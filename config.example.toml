@@ -1,0 +1,39 @@
+# Copy to ~/.config/scarlet-voice/config.toml and edit. Every key is optional.
+# Push-to-talk buttons, hold/tap modes, live typing, sounds and the wake word on/off
+# are set in the Scarlet Voice Settings app (scarlet-config), saved in bindings.json.
+
+[audio]
+source = ""            # PipeWire node name; empty = default mic
+
+[whisper]
+url = "http://127.0.0.1:8178/inference"
+language = "en"
+prompt = "Scarlet, SteamOS, Steam Frame, T3 Code, Godot."   # vocabulary hints
+min_audio_ctx = 512        # smallest encoder window; lower makes medium/turbo loop on short clips
+
+[dictation]
+hold_delay = 0.0           # seconds held before recording starts (0 = on press)
+min_seconds = 2.0          # recordings shorter than this are discarded
+max_seconds = 120
+key_delay_ms = 4
+trailing_space = true
+streaming = true           # transcribe pieces while you talk; only the last one waits for release
+engine = "moonshine"       # live engine: moonshine (CPU, fast) or whisper (GPU server)
+moonshine_threads = 2
+step_seconds = 0.8         # re-decode the current window this often
+pause_seconds = 0.8        # a pause this long closes the window
+max_window_seconds = 8.0   # without a pause, close at the quietest point by this length (moonshine max ~10)
+save_clips = 0             # keep the last N dictations' audio in ~/.local/state/scarlet-voice/clips
+
+[wake]
+phrases = ["HEY SCARLET"]
+threshold = 0.25           # higher = fewer false triggers, more misses
+boost = 1.5                # higher = easier to trigger
+command_timeout = 5.0      # seconds to start speaking after the wake chime
+end_silence = 0.8          # silence that ends a command
+max_command_seconds = 20
+wake_hook = ""             # run with the keyword as $1 as soon as the wake word fires
+command_hook = "hooks/on-command"   # run with the transcribed command as $1
+
+[sounds]
+volume = 0.5

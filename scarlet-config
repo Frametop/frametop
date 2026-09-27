@@ -1,0 +1,4 @@
+#!/bin/sh
+# GTK comes from the system Python; evdev and websockets from the project venv.
+dir=$(dirname "$(readlink -f "$0")")
+PYTHONPATH="$dir:$dir/.venv/lib/python3.12/site-packages" exec /usr/bin/python3 "$dir/scarlet_config.py" "$@"

@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Control the scarlet-voice daemon: scarletctl toggle|start|stop|cancel|status|type TEXT|wake [on|off|toggle]|events"""
+import os
+import socket
+import sys
+from pathlib import Path
+
+path = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "scarlet-voice/control.sock"
+if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+    sys.exit(__doc__)
+sock = socket.socket(socket.AF_UNIX)
+try:
+    sock.connect(str(path))
+except OSError as err:
+    sys.exit(f"scarlet-voice not reachable at {path}: {err}")
+sock.sendall((" ".join(sys.argv[1:]) + "\n").encode())
+f = sock.makefile()
+if sys.argv[1] == "events":
+    for line in f:
+        print(line, end="", flush=True)
+else:
+    print(f.readline(), end="")

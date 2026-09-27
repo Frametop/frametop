@@ -1,0 +1,14 @@
+[Unit]
+Description=scarlet-voice controller push-to-talk (left d-pad down)
+# No After=steamvr.service: default.target is ordered after its wants and steamvr after
+# the graphical session, so that would be an ordering cycle. The script retries until
+# SteamVR is up.
+After=scarlet-voice.service
+
+[Service]
+ExecStart=%h/Desktop/Projects/scarlet-voice/.venv/bin/python %h/Desktop/Projects/scarlet-voice/scarlet_vr_input.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target steamvr.service

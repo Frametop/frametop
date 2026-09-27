@@ -1,6 +1,8 @@
-# scarlet-voice
+# frame-voice
 
 Local voice input for the Steam Frame. Nothing leaves the headset.
+
+The services and commands are named `scarlet-*` after Scarlet, the assistant this was built for.
 
 - **Dictation**: hold a key, speak, release. The text is typed into whatever has focus (desktop apps, search bars, terminals, game-mode windows) through a virtual uinput keyboard.
 - **Wake word**: say "Hey Scarlet", then a command. The command is transcribed and handed to a hook script and to any event subscribers. This is the entry point for the future Scarlet assistant.

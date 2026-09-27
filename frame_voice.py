@@ -40,6 +40,9 @@ VAD_MODEL = ROOT / "models/silero_vad.onnx"
 RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "frame-voice"
 CLIP_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "frame-voice/clips"
 SOCKET_PATH = RUNTIME_DIR / "control.sock"
+# Keys of keyboards Frametop's input relay has grabbed for its VR desktop: a grabbed
+# keyboard can't be read here, so the relay sends its keys ("key <code> <value> <device>").
+FRAMETOP_KEYS = "\0frametop_keys"
 
 log = logging.getLogger("frame-voice")
 
@@ -155,6 +158,12 @@ def sd_notify(message, fds=()):
         # socket.send_fds() ignores its address argument on Python 3.12.
         sock.sendmsg([message.encode()], ancillary, 0, addr)
     return True
+
+
+class RelayKeyboard:
+    """Stands in for an evdev device in on_key() for keys from Frametop's input relay."""
+    path = "frametop-relay"
+    name = "Frametop relay"
 
 
 class Typer:
@@ -298,6 +307,7 @@ class FrameVoice:
         self.mods_down = set()  # (device path, code) of modifiers held on any keyboard
         self.mods_released = asyncio.Event()
         self.mods_released.set()
+        self._held_logged = None  # the modifiers last logged as holding typing back
         self.hk_timer = None
 
         self.kws = self.kws_stream = None  # built from the wake phrases in settings.json
@@ -734,8 +744,11 @@ class FrameVoice:
             live = (self.dcfg["live_typing"] and stream is self.stream
                     and time.monotonic() - stream["t0"] >= self.dcfg["min_seconds"])
             if not live or self.mods_down:
+                if live:
+                    self._log_held_modifiers()
                 return  # a held Ctrl/Alt/Super would turn letters into shortcuts; retried on release
         elif self.mods_down:
+            self._log_held_modifiers()
             await self.mods_released.wait()
         new = stream["words"][stream["typed"]:]
         text = (" " if stream["typed"] and new else "") + " ".join(new)
@@ -834,9 +847,18 @@ class FrameVoice:
             self.mods_down.discard(key)
             self._modifiers_changed()
 
+    def _log_held_modifiers(self):
+        """Say which modifier holds typing back, once per set of held keys."""
+        held = sorted(self.mods_down)
+        if held != self._held_logged:
+            self._held_logged = held
+            log.info("typing waits for release of %s",
+                     ", ".join(f"{e.KEY.get(code, code)} on {path}" for path, code in held))
+
     def _modifiers_changed(self):
         if not self.mods_down:
             self.mods_released.set()
+            self._held_logged = None
             if self.stream:  # type words committed while a modifier was held
                 asyncio.create_task(self._flush_typing(self.stream))
 
@@ -908,6 +930,42 @@ class FrameVoice:
                 self.kws_stream = self.kws.create_stream() if self.kws else None
         if changed:
             log.info("settings: %s", ", ".join(f"{k}={v}" for k, v in changed.items()))
+
+    def listen_frametop_keys(self):
+        """Keys from Frametop's input relay, for the keyboards it grabs. Only from our own
+        user: the socket is abstract, so any local user could send to it."""
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)  # the kernel adds the sender's uid
+        try:
+            sock.bind(FRAMETOP_KEYS)
+        except OSError as err:
+            log.warning("frametop keys: can't listen (%s)", err)
+            sock.close()
+            return None
+        relay = RelayKeyboard()
+        creds = struct.Struct("3i")  # struct ucred: pid, uid, gid
+
+        def readable():
+            while True:
+                try:
+                    data, anc, _, _ = sock.recvmsg(64, socket.CMSG_SPACE(creds.size))
+                except BlockingIOError:
+                    return
+                uid = next((creds.unpack(d[:creds.size])[1] for level, kind, d in anc
+                            if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
+                words = data.split(maxsplit=3)
+                if uid != os.getuid() or len(words) < 3 or words[0] != b"key":
+                    continue
+                if len(words) > 3 and words[3].decode(errors="replace") == TYPER_NAME:
+                    continue  # our own typing, grabbed along with the real keyboards
+                try:
+                    code, value = int(words[1]), int(words[2])
+                except ValueError:
+                    continue
+                self.on_key(relay, code, value)
+
+        asyncio.get_running_loop().add_reader(sock.fileno(), readable)
+        return sock
 
     async def _read_device(self, dev):
         try:
@@ -984,8 +1042,12 @@ class FrameVoice:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stop.set)
         watcher = asyncio.create_task(self.watch_devices())
+        frametop_keys = self.listen_frametop_keys()
         await stop.wait()
         watcher.cancel()
+        if frametop_keys:
+            asyncio.get_running_loop().remove_reader(frametop_keys.fileno())
+            frametop_keys.close()
         server.close()
         if self.mic_proc and self.mic_proc.returncode is None:
             self.mic_proc.terminate()

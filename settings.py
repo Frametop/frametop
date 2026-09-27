@@ -1,21 +1,24 @@
-"""Push-to-talk bindings and settings shared by scarlet-voice, scarlet-vr-input and scarlet-config.
+"""Push-to-talk bindings and settings shared by frame-voice, frame-voice-vr-input and frame-voice-config.
 
-~/.config/scarlet-voice/bindings.json (written by the scarlet-config app):
+~/.config/frame-voice/settings.json (written by the frame-voice-config app):
   {"keyboard": ["KEY_RIGHTCTRL", "BTN_SIDE"],
    "controller": [{"device": "/user/hand/left", "input": "/input/dpad_down/click"}],
    "keyboard_mode": "toggle", "controller_mode": "hold",
-   "live_typing": true, "sounds": false, "wake_word": true}
+   "live_typing": true, "sounds": false, "wake_word": true,
+   "wake_phrases": ["HEY COMPUTER"]}
 
 keyboard: evdev key or mouse button names, read from every physical keyboard and mouse.
 controller: a SteamVR device path and one of its boolean inputs, read from vrserver.
 *_mode: "hold" records while held; "toggle" starts on one press and stops on the next.
+wake_phrases: what to say before a command; any English words, spelled out at load time.
 The options override config.toml.
 """
 import json
 import os
+import re
 from pathlib import Path
 
-PATH = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "scarlet-voice/bindings.json"
+PATH = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "frame-voice/settings.json"
 DEFAULT = {
     "keyboard": ["KEY_RIGHTCTRL"],
     "controller": [{"device": "/user/hand/left", "input": "/input/dpad_down/click"}],
@@ -25,12 +28,18 @@ DEFAULT = {
     "live_typing": True,
     "sounds": False,
     "wake_word": True,
+    "wake_phrases": ["HEY COMPUTER"],
 }
 MODES = ("hold", "toggle")
 OPTIONS = ("live_typing", "sounds", "wake_word")
 # Held modifiers turn typed letters into shortcuts, so live typing waits until they are released.
 MODIFIERS = {"KEY_LEFTCTRL", "KEY_RIGHTCTRL", "KEY_LEFTALT", "KEY_RIGHTALT",
              "KEY_LEFTSHIFT", "KEY_RIGHTSHIFT", "KEY_LEFTMETA", "KEY_RIGHTMETA"}
+
+
+def clean_phrase(text):
+    """A wake phrase as the keyword spotter wants it: uppercase words, letters and apostrophes."""
+    return " ".join(re.sub(r"[^A-Z' ]", " ", text.upper()).split())
 
 
 def load():
@@ -50,6 +59,9 @@ def load():
     for key in OPTIONS:
         if isinstance(data.get(key), bool):
             out[key] = data[key]
+    if isinstance(data.get("wake_phrases"), list):
+        phrases = (clean_phrase(p) for p in data["wake_phrases"] if isinstance(p, str))
+        out["wake_phrases"] = list(dict.fromkeys(p for p in phrases if p))
     return out
 
 

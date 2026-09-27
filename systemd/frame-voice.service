@@ -1,7 +1,7 @@
 [Unit]
-Description=scarlet-voice dictation and wake word daemon
-Wants=scarlet-whisper.service pipewire.service
-After=scarlet-whisper.service pipewire.service
+Description=frame-voice dictation and wake word daemon
+Wants=frame-voice-whisper.service pipewire.service
+After=frame-voice-whisper.service pipewire.service
 # SteamVR opens input devices only at startup, and gamescope gets keyboard input through
 # SteamVR, so the typing keyboard must exist before SteamVR starts.
 Before=steamvr.service
@@ -10,11 +10,11 @@ Before=steamvr.service
 # READY=1 is sent after the virtual keyboard exists.
 Type=notify
 NotifyAccess=main
-ExecStart=%h/Desktop/Projects/scarlet-voice/.venv/bin/python %h/Desktop/Projects/scarlet-voice/scarlet_voice.py
+ExecStart=%h/Desktop/Projects/frame-voice/.venv/bin/python %h/Desktop/Projects/frame-voice/frame_voice.py
 Restart=on-failure
 RestartSec=2
 # systemd keeps the virtual keyboard's fd across restarts, so SteamVR keeps the same device.
-# Clear with: systemctl --user clean --what=fdstore scarlet-voice
+# Clear with: systemctl --user clean --what=fdstore frame-voice
 FileDescriptorStoreMax=1
 FileDescriptorStorePreserve=yes
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scarlet-voice: local push-to-talk dictation and "Hey Scarlet" wake word daemon.
+"""frame-voice: local push-to-talk dictation and wake word daemon.
 
 One PipeWire capture stream feeds two consumers:
   * dictation: hotkey or socket command -> record -> whisper-server -> type via uinput
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import evdev
 
-import bindings
+import settings
 import numpy as np
 import sentencepiece
 import sherpa_onnx
@@ -33,22 +33,22 @@ from evdev import ecodes as e
 ROOT = Path(__file__).resolve().parent
 RATE = 16000
 CHUNK = 1536  # 96 ms of 16 kHz mono: a whole number of 512-sample VAD windows
-MODIFIER_CODES = {e.ecodes[name] for name in bindings.MODIFIERS}
-TYPER_NAME = "scarlet-voice keyboard"
+MODIFIER_CODES = {e.ecodes[name] for name in settings.MODIFIERS}
+TYPER_NAME = "frame-voice keyboard"
 KWS_DIR = ROOT / "models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
 VAD_MODEL = ROOT / "models/silero_vad.onnx"
-RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "scarlet-voice"
-CLIP_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "scarlet-voice/clips"
+RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "frame-voice"
+CLIP_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "frame-voice/clips"
 SOCKET_PATH = RUNTIME_DIR / "control.sock"
 
-log = logging.getLogger("scarlet-voice")
+log = logging.getLogger("frame-voice")
 
 DEFAULTS = {
     "audio": {"source": ""},
     "whisper": {
         "url": "http://127.0.0.1:8178/inference",
         "language": "en",
-        "prompt": "Scarlet, SteamOS, Steam Frame, T3 Code, Godot.",
+        "prompt": "SteamOS, Steam Frame, Godot.",
         # Smallest encoder window (50 per second of audio). medium and large-v3-turbo loop
         # and take 10-20 s on short clips below 512; 512 covers pieces up to ~10 s.
         "min_audio_ctx": 512,
@@ -73,12 +73,11 @@ DEFAULTS = {
         "step_seconds": 0.8,
         "pause_seconds": 0.8,  # shorter pauses inside a sentence ended it with "?"/"." in testing
         "max_window_seconds": 8.0,
-        # Keep the audio of the last N dictations in ~/.local/state/scarlet-voice/clips for
+        # Keep the audio of the last N dictations in ~/.local/state/frame-voice/clips for
         # comparing models and settings. 0 = never write audio to disk.
         "save_clips": 0,
     },
     "wake": {
-        "phrases": ["HEY SCARLET"],
         "threshold": 0.25,
         "boost": 1.5,
         "command_timeout": 5.0,
@@ -87,12 +86,12 @@ DEFAULTS = {
         "wake_hook": "",
         "command_hook": "hooks/on-command",
     },
-    "sounds": {"volume": 0.5},  # on/off is in bindings.json (scarlet-config)
+    "sounds": {"volume": 0.5},  # on/off is in settings.json (frame-voice-config)
 }
 
 
 def load_config():
-    path = Path(os.environ.get("SCARLET_VOICE_CONFIG", "~/.config/scarlet-voice/config.toml")).expanduser()
+    path = Path(os.environ.get("FRAME_VOICE_CONFIG", "~/.config/frame-voice/config.toml")).expanduser()
     cfg = {k: dict(v) for k, v in DEFAULTS.items()}
     if path.exists():
         with open(path, "rb") as f:
@@ -271,11 +270,11 @@ def to_wav(samples):
 
 # ---------------------------------------------------------------- daemon
 
-class ScarletVoice:
+class FrameVoice:
     def __init__(self, cfg):
         self.cfg = cfg
         self.dcfg, self.wcfg = cfg["dictation"], cfg["wake"]
-        self.hotkeys = {}  # evdev code -> name, from load_bindings()
+        self.hotkeys = {}  # evdev code -> name, from load_settings()
         self.typer = Typer(self.dcfg["key_delay_ms"])
         self.type_lock = asyncio.Lock()
         self.sounds = {}  # apply_options() makes them when enabled
@@ -286,7 +285,7 @@ class ScarletVoice:
         self.stream = None  # streaming state of the current dictation, see start_dictation
         self.whisper_lock = asyncio.Lock()  # one request at a time, in order
         self.command = None  # dict while capturing a post-wake command
-        self.wake_enabled = bindings.DEFAULT["wake_word"]  # apply_options() sets the saved value
+        self.wake_enabled = settings.DEFAULT["wake_word"]  # apply_options() sets the saved value
         self.mic_task = None
         self.mic_proc = None
         self.audio_session_ready = False
@@ -294,15 +293,14 @@ class ScarletVoice:
 
         self.hk_down = False
         self.hk_chord = False
-        self.kb_mode = bindings.DEFAULT["keyboard_mode"]
-        self.applied = {}  # bindings.json options last applied, so a save only changes what changed
+        self.kb_mode = settings.DEFAULT["keyboard_mode"]
+        self.applied = {}  # settings.json options last applied, so a save only changes what changed
         self.mods_down = set()  # (device path, code) of modifiers held on any keyboard
         self.mods_released = asyncio.Event()
         self.mods_released.set()
         self.hk_timer = None
 
-        self.kws = self._make_kws()
-        self.kws_stream = self.kws.create_stream()
+        self.kws = self.kws_stream = None  # built from the wake phrases in settings.json
         self.cmd_vad = self._make_vad(self.wcfg["end_silence"])
         self.clip_vad = self._make_vad(0.5)
         self.piece_vad = self._make_vad(0.1)  # per-chunk speech/silence labels for live windows
@@ -313,21 +311,25 @@ class ScarletVoice:
                 encoder=str(m / "encoder_model.ort"), decoder=str(m / "decoder_model_merged.ort"),
                 tokens=str(m / "tokens.txt"), num_threads=self.dcfg["moonshine_threads"])
             log.info("live dictation engine: moonshine (%s)", m.name)
-        self.load_bindings()
+        self.load_settings()
 
     # --- models
 
-    def _make_kws(self):
+    def _make_kws(self, phrases):
+        """Open-vocabulary spotter for the phrases: they are spelled with the model's BPE
+        tokens at load time, so any English words work without training."""
+        if not phrases:
+            log.info("wake phrases: none")
+            return None
         sp = sentencepiece.SentencePieceProcessor(model_file=str(KWS_DIR / "bpe.model"))
         lines = []
-        for phrase in self.wcfg["phrases"]:
-            phrase = phrase.upper().strip()
+        for phrase in phrases:
             tokens = " ".join(sp.encode(phrase, out_type=str))
             lines.append(f"{tokens} :{self.wcfg['boost']} #{self.wcfg['threshold']} @{phrase.replace(' ', '_')}")
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
         kw_file = RUNTIME_DIR / "keywords.txt"
         kw_file.write_text("\n".join(lines) + "\n")
-        log.info("wake phrases: %s", ", ".join(self.wcfg["phrases"]))
+        log.info("wake phrases: %s", ", ".join(phrases))
         return sherpa_onnx.KeywordSpotter(
             tokens=str(KWS_DIR / "tokens.txt"),
             encoder=str(KWS_DIR / "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"),
@@ -368,7 +370,7 @@ class ScarletVoice:
             # SteamOS runs every playback stream through a per-stream spatializer that takes
             # ~0.35 s to set up, late enough to bury a start tone under the first word. Its
             # WirePlumber script skips streams named like filter chains, so use such a name.
-            props = '{ node.name = "scarlet-voice-chime-filter-chain" media.role = "Notification" }'
+            props = '{ node.name = "frame-voice-chime-filter-chain" media.role = "Notification" }'
             task = asyncio.create_task(self._run(["pw-play", "-P", props, str(self.sounds[name])], quiet=True))
             self.tasks.add(task)
             task.add_done_callback(self.tasks.discard)
@@ -398,7 +400,16 @@ class ScarletVoice:
     # --- microphone
 
     def mic_needed(self):
-        return self.wake_enabled or self.recording is not None or self.command is not None
+        return (self.wake_enabled and self.kws is not None) or self.recording is not None or self.command is not None
+
+    def reset_kws(self):
+        if self.kws:
+            self.kws.reset_stream(self.kws_stream)
+
+    async def _rebuild_kws(self, phrases):
+        kws = await asyncio.to_thread(self._make_kws, phrases)
+        self.kws, self.kws_stream = kws, kws.create_stream() if kws else None
+        self.update_mic()
 
     def update_mic(self):
         if self.mic_needed() and (self.mic_task is None or self.mic_task.done()):
@@ -465,13 +476,13 @@ class ScarletVoice:
                 asyncio.create_task(self.stop_dictation())
         elif self.command is not None:
             self._command_audio(chunk)
-        elif self.wake_enabled:
+        elif self.wake_enabled and self.kws:
             self.kws_stream.accept_waveform(RATE, chunk)
             while self.kws.is_ready(self.kws_stream):
                 self.kws.decode_stream(self.kws_stream)
                 keyword = self.kws.get_result(self.kws_stream)
                 if keyword:
-                    self.kws.reset_stream(self.kws_stream)
+                    self.reset_kws()
                     self.on_wake(keyword.replace("_", " "))
                     break
 
@@ -748,7 +759,7 @@ class ScarletVoice:
         log.info("wake word: %s", keyword)
         self.chime("wake")
         self.broadcast("wake", keyword=keyword)
-        self.run_hook("wake_hook", keyword, env={"SCARLET_EVENT": "wake"})
+        self.run_hook("wake_hook", keyword, env={"FRAME_VOICE_EVENT": "wake"})
         self.command = {"chunks": [], "t0": time.monotonic(), "heard": False}
         self.cmd_vad.reset()
         self.update_mic()
@@ -771,7 +782,7 @@ class ScarletVoice:
             self.chime("cancel")
             self.broadcast("command_timeout")
         if self.command is None:
-            self.kws.reset_stream(self.kws_stream)
+            self.reset_kws()
             self.update_mic()
 
     async def finish_command(self, samples):
@@ -784,7 +795,7 @@ class ScarletVoice:
             return
         self.broadcast("command", text=text)
         if text:
-            self.run_hook("command_hook", text, env={"SCARLET_EVENT": "command"})
+            self.run_hook("command_hook", text, env={"FRAME_VOICE_EVENT": "command"})
 
     # --- hotkey
 
@@ -849,28 +860,28 @@ class ScarletVoice:
                     continue
                 log.info("hotkey: watching %s (%s)", dev.name, path)
                 watching[path] = asyncio.create_task(self._read_device(dev))
-            if bindings.mtime() != self.bindings_mtime:
-                self.load_bindings()
+            if settings.mtime() != self.settings_mtime:
+                self.load_settings()
                 continue  # rescan now for devices with the new keys
             await asyncio.sleep(2)
 
-    def load_bindings(self):
-        self.bindings_mtime = bindings.mtime()
-        b = bindings.load()  # defaults when the file doesn't exist yet
+    def load_settings(self):
+        self.settings_mtime = settings.mtime()
+        b = settings.load()  # defaults when the file doesn't exist yet
         self.hotkeys = {}
         for name in b["keyboard"]:
             code = e.ecodes.get(name)
             if isinstance(code, int):
                 self.hotkeys[code] = name
             else:
-                log.warning("bindings: unknown key %r", name)
+                log.warning("settings: unknown key %r", name)
         log.info("keyboard/mouse push-to-talk: %s", ", ".join(self.hotkeys.values()) or "none")
         self.apply_options(b)
 
     def apply_options(self, b):
         """Settings from the config app. Only changed ones are applied, so a save doesn't
-        undo e.g. `scarletctl wake off`."""
-        changed = {k: b[k] for k in ("keyboard_mode", *bindings.OPTIONS) if self.applied.get(k) != b[k]}
+        undo e.g. `frame-voice-ctl wake off`."""
+        changed = {k: b[k] for k in ("keyboard_mode", "wake_phrases", *settings.OPTIONS) if self.applied.get(k) != b[k]}
         self.applied.update(changed)
         if "keyboard_mode" in changed:
             self.kb_mode = changed["keyboard_mode"]
@@ -880,12 +891,21 @@ class ScarletVoice:
             self.sounds = make_sounds(self.cfg["sounds"]["volume"]) if changed["sounds"] else {}
         if "wake_word" in changed and changed["wake_word"] != self.wake_enabled:
             self.wake_enabled = changed["wake_word"]
-            self.kws.reset_stream(self.kws_stream)
+            self.reset_kws()
             try:
                 asyncio.get_running_loop()
                 self.update_mic()
             except RuntimeError:
                 pass  # at startup; run() opens the mic
+        if "wake_phrases" in changed:
+            try:
+                asyncio.get_running_loop()
+                task = asyncio.create_task(self._rebuild_kws(changed["wake_phrases"]))
+                self.tasks.add(task)
+                task.add_done_callback(self.tasks.discard)
+            except RuntimeError:  # at startup
+                self.kws = self._make_kws(changed["wake_phrases"])
+                self.kws_stream = self.kws.create_stream() if self.kws else None
         if changed:
             log.info("settings: %s", ", ".join(f"{k}={v}" for k, v in changed.items()))
 
@@ -933,14 +953,14 @@ class ScarletVoice:
             case "wake":
                 if arg in ("on", "off", "toggle"):
                     self.wake_enabled = {"on": True, "off": False}.get(arg, not self.wake_enabled)
-                    self.kws.reset_stream(self.kws_stream)
+                    self.reset_kws()
                     self.update_mic()
                 else:
                     self.on_wake("manual")
             case "status":
                 pass
             case "reload":
-                self.load_bindings()
+                self.load_settings()
             case "events":
                 self.subscribers.add(writer)
                 writer.write((json.dumps({"event": "subscribed", **self.state()}) + "\n").encode())
@@ -975,7 +995,7 @@ class ScarletVoice:
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    asyncio.run(ScarletVoice(load_config()).run())
+    asyncio.run(FrameVoice(load_config()).run())
 
 
 if __name__ == "__main__":

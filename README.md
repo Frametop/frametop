@@ -2,21 +2,19 @@
 
 Local voice input for the Steam Frame. Nothing leaves the headset.
 
-The services and commands are named `scarlet-*` after Scarlet, the assistant this was built for.
-
-- **Dictation**: hold a key, speak, release. The text is typed into whatever has focus (desktop apps, search bars, terminals, game-mode windows) through a virtual uinput keyboard.
-- **Wake word**: say "Hey Scarlet", then a command. The command is transcribed and handed to a hook script and to any event subscribers. This is the entry point for the future Scarlet assistant.
+- **Dictation**: tap a key (or hold a controller button) and speak. Words are typed as you talk into whatever has focus (desktop apps, search bars, terminals, game-mode windows) through a virtual uinput keyboard, transcribed on the headset by Moonshine.
+- **Wake words**: say one (default "Hey Computer"; add your own in the settings app), then a command. The command is transcribed and handed to a hook script and to any event subscribers. This is the entry point for a voice assistant.
 
 ## Pieces
 
 | Part | What it does |
 | --- | --- |
-| `scarlet-whisper.service` | `whisper-server` (whisper.cpp, Vulkan on the Adreno 750) with `ggml-small.en-q5_1` loaded, on `127.0.0.1:8178` |
-| `scarlet-voice.service` | `scarlet_voice.py`: mic capture, hotkey, wake word, typing, control socket |
-| `scarlet-vr-input.service` | `scarlet_vr_input.py`: controller push-to-talk, reads left d-pad down from SteamVR's raw input stream |
-| `scarlet-config` | Settings app (GTK 4 / libadwaita): pick push-to-talk buttons by pressing them. In the app menu as *Scarlet Voice Settings* |
-| `scarletctl` | CLI for the control socket |
-| `hooks/on-command` | Runs after "Hey Scarlet ..." with the command text as `$1` |
+| `frame-voice-whisper.service` | `whisper-server` (whisper.cpp, Vulkan on the Adreno 750) with `ggml-small.en-q5_1` loaded, on `127.0.0.1:8178` |
+| `frame-voice.service` | `frame_voice.py`: mic capture, hotkey, wake word, typing, control socket |
+| `frame-voice-vr-input.service` | `frame_voice_vr_input.py`: controller push-to-talk, reads left d-pad down from SteamVR's raw input stream |
+| `frame-voice-config` | Settings app (GTK 4 / libadwaita): pick push-to-talk buttons by pressing them. In the app menu as *Frame Voice Settings* |
+| `frame-voice-ctl` | CLI for the control socket |
+| `hooks/on-command` | Runs after a wake word with the command text as `$1` |
 
 The mic is captured once with `pw-record`. The wake word spotter (sherpa-onnx open-vocabulary KWS, about 5% of one core) listens continuously. Silero VAD ends commands on silence and trims clips before transcription.
 
@@ -26,15 +24,15 @@ The mic is captured once with `pw-record`. The wake word spotter (sherpa-onnx op
 | --- | --- |
 | Keyboard or mouse | Tap **Right Ctrl** (default) to start, tap again to stop. Shortcuts with it (Ctrl+C) don't start or stop dictation. Hold mode is available in the settings app. |
 | Steam Frame controllers | Hold left **d-pad down** (default), speak, release. Works in games, the Steam UI and the desktop with no per-app setup. The button is observed, not captured, so whatever else it is bound to still happens. |
-| Desktop mode shortcut | KDE System Settings > Shortcuts > add a command shortcut running `scarletctl toggle`. |
-| Scripts, the assistant | `scarletctl toggle`, `start`, `stop`, `cancel`, `type "text"` |
-| Voice | "Hey Scarlet, ..." runs `hooks/on-command`. "Hey Scarlet, type hello world" types "hello world" (example in the hook). |
+| Desktop mode shortcut | KDE System Settings > Shortcuts > add a command shortcut running `frame-voice-ctl toggle`. |
+| Scripts, the assistant | `frame-voice-ctl toggle`, `start`, `stop`, `cancel`, `type "text"` |
+| Voice | "<wake word>, ..." runs `hooks/on-command`. "Hey Computer, type hello world" types "hello world" (example in the hook). |
 
 Recordings shorter than 2 s (`min_seconds`) are discarded with the cancel tone, so brief or accidental presses never type anything.
 
-Change the buttons in *Scarlet Voice Settings* (`./scarlet-config`): **Add** waits for you to press a controller button, key or mouse button (not left/right click, not the controller's system button). The app also sets hold or tap mode per trigger and switches live typing, sounds and the wake word. Everything lives in `~/.config/scarlet-voice/bindings.json`; both services apply changes without a restart. Delete the file to go back to the defaults.
+Change the buttons in *Frame Voice Settings* (`./frame-voice-config`): **Add** waits for you to press a controller button, key or mouse button (not left/right click, not the controller's system button). The app also sets hold or tap mode per trigger, switches live typing and sounds, and manages wake words: add any phrase in English words (they're spelled out for the spotter when loaded, no training), remove them, or turn listening off. Changes apply within a couple of seconds. Everything lives in `~/.config/frame-voice/settings.json`; both services apply changes without a restart. Delete the file to go back to the defaults.
 
-Live text works by agreement, with the approach and model borrowed from the Faceclaw app for Even Realities G2 glasses (Moonshine base through sherpa-onnx, on the CPU): the speech since your last pause is re-decoded every 0.8 s, and words two decodes in a row agree on are typed, except the last one, whose punctuation can still change. At a 0.8 s pause, or at the quietest point once the window reaches 8 s, the window is decoded one last time and its remaining words are typed. On test audio the first words appeared at about 2.3 s, then every 1-1.5 s, and the text was complete 0.1-0.2 s after release. Nothing is cut while it is still being decoded, so words aren't split or doubled at the edges the way fixed pieces did. Moonshine adds fewer commas than whisper, and a long pause can still end a sentence with a period. `engine = "whisper"` switches live text to the whisper-server (it dropped words when re-decoded this way in testing). The "Hey Scarlet" command path still uses whisper.
+Live text works by agreement, with the approach and model borrowed from the Faceclaw app for Even Realities G2 glasses (Moonshine base through sherpa-onnx, on the CPU): the speech since your last pause is re-decoded every 0.8 s, and words two decodes in a row agree on are typed, except the last one, whose punctuation can still change. At a 0.8 s pause, or at the quietest point once the window reaches 8 s, the window is decoded one last time and its remaining words are typed. On test audio the first words appeared at about 2.3 s, then every 1-1.5 s, and the text was complete 0.1-0.2 s after release. Nothing is cut while it is still being decoded, so words aren't split or doubled at the edges the way fixed pieces did. Moonshine adds fewer commas than whisper, and a long pause can still end a sentence with a period. `engine = "whisper"` switches live text to the whisper-server (it dropped words when re-decoded this way in testing). Wake-word commands still use whisper.
 
 Live text never types while Ctrl, Alt, Shift or Super is held on any keyboard: the letters would reach apps as shortcuts. It waits for the release. That is why the keyboard default is tap mode: holding Right Ctrl to talk would hold back the text until you let go. (Pressing and releasing Ctrl on the virtual keyboard to "unhold" it did not work: letters still arrived as Ctrl shortcuts in the Frametop desktop.)
 
@@ -43,30 +41,30 @@ Audio cues are off by default (`[sounds] enabled = true` turns them on): rising 
 ## Control and events
 
 ```
-./scarletctl status
-./scarletctl wake off        # stop wake word listening; the mic fully closes when idle
-./scarletctl wake on
-./scarletctl wake            # act as if "Hey Scarlet" was heard
-./scarletctl type "text"     # type into the focused app
-./scarletctl events          # stream JSON events: wake, command, dictation, command_timeout, error
+./frame-voice-ctl status
+./frame-voice-ctl wake off        # stop wake word listening; the mic fully closes when idle
+./frame-voice-ctl wake on
+./frame-voice-ctl wake            # act as if a wake word was heard
+./frame-voice-ctl type "text"     # type into the focused app
+./frame-voice-ctl events          # stream JSON events: wake, command, dictation, command_timeout, error
 ```
 
-The socket is `$XDG_RUNTIME_DIR/scarlet-voice/control.sock`, mode 0600. It can type into any focused window, so keep it owner-only.
+The socket is `$XDG_RUNTIME_DIR/frame-voice/control.sock`, mode 0600. It can type into any focused window, so keep it owner-only.
 
-An assistant can either replace `hooks/on-command` or subscribe with `scarletctl events` and act on `{"event": "command", "text": ...}`.
+An assistant can either replace `hooks/on-command` or subscribe with `frame-voice-ctl events` and act on `{"event": "command", "text": ...}`.
 
 ## Config
 
-Copy `config.example.toml` to `~/.config/scarlet-voice/config.toml`. Every key is optional. Then `systemctl --user restart scarlet-voice`.
+Copy `config.example.toml` to `~/.config/frame-voice/config.toml`. Every key is optional. Then `systemctl --user restart frame-voice`.
 
 Wake phrase tuning: raise `threshold` for fewer false triggers, raise `boost` if it misses you. Phrases can be anything spelled in English words; they are tokenized at startup, no training needed.
 
 ## Services
 
 ```
-systemctl --user status scarlet-whisper scarlet-voice scarlet-vr-input
-journalctl --user -u scarlet-voice -f
-systemctl --user stop scarlet-voice scarlet-whisper scarlet-vr-input   # the units are linked, so `disable` removes the links
+systemctl --user status frame-voice-whisper frame-voice frame-voice-vr-input
+journalctl --user -u frame-voice -f
+systemctl --user stop frame-voice frame-voice-whisper frame-voice-vr-input   # the units are linked, so `disable` removes the links
 ```
 
 ## Build notes
@@ -82,13 +80,13 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DGGML_NATIV
 cmake --build build -j5 --target whisper-server whisper-cli whisper-bench
 ```
 
-`vendor/prefix` holds SPIRV-Headers, which SteamOS does not ship. The Python side lives in `.venv` (`evdev sherpa-onnx numpy sentencepiece websockets`). `models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27` holds the Moonshine files from huggingface.co/csukuangfj2 (`encoder_model.ort`, `decoder_model_merged.ort`, `tokens.txt`). The settings app uses the system Python for GTK (`gi`) and the venv for the rest; the `scarlet-config` launcher sets that up.
+`vendor/prefix` holds SPIRV-Headers, which SteamOS does not ship. The Python side lives in `.venv` (`evdev sherpa-onnx numpy sentencepiece websockets`). `models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27` holds the Moonshine files from huggingface.co/csukuangfj2 (`encoder_model.ort`, `decoder_model_merged.ort`, `tokens.txt`). The settings app uses the system Python for GTK (`gi`) and the venv for the rest; the `frame-voice-config` launcher sets that up.
 
 The whisper service sets `DISABLE_GAMESCOPE_WSI=1`. Without it the Gamescope Vulkan layer aborts whisper-server at startup.
 
-Typing goes through a uinput keyboard that SteamVR must have open: SteamVR opens `/dev/input` devices only when it starts, and gamescope gets keyboard input from SteamVR. `scarlet-voice.service` is ordered `Before=steamvr.service` and parks the device's fd in systemd's fd store, so daemon restarts keep the same device. After the very first install, restart SteamVR once. The device is a full keyboard (fd store name `typer2`; the first version, `typer`, had only the typing keys and is replaced automatically, which also needs one SteamVR restart). Multidesk's input relay picks the device up immediately for its desktop screens. To drop the device: `systemctl --user clean --what=fdstore scarlet-voice`.
+Typing goes through a uinput keyboard that SteamVR must have open: SteamVR opens `/dev/input` devices only when it starts, and gamescope gets keyboard input from SteamVR. `frame-voice.service` is ordered `Before=steamvr.service` and parks the device's fd in systemd's fd store, so daemon restarts keep the same device. After the very first install, restart SteamVR once. The device is a full keyboard (fd store name `typer2`; the first version, `typer`, had only the typing keys and is replaced automatically, which also needs one SteamVR restart). Multidesk's input relay picks the device up immediately for its desktop screens. To drop the device: `systemctl --user clean --what=fdstore frame-voice`.
 
-Controller input: SteamVR sends OpenVR actions only to the app with input focus, and while the 2D Steam or desktop screens are up the compositor's laser mouse holds focus, so a background or overlay OpenVR app never sees the button there. `scarlet_vr_input.py` instead subscribes to vrserver's local web socket (`ws://127.0.0.1:27062`, mailbox `input_server`, `request_input_state_updates`), the stream the controller binding page uses for its live view. It is undocumented and could change with a SteamVR update. `scarlet-vr-input.service` has no `After=steamvr.service`: with `WantedBy=default.target` that is an ordering cycle at boot.
+Controller input: SteamVR sends OpenVR actions only to the app with input focus, and while the 2D Steam or desktop screens are up the compositor's laser mouse holds focus, so a background or overlay OpenVR app never sees the button there. `frame_voice_vr_input.py` instead subscribes to vrserver's local web socket (`ws://127.0.0.1:27062`, mailbox `input_server`, `request_input_state_updates`), the stream the controller binding page uses for its live view. It is undocumented and could change with a SteamVR update. `frame-voice-vr-input.service` has no `After=steamvr.service`: with `WantedBy=default.target` that is an ordering cycle at boot.
 
 ## Measurements (2026-09-25, jfk.wav)
 

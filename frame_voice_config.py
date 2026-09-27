@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Scarlet Voice settings (GTK 4 / libadwaita): pick push-to-talk buttons by pressing them.
+"""Frame Voice settings (GTK 4 / libadwaita): pick push-to-talk buttons by pressing them.
 
 "Add" waits for a controller button (read from vrserver's input stream, like
-scarlet-vr-input) or a keyboard key / mouse button (read from evdev, like scarlet-voice)
-and saves ~/.config/scarlet-voice/bindings.json. Both services pick changes up on their
-own. Run through the `scarlet-config` launcher: GTK comes from the system Python, evdev
+frame-voice-vr-input) or a keyboard key / mouse button (read from evdev, like frame-voice)
+and saves ~/.config/frame-voice/settings.json. Both services pick changes up on their
+own. Run through the `frame-voice-config` launcher: GTK comes from the system Python, evdev
 and websockets from the project venv.
 """
 import asyncio
@@ -28,12 +28,12 @@ import websockets  # noqa: E402
 from evdev import ecodes as e  # noqa: E402
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-import bindings  # noqa: E402
+import settings  # noqa: E402
 
-SOCKET_PATH = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "scarlet-voice/control.sock"
+SOCKET_PATH = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "frame-voice/control.sock"
 VRSERVER = "http://127.0.0.1:27062"
 VR_HEADERS = {"Referer": f"{VRSERVER}/dashboard/controllerbinding.html"}
-TYPER_NAME = "scarlet-voice keyboard"
+TYPER_NAME = "frame-voice keyboard"
 CAPTURE_SECONDS = 15
 
 # Clicking "Add" would otherwise bind the mouse button that clicked it.
@@ -76,13 +76,20 @@ MODE_HINTS = {"toggle": "Tap to start, tap again to stop.", "hold": "Hold to tal
 
 
 def key_note(name, mode):
-    if name in bindings.MODIFIERS:
+    if name in settings.MODIFIERS:
         if mode == "hold":
             return "While it's held, text waits for release (it would turn letters into shortcuts)"
         return "Shortcuts with it (like Ctrl+C) don't start or stop dictation"
     if name.startswith("KEY_") and (len(name) == 5 or name in ("KEY_SPACE", "KEY_ENTER")):
         return "This key also types into apps"
     return name
+
+
+def device_label(root_path, controller_type):
+    name = controller_type.replace("_", " ").title().replace("Frame", "Steam Frame")
+    hand = root_path.rsplit("/", 1)[-1]
+    # A controller without a hand role (Frametop's pointer holds one) is known by its serial.
+    return f"{hand.title()} {name}" if hand in ("left", "right") else f"{name} ({hand})"
 
 
 def vr_devices():
@@ -94,7 +101,7 @@ def vr_devices():
     except OSError:
         return None
     return [{"device": d["root_path"], "controller_type": d["controller_type"],
-             "label": f"{d['root_path'].rsplit('/', 1)[-1]} {d['controller_type'].replace('_', ' ').title().replace('Frame', 'Steam Frame')}"}
+             "label": device_label(d["root_path"], d["controller_type"])}
             for d in state.get("devices", [])
             if d.get("class") == "TrackedDeviceClass_Controller" and d.get("root_path")
             and d.get("controller_type") not in IGNORED_CONTROLLERS]
@@ -186,7 +193,7 @@ class Capture:
             self.end()
 
     async def _controller(self, cancel, devices):
-        mailbox = f"scarlet_config_{os.getpid()}_{secrets.token_hex(3)}"
+        mailbox = f"frame_voice_config_{os.getpid()}_{secrets.token_hex(3)}"
         types = {d["device"]: d["controller_type"] for d in devices}
         async with websockets.connect(VRSERVER.replace("http", "ws"), origin=VRSERVER, max_size=None,
                                       additional_headers=VR_HEADERS) as ws:
@@ -218,9 +225,9 @@ class Capture:
 
 class Window(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Scarlet Voice", default_width=560, default_height=640)
+        super().__init__(application=app, title="Frame Voice", default_width=560, default_height=640)
         self.capture = Capture()
-        self.data = bindings.load()
+        self.data = settings.load()
         self.rows = []
         self.dialog = None
 
@@ -232,7 +239,8 @@ class Window(Adw.ApplicationWindow):
             add.connect("clicked", lambda _b, k=kind: self.start_capture(k))
             group.set_header_suffix(add)
         page = Adw.PreferencesPage()
-        for group in (self.controller_group, self.keyboard_group, self._behavior_group()):
+        self.wake_group = self._wake_group()
+        for group in (self.controller_group, self.keyboard_group, self.wake_group, self._behavior_group()):
             page.add(group)
         self.toasts = Adw.ToastOverlay(child=page)
         view = Adw.ToolbarView(content=self.toasts)
@@ -240,6 +248,30 @@ class Window(Adw.ApplicationWindow):
         self.set_content(view)
         self.refresh()
         threading.Thread(target=self._load_controllers, daemon=True).start()
+
+    def _wake_group(self):
+        group = Adw.PreferencesGroup(
+            title="Wake words",
+            description="Say one, then a command; the command goes to hooks/on-command and the event "
+                        "stream. Any English words work. Two or more words trigger by accident less.")
+        switch = Adw.SwitchRow(title="Listen for wake words", subtitle="While not dictating",
+                               active=self.data["wake_word"])
+        switch.connect("notify::active", lambda r, _p: self.set_option("wake_word", r.get_active()))
+        group.add(switch)
+        self.wake_entry = Adw.EntryRow(title="Add a wake word, like \u201cHey Computer\u201d", show_apply_button=True)
+        self.wake_entry.connect("apply", self.add_wake_phrase)
+        return group
+
+    def add_wake_phrase(self, entry):
+        phrase = settings.clean_phrase(entry.get_text())
+        entry.set_text("")
+        if not phrase:
+            self.toast("Use letters and spaces.")
+        elif phrase in self.data["wake_phrases"]:
+            self.toast(f"\u201c{phrase.title()}\u201d is already a wake word.")
+        else:
+            self.data["wake_phrases"].append(phrase)
+            self.save(f"Added \u201c{phrase.title()}\u201d.")
 
     def _behavior_group(self):
         group = Adw.PreferencesGroup(title="Behavior",
@@ -252,8 +284,7 @@ class Window(Adw.ApplicationWindow):
             group.add(row)
         for key, title, subtitle in (
                 ("live_typing", "Type while talking", "Text appears every few seconds instead of after you stop"),
-                ("sounds", "Sounds", "Tones when recording starts and stops"),
-                ("wake_word", "\u201cHey Scarlet\u201d wake word", "Listen for the wake word when not dictating")):
+                ("sounds", "Sounds", "Tones when recording starts and stops")):
             row = Adw.SwitchRow(title=title, subtitle=subtitle, active=self.data[key])
             row.connect("notify::active", lambda r, _p, k=key: self.set_option(k, r.get_active()))
             group.add(row)
@@ -271,7 +302,6 @@ class Window(Adw.ApplicationWindow):
             text = "No controller connected. Wake one to add its buttons."
         else:
             text = "Connected: " + ", ".join(d["label"] for d in devices) + "."
-            text = text[:11] + text[11].upper() + text[12:]
         self.controller_status = text
         GLib.idle_add(self.refresh)
 
@@ -285,8 +315,11 @@ class Window(Adw.ApplicationWindow):
         self.keyboard_group.set_description(MODE_HINTS[self.data["keyboard_mode"]])
         entries += [(self.keyboard_group, key_label(k), key_note(k, self.data["keyboard_mode"]), ("keyboard", i))
                     for i, k in enumerate(self.data["keyboard"])]
+        entries += [(self.wake_group, p.title(), "", ("wake_phrases", i)) for i, p in enumerate(self.data["wake_phrases"])]
         for group, title, subtitle, (kind, index) in entries:
-            row = Adw.ActionRow(title=title, subtitle=subtitle)
+            row = Adw.ActionRow(title=title)
+            if subtitle:
+                row.set_subtitle(subtitle)
             remove = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER,
                                 css_classes=["flat"], tooltip_text="Remove")
             remove.connect("clicked", lambda _b, k=kind, i=index: self.remove(k, i))
@@ -298,12 +331,14 @@ class Window(Adw.ApplicationWindow):
                 row = Adw.ActionRow(title="Nothing bound", subtitle="Use Add to pick a button", sensitive=False)
                 group.add(row)
                 self.rows.append((group, row))
+        self.wake_group.add(self.wake_entry)  # keep the entry below the phrases
+        self.rows.append((self.wake_group, self.wake_entry))
 
     def save(self, message):
-        bindings.save(self.data)
+        settings.save(self.data)
         live = notify_daemon()
         self.refresh()
-        self.toast(message + (" Active now." if live else " scarlet-voice is not running."))
+        self.toast(message + (" Active now." if live else " frame-voice is not running."))
 
     def toast(self, text):
         self.toasts.add_toast(Adw.Toast(title=text, timeout=3))
@@ -351,7 +386,7 @@ class Window(Adw.ApplicationWindow):
 
 
 def main():
-    app = Adw.Application(application_id="local.scarletvoice.Config")
+    app = Adw.Application(application_id="local.framevoice.Config")
     app.connect("activate", lambda a: (a.get_active_window() or Window(a)).present())
     return app.run(sys.argv)
 

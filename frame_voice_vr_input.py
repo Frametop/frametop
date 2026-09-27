@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Controller push-to-talk for scarlet-voice: hold a bound button (or tap it, in toggle mode).
+"""Controller push-to-talk for frame-voice: hold a bound button (or tap it, in toggle mode).
 
 SteamVR only gives controller input to the app that has focus, and while the 2D Steam
 or desktop screens are up the compositor's laser mouse holds it, so an OpenVR action
 never fires there. Instead this reads raw component state from vrserver's local web
 socket (127.0.0.1:27062), the same stream the controller binding page uses for its live
 view. It sees the button whatever has focus. Press -> `start vr`, release -> `stop` on
-the scarlet-voice control socket; the daemon applies the 2 s minimum.
+the frame-voice control socket; the daemon applies the 2 s minimum.
 
 The button is observed, not captured: whatever else is bound to it still happens.
-Buttons come from ~/.config/scarlet-voice/bindings.json (see bindings.py and the
-scarlet-config app); changes apply within a second.
+Buttons come from ~/.config/frame-voice/settings.json (see settings.py and the
+frame-voice-config app); changes apply within a second.
 """
 import asyncio
 import json
@@ -23,15 +23,15 @@ from pathlib import Path
 
 import websockets
 
-import bindings
+import settings
 
-SOCKET_PATH = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "scarlet-voice/control.sock"
+SOCKET_PATH = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "frame-voice/control.sock"
 VRSERVER = "http://127.0.0.1:27062"
-MAILBOX = f"scarlet_voice_ptt_{os.getpid()}"
+MAILBOX = f"frame_voice_ptt_{os.getpid()}"
 VR_HEADERS = {"Referer": f"{VRSERVER}/dashboard/controllerbinding.html"}
 DEVICE_POLL = 5  # seconds between checks for controllers connecting or leaving
 
-log = logging.getLogger("scarlet-vr-input")
+log = logging.getLogger("frame-voice-vr-input")
 
 
 def send(command):
@@ -42,7 +42,7 @@ def send(command):
             sock.sendall((command + "\n").encode())
             sock.recv(4096)
     except OSError as err:
-        log.warning("scarlet-voice not reachable (%s): %s", command, err)
+        log.warning("frame-voice not reachable (%s): %s", command, err)
 
 
 async def connect():
@@ -66,9 +66,9 @@ async def subscribe(ws, device, mailbox, on=True):
 
 
 def wanted():
-    """device -> set of inputs, from bindings.json."""
+    """device -> set of inputs, from settings.json."""
     out = {}
-    for b in bindings.load()["controller"]:
+    for b in settings.load()["controller"]:
         out.setdefault(b["device"], set()).add(b["input"])
     return out
 
@@ -77,7 +77,7 @@ async def run_session():
     """One connection to vrserver. Returns or raises when SteamVR goes away."""
     async with await connect() as ws:
         await ws.send(f"mailbox_open {MAILBOX}")
-        stamp, inputs, mode = bindings.mtime(), wanted(), bindings.load()["controller_mode"]
+        stamp, inputs, mode = settings.mtime(), wanted(), settings.load()["controller_mode"]
         for device in inputs:
             await subscribe(ws, device, MAILBOX)
         log.info("connected to SteamVR, watching %s (%s)", describe(inputs), mode)
@@ -102,15 +102,15 @@ async def run_session():
                                 pressed.add((device, name))
                             elif name in components:
                                 pressed.discard((device, name))
-                if bindings.mtime() != stamp:
-                    stamp, new, mode = bindings.mtime(), wanted(), bindings.load()["controller_mode"]
+                if settings.mtime() != stamp:
+                    stamp, new, mode = settings.mtime(), wanted(), settings.load()["controller_mode"]
                     for device in inputs.keys() - new.keys():
                         await subscribe(ws, device, MAILBOX, on=False)
                     for device in new.keys() - inputs.keys():
                         await subscribe(ws, device, MAILBOX)
                     inputs = new
                     pressed = {(d, i) for d, i in pressed if i in inputs.get(d, ())}
-                    log.info("bindings changed, watching %s (%s)", describe(inputs), mode)
+                    log.info("settings changed, watching %s (%s)", describe(inputs), mode)
                 if now >= next_poll:
                     next_poll = now + DEVICE_POLL
                     current = await asyncio.to_thread(connected)

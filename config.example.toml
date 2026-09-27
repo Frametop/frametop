@@ -1,6 +1,6 @@
-# Copy to ~/.config/scarlet-voice/config.toml and edit. Every key is optional.
-# Push-to-talk buttons, hold/tap modes, live typing, sounds and the wake word on/off
-# are set in the Scarlet Voice Settings app (scarlet-config), saved in bindings.json.
+# Copy to ~/.config/frame-voice/config.toml and edit. Every key is optional.
+# Push-to-talk buttons, hold/tap modes, live typing, sounds, wake words and wake on/off
+# are set in the Frame Voice Settings app (frame-voice-config), saved in settings.json.
 
 [audio]
 source = ""            # PipeWire node name; empty = default mic
@@ -8,7 +8,7 @@ source = ""            # PipeWire node name; empty = default mic
 [whisper]
 url = "http://127.0.0.1:8178/inference"
 language = "en"
-prompt = "Scarlet, SteamOS, Steam Frame, T3 Code, Godot."   # vocabulary hints
+prompt = "SteamOS, Steam Frame, Godot."   # vocabulary hints
 min_audio_ctx = 512        # smallest encoder window; lower makes medium/turbo loop on short clips
 
 [dictation]
@@ -23,10 +23,9 @@ moonshine_threads = 2
 step_seconds = 0.8         # re-decode the current window this often
 pause_seconds = 0.8        # a pause this long closes the window
 max_window_seconds = 8.0   # without a pause, close at the quietest point by this length (moonshine max ~10)
-save_clips = 0             # keep the last N dictations' audio in ~/.local/state/scarlet-voice/clips
+save_clips = 0             # keep the last N dictations' audio in ~/.local/state/frame-voice/clips
 
 [wake]
-phrases = ["HEY SCARLET"]
 threshold = 0.25           # higher = fewer false triggers, more misses
 boost = 1.5                # higher = easier to trigger
 command_timeout = 5.0      # seconds to start speaking after the wake chime

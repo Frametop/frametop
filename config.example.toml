@@ -22,7 +22,8 @@ engine = "moonshine"       # live engine: moonshine (CPU, fast) or whisper (GPU 
 moonshine_threads = 2
 step_seconds = 0.8         # re-decode the current window this often
 pause_seconds = 0.8        # a pause this long closes the window
-max_window_seconds = 8.0   # without a pause, close at the quietest point by this length (moonshine max ~10)
+max_window_seconds = 8.0   # without a pause, close at the quietest point by this much audio, context included (moonshine max ~9)
+context_seconds = 1.5      # decode each window after this much of the previous one, so a sentence can carry on across a pause
 save_clips = 0             # keep the last N dictations' audio in ~/.local/state/frame-voice/clips
 
 [wake]

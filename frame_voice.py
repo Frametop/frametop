@@ -43,6 +43,10 @@ SOCKET_PATH = RUNTIME_DIR / "control.sock"
 # Keys of keyboards Frametop's input relay has grabbed for its VR desktop: a grabbed
 # keyboard can't be read here, so the relay sends its keys ("key <code> <value> <device>").
 FRAMETOP_KEYS = "\0frametop_keys"
+# Audio kept before speech that starts after a silence: the VAD flags speech ~0.27 s late.
+LEAD_IN_SECONDS = 0.5
+# Committed words a window's decode is lined up against: more than its context can hold.
+ALIGN_WORDS = 12
 
 log = logging.getLogger("frame-voice")
 
@@ -68,14 +72,17 @@ DEFAULTS = {
         # Live text by agreement: the current window of speech is re-decoded every
         # step_seconds and words two decodes in a row agree on are typed. A window closes at a
         # pause (its last words are typed then) or at its quietest point by max_window_seconds.
-        # moonshine runs on the CPU (~0.1-0.3 s per decode, max ~10 s of audio); "whisper" uses
-        # the whisper-server on the GPU (better punctuation, ~0.5-0.8 s per decode).
+        # moonshine runs on the CPU (~0.1-0.3 s per decode, returns nothing past ~9 s of audio);
+        # "whisper" uses the whisper-server on the GPU (better punctuation, ~0.5-0.8 s per decode).
         "engine": "moonshine",
         "moonshine_model": "models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27",
         "moonshine_threads": 2,
         "step_seconds": 0.8,
         "pause_seconds": 0.8,  # shorter pauses inside a sentence ended it with "?"/"." in testing
-        "max_window_seconds": 8.0,
+        "max_window_seconds": 8.0,  # audio per decode, context included
+        # Each window is decoded after this much of the previous one's end, so a sentence that
+        # goes on after a pause isn't heard as a new one (no stray "." and capital at the seam).
+        "context_seconds": 1.5,
         # Keep the audio of the last N dictations in ~/.local/state/frame-voice/clips for
         # comparing models and settings. 0 = never write audio to disk.
         "save_clips": 0,
@@ -231,14 +238,85 @@ def drop_repeats(text):
     return " ".join(out)
 
 
+SAME_WORD = {"okay": "ok"}  # spellings Moonshine switches between from one decode to the next
+
+
+def norm(word):
+    word = re.sub(r"[^\w']", "", word.lower())
+    return SAME_WORD.get(word, word)
+
+
+def split_marks(word):
+    """("the.", ...) -> ("the", "."): a word and the punctuation after it."""
+    m = re.fullmatch(r"(.*?)([.,!?;:]*)", word)
+    return m[1], m[2]
+
+
+SENTENCE_END = (".", "?", "!")
+# Words a sentence rarely ends on, so a pause after one is a pause inside a sentence.
+DANGLING = set("""a an the to of for in on at by with from into onto about as than and or but nor
+    because if when while where whether that which whose my our your their its i we they he she
+    i'm we're you're they're it's are were be been being am have has had will would can
+    could should shall may might must very""".split())
+
+
+def settle_mark(word, held, heard):
+    """Punctuation after `word`, the last one before a pause. held: what the window decoded
+    alone put there (every window it ends reads as a finished sentence). heard: what the next
+    decode put there after hearing what followed (None if it didn't line up), which in turn
+    tends to run finished sentences together."""
+    if heard is None:
+        return held
+    if heard.endswith(SENTENCE_END) or norm(word) in DANGLING:
+        return heard
+    return held or heard
+
+
 def common_prefix(a, b):
     """How many leading words two hypotheses share, ignoring case and punctuation."""
     n = 0
     for x, y in zip(a, b):
-        if re.sub(r"[^\w']", "", x.lower()) != re.sub(r"[^\w']", "", y.lower()):
+        if norm(x) != norm(y):
             break
         n += 1
     return n
+
+
+def agreement(prev, cur):
+    """How many leading words of `cur` the previous hypothesis backs up. One word that
+    differs (a filler heard as "A" one time and "Uh," the next) doesn't hold back the rest
+    when the three words after it agree again; cur's version of it wins."""
+    i = j = 0
+    while True:
+        k = common_prefix(prev[i:], cur[j:])
+        i, j = i + k, j + k
+        if i >= len(prev) or j >= len(cur):
+            return j
+        for di, dj in ((1, 1), (0, 1), (1, 0)):
+            if common_prefix(prev[i + di:], cur[j + dj:]) >= 3:
+                i, j = i + di, j + dj
+                break
+        else:
+            return j
+
+
+def align(ref, hyp):
+    """Where the words after `ref` start in `hyp`, a decode whose audio starts inside the
+    audio of ref's last words. Lines ref's end up with hyp's start (same word +2, anything
+    else -1, ref may start anywhere); on a tie the earlier start wins, so a phrase said twice
+    in a row isn't taken for the copy already typed. Returns (start, hyp's form of ref's last
+    word or None when that word didn't line up), or None when nothing lines up."""
+    a, b = [norm(w) for w in ref], [norm(w) for w in hyp]
+    row = [-j for j in range(len(b) + 1)]
+    for i in range(1, len(a) + 1):
+        nxt = [0]
+        for j in range(1, len(b) + 1):
+            nxt.append(max(row[j - 1] + (2 if a[i - 1] == b[j - 1] else -1), row[j] - 1, nxt[j - 1] - 1))
+        row = nxt
+    start = max(range(len(b) + 1), key=lambda j: (row[j], -j))
+    if not a or row[start] < 2:
+        return None
+    return start, hyp[start - 1] if start and b[start - 1] == a[-1] else None
 
 
 def feed_vad(vad, samples):
@@ -570,10 +648,15 @@ class FrameVoice:
         self.recording, self.recording_source = [], source
         if self.dcfg["streaming"]:
             self.piece_vad.reset()
+            # win: first chunk of the current window. lead: the end of the previous window,
+            # decoded ahead of it. deferred: lead holds a word not committed yet (a window cut
+            # without a pause). words: committed, text: the same as typed, held: punctuation
+            # after the last word, waiting to hear if the sentence goes on. typed: chars typed.
             self.stream = {"source": source, "t0": time.monotonic(), "chunks": self.recording,
                            "speech": [], "level": [], "wake": asyncio.Event(), "final": False,
-                           "win": 0, "decoded_at": 0, "prev": [], "wdone": [],
-                           "words": [], "typed": 0}
+                           "win": 0, "decoded_at": 0, "lead": np.zeros(0, np.float32),
+                           "deferred": False, "prev": [], "base": 0,
+                           "words": [], "text": "", "held": None, "typed": 0}
             self.stream["worker"] = asyncio.create_task(self._stream_worker(self.stream))
         self.update_mic()
         self.chime("start")
@@ -619,7 +702,9 @@ class FrameVoice:
                 stream["final"] = True
                 stream["wake"].set()
                 await stream["worker"]
-                text = " ".join(stream["words"])
+                stream["text"] += stream["held"] or ""
+                stream["held"] = None
+                text = stream["text"]
                 if not text:
                     log.info("no speech detected")
             else:
@@ -651,6 +736,7 @@ class FrameVoice:
         else:
             text = await self.transcribe_speech(audio, context, quiet=True)
         text = re.sub(r"([,;:!?])\1+", r"\1", text)  # "so,," -> "so,"
+        text = re.sub(r"(?<![\w'])i(?=['\s.,!?;:]|$)", "I", text)  # audio starting mid-phrase can give "i"
         return re.sub(r"^(\.\.\.|\u2026)\s*|\s*(\.\.\.|\u2026)$", "", text)
 
     def _moonshine_decode(self, audio):
@@ -666,12 +752,13 @@ class FrameVoice:
         """Live transcription by agreement.
 
         The current window (speech since the last pause) is re-decoded every step_seconds of
-        new audio. Words that two decodes in a row agree on are committed and typed, except
-        the last agreed word, whose punctuation can still change. At a pause, or at the
-        window's quietest point once it is max_window_seconds long, the window closes: it is
-        decoded once more and the rest of its words are committed. Nothing is cut
-        mid-sentence while it is still being decoded, so there are no split or doubled words
-        at piece edges.
+        new audio, after the last context_seconds of the previous window, so it is heard as the
+        continuation it is. Each decode is lined up with the words already committed; of the
+        words after them, those two decodes in a row agree on are committed and typed, except
+        the last, whose punctuation can still change. At a pause, or at the window's quietest
+        point once max_window_seconds of audio is decoded, the window closes: it is decoded
+        once more and the rest of its words are committed. The punctuation after a pause waits
+        for the next window, which hears whether the sentence went on.
         """
         per = CHUNK / RATE
         step = max(1, round(self.dcfg["step_seconds"] / per))
@@ -681,65 +768,148 @@ class FrameVoice:
             speech, win = stream["speech"], stream["win"]
             end = len(speech)
             window = speech[win:end]
+            last = max((i for i, v in enumerate(window) if v), default=None)
+            if last is None and stream["deferred"]:
+                last = -1  # no new speech, but the context holds a word still to commit
+            full = len(stream["lead"]) / RATE + len(window) * per >= self.dcfg["max_window_seconds"]
             if stream["final"]:
-                if any(window):
-                    await self._close_window(stream, end)
+                if last is None:
+                    return
+                if full:  # Moonshine returns nothing for more than ~9 s of audio
+                    await self._close_window(stream, self._quiet_cut(stream, end), forced=True)
+                    stream["wake"].set()
+                    continue
+                await self._close_window(stream, end)
                 return
-            if not any(window):
+            if last is None:
                 if len(window) * per > 1.0:
-                    stream["win"] = stream["decoded_at"] = end - int(0.3 / per)  # keep a lead-in
+                    stream["win"] = stream["decoded_at"] = self._lead_in(stream, end)
                 continue
-            silence = len(window) - (max(i for i, v in enumerate(window) if v) + 1)
+            silence = len(window) - (last + 1)
             if silence * per >= self.dcfg["pause_seconds"]:
                 await self._close_window(stream, end - silence + int(0.15 / per))
-            elif len(window) * per >= self.dcfg["max_window_seconds"]:
-                # No pause: close at the quietest chunk of the second half, preferring ones
-                # the VAD calls non-speech (a breath between words rather than inside one).
-                level = stream["level"]
-                first = win + int(len(window) / 2)
-                cut = min(range(first, end), key=lambda i: (speech[i], level[i], -i)) + 1
-                await self._close_window(stream, cut)
+            elif full:
+                await self._close_window(stream, self._quiet_cut(stream, end), forced=True)
             elif end - stream["decoded_at"] >= step:
                 stream["decoded_at"] = end
-                hyp = (await self._decode(np.concatenate(stream["chunks"][win:end]), self._context(stream))).split()
-                agreed = common_prefix(stream["prev"], hyp)
+                hyp = (await self._decode(self._window_audio(stream, end), self._context(stream))).split()
+                found = self._uncommitted(stream, hyp)
+                if found is None:
+                    log.info("decode skipped, doesn't line up with the words typed: %s", " ".join(hyp))
+                    continue
+                new, boundary = found
+                before = self._uncommitted(stream, stream["prev"])
                 stream["prev"] = hyp
-                done = len(stream["wdone"])
-                if agreed - 1 > done:
-                    self._commit(stream, hyp[done:agreed - 1])
+                agreed = agreement(before[0], new) if before else 0
+                if agreed > 1:
+                    self._commit(stream, new[:agreed - 1], boundary)
 
-    async def _close_window(self, stream, cut):
-        win = stream["win"]
-        words = (await self._decode(np.concatenate(stream["chunks"][win:cut]), self._context(stream))).split()
-        # Words already typed stay as typed; the rest of the final decode follows them.
-        self._commit(stream, words[len(stream["wdone"]):])
-        log.info("window %.1fs: %s", (cut - win) * CHUNK / RATE, " ".join(words))
-        stream.update(win=cut, decoded_at=cut, prev=[], wdone=[])
+    async def _close_window(self, stream, cut, forced=False):
+        """Decode the window once more and commit the rest of its words. After a pause the last
+        word's punctuation is held for the next window. Without one (forced), the audio stops
+        mid-speech, and Moonshine can garble or repeat the cut-off words ("on a dot on a dot"),
+        so only words the last live decode agrees on are committed; the rest (up to 5) are
+        carried in the next window's context, sized to hold them."""
+        audio = self._window_audio(stream, cut)
+        hyp = (await self._decode(audio, self._context(stream))).split()
+        found = self._uncommitted(stream, hyp)
+        if found is None:
+            # Go by position within this window's own audio, as before context was added.
+            log.info("window decode doesn't line up with the words typed: %s", " ".join(hyp))
+            hyp = (await self._decode(np.concatenate(stream["chunks"][stream["win"]:cut]), self._context(stream))).split()
+            found = hyp[len(stream["words"]) - stream["base"]:], None
+        new, boundary = found
+        start = len(hyp) - len(new)
+        context = self.dcfg["context_seconds"]
+        if forced:
+            before = self._uncommitted(stream, stream["prev"])
+            keep = max(0, agreement(before[0], new) - 1 if before else 0, len(new) - 5)
+            context = max(context, min(3.5, 0.45 * (len(new) - keep + 2)))  # ~0.3-0.4 s per word
+            new = new[:keep]
+        self._commit(stream, new, boundary, hold=not forced)
+        log.info("window %.1fs + %.1fs context: %s", (cut - stream["win"]) * CHUNK / RATE,
+                 len(stream["lead"]) / RATE, " ".join(hyp[:start] + ["|"] + hyp[start:]) if start else " ".join(hyp))
+        stream.update(win=cut, decoded_at=cut, lead=self._lead(audio, context), deferred=forced, prev=[],
+                      base=len(stream["words"]))
+
+    def _window_audio(self, stream, end):
+        return np.concatenate([stream["lead"], *stream["chunks"][stream["win"]:end]])
+
+    def _lead(self, audio, seconds):
+        """Context for the next window: about `seconds` from the end of this one, from the
+        quietest 30 ms nearby, so it rarely starts inside a word."""
+        n = int(seconds * RATE)
+        if n <= 0:
+            return audio[:0]
+        if len(audio) <= n:
+            return audio
+        frame = RATE * 30 // 1000
+        starts = range(max(0, len(audio) - n - RATE // 2), len(audio) - n + RATE // 4, frame)
+        return audio[min(starts, key=lambda i: float(np.mean(audio[i:i + frame] ** 2))):]
+
+    def _lead_in(self, stream, end):
+        """Start of a window with no speech yet: LEAD_IN_SECONDS before now, or before a sound
+        in the last second the VAD didn't flag (a lone short word like "I" is too brief)."""
+        per = CHUNK / RATE
+        win, level = stream["win"], stream["level"]
+        start = end - round(LEAD_IN_SECONDS / per)
+        floor = float(np.percentile(level[win:end], 20))
+        loud = next((i for i in range(max(win, end - round(1.0 / per)), end)
+                     if level[i] > max(3 * floor, 0.005)), None)
+        if loud is not None:
+            start = min(start, loud - round(0.2 / per))
+        return max(win, start)
+
+    def _quiet_cut(self, stream, end):
+        """Where to close a window with no pause: after the quietest chunk of its second half,
+        preferring ones the VAD calls non-speech (a breath between words, not inside one)."""
+        speech, level = stream["speech"], stream["level"]
+        first = stream["win"] + (end - stream["win"]) // 2
+        return min(range(first, end), key=lambda i: (speech[i], level[i], -i)) + 1
+
+    def _uncommitted(self, stream, hyp):
+        """hyp's words after the committed ones, and hyp's form of the last committed word
+        (None when it didn't line up). None when hyp doesn't line up with them at all."""
+        # Without context, only words committed in this window are in hyp. With it, a decode too
+        # short to line up ("Post. The" for "...pose. The") is skipped rather than guessed at.
+        ref = stream["words"][max(0, stream["base"] - ALIGN_WORDS) if len(stream["lead"]) else stream["base"]:]
+        if not ref:
+            return hyp, None
+        found = align(ref, hyp)
+        return (hyp[found[0]:], found[1]) if found else None
 
     def _context(self, stream):
         return " ".join(stream["words"][-30:])
 
-    def _commit(self, stream, words):
+    def _commit(self, stream, words, boundary=None, hold=False):
+        """Queue words for typing. boundary: this decode's form of the last committed word,
+        which settles punctuation held back at a pause. hold: keep the last new word's
+        punctuation back until the next window hears whether the sentence goes on."""
         if not words:
             return
-        skip = 0
-        if not stream["wdone"]:
-            # A window's first words can repeat the end of the previous one when it closed
-            # inside a phrase.
-            skip = max((k for k in range(1, 4) if common_prefix([w for w in stream["words"][-k:]], words[:k]) == k
-                        and len(stream["words"]) >= k), default=0)
-        stream["wdone"].extend(words)
-        words = words[skip:]
-        if not words:
-            return
+        piece = ""
+        if stream["held"] is not None:
+            heard = None if boundary is None else split_marks(boundary)[1]
+            mark = settle_mark(stream["words"][-1] if stream["words"] else "", stream["held"], heard)
+            piece, stream["held"] = mark, None
+            if mark.endswith(SENTENCE_END) and words[0][:1].islower():
+                words = [words[0][:1].upper() + words[0][1:], *words[1:]]
+        if hold:
+            word, stream["held"] = split_marks(words[-1])
+            words = words[:-1] + ([word] if word else [])
+        if words:
+            piece += (" " if stream["text"] else "") + " ".join(words)
         stream["words"].extend(words)
-        self.broadcast("dictation_piece", text=" ".join(words))
+        stream["text"] += piece
+        if not piece:
+            return
+        self.broadcast("dictation_piece", text=piece.strip())
         task = asyncio.create_task(self._flush_typing(stream))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
     async def _flush_typing(self, stream, final=False):
-        """Type committed words not typed yet: live while recording when allowed, else at the end."""
+        """Type committed text not typed yet: live while recording when allowed, else at the end."""
         if not final:
             live = (self.dcfg["live_typing"] and stream is self.stream
                     and time.monotonic() - stream["t0"] >= self.dcfg["min_seconds"])
@@ -750,14 +920,13 @@ class FrameVoice:
         elif self.mods_down:
             self._log_held_modifiers()
             await self.mods_released.wait()
-        new = stream["words"][stream["typed"]:]
-        text = (" " if stream["typed"] and new else "") + " ".join(new)
-        stream["typed"] += len(new)
-        if final and stream["words"] and self.dcfg["trailing_space"]:
+        text = stream["text"][stream["typed"]:]
+        stream["typed"] = len(stream["text"])
+        if final and stream["text"] and self.dcfg["trailing_space"]:
             text += " "
         if text:
             if not final:
-                log.info("typing %d words live (%.1fs in)", len(new), time.monotonic() - stream["t0"])
+                log.info("typing %d words live (%.1fs in)", len(text.split()), time.monotonic() - stream["t0"])
             await self.type_text(text)
 
     async def toggle_dictation(self, source):

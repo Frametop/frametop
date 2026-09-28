@@ -18,7 +18,9 @@ import os
 import re
 from pathlib import Path
 
-PATH = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "frame-voice/settings.json"
+# Not under $XDG_CONFIG_HOME: Frametop's desktop points it at ~/.config/frametop, and the
+# services (started by systemd) and the settings app must read the same file.
+PATH = Path(os.environ.get("FRAME_VOICE_SETTINGS", "~/.config/frame-voice/settings.json")).expanduser()
 DEFAULT = {
     "keyboard": ["KEY_RIGHTCTRL"],
     "controller": [{"device": "/user/hand/left", "input": "/input/dpad_down/click"}],

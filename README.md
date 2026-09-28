@@ -12,7 +12,7 @@ Local voice input for the Steam Frame. Nothing leaves the headset.
 | `frame-voice-whisper.service` | `whisper-server` (whisper.cpp, Vulkan on the Adreno 750) with `ggml-small.en-q5_1` loaded, on `127.0.0.1:8178` |
 | `frame-voice.service` | `frame_voice.py`: mic capture, hotkey, wake word, typing, control socket |
 | `frame-voice-vr-input.service` | `frame_voice_vr_input.py`: controller push-to-talk, reads left d-pad down from SteamVR's raw input stream |
-| `frame-voice-config` | Settings app (GTK 4 / libadwaita): pick push-to-talk buttons by pressing them. In the app menu as *Frame Voice Settings* |
+| `frame-voice-config` | Settings app (GTK 4 / libadwaita): start and stop the services, start at system startup, pick push-to-talk buttons by pressing them. In the app menu as *Frame Voice Settings* |
 | `frame-voice-ctl` | CLI for the control socket |
 | `hooks/on-command` | Runs after a wake word with the command text as `$1` |
 
@@ -30,7 +30,7 @@ The mic is captured once with `pw-record`. The wake word spotter (sherpa-onnx op
 
 Recordings shorter than 2 s (`min_seconds`) are discarded with the cancel tone, so brief or accidental presses never type anything.
 
-Change the buttons in *Frame Voice Settings* (`./frame-voice-config`): **Add** waits for you to press a controller button, key or mouse button (not left/right click, not the controller's system button). The app also sets hold or tap mode per trigger, switches live typing and sounds, and manages wake words: add any phrase in English words (they're spelled out for the spotter when loaded, no training), remove them, or turn listening off. Changes apply within a couple of seconds. Everything lives in `~/.config/frame-voice/settings.json`; both services apply changes without a restart. Delete the file to go back to the defaults.
+*Frame Voice Settings* (`./frame-voice-config`) starts and stops all three services (**Running**) and sets whether they start at system startup (see Services). Change the buttons there too: **Add** waits for you to press a controller button, key or mouse button (not left/right click, not the controller's system button). The app also sets hold or tap mode per trigger, switches live typing and sounds, and manages wake words: add any phrase in English words (they're spelled out for the spotter when loaded, no training), remove them, or turn listening off. Changes apply within a couple of seconds. Everything lives in `~/.config/frame-voice/settings.json`; both services apply changes without a restart. Delete the file to go back to the defaults.
 
 Live text works by agreement, with the approach and model borrowed from the Faceclaw app for Even Realities G2 glasses (Moonshine base through sherpa-onnx, on the CPU): the speech since your last pause is re-decoded every 0.8 s, and words two decodes in a row agree on are typed, except the last one, whose punctuation can still change. One word the two decodes disagree on (a filler heard as "a" once and "uh" the next time) doesn't hold back the words after it once three of them agree again. At a 0.8 s pause, or at the quietest point once a decode would pass 8 s of audio (Moonshine returns nothing past about 9 s), the window is decoded one last time and its remaining words are typed.
 
@@ -55,7 +55,7 @@ Audio cues are off by default (`[sounds] enabled = true` turns them on): rising 
 ./frame-voice-ctl events          # stream JSON events: wake, command, dictation, command_timeout, error
 ```
 
-The socket is `$XDG_RUNTIME_DIR/frame-voice/control.sock`, mode 0600. It can type into any focused window, so keep it owner-only.
+The socket is `/run/user/<uid>/frame-voice/control.sock` (systemd's runtime dir; the clients ignore `$XDG_RUNTIME_DIR`, which Frametop's desktop points elsewhere), mode 0600. It can type into any focused window, so keep it owner-only.
 
 An assistant can either replace `hooks/on-command` or subscribe with `frame-voice-ctl events` and act on `{"event": "command", "text": ...}`.
 
@@ -67,11 +67,23 @@ Wake phrase tuning: raise `threshold` for fewer false triggers, raise `boost` if
 
 ## Services
 
+**Running** in the settings app starts or stops all three units; **Start at system startup** enables or disables them. Or by hand:
+
 ```
 systemctl --user status frame-voice-whisper frame-voice frame-voice-vr-input
 journalctl --user -u frame-voice -f
-systemctl --user stop frame-voice frame-voice-whisper frame-voice-vr-input   # the units are linked, so `disable` removes the links
+systemctl --user stop frame-voice frame-voice-whisper frame-voice-vr-input
 ```
+
+The units are linked from `systemd/`. Don't turn startup off with a plain `systemctl --user disable`: it removes those links too, and when a unit file goes missing systemd drops the typing keyboard (see below), even while the service runs. The app does what this does:
+
+```
+systemctl --user disable --no-reload frame-voice-whisper frame-voice frame-voice-vr-input
+systemctl --user link --no-reload ~/Desktop/Projects/frame-voice/systemd/*.service
+systemctl --user daemon-reload
+```
+
+Startup matters for typing into game-mode windows: SteamVR only uses the typing keyboard if it existed when SteamVR started (see Build notes). Enabled, `frame-voice` starts before SteamVR, and stopping and starting it keeps the same keyboard. Disabled, it starts only when you start it, after SteamVR, so restart SteamVR once after each start to type into game-mode windows: systemd keeps a stopped unit's fd store only while the unit is enabled, so each start makes a new keyboard. Typing into Frametop's desktop works either way.
 
 ## Build notes
 

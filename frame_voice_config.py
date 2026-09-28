@@ -4,7 +4,8 @@
 "Add" waits for a controller button (read from vrserver's input stream, like
 frame-voice-vr-input) or a keyboard key / mouse button (read from evdev, like frame-voice)
 and saves ~/.config/frame-voice/settings.json. Both services pick changes up on their
-own. Run through the `frame-voice-config` launcher: GTK comes from the system Python, evdev
+own. The Service switches start, stop, enable and disable the three systemd user units.
+Run through the `frame-voice-config` launcher: GTK comes from the system Python, evdev
 and websockets from the project venv.
 """
 import asyncio
@@ -13,6 +14,7 @@ import os
 import secrets
 import select
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -30,7 +32,10 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 import settings  # noqa: E402
 
-SOCKET_PATH = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "frame-voice/control.sock"
+# systemd's runtime dir, where the services and their socket live. Not $XDG_RUNTIME_DIR: Frametop's
+# desktop points that (and the session bus) at its own, where systemctl --user can't reach them.
+USER_RUNTIME = Path(f"/run/user/{os.getuid()}")
+SOCKET_PATH = USER_RUNTIME / "frame-voice/control.sock"
 VRSERVER = "http://127.0.0.1:27062"
 VR_HEADERS = {"Referer": f"{VRSERVER}/dashboard/controllerbinding.html"}
 TYPER_NAME = "frame-voice keyboard"
@@ -105,6 +110,48 @@ def vr_devices():
             for d in state.get("devices", [])
             if d.get("class") == "TrackedDeviceClass_Controller" and d.get("root_path")
             and d.get("controller_type") not in IGNORED_CONTROLLERS]
+
+
+UNIT_DIR = Path(__file__).resolve().parent / "systemd"
+UNITS = ("frame-voice-whisper.service", "frame-voice.service", "frame-voice-vr-input.service")
+
+
+def systemctl(*args):
+    env = {**os.environ, "XDG_RUNTIME_DIR": str(USER_RUNTIME), "DBUS_SESSION_BUS_ADDRESS": f"unix:path={USER_RUNTIME}/bus"}
+    try:
+        return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=90, env=env)
+    except (OSError, subprocess.TimeoutExpired) as err:
+        return subprocess.CompletedProcess(args, 1, "", str(err))
+
+
+def service_state():
+    """unit -> {"LoadState", "ActiveState", "UnitFileState"}, in UNITS order."""
+    out = systemctl("show", "-p", "Id,LoadState,ActiveState,UnitFileState", *UNITS).stdout
+    blocks = [dict(line.split("=", 1) for line in block.splitlines() if "=" in line) for block in out.split("\n\n")]
+    return {unit: next((b for b in blocks if b.get("Id") == unit), {}) for unit in UNITS}
+
+
+def service_action(action):
+    """systemctl start, stop, enable or disable all three units. Returns an error or None.
+
+    SteamVR only sees the typing keyboard if it existed when SteamVR started. It lives in
+    frame-voice's fd store, which systemd keeps across a stop only while the unit is enabled,
+    and drops when the unit file goes missing, even while running. The units are linked from
+    the repo and `systemctl disable` removes those links too, so they are linked again before
+    systemd reloads."""
+    steps = [(action, *UNITS)]
+    if action in ("start", "enable"):  # links missing (never installed, or removed by hand)
+        state = service_state()
+        missing = [str(UNIT_DIR / u) for u in UNITS if state[u].get("LoadState") != "loaded"]
+        steps[:0] = [("link", *missing)] if missing else []
+    elif action == "disable":
+        steps = [("disable", "--no-reload", *UNITS), ("link", "--no-reload", *(str(UNIT_DIR / u) for u in UNITS)),
+                 ("daemon-reload",)]
+    for args in steps:
+        result = systemctl(*args)
+        if result.returncode:
+            return (result.stderr.strip() or f"systemctl {args[0]} failed").splitlines()[0]
+    return None
 
 
 def notify_daemon():
@@ -231,6 +278,10 @@ class Window(Adw.ApplicationWindow):
         self.rows = []
         self.dialog = None
 
+        self.service_busy = False  # a start/stop/enable/disable is running
+        self.polling = False
+        self.syncing = False  # switches being set from the service state, not by the user
+
         self.controller_status = "Checking for controllers…"
         self.controller_group = Adw.PreferencesGroup(title="Controller")
         self.keyboard_group = Adw.PreferencesGroup(title="Keyboard and mouse")
@@ -240,7 +291,8 @@ class Window(Adw.ApplicationWindow):
             group.set_header_suffix(add)
         page = Adw.PreferencesPage()
         self.wake_group = self._wake_group()
-        for group in (self.controller_group, self.keyboard_group, self.wake_group, self._behavior_group()):
+        for group in (self._service_group(), self.controller_group, self.keyboard_group, self.wake_group,
+                      self._behavior_group()):
             page.add(group)
         self.toasts = Adw.ToastOverlay(child=page)
         view = Adw.ToolbarView(content=self.toasts)
@@ -248,6 +300,81 @@ class Window(Adw.ApplicationWindow):
         self.set_content(view)
         self.refresh()
         threading.Thread(target=self._load_controllers, daemon=True).start()
+        self._poll_service()
+        GLib.timeout_add_seconds(2, self._poll_service)
+
+    def _service_group(self):
+        group = Adw.PreferencesGroup(title="Service")
+        self.running_row = Adw.SwitchRow(title="Running", subtitle="Checking…")
+        self.running_row.connect("notify::active", lambda r, _p: self.syncing or self.run_service(
+            "start" if r.get_active() else "stop"))
+        self.startup_row = Adw.SwitchRow(title="Start at system startup")
+        self.startup_row.connect("notify::active", lambda r, _p: self.syncing or self.run_service(
+            "enable" if r.get_active() else "disable"))
+        group.add(self.running_row)
+        group.add(self.startup_row)
+        return group
+
+    def _poll_service(self):
+        if not self.polling and not self.service_busy:
+            self.polling = True
+
+            def work():
+                state = service_state()
+                GLib.idle_add(self._polled, state)
+            threading.Thread(target=work, daemon=True).start()
+        return True  # keep polling: systemctl or a reboot can change it too
+
+    def _polled(self, state):
+        self.polling = False
+        self.show_service(state)
+
+    def show_service(self, state):
+        if self.service_busy:
+            return
+        active = {u: state[u].get("ActiveState", "unknown") for u in UNITS}
+        on = active["frame-voice.service"] in ("active", "activating", "reloading")
+        failed = [u for u in UNITS if active[u] == "failed"]
+        stopped = [u for u in UNITS if active[u] not in ("active", "activating", "reloading")]
+        if failed:
+            subtitle = f"{failed[0].removesuffix('.service')} failed. Log: journalctl --user -u {failed[0]}"
+        elif on and stopped:
+            subtitle = "Partly running: " + ", ".join(u.removesuffix(".service") for u in stopped) + " stopped"
+        elif on:
+            subtitle = "Dictation, wake words and controller push-to-talk are on"
+        else:
+            subtitle = "Stopped"
+        enabled = state["frame-voice.service"].get("UnitFileState") == "enabled"
+        self.syncing = True
+        self.running_row.set_active(on)
+        self.startup_row.set_active(enabled)
+        self.syncing = False
+        self.running_row.set_subtitle(subtitle)
+        self.startup_row.set_subtitle(
+            "Starts before SteamVR, so typing reaches game-mode windows" if enabled else
+            "Off: restart SteamVR after starting Frame Voice to type into game-mode windows")
+
+    def run_service(self, action):
+        self.service_busy = True
+        row = self.running_row if action in ("start", "stop") else self.startup_row
+        row.set_subtitle({"start": "Starting…", "stop": "Stopping…", "enable": "Enabling…", "disable": "Disabling…"}[action])
+        self.running_row.set_sensitive(False)
+        self.startup_row.set_sensitive(False)
+
+        def work():
+            error = service_action(action)
+            GLib.idle_add(self._service_done, action, error, service_state())
+        threading.Thread(target=work, daemon=True).start()
+
+    def _service_done(self, action, error, state):
+        self.service_busy = False
+        self.running_row.set_sensitive(True)
+        self.startup_row.set_sensitive(True)
+        self.show_service(state)
+        done = {"start": "Frame Voice started.", "stop": "Frame Voice stopped.",
+                "enable": "Frame Voice will start at system startup.",
+                "disable": "Frame Voice won't start at system startup."}
+        self.toast(f"Couldn't {action} Frame Voice: {error}" if error else done[action])
 
     def _wake_group(self):
         group = Adw.PreferencesGroup(

@@ -5,7 +5,8 @@ import socket
 import sys
 from pathlib import Path
 
-path = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "frame-voice/control.sock"
+# Not $XDG_RUNTIME_DIR: Frametop's desktop points it at its own directory.
+path = Path(f"/run/user/{os.getuid()}") / "frame-voice/control.sock"
 if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
     sys.exit(__doc__)
 sock = socket.socket(socket.AF_UNIX)

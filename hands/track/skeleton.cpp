@@ -607,8 +607,10 @@ void Skeleton::update(Fit &f, const V3 pts[21], bool right, double right_score, 
     // kFlipFrames in a row. A side chosen that way sticks while the hand is tracked, as the
     // model's call does; switching resets the filter, so it mustn't flicker.
     constexpr int kFlipFrames = 3;
+    // The model's call is a running average (Hand::right_score); while it hovers near 0.5 a
+    // tracked hand keeps the side it has, so the skeleton doesn't turn inside out.
     int side = model_side;
-    if (continuing && f.flipped && f.side != model_side) side = f.side;
+    if (continuing && f.side != model_side && (f.flipped || std::fabs(right_score - 0.5) < 0.25)) side = f.side;
     if (!continuing) f.votes = 0;
     Shape s = shape(side, scale);
     Rot R;

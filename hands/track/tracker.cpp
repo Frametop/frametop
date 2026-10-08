@@ -216,6 +216,8 @@ bool Tracker::hand_3d(Hand &hand, std::vector<View *> views, int64_t t_ns) {
             }
             pts[k] = triangulate(origins.data(), dirs.data(), w.data(), n, &res[k]);
         }
+        double res_pt[21];
+        std::copy(res.begin(), res.end(), res_pt);
         std::nth_element(res.begin(), res.begin() + 10, res.end());
         const double residual = res[10];
         // the views disagree: two different hands; keep the stronger. Rays to two different
@@ -250,6 +252,9 @@ bool Tracker::hand_3d(Hand &hand, std::vector<View *> views, int64_t t_ns) {
             hand.scale += 0.1 * (std::clamp(t[t.size() / 2] / m[m.size() / 2], 0.8, 1.6) - hand.scale);
         std::copy(pts, pts + 21, hand.pts);
         hand.residual = residual;
+        std::copy(res_pt, res_pt + 21, hand.res_pt);
+        hand.eye = {0, 0, 0};
+        for (View *v : views) hand.eye = hand.eye + v->cam->origin * (1.0 / views.size());
         for (View *v : views) {
             V3 mono[21];
             if (!single_view(*v->cam, v->lm, hand.scale, mono)) continue;
@@ -267,6 +272,8 @@ bool Tracker::hand_3d(Hand &hand, std::vector<View *> views, int64_t t_ns) {
         }
         std::copy(pts, pts + 21, hand.pts);
         hand.residual = -1;
+        std::fill(hand.res_pt, hand.res_pt + 21, -1.0);
+        hand.eye = cam.origin;
     }
     hand.has_pts = true;
     hand.nviews = int(views.size());
@@ -544,6 +551,10 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
             h.last_ns = t_ns, h.last_palm = palm, h.seen_ns = t_ns;
             ++h.frames;
             smooth(h, t_ns);
+            if (skeleton_on_)
+                skel_.update(h.fit, h.pts, h.right(), h.right_score, h.nviews, h.residual, h.res_pt, h.eye, h.scale, t_ns);
+            else
+                h.fit.valid = false;
             out.push_back(&h);
             ++it;
         } else if (t_ns - h.seen_ns > 300'000'000) {
@@ -580,7 +591,7 @@ void Tracker::exchange(const std::string &a, const std::string &b) {
     if (!cams_.count(a) || !cams_.count(b)) return;
     const Camera *ca = cams_[a], *cb = cams_[b];
     for (View &v : views_) v.cam = v.cam == ca ? cb : v.cam == cb ? ca : v.cam;
-    for (auto &[id, h] : hands_) h.has_pts = false, h.frames = 0, h.residual = -1;
+    for (auto &[id, h] : hands_) h.has_pts = false, h.frames = 0, h.residual = -1, h.fit.valid = false;
 }
 
 void Tracker::drop_camera(const std::string &name) {

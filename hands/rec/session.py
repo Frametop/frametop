@@ -493,7 +493,7 @@ class HandsFile:
                 if len(data) < size:
                     return None
                 magic, version, _, seq, _, publish_ns, nhands, _ = HANDS_HDR.unpack_from(data, 0)
-                if magic != b"FHHANDS1" or version != 1:
+                if magic != b"FHHANDS1" or version < 1:   # 2 appends the skeleton; the start is unchanged
                     return None
                 if seq % 2 or os.pread(fd, 8, 16) != data[16:24]:
                     continue

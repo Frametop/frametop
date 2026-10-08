@@ -4,6 +4,7 @@
 
 #include "calib.h"
 #include "nets.h"
+#include "skeleton.h"
 
 #include <condition_variable>
 #include <functional>
@@ -36,7 +37,8 @@ struct Hand {
     V3 pts[21]{};               // as measured this frame; the tracker steers crops by these
     V3 smooth[21]{};            // filtered (One Euro, see Tracker::smooth): publish these
     bool has_pts = false;
-    double residual = -1;       // rms ray distance of the triangulation (m); -1: one view
+    double residual = -1;       // rms ray distance of the triangulation (m), the landmarks' median; -1: one view
+    double res_pt[21]{};        // each landmark's (-1: one view)
     int nviews = 0;
     double right_score = 0.5;   // the model's right-hand score (these images aren't mirrored)
     double scale = 1.0;         // this user's hand size / the model's world landmarks
@@ -47,6 +49,8 @@ struct Hand {
     V3 last_palm{};
     V3 dpalm{};                 // the filter's palm velocity, m/s
     int64_t smooth_ns = 0;
+    V3 eye{};                   // the centre of the cameras it was seen with this frame (depth is along eye -> point)
+    skel::Fit fit;              // the skeleton fitted to pts (track/skeleton.h); fit.valid when it fitted this frame
     bool right() const { return right_score > 0.5; }
 };
 
@@ -100,6 +104,9 @@ public:
     // view split off where its hand already is in that camera is dropped instead of starting a new
     // hand. Off by default: the stock model's side is noisier and the first guard costs it tracking.
     void set_misread_guard(bool on) { misread_guard_ = on; }
+    // The skeleton fit (track/skeleton.h), after each hand's 3D. On by default.
+    void set_skeleton(bool on) { skeleton_on_ = on; }
+    skel::Skeleton &skeleton() { return skel_; }
     // One view's 3D hand: each landmark along its ray, as far as how big the palm looks says
     // for a hand `scale` times the model's (Hand::scale). False if the palm is degenerate.
     static bool single_view(const Camera &cam, const Landmarks &lm, double scale, V3 out[21]);
@@ -138,6 +145,8 @@ private:
     int max_views_, hand_budget_ = 4, search_budget_ = 3;
     double min_presence_ = 0.5, keep_presence_ = 0.5;
     bool misread_guard_ = false;
+    bool skeleton_on_ = true;
+    skel::Skeleton skel_;
     std::vector<View> views_;
     std::map<int, Hand> hands_;
     std::vector<Tile> tiles_;

@@ -1,7 +1,7 @@
 # Hand tracking, built into build/ (hands/build.sh runs this in the dev container):
 #   make          ft-camd (camd/: runs on the host, so linked statically) and ft-hands (track/)
 #   make tools    ft-handreplay and ft-ringplay, for recordings
-#   make check    builds and runs the C++ unit tests (tests/sides_test.cpp)
+#   make check    builds and runs the C++ unit tests (tests/sides_test.cpp, tests/skeleton_test.cpp)
 # The first build fetches ncnn (NCNN_TAG) and builds it into build/ncnn, which takes a few
 # minutes. NCNN=DIR uses an ncnn install already built instead.
 NCNN_TAG  = 20260526
@@ -14,7 +14,7 @@ LDLIBS    = $(NCNN)/lib/libncnn.a -ljsoncpp -fopenmp -lpthread
 LDFLAGS  ?=
 
 CAMD  = camd/camd.c camd/tp.c camd/xrcams.c
-TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp
+TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp
 HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h
 
 all: build/ft-camd build/ft-hands
@@ -36,8 +36,13 @@ build/sides-test: tests/sides_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/sides_test.cpp $(TRACK) $(LDLIBS)
 
-check: build/sides-test
+build/skeleton-test: tests/skeleton_test.cpp track/skeleton.cpp track/skeleton.h track/geom.h
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/skeleton_test.cpp track/skeleton.cpp
+
+check: build/sides-test build/skeleton-test
 	build/sides-test
+	build/skeleton-test
 
 build/ft-ringplay: track/ringplay.cpp track/record.h camd/fhring.h
 	@mkdir -p build
@@ -54,6 +59,6 @@ build/ncnn/install/lib/libncnn.a:
 	cmake --build build/ncnn/build --target install > build/ncnn/build.log
 
 clean:
-	rm -f build/ft-camd build/ft-hands build/ft-handreplay build/ft-ringplay build/sides-test
+	rm -f build/ft-camd build/ft-hands build/ft-handreplay build/ft-ringplay build/sides-test build/skeleton-test
 
 .PHONY: all tools check clean

@@ -258,6 +258,9 @@ int main(int argc, char **argv) {
     Contrast palm_contrast, hand_contrast{Contrast::None};
     double keep_presence = 0.5;   // landmark presence a tracked view needs to stay
     bool misread_guard = setting("HANDS_MISREAD_GUARD") == "1";
+    // the skeleton fit (track/skeleton.h): published as fh_hands version 2, and as version 1's
+    // points and capsules; 0 publishes the One Euro filtered landmarks as before, and no skeleton
+    bool skeleton = setting("HANDS_SKELETON") != "0";
     PinchParams pinch_params;
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
@@ -289,6 +292,7 @@ int main(int argc, char **argv) {
         else if (a == "--record-hz" && more) record_hz = std::max(0.0, std::atof(argv[++i]));
         else if (a == "--keep-presence" && more) keep_presence = std::atof(argv[++i]);
         else if (a == "--misread-guard" && more) misread_guard = std::string(argv[++i]) == "1";
+        else if (a == "--skeleton" && more) skeleton = std::string(argv[++i]) != "0";
         else if (a == "--cams" && more) cams_arg = argv[++i];
         else if (a == "--bright" && more) bright_arg = argv[++i];
         else if (a == "--bright-on" && more) light.on = std::atof(argv[++i]);
@@ -310,6 +314,7 @@ int main(int argc, char **argv) {
                         "          as --swap-sides; 0: as ft-camd names them)\n"
                         "          [--keep-presence P] (0.5) [--ring PATH] (ft-camd's, or ft-ringplay's)\n"
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
+                        "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
                         "          [--pinch-begin M] (0.020) [--pinch-end M] (0.035) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
@@ -496,6 +501,7 @@ int main(int argc, char **argv) {
     Tracker tracker(used, nets, pool);
     tracker.set_keep_presence(keep_presence);
     tracker.set_misread_guard(misread_guard);
+    tracker.set_skeleton(skeleton);
     std::map<std::string, std::vector<uint8_t>> pixels;
     std::map<std::string, uint64_t> lit_seen;   // per colour camera: the frame last counted for the light
     const uint64_t start = mono_ns();
@@ -823,11 +829,14 @@ int main(int argc, char **argv) {
             const Stats &s = tracker.stats;
             std::sort(lat.begin(), lat.end());
             std::printf("%5.1fs %4.1f sets/s  hands %.2f views %zu  palm %3d calls %4.1f ms/batch  hand %3d calls %4.1f ms/batch  "
-                        "step %4.1f ms  latency %4.1f ms  resid %.1f mm  CPU %3.0f%%\n",
+                        "step %4.1f ms  latency %4.1f ms  resid %.1f mm  fit %.0f us  CPU %3.0f%%\n",
                         (now - start) / 1e9, s.sets / dt, s.sets ? hands_sum / s.sets : 0, tracker.views(), s.palm_calls,
                         s.palm_batches ? s.palm_ms / s.palm_batches : 0, s.hand_calls,
                         s.hand_batches ? s.hand_ms / s.hand_batches : 0, s.sets ? s.step_ms / s.sets : 0,
-                        lat.empty() ? 0 : lat[lat.size() / 2], resid_n ? resid_sum / resid_n : 0, 100 * (cpu1 - cpu0) / dt);
+                        lat.empty() ? 0 : lat[lat.size() / 2], resid_n ? resid_sum / resid_n : 0,
+                        tracker.skeleton().fits ? tracker.skeleton().us_total / tracker.skeleton().fits : 0.0,
+                        100 * (cpu1 - cpu0) / dt);
+            tracker.skeleton().fits = 0, tracker.skeleton().us_total = 0;
             if (!color.empty())
                 std::printf("        cameras %s%s: colour frames at %.1f (bright at %.0f, dim under %.0f), ambient IR %.1f, "
                             "%d steps with colour, colour placed %.1f ms after capture\n",

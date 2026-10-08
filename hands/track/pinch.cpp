@@ -45,7 +45,7 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
             if (down ? c->id != follow_[s] : c->right() != (s == 1) || c->id == taken[1 - s]) continue;
             if (!h || c->frames > h->frames) h = c;
         }
-        world_d[s] = tri_d[s] = palm_down[s] = -1;
+        world_d[s] = tri_d[s] = fit_d[s] = palm_down[s] = -1;
         if (!h) {
             o.flags &= ~FH_PINCH_TRACKED;
             if (down && (t_ns - seen_ns_[s]) / 1e9 > p_.grace_s) end(s, t_ns, true);
@@ -53,6 +53,7 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
         }
         seen_ns_[s] = t_ns;
         tri_d[s] = norm(h->pts[kThumbTip] - h->pts[kIndexTip]);
+        if (h->fit.valid) fit_d[s] = norm(h->fit.pts[kThumbTip] - h->fit.pts[kIndexTip]);
         const V3 normal = cross(h->smooth[5] - h->smooth[0], h->smooth[17] - h->smooth[0]);
         palm_down[s] = norm(normal) > 0 ? std::fabs(normal[1]) / norm(normal) : 0;
         double sum = 0;
@@ -64,7 +65,7 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
             sum += norm(a - b), ++n;
         }
         if (n) world_d[s] = sum / n * h->scale;
-        const double d = p_.triangulated || world_d[s] < 0 ? tri_d[s] : world_d[s];
+        const double d = p_.fitted && fit_d[s] >= 0 ? fit_d[s] : p_.triangulated || world_d[s] < 0 ? tri_d[s] : world_d[s];
         // Where the pinch is, for drags: the index and middle knuckles, which hold still while
         // the fingers open and close. The point between the tips moved 1-2 cm as a pinch
         // opened, so every release dragged the pointer off what it pressed (headset test,

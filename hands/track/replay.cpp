@@ -136,7 +136,8 @@ int main(int argc, char **argv) {
                       : k == "ang_min" ? &skel_params.ang_min : k == "ang_beta" ? &skel_params.ang_beta
                       : k == "d_cutoff" ? &skel_params.d_cutoff : k == "limits" ? &skel_params.limits
                       : k == "depth_ratio" ? &skel_params.depth_ratio
-                      : k == "glitch" ? &skel_params.glitch : nullptr;
+                      : k == "glitch" ? &skel_params.glitch
+                      : k == "warm" ? &skel_params.warm : nullptr;
             if (k == "iterations") skel_params.iterations = int(v);
             else if (f && v == v) *f = v;
             else return std::fprintf(stderr, "--skel NAME=VALUE: %s?\n", kv.c_str()), 1;

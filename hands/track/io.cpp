@@ -181,8 +181,9 @@ void Publisher::write(const std::vector<const Hand *> &in, uint64_t capture_ns) 
         std::memset(&o, 0, sizeof o);
         if (k >= hands.size()) continue;
         const Hand &h = *hands[k];
-        // the fitted skeleton's points when there is one: fingers keep their length
-        const V3 *pts = fit_points_ && h.fit.valid ? h.fit.pts : h.smooth;
+        // the fitted skeleton's points when there is one (fingers keep their length), else the
+        // filtered landmarks (ft-hands --skeleton 0)
+        const V3 *pts = h.fit.valid ? h.fit.pts : h.smooth;
         o.id = uint32_t(h.id);
         o.flags = (h.right() ? FH_HAND_RIGHT : 0) | (h.nviews >= 2 ? FH_HAND_STEREO : 0);
         o.confidence = float(std::min(1.0, h.frames / 5.0));

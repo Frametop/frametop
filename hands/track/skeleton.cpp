@@ -370,7 +370,7 @@ void Skeleton::pose(const Shape &s, int side, const Rot &R, V3 t, const double *
 
 double Skeleton::solve(const Shape &s, int side, const V3 pts[21], const double sigma_l[21], const double sigma_d[21],
                        V3 eye, const double *prev, int iterations, Rot &R, V3 &t, double *q, double *rms, double limits,
-                       double chain_rms[5]) {
+                       double chain_rms[5], bool warm) {
     Weight w[21];
     for (int i = 0; i < 21; ++i) w[i] = weight(pts[i], eye, sigma_l[i], sigma_d[i]);
 
@@ -470,51 +470,72 @@ double Skeleton::solve(const Shape &s, int side, const V3 pts[21], const double 
             target[d] = dofs[d].axis == 2 ? 0 : pc ? pc[d] : qc[d];
         }
         for (int j = 0; j < 3; ++j) lambda[n + j] = 1 / (kBaseSigma * kBaseSigma), target[n + j] = 0;
-        auto params = [&](int k) -> double & { return k < n ? qc[k] : oc[k - n]; };
-        ChainState st;
-        for (int it = 0; it < iterations; ++it) {
-            chain_fk(s, c, side, rest, R, t, qc, {oc[0], oc[1], oc[2]}, st);
-            double H[kMaxP][kMaxP] = {}, g[kMaxP] = {};
-            for (int m = 0; m < 4; ++m) {   // the base, then the chain's three landmarks
-                const int lm = base + m;
-                const Weight &wm = w[lm];
-                const V3 at = m ? st.pts[m - 1] : st.base, r = at - pts[lm];
-                V3 J[kMaxP], WJ[kMaxP];
-                for (int d = 0; d < n; ++d)
-                    J[d] = m && dofs[d].joint <= m - 1 ? cross(st.axis[d], at - st.pivot[d]) * dof_sign(dofs[d], side) : V3{0, 0, 0};
-                for (int j = 0; j < 3; ++j) J[n + j] = {0, 0, 0}, J[n + j][j] = 1;
-                for (int d = 0; d < np; ++d) WJ[d] = wm.apply(J[d]);
-                for (int a2 = 0; a2 < np; ++a2) {
-                    g[a2] += dot(WJ[a2], r);
-                    for (int b2 = 0; b2 <= a2; ++b2) H[a2][b2] += dot(J[b2], WJ[a2]);
+        // Gauss-Newton from (qa, oa), in place; returns the chain's cost, and its plain rms in *crms
+        auto run = [&](double *qa, double *oa, double *crms) {
+            auto params = [&](int k) -> double & { return k < n ? qa[k] : oa[k - n]; };
+            ChainState st;
+            for (int it = 0; it < iterations; ++it) {
+                chain_fk(s, c, side, rest, R, t, qa, {oa[0], oa[1], oa[2]}, st);
+                double H[kMaxP][kMaxP] = {}, g[kMaxP] = {};
+                for (int m = 0; m < 4; ++m) {   // the base, then the chain's three landmarks
+                    const int lm = base + m;
+                    const Weight &wm = w[lm];
+                    const V3 at = m ? st.pts[m - 1] : st.base, r = at - pts[lm];
+                    V3 J[kMaxP], WJ[kMaxP];
+                    for (int d = 0; d < n; ++d)
+                        J[d] = m && dofs[d].joint <= m - 1 ? cross(st.axis[d], at - st.pivot[d]) * dof_sign(dofs[d], side) : V3{0, 0, 0};
+                    for (int j = 0; j < 3; ++j) J[n + j] = {0, 0, 0}, J[n + j][j] = 1;
+                    for (int d = 0; d < np; ++d) WJ[d] = wm.apply(J[d]);
+                    for (int a2 = 0; a2 < np; ++a2) {
+                        g[a2] += dot(WJ[a2], r);
+                        for (int b2 = 0; b2 <= a2; ++b2) H[a2][b2] += dot(J[b2], WJ[a2]);
+                    }
                 }
+                for (int a2 = 0; a2 < np; ++a2) {
+                    for (int b2 = 0; b2 < a2; ++b2) H[b2][a2] = H[a2][b2];
+                    H[a2][a2] = H[a2][a2] * (1 + 1e-3) + lambda[a2];
+                    g[a2] += lambda[a2] * (params(a2) - target[a2]);
+                }
+                if (!solve_spd(H, g, x, np)) break;
+                double step = 0;
+                for (int d = 0; d < n; ++d) {
+                    const double nq = std::clamp(qa[d] + x[d], dofs[d].lo * limits, dofs[d].hi * limits);
+                    step = std::max(step, std::fabs(nq - qa[d]));
+                    qa[d] = nq;
+                }
+                V3 o{oa[0] + x[n], oa[1] + x[n + 1], oa[2] + x[n + 2]};
+                if (norm(o) > kBaseMax) o = o * (kBaseMax / norm(o));
+                for (int j = 0; j < 3; ++j) step = std::max(step, std::fabs(o[j] - oa[j]) * 10), oa[j] = o[j];   // 0.1 mm ~ 1e-3 rad
+                if (step < 1e-3) break;
             }
-            for (int a2 = 0; a2 < np; ++a2) {
-                for (int b2 = 0; b2 < a2; ++b2) H[b2][a2] = H[a2][b2];
-                H[a2][a2] = H[a2][a2] * (1 + 1e-3) + lambda[a2];
-                g[a2] += lambda[a2] * (params(a2) - target[a2]);
+            chain_fk(s, c, side, rest, R, t, qa, {oa[0], oa[1], oa[2]}, st);
+            double cc = 0, sq = 0;
+            for (int m = 0; m < 4; ++m) {
+                const V3 r = (m ? st.pts[m - 1] : st.base) - pts[base + m];
+                cc += dot(r, w[base + m].apply(r));
+                sq += dot(r, r);
             }
-            if (!solve_spd(H, g, x, np)) break;
-            double step = 0;
-            for (int d = 0; d < n; ++d) {
-                const double nq = std::clamp(qc[d] + x[d], dofs[d].lo * limits, dofs[d].hi * limits);
-                step = std::max(step, std::fabs(nq - qc[d]));
-                qc[d] = nq;
+            for (int d = 0; d < np; ++d) cc += lambda[d] * (params(d) - target[d]) * (params(d) - target[d]);
+            *crms = std::sqrt(sq / 4);
+            return cc;
+        };
+        double crms = 0, cc = run(qc, oc, &crms);
+        // and from last frame's pose: the one that fits better wins, so the fit doesn't hop
+        // between two poses that fit about as well from one frame's analytic start to the next
+        if (pc && warm) {
+            double q2[kMaxP], o2[3], crms2 = 0;
+            const double *po = prev + kAngles + 3 * c;
+            for (int d = 0; d < n; ++d) q2[d] = std::clamp(pc[d], dofs[d].lo * limits, dofs[d].hi * limits);
+            for (int j = 0; j < 3; ++j) o2[j] = po[j];
+            const double cc2 = run(q2, o2, &crms2);
+            if (cc2 < cc) {
+                cc = cc2, crms = crms2;
+                std::copy(q2, q2 + n, qc);
+                std::copy(o2, o2 + 3, oc);
             }
-            V3 o{oc[0] + x[n], oc[1] + x[n + 1], oc[2] + x[n + 2]};
-            if (norm(o) > kBaseMax) o = o * (kBaseMax / norm(o));
-            for (int j = 0; j < 3; ++j) step = std::max(step, std::fabs(o[j] - oc[j]) * 10), oc[j] = o[j];   // 0.1 mm ~ 1e-3 rad
-            if (step < 1e-3) break;
         }
-        chain_fk(s, c, side, rest, R, t, qc, {oc[0], oc[1], oc[2]}, st);
-        double sq = 0;
-        for (int m = 0; m < 4; ++m) {
-            const V3 r = (m ? st.pts[m - 1] : st.base) - pts[base + m];
-            cost += dot(r, w[base + m].apply(r));
-            sq += dot(r, r);
-        }
-        if (chain_rms) chain_rms[c] = std::sqrt(sq / 4);
-        for (int d = 0; d < np; ++d) cost += lambda[d] * (params(d) - target[d]) * (params(d) - target[d]);
+        cost += cc;
+        if (chain_rms) chain_rms[c] = crms;
     }
     if (rms) {
         V3 out[21];
@@ -595,7 +616,7 @@ void Skeleton::update(Fit &f, const V3 pts[21], bool right, double right_score, 
     double q[kParams] = {}, rms = 0;
     const double *prev = continuing && f.side == side ? f.q : nullptr;
     double crms[5] = {};
-    double cost = solve(s, side, pts, sl, sd, eye, prev, p_.iterations, R, t, q, &rms, p_.limits, crms);
+    double cost = solve(s, side, pts, sl, sd, eye, prev, p_.iterations, R, t, q, &rms, p_.limits, crms, p_.warm > 0);
     if (cost < 0) return;
     bool better = false;
     if (rms > 0.015) {
@@ -605,7 +626,7 @@ void Skeleton::update(Fit &f, const V3 pts[21], bool right, double right_score, 
         const Shape s2 = shape(-side, scale);
         double crms2[5] = {};
         const double cost2 = solve(s2, -side, pts, sl, sd, eye, continuing && f.side == -side ? f.q : nullptr,
-                                   p_.iterations, R2, t2, q2, &rms2, p_.limits, crms2);
+                                   p_.iterations, R2, t2, q2, &rms2, p_.limits, crms2, p_.warm > 0);
         better = cost2 >= 0 && cost2 < 0.5 * cost;
         if (better && ++f.votes >= kFlipFrames) {
             side = -side, s = s2, R = R2, t = t2, rms = rms2, cost = cost2;

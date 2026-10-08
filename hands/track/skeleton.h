@@ -96,6 +96,7 @@ struct Params {
     double rot_min = 2.0, rot_beta = 10.0;   // palm rotation: + beta per rad/s
     double ang_min = 2.0, ang_beta = 3.0;    // a finger's joint angles: + beta per rad/s of that finger
     double d_cutoff = 1.5;                   // for the speeds themselves
+    double warm = 1;                         // 1: also start each chain from last frame's pose
     double glitch = 0.015;                   // m: a chain fitting worse than this moves the filter less
     int iterations = 4;                      // Gauss-Newton steps per chain
     double depth_ratio = 3.5;                // stereo: how much less sure depth is than across the view
@@ -130,7 +131,7 @@ public:
     // weighted cost; rms gets the plain rms distance. prev: last frame's angles for the prior, or null.
     static double solve(const Shape &s, int side, const V3 pts[21], const double sigma_l[21], const double sigma_d[21],
                         V3 eye, const double *prev, int iterations, Rot &R, V3 &t, double *q, double *rms,
-                        double limits = 1, double chain_rms[5] = nullptr);
+                        double limits = 1, double chain_rms[5] = nullptr, bool warm = true);
     // The arm model: an elbow for a wrist pose, side, palm length (m) and the up direction.
     static V3 elbow(V3 wrist, V3 mid_knuckle, int side, double forearm, V3 up);
 

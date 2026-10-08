@@ -72,8 +72,10 @@ struct Fit {
     V3 t{};                   // wrist
     double q[kParams]{};       // angles (rad), then each chain base's offset (m)
     double rms = 0;           // fitted landmarks against measured, m (all 21)
+    double chain_rms[5]{};    // each chain's (thumb, index, ...: its base and 3 landmarks)
     double us = 0;            // fit time, microseconds
-    bool flipped = false;     // the other side fitted much better than the model's call
+    bool flipped = false;     // fitted as the other side than the model's call (it fitted much better)
+    int votes = 0;            // frames in a row the other side fitted much better
     // filtered
     Rot Rf;
     V3 cf{}, vel{}, angvel{}; // palm centre, its velocity (m/s), the palm's angular velocity (rad/s)
@@ -94,6 +96,7 @@ struct Params {
     double rot_min = 2.0, rot_beta = 10.0;   // palm rotation: + beta per rad/s
     double ang_min = 2.0, ang_beta = 3.0;    // a finger's joint angles: + beta per rad/s of that finger
     double d_cutoff = 1.5;                   // for the speeds themselves
+    double glitch = 0.015;                   // m: a chain fitting worse than this moves the filter less
     int iterations = 4;                      // Gauss-Newton steps per chain
     double depth_ratio = 3.5;                // stereo: how much less sure depth is than across the view
     double limits = 1;                       // scales the joint limits (for tests: 10 is about none)
@@ -127,7 +130,7 @@ public:
     // weighted cost; rms gets the plain rms distance. prev: last frame's angles for the prior, or null.
     static double solve(const Shape &s, int side, const V3 pts[21], const double sigma_l[21], const double sigma_d[21],
                         V3 eye, const double *prev, int iterations, Rot &R, V3 &t, double *q, double *rms,
-                        double limits = 1);
+                        double limits = 1, double chain_rms[5] = nullptr);
     // The arm model: an elbow for a wrist pose, side, palm length (m) and the up direction.
     static V3 elbow(V3 wrist, V3 mid_knuckle, int side, double forearm, V3 up);
 

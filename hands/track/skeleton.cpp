@@ -369,7 +369,8 @@ void Skeleton::pose(const Shape &s, int side, const Rot &R, V3 t, const double *
 }
 
 double Skeleton::solve(const Shape &s, int side, const V3 pts[21], const double sigma_l[21], const double sigma_d[21],
-                       V3 eye, const double *prev, int iterations, Rot &R, V3 &t, double *q, double *rms, double limits) {
+                       V3 eye, const double *prev, int iterations, Rot &R, V3 &t, double *q, double *rms, double limits,
+                       double chain_rms[5]) {
     Weight w[21];
     for (int i = 0; i < 21; ++i) w[i] = weight(pts[i], eye, sigma_l[i], sigma_d[i]);
 
@@ -506,10 +507,13 @@ double Skeleton::solve(const Shape &s, int side, const V3 pts[21], const double 
             if (step < 1e-3) break;
         }
         chain_fk(s, c, side, rest, R, t, qc, {oc[0], oc[1], oc[2]}, st);
+        double sq = 0;
         for (int m = 0; m < 4; ++m) {
             const V3 r = (m ? st.pts[m - 1] : st.base) - pts[base + m];
             cost += dot(r, w[base + m].apply(r));
+            sq += dot(r, r);
         }
+        if (chain_rms) chain_rms[c] = std::sqrt(sq / 4);
         for (int d = 0; d < np; ++d) cost += lambda[d] * (params(d) - target[d]) * (params(d) - target[d]);
     }
     if (rms) {
@@ -578,30 +582,41 @@ void Skeleton::update(Fit &f, const V3 pts[21], bool right, double right_score, 
         sd[i] = nviews >= 2 ? p_.depth_ratio * sl[i] : 0.015;
     }
     // the side: the model's, unless the mirror image fits far better (a finger can't bend
-    // backward, so a hand fitted as the wrong side fits badly once its fingers bend)
+    // backward, so a hand fitted as the wrong side fits badly once its fingers bend) for
+    // kFlipFrames in a row. A side chosen that way sticks while the hand is tracked, as the
+    // model's call does; switching resets the filter, so it mustn't flicker.
+    constexpr int kFlipFrames = 3;
     int side = model_side;
+    if (continuing && f.flipped && f.side != model_side) side = f.side;
+    if (!continuing) f.votes = 0;
     Shape s = shape(side, scale);
     Rot R;
     V3 t;
     double q[kParams] = {}, rms = 0;
     const double *prev = continuing && f.side == side ? f.q : nullptr;
-    double cost = solve(s, side, pts, sl, sd, eye, prev, p_.iterations, R, t, q, &rms, p_.limits);
+    double crms[5] = {};
+    double cost = solve(s, side, pts, sl, sd, eye, prev, p_.iterations, R, t, q, &rms, p_.limits, crms);
     if (cost < 0) return;
-    f.flipped = false;
+    bool better = false;
     if (rms > 0.015) {
         Rot R2;
         V3 t2;
         double q2[kParams] = {}, rms2 = 0;
         const Shape s2 = shape(-side, scale);
+        double crms2[5] = {};
         const double cost2 = solve(s2, -side, pts, sl, sd, eye, continuing && f.side == -side ? f.q : nullptr,
-                                   p_.iterations, R2, t2, q2, &rms2, p_.limits);
-        if (cost2 >= 0 && cost2 < 0.5 * cost) {
+                                   p_.iterations, R2, t2, q2, &rms2, p_.limits, crms2);
+        better = cost2 >= 0 && cost2 < 0.5 * cost;
+        if (better && ++f.votes >= kFlipFrames) {
             side = -side, s = s2, R = R2, t = t2, rms = rms2, cost = cost2;
             std::copy(q2, q2 + kParams, q);
-            f.flipped = true;
+            std::copy(crms2, crms2 + 5, crms);
+            f.votes = 0;
             ++flips;
         }
     }
+    if (!better) f.votes = 0;
+    f.flipped = side != model_side;
 
     // learn the bone lengths from clean stereo frames, in the hand's own palm frame
     if (nviews >= 2 && residual >= 0 && residual <= 0.004 && side == model_side && std::fabs(right_score - 0.5) > 0.3) {
@@ -643,16 +658,20 @@ void Skeleton::update(Fit &f, const V3 pts[21], bool right, double right_score, 
         f.Rf = f.Rf * exp_rot(delta * alpha(p_.rot_min + p_.rot_beta * norm(f.angvel)));
         for (int ch = 0; ch < 5; ++ch) {
             const int a = kChainQ[ch], b = ch + 1 < 5 ? kChainQ[ch + 1] : kAngles;
+            // a chain that fits its landmarks badly this frame is mostly a misplaced landmark (a
+            // finger hidden behind another): it moves the filter, and its speed, less
+            const double trust = std::min(1.0, std::pow(p_.glitch / std::max(crms[ch], 1e-6), 2));
             double speed = 0;
             for (int d = a; d < b; ++d) {
-                f.dq[d] += ad * ((q[d] - f.qf[d]) / dt - f.dq[d]);
+                f.dq[d] += trust * ad * ((q[d] - f.qf[d]) / dt - f.dq[d]);
                 speed = std::max(speed, std::fabs(f.dq[d]));
             }
-            const double ac = alpha(p_.ang_min + p_.ang_beta * speed);
+            const double ac = trust * alpha(p_.ang_min + p_.ang_beta * speed);
             for (int d = a; d < b; ++d) f.qf[d] += ac * (q[d] - f.qf[d]);
             for (int d = kAngles + 3 * ch; d < kAngles + 3 * ch + 3; ++d) f.qf[d] += ac * (q[d] - f.qf[d]);   // its base
         }
     }
+    std::copy(crms, crms + 5, f.chain_rms);
     f.R = R, f.t = t, f.rms = rms, f.side = side, f.ns = t_ns, f.valid = true;
     std::copy(q, q + kParams, f.q);
     {

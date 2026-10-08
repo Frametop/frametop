@@ -36,6 +36,7 @@ struct Rec {
     V3 pts[4][21];       // measured, One Euro, skeleton (filtered, published), skeleton before filtering
     double rms, us;
     V3 elbow;
+    V3 normal[2];        // the back of the hand's normal: from the One Euro landmarks, the skeleton's palm frame
     V3 up;               // the head's up from the HMD pose, or 0
     // the fit's inputs, to time it again on its own (bench)
     double right_score, residual, scale, res_pt[21];
@@ -94,6 +95,13 @@ public:
         r.palm_speed = norm(h.dpalm);
         for (int i = 0; i < 21; ++i) r.pts[0][i] = h.pts[i], r.pts[1][i] = h.smooth[i], r.pts[2][i] = h.fit.valid ? h.fit.pts[i] : h.smooth[i];
         for (int i = 0; i < 21; ++i) r.pts[3][i] = h.fit.valid ? h.fit.raw[i] : h.smooth[i];
+        {
+            const V3 *p = h.smooth;
+            const V3 a = p[5] - p[0], b = p[17] - p[0];
+            const V3 c{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+            r.normal[0] = unit(c) * (h.right() ? 1.0 : -1.0);
+            r.normal[1] = h.fit.valid ? h.fit.frames[0].col(1) : r.normal[0];
+        }
         r.right_score = h.right_score, r.residual = h.residual, r.scale = h.scale, r.nviews = h.nviews, r.eye = h.eye;
         r.t_ns = int64_t(ts * 1e9);
         std::copy(h.res_pt, h.res_pt + 21, r.res_pt);
@@ -222,7 +230,19 @@ public:
                     for (size_t k = 2; k < rs.size(); ++k) {
                         const Rec &a = *rs[k - 2], &b = *rs[k - 1], &c = *rs[k];
                         if (c.ts - b.ts >= 0.1 || b.ts - a.ts >= 0.1 || b.ts - a.ts < 1e-3) continue;
-                        const int moving = c.palm_speed > 0.3 ? 1 : c.palm_speed < 0.1 ? 0 : -1;
+                        // at rest: the palm still, and the fingers too (typing moves them on a still
+                        // palm: that's motion, not jitter); by a centred average of the measured tips
+                        bool fingers_still = false;
+                        if (k >= 4 && k + 2 < rs.size() && rs[k + 2]->ts - rs[k - 4]->ts < 0.35) {
+                            auto rel = [&](size_t i) {
+                                V3 s{};
+                                for (size_t j = i - 2; j <= i + 2; ++j)
+                                    s = s + (rs[j]->pts[0][8] - palm(rs[j]->pts[0])) * 0.1 + (rs[j]->pts[0][4] - palm(rs[j]->pts[0])) * 0.1;
+                                return s;
+                            };
+                            fingers_still = norm(rel(k) - rel(k - 2)) / (rs[k]->ts - rs[k - 2]->ts) < 0.1;
+                        }
+                        const int moving = c.palm_speed > 0.3 ? 1 : c.palm_speed < 0.1 && fingers_still ? 0 : -1;
                         if (moving < 0) continue;
                         const double f = (c.ts - b.ts) / (b.ts - a.ts);
                         for (int v = 0; v < 4; ++v) {
@@ -233,10 +253,31 @@ public:
                 for (int m = 0; m < 2; ++m)
                     std::printf("%-9s jitter %s (%zu): median measured %.1f, One Euro %.1f, skeleton %.1f (unfiltered %.1f) mm; "
                                 "90%% %.1f, %.1f, %.1f (%.1f)\n",
-                                what[w], m ? "moving" : "at rest", j[m][0].size(), quantile(j[m][0], 0.5), quantile(j[m][1], 0.5),
+                                what[w], m ? "moving" : "at rest (fingers too)", j[m][0].size(), quantile(j[m][0], 0.5), quantile(j[m][1], 0.5),
                                 quantile(j[m][2], 0.5), quantile(j[m][3], 0.5), quantile(j[m][0], 0.9), quantile(j[m][1], 0.9),
                                 quantile(j[m][2], 0.9), quantile(j[m][3], 0.9));
             }
+        }
+        // the palm's normal, update to update: still, and with the fingers moving on a still palm
+        // (a pinch: ray and grab orientation want it steady)
+        {
+            std::map<int, std::vector<const Rec *>> by;
+            for (const Rec &r : recs) by[r.id].push_back(&r);
+            std::vector<double> d[2][2];   // still / fingers moving, One Euro / skeleton
+            for (auto &[id, rs] : by)
+                for (size_t k = 1; k < rs.size(); ++k) {
+                    const Rec &a = *rs[k - 1], &b = *rs[k];
+                    if (b.ts - a.ts >= 0.1 || !a.fit_ok || !b.fit_ok || b.palm_speed > 0.1) continue;
+                    const double tip = norm((b.pts[0][8] - palm(b.pts[0])) - (a.pts[0][8] - palm(a.pts[0]))) / (b.ts - a.ts);
+                    const int fingers = tip > 0.3 ? 1 : tip < 0.1 ? 0 : -1;
+                    if (fingers < 0) continue;
+                    for (int v = 0; v < 2; ++v)
+                        d[fingers][v].push_back(std::acos(std::clamp(dot(a.normal[v], b.normal[v]), -1.0, 1.0)) * 180 / M_PI);
+                }
+            for (int f = 0; f < 2; ++f)
+                std::printf("palm normal change per update, palm still, fingers %s (%zu): median One Euro %.2f, skeleton %.2f deg; "
+                            "90%% %.2f, %.2f\n", f ? "moving" : "still", d[f][0].size(), quantile(d[f][0], 0.5),
+                            quantile(d[f][1], 0.5), quantile(d[f][0], 0.9), quantile(d[f][1], 0.9));
         }
         // 5. lag: the published tip against a centred average of the measured one (+-2 updates,
         // so it doesn't lag), along the tip's motion, where the tip moves fast

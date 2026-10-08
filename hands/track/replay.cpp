@@ -41,7 +41,7 @@
 //             and residual, the bone-length calibration, bone-length spread, jitter, fingertip
 //             lag and the elbow, each for the measured, One Euro filtered and fitted landmarks.
 // --skel NAME=VALUE: a skeleton setting (skel::Params: pos_min, pos_beta, rot_min, rot_beta,
-//             ang_min, ang_beta, d_cutoff, iterations), repeatable.
+//             ang_min, ang_beta, d_cutoff, glitch, depth_ratio, limits, iterations), repeatable.
 // --labels FILE: frame-hands' auto-labels (labels.jsonl) for this recording: the landmarks'
 //             distance to them, measured, One Euro and fitted.
 // --hmd-poses FILE: a hand-recorder take's poses.jsonl: the arm model's elbow with gravity's up
@@ -135,7 +135,8 @@ int main(int argc, char **argv) {
                       : k == "rot_min" ? &skel_params.rot_min : k == "rot_beta" ? &skel_params.rot_beta
                       : k == "ang_min" ? &skel_params.ang_min : k == "ang_beta" ? &skel_params.ang_beta
                       : k == "d_cutoff" ? &skel_params.d_cutoff : k == "limits" ? &skel_params.limits
-                      : k == "depth_ratio" ? &skel_params.depth_ratio : nullptr;
+                      : k == "depth_ratio" ? &skel_params.depth_ratio
+                      : k == "glitch" ? &skel_params.glitch : nullptr;
             if (k == "iterations") skel_params.iterations = int(v);
             else if (f && v == v) *f = v;
             else return std::fprintf(stderr, "--skel NAME=VALUE: %s?\n", kv.c_str()), 1;

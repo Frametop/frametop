@@ -38,7 +38,9 @@
 // HANDS_CAMERAS, HANDS_BRIGHT, HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT (which
 // colour camera is passthrough_left: color_video0 or color_video3), HANDS_COLOR_CROP
 // (subtract or none: tools/check_color.py tells both), HANDS_MISREAD_GUARD (0 or 1: the
-// tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard).
+// tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_REACQUIRE (seconds
+// the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
+// hands are one left and one right, Tracker::set_pair_sides).
 #include "io.h"
 #include "pinch.h"
 #include "record.h"
@@ -258,6 +260,10 @@ int main(int argc, char **argv) {
     Contrast palm_contrast, hand_contrast{Contrast::None};
     double keep_presence = 0.5;   // landmark presence a tracked view needs to stay
     bool misread_guard = setting("HANDS_MISREAD_GUARD") == "1";
+    double reacquire = 1.5;
+    if (const std::string v = setting("HANDS_REACQUIRE"); !v.empty()) reacquire = std::atof(v.c_str());
+    bool pair_sides = setting("HANDS_PAIR_SIDES") != "0";
+    double hold = 0.6;   // s a lost, established hand is kept and retried before it's forgotten
     PinchParams pinch_params;
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
@@ -289,6 +295,9 @@ int main(int argc, char **argv) {
         else if (a == "--record-hz" && more) record_hz = std::max(0.0, std::atof(argv[++i]));
         else if (a == "--keep-presence" && more) keep_presence = std::atof(argv[++i]);
         else if (a == "--misread-guard" && more) misread_guard = std::string(argv[++i]) == "1";
+        else if (a == "--reacquire" && more) reacquire = std::atof(argv[++i]);
+        else if (a == "--pair-sides" && more) pair_sides = std::string(argv[++i]) == "1";
+        else if (a == "--hold" && more) hold = std::atof(argv[++i]);
         else if (a == "--cams" && more) cams_arg = argv[++i];
         else if (a == "--bright" && more) bright_arg = argv[++i];
         else if (a == "--bright-on" && more) light.on = std::atof(argv[++i]);
@@ -310,6 +319,7 @@ int main(int argc, char **argv) {
                         "          as --swap-sides; 0: as ft-camd names them)\n"
                         "          [--keep-presence P] (0.5) [--ring PATH] (ft-camd's, or ft-ringplay's)\n"
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
+                        "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
                         "          [--pinch-begin M] (0.020) [--pinch-end M] (0.035) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
@@ -496,6 +506,9 @@ int main(int argc, char **argv) {
     Tracker tracker(used, nets, pool);
     tracker.set_keep_presence(keep_presence);
     tracker.set_misread_guard(misread_guard);
+    tracker.set_reacquire(reacquire, 2, true);
+    tracker.set_pair_sides(pair_sides);
+    tracker.set_hold(reacquire > 0 ? hold : 0.3);
     std::map<std::string, std::vector<uint8_t>> pixels;
     std::map<std::string, uint64_t> lit_seen;   // per colour camera: the frame last counted for the light
     const uint64_t start = mono_ns();

@@ -11,9 +11,19 @@
 //             each step's time here times F as the busy time (the headset is busier live).
 // --cost:     instead of timing the steps, charge each round of model calls what it
 //             typically costs live (10 ms landmarks, 18 ms palms): repeatable results.
+// --cost-hand MS, --cost-palm MS: those per-round costs (with --cost). The 2026-10-08 live probe
+//             (CPUs 0,1,4 beside SteamVR, 3 threads) measured about 14 and 52.
 // --timeline: per processed set, a line per hand (time, id, side, views, wrist) and per view
 //             (hand, camera, presence, next crop, set index).
 // --keep-presence P: landmark presence a tracked view needs to stay (default 0.5, as new ones).
+// --reacquire S, --reacquire-tiles N, --reacquire-fast: aim the palm search at hands lost within S s
+//             (Tracker::set_reacquire; default off, tiles 2).
+// --near F: Tracker::set_near (0.5). --hold S: Tracker::set_hold (0.3). --search-budget N: palm tiles per round with one hand tracked (2).
+// --drop-every S: the re-acquire test. Every S s, while two hands are tracked, one of them (left and
+//             right in turn) is made invisible for 0.35 s (Tracker::blind: just past the 0.3 s the tracker
+//             holds a lost hand), and the report says how long it then took to have two hands again:
+//             the time to find a hand that never left the view.
+// --pair-sides: two hands seen at once get one left and one right (Tracker::set_pair_sides).
 // --misread-guard: the tracker's guards for fine-tuned landmark models (Tracker::set_misread_guard).
 // --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX: the pinch detector (track/pinch.h);
 //             the timeline gets its begin/end/lost events and both distance measures per set.
@@ -85,9 +95,17 @@ int main(int argc, char **argv) {
     int oracle = 0, threads = 2;
     double slow = 1.0, from = 0, to = 1e9;
     bool cost = false;
+    double cost_hand = 10, cost_palm = 18;
     Contrast palm_contrast, hand_contrast{Contrast::None};   // as ft-hands's
     double keep_presence = 0.5;   // landmark presence a tracked view needs to stay
     bool misread_guard = false;
+    double reacquire = 0;
+    int reacquire_tiles = 2;
+    bool reacquire_fast = false, pair_sides = false;
+    double drop_every = 0;   // seconds; 0: off
+    double reacquire_clear = 0.12;
+    double near_frac = 0.5, hold = 0.3;
+    int search_budget1 = 2;
     PinchParams pinch_params;
     GripParams grip_params;
     std::string use = "mono", color_left = "color_video0", color_crop = "subtract", sides = "file";
@@ -103,8 +121,19 @@ int main(int argc, char **argv) {
         else if (a == "--threads" && more) threads = std::atoi(argv[++i]);
         else if (a == "--models" && more) models = argv[++i];
         else if (a == "--cost") cost = true;
+        else if (a == "--cost-hand" && more) cost_hand = std::atof(argv[++i]);
+        else if (a == "--cost-palm" && more) cost_palm = std::atof(argv[++i]);
         else if (a == "--keep-presence" && more) keep_presence = std::atof(argv[++i]);
         else if (a == "--misread-guard") misread_guard = true;
+        else if (a == "--reacquire" && more) reacquire = std::atof(argv[++i]);
+        else if (a == "--reacquire-tiles" && more) reacquire_tiles = std::atoi(argv[++i]);
+        else if (a == "--reacquire-fast") reacquire_fast = true;
+        else if (a == "--reacquire-clear" && more) reacquire_clear = std::atof(argv[++i]);
+        else if (a == "--pair-sides") pair_sides = true;
+        else if (a == "--drop-every" && more) drop_every = std::atof(argv[++i]);
+        else if (a == "--near" && more) near_frac = std::atof(argv[++i]);
+        else if (a == "--hold" && more) hold = std::atof(argv[++i]);
+        else if (a == "--search-budget" && more) search_budget1 = std::atoi(argv[++i]);
         else if (a == "--cams" && more) use = argv[++i];
         else if (a == "--sides" && more) sides = argv[++i];
         else if (a == "--pinch-begin" && more) pinch_params.begin_m = std::atof(argv[++i]);
@@ -187,6 +216,16 @@ int main(int argc, char **argv) {
     };
     tracker.set_keep_presence(keep_presence);
     tracker.set_misread_guard(misread_guard);
+    tracker.set_reacquire(reacquire, reacquire_tiles, reacquire_fast, reacquire_clear);
+    tracker.set_pair_sides(pair_sides);
+    tracker.set_near(near_frac);
+    tracker.set_hold(hold);
+    tracker.set_search_budget(3, search_budget1);
+    std::vector<std::string> trace;
+    if (tl) {
+        tracker.set_trace(&trace);
+        for (const std::string &line : tracker.describe_tiles()) std::fprintf(tl, "# %s\n", line.c_str());
+    }
     FILE *dp = depth.empty() ? nullptr : std::fopen(depth.c_str(), "w");
     FILE *pp = poses.empty() ? nullptr : std::fopen(poses.c_str(), "w");
     if (dp)
@@ -201,7 +240,20 @@ int main(int argc, char **argv) {
     // oracle: sets where a side's hand was findable, and where the tracker had it then
     int o_sets = 0, o_left = 0, o_right = 0, o_left_hit = 0, o_right_hit = 0, o_left_extra = 0, o_right_extra = 0;
     std::map<std::string, int> o_by_cam;
+    // label-free: per oracle set, hands the full search found (distinct left/right calls, at most 2)
+    // against hands the tracker published
+    int o_hands = 0, o_missed = 0;
+    // the re-acquire test
+    double drop_next = drop_every, drop_end = -1;
+    int drop_turn = 0, drops = 0;
+    std::vector<double> reacq;
     double busy_ms = 0;
+    // gaps: per side (the tracker's left/right call, as the live probe counts them), the time from
+    // the last processed set with a hand of that side to the next one, when it's 0.3 s or more; and
+    // sets with two published palms within 8 cm (one hand counted twice)
+    double side_last[2] = {-1, -1};
+    std::vector<double> gaps[2];
+    int overlap_sets = 0;
     // jitter: how far each update's palm is from a straight line through the last two,
     // mm (steady motion cancels out; what's left is noise and real acceleration)
     std::vector<double> jit_raw, jit_sm;
@@ -232,6 +284,8 @@ int main(int argc, char **argv) {
             ++index;
             continue;
         }
+        // a pause in the recording (the hand recorder's takes pause between prompts): gaps don't span it
+        const bool pause = t_prev && t - t_prev > 500'000'000;
         t_prev = t;
         if (!t0) t0 = t;
         const double ts = (t - t0) / 1e9;
@@ -239,19 +293,42 @@ int main(int argc, char **argv) {
         if (ts < from) continue;
         if (ts > to) break;
         ++nsets;
+        if (pause) {
+            side_last[0] = side_last[1] = -1;
+            if (tl) std::fprintf(tl, "%.3f break\n", ts);
+        }
 
         if (t >= busy_until && t >= next_ns) {
             const auto w0 = std::chrono::steady_clock::now();
             const Stats before = tracker.stats;
+            if (drop_every > 0 && drop_end < 0 && ts >= drop_next && last_out.size() == 2) {
+                const Hand *h = last_out[0]->right() == bool(drop_turn) ? last_out[0] : last_out[1];
+                if (tracker.blind(h->id, int64_t(t) + 350'000'000)) {
+                    drop_end = ts + 0.35, ++drops, drop_turn ^= 1;
+                    if (tl) std::fprintf(tl, "%.3f drop %d\n", ts, h->id);
+                }
+                drop_next = ts + drop_every;
+            }
             const auto out = tracker.step(images, int64_t(t));
+            if (drop_end >= 0 && ts >= drop_end && out.size() >= 2) {
+                reacq.push_back(ts - drop_end);
+                if (tl) std::fprintf(tl, "%.3f reacquired after %.2f s\n", ts, ts - drop_end);
+                drop_end = -1, drop_next = std::max(drop_next, ts + 1.0);
+            } else if (drop_end >= 0 && ts - drop_end > 10) {   // gone: give up, counts as 10 s
+                reacq.push_back(10);
+                drop_end = -1;
+            }
             double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - w0).count();
             if (cost) {   // repeatable: rounds of model calls at typical live costs, per thread
                 const int hands = tracker.stats.hand_calls - before.hand_calls, palms = tracker.stats.palm_calls - before.palm_calls;
-                ms = (2 + 10.0 * ((hands + threads - 1) / threads) + 18.0 * ((palms + threads - 1) / threads)) / slow;
+                ms = (2 + cost_hand * ((hands + threads - 1) / threads) + cost_palm * ((palms + threads - 1) / threads)) / slow;
             }
             busy_ms += ms;
             busy_until = t + uint64_t(ms * slow * 1e6) + 3'000'000;   // + the ring hand-off
             const std::vector<Seen> seen = tracker.views_now();
+            if (tl)
+                for (const std::string &e : trace) std::fprintf(tl, "%.3f ev %s\n", ts, e.c_str());
+            trace.clear();
             if (first_hand_ts < 0 && !seen.empty()) first_hand_ts = ts;
             std::vector<Seen> side_views = seen;
             if (checking)
@@ -318,8 +395,8 @@ int main(int argc, char **argv) {
                 if (!tr.sets) tr.first = ts;
                 tr.last = ts, ++tr.sets, tr.left += h->pts[0][0] < 0;
                 if (tl)
-                    std::fprintf(tl, "%.3f %d %s %d %+.3f %+.3f %+.3f\n", ts, h->id, h->pts[0][0] < 0 ? "L" : "R", h->nviews,
-                                 h->pts[0][0], h->pts[0][1], h->pts[0][2]);
+                    std::fprintf(tl, "%.3f %d %s %d %+.3f %+.3f %+.3f hand %s\n", ts, h->id, h->pts[0][0] < 0 ? "L" : "R", h->nviews,
+                                 h->pts[0][0], h->pts[0][1], h->pts[0][2], h->right() ? "R" : "L");
                 if (pp) {
                     double world[21][3] = {};
                     int n = 0;
@@ -361,6 +438,20 @@ int main(int argc, char **argv) {
                     std::fprintf(tl, "%.3f   view %d %s presence %.2f roi %.0f %.0f %.0f %.3f  set %d\n", ts, v.hand, v.cam.c_str(),
                                  v.lm.presence, v.roi.center[0], v.roi.center[1], v.roi.size, v.roi.rotation, index);
             left += l, right += r, both += l && r;
+            bool hl = false, hr = false;
+            for (const Hand *h : out) (h->right() ? hr : hl) = true;
+            for (int k = 0; k < 2; ++k)
+                if (k ? hr : hl) {
+                    if (side_last[k] >= 0 && ts - side_last[k] >= 0.3) gaps[k].push_back(ts - side_last[k]);
+                    side_last[k] = ts;
+                }
+            {
+                bool close = false;
+                auto palm = [](const V3 *p) { return (p[0] + p[5] + p[9] + p[13] + p[17]) * 0.2; };
+                for (size_t a = 0; a < out.size(); ++a)
+                    for (size_t b = a + 1; b < out.size(); ++b) close = close || norm(palm(out[a]->pts) - palm(out[b]->pts)) < 0.08;
+                overlap_sets += close;
+            }
             ++hist[std::min<size_t>(out.size(), 2)];
         }
 
@@ -372,6 +463,17 @@ int main(int argc, char **argv) {
             for (const Seen &s : seen) {
                 (s.wrist[0] < 0 ? l : r) = true;
                 ++o_by_cam[s.cam + (s.wrist[0] < 0 ? " L" : " R")];
+                if (tl)
+                    std::fprintf(tl, "%.3f oracle %s tile %d presence %.2f right %.2f wrist %+.3f %+.3f %+.3f roi %.0f %.0f %.0f\n", ts,
+                                 s.cam.c_str(), s.tile, s.lm.presence, s.lm.right, s.wrist[0], s.wrist[1], s.wrist[2],
+                                 s.roi.center[0], s.roi.center[1], s.roi.size);
+            }
+            if (tl) std::fprintf(tl, "%.3f oracle-done %zu\n", ts, seen.size());
+            {
+                bool ol = false, orr = false;
+                for (const Seen &s : seen) (s.lm.right > 0.5 ? orr : ol) = true;
+                const int n = int(ol) + int(orr);
+                o_hands += n, o_missed += std::max(0, n - int(std::min<size_t>(last_out.size(), 2)));
             }
             bool tl_ = false, tr_ = false;
             for (const Hand *h : last_out) (h->pts[0][0] < 0 ? tl_ : tr_) = true;
@@ -399,6 +501,21 @@ int main(int argc, char **argv) {
         double total = 0;
         for (double d : lens[k]) total += d;
         std::printf("%s tracks: %zu, median %.1f s, total %.0f s\n", k ? "right" : "left ", lens[k].size(), median(lens[k]), total);
+    }
+    for (int k = 0; k < 2; ++k) {
+        double total = 0, longest = 0;
+        for (double g : gaps[k]) total += g, longest = std::max(longest, g);
+        std::printf("%s hand gaps >= 0.3 s: %zu, total %.1f s, longest %.1f s\n", k ? "right" : "left ", gaps[k].size(), total, longest);
+    }
+    std::printf("sets with two hands within 8 cm: %d\n", overlap_sets);
+    if (drop_every > 0) {
+        std::sort(reacq.begin(), reacq.end());
+        double sum = 0;
+        for (double r : reacq) sum += r;
+        auto q = [&](double f) { return reacq.empty() ? 0.0 : reacq[std::min(reacq.size() - 1, size_t(f * reacq.size()))]; };
+        std::printf("re-acquire test: %d drops, %zu back; after the blind 0.35 s: median %.2f s, 75%% %.2f s, 90%% %.2f s, max %.2f s, "
+                    "mean %.2f s\n", drops, reacq.size(), q(0.5), q(0.75), q(0.9), reacq.empty() ? 0 : reacq.back(),
+                    reacq.empty() ? 0 : sum / reacq.size());
     }
     std::printf("views lost %d, handoff misses %d, dups %d, splits %d;  hands new %d, merged %d, forgotten %d\n", s.lost,
                 s.handoff_miss, s.dups, s.splits, s.created, s.merged, s.forgotten);
@@ -449,6 +566,8 @@ int main(int argc, char **argv) {
                     o_sets, o_left, o_left_hit, 100.0 * o_left_hit / std::max(o_left, 1), o_right, o_right_hit,
                     100.0 * o_right_hit / std::max(o_right, 1));
         std::printf("        tracker had a hand the full search didn't find: left %d, right %d\n", o_left_extra, o_right_extra);
+        std::printf("        hands the full search found: %d, the tracker had %d fewer (%.1f%% missed)\n", o_hands, o_missed,
+                    100.0 * o_missed / std::max(o_hands, 1));
         std::printf("        found by camera:");
         for (auto &[k, n] : o_by_cam) std::printf("  %s %d", k.c_str(), n);
         std::printf("\n");

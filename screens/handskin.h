@@ -1,6 +1,7 @@
 // Rendered hands from a 3D model, the CPU side (ft-handview, handview.cpp): the skinning matrices
-// that pose the model's hand (handasset.h: WebXR Input Profiles' generic-hand, 25 joints) like a
-// tracked hand (handcut::Hand: 21 joints in MediaPipe's order), and demo hands to try it on.
+// that pose a model's hand (handasset.h: WebXR Input Profiles' generic-hand and the others in
+// screens/assets/hands, each mapped onto WebXR's 25 joints) like a tracked hand (handcut::Hand:
+// 21 joints in MediaPipe's order), and demo hands to try it on.
 //
 // Each of the model's joints gets a frame, the same way in its bind pose and on the tracked hand:
 // its bone's direction (toward the next joint along the finger; a tip takes its last bone's), and
@@ -28,28 +29,32 @@ constexpr int kJoints = 25;   // WebXR's: wrist, thumb (4), then 5 for each fing
 // The model's joint for each of MediaPipe's 21 (the metacarpals, 5 10 15 20, have none).
 constexpr int kFromMediaPipe[21] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19, 21, 22, 23, 24};
 
+// The model by its name (HANDS_VIEW_MODEL: handasset::kModel's), or -1.
+int FindModel(const char *name);
+
 struct Bones {
+    int model = 0;          // handasset::kModel's
     float m[kJoints][12];   // row-major 3x4: model (bind pose) -> room
     float wrist[3];         // the tracked wrist, and the direction from it along the hand
     float fwd[3];
     float scale = 1;        // the palm's size against the model's
 };
 
-// The skinning matrices for the model of h's side posed as h. False if the hand is degenerate.
-bool Pose(const handcut::Hand &h, Bones &out);
+// The skinning matrices for the model's hand of h's side posed as h. False if the hand is degenerate.
+bool Pose(int model, const handcut::Hand &h, Bones &out);
 
-// Vertex i of the model of that side, skinned on the CPU (the bounds, tests). Room, metres.
+// Vertex i of the model (b's) of that side, skinned on the CPU (the bounds, tests). Room, metres.
 void Skin(bool right, const Bones &b, int i, float out[3]);
 // The model's vertex i in its bind pose, metres.
-void BindVertex(bool right, int i, float out[3]);
-int Vertices(bool right);
+void BindVertex(int model, bool right, int i, float out[3]);
+int Vertices(int model, bool right);
 
 // Every `step`th vertex skinned, as a mesh's points (handmesh::Place's input: where to put the
 // hand's square). Normals are left 0.
 void Points(bool right, const Bones &b, int step, handmesh::Mesh &out);
 
 // The model's bind pose as a tracked hand (the 21 joints at the model's), for tests.
-handcut::Hand BindHand(bool right);
+handcut::Hand BindHand(int model, bool right);
 
 // Demo hands (ft-handview --demo and --snapshot): a pose by name, the hand's wrist at `at`, the
 // palm facing `palm` and the fingers along `up` (both room directions; up is made square to palm).

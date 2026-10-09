@@ -59,6 +59,8 @@
 // --skeleton-dump FILE: with --labels, a line per hand matched to a label: time, id, stereo, then
 //             the measured, fitted (unfiltered) and labelled landmarks.
 // --pinch-fitted: also run a second pinch detector on the fitted tips, and report its count.
+// The middle pinch (thumb to middle fingertip) runs beside the pinch as in ft-hands; the timeline
+// gets its events as "pinch2".
 // --ray FILE: per processed set, a line per hand with what the pointer helper's hand ray reads
 //             (hands/include/fh_ray.h; pointer/tools/rayeval): the set's capture time (ns,
 //             CLOCK_MONOTONIC_RAW as recorded), id, side (L/R), stereo, fitted, its side's pinch
@@ -326,7 +328,12 @@ int main(int argc, char **argv) {
     // mm (steady motion cancels out; what's left is noise and real acceleration)
     std::vector<double> jit_raw, jit_sm;
     int near_face = 0, hand_updates = 0;   // published palms within 20 cm of the eyes
+    PinchParams middle_params = pinch_params;   // as ft-hands: the middle pinch, and the two exclude each other
+    middle_params.finger = 12, middle_params.other_finger = 8, middle_params.other_margin = 0.01;
+    middle_params.extended_finger = 8, middle_params.min_frames = 5;
+    pinch_params.other_finger = 12;
     Pinch pinch(pinch_params);
+    Pinch middle(middle_params);
     PinchParams fitted_params = pinch_params;
     fitted_params.fitted = true;
     Pinch pinch_fit(fitted_params);
@@ -426,7 +433,12 @@ int main(int argc, char **argv) {
                 }
             }
             grip.update(out, seen, int64_t(t));
-            pinch.update(out, seen, int64_t(t), grip.gripping());
+            pinch.update(out, seen, int64_t(t), grip.gripping(), middle.down());
+            middle.update(out, seen, int64_t(t), grip.gripping(), pinch.down());
+            if (tl)
+                for (const Pinch::Event &e : middle.events)
+                    std::fprintf(tl, "%.3f pinch2 %s %s d %.3f point %+.3f %+.3f %+.3f hand %u\n", ts, e.side ? "R" : "L",
+                                 e.what, e.distance, e.point[0], e.point[1], e.point[2], middle.side(e.side).hand_id);
             if (pinch_fitted) {
                 pinch_fit.update(out, seen, int64_t(t), grip.gripping());
                 for (const Pinch::Event &e : pinch_fit.events) {

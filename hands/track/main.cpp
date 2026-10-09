@@ -364,7 +364,16 @@ int main(int argc, char **argv) {
     Nets nets;
     Publisher pub;
     GesturePublisher gestures;
+    // The middle pinch (thumb to middle fingertip, fh_gestures v3): the same thresholds, and the two
+    // exclude each other: each begins only with the thumb nearer its own fingertip (the middle one
+    // by 1 cm), and not while the other is down on that hand. A middle pinch also wants the index
+    // extended and the hand tracked 5 frames (see PinchParams).
+    PinchParams middle_params = pinch_params;
+    middle_params.finger = 12, middle_params.other_finger = 8, middle_params.other_margin = 0.01;
+    middle_params.extended_finger = 8, middle_params.min_frames = 5;
+    pinch_params.other_finger = 12;
     Pinch pinch(pinch_params);
+    Pinch middle(middle_params);
     Grip grip(grip_params);
     std::unique_ptr<Recorder> rec;
     uint64_t rec_start = 0, rec_next_ns = 0;   // rec_next_ns: --record-hz's next set, capture clock
@@ -808,7 +817,8 @@ int main(int argc, char **argv) {
         if (mono_ns() - t_sides > 2'000'000'000ull) write_sides();
         if (gestures_on) {
             grip.update(hands, views, int64_t(capture));
-            pinch.update(hands, views, int64_t(capture), grip.gripping());
+            pinch.update(hands, views, int64_t(capture), grip.gripping(), middle.down());
+            middle.update(hands, views, int64_t(capture), grip.gripping(), pinch.down());
         }
         if (gestures_on && gesture_log && capture - t_glog >= 100'000'000) {
             t_glog = capture;
@@ -819,16 +829,20 @@ int main(int argc, char **argv) {
                                 pinch.side(k).flags & FH_PINCH_DOWN ? " PINCH" : grip.side(k).flags & FH_PINCH_DOWN ? " GRIP" : "");
         }
         // a gesture down or closing gets the full rate, even while the palm holds still
-        next_ns = tmin + uint64_t((std::min(tracker.interval(), pinch.engaged() || grip.engaged() ? 1 / 30.0 : 1.0) -
+        next_ns = tmin + uint64_t((std::min(tracker.interval(),
+                                            pinch.engaged() || middle.engaged() || grip.engaged() ? 1 / 30.0 : 1.0) -
                                    0.005) * 1e9);
         if (publish) pub.write(hands, capture);
-        if (publish && gestures_on) gestures.write(pinch, grip, capture);
+        if (publish && gestures_on) gestures.write(pinch, grip, capture, &middle);
         for (const Pinch::Event &e : grip.events)
             std::printf("grip  %s %-5s curl %.2f at %+.3f %+.3f %+.3f\n", e.side ? "right" : "left ", e.what, e.distance,
                         e.point[0], e.point[1], e.point[2]);
         for (const Pinch::Event &e : pinch.events)
             std::printf("pinch %s %-5s d %.3f m at %+.3f %+.3f %+.3f\n", e.side ? "right" : "left ", e.what, e.distance,
                         e.point[0], e.point[1], e.point[2]);
+        for (const Pinch::Event &e : middle.events)
+            std::printf("middle pinch %s %-5s d %.3f m at %+.3f %+.3f %+.3f\n", e.side ? "right" : "left ", e.what,
+                        e.distance, e.point[0], e.point[1], e.point[2]);
         lat.push_back((mono_ns() - dq) / 1e6);
         hands_sum += double(hands.size());
         bool on_left = false, on_right = false;   // by where the wrist is, not the model's label
@@ -868,9 +882,10 @@ int main(int argc, char **argv) {
                 std::printf("        side cameras: %s, %s\n", side_round ? "checking the decision" : "deciding",
                             side_check.summary().c_str());
             if (gestures_on) {
-                std::printf("        pinches: left %u right %u (held back, palm down: %d %d)  grips: left %u right %u",
+                std::printf("        pinches: left %u right %u (held back, palm down: %d %d)  middle pinches: left %u right %u  "
+                            "grips: left %u right %u",
                             pinch.side(0).begins, pinch.side(1).begins, pinch.held_back[0], pinch.held_back[1],
-                            grip.side(0).begins, grip.side(1).begins);
+                            middle.side(0).begins, middle.side(1).begins, grip.side(0).begins, grip.side(1).begins);
                 for (int k = 0; k < 2; ++k)
                     if (pinch.side(k).flags & FH_PINCH_TRACKED)
                         std::printf("  %s %s d %.3f curl %.2f", k ? "right" : "left",
@@ -897,8 +912,9 @@ int main(int argc, char **argv) {
     if (publish) pub.write({}, mono_ns());
     if (publish && gestures_on) {
         pinch.release(int64_t(mono_ns()));   // a drag in progress ends, as lost
+        middle.release(int64_t(mono_ns()));
         grip.release(int64_t(mono_ns()));
-        gestures.write(pinch, grip, mono_ns());
+        gestures.write(pinch, grip, mono_ns(), &middle);
     }
     return exit_code;
 }

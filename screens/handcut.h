@@ -240,7 +240,7 @@ private:
     int64_t leadNs_ = 36'000'000;   // 25 ms to the displays, plus the tick a cutout buffer waits for its fence
     int fd_ = -1, gfd_ = -1;
     const void *map_ = nullptr, *gmap_ = nullptr;
-    size_t mapLen_ = 0;
+    size_t mapLen_ = 0, gmapLen_ = 0;
     uint64_t seq_ = 0, gseq_ = 0, frames_ = 0;
     int version_ = 0;
     int64_t captureNs_ = 0, publishNs_ = 0, lastOpenTry_ = 0, lastGOpenTry_ = 0, nowNs_ = 0;

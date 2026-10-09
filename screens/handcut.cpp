@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -155,7 +156,7 @@ double MatteParams::Margin(double dist, double speed) const {
 
 Hands::~Hands() {
     if (map_) munmap(const_cast<void *>(map_), mapLen_);
-    if (gmap_) munmap(const_cast<void *>(gmap_), sizeof(fh_gestures_t));
+    if (gmap_) munmap(const_cast<void *>(gmap_), gmapLen_);
     if (fd_ >= 0) close(fd_);
     if (gfd_ >= 0) close(gfd_);
 }
@@ -225,17 +226,20 @@ bool Hands::ReadFiles() {
     }
     // the gestures file, written right after each hands update
     if (gmap_ && now - publishNs_ > kReopenNs && now - lastGOpenTry_ > kReopenNs) {
-        munmap(const_cast<void *>(gmap_), sizeof(fh_gestures_t)), close(gfd_);
+        munmap(const_cast<void *>(gmap_), gmapLen_), close(gfd_);
         gmap_ = nullptr, gfd_ = -1, gseq_ = 0;
     }
     if (!gmap_ && now - lastGOpenTry_ >= 1'000'000'000) {
         lastGOpenTry_ = now;
-        size_t len = 0;
-        gmap_ = MapFile("gestures", sizeof(fh_gestures_t), sizeof(fh_gestures_t), &gfd_, &len);
+        // version 2 (the grips) or later; a later one's extra slots are left out
+        gmap_ = MapFile("gestures", offsetof(fh_gestures_t, grip) + sizeof(fh_pinch_t) * 2, sizeof(fh_gestures_t), &gfd_,
+                        &gmapLen_);
     }
     static fh_gestures_t g;
-    if (gmap_ && CopySeq(gmap_, sizeof g, &gseq_, &g) && std::memcmp(g.magic, FH_GESTURES_MAGIC, 8) == 0 && g.version >= 2)
+    if (gmap_ && CopySeq(gmap_, gmapLen_, &gseq_, &g) && std::memcmp(g.magic, FH_GESTURES_MAGIC, 8) == 0 && g.version >= 2) {
+        if (gmapLen_ < sizeof g) std::memset(reinterpret_cast<char *>(&g) + gmapLen_, 0, sizeof g - gmapLen_);
         Ingest(copy.v1, nullptr, &g);
+    }
     return got;
 }
 

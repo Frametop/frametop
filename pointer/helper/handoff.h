@@ -245,6 +245,8 @@ public:
         return handsLive_ ? Owner::Hand : Owner::Off;
     }
     bool IsController(int side) const { return State(side) == Owner::Controller; }
+    // When the side's controller last had a button pressed (-1e9: never).
+    double LastPress(int side) const { return side < 0 || side > 1 ? -1e9 : side_[side].lastPress; }
 
     // A bare hand at p is reaching for or holding a tracked controller.
     bool NearController(V3 p) const {

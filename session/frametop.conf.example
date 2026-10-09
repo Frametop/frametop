@@ -55,6 +55,11 @@ POINTER_PINCH_DEADZONE=1.5 # hands: degrees the pinching hand moves before the p
 POINTER_GRIP_GAIN=1        # hands: the pointer moves this times the gripping hand's angle
 POINTER_GRIP_BELOW=0.35    # hands: grips beginning more than this (m) below the eyes are ignored (hands on a desk)
 POINTER_PINCH_TYPING=1     # hands: no pinch within this many seconds of a key (typing touches thumb to index)
+POINTER_HAND_RAY=1         # hands: a bare hand raised and pointing shows a ray that drives the pointer like a controller's laser (pinch = click, middle pinch = right click or scroll); 0 = gaze pinches only
+POINTER_RAY_DEADZONE=2.5   # hand ray: degrees the ray turns during a pinch before the press drags (a click's own wobble stays inside)
+POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out pushes it away and pulling in brings it near
+POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle pinch moved up or down (-1 turns the direction round)
+POINTER_RAY_RELEASE=2      # hand ray: seconds after the ray goes before the pointer it woke lets go of the laser
 SHARE_KEYS=0       # 1 = keys of keyboards grabbed for the desktop also go to @frametop_keys, for hotkey tools (any local process can listen)
 DISPLAY_OFF_MIN=0  # minutes without use before frametop-power turns the displays off, even if the headset seems worn (0 = never)
 DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (mm) within 10 s counts as use

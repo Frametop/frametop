@@ -393,7 +393,10 @@ bool Hands::Feed(const void *hands, size_t size, const fh_gestures_t *gestures, 
 void Hands::Advance(int64_t nowNs) {
     nowNs_ = nowNs;
     fresh_ = nowNs - publishNs_ <= kStaleNs;
-    if (!fresh_) base_.clear(), owner_.clear(), seen_.clear();
+    if (!fresh_) {
+        base_.clear(), owner_.clear(), seen_.clear();
+        for (Gesture *g : {&pinch_[0], &pinch_[1], &grip_[0], &grip_[1]}) g->down = g->tracked = false;   // ft-hands stopped
+    }
     // move each hand ahead to when this frame will be on the displays; a slow hand's
     // velocity is mostly tracking noise, so it fades out below kStillSpeed
     const double ahead = std::clamp((nowNs + leadNs_ - captureNs_) / 1e9, 0.0, kMaxAhead);

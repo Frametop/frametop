@@ -116,6 +116,7 @@ typedef struct {
     unsigned        out_w, out_h;       /* image size in the ring                     */
     uint64_t        last_pub_ns;        /* --color-fps pacing                         */
     uint64_t        paced, seams;       /* color frames skipped: pacing, the half-size copy */
+    uint64_t        idled;              /* mono frames skipped while ft-hands is parked (hands_want) */
     uint64_t        paused_until;       /* color: going stale, left alone until then  */
     unsigned        pause_s;            /* ... for this long the next time            */
     uint64_t        pauses;
@@ -150,6 +151,7 @@ static double      opt_color_idle = 2;  /* ... and this often while no reader as
  * saves most of the decoding (about 11% of a core at 30 fps).
  */
 static double      color_fps = 2;
+static bool        hands_parked = false;  /* ft-hands is parked: the mono frames aren't copied (hands_want) */
 static double      opt_status = 10.0;
 
 static volatile sig_atomic_t stop;
@@ -688,6 +690,11 @@ static void on_frame(cam_t *c, int64_t index, uint32_t seq, uint64_t ts, uint64_
         return;
     }
 
+    if (hands_parked && !c->color) {    /* nobody tracks: no copies (the colour ones still tell the light) */
+        c->idled++;
+        return;
+    }
+
     if (index > c->maxindex) {
         reset_learning(c);     /* the queue grew */
         return;
@@ -898,6 +905,39 @@ static void color_want(void)
     }
 }
 
+/*
+ * Whether ft-hands is parked (hand interaction in VR games, hands/track/main.cpp "Parked"): it writes
+ * "0" to ring_dir/hands-want every second while parked. A file newer than 3 s saying 0 stops the mono
+ * frames' copies; anything else (no file, a stale one: ft-hands gone) copies them as usual, so other
+ * readers of the ring (the hand recorder, ft-cutouts) are never starved by a parked tracker that died.
+ */
+static void hands_want(void)
+{
+    char path[128], buf[32] = "";
+    struct stat st;
+    struct timespec now;
+    bool parked = false;
+
+    snprintf(path, sizeof(path), "%s/hands-want", ring_dir);
+    clock_gettime(CLOCK_REALTIME, &now);
+
+    if (stat(path, &st) == 0 && now.tv_sec - st.st_mtim.tv_sec <= 3) {
+        FILE *f = fopen(path, "r");
+        if (f) {
+            if (fgets(buf, sizeof(buf), f) && buf[0] == '0')
+                parked = true;
+            fclose(f);
+        }
+    }
+
+    if (parked != hands_parked) {
+        printf("hand tracking %s: %s the mono cameras' frames\n", parked ? "parked" : "back",
+               parked ? "not copying" : "copying");
+        fflush(stdout);
+        hands_parked = parked;
+    }
+}
+
 /* A setting from ~/.config/frametop.conf, or FT_<key> from the environment; "" if unset. */
 static void setting(const char *key, char *out, size_t n)
 {
@@ -1099,10 +1139,10 @@ static void status(double secs)
             c->last_bright = c->bright;
             continue;
         }
-        printf("  %s %s%.1f fps (dark %llu at %.1f stale %llu torn %llu remapped %llu, sync %.2f ms copy %.2f ms)",
-               c->slug, c->mapped ? "" : "learning ", (double)(c->bright - c->last_bright) / opt_status,
+        printf("  %s %s%s%.1f fps (dark %llu at %.1f stale %llu torn %llu remapped %llu idled %llu, sync %.2f ms copy %.2f ms)",
+               c->slug, hands_parked ? "PARKED " : "", c->mapped ? "" : "learning ", (double)(c->bright - c->last_bright) / opt_status,
                (unsigned long long)c->dark, c->rc->dark_mean, (unsigned long long)c->stale,
-               (unsigned long long)c->torn, (unsigned long long)c->repairs,
+               (unsigned long long)c->torn, (unsigned long long)c->repairs, (unsigned long long)c->idled,
                c->nsync ? c->sync_ns / 1e6 / c->nsync : 0.0, c->bright ? c->copy_ns / 1e6 / c->bright : 0.0);
         c->last_bright = c->bright;
     }
@@ -1247,7 +1287,7 @@ int main(int argc, char **argv)
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
-    uint64_t start = mono_ns(), last_status = start, last_want = 0;
+    uint64_t start = mono_ns(), last_status = start, last_want = 0, last_hands = 0;
     int rc = 0;
 
     while (!stop) {
@@ -1263,6 +1303,11 @@ int main(int argc, char **argv)
         if (opt_with_color && now - last_want >= 500000000ull) {
             color_want();
             last_want = now;
+        }
+
+        if (now - last_hands >= 200000000ull) {   /* a stat: often, so an unparked tracker gets frames soon */
+            hands_want();
+            last_hands = now;
         }
 
         struct pollfd pf = { .fd = pidfd, .events = POLLIN };

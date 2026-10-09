@@ -126,6 +126,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     app can capture one; watchers see them as events with id frame_controller
   vrbtn, vrhello, gazeawake   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
+  vrdash 1|0        from the pointer helper (hand interaction): the dashboard is open, so hand
+                    tracking parked for a game wakes (game_pause.py, PARK_PATH)
   textfield 1|0     from the desktop's input method (above)
   pause on|off|toggle [reason]   pause Frametop or resume it (input/ft-pause; the gesture reader)
   pause ?           the pause state, as {"t": "pause", ...}
@@ -1267,6 +1269,9 @@ def main():
                     continue
                 if cmd == "vrgame" and len(words) == 2:
                     pause.game_state(words[1] == "1", now)
+                    continue
+                if cmd == "vrdash" and len(words) == 2:
+                    pause.dashboard_state(words[1] == "1")
                     continue
                 if cmd == "pause" and len(words) >= 2 and words[1] in ("on", "off", "toggle", "?"):
                     # From input/ft-pause, the settings app, or the gesture reader (unbound, no reply).

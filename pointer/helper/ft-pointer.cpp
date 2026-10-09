@@ -276,7 +276,9 @@
 // second: L and R are hand, controller or off (no hand tracking and no controller in use), and
 // allowed is 1 when hands may work at all: the headset worn, and outside VR games, or in one with
 // the dashboard open or Frametop toggled back on (the relay's "paused 0"; it sends "paused 1|0"
-// on a change and at the helper's start).
+// on a change and at the helper's start). The relay also hears "vrdash 1|0" (the dashboard open, on a
+// change and every 5 s in a game): it parks hand tracking while Frametop is paused for a game and
+// unparks it while the dashboard is open (input/game_pause.py).
 //
 // Hand ray (hand interaction, with POINTER_HANDS and POINTER_HAND_RAY=1, the default;
 // frame-hands/notes/hand-interaction.md sections 2 and 5): a bare hand raised and pointing shows a
@@ -1063,6 +1065,8 @@ int main() {
     handoff::Handoff arbiter;
     bool framePaused = false;           // the relay's "paused 1|0": Frametop paused (for a VR game)
     bool dashboardUp = false;           // IsDashboardVisible, read at most every 100 ms
+    bool dashSent = false;              // "vrdash" as last sent to the relay
+    Clock::time_point dashSentAt{};
     Clock::time_point dashboardAt{};
     std::string handsSent;              // "hands L R allowed" as last sent to ft-screens
     Clock::time_point handsSentAt{};
@@ -1977,6 +1981,12 @@ int main() {
             if (tnow - dashboardAt > std::chrono::milliseconds(100)) {
                 dashboardAt = tnow;
                 dashboardUp = overlay->IsDashboardVisible();
+            }
+            // The relay parks hand tracking while Frametop is paused for a game, and unparks it while
+            // the dashboard is open: "vrdash 1|0", on a change and every 5 s in a game.
+            if (dashboardUp != dashSent || (inGame && tnow - dashSentAt > std::chrono::seconds(5))) {
+                dashSent = dashboardUp, dashSentAt = tnow;
+                SendTo(out, "frametop_relay", dashboardUp ? "vrdash 1" : "vrdash 0");
             }
             handsAllowed = !headsetOff && (!inGame || dashboardUp || !framePaused);
             const std::string msg = std::string("hands ") + handoff::Name(arbiter.State(0)) + " " +

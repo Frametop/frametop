@@ -5,7 +5,10 @@ Paused:
   - The gaze service stops (frametop-gaze: ft-gazed, ft-gaze, our own eye tracker ft-eyes, the
     gaze panel), and with it every read of SteamVR's eye tracking. Our frame grabber, the root
     service ft-eyegrab, goes idle by itself 3 seconds after ft-eyes stops asking for frames.
-  - Hand tracking stops if it runs (frametop-camd, frametop-hands).
+  - Hand tracking stops if it runs (frametop-camd, frametop-hands). With hand interaction on
+    (POINTER_HANDS=1) it's parked instead (PARK_PATH: ft-hands stops processing and ft-camd stops
+    copying, the models stay loaded), and it unparks while the dashboard is open, so the hands work
+    there during the game.
   - The desktop, by "pause_desktop": "hide" (the default) hides every screen and floating window
     and slows the desktop down ("pause on" to ft-screens: KWin gets one frame callback a second
     instead of 90, so it and the apps on it hardly draw), and remote desktop stops if it runs
@@ -56,6 +59,12 @@ HELPER = "\0ft_pointer_helper"
 STATE_PATH = f"/run/user/{os.getuid()}/frametop-pause.json"
 # User services that pausing stops, if they run.
 UNITS = ("frametop-gaze.service", "frametop-hands.service", "frametop-camd.service")
+# With hand interaction on (POINTER_HANDS=1), pausing parks hand tracking instead of stopping it, so
+# the hands are there when the dashboard opens during the game: ft-hands stops processing while
+# PARK_PATH exists (and ft-camd stops copying frames for it), and starts again within a palm search
+# (about 200 ms) once it goes. The pointer helper says when the dashboard opens and closes ("vrdash").
+HAND_UNITS = ("frametop-hands.service", "frametop-camd.service")
+PARK_PATH = f"/run/user/{os.getuid()}/frametop-hands/park"
 # What still works while paused, besides commands ("command:CMD"): the toggle itself, and Steam's menu.
 PAUSED_ACTIONS = ("pause_toggle", "steam_menu")
 DEFAULT_GESTURE = {"buttons": ["left/thumbstick", "right/thumbstick"], "presses": 2}
@@ -399,6 +408,7 @@ class Worker(threading.Thread):
         self.lock = threading.Lock()
         self.stopped = {"units": [], "remote": False, "desktop": None}
         self.busy = False
+        self.keep = ()  # units pausing leaves running (hand tracking, parked instead)
 
     def submit(self, job, *args):
         self.busy = True
@@ -427,7 +437,7 @@ class Worker(threading.Thread):
 
     def stop_units(self):
         """Stop the UNITS that run, adding them to what the resume starts again."""
-        units = [u for u in UNITS if active(u)]
+        units = [u for u in UNITS if u not in self.keep and active(u)]
         if units:
             run(["systemctl", "--user", "stop", *units], timeout=30)
             with self.lock:
@@ -493,6 +503,8 @@ class GamePause:
         self.resume_at = None
         self.settings = settings_of({}, buttons)
         self.hands = False  # hand interaction is on (set_hands)
+        self.dashboard = False  # the SteamVR dashboard is open (the helper's "vrdash")
+        self.parked = None  # hand tracking parked, as last applied (None: not yet)
         self.screens = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
         self.worker = Worker(log, self.save)
         self.watch = ControllerWatch(log)
@@ -563,9 +575,38 @@ class GamePause:
             pass  # the helper isn't running; it says vrhello when it starts
 
     def set_hands(self, on):
-        """Hand interaction (POINTER_HANDS=1): feed the helper who holds a controller."""
+        """Hand interaction (POINTER_HANDS=1): feed the helper who holds a controller, and park hand
+        tracking for games instead of stopping it."""
         self.hands = on
+        self.worker.keep = HAND_UNITS if on else ()
         self.watch.set_touch_feed(on)
+        self.update_park()
+
+    def dashboard_state(self, on):
+        """From the pointer helper: the dashboard opened or closed ("vrdash 1|0")."""
+        self.dashboard = on
+        self.update_park()
+
+    def update_park(self):
+        """Hand tracking is parked while Frametop is paused with hand interaction on, unless the
+        dashboard is open (hands work there during a game)."""
+        want = self.paused and self.hands and not self.dashboard
+        if want == self.parked:
+            return
+        try:
+            if want:
+                if os.path.isdir(os.path.dirname(PARK_PATH)):  # hand tracking has run: it'll read it
+                    with open(PARK_PATH, "w") as f:
+                        f.write("parked by the input relay (Frametop paused for a VR game)\n")
+            elif os.path.exists(PARK_PATH):
+                os.remove(PARK_PATH)
+        except OSError as e:
+            self.log(f"hand tracking: can't {'park' if want else 'unpark'} it: {e}")
+            return
+        if self.parked is not None or want:
+            self.log(f"hand tracking {'parked' if want else 'unparked'}"
+                     f"{' (the dashboard is open)' if not want and self.paused else ''}")
+        self.parked = want
 
     def pause(self, reason, now):
         if self.paused:
@@ -576,7 +617,8 @@ class GamePause:
         self.log(f"Frametop paused ({reason}{', until the game ends' if self.ends_with_game else ''})")
         self.sound(True)
         self.tell_screens(True)
-        self.tell_helper()  # at once, even when the desktop is closing: that takes a while
+        self.tell_helper()
+        self.update_park()  # at once, even when the desktop is closing: that takes a while
         self.on_change(True)
         self.worker.submit(self.worker.pause, self.settings["desktop"])
         self.save()
@@ -589,6 +631,7 @@ class GamePause:
         self.sound(False)
         self.tell_screens(False)
         self.tell_helper()
+        self.update_park()
         self.on_change(False)
         self.worker.submit(self.worker.resume)
         self.save()

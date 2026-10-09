@@ -6,6 +6,13 @@
 //            [--no-publish] [--no-gestures] [--record DIR] [--sides auto|0|1] [--cams auto|mono|color|all] ...
 //            (--help lists them all)
 //
+// Parked (hand interaction in VR games): while run_dir/park exists (/run/user/UID/frametop-hands/park;
+// the input relay makes it when Frametop pauses for a game and removes it when the dashboard opens or
+// Frametop resumes), ft-hands processes no frames: the models stay loaded, the hands file says no
+// hands, and a gesture down ends, as lost. It writes "0" to run_dir/hands-want every second, so
+// ft-camd stops copying the mono cameras' frames meanwhile (it copies again 3 s after the last
+// write). Unparked, it tracks again from a palm search (about 200 ms). Not while recording.
+//
 // --no-gestures: hands for the cutouts only. No pinch or grip detection, so nothing reaches
 // the pointer and a closing hand doesn't raise the rate; the gestures file is removed.
 //
@@ -652,12 +659,50 @@ int main(int argc, char **argv) {
         return n ? sum / n : -1;
     };
 
+    // Parking (see "Parked" at the top): run_dir/park says so; ft-camd hears it through hands-want.
+    const std::string park_file = run_dir() + "/park", hands_want_file = run_dir() + "/hands-want";
+    const bool can_park = track && publish;
+    bool parked = false;
+    uint64_t t_park = 0, t_hands_want = 0;
     int exit_code = 0;
     while (!g_stop && (seconds <= 0 || (mono_ns() - start) / 1e9 < seconds)) {
         if (!ring.alive()) {
             std::fprintf(stderr, "ft-camd stopped\n");
             exit_code = 2;
             break;
+        }
+        if (can_park && mono_ns() - t_park > 250'000'000) {
+            t_park = mono_ns();
+            struct stat pst;
+            const bool want = !rec && !g_record && stat(park_file.c_str(), &pst) == 0;
+            if (want != parked) {
+                parked = want;
+                std::printf("%s\n", parked ? "parked: no tracking until run_dir/park goes (models stay loaded)"
+                                           : "unparked: tracking again");
+                std::fflush(stdout);
+                if (parked) {
+                    // the hands are gone for every reader, and a gesture down ends, as lost
+                    pub.write({}, mono_ns());
+                    if (gestures_on) {
+                        pinch.release(int64_t(mono_ns()));
+                        middle.release(int64_t(mono_ns()));
+                        grip.release(int64_t(mono_ns()));
+                        gestures.write(pinch, grip, mono_ns(), &middle);
+                    }
+                    t_hands_want = 0;
+                } else {
+                    unlink(hands_want_file.c_str());
+                    next_ns = 0;
+                }
+            }
+        }
+        if (parked) {
+            if (mono_ns() - t_hands_want > 1'000'000'000ull) {  // fresh, so ft-camd keeps idling
+                t_hands_want = mono_ns();
+                write_file(hands_want_file, "0\n");
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
         }
         const uint64_t now0 = mono_ns();
         const int64_t raw_off = raw_minus_mono_ns();
@@ -907,6 +952,7 @@ int main(int argc, char **argv) {
         }
     }
     if (!color.empty()) unlink(want_file.c_str());
+    if (parked) unlink(hands_want_file.c_str());
     if (write_sides_file) unlink(sides_file.c_str());
     write_rec_sides();
     if (publish) pub.write({}, mono_ns());

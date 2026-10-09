@@ -2,7 +2,11 @@
 // (a light grid) in front of you as its own overlay; where ft-hands tracks your hands
 // in front of it, each eye sees through it, like ft-screens' screens with cutouts.
 //
-//   ft-handtest [--distance m] [--width m] [--seconds s]
+//   ft-handtest [--distance m] [--width m] [--seconds s] [--matte mesh|capsules] [--margin deg]
+//
+// The matte follows HANDS_MATTE* in ~/.config/frametop.conf (handcut.h); --matte and
+// --margin override them. Every 2 s it prints the composite's cost (CPU ms per call, and how
+// many pieces each eye cut).
 //
 // Needs hand tracking running (hands/run.sh; ft-hands publishes /run/user/UID/frametop-hands/hands).
 // Build: screens/build.sh (build/ft-handtest), run in the dev container.
@@ -201,6 +205,8 @@ int RunProbe(vr::VROverlayHandle_t ov, const handcut::Panel &panel, handcut::Ren
 
 int main(int argc, char **argv) {
     double distance = 0.8, width = 1.0, seconds = 0, leadMs = -1, dotMm = 3;
+    handcut::MatteParams matte;
+    const std::string settings = handcut::ReadMatteSettings(matte);
     bool probe = false;
     std::string logPath = "/tmp/handprobe-" + std::to_string(time(nullptr)) + ".jsonl";
     for (int i = 1; i < argc; ++i) {
@@ -212,8 +218,10 @@ int main(int argc, char **argv) {
         else if (!std::strcmp(argv[i], "--lead") && more) leadMs = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--dot-mm") && more) dotMm = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--log") && more) logPath = argv[++i];
+        else if (!std::strcmp(argv[i], "--matte") && more) matte.mesh = std::strcmp(argv[++i], "capsules") != 0;
+        else if (!std::strcmp(argv[i], "--margin") && more) matte.marginDeg = std::atof(argv[++i]);
         else return std::fprintf(stderr, "usage: ft-handtest [--distance m] [--width m] [--seconds s] "
-                                         "[--probe [--lead ms] [--dot-mm mm] [--log FILE]]\n"), 2;
+                                         "[--matte mesh|capsules] [--margin deg] [--probe [--lead ms] [--dot-mm mm] [--log FILE]]\n"), 2;
     }
     signal(SIGINT, Stop);
     signal(SIGTERM, Stop);
@@ -284,6 +292,11 @@ int main(int argc, char **argv) {
     std::printf("test panel %.2f m wide, %.2f m ahead; Ctrl+C to stop\n", width, distance);
 
     handcut::Hands hands;
+    hands.SetShift(matte.shift);
+    handcut::Matte built;
+    std::printf("matte: %s, margin %.2f deg + %.0f ms of motion (at most %.2f deg more)%s%s\n",
+                matte.mesh ? "mesh" : "capsules", matte.marginDeg, matte.motionMs, matte.motionMaxDeg,
+                settings.empty() ? "" : "; settings: ", settings.c_str());
     bool cutting = false;
     const int64_t start = MonoNs();
     int64_t lastReport = start;
@@ -295,12 +308,14 @@ int main(int argc, char **argv) {
         vr::VRSystem()->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses, vr::k_unMaxTrackedDeviceCount);
         const auto &head = poses[vr::k_unTrackedDeviceIndex_Hmd].mDeviceToAbsoluteTracking;
         const int64_t now = MonoNs();
-        std::vector<handcut::Capsule2D> eyes2d[2];
+        handcut::Spots eyes2d[2];
         bool cut = false;
         if (hands.Update(head, now)) {
             double eyes[2][3];
             handcut::EyePositions(head, eyes);
-            cut = handcut::Project(panel, hands.capsules(), eyes, eyes2d);
+            const double headPos[3] = {head.m[0][3], head.m[1][3], head.m[2][3]};
+            handcut::BuildMatte(hands.shown(), hands.capsules(), headPos, matte, built);
+            cut = handcut::Project(panel, built, eyes, eyes2d);
         }
         const handcut::Output *out = cut ? renderer.Composite(0, bo, 1, client, eyes2d) : nullptr;
         if (out) {
@@ -319,7 +334,7 @@ int main(int argc, char **argv) {
                 if (shown != it->second) shown = it->second, vr::VROverlay()->SetOverlayTexture(ov, &tex);
                 ms += renderer.lastMs(), worst = std::max(worst, renderer.lastMs());
                 ++cutFrames;
-                caps2d += eyes2d[0].size() + eyes2d[1].size();
+                caps2d += eyes2d[0].caps.size() + eyes2d[1].caps.size() + eyes2d[0].hulls.size() + eyes2d[1].hulls.size();
             }
         } else if (cutting) {
             vr::VROverlay()->SetOverlayFlag(ov, vr::VROverlayFlags_SideBySide_Parallel, false);
@@ -331,7 +346,7 @@ int main(int argc, char **argv) {
         ++frames;
         if (now - lastReport > 2'000'000'000) {
             const handcut::CutStats st = renderer.TakeStats();
-            std::printf("%.0f s: %d ticks, %d with a cutout (%.1f capsules per eye), composite %.2f ms avg %.2f ms worst, "
+            std::printf("%.0f s: %d ticks, %d with a cutout (%.1f pieces per eye), composite %.2f ms avg %.2f ms worst, "
                         "%zu hand capsules known; %d draws (%d partial), %d same, %d busy\n",
                         (now - start) / 1e9, frames, cutFrames, cutFrames ? caps2d / 2.0 / cutFrames : 0.0,
                         cutFrames ? ms / cutFrames : 0.0, worst, hands.capsules().size(), st.draws, st.partial, st.same,

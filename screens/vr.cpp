@@ -56,7 +56,13 @@
 //   - hand cutouts (handcut.cpp): where ft-hands (hands/) tracks a hand between an eye and a
 //     screen, that eye sees through the screen (to Room View). Only then is the screen
 //     drawn by us, into a side-by-side buffer (one half per eye); otherwise its client
-//     buffer is shown as is.
+//     buffer is shown as is. The matte is hand-shaped (or ft-hands' capsules, HANDS_MATTE).
+//   - near hand input (handinput.cpp): poke a screen or floating window with the index finger
+//     to click it; pinch its bar, edges, title bar or corners to move or resize it; hold it
+//     with both hands to stretch and turn it. A glow on the screen shows where the fingertip
+//     and the pinch point are. It takes the pointer helper's word on which hands are bare and
+//     whether hand input is allowed ("hands"), and tells it which hands are near a panel
+//     ("near"), so a pinch is either ours or the helper's.
 //   - the catcher: a button pressed on a screen is released in KWin even when the laser
 //     lets go between panels (UpdateCatcher).
 //   - floating windows (docs/floating-windows.md): KWin's spare outputs, after the screens,
@@ -73,6 +79,7 @@
 #include "vr.h"
 
 #include "handcut.h"
+#include "handinput.h"
 #include "keyboard.h"
 
 #include <drm_fourcc.h>
@@ -84,8 +91,8 @@
 #include <linux/input-event-codes.h>
 #include <limits.h>
 #include <spawn.h>
-
-extern char **environ;  // for posix_spawn
+#include <sys/stat.h>
+#include <unistd.h>  // environ (g++ defines _GNU_SOURCE), for posix_spawn
 
 #include <algorithm>
 #include <chrono>
@@ -209,6 +216,7 @@ bool LaserPose(vr::TrackedDeviceIndex_t dev, Mat *out) {
 }
 
 bool IsHandController(vr::TrackedDeviceIndex_t i) {
+    if (i >= vr::k_unMaxTrackedDeviceCount) return false;   // not a device (a hand's holder, kHandHolder)
     if (vr::VRSystem()->GetTrackedDeviceClass(i) != vr::TrackedDeviceClass_Controller) return false;
     char type[64] = "";
     vr::VRSystem()->GetStringTrackedDeviceProperty(i, vr::Prop_ControllerType_String, type, sizeof type);
@@ -247,6 +255,11 @@ constexpr long kAimLinger = 25;      // ticks (~0.3 s) a panel keeps the laser o
 long g_tick = 0;                     // ft_vr_poll calls
 bool g_vr = false;                   // connected to SteamVR (ft-screens --no-vr runs without it)
 constexpr vr::TrackedDeviceIndex_t kNone = vr::k_unTrackedDeviceIndexInvalid;
+// Near hand input (handinput.cpp) holds KWin's button and carries panels as these, in place of
+// a device: no device has them, so DevicePose and LaserPose fail for them (no laser to follow or
+// catch), and a laser's release never ends what a hand holds.
+constexpr vr::TrackedDeviceIndex_t kHandHolder[2] = {vr::k_unMaxTrackedDeviceCount + 1, vr::k_unMaxTrackedDeviceCount + 2};
+bool IsHandHolder(vr::TrackedDeviceIndex_t d) { return d == kHandHolder[0] || d == kHandHolder[1]; }
 
 // A popup or dialog of a floating window: a small panel over it, cut from the same buffer.
 struct Sub {
@@ -277,6 +290,7 @@ struct Screen {
     Mat rollFrom = Identity();                // roll: the pose at the press (pinRel when pinned)
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
     bool hover[7] = {};                       // a laser is on the bar, curve, roll, resize, dock, close, reset control
+    unsigned handHover = 0;                   // ...a hand's pinch point is near them (bit k: control k)
     bool lasers = true;                       // MakeOverlaysInteractiveIfVisible is set
     float controls = 0;                       // the controls' fade, 0 (hidden) .. 1
     bool controlsUp = false;                  // the controls' overlays are shown
@@ -334,6 +348,9 @@ std::map<const void *, vr::SharedTextureHandle_t> g_imports;
 // Hand cutouts (see the top and handcut.h).
 bool g_cutouts = true;          // the cutouts command turns them off
 handcut::Hands g_hands;
+handcut::MatteParams g_matte;   // HANDS_MATTE* settings, the cutouts command
+handcut::Matte g_matteNow;      // this tick's
+bool g_handsNow = false;        // g_hands has fresh hands this tick
 handcut::Renderer g_cutter;
 int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
@@ -641,15 +658,21 @@ Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 // Where each control sits, relative to the screen: bar, curve, roll, resize tab, a
 // floating window's dock and close buttons (left of the bar), and a desktop screen's reset
 // button (left of the bar, where a floating window has its dock button).
-std::array<Mat, 7> ControlOffsets(const Screen &s) {
+// Their centres on the surface: u along it, v up, metres from the screen's centre.
+void ControlUV(const Screen &s, double u[7], double v[7]) {
     const double h = s.heightMetres(), bar = s.chrome, button = s.grip, gap = bar * 0.06;
-    return {BarOffset(s), OnSurface(s, bar / 2 + gap + button / 2, BarY(s), 0.003),
-            OnSurface(s, bar / 2 + gap * 2 + button * 1.5, BarY(s), 0.003),
-            // The tab's top left corner is the screen's bottom right corner.
-            OnSurface(s, s.metres / 2 + s.grip / 2, -(h / 2 + s.grip / 2), 0.003),
-            OnSurface(s, -(bar / 2 + gap + button / 2), BarY(s), 0.003),
-            OnSurface(s, -(bar / 2 + gap * 2 + button * 1.5), BarY(s), 0.003),
-            OnSurface(s, -(bar / 2 + gap + button / 2), BarY(s), 0.003)};
+    const double uu[7] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
+                          // The tab's top left corner is the screen's bottom right corner.
+                          s.metres / 2 + s.grip / 2, -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
+                          -(bar / 2 + gap + button / 2)};
+    for (int k = 0; k < 7; ++k) u[k] = uu[k], v[k] = k == 3 ? -(h / 2 + s.grip / 2) : BarY(s);
+}
+std::array<Mat, 7> ControlOffsets(const Screen &s) {
+    double u[7], v[7];
+    ControlUV(s, u, v);
+    std::array<Mat, 7> m;
+    for (int k = 0; k < 7; ++k) m[k] = OnSurface(s, u[k], v[k], 0.003);
+    return m;
 }
 
 // A floating window's popups and dialogs, a few millimetres in front of it, where they are
@@ -814,8 +837,9 @@ bool ModeVisible() {
 void ApplyAlpha(const Screen &s) {
     vr::VROverlay()->SetOverlayAlpha(s.overlay, s.alpha);
     for (const auto &[k, sub] : s.subs) vr::VROverlay()->SetOverlayAlpha(sub.overlay, s.alpha);
-    const bool active[7] = {s.hover[0] || s.drag == Drag::Move, s.hover[1], s.hover[2] || s.drag == Drag::Roll,
-                            s.hover[3] || s.drag == Drag::Resize, s.hover[4], s.hover[5], s.hover[6]};
+    bool active[7] = {s.hover[0] || s.drag == Drag::Move, s.hover[1], s.hover[2] || s.drag == Drag::Roll,
+                      s.hover[3] || s.drag == Drag::Resize, s.hover[4], s.hover[5], s.hover[6]};
+    for (int k = 0; k < 7; ++k) active[k] = active[k] || (s.handHover >> k & 1);
     const auto controls = s.Controls();
     for (int k = 0; k < 7; ++k)
         if (controls[k] != vr::k_ulOverlayHandleInvalid)
@@ -1274,6 +1298,20 @@ void UpdateGuides() {
     }
 }
 
+// A floating window's resize: the corner goes where the laser (or a hand's pinch) is, at hx,
+// hy on the panel, in both directions, and the window gets that many pixels at the same
+// density (ft-floatd resizes it, and the new crop comes back as "float", with the top left
+// corner kept where it is).
+void ResizeFloat(Screen &s, int index, double hx, double hy, double grabX, double grabY) {
+    if (s.mpp <= 0 || g_tick - s.resizeSent < 4) return;  // about 20 a second
+    const double left = -s.metres / 2, top = s.heightMetres() / 2;
+    const int w = std::max(320, int(std::lround((hx - grabX - left) / s.mpp)));
+    const int h = std::max(200, int(std::lround((top - (hy - grabY)) / s.mpp)));
+    if (w == s.resizeW && h == s.resizeH) return;
+    s.resizeW = w, s.resizeH = h, s.resizeSent = g_tick;
+    SendFloat("resize " + std::to_string(index + 1) + " " + std::to_string(w) + " " + std::to_string(h));
+}
+
 void UpdateDrag(Screen &s, int index) {
     Mat d;
     if (!DevicePose(s.dragDevice, &d)) return;
@@ -1296,19 +1334,7 @@ void UpdateDrag(Screen &s, int index) {
     double hx, hy;
     Mat l;
     if (!LaserPose(s.dragDevice, &l) || !RayOnScreen(s, l, &hx, &hy)) return;
-    if (s.floating) {
-        // A floating window: the corner goes where the laser is, in both directions, and the
-        // window gets that many pixels at the same density (ft-floatd resizes it, and the
-        // new crop comes back as "float", with the top left corner kept where it is).
-        if (s.mpp <= 0 || g_tick - s.resizeSent < 4) return;  // about 20 a second
-        const double left = -s.metres / 2, top = s.heightMetres() / 2;
-        const int w = std::max(320, int(std::lround((hx - s.grabX - left) / s.mpp)));
-        const int h = std::max(200, int(std::lround((top - (hy - s.grabY)) / s.mpp)));
-        if (w == s.resizeW && h == s.resizeH) return;
-        s.resizeW = w, s.resizeH = h, s.resizeSent = g_tick;
-        SendFloat("resize " + std::to_string(index + 1) + " " + std::to_string(w) + " " + std::to_string(h));
-        return;
-    }
+    if (s.floating) return ResizeFloat(s, index, hx, hy, s.grabX, s.grabY);
     const double a = s.width > 0 ? double(s.height) / s.width : 9.0 / 16;
     const double cx = hx - s.grabX, cy = hy - s.grabY;  // where the corner should be
     SetWidth(s, 2 * (cx - a * cy) / (1 + a * a));
@@ -1930,24 +1956,37 @@ void StopCutting(Screen &s) {
     s.cutting = false, s.cutShown = 0;
 }
 
-// Each tick: for each visible screen with a hand in front of it (for either eye), draw its
-// client buffer with the hands cut out and show that; else show the client buffer.
+// Each tick: for each visible screen with a hand in front of it (for either eye), or a glow
+// of hand input on it, draw its client buffer with the hands cut out and the glows on top, and
+// show that; else show the client buffer.
 // Floating windows don't get cutouts yet: their panel and popups show crops of the client
 // buffer (texture bounds), which a side-by-side buffer doesn't match.
+handinput::HandInput g_handInput;
+
 void UpdateCutouts() {
     Mat head;
     const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
-    const bool hands = g_cutouts && haveHead &&
-                       g_hands.Update(head, std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                Clock::now().time_since_epoch()).count());
+    const bool hands = g_cutouts && haveHead && g_handsNow;
     double eyes[2][3];
-    if (hands) handcut::EyePositions(head, eyes);
+    if (haveHead) handcut::EyePositions(head, eyes);
+    if (hands) {
+        const double at[3] = {head.m[0][3], head.m[1][3], head.m[2][3]};
+        handcut::BuildMatte(g_hands.shown(), g_hands.capsules(), at, g_matte, g_matteNow);
+    }
+    const auto &glows = g_handInput.glows();
     for (auto &[i, s] : g_screens) {
-        std::vector<handcut::Capsule2D> spots[2];
+        handcut::Spots spots[2];
         Mat p;
-        bool cut = hands && s.visible && !s.floating && s.key && s.width > 0 && ScreenPose(s, &p) &&
-                   handcut::Project({p, s.metres, s.heightMetres(), s.curve, s.width, s.height}, g_hands.capsules(),
-                                    eyes, spots);
+        bool cut = false;
+        if (g_cutouts && haveHead && s.visible && !s.floating && s.key && s.width > 0 && ScreenPose(s, &p)) {
+            if (hands)
+                cut = handcut::Project({p, s.metres, s.heightMetres(), s.curve, s.width, s.height}, g_matteNow, eyes, spots);
+            const auto g = glows.find(i);
+            if (g != glows.end() && !g->second.empty()) {
+                spots[0].glows = spots[1].glows = g->second;   // on the surface: the same texture point for both eyes
+                cut = true;
+            }
+        }
         const handcut::Output *out = cut && CutterReady() ? g_cutter.Composite(i, s.key, s.frames, s.buf, spots) : nullptr;
         const vr::SharedTextureHandle_t h = out ? ImportCutout(out) : 0;
         if (!h) {
@@ -1961,6 +2000,197 @@ void UpdateCutouts() {
         }
         if (h != s.cutShown) SetScreenTexture(s, h), s.cutShown = h;   // the same buffer stays: no new frame for SteamVR
     }
+}
+
+// ---------------------------------------------------------------- near hand input
+
+// The pointer helper's word on the hands ("hands <L> <R> <allowed>", on change and every
+// second): each side a bare hand ("hand"), a controller's ("controller"), or neither ("off"),
+// and whether hand input is allowed now (the headset worn, and no VR game, or its dashboard
+// or Frametop's panels up during one). Older than 3 s, it lapses: no near input.
+struct HandsWord {
+    bool hand[2] = {false, false};
+    bool allowed = false;
+    int64_t atMs = INT64_MIN / 2;
+} g_handsWord;
+// HANDS_NEAR: 1 (default) follows the helper's word, 0 is off, force is on without it (for
+// testing without the helper; the "handinput" command switches it too).
+enum class NearMode { Off, Helper, Force } g_nearMode = NearMode::Helper;
+
+bool SideAllowed(int side) {
+    if (g_nearMode == NearMode::Off || g_paused) return false;
+    if (g_nearMode == NearMode::Force) return true;
+    return NowMs() - g_handsWord.atMs < 3000 && g_handsWord.allowed && g_handsWord.hand[side];
+}
+
+bool HandInputOn() { return g_nearMode != NearMode::Off; }
+
+// The panel as hand input sees it: its place, size, buffer, controls and popups.
+handinput::Panel InputPanel(const Screen &s, int index, const Mat &p) {
+    handinput::Panel P;
+    P.index = index, P.pose = p, P.width = s.metres, P.height = s.heightMetres(), P.curve = s.curve;
+    P.pxW = s.width, P.pxH = s.height;
+    P.floating = s.floating;
+    P.cropX = s.cropX, P.cropY = s.cropY, P.cropW = s.cropW, P.cropH = s.cropH, P.titleH = s.titleH;
+    P.glows = !s.floating;
+    P.held = s.drag != Drag::None && !IsHandHolder(s.dragDevice);
+    double u[7], v[7];
+    ControlUV(s, u, v);
+    const auto controls = s.Controls();
+    static const handinput::Control kinds[7] = {handinput::Control::Bar, handinput::Control::Curve,
+                                                handinput::Control::Roll, handinput::Control::Tab,
+                                                handinput::Control::Dock, handinput::Control::Close,
+                                                handinput::Control::Reset};
+    for (int k = 0; k < 7; ++k) {
+        if (controls[k] == vr::k_ulOverlayHandleInvalid) continue;
+        const double hw = k == 0 ? s.chrome / 2 : s.grip / 2, hh = k == 0 ? s.chrome * 12 / 256 : s.grip / 2;
+        P.controls.push_back({kinds[k], u[k], v[k], hw, hh});
+    }
+    if (s.floating && s.mpp > 0)
+        for (const auto &[k, sub] : s.subs)
+            P.popups.push_back({(sub.x + sub.w / 2.0 - (s.cropX + s.cropW / 2.0)) * s.mpp,
+                                -(sub.y + sub.h / 2.0 - (s.cropY + s.cropH / 2.0)) * s.mpp, sub.w * s.mpp, sub.h * s.mpp,
+                                sub.x, sub.y, sub.w, sub.h});
+    return P;
+}
+
+// A hand took a panel by a grab zone: like StartDrag, held by the hand (a pinned screen is
+// carried freely and goes back on its wrist when let go). A second hand on a panel the first
+// already holds joins it (two hands: handinput's stretch).
+void StartHandDrag(Screen &s, int side, handinput::Zone zone) {
+    if (s.drag != Drag::None) return;
+    Mat p;
+    if (!ScreenPose(s, &p)) return;
+    const Drag mode = zone == handinput::Zone::Tab || zone == handinput::Zone::Corner ? Drag::Resize : Drag::Move;
+    s.pinTarget = kNone;
+    if (s.pinned != kNone && mode == Drag::Move) {
+        s.pinTarget = s.pinned;
+        SetAbsolute(s, p);
+    }
+    s.drag = mode;
+    s.dragDevice = kHandHolder[side];
+    s.onWrist = kNone;
+    LightBar(s, s.pinTarget != kNone);
+    ApplyAlpha(s);
+}
+
+// Writes want-hz for ft-hands (hands/track/main.cpp) while a hand is near a panel: a still hand
+// is tracked at 15 Hz, which doubles a poke's latency. Kept fresh twice a second.
+void WantHz(bool near) {
+    static int64_t last = 0;
+    const int64_t now = NowMs();
+    if (!near || now - last < 500) return;
+    last = now;
+    const std::string path = "/run/user/" + std::to_string(getuid()) + "/frametop-hands/want-hz";
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0) return;
+    const ssize_t n = write(fd, "30\n", 3);
+    (void)n;
+    close(fd);
+}
+
+void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data) {
+    std::vector<handinput::Panel> panels;
+    for (auto &[i, s] : g_screens) {
+        Mat p;
+        if (s.visible && s.width > 0 && s.height > 0 && (!s.floating || s.cropW > 0) && ScreenPose(s, &p))
+            panels.push_back(InputPanel(s, i, p));
+    }
+    handinput::Input in;
+    in.nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
+    in.hands = &g_hands;
+    in.haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &in.head);
+    for (int k = 0; k < 2; ++k) in.allowed[k] = in.haveHead && SideAllowed(k);
+    in.pointerBusy = g_press.buttons && !IsHandHolder(g_press.device);
+    // KWin's button, let go of by someone else (ReleaseStuck: its screen hid, or paused)
+    for (int k = 0; k < 2; ++k)
+        if (g_handInput.pressingKwin(k) && !(g_press.buttons && g_press.device == kHandHolder[k])) g_handInput.ForgetPress(k);
+    g_handInput.Update(in, panels);
+
+    for (const handinput::Event &e : g_handInput.events()) {
+        const auto it = g_screens.find(e.panel);
+        if (it == g_screens.end()) continue;
+        Screen &s = it->second;
+        const vr::TrackedDeviceIndex_t holder = kHandHolder[e.side];
+        ft_event f{};
+        f.screen = e.panel;
+        f.x = e.x, f.y = e.y;
+        switch (e.type) {
+            case handinput::Event::Motion:
+                s.inputMs = NowMs();
+                if (g_press.buttons && g_press.device == holder) g_press.screen = e.panel, g_press.x = e.x, g_press.y = e.y;
+                f.type = FT_MOTION;
+                handle(&f, data);
+                break;
+            case handinput::Event::Press:
+                s.inputMs = NowMs();
+                PressDown(holder, BTN_LEFT, e.panel, e.x, e.y);
+                f.type = FT_BUTTON, f.button = BTN_LEFT, f.pressed = true;
+                f.controller = true;   // the click filter holds a poke's wobble still (controller-click.h)
+                handle(&f, data);
+                break;
+            case handinput::Event::Release:
+                if (g_press.device == holder && (g_press.buttons & ButtonBit(BTN_LEFT))) {
+                    g_press.buttons &= ~ButtonBit(BTN_LEFT);
+                    if (!g_press.buttons) g_press.upAt = -1;
+                }
+                f.type = FT_BUTTON, f.button = BTN_LEFT, f.pressed = false, f.controller = true;
+                handle(&f, data);
+                break;
+            case handinput::Event::Control:
+                s.inputMs = NowMs();
+                if (e.control == handinput::Control::Curve) {
+                    ToggleCurve(s);
+                } else if (e.control == handinput::Control::Reset) {
+                    std::printf("screen %d: reset the layout (poked)\n", e.panel + 1);
+                    RunLayout("reset");
+                } else if (e.control == handinput::Control::Dock || e.control == handinput::Control::Close) {
+                    SendFloat((e.control == handinput::Control::Dock ? "dock " : "close ") + std::to_string(e.panel + 1));
+                }
+                break;
+            case handinput::Event::GrabStart:
+                StartHandDrag(s, e.side, e.zone);
+                break;
+            case handinput::Event::GrabEnd:
+                if (s.drag == Drag::None || s.dragDevice != holder) break;
+                if (g_handInput.grabPanel(1 - e.side) == e.panel) {   // two hands to one
+                    s.dragDevice = kHandHolder[1 - e.side];
+                    if (s.drag == Drag::Resize) s.drag = Drag::Move;
+                    ApplyAlpha(s);
+                } else {
+                    FinishDrag(s, e.panel);
+                }
+                break;
+        }
+    }
+    for (const handinput::Carry &c : g_handInput.carries()) {
+        const auto it = g_screens.find(c.panel);
+        if (it == g_screens.end()) continue;
+        Screen &s = it->second;
+        if (c.kind == handinput::Carry::Resize) {
+            if (s.floating) ResizeFloat(s, c.panel, c.hx, c.hy, c.grabX, c.grabY);
+            else if (c.width > 0) SetWidth(s, c.width);
+            continue;
+        }
+        if (c.width > 0 && !s.floating) {
+            s.metres = std::clamp(c.width, kMinWidth, 12.0);
+            vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+            ApplyCurve(s);
+        }
+        SetAbsolute(s, c.pose);
+    }
+    const auto &hovered = g_handInput.hovered();
+    for (auto &[i, s] : g_screens) {
+        const auto h = hovered.find(i);
+        const unsigned bits = h == hovered.end() ? 0 : h->second;
+        if (bits != s.handHover) s.handHover = bits, ApplyAlpha(s);
+        if (g_handInput.nearPanels().count(i)) s.nearUntil = g_tick + kControlsLinger;   // the controls show
+    }
+    // the near claim, for each hands frame (the helper waits for it at a pinch's begin)
+    if (g_handInput.newFrame() && HandInputOn())
+        SendPointer("near " + std::to_string(g_handInput.frameNs()) + " " + (g_handInput.near(0) ? "1" : "0") + " " +
+                    (g_handInput.near(1) ? "1" : "0"));
+    WantHz(g_handInput.anyNear());
 }
 
 // Steam in front: the dashboard (the Steam menu) is open, or Steam's own keyboard is up
@@ -2015,6 +2245,18 @@ bool ft_vr_init(void) {
     }
     g_vr = true;
     RefreshPoses();
+    // hand cutouts and near hand input settings (~/.config/frametop.conf)
+    const std::string matte = handcut::ReadMatteSettings(g_matte);
+    g_hands.SetShift(g_matte.shift);
+    const std::string lead = handcut::Setting("HANDS_MATTE_LEAD", "");
+    if (!lead.empty()) g_hands.SetPrediction(true, std::atof(lead.c_str()));
+    const std::string near = handcut::Setting("HANDS_NEAR", "1");
+    g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
+    std::printf("hands: matte %s, margin %.2f deg + %.0f ms of motion (at most %.2f more), lead %.0f ms, shift %s; near input %s%s%s\n",
+                g_matte.mesh ? "mesh" : "capsules", g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
+                g_hands.leadMs(), g_matte.shift.empty() ? "off" : "on",
+                g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "forced on" : "on (the pointer helper's word)",
+                matte.empty() ? "" : "; settings: ", matte.c_str());
     // The catcher (see UpdateCatcher): clear and invisible, but the laser lands on it, and
     // it keeps SteamVR's laser mouse on while it's up.
     if (vr::VROverlay()->CreateOverlay("frametop.catcher", "Frametop: release catcher", &g_catcher) ==
@@ -2314,6 +2556,12 @@ void ft_vr_forget(const void *key) {
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     if (!g_vr) return;
     RefreshPoses();
+    // the hands, once per tick, for the cutouts and hand input
+    {
+        Mat head;
+        g_handsNow = (g_cutouts || HandInputOn()) && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) &&
+                     g_hands.Update(head, std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count());
+    }
     for (auto &[index, s] : g_screens) {
         vr::VREvent_t ev;
         // The screen itself (and a floating window's popups): input for KWin.
@@ -2469,6 +2717,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         if (ev.eventType == vr::VREvent_MouseButtonUp)
             ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
+    UpdateHandInput(handle, data);
     ReleaseStuck(handle, data);
     UpdateRemoteDrag(handle, data);
     RefreshChrome();
@@ -2596,6 +2845,13 @@ void ft_vr_keyboard_hide(void) {
 //                             <last composite ms> ms, predict <on|off> lead <ms> ms"
 //   cutouts predict on|off    move the hands ahead along their velocity (on by default)
 //   cutouts lead <ms>         ...to this long after now: about when the frame is on the displays
+//   cutouts matte mesh|capsules   the hand-shaped matte, or ft-hands' capsules
+//   cutouts margin <deg> [<motion ms> [<motion max deg>]]   the matte's margin around the hand
+//   cutouts shift off|"<dist>:<yaw>,<pitch> ..."   the per-distance correction (degrees; off by default)
+//   hands <L> <R> <allowed>   the pointer helper: each side hand|controller|off, hand input allowed 0|1
+//                             (on change and every second; older than 3 s it lapses)
+//   handinput on|off|force|state   near hand input: on follows the helper's word, force ignores it
+//                             -> "ok <mode> <left state> <right state>; <counts>"
 // Floating windows (from ft-floatd; <screen> is the spare output's number, after the screens):
 //   float <screen> <metres per pixel> <x> <y> <w> <h> <title>   the window's rectangle in the
 //                             buffer and its title bar's height (pixels); shows the panel
@@ -2765,9 +3021,29 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         else return (void)std::snprintf(reply, size, "error modes: always outside_games dashboard");
         UpdateLasers();
         std::snprintf(reply, size, "ok %s", LasersName());
+    } else if (char sl[16], sr[16]; std::sscanf(cmd, "hands %15s %15s %d", sl, sr, &n) == 3) {
+        const bool l = !std::strcmp(sl, "hand"), r = !std::strcmp(sr, "hand"), allowed = n != 0;
+        if (l != g_handsWord.hand[0] || r != g_handsWord.hand[1] || allowed != g_handsWord.allowed)
+            std::printf("hands from the pointer helper: left %s, right %s, %s\n", sl, sr, allowed ? "allowed" : "not allowed");
+        g_handsWord.hand[0] = l, g_handsWord.hand[1] = r, g_handsWord.allowed = allowed, g_handsWord.atMs = NowMs();
+        std::snprintf(reply, size, "ok");
+    } else if (std::sscanf(cmd, "handinput %15s", word) == 1) {
+        if (!std::strcmp(word, "on")) g_nearMode = NearMode::Helper;
+        else if (!std::strcmp(word, "off")) g_nearMode = NearMode::Off;
+        else if (!std::strcmp(word, "force")) g_nearMode = NearMode::Force;
+        else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error handinput on|off|force|state");
+        const auto &st = g_handInput.stats;
+        std::snprintf(reply, size,
+                      "ok %s, helper %s (left %s, right %s, %s); %s; %d frames, %d near, %d presses, %d controls, %d grabs, "
+                      "%d stretches; held back: %d one view, %d bent, %d not nearest, %d pinching, %d busy, %d slow",
+                      g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
+                      NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
+                      g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
+                      g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.controls, st.grabs, st.stretches,
+                      st.heldNotStereo, st.heldNotExtended, st.heldNotNearest, st.heldPinching, st.heldBusy, st.heldSlow);
     } else if (std::sscanf(cmd, "cutouts %15s", word) == 1) {
         char arg[16] = "";
-        double ms = 0;
+        double ms = 0, a = 0, b = 0;
         if (!std::strcmp(word, "on")) g_cutouts = true;
         else if (!std::strcmp(word, "off")) g_cutouts = false;
         else if (!std::strcmp(word, "predict") && std::sscanf(cmd, "cutouts predict %15s", arg) == 1 &&
@@ -2775,8 +3051,23 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
             g_hands.SetPrediction(!std::strcmp(arg, "on"), g_hands.leadMs());
         else if (!std::strcmp(word, "lead") && std::sscanf(cmd, "cutouts lead %lf", &ms) == 1)
             g_hands.SetPrediction(g_hands.predicting(), ms);
-        else if (std::strcmp(word, "state") != 0)
-            return (void)std::snprintf(reply, size, "error cutouts on|off|state|predict on|off|lead <ms>");
+        else if (!std::strcmp(word, "matte") && std::sscanf(cmd, "cutouts matte %15s", arg) == 1 &&
+                 (!std::strcmp(arg, "mesh") || !std::strcmp(arg, "capsules")))
+            g_matte.mesh = !std::strcmp(arg, "mesh");
+        else if (const int got = std::sscanf(cmd, "cutouts margin %lf %lf %lf", &ms, &a, &b);
+                 !std::strcmp(word, "margin") && got >= 1 && ms >= 0 && ms <= 10) {
+            g_matte.marginDeg = ms;
+            if (got >= 2) g_matte.motionMs = std::clamp(a, 0.0, 200.0);
+            if (got >= 3) g_matte.motionMaxDeg = std::clamp(b, 0.0, 10.0);
+        } else if (!std::strcmp(word, "shift")) {
+            const char *spec = cmd + std::strlen("cutouts shift");
+            while (*spec == ' ') ++spec;
+            if (!std::strcmp(spec, "off")) g_matte.shift.clear();
+            else if (!handcut::ParseShift(spec, g_matte.shift)) return (void)std::snprintf(reply, size, "error shift <dist>:<yaw>,<pitch> ...");
+            g_hands.SetShift(g_matte.shift);
+        } else if (std::strcmp(word, "state") != 0)
+            return (void)std::snprintf(reply, size, "error cutouts on|off|state|predict on|off|lead <ms>|matte mesh|capsules|"
+                                                    "margin <deg> [ms [deg]]|shift off|<spec>");
         // Composite's counts since the last state, per second.
         static auto since = Clock::now();
         const double dt = std::max(1e-3, std::chrono::duration<double>(Clock::now() - since).count());
@@ -2785,10 +3076,12 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         const int calls = c.draws + c.same + c.busy;
         std::snprintf(reply, size,
                       "ok %s %s %.2f ms, predict %s lead %.0f ms; per s: %.1f draws (%.1f partial), %.1f same, %.1f busy, "
-                      "%.1f waits; CPU %.2f ms avg %.2f worst",
+                      "%.1f waits; CPU %.2f ms avg %.2f worst; matte %s margin %.2f deg + %.0f ms (max %.2f), shift %s",
                       g_cutouts ? "on" : "off", g_cutterState > 0 ? "ready" : g_cutterState < 0 ? "unavailable" : "idle",
                       g_cutter.lastMs(), g_hands.predicting() ? "on" : "off", g_hands.leadMs(), c.draws / dt,
-                      c.partial / dt, c.same / dt, c.busy / dt, c.waits / dt, calls ? c.cpuMs / calls : 0.0, c.worstMs);
+                      c.partial / dt, c.same / dt, c.busy / dt, c.waits / dt, calls ? c.cpuMs / calls : 0.0, c.worstMs,
+                      g_matte.mesh ? "mesh" : "capsules", g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
+                      g_matte.shift.empty() ? "off" : "on");
     } else if (int x0, y0, w0, h0, t0; std::sscanf(cmd, "float %d %lf %d %d %d %d %d", &n, &w, &x0, &y0, &w0, &h0, &t0) == 7) {
         Screen *s = Find(n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
@@ -2833,7 +3126,8 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         StartDrag(*s, Drag::Move, g_press.device);
         std::snprintf(reply, size, "ok");
     } else if (std::strcmp(cmd, "up") == 0) {
-        if ((g_press.buttons & ButtonBit(BTN_LEFT)) && g_press.device != kNone && !IsHandController(g_press.device))
+        if ((g_press.buttons & ButtonBit(BTN_LEFT)) && g_press.device != kNone && !IsHandController(g_press.device) &&
+            !IsHandHolder(g_press.device))
             g_press.upAt = g_tick + 9;
         std::snprintf(reply, size, "ok");
     } else if (std::sscanf(cmd, "spin %15s", word) == 1) {

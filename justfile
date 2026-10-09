@@ -40,6 +40,9 @@ test-c:
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/relay-buttons-test.c \
       -o build/tests/relay-buttons-test
     build/tests/relay-buttons-test && echo "screens/tests/relay-buttons-test.c: ok"
+    g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handinput_test.cpp \
+      screens/handcut.cpp screens/handinput.cpp -o build/tests/handinput-test
+    build/tests/handinput-test && echo "screens/tests/handinput_test.cpp: ok"
 
 # shell scripts: syntax-gate everything that ships. No git: the image has
 # none, and a mounted checkout can trip "dubious ownership" — find lists

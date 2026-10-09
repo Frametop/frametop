@@ -1,25 +1,19 @@
-// Hand cutouts (see handcut.h).
+// Hand cutouts, the CPU side (see handcut.h): the hands and gestures files, the matte and
+// where the eyes see it on a panel. No GPU or SteamVR calls here (handrender.cpp has those).
 #include "handcut.h"
 
-#include "../hands/include/fh_hands.h"
-
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
-#include <drm_fourcc.h>
 #include <fcntl.h>
-#include <gbm.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 namespace handcut {
@@ -27,12 +21,14 @@ namespace {
 
 // The hands file ft-hands publishes (hands/include/fh_hands.h).
 constexpr uint32_t kMaxHands = FH_HANDS_MAX_HANDS, kMaxCapsules = FH_HANDS_MAX_CAPSULES;
-constexpr int64_t kStaleNs = 300'000'000;   // hands older than this are gone
+constexpr int64_t kStaleNs = 300'000'000;      // hands older than this are gone
+constexpr int64_t kReopenNs = 3'000'000'000;   // a file this stale is opened again (ft-hands may have made a new one)
 constexpr int64_t kHistoryNs = 1'000'000'000;
 constexpr double kNear = 0.12;   // metres: nothing closer to an eye than this is cut
 constexpr double kMaxSpeed = 2.5;     // m/s: faster is a tracking jump, not a hand
 constexpr double kStillSpeed = 0.05;  // m/s: below this, a hand's velocity is noise
 constexpr double kMaxAhead = 0.12;    // s: never predict further than this
+constexpr double kPalmLen = 0.0815;   // wrist to middle knuckle of the skeleton's average hand
 
 int64_t MonoNs() {
     timespec ts;
@@ -41,7 +37,9 @@ int64_t MonoNs() {
 }
 
 void Apply(const Mat &m, const float p[3], float out[3]) {
-    for (int i = 0; i < 3; ++i) out[i] = m.m[i][0] * p[0] + m.m[i][1] * p[1] + m.m[i][2] * p[2] + m.m[i][3];
+    float r[3];
+    for (int i = 0; i < 3; ++i) r[i] = m.m[i][0] * p[0] + m.m[i][1] * p[1] + m.m[i][2] * p[2] + m.m[i][3];
+    std::memcpy(out, r, sizeof r);
 }
 
 // Room -> panel-local: R^T (p - t).
@@ -50,74 +48,273 @@ void ToLocal(const Mat &m, const double p[3], double out[3]) {
     for (int i = 0; i < 3; ++i) out[i] = m.m[0][i] * d[0] + m.m[1][i] * d[1] + m.m[2][i] * d[2];
 }
 
+double Dist(const float a[3], const float b[3]) {
+    return std::sqrt(double(a[0] - b[0]) * (a[0] - b[0]) + double(a[1] - b[1]) * (a[1] - b[1]) +
+                     double(a[2] - b[2]) * (a[2] - b[2]));
+}
+
+void Mid(const float a[3], const float b[3], float out[3]) {
+    for (int i = 0; i < 3; ++i) out[i] = (a[i] + b[i]) / 2;
+}
+
+bool Finite(const float *v, int n) {
+    for (int i = 0; i < n; ++i)
+        if (!std::isfinite(v[i]) || std::fabs(v[i]) > 10) return false;
+    return true;
+}
+
+// The skeleton's rough radii (hands/track/skeleton.cpp) at the average hand's size, for version 1.
+float DefaultRadius(int i) { return i == 0 ? 0.020f : i == 1 || i % 4 == 1 ? 0.012f : i <= 4 ? 0.0095f : 0.0085f; }
+
+// Turns p by `rad` about the unit axis through `at` (Rodrigues).
+void Turn(float p[3], const double at[3], const double axis[3], double rad) {
+    const double v[3] = {p[0] - at[0], p[1] - at[1], p[2] - at[2]};
+    const double c = std::cos(rad), s = std::sin(rad), d = axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2];
+    const double x[3] = {axis[1] * v[2] - axis[2] * v[1], axis[2] * v[0] - axis[0] * v[2], axis[0] * v[1] - axis[1] * v[0]};
+    for (int i = 0; i < 3; ++i) p[i] = float(at[i] + v[i] * c + x[i] * s + axis[i] * d * (1 - c));
+}
+
 }  // namespace
+
+double Hand::speed() const { return std::sqrt(double(v[0]) * v[0] + double(v[1]) * v[1] + double(v[2]) * v[2]); }
+
+void Hand::Palm(double out[3]) const {
+    out[0] = out[1] = out[2] = 0;
+    for (int j : {0, 5, 9, 13, 17})
+        for (int i = 0; i < 3; ++i) out[i] += p[j][i] / 5.0;
+}
+
+// ---------------------------------------------------------------------------- settings
+
+std::string Setting(const char *name, const char *def) {
+    const std::string env = std::string("FT_") + name;
+    if (const char *v = std::getenv(env.c_str())) return v;
+    const char *home = std::getenv("HOME");
+    if (home) {
+        std::ifstream f(std::string(home) + "/.config/frametop.conf");
+        std::string line, found;
+        bool have = false;
+        const std::string key = std::string(name) + "=";
+        while (std::getline(f, line)) {
+            if (line.rfind(key, 0) != 0) continue;
+            std::string v = line.substr(key.size());
+            const size_t hash = v.find('#');
+            if (hash != std::string::npos) v.resize(hash);
+            while (!v.empty() && std::isspace(static_cast<unsigned char>(v.back()))) v.pop_back();
+            if (v.size() >= 2 && (v[0] == '"' || v[0] == '\'') && v.back() == v[0]) v = v.substr(1, v.size() - 2);
+            found = v, have = true;   // the last one counts, as when the shell reads it
+        }
+        if (have) return found;
+    }
+    return def;
+}
+
+bool ParseShift(const std::string &text, std::vector<Shift> &out) {
+    std::vector<Shift> s;
+    std::istringstream in(text);
+    std::string item;
+    while (in >> item) {
+        Shift k;
+        if (std::sscanf(item.c_str(), "%lf:%lf,%lf", &k.dist, &k.yawDeg, &k.pitchDeg) != 3 || !(k.dist > 0) ||
+            std::fabs(k.yawDeg) > 10 || std::fabs(k.pitchDeg) > 10)
+            return false;
+        s.push_back(k);
+    }
+    std::sort(s.begin(), s.end(), [](const Shift &a, const Shift &b) { return a.dist < b.dist; });
+    out = s;
+    return true;
+}
+
+std::string ReadMatteSettings(MatteParams &p) {
+    std::string log;
+    auto num = [&](const char *name, double &v, double lo, double hi) {
+        const std::string s = Setting(name, "");
+        if (s.empty()) return;
+        char *end;
+        const double x = std::strtod(s.c_str(), &end);
+        if (end != s.c_str() && !*end && x >= lo && x <= hi) v = x, log += std::string(name) + "=" + s + " ";
+        else log += std::string(name) + "=" + s + " (ignored) ";
+    };
+    const std::string m = Setting("HANDS_MATTE", "");
+    if (m == "capsules" || m == "mesh") p.mesh = m == "mesh", log += "HANDS_MATTE=" + m + " ";
+    num("HANDS_MATTE_MARGIN", p.marginDeg, 0, 10);
+    num("HANDS_MATTE_MOTION", p.motionMs, 0, 200);
+    num("HANDS_MATTE_MOTION_MAX", p.motionMaxDeg, 0, 10);
+    const std::string sh = Setting("HANDS_MATTE_SHIFT", "");
+    if (!sh.empty()) log += "HANDS_MATTE_SHIFT=" + sh + (ParseShift(sh, p.shift) ? " " : " (ignored) ");
+    return log;
+}
+
+double MatteParams::Margin(double dist, double speed) const {
+    const double still = dist * std::tan(marginDeg * M_PI / 180);
+    const double moving = std::min(speed * motionMs / 1000, dist * std::tan(motionMaxDeg * M_PI / 180));
+    return std::max(minMarginM, still + moving);
+}
 
 // ------------------------------------------------------------------------------- hands
 
-bool Hands::Read() {
-    if (!map_) {
-        const int64_t now = MonoNs();
-        if (now - lastOpenTry_ < 1'000'000'000) return false;
-        lastOpenTry_ = now;
-        const std::string path = "/run/user/" + std::to_string(getuid()) + "/frametop-hands/hands";
-        fd_ = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-        if (fd_ < 0) return false;
-        struct stat st;
-        if (fstat(fd_, &st) < 0 || st.st_uid != getuid() || size_t(st.st_size) < sizeof(fh_hands_t)) {
-            close(fd_), fd_ = -1;
-            return false;
-        }
-        void *m = mmap(nullptr, sizeof(fh_hands_t), PROT_READ, MAP_SHARED, fd_, 0);
-        if (m == MAP_FAILED) {
-            close(fd_), fd_ = -1;
-            return false;
-        }
-        map_ = m;
+Hands::~Hands() {
+    if (map_) munmap(const_cast<void *>(map_), mapLen_);
+    if (gmap_) munmap(const_cast<void *>(gmap_), sizeof(fh_gestures_t));
+    if (fd_ >= 0) close(fd_);
+    if (gfd_ >= 0) close(gfd_);
+}
+
+namespace {
+
+// Maps up to `want` bytes of a file in the hands folder, if it's ours and at least `least` long.
+const void *MapFile(const char *name, size_t least, size_t want, int *fd, size_t *len) {
+    const std::string path = "/run/user/" + std::to_string(getuid()) + "/frametop-hands/" + name;
+    *fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (*fd < 0) return nullptr;
+    struct stat st;
+    if (fstat(*fd, &st) < 0 || st.st_uid != getuid() || size_t(st.st_size) < least) {
+        close(*fd), *fd = -1;
+        return nullptr;
     }
-    const auto *file = static_cast<const fh_hands_t *>(map_);
-    const auto *seq = const_cast<const uint64_t *>(&file->seq);
+    *len = std::min(size_t(st.st_size), want);
+    void *m = mmap(nullptr, *len, PROT_READ, MAP_SHARED, *fd, 0);
+    if (m == MAP_FAILED) {
+        close(*fd), *fd = -1;
+        return nullptr;
+    }
+    return m;
+}
+
+// A copy of a seqlocked file (both files start with magic, version, size, seq). False if it
+// was being written, or hasn't changed since `last`.
+bool CopySeq(const void *map, size_t len, uint64_t *last, void *out) {
+    const auto *seq = reinterpret_cast<const uint64_t *>(static_cast<const char *>(map) + 16);
     const uint64_t s1 = __atomic_load_n(seq, __ATOMIC_ACQUIRE);
-    if ((s1 & 1) || s1 == seq_) return false;
-    fh_hands_t copy;
-    std::memcpy(static_cast<void *>(&copy), map_, sizeof copy);
+    if ((s1 & 1) || s1 == *last) return false;
+    std::memcpy(out, map, len);
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    if (__atomic_load_n(seq, __ATOMIC_RELAXED) != s1 || std::memcmp(copy.magic, FH_HANDS_MAGIC, 8) != 0) return false;
-    seq_ = s1;
-    const uint32_t nhands = std::min<uint32_t>(copy.nhands, kMaxHands), ncaps = std::min<uint32_t>(copy.ncapsules, kMaxCapsules);
-    captureNs_ = int64_t(copy.capture_ns), publishNs_ = int64_t(copy.publish_ns);
+    if (__atomic_load_n(seq, __ATOMIC_RELAXED) != s1) return false;
+    *last = s1;
+    return true;
+}
+
+}  // namespace
+
+bool Hands::ReadFiles() {
+    const int64_t now = MonoNs();
+    bool got = false;
+    // a long-stale file: ft-hands may have stopped and made a new one since
+    if (map_ && now - publishNs_ > kReopenNs && now - lastOpenTry_ > kReopenNs) {
+        munmap(const_cast<void *>(map_), mapLen_), close(fd_);
+        map_ = nullptr, fd_ = -1, seq_ = 0;
+    }
+    if (!map_ && now - lastOpenTry_ >= 1'000'000'000) {
+        lastOpenTry_ = now;
+        map_ = MapFile("hands", sizeof(fh_hands_t), sizeof(fh_hands_v2_t), &fd_, &mapLen_);
+    }
+    static fh_hands_v2_t copy;
+    if (map_ && CopySeq(map_, mapLen_, &seq_, &copy)) {
+        if (std::memcmp(copy.v1.magic, FH_HANDS_MAGIC, 8) == 0) {
+            if (mapLen_ < sizeof copy) std::memset(reinterpret_cast<char *>(&copy) + mapLen_, 0, sizeof copy - mapLen_);
+            const bool v2 = copy.v1.version >= 2 && mapLen_ >= sizeof copy && copy.v1.size >= sizeof copy;
+            // A version 2 file grown under a version 1 mapping: map it again next time.
+            if (copy.v1.version >= 2 && mapLen_ < sizeof copy) {
+                munmap(const_cast<void *>(map_), mapLen_), close(fd_);
+                map_ = nullptr, fd_ = -1, seq_ = 0, lastOpenTry_ = 0;
+            }
+            version_ = int(copy.v1.version);
+            Ingest(copy.v1, v2 ? copy.fits : nullptr, nullptr);
+            got = true;
+        }
+    }
+    // the gestures file, written right after each hands update
+    if (gmap_ && now - publishNs_ > kReopenNs && now - lastGOpenTry_ > kReopenNs) {
+        munmap(const_cast<void *>(gmap_), sizeof(fh_gestures_t)), close(gfd_);
+        gmap_ = nullptr, gfd_ = -1, gseq_ = 0;
+    }
+    if (!gmap_ && now - lastGOpenTry_ >= 1'000'000'000) {
+        lastGOpenTry_ = now;
+        size_t len = 0;
+        gmap_ = MapFile("gestures", sizeof(fh_gestures_t), sizeof(fh_gestures_t), &gfd_, &len);
+    }
+    static fh_gestures_t g;
+    if (gmap_ && CopySeq(gmap_, sizeof g, &gseq_, &g) && std::memcmp(g.magic, FH_GESTURES_MAGIC, 8) == 0 && g.version >= 2)
+        Ingest(copy.v1, nullptr, &g);
+    return got;
+}
+
+void Hands::Ingest(const fh_hands_t &v1, const fh_hand_fit_t *fits, const fh_gestures_t *g) {
+    if (g) {   // gestures only
+        const Mat head = HeadAt(int64_t(g->capture_ns));
+        for (int k = 0; k < 4; ++k) {
+            const fh_pinch_t &in = k < 2 ? g->pinch[k] : g->grip[k - 2];
+            Gesture &o = k < 2 ? pinch_[k] : grip_[k - 2];
+            o.tracked = in.flags & FH_PINCH_TRACKED, o.down = in.flags & FH_PINCH_DOWN, o.lost = in.flags & FH_PINCH_LOST;
+            o.handId = in.hand_id, o.begins = in.begins, o.ends = in.ends;
+            o.beginNs = int64_t(in.begin_ns), o.endNs = int64_t(in.end_ns);
+            o.distance = in.distance, o.strength = in.strength;
+            if (Finite(in.point, 3)) Apply(head, in.point, o.point);
+            if (Finite(in.begin_point, 3)) Apply(HeadAt(o.beginNs), in.begin_point, o.beginPoint);
+        }
+        return;
+    }
+    ++frames_;
+    const uint32_t nhands = std::min<uint32_t>(v1.nhands, kMaxHands), ncaps = std::min<uint32_t>(v1.ncapsules, kMaxCapsules);
+    captureNs_ = int64_t(v1.capture_ns), publishNs_ = int64_t(v1.publish_ns);
     const Mat head = HeadAt(captureNs_);
 
-    // each hand's palm in the room, and its velocity from the last time it was seen
-    ids_.clear(), basePts_.clear();
-    std::vector<int> owners;   // the hand each capsule belongs to, in file order
+    seen_.clear();
+    std::vector<int> owners;   // the hand each capsule belongs to, in file order (-1: none kept)
     for (uint32_t k = 0; k < nhands; ++k) {
-        const fh_hand_t &h = copy.hands[k];
-        const uint32_t id = h.id;
-        const auto &pts = h.pts;
-        const int idx = int(ids_.size());
-        ids_.push_back(id);
-        owners.insert(owners.end(), std::min<uint32_t>(h.ncapsules, kMaxCapsules), idx);
-        HandPoints hp{id, (h.flags & FH_HAND_RIGHT) != 0, {}};
-        bool finite = true;
-        for (int j = 0; j < 21; ++j) {
-            for (float v : pts[j]) finite = finite && std::isfinite(v) && std::fabs(v) < 10;
-            Apply(head, pts[j], hp.p[j]);
-        }
-        if (finite) basePts_.push_back(hp);
-        double palm[3] = {0, 0, 0};
+        const fh_hand_t &in = v1.hands[k];
+        const uint32_t nc = std::min<uint32_t>(in.ncapsules, kMaxCapsules);
+        Hand h;
+        h.id = in.id;
+        h.right = in.flags & FH_HAND_RIGHT;
+        h.stereo = in.flags & FH_HAND_STEREO;
+        h.confidence = in.confidence;
+        h.captureNs = captureNs_;
+        const fh_hand_fit_t *f = fits && (fits[k].flags & FH_FIT_VALID) && fits[k].id == in.id ? &fits[k] : nullptr;
         bool ok = true;
-        for (int j : {0, 5, 9, 13, 17}) {
-            float w[3];
-            ok = ok && std::isfinite(pts[j][0]) && std::isfinite(pts[j][1]) && std::isfinite(pts[j][2]);
-            Apply(head, pts[j], w);
-            for (int i = 0; i < 3; ++i) palm[i] += w[i] / 5;
+        if (f) {
+            h.fit = true;
+            for (int j = 0; j < 21; ++j) {
+                ok = ok && Finite(f->joints[j].p, 3);
+                Apply(head, f->joints[j].p, h.p[j]);
+                h.radius[j] = std::isfinite(f->joints[j].radius) && f->joints[j].radius > 0 && f->joints[j].radius < 0.05
+                                  ? f->joints[j].radius : DefaultRadius(j);
+            }
+            for (int b = 0; b < 20; ++b) h.bone[b] = f->bone_len[b];
+            ok = ok && Finite(f->elbow, 3) && Finite(f->pinch_point, 3) && Finite(f->contact, 3);
+            Apply(head, f->elbow, h.elbow);
+            Apply(head, f->pinch_point, h.pinchPoint);
+            Apply(head, f->contact, h.contact);
+            h.elbowConf = f->elbow_conf, h.hasElbow = true;
+            h.pinchD[0] = f->pinch_d[0], h.pinchD[1] = f->pinch_d[1];
+            if (f->tracked_ns) h.captureNs = int64_t(f->tracked_ns);
+        } else {
+            for (int j = 0; j < 21; ++j) {
+                ok = ok && Finite(in.pts[j], 3);
+                Apply(head, in.pts[j], h.p[j]);
+                h.radius[j] = DefaultRadius(j);
+            }
+            for (int b = 0; b < 20; ++b) {
+                const int a = b % 4 == 0 ? 0 : b;   // bones 0, 4, 8, 12, 16 start at the wrist
+                h.bone[b] = float(Dist(h.p[a], h.p[b + 1]));
+            }
+            Mid(h.p[5], h.p[9], h.pinchPoint);
+            Mid(h.p[4], h.p[8], h.contact);
+            h.pinchD[0] = float(Dist(h.p[4], h.p[8])), h.pinchD[1] = float(Dist(h.p[4], h.p[12]));
+            // no elbow: the forearm carries on along the hand's axis (as ft-hands' capsule)
+            const double n = Dist(h.p[0], h.p[9]) + 1e-9;
+            for (int i = 0; i < 3; ++i) h.elbow[i] = float(h.p[0][i] + (h.p[0][i] - h.p[9][i]) / n * 0.25);
         }
-        Motion &m = motion_[id];
-        const double dt = (captureNs_ - m.ns) / 1e9;
         if (!ok) {
-            m = Motion{};
+            owners.insert(owners.end(), nc, -1);
+            motion_.erase(h.id);
             continue;
         }
+        // its palm's velocity in the room, from the last time it was seen
+        double palm[3];
+        h.Palm(palm);
+        Motion &m = motion_[h.id];
+        const double dt = (captureNs_ - m.ns) / 1e9;
         if (m.ns && dt > 0.005 && dt < 0.2) {
             double speed = 0;
             for (int i = 0; i < 3; ++i) {
@@ -127,11 +324,14 @@ bool Hands::Read() {
             speed = std::sqrt(speed);
             if (speed > kMaxSpeed)
                 for (double &v : m.v) v *= kMaxSpeed / speed;
-        } else {
+        } else if (!m.ns || dt >= 0.2) {
             m.v[0] = m.v[1] = m.v[2] = 0;
         }
         m.ns = captureNs_;
         std::memcpy(m.palm, palm, sizeof palm);
+        for (int i = 0; i < 3; ++i) h.v[i] = float(m.v[i]);
+        owners.insert(owners.end(), nc, int(seen_.size()));
+        seen_.push_back(h);
     }
     for (auto it = motion_.begin(); it != motion_.end();)
         it = captureNs_ - it->second.ns > kStaleNs ? motion_.erase(it) : std::next(it);
@@ -139,10 +339,9 @@ bool Hands::Read() {
 
     base_.clear(), owner_.clear();
     for (uint32_t k = 0; k < ncaps; ++k) {
-        const fh_capsule_t &f = copy.capsules[k];
-        bool ok = true;
-        for (float v : {f.a[0], f.a[1], f.a[2], f.b[0], f.b[1], f.b[2], f.ra, f.rb}) ok = ok && std::isfinite(v) && std::fabs(v) < 10;
-        if (!ok || f.ra <= 0 || f.rb <= 0) continue;
+        const fh_capsule_t &f = v1.capsules[k];
+        bool ok = Finite(f.a, 3) && Finite(f.b, 3) && std::isfinite(f.ra) && std::isfinite(f.rb);
+        if (!ok || f.ra <= 0 || f.rb <= 0 || f.ra > 1 || f.rb > 1) continue;
         Capsule c;
         Apply(head, f.a, c.a);
         Apply(head, f.b, c.b);
@@ -150,7 +349,6 @@ bool Hands::Read() {
         base_.push_back(c);
         owner_.push_back(owners[k]);
     }
-    return true;
 }
 
 void Hands::SetPrediction(bool on, double leadMs) {
@@ -168,48 +366,211 @@ Mat Hands::HeadAt(int64_t ns) const {
 bool Hands::Update(const Mat &head, int64_t nowNs) {
     history_.push_back({nowNs, head});
     while (!history_.empty() && nowNs - history_.front().ns > kHistoryNs) history_.erase(history_.begin());
-    Read();
-    if (nowNs - publishNs_ > kStaleNs) base_.clear(), owner_.clear(), basePts_.clear();
+    ReadFiles();
+    Advance(nowNs);
+    return !world_.empty() || !shown_.empty();
+}
+
+bool Hands::Feed(const void *hands, size_t size, const fh_gestures_t *gestures, const Mat &head, int64_t nowNs) {
+    history_.push_back({nowNs, head});
+    while (!history_.empty() && nowNs - history_.front().ns > kHistoryNs) history_.erase(history_.begin());
+    static fh_hands_v2_t copy;
+    std::memset(&copy, 0, sizeof copy);
+    if (hands && size >= sizeof(fh_hands_t)) {
+        std::memcpy(&copy, hands, std::min(size, sizeof copy));
+        if (std::memcmp(copy.v1.magic, FH_HANDS_MAGIC, 8) == 0) {
+            const bool v2 = copy.v1.version >= 2 && size >= sizeof copy;
+            version_ = int(copy.v1.version);
+            Ingest(copy.v1, v2 ? copy.fits : nullptr, nullptr);
+        }
+    }
+    if (gestures && std::memcmp(gestures->magic, FH_GESTURES_MAGIC, 8) == 0 && gestures->version >= 2)
+        Ingest(copy.v1, nullptr, gestures);
+    Advance(nowNs);
+    return !shown_.empty();
+}
+
+void Hands::Advance(int64_t nowNs) {
+    nowNs_ = nowNs;
+    fresh_ = nowNs - publishNs_ <= kStaleNs;
+    if (!fresh_) base_.clear(), owner_.clear(), seen_.clear();
     // move each hand ahead to when this frame will be on the displays; a slow hand's
     // velocity is mostly tracking noise, so it fades out below kStillSpeed
     const double ahead = std::clamp((nowNs + leadNs_ - captureNs_) / 1e9, 0.0, kMaxAhead);
+    auto gain = [](const float v[3]) {
+        const double speed = std::sqrt(double(v[0]) * v[0] + double(v[1]) * v[1] + double(v[2]) * v[2]);
+        return std::clamp((speed - kStillSpeed) / kStillSpeed, 0.0, 1.0);
+    };
+    shown_ = seen_;
     world_ = base_;
-    for (size_t k = 0; predict_ && k < world_.size(); ++k) {
-        if (owner_[k] < 0) continue;
-        const auto m = motion_.find(ids_[owner_[k]]);
-        if (m == motion_.end()) continue;
-        const double *v = m->second.v;
-        const double speed = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-        const double gain = std::clamp((speed - kStillSpeed) / kStillSpeed, 0.0, 1.0);
-        for (int i = 0; i < 3; ++i) {
-            world_[k].a[i] += float(v[i] * gain * ahead);
-            world_[k].b[i] += float(v[i] * gain * ahead);
+    if (predict_) {
+        for (Hand &h : shown_) {
+            const double k = gain(h.v) * ahead;
+            auto move = [&](float p[3]) {
+                for (int i = 0; i < 3; ++i) p[i] += float(h.v[i] * k);
+            };
+            for (auto &p : h.p) move(p);
+            move(h.elbow), move(h.pinchPoint), move(h.contact);
+        }
+        for (size_t k = 0; k < world_.size(); ++k) {
+            if (owner_[k] < 0) continue;
+            const Hand &h = seen_[owner_[k]];
+            const double a = gain(h.v) * ahead;
+            for (int i = 0; i < 3; ++i) world_[k].a[i] += float(h.v[i] * a), world_[k].b[i] += float(h.v[i] * a);
         }
     }
-    return !world_.empty();
+    // the correction hook: Room View's picture of the hand, off by distance (off by default)
+    if (!shift_.empty() && !history_.empty()) {
+        const Mat &head = history_.back().head;
+        const double at[3] = {head.m[0][3], head.m[1][3], head.m[2][3]};
+        const double up[3] = {head.m[0][1], head.m[1][1], head.m[2][1]}, right[3] = {head.m[0][0], head.m[1][0], head.m[2][0]};
+        for (size_t k = 0; k < shown_.size(); ++k) {
+            Hand &h = shown_[k];
+            double palm[3];
+            h.Palm(palm);
+            const double d = std::sqrt((palm[0] - at[0]) * (palm[0] - at[0]) + (palm[1] - at[1]) * (palm[1] - at[1]) +
+                                       (palm[2] - at[2]) * (palm[2] - at[2]));
+            double yaw = shift_.front().yawDeg, pitch = shift_.front().pitchDeg;
+            for (size_t i = 1; i < shift_.size(); ++i) {
+                if (d <= shift_[i - 1].dist) break;
+                const Shift &a = shift_[i - 1], &b = shift_[i];
+                const double t = std::clamp((d - a.dist) / (b.dist - a.dist), 0.0, 1.0);
+                yaw = a.yawDeg + (b.yawDeg - a.yawDeg) * t, pitch = a.pitchDeg + (b.pitchDeg - a.pitchDeg) * t;
+            }
+            auto turn = [&](float p[3]) {
+                Turn(p, at, up, -yaw * M_PI / 180);    // positive yaw: to the right
+                Turn(p, at, right, pitch * M_PI / 180);
+            };
+            for (auto &p : h.p) turn(p);
+            turn(h.elbow), turn(h.pinchPoint), turn(h.contact);
+            for (size_t c = 0; c < world_.size(); ++c)
+                if (owner_[c] == int(k)) turn(world_[c].a), turn(world_[c].b);
+        }
+    }
 }
 
 void Hands::Points(int64_t nowNs, bool predict, double leadMs, std::vector<HandPoints> &out) const {
-    out = basePts_;
-    if (!predict) return;
+    out.clear();
     const double ahead = std::clamp((nowNs + leadMs * 1e6 - captureNs_) / 1e9, 0.0, kMaxAhead);
-    for (HandPoints &hp : out) {
-        const auto m = motion_.find(hp.id);
-        if (m == motion_.end()) continue;
-        const double *v = m->second.v;
-        const double speed = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-        const double gain = std::clamp((speed - kStillSpeed) / kStillSpeed, 0.0, 1.0);   // as Update
+    for (const Hand &h : seen_) {
+        HandPoints hp{h.id, h.right, {}};
+        std::memcpy(hp.p, h.p, sizeof hp.p);
+        const double speed = h.speed();
+        const double gain = predict ? std::clamp((speed - kStillSpeed) / kStillSpeed, 0.0, 1.0) : 0.0;   // as Advance
         for (auto &p : hp.p)
-            for (int i = 0; i < 3; ++i) p[i] += float(v[i] * gain * ahead);
+            for (int i = 0; i < 3; ++i) p[i] += float(h.v[i] * gain * ahead);
+        out.push_back(hp);
     }
 }
 
-void EyePositions(const Mat &head, double out[2][3]) {
-    const vr::EVREye eyes[2] = {vr::Eye_Left, vr::Eye_Right};
-    for (int e = 0; e < 2; ++e) {
-        const Mat t = vr::VRSystem()->GetEyeToHeadTransform(eyes[e]);
-        for (int i = 0; i < 3; ++i)
-            out[e][i] = head.m[i][0] * t.m[0][3] + head.m[i][1] * t.m[1][3] + head.m[i][2] * t.m[2][3] + head.m[i][3];
+// ------------------------------------------------------------------------------- matte
+
+namespace {
+
+// A finger's half-width at each joint, metres, at the average hand's size: real hands
+// (thumb and index about 20 mm across at the base, 15 at the tip), not ft-hands' capsules
+// (which have a margin in them). The margin is added on top (MatteParams::Margin).
+float JointRadius(int j) {
+    static const float r[21] = {0,      0.0125f, 0.0110f, 0.0095f, 0.0085f,    // wrist, thumb
+                                0.0105f, 0.0095f, 0.0085f, 0.0075f,           // index
+                                0.0108f, 0.0098f, 0.0088f, 0.0078f,           // middle
+                                0.0102f, 0.0092f, 0.0083f, 0.0074f,           // ring
+                                0.0092f, 0.0083f, 0.0076f, 0.0068f};          // little
+    return r[j];
+}
+
+struct V {
+    double x, y, z;
+    V(double a = 0, double b = 0, double c = 0) : x(a), y(b), z(c) {}
+    explicit V(const float p[3]) : x(p[0]), y(p[1]), z(p[2]) {}
+    V operator+(const V &o) const { return {x + o.x, y + o.y, z + o.z}; }
+    V operator-(const V &o) const { return {x - o.x, y - o.y, z - o.z}; }
+    V operator*(double k) const { return {x * k, y * k, z * k}; }
+    double dot(const V &o) const { return x * o.x + y * o.y + z * o.z; }
+    V cross(const V &o) const { return {y * o.z - z * o.y, z * o.x - x * o.z, x * o.y - y * o.x}; }
+    double norm() const { return std::sqrt(dot(*this)); }
+    V unit() const {
+        const double n = norm();
+        return n > 1e-9 ? *this * (1 / n) : V{};
+    }
+};
+
+std::array<float, 3> F3(const V &v) { return {float(v.x), float(v.y), float(v.z)}; }
+
+}  // namespace
+
+void BuildMatte(const std::vector<Hand> &hands, const std::vector<Capsule> &fileCapsules, const double headPos[3],
+                const MatteParams &p, Matte &out) {
+    out.clear();
+    const V head(headPos[0], headPos[1], headPos[2]);
+    if (!p.mesh) {
+        // ft-hands' capsules have a margin of 4 mm in them already; the angular margin is
+        // the mesh's (the capsule matte stays as it was, for comparison)
+        out.caps = fileCapsules;
+        return;
+    }
+    for (const Hand &h : hands) {
+        V P[21];
+        for (int j = 0; j < 21; ++j) P[j] = V(h.p[j]);
+        double palm[3];
+        h.Palm(palm);
+        const double dist = (V(palm[0], palm[1], palm[2]) - head).norm();
+        const double m = p.Margin(dist, h.speed());
+        const double k = std::clamp((P[9] - P[0]).norm() / kPalmLen, 0.7, 1.4);   // this hand's size
+        // fingers: a tapered capsule per bone; the tip's end pulled back (MediaPipe's tip
+        // point is the very end of the finger, a capsule's round end reaches past it)
+        static const int kBones[][2] = {{1, 2},   {2, 3},   {3, 4},   {5, 6},   {6, 7},   {7, 8},   {9, 10},  {10, 11},
+                                        {11, 12}, {13, 14}, {14, 15}, {15, 16}, {17, 18}, {18, 19}, {19, 20}};
+        for (const auto &b : kBones) {
+            const double ra = JointRadius(b[0]) * k, rb = JointRadius(b[1]) * k;
+            V a = P[b[0]], e = P[b[1]];
+            if (b[1] % 4 == 0) {
+                const V d = e - a;
+                const double n = d.norm();
+                if (n > 1e-6) e = e - d * (std::min(0.5 * rb, 0.4 * n) / n);
+            }
+            out.caps.push_back({{float(a.x), float(a.y), float(a.z)}, {float(e.x), float(e.y), float(e.z)}, float(ra + m),
+                                float(rb + m)});
+        }
+        // the palm: a slab through the wrist and the knuckles, widened to the hand's edges
+        const V across = (P[17] - P[5]).unit();   // from the index side to the little finger's
+        const V fwd = (P[9] - P[0]).unit();
+        const V normal = across.cross(fwd).unit();
+        Hull palmHull;
+        const double half = 0.012 * k;
+        const V edge[] = {P[0] + across * (0.026 * k), P[0] - across * (0.020 * k), P[1],
+                          P[5] - across * (0.008 * k),  P[9],                      P[13],
+                          P[17] + across * (0.009 * k), (P[0] + P[17]) * 0.5 + across * (0.014 * k)};
+        for (const V &q : edge)
+            for (double s : {-half, half}) palmHull.v.push_back(F3(q + normal * s));
+        out.hulls.push_back(palmHull), out.hullMargin.push_back(float(m));
+        // the thumb's web, between the thumb's base and the index knuckle
+        Hull web;
+        const double wh = 0.007 * k;
+        for (const V &q : {P[1], P[2], P[5] + (P[6] - P[5]) * 0.15, P[5]})
+            for (double s : {-wh, wh}) web.v.push_back(F3(q + normal * s));
+        out.hulls.push_back(web), out.hullMargin.push_back(float(m));
+        // the forearm: a tapered tube from the wrist toward the elbow (flatter than round)
+        V dir = V(h.elbow) - P[0];
+        double len = dir.norm();
+        if (len < 0.05) continue;
+        dir = dir * (1 / len);
+        len = std::min(len, h.hasElbow ? 0.32 * k : 0.16);
+        V a = across - dir * across.dot(dir);
+        if (a.norm() < 1e-6) a = normal.cross(dir);
+        a = a.unit();
+        const V b = dir.cross(a).unit();
+        Hull arm;
+        const double rw[2] = {0.027 * k, 0.019 * k}, re[2] = {0.035 * k, 0.029 * k};
+        for (int ring = 0; ring < 2; ++ring) {
+            const V c = P[0] + dir * (ring ? len : 0.0);
+            const double *r = ring ? re : rw;
+            for (int i = 0; i < 8; ++i) {
+                const double t = i * M_PI / 4;
+                arm.v.push_back(F3(c + a * (r[0] * std::cos(t)) + b * (r[1] * std::sin(t))));
+            }
+        }
+        out.hulls.push_back(arm), out.hullMargin.push_back(float(m));
     }
 }
 
@@ -246,10 +607,152 @@ bool OnPanel(const Panel &p, const double e[3], const double q[3], double *x, do
     return true;
 }
 
+constexpr double kEps = 0.002;   // a hand pushed through the panel: only the part in front is cut
+
+bool ProjectCapsule(const Panel &p, const Capsule &c, const double eye[3], Capsule2D *out) {
+    const double pxPerM = p.pxWidth / p.width;
+    double a[3], b[3];
+    const double wa[3] = {c.a[0], c.a[1], c.a[2]}, wb[3] = {c.b[0], c.b[1], c.b[2]};
+    ToLocal(p.pose, wa, a);
+    ToLocal(p.pose, wb, b);
+    // a hand pushed through the panel: keep the part in front
+    if (a[2] < kEps && b[2] < kEps) return false;
+    if (a[2] < kEps || b[2] < kEps) {
+        double *in = a[2] < kEps ? b : a, *out3 = a[2] < kEps ? a : b;
+        const double t = (in[2] - kEps) / (in[2] - out3[2]);
+        for (int i = 0; i < 3; ++i) out3[i] = in[i] + t * (out3[i] - in[i]);
+    }
+    // and the part near the eye's plane: it would land far across the panel with a
+    // huge radius, so one bad hand estimate there tears a hole through the screen
+    const double zmax = eye[2] - kNear;
+    if (a[2] > zmax && b[2] > zmax) return false;
+    if (a[2] > zmax || b[2] > zmax) {
+        double *in = a[2] > zmax ? b : a, *out3 = a[2] > zmax ? a : b;
+        const double t = (zmax - in[2]) / (out3[2] - in[2]);
+        for (int i = 0; i < 3; ++i) out3[i] = in[i] + t * (out3[i] - in[i]);
+    }
+    double ax, ay, ga, bx, by, gb;
+    if (!OnPanel(p, eye, a, &ax, &ay, &ga) || !OnPanel(p, eye, b, &bx, &by, &gb)) return false;
+    const float ra = float(c.ra * ga * pxPerM), rb = float(c.rb * gb * pxPerM);
+    const float r = std::max(ra, rb);
+    if (std::max(ax, bx) + r < 0 || std::min(ax, bx) - r > p.pxWidth || std::max(ay, by) + r < 0 ||
+        std::min(ay, by) - r > p.pxHeight)
+        return false;
+    *out = {float(ax), float(ay), float(bx), float(by), ra, rb};
+    return true;
+}
+
+// Keeps the part of a convex point set with lo <= z <= hi: the points inside, and where the
+// segments between an inside and an outside point cross the plane (the clipped hull's corners
+// are among them).
+void ClipZ(std::vector<std::array<double, 3>> &pts, double plane, bool keepAbove) {
+    std::vector<std::array<double, 3>> out;
+    auto in = [&](const std::array<double, 3> &q) { return keepAbove ? q[2] >= plane : q[2] <= plane; };
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (in(pts[i])) {
+            out.push_back(pts[i]);
+            continue;
+        }
+        for (size_t j = 0; j < pts.size(); ++j) {
+            if (!in(pts[j])) continue;
+            const double t = (plane - pts[i][2]) / (pts[j][2] - pts[i][2]);
+            out.push_back({pts[i][0] + t * (pts[j][0] - pts[i][0]), pts[i][1] + t * (pts[j][1] - pts[i][1]), plane});
+        }
+    }
+    pts.swap(out);
+}
+
+double Cross2(const std::array<double, 2> &o, const std::array<double, 2> &a, const std::array<double, 2> &b) {
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+}
+
+// The convex hull (counterclockwise in x right, y down... either way: normals are set
+// pointing away from the centroid), at most kMaxHullEdges corners.
+std::vector<std::array<double, 2>> Hull2(std::vector<std::array<double, 2>> p) {
+    std::sort(p.begin(), p.end());
+    p.erase(std::unique(p.begin(), p.end(), [](auto &a, auto &b) { return std::fabs(a[0] - b[0]) < 1e-3 && std::fabs(a[1] - b[1]) < 1e-3; }),
+            p.end());
+    if (p.size() < 3) return p;
+    std::vector<std::array<double, 2>> h(2 * p.size());
+    size_t k = 0;
+    for (size_t i = 0; i < p.size(); ++i) {
+        while (k >= 2 && Cross2(h[k - 2], h[k - 1], p[i]) <= 0) --k;
+        h[k++] = p[i];
+    }
+    for (size_t i = p.size() - 1, t = k + 1; i > 0; --i) {
+        while (k >= t && Cross2(h[k - 2], h[k - 1], p[i - 1]) <= 0) --k;
+        h[k++] = p[i - 1];
+    }
+    h.resize(k - 1);
+    // too many corners: drop the ones that take the least area away
+    while (h.size() > size_t(kMaxHullEdges)) {
+        size_t best = 0;
+        double least = 1e300;
+        for (size_t i = 0; i < h.size(); ++i) {
+            const double a = std::fabs(Cross2(h[(i + h.size() - 1) % h.size()], h[i], h[(i + 1) % h.size()]));
+            if (a < least) least = a, best = i;
+        }
+        h.erase(h.begin() + long(best));
+    }
+    return h;
+}
+
+constexpr float kHullFeather = 2.0f;   // pixels either side of a hull's edge
+
+bool ProjectHull(const Panel &p, const Hull &hull, float margin, const double eye[3], Hull2D *out) {
+    const double pxPerM = p.pxWidth / p.width;
+    std::vector<std::array<double, 3>> pts;
+    for (const auto &q : hull.v) {
+        const double w[3] = {q[0], q[1], q[2]};
+        double l[3];
+        ToLocal(p.pose, w, l);
+        pts.push_back({l[0], l[1], l[2]});
+    }
+    ClipZ(pts, kEps, true);              // the part in front of the panel
+    if (pts.size() < 3) return false;
+    ClipZ(pts, eye[2] - kNear, false);   // ...and not near the eye's plane (see ProjectCapsule)
+    if (pts.size() < 3) return false;
+    std::vector<std::array<double, 2>> flat;
+    double grow = 0;
+    for (const auto &q : pts) {
+        double x, y, g;
+        if (!OnPanel(p, eye, q.data(), &x, &y, &g)) continue;
+        flat.push_back({x, y});
+        grow = std::max(grow, g);
+    }
+    const auto h = Hull2(flat);
+    if (h.size() < 3) return false;
+    double cx = 0, cy = 0;
+    for (const auto &q : h) cx += q[0] / h.size(), cy += q[1] / h.size();
+    Hull2D o;
+    o.r = float(margin * grow * pxPerM);
+    o.box[0] = o.box[1] = 1e9f, o.box[2] = o.box[3] = -1e9f;
+    for (size_t i = 0; i < h.size(); ++i) {
+        const auto &a = h[i], &b = h[(i + 1) % h.size()];
+        double nx = b[1] - a[1], ny = -(b[0] - a[0]);
+        const double n = std::hypot(nx, ny);
+        if (n < 1e-6) continue;
+        nx /= n, ny /= n;
+        double c = nx * a[0] + ny * a[1];
+        if (nx * cx + ny * cy - c > 0) nx = -nx, ny = -ny, c = -c;   // point away from the middle
+        o.e[o.n][0] = float(nx), o.e[o.n][1] = float(ny), o.e[o.n][2] = float(c);
+        ++o.n;
+        o.box[0] = std::min(o.box[0], float(a[0])), o.box[1] = std::min(o.box[1], float(a[1]));
+        o.box[2] = std::max(o.box[2], float(a[0])), o.box[3] = std::max(o.box[3], float(a[1]));
+    }
+    if (o.n < 3) return false;
+    // a corner's offset reaches further than r (the edges are pushed out, not rounded): the
+    // box takes the sharpest corner's reach
+    const float reach = o.r * 2.0f + kHullFeather + 1;
+    o.box[0] -= reach, o.box[1] -= reach, o.box[2] += reach, o.box[3] += reach;
+    if (o.box[2] < 0 || o.box[0] > p.pxWidth || o.box[3] < 0 || o.box[1] > p.pxHeight) return false;
+    *out = o;
+    return true;
+}
+
 }  // namespace
 
 bool Project(const Panel &p, const std::vector<Capsule> &caps, const double eyes[2][3], std::vector<Capsule2D> out[2]) {
-    const double pxPerM = p.pxWidth / p.width;
     bool any = false;
     for (int e = 0; e < 2; ++e) {
         out[e].clear();
@@ -257,493 +760,31 @@ bool Project(const Panel &p, const std::vector<Capsule> &caps, const double eyes
         ToLocal(p.pose, eyes[e], eye);
         if (eye[2] <= 0.01) continue;  // behind the panel
         for (const Capsule &c : caps) {
-            double a[3], b[3];
-            const double wa[3] = {c.a[0], c.a[1], c.a[2]}, wb[3] = {c.b[0], c.b[1], c.b[2]};
-            ToLocal(p.pose, wa, a);
-            ToLocal(p.pose, wb, b);
-            // a hand pushed through the panel: keep the part in front
-            const double eps = 0.002;
-            if (a[2] < eps && b[2] < eps) continue;
-            if (a[2] < eps || b[2] < eps) {
-                double *in = a[2] < eps ? b : a, *out3 = a[2] < eps ? a : b;
-                const double t = (in[2] - eps) / (in[2] - out3[2]);
-                for (int i = 0; i < 3; ++i) out3[i] = in[i] + t * (out3[i] - in[i]);
-            }
-            // and the part near the eye's plane: it would land far across the panel with a
-            // huge radius, so one bad hand estimate there tears a hole through the screen
-            const double zmax = eye[2] - kNear;
-            if (a[2] > zmax && b[2] > zmax) continue;
-            if (a[2] > zmax || b[2] > zmax) {
-                double *in = a[2] > zmax ? b : a, *out3 = a[2] > zmax ? a : b;
-                const double t = (zmax - in[2]) / (out3[2] - in[2]);
-                for (int i = 0; i < 3; ++i) out3[i] = in[i] + t * (out3[i] - in[i]);
-            }
-            double ax, ay, ga, bx, by, gb;
-            if (!OnPanel(p, eye, a, &ax, &ay, &ga) || !OnPanel(p, eye, b, &bx, &by, &gb)) continue;
-            const float ra = float(c.ra * ga * pxPerM), rb = float(c.rb * gb * pxPerM);
-            const float r = std::max(ra, rb);
-            if (std::max(ax, bx) + r < 0 || std::min(ax, bx) - r > p.pxWidth || std::max(ay, by) + r < 0 ||
-                std::min(ay, by) - r > p.pxHeight)
-                continue;
-            out[e].push_back({float(ax), float(ay), float(bx), float(by), ra, rb});
-            any = true;
+            Capsule2D d;
+            if (ProjectCapsule(p, c, eye, &d)) out[e].push_back(d), any = true;
         }
     }
     return any;
 }
 
-// ---------------------------------------------------------------------------- renderer
-
-namespace {
-
-PFNEGLGETPLATFORMDISPLAYEXTPROC pGetPlatformDisplay;
-PFNEGLCREATEIMAGEKHRPROC pCreateImage;
-PFNEGLDESTROYIMAGEKHRPROC pDestroyImage;
-PFNGLEGLIMAGETARGETTEXTURE2DOESPROC pImageTargetTexture;
-PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC pImageTargetRenderbuffer;
-PFNEGLCREATESYNCKHRPROC pCreateSync;
-PFNEGLDESTROYSYNCKHRPROC pDestroySync;
-PFNEGLCLIENTWAITSYNCKHRPROC pClientWaitSync;
-
-const char *kVertex = R"(
-attribute vec2 pos;          // the unit square
-uniform vec4 rect;           // where it goes, in pixels of the eye's half: x0 y0 x1 y1
-uniform vec2 size;           // the half's size in pixels
-varying vec2 px;
-varying vec2 uv;
-void main() {
-    px = mix(rect.xy, rect.zw, pos);
-    uv = px / size;
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
-})";
-
-// The client's pixels, opaque (its alpha is ignored, as IgnoreTextureAlpha did).
-const char *kCopy = R"(
-#extension GL_OES_EGL_image_external : require
-precision highp float;   // mediump (16-bit on Adreno) steps 1.7 texels across a 3440-pixel screen
-uniform samplerExternalOES tex;
-varying vec2 uv;
-void main() { gl_FragColor = vec4(texture2D(tex, uv).rgb, 1.0); })";
-
-// Coverage of one tapered capsule; blended to take that much alpha away.
-const char *kCut = R"(
-precision highp float;
-uniform vec2 a, b, r;
-uniform float feather;
-varying vec2 px;
-void main() {
-    vec2 ab = b - a;
-    float t = clamp(dot(px - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
-    float d = length(px - (a + t * ab));
-    float rad = mix(r.x, r.y, t);
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0 - smoothstep(rad - feather, rad + feather, d));
-})";
-
-// A probe dot: the colour inside, a dark ring around it so it reads on any background.
-const char *kMark = R"(
-precision highp float;
-uniform vec2 c;
-uniform float r;
-uniform vec3 color;
-varying vec2 px;
-void main() {
-    float d = length(px - c);
-    float a = 1.0 - smoothstep(r - 0.75, r + 0.75, d);
-    if (a <= 0.0) discard;
-    gl_FragColor = vec4(d > r - 2.0 ? vec3(0.0) : color, a);
-})";
-
-unsigned Shader(GLenum type, const char *src) {
-    const GLuint s = glCreateShader(type);
-    glShaderSource(s, 1, &src, nullptr);
-    glCompileShader(s);
-    GLint ok = 0;
-    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        char log[1024] = "";
-        glGetShaderInfoLog(s, sizeof log, nullptr, log);
-        std::fprintf(stderr, "handcut: shader: %s\n", log);
-    }
-    return s;
-}
-
-unsigned Program(const char *fs) {
-    const GLuint p = glCreateProgram();
-    glAttachShader(p, Shader(GL_VERTEX_SHADER, kVertex));
-    glAttachShader(p, Shader(GL_FRAGMENT_SHADER, fs));
-    glBindAttribLocation(p, 0, "pos");
-    glLinkProgram(p);
-    GLint ok = 0;
-    glGetProgramiv(p, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char log[1024] = "";
-        glGetProgramInfoLog(p, sizeof log, nullptr, log);
-        std::fprintf(stderr, "handcut: program: %s\n", log);
-        return 0;
-    }
-    return p;
-}
-
-EGLImageKHR ImageFor(EGLDisplay dpy, const ft_dmabuf &b) {
-    static const EGLint fd[4] = {EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE1_FD_EXT, EGL_DMA_BUF_PLANE2_FD_EXT,
-                                 EGL_DMA_BUF_PLANE3_FD_EXT};
-    static const EGLint off[4] = {EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE1_OFFSET_EXT,
-                                  EGL_DMA_BUF_PLANE2_OFFSET_EXT, EGL_DMA_BUF_PLANE3_OFFSET_EXT};
-    static const EGLint pitch[4] = {EGL_DMA_BUF_PLANE0_PITCH_EXT, EGL_DMA_BUF_PLANE1_PITCH_EXT,
-                                    EGL_DMA_BUF_PLANE2_PITCH_EXT, EGL_DMA_BUF_PLANE3_PITCH_EXT};
-    static const EGLint lo[4] = {EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
-                                 EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT};
-    static const EGLint hi[4] = {EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT,
-                                 EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT};
-    EGLint a[64];
-    int n = 0;
-    a[n++] = EGL_WIDTH, a[n++] = b.width, a[n++] = EGL_HEIGHT, a[n++] = b.height;
-    a[n++] = EGL_LINUX_DRM_FOURCC_EXT, a[n++] = EGLint(b.format);
-    for (int i = 0; i < b.n_planes && i < 4; ++i) {
-        a[n++] = fd[i], a[n++] = b.fd[i], a[n++] = off[i], a[n++] = EGLint(b.offset[i]);
-        a[n++] = pitch[i], a[n++] = EGLint(b.stride[i]);
-        if (b.modifier != DRM_FORMAT_MOD_INVALID) {
-            a[n++] = lo[i], a[n++] = EGLint(b.modifier & 0xffffffff);
-            a[n++] = hi[i], a[n++] = EGLint(b.modifier >> 32);
-        }
-    }
-    a[n++] = EGL_NONE;
-    return pCreateImage(dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, a);
-}
-
-}  // namespace
-
-Renderer::~Renderer() {
-    for (auto &[k, r] : rings_)
-        for (Output &o : r.out) FreeOutput(o);
-    for (auto &[k, im] : imported_) {
-        glDeleteTextures(1, &im.tex);
-        pDestroyImage(EGLDisplay(dpy_), EGLImageKHR(im.image));
-    }
-    if (ctx_) eglDestroyContext(EGLDisplay(dpy_), EGLContext(ctx_));
-    if (dpy_) eglTerminate(EGLDisplay(dpy_));
-    if (gbm_) gbm_device_destroy(static_cast<gbm_device *>(gbm_));
-    if (drm_ >= 0) close(drm_);
-}
-
-bool Renderer::Init(const std::vector<uint64_t> &modifiers, std::function<void(const Output *)> released) {
-    if (ready_) return true;
-    modifiers_ = modifiers;
-    released_ = std::move(released);
-    drm_ = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
-    if (drm_ < 0) return std::perror("handcut: /dev/dri/renderD128"), false;
-    gbm_ = gbm_create_device(drm_);
-    pGetPlatformDisplay = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
-    pCreateImage = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(eglGetProcAddress("eglCreateImageKHR"));
-    pDestroyImage = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(eglGetProcAddress("eglDestroyImageKHR"));
-    pImageTargetTexture = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(eglGetProcAddress("glEGLImageTargetTexture2DOES"));
-    pImageTargetRenderbuffer = reinterpret_cast<PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC>(
-        eglGetProcAddress("glEGLImageTargetRenderbufferStorageOES"));
-    pCreateSync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(eglGetProcAddress("eglCreateSyncKHR"));
-    pDestroySync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(eglGetProcAddress("eglDestroySyncKHR"));
-    pClientWaitSync = reinterpret_cast<PFNEGLCLIENTWAITSYNCKHRPROC>(eglGetProcAddress("eglClientWaitSyncKHR"));
-    if (!gbm_ || !pGetPlatformDisplay || !pCreateImage || !pImageTargetTexture || !pImageTargetRenderbuffer ||
-        !pCreateSync || !pDestroySync || !pClientWaitSync) {
-        std::fprintf(stderr, "handcut: GBM or EGL extensions missing\n");
-        return false;
-    }
-    EGLDisplay dpy = pGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, gbm_, nullptr);
-    if (dpy == EGL_NO_DISPLAY || !eglInitialize(dpy, nullptr, nullptr)) return std::fprintf(stderr, "handcut: no EGL display\n"), false;
-    dpy_ = dpy;
-    eglBindAPI(EGL_OPENGL_ES_API);
-    const EGLint attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-    EGLContext ctx = eglCreateContext(dpy, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, attrs);
-    if (ctx == EGL_NO_CONTEXT || !eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx))
-        return std::fprintf(stderr, "handcut: no surfaceless GLES context\n"), false;
-    ctx_ = ctx;
-    copyProg_ = Program(kCopy);
-    cutProg_ = Program(kCut);
-    markProg_ = Program(kMark);
-    if (!copyProg_ || !cutProg_ || !markProg_) return false;
-    const float quad[] = {0, 0, 1, 0, 0, 1, 1, 1};
-    glGenBuffers(1, &vbo_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof quad, quad, GL_STATIC_DRAW);
-    ready_ = true;
-    return true;
-}
-
-unsigned Renderer::Texture(const void *key, const ft_dmabuf &src) {
-    auto it = imported_.find(key);
-    if (it != imported_.end()) return it->second.tex;
-    EGLImageKHR image = ImageFor(EGLDisplay(dpy_), src);
-    if (image == EGL_NO_IMAGE_KHR) {
-        std::fprintf(stderr, "handcut: can't import a %dx%d client buffer (format 0x%x modifier 0x%llx)\n", src.width,
-                     src.height, src.format, (unsigned long long)src.modifier);
-        return 0;
-    }
-    GLuint tex;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    pImageTargetTexture(GL_TEXTURE_EXTERNAL_OES, image);
-    imported_[key] = {image, tex};
-    return tex;
-}
-
-void Renderer::Forget(const void *key) {
-    auto it = imported_.find(key);
-    if (it == imported_.end()) return;
-    glDeleteTextures(1, &it->second.tex);
-    pDestroyImage(EGLDisplay(dpy_), EGLImageKHR(it->second.image));
-    imported_.erase(it);
-    for (auto &[k, r] : rings_)   // a new buffer at the same address isn't this one
-        for (Output &o : r.out)
-            if (o.key == key) o.drawn = false;
-}
-
-bool Renderer::MakeOutput(Output &o, int w, int h) {
-    auto *gbm = static_cast<gbm_device *>(gbm_);
-    std::vector<uint64_t> mods;
-    for (uint64_t m : modifiers_)
-        if (m != DRM_FORMAT_MOD_INVALID) mods.push_back(m);
-    gbm_bo *bo = mods.empty() ? gbm_bo_create(gbm, w, h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR)
-                              : gbm_bo_create_with_modifiers2(gbm, w, h, GBM_FORMAT_ABGR8888, mods.data(),
-                                                             unsigned(mods.size()), GBM_BO_USE_RENDERING);
-    if (!bo) return std::fprintf(stderr, "handcut: can't allocate a %dx%d output\n", w, h), false;
-    o.bo = bo;
-    o.buf = {};
-    o.buf.width = w, o.buf.height = h;
-    o.buf.format = DRM_FORMAT_ABGR8888;
-    o.buf.modifier = mods.empty() ? DRM_FORMAT_MOD_LINEAR : gbm_bo_get_modifier(bo);
-    o.buf.n_planes = gbm_bo_get_plane_count(bo);
-    for (int i = 0; i < o.buf.n_planes && i < 4; ++i) {
-        o.buf.fd[i] = gbm_bo_get_fd_for_plane(bo, i);
-        o.buf.offset[i] = gbm_bo_get_offset(bo, i);
-        o.buf.stride[i] = gbm_bo_get_stride_for_plane(bo, i);
-    }
-    EGLImageKHR image = ImageFor(EGLDisplay(dpy_), o.buf);
-    if (image == EGL_NO_IMAGE_KHR) return std::fprintf(stderr, "handcut: can't render to the output\n"), FreeOutput(o), false;
-    o.image = image;
-    glGenRenderbuffers(1, &o.rb);
-    glBindRenderbuffer(GL_RENDERBUFFER, o.rb);
-    pImageTargetRenderbuffer(GL_RENDERBUFFER, image);
-    glGenFramebuffers(1, &o.fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, o.rb);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        return std::fprintf(stderr, "handcut: output framebuffer incomplete\n"), FreeOutput(o), false;
-    return true;
-}
-
-void Renderer::FreeOutput(Output &o) {
-    if (o.bo && released_) released_(&o);
-    if (o.fence) pDestroySync(EGLDisplay(dpy_), EGLSyncKHR(o.fence));
-    if (o.fbo) glDeleteFramebuffers(1, &o.fbo);
-    if (o.rb) glDeleteRenderbuffers(1, &o.rb);
-    if (o.image) pDestroyImage(EGLDisplay(dpy_), EGLImageKHR(o.image));
-    for (int i = 0; i < o.buf.n_planes && i < 4; ++i)
-        if (o.buf.fd[i] >= 0) close(o.buf.fd[i]);
-    if (o.bo) gbm_bo_destroy(static_cast<gbm_bo *>(o.bo));
-    o = Output{};
-}
-
-void Renderer::DropPanel(int panel) {
-    auto it = rings_.find(panel);
-    if (it == rings_.end()) return;
-    for (Output &o : it->second.out) FreeOutput(o);
-    rings_.erase(it);
-}
-
-namespace {
-
-// The pixels a cutout's quad covers (see Draw), as x0 y0 x1 y1 in the eye's half.
-void Bounds(const Capsule2D &c, float b[4]) {
-    const float feather = std::max(1.5f, 0.15f * std::min(c.ra, c.rb));
-    const float r = std::max(c.ra, c.rb) + feather;
-    b[0] = std::min(c.ax, c.bx) - r, b[1] = std::min(c.ay, c.by) - r;
-    b[2] = std::max(c.ax, c.bx) + r, b[3] = std::max(c.ay, c.by) + r;
-}
-
-// Within a quarter pixel: the same picture.
-bool SameSpots(const std::vector<Capsule2D> a[2], const std::vector<Capsule2D> b[2]) {
+bool Project(const Panel &p, const Matte &m, const double eyes[2][3], Spots out[2]) {
+    bool any = false;
     for (int e = 0; e < 2; ++e) {
-        if (a[e].size() != b[e].size()) return false;
-        for (size_t i = 0; i < a[e].size(); ++i) {
-            const Capsule2D &p = a[e][i], &q = b[e][i];
-            for (float d : {p.ax - q.ax, p.ay - q.ay, p.bx - q.bx, p.by - q.by, p.ra - q.ra, p.rb - q.rb})
-                if (std::fabs(d) > 0.25f) return false;
+        out[e].clear();
+        double eye[3];
+        ToLocal(p.pose, eyes[e], eye);
+        if (eye[2] <= 0.01) continue;  // behind the panel
+        for (const Capsule &c : m.caps) {
+            Capsule2D d;
+            if (ProjectCapsule(p, c, eye, &d)) out[e].caps.push_back(d), any = true;
+        }
+        for (size_t k = 0; k < m.hulls.size(); ++k) {
+            Hull2D d;
+            if (ProjectHull(p, m.hulls[k], k < m.hullMargin.size() ? m.hullMargin[k] : 0, eye, &d))
+                out[e].hulls.push_back(d), any = true;
         }
     }
-    return true;
-}
-
-int64_t SteadyNs() {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
-}  // namespace
-
-bool Renderer::Passed(Output &o, int64_t timeoutNs) {
-    if (!o.fence) return true;
-    const EGLint r = pClientWaitSync(EGLDisplay(dpy_), EGLSyncKHR(o.fence), 0, EGLTimeKHR(timeoutNs));
-    if (r == EGL_TIMEOUT_EXPIRED_KHR) return false;
-    pDestroySync(EGLDisplay(dpy_), EGLSyncKHR(o.fence));   // passed, or failed: don't wait on it again
-    o.fence = nullptr;
-    return true;
-}
-
-// Draws one buffer. Partial: the buffer holds this client frame already, with o.spots cut
-// out, so each eye is drawn again only inside the box around those and the new cutouts.
-void Renderer::Draw(Output &o, unsigned tex, int w, int h, const std::vector<Capsule2D> eyes[2], bool partial) {
-    glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
-    for (int e = 0; e < 2; ++e) {
-        if (partial) {
-            float box[4] = {1e9f, 1e9f, -1e9f, -1e9f}, b[4];
-            const std::vector<Capsule2D> *lists[2] = {&o.spots[e], &eyes[e]};
-            for (const std::vector<Capsule2D> *list : lists)
-                for (const Capsule2D &c : *list) {
-                    Bounds(c, b);
-                    box[0] = std::min(box[0], b[0]), box[1] = std::min(box[1], b[1]);
-                    box[2] = std::max(box[2], b[2]), box[3] = std::max(box[3], b[3]);
-                }
-            // Window y is the buffer's row, the same way down as the cutouts' y (see kVertex).
-            const int x0 = std::clamp(int(std::floor(box[0])) - 1, 0, w), y0 = std::clamp(int(std::floor(box[1])) - 1, 0, h);
-            const int x1 = std::clamp(int(std::ceil(box[2])) + 1, 0, w), y1 = std::clamp(int(std::ceil(box[3])) + 1, 0, h);
-            if (x1 <= x0 || y1 <= y0) continue;   // no cutout in this eye, then or now
-            glEnable(GL_SCISSOR_TEST);
-            glScissor(e * w + x0, y0, x1 - x0, y1 - y0);
-        }
-        glViewport(e * w, 0, w, h);
-        glDisable(GL_BLEND);
-        glUseProgram(copyProg_);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
-        glUniform1i(glGetUniformLocation(copyProg_, "tex"), 0);
-        glUniform4f(glGetUniformLocation(copyProg_, "rect"), 0, 0, float(w), float(h));
-        glUniform2f(glGetUniformLocation(copyProg_, "size"), float(w), float(h));
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        // take alpha away where the hand is; the colour stays (straight alpha)
-        glEnable(GL_BLEND);
-        glBlendFuncSeparate(GL_ZERO, GL_ONE, GL_ZERO, GL_ONE_MINUS_SRC_ALPHA);
-        glUseProgram(cutProg_);
-        glUniform2f(glGetUniformLocation(cutProg_, "size"), float(w), float(h));
-        const GLint uRect = glGetUniformLocation(cutProg_, "rect"), uA = glGetUniformLocation(cutProg_, "a"),
-                    uB = glGetUniformLocation(cutProg_, "b"), uR = glGetUniformLocation(cutProg_, "r"),
-                    uF = glGetUniformLocation(cutProg_, "feather");
-        for (const Capsule2D &c : eyes[e]) {
-            float b[4];
-            Bounds(c, b);
-            glUniform4f(uRect, b[0], b[1], b[2], b[3]);
-            glUniform2f(uA, c.ax, c.ay);
-            glUniform2f(uB, c.bx, c.by);
-            glUniform2f(uR, c.ra, c.rb);
-            glUniform1f(uF, std::max(1.5f, 0.15f * std::min(c.ra, c.rb)));
-            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        }
-        glDisable(GL_SCISSOR_TEST);
-    }
-    glDisable(GL_BLEND);
-}
-
-const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, const ft_dmabuf &src,
-                                  const std::vector<Capsule2D> eyes[2]) {
-    if (!ready_) return nullptr;
-    const int64_t t0 = SteadyNs();
-    const int w = src.width, h = src.height;
-    Ring &ring = rings_[panel];
-    if (ring.w != w || ring.h != h) {
-        for (Output &old : ring.out) FreeOutput(old);
-        ring.w = w, ring.h = h, ring.shown = ring.before = ring.drawing = -1;
-    }
-    // After a pause the panel showed its client buffer, so nothing of ours is on it.
-    if (t0 - ring.lastCall > 30'000'000) ring.shown = ring.before = -1;
-    ring.lastCall = t0;
-    auto promote = [&ring] {
-        ring.before = ring.shown, ring.shown = ring.drawing, ring.drawing = -1;
-    };
-    if (ring.drawing >= 0 && Passed(ring.out[ring.drawing], 0)) promote();
-
-    const int newest = ring.drawing >= 0 ? ring.drawing : ring.shown;
-    const Output *n = newest >= 0 ? &ring.out[newest] : nullptr;
-    if (n && n->key == key && n->serial == serial && SameSpots(n->spots, eyes)) {
-        ++stats_.same;
-    } else if (ring.drawing >= 0) {
-        ++stats_.busy;   // drawn on a later tick, from what's current then
-    } else {
-        int i = 0;
-        while (i == ring.shown || i == ring.before) ++i;
-        Output &o = ring.out[i];
-        if (!o.bo && !MakeOutput(o, 2 * w, h)) return nullptr;
-        const GLuint tex = Texture(key, src);
-        if (!tex) return nullptr;
-        const bool partial = o.drawn && o.key == key && o.serial == serial;
-        Draw(o, tex, w, h, eyes, partial);
-        o.fence = pCreateSync(EGLDisplay(dpy_), EGL_SYNC_FENCE_KHR, nullptr);
-        glFlush();
-        if (!o.fence) glFinish();   // no fence: wait here, as before
-        o.key = key, o.serial = serial, o.drawn = true;
-        for (int e = 0; e < 2; ++e) o.spots[e] = eyes[e];
-        ring.drawing = i;
-        ++stats_.draws, stats_.partial += partial;
-    }
-    // Nothing of ours to show yet: wait for this one rather than show none.
-    if (ring.shown < 0 && ring.drawing >= 0) {
-        ++stats_.waits;
-        if (Passed(ring.out[ring.drawing], 50'000'000)) promote();
-    }
-    lastMs_ = (SteadyNs() - t0) / 1e6;
-    stats_.cpuMs += lastMs_, stats_.worstMs = std::max(stats_.worstMs, lastMs_);
-    return ring.shown >= 0 ? &ring.out[ring.shown] : nullptr;
-}
-
-const Output *Renderer::Marks(int panel, int w, int h, const std::vector<Mark> eyes[2]) {
-    if (!ready_) return nullptr;
-    Ring &ring = rings_[panel];
-    if (ring.w != w || ring.h != h) {
-        for (Output &old : ring.out) FreeOutput(old);
-        ring.w = w, ring.h = h, ring.shown = ring.before = ring.drawing = -1;
-    }
-    auto promote = [&ring] {
-        ring.before = ring.shown, ring.shown = ring.drawing, ring.drawing = -1;
-    };
-    if (ring.drawing >= 0 && Passed(ring.out[ring.drawing], 0)) promote();
-    if (ring.drawing < 0) {
-        int i = 0;
-        while (i == ring.shown || i == ring.before) ++i;
-        Output &o = ring.out[i];
-        if (!o.bo && !MakeOutput(o, 2 * w, h)) return nullptr;
-        glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
-        glViewport(0, 0, 2 * w, h);
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
-        glDisable(GL_BLEND);
-        glUseProgram(markProg_);
-        glUniform2f(glGetUniformLocation(markProg_, "size"), float(w), float(h));
-        const GLint uRect = glGetUniformLocation(markProg_, "rect"), uC = glGetUniformLocation(markProg_, "c"),
-                    uR = glGetUniformLocation(markProg_, "r"), uColor = glGetUniformLocation(markProg_, "color");
-        for (int e = 0; e < 2; ++e) {
-            glViewport(e * w, 0, w, h);
-            for (const Mark &m : eyes[e]) {
-                glUniform4f(uRect, m.x - m.r - 1, m.y - m.r - 1, m.x + m.r + 1, m.y + m.r + 1);
-                glUniform2f(uC, m.x, m.y);
-                glUniform1f(uR, m.r);
-                glUniform3f(uColor, m.rgb[0], m.rgb[1], m.rgb[2]);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            }
-        }
-        o.fence = pCreateSync(EGLDisplay(dpy_), EGL_SYNC_FENCE_KHR, nullptr);
-        glFlush();
-        if (!o.fence) glFinish();
-        o.key = nullptr, o.drawn = false;   // holds no client frame
-        ring.drawing = i;
-    }
-    if (ring.shown < 0 && ring.drawing >= 0 && Passed(ring.out[ring.drawing], 50'000'000)) promote();
-    return ring.shown >= 0 ? &ring.out[ring.shown] : nullptr;
+    return any;
 }
 
 }  // namespace handcut

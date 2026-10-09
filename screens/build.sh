@@ -7,14 +7,16 @@
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
 # shipped with SteamVR on the Frame predates, so the build uses the public header from
 # Valve's openvr repo (pinned in scripts/openvr.sh).
-# keyboard.cpp draws its key labels with stb_truetype (public domain, one header, pinned).
+# keyboard.cpp draws its key labels with stb_truetype (public domain, one header, pinned);
+# ft-handview --snapshot writes PNGs with stb_image_write (the same).
+# ft-handview's hand model is compiled in (handasset.h, from screens/assets/hands by tools/hand-asset.py).
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 "$root/scripts/sync.sh" >/dev/null
 exec "$root/scripts/frame.sh" -C screens 'set -e; mkdir -p build/include
 . ../scripts/openvr.sh
 stb=2c980bb59875b0d32144a71867fbdebb2f77cd20
-[ -f build/include/stb-$stb ] || { curl -fsSL "https://raw.githubusercontent.com/nothings/stb/$stb/stb_truetype.h" -o build/include/stb_truetype.h && touch build/include/stb-$stb; }
+[ -f build/include/stb-$stb ] && [ -f build/include/stb_image_write.h ] || { for h in stb_truetype.h stb_image_write.h; do curl -fsSL "https://raw.githubusercontent.com/nothings/stb/$stb/$h" -o build/include/$h || exit 1; done; touch build/include/stb-$stb; }
 cc="gcc -std=c11 -O2 -Wall -Wno-unused-parameter $(pkg-config --cflags wlroots-0.20 wayland-server xkbcommon libdrm pixman-1)"
 $cc -c -o build/compositor.o compositor.c
 $cc -c -o build/remote.o remote.c
@@ -27,10 +29,11 @@ $cxx -c -o build/handinput.o handinput.cpp
 $cxx -c -o build/palmmenu.o palmmenu.cpp
 $cxx -c -o build/handtest.o handtest.cpp
 $cxx -c -o build/handmesh.o handmesh.cpp
+$cxx -c -o build/handskin.o handskin.cpp
 $cxx -c -o build/handview.o handview.cpp
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
 g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/keyboard.o build/handcut.o build/handrender.o build/handinput.o build/palmmenu.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o $vrlibs
-g++ -o build/ft-handview build/handview.o build/handmesh.o build/handcut.o build/handrender.o $vrlibs
+g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handcut.o build/handrender.o $vrlibs
 echo "built build/ft-screens build/ft-handtest build/ft-handview"'

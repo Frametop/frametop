@@ -260,4 +260,4 @@ Programs built in the `dev` container link against its glibc, which is newer tha
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The rendered hands' 3D model in `screens/assets/hands` is from the W3C Immersive Web Working Group's WebXR Input Profiles (MIT, Copyright (c) 2019 Amazon); see its [README](screens/assets/hands/README.md) and [LICENSE](screens/assets/hands/LICENSE).

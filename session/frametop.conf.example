@@ -61,6 +61,9 @@ HANDS_POKE_REST_BELOW=0.30 # ... and not from a hand resting low by the body: it
 HANDS_POKE_REST_NEAR=0.32  # ... and this close (m) to the head across the floor (typing under a low panel)
 HANDS_NEAR=1               # Frametop panels: poke to click, pinch the bar, edges or corners to move or resize (1 = when the pointer helper says a hand is bare | 0 = off | force = always, for testing)
 HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face and look at it, and a ring shows above the palm; pinch with that hand to open the Steam menu (or close the dashboard). 0 = off
+HANDS_VIEW_MODEL=asset     # rendered hands (ft-handview): asset = a 3D hand model posed by the tracking | capsules = tubes from the skeleton (the older look)
+HANDS_VIEW_STYLE=ghost     # rendered hands: ghost = light, see-through, a bright rim | solid = matte light grey with a rim light
+HANDS_VIEW_ROOMVIEW=1      # rendered hands: 1 = drawn with Room View on too, over the cutout | 0 = only with Room View off
 POINTER_HANDS=0            # 1 = pinches click (on the release; hold and move to nudge the pointer first) and grips press and drag, with hand tracking
 POINTER_PINCH_GAIN=0.5     # hands: the pointer moves this times the pinching hand's angle (precision)
 POINTER_PINCH_DEADZONE=1.5 # hands: degrees the pinching hand moves before the pointer does (a tap's jitter)

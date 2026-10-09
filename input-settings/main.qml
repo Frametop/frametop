@@ -24,6 +24,7 @@ Kirigami.ApplicationWindow {
             Kirigami.Action { text: "Pointer"; icon.name: "transform-move"; onTriggered: root.show(pointerPage) },
             Kirigami.Action { text: "Ignored panels"; icon.name: "view-hidden"; onTriggered: root.show(ignorePage) },
             Kirigami.Action { text: "Gaze"; icon.name: "view-visible"; onTriggered: root.show(gazePage) },
+            Kirigami.Action { text: "Hands"; icon.name: "transform-browse"; onTriggered: root.show(handsPage) },
             Kirigami.Action { text: "Bluetooth"; icon.name: "preferences-system-bluetooth"; onTriggered: root.show(bluetoothPage) }
         ]
     }
@@ -57,9 +58,9 @@ Kirigami.ApplicationWindow {
         pageStack.push(page)
     }
 
-    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|pointer|ignore|gaze|bluetooth opens the app on that page.
+    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|pointer|ignore|gaze|hands|bluetooth opens the app on that page.
     pageStack.initialPage: ({ buttons: buttonsPage, controllers: controllersPage, games: gamesPage, keyboard: keyboardPage,
-                              pointer: pointerPage, ignore: ignorePage, gaze: gazePage,
+                              pointer: pointerPage, ignore: ignorePage, gaze: gazePage, hands: handsPage,
                               bluetooth: bluetoothPage })[startPage] || devicesPage
 
     Connections {
@@ -1276,6 +1277,89 @@ Kirigami.ApplicationWindow {
                       + "(gaze/tracker), which keeps its own calibration. Eye bias: the gaze "
                       + "combines both eyes, since their errors partly cancel; Left or Right counts that eye twice as "
                       + "much, and Auto weights each by how far off it was at your recent nudges."
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Hands
+    Component {
+        id: handsPage
+        Kirigami.ScrollablePage {
+            id: hpage
+            title: "Hands"
+            header: DriverWarning {}
+            property var st: backend.handsStatus
+            readonly property var range: backend.handsMarginRange
+            // What runs, and why it can't: asked on the host, while this page is open.
+            Timer {
+                running: true
+                repeat: true
+                interval: 5000
+                triggeredOnStart: true
+                onTriggered: backend.refreshHands()
+            }
+
+            Kirigami.FormLayout {
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                    visible: !!hpage.st.problem
+                    type: backend.handsMode === "off" ? Kirigami.MessageType.Information : Kirigami.MessageType.Warning
+                    text: hpage.st.problem || ""
+                }
+                ColumnLayout {
+                    Kirigami.FormData.label: "Hand tracking:"
+                    Repeater {
+                        model: backend.handsModes
+                        delegate: Controls.RadioButton {
+                            required property var modelData
+                            text: modelData.text
+                            checked: backend.handsMode === modelData.value
+                            onToggled: if (checked) backend.setHandsMode(modelData.value)
+                        }
+                    }
+                }
+                Controls.Label {
+                    text: hpage.st.summary === undefined ? "…" : hpage.st.summary
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                }
+                RowLayout {
+                    Kirigami.FormData.label: "Hand cutout margin:"
+                    Controls.Label { text: "smaller"; opacity: 0.7 }
+                    Controls.Slider {
+                        id: marginSlider
+                        from: hpage.range.min
+                        to: hpage.range.max
+                        stepSize: hpage.range.step
+                        snapMode: Controls.Slider.SnapAlways
+                        value: backend.handsMargin
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                        onMoved: backend.setHandsMargin(value)
+                    }
+                    Controls.Label { text: "bigger"; opacity: 0.7 }
+                    Controls.Label {
+                        text: marginSlider.value.toFixed(2) + "°"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                    }
+                    Controls.ToolButton {
+                        icon.name: "edit-undo"
+                        display: Controls.AbstractButton.IconOnly
+                        text: "Default (" + hpage.range.default + "°)"
+                        Controls.ToolTip.text: text
+                        Controls.ToolTip.visible: hovered
+                        onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
+                    }
+                }
+            }
+
+            footer: Controls.Label {
+                padding: Kirigami.Units.largeSpacing
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: "Your hands show through Frametop's screens where they're in front of them. Hand tracking "
+                      + "uses a lot of the headset's CPU. The margin is how far past your hand the screen opens up; "
+                      + "it applies right away."
             }
         }
     }

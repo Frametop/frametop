@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Install, start, stop, or inspect hand tracking on the Frame: ft-camd (the camera broker) and
-# ft-hands (the tracker), user services that stop with SteamVR. They don't start with it:
-# ft-handsctl on|off (on the Frame) or hands/run.sh start|stop.
-# Usage: hands/run.sh install|uninstall
+# ft-hands (the tracker), user services that stop with SteamVR. HANDS_MODE in frametop.conf says
+# when they start (hands/handsmode.py: with the Frametop desktop, with SteamVR, or off, the
+# default); ft-handsctl on|off (on the Frame) or hands/run.sh start|stop do it by hand.
+# Usage: hands/run.sh install|uninstall    # install applies HANDS_MODE
 #        hands/run.sh caps      # give ft-camd its capabilities again (a rebuild clears them)
 #        hands/run.sh uncaps    # take them back, unless the Hand Recorder or the services use them
 #        hands/run.sh start|stop|restart|status|log [lines]
@@ -59,11 +60,15 @@ case ${1:-status} in
     for u in $units; do
       fill_template "$root/hands/$u" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$u"
     done
-    # Installed but not started with SteamVR: ft-handsctl on|off (linked into ~/.local/bin).
-    "$frame" --host "set -e; systemctl --user daemon-reload; systemctl --user disable $units 2>/dev/null || true
+    # Started as HANDS_MODE says (off: not at all; Frametop Input Settings, Hands), or by hand
+    # with ft-handsctl on|off (linked into ~/.local/bin).
+    "$frame" --host "set -e; systemctl --user daemon-reload
+python3 $(printf %q "$FRAME_REPO/hands/handsmode.py") apply
 mkdir -p ~/.local/bin && ln -sfn $(printf %q "$FRAME_REPO/hands/ft-handsctl") ~/.local/bin/ft-handsctl
-$states; echo 'start it with: ft-handsctl on'" ;;
-  caps) set_caps ;;
+$states; python3 $(printf %q "$FRAME_REPO/hands/handsmode.py") status" ;;
+  caps)  # then what HANDS_MODE wants starts, if it couldn't without them
+    set_caps
+    on_frame "python3 $(printf %q "$FRAME_REPO/hands/handsmode.py") apply" ;;
   uncaps) drop_caps ;;
   uninstall)
     "$frame" --host "systemctl --user disable --now $units 2>/dev/null

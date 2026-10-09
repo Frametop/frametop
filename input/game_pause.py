@@ -8,7 +8,8 @@ Paused:
   - Hand tracking stops if it runs (frametop-camd, frametop-hands). With hand interaction on
     (POINTER_HANDS=1) it's parked instead (PARK_PATH: ft-hands stops processing and ft-camd stops
     copying, the models stay loaded), and it unparks while the dashboard is open, so the hands work
-    there during the game.
+    there during the game. With HANDS_MODE=always it keeps running, unparked: the hands show in
+    the game (hands/handsmode.py).
   - The desktop, by "pause_desktop": "hide" (the default) hides every screen and floating window
     and slows the desktop down ("pause on" to ft-screens: KWin gets one frame callback a second
     instead of 90, so it and the apps on it hardly draw), and remote desktop stops if it runs
@@ -503,6 +504,7 @@ class GamePause:
         self.resume_at = None
         self.settings = settings_of({}, buttons)
         self.hands = False  # hand interaction is on (set_hands)
+        self.hands_always = False  # HANDS_MODE=always: hand tracking runs through games (set_hands)
         self.dashboard = False  # the SteamVR dashboard is open (the helper's "vrdash")
         self.parked = None  # hand tracking parked, as last applied (None: not yet)
         self.screens = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
@@ -574,11 +576,11 @@ class GamePause:
         except OSError:
             pass  # the helper isn't running; it says vrhello when it starts
 
-    def set_hands(self, on):
+    def set_hands(self, on, always=False):
         """Hand interaction (POINTER_HANDS=1): feed the helper who holds a controller, and park hand
-        tracking for games instead of stopping it."""
-        self.hands = on
-        self.worker.keep = HAND_UNITS if on else ()
+        tracking for games instead of stopping it. always (HANDS_MODE=always): neither."""
+        self.hands, self.hands_always = on, always
+        self.worker.keep = HAND_UNITS if on or always else ()
         self.watch.set_touch_feed(on)
         self.update_park()
 
@@ -589,8 +591,8 @@ class GamePause:
 
     def update_park(self):
         """Hand tracking is parked while Frametop is paused with hand interaction on, unless the
-        dashboard is open (hands work there during a game)."""
-        want = self.paused and self.hands and not self.dashboard
+        dashboard is open (hands work there during a game) or HANDS_MODE=always."""
+        want = self.paused and self.hands and not self.hands_always and not self.dashboard
         if want == self.parked:
             return
         try:

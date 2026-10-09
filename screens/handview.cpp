@@ -1,15 +1,22 @@
-// ft-handview: your hands, drawn, when Room View is off. In a VR game, SteamVR Home, the
-// dashboard, or Frametop's panels over the void, it draws each tracked hand like the Quest
-// does: a light, see-through hand from the tracked skeleton with a brighter rim, fading out
-// toward the forearm, over everything. With Room View on, it draws nothing: you see your hands,
-// and ft-screens cuts them out of the panels (handcut.h).
+// ft-handview: your hands, drawn. In a VR game, SteamVR Home, the dashboard, Frametop's panels
+// over the void, and (HANDS_VIEW_ROOMVIEW=1, the default) with Room View on too, it draws each
+// tracked hand over everything: a 3D hand model posed by the tracked skeleton (handskin.h), in
+// one of two looks (HANDS_VIEW_STYLE): ghost, light and see-through with a bright rim like the
+// Quest's, or solid, a matte light hand with a rim light. With Room View on, ft-screens also cuts
+// a hole for each hand in the panels (handcut.h), and the drawn hand floats over the real one.
+// HANDS_VIEW_MODEL=capsules draws the older hand of tubes from the matte's pieces (handmesh.h).
 //
 //   ft-handview [--status S] [--res PX] [--demo] [--seconds S]
+//   ft-handview --snapshot FILE.png [--res PX] [--seconds S]
 //
 //   --status S   every S seconds a line to the log: Room View, each hand, renders and their cost
 //   --res PX     each eye's half of a hand's buffer, PX square (default 320)
-//   --demo       two still, slowly turning hands 45 cm ahead of where your head is at the start,
+//   --demo       two slowly opening and turning hands 45 cm ahead of where your head is at the start,
 //                whatever Room View, the tracking or the helper say (trying the look, the cost)
+//   --snapshot   no SteamVR: draws demo poses (open, palm away, palm up, fist, point, pinch, spread)
+//                of both hands offscreen, each eye's half, into a PNG (left hands over dark, right
+//                over light), then draws both hands 30 times a second for S seconds (default 5) and
+//                prints the CPU it took, per draw and of one core
 //
 // The hands come from ft-hands' shared files, as ft-screens reads them (handcut::Hands, in the
 // standing universe, moved ahead to when the frame is on the displays). A hand holding a
@@ -25,12 +32,18 @@
 // bright where the hand meets the background or a part of it further back (a finger over the palm).
 //
 // Room View: roomview.h. HANDS_ROOMVIEW=auto|on|off in ~/.config/frametop.conf forces it.
+// Settings (~/.config/frametop.conf): HANDS_VIEW_MODEL asset|capsules, HANDS_VIEW_STYLE ghost|solid,
+// HANDS_VIEW_ROOMVIEW 1|0 (draw with Room View on too).
 // Commands (datagrams on @ft_handview, replies to the sender):
 //   hands <L> <R> <allowed>   the pointer helper's word: each side hand|controller|off
 //   roomview auto|on|off      force Room View's state (auto: detect it) -> "ok <on|off> (<why>)"
+//   model asset|capsules      the hand model, style ghost|solid its look, inroom 1|0 drawing with
+//                             Room View on (live, until a restart) -> "ok"
 //   state                     -> "ok <the status line>"
 #include "handcut.h"
 #include "handmesh.h"
+#include "handskin.h"
+#include "handasset.h"
 #include "roomview.h"
 
 #include <EGL/egl.h>
@@ -56,6 +69,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 namespace {
 
@@ -86,8 +102,9 @@ PFNEGLCREATESYNCKHRPROC pCreateSync;
 PFNEGLDESTROYSYNCKHRPROC pDestroySync;
 PFNEGLCLIENTWAITSYNCKHRPROC pClientWaitSync;
 
-// The body: shading (a little darker where the surface turns away), the fade toward the
-// forearm, and how far from the eye (from `depth0`, half a metre in 0..1), into the scratch buffer.
+// The body: how squarely the surface faces the eye (the rim pass shades by it), the fade toward
+// the forearm, and how far from the eye (from `depth0`, half a metre in 0..1), into the scratch
+// buffer. The capsules' mesh comes posed (handmesh.h); the model is skinned here (kSkinVs).
 const char *kBodyVs = R"(
 attribute vec3 pos;
 attribute vec3 nrm;
@@ -105,17 +122,57 @@ void main() {
     vback = back;
     vdist = gl_Position.w;
 })";
+// The model (handasset.h), skinned: each vertex moved by up to four of its joints' matrices
+// (handskin::Pose, model -> room), blended by its weights. `back` is worked out here: how far
+// behind the tracked wrist, along the hand.
+const char *kSkinVs = R"(
+attribute vec3 pos;       // the model's units (kPosStep)
+attribute vec3 nrm;
+attribute vec4 joints;
+attribute vec4 weights;
+uniform vec4 bones[75];   // 25 joints' 3x4 matrices, a row each
+uniform float posStep;
+uniform mat4 mvp;
+uniform vec3 eye;
+uniform vec3 wrist;
+uniform vec3 fwd;
+varying vec3 vn;
+varying vec3 vv;
+varying float vback;
+varying float vdist;
+vec3 apply(float j, vec4 p) {
+    int k = int(j + 0.5) * 3;
+    return vec3(dot(bones[k], p), dot(bones[k + 1], p), dot(bones[k + 2], p));
+}
+void main() {
+    vec4 p = vec4(pos * posStep, 1.0), n = vec4(nrm, 0.0);
+    vec3 sp = weights.x * apply(joints.x, p) + weights.y * apply(joints.y, p) + weights.z * apply(joints.z, p) +
+              weights.w * apply(joints.w, p);
+    vec3 sn = weights.x * apply(joints.x, n) + weights.y * apply(joints.y, n) + weights.z * apply(joints.z, n) +
+              weights.w * apply(joints.w, n);
+    gl_Position = mvp * vec4(sp, 1.0);
+    vn = sn;
+    vv = eye - sp;
+    vback = dot(wrist - sp, fwd);
+    vdist = gl_Position.w;
+})";
 const char *kBodyFs = R"(
 precision highp float;
 uniform float depth0;
+uniform vec2 fade;   // vback where the fade starts and where it's gone (nothing past that)
+uniform float open;  // 1: the mesh is open at the wrist (the model)
 varying vec3 vn;
 varying vec3 vv;
 varying float vback;
 varying float vdist;
 void main() {
+    if (vback > fade.y) discard;
     float facing = abs(dot(normalize(vn), normalize(vv)));
-    float fade = 1.0 - smoothstep(-0.01, 0.10, vback);   // gone by handmesh.cpp kFaded
-    gl_FragColor = vec4(0.72 + 0.28 * facing, fade, clamp((vdist - depth0) / 0.5, 0.0, 1.0), 1.0);
+    float f = 1.0 - smoothstep(fade.x, fade.y, vback);
+    // the model's inside, seen through its open wrist end: there but clear, as the faded wrist
+    // in front of it would be (a cap would look like a sleeve; nothing, like a tube)
+    if (!gl_FrontFacing) f *= 1.0 - open;
+    gl_FragColor = vec4(facing, f, clamp((vdist - depth0) / 0.5, 0.0, 1.0), 1.0);
 })";
 
 // The rim, from the scratch buffer: how close a pixel of the hand is to its outline, or to a
@@ -135,6 +192,10 @@ uniform vec4 box;
 uniform vec2 texel;
 uniform float rim;        // the rim's width, texels
 uniform float body;       // the body's opacity
+uniform vec3 base;        // its colour
+uniform float shade;      // how much darker where the surface turns away
+uniform float fres;       // how much the turning-away edges glow (fresnel)
+uniform vec3 glow;        // the rim's colour
 varying vec2 uv;
 vec4 at(vec2 d) { return texture2D(tex, clamp(uv + d * texel, box.xy, box.zw)); }
 void main() {
@@ -150,9 +211,10 @@ void main() {
         s = at(d * rim * 0.45);
         inner = max(inner, max(1.0 - s.a, s.a * step(0.03, s.b - c.b)));
     }
-    float edge = 0.4 * outer + 0.6 * inner;
+    float turned = 1.0 - c.r;
+    float edge = max(0.4 * outer + 0.6 * inner, fres * turned * turned * turned);
     float alpha = (cov / 10.0) * c.g * mix(body, 0.95, edge);
-    vec3 rgb = mix(vec3(0.86, 0.89, 0.94) * c.r, vec3(1.0), edge);
+    vec3 rgb = mix(base * (1.0 - shade * turned), glow, edge);
     gl_FragColor = vec4(rgb, alpha);
 })";
 
@@ -192,29 +254,54 @@ unsigned Program(const char *vs, const char *fs, std::initializer_list<const cha
 struct Output {
     gbm_bo *bo = nullptr;
     EGLImageKHR image = EGL_NO_IMAGE_KHR;
-    GLuint rb = 0, fbo = 0;
+    GLuint rb = 0, fbo = 0, tex = 0;   // tex: an offscreen one's (--snapshot)
     vr::SharedTextureHandle_t handle = 0;
     EGLSyncKHR fence = EGL_NO_SYNC_KHR;
     handmesh::Quad quad;   // what it was drawn for
 };
 
+// A look (HANDS_VIEW_STYLE): the rim pass's colours and opacities.
+struct Style {
+    const char *name;
+    float base[3], shade, body, fres, glow[3];
+};
+// ghost: Quest-like, light and see-through, the outline and the edges turning away glowing white;
+// solid: a matte light hand, darker where it turns away, with a cool rim light, over anything
+const Style kStyles[] = {{"ghost", {0.86f, 0.89f, 0.94f}, 0.28f, 0.32f, 0.55f, {1, 1, 1}},
+                         {"solid", {0.80f, 0.82f, 0.86f}, 0.50f, 0.94f, 0.65f, {0.82f, 0.92f, 1}}};
+const Style *FindStyle(const char *name) {
+    for (const Style &s : kStyles)
+        if (!std::strcmp(s.name, name)) return &s;
+    return nullptr;
+}
+
 class Gpu {
 public:
     bool Init(const std::vector<uint64_t> &modifiers, int eyePx);
-    bool MakeOutput(Output &o);
+    // vr false: an offscreen buffer to read back (--snapshot), no SteamVR
+    bool MakeOutput(Output &o, bool vr = true);
     void FreeOutput(Output &o);
-    // Draws the mesh for both eyes into o and fences it; returns at once.
-    void Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, const double eyes[2][3]);
+    // Draws the mesh (the capsules' hand) for both eyes into o and fences it; returns at once.
+    void Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, const double eyes[2][3], const Style &st);
+    // ...or the model of that side, posed by `bones`.
+    void DrawModel(Output &o, bool right, const handskin::Bones &bones, const handmesh::Quad &q, const double eyes[2][3],
+                   const Style &st);
     bool Passed(Output &o);
+    // The output's pixels, RGBA, its first row the top (--snapshot).
+    void Read(Output &o, std::vector<uint8_t> &rgba);
     void Done();
 
 private:
+    void Body(const handmesh::Quad &q, GLuint prog);
+    void Eyes(const handmesh::Quad &q, const double eyes[2][3], GLuint prog, GLsizei count);
+    void Rim(Output &o, const handmesh::Quad &q, const Style &st);
     int drm_ = -1, eye_ = 0;
     gbm_device *gbm_ = nullptr;
     EGLDisplay dpy_ = EGL_NO_DISPLAY;
     EGLContext ctx_ = EGL_NO_CONTEXT;
     std::vector<uint64_t> mods_;
-    GLuint body_ = 0, rim_ = 0, scratchTex_ = 0, scratchDepth_ = 0, scratch_ = 0, vbo_ = 0, ibo_ = 0, quad_ = 0;
+    GLuint body_ = 0, skin_ = 0, rim_ = 0, scratchTex_ = 0, scratchDepth_ = 0, scratch_ = 0, vbo_ = 0, ibo_ = 0, quad_ = 0;
+    GLuint modelVbo_[2] = {}, modelIbo_[2] = {};   // the model's hands, uploaded once
 };
 
 bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
@@ -243,8 +330,9 @@ bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
     if (ctx_ == EGL_NO_CONTEXT || !eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx_))
         return std::fprintf(stderr, "handview: no surfaceless GLES context\n"), false;
     body_ = Program(kBodyVs, kBodyFs, {"pos", "nrm", "back"});
+    skin_ = Program(kSkinVs, kBodyFs, {"pos", "nrm", "joints", "weights"});
     rim_ = Program(kRimVs, kRimFs, {"pos"});
-    if (!body_ || !rim_) return false;
+    if (!body_ || !skin_ || !rim_) return false;
     // the scratch buffer: both eyes side by side, with depth
     glGenTextures(1, &scratchTex_);
     glBindTexture(GL_TEXTURE_2D, scratchTex_);
@@ -268,11 +356,34 @@ bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
     glGenBuffers(1, &quad_);
     glBindBuffer(GL_ARRAY_BUFFER, quad_);
     glBufferData(GL_ARRAY_BUFFER, sizeof quad, quad, GL_STATIC_DRAW);
+    // the model: positions, normals, joints, weights one after another, and the triangles
+    glGenBuffers(2, modelVbo_);
+    glGenBuffers(2, modelIbo_);
+    for (int side = 0; side < 2; ++side) {
+        const handasset::Hand &a = handasset::kHands[side];
+        const size_t n = size_t(a.verts), sizes[4] = {n * 6, n * 3, n * 4, n * 4};
+        glBindBuffer(GL_ARRAY_BUFFER, modelVbo_[side]);
+        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(sizes[0] + sizes[1] + sizes[2] + sizes[3]), nullptr, GL_STATIC_DRAW);
+        const void *parts[4] = {a.pos, a.nrm, a.joints, a.weights};
+        size_t at = 0;
+        for (int k = 0; k < 4; ++k) glBufferSubData(GL_ARRAY_BUFFER, GLintptr(at), GLsizeiptr(sizes[k]), parts[k]), at += sizes[k];
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, modelIbo_[side]);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(a.tris * 3 * sizeof(uint16_t)), a.idx, GL_STATIC_DRAW);
+    }
     return true;
 }
 
-bool Gpu::MakeOutput(Output &o) {
+bool Gpu::MakeOutput(Output &o, bool vr) {
     const int w = 2 * eye_, h = eye_;
+    if (!vr) {
+        glGenTextures(1, &o.tex);
+        glBindTexture(GL_TEXTURE_2D, o.tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glGenFramebuffers(1, &o.fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, o.tex, 0);
+        return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    }
     o.bo = mods_.empty() ? gbm_bo_create(gbm_, w, h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR)
                          : gbm_bo_create_with_modifiers2(gbm_, w, h, GBM_FORMAT_ABGR8888, mods_.data(), unsigned(mods_.size()),
                                                          GBM_BO_USE_RENDERING);
@@ -329,13 +440,14 @@ void Gpu::FreeOutput(Output &o) {
     if (o.fence != EGL_NO_SYNC_KHR) pDestroySync(dpy_, o.fence);
     if (o.fbo) glDeleteFramebuffers(1, &o.fbo);
     if (o.rb) glDeleteRenderbuffers(1, &o.rb);
+    if (o.tex) glDeleteTextures(1, &o.tex);
     if (o.image != EGL_NO_IMAGE_KHR) pDestroyImage(dpy_, o.image);
     if (o.bo) gbm_bo_destroy(o.bo);
     o = Output{};
 }
 
-void Gpu::Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, const double eyes[2][3]) {
-    // the body, both eyes
+// The body pass's start: the scratch buffer cleared, depth on, `prog` in use.
+void Gpu::Body(const handmesh::Quad &q, GLuint prog) {
     glBindFramebuffer(GL_FRAMEBUFFER, scratch_);
     glViewport(0, 0, 2 * eye_, eye_);
     glClearColor(0, 0, 0, 0);
@@ -345,7 +457,28 @@ void Gpu::Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, cons
     glDepthFunc(GL_LESS);
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
-    glUseProgram(body_);
+    glFrontFace(GL_CW);   // the eye matrices put the top in the first row: counterclockwise turns clockwise
+    glUseProgram(prog);
+    const double depth0 = std::max(0.0, q.distance - 0.25);
+    glUniform1f(glGetUniformLocation(prog, "depth0"), float(depth0));
+}
+
+// Both eyes' halves of the body: `count` indices of what's bound.
+void Gpu::Eyes(const handmesh::Quad &q, const double eyes[2][3], GLuint prog, GLsizei count) {
+    for (int e = 0; e < 2; ++e) {
+        float mvp[16];
+        handmesh::EyeMatrix(q, eyes[e], 0.05, q.distance + 1.0, mvp);
+        glViewport(e * eye_, 0, eye_, eye_);
+        glUniformMatrix4fv(glGetUniformLocation(prog, "mvp"), 1, GL_FALSE, mvp);
+        glUniform3f(glGetUniformLocation(prog, "eye"), float(eyes[e][0]), float(eyes[e][1]), float(eyes[e][2]));
+        glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_SHORT, nullptr);
+    }
+}
+
+void Gpu::Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, const double eyes[2][3], const Style &st) {
+    Body(q, body_);
+    glUniform2f(glGetUniformLocation(body_, "fade"), -0.01f, 0.10f);   // gone by handmesh.cpp kFaded
+    glUniform1f(glGetUniformLocation(body_, "open"), 0);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(m.v.size() * sizeof(handmesh::Vertex)), m.v.data(), GL_STREAM_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
@@ -355,19 +488,38 @@ void Gpu::Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, cons
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void *>(offsetof(handmesh::Vertex, p)));
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void *>(offsetof(handmesh::Vertex, n)));
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void *>(offsetof(handmesh::Vertex, back)));
-    const double depth0 = std::max(0.0, q.distance - 0.25);
-    glUniform1f(glGetUniformLocation(body_, "depth0"), float(depth0));
-    for (int e = 0; e < 2; ++e) {
-        float mvp[16];
-        handmesh::EyeMatrix(q, eyes[e], 0.05, q.distance + 1.0, mvp);
-        glViewport(e * eye_, 0, eye_, eye_);
-        glUniformMatrix4fv(glGetUniformLocation(body_, "mvp"), 1, GL_FALSE, mvp);
-        glUniform3f(glGetUniformLocation(body_, "eye"), float(eyes[e][0]), float(eyes[e][1]), float(eyes[e][2]));
-        glDrawElements(GL_TRIANGLES, GLsizei(m.idx.size()), GL_UNSIGNED_SHORT, nullptr);
-    }
+    Eyes(q, eyes, body_, GLsizei(m.idx.size()));
     glDisableVertexAttribArray(1), glDisableVertexAttribArray(2);
+    Rim(o, q, st);
+}
+
+void Gpu::DrawModel(Output &o, bool right, const handskin::Bones &bones, const handmesh::Quad &q, const double eyes[2][3],
+                    const Style &st) {
+    Body(q, skin_);
+    // the model's wrist: its heel fades out toward the tracked wrist, and the short cuff past it
+    // isn't drawn (seen end on, with the hand pointing away, it would hide the hand)
+    glUniform2f(glGetUniformLocation(skin_, "fade"), -0.035f, -0.004f);
+    glUniform1f(glGetUniformLocation(skin_, "open"), 1);
+    glUniform4fv(glGetUniformLocation(skin_, "bones"), 3 * handskin::kJoints, &bones.m[0][0]);
+    glUniform1f(glGetUniformLocation(skin_, "posStep"), handasset::kPosStep);
+    glUniform3fv(glGetUniformLocation(skin_, "wrist"), 1, bones.wrist);
+    glUniform3fv(glGetUniformLocation(skin_, "fwd"), 1, bones.fwd);
+    const size_t n = size_t(handasset::kHands[right].verts);
+    glBindBuffer(GL_ARRAY_BUFFER, modelVbo_[right]);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, modelIbo_[right]);
+    for (int k = 0; k < 4; ++k) glEnableVertexAttribArray(k);
+    glVertexAttribPointer(0, 3, GL_SHORT, GL_FALSE, 0, nullptr);
+    glVertexAttribPointer(1, 3, GL_BYTE, GL_TRUE, 0, reinterpret_cast<void *>(n * 6));
+    glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_FALSE, 0, reinterpret_cast<void *>(n * 9));
+    glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, 0, reinterpret_cast<void *>(n * 13));
+    Eyes(q, eyes, skin_, GLsizei(handasset::kHands[right].tris * 3));
+    for (int k = 1; k < 4; ++k) glDisableVertexAttribArray(k);
+    Rim(o, q, st);
+}
+
+// The rim pass, from the scratch buffer into the output; fenced.
+void Gpu::Rim(Output &o, const handmesh::Quad &q, const Style &st) {
     glDisable(GL_DEPTH_TEST);
-    // the rim, into the output
     glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
     glViewport(0, 0, 2 * eye_, eye_);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -377,7 +529,11 @@ void Gpu::Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, cons
     glUniform1i(glGetUniformLocation(rim_, "tex"), 0);
     glUniform2f(glGetUniformLocation(rim_, "texel"), 1.0f / (2 * eye_), 1.0f / eye_);
     glUniform1f(glGetUniformLocation(rim_, "rim"), float(std::clamp(0.004 * eye_ / q.size, 1.5, 8.0)));   // 4 mm
-    glUniform1f(glGetUniformLocation(rim_, "body"), 0.32f);
+    glUniform1f(glGetUniformLocation(rim_, "body"), st.body);
+    glUniform3fv(glGetUniformLocation(rim_, "base"), 1, st.base);
+    glUniform1f(glGetUniformLocation(rim_, "shade"), st.shade);
+    glUniform1f(glGetUniformLocation(rim_, "fres"), st.fres);
+    glUniform3fv(glGetUniformLocation(rim_, "glow"), 1, st.glow);
     glBindBuffer(GL_ARRAY_BUFFER, quad_);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
     for (int e = 0; e < 2; ++e) {
@@ -390,6 +546,12 @@ void Gpu::Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, cons
     o.fence = pCreateSync(dpy_, EGL_SYNC_FENCE_KHR, nullptr);
     glFlush();
     o.quad = q;
+}
+
+void Gpu::Read(Output &o, std::vector<uint8_t> &rgba) {
+    glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
+    rgba.resize(size_t(2 * eye_) * eye_ * 4);
+    glReadPixels(0, 0, 2 * eye_, eye_, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 }
 
 bool Gpu::Passed(Output &o) {
@@ -464,45 +626,137 @@ bool ControllerAt(int side, const double palm[3], const vr::TrackedDevicePose_t 
     return false;
 }
 
-// --demo: an open hand, fingers up and the palm toward you, 45 cm ahead of `head` and 12 cm to
-// its side, turning slowly about its arm.
+// --demo: a hand opening and closing, fingers up and the palm toward you, 45 cm ahead of `head`,
+// 25 cm down and 12 cm to its side, turning slowly about its arm.
 handcut::Hand DemoHand(const Mat &head, bool right, double t) {
-    static const float kP[21][3] = {{0, 0, 0},           {-0.025f, 0.02f, 0},  {-0.045f, 0.04f, 0}, {-0.058f, 0.06f, 0},
-                                    {-0.068f, 0.08f, 0}, {-0.022f, 0.085f, 0}, {-0.025f, 0.125f, 0}, {-0.027f, 0.15f, 0},
-                                    {-0.028f, 0.17f, 0}, {0, 0.088f, 0},       {0, 0.132f, 0},       {0, 0.16f, 0},
-                                    {0, 0.182f, 0},      {0.02f, 0.083f, 0},   {0.023f, 0.122f, 0},  {0.025f, 0.148f, 0},
-                                    {0.026f, 0.168f, 0}, {0.038f, 0.075f, 0},  {0.043f, 0.103f, 0},  {0.046f, 0.12f, 0},
-                                    {0.048f, 0.136f, 0}};
-    handcut::Hand h;
-    h.id = right ? 2 : 1, h.right = right, h.stereo = true, h.fit = true, h.confidence = 1;
     const double yaw = std::atan2(head.m[0][2], head.m[2][2]);   // the head's heading, level
     const double fx = -std::sin(yaw), fz = -std::cos(yaw), rx = std::cos(yaw), rz = -std::sin(yaw);
-    const double side = right ? 1 : -1, turn = 0.5 * std::sin(t * 0.8), curl = 0.5 + 0.5 * std::sin(t * 1.3);
-    const double c[3] = {head.m[0][3] + 0.45 * fx + 0.12 * side * rx, head.m[1][3] - 0.25, head.m[2][3] + 0.45 * fz + 0.12 * side * rz};
-    auto place = [&](double x, double y, double z, float out[3]) {
-        // the hand's frame: x to its side (mirrored for the left), y up its fingers, z toward you;
-        // turned by `turn` about y
-        const double lx = side * (x * std::cos(turn) + z * std::sin(turn)), lz = -x * std::sin(turn) + z * std::cos(turn);
-        out[0] = float(c[0] + lx * rx - lz * fx), out[1] = float(c[1] + y), out[2] = float(c[2] + lx * rz - lz * fz);
-    };
-    for (int j = 0; j < 21; ++j) {
-        double y = kP[j][1], z = kP[j][2];
-        if (j > 5 && j % 4 != 1) {   // the fingers' outer joints curl toward you
-            const int base = (j - 1) / 4 * 4 + 1;
-            const double over = kP[j][1] - kP[base][1];
-            y = kP[base][1] + over * std::cos(curl * 0.8), z = over * std::sin(curl * 0.8);
-        }
-        place(kP[j][0], y, z, h.p[j]);
-        h.radius[j] = 0.008f;
-    }
-    for (int b = 0; b < 20; ++b) h.bone[b] = 0.03f;
-    place(0, -0.26, 0.04, h.elbow);
-    h.hasElbow = true, h.elbowConf = 1;
-    std::memcpy(h.pinchPoint, h.p[9], sizeof h.pinchPoint);
-    std::memcpy(h.contact, h.p[8], sizeof h.contact);
-    h.pinchD[0] = h.pinchD[1] = 0.08f;
-    h.v[0] = h.v[1] = h.v[2] = 0;
+    const double side = right ? 1 : -1, turn = 0.5 * std::sin(t * 0.8);
+    const double at[3] = {head.m[0][3] + 0.45 * fx + 0.12 * side * rx, head.m[1][3] - 0.33, head.m[2][3] + 0.45 * fz + 0.12 * side * rz};
+    // the palm toward you, turned by `turn` about the vertical
+    const double palm[3] = {-fx * std::cos(turn) + rx * std::sin(turn), 0, -fz * std::cos(turn) + rz * std::sin(turn)};
+    const double up[3] = {0, 1, 0};
+    handcut::Hand h;
+    handskin::DemoPose("wave", right, at, palm, up, t, h);
     return h;
+}
+
+// The settings that pick how a hand is drawn (HANDS_VIEW_*), and the live commands' changes.
+struct Look {
+    bool model = true;          // the 3D model (else the capsules)
+    const Style *style = &kStyles[0];
+    bool inRoom = true;         // draw with Room View on too
+};
+
+Look ReadLook(std::string &log) {
+    Look k;
+    const std::string m = handcut::Setting("HANDS_VIEW_MODEL", "asset"), st = handcut::Setting("HANDS_VIEW_STYLE", "ghost"),
+                      r = handcut::Setting("HANDS_VIEW_ROOMVIEW", "1");
+    if (m == "asset" || m == "capsules") k.model = m == "asset";
+    else log += "HANDS_VIEW_MODEL=" + m + " (ignored: asset|capsules) ";
+    if (const Style *f = FindStyle(st.c_str())) k.style = f;
+    else log += "HANDS_VIEW_STYLE=" + st + " (ignored: ghost|solid) ";
+    if (r == "0" || r == "1") k.inRoom = r == "1";
+    else log += "HANDS_VIEW_ROOMVIEW=" + r + " (ignored: 1|0) ";
+    return k;
+}
+
+// How a hand is drawn, the CPU's part: pose it (the model) or build its mesh (the capsules), and
+// place its square. False if there's nothing to draw. `mesh` holds the capsules' mesh, or the
+// model's skinned points (its bounds).
+bool Prepare(const Look &look, const handcut::Hand &h, const double headPos[3], const double eyes[2][3],
+             handmesh::Mesh &mesh, handskin::Bones &bones, handmesh::Quad &q) {
+    if (look.model) {
+        if (!handskin::Pose(h, bones)) return false;
+        handskin::Points(h.right, bones, 3, mesh);   // a third of the vertices: the square has a margin
+        return handmesh::Place(mesh, eyes, 0.05, q);
+    }
+    handmesh::Build(h, headPos, mesh);
+    return handmesh::Place(mesh, eyes, 0.04, q);
+}
+
+void Render(Gpu &gpu, Output &o, const Look &look, const handcut::Hand &h, const handmesh::Mesh &mesh,
+            const handskin::Bones &bones, const handmesh::Quad &q, const double eyes[2][3]) {
+    if (look.model) gpu.DrawModel(o, h.right, bones, q, eyes, *look.style);
+    else gpu.Draw(o, mesh, q, eyes, *look.style);
+}
+
+// --snapshot: demo poses of both hands drawn offscreen into a PNG, then the cost of drawing.
+int Snapshot(const char *path, int res, double seconds, const Look &look) {
+    Gpu gpu;
+    if (!gpu.Init({}, res)) return 1;
+    Output out;
+    if (!gpu.MakeOutput(out, false)) return std::fprintf(stderr, "snapshot: no offscreen buffer\n"), 1;
+    const double eyes[2][3] = {{-0.032, 0, 0}, {0.032, 0, 0}}, head[3] = {0, 0, 0};
+    struct Shot {
+        const char *pose;
+        double palm[3], up[3];
+    };
+    // the head at the origin looking along -z; each hand 40 cm ahead, 15 cm down, 10 cm aside
+    const Shot shots[] = {{"open", {0, 0.3, 1}, {0, 1, -0.3}},    {"open", {0, -0.3, -1}, {0, 1, -0.3}},  // palm toward you, away
+                          {"open", {0, 1, 0}, {0, 0, -1}},         {"fist", {0.5, 0, 1}, {0, 1, -0.3}},
+                          {"point", {0, -1, 0.2}, {0, 0.2, -1}},   {"pinch", {1, 0, 0.6}, {0, 1, -0.4}},
+                          {"spread", {0, 0.2, 1}, {0, 1, -0.2}}};
+    const int rows = int(sizeof shots / sizeof shots[0]), W = 4 * res, H = rows * res;
+    std::vector<uint8_t> img(size_t(W) * H * 3), px;
+    handmesh::Mesh mesh;
+    handskin::Bones bones;
+    for (int r = 0; r < rows; ++r)
+        for (int right = 0; right < 2; ++right) {
+            const Shot &sh = shots[r];
+            const double side = right ? 1 : -1;
+            // the left hand mirrored across the middle: its palm and fingers' sideways parts flip
+            const double at[3] = {0.10 * side, -0.22, -0.40}, palm[3] = {sh.palm[0] * -side, sh.palm[1], sh.palm[2]},
+                         up[3] = {sh.up[0] * -side, sh.up[1], sh.up[2]};
+            handcut::Hand h;
+            handmesh::Quad q;
+            if (!handskin::DemoPose(sh.pose, right, at, palm, up, 0, h)) continue;
+            if (!Prepare(look, h, head, eyes, mesh, bones, q)) continue;
+            Render(gpu, out, look, h, mesh, bones, q, eyes);
+            glFinish();
+            gpu.Read(out, px);
+            // over dark (the left hand) or light (the right): the rows' top first
+            const float bg = right ? 0.62f : 0.12f;
+            for (int y = 0; y < res; ++y)
+                for (int x = 0; x < 2 * res; ++x) {
+                    const uint8_t *c = &px[(size_t(y) * 2 * res + x) * 4];
+                    uint8_t *d = &img[(size_t(r * res + y) * W + right * 2 * res + x) * 3];
+                    const float a = c[3] / 255.0f;
+                    for (int k = 0; k < 3; ++k) d[k] = uint8_t(std::lround(c[k] * a + 255 * bg * (1 - a)));
+                }
+        }
+    if (!stbi_write_png(path, W, H, 3, img.data(), W * 3)) return std::fprintf(stderr, "snapshot: can't write %s\n", path), 1;
+    std::printf("wrote %s: %d poses (open palm toward you, palm away, palm up, fist, point, pinch, spread), "
+                "each row the left hand (left eye | right eye, over dark) and the right (over light); %s, %s\n",
+                path, rows, look.model ? "the model" : "capsules", look.style->name);
+    // the cost: both waving hands, each drawn 30 times a second, as ft-handview draws them
+    const double cpu0 = CpuSeconds();
+    double drawMs = 0, poseMs = 0;
+    int draws = 0;
+    const auto start = std::chrono::steady_clock::now();
+    for (int frame = 0; std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds; ++frame) {
+        const auto tick = std::chrono::steady_clock::now();
+        Mat ident{};
+        ident.m[0][0] = ident.m[1][1] = ident.m[2][2] = 1;
+        for (int right = 0; right < 2; ++right) {
+            const auto t0 = std::chrono::steady_clock::now();
+            const handcut::Hand h = DemoHand(ident, right, frame / 30.0);
+            handmesh::Quad q;
+            if (!Prepare(look, h, head, eyes, mesh, bones, q)) continue;
+            poseMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            Render(gpu, out, look, h, mesh, bones, q, eyes);
+            drawMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            ++draws;
+        }
+        glFinish();   // as the fence would have passed by the next frame
+        std::this_thread::sleep_until(tick + std::chrono::microseconds(33333));
+    }
+    const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    std::printf("%d draws in %.1f s: CPU %.3f ms per draw (posing and placing %.3f), %.1f%% of a core in all\n", draws,
+                wall, draws ? drawMs / draws : 0.0, draws ? poseMs / draws : 0.0, 100 * (CpuSeconds() - cpu0) / wall);
+    gpu.FreeOutput(out);
+    gpu.Done();
+    return 0;
 }
 
 }  // namespace
@@ -511,17 +765,24 @@ int main(int argc, char **argv) {
     double statusS = 0, seconds = 0;
     int res = 320;
     bool demo = false;
+    const char *snapshot = nullptr;
     for (int i = 1; i < argc; ++i) {
         const bool more = i + 1 < argc;
         if (!std::strcmp(argv[i], "--status") && more) statusS = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--res") && more) res = std::clamp(std::atoi(argv[++i]), 64, 1024);
         else if (!std::strcmp(argv[i], "--seconds") && more) seconds = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--demo")) demo = true;
-        else return std::fprintf(stderr, "usage: ft-handview [--status S] [--res PX] [--demo] [--seconds S]\n"), 2;
+        else if (!std::strcmp(argv[i], "--snapshot") && more) snapshot = argv[++i];
+        else return std::fprintf(stderr, "usage: ft-handview [--status S] [--res PX] [--demo] [--seconds S]\n"
+                                         "       ft-handview --snapshot FILE.png [--res PX] [--seconds S]\n"), 2;
     }
     signal(SIGINT, Stop);
     signal(SIGTERM, Stop);
     setvbuf(stdout, nullptr, _IOLBF, 0);
+    std::string lookLog;
+    Look look = ReadLook(lookLog);
+    if (!lookLog.empty()) std::fprintf(stderr, "%s\n", lookLog.c_str());
+    if (snapshot) return Snapshot(snapshot, res, seconds > 0 ? seconds : 5, look);
 
     const int sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     {
@@ -563,8 +824,10 @@ int main(int argc, char **argv) {
     room.SetForce(force);
     handcut::Hands hands;
     handmesh::Mesh mesh;
-    std::printf("ft-handview: %dx%d per eye per hand%s; Room View %s\n", res, res, demo ? ", demo hands" : "",
-                force == roomview::Force::Auto ? "detected" : roomview::Name(force));
+    handskin::Bones bones;
+    std::printf("ft-handview: %dx%d per eye per hand%s; %s, %s; Room View %s, %s with it on\n", res, res,
+                demo ? ", demo hands" : "", look.model ? "the model" : "capsules", look.style->name,
+                force == roomview::Force::Auto ? "detected" : roomview::Name(force), look.inRoom ? "drawn" : "not drawn");
 
     bool scene = false, constructRoomView = true;
     int64_t nextScene = 0, nextSettings = 0;
@@ -608,9 +871,17 @@ int main(int argc, char **argv) {
                     room.Update(now, scene, constructRoomView);
                     reply = std::string("ok ") + (room.on() ? "on" : "off") + " (" + room.why() + ")";
                 }
+            } else if (std::sscanf(buf, "model %15s", word) == 1 && (!std::strcmp(word, "asset") || !std::strcmp(word, "capsules"))) {
+                look.model = !std::strcmp(word, "asset"), reply = "ok";
+            } else if (const Style *st = std::sscanf(buf, "style %15s", word) == 1 ? FindStyle(word) : nullptr) {
+                look.style = st, reply = "ok";
+            } else if (std::sscanf(buf, "inroom %15s", word) == 1 && (!std::strcmp(word, "1") || !std::strcmp(word, "0"))) {
+                look.inRoom = word[0] == '1', reply = "ok";
             } else if (!std::strcmp(buf, "state")) {
                 reply = "ok " + statusLine;
-            } else reply = "error hands <L> <R> <allowed>|roomview auto|on|off|state";
+            } else reply = "error hands <L> <R> <allowed>|roomview auto|on|off|model asset|capsules|style ghost|solid|inroom 1|0|state";
+            if (reply == "ok")
+                for (Side &s : sides) s.lastFrame = ~uint64_t(0);   // a new look shows at once
             if (!reply.empty() && fromLen > offsetof(sockaddr_un, sun_path))
                 sendto(sock, reply.data(), reply.size(), 0, reinterpret_cast<sockaddr *>(&from), fromLen);
             fromLen = sizeof from;
@@ -637,7 +908,7 @@ int main(int argc, char **argv) {
                 shown = {DemoHand(demoHead, false, t), DemoHand(demoHead, true, t)};
                 frame = uint64_t(t * 30);   // a "hands frame" 30 times a second
             }
-        } else if (hp.bPoseIsValid && !roomOn && hands.Update(head, now)) {
+        } else if (hp.bPoseIsValid && (!roomOn || look.inRoom) && hands.Update(head, now)) {
             shown = hands.shown();
             frame = hands.frame();
         }
@@ -655,7 +926,7 @@ int main(int argc, char **argv) {
             if (h) h->Palm(palm);
             const char *why = nullptr;
             if (!hp.bPoseIsValid) why = "no head pose";
-            else if (roomOn && !demo) why = "Room View on";
+            else if (roomOn && !demo && !look.inRoom) why = "Room View on";
             else if (!h) why = "not tracked";
             else if (demo) why = nullptr;
             else if (heard ? g_word.side[si] == 2 : ControllerAt(si, palm, poses, now)) why = heard ? "controller (helper)" : "controller near";
@@ -687,13 +958,12 @@ int main(int argc, char **argv) {
                 continue;
             }
             const auto t0 = std::chrono::steady_clock::now();
-            handmesh::Build(*h, headPos, mesh);
             handmesh::Quad q;
-            if (!handmesh::Place(mesh, eyes, 0.04, q)) continue;
+            if (!Prepare(look, *h, headPos, eyes, mesh, bones, q)) continue;
             s.meshMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             int pick = 0;
             while (pick == s.shown || pick == s.before) ++pick;
-            gpu.Draw(s.out[pick], mesh, q, eyes);
+            Render(gpu, s.out[pick], look, *h, mesh, bones, q, eyes);
             s.drawing = pick, s.drawnAt = MonoNs();
             const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             ++s.draws, s.cpuMs += ms, s.worstMs = std::max(s.worstMs, ms);
@@ -704,10 +974,11 @@ int main(int argc, char **argv) {
         if (now - lastStatus >= int64_t((statusS > 0 ? statusS : 2) * 1e9)) {
             const double dt = (now - lastStatus) / 1e9, cpu1 = CpuSeconds();
             char line[640];
-            int k = std::snprintf(line, sizeof line, "room view %s (%s), helper %s; CPU %.1f%%", roomOn ? "on" : "off",
-                                  room.why(), heard ? "heard" : "silent", 100 * (cpu1 - cpu0) / dt);
+            int k = std::snprintf(line, sizeof line, "room view %s (%s%s), helper %s; %s, %s; CPU %.1f%%", roomOn ? "on" : "off",
+                                  room.why(), roomOn && !look.inRoom ? ": not drawn" : "", heard ? "heard" : "silent",
+                                  look.model ? "model" : "capsules", look.style->name, 100 * (cpu1 - cpu0) / dt);
             for (Side &s : sides)
-                k += std::snprintf(line + k, sizeof line - k, "; %s %s, %.1f draws/s, CPU %.2f ms avg (mesh %.2f) %.2f worst, up after %.1f ms, %d busy",
+                k += std::snprintf(line + k, sizeof line - k, "; %s %s, %.1f draws/s, CPU %.2f ms avg (posing %.2f) %.2f worst, up after %.1f ms, %d busy",
                                    s.name, s.why, s.draws / dt, s.draws ? s.cpuMs / s.draws : 0.0,
                                    s.draws ? s.meshMs / s.draws : 0.0, s.worstMs,
                                    s.draws ? s.gpuMs / s.draws : 0.0, s.busy);
@@ -719,7 +990,8 @@ int main(int argc, char **argv) {
         // about the displays' rate while a hand shows; else 20 times a second, and 10 with Room View
         // on (nothing to draw: a hand shows up a little later, for less waking)
         const bool busy = sides[0].visible || sides[1].visible || sides[0].drawing >= 0 || sides[1].drawing >= 0;
-        std::this_thread::sleep_until(tick + std::chrono::microseconds(busy ? 11111 : roomOn && !demo ? 100000 : 50000));
+        const bool idle = roomOn && !demo && !look.inRoom;
+        std::this_thread::sleep_until(tick + std::chrono::microseconds(busy ? 11111 : idle ? 100000 : 50000));
     }
     for (Side &s : sides) {
         vr::VROverlay()->DestroyOverlay(s.overlay);

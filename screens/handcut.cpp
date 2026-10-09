@@ -126,6 +126,16 @@ bool ParseShift(const std::string &text, std::vector<Shift> &out) {
     return true;
 }
 
+const char *ShapeName(MatteShape s) {
+    return s == MatteShape::Circle ? "circle" : s == MatteShape::Mesh ? "mesh" : "capsules";
+}
+
+bool ParseShape(const std::string &name, MatteShape *out) {
+    for (MatteShape s : {MatteShape::Circle, MatteShape::Mesh, MatteShape::Capsules})
+        if (name == ShapeName(s)) return *out = s, true;
+    return false;
+}
+
 std::string ReadMatteSettings(MatteParams &p) {
     std::string log;
     auto num = [&](const char *name, double &v, double lo, double hi) {
@@ -137,7 +147,7 @@ std::string ReadMatteSettings(MatteParams &p) {
         else log += std::string(name) + "=" + s + " (ignored) ";
     };
     const std::string m = Setting("HANDS_MATTE", "");
-    if (m == "capsules" || m == "mesh") p.mesh = m == "mesh", log += "HANDS_MATTE=" + m + " ";
+    if (!m.empty()) log += "HANDS_MATTE=" + m + (ParseShape(m, &p.shape) ? " " : " (ignored) ");
     num("HANDS_MATTE_MARGIN", p.marginDeg, 0, 10);
     num("HANDS_MATTE_MOTION", p.motionMs, 0, 200);
     num("HANDS_MATTE_MOTION_MAX", p.motionMaxDeg, 0, 10);
@@ -510,7 +520,7 @@ void BuildMatte(const std::vector<Hand> &hands, const std::vector<Capsule> &file
                 const MatteParams &p, Matte &out) {
     out.clear();
     const V head(headPos[0], headPos[1], headPos[2]);
-    if (!p.mesh) {
+    if (p.shape == MatteShape::Capsules) {
         // ft-hands' capsules have a margin of 4 mm in them already; the angular margin is
         // the mesh's (the capsule matte stays as it was, for comparison)
         out.caps = fileCapsules;
@@ -524,6 +534,38 @@ void BuildMatte(const std::vector<Hand> &hands, const std::vector<Capsule> &file
         const double dist = (V(palm[0], palm[1], palm[2]) - head).norm();
         const double m = p.Margin(dist, h.speed());
         const double k = std::clamp((P[9] - P[0]).norm() / kPalmLen, 0.7, 1.4);   // this hand's size
+        if (p.shape == MatteShape::Circle) {
+            // the middle of what the head sees of the hand: the box around its joints (each
+            // with its half-width; the wrist's is the hand's) in a plane facing the head...
+            V w;
+            V u[21];
+            double rr[21], d[21];
+            for (int j = 0; j < 21; ++j) {
+                d[j] = std::max(1e-3, (P[j] - head).norm());
+                u[j] = (P[j] - head) * (1 / d[j]), w = w + u[j];
+                rr[j] = (j ? JointRadius(j) : 0.025) * k;
+            }
+            w = w.unit();
+            const V a = (std::fabs(w.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0)).cross(w).unit(), b = w.cross(a);
+            double lo[2] = {1e9, 1e9}, hi[2] = {-1e9, -1e9};
+            for (int j = 0; j < 21; ++j) {
+                const double f = u[j].dot(w), t = rr[j] / d[j];
+                if (f < 0.1) continue;   // beside the head: not seen
+                const double x = u[j].dot(a) / f, y = u[j].dot(b) / f;
+                lo[0] = std::min(lo[0], x - t), hi[0] = std::max(hi[0], x + t);
+                lo[1] = std::min(lo[1], y - t), hi[1] = std::max(hi[1], y + t);
+            }
+            if (lo[0] > hi[0]) continue;
+            const V c = (w + a * ((lo[0] + hi[0]) / 2) + b * ((lo[1] + hi[1]) / 2)).unit();
+            // ...and the widest angle from there to the hand's edge, at the palm's distance
+            double reach = 0;
+            for (int j = 0; j < 21; ++j)
+                reach = std::max(reach, std::acos(std::clamp(u[j].dot(c), -1.0, 1.0)) + std::atan(rr[j] / d[j]));
+            const double r = dist * std::tan(std::min(reach, 1.2)) + m;
+            const V at = head + c * dist;
+            out.circles.push_back({{float(at.x), float(at.y), float(at.z)}, float(r)});
+            continue;
+        }
         // fingers: a tapered capsule per bone; the tip's end pulled back (MediaPipe's tip
         // point is the very end of the finger, a capsule's round end reaches past it)
         static const int kBones[][2] = {{1, 2},   {2, 3},   {3, 4},   {5, 6},   {6, 7},   {7, 8},   {9, 10},  {10, 11},
@@ -648,6 +690,56 @@ bool ProjectCapsule(const Panel &p, const Capsule &c, const double eye[3], Capsu
         std::min(ay, by) - r > p.pxHeight)
         return false;
     *out = {float(ax), float(ay), float(bx), float(by), ra, rb};
+    return true;
+}
+
+// A disk facing the eye, as the eye sees it on the panel: an ellipse there (a circle on a
+// panel square to the eye), drawn as the stadium around it (a capsule as long as the
+// ellipse, as wide as it is narrow), with the capsules' soft edge.
+bool ProjectCircle(const Panel &p, const Circle &k, const double eye[3], Capsule2D *out) {
+    double c[3];
+    const double w[3] = {k.c[0], k.c[1], k.c[2]};
+    ToLocal(p.pose, w, c);
+    if (c[2] < kEps || c[2] > eye[2] - kNear) return false;   // behind the panel, or at the eye
+    double cx, cy, g;
+    if (!OnPanel(p, eye, c, &cx, &cy, &g)) return false;
+    const V e(eye[0], eye[1], eye[2]), at(c[0], c[1], c[2]), d = (at - e).unit();
+    const V a = (std::fabs(d.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0)).cross(d).unit(), b = d.cross(a);
+    // the rim, along the rays from the eye through it (a point near the eye on each: the
+    // rim may reach past the panel's plane, the ray still meets the panel)
+    constexpr int kRim = 16;
+    double rim[kRim][2];
+    int n = 0;
+    for (int i = 0; i < kRim; ++i) {
+        const double t = i * 2 * M_PI / kRim;
+        const V q = at + (a * std::cos(t) + b * std::sin(t)) * k.r;
+        if ((q - e).dot(d) <= 0) continue;
+        const V near = e + (q - e) * 0.1;
+        const double nq[3] = {near.x, near.y, near.z};
+        double x, y, gr;
+        if (OnPanel(p, eye, nq, &x, &y, &gr)) rim[n][0] = x - cx, rim[n][1] = y - cy, ++n;
+    }
+    if (n < kRim / 2) return false;
+    // the long axis: toward the farthest rim point
+    int far = 0;
+    for (int i = 1; i < n; ++i)
+        if (std::hypot(rim[i][0], rim[i][1]) > std::hypot(rim[far][0], rim[far][1])) far = i;
+    const double len = std::hypot(rim[far][0], rim[far][1]);
+    if (!(len > 0.5)) return false;
+    const double ux = rim[far][0] / len, uy = rim[far][1] / len;
+    double lo[2] = {1e9, 1e9}, hi[2] = {-1e9, -1e9};
+    for (int i = 0; i < n; ++i) {
+        const double s = rim[i][0] * ux + rim[i][1] * uy, t = -rim[i][0] * uy + rim[i][1] * ux;
+        lo[0] = std::min(lo[0], s), hi[0] = std::max(hi[0], s), lo[1] = std::min(lo[1], t), hi[1] = std::max(hi[1], t);
+    }
+    // the rim's points are 360/16 degrees apart: the ellipse reaches up to 2% past them
+    const double grow = 1 / std::cos(M_PI / kRim);
+    const double mx = cx + ux * (lo[0] + hi[0]) / 2 - uy * (lo[1] + hi[1]) / 2,
+                 my = cy + uy * (lo[0] + hi[0]) / 2 + ux * (lo[1] + hi[1]) / 2;
+    const double A = (hi[0] - lo[0]) / 2 * grow, B = std::min(A, (hi[1] - lo[1]) / 2 * grow);
+    const double half = A - B;
+    if (mx + A < 0 || mx - A > p.pxWidth || my + A < 0 || my - A > p.pxHeight) return false;
+    *out = {float(mx - ux * half), float(my - uy * half), float(mx + ux * half), float(my + uy * half), float(B), float(B)};
     return true;
 }
 
@@ -798,6 +890,10 @@ bool Project(const Panel &p, const Matte &m, const double eyes[2][3], Spots out[
         double eye[3];
         ToLocal(p.pose, eyes[e], eye);
         if (eye[2] <= 0.01) continue;  // behind the panel
+        for (const Circle &c : m.circles) {
+            Capsule2D d;
+            if (ProjectCircle(p, c, eye, &d)) out[e].caps.push_back(d), any = true;
+        }
         for (const Capsule &c : m.caps) {
             Capsule2D d;
             if (ProjectCapsule(p, c, eye, &d)) out[e].caps.push_back(d), any = true;

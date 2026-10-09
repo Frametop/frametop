@@ -8,11 +8,11 @@
 // with the head pose at that time, and reads the gestures file next to it (pinches, grips) for
 // hand input (handinput.h).
 //
-// The matte (what's cut out) is built from the hands each tick (BuildMatte): either the
-// capsules ft-hands publishes, or a hand-shaped one of convex pieces: a tapered capsule per
-// finger bone, the palm as a slab through the wrist and knuckles, the thumb's web, and the
-// forearm toward the elbow as a tapered tube. Project() finds where each eye sees them on a
-// panel, and Renderer draws the panel's client buffer into a side-by-side buffer (left eye |
+// The matte (what's cut out) is built from the hands each tick (BuildMatte): a round hole per
+// hand (the default: a disk facing the eye, wide enough for the whole hand), the capsules
+// ft-hands publishes, or a hand-shaped one of convex pieces: a tapered capsule per finger
+// bone, the palm as a slab through the wrist and knuckles, the thumb's web, and the forearm
+// toward the elbow as a tapered tube. Project() finds where each eye sees them on a panel, and Renderer draws the panel's client buffer into a side-by-side buffer (left eye |
 // right eye) with those spots transparent and the glows of hand input (fingertip, pinch point)
 // on top. A panel shows that buffer, with the overlay's SideBySide_Parallel flag, only while a
 // hand is in front of it.
@@ -63,13 +63,21 @@ struct Hull {
     std::vector<std::array<float, 3>> v;
 };
 
+// A round hole: a disk around c, radius r (metres, the margin in it), facing whichever eye
+// looks at it.
+struct Circle {
+    float c[3];
+    float r;
+};
+
 struct Matte {
+    std::vector<Circle> circles;
     std::vector<Capsule> caps;
     std::vector<Hull> hulls;
     // How much wider than the hand each piece is drawn (metres at the hand), per piece: the
     // capsules have it in their radii already; a hull grows by it on the panel.
     std::vector<float> hullMargin;
-    void clear() { caps.clear(), hulls.clear(), hullMargin.clear(); }
+    void clear() { circles.clear(), caps.clear(), hulls.clear(), hullMargin.clear(); }
 };
 
 struct Capsule2D {       // on a panel's texture, pixels from the top left
@@ -153,8 +161,16 @@ struct Shift {
     double yawDeg, pitchDeg;  // positive: to the right, up
 };
 
+enum class MatteShape {
+    Circle,     // a round hole per hand
+    Mesh,       // the hand-shaped matte
+    Capsules,   // ft-hands' capsules
+};
+const char *ShapeName(MatteShape s);
+bool ParseShape(const std::string &name, MatteShape *out);   // circle|mesh|capsules
+
 struct MatteParams {
-    bool mesh = true;         // the hand-shaped matte (else ft-hands' capsules)
+    MatteShape shape = MatteShape::Circle;
     // Margin around the hand, as an angle seen from the eyes: the probe measured the cutout
     // points 1.8-2.4 degrees (median) off the hand Room View shows with the hand still (p90
     // 4.1-4.5), 2.8-3.1 moving (p90 5.7-6.7); part of that is the video landmark model's own
@@ -169,7 +185,7 @@ struct MatteParams {
 };
 
 // Parses settings from ~/.config/frametop.conf (FT_<NAME> in the environment overrides):
-// HANDS_MATTE (mesh|capsules), HANDS_MATTE_MARGIN (deg), HANDS_MATTE_MOTION (ms),
+// HANDS_MATTE (circle|mesh|capsules), HANDS_MATTE_MARGIN (deg), HANDS_MATTE_MOTION (ms),
 // HANDS_MATTE_MOTION_MAX (deg), HANDS_MATTE_SHIFT ("dist:yaw,pitch dist:yaw,pitch ...", deg).
 // Returns what it read as "NAME=value" lines, for the log.
 std::string ReadMatteSettings(MatteParams &p);

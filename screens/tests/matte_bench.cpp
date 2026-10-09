@@ -1,6 +1,6 @@
 // The cutout composite's cost, offline: recorded hands (ft-handreplay --publish-dump) cut out of
 // a 3440x1935 test buffer on a panel 0.6 m ahead, through handcut's Renderer on the GPU (no
-// SteamVR, no overlay), the hand-shaped matte against ft-hands' capsules.
+// SteamVR, no overlay), the round, hand-shaped and ft-hands' capsule mattes.
 //
 //   matte_bench DUMP [--frames N] [--panel-px W H]
 //
@@ -99,7 +99,8 @@ int main(int argc, char **argv) {
     // GPU's clocks and whatever else runs weigh on them alike.
     struct Mode {
         const char *name;
-        bool mesh, glows, still;
+        handcut::MatteShape shape;
+        bool glows, still;
         handcut::Hands hands;
         handcut::Matte m;
         std::vector<double> cpu, gpu;
@@ -108,9 +109,10 @@ int main(int argc, char **argv) {
     };
     std::vector<Mode> modes;
     for (bool still : {false, true}) {
-        modes.push_back({"mesh", true, false, still, {}, {}, {}, {}});
-        modes.push_back({"capsules", false, false, still, {}, {}, {}, {}});
-        modes.push_back({"mesh + 2 glows", true, true, still, {}, {}, {}, {}});
+        modes.push_back({"circle", handcut::MatteShape::Circle, false, still, {}, {}, {}, {}});
+        modes.push_back({"mesh", handcut::MatteShape::Mesh, false, still, {}, {}, {}, {}});
+        modes.push_back({"capsules", handcut::MatteShape::Capsules, false, still, {}, {}, {}, {}});
+        modes.push_back({"circle + 2 glows", handcut::MatteShape::Circle, true, still, {}, {}, {}, {}});
     }
     uint64_t serial = 1;
     for (size_t k = 0; k < hands.size(); ++k) {
@@ -119,7 +121,7 @@ int main(int argc, char **argv) {
         for (size_t i = 0; i < modes.size(); ++i) {
             Mode &md = modes[i];
             handcut::MatteParams mp;
-            mp.mesh = md.mesh;
+            mp.shape = md.shape;
             md.hands.Feed(hands[k].data(), hands[k].size(), &gestures[k], Identity(), int64_t(v1->publish_ns));
             handcut::BuildMatte(md.hands.shown(), md.hands.capsules(), head, mp, md.m);
             handcut::Spots s[2];
@@ -137,7 +139,7 @@ int main(int argc, char **argv) {
         }
     }
     for (const Mode &md : modes)
-        std::printf("%-15s %-12s %d composites (%d draws, %d partial): CPU median %.3f ms, 90%% %.3f; GPU finish median "
+        std::printf("%-16s %-12s %d composites (%d draws, %d partial): CPU median %.3f ms, 90%% %.3f; GPU finish median "
                     "%.2f ms, 90%% %.2f, max %.2f; %.1f pieces per eye\n",
                     md.name, md.still ? "still screen" : "video", md.cut, md.draws, md.partial, Pct(md.cpu, 0.5),
                     Pct(md.cpu, 0.9), Pct(md.gpu, 0.5), Pct(md.gpu, 0.9), Pct(md.gpu, 1), md.cut ? md.pieces / md.cut : 0.0);

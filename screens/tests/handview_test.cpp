@@ -1,8 +1,11 @@
 // Offline tests for ft-handview's CPU side: Room View's detector (roomview.h) against a fake
-// shared state, and the rendered hand's mesh and square (handmesh.cpp). No OpenVR, GPU or headset.
+// shared state, the rendered hand's mesh and square (handmesh.cpp), and the hand model's
+// posing (handskin.cpp). No OpenVR, GPU or headset.
 //
 // Build and run: the justfile's test-c.
 #include "../handmesh.h"
+#include "../handasset.h"
+#include "../handskin.h"
 #include "../roomview.h"
 
 #include <sys/stat.h>
@@ -195,9 +198,154 @@ void TestMesh() {
 
 }  // namespace
 
+// Turns p by `rad` about the unit axis through `at` (Rodrigues).
+void Turn(float p[3], const float at[3], const double axis[3], double rad) {
+    const double v[3] = {p[0] - at[0], p[1] - at[1], p[2] - at[2]};
+    const double c = std::cos(rad), s = std::sin(rad), d = axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2];
+    const double x[3] = {axis[1] * v[2] - axis[2] * v[1], axis[2] * v[0] - axis[0] * v[2], axis[0] * v[1] - axis[1] * v[0]};
+    for (int i = 0; i < 3; ++i) p[i] = float(at[i] + v[i] * c + x[i] * s + axis[i] * d * (1 - c));
+}
+
+// How far joint j's matrix turns things (degrees), and how far it moves the point q (metres).
+double Angle(const handskin::Bones &b, int j) {
+    const float *m = b.m[j];
+    const double s = std::cbrt(m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]));
+    const double tr = (m[0] + m[5] + m[10]) / s;
+    return std::acos(std::clamp((tr - 1) / 2, -1.0, 1.0)) * 180 / M_PI;
+}
+
+void TestSkin() {
+    for (bool right : {false, true}) {
+        // the model's own pose: every matrix the identity, every vertex where it was
+        handskin::Bones b;
+        const handcut::Hand bind = handskin::BindHand(right);
+        CHECK(handskin::Pose(bind, b));
+        double worst = 0;
+        for (int j = 0; j < handskin::kJoints; ++j)
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 4; ++c) worst = std::max(worst, std::fabs(b.m[j][r * 4 + c] - (r == c ? 1.0 : 0.0)));
+        CHECK(worst < 1e-4);
+        NEAR(b.scale, 1, 1e-4);
+        double moved = 0;
+        for (int i = 0; i < handskin::Vertices(right); ++i) {
+            float p[3], q[3];
+            handskin::BindVertex(right, i, p);
+            handskin::Skin(right, b, i, q);
+            moved = std::max(moved, double(std::hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])));
+        }
+        CHECK(moved < 1e-4);
+
+        // moved and turned whole, and 20% bigger: the model follows, scaled
+        handcut::Hand big = bind;
+        const double axis[3] = {0.48, 0.6, 0.64};
+        const float origin[3] = {0, 0, 0};
+        for (auto &p : big.p) {
+            Turn(p, origin, axis, 1.1);
+            for (int i = 0; i < 3; ++i) p[i] = p[i] * 1.2f + (i == 2 ? -0.5f : 0.1f);
+        }
+        CHECK(handskin::Pose(big, b));
+        NEAR(b.scale, 1.2, 1e-3);
+        double off = 0;
+        for (int i = 0; i < handskin::Vertices(right); i += 7) {
+            float p[3], q[3];
+            handskin::BindVertex(right, i, p);
+            Turn(p, origin, axis, 1.1);
+            for (int k = 0; k < 3; ++k) p[k] = p[k] * 1.2f + (k == 2 ? -0.5f : 0.1f);
+            handskin::Skin(right, b, i, q);
+            off = std::max(off, double(std::hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])));
+        }
+        CHECK(off < 1e-3);
+
+        // the index finger bent 60 degrees at its middle joint (MediaPipe 6): its last two bones
+        // (the model's index intermediate, distal and tip joints, 7-9) turn that much, nothing else
+        handcut::Hand bent = bind;
+        const float *pip = bind.p[6];
+        double ax[3];
+        {
+            const double d[3] = {bind.p[7][0] - pip[0], bind.p[7][1] - pip[1], bind.p[7][2] - pip[2]};
+            const double a[3] = {bind.p[17][0] - bind.p[5][0], bind.p[17][1] - bind.p[5][1], bind.p[17][2] - bind.p[5][2]};
+            // the bending axis: across the palm, square to the bone
+            const double k = (a[0] * d[0] + a[1] * d[1] + a[2] * d[2]) / (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            for (int i = 0; i < 3; ++i) ax[i] = a[i] - k * d[i];
+            const double n = std::sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+            for (double &v : ax) v /= n;
+        }
+        for (int j : {7, 8}) Turn(bent.p[j], pip, ax, 60 * M_PI / 180);
+        CHECK(handskin::Pose(bent, b));
+        for (int j = 0; j < handskin::kJoints; ++j) {
+            const double a = Angle(b, j);
+            if (j >= 7 && j <= 9) NEAR(a, 60, 1);
+            else CHECK(a < 0.5);
+        }
+        // a vertex of the index fingertip went with it; one of the little finger's stayed
+        const handasset::Hand &model = handasset::kHands[right];
+        int tipV = -1, littleV = -1;
+        for (int i = 0; i < model.verts; ++i) {   // all its weight on the index's last bones, or the little finger's
+            int index = 0, little = 0;
+            for (int k = 0; k < 4; ++k) {
+                const int j = model.joints[4 * i + k], w = model.weights[4 * i + k];
+                index += j >= 8 && j <= 9 ? w : 0, little += j >= 22 && j <= 24 ? w : 0;
+            }
+            if (index == 255 && tipV < 0) tipV = i;
+            if (little == 255 && littleV < 0) littleV = i;
+        }
+        CHECK(tipV >= 0 && littleV >= 0);
+        if (tipV >= 0 && littleV >= 0) {
+            float p[3], q[3];
+            handskin::BindVertex(right, tipV, p), handskin::Skin(right, b, tipV, q);
+            CHECK(std::hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) > 0.01);
+            handskin::BindVertex(right, littleV, p), handskin::Skin(right, b, littleV, q);
+            CHECK(std::hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 1e-4);
+        }
+    }
+    // left and right: the same pose mirrored gives the mirrored hand (the model's two hands
+    // aren't one mirrored mesh, so compare their extents and middles)
+    for (const char *pose : {"open", "fist", "pinch"}) {
+        handskin::Bones b[2];
+        double lo[2][3], hi[2][3], mid[2][3];
+        for (int right = 0; right < 2; ++right) {
+            const double side = right ? 1 : -1, at[3] = {0.1 * side, -0.2, -0.4}, palm[3] = {-0.3 * side, 0.2, 1},
+                         up[3] = {0.2 * side, 1, -0.2};
+            handcut::Hand h;
+            CHECK(handskin::DemoPose(pose, right, at, palm, up, 0, h) && h.right == bool(right));
+            CHECK(handskin::Pose(h, b[right]));
+            const int n = handskin::Vertices(right);
+            for (int i = 0; i < 3; ++i) lo[right][i] = 1e9, hi[right][i] = -1e9, mid[right][i] = 0;
+            for (int v = 0; v < n; ++v) {
+                float q[3];
+                handskin::Skin(right, b[right], v, q);
+                for (int i = 0; i < 3; ++i) {
+                    const double x = i == 0 ? q[i] * side : q[i];   // the left hand flipped across x = 0
+                    lo[right][i] = std::min(lo[right][i], x), hi[right][i] = std::max(hi[right][i], x), mid[right][i] += x / n;
+                }
+            }
+            // the model's thumb and index tips where the tracked ones are
+            for (int k : {4, 8}) {
+                const int j = handskin::kFromMediaPipe[k];
+                const float *m = b[right].m[j];
+                float tip[3];
+                const handcut::Hand bh = handskin::BindHand(right);
+                for (int r = 0; r < 3; ++r)
+                    tip[r] = m[r * 4] * bh.p[k][0] + m[r * 4 + 1] * bh.p[k][1] + m[r * 4 + 2] * bh.p[k][2] + m[r * 4 + 3];
+                NEAR(std::hypot(tip[0] - h.p[k][0], tip[1] - h.p[k][1], tip[2] - h.p[k][2]), 0, 1e-4);
+            }
+        }
+        for (int i = 0; i < 3; ++i) {
+            NEAR(lo[0][i], lo[1][i], 0.008), NEAR(hi[0][i], hi[1][i], 0.008);
+            NEAR(mid[0][i], mid[1][i], 0.005);
+        }
+    }
+    // a degenerate hand: no pose
+    handcut::Hand flat;
+    for (auto &p : flat.p) p[0] = p[1] = p[2] = 0;
+    handskin::Bones b;
+    CHECK(!handskin::Pose(flat, b));
+}
+
 int main() {
     TestRoomView();
     TestMesh();
+    TestSkin();
     std::printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

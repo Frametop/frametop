@@ -783,10 +783,11 @@ void TestMatte() {
     Rig r;
     r.Frame({TipAt(0, 0, 0.1)});
     handcut::MatteParams mp;
+    mp.shape = handcut::MatteShape::Mesh;
     handcut::Matte m;
     const double head[3] = {0, 0, 0};
     handcut::BuildMatte(r.hands.shown(), r.hands.capsules(), head, mp, m);
-    CHECK(m.caps.size() == 15 && m.hulls.size() == 3);
+    CHECK(m.caps.size() == 15 && m.hulls.size() == 3 && m.circles.empty());
     handcut::Panel p{At(0, 0, -0.5), 1.0, 0.5625, 0, 1920, 1080};
     const double eyes[2][3] = {{-0.032, 0, 0}, {0.032, 0, 0}};
     handcut::Spots s[2];
@@ -811,6 +812,52 @@ void TestMatte() {
     handcut::BuildMatte(t.hands.shown(), t.hands.capsules(), head, mp, m);
     handcut::Project(p, m, eyes, s);
     for (const handcut::Capsule2D &k : s[0].caps) CHECK(k.ra < 400 && k.rb < 400);
+    // the circle (the default): one round hole per hand, around every joint as each eye sees
+    // it, and a margin past the outermost
+    {
+        Rig c;
+        c.Frame({TipAt(0, 0, 0.1)});
+        handcut::MatteParams cp;
+        CHECK(cp.shape == handcut::MatteShape::Circle);
+        handcut::BuildMatte(c.hands.shown(), c.hands.capsules(), head, cp, m);
+        CHECK(m.circles.size() == 1 && m.caps.empty() && m.hulls.empty());
+        CHECK(handcut::Project(p, m, eyes, s));
+        const handcut::Hand &h = c.hands.shown()[0];
+        for (int e = 0; e < 2; ++e) {
+            CHECK(s[e].caps.size() == 1 && s[e].hulls.empty());
+            if (s[e].caps.size() != 1) continue;
+            const handcut::Capsule2D &k = s[e].caps[0];
+            // a panel square to the head: round, but for the eye seeing the disk a little off its axis
+            CHECK(std::hypot(k.bx - k.ax, k.by - k.ay) < 0.05 * k.ra);
+            double worst = 0;
+            for (int j = 0; j < 21; ++j) {
+                // where the eye sees joint j on the panel (z -0.5)
+                const double f = 0.5 / -double(h.p[j][2]);
+                const double x = (eyes[e][0] + (h.p[j][0] - eyes[e][0]) * f + 0.5) * 1920, y = (0.5 - h.p[j][1] * f / 0.5625) * 1080;
+                worst = std::max(worst, std::hypot(x - k.ax, y - k.ay));
+            }
+            const double margin = mp.Margin(0.45, 0) * 1.1 * 1920;   // about the palm's distance
+            CHECK(worst + margin < k.ra);
+            CHECK(k.ra < worst + 0.06 * 1920);   // ...not much more: a finger's width or so
+        }
+        // a panel turned 50 degrees: the hole is the disk seen at a slant, longer across
+        handcut::Panel q{RotY(50 * M_PI / 180, 0, 0, -0.5), 1.0, 0.5625, 0, 1920, 1080};
+        handcut::Spots t[2];
+        CHECK(handcut::Project(q, m, eyes, t) && t[0].caps.size() == 1);
+        if (t[0].caps.size() == 1) {
+            const handcut::Capsule2D &k = t[0].caps[0];
+            CHECK(std::fabs(k.bx - k.ax) > 10 && std::fabs(k.by - k.ay) < std::fabs(k.bx - k.ax) * 0.2);
+        }
+        // the hand pushed through the panel: no hole
+        Rig d;
+        d.Frame({TipAt(0, 0, -0.30)});
+        handcut::BuildMatte(d.hands.shown(), d.hands.capsules(), head, cp, m);
+        CHECK(m.circles.size() == 1 && !handcut::Project(p, m, eyes, s));
+        // the setting's names
+        handcut::MatteShape shape;
+        CHECK(handcut::ParseShape("mesh", &shape) && shape == handcut::MatteShape::Mesh);
+        CHECK(handcut::ParseShape("circle", &shape) && shape == handcut::MatteShape::Circle && !handcut::ParseShape("round", &shape));
+    }
     // shift settings parse
     std::vector<handcut::Shift> sh;
     CHECK(handcut::ParseShift("0.5:-1,0.5 0.3:1.2,-0.4", sh) && sh.size() == 2 && sh[0].dist == 0.3);
@@ -1377,14 +1424,14 @@ int Replay(const char *path) {
             }
     }
     // 3. The matte: every frame's hands against a panel 0.6 m ahead, CPU cost of building and
-    // projecting it, mesh against capsules.
+    // projecting it, circle, mesh and capsules.
     {
         handcut::Hands hands;
         handcut::Panel P{At(0, -0.15, -0.6), 1.2, 0.675, 0, 3440, 1935};
         const double eyes[2][3] = {{-0.032, 0, 0}, {0.032, 0, 0}}, head[3] = {0, 0, 0};
-        for (bool mesh : {true, false}) {
+        for (handcut::MatteShape shape : {handcut::MatteShape::Circle, handcut::MatteShape::Mesh, handcut::MatteShape::Capsules}) {
             handcut::MatteParams mp;
-            mp.mesh = mesh;
+            mp.shape = shape;
             handcut::Matte m;
             handcut::Spots s[2];
             std::vector<double> us;
@@ -1405,7 +1452,7 @@ int Replay(const char *path) {
             std::sort(us.begin(), us.end());
             std::printf("matte %-8s: %zu frames with hands on the panel, %.1f pieces per eye, %zu bad; build+project "
                         "median %.0f us, 90%% %.0f us, max %.0f us\n",
-                        mesh ? "mesh" : "capsules", withHands, withHands ? pieces / 2.0 / withHands : 0.0, bad,
+                        handcut::ShapeName(shape), withHands, withHands ? pieces / 2.0 / withHands : 0.0, bad,
                         us[us.size() / 2], us[us.size() * 9 / 10], us.back());
         }
     }

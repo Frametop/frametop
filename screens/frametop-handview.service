@@ -10,7 +10,8 @@ Requisite=steamvr.service
 [Service]
 # Runs in the container it was built in (scripts/in-box, which starts it in a scope of its own,
 # so stopping this service can't stop it): clean the process up explicitly around it.
-# Settings: HANDS_ROOMVIEW (auto|on|off) in ~/.config/frametop.conf. A status line every minute.
+# Settings: HANDS_ROOMVIEW (auto|on|off), HANDS_VIEW_MODEL, HANDS_VIEW_STYLE, HANDS_VIEW_ROOMVIEW in
+# ~/.config/frametop.conf. A status line every minute.
 ExecStartPre=-/usr/bin/pkill -x ft-handview
 ExecStart=@REPO@/scripts/in-box @REPO@/screens/build/ft-handview --status 60
 ExecStopPost=-/usr/bin/pkill -x ft-handview

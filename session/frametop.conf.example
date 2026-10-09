@@ -50,7 +50,7 @@ HANDS_BRIGHT_OFF=25        # ... and back to the mono cameras under this
 HANDS_COLOR_LEFT=color_video0  # hand tracking: which colour camera is passthrough_left (hands/tools/check_color.py tells)
 HANDS_COLOR_CROP=subtract  # hand tracking: how the colour calibration's crop applies, subtract | none (check_color.py tells)
 #HANDS_MODELS=            # hand tracking: a folder of palm.ncnn.* and hand.ncnn.* to use instead of the stock models (hands/models/ncnn)
-HANDS_MATTE=mesh           # hand cutouts: mesh = hand-shaped, from the skeleton | capsules = ft-hands' capsules (the old look)
+HANDS_MATTE=circle         # hand cutouts: circle = a round hole per hand | mesh = hand-shaped, from the skeleton | capsules = ft-hands' capsules (the old look)
 HANDS_MATTE_MARGIN=1.5     # hand cutouts: degrees (seen from the eyes) the hole reaches past the hand, held still (Hand cutout margin on the Hands page, live)
 HANDS_MATTE_MOTION=25      # ... plus how far the hand moves in this many ms
 HANDS_MATTE_MOTION_MAX=1.5 # ... up to this many degrees more
@@ -64,6 +64,9 @@ HANDS_GRAB_SMOOTH_BETA=15  # ... and this much less as it moves (Hz per m/s; hig
 HANDS_GRAB_DEADZONE=0.01   # ... and moves the panel only once it's this far (m) from where the pinch began
 HANDS_NEAR=1               # Frametop panels: poke to click, pinch the bar, edges or corners to move or resize (1 = when the pointer helper says a hand is bare | 0 = off | force = always, for testing)
 HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face and look at it, and a ring shows above the palm; pinch with that hand to open the Steam menu (or close the dashboard). 0 = off
+HANDS_VIEW_MODEL=asset     # rendered hands (ft-handview): asset = a 3D hand model posed by the tracking | capsules = tubes from the skeleton (the older look)
+HANDS_VIEW_STYLE=ghost     # rendered hands: ghost = light, see-through, a bright rim | solid = matte light grey with a rim light
+HANDS_VIEW_ROOMVIEW=1      # rendered hands: 1 = drawn with Room View on too, over the cutout | 0 = only with Room View off
 POINTER_HANDS=0            # 1 = pinches click (on the release; hold and move to nudge the pointer first) and grips press and drag, with hand tracking
 POINTER_PINCH_GAIN=0.5     # hands without gaze mode: a held pinch drags the pointer this times the hand's angle (precision)
 POINTER_PINCH_DEADZONE=1.5 # hands without gaze mode: degrees the pinching hand moves before the pointer does (a tap's jitter)

@@ -57,6 +57,8 @@
 //     screen, that eye sees through the screen (to Room View). Only then is the screen
 //     drawn by us, into a side-by-side buffer (one half per eye); otherwise its client
 //     buffer is shown as is. The matte is hand-shaped (or ft-hands' capsules, HANDS_MATTE).
+//     Only with Room View on (roomview.h): with it off a cutout would show the void or the game,
+//     and ft-handview (handview.cpp) draws the hands instead.
 //   - near hand input (handinput.cpp): poke a screen or floating window with the index finger
 //     to click it; pinch its bar, edges, title bar or corners to move or resize it; hold it
 //     with both hands to stretch and turn it. A glow on the screen shows where the fingertip
@@ -81,6 +83,7 @@
 #include "handcut.h"
 #include "handinput.h"
 #include "keyboard.h"
+#include "roomview.h"
 
 #include <drm_fourcc.h>
 #include <openvr.h>
@@ -376,6 +379,8 @@ bool g_handsNow = false;        // g_hands has fresh hands this tick
 handcut::Renderer g_cutter;
 int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
+roomview::Detector g_roomView;   // no cutouts with Room View off
+bool g_constructRoomView = true; // camera/enableConstructRoomView
 
 // Visibility (see the top). g_manual is the hide/show switch: in the always mode it hides
 // the screens, in the others it shows them anyway.
@@ -1996,7 +2001,14 @@ handinput::HandInput g_handInput;
 void UpdateCutouts() {
     Mat head;
     const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
-    const bool hands = g_cutouts && haveHead && g_handsNow;
+    if (g_tick % 450 == 0) {
+        vr::EVRSettingsError se;
+        const bool v = vr::VRSettings()->GetBool("camera", "enableConstructRoomView", &se);
+        g_constructRoomView = se == vr::VRSettingsError_None ? v : true;
+    }
+    const bool room = g_roomView.Update(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(),
+                                        g_gameRunning, g_constructRoomView);
+    const bool hands = g_cutouts && haveHead && g_handsNow && room;
     double eyes[2][3];
     if (haveHead) handcut::EyePositions(head, eyes);
     if (hands) {
@@ -2283,6 +2295,9 @@ bool ft_vr_init(void) {
     g_hands.SetShift(g_matte.shift);
     const std::string lead = handcut::Setting("HANDS_MATTE_LEAD", "");
     if (!lead.empty()) g_hands.SetPrediction(true, std::atof(lead.c_str()));
+    roomview::Force rv;
+    if (roomview::ParseForce(handcut::Setting("HANDS_ROOMVIEW", "auto"), &rv)) g_roomView.SetForce(rv);
+    g_roomView.SetLog(true);
     // pokes come at a panel's face (handinput.h): the finger's angle to it, and a hand resting low
     // by the body (typing) doesn't poke
     auto num = [](const char *name, double &v, double lo, double hi) {
@@ -2776,6 +2791,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         }
         // A carrying controller that goes away drops its screen.
         if (ev.eventType == vr::VREvent_TrackedDeviceDeactivated) EndDragsBy(ev.trackedDeviceIndex);
+        g_roomView.Event(ev.eventType);
     }
     // Our keyboard: its keys, and its Close key. It goes when the screens do.
     struct Forward {
@@ -2889,7 +2905,8 @@ void ft_vr_keyboard_hide(void) {
 //   spin next|prev|<degrees>  turn every panel in the room about your head (see the lazy
 //                             susan) -> "ok <degrees turned>"
 //   cutouts on|off|state      hand cutouts (see handcut.h) -> "ok <on|off> <ready|idle|unavailable>
-//                             <last composite ms> ms, predict <on|off> lead <ms> ms"
+//                             <last composite ms> ms, predict <on|off> lead <ms> ms; ...; room view <on|off> (<why>)"
+//   cutouts roomview auto|on|off   cut only with Room View on: detected (roomview.h), or forced
 //   cutouts predict on|off    move the hands ahead along their velocity (on by default)
 //   cutouts lead <ms>         ...to this long after now: about when the frame is on the displays
 //   cutouts matte mesh|capsules   the hand-shaped matte, or ft-hands' capsules
@@ -3113,9 +3130,14 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
             if (!std::strcmp(spec, "off")) g_matte.shift.clear();
             else if (!handcut::ParseShift(spec, g_matte.shift)) return (void)std::snprintf(reply, size, "error shift <dist>:<yaw>,<pitch> ...");
             g_hands.SetShift(g_matte.shift);
+        } else if (roomview::Force rv; !std::strcmp(word, "roomview") && std::sscanf(cmd, "cutouts roomview %15s", arg) == 1 &&
+                   roomview::ParseForce(arg, &rv)) {
+            g_roomView.SetForce(rv);
+            g_roomView.Update(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(),
+                              g_gameRunning, g_constructRoomView);
         } else if (std::strcmp(word, "state") != 0)
             return (void)std::snprintf(reply, size, "error cutouts on|off|state|predict on|off|lead <ms>|matte mesh|capsules|"
-                                                    "margin <deg> [ms [deg]]|shift off|<spec>");
+                                                    "margin <deg> [ms [deg]]|shift off|<spec>|roomview auto|on|off");
         // Composite's counts since the last state, per second.
         static auto since = Clock::now();
         const double dt = std::max(1e-3, std::chrono::duration<double>(Clock::now() - since).count());
@@ -3124,12 +3146,14 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         const int calls = c.draws + c.same + c.busy;
         std::snprintf(reply, size,
                       "ok %s %s %.2f ms, predict %s lead %.0f ms; per s: %.1f draws (%.1f partial), %.1f same, %.1f busy, "
-                      "%.1f waits; CPU %.2f ms avg %.2f worst; matte %s margin %.2f deg + %.0f ms (max %.2f), shift %s",
+                      "%.1f waits; CPU %.2f ms avg %.2f worst; matte %s margin %.2f deg + %.0f ms (max %.2f), shift %s; "
+                      "room view %s (%s%s)",
                       g_cutouts ? "on" : "off", g_cutterState > 0 ? "ready" : g_cutterState < 0 ? "unavailable" : "idle",
                       g_cutter.lastMs(), g_hands.predicting() ? "on" : "off", g_hands.leadMs(), c.draws / dt,
                       c.partial / dt, c.same / dt, c.busy / dt, c.waits / dt, calls ? c.cpuMs / calls : 0.0, c.worstMs,
                       g_matte.mesh ? "mesh" : "capsules", g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
-                      g_matte.shift.empty() ? "off" : "on");
+                      g_matte.shift.empty() ? "off" : "on", g_roomView.on() ? "on" : "off", g_roomView.why(),
+                      g_roomView.on() ? "" : ": no cutouts");
     } else if (int x0, y0, w0, h0, t0; std::sscanf(cmd, "float %d %lf %d %d %d %d %d", &n, &w, &x0, &y0, &w0, &h0, &t0) == 7) {
         Screen *s = Find(n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);

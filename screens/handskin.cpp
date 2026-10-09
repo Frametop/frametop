@@ -78,13 +78,22 @@ void Frames(const V J[kJoints], const Frame &palm, Frame out[kJoints]) {
     }
 }
 
-V Bind(bool right, int j) { return V(handasset::kHands[right].bind[j]); }
+const handasset::Hand &Model(int model, bool right) {
+    return handasset::kModel[model >= 0 && model < handasset::kModels ? model : 0].hands[right];
+}
 
 }  // namespace
 
-bool Pose(const handcut::Hand &h, Bones &out) {
+int FindModel(const char *name) {
+    for (int k = 0; k < handasset::kModels; ++k)
+        if (!std::strcmp(handasset::kModel[k].name, name)) return k;
+    return -1;
+}
+
+bool Pose(int model, const handcut::Hand &h, Bones &out) {
     V B[kJoints], J[kJoints];
-    for (int j = 0; j < kJoints; ++j) B[j] = Bind(h.right, j);
+    const handasset::Hand &a = Model(model, h.right);
+    for (int j = 0; j < kJoints; ++j) B[j] = V(a.bind[j]);
     for (int k = 0; k < 21; ++k) {
         if (!std::isfinite(h.p[k][0]) || !std::isfinite(h.p[k][1]) || !std::isfinite(h.p[k][2])) return false;
         J[kFromMediaPipe[k]] = V(h.p[k]);
@@ -130,20 +139,21 @@ bool Pose(const handcut::Hand &h, Bones &out) {
     for (int i = 0; i < 3; ++i) out.wrist[i] = h.p[0][i];
     out.fwd[0] = float(tp.d.x), out.fwd[1] = float(tp.d.y), out.fwd[2] = float(tp.d.z);
     out.scale = float(s);
+    out.model = model >= 0 && model < handasset::kModels ? model : 0;
     return true;
 }
 
-int Vertices(bool right) { return handasset::kHands[right].verts; }
+int Vertices(int model, bool right) { return Model(model, right).verts; }
 
-void BindVertex(bool right, int i, float out[3]) {
-    const int16_t *p = handasset::kHands[right].pos + 3 * i;
+void BindVertex(int model, bool right, int i, float out[3]) {
+    const int16_t *p = Model(model, right).pos + 3 * i;
     for (int k = 0; k < 3; ++k) out[k] = p[k] * handasset::kPosStep;
 }
 
 void Skin(bool right, const Bones &b, int i, float out[3]) {
-    const handasset::Hand &a = handasset::kHands[right];
+    const handasset::Hand &a = Model(b.model, right);
     float v[3];
-    BindVertex(right, i, v);
+    BindVertex(b.model, right, i, v);
     out[0] = out[1] = out[2] = 0;
     for (int k = 0; k < 4; ++k) {
         const float w = a.weights[4 * i + k] / 255.0f;
@@ -155,7 +165,7 @@ void Skin(bool right, const Bones &b, int i, float out[3]) {
 
 void Points(bool right, const Bones &b, int step, handmesh::Mesh &out) {
     out.clear();
-    const int n = Vertices(right);
+    const int n = Vertices(b.model, right);
     for (int i = 0; i < n; i += std::max(1, step)) {
         handmesh::Vertex v{};
         Skin(right, b, i, v.p);
@@ -163,11 +173,11 @@ void Points(bool right, const Bones &b, int step, handmesh::Mesh &out) {
     }
 }
 
-handcut::Hand BindHand(bool right) {
+handcut::Hand BindHand(int model, bool right) {
     handcut::Hand h;
     h.right = right, h.fit = true, h.stereo = true, h.confidence = 1;
     for (int k = 0; k < 21; ++k)
-        for (int i = 0; i < 3; ++i) h.p[k][i] = handasset::kHands[right].bind[kFromMediaPipe[k]][i];
+        for (int i = 0; i < 3; ++i) h.p[k][i] = Model(model, right).bind[kFromMediaPipe[k]][i];
     return h;
 }
 

@@ -9,7 +9,7 @@
 # Valve's openvr repo (pinned in scripts/openvr.sh).
 # keyboard.cpp draws its key labels with stb_truetype (public domain, one header, pinned);
 # ft-handview --snapshot writes PNGs with stb_image_write (the same).
-# ft-handview's hand model is compiled in (handasset.h, from screens/assets/hands by tools/hand-asset.py).
+# ft-handview's hand models are compiled in (handasset.h, from screens/assets/hands by tools/hand-asset.py).
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 "$root/scripts/sync.sh" >/dev/null

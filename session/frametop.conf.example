@@ -64,8 +64,8 @@ HANDS_GRAB_SMOOTH_BETA=15  # ... and this much less as it moves (Hz per m/s; hig
 HANDS_GRAB_DEADZONE=0.01   # ... and moves the panel only once it's this far (m) from where the pinch began
 HANDS_NEAR=1               # Frametop panels: poke to click, pinch the bar, edges or corners to move or resize (1 = when the pointer helper says a hand is bare | 0 = off | force = always, for testing)
 HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face and look at it, and a ring shows above the palm; pinch with that hand to open the Steam menu (or close the dashboard). 0 = off
-HANDS_VIEW_MODEL=asset     # rendered hands (ft-handview): asset = a 3D hand model posed by the tracking | capsules = tubes from the skeleton (the older look)
-HANDS_VIEW_STYLE=ghost     # rendered hands: ghost = light, see-through, a bright rim | solid = matte light grey with a rim light
+HANDS_VIEW_MODEL=asset     # rendered hands (ft-handview): a 3D hand model posed by the tracking, asset (WebXR's generic hand) | babylon | mrtk3 | godot | mrtk2 (screens/assets/hands/README.md) | capsules = tubes from the skeleton (the older look)
+HANDS_VIEW_STYLE=ghost     # rendered hands: ghost = light, see-through, glowing toward its edges | solid = matte light grey lit from above, a soft rim light
 HANDS_VIEW_ROOMVIEW=1      # rendered hands: 1 = drawn with Room View on too, over the cutout | 0 = only with Room View off
 POINTER_HANDS=0            # 1 = pinches click (on the release; hold and move to nudge the pointer first) and grips press and drag, with hand tracking
 POINTER_PINCH_GAIN=0.5     # hands without gaze mode: a held pinch drags the pointer this times the hand's angle (precision)

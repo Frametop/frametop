@@ -3,7 +3,7 @@
 Local voice input for the Steam Frame. Nothing leaves the headset.
 
 - **Dictation**: tap a key (or hold a controller button) and speak. Words are typed as you talk into whatever has focus (desktop apps, search bars, terminals, game-mode windows) through a virtual uinput keyboard, transcribed on the headset by Moonshine.
-- **Wake words**: say one (default "Hey Computer"; add your own in the settings app), then a command. The command is transcribed and handed to a hook script and to any event subscribers. This is the entry point for a voice assistant.
+- **Wake words**: say one (default "Hey Computer"; add your own in the settings app), then a command. The command is transcribed and handed to a hook script and to any event subscribers, or runs a program you set up for it (see Voice commands). This is the entry point for a voice assistant.
 
 ## Pieces
 
@@ -26,11 +26,11 @@ The mic is captured once with `pw-record`. The wake word spotter (sherpa-onnx op
 | Steam Frame controllers | Hold left **d-pad down** (default), speak, release. Works in games, the Steam UI and the desktop with no per-app setup. The button is observed, not captured, so whatever else it is bound to still happens. |
 | Desktop mode shortcut | KDE System Settings > Shortcuts > add a command shortcut running `frame-voice-ctl toggle`. |
 | Scripts, the assistant | `frame-voice-ctl toggle`, `start`, `stop`, `cancel`, `type "text"` |
-| Voice | "<wake word>, ..." runs `hooks/on-command`. "Hey Computer, type hello world" types "hello world" (example in the hook). |
+| Voice | "<wake word>, ..." runs a matching voice command (see Voice commands), otherwise `hooks/on-command`. "Hey Computer, type hello world" types "hello world" (example in the hook). |
 
 Recordings shorter than 2 s (`min_seconds`) are discarded with the cancel tone, so brief or accidental presses never type anything.
 
-*Frame Voice Settings* (`./frame-voice-config`) starts and stops all three services (**Running**) and sets whether they start at system startup (see Services). Change the buttons there too: **Add** waits for you to press a controller button, key or mouse button (not left/right click, not the controller's system button). The app also sets hold or tap mode per trigger, switches live typing and sounds, and manages wake words: add any phrase in English words (they're spelled out for the spotter when loaded, no training), remove them, or turn listening off. Changes apply within a couple of seconds. Everything lives in `~/.config/frame-voice/settings.json`; both services apply changes without a restart. Delete the file to go back to the defaults.
+*Frame Voice Settings* (`./frame-voice-config`) starts and stops all three services (**Running**) and sets whether they start at system startup (see Services). Change the buttons there too: **Add** waits for you to press a controller button, key or mouse button (not left/right click, not the controller's system button). The app also sets hold or tap mode per trigger, switches live typing and sounds, and manages wake words: add any phrase in English words (they're spelled out for the spotter when loaded, no training), remove them, or turn listening off. Changes apply within a couple of seconds. Everything lives in `~/.config/frame-voice/settings.json`, along with voice commands (see Voice commands); both services apply changes without a restart. Delete the file to go back to the defaults.
 
 Live text works by agreement, with the approach and model borrowed from the Faceclaw app for Even Realities G2 glasses (Moonshine base through sherpa-onnx, on the CPU): the speech since your last pause is re-decoded every 0.8 s, and words two decodes in a row agree on are typed, except the last one, whose punctuation can still change. One word the two decodes disagree on (a filler heard as "a" once and "uh" the next time) doesn't hold back the words after it once three of them agree again. At a 0.8 s pause, or at the quietest point once a decode would pass 8 s of audio (Moonshine returns nothing past about 9 s), the window is decoded one last time and its remaining words are typed.
 
@@ -58,6 +58,39 @@ Audio cues are off by default (`[sounds] enabled = true` turns them on): rising 
 The socket is `/run/user/<uid>/frame-voice/control.sock` (systemd's runtime dir; the clients ignore `$XDG_RUNTIME_DIR`, which Frametop's desktop points elsewhere), mode 0600. It can type into any focused window, so keep it owner-only.
 
 An assistant can either replace `hooks/on-command` or subscribe with `frame-voice-ctl events` and act on `{"event": "command", "text": ...}`.
+
+## Voice commands
+
+A command that starts with a set phrase can run a program. Add a `"commands"` list to `~/.config/frame-voice/settings.json` by hand (the settings app doesn't edit it, and keeps it when it saves). It is empty by default. Example: "Hey Computer, flag that" or "Hey Computer, flag that, fingers crossed" runs a hand tracking tool's flag command.
+
+```json
+  "commands": [
+    {
+      "say": ["flag that", "flag this", "flag it", "flag"],
+      "run": ["~/.local/bin/ft-handsctl", "flag"]
+    }
+  ]
+```
+
+| Key | Meaning |
+| --- | --- |
+| `say` | Phrases. Case and punctuation don't matter. |
+| `run` | The program and its arguments. `~` is expanded. It runs directly, never through a shell, so spoken words can't become shell syntax. |
+| `rest` | Optional. `"arg"` (default): the words after the phrase are added as one more argument when there are any. `"none"`: they never are. |
+
+Matching works on whole words. A command matches when its words equal a phrase or start with it, so "Flag that." and "Flag that, fingers crossed." match "flag that", but "Flagging that" and "Please flag that" don't. If phrases of several entries match, the longest wins, then the first entry. The rest keeps your words as transcribed, without the punctuation that follows the phrase or a final period: the second example runs `ft-handsctl flag "fingers crossed"`.
+
+A matched command runs instead of `hooks/on-command`. The `command` event is still sent, with `"matched"` (the phrase) and `"ran"` (the argv) added. The program gets these environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `FRAME_VOICE_EVENT` | `voice_command` |
+| `FRAME_VOICE_TEXT` | The whole transcribed command |
+| `FRAME_VOICE_PHRASE` | The phrase that matched, as written in `say` |
+| `FRAME_VOICE_REST` | The words after it, or empty |
+| `FRAME_VOICE_WAKE_UNIX` | When the wake word was heard, in Unix seconds (e.g. `1791582811.212`) |
+
+frame-voice doesn't wait for the program. A malformed entry is skipped with a warning in the log (`journalctl --user -u frame-voice`). Changes to the list apply within a couple of seconds, like the other settings. Updating frame-voice from a version without voice commands needs one `systemctl --user restart frame-voice`.
 
 ## Config
 
@@ -98,7 +131,7 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DGGML_NATIV
 cmake --build build -j5 --target whisper-server whisper-cli whisper-bench
 ```
 
-`vendor/prefix` holds SPIRV-Headers, which SteamOS does not ship. The Python side lives in `.venv` (`evdev sherpa-onnx numpy sentencepiece websockets`). `models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27` holds the Moonshine files from huggingface.co/csukuangfj2 (`encoder_model.ort`, `decoder_model_merged.ort`, `tokens.txt`). The settings app uses the system Python for GTK (`gi`) and the venv for the rest; the `frame-voice-config` launcher sets that up.
+`vendor/prefix` holds SPIRV-Headers, which SteamOS does not ship. Tests: `python3 -m unittest` in the repo (no audio stack needed). The Python side lives in `.venv` (`evdev sherpa-onnx numpy sentencepiece websockets`). `models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27` holds the Moonshine files from huggingface.co/csukuangfj2 (`encoder_model.ort`, `decoder_model_merged.ort`, `tokens.txt`). The settings app uses the system Python for GTK (`gi`) and the venv for the rest; the `frame-voice-config` launcher sets that up.
 
 The whisper service sets `DISABLE_GAMESCOPE_WSI=1`. Without it the Gamescope Vulkan layer aborts whisper-server at startup.
 

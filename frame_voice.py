@@ -3,7 +3,8 @@
 
 One PipeWire capture stream feeds two consumers:
   * dictation: hotkey or socket command -> record -> whisper-server -> type via uinput
-  * wake word: sherpa-onnx keyword spotter -> capture the spoken command -> hooks + events
+  * wake word: sherpa-onnx keyword spotter -> capture the spoken command -> voice command,
+    or hooks + events
 """
 import asyncio
 import io
@@ -25,6 +26,7 @@ from pathlib import Path
 import evdev
 
 import settings
+import voice_commands
 import numpy as np
 import sentencepiece
 import sherpa_onnx
@@ -372,6 +374,7 @@ class FrameVoice:
         self.stream = None  # streaming state of the current dictation, see start_dictation
         self.whisper_lock = asyncio.Lock()  # one request at a time, in order
         self.command = None  # dict while capturing a post-wake command
+        self.voice_commands = []  # from "commands" in settings.json, see voice_commands.py
         self.wake_enabled = settings.DEFAULT["wake_word"]  # apply_options() sets the saved value
         self.mic_task = None
         self.mic_proc = None
@@ -474,6 +477,11 @@ class FrameVoice:
                 log.warning("%s exited %s", argv[0], rc)
         except OSError as err:
             log.warning("could not run %s: %s", argv[0], err)
+
+    def spawn(self, coro):
+        task = asyncio.create_task(coro)
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
 
     def run_hook(self, key, *args, env=None):
         hook = self.wcfg.get(key)
@@ -942,7 +950,7 @@ class FrameVoice:
         self.chime("wake")
         self.broadcast("wake", keyword=keyword)
         self.run_hook("wake_hook", keyword, env={"FRAME_VOICE_EVENT": "wake"})
-        self.command = {"chunks": [], "t0": time.monotonic(), "heard": False}
+        self.command = {"chunks": [], "t0": time.monotonic(), "heard": False, "wake_unix": time.time()}
         self.cmd_vad.reset()
         self.update_mic()
 
@@ -957,7 +965,7 @@ class FrameVoice:
         elapsed = time.monotonic() - cmd["t0"]
         if cmd["heard"] and not speaking or elapsed > self.wcfg["max_command_seconds"]:
             self.command = None
-            asyncio.create_task(self.finish_command(np.concatenate(cmd["chunks"])))
+            asyncio.create_task(self.finish_command(np.concatenate(cmd["chunks"]), cmd["wake_unix"]))
         elif not cmd["heard"] and elapsed > self.wcfg["command_timeout"]:
             self.command = None
             log.info("wake: no command heard")
@@ -967,7 +975,7 @@ class FrameVoice:
             self.reset_kws()
             self.update_mic()
 
-    async def finish_command(self, samples):
+    async def finish_command(self, samples, wake_unix):
         self.chime("stop")
         try:
             text = await self.transcribe(samples)
@@ -975,9 +983,23 @@ class FrameVoice:
             log.error("transcription failed: %s", err)
             self.broadcast("error", message=str(err))
             return
-        self.broadcast("command", text=text)
-        if text:
-            self.run_hook("command_hook", text, env={"FRAME_VOICE_EVENT": "command"})
+        found = voice_commands.match(text, self.voice_commands) if text else None
+        if found is None:
+            self.broadcast("command", text=text)
+            if text:
+                self.run_hook("command_hook", text, env={"FRAME_VOICE_EVENT": "command"})
+            return
+        # A voice command runs instead of the command hook. The argv goes straight to
+        # exec, so the transcribed words never reach a shell.
+        log.info("voice command %r: %s", found.phrase, found.argv)
+        self.broadcast("command", text=text, matched=found.phrase, ran=found.argv)
+        self.spawn(self._run(found.argv, env={
+            "FRAME_VOICE_EVENT": "voice_command",
+            "FRAME_VOICE_TEXT": text,
+            "FRAME_VOICE_REST": found.rest,
+            "FRAME_VOICE_PHRASE": found.phrase,
+            "FRAME_VOICE_WAKE_UNIX": f"{wake_unix:.3f}",
+        }))
 
     # --- hotkey
 
@@ -1072,8 +1094,15 @@ class FrameVoice:
     def apply_options(self, b):
         """Settings from the config app. Only changed ones are applied, so a save doesn't
         undo e.g. `frame-voice-ctl wake off`."""
-        changed = {k: b[k] for k in ("keyboard_mode", "wake_phrases", *settings.OPTIONS) if self.applied.get(k) != b[k]}
+        changed = {k: b[k] for k in ("keyboard_mode", "wake_phrases", "commands", *settings.OPTIONS)
+                   if self.applied.get(k) != b[k]}
         self.applied.update(changed)
+        if "commands" in changed:
+            self.voice_commands, warnings = voice_commands.parse(changed.pop("commands"))
+            for warning in warnings:
+                log.warning("settings: %s", warning)
+            log.info("voice commands: %s", ", ".join(
+                f"{c.phrases[0][0]!r} -> {c.run[0]}" for c in self.voice_commands) or "none")
         if "keyboard_mode" in changed:
             self.kb_mode = changed["keyboard_mode"]
         if "live_typing" in changed:

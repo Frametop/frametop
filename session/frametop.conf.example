@@ -62,8 +62,8 @@ HANDS_POKE_REST_NEAR=0.32  # ... and this close (m) to the head across the floor
 HANDS_NEAR=1               # Frametop panels: poke to click, pinch the bar, edges or corners to move or resize (1 = when the pointer helper says a hand is bare | 0 = off | force = always, for testing)
 HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face and look at it, and a ring shows above the palm; pinch with that hand to open the Steam menu (or close the dashboard). 0 = off
 POINTER_HANDS=0            # 1 = pinches click (on the release; hold and move to nudge the pointer first) and grips press and drag, with hand tracking
-POINTER_PINCH_GAIN=0.5     # hands: the pointer moves this times the pinching hand's angle (precision)
-POINTER_PINCH_DEADZONE=1.5 # hands: degrees the pinching hand moves before the pointer does (a tap's jitter)
+POINTER_PINCH_GAIN=0.5     # hands without gaze mode: a held pinch drags the pointer this times the hand's angle (precision)
+POINTER_PINCH_DEADZONE=1.5 # hands without gaze mode: degrees the pinching hand moves before the pointer does (a tap's jitter)
 POINTER_GRIP_GAIN=1        # hands: the pointer moves this times the gripping hand's angle
 POINTER_GRIP_BELOW=0.35    # hands: grips beginning more than this (m) below the eyes are ignored (hands on a desk)
 POINTER_PINCH_TYPING=1     # hands: no pinch within this many seconds of a key (typing touches thumb to index)
@@ -73,6 +73,9 @@ POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out push
 POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle pinch moved up or down (-1 turns the direction round)
 POINTER_RAY_RELEASE=2      # hand ray: seconds after the ray goes before the pointer it woke lets go of the laser
 POINTER_RAY_GRACE=0.5      # hand ray: seconds a hand keeps the laser after its ray drops (the other hand's ray takes it after this, or at once by pinching or raising)
+POINTER_GAZE_HAND_RAY=0    # hands in gaze mode: 0 = no hand ray, your eyes aim and a pinch clicks where you look | 1 = a raised, pointing hand's ray works beside the gaze
+POINTER_GAZE_PINCH_DEADZONE=4 # hands in gaze mode: degrees (seen from the eye; about 3 cm at arm's length) a held pinch moves before it nudges the pointer; held still for POINTER_GAZE_HOLD it's a press, to drag
+POINTER_GAZE_PINCH_GAIN=0.3   # hands in gaze mode: past that, the pointer moves this times the pinching hand's angle (low, for small corrections)
 SHARE_KEYS=0       # 1 = keys of keyboards grabbed for the desktop also go to @frametop_keys, for hotkey tools (any local process can listen)
 DISPLAY_OFF_MIN=0  # minutes without use before frametop-power turns the displays off, even if the headset seems worn (0 = never)
 DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (mm) within 10 s counts as use

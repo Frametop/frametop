@@ -169,6 +169,9 @@ GAZE_SETTINGS = [
     ("POINTER_GAZE_NUDGE_MAX", "Largest correction to learn", 55, 1, 110, 1, "°"),
     ("POINTER_GAZE_HOLD", "Hold still to drag", 0.5, 0.1, 2.0, 0.05, "s"),
     ("POINTER_GAZE_SHOW", "Dot shows after moving", 1.0, 0.0, 5.0, 0.1, "s"),
+    # with hand tracking (POINTER_HANDS): how far a held pinch moves before it nudges, and how fast
+    ("POINTER_GAZE_PINCH_DEADZONE", "Pinch nudge starts after", 4.0, 1.0, 10.0, 0.5, "°"),
+    ("POINTER_GAZE_PINCH_GAIN", "Pinch nudge speed", 0.3, 0.1, 1.0, 0.05, "×"),
 ]
 # In gaze mode, what the mouse's left button does (POINTER_GAZE_MOUSE).
 GAZE_MOUSE = {"precision": "Gaze precision: hold to steer with the mouse, release to click",

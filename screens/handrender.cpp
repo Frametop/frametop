@@ -57,6 +57,16 @@ void main() {
     gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
 })";
 
+// Pixel positions as they are (a hull's polygon, handcut.h Hull2D::fan).
+const char *kVertexPx = R"(
+attribute vec2 pos;          // pixels of the eye's half
+uniform vec2 size;
+varying vec2 px;
+void main() {
+    px = pos;
+    gl_Position = vec4(pos / size * 2.0 - 1.0, 0.0, 1.0);
+})";
+
 // The client's pixels, opaque (its alpha is ignored, as IgnoreTextureAlpha did).
 const char *kCopy = R"(
 #extension GL_OES_EGL_image_external : require
@@ -76,6 +86,7 @@ void main() {
     float t = clamp(dot(px - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
     float d = length(px - (a + t * ab));
     float rad = mix(r.x, r.y, t);
+    if (d >= rad + feather) discard;   // outside it: nothing to blend
     gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0 - smoothstep(rad - feather, rad + feather, d));
 })";
 
@@ -91,6 +102,7 @@ void main() {
     for (int i = 0; i < 16; ++i) {
         if (i >= n) break;
         d = max(d, dot(edges[i].xy, px) - edges[i].z);
+        if (d >= r + feather) discard;   // outside: most of the box (and no blend to pay for)
     }
     gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0 - smoothstep(r - feather, r + feather, d));
 })";
@@ -145,9 +157,9 @@ unsigned Shader(GLenum type, const char *src) {
     return s;
 }
 
-unsigned Program(const char *fs) {
+unsigned Program(const char *fs, const char *vs = kVertex) {
     const GLuint p = glCreateProgram();
-    glAttachShader(p, Shader(GL_VERTEX_SHADER, kVertex));
+    glAttachShader(p, Shader(GL_VERTEX_SHADER, vs));
     glAttachShader(p, Shader(GL_FRAGMENT_SHADER, fs));
     glBindAttribLocation(p, 0, "pos");
     glLinkProgram(p);
@@ -236,7 +248,7 @@ bool Renderer::Init(const std::vector<uint64_t> &modifiers, std::function<void(c
     ctx_ = ctx;
     copyProg_ = Program(kCopy);
     cutProg_ = Program(kCut);
-    hullProg_ = Program(kHull);
+    hullProg_ = Program(kHull, kVertexPx);
     glowProg_ = Program(kGlow);
     markProg_ = Program(kMark);
     if (!copyProg_ || !cutProg_ || !hullProg_ || !glowProg_ || !markProg_) return false;
@@ -459,16 +471,19 @@ void Renderer::Draw(Output &o, unsigned tex, int w, int h, const Spots eyes[2], 
             glUseProgram(hullProg_);
             glUniform2f(glGetUniformLocation(hullProg_, "size"), float(w), float(h));
             glUniform1f(glGetUniformLocation(hullProg_, "feather"), kHullFeather);
-            const GLint uRect = glGetUniformLocation(hullProg_, "rect"), uE = glGetUniformLocation(hullProg_, "edges"),
-                        uN = glGetUniformLocation(hullProg_, "n"), uR = glGetUniformLocation(hullProg_, "r");
+            const GLint uE = glGetUniformLocation(hullProg_, "edges"), uN = glGetUniformLocation(hullProg_, "n"),
+                        uR = glGetUniformLocation(hullProg_, "r");
+            // the grown polygon itself, not its box: a forearm across the panel covers a fraction of it
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
             for (const Hull2D &hl : eyes[e].hulls) {
-                Bounds(hl, b);
-                glUniform4f(uRect, b[0], b[1], b[2], b[3]);
+                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, &hl.fan[0][0]);
                 glUniform3fv(uE, hl.n, &hl.e[0][0]);
                 glUniform1i(uN, hl.n);
                 glUniform1f(uR, hl.r);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                glDrawArrays(GL_TRIANGLE_FAN, 0, hl.n);
             }
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
         }
         if (!eyes[e].glows.empty()) {
             glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);

@@ -550,18 +550,20 @@ void BuildMatte(const std::vector<Hand> &hands, const std::vector<Capsule> &file
         for (const V &q : {P[1], P[2], P[5] + (P[6] - P[5]) * 0.15, P[5]})
             for (double s : {-wh, wh}) web.v.push_back(F3(q + normal * s));
         out.hulls.push_back(web), out.hullMargin.push_back(float(m));
-        // the forearm: a tapered tube from the wrist toward the elbow (flatter than round)
+        // the forearm: a stub of a tapered tube from the wrist toward the elbow (flatter than
+        // round). A stub, as the capsules' (16 cm): the elbow is a guess (13-15 degrees off in
+        // the forearm probe), and a longer piece costs a bigger redraw for little.
         V dir = V(h.elbow) - P[0];
         double len = dir.norm();
         if (len < 0.05) continue;
         dir = dir * (1 / len);
-        len = std::min(len, h.hasElbow ? 0.32 * k : 0.16);
+        len = std::min(len, 0.18 * k);
         V a = across - dir * across.dot(dir);
         if (a.norm() < 1e-6) a = normal.cross(dir);
         a = a.unit();
         const V b = dir.cross(a).unit();
         Hull arm;
-        const double rw[2] = {0.027 * k, 0.019 * k}, re[2] = {0.035 * k, 0.029 * k};
+        const double rw[2] = {0.027 * k, 0.019 * k}, re[2] = {0.032 * k, 0.025 * k};
         for (int ring = 0; ring < 2; ++ring) {
             const V c = P[0] + dir * (ring ? len : 0.0);
             const double *r = ring ? re : rw;
@@ -726,7 +728,8 @@ bool ProjectHull(const Panel &p, const Hull &hull, float margin, const double ey
     for (const auto &q : h) cx += q[0] / h.size(), cy += q[1] / h.size();
     Hull2D o;
     o.r = float(margin * grow * pxPerM);
-    o.box[0] = o.box[1] = 1e9f, o.box[2] = o.box[3] = -1e9f;
+    // the edges, in order around it (edge i from corner i to i + 1), normals pointing out
+    std::vector<std::array<double, 2>> corner;
     for (size_t i = 0; i < h.size(); ++i) {
         const auto &a = h[i], &b = h[(i + 1) % h.size()];
         double nx = b[1] - a[1], ny = -(b[0] - a[0]);
@@ -736,15 +739,29 @@ bool ProjectHull(const Panel &p, const Hull &hull, float margin, const double ey
         double c = nx * a[0] + ny * a[1];
         if (nx * cx + ny * cy - c > 0) nx = -nx, ny = -ny, c = -c;   // point away from the middle
         o.e[o.n][0] = float(nx), o.e[o.n][1] = float(ny), o.e[o.n][2] = float(c);
+        corner.push_back(a);
         ++o.n;
-        o.box[0] = std::min(o.box[0], float(a[0])), o.box[1] = std::min(o.box[1], float(a[1]));
-        o.box[2] = std::max(o.box[2], float(a[0])), o.box[3] = std::max(o.box[3], float(a[1]));
     }
     if (o.n < 3) return false;
-    // a corner's offset reaches further than r (the edges are pushed out, not rounded): the
-    // box takes the sharpest corner's reach
-    const float reach = o.r * 2.0f + kHullFeather + 1;
-    o.box[0] -= reach, o.box[1] -= reach, o.box[2] += reach, o.box[3] += reach;
+    // what's drawn: each corner pushed out along its bisector so the edges move out by `reach`
+    // (the margin and the feather), at most 3 times that at a sharp corner
+    const double reach = o.r + kHullFeather + 1;
+    o.box[0] = o.box[1] = 1e9f, o.box[2] = o.box[3] = -1e9f;
+    for (int i = 0; i < o.n; ++i) {
+        const float *n1 = o.e[(i + o.n - 1) % o.n], *n2 = o.e[i];
+        double bx = n1[0] + n2[0], by = n1[1] + n2[1];
+        const double bl = std::hypot(bx, by);
+        double k = reach;
+        if (bl > 1e-6) {
+            bx /= bl, by /= bl;
+            k = reach / std::max(1.0 / 3, bx * n2[0] + by * n2[1]);
+        } else {
+            bx = n2[0], by = n2[1];
+        }
+        o.fan[i][0] = float(corner[i][0] + bx * k), o.fan[i][1] = float(corner[i][1] + by * k);
+        o.box[0] = std::min(o.box[0], o.fan[i][0]), o.box[1] = std::min(o.box[1], o.fan[i][1]);
+        o.box[2] = std::max(o.box[2], o.fan[i][0]), o.box[3] = std::max(o.box[3], o.fan[i][1]);
+    }
     if (o.box[2] < 0 || o.box[0] > p.pxWidth || o.box[3] < 0 || o.box[1] > p.pxHeight) return false;
     *out = o;
     return true;

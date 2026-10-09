@@ -85,6 +85,7 @@ struct Hull2D {
     float e[kMaxHullEdges][3];   // nx, ny, c (n points out)
     float r = 0;
     float box[4];                // x0 y0 x1 y1 around it, r and the feather included
+    float fan[kMaxHullEdges][2]; // the polygon grown by r and the feather: what's drawn (n corners)
 };
 
 // A glow of hand input (handinput.cpp), drawn on top of the panel at a texture point: a soft

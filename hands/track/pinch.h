@@ -23,6 +23,9 @@ struct PinchParams {
     // triangulated tips. The model's pose should hold up better when the fingers hide each
     // other; tomorrow's recordings will tell.
     bool triangulated = false;
+    // Or the fitted skeleton's tips (track/skeleton.h), where the hand has one: for comparing
+    // in ft-handreplay (--pinch-fitted); not used live yet.
+    bool fitted = false;
     // No pinch begins while the palm faces down more than this (|palm normal . up| in the
     // head frame; 1 turns it off). Typing curls the thumb onto the index: in the 2026-09-30
     // lit recording, pinches that began while typing had 0.69-1.00, deliberate ones 0.00-0.50.
@@ -58,7 +61,7 @@ public:
     };
     std::vector<Event> events;
     // Both distance measures for the last update, per side (-1: no hand), for logs.
-    double world_d[2] = {-1, -1}, tri_d[2] = {-1, -1};
+    double world_d[2] = {-1, -1}, tri_d[2] = {-1, -1}, fit_d[2] = {-1, -1};
     double palm_down[2] = {-1, -1};   // |palm normal . up| of each side's hand
     int held_back[2] = {0, 0};          // pinches that didn't begin because the palm faced down
 

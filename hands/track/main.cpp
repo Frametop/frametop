@@ -266,6 +266,9 @@ int main(int argc, char **argv) {
     if (const std::string v = setting("HANDS_REACQUIRE"); !v.empty()) reacquire = std::atof(v.c_str());
     bool pair_sides = setting("HANDS_PAIR_SIDES") != "0";
     double hold = 0.6;   // s a lost, established hand is kept and retried before it's forgotten
+    // the skeleton fit (track/skeleton.h): published as fh_hands version 2, and as version 1's
+    // points and capsules; 0 publishes the One Euro filtered landmarks as before, and no skeleton
+    bool skeleton = setting("HANDS_SKELETON") != "0";
     PinchParams pinch_params;
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
@@ -300,6 +303,7 @@ int main(int argc, char **argv) {
         else if (a == "--reacquire" && more) reacquire = std::atof(argv[++i]);
         else if (a == "--pair-sides" && more) pair_sides = std::string(argv[++i]) == "1";
         else if (a == "--hold" && more) hold = std::atof(argv[++i]);
+        else if (a == "--skeleton" && more) skeleton = std::string(argv[++i]) != "0";
         else if (a == "--cams" && more) cams_arg = argv[++i];
         else if (a == "--bright" && more) bright_arg = argv[++i];
         else if (a == "--bright-on" && more) light.on = std::atof(argv[++i]);
@@ -322,6 +326,7 @@ int main(int argc, char **argv) {
                         "          [--keep-presence P] (0.5) [--ring PATH] (ft-camd's, or ft-ringplay's)\n"
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
                         "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
+                        "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
                         "          [--pinch-begin M] (0.020) [--pinch-end M] (0.035) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
@@ -511,6 +516,7 @@ int main(int argc, char **argv) {
     tracker.set_reacquire(reacquire, 2, true);
     tracker.set_pair_sides(pair_sides);
     tracker.set_hold(reacquire > 0 ? hold : 0.3);
+    tracker.set_skeleton(skeleton);
     std::map<std::string, std::vector<uint8_t>> pixels;
     std::map<std::string, uint64_t> lit_seen;   // per colour camera: the frame last counted for the light
     const uint64_t start = mono_ns();
@@ -838,11 +844,14 @@ int main(int argc, char **argv) {
             const Stats &s = tracker.stats;
             std::sort(lat.begin(), lat.end());
             std::printf("%5.1fs %4.1f sets/s  hands %.2f views %zu  palm %3d calls %4.1f ms/batch  hand %3d calls %4.1f ms/batch  "
-                        "step %4.1f ms  latency %4.1f ms  resid %.1f mm  CPU %3.0f%%\n",
+                        "step %4.1f ms  latency %4.1f ms  resid %.1f mm  fit %.0f us  CPU %3.0f%%\n",
                         (now - start) / 1e9, s.sets / dt, s.sets ? hands_sum / s.sets : 0, tracker.views(), s.palm_calls,
                         s.palm_batches ? s.palm_ms / s.palm_batches : 0, s.hand_calls,
                         s.hand_batches ? s.hand_ms / s.hand_batches : 0, s.sets ? s.step_ms / s.sets : 0,
-                        lat.empty() ? 0 : lat[lat.size() / 2], resid_n ? resid_sum / resid_n : 0, 100 * (cpu1 - cpu0) / dt);
+                        lat.empty() ? 0 : lat[lat.size() / 2], resid_n ? resid_sum / resid_n : 0,
+                        tracker.skeleton().fits ? tracker.skeleton().us_total / tracker.skeleton().fits : 0.0,
+                        100 * (cpu1 - cpu0) / dt);
+            tracker.skeleton().fits = 0, tracker.skeleton().us_total = 0;
             if (!color.empty())
                 std::printf("        cameras %s%s: colour frames at %.1f (bright at %.0f, dim under %.0f), ambient IR %.1f, "
                             "%d steps with colour, colour placed %.1f ms after capture\n",

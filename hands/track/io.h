@@ -36,8 +36,11 @@ class Publisher {
 public:
     bool open(std::string &err);
     void write(const std::vector<const Hand *> &hands, uint64_t capture_ns);
+    // Fills one hand's version 2 record (also for ft-handreplay's checks).
+    static void fill_fit(const Hand &h, uint64_t capture_ns, fh_hand_fit_t &o);
 
 private:
+    fh_hands_v2_t *file_ = nullptr;
     fh_hands_t *out_ = nullptr;
     uint64_t seq_ = 0;
 };

@@ -46,6 +46,19 @@
 //             the tracker's views moving with their images (Tracker::exchange). The side check runs in every mode, and the report
 //             says what it found and when: seconds into the recording, and after how long of
 //             hands (from the first set with a hand in view).
+// --no-skeleton: the tracker without the skeleton fit (track/skeleton.h). With it (the
+//             default) the report ends with the skeleton's measures (track/skeval.h): fit time
+//             and residual, the bone-length calibration, bone-length spread, jitter, fingertip
+//             lag and the elbow, each for the measured, One Euro filtered and fitted landmarks.
+// --skel NAME=VALUE: a skeleton setting (skel::Params: pos_min, pos_beta, rot_min, rot_beta,
+//             ang_min, ang_beta, d_cutoff, glitch, depth_ratio, limits, iterations), repeatable.
+// --labels FILE: frame-hands' auto-labels (labels.jsonl) for this recording: the landmarks'
+//             distance to them, measured, One Euro and fitted.
+// --hmd-poses FILE: a hand-recorder take's poses.jsonl: the arm model's elbow with gravity's up
+//             against the head's up.
+// --skeleton-dump FILE: with --labels, a line per hand matched to a label: time, id, stereo, then
+//             the measured, fitted (unfiltered) and labelled landmarks.
+// --pinch-fitted: also run a second pinch detector on the fitted tips, and report its count.
 // --depth FILE: per processed set, a line per hand for tools/depth_report.py: its views'
 //             cameras, triangulation residual, hand scale, measured and published palm, and
 //             each view's one-view palm (Tracker::single_view at the hand's scale). The
@@ -53,6 +66,7 @@
 #include "pinch.h"
 #include "record.h"
 #include "sides.h"
+#include "skeval.h"
 #include "tracker.h"
 
 #include <json/json.h>
@@ -106,6 +120,9 @@ int main(int argc, char **argv) {
     double reacquire_clear = 0.12;
     double near_frac = 0.5, hold = 0.3;
     int search_budget1 = 2;
+    bool skeleton = true, pinch_fitted = false;
+    skel::Params skel_params;
+    std::string labels, hmd_poses, skeleton_dump;
     PinchParams pinch_params;
     GripParams grip_params;
     std::string use = "mono", color_left = "color_video0", color_crop = "subtract", sides = "file";
@@ -134,6 +151,27 @@ int main(int argc, char **argv) {
         else if (a == "--near" && more) near_frac = std::atof(argv[++i]);
         else if (a == "--hold" && more) hold = std::atof(argv[++i]);
         else if (a == "--search-budget" && more) search_budget1 = std::atoi(argv[++i]);
+        else if (a == "--no-skeleton") skeleton = false;
+        else if (a == "--pinch-fitted") pinch_fitted = true;
+        else if (a == "--labels" && more) labels = argv[++i];
+        else if (a == "--hmd-poses" && more) hmd_poses = argv[++i];
+        else if (a == "--skeleton-dump" && more) skeleton_dump = argv[++i];
+        else if (a == "--skel" && more) {
+            const std::string kv = argv[++i];
+            const size_t eq = kv.find('=');
+            const std::string k = kv.substr(0, eq);
+            const double v = eq == std::string::npos ? NAN : std::atof(kv.c_str() + eq + 1);
+            double *f = k == "pos_min" ? &skel_params.pos_min : k == "pos_beta" ? &skel_params.pos_beta
+                      : k == "rot_min" ? &skel_params.rot_min : k == "rot_beta" ? &skel_params.rot_beta
+                      : k == "ang_min" ? &skel_params.ang_min : k == "ang_beta" ? &skel_params.ang_beta
+                      : k == "d_cutoff" ? &skel_params.d_cutoff : k == "limits" ? &skel_params.limits
+                      : k == "depth_ratio" ? &skel_params.depth_ratio
+                      : k == "glitch" ? &skel_params.glitch
+                      : k == "warm" ? &skel_params.warm : nullptr;
+            if (k == "iterations") skel_params.iterations = int(v);
+            else if (f && v == v) *f = v;
+            else return std::fprintf(stderr, "--skel NAME=VALUE: %s?\n", kv.c_str()), 1;
+        }
         else if (a == "--cams" && more) use = argv[++i];
         else if (a == "--sides" && more) sides = argv[++i];
         else if (a == "--pinch-begin" && more) pinch_params.begin_m = std::atof(argv[++i]);
@@ -226,6 +264,27 @@ int main(int argc, char **argv) {
         tracker.set_trace(&trace);
         for (const std::string &line : tracker.describe_tiles()) std::fprintf(tl, "# %s\n", line.c_str());
     }
+    tracker.set_skeleton(skeleton);
+    tracker.skeleton().set_params(skel_params);
+    skeval::Eval eval;
+    eval.dump = skeleton_dump;
+    if (!labels.empty() && !eval.load_labels(labels)) return std::fprintf(stderr, "%s: can't read it\n", labels.c_str()), 1;
+    std::vector<std::pair<int64_t, int>> label_hits;   // processed sets' times
+    std::vector<std::pair<int64_t, V3>> ups;            // the head's up (head frame) by CLOCK_MONOTONIC
+    if (!hmd_poses.empty()) {
+        std::ifstream f(hmd_poses);
+        std::string line;
+        Json::CharReaderBuilder b;
+        while (std::getline(f, line)) {
+            Json::Value v;
+            std::string e;
+            std::istringstream in(line);
+            if (!Json::parseFromStream(b, in, &v, &e) || !v["hmd"]["ok"].asBool() || v["hmd"]["m"].size() != 12) continue;
+            const Json::Value &m = v["hmd"]["m"];   // 3x4, head -> room: up in the head frame is its second row
+            ups.push_back({v["t"].asInt64(), unit(V3{m[4].asDouble(), m[5].asDouble(), m[6].asDouble()})});
+        }
+        if (ups.empty()) return std::fprintf(stderr, "%s: no HMD poses\n", hmd_poses.c_str()), 1;
+    }
     FILE *dp = depth.empty() ? nullptr : std::fopen(depth.c_str(), "w");
     FILE *pp = poses.empty() ? nullptr : std::fopen(poses.c_str(), "w");
     if (dp)
@@ -259,6 +318,10 @@ int main(int argc, char **argv) {
     std::vector<double> jit_raw, jit_sm;
     int near_face = 0, hand_updates = 0;   // published palms within 20 cm of the eyes
     Pinch pinch(pinch_params);
+    PinchParams fitted_params = pinch_params;
+    fitted_params.fitted = true;
+    Pinch pinch_fit(fitted_params);
+    int pinch_fit_begins[2] = {0, 0};
     double pinch_begin_ts[2] = {0, 0};
     std::vector<double> pinch_len[2];   // seconds, per side
     int pinch_lost = 0;
@@ -355,6 +418,27 @@ int main(int argc, char **argv) {
             }
             grip.update(out, seen, int64_t(t));
             pinch.update(out, seen, int64_t(t), grip.gripping());
+            if (pinch_fitted) {
+                pinch_fit.update(out, seen, int64_t(t), grip.gripping());
+                for (const Pinch::Event &e : pinch_fit.events) {
+                    pinch_fit_begins[e.side] += std::string(e.what) == "begin";
+                    if (tl) std::fprintf(tl, "%.3f pinch-fitted %s %s d %.3f\n", ts, e.side ? "R" : "L", e.what, e.distance);
+                }
+            }
+            if (skeleton) {
+                V3 up{0, 0, 0};
+                if (!ups.empty()) {   // at the set's dequeue time, as frame-hands' armmodel.py
+                    uint64_t dq = UINT64_MAX;
+                    for (auto &c : cams)
+                        if (used.count(c.name) && std::string(c.name).rfind("color_", 0) != 0) dq = std::min(dq, c.dqbuf_ns);
+                    const auto it = std::lower_bound(ups.begin(), ups.end(), std::make_pair(int64_t(dq), V3{}),
+                                                     [](auto &a, auto &b) { return a.first < b.first; });
+                    if (it != ups.end() && std::llabs(it->first - int64_t(dq)) < 50'000'000) up = it->second;
+                }
+                for (const Hand *h : out) eval.add(*h, ts, up);
+                eval.calibration(tracker.skeleton(), ts);
+                label_hits.push_back({int64_t(t), int(out.size())});
+            }
             next_ns = t + uint64_t((std::min(tracker.interval(), pinch.engaged() || grip.engaged() ? 1 / 30.0 : 1.0) - 0.005) * 1e9);
             for (const Pinch::Event &e : grip.events) {
                 if (std::string(e.what) == "begin") grip_begin_ts[e.side] = ts;
@@ -553,7 +637,7 @@ int main(int argc, char **argv) {
     std::sort(jit_sm.begin(), jit_sm.end());
     if (!jit_raw.empty())
         std::printf("palm jitter (off a straight line through the last two updates): measured median %.1f mm, 90%% %.1f mm; "
-                    "published median %.1f mm, 90%% %.1f mm\n", jit_raw[jit_raw.size() / 2], jit_raw[jit_raw.size() * 9 / 10],
+                    "One Euro median %.1f mm, 90%% %.1f mm\n", jit_raw[jit_raw.size() / 2], jit_raw[jit_raw.size() * 9 / 10],
                     jit_sm[jit_sm.size() / 2], jit_sm[jit_sm.size() * 9 / 10]);
     if (!side_check.usable())
         std::printf("side cameras: not both in this recording\n");
@@ -561,6 +645,8 @@ int main(int argc, char **argv) {
         std::printf("%sside cameras %s: %s\n", side_report.c_str(), side_report.empty() ? "undecided" : "at the end",
                     checking || side_report.empty() ? side_check.summary().c_str()
                                                     : names_swapped ? "exchanged from the recorded names" : "as recorded");
+    if (pinch_fitted)
+        std::printf("pinches on the fitted tips (same thresholds): left %d, right %d\n", pinch_fit_begins[0], pinch_fit_begins[1]);
     if (o_sets) {
         std::printf("oracle, %d sets: a left hand findable in %d, the tracker had it in %d (%.0f%%); right %d, had %d (%.0f%%)\n",
                     o_sets, o_left, o_left_hit, 100.0 * o_left_hit / std::max(o_left, 1), o_right, o_right_hit,
@@ -572,5 +658,6 @@ int main(int argc, char **argv) {
         for (auto &[k, n] : o_by_cam) std::printf("  %s %d", k.c_str(), n);
         std::printf("\n");
     }
+    if (skeleton) eval.report(tracker.skeleton(), int64_t(t0), label_hits);
     return 0;
 }

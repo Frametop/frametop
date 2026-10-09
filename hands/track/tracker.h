@@ -4,6 +4,7 @@
 
 #include "calib.h"
 #include "nets.h"
+#include "skeleton.h"
 
 #include <condition_variable>
 #include <functional>
@@ -36,7 +37,8 @@ struct Hand {
     V3 pts[21]{};               // as measured this frame; the tracker steers crops by these
     V3 smooth[21]{};            // filtered (One Euro, see Tracker::smooth): publish these
     bool has_pts = false;
-    double residual = -1;       // rms ray distance of the triangulation (m); -1: one view
+    double residual = -1;       // rms ray distance of the triangulation (m), the landmarks' median; -1: one view
+    double res_pt[21]{};        // each landmark's (-1: one view)
     int nviews = 0;
     double right_score = 0.5;   // the model's right-hand score (these images aren't mirrored)
     double scale = 1.0;         // this user's hand size / the model's world landmarks
@@ -49,6 +51,8 @@ struct Hand {
     int64_t smooth_ns = 0;
     double side_evidence = 0;   // log-odds of a right hand, from every reading, fading (Tracker::set_pair_sides)
     int side = -1;              // the side the pairing settled this step (0 left, 1 right), or -1: by right_score
+    V3 eye{};                   // the centre of the cameras it was seen with this frame (depth is along eye -> point)
+    skel::Fit fit;              // the skeleton fitted to pts (track/skeleton.h); fit.valid when it fitted this frame
     bool right() const { return side >= 0 ? side == 1 : right_score > 0.5; }
 };
 
@@ -135,6 +139,9 @@ public:
     bool blind(int id, int64_t until_ns);
     // The palm search's tiles, a line each: index, camera, centre, size, rotation, weight.
     std::vector<std::string> describe_tiles() const;
+    // The skeleton fit (track/skeleton.h), after each hand's 3D. On by default.
+    void set_skeleton(bool on) { skeleton_on_ = on; }
+    skel::Skeleton &skeleton() { return skel_; }
     // One view's 3D hand: each landmark along its ray, as far as how big the palm looks says
     // for a hand `scale` times the model's (Hand::scale). False if the palm is degenerate.
     static bool single_view(const Camera &cam, const Landmarks &lm, double scale, V3 out[21]);
@@ -192,6 +199,8 @@ private:
     bool misread_guard_ = false;
     std::vector<std::string> *trace_ = nullptr;
     void note(const char *fmt, ...) const __attribute__((format(printf, 2, 3)));
+    bool skeleton_on_ = true;
+    skel::Skeleton skel_;
     std::vector<View> views_;
     std::map<int, Hand> hands_;
     std::vector<Tile> tiles_;

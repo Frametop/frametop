@@ -56,7 +56,8 @@
 //   - hand cutouts (handcut.cpp): where ft-hands (hands/) tracks a hand between an eye and a
 //     screen, that eye sees through the screen (to Room View). Only then is the screen
 //     drawn by us, into a side-by-side buffer (one half per eye); otherwise its client
-//     buffer is shown as is. The matte is hand-shaped (or ft-hands' capsules, HANDS_MATTE).
+//     buffer is shown as is. The matte is a round hole per hand (or hand-shaped, or ft-hands'
+//     capsules: HANDS_MATTE).
 //     Only with Room View on (roomview.h): with it off a cutout would show the void or the game,
 //     and ft-handview (handview.cpp) draws the hands instead.
 //   - near hand input (handinput.cpp): poke a screen or floating window with the index finger
@@ -2370,7 +2371,7 @@ bool ft_vr_init(void) {
     std::printf("hands: pokes within %.0f deg of a panel's normal, not from a hand %.2f m under the eyes and within %.2f m\n",
                 k.fingerAngle, k.restBelow, k.restNear);
     std::printf("hands: matte %s, margin %.2f deg + %.0f ms of motion (at most %.2f more), lead %.0f ms, shift %s; near input %s%s%s\n",
-                g_matte.mesh ? "mesh" : "capsules", g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
+                handcut::ShapeName(g_matte.shape), g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
                 g_hands.leadMs(), g_matte.shift.empty() ? "off" : "on",
                 g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "forced on" : "on (the pointer helper's word)",
                 matte.empty() ? "" : "; settings: ", matte.c_str());
@@ -2966,7 +2967,7 @@ void ft_vr_keyboard_hide(void) {
 //   cutouts roomview auto|on|off   cut only with Room View on: detected (roomview.h), or forced
 //   cutouts predict on|off    move the hands ahead along their velocity (on by default)
 //   cutouts lead <ms>         ...to this long after now: about when the frame is on the displays
-//   cutouts matte mesh|capsules   the hand-shaped matte, or ft-hands' capsules
+//   cutouts matte circle|mesh|capsules   a round hole per hand, the hand-shaped matte, or ft-hands' capsules
 //   cutouts margin <deg> [<motion ms> [<motion max deg>]]   the matte's margin around the hand
 //   cutouts shift off|"<dist>:<yaw>,<pitch> ..."   the per-distance correction (degrees; off by default)
 //   hands <L> <R> <allowed>   the pointer helper: each side hand|controller|off, hand input allowed 0|1
@@ -3180,9 +3181,9 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
             g_hands.SetPrediction(!std::strcmp(arg, "on"), g_hands.leadMs());
         else if (!std::strcmp(word, "lead") && std::sscanf(cmd, "cutouts lead %lf", &ms) == 1)
             g_hands.SetPrediction(g_hands.predicting(), ms);
-        else if (!std::strcmp(word, "matte") && std::sscanf(cmd, "cutouts matte %15s", arg) == 1 &&
-                 (!std::strcmp(arg, "mesh") || !std::strcmp(arg, "capsules")))
-            g_matte.mesh = !std::strcmp(arg, "mesh");
+        else if (handcut::MatteShape shape; !std::strcmp(word, "matte") && std::sscanf(cmd, "cutouts matte %15s", arg) == 1 &&
+                 handcut::ParseShape(arg, &shape))
+            g_matte.shape = shape;
         else if (const int got = std::sscanf(cmd, "cutouts margin %lf %lf %lf", &ms, &a, &b);
                  !std::strcmp(word, "margin") && got >= 1 && ms >= 0 && ms <= 10) {
             g_matte.marginDeg = ms;
@@ -3200,7 +3201,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
             g_roomView.Update(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(),
                               g_gameRunning, g_constructRoomView);
         } else if (std::strcmp(word, "state") != 0)
-            return (void)std::snprintf(reply, size, "error cutouts on|off|state|predict on|off|lead <ms>|matte mesh|capsules|"
+            return (void)std::snprintf(reply, size, "error cutouts on|off|state|predict on|off|lead <ms>|matte circle|mesh|capsules|"
                                                     "margin <deg> [ms [deg]]|shift off|<spec>|roomview auto|on|off");
         // Composite's counts since the last state, per second.
         static auto since = Clock::now();
@@ -3215,7 +3216,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
                       g_cutouts ? "on" : "off", g_cutterState > 0 ? "ready" : g_cutterState < 0 ? "unavailable" : "idle",
                       g_cutter.lastMs(), g_hands.predicting() ? "on" : "off", g_hands.leadMs(), c.draws / dt,
                       c.partial / dt, c.same / dt, c.busy / dt, c.waits / dt, calls ? c.cpuMs / calls : 0.0, c.worstMs,
-                      g_matte.mesh ? "mesh" : "capsules", g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
+                      handcut::ShapeName(g_matte.shape), g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
                       g_matte.shift.empty() ? "off" : "on", g_roomView.on() ? "on" : "off", g_roomView.why(),
                       g_roomView.on() ? "" : ": no cutouts");
     } else if (int x0, y0, w0, h0, t0; std::sscanf(cmd, "float %d %lf %d %d %d %d %d", &n, &w, &x0, &y0, &w0, &h0, &t0) == 7) {

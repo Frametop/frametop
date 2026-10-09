@@ -50,7 +50,7 @@ HANDS_BRIGHT_OFF=25        # ... and back to the mono cameras under this
 HANDS_COLOR_LEFT=color_video0  # hand tracking: which colour camera is passthrough_left (hands/tools/check_color.py tells)
 HANDS_COLOR_CROP=subtract  # hand tracking: how the colour calibration's crop applies, subtract | none (check_color.py tells)
 #HANDS_MODELS=            # hand tracking: a folder of palm.ncnn.* and hand.ncnn.* to use instead of the stock models (hands/models/ncnn)
-HANDS_MATTE=mesh           # hand cutouts: mesh = hand-shaped, from the skeleton | capsules = ft-hands' capsules (the old look)
+HANDS_MATTE=circle         # hand cutouts: circle = a round hole per hand | mesh = hand-shaped, from the skeleton | capsules = ft-hands' capsules (the old look)
 HANDS_MATTE_MARGIN=1.5     # hand cutouts: degrees (seen from the eyes) the hole reaches past the hand, held still (Hand cutout margin on the Hands page, live)
 HANDS_MATTE_MOTION=25      # ... plus how far the hand moves in this many ms
 HANDS_MATTE_MOTION_MAX=1.5 # ... up to this many degrees more

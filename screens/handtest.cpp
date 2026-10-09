@@ -2,7 +2,7 @@
 // (a light grid) in front of you as its own overlay; where ft-hands tracks your hands
 // in front of it, each eye sees through it, like ft-screens' screens with cutouts.
 //
-//   ft-handtest [--distance m] [--width m] [--seconds s] [--matte mesh|capsules] [--margin deg]
+//   ft-handtest [--distance m] [--width m] [--seconds s] [--matte circle|mesh|capsules] [--margin deg]
 //
 // The matte follows HANDS_MATTE* in ~/.config/frametop.conf (handcut.h); --matte and
 // --margin override them. Every 2 s it prints the composite's cost (CPU ms per call, and how
@@ -218,10 +218,10 @@ int main(int argc, char **argv) {
         else if (!std::strcmp(argv[i], "--lead") && more) leadMs = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--dot-mm") && more) dotMm = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--log") && more) logPath = argv[++i];
-        else if (!std::strcmp(argv[i], "--matte") && more) matte.mesh = std::strcmp(argv[++i], "capsules") != 0;
+        else if (!std::strcmp(argv[i], "--matte") && more && handcut::ParseShape(argv[i + 1], &matte.shape)) ++i;
         else if (!std::strcmp(argv[i], "--margin") && more) matte.marginDeg = std::atof(argv[++i]);
         else return std::fprintf(stderr, "usage: ft-handtest [--distance m] [--width m] [--seconds s] "
-                                         "[--matte mesh|capsules] [--margin deg] [--probe [--lead ms] [--dot-mm mm] [--log FILE]]\n"), 2;
+                                         "[--matte circle|mesh|capsules] [--margin deg] [--probe [--lead ms] [--dot-mm mm] [--log FILE]]\n"), 2;
     }
     signal(SIGINT, Stop);
     signal(SIGTERM, Stop);
@@ -295,7 +295,7 @@ int main(int argc, char **argv) {
     hands.SetShift(matte.shift);
     handcut::Matte built;
     std::printf("matte: %s, margin %.2f deg + %.0f ms of motion (at most %.2f deg more)%s%s\n",
-                matte.mesh ? "mesh" : "capsules", matte.marginDeg, matte.motionMs, matte.motionMaxDeg,
+                handcut::ShapeName(matte.shape), matte.marginDeg, matte.motionMs, matte.motionMaxDeg,
                 settings.empty() ? "" : "; settings: ", settings.c_str());
     bool cutting = false;
     const int64_t start = MonoNs();

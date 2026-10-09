@@ -110,6 +110,7 @@ void AddHull(const std::vector<std::array<float, 3>> &pts, Mesh &out) {
 void Build(const handcut::Hand &h, const double headPos[3], Mesh &out) {
     out.clear();
     handcut::MatteParams p;
+    p.shape = handcut::MatteShape::Mesh;
     p.marginDeg = p.motionMaxDeg = p.minMarginM = 0;
     handcut::Matte matte;
     handcut::BuildMatte({h}, {}, headPos, p, matte);

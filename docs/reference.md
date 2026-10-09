@@ -83,7 +83,7 @@ get N    screens    head    state    key code value    scale N s    vrkeyboard s
 visibility always|dashboard|gesture|toggle    wrist degrees    gesture left|right degrees
 hide | show | toggle    controllers always|outside_games|dashboard    ingames hide|visible    pause on|off|state
 conceal N|all    reveal N|all    concealed    cutouts on|off|state    cutouts predict on|off    cutouts lead ms
-cutouts matte mesh|capsules    cutouts margin deg [ms [deg]]    cutouts shift off|spec    cutouts roomview auto|on|off
+cutouts matte circle|mesh|capsules    cutouts margin deg [ms [deg]]    cutouts shift off|spec    cutouts roomview auto|on|off
 hands L R allowed    handinput on|off|force|state    palmmenu on|off|state
 float N mpp x y w h title    unfloat N    pose N matrix    sub N k x y w h | sub N k off    minimized N 0|1    carry N
 rates focused in_view hidden    rates?    watch seconds    phase ms

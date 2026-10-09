@@ -2324,6 +2324,7 @@ int main() {
         };
         // A gesture that began: by the ray, held back like the gaze (beginHold), or nothing.
         auto startGesture = [&](int s, int kind, const fh_pinch_t &g, bool ray) {
+            ray = ray && rays[s].Shown();  // (a ray that went while ft-screens was asked: not a ray gesture)
             if (ray && kind != 1) {
                 beginRayHold(s, kind, g);
             } else if (ray || kind == 2) {
@@ -2458,7 +2459,9 @@ int main() {
             if (q.ended && holdingKind(q.side, q.kind)) endGesture(q.lost);
         }
         // A ray pinch's press, once the claim has had its 30 ms.
-        if (hold.src == Src::Ray && hold.pendingPress && tnow >= hold.pressAt) {
+        // (and once a pointer the ray just woke has been bound: the wake's claim comes 300 ms on)
+        if (hold.src == Src::Ray && hold.pendingPress && tnow >= hold.pressAt && active &&
+            tnow - wokeAt > std::chrono::milliseconds(350)) {
             hold.pendingPress = false;
             hold.pressed = true;
             gazeBack = false;

@@ -1,0 +1,23 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop rendered hands: your tracked hands drawn over games, the dashboard and the panels with Room View off
+Documentation=file://@REPO@/screens/README.md
+# Needs SteamVR's IPC and ft-hands' shared files; it starts and stops with SteamVR.
+After=steamvr.service frametop-hands.service
+PartOf=steamvr.service
+Requisite=steamvr.service
+
+[Service]
+# Runs in the container it was built in (scripts/in-box, which starts it in a scope of its own,
+# so stopping this service can't stop it): clean the process up explicitly around it.
+# Settings: HANDS_ROOMVIEW (auto|on|off) in ~/.config/frametop.conf. A status line every minute.
+ExecStartPre=-/usr/bin/pkill -x ft-handview
+ExecStart=@REPO@/scripts/in-box @REPO@/screens/build/ft-handview --status 60
+ExecStopPost=-/usr/bin/pkill -x ft-handview
+Restart=on-failure
+RestartSec=3
+# The container session (conmon) ignores SIGTERM; don't wait 90 s for it.
+TimeoutStopSec=5
+
+[Install]
+WantedBy=steamvr.service

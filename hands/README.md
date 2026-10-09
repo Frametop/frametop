@@ -5,6 +5,7 @@ Hand tracking from the headset's own cameras. It's deferred: it costs a lot of t
 It serves two things in Frametop:
 
 - **Hand cutouts:** where your hand is between an eye and a screen, that eye sees the room through the screen (ft-screens, `screens/handcut.cpp`), so your hands show over the screens the way they do on a Vision Pro. The hole is hand-shaped, built from the skeleton (see "Hand cutouts and near input" below).
+- **Rendered hands:** with Room View off (a VR game, SteamVR Home, the dashboard, or the panels over the void), ft-screens doesn't cut, and ft-handview draws your hands instead, Quest-style, over everything (`screens/handview.cpp`; see "Rendered hands" below).
 - **Near input on Frametop's panels:** poke a screen with your index finger to click, pinch its bar, edges or corners to move or resize it, hold it with both hands to stretch it (ft-screens, `screens/handinput.cpp`; see "Hand cutouts and near input").
 - **Pinches and grips:** with `POINTER_HANDS=1`, the pointer helper takes them as clicks and drags. Look at something and pinch to click it, with the eye tracker doing the looking (`gaze/`), or close your hand to press and drag what the pointer is on. See "Pinches and grips in the pointer" below.
 
@@ -278,7 +279,7 @@ To try the hand cutouts without restarting the desktop, `screens/build/ft-handte
 
 ## Hand cutouts and near input
 
-ft-screens reads the hands file (version 2's skeleton when it's there, else version 1's points) and the gestures file once per tick (`screens/handcut.cpp`).
+ft-screens reads the hands file (version 2's skeleton when it's there, else version 1's points) and the gestures file once per tick (`screens/handcut.cpp`). It cuts only with Room View on: with it off, a hole would show the void or the game, not your hand (see "Rendered hands"). `cutouts state` ends with `room view on|off (why)`; `cutouts roomview auto|on|off` forces it.
 
 **The matte** (`HANDS_MATTE=mesh`, the default) is hand-shaped: a tapered capsule per finger bone, with real fingers' half-widths (10.5 mm at the index's knuckle down to 7.5 mm at its tip, scaled by the hand's palm length); the palm as a 2.4 cm slab through the wrist and the knuckles, widened to the hand's edges; the thumb's web; and an 18 cm stub of the forearm toward the skeleton's elbow (along the hand's axis without a skeleton). The palm, web and forearm are convex pieces, each drawn as its outline grown by the margin with a soft 2 px edge. `HANDS_MATTE=capsules` draws ft-hands' capsules instead, as before, for comparison (`cutouts matte mesh|capsules` switches it live).
 
@@ -303,6 +304,23 @@ Cost, offline (`scripts/bench-matte.sh` on the probe-moves and lit replays, a 34
 The "approach from front" rules, on recordings: in the hand recorder's desk take (PR #3, with head poses), typing under panels 0.30-0.40 m ahead (at eye height, or 0.45 m low and tilted up) made no press; the hand on the mouse (0.37-0.40 m out, past the resting zone) made 2 presses in 13 s under the nearest ones. In its touch-the-dot take the fingertip stopped 0-2 cm short of the dot in the air, its last bone 44-63 degrees off the line from the head: with a panel 3 cm nearer, 2 of 6 touches pressed at 50 degrees, 3 at 65. `HANDS_POKE_REST_NEAR=0.42` takes the mouse hand out too, but then a low dot 25 cm ahead no longer takes a poke.
 
 Offline, `scripts/test-handinput.sh [DUMP...]` runs its unit tests and plays recorded hands (`ft-handreplay --publish-dump`) against panels placed around them. On the probe-moves (v4), lit and dim recordings, in 1 s and longer stretches where a hand held still and pointed (184 s in all; the fingertip still moved 19-23 mm in depth within each, median), a panel 3 cm beyond the fingertip got no press, 2 cm one (in 42 s of probe-moves), 1 cm 7, 0.5 cm 18. frame-hands `notes/hand-interaction.md` section 10 has the rest.
+
+## Rendered hands
+
+`ft-handview` (`screens/handview.cpp`, built by `screens/build.sh`) draws each tracked hand when Room View is off: a light, see-through hand (about a third opaque) with a bright rim where it meets the background or a part of it further back (a finger over the palm), fading out over the 10 cm behind the wrist. It's built from the same pieces as the cutouts' matte with no margin (`screens/handmesh.cpp`): a tube with round ends per finger bone, four more from the wrist to the knuckles, the palm's slab, the thumb's web and the forearm's stub. With Room View on it draws nothing.
+
+Each hand is an overlay of its own (sort order 100, over the panels and the dashboard): a square placed at the hand, facing your head, side by side, each half what one eye sees of the hand projected onto the square. The compositor keeps a placed overlay still in the room as your head turns, so a hand only waits for its own motion; a head-locked layer would have to be redrawn at the display's rate to stay put. It's drawn for each new hands frame and, while the hand moves, at most every 20 ms in between (moved ahead like the cutouts), on the GPU: the body into a scratch buffer, then the rim into a DMA-BUF SteamVR imports. The `--demo` hands (two hands 45 cm ahead, drawn 30 times a second each) cost 0.5-0.7 ms of CPU per hand per draw (0.3 of it the mesh) and about 4.5% of one core in all on 2026-10-09; idle it's 0.2%, and with Room View on it wakes 10 times a second.
+
+A hand holding a controller isn't drawn: the pointer helper sends ft-handview its word ("hands L R allowed" on `@ft_handview`, as to ft-screens); while the helper is silent (3 s), a hand within 15 cm of its side's controller counts as holding it. The hands draw in VR games too (hand input keeps its own rules), but only while hand tracking runs: the relay parks it while Frametop is paused for a game, unless the dashboard is open.
+
+**Room View** (`screens/roomview.h`): SteamVR has no public "is Room View on". In a VR game, the compositor's `VREvent_RoomViewShown` and `VREvent_RoomViewHidden` tell it; with no game, the construct shows Room View when `camera/enableConstructRoomView` is on (the default on the Frame). The passthrough shared state (`VR_CameraPassthroughState`, read only) has an `enabled` byte; it read 1 on 2026-10-09 and isn't yet known to follow the dashboard's Room View button, so only a 0 counts (off). `HANDS_ROOMVIEW=auto|on|off` in `~/.config/frametop.conf` forces it for both programs.
+
+```
+screens/build/ft-handview [--status S] [--res PX] [--demo] [--seconds S]   # in the dev container (scripts/in-box)
+echo -n state | socat -t 1 - ABSTRACT-SENDTO:ft_handview,bind=   # the status line; also: roomview auto|on|off
+```
+
+`screens/frametop-handview.service` runs it as a user service (`--status 60`), started and stopped with SteamVR; the installer doesn't install it on its own.
 
 ## Camera check
 

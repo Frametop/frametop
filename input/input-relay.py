@@ -101,6 +101,12 @@ keyboards) get their volume entries remapped to unused stand-in codes, so their
 other keys keep working for SteamVR; a device without a keymap that has only volume
 keys (the headset's pmic_resin) is grabbed. The keymaps go back when the relay exits.
 
+Hand interaction (POINTER_HANDS=1): the pointer helper decides per side whether a hand holds a
+controller or is bare (pointer/helper/handoff.h). The relay's web socket reader (game_pause.py,
+TouchTracker) sends it "ctl <side> touch 0|1", "ctl <side> press", "ctl <side> gone" and
+"ctl ws 0|1", and the pause state as "paused 1|0" (hands work in a VR game only with the dashboard
+open or Frametop toggled back on).
+
 Frametop can pause for VR games (game_pause.py: by hand, with a controller gesture, or by itself
 while a game runs). Paused, it stops the services that cost the game CPU and GPU, and the relay
 plays a plain one: the pointer devices feed the virtual mouse and keyboard as without pointer
@@ -877,6 +883,8 @@ def main():
             log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
         state["pointer"] = None if pause.paused else state["pointer_conf"]
         pause.configure(state["rules"])
+        # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
+        pause.set_hands(conf.get("POINTER_HANDS", "0") == "1")
 
     load_config()
     tap = None  # the modifier (folded, MODIFIERS) pressed alone, with nothing since: its release is a tap

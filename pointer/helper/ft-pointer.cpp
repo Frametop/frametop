@@ -262,6 +262,18 @@
 // (unless the dashboard is up) and with the headset off, and while the mouse's button is held.
 // Hand use keeps the pointer from the relay's idle release for two minutes, as gaze mode does.
 //
+// Handoff (hand interaction, with POINTER_HANDS; frame-hands/notes/hand-interaction.md section 1):
+// per side, a controller used recently wins, otherwise the bare hand does (handoff.h has the
+// rules). The input relay sends who touches or presses a controller ("ctl <side> touch 0|1",
+// "ctl <side> press", "ctl <side> gone", "ctl ws 0|1", read from vrserver's web socket), the helper
+// adds each controller's motion, charging and tracking, and the hands from ft-hands' hands file
+// (handsin.h). Transitions go to the log ("handoff right: controller -> hand (no touch 1.5 s,
+// still 3.0 s)"). ft-screens gets "hands <L> <R> <allowed>" on @ft_screens, on a change and every
+// second: L and R are hand, controller or off (no hand tracking and no controller in use), and
+// allowed is 1 when hands may work at all: the headset worn, and outside VR games, or in one with
+// the dashboard open or Frametop toggled back on (the relay's "paused 0"; it sends "paused 1|0"
+// on a change and at the helper's start).
+//
 // Placement (for layout): SteamVR keeps a floating panel's position inside the
 // dashboard, where nothing outside can set it, so the helper carries panels like a user
 // would. It measures the panel (md::ScanPanel), aims the device at its grab bar
@@ -288,6 +300,8 @@
 // reload (re-read the settings below), debug (toggle a twice-a-second state log),
 // overlays (replies with the overlay list as JSON, see OverlayList),
 // vrbind/vrglobal/vrstatus (Frame controller buttons, see vrbuttons.h),
+// ctl ... and paused 0|1 (the relay, see Handoff), near <capture_ns> <L 0|1> <R 0|1> (ft-screens:
+// which hands are near its panels, for the hand ray),
 // and btn/scroll lines, which are forwarded to the driver unchanged. For layouts, with a
 // reply datagram to the sender's (abstract) address:
 //   place <overlay> <x> <y> <z> <yaw> <pitch> [roll [grab]]: centre in the standing
@@ -316,12 +330,10 @@
 // POINTER_ROLE (right): gaze precision and keyboard clicks, above.
 #include <openvr.h>
 
+#include "handoff.h"
+#include "handsin.h"
 #include "vrbuttons.h"
 #include "vrmath.h"
-
-extern "C" {
-#include "../../hands/include/fh_gestures.h"
-}
 
 #include <algorithm>
 #include <atomic>
@@ -379,81 +391,6 @@ double ConfDouble(const std::map<std::string, std::string> &c, const char *key, 
     auto it = c.find(key);
     return it == c.end() ? fallback : std::atof(it->second.c_str());
 }
-
-// Hand gestures from ft-hands (see "Hands" at the top): /run/user/UID/frametop-hands/gestures,
-// mapped read-only. Version 1 files have pinches only; their grips read as zero.
-class HandGestures {
-public:
-    ~HandGestures() { Close(); }
-    // A consistent copy of the file (its sequence lock), if it's there. Opens it, and
-    // checks it's still the same file, at most once a second.
-    bool Read(fh_gestures_t &out) {
-        const auto now = std::chrono::steady_clock::now();
-        if (now - checked_ > std::chrono::seconds(1)) {
-            checked_ = now;
-            const std::string path = "/run/user/" + std::to_string(getuid()) + "/frametop-hands/gestures";
-            struct stat st;
-            if (stat(path.c_str(), &st) != 0 || size_t(st.st_size) != len_ || st.st_ino != ino_) {
-                Close();
-                const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-                if (fd >= 0 && fstat(fd, &st) == 0 && size_t(st.st_size) >= offsetof(fh_gestures_t, grip)) {
-                    void *m = mmap(nullptr, size_t(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
-                    if (m != MAP_FAILED) map_ = m, len_ = size_t(st.st_size), ino_ = st.st_ino, ++opens;
-                }
-                if (fd >= 0) close(fd);
-            }
-        }
-        if (!map_) return false;
-        const auto *g = static_cast<const fh_gestures_t *>(map_);
-        if (std::memcmp(g->magic, FH_GESTURES_MAGIC, 8) != 0) return false;
-        const size_t n = std::min(len_, sizeof out);
-        for (int tries = 0; tries < 3; ++tries) {
-            const uint64_t seq = __atomic_load_n(&g->seq, __ATOMIC_ACQUIRE);
-            if (seq & 1) continue;
-            std::memset(&out, 0, sizeof out);
-            std::memcpy(&out, map_, n);
-            __atomic_thread_fence(__ATOMIC_ACQUIRE);
-            if (__atomic_load_n(&g->seq, __ATOMIC_RELAXED) != seq) continue;
-            if (out.version < 2) std::memset(out.grip, 0, sizeof out.grip);
-            return true;
-        }
-        return false;
-    }
-    int opens = 0;   // a new file: the counters start over
-
-private:
-    void Close() {
-        if (map_) munmap(map_, len_);
-        map_ = nullptr, len_ = 0, ino_ = 0;
-    }
-    void *map_ = nullptr;
-    size_t len_ = 0;
-    ino_t ino_ = 0;
-    std::chrono::steady_clock::time_point checked_{};
-};
-
-// The HMD's recent poses (standing universe), to turn the gestures' head-frame points into
-// the room as the head was when the cameras took them.
-class PoseHistory {
-public:
-    void Add(std::chrono::steady_clock::time_point t, const vr::HmdMatrix34_t &m) {
-        poses_.push_back({t, m});
-        while (poses_.size() > 128) poses_.pop_front();   // about a second
-    }
-    // The pose at CLOCK_MONOTONIC time t_ns (steady_clock's), or the nearest kept.
-    bool At(uint64_t t_ns, vr::HmdMatrix34_t &out) const {
-        if (poses_.empty()) return false;
-        const std::chrono::steady_clock::time_point t{std::chrono::nanoseconds(t_ns)};
-        const auto *best = &poses_.front();
-        for (const auto &p : poses_)
-            if (std::chrono::abs(p.first - t) < std::chrono::abs(best->first - t)) best = &p;
-        out = best->second;
-        return true;
-    }
-
-private:
-    std::deque<std::pair<std::chrono::steady_clock::time_point, vr::HmdMatrix34_t>> poses_;
-};
 
 int AbstractSocket(const char *name, bool bindIt) {
     const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
@@ -1020,8 +957,8 @@ int main() {
     // precision or gaze drag button, held now. What steers the pointer meanwhile (a hand, or
     // the mouse through its own moves), from where it pointed when the hold began (for a
     // hand: seen from the eye then, in the room), and the pointer then.
-    HandGestures handFile;
-    PoseHistory poses;
+    hin::HandGestures handFile;
+    hin::PoseHistory poses;
     enum class Src { None, Hand, Mouse, Head };
     struct Hold {
         Src src = Src::None;
@@ -1053,6 +990,28 @@ int main() {
     uint64_t handSeq = 0, handPublished = 0;
     Clock::time_point handUsed{};  // a gesture began then (keeps the pointer, like gaze mode)
     Clock::time_point lastTyping{};  // the relay's last "typing": a key on a keyboard
+    // Hand interaction (see "Handoff" at the top): the hands in the room, the arbiter, and what
+    // it last told ft-screens.
+    hin::HandsInRoom handsRoom;
+    handoff::Handoff arbiter;
+    bool framePaused = false;           // the relay's "paused 1|0": Frametop paused (for a VR game)
+    bool dashboardUp = false;           // IsDashboardVisible, read at most every 100 ms
+    Clock::time_point dashboardAt{};
+    std::string handsSent;              // "hands L R allowed" as last sent to ft-screens
+    Clock::time_point handsSentAt{};
+    bool handsAllowed = false;          // hand interaction allowed now (see "Handoff" at the top)
+    // Controllers, looked at once a second: type (ours is left out), side from the role hint, charging.
+    struct DeviceInfo {
+        bool controller = false, ours = false, charging = false;
+        int hint = 0;
+    };
+    DeviceInfo devices[vr::k_unMaxTrackedDeviceCount];
+    Clock::time_point devicesAt{};
+    // ft-screens' near reports ("near <capture_ns> <L> <R>"): the last one, and when it came.
+    uint64_t nearNs = 0;
+    bool nearSide[2] = {false, false};
+    Clock::time_point nearAt{};
+    auto secsOf = [](Clock::time_point t) { return std::chrono::duration<double>(t.time_since_epoch()).count(); };
     // Gaze mode outside games, and its dot (see the top): lastMove/lastHeld/pulseAt.
     bool inGame = false, gazeAwake = false, gameSent = false;
     Clock::time_point inGameAt{}, gazeAwakeAt{}, gameSentAt{};
@@ -1513,6 +1472,31 @@ int main() {
                     continue;
                 }
             }
+            // Hand interaction (see "Handoff" at the top): who holds a controller, from the relay.
+            {
+                char side[16], what[16];
+                int v = 0;
+                const int got = std::sscanf(buf, "ctl %15s %15s %d", side, what, &v);
+                if (got >= 2) {
+                    const double t = secsOf(Clock::now());
+                    const int k = !std::strcmp(side, "left") ? 0 : !std::strcmp(side, "right") ? 1 : -1;
+                    if (!std::strcmp(side, "ws")) arbiter.Socket(std::atoi(what) != 0, t);
+                    else if (!std::strcmp(what, "touch") && got == 3) arbiter.Touch(k, v != 0, t);
+                    else if (!std::strcmp(what, "press")) arbiter.Press(k, t);
+                    else if (!std::strcmp(what, "gone")) arbiter.Gone(k, t);
+                    continue;
+                }
+                if (std::sscanf(buf, "paused %d", &v) == 1) {
+                    framePaused = v != 0;
+                    continue;
+                }
+                unsigned long long ns;
+                int l, r;
+                if (std::sscanf(buf, "near %llu %d %d", &ns, &l, &r) == 3) {
+                    nearNs = ns, nearSide[0] = l != 0, nearSide[1] = r != 0, nearAt = Clock::now();
+                    continue;
+                }
+            }
             if (std::strcmp(buf, "typing") == 0) {  // not mouse input: it never wakes the pointer
                 lastTyping = Clock::now();
                 continue;
@@ -1785,6 +1769,73 @@ int main() {
             sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &h0, 1);
             if (h0.bPoseIsValid) poses.Add(tnow, h0.mDeviceToAbsoluteTracking);
         }
+        // Handoff (see the top): per side, a controller in use or the bare hand.
+        if (handsOn) {
+            handsRoom.Update(poses);
+            if (tnow - devicesAt > std::chrono::seconds(1)) {
+                devicesAt = tnow;
+                for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
+                    DeviceInfo &d = devices[i];
+                    d.controller = sys->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_Controller;
+                    if (!d.controller) continue;
+                    char type[64] = "";
+                    sys->GetStringTrackedDeviceProperty(i, vr::Prop_ControllerType_String, type, sizeof type);
+                    d.ours = std::strcmp(type, "ft_pointer") == 0;
+                    d.hint = sys->GetInt32TrackedDeviceProperty(i, vr::Prop_ControllerRoleHint_Int32);
+                    d.charging = sys->GetBoolTrackedDeviceProperty(i, vr::Prop_DeviceIsCharging_Bool);
+                }
+            }
+            std::vector<handoff::Controller> ctls;
+            for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
+                const DeviceInfo &d = devices[i];
+                if (!d.controller || d.ours || i == ours) continue;
+                const auto role = sys->GetControllerRoleForTrackedDeviceIndex(i);
+                // its hand role; one our device holds (POINTER_ROLE=left|right) leaves it with its hint
+                const int r = role == vr::TrackedControllerRole_LeftHand || role == vr::TrackedControllerRole_RightHand
+                                  ? int(role) : d.hint;
+                handoff::Controller c;
+                c.id = i;
+                c.side = r == vr::TrackedControllerRole_LeftHand ? 0 : r == vr::TrackedControllerRole_RightHand ? 1 : -1;
+                c.connected = all[i].bDeviceIsConnected;
+                c.charging = d.charging;
+                c.tracked = all[i].bPoseIsValid && all[i].eTrackingResult == vr::TrackingResult_Running_OK;
+                c.lost = !all[i].bPoseIsValid || all[i].eTrackingResult == vr::TrackingResult_Running_OutOfRange;
+                const Vec3 p = Position(all[i].mDeviceToAbsoluteTracking);
+                c.pos = {p.x, p.y, p.z};
+                c.vel = {all[i].vVelocity.v[0], all[i].vVelocity.v[1], all[i].vVelocity.v[2]};
+                const auto &w = all[i].vAngularVelocity.v;
+                c.spin = std::sqrt(double(w[0]) * w[0] + double(w[1]) * w[1] + double(w[2]) * w[2]);
+                ctls.push_back(c);
+            }
+            const uint64_t ns =
+                uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(tnow.time_since_epoch()).count());
+            const bool live = handsRoom.Live(ns);
+            std::vector<handoff::Hand> seen;
+            if (live)
+                for (const hin::RoomHand &h : handsRoom.hands) {
+                    handoff::Hand b;
+                    b.side = h.side, b.pos = {h.palm.x, h.palm.y, h.palm.z};
+                    b.vel = {h.vel.x, h.vel.y, h.vel.z}, b.velValid = h.velValid;
+                    seen.push_back(b);
+                }
+            arbiter.Update(secsOf(tnow), ctls, seen, live);
+            for (const std::string &line : arbiter.log) std::printf("%s\n", line.c_str());
+            if (!arbiter.log.empty()) std::fflush(stdout);
+            arbiter.log.clear();
+            // In a VR game, only with the dashboard open or Frametop toggled back on (not paused).
+            if (tnow - dashboardAt > std::chrono::milliseconds(100)) {
+                dashboardAt = tnow;
+                dashboardUp = overlay->IsDashboardVisible();
+            }
+            handsAllowed = !headsetOff && (!inGame || dashboardUp || !framePaused);
+            const std::string msg = std::string("hands ") + handoff::Name(arbiter.State(0)) + " " +
+                                    handoff::Name(arbiter.State(1)) + (handsAllowed ? " 1" : " 0");
+            if (msg != handsSent || tnow - handsSentAt > std::chrono::seconds(1)) {
+                if (msg != handsSent && debug) std::printf("%s\n", msg.c_str());
+                handsSent = msg, handsSentAt = tnow;
+                SendTo(out, "ft_screens", msg);
+            }
+        }
         // Where a gesture's point is, seen from the hold's origin: yaw and pitch, degrees.
         auto handAngles = [&](const float p[3], uint64_t t_ns, const Vec3 &from, double &hy, double &hp) {
             vr::HmdMatrix34_t head;
@@ -2005,7 +2056,7 @@ int main() {
                 handBaseline = true, handOpens = handFile.opens;
             }
             // Not over a VR game (unless the dashboard is up), and not with the headset off.
-            const bool allowed = !headsetOff && (!inGame || overlay->IsDashboardVisible());
+            const bool allowed = handsAllowed;
             for (int k = 1; k >= 0; --k)  // grips first: one takes over a pinch
                 for (int s = 0; s < 2; ++s) {
                     const fh_pinch_t &g = slots[k][s];

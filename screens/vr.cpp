@@ -2370,6 +2370,10 @@ bool ft_vr_init(void) {
     num("HANDS_GRAB_DEADZONE", k.grabDeadzone, 0, 0.1);
     const std::string near = handcut::Setting("HANDS_NEAR", "1");
     g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
+    // The passthrough holes in the panels: off by default since ft-handview draws the hands
+    // (user, 2026-10-09: the drawn hands instead of the bubble); `cutouts on` brings them back.
+    g_cutouts = handcut::Setting("HANDS_CUTOUTS", "0") == "1";
+    std::printf("hands: cutouts %s\n", g_cutouts ? "on (HANDS_CUTOUTS=1)" : "off (the drawn hands show them; HANDS_CUTOUTS=1 cuts holes too)");
     g_palm.params().on = handcut::Setting("HANDS_PALM_MENU", "1") != "0";
     std::printf("hands: palm menu %s\n", g_palm.params().on ? "on (palm up, pinch: the Steam menu)" : "off");
     std::printf("hands: pokes within %.0f deg of a panel's normal, not from a hand %.2f m under the eyes and within %.2f m\n",

@@ -25,7 +25,8 @@
 //             the time to find a hand that never left the view.
 // --pair-sides: two hands seen at once get one left and one right (Tracker::set_pair_sides).
 // --misread-guard: the tracker's guards for fine-tuned landmark models (Tracker::set_misread_guard).
-// --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX: the pinch detector (track/pinch.h);
+// --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX, --pinch-dip 0|1: the pinch
+//             detector (track/pinch.h; --pinch-dip 1: PinchParams::dip, as HANDS_PINCH_DIP=1);
 //             the timeline gets its begin/end/lost events and both distance measures per set.
 // --grip-begin R, --grip-end R: the grip detector (a closed hand; track/pinch.h); the timeline
 //             gets its events and each side's finger curl per set.
@@ -73,6 +74,18 @@
 //             down, grip down, and pinch begun in this set (0/1 each), then the 21 published points
 //             (the fit's when it has one; head frame), the wrist's frame as a quaternion (x y z w;
 //             0 0 0 1 without a fit) and the elbow.
+// --tips FILE: per processed set, a line per hand for frame-hands' train/taps/tapeval.py (the pinch
+//             distance against auto-labels): "H", the set's capture time (ns, the labels' t_ns), id, side
+//             (L/R), views, scale, the pinch detector's thumb-index measures (world landmarks as Pinch
+//             averages them, triangulated, fitted; -1 none), the same for thumb-middle, the palm normal
+//             (smoothed points, pointing out of the palm) and centre, then thumb tip, index tip and
+//             middle tip as measured, smoothed and fitted (head frame), then per view: camera, presence,
+//             and the 2D thumb, index and middle tips (px). Pinch events go in as "E time side
+//             begin|end|lost distance" (side 0 left, 1 right; "E2" for the middle pinch), and each
+//             processed set's time as "S time".
+// --rate HZ:  process sets at a fixed rate (the live tracker adapts: 5 Hz with no hands, 15 still, 30
+//             fast or while a pinch is down or closing). --want-hz HZ: as a reader's want-hz (ft-screens
+//             near a panel): the live rule, but never slower than HZ.
 // --depth FILE: per processed set, a line per hand for tools/depth_report.py: its views'
 //             cameras, triangulation residual, hand scale, measured and published palm, and
 //             each view's one-view palm (Tracker::single_view at the hand's scale). The
@@ -106,6 +119,8 @@ struct Track {
     double t[2]{};
     int line = 0;   // updates on the current unbroken run
 };
+
+V3 cross3(V3 a, V3 b) { return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]}; }
 
 double median(std::vector<double> v) {
     if (v.empty()) return 0;
@@ -141,7 +156,8 @@ int main(int argc, char **argv) {
     PinchParams pinch_params;
     GripParams grip_params;
     std::string use = "mono", color_left = "color_video0", color_crop = "subtract", sides = "file";
-    std::string ray_out;
+    std::string ray_out, tips_out;
+    double fixed_rate = 0, want_hz = 0;
     std::string timeline, depth, poses, models = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/ncnn";
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
@@ -152,6 +168,9 @@ int main(int argc, char **argv) {
         else if (a == "--depth" && more) depth = argv[++i];
         else if (a == "--poses" && more) poses = argv[++i];
         else if (a == "--ray" && more) ray_out = argv[++i];
+        else if (a == "--tips" && more) tips_out = argv[++i];
+        else if (a == "--rate" && more) fixed_rate = std::atof(argv[++i]);
+        else if (a == "--want-hz" && more) want_hz = std::min(30.0, std::atof(argv[++i]));
         else if (a == "--threads" && more) threads = std::atoi(argv[++i]);
         else if (a == "--models" && more) models = argv[++i];
         else if (a == "--cost") cost = true;
@@ -196,6 +215,7 @@ int main(int argc, char **argv) {
         else if (a == "--pinch-end" && more) pinch_params.end_m = std::atof(argv[++i]);
         else if (a == "--pinch-triangulated") pinch_params.triangulated = true;
         else if (a == "--pinch-palm-down" && more) pinch_params.palm_down_max = std::atof(argv[++i]);
+        else if (a == "--pinch-dip" && more) pinch_params.dip = std::atoi(argv[++i]) != 0;
         else if (a == "--grip-begin" && more) grip_params.begin = std::atof(argv[++i]);
         else if (a == "--grip-end" && more) grip_params.end = std::atof(argv[++i]);
         else if (a == "--color-left" && more) color_left = argv[++i];
@@ -306,6 +326,9 @@ int main(int argc, char **argv) {
     FILE *dp = depth.empty() ? nullptr : std::fopen(depth.c_str(), "w");
     FILE *pp = poses.empty() ? nullptr : std::fopen(poses.c_str(), "w");
     FILE *rp = ray_out.empty() ? nullptr : std::fopen(ray_out.c_str(), "w");
+    FILE *tp = tips_out.empty() ? nullptr : std::fopen(tips_out.c_str(), "w");
+    if (tp) std::fprintf(tp, "# tips v1: H t id side views scale world tri fit world2 tri2 fit2 normal3 palm3 "
+                             "thumb/index/middle x (measured, smoothed, fitted) x xyz, then cam presence 6 px\n");
     if (dp)
         for (auto &[name, c] : used)
             std::fprintf(dp, "# cam %s %.4f %.4f %.4f %.1f\n", name.c_str(), c.origin[0], c.origin[1], c.origin[2], c.fx);
@@ -339,6 +362,7 @@ int main(int argc, char **argv) {
     PinchParams middle_params = pinch_params;   // as ft-hands: the middle pinch, and the two exclude each other
     middle_params.finger = 12, middle_params.other_finger = 8, middle_params.other_margin = 0.01;
     middle_params.extended_finger = 8, middle_params.min_frames = 5;
+    middle_params.dip = false;
     pinch_params.other_finger = 12;
     Pinch pinch(pinch_params);
     Pinch middle(middle_params);
@@ -503,7 +527,53 @@ int main(int argc, char **argv) {
                     for (int j = 0; j < 3; ++j) std::fprintf(rp, " %.4f", fitted ? h->fit.elbow[j] : 0.0);
                     std::fputc('\n', rp);
                 }
-            next_ns = t + uint64_t((std::min(tracker.interval(), pinch.engaged() || grip.engaged() ? 1 / 30.0 : 1.0) - 0.005) * 1e9);
+            // as ft-hands (track/main.cpp), or a fixed rate (--rate)
+            next_ns = t + uint64_t(((fixed_rate > 0 ? 1 / fixed_rate
+                                                    : std::min({tracker.interval(),
+                                                                pinch.engaged() || middle.engaged() || grip.engaged() ? 1 / 30.0 : 1.0,
+                                                                want_hz > 0 ? 1 / want_hz : 1.0})) -
+                                     0.005) * 1e9);
+            if (tp) {
+                std::fprintf(tp, "S %llu\n", (unsigned long long)t);
+                for (const Pinch::Event &e : pinch.events)
+                    std::fprintf(tp, "E %llu %d %s %.4f\n", (unsigned long long)t, e.side, e.what, e.distance);
+                for (const Pinch::Event &e : middle.events)
+                    std::fprintf(tp, "E2 %llu %d %s %.4f\n", (unsigned long long)t, e.side, e.what, e.distance);
+                for (const Hand *h : out) {
+                    // the pinch detector's measures (Pinch::update's measure) for this hand
+                    auto measure = [&](int f, double m[3]) {
+                        double sum = 0;
+                        int n = 0;
+                        for (const Seen &v : seen) {
+                            if (v.hand != h->id) continue;
+                            const V3 a{v.lm.world[4][0], v.lm.world[4][1], v.lm.world[4][2]};
+                            const V3 b{v.lm.world[f][0], v.lm.world[f][1], v.lm.world[f][2]};
+                            sum += norm(a - b), ++n;
+                        }
+                        m[0] = n ? sum / n * h->scale : -1;
+                        m[1] = norm(h->pts[4] - h->pts[f]);
+                        m[2] = h->fit.valid ? norm(h->fit.pts[4] - h->fit.pts[f]) : -1;
+                    };
+                    double m8[3], m12[3];
+                    measure(8, m8), measure(12, m12);
+                    const V3 *p = h->smooth;
+                    V3 nrm = cross3(p[5] - p[0], p[17] - p[0]);
+                    nrm = norm(nrm) > 0 ? nrm * ((h->right() ? 1.0 : -1.0) / norm(nrm)) : V3{0, 0, 0};
+                    const V3 palm = (p[0] + p[5] + p[9] + p[13] + p[17]) * 0.2;
+                    std::fprintf(tp, "H %llu %d %s %d %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
+                                 (unsigned long long)t, h->id, h->right() ? "R" : "L", h->nviews, h->scale, m8[0], m8[1], m8[2],
+                                 m12[0], m12[1], m12[2], nrm[0], nrm[1], nrm[2], palm[0], palm[1], palm[2]);
+                    for (int k : {4, 8, 12})
+                        for (const V3 *src : {h->pts, h->smooth, h->fit.valid ? h->fit.pts : nullptr})
+                            for (int j = 0; j < 3; ++j) std::fprintf(tp, " %.4f", src ? src[k][j] : NAN);
+                    for (const Seen &v : seen) {
+                        if (v.hand != h->id) continue;
+                        std::fprintf(tp, " %s %.3f", v.cam.c_str(), v.lm.presence);
+                        for (int k : {4, 8, 12}) std::fprintf(tp, " %.1f %.1f", v.lm.pts[k][0], v.lm.pts[k][1]);
+                    }
+                    std::fputc('\n', tp);
+                }
+            }
             for (const Pinch::Event &e : grip.events) {
                 if (std::string(e.what) == "begin") grip_begin_ts[e.side] = ts;
                 else grip_len[e.side].push_back(ts - grip_begin_ts[e.side]);
@@ -648,6 +718,7 @@ int main(int argc, char **argv) {
     if (pp) std::fclose(pp);
     if (pubf) std::fclose(pubf);
     if (rp) std::fclose(rp);
+    if (tp) std::fclose(tp);
 
     const double secs = nsets > 1 ? nsets / 30.0 : 0;
     const Stats &s = tracker.stats;
@@ -705,6 +776,8 @@ int main(int argc, char **argv) {
                 pinch_len[0].size(), pinch_len[0].empty() ? 0 : pinch_len[0][pinch_len[0].size() / 2], pinch_len[1].size(),
                 pinch_len[1].empty() ? 0 : pinch_len[1][pinch_len[1].size() / 2], pinch_lost, pinch.held_back[0],
                 pinch.held_back[1]);
+    if (pinch_params.dip)
+        std::printf("pinches begun on a dip (--pinch-dip): left %d, right %d\n", pinch.dip_begins[0], pinch.dip_begins[1]);
     for (int k = 0; k < 2; ++k) std::sort(grip_len[k].begin(), grip_len[k].end());
     std::printf("grips (curl under %.2f, open over %.2f): left %zu (median %.2f s), right %zu (median %.2f s)\n",
                 grip_params.begin, grip_params.end, grip_len[0].size(),

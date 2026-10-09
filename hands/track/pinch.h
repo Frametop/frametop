@@ -5,6 +5,7 @@
 
 #include "tracker.h"
 
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -63,6 +64,20 @@ struct PinchParams {
     double extended_min = 1.5;
     // And only on a hand tracked at least this many frames (a hand just found is often misread).
     int min_frames = 0;
+    // The dip rule (HANDS_PINCH_DIP=1, off by default): a pinch also begins on a sharp dip that
+    // doesn't reach begin_m. Quick taps with the hand raised often read 25-30 mm at contact and
+    // spring back (the model doesn't read the touch; frame-hands notes/taps.md, "Dip detector"). It
+    // begins when, within dip_win_s, the distance fell by dip_rel of its highest and by dip_drop_m,
+    // to under dip_max_m, with the palm moving under dip_speed_max (m/s, over the last 150 ms) and
+    // the thumb still dip_other_min_m from the other fingertip (other_finger: a hand closing into a
+    // grab brings both in). It ends once the distance is dip_rebound_m over the lowest it read (or
+    // past end_m) for end_frames; if it gets under begin_m it is an ordinary pinch from there on
+    // (drags and all). Tuned on the probe-moves and lit recordings (frame-hands train/taps/dipsim.py);
+    // in the guided tap capture's replay, quick taps at a 2 Hz click 10 -> 25 of 30 caught. The cost
+    // is near misses: fingers stopped ~1 cm apart click too (5 -> 16 pinches in that segment).
+    bool dip = false;
+    double dip_win_s = 0.15, dip_rel = 0.4, dip_drop_m = 0.004, dip_max_m = 0.032;
+    double dip_speed_max = 0.3, dip_other_min_m = 0.04, dip_rebound_m = 0.006;
 };
 
 class Pinch {
@@ -101,9 +116,21 @@ public:
     double other_d[2] = {-1, -1};       // the thumb to the other fingertip (other_finger), same measure
     double palm_down[2] = {-1, -1};   // |palm normal . up| of each side's hand
     int held_back[2] = {0, 0};          // pinches that didn't begin because the palm faced down
+    int dip_begins[2] = {0, 0};         // pinches the dip rule began (PinchParams::dip)
 
 private:
     void end(int s, int64_t t_ns, bool lost);
+    // the dip rule's recent distances on each side's hand (PinchParams::dip)
+    struct Sample {
+        int64_t t_ns;
+        double d;
+        V3 palm;
+    };
+    bool dip_fires(int s, int64_t t_ns, double d, double other, const V3 &palm) const;
+    std::deque<Sample> recent_[2];
+    int recent_id_[2] = {0, 0};
+    bool dip_[2] = {false, false};      // the pinch down began on a dip and hasn't reached begin_m
+    double dip_min_[2] = {1, 1};        // its lowest distance so far
     PinchParams p_;
     fh_pinch_t side_[2]{};
     int follow_[2] = {0, 0};        // the hand id a pinch follows while down

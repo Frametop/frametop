@@ -15,6 +15,9 @@
 namespace {
 
 constexpr int kThumbTip = 4;
+// The dip rule ignores dips from fingers spread wider than this (m): a hand opening wide and
+// relaxing again isn't a tap.
+constexpr double kDipFromMax = 0.10;
 
 V3 cross(V3 a, V3 b) { return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]}; }
 
@@ -56,6 +59,8 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
             continue;
         }
         seen_ns_[s] = t_ns;
+        while (!recent_[s].empty() && (t_ns - recent_[s].front().t_ns) / 1e9 > std::max(p_.dip_win_s, 0.15) + 1e-3)
+            recent_[s].pop_front();
         tri_d[s] = norm(h->pts[kThumbTip] - h->pts[tip]);
         if (h->fit.valid) fit_d[s] = norm(h->fit.pts[kThumbTip] - h->fit.pts[tip]);
         const V3 normal = cross(h->smooth[5] - h->smooth[0], h->smooth[17] - h->smooth[0]);
@@ -104,6 +109,19 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
         // opened, so every release dragged the pointer off what it pressed (headset test,
         // 2026-09-30).
         const V3 point = (h->smooth[5] + h->smooth[9]) * 0.5;
+        const V3 palm = (h->smooth[0] + h->smooth[5] + h->smooth[9] + h->smooth[13] + h->smooth[17]) * 0.2;
+        if (recent_id_[s] != h->id) recent_[s].clear(), recent_id_[s] = h->id;
+        auto begin = [&](bool dip) {
+            o.flags = (o.flags | FH_PINCH_DOWN) & ~FH_PINCH_LOST;
+            ++o.begins;
+            o.begin_ns = uint64_t(t_ns);
+            put3(o.begin_point, point);
+            follow_[s] = h->id;
+            open_frames_[s] = 0;
+            dip_[s] = dip, dip_min_[s] = d;
+            if (dip) ++dip_begins[s];
+            events.push_back({s, "begin", t_ns, d, point});
+        };
         o.flags |= FH_PINCH_TRACKED;
         o.hand_id = uint32_t(h->id);
         o.distance = float(d);
@@ -121,25 +139,50 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
                 held_[s] = true;
                 ++held_back[s];
             } else if (d < p_.begin_m && !held_[s]) {
-                o.flags = (o.flags | FH_PINCH_DOWN) & ~FH_PINCH_LOST;
-                ++o.begins;
-                o.begin_ns = uint64_t(t_ns);
-                put3(o.begin_point, point);
-                follow_[s] = h->id;
-                open_frames_[s] = 0;
-                events.push_back({s, "begin", t_ns, d, point});
+                begin(false);
+            } else if (p_.dip && own && !held_[s] && palm_down[s] <= p_.palm_down_max &&
+                       dip_fires(s, t_ns, d, other_d[s], palm)) {
+                begin(true);
             }
-        } else if (d > p_.end_m) {
-            // past end_m for end_frames; a drag also clearly open, or open a while (see PinchParams)
-            if (open_frames_[s]++ == 0) open_since_[s] = t_ns;
-            const bool drag = (t_ns - int64_t(o.begin_ns)) / 1e9 >= p_.drag_s;
-            if (open_frames_[s] >= p_.end_frames &&
-                (!drag || d > p_.drag_open_m || (t_ns - open_since_[s]) / 1e9 >= p_.drag_open_s - 1e-6))
-                end(s, t_ns, false);
-        } else if (d < p_.drag_reclose_m || (t_ns - int64_t(o.begin_ns)) / 1e9 < p_.drag_s) {
-            open_frames_[s] = 0;   // closed again (a drag: firmly)
+        } else {
+            if (dip_[s]) {
+                dip_min_[s] = std::min(dip_min_[s], d);
+                if (d < p_.begin_m) dip_[s] = false;   // the fingers met: an ordinary pinch from here (drags)
+            }
+            if (dip_[s]) {
+                // began on a dip and the fingers haven't met: it ends once they spring back
+                if (d > std::min(p_.end_m, dip_min_[s] + p_.dip_rebound_m)) {
+                    if (++open_frames_[s] >= p_.end_frames) end(s, t_ns, false);
+                } else {
+                    open_frames_[s] = 0;
+                }
+            } else if (d > p_.end_m) {
+                // past end_m for end_frames; a drag also clearly open, or open a while (see PinchParams)
+                if (open_frames_[s]++ == 0) open_since_[s] = t_ns;
+                const bool drag = (t_ns - int64_t(o.begin_ns)) / 1e9 >= p_.drag_s;
+                if (open_frames_[s] >= p_.end_frames &&
+                    (!drag || d > p_.drag_open_m || (t_ns - open_since_[s]) / 1e9 >= p_.drag_open_s - 1e-6))
+                    end(s, t_ns, false);
+            } else if (d < p_.drag_reclose_m || (t_ns - int64_t(o.begin_ns)) / 1e9 < p_.drag_s) {
+                open_frames_[s] = 0;   // closed again (a drag: firmly)
+            }
         }
+        if (p_.dip) recent_[s].push_back({t_ns, d, palm});
     }
+}
+
+bool Pinch::dip_fires(int s, int64_t t_ns, double d, double other, const V3 &palm) const {
+    if (d >= p_.dip_max_m || (p_.other_finger && other >= 0 && other < p_.dip_other_min_m)) return false;
+    // the highest distance within dip_win_s, and the palm's travel over the last 150 ms
+    double high = 0;
+    const Sample *old = nullptr;
+    for (const Sample &x : recent_[s]) {
+        const double age = (t_ns - x.t_ns) / 1e9;
+        if (age <= p_.dip_win_s + 1e-3) high = std::max(high, x.d);
+        if (!old && age <= 0.15) old = &x;
+    }
+    const double speed = old ? norm(palm - old->palm) / std::max((t_ns - old->t_ns) / 1e9, 1e-3) : 0;
+    return high - d >= p_.dip_drop_m && d <= high * (1 - p_.dip_rel) && high <= kDipFromMax && speed < p_.dip_speed_max;
 }
 
 void Pinch::end(int s, int64_t t_ns, bool lost) {
@@ -148,6 +191,8 @@ void Pinch::end(int s, int64_t t_ns, bool lost) {
     ++o.ends;
     o.end_ns = uint64_t(t_ns);
     follow_[s] = 0;
+    recent_[s].clear();   // a new dip needs a fresh open reference
+    dip_[s] = false;
     events.push_back({s, lost ? "lost" : "end", t_ns, o.distance, {o.point[0], o.point[1], o.point[2]}});
 }
 

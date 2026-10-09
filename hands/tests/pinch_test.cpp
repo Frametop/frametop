@@ -1,5 +1,6 @@
 // Unit tests for the pinch and grip detectors' hold on a drag (track/pinch.h: PinchParams' drag_*
-// and grip_takeover_s): made-up hands at 30 Hz, the distances from their points (no views).
+// and grip_takeover_s) and the dip rule (PinchParams::dip): made-up hands at 30 Hz, the distances
+// from their points (no views).
 // Build and run: make check (in the dev container; hands/build.sh's environment).
 #include "../track/pinch.h"
 
@@ -22,12 +23,13 @@ namespace {
 
 constexpr int64_t kFrame = 33'333'333;
 
-// A right hand 0.4 m ahead, the thumb tip d from the index tip, the other fingers open (curl 2)
-// or closed around (fist: curl 0.85).
-Hand MakeHand(double d, bool fist = false) {
+// A right hand 0.4 m ahead (moved by shift), the thumb tip d from the index tip, the other fingers
+// open (curl 2) or closed around (fist: curl 0.85); middle_gap > 0 puts the middle tip that far
+// from the thumb tip (a hand closing into a grab).
+Hand MakeHand(double d, bool fist = false, V3 shift = {0, 0, 0}, double middle_gap = 0) {
     Hand h;
     h.id = 1, h.side = 1, h.frames = 30, h.has_pts = true;
-    const V3 wrist{0, -0.1, -0.35};
+    const V3 wrist = V3{0, -0.1, -0.35} + shift;
     auto at = [&](double x, double y, double z) { return V3{wrist[0] + x, wrist[1] + y, wrist[2] + z}; };
     const double knuckle = 0.08, tip = fist ? 0.068 : 0.16;
     h.pts[0] = at(0, 0, 0);
@@ -42,6 +44,7 @@ Hand MakeHand(double d, bool fist = false) {
     h.pts[1] = at(-0.03, 0, -0.02), h.pts[2] = at(-0.04, 0, -0.04), h.pts[3] = at(-0.045, 0, -0.06);
     const V3 index = h.pts[8];
     h.pts[4] = {index[0] - d, index[1], index[2]};
+    if (middle_gap > 0) h.pts[12] = {h.pts[4][0], h.pts[4][1] + middle_gap, h.pts[4][2]};
     for (int i = 0; i < 21; ++i) h.smooth[i] = h.pts[i];
     return h;
 }
@@ -51,12 +54,17 @@ struct Run {
     Grip grip;
     int64_t t = 1'000'000'000;
     int ends = 0, lost = 0;
+    int begins = 0;
+    V3 shift{0, 0, 0}, velocity{0, 0, 0};   // the hand's offset and its motion, m/s
+    double middle_gap = 0;
     void Step(double d, bool fist = false) {
-        Hand h = MakeHand(d, fist);
+        Hand h = MakeHand(d, fist, shift, middle_gap);
+        shift = shift + velocity * (kFrame / 1e9);
         const std::vector<const Hand *> hands{&h};
         grip.update(hands, {}, t, pinch.holding(t));
         pinch.update(hands, {}, t, grip.gripping());
         for (const Pinch::Event &e : pinch.events) {
+            begins += std::string(e.what) == "begin";
             ends += std::string(e.what) != "begin";
             lost += std::string(e.what) == "lost";
         }
@@ -129,12 +137,88 @@ void TestGripTakeover() {
     CHECK(!(b.grip.side(1).flags & FH_PINCH_DOWN), "and no grip begins on it");
 }
 
+PinchParams DipParams() {
+    PinchParams p = Params();
+    p.dip = true;
+    return p;
+}
+
+// open, a quick dip to `low` (two frames) and back open
+void QuickDip(Run &r, double low) {
+    for (int k = 0; k < 10; ++k) r.Step(0.06);
+    r.Step(0.045), r.Step(low), r.Step(low + 0.001), r.Step(0.045), r.Step(0.06), r.Step(0.06);
+}
+
+void TestDip() {
+    // a quick tap that reads 2.8 cm at contact: no pinch without the dip rule, a click with it
+    Run off{Pinch(Params()), Grip()};
+    QuickDip(off, 0.028);
+    CHECK(off.begins == 0, "without the dip rule a 2.8 cm dip is no pinch (%d)", off.begins);
+    Run on{Pinch(DipParams()), Grip()};
+    QuickDip(on, 0.028);
+    CHECK(on.begins == 1 && on.ends == 1 && on.lost == 0 && !on.down(), "a 2.8 cm dip clicks once (%d begins, %d ends)",
+          on.begins, on.ends);
+    CHECK(on.pinch.dip_begins[1] == 1, "counted as a dip");
+    // too shallow: 6 to 3.5 cm (over dip_max_m)
+    Run shallow{Pinch(DipParams()), Grip()};
+    QuickDip(shallow, 0.035);
+    CHECK(shallow.begins == 0, "a dip to 3.5 cm isn't a tap");
+    // closing slowly (1 mm a frame) to 2.8 cm and staying: not a dip
+    Run slow{Pinch(DipParams()), Grip()};
+    for (int k = 0; k < 10; ++k) slow.Step(0.06);
+    for (double d = 0.06; d > 0.028; d -= 0.001) slow.Step(d);
+    for (int k = 0; k < 10; ++k) slow.Step(0.028);
+    CHECK(slow.begins == 0, "a slow close to 2.8 cm isn't a tap (%d)", slow.begins);
+    // the same quick dip while the hand moves at 0.5 m/s: no tap
+    Run moving{Pinch(DipParams()), Grip()};
+    moving.velocity = {0.5, 0, 0};
+    QuickDip(moving, 0.028);
+    CHECK(moving.begins == 0, "a dip while the hand moves fast isn't a tap (%d)", moving.begins);
+    // the middle fingertip coming in with the thumb (a hand closing into a grab): no tap
+    Run grab{Pinch(DipParams()), Grip()};
+    for (int k = 0; k < 10; ++k) grab.Step(0.06);
+    grab.middle_gap = 0.03;
+    grab.Step(0.045), grab.Step(0.028), grab.Step(0.028);
+    CHECK(grab.begins == 0, "a dip with the middle tip 3 cm from the thumb isn't a tap (%d)", grab.begins);
+    // a dip that goes on to contact is an ordinary pinch: held 1 s, a two-frame spike doesn't end it
+    Run hold{Pinch(DipParams()), Grip()};
+    for (int k = 0; k < 10; ++k) hold.Step(0.06);
+    hold.Step(0.045), hold.Step(0.028);
+    CHECK(hold.down(), "the dip began it");
+    for (int k = 0; k < 30; ++k) hold.Step(0.01);
+    hold.Step(0.038), hold.Step(0.038), hold.Step(0.01);
+    CHECK(hold.down() && hold.ends == 0, "after contact it holds like any drag");
+    // a dip held without contact ends once the tips spring back dip_rebound_m (6 mm) over its low
+    Run spring{Pinch(DipParams()), Grip()};
+    for (int k = 0; k < 10; ++k) spring.Step(0.06);
+    spring.Step(0.045), spring.Step(0.026);
+    for (int k = 0; k < 10; ++k) spring.Step(0.027);
+    CHECK(spring.down(), "held at 2.7 cm: still down");
+    spring.Step(0.033);
+    CHECK(spring.down(), "one frame 7 mm over the low: still down");
+    spring.Step(0.033);
+    CHECK(!spring.down() && spring.lost == 0, "two frames 7 mm over the low: released, under end_m");
+    // two taps in a row click twice; one held low after its release doesn't click again: a new dip
+    // needs the hand open again since the release
+    Run twice{Pinch(DipParams()), Grip()};
+    QuickDip(twice, 0.028);
+    QuickDip(twice, 0.028);
+    CHECK(twice.begins == 2, "two dips, two clicks (%d)", twice.begins);
+    Run settle{Pinch(DipParams()), Grip()};
+    for (int k = 0; k < 10; ++k) settle.Step(0.06);
+    settle.Step(0.045), settle.Step(0.026), settle.Step(0.033), settle.Step(0.033);   // released at 3.3 cm
+    for (int k = 0; k < 10; ++k) settle.Step(k % 2 ? 0.033 : 0.028);
+    CHECK(settle.begins == 1 && !settle.down(), "jitter at 2.8-3.3 cm after a dip's release: no second click (%d)",
+          settle.begins);
+}
+
 }  // namespace
 
 int main() {
     TestDragSpike();
     TestTapUnchanged();
     TestGripTakeover();
+    TestDip();
     if (failures) {
         std::printf("%d failures\n", failures);
         return 1;

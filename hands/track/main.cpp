@@ -48,7 +48,8 @@
 // tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODELS (as
 // --models: a folder with palm.ncnn.* and hand.ncnn.*, e.g. fine-tuned ones), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
-// hands are one left and one right, Tracker::set_pair_sides).
+// hands are one left and one right, Tracker::set_pair_sides), HANDS_PINCH_DIP (0 or 1: pinches also
+// begin on a sharp dip of the thumb-index distance, PinchParams::dip).
 #include "io.h"
 #include "pinch.h"
 #include "record.h"
@@ -277,6 +278,7 @@ int main(int argc, char **argv) {
     // points and capsules; 0 publishes the One Euro filtered landmarks as before, and no skeleton
     bool skeleton = setting("HANDS_SKELETON") != "0";
     PinchParams pinch_params;
+    pinch_params.dip = setting("HANDS_PINCH_DIP") == "1";
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)
@@ -295,6 +297,7 @@ int main(int argc, char **argv) {
         else if (a == "--pinch-end" && more) pinch_params.end_m = std::atof(argv[++i]);
         else if (a == "--pinch-triangulated") pinch_params.triangulated = true;
         else if (a == "--pinch-palm-down" && more) pinch_params.palm_down_max = std::atof(argv[++i]);
+        else if (a == "--pinch-dip" && more) pinch_params.dip = std::atoi(argv[++i]) != 0;
         else if (a == "--grip-begin" && more) grip_params.begin = std::atof(argv[++i]);
         else if (a == "--grip-end" && more) grip_params.end = std::atof(argv[++i]);
         else if (a == "--gesture-log") gesture_log = true;
@@ -337,6 +340,7 @@ int main(int argc, char **argv) {
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
                         "          [--pinch-begin M] (0.020) [--pinch-end M] (0.035) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
+                        "          [--pinch-dip 0|1] (0; 1: also on a sharp dip, see PinchParams::dip; HANDS_PINCH_DIP)\n"
                         "          [--grip-begin R] (1.2) [--grip-end R] (1.45) [--gesture-log]\n"
                         "          [--contrast MODE|PALM/HAND] (clahe[:CLIP], none, stretch; default clahe:2/none)\n"
                         "Recording saves every frame set (at most N a second with --record-hz) for S seconds (120) to DIR/sets.bin,\n"
@@ -347,7 +351,7 @@ int main(int argc, char **argv) {
                         "auto picks the cameras by the light (see the top of track/main.cpp).\n"
                         "Settings in ~/.config/frametop.conf: HANDS_SWAP_SIDES=auto|0|1, HANDS_CPUS=5,6,7, HANDS_CAMERAS, HANDS_BRIGHT,\n"
                         "HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT, HANDS_COLOR_CROP, HANDS_MISREAD_GUARD=0|1, HANDS_MODELS=DIR\n"
-                        "(FT_<name> overrides).\n",
+                        "HANDS_PINCH_DIP=0|1 (FT_<name> overrides).\n",
                         argv[0]);
             return a == "--help" ? 0 : 1;
         }
@@ -378,6 +382,7 @@ int main(int argc, char **argv) {
     PinchParams middle_params = pinch_params;
     middle_params.finger = 12, middle_params.other_finger = 8, middle_params.other_margin = 0.01;
     middle_params.extended_finger = 8, middle_params.min_frames = 5;
+    middle_params.dip = false;   // the dip rule is tuned on the index pinch only
     pinch_params.other_finger = 12;
     Pinch pinch(pinch_params);
     Pinch middle(middle_params);

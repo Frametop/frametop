@@ -454,7 +454,9 @@ int main(int argc, char **argv) {
                     checking = false;
                 }
             }
-            grip.update(out, seen, int64_t(t));
+            std::vector<int> holding = pinch.holding(int64_t(t)), held2 = middle.holding(int64_t(t));   // as ft-hands
+            holding.insert(holding.end(), held2.begin(), held2.end());
+            grip.update(out, seen, int64_t(t), holding);
             pinch.update(out, seen, int64_t(t), grip.gripping(), middle.down());
             middle.update(out, seen, int64_t(t), grip.gripping(), pinch.down());
             if (tl)

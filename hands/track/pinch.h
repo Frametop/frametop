@@ -18,6 +18,19 @@ struct PinchParams {
     int end_frames = 2;       // processed frames in a row past end_m before it ends, so one
                               // noisy frame doesn't drop a drag
     double grace_s = 0.25;    // a pinching hand lost this long ends its pinch (FH_PINCH_LOST)
+    // A drag: a pinch held drag_s or longer ends only once the tips are drag_open_m apart (for
+    // end_frames, as above), or drag_open_s after they first went past end_m, unless they closed
+    // again within drag_reclose_m in between. A thumb hidden for a frame or two, or fingers loosened
+    // a little mid-drag, read 3.5-4 cm and dropped what was dragged (2026-10-09 headset test: drags
+    // ending at 3.5-4.0 cm). Fingers hovering 3-5 cm apart still end it: on the lit recording's
+    // replay (pinches held 0.3 s or more, typing among them) the ends came 33-134 ms later, at most
+    // 200, where any dip under end_m starting the wait over kept one held 6 s longer. A tap ends as
+    // before: its release is the click.
+    double drag_s = 0.3, drag_open_m = 0.05, drag_open_s = 0.12, drag_reclose_m = 0.03;
+    // A grip takes this pinch's hand (ends it, as lost) only within grip_takeover_s of its begin:
+    // closing the hand into a fist passes through a pinch. Later the pinch is being held (a drag),
+    // and the other fingers curling around it don't end it (3 of 28 pinches ended so, the same test).
+    double grip_takeover_s = 0.3;
     // Where the distance comes from: MediaPipe's world landmarks (the model's own 3D hand
     // pose, averaged over the hand's views, at the user's hand size), or the tracker's
     // triangulated tips. The model's pose should hold up better when the fingers hide each
@@ -70,6 +83,9 @@ public:
     const fh_pinch_t &side(int s) const { return side_[s]; }   // 0 left, 1 right
     // A pinch is down or closing: worth tracking at the full rate.
     bool engaged() const;
+    // The hands a pinch has been down on for grip_takeover_s or longer at t_ns (for Grip::update's
+    // `blocked`: no grip begins on them).
+    std::vector<int> holding(int64_t t_ns) const;
 
     // What changed in the last update, for logs.
     struct Event {
@@ -92,6 +108,7 @@ private:
     fh_pinch_t side_[2]{};
     int follow_[2] = {0, 0};        // the hand id a pinch follows while down
     int open_frames_[2] = {0, 0};
+    int64_t open_since_[2] = {0, 0};   // the first frame of this run past end_m
     int64_t seen_ns_[2] = {0, 0};
     bool held_[2] = {false, false};  // a close held back (palm down) that hasn't opened yet
 };
@@ -125,7 +142,9 @@ class Grip {
 public:
     explicit Grip(const GripParams &p = {}) : p_(p) {}
     const GripParams &params() const { return p_; }
-    void update(const std::vector<const Hand *> &hands, const std::vector<Seen> &views, int64_t t_ns);
+    // blocked: hands no grip begins on (a pinch held on them: Pinch::holding).
+    void update(const std::vector<const Hand *> &hands, const std::vector<Seen> &views, int64_t t_ns,
+                const std::vector<int> &blocked = {});
     void release(int64_t t_ns);
     const fh_pinch_t &side(int s) const { return side_[s]; }
     // The hands gripping now (for Pinch::update).

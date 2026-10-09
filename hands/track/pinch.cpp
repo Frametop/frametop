@@ -30,8 +30,10 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
     auto grips = [&](int id) { return std::find(gripping.begin(), gripping.end(), id) != gripping.end(); };
     auto other_down = [&](int id) { return std::find(blocked.begin(), blocked.end(), id) != blocked.end(); };
     const int tip = p_.finger, other = p_.other_finger;
-    for (int s = 0; s < 2; ++s)   // a grip took this pinch's hand: it's a drag now, not a click
-        if ((side_[s].flags & FH_PINCH_DOWN) && grips(follow_[s])) end(s, t_ns, true);
+    for (int s = 0; s < 2; ++s)   // a grip took this pinch's hand on the way to it: a grip's drag, not a click
+        if ((side_[s].flags & FH_PINCH_DOWN) && grips(follow_[s]) &&
+            (t_ns - int64_t(side_[s].begin_ns)) / 1e9 < p_.grip_takeover_s)
+            end(s, t_ns, true);
     // A hand a pinch is down on belongs to that side until it ends. The left/right call is a
     // running average of the model's, and when it flips mid-pinch the other side would take
     // the same hand and pinch too (4 times in the 2026-09-30 lit recording).
@@ -128,9 +130,14 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
                 events.push_back({s, "begin", t_ns, d, point});
             }
         } else if (d > p_.end_m) {
-            if (++open_frames_[s] >= p_.end_frames) end(s, t_ns, false);
-        } else {
-            open_frames_[s] = 0;
+            // past end_m for end_frames; a drag also clearly open, or open a while (see PinchParams)
+            if (open_frames_[s]++ == 0) open_since_[s] = t_ns;
+            const bool drag = (t_ns - int64_t(o.begin_ns)) / 1e9 >= p_.drag_s;
+            if (open_frames_[s] >= p_.end_frames &&
+                (!drag || d > p_.drag_open_m || (t_ns - open_since_[s]) / 1e9 >= p_.drag_open_s - 1e-6))
+                end(s, t_ns, false);
+        } else if (d < p_.drag_reclose_m || (t_ns - int64_t(o.begin_ns)) / 1e9 < p_.drag_s) {
+            open_frames_[s] = 0;   // closed again (a drag: firmly)
         }
     }
 }
@@ -156,6 +163,14 @@ std::vector<int> Pinch::down() const {
     std::vector<int> out;
     for (int s = 0; s < 2; ++s)
         if (side_[s].flags & FH_PINCH_DOWN) out.push_back(follow_[s]);
+    return out;
+}
+
+std::vector<int> Pinch::holding(int64_t t_ns) const {
+    std::vector<int> out;
+    for (int s = 0; s < 2; ++s)
+        if ((side_[s].flags & FH_PINCH_DOWN) && (t_ns - int64_t(side_[s].begin_ns)) / 1e9 >= p_.grip_takeover_s)
+            out.push_back(follow_[s]);
     return out;
 }
 
@@ -206,8 +221,10 @@ V3 palm_centre(const Hand &h) {
 
 }  // namespace
 
-void Grip::update(const std::vector<const Hand *> &hands, const std::vector<Seen> &views, int64_t t_ns) {
+void Grip::update(const std::vector<const Hand *> &hands, const std::vector<Seen> &views, int64_t t_ns,
+                  const std::vector<int> &blocked) {
     events.clear();
+    auto held = [&](int id) { return std::find(blocked.begin(), blocked.end(), id) != blocked.end(); };
     int taken[2] = {0, 0};
     for (int s = 0; s < 2; ++s)
         if (side_[s].flags & FH_PINCH_DOWN) taken[s] = follow_[s];
@@ -239,7 +256,8 @@ void Grip::update(const std::vector<const Hand *> &hands, const std::vector<Seen
             if (mean > p_.end) open_ns_[s] = t_ns;
             const bool ahead = -point[2] >= p_.min_ahead_m &&
                                std::atan2(-point[1], -point[2]) * 180 / M_PI <= p_.max_down_deg;
-            if (most < p_.begin && ahead && thumb >= p_.thumb_off_m && open_ns_[s] && (t_ns - open_ns_[s]) / 1e9 <= p_.armed_s) {
+            if (most < p_.begin && ahead && thumb >= p_.thumb_off_m && !held(h->id) && open_ns_[s] &&
+                (t_ns - open_ns_[s]) / 1e9 <= p_.armed_s) {
                 o.flags = (o.flags | FH_PINCH_DOWN) & ~FH_PINCH_LOST;
                 ++o.begins;
                 o.begin_ns = uint64_t(t_ns);

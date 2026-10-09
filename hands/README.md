@@ -31,6 +31,7 @@ ft-handsctl status              # the services, and ft-hands' last status lines
 ft-handsctl log [lines]
 ft-handsctl cutouts on|off|state  # ft-screens' hand cutouts, without stopping tracking
 ft-handsctl gestures            # pinches, grips and middle pinches, live (tools/watch_gestures.py --distance)
+ft-handsctl flag [note...]      # flag a tracking failure: the last seconds go to a folder (see "Flags")
 
 hands/ft-cutouts on | off | status   # the cutouts only: no pinches or grips
 
@@ -53,6 +54,7 @@ Settings in `~/.config/frametop.conf` (`FT_<name>` in the environment overrides 
 - `HANDS_COLOR_LEFT` (`color_video0`), `HANDS_COLOR_CROP` (`subtract`): how the colour module's calibration maps onto its images, as `--color-left` and `--color-crop`.
 - `HANDS_SKELETON=1`: fit a skeleton with your bone lengths and publish it (see "Skeleton" below); `0` publishes the filtered landmarks as before. As `--skeleton`.
 - `HANDS_PINCH_DIP=0`: `1` also starts a pinch on a quick dip of the thumb-index distance that never reaches 2 cm (see the pinch under "Gestures" below). As `--pinch-dip`.
+- `HANDS_FLAG_BUFFER=1`: keep the last seconds of hand crops in RAM for `ft-handsctl flag` (see "Flags"); `0` keeps nothing. As `--flag-buffer`. `HANDS_FLAG_SECONDS` (12), `HANDS_FLAG_CROP` (224 px), `HANDS_FLAG_MB` (80) size it. `HANDS_FLAG_DIR` (`~/.local/share/frametop/hands/flags`) is where flags go; `HANDS_FLAG_FLASH=1` pulses the drawn hands when a flag is taken, `HANDS_FLAG_TONE=1` adds a short tone, `HANDS_FLAG_VIEW=1` saves a frame of your view.
 
 The pointer helper's `POINTER_HANDS` and `POINTER_PINCH_*`/`POINTER_GRIP_*` settings are in "Pinches and grips in the pointer" below.
 
@@ -63,6 +65,7 @@ Files, all in `/run/user/UID/frametop-hands/` (private to the user; not `/run/us
 | `cam-ring` | ft-camd | `camd/fhring.h` | ft-hands, `tools/ring.py` |
 | `hands` | ft-hands | `include/fh_hands.h` (version 2: version 1, then a skeleton per hand) | ft-screens (`screens/handcut.cpp`, version 1's part), the hand recorder (`rec/session.py`) |
 | `gestures` | ft-hands | `include/fh_gestures.h` | the pointer helper (`pointer/helper/ft-pointer.cpp`), `tools/watch_gestures.py` |
+| `flag` | `ft-handsctl flag` (`handsflag.py`) | key=value lines: `dir`, `note`, `flag_unix`, `said_unix` | ft-hands, which removes it when it takes it |
 
 The source keeps the `fh_` names and magic strings of frame-hands, the project it started as, so recordings made with it still work.
 
@@ -245,6 +248,16 @@ Settings in `~/.config/frametop.conf`:
 - `POINTER_HAND_RAY` (1), `POINTER_RAY_DEADZONE` (2.5 degrees the ray turns during a pinch before the press drags), `POINTER_RAY_PUSH` (1), `POINTER_RAY_SCROLL` (1; -1 turns scrolling round), `POINTER_RAY_RELEASE` (2 s after the ray goes before a pointer it woke lets go), `POINTER_RAY_GRACE` (0.5 s a hand keeps the laser after its ray drops; the other hand's ray takes it after that, or at once by pinching or raising): the hand ray.
 - The ray's smoothing (`include/fh_smooth.h`, through `fh_ray.h`): One Euro filters run in continuous time, so the pointer's pose moves at the helper's rate (about 100 Hz) instead of stepping at the tracker's 15-30 Hz; the direction is filtered on the sphere. `POINTER_RAY_SMOOTH_MINCUTOFF` (0.8 Hz with the hand still), `POINTER_RAY_SMOOTH_BETA` (0.06 Hz more per degree a second it turns), `POINTER_RAY_SMOOTH_HOLD` (0.5 Hz still while a pinch is held: a drag's precision). The reach, push and pull's input, has a heavier one of its own. `POINTER_RAY_STEADY` (1): while a pinch is held (and 0.25 s after), the ray pivots on where the shoulder was at the press, then eases back to the body model over 0.5 s; the model's shoulder follows the head, which made looking around move what was dragged. `POINTER_RAY_TAP` (0.3 s) and `POINTER_RAY_TAP_DEADZONE` (6 degrees): a pinch's first 0.3 s takes 6 degrees of turn before it drags, so a quick tap whose hand swung stays a click; after that `POINTER_RAY_DEADZONE` applies. When the press starts dragging the pointer carries on from where it was, no jump. On the probe-moves replay (`pointer/tools/rayeval` on `frame-hands/dumps/probe-moves-v4.dump`, read at 90 Hz) the pose's second difference per tick went from 0.90-0.96 degrees rms (p90 1.4) to 0.24-0.26 (p90 0.24) at about the same lag (110 ms behind the capture, against 105).
 
+## Flags
+
+When tracking goes wrong in real use, flag it: `ft-handsctl flag [note]`, or by voice with frame-voice's voice commands (its `commands` setting: "flag that" runs `ft-handsctl flag` with the words after it as the note, e.g. "flag that, fingers crossed"). The offline tools (frame-hands' `train/flags`) relabel what was saved with the teacher, find what went wrong and in which situations, and make guided capture sessions for the weakest ones.
+
+ft-hands keeps a rolling buffer in RAM (`track/flagbuf.h`, `HANDS_FLAG_BUFFER=1`): per processed set, a mono crop around each view the tracker used (its landmark crop's centre, 1.6 times its size, axis aligned, at most `HANDS_FLAG_CROP` px a side), with where it is in the image, so labels made on it lift back to the image and triangulate; a lost view is still cropped where it was for a second, so the teacher can say whether the hand was there; and its hands, gestures and each view's landmarks. It keeps `HANDS_FLAG_SECONDS` and at most `HANDS_FLAG_MB` of crops; nothing is written until a flag. Cost, measured (2026-10-09, a replayed ring with two hands in view): about 80 crops a second at 20 sets a second, 56 MB of crops for 14 s at 224 px (ft-hands' peak RSS 101 -> 159 MB), and 0.1 ms a crop on a tracking core (A720), so about 1% of a core; ft-hands' CPU time was the same with and without it. At 30 sets a second with four views the 80 MB cap can trim the oldest seconds.
+
+`ft-handsctl flag` makes `HANDS_FLAG_DIR/flag-<time>/` and asks ft-hands for the buffer through `run_dir/flag`; ft-hands keeps going for 2 s more, then a thread of its own (off the tracking cores, lowest priority) writes `manifest.json` (written last), `sets.jsonl`, `crops.jsonl` and `crops.bin`. Once ft-hands has taken the request, the drawn hands pulse cyan for half a second (ft-handview's `flash`; `HANDS_FLAG_FLASH=0` turns it off; `HANDS_FLAG_TONE=1` also plays a short tone). It returns then, and in the background saves one frame of your view from `/dev/video99` as `view.jpg` (`HANDS_FLAG_VIEW=0` skips it), the head's poses over the window from ft-handview (`poses`) as `hmd.jsonl`, and `ctl.json`. ft-hands logs each flag ("flag:", "flag written:"), and the status line has the buffer's size and cost. A flag while one is being taken adds its note to it. The format is in frame-hands' `notes/flag-failures.md`. The crops show your hands and some of the room: keep flags with your recordings.
+
+`ft-handreplay REC --flag-at S1,S2 --flag-out DIR` (or `--flag-every S`) makes the same flags from a recording, with the same buffer, for testing the offline tools before real flags exist; `--flag-crop PX`, `--flag-scale F`, `--flag-mb MB` and `--flag-seconds S` change the buffer.
+
 ## Recordings
 
 `hands/build.sh --tools` also builds the offline tools.
@@ -267,6 +280,7 @@ hands/build/ft-handreplay ~/.local/share/frametop/hands/rec-20260929-120000 --co
 - The pinch, contrast and presence options are ft-hands'. `--reacquire S` (off unless given; `--reacquire-fast` searches every set as ft-hands does, `--reacquire-tiles N`, `--reacquire-clear M`), `--pair-sides`, `--hold S`, `--near F` and `--search-budget N` are the tracker's re-acquire settings, off or at their old values by default so old replays repeat.
 - `--cost-hand MS`, `--cost-palm MS`: with `--cost`, what a round of landmark and palm calls costs. The defaults (10, 18) are the headset's idle costs. The 2026-10-08 live probe (CPUs 0,1,4 beside SteamVR, 3 threads) measured about 14 and 52, and the live tracker loses hands far more at those costs.
 - `--drop-every S`: the re-acquire test. Every S s, while two hands are tracked, one of them is made invisible for 0.35 s (just past the 0.3 s the tracker holds a lost hand), and the report gives how long it then took to have two hands again: the time to find a hand that never left the view.
+- `--flag-at S1,S2`, `--flag-every S`, `--flag-out DIR`: flags as `ft-handsctl flag` makes them live (see "Flags"), at those times into the recording.
 - With `--timeline`, the tracker also writes why views and hands came and went (`ev` lines: lost, miss, split, search and its tiles, palms kept or rejected, new, forget, pair-sides), and `--oracle` writes what the full search found. `tools/gap_report.py TIMELINE --list` turns that into every gap of 0.3 s or more per side, with its cause. `tools/replay_gaps.sh OUT MODELS "ARGS" REC...` runs several replays at once (on the 7i through frame-job) and reports them. For pinches, `--tips FILE` logs each hand's thumb, index and middle tips and the pinch detector's distance measures per processed set, with its pinch events; `--rate HZ` fixes the processing rate (15 or 30, against the live rule) and `--want-hz HZ` plays a reader asking for it; `tools/replay_tips.sh OUT NAME=MODELS "ARGS" REC...` runs them (frame-hands' `train/taps/tapeval.py` scores them against auto-labels).
 
 `ft-ringplay DIR --ring PATH [--from S] [--to S] [--loop]` publishes a recording into a ring file in real time, as ft-camd would, so `ft-hands --ring PATH --no-publish` runs the same frames run after run. It needs no privileges, and it skips the dark frames.

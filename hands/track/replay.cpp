@@ -86,10 +86,18 @@
 // --rate HZ:  process sets at a fixed rate (the live tracker adapts: 5 Hz with no hands, 15 still, 30
 //             fast or while a pinch is down or closing). --want-hz HZ: as a reader's want-hz (ft-screens
 //             near a panel): the live rule, but never slower than HZ.
+// --flag-every S, --flag-at S[,S...], --flag-out DIR: flags as ft-hands makes them on `ft-handsctl flag`
+//             (track/flagbuf.h; frame-hands notes/flag-failures.md has the format), with the same buffer,
+//             at those times into the recording (seconds from its first set; every S: S, 2S, ...), each
+//             into DIR/flag-<recording>-<seconds>. With --flag-every 14 (the 12 s before and 2 after) they
+//             cover the recording end to end, for checking the offline tools against full-set labels.
+//             --flag-crop PX (224), --flag-scale F (1.6), --flag-mb MB (400: unlike live, nothing dropped),
+//             --flag-seconds S (12): the buffer's settings.
 // --depth FILE: per processed set, a line per hand for tools/depth_report.py: its views'
 //             cameras, triangulation residual, hand scale, measured and published palm, and
 //             each view's one-view palm (Tracker::single_view at the hand's scale). The
 //             header has each camera's centre and focal length.
+#include "flagbuf.h"
 #include "io.h"
 #include "pinch.h"
 #include "record.h"
@@ -98,6 +106,7 @@
 #include "tracker.h"
 
 #include <json/json.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <chrono>
@@ -105,6 +114,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -158,6 +168,11 @@ int main(int argc, char **argv) {
     std::string use = "mono", color_left = "color_video0", color_crop = "subtract", sides = "file";
     std::string ray_out, tips_out;
     double fixed_rate = 0, want_hz = 0;
+    double flag_every = 0;
+    std::vector<double> flag_at;
+    std::string flag_out;
+    FlagConfig flag_cfg;
+    flag_cfg.max_bytes = size_t(400) << 20, flag_cfg.writer_cpus.clear();
     std::string timeline, depth, poses, models = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/ncnn";
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
@@ -224,6 +239,21 @@ int main(int argc, char **argv) {
             if (!Contrast::parse_pair(argv[++i], palm_contrast, hand_contrast))
                 return std::fprintf(stderr, "--contrast MODE or PALM/HAND, each clahe[:CLIP]|none|stretch\n"), 1;
         }
+        else if (a == "--flag-every" && more) flag_every = std::atof(argv[++i]);
+        else if (a == "--flag-at" && more) {
+            for (const char *p = argv[++i]; *p;) {
+                char *end;
+                const double v = std::strtod(p, &end);
+                if (end == p) break;
+                flag_at.push_back(v);
+                p = *end == ',' ? end + 1 : end;
+            }
+        }
+        else if (a == "--flag-out" && more) flag_out = argv[++i];
+        else if (a == "--flag-crop" && more) flag_cfg.crop_px = std::atoi(argv[++i]);
+        else if (a == "--flag-scale" && more) flag_cfg.scale = std::atof(argv[++i]);
+        else if (a == "--flag-mb" && more) flag_cfg.max_bytes = size_t(std::atof(argv[++i]) * 1048576);
+        else if (a == "--flag-seconds" && more) flag_cfg.before_s = std::atof(argv[++i]);
         else if (a == "--from" && more) from = std::atof(argv[++i]);
         else if (a == "--to" && more) to = std::atof(argv[++i]);
         else return std::fprintf(stderr, "unknown option %s\n", a.c_str()), 1;
@@ -390,6 +420,22 @@ int main(int argc, char **argv) {
     }
     double grip_begin_ts[2] = {0, 0};
     std::vector<double> grip_len[2];
+    // --flag-*: the flag buffer, fed as ft-hands feeds it
+    std::unique_ptr<FlagBuffer> flags;
+    if ((flag_every > 0 || !flag_at.empty()) && flag_out.empty()) return std::fprintf(stderr, "--flag-every/--flag-at need --flag-out DIR\n"), 1;
+    std::string rec_name = dir;
+    while (rec_name.size() > 1 && rec_name.back() == '/') rec_name.pop_back();
+    rec_name = rec_name.substr(rec_name.rfind('/') + 1);
+    if (!flag_out.empty()) {
+        mkdir(flag_out.c_str(), 0755);
+        flags = std::make_unique<FlagBuffer>(flag_cfg);
+        flags->set_static(cameras_json(used), "{\"models\": " + json_string(models) + ", \"replay\": true, \"sides\": \"" + sides +
+                                                  "\", \"cams\": \"" + use + "\", \"misread_guard\": " + (misread_guard ? "true" : "false") +
+                                                  ", \"skeleton\": " + (skeleton ? "true" : "false") + "}");
+        std::sort(flag_at.begin(), flag_at.end());
+    }
+    double flag_next_every = flag_every;
+    size_t flag_next_at = 0;
     do {
         if (sides == "file")
             for (auto &[first, rename] : file_runs)
@@ -483,6 +529,24 @@ int main(int argc, char **argv) {
             grip.update(out, seen, int64_t(t), holding);
             pinch.update(out, seen, int64_t(t), grip.gripping(), middle.down());
             middle.update(out, seen, int64_t(t), grip.gripping(), pinch.down());
+            if (flags) {
+                flags->add(int64_t(t), int64_t(t), index, images, seen, output_json(out, &pinch, &middle, &grip));
+                const bool due_at = flag_next_at < flag_at.size() && ts >= flag_at[flag_next_at];
+                const bool due_every = flag_every > 0 && ts >= flag_next_every;
+                if ((due_at || due_every) && !flags->waiting()) {
+                    char name[256], fields[1024];
+                    std::snprintf(name, sizeof name, "%s/flag-%s-%07.2f", flag_out.c_str(), rec_name.c_str(), ts);
+                    std::snprintf(fields, sizeof fields,
+                                  "\"source\": \"ft-handreplay\", \"flag_unix\": null, \"note\": \"replay at %.2f s\", \"said_unix\": null, "
+                                  "\"models\": %s, \"sides\": {\"names_swapped\": %s, \"swapped\": null}, \"recording\": {\"dir\": %s, "
+                                  "\"at_s\": %.3f, \"from_s\": %.3f, \"to_s\": %.3f}",
+                                  ts, json_string(models).c_str(), names_swapped ? "true" : "false", json_string(dir).c_str(), ts,
+                                  ts - flag_cfg.before_s, ts + flag_cfg.after_s);
+                    flags->flag({name, fields}, int64_t(t));
+                    if (due_at) ++flag_next_at;
+                    if (due_every) flag_next_every += flag_every;
+                }
+            }
             if (tl)
                 for (const Pinch::Event &e : middle.events)
                     std::fprintf(tl, "%.3f pinch2 %s %s d %.3f point %+.3f %+.3f %+.3f hand %u\n", ts, e.side ? "R" : "L",
@@ -809,5 +873,13 @@ int main(int argc, char **argv) {
         std::printf("\n");
     }
     if (skeleton) eval.report(tracker.skeleton(), int64_t(t0), label_hits);
+    if (flags) {
+        flags->finish();
+        flags->wait();
+        const FlagBuffer::Stats fs = flags->stats();
+        std::printf("flags: %zu written to %s, %zu crops (%zu ghosts), %.0f us a crop, %zu dropped%s%s\n", fs.flags, flag_out.c_str(),
+                    fs.crops, fs.ghosts, fs.crop_calls ? fs.crop_us / fs.crop_calls : 0.0, fs.dropped,
+                    fs.last_error.empty() ? "" : "; error: ", fs.last_error.c_str());
+    }
     return 0;
 }

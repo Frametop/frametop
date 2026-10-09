@@ -8,6 +8,8 @@
 #   ft-handsctl mode [frametop|always|off]  HANDS_MODE: with the Frametop desktop, with SteamVR, or off
 #   ft-handsctl cutouts on|off|state   ft-screens' hand cutouts, without stopping tracking
 #   ft-handsctl gestures               watch pinches and grips live (Ctrl+C to stop)
+#   ft-handsctl flag [note...]         flag a tracking failure: the last seconds of hand crops and
+#                                      ft-hands' output go to HANDS_FLAG_DIR/flag-<time> (handsflag.py)
 #
 # Needs the services installed once: hands/run.sh install (it sets ft-camd's capabilities).
 set -euo pipefail
@@ -47,5 +49,6 @@ case ${1:-status} in
   cutouts)
     ask_screens "cutouts ${2:-state}" ;;
   gestures) exec python3 "$here/tools/watch_gestures.py" --distance ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  flag) shift; exec python3 "$here/handsflag.py" "$@" ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

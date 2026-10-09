@@ -21,6 +21,9 @@ to the input relay over its control socket (@frametop_relay):
   - Gaze: the pointer's gaze mode (@ft_pointer_helper "gaze") and the gaze service
     (gaze/ft-gazed, @ft_gazed: status, forget, reload), with its eye tracker (SteamVR's or
     our own) and eye bias (GAZE_TRACKER, GAZE_EYE in frametop.conf).
+  - Hands: when hand tracking runs (HANDS_MODE: with the Frametop desktop, always with SteamVR,
+    or off; hands/handsmode.py on the host starts and stops its services) and the hand cutouts'
+    margin (HANDS_MATTE_MARGIN, sent live to ft-screens: "cutouts margin DEG").
   - Bluetooth: paired devices, and re-applying the Bluetooth LE fixes after pairing.
   - A warning on every page when SteamVR won't load the ft_pointer driver (blocked after a
     crash, disabled, or SteamVR in safe mode) or hasn't loaded it (@ft_pointer doesn't answer
@@ -38,6 +41,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 from PySide6.QtCore import Property, QObject, QSocketNotifier, QTimer, QUrl, Signal, Slot
@@ -56,6 +60,14 @@ VRSETTINGS_PATHS = [os.path.expanduser("~/.config/openvr/config/steamvr.vrsettin
                     os.path.expanduser("~/.steam/steam/config/steamvr.vrsettings")]
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAZE_PROBE = os.path.join(REPO, "gaze", "probe", "ft-gazeprobe")
+# Hand tracking's mode and the cutouts' margin (standard library only, so it imports here too).
+sys.path.insert(0, os.path.join(REPO, "hands"))
+import handsmode  # noqa: E402
+HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
+SCREENS = "\0ft_screens"
+HANDS_MODES = {"frametop": "With Frametop: while the Frametop desktop runs",
+               "always": "Always: whenever SteamVR runs, in games and the SteamVR dashboard too",
+               "off": "Off"}
 BTN_MISC = 0x100
 # Header names that mark the start of a range, not a real key (BTN_MOUSE == BTN_LEFT).
 RANGE_ALIASES = {"BTN_MISC", "BTN_MOUSE", "BTN_JOYSTICK", "BTN_GAMEPAD", "BTN_DIGI", "BTN_WHEEL",
@@ -308,6 +320,7 @@ class Backend(QObject):
     driverChanged = Signal()
     panelsChanged = Signal()
     pauseChanged = Signal()
+    handsChanged = Signal()
     activity = Signal(str)  # device id
     captured = Signal(int, str)  # code, name
     capturedController = Signal(str, str)  # button, label
@@ -337,6 +350,9 @@ class Backend(QObject):
         self._panels = None  # SteamVR's overlays, from the helper; None until it answers
         self._pause = {}  # the relay's pause state ("pause ?"), {} when it doesn't answer
         self._pause_at = 0.0
+        self._hands = {}  # handsmode.py's status, {} until it answers
+        self._hands_lock = threading.Lock()  # one handsmode.py at a time
+        self._hands_refreshing = False
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         self.sock.bind("")  # autobind an abstract address the relay can reply to
         self.sock.setblocking(False)
@@ -1210,6 +1226,78 @@ class Backend(QObject):
             self.message.emit(done, False)
         except OSError as e:
             self.message.emit(f"Couldn't open the gaze probe: {e}", True)
+
+    # --- hands ---
+    @Property("QVariantList", constant=True)
+    def handsModes(self):
+        return [{"value": k, "text": v} for k, v in HANDS_MODES.items()]
+
+    @Property(str, notify=handsChanged)
+    def handsMode(self):
+        return handsmode.mode_of(read_conf())
+
+    @Property("QVariantMap", notify=handsChanged)
+    def handsStatus(self):
+        """handsmode.py's status: "summary", "problem" (why it can't run, or ""), and the rest."""
+        return self._hands
+
+    def _hands_run(self, *args):
+        """handsmode.py on the host (systemctl, getcap and the cameras are there), off the UI
+        thread: distrobox-host-exec takes a moment. Then its status."""
+        with self._hands_lock:
+            result = host("python3", HANDSMODE, *args) if args else None
+            st = host("python3", HANDSMODE, "status", "--json")
+            try:
+                self._hands = json.loads(st.stdout)
+            except ValueError:
+                self._hands = {"summary": "", "problem": "Couldn't ask the host about hand tracking: "
+                               + (st.stderr.strip() or st.stdout.strip() or "no answer")[:160]}
+            self._hands_refreshing = False
+        self.handsChanged.emit()
+        return result
+
+    @Slot()
+    def refreshHands(self):
+        if not self._hands_refreshing:
+            self._hands_refreshing = True
+            threading.Thread(target=self._hands_run, daemon=True).start()
+
+    @Slot(str)
+    def setHandsMode(self, mode):
+        """Written here so the page follows at once; handsmode.py set writes the same and applies it
+        (starts and stops the services), and the input relay rereads it (games keep the hands with
+        HANDS_MODE=always)."""
+        if mode not in HANDS_MODES:
+            return
+        write_conf_value("HANDS_MODE", mode)
+        self.handsChanged.emit()
+        self.reload_timer.start()
+
+        def job():
+            result = self._hands_run("set", mode)
+            if result.returncode != 0:
+                self.message.emit("Couldn't apply it: " + (result.stderr.strip() or "no answer")[:160], True)
+            else:
+                self.message.emit("Hand tracking: " + HANDS_MODES[mode].split(":")[0], False)
+        threading.Thread(target=job, daemon=True).start()
+
+    @Property("QVariantMap", constant=True)
+    def handsMarginRange(self):
+        return {"min": handsmode.MARGIN_MIN, "max": handsmode.MARGIN_MAX, "step": handsmode.MARGIN_STEP,
+                "default": handsmode.MARGIN_DEFAULT}
+
+    @Property(float, notify=handsChanged)
+    def handsMargin(self):
+        return handsmode.margin_of(read_conf())
+
+    @Slot(float)
+    def setHandsMargin(self, value):
+        """HANDS_MATTE_MARGIN, and to ft-screens now (only the still margin: its motion part stays).
+        Without the desktop running it takes it when it starts."""
+        value = format(round(min(max(value, 0.0), 10.0), 2), "g")
+        write_conf_value("HANDS_MATTE_MARGIN", value)
+        self._send(f"cutouts margin {value}", SCREENS)
+        self.handsChanged.emit()
 
     # --- bluetooth ---
     @Property("QVariantList", notify=bluetoothChanged)

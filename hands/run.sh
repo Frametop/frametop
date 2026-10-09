@@ -14,7 +14,10 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
 frame="$root/scripts/frame.sh"
-units="frametop-camd.service frametop-hands.service"
+units="frametop-camd.service frametop-hands.service frametop-handview.service"
+# ft-handview (the hands drawn with Room View off) is screens/' build (screens/build.sh, which
+# the desktop's install runs); its unit sits there too.
+unit_dir() { [ "$1" = frametop-handview.service ] && echo screens || echo hands; }
 # pidfd_getfd on XRService (ptrace_scope=1), system-wide tracepoints, and their root-only
 # format files. ft-camd drops them all once it has set up.
 caps=cap_sys_ptrace,cap_perfmon,cap_dac_read_search+ep
@@ -58,7 +61,7 @@ case ${1:-status} in
     "$root/hands/build.sh"
     set_caps
     for u in $units; do
-      fill_template "$root/hands/$u" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$u"
+      fill_template "$root/$(unit_dir $u)/$u" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$u"
     done
     # Started as HANDS_MODE says (off: not at all; Frametop Input Settings, Hands), or by hand
     # with ft-handsctl on|off (linked into ~/.local/bin).

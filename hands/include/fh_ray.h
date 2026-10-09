@@ -39,7 +39,10 @@
 //               claim, or the fingertip at an overlay)
 //   not a fist  no grip down                            a grip down
 // While a ray pinch is held (Hold), the ray stays up whatever the tests say, until hideFor after
-// the release.
+// the release. A pinch may also bring a ray up (ShowForPinch): one that hid within a moment (the
+// pointer helper's grace; not one hidden for "off", "near" or a reset), or one whose show tests
+// all pass but not yet for showFor. Closing the fingers turns the hand a little, so a ray near a
+// hide limit can drop just as the pinch begins.
 //
 // Filter (RayFilter): One Euro filters (Casiez, Roussel and Vogel, CHI 2012) on the ray's yaw and
 // pitch (minCutoff 0.8 Hz, beta 0.02 per deg/s, dCutoff 1 Hz) and per axis on the origin
@@ -288,14 +291,14 @@ public:
             }
         } else {
             if (!sideIsHand) {
-                Hide("off");
+                Hide("off", f.t);
             } else if (f.near && !held_) {
-                Hide("near");
+                Hide("near", f.t);
             } else if (keepOk || held_ || f.t < holdUntil_) {
                 failSince_ = -1;
             } else {
                 if (failSince_ < 0) failSince_ = f.t;
-                if (f.t - failSince_ >= p_.hideFor - 1e-9) Hide(tests_.fails.empty() ? "pose" : tests_.fails);
+                if (f.t - failSince_ >= p_.hideFor - 1e-9) Hide(tests_.fails.empty() ? "pose" : tests_.fails, f.t);
             }
         }
         if (shown_) out_ = filter_(raw_, f.t);
@@ -303,15 +306,24 @@ public:
     // Each tick, with the time now on the capture clock: the hand lost (no frame for lostFor) hides it.
     void Tick(double now, bool sideIsHand) {
         if (!shown_) return;
-        if (!sideIsHand) Hide("off");
-        else if (!held_ && now - lastFrame_ > p_.lostFor && now >= holdUntil_) Hide("lost");
+        if (!sideIsHand) Hide("off", now);
+        else if (!held_ && now - lastFrame_ > p_.lostFor && now >= holdUntil_) Hide("lost", now);
     }
     // A ray pinch is held: the ray stays up until hideFor after it ends.
     void Hold(bool on, double t) {
         if (held_ && !on) holdUntil_ = t + p_.hideFor;
         held_ = on;
     }
-    void Reset() { Hide("reset"); }
+    void Reset() { Hide("reset", -1e9); }
+    // A pinch began on this hand at t: may its ray show for it (see the top)? within: how long ago
+    // it may have hidden.
+    bool CanShowForPinch(double t, double within) const {
+        return shown_ || showSince_ >= 0 || (revivable_ && t - hidAt_ <= within);
+    }
+    // Show it (filter started afresh from the hand now), for a pinch that may (CanShowForPinch).
+    void ShowForPinch() {
+        if (!shown_) Show(lastFrame_);
+    }
 
     bool Shown() const { return shown_; }
     const Ray &Current() const { return out_; }   // filtered
@@ -329,9 +341,10 @@ private:
         out_ = filter_(raw_, t);
         event = "show";
     }
-    void Hide(const std::string &why) {
+    void Hide(const std::string &why, double t) {
         if (!shown_) return;
         shown_ = false, failSince_ = -1, showSince_ = -1, held_ = false, holdUntil_ = 0;
+        hidAt_ = t, revivable_ = why != "off" && why != "near" && why != "reset";
         event = "hide " + why;
     }
     int side_;
@@ -342,8 +355,8 @@ private:
     std::string why_;
     V3 lastK_;
     double lastT_ = 0, lastFrame_ = -1e9, lastStereo_ = -1e9, reach_ = 0;
-    double showSince_ = -1, failSince_ = -1, holdUntil_ = 0;
-    bool haveLast_ = false, shown_ = false, held_ = false;
+    double showSince_ = -1, failSince_ = -1, holdUntil_ = 0, hidAt_ = -1e9;
+    bool haveLast_ = false, shown_ = false, held_ = false, revivable_ = false;
 };
 
 }  // namespace fhray

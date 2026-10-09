@@ -227,7 +227,7 @@ Settings in `~/.config/frametop.conf`:
 - `POINTER_GRIP_GAIN` (1): a grip moves the pointer this many times the hand's angle.
 - `POINTER_GRIP_BELOW` (0.35): grips that begin more than this many metres below the eyes are ignored, because hands resting on a desk curl like a loose fist. Pinches have no such limit: deliberate ones sat 0.35-0.45 m below the eyes with the elbow resting.
 - `POINTER_PINCH_TYPING` (1): no pinch begins within this many seconds of a key press, because typing touches thumb to index.
-- `POINTER_HAND_RAY` (1), `POINTER_RAY_DEADZONE` (2.5 degrees the ray turns during a pinch before the press drags), `POINTER_RAY_PUSH` (1), `POINTER_RAY_SCROLL` (1; -1 turns scrolling round), `POINTER_RAY_RELEASE` (2 s after the ray goes before a pointer it woke lets go): the hand ray.
+- `POINTER_HAND_RAY` (1), `POINTER_RAY_DEADZONE` (2.5 degrees the ray turns during a pinch before the press drags), `POINTER_RAY_PUSH` (1), `POINTER_RAY_SCROLL` (1; -1 turns scrolling round), `POINTER_RAY_RELEASE` (2 s after the ray goes before a pointer it woke lets go), `POINTER_RAY_GRACE` (0.5 s a hand keeps the laser after its ray drops; the other hand's ray takes it after that, or at once by pinching or raising): the hand ray.
 
 ## Recordings
 

@@ -665,6 +665,7 @@ private:
             if (rest.find("Thumbnail") != std::string::npos || rest.find("Subview") != std::string::npos) continue;
             if (key.rfind("system.pointer", 0) == 0 || key.rfind("system.cursor", 0) == 0 ||
                 key.rfind("frametop.pointer", 0) == 0 || key.rfind("frametop.guide", 0) == 0 ||
+                key.rfind("frametop.handview", 0) == 0 ||  // the drawn hands (ft-handview): around the hand itself
                 key == "frametop.gazepanel" ||  // the gaze calibration panel, fixed to the headset
                 key == "frametop.catcher" ||  // ft-screens' release catcher: only on a laser mid-drag
                 key == "system.HeadsetView" || key == "system.toast")

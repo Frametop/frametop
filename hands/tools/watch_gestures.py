@@ -1,14 +1,15 @@
-"""Watch the gestures ft-hands publishes, live: pinches and grips, begins, ends, and drags.
+"""Watch the gestures ft-hands publishes, live: pinches, grips and middle pinches, begins, ends, and drags.
 
 usage: python3 tools/watch_gestures.py [--every S] [--distance]
 
-Prints a line when a pinch or a grip (a closed hand) begins or ends on either hand. It goes
+Prints a line when a pinch, a grip (a closed hand) or a middle pinch (thumb to middle finger)
+begins or ends on either hand. It goes
 by the counters, so a quick tap between two reads still shows. While one is held, every
 --every seconds (default 0.1) it prints how far its point has moved since it began, in the
 head frame (turning your head moves it too; a real consumer turns both points into the room
 first, see include/fh_gestures.h). --distance also prints each hand's thumb-to-index
 distance and finger curl, to see how close a gesture comes to the thresholds.
-Version 1 files (pinches only) still work.
+Version 1 files (pinches only) and version 2 files (no middle pinches) still work.
 """
 import argparse
 import mmap
@@ -20,7 +21,7 @@ HDR = struct.Struct('<8sIIQQQffff8x')        # 64 bytes
 SLOT = struct.Struct('<IIIIQQff3f3f')        # 64 bytes
 TRACKED, DOWN, LOST = 1, 2, 4
 SIDES = ('left ', 'right')
-KINDS = ('pinch', 'grip ')
+KINDS = ('pinch', 'grip ', 'middle pinch')
 
 
 def path():
@@ -28,15 +29,20 @@ def path():
 
 
 def read(m):
-    """(header, [[pinch left, right], [grip left, right]]) under the sequence lock, or None
-    if it's being written. Version 1 has no grips: they read as all zero."""
+    """(header, [[pinch left, right], [grip left, right], [middle pinch left, right]]) under the
+    sequence lock, or None if it's being written. Version 1 has no grips and version 2 no middle
+    pinches: they read as all zero."""
     for _ in range(10):
         s1 = struct.unpack_from('<Q', m, 16)[0]
         if s1 % 2 == 0:
             h = HDR.unpack_from(m, 0)
-            kinds = 2 if h[1] >= 2 and len(m) >= HDR.size + 4 * SLOT.size else 1
+            kinds = 1
+            if h[1] >= 2 and len(m) >= HDR.size + 4 * SLOT.size:
+                kinds = 2
+            if h[1] >= 3 and len(m) >= HDR.size + 6 * SLOT.size:
+                kinds = 3
             g = [[SLOT.unpack_from(m, HDR.size + (k * 2 + s) * SLOT.size) for s in range(2)] for k in range(kinds)]
-            if kinds == 1:
+            while len(g) < 3:
                 g.append([(0,) * 14, (0,) * 14])
             if struct.unpack_from('<Q', m, 16)[0] == s1:
                 return h, g

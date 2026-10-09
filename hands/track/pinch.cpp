@@ -14,7 +14,7 @@
 
 namespace {
 
-constexpr int kThumbTip = 4, kIndexTip = 8;
+constexpr int kThumbTip = 4;
 
 V3 cross(V3 a, V3 b) { return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]}; }
 
@@ -25,9 +25,11 @@ void put3(float out[3], V3 v) {
 }  // namespace
 
 void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<Seen> &views, int64_t t_ns,
-                   const std::vector<int> &gripping) {
+                   const std::vector<int> &gripping, const std::vector<int> &blocked) {
     events.clear();
     auto grips = [&](int id) { return std::find(gripping.begin(), gripping.end(), id) != gripping.end(); };
+    auto other_down = [&](int id) { return std::find(blocked.begin(), blocked.end(), id) != blocked.end(); };
+    const int tip = p_.finger, other = p_.other_finger;
     for (int s = 0; s < 2; ++s)   // a grip took this pinch's hand: it's a drag now, not a click
         if ((side_[s].flags & FH_PINCH_DOWN) && grips(follow_[s])) end(s, t_ns, true);
     // A hand a pinch is down on belongs to that side until it ends. The left/right call is a
@@ -45,27 +47,56 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
             if (down ? c->id != follow_[s] : c->right() != (s == 1) || c->id == taken[1 - s]) continue;
             if (!h || c->frames > h->frames) h = c;
         }
-        world_d[s] = tri_d[s] = fit_d[s] = palm_down[s] = -1;
+        world_d[s] = tri_d[s] = fit_d[s] = palm_down[s] = other_d[s] = -1;
         if (!h) {
             o.flags &= ~FH_PINCH_TRACKED;
             if (down && (t_ns - seen_ns_[s]) / 1e9 > p_.grace_s) end(s, t_ns, true);
             continue;
         }
         seen_ns_[s] = t_ns;
-        tri_d[s] = norm(h->pts[kThumbTip] - h->pts[kIndexTip]);
-        if (h->fit.valid) fit_d[s] = norm(h->fit.pts[kThumbTip] - h->fit.pts[kIndexTip]);
+        tri_d[s] = norm(h->pts[kThumbTip] - h->pts[tip]);
+        if (h->fit.valid) fit_d[s] = norm(h->fit.pts[kThumbTip] - h->fit.pts[tip]);
         const V3 normal = cross(h->smooth[5] - h->smooth[0], h->smooth[17] - h->smooth[0]);
         palm_down[s] = norm(normal) > 0 ? std::fabs(normal[1]) / norm(normal) : 0;
-        double sum = 0;
-        int n = 0;
-        for (const Seen &v : views) {
-            if (v.hand != h->id) continue;
-            const V3 a{v.lm.world[kThumbTip][0], v.lm.world[kThumbTip][1], v.lm.world[kThumbTip][2]};
-            const V3 b{v.lm.world[kIndexTip][0], v.lm.world[kIndexTip][1], v.lm.world[kIndexTip][2]};
-            sum += norm(a - b), ++n;
+        // thumb tip to fingertip f: the model's world landmarks averaged over the views (at the hand's
+        // scale), the fitted tips, or the triangulated ones, as configured
+        auto measure = [&](int f, double *world, double *tri, double *fit) {
+            double sum = 0;
+            int n = 0;
+            for (const Seen &v : views) {
+                if (v.hand != h->id) continue;
+                const V3 a{v.lm.world[kThumbTip][0], v.lm.world[kThumbTip][1], v.lm.world[kThumbTip][2]};
+                const V3 b{v.lm.world[f][0], v.lm.world[f][1], v.lm.world[f][2]};
+                sum += norm(a - b), ++n;
+            }
+            *world = n ? sum / n * h->scale : -1;
+            *tri = norm(h->pts[kThumbTip] - h->pts[f]);
+            *fit = h->fit.valid ? norm(h->fit.pts[kThumbTip] - h->fit.pts[f]) : -1;
+            return p_.fitted && *fit >= 0 ? *fit : p_.triangulated || *world < 0 ? *tri : *world;
+        };
+        double unused_tri, unused_fit;
+        const double d = measure(tip, &world_d[s], &unused_tri, &unused_fit);
+        double ow = -1, ot = -1, of = -1;
+        if (other) other_d[s] = measure(other, &ow, &ot, &of);
+        // the thumb clearly nearer this fingertip than the other one, the extended finger straight
+        // enough (from the model's world landmarks, else the tracked points), the hand tracked a while
+        bool own = !other || d + p_.other_margin < other_d[s];
+        if (own && p_.extended_finger > 0) {
+            const int f = p_.extended_finger, knuckle = f - 3;
+            double ratio = -1;
+            for (const Seen &v : views) {
+                if (v.hand != h->id) continue;
+                auto w = [&](int i) { return V3{v.lm.world[i][0], v.lm.world[i][1], v.lm.world[i][2]}; };
+                const double k = norm(w(knuckle) - w(0));
+                if (k > 1e-4) ratio = std::max(ratio, norm(w(f) - w(0)) / k);
+            }
+            if (ratio < 0) {
+                const double k = norm(h->smooth[knuckle] - h->smooth[0]);
+                ratio = k > 1e-4 ? norm(h->smooth[f] - h->smooth[0]) / k : 0;
+            }
+            own = ratio >= p_.extended_min;
         }
-        if (n) world_d[s] = sum / n * h->scale;
-        const double d = p_.fitted && fit_d[s] >= 0 ? fit_d[s] : p_.triangulated || world_d[s] < 0 ? tri_d[s] : world_d[s];
+        if (own && h->frames < p_.min_frames) own = false;
         // Where the pinch is, for drags: the index and middle knuckles, which hold still while
         // the fingers open and close. The point between the tips moved 1-2 cm as a pinch
         // opened, so every release dragged the pointer off what it pressed (headset test,
@@ -80,8 +111,10 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
             // a close held back (palm down) has to open again before a pinch can begin, so
             // turning the hand with the fingers still closed doesn't start one
             if (d > p_.end_m) held_[s] = false;
-            if (grips(h->id)) {
-                // closed: no pinch until it opens
+            if (grips(h->id) || other_down(h->id)) {
+                // closed, or the other pinch is down on it: no pinch until it opens
+            } else if (d < p_.begin_m && !own) {
+                // the thumb is on the other fingertip
             } else if (d < p_.begin_m && !held_[s] && palm_down[s] > p_.palm_down_max) {
                 held_[s] = true;
                 ++held_back[s];
@@ -117,6 +150,13 @@ void Pinch::release(int64_t t_ns) {
         side_[s].flags &= ~FH_PINCH_TRACKED;
         if (side_[s].flags & FH_PINCH_DOWN) end(s, t_ns, true);
     }
+}
+
+std::vector<int> Pinch::down() const {
+    std::vector<int> out;
+    for (int s = 0; s < 2; ++s)
+        if (side_[s].flags & FH_PINCH_DOWN) out.push_back(follow_[s]);
+    return out;
 }
 
 bool Pinch::engaged() const {
@@ -276,7 +316,7 @@ void GesturePublisher::use(fh_gestures_t *mem, const Pinch &pinch, const Grip &g
     // a gesture the last tracker left down (it crashed) is over: count its end, as lost
     __atomic_store_n(&out_->seq, 2 * ++seq_ - 1, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_RELEASE);
-    for (fh_pinch_t *slots : {out_->pinch, out_->grip})
+    for (fh_pinch_t *slots : {out_->pinch, out_->grip, out_->pinch2})
         for (int s = 0; s < 2; ++s) {
             fh_pinch_t &o = slots[s];
             if (o.begins == o.ends) continue;
@@ -291,14 +331,15 @@ void GesturePublisher::use(fh_gestures_t *mem, const Pinch &pinch, const Grip &g
     out_->grip_end = float(grip.params().end);
 }
 
-void GesturePublisher::write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns) {
+void GesturePublisher::write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns, const Pinch *middle) {
     __atomic_store_n(&out_->seq, 2 * ++seq_ - 1, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_RELEASE);
-    for (int g = 0; g < 2; ++g)
+    static const fh_pinch_t none{};
+    for (int g = 0; g < 3; ++g)
         for (int s = 0; s < 2; ++s) {
             // counters carry on from what's in the file (a restarted tracker starts its own at 0)
-            const fh_pinch_t &in = g ? grip.side(s) : pinch.side(s);
-            fh_pinch_t &o = g ? out_->grip[s] : out_->pinch[s];
+            const fh_pinch_t &in = g == 2 ? (middle ? middle->side(s) : none) : g ? grip.side(s) : pinch.side(s);
+            fh_pinch_t &o = g == 2 ? out_->pinch2[s] : g ? out_->grip[s] : out_->pinch[s];
             const uint32_t base_b = o.begins - last_begins_[g][s], base_e = o.ends - last_ends_[g][s];
             o = in;
             o.begins = base_b + in.begins;

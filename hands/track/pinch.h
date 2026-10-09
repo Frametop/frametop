@@ -34,6 +34,22 @@ struct PinchParams {
     // pinches, hand raised in front, read 0.90-0.99 too. The pointer helper now leaves out
     // gestures that begin low (hands on a desk), which it can tell with the head's pose.
     double palm_down_max = 1.0;
+    // Which fingertip meets the thumb: 8 the index (the pinch), 12 the middle finger (the middle
+    // pinch, fh_gestures v3: a right click or scrolling on the pointer helper's hand ray).
+    int finger = 8;
+    // The other fingertip the thumb could be on (0: none). A pinch begins only with the thumb
+    // nearer its own fingertip than this one by at least other_margin (m): the middle pinch's
+    // index tip is often within the begin distance too.
+    int other_finger = 0;
+    double other_margin = 0.0;
+    // And only with this finger extended (0: any): its tip at least extended_min times as far from
+    // the wrist as its knuckle (about 1.8-2.0 straight, under 1.2 curled). The middle pinch wants the
+    // index extended: closing the hand into a grab brings the middle tip to the thumb with the index
+    // curled too (6 false middle pinches in the recorder's gestures take, PR #8, all at curls 1.2-1.4).
+    int extended_finger = 0;
+    double extended_min = 1.5;
+    // And only on a hand tracked at least this many frames (a hand just found is often misread).
+    int min_frames = 0;
 };
 
 class Pinch {
@@ -43,8 +59,12 @@ public:
     // After each processed set: the hands out of Tracker::step, the tracker's views (for
     // the world landmarks) and the capture time. Hands in `gripping` (their ids) are closed:
     // no pinch begins on them, and one that's down on them ends, as lost.
+    // Hands in `blocked` (their ids: another pinch is down on them) begin no pinch, and one that's
+    // down on them carries on.
     void update(const std::vector<const Hand *> &hands, const std::vector<Seen> &views, int64_t t_ns,
-                const std::vector<int> &gripping = {});
+                const std::vector<int> &gripping = {}, const std::vector<int> &blocked = {});
+    // The hands a pinch is down on now (for another pinch's `blocked`).
+    std::vector<int> down() const;
     // Ends any pinch that's down (as lost), e.g. when the tracker stops.
     void release(int64_t t_ns);
     const fh_pinch_t &side(int s) const { return side_[s]; }   // 0 left, 1 right
@@ -62,6 +82,7 @@ public:
     std::vector<Event> events;
     // Both distance measures for the last update, per side (-1: no hand), for logs.
     double world_d[2] = {-1, -1}, tri_d[2] = {-1, -1}, fit_d[2] = {-1, -1};
+    double other_d[2] = {-1, -1};       // the thumb to the other fingertip (other_finger), same measure
     double palm_down[2] = {-1, -1};   // |palm normal . up| of each side's hand
     int held_back[2] = {0, 0};          // pinches that didn't begin because the palm faced down
 
@@ -127,14 +148,15 @@ private:
 // Writes /run/user/UID/frametop-hands/gestures.
 class GesturePublisher {
 public:
+    // middle: the middle pinches (fh_gestures v3), or none (written as zero).
     bool open(const Pinch &pinch, const Grip &grip, std::string &err);
     // Writes into `mem` instead of the gestures file (ft-handreplay --publish-dump).
     void use(fh_gestures_t *mem, const Pinch &pinch, const Grip &grip);
-    void write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns);
+    void write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns, const Pinch *middle = nullptr);
 
 private:
     fh_gestures_t *out_ = nullptr;
     uint64_t seq_ = 0;
-    // the counters last written, per gesture (0 pinch, 1 grip) and side
-    uint32_t last_begins_[2][2] = {}, last_ends_[2][2] = {};
+    // the counters last written, per gesture (0 pinch, 1 grip, 2 middle pinch) and side
+    uint32_t last_begins_[3][2] = {}, last_ends_[3][2] = {};
 };

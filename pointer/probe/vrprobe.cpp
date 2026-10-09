@@ -1,5 +1,5 @@
 // Print SteamVR's view of tracked devices: class, hand role, controller type,
-// connection, pose validity, and the dashboard's primary pointer device.
+// connection, pose validity, activity level, charging, and the dashboard's primary pointer device.
 // Runs as a background OpenVR client (in the dev container).
 #include <openvr.h>
 
@@ -59,9 +59,17 @@ int main(int argc, char **argv) {
         sys->GetStringTrackedDeviceProperty(i, vr::Prop_SerialNumber_String, serial, sizeof serial);
         const auto role = sys->GetControllerRoleForTrackedDeviceIndex(i);
         const int hint = sys->GetInt32TrackedDeviceProperty(i, vr::Prop_ControllerRoleHint_Int32);
-        std::printf("%u %-10s role=%-6s hint=%d type=%-16s connected=%d pose=%d %s\n", i,
+        // Activity level and charging: whether a controller can be told in a hand from on a desk
+        // or a charger (the handoff arbiter, pointer/helper/handoff.h; probe P4).
+        static const char *levels[] = {"unknown", "idle", "interaction", "interaction-timeout", "standby", "idle-timeout"};
+        const int level = int(sys->GetTrackedDeviceActivityLevel(i)) + 1;
+        vr::ETrackedPropertyError pe;
+        const bool charging = sys->GetBoolTrackedDeviceProperty(i, vr::Prop_DeviceIsCharging_Bool, &pe);
+        std::printf("%u %-10s role=%-6s hint=%d type=%-16s connected=%d pose=%d activity=%s charging=%s %s\n", i,
                     cls < 6 ? classes[cls] : "?", role < 6 ? roles[role] : "?", hint, type,
-                    sys->IsTrackedDeviceConnected(i), poses[i].bPoseIsValid, serial);
+                    sys->IsTrackedDeviceConnected(i), poses[i].bPoseIsValid,
+                    level >= 0 && level < 6 ? levels[level] : "?",
+                    pe == vr::TrackedProp_Success ? (charging ? "yes" : "no") : "n/a", serial);
     }
     std::printf("left hand = %u, right hand = %u\n",
                 sys->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand),

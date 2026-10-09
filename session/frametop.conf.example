@@ -15,7 +15,7 @@ POINTER_IDLE=30    # seconds without mouse use before the controllers get their 
 POINTER_WAKE_COUNTS=40     # mouse counts within 1 s needed to wake or re-claim the laser (ignores desk jitter)
 POINTER_CONTROLLER_PICKUP=1 # how hard a controller must move (x 0.35 m/s or 2 rad/s, for 100 ms) to take the laser back; raise it if resting controllers do (0.5 to 5)
 POINTER_DISTANCE=1.5       # metres to the cursor when it isn't on a panel
-POINTER_ROLE=right         # the hand role the pointer's controller takes: right | left | stylus (no hand); with a Frame controller held in that hand, clicks don't land, so pick the other
+POINTER_ROLE=treadmill     # the role the pointer's controller takes: treadmill (no hand: controllers keep theirs; needs the driver's default role 4 and a SteamVR restart) | right | left | stylus
 POINTER_CURSOR_DEG=0.4     # size of the free-space dot, in degrees
 POINTER_ORIGIN_FRACTION=0.95 # laser starts this far along eye->cursor: its beam is a few cm, SteamVR's hit dot tiny
 POINTER_LASER_WIDTH=0.8    # controller beam width (dashboard.laserRayWidthScale), set once at helper start
@@ -62,6 +62,11 @@ POINTER_PINCH_DEADZONE=1.5 # hands: degrees the pinching hand moves before the p
 POINTER_GRIP_GAIN=1        # hands: the pointer moves this times the gripping hand's angle
 POINTER_GRIP_BELOW=0.35    # hands: grips beginning more than this (m) below the eyes are ignored (hands on a desk)
 POINTER_PINCH_TYPING=1     # hands: no pinch within this many seconds of a key (typing touches thumb to index)
+POINTER_HAND_RAY=1         # hands: a bare hand raised and pointing shows a ray that drives the pointer like a controller's laser (pinch = click, middle pinch = right click or scroll); 0 = gaze pinches only
+POINTER_RAY_DEADZONE=2.5   # hand ray: degrees the ray turns during a pinch before the press drags (a click's own wobble stays inside)
+POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out pushes it away and pulling in brings it near
+POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle pinch moved up or down (-1 turns the direction round)
+POINTER_RAY_RELEASE=2      # hand ray: seconds after the ray goes before the pointer it woke lets go of the laser
 SHARE_KEYS=0       # 1 = keys of keyboards grabbed for the desktop also go to @frametop_keys, for hotkey tools (any local process can listen)
 DISPLAY_OFF_MIN=0  # minutes without use before frametop-power turns the displays off, even if the headset seems worn (0 = never)
 DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (mm) within 10 s counts as use

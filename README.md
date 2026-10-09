@@ -17,7 +17,7 @@ Join the [Frametop Discord](https://discord.gg/W3X9f7z3Bc) for questions, ideas,
 
 ## Install on the headset
 
-> **Frametop doesn't work on the SteamOS beta right now.** On the beta (SteamOS 0.4.3), gaze mode can't read the eye tracker, and the desktop has started without its taskbar ([#15](https://github.com/DeeJanuz/frametop/issues/15)). Use the stable SteamOS release until this note is gone.
+> **SteamOS 0.4:** SteamOS 0.4 moved the eye tracker's data that gaze mode reads. This version of Frametop reads both SteamOS 0.3's and 0.4's, and it's tested on 0.4.5. Run `scripts/doctor.sh` after the update: it says whether the eye tracker's layout is one Frametop knows. It also says whether the update deleted the Bluetooth fixes or our eye tracker's frame grabber, which happens when they were installed by Frametop 0.3.0-exp.3 or older. Reinstall what it names (`setup/bluetooth/install.sh install`, `gaze/tracker/install.sh`). From then on they're kept through updates.
 
 You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or the on-screen one), and about 3 GB of free space.
 
@@ -135,7 +135,7 @@ With the displays off, the headset keeps tracking and rendering, so it uses abou
 
 ## Known limitations
 
-This is an early release, tested on one Steam Frame (SteamOS 0.3.0 build 20260922, SteamVR 2.17.10).
+This is an early release, tested on one Steam Frame (SteamOS 0.4.5 build 20261007, SteamVR 2.18.2; before that SteamOS 0.3.0 build 20260922, SteamVR 2.17.10).
 
 - A SteamOS or SteamVR update can break parts of it until Frametop catches up. After an update, run `cd ~/frametop && scripts/doctor.sh` in a terminal. It checks what Frametop needs from SteamOS, and says what changed since the versions you last marked as working and what to try. Once everything works, `scripts/doctor.sh --mark-good` records the versions. If something stops working, please report it.
 - The first install downloads 1–2 GB for the build container and compiles everything on the headset, which takes several minutes.
@@ -159,7 +159,11 @@ In a terminal on the headset, run:
 cd ~/frametop && scripts/report.sh
 ```
 
-This writes `frametop-report-<date>.txt` with version numbers, service states, settings, and recent logs. Bluetooth addresses and the headset's serial number are masked. It takes up to half a minute, because it also checks gaze mode: it starts the gaze service for a moment to see whether the eye tracker sends. If gaze or its calibration doesn't work, run it while you wear the headset. `scripts/gaze-report.py` prints only the gaze part, with what looks wrong first. Then [open an issue](https://github.com/DeeJanuz/frametop/issues), describe what you did, what you expected, and what happened, and attach the file. Quick questions can go to [Discord](https://discord.gg/W3X9f7z3Bc) instead.
+From a release, start in `~/.local/share/frametop/releases/current` instead of `~/frametop`.
+
+This writes `frametop-report-<date>.txt` with version numbers, service states, settings, Frametop's keyboard and the Steam menu, and recent logs. Bluetooth addresses and the headset's serial number are masked.
+
+If the problem is something you can make happen, like a window that won't drag or a keyboard that doesn't open, run `scripts/report.sh --watch` instead. After the usual report it records for 60 seconds (`--watch 120` for longer) while you make it happen in the headset. It notes when the Steam menu opens and closes, which laser drags what, where typing goes, and when Frametop's keyboard opens or why it doesn't. It takes up to half a minute, because it also checks gaze mode: it starts the gaze service for a moment to see whether the eye tracker sends. If gaze or its calibration doesn't work, run it while you wear the headset. `scripts/gaze-report.py` prints only the gaze part, with what looks wrong first. Then [open an issue](https://github.com/DeeJanuz/frametop/issues), describe what you did, what you expected, and what happened, and attach the file. Quick questions can go to [Discord](https://discord.gg/W3X9f7z3Bc) instead.
 
 ## Update
 

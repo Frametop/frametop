@@ -59,6 +59,12 @@
 // --skeleton-dump FILE: with --labels, a line per hand matched to a label: time, id, stereo, then
 //             the measured, fitted (unfiltered) and labelled landmarks.
 // --pinch-fitted: also run a second pinch detector on the fitted tips, and report its count.
+// --ray FILE: per processed set, a line per hand with what the pointer helper's hand ray reads
+//             (hands/include/fh_ray.h; pointer/tools/rayeval): the set's capture time (ns,
+//             CLOCK_MONOTONIC_RAW as recorded), id, side (L/R), stereo, fitted, its side's pinch
+//             down, grip down, and pinch begun in this set (0/1 each), then the 21 published points
+//             (the fit's when it has one; head frame), the wrist's frame as a quaternion (x y z w;
+//             0 0 0 1 without a fit) and the elbow.
 // --depth FILE: per processed set, a line per hand for tools/depth_report.py: its views'
 //             cameras, triangulation residual, hand scale, measured and published palm, and
 //             each view's one-view palm (Tracker::single_view at the hand's scale). The
@@ -126,6 +132,7 @@ int main(int argc, char **argv) {
     PinchParams pinch_params;
     GripParams grip_params;
     std::string use = "mono", color_left = "color_video0", color_crop = "subtract", sides = "file";
+    std::string ray_out;
     std::string timeline, depth, poses, models = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/ncnn";
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
@@ -135,6 +142,7 @@ int main(int argc, char **argv) {
         else if (a == "--timeline" && more) timeline = argv[++i];
         else if (a == "--depth" && more) depth = argv[++i];
         else if (a == "--poses" && more) poses = argv[++i];
+        else if (a == "--ray" && more) ray_out = argv[++i];
         else if (a == "--threads" && more) threads = std::atoi(argv[++i]);
         else if (a == "--models" && more) models = argv[++i];
         else if (a == "--cost") cost = true;
@@ -287,6 +295,7 @@ int main(int argc, char **argv) {
     }
     FILE *dp = depth.empty() ? nullptr : std::fopen(depth.c_str(), "w");
     FILE *pp = poses.empty() ? nullptr : std::fopen(poses.c_str(), "w");
+    FILE *rp = ray_out.empty() ? nullptr : std::fopen(ray_out.c_str(), "w");
     if (dp)
         for (auto &[name, c] : used)
             std::fprintf(dp, "# cam %s %.4f %.4f %.4f %.1f\n", name.c_str(), c.origin[0], c.origin[1], c.origin[2], c.fx);
@@ -439,6 +448,25 @@ int main(int argc, char **argv) {
                 eval.calibration(tracker.skeleton(), ts);
                 label_hits.push_back({int64_t(t), int(out.size())});
             }
+            if (rp)
+                for (const Hand *h : out) {
+                    const int sd = h->right() ? 1 : 0;
+                    const bool pdown = (pinch.side(sd).flags & FH_PINCH_DOWN) && pinch.side(sd).hand_id == uint32_t(h->id);
+                    const bool gdown = (grip.side(sd).flags & FH_PINCH_DOWN) && grip.side(sd).hand_id == uint32_t(h->id);
+                    bool began = false;
+                    for (const Pinch::Event &e : pinch.events) began = began || (e.side == sd && std::string(e.what) == "begin");
+                    const bool fitted = h->fit.valid;
+                    const V3 *pts = fitted ? h->fit.pts : h->smooth;
+                    double q[4] = {0, 0, 0, 1};
+                    if (fitted) skel::to_quat(h->fit.frames[0], q);
+                    std::fprintf(rp, "%llu %d %s %d %d %d %d %d", (unsigned long long)t, h->id, sd ? "R" : "L",
+                                 h->nviews >= 2, fitted, pdown, gdown, began);
+                    for (int k = 0; k < 21; ++k)
+                        for (int j = 0; j < 3; ++j) std::fprintf(rp, " %.5f", pts[k][j]);
+                    std::fprintf(rp, " %.5f %.5f %.5f %.5f", q[0], q[1], q[2], q[3]);
+                    for (int j = 0; j < 3; ++j) std::fprintf(rp, " %.4f", fitted ? h->fit.elbow[j] : 0.0);
+                    std::fputc('\n', rp);
+                }
             next_ns = t + uint64_t((std::min(tracker.interval(), pinch.engaged() || grip.engaged() ? 1 / 30.0 : 1.0) - 0.005) * 1e9);
             for (const Pinch::Event &e : grip.events) {
                 if (std::string(e.what) == "begin") grip_begin_ts[e.side] = ts;
@@ -571,6 +599,7 @@ int main(int argc, char **argv) {
     if (tl) std::fclose(tl);
     if (dp) std::fclose(dp);
     if (pp) std::fclose(pp);
+    if (rp) std::fclose(rp);
 
     const double secs = nsets > 1 ? nsets / 30.0 : 0;
     const Stats &s = tracker.stats;

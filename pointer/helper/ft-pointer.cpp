@@ -279,6 +279,8 @@
 // on a change and at the helper's start). The relay also hears "vrdash 1|0" (the dashboard open, on a
 // change and every 5 s in a game): it parks hand tracking while Frametop is paused for a game and
 // unparks it while the dashboard is open (input/game_pause.py).
+// ft-handview (screens/handview.cpp) gets the same "hands" on @ft_handview: it doesn't draw a hand
+// holding a controller.
 //
 // Hand ray (hand interaction, with POINTER_HANDS and POINTER_HAND_RAY=1, the default;
 // frame-hands/notes/hand-interaction.md sections 2 and 5): a bare hand raised and pointing shows a
@@ -1995,6 +1997,7 @@ int main() {
                 if (msg != handsSent && debug) std::printf("%s\n", msg.c_str());
                 handsSent = msg, handsSentAt = tnow;
                 SendTo(out, "ft_screens", msg);
+                SendTo(out, "ft_handview", msg);   // draws the bare hands with Room View off
             }
 
             // The hand ray (see "Hand ray" at the top): each side's hand, when a new frame came.

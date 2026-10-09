@@ -43,6 +43,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handinput_test.cpp \
       screens/handcut.cpp screens/handinput.cpp -o build/tests/handinput-test
     build/tests/handinput-test && echo "screens/tests/handinput_test.cpp: ok"
+    g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handview_test.cpp \
+      screens/handmesh.cpp screens/handcut.cpp -o build/tests/handview-test
+    build/tests/handview-test >/dev/null && echo "screens/tests/handview_test.cpp: ok"
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build ft-screens in the dev container on the Frame (screens/build/ft-screens), and
-# ft-handtest, which tries the hand cutouts (handcut.cpp) on a test panel of its own.
+# ft-handtest, which tries the hand cutouts (handcut.cpp) on a test panel of its own, and
+# ft-handview, which draws the hands when Room View is off (handview.cpp).
 # compositor.c is the wlroots side (C; wlroots headers aren't C++), vr.cpp the OpenVR side,
 # remote.c the remote screens (their streams are ft-stream's, stream/build.sh).
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
@@ -24,8 +25,11 @@ $cxx -c -o build/handcut.o handcut.cpp
 $cxx -c -o build/handrender.o handrender.cpp
 $cxx -c -o build/handinput.o handinput.cpp
 $cxx -c -o build/handtest.o handtest.cpp
+$cxx -c -o build/handmesh.o handmesh.cpp
+$cxx -c -o build/handview.o handview.cpp
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
 g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/keyboard.o build/handcut.o build/handrender.o build/handinput.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o $vrlibs
-echo "built build/ft-screens build/ft-handtest"'
+g++ -o build/ft-handview build/handview.o build/handmesh.o build/handcut.o build/handrender.o $vrlibs
+echo "built build/ft-screens build/ft-handtest build/ft-handview"'

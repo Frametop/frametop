@@ -31,8 +31,10 @@
 // SteamVR keeps a hand role reserved for a disconnected device that still hints
 // that hand, so the real controller would never get it back otherwise.
 //
-// Settings (steamvr.vrsettings section "driver_ft_pointer"): role (int, 2 = right hand, 4 = treadmill,
-// 5 = stylus).
+// Settings (steamvr.vrsettings section "driver_ft_pointer", defaults in
+// ft_pointer/resources/settings/default.vrsettings): role (int, 2 = right hand, 4 = treadmill, the
+// default, 5 = stylus). A treadmill is hinted from Activate on, shown or not: SteamVR gives it
+// /user/treadmill only when the device is added. Only a hand role switches to OptOut while hidden.
 #include <openvr_driver.h>
 
 #include <atomic>

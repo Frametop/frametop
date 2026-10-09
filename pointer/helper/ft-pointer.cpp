@@ -229,10 +229,14 @@
 // ft-gazed says it's up ("calpanel 1", renewed every second; it lapses 3 s after the last),
 // the dot hides and a press answers the panel instead of clicking: a left click or gaze_left
 // sends "calaccept" to @ft_gazed (take this dot now), a right click or gaze_right "calquit".
-//   POINTER_ROLE (right, left, or stylus): the hand role our device takes while connected. A
-// Frame controller in your hand counts as used through its touch sensors and takes its hand's
-// role back, and then no click lands (see "no hand role" in the main loop): with a controller
-// held in the right hand, the pointer needs the left hand, or the stylus role.
+//   POINTER_ROLE (treadmill, the default, or right, left, stylus): the role our device takes while
+// connected. Treadmill is no hand, so the real controllers keep both hand roles and a controller
+// can be used beside the pointer (or a bare hand's ray). The driver must hint it from the start
+// (its default.vrsettings role 4, or driver_ft_pointer/role; a SteamVR restart to change), so this
+// setting can't make a device added as a hand into a treadmill. With a hand role, a Frame controller
+// in your hand counts as used through its touch sensors and takes its hand's role back, and then
+// no click lands (see "no hand role" in the main loop): with a controller held in the right hand,
+// the pointer needs the left hand, or the stylus role. docs/design.md, "Treadmill role".
 //
 // Hands (POINTER_HANDS, off by default; needs hand tracking, hands/): ft-hands publishes
 // pinches and grips (hands/include/fh_gestures.h), read here every frame.
@@ -747,7 +751,7 @@ int main() {
     // holds back its press in gaze mode; direct: it clicks at once), POINTER_ROLE.
     bool gazeMousePrecision = true;
     bool gazeMouseHeld = true;  // POINTER_GAZE_MOUSE_MOVE (see the top)
-    std::string role = "right";
+    std::string role = "treadmill";
     double pickupScale = 1;  // POINTER_CONTROLLER_PICKUP: scales the controller-moved limits
     std::vector<std::string> ignore;  // POINTER_IGNORE (see ParseIgnore)
     auto loadConfig = [&] {
@@ -787,7 +791,9 @@ int main() {
         const auto mm = conf.find("POINTER_GAZE_MOUSE_MOVE");
         gazeMouseHeld = mm == conf.end() || mm->second != "free";
         const auto ro = conf.find("POINTER_ROLE");
-        role = ro != conf.end() && (ro->second == "left" || ro->second == "stylus") ? ro->second : "right";
+        role = ro != conf.end() && (ro->second == "left" || ro->second == "right" || ro->second == "stylus")
+                   ? ro->second
+                   : "treadmill";
         pickupScale = std::clamp(ConfDouble(conf, "POINTER_CONTROLLER_PICKUP", 1), 0.5, 5.0);
         const auto ig = conf.find("POINTER_IGNORE");
         ignore = ParseIgnore(ig == conf.end() ? "" : ig->second);
@@ -992,6 +998,7 @@ int main() {
     Clock::time_point lastTyping{};  // the relay's last "typing": a key on a keyboard
     // Hand interaction (see "Handoff" at the top): the hands in the room, the arbiter, and what
     // it last told ft-screens.
+    int raySide = -1;  // the bare hand whose ray drives the pointer (see "Hand ray"), -1: none
     hin::HandsInRoom handsRoom;
     handoff::Handoff arbiter;
     bool framePaused = false;           // the relay's "paused 1|0": Frametop paused (for a VR game)
@@ -1679,9 +1686,12 @@ int main() {
             if (debug) std::fflush(stdout);
         }
 
-        // Didn't get the hand role (a held controller keeps it): release, back off.
+        // Didn't get the hand role (a held controller keeps it): release, back off. Not as a treadmill,
+        // which has no controller role at all (see POINTER_ROLE at the top): its hint says so.
         if (active && tnow - wokeAt > std::chrono::seconds(1) && ours != vr::k_unTrackedDeviceIndexInvalid &&
-            sys->GetControllerRoleForTrackedDeviceIndex(ours) == vr::TrackedControllerRole_Invalid) {
+            sys->GetControllerRoleForTrackedDeviceIndex(ours) == vr::TrackedControllerRole_Invalid &&
+            sys->GetInt32TrackedDeviceProperty(ours, vr::Prop_ControllerRoleHint_Int32) !=
+                vr::TrackedControllerRole_Treadmill) {
             active = false;
             claimPending = claimHeld = false;
             cursorDot.Show(false);
@@ -1694,8 +1704,10 @@ int main() {
         }
 
         // Last used wins: a real controller being moved releases the pointer (see the top),
-        // in gaze mode too.
-        if (active && hold.src == Src::None && tnow - lastMouse > std::chrono::milliseconds(500)) {
+        // in gaze mode too. Not while a bare hand's ray drives it: that ray goes only when its own
+        // side turns controller (see "Handoff" at the top), so a controller in the other hand
+        // doesn't take it.
+        if (active && hold.src == Src::None && raySide < 0 && tnow - lastMouse > std::chrono::milliseconds(500)) {
             for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
                 if (i == ours || !all[i].bPoseIsValid || all[i].eTrackingResult != vr::TrackingResult_Running_OK ||
                     sys->GetTrackedDeviceClass(i) != vr::TrackedDeviceClass_Controller) {
@@ -2065,12 +2077,24 @@ int main() {
                     seenBegins[k][s] = g.begins, seenEnds[k][s] = g.ends;
                     auto holding = [&] { return hold.src == Src::Hand && hold.side == s && hold.grip == (k == 1); };
                     if (holding() && ended) endHold(lost);  // the one held ended (another may have begun)
-                    if (began && allowed) {
+                    // Not on a side that has a controller in use, and not by a hand at a controller
+                    // (reaching for it or holding it: by position, whatever ft-hands calls its side).
+                    bool atController = arbiter.IsController(s);
+                    vr::HmdMatrix34_t gh;
+                    if (!atController && poses.At(g.begin_ns, gh)) {
+                        const Vec3 at = hin::ToRoom(gh, g.begin_point);
+                        atController = arbiter.NearController({at.x, at.y, at.z});
+                    }
+                    if (began && allowed && atController && debug)
+                        std::printf("hand %s %s ignored: at a controller\n", s ? "right" : "left", k ? "grip" : "pinch");
+                    if (began && allowed && !atController) {
                         beginHold(s, k == 1, g);
                         // begun and ended since the last read (a quick tap): its release too
                         if (!(g.flags & FH_PINCH_DOWN) && holding()) endHold(lost);
                     }
                 }
+            // A side that turns controller mid-gesture: the gesture ends, as lost.
+            if (hold.src == Src::Hand && arbiter.IsController(hold.side)) endHold(true);
             // The held gesture's hand moves the pointer: past the dead zone (a tap's jitter,
             // the pinch point shifting as the fingers close), then at the gain, from there.
             if (hold.src == Src::Hand) {

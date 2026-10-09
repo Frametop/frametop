@@ -115,9 +115,9 @@ A mouse drives SteamVR the way a controller's laser does, but shows up as a smal
 
 - The input relay, in pointer mode (`POINTER=1`), sends mouse motion, clicks, and scrolling to the helper. A deliberate movement or a click wakes the pointer, and 30 seconds without mouse input releases it.
 - The helper, `pointer/helper/ft-pointer`, runs in the `dev` container as `frametop-pointer.service` and starts with SteamVR. It keeps the cursor, tests it against every visible overlay, draws the dot, and sends the driver an exact pose.
-- The driver, `pointer/driver/` (`ft_pointer`), is loaded by SteamVR. It's an invisible virtual right-hand controller whose laser follows the cursor.
+- The driver, `pointer/driver/` (`ft_pointer`), is loaded by SteamVR. It's an invisible virtual controller whose laser follows the cursor. It takes the treadmill role, no hand, so the real controllers keep theirs and one can be used beside it (`POINTER_ROLE` and the driver's `role` setting; see docs/design.md, "Treadmill role").
 
-Whichever device you used last wins. Picking up a controller hands the laser back at once, and moving the mouse takes it again. When the headset comes off, the pointer lets go, so the displays can sleep, and it stays off until you're wearing the headset again.
+Whichever device you used last wins. Picking up a controller hands the laser back at once, and moving the mouse takes it again. With hand interaction (`POINTER_HANDS=1`), this goes per hand: a controller used recently wins its hand, and the other hand can stay bare. When the headset comes off, the pointer lets go, so the displays can sleep, and it stays off until you're wearing the headset again.
 
 To move a floating panel, left-drag its grab bar. The scroll wheel pushes and pulls it while you drag. Hold the right button while dragging and move the mouse to tilt the panel around the grab point; the right press isn't sent as a click. The tilt stays for the rest of the drag, and releasing the left button drops the panel as it is. A mapped Toggle dashboard button wakes the pointer if needed and holds the virtual system button for 0.12 s, because SteamVR ignores a press and release in the same instant. Open Steam menu / close dashboard (`steam_menu`) needs no pointer: `steam/ft-steam menu` asks Steam's UI, over its debugging port (`steam/steamui.py`), to show its dashboard overlay and focus the Steam frame's menu, or to hide the dashboard if it's up.
 
@@ -125,7 +125,8 @@ To move a floating panel, left-drag its grab bar. The scroll wheel pushes and pu
 pointer/driver/build.sh && pointer/driver/install.sh install   # then restart SteamVR
 pointer/helper/build.sh && pointer/helper/run.sh install
 pointer/helper/run.sh status | log | restart
-pointer/driver/install.sh probe     # devices, hand roles, who owns the dashboard pointer
+pointer/driver/install.sh probe     # devices, hand roles, activity, charging, who owns the dashboard pointer
+pointer/probe/build.sh              # probes: vrprobe, lasertest (who has the laser), ctlnoise (controller noise)
 ```
 
 The pointer settings are in `~/.config/frametop.conf`: `POINTER_SENSITIVITY`, `POINTER_IDLE`, `POINTER_WAKE_COUNTS`, `POINTER_CONTROLLER_PICKUP`, `POINTER_DISTANCE`, `POINTER_CURSOR_DEG`, `POINTER_ORIGIN_FRACTION`, `POINTER_ORIGIN_MARGIN`, `POINTER_SCENE_RADIUS`, `POINTER_EDGE_REACH`, `POINTER_LASER_WIDTH`, `POINTER_IGNORE`, the head follow settings `POINTER_FOLLOW`, `POINTER_LEASH_DEG`, `POINTER_LEASH_DELAY`, `POINTER_LEASH_RETURN`, and `POINTER_FOLLOW_REACH`, and the gaze mode settings `POINTER_GAZE`, `POINTER_GAZE_RETAKE`, `POINTER_GAZE_NUDGE_MAX`, `POINTER_GAZE_HOLD`, `POINTER_GAZE_DOT`, `POINTER_GAZE_SHOW`, `POINTER_GAZE_MOUSE`, `POINTER_GAZE_MOUSE_MOVE`, and the keyboard clicks' `POINTER_HEAD_DEADZONE` and `POINTER_KEY_TAP`, and the gaze service's `GAZE_TRACKER` (`auto`, the default: our own eye tracker when it's installed, else SteamVR's; or `own` or `steam`) and `GAZE_EYE` (the eye bias). The example config explains each. Frametop Input Settings changes them live; after editing the file by hand, restart the relay or the helper (the gaze service reads its two again when the file changes).

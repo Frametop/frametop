@@ -57,9 +57,11 @@
 // --hmd-poses FILE: a hand-recorder take's poses.jsonl: the arm model's elbow with gravity's up
 //             against the head's up.
 // --publish-dump FILE: what ft-hands would have published after each processed set, for
-//             Frametop's offline tests (screens/tests): a header (FHDUMP01, then the sizes of
+//             Frametop's offline tests (screens/tests): a header (FHDUMP02, then the sizes of
 //             fh_hands_v2_t and fh_gestures_t as two uint32), then per set the hands file's and
-//             the gestures file's bytes. publish_ns is the set's time plus the step's busy time.
+//             the gestures file's bytes and the set's dequeue time (int64, CLOCK_MONOTONIC: the
+//             clock of a hand-recorder take's poses.jsonl; capture_ns is the cameras' clock).
+//             publish_ns is the set's time plus the step's busy time.
 // --skeleton-dump FILE: with --labels, a line per hand matched to a label: time, id, stereo, then
 //             the measured, fitted (unfiltered) and labelled landmarks.
 // --pinch-fitted: also run a second pinch detector on the fitted tips, and report its count.
@@ -359,7 +361,7 @@ int main(int argc, char **argv) {
         pub.use(&pub_hands);
         pub_g.use(&pub_gestures, pinch, grip);
         const uint32_t sizes[2] = {uint32_t(sizeof pub_hands), uint32_t(sizeof pub_gestures)};
-        std::fwrite("FHDUMP01", 1, 8, pubf);
+        std::fwrite("FHDUMP02", 1, 8, pubf);
         std::fwrite(sizes, sizeof sizes, 1, pubf);
     }
     double grip_begin_ts[2] = {0, 0};
@@ -524,6 +526,10 @@ int main(int argc, char **argv) {
                 pub_hands.v1.publish_ns = pub_gestures.publish_ns = busy_until;
                 std::fwrite(&pub_hands, sizeof pub_hands, 1, pubf);
                 std::fwrite(&pub_gestures, sizeof pub_gestures, 1, pubf);
+                int64_t dq = INT64_MAX;
+                for (auto &c : cams)
+                    if (used.count(c.name) && std::string(c.name).rfind("color_", 0) != 0) dq = std::min(dq, int64_t(c.dqbuf_ns));
+                std::fwrite(&dq, sizeof dq, 1, pubf);
             }
             ++processed;
             last_out = out;

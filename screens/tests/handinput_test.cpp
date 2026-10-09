@@ -93,6 +93,7 @@ struct SynthHand {
     // or, for grabs: where the pinch point (index and middle knuckles) is
     bool byPinch = false;
     double pinch[3] = {0, 0, 0};
+    double pitchDeg = 0, yawDeg = 0;   // the hand turned about the tip: down (pitch < 0), to the right (yaw < 0)
 };
 
 struct Synth {
@@ -116,6 +117,12 @@ struct Synth {
             o.id = h.id, o.flags = (h.right ? FH_HAND_RIGHT : 0) | (h.stereo ? FH_HAND_STEREO : 0), o.confidence = 1;
             float pts[21][3];
             PointingHand(pts, h.bent);
+            const double a = h.pitchDeg * M_PI / 180, b = h.yawDeg * M_PI / 180;
+            for (auto &q : pts) {   // about x (pitch), then y (yaw); the tip is the origin here
+                const double y = q[1] * std::cos(a) - q[2] * std::sin(a), z = q[1] * std::sin(a) + q[2] * std::cos(a);
+                const double x = q[0] * std::cos(b) + z * std::sin(b), z2 = -q[0] * std::sin(b) + z * std::cos(b);
+                q[0] = float(x), q[1] = float(y), q[2] = float(z2);
+            }
             double off[3];
             if (h.byPinch)
                 for (int i = 0; i < 3; ++i) off[i] = h.pinch[i] - (pts[5][i] + pts[9][i]) / 2;
@@ -333,15 +340,70 @@ void TestPoke() {
 
 void TestSlowDrift() {
     Rig r;
-    // creeping in at 3 mm/s: no press at the surface, only once it's 1 cm deep
+    // creeping in at 3 mm/s, 2 cm past the surface: not coming at it, no press
     double d = 0.02;
-    int pressedAt = -1;
-    for (int k = 0; k < 400 && pressedAt < 0; ++k) {
+    for (int k = 0; k < 400; ++k) {
         d -= 0.0001;
         r.Frame({TipAt(0, 0, d)}, 1);
-        if (r.Count(Event::Press)) pressedAt = k;
     }
-    CHECK(pressedAt >= 0 && d <= -0.0099);
+    CHECK(r.Count(Event::Press) == 0 && r.in.stats.heldSlow > 0);
+}
+
+// A panel pitched back by `deg` (its front facing up toward the eyes), centred at c.
+Panel Tilted(double deg, double cy, double cz) {
+    Panel p = TestPanel();
+    const double a = deg * M_PI / 180;
+    p.pose = At(0, cy, cz);
+    p.pose.m[1][1] = float(std::cos(a)), p.pose.m[1][2] = float(std::sin(a));
+    p.pose.m[2][1] = float(-std::sin(a)), p.pose.m[2][2] = float(std::cos(a));
+    p.controls.clear();
+    return p;
+}
+
+// A poke along the panel's normal at u, v: from 6 cm out to 1.5 cm in, 1 cm a frame, and back.
+int Poke(Rig &r, double u, double v, double pitch, double yaw, double extraX = 0) {
+    const int before = r.Count(Event::Press);
+    for (int mm = 60; mm >= -15; mm -= 10) {
+        double at[3];
+        FromSurface(r.panels[0], u, v, mm / 1000.0, at);
+        SynthHand h;
+        for (int i = 0; i < 3; ++i) h.tip[i] = at[i];
+        h.tip[0] += extraX;
+        h.pitchDeg = pitch, h.yawDeg = yaw;
+        r.Frame({h});
+    }
+    for (int k = 0; k < 6; ++k) {
+        double at[3];
+        FromSurface(r.panels[0], u, v, 0.02 + 0.01 * k, at);
+        SynthHand h;
+        for (int i = 0; i < 3; ++i) h.tip[i] = at[i];
+        h.tip[0] += extraX;
+        h.pitchDeg = pitch, h.yawDeg = yaw;
+        r.Frame({h});
+    }
+    return r.Count(Event::Press) - before;
+}
+
+void TestApproachFromFront() {
+    // straight in: a press; the finger 60 degrees off the normal: none
+    {
+        Rig r;
+        CHECK(Poke(r, 0, 0, 0, 0) == 1);
+        CHECK(Poke(r, 0.1, 0, 0, 60) == 0 && r.in.stats.heldAskew > 0);
+        CHECK(Poke(r, -0.1, 0, 0, 40) == 1);   // within 50 degrees: still a poke
+    }
+    // a low panel (0.45 m under the eyes, pitched back 50 degrees to face them):
+    // reached for 0.45 m out, a poke; with the hand resting by the body (0.2 m out), none
+    {
+        Rig r;
+        r.panels = {Tilted(50, -0.45, -0.45)};
+        CHECK(Poke(r, 0, 0, -50, 0) == 1);
+    }
+    {
+        Rig r;
+        r.panels = {Tilted(50, -0.45, -0.22)};
+        CHECK(Poke(r, 0, 0, -50, 0) == 0 && r.in.stats.heldResting > 0);
+    }
 }
 
 void TestGuards() {
@@ -630,19 +692,89 @@ struct Record {
     std::vector<char> hands;
     fh_gestures_t g;
     int64_t capture, publish;
+    int64_t dq = 0;          // the set's dequeue time, CLOCK_MONOTONIC (FHDUMP02)
+    Mat head = Identity();   // the head then, from a take's poses.jsonl (else at the origin)
 };
+
+// Where the head was, from the dump's poses (identity without them): panels are placed
+// around it.
+Mat g_ref = Identity();
+bool g_poses = false;
+
+Mat Level(const Mat &h) {   // the head turned only about the vertical, at its place
+    const double fx = -h.m[0][2], fz = -h.m[2][2];   // where its -z points, across the floor
+    return RotY(std::atan2(-fx, -fz), h.m[0][3], h.m[1][3], h.m[2][3]);
+}
+
+Mat Mul(const Mat &a, const Mat &b) {
+    Mat r{};
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 4; ++j) {
+            double v = j == 3 ? a.m[i][3] : 0;
+            for (int k = 0; k < 3; ++k) v += a.m[i][k] * b.m[k][j];
+            r.m[i][j] = float(v);
+        }
+    return r;
+}
+
+// A take's poses.jsonl: CLOCK_MONOTONIC time, head -> room.
+std::vector<std::pair<int64_t, Mat>> LoadPoses(const std::string &path) {
+    std::vector<std::pair<int64_t, Mat>> out;
+    std::ifstream f(path);
+    std::string line;
+    while (std::getline(f, line)) {
+        long long t;
+        const size_t m = line.find("\"m\": [");
+        if (std::sscanf(line.c_str(), "{\"t\": %lld", &t) != 1 || m == std::string::npos || line.find("\"ok\": true") == std::string::npos)
+            continue;
+        Mat h{};
+        float v[12];
+        if (std::sscanf(line.c_str() + m + 6, "%f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f", &v[0], &v[1], &v[2], &v[3],
+                        &v[4], &v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11]) != 12)
+            continue;
+        for (int k = 0; k < 12; ++k) h.m[k / 4][k % 4] = v[k];
+        out.push_back({t, h});
+    }
+    return out;
+}
+
+// The touch take's targets (prompts.jsonl): a dot in the room, shown at `show`, held until `done`.
+struct Target { int64_t show = 0, done = 0; double room[3]; std::string id; };
+std::vector<Target> LoadTargets(const std::string &path) {
+    std::vector<Target> out;
+    std::ifstream f(path);
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.find("\"event\": \"target\"") == std::string::npos) continue;
+        long long t;
+        const size_t r = line.find("\"room\": [");
+        double x, y, z;
+        if (std::sscanf(line.c_str(), "{\"t\": %lld", &t) != 1 || r == std::string::npos ||
+            std::sscanf(line.c_str() + r + 9, "%lf, %lf, %lf", &x, &y, &z) != 3)
+            continue;
+        if (line.find("\"state\": \"show\"") != std::string::npos) out.push_back({t, 0, {x, y, z}, ""});
+        else if (line.find("\"state\": \"done\"") != std::string::npos && !out.empty()) out.back().done = t;
+    }
+    return out;
+}
 
 bool Load(const char *path, std::vector<Record> &out) {
     std::ifstream f(path, std::ios::binary);
     char magic[8];
     uint32_t sizes[2];
-    if (!f.read(magic, 8) || std::memcmp(magic, "FHDUMP01", 8) || !f.read(reinterpret_cast<char *>(sizes), 8) ||
-        sizes[0] < sizeof(fh_hands_t) || sizes[1] != sizeof(fh_gestures_t))
+    if (!f.read(magic, 8) || (std::memcmp(magic, "FHDUMP01", 8) && std::memcmp(magic, "FHDUMP02", 8)) ||
+        !f.read(reinterpret_cast<char *>(sizes), 8) ||
+        sizes[0] < sizeof(fh_hands_t) || sizes[1] < 64 + 4 * 64 || sizes[1] > 4096)
         return false;
+    // the gestures file as the dump's ft-hands wrote it: version 2 (grips) or later
+    std::vector<char> g(sizes[1]);
     while (true) {
         Record r;
         r.hands.resize(sizes[0]);
-        if (!f.read(r.hands.data(), sizes[0]) || !f.read(reinterpret_cast<char *>(&r.g), sizeof r.g)) break;
+        if (!f.read(r.hands.data(), sizes[0]) || !f.read(g.data(), sizes[1])) break;
+        std::memset(&r.g, 0, sizeof r.g);
+        std::memcpy(&r.g, g.data(), std::min(sizeof r.g, size_t(sizes[1])));
+        if (!std::memcmp(magic, "FHDUMP02", 8) && !f.read(reinterpret_cast<char *>(&r.dq), sizeof r.dq)) break;
         const auto *v1 = reinterpret_cast<const fh_hands_t *>(r.hands.data());
         r.capture = int64_t(v1->capture_ns), r.publish = int64_t(v1->publish_ns);
         out.push_back(std::move(r));
@@ -656,20 +788,35 @@ struct Run {
 };
 
 // Plays records [from, to) through hand input at 90 Hz ticks, against `panels`.
-Run Play(const std::vector<Record> &recs, size_t from, size_t to, const std::vector<Panel> &panels, int sides = 3) {
+Run Play(const std::vector<Record> &recs, size_t from, size_t to, const std::vector<Panel> &panels, int sides = 3,
+         const Params &given = Params{}) {
     handcut::Hands hands;
-    HandInput in;
+    Params params = given;
+    if (const char *v = std::getenv("HANDINPUT_REST_NEAR")) params.restNear = std::atof(v);   // trying other values
+    HandInput in(params);
     Run run;
     for (size_t k = from; k < to; ++k) {
         const Record &r = recs[k];
         const int64_t next = k + 1 < to ? recs[k + 1].publish : r.publish + 33'000'000;
         for (int64_t t = r.publish; t < next; t += 11'111'111) {
-            if (t == r.publish) hands.Feed(r.hands.data(), r.hands.size(), &r.g, Identity(), t);
-            else hands.Feed(nullptr, 0, nullptr, Identity(), t);
+            // the head pose at capture time goes in with the capture time (Hands looks it up by time)
+            if (t == r.publish) hands.Feed(nullptr, 0, nullptr, r.head, r.capture), hands.Feed(r.hands.data(), r.hands.size(), &r.g, r.head, t);
+            else hands.Feed(nullptr, 0, nullptr, r.head, t);
             Input i;
-            i.nowNs = t, i.hands = &hands, i.head = Identity(), i.haveHead = true, i.allowed[0] = sides & 1, i.allowed[1] = sides & 2;
+            i.nowNs = t, i.hands = &hands, i.head = r.head, i.haveHead = true, i.allowed[0] = sides & 1, i.allowed[1] = sides & 2;
             in.Update(i, panels);
             for (const Event &e : in.events()) {
+                if (e.type == Event::Press && std::getenv("HANDINPUT_VERBOSE")) {
+                    for (const handcut::Hand &h : hands.seen())
+                        if (h.right == (e.side == 1)) {
+                            double palm[3];
+                            h.Palm(palm);
+                            std::printf("    press %s at %.1f s: palm %.2f m under the eyes, %.2f out; tip d %.3f\n",
+                                        e.side ? "R" : "L", (r.capture - recs.front().capture) / 1e9, r.head.m[1][3] - palm[1],
+                                        std::hypot(palm[0] - r.head.m[0][3], palm[2] - r.head.m[2][3]),
+                                        Locate(panels[0], h.p[8]).d);
+                        }
+                }
                 run.presses += e.type == Event::Press, run.controls += e.type == Event::Control;
                 run.grabs += e.type == Event::GrabStart;
             }
@@ -682,9 +829,11 @@ Run Play(const std::vector<Record> &recs, size_t from, size_t to, const std::vec
 
 // A panel facing the head (at the origin) whose surface is `offset` beyond the point p, along
 // the line from the head.
-Panel Facing(const double p[3], double offset) {
+Panel Facing(const double pt[3], double offset, const double head[3] = nullptr) {
+    const double o[3] = {head ? head[0] : 0, head ? head[1] : 0, head ? head[2] : 0};
+    const double p[3] = {pt[0] - o[0], pt[1] - o[1], pt[2] - o[2]};
     const double n = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
-    const double c[3] = {p[0] / n * (n + offset), p[1] / n * (n + offset), p[2] / n * (n + offset)};
+    const double c[3] = {o[0] + p[0] / n * (n + offset), o[1] + p[1] / n * (n + offset), o[2] + p[2] / n * (n + offset)};
     double z[3] = {-p[0] / n, -p[1] / n, -p[2] / n};
     double x[3] = {z[2], 0, -z[0]};
     const double xl = std::hypot(x[0], x[2]);
@@ -700,6 +849,24 @@ Panel Facing(const double p[3], double offset) {
 int Replay(const char *path) {
     std::vector<Record> recs;
     if (!Load(path, recs)) return std::printf("%s: not a publish dump\n", path), 1;
+    // a hand-recorder take's head poses and targets, next to the dump (NAME.poses.jsonl, NAME.prompts.jsonl)
+    std::string base = path;
+    if (base.size() > 5 && base.substr(base.size() - 5) == ".dump") base.resize(base.size() - 5);
+    const auto poses = LoadPoses(base + ".poses.jsonl");
+    g_poses = !poses.empty() && recs.front().dq;
+    g_ref = Identity();
+    if (g_poses) {
+        size_t j = 0;
+        Mat last = poses.front().second;
+        for (Record &r : recs) {   // the pose nearest the capture (about 20 ms before the dequeue)
+            const int64_t at = r.dq - 20'000'000;
+            while (j + 1 < poses.size() && std::llabs(poses[j + 1].first - at) <= std::llabs(poses[j].first - at)) ++j;
+            if (std::llabs(poses[j].first - at) < 60'000'000) last = poses[j].second;
+            r.head = last;
+        }
+        g_ref = Level(recs.front().head);
+        std::printf("(head poses from %s.poses.jsonl; panels placed around the head at the start)\n", base.c_str());
+    }
     const double secs = (recs.back().capture - recs.front().capture) / 1e9;
     std::printf("== %s: %zu frames, %.0f s\n", path, recs.size(), secs);
 
@@ -709,19 +876,19 @@ int Replay(const char *path) {
     // moves it toward the panel, so every press is a false one.
     {
         handcut::Hands hands;
-        struct Win { size_t from, to; int side; double tip[3]; double spread; };
+        struct Win { size_t from, to; int side; double tip[3]; double spread; double dir[3]; bool resting; };
         std::vector<Win> wins;
         for (int s = 0; s < 2; ++s) {
             size_t start = 0;
             bool open = false;
             double anchor[3] = {};
-            std::vector<std::array<double, 3>> tips;
-            int pointing = 0;
+            std::vector<std::array<double, 3>> tips, dirs;
+            int pointing = 0, resting = 0;
             auto close = [&](size_t k) {
                 open = false;
                 if (tips.size() < 15 || recs[k - 1].capture - recs[start].capture < 1'000'000'000 || pointing < int(tips.size() * 0.8))
                     return;
-                Win w{start, k, s, {0, 0, 0}, 0};
+                Win w{start, k, s, {0, 0, 0}, 0, {0, 0, 0}, resting * 2 > int(tips.size())};
                 // the median tip (per axis), and how far the tip strays along the head's line
                 for (int i = 0; i < 3; ++i) {
                     std::vector<double> v;
@@ -736,11 +903,17 @@ int Replay(const char *path) {
                     lo = std::min(lo, along), hi = std::max(hi, along);
                 }
                 w.spread = hi - lo;
+                for (auto &d : dirs)
+                    for (int i = 0; i < 3; ++i) w.dir[i] += d[i];
+                const double dl = std::sqrt(w.dir[0] * w.dir[0] + w.dir[1] * w.dir[1] + w.dir[2] * w.dir[2]);
+                for (double &x : w.dir) x /= dl;
                 wins.push_back(w);
             };
             handcut::Hands hs;
             for (size_t k = 0; k < recs.size(); ++k) {
-                hs.Feed(recs[k].hands.data(), recs[k].hands.size(), &recs[k].g, Identity(), recs[k].publish);
+                hs.Feed(nullptr, 0, nullptr, recs[k].head, recs[k].capture);
+                hs.Feed(recs[k].hands.data(), recs[k].hands.size(), &recs[k].g, recs[k].head, recs[k].publish);
+                const double hx = recs[k].head.m[0][3], hy = recs[k].head.m[1][3], hz = recs[k].head.m[2][3];
                 const handcut::Hand *h = nullptr;
                 for (const handcut::Hand &x : hs.seen())
                     if (x.right == (s == 1)) h = &x;
@@ -751,10 +924,16 @@ int Replay(const char *path) {
                 if (!ok && open) close(k);
                 if (!h) continue;
                 if (!open) {
-                    open = true, start = k, tips.clear(), pointing = 0;
+                    open = true, start = k, tips.clear(), dirs.clear(), pointing = 0, resting = 0;
                     std::copy(palm, palm + 3, anchor);
                 }
                 tips.push_back({h->p[8][0], h->p[8][1], h->p[8][2]});
+                {
+                    const double d[3] = {double(h->p[8][0]) - h->p[7][0], double(h->p[8][1]) - h->p[7][1], double(h->p[8][2]) - h->p[7][2]};
+                    const double n = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) + 1e-9;
+                    dirs.push_back({d[0] / n, d[1] / n, d[2] / n});
+                    resting += hy - palm[1] > 0.35 && std::hypot(palm[0] - hx, palm[2] - hz) < 0.30;   // as handinput's
+                }
                 const double ext = std::hypot(std::hypot(h->p[8][0] - h->p[0][0], h->p[8][1] - h->p[0][1]), h->p[8][2] - h->p[0][2]) /
                                    std::hypot(std::hypot(h->p[5][0] - h->p[0][0], h->p[5][1] - h->p[0][1]), h->p[5][2] - h->p[0][2]);
                 pointing += ext >= 1.6 && h->stereo;
@@ -771,27 +950,149 @@ int Replay(const char *path) {
         for (double off : {0.005, 0.01, 0.02, 0.03}) {
             int presses = 0, held = 0, nearest = 0;
             for (const Win &w : wins) {
-                const Run r = Play(recs, w.from, w.to, {Facing(w.tip, off)}, 1 << w.side);
+                const double hp[3] = {recs[w.from].head.m[0][3], recs[w.from].head.m[1][3], recs[w.from].head.m[2][3]};
+                const Run r = Play(recs, w.from, w.to, {Facing(w.tip, off, hp)}, 1 << w.side);
                 presses += r.presses;
                 held += r.stats.heldSlow, nearest += r.stats.heldNotNearest;
             }
             std::printf("  panel %.1f cm beyond the fingertip: %d presses (%.2f per minute); frames at d <= 0 held back: %d slow, %d not nearest\n",
                         off * 100, presses, total > 0 ? presses / total * 60 : 0.0, held, nearest);
         }
+        // Deliberate pokes, made from these stretches: a panel across the finger 2 cm beyond its
+        // tip, and the hand moved 4 cm into it along the finger (0.2 s), held 0.15 s, pulled back
+        // (0.25 s), half a second in; the hand's own tracking noise stays. A poke should press.
+        int found = 0, tried = 0, restingTried = 0, restingFound = 0;
+        HandInput::Stats why;
+        for (const Win &w : wins) {
+            std::vector<Record> mod(recs.begin() + long(w.from), recs.begin() + long(w.to));
+            const int64_t t0 = mod.front().capture + 500'000'000;
+            if (mod.back().capture < t0 + 600'000'000) continue;
+            for (Record &r : mod) {
+                const double t = (r.capture - t0) / 1e9;
+                const double a = t < 0 ? 0 : t < 0.2 ? t / 0.2 : t < 0.35 ? 1 : t < 0.6 ? 1 - (t - 0.35) / 0.25 : 0;
+                double room[3], off[3];   // the file's points are in the head frame
+                for (int i = 0; i < 3; ++i) room[i] = w.dir[i] * 0.04 * a;
+                for (int i = 0; i < 3; ++i) off[i] = r.head.m[0][i] * room[0] + r.head.m[1][i] * room[1] + r.head.m[2][i] * room[2];
+                auto *v1 = reinterpret_cast<fh_hands_t *>(r.hands.data());
+                auto *fits = r.hands.size() >= sizeof(fh_hands_v2_t) ? reinterpret_cast<fh_hands_v2_t *>(r.hands.data())->fits : nullptr;
+                uint32_t cap = 0;
+                for (uint32_t k = 0; k < v1->nhands && k < FH_HANDS_MAX_HANDS; ++k) {
+                    fh_hand_t &h = v1->hands[k];
+                    const bool mine = bool(h.flags & FH_HAND_RIGHT) == (w.side == 1);
+                    if (mine) {
+                        for (auto &q : h.pts)
+                            for (int i = 0; i < 3; ++i) q[i] += float(off[i]);
+                        for (uint32_t c = cap; c < cap + h.ncapsules && c < FH_HANDS_MAX_CAPSULES; ++c)
+                            for (int i = 0; i < 3; ++i) v1->capsules[c].a[i] += float(off[i]), v1->capsules[c].b[i] += float(off[i]);
+                        if (fits) {
+                            for (auto &j : fits[k].joints)
+                                for (int i = 0; i < 3; ++i) j.p[i] += float(off[i]);
+                            for (int i = 0; i < 3; ++i)
+                                fits[k].elbow[i] += float(off[i]), fits[k].pinch_point[i] += float(off[i]), fits[k].contact[i] += float(off[i]);
+                        }
+                    }
+                    cap += h.ncapsules;
+                }
+            }
+            double c[3], z[3];
+            for (int i = 0; i < 3; ++i) c[i] = w.tip[i] + w.dir[i] * 0.02, z[i] = -w.dir[i];
+            Panel P = TestPanel();
+            double x[3] = {z[2], 0, -z[0]};
+            const double xl = std::hypot(x[0], x[2]);
+            if (xl < 1e-3) continue;
+            x[0] /= xl, x[2] /= xl;
+            const double y[3] = {z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
+            for (int i = 0; i < 3; ++i) P.pose.m[i][0] = float(x[i]), P.pose.m[i][1] = float(y[i]), P.pose.m[i][2] = float(z[i]), P.pose.m[i][3] = float(c[i]);
+            P.controls.clear();
+            const Run r = Play(mod, 0, mod.size(), {P}, 1 << w.side);
+            ++tried, found += r.presses > 0;
+            restingTried += w.resting, restingFound += w.resting && r.presses > 0;
+            if (!r.presses) {
+                const auto &q = r.stats;
+                why.heldNotStereo += q.heldNotStereo, why.heldNotExtended += q.heldNotExtended, why.heldNotNearest += q.heldNotNearest;
+                why.heldResting += q.heldResting, why.heldAskew += q.heldAskew, why.heldSlow += q.heldSlow, why.heldBusy += q.heldBusy;
+            }
+        }
+        std::printf("  made-up pokes along the finger: %d of %d pressed (%d of %d by a hand resting low by the body); the "
+                    "missed ones' frames held back: %d one view, %d bent, %d not nearest, %d resting, %d askew, %d slow, %d busy\n",
+                    found, tried, restingFound, restingTried, why.heldNotStereo, why.heldNotExtended, why.heldNotNearest,
+                    why.heldResting, why.heldAskew, why.heldSlow, why.heldBusy);
     }
     // 2. Fixed panels where ft-handtest put its own (0.15 m below the eyes) at a range of
     // distances: the hands cross some of them. Presses, the near claim, grabs.
+    // Then low ones, where a keyboard or a lap is: 0.45 m under the eyes, pitched back 50
+    // degrees to face them (typing under a low panel should poke nothing).
+    for (int low = 0; low < 2; ++low)
     for (double z : {0.30, 0.35, 0.40, 0.45, 0.50, 0.60}) {
-        Panel P = TestPanel(-z);
-        P.pose.m[1][3] = -0.15f;
+        Panel P = low ? Tilted(50, -0.45, -z) : TestPanel(-z);
+        if (!low) P.pose.m[1][3] = -0.15f;
         P.width = 1.2, P.height = 0.675;
         P.controls.clear();
+        P.pose = Mul(g_ref, P.pose);
         const Run r = Play(recs, 0, recs.size(), {P});
         const auto &s = r.stats;
-        std::printf("panel %.2f m ahead: near %4.1f%% of frames, %3d presses (%.1f/min), %d grabs; held back: %d one view, "
-                    "%d bent, %d not nearest, %d pinching, %d busy, %d slow\n",
-                    z, 100.0 * r.nearFrames / std::max(1, r.frames), r.presses, r.presses / secs * 60, r.grabs,
-                    s.heldNotStereo, s.heldNotExtended, s.heldNotNearest, s.heldPinching, s.heldBusy, s.heldSlow);
+        std::printf("%s panel %.2f m ahead: near %4.1f%% of frames, %3d presses (%.1f/min), %d grabs; held back: %d one view, "
+                    "%d bent, %d not nearest, %d pinching, %d busy, %d resting, %d askew, %d slow\n",
+                    low ? "low " : "eye ", z, 100.0 * r.nearFrames / std::max(1, r.frames), r.presses, r.presses / secs * 60, r.grabs,
+                    s.heldNotStereo, s.heldNotExtended, s.heldNotNearest, s.heldPinching, s.heldBusy, s.heldResting,
+                    s.heldAskew, s.heldSlow);
+    }
+    // 2b. The hand recorder's touch-the-dot take: deliberate touches of a dot in the room, with
+    // nothing to push against (the tip stops at the dot, give or take the tracking error). A
+    // panel facing the head through each dot (30 cm square), or 3 cm nearer: does each touch press?
+    // At the default finger angle (50 deg) and at 65.
+    {
+        const auto targets = LoadTargets(base + ".prompts.jsonl");
+        for (double ahead : {0.0, 0.03})
+            for (double angle : {50.0, 65.0}) {
+                Params k;
+                k.fingerAngle = angle;
+                int hit = 0, tried = 0;
+                HandInput::Stats why;
+                for (const Target &tg : targets) {
+                    if (!g_poses || !tg.done) continue;
+                    size_t from = recs.size(), to = 0;
+                    for (size_t j = 0; j < recs.size(); ++j)
+                        if (recs[j].dq >= tg.show - 500'000'000 && recs[j].dq <= tg.done + 300'000'000) from = std::min(from, j), to = j + 1;
+                    if (from >= to) continue;
+                    const Mat &h = recs[from].head;
+                    const double hp[3] = {h.m[0][3], h.m[1][3], h.m[2][3]};
+                    Panel P = Facing(tg.room, -ahead, hp);
+                    P.width = P.height = 0.3;
+                    P.pxW = P.pxH = 600;
+                    const Run r = Play(recs, from, to, {P}, 3, k);
+                    ++tried, hit += r.presses > 0;
+                    const auto &q = r.stats;
+                    why.heldNotStereo += q.heldNotStereo, why.heldNotExtended += q.heldNotExtended, why.heldNotNearest += q.heldNotNearest;
+                    why.heldResting += q.heldResting, why.heldAskew += q.heldAskew, why.heldSlow += q.heldSlow, why.heldBusy += q.heldBusy;
+                    if (ahead > 0 || angle > 50) continue;
+                    // how close the nearest index tip came, and at what angle to the normal
+                    handcut::Hands hs;
+                    double best = 1e9, ang = 0, u = 0, v = 0;
+                    for (size_t j = from; j < to; ++j) {
+                        hs.Feed(nullptr, 0, nullptr, recs[j].head, recs[j].capture);
+                        hs.Feed(recs[j].hands.data(), recs[j].hands.size(), &recs[j].g, recs[j].head, recs[j].publish);
+                        for (const handcut::Hand &x : hs.seen()) {
+                            const Hit t = Locate(P, x.p[8]);
+                            if (std::hypot(t.u, t.v) < 0.1 && t.d < best) {
+                                best = t.d, u = t.u, v = t.v;
+
+                                double d[3], l[3];
+                                for (int i = 0; i < 3; ++i) d[i] = double(x.p[8][i]) - x.p[7][i];
+                                for (int i = 0; i < 3; ++i) l[i] = P.pose.m[0][i] * d[0] + P.pose.m[1][i] * d[1] + P.pose.m[2][i] * d[2];
+                                ang = std::acos(std::clamp(-l[2] / std::sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]), -1.0, 1.0)) * 180 / M_PI;
+                            }
+                        }
+                    }
+                    std::printf("  touch %d: the index tip came to %+.1f cm of the dot's plane (%.1f, %.1f cm off the dot), its last "
+                                "bone %.0f deg off the normal\n", tried, best * 100, u * 100, v * 100, ang);
+                }
+                if (tried)
+                    std::printf("touch the dot, panel %.0f cm nearer than the dot, finger within %.0f deg: %d of %d pressed; frames "
+                                "held back: %d one view, %d bent, %d not nearest, %d resting, %d askew, %d slow, %d busy\n",
+                                ahead * 100, angle, hit, tried, why.heldNotStereo, why.heldNotExtended, why.heldNotNearest,
+                                why.heldResting, why.heldAskew, why.heldSlow, why.heldBusy);
+            }
     }
     // 3. The matte: every frame's hands against a panel 0.6 m ahead, CPU cost of building and
     // projecting it, mesh against capsules.
@@ -844,6 +1145,7 @@ int main(int argc, char **argv) {
     TestHover();
     TestPoke();
     TestSlowDrift();
+    TestApproachFromFront();
     TestGuards();
     TestRelease();
     TestDeep();

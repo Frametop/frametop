@@ -55,6 +55,9 @@ HANDS_MATTE_MOTION=25      # ... plus how far the hand moves in this many ms
 HANDS_MATTE_MOTION_MAX=1.5 # ... up to this many degrees more
 HANDS_MATTE_LEAD=36        # hand cutouts: ms ahead the hands are moved along their velocity (about when a frame reaches the displays)
 #HANDS_MATTE_SHIFT=        # hand cutouts: a correction by distance, "metres:yaw,pitch ..." in degrees (right, up); off when empty
+HANDS_POKE_ANGLE=50        # Frametop panels: a poke counts with the finger within this many degrees of the panel's normal (coming at its face)
+HANDS_POKE_REST_BELOW=0.30 # ... and not from a hand resting low by the body: its palm this far (m) under the eyes
+HANDS_POKE_REST_NEAR=0.32  # ... and this close (m) to the head across the floor (typing under a low panel)
 HANDS_NEAR=1               # Frametop panels: poke to click, pinch the bar, edges or corners to move or resize (1 = when the pointer helper says a hand is bare | 0 = off | force = always, for testing)
 POINTER_HANDS=0            # 1 = pinches click (on the release; hold and move to nudge the pointer first) and grips press and drag, with hand tracking
 POINTER_PINCH_GAIN=0.5     # hands: the pointer moves this times the pinching hand's angle (precision)

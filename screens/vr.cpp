@@ -2251,8 +2251,22 @@ bool ft_vr_init(void) {
     g_hands.SetShift(g_matte.shift);
     const std::string lead = handcut::Setting("HANDS_MATTE_LEAD", "");
     if (!lead.empty()) g_hands.SetPrediction(true, std::atof(lead.c_str()));
+    // pokes come at a panel's face (handinput.h): the finger's angle to it, and a hand resting low
+    // by the body (typing) doesn't poke
+    auto num = [](const char *name, double &v, double lo, double hi) {
+        const std::string t = handcut::Setting(name, "");
+        char *end;
+        const double x = t.empty() ? 0 : std::strtod(t.c_str(), &end);
+        if (!t.empty() && end != t.c_str() && !*end && x >= lo && x <= hi) v = x;
+    };
+    handinput::Params &k = g_handInput.params();
+    num("HANDS_POKE_ANGLE", k.fingerAngle, 10, 90);
+    num("HANDS_POKE_REST_BELOW", k.restBelow, 0, 2);
+    num("HANDS_POKE_REST_NEAR", k.restNear, 0, 2);
     const std::string near = handcut::Setting("HANDS_NEAR", "1");
     g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
+    std::printf("hands: pokes within %.0f deg of a panel's normal, not from a hand %.2f m under the eyes and within %.2f m\n",
+                k.fingerAngle, k.restBelow, k.restNear);
     std::printf("hands: matte %s, margin %.2f deg + %.0f ms of motion (at most %.2f more), lead %.0f ms, shift %s; near input %s%s%s\n",
                 g_matte.mesh ? "mesh" : "capsules", g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
                 g_hands.leadMs(), g_matte.shift.empty() ? "off" : "on",
@@ -3036,12 +3050,13 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         const auto &st = g_handInput.stats;
         std::snprintf(reply, size,
                       "ok %s, helper %s (left %s, right %s, %s); %s; %d frames, %d near, %d presses, %d controls, %d grabs, "
-                      "%d stretches; held back: %d one view, %d bent, %d not nearest, %d pinching, %d busy, %d slow",
+                      "%d stretches; held back: %d one view, %d bent, %d not nearest, %d pinching, %d busy, %d resting, %d askew, %d slow",
                       g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
                       NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
                       g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
                       g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.controls, st.grabs, st.stretches,
-                      st.heldNotStereo, st.heldNotExtended, st.heldNotNearest, st.heldPinching, st.heldBusy, st.heldSlow);
+                      st.heldNotStereo, st.heldNotExtended, st.heldNotNearest, st.heldPinching, st.heldBusy, st.heldResting,
+                      st.heldAskew, st.heldSlow);
     } else if (std::sscanf(cmd, "cutouts %15s", word) == 1) {
         char arg[16] = "";
         double ms = 0, a = 0, b = 0;

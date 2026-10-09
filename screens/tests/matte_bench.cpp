@@ -73,10 +73,12 @@ int main(int argc, char **argv) {
         return std::fprintf(stderr, "%s: not a publish dump\n", argv[1]), 1;
     std::vector<std::vector<char>> hands;
     std::vector<fh_gestures_t> gestures;
+    std::vector<char> gb(sizes[1]);
     while (int(hands.size()) < frames) {
         std::vector<char> h(sizes[0]);
-        fh_gestures_t g;
-        if (!f.read(h.data(), sizes[0]) || !f.read(reinterpret_cast<char *>(&g), sizeof g)) break;
+        fh_gestures_t g{};
+        if (!f.read(h.data(), sizes[0]) || !f.read(gb.data(), sizes[1])) break;
+        std::memcpy(&g, gb.data(), std::min(sizeof g, size_t(sizes[1])));
         hands.push_back(std::move(h)), gestures.push_back(g);
     }
     handcut::Renderer r;

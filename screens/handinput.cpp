@@ -25,8 +25,37 @@ double Dist3(const float a[3], const float b[3]) {
     return std::sqrt(Dot(d, d));
 }
 
-// The index finger is straight: its tip much farther from the wrist than its knuckle.
-double Extension(const Hand &h) { return Dist3(h.p[8], h.p[0]) / std::max(1e-6, Dist3(h.p[5], h.p[0])); }
+// A finger is straight: its tip much farther from the wrist than its knuckle (`mcp`: 5 index,
+// 9 middle, 13 ring, 17 little).
+double FingerExtension(const Hand &h, int mcp) {
+    return Dist3(h.p[mcp + 3], h.p[0]) / std::max(1e-6, Dist3(h.p[mcp], h.p[0]));
+}
+double Extension(const Hand &h) { return FingerExtension(h, 5); }
+
+// The index's last bone (DIP to tip) points into the panel within maxDeg of its normal there.
+bool Along(const Panel &p, const Hit &at, const Hand &h, double maxDeg) {
+    const double d[3] = {double(h.p[8][0]) - h.p[7][0], double(h.p[8][1]) - h.p[7][1], double(h.p[8][2]) - h.p[7][2]};
+    double l[3];   // in the panel's frame
+    for (int i = 0; i < 3; ++i) l[i] = p.pose.m[0][i] * d[0] + p.pose.m[1][i] * d[1] + p.pose.m[2][i] * d[2];
+    // the surface's normal (out of its front): +z, or on a cylinder the way OnSurface turns it
+    double n[3] = {0, 0, 1};
+    if (p.curve > 0) n[0] = -std::sin(at.u / p.curve), n[2] = std::cos(at.u / p.curve);
+    const double len = std::sqrt(Dot(l, l));
+    return len > 1e-6 && -Dot(l, n) / len >= std::cos(maxDeg * M_PI / 180);
+}
+
+// A hand resting low by the body (typing, in the lap): its palm well under the eyes and close to
+// the head across the floor (the standing universe's y is up). `was`: it rested last frame, and
+// stays resting until it's restLeave higher or further out.
+bool Resting(const Hand &h, const Input &in, const Params &k, bool was) {
+    if (!in.haveHead) return false;
+    double palm[3];
+    h.Palm(palm);
+    const double below = in.head.m[1][3] - palm[1];
+    const double across = std::hypot(palm[0] - in.head.m[0][3], palm[2] - in.head.m[2][3]);
+    const double slack = was ? k.restLeave : 0;
+    return below > k.restBelow - slack && across < k.restNear + slack;
+}
 
 // How far outside [lo, hi] x is (0 inside).
 double Outside(double x, double lo, double hi) { return x < lo ? lo - x : x > hi ? x - hi : 0; }
@@ -361,11 +390,13 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     }
     const Hit t = Locate(*P, h->p[8]);
     sd.recent.push_back({h->captureNs, t.d});
-    if (sd.recent.size() > 3) sd.recent.erase(sd.recent.begin());
+    while (sd.recent.size() > 2 && h->captureNs - sd.recent.front().t > 250'000'000) sd.recent.erase(sd.recent.begin());
     const bool extended = Extension(*h) >= p_.extended;
     double others = 1e9;
     for (int j : {12, 16, 20}) others = std::min(others, Locate(*P, h->p[j]).d);
-    const bool nearest = t.d + p_.nearest <= others;
+    double straightest = 0;   // of the other fingers
+    for (int f : {9, 13, 17}) straightest = std::max(straightest, FingerExtension(*h, f));
+    const bool nearest = t.d + p_.nearest <= others || Extension(*h) - straightest >= p_.pointing;
     double x = 0, y = 0;
     const bool over = ToBuffer(*P, t.u, t.v, &x, &y);
     const Control ctl = over ? Control::None : ControlAt(*P, t.u, t.v, 0.01);
@@ -396,20 +427,30 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         return;
     }
     // hovering
+    const bool resting = sd.resting = Resting(*h, in, p_, sd.resting);
     if (sd.spent && t.d >= 0) sd.spent = false;
     sd.below = t.d <= 0 ? sd.below + 1 : 0;
-    if (over && extended && t.d <= p_.cursor && t.d > p_.nearBack && !in.pointerBusy && !otherPressing &&
+    // coming in: when it crossed the surface, it came toward it at approach or faster from some
+    // point in the last approachMs (or from the frame before, at a low rate)
+    if (sd.below == 1) {
+        sd.fastIn = false;
+        const Side::Sample &now = sd.recent.back();
+        for (size_t i = 0; i + 1 < sd.recent.size(); ++i) {
+            const Side::Sample &q = sd.recent[i];
+            const double dt = (now.t - q.t) / 1e9;
+            if ((dt * 1e3 <= p_.approachMs + 20 || i + 2 == sd.recent.size()) && dt > 1e-3 &&
+                (q.d - now.d) / dt >= p_.approach)
+                sd.fastIn = true;
+        }
+    }
+    if (over && extended && !resting && t.d <= p_.cursor && t.d > p_.nearBack && !in.pointerBusy && !otherPressing &&
         (std::fabs(x - sd.hoverX) >= 0.5 || std::fabs(y - sd.hoverY) >= 0.5)) {
         sd.hoverX = x, sd.hoverY = y;
         Emit(Event::Motion, s, P->index, x, y);
     }
     const bool button = ctl == Control::Curve || ctl == Control::Reset || ctl == Control::Dock || ctl == Control::Close;
     if (sd.below < p_.pressFrames || !(over || button)) return;
-    bool fast = false;
-    if (sd.recent.size() >= 3) {
-        const double dt = (sd.recent.back().t - sd.recent.front().t) / 1e9;
-        fast = dt > 1e-3 && (sd.recent.front().d - sd.recent.back().d) / dt >= p_.approach;
-    }
+    const bool fast = sd.fastIn;
     const bool rePress = sd.releasedAt >= 0 && in.nowNs - sd.releasedAt < int64_t(p_.rePressMs * 1e6);
     const handcut::Gesture &pinch = in.hands->pinch(s), &grip = in.hands->grip(s);
     if (!h->stereo) return (void)++stats.heldNotStereo;
@@ -417,7 +458,9 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     if (!nearest) return (void)++stats.heldNotNearest;
     if (pinch.down || grip.down) return (void)++stats.heldPinching;
     if (in.pointerBusy || otherPressing || rePress || sd.spent) return (void)++stats.heldBusy;
-    if (!fast && t.d > p_.deepPress) return (void)++stats.heldSlow;
+    if (resting) return (void)++stats.heldResting;
+    if (!Along(*P, t, *h, p_.fingerAngle)) return (void)++stats.heldAskew;
+    if (!fast) return (void)++stats.heldSlow;
     // pressed
     sd.state = State::Press, sd.lockU = t.u, sd.lockV = t.v, sd.deepest = t.d, sd.dragging = false;
     if (over) {

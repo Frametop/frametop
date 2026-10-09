@@ -63,10 +63,26 @@ struct Params {
     double cursor = 0.05;       // the KWin pointer follows the fingertip this close (3.5)
     // the poke (3.5)
     double extended = 1.6;      // index tip-to-wrist over knuckle-to-wrist: the finger is straight
-    double nearest = 0.005;     // the index is this much nearer the surface than the other fingertips
+    double nearest = 0.005;     // the index is this much nearer the surface than the other fingertips,
+    double pointing = 0.2;      // ...or the hand points: the index straighter than each other finger by
+                                // this (as `extended`). A pointing hand coming at a panel from below at
+                                // an angle has its loosely curled fingertips 1-3 cm nearer the surface
+                                // than the index tip (the hand recorder's touch take: index 1.9, the
+                                // others 1.3-1.65)
     int pressFrames = 2;        // processed frames in a row at d <= 0
-    double approach = 0.05;     // m/s toward the surface over the last 3 frames
-    double deepPress = -0.01;   // ...or this deep, however slow
+    // ...coming at the panel's face (user, 2026-10-08: "approach from front"): moving into it at
+    // least this fast over the last approachMs, the finger (its last bone) within fingerAngle of
+    // the panel's normal, and not a hand resting low by the body (its palm more than restBelow
+    // under the eyes and within restNear of the head, across the floor): typing under a low
+    // panel doesn't poke it, a hand reaching out to a low panel does
+    double approach = 0.04;     // m/s
+    double approachMs = 100;
+    double fingerAngle = 50;    // degrees
+    // Typing in the hand recorder's desk take (head poses known): palms 0.34-0.40 m under the eyes,
+    // 0.23-0.28 m out; a hand on the mouse 0.40 m out. So a little under the decision's "e.g. 0.35,
+    // 0.3", with room to leave: resting from restBelow and restNear, until restLeave closer to
+    // the eyes' height or further out.
+    double restBelow = 0.30, restNear = 0.32, restLeave = 0.05;
     double release = 0.015;     // up at d >= this
     double pullBack = 0.01;     // ...or pulled back this far from the deepest point
     double slide = 0.015;       // the click stays where it was pressed until the tip slides this far
@@ -182,7 +198,8 @@ public:
         int presses = 0, releases = 0, lostReleases = 0, deepReleases = 0, controls = 0;
         int grabs = 0, grabEnds = 0, stretches = 0;
         // presses that didn't happen, by the guard that stopped them (frames at d <= 0 over content)
-        int heldNotStereo = 0, heldNotExtended = 0, heldNotNearest = 0, heldSlow = 0, heldPinching = 0, heldBusy = 0;
+        int heldNotStereo = 0, heldNotExtended = 0, heldNotNearest = 0, heldSlow = 0, heldPinching = 0, heldBusy = 0,
+            heldAskew = 0, heldResting = 0;
     } stats;
 
 private:
@@ -194,8 +211,10 @@ private:
         int64_t lastSeen = 0, outSince = -1, releasedAt = -1;
         // the poke
         int below = 0;                       // frames in a row at d <= 0
+        bool fastIn = false;                 // ...and coming in fast when it crossed the surface
+        bool resting = false;                // the hand rests low by the body (Params::restBelow)
         struct Sample { int64_t t; double d; };
-        std::vector<Sample> recent;          // the index tip's d over the last frames
+        std::vector<Sample> recent;          // the index tip's d over the last frames (about 250 ms)
         double lockU = 0, lockV = 0, lastX = -1, lastY = -1, deepest = 0;
         bool dragging = false, spent = false;
         Control control = Control::None;     // pressed a control (no KWin press)

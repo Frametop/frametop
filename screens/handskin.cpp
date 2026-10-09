@@ -181,6 +181,33 @@ handcut::Hand BindHand(int model, bool right) {
     return h;
 }
 
+bool TrackedFrames(const handcut::Hand &h, float palm[9], float bones[20][9]) {
+    V P[21];
+    for (int k = 0; k < 21; ++k) {
+        if (!std::isfinite(h.p[k][0]) || !std::isfinite(h.p[k][1]) || !std::isfinite(h.p[k][2])) return false;
+        P[k] = V(h.p[k]);
+    }
+    const V fwd = P[9] - P[0], across = P[17] - P[5];
+    if (fwd.norm() < 0.02 || across.norm() < 0.01) return false;
+    const Frame pf = Along(fwd, across, V(0, 1, 0));
+    if (pf.x.norm() < 0.5) return false;
+    auto put = [](const Frame &f, float out[9]) {
+        const V c[3] = {f.x, f.y, f.d};
+        for (int i = 0; i < 3; ++i) out[3 * i] = float(c[i].x), out[3 * i + 1] = float(c[i].y), out[3 * i + 2] = float(c[i].z);
+    };
+    put(pf, palm);
+    Frame f[20];
+    for (int b = 0; b < 20; ++b) {
+        const int j = b + 1, parent = j % 4 == 1 ? 0 : j - 1;
+        const bool thumb = j <= 4;
+        if (parent == 0) f[b] = pf;
+        else if (parent % 4 == 1) f[b] = Along(P[j] - P[parent], thumb ? pf.y : pf.x, thumb ? pf.x : pf.y);
+        else f[b] = Along(P[j] - P[parent], f[b - 1].x, thumb ? pf.x : pf.y);
+        put(f[b], bones[b]);
+    }
+    return true;
+}
+
 // ------------------------------------------------------------------------------- demo hands
 
 bool DemoPose(const char *name, bool right, const double at[3], const double palm[3], const double up[3], double t,

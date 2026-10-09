@@ -56,6 +56,15 @@ void Points(bool right, const Bones &b, int step, handmesh::Mesh &out);
 // The model's bind pose as a tracked hand (the 21 joints at the model's), for tests.
 handcut::Hand BindHand(int model, bool right);
 
+// The tracked hand's own frames, by the rule the models' joints follow (Pose; handrobot.h's
+// segments use them): the palm's (d from the wrist to the middle knuckle, x across it from the
+// index knuckle to the little finger's), and each bone's (bone b ends at joint b + 1, as
+// handcut::Hand::bone): d along it, x the axis it bends about (the palm's x for a finger's first
+// bone, the palm's normal for the thumb's metacarpal, then its parent's), the bones from the
+// wrist the palm's. y = d x x: out of a right hand's palm (and a left one's back). Nine floats
+// each: x, y, d. False if the hand is degenerate.
+bool TrackedFrames(const handcut::Hand &h, float palm[9], float bones[20][9]);
+
 // Demo hands (ft-handview --demo and --snapshot): a pose by name, the hand's wrist at `at`, the
 // palm facing `palm` and the fingers along `up` (both room directions; up is made square to palm).
 // t animates "wave" (a slow open-close and turn). Names: open, fist, pinch, point, spread, wave.

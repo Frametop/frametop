@@ -12,6 +12,10 @@ ft-handview draws your hands with one of these (`HANDS_VIEW_MODEL` in `~/.config
 
 `screens/tools/hand-asset.py` maps each one's skeleton onto WebXR's 25 hand joints (the names it takes are in its MODELS) and turns them all into `screens/handasset.h`, which ft-handview compiles in (`screens/handskin.h` poses them). Run it again after changing these files. `screens/tools/hand-glb-clean.py` rewrote the converted ones (each README says how).
 
+`HANDS_VIEW_MODEL=robot` isn't here: it's built in code from the tracked skeleton (`screens/handrobot.cpp`).
+
+Robot hands looked at on 2026-10-09, none taken. MuJoCo Menagerie's `shadow_hand` (Apache-2.0, from Shadow Robot Company; a rigid OBJ part per finger segment, five fingers) has the right licence and parts, but about 51,000 triangles without the forearm (each fingertip about 5,000), so it would need decimating to a tenth, its MJCF body transforms turned into bone-bound parts, and its proportions aren't a human hand's. Menagerie's `tetheria_aero_hand_open` and `sharpa_wave` (Apache-2.0) are segmented too but heavier (STL, no normals); `leap_hand` (MIT) and `wonik_allegro` (BSD) have four fingers. Quaternius' 2018 "Animated LowPoly Robot" (CC0 on OpenGameArt) has a mitten hand with three finger bones, and Quaternius' current licence forbids redistributing its packs. Kenney, Poly Pizza, OpenGameArt and itch.io had no finger-rigged robot hand; Sketchfab needs a login to download; InMoov is non-commercial.
+
 Not taken: Ultraleap's hands (Apache-2.0; GenericHand is left only with a forearm, 4350 triangles; LowPoly is faceted), MRTK2's hand coach (21 joints, no tips, unshared vertices), Meta's hands (as in A-Frame's and three.js's older examples) and MANO (non-commercial).
 
 ## asset: generic-hand

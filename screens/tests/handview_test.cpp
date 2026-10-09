@@ -1,10 +1,11 @@
 // Offline tests for ft-handview's CPU side: Room View's detector (roomview.h) against a fake
-// shared state, the rendered hand's mesh and square (handmesh.cpp), and the hand model's
-// posing (handskin.cpp). No OpenVR, GPU or headset.
+// shared state, the rendered hand's mesh and square (handmesh.cpp), the hand model's posing
+// (handskin.cpp) and the robot hand's (handrobot.cpp). No OpenVR, GPU or headset.
 //
 // Build and run: the justfile's test-c.
 #include "../handmesh.h"
 #include "../handasset.h"
+#include "../handrobot.h"
 #include "../handskin.h"
 #include "../roomview.h"
 
@@ -391,8 +392,176 @@ void TestSkin(int model) {
     CHECK(!handskin::Pose(model, flat, b));
 }
 
+// A demo pose of that side, mirrored across x = 0 for the left (as --snapshot draws them).
+handcut::Hand Demo(const char *pose, bool right) {
+    const double side = right ? 1 : -1, at[3] = {0.1 * side, -0.2, -0.4}, palm[3] = {-0.3 * side, 0.2, 1}, up[3] = {0.2 * side, 1, -0.2};
+    handcut::Hand h;
+    CHECK(handskin::DemoPose(pose, right, at, palm, up, 0, h));
+    return h;
+}
+
+double Dist(const float a[3], const float b[3]) { return std::hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
+
+void TestRobot() {
+    const handrobot::Mesh &m = handrobot::Model();
+    // the mesh: every triangle's corners exist, every vertex on a segment, fixed to an end, with a
+    // material and a unit normal; about as many triangles as the models (it draws once, they twice)
+    CHECK(!m.v.empty() && m.idx.size() % 3 == 0 && m.v.size() < 65536);
+    bool ok = true;
+    for (uint16_t i : m.idx) ok = ok && i < m.v.size();
+    int mats[4] = {};
+    for (const handrobot::Vertex &v : m.v) {
+        ok = ok && v.seg >= 0 && v.seg < handrobot::kSegs && v.seg == std::floor(v.seg) && (v.end == 0 || v.end == 1);
+        ok = ok && v.mat >= 0 && v.mat <= 3 && std::fabs(std::hypot(v.n[0], v.n[1], v.n[2]) - 1) < 1e-3;
+        if (v.mat >= 0 && v.mat <= 3) ++mats[int(v.mat)];
+    }
+    CHECK(ok);
+    for (int k = 0; k < 4; ++k) CHECK(mats[k] > 0);
+    std::printf("robot: %zu vertices, %zu triangles\n", m.v.size(), m.idx.size() / 3);
+    CHECK(m.idx.size() / 3 < 4500);
+    // its normals point out: away from its segment's bone line (shells, joints) for most vertices
+    // of the fingers
+    int out = 0, fingers = 0;
+    for (const handrobot::Vertex &v : m.v)
+        if (v.seg >= 4 && v.mat == handrobot::kShell) ++fingers, out += v.p[0] * v.n[0] + v.p[1] * v.n[1] > -1e-6;
+    CHECK(out > 0.97 * fingers);
+
+    for (const char *pose : {"open", "fist", "pinch", "point", "spread"}) {
+        handrobot::Bones b[2];
+        handcut::Hand h[2];
+        for (int right = 0; right < 2; ++right) {
+            h[right] = Demo(pose, right);
+            CHECK(handrobot::Pose(h[right], b[right]));
+            const handcut::Hand &hh = h[right];
+            // each segment starts at its joint, along its bone
+            for (int k = 0; k < handrobot::kSegs; ++k) {
+                const float *s = b[right].seg[k];
+                const float o[3] = {s[3], s[7], s[11]};
+                NEAR(Dist(o, hh.p[handrobot::kFrom[k]]), 0, 1e-5);
+                const float L = Dist(hh.p[handrobot::kTo[k]], hh.p[handrobot::kFrom[k]]);
+                NEAR(s[12] * b[right].scale, L, 1e-4);
+                // its z axis toward its end joint
+                double along = 0;
+                for (int i = 0; i < 3; ++i) along += s[i * 4 + 2] / b[right].scale * (hh.p[handrobot::kTo[k]][i] - o[i]) / L;
+                NEAR(along, 1, 1e-4);
+            }
+            // every vertex within its bone's length along it (a ball pokes out behind its joint),
+            // and the fingertips' furthest reach at the tracked tips
+            double worstPast = -1, worstBehind = -1, tipOff[5] = {1, 1, 1, 1, 1};
+            for (const handrobot::Vertex &v : m.v) {
+                const int k = int(v.seg);
+                if (k == 0) continue;
+                float p[3];
+                handrobot::Place(b[right], v, p);
+                const float *a = hh.p[handrobot::kFrom[k]], *e = hh.p[handrobot::kTo[k]];
+                const double L = Dist(a, e);
+                double along = 0;
+                for (int i = 0; i < 3; ++i) along += (p[i] - a[i]) * (e[i] - a[i]) / L;
+                worstPast = std::max(worstPast, along - L);
+                worstBehind = std::max(worstBehind, -along);
+                if (k == 3 || (k >= 6 && (k - 6) % 3 == 0)) {
+                    const int f = k == 3 ? 0 : 1 + (k - 6) / 3;
+                    tipOff[f] = std::min(tipOff[f], Dist(p, e));
+                }
+            }
+            CHECK(worstPast < 1e-4);
+            CHECK(worstBehind < 0.0115);   // the thumb's base ball, 10.8 mm
+            for (double d : tipOff) CHECK(d < 0.0012);
+        }
+        // the left hand is the right one mirrored, vertex for vertex
+        double off = 0;
+        for (const handrobot::Vertex &v : m.v) {
+            float l[3], r[3];
+            handrobot::Place(b[0], v, l), handrobot::Place(b[1], v, r);
+            off = std::max(off, double(std::hypot(l[0] + r[0], l[1] - r[1], l[2] - r[2])));
+        }
+        CHECK(off < 1e-5);
+        // rigid: in a pose with the same bone lengths as the open hand, each segment's vertices keep
+        // their distances to each other
+        if (!std::strcmp(pose, "fist")) {
+            handrobot::Bones open;
+            CHECK(handrobot::Pose(Demo("open", true), open));
+            double worst = 0;
+            for (size_t i = 0; i < m.v.size(); i += 5)
+                for (size_t j = i + 1; j < m.v.size(); j += 37) {
+                    if (m.v[i].seg != m.v[j].seg || m.v[i].seg < 4) continue;   // the fingers (the thumb's lengths differ)
+                    float a0[3], a1[3], c0[3], c1[3];
+                    handrobot::Place(open, m.v[i], a0), handrobot::Place(open, m.v[j], a1);
+                    handrobot::Place(b[1], m.v[i], c0), handrobot::Place(b[1], m.v[j], c1);
+                    worst = std::max(worst, std::fabs(Dist(a0, a1) - Dist(c0, c1)));
+                }
+            CHECK(worst < 1e-5);
+        }
+        // the palm's side: its glowing dot toward the palm, the knuckles' line on the back; the
+        // fingertips' pads on the palm side of the open hand, the thumb's facing the index
+        for (int right = 0; right < 2; ++right) {
+            const handcut::Hand &hh = h[right];
+            double palm[3];
+            {
+                const double side = right ? 1 : -1, raw[3] = {-0.3 * side, 0.2, 1};
+                const double n = std::sqrt(raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2]);
+                for (int i = 0; i < 3; ++i) palm[i] = raw[i] / n;
+            }
+            for (const handrobot::Vertex &v : m.v) {
+                if (v.mat != handrobot::kAccent) continue;
+                float p[3];
+                handrobot::Place(b[right], v, p);
+                const double toward = (p[0] - hh.p[0][0]) * palm[0] + (p[1] - hh.p[0][1]) * palm[1] + (p[2] - hh.p[0][2]) * palm[2];
+                const double z = v.p[2] + v.end * handrobot::ReferenceLength(0);   // on the reference hand
+                if (v.seg == 0 && z > 0.035 && z < 0.08 && std::fabs(v.p[1]) > 0.01) CHECK(v.p[1] > 0 ? toward > 0.008 : toward < -0.008);
+                if (!std::strcmp(pose, "open") && v.seg >= 6 && (int(v.seg) - 6) % 3 == 0) {
+                    const float *tip = hh.p[handrobot::kTo[int(v.seg)]];
+                    CHECK((p[0] - tip[0]) * palm[0] + (p[1] - tip[1]) * palm[1] + (p[2] - tip[2]) * palm[2] > 0);
+                }
+            }
+        }
+        if (!std::strcmp(pose, "pinch")) {
+            // the thumb's pad and the index's: their middles within 15 mm (they meet)
+            for (int right = 0; right < 2; ++right) {
+                double c[2][3] = {};
+                int n[2] = {};
+                for (const handrobot::Vertex &v : m.v) {
+                    if (v.mat != handrobot::kAccent || (v.seg != 3 && v.seg != 6)) continue;
+                    const int w = v.seg == 6;
+                    float p[3];
+                    handrobot::Place(b[right], v, p);
+                    for (int i = 0; i < 3; ++i) c[w][i] += p[i];
+                    ++n[w];
+                }
+                CHECK(n[0] > 0 && n[1] > 0);
+                if (n[0] && n[1]) NEAR(std::hypot(c[0][0] / n[0] - c[1][0] / n[1], c[0][1] / n[0] - c[1][1] / n[1], c[0][2] / n[0] - c[1][2] / n[1]), 0, 0.015);
+            }
+        }
+    }
+    // a longer finger: its shells' ends stay as they are (only the middle stretches), the tip at the tip
+    {
+        handcut::Hand h = Demo("open", true), longer = h;
+        for (int j : {7, 8})
+            for (int i = 0; i < 3; ++i) longer.p[j][i] += 0.2f * (h.p[7][i] - h.p[6][i]);
+        handrobot::Bones a, b;
+        CHECK(handrobot::Pose(h, a) && handrobot::Pose(longer, b));
+        const double stretch = 0.2 * Dist(h.p[7], h.p[6]);
+        double startMoved = 0, endOff = 0;
+        for (const handrobot::Vertex &v : m.v)
+            if (v.seg == 5) {
+                float p[3], q[3];
+                handrobot::Place(a, v, p), handrobot::Place(b, v, q);
+                if (v.end == 0) startMoved = std::max(startMoved, Dist(p, q));
+                else endOff = std::max(endOff, std::fabs(Dist(p, q) - stretch));
+            }
+        CHECK(startMoved < 1e-5);
+        CHECK(endOff < 1e-5);
+    }
+    // a degenerate hand: no pose
+    handcut::Hand flat;
+    for (auto &p : flat.p) p[0] = p[1] = p[2] = 0;
+    handrobot::Bones b;
+    CHECK(!handrobot::Pose(flat, b));
+}
+
 int main() {
     TestRoomView();
+    TestRobot();
     TestMesh();
     TestModels();
     for (int model = 0; model < handasset::kModels; ++model) {

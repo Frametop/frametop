@@ -4,8 +4,9 @@
 // model, HANDS_VIEW_MODEL: handasset.h's), in one of two looks (HANDS_VIEW_STYLE): ghost, light and
 // see-through, glowing toward its edges like the Quest's, or solid, a matte light hand lit from
 // above with a soft rim light. With Room View on, ft-screens also cuts a hole for each hand in the
-// panels (handcut.h), and the drawn hand floats over the real one. HANDS_VIEW_MODEL=capsules draws
-// the older hand of tubes from the matte's pieces (handmesh.h).
+// panels (handcut.h), and the drawn hand floats over the real one. HANDS_VIEW_MODEL=robot draws a
+// robot hand built in code from the skeleton (handrobot.h), capsules the older hand of tubes from
+// the matte's pieces (handmesh.h).
 //
 //   ft-handview [--status S] [--res PX] [--demo] [--seconds S]
 //   ft-handview --snapshot FILE.png [--res PX] [--seconds S]
@@ -35,19 +36,20 @@
 // fingertips' glow, and the outline smoothed.
 //
 // Room View: roomview.h. HANDS_ROOMVIEW=auto|on|off in ~/.config/frametop.conf forces it.
-// Settings (~/.config/frametop.conf): HANDS_VIEW_MODEL asset|babylon|mrtk3|godot|mrtk2|capsules
+// Settings (~/.config/frametop.conf): HANDS_VIEW_MODEL asset|babylon|mrtk3|godot|mrtk2|robot|capsules
 // (screens/assets/hands/README.md), HANDS_VIEW_STYLE ghost|solid,
 // HANDS_VIEW_ROOMVIEW 1|0 (draw with Room View on too).
 // Commands (datagrams on @ft_handview, replies to the sender):
 //   hands <L> <R> <allowed>   the pointer helper's word: each side hand|controller|off
 //   roomview auto|on|off      force Room View's state (auto: detect it) -> "ok <on|off> (<why>)"
-//   model <name>|capsules     the hand model, style ghost|solid its look, inroom 1|0 drawing with
+//   model <name>|robot|capsules  the hand model, style ghost|solid its look, inroom 1|0 drawing with
 //                             Room View on (live, until a restart) -> "ok"
 //   state                     -> "ok <the status line>"
 #include "handcut.h"
 #include "handmesh.h"
 #include "handskin.h"
 #include "handasset.h"
+#include "handrobot.h"
 #include "roomview.h"
 
 #include <EGL/egl.h>
@@ -173,6 +175,43 @@ void main() {
     vback = dot(wrist - sp, fwd);
     vtip = tipness(sp);
 })";
+// The robot (handrobot.h): each vertex moved by its segment's matrix, its end-fixed ones along
+// the bone by its length (the shell's middle takes it up), the x and y scales on the palm.
+const char *kRobotVs = R"(
+attribute vec3 pos;    // in its segment's frame (handrobot::Vertex)
+attribute vec3 nrm;
+attribute vec3 info;   // its segment, 1 if fixed to the bone's end, its material
+uniform vec4 segs[64]; // 16 segments: a 3x4 matrix (a row each), then (length, x scale, y scale, 0)
+uniform mat4 mvp;
+uniform vec3 eye;
+varying vec3 vn;
+varying vec3 vv;
+varying float vmat;
+void main() {
+    int k = int(info.x + 0.5) * 4;
+    vec4 g = segs[k + 3];
+    vec4 l = vec4(pos.x * g.y, pos.y * g.z, pos.z + info.y * g.x, 1.0);
+    vec3 p = vec3(dot(segs[k], l), dot(segs[k + 1], l), dot(segs[k + 2], l));
+    vec4 n = vec4(nrm.x / g.y, nrm.y / g.z, nrm.z, 0.0);
+    vn = vec3(dot(segs[k], n), dot(segs[k + 1], n), dot(segs[k + 2], n));
+    vv = eye - p;
+    vmat = info.z;
+    gl_Position = mvp * vec4(p, 1.0);
+})";
+// Its body: r how squarely it faces the eye, g a highlight (a light above, a little to the eye's
+// side), b the light from above (wrapped), a its material (0.5 shell, 0.625 joint, 0.75 accent,
+// 0.875 line). Nothing fades: the cuff is closed.
+const char *kRobotFs = R"(
+precision highp float;
+varying vec3 vn;
+varying vec3 vv;
+varying float vmat;
+void main() {
+    vec3 n = normalize(vn), v = normalize(vv);
+    vec3 h = normalize(normalize(vec3(0.25, 1.0, 0.35)) + v);
+    float spec = pow(max(dot(n, h), 0.0), 28.0);
+    gl_FragColor = vec4(abs(dot(n, v)), spec, 0.5 + 0.5 * n.y, 0.5 + 0.125 * floor(vmat + 0.5));
+})";
 // Out: r how squarely it faces the eye, g the fade (1 drawn, 0 gone), b the light from above,
 // a 0.5 and up where there's hand, up to 1 at a fingertip.
 const char *kBodyFs = R"(
@@ -265,6 +304,43 @@ void main() {
     gl_FragColor = vec4(rgb, alpha);
 })";
 
+// The robot's second pass: each material's colour and opacity, the shells and joints lit (and
+// shining), the accents glowing, the same fresnel rim and outline as the models'.
+const char *kRobotRimFs = R"(
+precision highp float;
+uniform sampler2D tex;
+uniform vec4 box;
+uniform vec2 texel;
+uniform vec3 shell;      // the shells' colour
+uniform vec3 dark;       // the joints' and the core's
+uniform vec3 accent;     // the glowing accents'
+uniform vec4 opacity;    // each material's: shell, joint, accent, line
+uniform vec2 shine;      // the highlight's strength: shell, joint
+uniform float shade;     // how much darker away from the light
+uniform float fres;      // the rim
+uniform float rimPow;
+uniform vec3 glow;
+varying vec2 uv;
+float hand(vec2 d) { return step(0.25, texture2D(tex, clamp(uv + d * texel, box.xy, box.zw)).a); }
+void main() {
+    vec4 c = texture2D(tex, uv);
+    if (c.a < 0.25) discard;
+    float cov = 2.0;
+    for (int i = 0; i < 8; ++i) {
+        float a = float(i) * 0.7853982;
+        cov += hand(vec2(cos(a), sin(a)) * 0.7);
+    }
+    float m = floor((c.a - 0.5) * 8.0 + 0.5);
+    float lit = 1.0 - shade + shade * c.b;
+    vec3 rgb;
+    float op, rim = fres * pow(1.0 - c.r, rimPow);
+    if (m < 0.5) rgb = shell * lit + shine.x * c.g, op = opacity.x;
+    else if (m < 1.5) rgb = dark * lit + shine.y * c.g, op = opacity.y;
+    else if (m < 2.5) rgb = accent * (0.85 + 0.25 * c.r) + 0.15 * c.g, op = opacity.z, rim = 0.0;
+    else rgb = mix(dark, shell, 0.3) * lit, op = opacity.w;
+    gl_FragColor = vec4(mix(rgb, glow, rim), (cov / 10.0) * mix(op, 0.95, clamp(rim, 0.0, 1.0)));
+})";
+
 unsigned Shader(GLenum type, const char *src) {
     const GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
@@ -307,15 +383,22 @@ struct Output {
     handmesh::Quad quad;   // what it was drawn for
 };
 
-// A look (HANDS_VIEW_STYLE): the second pass's colours and opacities.
+// A look (HANDS_VIEW_STYLE): the second pass's colours and opacities, and the robot's.
 struct Style {
     const char *name;
     float base[3], shade, body, fres, rimPow, glow[3], tip;
+    // the robot (kRobotRimFs): its shells', joints' and accents' colours, each material's opacity
+    // (shell, joint, accent, line), and how much the shells and the joints shine
+    float shell[3], dark[3], accent[3], opacity[4], shine[2];
 };
 // ghost: Quest-like, light and see-through, glowing white toward its edges and at the fingertips;
-// solid: a matte light hand lit from above, with a soft cool rim light, over anything
-const Style kStyles[] = {{"ghost", {0.84f, 0.88f, 0.95f}, 0.30f, 0.30f, 0.90f, 2.2f, {1, 1, 1}, 0.30f},
-                         {"solid", {0.82f, 0.83f, 0.86f}, 0.45f, 0.96f, 0.55f, 2.6f, {0.85f, 0.93f, 1}, 0.12f}};
+// solid: a matte light hand lit from above, with a soft cool rim light, over anything. The robot:
+// ghost, pale see-through shells over darker joints, the accents glowing nearly solid; solid,
+// matte ceramic white shells and dark grey metal joints with cyan accents.
+const Style kStyles[] = {{"ghost", {0.84f, 0.88f, 0.95f}, 0.30f, 0.30f, 0.90f, 2.2f, {1, 1, 1}, 0.30f,
+                          {0.86f, 0.92f, 1}, {0.30f, 0.36f, 0.44f}, {0.35f, 0.90f, 1}, {0.30f, 0.50f, 0.95f, 0.50f}, {0.25f, 0.35f}},
+                         {"solid", {0.82f, 0.83f, 0.86f}, 0.45f, 0.96f, 0.55f, 2.6f, {0.85f, 0.93f, 1}, 0.12f,
+                          {0.93f, 0.94f, 0.95f}, {0.15f, 0.16f, 0.18f}, {0.30f, 0.88f, 1}, {0.97f, 0.98f, 1, 0.97f}, {0.22f, 0.50f}}};
 const Style *FindStyle(const char *name) {
     for (const Style &s : kStyles)
         if (!std::strcmp(s.name, name)) return &s;
@@ -368,6 +451,8 @@ public:
     // ...or the model of that side, posed by `bones`.
     void DrawModel(Output &o, bool right, const handskin::Bones &bones, const handmesh::Quad &q, const double eyes[2][3],
                    const float tips[15], const struct Cut &cut, const Style &st);
+    // ...or the robot, posed by `bones`.
+    void DrawRobot(Output &o, const handrobot::Bones &bones, const handmesh::Quad &q, const double eyes[2][3], const Style &st);
     bool Passed(Output &o);
     // The output's pixels, RGBA, its first row the top (--snapshot).
     void Read(Output &o, std::vector<uint8_t> &rgba);
@@ -377,13 +462,13 @@ private:
     void Body(GLuint prog, const float tips[15]);
     void Eyes(const handmesh::Quad &q, const double eyes[2][3], GLuint prog, GLsizei count);
     void Cap(const handmesh::Quad &q, const double eyes[2][3], const Cut &cut);
-    void Rim(Output &o, const handmesh::Quad &q, const Style &st);
+    void Rim(Output &o, const handmesh::Quad &q, const Style &st, bool robot = false);
     int drm_ = -1, eye_ = 0;
     gbm_device *gbm_ = nullptr;
     EGLDisplay dpy_ = EGL_NO_DISPLAY;
     EGLContext ctx_ = EGL_NO_CONTEXT;
     std::vector<uint64_t> mods_;
-    GLuint body_ = 0, skin_ = 0, cap_ = 0, rim_ = 0, scratchTex_ = 0, scratchDepth_ = 0, scratch_ = 0, vbo_ = 0, ibo_ = 0, quad_ = 0;
+    GLuint body_ = 0, skin_ = 0, robot_ = 0, robotRim_ = 0, robotVbo_ = 0, robotIbo_ = 0, cap_ = 0, rim_ = 0, scratchTex_ = 0, scratchDepth_ = 0, scratch_ = 0, vbo_ = 0, ibo_ = 0, quad_ = 0;
     GLuint modelVbo_[handasset::kModels][2] = {}, modelIbo_[handasset::kModels][2] = {};   // the models' hands, uploaded once
 };
 
@@ -416,7 +501,9 @@ bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
     skin_ = Program(kSkinVs, kBodyFs, {"pos", "nrm", "joints", "weights"});
     cap_ = Program(kCapVs, kCapFs, {"pos"});
     rim_ = Program(kRimVs, kRimFs, {"pos"});
-    if (!body_ || !skin_ || !cap_ || !rim_) return false;
+    robot_ = Program(kRobotVs, kRobotFs, {"pos", "nrm", "info"});
+    robotRim_ = Program(kRimVs, kRobotRimFs, {"pos"});
+    if (!body_ || !skin_ || !cap_ || !rim_ || !robot_ || !robotRim_) return false;
     // the scratch buffer: both eyes side by side, with depth and stencil (the cap)
     glGenTextures(1, &scratchTex_);
     glBindTexture(GL_TEXTURE_2D, scratchTex_);
@@ -456,6 +543,14 @@ bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, modelIbo_[model][side]);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(a.tris * 3 * sizeof(uint16_t)), a.idx, GL_STATIC_DRAW);
     }
+    // the robot: its vertices as they are (handrobot::Vertex), one mesh for both hands
+    const handrobot::Mesh &r = handrobot::Model();
+    glGenBuffers(1, &robotVbo_);
+    glGenBuffers(1, &robotIbo_);
+    glBindBuffer(GL_ARRAY_BUFFER, robotVbo_);
+    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(r.v.size() * sizeof(handrobot::Vertex)), r.v.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, robotIbo_);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(r.idx.size() * sizeof(uint16_t)), r.idx.data(), GL_STATIC_DRAW);
     return true;
 }
 
@@ -623,6 +718,22 @@ void Gpu::DrawModel(Output &o, bool right, const handskin::Bones &bones, const h
     Rim(o, q, st);
 }
 
+void Gpu::DrawRobot(Output &o, const handrobot::Bones &bones, const handmesh::Quad &q, const double eyes[2][3], const Style &st) {
+    const float none[15] = {};
+    Body(robot_, none);
+    glUniform4fv(glGetUniformLocation(robot_, "segs"), 4 * handrobot::kSegs, &bones.seg[0][0]);
+    glBindBuffer(GL_ARRAY_BUFFER, robotVbo_);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, robotIbo_);
+    const GLsizei stride = sizeof(handrobot::Vertex);
+    for (int k = 0; k < 3; ++k) glEnableVertexAttribArray(k);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void *>(offsetof(handrobot::Vertex, p)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void *>(offsetof(handrobot::Vertex, n)));
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void *>(offsetof(handrobot::Vertex, seg)));
+    Eyes(q, eyes, robot_, GLsizei(handrobot::Model().idx.size()));
+    for (int k = 1; k < 3; ++k) glDisableVertexAttribArray(k);
+    Rim(o, q, st, true);
+}
+
 // The cap (kCapFs) over the body in the scratch buffer, where the stencil says the view went in
 // through the cut.
 void Gpu::Cap(const handmesh::Quad &q, const double eyes[2][3], const Cut &cut) {
@@ -652,29 +763,38 @@ void Gpu::Cap(const handmesh::Quad &q, const double eyes[2][3], const Cut &cut) 
 }
 
 // The rim pass, from the scratch buffer into the output; fenced.
-void Gpu::Rim(Output &o, const handmesh::Quad &q, const Style &st) {
+void Gpu::Rim(Output &o, const handmesh::Quad &q, const Style &st, bool robot) {
     glDisable(GL_DEPTH_TEST);
     glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
     glViewport(0, 0, 2 * eye_, eye_);
     glClear(GL_COLOR_BUFFER_BIT);
-    glUseProgram(rim_);
+    const GLuint prog = robot ? robotRim_ : rim_;
+    glUseProgram(prog);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, scratchTex_);
-    glUniform1i(glGetUniformLocation(rim_, "tex"), 0);
-    glUniform2f(glGetUniformLocation(rim_, "texel"), 1.0f / (2 * eye_), 1.0f / eye_);
-    glUniform1f(glGetUniformLocation(rim_, "body"), st.body);
-    glUniform3fv(glGetUniformLocation(rim_, "base"), 1, st.base);
-    glUniform1f(glGetUniformLocation(rim_, "shade"), st.shade);
-    glUniform1f(glGetUniformLocation(rim_, "fres"), st.fres);
-    glUniform1f(glGetUniformLocation(rim_, "rimPow"), st.rimPow);
-    glUniform3fv(glGetUniformLocation(rim_, "glow"), 1, st.glow);
-    glUniform1f(glGetUniformLocation(rim_, "tip"), st.tip);
+    glUniform1i(glGetUniformLocation(prog, "tex"), 0);
+    glUniform2f(glGetUniformLocation(prog, "texel"), 1.0f / (2 * eye_), 1.0f / eye_);
+    glUniform1f(glGetUniformLocation(prog, "shade"), st.shade);
+    glUniform1f(glGetUniformLocation(prog, "fres"), st.fres);
+    glUniform1f(glGetUniformLocation(prog, "rimPow"), st.rimPow);
+    glUniform3fv(glGetUniformLocation(prog, "glow"), 1, st.glow);
+    if (robot) {
+        glUniform3fv(glGetUniformLocation(prog, "shell"), 1, st.shell);
+        glUniform3fv(glGetUniformLocation(prog, "dark"), 1, st.dark);
+        glUniform3fv(glGetUniformLocation(prog, "accent"), 1, st.accent);
+        glUniform4fv(glGetUniformLocation(prog, "opacity"), 1, st.opacity);
+        glUniform2fv(glGetUniformLocation(prog, "shine"), 1, st.shine);
+    } else {
+        glUniform1f(glGetUniformLocation(prog, "body"), st.body);
+        glUniform3fv(glGetUniformLocation(prog, "base"), 1, st.base);
+        glUniform1f(glGetUniformLocation(prog, "tip"), st.tip);
+    }
     glBindBuffer(GL_ARRAY_BUFFER, quad_);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
     for (int e = 0; e < 2; ++e) {
         glViewport(e * eye_, 0, eye_, eye_);
         const float half = 0.5f / (2 * eye_);   // texel centres: the taps stay in this eye's half
-        glUniform4f(glGetUniformLocation(rim_, "box"), e * 0.5f + half, 0.5f / eye_, e * 0.5f + 0.5f - half, 1 - 0.5f / eye_);
+        glUniform4f(glGetUniformLocation(prog, "box"), e * 0.5f + half, 0.5f / eye_, e * 0.5f + 0.5f - half, 1 - 0.5f / eye_);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
     if (o.fence != EGL_NO_SYNC_KHR) pDestroySync(dpy_, o.fence);
@@ -777,16 +897,18 @@ handcut::Hand DemoHand(const Mat &head, bool right, double t) {
 }
 
 // The settings that pick how a hand is drawn (HANDS_VIEW_*), and the live commands' changes.
+constexpr int kCapsules = -1, kRobot = -2;   // Look::model's that aren't handasset's
+
 struct Look {
-    int model = 0;              // the 3D model (handasset::kModel's), or -1: the capsules
+    int model = 0;              // the 3D model (handasset::kModel's), or kCapsules, kRobot
     const Style *style = &kStyles[0];
     bool inRoom = true;         // draw with Room View on too
 };
 
-// A model's name (HANDS_VIEW_MODEL, the model command): one of handasset's, or capsules (-1).
+// A model's name (HANDS_VIEW_MODEL, the model command): one of handasset's, robot or capsules.
 bool ParseModel(const char *name, int &model) {
-    const int k = !std::strcmp(name, "capsules") ? -1 : handskin::FindModel(name);
-    if (k < 0 && std::strcmp(name, "capsules")) return false;
+    const int k = !std::strcmp(name, "capsules") ? kCapsules : !std::strcmp(name, "robot") ? kRobot : handskin::FindModel(name);
+    if (k == -1 && std::strcmp(name, "capsules")) return false;
     model = k;
     return true;
 }
@@ -794,10 +916,10 @@ bool ParseModel(const char *name, int &model) {
 std::string ModelNames() {
     std::string s;
     for (const handasset::Model &m : handasset::kModel) s += std::string(m.name) + "|";
-    return s + "capsules";
+    return s + "robot|capsules";
 }
 
-const char *ModelName(int model) { return model < 0 ? "capsules" : handasset::kModel[model].name; }
+const char *ModelName(int model) { return model == kRobot ? "robot" : model < 0 ? "capsules" : handasset::kModel[model].name; }
 
 Look ReadLook(std::string &log) {
     Look k;
@@ -811,11 +933,16 @@ Look ReadLook(std::string &log) {
     return k;
 }
 
-// How a hand is drawn, the CPU's part: pose it (the model) or build its mesh (the capsules), and
-// place its square. False if there's nothing to draw. `mesh` holds the capsules' mesh, or the
-// model's skinned points (its bounds).
+// How a hand is drawn, the CPU's part: pose it (a model, the robot) or build its mesh (the
+// capsules), and place its square. False if there's nothing to draw. `mesh` holds the capsules'
+// mesh, or the model's or the robot's posed points (its bounds).
 bool Prepare(const Look &look, const handcut::Hand &h, const double headPos[3], const double eyes[2][3],
-             handmesh::Mesh &mesh, handskin::Bones &bones, handmesh::Quad &q) {
+             handmesh::Mesh &mesh, handskin::Bones &bones, handrobot::Bones &robot, handmesh::Quad &q) {
+    if (look.model == kRobot) {
+        if (!handrobot::Pose(h, robot)) return false;
+        handrobot::Points(robot, 4, mesh);
+        return handmesh::Place(mesh, eyes, 0.05, q);
+    }
     if (look.model >= 0) {
         if (!handskin::Pose(look.model, h, bones)) return false;
         handskin::Points(h.right, bones, 3, mesh);   // a third of the vertices: the square has a margin
@@ -877,7 +1004,8 @@ Cut CutOf(const handmesh::Mesh &points, const handskin::Bones &b) {
 }
 
 void Render(Gpu &gpu, Output &o, const Look &look, const handcut::Hand &h, const handmesh::Mesh &mesh,
-            const handskin::Bones &bones, const handmesh::Quad &q, const double eyes[2][3]) {
+            const handskin::Bones &bones, const handrobot::Bones &robot, const handmesh::Quad &q, const double eyes[2][3]) {
+    if (look.model == kRobot) return gpu.DrawRobot(o, robot, q, eyes, *look.style);
     float tips[15];
     for (int f = 0; f < 5; ++f)
         for (int i = 0; i < 3; ++i) tips[3 * f + i] = h.p[4 + 4 * f][i];
@@ -905,6 +1033,7 @@ int Snapshot(const char *path, int res, double seconds, const Look &look) {
     std::vector<uint8_t> img(size_t(W) * H * 3), px;
     handmesh::Mesh mesh;
     handskin::Bones bones;
+    handrobot::Bones robot;
     for (int r = 0; r < rows; ++r)
         for (int right = 0; right < 2; ++right) {
             const Shot &sh = shots[r];
@@ -915,8 +1044,8 @@ int Snapshot(const char *path, int res, double seconds, const Look &look) {
             handcut::Hand h;
             handmesh::Quad q;
             if (!handskin::DemoPose(sh.pose, right, at, palm, up, 0, h)) continue;
-            if (!Prepare(look, h, head, eyes, mesh, bones, q)) continue;
-            Render(gpu, out, look, h, mesh, bones, q, eyes);
+            if (!Prepare(look, h, head, eyes, mesh, bones, robot, q)) continue;
+            Render(gpu, out, look, h, mesh, bones, robot, q, eyes);
             glFinish();
             gpu.Read(out, px);
             // over dark (the left hand) or light (the right): the rows' top first
@@ -946,9 +1075,9 @@ int Snapshot(const char *path, int res, double seconds, const Look &look) {
             const auto t0 = std::chrono::steady_clock::now();
             const handcut::Hand h = DemoHand(ident, right, frame / 30.0);
             handmesh::Quad q;
-            if (!Prepare(look, h, head, eyes, mesh, bones, q)) continue;
+            if (!Prepare(look, h, head, eyes, mesh, bones, robot, q)) continue;
             poseMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-            Render(gpu, out, look, h, mesh, bones, q, eyes);
+            Render(gpu, out, look, h, mesh, bones, robot, q, eyes);
             drawMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             ++draws;
         }
@@ -1032,6 +1161,7 @@ int main(int argc, char **argv) {
     handcut::Hands hands;
     handmesh::Mesh mesh;
     handskin::Bones bones;
+    handrobot::Bones robot;
     std::printf("ft-handview: %dx%d per eye per hand%s; %s, %s; Room View %s, %s with it on\n", res, res,
                 demo ? ", demo hands" : "", ModelName(look.model), look.style->name,
                 force == roomview::Force::Auto ? "detected" : roomview::Name(force), look.inRoom ? "drawn" : "not drawn");
@@ -1166,11 +1296,11 @@ int main(int argc, char **argv) {
             }
             const auto t0 = std::chrono::steady_clock::now();
             handmesh::Quad q;
-            if (!Prepare(look, *h, headPos, eyes, mesh, bones, q)) continue;
+            if (!Prepare(look, *h, headPos, eyes, mesh, bones, robot, q)) continue;
             s.meshMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             int pick = 0;
             while (pick == s.shown || pick == s.before) ++pick;
-            Render(gpu, s.out[pick], look, *h, mesh, bones, q, eyes);
+            Render(gpu, s.out[pick], look, *h, mesh, bones, robot, q, eyes);
             s.drawing = pick, s.drawnAt = MonoNs();
             const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             ++s.draws, s.cpuMs += ms, s.worstMs = std::max(s.worstMs, ms);

@@ -258,7 +258,12 @@ bool GesturePublisher::open(const Pinch &pinch, const Grip &grip, std::string &e
     void *m = mmap(nullptr, sizeof(fh_gestures_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (m == MAP_FAILED) return err = path + ": can't map it", false;
-    out_ = static_cast<fh_gestures_t *>(m);
+    use(static_cast<fh_gestures_t *>(m), pinch, grip);
+    return true;
+}
+
+void GesturePublisher::use(fh_gestures_t *mem, const Pinch &pinch, const Grip &grip) {
+    out_ = mem;
     // keep the counters a previous tracker left, so a reader doesn't see them jump back
     const bool ours = !std::memcmp(out_->magic, FH_GESTURES_MAGIC, 8) && out_->version == FH_GESTURES_VERSION;
     if (!ours) {
@@ -284,7 +289,6 @@ bool GesturePublisher::open(const Pinch &pinch, const Grip &grip, std::string &e
     out_->end_m = float(pinch.params().end_m);
     out_->grip_begin = float(grip.params().begin);
     out_->grip_end = float(grip.params().end);
-    return true;
 }
 
 void GesturePublisher::write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns) {

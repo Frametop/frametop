@@ -529,6 +529,12 @@ int main(int argc, char **argv) {
     // to place the colour frames, whose capture clock is their own (see the top).
     double mono_delay_ns = -1;
     const std::string want_file = run_dir() + "/color-fps";
+    // A reader that needs the full rate writes it to want-hz and keeps the file fresh: ft-screens,
+    // while a hand is near one of its panels (a poke's latency at 15 Hz doubles). Older than 1 s
+    // (by its mtime), it lapses. Checked 5 times a second.
+    const std::string want_hz_file = run_dir() + "/want-hz";
+    double want_hz = 0;
+    uint64_t t_want_hz = 0;
     // The side cameras' naming, for the hand recorder and other tools (hands/rec/session.py
     // reads it): written by a tracking, publishing ft-hands at the start, on every change and
     // every 2 s, and removed when it exits. swapped: ft-camd's naming is backwards (null: not
@@ -675,6 +681,19 @@ int main(int argc, char **argv) {
             }
         }
 
+        if (now0 - t_want_hz > 200'000'000) {
+            t_want_hz = now0, want_hz = 0;
+            struct stat st;
+            timespec rt;
+            clock_gettime(CLOCK_REALTIME, &rt);
+            if (stat(want_hz_file.c_str(), &st) == 0 && st.st_uid == getuid() &&
+                (rt.tv_sec - st.st_mtim.tv_sec) * 1e9 + (rt.tv_nsec - st.st_mtim.tv_nsec) < 1e9)
+                if (FILE *f = std::fopen(want_hz_file.c_str(), "r")) {
+                    if (std::fscanf(f, "%lf", &want_hz) != 1 || !(want_hz > 0)) want_hz = 0;
+                    want_hz = std::min(want_hz, 30.0);
+                    std::fclose(f);
+                }
+        }
         const bool use_mono = mode != Cams::Color, use_color = mode != Cams::Mono;
         const bool mono_driven = use_mono || rec || g_record || !track;
         std::map<std::string, Image> images;
@@ -819,7 +838,9 @@ int main(int argc, char **argv) {
                                 pinch.side(k).flags & FH_PINCH_DOWN ? " PINCH" : grip.side(k).flags & FH_PINCH_DOWN ? " GRIP" : "");
         }
         // a gesture down or closing gets the full rate, even while the palm holds still
-        next_ns = tmin + uint64_t((std::min(tracker.interval(), pinch.engaged() || grip.engaged() ? 1 / 30.0 : 1.0) -
+        // and so does a reader that asks for it (want-hz)
+        next_ns = tmin + uint64_t((std::min({tracker.interval(), pinch.engaged() || grip.engaged() ? 1 / 30.0 : 1.0,
+                                             want_hz > 0 ? 1 / want_hz : 1.0}) -
                                    0.005) * 1e9);
         if (publish) pub.write(hands, capture);
         if (publish && gestures_on) gestures.write(pinch, grip, capture);

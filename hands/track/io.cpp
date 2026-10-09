@@ -126,13 +126,17 @@ bool Publisher::open(std::string &err) {
     void *m = mmap(nullptr, sizeof(fh_hands_v2_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (m == MAP_FAILED) return err = path + ": can't map it", false;
-    file_ = static_cast<fh_hands_v2_t *>(m);
+    use(static_cast<fh_hands_v2_t *>(m));
+    return true;
+}
+
+void Publisher::use(fh_hands_v2_t *mem) {
+    file_ = mem;
     out_ = &file_->v1;
     std::memset(file_, 0, sizeof *file_);
     std::memcpy(out_->magic, FH_HANDS_MAGIC, 8);
     out_->version = FH_HANDS_VERSION;
     out_->size = sizeof(fh_hands_v2_t);
-    return true;
 }
 
 static_assert(sizeof(fh_hand_fit_t::angles) / sizeof(float) == skel::kAngles, "fh_hand_fit_t angles");

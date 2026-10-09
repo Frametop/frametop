@@ -128,6 +128,8 @@ private:
 class GesturePublisher {
 public:
     bool open(const Pinch &pinch, const Grip &grip, std::string &err);
+    // Writes into `mem` instead of the gestures file (ft-handreplay --publish-dump).
+    void use(fh_gestures_t *mem, const Pinch &pinch, const Grip &grip);
     void write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns);
 
 private:

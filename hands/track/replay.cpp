@@ -56,6 +56,10 @@
 //             distance to them, measured, One Euro and fitted.
 // --hmd-poses FILE: a hand-recorder take's poses.jsonl: the arm model's elbow with gravity's up
 //             against the head's up.
+// --publish-dump FILE: what ft-hands would have published after each processed set, for
+//             Frametop's offline tests (screens/tests): a header (FHDUMP01, then the sizes of
+//             fh_hands_v2_t and fh_gestures_t as two uint32), then per set the hands file's and
+//             the gestures file's bytes. publish_ns is the set's time plus the step's busy time.
 // --skeleton-dump FILE: with --labels, a line per hand matched to a label: time, id, stereo, then
 //             the measured, fitted (unfiltered) and labelled landmarks.
 // --pinch-fitted: also run a second pinch detector on the fitted tips, and report its count.
@@ -63,6 +67,7 @@
 //             cameras, triangulation residual, hand scale, measured and published palm, and
 //             each view's one-view palm (Tracker::single_view at the hand's scale). The
 //             header has each camera's centre and focal length.
+#include "io.h"
 #include "pinch.h"
 #include "record.h"
 #include "sides.h"
@@ -122,7 +127,7 @@ int main(int argc, char **argv) {
     int search_budget1 = 2;
     bool skeleton = true, pinch_fitted = false;
     skel::Params skel_params;
-    std::string labels, hmd_poses, skeleton_dump;
+    std::string labels, hmd_poses, skeleton_dump, publish_dump;
     PinchParams pinch_params;
     GripParams grip_params;
     std::string use = "mono", color_left = "color_video0", color_crop = "subtract", sides = "file";
@@ -156,6 +161,7 @@ int main(int argc, char **argv) {
         else if (a == "--labels" && more) labels = argv[++i];
         else if (a == "--hmd-poses" && more) hmd_poses = argv[++i];
         else if (a == "--skeleton-dump" && more) skeleton_dump = argv[++i];
+        else if (a == "--publish-dump" && more) publish_dump = argv[++i];
         else if (a == "--skel" && more) {
             const std::string kv = argv[++i];
             const size_t eq = kv.find('=');
@@ -326,6 +332,20 @@ int main(int argc, char **argv) {
     std::vector<double> pinch_len[2];   // seconds, per side
     int pinch_lost = 0;
     Grip grip(grip_params);
+    // --publish-dump: the files ft-hands would write, in memory, appended per set
+    FILE *pubf = publish_dump.empty() ? nullptr : std::fopen(publish_dump.c_str(), "wb");
+    if (!publish_dump.empty() && !pubf) return std::fprintf(stderr, "%s: can't write it\n", publish_dump.c_str()), 1;
+    static fh_hands_v2_t pub_hands;
+    static fh_gestures_t pub_gestures;
+    Publisher pub;
+    GesturePublisher pub_g;
+    if (pubf) {
+        pub.use(&pub_hands);
+        pub_g.use(&pub_gestures, pinch, grip);
+        const uint32_t sizes[2] = {uint32_t(sizeof pub_hands), uint32_t(sizeof pub_gestures)};
+        std::fwrite("FHDUMP01", 1, 8, pubf);
+        std::fwrite(sizes, sizeof sizes, 1, pubf);
+    }
     double grip_begin_ts[2] = {0, 0};
     std::vector<double> grip_len[2];
     do {
@@ -458,6 +478,13 @@ int main(int argc, char **argv) {
                 std::fprintf(tl, "%.3f pinchd L world %.3f tri %.3f R world %.3f tri %.3f palm %.2f %.2f\n", ts,
                              pinch.world_d[0], pinch.tri_d[0], pinch.world_d[1], pinch.tri_d[1], pinch.palm_down[0],
                              pinch.palm_down[1]);
+            if (pubf) {
+                pub.write(out, t);
+                pub_g.write(pinch, grip, t);
+                pub_hands.v1.publish_ns = pub_gestures.publish_ns = busy_until;
+                std::fwrite(&pub_hands, sizeof pub_hands, 1, pubf);
+                std::fwrite(&pub_gestures, sizeof pub_gestures, 1, pubf);
+            }
             ++processed;
             last_out = out;
             bool l = false, r = false;
@@ -571,6 +598,7 @@ int main(int argc, char **argv) {
     if (tl) std::fclose(tl);
     if (dp) std::fclose(dp);
     if (pp) std::fclose(pp);
+    if (pubf) std::fclose(pubf);
 
     const double secs = nsets > 1 ? nsets / 30.0 : 0;
     const Stats &s = tracker.stats;

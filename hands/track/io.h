@@ -35,6 +35,8 @@ private:
 class Publisher {
 public:
     bool open(std::string &err);
+    // Writes into `mem` instead of the hands file (ft-handreplay --publish-dump).
+    void use(fh_hands_v2_t *mem);
     void write(const std::vector<const Hand *> &hands, uint64_t capture_ns);
     // Fills one hand's version 2 record (also for ft-handreplay's checks).
     static void fill_fit(const Hand &h, uint64_t capture_ns, fh_hand_fit_t &o);

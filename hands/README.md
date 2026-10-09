@@ -4,7 +4,8 @@ Hand tracking from the headset's own cameras. It's deferred: it costs a lot of t
 
 It serves two things in Frametop:
 
-- **Hand cutouts:** where your hand is between an eye and a screen, that eye sees the room through the screen (ft-screens, `screens/handcut.cpp`), so your hands show over the screens the way they do on a Vision Pro.
+- **Hand cutouts:** where your hand is between an eye and a screen, that eye sees the room through the screen (ft-screens, `screens/handcut.cpp`), so your hands show over the screens the way they do on a Vision Pro. The hole is hand-shaped, built from the skeleton (see "Hand cutouts and near input" below).
+- **Near input on Frametop's panels:** poke a screen with your index finger to click, pinch its bar, edges or corners to move or resize it, hold it with both hands to stretch it (ft-screens, `screens/handinput.cpp`; see "Hand cutouts and near input").
 - **Pinches and grips:** with `POINTER_HANDS=1`, the pointer helper takes them as clicks and drags. Look at something and pinch to click it, with the eye tracker doing the looking (`gaze/`), or close your hand to press and drag what the pointer is on. See "Pinches and grips in the pointer" below.
 
 Two programs, each a user service that stops when SteamVR does:
@@ -147,7 +148,7 @@ The status line also says how often a hand was on each side (by where the wrist 
 - The palm detector runs only while fewer than two hands are tracked, at most 5 times a second, on a few zoomed tiles per search. Tiles are picked in proportion to how likely hands are there. Each tile is turned so the expected shoulder-to-hand direction points up. There are 42 tiles and a search tries 2 (3 with no hand tracked), so even the likeliest tile comes round only every 10-11 searches: about 2 s at 5 searches a second, and 4-5 s live, where a search round takes about 50 ms and the tracker manages 2-3 a second.
 - **Re-acquiring a lost hand** (`--reacquire`, on by default since 2026-10-08). A hand that stops being seen is first held, not published: 0.6 s if it was tracked for 30 frames or more (`--hold`), else 0.3 s. Meanwhile its crops are retried where it was heading (its last position plus its velocity). From the first step it's missing and for 1.5 s after it's forgotten, the palm search aims up to 2 tiles at where it should be, in the cameras that see that spot best. The aimed tiles grow with the time since the loss, and they run every processed set while such a hand is missing, not only 5 times a second. The rotation keeps at least one tile per search. In replays this brought a lost hand back on the next processed set (median 0.05 s, against 0.12-0.25 s), and the slowest cases from seconds down to under 1 s (see frame-hands' `notes/reacquire.md`).
 - **Left and right** (`--pair-sides`, on by default since 2026-10-08). Each hand used to be called left or right by a running average of the landmark model's call, and both hands could get the same side for seconds. Now each hand also accumulates the model's calls as fading log-odds, and two hands seen together are one left and one right: the hand with more right-hand evidence is the right one, and which wrist is further right only tips a close call.
-- Frame sets are processed at 30 Hz while a hand moves faster than 0.25 m/s (or a pinch is down or closing), at 15 Hz otherwise, and at 5 Hz while no hand is in view.
+- Frame sets are processed at 30 Hz while a hand moves faster than 0.25 m/s (or a pinch is down or closing), at 15 Hz otherwise, and at 5 Hz while no hand is in view. A reader that needs the full rate writes it to `/run/user/UID/frametop-hands/want-hz` and keeps the file fresh: ft-screens writes 30 there while a hand is near one of its panels, because at 15 Hz a poke's press would come up to 67 ms later. A file older than 1 s lapses.
 
 ### 3D
 
@@ -227,7 +228,7 @@ Settings in `~/.config/frametop.conf`:
 
 `hands/build.sh --tools` also builds the offline tools.
 
-`ft-handreplay DIR` runs a recording through the tracker with the live scheduling and reports how well it kept the hands: hands per set, left and right coverage, track lengths, pinches, jitter, and the same reasons as the status line.
+`ft-handreplay DIR` runs a recording through the tracker with the live scheduling and reports how well it kept the hands: hands per set, left and right coverage, track lengths, pinches, jitter, and the same reasons as the status line. `--publish-dump FILE` also writes what ft-hands would have published after each processed set (the hands and gestures files' bytes), for ft-screens' offline tests (`scripts/test-handinput.sh`, `scripts/bench-matte.sh`). To match the live tracker, replay with `--reacquire 1.5 --reacquire-fast --pair-sides --hold 0.6` and the models in use.
 
 ```
 hands/build/ft-handreplay ~/.local/share/frametop/hands/rec-20260929-120000 --cost --oracle 10 --timeline /tmp/tl.txt
@@ -260,7 +261,28 @@ Python, with NumPy and OpenCV. `setup/dev-container.sh` doesn't install them, be
 - `tools/cut_sets.py REC OUT [--sets N | --at I,J,...]`: copies a few frame sets (by default 8, spread evenly) out of a recording into a small one, to look at or check elsewhere without moving gigabytes. Plain Python, so it also runs on the Frame's host.
 - `tools/convert_models.py`: how `models/ncnn` was made from the OpenCV Zoo ONNX ports of MediaPipe's models (see `models/NOTICE`).
 
-To try the hand cutouts without restarting the desktop, `screens/build/ft-handtest [--distance m] [--width m] [--seconds s]` (built by `screens/build.sh`, run in the dev container, with hand tracking on) shows a test panel of its own, a light grid 1 m wide and 0.8 m ahead by default, and cuts your hands out of it the way ft-screens cuts them out of the screens.
+To try the hand cutouts without restarting the desktop, `screens/build/ft-handtest [--distance m] [--width m] [--seconds s] [--matte mesh|capsules] [--margin deg]` (built by `screens/build.sh`, run in the dev container, with hand tracking on) shows a test panel of its own, a light grid 1 m wide and 0.8 m ahead by default, and cuts your hands out of it the way ft-screens cuts them out of the screens. Every 2 s it prints the composite's cost.
+
+## Hand cutouts and near input
+
+ft-screens reads the hands file (version 2's skeleton when it's there, else version 1's points) and the gestures file once per tick (`screens/handcut.cpp`).
+
+**The matte** (`HANDS_MATTE=mesh`, the default) is hand-shaped: a tapered capsule per finger bone, with real fingers' half-widths (10.5 mm at the index's knuckle down to 7.5 mm at its tip, scaled by the hand's palm length); the palm as a 2.4 cm slab through the wrist and the knuckles, widened to the hand's edges; the thumb's web; and an 18 cm stub of the forearm toward the skeleton's elbow (along the hand's axis without a skeleton). The palm, web and forearm are convex pieces, each drawn as its outline grown by the margin with a soft 2 px edge. `HANDS_MATTE=capsules` draws ft-hands' capsules instead, as before, for comparison (`cutouts matte mesh|capsules` switches it live).
+
+Its margin is an angle seen from the eyes, so it covers the same share of the tracking error at any distance: `HANDS_MATTE_MARGIN` (1.5 degrees) with the hand still, plus `HANDS_MATTE_MOTION` (25 ms) of the hand's motion, at most `HANDS_MATTE_MOTION_MAX` (1.5 degrees) more. The cutout placement probes of 2026-10-08 (frame-hands `captures/probe-2026100*/video_analysis`) measured the cutout points against the hand Room View shows: 1.8-2.4 degrees median still (p90 4.1-4.7), 2.3-3.1 moving at 0.1-0.8 m/s, 4-6 above 0.8 m/s. Part of that is the video landmark model's own error, and an edge needs only the error across it (about 70% of a point's). A margin covering the p90 (4.5 degrees, 3 cm at 40 cm) would turn each finger into a 7 cm blob; 1.5 covers about the median. `cutouts margin DEG [MS [MAX]]` changes it live. The prediction lead stays 36 ms (`HANDS_MATTE_LEAD`, `cutouts lead`): the probes' best lead for fast hands was 6-14 ms, but 36 costs only 0.1-0.2 degrees.
+
+The probes also saw the hand's picture off by an amount that depended on its distance, but not the same way in any two runs, so the correction is a hook, off: `HANDS_MATTE_SHIFT="0.35:0.5,-0.3 0.6:-1,0"` would turn the matte's hands by those yaw and pitch angles (degrees, right and up positive) at those distances from the head, in between linearly (`cutouts shift ...|off` live).
+
+Cost, offline (`scripts/bench-matte.sh` on the probe-moves and lit replays, a 3440x1935 screen 0.6 m ahead, GPU time to finish each buffer on an otherwise idle GPU): the mesh 3.9-4.1 ms per full buffer against 3.8-3.9 for the capsules, and 3.4-3.6 against 3.0-3.4 when only the hands' boxes are redrawn (the margin is wider than the capsules' 4 mm). CPU 0.2 ms per composite either way; building and projecting the matte 14-24 us median.
+
+**Near input** (`screens/handinput.cpp`, frame-hands `notes/hand-interaction.md` sections 3 and 5): a bare hand whose fingertip or pinch point is over a panel and within 15 cm in front of it is near it, and ft-screens tells the pointer helper so ("near"), which then leaves that hand's pinches alone. Near a panel:
+- **Poke to click:** the index fingertip, with the index straight and nearer the surface than the other fingertips, presses when it's at or past the surface for two hands frames in a row, seen by two cameras, and either moving toward the panel at 5 cm/s or more or 1 cm past it. It lets go 1.5 cm out, or 1 cm back from the deepest point (so a tracker that has the finger behind the panel still lets go). The click stays where it was pressed until the fingertip slides 1.5 cm; then it drags. No new press for 150 ms after a release; a finger 8 cm through the panel lets go and needs to come back out first. Within 5 cm the pointer follows the fingertip. The curve, reset, dock and close buttons take pokes too.
+- **Pinch to move or resize:** a pinch that begins on the bar, an edge, the top, a floating window's title bar, a corner or the resize tab takes the panel. Moved, it follows the pinch point 1:1 (closer and farther too) and keeps facing you; by a corner it resizes. A pinch on the content does nothing: the content takes a pinch only through the hand ray.
+- **Two hands:** both hands holding one panel stretch it (its width follows their distance, past a 1 cm dead zone) and turn it with the line between them; let go with one and the other carries on.
+- A glow shows where the fingertip is on the screen (a ring that tightens as it comes to the surface, a dot while pressed), and where the pinch point is near a grab zone (blue while it holds); the bar brightens under a pinch point.
+- It takes the helper's word on which hands are bare and whether hand input is allowed ("hands"); without that word for 3 s, near input is off. `HANDS_NEAR` (1): 0 turns it off, `force` turns it on without the helper (testing). `ft-screens` command `handinput on|off|force|state`.
+
+Offline, `scripts/test-handinput.sh [DUMP...]` runs its unit tests and plays recorded hands (`ft-handreplay --publish-dump`) against panels placed around them. On the probe-moves (v4), lit and dim recordings, in 1 s and longer stretches where a hand held still and pointed (184 s in all; the fingertip still moved 19-23 mm in depth within each, median), a panel 3 cm beyond the fingertip got no press, 2 cm one (in 42 s of probe-moves), 1 cm 7, 0.5 cm 18. frame-hands `notes/hand-interaction.md` section 10 has the rest.
 
 ## Camera check
 
@@ -318,4 +340,5 @@ Guesses, not tested:
 - **Pinches aren't reliable enough for everyday use yet.** That's why hand tracking stays off until `ft-handsctl on`, and `POINTER_HANDS` is 0 by default.
 - **SteamVR can leave the upper cameras and the IR light off after a wake**, and then no hands are found. See "Camera check" above: `camcheck.py` tells, the hand recorder won't start a session, and the fix is a SteamVR restart or a reboot.
 - **The skeleton (2026-10-08) is tested on recordings only**, not in the headset: the cutouts now follow it (version 1's points and capsules), so check them there; `HANDS_SKELETON=0` brings back the filtered landmarks.
-- **Floating windows don't get hand cutouts.** Their panels show crops of the client buffer, which the cutouts' side-by-side buffer doesn't match (`screens/vr.cpp`, `UpdateCutouts`).
+- **Floating windows don't get hand cutouts or glows.** Their panels show crops of the client buffer, which the cutouts' side-by-side buffer doesn't match (`screens/vr.cpp`, `UpdateCutouts`). Near input works on them.
+- **The matte and near input are tested offline only** (2026-10-08): `HEADSET-TESTS.md` has the first headset tests.

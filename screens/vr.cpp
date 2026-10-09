@@ -2167,6 +2167,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         const auto it = g_screens.find(c.panel);
         if (it == g_screens.end()) continue;
         Screen &s = it->second;
+        if (s.drag == Drag::None || !IsHandHolder(s.dragDevice)) continue;   // a laser took it, or it was let go
         if (c.kind == handinput::Carry::Resize) {
             if (s.floating) ResizeFloat(s, c.panel, c.hx, c.hy, c.grabX, c.grabY);
             else if (c.width > 0) SetWidth(s, c.width);

@@ -17,11 +17,12 @@
 //   btn <name> <0|1>             name: trigger, b, x, system, joystick, a (a = claim the laser, no click)
 //   scroll <x> <y>               joystick deflection -1..1
 //   show | hide                  connect (take the hand role) or disconnect (give it back)
-//   role right|left|stylus       which role to hint while connected, from now on (the helper
-//                                sends POINTER_ROLE). A Frame controller in your hand takes
-//                                its hand's role back (it counts as used while held), so a
+//   role right|left|stylus|treadmill  which role to hint while connected, from now on (the
+//                                helper sends POINTER_ROLE). A Frame controller in your hand
+//                                takes its hand's role back (it counts as used while held), so a
 //                                controller used beside the pointer needs the pointer on the
-//                                other hand, or on no hand at all
+//                                other hand, or on no hand at all. Treadmill is no hand: its
+//                                bindings are under /user/treadmill (docs/design.md, "Treadmill role")
 //
 // The device starts disconnected, so it never holds a hand role at boot (holding
 // the right hand while SteamVR started left the Steam UI stuck loading). It
@@ -30,7 +31,8 @@
 // SteamVR keeps a hand role reserved for a disconnected device that still hints
 // that hand, so the real controller would never get it back otherwise.
 //
-// Settings (steamvr.vrsettings section "driver_ft_pointer"): role (int, 2 = right hand, 5 = stylus).
+// Settings (steamvr.vrsettings section "driver_ft_pointer"): role (int, 2 = right hand, 4 = treadmill,
+// 5 = stylus).
 #include <openvr_driver.h>
 
 #include <atomic>
@@ -115,7 +117,9 @@ public:
         props->SetStringProperty(c, Prop_ControllerType_String, "ft_pointer");
         props->SetStringProperty(c, Prop_InputProfilePath_String, "{ft_pointer}/input/ft_pointer_profile.json");
         props->SetStringProperty(c, Prop_RenderModelName_String, "{ft_pointer}/rendermodels/ft_pointer_invisible");
-        props->SetInt32Property(c, Prop_ControllerRoleHint_Int32, TrackedControllerRole_OptOut);  // until "show"
+        // A hand only while shown (see the top); a role that's no hand from the start, since
+        // SteamVR gives a treadmill its path only when the device is added (docs/design.md).
+        props->SetInt32Property(c, Prop_ControllerRoleHint_Int32, HintFor(false));
         props->SetInt32Property(c, Prop_DeviceClass_Int32, TrackedDeviceClass_Controller);
         props->SetBoolProperty(c, Prop_NeverTracked_Bool, false);
 
@@ -211,12 +215,11 @@ public:
         }
         if (snapshot.role > 0 && snapshot.role != role_) {
             role_ = snapshot.role;
-            if (hinted_) VRProperties()->SetInt32Property(container_, Prop_ControllerRoleHint_Int32, role_);
+            VRProperties()->SetInt32Property(container_, Prop_ControllerRoleHint_Int32, HintFor(hinted_));
         }
         if (snapshot.visible != hinted_) {
             // Claim the hand before connecting; give it up when disconnecting.
-            VRProperties()->SetInt32Property(container_, Prop_ControllerRoleHint_Int32,
-                                             snapshot.visible ? role_ : int32_t(TrackedControllerRole_OptOut));
+            VRProperties()->SetInt32Property(container_, Prop_ControllerRoleHint_Int32, HintFor(snapshot.visible));
             hinted_ = snapshot.visible;
         }
         const bool ok = hmd.bPoseIsValid && snapshot.visible;
@@ -248,7 +251,11 @@ private:
     uint32_t objectId_ = k_unTrackedDeviceIndexInvalid;
     PropertyContainerHandle_t container_ = k_ulInvalidPropertyContainer;
     int32_t role_ = TrackedControllerRole_RightHand;
-    bool hinted_ = false;  // whether the role hint currently claims role_
+    bool hinted_ = false;  // whether we're shown (a hand role is hinted only then)
+    int32_t HintFor(bool shown) const {
+        const bool hand = role_ == TrackedControllerRole_LeftHand || role_ == TrackedControllerRole_RightHand;
+        return shown || !hand ? role_ : int32_t(TrackedControllerRole_OptOut);
+    }
     DriverPose_t pose_{};
     bool reportedOff_ = false;  // the disconnected pose has gone out (it isn't repeated)
     // What the input components were last set to.
@@ -335,7 +342,8 @@ private:
             role = !std::strcmp(name, "left")     ? TrackedControllerRole_LeftHand
                    : !std::strcmp(name, "right")  ? TrackedControllerRole_RightHand
                    : !std::strcmp(name, "stylus") ? TrackedControllerRole_Stylus
-                                                  : 0;
+                   : !std::strcmp(name, "treadmill") ? TrackedControllerRole_Treadmill
+                                                     : 0;
             if (role) kind = kRole;
         } else if (std::sscanf(cmd, "btn %31s %d", name, &v) == 2) {
             for (int i = 0; i < kButtons; ++i)

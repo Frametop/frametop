@@ -1,4 +1,5 @@
-// Offline tests for near hand input (handinput.cpp) and the hand matte (handcut.cpp).
+// Offline tests for near hand input (handinput.cpp), the palm menu (palmmenu.cpp) and the hand
+// matte (handcut.cpp).
 //
 //   handinput_test                       unit tests on synthetic hands and panels
 //   handinput_test --replay FILE.dump... recorded hands (ft-handreplay --publish-dump) against
@@ -9,6 +10,7 @@
 // test-c (unit tests only). No OpenVR, GPU or headset.
 #include "../handcut.h"
 #include "../handinput.h"
+#include "../palmmenu.h"
 
 #include <algorithm>
 #include <chrono>
@@ -94,7 +96,46 @@ struct SynthHand {
     bool byPinch = false;
     double pinch[3] = {0, 0, 0};
     double pitchDeg = 0, yawDeg = 0;   // the hand turned about the tip: down (pitch < 0), to the right (yaw < 0)
+    // or an open hand for the palm menu (PalmHand): its palm's centre here
+    bool palm = false;
+    double palmAt[3] = {0, -0.25, -0.35};
+    double rollDeg = 0;                // about the fingers' axis: 0 palm up, 180 palm down
+    double tiltDeg = 20;               // fingertips up: the palm turns toward the head behind it
+    int curl = 0;                      // middle, ring and little: 0 open, 1 half curled, 2 a fist
 };
+
+// An open hand, palm up, fingers ahead (-z), as SynthHand says; the right hand's thumb is on +x.
+void PalmHand(const SynthHand &h, float out[21][3]) {
+    static const float base[21][3] = {
+        {0, 0, 0},
+        {0.02f, 0, -0.02f},       {0.04f, 0.005f, -0.04f},  {0.055f, 0.01f, -0.06f},  {0.065f, 0.015f, -0.075f},
+        {0.025f, 0, -0.09f},      {0.027f, 0.005f, -0.13f}, {0.028f, 0.01f, -0.155f}, {0.029f, 0.012f, -0.175f},
+        {0.005f, 0, -0.095f},     {0.005f, 0.005f, -0.14f}, {0.005f, 0.01f, -0.168f}, {0.005f, 0.012f, -0.19f},
+        {-0.013f, 0, -0.09f},     {-0.013f, 0.005f, -0.13f}, {-0.013f, 0.01f, -0.155f}, {-0.013f, 0.012f, -0.175f},
+        {-0.03f, 0, -0.08f},      {-0.03f, 0.005f, -0.11f}, {-0.03f, 0.01f, -0.13f},  {-0.03f, 0.012f, -0.145f}};
+    std::memcpy(out, base, sizeof base);
+    // curled: the last three joints of the middle, ring and little fingers fold toward the palm
+    static const float half[3][3][3] = {{{0.005f, 0.02f, -0.13f}, {0.005f, 0.035f, -0.135f}, {0.005f, 0.04f, -0.13f}},
+                                        {{-0.013f, 0.02f, -0.125f}, {-0.013f, 0.035f, -0.13f}, {-0.013f, 0.04f, -0.125f}},
+                                        {{-0.03f, 0.02f, -0.11f}, {-0.03f, 0.03f, -0.115f}, {-0.03f, 0.035f, -0.115f}}};
+    static const float fist[3][3][3] = {{{0.005f, 0.03f, -0.11f}, {0.005f, 0.04f, -0.09f}, {0.005f, 0.03f, -0.07f}},
+                                        {{-0.013f, 0.03f, -0.105f}, {-0.013f, 0.04f, -0.085f}, {-0.013f, 0.03f, -0.068f}},
+                                        {{-0.03f, 0.03f, -0.095f}, {-0.03f, 0.035f, -0.08f}, {-0.03f, 0.028f, -0.065f}}};
+    for (int f = 0; f < 3 && h.curl; ++f) std::memcpy(out[10 + 4 * f], h.curl == 1 ? half[f] : fist[f], sizeof half[f]);
+    const double r = h.rollDeg * M_PI / 180, a = h.tiltDeg * M_PI / 180;
+    double c[3] = {0, 0, 0};
+    for (int j = 0; j < 21; ++j) {
+        float *q = out[j];
+        const double x = h.right ? q[0] : -q[0], y = q[1], z = q[2];
+        const double x1 = x * std::cos(r) - y * std::sin(r), y1 = x * std::sin(r) + y * std::cos(r);   // roll about z
+        const double y2 = y1 * std::cos(a) - z * std::sin(a), z2 = y1 * std::sin(a) + z * std::cos(a); // tilt about x
+        q[0] = float(x1), q[1] = float(y2), q[2] = float(z2);
+    }
+    for (int j : {0, 5, 9, 13, 17})
+        for (int i = 0; i < 3; ++i) c[i] += out[j][i] / 5.0;
+    for (int j = 0; j < 21; ++j)
+        for (int i = 0; i < 3; ++i) out[j][i] = float(out[j][i] - c[i] + h.palmAt[i]);
+}
 
 struct Synth {
     fh_hands_v2_t file{};
@@ -115,6 +156,10 @@ struct Synth {
             if (!h.present) continue;
             fh_hand_t &o = file.v1.hands[n++];
             o.id = h.id, o.flags = (h.right ? FH_HAND_RIGHT : 0) | (h.stereo ? FH_HAND_STEREO : 0), o.confidence = 1;
+            if (h.palm) {
+                PalmHand(h, o.pts);
+                continue;
+            }
             float pts[21][3];
             PointingHand(pts, h.bent);
             const double a = h.pitchDeg * M_PI / 180, b = h.yawDeg * M_PI / 180;
@@ -1132,6 +1177,249 @@ int Replay(const char *path) {
 
 }  // namespace
 
+// ------------------------------------------------------------------------------ the palm menu
+
+SynthHand PalmUpHand(bool right = true, uint32_t id = 1) {
+    SynthHand h;
+    h.palm = true, h.right = right, h.id = id;
+    return h;
+}
+
+handcut::Hand Seen(const SynthHand &sh) {
+    Synth s;
+    s.Write({sh}, 1'000'000'000);
+    handcut::Hands h;
+    h.Feed(&s.file, sizeof(fh_hands_t), nullptr, Identity(), 1'010'000'000);
+    return h.seen().empty() ? handcut::Hand{} : h.seen()[0];
+}
+
+void TestPalmUp() {
+    const palmmenu::Params k;
+    for (bool right : {false, true}) {
+        SynthHand sh = PalmUpHand(right);
+        palmmenu::Pose pose;
+        // palm up at chest height, tilted a little toward the face, looked at: up
+        CHECK(palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose));
+        CHECK(pose.facingDeg < 45 && pose.lookDeg < 40 && pose.open > 1.8);
+        double n[3];
+        palmmenu::PalmNormal(Seen(sh), n);
+        CHECK(n[1] > 0.9);   // the normal comes out of the palm, up, for either hand
+        // palm down (typing, resting): not
+        sh.rollDeg = 180;
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose) && pose.facingDeg > 120);
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, true));
+        // on its side (thumb up): not
+        sh.rollDeg = right ? 90 : -90;
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, true));
+        // a fist: not; half curled: only once up (hysteresis)
+        sh.rollDeg = 0, sh.curl = 2;
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, true));
+        sh.curl = 1;
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose) && palmmenu::PalmUp(Seen(sh), Identity(), k, true));
+        CHECK(pose.open > k.openLeave && pose.open < k.open);
+        // turned a little away from the face: only once up
+        sh.curl = 0, sh.tiltDeg = -10;
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose) && palmmenu::PalmUp(Seen(sh), Identity(), k, true));
+        CHECK(pose.facingDeg > k.facing && pose.facingDeg < k.facingLeave);
+        // not looked at (out to the side and low), or out of reach: not
+        sh.tiltDeg = 20, sh.palmAt[0] = right ? 0.4 : -0.4, sh.palmAt[1] = -0.15, sh.palmAt[2] = -0.2;
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, true, &pose) && pose.lookDeg > k.lookLeave);
+        sh.palmAt[0] = 0, sh.palmAt[1] = -0.3, sh.palmAt[2] = -0.8;
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, true));
+        // the head turned to look at it there: up again (the head's pose counts, not the room's axes)
+        sh.palmAt[0] = right ? 0.4 : -0.4, sh.palmAt[1] = -0.25, sh.palmAt[2] = 0;
+        sh.tiltDeg = 0;
+        sh.rollDeg = right ? 35 : -35;   // the palm turned toward the head
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, false));
+        CHECK(palmmenu::PalmUp(Seen(sh), RotY(right ? -M_PI / 2 : M_PI / 2, 0, 0, 0), k, false));
+    }
+}
+
+struct PalmRig {
+    handcut::Hands hands;
+    palmmenu::PalmMenu menu;
+    Synth synth;
+    int64_t t = 1'000'000'000;
+    bool allowed[2] = {true, true}, busy[2] = {false, false};
+    std::vector<int> toggles;   // the side of each toggle
+    void Frame(const std::vector<SynthHand> &h, int ticks = 3) {
+        synth.Write(h, t);
+        for (int k = 0; k < ticks; ++k) {
+            const int64_t now = t + 30'000'000 + k * 11'111'111;
+            if (k == 0) hands.Feed(&synth.file, sizeof(fh_hands_t), &synth.g, Identity(), now);
+            else hands.Feed(nullptr, 0, nullptr, Identity(), now);
+            palmmenu::Input i;
+            i.nowNs = now, i.hands = &hands, i.head = Identity(), i.haveHead = true;
+            for (int s = 0; s < 2; ++s) i.allowed[s] = allowed[s], i.busy[s] = busy[s];
+            menu.Update(i);
+            if (menu.toggled() >= 0) toggles.push_back(menu.toggled());
+        }
+        t += 33'333'333;
+    }
+    void Frames(int n, const std::vector<SynthHand> &h) {
+        for (int k = 0; k < n; ++k) Frame(h);
+    }
+    void Pinch(int side, bool down, uint32_t id = 1) {
+        const double p[3] = {0, -0.2, -0.35};
+        synth.Pinch(side, down, t, p, id);
+    }
+};
+
+void TestPalmMenuShows() {
+    PalmRig r;
+    const SynthHand up = PalmUpHand();
+    SynthHand down = up;
+    down.rollDeg = 180;
+    r.Frames(5, {up});   // 167 ms
+    CHECK(!r.menu.shown(1));
+    r.Frames(6, {up});   // 367 ms
+    CHECK(r.menu.shown(1) && !r.menu.shown(0) && !r.menu.pinched(1));
+    double at[3];
+    CHECK(r.menu.Ring(1, r.hands.shown(), at));
+    const handcut::Hand h = Seen(up);
+    double palm[3];
+    h.Palm(palm);
+    NEAR(at[1] - palm[1], r.menu.params().lift * std::cos(20 * M_PI / 180), 0.003);   // above the palm, toward the face
+    CHECK(!r.menu.Ring(0, r.hands.shown(), at));
+    // turned away for one frame: stays; for 150 ms: goes
+    r.Frame({down});
+    CHECK(r.menu.shown(1));
+    r.Frame({up});
+    r.Frames(6, {down});
+    CHECK(!r.menu.shown(1));
+    // a palm up for less than showMs, twice: never shows
+    r.Frames(5, {up});
+    r.Frame({down});
+    r.Frames(5, {up});
+    CHECK(!r.menu.shown(1));
+    // the hand gone: the ring goes after lostMs
+    r.Frames(6, {up});
+    CHECK(r.menu.shown(1));
+    r.Frames(10, {});
+    CHECK(!r.menu.shown(1));
+    // the left hand alone
+    r.Frames(11, {PalmUpHand(false, 2)});
+    CHECK(r.menu.shown(0) && !r.menu.shown(1));
+    // not allowed (a controller on that side, a game without the dashboard), or near input busy
+    // with that hand: no ring
+    r.allowed[0] = false;
+    r.Frame({PalmUpHand(false, 2)});
+    CHECK(!r.menu.shown(0));
+    r.allowed[0] = true, r.busy[0] = true;
+    r.Frames(11, {PalmUpHand(false, 2)});
+    CHECK(!r.menu.shown(0));
+    r.busy[0] = false;
+    r.menu.params().on = false;   // HANDS_PALM_MENU=0
+    r.Frames(11, {PalmUpHand(false, 2)});
+    CHECK(!r.menu.shown(0) && r.toggles.empty());
+}
+
+void TestPalmMenuPinch() {
+    const SynthHand up = PalmUpHand();
+    {   // a pinch tap on the ring: lit while held, the release toggles the Steam menu
+        PalmRig r;
+        r.Frames(11, {up});
+        r.Pinch(1, true);
+        r.Frame({up});
+        CHECK(r.menu.pinched(1) && r.menu.shown(1) && r.toggles.empty());
+        r.Frames(3, {up});
+        r.Pinch(1, false);
+        r.Frame({up});
+        CHECK(!r.menu.pinched(1) && r.menu.shown(1) && r.toggles == std::vector<int>{1});
+        CHECK(r.menu.stats.toggles == 1 && r.menu.stats.pinches == 1);
+        // again within againMs (one pinch read as two): nothing; later: toggles again (closes it)
+        r.Pinch(1, true);
+        r.Frame({up});
+        r.Pinch(1, false);
+        r.Frame({up});
+        CHECK(r.toggles.size() == 1);
+        r.Frames(15, {up});
+        r.Pinch(1, true);
+        r.Frame({up});
+        r.Pinch(1, false);
+        r.Frame({up});
+        CHECK(r.toggles.size() == 2);
+    }
+    {   // a pinch that began and ended between two reads (a quick tap): toggles too
+        PalmRig r;
+        r.Frames(11, {up});
+        r.Pinch(1, true);
+        r.Pinch(1, false);
+        r.Frame({up});
+        CHECK(r.toggles == std::vector<int>{1});
+    }
+    {   // a pinch that began before the ring showed is the helper's: its release does nothing
+        PalmRig r;
+        r.Frames(3, {up});
+        r.Pinch(1, true);
+        r.Frames(10, {up});
+        CHECK(r.menu.shown(1) && !r.menu.pinched(1));
+        r.Pinch(1, false);
+        r.Frame({up});
+        CHECK(r.toggles.empty());
+    }
+    {   // lost (the hand went mid-pinch): nothing
+        PalmRig r;
+        r.Frames(11, {up});
+        r.Pinch(1, true);
+        r.Frame({up});
+        r.Pinch(1, false);
+        r.synth.g.pinch[1].flags |= FH_PINCH_LOST;
+        r.Frame({up});
+        CHECK(r.toggles.empty() && r.menu.stats.cancels == 1);
+    }
+    {   // the hand turned over while pinching: the ring stays until the release, which does nothing
+        PalmRig r;
+        SynthHand down = up;
+        down.rollDeg = 180;
+        r.Frames(11, {up});
+        r.Pinch(1, true);
+        r.Frame({up});
+        r.Frames(8, {down});
+        CHECK(r.menu.pinched(1) && r.menu.shown(1));
+        r.Pinch(1, false);
+        r.Frame({down});
+        CHECK(r.toggles.empty() && r.menu.stats.cancels == 1);
+        r.Frames(6, {down});
+        CHECK(!r.menu.shown(1));
+    }
+    {   // a fist pinch (curled fingers) once the ring shows: still the ring's (the leave thresholds)
+        PalmRig r;
+        SynthHand half = up;
+        half.curl = 1;
+        r.Frames(11, {up});
+        r.Frames(3, {half});
+        r.Pinch(1, true);
+        r.Frame({half});
+        r.Pinch(1, false);
+        r.Frame({half});
+        CHECK(r.toggles == std::vector<int>{1});
+    }
+    {   // hand input taken away mid-pinch: cancelled
+        PalmRig r;
+        r.Frames(11, {up});
+        r.Pinch(1, true);
+        r.Frame({up});
+        r.allowed[1] = false;
+        r.Frame({up});
+        r.Pinch(1, false);
+        r.allowed[1] = true;
+        r.Frame({up});
+        CHECK(r.toggles.empty() && !r.menu.pinched(1) && r.menu.stats.cancels == 1);
+    }
+    {   // the other hand's pinch: not the ring's
+        PalmRig r;
+        SynthHand other = PalmUpHand(false, 2);
+        other.rollDeg = 180;
+        r.Frames(11, {up, other});
+        r.Pinch(0, true, 2);
+        r.Frame({up, other});
+        r.Pinch(0, false, 2);
+        r.Frame({up, other});
+        CHECK(r.toggles.empty() && r.menu.shown(1) && !r.menu.shown(0));
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc > 2 && !std::strcmp(argv[1], "--replay")) {
         int rc = 0;
@@ -1158,6 +1446,9 @@ int main(int argc, char **argv) {
     TestStretchHands();
     TestV2Ingest();
     TestMatte();
+    TestPalmUp();
+    TestPalmMenuShows();
+    TestPalmMenuPinch();
     std::printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

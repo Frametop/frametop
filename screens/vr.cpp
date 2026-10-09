@@ -63,6 +63,9 @@
 //     and the pinch point are. It takes the pointer helper's word on which hands are bare and
 //     whether hand input is allowed ("hands"), and tells it which hands are near a panel
 //     ("near"), so a pinch is either ours or the helper's.
+//   - the palm menu (palmmenu.cpp): a bare hand turned palm up toward your face, while you look
+//     at it, gets a small ring above the palm; a pinch tap by that hand opens the Steam menu
+//     (steam/ft-steam menu), or closes the dashboard. That hand counts as near meanwhile.
 //   - the catcher: a button pressed on a screen is released in KWin even when the laser
 //     lets go between panels (UpdateCatcher).
 //   - floating windows (docs/floating-windows.md): KWin's spare outputs, after the screens,
@@ -80,6 +83,7 @@
 
 #include "handcut.h"
 #include "handinput.h"
+#include "palmmenu.h"
 #include "keyboard.h"
 
 #include <drm_fourcc.h>
@@ -1216,32 +1220,37 @@ void EndDrag(Screen &s) {
     ApplyAlpha(s);
 }
 
-// Run `ft-layout <cmd>` in the background, logging to the host's runtime directory
-// (XDG_RUNTIME_DIR, not the nested desktop's; else /tmp with O_NOFOLLOW: a symlink there
-// must not be followed). The desktop start truncates the same log.
-void RunLayout(const char *cmd) {
+// Run one of Frametop's tools, `<repo>/<tool> <arg>`, in the background. log: its output goes
+// there, in the host's runtime directory (XDG_RUNTIME_DIR, not the nested desktop's; else /tmp
+// with O_NOFOLLOW: a symlink there must not be followed); null: to ours.
+void RunTool(const char *tool, const char *arg, const char *log) {
     if (g_beside) return;
     char exe[PATH_MAX];
     if (!realpath("/proc/self/exe", exe)) return;
     const char *runtime = std::getenv("XDG_RUNTIME_DIR");
-    std::string logname = std::string(runtime && *runtime ? runtime : "/tmp") + "/frametop-layout.log";
-    std::string layout(exe);  // <repo>/screens/build/ft-screens -> <repo>/layout/ft-layout
-    for (int up = 0; up < 3 && layout.rfind('/') != std::string::npos; ++up) layout.resize(layout.rfind('/'));
-    layout += "/layout/ft-layout";
+    std::string logname = log ? std::string(runtime && *runtime ? runtime : "/tmp") + "/" + log : "ours";
+    std::string path(exe);  // <repo>/screens/build/ft-screens -> <repo>/<tool>
+    for (int up = 0; up < 3 && path.rfind('/') != std::string::npos; ++up) path.resize(path.rfind('/'));
+    path += std::string("/") + tool;
     posix_spawn_file_actions_t io;
     posix_spawn_file_actions_init(&io);
     posix_spawn_file_actions_addopen(&io, 0, "/dev/null", O_RDONLY, 0);
-    posix_spawn_file_actions_addopen(&io, 1, logname.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
-    posix_spawn_file_actions_adddup2(&io, 1, 2);
-    std::string arg(cmd);
-    char *argv[] = {layout.data(), arg.data(), nullptr};
+    if (log) {
+        posix_spawn_file_actions_addopen(&io, 1, logname.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
+        posix_spawn_file_actions_adddup2(&io, 1, 2);
+    }
+    std::string a(arg);
+    char *argv[] = {path.data(), a.data(), nullptr};
     pid_t pid;  // reaped by the compositor's SIGCHLD handler
     // A log that can't be opened (a symlink or a directory in its place) fails the spawn too.
-    const int rc = posix_spawn(&pid, layout.c_str(), &io, nullptr, argv, environ);
+    const int rc = posix_spawn(&pid, path.c_str(), &io, nullptr, argv, environ);
     if (rc != 0)
-        std::printf("can't run %s (log %s): %s\n", layout.c_str(), logname.c_str(), std::strerror(rc));
+        std::printf("can't run %s (log %s): %s\n", path.c_str(), logname.c_str(), std::strerror(rc));
     posix_spawn_file_actions_destroy(&io);
 }
+
+// `ft-layout <cmd>`, logging to frametop-layout.log. The desktop start truncates that log.
+void RunLayout(const char *cmd) { RunTool("layout/ft-layout", cmd, "frametop-layout.log"); }
 
 // KWin's outputs follow where the screens are, so the pointer and dragged windows cross
 // to the screen you see next to this one: `ft-layout scale` runs once a move has settled.
@@ -2047,11 +2056,16 @@ struct HandsWord {
 // testing without the helper; the "handinput" command switches it too).
 enum class NearMode { Off, Helper, Force } g_nearMode = NearMode::Helper;
 
-bool SideAllowed(int side) {
-    if (g_nearMode == NearMode::Off || g_paused) return false;
+// Hand input on this side now: the helper's word (or force). The palm menu goes by this alone:
+// paused for a VR game, the helper allows hands while the dashboard is open, and the ring isn't a
+// panel that hides.
+bool HandsAllowed(int side) {
     if (g_nearMode == NearMode::Force) return true;
     return NowMs() - g_handsWord.atMs < 3000 && g_handsWord.allowed && g_handsWord.hand[side];
 }
+
+// Near input: that, with near input on and Frametop's panels not paused away.
+bool SideAllowed(int side) { return g_nearMode != NearMode::Off && !g_paused && HandsAllowed(side); }
 
 bool HandInputOn() { return g_nearMode != NearMode::Off; }
 
@@ -2119,6 +2133,41 @@ void WantHz(bool near) {
     close(fd);
 }
 
+// The palm menu (palmmenu.h): before near input, which leaves it the hand it has. Its ring is
+// a guide ("frametop.guide.palm.*"), so the pointer helper's cursor and rays pass through it.
+palmmenu::PalmMenu g_palm;
+GuidePart g_palmRing[2];
+
+void UpdatePalmMenu(const handinput::Input &in) {
+    palmmenu::Input pin;
+    pin.nowNs = in.nowNs, pin.hands = &g_hands, pin.head = in.head, pin.haveHead = in.haveHead;
+    for (int k = 0; k < 2; ++k)
+        pin.allowed[k] = in.haveHead && !g_beside && HandsAllowed(k), pin.busy[k] = g_handInput.pressing(k) || g_handInput.grabbing(k);
+    g_palm.Update(pin);
+    if (g_palm.toggled() >= 0) {
+        std::printf("palm menu (%s hand): the Steam menu\n", g_palm.toggled() ? "right" : "left");
+        RunTool("steam/ft-steam", "menu", nullptr);   // opens it, or closes the dashboard
+    }
+    for (int k = 0; k < 2; ++k) {
+        GuidePart &r = g_palmRing[k];
+        double pt[3];
+        if (!in.haveHead || !g_palm.Ring(k, g_hands.shown(), pt)) {
+            r.Show(false);
+            continue;
+        }
+        if (r.overlay == vr::k_ulOverlayHandleInvalid) {
+            const char *key = k ? "frametop.guide.palm.right" : "frametop.guide.palm.left";
+            if (vr::VROverlay()->CreateOverlay(key, "Frametop: palm menu", &r.overlay) != vr::VROverlayError_None) continue;
+            vr::VROverlay()->SetOverlayWidthInMeters(r.overlay, float(g_palm.params().size));
+            vr::VROverlay()->SetOverlaySortOrder(r.overlay, 22);
+        }
+        const Mat m = FacingPose(pt, in.head);
+        vr::VROverlay()->SetOverlayTransformAbsolute(r.overlay, vr::TrackingUniverseStanding, &m);
+        r.Light(g_palm.pinched(k), RingTexture(g_palm.pinched(k)), 128);
+        r.Show(true);
+    }
+}
+
 void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data) {
     std::vector<handinput::Panel> panels;
     for (auto &[i, s] : g_screens) {
@@ -2135,6 +2184,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     // KWin's button, let go of by someone else (ReleaseStuck: its screen hid, or paused)
     for (int k = 0; k < 2; ++k)
         if (g_handInput.pressingKwin(k) && !(g_press.buttons && g_press.device == kHandHolder[k])) g_handInput.ForgetPress(k);
+    UpdatePalmMenu(in);
+    for (int k = 0; k < 2; ++k) in.allowed[k] = in.allowed[k] && !g_palm.shown(k);   // the palm menu has that hand
     g_handInput.Update(in, panels);
 
     for (const handinput::Event &e : g_handInput.events()) {
@@ -2217,11 +2268,13 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         if (bits != s.handHover) s.handHover = bits, ApplyAlpha(s);
         if (g_handInput.nearPanels().count(i)) s.nearUntil = g_tick + kControlsLinger;   // the controls show
     }
-    // the near claim, for each hands frame (the helper waits for it at a pinch's begin)
-    if (g_handInput.newFrame() && HandInputOn())
-        SendPointer("near " + std::to_string(g_handInput.frameNs()) + " " + (g_handInput.near(0) ? "1" : "0") + " " +
-                    (g_handInput.near(1) ? "1" : "0"));
-    WantHz(g_handInput.anyNear());
+    // the near claim, for each hands frame (the helper waits for it at a pinch's begin); a hand
+    // the palm menu has counts too, so its pinch doesn't click for the helper
+    auto near = [](int k) { return g_handInput.near(k) || g_palm.shown(k); };
+    if (g_handInput.newFrame() && (HandInputOn() || g_palm.params().on))
+        SendPointer("near " + std::to_string(g_handInput.frameNs()) + " " + (near(0) ? "1" : "0") + " " +
+                    (near(1) ? "1" : "0"));
+    WantHz(g_handInput.anyNear() || g_palm.anyShown());
 }
 
 // Steam in front: the dashboard (the Steam menu) is open, or Steam's own keyboard is up
@@ -2297,6 +2350,8 @@ bool ft_vr_init(void) {
     num("HANDS_POKE_REST_NEAR", k.restNear, 0, 2);
     const std::string near = handcut::Setting("HANDS_NEAR", "1");
     g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
+    g_palm.params().on = handcut::Setting("HANDS_PALM_MENU", "1") != "0";
+    std::printf("hands: palm menu %s\n", g_palm.params().on ? "on (palm up, pinch: the Steam menu)" : "off");
     std::printf("hands: pokes within %.0f deg of a panel's normal, not from a hand %.2f m under the eyes and within %.2f m\n",
                 k.fingerAngle, k.restBelow, k.restNear);
     std::printf("hands: matte %s, margin %.2f deg + %.0f ms of motion (at most %.2f more), lead %.0f ms, shift %s; near input %s%s%s\n",
@@ -2335,6 +2390,8 @@ void ft_vr_shutdown(void) {
     }
     for (auto &[dev, g] : g_guides)
         for (auto o : {g.ring.overlay, g.dot.overlay}) vr::VROverlay()->DestroyOverlay(o);
+    for (GuidePart &r : g_palmRing)
+        if (r.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(r.overlay), r = GuidePart{};
     keyboard::Destroy();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     for (auto &[k, h] : g_imports) vr::VRIPCResourceManager()->UnrefResource(h);
@@ -2606,7 +2663,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     // the hands, once per tick, for the cutouts and hand input
     {
         Mat head;
-        g_handsNow = (g_cutouts || HandInputOn()) && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) &&
+        g_handsNow = (g_cutouts || HandInputOn() || g_palm.params().on) && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) &&
                      g_hands.Update(head, std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count());
     }
     for (auto &[index, s] : g_screens) {
@@ -2899,6 +2956,7 @@ void ft_vr_keyboard_hide(void) {
 //                             (on change and every second; older than 3 s it lapses)
 //   handinput on|off|force|state   near hand input: on follows the helper's word, force ignores it
 //                             -> "ok <mode> <left state> <right state>; <counts>"
+//   palmmenu on|off|state      the palm menu (HANDS_PALM_MENU) -> "ok <on|off>; <left> <right>; <counts>"
 // Floating windows (from ft-floatd; <screen> is the spare output's number, after the screens):
 //   float <screen> <metres per pixel> <x> <y> <w> <h> <title>   the window's rectangle in the
 //                             buffer and its title bar's height (pixels); shows the panel
@@ -3089,6 +3147,12 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
                       g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.controls, st.grabs, st.stretches,
                       st.heldNotStereo, st.heldNotExtended, st.heldNotNearest, st.heldPinching, st.heldBusy, st.heldResting,
                       st.heldAskew, st.heldSlow);
+    } else if (std::sscanf(cmd, "palmmenu %15s", word) == 1) {
+        if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_palm.params().on = !std::strcmp(word, "on");
+        else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error palmmenu on|off|state");
+        const auto &st = g_palm.stats;
+        std::snprintf(reply, size, "ok %s; %s; %d shown, %d pinches, %d toggles, %d cancelled", g_palm.params().on ? "on" : "off",
+                      g_palm.Describe().c_str(), st.shows, st.pinches, st.toggles, st.cancels);
     } else if (std::sscanf(cmd, "cutouts %15s", word) == 1) {
         char arg[16] = "";
         double ms = 0, a = 0, b = 0;

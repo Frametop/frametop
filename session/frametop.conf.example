@@ -68,6 +68,10 @@ HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face an
 HANDS_VIEW_MODEL=asset     # rendered hands (ft-handview): a 3D hand model posed by the tracking, asset (WebXR's generic hand) | babylon | mrtk3 | godot | mrtk2 (screens/assets/hands/README.md) | robot = a robot hand built from the skeleton (white shells, dark joints, cyan accents) | capsules = tubes from the skeleton (the older look)
 HANDS_VIEW_STYLE=ghost     # rendered hands: ghost = light, see-through, glowing toward its edges | solid = matte light grey lit from above, a soft rim light
 HANDS_VIEW_ROOMVIEW=1      # rendered hands: 1 = drawn with Room View on too, over the cutout | 0 = only with Room View off
+HANDS_FLAG_BUFFER=1        # hands: keep the last seconds of hand crops in RAM (about 50 MB) so `ft-handsctl flag [note]` can save a tracking failure for the offline tools | 0 = keep nothing
+HANDS_FLAG_DIR=~/.local/share/frametop/hands/flags  # hands: where `ft-handsctl flag` saves flags (they show your hands and some of the room)
+HANDS_FLAG_FLASH=1         # hands: the drawn hands pulse cyan when a flag is taken | 0 = no pulse
+HANDS_FLAG_TONE=0          # hands: 1 = also a short tone when a flag is taken
 POINTER_HANDS=0            # 1 = pinches click (on the release; hold and move to nudge the pointer first) and grips press and drag, with hand tracking
 POINTER_PINCH_GAIN=0.5     # hands without gaze mode: a held pinch drags the pointer this times the hand's angle (precision)
 POINTER_PINCH_DEADZONE=1.5 # hands without gaze mode: degrees the pinching hand moves before the pointer does (a tap's jitter)

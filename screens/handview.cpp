@@ -45,6 +45,11 @@
 //   model <name>|robot|capsules  the hand model, style ghost|solid its look, inroom 1|0 drawing with
 //                             Room View on (live, until a restart) -> "ok"
 //   state                     -> "ok <the status line>"
+//   flash                     both drawn hands pulse cyan for half a second: a flag was taken
+//                             (`ft-handsctl flag`, hands/README.md) -> "ok <hands shown>"
+//   poses <S>                 the head's poses over the last S seconds (at most 20; kept 30 times a
+//                             second) -> "ok" and a line each: "<CLOCK_MONOTONIC ns> <3x4 row-major,
+//                             standing universe>" (ft-handsctl saves them with a flag)
 #include "handcut.h"
 #include "handmesh.h"
 #include "handskin.h"
@@ -837,6 +842,7 @@ struct Side {
     int64_t lastDraw = 0;
     uint64_t lastFrame = 0;
     double lastPalm[3] = {};
+    float flash = 0;                   // the flash's pulse it was last drawn with
     const char *why = "not tracked";   // why it's hidden
     // since the last status line
     int draws = 0, busy = 0;
@@ -1001,6 +1007,25 @@ Cut CutOf(const handmesh::Mesh &points, const handskin::Bones &b) {
     for (int i = 0; i < 3; ++i) c.centre[i] = float(out[0][i]), c.axis[i] = float(out[1][i]), c.u[i] = float(out[2][i]), c.v[i] = float(out[3][i]);
     c.ok = true;
     return c;
+}
+
+// flash: how far into the cyan a pulse (the flash command) is, 0..1, at `ago` seconds after it began.
+constexpr double kFlashS = 0.5;
+float FlashAmount(double ago) { return ago < 0 || ago > kFlashS ? 0.0f : float(std::sin(M_PI * ago / kFlashS)); }
+
+// The look with a flash's pulse in it: the colours toward cyan, the accents brighter.
+Style Flashed(const Style &st, float f) {
+    Style o = st;
+    const float cyan[3] = {0.30f, 0.88f, 1.0f};
+    for (int i = 0; i < 3; ++i) {
+        o.base[i] += (cyan[i] - o.base[i]) * 0.7f * f;
+        o.glow[i] += (cyan[i] - o.glow[i]) * f;
+        o.shell[i] += (cyan[i] - o.shell[i]) * 0.5f * f;
+        o.accent[i] += (1.0f - o.accent[i]) * 0.6f * f;
+    }
+    o.body += (1.0f - o.body) * 0.5f * f, o.fres += (1.0f - o.fres) * 0.5f * f, o.tip += (1.0f - o.tip) * f;
+    for (float &op : o.opacity) op += (1.0f - op) * 0.5f * f;
+    return o;
 }
 
 void Render(Gpu &gpu, Output &o, const Look &look, const handcut::Hand &h, const handmesh::Mesh &mesh,
@@ -1175,6 +1200,16 @@ int main(int argc, char **argv) {
     Mat demoHead{};
     bool haveDemoHead = false;
     std::string statusLine = "starting";
+    int64_t flashAt = INT64_MIN / 2;   // the flash command's time
+    // the head's poses for `poses` (see the top): 30 a second, 20 s
+    struct HeadPose {
+        int64_t ns;
+        Mat m;
+    };
+    std::vector<HeadPose> headPoses;
+    size_t headNext = 0;
+    constexpr size_t kHeadPoses = 600;
+    int64_t headAt = 0;
 
     while (!g_stop && (seconds <= 0 || (MonoNs() - start) / 1e9 < seconds)) {
         const auto tick = std::chrono::steady_clock::now();
@@ -1216,7 +1251,22 @@ int main(int argc, char **argv) {
                 look.inRoom = word[0] == '1', reply = "ok";
             } else if (!std::strcmp(buf, "state")) {
                 reply = "ok " + statusLine;
-            } else reply = "error hands <L> <R> <allowed>|roomview auto|on|off|model " + ModelNames() + "|style ghost|solid|inroom 1|0|state";
+            } else if (!std::strcmp(buf, "flash")) {
+                flashAt = now;
+                reply = std::string("ok ") + std::to_string(int(sides[0].visible) + int(sides[1].visible));
+            } else if (double secs = 0; std::sscanf(buf, "poses %lf", &secs) == 1) {
+                reply = "ok";
+                const int64_t since = now - int64_t(std::clamp(secs, 0.0, 20.0) * 1e9);
+                for (size_t k = 0; k < headPoses.size(); ++k) {
+                    const HeadPose &p = headPoses[(headNext + k) % headPoses.size()];
+                    if (p.ns < since) continue;
+                    char line[320];
+                    int len = std::snprintf(line, sizeof line, "\n%lld", (long long)p.ns);
+                    for (int r = 0; r < 3; ++r)
+                        for (int c = 0; c < 4; ++c) len += std::snprintf(line + len, sizeof line - len, " %.5f", p.m.m[r][c]);
+                    reply += line;
+                }
+            } else reply = "error hands <L> <R> <allowed>|roomview auto|on|off|model " + ModelNames() + "|style ghost|solid|inroom 1|0|state|flash|poses <S>";
             if (reply == "ok")
                 for (Side &s : sides) s.lastFrame = ~uint64_t(0);   // a new look shows at once
             if (!reply.empty() && fromLen > offsetof(sockaddr_un, sun_path))
@@ -1236,6 +1286,12 @@ int main(int argc, char **argv) {
         vr::VRSystem()->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses, vr::k_unMaxTrackedDeviceCount);
         const vr::TrackedDevicePose_t &hp = poses[vr::k_unTrackedDeviceIndex_Hmd];
         const Mat &head = hp.mDeviceToAbsoluteTracking;
+        if (hp.bPoseIsValid && now - headAt >= 33'000'000) {
+            headAt = now;
+            if (headPoses.size() < kHeadPoses) headPoses.push_back({now, head});
+            else headPoses[headNext] = {now, head}, headNext = (headNext + 1) % kHeadPoses;
+        }
+        const float flash = FlashAmount((now - flashAt) / 1e9);
         std::vector<handcut::Hand> shown;
         uint64_t frame = 0;
         if (demo) {
@@ -1288,7 +1344,9 @@ int main(int argc, char **argv) {
             const double moved = std::sqrt((palm[0] - s.lastPalm[0]) * (palm[0] - s.lastPalm[0]) +
                                            (palm[1] - s.lastPalm[1]) * (palm[1] - s.lastPalm[1]) +
                                            (palm[2] - s.lastPalm[2]) * (palm[2] - s.lastPalm[2]));
-            const bool want = frame != s.lastFrame || (moved > 0.003 && now - s.lastDraw >= 20'000'000) || !s.visible;
+            // and through a flash, until it's drawn without it again
+            const bool flashing = (flash > 0 || s.flash > 0) && now - s.lastDraw >= 20'000'000;
+            const bool want = frame != s.lastFrame || (moved > 0.003 && now - s.lastDraw >= 20'000'000) || !s.visible || flashing;
             if (!want) continue;
             if (s.drawing >= 0) {   // the GPU is still on the last one
                 s.busy += s.visible;
@@ -1300,7 +1358,15 @@ int main(int argc, char **argv) {
             s.meshMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             int pick = 0;
             while (pick == s.shown || pick == s.before) ++pick;
-            Render(gpu, s.out[pick], look, *h, mesh, bones, robot, q, eyes);
+            if (flash > 0) {
+                const Style st = Flashed(*look.style, flash);
+                Look lit = look;
+                lit.style = &st;
+                Render(gpu, s.out[pick], lit, *h, mesh, bones, robot, q, eyes);
+            } else {
+                Render(gpu, s.out[pick], look, *h, mesh, bones, robot, q, eyes);
+            }
+            s.flash = flash;
             s.drawing = pick, s.drawnAt = MonoNs();
             const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             ++s.draws, s.cpuMs += ms, s.worstMs = std::max(s.worstMs, ms);
@@ -1326,7 +1392,7 @@ int main(int argc, char **argv) {
         }
         // about the displays' rate while a hand shows; else 20 times a second, and 10 with Room View
         // on (nothing to draw: a hand shows up a little later, for less waking)
-        const bool busy = sides[0].visible || sides[1].visible || sides[0].drawing >= 0 || sides[1].drawing >= 0;
+        const bool busy = sides[0].visible || sides[1].visible || sides[0].drawing >= 0 || sides[1].drawing >= 0 || flash > 0;
         const bool idle = roomOn && !demo && !look.inRoom;
         std::this_thread::sleep_until(tick + std::chrono::microseconds(busy ? 11111 : idle ? 100000 : 50000));
     }

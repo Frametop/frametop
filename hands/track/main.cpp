@@ -49,6 +49,13 @@
 // --models: a folder with palm.ncnn.* and hand.ncnn.*, e.g. fine-tuned ones), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
 // hands are one left and one right, Tracker::set_pair_sides).
+//
+// Flags (track/flagbuf.h; HANDS_FLAG_BUFFER, default 1): ft-hands keeps the last HANDS_FLAG_SECONDS
+// (12) of hand crops and its output in RAM (at most HANDS_FLAG_MB, 80, of crops HANDS_FLAG_CROP, 224
+// px, a side), and `ft-handsctl flag [note]` writes them and the next 2 s to a folder for frame-hands'
+// offline tools. The request is run_dir/flag (key=value lines: dir, note, said_unix, flag_unix),
+// checked 4 times a second and removed when taken; the folder's manifest.json is written last.
+#include "flagbuf.h"
 #include "io.h"
 #include "pinch.h"
 #include "record.h"
@@ -280,6 +287,13 @@ int main(int argc, char **argv) {
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)
+    // the flag buffer (see the top)
+    bool flag_on = setting("HANDS_FLAG_BUFFER") != "0";
+    FlagConfig flag_cfg;
+    if (const std::string v = setting("HANDS_FLAG_SECONDS"); !v.empty()) flag_cfg.before_s = std::clamp(std::atof(v.c_str()), 1.0, 60.0);
+    if (const std::string v = setting("HANDS_FLAG_CROP"); !v.empty()) flag_cfg.crop_px = std::clamp(std::atoi(v.c_str()), 64, 512);
+    if (const std::string v = setting("HANDS_FLAG_MB"); !v.empty())
+        flag_cfg.max_bytes = size_t(std::clamp(std::atof(v.c_str()), 8.0, 1024.0) * 1048576);
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         const bool more = i + 1 < argc;
@@ -311,6 +325,7 @@ int main(int argc, char **argv) {
         else if (a == "--pair-sides" && more) pair_sides = std::string(argv[++i]) == "1";
         else if (a == "--hold" && more) hold = std::atof(argv[++i]);
         else if (a == "--skeleton" && more) skeleton = std::string(argv[++i]) != "0";
+        else if (a == "--flag-buffer" && more) flag_on = std::string(argv[++i]) != "0";
         else if (a == "--cams" && more) cams_arg = argv[++i];
         else if (a == "--bright" && more) bright_arg = argv[++i];
         else if (a == "--bright-on" && more) light.on = std::atof(argv[++i]);
@@ -334,6 +349,7 @@ int main(int argc, char **argv) {
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
                         "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
                         "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
+                        "          [--flag-buffer 0|1] (1: keep the last seconds for `ft-handsctl flag`; HANDS_FLAG_BUFFER)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
                         "          [--pinch-begin M] (0.020) [--pinch-end M] (0.035) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
@@ -346,7 +362,8 @@ int main(int argc, char **argv) {
                         "camera's newest dark frame, as <name>_dk; with --with-color, the color cameras' as color_video<N>.\n"
                         "auto picks the cameras by the light (see the top of track/main.cpp).\n"
                         "Settings in ~/.config/frametop.conf: HANDS_SWAP_SIDES=auto|0|1, HANDS_CPUS=5,6,7, HANDS_CAMERAS, HANDS_BRIGHT,\n"
-                        "HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT, HANDS_COLOR_CROP, HANDS_MISREAD_GUARD=0|1, HANDS_MODELS=DIR\n"
+                        "HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT, HANDS_COLOR_CROP, HANDS_MISREAD_GUARD=0|1, HANDS_MODELS=DIR,\n"
+                        "HANDS_FLAG_BUFFER=0|1, HANDS_FLAG_SECONDS, HANDS_FLAG_CROP, HANDS_FLAG_MB\n"
                         "(FT_<name> overrides).\n",
                         argv[0]);
             return a == "--help" ? 0 : 1;
@@ -534,6 +551,31 @@ int main(int argc, char **argv) {
     tracker.set_hold(reacquire > 0 ? hold : 0.3);
     tracker.set_skeleton(skeleton);
     std::map<std::string, std::vector<uint8_t>> pixels;
+    // The flag buffer (see the top), and its request file.
+    std::unique_ptr<FlagBuffer> flags;
+    const std::string flag_file = run_dir() + "/flag";
+    if (flag_on && track) {
+        flags = std::make_unique<FlagBuffer>(flag_cfg);
+        char cfg[1024];
+        std::string cpu_list;
+        for (int c : cpus) cpu_list += (cpu_list.empty() ? "" : ",") + std::to_string(c);
+        std::snprintf(cfg, sizeof cfg,
+                      "{\"models\": %s, \"int8\": %s, \"threads\": %d, \"cpus\": \"%s\", \"cams\": \"%s\", \"bright\": \"%s\", "
+                      "\"keep_presence\": %.2f, \"misread_guard\": %s, \"reacquire\": %.2f, \"pair_sides\": %s, \"hold\": %.2f, "
+                      "\"skeleton\": %s, \"gestures\": %s, \"pinch_begin\": %.3f, \"pinch_end\": %.3f, \"grip_begin\": %.2f, "
+                      "\"grip_end\": %.2f, \"sides\": \"%s\", \"flag_seconds\": %.1f, \"flag_crop\": %d, \"flag_mb\": %.0f}",
+                      json_string(models).c_str(), int8 ? "true" : "false", threads, cpu_list.c_str(), cams_arg.c_str(),
+                      bright_arg.c_str(), keep_presence, misread_guard ? "true" : "false", reacquire, pair_sides ? "true" : "false",
+                      hold, skeleton ? "true" : "false", gestures_on ? "true" : "false", pinch_params.begin_m, pinch_params.end_m,
+                      grip_params.begin, grip_params.end, sides_mode.c_str(), flag_cfg.before_s, flag_cfg.crop_px,
+                      flag_cfg.max_bytes / 1048576.0);
+        flags->set_static(cameras_json(used), cfg);
+    }
+    struct stat flag_st;   // a request left from before this run is stale
+    if (stat(flag_file.c_str(), &flag_st) == 0 && std::time(nullptr) - flag_st.st_mtime > 10) unlink(flag_file.c_str());
+    uint64_t t_flag_check = 0;
+    size_t flags_told = 0;
+    std::string flag_error_told;
     std::map<std::string, uint64_t> lit_seen;   // per colour camera: the frame last counted for the light
     const uint64_t start = mono_ns();
     uint64_t t_status = start, next_ns = 0, t_want = 0, t_glog = 0;
@@ -671,7 +713,55 @@ int main(int argc, char **argv) {
     bool parked = false;
     uint64_t t_park = 0, t_hands_want = 0;
     int exit_code = 0;
+    // A flag request (see the top): taken, and answered with a folder.
+    auto take_flag = [&] {
+        std::ifstream f(flag_file);
+        if (!f) return;
+        std::map<std::string, std::string> kv;
+        std::string line;
+        while (std::getline(f, line))
+            if (const auto eq = line.find('='); eq != std::string::npos) kv[line.substr(0, eq)] = line.substr(eq + 1);
+        unlink(flag_file.c_str());
+        const std::string dir = kv["dir"];
+        if (dir.empty() || dir[0] != '/') return (void)std::printf("flag: no folder in the request\n");
+        auto num = [&](const char *k) { return kv[k].empty() ? std::string("null") : std::to_string(std::atof(kv[k].c_str())); };
+        char light_json[160];
+        std::snprintf(light_json, sizeof light_json, "{\"cams\": \"%s\", \"level\": %.1f, \"ambient_ir\": %.1f}", cams_name(mode),
+                      light.level, ambient());
+        FlagRequest req;
+        req.dir = dir;
+        req.fields = "\"source\": \"ft-hands\", \"flag_unix\": " + num("flag_unix") + ", \"note\": " + json_string(kv["note"], true) +
+                     ", \"said_unix\": " + num("said_unix") + ", \"models\": " + json_string(models) +
+                     ", \"sides\": {\"names_swapped\": " + json_bool(names_swapped) + ", \"swapped\": " + json_bool(truth) +
+                     "}, \"light\": " + light_json + ", \"parked\": " + (parked ? "true" : "false");
+        if (!flags) {   // no buffer: the folder says why
+            mkdir(dir.c_str(), 0700);
+            write_file(dir + "/manifest.json", "{\"version\": 1, " + req.fields +
+                                                   ", \"error\": \"no flag buffer (HANDS_FLAG_BUFFER=0, or not tracking)\"}\n");
+            std::printf("flag: %s (no buffer: HANDS_FLAG_BUFFER=0)\n", dir.c_str());
+        } else if (flags->flag(req, int64_t(mono_ns()) + raw_minus_mono_ns(), kv["note"])) {
+            std::printf("flag: %s%s%s, written in %.0f s\n", dir.c_str(), kv["note"].empty() ? "" : ": ", kv["note"].c_str(),
+                        flags->config().after_s);
+        } else {
+            std::printf("flag: one is already being taken%s\n", kv["note"].empty() ? "" : " (its note added)");
+        }
+        std::fflush(stdout);
+    };
     while (!g_stop && (seconds <= 0 || (mono_ns() - start) / 1e9 < seconds)) {
+        if (mono_ns() - t_flag_check > 250'000'000) {
+            t_flag_check = mono_ns();
+            if (stat(flag_file.c_str(), &flag_st) == 0 && flag_st.st_uid == getuid()) take_flag();
+            if (flags) {
+                flags->tick(int64_t(mono_ns()) + raw_minus_mono_ns());
+                const FlagBuffer::Stats fs = flags->stats();
+                if (fs.flags != flags_told || fs.last_error != flag_error_told) {
+                    if (fs.flags != flags_told) std::printf("flag written: %s\n", fs.last_dir.c_str());
+                    if (!fs.last_error.empty() && fs.last_error != flag_error_told) std::printf("flag failed: %s\n", fs.last_error.c_str());
+                    flags_told = fs.flags, flag_error_told = fs.last_error;
+                    std::fflush(stdout);
+                }
+            }
+        }
         if (!ring.alive()) {
             std::fprintf(stderr, "ft-camd stopped\n");
             exit_code = 2;
@@ -903,6 +993,9 @@ int main(int argc, char **argv) {
                                    0.005) * 1e9);
         if (publish) pub.write(hands, capture);
         if (publish && gestures_on) gestures.write(pinch, grip, capture, &middle);
+        if (flags)
+            flags->add(int64_t(tmin), int64_t(capture), -1, images, views,
+                       output_json(hands, gestures_on ? &pinch : nullptr, gestures_on ? &middle : nullptr, gestures_on ? &grip : nullptr));
         for (const Pinch::Event &e : grip.events)
             std::printf("grip  %s %-5s curl %.2f at %+.3f %+.3f %+.3f\n", e.side ? "right" : "left ", e.what, e.distance,
                         e.point[0], e.point[1], e.point[2]);
@@ -947,6 +1040,12 @@ int main(int argc, char **argv) {
                             s.handoff_miss, s.dups, s.splits, s.created, s.merged, s.forgotten,
                             !rec ? "" : ("  recorded " + std::to_string(rec->written()) + " dropped " +
                                          std::to_string(rec->dropped())).c_str());
+            if (flags) {
+                const FlagBuffer::Stats fs = flags->stats();
+                std::printf("        flag buffer: %zu sets, %zu crops (%zu ghosts) in %.1f MB, %.0f us a crop, %zu dropped, %zu flags written%s%s\n",
+                            fs.sets, fs.crops, fs.ghosts, flags->bytes() / 1048576.0, fs.crop_calls ? fs.crop_us / fs.crop_calls : 0.0,
+                            fs.dropped, fs.flags, fs.last_error.empty() ? "" : "; last error: ", fs.last_error.c_str());
+            }
             if (checking)
                 std::printf("        side cameras: %s, %s\n", side_round ? "checking the decision" : "deciding",
                             side_check.summary().c_str());
@@ -975,6 +1074,7 @@ int main(int argc, char **argv) {
             color_steps = 0;
         }
     }
+    if (flags) flags->finish(), flags->wait();
     if (!color.empty()) unlink(want_file.c_str());
     if (parked) unlink(hands_want_file.c_str());
     if (write_sides_file) unlink(sides_file.c_str());

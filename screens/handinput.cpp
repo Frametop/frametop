@@ -327,6 +327,11 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
     newFrame_ = H.frame() != frame_;
     frame_ = H.frame();
     if (newFrame_) frameNs_ = H.captureNs(), ++stats.frames;
+    if (in.haveHead) {
+        head_.Set({p_.grabHeadMinCutoff, p_.grabHeadBeta, 1.0});
+        const double t = in.nowNs / 1e9;
+        head_.Sample({in.head.m[0][3], in.head.m[1][3], in.head.m[2][3]}, t, t);
+    }
     for (int s = 0; s < 2; ++s) {
         Side &sd = side_[s];
         if (!in.allowed[s]) {
@@ -503,15 +508,24 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
         if (e <= 0 && std::fabs(b.d) < key) key = std::fabs(b.d), bestP = &P, zone = z, sx = x, sy = y;
     }
     if (!bestP) return;
-    const Hand *h = HandFor(s, in.hands->shown(), g.handId ? g.handId : sd.handId);
+    // the pinch point as the cameras saw it (the smoothing starts afresh from it: Carried)
+    const Hand *h = HandFor(s, in.hands->seen(), g.handId ? g.handId : sd.handId);
     double pinch[3];
     if (h) Copy3(h->pinchPoint, pinch);
     else Copy3(g.point, pinch);
     sd.state = State::Grab, sd.panel = bestP->index, sd.zone = zone, sd.sx = sx, sd.sy = sy;
     sd.start = sd.last = bestP->pose, sd.width0 = bestP->width;
+    sd.point.Set({p_.grabMinCutoff, p_.grabBeta, 1.0});
+    sd.point.Reset();
+    sd.point.Sample({pinch[0], pinch[1], pinch[2]}, in.hands->captureNs() / 1e9, in.nowNs / 1e9);
+    sd.from = {pinch[0], pinch[1], pinch[2]}, sd.shift = {}, sd.engaged = false;
     ToLocal(bestP->pose, pinch, sd.grabLocal);
-    if (in.haveHead) sd.startHead[0] = in.head.m[0][3], sd.startHead[1] = in.head.m[1][3], sd.startHead[2] = in.head.m[2][3];
-    else std::copy(pinch, pinch + 3, sd.startHead), sd.startHead[2] += 1;
+    if (in.haveHead) {
+        const fhsmooth::V3 hd = head_.Last();
+        sd.startHead[0] = hd.x, sd.startHead[1] = hd.y, sd.startHead[2] = hd.z;
+    } else {
+        std::copy(pinch, pinch + 3, sd.startHead), sd.startHead[2] += 1;
+    }
     const Hit n = Locate(*bestP, pinch);
     sd.grabX = n.u - sx * bestP->width / 2, sd.grabY = n.v - sy * bestP->height / 2;
     Event e;
@@ -520,15 +534,33 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     ++stats.grabs;
 }
 
+bool HandInput::Carried(int s, const Input &in, double out[3], bool deadzone) {
+    Side &sd = side_[s];
+    if (!sd.point.Ready()) return false;
+    fhsmooth::V3 p = sd.point.At(in.nowNs / 1e9);
+    if (!sd.engaged && fhsmooth::Len(p - sd.from) > p_.grabDeadzone) sd.engaged = true, sd.shift = p - sd.from;
+    if (deadzone) p = sd.engaged ? p - sd.shift : sd.from;
+    out[0] = p.x, out[1] = p.y, out[2] = p.z;
+    return true;
+}
+
 void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
     double head[3] = {0, 0, 0};
-    if (in.haveHead) head[0] = in.head.m[0][3], head[1] = in.head.m[1][3], head[2] = in.head.m[2][3];
-    auto pinchOf = [&](int s, double out[3]) {
-        const Hand *h = HandFor(s, in.hands->shown(), side_[s].handId);
-        if (!h) return false;
-        Copy3(h->pinchPoint, out);
-        return true;
-    };
+    if (in.haveHead) {
+        const fhsmooth::V3 hd = head_.At(in.nowNs / 1e9);
+        head[0] = hd.x, head[1] = hd.y, head[2] = hd.z;
+    }
+    // each grabbing hand's new frame into its smoothing: the pinch point as the cameras saw it
+    if (newFrame_)
+        for (int s = 0; s < 2; ++s) {
+            Side &sd = side_[s];
+            const Hand *h = sd.state == State::Grab ? HandFor(s, in.hands->seen(), sd.handId) : nullptr;
+            if (!h) continue;   // briefly unseen: the panel stays where the smoothing has it
+            sd.point.Set({p_.grabMinCutoff, p_.grabBeta, 1.0});
+            sd.point.Sample({h->pinchPoint[0], h->pinchPoint[1], h->pinchPoint[2]}, in.hands->captureNs() / 1e9, in.nowNs / 1e9);
+        }
+    // (a stretch has its own dead zone, on the hands' distance)
+    auto pinchOf = [&](int s, double out[3]) { return Carried(s, in, out, false); };
     for (int s = 0; s < 2; ++s) {
         Side &sd = side_[s];
         if (sd.state != State::Grab) continue;
@@ -554,9 +586,10 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
             carries_.push_back(c);
             continue;
         }
-        if (!pinchOf(s, p)) continue;   // briefly unseen: it stays where it is
+        if (sd.width0 < 0 && sd.point.Ready()) sd.from = sd.point.At(in.nowNs / 1e9), sd.engaged = false;   // (below)
+        if (!Carried(s, in, p)) continue;
         if (sd.width0 < 0) {
-            // the other hand let go: carry on alone from where it is now
+            // the other hand let go: carry on alone from where it is now (its dead zone afresh)
             sd.start = sd.last = P->pose, sd.width0 = P->width;
             ToLocal(P->pose, p, sd.grabLocal);
             std::copy(head, head + 3, sd.startHead);

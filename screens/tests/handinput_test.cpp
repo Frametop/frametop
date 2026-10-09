@@ -20,6 +20,7 @@
 #include <cstring>
 #include <fstream>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -573,7 +574,7 @@ void TestGrabMove() {
     CHECK(r.Count(Event::GrabStart) == 1 && r.in.grabbing(1));
     CHECK(r.Last(Event::GrabStart)->zone == Zone::Bar);
     CHECK(r.in.hovered().count(0) && (r.in.hovered().at(0) & 1));   // the bar lights
-    // carried 10 cm up and 20 cm closer, slowly (the carry follows the predicted pinch point)
+    // carried 10 cm up and 20 cm closer, slowly (the carry follows the smoothed pinch point)
     const double g0[3] = {0.05 + 0.01, barY, -0.5 + 0.02};   // where it took the panel (PinchAt's hand)
     (void)g0;
     for (int k = 1; k <= 30; ++k) {
@@ -586,8 +587,10 @@ void TestGrabMove() {
         const Mat &p = r.carries[0].pose;
         // the grab point (on the bar, 5 cm right of the middle) is under the pinch point, and the
         // panel faces the head
-        const Hit g = Locate(PanelAt(p, 1.0), r.hands.shown()[0].pinchPoint);
-        NEAR(g.u, 0.05, 0.005), NEAR(g.v, barY, 0.005), NEAR(g.d, 0.02, 0.005);
+        // (the panel behind it by the grab's dead zone, 1 cm, the way it first moved: up and nearer)
+        const Hit g = Locate(PanelAt(p, 1.0), r.hands.seen()[0].pinchPoint);
+        NEAR(g.u, 0.05, 0.005);
+        CHECK(std::hypot(g.v - barY, g.d - 0.02) <= 0.015 && g.v >= barY - 0.001 && g.d >= 0.02 - 0.001);
         const double c = -(p.m[0][2] * p.m[0][3] + p.m[1][2] * p.m[1][3] + p.m[2][2] * p.m[2][3]) /
                          std::sqrt(p.m[0][3] * p.m[0][3] + p.m[1][3] * p.m[1][3] + p.m[2][3] * p.m[2][3]);
         CHECK(c > 0.995);
@@ -610,6 +613,91 @@ void TestGrabMove() {
     f.Frame({PinchAt(0.05, barY, 0.3)});
     for (int k = 0; k < 5; ++k) f.Frame({PinchAt(0.05, barY, 0.02)});
     CHECK(f.Count(Event::GrabStart) == 0);
+}
+
+// A near grab's smoothing (Params::grab*, fh_smooth.h): a still noisy hand leaves the panel still
+// (the dead zone), a steady move carries it smoothly with no jump when it starts, a fast move
+// arrives without overshooting, and a new grab starts afresh.
+void TestGrabSmooth() {
+    // where the panel's grab point is (room), from the carry
+    auto grabPoint = [](const Rig &r, const double local[3]) {
+        const Mat &p = r.carries[0].pose;
+        std::vector<double> out(3);
+        for (int i = 0; i < 3; ++i) out[i] = p.m[i][0] * local[0] + p.m[i][1] * local[1] + p.m[i][2] * local[2] + p.m[i][3];
+        return out;
+    };
+    Rig r;
+    const double barY = r.panels[0].controls[0].v;
+    for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0.05, barY, 0.02)});
+    const double at[3] = {0.05, barY, -0.48};
+    r.synth.Pinch(1, true, r.t, at, 1);
+    r.Frame({PinchAt(0.05, barY, 0.02)});
+    CHECK(r.in.grabbing(1));
+    // the grab point, panel-local: where the pinch point was on the panel
+    const Hit g0 = Locate(r.panels[0], r.hands.seen()[0].pinchPoint);
+    const double local[3] = {g0.u, g0.v, g0.d};
+    // 1 s held, 3 mm of noise on each axis (ft-hands' depth jitter): the panel doesn't move
+    std::mt19937 rng(3);
+    std::normal_distribution<double> n(0, 0.003);
+    double still = 0;
+    std::vector<double> first;
+    for (int k = 0; k < 30; ++k) {
+        r.Frame({PinchAt(0.05 + n(rng), barY + n(rng), 0.02 + n(rng))});
+        if (r.carries.empty()) continue;
+        const auto gp = grabPoint(r, local);
+        if (first.empty()) first = gp;
+        still = std::max(still, std::hypot(gp[0] - first[0], gp[1] - first[1], gp[2] - first[2]));
+    }
+    std::printf("grab smoothing: a still hand with 3 mm of noise moved the panel %.2f mm\n", still * 1000);
+    CHECK(!first.empty() && still < 0.0005);
+    // a steady move: 30 cm to the right in 1 s; at 90 Hz the grab point moves evenly, no jump as
+    // the dead zone lets go, and it never gets ahead of the hand
+    std::vector<double> xs;
+    for (int k = 1; k <= 45; ++k) {
+        const double x = 0.05 + 0.3 * std::min(1.0, k / 30.0);
+        r.synth.Write({PinchAt(x, barY, 0.02)}, r.t);
+        for (int j = 0; j < 3; ++j) {
+            const int64_t now = r.t + 30'000'000 + j * 11'111'111;
+            if (j == 0) r.hands.Feed(&r.synth.file, sizeof(fh_hands_t), &r.synth.g, Identity(), now);
+            else r.hands.Feed(nullptr, 0, nullptr, Identity(), now);
+            Input i;
+            i.nowNs = now, i.hands = &r.hands, i.head = Identity(), i.haveHead = true;
+            i.allowed[0] = i.allowed[1] = true;
+            r.in.Update(i, r.panels);
+            if (!r.in.carries().empty()) {
+                r.carries = r.in.carries();
+                xs.push_back(grabPoint(r, local)[0]);
+            }
+        }
+        r.t += 33'333'333;
+    }
+    double jump = 0, ahead = 0, back = 0;
+    for (size_t k = 1; k < xs.size(); ++k) {
+        jump = std::max(jump, xs[k] - xs[k - 1]);
+        back = std::max(back, xs[k - 1] - xs[k]);
+        ahead = std::max(ahead, xs[k] - (first[0] + 0.3));
+    }
+    std::printf("grab smoothing: a 0.3 m/s move, at most %.1f mm a tick (the hand: 3.3), %.1f mm back, settled %.1f mm "
+                "behind the hand (the dead zone: 10)\n", jump * 1000, back * 1000, (first[0] + 0.3 - xs.back()) * 1000);
+    CHECK(jump < 0.006 && back < 1e-6 && ahead <= 1e-6);
+    CHECK(std::fabs(xs.back() - (first[0] + 0.3 - 0.01)) < 0.003);   // half a second on: behind by the dead zone
+    // let go, then a new grab further along: it starts from the hand, not the old smoothing
+    r.panels[0].pose = r.carries[0].pose;
+    r.synth.Pinch(1, false, r.t, at, 1);
+    r.Frame({PinchAt(0.35, barY, 0.02)});
+    CHECK(!r.in.grabbing(1));
+    for (int k = 0; k < 10; ++k) r.Frame({PinchAt(0.35, barY, 0.02)});
+    const Hit g1 = Locate(r.panels[0], r.hands.seen()[0].pinchPoint);
+    const double at2[3] = {0.35, barY, -0.48};
+    r.synth.Pinch(1, true, r.t, at2, 1);
+    r.Frame({PinchAt(0.35, barY, 0.02)});
+    CHECK(r.in.grabbing(1) && !r.carries.empty());
+    if (!r.carries.empty()) {
+        const double l1[3] = {g1.u, g1.v, g1.d};
+        const auto gp = grabPoint(r, l1);
+        const float *pp = r.hands.seen()[0].pinchPoint;
+        CHECK(std::hypot(gp[0] - pp[0], gp[1] - pp[1], gp[2] - pp[2]) < 0.002);
+    }
 }
 
 void TestGrabResize() {
@@ -655,9 +743,9 @@ void TestStretchHands() {
         r.Frame({PinchAt(-0.6, 0, 0.01, false, 1), PinchAt(0.6, 0.01 * j, 0.01, true, 2)});
     }
     CHECK(r.carries.size() == 1 && r.carries[0].kind == Carry::Move && r.carries[0].sides == 2);
-    if (r.carries.size() == 1) {   // the grab point stays under the right hand
+    if (r.carries.size() == 1) {   // the grab point stays under the right hand (behind it by the 1 cm dead zone)
         const Hit g = Locate(PanelAt(r.carries[0].pose, 1.19), r.hands.shown()[0].right ? r.hands.shown()[0].pinchPoint : r.hands.shown()[1].pinchPoint);
-        NEAR(g.u, 0.595, 0.01), NEAR(g.v, 0, 0.01);
+        NEAR(g.u, 0.595, 0.01), NEAR(g.v, 0, 0.015);
     }
     // the right hand lost: its pinch ends as lost
     r.synth.Pinch(1, false, r.t, rr, 2);
@@ -891,6 +979,154 @@ Panel Facing(const double pt[3], double offset, const double head[3] = nullptr) 
     return P;
 }
 
+// A near grab's input at the display's rate, on recorded hands: the pinch point moved ahead
+// (shown(), what a grab carried before fh_smooth.h) against the smoothed one (Params::grab*, the
+// dead zone left out), read at 90 Hz ticks between the published frames. Judder: its second
+// difference per tick (steps and noise show there); wobble: a still hand's spread over 0.5 s;
+// lag: the delay that best fits each to the pinch point as seen (capture time), while it moves
+// faster than 0.15 m/s (negative: ahead of it, by the prediction).
+void SmoothReport(const std::vector<Record> &recs) {
+    Params k;
+    if (const char *v = std::getenv("HANDINPUT_GRAB_MINCUTOFF")) k.grabMinCutoff = std::atof(v);   // trying other values
+    if (const char *v = std::getenv("HANDINPUT_GRAB_BETA")) k.grabBeta = std::atof(v);
+    struct Tick {
+        int64_t t;
+        int run;
+        double old[3], now[3];
+        bool still;
+    };
+    struct Raw {
+        int64_t t;
+        int run;
+        double p[3];
+    };
+    struct Side {
+        fhsmooth::Point3 f;
+        uint32_t id = 0;
+        int run = 0;
+        int64_t seen = 0;
+        std::vector<Tick> ticks;
+        std::vector<Raw> raw;
+    } sd[2];
+    handcut::Hands hs;
+    for (size_t r = 0; r < recs.size(); ++r) {
+        const Record &rec = recs[r];
+        const int64_t next = r + 1 < recs.size() ? std::min(recs[r + 1].publish, rec.publish + 100'000'000) : rec.publish + 33'000'000;
+        for (int64_t t = rec.publish; t < next; t += 11'111'111) {
+            if (t == rec.publish) {
+                hs.Feed(nullptr, 0, nullptr, rec.head, rec.capture);
+                hs.Feed(rec.hands.data(), rec.hands.size(), &rec.g, rec.head, t);
+                for (int s = 0; s < 2; ++s) {
+                    Side &q = sd[s];
+                    const handcut::Hand *h = nullptr;
+                    for (const handcut::Hand &x : hs.seen())
+                        if (x.right == (s == 1)) h = &x;
+                    if (!h) continue;
+                    if (h->id != q.id || rec.capture - q.seen > 250'000'000) {
+                        q.f.Set({k.grabMinCutoff, k.grabBeta, 1.0});
+                        q.f.Reset(), q.id = h->id, ++q.run;
+                    }
+                    q.seen = rec.capture;
+                    q.f.Sample({h->pinchPoint[0], h->pinchPoint[1], h->pinchPoint[2]}, rec.capture / 1e9, t / 1e9);
+                    q.raw.push_back({rec.capture, q.run, {h->pinchPoint[0], h->pinchPoint[1], h->pinchPoint[2]}});
+                }
+            } else {
+                hs.Feed(nullptr, 0, nullptr, rec.head, t);
+            }
+            for (int s = 0; s < 2; ++s) {
+                Side &q = sd[s];
+                const handcut::Hand *h = nullptr;
+                for (const handcut::Hand &x : hs.shown())
+                    if (x.right == (s == 1) && x.id == q.id) h = &x;
+                if (!h || !q.f.Ready() || t - q.seen > 250'000'000) continue;
+                const fhsmooth::V3 v = q.f.At(t / 1e9);
+                Tick tk{t, q.run, {h->pinchPoint[0], h->pinchPoint[1], h->pinchPoint[2]}, {v.x, v.y, v.z}, false};
+                q.ticks.push_back(tk);
+            }
+        }
+    }
+    for (int s = 0; s < 2; ++s) {
+        Side &q = sd[s];
+        if (q.ticks.size() < 100) continue;
+        auto rawAt = [&](int64_t t, int run, double out[3]) {
+            auto it = std::lower_bound(q.raw.begin(), q.raw.end(), t, [](const Raw &r, int64_t v) { return r.t < v; });
+            if (it == q.raw.begin() || it == q.raw.end()) return false;
+            const Raw &b = *it, &a = *(it - 1);
+            if (a.run != run || b.run != run || b.t - a.t > 200'000'000) return false;
+            const double u = double(t - a.t) / double(b.t - a.t);
+            for (int i = 0; i < 3; ++i) out[i] = a.p[i] + u * (b.p[i] - a.p[i]);
+            return true;
+        };
+        auto dist = [](const double a[3], const double b[3]) { return std::hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); };
+        // moving (the seen point, 50 ms either side) and still (under 2 cm/s over 0.3 s)
+        std::vector<char> moving(q.ticks.size()), still(q.ticks.size());
+        for (size_t i = 0; i < q.ticks.size(); ++i) {
+            double a[3], b[3], c[3];
+            const Tick &x = q.ticks[i];
+            moving[i] = rawAt(x.t - 50'000'000, x.run, a) && rawAt(x.t + 50'000'000, x.run, b) && dist(a, b) / 0.1 > 0.15;
+            still[i] = rawAt(x.t - 300'000'000, x.run, c) && rawAt(x.t, x.run, b) && dist(c, b) / 0.3 < 0.02;
+        }
+        std::vector<double> jo, jn;
+        for (size_t i = 1; i + 1 < q.ticks.size(); ++i) {
+            const Tick &a = q.ticks[i - 1], &b = q.ticks[i], &c = q.ticks[i + 1];
+            if (a.run != b.run || b.run != c.run || c.t - a.t > 30'000'000) continue;
+            double o2 = 0, n2 = 0;
+            for (int j = 0; j < 3; ++j) {
+                const double o = a.old[j] - 2 * b.old[j] + c.old[j], n = a.now[j] - 2 * b.now[j] + c.now[j];
+                o2 += o * o, n2 += n * n;
+            }
+            jo.push_back(std::sqrt(o2) * 1000), jn.push_back(std::sqrt(n2) * 1000);
+        }
+        auto rms = [](const std::vector<double> &v) {
+            double a = 0;
+            for (double x : v) a += x * x;
+            return v.empty() ? 0.0 : std::sqrt(a / double(v.size()));
+        };
+        auto pct = [](std::vector<double> v, double p) {
+            if (v.empty()) return 0.0;
+            std::sort(v.begin(), v.end());
+            return v[size_t(p * double(v.size() - 1))];
+        };
+        std::vector<double> wo, wn;
+        for (size_t i = 0; i + 45 <= q.ticks.size(); i += 45) {
+            bool ok = q.ticks[i + 44].t - q.ticks[i].t < 600'000'000;
+            for (size_t j = i; j < i + 45 && ok; ++j) ok = still[j] && q.ticks[j].run == q.ticks[i].run;
+            if (!ok) continue;
+            for (int which = 0; which < 2; ++which) {
+                double m[3] = {0, 0, 0}, v = 0;
+                for (size_t j = i; j < i + 45; ++j)
+                    for (int c = 0; c < 3; ++c) m[c] += (which ? q.ticks[j].now[c] : q.ticks[j].old[c]) / 45;
+                for (size_t j = i; j < i + 45; ++j) {
+                    const double d = dist(which ? q.ticks[j].now : q.ticks[j].old, m);
+                    v += d * d / 45;
+                }
+                (which ? wn : wo).push_back(std::sqrt(v) * 1000);
+            }
+        }
+        struct Fit { double ms, mm; };
+        auto lag = [&](bool now) {
+            double best = 0, bestErr = 1e9;
+            for (int d = -150; d <= 300; d += 5) {
+                double e = 0;
+                int n = 0;
+                for (size_t i = 0; i < q.ticks.size(); ++i) {
+                    double r[3];
+                    if (!moving[i] || !rawAt(q.ticks[i].t - d * 1'000'000, q.ticks[i].run, r)) continue;
+                    e += dist(now ? q.ticks[i].now : q.ticks[i].old, r), ++n;
+                }
+                if (n > 50 && e / n < bestErr) bestErr = e / n, best = d;
+            }
+            return Fit{best, bestErr * 1000};
+        };
+        const auto lo = lag(false), ln = lag(true);
+        std::printf("  grab input, %s hand (%zu ticks at 90 Hz): judder rms %.2f p99 %.2f mm, before (moved ahead) rms %.2f p99 %.2f; "
+                    "still wobble p50 %.2f p90 %.2f mm, before %.2f %.2f (%zu windows); lag moving %.0f ms (%.1f mm off), "
+                    "before %.0f ms (%.1f mm off), after the capture\n",
+                    s ? "right" : "left", q.ticks.size(), rms(jn), pct(jn, 0.99), rms(jo), pct(jo, 0.99), pct(wn, 0.5),
+                    pct(wn, 0.9), pct(wo, 0.5), pct(wo, 0.9), wn.size(), ln.ms, ln.mm, lo.ms, lo.mm);
+    }
+}
+
 int Replay(const char *path) {
     std::vector<Record> recs;
     if (!Load(path, recs)) return std::printf("%s: not a publish dump\n", path), 1;
@@ -914,6 +1150,7 @@ int Replay(const char *path) {
     }
     const double secs = (recs.back().capture - recs.front().capture) / 1e9;
     std::printf("== %s: %zu frames, %.0f s\n", path, recs.size(), secs);
+    SmoothReport(recs);
 
     // 1. Hovering: stretches of 1 s and more where a hand holds still (its palm within 2 cm)
     // pointing (index straight), a panel facing the head 0.5-3 cm beyond the fingertip's
@@ -1442,6 +1679,7 @@ int main(int argc, char **argv) {
     TestControlPoke();
     TestNearClaim();
     TestGrabMove();
+    TestGrabSmooth();
     TestGrabResize();
     TestStretchHands();
     TestV2Ingest();

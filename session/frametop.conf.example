@@ -73,6 +73,12 @@ POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out push
 POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle pinch moved up or down (-1 turns the direction round)
 POINTER_RAY_RELEASE=2      # hand ray: seconds after the ray goes before the pointer it woke lets go of the laser
 POINTER_RAY_GRACE=0.5      # hand ray: seconds a hand keeps the laser after its ray drops (the other hand's ray takes it after this, or at once by pinching or raising)
+POINTER_RAY_SMOOTH_MINCUTOFF=0.8  # hand ray: smoothing with the hand still (Hz; lower = steadier, laggier)
+POINTER_RAY_SMOOTH_BETA=0.06  # hand ray: ... and how much it lets up as the hand turns (Hz per deg/s; higher = keeps up better)
+POINTER_RAY_SMOOTH_HOLD=0.5 # hand ray: the still smoothing while a pinch is held (a drag's precision; Hz)
+POINTER_RAY_STEADY=1       # hand ray: while a pinch is held, the ray pivots on where the shoulder was at the press, so looking around doesn't move what you drag
+POINTER_RAY_TAP=0.3        # hand ray: for this many seconds after a pinch begins ...
+POINTER_RAY_TAP_DEADZONE=6 # ... the ray turns this many degrees before the press drags (a quick tap stays a click)
 SHARE_KEYS=0       # 1 = keys of keyboards grabbed for the desktop also go to @frametop_keys, for hotkey tools (any local process can listen)
 DISPLAY_OFF_MIN=0  # minutes without use before frametop-power turns the displays off, even if the headset seems worn (0 = never)
 DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (mm) within 10 s counts as use

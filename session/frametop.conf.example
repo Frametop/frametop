@@ -40,6 +40,7 @@ POINTER_HEAD_DEADZONE=0.5  # keyboard clicks at the gaze (Meta+J, Meta+K): degre
 POINTER_KEY_TAP=0.25       # keyboard clicks: let go within this (s) and it clicks where the dot was at the press, and tells the gaze tracker it was right
 GAZE_TRACKER=auto          # gaze service: auto = our own eye tracker when it's installed (gaze/tracker/install.sh, which install.sh offers), else SteamVR's | own = ours | steam = SteamVR's. Each keeps its own calibration (Calibrate on Frametop Input Settings' Gaze page)
 GAZE_EYE=auto              # gaze service: eye bias. auto = each eye weighted by how far off it was at your recent nudges | left | right = that eye counts twice
+HANDS_MODE=off             # hand tracking (hands/run.sh install), when it runs: frametop = while the Frametop desktop runs | always = whenever SteamVR runs, in games and the dashboard too | off = only by hand (ft-handsctl on). Frametop Input Settings' Hands page applies it at once
 HANDS_SWAP_SIDES=auto      # hand tracking: which side camera is which. auto = ft-hands tells from the hands and fixes ft-camd's names, which some SteamVR restarts swap | 0 = keep ft-camd's | 1 = exchange them
 HANDS_CPUS=5,6,7           # hand tracking: the CPUs its model threads run on
 HANDS_CAMERAS=auto         # hand tracking: auto (by the light) | mono (the IR cameras; also keeps ft-camd off the colour ones) | color | all
@@ -50,7 +51,7 @@ HANDS_COLOR_LEFT=color_video0  # hand tracking: which colour camera is passthrou
 HANDS_COLOR_CROP=subtract  # hand tracking: how the colour calibration's crop applies, subtract | none (check_color.py tells)
 #HANDS_MODELS=            # hand tracking: a folder of palm.ncnn.* and hand.ncnn.* to use instead of the stock models (hands/models/ncnn)
 HANDS_MATTE=mesh           # hand cutouts: mesh = hand-shaped, from the skeleton | capsules = ft-hands' capsules (the old look)
-HANDS_MATTE_MARGIN=1.5     # hand cutouts: degrees (seen from the eyes) the hole reaches past the hand, held still
+HANDS_MATTE_MARGIN=1.5     # hand cutouts: degrees (seen from the eyes) the hole reaches past the hand, held still (Hand cutout margin on the Hands page, live)
 HANDS_MATTE_MOTION=25      # ... plus how far the hand moves in this many ms
 HANDS_MATTE_MOTION_MAX=1.5 # ... up to this many degrees more
 HANDS_MATTE_LEAD=36        # hand cutouts: ms ahead the hands are moved along their velocity (about when a frame reaches the displays)

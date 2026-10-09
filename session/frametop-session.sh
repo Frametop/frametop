@@ -107,10 +107,14 @@ if [ "${1:-}" != --inner ]; then
   export FT_SCREEN_COUNT=$(( ${#screen_args[@]} / 2 )) FT_FLOAT_SLOTS=$float_slots
   "$here/../scripts/in-box" "$here/../screens/build/ft-screens" --socket "$socket" \
     "${screen_args[@]}" --spares "$float_slots" > /tmp/frametop-screens.log 2>&1 < /dev/null &
-  stop_screens() { pkill -x ft-screens 2>/dev/null || true; }
+  # With HANDS_MODE=frametop, hand tracking and the hand view run while this desktop does
+  # (hands/handsmode.py; it does nothing for the other modes).
+  handsmode() { python3 "$here/../hands/handsmode.py" desktop "$1" 2>&1 || true; }
+  stop_screens() { pkill -x ft-screens 2>/dev/null || true; handsmode down; }
   trap stop_screens EXIT
   for _ in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/$socket" ] && break; sleep 0.2; done
   [ -S "$XDG_RUNTIME_DIR/$socket" ] || { echo "ft-screens didn't start (see /tmp/frametop-screens.log)" >&2; exit 1; }
+  handsmode up
   WAYLAND_DISPLAY=$XDG_RUNTIME_DIR/$socket "$0" --inner
   exit
 fi

@@ -886,7 +886,8 @@ def main():
         state["pointer"] = None if pause.paused else state["pointer_conf"]
         pause.configure(state["rules"])
         # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
-        pause.set_hands(conf.get("POINTER_HANDS", "0") == "1")
+        # HANDS_MODE=always keeps hand tracking running through games.
+        pause.set_hands(conf.get("POINTER_HANDS", "0") == "1", conf.get("HANDS_MODE") == "always")
 
     load_config()
     tap = None  # the modifier (folded, MODIFIERS) pressed alone, with nothing since: its release is a tap

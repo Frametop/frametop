@@ -13,12 +13,19 @@ Two programs, each a user service that stops when SteamVR does:
 - `ft-camd` (`camd/`, C) borrows XRService's camera buffers and publishes the four IR tracking cameras' frames to a shared-memory ring. It runs on the host.
 - `ft-hands` (`track/`, C++) finds hands in those frames with MediaPipe's palm and landmark models on ncnn, triangulates them, and publishes them. It runs in the dev container.
 
-They don't start with SteamVR. `hands/run.sh install` builds them, gives ft-camd its capabilities, installs both services disabled, and links `hands/ft-handsctl` into `~/.local/bin`. Then `ft-handsctl on` starts hand tracking and `ft-handsctl off` stops it. `install.sh` doesn't install it.
+`hands/run.sh install` builds them, gives ft-camd its capabilities, installs both services, and links `hands/ft-handsctl` into `~/.local/bin`. `install.sh` doesn't install it. When they run is `HANDS_MODE` in `~/.config/frametop.conf`, set on the Hands page of Frametop Input Settings or with `ft-handsctl mode`; `hands/handsmode.py` does the starting and stopping, for these two and the hand view (`frametop-handview.service`, when it's installed):
+
+- `off` (the default): nothing starts them. `ft-handsctl on` starts hand tracking and `ft-handsctl off` stops it, as before; it stops with SteamVR.
+- `frametop`: they run while the Frametop desktop does. The session (`session/frametop-session.sh`, screens backend) starts them once ft-screens is up and stops them as it ends.
+- `always`: they're wanted by `steamvr.service` (`systemctl --user add-wants`), so they run whenever SteamVR does, in games and the SteamVR dashboard too, with or without the desktop. Pausing Frametop for a VR game leaves them running and unparked.
+
+Choosing a mode applies it at once: the services start or stop, with no desktop restart. Without ft-camd's capabilities nothing starts, and the Hands page says to run `hands/run.sh caps` (it asks for the password in the terminal; the page never does). `hands/run.sh install` and `caps` apply the mode too, but stop nothing, so what `ft-handsctl on` or `ft-cutouts on` started keeps running.
 
 For the cutouts alone, `hands/ft-cutouts on` starts the same two programs with ft-hands' `--no-gestures`: your hands show through the screens, and no pinch or grip is detected, so nothing clicks or drags. It runs this checkout's build as transient user units, so it needs `hands/build.sh` and ft-camd's capabilities (`hands/run.sh caps`) but not `hands/run.sh install`. It and `ft-handsctl on` stop each other's services, and it stops with SteamVR too.
 
 ```
 ft-handsctl on | off            # on the Frame: start or stop hand tracking (SteamVR must be running)
+ft-handsctl mode [frametop|always|off]  # HANDS_MODE: show it, or set and apply it
 ft-handsctl status              # the services, and ft-hands' last status lines
 ft-handsctl log [lines]
 ft-handsctl cutouts on|off|state  # ft-screens' hand cutouts, without stopping tracking
@@ -26,7 +33,7 @@ ft-handsctl gestures            # pinches, grips and middle pinches, live (tools
 
 hands/ft-cutouts on | off | status   # the cutouts only: no pinches or grips
 
-hands/run.sh install            # build, give ft-camd its capabilities (sudo, once per build), install disabled
+hands/run.sh install            # build, give ft-camd its capabilities (sudo, once per build), install, apply HANDS_MODE
 hands/run.sh start|stop         # start or stop the services
 hands/run.sh restart            # after changing a setting
 hands/run.sh status
@@ -275,7 +282,7 @@ ft-screens reads the hands file (version 2's skeleton when it's there, else vers
 
 **The matte** (`HANDS_MATTE=mesh`, the default) is hand-shaped: a tapered capsule per finger bone, with real fingers' half-widths (10.5 mm at the index's knuckle down to 7.5 mm at its tip, scaled by the hand's palm length); the palm as a 2.4 cm slab through the wrist and the knuckles, widened to the hand's edges; the thumb's web; and an 18 cm stub of the forearm toward the skeleton's elbow (along the hand's axis without a skeleton). The palm, web and forearm are convex pieces, each drawn as its outline grown by the margin with a soft 2 px edge. `HANDS_MATTE=capsules` draws ft-hands' capsules instead, as before, for comparison (`cutouts matte mesh|capsules` switches it live).
 
-Its margin is an angle seen from the eyes, so it covers the same share of the tracking error at any distance: `HANDS_MATTE_MARGIN` (1.5 degrees) with the hand still, plus `HANDS_MATTE_MOTION` (25 ms) of the hand's motion, at most `HANDS_MATTE_MOTION_MAX` (1.5 degrees) more. The cutout placement probes of 2026-10-08 (frame-hands `captures/probe-2026100*/video_analysis`) measured the cutout points against the hand Room View shows: 1.8-2.4 degrees median still (p90 4.1-4.7), 2.3-3.1 moving at 0.1-0.8 m/s, 4-6 above 0.8 m/s. Part of that is the video landmark model's own error, and an edge needs only the error across it (about 70% of a point's). A margin covering the p90 (4.5 degrees, 3 cm at 40 cm) would turn each finger into a 7 cm blob; 1.5 covers about the median. `cutouts margin DEG [MS [MAX]]` changes it live. The prediction lead stays 36 ms (`HANDS_MATTE_LEAD`, `cutouts lead`): the probes' best lead for fast hands was 6-14 ms, but 36 costs only 0.1-0.2 degrees.
+Its margin is an angle seen from the eyes, so it covers the same share of the tracking error at any distance: `HANDS_MATTE_MARGIN` (1.5 degrees) with the hand still, plus `HANDS_MATTE_MOTION` (25 ms) of the hand's motion, at most `HANDS_MATTE_MOTION_MAX` (1.5 degrees) more. The cutout placement probes of 2026-10-08 (frame-hands `captures/probe-2026100*/video_analysis`) measured the cutout points against the hand Room View shows: 1.8-2.4 degrees median still (p90 4.1-4.7), 2.3-3.1 moving at 0.1-0.8 m/s, 4-6 above 0.8 m/s. Part of that is the video landmark model's own error, and an edge needs only the error across it (about 70% of a point's). A margin covering the p90 (4.5 degrees, 3 cm at 40 cm) would turn each finger into a 7 cm blob; 1.5 covers about the median. `cutouts margin DEG [MS [MAX]]` changes it live, and so does the Hand cutout margin slider on the Hands page of Frametop Input Settings (0-3 degrees in quarter steps; it sends the still margin only and writes `HANDS_MATTE_MARGIN`). The prediction lead stays 36 ms (`HANDS_MATTE_LEAD`, `cutouts lead`): the probes' best lead for fast hands was 6-14 ms, but 36 costs only 0.1-0.2 degrees.
 
 The probes also saw the hand's picture off by an amount that depended on its distance, but not the same way in any two runs, so the correction is a hook, off: `HANDS_MATTE_SHIFT="0.35:0.5,-0.3 0.6:-1,0"` would turn the matte's hands by those yaw and pitch angles (degrees, right and up positive) at those distances from the head, in between linearly (`cutouts shift ...|off` live).
 
@@ -345,7 +352,7 @@ Guesses, not tested:
 - **The colour cameras can't be used while the headset is worn.** The colour module then writes only a half-size image into the top-left quarter of its buffers, and ft-camd drops those frames. So the service runs the mono cameras only, and tracking in bright light, where the mono cameras see dark hands, doesn't get the colour pair's help.
 - **The colour calibration mapping isn't settled.** Which colour camera is `passthrough_left` (`HANDS_COLOR_LEFT`) and how the module's crop applies (`HANDS_COLOR_CROP`) still need `tools/check_color.py` on a recording with a lit, textured view.
 - **Depth when one camera loses the hand.** A hand seen in one camera drifts 10% per update toward the one-camera depth guess (`kMonoDepthGain`, 0.1, in `track/tracker.cpp`). In the 2026-09-30 replays that was worse than keeping the last distance (see "3D" above). A smaller gain, such as 0.02, is the next thing to try.
-- **Pinches aren't reliable enough for everyday use yet.** That's why hand tracking stays off until `ft-handsctl on`, and `POINTER_HANDS` is 0 by default.
+- **Pinches aren't reliable enough for everyday use yet.** That's why hand tracking is off by default (`HANDS_MODE=off`: only `ft-handsctl on` starts it), and `POINTER_HANDS` is 0 by default.
 - **SteamVR can leave the upper cameras and the IR light off after a wake**, and then no hands are found. See "Camera check" above: `camcheck.py` tells, the hand recorder won't start a session, and the fix is a SteamVR restart or a reboot.
 - **The skeleton (2026-10-08) is tested on recordings only**, not in the headset: the cutouts now follow it (version 1's points and capsules), so check them there; `HANDS_SKELETON=0` brings back the filtered landmarks.
 - **Floating windows don't get hand cutouts or glows.** Their panels show crops of the client buffer, which the cutouts' side-by-side buffer doesn't match (`screens/vr.cpp`, `UpdateCutouts`). Near input works on them.

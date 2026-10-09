@@ -2363,12 +2363,18 @@ bool ft_vr_init(void) {
     num("HANDS_POKE_ANGLE", k.fingerAngle, 10, 90);
     num("HANDS_POKE_REST_BELOW", k.restBelow, 0, 2);
     num("HANDS_POKE_REST_NEAR", k.restNear, 0, 2);
+    // what a near grab carries, smoothed (handinput.h, Params::grab*)
+    num("HANDS_GRAB_SMOOTH_MINCUTOFF", k.grabMinCutoff, 0.05, 30);
+    num("HANDS_GRAB_SMOOTH_BETA", k.grabBeta, 0, 200);
+    num("HANDS_GRAB_DEADZONE", k.grabDeadzone, 0, 0.1);
     const std::string near = handcut::Setting("HANDS_NEAR", "1");
     g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
     g_palm.params().on = handcut::Setting("HANDS_PALM_MENU", "1") != "0";
     std::printf("hands: palm menu %s\n", g_palm.params().on ? "on (palm up, pinch: the Steam menu)" : "off");
     std::printf("hands: pokes within %.0f deg of a panel's normal, not from a hand %.2f m under the eyes and within %.2f m\n",
                 k.fingerAngle, k.restBelow, k.restNear);
+    std::printf("hands: grabs smoothed from %.2f Hz (+%.1f Hz per m/s), a %.1f cm dead zone\n", k.grabMinCutoff, k.grabBeta,
+                k.grabDeadzone * 100);
     std::printf("hands: matte %s, margin %.2f deg + %.0f ms of motion (at most %.2f more), lead %.0f ms, shift %s; near input %s%s%s\n",
                 g_matte.mesh ? "mesh" : "capsules", g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
                 g_hands.leadMs(), g_matte.shift.empty() ? "off" : "on",

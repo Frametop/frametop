@@ -44,10 +44,24 @@
 // all pass but not yet for showFor. Closing the fingers turns the hand a little, so a ray near a
 // hide limit can drop just as the pinch begins.
 //
-// Filter (RayFilter): One Euro filters (Casiez, Roussel and Vogel, CHI 2012) on the ray's yaw and
-// pitch (minCutoff 0.8 Hz, beta 0.02 per deg/s, dCutoff 1 Hz) and per axis on the origin
-// (originMinCutoff 1.5 Hz): the aim matters more than where the beam starts.
+// Filter (RayFilter, hands/include/fh_smooth.h): One Euro filters (Casiez, Roussel and Vogel, CHI
+// 2012) run in continuous time, so the beam moves at the display's rate rather than in steps at
+// the tracker's: the direction on the sphere (minCutoff, beta per deg/s, dCutoff), the origin
+// (originMinCutoff, originBeta per m/s): the aim matters more than where the beam starts. While a
+// ray pinch is held (a drag), the direction's minimum cutoff drops to holdMinCutoff: a slow drag
+// is steadier, a fast one still keeps up. The reach (|K - S|, push and pull's input) has its own
+// (reachMinCutoff, reachBeta per m/s): push and pull turns a reach's change into 3 times its share
+// of the panel's distance (13 times it for a panel 2 m away). The caller reads the ray at
+// the time it draws (At(now)); between tracker frames it glides toward the newest one.
+//
+// Steady shoulder (holdShoulder): while a ray pinch is held, and hideFor after, the ray's shoulder
+// stays where it was in the room at the press; then it eases back to the body model's over
+// shoulderBlend (0.5 s). The model's shoulder moves with the head (the neck follows its position,
+// the torso its yaw): on a recording, with the hand still, a fifth of the ray's motion came from
+// there, up to 2-4 deg/s (p90). Looking around while dragging moved what was dragged.
 #pragma once
+
+#include "fh_smooth.h"
 
 #include <algorithm>
 #include <cmath>
@@ -56,18 +70,10 @@
 
 namespace fhray {
 
-struct V3 {
-    double x = 0, y = 0, z = 0;
-};
-inline V3 operator+(V3 a, V3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
-inline V3 operator-(V3 a, V3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
-inline V3 operator*(V3 a, double s) { return {a.x * s, a.y * s, a.z * s}; }
-inline double Dot(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-inline double Len(V3 a) { return std::sqrt(Dot(a, a)); }
-inline V3 Norm(V3 a) {
-    const double l = Len(a);
-    return l > 1e-12 ? a * (1 / l) : V3{0, 0, -1};
-}
+using fhsmooth::Dot;
+using fhsmooth::Len;
+using fhsmooth::Norm;
+using fhsmooth::V3;
 constexpr double kDeg = M_PI / 180;
 // Yaw: 0 along -z, positive turning left (about +y), as OpenVR; pitch: up positive.
 inline double YawOf(V3 d) { return std::atan2(-d.x, -d.z); }
@@ -98,8 +104,12 @@ struct Params {
     double forearmShow = -35, forearmHide = -50, elbowConfMin = 0.5;
     double pitchMin = -45, pitchMax = 60, pitchMinHide = -60, pitchMaxHide = 75;
     double yawShow = 70, yawHide = 80;
-    // filter
-    double minCutoff = 0.8, beta = 0.02, dCutoff = 1.0, originMinCutoff = 1.5, originBeta = 0.5;
+    // filter (see the top)
+    double minCutoff = 0.8, beta = 0.06, dCutoff = 1.0, originMinCutoff = 1.5, originBeta = 0.5;
+    double holdMinCutoff = 0.5;
+    bool holdShoulder = true;
+    double shoulderBlend = 0.5;
+    double reachMinCutoff = 1.0, reachBeta = 5.0;
 };
 
 // The torso and shoulders, from the head.
@@ -192,63 +202,47 @@ inline Tests Evaluate(const Params &p, const Body &body, const HandFrame &f, con
     return r;
 }
 
-// One Euro filter for one value.
-class OneEuro {
-public:
-    OneEuro(double minCutoff = 1, double beta = 0, double dCutoff = 1) : min_(minCutoff), beta_(beta), dc_(dCutoff) {}
-    void Set(double minCutoff, double beta, double dCutoff) { min_ = minCutoff, beta_ = beta, dc_ = dCutoff; }
-    void Reset() { init_ = false; }
-    double operator()(double v, double t) {
-        if (!init_ || t <= t_) {
-            if (!init_) x_ = v, dx_ = 0, t_ = t, init_ = true;
-            return x_;
-        }
-        const double dt = t - t_;
-        t_ = t;
-        const double d = (v - x_) / dt;
-        dx_ += Alpha(dc_, dt) * (d - dx_);
-        x_ += Alpha(min_ + beta_ * std::fabs(dx_), dt) * (v - x_);
-        return x_;
-    }
-    double Value() const { return x_; }
-
-private:
-    static double Alpha(double cutoff, double dt) {
-        const double tau = 1 / (2 * M_PI * cutoff);
-        return 1 / (1 + tau / dt);
-    }
-    double min_, beta_, dc_, x_ = 0, dx_ = 0, t_ = 0;
-    bool init_ = false;
-};
-
-// The ray's filter: yaw and pitch in degrees, the origin per axis.
+// The ray's filter (see the top).
 class RayFilter {
 public:
     explicit RayFilter(const Params &p = {}) { SetParams(p); }
     void SetParams(const Params &p) {
-        yaw_.Set(p.minCutoff, p.beta, p.dCutoff), pitch_.Set(p.minCutoff, p.beta, p.dCutoff);
-        for (OneEuro &o : o_) o.Set(p.originMinCutoff, p.originBeta, p.dCutoff);
+        p_ = p;
+        dir_.Set({held_ ? p.holdMinCutoff : p.minCutoff, p.beta, p.dCutoff});
+        origin_.Set({p.originMinCutoff, p.originBeta, p.dCutoff});
+        reach_.Set({p.reachMinCutoff, p.reachBeta, p.dCutoff});
     }
-    void Reset() {
-        yaw_.Reset(), pitch_.Reset();
-        for (OneEuro &o : o_) o.Reset();
-        have_ = false;
+    // A ray pinch held: the direction's precision (holdMinCutoff), from now on.
+    void SetHeld(bool on) {
+        if (on == held_) return;
+        held_ = on;
+        SetParams(p_);
     }
-    Ray operator()(const Ray &raw, double t) {
-        double y = YawOf(raw.dir) / kDeg;
-        if (have_) y = lastYaw_ + std::remainder(y - lastYaw_, 360.0);  // unwrapped
-        lastYaw_ = y, have_ = true;
-        const double fy = yaw_(y, t), fp = pitch_(PitchOf(raw.dir) / kDeg, t);
+    void Reset() { dir_.Reset(), origin_.Reset(), reach_.Reset(); }
+    // A tracker frame's ray and reach, captured at t, arrived at now.
+    void Sample(const Ray &raw, double reach, double t, double now) {
+        dir_.Sample(raw.dir, t, now), origin_.Sample(raw.origin, t, now), reach_.Sample(reach, t, now);
+    }
+    // The ray at now (the filters' timeline moves there).
+    Ray At(double now) {
         Ray r;
-        r.dir = Dir(fy * kDeg, fp * kDeg);
-        r.origin = {o_[0](raw.origin.x, t), o_[1](raw.origin.y, t), o_[2](raw.origin.z, t)};
+        r.dir = dir_.At(now), r.origin = origin_.At(now);
+        reach_.At(now);
         return r;
     }
+    Ray Last() const {
+        Ray r;
+        r.dir = dir_.Last(), r.origin = origin_.Last();
+        return r;
+    }
+    double Reach() const { return reach_.Last(); }
 
 private:
-    OneEuro yaw_, pitch_, o_[3];
-    double lastYaw_ = 0;
-    bool have_ = false;
+    Params p_;
+    fhsmooth::Direction dir_;
+    fhsmooth::Point3 origin_;
+    fhsmooth::Scalar reach_;
+    bool held_ = false;
 };
 
 // One side's ray: prediction, the gate and the filter.
@@ -260,17 +254,20 @@ public:
 
     // A new frame of this side's hand. sideIsHand: the ray may show (the arbiter says this side is a
     // bare hand, and the caller allows it); without it, a ray shown hides at once ("hide off").
-    void Frame(const Body &body, const HandFrame &f, bool sideIsHand) {
+    // now: when it arrived, on the capture times' clock (< 0: at its capture time).
+    void Frame(const Body &body, const HandFrame &f, bool sideIsHand, double now = -1) {
+        if (now < 0) now = f.t;
+        const bool wasShown = shown_;
         // K's room velocity, for the prediction
         V3 vk;
         if (haveLast_ && f.t > lastT_ && f.t - lastT_ < 0.2) vk = (f.knuckle - lastK_) * (1 / (f.t - lastT_));
         lastK_ = f.knuckle, lastT_ = f.t, haveLast_ = true;
         const V3 k = f.knuckle + vk * p_.predict;
-        const V3 s = body.Shoulder(side_);
+        const V3 s = Shoulder(body, f.t);
         raw_.dir = Norm(k - s);
         raw_.origin = k + raw_.dir * p_.originAhead;
         reach_ = Len(f.knuckle - s);
-        lastFrame_ = f.t;
+        lastFrame_ = f.t, arrived_ = now;
         if (f.stereo) lastStereo_ = f.t;
         tests_ = Evaluate(p_, body, f, raw_);
         const bool tracked = f.t - lastStereo_ <= p_.stereoWithin;
@@ -285,7 +282,7 @@ public:
         if (!shown_) {
             if (showOk) {
                 if (showSince_ < 0) showSince_ = f.t;
-                if (f.t - showSince_ >= p_.showFor - 1e-9) Show(f.t);
+                if (f.t - showSince_ >= p_.showFor - 1e-9) Show();
             } else {
                 showSince_ = -1;
             }
@@ -301,7 +298,7 @@ public:
                 if (f.t - failSince_ >= p_.hideFor - 1e-9) Hide(tests_.fails.empty() ? "pose" : tests_.fails, f.t);
             }
         }
-        if (shown_) out_ = filter_(raw_, f.t);
+        if (shown_ && wasShown) filter_.Sample(raw_, reach_, f.t, now);  // (Show took this frame already)
     }
     // Each tick, with the time now on the capture clock: the hand lost (no frame for lostFor) hides it.
     void Tick(double now, bool sideIsHand) {
@@ -309,10 +306,13 @@ public:
         if (!sideIsHand) Hide("off", now);
         else if (!held_ && now - lastFrame_ > p_.lostFor && now >= holdUntil_) Hide("lost", now);
     }
-    // A ray pinch is held: the ray stays up until hideFor after it ends.
+    // A ray pinch is held: the ray stays up until hideFor after it ends, and its filter takes the
+    // drag's precision (holdMinCutoff) meanwhile.
     void Hold(bool on, double t) {
         if (held_ && !on) holdUntil_ = t + p_.hideFor;
+        if (on && !held_ && p_.holdShoulder) steady_ = true, steadyAt_ = lastS_;
         held_ = on;
+        filter_.SetHeld(on);
     }
     void Reset() { Hide("reset", -1e9); }
     // A pinch began on this hand at t: may its ray show for it (see the top)? within: how long ago
@@ -322,41 +322,55 @@ public:
     }
     // Show it (filter started afresh from the hand now), for a pinch that may (CanShowForPinch).
     void ShowForPinch() {
-        if (!shown_) Show(lastFrame_);
+        if (!shown_) Show();
     }
 
     bool Shown() const { return shown_; }
-    const Ray &Current() const { return out_; }   // filtered
-    const Ray &Raw() const { return raw_; }       // unfiltered, predicted
-    double Reach() const { return reach_; }       // |K - S|: arm out or in (push and pull)
+    Ray Current() const { return filter_.Last(); }   // filtered, where its timeline stands (the last frame or At)
+    Ray At(double now) { return filter_.At(now); }  // filtered, at now (between frames: on its way to the newest)
+    const Ray &Raw() const { return raw_; }         // unfiltered, predicted
+    double Reach() const { return filter_.Reach(); }  // |K - S|, filtered: arm out or in (push and pull)
+    double RawReach() const { return reach_; }
     const Tests &LastTests() const { return tests_; }
     const std::string &Why() const { return why_; }   // what fails now ("" if nothing)
     // Changes since the caller last cleared it: "show" or "hide <reason>".
     std::string event;
 
 private:
-    void Show(double t) {
+    // The ray's shoulder (see "Steady shoulder" at the top).
+    V3 Shoulder(const Body &body, double t) {
+        V3 s = body.Shoulder(side_);
+        if (steady_) {
+            const double u = held_ ? 0 : (t - holdUntil_) / std::max(1e-3, p_.shoulderBlend);
+            if (u >= 1) steady_ = false;
+            else s = steadyAt_ + (s - steadyAt_) * std::clamp(u, 0.0, 1.0);
+        }
+        lastS_ = s;
+        return s;
+    }
+    void Show() {
         shown_ = true, failSince_ = -1, showSince_ = -1;
         filter_.Reset();
-        out_ = filter_(raw_, t);
+        filter_.Sample(raw_, reach_, lastFrame_, arrived_);
         event = "show";
     }
     void Hide(const std::string &why, double t) {
         if (!shown_) return;
-        shown_ = false, failSince_ = -1, showSince_ = -1, held_ = false, holdUntil_ = 0;
+        shown_ = false, failSince_ = -1, showSince_ = -1, held_ = false, holdUntil_ = 0, steady_ = false;
+        filter_.SetHeld(false);
         hidAt_ = t, revivable_ = why != "off" && why != "near" && why != "reset";
         event = "hide " + why;
     }
     int side_;
     Params p_;
     RayFilter filter_;
-    Ray raw_, out_;
+    Ray raw_;
     Tests tests_;
     std::string why_;
-    V3 lastK_;
-    double lastT_ = 0, lastFrame_ = -1e9, lastStereo_ = -1e9, reach_ = 0;
+    V3 lastK_, lastS_, steadyAt_;
+    double lastT_ = 0, lastFrame_ = -1e9, lastStereo_ = -1e9, reach_ = 0, arrived_ = 0;
     double showSince_ = -1, failSince_ = -1, holdUntil_ = 0, hidAt_ = -1e9;
-    bool haveLast_ = false, shown_ = false, held_ = false, revivable_ = false;
+    bool haveLast_ = false, shown_ = false, held_ = false, revivable_ = false, steady_ = false;
 };
 
 }  // namespace fhray

@@ -880,7 +880,10 @@ int main(int argc, char **argv) {
         }
         if (mono_ns() - t_sides > 2'000'000'000ull) write_sides();
         if (gestures_on) {
-            grip.update(hands, views, int64_t(capture));
+            // no grip begins on a hand holding a pinch (a drag: PinchParams::grip_takeover_s)
+            std::vector<int> holding = pinch.holding(int64_t(capture)), held2 = middle.holding(int64_t(capture));
+            holding.insert(holding.end(), held2.begin(), held2.end());
+            grip.update(hands, views, int64_t(capture), holding);
             pinch.update(hands, views, int64_t(capture), grip.gripping(), middle.down());
             middle.update(hands, views, int64_t(capture), grip.gripping(), pinch.down());
         }

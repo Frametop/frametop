@@ -14,6 +14,8 @@
 
 #include "handcut.h"
 
+#include "../hands/include/fh_smooth.h"
+
 #include <array>
 #include <cstdint>
 #include <map>
@@ -95,6 +97,14 @@ struct Params {
     double glowReach = 0.05;    // the pinch point's glow shows this close to a grab zone
     double stretchDead = 0.01;  // two hands: their distance changes this much before the panel scales
     double minWidth = 0.15, maxWidth = 12;
+    // Smoothing what a grab carries (hands/include/fh_smooth.h: One Euro, in continuous time, read
+    // each tick): the pinch point as the cameras saw it (not moved ahead, whose speed is noise
+    // times the lead), from minCutoff (Hz) still, beta (Hz per m/s) more as it moves; the head
+    // the carried panel faces, likewise (a nod or a lean turned a close panel about the hand).
+    double grabMinCutoff = 1.0, grabBeta = 15.0, grabHeadMinCutoff = 0.5, grabHeadBeta = 2.0;
+    // A grab moves nothing until the pinch point has moved this far from the start (m): the
+    // fingers closing on a pinch move it a little. Then it carries from there (no jump).
+    double grabDeadzone = 0.01;
 };
 
 enum class Zone { None, Bar, Tab, Corner, Edge, Title };
@@ -227,6 +237,11 @@ private:
         double grabLocal[3] = {0, 0, 0}, startHead[3] = {0, 0, 0};
         Mat start{}, last{};
         double width0 = 1, grabX = 0, grabY = 0;
+        // the pinch point, smoothed (Params::grab*), where it began, and the dead zone's offset
+        // once it's out (grabDeadzone)
+        fhsmooth::Point3 point;
+        fhsmooth::V3 from, shift;
+        bool engaged = false;
     };
     const handcut::Hand *HandFor(int side, const std::vector<handcut::Hand> &hands, uint32_t prefer) const;
     void Poke(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand *h);
@@ -235,6 +250,8 @@ private:
     void Glows(const Input &in, const std::vector<Panel> &panels);
     void EndPress(int s, bool lost);
     void EndGrab(int s, bool lost);
+    // A grabbing side's pinch point: smoothed, at the tick's time, within its dead zone (deadzone).
+    bool Carried(int s, const Input &in, double out[3], bool deadzone = true);
     void Emit(Event::Type t, int s, int panel, double x = 0, double y = 0, bool lost = false);
     const Panel *Find(const std::vector<Panel> &panels, int index) const;
 
@@ -247,6 +264,7 @@ private:
     std::set<int> nearPanels_;
     uint64_t frame_ = 0;
     bool newFrame_ = false;
+    fhsmooth::Point3 head_;   // the head carried panels face, smoothed
     int64_t frameNs_ = 0;
     // two hands on one panel: what it was when the second hand took it
     struct Stretch {

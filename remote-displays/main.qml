@@ -547,7 +547,7 @@ Kirigami.ApplicationWindow {
                                             Layout.fillWidth: true
                                             wrapMode: Text.Wrap
                                             opacity: 0.7
-                                            text: "A monitor is scaled to the stream's size; its own resolution stays as it is."
+                                            text: "The monitor switches to the stream's resolution while it streams (or its closest mode with the same shape), and back when it stops."
                                         }
                                         RowLayout {
                                             Kirigami.FormData.label: "Width in VR:"

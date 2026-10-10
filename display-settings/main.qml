@@ -967,12 +967,14 @@ Kirigami.ApplicationWindow {
                     Repeater {
                         model: [
                             { value: "auto", text: "Show them in the Steam session", help: "The desktop's notifications go to the Steam session's notification server, such as one that shows them in VR, with their buttons. Plasma's own popups stay off meanwhile; its history keeps them. Not to SteamOS's own server, which can't show them on the Frame." },
-                            { value: "on", text: "Always send them to the Steam session", help: "Whatever serves notifications there, SteamOS's own server too." },
+                            { value: "on", text: "Always send them to the Steam session", help: "Whatever serves notifications there, SteamOS's own server too, which can't show them on the Frame: they're lost then." },
                             { value: "off", text: "Keep them in the desktop", help: "Plasma shows them on the desktop's screens." }
                         ]
                         delegate: ColumnLayout {
                             required property var modelData
                             spacing: 0
+                            // "on" can lose them (SteamOS's server): set in frametop.conf, shown only then
+                            visible: modelData.value !== "on" || backend.notifyForward === "on"
                             Controls.RadioButton {
                                 text: modelData.text
                                 checked: backend.notifyForward === modelData.value

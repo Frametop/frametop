@@ -221,11 +221,14 @@ def check_host():
                "kwinrc may no longer turn it off (session/frametop-session.sh)")
 
     # ft-notifyfwd uses Plasma's notification watcher API, which no spec covers, and PyGObject.
-    try:
-        with open("/usr/lib/libnotificationmanager.so", "rb") as f:
-            plasma = f.read()
-    except OSError:
-        plasma = b""
+    plasma = b""
+    for lib in ("/usr/lib/libnotificationmanager.so.1", "/usr/lib/libnotificationmanager.so"):
+        try:
+            with open(lib, "rb") as f:
+                plasma = f.read()
+            break
+        except OSError:
+            pass
     missing = [m for m in (b"RegisterWatcher", b"InvokeAction") if m not in plasma]
     if run("/usr/bin/python3", "-c", "from gi.repository import Gio")[0] != 0:
         report("warn", "notifications", "no PyGObject (Gio) for /usr/bin/python3: the desktop's "

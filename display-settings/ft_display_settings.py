@@ -173,10 +173,16 @@ class Backend(QObject):
         """ft-notifyfwd's: forwarding | waiting (no usable server on the user bus) | "" (not running)."""
         try:
             with open(NOTIFYFWD_LOG) as f:
-                last = (f.read().strip().splitlines() or [""])[-1]
+                lines = f.read().splitlines()
         except OSError:
             return ""
-        return "forwarding" if last == "ft-notifyfwd: forwarding" else "waiting" if "not forwarding" in last else ""
+        # the last state line: errors it logs in between (a failed Notify) don't change it
+        for line in reversed(lines):
+            if line == "ft-notifyfwd: forwarding":
+                return "forwarding"
+            if line.startswith("ft-notifyfwd: not forwarding"):
+                return "waiting"
+        return ""
 
     def _ask_screens(self, text):
         """Request/reply to ft-screens; None if it isn't running."""

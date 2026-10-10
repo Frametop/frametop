@@ -35,21 +35,25 @@ room about your head so the next one to the right or left comes to the front (ft
 Meta+Alt+Tab and Meta+Alt+Shift+Tab by default), profile:NAME = switch to that profile (ft-layout
 use NAME: its screens and apps; docs/profiles.md), steam_menu = open the SteamVR dashboard on
 Steam's menu, or close the dashboard (steam/ft-steam menu, through Steam's UI), pause_toggle =
-pause Frametop for a VR game, or resume it (game_pause.py), command:CMD = run
-CMD with sh -c (on the host, as this service: its environment, output to its log, and
-COMMAND_PATH, so ft-layout, ft-float and ft-steam need no path), key = pass through as a key, none).
+pause Frametop for a VR game, or resume it (game_pause.py), dictate = start or stop dictation, and
+dictate_hold = dictation while held (Frametop Voice, voice/ft-voiced: "toggle|start|stop <source>"
+to @frametop_voice), command:CMD = run CMD with sh -c (on the host, as this service: its
+environment, output to its log, and COMMAND_PATH, so ft-layout, ft-float and ft-steam need no
+path), key = pass through as a key, none).
 
 Frame controller buttons can be mapped too ("controller_buttons": {"right/a": action} in the
 rules file; any action but key and the gaze ones, GAZE_ACTIONS: gaze mode is a mouse feature,
 docs/gaze-controllers.md). So can key combinations on any keyboard ("key_bindings":
 {"29+56+34": action}, evdev codes joined by "+", modifiers first and left-hand codes for
 either side, here Ctrl+Alt+G): the combination does the action, and its last key isn't typed.
-A modifier on its own ("125": Meta) is a tap: pressed and released with no other key, mouse
-button, or scroll in between; the desktop gets an F24 press before its release, so Plasma's
-launcher doesn't open on a Meta tap that's bound. A rules file without "key_bindings" gets
-DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left, Meta+K: gaze_right, Meta+Shift+F:
-float_toggle); one with its own, even an empty one, doesn't. The float, profile, Steam menu,
-pause and command actions work without pointer mode too. A combination with Meta also sends the desktop an
+A modifier on its own ("125": Meta) is a tap: pressed with no other modifier held, and released
+with no other key, mouse button, or scroll in between; the desktop gets an F24 press before its
+release, so Plasma's launcher doesn't open on a Meta tap that's bound. A tap's left-hand code is
+either side's; a right-hand code ("97": Right Ctrl) is that key's alone, and comes first. A rules
+file without "key_bindings" gets DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left,
+Meta+K: gaze_right, Meta+Shift+F: float_toggle), plus a Right Ctrl tap for dictate once Frametop
+Voice is installed (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. The float,
+profile, Steam menu, pause, dictation and command actions work without pointer mode too. A combination with Meta also sends the desktop an
 F24 press and Meta's release right away: so letting go of Meta doesn't open Plasma's launcher, and
 a gaze click isn't Meta+click (KWin's window move and resize). Another key while Meta is still
 held gives the desktop Meta back. While typing goes to Steam, keyboards aren't grabbed, so Steam
@@ -77,11 +81,13 @@ Typing goes to the panel clicked last, and ft-screens says which ("keyboard
 desktop|steam" on the control socket, every second). While it's the desktop,
 pass-through keyboards are grabbed, so gamescope, which reads every keyboard itself,
 doesn't type them into its focused app too. Without word from ft-screens for 3 seconds
-they're released. With SHARE_KEYS=1 in ~/.config/frametop.conf,
-a grabbed keyboard's keys also go out as "key <code> <value> <device name>" datagrams on
-@frametop_keys, for programs that watch every keyboard for a hotkey and lose it to the grab.
-It's off by default: any local process that binds that name first gets every key typed
-into the desktop.
+they're released.
+
+Dictation (Frametop Voice) types here: its text comes as "type TEXT" on the control socket, only
+from this user, and goes out key by key, TYPE_STEP apart, where typing goes: to ft-screens for the
+desktop, else on the virtual keyboard, which SteamVR passes on to Steam and games (US layout,
+ASCII; the voice service turns the rest into ASCII or drops it). A character waits while a
+modifier is held on a keyboard, which would make it a shortcut (Ctrl+letter).
 
 Frametop's keyboard (ft-screens' key panel): the desktop's input method (input/ft-textinput)
 says "textfield 1|0" when a text field on the desktop gains or loses keyboard focus, and
@@ -123,6 +129,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
   textfield 1|0     from the desktop's input method (above)
   pause on|off|toggle [reason]   pause Frametop or resume it (input/ft-pause; the gesture reader)
   pause ?           the pause state, as {"t": "pause", ...}
+  type TEXT         from Frametop Voice: type TEXT where typing goes (above); ignored from
+                    another user
 
 Runs on the Frame host as a user service (frametop-input-relay.service). The
 virtual devices are parked in systemd's file descriptor store, so a relay
@@ -218,7 +226,8 @@ RULES_PATH = os.path.expanduser("~/.config/frametop-input.json")
 ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashboard", "recenter",
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
-           "dock_all", "spin_next", "spin_prev", "steam_menu", "pause_toggle", "key", "none")
+           "dock_all", "spin_next", "spin_prev", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
+           "key", "none")
 # Gaze mode is a mouse feature: these never come from a controller button (docs/gaze-controllers.md).
 GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right", "gaze_quickcal")
 # Key combinations a rules file without "key_bindings" gets: a Meta tap opens Steam's menu, Meta+J
@@ -228,9 +237,25 @@ GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze
 # desktop like RustDesk.
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev"}
+# Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
+# file), a rules file without "key_bindings" gets these too: a Right Ctrl tap, Right Ctrl alone,
+# so a Left Ctrl tap (crouch in many games) doesn't start it.
+VOICE = "\0frametop_voice"
+VOICE_ACTIONS = ("dictate", "dictate_hold")
+VOICE_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-voice.service")
+VOICE_KEY_BINDINGS = {"97": "dictate"}
 KEY_F24 = 194  # sent to the desktop with a Meta combination (see the top)
 # Key combinations ("key_bindings"): modifiers, each side's code folded into the left one's.
 MODIFIERS = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125}
+KEY_LEFTSHIFT = 42
+# Dictation's text, typed on a US layout (see the top): character -> (code, with Shift).
+US_KEYS = {" ": (57, False)}
+for _row, _shifted, _first in (("1234567890-=", "!@#$%^&*()_+", 2), ("qwertyuiop[]", "QWERTYUIOP{}", 16),
+                               ("asdfghjkl;'`", 'ASDFGHJKL:"~', 30), ("\\zxcvbnm,./", "|ZXCVBNM<>?", 43)):
+    for _i, (_plain, _shift) in enumerate(zip(_row, _shifted)):
+        US_KEYS[_plain], US_KEYS[_shift] = (_first + _i, False), (_first + _i, True)
+TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to the next key
+TYPE_MAX = 20000  # characters waiting to be typed, at most
 VR_KEYBOARD_MODES = ("always", "no_keyboard", "button", "never")  # when Frametop's keyboard opens
 HELPER = "\0ft_pointer_helper"
 # Frame controller buttons the pointer helper can read (pointer/helper/vrbuttons.h).
@@ -256,7 +281,8 @@ def known_action(a):
 
 
 def needs_pointer(a):
-    return a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in ("steam_menu", "pause_toggle") and not a.startswith((PROFILE, COMMAND))
+    return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
+            and a not in ("steam_menu", "pause_toggle") and not a.startswith((PROFILE, COMMAND)))
 
 
 def works_paused(a):
@@ -267,7 +293,6 @@ def works_paused(a):
 # What pressed pause_toggle, for the log (do_action's source).
 PAUSE_SOURCES = {"mouse": "mouse button", "keyboard": "key combination", "left": "controller button",
                  "right": "controller button"}
-KEYS = "\0frametop_keys"  # keys of keyboards grabbed for the desktop, for other readers
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FT_LAYOUT = os.path.join(REPO, "layout", "ft-layout")
 FT_STEAM = os.path.join(REPO, "steam", "ft-steam")
@@ -366,6 +391,11 @@ def read_config(path=os.path.expanduser("~/.config/frametop.conf")):
     return conf
 
 
+def default_key_bindings():
+    """The key combinations a rules file without its own gets."""
+    return {**DEFAULT_KEY_BINDINGS, **(VOICE_KEY_BINDINGS if os.path.exists(VOICE_UNIT) else {})}
+
+
 def read_rules(path=RULES_PATH):
     """{"devices": {id: {"role", "name"}}, "buttons": {id: {"<code>": action}},
     "controller_buttons": {"<hand>/<button>": action}, "controller_in_games": bool,
@@ -380,7 +410,7 @@ def read_rules(path=RULES_PATH):
     rules.setdefault("buttons", {})
     rules.setdefault("controller_buttons", {})
     if not isinstance(rules.get("key_bindings"), dict):
-        rules["key_bindings"] = dict(DEFAULT_KEY_BINDINGS)
+        rules["key_bindings"] = default_key_bindings()
     return rules
 
 
@@ -765,7 +795,7 @@ class Node:
     def __init__(self, path, fd, name, bus, vendor, product, uniq, is_mouse, is_keyboard,
                  candidate=True, volume_keys=False, only_volume=False, uinput=False):
         self.path, self.fd, self.name = path, fd, name
-        self.uinput = uinput  # made by a program (frame-voice's keyboard, say), not a real device
+        self.uinput = uinput  # made by a program (a remote desktop's keyboard, say), not a real device
         self.bus, self.vendor, self.product, self.uniq = bus, vendor, product, uniq
         self.is_mouse, self.is_keyboard = is_mouse, is_keyboard
         self.candidate, self.volume_keys, self.only_volume = candidate, volume_keys, only_volume
@@ -835,6 +865,10 @@ def main():
     control = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     control.bind("\0frametop_relay")
     control.setblocking(False)
+    # The kernel adds each sender's user ("type" is taken only from ours: an abstract socket
+    # takes datagrams from anyone).
+    control.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+    creds = struct.Struct("3i")  # struct ucred: pid, uid, gid
     watchers = {}  # address -> watch end time
 
     # desktop_until: typing goes to the Frametop desktop until then (ft-screens says so
@@ -842,7 +876,7 @@ def main():
     # vr_capture_until: every controller button is taken until then (the settings app capturing one).
     # pointer: the 3D mouse while it's in use, pointer_conf: the one the config asks for (they
     # differ while Frametop is paused).
-    state = {"pointer": None, "pointer_conf": None, "rules": {}, "share_keys": False,
+    state = {"pointer": None, "pointer_conf": None, "rules": {},
              "desktop_until": 0.0, "typing_applied": None, "vr_capture_until": 0.0, "vr_bind_retry": False,
              "pointer_holding": False}
 
@@ -864,7 +898,6 @@ def main():
     def load_config():
         conf = read_config()
         state["rules"] = read_rules()
-        state["share_keys"] = conf.get("SHARE_KEYS", "0") == "1"
         if conf.get("POINTER", "0") == "1":
             p = state["pointer_conf"] or Pointer(0.03, 30)
             p.sensitivity = float(conf.get("POINTER_SENSITIVITY", "0.03"))
@@ -992,10 +1025,20 @@ def main():
                 except OSError:
                     pass  # the Frametop desktop isn't running
                 log(action)
+        elif action in VOICE_ACTIONS:
+            # dictate starts or stops on a press; dictate_hold starts on the press and stops on
+            # the release. The voice service logs it.
+            command = {1: "toggle"}.get(value) if action == "dictate" else {1: "start", 0: "stop"}.get(value)
+            if command:
+                try:
+                    screens_sock.sendto(f"{command} {source}".encode(), VOICE)
+                except OSError:
+                    log(f"{action}: Frametop Voice isn't running (frametop-voice.service)")
         elif state["pointer"]:
             state["pointer"].action(action, value, now, source)
 
     held_modifiers = set()  # on any keyboard, folded (MODIFIERS)
+    tap_code = None  # the tap's key as it is (a right-hand code isn't folded), see modifier_tap
     held_meta = set()  # the Meta keys held, as they are (KEY_LEFTMETA, KEY_RIGHTMETA)
     meta_hidden = set()  # held Meta keys the desktop was told came up (a combination; key_binding)
     combos_down = {}  # key code -> the action its combination started (released with it)
@@ -1003,11 +1046,12 @@ def main():
     def key_binding(code, value, now):
         """A key from a keyboard: does it complete a key combination ("key_bindings")? True if
         it was taken for one (then it isn't typed)."""
-        nonlocal tap
+        nonlocal tap, tap_code
         if code in MODIFIERS:
             mod = MODIFIERS[code]
             if value == 1:
                 tap = mod if not held_modifiers and not combos_down else None
+                tap_code = code
             (held_modifiers.add if value else held_modifiers.discard)(mod)
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
                 (held_meta.add if value else held_meta.discard)(code)
@@ -1016,7 +1060,7 @@ def main():
                     return True  # the desktop already had it come up (below)
             if value == 0 and tap == mod:
                 tap = None
-                modifier_tap(mod, now)
+                modifier_tap(mod, tap_code, now)
             return False
         if value == 1 and code not in combos_down and meta_hidden:
             # Another key while Meta is still held after a combination: the desktop gets Meta
@@ -1051,11 +1095,16 @@ def main():
         log(f"key combination {combo}: {action}")
         return True
 
-    def modifier_tap(mod, now):
-        """A modifier pressed and released alone: its binding, if it has one ("125": Meta tap)."""
-        action = state["rules"]["key_bindings"].get(str(mod))
+    def modifier_tap(mod, code, now):
+        """A modifier pressed and released alone: its binding, if it has one ("125": Meta tap).
+        A right-hand key's own binding ("97": Right Ctrl) comes before the folded one."""
+        bindings = state["rules"]["key_bindings"]
+        combo = str(code) if code != mod and str(code) in bindings else str(mod)
+        action = bindings.get(combo)
         if not known_action(action) or action in ("key", "none") or (pause.paused and not works_paused(action)):
             return
+        if action == "dictate_hold":
+            action = "dictate"  # a tap is over before it's held: it starts, and the next one stops
         # The desktop gets a key in between before the release goes there, so the tap isn't one
         # there too: a Meta tap would open Plasma's launcher.
         to_screens(KEY_F24, 1)
@@ -1063,7 +1112,7 @@ def main():
         if state["pointer"] or not needs_pointer(action):
             do_action(action, 1, now, "keyboard")
             do_action(action, 0, now, "keyboard")
-        log(f"key combination {mod}: {action}")
+        log(f"key combination {combo}: {action}")
 
 
     screens_down = set()  # keys the desktop was told went down and not yet up (see reconcile_desktop_keys)
@@ -1089,19 +1138,51 @@ def main():
     next_scan = 0.0
 
     volume = Volume()
-    keys_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
+    typing = collections.deque()  # (code, shift): dictation's characters still to type
+    typing_down = []  # the character pressed last, (code, shift, to the desktop): its release is next
+    typing_at = 0.0  # the next press or release goes then
 
-    def share_key(node, code, value):
-        """With SHARE_KEYS=1, a key from a keyboard grabbed for the desktop, for programs
-        that watch every keyboard for a hotkey and lose it to the grab. It can't go on
-        another input device: gamescope reads every keyboard itself and would type it
-        into its focused app."""
-        if not state["share_keys"]:
+    def type_text(text):
+        """Queue dictation's text (see the top)."""
+        keys = [US_KEYS[c] for c in text if c in US_KEYS]
+        room = max(0, TYPE_MAX - len(typing))
+        typing.extend(keys[:room])
+        log(f"typing {min(len(keys), room)} characters for Frametop Voice"
+            + (f" ({len(keys) - room} dropped: too many waiting)" if len(keys) > room else ""))
+
+    def type_key(code, value, desktop):
+        if desktop:
+            to_screens(code, value)
+        else:
+            keyboard.emit(EV_KEY, code, value)
+            keyboard.sync()
+
+    def typing_tick(now):
+        """Release the character pressed last, or press the next, when it's time. A new one
+        waits while a modifier is held."""
+        nonlocal typing_at
+        if now < typing_at:
             return
-        try:
-            keys_sock.sendto(f"key {code} {value} {node.name}".encode(), KEYS)
-        except OSError:
-            pass  # nobody listening
+        if typing_down:
+            code, shift, desktop = typing_down.pop()
+            type_key(code, 0, desktop)
+            if shift:
+                type_key(KEY_LEFTSHIFT, 0, desktop)
+        elif typing and not held_modifiers:
+            code, shift = typing.popleft()
+            desktop = now < state["desktop_until"]
+            if shift:
+                type_key(KEY_LEFTSHIFT, 1, desktop)
+            type_key(code, 1, desktop)
+            typing_down.append((code, shift, desktop))
+        else:
+            return
+        typing_at = now + TYPE_STEP
+
+    def typing_timeout(now, default):
+        if typing_down or (typing and not held_modifiers):
+            return max(0.0, min(default, typing_at - now))
+        return default
 
     def restore_keymaps():
         """Give remapped devices their volume keys back, so they work without the relay."""
@@ -1154,10 +1235,7 @@ def main():
 
     def release_held(node):
         for code in node.held:
-            if node.role == "passthrough":
-                share_key(node, code, 0)
-            else:
-                (mouse if code >= BTN_MISC else keyboard).emit(EV_KEY, code, 0)
+            (mouse if code >= BTN_MISC else keyboard).emit(EV_KEY, code, 0)
         node.held.clear()
         mouse.sync()
         keyboard.sync()
@@ -1249,9 +1327,11 @@ def main():
     def handle_control(now):
         while True:
             try:
-                data, addr = control.recvfrom(4096)
+                data, anc, _, addr = control.recvmsg(65536, socket.CMSG_SPACE(creds.size))
             except BlockingIOError:
                 return
+            uid = next((creds.unpack(d[:creds.size])[1] for level, kind, d in anc
+                        if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
             words = data.decode(errors="replace").split()
             cmd = words[0] if words else ""
             # One malformed datagram must not end the relay: it would drop every grab,
@@ -1285,6 +1365,13 @@ def main():
                     continue
                 if cmd == "textfield" and len(words) == 2:
                     text_field(words[1] == "1")
+                    continue
+                if cmd == "type":
+                    # From Frametop Voice (unbound, no reply). It types keys, so only from this user.
+                    if uid == os.getuid():
+                        type_text(data[len(b"type "):].decode(errors="replace"))
+                    else:
+                        log(f"type from another user ({uid}): ignored")
                     continue
                 if cmd == "gazeawake" and len(words) == 2:
                     if state["pointer"]:
@@ -1386,7 +1473,8 @@ def main():
             state["pointer_holding"] = holding
             pause.controllers_changed()
         ready, _, _ = select.select(list(nodes) + [control], [], [],
-                                    min(volume.timeout(now, pointer.timeout() if pointer else 0.5), pause.timeout(now)))
+                                    typing_timeout(now, min(volume.timeout(now, pointer.timeout() if pointer else 0.5),
+                                                            pause.timeout(now))))
         now = time.monotonic()
         if pointer:
             pointer.tick(now)
@@ -1395,6 +1483,7 @@ def main():
         if state["vr_bind_retry"]:
             vr_bind(now)
         volume.tick(now)
+        typing_tick(now)
         pause.tick(now)
         if state["vr_capture_until"] and now >= state["vr_capture_until"]:
             vr_bind(now)  # capture over: back to the mapped buttons
@@ -1439,16 +1528,6 @@ def main():
                 if node.role != "pointer":
                     # Observed only, unless typing goes to the desktop. Key combinations work on
                     # any pass-through keyboard.
-                    if (node.role == "passthrough" and etype == EV_KEY and node.grabbed
-                            and code < BTN_MISC and value in (0, 1)):
-                        # Shared as pressed, key combinations included: the Meta release a
-                        # combination keeps from the desktop must still reach frame-voice, or
-                        # it waits for that release before typing anything.
-                        share_key(node, code, value)
-                        if value:
-                            node.held.add(code)
-                        else:
-                            node.held.discard(code)
                     if node.role == "passthrough" and etype == EV_KEY and code < BTN_MISC and key_binding(code, value, now):
                         continue
                     if node.role == "passthrough" and etype == EV_KEY:

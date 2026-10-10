@@ -55,8 +55,9 @@ SCREENS = "\0ft_screens"
 STATE_PATH = f"/run/user/{os.getuid()}/frametop-pause.json"
 # User services that pausing stops, if they run.
 UNITS = ("frametop-gaze.service", "frametop-hands.service", "frametop-camd.service")
-# What still works while paused, besides commands ("command:CMD"): the toggle itself, and Steam's menu.
-PAUSED_ACTIONS = ("pause_toggle", "steam_menu")
+# What still works while paused, besides commands ("command:CMD"): the toggle itself, Steam's menu,
+# and dictation (Frametop Voice types into games too).
+PAUSED_ACTIONS = ("pause_toggle", "steam_menu", "dictate", "dictate_hold")
 DEFAULT_GESTURE = {"buttons": ["left/thumbstick", "right/thumbstick"], "presses": 2}
 DESKTOP_MODES = ("hide", "close")
 SOUNDS = {True: "/usr/share/sounds/ocean/stereo/device-removed.oga",

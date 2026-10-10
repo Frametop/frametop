@@ -44,6 +44,8 @@ EYE_MMAP = "/dev/shm/eye-server.mmap"
 # SteamVR's settings, where SteamOS 0.4's Track Dominant Eye Only lives (as gaze/gazecal.py reads it).
 STEAMVR_SETTINGS = (os.path.join(HOME, ".config/openvr/config/steamvr.vrsettings"),
                     os.path.join(HOME, ".steam/steam/config/steamvr.vrsettings"))
+EYE_LOG = os.path.join(HOME, ".local/share/Steam/logs/eyetracking.txt")
+EYE_RATE_MARK = os.path.join(HOME, ".local/state/frametop/gaze/steamvr-eye-rate")  # gaze/eye-rate.py
 VRSERVER = "http://127.0.0.1:27062"  # its web socket: input/vrws.py
 PAUSE_STATE = f"/run/user/{os.getuid()}/frametop-pause.json"  # input/game_pause.py
 HOST_GLIBC = (2, 39)  # the newest the pointer driver may need (pointer/driver/build.sh)
@@ -606,6 +608,40 @@ def check_eye_tracker():
            "check again after that")
 
 
+def check_eye_rate():
+    """gaze/eye-rate.py: SteamVR runs the eye cameras at 15 fps unless steamvr.gazeDepEyeToHeadEnable
+    is on, and at 15 our tracker can't calibrate. The setting counts from SteamVR's start, and the
+    rate is the last "Set framerate" since the eye tracker's (none: it starts at 90)."""
+    if systemctl("is-enabled", "frametop-gaze") != "enabled":
+        return
+    out = run(f"{STEAMVR_BIN}/vrcmd", "--settings-bool", "steamvr.gazeDepEyeToHeadEnable",
+              env=dict(os.environ, LD_LIBRARY_PATH=STEAMVR_BIN))[1]
+    on = re.search(r"^steamvr\.gazeDepEyeToHeadEnable=(true|1)\b", out, re.M) is not None
+    try:
+        with open(EYE_LOG, errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        lines = []
+    starts = [i for i, line in enumerate(lines) if " startup with PID" in line]
+    rates = re.findall(r"CStereoAdspCams: Set framerate ([\d.]+)", "\n".join(lines[starts[-1]:])) if starts else []
+    rate = float(rates[-1]) if rates else 90.0 if starts else None
+    ours = os.path.exists("/etc/systemd/system/frametop-eyegrab.service")
+    if rate is not None and rate < 90:
+        why = (f"SteamVR runs the eye cameras at {rate:g} fps, so our eye tracker can't calibrate (a dot needs "
+               "15 frames in 0.6 s) and the gaze moves only that often")
+        if on:
+            report("warn", "eye cameras", f"{why}: steamvr.gazeDepEyeToHeadEnable is on, but SteamVR started "
+                   "before that; restart SteamVR")
+        else:
+            report("FAIL" if ours else "warn", "eye cameras", f"{why}: run gaze/eye-rate.py on, then restart SteamVR")
+    elif not on:
+        report("warn", "eye cameras", "steamvr.gazeDepEyeToHeadEnable is off, so SteamVR may run the eye cameras "
+               "at 15 fps from its next start: run gaze/eye-rate.py on")
+    else:
+        report("ok", "eye cameras", (f"{rate:g} fps" if rate else "rate unknown (no eyetracking.txt)") +
+               " (steamvr.gazeDepEyeToHeadEnable on" + (", set by Frametop)" if os.path.exists(EYE_RATE_MARK) else ")"))
+
+
 def main():
     args = sys.argv[1:]
     if args not in ([], ["--mark-good"]):
@@ -632,6 +668,7 @@ def main():
         check_steam_ui()
         check_vr_socket()
         check_eye_tracker()
+        check_eye_rate()
 
     if args == ["--mark-good"]:
         if failed:

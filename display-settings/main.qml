@@ -958,6 +958,58 @@ Kirigami.ApplicationWindow {
                           + "your head where you let go. Choosing a pin above keeps the screen where it is now, so place "
                           + "it first. Save as profile… (Layout) keeps pins."
                 }
+
+                Kirigami.FormLayout {
+                    Layout.fillWidth: true
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Notifications" }
+
+                    Repeater {
+                        model: [
+                            { value: "auto", text: "Show them in the Steam session", help: "The desktop's notifications go to the Steam session's notification server, such as one that shows them in VR, with their buttons. Plasma's own popups stay off meanwhile; its history keeps them. Not to SteamOS's own server, which can't show them on the Frame." },
+                            { value: "on", text: "Always send them to the Steam session", help: "Whatever serves notifications there, SteamOS's own server too." },
+                            { value: "off", text: "Keep them in the desktop", help: "Plasma shows them on the desktop's screens." }
+                        ]
+                        delegate: ColumnLayout {
+                            required property var modelData
+                            spacing: 0
+                            Controls.RadioButton {
+                                text: modelData.text
+                                checked: backend.notifyForward === modelData.value
+                                onToggled: if (checked) backend.setNotifyForward(modelData.value)
+                            }
+                            Controls.Label {
+                                text: modelData.help
+                                opacity: 0.7
+                                font: Kirigami.Theme.smallFont
+                                leftPadding: Kirigami.Units.gridUnit * 1.6
+                                wrapMode: Text.Wrap
+                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                            }
+                        }
+                    }
+                    Controls.Label {
+                        Kirigami.FormData.label: "Now:"
+                        visible: backend.desktopRunning
+                        text: backend.notifyForwardState === "forwarding" ? "In the Steam session"
+                            : backend.notifyForwardState === "waiting" ? "In the desktop: the Steam session has no notification server that can show them"
+                            : "In the desktop"
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
+                    RowLayout {
+                        visible: backend.notifyRestartNeeded
+                        Controls.Label {
+                            text: "Applies when the desktop starts again."
+                            wrapMode: Text.Wrap
+                        }
+                        Controls.Button {
+                            text: "Restart desktop"
+                            icon.name: "system-reboot"
+                            onClicked: restartDialog.open()
+                        }
+                    }
+                }
             }
         }
     }

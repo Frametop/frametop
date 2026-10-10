@@ -51,3 +51,37 @@ So typing hands sit anywhere from 0.29 to 0.42 m under the eyes depending on the
 which is also where deliberate gaze pinches with the elbow resting sit (0.35-0.45 m): no fixed
 height tells them apart. What does: both hands down together (level within a few cm, 0.15-0.25 m
 apart, palms down), and a hand that types rising well above where it typed when it's meant.
+
+## What the branch does
+
+`pointer/helper/typing.h` (tests: `pointer/tests/typing-test.cpp`) decides, per side, whether typing
+holds a hand back; the pointer helper feeds it the relay's keys and each hands frame, and ft-screens
+hears the result (`typing <L> <R>` on @ft_screens).
+
+- Keys: for `POINTER_PINCH_TYPING` (2 s, was 1) after a key, every hand is held back, except one
+  that has left the keyboard or is busy out of the keyboard zone (its ray up, a gesture held:
+  pointing with one hand and pressing Enter with the other).
+- On the keyboard: a hand in the keyboard zone (palm at least `POINTER_TYPING_BELOW`, 0.2 m, under
+  the eyes, 0.05-0.45 m ahead, palm down) while typing is parked, and stays held back through any
+  pause until it rises `POINTER_TYPING_RAISE` (0.08 m) above where it typed, or turns its palm up,
+  for 0.1 s. Freed, it works at once, keys or not. A hand on the mouse beside the keyboard is parked
+  too once a key comes (its pinches are mouse clicks). Unseen 3 s, it's forgotten.
+- The posture: both hands in the zone, level within 8 cm and at most 32 cm apart, for
+  `POINTER_TYPING_POSTURE` (0.3 s), is typing before any key, within `POINTER_TYPING_RECENT` (600 s)
+  of a key. Without that limit, both hands resting on a desk would hold gaze pinches back.
+- Held back: no pinch, middle pinch or grip (ray, gaze or plain) in the helper; no ray (an owner
+  drops the pointer to the mouse or the gaze, "hand ray: right -> none (typing)"); no poke, near grab
+  or fingertip cursor in ft-screens. A gesture already held carries on.
+
+Replaying the four flags and the PR #3 takes through typing.h (`/tmp` driver, not in the repo; the
+flags have no keys, so a key a minute before the window was assumed):
+
+| recording | result |
+| --- | --- |
+| flag 145753 (typing, the ray click at 14:57:38) | both hands parked by the posture 0.3 s into the window, held back 98% of it; the 14:57:38 pinch came 0.27 s into the window, before the replay's posture (live, the hands had been on the keys since 14:57:10) |
+| flag 150115 (typing, then the right hand up for a grip, a drag and a click) | posture at once; the right hand freed by its raise (0.18 m), its grip and two pinches allowed; the left held back 98% |
+| flags 145841, 145857 (deliberate ray use, the other hand low) | nothing held back, all 11 pinches allowed |
+| desk take, keys during the typing prompt | typing, mouse and switching: both hands held back 100% |
+| desk take, no keys | the posture alone: typing 84-100%, mouse phase: the mouse hand free (0.41 m from the other hand) |
+| gestures take (pinches, grabs, pointing) | nothing held back |
+| touch take (low dots) | the posture took both hands while they waited low; the touching hand freed by its first raise, then held back 9% |

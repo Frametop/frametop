@@ -1632,6 +1632,7 @@ Screen *Find(int one_based) {
 // turns instead of you. A spin that arrives during one adds to it, from where the panels are
 // headed, so quick taps carry on smoothly. Grabbing a panel, or a command that places it,
 // takes it out of the spin where it is. The 3D mouse's pointer goes to straight ahead.
+// "spin to N" turns the ring the short way so panel N comes to straight ahead (spotwatch).
 constexpr double kSpinSeconds = 0.3;  // how long a spin takes
 constexpr double kSpinAhead = 8;      // degrees: a panel this near straight ahead is the current one
 constexpr double kSpinFocus = 30;     // degrees: when a spin settles, the panel this near ahead gets typing
@@ -1643,6 +1644,7 @@ struct Spin {
     Clock::time_point start;
     std::map<int, Mat> base;  // index -> its pose before the spin
     int front = -1;           // settled: this panel came to the front (ft_vr_poll reports it)
+    int target = -1;          // "spin to": this panel is the one coming to the front
 } g_spin;
 
 // p turned a radians about the vertical axis through (cx, cz); positive turns it to the left.
@@ -1681,7 +1683,9 @@ void UpdateSpin() {
         // The panel now nearest straight ahead (of where you face) gets typing and the active window.
         Mat head;
         double nearest = kSpinFocus;
-        if (DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+        if (g_spin.target >= 0 && g_spin.base.count(g_spin.target)) {
+            g_spin.front = g_spin.target;  // what "spin to" asked for, wherever it settled
+        } else if (DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
             for (const auto &[i, p] : g_spin.base) {
                 const auto it = g_screens.find(i);
                 Mat q;
@@ -1695,6 +1699,7 @@ void UpdateSpin() {
             }
         }
         g_spin.on = false;
+        g_spin.target = -1;
         g_spin.base.clear();
         ArrangeDesktopSoon();  // KWin's outputs follow where the screens are now
     }
@@ -1704,6 +1709,16 @@ void SpinCommand(const char *arg, char *reply, int size) {
     Mat head;
     if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head))
         return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
+    int target = -1;  // "spin to N": that panel (0-based)
+    if (!std::strncmp(arg, "to ", 3)) {
+        char *end;
+        const long n = std::strtol(arg + 3, &end, 10);
+        const Screen *s = end == arg + 3 || *end ? nullptr : Find(int(n));
+        if (!s) return (void)std::snprintf(reply, size, "error no panel %s", arg + 3);
+        if (s->pinned != kNone) return (void)std::snprintf(reply, size, "error pinned");
+        if (!Spinnable(*s)) return (void)std::snprintf(reply, size, "error not in the room");
+        target = int(n) - 1;
+    }
     if (g_spin.on) {
         g_spin.from = SpinNow();  // carry on from where the panels are now
     } else {
@@ -1718,21 +1733,33 @@ void SpinCommand(const char *arg, char *reply, int size) {
     if (g_spin.base.empty()) return (void)std::snprintf(reply, size, "error nothing to spin");
     double turn;  // degrees, positive to the left
     const bool next = !std::strcmp(arg, "next");
-    if (next || !std::strcmp(arg, "prev")) {
-        // Each visible panel's bearing from where you face, to the right positive, as it will
-        // be when the spin so far ends; the nearest one past straight ahead comes to the front.
-        double fx = -head.m[0][2], fz = -head.m[2][2];
-        const double n = std::sqrt(fx * fx + fz * fz) + 1e-9;
-        fx /= n, fz /= n;
-        const double rx = -fz, rz = fx;
+    // Each panel's bearing from where you face, to the right positive, as it will be when the
+    // spin so far ends.
+    double fx = -head.m[0][2], fz = -head.m[2][2];
+    const double fn = std::sqrt(fx * fx + fz * fz) + 1e-9;
+    fx /= fn, fz /= fn;
+    const double rx = -fz, rz = fx;
+    auto bearing = [&](const Mat &p) {
+        const Mat q = Turned(p, g_spin.to, g_spin.cx, g_spin.cz);
+        const double dx = q.m[0][3] - head.m[0][3], dz = q.m[2][3] - head.m[2][3];
+        return std::atan2(dx * rx + dz * rz, dx * fx + dz * fz) * 180 / M_PI;
+    };
+    if (target >= 0) {
+        const auto it = g_spin.base.find(target);
+        if (it == g_spin.base.end()) {  // (Spinnable but no pose yet)
+            if (!g_spin.on) g_spin.base.clear();
+            return (void)std::snprintf(reply, size, "error panel %d has no pose", target + 1);
+        }
+        turn = bearing(it->second);  // already within +-180: the short way round
+        g_spin.target = target;
+    } else if (next || !std::strcmp(arg, "prev")) {
+        // The nearest visible panel past straight ahead comes to the front.
         double best = 0;
         bool found = false;
         for (const auto &[i, p] : g_spin.base) {
             const auto s = g_screens.find(i);
             if (s == g_screens.end() || !s->second.visible) continue;
-            const Mat q = Turned(p, g_spin.to, g_spin.cx, g_spin.cz);
-            const double dx = q.m[0][3] - head.m[0][3], dz = q.m[2][3] - head.m[2][3];
-            double a = std::atan2(dx * rx + dz * rz, dx * fx + dz * fz) * 180 / M_PI;
+            double a = bearing(p);
             if (!next) a = -a;
             if (a <= kSpinAhead) a += 360;
             if (!found || a < best) best = a, found = true;
@@ -1743,10 +1770,12 @@ void SpinCommand(const char *arg, char *reply, int size) {
         }
         if (best > 180) best -= 360;  // the short way round
         turn = next ? best : -best;
+        g_spin.target = -1;
     } else {
         char *end;
         turn = std::strtod(arg, &end);
-        if (end == arg || *end) return (void)std::snprintf(reply, size, "error spin next|prev|<degrees>");
+        if (end == arg || *end) return (void)std::snprintf(reply, size, "error spin next|prev|to <N>|<degrees>");
+        g_spin.target = -1;  // turned on by hand: the nearest panel takes the front again
     }
     g_spin.to += turn * M_PI / 180;
     g_spin.start = Clock::now();
@@ -2624,6 +2653,10 @@ void ft_vr_keyboard_hide(void) {
 //                     <controllers> <game running 0|1> <ingames>"
 //   spin next|prev|<degrees>  turn every panel in the room about your head (see the lazy
 //                             susan) -> "ok <degrees turned>"
+//   spin to <N>               ...the short way, so panel N comes to straight ahead and gets
+//                             typing -> "ok <degrees>", "error pinned", "error not in the room"
+//   front <N>                 panel N gets typing and its window becomes KWin's active one,
+//                             where it is (as when a spin brings it to the front)
 //   cutouts on|off|state      hand cutouts (see handcut.h) -> "ok <on|off> <ready|idle|unavailable>
 //                             <last composite ms> ms, predict <on|off> lead <ms> ms"
 //   cutouts predict on|off    move the hands ahead along their velocity (on by default)
@@ -2868,8 +2901,14 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         if ((g_press.buttons & ButtonBit(BTN_LEFT)) && g_press.device != kNone && !IsHandController(g_press.device))
             g_press.upAt = g_tick + 9;
         std::snprintf(reply, size, "ok");
-    } else if (std::sscanf(cmd, "spin %15s", word) == 1) {
-        SpinCommand(word, reply, size);
+    } else if (!std::strncmp(cmd, "spin ", 5)) {
+        SpinCommand(cmd + 5, reply, size);
+    } else if (std::sscanf(cmd, "front %d", &n) == 1) {
+        // Typing and the active window go to panel N where it is, as after a spin to it (spotwatch,
+        // for a pinned panel, which doesn't spin).
+        if (!Find(n)) return (void)std::snprintf(reply, size, "error no panel %d", n);
+        g_spin.front = n - 1;
+        std::snprintf(reply, size, "ok");
     } else if (std::strcmp(cmd, "debug") == 0) {
         // One line for scripts/report.sh: what decides whether a laser drags and the keyboard shows.
         std::string drags;

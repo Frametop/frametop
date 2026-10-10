@@ -255,6 +255,23 @@ EOF
   *) rm -f "$autostart" ;;
 esac
 
+# Spotwatch (spotwatch/ft-spotwatch, Meta+Space): the search for apps and remote displays, up
+# exactly while this desktop is. ft-screens gives it the typing while it's open (screens backend).
+autostart=$XDG_CONFIG_HOME/autostart/frametop-spotwatch.desktop
+if [ "$backend" = screens ]; then
+  mkdir -p "$(dirname "$autostart")"
+  cat > "$autostart" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Frametop spotwatch
+Exec=sh -c 'exec "$here/../spotwatch/ft-spotwatch" > /tmp/frametop-spotwatch.log 2>&1'
+X-KDE-autostart-phase=2
+NoDisplay=true
+EOF
+else
+  rm -f "$autostart"
+fi
+
 # Launch as Standalone in every app's right-click menu (float/ft_apps.py): copies of the
 # apps' desktop files with that action, first in XDG_DATA_DIRS, so only this desktop sees
 # them. Written now, before Plasma reads them; ft-floatd keeps them up to date.

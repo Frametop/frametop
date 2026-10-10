@@ -8,7 +8,10 @@
   ft-float dock all            put every floating window back
   ft-float launch APP          start an app (its desktop file name, e.g. org.kde.dolphin) and
                                float its first window where that app last floated
+  ft-float launch APP action=ACTION   ...one of its desktop file's actions (a private window)
+  ft-float launch APP screen=N   ...its first window docked on screen N instead
   ft-float run COMMAND [ARG...]  the same for a command
+  ft-float activate ID         make a window KWin's active one, unminimized
   ft-float close ID            close a window
   ft-float list                the spare outputs and what floats on them
 FT_FLOAT_SOCKET names ft-floatd's socket (default frametop_float).

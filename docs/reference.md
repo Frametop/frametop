@@ -87,9 +87,12 @@ hide | show | toggle    controllers always|outside_games|dashboard    ingames hi
 conceal N|all    reveal N|all    concealed    cutouts on|off|state    cutouts predict on|off    cutouts lead ms
 float N mpp x y w h title    unfloat N    pose N matrix    sub N k x y w h | sub N k off    minimized N 0|1    carry N
 rates focused in_view hidden    rates?    watch seconds    phase ms
+spin next|prev|DEGREES|to N    front N    spotwatch on|off
 ```
 
 Each screen draws at a frame rate for how much of it you see. KWin draws a screen only after ft-screens gives it a frame callback, and its apps wait for theirs, so the rate of callbacks is the screen's frame rate, for KWin and the apps on it alike. A screen is focused while you look at it (within 12 degrees of where your head points), while a laser or the mouse is on it or was in the last 1.5 seconds, while it's carried, and while you type on it; it gets every display frame. The rest of what you can see (within 60 degrees) gets 15 frames a second, and a hidden screen, one behind you, and everything while paused get one a second. A level goes up at once and comes down after a moment (1.5 s from focused, 0.5 s from in view). A video, or anything moving over a large part of a screen (6% or more of it, redrawn on 8 commits in a row, 10 or more a second), keeps every frame while in view. A floating window is a screen of its own here. Nothing that stands still costs anything at any rate: KWin sends a frame only when something on the screen changed. `rates F V H` sets the three rates in Hz (0: every display frame; default `0 15 1`, also `ft-screens --rates 0,15,1`), and `rates?` shows them, the display's rate, and for each screen its level, its milliseconds between frames, and whether it counts as a video. `watch S` gives every screen full rate for S seconds: remote desktop renews it while a VNC client is connected, since a viewer sees what KWin draws. The ticks (SteamVR events and the callbacks) come once per display frame, 1 ms after the vsync (`phase ms` changes that, for tuning), in step with the display rather than on a timer that drifted through the frame.
+
+`spin` turns every panel in the room about your head (the lazy susan): `next` and `prev` bring the next one on the right or left to straight ahead, `to N` turns the short way to panel N, and a number of degrees turns that far. Typing goes to the panel that ends up in front. `front N` gives panel N the typing where it is, as a spin to it would. `spotwatch on`, renewed every second, gives spotwatch's search the typing, and `spotwatch off` gives it back ([Spotwatch](#spotwatch)).
 
 `conceal` and `reveal` hide and show one screen on its own (`ft-layout hide` and `show` send them), and `concealed` lists those screens. `pause on` (from the input relay, when Frametop pauses for a VR game) hides every screen and floating window whatever else says, and slows the desktop down; `pause off` undoes it. `cutouts` turns the hand cutouts on and off (`ft-handsctl cutouts`). The last line is ft-floatd's, for floating windows: N is a floating window's panel, numbered on from the screens, one per spare output. `float` gives the window's rectangle in its output, metres per pixel, and the title bar's height, and shows the panel; `unfloat` hides it. `pose` places it (a 3x4 matrix, standing universe), `sub` shows popup or dialog k over it, `minimized` hides it while its window is minimized, and `carry` moves it with the laser that pressed the window's own title bar.
 
@@ -212,6 +215,20 @@ float/ft-float launch org.kde.dolphin # start an app (its desktop file name) flo
 float/ft-float run COMMAND [ARG...]   # the same for a command
 float/ft-float close ID               # close a window
 float/ft-float list                   # the spare outputs and what floats on them
+float/ft-float launch firefox action=new-private-window   # one of the app's own actions, floating
+float/ft-float launch org.kde.dolphin screen=2            # its first window docked on screen 2
+float/ft-float activate ID            # make a window the active one, unminimized
+```
+
+## Spotwatch
+
+Meta+Space opens spotwatch, a search pill straight ahead of where your head points, for apps and remote displays (`{host} - {display}`). Tab, Shift+Tab, and the arrow keys move through what it finds, and Enter or a click opens it. A running app's most recent window spins to the front with the lazy susan. An app that isn't running starts floating. A remote display connects if needed and spins to the front. Shift+Enter or a right click opens an item's menu: an app's own actions (a private window), Open new window, Open docked on this screen, and its windows; a remote display's Go to and Disconnect. Esc, Meta+Space again, or a click elsewhere closes it. It's the `spotwatch` action in Frametop Input Settings, bindable to mouse and controller buttons too, and opened that way it brings Frametop's keyboard. [spotwatch.md](spotwatch.md) has the decisions and how it works.
+
+`spotwatch/ft-spotwatch` runs inside the desktop's Plasma session (log: `/tmp/frametop-spotwatch.log`) and runs the pill, `ft-spotpanel` (built by `screens/build.sh`), in the container. While the search is open, ft-screens sends it every key. Use counts are in `~/.config/frametop-spotwatch.json` and icons in `~/.cache/frametop/spotwatch`.
+
+```
+spotwatch/test/spotwatch-test.py   # the ranking and the search against a fake ft-screens and ft-floatd (offline)
+spotwatch/test/render.py OUT.png   # the panel's picture, without a headset
 ```
 
 ## Displays off and sleep

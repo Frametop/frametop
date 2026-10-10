@@ -367,11 +367,16 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     if (sd.state == State::Press) {
         best = sd.panel;
     } else {
+        // a resting hand (typing, the lap) is near only within restFront; the panel the hand is
+        // near already keeps it nearLeave farther (no flicker of the ray at the zone's edge)
+        sd.resting = Resting(*h, in, p_, sd.resting);
         const double margin = std::max(p_.nearMargin, p_.edgeOut + 0.005);
         for (const Panel &P : panels) {
+            double reach = p_.nearFront + (sd.state == State::Hover && P.index == sd.panel ? p_.nearLeave : 0);
+            if (sd.resting) reach = std::min(reach, p_.restFront);
             for (const float *pt : {h->p[8], h->pinchPoint}) {
                 const Hit t = Locate(P, pt);
-                if (t.d > p_.nearBack && t.d <= p_.nearFront && InFootprint(P, t, margin) && std::fabs(t.d) < key)
+                if (t.d > p_.nearBack && t.d <= reach && InFootprint(P, t, margin) && std::fabs(t.d) < key)
                     key = std::fabs(t.d), best = P.index;
             }
         }
@@ -431,8 +436,8 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         }
         return;
     }
-    // hovering
-    const bool resting = sd.resting = Resting(*h, in, p_, sd.resting);
+    // hovering (resting: from the claim above)
+    const bool resting = sd.resting;
     if (sd.spent && t.d >= 0) sd.spent = false;
     sd.below = t.d <= 0 ? sd.below + 1 : 0;
     // coming in: when it crossed the surface, it came toward it at approach or faster from some

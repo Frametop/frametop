@@ -543,16 +543,39 @@ void TestControlPoke() {
 
 void TestNearClaim() {
     Rig r;
-    r.Frame({TipAt(0, 0, 0.30)});
+    r.Frame({TipAt(0, 0, 0.32)});
     CHECK(!r.in.near(1));
-    r.Frame({TipAt(0, 0, 0.12)});
+    r.Frame({TipAt(0, 0, 0.28)});   // within a foot (nearFront 0.30)
     CHECK(r.in.near(1));
-    r.Frame({TipAt(0, 0, 0.30)});
+    for (int k = 0; k < 10; ++k) r.Frame({TipAt(0, 0, 0.33)});
+    CHECK(r.in.near(1));   // near stays near up to 5 cm farther out (nearLeave)
+    r.Frame({TipAt(0, 0, 0.40)});
     CHECK(r.in.near(1));   // lingers 250 ms
-    for (int k = 0; k < 10; ++k) r.Frame({TipAt(0, 0, 0.30)});
+    for (int k = 0; k < 10; ++k) r.Frame({TipAt(0, 0, 0.40)});
+    CHECK(!r.in.near(1));
+    r.Frame({TipAt(0, 0, 0.33)});   // coming back: not near until within nearFront again
     CHECK(!r.in.near(1));
     r.Frame({TipAt(0.7, 0, 0.05)});   // off to the side of the panel
     CHECK(!r.in.near(1));
+    // a hand resting low by the body (typing under a low panel, its palm 0.35 m under the eyes and
+    // 0.2 m out) is near only within restFront (0.15): its pinches stay the helper's
+    Rig low;
+    low.panels[0].pose = At(0, -0.35, -0.5);
+    auto lowTip = [](double d) {
+        SynthHand h;
+        h.tip[0] = 0, h.tip[1] = -0.35, h.tip[2] = -0.5 + d;
+        return h;
+    };
+    for (int k = 0; k < 5; ++k) low.Frame({lowTip(0.22)});
+    CHECK(!low.in.near(1));
+    low.Frame({lowTip(0.12)});
+    CHECK(low.in.near(1));
+    // the same distance with the hand raised out of the resting zone: near
+    Rig up;
+    up.panels[0].pose = At(0, -0.1, -0.5);
+    SynthHand raised = TipAt(0, -0.1, 0.22);
+    for (int k = 0; k < 5; ++k) up.Frame({raised});
+    CHECK(up.in.near(1));
 }
 
 SynthHand PinchAt(double u, double v, double d, bool right = true, uint32_t id = 1) {

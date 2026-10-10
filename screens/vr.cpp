@@ -2361,6 +2361,7 @@ bool ft_vr_init(void) {
         if (!t.empty() && end != t.c_str() && !*end && x >= lo && x <= hi) v = x;
     };
     handinput::Params &k = g_handInput.params();
+    num("HANDS_NEAR_REACH", k.nearFront, 0.05, 0.6);   // within it a hand touches: no ray, pokes
     num("HANDS_POKE_ANGLE", k.fingerAngle, 10, 90);
     num("HANDS_POKE_REST_BELOW", k.restBelow, 0, 2);
     num("HANDS_POKE_REST_NEAR", k.restNear, 0, 2);
@@ -2376,8 +2377,9 @@ bool ft_vr_init(void) {
     std::printf("hands: cutouts %s\n", g_cutouts ? "on (HANDS_CUTOUTS=1)" : "off (the drawn hands show them; HANDS_CUTOUTS=1 cuts holes too)");
     g_palm.params().on = handcut::Setting("HANDS_PALM_MENU", "1") != "0";
     std::printf("hands: palm menu %s\n", g_palm.params().on ? "on (palm up, pinch: the Steam menu)" : "off");
-    std::printf("hands: pokes within %.0f deg of a panel's normal, not from a hand %.2f m under the eyes and within %.2f m\n",
-                k.fingerAngle, k.restBelow, k.restNear);
+    std::printf("hands: near (touch, no ray) within %.2f m of a panel (%.2f resting low), pokes within %.0f deg of its "
+                "normal, not from a hand %.2f m under the eyes and within %.2f m\n",
+                k.nearFront, std::min(k.nearFront, k.restFront), k.fingerAngle, k.restBelow, k.restNear);
     std::printf("hands: grabs smoothed from %.2f Hz (+%.1f Hz per m/s), a %.1f cm dead zone\n", k.grabMinCutoff, k.grabBeta,
                 k.grabDeadzone * 100);
     std::printf("hands: matte %s, margin %.2f deg + %.0f ms of motion (at most %.2f more), lead %.0f ms, shift %s; near input %s%s%s\n",

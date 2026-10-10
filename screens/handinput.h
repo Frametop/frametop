@@ -59,9 +59,15 @@ struct Panel {
 
 struct Params {
     // the near claim (3.4): a fingertip or the pinch point over the panel (plus this margin)
-    // and this far in front of it (or this little behind)
-    double nearFront = 0.15, nearBack = -0.03, nearMargin = 0.02;
-    double leaveMs = 250;       // ...leaves the claim this long after it's out of the zone
+    // and this far in front of it (or this little behind). Within it the hand touches: its ray
+    // hides and takes no pinches (the pointer helper), the index pokes. 0.30 since 2026-10-10
+    // (user: "near = poke within a foot"; 0.15 before), HANDS_NEAR_REACH.
+    double nearFront = 0.30, nearBack = -0.03, nearMargin = 0.02;
+    double nearLeave = 0.05;    // ...a hand near a panel stays near it until this much farther out,
+    double leaveMs = 250;       // ...and leaves the claim this long after it's out of the zone
+    // A hand resting low by the body (restBelow, restNear: typing, the lap) is near only this
+    // close: its pinches stay the helper's (gaze pinches in the lap) under a low panel within reach.
+    double restFront = 0.15;
     double cursor = 0.05;       // the KWin pointer follows the fingertip this close (3.5)
     // the poke (3.5)
     double extended = 1.6;      // index tip-to-wrist over knuckle-to-wrist: the finger is straight

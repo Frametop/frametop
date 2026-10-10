@@ -57,6 +57,7 @@ HANDS_MATTE_MOTION=25      # ... plus how far the hand moves in this many ms
 HANDS_MATTE_MOTION_MAX=1.5 # ... up to this many degrees more
 HANDS_MATTE_LEAD=36        # hand cutouts: ms ahead the hands are moved along their velocity (about when a frame reaches the displays)
 #HANDS_MATTE_SHIFT=        # hand cutouts: a correction by distance, "metres:yaw,pitch ..." in degrees (right, up); off when empty
+HANDS_NEAR_REACH=0.30      # Frametop panels: a bare hand this close (m) in front of one touches it: its ray hides and takes no pinches, the index pokes (0.15 = the old reach; a hand resting low by the body: 0.15 at most)
 HANDS_POKE_ANGLE=50        # Frametop panels: a poke counts with the finger within this many degrees of the panel's normal (coming at its face)
 HANDS_POKE_REST_BELOW=0.30 # ... and not from a hand resting low by the body: its palm this far (m) under the eyes
 HANDS_POKE_REST_NEAR=0.32  # ... and this close (m) to the head across the floor (typing under a low panel)

@@ -84,7 +84,7 @@ def key_note(name, mode):
     if name in settings.MODIFIERS:
         if mode == "hold":
             return "While it's held, text waits for release (it would turn letters into shortcuts)"
-        return "Shortcuts with it (like Ctrl+C) don't start or stop dictation"
+        return "Counts only on its own: not in shortcuts like Ctrl+C, or with another modifier held"
     if name.startswith("KEY_") and (len(name) == 5 or name in ("KEY_SPACE", "KEY_ENTER")):
         return "This key also types into apps"
     return name

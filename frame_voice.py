@@ -1009,8 +1009,14 @@ class FrameVoice:
             self._track_modifier(dev, code, value)
         if code in self.hotkeys:
             if value == 1:
-                self.hk_down, self.hk_chord = True, False
-                if self.kb_mode == "hold":
+                # Only the key on its own: a modifier already held (Shift, then Right Ctrl, or
+                # Ctrl, then a mouse button) makes it a shortcut, not a dictation gesture.
+                others = sorted({c for _, c in self.mods_down if c != code})
+                self.hk_down, self.hk_chord = True, bool(others)
+                if others:
+                    log.info("hotkey: %s with %s held, not dictation", self.hotkeys[code],
+                             "+".join(e.KEY.get(c, str(c)) for c in others))
+                elif self.kb_mode == "hold":
                     self.hk_timer = loop.call_later(self.dcfg["hold_delay"], self._hold_start)
             elif value == 0:
                 self.hk_down = False

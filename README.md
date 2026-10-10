@@ -22,7 +22,7 @@ The mic is captured once with `pw-record`. The wake word spotter (sherpa-onnx op
 
 | Where | How |
 | --- | --- |
-| Keyboard or mouse | Tap **Right Ctrl** (default) to start, tap again to stop. Shortcuts with it (Ctrl+C) don't start or stop dictation. Hold mode is available in the settings app. |
+| Keyboard or mouse | Tap **Right Ctrl** (default) to start, tap again to stop. It counts only on its own: shortcuts with it (Ctrl+C), or with another modifier held when you press it (Shift+Right Ctrl), don't start or stop dictation. Hold mode is available in the settings app. |
 | Steam Frame controllers | Hold left **d-pad down** (default), speak, release. Works in games, the Steam UI and the desktop with no per-app setup. The button is observed, not captured, so whatever else it is bound to still happens. |
 | Desktop mode shortcut | KDE System Settings > Shortcuts > add a command shortcut running `frame-voice-ctl toggle`. |
 | Scripts, the assistant | `frame-voice-ctl toggle`, `start`, `stop`, `cancel`, `type "text"` |
@@ -131,7 +131,7 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DGGML_NATIV
 cmake --build build -j5 --target whisper-server whisper-cli whisper-bench
 ```
 
-`vendor/prefix` holds SPIRV-Headers, which SteamOS does not ship. Tests: `python3 -m unittest` in the repo (no audio stack needed). The Python side lives in `.venv` (`evdev sherpa-onnx numpy sentencepiece websockets`). `models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27` holds the Moonshine files from huggingface.co/csukuangfj2 (`encoder_model.ort`, `decoder_model_merged.ort`, `tokens.txt`). The settings app uses the system Python for GTK (`gi`) and the venv for the rest; the `frame-voice-config` launcher sets that up.
+`vendor/prefix` holds SPIRV-Headers, which SteamOS does not ship. Tests: `.venv/bin/python -m unittest` in the repo (no audio stack needed; with the system `python3` the push-to-talk key tests are skipped, since they need `evdev`). The Python side lives in `.venv` (`evdev sherpa-onnx numpy sentencepiece websockets`). `models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27` holds the Moonshine files from huggingface.co/csukuangfj2 (`encoder_model.ort`, `decoder_model_merged.ort`, `tokens.txt`). The settings app uses the system Python for GTK (`gi`) and the venv for the rest; the `frame-voice-config` launcher sets that up.
 
 The whisper service sets `DISABLE_GAMESCOPE_WSI=1`. Without it the Gamescope Vulkan layer aborts whisper-server at startup.
 

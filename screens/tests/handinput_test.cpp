@@ -97,6 +97,7 @@ struct SynthHand {
     bool byPinch = false;
     double pinch[3] = {0, 0, 0};
     double pitchDeg = 0, yawDeg = 0;   // the hand turned about the tip: down (pitch < 0), to the right (yaw < 0)
+    double twistDeg = 0;               // ...and first about its own axis (counterclockwise as seen from behind)
     // or an open hand for the palm menu (PalmHand): its palm's centre here
     bool palm = false;
     double palmAt[3] = {0, -0.25, -0.35};
@@ -163,8 +164,10 @@ struct Synth {
             }
             float pts[21][3];
             PointingHand(pts, h.bent);
-            const double a = h.pitchDeg * M_PI / 180, b = h.yawDeg * M_PI / 180;
-            for (auto &q : pts) {   // about x (pitch), then y (yaw); the tip is the origin here
+            const double a = h.pitchDeg * M_PI / 180, b = h.yawDeg * M_PI / 180, w = h.twistDeg * M_PI / 180;
+            for (auto &q : pts) {   // about z (twist), then x (pitch), then y (yaw); the tip is the origin here
+                const double x0 = q[0] * std::cos(w) - q[1] * std::sin(w), y0 = q[0] * std::sin(w) + q[1] * std::cos(w);
+                q[0] = float(x0), q[1] = float(y0);
                 const double y = q[1] * std::cos(a) - q[2] * std::sin(a), z = q[1] * std::sin(a) + q[2] * std::cos(a);
                 const double x = q[0] * std::cos(b) + z * std::sin(b), z2 = -q[0] * std::sin(b) + z * std::cos(b);
                 q[0] = float(x), q[1] = float(y), q[2] = float(z2);
@@ -720,6 +723,191 @@ void TestGrabSmooth() {
         const auto gp = grabPoint(r, l1);
         const float *pp = r.hands.seen()[0].pinchPoint;
         CHECK(std::hypot(gp[0] - pp[0], gp[1] - pp[1], gp[2] - pp[2]) < 0.002);
+    }
+}
+
+// A panel's turn from facing the head at the origin: yaw (its front turned toward +x), pitch (its
+// front up), roll (counterclockwise as seen), degrees.
+void FacingTurn(const Mat &p, double *yaw, double *pitch, double *roll) {
+    const double c[3] = {p.m[0][3], p.m[1][3], p.m[2][3]}, l = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+    const double z[3] = {-c[0] / l, -c[1] / l, -c[2] / l}, xl = std::hypot(z[0], z[2]);
+    const double x[3] = {z[2] / xl, 0, -z[0] / xl};
+    const double y[3] = {z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
+    const double *f[3] = {x, y, z};
+    double off[3][3];   // F^T P
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) off[i][j] = f[i][0] * p.m[0][j] + f[i][1] * p.m[1][j] + f[i][2] * p.m[2][j];
+    *yaw = std::atan2(off[0][2], off[2][2]) * 180 / M_PI;
+    *pitch = std::asin(std::clamp(off[1][2], -1.0, 1.0)) * 180 / M_PI;
+    *roll = std::atan2(off[1][0], off[0][0]) * 180 / M_PI;
+}
+
+// Grabs TestPanel's bar with the right hand and holds still; then each Turn call turns the hand
+// (about the pinch point, which stays put) to yaw, pitch and twist over `frames`, and holds `hold`.
+struct WristRig {
+    Rig r;
+    double barY = 0, u = 0.05;
+    double yaw = 0, pitch = 0, twist = 0;
+    explicit WristRig(bool rotate = true, double u0 = 0.05) : u(u0) {
+        r.in.params().grabRotate = rotate;
+        barY = r.panels[0].controls[0].v;
+        for (int k = 0; k < 5; ++k) r.Frame({Hand()});
+        const double at[3] = {u, barY, -0.48};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({Hand()});
+        for (int k = 0; k < 10; ++k) Step();
+    }
+    SynthHand Hand() const {
+        SynthHand h = PinchAt(u, barY, 0.02);
+        h.yawDeg = yaw, h.pitchDeg = pitch, h.twistDeg = twist;
+        return h;
+    }
+    void Step() {
+        if (!r.carries.empty() && r.carries[0].kind != Carry::Resize) r.panels[0].pose = r.carries[0].pose;
+        r.Frame({Hand()});
+    }
+    void Turn(double y, double p, double w, int frames = 15, int hold = 45) {
+        const double y0 = yaw, p0 = pitch, w0 = twist;
+        for (int k = 1; k <= frames; ++k) {
+            const double f = double(k) / frames;
+            yaw = y0 + (y - y0) * f, pitch = p0 + (p - p0) * f, twist = w0 + (w - w0) * f;
+            Step();
+        }
+        for (int k = 0; k < hold; ++k) Step();
+    }
+    void Angles(double *y, double *p, double *w) const { FacingTurn(r.panels[0].pose, y, p, w); }
+};
+
+// One hand carrying a panel turns it with the wrist (Params::grabRotate): yaw, pitch and roll 1:1
+// past the dead zone, the grab point staying under the pinch; a still hand's jitter doesn't turn
+// it; carried around the head with the wrist kept, it only faces the head; it snaps level; let go,
+// it keeps the turn; a corner grab only resizes.
+void TestGrabTurn() {
+    const double dead = Params().rotDeadzone;
+    double y, p, w;
+    {
+        WristRig t;
+        CHECK(t.r.in.grabbing(1) && !t.r.carries.empty());
+        t.Angles(&y, &p, &w);
+        NEAR(y, 0, 0.3), NEAR(p, 0, 0.3), NEAR(w, 0, 0.3);
+        t.Turn(30, 0, 0);
+        t.Angles(&y, &p, &w);
+        std::printf("wrist turn: hand yaw 30 -> panel yaw %.1f pitch %.1f roll %.1f (dead zone %.0f)\n", y, p, w, dead);
+        NEAR(y, 30 - dead, 1.5), NEAR(p, 0, 1), NEAR(w, 0, 1);
+        CHECK(t.r.in.turning(1));
+        // the grab point is still under the pinch point
+        const Hit g = Locate(PanelAt(t.r.panels[0].pose, 1.0), t.r.hands.seen()[0].pinchPoint);
+        CHECK(std::hypot(g.u - 0.05, g.v - t.barY) < 0.015);
+        // back: back to facing (5 deg of the dead zone the other way is gone, not jumped)
+        t.Turn(5, 0, 0);
+        t.Angles(&y, &p, &w);
+        NEAR(y, 0, 1.0);
+    }
+    {
+        WristRig t(true, 0.0);   // (straight ahead: the forearm's axis toward the head)
+        t.Turn(0, 0, 25);   // a twist about the forearm: roll
+        t.Angles(&y, &p, &w);
+        std::printf("wrist turn: hand twist 25 -> panel yaw %.1f pitch %.1f roll %.1f\n", y, p, w);
+        NEAR(w, 25 - dead, 1.5), NEAR(y, 0, 1.5), NEAR(p, 0, 1.5);
+        // nearly level again: it snaps level
+        t.Turn(0, 0, dead + 1.5);
+        t.Angles(&y, &p, &w);
+        NEAR(w, 0, 0.2);
+        t.Turn(0, 0, dead + 6);   // past the snap: 6 deg
+        t.Angles(&y, &p, &w);
+        NEAR(w, 6, 1.0);
+    }
+    {
+        WristRig t;
+        t.Turn(0, 20, 0);   // the hand tips up: the panel tips back
+        t.Angles(&y, &p, &w);
+        std::printf("wrist turn: hand pitch 20 -> panel yaw %.1f pitch %.1f roll %.1f\n", y, p, w);
+        NEAR(std::fabs(p), 20 - dead, 1.5), NEAR(y, 0, 1.5), NEAR(w, 0, 1.5);
+    }
+    {
+        // a still hand's jitter (2.5 deg either way on each axis, every frame) doesn't turn it
+        WristRig t;
+        std::mt19937 rng(5);
+        std::uniform_real_distribution<double> n(-2.5, 2.5);
+        double most = 0;
+        for (int k = 0; k < 90; ++k) {
+            t.yaw = n(rng), t.pitch = n(rng), t.twist = n(rng);
+            t.Step();
+            t.Angles(&y, &p, &w);
+            most = std::max({most, std::fabs(y), std::fabs(p), std::fabs(w)});
+        }
+        std::printf("wrist turn: 2.5 deg of jitter turned the panel at most %.2f deg\n", most);
+        CHECK(most < 0.5 && !t.r.in.turning(1));
+    }
+    {
+        // carried 50 degrees around the head to the left, the wrist turning with the arm: it only
+        // keeps facing the head
+        WristRig t;
+        const double r0 = std::hypot(t.u, -0.48);
+        double most = 0;
+        for (int k = 1; k <= 60; ++k) {
+            const double a = 50.0 * std::min(1.0, k / 40.0), ar = a * M_PI / 180;
+            const double base = std::atan2(t.u, 0.48);   // where the grab began, from the head
+            SynthHand h = PinchAt(0, t.barY, 0);
+            h.pinch[0] = r0 * std::sin(base - ar), h.pinch[2] = -r0 * std::cos(base - ar);
+            h.yawDeg = a;
+            if (!t.r.carries.empty()) t.r.panels[0].pose = t.r.carries[0].pose;
+            t.r.Frame({h});
+            t.Angles(&y, &p, &w);
+            if (k > 45) most = std::max({most, std::fabs(y), std::fabs(p), std::fabs(w)});
+        }
+        std::printf("wrist turn: carried 50 deg round the head, the panel %.2f deg off facing it\n", most);
+        CHECK(most < 2 && !t.r.in.turning(1));
+    }
+    {
+        // off (HANDS_GRAB_ROTATE=0): it faces the head whatever the wrist does
+        WristRig t(false);
+        t.Turn(30, 10, 20);
+        t.Angles(&y, &p, &w);
+        NEAR(y, 0, 0.5), NEAR(p, 0, 0.5), NEAR(w, 0, 0.5);
+    }
+    {
+        // let go turned, take it again: it keeps the turn (no snap back to facing)
+        WristRig t;
+        t.Turn(30, 0, 0);
+        double y1;
+        t.Angles(&y1, &p, &w);
+        const double at[3] = {t.u, t.barY, -0.48};
+        t.r.synth.Pinch(1, false, t.r.t, at, 1);
+        t.Step();
+        CHECK(!t.r.in.grabbing(1));
+        for (int k = 0; k < 10; ++k) t.Step();
+        t.Angles(&y, &p, &w);
+        NEAR(y, y1, 0.01);
+        // the grab point moved with the turn: pinch where the bar is now
+        const Mat &P = t.r.panels[0].pose;
+        double bar[3];
+        FromSurface(PanelAt(P, 1.0), t.u, t.barY, 0.02, bar);
+        SynthHand h = t.Hand();
+        h.pinch[0] = bar[0], h.pinch[1] = bar[1], h.pinch[2] = bar[2];
+        for (int k = 0; k < 5; ++k) t.r.Frame({h});
+        t.r.synth.Pinch(1, true, t.r.t, bar, 1);
+        for (int k = 0; k < 30; ++k) {
+            if (!t.r.carries.empty()) t.r.panels[0].pose = t.r.carries[0].pose;
+            t.r.Frame({h});
+        }
+        CHECK(t.r.in.grabbing(1));
+        t.Angles(&y, &p, &w);
+        NEAR(y, y1, 0.5);
+    }
+    {
+        // the corner: twisting the hand there only resizes (and with the pinch still, not even that)
+        Rig r;
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0.5, -0.28, 0.01)});
+        const double at[3] = {0.5, -0.28, -0.49};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        for (int k = 0; k <= 40; ++k) {
+            SynthHand h = PinchAt(0.5, -0.28, 0.01);
+            h.twistDeg = std::min(k, 20) * 1.5, h.yawDeg = std::min(k, 20);
+            r.Frame({h});
+        }
+        CHECK(r.in.grabbing(1) && !r.carries.empty() && r.carries[0].kind == Carry::Resize);
+        if (!r.carries.empty()) NEAR(r.carries[0].width, 1.0, 0.02);
     }
 }
 
@@ -1750,6 +1938,7 @@ int main(int argc, char **argv) {
     TestNearClaim();
     TestGrabMove();
     TestGrabSmooth();
+    TestGrabTurn();
     TestGrabResize();
     TestStretchHands();
     TestV2Ingest();

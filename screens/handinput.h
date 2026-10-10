@@ -111,6 +111,19 @@ struct Params {
     // A grab moves nothing until the pinch point has moved this far from the start (m): the
     // fingers closing on a pinch move it a little. Then it carries from there (no jump).
     double grabDeadzone = 0.01;
+    // One hand carrying a panel turns it with the wrist (user, 2026-10-10: yaw, pitch and roll, to
+    // line displays up): the hand's turn since the grab, from its frame through the wrist and the
+    // index and little knuckles (they hold still while the fingers pinch), taken relative to facing
+    // the head across the floor from the hand, and applied relative to the panel facing the head
+    // (CarryPose). So carrying a panel around you turns it only to keep facing you, as
+    // before, and a turn of the wrist turns it on top of that, 1:1. The two directions of that frame
+    // are smoothed (fh_smooth.h's Direction: rotMinCutoff Hz still, rotBeta Hz more per deg/s), and
+    // nothing turns until the hand has turned rotDeadzone degrees (the frame's jitter: about 1 deg a
+    // frame, up to 6 over a second and a half on a still hand); then it turns from there (no jump).
+    // A turned panel snaps level within rollSnap degrees of roll (vr.cpp's kRollSnap). Let go, it
+    // stays turned; the next grab keeps that turn. HANDS_GRAB_ROTATE, HANDS_GRAB_ROTATE_DEADZONE.
+    bool grabRotate = true;
+    double rotDeadzone = 5, rotMinCutoff = 1.0, rotBeta = 0.05, rollSnap = 2.5;
 };
 
 enum class Zone { None, Bar, Tab, Corner, Edge, Title };
@@ -167,9 +180,11 @@ Control ControlAt(const Panel &p, double u, double v, double margin);
 Zone GrabZone(const Panel &p, const Hit &h, const Params &k, int *sx, int *sy, double *excess);
 // One hand carrying a panel: the grab point (panel-local, at the start) follows the pinch
 // point, and the panel keeps the turn it had from facing the head (its yaw, pitch and roll
-// relative to that), so carrying it around you keeps it facing you.
+// relative to that), so carrying it around you keeps it facing you. turn (optional): the wrist's
+// turn since the grab, in the frame facing the head (x right, y up, z toward the head), applied on
+// top; rollSnap: then the panel snaps level within this many degrees of roll (0: never).
 Mat CarryPose(const Mat &start, const double startHead[3], const double grabLocal[3], const double pinch[3],
-              const double head[3], const Mat &previous);
+              const double head[3], const Mat &previous, const double (*turn)[3] = nullptr, double rollSnap = 0);
 // Two hands: the panel held at the start (pose, width) with the hands at l0, r0; now at l, r.
 // The width scales with their distance (a dead zone of `dead`, clamped), and the panel turns
 // about the vertical with the line between them and moves with their midpoint. floating:
@@ -205,6 +220,8 @@ public:
     // ...holding KWin's button (not a poked control)
     bool pressingKwin(int side) const { return pressing(side) && side_[side].control == Control::None; }
     bool grabbing(int side) const { return side_[side].state == State::Grab; }
+    // ...and turning it with the wrist (past the dead zone)
+    bool turning(int side) const { return grabbing(side) && side_[side].turning; }
     int grabPanel(int side) const { return side_[side].state == State::Grab ? side_[side].panel : -1; }
     // "left hover 2 d 0.031, right idle"
     std::string Describe() const;
@@ -248,12 +265,22 @@ private:
         fhsmooth::Point3 point;
         fhsmooth::V3 from, shift;
         bool engaged = false;
+        // the wrist's turn (Params::grabRotate): the hand frame's two directions, smoothed; the
+        // hand relative to facing the head at the start (moved on by the dead zone once out of it)
+        fhsmooth::Direction along, across;
+        double rot0[3][3] = {};
+        bool haveRot0 = false, turning = false;
     };
     const handcut::Hand *HandFor(int side, const std::vector<handcut::Hand> &hands, uint32_t prefer) const;
     void Poke(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand *h);
     void Grab(int s, const Input &in, const std::vector<Panel> &panels);
     void Carries(const Input &in, const std::vector<Panel> &panels);
     void Glows(const Input &in, const std::vector<Panel> &panels);
+    // A grabbing side's wrist turn since the grab (Params::grabRotate), in the frame facing the head
+    // across the floor from the pinch point (CarryPose applies it in the frame the panel faces the
+    // head in); false while within the dead zone (or off).
+    bool Turn(int s, const Input &in, const double pinch[3], const double head[3], double out[3][3]);
+    void SampleTurn(int s, const handcut::Hand &h, const Input &in);
     void EndPress(int s, bool lost);
     void EndGrab(int s, bool lost);
     // A grabbing side's pinch point: smoothed, at the tick's time, within its dead zone (deadzone).

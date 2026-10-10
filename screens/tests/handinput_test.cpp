@@ -10,15 +10,18 @@
 // test-c (unit tests only). No OpenVR, GPU or headset.
 #include "../handcut.h"
 #include "../handinput.h"
+#include "../grabthat.h"
 #include "../palmmenu.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <string>
@@ -104,6 +107,7 @@ struct SynthHand {
     double rollDeg = 0;                // about the fingers' axis: 0 palm up, 180 palm down
     double tiltDeg = 20;               // fingertips up: the palm turns toward the head behind it
     int curl = 0;                      // middle, ring and little: 0 open, 1 half curled, 2 a fist
+    int curlIndex = 0;                 // ...and the index, likewise (grab that's fist)
 };
 
 // An open hand, palm up, fingers ahead (-z), as SynthHand says; the right hand's thumb is on +x.
@@ -124,6 +128,9 @@ void PalmHand(const SynthHand &h, float out[21][3]) {
                                         {{-0.013f, 0.03f, -0.105f}, {-0.013f, 0.04f, -0.085f}, {-0.013f, 0.03f, -0.068f}},
                                         {{-0.03f, 0.03f, -0.095f}, {-0.03f, 0.035f, -0.08f}, {-0.03f, 0.028f, -0.065f}}};
     for (int f = 0; f < 3 && h.curl; ++f) std::memcpy(out[10 + 4 * f], h.curl == 1 ? half[f] : fist[f], sizeof half[f]);
+    static const float halfIndex[3][3] = {{0.027f, 0.02f, -0.13f}, {0.027f, 0.035f, -0.135f}, {0.027f, 0.04f, -0.13f}};
+    static const float fistIndex[3][3] = {{0.027f, 0.03f, -0.11f}, {0.027f, 0.04f, -0.09f}, {0.027f, 0.03f, -0.07f}};
+    if (h.curlIndex) std::memcpy(out[6], h.curlIndex == 1 ? halfIndex : fistIndex, sizeof halfIndex);
     const double r = h.rollDeg * M_PI / 180, a = h.tiltDeg * M_PI / 180;
     double c[3] = {0, 0, 0};
     for (int j = 0; j < 21; ++j) {
@@ -1409,6 +1416,35 @@ int Replay(const char *path) {
     const double secs = (recs.back().capture - recs.front().capture) / 1e9;
     std::printf("== %s: %zu frames, %.0f s\n", path, recs.size(), secs);
     SmoothReport(recs);
+    {   // grab that (grabthat.h): every fire here is a false one (none of the takes has the gesture)
+        handcut::Hands hands;
+        grabthat::Detector det;
+        const bool allowed[2] = {true, true};
+        int fires = 0, claimed = 0, arms = 0, pinches = 0, grips = 0, takenPinches = 0, takenGrips = 0;
+        uint32_t begins[2][2] = {{0, 0}, {0, 0}};
+        bool first = true;
+        for (const Record &r : recs) {
+            hands.Feed(r.hands.data(), r.hands.size(), &r.g, r.head, r.publish);
+            det.Frame(hands.captureNs(), hands.seen(), hands.captureHead(), allowed);
+            for (const auto &f : det.fired())
+                std::printf("grab that: fired, %s hand, at %.2f s\n", f.side ? "right" : "left", (f.t - recs.front().capture) / 1e9), ++fires;
+            for (int s = 0; s < 2; ++s) {
+                const bool mine = det.claims(s, hands.captureNs());
+                claimed += mine;
+                // a pinch or grip that began on a claimed hand: the pointer helper leaves it (lost)
+                const uint32_t b[2] = {r.g.pinch[s].begins, r.g.grip[s].begins};
+                if (!first) {
+                    pinches += b[0] != begins[s][0], grips += b[1] != begins[s][1];
+                    takenPinches += mine && b[0] != begins[s][0], takenGrips += mine && b[1] != begins[s][1];
+                }
+                begins[s][0] = b[0], begins[s][1] = b[1];
+            }
+            first = false;
+        }
+        arms = det.stats.arms;
+        std::printf("grab that: %d fire(s), armed %d times, claimed a hand on %d frames: %d of %d pinches and %d of %d grips "
+                    "began on a claimed hand\n", fires, arms, claimed, takenPinches, pinches, takenGrips, grips);
+    }
 
     // 1. Hovering: stretches of 1 s and more where a hand holds still (its palm within 2 cm)
     // pointing (index straight), a panel facing the head 0.5-3 cm beyond the fingertip's
@@ -1670,7 +1706,6 @@ int Replay(const char *path) {
     return 0;
 }
 
-}  // namespace
 
 // ------------------------------------------------------------------------------ the palm menu
 
@@ -1915,7 +1950,394 @@ void TestPalmMenuPinch() {
     }
 }
 
+
+// ------------------------------------------------------------------------------ grab that
+
+// A hand held out, palm forward, fingers up (grabthat.h), the palm's centre at (x, y, z) (head at
+// the origin, -z ahead); `flip` 0..1 turns it over toward you about the fingers' axis, `fist`
+// 0 open, 1 the three fingers half curled, 2 all four curled.
+SynthHand StopHand(double x, double y, double z, double flip = 0, int fist = 0, bool right = true) {
+    SynthHand h;
+    h.palm = true, h.right = right, h.id = right ? 1 : 2;
+    h.palmAt[0] = x, h.palmAt[1] = y, h.palmAt[2] = z;
+    h.rollDeg = 180 * (1 - flip), h.tiltDeg = 90;
+    h.curl = fist >= 2 ? 2 : fist, h.curlIndex = fist >= 2 ? 2 : 0;
+    return h;
+}
+
+// Plays synthetic hands frames (30 Hz) through a detector, head at the origin; returns the fires'
+// times (s from the start) and how many frames it claimed the hand on.
+struct GrabRig {
+    handcut::Hands hands;
+    Synth synth;
+    grabthat::Detector det;
+    int64_t t0 = 1'000'000'000, t = 1'000'000'000;
+    std::vector<grabthat::Fire> fires;
+    int claimed[2] = {0, 0};
+    bool allowed[2] = {true, true};
+    void Frame(const std::vector<SynthHand> &h) {
+        synth.Write(h, t);
+        hands.Feed(&synth.file, sizeof(fh_hands_t), &synth.g, Identity(), t + 30'000'000);
+        det.Frame(hands.captureNs(), hands.seen(), hands.captureHead(), allowed);
+        for (const auto &f : det.fired()) fires.push_back(f);
+        for (int s = 0; s < 2; ++s) claimed[s] += det.claims(s, t);
+        t += 33'333'333;
+    }
+    double At(const grabthat::Fire &f) const { return (f.t - t0) / 1e9; }
+};
+
+void TestGrabThatGesture() {
+    {   // the user's gesture: held out 0.5 s, then a fist turning over and pulled back 15 cm in 0.2 s
+        GrabRig r;
+        for (int k = 0; k < 10; ++k) r.Frame({StopHand(0.1, -0.15, -0.42)});
+        CHECK(r.det.armed(1) && !r.det.claims(1, r.t));
+        const grabthat::Features open = grabthat::Measure(r.hands.seen()[0], Identity());
+        for (int k = 1; k <= 6; ++k) {
+            const double f = k / 6.0;
+            r.Frame({StopHand(0.1, -0.15, -0.42 + 0.15 * f, f, k >= 2 ? 2 : 1)});
+        }
+        const grabthat::Features fist = grabthat::Measure(r.hands.seen()[0], Identity());
+        for (int k = 0; k < 15; ++k) r.Frame({StopHand(0.1, -0.15, -0.27, 1, 2)});
+        std::printf("grab that, synthetic: open %.2f palm %.2f fwd %.2f -> fist %.2f palm %.2f fwd %.2f; %zu fire(s), "
+                    "claimed %d frames\n", open.open, open.palmFwd, open.fwd, fist.open, fist.palmFwd, fist.fwd,
+                    r.fires.size(), r.claimed[1]);
+        CHECK(r.fires.size() == 1 && r.fires[0].side == 1);
+        CHECK(r.claimed[1] >= 2 && r.claimed[0] == 0);
+        if (!r.fires.empty()) {   // aimed from the eyes through the palm as it was held out
+            NEAR(r.fires[0].palm[2], -0.42, 0.01), NEAR(r.fires[0].eye[2], 0, 1e-6);
+            CHECK(r.fires[0].fist[2] > r.fires[0].palm[2] + 0.05);   // pulled in by then
+        }
+        // the left hand, the same way
+        GrabRig l;
+        for (int k = 0; k < 10; ++k) l.Frame({StopHand(-0.1, -0.15, -0.42, 0, 0, false)});
+        for (int k = 1; k <= 6; ++k) l.Frame({StopHand(-0.1, -0.15, -0.42 + 0.025 * k, k / 6.0, k >= 2 ? 2 : 1, false)});
+        for (int k = 0; k < 5; ++k) l.Frame({StopHand(-0.1, -0.15, -0.27, 1, 2, false)});
+        CHECK(l.fires.size() == 1 && l.fires[0].side == 0);
+        // not allowed (a controller on that side, hand input off): nothing
+        GrabRig n;
+        n.allowed[1] = false;
+        for (int k = 0; k < 10; ++k) n.Frame({StopHand(0.1, -0.15, -0.42)});
+        for (int k = 1; k <= 6; ++k) n.Frame({StopHand(0.1, -0.15, -0.42 + 0.025 * k, k / 6.0, 2)});
+        CHECK(n.fires.empty() && n.claimed[1] == 0);
+        // held out too briefly (under armMs): nothing
+        GrabRig q;
+        for (int k = 0; k < 4; ++k) q.Frame({StopHand(0.1, -0.15, -0.42)});
+        for (int k = 1; k <= 6; ++k) q.Frame({StopHand(0.1, -0.15, -0.42 + 0.025 * k, k / 6.0, 2)});
+        CHECK(q.fires.empty());
+    }
+    {   // a wave: held out open, palm forward, swinging 15 cm either way at 1.5 Hz for 3 s
+        GrabRig r;
+        for (int k = 0; k < 90; ++k) {
+            const double a = std::sin(2 * M_PI * 1.5 * k / 30.0);
+            SynthHand h = StopHand(0.1 + 0.15 * a, -0.1, -0.40);
+            h.rollDeg += 20 * a;
+            r.Frame({h});
+        }
+        CHECK(r.fires.empty() && r.claimed[1] == 0);
+    }
+    {   // a push: palm forward from 25 to 50 cm out, then back to 30 cm, relaxed
+        GrabRig r;
+        for (int k = 0; k <= 12; ++k) r.Frame({StopHand(0.1, -0.15, -0.25 - 0.25 * k / 12.0)});
+        for (int k = 1; k <= 10; ++k) r.Frame({StopHand(0.1, -0.15, -0.50 + 0.02 * k, 0.3 * k / 10, 1)});
+        for (int k = 0; k < 10; ++k) r.Frame({StopHand(0.1, -0.15, -0.30, 0.3, 1)});
+        CHECK(r.fires.empty());
+    }
+    {   // a fist made without pulling back, turning over: no fire, and the claim lets go
+        GrabRig r;
+        for (int k = 0; k < 10; ++k) r.Frame({StopHand(0.1, -0.15, -0.42)});
+        for (int k = 1; k <= 6; ++k) r.Frame({StopHand(0.1, -0.15, -0.42 + 0.003 * k, k / 6.0, 2)});
+        for (int k = 0; k < 30; ++k) r.Frame({StopHand(0.1, -0.15, -0.40, 1, 2)});
+        CHECK(r.fires.empty() && !r.det.claims(1, r.t));
+        // ...nor a fist pulled back slowly, over a second
+        GrabRig w;
+        for (int k = 0; k < 10; ++k) w.Frame({StopHand(0.1, -0.15, -0.42)});
+        for (int k = 1; k <= 3; ++k) w.Frame({StopHand(0.1, -0.15, -0.42, k / 3.0, 2)});
+        for (int k = 1; k <= 30; ++k) w.Frame({StopHand(0.1, -0.15, -0.42 + 0.15 * k / 30.0, 1, 2)});
+        CHECK(w.fires.empty());
+    }
+    {   // held out, turned over first (palm toward you), then closed and pulled in: not closing on
+        // the window (the one fire on the recordings before the palm rule)
+        GrabRig r;
+        for (int k = 0; k < 15; ++k) r.Frame({StopHand(0.1, -0.15, -0.36)});
+        for (int k = 1; k <= 8; ++k) r.Frame({StopHand(0.1, -0.15, -0.36, k / 8.0)});   // over 0.27 s
+        for (int k = 1; k <= 6; ++k) r.Frame({StopHand(0.1, -0.15, -0.36 + 0.02 * k, 1, k >= 2 ? 2 : 1)});
+        CHECK(r.fires.empty());
+    }
+    {   // a pinch with the hand held out, pulled back (a ray carry): the other fingers stay open
+        GrabRig r;
+        for (int k = 0; k < 10; ++k) r.Frame({StopHand(0.1, -0.15, -0.42)});
+        for (int k = 1; k <= 8; ++k) {
+            SynthHand h = StopHand(0.1, -0.15, -0.42 + 0.02 * k, 0.5 * k / 8);
+            h.curlIndex = 2;
+            r.Frame({h});
+        }
+        CHECK(r.fires.empty() && r.claimed[1] == 0);
+        // a pinch-grab near a panel: pointing hand, palm down, pulled in: never held out
+        GrabRig g;
+        for (int k = 0; k < 20; ++k) g.Frame({PinchAt(0.05, -0.3, 0.1 + 0.01 * k)});
+        CHECK(g.fires.empty() && g.claimed[1] == 0);
+    }
+    {   // held out, then dropped to the lap, the fingers relaxing and the palm turning down
+        GrabRig r;
+        for (int k = 0; k < 10; ++k) r.Frame({StopHand(0.1, -0.15, -0.42)});
+        for (int k = 1; k <= 9; ++k) {
+            const double f = k / 9.0;
+            SynthHand h = StopHand(0.1, -0.15 - 0.30 * f, -0.42 + 0.22 * f, 0, 1);
+            h.tiltDeg = 90 - 90 * f;   // fingers forward, palm down
+            r.Frame({h});
+        }
+        for (int k = 0; k < 15; ++k) {
+            SynthHand h = StopHand(0.1, -0.45, -0.20, 0, 1);
+            h.tiltDeg = 0;
+            r.Frame({h});
+        }
+        CHECK(r.fires.empty());
+    }
+    {   // typing: both hands low and close, palms down, fingers half curled, tapping
+        GrabRig r;
+        for (int k = 0; k < 90; ++k) {
+            SynthHand a = StopHand(0.12, -0.40, -0.25 - 0.01 * std::sin(k), 0, 1), b = StopHand(-0.12, -0.40, -0.25, 0, k % 7 ? 1 : 2, false);
+            a.tiltDeg = b.tiltDeg = 0;
+            r.Frame({a, b});
+        }
+        CHECK(r.fires.empty() && r.claimed[0] == 0 && r.claimed[1] == 0);
+    }
+    {   // twice in a row: the second needs the hand held out again (and againMs after the first)
+        GrabRig r;
+        for (int rep = 0; rep < 2; ++rep) {
+            for (int k = 0; k < 30; ++k) r.Frame({StopHand(0.1, -0.15, -0.42)});
+            for (int k = 1; k <= 6; ++k) r.Frame({StopHand(0.1, -0.15, -0.42 + 0.025 * k, k / 6.0, 2)});
+            for (int k = 0; k < 10; ++k) r.Frame({StopHand(0.1, -0.15, -0.27, 1, 2)});
+        }
+        CHECK(r.fires.size() == 2);
+    }
+}
+
+// The target, where it goes, and the move.
+void TestGrabThatPlace() {
+    using grabthat::Target;
+    std::vector<Target> panels(3);
+    panels[0].index = 0, panels[0].pose = At(0, 0, -2), panels[0].width = 1.6, panels[0].height = 0.9;
+    panels[1].index = 1, panels[1].pose = RotY(M_PI / 4, -1.4, 0, -1.4), panels[1].width = 1.0, panels[1].height = 0.6;
+    panels[2].index = 2, panels[2].pose = At(1.5, 0.2, -1.5), panels[2].width = 1.0, panels[2].height = 0.6,
+    panels[2].curve = 1.5;
+    grabthat::Params k;
+    grabthat::Fire f;
+    f.head = Identity();
+    auto aim = [&](double x, double y, double z) {
+        f.palm[0] = x, f.palm[1] = y, f.palm[2] = z;
+        return grabthat::Pick(panels, f, k);
+    };
+    CHECK(aim(0.05, -0.02, -0.4) == 0);
+    CHECK(aim(-0.28, 0, -0.28) == 1);    // 45 degrees left
+    CHECK(aim(0.28, 0.04, -0.28) == 2);  // the curved one, 45 degrees right
+    CHECK(aim(0.5, 0.3, -0.05) == 0);    // nothing that way (off to the right and up): where the head points
+    f.head = RotY(-M_PI / 2, 0, 0, 0);    // looking right, palm at nothing: nothing within 20 deg
+    CHECK(aim(0, -0.4, 0.3) == -1);
+    // the curved panel's surface: from its axis straight ahead, it's met r away at u = 0
+    double u, v, t;
+    const double from[3] = {1.5, 0.2, -1.5 + 1.5}, dir[3] = {0, 0, -1};
+    CHECK(grabthat::RayHit(panels[2], from, dir, &u, &v, &t));
+    NEAR(u, 0, 1e-6), NEAR(t, 1.5, 1e-6);
+    const double d2[3] = {std::sin(0.3), 0, -std::cos(0.3)};   // 0.3 rad round: u = r * 0.3 along the arc
+    CHECK(grabthat::RayHit(panels[2], from, d2, &u, &v, &t));
+    NEAR(u, 0.45, 1e-4), NEAR(t, 1.5, 1e-4);
+    // where it comes: 45 cm ahead across the floor, at the fist's height, facing the eyes
+    f.head = Identity(), f.fist[0] = 0.1, f.fist[1] = -0.15, f.fist[2] = -0.25;
+    Mat m = grabthat::Arrival(f, k);
+    NEAR(m.m[0][3], 0, 1e-6), NEAR(m.m[1][3], -0.15, 1e-6), NEAR(m.m[2][3], -0.45, 1e-6);
+    const double c = -(m.m[0][2] * m.m[0][3] + m.m[1][2] * m.m[1][3] + m.m[2][2] * m.m[2][3]) /
+                     std::sqrt(m.m[0][3] * m.m[0][3] + m.m[1][3] * m.m[1][3] + m.m[2][3] * m.m[2][3]);
+    CHECK(c > 0.9999);
+    f.head = RotY(-M_PI / 2, 0, 1.6, 0), f.fist[1] = 0.5;   // turned right; a fist low: no lower than 45 cm under the eyes
+    m = grabthat::Arrival(f, k);
+    NEAR(m.m[0][3], 0.45, 1e-5), NEAR(m.m[1][3], 1.6 - 0.45, 1e-5), NEAR(m.m[2][3], 0, 1e-5);
+    // the move: the ends, and halfway turned half
+    const Mat a = At(0, 0, -2), b = RotY(M_PI / 2, 1, 0, 0);
+    Mat h = grabthat::Blend(a, b, 0);
+    NEAR(h.m[2][3], -2, 1e-6), NEAR(h.m[0][0], 1, 1e-6);
+    h = grabthat::Blend(a, b, 1);
+    NEAR(h.m[0][3], 1, 1e-6), NEAR(h.m[0][2], 1, 1e-5);
+    h = grabthat::Blend(a, b, 0.5);
+    NEAR(h.m[0][3], 0.5, 1e-6), NEAR(std::atan2(h.m[0][2], h.m[2][2]), M_PI / 4, 1e-5);
+    NEAR(grabthat::Ease(0.5), 0.5, 1e-9), NEAR(grabthat::Ease(0), 0, 1e-9), NEAR(grabthat::Ease(2), 1, 1e-9);
+}
+
+// --- the user's flags (frame-hands captures/flags/<flag>: sets.jsonl, hmd.jsonl, manifest.json)
+
+// A small JSON reader for the flags' lines: numbers, strings, arrays, objects.
+struct Json {
+    enum Kind { Null, Num, Str, Arr, Obj } kind = Null;
+    double num = 0;
+    std::string str;
+    std::vector<Json> items;
+    std::vector<std::pair<std::string, Json>> fields;
+    const Json *operator[](const char *key) const {
+        for (const auto &[k, v] : fields)
+            if (k == key) return &v;
+        return nullptr;
+    }
+};
+bool ParseJson(const char *&p, Json &out) {
+    while (*p && std::isspace((unsigned char)*p)) ++p;
+    if (*p == '{' || *p == '[') {
+        const bool obj = *p++ == '{';
+        out.kind = obj ? Json::Obj : Json::Arr;
+        for (;;) {
+            while (*p && std::isspace((unsigned char)*p)) ++p;
+            if (*p == (obj ? '}' : ']')) return ++p, true;
+            if (*p == ',') {
+                ++p;
+                continue;
+            }
+            if (obj) {
+                Json key;
+                if (!ParseJson(p, key) || key.kind != Json::Str) return false;
+                while (*p && std::isspace((unsigned char)*p)) ++p;
+                if (*p++ != ':') return false;
+                out.fields.push_back({key.str, Json{}});
+                if (!ParseJson(p, out.fields.back().second)) return false;
+            } else {
+                out.items.emplace_back();
+                if (!ParseJson(p, out.items.back())) return false;
+            }
+        }
+    }
+    if (*p == '"') {
+        out.kind = Json::Str;
+        for (++p; *p && *p != '"'; ++p) {
+            if (*p == '\\' && p[1]) ++p;
+            out.str += *p;
+        }
+        return *p ? (++p, true) : false;
+    }
+    if (!std::strncmp(p, "null", 4) || !std::strncmp(p, "true", 4)) return out.num = *p == 't', p += 4, true;
+    if (!std::strncmp(p, "false", 5)) return p += 5, true;
+    char *end;
+    out.kind = Json::Num, out.num = std::strtod(p, &end);
+    if (end == p) return false;
+    p = end;
+    return true;
+}
+bool ReadJsonLines(const std::string &path, std::vector<Json> &out) {
+    std::ifstream f(path);
+    if (!f) return false;
+    std::string line;
+    while (std::getline(f, line)) {
+        const char *p = line.c_str();
+        Json j;
+        if (ParseJson(p, j)) out.push_back(std::move(j));
+    }
+    return true;
+}
+
+// Replays a flag's hands (as ft-hands published them, "pub") through the detector, with the head
+// poses it recorded; the fires' times are seconds from the flag. False if it can't be read.
+bool ReplayFlag(const std::string &dir, std::vector<grabthat::Fire> &fires, double *flagT, double *seconds,
+                int *claimed = nullptr, int *arms = nullptr, const grabthat::Params &k = {}) {
+    std::vector<Json> sets, poses, manifest;
+    if (!ReadJsonLines(dir + "/sets.jsonl", sets) || !ReadJsonLines(dir + "/hmd.jsonl", poses)) return false;
+    std::ifstream mf(dir + "/manifest.json");
+    std::string text((std::istreambuf_iterator<char>(mf)), std::istreambuf_iterator<char>());
+    const char *mp = text.c_str();
+    Json m;
+    if (!ParseJson(mp, m) || !m["flag_t_raw_ns"]) return false;
+    *flagT = m["flag_t_raw_ns"]->num;
+    std::vector<std::pair<double, Mat>> heads;
+    for (const Json &j : poses) {
+        if (!j["t_ns"] || !j["m"] || j["m"]->items.size() != 12) continue;
+        Mat h{};
+        for (int i = 0; i < 12; ++i) h.m[i / 4][i % 4] = float(j["m"]->items[i].num);
+        heads.push_back({j["t_ns"]->num, h});
+    }
+    grabthat::Detector det(k);
+    const bool allowed[2] = {true, true};
+    fires.clear();
+    double first = 0, last = 0;
+    for (const Json &j : sets) {
+        if (!j["t_raw_ns"] || !j["hands"]) continue;
+        const double t = j["t_raw_ns"]->num;
+        if (first == 0) first = t;
+        last = t;
+        Mat head = Identity();
+        double best = 1e18;
+        for (const auto &[ht, hm] : heads)
+            if (std::fabs(ht - t) < best) best = std::fabs(ht - t), head = hm;
+        std::vector<handcut::Hand> hands;
+        for (const Json &hj : j["hands"]->items) {
+            const Json *pts = hj["pub"] ? hj["pub"] : hj["pts"];
+            if (!pts || pts->items.size() != 21 || !hj["side"]) continue;
+            handcut::Hand h;
+            h.id = hj["id"] ? uint32_t(hj["id"]->num) : 0, h.right = hj["side"]->str == "R";
+            h.stereo = hj["nviews"] && hj["nviews"]->num >= 2, h.confidence = 1, h.captureNs = int64_t(t);
+            for (int q = 0; q < 21; ++q) {
+                const double x = pts->items[q].items[0].num, y = pts->items[q].items[1].num, z = pts->items[q].items[2].num;
+                for (int i = 0; i < 3; ++i) h.p[q][i] = float(head.m[i][0] * x + head.m[i][1] * y + head.m[i][2] * z + head.m[i][3]);
+            }
+            hands.push_back(h);
+        }
+        det.Frame(int64_t(t), hands, head, allowed);
+        for (const auto &f : det.fired()) fires.push_back(f);
+        if (claimed) *claimed += det.claims(0, int64_t(t)) + det.claims(1, int64_t(t));
+    }
+    if (arms) *arms = det.stats.arms;
+    *seconds = (last - first) / 1e9;
+    return true;
+}
+
+std::string FlagsDir() {
+    const char *env = std::getenv("FRAME_HANDS_FLAGS");
+    if (env && *env) return env;
+    const char *home = std::getenv("HOME");
+    return std::string(home ? home : "") + "/Desktop/Projects/frame-hands/captures/flags";
+}
+
+// The user's example (2026-10-10 15:01, right hand, twice): fires twice, at the right times.
+void TestGrabThatFlag() {
+    const std::string dir = FlagsDir() + "/flag-20261010-150115";
+    std::vector<grabthat::Fire> fires;
+    double flagT = 0, secs = 0;
+    if (!ReplayFlag(dir, fires, &flagT, &secs)) {
+        std::printf("grab that: %s not here, its replay skipped\n", dir.c_str());
+        return;
+    }
+    std::printf("grab that, the user's flag (%.0f s): %zu fire(s):", secs, fires.size());
+    for (const auto &f : fires) std::printf(" %s at %+.2f s", f.side ? "right" : "left", (f.t - flagT) / 1e9);
+    std::printf("\n");
+    CHECK(fires.size() == 2);
+    if (fires.size() == 2) {
+        CHECK(fires[0].side == 1 && fires[1].side == 1);
+        NEAR((fires[0].t - flagT) / 1e9, -11.4, 0.15);
+        NEAR((fires[1].t - flagT) / 1e9, -5.9, 0.15);
+    }
+}
+
+// --grabthat FLAG_DIR...: the fires in each flag (false fires: flags taken for something else).
+int ScanFlags(int n, char **dirs) {
+    int total = 0;
+    double all = 0;
+    for (int i = 0; i < n; ++i) {
+        std::vector<grabthat::Fire> fires;
+        double flagT = 0, secs = 0;
+        int claimed = 0, arms = 0;
+        if (!ReplayFlag(dirs[i], fires, &flagT, &secs, &claimed, &arms)) {
+            std::printf("%s: can't read\n", dirs[i]);
+            continue;
+        }
+        std::printf("%s: %.0f s, armed %d, claimed %d frames, %zu fire(s)", dirs[i], secs, arms, claimed, fires.size());
+        for (const auto &f : fires) std::printf(" %s at %+.2f s", f.side ? "right" : "left", (f.t - flagT) / 1e9);
+        std::printf("\n");
+        total += int(fires.size()), all += secs;
+    }
+    std::printf("%d fire(s) in %.0f s\n", total, all);
+    return 0;
+}
+
+
+}  // namespace
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !std::strcmp(argv[1], "--grabthat")) return ScanFlags(argc - 2, argv + 2);
     if (argc > 2 && !std::strcmp(argv[1], "--replay")) {
         int rc = 0;
         for (int i = 2; i < argc; ++i) rc |= Replay(argv[i]);
@@ -1946,6 +2368,9 @@ int main(int argc, char **argv) {
     TestPalmUp();
     TestPalmMenuShows();
     TestPalmMenuPinch();
+    TestGrabThatGesture();
+    TestGrabThatPlace();
+    TestGrabThatFlag();
     std::printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

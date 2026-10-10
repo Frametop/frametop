@@ -306,7 +306,14 @@ class Backend(QObject):
                                  {**basic, "Content-Type": "application/json"})
                     r = conn.getresponse()
                     text = r.read().decode(errors="replace")
-                    if r.status == 404:  # no tokens: plain Sunshine. The login works if it lists clients.
+                    # No tokens: plain Sunshine, which answers a POST to a path it doesn't have with a
+                    # bare 400 "Bad Request", before any login check (404 elsewhere). The login works if
+                    # it lists clients.
+                    try:
+                        bare = r.status == 400 and json.loads(text).get("error") == "Bad Request"
+                    except (ValueError, AttributeError):
+                        bare = False
+                    if r.status == 404 or bare:
                         conn.request("GET", "/api/clients/list", headers=basic)
                         r = conn.getresponse()
                         r.read()

@@ -1531,6 +1531,47 @@ Kirigami.ApplicationWindow {
                         onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
                     }
                 }
+
+                // Three ways the hands work the desktop, each on its own (handsmode.METHODS).
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand input" }
+                Controls.Switch {
+                    Kirigami.FormData.label: "With gaze on:"
+                    text: "Pinch to click where you look"
+                    checked: !!backend.handMethods.gaze_clicks
+                    onToggled: backend.setHandMethod("gaze_clicks", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "Your eyes aim and your hands are the mouse's buttons. Index pinch: left click. "
+                        + "Middle finger to thumb: right click. Pinch and hold still to press and drag. Hold a pinch "
+                        + "with one hand and pinch with the other: both buttons held, each until its pinch opens."
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "With gaze off:"
+                    text: "Point a raised hand for a ray"
+                    checked: !!backend.handMethods.ray
+                    onToggled: backend.setHandMethod("ray", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "A hand raised in front and pointing shows a ray that works like a controller's "
+                        + "laser: pinch to click, middle pinch to right-click or scroll. A pinch with the hand held low "
+                        + "presses where the pointer is."
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Direct touch:"
+                    text: "Poke and grab Frametop's screens, gaze on or off"
+                    checked: !!backend.handMethods.touch
+                    onToggled: backend.setHandMethod("touch", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "Touch a screen with your index finger to click it. Pinch its bar, an edge or "
+                        + "a corner to move or resize it."
+                }
+                Controls.Label {
+                    visible: backend.handsMode === "off"
+                    text: "These need hand tracking on (above)."
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                }
             }
 
             footer: Controls.Label {
@@ -1539,7 +1580,9 @@ Kirigami.ApplicationWindow {
                 opacity: 0.7
                 text: "Your hands show through Frametop's screens where they're in front of them. Hand tracking "
                       + "uses a lot of the headset's CPU. The margin is how far past your hand the screen opens up; "
-                      + "it applies right away."
+                      + "it applies right away. The hand inputs are separate: any of them can be on alone, and they "
+                      + "apply within a second. A hand holding a controller, or whose controller you just used, "
+                      + "does none of them."
             }
         }
     }

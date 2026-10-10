@@ -28,6 +28,21 @@
 // (POINTER_GRIP_GAIN, 1). A pinch that has nudged only clicks, as the mouse's held-back press does
 // once it has moved. A middle pinch (the right button) never becomes a press.
 //
+// Chord: both buttons held, as with both of a mouse's (user, 2026-10-10). While one hand's index
+// pinch is held (held back, nudged, or pressed), an index pinch by the other hand presses the right
+// button, and holds it until that pinch ends; the first hand's left button stays down until its own
+// pinch ends. A first pinch still held back becomes a real left press at once, where the pointer is
+// (the lock, or where its nudge took it: a nudge is then a lesson, as for a click), without waiting
+// out the hold, so the chord is always left and right down together. The right press goes out 30 ms
+// after a left press the chord made (ChordButton), so the left lands first. Both press where the
+// pointer is, not where the eyes are now. The first hand drags while it's held; if it lets go first,
+// the second hand drags from there (Take). A quick second pinch is a right click during the left's
+// press (released 40 ms on). A chord's hand lost (or the chord cut short) releases its button. A
+// middle pinch stays a right click on its own; one by the other hand during a pinch is ignored, as is
+// a third pinch. Typing holds the chord's pinch back like any other: the helper asks typing.h before
+// a pinch can be the chord's (a hand on the keyboard, or keys within POINTER_PINCH_TYPING and the
+// hand not lifted off them).
+//
 // Times are seconds on one steady clock (CLOCK_MONOTONIC: ft-hands' capture times as seconds).
 // Angles are degrees: the gaze's head-relative as ft-gazed sends it (yaw +left, pitch +up), the
 // pointer's and the hand's in the room.
@@ -55,17 +70,16 @@ struct Params {
 inline bool RayAllowed(bool rayOn, bool gazeOn, bool gazeHandRay) { return rayOn && (!gazeOn || gazeHandRay); }
 
 // Why a gaze pinch doesn't begin, for its log line, or nullptr. The helper has already checked
-// what holds for every gesture (hands allowed, a controller on that side, ft-screens' near claims).
+// what holds for every gesture (hands allowed, typing: typing.h, a controller on that side,
+// ft-screens' near claims). The old key guard (no pinch within POINTER_PINCH_TYPING of a key) is
+// typing.h's now: per hand, and a hand lifted off the keys is free at once.
 struct Situation {
     bool busy = false;        // a press or a hold is already going (the mouse's, a key's, a hand's)
     bool active = true;       // the pointer is awake (the first gesture only wakes it)
-    double sinceKey = 1e9;    // seconds since the relay's last "typing"
-    double typingHold = 1.0;  // (the helper holds typing hands back itself now: typing.h)
 };
 inline const char *Refused(const Situation &s) {
     if (s.busy) return "ignored (a press is already held)";
     if (!s.active) return "it woke the pointer, no click";
-    if (s.sinceKey < s.typingHold) return "ignored (typing)";
     return nullptr;
 }
 
@@ -165,22 +179,70 @@ public:
         return true;
     }
 
+    // The chord (see the top), on the left's pinch: the other hand pinched. Held back (aiming or
+    // nudged), it becomes a real press now, where the pointer is, and the hand drags from there; true
+    // when it did (the helper presses the left button, then the right).
+    bool Chord(double t) {
+        if (phase_ == Phase::Off || right_) return false;
+        ++chords_;
+        if (phase_ == Phase::Press) return false;
+        phase_ = Phase::Press;
+        engaged_ = false;
+        refY_ = lastHy_, refP_ = lastHp_;
+        pressAt_ = t, byChord_ = true;
+        return true;
+    }
+    // The chord's own pinch: the right button, pressed where the pointer is (no lock, no nudge, no
+    // hold). Its hand is only followed (Track) while the left's pinch drags; once that lets go, it
+    // drags from where the pointer is (Take, then Hand).
+    void BeginChord(const Params &p, double t, double yaw, double pitch, double hy, double hp) {
+        Begin(p, t, yaw, pitch, hy, hp, true, -1);
+        phase_ = Phase::Press, chord_ = true, pressAt_ = t;
+    }
+    void Track(double hy, double hp) {
+        if (phase_ != Phase::Off) lastHy_ = hy, lastHp_ = hp;
+    }
+    void Take(double yaw, double pitch) {
+        yaw_ = yaw, pitch_ = pitch;
+        engaged_ = false;
+        refY_ = lastHy_, refP_ = lastHp_;
+    }
+    bool IsChord() const { return chord_; }  // the chord's own pinch (the right button)
+    bool ByChord() const { return byChord_; }  // the left's, pressed by a chord rather than the hold
+    int ChordCount() const { return chords_; }  // the other hand's right presses during it
+
     // What it did, for its log line ("pinch right: " + this). lost: it ended without a click (why
     // says what); hit: what the click landed on; lesson: what the helper sent the gaze service for
     // it ("a lesson", "the quick check", or "" for nothing).
     std::string Says(double t, bool lost, const std::string &why, const std::string &hit, const std::string &lesson) const {
-        char b[320];
+        char b[400];
         const std::string on = hit.empty() ? "nothing" : hit;
         char gaze[48] = "no fresh gaze: where the pointer was";
         if (lockAge_ >= 0) std::snprintf(gaze, sizeof gaze, "gaze %.0f ms before", lockAge_ * 1000);
         const double held = t - t0_;
         const char *button = right_ ? "right click" : "clicked";
-        if (phase_ == Phase::Press) {
+        char drag[40] = "";
+        if (dragged_ > 0) std::snprintf(drag, sizeof drag, "dragged %.1f deg, ", dragged_);
+        if (chord_) {
             const std::string pressed = pressHit.empty() ? "nothing" : pressHit;
-            char drag[40] = "";
-            if (dragged_ > 0) std::snprintf(drag, sizeof drag, "dragged %.1f deg, ", dragged_);
-            std::snprintf(b, sizeof b, "became a press on %s (held still %.2f s; %s), %slet go%s%s (held %.2f s)",
-                          pressed.c_str(), pressAt_ - t0_, gaze, drag, lost ? ": " : "", lost ? why.c_str() : "", held);
+            std::snprintf(b, sizeof b, "the right button with the other hand's press, on %s, %slet go%s%s (held %.2f s)",
+                          pressed.c_str(), drag, lost ? ": " : "", lost ? why.c_str() : "", held);
+        } else if (phase_ == Phase::Press) {
+            const std::string pressed = pressHit.empty() ? "nothing" : pressHit;
+            char how[160];
+            if (!byChord_) {
+                std::snprintf(how, sizeof how, "held still %.2f s; %s", pressAt_ - t0_, gaze);
+            } else if (moved_ >= 0.2) {
+                std::snprintf(how, sizeof how, "the other hand pinched after %.2f s, nudged %.1f deg; %s; %s",
+                              pressAt_ - t0_, moved_, lesson.empty() ? "not learned" : lesson.c_str(), gaze);
+            } else {
+                std::snprintf(how, sizeof how, "the other hand pinched after %.2f s; %s", pressAt_ - t0_, gaze);
+            }
+            char chords[48] = "";
+            if (chords_ == 1) std::snprintf(chords, sizeof chords, ", with the right button");
+            else if (chords_ > 1) std::snprintf(chords, sizeof chords, ", with the right button %d times", chords_);
+            std::snprintf(b, sizeof b, "became a press on %s (%s), %slet go%s%s (held %.2f s%s)", pressed.c_str(), how,
+                          drag, lost ? ": " : "", lost ? why.c_str() : "", held, chords);
         } else if (lost) {
             std::snprintf(b, sizeof b, "no click: %s (%s, held %.2f s)", why.c_str(), gaze, held);
         } else if (moved_ < 0.2) {
@@ -196,11 +258,63 @@ public:
 private:
     Params p_;
     Phase phase_ = Phase::Off;
-    bool right_ = false, engaged_ = false;
+    bool right_ = false, engaged_ = false, chord_ = false, byChord_ = false;
+    int chords_ = 0;
     double t0_ = 0, pressAt_ = 0, lockAge_ = -1;
     double yaw_ = 0, pitch_ = 0, startY_ = 0, startP_ = 0;
     double refY_ = 0, refP_ = 0, lastHy_ = 0, lastHp_ = 0;
     double moved_ = 0, dragged_ = 0;
+};
+
+// A pinch that began makes a chord (see the top): an index pinch (not middle) by the other hand
+// while held, the hand's gaze pinch on heldSide, is an index pinch, and no chord is held yet.
+inline bool Chordable(const Pinch &held, int heldSide, int side, bool middle, bool chordHeld) {
+    return held.On() && !held.Right() && !held.IsChord() && heldSide >= 0 && side != heldSide && !middle &&
+           !chordHeld;
+}
+
+// The chord's right button as the helper sends it (see the top): pressed once due (30 ms after a left
+// press the chord made, else at once), held until its pinch ends; a pinch that ended before its press
+// went out still clicks (released 40 ms on), and one lost before it presses nothing.
+class ChordButton {
+public:
+    void Begin(double t, bool afterLeft) {
+        *this = ChordButton();
+        on_ = true, dueAt_ = t + (afterLeft ? 0.03 : 0);
+    }
+    bool On() const { return on_; }
+    bool Down() const { return down_; }
+    bool Finished() const { return on_ && done_; }  // over: its log line, then Reset
+    bool Pressed() const { return pressed_; }      // its press went out (at some point)
+    void Reset() { *this = ChordButton(); }
+    // Each frame: 1 press it now, -1 release it now, 0 nothing.
+    int Tick(double t) {
+        if (!on_ || done_) return 0;
+        if (!down_ && t >= dueAt_ - 1e-9) {
+            down_ = pressed_ = true, downAt_ = t;
+            return 1;
+        }
+        if (down_ && ended_ && t >= downAt_ + 0.04 - 1e-9) {
+            down_ = false, done_ = true;
+            return -1;
+        }
+        return 0;
+    }
+    // Its pinch ended (lost: the hand was lost, or the chord was cut short): -1 release it now, or 0.
+    int End(bool lost) {
+        if (!on_ || done_) return 0;
+        if (down_ && (lost || !ended_)) {
+            down_ = false, done_ = true;
+            return -1;
+        }
+        if (lost) done_ = true;  // never pressed: nothing to release
+        else ended_ = true;      // a tap: its press, then the release 40 ms on (Tick)
+        return 0;
+    }
+
+private:
+    bool on_ = false, down_ = false, pressed_ = false, ended_ = false, done_ = false;
+    double dueAt_ = 0, downAt_ = 0;
 };
 
 }  // namespace gazehand

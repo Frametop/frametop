@@ -107,11 +107,12 @@ keyboards) get their volume entries remapped to unused stand-in codes, so their
 other keys keep working for SteamVR; a device without a keymap that has only volume
 keys (the headset's pmic_resin) is grabbed. The keymaps go back when the relay exits.
 
-Hand interaction (POINTER_HANDS=1): the pointer helper decides per side whether a hand holds a
-controller or is bare (pointer/helper/handoff.h). The relay's web socket reader (game_pause.py,
-TouchTracker) sends it "ctl <side> touch 0|1", "ctl <side> press", "ctl <side> gone" and
-"ctl ws 0|1", and the pause state as "paused 1|0" (hands work in a VR game only with the dashboard
-open or Frametop toggled back on).
+Hand interaction (POINTER_HANDS=1, or HANDS_NEAR=on for ft-screens' direct touch alone): the
+pointer helper decides per side whether a hand holds a controller or is bare
+(pointer/helper/handoff.h). The relay's web socket reader (game_pause.py, TouchTracker) sends it
+"ctl <side> touch 0|1", "ctl <side> press", "ctl <side> gone" and "ctl ws 0|1", and the pause
+state as "paused 1|0" (hands work in a VR game only with the dashboard open or Frametop toggled
+back on).
 
 Frametop can pause for VR games (game_pause.py: by hand, with a controller gesture, or by itself
 while a game runs). Paused, it stops the services that cost the game CPU and GPU, and the relay
@@ -921,7 +922,9 @@ def main():
         pause.configure(state["rules"])
         # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
         # HANDS_MODE=always keeps hand tracking running through games.
-        pause.set_hands(conf.get("POINTER_HANDS", "0") == "1", conf.get("HANDS_MODE") == "always")
+        # Direct touch alone (HANDS_NEAR=on) needs the same: the helper's handoff runs for it.
+        pause.set_hands(conf.get("POINTER_HANDS", "0") == "1" or conf.get("HANDS_NEAR") == "on",
+                        conf.get("HANDS_MODE") == "always")
 
     load_config()
     tap = None  # the modifier (folded, MODIFIERS) pressed alone, with nothing since: its release is a tap

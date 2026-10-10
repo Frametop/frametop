@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for hands/handsmode.py: HANDS_MODE and HANDS_MATTE_MARGIN in a temporary frametop.conf,
-and which units each mode starts, stops and makes SteamVR want, with a made-up systemd (nothing
-here runs systemctl, getcap or pgrep).
+"""Tests for hands/handsmode.py: HANDS_MODE and HANDS_MATTE_MARGIN in a temporary frametop.conf, the
+Hands page's three input switches (methods_of, method_writes), and which units each mode starts,
+stops and makes SteamVR want, with a made-up systemd (nothing here runs systemctl, getcap or pgrep).
 
   python3 hands/tests/test_handsmode.py
 """
@@ -189,6 +189,68 @@ class StatusTest(unittest.TestCase):
                          "Hand tracking starts with the Frametop desktop")
         self.assertEqual(hm.status(FakeHost(active=(CUT_CAMD, CUT_HANDS)), {})["summary"],
                          "The hand cutouts are running (started by hand: ft-cutouts)")
+
+
+class MethodsTest(unittest.TestCase):
+    """The Hands page's three switches (gaze clicks, the ray, direct touch): read from old configs as
+    they always worked, and each toggled without moving the others."""
+
+    def apply(self, conf, method, on):
+        new = dict(conf, **hm.method_writes(conf, method, on))
+        return new, hm.methods_of(new)
+
+    def test_old_configs_read_as_before(self):
+        self.assertEqual(hm.methods_of({}), {"gaze_clicks": False, "ray": False, "touch": False})
+        on = {"gaze_clicks": True, "ray": True, "touch": True}
+        self.assertEqual(hm.methods_of({"POINTER_HANDS": "1"}), on)
+        self.assertEqual(hm.methods_of({"POINTER_HANDS": "1", "HANDS_NEAR": "1"}), on)  # the example config's
+        self.assertEqual(hm.methods_of({"POINTER_HANDS": "1", "POINTER_HAND_RAY": "0"})["ray"], False)
+        self.assertEqual(hm.methods_of({"POINTER_HANDS": "1", "HANDS_NEAR": "0"})["touch"], False)
+        self.assertTrue(hm.methods_of({"HANDS_NEAR": "force"})["touch"])
+        self.assertFalse(hm.methods_of({"HANDS_NEAR": "1"})["touch"], "1 without POINTER_HANDS: off, as before")
+        self.assertTrue(hm.methods_of({"HANDS_NEAR": "on"})["touch"])
+        self.assertFalse(hm.methods_of({"POINTER_HANDS": "yes"})["ray"], "as the helper reads it: not a number, 0")
+
+    def test_each_switch_alone(self):
+        for method in hm.METHODS:
+            conf, got = self.apply({}, method, True)
+            self.assertEqual(got, {m: m == method for m in hm.METHODS}, f"{method} alone: {conf}")
+            conf, got = self.apply(conf, method, False)
+            self.assertEqual(got, {m: False for m in hm.METHODS}, f"{method} off again: {conf}")
+
+    def test_touch_alone_needs_no_pointer_hands(self):
+        conf, got = self.apply({}, "touch", True)
+        self.assertEqual(conf, {"HANDS_NEAR": "on"})
+        conf, got = self.apply({"POINTER_HANDS": "1"}, "gaze_clicks", False)
+        conf, got = self.apply(conf, "ray", False)
+        self.assertEqual(conf["POINTER_HANDS"], "0")
+        self.assertEqual(conf["HANDS_NEAR"], "on", "touch stays on without POINTER_HANDS")
+        self.assertTrue(got["touch"])
+
+    def test_turning_one_on_pins_the_others(self):
+        # all off, then the ray: POINTER_GAZE_PINCH's default (1) and HANDS_NEAR's (1) would turn the
+        # others on with POINTER_HANDS, so they're written off
+        conf, got = self.apply({}, "ray", True)
+        self.assertEqual(got, {"gaze_clicks": False, "ray": True, "touch": False})
+        self.assertEqual(conf, {"POINTER_HANDS": "1", "POINTER_GAZE_PINCH": "0", "HANDS_NEAR": "0"})
+        conf, got = self.apply(conf, "gaze_clicks", True)
+        self.assertEqual(got, {"gaze_clicks": True, "ray": True, "touch": False})
+
+    def test_minimal_writes(self):
+        conf = {"POINTER_HANDS": "1", "HANDS_NEAR": "1"}
+        self.assertEqual(hm.method_writes(conf, "ray", True), {}, "already on: nothing")
+        self.assertEqual(hm.method_writes(conf, "ray", False), {"POINTER_HAND_RAY": "0"})
+        self.assertEqual(hm.method_writes(conf, "touch", False), {"HANDS_NEAR": "0"})
+        self.assertEqual(hm.method_writes({"HANDS_NEAR": "force"}, "touch", True), {}, "force stays force")
+
+    def test_every_combination(self):
+        start = {"POINTER_HANDS": "1", "HANDS_NEAR": "1"}
+        for bits in range(8):
+            want = {m: bool(bits >> i & 1) for i, m in enumerate(hm.METHODS)}
+            conf = dict(start)
+            for m in hm.METHODS:
+                conf, _ = self.apply(conf, m, want[m])
+            self.assertEqual(hm.methods_of(conf), want, f"{want}: {conf}")
 
 
 class HostTest(unittest.TestCase):

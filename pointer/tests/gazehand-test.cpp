@@ -1,8 +1,10 @@
 // Unit tests for gaze pinches (pointer/helper/gazehand.h): the gaze lock, the nudge's dead zone and
-// gain, the press after a still hold, the typing guard and the ray switch, with made-up gaze at
+// gain, the press after a still hold, the two-hand chord (both buttons held), typing holding pinches
+// back (typing.h, which the helper asks before gazehand), and the ray switch, with made-up gaze at
 // ft-gazed's 90 Hz and hands at ft-hands' 30 Hz.
 // Build and run: just test-c (or g++ -std=c++17 -I. pointer/tests/gazehand-test.cpp).
 #include "pointer/helper/gazehand.h"
+#include "pointer/helper/typing.h"
 
 #include <cmath>
 #include <cstdio>
@@ -185,18 +187,207 @@ void TestMiddlePinch() {
 void TestRefused() {
     Situation s;
     CHECK(Refused(s) == nullptr, "nothing in the way");
-    s.sinceKey = 0.3;
-    CHECK(Refused(s) && std::string(Refused(s)) == "ignored (typing)", "a key 0.3 s ago");
-    s.sinceKey = 1.2;
-    CHECK(Refused(s) == nullptr, "a key 1.2 s ago");
-    s.typingHold = 0;
-    s.sinceKey = 0;
-    CHECK(Refused(s) == nullptr, "POINTER_PINCH_TYPING=0: no guard");
+    // The key guard is typing.h's (the helper asks it before gazehand): keys alone, no hands seen.
+    typing::Typing ty;
+    ty.Key(0);
+    CHECK(ty.Why(1, 0.3) && std::string(ty.Why(1, 0.3)) == "typing", "a key 0.3 s ago");
+    CHECK(ty.Blocked(1, 1.2), "a key 1.2 s ago: still typing (POINTER_PINCH_TYPING is 2 s, was 1)");
+    CHECK(!ty.Blocked(1, 2.1), "a key 2.1 s ago");
+    typing::Params off;
+    off.hold = 0;
+    ty.SetParams(off);
+    CHECK(!ty.Blocked(1, 0), "POINTER_PINCH_TYPING=0: no guard");
     s = Situation();
-    s.active = false, s.sinceKey = 0.1;
+    s.active = false;
     CHECK(std::string(Refused(s)) == "it woke the pointer, no click", "asleep: it only wakes");
     s.busy = true;
     CHECK(std::string(Refused(s)) == "ignored (a press is already held)", "busy first");
+}
+
+// The chord (see "Chord" in gazehand.h): which second pinches make one.
+void TestChordable() {
+    Pinch left;
+    CHECK(!Chordable(left, -1, 1, false, false), "nothing held: a plain pinch");
+    left.Begin(Params(), 0, 10, 0, -20, -35, false, 0.08);
+    CHECK(Chordable(left, 0, 1, false, false), "the other hand's index pinch: a chord");
+    CHECK(!Chordable(left, 0, 0, false, false), "the same hand: no");
+    CHECK(!Chordable(left, 0, 1, true, false), "a middle pinch by the other hand: no (ignored, as before)");
+    CHECK(!Chordable(left, 0, 1, false, true), "a chord held already: no third button");
+    Pinch middle;
+    middle.Begin(Params(), 0, 10, 0, -20, -35, true, 0.08);
+    CHECK(!Chordable(middle, 0, 1, false, false), "during a middle pinch (a right click held back): no");
+    Pinch chord;
+    chord.BeginChord(Params(), 0, 10, 0, -20, -35);
+    CHECK(!Chordable(chord, 1, 0, false, false), "the chord's own pinch can't make another");
+    // The helper's busy test: a chord isn't busy, so only typing (typing.h, asked first) and the wake
+    // stand in its way.
+    Situation s;
+    s.busy = !Chordable(left, 0, 1, false, false);
+    CHECK(Refused(s) == nullptr, "a chord goes ahead");
+    {
+        // Keys 0.3 s ago: the left holds its gaze pinch out of the keyboard zone (busy: free), the
+        // right is on the keys. The right's pinch is held back before it can be the chord's.
+        typing::Typing ty;
+        typing::Head head;
+        head.pos = {0, 1.6, 0};
+        typing::Hand hands[2];
+        hands[0].seen = true, hands[0].palm = {-0.1, 1.5, -0.4}, hands[0].down = 0.1, hands[0].busy = true;
+        hands[1].seen = true, hands[1].palm = {0.1, 1.25, -0.25}, hands[1].down = 0.95;
+        ty.Key(0);
+        double t = 0;
+        for (; t < 0.3; t += kFrame) ty.Frame(t, head, hands);
+        CHECK(!ty.Blocked(0, t), "the left's gaze pinch, held out: free (%s)", ty.Why(0, t));
+        CHECK(ty.Why(1, t) && std::string(ty.Why(1, t)) == "typing: the hand is on the keyboard",
+              "a chord's pinch 0.3 s after a key, by a hand on the keys: typing (%s)", ty.Why(1, t));
+        // The right lifted 0.11 m off the keys: free at once, keys or not, so its pinch makes the chord.
+        hands[1].palm.y += 0.11;
+        for (const double end = t + 0.2; t < end; t += kFrame) ty.Frame(t, head, hands);
+        ty.Key(t);
+        CHECK(!ty.Blocked(1, t), "the right lifted off the keys: its chord goes ahead (%s)", ty.Why(1, t));
+    }
+    s = Situation();
+    s.busy = !Chordable(left, 0, 1, true, false);
+    CHECK(std::string(Refused(s)) == "ignored (a press is already held)", "a middle pinch: busy, as before");
+}
+
+// L hold + R pinch: the left, still held back, becomes a real press where the pointer is (the lock);
+// the right goes down 30 ms later and stays down until its pinch ends.
+void TestChordPressesBoth() {
+    Params prm;
+    Pinch left;
+    left.Begin(prm, 0, 30, 5, -20, -35, false, 0.08);
+    double t = 0;
+    for (int i = 0; i < 6; ++i) t += kFrame, left.Hand(-20 + 0.5, -35);  // still: aiming
+    CHECK(left.State() == Pinch::Phase::Aim, "aiming before the chord");
+    CHECK(left.Chord(t), "the chord makes the press");
+    CHECK(left.State() == Pinch::Phase::Press && left.Yaw() == 30 && left.Pitch() == 5, "pressed at the lock");
+    CHECK(!left.Promote(t + 1), "the hold has nothing left to do");
+    Pinch right;
+    right.BeginChord(prm, t, left.Yaw(), left.Pitch(), 15, -35);
+    ChordButton b;
+    b.Begin(t, true);
+    CHECK(b.Tick(t) == 0 && !b.Down(), "not yet: the left lands first");
+    CHECK(b.Tick(t + 0.02) == 0, "20 ms on: not yet");
+    CHECK(b.Tick(t + 0.031) == 1 && b.Down(), "30 ms on: the right goes down");
+    for (double u = t + 0.04; u < t + 1; u += 0.008) CHECK(b.Tick(u) == 0, "held while its pinch is: %.3f", u);
+    // the left hand drags meanwhile, at the grip's gain past 0.5 deg; both buttons stay down
+    left.Hand(-19.5 + 0.6, -35);  // engages
+    left.Hand(-19.5 + 4.6, -35);
+    CHECK(std::fabs(left.Yaw() - 34) < 1e-9 && std::fabs(left.Dragged() - 4) < 1e-9, "dragged at gain 1: %.3f", left.Yaw());
+    left.pressHit = right.pressHit = "frametop.screen.0";
+    const std::string says = left.Says(t + 1.2, false, "", "", "");
+    CHECK(Has(says, "became a press on frametop.screen.0 (the other hand pinched after 0.20 s; gaze 80 ms before)") &&
+              Has(says, "dragged 4.0 deg, let go") && Has(says, ", with the right button)"),
+          "%s", says.c_str());
+    const std::string rs = right.Says(t + 1.0, false, "", "", "");
+    CHECK(Has(rs, "the right button with the other hand's press, on frametop.screen.0, let go (held 1.00 s)"), "%s", rs.c_str());
+    // a left already pressed by the hold: the chord only adds the right
+    Pinch held;
+    held.Begin(prm, 0, 0, 0, 0, 0, false, -1);
+    CHECK(held.Promote(0.5), "held still: a press");
+    CHECK(!held.Chord(0.7) && held.State() == Pinch::Phase::Press && held.ChordCount() == 1, "already a press");
+    CHECK(Has(held.Says(1, false, "", "", ""), "(held still 0.50 s;"), "the hold made it");
+}
+
+// R release first: the right comes up at once, the left stays down; the other hand can chord again.
+void TestChordRightLetsGoFirst() {
+    Pinch left;
+    left.Begin(Params(), 0, 0, 0, 0, 0, false, 0.08);
+    CHECK(left.Chord(0.1), "chord");
+    ChordButton b;
+    b.Begin(0.1, true);
+    b.Tick(0.14);
+    CHECK(b.Down(), "down");
+    CHECK(b.End(false) == -1 && !b.Down() && b.Finished(), "its pinch ended: released now");
+    CHECK(left.State() == Pinch::Phase::Press, "the left is still held");
+    b.Reset();
+    CHECK(Chordable(left, 0, 1, false, b.On()), "a second chord (right pressed again)");
+    CHECK(!left.Chord(0.6), "the left is a press already");
+    b.Begin(0.6, false);
+    CHECK(b.Tick(0.6) == 1, "a press the chord didn't have to make first: at once");
+    CHECK(b.End(false) == -1, "and up");
+    CHECK(Has(left.Says(1.0, false, "", "", ""), "with the right button 2 times"), "%s", left.Says(1.0, false, "", "", "").c_str());
+}
+
+// L release first: the left comes up (the helper's), the right stays down, and the second hand drags
+// from where the pointer is, without a jump.
+void TestChordLeftLetsGoFirst() {
+    Params prm;
+    Pinch right;
+    right.BeginChord(prm, 0, 30, 5, 10, -30);
+    for (int i = 1; i <= 10; ++i) right.Track(10 + i * 0.3, -30);  // moves 3 deg while the left drags
+    CHECK(right.Yaw() == 30 && right.Dragged() == 0, "only followed while the left drags");
+    right.Take(36, 5);  // the left let go with the pointer at 36
+    right.Hand(13.4, -30);
+    CHECK(right.Yaw() == 36, "the drag's dead zone, from the hand at the handover");
+    right.Hand(13.6, -30);  // engages
+    right.Hand(15.6, -30);
+    CHECK(std::fabs(right.Yaw() - 38) < 1e-9 && std::fabs(right.Dragged() - 2) < 1e-9, "dragged from 36: %.3f", right.Yaw());
+    ChordButton b;
+    b.Begin(0, false);
+    CHECK(b.Tick(0) == 1, "down");
+    for (double u = 0.1; u < 2; u += 0.1) CHECK(b.Tick(u) == 0, "stays down while its pinch does");
+    CHECK(b.End(false) == -1, "up with its pinch");
+    right.pressHit = "frametop.float.2";
+    CHECK(Has(right.Says(2, false, "", "", ""), "on frametop.float.2, dragged 2.0 deg, let go (held 2.00 s)"), "%s",
+          right.Says(2, false, "", "", "").c_str());
+}
+
+// The chord after a nudge: the left presses where the nudge took the pointer (a lesson), then drags.
+void TestChordAfterANudge() {
+    Params prm;
+    Pinch left;
+    left.Begin(prm, 0, 30, 5, -20, -35, false, 0.08);
+    double hy = -20;
+    for (int i = 0; i < 16; ++i) hy += 0.5, left.Hand(hy, -35);  // 8 deg: nudges 0.3 x (8 - 4.5), 1.05
+    CHECK(left.State() == Pinch::Phase::Nudge && left.Moved() > 0.2, "nudged %.3f", left.Moved());
+    const double at = left.Yaw();
+    CHECK(left.Chord(0.6), "a nudged pinch becomes a press too (the chord asks for both buttons)");
+    CHECK(left.Yaw() == at && left.State() == Pinch::Phase::Press, "pressed where the nudge took it: %.3f", left.Yaw());
+    left.Hand(hy + 0.4, -35);
+    CHECK(left.Yaw() == at, "the drag's dead zone counts from the hand at the chord");
+    left.Hand(hy + 0.6, -35);  // engages
+    left.Hand(hy + 2.6, -35);
+    CHECK(std::fabs(left.Yaw() - (at + 2)) < 1e-9, "then gain 1: %.3f", left.Yaw());
+    const std::string says = left.Says(1.2, false, "", "", "a lesson");
+    CHECK(Has(says, "the other hand pinched after 0.60 s, nudged 1.1 deg; a lesson;"), "%s", says.c_str());
+}
+
+// A quick second pinch: a right click during the left's press. One lost before its press: nothing.
+// One lost while down: released at once.
+void TestChordTapsAndLosses() {
+    ChordButton b;
+    b.Begin(1.0, true);
+    CHECK(b.End(false) == 0 && !b.Finished(), "a tap that ended before its press");
+    CHECK(b.Tick(1.03) == 1, "still pressed when due");
+    CHECK(b.Tick(1.05) == 0, "held 40 ms");
+    CHECK(b.Tick(1.07) == -1 && b.Finished() && b.Pressed(), "then released: a right click");
+    b.Begin(1.0, true);
+    CHECK(b.End(true) == 0 && b.Finished() && !b.Pressed(), "lost before its press: no button at all");
+    CHECK(b.Tick(1.1) == 0, "and nothing later");
+    b.Begin(1.0, false);
+    CHECK(b.Tick(1.0) == 1, "down");
+    CHECK(b.End(true) == -1 && b.Finished(), "the hand lost mid-chord: released at once");
+    CHECK(b.End(true) == 0 && b.Tick(2) == 0, "once");
+    b.Begin(1.0, false);
+    b.Tick(1.0);
+    b.End(false);  // a tap whose release is due
+    CHECK(b.End(true) == 0 && !b.Down() && b.Finished(), "cut short after its release: nothing more");
+    b.Begin(1.0, true);
+    b.End(false);
+    b.Tick(1.03);
+    CHECK(b.Down() && b.End(true) == -1, "a tap cut short while its click is down: released now");
+    Pinch right;
+    right.BeginChord(Params(), 0, 0, 0, 0, 0);
+    CHECK(Has(right.Says(0.4, true, "ft-hands lost the hand, or a grip took the pinch", "", ""),
+              "let go: ft-hands lost the hand"),
+          "%s", right.Says(0.4, true, "ft-hands lost the hand, or a grip took the pinch", "", "").c_str());
+    // the left's hand lost mid-chord: its press ends as lost (the helper releases the left)
+    Pinch left;
+    left.Begin(Params(), 0, 0, 0, 0, 0, false, -1);
+    left.Chord(0.1);
+    CHECK(Has(left.Says(0.5, true, "ft-hands lost the hand", "", ""), "let go: ft-hands lost the hand (held 0.50 s, with the right button)"),
+          "%s", left.Says(0.5, true, "ft-hands lost the hand", "", "").c_str());
 }
 
 void TestRaySwitch() {
@@ -218,6 +409,12 @@ int main() {
     TestHoldStillBecomesAPress();
     TestMiddlePinch();
     TestRefused();
+    TestChordable();
+    TestChordPressesBoth();
+    TestChordRightLetsGoFirst();
+    TestChordLeftLetsGoFirst();
+    TestChordAfterANudge();
+    TestChordTapsAndLosses();
     TestRaySwitch();
     if (failures) {
         std::printf("%d failures\n", failures);

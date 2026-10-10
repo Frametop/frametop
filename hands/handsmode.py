@@ -21,6 +21,9 @@ nothing and says so ("problem"), and never asks for a password.
                                                # doesn't want (Frametop Input Settings, ft-handsctl mode)
   python3 hands/handsmode.py desktop up|down   # the session's hooks; only HANDS_MODE=frametop acts
 
+It also reads and writes the three hand input switches Frametop Input Settings shows (METHODS:
+gaze clicks, the hand ray, direct touch), which are pointer and ft-screens settings, not services.
+
 On the host, system Python, standard library only (the settings app runs it through
 distrobox-host-exec, and imports it for the settings' defaults).
 """
@@ -96,6 +99,66 @@ def margin_of(conf):
     except ValueError:
         return MARGIN_DEFAULT
     return v if 0 <= v <= 10 else MARGIN_DEFAULT
+
+
+# How the hands work the desktop, as three switches that don't depend on each other (Frametop Input
+# Settings' Hands page; user, 2026-10-10). In frametop.conf:
+#   gaze_clicks  gaze mode's hand clicks: a pinch clicks where you look, a middle pinch right-clicks, a
+#                pinch by each hand holds both buttons. POINTER_HANDS=1 and POINTER_GAZE_PINCH (1).
+#   ray          with gaze mode off, a raised pointing hand's ray drives the pointer (and a low hand's
+#                pinch presses where it is). POINTER_HANDS=1 and POINTER_HAND_RAY (1).
+#   touch        ft-screens' direct touch, poke and grab its panels, gaze or not. HANDS_NEAR: 1 (the
+#                default) with POINTER_HANDS=1, on without it, force always, 0 off.
+# POINTER_HANDS turns the pointer's hand input on for either of the first two, so the others' keys
+# are pinned when it changes, and an old config reads as it always worked (HANDS_NEAR=1 and
+# POINTER_HANDS=1: all three on; POINTER_HANDS=0, the default: all three off).
+METHODS = ("gaze_clicks", "ray", "touch")
+
+
+def _flag(conf, key, default):
+    """A 0/1 setting as the pointer helper reads it (a number, not 0), else the default."""
+    v = conf.get(key)
+    if v is None or v == "":
+        return default
+    try:
+        return float(v) != 0
+    except ValueError:
+        return False
+
+
+def near_of(conf):
+    """Whether ft-screens' direct touch is on: HANDS_NEAR as ft-screens and the helper read it."""
+    v = conf.get("HANDS_NEAR", "1")
+    if v == "0":
+        return False
+    if v in ("on", "force"):
+        return True
+    return _flag(conf, "POINTER_HANDS", False)
+
+
+def methods_of(conf):
+    """{method: on} for METHODS."""
+    hands = _flag(conf, "POINTER_HANDS", False)
+    return {"gaze_clicks": hands and _flag(conf, "POINTER_GAZE_PINCH", True),
+            "ray": hands and _flag(conf, "POINTER_HAND_RAY", True),
+            "touch": near_of(conf)}
+
+
+def method_writes(conf, method, on):
+    """The KEY: value writes that turn one method on or off and leave the other two as they are."""
+    want = methods_of(conf)
+    want[method] = bool(on)
+    writes = {}
+    hands = want["gaze_clicks"] or want["ray"]
+    if _flag(conf, "POINTER_HANDS", False) != hands:
+        writes["POINTER_HANDS"] = "1" if hands else "0"
+    if hands:
+        for key, m in (("POINTER_GAZE_PINCH", "gaze_clicks"), ("POINTER_HAND_RAY", "ray")):
+            if _flag(conf, key, True) != want[m]:
+                writes[key] = "1" if want[m] else "0"
+    if near_of(dict(conf, **writes)) != want["touch"]:
+        writes["HANDS_NEAR"] = "on" if want["touch"] else "0"
+    return writes
 
 
 class Host:

@@ -26,8 +26,11 @@ to the input relay over its control socket (@frametop_relay):
     (gaze/ft-gazed, @ft_gazed: status, forget, reload), with its eye tracker (SteamVR's or
     our own) and eye bias (GAZE_TRACKER, GAZE_EYE in frametop.conf).
   - Hands: when hand tracking runs (HANDS_MODE: with the Frametop desktop, always with SteamVR,
-    or off; hands/handsmode.py on the host starts and stops its services) and the hand cutouts'
-    margin (HANDS_MATTE_MARGIN, sent live to ft-screens: "cutouts margin DEG").
+    or off; hands/handsmode.py on the host starts and stops its services), the hand cutouts'
+    margin (HANDS_MATTE_MARGIN, sent live to ft-screens: "cutouts margin DEG"), and three hand
+    inputs, each on its own (handsmode.METHODS): clicks at the gaze (POINTER_HANDS,
+    POINTER_GAZE_PINCH), the hand ray with gaze off (POINTER_HAND_RAY), and direct touch on
+    Frametop's panels (HANDS_NEAR, sent live to ft-screens: "handinput on|off").
   - Bluetooth: paired devices, and re-applying the Bluetooth LE fixes after pairing.
   - A warning on every page when SteamVR won't load the ft_pointer driver (blocked after a
     crash, disabled, or SteamVR in safe mode) or hasn't loaded it (@ft_pointer doesn't answer
@@ -72,6 +75,10 @@ SCREENS = "\0ft_screens"
 HANDS_MODES = {"frametop": "With Frametop: while the Frametop desktop runs",
                "always": "Always: whenever SteamVR runs, in games and the SteamVR dashboard too",
                "off": "Off"}
+# The Hands page's input switches, each on its own (handsmode.METHODS): POINTER_HANDS with
+# POINTER_GAZE_PINCH or POINTER_HAND_RAY for the pointer, HANDS_NEAR for ft-screens.
+HAND_METHODS = {"gaze_clicks": "Hand clicks in gaze mode", "ray": "Hand ray with gaze off",
+                "touch": "Direct touch"}
 sys.path.insert(0, os.path.join(REPO, "voice"))
 import voice_commands  # noqa: E402  Frametop Voice's commands and settings (standard library)
 import voice_settings  # noqa: E402
@@ -1426,6 +1433,26 @@ class Backend(QObject):
             else:
                 self.message.emit("Hand tracking: " + HANDS_MODES[mode].split(":")[0], False)
         threading.Thread(target=job, daemon=True).start()
+
+    @Property("QVariantMap", notify=handsChanged)
+    def handMethods(self):
+        """{method: on} for the Hands page's input switches (handsmode.methods_of)."""
+        return handsmode.methods_of(read_conf())
+
+    @Slot(str, bool)
+    def setHandMethod(self, method, on):
+        """One hand input on or off, the other two left as they are (handsmode.method_writes). The
+        helper and the relay reread frametop.conf; ft-screens hears direct touch now."""
+        if method not in HAND_METHODS:
+            return
+        writes = handsmode.method_writes(read_conf(), method, on)
+        for key, value in writes.items():
+            write_conf_value(key, value)
+        if "HANDS_NEAR" in writes:
+            self._send("handinput " + ("off" if writes["HANDS_NEAR"] == "0" else "on"), SCREENS)
+        self.reload_timer.start()
+        self.handsChanged.emit()
+        self.message.emit(f"{HAND_METHODS[method]}: {'on' if on else 'off'}", False)
 
     @Property("QVariantMap", constant=True)
     def handsMarginRange(self):

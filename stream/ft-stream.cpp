@@ -1,12 +1,14 @@
 // ft-stream: one remote display for ft-screens (docs/remote-displays.md). A Moonlight client
 // (moonlight-common-c, and libgamestream for pairing and launching) for one display of a
-// Vibepollo host. It decodes the stream on the Frame's iris decoder and converts each picture
+// Vibepollo host, or of a Sunshine instance (one per display, each on its own port: the Mac). It decodes the stream on the Frame's iris decoder and converts each picture
 // into a ring of three RGBA buffers (spike/iris.h), which ft-screens shows as a panel like any
 // screen of the desktop: its controls, layout, profiles, curve, pins and hand cutouts. Each
 // display is its own client with its own certificate (--id), because Vibepollo ties a Remote
 // Monitor to the client that opened it, one stream per client.
 //
-//   ft-stream pair HOST --id NAME [--token FILE]     (pairs with the host's API token, or a PIN)
+//   ft-stream pair HOST --id NAME [--token FILE | --login]
+//                    (pairs with the host's API token, with its Web UI login read from stdin as
+//                    two lines, user name and password (Sunshine), or with a PIN typed in there)
 //   ft-stream grant HOST --id NAME [--token FILE]    (permissions for a client paired by PIN)
 //   ft-stream unpair HOST --id NAME
 //   ft-stream monitors HOST [--token FILE]           (the host's monitors, as Vibepollo lists them)
@@ -14,8 +16,9 @@
 //   ft-stream stream HOST --id NAME --fd N --app display:DEVICE|monitor|primary|ID|NAME
 //                    [--size 2560x1440] [--fps 60] [--bitrate kbps]
 //
-// Keys live in ~/.local/share/frametop-stream/NAME, the host's token in
-// ~/.local/share/frametop-stream/hosts/HOST.token (see host.h).
+// HOST may be HOST:PORT, a host whose HTTP port isn't 47989 (a Mac's second Sunshine instance
+// is on 48089). Keys live in ~/.local/share/frametop-stream/NAME, the host's token in
+// ~/.local/share/frametop-stream/hosts/HOST.token (see host.h), named without the port.
 //
 // "stream" is started by ft-screens (screens/remote.c), which gives it one end of a
 // SOCK_SEQPACKET socket pair as fd N. Messages are text, one per packet.
@@ -264,11 +267,12 @@ int MoonlightButton(unsigned code) {
     }
 }
 
-// Whether a host's GameStream port (47989) takes a connection within `ms`.
-bool Answers(const std::string &address, int ms) {
+// Whether a host's GameStream port (47989, or the instance's) takes a connection within `ms`.
+bool Answers(const std::string &address, int port, int ms) {
     addrinfo hints{}, *res = nullptr;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(address.c_str(), "47989", &hints, &res) != 0) return false;
+    if (getaddrinfo(address.c_str(), std::to_string(port ? port : kGameStreamPort).c_str(), &hints, &res) != 0)
+        return false;
     bool ok = false;
     for (addrinfo *a = res; a && !ok; a = a->ai_next) {
         const int s = socket(a->ai_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -292,7 +296,7 @@ bool Answers(const std::string &address, int ms) {
 // (empty) while none answers; "auto" (the default) the first direct one that answers, else
 // its own. Through the home router a stream lost a frame's packets in bursts (0.33% of
 // packets, 1.8% of frames at 50 Mbit/s); over the dongle, none (2026-10-07).
-std::string Route(const std::string &host) {
+std::string Route(const std::string &host, int port) {
     std::ifstream f(std::string(std::getenv("HOME") ? std::getenv("HOME") : "") + "/.config/frametop-layout.json");
     const nlohmann::json layout = nlohmann::json::parse(f, nullptr, false);
     if (!layout.is_object() || !layout.contains("hosts") || !layout["hosts"].is_array()) return host;
@@ -303,7 +307,7 @@ std::string Route(const std::string &host) {
         if (h.contains("direct") && h["direct"].is_array())
             for (const auto &d : h["direct"])
                 // A second: right after Vibepollo starts, 300 ms sent streams the long way.
-                if (d.is_string() && Answers(d.get<std::string>(), 1000)) return d.get<std::string>();
+                if (d.is_string() && Answers(d.get<std::string>(), port, 1000)) return d.get<std::string>();
         return route == "dongle" ? "" : host;
     }
     return host;
@@ -519,17 +523,22 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
     if (argc < 3) {
-        std::fprintf(stderr, "usage: ft-stream pair|grant|unpair|monitors|release|stream HOST --id NAME [options]\n");
+        std::fprintf(stderr, "usage: ft-stream pair|grant|unpair|monitors|release|stream HOST[:PORT] --id NAME [options]\n");
         return 2;
     }
-    const std::string cmd = argv[1], host = argv[2];
+    const std::string cmd = argv[1];
+    std::string host = argv[2];
+    int port = 0;
+    if (!SplitPort(&host, &port)) return std::fprintf(stderr, "bad port in %s\n", argv[2]), 2;
     std::string id, app = "primary", tokenFile;
     int width = 2560, height = 1440, fps = 60, bitrate = 0, fd = -1;
+    bool login = false;
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : "";
         if (a == "--id") id = v, ++i;
         else if (a == "--token") tokenFile = v, ++i;
+        else if (a == "--login") login = true;
         else if (a == "--app") app = v, ++i;
         else if (a == "--size") std::sscanf(v, "%dx%d", &width, &height), ++i;
         else if (a == "--fps") fps = std::atoi(v), ++i;
@@ -539,7 +548,8 @@ int main(int argc, char **argv) {
     }
     if (tokenFile.empty()) tokenFile = TokenFile(host);
     WebApi api;
-    const bool haveToken = api.Load(host, tokenFile);
+    const bool haveToken = login ? api.LoadLogin(host, port, stdin) : api.Load(host, tokenFile);
+    if (login && !haveToken) return std::fprintf(stderr, "--login: no user name and password on stdin\n"), 2;
     if (cmd == "monitors") {
         if (!haveToken) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
         nlohmann::json r;
@@ -555,15 +565,16 @@ int main(int argc, char **argv) {
     if (!bitrate) bitrate = int(std::min(150000.0, 20000.0 * width * height * fps / (1920.0 * 1080 * 60)));
 
     g_host = host;
-    const std::string route = cmd == "stream" ? Route(host) : host;
+    const std::string route = cmd == "stream" ? Route(host, port) : host;
     if (route.empty()) {  // dongle only, and it isn't up: ft-screens tries again later
         std::fprintf(stderr, "%s: no direct address answers (route dongle)\n", host.c_str());
         if (fd >= 0) Viewer{fd}.Send("state lost the dongle link is down");
         return 1;
     }
     Client client;
-    if (!client.Connect(route, id)) return 1;
-    std::printf("host %s%s: %s, %s, current app %d\n", host.c_str(), route != host ? (" through " + route).c_str() : "",
+    if (!client.Connect(route, id, port)) return 1;
+    std::printf("host %s%s%s: %s, %s, current app %d\n", host.c_str(), port ? (":" + std::to_string(port)).c_str() : "",
+                route != host ? (" through " + route).c_str() : "",
                 client.server.serverInfo.serverInfoAppVersion, client.server.paired ? "paired" : "not paired",
                 client.server.currentGame);
     if (cmd == "pair") {
@@ -571,7 +582,7 @@ int main(int argc, char **argv) {
         return client.Pair(haveToken ? &api : nullptr) ? 0 : 1;
     }
     if (cmd == "grant") {
-        if (!haveToken) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
+        if (!haveToken || login) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
         return client.GrantByName(api) ? 0 : 1;
     }
     if (cmd == "unpair") return client.Unpair() ? 0 : 1;

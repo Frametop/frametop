@@ -194,6 +194,8 @@ remote-displays/install.sh                   # its menu entry
 
 On the PC, `host/windows/Setup Frametop host.cmd` sets it up for Frametop: Vibepollo 2.0.0 (installed if missing), Frametop's build of its `sunshine.exe`, the settings Frametop needs, the Web UI login you sign in with from the Frame, and a firewall check (`-Check` to see what it would change, `-Undo` to put things back).
 
+On a Mac, `host/macos/frametop-host-setup.sh` (or `Setup Frametop host.command`) installs Sunshine and runs one instance per real display, each on its own port (47989 + 100·N), started at login. You allow Sunshine Screen Recording and Accessibility once in System Settings. Remote Displays finds the Mac as one computer; signing in with the Web UI login pairs the displays you pick, and the password isn't kept, so adding more later signs in again. Macs have no virtual displays (`--check`, `--undo` as on the PC).
+
 ## Floating windows
 
 A desktop window can float in VR as a panel of its own, away from the screens. Meta+Shift+F floats the window under the pointer (or the active one, over the wallpaper), or puts it back on its screen if it floats. So do Float in VR in every window's menu (Alt+F3; Back to Desktop on a floating one), the button left of Close in its title bar, and a mouse button, controller button, or key combination mapped to Float window in VR in Frametop Input Settings; Put all floating windows back is mappable too. Launch as Standalone, in an app's right-click menu in the Application Launcher or the taskbar, starts the app with its first window floating, where that app last floated or in front of you. [floating-windows.md](floating-windows.md) explains how it works.

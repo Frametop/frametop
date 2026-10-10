@@ -175,7 +175,7 @@ The requirement: each host streams its real displays, and virtual displays it cr
 |---|---|---|
 | Windows | Vibepollo | 1 main session (real or virtual) + up to 4 virtual Remote Monitors |
 | Linux (Arch, CachyOS; beta) | Vibepollo | The same, with at most 4 virtual displays at once |
-| macOS | Sunshine | 1, the Mac's main display, for now |
+| macOS | Sunshine | Every real display, one Sunshine instance each (`host/macos`); no virtual displays |
 
 ### Windows and Linux: Vibepollo
 
@@ -210,19 +210,15 @@ The config folder is admin-only, so the change is a script for the user to run (
 
 **Risk.** Vibepollo is new, moves fast, and has one maintainer, and its README says about 99% of its code is AI-generated. Frametop depends only on its Moonlight-protocol behaviour and the Remote Monitor app ids, so on Windows Apollo (virtual displays through the SudoVDA driver) or plain Sunshine (real displays) stay as fallbacks.
 
-### macOS: Sunshine, one display for now
+### macOS: Sunshine, one instance per display
 
-Vibepollo has no macOS build. Sunshine (v2026.914, labelled experimental on macOS) is the only Moonlight-protocol host for the Mac, so the Mac streams one display: its main display, from one Sunshine instance. The reasons:
+Vibepollo has no macOS build. Sunshine (labelled experimental on macOS) is the only Moonlight-protocol host for the Mac. One Sunshine streams one display, so the Mac runs one instance per real display, each with its own config file, ports (`port` 47989 + 100·N) and `output_name` (the display's CGDirectDisplayID). `host/macos/frametop-host-setup.sh` sets them up (see "The Mac" below). Sunshine can't create virtual displays on macOS, and no PR is open for it.
 
-- Since v2026.906, absolute mouse input only reaches the main display (Sunshine #5733). Any other display would show but couldn't be clicked.
-- Nobody reports running several Sunshine instances on one Mac yet.
-- Sunshine can't create virtual displays on macOS.
+- Absolute mouse input reached only the main display from v2026.906 (Sunshine #5733). libvirtualhid #145 and Sunshine #5739 fixed it on 2026-10-09, first in the pre-release v2026.1010.141104, which the host setup pins until a release has it.
+- Capture is at backing pixel size, so the built-in display streams at 3024x1964. Closing the lid removes the built-in display, so a stream of it ends. Sunshine now keeps a display awake while it captures it (#5509 was the stall when one slept).
+- Sound comes from a Core Audio tap (macOS 14+), so nothing like BlackHole is needed. Every instance carries it; ft-stream's per-address lock plays one.
 
-The main display is the one with the menu bar (System Settings → Displays). Capture is at backing pixel size, so the built-in display streams at 3024x1964. Closing the lid removes the built-in display, so a stream of it ends. Capture stalls if the display sleeps mid-stream (#5509).
-
-One display can still reach the encoder's limit. Sunshine forces VideoToolbox's low-latency mode, which roughly halves throughput (#5814); an M4 Pro managed 0.36-0.46 Gpix/s in that mode. The super ultrawide at 60 fps is 0.44 Gpix/s, so full-motion video on it may need a lower fps or a smaller stream. The other two displays need 0.30 and 0.36 Gpix/s.
-
-**What would lift the limit.** The mouse fix is libvirtualhid PR #145 ("target configured mouse viewport", open), which Sunshine's draft PR #5739 pulls in. Once it ships, spike S4 tries one Sunshine instance per display (own config file, `port` about 100 apart, `output_name`) and BetterDisplay virtual displays switched on by `global_prep_cmd`. Open PR #5817 (ScreenCaptureKit + OBS's VideoToolbox encoder) may raise the encoder limit. Helping #145 along upstream is the one Mac contribution worth making.
+Full-motion video can still reach the encoder's limit. Sunshine forces VideoToolbox's low-latency mode, which roughly halves throughput (#5814); an M4 Pro managed 0.36-0.46 Gpix/s in that mode. The super ultrawide at 60 fps is 0.44 Gpix/s; the test Mac is an M3 Max, with two encode engines. Open PR #5817 (ScreenCaptureKit + OBS's VideoToolbox encoder) may raise the limit. Its capture (AVFoundation) also sends 30-55 fps of a still desktop, not `minimum_fps_target`'s 1 fps, at a low bitrate (1-6 Mbit/s).
 
 ### What stock hosts cost us
 
@@ -232,8 +228,8 @@ One display can still reach the encoder's limit. Sunshine forces VideoToolbox's 
 | One stream per display | Five ft-stream processes, connections, and client pairings on the Frame | Measure the CPU (S3) |
 | One real display per Vibepollo install | A second real display needs a second host instance | Use virtual displays; S3 tries a second instance on Windows |
 | Cursor drawn into the video | Lags the laser by a round trip; each mouse move over a still page becomes a video frame | Accept |
-| Mac: one display | Sunshine's mouse reaches only the main display, and there are no virtual displays | Upstream fix in progress, then S4 |
-| Mac encoder | Full-motion video on the super ultrawide at 60 fps is at the limit | Lower fps or size for that stream |
+| Mac: an instance per display | Each display pairs on its own, with the Web UI login (no tokens); no virtual displays | Remote Displays pairs all the picked displays from one sign-in |
+| Mac encoder | Full-motion video on the super ultrawide at 60 fps is at the limit; a still desktop still streams 30-55 fps | Lower fps or size for that stream; ScreenCaptureKit (#5817) upstream |
 
 What Frametop maintains: ft-stream (pairing, decoder, keyframe sampling, input mapping, Remote Monitor launch and resume; the protocol itself is moonlight-common-c's), the remote screen type in ft-screens, the layout and settings changes, and host setup notes or scripts.
 
@@ -464,6 +460,14 @@ The user decided remote displays are Frametop displays, with the same controls a
 - Monitors it changed are listed in `config\frametop_display_mode.json` (each one's own mode and the one it set, and the places) until they're back, so the next start puts them back after a crash or a forced stop. One someone has changed since keeps theirs.
 - In Frametop nothing changes: ft-stream already asks for the size set in Remote Displays, and changing it starts the stream over, which switches the monitor again. The note under a monitor's stream settings says what happens.
 
+**The Mac: one Sunshine instance per display (2026-10-10, branch `mac-host`):**
+- `host/macos/frametop-host-setup.sh` (or `Setup Frametop host.command`): installs the pinned Sunshine pre-release (SHA-256 checked, notarized by LizardByte), lists the displays (`displays.js`, JavaScript for Automation, no compiler), and writes an instance per display in `~/Library/Application Support/Frametop/sunshine/instance-N`, the main display's first, each started at login by the LaunchAgent `frametop.sunshine.N`. Its settings: `port`, `sunshine_name` "COMPUTER: DISPLAY (WxH)", its own state and apps files, `minimum_fps_target = 1`, and the menu bar icon on the first only. The rest of each `sunshine.conf` (Web UI changes) is kept on a rerun. `--check`, `--undo` (removes the LaunchAgents; settings, pairings and Sunshine stay), `--set-login`, `--skip-login`.
+- An instance is tied to its monitor by vendor, model and serial, not to a display id: `ft-sunshine-instance` looks the id up at every start and passes `output_name=ID`. While the monitor is unplugged it doesn't start Sunshine, which would fall back to the main display, and launchd tries again.
+- One certificate for all the instances, so Remote Displays pins one key per Mac; one Web UI login file for all, kept from an earlier Sunshine install if there was one. An earlier Homebrew Sunshine's LaunchAgent (the same ports) is turned off, and back on with `--undo`.
+- Screen Recording and Accessibility are granted by hand, once for all the instances: macOS lists them as Sunshine (the LaunchAgent runs a bash script that execs it; `AssociatedBundleIdentifiers` makes Login Items say Sunshine too). Sunshine started from a terminal gets that terminal's grants instead.
+- Frametop side: a display has a `port` when its instance isn't on 47989, and ft-stream takes `HOST:PORT`, so ft-screens passes it through as it is. The token, pin and audio lock stay per address. `host_answers` checks the displays' ports. Remote Displays tries `/api/token` at sign-in; a 404 means plain Sunshine, and the login is checked on `/api/clients/list`. It's kept in memory only, passed on stdin to `ft-layout remote add --port P --login` and on to `ft-stream pair --login` for each display picked, then forgotten. Upstream Sunshine (v2026.1010) lists a waiting pairing request with an id (`GET /api/pin`); ft-stream approves its own (libgamestream's device name "roth", from its own address) with `POST /api/pin {pairing_id, pin, name}`. The login is checked first: a wrong password's request, left waiting, blocked the next try. There are no permissions to grant. Add computer merges the instances' mDNS entries ("Mac (2)") into one computer, and Add displays lists the instances from their serverinfo on ports 47989 + 100·N.
+- Tested on the M3 Max (macOS 26.6.2: built-in 3024x1964, MPG491CX OLED 5120x1440, LC34G55T 3440x1440): the setup with `--check`, a first run and a rerun; the three instances answer from the Frame. With throwaway test instances (their own login, removed after): pairing with a wrong password then the right one; `ft-layout remote add --port --login` into a scratch layout; streams through a stand-in for ft-screens, the three at once (no losses; 35, 52 and 36 fps of still desktops, 3-9% of a Frame core each, about 6% CPU for Sunshine on the Mac for the OLED); the host's sound; a pointer move to two corners of the LC34G55T, not the main display, landing within a pixel of where it should. Not tested: the Remote Displays app itself, the live desktop, drags across the Mac's displays (separate processes; the release goes through the stream the press went down on), full-motion video's encode rate, replugging a monitor.
+
 **Tested in the live desktop (frame-testbench, the 3D mouse through `@ft_pointer_helper`, 2026-10-07):**
 - An Explorer window carried by its title bar from the Remote Monitor to the OLED stayed there, and carried back, stayed there too. The log showed one change of screen each way.
 - Disconnect, connect: the panel came back where it was, at its width. Connect in a new run with the headset off: placed from screen 1's anchor.
@@ -489,6 +493,6 @@ The user decided remote displays are Frametop displays, with the same controls a
 ## Open questions
 
 - Which of the test PC's two desk monitors is the real one (the main session)?
-- The Mac's chip (Max chips have two video encode engines) and BetterDisplay Pro matter only once the Mac goes past one display.
+- Mac virtual displays: BetterDisplay switched on by `global_prep_cmd`, or a small helper on the private `CGVirtualDisplay` API. Not needed for v1.
 - Audio: none, the focused display's host, or a fixed one?
 - Remote displays outside the desktop: should they also show over games, where the decoder is shared with Steam Link VR?

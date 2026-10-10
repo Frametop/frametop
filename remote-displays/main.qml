@@ -47,8 +47,9 @@ Kirigami.ApplicationWindow {
 
     // ---------------------------------------------------------------- dialogs
     // A host: picked from the computers found on the network (or typed in), then a sign-in
-    // with its Vibepollo Web UI login, for Frametop's own API token. Also signs in again to
-    // one already added (openFor).
+    // with its Web UI login: Vibepollo gives Frametop its own API token; Sunshine (a Mac) has
+    // none, so the login pairs the displays picked next and is then forgotten. Also signs in
+    // again to one already added (openFor).
     Kirigami.PromptDialog {
         id: hostDialog
         objectName: "hostDialog"
@@ -112,13 +113,13 @@ Kirigami.ApplicationWindow {
                 hostDialog.close()
                 root.showPassiveNotification("Signed in to " + name)
                 const h = backend.hosts.find(x => x.name === name)
-                if (h && !hostDialog.existing) displayDialog.openFor(h)
+                if (h && (!hostDialog.existing || h.kind === "sunshine")) displayDialog.openFor(h)
             }
         }
         ColumnLayout {
             RowLayout {
                 visible: !hostDialog.existing
-                Controls.Label { text: "Computers running Vibepollo on your network:"; Layout.fillWidth: true }
+                Controls.Label { text: "Computers running Vibepollo or Sunshine on your network:"; Layout.fillWidth: true }
                 Controls.ToolButton {
                     icon.name: "view-refresh"
                     text: "Look again"
@@ -158,7 +159,7 @@ Kirigami.ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.largeSpacing
                 wrapMode: Text.Wrap
-                text: "Sign in with its Vibepollo Web UI user name and password. Frametop keeps a token that can only pair its displays, set their permissions and list the monitors; the password isn't kept."
+                text: "Sign in with its Vibepollo or Sunshine Web UI user name and password. From Vibepollo, Frametop keeps a token that can only pair its displays, set their permissions and list the monitors. Sunshine has no tokens: the login pairs the displays you pick next. The password isn't kept."
             }
             Kirigami.FormLayout {
                 Layout.fillWidth: true
@@ -186,7 +187,8 @@ Kirigami.ApplicationWindow {
     }
 
     // A host's displays to add: its monitors as they are (all of them ticked, but the ones
-    // already added), and a virtual one at any size.
+    // already added), and on Vibepollo, a virtual one at any size. A monitor is known by its
+    // key: what it streams, and a Sunshine instance's port.
     Kirigami.PromptDialog {
         id: displayDialog
         objectName: "displayDialog"
@@ -194,22 +196,23 @@ Kirigami.ApplicationWindow {
         standardButtons: Kirigami.Dialog.NoButton
         property string host: ""
         property string address: ""
-        property var added: []     // what its displays stream (app), so a monitor isn't added twice
+        property string kind: ""
+        property var added: []     // its displays' keys, so a monitor isn't added twice
         property var monitors: []
         property var chosen: ({})  // app -> ticked
         property bool virtualChosen: false
         property string error: ""
         property bool loading: false
-        readonly property int count: monitors.filter(m => chosen[m.app]).length + (virtualChosen ? 1 : 0)
+        readonly property int count: monitors.filter(m => chosen[m.key]).length + (virtualChosen ? 1 : 0)
         function openFor(h) {
-            host = h.name; address = h.address; added = h.displays.map(d => d.app)
+            host = h.name; address = h.address; kind = h.kind; added = h.displays.map(d => d.key)
             monitors = []; chosen = ({}); virtualChosen = false; error = ""; loading = true
             open()
             backend.listMonitors(address)
         }
-        function tick(app, on) {
+        function tick(key, on) {
             const c = Object.assign({}, chosen)
-            c[app] = on
+            c[key] = on
             chosen = c
         }
         function accept() {
@@ -217,11 +220,16 @@ Kirigami.ApplicationWindow {
             close()
             const fps = displayRate.currentValue, kbps = Math.round(displayBitrate.value * 1000)
             for (const m of monitors)
-                if (chosen[m.app]) backend.addDisplay(host, m.app, m.name, m.width, m.height, fps, kbps)
+                if (chosen[m.key]) backend.addDisplay(host, m.app, m.name, m.width, m.height, fps, kbps, m.port)
             if (virtualChosen) {
                 const r = backend.resolutions[displayRes.currentIndex]
-                backend.addDisplay(host, "monitor", "Virtual", r.width, r.height, fps, kbps)
+                backend.addDisplay(host, "monitor", "Virtual", r.width, r.height, fps, kbps, 0)
             }
+            if (kind === "sunshine") backend.forgetLogin(address)  // queued with each display
+        }
+        function later() {
+            close()
+            if (kind === "sunshine") backend.forgetLogin(address)
         }
         Connections {
             target: backend
@@ -230,7 +238,7 @@ Kirigami.ApplicationWindow {
                 displayDialog.loading = false
                 displayDialog.monitors = monitors.filter(m => !m.virtual && m.active)
                 const c = {}
-                for (const m of displayDialog.monitors) c[m.app] = !displayDialog.added.includes(m.app)
+                for (const m of displayDialog.monitors) c[m.key] = !displayDialog.added.includes(m.key)
                 displayDialog.chosen = c
                 displayDialog.error = error
             }
@@ -247,16 +255,16 @@ Kirigami.ApplicationWindow {
                 model: displayDialog.monitors
                 Controls.CheckBox {
                     required property var modelData
-                    readonly property bool already: displayDialog.added.includes(modelData.app)
+                    readonly property bool already: displayDialog.added.includes(modelData.key)
                     enabled: !already
                     text: modelData.name + " (" + modelData.width + " × " + modelData.height + (modelData.primary ? ", main" : "") + ")"
                           + (already ? ": added" : "")
-                    checked: displayDialog.chosen[modelData.app] === true
-                    onToggled: displayDialog.tick(modelData.app, checked)
+                    checked: displayDialog.chosen[modelData.key] === true
+                    onToggled: displayDialog.tick(modelData.key, checked)
                 }
             }
             Controls.CheckBox {
-                visible: !displayDialog.loading
+                visible: !displayDialog.loading && displayDialog.kind !== "sunshine"  // Sunshine can't make them on a Mac
                 text: "A virtual display (the host makes a new monitor at the size you pick)"
                 checked: displayDialog.virtualChosen
                 onToggled: displayDialog.virtualChosen = checked
@@ -294,7 +302,7 @@ Kirigami.ApplicationWindow {
                 enabled: displayDialog.count > 0
                 onTriggered: displayDialog.accept()
             },
-            Kirigami.Action { text: "Later"; icon.name: "dialog-cancel"; onTriggered: displayDialog.close() }
+            Kirigami.Action { text: "Later"; icon.name: "dialog-cancel"; onTriggered: displayDialog.later() }
         ]
     }
 
@@ -317,7 +325,7 @@ Kirigami.ApplicationWindow {
                 text: !backend.desktopRunning
                       ? "The Frametop desktop isn't running. The connected displays start with it."
                       : backend.hosts.length === 0
-                        ? "Another computer's monitors as Frametop screens, with the screens' controls, in your layouts and profiles. The computer runs Vibepollo: add it, sign in with its Web UI login, then pick its displays."
+                        ? "Another computer's monitors as Frametop screens, with the screens' controls, in your layouts and profiles. The computer runs Vibepollo (a Mac: Sunshine, set up with Frametop's host setup): add it, sign in with its Web UI login, then pick its displays."
                         : "Each display is a panel like a screen: move, size, curve and pin it in VR, and Display Settings' Save as profile keeps where it is. A disconnected display keeps its place and settings."
             }
             ColumnLayout {
@@ -328,6 +336,8 @@ Kirigami.ApplicationWindow {
                         id: hostCard
                         required property var modelData
                         readonly property bool anyConnected: modelData.displays.some(d => d.connected)
+                        // Sunshine keeps no token: adding displays signs in first, every time.
+                        readonly property bool sunshine: modelData.kind === "sunshine"
                         Layout.fillWidth: true
                         contentItem: ColumnLayout {
                             RowLayout {
@@ -343,7 +353,7 @@ Kirigami.ApplicationWindow {
                                         text: hostCard.modelData.address + "  ·  "
                                               + (hostCard.modelData.online === true ? "online"
                                                  : hostCard.modelData.online === false ? "not answering" : "checking…")
-                                              + (hostCard.modelData.hasToken ? "" : "  ·  not signed in")
+                                              + (hostCard.modelData.hasToken || hostCard.sunshine ? "" : "  ·  not signed in")
                                         color: hostCard.modelData.online === false ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
                                         opacity: hostCard.modelData.online === false ? 1 : 0.7
                                     }
@@ -358,19 +368,20 @@ Kirigami.ApplicationWindow {
                                     Controls.ToolTip.visible: hovered
                                 }
                                 Controls.Button {
-                                    visible: hostCard.modelData.hasToken
+                                    visible: hostCard.modelData.hasToken || hostCard.sunshine
                                     text: "Add displays"
                                     icon.name: "list-add"
-                                    onClicked: displayDialog.openFor(hostCard.modelData)
+                                    onClicked: hostCard.sunshine && !hostCard.modelData.hasToken
+                                               ? hostDialog.openFor(hostCard.modelData) : displayDialog.openFor(hostCard.modelData)
                                 }
                                 Controls.Button {
-                                    visible: !hostCard.modelData.hasToken
+                                    visible: !hostCard.modelData.hasToken && !hostCard.sunshine
                                     text: "Sign in"
                                     icon.name: "unlock"
                                     onClicked: hostDialog.openFor(hostCard.modelData)
                                 }
                                 Controls.ToolButton {
-                                    visible: hostCard.modelData.hasToken
+                                    visible: hostCard.modelData.hasToken && !hostCard.sunshine
                                     icon.name: "unlock"
                                     display: Controls.AbstractButton.IconOnly
                                     text: "Sign in again"

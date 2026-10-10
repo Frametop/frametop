@@ -707,6 +707,80 @@ static void split_groups(xr_state_t *st)
     }
 }
 
+static const fdent_t *fdent_of(int xfd)
+{
+    for (int i = 0; i < nfdents; i++)
+        if (fdents[i].xfd == xfd)
+            return &fdents[i];
+
+    return NULL;
+}
+
+/*
+ * Another allocation can land between a buffer's two planes (a 16 MB udmabuf, seen after a
+ * SteamVR restart), and the pairing in build_groups then loses that buffer: the camera had
+ * 15 of its 16, and one index's frames were never found ("still learning" for good). A run
+ * bound by VIDIOC_QUERYBUF knows all its camera's buffers, so the missing ones go back in, in
+ * fd order (the allocation order).
+ */
+static void complete_exact_groups(xr_state_t *st)
+{
+    for (int i = 0; i < st->ngroups; i++) {
+
+        xr_group_t  *g   = &st->groups[i];
+        xr_camera_t *cam = g->cam;
+
+        bool first = g->exact;
+
+        for (int j = 0; j < i && first; j++)
+            first = !(st->groups[j].exact && st->groups[j].cam == cam);
+
+        if (!first)     /* the camera's first run takes them all */
+            continue;
+
+        for (int k = 0; k < cam->nqbuf && g->nbufs < XR_MAX_RUNBUFS; k++) {
+
+            int  xfd  = cam->qbuf_xfd[k];
+            bool have = false;
+
+            for (int b = 0; b < g->nbufs && !have; b++)
+                have = g->buf[b].xfd == xfd;
+
+            const fdent_t *e = fdent_of(xfd);
+
+            if (have || !e || e->kind != FD_DMABUF || e->size != g->planesize[0])
+                continue;
+
+            /* the run the interruption cut off starts a group of its own: empty it */
+            for (int j = 0; j < st->ngroups; j++)
+                for (int b = 0; j != i && b < st->groups[j].nbufs; b++)
+                    if (st->groups[j].buf[b].xfd == xfd) {
+                        xr_group_t *o = &st->groups[j];
+                        memmove(&o->buf[b], &o->buf[b + 1], (size_t)(o->nbufs - b - 1) * sizeof(o->buf[0]));
+                        o->nbufs--;
+                        break;
+                    }
+
+            int at = g->nbufs;
+
+            while (at > 0 && g->buf[at - 1].xfd > xfd)
+                at--;
+
+            memmove(&g->buf[at + 1], &g->buf[at], (size_t)(g->nbufs - at) * sizeof(g->buf[0]));
+            g->buf[at] = (xr_bufref_t){ .xfd = xfd, .xfd1 = -1, .size = e->size };
+            g->nbufs++;
+        }
+    }
+
+    int keep = 0;
+
+    for (int i = 0; i < st->ngroups; i++)
+        if (st->groups[i].nbufs >= 4)
+            st->groups[keep++] = st->groups[i];
+
+    st->ngroups = keep;
+}
+
 /*
  * XRService allocates one udmabuf per plane, plane 0 then plane 1, a whole
  * queue at a time right after opening the sensor's subdev. Plane 1 matches
@@ -803,6 +877,8 @@ static void build_groups(xr_state_t *st)
                     st->groups[i].exact = true;
                     break;
                 }
+
+    complete_exact_groups(st);
 
     /*
      * The rest by the sensor marker and sizes. The sensor marker alone can be wrong: XRService

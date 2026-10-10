@@ -3,6 +3,7 @@
 // or gaze pinches. Probe P9 of frame-hands/notes/hand-interaction.md, without the headset.
 //
 //   rayeval RAY.txt|DUMP PROBE.jsonl [--side L|R|both] [--near-panel] [--csv FILE] [--set NAME=VALUE...]
+//   rayeval DUMP POSES.jsonl --prompts PROMPTS.jsonl ...
 //
 // RAY.txt: ft-handreplay DIR --ray RAY.txt (per set and hand: the points the helper would read).
 // Or DUMP: ft-handreplay DIR --publish-dump DUMP (the hands and gestures files as ft-hands would have
@@ -13,10 +14,25 @@
 // the live tracker published (the probe's "cap") with the recorded ones.
 // --near-panel: count a hand as near (ft-screens' near claim: the index tip over the probe's
 // panel, within 15 cm in front of it) as the helper would hear from ft-screens.
+// POSES.jsonl --prompts PROMPTS.jsonl: a guided capture's head poses ("hmd": {"m": [...]}, CLOCK_MONOTONIC;
+// frame-hands probes/tap_session.py) and its prompts, whose t and t_raw pairs map the recording's
+// clock to the poses' (linearly between them: the two clocks drift a few ms over minutes).
 // --csv: per hand frame: t, side, shown, the tests' values, ray yaw and pitch (raw, filtered).
 // --set: an fh_ray Params value (predict, minCutoff, beta, dCutoff, holdMinCutoff, reachMinCutoff,
-// reachBeta, palmShow, palmHide, raisedShow, raisedHide, forwardShow, forwardHide, showFor, hideFor),
+// reachBeta, palmShow, palmHide, raisedShow, raisedHide, forwardShow, forwardHide, showFor, hideFor,
+// handWeight, handPitch, handYaw, torsoWrists, pinchAnchor, holdShoulder; 0 or 1 for the switches),
 // to try settings.
+//
+// Pinches (a dump: the gestures file's pinch, its distance and its ends): per side, the ray pinches'
+// release kick (how far the ray turned from the last frame the fingers were closed, under 2.5 cm,
+// to the frame the pinch ended on, as the helper reads it: filtered, at the end frame's arrival),
+// alone and for a still hand (the palm's centre moved under 5 mm meanwhile). For every pinch held
+// 0.3 s or more, ray or not, the pinch point a near grab carries (ft-screens: the fit's K through
+// fh_smooth at the grab's settings, read at 90 Hz) measured and pinned to the hand's axes (fh_ray.h's
+// Anchor, as the ray's pinch anchor): its jitter while held (second difference per tick, mm), its
+// drift with the hand still, and its release kick. And the hand's own direction (fh_ray.h's HandDir)
+// against the shoulder's ray, where the ray shows: the pitch and yaw offsets that would line them up
+// (median), for handPitch and handYaw.
 //
 // Smoothness at the display's rate (fh_smooth.h's point): the run also reads each shown ray at
 // 90 Hz ticks from when its frame would have arrived (capture time plus the published latency) to the
@@ -76,6 +92,7 @@ bool Numbers(const std::string &line, const char *key, std::vector<double> &out)
     size_t at = line.find(k);
     if (at == std::string::npos) return false;
     at += k.size();
+    while (at < line.size() && line[at] == ' ') ++at;
     const bool list = line[at] == '[';
     if (list) ++at;
     const char *p = line.c_str() + at;
@@ -101,6 +118,8 @@ struct Frame {
     bool haveKnuckle = false;  // the fit's pinch point (a dump); else the knuckles' midpoint
     V3 knuckle;
     uint64_t latency = 0;      // capture to publish, ns (a dump; else 35 ms)
+    double pinchD = -1;        // the pinch's thumb to index distance, m (a dump; else unknown)
+    bool ended = false;        // its side's pinch ended in this set (a dump)
 };
 
 // A publish dump (ft-handreplay --publish-dump: FHDUMP01, or FHDUMP02 with each set's dequeue time)
@@ -116,7 +135,7 @@ bool LoadDump(const char *path, std::vector<Frame> &out) {
     std::vector<char> hb(sizes[0]), gb(sizes[1]);
     static fh_hands_v2_t h;
     fh_gestures_t g;
-    uint32_t begins[2] = {0, 0};
+    uint32_t begins[2] = {0, 0}, ends[2] = {0, 0};
     bool first = true;
     while (f.read(hb.data(), sizes[0]) && f.read(gb.data(), sizes[1])) {
         int64_t dq;
@@ -144,10 +163,12 @@ bool LoadDump(const char *path, std::vector<Frame> &out) {
             fr.pinch = (pp.flags & FH_PINCH_DOWN) && pp.hand_id == hh.id;
             fr.grip = (g.grip[fr.side].flags & FH_PINCH_DOWN) && g.grip[fr.side].hand_id == hh.id;
             fr.began = !first && pp.begins != begins[fr.side] && pp.hand_id == hh.id;
+            fr.ended = !first && pp.ends != ends[fr.side] && pp.hand_id == hh.id;
+            if (pp.hand_id == hh.id && (pp.flags & FH_PINCH_TRACKED)) fr.pinchD = pp.distance;
             fr.latency = h.v1.publish_ns > h.v1.capture_ns ? h.v1.publish_ns - h.v1.capture_ns : 0;
             out.push_back(fr);
         }
-        for (int s = 0; s < 2; ++s) begins[s] = g.pinch[s].begins;
+        for (int s = 0; s < 2; ++s) begins[s] = g.pinch[s].begins, ends[s] = g.pinch[s].ends;
         first = false;
     }
     return !out.empty();
@@ -209,7 +230,7 @@ int main(int argc, char **argv) {
     }
     int only = -1;
     bool nearPanel = false, held = false;
-    const char *csvPath = nullptr;
+    const char *csvPath = nullptr, *promptsPath = nullptr;
     std::vector<std::string> sets;  // --set name=value: fh_ray Params
     for (int i = 3; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--side") && i + 1 < argc) {
@@ -218,6 +239,7 @@ int main(int argc, char **argv) {
         } else if (!std::strcmp(argv[i], "--near-panel")) nearPanel = true;
         else if (!std::strcmp(argv[i], "--held")) held = true;
         else if (!std::strcmp(argv[i], "--csv") && i + 1 < argc) csvPath = argv[++i];
+        else if (!std::strcmp(argv[i], "--prompts") && i + 1 < argc) promptsPath = argv[++i];
         else if (!std::strcmp(argv[i], "--set") && i + 1 < argc) sets.push_back(argv[++i]);
     }
     Params params;
@@ -231,7 +253,14 @@ int main(int argc, char **argv) {
                   : k == "forwardShow" ? &params.forwardShow : k == "forwardHide" ? &params.forwardHide
                   : k == "showFor" ? &params.showFor : k == "hideFor" ? &params.hideFor
                   : k == "holdMinCutoff" ? &params.holdMinCutoff : k == "reachMinCutoff" ? &params.reachMinCutoff
-                  : k == "reachBeta" ? &params.reachBeta : nullptr;
+                  : k == "reachBeta" ? &params.reachBeta : k == "handWeight" ? &params.handWeight
+                  : k == "handPitch" ? &params.handPitch : k == "handYaw" ? &params.handYaw : nullptr;
+        bool *b = k == "torsoWrists" ? &params.torsoWrists : k == "pinchAnchor" ? &params.pinchAnchor
+                : k == "holdShoulder" ? &params.holdShoulder : nullptr;
+        if (b) {
+            *b = v != 0;
+            continue;
+        }
         if (!f) {
             std::fprintf(stderr, "unknown --set %s\n", k.c_str());
             return 2;
@@ -259,7 +288,11 @@ int main(int argc, char **argv) {
                 continue;
             }
             std::vector<double> t, cap, h;
-            if (!Numbers(line, "t", t) || !Numbers(line, "head", h) || h.size() != 12) continue;
+            // a probe's "head", or a guided capture's "hmd": {"m": [...]} (the first "m" on its line)
+            if (!Numbers(line, "t", t) || (!Numbers(line, "head", h) && (line.find("\"hmd\": {") == std::string::npos ||
+                                                                          !Numbers(line, "m", h))) ||
+                h.size() != 12)
+                continue;
             M34 m;
             for (int k = 0; k < 12; ++k) m.m[k / 4][k % 4] = h[k];
             heads.push_back({uint64_t(t[0]), m});
@@ -286,7 +319,17 @@ int main(int argc, char **argv) {
             if (s) frames.push_back(f);
         }
     }
-    if (heads.empty() || frames.empty() || caps.empty()) {
+    // a guided capture's prompts: the recording's raw clock against the poses' mono one
+    std::vector<std::pair<int64_t, int64_t>> rawMono;  // (raw, raw - mono)
+    if (promptsPath) {
+        std::ifstream in(promptsPath);
+        std::string line;
+        std::vector<double> t, r;
+        while (std::getline(in, line))
+            if (Numbers(line, "t", t) && Numbers(line, "t_raw", r)) rawMono.push_back({int64_t(r[0]), int64_t(r[0]) - int64_t(t[0])});
+        std::sort(rawMono.begin(), rawMono.end());
+    }
+    if (heads.empty() || frames.empty() || (caps.empty() && rawMono.empty())) {
         std::fprintf(stderr, "nothing to evaluate: %zu head poses, %zu captures, %zu hand frames\n", heads.size(),
                      caps.size(), frames.size());
         return 1;
@@ -312,8 +355,23 @@ int main(int argc, char **argv) {
     }
     std::sort(diffs.begin(), diffs.end());
     const int64_t off = diffs.empty() ? bin * 500'000 : diffs[diffs.size() / 2];
-    std::printf("clock: recording raw = probe mono + %.3f s (%d of %zu published captures matched)\n", off / 1e9,
-                int(diffs.size()), caps.size());
+    auto offAt = [&](uint64_t raw) {
+        if (rawMono.empty()) return off;
+        const auto it = std::lower_bound(rawMono.begin(), rawMono.end(), std::make_pair(int64_t(raw), INT64_MIN));
+        if (it == rawMono.begin()) return it->second;
+        if (it == rawMono.end()) return rawMono.back().second;
+        const auto &a = *(it - 1), &b = *it;
+        return a.second + int64_t(double(b.second - a.second) * double(int64_t(raw) - a.first) / double(std::max<int64_t>(1, b.first - a.first)));
+    };
+    if (rawMono.empty())
+        std::printf("clock: recording raw = probe mono + %.3f s (%d of %zu published captures matched)\n", off / 1e9,
+                    int(diffs.size()), caps.size());
+    else
+        std::printf("clock: recording raw = poses mono + %.3f .. %.3f s (%zu prompts)\n", rawMono.front().second / 1e9,
+                    rawMono.back().second / 1e9, rawMono.size());
+    // each set's wrists (head frame), for the torso (fh_ray.h's torsoWrists)
+    std::map<uint64_t, std::vector<V3>> setWrists;
+    for (const Frame &f : frames) setWrists[f.t].push_back(f.pts[0]);
 
     FILE *csv = csvPath ? std::fopen(csvPath, "w") : nullptr;
     if (csv) std::fprintf(csv, "t,side,stereo,shown,below,ahead,palm,pitch,yawoff,raw_yaw,raw_pitch,yaw,pitch,near,pinch\n");
@@ -361,11 +419,59 @@ int main(int argc, char **argv) {
         double bodyAngle = 0, rawAngle = 0;
     } sm[2];
     LegacyRayFilter legacy[2];
+    // Pinches (see the top). A ray pinch's release: the ray and the palm's centre when the fingers were
+    // last closed. A near grab's point, measured and pinned, through the grab's smoothing.
+    struct Release {
+        bool ray = false, closed = false;
+        V3 dir, palm;
+    } rel[2];
+    struct GrabSim {
+        bool on = false, closed = false, still = true;
+        double begin = 0;
+        Anchor anchor;
+        fhsmooth::Point3 point[2];  // [measured, pinned]
+        std::vector<V3> ticks[2];
+        V3 start[2], atClosed[2], palm0;
+        double drift[2] = {0, 0};
+    } grab[2];
+    struct PinchStats {
+        std::vector<double> kick, kickStill, palmMove;       // ray pinches: deg, deg, mm
+        std::vector<double> jit[2], kickMm[2], kickMmStill[2], drift[2];  // grabs: [measured, pinned]
+        int grabs = 0;
+        std::vector<double> offPitch, offYaw, handOff, rawStep;
+        V3 lastRaw;
+        double lastRawT = -1;
+    } ps[2];
+    const fhsmooth::Params grabParams{1.0, 15.0, 1.0};  // screens/handinput.h's grabMinCutoff, grabBeta
     auto runTicks = [&](double from, double to) {
         for (int k = 0; k < 2; ++k) {
-            if (!rays[k].Shown() || (only >= 0 && k != only)) continue;
+            if (only >= 0 && k != only) continue;
+            if (grab[k].on)
+                for (double tk = from; tk < to; tk += 1 / 90.0)
+                    for (int m = 0; m < 2; ++m) grab[k].ticks[m].push_back(grab[k].point[m].At(tk));
+            if (!rays[k].Shown()) continue;
             for (double tk = from; tk < to; tk += 1 / 90.0)
                 sm[k].ticks.push_back({tk, sm[k].run, rays[k].At(tk).dir, sm[k].legacy, rays[k].Reach(), sm[k].still});
+        }
+    };
+    // a grab simulation's end: its measures
+    auto endGrab = [&](int k) {
+        GrabSim &g = grab[k];
+        PinchStats &q = ps[k];
+        g.on = false;
+        if (g.ticks[0].size() < 30) return;  // held under a third of a second
+        ++q.grabs;
+        for (int m = 0; m < 2; ++m) {
+            const std::vector<V3> &v = g.ticks[m];
+            double s2 = 0;
+            for (size_t i = 1; i + 1 < v.size(); ++i) s2 += Dot(v[i - 1] - v[i] * 2 + v[i + 1], v[i - 1] - v[i] * 2 + v[i + 1]);
+            q.jit[m].push_back(std::sqrt(s2 / double(v.size() - 2)) * 1000);
+            if (g.closed) {
+                const double kick = Len(v.back() - g.atClosed[m]) * 1000;
+                q.kickMm[m].push_back(kick);
+                if (g.still) q.kickMmStill[m].push_back(kick);
+            }
+            if (g.still) q.drift[m].push_back(g.drift[m] * 1000);
         }
     };
     double setArrive = -1;
@@ -374,7 +480,7 @@ int main(int argc, char **argv) {
     size_t hi = 0;
     int skipped = 0;
     for (const Frame &f : frames) {
-        const int64_t mono = int64_t(f.t) - off;
+        const int64_t mono = int64_t(f.t) - offAt(f.t);
         if (f.t != setT) {  // a new set: the last one's ticks, up to when this one arrives
             const double arrive = (mono + int64_t(f.latency ? f.latency : 35'000'000)) / 1e9;
             if (setArrive >= 0) runTicks(setArrive, std::min(arrive, setArrive + 0.2));
@@ -389,12 +495,17 @@ int main(int argc, char **argv) {
         }
         const M34 &h = heads[pick].second;
         const double t = mono / 1e9;
-        body.Update(t, Pos(h), Rot(h, V3{0, 0, -1}));
         auto room = [&](V3 p) { return Pos(h) + Rot(h, p); };
+        {
+            std::vector<V3> w;
+            for (V3 p : setWrists[f.t]) w.push_back(room(p));
+            body.Update(t, Pos(h), Rot(h, V3{0, 0, -1}), w.data(), int(w.size()));
+        }
         HandFrame hf;
         hf.t = t, hf.stereo = f.stereo;
         hf.knuckle = room(f.haveKnuckle ? f.knuckle : (f.pts[5] + f.pts[9]) * 0.5);
         hf.wrist = room(f.pts[0]);
+        hf.middle = room(f.pts[9]), hf.ring = room(f.pts[13]), hf.little = room(f.pts[17]), hf.palm = true;
         if (f.fitted) {
             hf.palmNormal = Norm(Rot(h, QRot(f.q, V3{0, -1, 0})));
             hf.elbow = room(f.elbow);
@@ -414,9 +525,62 @@ int main(int argc, char **argv) {
         if (f.began) {
             ++s.pinches;
             if (r.Shown()) ++s.rayPinches, s.pinchAt = t, s.pinchDir = r.Current().dir;
+            rel[f.side] = {};
         }
-        r.Hold(f.pinch && r.Shown(), t);
+        // (the helper sees a pinch's end after the frame it ended on: held through it)
+        const bool wasHeld = rel[f.side].ray;
+        r.Hold((f.pinch || (f.ended && wasHeld)) && r.Shown(), t);
+        if (f.pinch && r.Shown()) rel[f.side].ray = true;
         r.Frame(body, hf, true, setArrive);
+        if (f.ended && wasHeld) r.Hold(false, t);
+        {   // pinches (see the top)
+            PinchStats &q = ps[f.side];
+            const Axes ax = HandAxes(hf.wrist, hf.middle, hf.ring, hf.little, f.side);
+            Release &e = rel[f.side];
+            if (e.ray && r.Shown()) {
+                const V3 d = r.At(setArrive).dir;
+                if (f.pinch && f.pinchD >= 0 && f.pinchD < 0.025) e.closed = true, e.dir = d, e.palm = ax.o;
+                if (f.ended && e.closed) {
+                    const double kick = fhsmooth::Angle(d, e.dir) / kDeg, moved = Len(ax.o - e.palm) * 1000;
+                    q.kick.push_back(kick), q.palmMove.push_back(moved);
+                    if (moved < 5) q.kickStill.push_back(kick);
+                }
+            }
+            if (f.ended) e = {};
+            GrabSim &g = grab[f.side];
+            if (f.pinch && !g.on && ax.ok) {
+                g = GrabSim();
+                g.on = true, g.begin = t, g.palm0 = ax.o;
+                g.anchor.Pin(ax, hf.knuckle);
+                for (int m = 0; m < 2; ++m) g.point[m].Set(grabParams), g.start[m] = hf.knuckle;
+            }
+            if (g.on && (f.pinch || f.ended)) {
+                const V3 k[2] = {hf.knuckle, g.anchor.At(ax, hf.knuckle, 1)};
+                for (int m = 0; m < 2; ++m) {
+                    g.point[m].Sample(k[m], t, setArrive);
+                    g.drift[m] = std::max(g.drift[m], Len(k[m] - g.start[m]));
+                }
+                if (Len(ax.o - g.palm0) > 0.01) g.still = false;
+                if (f.pinch && f.pinchD >= 0 && f.pinchD < 0.025)
+                    for (int m = 0; m < 2; ++m) g.closed = true, g.atClosed[m] = g.point[m].At(setArrive);
+                if (f.ended) {
+                    for (int m = 0; m < 2; ++m) g.ticks[m].push_back(g.point[m].At(setArrive));
+                    endGrab(f.side);
+                }
+            } else if (g.on && !f.pinch) {
+                g.on = false;  // lost
+            }
+            // the hand's own direction against the shoulder's ray (handPitch, handYaw)
+            if (r.Shown() && f.stereo && ax.ok) {
+                const V3 d = Norm(hf.knuckle - body.Shoulder(f.side));
+                const double ly = Dot(d, ax.u), ys = std::atan2(-Dot(d, ax.r), Dot(d, ax.f));
+                q.offPitch.push_back(std::asin(std::clamp(ly, -1.0, 1.0)) / kDeg);
+                q.offYaw.push_back((f.side ? -ys : ys) / kDeg);
+                q.handOff.push_back(fhsmooth::Angle(d, HandDir(ax, f.side, params.handPitch, params.handYaw)) / kDeg);
+            }
+            if (r.Shown() && q.lastRawT >= 0 && t - q.lastRawT < 0.1) q.rawStep.push_back(fhsmooth::Angle(q.lastRaw, r.Raw().dir) / kDeg);
+            q.lastRaw = r.Raw().dir, q.lastRawT = r.Shown() ? t : -1;
+        }
         ++s.frames;
         s.nearFrames += hf.near;
         const Tests &ts = r.LastTests();
@@ -634,6 +798,24 @@ int main(int argc, char **argv) {
                     size_t(std::count(moving.begin(), moving.end(), 1)), ln.ms, ln.deg, lo.ms, lo.deg);
         std::printf("  body model, hand still: the shoulder turned the ray %.0f%% of its raw motion; p50 %.2f p90 %.2f deg/s\n",
                     q.rawAngle > 0 ? 100 * q.bodyAngle / q.rawAngle : NAN, Pct(q.bodyDegS, 0.5), Pct(q.bodyDegS, 0.9));
+        const PinchStats &p = ps[k];
+        std::printf("  raw ray per frame, shown: p50 %.2f p99 %.2f deg, %d frames over 3 deg (%zu)\n", Pct(p.rawStep, 0.5),
+                    Pct(p.rawStep, 0.99), int(std::count_if(p.rawStep.begin(), p.rawStep.end(), [](double a) { return a > 3; })),
+                    p.rawStep.size());
+        std::printf("  ray pinch release kick (closed -> end): p50 %.2f p90 %.2f deg (%zu); palm still (< 5 mm): p50 %.2f p90 %.2f "
+                    "deg (%zu); palm moved p50 %.1f mm\n",
+                    Pct(p.kick, 0.5), Pct(p.kick, 0.9), p.kick.size(), Pct(p.kickStill, 0.5), Pct(p.kickStill, 0.9),
+                    p.kickStill.size(), Pct(p.palmMove, 0.5));
+        for (int m = 0; m < 2; ++m)
+            std::printf("  grab point %s (%d pinches >= 0.3 s): jitter rms p50 %.2f p90 %.2f mm/tick; release kick p50 %.1f "
+                        "p90 %.1f mm, palm still p50 %.1f p90 %.1f mm (%zu); drift, palm still, p50 %.1f p90 %.1f mm\n",
+                        m ? "pinned" : "measured", p.grabs, Pct(p.jit[m], 0.5), Pct(p.jit[m], 0.9), Pct(p.kickMm[m], 0.5),
+                        Pct(p.kickMm[m], 0.9), Pct(p.kickMmStill[m], 0.5), Pct(p.kickMmStill[m], 0.9), p.kickMmStill[m].size(),
+                        Pct(p.drift[m], 0.5), Pct(p.drift[m], 0.9));
+        std::printf("  hand direction vs the shoulder's ray (%zu frames): lines up at pitch p10/50/90 %.0f/%.0f/%.0f, yaw "
+                    "%.0f/%.0f/%.0f deg; HandDir(%.0f, %.0f) off by p50 %.1f p90 %.1f deg\n",
+                    p.offPitch.size(), Pct(p.offPitch, 0.1), Pct(p.offPitch, 0.5), Pct(p.offPitch, 0.9), Pct(p.offYaw, 0.1),
+                    Pct(p.offYaw, 0.5), Pct(p.offYaw, 0.9), params.handPitch, params.handYaw, Pct(p.handOff, 0.5), Pct(p.handOff, 0.9));
     }
     return 0;
 }

@@ -63,7 +63,7 @@ HANDS_POKE_REST_NEAR=0.32  # ... and this close (m) to the head across the floor
 HANDS_GRAB_SMOOTH_MINCUTOFF=1  # Frametop panels: a near grab's pinch point is smoothed this much held still (Hz; lower = steadier, laggier)
 HANDS_GRAB_SMOOTH_BETA=15  # ... and this much less as it moves (Hz per m/s; higher = keeps up better, wobbles more)
 HANDS_GRAB_DEADZONE=0.01   # ... and moves the panel only once it's this far (m) from where the pinch began
-HANDS_NEAR=1               # Frametop panels: poke to click, pinch the bar, edges or corners to move or resize (1 = when the pointer helper says a hand is bare | 0 = off | force = always, for testing)
+HANDS_NEAR=1               # Frametop panels (direct touch): poke to click, pinch the bar, edges or corners to move or resize, gaze or not (1 = with POINTER_HANDS=1, when the pointer helper says a hand is bare | on = the same without POINTER_HANDS: the helper runs only the handoff for it | 0 = off | force = always, for testing)
 HANDS_CUTOUTS=0            # hands: 1 = also cut a round hole per hand in Frametop's panels, so Room View shows the real hand through them (off: ft-handview draws the hands)
 HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face and look at it, and a ring shows above the palm; pinch with that hand to open the Steam menu (or close the dashboard). 0 = off
 HANDS_VIEW_MODEL=asset     # rendered hands (ft-handview): a 3D hand model posed by the tracking, asset (WebXR's generic hand) | babylon | mrtk3 | godot | mrtk2 (screens/assets/hands/README.md) | robot = a robot hand built from the skeleton (white shells, dark joints, cyan accents) | capsules = tubes from the skeleton (the older look)
@@ -96,6 +96,7 @@ POINTER_RAY_HAND_WEIGHT=0  # hand ray: 0..1, how far the ray turns toward where 
 POINTER_RAY_HAND_PITCH=-30 # hand ray: with a weight, degrees the hand's own direction tilts from the wrist-to-knuckles line (negative: toward the palm) ...
 POINTER_RAY_HAND_YAW=8     # ... and turns out, away from the thumb
 POINTER_RAY_ANCHOR=0       # hand ray: 1 = during a pinch, the knuckle point the ray aims through is pinned to the palm (measured no steadier, so 0)
+POINTER_GAZE_PINCH=1       # hands in gaze mode: 1 = a pinch clicks where you look (middle pinch: right click; a pinch by each hand holds left and right together) | 0 = no clicks at the gaze (direct touch, and a ray with POINTER_GAZE_HAND_RAY=1, still work)
 POINTER_GAZE_HAND_RAY=0    # hands in gaze mode: 0 = no hand ray, your eyes aim and a pinch clicks where you look | 1 = a raised, pointing hand's ray works beside the gaze
 POINTER_GAZE_PINCH_DEADZONE=4 # hands in gaze mode: degrees (seen from the eye; about 3 cm at arm's length) a held pinch moves before it nudges the pointer; held still for POINTER_GAZE_HOLD it's a press, to drag
 POINTER_GAZE_PINCH_GAIN=0.3   # hands in gaze mode: past that, the pointer moves this times the pinching hand's angle (low, for small corrections)

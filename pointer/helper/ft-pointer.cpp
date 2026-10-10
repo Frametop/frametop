@@ -323,11 +323,17 @@
 // the pose's second difference per 90 Hz tick went from 0.90-0.96 deg rms (p90 1.4) to 0.24-0.26
 // (p90 0.24), at the same lag (110 ms behind the capture against 105). POINTER_RAY_STEADY (1): during
 // a ray pinch the ray pivots on where the shoulder was at the press (fh_ray.h's steady shoulder), so
-// looking around doesn't move what's dragged; push and pull's reach is filtered too. A pinch's first
-// POINTER_RAY_TAP (0.3 s) needs POINTER_RAY_TAP_DEADZONE (6 deg) of turn to drag, so a quick tap whose
-// hand swung is still a click; then POINTER_RAY_DEADZONE. A held ray pinch ends on the pinch's end, the
-// pointer going, or the gestures file unreadable for 0.5 s (one failed read under its sequence lock
-// ended drags), and the log says which.
+// looking around doesn't move what's dragged; push and pull's reach is filtered too.
+// POINTER_RAY_TORSO_WRISTS (1): the shoulders face between the head and the hands seen (StereoKit's
+// body model), so looking aside while pointing swings them less. POINTER_RAY_HAND_WEIGHT (0, 0..1):
+// how far the ray turns toward the hand's own direction (StereoKit's aim blend; POINTER_RAY_HAND_PITCH
+// -30 and POINTER_RAY_HAND_YAW 8 deg from the palm's axes), and POINTER_RAY_ANCHOR (0): the knuckle
+// point pinned to the palm during a pinch (StereoKit's pinch anchor). Both measured worse on
+// replays, so they're off (fh_ray.h has the numbers). A pinch's first POINTER_RAY_TAP (0.3 s) needs
+// POINTER_RAY_TAP_DEADZONE (6 deg) of turn to drag, so a quick tap whose hand swung is still a click;
+// then POINTER_RAY_DEADZONE. A held ray pinch ends on the pinch's end, the pointer going, or the
+// gestures file unreadable for 0.5 s (one failed read under its sequence lock ended drags), and the
+// log says which.
 //   Push and pull (POINTER_RAY_PUSH=1): while a ray pinch carries something (it pressed on no
 // panel's content: a grab bar, a scene-graph control, a panel's edge, one of ft-screens' controls;
 // or the panel it pressed on starts to move, as a floating window by its title bar), the origin
@@ -426,7 +432,9 @@
 // POINTER_HAND_RAY (1), POINTER_RAY_DEADZONE (2.5 deg), POINTER_RAY_PUSH (1), POINTER_RAY_SCROLL (1),
 // POINTER_RAY_RELEASE (2 s), POINTER_RAY_GRACE (0.5 s), POINTER_RAY_SMOOTH_MINCUTOFF (0.8 Hz),
 // POINTER_RAY_SMOOTH_BETA (0.06), POINTER_RAY_SMOOTH_HOLD (0.5 Hz), POINTER_RAY_STEADY (1),
-// POINTER_RAY_TAP (0.3 s), POINTER_RAY_TAP_DEADZONE (6 deg): the hand ray, above.
+// POINTER_RAY_TAP (0.3 s), POINTER_RAY_TAP_DEADZONE (6 deg), POINTER_RAY_TORSO_WRISTS (1),
+// POINTER_RAY_HAND_WEIGHT (0), POINTER_RAY_HAND_PITCH (-30 deg), POINTER_RAY_HAND_YAW (8 deg),
+// POINTER_RAY_ANCHOR (0): the hand ray, above.
 // POINTER_GAZE_HAND_RAY (0), POINTER_GAZE_PINCH_DEADZONE (4 deg), POINTER_GAZE_PINCH_GAIN (0.3): gaze
 // pinches, above.
 // POINTER_GAZE_MOUSE (precision), POINTER_HEAD_DEADZONE (0.5 deg), POINTER_KEY_TAP (0.25 s),
@@ -857,7 +865,8 @@ int main() {
     double rayDeadzone = 2.5, rayScroll = 1.0, rayRelease = 2.0, rayGrace = 0.5;
     // ...its smoothing and a tap's dead zone (see "Hand ray" at the top): POINTER_RAY_SMOOTH_MINCUTOFF,
     // POINTER_RAY_SMOOTH_BETA, POINTER_RAY_SMOOTH_HOLD, POINTER_RAY_STEADY, POINTER_RAY_TAP,
-    // POINTER_RAY_TAP_DEADZONE. rayParamsNew: read again, for the rays.
+    // POINTER_RAY_TAP_DEADZONE; the body and hand models' POINTER_RAY_TORSO_WRISTS, POINTER_RAY_HAND_WEIGHT,
+    // POINTER_RAY_HAND_PITCH, POINTER_RAY_HAND_YAW, POINTER_RAY_ANCHOR. rayParamsNew: read again, for the rays.
     fhray::Params rayParams;
     bool rayParamsNew = true;
     double rayTap = 0.3, rayTapDeadzone = 6.0;
@@ -914,6 +923,11 @@ int main() {
         rayParams.beta = std::clamp(ConfDouble(conf, "POINTER_RAY_SMOOTH_BETA", 0.06), 0.0, 5.0);
         rayParams.holdMinCutoff = std::clamp(ConfDouble(conf, "POINTER_RAY_SMOOTH_HOLD", 0.5), 0.05, 30.0);
         rayParams.holdShoulder = ConfDouble(conf, "POINTER_RAY_STEADY", 1) != 0;
+        rayParams.torsoWrists = ConfDouble(conf, "POINTER_RAY_TORSO_WRISTS", 1) != 0;
+        rayParams.handWeight = std::clamp(ConfDouble(conf, "POINTER_RAY_HAND_WEIGHT", 0), 0.0, 1.0);
+        rayParams.handPitch = std::clamp(ConfDouble(conf, "POINTER_RAY_HAND_PITCH", -30), -90.0, 90.0);
+        rayParams.handYaw = std::clamp(ConfDouble(conf, "POINTER_RAY_HAND_YAW", 8), -90.0, 90.0);
+        rayParams.pinchAnchor = ConfDouble(conf, "POINTER_RAY_ANCHOR", 0) != 0;
         rayParamsNew = true;
         rayTap = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP", 0.3), 0.0, 2.0);
         rayTapDeadzone = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP_DEADZONE", 6.0), 0.0, 30.0);
@@ -2131,7 +2145,11 @@ int main() {
             if (newHands && live && rayOn && poses.At(handsRoom.capture_ns, capHead)) {
                 const double tc = double(handsRoom.capture_ns) / 1e9;
                 const Vec3 hp = Position(capHead), hf = Rotate(capHead, Vec3{0, 0, -1});
-                body.Update(tc, {hp.x, hp.y, hp.z}, {hf.x, hf.y, hf.z});
+                fhray::V3 wrists[FH_HANDS_MAX_HANDS];  // the torso faces between the head and the hands
+                int nw = 0;
+                for (const hin::RoomHand &c : handsRoom.hands)
+                    if (nw < FH_HANDS_MAX_HANDS) wrists[nw++] = {c.pts[0].x, c.pts[0].y, c.pts[0].z};
+                body.Update(tc, {hp.x, hp.y, hp.z}, {hf.x, hf.y, hf.z}, wrists, nw);
                 // the hand each side's ray follows: ft-hands' side call, held through a brief flip (rayowner.h)
                 std::vector<rayown::SeenHand> seenHands;
                 for (const hin::RoomHand &c : handsRoom.hands) seenHands.push_back({c.id, c.side});
@@ -2144,6 +2162,7 @@ int main() {
                     fhray::HandFrame f;
                     f.t = tc, f.stereo = h->stereo;
                     f.knuckle = fv(h->knuckle), f.wrist = fv(h->pts[0]), f.palmNormal = fv(h->palmNormal);
+                    f.middle = fv(h->pts[9]), f.ring = fv(h->pts[13]), f.little = fv(h->pts[17]), f.palm = true;
                     f.elbow = fv(h->elbow), f.elbowConf = h->elbowConf;
                     f.grip = gripDown[s];
                     // near: ft-screens says so (a fresh report), or the fingertip is at an overlay: a cast

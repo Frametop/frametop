@@ -7,16 +7,48 @@
 // +x right, +y up, -z forward), metres, radians inside and degrees in Params, seconds on one
 // steady clock (CLOCK_MONOTONIC: ft-hands' capture times, as seconds).
 //
-// Body model (no torso tracking): the torso's yaw is the head's, low-passed (torsoTau, 0.6 s) and
-// never more than torsoMaxLag (30 deg) behind. The neck is the head moved by neck (10 cm down, 8 cm
-// back), turned by the head's yaw only; a shoulder is the neck moved by (+-shoulderX, shoulderY,
-// 0) (17 cm out, 13 cm down), turned by the torso's yaw. Head pitch and roll are ignored, so
-// nodding doesn't swing the ray.
+// Body model (no torso tracking): the torso faces the head's yaw, low-passed (torsoTau, 0.6 s) and
+// never more than torsoMaxLag (30 deg) off the head's. With torsoWrists (on), what it faces is the
+// head's forward counted twice plus the direction from the neck to each wrist seen, levelled (the
+// formula is StereoKit's, MIT: systems/input.cpp, body_make_shoulders): you point where your body
+// faces, so looking aside while pointing turns the shoulders less, and the ray with them (with both
+// hands ahead, a third as far). On the probe-moves replay (pointer/tools/rayeval) the share of a
+// still hand's ray motion that came from the shoulder went from 20 to 18% (p90 1.7-3.6 deg/s from
+// 2.0-3.7); on the guided tap capture, where the head mostly faced the panel, nothing got worse.
+// The neck is the head moved by neck (10 cm down, 8 cm back), turned by the head's yaw only; a
+// shoulder is the neck moved by (+-shoulderX, shoulderY, 0) (17 cm out, 13 cm down), turned by the
+// torso's yaw. Head pitch and roll are ignored, so nodding doesn't swing the ray.
 //
 // Ray: from the shoulder S through the knuckle point K (the index and middle knuckles: the pinch
 // point, which holds still as the fingers close, so pinching barely turns the ray). The direction
 // is D = normalize(K - S); the origin is K + originAhead (3 cm) along D, in front of the fingers.
 // K is predicted predict (20 ms) ahead with its room velocity (differenced across frames).
+//
+// Hand direction (handWeight, 0 = off, the default): D turned toward where the hand itself points
+// by that fraction of the angle between them (StereoKit's aim, MIT: xr_backends/extensions/
+// hand_tracking.cpp, which slerps half way). The hand's axes come from the joints that hold still in
+// a thumb-index pinch (HandAxes: the wrist and the middle, ring and little knuckles), and its
+// direction is their forward (wrist to knuckles) tilted handPitch toward the back of the hand
+// (negative: the palm) and handYaw out, away from the thumb. The gate's tests still read the
+// shoulder's ray. Off because every weight measured worse (rayeval, the guided tap capture and
+// probe-moves, fitted skeleton): our palm's orientation is far noisier than K seen from the
+// shoulder 45 cm away. At 0.3 the 90 Hz judder went from 0.07-0.14 to 0.11-0.33 deg rms, a still
+// hand's wobble more than doubled, the ray's turn 150 ms into a pinch went from 0.4-0.5 to 1.2-1.7
+// deg (p50), and frames where the raw ray turned over 3 deg from 159 to 330. Where the hand's
+// direction sits against the shoulder's ray depends on how the hand is held: pitch -15 to -41, yaw
+// -4 to 19 (the recordings' medians); handPitch and handYaw are in the middle of that. StereoKit's
+// -50 and 20 suit its own axes.
+//
+// Pinch anchor (pinchAnchor, off by default): while a ray pinch is held, K is pinned to the hand's
+// axes where it was at the press, rebuilt from them each frame (StereoKit's pinch point, MIT:
+// hands/input_hand.cpp, pinned to the index finger's root while the pinch is active), and eased
+// back to the measured K on the steady shoulder's schedule (below). StereoKit pins a point between
+// the fingertips, which travels as they open; ours is the knuckles already, and on the guided tap
+// capture it held stiller than the axes do: pinned, a held pinch's point (as a near grab carries
+// it) shook as much or more (0.15-0.29 against 0.12-0.19 mm per 90 Hz tick, p50) and its release
+// kick was no smaller (1.4-2.0 against 1.2-1.6 mm, p50, palm still), from the fitted skeleton and
+// from the filtered landmarks alike. The palm's turn, times the 7 cm from its centre to K, is the
+// noise it adds.
 //
 // Pointing (Gate): the ray shows once every "show" test has held for showFor (120 ms), and hides
 // once some "keep" test has failed for hideFor (250 ms):
@@ -58,7 +90,8 @@
 // stays where it was in the room at the press; then it eases back to the body model's over
 // shoulderBlend (0.5 s). The model's shoulder moves with the head (the neck follows its position,
 // the torso its yaw): on a recording, with the hand still, a fifth of the ray's motion came from
-// there, up to 2-4 deg/s (p90). Looking around while dragging moved what was dragged.
+// there, up to 2-4 deg/s (p90). Looking around while dragging moved what was dragged. The pinch
+// anchor (when on) holds and eases back with it.
 #pragma once
 
 #include "fh_smooth.h"
@@ -91,10 +124,13 @@ inline double WrapPi(double a) { return std::remainder(a, 2 * M_PI); }
 struct Params {
     // body
     double torsoTau = 0.6, torsoMaxLag = 30;
+    bool torsoWrists = true;
     V3 neck{0, -0.10, 0.08};
     double shoulderX = 0.17, shoulderY = -0.13;
     // ray
     double originAhead = 0.03, predict = 0.020;
+    double handWeight = 0, handPitch = -30, handYaw = 8;
+    bool pinchAnchor = false;
     // gate
     double showFor = 0.12, hideFor = 0.25;
     double stereoWithin = 0.2, lostFor = 0.25;
@@ -112,26 +148,34 @@ struct Params {
     double reachMinCutoff = 1.0, reachBeta = 5.0;
 };
 
-// The torso and shoulders, from the head.
+// The torso and shoulders, from the head (and the wrists: torsoWrists).
 class Body {
 public:
     explicit Body(const Params &p = {}) : p_(p) {}
     void SetParams(const Params &p) { p_ = p; }
-    // The head's position and forward direction (-z of its pose) at time t.
-    void Update(double t, V3 head, V3 forward) {
+    // The head's position and forward direction (-z of its pose) at time t, and the wrists seen in
+    // the same frame (none: nullptr, n 0).
+    void Update(double t, V3 head, V3 forward, const V3 *wrists = nullptr, int n = 0) {
         head_ = head;
         headYaw_ = YawOf(forward);
-        if (!init_) {
-            torso_ = headYaw_, t_ = t, init_ = true;
-            return;
+        // what the torso turns toward: the head's yaw, or with the wrists (see the top)
+        double target = headYaw_;
+        if (p_.torsoWrists && n > 0) {
+            V3 face = Dir(headYaw_, 0) * 2;
+            for (int i = 0; i < n; ++i) face = face + Norm(wrists[i] - Neck());
+            face.y = 0;
+            if (Len(face) > 0.1) target = YawOf(face);
         }
-        const double dt = std::clamp(t - t_, 0.0, 0.5);
-        t_ = t;
-        double lag = WrapPi(headYaw_ - torso_);
-        lag *= std::exp(-dt / std::max(1e-3, p_.torsoTau));
+        if (!init_) {
+            torso_ = target, t_ = t, init_ = true;
+        } else {
+            const double dt = std::clamp(t - t_, 0.0, 0.5);
+            t_ = t;
+            const double lag = WrapPi(target - torso_) * std::exp(-dt / std::max(1e-3, p_.torsoTau));
+            torso_ = WrapPi(target - lag);
+        }
         const double max = p_.torsoMaxLag * kDeg;
-        lag = std::clamp(lag, -max, max);
-        torso_ = WrapPi(headYaw_ - lag);
+        torso_ = WrapPi(headYaw_ - std::clamp(WrapPi(headYaw_ - torso_), -max, max));
     }
     bool Ready() const { return init_; }
     V3 Head() const { return head_; }
@@ -154,12 +198,70 @@ struct Ray {
     V3 origin, dir{0, 0, -1};
 };
 
+// A hand's axes from the joints that hold still in a thumb-index pinch: the wrist and the middle,
+// ring and little knuckles (MediaPipe 0, 9, 13, 17). f: forward, from the wrist to the ring and
+// little knuckles; u: out of the back of the hand; r = f x u (toward the little finger on a right
+// hand palm away, toward the thumb on a left one: to the right on both). o: their centre. side: 0
+// left, 1 right. Built as StereoKit's hand orientation (MIT: xr_backends/extensions/hand_tracking.cpp),
+// with the middle knuckle for the index one and the wrist for the metacarpals' roots.
+struct Axes {
+    V3 o, r, u, f;
+    bool ok = false;
+};
+inline Axes HandAxes(V3 wrist, V3 middle, V3 ring, V3 little, int side) {
+    Axes a;
+    const V3 fwd = (ring + little) * 0.5 - wrist, across = (little - middle) * (side ? 1.0 : -1.0);
+    const V3 back = Cross(across, fwd);
+    if (Len(fwd) < 0.02 || Len(across) < 0.005 || Len(back) < 1e-6) return a;  // a collapsed hand
+    a.f = Norm(fwd);
+    a.u = Norm(back - a.f * Dot(back, a.f));
+    a.r = Cross(a.f, a.u);
+    a.o = (wrist + middle + ring + little) * 0.25;
+    a.ok = true;
+    return a;
+}
+inline V3 ToAxes(const Axes &a, V3 p) {
+    const V3 d = p - a.o;
+    return {Dot(d, a.r), Dot(d, a.u), Dot(d, a.f)};
+}
+inline V3 FromAxes(const Axes &a, V3 l) { return a.o + a.r * l.x + a.u * l.y + a.f * l.z; }
+// Where the hand points (see "Hand direction" at the top): the axes' forward turned pitch degrees
+// toward the back of the hand (negative: toward the palm) and yaw degrees out, away from the thumb.
+// StereoKit's is pitch -50, yaw 20 from its own axes (MIT, quat_from_angles(-50, +-20, 0)).
+inline V3 HandDir(const Axes &a, int side, double pitch, double yaw) {
+    const double p = pitch * kDeg, y = (side ? -yaw : yaw) * kDeg;
+    return Norm(a.r * (-std::cos(p) * std::sin(y)) + a.u * std::sin(p) + a.f * (std::cos(p) * std::cos(y)));
+}
+
+// A point pinned to a hand's axes (see "Pinch anchor" at the top): Pin it, then At rebuilds it from
+// the axes now, weighted against the point as measured (1: pinned, 0: as measured, between: easing
+// back). Axes that can't be built leave it as measured.
+class Anchor {
+public:
+    void Pin(const Axes &a, V3 p) {
+        pinned_ = a.ok;
+        if (a.ok) local_ = ToAxes(a, p);
+    }
+    void Unpin() { pinned_ = false; }
+    bool Pinned() const { return pinned_; }
+    V3 At(const Axes &a, V3 measured, double weight) const {
+        if (!pinned_ || !a.ok || weight <= 0) return measured;
+        return measured + (FromAxes(a, local_) - measured) * std::min(weight, 1.0);
+    }
+
+private:
+    V3 local_;
+    bool pinned_ = false;
+};
+
 // One hand at one capture time, in the room.
 struct HandFrame {
     double t = 0;            // capture time, s
     bool stereo = false;     // triangulated from two or more cameras
     V3 knuckle;              // K: the index and middle knuckles
     V3 wrist;
+    V3 middle, ring, little; // their knuckles (palm: set), for the hand's axes
+    bool palm = false;
     V3 palmNormal;           // unit, out of the palm
     V3 elbow;
     double elbowConf = 0;    // 0: the arm model's guess
@@ -258,18 +360,31 @@ public:
     void Frame(const Body &body, const HandFrame &f, bool sideIsHand, double now = -1) {
         if (now < 0) now = f.t;
         const bool wasShown = shown_;
+        // K: pinned to the hand's axes during a pinch (see "Pinch anchor" at the top)
+        axes_ = f.palm ? HandAxes(f.wrist, f.middle, f.ring, f.little, side_) : Axes{};
+        lastMeasured_ = f.knuckle;
+        if (pinAt_) anchor_.Pin(axes_, f.knuckle), pinAt_ = false;
+        const double pinned = Steady(f.t);
+        const V3 kNow = anchor_.At(axes_, f.knuckle, pinned);
+        if (pinned <= 0) anchor_.Unpin();
         // K's room velocity, for the prediction
         V3 vk;
-        if (haveLast_ && f.t > lastT_ && f.t - lastT_ < 0.2) vk = (f.knuckle - lastK_) * (1 / (f.t - lastT_));
-        lastK_ = f.knuckle, lastT_ = f.t, haveLast_ = true;
-        const V3 k = f.knuckle + vk * p_.predict;
+        if (haveLast_ && f.t > lastT_ && f.t - lastT_ < 0.2) vk = (kNow - lastK_) * (1 / (f.t - lastT_));
+        lastK_ = kNow, lastT_ = f.t, haveLast_ = true;
+        const V3 k = kNow + vk * p_.predict;
         const V3 s = Shoulder(body, f.t);
         raw_.dir = Norm(k - s);
         raw_.origin = k + raw_.dir * p_.originAhead;
-        reach_ = Len(f.knuckle - s);
+        reach_ = Len(kNow - s);
         lastFrame_ = f.t, arrived_ = now;
         if (f.stereo) lastStereo_ = f.t;
-        tests_ = Evaluate(p_, body, f, raw_);
+        tests_ = Evaluate(p_, body, f, raw_);  // the shoulder's ray: the tests were tuned on it
+        // turned toward the hand's own direction (see "Hand direction" at the top)
+        if (p_.handWeight > 0 && axes_.ok) {
+            const V3 hand = HandDir(axes_, side_, p_.handPitch, p_.handYaw);
+            raw_.dir = fhsmooth::Slerp(raw_.dir, hand, std::min(p_.handWeight, 1.0));
+            raw_.origin = k + raw_.dir * p_.originAhead;
+        }
         const bool tracked = f.t - lastStereo_ <= p_.stereoWithin;
         const bool showOk = sideIsHand && tracked && tests_.show && !f.near;
         const bool keepOk = tests_.keep;
@@ -310,7 +425,14 @@ public:
     // drag's precision (holdMinCutoff) meanwhile.
     void Hold(bool on, double t) {
         if (held_ && !on) holdUntil_ = t + p_.hideFor;
-        if (on && !held_ && p_.holdShoulder) steady_ = true, steadyAt_ = lastS_;
+        if (on && !held_) {
+            if (p_.holdShoulder) steady_ = true, steadyAt_ = lastS_;
+            // K pinned where it was in the newest frame, against the axes then (or the next frame's)
+            if (p_.pinchAnchor) {
+                if (axes_.ok) anchor_.Pin(axes_, lastMeasured_);
+                else pinAt_ = true;
+            }
+        }
         held_ = on;
         filter_.SetHeld(on);
     }
@@ -337,13 +459,19 @@ public:
     std::string event;
 
 private:
+    // How much of a held pinch's steadiness is left at t: 1 while it's held and hideFor after, then
+    // down to 0 over shoulderBlend (see "Steady shoulder" at the top).
+    double Steady(double t) const {
+        if (held_) return 1;
+        return 1 - std::clamp((t - holdUntil_) / std::max(1e-3, p_.shoulderBlend), 0.0, 1.0);
+    }
     // The ray's shoulder (see "Steady shoulder" at the top).
     V3 Shoulder(const Body &body, double t) {
         V3 s = body.Shoulder(side_);
         if (steady_) {
-            const double u = held_ ? 0 : (t - holdUntil_) / std::max(1e-3, p_.shoulderBlend);
-            if (u >= 1) steady_ = false;
-            else s = steadyAt_ + (s - steadyAt_) * std::clamp(u, 0.0, 1.0);
+            const double w = Steady(t);
+            if (w <= 0) steady_ = false;
+            else s = steadyAt_ + (s - steadyAt_) * (1 - w);
         }
         lastS_ = s;
         return s;
@@ -357,6 +485,7 @@ private:
     void Hide(const std::string &why, double t) {
         if (!shown_) return;
         shown_ = false, failSince_ = -1, showSince_ = -1, held_ = false, holdUntil_ = 0, steady_ = false;
+        anchor_.Unpin(), pinAt_ = false;
         filter_.SetHeld(false);
         hidAt_ = t, revivable_ = why != "off" && why != "near" && why != "reset";
         event = "hide " + why;
@@ -367,7 +496,10 @@ private:
     Ray raw_;
     Tests tests_;
     std::string why_;
-    V3 lastK_, lastS_, steadyAt_;
+    V3 lastK_, lastS_, steadyAt_, lastMeasured_;
+    Axes axes_;
+    Anchor anchor_;
+    bool pinAt_ = false;  // pin at the next frame (no axes when the pinch began)
     double lastT_ = 0, lastFrame_ = -1e9, lastStereo_ = -1e9, reach_ = 0, arrived_ = 0;
     double showSince_ = -1, failSince_ = -1, holdUntil_ = 0, hidAt_ = -1e9;
     bool haveLast_ = false, shown_ = false, held_ = false, revivable_ = false, steady_ = false;

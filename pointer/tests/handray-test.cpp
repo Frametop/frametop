@@ -1,5 +1,6 @@
-// Unit tests for the hand ray (hands/include/fh_ray.h): the body model, the pointing gate's
-// timing and tests, and the filter, with made-up hands at ft-hands' 30 Hz.
+// Unit tests for the hand ray (hands/include/fh_ray.h): the body model (and the torso with the
+// wrists), the pointing gate's timing and tests, the filter, the hand's axes and direction, and the
+// pinch anchor, with made-up hands at ft-hands' 30 Hz.
 // Build and run: just test-c (or g++ -std=c++17 -I. pointer/tests/handray-test.cpp).
 #include "hands/include/fh_ray.h"
 
@@ -254,9 +255,168 @@ void TestFilter() {
     CHECK(moved > 17, "a 20 deg sweep: the filtered ray followed %.1f deg", moved);
 }
 
+// Pointing's hand with its palm joints: the wrist, then the middle, ring and little knuckles 8-9 cm
+// on toward the fingers (ahead), spread across to the right; the back of the hand faces up.
+HandFrame WithPalm(HandFrame f) {
+    const V3 up = Norm(f.knuckle - f.wrist), across{1, 0, 0};
+    f.middle = f.wrist + up * 0.09 + across * 0.01;
+    f.ring = f.wrist + up * 0.085 + across * 0.03;
+    f.little = f.wrist + up * 0.075 + across * 0.05;
+    f.palm = true;
+    return f;
+}
+
+void TestHandAxes() {
+    const HandFrame f = WithPalm(Pointing(0));
+    const Axes a = HandAxes(f.wrist, f.middle, f.ring, f.little, 1);
+    CHECK(a.ok, "axes from a hand");
+    CHECK(Dot(a.f, Norm(f.knuckle - f.wrist)) > 0.85, "forward toward the knuckles");
+    CHECK(a.u.y > 0.9, "up out of the back of the hand: (%.2f %.2f %.2f)", a.u.x, a.u.y, a.u.z);
+    CHECK(a.r.x > 0.8, "across to the right: %.2f", a.r.x);
+    // the left hand, mirrored: the same axes, so its yaw turns out to the left
+    auto mirror = [](V3 v) { return V3{-v.x, v.y, v.z}; };
+    const Axes l = HandAxes(mirror(f.wrist), mirror(f.middle), mirror(f.ring), mirror(f.little), 0);
+    CHECK(l.ok && l.u.y > 0.9 && l.r.x > 0.8, "left hand axes");
+    const V3 dr = HandDir(a, 1, 0, 20), dl = HandDir(l, 0, 0, 20);
+    CHECK(Dot(dr, a.r) > 0.3 && Dot(dl, l.r) < -0.3, "yaw turns out on both sides: %.2f %.2f", Dot(dr, a.r), Dot(dl, l.r));
+    CHECK(Dot(HandDir(a, 1, -50, 0), a.u) < -0.7, "negative pitch tilts toward the palm");
+    // a collapsed hand has no axes
+    CHECK(!HandAxes(f.wrist, f.wrist, f.wrist, f.wrist, 1).ok, "no axes from one point");
+    // a point pinned to the axes moves with the hand, turned and carried
+    Anchor an;
+    an.Pin(a, f.knuckle);
+    Axes moved = a;
+    moved.o = a.o + V3{0.1, 0, 0};
+    CHECK(Len(an.At(moved, f.knuckle, 1) - (f.knuckle + V3{0.1, 0, 0})) < 1e-9, "pinned: carried with the hand");
+    CHECK(Len(an.At(moved, f.knuckle, 0) - f.knuckle) < 1e-9, "weight 0: as measured");
+}
+
+void TestTorsoWrists() {
+    // the head turns 40 deg left while the hands point ahead: the torso turns a third of that
+    const V3 wrists[2] = {{-0.17, 1.33, -0.36}, {0.17, 1.33, -0.36}};
+    Params on, off;
+    off.torsoWrists = false;
+    Body a(on), b(off);
+    for (int i = 0; i <= 300; ++i) {
+        const V3 fwd = i ? Dir(40 * kDeg, 0) : kForward;
+        a.Update(i * 0.01, kEye, fwd, wrists, 2);
+        b.Update(i * 0.01, kEye, fwd, wrists, 2);
+    }
+    CHECK(Near(b.TorsoYaw() / kDeg, 40, 0.5), "off: the torso follows the head (%.1f)", b.TorsoYaw() / kDeg);
+    CHECK(a.TorsoYaw() / kDeg > 12 && a.TorsoYaw() / kDeg < 30, "on: the hands hold it back (%.1f)", a.TorsoYaw() / kDeg);
+    // the right shoulder moved less, so the ray to a still hand turned less
+    Body c(on);
+    c.Update(0, kEye, kForward, wrists, 2);
+    const V3 s0 = c.Shoulder(1);
+    CHECK(Len(a.Shoulder(1) - s0) < Len(b.Shoulder(1) - s0) * 0.8, "the shoulder moved %.3f m, against %.3f",
+          Len(a.Shoulder(1) - s0), Len(b.Shoulder(1) - s0));
+    // facing the hands with the head: as before
+    Body d(on), e(off);
+    for (int i = 0; i <= 100; ++i) d.Update(i * 0.01, kEye, kForward, wrists, 2), e.Update(i * 0.01, kEye, kForward);
+    CHECK(Near(d.TorsoYaw(), e.TorsoYaw(), 1e-6), "hands ahead, head ahead: the same torso");
+    // never more than torsoMaxLag off the head
+    Body f(on);
+    const V3 side[1] = {{1.0, 1.3, 0}};
+    for (int i = 0; i <= 300; ++i) f.Update(i * 0.01, kEye, kForward, side, 1);
+    CHECK(std::fabs(f.TorsoYaw() / kDeg) <= 30 + 1e-6, "within 30 deg of the head (%.1f)", f.TorsoYaw() / kDeg);
+}
+
+void TestHandWeight() {
+    // weight 0: the palm joints change nothing
+    Params p;
+    p.handWeight = 0;
+    Body b;
+    HandRay a(1, p), c(1, p);
+    for (int i = 0; i < 10; ++i) {
+        const double t = i * kFrame;
+        b.Update(t, kEye, kForward);
+        a.Frame(b, Pointing(t), true);
+        c.Frame(b, WithPalm(Pointing(t)), true);
+    }
+    CHECK(Len(a.Raw().dir - c.Raw().dir) < 1e-12 && Len(a.Raw().origin - c.Raw().origin) < 1e-12, "weight 0 = the shoulder's ray");
+    CHECK(a.Shown() && c.Shown(), "both shown");
+    // weight 1: the hand's own direction; between: on the way, the gate unchanged
+    p.handWeight = 1;
+    HandRay h(1, p);
+    const HandFrame f = WithPalm(Pointing(0));
+    h.Frame(b, f, true);
+    const V3 hd = HandDir(HandAxes(f.wrist, f.middle, f.ring, f.little, 1), 1, p.handPitch, p.handYaw);
+    CHECK(fhsmooth::Angle(h.Raw().dir, hd) < 1e-6, "weight 1 = the hand's direction");
+    p.handWeight = 0.3;
+    HandRay m(1, p);
+    m.Frame(b, f, true);
+    const double whole = fhsmooth::Angle(a.Raw().dir, hd), part = fhsmooth::Angle(a.Raw().dir, m.Raw().dir);
+    CHECK(Near(part, 0.3 * whole, 1e-6), "weight 0.3 turns it %.1f of %.1f deg", part / kDeg, whole / kDeg);
+    CHECK(m.LastTests().pitch == a.LastTests().pitch && m.LastTests().palm == a.LastTests().palm, "the tests read the shoulder's ray");
+}
+
+void TestPinchAnchor() {
+    // While a ray pinch is held, the knuckle point moving on its own (the fingers closing and
+    // opening, a knuckle misread) doesn't move the ray; the hand moving does; the release eases back.
+    Params p;
+    p.pinchAnchor = true, p.holdShoulder = false, p.predict = 0;  // (a jump's prediction would overshoot)
+    Body b;
+    HandRay r(1, p);
+    double t = 0;
+    for (; t < 0.3; t += kFrame) b.Update(t, kEye, kForward), r.Frame(b, WithPalm(Pointing(t)), true);
+    CHECK(r.Shown(), "shown");
+    r.Hold(true, t);
+    const V3 d0 = r.Raw().dir;
+    double worst = 0;
+    for (int i = 0; i < 15; ++i, t += kFrame) {
+        HandFrame f = WithPalm(Pointing(t));
+        f.knuckle = f.knuckle + V3{0.01 * std::sin(i), -0.015, 0.01};  // the knuckles alone, up to 2 cm
+        b.Update(t, kEye, kForward);
+        r.Frame(b, f, true);
+        worst = std::max(worst, fhsmooth::Angle(r.Raw().dir, d0) / kDeg);
+    }
+    CHECK(worst < 0.3, "the knuckles alone moved the held ray %.2f deg", worst);
+    // the whole hand moves 5 cm right: the ray follows
+    auto shifted = [](double t, V3 by, V3 kOff) {
+        HandFrame f = WithPalm(Pointing(t));
+        for (V3 *v : {&f.knuckle, &f.wrist, &f.middle, &f.ring, &f.little}) *v = *v + by;
+        f.knuckle = f.knuckle + kOff;
+        return f;
+    };
+    const V3 by{0.05, 0, 0}, kOff{0.0, -0.015, 0.01};
+    b.Update(t, kEye, kForward);
+    r.Frame(b, shifted(t, by, kOff), true);
+    t += kFrame;
+    const V3 want = Norm(Pointing(0).knuckle + by - b.Shoulder(1));
+    CHECK(fhsmooth::Angle(r.Raw().dir, want) / kDeg < 0.3, "the hand moved: the ray followed (off by %.2f deg)",
+          fhsmooth::Angle(r.Raw().dir, want) / kDeg);
+    // released: held hideFor, then eases to the measured knuckles over shoulderBlend, no jump
+    r.Hold(false, t);
+    V3 last = r.Raw().dir;
+    double biggest = 0;
+    for (double end = t + p.hideFor + p.shoulderBlend + 0.2; t < end; t += kFrame) {
+        b.Update(t, kEye, kForward);
+        r.Frame(b, shifted(t, by, kOff), true);
+        biggest = std::max(biggest, fhsmooth::Angle(r.Raw().dir, last) / kDeg);
+        last = r.Raw().dir;
+    }
+    const V3 measured = Norm(Pointing(0).knuckle + by + kOff - b.Shoulder(1));
+    CHECK(fhsmooth::Angle(r.Raw().dir, measured) / kDeg < 0.05, "back on the measured knuckles");
+    CHECK(biggest < 0.5, "eased back: at most %.2f deg a frame", biggest);
+    // off: the knuckles alone move it
+    p.pinchAnchor = false;
+    HandRay o(1, p);
+    for (t = 0; t < 0.3; t += kFrame) b.Update(t, kEye, kForward), o.Frame(b, WithPalm(Pointing(t)), true);
+    o.Hold(true, t);
+    const V3 o0 = o.Raw().dir;
+    HandFrame f = WithPalm(Pointing(t));
+    f.knuckle = f.knuckle + V3{0, -0.015, 0.01};
+    o.Frame(b, f, true);
+    CHECK(fhsmooth::Angle(o.Raw().dir, o0) / kDeg > 1, "anchor off: the knuckles move the ray");
+}
+
 }  // namespace
 
 int main() {
+    TestHandAxes();
+    TestTorsoWrists();
+    TestHandWeight();
+    TestPinchAnchor();
     TestBody();
     TestGateShowHide();
     TestLapPinch();

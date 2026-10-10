@@ -90,6 +90,11 @@ POINTER_RAY_SMOOTH_HOLD=0.5 # hand ray: the still smoothing while a pinch is hel
 POINTER_RAY_STEADY=1       # hand ray: while a pinch is held, the ray pivots on where the shoulder was at the press, so looking around doesn't move what you drag
 POINTER_RAY_TAP=0.3        # hand ray: for this many seconds after a pinch begins ...
 POINTER_RAY_TAP_DEADZONE=6 # ... the ray turns this many degrees before the press drags (a quick tap stays a click)
+POINTER_RAY_TORSO_WRISTS=1 # hand ray: 1 = the shoulders the ray starts from face between your head and your hands, so looking aside while pointing moves the ray less | 0 = they follow the head
+POINTER_RAY_HAND_WEIGHT=0  # hand ray: 0..1, how far the ray turns toward where the hand itself points (1 = the hand alone); measured shakier, so 0
+POINTER_RAY_HAND_PITCH=-30 # hand ray: with a weight, degrees the hand's own direction tilts from the wrist-to-knuckles line (negative: toward the palm) ...
+POINTER_RAY_HAND_YAW=8     # ... and turns out, away from the thumb
+POINTER_RAY_ANCHOR=0       # hand ray: 1 = during a pinch, the knuckle point the ray aims through is pinned to the palm (measured no steadier, so 0)
 POINTER_GAZE_HAND_RAY=0    # hands in gaze mode: 0 = no hand ray, your eyes aim and a pinch clicks where you look | 1 = a raised, pointing hand's ray works beside the gaze
 POINTER_GAZE_PINCH_DEADZONE=4 # hands in gaze mode: degrees (seen from the eye; about 3 cm at arm's length) a held pinch moves before it nudges the pointer; held still for POINTER_GAZE_HOLD it's a press, to drag
 POINTER_GAZE_PINCH_GAIN=0.3   # hands in gaze mode: past that, the pointer moves this times the pinching hand's angle (low, for small corrections)

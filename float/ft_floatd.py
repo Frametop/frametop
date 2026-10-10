@@ -12,8 +12,12 @@ which window floats on which spare output and panel, and connects three parts:
 Commands and ft-screens' events arrive as datagrams on @frametop_float (ft-float is the
 command-line side). Replies go to the sender:
   float [ID|active|pointer]   dock [ID|active|all]   close ID   list   quit   (ft-float)
-  launch APP.desktop   run ["argv", ...]   (start an app and float its first window)
+  launch APP.desktop [action=ACTION] [screen=N]   run ["argv", ...]
+            (start an app, or one of its desktop file's actions, and float its first window;
+            with screen=N its first window opens docked on screen N instead)
   windows   (-> JSON: the open apps' windows and where they are, for a profile; ft-layout save)
+  spotlist  (-> JSON: every app window, its title, panel, and when it was last active; spotwatch)
+  activate ID   (make that window KWin's active one, unminimized; spotwatch)
   profile NAME   (open a profile's apps: move the matching windows, launch the missing ones)
   ("float pointer" is the float key: the window under the pointer, else the active one,
   floated or docked; the input relay sends it for float_toggle, and "dock all" for dock_all)
@@ -259,6 +263,7 @@ class Launch:
         self.pids = [pid] if pid else []  # the processes we started (none when D-Bus started it)
         self.entries = entries    # a profile's entries still waiting for a window, or None
         self.relaunched = False
+        self.dock = None          # its first window opens docked on this output (launch screen=N)
         self.until = time.monotonic() + LAUNCH_SECONDS
 
 
@@ -308,7 +313,7 @@ class Daemon:
         self.sub_numbers = {}    # popup/dialog id -> (window id, number)
         self.next_sub = 1
         self.launches = []       # Launch: apps we started, waiting for their window
-        self.captures = {}       # token -> sender: "windows" requests waiting for the script's report
+        self.captures = {}       # token -> (sender, what): "windows" and "spotlist" requests waiting for the script's report
         self.next_token = 1
         self.sock = None         # our socket (set by main), for deferred replies
         self.places = load_places()  # app -> {"rel": pose by the primary screen, "pixels", "scale"}
@@ -394,6 +399,11 @@ class Daemon:
             return
         if kind == "added" and self.launches and not f:
             launch = self.launched(ev)
+            if launch and launch.dock:
+                log(f"{wid[:9]} ({ev.get('cls')}) opens docked on {launch.dock}")
+                self.command(cmd="to-output", id=wid, output=launch.dock)
+                self.seen(ev)
+                return
             if launch and launch.entries is None:
                 self.float_launched(ev, launch)
                 return
@@ -760,9 +770,11 @@ class Daemon:
         c[1] -= 0.1 * d  # a little below eye level, like a screen
         return c, ft_layout.turn_yaw((1.0, 0.0, 0.0), heading), (0.0, 1.0, 0.0), ft_layout.turn_yaw((0.0, 0.0, 1.0), heading)
 
-    def launch(self, app=None, argv=None):
-        """Start an app (a desktop file name) or a command; its first window will float.
-        Returns (reply, pid or None)."""
+    def launch(self, app=None, argv=None, action=None, dock=None):
+        """Start an app (a desktop file name) or a command; its first window will float, or
+        with dock (an output name) open docked there. action: one of the desktop file's
+        actions instead (no pid: its window is known by the app's name). Returns (reply, pid or
+        None)."""
         if app:
             app = app.removesuffix(".desktop")
             try:
@@ -771,14 +783,22 @@ class Daemon:
                 info = None
             if info is None:
                 return f"error no app {app}", None
+            if action and action not in info.list_actions():
+                return f"error {app} has no action {action}", None
             pids = []
             try:
-                info.launch_uris_as_manager([], Gio.AppLaunchContext(), GLib.SpawnFlags.SEARCH_PATH,
-                                            None, None, lambda _info, pid, *_: pids.append(pid), None)
+                if action:
+                    info.launch_action(action, Gio.AppLaunchContext())
+                else:
+                    info.launch_uris_as_manager([], Gio.AppLaunchContext(), GLib.SpawnFlags.SEARCH_PATH,
+                                                None, None, lambda _info, pid, *_: pids.append(pid), None)
             except GLib.Error as e:
                 return f"error {app}: {e.message}", None
-            self.launches.append(Launch(app, pids[0] if pids else None))
-            log(f"launched {app} (pid {pids[0] if pids else 'by D-Bus'})")
+            la = Launch(app, pids[0] if pids else None)
+            la.dock = dock
+            self.launches.append(la)
+            log(f"launched {app}{' (' + action + ')' if action else ''}"
+                f"{' docked on ' + dock if dock else ''} (pid {pids[0] if pids else 'by D-Bus'})")
             return "ok", (pids[0] if pids else None)
         else:
             try:
@@ -838,25 +858,42 @@ class Daemon:
 
     # ------------------------------------------------------------ profiles (docs/profiles.md)
 
-    def capture(self, sender):
-        """"windows": have the script report every window as it is now, and answer when the
-        report is in (or after 3 seconds with what we know)."""
+    def capture(self, sender, what="windows"):
+        """"windows" and "spotlist": have the script report every window as it is now, and
+        answer when the report is in (or after 3 seconds with what we know)."""
         if not sender:
-            return "error windows needs a reply address"
+            return f"error {what} needs a reply address"
         token = self.next_token
         self.next_token += 1
-        self.captures[token] = sender
+        self.captures[token] = (sender, what)
         self.command(cmd="report-all", token=token)
         GLib.timeout_add(3000, lambda: self.captured(token) and False)
         return None  # answered by captured
 
     def captured(self, token):
-        sender = self.captures.pop(token, None)
+        sender, what = self.captures.pop(token, (None, None))
         if sender and self.sock:
+            entries = self.spot_entries() if what == "spotlist" else self.window_entries()
             try:
-                self.sock.sendto(("ok " + json.dumps(self.window_entries())).encode(), sender)
+                self.sock.sendto(("ok " + json.dumps(entries)).encode(), sender)
             except OSError as e:
-                log(f"windows: {e}")
+                log(f"{what}: {e}")
+
+    def spot_entries(self):
+        """Every app window for spotwatch's search: its desktop file name, title, the panel
+        it's on (a screen or a floating window's; None elsewhere), and when it was last active."""
+        out = []
+        for wid, ev in self.windows.items():
+            if not recordable(ev):
+                continue
+            f = self.floats.get(wid)
+            m = re.match(r"WL-(\d+)$", ev.get("output", ""))
+            panel = f.slot.index if f else (int(m.group(1)) + 1 if m and int(m.group(1)) < self.screens_n else None)
+            out.append({"id": wid, "app": desktop_name(ev.get("app", ""), ev.get("cls", "")) if ev.get("app") else "",
+                        "class": ev.get("cls", ""), "pid": ev.get("pid") or 0, "title": ev.get("caption", ""),
+                        "panel": panel, "floating": bool(f), "minimized": bool(ev.get("minimized")),
+                        "activeAt": ev.get("activeAt") or 0})
+        return out
 
     def window_entries(self):
         """Every app window and where it is, as a profile keeps it."""
@@ -1036,8 +1073,15 @@ class Daemon:
         if not words:
             return "error empty"
         cmd, rest = words[0], words[1:]
-        if cmd == "launch" and len(rest) == 1:
-            return self.launch(app=rest[0])[0]
+        if cmd == "launch" and rest:
+            opts = dict(w.split("=", 1) for w in rest[1:] if "=" in w)
+            if len(opts) != len(rest) - 1 or set(opts) - {"action", "screen"}:
+                return "error launch APP.desktop [action=ACTION] [screen=N]"
+            screen = opts.get("screen")
+            if screen is not None and not (screen.isdigit() and 1 <= int(screen) <= self.screens_n):
+                return f"error no screen {screen}"
+            return self.launch(app=rest[0], action=opts.get("action"),
+                               dock=f"WL-{int(screen) - 1}" if screen else None)[0]
         if cmd == "run" and rest:
             try:
                 argv = json.loads(text.split(None, 1)[1])
@@ -1046,8 +1090,13 @@ class Daemon:
             if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
                 return "error run takes a JSON list"
             return self.launch(argv=argv)[0]
-        if cmd == "windows":
-            return self.capture(sender)
+        if cmd in ("windows", "spotlist"):
+            return self.capture(sender, cmd)
+        if cmd == "activate" and len(rest) == 1:
+            if rest[0] not in self.windows:
+                return f"error no window {rest[0]}"
+            self.command(cmd="activate", id=rest[0])
+            return "ok"
         if cmd == "profile" and rest:
             return self.open_profile(text.split(None, 1)[1])
         if cmd == "list":

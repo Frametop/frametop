@@ -223,6 +223,20 @@ def check_host():
         report("warn", "KWin effects", f"no built-in {', '.join(gone)} effect: renamed? The desktop's "
                "kwinrc may no longer turn it off (session/frametop-session.sh)")
 
+    # Spotwatch (spotwatch/ft_spotwatch.py) runs on the host's Python: GdkPixbuf's SVG loader
+    # draws the apps' icons, and libxkbcommon turns keys into text on the desktop's layout.
+    code, out = run("python3", "-c", "import gi; gi.require_version('GdkPixbuf', '2.0'); "
+                    "from gi.repository import GdkPixbuf; "
+                    "print(' '.join(f.get_name() for f in GdkPixbuf.Pixbuf.get_formats()))")
+    if code != 0:
+        report("warn", "spotwatch", "the host's Python has no GdkPixbuf: spotwatch can't start")
+    elif "svg" not in out.split():
+        report("warn", "spotwatch", "GdkPixbuf has no SVG loader: most apps show no icon in spotwatch")
+    elif not any(os.path.exists(p) for p in ("/usr/lib/libxkbcommon.so.0", "/usr/lib64/libxkbcommon.so.0")):
+        report("warn", "spotwatch", "no libxkbcommon: spotwatch types on a US layout")
+    else:
+        report("ok", "spotwatch", "GdkPixbuf with SVG, and libxkbcommon")
+
     # ft-notifyfwd uses Plasma's notification watcher API, which no spec covers, and PyGObject.
     plasma = b""
     for lib in ("/usr/lib/libnotificationmanager.so.1", "/usr/lib/libnotificationmanager.so"):

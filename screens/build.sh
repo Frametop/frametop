@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build ft-screens in the dev container on the Frame (screens/build/ft-screens), and
-# ft-handtest, which tries the hand cutouts (handcut.cpp) on a test panel of its own.
+# ft-handtest, which tries the hand cutouts (handcut.cpp) on a test panel of its own, and
+# ft-spotpanel, spotwatch's search panel (spotwatch/ft-spotpanel.cpp; ft-spotwatch runs it).
 # compositor.c is the wlroots side (C; wlroots headers aren't C++), vr.cpp the OpenVR side,
 # remote.c the remote screens (their streams are ft-stream's, stream/build.sh).
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
@@ -26,4 +27,5 @@ vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
 g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/keyboard.o build/handcut.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o $vrlibs
-echo "built build/ft-screens build/ft-handtest"'
+$cxx -o build/ft-spotpanel ../spotwatch/ft-spotpanel.cpp $(pkg-config --libs gbm libdrm) $OPENVR_LIBS -lpthread
+echo "built build/ft-screens build/ft-handtest build/ft-spotpanel"'

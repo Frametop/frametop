@@ -17,6 +17,7 @@ const settled = {};    // id -> {output, frame, fullScreen, maximized}: where a 
 const held = {};       // id -> {w, h, until, asked}: a size asked for, for a second (see hold)
 const moved = {};      // id -> true, or "back" once put back: it moved while KWin changed the outputs
 let layout = "", layoutOutputs = {}, layoutSince = 0;  // the outputs at the last screensChanged
+const activeAt = {};   // id -> when it was last KWin's active window (ms), for spotwatch's most recent
 
 function send(ev) {
     callDBus(SERVICE, PATH, IFACE, "Event", JSON.stringify(ev));
@@ -52,7 +53,7 @@ function info(w) {
         frame: rect(w.frameGeometry), client: rect(w.clientGeometry), popup: w.popupWindow,
         transient: w.transient, parent: w.transientFor ? String(w.transientFor.internalId) : "",
         normal: w.normalWindow, dialog: w.dialog, fullScreen: w.fullScreen, minimized: w.minimized,
-        onAllDesktops: w.onAllDesktops, maximized: isMaximized(w)
+        onAllDesktops: w.onAllDesktops, maximized: isMaximized(w), activeAt: activeAt[String(w.internalId)] || 0
     };
 }
 
@@ -268,8 +269,10 @@ workspace.windowRemoved.connect(w => {
     delete settled[id];
     delete held[id];
     delete moved[id];
+    delete activeAt[id];
 });
 workspace.windowActivated.connect(w => {
+    if (w) activeAt[String(w.internalId)] = Date.now();
     if (w && isSpare(w.output)) send({ev: "activated", id: String(w.internalId)});
 });
 takeLayout();
@@ -376,8 +379,15 @@ function run(c) {
             if (w) w.closeWindow();
             break;
         case "activate":
+            if (w && w.minimized) w.minimized = false;
             if (w) workspace.activeWindow = w;
             break;
+        case "to-output": {  // a launched window that opens docked, onto that screen (spotwatch)
+            const o = outputByName(c.output);
+            if (w && o && (!w.output || w.output.name !== o.name)) workspace.sendClientToScreen(w, o);
+            if (w) workspace.activeWindow = w;
+            break;
+        }
         case "activate-output": {  // the top window on that output (a spin brought it to the front)
             const order = workspace.stackingOrder;
             for (let i = order.length - 1; i >= 0; --i) {

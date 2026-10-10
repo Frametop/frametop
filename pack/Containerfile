@@ -75,7 +75,7 @@ COPY . /src/frametop
 WORKDIR /src/frametop
 ENV FRAME_IN_BOX=1 OPENVR_LIB=/opt/frametop/lib
 RUN screens/build.sh \
- && install -t /opt/frametop/bin screens/build/ft-screens screens/build/ft-handtest
+ && install -t /opt/frametop/bin screens/build/ft-screens screens/build/ft-handtest screens/build/ft-spotpanel
 RUN pointer/helper/build.sh && pointer/driver/build.sh \
  && install -t /opt/frametop/bin pointer/helper/build/ft-pointer \
  && install -t /opt/frametop/lib pointer/driver/build/driver_ft_pointer.so

@@ -53,7 +53,7 @@ jobs:
         run: |
           podman run --rm --entrypoint sh "$FT_IMAGE" -c '
             set -e
-            for p in ft-screens ft-pointer ft-powerd ft-gaze ft-gazepanel ft-stream ft-eyegrab whisper-server; do
+            for p in ft-screens ft-spotpanel ft-pointer ft-powerd ft-gaze ft-gazepanel ft-stream ft-eyegrab whisper-server; do
               test -x /opt/frametop/bin/$p
             done
             test -f /src/frametop/pointer/driver/build/driver_ft_pointer.so

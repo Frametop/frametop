@@ -13,13 +13,14 @@ test: test-python test-c test-bash
 # the Python suites as a strict gate: every failure fails the run. The image's
 # python3 has to import the dnf Qt stack and the locked packages together;
 # without that check the Qt tests would only skip. session/test is not here:
-# test_accessibility.py needs the host's AT-SPI and PyGObject.
+# test_accessibility.py needs the host's AT-SPI and PyGObject, test_notifyfwd.py
+# the host's dbus-daemon and PyGObject.
 test-python:
     #!/usr/bin/env bash
     set -uo pipefail
-    python3 -c 'import PySide6, numpy, cv2' || { echo "python3 can't import PySide6, numpy, and cv2"; exit 1; }
+    python3 -c 'import PySide6, numpy, cv2, sherpa_onnx' || { echo "python3 can't import PySide6, numpy, cv2, and sherpa_onnx"; exit 1; }
     status=0
-    for t in input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py gaze/test/*.py pack/test/*.py; do
+    for t in input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py gaze/test/*.py pack/test/*.py voice/test/*.py; do
         [ -f "$t" ] || continue
         if python3 "$t" >/dev/null; then echo "$t: ok"; else echo "$t: FAILED"; status=1; fi
     done

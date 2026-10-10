@@ -9,6 +9,7 @@ PHYS_WIDTH=1.6     # gamescope: panel width in metres, docked
 REMOTE=0           # 1 = serve the desktop's primary screen over VNC on the tailnet (port 5900; Frametop Remote Access, see README)
 FLOAT_SLOTS=8      # screens backend: how many windows can float in VR at once (spare outputs; 0 turns it off; restart the desktop after a change)
 FLOAT_MARGIN=300   # floating windows: pixels around each window on its output, so menus have room past its edges
+NOTIFY_FORWARD=auto # the desktop's notifications go to the Steam session's notification server (e.g. VR toasts), Plasma's popups off: auto = unless that's SteamOS's steam_notif_daemon | on | off (restart the desktop after a change)
 POINTER=0          # 1 = the mouse drives the universal 3D pointer (ft_pointer driver) instead of a plain mouse
 POINTER_SENSITIVITY=0.03   # degrees per mouse count
 POINTER_IDLE=30    # seconds without mouse use before the controllers get their laser back
@@ -98,7 +99,6 @@ POINTER_RAY_ANCHOR=0       # hand ray: 1 = during a pinch, the knuckle point the
 POINTER_GAZE_HAND_RAY=0    # hands in gaze mode: 0 = no hand ray, your eyes aim and a pinch clicks where you look | 1 = a raised, pointing hand's ray works beside the gaze
 POINTER_GAZE_PINCH_DEADZONE=4 # hands in gaze mode: degrees (seen from the eye; about 3 cm at arm's length) a held pinch moves before it nudges the pointer; held still for POINTER_GAZE_HOLD it's a press, to drag
 POINTER_GAZE_PINCH_GAIN=0.3   # hands in gaze mode: past that, the pointer moves this times the pinching hand's angle (low, for small corrections)
-SHARE_KEYS=0       # 1 = keys of keyboards grabbed for the desktop also go to @frametop_keys, for hotkey tools (any local process can listen)
 DISPLAY_OFF_MIN=0  # minutes without use before frametop-power turns the displays off, even if the headset seems worn (0 = never)
 DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (mm) within 10 s counts as use
 DISPLAY_MOVE_DEG=0.5 # displays off: or turning this far (degrees) within 10 s

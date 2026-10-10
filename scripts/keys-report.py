@@ -112,7 +112,7 @@ def main():
     try:
         with open(os.path.join(HOME, ".config/frametop.conf")) as f:
             conf = [ln.split("#")[0].strip() for ln in f]
-        out("Settings: " + " ".join(c for c in conf if re.match(r"(POINTER|SHARE_KEYS|BACKEND)=", c)))
+        out("Settings: " + " ".join(c for c in conf if re.match(r"(POINTER|BACKEND)=", c)))
     except OSError:
         out("Settings: no ~/.config/frametop.conf")
     out("ft-screens state (visibility, manual, wrist, gesture, lasers, game running, in games): "

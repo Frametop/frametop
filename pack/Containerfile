@@ -21,6 +21,9 @@ RUN dnf -y install --setopt=install_weak_deps=False \
       # moonlight-common-c, and the host's sound (Opus, PulseAudio)
       openssl-devel libcurl-devel expat-devel libuuid-devel json-devel \
       opus-devel pulseaudio-libs-devel \
+      # Frametop Voice (voice/): glslc and the SPIR-V headers for whisper.cpp's
+      # Vulkan backend; ft-voiced records with pw-record and plays its sounds with pw-play
+      glslc spirv-headers-devel pipewire-utils \
       # Frametop Input Settings (Kirigami, PySide6) and remote desktop (krdp):
       # the KDE/Qt stack has no PyPI wheels, so it stays a dnf package
       python3-pyside6 kf6-kirigami kf6-qqc2-desktop-style qt6-qtwayland \
@@ -53,14 +56,15 @@ RUN install -d /opt/frametop/bin /opt/frametop/lib \
 # because PySide6 and Kirigami come from dnf for this python3: one interpreter
 # imports both, as in the dev container on the Frame. Rebuilt only when the
 # lockfile changes, so source edits below reuse this layer.
-# uv sync --frozen --group tracker: the default dev group (pytest/ruff for CI's
-# in-image tests) plus the tracker stack; the types group (mypy) stays out.
+# uv sync --frozen --group tracker --group voice: the default dev group (pytest/ruff
+# for CI's in-image tests) plus the tracker stack and Frametop Voice's (sherpa-onnx);
+# the types group (mypy) stays out.
 # --no-cache keeps uv's download cache out of the image.
 ENV UV_PROJECT_ENVIRONMENT=/opt/frametop/venv UV_PYTHON=/usr/bin/python3 UV_PYTHON_DOWNLOADS=never
 COPY pyproject.toml uv.lock .python-version /src/frametop/
 RUN uv venv --system-site-packages /opt/frametop/venv \
- && cd /src/frametop && uv sync --frozen --group tracker --no-cache \
- && /opt/frametop/venv/bin/python -c 'import PySide6, numpy, cv2'
+ && cd /src/frametop && uv sync --frozen --group tracker --group voice --no-cache \
+ && /opt/frametop/venv/bin/python -c 'import PySide6, numpy, cv2, sherpa_onnx, sentencepiece'
 
 # The sources, then the binaries, built by the same build scripts as on the
 # Frame (FRAME_IN_BOX=1: they run here instead of entering the dev container).
@@ -85,6 +89,10 @@ RUN stream/build.sh \
 # build/venv, which here only points at the venv above.
 RUN gaze/tracker/build.sh \
  && install -t /opt/frametop/bin gaze/tracker/build/ft-eyegrab
+# Frametop Voice: whisper.cpp's server (Vulkan), and build/venv pointing at the venv
+# above. Its speech models aren't in the image: voice/models.sh fetches them on install.
+RUN voice/build.sh \
+ && install -t /opt/frametop/bin voice/build/bin/whisper-server
 
 # A release installs from this image (pack/install-release.sh): it copies
 # /src/frametop, built, to the Frame for its host side (services, the driver,

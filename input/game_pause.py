@@ -66,8 +66,9 @@ UNITS = ("frametop-gaze.service", "frametop-hands.service", "frametop-camd.servi
 # (about 200 ms) once it goes. The pointer helper says when the dashboard opens and closes ("vrdash").
 HAND_UNITS = ("frametop-hands.service", "frametop-camd.service")
 PARK_PATH = f"/run/user/{os.getuid()}/frametop-hands/park"
-# What still works while paused, besides commands ("command:CMD"): the toggle itself, and Steam's menu.
-PAUSED_ACTIONS = ("pause_toggle", "steam_menu")
+# What still works while paused, besides commands ("command:CMD"): the toggle itself, Steam's menu,
+# and dictation (Frametop Voice types into games too).
+PAUSED_ACTIONS = ("pause_toggle", "steam_menu", "dictate", "dictate_hold")
 DEFAULT_GESTURE = {"buttons": ["left/thumbstick", "right/thumbstick"], "presses": 2}
 DESKTOP_MODES = ("hide", "close")
 SOUNDS = {True: "/usr/share/sounds/ocean/stereo/device-removed.oga",

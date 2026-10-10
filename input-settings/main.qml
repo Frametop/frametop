@@ -21,6 +21,7 @@ Kirigami.ApplicationWindow {
             Kirigami.Action { text: "Controllers"; icon.name: "input-gamepad"; onTriggered: root.show(controllersPage) },
             Kirigami.Action { text: "Game optimization"; icon.name: "applications-games"; onTriggered: root.show(gamesPage) },
             Kirigami.Action { text: "Keyboard"; icon.name: "input-keyboard-virtual"; onTriggered: root.show(keyboardPage) },
+            Kirigami.Action { text: "Voice"; icon.name: "audio-input-microphone"; onTriggered: root.show(voicePage) },
             Kirigami.Action { text: "Pointer"; icon.name: "transform-move"; onTriggered: root.show(pointerPage) },
             Kirigami.Action { text: "Ignored panels"; icon.name: "view-hidden"; onTriggered: root.show(ignorePage) },
             Kirigami.Action { text: "Gaze"; icon.name: "view-visible"; onTriggered: root.show(gazePage) },
@@ -58,9 +59,9 @@ Kirigami.ApplicationWindow {
         pageStack.push(page)
     }
 
-    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|pointer|ignore|gaze|hands|bluetooth opens the app on that page.
+    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|voice|pointer|ignore|gaze|hands|bluetooth opens the app on that page.
     pageStack.initialPage: ({ buttons: buttonsPage, controllers: controllersPage, games: gamesPage, keyboard: keyboardPage,
-                              pointer: pointerPage, ignore: ignorePage, gaze: gazePage, hands: handsPage,
+                              voice: voicePage, pointer: pointerPage, ignore: ignorePage, gaze: gazePage, hands: handsPage,
                               bluetooth: bluetoothPage })[startPage] || devicesPage
 
     Connections {
@@ -516,7 +517,7 @@ Kirigami.ApplicationWindow {
             id: kpage
             title: "Keyboard"
             // Pass-through keyboards connected now: with "no_keyboard", the keyboard waits for none.
-            // A program's uinput keyboard (frame-voice's, say) doesn't count.
+            // A program's uinput keyboard (a remote desktop's, say) doesn't count.
             property var keyboards: backend.devices.filter(d => d.connected && d.role === "passthrough"
                                                                 && d.kinds.indexOf("keyboard") >= 0 && !d.uinput)
 
@@ -594,7 +595,8 @@ Kirigami.ApplicationWindow {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                     wrapMode: Text.WordWrap
                     text: "Hold the modifiers (Ctrl, Alt, Shift, Meta), then press the key, on any keyboard. Or tap "
-                          + "one modifier on its own. The combination's last key isn't typed; the modifiers still reach "
+                          + "one modifier on its own: a left one taps either side, a right one only itself (Right Ctrl). "
+                          + "The combination's last key isn't typed; the modifiers still reach "
                           + "the app. While you're in Steam or a game, they see the keys too. Until you remove or change "
                           + "them, a Meta tap opens the Steam menu (or closes the dashboard) instead of the desktop's "
                           + "launcher, and Meta+Shift+F floats the desktop window under the pointer in VR, or puts it "
@@ -615,8 +617,183 @@ Kirigami.ApplicationWindow {
                       + "menu or Steam's own keyboard is up. Type on it with a laser or the 3D mouse. It types into any "
                       + "app, but only Qt, GTK and Firefox apps say when a text field is selected; for the rest "
                       + "(Chromium, Electron and X11 apps), map Open/close keyboard to a button on the Buttons or "
-                      + "Controllers page. Keyboards set to Ignore, and keyboards other programs make (like "
-                      + "frame-voice's), don't count as connected."
+                      + "Controllers page. Keyboards set to Ignore, and keyboards other programs make, don't "
+                      + "count as connected."
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Voice
+    Component {
+        id: voicePage
+        Kirigami.ScrollablePage {
+            id: vpage
+            title: "Voice"
+            property var st: backend.voiceStatus
+            property var vs: backend.voiceSettings
+            property bool capturing: false
+            Component.onCompleted: backend.refreshVoice()
+            Component.onDestruction: if (capturing) backend.cancelControllerCapture()
+
+            Connections {
+                target: backend
+                function onCapturedController(button, label) {
+                    if (vpage.capturing) { vpage.capturing = false; backend.addVoiceButton(button) }
+                }
+            }
+            Timer {
+                // The relay takes every button for 30 s while capturing.
+                running: vpage.capturing
+                interval: 30000
+                onTriggered: { backend.cancelControllerCapture(); vpage.capturing = false }
+            }
+
+            ColumnLayout {
+                spacing: Kirigami.Units.largeSpacing
+
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: !backend.voiceInstalled
+                    type: Kirigami.MessageType.Information
+                    text: "Voice dictation isn't installed. Run voice/run.sh install in Frametop's folder: it "
+                          + "downloads about 320 MB of speech models, which stay on the headset."
+                }
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: backend.voiceInstalled && backend.voiceEnabled && !vpage.st.running
+                    type: Kirigami.MessageType.Warning
+                    text: "Voice dictation is on but not running. See journalctl --user -u frametop-voice."
+                }
+
+                Kirigami.FormLayout {
+                    Layout.fillWidth: true
+                    enabled: backend.voiceInstalled
+
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Voice dictation:"
+                        text: !vpage.st.running ? "Off" : vpage.st.dictating ? "On, listening now" : "On"
+                        checked: backend.voiceEnabled
+                        onToggled: backend.setVoiceOn(checked)
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Push to talk" }
+                    Controls.Label {
+                        Kirigami.FormData.label: "Keys:"
+                        text: backend.dictationKeys.length
+                              ? backend.dictationKeys.map(k => k.label + " (" + k.actionLabel.toLowerCase() + ")").join(", ")
+                              : "none"
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                    }
+                    Controls.Button {
+                        text: "Change on the Keyboard page"
+                        icon.name: "input-keyboard"
+                        onClicked: root.show(keyboardPage)
+                    }
+                    Repeater {
+                        model: backend.voiceButtons
+                        delegate: RowLayout {
+                            required property var modelData
+                            Kirigami.FormData.label: "Controller:"
+                            Controls.Label { text: modelData.label }
+                            Controls.ToolButton {
+                                icon.name: "edit-delete"
+                                display: Controls.AbstractButton.IconOnly
+                                text: "Remove"
+                                Controls.ToolTip.text: text
+                                Controls.ToolTip.visible: hovered
+                                onClicked: backend.removeVoiceButton(modelData.button)
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: backend.voiceButtons.length ? "Another:" : "Controller:"
+                        Controls.Button {
+                            text: vpage.capturing ? "Press a button on a controller…" : "Capture a button"
+                            icon.name: "input-gamepad"
+                            highlighted: vpage.capturing
+                            enabled: backend.controllerStatus.helper
+                            onClicked: {
+                                if (vpage.capturing) { backend.cancelControllerCapture(); vpage.capturing = false }
+                                else { vpage.capturing = true; backend.startControllerCapture() }
+                            }
+                        }
+                        Controls.Label { text: "or"; opacity: 0.7 }
+                        Controls.ComboBox {
+                            id: voiceButtonBox
+                            model: backend.controllerButtons
+                            textRole: "text"
+                            valueRole: "value"
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                        }
+                        Controls.Button {
+                            text: "Add"
+                            icon.name: "list-add"
+                            onClicked: backend.addVoiceButton(voiceButtonBox.currentValue)
+                        }
+                    }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "Controller buttons:"
+                        model: backend.voiceModes
+                        textRole: "text"
+                        valueRole: "value"
+                        Component.onCompleted: currentIndex = indexOfValue(vpage.vs.controller_mode)
+                        onActivated: backend.setVoiceControllerMode(currentValue)
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Typing" }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "As you talk:"
+                        text: "Type words while you're still talking (off: all at once when you stop)"
+                        checked: vpage.vs.live_typing
+                        onToggled: backend.setVoiceOption("live_typing", checked)
+                    }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Sounds:"
+                        text: "A short tone when dictation starts and stops"
+                        checked: vpage.vs.sounds
+                        onToggled: backend.setVoiceOption("sounds", checked)
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Wake word" }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Wake word:"
+                        text: "Listen for it, then for a command (the microphone stays open)"
+                        checked: vpage.vs.wake_word
+                        onToggled: backend.setVoiceOption("wake_word", checked)
+                    }
+                    Controls.TextField {
+                        Kirigami.FormData.label: "Say:"
+                        text: vpage.vs.wake_phrases.map(p => p.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())).join(", ")
+                        placeholderText: "Hey Computer"
+                        enabled: vpage.vs.wake_word
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 16
+                        onEditingFinished: backend.setWakePhrases(text)
+                    }
+                    Repeater {
+                        model: backend.voiceCommands
+                        delegate: Controls.Label {
+                            required property var modelData
+                            Kirigami.FormData.label: "Command:"
+                            text: "\u201c" + modelData.say + "\u201d runs " + modelData.run
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                        }
+                    }
+                }
+
+                Controls.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    text: "Speech is recognised on the headset; nothing leaves it. Text is typed where you type: the "
+                          + "desktop window you clicked last, or Steam and games. It waits while you hold Ctrl, Alt, "
+                          + "Shift or Meta, so letters don't turn into shortcuts. Recordings under 2 seconds are "
+                          + "dropped. A key works only on its own: with another modifier held it's a shortcut, not "
+                          + "dictation. Controller buttons still do what they do in games. After the wake word, a "
+                          + "command goes to voice/hooks/on-command, or runs a program you set in "
+                          + "~/.config/frametop-voice.json (\"commands\"; see voice/README.md)."
+                }
             }
         }
     }

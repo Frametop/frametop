@@ -16,7 +16,7 @@
 #      now keeps running until you restart the headset.
 #   2. After the restart, run it again. It deletes the code (~/frametop, or the releases in
 #      ~/.local/share/frametop/releases with their containers and images) and, if you want, your
-#      settings and the build container.
+#      settings, voice dictation's speech models, and the build container.
 # When nothing of Frametop is running, one run does both.
 #
 # Options (piped, they go after "bash -s --"):
@@ -76,7 +76,7 @@ find_repo() {
 # Frametop's programs that are running now (step 1 leaves them running until the restart).
 running() {
   local n out=()
-  for n in ft-screens ft-pointer ft-powerd ft-eyegrab ft-camd ft-hands; do
+  for n in ft-screens ft-pointer ft-powerd ft-eyegrab ft-camd ft-hands ft-voiced whisper-server; do
     pgrep -x "$n" >/dev/null && out+=("$n")
   done
   pgrep -f '[i]nput/input-relay\.py' >/dev/null && out+=("input relay")
@@ -252,6 +252,12 @@ main() {
     echo "setup (${kept[*]/#$HOME/\~})."
     ask "Delete your settings too? Keep them to pick up where you left off if you reinstall." n &&
       run rm -rf "${kept[@]}"
+  fi
+
+  # Frametop Voice's speech models (voice/models.sh): downloaded again by an install.
+  if [ -d "$HOME/.local/share/frametop/voice" ]; then
+    ask "Delete voice dictation's speech models ($(size "$HOME/.local/share/frametop/voice"); an install downloads them again)?" y &&
+      run rm -rf "$HOME/.local/share/frametop/voice"
   fi
 
   local recs=()

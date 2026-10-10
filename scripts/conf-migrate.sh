@@ -6,6 +6,9 @@
 #   camera names even when they're backwards (some SteamVR restarts swap them), so hands landed
 #   beside their cutouts and the hand recorder labelled the side cameras wrong. auto tells from
 #   the hands.
+#   SHARE_KEYS: gone on 2026-10-10. It sent the keys of keyboards grabbed for the desktop to
+#   @frametop_keys for frame-voice, which is now Frametop Voice and gets its keys from the relay.
+#   The example's line goes; a changed one stays, unread, and gets a note.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
@@ -21,5 +24,14 @@ if grep -qxF "$old" "$f"; then
   cat "$tmp" > "$f"   # in place: the file keeps its owner and mode
   rm -f "$tmp"
   echo "settings: HANDS_SWAP_SIDES=0 (the old default) is now auto: hand tracking tells the side cameras apart itself"
+fi
+old="SHARE_KEYS=0       # 1 = keys of keyboards grabbed for the desktop also go to @frametop_keys, for hotkey tools (any local process can listen)"
+if grep -qxF "$old" "$f"; then
+  tmp=$(mktemp)
+  awk -v old="$old" '$0 != old { print }' "$f" > "$tmp"
+  cat "$tmp" > "$f"
+  rm -f "$tmp"
+elif grep -q '^SHARE_KEYS=1' "$f"; then
+  echo "settings: SHARE_KEYS=1 does nothing now: nothing sends keys to @frametop_keys (Frametop Voice gets them from the input relay)"
 fi
 EOF

@@ -6,9 +6,10 @@ follows the controllers' raw input through a web socket there (mailbox input_ser
 request_input_state_updates). Reading it takes nothing from anyone: whatever the buttons are
 bound to still happens, and it works whatever app has input focus, VR games included. SteamVR
 input only reaches the focused app, or an overlay with global input, which then takes the button
-from the game (pointer/helper/vrbuttons.h). frame-voice reads its push-to-talk button the same
-way. It's undocumented, so a SteamVR update could change it (scripts/update-check.py checks it).
-The host's Python has no `websockets` module, so this is a small RFC 6455 client of its own.
+from the game (pointer/helper/vrbuttons.h). Frametop Voice (voice/ft-voiced) reads its
+push-to-talk button the same way. It's undocumented, so a SteamVR update could change it
+(scripts/update-check.py checks it). The host's Python has no `websockets` module, so this is a
+small RFC 6455 client of its own.
 
   controllers()   the Frame controllers SteamVR has now: {root path: "left" | "right"}. A
                   controller's root path is /user/hand/<side>, or /devices/cv/<serial> while the

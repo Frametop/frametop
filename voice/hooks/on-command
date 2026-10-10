@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Frametop Voice runs this on the host after a wake word, with the transcribed command as $1,
+# when no voice command (voice_commands.py) matches. Replace it with a call into your assistant,
+# or point "command_hook" in the settings' "advanced" "wake" section at your own. Runs as your
+# user, no shell interpolation of $1.
+set -euo pipefail
+text="$1"
+log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/frametop/voice"
+mkdir -p "$log_dir"
+printf '%s\t%s\n' "$(date -Is)" "$text" >> "$log_dir/commands.log"
+
+# Built-in example: "<wake word>, type hello world" types into the focused field.
+shopt -s nocasematch
+if [[ "$text" =~ ^(type|dictate)[[:space:],:]+(.*)$ ]]; then
+    exec "$(dirname "$0")/../ft-voice" type "${BASH_REMATCH[2]}"
+fi

@@ -56,11 +56,14 @@ PACKAGES = {
     "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
             "after a desktop restart; floating a window; no blur behind the taskbar's menus",
     "plasma-workspace": "the taskbar and panels after a desktop restart; no DiscoverNotifier or "
-                        "ibus-daemon inside the desktop",
+                        "ibus-daemon inside the desktop; a notification in the desktop shows in the "
+                        "Steam session and its buttons work (ft-notifyfwd)",
     "at-spi2-core": "an AT-SPI-aware app appears on the nested desktop's accessibility bus; "
                     "the registry stops and comes back after a desktop restart",
     "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked",
     "bluez": "a Bluetooth mouse reconnecting after it sleeps",
+    "pipewire": "voice dictation hears you (ft-voiced records with the container's pw-record) and "
+                "its mic isn't silent after a reboot (SteamOS's echo-cancel chain)",
     "steamdeck-kde-presets": "Launch a program -> Native Desktop opens SteamOS's own desktop; starting "
                              "the desktop sends Steam no command line (no ExecCommandLine in "
                              "~/.local/share/Steam/logs/console_log.txt)",
@@ -76,6 +79,7 @@ UNITS = {
     "frametop-power": "@ft_powerd",
     "frametop-camd": None,
     "frametop-hands": None,
+    "frametop-voice": "@frametop_voice",
 }
 
 # eye-server.mmap offsets, the same as gaze/ft-gaze.cpp's (packed, little-endian), and the
@@ -218,6 +222,25 @@ def check_host():
     else:
         report("warn", "KWin effects", f"no built-in {', '.join(gone)} effect: renamed? The desktop's "
                "kwinrc may no longer turn it off (session/frametop-session.sh)")
+
+    # ft-notifyfwd uses Plasma's notification watcher API, which no spec covers, and PyGObject.
+    plasma = b""
+    for lib in ("/usr/lib/libnotificationmanager.so.1", "/usr/lib/libnotificationmanager.so"):
+        try:
+            with open(lib, "rb") as f:
+                plasma = f.read()
+            break
+        except OSError:
+            pass
+    missing = [m for m in (b"RegisterWatcher", b"InvokeAction") if m not in plasma]
+    if run("/usr/bin/python3", "-c", "from gi.repository import Gio")[0] != 0:
+        report("warn", "notifications", "no PyGObject (Gio) for /usr/bin/python3: the desktop's "
+               "notifications stay in the desktop (session/ft-notifyfwd)")
+    elif missing:
+        report("warn", "notifications", f"Plasma's notification manager has no {', '.join(m.decode() for m in missing)}: "
+               "the desktop's notifications stay in the desktop (session/ft-notifyfwd)")
+    else:
+        report("ok", "notifications", "Plasma has its notification watcher API (ft-notifyfwd)")
 
     if systemctl("cat", "steamvr.service"):
         report("ok", "steamvr.service", "Frametop's services start and stop with it")

@@ -10,8 +10,9 @@ the dev container:
     1920x1080 worth of pixels, rotation for portrait.)
   - Visibility (ft-screens): when the screens show (always, only with the SteamVR
     dashboard open, while you look at a controller, or only when toggled), the wrist
-    angle within which a pinned screen shows, and pinning each screen to a wrist or
-    your head.
+    angle within which a pinned screen shows, pinning each screen to a wrist or your
+    head, and whether the desktop's notifications go to the Steam session
+    (NOTIFY_FORWARD, session/ft-notifyfwd; its state from its log).
   - Layout: a preset (curved or flat, rows, distance, gap, height) or a named layout
     saved from where the screens are, with a preview; arrange now; save the current
     arrangement under a name; rename and delete; arrange automatically when the
@@ -62,6 +63,8 @@ FT_POWERD = "\0ft_powerd"
 # nothing was saved.
 STEAM_SLEEP_AC_DEFAULT = 3600
 SCALES = [0.75, 1.0, 1.25, 4 / 3, 1.5, 1.75, 2.0]
+NOTIFY_FORWARD = ("auto", "on", "off")  # session/ft-notifyfwd; frametop.conf's NOTIFY_FORWARD
+NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tmp is the host's)
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
 
@@ -121,6 +124,7 @@ class Backend(QObject):
         self._steam_busy = False
         self._steamDone.connect(self._steam_done, Qt.QueuedConnection)
         self._pins = []     # each running screen's pin: none | left | right | head
+        self._notify_state = ""
         self.poll = QTimer(interval=3000, timeout=self._check_running)
         self.poll.start()
         self._check_running()
@@ -133,8 +137,10 @@ class Backend(QObject):
                 return cast(conf.get(key, default))
             except ValueError:
                 return default
+        notify = conf.get("NOTIFY_FORWARD", "auto")
         return {"screens": num("SCREENS", 2, int), "width": num("WIDTH", 1920, int),
-                "height": num("HEIGHT", 1080, int), "physWidth": num("PHYS_WIDTH", 1.6)}
+                "height": num("HEIGHT", 1080, int), "physWidth": num("PHYS_WIDTH", 1.6),
+                "notifyForward": notify if notify in NOTIFY_FORWARD else "off"}
 
     def _check_running(self):
         # The session's own Wayland socket (host processes' environments aren't readable
@@ -142,12 +148,15 @@ class Backend(QObject):
         running = os.path.exists(f"/run/user/{os.getuid()}/frametop/wayland-0")
         count = self._screens_running() if running and ft_layout.backend() == "screens" else 0
         pins = self._read_pins(count)
-        if running != self._running or count != self._running_count or pins != self._pins:
+        notify_state = self._read_notify_state() if running else ""
+        if (running != self._running or count != self._running_count or pins != self._pins
+                or notify_state != self._notify_state):
             if running != self._running or count != self._running_count:
                 self._started = self._conf() if running else {}
             self._running = running
             self._running_count = count
             self._pins = pins
+            self._notify_state = notify_state
             self.changed.emit()
         self._check_powerd()
 
@@ -158,6 +167,22 @@ class Backend(QObject):
             f = reply.split() if reply and reply.startswith("ok") else []
             pins.append(f[16] if len(f) > 16 else "none")
         return pins
+
+    @staticmethod
+    def _read_notify_state():
+        """ft-notifyfwd's: forwarding | waiting (no usable server on the user bus) | "" (not running)."""
+        try:
+            with open(NOTIFYFWD_LOG) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            return ""
+        # the last state line: errors it logs in between (a failed Notify) don't change it
+        for line in reversed(lines):
+            if line == "ft-notifyfwd: forwarding":
+                return "forwarding"
+            if line.startswith("ft-notifyfwd: not forwarding"):
+                return "waiting"
+        return ""
 
     def _ask_screens(self, text):
         """Request/reply to ft-screens; None if it isn't running."""
@@ -382,6 +407,26 @@ class Backend(QObject):
     @Slot()
     def toggleScreens(self):
         self._ask_screens("toggle")
+
+    # --- the desktop's notifications in the Steam session (session/ft-notifyfwd) ---
+    @Property(str, notify=changed)
+    def notifyForward(self):
+        return self._conf()["notifyForward"]
+
+    @Property(str, notify=changed)
+    def notifyForwardState(self):
+        return self._notify_state
+
+    @Property(bool, notify=changed)
+    def notifyRestartNeeded(self):
+        """The session writes ft-notifyfwd's autostart entry when it starts."""
+        return self._running and bool(self._started) and self._started["notifyForward"] != self._conf()["notifyForward"]
+
+    @Slot(str)
+    def setNotifyForward(self, mode):
+        if mode in NOTIFY_FORWARD:
+            write_conf_value("NOTIFY_FORWARD", mode)
+            self.changed.emit()
 
     # --- ft-screens: visibility and pinning ---
     @Property("QVariantMap", notify=changed)

@@ -1,0 +1,159 @@
+# frame-voice
+
+Local voice input for the Steam Frame. Nothing leaves the headset.
+
+- **Dictation**: tap a key (or hold a controller button) and speak. Words are typed as you talk into whatever has focus (desktop apps, search bars, terminals, game-mode windows) through a virtual uinput keyboard, transcribed on the headset by Moonshine.
+- **Wake words**: say one (default "Hey Computer"; add your own in the settings app), then a command. The command is transcribed and handed to a hook script and to any event subscribers, or runs a program you set up for it (see Voice commands). This is the entry point for a voice assistant.
+
+## Pieces
+
+| Part | What it does |
+| --- | --- |
+| `frame-voice-whisper.service` | `whisper-server` (whisper.cpp, Vulkan on the Adreno 750) with `ggml-small.en-q5_1` loaded, on `127.0.0.1:8178` |
+| `frame-voice.service` | `frame_voice.py`: mic capture, hotkey, wake word, typing, control socket |
+| `frame-voice-vr-input.service` | `frame_voice_vr_input.py`: controller push-to-talk, reads left d-pad down from SteamVR's raw input stream |
+| `frame-voice-config` | Settings app (GTK 4 / libadwaita): start and stop the services, start at system startup, pick push-to-talk buttons by pressing them. In the app menu as *Frame Voice Settings* |
+| `frame-voice-ctl` | CLI for the control socket |
+| `hooks/on-command` | Runs after a wake word with the command text as `$1` |
+
+The mic is captured once with `pw-record`. The wake word spotter (sherpa-onnx open-vocabulary KWS, about 5% of one core) listens continuously. Silero VAD ends commands on silence and trims clips before transcription.
+
+## Triggers
+
+| Where | How |
+| --- | --- |
+| Keyboard or mouse | Tap **Right Ctrl** (default) to start, tap again to stop. It counts only on its own: shortcuts with it (Ctrl+C), or with another modifier held when you press it (Shift+Right Ctrl), don't start or stop dictation. Hold mode is available in the settings app. |
+| Steam Frame controllers | Hold left **d-pad down** (default), speak, release. Works in games, the Steam UI and the desktop with no per-app setup. The button is observed, not captured, so whatever else it is bound to still happens. |
+| Desktop mode shortcut | KDE System Settings > Shortcuts > add a command shortcut running `frame-voice-ctl toggle`. |
+| Scripts, the assistant | `frame-voice-ctl toggle`, `start`, `stop`, `cancel`, `type "text"` |
+| Voice | "<wake word>, ..." runs a matching voice command (see Voice commands), otherwise `hooks/on-command`. "Hey Computer, type hello world" types "hello world" (example in the hook). |
+
+Recordings shorter than 2 s (`min_seconds`) are discarded with the cancel tone, so brief or accidental presses never type anything.
+
+*Frame Voice Settings* (`./frame-voice-config`) starts and stops all three services (**Running**) and sets whether they start at system startup (see Services). Change the buttons there too: **Add** waits for you to press a controller button, key or mouse button (not left/right click, not the controller's system button). The app also sets hold or tap mode per trigger, switches live typing and sounds, and manages wake words: add any phrase in English words (they're spelled out for the spotter when loaded, no training), remove them, or turn listening off. Changes apply within a couple of seconds. Everything lives in `~/.config/frame-voice/settings.json`, along with voice commands (see Voice commands); both services apply changes without a restart. Delete the file to go back to the defaults.
+
+Live text works by agreement, with the approach and model borrowed from the Faceclaw app for Even Realities G2 glasses (Moonshine base through sherpa-onnx, on the CPU): the speech since your last pause is re-decoded every 0.8 s, and words two decodes in a row agree on are typed, except the last one, whose punctuation can still change. One word the two decodes disagree on (a filler heard as "a" once and "uh" the next time) doesn't hold back the words after it once three of them agree again. At a 0.8 s pause, or at the quietest point once a decode would pass 8 s of audio (Moonshine returns nothing past about 9 s), the window is decoded one last time and its remaining words are typed.
+
+Windows join up like one recording. Each one is decoded after the last 1.5 s of the one before it (`context_seconds`), so Moonshine hears a sentence that goes on after a pause as the continuation it is. Every decode is lined up with the words already typed, by content rather than by word count, and only what comes after them is new; a phrase you really say twice stays twice. The punctuation after a pause waits until the next window is heard: a period Moonshine put there only because the audio stopped is dropped when the next decode runs on and the word can't end a sentence ("the", "to", "we are"), so "increase the. Width" comes out as "increase the width". A window cut without a pause ends mid-speech, where Moonshine can garble or repeat the cut-off words, so only words the last live decode agrees with are typed then; the rest (up to 5) go to the next window, whose context is made long enough to hold them. After a silence, 0.5 s before the speech is kept, and anything loud in the last second the speech detector didn't flag (a short "I" before a gap), since its speech flag comes about 0.27 s late.
+
+On test clips (two TTS voices, 1 s pauses placed mid-sentence and between sentences, replayed in real time) every mid-sentence seam came out without a stray period or capital. The previous version put a period in 4 of the 6, deleted the phrase said twice, doubled words where a window was cut without a pause, and in one run dropped a whole phrase. The last word of each phrase is typed 0.3-1.8 s after you say it, about the same as before. Moonshine adds fewer commas than whisper. `engine = "whisper"` switches live text to the whisper-server (it dropped words when re-decoded this way in testing). Wake-word commands still use whisper.
+
+Live text never types while Ctrl, Alt, Shift or Super is held on any keyboard: the letters would reach apps as shortcuts. It waits for the release. That is why the keyboard default is tap mode: holding Right Ctrl to talk would hold back the text until you let go. (Pressing and releasing Ctrl on the virtual keyboard to "unhold" it did not work: letters still arrived as Ctrl shortcuts in the Frametop desktop.) When typing holds back, the log says which key on which device it waits for (`typing waits for release of ...`).
+
+Only if you use Frametop: keyboards grabbed by Frametop's input relay (while typing goes to its VR desktop) can't be read directly, so the relay sends their keys to the abstract socket `@frametop_keys`, and frame-voice treats them like keys from any other keyboard. The relay only does this with `SHARE_KEYS=1` in `~/.config/frametop.conf`; without it, the push-to-talk key does nothing while typing goes to the desktop. frame-voice accepts these keys only from your own user, and skips its own typing keyboard, which the relay grabs too. With `SHARE_KEYS=1`, everything typed into the desktop, passwords included, goes to that socket, where any local process could listen while frame-voice isn't running. Without Frametop nothing sends to the socket; keyboards aren't grabbed, and frame-voice reads them directly.
+
+Audio cues are off by default (`[sounds] enabled = true` turns them on): rising tone = recording, falling tone = processing, single high tone = wake word heard, low tone = cancelled or nothing heard.
+
+## Control and events
+
+```
+./frame-voice-ctl status
+./frame-voice-ctl wake off        # stop wake word listening; the mic fully closes when idle
+./frame-voice-ctl wake on
+./frame-voice-ctl wake            # act as if a wake word was heard
+./frame-voice-ctl type "text"     # type into the focused app
+./frame-voice-ctl events          # stream JSON events: wake, command, dictation, command_timeout, error
+```
+
+The socket is `/run/user/<uid>/frame-voice/control.sock` (systemd's runtime dir; the clients ignore `$XDG_RUNTIME_DIR`, which Frametop's desktop points elsewhere), mode 0600. It can type into any focused window, so keep it owner-only.
+
+An assistant can either replace `hooks/on-command` or subscribe with `frame-voice-ctl events` and act on `{"event": "command", "text": ...}`.
+
+## Voice commands
+
+A command that starts with a set phrase can run a program. Add a `"commands"` list to `~/.config/frame-voice/settings.json` by hand (the settings app doesn't edit it, and keeps it when it saves). It is empty by default. Example: "Hey Computer, flag that" or "Hey Computer, flag that, fingers crossed" runs a hand tracking tool's flag command.
+
+```json
+  "commands": [
+    {
+      "say": ["flag that", "flag this", "flag it", "flag"],
+      "run": ["~/.local/bin/ft-handsctl", "flag"]
+    }
+  ]
+```
+
+| Key | Meaning |
+| --- | --- |
+| `say` | Phrases. Case and punctuation don't matter. |
+| `run` | The program and its arguments. `~` is expanded. It runs directly, never through a shell, so spoken words can't become shell syntax. |
+| `rest` | Optional. `"arg"` (default): the words after the phrase are added as one more argument when there are any. `"none"`: they never are. |
+
+Matching works on whole words. A command matches when its words equal a phrase or start with it, so "Flag that." and "Flag that, fingers crossed." match "flag that", but "Flagging that" and "Please flag that" don't. If phrases of several entries match, the longest wins, then the first entry. The rest keeps your words as transcribed, without the punctuation that follows the phrase or a final period: the second example runs `ft-handsctl flag "fingers crossed"`.
+
+A matched command runs instead of `hooks/on-command`. The `command` event is still sent, with `"matched"` (the phrase) and `"ran"` (the argv) added. The program gets these environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `FRAME_VOICE_EVENT` | `voice_command` |
+| `FRAME_VOICE_TEXT` | The whole transcribed command |
+| `FRAME_VOICE_PHRASE` | The phrase that matched, as written in `say` |
+| `FRAME_VOICE_REST` | The words after it, or empty |
+| `FRAME_VOICE_WAKE_UNIX` | When the wake word was heard, in Unix seconds (e.g. `1791582811.212`) |
+
+frame-voice doesn't wait for the program. A malformed entry is skipped with a warning in the log (`journalctl --user -u frame-voice`). Changes to the list apply within a couple of seconds, like the other settings. Updating frame-voice from a version without voice commands needs one `systemctl --user restart frame-voice`.
+
+## Config
+
+Copy `config.example.toml` to `~/.config/frame-voice/config.toml`. Every key is optional. Then `systemctl --user restart frame-voice`.
+
+Wake phrase tuning: raise `threshold` for fewer false triggers, raise `boost` if it misses you. Phrases can be anything spelled in English words; they are tokenized at startup, no training needed.
+
+## Services
+
+**Running** in the settings app starts or stops all three units; **Start at system startup** enables or disables them. Or by hand:
+
+```
+systemctl --user status frame-voice-whisper frame-voice frame-voice-vr-input
+journalctl --user -u frame-voice -f
+systemctl --user stop frame-voice frame-voice-whisper frame-voice-vr-input
+```
+
+The units are linked from `systemd/`. Don't turn startup off with a plain `systemctl --user disable`: it removes those links too, and when a unit file goes missing systemd drops the typing keyboard (see below), even while the service runs. The app does what this does:
+
+```
+systemctl --user disable --no-reload frame-voice-whisper frame-voice frame-voice-vr-input
+systemctl --user link --no-reload ~/Desktop/Projects/frame-voice/systemd/*.service
+systemctl --user daemon-reload
+```
+
+Startup matters for typing into game-mode windows: SteamVR only uses the typing keyboard if it existed when SteamVR started (see Build notes). Enabled, `frame-voice` starts before SteamVR, and stopping and starting it keeps the same keyboard. Disabled, it starts only when you start it, after SteamVR, so restart SteamVR once after each start to type into game-mode windows: systemd keeps a stopped unit's fd store only while the unit is enabled, so each start makes a new keyboard. Typing into Frametop's desktop works either way.
+
+## Build notes
+
+whisper.cpp is in `vendor/whisper.cpp`, built with:
+
+```
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DGGML_NATIVE=OFF \
+  -DGGML_CPU_ARM_ARCH=armv9.2-a+dotprod+i8mm+sve2+fp16 \
+  -DCMAKE_PREFIX_PATH=$PWD/../prefix \
+  -DCMAKE_C_FLAGS="-mtune=cortex-a720 -I$PWD/../prefix/include" \
+  -DCMAKE_CXX_FLAGS="-mtune=cortex-a720 -I$PWD/../prefix/include"
+cmake --build build -j5 --target whisper-server whisper-cli whisper-bench
+```
+
+`vendor/prefix` holds SPIRV-Headers, which SteamOS does not ship. Tests: `.venv/bin/python -m unittest` in the repo (no audio stack needed; with the system `python3` the push-to-talk key tests are skipped, since they need `evdev`). The Python side lives in `.venv` (`evdev sherpa-onnx numpy sentencepiece websockets`). `models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27` holds the Moonshine files from huggingface.co/csukuangfj2 (`encoder_model.ort`, `decoder_model_merged.ort`, `tokens.txt`). The settings app uses the system Python for GTK (`gi`) and the venv for the rest; the `frame-voice-config` launcher sets that up.
+
+The whisper service sets `DISABLE_GAMESCOPE_WSI=1`. Without it the Gamescope Vulkan layer aborts whisper-server at startup.
+
+Typing goes through a uinput keyboard that SteamVR must have open: SteamVR opens `/dev/input` devices only when it starts, and gamescope gets keyboard input from SteamVR. `frame-voice.service` is ordered `Before=steamvr.service` and parks the device's fd in systemd's fd store, so daemon restarts keep the same device. After the very first install, restart SteamVR once. The device is a full keyboard (fd store name `typer2`; the first version, `typer`, had only the typing keys and is replaced automatically, which also needs one SteamVR restart). Multidesk's input relay picks the device up immediately for its desktop screens. To drop the device: `systemctl --user clean --what=fdstore frame-voice`.
+
+Controller input: SteamVR sends OpenVR actions only to the app with input focus, and while the 2D Steam or desktop screens are up the compositor's laser mouse holds focus, so a background or overlay OpenVR app never sees the button there. `frame_voice_vr_input.py` instead subscribes to vrserver's local web socket (`ws://127.0.0.1:27062`, mailbox `input_server`, `request_input_state_updates`), the stream the controller binding page uses for its live view. It is undocumented and could change with a SteamVR update. `frame-voice-vr-input.service` has no `After=steamvr.service`: with `WantedBy=default.target` that is an ordering cycle at boot.
+
+## Measurements (2026-09-25, jfk.wav)
+
+Server with the model loaded, `small.en-q5_1` on Vulkan:
+
+| Clip | Latency |
+| --- | --- |
+| 3.2 s phrase | 0.4 s |
+| 11 s sentence | 1.2 s |
+
+Whisper always encodes a 30 s window. The daemon shrinks `audio_ctx` to the clip length (floor 512), which is most of that speedup. The CPU backend took over 20 s. This process only gets CPUs 0-4; the faster cores are reserved.
+
+Bigger models (2026-09-26, 9 real dictations replayed, 512 window, VR running): `medium.en-q5_0` and `large-v3-turbo-q5_0` were no more accurate than `small.en` on this voice (the one difference: "T3 Code Write" vs "right"), took 2-3x longer (about 3 s and 3.5 s per piece versus 1 s), and loading them next to VR made the headset stutter. Turbo also added stray "..." on streamed pieces. Below a 512 window both loop and take 10-20 s. `small.en` stays the default; both bigger models are still in `models/` (about 1.1 GB).
+
+## Limits
+
+- Typing assumes a US keyboard layout and ASCII. Accents are stripped, other characters dropped.
+- Transcription uses the GPU. A heavy VR game may stutter briefly while a clip transcribes. `ggml-base.en.bin` is faster and lighter if that matters.
+- Not yet verified: typing into SteamVR dashboard/overlay text fields and into apps inside VR games.

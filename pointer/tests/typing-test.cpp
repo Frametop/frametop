@@ -299,6 +299,20 @@ void TestOff() {
     CHECK(!w.Blocked(0) && !w.Blocked(1) && !w.ty.Parked(0), "POINTER_PINCH_TYPING=0: no guard");
 }
 
+// Times below zero (a replay's, relative to a flag): the same.
+void TestNegativeClock() {
+    World w;
+    w.t = -16;
+    w.ty.Key(w.t - 60);
+    w.hands[0] = Keys(0), w.hands[1] = Keys(1);
+    w.Run(0.4);
+    CHECK(w.ty.Posture() && w.Blocked(1), "the posture at t < 0");
+    w.Run(1, 0.2);
+    w.hands[1] = Pointing(1);
+    w.Run(0.3);
+    CHECK(!w.Blocked(1), "raised at t < 0: free");
+}
+
 // The head turned (facing +x): ahead counts along its heading.
 void TestHeading() {
     World w;
@@ -328,6 +342,7 @@ int main() {
     TestTurned();
     TestOff();
     TestHeading();
+    TestNegativeClock();
     if (failures) {
         std::printf("%d failures\n", failures);
         return 1;

@@ -79,6 +79,9 @@ struct Head {
 };
 
 class Typing {
+    static constexpr double kNever = -1e18;  // a time that hasn't come (times may be negative: replays)
+    static bool Ever(double t) { return t > kNever / 2; }
+
 public:
     explicit Typing(Params p = {}) : p_(p) {}
     void SetParams(const Params &p) { p_ = p; }
@@ -92,7 +95,7 @@ public:
     void Frame(double t, const Head &head, const Hand hands[2]) {
         if (p_.hold <= 0) {
             for (Side &s : side_) s = Side{};
-            postureSince_ = -1, posture_ = false;
+            postureSince_ = kNever, posture_ = false;
             return;
         }
         double fx = head.fwd.x, fz = head.fwd.z;
@@ -110,9 +113,9 @@ public:
         // the posture
         bool pose = in[0] && in[1] && std::fabs(hands[0].palm.y - hands[1].palm.y) <= p_.level &&
                     Dist(hands[0].palm, hands[1].palm) <= p_.gap;
-        pose = pose && p_.posture > 0 && (p_.recent <= 0 || (lastKey_ > -1e17 && t - lastKey_ < p_.recent));
-        if (!pose) postureSince_ = -1, posture_ = false;
-        else if (postureSince_ < 0) postureSince_ = t;
+        pose = pose && p_.posture > 0 && (p_.recent <= 0 || (Ever(lastKey_) && t - lastKey_ < p_.recent));
+        if (!pose) postureSince_ = kNever, posture_ = false;
+        else if (!Ever(postureSince_)) postureSince_ = t;
         if (pose && !posture_ && t - postureSince_ >= p_.posture - 1e-9) {
             posture_ = true;
             log.push_back("typing: both hands in the keyboard posture");
@@ -128,22 +131,22 @@ public:
                 }
                 continue;
             }
-            const double dt = s.seen > -1e17 ? std::clamp(t - s.seen, 0.0, 1.0) : 0;
+            const double dt = Ever(s.seen) ? std::clamp(t - s.seen, 0.0, 1.0) : 0;
             s.seen = t;
             if (s.parked) {
                 const double rose = h.palm.y - s.restY;
                 const bool up = rose >= p_.raise, turned = h.down < p_.turned;
                 if (up || turned) {
-                    if (s.leaveSince < 0) s.leaveSince = t;
+                    if (!Ever(s.leaveSince)) s.leaveSince = t;
                     if (t - s.leaveSince >= p_.leave - 1e-9) {
-                        s.parked = false, s.free = true, s.leaveSince = -1;
+                        s.parked = false, s.free = true, s.leaveSince = kNever;
                         char b[96];
                         if (up) std::snprintf(b, sizeof b, "typing: %s hand off the keyboard (raised %.2f m)", Name(k), rose);
                         else std::snprintf(b, sizeof b, "typing: %s hand off the keyboard (palm turned)", Name(k));
                         log.push_back(b);
                     }
                 } else {
-                    s.leaveSince = -1;
+                    s.leaveSince = kNever;
                     if (std::fabs(rose) < p_.raise / 2)
                         s.restY += rose * (1 - std::exp(-dt / std::max(1e-3, p_.restTau)));
                 }
@@ -154,7 +157,7 @@ public:
             // pointing or holding a gesture out of the zone when keys come: not typing (point, then Enter)
             if (h.busy && !in[k] && !s.free) s.free = true;
             if (typing && down) {
-                s.parked = true, s.free = false, s.leaveSince = -1;
+                s.parked = true, s.free = false, s.leaveSince = kNever;
                 if (!s.known || std::fabs(h.palm.y - s.restY) >= p_.raise / 2) s.restY = h.palm.y;
                 s.known = true;
                 log.push_back(std::string("typing: ") + Name(k) + " hand on the keyboard");
@@ -163,7 +166,7 @@ public:
     }
 
     // Typing by the keys: within hold of the last one.
-    bool Keys(double t) const { return p_.hold > 0 && lastKey_ > -1e17 && t - lastKey_ < p_.hold; }
+    bool Keys(double t) const { return p_.hold > 0 && Ever(lastKey_) && t - lastKey_ < p_.hold; }
     bool Posture() const { return posture_; }
     bool Parked(int s) const { return side_[s].parked; }
     bool Free(int s) const { return side_[s].free; }
@@ -186,13 +189,13 @@ private:
         bool parked = false;  // on the keyboard
         bool free = false;    // left it since (keys don't hold it back)
         bool known = false;   // restY is where it typed
-        double restY = 0, seen = -1e18, leaveSince = -1;
+        double restY = 0, seen = kNever, leaveSince = kNever;
     };
     static double Dist(const V3 &a, const V3 &b) { return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)); }
     static const char *Name(int k) { return k ? "right" : "left"; }
     Params p_;
     Side side_[2];
-    double lastKey_ = -1e18, postureSince_ = -1;
+    double lastKey_ = kNever, postureSince_ = kNever;
     bool posture_ = false;
 };
 

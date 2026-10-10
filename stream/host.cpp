@@ -2,10 +2,13 @@
 #include "host.h"
 
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <curl/curl.h>
+#include <openssl/evp.h>
 
 #include <algorithm>
 #include <atomic>
@@ -86,6 +89,33 @@ size_t Append(char *data, size_t size, size_t n, void *out) {
     return size * n;
 }
 
+std::string Base64(const std::string &v) {
+    std::string out(4 * ((v.size() + 2) / 3) + 1, '\0');
+    const int n = EVP_EncodeBlock(reinterpret_cast<unsigned char *>(&out[0]),
+                                  reinterpret_cast<const unsigned char *>(v.data()), int(v.size()));
+    out.resize(size_t(n));
+    return out;
+}
+
+// This end's address toward host:port, as the host sees it (a UDP connect sends nothing).
+std::string LocalAddress(const std::string &host, int port) {
+    addrinfo hints{}, *res = nullptr;
+    hints.ai_socktype = SOCK_DGRAM;
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0) return "";
+    std::string out;
+    const int s = socket(res->ai_family, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    sockaddr_storage me{};
+    socklen_t len = sizeof me;
+    char text[INET6_ADDRSTRLEN] = "";
+    if (s >= 0 && connect(s, res->ai_addr, res->ai_addrlen) == 0 &&
+        getsockname(s, reinterpret_cast<sockaddr *>(&me), &len) == 0 &&
+        getnameinfo(reinterpret_cast<sockaddr *>(&me), len, text, sizeof text, nullptr, 0, NI_NUMERICHOST) == 0)
+        out = text;
+    if (s >= 0) close(s);
+    freeaddrinfo(res);
+    return out;
+}
+
 }  // namespace
 
 std::string KeyDir(const std::string &id) {
@@ -95,10 +125,23 @@ std::string KeyDir(const std::string &id) {
 
 std::string TokenFile(const std::string &host) { return KeyDir("hosts") + "/" + host + ".token"; }
 
+bool SplitPort(std::string *host, int *port) {
+    *port = 0;
+    const size_t colon = host->rfind(':');
+    // One colon: HOST:PORT. More are an IPv6 address, with a port only as [ADDRESS]:PORT.
+    if (colon == std::string::npos || (host->find(':') != colon && (*host)[0] != '[')) return true;
+    const std::string digits = host->substr(colon + 1);
+    if (digits.empty() || digits.size() > 5 || !std::all_of(digits.begin(), digits.end(), ::isdigit)) return false;
+    *port = std::atoi(digits.c_str());
+    host->resize(colon);
+    if (host->size() > 1 && (*host)[0] == '[' && host->back() == ']') *host = host->substr(1, host->size() - 2);
+    return *port > 0 && *port < 65535;
+}
+
 bool WebApi::Load(const std::string &host, const std::string &file) {
     std::ifstream f(file);
     if (!(f >> token)) return false;
-    base = "https://" + host + ":47990";
+    base = "https://" + host + ":" + std::to_string(kGameStreamPort + 1);
     // The Web UI's public key as Remote Displays saw it when signing in (HOST.pin next to
     // HOST.token): another one is refused. Without one, any (a host from make-frametop-token).
     const std::string pinFile = file.size() > 6 && file.compare(file.size() - 6, 6, ".token") == 0
@@ -108,12 +151,28 @@ bool WebApi::Load(const std::string &host, const std::string &file) {
     return true;
 }
 
+bool WebApi::LoadLogin(const std::string &host, int port, FILE *in) {
+    char user[256], pass[256];
+    if (!std::fgets(user, sizeof user, in) || !std::fgets(pass, sizeof pass, in)) return false;
+    user[std::strcspn(user, "\r\n")] = pass[std::strcspn(pass, "\r\n")] = '\0';
+    if (!*user) return false;
+    login = std::string(user) + ":" + pass;
+    std::memset(pass, 0, sizeof pass);
+    base = "https://" + host + ":" + std::to_string((port ? port : kGameStreamPort) + 1);
+    // Every instance on a host shares the Web UI certificate Remote Displays pinned (the Mac's
+    // host setup gives them one), so one pin per address.
+    std::ifstream p(KeyDir("hosts") + "/" + host + ".pin");
+    if (!(p >> pin)) pin.clear();
+    return true;
+}
+
 long WebApi::Call(const char *method, const std::string &path, const nlohmann::json *body, nlohmann::json *out) {
     CURL *c = curl_easy_init();
     if (!c) return -1;
     std::string text;
     const std::string payload = body ? body->dump() : "";
-    curl_slist *headers = curl_slist_append(nullptr, ("Authorization: Bearer " + token).c_str());
+    curl_slist *headers = curl_slist_append(
+        nullptr, (login.empty() ? "Authorization: Bearer " + token : "Authorization: Basic " + Base64(login)).c_str());
     if (body) headers = curl_slist_append(headers, "Content-Type: application/json");
     curl_easy_setopt(c, CURLOPT_URL, (base + path).c_str());
     curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, method);
@@ -174,11 +233,11 @@ void Client::DropConnection() {
     http_init(dir.c_str(), 0);
 }
 
-bool Client::Connect(const std::string &h, const std::string &name) {
-    host = h, id = name, dir = KeyDir(id);
+bool Client::Connect(const std::string &h, const std::string &name, int httpPort) {
+    host = h, id = name, dir = KeyDir(id), port = httpPort;
     const mode_t old = umask(077);  // the client's private key
     NewUniqueId(dir);
-    const int r = gs_init(&server, host.data(), 0, dir.c_str(), 0, true);
+    const int r = gs_init(&server, host.data(), (unsigned short)port, dir.c_str(), 0, true);
     umask(old);
     if (r != GS_OK) return std::fprintf(stderr, "can't reach %s: %s\n", host.c_str(), gs_error ? gs_error : "?"), false;
     DropConnection();
@@ -197,6 +256,7 @@ bool Client::Pair(WebApi *api) {
         std::printf("paired. Now allow it to launch apps and use the mouse and keyboard in the Web UI (Clients).\n");
         return true;
     }
+    if (!api->login.empty()) return PairByLogin(*api, pin);
     std::map<std::string, std::pair<std::string, uint32_t>> before, after;
     if (!api->Clients(&before)) return false;
     // gs_pair waits for the PIN, so it runs beside the request that gives it.
@@ -225,6 +285,54 @@ bool Client::Pair(WebApi *api) {
     if (uuid.empty()) return std::fprintf(stderr, "paired, but the host lists no new client named %s\n", id.c_str()), false;
     if (!api->Grant(uuid, id)) return false;
     std::printf("paired as %s (host id %s), allowed to launch and to use the mouse and keyboard\n", id.c_str(), uuid.c_str());
+    return true;
+}
+
+// Sunshine: gs_pair's request waits on the host until it's approved with its PIN. The host
+// lists waiting requests with an id (GET /api/pin); this one is libgamestream's device name
+// from this end's address.
+bool Client::PairByLogin(WebApi &api, char *pin) {
+    // The login first: a request left waiting by a failed try blocks this client's next one
+    // until the host drops it.
+    nlohmann::json r;
+    const long first = api.Call("GET", "/api/pin", nullptr, &r);
+    if (first == 401) return std::fprintf(stderr, "wrong user name or password\n"), false;
+    if (first != 200) return std::fprintf(stderr, "the host's Web UI answered %ld\n", first), false;
+    std::atomic<int> result{GS_FAILED};
+    std::atomic<bool> done{false};
+    std::thread pairing([&] { result = gs_pair(&server, pin), done = true; });
+    const std::string me = LocalAddress(host, port ? port : kGameStreamPort);
+    bool given = false;
+    long code = 0;
+    for (int i = 0; i < 40 && !given && !done; ++i) {
+        usleep(250'000);
+        code = api.Call("GET", "/api/pin", nullptr, &r);
+        if (code != 200 || !r.is_object() || !r.contains("pairings") || !r["pairings"].is_array()) continue;
+        std::vector<std::string> ours, mine;
+        for (const auto &p : r["pairings"]) {
+            if (!p.is_object() || p.value("name", "") != "roth") continue;  // libgamestream's devicename
+            ours.push_back(p.value("id", ""));
+            if (p.value("address", "") == me) mine.push_back(p.value("id", ""));
+        }
+        const std::vector<std::string> &pick = mine.size() == 1 ? mine : ours;
+        if (pick.size() != 1) continue;
+        const nlohmann::json body = {{"pairing_id", pick[0]}, {"pin", pin}, {"name", id}};
+        given = api.Call("POST", "/api/pin", &body, &r) == 200 && r.is_object() && r.value("status", false);
+    }
+    if (!given && done) {  // the host turned the request down before it could be approved
+        pairing.join();
+        DropConnection();
+        return std::fprintf(stderr, "pairing failed: %s\n", gs_error ? gs_error : "?"), false;
+    }
+    if (!given) {
+        std::fprintf(stderr, "the host showed no pairing request to approve (%ld)\n", code);
+        std::fflush(stderr);
+        std::_Exit(1);  // gs_pair is still waiting
+    }
+    pairing.join();
+    DropConnection();
+    if (result != GS_OK) return std::fprintf(stderr, "pairing failed: %s\n", gs_error ? gs_error : "?"), false;
+    std::printf("paired as %s\n", id.c_str());
     return true;
 }
 

@@ -44,7 +44,10 @@ you face (yaw only), like a recenter. It lives in ~/.config/frametop-layout.json
               "displays": [{"id": "desk-pc-oled",         (docs/remote-displays.md), each a panel
                             "client": "frametop-1",       streamed by ft-stream: its paired client,
                             "app": "display:{GUID}",      what it streams (display:DEVICE, monitor:
-                                                          a Vibepollo Remote Monitor, primary),
+                                                          a Vibepollo Remote Monitor, primary, or
+                                                          an app's name: Desktop for Sunshine),
+                            "port": 48089,                its Sunshine instance's HTTP port, when
+                                                          not 47989 (a Mac runs one per display)
                             "label": "OLED", "size": [5120, 1440], "fps": 60, "bitrate": 50000,
                             "metres": 1.8, "curve": 0, "pin": ..., "hidden": true,
                             "off": true,                  disconnected: no stream, no panel
@@ -93,8 +96,10 @@ Usage (on the Frame host; Frametop Display Settings calls it too):
   ft-layout remote list              the remote displays, their numbers and their streams' state
   ft-layout remote monitors ADDRESS  the host's displays (Vibepollo's /api/display-devices, JSON)
   ft-layout remote add HOST ADDRESS APP [--size WxH] [--fps F] [--bitrate KBPS] [--label TEXT]
+                     [--port PORT] [--login]
                                      a display of a host (pairs its client with the host's token
-                                     first) -> its id
+                                     first, or with --login, with the Web UI login read from stdin
+                                     as two lines: a Sunshine instance on PORT) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M ...
   ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none
                                      how a host's streams reach it; its running streams start over
@@ -136,6 +141,7 @@ DEFAULTS = {"auto": True, "mode": "preset",
 REMOTE_FIRST = 101  # ft-screens' remote screens (screens/remote.h)
 REMOTE_MAX = 16
 REMOTE_PIXELS_PER_METRE = 2400  # a new remote display's width in VR (5120 px: 2.1 m), at least 1 m
+GAMESTREAM_PORT = 47989  # a host's HTTP port, where ft-stream reaches it
 WEB_UI_PORT = 47990  # Vibepollo's Web UI: a host answers there when it's up
 STREAM = os.path.join(REPO, "stream", "build", "ft-stream")
 
@@ -772,12 +778,19 @@ def remotes_running(sock):
     return {int(e.split(":")[0]): e.split(":")[2] for e in fields}
 
 
+def display_target(host, d):
+    """Where ft-stream reaches a display: the host's address, with its instance's port when it
+    has one of its own (HOST:PORT)."""
+    port = d.get("port")
+    return f"{host['address']}:{int(port)}" if port and int(port) != GAMESTREAM_PORT else host["address"]
+
+
 def start_remote(sock, n, host, d):
     """Its stream (ft-screens starts it over only if the settings changed). ft-screens'
     reply: "ok restored" when its panel is back where it was before a disconnect."""
     w, h = d.get("size", [2560, 1440])
     label = f"{host.get('name') or host['address']}: {d.get('label') or d['id']}"
-    return sock.ask(f"remote {n} start {d['client']} {host['address']} {d['app']} {int(w)}x{int(h)} "
+    return sock.ask(f"remote {n} start {d['client']} {display_target(host, d)} {d['app']} {int(w)}x{int(h)} "
                     f"{int(d.get('fps', 60))} {int(d.get('bitrate', 0))} {remote_size(d)[0]:.3f} {label}")
 
 
@@ -796,17 +809,19 @@ def place_remote(sock, n, d, t, eye, heading):
 
 
 def host_answers(host, timeout=1.5):
-    """Whether a host's Vibepollo answers, at its address or its Steam Link dongle's (as its
-    route allows)."""
+    """Whether a host answers, at its address or its Steam Link dongle's (as its route allows):
+    Vibepollo on its Web UI port, Sunshine instances on any of their displays' ports."""
     route = host.get("route", "auto")
     addresses = ([] if route == "dongle" else [host.get("address")]) + \
         ([] if route == "network" else list(host.get("direct", [])))
+    ports = sorted({int(d["port"]) for d in host.get("displays", []) if d.get("port")}) or [WEB_UI_PORT]
     for address in filter(None, addresses):
-        try:
-            with socket.create_connection((address, WEB_UI_PORT), timeout=timeout):
-                return True
-        except OSError:
-            pass
+        for port in ports:
+            try:
+                with socket.create_connection((address, port), timeout=timeout):
+                    return True
+            except OSError:
+                pass
     return False
 
 
@@ -898,14 +913,14 @@ def in_container():
     return os.path.exists("/run/.containerenv")
 
 
-def run_stream(*args, timeout=60):
+def run_stream(*args, timeout=60, stdin=None):
     """ft-stream, in the container ft-screens runs in: "dev" for a clone, the release's own for a
     release (scripts/in-box). A missing "dev" made distrobox ask whether to create it, and the
-    question hung until the timeout."""
+    question hung until the timeout. `stdin`: text for it to read (a --login)."""
     cmd = [STREAM, *args]
     if not in_container():
         cmd = [os.path.join(REPO, "scripts", "in-box"), *cmd]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=stdin)
     return r.returncode, r.stdout, r.stderr
 
 
@@ -954,7 +969,7 @@ def remote_command(args):
             w, h = d.get("size", [2560, 1440])
             state = "disconnected" if d.get("off") else running.get(n, "off")
             state += f" route {host.get('route', 'auto')}"
-            print(f"{n} {d['id']} {host.get('name')} {host['address']} {d['app']} {w}x{h}@{d.get('fps', 60)} "
+            print(f"{n} {d['id']} {host.get('name')} {display_target(host, d)} {d['app']} {w}x{h}@{d.get('fps', 60)} "
                   f"{state}{' hidden' if d.get('hidden') else ''}  {d.get('label', '')}")
         return
     if what == "host" and len(args) >= 3:
@@ -1027,12 +1042,20 @@ def remote_command(args):
         return
     if what == "add" and len(args) >= 4:
         host_name, address, app = args[1], args[2], args[3]
-        opts = dict(zip(args[4::2], args[5::2]))
-        unknown = set(opts) - {"--size", "--fps", "--bitrate", "--label", "--client"}
-        if unknown or len(args[4:]) % 2:
-            raise RuntimeError("remote add: options are --size WxH --fps F --bitrate KBPS --label TEXT --client NAME")
+        rest = args[4:]
+        login = "--login" in rest  # the Web UI login on stdin: a Sunshine instance's pairing
+        rest = [a for a in rest if a != "--login"]
+        opts = dict(zip(rest[0::2], rest[1::2]))
+        unknown = set(opts) - {"--size", "--fps", "--bitrate", "--label", "--client", "--port"}
+        if unknown or len(rest) % 2:
+            raise RuntimeError("remote add: options are --size WxH --fps F --bitrate KBPS --label TEXT --client NAME "
+                               "--port PORT --login")
         if not re.fullmatch(r"[A-Za-z0-9.:-]+", address) or not re.fullmatch(r"[A-Za-z0-9{}._:-]+", app):
             raise RuntimeError("remote add: the address or app has other characters")
+        port = opts.get("--port", "")
+        if port and not (port.isdigit() and 1024 < int(port) < 65535):
+            raise RuntimeError("remote add: --port is a port number")
+        port = int(port) if port else 0
         layout = load_layout()
         displays = remote_displays(layout)
         if len(displays) >= REMOTE_MAX:
@@ -1059,7 +1082,11 @@ def remote_command(args):
                         size = [int(res["width"]), int(res["height"])]
             except (ValueError, KeyError, TypeError):
                 pass
-        code, out, err = run_stream("pair", address, "--id", client, timeout=30)
+        target = f"{address}:{port}" if port else address
+        if login:
+            code, out, err = run_stream("pair", target, "--id", client, "--login", timeout=30, stdin=sys.stdin.read())
+        else:
+            code, out, err = run_stream("pair", target, "--id", client, timeout=30)
         if code:
             raise RuntimeError(f"pairing {client} with {address} failed: {(err or out).strip()}")
         log(out.strip().splitlines()[-1] if out.strip() else f"paired {client}")
@@ -1071,6 +1098,8 @@ def remote_command(args):
         host["displays"].append({"id": display_id, "client": client, "app": app, "label": label, "size": size,
                                  "fps": int(opts.get("--fps", 60)), "bitrate": int(opts.get("--bitrate", 0)),
                                  "metres": round(max(1.0, size[0] / REMOTE_PIXELS_PER_METRE), 3)})
+        if port:
+            host["displays"][-1]["port"] = port
         remote_displays(layout)  # gives it a screen number
         save_layout(layout)
         print(display_id)
@@ -1113,7 +1142,7 @@ def remote_command(args):
         for profile in layout.get("profiles", {}).values():
             profile.get("remote", {}).pop(d["id"], None)
         save_layout(layout)
-        code, out, err = run_stream("unpair", host["address"], "--id", d["client"], timeout=30)
+        code, out, err = run_stream("unpair", display_target(host, d), "--id", d["client"], timeout=30)
         said = (out or err).strip().splitlines()
         log(f"removed {d['id']}; {said[-1] if said else f'unpair exited {code}'}")
         return

@@ -20,7 +20,8 @@
 #     password is typed here and never shown or saved.
 #  4. macOS's permissions, Screen Recording and Accessibility, which only you can grant. One
 #     grant covers every instance.
-#  5. Checks: every instance answers, the firewall, and whether the Mac sleeps while idle.
+#  5. Checks: every instance answers, the permissions, the firewall, and whether the Mac sleeps
+#     while idle.
 #
 # Options:
 #   --set-login     set a new Web UI login even if there is one
@@ -34,6 +35,7 @@ SUNSHINE_VERSION=2026.1010.141104
 DMG_URL="https://github.com/LizardByte/Sunshine/releases/download/v$SUNSHINE_VERSION/Sunshine-macOS-arm64.dmg"
 DMG_SHA=c40d7d860a77d8e37ce0105b211b453f7c59ff1f1bbbf4970cdd3b66d4f26a58
 APP=/Applications/Sunshine.app
+SUNSHINE_ID=dev.lizardbyte.app.Sunshine
 SUNSHINE="$APP/Contents/MacOS/Sunshine"
 DATA="$HOME/Library/Application Support/Frametop/sunshine"
 LOGS="$HOME/Library/Logs/Frametop"
@@ -91,6 +93,14 @@ wait_answers() {
         sleep 1
     done
     return 1
+}
+
+# Restart the main display's instance: macOS applies its permissions at the next start, and it
+# notes them (and asks for missing ones) a moment after it answers.
+restart_first() {
+    launchctl kickstart -k "$GUI/$LABEL.$first"
+    wait_answers $((BASE_PORT + 100 * first)) || true
+    sleep 2
 }
 
 # The instance number for a display's key: the one it had, else the lowest free one.
@@ -152,7 +162,7 @@ write_agent() {
         <string>$n</string>
     </array>
     <!-- Login Items shows it as Sunshine rather than as the bash that starts it. -->
-    <key>AssociatedBundleIdentifiers</key><string>dev.lizardbyte.app.Sunshine</string>
+    <key>AssociatedBundleIdentifiers</key><string>$SUNSHINE_ID</string>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
     <key>ThrottleInterval</key><integer>10</integer>
@@ -340,8 +350,21 @@ $n"
         echo "Allow both in System Settings > Privacy & Security, then come back here. If Sunshine is"
         echo "already allowed, nothing appears."
         read -r -p "Press Enter when done: " _
-        launchctl kickstart -k "$GUI/$LABEL.$first"  # macOS applies Screen Recording at the next start
-        wait_answers $((BASE_PORT + 100 * first)) || true
+        restart_first
+        # A grant macOS lost track of, or one given to another Sunshine (Homebrew's), leaves Sunshine
+        # without Accessibility and not asking again: clear its records so it asks once more.
+        local yn
+        while ! permitted inputPostEventPermissionState; do
+            read -r -p "Sunshine still doesn't have Accessibility. Ask again? [Y/n] " yn
+            case $yn in [Nn]*) break ;; esac
+            tccutil reset Accessibility "$SUNSHINE_ID" >/dev/null 2>&1 || true
+            tccutil reset PostEvent "$SUNSHINE_ID" >/dev/null 2>&1 || true
+            defaults delete "$SUNSHINE_ID" inputPostEventPermissionState 2>/dev/null || true
+            restart_first
+            echo "Allow Sunshine in macOS's dialog, or in System Settings > Privacy & Security > Accessibility."
+            read -r -p "Press Enter when done: " _
+            restart_first
+        done
     else
         say "Not in a terminal: if macOS asks, allow Screen Recording and Accessibility for Sunshine, then run this again."
     fi
@@ -372,6 +395,19 @@ addresses() {
     echo "${out:-no network}"
 }
 
+# Whether Sunshine had a macOS permission when it last started: it notes 2 then, 1 when it
+# asked and didn't get it. Without Accessibility the pointer still moves (Sunshine warps it) but
+# clicks, scrolling and typing are dropped.
+permitted() { [ "$(defaults read "$SUNSHINE_ID" "$1" 2>/dev/null)" = 2 ]; }
+permission() {
+    if permitted "$1"; then
+        say "$2: allowed."
+    else
+        say "$2: not allowed for Sunshine, so $3."
+        say "  Allow it in System Settings > Privacy & Security > $2, then run this again."
+    fi
+}
+
 # 5. Checks
 checks() {
     local n key name w h port
@@ -390,6 +426,9 @@ checks() {
             fi
         done
     fi
+
+    permission screenRecordingPermissionState "Screen Recording" "the screens it sends stay black"
+    permission inputPostEventPermissionState "Accessibility" "the pointer moves but clicks, scrolling and typing don't reach the Mac"
 
     local fw=/usr/libexec/ApplicationFirewall/socketfilterfw
     if "$fw" --getglobalstate 2>/dev/null | grep -q enabled; then

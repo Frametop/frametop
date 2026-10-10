@@ -13,6 +13,8 @@ Two settings apps come with it: Frametop Display Settings for the screens, profi
 
 Frametop is an independent project, not made by or affiliated with Valve.
 
+Frametop lives at [Frametop/frametop](https://github.com/Frametop/frametop): code, releases, issues, and pull requests. It moved there from DeeJanuz/frametop on 2026-10-09; the old links and clones still work.
+
 Join the [Frametop Discord](https://discord.gg/W3X9f7z3Bc) for questions, ideas, and help with your setup.
 
 ## Install on the headset
@@ -26,12 +28,12 @@ You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or th
 3. Run:
 
    ```
-   curl -fsSL https://deejanuz.github.io/frametop/get.sh | bash
+   curl -fsSL https://frametop.github.io/frametop/get.sh | bash
    ```
 
-   It asks which version you want: stable (the `main` branch, tested releases) or experimental (the `experimental` branch, the newest features, less tested). Then it clones the repo into `~/frametop` and runs `install.sh`. To choose without the question, add `-s -- --stable` or `-s -- --experimental` after `bash`. By hand, the same is `git clone https://github.com/DeeJanuz/frametop.git ~/frametop`, then `cd ~/frametop` and `./install.sh` (add `--branch experimental` to the clone for experimental).
+   It asks which version you want: stable (the `main` branch, tested releases) or experimental (the `experimental` branch, the newest features, less tested). Then it clones the repo into `~/frametop` and runs `install.sh`. To choose without the question, add `-s -- --stable` or `-s -- --experimental` after `bash`. By hand, the same is `git clone https://github.com/Frametop/frametop.git ~/frametop`, then `cd ~/frametop` and `./install.sh` (add `--branch experimental` to the clone for experimental).
 
-   The third choice, experimental release, downloads Frametop already built (`Frametop.zip`, about 1.1 GB, from the [Frametop organization's releases](https://github.com/Frametop/frametop/releases)) and installs it without compiling anything. `-s -- --release --experimental` picks it without the question.
+   The third and fourth choices, stable release and experimental release, download Frametop already built (`Frametop.zip`, about 1.1 GB, from the [releases](https://github.com/Frametop/frametop/releases)) and install it without compiling anything. `-s -- --release` picks the stable release without the question, and `-s -- --release --experimental` the experimental one.
 
    The installer sets up distrobox in your home folder (the system files aren't touched), a Fedora build container, and everything else. The first run downloads 1–2 GB. It asks you four things along the way: whether to install gaze mode (experimental, yes by default), our own eye tracker for it (yes by default), and the Bluetooth fixes, then whether to restart SteamVR. The eye tracker and the Bluetooth fixes need your `sudo` password; if you've never set one, run `passwd` first, or skip them for now. SteamVR has to restart once at the end, which closes everything open in VR, including the terminal. Rebooting the headset works too.
 
@@ -163,14 +165,14 @@ From a release, start in `~/.local/share/frametop/releases/current` instead of `
 
 This writes `frametop-report-<date>.txt` with version numbers, service states, settings, Frametop's keyboard and the Steam menu, and recent logs. Bluetooth addresses and the headset's serial number are masked.
 
-If the problem is something you can make happen, like a window that won't drag or a keyboard that doesn't open, run `scripts/report.sh --watch` instead. After the usual report it records for 60 seconds (`--watch 120` for longer) while you make it happen in the headset. It notes when the Steam menu opens and closes, which laser drags what, where typing goes, and when Frametop's keyboard opens or why it doesn't. It takes up to half a minute, because it also checks gaze mode: it starts the gaze service for a moment to see whether the eye tracker sends. If gaze or its calibration doesn't work, run it while you wear the headset. `scripts/gaze-report.py` prints only the gaze part, with what looks wrong first. Then [open an issue](https://github.com/DeeJanuz/frametop/issues), describe what you did, what you expected, and what happened, and attach the file. Quick questions can go to [Discord](https://discord.gg/W3X9f7z3Bc) instead.
+If the problem is something you can make happen, like a window that won't drag or a keyboard that doesn't open, run `scripts/report.sh --watch` instead. After the usual report it records for 60 seconds (`--watch 120` for longer) while you make it happen in the headset. It notes when the Steam menu opens and closes, which laser drags what, where typing goes, and when Frametop's keyboard opens or why it doesn't. It takes up to half a minute, because it also checks gaze mode: it starts the gaze service for a moment to see whether the eye tracker sends. If gaze or its calibration doesn't work, run it while you wear the headset. `scripts/gaze-report.py` prints only the gaze part, with what looks wrong first. Then [open an issue](https://github.com/Frametop/frametop/issues), describe what you did, what you expected, and what happened, and attach the file. Quick questions can go to [Discord](https://discord.gg/W3X9f7z3Bc) instead.
 
 ## Update
 
 Run the same command again. It updates `~/frametop` to the latest of the version you have (or switches, if you pick the other one) and installs it:
 
 ```
-curl -fsSL https://deejanuz.github.io/frametop/get.sh | bash
+curl -fsSL https://frametop.github.io/frametop/get.sh | bash
 ```
 
 Or by hand: `cd ~/frametop && git pull && ./install.sh`.
@@ -180,7 +182,7 @@ Or by hand: `cd ~/frametop && git pull && ./install.sh`.
 In a terminal on the headset, run:
 
 ```
-curl -fsSL https://deejanuz.github.io/frametop/uninstall.sh | bash
+curl -fsSL https://frametop.github.io/frametop/uninstall.sh | bash
 ```
 
 It works in two steps, so it never takes away the keyboard, mouse, or desktop you're using while it runs:

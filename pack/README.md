@@ -194,6 +194,14 @@ prerelease when the tag has a `-` (`v0.3.0-exp.1`); someone publishes it. A
 manual run keeps the zip as an artifact for a week. The repo needs Depot's
 GitHub app for the runner label to work.
 
+The repo moved from DeeJanuz/frametop to the Frametop organization on
+2026-10-09, because Depot's runners need an organization. GitHub redirects the
+old repo URLs; the old Pages one-liner (`deejanuz.github.io/frametop/get.sh`)
+is kept by DeeJanuz/deejanuz.github.io, whose `frametop/get.sh` and
+`frametop/uninstall.sh` hand over to `frametop.github.io/frametop`. A release:
+merge into experimental (and main for a stable one, by merge commit), push,
+tag, and publish the draft.
+
 ## The longer arc
 
 The image only pays off when it makes installing Frametop easier, so none of

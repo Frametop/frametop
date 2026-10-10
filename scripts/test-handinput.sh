@@ -7,4 +7,4 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 dumps=$(printf ' %q' "$@")
 "$root/scripts/frame.sh" -C screens "mkdir -p build && g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror \
-  tests/handinput_test.cpp handcut.cpp handinput.cpp palmmenu.cpp -o build/handinput-test && build/handinput-test${dumps:+ && build/handinput-test --replay$dumps}"
+  tests/handinput_test.cpp handcut.cpp handinput.cpp palmmenu.cpp grabthat.cpp -o build/handinput-test && build/handinput-test${dumps:+ && build/handinput-test --replay$dumps}"

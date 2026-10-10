@@ -105,6 +105,60 @@ void MulRot(const Mat &a, const double b[3][3], Mat *out) {
         for (int j = 0; j < 3; ++j) out->m[i][j] = float(a.m[i][0] * b[0][j] + a.m[i][1] * b[1][j] + a.m[i][2] * b[2][j]);
 }
 
+// Plain 3x3 rotations (the wrist's turn): a b, a^T b, a b^T.
+void Mul3(const double a[3][3], const double b[3][3], double out[3][3]) {
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) out[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+}
+void MulT3(const double a[3][3], const double b[3][3], double out[3][3]) {
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) out[i][j] = a[0][i] * b[0][j] + a[1][i] * b[1][j] + a[2][i] * b[2][j];
+}
+void MulBT3(const double a[3][3], const double b[3][3], double out[3][3]) {
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) out[i][j] = a[i][0] * b[j][0] + a[i][1] * b[j][1] + a[i][2] * b[j][2];
+}
+// A rotation's angle (radians) and axis.
+double AngleAxis(const double r[3][3], double axis[3]) {
+    axis[0] = r[2][1] - r[1][2], axis[1] = r[0][2] - r[2][0], axis[2] = r[1][0] - r[0][1];
+    const double s = std::sqrt(Dot(axis, axis)), c = r[0][0] + r[1][1] + r[2][2] - 1;
+    if (s > 1e-12)
+        for (int i = 0; i < 3; ++i) axis[i] /= s;
+    else axis[0] = 1, axis[1] = axis[2] = 0;
+    return std::atan2(s, c);
+}
+// The rotation by `angle` (radians) about a unit axis (Rodrigues).
+void FromAxis(const double a[3], double angle, double out[3][3]) {
+    const double c = std::cos(angle), s = std::sin(angle), t = 1 - c;
+    out[0][0] = c + t * a[0] * a[0], out[0][1] = t * a[0] * a[1] - s * a[2], out[0][2] = t * a[0] * a[2] + s * a[1];
+    out[1][0] = t * a[0] * a[1] + s * a[2], out[1][1] = c + t * a[1] * a[1], out[1][2] = t * a[1] * a[2] - s * a[0];
+    out[2][0] = t * a[0] * a[2] - s * a[1], out[2][1] = t * a[1] * a[2] + s * a[0], out[2][2] = c + t * a[2] * a[2];
+}
+void RotOf(const Mat &m, double out[3][3]) {
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) out[i][j] = m.m[i][j];
+}
+
+// The hand's frame for its turn: from the wrist toward the middle of the index and little
+// knuckles (along), and from the index knuckle to the little one (across). The knuckles hold
+// still while the fingers pinch or open, the fingertips don't.
+void HandAxes(const Hand &h, fhsmooth::V3 *along, fhsmooth::V3 *across) {
+    auto v = [&](int j) { return fhsmooth::V3{h.p[j][0], h.p[j][1], h.p[j][2]}; };
+    *along = (v(5) + v(17)) * 0.5 - v(0);
+    *across = v(17) - v(5);
+}
+// ...as a rotation: columns across (made square to along), along, and their cross product.
+bool HandFrame(fhsmooth::V3 along, fhsmooth::V3 across, double out[3][3]) {
+    const fhsmooth::V3 y = fhsmooth::Norm(along);
+    fhsmooth::V3 x = across - y * fhsmooth::Dot(across, y);
+    if (fhsmooth::Len(x) < 1e-6) return false;
+    x = fhsmooth::Norm(x);
+    const fhsmooth::V3 z = fhsmooth::Cross(x, y);
+    const fhsmooth::V3 cols[3] = {x, y, z};
+    for (int j = 0; j < 3; ++j) out[0][j] = cols[j].x, out[1][j] = cols[j].y, out[2][j] = cols[j].z;
+    return true;
+}
+
 }  // namespace
 
 // ----------------------------------------------------------------------------- geometry
@@ -207,17 +261,31 @@ Zone GrabZone(const Panel &p, const Hit &h, const Params &k, int *sx, int *sy, d
 }
 
 Mat CarryPose(const Mat &start, const double startHead[3], const double grabLocal[3], const double pinch[3],
-              const double head[3], const Mat &previous) {
-    // the turn from facing the head the panel had at the start
+              const double head[3], const Mat &previous, const double (*turn)[3], double rollSnap) {
+    // the turn from facing the head the panel had at the start, and the wrist's on top
     const double c0[3] = {start.m[0][3], start.m[1][3], start.m[2][3]};
     double off[3][3];
     MulTA(Facing(c0, startHead), start, off);
+    if (turn) {
+        double t[3][3];
+        Mul3(turn, off, t);
+        std::memcpy(off, t, sizeof off);
+    }
     Mat r = previous;
     for (int it = 0; it < 3; ++it) {
         double c[3];
         for (int i = 0; i < 3; ++i)
             c[i] = pinch[i] - (r.m[i][0] * grabLocal[0] + r.m[i][1] * grabLocal[1] + r.m[i][2] * grabLocal[2]);
         MulRot(Facing(c, head), off, &r);
+        // nearly level: level (about its own front, so it stays facing the same way)
+        const double roll = std::atan2(-double(r.m[1][0]), double(r.m[1][1]));
+        if (rollSnap > 0 && std::fabs(roll) < rollSnap * M_PI / 180) {
+            const double cr = std::cos(roll), sr = std::sin(roll);
+            for (int i = 0; i < 3; ++i) {
+                const double x = r.m[i][0], y = r.m[i][1];
+                r.m[i][0] = float(x * cr + y * sr), r.m[i][1] = float(-x * sr + y * cr);
+            }
+        }
         for (int i = 0; i < 3; ++i) r.m[i][3] = float(c[i]);
     }
     // the centre for the final turn
@@ -367,11 +435,16 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     if (sd.state == State::Press) {
         best = sd.panel;
     } else {
+        // a resting hand (typing, the lap) is near only within restFront; the panel the hand is
+        // near already keeps it nearLeave farther (no flicker of the ray at the zone's edge)
+        sd.resting = Resting(*h, in, p_, sd.resting);
         const double margin = std::max(p_.nearMargin, p_.edgeOut + 0.005);
         for (const Panel &P : panels) {
+            double reach = p_.nearFront + (sd.state == State::Hover && P.index == sd.panel ? p_.nearLeave : 0);
+            if (sd.resting) reach = std::min(reach, p_.restFront);
             for (const float *pt : {h->p[8], h->pinchPoint}) {
                 const Hit t = Locate(P, pt);
-                if (t.d > p_.nearBack && t.d <= p_.nearFront && InFootprint(P, t, margin) && std::fabs(t.d) < key)
+                if (t.d > p_.nearBack && t.d <= reach && InFootprint(P, t, margin) && std::fabs(t.d) < key)
                     key = std::fabs(t.d), best = P.index;
             }
         }
@@ -431,8 +504,8 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         }
         return;
     }
-    // hovering
-    const bool resting = sd.resting = Resting(*h, in, p_, sd.resting);
+    // hovering (resting: from the claim above)
+    const bool resting = sd.resting;
     if (sd.spent && t.d >= 0) sd.spent = false;
     sd.below = t.d <= 0 ? sd.below + 1 : 0;
     // coming in: when it crossed the surface, it came toward it at approach or faster from some
@@ -520,6 +593,8 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     sd.point.Reset();
     sd.point.Sample({pinch[0], pinch[1], pinch[2]}, in.hands->captureNs() / 1e9, in.nowNs / 1e9);
     sd.from = {pinch[0], pinch[1], pinch[2]}, sd.shift = {}, sd.engaged = false;
+    sd.along.Reset(), sd.across.Reset(), sd.haveRot0 = sd.turning = false;   // the wrist's turn: afresh
+    if (h) SampleTurn(s, *h, in);
     ToLocal(bestP->pose, pinch, sd.grabLocal);
     if (in.haveHead) {
         const fhsmooth::V3 hd = head_.Last();
@@ -533,6 +608,49 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     e.type = Event::GrabStart, e.side = s, e.panel = bestP->index, e.zone = zone;
     events_.push_back(e);
     ++stats.grabs;
+}
+
+void HandInput::SampleTurn(int s, const Hand &h, const Input &in) {
+    Side &sd = side_[s];
+    fhsmooth::V3 along, across;
+    HandAxes(h, &along, &across);
+    const fhsmooth::Params k{p_.rotMinCutoff, p_.rotBeta, 1.0};
+    sd.along.Set(k), sd.across.Set(k);
+    const double tc = h.captureNs / 1e9, now = in.nowNs / 1e9;
+    sd.along.Sample(along, tc, now), sd.across.Sample(across, tc, now);
+}
+
+bool HandInput::Turn(int s, const Input &in, const double pinch[3], const double head[3], double out[3][3]) {
+    Side &sd = side_[s];
+    if (!p_.grabRotate || !sd.along.Ready() || !sd.across.Ready()) return false;
+    const double now = in.nowNs / 1e9;
+    double hand[3][3], face[3][3], rel[3][3];
+    if (!HandFrame(sd.along.At(now), sd.across.At(now), hand)) return false;
+    // the hand, in the frame facing the head across the floor from the pinch point: a hand carried
+    // round you turns with it (no turn), and one below the eyes still turns about the vertical
+    // when it turns about the vertical (a frame pitched toward the eyes would mix yaw and roll)
+    const double level[3] = {head[0], pinch[1], head[2]};
+    RotOf(Facing(pinch, level), face);
+    MulT3(face, hand, rel);
+    if (!sd.haveRot0) {
+        std::memcpy(sd.rot0, rel, sizeof rel);
+        sd.haveRot0 = true, sd.turning = false;
+        return false;
+    }
+    MulBT3(rel, sd.rot0, out);   // its turn since the start
+    if (!sd.turning) {
+        double axis[3];
+        const double a = AngleAxis(out, axis), dead = p_.rotDeadzone * M_PI / 180;
+        if (a <= dead) return false;
+        // out of the dead zone: the start moves on by it, so the turn starts from nothing
+        double by[3][3], moved[3][3];
+        FromAxis(axis, dead, by);
+        Mul3(by, sd.rot0, moved);
+        std::memcpy(sd.rot0, moved, sizeof moved);
+        MulBT3(rel, sd.rot0, out);
+        sd.turning = true;
+    }
+    return true;
 }
 
 bool HandInput::Carried(int s, const Input &in, double out[3], bool deadzone) {
@@ -559,6 +677,7 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
             if (!h) continue;   // briefly unseen: the panel stays where the smoothing has it
             sd.point.Set({p_.grabMinCutoff, p_.grabBeta, 1.0});
             sd.point.Sample({h->pinchPoint[0], h->pinchPoint[1], h->pinchPoint[2]}, in.hands->captureNs() / 1e9, in.nowNs / 1e9);
+            SampleTurn(s, *h, in);
         }
     // (a stretch has its own dead zone, on the hands' distance)
     auto pinchOf = [&](int s, double out[3]) { return Carried(s, in, out, false); };
@@ -594,6 +713,7 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
             sd.start = sd.last = P->pose, sd.width0 = P->width;
             ToLocal(P->pose, p, sd.grabLocal);
             std::copy(head, head + 3, sd.startHead);
+            sd.haveRot0 = sd.turning = false;   // the wrist's turn from the hand as it is now
         }
         Carry c;
         c.panel = sd.panel, c.sides = 1 << s;
@@ -608,7 +728,11 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
             }
         } else {
             c.kind = Carry::Move;
-            c.pose = CarryPose(sd.start, sd.startHead, sd.grabLocal, p, in.haveHead ? head : sd.startHead, sd.last);
+            const double *faces = in.haveHead ? head : sd.startHead;
+            double turn[3][3];
+            const bool turned = Turn(s, in, p, faces, turn);
+            c.pose = CarryPose(sd.start, sd.startHead, sd.grabLocal, p, faces, sd.last, turned ? turn : nullptr,
+                               turned ? p_.rollSnap : 0);
             sd.last = c.pose;
         }
         carries_.push_back(c);

@@ -217,6 +217,7 @@ public:
     // Counts the hands file's updates read: a new one is a new processed camera frame.
     uint64_t frame() const { return frames_; }
     int64_t captureNs() const { return captureNs_; }
+    const Mat &captureHead() const { return captureHead_; }   // the head pose seen() was turned into the room with
     int64_t publishNs() const { return publishNs_; }
     int version() const { return version_; }
     bool fresh() const { return fresh_; }
@@ -259,6 +260,7 @@ private:
     size_t mapLen_ = 0, gmapLen_ = 0;
     uint64_t seq_ = 0, gseq_ = 0, frames_ = 0;
     int version_ = 0;
+    Mat captureHead_{};
     int64_t captureNs_ = 0, publishNs_ = 0, lastOpenTry_ = 0, lastGOpenTry_ = 0, nowNs_ = 0;
 };
 

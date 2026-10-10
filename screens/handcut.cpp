@@ -271,7 +271,7 @@ void Hands::Ingest(const fh_hands_t &v1, const fh_hand_fit_t *fits, const fh_ges
     ++frames_;
     const uint32_t nhands = std::min<uint32_t>(v1.nhands, kMaxHands), ncaps = std::min<uint32_t>(v1.ncapsules, kMaxCapsules);
     captureNs_ = int64_t(v1.capture_ns), publishNs_ = int64_t(v1.publish_ns);
-    const Mat head = HeadAt(captureNs_);
+    const Mat head = captureHead_ = HeadAt(captureNs_);
 
     seen_.clear();
     std::vector<int> owners;   // the hand each capsule belongs to, in file order (-1: none kept)

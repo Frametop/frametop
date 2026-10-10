@@ -62,6 +62,8 @@ PACKAGES = {
                     "the registry stops and comes back after a desktop restart",
     "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked",
     "bluez": "a Bluetooth mouse reconnecting after it sleeps",
+    "pipewire": "voice dictation hears you (ft-voiced records with the container's pw-record) and "
+                "its mic isn't silent after a reboot (SteamOS's echo-cancel chain)",
     "steamdeck-kde-presets": "Launch a program -> Native Desktop opens SteamOS's own desktop; starting "
                              "the desktop sends Steam no command line (no ExecCommandLine in "
                              "~/.local/share/Steam/logs/console_log.txt)",
@@ -77,6 +79,7 @@ UNITS = {
     "frametop-power": "@ft_powerd",
     "frametop-camd": None,
     "frametop-hands": None,
+    "frametop-voice": "@frametop_voice",
 }
 
 # eye-server.mmap offsets, the same as gaze/ft-gaze.cpp's (packed, little-endian), and the

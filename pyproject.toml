@@ -16,8 +16,8 @@ dev = [
     "pyflakes>=3.4",
 ]
 # type checking is dev tooling outside the image: the image installs the
-# default groups (dev for CI's pytest/ruff, tracker for the hand tracker)
-# but not this one
+# default groups (dev for CI's pytest/ruff, tracker for the hand tracker,
+# voice for Frametop Voice) but not this one
 types = [
     "mypy>=1.19",
 ]
@@ -25,6 +25,17 @@ tracker = [
     "numpy>=2.2",
     "opencv-python-headless>=4.11",
     "huggingface_hub>=0.34",
+]
+# Frametop Voice (voice/ft-voiced): Moonshine, the wake word spotter and Silero VAD run
+# through sherpa-onnx; sentencepiece spells out wake phrases (voice/requirements.txt has the
+# same versions, for the dev container). sherpa-onnx's wheels need sherpa-onnx-core of the
+# same version (onnxruntime and its C++ side), but don't all say so, and uv locks without it:
+# both are named here, at one version.
+voice = [
+    "numpy>=2.2",
+    "sentencepiece>=0.2.2",
+    "sherpa-onnx==1.13.8",
+    "sherpa-onnx-core==1.13.8",
 ]
 
 [tool.uv]

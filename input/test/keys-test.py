@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Offline test of the input relay's key combinations and modifier taps, and of which keys and
-mouse buttons reach the desktop (ft-screens).
+"""Offline test of the input relay's key combinations and modifier taps, of which keys and
+mouse buttons reach the desktop (ft-screens), and of dictation (Frametop Voice): the keys that
+start and stop it, and the text it has the relay type.
 
 Runs the relay's main() against a fake pass-through keyboard, a fake mouse, and two fake nodes
 with volume keys, a keyboard's Consumer Control node and the headset's gpio-keys (pipes), with
@@ -64,7 +65,7 @@ class StubPause:
 stub = {}
 relay.game_pause.GamePause = StubPause
 
-for name in ("SCREENS", "HELPER", "FLOAT", "GAZED", "KEYS"):
+for name in ("SCREENS", "HELPER", "FLOAT", "GAZED", "VOICE"):
     setattr(relay, name, f"\0{tag}_{name.lower()}")
 OUT = tempfile.mkdtemp(prefix="ft-keys-test-")
 steam_log, cmd_log = f"{OUT}/steam.log", f"{OUT}/cmd.log"
@@ -176,6 +177,9 @@ relay.probe = probe
 screens = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 screens.bind(relay.SCREENS)
 screens.settimeout(0.05)
+voice = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)  # Frametop Voice's socket
+voice.bind(relay.VOICE)
+voice.settimeout(0.05)
 EVENT = struct.Struct("llHHi")
 
 
@@ -198,6 +202,31 @@ def typed():
             got.append(screens.recv(256).decode())
         except socket.timeout:
             return got
+
+
+def dictation():
+    """What Frametop Voice was sent since the last call."""
+    got = []
+    while True:
+        try:
+            got.append(voice.recv(256).decode())
+        except socket.timeout:
+            return got
+
+
+def to_relay(text):
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    c.sendto(text.encode(), f"\0{tag}_relay")
+    c.close()
+
+
+def keys_for(text):
+    """The presses and releases that type text, as (code, value), Shift included."""
+    out = []
+    for ch in text:
+        code, shift = relay.US_KEYS[ch]
+        out += ([(42, 1)] if shift else []) + [(code, 1), (code, 0)] + ([(42, 0)] if shift else [])
+    return out
 
 
 def emitted():
@@ -247,7 +276,7 @@ def check(label, got, want):
         failures.append(label)
 
 
-META, RMETA, SHIFT, CTRL, RCTRL, ALT, A, F, J, P, TAB = 125, 126, 42, 29, 97, 56, 30, 33, 36, 25, 15
+META, RMETA, SHIFT, CTRL, RCTRL, ALT, A, C, F, J, P, TAB = 125, 126, 42, 29, 97, 56, 30, 46, 33, 36, 25, 15
 F24 = ["key 194 1", "key 194 0"]
 
 
@@ -318,9 +347,9 @@ def tests():
     check("Meta tap bound to none: nothing", lines(steam_log), ["menu", "menu"])
     check("Meta tap bound to none: no F24", typed(), ["key 125 1", "key 125 0"])
 
-    use({"29": f"command:command -v ft-steam ft-layout ft-float | wc -l >> {cmd_log}"})
+    use({"29": f"command:command -v ft-steam ft-layout ft-float ft-voice | wc -l >> {cmd_log}"})
     key(RCTRL, 1); key(RCTRL, 0)
-    check("right Ctrl tap runs its command, which finds Frametop's tools", lines(cmd_log), ["combo", "3"])
+    check("right Ctrl tap runs its command, which finds Frametop's tools", lines(cmd_log), ["combo", "4"])
     check("Ctrl tap: F24 before Ctrl's release", typed(), ["key 97 1"] + F24 + ["key 97 0"])
 
     use({"125+36": "gaze_left", "29": f"command:echo paused >> {cmd_log}", "42+125+25": "pause_toggle"})
@@ -330,7 +359,7 @@ def tests():
     check("paused: Meta+J (gaze click) does nothing and is typed as is", typed(),
           ["key 125 1", "key 36 1", "key 36 0", "key 125 0"])
     key(RCTRL, 1); key(RCTRL, 0)
-    check("paused: a command still runs", lines(cmd_log), ["combo", "3", "paused"])
+    check("paused: a command still runs", lines(cmd_log), ["combo", "4", "paused"])
     typed()
     key(SHIFT, 1); key(META, 1); key(P, 1); key(P, 0); key(META, 0); key(SHIFT, 0)
     check("paused: Meta+Shift+P (pause_toggle) resumes", stub["pause"].paused, False)
@@ -412,6 +441,73 @@ def tests():
     pause("off")
     check("spinning works without pointer mode", (relay.needs_pointer("spin_next"), relay.needs_pointer("spin_prev")),
           (False, False))
+
+    # Dictation: Right Ctrl alone (the default with Frametop Voice installed) starts and stops it.
+    use({"97": "dictate"})
+    dictation()
+    key(RCTRL, 1); key(RCTRL, 0)
+    check("Right Ctrl tap (dictate): Frametop Voice toggles", dictation(), ["toggle keyboard"])
+    check("...and the desktop gets F24 before Ctrl's release", typed(), ["key 97 1"] + F24 + ["key 97 0"])
+    key(CTRL, 1); key(CTRL, 0)
+    check("a Left Ctrl tap isn't Right Ctrl's", dictation(), [])
+    key(SHIFT, 1); key(RCTRL, 1); key(RCTRL, 0); key(SHIFT, 0)
+    check("Shift held, then a Right Ctrl tap: not dictation", dictation(), [])
+    key(RCTRL, 1); key(SHIFT, 1); key(SHIFT, 0); key(RCTRL, 0)
+    check("Right Ctrl held, Shift pressed and released: not dictation", dictation(), [])
+    key(RCTRL, 1); key(C, 1); key(C, 0); key(RCTRL, 0)
+    check("Right Ctrl+C: not dictation", dictation(), [])
+    key(RCTRL, 1); key(relay.BTN_LEFT, 1, ms_w); key(relay.BTN_LEFT, 0, ms_w); key(RCTRL, 0)
+    check("Right Ctrl+click: not dictation", dictation(), [])
+    use({"29": "dictate"})
+    key(CTRL, 1); key(CTRL, 0); key(RCTRL, 1); key(RCTRL, 0)
+    check("a Ctrl tap bound by its left code: either side", dictation(), ["toggle keyboard", "toggle keyboard"])
+    use({"97": "dictate_hold"})
+    key(RCTRL, 1); key(RCTRL, 0)
+    check("a tap bound to dictate_hold toggles (a tap is over before it's held)", dictation(), ["toggle keyboard"])
+    use({"29+42+33": "dictate_hold"})
+    key(CTRL, 1); key(SHIFT, 1); key(F, 1)
+    check("Ctrl+Shift+F held (dictate_hold): starts", dictation(), ["start keyboard"])
+    key(F, 0); key(SHIFT, 0); key(CTRL, 0)
+    check("...and its release stops", dictation(), ["stop keyboard"])
+    use({"97": "dictate"})
+    pause("on")
+    key(RCTRL, 1); key(RCTRL, 0)
+    check("paused: dictation still toggles", dictation(), ["toggle keyboard"])
+    pause("off")
+    check("dictation works without pointer mode",
+          (relay.needs_pointer("dictate"), relay.needs_pointer("dictate_hold")), (False, False))
+    unit = os.path.join(OUT, "frametop-voice.service")
+    relay.VOICE_UNIT = unit
+    check("defaults without Frametop Voice: no dictation key", "97" in relay.default_key_bindings(), False)
+    open(unit, "w").close()
+    check("defaults with Frametop Voice installed: Right Ctrl tap", relay.default_key_bindings().get("97"), "dictate")
+
+    # Typing dictation's text: on the virtual keyboard while typing goes to Steam, to the desktop
+    # while it goes there; held back while a modifier is held.
+    use({})
+    typed(), emitted()
+    to_relay("type Hi, you!")
+    time.sleep(0.3)
+    check("type: to the virtual keyboard while typing goes to Steam", emitted(),
+          [("keyboard", c, v) for c, v in keys_for("Hi, you!")])
+    check("...and not to the desktop", typed(), [])
+    to_relay("type caf\u00e9\tok")
+    time.sleep(0.3)
+    check("type: what a US layout can't type is dropped", emitted(), [("keyboard", c, v) for c, v in keys_for("cafok")])
+    key(CTRL, 1)
+    to_relay("type ab")
+    time.sleep(0.3)
+    check("type: waits while Ctrl is held", emitted(), [])
+    key(CTRL, 0)
+    time.sleep(0.3)
+    check("...and types once it's released", emitted(), [("keyboard", c, v) for c, v in keys_for("ab")])
+    typed()
+    to_relay("keyboard desktop")
+    to_relay("type Ok.")
+    time.sleep(0.3)
+    check("type: to the desktop while typing goes there", typed(), [f"key {c} {v}" for c, v in keys_for("Ok.")])
+    check("...and not to the virtual keyboard", emitted(), [])
+    to_relay("keyboard steam")
 
     check("an empty command isn't an action", relay.known_action("command:  "), False)
     check("steam_menu, pause_toggle and commands work without pointer mode",

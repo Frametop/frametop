@@ -56,7 +56,6 @@ POINTER_PINCH_DEADZONE=1.5 # hands: degrees the pinching hand moves before the p
 POINTER_GRIP_GAIN=1        # hands: the pointer moves this times the gripping hand's angle
 POINTER_GRIP_BELOW=0.35    # hands: grips beginning more than this (m) below the eyes are ignored (hands on a desk)
 POINTER_PINCH_TYPING=1     # hands: no pinch within this many seconds of a key (typing touches thumb to index)
-SHARE_KEYS=0       # 1 = keys of keyboards grabbed for the desktop also go to @frametop_keys, for hotkey tools (any local process can listen)
 DISPLAY_OFF_MIN=0  # minutes without use before frametop-power turns the displays off, even if the headset seems worn (0 = never)
 DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (mm) within 10 s counts as use
 DISPLAY_MOVE_DEG=0.5 # displays off: or turning this far (degrees) within 10 s

@@ -18,6 +18,10 @@ to the input relay over its control socket (@frametop_relay):
   - Game optimization: pausing Frametop while a VR game runs, so it leaves the CPU and GPU to the game
     (input/game_pause.py, in the relay: "pause on|off|?"): pause now, pause by itself during VR
     games, the controller gesture that pauses and resumes, what happens to the desktop, a sound.
+  - Voice: Frametop Voice's dictation (voice/ft-voiced): on or off, its keys (key combinations
+    with the dictation actions), controller buttons, typing, sounds, and the wake word. Settings
+    go to ~/.config/frametop-voice.json (voice/voice_settings.py); ft-voiced reads them again
+    within 2 s, and answers "status" on its control socket.
   - Gaze: the pointer's gaze mode (@ft_pointer_helper "gaze") and the gaze service
     (gaze/ft-gazed, @ft_gazed: status, forget, reload), with its eye tracker (SteamVR's or
     our own) and eye bias (GAZE_TRACKER, GAZE_EYE in frametop.conf).
@@ -56,6 +60,12 @@ VRSETTINGS_PATHS = [os.path.expanduser("~/.config/openvr/config/steamvr.vrsettin
                     os.path.expanduser("~/.steam/steam/config/steamvr.vrsettings")]
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAZE_PROBE = os.path.join(REPO, "gaze", "probe", "ft-gazeprobe")
+sys.path.insert(0, os.path.join(REPO, "voice"))
+import voice_commands  # noqa: E402  Frametop Voice's commands and settings (standard library)
+import voice_settings  # noqa: E402
+
+VOICE_UNIT = "frametop-voice.service"
+VOICE_SOCKET = f"/run/user/{os.getuid()}/frametop-voice/control.sock"  # ft-voiced's, owner-only
 BTN_MISC = 0x100
 # Header names that mark the start of a range, not a real key (BTN_MOUSE == BTN_LEFT).
 RANGE_ALIASES = {"BTN_MISC", "BTN_MOUSE", "BTN_JOYSTICK", "BTN_GAMEPAD", "BTN_DIGI", "BTN_WHEEL",
@@ -77,6 +87,8 @@ ACTION_LABELS = {
     "screens_toggle": "Hide/show desktop screens", "keyboard_toggle": "Open/close keyboard",
     "float_toggle": "Float window in VR / put it back", "dock_all": "Put all floating windows back",
     "pause_toggle": "Pause/resume Frametop (for VR games)",
+    "dictate": "Dictation: start or stop",
+    "dictate_hold": "Dictation: while held",
     "spin_next": "Spin the panels: next one on the right to the front",
     "spin_prev": "Spin the panels: next one on the left to the front",
     "key": "Pass through as key",
@@ -110,7 +122,10 @@ PAUSE_REASONS = {"game": "a VR game started", "gesture": "controller gesture", "
                  "settings": "from here"}
 # Gaze mode is a mouse and keyboard feature (docs/gaze-controllers.md; the relay's GAZE_ACTIONS).
 GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right", "gaze_quickcal")
-CONTROLLER_ACTIONS = [a for a in ACTION_LABELS if a not in ("key", "none") + GAZE_ACTIONS]
+# Dictation's controller buttons are on the Voice page: read from SteamVR's web socket, they stay
+# the games' too (a Controllers mapping would take them).
+VOICE_ACTIONS = voice_settings.DICTATION_ACTIONS
+CONTROLLER_ACTIONS = [a for a in ACTION_LABELS if a not in ("key", "none") + GAZE_ACTIONS + VOICE_ACTIONS]
 # Key combinations take any action but key and none; the keyboard clicks only work there.
 SHORTCUT_ACTIONS = [a for a in ACTION_LABELS if a not in ("key", "none")]
 KEYBOARD_ONLY = ("gaze_left", "gaze_right")
@@ -164,6 +179,8 @@ GAZE_MOUSE = {"precision": "Gaze precision: hold to steer with the mouse, releas
 # Key combinations ("key_bindings" in the rules): modifiers, either side folded into the left code.
 MODIFIER_CODES = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125}
 MODIFIER_NAMES = {29: "Ctrl", 42: "Shift", 56: "Alt", 125: "Meta"}
+# A tap of a right-hand modifier is bound by its own code: that key alone (the relay's modifier_tap).
+RIGHT_MODIFIER_NAMES = {97: "Right Ctrl", 54: "Right Shift", 100: "Right Alt", 126: "Right Meta"}
 # What a rules file without "key_bindings" gets (the relay's DEFAULT_KEY_BINDINGS): a Meta tap
 # opens Steam's menu, Meta+J and Meta+K click at the gaze, Meta+Shift+F floats a window,
 # Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels.
@@ -171,11 +188,17 @@ DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "g
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev"}
 
 
+def voice_installed():
+    return os.path.exists(os.path.expanduser(f"~/.config/systemd/user/{VOICE_UNIT}"))
+
+
 def key_bindings(rules):
     """The rules' key combinations, or the defaults if it has none of its own (an empty list
-    counts as its own)."""
+    counts as its own): with Frametop Voice installed, a Right Ctrl tap dictates too."""
     bound = rules.get("key_bindings")
-    return dict(bound) if isinstance(bound, dict) else dict(DEFAULT_KEY_BINDINGS)
+    if isinstance(bound, dict):
+        return dict(bound)
+    return {**DEFAULT_KEY_BINDINGS, **(voice_settings.VOICE_KEY_BINDINGS if voice_installed() else {})}
 # The gaze service's settings (gaze/ft-gazed): whose eye tracking, and the eye bias. GAZE_TRACKER
 # can also be auto (the default): ours when it's installed, else SteamVR's.
 GAZE_TRACKERS = {"steam": "SteamVR's eye tracker", "own": "our own eye tracker"}
@@ -308,6 +331,7 @@ class Backend(QObject):
     driverChanged = Signal()
     panelsChanged = Signal()
     pauseChanged = Signal()
+    voiceChanged = Signal()
     activity = Signal(str)  # device id
     captured = Signal(int, str)  # code, name
     capturedController = Signal(str, str)  # button, label
@@ -326,6 +350,9 @@ class Backend(QObject):
         self._capture_combo = ""  # the action a key combination is being captured for
         self._combo_mods = set()
         self._combo_tap = None  # a modifier pressed alone, nothing since: released, it's a tap
+        self._combo_tap_code = None  # that modifier's key as it is (Right Ctrl: 97)
+        self._voice = {}  # ft-voiced's status, {} when it isn't running
+        self._voice_enabled = False  # its service starts at login (systemctl, refreshVoice)
         self._vr = {}  # the helper's vrstatus, {} when it doesn't answer
         self._vr_at = 0.0
         self._gaze = {}  # ft-gazed's status, {} when it isn't running
@@ -386,6 +413,10 @@ class Backend(QObject):
         if self._pause and now - self._pause_at > 5:
             self._pause = {}
             self.pauseChanged.emit()
+        voice = self._voice_status() if voice_installed() else {}
+        if voice != self._voice:
+            self._voice = voice
+            self.voiceChanged.emit()
 
     def _check_driver(self):
         block = driver_block()
@@ -455,9 +486,12 @@ class Backend(QObject):
                     mod = MODIFIER_CODES[code]
                     if value == 1:
                         self._combo_tap = None if self._combo_mods else mod
+                        self._combo_tap_code = code
                     (self._combo_mods.add if value else self._combo_mods.discard)(mod)
                     if value == 0 and self._combo_tap == mod:
-                        self._end_shortcut_capture(str(mod))  # the relay's modifier tap
+                        # The relay's modifier tap: a right-hand key by its own code, that key alone.
+                        tapped = self._combo_tap_code
+                        self._end_shortcut_capture(str(tapped if tapped in RIGHT_MODIFIER_NAMES else mod))
                 elif value == 1 and code < BTN_MISC:
                     self._end_shortcut_capture("+".join(str(c) for c in sorted(self._combo_mods) + [code]))
                 elif value == 1:
@@ -1041,6 +1075,8 @@ class Backend(QObject):
         parts = [int(c) for c in combo.split("+") if c.isdigit()]
         if len(parts) == 1 and parts[0] in MODIFIER_NAMES:
             return MODIFIER_NAMES[parts[0]] + " tap"
+        if len(parts) == 1 and parts[0] in RIGHT_MODIFIER_NAMES:
+            return RIGHT_MODIFIER_NAMES[parts[0]] + " tap"
         return "+".join(MODIFIER_NAMES.get(c) or self.codeName(c).removeprefix("KEY_").title() for c in parts)
 
     @Property("QVariantList", notify=mappingsChanged)
@@ -1092,6 +1128,113 @@ class Backend(QObject):
         rules["key_bindings"].pop(combo, None)
         self._save_rules(rules)
         self.message.emit(f"{self.comboName(combo)} removed", False)
+
+    # --- voice dictation (Frametop Voice) ---
+    def _voice_status(self):
+        """ft-voiced's "status" ({} when it isn't running)."""
+        try:
+            with socket.socket(socket.AF_UNIX) as s:
+                s.settimeout(0.3)
+                s.connect(VOICE_SOCKET)
+                s.sendall(b"status\n")
+                return json.loads(s.makefile().readline())
+        except (OSError, ValueError):
+            return {}
+
+    @Slot()
+    def refreshVoice(self):
+        """Whether the service starts at login: asked of the host's systemd, so only when the
+        Voice page opens and after a change, not every 2 s."""
+        self._voice_enabled = host("systemctl", "--user", "is-enabled", VOICE_UNIT).stdout.strip() == "enabled"
+        self.voiceChanged.emit()
+
+    @Property(bool, notify=voiceChanged)
+    def voiceInstalled(self):
+        return voice_installed()
+
+    @Property(bool, notify=voiceChanged)
+    def voiceEnabled(self):
+        return self._voice_enabled
+
+    @Property("QVariantMap", notify=voiceChanged)
+    def voiceStatus(self):
+        v = self._voice
+        return {"running": bool(v), "dictating": bool(v.get("dictating")), "wake": bool(v.get("wake_enabled")),
+                "mic": bool(v.get("mic_open"))}
+
+    @Slot(bool)
+    def setVoiceOn(self, on):
+        result = host("systemctl", "--user", "enable" if on else "disable", "--now", VOICE_UNIT)
+        if result.returncode == 0:
+            self.message.emit("Voice dictation " + ("on" if on else "off, and it won't start at login"), False)
+        else:
+            self.message.emit("Couldn't turn voice dictation " + ("on: " if on else "off: ")
+                              + (result.stderr.strip() or "systemctl failed")[:160], True)
+        self.refreshVoice()
+
+    @Property("QVariantMap", notify=voiceChanged)
+    def voiceSettings(self):
+        s = voice_settings.load()
+        return {k: s[k] for k in voice_settings.DEFAULT}
+
+    def _set_voice(self, key, value, text):
+        s = voice_settings.load()
+        s[key] = value
+        voice_settings.save(s)
+        self.message.emit(text, False)
+        self.voiceChanged.emit()
+
+    @Slot(str, bool)
+    def setVoiceOption(self, key, on):
+        texts = {"live_typing": ("Typing as you talk", "Typing when you stop talking"),
+                 "sounds": ("A tone when dictation starts and stops", "No dictation sounds"),
+                 "wake_word": ("Listening for the wake word", "Wake word off")}
+        if key in texts:
+            self._set_voice(key, bool(on), texts[key][0 if on else 1])
+
+    @Property("QVariantList", constant=True)
+    def voiceModes(self):
+        return [{"value": "hold", "text": "Hold to talk"},
+                {"value": "toggle", "text": "Press to start, press again to stop"}]
+
+    @Slot(str)
+    def setVoiceControllerMode(self, mode):
+        if mode in voice_settings.MODES:
+            self._set_voice("controller_mode", mode, "Controller: " + ("hold to talk" if mode == "hold"
+                                                                     else "press to start and stop"))
+
+    @Property("QVariantList", notify=voiceChanged)
+    def voiceButtons(self):
+        return [{"button": b, "label": CONTROLLER_BUTTONS.get(b, b)} for b in voice_settings.load()["controller"]]
+
+    @Slot(str)
+    def addVoiceButton(self, button):
+        buttons = voice_settings.load()["controller"]
+        if button in CONTROLLER_BUTTONS and button not in buttons:
+            self._set_voice("controller", buttons + [button], f"Dictation: {CONTROLLER_BUTTONS[button]}")
+
+    @Slot(str)
+    def removeVoiceButton(self, button):
+        buttons = voice_settings.load()["controller"]
+        if button in buttons:
+            self._set_voice("controller", [b for b in buttons if b != button],
+                            f"{CONTROLLER_BUTTONS.get(button, button)}: no longer dictation")
+
+    @Slot(str)
+    def setWakePhrases(self, text):
+        phrases = list(dict.fromkeys(p for p in (voice_settings.clean_phrase(t) for t in re.split(r"[,\n]", text)) if p))
+        if phrases and phrases != voice_settings.load()["wake_phrases"]:
+            self._set_voice("wake_phrases", phrases, "Wake word: " + ", ".join(p.title() for p in phrases))
+
+    @Property("QVariantList", notify=mappingsChanged)
+    def dictationKeys(self):
+        return [{"combo": c, "label": self.comboName(c), "actionLabel": action_label(a)}
+                for c, a in sorted(key_bindings(read_json(RULES_PATH)).items()) if a in VOICE_ACTIONS]
+
+    @Property("QVariantList", notify=voiceChanged)
+    def voiceCommands(self):
+        commands, _ = voice_commands.parse(voice_settings.load()["commands"])
+        return [{"say": " / ".join(p for p, _ in c.phrases), "run": " ".join(c.run)} for c in commands]
 
     @Property(str, notify=gazeChanged)
     def gazeTracker(self):

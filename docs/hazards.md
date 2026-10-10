@@ -25,6 +25,6 @@ ft-screens drops keys while no screen has focus or the SteamVR dashboard is open
 
 ## Typing and grabbed keyboards
 
-- **Programs that watch every keyboard lose grabbed ones.** While typing goes to the desktop, the relay grabs pass-through keyboards, so a hotkey tool reading them directly stops seeing their keys. `SHARE_KEYS=1` in `~/.config/frametop.conf` sends their keys to the abstract socket `@frametop_keys` instead. It's off by default: abstract sockets have no permissions, and any local process that binds the name first receives every key typed into the desktop, passwords included.
+- **Programs that watch every keyboard lose grabbed ones.** While typing goes to the desktop, the relay grabs pass-through keyboards, so a hotkey tool reading them directly stops seeing their keys. Bind the tool's key as a Frametop key combination that runs a command (`command:CMD`) instead: the relay sees every keyboard. Frametop Voice's push-to-talk key works this way. (Until 2026-10-10, `SHARE_KEYS=1` sent every key typed into the desktop to the abstract socket `@frametop_keys`, which any local process could bind first.)
 - **Typing starts out going to Steam.** After the desktop starts, keys go to Steam until you click a screen.
 - **Controller clicks don't move typing.** Overlay apps don't see controller clicks on other panels, so after one typing stays where it was. A mouse click, or a click on a screen, moves it.

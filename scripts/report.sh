@@ -59,7 +59,7 @@ podman container inspect -f "container $box: running={{.State.Running}} image={{
   echo "container $box: missing"
 
 section Services
-for u in frametop-input-relay frametop-pointer frametop-power frametop-gaze frametop-desktop; do
+for u in frametop-input-relay frametop-pointer frametop-power frametop-gaze frametop-voice frametop-desktop; do
   echo "$u: $(systemctl --user is-enabled $u 2>/dev/null) / $(systemctl --user is-active $u 2>/dev/null)"
 done
 for u in frametop-eyegrab steamframe-bt-fixups; do
@@ -149,6 +149,13 @@ section "Pointer helper (last 60 lines)"
 journalctl --user -u frametop-pointer -n 60 --no-pager -o short 2>/dev/null
 section "Power service (last 30 lines)"
 journalctl --user -u frametop-power -n 30 --no-pager -o short 2>/dev/null
+# Frametop Voice's log has what was said (each dictation window's words, transcripts, wake word
+# commands): those lines are left out of the report.
+if systemctl --user is-enabled frametop-voice >/dev/null 2>&1; then
+  section "Voice dictation (last 30 lines, without what was said)"
+  journalctl --user -u frametop-voice -u frametop-voice-whisper -n 60 --no-pager -o short 2>/dev/null |
+    grep -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|decode skipped|line up with' | tail -n 30
+fi
 # The gaze service, SteamVR's eye tracker and ours, the checks and calibrations, with what
 # looks wrong first. It wakes an idle gaze service for about 20 s, to see the tracker send.
 python3 "$repo/scripts/gaze-report.py" </dev/null 2>&1 || echo "scripts/gaze-report.py failed"

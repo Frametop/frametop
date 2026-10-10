@@ -1143,10 +1143,11 @@ class Voice:
         while something uses it: wake word commands, or dictation set to use it."""
         want = self.wake_enabled or self.dcfg["engine"] == "whisper" or not self.dcfg["streaming"]
         if want != self.whisper_wanted:
+            if want or self.whisper_wanted is not None:  # at startup, not running is the start
+                log.info("whisper-server: %s", "starting" if want else "stopping (nothing uses it)")
             self.whisper_wanted = want
-            log.info("whisper-server: %s", "starting" if want else "stopping (nothing uses it)")
             self.spawn(self._run(["systemctl", "--user", "start" if want else "stop",
-                                  "frametop-voice-whisper.service"], host=True))
+                                  "frametop-voice-whisper.service"], host=True, quiet=True))
 
     # --- control socket
 

@@ -66,7 +66,9 @@ STREAM_RATES = [30, 60, 72, 90, 120]
 # clients and set their permissions, and list the host's monitors.
 SCOPES = [{"path": "/api/pin", "methods": ["POST"]}, {"path": "/api/clients/list", "methods": ["GET"]},
           {"path": "/api/clients/update", "methods": ["POST"]}, {"path": "/api/display-devices", "methods": ["GET"]}]
-NAME_RE = r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}"
+# A host's name: a Mac's is often "Name's MacBook" (straight or curly apostrophe). It goes to
+# ft-layout as an argument and into the layout and panel labels, never through a shell.
+NAME_RE = r"[A-Za-z0-9][A-Za-z0-9 ._'’-]{0,39}"
 RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2560, 1080, "ultrawide"),
                (3440, 1440, "ultrawide"), (5120, 1440, "super ultrawide"), (1920, 1200, "16:10"),
                (2560, 1600, "16:10"), (1080, 1920, "portrait"), (1440, 2560, "portrait")]
@@ -272,7 +274,7 @@ class Backend(QObject):
         the displays picked next."""
         name, address, dongle = " ".join(name.split()), address.strip(), dongle.strip()
         if not re.fullmatch(NAME_RE, name):
-            return self.signedIn.emit(name, False, "A host's name needs 1 to 40 letters, digits, spaces, dots or dashes")
+            return self.signedIn.emit(name, False, "A host's name needs 1 to 40 letters, digits, spaces, dots, dashes or apostrophes")
         if not re.fullmatch(r"[A-Za-z0-9.:-]{1,64}", address) or (dongle and not re.fullmatch(r"[0-9.]{7,15}", dongle)):
             return self.signedIn.emit(name, False, "The address is a host name or an IP address")
         layout = ft_layout.load_layout()

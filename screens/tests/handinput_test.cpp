@@ -201,6 +201,7 @@ struct Rig {
     int64_t t = 1'000'000'000;
     bool allowed[2] = {true, true};
     bool busy = false;
+    bool typing[2] = {false, false};
     std::vector<Event> events;
     std::vector<Carry> carries;
     // One hands frame (and the ticks until the next one, 30 Hz: three 90 Hz ticks)
@@ -213,6 +214,7 @@ struct Rig {
             Input i;
             i.nowNs = now, i.hands = &hands, i.head = Identity(), i.haveHead = true;
             i.allowed[0] = allowed[0], i.allowed[1] = allowed[1], i.pointerBusy = busy;
+            i.typing[0] = typing[0], i.typing[1] = typing[1];
             in.Update(i, panels);
             for (const Event &e : in.events()) events.push_back(e);
             carries = in.carries();
@@ -560,6 +562,38 @@ SynthHand PinchAt(double u, double v, double d, bool right = true, uint32_t id =
     h.byPinch = true, h.right = right, h.id = id, h.bent = true;   // a pinching hand's index is bent
     h.pinch[0] = u, h.pinch[1] = v, h.pinch[2] = -0.5 + d;
     return h;
+}
+
+// Typing on a real keyboard (the helper's "typing"): a hand it holds back neither pokes nor grabs, and
+// the cursor doesn't follow its fingertip; the other hand still does; a press or grab already held
+// carries on to its release.
+void TestTyping() {
+    {
+        Rig r;
+        r.typing[1] = true;
+        for (int mm = 100; mm >= -15; mm -= 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+        CHECK(r.Count(Event::Press) == 0 && r.in.stats.heldTyping > 0);
+        CHECK(r.Count(Event::Motion) == 0);
+    }
+    {
+        Rig r;
+        r.typing[0] = true;   // the left hand typing: the right one pokes as ever
+        for (int mm = 100; mm >= -15; mm -= 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+        CHECK(r.Count(Event::Press) == 1);
+        r.typing[1] = true;   // typing starts mid-press: it ends as usual, pulled back
+        for (int mm = -15; mm <= 50; mm += 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+        CHECK(r.Count(Event::Release) == 1 && !r.Last(Event::Release)->lost);
+    }
+    {
+        Rig r;
+        r.typing[1] = true;
+        const double barY = r.panels[0].controls[0].v;
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0.05, barY, 0.02)});
+        const double at[3] = {0.05, barY, -0.48};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({PinchAt(0.05, barY, 0.02)});
+        CHECK(r.Count(Event::GrabStart) == 0 && !r.in.grabbing(1));
+    }
 }
 
 void TestGrabMove() {
@@ -1719,6 +1753,7 @@ int main(int argc, char **argv) {
     TestSlowDrift();
     TestApproachFromFront();
     TestGuards();
+    TestTyping();
     TestRelease();
     TestDeep();
     TestDrag();

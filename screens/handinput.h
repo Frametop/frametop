@@ -139,6 +139,8 @@ struct Input {
     bool haveHead = false;
     bool allowed[2] = {false, false};   // per side: a bare hand, and hand input allowed now
     bool pointerBusy = false;           // a laser or the mouse holds a button in KWin
+    bool typing[2] = {false, false};    // per side: typing holds this hand back (the helper's "typing"):
+                                        // no new poke or grab, and the cursor doesn't follow its fingertip
 };
 
 // Where a point (room) is over a panel: u along it (along the arc when curved) and v up,
@@ -209,7 +211,7 @@ public:
         int grabs = 0, grabEnds = 0, stretches = 0;
         // presses that didn't happen, by the guard that stopped them (frames at d <= 0 over content)
         int heldNotStereo = 0, heldNotExtended = 0, heldNotNearest = 0, heldSlow = 0, heldPinching = 0, heldBusy = 0,
-            heldAskew = 0, heldResting = 0;
+            heldAskew = 0, heldResting = 0, heldTyping = 0;
     } stats;
 
 private:

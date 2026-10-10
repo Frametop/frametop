@@ -78,7 +78,11 @@ POINTER_PINCH_GAIN=0.5     # hands without gaze mode: a held pinch drags the poi
 POINTER_PINCH_DEADZONE=1.5 # hands without gaze mode: degrees the pinching hand moves before the pointer does (a tap's jitter)
 POINTER_GRIP_GAIN=1        # hands: the pointer moves this times the gripping hand's angle
 POINTER_GRIP_BELOW=0.35    # hands: grips beginning more than this (m) below the eyes are ignored (hands on a desk)
-POINTER_PINCH_TYPING=1     # hands: no pinch within this many seconds of a key (typing touches thumb to index)
+POINTER_PINCH_TYPING=2     # hands: typing on a keyboard: no pinch, grip, poke or hand ray within this many seconds of a key, except by a hand lifted off the keys (typing touches thumb to index); 0 = no typing guard
+POINTER_TYPING_RAISE=0.08  # hands: a hand that was typing stays held back, however long you pause, until it rises this far (m) above where it typed, or turns its palm up
+POINTER_TYPING_BELOW=0.2   # hands: the keyboard is where the palms are at least this far (m) below the eyes, in front of you, palms down
+POINTER_TYPING_POSTURE=0.3 # hands: both hands down on the keyboard together this long (s) count as typing before the first key; 0 = only keys
+POINTER_TYPING_RECENT=600  # hands: ... only within this many seconds of a key (a keyboard in use; both hands resting on a desk otherwise hold gaze pinches back); 0 = always
 POINTER_HAND_RAY=1         # hands: a bare hand raised and pointing shows a ray that drives the pointer like a controller's laser (pinch = click, middle pinch = right click or scroll); 0 = gaze pinches only
 POINTER_RAY_DEADZONE=2.5   # hand ray: degrees the ray turns during a pinch before the press drags (a click's own wobble stays inside)
 POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out pushes it away and pulling in brings it near

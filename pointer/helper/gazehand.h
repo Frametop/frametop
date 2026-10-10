@@ -60,7 +60,7 @@ struct Situation {
     bool busy = false;        // a press or a hold is already going (the mouse's, a key's, a hand's)
     bool active = true;       // the pointer is awake (the first gesture only wakes it)
     double sinceKey = 1e9;    // seconds since the relay's last "typing"
-    double typingHold = 1.0;  // POINTER_PINCH_TYPING
+    double typingHold = 1.0;  // (the helper holds typing hands back itself now: typing.h)
 };
 inline const char *Refused(const Situation &s) {
     if (s.busy) return "ignored (a press is already held)";

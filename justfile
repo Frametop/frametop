@@ -13,7 +13,8 @@ test: test-python test-c test-bash
 # the Python suites as a strict gate: every failure fails the run. The image's
 # python3 has to import the dnf Qt stack and the locked packages together;
 # without that check the Qt tests would only skip. session/test is not here:
-# test_accessibility.py needs the host's AT-SPI and PyGObject.
+# test_accessibility.py needs the host's AT-SPI and PyGObject, test_notifyfwd.py
+# the host's dbus-daemon and PyGObject.
 test-python:
     #!/usr/bin/env bash
     set -uo pipefail

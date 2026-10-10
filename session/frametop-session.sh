@@ -35,6 +35,7 @@ done
 
 conf=$HOME/.config/frametop.conf
 BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_SLOTS=8 FLOAT_MARGIN=300
+NOTIFY_FORWARD=auto
 # shellcheck disable=SC1090
 [ -f "$conf" ] && . "$conf"
 backend=${FT_BACKEND:-$BACKEND}
@@ -43,6 +44,7 @@ width=${FT_WIDTH:-$WIDTH}
 height=${FT_HEIGHT:-$HEIGHT}
 phys_width=${FT_PHYS_WIDTH:-$PHYS_WIDTH}
 remote=${FT_REMOTE:-$REMOTE}
+notify_forward=${FT_NOTIFY_FORWARD:-$NOTIFY_FORWARD}
 # Floating windows (screens backend): KWin gets this many spare outputs after the screens,
 # and ft-floatd floats a window on each (docs/floating-windows.md). Changing it takes a
 # desktop restart.
@@ -232,6 +234,26 @@ EOF
 else
   rm -f "$autostart"
 fi
+
+# ft-notifyfwd shows this desktop's notifications in the Steam session (in VR, with a VR
+# notification server there), with their buttons, through the user bus's notification
+# server; Plasma's own popups stay off while it does. NOTIFY_FORWARD: auto (only when that
+# server isn't SteamOS's steam_notif_daemon) | on | off.
+autostart=$XDG_CONFIG_HOME/autostart/frametop-notifyfwd.desktop
+case $notify_forward in
+  auto | on)
+    mkdir -p "$(dirname "$autostart")"
+    cat > "$autostart" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Frametop notifications in VR
+Exec=sh -c 'exec "$here/ft-notifyfwd" $notify_forward > /tmp/frametop-notifyfwd.log 2>&1'
+X-KDE-autostart-phase=2
+NoDisplay=true
+EOF
+    ;;
+  *) rm -f "$autostart" ;;
+esac
 
 # Launch as Standalone in every app's right-click menu (float/ft_apps.py): copies of the
 # apps' desktop files with that action, first in XDG_DATA_DIRS, so only this desktop sees

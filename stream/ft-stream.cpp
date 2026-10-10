@@ -296,10 +296,15 @@ bool Answers(const std::string &address, int port, int ms) {
 // (empty) while none answers; "auto" (the default) the first direct one that answers, else
 // its own. Through the home router a stream lost a frame's packets in bursts (0.33% of
 // packets, 1.8% of frames at 50 Mbit/s); over the dongle, none (2026-10-07).
-std::string Route(const std::string &host, int port) {
+nlohmann::json Layout() {
     std::ifstream f(std::string(std::getenv("HOME") ? std::getenv("HOME") : "") + "/.config/frametop-layout.json");
     const nlohmann::json layout = nlohmann::json::parse(f, nullptr, false);
-    if (!layout.is_object() || !layout.contains("hosts") || !layout["hosts"].is_array()) return host;
+    return layout.is_object() && layout.contains("hosts") && layout["hosts"].is_array() ? layout : nlohmann::json();
+}
+
+std::string Route(const std::string &host, int port) {
+    const nlohmann::json layout = Layout();
+    if (layout.is_null()) return host;
     for (const auto &h : layout["hosts"]) {
         if (!h.is_object() || h.value("address", "") != host) continue;
         const std::string route = h.value("route", "auto");
@@ -311,6 +316,24 @@ std::string Route(const std::string &host, int port) {
         return route == "dongle" ? "" : host;
     }
     return host;
+}
+
+// The port of the display whose client is `id`, from the layout, or 0. A Mac runs a Sunshine
+// instance per display, each on its own port, and a client is paired with one of them only. An
+// ft-layout from before ports (an older release's Reset Screen Layout or profile launchers) asks
+// for HOST alone: that reached the instance on 47989, where the client isn't paired, so the
+// display froze and its pointer went to the main display (2026-10-10).
+int LayoutPort(const std::string &host, const std::string &id) {
+    const nlohmann::json layout = Layout();
+    if (layout.is_null()) return 0;
+    for (const auto &h : layout["hosts"]) {
+        if (!h.is_object() || h.value("address", "") != host || !h.contains("displays") || !h["displays"].is_array())
+            continue;
+        for (const auto &d : h["displays"])
+            if (d.is_object() && d.value("client", "") == id && d.contains("port") && d["port"].is_number_integer())
+                return d["port"].get<int>();
+    }
+    return 0;
 }
 
 int Stream(Client &client, const std::string &app, int fd, int width, int height, int fps, int bitrate) {
@@ -564,6 +587,8 @@ int main(int argc, char **argv) {
     // Moonlight's rule of thumb, about 20 Mbit/s for 1080p60, scaled by pixels and fps.
     if (!bitrate) bitrate = int(std::min(150000.0, 20000.0 * width * height * fps / (1920.0 * 1080 * 60)));
 
+    if (!port && (port = LayoutPort(host, id)))
+        std::printf("%s: %s's port is %d (the layout)\n", host.c_str(), id.c_str(), port);
     g_host = host;
     const std::string route = cmd == "stream" ? Route(host, port) : host;
     if (route.empty()) {  // dongle only, and it isn't up: ft-screens tries again later

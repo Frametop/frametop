@@ -448,7 +448,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
                 sd.fastIn = true;
         }
     }
-    if (over && extended && !resting && t.d <= p_.cursor && t.d > p_.nearBack && !in.pointerBusy && !otherPressing &&
+    if (over && extended && !resting && !in.typing[s] && t.d <= p_.cursor && t.d > p_.nearBack && !in.pointerBusy && !otherPressing &&
         (std::fabs(x - sd.hoverX) >= 0.5 || std::fabs(y - sd.hoverY) >= 0.5)) {
         sd.hoverX = x, sd.hoverY = y;
         Emit(Event::Motion, s, P->index, x, y);
@@ -464,6 +464,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     if (pinch.down || grip.down) return (void)++stats.heldPinching;
     if (in.pointerBusy || otherPressing || rePress || sd.spent) return (void)++stats.heldBusy;
     if (resting) return (void)++stats.heldResting;
+    if (in.typing[s]) return (void)++stats.heldTyping;
     if (!Along(*P, t, *h, p_.fingerAngle)) return (void)++stats.heldAskew;
     if (!fast) return (void)++stats.heldSlow;
     // pressed
@@ -494,7 +495,7 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     sd.begins = g.begins;
     // a new pinch: the near claim had this hand, and it began in a grab zone (decided once,
     // at the pinch's begin; on the content a near pinch does nothing)
-    if (!g.down || sd.state != State::Hover) return;
+    if (!g.down || sd.state != State::Hover || in.typing[s]) return;
     const Panel *bestP = nullptr;
     Zone zone = Zone::None;
     int sx = 1, sy = -1;

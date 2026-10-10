@@ -64,7 +64,8 @@
 //     to click it; pinch its bar, edges, title bar or corners to move or resize it; hold it
 //     with both hands to stretch and turn it. A glow on the screen shows where the fingertip
 //     and the pinch point are. It takes the pointer helper's word on which hands are bare and
-//     whether hand input is allowed ("hands"), and tells it which hands are near a panel
+//     whether hand input is allowed ("hands"), and which hands typing on a real keyboard holds
+//     back ("typing": no pokes or grabs by them), and tells it which hands are near a panel
 //     ("near"), so a pinch is either ours or the helper's.
 //   - the palm menu (palmmenu.cpp): a bare hand turned palm up toward your face, while you look
 //     at it, gets a small ring above the palm; a pinch tap by that hand opens the Steam menu
@@ -2065,6 +2066,13 @@ struct HandsWord {
     bool allowed = false;
     int64_t atMs = INT64_MIN / 2;
 } g_handsWord;
+// The pointer helper's word on typing ("typing <L 0|1> <R 0|1>", on change and every second): the
+// hands typing on a real keyboard holds back (pointer/helper/typing.h): no pokes or near grabs by
+// them. Older than 3 s, it lapses.
+struct TypingWord {
+    bool side[2] = {false, false};
+    int64_t atMs = INT64_MIN / 2;
+} g_typingWord;
 // HANDS_NEAR: 1 (default) follows the helper's word, 0 is off, force is on without it (for
 // testing without the helper; the "handinput" command switches it too).
 enum class NearMode { Off, Helper, Force } g_nearMode = NearMode::Helper;
@@ -2193,6 +2201,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     in.hands = &g_hands;
     in.haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &in.head);
     for (int k = 0; k < 2; ++k) in.allowed[k] = in.haveHead && SideAllowed(k);
+    for (int k = 0; k < 2; ++k) in.typing[k] = NowMs() - g_typingWord.atMs < 3000 && g_typingWord.side[k];
     in.pointerBusy = g_press.buttons && !IsHandHolder(g_press.device);
     // KWin's button, let go of by someone else (ReleaseStuck: its screen hid, or paused)
     for (int k = 0; k < 2; ++k)
@@ -2982,6 +2991,8 @@ void ft_vr_keyboard_hide(void) {
 //   cutouts shift off|"<dist>:<yaw>,<pitch> ..."   the per-distance correction (degrees; off by default)
 //   hands <L> <R> <allowed>   the pointer helper: each side hand|controller|off, hand input allowed 0|1
 //                             (on change and every second; older than 3 s it lapses)
+//   typing <L> <R>            the pointer helper: typing holds that side's hand back 0|1 (no pokes
+//                             or near grabs); on change and every second, older than 3 s it lapses
 //   handinput on|off|force|state   near hand input: on follows the helper's word, force ignores it
 //                             -> "ok <mode> <left state> <right state>; <counts>"
 //   palmmenu on|off|state      the palm menu (HANDS_PALM_MENU) -> "ok <on|off>; <left> <right>; <counts>"
@@ -3160,6 +3171,9 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
             std::printf("hands from the pointer helper: left %s, right %s, %s\n", sl, sr, allowed ? "allowed" : "not allowed");
         g_handsWord.hand[0] = l, g_handsWord.hand[1] = r, g_handsWord.allowed = allowed, g_handsWord.atMs = NowMs();
         std::snprintf(reply, size, "ok");
+    } else if (int tl = 0, tr = 0; std::sscanf(cmd, "typing %d %d", &tl, &tr) == 2) {
+        g_typingWord.side[0] = tl != 0, g_typingWord.side[1] = tr != 0, g_typingWord.atMs = NowMs();
+        std::snprintf(reply, size, "ok");
     } else if (std::sscanf(cmd, "handinput %15s", word) == 1) {
         if (!std::strcmp(word, "on")) g_nearMode = NearMode::Helper;
         else if (!std::strcmp(word, "off")) g_nearMode = NearMode::Off;
@@ -3168,13 +3182,13 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         const auto &st = g_handInput.stats;
         std::snprintf(reply, size,
                       "ok %s, helper %s (left %s, right %s, %s); %s; %d frames, %d near, %d presses, %d controls, %d grabs, "
-                      "%d stretches; held back: %d one view, %d bent, %d not nearest, %d pinching, %d busy, %d resting, %d askew, %d slow",
+                      "%d stretches; held back: %d one view, %d bent, %d not nearest, %d pinching, %d busy, %d resting, %d typing, %d askew, %d slow",
                       g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
                       NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
                       g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
                       g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.controls, st.grabs, st.stretches,
                       st.heldNotStereo, st.heldNotExtended, st.heldNotNearest, st.heldPinching, st.heldBusy, st.heldResting,
-                      st.heldAskew, st.heldSlow);
+                      st.heldTyping, st.heldAskew, st.heldSlow);
     } else if (std::sscanf(cmd, "palmmenu %15s", word) == 1) {
         if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_palm.params().on = !std::strcmp(word, "on");
         else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error palmmenu on|off|state");

@@ -16,8 +16,10 @@
 // rises raise (0.08 m, POINTER_TYPING_RAISE) above where it typed, or turns (its normal's downward
 // part under turned), for leave (0.1 s). Then it's free at once, keys or not: a pinch right after
 // lifting a hand works. It's on the keyboard again once it's back down in the zone while typing. A
-// hand unseen for forget (3 s) is forgotten. A hand on the mouse is on the keyboard too (beside it,
-// palm down, at the same height): its pinches are the mouse's buttons.
+// hand unseen for forget (3 s) is forgotten. A hand in use out of the zone (its ray up, or holding a
+// gesture: Hand::busy) is free too: pointing with one hand and pressing Enter with the other. A hand
+// on the mouse is on the keyboard too (beside it, palm down, at the same height): its pinches are the
+// mouse's buttons.
 //   The zone: the palm at least below (0.20 m, POINTER_TYPING_BELOW) under the eyes, aheadMin to
 // aheadMax (0.05-0.45 m) ahead of them across the floor (along the head's heading), the palm facing
 // down (palmDown). Typing hands measured 0.29-0.42 m under the eyes and 0.18-0.34 m ahead, palms down
@@ -68,6 +70,7 @@ struct Hand {
     bool seen = false;
     V3 palm;
     double down = 0;
+    bool busy = false;  // its ray is up or it holds a gesture: in use elsewhere, if it's out of the zone
 };
 
 // The head in that frame: where the eyes are, and where it faces (its -z; only the heading counts).
@@ -148,6 +151,8 @@ public:
             }
             // back down where it typed (or in the zone, if it never typed here) while typing: on the keyboard
             const bool down = in[k] && (!s.known || h.palm.y - s.restY < p_.raise / 2);
+            // pointing or holding a gesture out of the zone when keys come: not typing (point, then Enter)
+            if (h.busy && !in[k] && !s.free) s.free = true;
             if (typing && down) {
                 s.parked = true, s.free = false, s.leaveSince = -1;
                 if (!s.known || std::fabs(h.palm.y - s.restY) >= p_.raise / 2) s.restY = h.palm.y;

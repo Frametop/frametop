@@ -255,10 +255,9 @@
 // hand moves the pointer at POINTER_GRIP_GAIN (1: as far as it moves, seen from the eye), and
 // opening the hand releases. So it drags whatever the pointer is on: a title bar moves the
 // window, a panel's grab bar carries the panel, text is selected.
-//   Typing touches thumb to index like a pinch: no pinch begins within POINTER_PINCH_TYPING
-// (1 s) of a key (the relay says "typing"). A grip begins only with the hand held up, at most
-// POINTER_GRIP_BELOW (0.35 m) below the eyes: hands on a desk curl like a loose fist. (The
-// user's own pinches sat 0.35-0.45 m below the eyes, elbow resting, so pinches have no such limit.)
+//   A grip begins only with the hand held up, at most POINTER_GRIP_BELOW (0.35 m) below the eyes:
+// hands on a desk curl like a loose fist. (The user's own pinches sat 0.35-0.45 m below the eyes,
+// elbow resting, so pinches have no such limit.)
 //   The hand's movement is taken in the room, from where the eye was when the gesture began,
 // with the head pose at each frame's capture time, so turning your head doesn't move it.
 // The first gesture while the pointer is off only wakes it. Gestures are ignored in a VR game
@@ -351,6 +350,20 @@
 // aren't allowed lets it go at once, unless the mouse is in use. In gaze mode the gaze takes the
 // pointer back when the ray goes.
 //
+// Typing (with POINTER_HANDS; typing.h has the rules, docs/hands-typing.md what they came from): a
+// hand on a real keyboard touches thumb to index like a pinch, curls like a grip, and sits where the
+// hand ray's raised test begins. The relay says "typing" on a key. For POINTER_PINCH_TYPING (2 s)
+// after one, every hand is held back except one that has left the keyboard, and a hand that was on
+// the keys stays held back, through any pause, until it rises POINTER_TYPING_RAISE (0.08 m) above
+// where it typed or turns its palm up. Both hands down on the keys together (the keyboard posture,
+// POINTER_TYPING_POSTURE, 0.3 s) count as typing before the first key, within POINTER_TYPING_RECENT
+// (600 s) of one. A hand held back makes no pinch, middle pinch or grip ("pinch right: ignored
+// (typing: the hand is on the keyboard)"), and has no ray: one that drove the pointer lets it go to
+// the mouse or the gaze ("hand ray: right -> none (typing)"), and it can't claim it again until the
+// hand is lifted. ft-screens gets "typing <L 0|1> <R 0|1>" on @ft_screens, on a change and every
+// second: no pokes or near grabs by those hands. Changes go to the log ("typing: right hand on the
+// keyboard", "typing: right hand off the keyboard (raised 0.09 m)").
+//
 // Gaze pinch (gaze mode with POINTER_HANDS; gazehand.h has the rules and the timings): the eyes aim
 // and the hands click, Vision Pro style. In gaze mode the hand ray stays off unless
 // POINTER_GAZE_HAND_RAY=1 (then a raised, pointing hand's pinches are still ray pinches, as above),
@@ -371,8 +384,8 @@
 // the eyes jump about and look ahead to where a thing should go, so a dragged window would jump
 // with them, and a drop would land wherever you last glanced. A pinch that has nudged only clicks.
 //   A middle pinch is the right button the same way: a right click at the locked gaze, nudged
-// first if moved; it never becomes a press. No pinch begins within POINTER_PINCH_TYPING of a key,
-// and the rules for all gestures hold (hands allowed, a controller on that side, the near claims).
+// first if moved; it never becomes a press. The rules for all gestures hold (hands allowed, typing,
+// a controller on that side, the near claims).
 // Each pinch logs one line: "pinch right: clicked at the gaze on frametop.screen.0 (gaze 80 ms
 // before, held 0.18 s)", "nudged 2.4 deg, then clicked on ... (a lesson; ...)", "became a press on
 // ... (held still 0.50 s; ...), dragged 6.0 deg, let go", or why not.
@@ -428,7 +441,10 @@
 // (always), POINTER_GAZE_SHOW (1 s): gaze mode, above. POINTER_CONTROLLER_PICKUP (1, 0.5 to 5): how hard a controller must
 // move to take the laser back, above. POINTER_IGNORE (empty): ignored panels, above.
 // POINTER_HANDS (0), POINTER_PINCH_GAIN (0.5), POINTER_PINCH_DEADZONE (1.5 deg),
-// POINTER_GRIP_GAIN (1), POINTER_GRIP_BELOW (0.35 m), POINTER_PINCH_TYPING (1 s): hands, above.
+// POINTER_GRIP_GAIN (1), POINTER_GRIP_BELOW (0.35 m): hands, above. POINTER_PINCH_TYPING (2 s; 0 off),
+// POINTER_TYPING_RAISE (0.08 m), POINTER_TYPING_BELOW (0.2 m: the keyboard zone's palms at least this
+// far under the eyes), POINTER_TYPING_POSTURE (0.3 s; 0 keys only), POINTER_TYPING_RECENT (600 s; 0
+// always): typing, above.
 // POINTER_HAND_RAY (1), POINTER_RAY_DEADZONE (2.5 deg), POINTER_RAY_PUSH (1), POINTER_RAY_SCROLL (1),
 // POINTER_RAY_RELEASE (2 s), POINTER_RAY_GRACE (0.5 s), POINTER_RAY_SMOOTH_MINCUTOFF (0.8 Hz),
 // POINTER_RAY_SMOOTH_BETA (0.06), POINTER_RAY_SMOOTH_HOLD (0.5 Hz), POINTER_RAY_STEADY (1),
@@ -447,6 +463,7 @@
 #include "handoff.h"
 #include "handsin.h"
 #include "rayowner.h"
+#include "typing.h"
 #include "vrbuttons.h"
 #include "vrmath.h"
 
@@ -858,7 +875,10 @@ int main() {
     double headDeadzone = 0.5, keyTap = 0.25;  // POINTER_HEAD_DEADZONE, POINTER_KEY_TAP (keyboard clicks, see the top)
     // Hands (see the top): POINTER_HANDS, POINTER_PINCH_GAIN, POINTER_PINCH_DEADZONE, POINTER_GRIP_GAIN.
     bool handsOn = false;
-    double pinchGain = 0.5, pinchDeadzone = 1.5, gripGain = 1.0, handBelow = 0.35, typingHold = 1.0;
+    double pinchGain = 0.5, pinchDeadzone = 1.5, gripGain = 1.0, handBelow = 0.35;
+    // Typing (see the top): POINTER_PINCH_TYPING, POINTER_TYPING_RAISE, POINTER_TYPING_BELOW,
+    // POINTER_TYPING_POSTURE, POINTER_TYPING_RECENT.
+    typing::Params typingParams;
     // The hand ray (see "Hand ray" at the top): POINTER_HAND_RAY, POINTER_RAY_DEADZONE, POINTER_RAY_PUSH,
     // POINTER_RAY_SCROLL, POINTER_RAY_RELEASE, POINTER_RAY_GRACE.
     bool rayOn = true, rayPush = true;
@@ -912,7 +932,11 @@ int main() {
         pinchDeadzone = std::clamp(ConfDouble(conf, "POINTER_PINCH_DEADZONE", 1.5), 0.0, 10.0);
         gripGain = std::clamp(ConfDouble(conf, "POINTER_GRIP_GAIN", 1.0), 0.05, 3.0);
         handBelow = std::clamp(ConfDouble(conf, "POINTER_GRIP_BELOW", 0.35), 0.05, 1.0);
-        typingHold = std::clamp(ConfDouble(conf, "POINTER_PINCH_TYPING", 1.0), 0.0, 5.0);
+        typingParams.hold = std::clamp(ConfDouble(conf, "POINTER_PINCH_TYPING", 2.0), 0.0, 10.0);
+        typingParams.raise = std::clamp(ConfDouble(conf, "POINTER_TYPING_RAISE", 0.08), 0.02, 0.5);
+        typingParams.below = std::clamp(ConfDouble(conf, "POINTER_TYPING_BELOW", 0.2), 0.0, 1.0);
+        typingParams.posture = std::clamp(ConfDouble(conf, "POINTER_TYPING_POSTURE", 0.3), 0.0, 5.0);
+        typingParams.recent = std::clamp(ConfDouble(conf, "POINTER_TYPING_RECENT", 600), 0.0, 86400.0);
         rayOn = ConfDouble(conf, "POINTER_HAND_RAY", 1) != 0;
         rayDeadzone = std::clamp(ConfDouble(conf, "POINTER_RAY_DEADZONE", 2.5), 0.0, 10.0);
         rayPush = ConfDouble(conf, "POINTER_RAY_PUSH", 1) != 0;
@@ -1165,7 +1189,9 @@ int main() {
     int handOpens = 0;
     uint64_t handSeq = 0, handPublished = 0;
     Clock::time_point handUsed{};  // a gesture began then (keeps the pointer, like gaze mode)
-    Clock::time_point lastTyping{};  // the relay's last "typing": a key on a keyboard
+    typing::Typing typist;           // the relay's "typing" (a key) and the hands: which hands typing holds back
+    std::string typingSent;          // "typing L R" as last sent to ft-screens
+    Clock::time_point typingSentAt{};
     // Hand interaction (see "Handoff" at the top): the hands in the room, the arbiter, and what
     // it last told ft-screens.
     int raySide = -1;  // the bare hand whose ray drives the pointer (see "Hand ray"), -1: none
@@ -1781,7 +1807,7 @@ int main() {
                 }
             }
             if (std::strcmp(buf, "typing") == 0) {  // not mouse input: it never wakes the pointer
-                lastTyping = Clock::now();
+                typist.Key(secsOf(Clock::now()));
                 continue;
             }
             if (std::strncmp(buf, "vrbind", 6) == 0) {
@@ -2131,11 +2157,43 @@ int main() {
                 SendTo(out, "ft_handview", msg);   // draws the bare hands with Room View off
             }
 
+            // Typing (see the top): each new hands frame (ft-hands' side call), then which hands it
+            // holds back now, for the ray below, the gestures, and ft-screens.
+            typist.SetParams(typingParams);
+            vr::HmdMatrix34_t typingHead;
+            if (newHands && live && poses.At(handsRoom.capture_ns, typingHead)) {
+                typing::Hand th[2];
+                for (int s = 0; s < 2; ++s)
+                    for (const hin::RoomHand &c : handsRoom.hands) {
+                        if (c.side != s) continue;
+                        th[s].seen = true;
+                        th[s].palm = {c.palm.x, c.palm.y, c.palm.z};
+                        th[s].down = -c.palmNormal.y;
+                        // its ray up, or a gesture held: in use (pointing, then Enter with the other hand)
+                        th[s].busy = rays[s].Shown() || (hold.side == s && (hold.src == Src::Hand || hold.src == Src::Ray));
+                        break;
+                    }
+                const Vec3 hp = Position(typingHead), hf = Rotate(typingHead, Vec3{0, 0, -1});
+                typing::Head th0;
+                th0.pos = {hp.x, hp.y, hp.z}, th0.fwd = {hf.x, hf.y, hf.z};
+                typist.Frame(double(handsRoom.capture_ns) / 1e9, th0, th);
+                for (const std::string &l : typist.log) std::printf("%s\n", l.c_str());
+                if (!typist.log.empty()) std::fflush(stdout);
+                typist.log.clear();
+            }
+            const bool typingSide[2] = {typist.Blocked(0, secsOf(tnow)), typist.Blocked(1, secsOf(tnow))};
+            const std::string typingMsg = std::string("typing ") + (typingSide[0] ? "1" : "0") + (typingSide[1] ? " 1" : " 0");
+            if (typingMsg != typingSent || tnow - typingSentAt > std::chrono::seconds(1)) {
+                if (typingMsg != typingSent && debug) std::printf("%s\n", typingMsg.c_str());
+                typingSent = typingMsg, typingSentAt = tnow;
+                SendTo(out, "ft_screens", typingMsg);   // no pokes or near grabs by those hands
+            }
+
             // The hand ray (see "Hand ray" at the top): each side's hand, when a new frame came.
             const bool mouseIdle = tnow - lastMouse >= std::chrono::seconds(1);
             auto mayPoint = [&](int s) {
                 return gazehand::RayAllowed(rayOn, gazeOn, gazeHandRay) && handsAllowed && mouseIdle &&
-                       arbiter.State(s) == handoff::Owner::Hand;
+                       arbiter.State(s) == handoff::Owner::Hand && !typingSide[s];
             };
             if (rayParamsNew) {
                 rayParamsNew = false;
@@ -2205,6 +2263,8 @@ int main() {
             rayown::Params op;
             op.grace = rayGrace;
             rayOwner.SetParams(op);
+            // typing: the owner lets the pointer go to the mouse or the gaze, not to the controllers (an "off")
+            if (rayOwner.Side() >= 0 && typingSide[rayOwner.Side()]) rayOwner.Drop("typing");
             const bool shown[2] = {rays[0].Shown(), rays[1].Shown()}, may[2] = {mayPoint(0), mayPoint(1)};
             rayOwner.Update(secsOf(tnow), shown, may, rayHid);
             ownerChanges(true);
@@ -2335,14 +2395,10 @@ int main() {
             }
             vr::HmdMatrix34_t head;
             if (!poses.At(g.begin_ns, head)) return;
-            // No pinch just after a key (typing touches thumb to index), and a grip only with
-            // the hand held up (hands on a desk curl like a loose fist; looking down at them
-            // puts them straight ahead in the head's frame, where ft-hands can't tell).
+            // A grip only with the hand held up (hands on a desk curl like a loose fist; looking down
+            // at them puts them straight ahead in the head's frame, where ft-hands can't tell). Typing
+            // was checked before (see "Typing" at the top).
             const Vec3 at = Position(head) + Rotate(head, Vec3{g.begin_point[0], g.begin_point[1], g.begin_point[2]});
-            if (!grip && tnow - lastTyping < std::chrono::duration<double>(typingHold)) {
-                pinchLog(side, 0, "ignored (no ray up; typing)");
-                return;
-            }
             if (grip && Position(head).y - at.y > handBelow) {
                 if (debug) std::printf("hand grip ignored: %.2f m below the eyes\n", Position(head).y - at.y);
                 return;
@@ -2559,9 +2615,7 @@ int main() {
             handUsed = tnow;
             gazehand::Situation sit;
             sit.busy = hold.src != Src::None || leftHeld || aimHeld || clickPress || clickRelease;
-            sit.active = active;
-            sit.sinceKey = std::chrono::duration<double>(tnow - lastTyping).count();
-            sit.typingHold = typingHold;
+            sit.active = active;  // (typing was checked before: typing.h, not gazehand's key guard)
             if (const char *why = gazehand::Refused(sit)) {
                 if (!sit.busy && !active) wake(tnow);  // the first gesture only wakes the pointer
                 pinchLog(side, kind, why);
@@ -2660,6 +2714,12 @@ int main() {
                     if (!began) continue;
                     if (!allowed) {
                         if (k != 1) pinchLog(s, k, "ignored (hands not allowed: a VR game, or the headset off)");
+                        continue;
+                    }
+                    // Not by a hand typing holds back (see "Typing" at the top).
+                    if (const char *why = typist.Why(s, secsOf(tnow))) {
+                        if (k != 1) pinchLog(s, k, std::string("ignored (") + why + ")");
+                        else if (debug) std::printf("hand %s grip ignored: %s\n", s ? "right" : "left", why);
                         continue;
                     }
                     // Not on a side that has a controller in use, and not by a hand at a controller

@@ -254,6 +254,31 @@ void TestLost() {
     CHECK(!w.Blocked(1), "lost on the keys, found raised: free");
 }
 
+// Pointing with one hand (its ray up) and pressing Enter with the other: the pointing hand isn't held
+// back. The same hand idle where it was (not pointing): the key holds it back for 2 s.
+void TestPointAndEnter() {
+    World w;
+    w.hands[0] = Lap(0), w.hands[1] = Pointing(1);
+    w.hands[1].busy = true;
+    w.Run(1);
+    w.ty.Key(w.t);
+    w.Run(0.5);
+    CHECK(!w.Blocked(1), "the pointing hand: free (%s)", w.ty.Why(1, w.t));
+    CHECK(w.Blocked(0), "the hand that pressed the key: held back");
+    World v;
+    v.hands[0] = Lap(0), v.hands[1] = Pointing(1);
+    v.Run(1);
+    v.ty.Key(v.t);
+    v.Run(0.5);
+    CHECK(v.Blocked(1), "a raised hand that isn't in use: held back by the key");
+    // a hand on the keys whose ray came up (today, 14:57:37): on the keyboard all the same
+    World k;
+    k.hands[0] = Keys(0), k.hands[1] = Keys(1);
+    k.hands[1].busy = true;
+    k.Run(1, 0.2);
+    CHECK(k.ty.Parked(1) && k.Blocked(1), "a typing hand with its ray up: on the keyboard");
+}
+
 // A palm turned up (the palm menu's pose) leaves the keyboard too.
 void TestTurned() {
     World w;
@@ -299,6 +324,7 @@ int main() {
     TestNotThePosture();
     TestMouseUser();
     TestLost();
+    TestPointAndEnter();
     TestTurned();
     TestOff();
     TestHeading();

@@ -1,6 +1,6 @@
 """Voice commands: run a program when a wake word command starts with a set phrase.
 
-From "commands" in ~/.config/frame-voice/settings.json:
+From "commands" in ~/.config/frametop-voice.json (voice_settings.py):
   [{"say": ["flag that", "flag"], "run": ["~/.local/bin/my-tool", "flag"], "rest": "arg"}]
 
 say:  phrases. A command matches when its words equal a phrase or start with it.
@@ -26,7 +26,7 @@ class Command(NamedTuple):
 
 
 class Match(NamedTuple):
-    phrase: str  # as written in settings.json
+    phrase: str  # as written in the settings
     rest: str  # the user's words after the phrase, "" when none
     argv: list
 

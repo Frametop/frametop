@@ -46,7 +46,7 @@ RELEASE = (HERE / "install-release.sh").exists() and (HERE / "frametop-image.tar
 SOCK_DIR = Path(f"/run/user/{os.getuid()}/frametop-install")
 SOCK = SOCK_DIR / "askpass"
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-# get.sh and install.sh mark each step with "== N/10 what it is"
+# get.sh and install.sh mark each step with "== N/M what it is"
 STEP = re.compile(r"^== (\d+)/(\d+) (.*)$")
 DONE_TEXT = ("Frametop is installed. Restart SteamVR once, or reboot the headset, so it loads "
              "Frametop's driver. Then open Launch a program, then Desktop.")
@@ -101,7 +101,7 @@ def in_unit(pid):
         return False
 
 
-def install_command(eye_tracker, bluetooth):
+def install_command(eye_tracker, bluetooth, voice=True):
     if RELEASE:
         args = [str(HERE / "install-release.sh"), "--yes"]
         if DRY_RUN:
@@ -110,6 +110,8 @@ def install_command(eye_tracker, bluetooth):
         args = [str(HERE / "get.sh"), "--yes"]
         if DRY_RUN:
             args += ["--clone-only", "--dir", str(STATE / "dry-run")]
+    if not voice:
+        args.append("--no-voice")
     if not eye_tracker:
         args.append("--no-eye-tracker")
     if bluetooth:
@@ -302,8 +304,10 @@ class Window(Adw.ApplicationWindow):
     def show_choices(self):
         what = f"Frametop {release_version()}" if RELEASE else "Frametop from GitHub"
         self.detail.set_label(f"This installs {what}: the multi-screen desktop, the 3D mouse, gaze "
-                              "mode, and Frametop's settings apps. Two optional parts need your "
-                              "SteamOS password (sudo):")
+                              "mode, and Frametop's settings apps. Optional: voice dictation, and two "
+                              "parts that need your SteamOS password (sudo):")
+        self.voice = Gtk.CheckButton(label="Voice dictation: a Right Ctrl tap or holding the left d-pad down, and "
+                                           "what you say is typed (downloads about 320 MB)", active=True)
         self.eye = Gtk.CheckButton(label="Our own eye tracker for gaze mode (more accurate than SteamVR's)",
                                    active=True)
         self.bt = Gtk.CheckButton(label="Bluetooth fixes (LE mice and keyboards, like the Swiftpoint Z3, "
@@ -319,7 +323,7 @@ class Window(Adw.ApplicationWindow):
         self.go.connect("clicked", self.install)
         self.pw.connect("activate", self.install)
         pw_row, keypad = keypad_row(self.pw)
-        self.choices = [self.eye, self.bt, pw_row, keypad, pw_note, self.error, self.go]
+        self.choices = [self.voice, self.eye, self.bt, pw_row, keypad, pw_note, self.error, self.go]
         if not password_set():
             for c in (self.eye, self.bt):
                 c.set_active(False)
@@ -371,7 +375,7 @@ class Window(Adw.ApplicationWindow):
         self.error.set_visible(True)
 
     def begin(self, pw):
-        args = install_command(self.eye.get_active(), self.bt.get_active())
+        args = install_command(self.eye.get_active(), self.bt.get_active(), self.voice.get_active())
         if pw is not None:
             try:
                 self.askpass = Askpass(self.ask_again)

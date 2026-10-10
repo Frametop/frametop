@@ -1,0 +1,20 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop Voice: dictation and wake words, on the headset
+Documentation=file://@REPO@/voice/README.md
+# SteamOS's mic chain: ft-voiced also waits until WirePlumber has run for 10 s. The relay types.
+After=pipewire.service wireplumber.service frametop-input-relay.service
+
+[Service]
+# Runs in the container it was built in (scripts/in-box), named ft-voiced there. Clean up the
+# process explicitly around it: in the container, it isn't in this unit's cgroup.
+ExecStartPre=-/usr/bin/pkill -x ft-voiced
+ExecStart=@REPO@/scripts/in-box @REPO@/voice/build/venv/bin/python @REPO@/voice/ft-voiced
+ExecStopPost=-/usr/bin/pkill -x ft-voiced
+Restart=on-failure
+RestartSec=3
+# The container session (conmon) ignores SIGTERM; don't wait 90 s for it.
+TimeoutStopSec=5
+
+[Install]
+WantedBy=default.target

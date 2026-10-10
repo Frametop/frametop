@@ -1,56 +1,78 @@
 #!/usr/bin/env python3
-"""frame-voice: local push-to-talk dictation and wake word daemon.
+"""ft-voiced: Frametop Voice, local dictation and wake words (frametop-voice.service).
 
-One PipeWire capture stream feeds two consumers:
-  * dictation: hotkey or socket command -> record -> whisper-server -> type via uinput
-  * wake word: sherpa-onnx keyword spotter -> capture the spoken command -> voice command,
-    or hooks + events
+One PipeWire capture stream (pw-record) feeds two consumers:
+  * dictation: push-to-talk -> record -> Moonshine (live, on the CPU) or whisper-server -> the
+    input relay types the text where typing goes
+  * wake word: sherpa-onnx keyword spotter -> capture the spoken command -> whisper-server ->
+    a voice command (voice_commands.py), or the command hook and event subscribers
+
+Push-to-talk comes from the input relay (a key combination or mouse button with the dictate or
+dictate_hold action: "toggle|start|stop|cancel <source>" on @frametop_voice, taken only from this
+user) and from Frame controller buttons, read from SteamVR's web socket (input/vrws.py), so they
+still do what they do in games. Text goes to the relay as "type TEXT" on @frametop_relay; it
+types only while no modifier is held, so letters never turn into shortcuts.
+
+Runs in Frametop's container (scripts/in-box: numpy, sherpa-onnx and pw-record are there),
+named ft-voiced for pkill. Programs it starts for voice commands and hooks run on the host
+(distrobox-host-exec), as the relay's commands do. Settings: voice_settings.py. Models:
+~/.local/share/frametop/voice/models (voice/models.sh). Control socket for ft-voice:
+/run/user/UID/frametop-voice/control.sock.
 """
 import asyncio
+import ctypes
 import io
 import json
 import logging
 import os
 import re
+import shutil
 import signal
 import socket
 import struct
+import sys
+import threading
 import time
-import tomllib
 import unicodedata
 import urllib.request
 import uuid
 import wave
 from pathlib import Path
 
-import evdev
-
-import settings
-import voice_commands
 import numpy as np
 import sentencepiece
 import sherpa_onnx
-from evdev import ecodes as e
 
 ROOT = Path(__file__).resolve().parent
+sys.path[:0] = [str(ROOT), str(ROOT.parent / "input")]  # its modules, and vrws (SteamVR's web socket)
+import voice_commands
+import voice_settings
+import vrws
+
 RATE = 16000
 CHUNK = 1536  # 96 ms of 16 kHz mono: a whole number of 512-sample VAD windows
-MODIFIER_CODES = {e.ecodes[name] for name in settings.MODIFIERS}
-TYPER_NAME = "frame-voice keyboard"
-KWS_DIR = ROOT / "models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
-VAD_MODEL = ROOT / "models/silero_vad.onnx"
-RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "frame-voice"
-CLIP_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "frame-voice/clips"
+MODELS = Path(os.environ.get("FRAMETOP_VOICE_MODELS", "~/.local/share/frametop/voice/models")).expanduser()
+KWS_DIR = MODELS / "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
+VAD_MODEL = MODELS / "silero_vad.onnx"
+# Not $XDG_RUNTIME_DIR: Frametop's desktop points it at its own directory.
+RUNTIME_DIR = Path(f"/run/user/{os.getuid()}/frametop-voice")
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "frametop/voice"
+CLIP_DIR = STATE_DIR / "clips"
 SOCKET_PATH = RUNTIME_DIR / "control.sock"
-# Keys of keyboards Frametop's input relay has grabbed for its VR desktop: a grabbed
-# keyboard can't be read here, so the relay sends its keys ("key <code> <value> <device>").
-FRAMETOP_KEYS = "\0frametop_keys"
+RELAY = "\0frametop_relay"  # the input relay: it types ("type TEXT")
+VOICE = "\0frametop_voice"  # push-to-talk from the relay
+TYPE_CHUNK = 2000  # bytes of text per "type" datagram, at most
+# Programs started for voice commands and hooks run on the host: in the container they'd miss
+# the host's tools. distrobox-host-exec passes no environment, so it goes through env there.
+IN_BOX = Path("/run/.containerenv").exists() and shutil.which("distrobox-host-exec") is not None
+HOST = ["distrobox-host-exec"] if IN_BOX else []
 # Audio kept before speech that starts after a silence: the VAD flags speech ~0.27 s late.
 LEAD_IN_SECONDS = 0.5
 # Committed words a window's decode is lined up against: more than its context can hold.
 ALIGN_WORDS = 12
+LOOKUP_EVERY = 5.0  # seconds between looking up the controllers' root paths (they change)
 
-log = logging.getLogger("frame-voice")
+log = logging.getLogger("ft-voiced")
 
 DEFAULTS = {
     "audio": {"source": ""},
@@ -63,10 +85,8 @@ DEFAULTS = {
         "min_audio_ctx": 512,
     },
     "dictation": {
-        "hold_delay": 0.0,  # seconds the hotkey must be held before recording starts
         "min_seconds": 2.0,  # shorter recordings are discarded, not transcribed
         "max_seconds": 120,
-        "key_delay_ms": 4,
         "trailing_space": True,
         # Transcribe while recording: pieces split at pauses go to whisper as soon as they end,
         # so only the last piece is left after release.
@@ -77,7 +97,7 @@ DEFAULTS = {
         # moonshine runs on the CPU (~0.1-0.3 s per decode, returns nothing past ~9 s of audio);
         # "whisper" uses the whisper-server on the GPU (better punctuation, ~0.5-0.8 s per decode).
         "engine": "moonshine",
-        "moonshine_model": "models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27",
+        "moonshine_model": "sherpa-onnx-moonshine-base-en-quantized-2026-02-27",  # in MODELS
         "moonshine_threads": 2,
         "step_seconds": 0.8,
         "pause_seconds": 0.8,  # shorter pauses inside a sentence ended it with "?"/"." in testing
@@ -85,7 +105,7 @@ DEFAULTS = {
         # Each window is decoded after this much of the previous one's end, so a sentence that
         # goes on after a pause isn't heard as a new one (no stray "." and capital at the seam).
         "context_seconds": 1.5,
-        # Keep the audio of the last N dictations in ~/.local/state/frame-voice/clips for
+        # Keep the audio of the last N dictations in ~/.local/state/frametop/voice/clips for
         # comparing models and settings. 0 = never write audio to disk.
         "save_clips": 0,
     },
@@ -95,140 +115,60 @@ DEFAULTS = {
         "command_timeout": 5.0,
         "end_silence": 0.8,
         "max_command_seconds": 20,
-        "wake_hook": "",
-        "command_hook": "hooks/on-command",
+        "wake_hook": "",  # run with the keyword as $1 as soon as the wake word fires (relative: to voice/)
+        "command_hook": "hooks/on-command",  # run with the transcribed command as $1
     },
-    "sounds": {"volume": 0.5},  # on/off is in settings.json (frame-voice-config)
+    "sounds": {"volume": 0.5},  # on or off: "sounds" in the settings
 }
 
 
-def load_config():
-    path = Path(os.environ.get("FRAME_VOICE_CONFIG", "~/.config/frame-voice/config.toml")).expanduser()
+def load_config(advanced):
+    """DEFAULTS, with the settings' "advanced" overrides."""
     cfg = {k: dict(v) for k, v in DEFAULTS.items()}
-    if path.exists():
-        with open(path, "rb") as f:
-            for section, values in tomllib.load(f).items():
-                cfg.setdefault(section, {}).update(values)
-        log.info("config: %s", path)
+    for section, values in advanced.items():
+        if section in cfg:
+            cfg[section].update(values)
+    if advanced:
+        log.info("advanced settings: %s", json.dumps(advanced))
     return cfg
 
 
-def resolve(p):
+def resolve(p, base=ROOT):
     p = Path(p).expanduser()
-    return p if p.is_absolute() else ROOT / p
+    return p if p.is_absolute() else base / p
+
+
+def set_process_name(name):
+    """The name pkill -x and pgrep -x see (frametop-voice.service stops it by name: in the
+    container, it isn't in the unit's cgroup)."""
+    try:
+        ctypes.CDLL(None).prctl(15, name.encode(), 0, 0, 0)  # PR_SET_NAME
+    except (OSError, AttributeError):
+        pass
 
 
 # ---------------------------------------------------------------- typing
 
-def _build_keymap():
-    km = {}
-    for c in "abcdefghijklmnopqrstuvwxyz":
-        code = getattr(e, f"KEY_{c.upper()}")
-        km[c], km[c.upper()] = (code, False), (code, True)
-    for c, shifted in zip("1234567890", "!@#$%^&*()"):
-        code = getattr(e, f"KEY_{c}")
-        km[c], km[shifted] = (code, False), (code, True)
-    for plain, shifted, name in [
-        ("-", "_", "MINUS"), ("=", "+", "EQUAL"), ("[", "{", "LEFTBRACE"), ("]", "}", "RIGHTBRACE"),
-        ("\\", "|", "BACKSLASH"), (";", ":", "SEMICOLON"), ("'", '"', "APOSTROPHE"),
-        (",", "<", "COMMA"), (".", ">", "DOT"), ("/", "?", "SLASH"), ("`", "~", "GRAVE"),
-    ]:
-        code = getattr(e, f"KEY_{name}")
-        km[plain], km[shifted] = (code, False), (code, True)
-    km[" "] = (e.KEY_SPACE, False)
-    return km
+ASCII_FIXUPS = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+                              "\u2013": "-", "\u2014": "-", "\u2026": "...", "\n": " ", "\t": " "})
 
 
-KEYMAP = _build_keymap()
-ASCII_FIXUPS = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"',
-                              "–": "-", "—": "-", "…": "...", "\n": " ", "\t": " "})
+def to_ascii(text):
+    """What the relay can type (a US layout): curly quotes and dashes made plain, accents
+    stripped, anything else outside printable ASCII dropped."""
+    text = unicodedata.normalize("NFKD", text.translate(ASCII_FIXUPS))
+    return "".join(c for c in text if " " <= c <= "~")
 
 
-INPUT_EVENT = struct.Struct("llHHi")  # struct input_event on 64-bit
-
-
-def inherited_fd(name):
-    """An fd systemd handed back from its fd store (LISTEN_FDS protocol), or None."""
-    if os.environ.get("LISTEN_PID") != str(os.getpid()):
-        return None
-    names = os.environ.get("LISTEN_FDNAMES", "").split(":")
-    count = int(os.environ.get("LISTEN_FDS", "0"))
-    return next((3 + i for i in range(count) if i < len(names) and names[i] == name), None)
-
-
-def sd_notify(message, fds=()):
-    addr = os.environ.get("NOTIFY_SOCKET")
-    if not addr:
-        return False
-    if addr.startswith("@"):
-        addr = "\0" + addr[1:]
-    ancillary = [(socket.SOL_SOCKET, socket.SCM_RIGHTS, struct.pack(f"{len(fds)}i", *fds))] if fds else []
-    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
-        # socket.send_fds() ignores its address argument on Python 3.12.
-        sock.sendmsg([message.encode()], ancillary, 0, addr)
-    return True
-
-
-class RelayKeyboard:
-    """Stands in for an evdev device in on_key() for keys from Frametop's input relay."""
-    path = "frametop-relay"
-    name = "Frametop relay"
-
-
-class Typer:
-    """Types text through a virtual uinput keyboard. Assumes a US layout on the receiving side.
-
-    SteamVR opens /dev/input devices only when it starts, and gamescope gets its keyboard
-    input from SteamVR. So the device must exist before SteamVR starts and must never be
-    recreated: under systemd its fd is parked in the unit's fd store and reused on restart.
-    """
-
-    FDNAME = "typer2"  # v2 is a full keyboard; v1 ("typer") had only the typing keys
-
-    def __init__(self, key_delay_ms):
-        self.delay = key_delay_ms / 1000
-        self.ui = None
-        old = inherited_fd("typer")
-        if old is not None:
-            sd_notify("FDSTOREREMOVE=1\nFDNAME=typer")
-            os.close(old)
-            log.warning("typer: replaced the v1 virtual keyboard; restart SteamVR once so it opens the new one")
-        self.fd = inherited_fd(self.FDNAME)
-        if self.fd is not None:
-            log.info("typer: reusing virtual keyboard from the systemd fd store")
+def type_chunks(text, size=TYPE_CHUNK):
+    """text in pieces of at most size bytes, split after a space where one is near."""
+    while text:
+        if len(text) <= size:
+            yield text
             return
-        self.ui = evdev.UInput({e.EV_KEY: list(range(e.KEY_ESC, e.KEY_MICMUTE + 1))}, name=TYPER_NAME)
-        self.fd = self.ui.fd
-        if sd_notify(f"FDSTORE=1\nFDNAME={self.FDNAME}", [self.fd]):
-            log.info("typer: new virtual keyboard stored in the systemd fd store")
-            self.ui = None  # never UI_DEV_DESTROY it; the fd store owns the device now
-        else:
-            log.warning("typer: not under systemd; SteamVR only sees this keyboard if it starts after us")
-
-    def _emit(self, type_, code, value):
-        os.write(self.fd, INPUT_EVENT.pack(0, 0, type_, code, value))
-
-    def _key(self, code, value):
-        self._emit(e.EV_KEY, code, value)
-        self._emit(e.EV_SYN, e.SYN_REPORT, 0)
-        time.sleep(self.delay)
-
-    def type(self, text):
-        text = unicodedata.normalize("NFKD", text.translate(ASCII_FIXUPS))
-        for ch in text:
-            if ch not in KEYMAP:
-                continue  # drops combining accents and anything outside the US keymap
-            code, shift = KEYMAP[ch]
-            if shift:
-                self._key(e.KEY_LEFTSHIFT, 1)
-            self._key(code, 1)
-            self._key(code, 0)
-            if shift:
-                self._key(e.KEY_LEFTSHIFT, 0)
-
-    def close(self):
-        if self.ui:  # only when not handed to systemd
-            self.ui.close()
+        cut = text.rfind(" ", size // 2, size) + 1 or size
+        yield text[:cut]
+        text = text[cut:]
 
 
 def drop_repeats(text):
@@ -359,12 +299,15 @@ def to_wav(samples):
 
 # ---------------------------------------------------------------- daemon
 
-class FrameVoice:
-    def __init__(self, cfg):
-        self.cfg = cfg
+class Voice:
+    def __init__(self):
+        self.settings_mtime = voice_settings.mtime()
+        b = voice_settings.load()  # defaults when the file doesn't exist yet
+        self.cfg = cfg = load_config(b["advanced"])
         self.dcfg, self.wcfg = cfg["dictation"], cfg["wake"]
-        self.hotkeys = {}  # evdev code -> name, from load_settings()
-        self.typer = Typer(self.dcfg["key_delay_ms"])
+        self.relay = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)  # to type ("type TEXT")
+        self.relay.settimeout(2)  # the relay's queue full for that long: it's stuck
+        self.relay_said = False  # logged that the relay isn't there (once until it is)
         self.type_lock = asyncio.Lock()
         self.sounds = {}  # apply_options() makes them when enabled
         self.subscribers = set()
@@ -374,35 +317,31 @@ class FrameVoice:
         self.stream = None  # streaming state of the current dictation, see start_dictation
         self.whisper_lock = asyncio.Lock()  # one request at a time, in order
         self.command = None  # dict while capturing a post-wake command
-        self.voice_commands = []  # from "commands" in settings.json, see voice_commands.py
-        self.wake_enabled = settings.DEFAULT["wake_word"]  # apply_options() sets the saved value
+        self.voice_commands = []  # from "commands" in the settings, see voice_commands.py
+        self.wake_enabled = voice_settings.DEFAULT["wake_word"]  # apply_options() sets the saved value
+        self.whisper_wanted = None  # whisper-server asked to run (True) or stop (False)
         self.mic_task = None
         self.mic_proc = None
         self.audio_session_ready = False
         self.tasks = set()  # keep references so fire-and-forget tasks are not collected early
 
-        self.hk_down = False
-        self.hk_chord = False
-        self.kb_mode = settings.DEFAULT["keyboard_mode"]
-        self.applied = {}  # settings.json options last applied, so a save only changes what changed
-        self.mods_down = set()  # (device path, code) of modifiers held on any keyboard
-        self.mods_released = asyncio.Event()
-        self.mods_released.set()
-        self._held_logged = None  # the modifiers last logged as holding typing back
-        self.hk_timer = None
+        self.applied = {}  # settings options last applied, so a save only changes what changed
+        self.controller = (tuple(b["controller"]), b["controller_mode"])  # push-to-talk buttons, mode
+        self.controller_changed = threading.Event()  # the reader (controller_loop) looks again
+        self.loop = None  # the event loop, for the controller reader's thread
 
-        self.kws = self.kws_stream = None  # built from the wake phrases in settings.json
+        self.kws = self.kws_stream = None  # built from the wake phrases in the settings
         self.cmd_vad = self._make_vad(self.wcfg["end_silence"])
         self.clip_vad = self._make_vad(0.5)
         self.piece_vad = self._make_vad(0.1)  # per-chunk speech/silence labels for live windows
         self.moonshine = None
         if self.dcfg["engine"] == "moonshine":
-            m = resolve(self.dcfg["moonshine_model"])
+            m = resolve(self.dcfg["moonshine_model"], MODELS)
             self.moonshine = sherpa_onnx.OfflineRecognizer.from_moonshine_v2(
                 encoder=str(m / "encoder_model.ort"), decoder=str(m / "decoder_model_merged.ort"),
                 tokens=str(m / "tokens.txt"), num_threads=self.dcfg["moonshine_threads"])
             log.info("live dictation engine: moonshine (%s)", m.name)
-        self.load_settings()
+        self.apply_options(b)
 
     # --- models
 
@@ -461,12 +400,16 @@ class FrameVoice:
             # SteamOS runs every playback stream through a per-stream spatializer that takes
             # ~0.35 s to set up, late enough to bury a start tone under the first word. Its
             # WirePlumber script skips streams named like filter chains, so use such a name.
-            props = '{ node.name = "frame-voice-chime-filter-chain" media.role = "Notification" }'
+            props = '{ node.name = "frametop-voice-chime-filter-chain" media.role = "Notification" }'
             task = asyncio.create_task(self._run(["pw-play", "-P", props, str(self.sounds[name])], quiet=True))
             self.tasks.add(task)
             task.add_done_callback(self.tasks.discard)
 
-    async def _run(self, argv, env=None, quiet=False):
+    async def _run(self, argv, env=None, quiet=False, host=False):
+        """Run a program and wait for it. host: on the host (voice commands, hooks), with env
+        passed through env(1) there."""
+        if host and HOST:
+            argv = [*HOST, "env", *(f"{k}={v}" for k, v in (env or {}).items()), *argv]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv, env={**os.environ, **(env or {})},
@@ -491,7 +434,7 @@ class FrameVoice:
         if not os.access(path, os.X_OK):
             log.warning("hook %s not executable: %s", key, path)
             return
-        asyncio.create_task(self._run([str(path), *args], env=env))
+        self.spawn(self._run([str(path), *args], env=env, host=True))
 
     # --- microphone
 
@@ -516,15 +459,15 @@ class FrameVoice:
     async def _wait_for_audio_session(self):
         """Don't open the mic while SteamOS is still building its mic filter chain.
 
-        At boot this daemon starts before SteamVR, and WirePlumber only after it. A capture
+        At boot this service can start before WirePlumber has built the chain. A capture
         stream that connects mid-setup can leave the echo-cancel link stuck, and the mic then
-        reads silence until PipeWire restarts. This unit can't be ordered after WirePlumber
-        (cycle through steamvr.service), so wait here instead.
+        reads silence until PipeWire restarts. The unit is ordered after WirePlumber, but that
+        only means it started, so wait here until it's been up for 10 s.
         """
         while True:
             proc = await asyncio.create_subprocess_exec(
-                "systemctl", "--user", "show", "wireplumber", "-p", "ActiveState", "-p", "ActiveEnterTimestampMonotonic",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                *HOST, "systemctl", "--user", "show", "wireplumber", "-p", "ActiveState",
+                "-p", "ActiveEnterTimestampMonotonic", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             props = dict(line.split("=", 1) for line in (await proc.communicate())[0].decode().split())
             if props.get("ActiveState") == "active":
                 started = int(props.get("ActiveEnterTimestampMonotonic", "0")) / 1e6
@@ -643,8 +586,23 @@ class FrameVoice:
             return json.load(resp).get("text", "")
 
     async def type_text(self, text):
+        """Have the input relay type text where typing goes. In order: one at a time."""
+        text = to_ascii(text)
+        if not text:
+            return
         async with self.type_lock:
-            await asyncio.to_thread(self.typer.type, text)
+            await asyncio.to_thread(self._send_text, text)
+
+    def _send_text(self, text):
+        for piece in type_chunks(text):
+            try:
+                self.relay.sendto(b"type " + piece.encode(), RELAY)
+            except OSError as err:
+                if not self.relay_said:
+                    log.warning("can't type: the input relay isn't there (frametop-input-relay.service): %s", err)
+                    self.relay_said = True
+                return
+        self.relay_said = False
 
     # --- dictation
 
@@ -917,17 +875,13 @@ class FrameVoice:
         task.add_done_callback(self.tasks.discard)
 
     async def _flush_typing(self, stream, final=False):
-        """Type committed text not typed yet: live while recording when allowed, else at the end."""
+        """Type committed text not typed yet: live while recording when allowed, else at the end.
+        (The relay holds it back while a modifier is held.)"""
         if not final:
             live = (self.dcfg["live_typing"] and stream is self.stream
                     and time.monotonic() - stream["t0"] >= self.dcfg["min_seconds"])
-            if not live or self.mods_down:
-                if live:
-                    self._log_held_modifiers()
-                return  # a held Ctrl/Alt/Super would turn letters into shortcuts; retried on release
-        elif self.mods_down:
-            self._log_held_modifiers()
-            await self.mods_released.wait()
+            if not live:
+                return
         text = stream["text"][stream["typed"]:]
         stream["typed"] = len(stream["text"])
         if final and stream["text"] and self.dcfg["trailing_space"]:
@@ -993,7 +947,7 @@ class FrameVoice:
         # exec, so the transcribed words never reach a shell.
         log.info("voice command %r: %s", found.phrase, found.argv)
         self.broadcast("command", text=text, matched=found.phrase, ran=found.argv)
-        self.spawn(self._run(found.argv, env={
+        self.spawn(self._run(found.argv, host=True, env={
             "FRAME_VOICE_EVENT": "voice_command",
             "FRAME_VOICE_TEXT": text,
             "FRAME_VOICE_REST": found.rest,
@@ -1001,107 +955,151 @@ class FrameVoice:
             "FRAME_VOICE_WAKE_UNIX": f"{wake_unix:.3f}",
         }))
 
-    # --- hotkey
+    # --- push-to-talk
 
-    def on_key(self, dev, code, value):
-        loop = asyncio.get_running_loop()
-        if code in MODIFIER_CODES:
-            self._track_modifier(dev, code, value)
-        if code in self.hotkeys:
-            if value == 1:
-                # Only the key on its own: a modifier already held (Shift, then Right Ctrl, or
-                # Ctrl, then a mouse button) makes it a shortcut, not a dictation gesture.
-                others = sorted({c for _, c in self.mods_down if c != code})
-                self.hk_down, self.hk_chord = True, bool(others)
-                if others:
-                    log.info("hotkey: %s with %s held, not dictation", self.hotkeys[code],
-                             "+".join(e.KEY.get(c, str(c)) for c in others))
-                elif self.kb_mode == "hold":
-                    self.hk_timer = loop.call_later(self.dcfg["hold_delay"], self._hold_start)
-            elif value == 0:
-                self.hk_down = False
-                if self.hk_timer:
-                    self.hk_timer.cancel()
-                if self.kb_mode == "hold":
-                    if self.recording_source == "hotkey":
-                        asyncio.create_task(self.stop_dictation())
-                elif not self.hk_chord:
-                    asyncio.create_task(self.toggle_dictation("hotkey"))
-        elif value == 1 and self.hk_down:
-            # Hotkey used as a modifier (e.g. Ctrl+C): not a dictation gesture.
-            self.hk_chord = True
-            if self.hk_timer:
-                self.hk_timer.cancel()
-            if self.kb_mode == "hold" and self.recording_source == "hotkey":
-                self.cancel_dictation(chime=False)
+    def push_to_talk(self, command, source):
+        """toggle, start, stop or cancel, from the relay (a key combination or mouse button) or
+        a controller button."""
+        if command == "toggle":
+            self.spawn(self.toggle_dictation(source))
+        elif command == "start":
+            self.start_dictation(source)
+        elif command == "stop":
+            self.spawn(self.stop_dictation())
+        elif command == "cancel":
+            self.cancel_dictation()
 
-    def _track_modifier(self, dev, code, value):
-        key = (dev.path, code)
-        if value:
-            self.mods_down.add(key)
-            self.mods_released.clear()
-        else:
-            self.mods_down.discard(key)
-            self._modifiers_changed()
+    def listen_relay(self):
+        """Push-to-talk from the input relay, on @frametop_voice. Only from this user: the socket
+        is abstract, so any local process could send to it."""
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)  # the kernel adds the sender's uid
+        try:
+            sock.bind(VOICE)
+        except OSError as err:
+            log.warning("push-to-talk: can't listen on @frametop_voice (%s)", err)
+            sock.close()
+            return None
+        creds = struct.Struct("3i")  # struct ucred: pid, uid, gid
 
-    def _log_held_modifiers(self):
-        """Say which modifier holds typing back, once per set of held keys."""
-        held = sorted(self.mods_down)
-        if held != self._held_logged:
-            self._held_logged = held
-            log.info("typing waits for release of %s",
-                     ", ".join(f"{e.KEY.get(code, code)} on {path}" for path, code in held))
-
-    def _modifiers_changed(self):
-        if not self.mods_down:
-            self.mods_released.set()
-            self._held_logged = None
-            if self.stream:  # type words committed while a modifier was held
-                asyncio.create_task(self._flush_typing(self.stream))
-
-    def _hold_start(self):
-        if self.hk_down and not self.hk_chord:
-            self.start_dictation("hotkey")
-
-    async def watch_devices(self):
-        watching = {}
-        while True:
-            for path in evdev.list_devices():
-                if path in watching and not watching[path].done():
-                    continue
+        def readable():
+            while True:
                 try:
-                    dev = evdev.InputDevice(path)
-                except OSError:
+                    data, anc, _, _ = sock.recvmsg(256, socket.CMSG_SPACE(creds.size))
+                except BlockingIOError:
+                    return
+                uid = next((creds.unpack(d[:creds.size])[1] for level, kind, d in anc
+                            if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
+                words = data.decode(errors="replace").split()
+                if uid != os.getuid() or not words or words[0] not in ("toggle", "start", "stop", "cancel"):
                     continue
-                keys = set(dev.capabilities().get(e.EV_KEY, []))
-                if dev.name == TYPER_NAME or not (self.hotkeys.keys() | MODIFIER_CODES) & keys:
-                    dev.close()
-                    continue
-                log.info("hotkey: watching %s (%s)", dev.name, path)
-                watching[path] = asyncio.create_task(self._read_device(dev))
-            if settings.mtime() != self.settings_mtime:
-                self.load_settings()
-                continue  # rescan now for devices with the new keys
+                self.push_to_talk(words[0], words[1] if len(words) > 1 else "relay")
+
+        self.loop.add_reader(sock.fileno(), readable)
+        return sock
+
+    def controller_loop(self):
+        """Push-to-talk on Frame controller buttons ("controller" in the settings), read from
+        SteamVR's web socket in this thread. Waits while SteamVR isn't up, and while no button
+        is set."""
+        said = None  # what was last logged about the connection
+        while True:
+            if self.controller[0]:
+                try:
+                    self._controller_session()
+                    said = None
+                except (OSError, ValueError) as err:  # urllib's errors are OSErrors
+                    if said != "down":
+                        log.info("controller push-to-talk: SteamVR isn't reachable (%s); trying every 5 s", err)
+                        said = "down"
+            self.controller_changed.wait(LOOKUP_EVERY)
+            self.controller_changed.clear()
+
+    def _controller_session(self):
+        """One connection to SteamVR's web socket. Returns when the buttons are taken away;
+        raises OSError when SteamVR goes."""
+        ws = vrws.VrSocket()
+        held, mode = False, None
+        try:
+            ws.open(f"frametop_voice_{os.getpid()}")
+            sides = {}  # root path -> side; a controller's root path changes (input/vrws.py)
+            pressed = set()
+            next_poll = 0.0
+            watching = None
+            while True:
+                buttons, mode = self.controller
+                if not buttons:
+                    return
+                if (buttons, mode) != watching:
+                    watching = (buttons, mode)
+                    pressed &= set(buttons)
+                    if held and not pressed:
+                        held = False
+                        if mode == "hold":
+                            self._from_controller("stop")
+                    log.info("controller push-to-talk: %s (%s)", ", ".join(buttons), mode)
+                now = time.monotonic()
+                if now >= next_poll:
+                    next_poll = now + LOOKUP_EVERY
+                    found = vrws.controllers()
+                    if found != sides:
+                        for path in sides.keys() - found.keys():
+                            ws.subscribe(path, on=False)
+                        for path in found.keys() - sides.keys():
+                            ws.subscribe(path)
+                        sides = found
+                        pressed = {b for b in pressed if b.split("/")[0] in sides.values()}
+                # (side, component) -> button: "left/dpad_down" is /input/dpad_down/click on the left one.
+                wanted = {(b.split("/", 1)[0], f"/input/{b.split('/', 1)[1]}/click"): b for b in buttons}
+                for text in ws.messages(timeout=1.0):
+                    # About 160 messages a second, nearly all capacitive sensing: parse only
+                    # those that carry one of the buttons.
+                    if not any(c in text for _, c in wanted):
+                        continue
+                    try:
+                        msg = json.loads(text)
+                    except ValueError:
+                        continue
+                    side = sides.get(msg.get("device"))
+                    components = msg.get("components") or {}
+                    for (s, c), b in wanted.items():
+                        if s == side and c in components:
+                            (pressed.add if components[c] else pressed.discard)(b)
+                    # After each message: a quick press and release can come in one batch.
+                    if pressed and not held:
+                        held = True
+                        self._from_controller("toggle" if mode == "toggle" else "start")
+                    elif held and not pressed:
+                        held = False
+                        if mode == "hold":
+                            self._from_controller("stop")
+        finally:
+            if held and mode == "hold":
+                self._from_controller("stop")
+            ws.close()
+
+    def _from_controller(self, command):
+        self.loop.call_soon_threadsafe(self.push_to_talk, command, "controller")
+
+    # --- settings
+
+    async def watch_settings(self):
+        while True:
             await asyncio.sleep(2)
+            if voice_settings.mtime() != self.settings_mtime:
+                self.load_settings()
 
     def load_settings(self):
-        self.settings_mtime = settings.mtime()
-        b = settings.load()  # defaults when the file doesn't exist yet
-        self.hotkeys = {}
-        for name in b["keyboard"]:
-            code = e.ecodes.get(name)
-            if isinstance(code, int):
-                self.hotkeys[code] = name
-            else:
-                log.warning("settings: unknown key %r", name)
-        log.info("keyboard/mouse push-to-talk: %s", ", ".join(self.hotkeys.values()) or "none")
-        self.apply_options(b)
+        self.settings_mtime = voice_settings.mtime()
+        self.apply_options(voice_settings.load())
 
     def apply_options(self, b):
-        """Settings from the config app. Only changed ones are applied, so a save doesn't
-        undo e.g. `frame-voice-ctl wake off`."""
-        changed = {k: b[k] for k in ("keyboard_mode", "wake_phrases", "commands", *settings.OPTIONS)
+        """Settings from Frametop Input Settings. Only changed ones are applied, so a save doesn't
+        undo e.g. `ft-voice wake off`."""
+        changed = {k: b[k] for k in ("controller", "controller_mode", "wake_phrases", "commands", "advanced",
+                                     *voice_settings.OPTIONS)
                    if self.applied.get(k) != b[k]}
+        first = not self.applied
         self.applied.update(changed)
         if "commands" in changed:
             self.voice_commands, warnings = voice_commands.parse(changed.pop("commands"))
@@ -1109,79 +1107,46 @@ class FrameVoice:
                 log.warning("settings: %s", warning)
             log.info("voice commands: %s", ", ".join(
                 f"{c.phrases[0][0]!r} -> {c.run[0]}" for c in self.voice_commands) or "none")
-        if "keyboard_mode" in changed:
-            self.kb_mode = changed["keyboard_mode"]
+        if "advanced" in changed:
+            if not first:
+                log.info("advanced settings changed: they apply when frametop-voice restarts")
+            changed.pop("advanced")
+        if "controller" in changed or "controller_mode" in changed:
+            self.controller = (tuple(b["controller"]), b["controller_mode"])
+            self.controller_changed.set()
         if "live_typing" in changed:
             self.dcfg["live_typing"] = changed["live_typing"]
         if "sounds" in changed:
             self.sounds = make_sounds(self.cfg["sounds"]["volume"]) if changed["sounds"] else {}
+        try:
+            asyncio.get_running_loop()
+            running = True
+        except RuntimeError:
+            running = False  # at startup; run() opens the mic and starts whisper-server
         if "wake_word" in changed and changed["wake_word"] != self.wake_enabled:
             self.wake_enabled = changed["wake_word"]
             self.reset_kws()
-            try:
-                asyncio.get_running_loop()
+            if running:
                 self.update_mic()
-            except RuntimeError:
-                pass  # at startup; run() opens the mic
+                self.update_whisper()
         if "wake_phrases" in changed:
-            try:
-                asyncio.get_running_loop()
-                task = asyncio.create_task(self._rebuild_kws(changed["wake_phrases"]))
-                self.tasks.add(task)
-                task.add_done_callback(self.tasks.discard)
-            except RuntimeError:  # at startup
+            if running:
+                self.spawn(self._rebuild_kws(changed["wake_phrases"]))
+            else:
                 self.kws = self._make_kws(changed["wake_phrases"])
                 self.kws_stream = self.kws.create_stream() if self.kws else None
         if changed:
             log.info("settings: %s", ", ".join(f"{k}={v}" for k, v in changed.items()))
 
-    def listen_frametop_keys(self):
-        """Keys from Frametop's input relay, for the keyboards it grabs. Only from our own
-        user: the socket is abstract, so any local user could send to it."""
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)  # the kernel adds the sender's uid
-        try:
-            sock.bind(FRAMETOP_KEYS)
-        except OSError as err:
-            log.warning("frametop keys: can't listen (%s)", err)
-            sock.close()
-            return None
-        relay = RelayKeyboard()
-        creds = struct.Struct("3i")  # struct ucred: pid, uid, gid
-
-        def readable():
-            while True:
-                try:
-                    data, anc, _, _ = sock.recvmsg(64, socket.CMSG_SPACE(creds.size))
-                except BlockingIOError:
-                    return
-                uid = next((creds.unpack(d[:creds.size])[1] for level, kind, d in anc
-                            if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
-                words = data.split(maxsplit=3)
-                if uid != os.getuid() or len(words) < 3 or words[0] != b"key":
-                    continue
-                if len(words) > 3 and words[3].decode(errors="replace") == TYPER_NAME:
-                    continue  # our own typing, grabbed along with the real keyboards
-                try:
-                    code, value = int(words[1]), int(words[2])
-                except ValueError:
-                    continue
-                self.on_key(relay, code, value)
-
-        asyncio.get_running_loop().add_reader(sock.fileno(), readable)
-        return sock
-
-    async def _read_device(self, dev):
-        try:
-            async for ev in dev.async_read_loop():
-                if ev.type == e.EV_KEY:
-                    self.on_key(dev, ev.code, ev.value)
-        except OSError:
-            log.info("hotkey: lost %s", dev.name)
-        finally:
-            self.mods_down = {m for m in self.mods_down if m[0] != dev.path}
-            self._modifiers_changed()
-            dev.close()
+    def update_whisper(self):
+        """Run whisper-server (frametop-voice-whisper.service: ~300 MB of the GPU's memory) only
+        while something uses it: wake word commands, or dictation set to use it."""
+        want = self.wake_enabled or self.dcfg["engine"] == "whisper" or not self.dcfg["streaming"]
+        if want != self.whisper_wanted:
+            self.whisper_wanted = want
+            log.info("whisper-server: %s", "starting" if want else "stopping (nothing uses it)")
+            self.spawn(self._run(["systemctl", "--user", "start" if want else "stop",
+                                  "frametop-voice-whisper.service"], host=True))
 
     # --- control socket
 
@@ -1232,36 +1197,42 @@ class FrameVoice:
         return {"ok": True, **self.state()}
 
     async def run(self):
+        self.loop = asyncio.get_running_loop()
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         SOCKET_PATH.unlink(missing_ok=True)
         old_umask = os.umask(0o177)  # socket is owner-only: it can type into any focused app
         server = await asyncio.start_unix_server(self.handle_client, path=str(SOCKET_PATH))
         os.umask(old_umask)
         log.info("control socket: %s", SOCKET_PATH)
-        sd_notify("READY=1")
-        log.info("dictation: keyboard %s, min %.1fs", self.kb_mode, self.dcfg["min_seconds"])
+        log.info("dictation: min %.1fs, live typing %s", self.dcfg["min_seconds"], self.dcfg["live_typing"])
+        relay = self.listen_relay()
+        threading.Thread(target=self.controller_loop, name="controller", daemon=True).start()
+        self.update_whisper()
         self.update_mic()
+        settings = asyncio.create_task(self.watch_settings())
         stop = asyncio.Event()
-        loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, stop.set)
-        watcher = asyncio.create_task(self.watch_devices())
-        frametop_keys = self.listen_frametop_keys()
+            self.loop.add_signal_handler(sig, stop.set)
         await stop.wait()
-        watcher.cancel()
-        if frametop_keys:
-            asyncio.get_running_loop().remove_reader(frametop_keys.fileno())
-            frametop_keys.close()
+        settings.cancel()
+        if relay:
+            self.loop.remove_reader(relay.fileno())
+            relay.close()
         server.close()
         if self.mic_proc and self.mic_proc.returncode is None:
             self.mic_proc.terminate()
-        self.typer.close()
         SOCKET_PATH.unlink(missing_ok=True)
 
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    asyncio.run(FrameVoice(load_config()).run())
+    set_process_name("ft-voiced")
+    m = resolve(DEFAULTS["dictation"]["moonshine_model"], MODELS)
+    missing = [str(p) for p in (KWS_DIR, VAD_MODEL, m) if not p.exists()]
+    if missing:
+        log.error("models missing (%s): fetch them with voice/models.sh", ", ".join(missing))
+        sys.exit(1)
+    asyncio.run(Voice().run())
 
 
 if __name__ == "__main__":

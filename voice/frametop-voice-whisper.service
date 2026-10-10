@@ -1,0 +1,18 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop Voice: whisper.cpp on the GPU, for wake word commands
+Documentation=file://@REPO@/voice/README.md
+# ft-voiced starts it while something uses it (the wake word on), and stops it after; it also
+# stops with ft-voiced's service. Not enabled on its own.
+PartOf=frametop-voice.service
+
+[Service]
+ExecStartPre=-/usr/bin/pkill -x whisper-server
+# In the container, outside this unit's cgroup, so Nice= wouldn't reach it: nice does. The
+# Gamescope WSI layer asserts on compute-only Vulkan devices, and whisper needs no swapchain.
+ExecStart=@REPO@/scripts/in-box env DISABLE_GAMESCOPE_WSI=1 nice -n 5 @REPO@/voice/build/bin/whisper-server \
+  -m %h/.local/share/frametop/voice/models/ggml-small.en-q5_1.bin --host 127.0.0.1 --port 8178 -t 3 -fa
+ExecStopPost=-/usr/bin/pkill -x whisper-server
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5

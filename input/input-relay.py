@@ -38,8 +38,8 @@ Steam's menu, or close the dashboard (steam/ft-steam menu, through Steam's UI), 
 pause Frametop for a VR game, or resume it (game_pause.py), dictate = start or stop dictation, and
 dictate_hold = dictation while held (Frametop Voice, voice/ft-voiced: "toggle|start|stop <source>"
 to @frametop_voice), command:CMD = run CMD with sh -c (on the host, as this service: its
-environment, output to its log, and COMMAND_PATH, so ft-layout, ft-float and ft-steam need no
-path), key = pass through as a key, none).
+environment, output to its log, and COMMAND_PATH, so ft-layout, ft-float, ft-steam and ft-voice
+need no path), key = pass through as a key, none).
 
 Frame controller buttons can be mapped too ("controller_buttons": {"right/a": action} in the
 rules file; any action but key and the gaze ones, GAZE_ACTIONS: gaze mode is a mouse feature,
@@ -296,8 +296,9 @@ PAUSE_SOURCES = {"mouse": "mouse button", "keyboard": "key combination", "left":
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FT_LAYOUT = os.path.join(REPO, "layout", "ft-layout")
 FT_STEAM = os.path.join(REPO, "steam", "ft-steam")
-# Commands ("command:CMD") find Frametop's own tools (ft-layout, ft-float, ft-steam) on their PATH.
-COMMAND_PATH = ":".join([os.path.join(REPO, d) for d in ("layout", "float", "steam")]
+# Commands ("command:CMD") find Frametop's own tools (ft-layout, ft-float, ft-steam, ft-voice) on
+# their PATH.
+COMMAND_PATH = ":".join([os.path.join(REPO, d) for d in ("layout", "float", "steam", "voice")]
                         + [os.environ.get("PATH", "/usr/local/bin:/usr/bin")])
 DEFAULT_BUTTONS = {BTN_LEFT: "left", BTN_RIGHT: "right", BTN_MIDDLE: "middle",
                    BTN_SIDE: "back", BTN_EXTRA: "back"}

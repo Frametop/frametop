@@ -53,12 +53,13 @@ jobs:
         run: |
           podman run --rm --entrypoint sh "$FT_IMAGE" -c '
             set -e
-            for p in ft-screens ft-pointer ft-powerd ft-gaze ft-gazepanel ft-stream ft-eyegrab; do
+            for p in ft-screens ft-pointer ft-powerd ft-gaze ft-gazepanel ft-stream ft-eyegrab whisper-server; do
               test -x /opt/frametop/bin/$p
             done
             test -f /src/frametop/pointer/driver/build/driver_ft_pointer.so
             test -x /src/frametop/pack/build/distrobox/install
             /src/frametop/gaze/tracker/build/venv/bin/python -c "import numpy, cv2"
+            /src/frametop/voice/build/venv/bin/python -c "import numpy, sentencepiece, sherpa_onnx"
             python3 -c "import PySide6"'
 
       # The FrameDrop manifest names the zip's URL in this repo's release (a fork's, in a fork).

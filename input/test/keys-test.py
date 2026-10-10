@@ -347,9 +347,9 @@ def tests():
     check("Meta tap bound to none: nothing", lines(steam_log), ["menu", "menu"])
     check("Meta tap bound to none: no F24", typed(), ["key 125 1", "key 125 0"])
 
-    use({"29": f"command:command -v ft-steam ft-layout ft-float | wc -l >> {cmd_log}"})
+    use({"29": f"command:command -v ft-steam ft-layout ft-float ft-voice | wc -l >> {cmd_log}"})
     key(RCTRL, 1); key(RCTRL, 0)
-    check("right Ctrl tap runs its command, which finds Frametop's tools", lines(cmd_log), ["combo", "3"])
+    check("right Ctrl tap runs its command, which finds Frametop's tools", lines(cmd_log), ["combo", "4"])
     check("Ctrl tap: F24 before Ctrl's release", typed(), ["key 97 1"] + F24 + ["key 97 0"])
 
     use({"125+36": "gaze_left", "29": f"command:echo paused >> {cmd_log}", "42+125+25": "pause_toggle"})
@@ -359,7 +359,7 @@ def tests():
     check("paused: Meta+J (gaze click) does nothing and is typed as is", typed(),
           ["key 125 1", "key 36 1", "key 36 0", "key 125 0"])
     key(RCTRL, 1); key(RCTRL, 0)
-    check("paused: a command still runs", lines(cmd_log), ["combo", "3", "paused"])
+    check("paused: a command still runs", lines(cmd_log), ["combo", "4", "paused"])
     typed()
     key(SHIFT, 1); key(META, 1); key(P, 1); key(P, 0); key(META, 0); key(SHIFT, 0)
     check("paused: Meta+Shift+P (pause_toggle) resumes", stub["pause"].paused, False)

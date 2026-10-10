@@ -126,6 +126,7 @@ host_runtime=$XDG_RUNTIME_DIR
 runtime=$host_runtime/frametop
 
 cleanup() {
+  [ -n "${watch_pid:-}" ] && kill "$watch_pid" 2>/dev/null || true  # the logout watcher below
   "$here/remote-ctl.sh" stop
   fusermount3 -u -z "$runtime/doc" 2>/dev/null || true
   umount --recursive "$runtime" 2>/dev/null || true
@@ -311,5 +312,30 @@ kwriteconfig6 --file "$XDG_CONFIG_HOME/ksmserverrc" --group General --key loginM
 # doesn't have, like a spare output or a screen a smaller layout dropped. Put such a panel
 # back on the first (primary) screen before Plasma reads the file (session/fix-panels.py).
 python3 "$here/fix-panels.py" --screens "$screens" || true
+
+# Plasma's logout (Leave) ends its session manager and then KWin, and this script ends with
+# them. KWin 6.2.5 can crash on the way out (SIGSEGV in its libei backend's teardown, with
+# a Deskflow client connected, which sends its input through libei), and its wrapper then
+# starts a fresh KWin with no Plasma: a black screen that never ends. So watch for the
+# session manager leaving while KWin stays, and end KWin's wrapper, which ends startplasma
+# and this script with it.
+ours() { [ "$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null | sed -n 's/^XDG_RUNTIME_DIR=//p')" = "$XDG_RUNTIME_DIR" ]; }
+logout_watch() {
+  local seen=0 gone=0 p alive
+  while sleep 3; do
+    alive=0
+    for p in $(pgrep -x ksmserver); do ours "$p" && { alive=1; break; }; done
+    if [ "$alive" = 1 ]; then seen=1 gone=0; continue; fi
+    [ "$seen" = 1 ] || continue
+    gone=$((gone + 1))
+    [ "$gone" -ge 3 ] || continue  # about 9 seconds after the session manager left
+    for p in $(pgrep -f kwin_wayland_wrapper); do
+      ours "$p" && { echo "frametop: Plasma logged out but KWin stayed; ending it" >&2; kill "$p" 2>/dev/null; }
+    done
+    return 0
+  done
+}
+logout_watch &
+watch_pid=$!
 
 dbus-run-session startplasma-wayland

@@ -33,6 +33,17 @@
 // ...; FrameControl in ft-pointer.cpp) is a press after controlHold (0.12 s,
 // POINTER_GAZE_CONTROL_HOLD) still, not hold: there's nothing to click on them, and the hand drags.
 //
+// Right-drag (user, 2026-10-11: "an index tap on one hand, followed by an index tap on the other" for
+// the right button held): an index pinch that begins within POINTER_GAZE_RIGHT_DRAG (1 s) of the other
+// hand's index tap (a click) presses the right button at once, at its gaze lock, and its hand drags
+// until it ends (PressNow). The tap before it clicked as usual. It replaces the chord below, which is
+// off unless POINTER_GAZE_CHORD=1.
+//
+// Scroll (user, 2026-10-11): a pinch with the thumb on both the index and middle tips (each within
+// POINTER_GAZE_SCROLL_GAP, 3 cm, at the begin or within 0.25 s of it) scrolls where you looked: the
+// stick deflects with the pinch point's displacement from the begin (0.5 cm dead zone, full at 4 cm),
+// up and down and across, times POINTER_GAZE_SCROLL (1). No click, no nudge, no press.
+//
 // Chord: both buttons held, as with both of a mouse's (user, 2026-10-10). While one hand's index
 // pinch is held (held back, nudged, or pressed), an index pinch by the other hand presses the right
 // button, and holds it until that pinch ends; the first hand's left button stays down until its own
@@ -215,6 +226,15 @@ public:
         engaged_ = false;
         refY_ = lastHy_, refP_ = lastHp_;
     }
+    // Right-drag (see the top): pressed now, the right button, the other hand's tap `after` s before.
+    void PressNow(double t, double after) {
+        if (phase_ == Phase::Off) return;
+        phase_ = Phase::Press, right_ = true, byTap_ = true, tapAfter_ = after;
+        engaged_ = false;
+        refY_ = lastHy_, refP_ = lastHp_;
+        pressAt_ = t;
+    }
+    bool ByTap() const { return byTap_; }   // a right-drag (PressNow): an index pinch with the right button
     bool IsChord() const { return chord_; }  // the chord's own pinch (the right button)
     bool ByChord() const { return byChord_; }  // the left's, pressed by a chord rather than the hold
     int ChordCount() const { return chords_; }  // the other hand's right presses during it
@@ -231,7 +251,11 @@ public:
         const char *button = right_ ? "right click" : "clicked";
         char drag[40] = "";
         if (dragged_ > 0) std::snprintf(drag, sizeof drag, "dragged %.1f deg, ", dragged_);
-        if (chord_) {
+        if (byTap_) {
+            const std::string pressed = pressHit.empty() ? "nothing" : pressHit;
+            std::snprintf(b, sizeof b, "the right button held (the other hand tapped %.2f s before) on %s, %slet go%s%s (held %.2f s; %s)",
+                          tapAfter_, pressed.c_str(), drag, lost ? ": " : "", lost ? why.c_str() : "", held, gaze);
+        } else if (chord_) {
             const std::string pressed = pressHit.empty() ? "nothing" : pressHit;
             std::snprintf(b, sizeof b, "the right button with the other hand's press, on %s, %slet go%s%s (held %.2f s)",
                           pressed.c_str(), drag, lost ? ": " : "", lost ? why.c_str() : "", held);
@@ -266,13 +290,31 @@ public:
 private:
     Params p_;
     Phase phase_ = Phase::Off;
-    bool right_ = false, engaged_ = false, chord_ = false, byChord_ = false;
+    bool right_ = false, engaged_ = false, chord_ = false, byChord_ = false, byTap_ = false;
+    double tapAfter_ = 0;
     int chords_ = 0;
     double t0_ = 0, pressAt_ = 0, lockAge_ = -1;
     double yaw_ = 0, pitch_ = 0, startY_ = 0, startP_ = 0;
     double refY_ = 0, refP_ = 0, lastHy_ = 0, lastHp_ = 0;
     double moved_ = 0, dragged_ = 0;
 };
+
+// A tap that arms the right-drag (see the top): the side and when, -1 none.
+struct TapArm {
+    int side = -1;
+    double t = 0;
+    // An index pinch by `side` beginning at t: a right-drag?
+    bool Arms(int pinchSide, double now, double window) const {
+        return window > 0 && side >= 0 && pinchSide != side && now - t >= 0 && now - t <= window;
+    }
+};
+
+// The stick deflection for a scroll (and the ray's middle-pinch scroll): the hand's displacement v (m)
+// past 0.5 cm, full at 4 cm, times gain, in steps of 0.05 (fewer datagrams).
+inline double ScrollAxis(double v, double gain) {
+    const double a = std::clamp((std::fabs(v) - 0.005) / 0.035, 0.0, 1.0) * gain;
+    return std::clamp(std::round((v < 0 ? -a : a) * 20) / 20, -1.0, 1.0);
+}
 
 // A pinch that began makes a chord (see the top): an index pinch (not middle) by the other hand
 // while held, the hand's gaze pinch on heldSide, is an index pinch, and no chord is held yet.

@@ -3968,7 +3968,7 @@ void TestSweep() {
     auto left = run(90, {0.25, -0.15}, 0.4);   // on its edge, 40 cm left in 0.4 s
     show("edge-on, 40 cm left", left);
     CHECK(left.size() == 1 && left[0] == -1);
-    auto right = run(-90, {-0.15, 0.25}, 0.4);  // the other edge (the back leading), right
+    auto right = run(-90, {-0.15, 0.25}, 0.4);  // turned the other way (the palm leading), right
     show("edge-on, 40 cm right", right);
     CHECK(right.size() == 1 && right[0] == 1);
     auto flat = run(180, {0.25, -0.15}, 0.4);    // palm down
@@ -3980,9 +3980,11 @@ void TestSweep() {
     auto shortOne = run(90, {0.1, -0.05}, 0.3);
     show("edge-on, 15 cm", shortOne);
     CHECK(shortOne.empty());
-    auto paw = run(90, {0.25, -0.15, 0.25, -0.15}, 0.4);   // back and forth: every stroke
+    // back and forth with one hand: only the palm-led strokes (user, 2026-10-11: the return stroke, the
+    // back of the hand leading, does nothing; the other hand palms the other way)
+    auto paw = run(90, {0.25, -0.15, 0.25, -0.15}, 0.4);
     show("back and forth", paw);
-    CHECK(paw.size() == 3 && paw[0] == -1 && paw[1] == 1 && paw[2] == -1);
+    CHECK(paw.size() == 2 && paw[0] == -1 && paw[1] == -1);
     // easier since the second live test: 28 cm counts, a hand tilted 30 deg off its edge too
     auto shorter = run(90, {0.16, -0.12}, 0.35);
     show("edge-on, 28 cm", shorter);

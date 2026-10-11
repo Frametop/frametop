@@ -209,6 +209,36 @@ void TestMiddlePinch() {
     CHECK(Has(says, "no click: ft-hands lost the hand"), "%s", says.c_str());
 }
 
+// Right-drag (user, 2026-10-11): an index tap on one hand, then an index pinch on the other within the
+// window: the right button pressed at once, dragged by the second hand.
+void TestRightDrag() {
+    TapArm arm;
+    CHECK(!arm.Arms(1, 0.5, 1.0), "no tap yet: no right-drag");
+    arm = {0, 10.0};
+    CHECK(arm.Arms(1, 10.6, 1.0), "the other hand 0.6 s after the left's tap: a right-drag");
+    CHECK(!arm.Arms(0, 10.6, 1.0), "the same hand again: a plain pinch");
+    CHECK(!arm.Arms(1, 11.2, 1.0), "1.2 s after: too late");
+    CHECK(!arm.Arms(1, 10.6, 0), "POINTER_GAZE_RIGHT_DRAG=0: off");
+    Pinch p;
+    p.Begin(Params(), 10.6, 5, 0, 0, -30, false, 0.08);
+    p.PressNow(10.6, 0.6);
+    CHECK(p.State() == Pinch::Phase::Press && p.Right() && p.ByTap(), "pressed at once, the right button");
+    CHECK(!p.Promote(12), "nothing to promote");
+    for (double hy = 0; hy >= -6; hy -= 0.5) p.Hand(hy, -30);
+    CHECK(p.Dragged() > 1, "the hand drags it: %.2f", p.Dragged());
+    p.pressHit = "frametop.remote.104";
+    const std::string says = p.Says(11.5, false, "", "", "");
+    CHECK(Has(says, "the right button held (the other hand tapped 0.60 s before) on frametop.remote.104"), "%s", says.c_str());
+}
+
+// The three-finger scroll's stick (and the ray's middle-pinch scroll): 0.5 cm dead zone, full at 4 cm.
+void TestScrollAxis() {
+    CHECK(ScrollAxis(0.004, 1) == 0, "under the dead zone");
+    CHECK(ScrollAxis(0.0225, 1) == 0.5, "half way: %.2f", ScrollAxis(0.0225, 1));
+    CHECK(ScrollAxis(-0.06, 1) == -1, "past full: -1");
+    CHECK(ScrollAxis(0.0225, -1) == -0.5, "turned round");
+}
+
 void TestRefused() {
     Situation s;
     CHECK(Refused(s) == nullptr, "nothing in the way");
@@ -434,6 +464,8 @@ int main() {
     TestHoldStillBecomesAPress();
     TestControlPressesSooner();
     TestMiddlePinch();
+    TestRightDrag();
+    TestScrollAxis();
     TestRefused();
     TestChordable();
     TestChordPressesBoth();

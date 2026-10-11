@@ -422,6 +422,10 @@ struct Params {
     // just over the 30 cm asked; was open 1.55, edge 0.55, lead 0.6, front 0.18, 30 cm in 600 ms, drift 0.15.
     // The flags replayed: 22 cm caught 3 strokes in 49 flags of other use (fists and drags), 25 cm one.)
     bool sweep = true;
+    // only the palm leading (user, 2026-10-11: "the reverse, moving towards the back of the hand, doesn't do
+    // anything; using it will require palming through with both hands": the right hand palming left brings
+    // the next, the left hand palming right the one before). HANDS_SWEEP_BACK=1: the back of the hand too.
+    bool sweepBack = false;
     double sweepOpen = 1.4, sweepEdge = 0.7, sweepLead = 0.45, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
     double sweepDistance = 0.25, sweepMs = 500, sweepDrift = 0.2, sweepRest = 0.15;
     bool flick = true;

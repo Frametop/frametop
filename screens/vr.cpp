@@ -2424,22 +2424,22 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms 
 }
 
 // ---------------------------------------------------------------- the front slot
-// One place in front of you (user, 2026-10-11: "make the system a bit more logical with the lazy susan";
-// the proposals they took): the lazy susan (a stroke, Meta+Alt+Tab) and "grab that" both bring a screen
-// to it, one at a time: whatever was there goes home first. Two distances in it: reading (the lazy
-// susan's: g_frontReading, 1 m) and touch (grab that's arm's reach), both as big as the screen's
-// resolution needs for its text to read (grabthat::ReadableSize; the same view at either distance).
-// Grab that at the one there pulls it from reading to touch. Sending it away (a push, flick or throw)
-// steps it back: touch to reading, reading home. A stroke sends it home and brings the next. Turned away
-// from, it goes home, unless you used it a while (g_frontKeepMs of input on it: kept). Moved by hand or
-// laser, it leaves the slot and that's its home now; resized there, it comes that size next time
-// (g_frontDeg). Its home: where it lives (the layout's place, or where you last put it).
-// SCREEN_SPIN_BRING=0: the lazy susan turns the room instead (and grab that still uses the slot).
-enum class Stage { Reading, Touch };
-const char *StageName(Stage st) { return st == Stage::Touch ? "arm's reach" : "reading distance"; }
+// One place in front of you for the lazy susan (user, 2026-10-11: "make the system a bit more logical
+// with the lazy susan"; the proposals they took): a stroke (or Meta+Alt+Tab) brings the next screen
+// there, 1 m ahead (g_frontReading), as big as its resolution needs for its text to read
+// (grabthat::ReadableSize), one at a time: the one there goes home first. Turned away from, it goes
+// home, unless you used it a while (g_frontKeepMs of input on it: kept). Resized there, it comes that
+// size next time (g_frontDeg). Its home: where it lived before it came.
+//   Manual controls take it (user, 2026-10-11, later: "if the primary slot has a window moved out of it
+// through any gesture, pull, push, or drag with the pinch or laser, the lazy susan should release the
+// display ... give up from manual controls but restore the monitor or window when it is next
+// triggered"): grab that, a push, flick or throw, or a carry by hand or laser releases it: it's yours,
+// it moves like any other screen and stays where you put it, until the next stroke puts it home.
+// Grab that brings a screen to arm's reach as big as it reads (the same rule), outside the slot; the
+// slot's one goes home first, unless it's released. SCREEN_SPIN_BRING=0: the lazy susan turns the room.
 struct Front {
     int panel = -1;          // the screen in the slot (-1: empty)
-    Stage stage = Stage::Reading;
+    bool released = false;   // a manual control took it: it's yours until the next stroke puts it home
     Mat home{}, to{};        // where it lives, and where it is in the slot
     double homeWidth = 0, homeCurve = 0;
     double width = 0;        // its width in the slot (as brought, or as resized there)
@@ -2512,16 +2512,18 @@ void FrontHome(const char *why) {
     g_front = {};
 }
 
-// Screen i to the slot at stage st, at `to` (facing you): the one there goes home first; the same one
-// changes distance. why: for the log.
-void FrontBring(int i, Stage st, const Mat &to, const char *why) {
+// Screen i at `to` (facing you), as big as it reads there: to the slot (the one there goes home first),
+// or (slot false: grab that) outside it, the slot's one going home first unless it's released.
+void BringReadable(int i, const Mat &to, bool slot, const char *why) {
     const auto it = g_screens.find(i);
     if (it == g_screens.end()) return;
     Screen &s = it->second;
-    if (g_front.panel >= 0 && g_front.panel != i) FrontHome("another comes");
+    if (g_front.panel >= 0 && g_front.panel != i && (slot || !g_front.released)) FrontHome("another comes");
     Mat now;
     if (!ScreenPose(s, &now)) return;
-    if (g_front.panel != i) {
+    if (!slot) {
+        if (g_front.panel == i) g_front.released = true;   // (grab that at the slot's one: a manual control)
+    } else if (g_front.panel != i) {
         const auto m = g_grabMoves.find(i);   // (on its way home: home is where it was going)
         g_front = {};
         g_front.panel = i;
@@ -2536,22 +2538,20 @@ void FrontBring(int i, Stage st, const Mat &to, const char *why) {
     const double d = std::max(0.2, std::hypot(to.m[0][3] - head[0], to.m[2][3] - head[2]));
     const grabthat::Readable r = FrontSize(i, s, d);
     if (!s.floating) s.curve = r.curve;
-    g_front.stage = st, g_front.to = to, g_front.width = r.width, g_front.awaySinceMs = -1;
+    if (slot) g_front.to = to, g_front.width = r.width, g_front.awaySinceMs = -1;
     StartGrabMove(i, s, to, r.width);
-    std::printf("front: screen %d to %s (%s), %.2f m out, %.2f m wide%s (%.0fx%.0f deg, %.0f px/deg)\n", i + 1, StageName(st), why, d,
-                r.width, s.curve > 0 ? ", curved round you" : "", r.degW, r.degH, r.ppd);
-    ShowCarousel();
+    std::printf("%s: screen %d %s (%s), %.2f m out, %.2f m wide%s (%.0fx%.0f deg, %.0f px/deg)\n", slot ? "front" : "grab that", i + 1,
+                slot ? "to the front" : "to arm's reach", why, d, r.width, s.curve > 0 ? ", curved round you" : "", r.degW, r.degH, r.ppd);
+    if (slot) ShowCarousel();
 }
 
-// Sent away (a push, flick or throw): one step back.
-void FrontStepBack(const char *why) {
-    Mat head;
-    if (g_front.stage == Stage::Touch && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
-        FrontBring(g_front.panel, Stage::Reading, grabthat::InFront(head, g_frontReading, g_frontDrop), why);
-        return;
-    }
-    FrontHome(why);
+// A manual control took the slot's screen: it's yours until the next stroke puts it home.
+void FrontRelease(int i, const char *why) {
+    if (i != g_front.panel || g_front.released) return;
+    g_front.released = true;
+    std::printf("front: screen %d released (%s): it stays where you put it; the next stroke puts it home\n", i + 1, why);
 }
+
 
 // The gesture fired (user, 2026-10-10: consistent with a display already near you): at a panel that
 // came by it and is still within arm's reach (where it came, or moved about there since), it goes
@@ -2608,7 +2608,7 @@ void GrabThat(const grabthat::Fire &f) {
                                  near.c_str(), targets.size(), f.facing, f.speed);
     }
     // to the front slot at arm's reach (the one there goes home; the one there comes closer)
-    FrontBring(i, Stage::Touch, grabthat::Arrival(f, k), i == g_front.panel ? "grab that: closer" : "grab that");
+    BringReadable(i, grabthat::Arrival(f, k), false, i == g_front.panel ? "pulled from the front slot" : "grab that");
     (void)hand;
 }
 
@@ -2727,7 +2727,8 @@ void SusanCommand(bool next, char *reply, int size) {
         ShowCarousel();
         return (void)std::snprintf(reply, size, "ok 0 (no other panel)");
     }
-    FrontBring(i, Stage::Reading, grabthat::InFront(head, g_frontReading, g_frontDrop), next ? "the lazy susan, next" : "the lazy susan, back");
+    if (g_front.released) FrontHome("restored by the next stroke");
+    BringReadable(i, grabthat::InFront(head, g_frontReading, g_frontDrop), true, next ? "the lazy susan, next" : "the lazy susan, back");
     std::snprintf(reply, size, "ok screen %d", i + 1);
 }
 
@@ -2838,16 +2839,14 @@ void UpdateFront() {
     const int64_t now = NowMs();
     const double dt = g_front.lastTickMs ? double(now - g_front.lastTickMs) : 0;
     g_front.lastTickMs = now;
-    if (g_grabMoves.count(g_front.panel)) return;   // (still on its way)
+    if (g_front.released || g_grabMoves.count(g_front.panel)) return;   // (yours; or still on its way)
     Screen &s = it->second;
     Mat p, head;
     if (!ScreenPose(s, &p)) return;
     const int i = g_front.panel;
-    if (s.pinned != kNone) {
-        std::printf("front: screen %d was pinned: it leaves the slot\n", i + 1);
-        return void(g_front = {});
-    }
+    if (s.pinned != kNone) return FrontRelease(i, "pinned");
     const bool held = s.drag != Drag::None || g_handInput.heldByHand(i);
+    if (held && Apart(p, g_front.to) > 0.03) return FrontRelease(i, "carried by hand or laser");
     if (!held && std::fabs(s.metres - g_front.width) > 0.01 * g_front.width && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
         // resized there (two fists, a corner): that's its size in the slot, here and next time
         const double d = std::max(0.2, Apart(head, p));
@@ -2855,8 +2854,7 @@ void UpdateFront() {
         std::printf("front: screen %d resized in the slot: %.2f m, %.0f deg wide from now on\n", i + 1, s.metres, g_frontDeg[i]);
         g_front.width = s.metres, g_front.to = p;
     } else if (!held && Apart(p, g_front.to) > 0.05) {
-        std::printf("front: screen %d was moved: it lives there now\n", i + 1);
-        return void(g_front = {});
+        return FrontRelease(i, "moved");
     }
     // used a while: kept (input on it within the last moment counts as use)
     if (!g_front.kept && g_frontKeepMs > 0 && (held || now - s.inputMs < 250)) {
@@ -3097,6 +3095,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "HANDS_PUSH") k.push = on;
     else if (n == "HANDS_THROW") k.cardThrow = on;
     else if (n == "HANDS_SWEEP") k.sweep = on;
+    else if (n == "HANDS_SWEEP_BACK") k.sweepBack = on;
     else if (n == "HANDS_TRACK_GATE") k.gate = on;
     else if (n == "HANDS_GRAB_THAT") g_grabThat.params().on = on;
     else if (n == "HANDS_TARGET_GLOW") g_targetGlowOn = on;
@@ -3217,15 +3216,10 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 break;
             case handinput::Event::Throw: {
                 // a flick at it, or a carry let go fast (after its GrabEnd: let go, unless it went back
-                // on a wrist): the one in the front slot steps back (arm's reach to reading distance,
-                // reading distance home); another goes out to throwDistance, easing out, at its width:
-                // that's its place now
+                // on a wrist): out to throwDistance, easing out, at its width: that's its place now (the
+                // front slot's one too: released, until the next stroke puts it home)
                 if (s.drag != Drag::None || s.pinned != kNone) break;
-                if (e.panel == g_front.panel) {
-                    FrontStepBack(e.push ? "pushed away" : e.flick ? "flicked away" : "thrown");
-                    g_grabThat.Quiet(g_handInput.frameNs() + int64_t(g_grabThat.params().quietAfterSendMs * 1e6));
-                    break;
-                }
+                FrontRelease(e.panel, e.push ? "pushed away" : e.flick ? "flicked away" : "thrown");   // (yours: it flies)
                 Mat head;
                 double far = 0;
                 if (DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) far = Apart(head, e.to);
@@ -3387,6 +3381,7 @@ bool ft_vr_init(void) {
     k.twoFingerScroll = handcut::Setting("HANDS_TWO_FINGER_SCROLL", "1") != "0";
     k.motionPress = handcut::Setting("HANDS_MOTION_PRESS", "1") != "0";
     k.sweep = handcut::Setting("HANDS_SWEEP", "1") != "0";
+    k.sweepBack = handcut::Setting("HANDS_SWEEP_BACK", "0") != "0";
     {
         const std::string aim = handcut::Setting("HANDS_TAP_AIM", "path");
         k.aimMode = aim == "finger" ? 1 : aim == "straight" ? 0 : 2;
@@ -4368,7 +4363,8 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error grabthat on|off|state");
         const auto &st = g_grabThat.stats;
         std::string came;
-        if (g_front.panel >= 0) came = std::to_string(g_front.panel + 1) + " (" + StageName(g_front.stage) + (g_front.kept ? ", kept" : "") + ")";
+        if (g_front.panel >= 0)
+            came = std::to_string(g_front.panel + 1) + " (front slot" + (g_front.released ? ", released" : g_front.kept ? ", kept" : "") + ")";
         std::snprintf(reply, size, "ok %s; %s; %d armed, %d closed, %d fired, %d timed out; came: %s",
                       g_grabThat.params().on ? "on" : "off", g_grabThat.Describe().c_str(), st.arms, st.closings, st.fires,
                       st.timeouts, came.empty() ? "none" : came.c_str());

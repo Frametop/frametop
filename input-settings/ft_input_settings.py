@@ -121,7 +121,10 @@ HAND_INTERACTIONS = [
     ("HANDS_THROW", True, "1", "Gestures", "Throw",
      "Letting go of a held screen while moving it fast throws it 3 m out along the throw."),
     ("HANDS_SWEEP", True, "1", "Gestures", "Sweep for the lazy susan",
-     "An open hand on its edge swept 25 cm sideways, quickly: the next screen on that side (Meta+Alt+Tab too)."),
+     "An open hand on its edge, palm leading, swept 25 cm sideways, quickly: the next screen on that side "
+     "(Meta+Alt+Tab too). The return stroke does nothing: the other hand palms the other way."),
+    ("HANDS_SWEEP_BACK", False, "1", "Gestures", "Lazy susan on the return stroke too",
+     "A stroke with the back of the hand leading counts too (one hand going back and forth)."),
     ("SCREEN_SPIN_BRING", True, "1", "Gestures", "Lazy susan brings screens to you",
      "The next screen comes 1 m in front of you, big enough to read, and takes the typing; the next stroke sends "
      "it home. Grab that pulls it to arm's reach; a push steps it back. Off: the screens turn around you instead."),
@@ -131,6 +134,17 @@ HAND_INTERACTIONS = [
      "A faint white glow round the screen \"grab that\" would take."),
     ("HANDS_EDGE_GLOW", True, "1", "Feedback", "Resize and edge glows",
      "A glow at the corner or edge a pinch there would resize or move."),
+    ("POINTER_GAZE_RIGHT_DRAG", True, "1", "Gaze + hands", "Right-drag: tap one hand, pinch the other",
+     "With gaze on: an index tap on one hand, then an index pinch on the other within a second, holds the right "
+     "button where you look; that hand drags until you let go."),
+    ("POINTER_GAZE_SCROLL", True, "1", "Gaze + hands", "Three-finger pinch scrolls",
+     "With gaze on: thumb on both the index and middle fingertips, then move the hand up, down or across: it "
+     "scrolls where you looked."),
+    ("POINTER_GAZE_CHORD", False, "1", "Gaze + hands", "Hold both buttons (chord)",
+     "With gaze on: while one hand's pinch is held, the other hand's pinch holds the right button too "
+     "(replaced by the right-drag)."),
+    ("POINTER_RAY_BEAM", False, "1", "Laser", "Show the hand laser's beam",
+     "Off: a hand's laser shows only its dot. On: the whole beam from the hand."),
     ("POINTER_RAY_READY", True, "6", "Laser", "Laser only when about to pinch",
      "A hand's laser shows once its thumb and index are within 6 cm, and goes when they open past 10 cm. "
      "Off: whenever the hand is raised and pointing."),

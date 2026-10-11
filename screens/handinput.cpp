@@ -1846,6 +1846,10 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
                     !place ? "not in front, at a panel, or busy" : !shape ? "not an open hand on its edge" : "too slow or off level");
             }
             sd.swDone = true;
+        } else if (along >= p_.sweepDistance && !p_.sweepBack && nSide * dir <= 0) {
+            sd.swDone = true;   // the back of the hand leading: the return stroke, nothing (Params::sweepBack)
+            Log("%s hand swept %s %.0f cm with the back of the hand leading: the return stroke, not the lazy susan", SideName(s),
+                dir > 0 ? "right" : "left", along * 100);
         } else if (along >= p_.sweepDistance) {
             sd.swDone = true;
             ++stats.sweeps;

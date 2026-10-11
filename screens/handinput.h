@@ -408,6 +408,18 @@ struct Params {
     // HANDS_FLICK_OPENING); no pinch or grip down; the hand not pressing or grabbing. Where to: on the line
     // from the eyes through the panel's centre. An open hand that comes through a panel faster than
     // flickPokeSpeed doesn't poke it. Once a second at most.
+    // The lazy susan by hand (user, 2026-10-11: "paw back and forth like pushing branches out of the way,
+    // left or right, and lazy susan through windows and displays"): an open hand on its edge (fingers
+    // open, sweepOpen or more; the palm's normal within sweepEdge of level, and along the way it moves
+    // by sweepLead or more: the palm or the back of the hand leading, never a flat hand), away from every
+    // panel (not in a touch zone), sweepFront or more in front of the eyes, between sweepBelow under them
+    // and sweepAbove over them, sweeps sideways sweepDistance or more within sweepMs, drifting at most
+    // sweepDrift up, down, forward or back: one stroke, one panel (Event::Spin: x -1 the hand went left,
+    // so the panel on the right comes to the front; +1 right, the one on the left). Every stroke counts,
+    // back and forth too. A stroke starts afresh where the hand turns or slows under sweepRest. HANDS_SWEEP.
+    bool sweep = true;
+    double sweepOpen = 1.55, sweepEdge = 0.55, sweepLead = 0.6, sweepFront = 0.18, sweepBelow = 0.5, sweepAbove = 0.15;
+    double sweepDistance = 0.30, sweepMs = 600, sweepDrift = 0.15, sweepRest = 0.15;
     bool flick = true;
     double flickSpeed = 1.2, flickTravel = 0.12, flickMs = 200, flickFitMs = 100, flickNear = 0.12, flickBack = 0.04;
     double flickAngle = 40, flickOpen = 1.5, flickPokeSpeed = 0.8, flickRefractoryMs = 1000, flickStartSpeed = 0.6;
@@ -465,7 +477,8 @@ const char *ZoneName(Zone z);
 struct Event {
     // Throw: the panel goes to `to` over `ms` (ease-out): a flick at it, or a carry let go fast
     // Settle: after a GrabEnd, the panel goes back to `to` at once (Params::rewindMs)
-    enum Type { Motion, Press, Release, Control, GrabStart, GrabEnd, Throw, Scroll, Settle } type;   // Scroll: x, y notches (y > 0: down)
+    // Spin: the lazy susan, one panel (x: -1 the hand swept left, +1 right; Params::sweep)
+    enum Type { Motion, Press, Release, Control, GrabStart, GrabEnd, Throw, Scroll, Settle, Spin } type;   // Scroll: x, y notches (y > 0: down)
     int side = 0;               // 0 left, 1 right
     int panel = -1;
     double x = 0, y = 0;        // buffer pixels (Motion, Press, Release)
@@ -676,6 +689,7 @@ public:
         int scrolls = 0, scrollNotches = 0;          // two-finger scrolls, and the notches they sent
         int motionPresses = 0;                       // presses by motion (Params::motionPress)
         int lockPushes = 0;                          // presses pushed through at the frozen aim (Params::lockPushDepth)
+        int sweeps = 0, sweepsRefused = 0;           // lazy susan strokes, and strokes the hand's shape or place refused
         int releaseFreezes = 0, rewinds = 0, regrabsRefused = 0;   // letting go (Params::openFreeze, rewindMs, regrabMs)
         int settles = 0, settledFists = 0;           // pinches that waited to become fists (Params::fistSettleMs), and did
         int joins = 0;                               // second hands joining a held panel (Params::joinFront)
@@ -805,6 +819,12 @@ private:
         bool frozen = false;
         std::vector<std::pair<int64_t, Mat>> poses;
         int64_t letGoNs = INT64_MIN / 2;
+        // the stroke under way (Params::sweep): where it began (sideways, up, forward: m in the head's
+        // level frame), when, which way, whether it's spun or been refused, and the last frame's sideways place
+        double swX0 = 0, swY0 = 0, swZ0 = 0, swLast = 0;
+        int64_t swT0 = 0, swLastT = 0;
+        int swDir = 0;
+        bool swDone = false, swHave = false;
         int letGoPanel = -1;
     };
     enum Why : unsigned {
@@ -855,6 +875,7 @@ private:
     void Guides(const Input &in, const std::vector<Panel> &panels);
     // A flick by this hand at a panel (Params::flick), on a hands frame.
     void Flick(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand &h);
+    void Sweep(int s, const Input &in, const handcut::Hand &h);
     // A push by this hand into a panel (Params::push), on a hands frame.
     void Push(int s, const Input &in, const std::vector<Panel> &panels);
     // A frame's confidence for a held hand (Params::monoWeight): 1, less for one camera or near the

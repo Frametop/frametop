@@ -2833,6 +2833,12 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     UpdateHandGuides();
 
     for (const handinput::Event &e : g_handInput.events()) {
+        if (e.type == handinput::Event::Spin) {   // the lazy susan by hand: swept left, the panel on the right comes (next)
+            char reply[96];
+            SpinCommand(e.x < 0 ? "next" : "prev", reply, sizeof reply);
+            std::printf("lazy susan by hand (%s, swept %s): %s\n", e.side ? "right" : "left", e.x < 0 ? "left" : "right", reply);
+            continue;
+        }
         const auto it = g_screens.find(e.panel);
         if (it == g_screens.end()) continue;
         Screen &s = it->second;
@@ -3062,6 +3068,7 @@ bool ft_vr_init(void) {
     k.fistPair = handcut::Setting("HANDS_FIST_PAIR", "1") != "0";
     k.twoFingerScroll = handcut::Setting("HANDS_TWO_FINGER_SCROLL", "1") != "0";
     k.motionPress = handcut::Setting("HANDS_MOTION_PRESS", "1") != "0";
+    k.sweep = handcut::Setting("HANDS_SWEEP", "1") != "0";
     {
         const std::string aim = handcut::Setting("HANDS_TAP_AIM", "path");
         k.aimMode = aim == "finger" ? 1 : aim == "straight" ? 0 : 2;

@@ -1,6 +1,7 @@
 // Near hand input on Frametop's panels (see handinput.h).
 #include "handinput.h"
 
+#include <cstdlib>
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
@@ -809,6 +810,7 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
         }
         if (sd.state == State::Press || sd.state == State::Grab) sd.busyNs = in.nowNs;
         if (newFrame_ && h && p_.flick && (sd.state == State::Idle || sd.state == State::Hover)) Flick(s, in, panels, *h);
+        if (newFrame_ && h && p_.sweep) Sweep(s, in, *h);
         if (newFrame_ && h && p_.push && (sd.state == State::Idle || sd.state == State::Hover)) Push(s, in, panels);
     }
     if (newFrame_ && anyNear()) ++stats.nearFrames;
@@ -1802,6 +1804,58 @@ Hit HandInput::FingerHit(int s, const Panel &P, const Hand &h) const {
     Hit out = tip;
     out.u += du, out.v += dv;
     return out;
+}
+
+// The lazy susan by hand (Params::sweep): one panel per large sideways stroke of an open hand on its edge.
+void HandInput::Sweep(int s, const Input &in, const Hand &h) {
+    Side &sd = side_[s];
+    if (!in.haveHead) return;
+    // the head's level frame: right, forward (on the floor), up
+    const Mat &H = in.head;
+    double rx = H.m[0][0], rz = H.m[2][0];
+    const double rl = std::hypot(rx, rz);
+    if (rl < 1e-6) return;
+    rx /= rl, rz /= rl;
+    const double fx = rz, fz = -rx;   // (forward: right turned a quarter to the left, on the floor: -z for a head at rest)
+    double palm[3], n[3];
+    h.Palm(palm);
+    PalmOut(h, n);
+    const double dx = palm[0] - H.m[0][3], dy = palm[1] - H.m[1][3], dz = palm[2] - H.m[2][3];
+    const double x = dx * rx + dz * rz, y = dy, z = dx * fx + dz * fz;
+    const int64_t t = h.captureNs;
+    const double dt = sd.swHave ? (t - sd.swLastT) / 1e9 : 0;
+    const double v = dt > 1e-3 ? (x - sd.swLast) / dt : 0;
+    const int dir = v > 0 ? 1 : -1;
+    // where it can be: in front, at chest to eye height, not pressing, holding or near a panel, not typing
+    const bool place = z >= p_.sweepFront && y >= -p_.sweepBelow && y <= p_.sweepAbove && sd.state == State::Idle &&
+                       !in.typing[s] && !in.grabThatArmed[s] && !in.hands->pinch(s).down && !in.hands->grip(s).down;
+    // the shape: open, on its edge, the palm or the back leading
+    const double nUp = n[1], nSide = n[0] * rx + n[2] * rz;
+    const bool shape = Openness(h) >= p_.sweepOpen && std::fabs(nUp) <= p_.sweepEdge && std::fabs(nSide) >= p_.sweepLead;
+    // a new stroke where it turns, slows, or starts
+    if (!sd.swHave || dt <= 1e-3 || dt > 0.2 || dir != sd.swDir || std::fabs(v) < p_.sweepRest) {
+        sd.swX0 = x, sd.swY0 = y, sd.swZ0 = z, sd.swT0 = t, sd.swDir = std::fabs(v) < p_.sweepRest ? 0 : dir, sd.swDone = false;
+    } else if (!sd.swDone) {
+        const double along = (x - sd.swX0) * dir;
+        if (!place || !shape || std::fabs(y - sd.swY0) > p_.sweepDrift || std::fabs(z - sd.swZ0) > p_.sweepDrift ||
+            t - sd.swT0 > int64_t(p_.sweepMs * 1e6)) {
+            if (along >= p_.sweepDistance / 2) {   // (a stroke well under way that went wrong: counted, logged once)
+                ++stats.sweepsRefused;
+                Log("%s hand swept %s %.0f cm: not a lazy susan stroke (%s)", SideName(s), dir > 0 ? "right" : "left", along * 100,
+                    !place ? "not in front, at a panel, or busy" : !shape ? "not an open hand on its edge" : "too slow or off level");
+            }
+            sd.swDone = true;
+        } else if (along >= p_.sweepDistance) {
+            sd.swDone = true;
+            ++stats.sweeps;
+            Event e;
+            e.type = Event::Spin, e.side = s, e.x = dir;
+            events_.push_back(e);
+            Log("%s hand swept %s %.0f cm in %.0f ms (the %s leading): the lazy susan, one panel", SideName(s), dir > 0 ? "right" : "left",
+                along * 100, (t - sd.swT0) / 1e6, nSide * dir > 0 ? "palm" : "back of the hand");
+        }
+    }
+    sd.swLast = x, sd.swLastT = t, sd.swHave = true;
 }
 
 void HandInput::FistPair(const Input &in, const std::vector<Panel> &panels) {

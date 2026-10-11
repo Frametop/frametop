@@ -3934,6 +3934,57 @@ void TestTrackGate() {
 // Fists only resize (Params::fistResizeOnly, user 2026-10-11): one fist holds the panel still; two fists
 // pulled apart and moved and turned only scale it, about its centre where it was.
 // Two fists near a panel resize it by their shape alone, no grip from ft-hands (Params::fistPair).
+// The lazy susan by hand (Params::sweep): an open hand on its edge swept 30 cm sideways in 0.6 s spins one
+// panel; a flat hand, a slow sweep, a short one don't; back and forth, each stroke counts.
+void TestSweep() {
+    auto run = [](double rollDeg, std::vector<double> xs, double seconds) {
+        Rig r;
+        const int frames = std::max(2, int(seconds * 30));
+        auto at = [&](double x) {
+            SynthHand h;
+            h.palm = true, h.rollDeg = rollDeg, h.tiltDeg = 0;
+            h.palmAt[0] = x, h.palmAt[1] = -0.2, h.palmAt[2] = -0.30;
+            return h;
+        };
+        for (int k = 0; k < 5; ++k) r.Frame({at(xs[0])});
+        for (size_t leg = 0; leg + 1 < xs.size(); ++leg) {
+            for (int k = 1; k <= frames; ++k) {
+                const double f = double(k) / frames;
+                r.Frame({at(xs[leg] + (xs[leg + 1] - xs[leg]) * (3 * f * f - 2 * f * f * f))});
+            }
+            for (int k = 0; k < 4; ++k) r.Frame({at(xs[leg + 1])});   // (a pause at each end)
+        }
+        std::vector<int> spins;
+        for (const Event &e : r.events) if (e.type == Event::Spin) spins.push_back(int(e.x));
+        if (std::getenv("SWEEP_DEBUG"))
+            for (const std::string &l : r.logs) std::printf("    %s\n", l.c_str());
+        return spins;
+    };
+    auto show = [](const char *what, const std::vector<int> &v) {
+        std::printf("sweep: %s: %zu spin(s)", what, v.size());
+        for (int d : v) std::printf(" %+d", d);
+        std::printf("\n");
+    };
+    auto left = run(90, {0.25, -0.15}, 0.4);   // on its edge, 40 cm left in 0.4 s
+    show("edge-on, 40 cm left", left);
+    CHECK(left.size() == 1 && left[0] == -1);
+    auto right = run(-90, {-0.15, 0.25}, 0.4);  // the other edge (the back leading), right
+    show("edge-on, 40 cm right", right);
+    CHECK(right.size() == 1 && right[0] == 1);
+    auto flat = run(180, {0.25, -0.15}, 0.4);    // palm down
+    show("flat, palm down", flat);
+    CHECK(flat.empty());
+    auto slow = run(90, {0.25, -0.15}, 1.5);
+    show("edge-on, 40 cm in 1.5 s", slow);
+    CHECK(slow.empty());
+    auto shortOne = run(90, {0.1, -0.05}, 0.3);
+    show("edge-on, 15 cm", shortOne);
+    CHECK(shortOne.empty());
+    auto paw = run(90, {0.25, -0.15, 0.25, -0.15}, 0.4);   // back and forth: every stroke
+    show("back and forth", paw);
+    CHECK(paw.size() == 3 && paw[0] == -1 && paw[1] == 1 && paw[2] == -1);
+}
+
 void TestFistPair() {
     Rig r;
     const Mat start = r.panels[0].pose;
@@ -4937,6 +4988,7 @@ int ScanFlags(int n, char **dirs) {
                 for (const std::string &l : run.logs)
                     if (l.find("pressed") != std::string::npos || l.find("took") != std::string::npos || l.find("flick") != std::string::npos ||
                         l.find("two fingers") != std::string::npos || l.find("hand opening") != std::string::npos ||
+                        l.find("lazy susan") != std::string::npos ||
                         l.find("closed again") != std::string::npos || l.find("let go of") != std::string::npos ||
                         l.find("push") != std::string::npos || l.find("both hands") != std::string::npos)
                         std::printf("    %s\n", l.c_str());
@@ -5002,6 +5054,7 @@ int main(int argc, char **argv) {
     TestFlick();
     TestCardThrow();
     TestTrackGate();
+    TestSweep();
     TestFistPair();
     TestFistResizeOnly();
     TestFistPinch();

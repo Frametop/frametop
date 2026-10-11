@@ -399,4 +399,37 @@ double Ease(double t) {
     return t * t * (3 - 2 * t);
 }
 
+Mat InFront(const Mat &head, double distance, double drop) {
+    double fw[3];
+    Forward(head, fw);
+    double hx = fw[0], hz = fw[2];
+    const double hl = std::hypot(hx, hz);
+    if (hl < 1e-6) hx = 0, hz = -1;
+    else hx /= hl, hz /= hl;
+    const double eye[3] = {head.m[0][3], head.m[1][3], head.m[2][3]};
+    const double c[3] = {eye[0] + hx * distance, eye[1] - drop, eye[2] + hz * distance};
+    return Facing(c, eye);
+}
+
+double ViewDistance(double width, double maxDeg, double nearest, double farthest, double *fit) {
+    const double t = std::tan(std::clamp(maxDeg, 1.0, 170.0) * M_PI / 360);
+    const double d = std::clamp(width / (2 * t), nearest, std::max(nearest, farthest));
+    if (fit) *fit = std::min(width, 2 * d * t);
+    return d;
+}
+
+int SusanPick(const std::vector<Bearing> &panels, int current, double from, bool next, double aheadDeg) {
+    int best = -1;
+    double bestA = 1e9;
+    for (const Bearing &b : panels) {
+        if (b.index == current) continue;
+        if (current < 0 && std::fabs(b.deg) <= aheadDeg) continue;   // (in front already)
+        double a = (next ? 1 : -1) * (b.deg - from);
+        while (a <= 1e-6) a += 360;   // round past where it started
+        while (a > 360) a -= 360;
+        if (a < bestA) bestA = a, best = b.index;
+    }
+    return best;
+}
+
 }  // namespace grabthat

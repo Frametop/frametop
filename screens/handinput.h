@@ -411,15 +411,19 @@ struct Params {
     // The lazy susan by hand (user, 2026-10-11: "paw back and forth like pushing branches out of the way,
     // left or right, and lazy susan through windows and displays"): an open hand on its edge (fingers
     // open, sweepOpen or more; the palm's normal within sweepEdge of level, and along the way it moves
-    // by sweepLead or more: the palm or the back of the hand leading, never a flat hand), away from every
-    // panel (not in a touch zone), sweepFront or more in front of the eyes, between sweepBelow under them
+    // by sweepLead or more: the palm or the back of the hand leading, never a flat hand), off every
+    // panel's surface (not pressing or holding; hovering near one counts: the panel the lazy susan brought
+    // sits right there), sweepFront or more in front of the eyes, between sweepBelow under them
     // and sweepAbove over them, sweeps sideways sweepDistance or more within sweepMs, drifting at most
     // sweepDrift up, down, forward or back: one stroke, one panel (Event::Spin: x -1 the hand went left,
     // so the panel on the right comes to the front; +1 right, the one on the left). Every stroke counts,
     // back and forth too. A stroke starts afresh where the hand turns or slows under sweepRest. HANDS_SWEEP.
+    // (Easier since the second live test, 2026-10-11: "really difficult": strokes counted came at 30-35 cm,
+    // just over the 30 cm asked; was open 1.55, edge 0.55, lead 0.6, front 0.18, 30 cm in 600 ms, drift 0.15.
+    // The flags replayed: 22 cm caught 3 strokes in 49 flags of other use (fists and drags), 25 cm one.)
     bool sweep = true;
-    double sweepOpen = 1.55, sweepEdge = 0.55, sweepLead = 0.6, sweepFront = 0.18, sweepBelow = 0.5, sweepAbove = 0.15;
-    double sweepDistance = 0.30, sweepMs = 600, sweepDrift = 0.15, sweepRest = 0.15;
+    double sweepOpen = 1.4, sweepEdge = 0.7, sweepLead = 0.45, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
+    double sweepDistance = 0.25, sweepMs = 500, sweepDrift = 0.2, sweepRest = 0.15;
     bool flick = true;
     double flickSpeed = 1.2, flickTravel = 0.12, flickMs = 200, flickFitMs = 100, flickNear = 0.12, flickBack = 0.04;
     double flickAngle = 40, flickOpen = 1.5, flickPokeSpeed = 0.8, flickRefractoryMs = 1000, flickStartSpeed = 0.6;

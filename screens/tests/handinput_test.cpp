@@ -3983,6 +3983,44 @@ void TestSweep() {
     auto paw = run(90, {0.25, -0.15, 0.25, -0.15}, 0.4);   // back and forth: every stroke
     show("back and forth", paw);
     CHECK(paw.size() == 3 && paw[0] == -1 && paw[1] == 1 && paw[2] == -1);
+    // easier since the second live test: 28 cm counts, a hand tilted 30 deg off its edge too
+    auto shorter = run(90, {0.16, -0.12}, 0.35);
+    show("edge-on, 28 cm", shorter);
+    CHECK(shorter.size() == 1 && shorter[0] == -1);
+    auto tilted = run(120, {0.25, -0.15}, 0.4);
+    show("tilted 30 deg, 40 cm", tilted);
+    CHECK(tilted.size() == 1);
+    auto halfFlat = run(150, {0.25, -0.15}, 0.4);   // 60 deg off its edge: mostly flat
+    show("tilted 60 deg (mostly flat)", halfFlat);
+    CHECK(halfFlat.empty());
+}
+
+void TestSusanPick() {
+    using grabthat::Bearing;
+    // panels at -90 (left), -20, +5 (ahead), +40, +120 (right, behind)
+    const std::vector<Bearing> p = {{0, -90}, {1, -20}, {2, 5}, {3, 40}, {4, 120}};
+    CHECK(grabthat::SusanPick(p, -1, 0, true, 8) == 3);    // none brought: the next to the right, not the one ahead
+    CHECK(grabthat::SusanPick(p, -1, 0, false, 8) == 1);   // ...or to the left
+    CHECK(grabthat::SusanPick(p, 3, 40, true, 8) == 4);    // brought 3 (it lives at +40): the next round
+    CHECK(grabthat::SusanPick(p, 4, 120, true, 8) == 0);   // past the last: round to the far left
+    CHECK(grabthat::SusanPick(p, 0, -90, false, 8) == 4);  // and the other way
+    CHECK(grabthat::SusanPick(p, 3, 40, false, 8) == 2);   // back: the one ahead comes too once one is brought
+    CHECK(grabthat::SusanPick({{2, 5}}, -1, 0, true, 8) == -1);   // only the one ahead: nothing
+    CHECK(grabthat::SusanPick({{2, 5}}, 2, 5, true, 8) == -1);    // only the brought one: nothing
+}
+
+void TestViewDistance() {
+    double w = 0;
+    // 0.6 m at arm's reach (0.45) spans 67 deg: stays
+    NEAR(grabthat::ViewDistance(0.6, 75, 0.45, 1.5, &w), 0.45, 1e-9);
+    NEAR(w, 0.6, 1e-9);
+    // the flagged 1.62 m: out to where it spans 75 deg (~1.06 m), its width kept
+    const double d = grabthat::ViewDistance(1.62, 75, 0.45, 1.5, &w);
+    NEAR(d, 0.81 / std::tan(37.5 * M_PI / 180), 1e-6);
+    NEAR(w, 1.62, 1e-9);
+    // a 2.5 m screen at most 1.5 m out: narrowed to span 75 deg there
+    NEAR(grabthat::ViewDistance(2.5, 75, 0.45, 1.5, &w), 1.5, 1e-9);
+    NEAR(w, 2 * 1.5 * std::tan(37.5 * M_PI / 180), 1e-9);
 }
 
 void TestFistPair() {
@@ -5055,6 +5093,8 @@ int main(int argc, char **argv) {
     TestCardThrow();
     TestTrackGate();
     TestSweep();
+    TestSusanPick();
+    TestViewDistance();
     TestFistPair();
     TestFistResizeOnly();
     TestFistPinch();

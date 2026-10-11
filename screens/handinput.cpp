@@ -1826,8 +1826,9 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
     const double dt = sd.swHave ? (t - sd.swLastT) / 1e9 : 0;
     const double v = dt > 1e-3 ? (x - sd.swLast) / dt : 0;
     const int dir = v > 0 ? 1 : -1;
-    // where it can be: in front, at chest to eye height, not pressing, holding or near a panel, not typing
-    const bool place = z >= p_.sweepFront && y >= -p_.sweepBelow && y <= p_.sweepAbove && sd.state == State::Idle &&
+    // where it can be: in front, at chest to eye height, not pressing or holding a panel (near one is fine), not typing
+    const bool place = z >= p_.sweepFront && y >= -p_.sweepBelow && y <= p_.sweepAbove &&
+                       (sd.state == State::Idle || sd.state == State::Hover) &&
                        !in.typing[s] && !in.grabThatArmed[s] && !in.hands->pinch(s).down && !in.hands->grip(s).down;
     // the shape: open, on its edge, the palm or the back leading
     const double nUp = n[1], nSide = n[0] * rx + n[2] * rz;

@@ -1927,7 +1927,12 @@ void UpdateSpin() {
     }
 }
 
+extern bool g_susanBring;
+void SusanCommand(bool next, char *reply, int size);
+
 void SpinCommand(const char *arg, char *reply, int size) {
+    if (g_susanBring && (!std::strcmp(arg, "next") || !std::strcmp(arg, "prev")))
+        return SusanCommand(!std::strcmp(arg, "next"), reply, size);   // (bring the next one: SusanCommand)
     Mat head;
     if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head))
         return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
@@ -2416,6 +2421,8 @@ std::map<int, Brought> g_brought;      // panels that came by the gesture: where
 // back): "grab that" brings it back at that width (user, 2026-10-11: "when you pull a display towards
 // you, it should remember the last size the display was when you pushed it away"), not grab that's maxWidth.
 std::map<int, double> g_nearWidth;
+double g_grabThatViewDeg = 75;   // HANDS_GRAB_THAT_VIEW_DEG: a panel grab that brings spans at most this much of the view
+extern double g_susanFar;
 
 // The width a panel goes away at (user, 2026-10-10: "windows should not resize to be smaller when
 // they're sent back. It should just push them back further away keeping their existing size"): its
@@ -2521,14 +2528,24 @@ void GrabThat(const grabthat::Fire &f) {
         StartGrabMove(it->first, o->second, it->second.from, SendAwayWidth(o->second, &it->second));
         it = g_brought.erase(it);
     }
-    const Mat to = grabthat::Arrival(f, k);
+    Mat to = grabthat::Arrival(f, k);
     const auto nw = g_nearWidth.find(i);
     const bool remembered = !s.floating && nw != g_nearWidth.end();
-    const double width = remembered ? nw->second : !s.floating && k.maxWidth > 0 ? std::min(s.metres, k.maxWidth) : s.metres;
+    double width = remembered ? nw->second : !s.floating && k.maxWidth > 0 ? std::min(s.metres, k.maxWidth) : s.metres;
+    // A wide one comes as far out as it spans at most g_grabThatViewDeg of the view (user's flags, 2026-10-11:
+    // a remote display made 1.62 m wide at arm's reach came back at that width 0.45 m ahead, filling the
+    // view, and no poke could land: the hands were through it before they saw it).
+    const double d = grabthat::ViewDistance(s.floating ? 0 : width, g_grabThatViewDeg, k.distance, g_susanFar, &width);
+    if (d > k.distance + 1e-3) {
+        const double e[3] = {f.head.m[0][3], f.head.m[1][3], f.head.m[2][3]}, r = d / k.distance;
+        to.m[0][3] = float(e[0] + (to.m[0][3] - e[0]) * r), to.m[2][3] = float(e[2] + (to.m[2][3] - e[2]) * r);
+    }
+    if (s.floating) width = s.metres;
     g_brought[i] = {now, to, s.metres, width};
-    std::printf("grab that (%s hand): screen %d %s%s\n", hand, i + 1, grabthat::OutcomeName(what),
+    std::printf("grab that (%s hand): screen %d %s%s%s\n", hand, i + 1, grabthat::OutcomeName(what),
                 remembered ? (", " + std::to_string(width).substr(0, 4) + " m wide as it was when sent away").c_str()
-                : width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "");
+                : width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "",
+                d > k.distance + 1e-3 ? (", " + std::to_string(d).substr(0, 4) + " m out to fit the view").c_str() : "");
     StartGrabMove(i, s, to, width);
 }
 
@@ -2594,6 +2611,104 @@ void UpdateGrabThat(const handinput::Input &in) {
         }
     }
     AnimateGrabMoves();
+}
+
+// The lazy susan brings (user, 2026-10-11: "rather than just spinning your perspective, it pulls the
+// window in front of you. You can interact with it, and then when you dismiss it, it'll go back to
+// where it was previously and pull up the next window on the list"): a stroke (or Meta+Alt+Tab, "spin
+// next|prev") sends the one it brought back home and brings the next one round, by where each one
+// lives, to straight ahead at a distance it spans at most susanViewDeg of the view at, and it takes
+// the typing (FT_FRONT). Out of view (you turned away), pushed, flicked or thrown, it goes home; moved
+// by hand or laser, it stays where you put it. SCREEN_SPIN_BRING=0: the old spin (the room turns).
+bool g_susanBring = true;
+double g_susanViewDeg = 60, g_susanNear = 0.6, g_susanFar = 1.5, g_susanDrop = 0.08;
+constexpr double kSusanAway = 70;          // degrees off where you face: out of view
+constexpr int64_t kSusanAwayMs = 600;      // ...for this long: it goes home
+struct Susan {
+    int panel = -1;          // the one brought (-1 none)
+    Mat home{}, to{};        // where it lives, and where it came
+    double homeWidth = 0;    // its width there
+    int64_t awaySinceMs = -1;
+} g_susan;
+
+// Where a panel lives (the brought one: home), and its bearing from where the head faces (deg, right +).
+double SusanBearing(const Mat &head, const Mat &p) {
+    double fx = -head.m[0][2], fz = -head.m[2][2];
+    const double n = std::hypot(fx, fz) + 1e-9;
+    fx /= n, fz /= n;
+    const double rx = -fz, rz = fx;
+    const double dx = p.m[0][3] - head.m[0][3], dz = p.m[2][3] - head.m[2][3];
+    return std::atan2(dx * rx + dz * rz, dx * fx + dz * fz) * 180 / M_PI;
+}
+
+void SusanHome(const char *why) {
+    const auto it = g_screens.find(g_susan.panel);
+    if (it != g_screens.end()) {
+        std::printf("lazy susan: screen %d goes home (%s)\n", g_susan.panel + 1, why);
+        StartGrabMove(g_susan.panel, it->second, g_susan.home, g_susan.homeWidth);
+    }
+    g_susan = {};
+}
+
+void SusanCommand(bool next, char *reply, int size) {
+    Mat head;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head))
+        return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
+    std::vector<grabthat::Bearing> panels;
+    double from = 0;
+    for (auto &[i, s] : g_screens) {
+        Mat p;
+        if (i == g_susan.panel) {
+            panels.push_back({i, from = SusanBearing(head, g_susan.home)});
+            continue;
+        }
+        if (!s.visible || !Spinnable(s) || g_handInput.heldByHand(i) || !ScreenPose(s, &p)) continue;
+        panels.push_back({i, SusanBearing(head, p)});
+    }
+    const int was = g_susan.panel;
+    const int i = grabthat::SusanPick(panels, was, from, next, kSpinAhead);
+    if (was >= 0) SusanHome(i >= 0 ? "the next one comes" : "no other panel");
+    if (i < 0) return (void)std::snprintf(reply, size, "ok 0 (no other panel)");
+    Screen &s = g_screens[i];
+    Mat now;
+    if (!ScreenPose(s, &now)) return (void)std::snprintf(reply, size, "error no pose for screen %d", i + 1);
+    g_brought.erase(i);   // (it lives where it is now, whatever brought it there)
+    double width = s.metres;
+    const double d = grabthat::ViewDistance(s.metres, g_susanViewDeg, g_susanNear, g_susanFar, &width);
+    g_susan.panel = i, g_susan.home = now, g_susan.homeWidth = s.metres, g_susan.awaySinceMs = -1;
+    g_susan.to = grabthat::InFront(head, d, g_susanDrop);
+    StartGrabMove(i, s, g_susan.to, s.floating ? s.metres : width);
+    g_spin.front = i;   // typing and the active window go to it (ft_vr_poll: FT_FRONT)
+    SendPointer("recenter");
+    std::printf("lazy susan: screen %d comes to the front, %.2f m out%s\n", i + 1, d,
+                width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "");
+    std::snprintf(reply, size, "ok screen %d", i + 1);
+}
+
+// Each tick: the brought one goes home when you turn away from it; moved elsewhere, it's yours.
+void UpdateSusan() {
+    if (g_susan.panel < 0) return;
+    const auto it = g_screens.find(g_susan.panel);
+    if (it == g_screens.end()) return void(g_susan = {});
+    if (g_grabMoves.count(g_susan.panel)) return;   // (still on its way)
+    Screen &s = it->second;
+    Mat p, head;
+    if (!ScreenPose(s, &p)) return;
+    if (s.pinned != kNone || (s.drag == Drag::None && Apart(p, g_susan.to) > 0.05)) {
+        std::printf("lazy susan: screen %d was moved: it stays there\n", g_susan.panel + 1);
+        return void(g_susan = {});
+    }
+    if (s.drag != Drag::None || g_handInput.heldByHand(g_susan.panel) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+        g_susan.awaySinceMs = -1;
+        return;
+    }
+    if (std::fabs(SusanBearing(head, p)) <= kSusanAway) {
+        g_susan.awaySinceMs = -1;
+    } else if (g_susan.awaySinceMs < 0) {
+        g_susan.awaySinceMs = NowMs();
+    } else if (NowMs() - g_susan.awaySinceMs >= kSusanAwayMs) {
+        SusanHome("out of view");
+    }
 }
 
 // The glow on the panel a gesture under way would take (user, 2026-10-10: "a glow over the window
@@ -2819,6 +2934,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "HANDS_TARGET_GLOW") g_targetGlowOn = on;
     else if (n == "HANDS_PUSH_GLOW") g_pushGlowOn = on;
     else if (n == "HANDS_PALM_MENU") g_palm.params().on = on;
+    else if (n == "SCREEN_SPIN_BRING") g_susanBring = on;
     else return false;
     return true;
 }
@@ -2938,6 +3054,11 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 // on a wrist): out to throwDistance, easing out; that's its place now, and "grab that"
                 // brings it back from there (and sends it back there)
                 if (s.drag != Drag::None || s.pinned != kNone) break;
+                if (e.panel == g_susan.panel) {   // the lazy susan brought it: sent away, it goes home
+                    SusanHome(e.push ? "pushed away" : e.flick ? "flicked away" : "thrown");
+                    g_grabThat.Quiet(g_handInput.frameNs() + int64_t(g_grabThat.params().quietAfterSendMs * 1e6));
+                    break;
+                }
                 const auto b = g_brought.find(e.panel);
                 const double w = SendAwayWidth(s, b == g_brought.end() ? nullptr : &b->second);
                 if (b != g_brought.end()) g_brought.erase(b);
@@ -3174,6 +3295,12 @@ bool ft_vr_init(void) {
         num("SCREEN_CURVE_MAX_DEG", deg, 20, 300);   // a curved screen bends at most this far round (CapCurve)
         g_curveMaxArc = deg * M_PI / 180;
     }
+    num("HANDS_GRAB_THAT_VIEW_DEG", g_grabThatViewDeg, 20, 170);   // grab that: a wide one comes farther out to fit
+    g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";   // the lazy susan brings panels (0: the room turns)
+    num("SCREEN_SPIN_VIEW_DEG", g_susanViewDeg, 20, 170);   // a brought panel spans at most this much of the view
+    std::printf("lazy susan: %s\n", g_susanBring ? ("brings the next panel to the front (at most " + std::to_string(int(g_susanViewDeg)) +
+                                                     " deg of the view), home when you turn away or send it away").c_str()
+                                                  : "turns the room (SCREEN_SPIN_BRING=0)");
     if (gt.on)
         std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s); "
                     "it takes a panel the line through the palm meets%s, %s, not one held, the palm within %.0f deg of the line\n",
@@ -3736,6 +3863,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     }
     ++g_tick;
     UpdateSpin();
+    UpdateSusan();
     if (g_spin.front >= 0) {
         ft_event e{};
         e.type = FT_FRONT;

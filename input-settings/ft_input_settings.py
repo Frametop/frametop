@@ -120,8 +120,11 @@ HAND_INTERACTIONS = [
      "A quick outward flick of an open hand at a screen sends it 3 m out."),
     ("HANDS_THROW", True, "1", "Gestures", "Throw",
      "Letting go of a held screen while moving it fast throws it 3 m out along the throw."),
-    ("HANDS_SWEEP", True, "1", "Gestures", "Sweep to spin (lazy susan)",
-     "An open hand on its edge swept 30 cm sideways spins the next screen on that side to the front."),
+    ("HANDS_SWEEP", True, "1", "Gestures", "Sweep for the lazy susan",
+     "An open hand on its edge swept 25 cm sideways, quickly: the next screen on that side (Meta+Alt+Tab too)."),
+    ("SCREEN_SPIN_BRING", True, "1", "Gestures", "Lazy susan brings screens to you",
+     "The next screen comes in front of you and takes the typing; it goes home on the next stroke, when you "
+     "push it away or turn away from it. Off: the screens turn around you instead."),
     ("HANDS_PALM_MENU", True, "1", "Gestures", "Palm menu",
      "Palm toward your face, away from screens, and a plain pinch: the Steam menu."),
     ("HANDS_TARGET_GLOW", True, "1", "Feedback", "Grab that's glow",

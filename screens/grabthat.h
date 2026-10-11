@@ -227,4 +227,21 @@ Mat Blend(const Mat &a, const Mat &b, double k);
 // Slow in, slow out (0..1).
 double Ease(double t);
 
+// A pose `distance` m straight ahead of the head (level), `drop` m under the eyes, facing them.
+Mat InFront(const Mat &head, double distance, double drop);
+// How far out a panel `width` m wide goes so it spans at most `maxDeg` of the view: at least `nearest`,
+// at most `farthest`; at `farthest` and still wider, *fit is the width that spans maxDeg there (else width).
+double ViewDistance(double width, double maxDeg, double nearest, double farthest, double *fit);
+
+// The lazy susan (user, 2026-10-11: "rather than just spinning your perspective, it pulls the window in
+// front of you"): the panels by bearing from where you face (degrees, right positive, -180..180, where
+// each one lives, not where it was brought). The next one round to the right (next) or left (!next) of
+// `from` (the brought one's bearing, or 0 for straight ahead), skipping `current` and, with none brought,
+// one within `aheadDeg` of straight ahead (it's in front already). -1: no other panel.
+struct Bearing {
+    int index;
+    double deg;
+};
+int SusanPick(const std::vector<Bearing> &panels, int current, double from, bool next, double aheadDeg);
+
 }  // namespace grabthat

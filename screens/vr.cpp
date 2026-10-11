@@ -3062,7 +3062,10 @@ bool ft_vr_init(void) {
     k.fistPair = handcut::Setting("HANDS_FIST_PAIR", "1") != "0";
     k.twoFingerScroll = handcut::Setting("HANDS_TWO_FINGER_SCROLL", "1") != "0";
     k.motionPress = handcut::Setting("HANDS_MOTION_PRESS", "1") != "0";
-    k.fingerRay = handcut::Setting("HANDS_FINGER_RAY", "1") != "0";
+    {
+        const std::string aim = handcut::Setting("HANDS_TAP_AIM", "path");
+        k.aimMode = aim == "finger" ? 1 : aim == "straight" ? 0 : 2;
+    }
     if (handcut::Setting("HANDS_RELEASE_FREEZE", "1") == "0") k.openFreeze = 0;
     k.touchDot = handcut::Setting("HANDS_TOUCH_DOT", "1") != "0";
     if (handcut::Setting("HANDS_TAP_LOCK", "1") == "0") k.lockOut = 0;
@@ -3115,6 +3118,7 @@ bool ft_vr_init(void) {
     num("HANDS_GRAB_THAT_DISTANCE", gt.distance, 0.2, 1.5);
     num("HANDS_GRAB_THAT_WIDTH", gt.maxWidth, 0, 12);
     num("HANDS_RELEASE_REWIND_MS", g_handInput.params().rewindMs, 0, 400);   // a slow let-go goes back this far (0: off)
+    num("HANDS_LOCK_PUSH", g_handInput.params().lockPushDepth, 0, 0.1);   // pushed this far through at a frozen aim: a tap
     num("HANDS_TAP_MS", g_handInput.params().tapMs, 0, 2000);   // a press doesn't drag this soon: a tap clicks where it went down
     num("HANDS_PRESS_STILL_MS", g_handInput.params().pressStillMs, 0, 60000);   // a still press lets go after this
     num("HANDS_RAY_HIDE_REACH", g_handInput.params().rayReach, 0, 1);   // a hand this near a panel hides its ray

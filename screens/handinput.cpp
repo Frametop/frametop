@@ -881,7 +881,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         }
     }
     if (sd.state != State::Hover && sd.state != State::Press) {
-        sd.aimSet = false;
+        sd.aimSet = sd.aimFrozen = false;
         return;
     }
     const Panel *P = Find(panels, sd.panel);
@@ -889,7 +889,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         sd.state = State::Idle, sd.panel = -1;
         return;
     }
-    const Hit t = FingerHit(*P, *h);   // (where the finger points: Params::fingerRay)
+    const Hit t = FingerHit(s, *P, *h);   // (where a tap lands: Params::aimMode)
     const double ext = Extension(*h);
     const bool extended = ext >= p_.extended;
     // two fingers on the content: a swipe scrolls, a lift clicks (Params::twoFingerScroll)
@@ -969,6 +969,8 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         sd.tipD = t.d;
         if (!sd.aimSet || p_.lockOut <= 0 || t.d > p_.lockOut || std::hypot(t.u - sd.aimU, t.v - sd.aimV) > p_.lockSlip)
             sd.aimU = t.u, sd.aimV = t.v, sd.aimSet = true;
+        if (t.d > p_.lockOut + 0.01) sd.aimFrozen = false;                   // (out again)
+        else if (p_.lockOut > 0 && t.d <= p_.lockOut) sd.aimFrozen = true;   // the aim froze on the way in
     }
     double ax = x, ay = y;
     if (over && sd.aimSet && !edge) {
@@ -1127,33 +1129,48 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     ++a.frames, a.deepest = std::min(a.deepest, t.d);
     a.u = t.u, a.v = t.v, a.over = over, a.outside = FromBorder(*P, t.u, t.v);
     a.otherGap = others - t.d, a.otherTip = otherTip, a.straightest = straightest;
-    if (!(over || button)) return (void)(a.why |= kOffContent);   // (slid off it, past the edge)
-    if (sd.below < (sd.quick ? 1 : p_.pressFrames)) return;
-    if (sd.below > p_.lateFrames || t.d < p_.lateDepth) return (void)(a.why |= kLate);
-    if (otherHolds) return (void)(++stats.heldByOther, a.why |= kHeld);
     const bool fast = sd.fastIn;
     const bool rePress = sd.releasedAt >= 0 && in.nowNs - sd.releasedAt < int64_t(p_.rePressMs * 1e6);
     const handcut::Gesture &pinch = in.hands->pinch(s), &grip = in.hands->grip(s);
     const double angle = FingerAngle(*P, t, *h);
     a.angle = angle, a.ext = ext;
-    if (!h->stereo) return (void)(++stats.heldNotStereo, a.why |= kOneView);
-    if (!extended) return (void)(++stats.heldNotExtended, a.why |= kBent);
-    if (!nearest) return (void)(++stats.heldNotNearest, a.why |= kNotNearest);
-    if (p_.flick && sd.inSpeed >= p_.flickPokeSpeed && Openness(*h) >= p_.flickOpen)   // a flick through it
-        return (void)(++stats.heldFlick, a.why |= kFlick);
-    if (p_.push && ((Curl3(*h) >= p_.pokeOpen && Openness(*h) >= p_.pokeOpen) ||
-                    (Curl3(*h) >= p_.pushCurl && sd.inSpeed >= p_.pushSpeed)))   // an open hand: a push, not a poke
-        return (void)(++stats.heldOpen, a.why |= kOpenHand);
-    if (pinch.down || grip.down) return (void)(++stats.heldPinching, a.why |= kPinching);
-    if (in.pointerBusy) return (void)(++stats.heldBusy, a.why |= kBusy);
-    if (otherPressing) return (void)(++stats.heldBusy, a.why |= kOtherHand);
-    if (rePress) return (void)(++stats.heldBusy, a.why |= kTooSoon);
-    if (sd.spent) return (void)(++stats.heldBusy, a.why |= kSpent);
-    if (!sd.rearmed) return (void)(++stats.heldBusy, a.why |= kNotOut);
-    if (resting) return (void)(++stats.heldResting, a.why |= kResting);
-    if (in.typing[s]) return (void)(++stats.heldTyping, a.why |= kTyping);
-    if (angle > p_.fingerAngle) return (void)(++stats.heldAskew, a.why |= kAskew);
-    if (!fast) return (void)(++stats.heldSlow, a.why |= kSlow);
+    // pushed in through the panel past lockPushDepth, the aim frozen on the way in: a tap at the aim, whatever
+    // its speed, angle or depth so far (user, 2026-10-11: "even if the finger doesn't push on the perfect
+    // spot, when the interaction point is frozen, if you move far enough forward through the display, it
+    // will still tap": slow deliberate pushes were refused as too slow or reaching through)
+    const bool forced = p_.lockPushDepth > 0 && sd.aimFrozen && t.d <= -p_.lockPushDepth && t.d >= -p_.lockPushDeepest &&
+                        sd.below <= p_.lockPushFrames && (over || button) && !otherHolds &&
+                        !pinch.down && !grip.down && !in.pointerBusy && !otherPressing && !sd.spent && sd.rearmed && !rePress &&
+                        !resting && !in.typing[s] && extended && nearest && h->stereo && sd.inSpeed >= p_.lockPushSpeed &&
+                        angle <= p_.lockPushAngle &&
+                        !(Curl3(*h) >= p_.pokeOpen && Openness(*h) >= p_.pokeOpen) &&
+                        !(p_.flick && sd.inSpeed >= p_.flickPokeSpeed && Openness(*h) >= p_.flickOpen) &&
+                        !(p_.push && Curl3(*h) >= p_.pushCurl && sd.inSpeed >= p_.pushSpeed);
+    if (forced) ++stats.lockPushes;
+    if (!forced) {
+        if (!(over || button)) return (void)(a.why |= kOffContent);   // (slid off it, past the edge)
+        if (sd.below < (sd.quick ? 1 : p_.pressFrames)) return;
+        if (sd.below > p_.lateFrames || t.d < p_.lateDepth) return (void)(a.why |= kLate);
+        if (otherHolds) return (void)(++stats.heldByOther, a.why |= kHeld);
+        if (!h->stereo) return (void)(++stats.heldNotStereo, a.why |= kOneView);
+        if (!extended) return (void)(++stats.heldNotExtended, a.why |= kBent);
+        if (!nearest) return (void)(++stats.heldNotNearest, a.why |= kNotNearest);
+        if (p_.flick && sd.inSpeed >= p_.flickPokeSpeed && Openness(*h) >= p_.flickOpen)   // a flick through it
+            return (void)(++stats.heldFlick, a.why |= kFlick);
+        if (p_.push && ((Curl3(*h) >= p_.pokeOpen && Openness(*h) >= p_.pokeOpen) ||
+                        (Curl3(*h) >= p_.pushCurl && sd.inSpeed >= p_.pushSpeed)))   // an open hand: a push, not a poke
+            return (void)(++stats.heldOpen, a.why |= kOpenHand);
+        if (pinch.down || grip.down) return (void)(++stats.heldPinching, a.why |= kPinching);
+        if (in.pointerBusy) return (void)(++stats.heldBusy, a.why |= kBusy);
+        if (otherPressing) return (void)(++stats.heldBusy, a.why |= kOtherHand);
+        if (rePress) return (void)(++stats.heldBusy, a.why |= kTooSoon);
+        if (sd.spent) return (void)(++stats.heldBusy, a.why |= kSpent);
+        if (!sd.rearmed) return (void)(++stats.heldBusy, a.why |= kNotOut);
+        if (resting) return (void)(++stats.heldResting, a.why |= kResting);
+        if (in.typing[s]) return (void)(++stats.heldTyping, a.why |= kTyping);
+        if (angle > p_.fingerAngle) return (void)(++stats.heldAskew, a.why |= kAskew);
+        if (!fast) return (void)(++stats.heldSlow, a.why |= kSlow);
+    }
     // pressed
     a.pressed = true;
     stats.quickPresses += sd.below < p_.pressFrames;
@@ -1741,20 +1758,45 @@ bool HandInput::Opening(int s, const Input &in) {
     return sd.frozen;
 }
 
-// Where the index finger points on the panel: the line from its middle joint through its tip, met with the
-// surface (user, 2026-10-11: "the tap is offset from where I'm actually trying to tap", most at the
-// edges): the tip's own point (straight in from it) sits short of where the finger points when it comes
-// in at an angle (30-50 degrees off the normal, a hand reaching up from below for the bottom edge), by
-// the tip's distance times that angle's tangent. Its depth stays the tip's. At most fingerRayMax from
-// the tip's own point; a finger not pointing at the panel: the tip's own point.
-Hit HandInput::FingerHit(const Panel &P, const Hand &h) const {
+// Where a tap would land on the panel (user, 2026-10-11: "the tap is offset from where I'm actually trying to
+// tap"). Straight in from the tip (the tip's own point) sits short of the touch when the finger comes in at
+// an angle; the finger's own line (its middle joint through its tip) overshoots it a few cm ahead of a tip
+// still a few cm out when the hand comes up steeply from below (a screen low by a desk: the dot showed 2-4 cm
+// ahead of the drawn fingertip, on the native screens). So by default (aimMode 2) the tip's path: where it's
+// heading as it comes in (its velocity over the last pathMs, at pathSpeed or faster toward the panel),
+// carried on to the surface, at most pathSlope times its distance off the tip's own point (and fingerRayMax);
+// slower or still: the tip's own point. aimMode 1: the finger's line; 0: straight in. HANDS_TAP_AIM.
+// Its depth stays the tip's.
+Hit HandInput::FingerHit(int s, const Panel &P, const Hand &h) const {
     const Hit tip = Locate(P, h.p[8]);
-    if (!p_.fingerRay) return tip;
-    const Hit mid = Locate(P, h.p[6]);
-    const double dd = mid.d - tip.d;
-    if (dd < 0.005) return tip;
-    const double k = mid.d / dd;
-    double du = mid.u + k * (tip.u - mid.u) - tip.u, dv = mid.v + k * (tip.v - mid.v) - tip.v;
+    double du = 0, dv = 0;
+    if (p_.aimMode == 1) {
+        const Hit mid = Locate(P, h.p[6]);
+        const double dd = mid.d - tip.d;
+        if (dd < 0.005) return tip;
+        const double k = mid.d / dd;
+        du = mid.u + k * (tip.u - mid.u) - tip.u, dv = mid.v + k * (tip.v - mid.v) - tip.v;
+    } else if (p_.aimMode == 2 && tip.d > 0) {
+        const std::vector<Side::Sample> &hist = side_[s].hist;
+        if (hist.size() < 2) return tip;
+        const Side::Sample &now = hist.back();
+        const Side::Sample *from = nullptr;
+        for (const Side::Sample &q : hist)
+            if (now.t - q.t <= int64_t(p_.pathMs * 1e6) && now.t - q.t > 0) {
+                from = &q;
+                break;
+            }
+        if (!from) return tip;
+        const Hit a = Locate(P, from->tip), b = Locate(P, now.tip);
+        const double dt = (now.t - from->t) / 1e9, vd = (b.d - a.d) / dt;
+        if (-vd < p_.pathSpeed) return tip;
+        const double k = tip.d / -vd;   // seconds to the surface at this pace
+        du = (b.u - a.u) / dt * k, dv = (b.v - a.v) / dt * k;
+        const double n = std::hypot(du, dv), lim = p_.pathSlope * tip.d;
+        if (n > lim && n > 0) du *= lim / n, dv *= lim / n;
+    } else {
+        return tip;
+    }
     const double n = std::hypot(du, dv);
     if (n > p_.fingerRayMax) du *= p_.fingerRayMax / n, dv *= p_.fingerRayMax / n;
     Hit out = tip;
@@ -2410,7 +2452,7 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
                 glows_[P->index].push_back({float(sd.lastX), float(sd.lastY), float(0.005 * k), 0.9f, false,
                                             {kWhite[0], kWhite[1], kWhite[2]}});
         } else if (sd.state == State::Hover && h && Extension(*h) >= p_.extended) {
-            const Hit t = FingerHit(*P, *h);
+            const Hit t = FingerHit(s, *P, *h);
             double x, y;
             if (t.d > p_.nearBack && t.d <= p_.nearFront && ToBuffer(*P, t.u, t.v, &x, &y)) {
                 const double f = std::clamp(t.d / p_.nearFront, 0.0, 1.0);
@@ -2517,12 +2559,24 @@ void HandInput::Guides(const Input &in, const std::vector<Panel> &panels) {
             button(bc, bs, false);
             continue;
         }
+        // a corner a pinch here would resize from, the fingers in its zone: that first (a hand by a corner
+        // is reaching for it, even pointing)
+        {
+            const Hit q = Locate(*P, h->contact);
+            int sx, sy;
+            double excess;
+            const Zone z = GrabZone(*P, q, p_, &sx, &sy, &excess);
+            if ((z == Zone::Corner || z == Zone::Tab) && excess <= 0) {
+                corner(sx, sy, strength(excess, p_.cornerReach), false);
+                continue;
+            }
+        }
         // a pointing fingertip over the content: the dot where a tap would land (the aim), smaller and
         // brighter as it comes in (Params::touchDot)
         // (pointing: not a hand shaping a pinch, its thumb by the index tip)
         if (p_.touchDot && Extension(*h) >= p_.extended - 0.1 &&
             std::hypot(h->p[4][0] - h->p[8][0], h->p[4][1] - h->p[8][1], h->p[4][2] - h->p[8][2]) > p_.pinchApart) {
-            const Hit tt = FingerHit(*P, *h);
+            const Hit tt = FingerHit(s, *P, *h);
             const double u = sd.aimSet ? sd.aimU : tt.u, v = sd.aimSet ? sd.aimV : tt.v;
             double x, y;
             if (tt.d <= p_.nearFront && tt.d > p_.nearBack && ToBuffer(*P, u, v, &x, &y)) {

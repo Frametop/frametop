@@ -189,10 +189,14 @@ struct Params {
     // jitter and its slide as the finger goes in and curls don't move it), unless the tip slides lockSlip
     // along the panel (a new target). The cursor and the fingertip dot show it. HANDS_TAP_LOCK (0: off).
     double lockOut = 0.015, lockSlip = 0.025;
-    // Taps land where the finger points (FingerHit: its middle joint through its tip, met with the panel),
-    // at most fingerRayMax from the tip's own point. HANDS_FINGER_RAY (0: straight in from the tip).
-    bool fingerRay = true;
-    double fingerRayMax = 0.04;
+    double lockPushDepth = 0.01;   // ...and pushed this far in through the panel, it taps there (HANDS_LOCK_PUSH, 0: off)
+    double lockPushSpeed = 0.015;  // ...coming in at least this fast (m/s; a hand drifting into a panel isn't a push)
+    double lockPushAngle = 60;     // ...the finger within this of the panel's normal (deg; the poke's own limit is fingerAngle)
+    double lockPushDeepest = 0.05; int lockPushFrames = 10;   // ...on its way in: within this deep, these frames past the surface
+    // Where a tap lands (HandInput::FingerHit; HANDS_TAP_AIM): the tip's path carried on to the surface,
+    // at most pathSlope times the tip's distance (and fingerRayMax) off its own point.
+    int aimMode = 2;   // HandInput::FingerHit: 2 the tip's path (HANDS_TAP_AIM=path), 1 the finger's line (finger), 0 straight in (straight)
+    double fingerRayMax = 0.04, pathMs = 100, pathSpeed = 0.05, pathSlope = 1.2;
     // A press by motion: a tip that came in quickly (motionSpeed m/s on the frame before, motionTravel
     // within 300 ms) and stopped or turned back short of the surface (within motionShort of it) presses
     // there too: the depth is the weakest number, a tap that "touched" often reads 0.5-1.5 cm out.
@@ -671,6 +675,7 @@ public:
         int fistPairs = 0;                           // two fists that took a panel by their shape (Params::fistPair)
         int scrolls = 0, scrollNotches = 0;          // two-finger scrolls, and the notches they sent
         int motionPresses = 0;                       // presses by motion (Params::motionPress)
+        int lockPushes = 0;                          // presses pushed through at the frozen aim (Params::lockPushDepth)
         int releaseFreezes = 0, rewinds = 0, regrabsRefused = 0;   // letting go (Params::openFreeze, rewindMs, regrabMs)
         int settles = 0, settledFists = 0;           // pinches that waited to become fists (Params::fistSettleMs), and did
         int joins = 0;                               // second hands joining a held panel (Params::joinFront)
@@ -707,7 +712,7 @@ private:
         double hoverX = -1, hoverY = -1, hoverU = 0, hoverV = 0;
         // the aim (Params::lockOut): where a tap will land, frozen as the tip comes within lockOut
         double aimU = 0, aimV = 0, tipD = 1;
-        bool aimSet = false;
+        bool aimSet = false, aimFrozen = false;
         int64_t hoverNs = -1;                // when the cursor last followed the fingertip
         int64_t pressedNs = 0;
         // a pinch on the content (Params::pinchClick): pressed while the pinch is held; the
@@ -819,7 +824,7 @@ private:
     void FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited, bool byPinch = false);
     void FistPair(const Input &in, const std::vector<Panel> &panels);
     bool Opening(int s, const Input &in);
-    Hit FingerHit(const Panel &P, const handcut::Hand &h) const;
+    Hit FingerHit(int s, const Panel &P, const handcut::Hand &h) const;
     // A pinch on the content (not a grab zone): a click where the fingers met (at c), held with the pinch.
     void PinchClick(int s, const Input &in, const std::vector<Panel> &panels, const float c[3]);
     // A pinch or a grip that began at a panel the other hand holds: the second anchor (Params::joinFront).

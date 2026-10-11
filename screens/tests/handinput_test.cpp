@@ -1905,6 +1905,42 @@ void TestCardThrow() {
     }
 }
 
+// A remote display (vr.cpp's index 101 and up, "frametop.remote.N") is a panel like any other here:
+// pokes, the card, corner resize and throws all name it.
+void TestRemoteDisplay() {
+    {
+        Rig r;
+        r.panels[0].index = 102;
+        for (int mm = 60; mm >= -15; mm -= 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+        CHECK(r.Last(Event::Press) && r.Last(Event::Press)->panel == 102);
+    }
+    {
+        Rig r;
+        r.panels[0].index = 102, r.panels[0].controls.clear();
+        const double cu = -0.5, cv = 0.28125;
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(cu, cv, 0.01)});
+        const double at[3] = {cu, cv, -0.49};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({PinchAt(cu, cv, 0.01)});
+        CHECK(r.Last(Event::GrabStart) && r.Last(Event::GrabStart)->panel == 102 && r.Last(Event::GrabStart)->zone == Zone::Corner);
+        for (int k = 1; k <= 10; ++k) r.Frame({PinchAt(cu - 0.005 * k, cv + 0.003 * k, 0.01)});
+        CHECK(!r.carries.empty() && r.carries[0].panel == 102 && r.carries[0].kind == Carry::Resize && r.carries[0].width > 1.0);
+        CHECK(r.in.corners().count(102) && r.in.corners().at(102).held);
+    }
+    {
+        Rig r;
+        r.panels[0].index = 102, r.panels[0].controls.clear();
+        const double a[3] = {0.05, 0, -0.44}, b[3] = {0.05, 0, -0.76};
+        for (int k = 0; k < 8; ++k) {
+            SynthHand h = OpenAt(a[0], a[1], a[2]);
+            h.curl = h.curlIndex = 1;
+            r.Frame({h});
+        }
+        Sweep(r, a, b, 1.5, [](double x, double y, double z) { return OpenAt(x, y, z); });
+        CHECK(r.Last(Event::Throw) && r.Last(Event::Throw)->panel == 102);
+    }
+}
+
 void TestV2Ingest() {
     // a version 2 file: the skeleton's joints, elbow and pinch point are used
     static fh_hands_v2_t f{};
@@ -3493,6 +3529,7 @@ int main(int argc, char **argv) {
     TestFistGrab();
     TestFlick();
     TestCardThrow();
+    TestRemoteDisplay();
     TestV2Ingest();
     TestMatte();
     TestPalmUp();

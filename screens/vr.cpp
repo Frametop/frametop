@@ -2151,8 +2151,10 @@ void StartHandDrag(Screen &s, int side, handinput::Zone zone) {
     ApplyAlpha(s);
 }
 
-// Writes want-hz for ft-hands (hands/track/main.cpp) while a hand is near a panel: a still hand
-// is tracked at 15 Hz, which doubles a poke's latency. Kept fresh twice a second.
+// Writes want-hz for ft-hands (hands/track/main.cpp) while a hand is near a panel, or within
+// handinput's rateReach (0.30 m) of one: a still hand is tracked at 15 Hz, which doubles a poke's
+// latency, and a tap from outside the 7.5 cm touch zone crosses it in a frame or two. Kept fresh
+// twice a second.
 void WantHz(bool near) {
     static int64_t last = 0;
     const int64_t now = NowMs();
@@ -2310,7 +2312,10 @@ void UpdateGrabThat(const handinput::Input &in) {
         for (int k = 0; k < 2; ++k)
             allowed[k] = in.allowed[k] && !in.typing[k] && !g_handInput.pressing(k) && !g_handInput.grabbing(k);
         g_grabThat.Frame(g_hands.captureNs(), g_hands.seen(), g_hands.captureHead(), allowed);
-        for (const grabthat::Fire &f : g_grabThat.fired()) GrabThat(f);
+        for (const grabthat::Fire &f : g_grabThat.fired()) {
+            g_handInput.GrabThatFired(f.side);   // a fist waiting on it isn't a fist grab
+            GrabThat(f);
+        }
     }
     AnimateGrabMoves();
 }
@@ -2334,7 +2339,9 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         if (g_handInput.pressingKwin(k) && !(g_press.buttons && g_press.device == kHandHolder[k])) g_handInput.ForgetPress(k);
     UpdatePalmMenu(in);
     for (int k = 0; k < 2; ++k) in.allowed[k] = in.allowed[k] && !g_palm.shown(k);   // the palm menu has that hand
+    for (int k = 0; k < 2; ++k) in.grabThatArmed[k] = g_grabThat.params().on && g_grabThat.armed(k);   // a fist waits on it
     g_handInput.Update(in, panels);
+    for (const std::string &l : g_handInput.logs()) std::printf("hands: %s\n", l.c_str());
     UpdateGrabThat(in);
 
     for (const handinput::Event &e : g_handInput.events()) {
@@ -2426,7 +2433,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     if (g_handInput.newFrame() && (HandInputOn() || g_palm.params().on))
         SendPointer("near " + std::to_string(g_handInput.frameNs()) + " " + (near(0) ? "1" : "0") + " " +
                     (near(1) ? "1" : "0"));
-    WantHz(g_handInput.anyNear() || g_palm.anyShown() || g_grabThat.armed(0) || g_grabThat.armed(1));
+    WantHz(g_handInput.anyNear() || g_handInput.approaching() || g_palm.anyShown() || g_grabThat.armed(0) || g_grabThat.armed(1));
 }
 
 // Steam in front: the dashboard (the Steam menu) is open, or Steam's own keyboard is up
@@ -2500,8 +2507,18 @@ bool ft_vr_init(void) {
         if (!t.empty() && end != t.c_str() && !*end && x >= lo && x <= hi) v = x;
     };
     handinput::Params &k = g_handInput.params();
-    num("HANDS_NEAR_REACH", k.nearFront, 0.05, 0.6);   // within it a hand touches: no ray, pokes
+    num("HANDS_NEAR_REACH", k.nearFront, 0.03, 0.6);   // within it a hand touches: no ray, pokes, its pinches are ours
+    // the leave margin and a resting hand's reach keep their proportion to the reach (0.025 and
+    // 0.04 at the default 0.075)
+    k.nearLeave = std::clamp(k.nearFront / 3, 0.015, 0.05), k.restFront = std::min(k.restFront, k.nearFront);
     num("HANDS_POKE_ANGLE", k.fingerAngle, 10, 90);
+    num("HANDS_POKE_TRAVEL", k.travel, 0, 0.2);   // a one-frame press needs this much travel in; 0: never one frame
+    if (k.travel <= 0) k.travel = 1e9;
+    num("HANDS_GRAB_BAND", k.bandOut, 0.01, 0.2);   // a pinch this close outside a panel's edge takes it
+    k.cornerReach = std::max(k.cornerReach, k.bandOut), k.barReach = std::max(k.barReach, k.bandOut);
+    k.pinchClick = handcut::Setting("HANDS_PINCH_CLICK", "1") != "0";
+    k.cardPinch = handcut::Setting("HANDS_CARD_PINCH", "1") != "0";
+    k.fistGrab = handcut::Setting("HANDS_FIST_GRAB", "1") != "0";
     num("HANDS_POKE_REST_BELOW", k.restBelow, 0, 2);
     num("HANDS_POKE_REST_NEAR", k.restNear, 0, 2);
     // what a near grab carries, smoothed (handinput.h, Params::grab*)
@@ -2528,9 +2545,16 @@ bool ft_vr_init(void) {
                     gt.distance, gt.maxWidth > 0 ? (", screens at most " + std::to_string(gt.maxWidth).substr(0, 4) + " m wide").c_str() : "");
     else
         std::printf("hands: grab that off\n");
-    std::printf("hands: near (touch, no ray) within %.2f m of a panel (%.2f resting low), pokes within %.0f deg of its "
-                "normal, not from a hand %.2f m under the eyes and within %.2f m\n",
-                k.nearFront, std::min(k.nearFront, k.restFront), k.fingerAngle, k.restBelow, k.restNear);
+    std::printf("hands: near (touch, no ray) within %.3f m of a panel (%.3f resting low), pokes within %.0f deg of its "
+                "normal (%s), not from a hand %.2f m under the eyes and within %.2f m\n",
+                k.nearFront, std::min(k.nearFront, k.restFront), k.fingerAngle,
+                k.travel < 1 ? ("one frame past the surface after " + std::to_string(int(std::lround(k.travel * 1000))) + " mm in").c_str()
+                             : "two frames past the surface",
+                k.restBelow, k.restNear);
+    std::printf("hands: near pinches take a panel within %.0f cm of its border (corners resize)%s; on its content they %s; "
+                "a fist at a panel %s\n",
+                k.bandOut * 100, k.cardPinch ? ", either side of its edge like a card" : "", k.pinchClick ? "click" : "do nothing",
+                k.fistGrab ? "carries and turns it (two stretch it)" : "does nothing (HANDS_FIST_GRAB=0)");
     std::printf("hands: grabs smoothed from %.2f Hz (+%.1f Hz per m/s), a %.1f cm dead zone; the wrist turns them %s\n",
                 k.grabMinCutoff, k.grabBeta, k.grabDeadzone * 100,
                 k.grabRotate ? ("past " + std::to_string(int(std::lround(k.rotDeadzone))) + " deg").c_str() : "not (HANDS_GRAB_ROTATE=0)");
@@ -3331,13 +3355,16 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error handinput on|off|force|state");
         const auto &st = g_handInput.stats;
         std::snprintf(reply, size,
-                      "ok %s, helper %s (left %s, right %s, %s); %s; %d frames, %d near, %d presses, %d controls, %d grabs, "
-                      "%d stretches; held back: %d one view, %d bent, %d not nearest, %d pinching, %d busy, %d resting, %d typing, %d askew, %d slow",
+                      "ok %s, helper %s (left %s, right %s, %s); %s; %d frames, %d near, %d presses (%d on one frame, %d by "
+                      "pinch), %d controls, %d grabs (%d card, %d fist; %d fists waited, %d were grab that), %d stretches; "
+                      "%d poke attempts, %d refused; held back: %d one view, %d bent, %d not nearest, %d pinching, %d busy, "
+                      "%d resting, %d typing, %d askew, %d slow",
                       g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
                       NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
                       g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
-                      g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.controls, st.grabs, st.stretches,
-                      st.heldNotStereo, st.heldNotExtended, st.heldNotNearest, st.heldPinching, st.heldBusy, st.heldResting,
+                      g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.quickPresses, st.pinchClicks,
+                      st.controls, st.grabs, st.cards, st.fists, st.fistsWaited, st.fistsCancelled, st.stretches, st.attempts,
+                      st.refused, st.heldNotStereo, st.heldNotExtended, st.heldNotNearest, st.heldPinching, st.heldBusy, st.heldResting,
                       st.heldTyping, st.heldAskew, st.heldSlow);
     } else if (std::sscanf(cmd, "palmmenu %15s", word) == 1) {
         if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_palm.params().on = !std::strcmp(word, "on");

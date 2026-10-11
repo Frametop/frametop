@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
@@ -32,16 +33,25 @@ double FingerExtension(const Hand &h, int mcp) {
 }
 double Extension(const Hand &h) { return FingerExtension(h, 5); }
 
-// The index's last bone (DIP to tip) points into the panel within maxDeg of its normal there.
-bool Along(const Panel &p, const Hit &at, const Hand &h, double maxDeg) {
-    const double d[3] = {double(h.p[8][0]) - h.p[7][0], double(h.p[8][1]) - h.p[7][1], double(h.p[8][2]) - h.p[7][2]};
+// The angle (degrees) between the index finger (its knuckle to its tip: the last bone alone is 2 cm
+// long, and a few mm of tracking noise on its ends turned it 15-20 degrees) and the way into the
+// panel there (its normal, reversed). 180 for a finger pointing out of it.
+double FingerAngle(const Panel &p, const Hit &at, const Hand &h) {
+    const double d[3] = {double(h.p[8][0]) - h.p[5][0], double(h.p[8][1]) - h.p[5][1], double(h.p[8][2]) - h.p[5][2]};
     double l[3];   // in the panel's frame
     for (int i = 0; i < 3; ++i) l[i] = p.pose.m[0][i] * d[0] + p.pose.m[1][i] * d[1] + p.pose.m[2][i] * d[2];
     // the surface's normal (out of its front): +z, or on a cylinder the way OnSurface turns it
     double n[3] = {0, 0, 1};
     if (p.curve > 0) n[0] = -std::sin(at.u / p.curve), n[2] = std::cos(at.u / p.curve);
     const double len = std::sqrt(Dot(l, l));
-    return len > 1e-6 && -Dot(l, n) / len >= std::cos(maxDeg * M_PI / 180);
+    if (len < 1e-6) return 180;
+    return std::acos(std::clamp(-Dot(l, n) / len, -1.0, 1.0)) * 180 / M_PI;
+}
+
+// How far u, v is from the panel's border: outside it (> 0) round the corners, or inside it (< 0).
+double FromBorder(const Panel &p, double u, double v) {
+    const double ou = std::fabs(u) - p.width / 2, ov = std::fabs(v) - p.height / 2;
+    return ou > 0 || ov > 0 ? std::hypot(std::max(ou, 0.0), std::max(ov, 0.0)) : std::max(ou, ov);
 }
 
 // A hand resting low by the body (typing, in the lap): its palm well under the eyes and close to
@@ -222,31 +232,45 @@ Control ControlAt(const Panel &p, double u, double v, double margin) {
     return Control::None;
 }
 
+const char *ZoneName(Zone z) {
+    switch (z) {
+        case Zone::Bar: return "the bar";
+        case Zone::Tab: return "the resize tab";
+        case Zone::Corner: return "a corner";
+        case Zone::Edge: return "the border";
+        case Zone::Title: return "the title bar";
+        case Zone::Card: return "its edge, like a card";
+        case Zone::Fist: return "the fist";
+        default: return "nothing";
+    }
+}
+
 Zone GrabZone(const Panel &p, const Hit &h, const Params &k, int *sx, int *sy, double *excess) {
-    const double W = p.width / 2, H = p.height / 2, depth = std::fabs(h.d) - k.zoneDepth;
+    const double W = p.width / 2, H = p.height / 2, depth = std::fabs(h.d) - k.bandDepth;
     struct Cand { Zone z; double e; int sx, sy; };
     std::vector<Cand> c;   // in priority order
     for (const Spot &s : p.controls)
         if (s.kind == Control::Tab)
-            c.push_back({Zone::Tab, std::sqrt((h.u - s.u) * (h.u - s.u) + (h.v - s.v) * (h.v - s.v) + h.d * h.d) - k.cornerReach, 1, -1});
+            c.push_back({Zone::Tab, std::max(std::hypot(h.u - s.u, h.v - s.v) - k.cornerReach, depth), 1, -1});
     for (int cx : {1, -1})
         for (int cy : {-1, 1}) {
             if (p.floating && !(cx == 1 && cy == -1)) continue;   // a window resizes from its bottom right only
-            const double du = h.u - cx * W, dv = h.v - cy * H;
-            c.push_back({Zone::Corner, std::sqrt(du * du + dv * dv + h.d * h.d) - k.cornerReach, cx, cy});
+            c.push_back({Zone::Corner, std::max(std::hypot(h.u - cx * W, h.v - cy * H) - k.cornerReach, depth), cx, cy});
         }
     for (const Spot &s : p.controls)
         if (s.kind == Control::Bar) {
             const double du = std::max(0.0, std::fabs(h.u - s.u) - s.hw), dv = h.v - s.v;
-            c.push_back({Zone::Bar, std::max(std::sqrt(du * du + dv * dv) - k.barReach, depth), 0, 0});
+            c.push_back({Zone::Bar, std::max(std::hypot(du, dv) - k.barReach, depth), 0, 0});
         }
     if (p.floating && p.titleH > 0 && p.cropH > 0) {
         const double band = p.titleH * p.height / p.cropH;
         c.push_back({Zone::Title, std::max({Outside(h.u, -W, W), Outside(h.v, H - band, H), depth}), 0, 0});
     }
-    c.push_back({Zone::Edge, std::max({Outside(h.u, -W - k.edgeOut, -W + k.edgeIn), Outside(h.v, -H, H), depth}), 0, 0});
-    c.push_back({Zone::Edge, std::max({Outside(h.u, W - k.edgeIn, W + k.edgeOut), Outside(h.v, -H, H), depth}), 0, 0});
-    c.push_back({Zone::Edge, std::max({Outside(h.u, -W, W), Outside(h.v, H - k.edgeIn, H + k.edgeOut), depth}), 0, 0});
+    // the border band: bandOut outside the edges (round the corners) to bandIn inside
+    const double ou = std::fabs(h.u) - W, ov = std::fabs(h.v) - H;
+    const double e = ou > 0 || ov > 0 ? std::hypot(std::max(ou, 0.0), std::max(ov, 0.0)) - k.bandOut
+                                      : std::min(-ou, -ov) - k.bandIn;
+    c.push_back({Zone::Edge, std::max(e, depth), 0, 0});
     const Cand *best = nullptr;
     for (const Cand &x : c)
         if (x.e <= 0) {
@@ -334,6 +358,18 @@ Mat StretchPose(const Mat &start, double width0, const double l0[3], const doubl
 
 namespace {
 int64_t g_now = 0;   // Update's time, for the helpers below
+const char *SideName(int s) { return s ? "right" : "left"; }
+// A point of the hand as float[3] (the palm's centre is computed)
+void ToF(const double in[3], float out[3]) { out[0] = float(in[0]), out[1] = float(in[1]), out[2] = float(in[2]); }
+}
+
+void HandInput::Log(const char *fmt, ...) {
+    char b[400];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(b, sizeof b, fmt, ap);
+    va_end(ap);
+    logs_.push_back(b);
 }
 
 const Panel *HandInput::Find(const std::vector<Panel> &panels, int index) const {
@@ -358,14 +394,18 @@ void HandInput::Emit(Event::Type t, int s, int panel, double x, double y, bool l
     events_.push_back(e);
 }
 
-void HandInput::EndPress(int s, bool lost) {
+void HandInput::EndPress(int s, bool lost, const char *why) {
     Side &sd = side_[s];
     if (sd.state != State::Press) return;
     if (sd.control == Control::None) {
         Emit(Event::Release, s, sd.panel, sd.lastX, sd.lastY, lost);
         ++stats.releases, stats.lostReleases += lost;
+        Log("%s %s on screen %d released at %.0f,%.0f after %.2f s (%s)", SideName(s), sd.byPinch ? "pinch" : "poke",
+            sd.panel + 1, sd.lastX, sd.lastY, (g_now - sd.pressedNs) / 1e9,
+            why ? why : lost ? "the hand was lost, or hand input was taken away" : "let go");
     }
     sd.state = State::Hover, sd.releasedAt = g_now, sd.below = 0, sd.control = Control::None;
+    sd.byPinch = false, sd.attempt.on = false, sd.rearmed = false;
 }
 
 void HandInput::EndGrab(int s, bool lost) {
@@ -373,28 +413,78 @@ void HandInput::EndGrab(int s, bool lost) {
     if (sd.state != State::Grab) return;
     Emit(Event::GrabEnd, s, sd.panel, 0, 0, lost);
     ++stats.grabEnds;
+    Log("%s %s let go of screen %d after %.2f s%s", SideName(s), sd.byGrip ? "fist" : "pinch", sd.panel + 1,
+        (g_now - sd.grabbedNs) / 1e9, lost ? " (the hand was lost, or hand input was taken away)" : "");
     const int other = 1 - s;
     if (stretch_.panel == sd.panel) {
         // two hands to one: the other carries on alone, from where the panel is now
         stretch_.panel = -1;
         Side &o = side_[other];
-        if (o.state == State::Grab && o.panel == sd.panel) o.zone = Zone::Edge, o.width0 = -1;   // re-seeded in Carries
+        if (o.state == State::Grab && o.panel == sd.panel) {
+            if (o.zone != Zone::Fist) o.zone = Zone::Edge;
+            o.width0 = -1;   // re-seeded in Carries
+        }
     }
-    sd.state = State::Hover, sd.below = 0;
+    sd.state = State::Hover, sd.below = 0, sd.byGrip = false;
 }
 
 void HandInput::ForgetPress(int s) {
     Side &sd = side_[s];
-    if (sd.state == State::Press) sd.state = State::Hover, sd.releasedAt = g_now, sd.control = Control::None;
+    if (sd.state == State::Press) {
+        sd.state = State::Hover, sd.releasedAt = g_now, sd.control = Control::None, sd.byPinch = false;
+        sd.attempt.on = false;
+    }
+}
+
+void HandInput::GrabThatFired(int s) {
+    Side &sd = side_[s];
+    if (!sd.fistWait && !sd.pinchWait) return;
+    Log("%s %s by screen %d: \"grab that\", not a %s", SideName(s), sd.fistWait ? "fist" : "pinch", sd.waitPanel + 1,
+        sd.fistWait ? "fist grab" : "pinch");
+    sd.fistWait = sd.pinchWait = false, ++stats.fistsCancelled;
+}
+
+void HandInput::EndAttempt(int s) {
+    Side &sd = side_[s];
+    Side::Attempt &a = sd.attempt;
+    if (!a.on) return;
+    a.on = false;
+    if (a.pressed) return;
+    ++stats.refused;
+    std::string why;
+    auto add = [&](const char *t) { why += (why.empty() ? "" : "; ") + std::string(t); };
+    char b[200];
+    if (a.why & kOffContent) add("off the content (a control that takes no poke, or past the edge)");
+    if (a.frames < (a.quick ? 1 : p_.pressFrames)) {
+        std::snprintf(b, sizeof b, "past the surface for %d frame(s); one frame presses after %.1f cm in at %.2f m/s, "
+                      "it came %.1f cm at %.2f m/s", a.frames, p_.travel * 100, p_.quickSpeed, a.travel * 100, a.speed);
+        add(b);
+    }
+    if (a.why & kLate) std::snprintf(b, sizeof b, "reaching through: past it over %d frames or %.0f cm", p_.lateFrames, -p_.lateDepth * 100), add(b);
+    if (a.why & kOneView) add("seen by one camera");
+    if (a.why & kBent) std::snprintf(b, sizeof b, "the index bent (%.2f, needs %.2f)", a.ext, p_.extended), add(b);
+    if (a.why & kNotNearest) add("another fingertip nearer the panel than the index");
+    if (a.why & kPinching) add("pinching or gripping");
+    if (a.why & kBusy) add("a laser or the mouse holds the button");
+    if (a.why & kOtherHand) add("the other hand is pressing");
+    if (a.why & kTooSoon) std::snprintf(b, sizeof b, "within %.0f ms of the last release", p_.rePressMs), add(b);
+    if (a.why & kSpent) add("came back from through the panel");
+    if (a.why & kNotOut) std::snprintf(b, sizeof b, "not out %.1f cm in front since the last release", p_.rearm * 100), add(b);
+    if (a.why & kResting) add("the hand rests low by the body");
+    if (a.why & kTyping) add("typing holds the hand back");
+    if (a.why & kAskew) std::snprintf(b, sizeof b, "the finger %.0f deg off the panel's normal (at most %.0f)", a.angle, p_.fingerAngle), add(b);
+    if (a.why & kSlow) std::snprintf(b, sizeof b, "coming in at %.2f m/s (at least %.2f)", a.speed, p_.approach), add(b);
+    if (why.empty()) add("?");
+    Log("%s poke on screen %d didn't press (%.1f cm deep at most): %s", SideName(s), sd.panel + 1, a.deepest * 100, why.c_str());
 }
 
 void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
     g_now = in.nowNs;
-    events_.clear(), carries_.clear(), glows_.clear(), hovered_.clear(), nearPanels_.clear();
+    events_.clear(), carries_.clear(), glows_.clear(), hovered_.clear(), nearPanels_.clear(), logs_.clear();
     const handcut::Hands &H = *in.hands;
     newFrame_ = H.frame() != frame_;
     frame_ = H.frame();
-    if (newFrame_) frameNs_ = H.captureNs(), ++stats.frames;
+    if (newFrame_) frameNs_ = H.captureNs(), ++stats.frames, approaching_ = false;
     if (in.haveHead) {
         head_.Set({p_.grabHeadMinCutoff, p_.grabHeadBeta, 1.0});
         const double t = in.nowNs / 1e9;
@@ -403,63 +493,92 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
     for (int s = 0; s < 2; ++s) {
         Side &sd = side_[s];
         if (!in.allowed[s]) {
-            EndPress(s, true), EndGrab(s, true);
+            EndPress(s, true), EndGrab(s, true), EndAttempt(s);
             sd.state = State::Off, sd.panel = -1;
-            sd.knowBegins = false;
+            sd.knowBegins = sd.knowGrip = sd.fistWait = sd.pinchWait = false;
+            sd.hist.clear();
             continue;
         }
         if (sd.state == State::Off) sd.state = State::Idle;
         const Hand *h = HandFor(s, H.seen(), sd.state == State::Idle ? 0 : sd.handId);
-        if (h) sd.lastSeen = in.nowNs, sd.handId = h->id;
+        if (h) {
+            if (h->id != sd.handId) sd.hist.clear();
+            sd.lastSeen = in.nowNs, sd.handId = h->id;
+        }
+        if (newFrame_ && h) {
+            Side::Sample q;
+            q.t = h->captureNs;
+            std::memcpy(q.tip, h->p[8], sizeof q.tip), std::memcpy(q.thumb, h->p[4], sizeof q.thumb);
+            std::memcpy(q.contact, h->contact, sizeof q.contact);
+            for (int i = 0; i < 3; ++i) q.along[i] = (h->p[5][i] + h->p[17][i]) / 2 - h->p[0][i];
+            if (sd.hist.empty() || q.t > sd.hist.back().t) sd.hist.push_back(q);
+            while (sd.hist.size() > 2 && q.t - sd.hist.front().t > 400'000'000) sd.hist.erase(sd.hist.begin());
+            double palm[3];
+            h->Palm(palm);
+            for (const Panel &P : panels)
+                for (const Hit &t : {Locate(P, h->p[8]), Locate(P, palm)})
+                    if (t.d > p_.nearBack && t.d <= p_.rateReach && InFootprint(P, t, 0.10)) approaching_ = true;
+        }
         if ((sd.state == State::Press || sd.state == State::Grab) && !Find(panels, sd.panel)) {   // hidden, gone
             EndPress(s, true), EndGrab(s, true);
             sd.state = State::Idle, sd.panel = -1;
         }
         if (!h && sd.state != State::Idle && in.nowNs - sd.lastSeen > int64_t(p_.lostMs * 1e6)) {
-            EndPress(s, true), EndGrab(s, true);
-            sd.state = State::Idle, sd.panel = -1;
+            EndPress(s, true), EndGrab(s, true), EndAttempt(s);
+            sd.state = State::Idle, sd.panel = -1, sd.fistWait = sd.pinchWait = false;
         }
+        // which panel it's near first, so a pinch or grip that begins on the frame the hand comes
+        // near is ours (the near report for that frame says so, and the helper leaves it)
+        if (newFrame_ && h && sd.state != State::Grab && sd.state != State::Press) Near(s, in, panels, h);
         Grab(s, in, panels);
-        if (newFrame_ && h && sd.state != State::Grab) Poke(s, in, panels, h);
+        if (newFrame_ && h && sd.state != State::Grab) {
+            if (sd.state == State::Press && sd.byPinch) PinchPress(s, in, panels, h);
+            else Poke(s, in, panels, h);
+        }
     }
     if (newFrame_ && anyNear()) ++stats.nearFrames;
     Carries(in, panels);
     Glows(in, panels);
 }
 
-void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, const Hand *h) {
+void HandInput::Near(int s, const Input &in, const std::vector<Panel> &panels, const Hand *h) {
     Side &sd = side_[s];
-    // the panel it's near: the index tip or the pinch point over it, close in front
+    // the panel it's near: the index tip, the contact, the knuckles or the palm over it, close in
+    // front. A resting hand (typing, the lap) is near only within restFront; the panel the hand is
+    // near already keeps it nearLeave farther (no flicker of the ray at the zone's edge)
+    sd.resting = Resting(*h, in, p_, sd.resting);
+    const double margin = std::max(p_.nearMargin, p_.bandOut + 0.005);
+    double palm[3];
+    h->Palm(palm);
+    float palmF[3];
+    ToF(palm, palmF);
     int best = -1;
     double key = 1e9;
-    if (sd.state == State::Press) {
-        best = sd.panel;
-    } else {
-        // a resting hand (typing, the lap) is near only within restFront; the panel the hand is
-        // near already keeps it nearLeave farther (no flicker of the ray at the zone's edge)
-        sd.resting = Resting(*h, in, p_, sd.resting);
-        const double margin = std::max(p_.nearMargin, p_.edgeOut + 0.005);
-        for (const Panel &P : panels) {
-            double reach = p_.nearFront + (sd.state == State::Hover && P.index == sd.panel ? p_.nearLeave : 0);
-            if (sd.resting) reach = std::min(reach, p_.restFront);
-            for (const float *pt : {h->p[8], h->pinchPoint}) {
-                const Hit t = Locate(P, pt);
-                if (t.d > p_.nearBack && t.d <= reach && InFootprint(P, t, margin) && std::fabs(t.d) < key)
-                    key = std::fabs(t.d), best = P.index;
-            }
+    for (const Panel &P : panels) {
+        double reach = p_.nearFront + (sd.state == State::Hover && P.index == sd.panel ? p_.nearLeave : 0);
+        if (sd.resting) reach = std::min(reach, p_.restFront);
+        for (const float *pt : {h->p[8], h->contact, h->pinchPoint, (const float *)palmF}) {
+            const Hit t = Locate(P, pt);
+            if (t.d > p_.nearBack && t.d <= reach && InFootprint(P, t, margin) && std::fabs(t.d) < key)
+                key = std::fabs(t.d), best = P.index;
         }
     }
     if (best >= 0) {
         if (sd.state == State::Idle || (sd.state == State::Hover && sd.panel != best)) {
-            sd.below = 0, sd.recent.clear(), sd.hoverX = sd.hoverY = -1;
-            sd.spent = false;
+            EndAttempt(s);
+            sd.below = 0, sd.hoverX = sd.hoverY = -1, sd.hoverNs = -1;
+            sd.spent = false, sd.rearmed = true;
         }
         if (sd.state == State::Idle) sd.state = State::Hover;
         sd.panel = best, sd.outSince = -1;
     } else if (sd.state == State::Hover) {
         if (sd.outSince < 0) sd.outSince = in.nowNs;
-        if (in.nowNs - sd.outSince > int64_t(p_.leaveMs * 1e6)) sd.state = State::Idle, sd.panel = -1;
+        if (in.nowNs - sd.outSince > int64_t(p_.leaveMs * 1e6)) EndAttempt(s), sd.state = State::Idle, sd.panel = -1;
     }
+}
+
+void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, const Hand *h) {
+    Side &sd = side_[s];
     if (sd.state != State::Hover && sd.state != State::Press) return;
     const Panel *P = Find(panels, sd.panel);
     if (!P) {
@@ -467,29 +586,32 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         return;
     }
     const Hit t = Locate(*P, h->p[8]);
-    sd.recent.push_back({h->captureNs, t.d});
-    while (sd.recent.size() > 2 && h->captureNs - sd.recent.front().t > 250'000'000) sd.recent.erase(sd.recent.begin());
-    const bool extended = Extension(*h) >= p_.extended;
+    const double ext = Extension(*h);
+    const bool extended = ext >= p_.extended;
     double others = 1e9;
     for (int j : {12, 16, 20}) others = std::min(others, Locate(*P, h->p[j]).d);
     double straightest = 0;   // of the other fingers
     for (int f : {9, 13, 17}) straightest = std::max(straightest, FingerExtension(*h, f));
-    const bool nearest = t.d + p_.nearest <= others || Extension(*h) - straightest >= p_.pointing;
+    const bool nearest = t.d + p_.nearest <= others || ext - straightest >= p_.pointing;
     double x = 0, y = 0;
     const bool over = ToBuffer(*P, t.u, t.v, &x, &y);
     const Control ctl = over ? Control::None : ControlAt(*P, t.u, t.v, 0.01);
     const bool otherPressing = side_[1 - s].state == State::Press;
+    char why[96];
 
     if (sd.state == State::Press) {
         sd.deepest = std::min(sd.deepest, t.d);
         if (t.d < p_.tooDeep) {   // reaching through the panel isn't a drag
             ++stats.deepReleases;
-            EndPress(s, false);
+            std::snprintf(why, sizeof why, "%.1f cm through the panel", -t.d * 100);
+            EndPress(s, false, why);
             sd.spent = true;
             return;
         }
         if (t.d >= p_.release || t.d - sd.deepest >= p_.pullBack) {
-            EndPress(s, false);
+            if (t.d >= p_.release) std::snprintf(why, sizeof why, "out to %+.1f cm", t.d * 100);
+            else std::snprintf(why, sizeof why, "pulled back to %+.1f cm from %+.1f", t.d * 100, sd.deepest * 100);
+            EndPress(s, false, why);
             return;
         }
         if (sd.control != Control::None) return;
@@ -507,107 +629,318 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     // hovering (resting: from the claim above)
     const bool resting = sd.resting;
     if (sd.spent && t.d >= 0) sd.spent = false;
-    sd.below = t.d <= 0 ? sd.below + 1 : 0;
+    if (t.d >= p_.rearm) sd.rearmed = true;
+    const bool crossed = t.d <= 0;
+    sd.below = crossed ? sd.below + 1 : 0;
     // coming in: when it crossed the surface, it came toward it at approach or faster from some
-    // point in the last approachMs (or from the frame before, at a low rate)
-    if (sd.below == 1) {
-        sd.fastIn = false;
-        const Side::Sample &now = sd.recent.back();
-        for (size_t i = 0; i + 1 < sd.recent.size(); ++i) {
-            const Side::Sample &q = sd.recent[i];
+    // point in the last approachMs (or from the frame before, at a low rate); and how far it came
+    // within travelMs (from the hand's recent fingertips, wherever they were)
+    if (sd.below == 1 && !sd.hist.empty()) {
+        sd.fastIn = false, sd.inSpeed = 0;
+        // how far it came: from where it was on average approachMs to travelMs before (a mean, so a
+        // still hand's jitter doesn't read as travel; with too few samples there, the farthest)
+        double sum = 0, far = t.d, prev = 1e9;
+        int n = 0;
+        const Side::Sample &now = sd.hist.back();
+        for (size_t i = 0; i + 1 < sd.hist.size(); ++i) {
+            const Side::Sample &q = sd.hist[i];
             const double dt = (now.t - q.t) / 1e9;
-            if ((dt * 1e3 <= p_.approachMs + 20 || i + 2 == sd.recent.size()) && dt > 1e-3 &&
-                (q.d - now.d) / dt >= p_.approach)
-                sd.fastIn = true;
+            if (dt <= 1e-3) continue;
+            const double qd = Locate(*P, q.tip).d;
+            if (dt * 1e3 <= p_.travelMs + 20) {
+                far = std::max(far, qd);
+                if (dt * 1e3 >= p_.approachMs - 20) sum += qd, ++n;
+            }
+            if (i + 2 == sd.hist.size()) prev = qd;
+            if (dt * 1e3 <= p_.approachMs + 20 || i + 2 == sd.hist.size()) {
+                const double v = (qd - t.d) / dt;
+                sd.inSpeed = std::max(sd.inSpeed, v);
+                if (v >= p_.approach) sd.fastIn = true;
+            }
+        }
+        sd.travelled = (n >= 2 ? sum / n : far) - t.d;
+        // ...and on its way in on the frame before too (between there and here): a still finger's
+        // jitter dips past the surface on one frame from anywhere
+        const double base = n >= 2 ? sum / n : far;
+        const bool onTheWay = prev < 1e8 && prev - t.d >= 0.002 && base - prev >= 0.005;
+        sd.quick = sd.fastIn && onTheWay && sd.inSpeed >= p_.quickSpeed && sd.travelled >= p_.travel;
+    }
+    if (over && extended && !resting && !in.typing[s] && t.d <= p_.cursor && t.d > p_.nearBack && !in.pointerBusy && !otherPressing) {
+        sd.hoverNs = in.nowNs, sd.hoverU = t.u, sd.hoverV = t.v;
+        if (std::fabs(x - sd.hoverX) >= 0.5 || std::fabs(y - sd.hoverY) >= 0.5) {
+            sd.hoverX = x, sd.hoverY = y;
+            Emit(Event::Motion, s, P->index, x, y);
         }
     }
-    if (over && extended && !resting && !in.typing[s] && t.d <= p_.cursor && t.d > p_.nearBack && !in.pointerBusy && !otherPressing &&
-        (std::fabs(x - sd.hoverX) >= 0.5 || std::fabs(y - sd.hoverY) >= 0.5)) {
-        sd.hoverX = x, sd.hoverY = y;
-        Emit(Event::Motion, s, P->index, x, y);
+    // an attempt: from crossing the surface until it's back out past `release` (or leaves)
+    Side::Attempt &a = sd.attempt;
+    if (crossed && !a.on) {
+        a = Side::Attempt{};
+        a.on = true, a.quick = sd.quick, a.speed = sd.inSpeed, a.travel = sd.travelled;
+        ++stats.attempts;
     }
+    if (!crossed) {
+        if (a.on && t.d >= p_.release) EndAttempt(s);
+        return;
+    }
+    ++a.frames, a.deepest = std::min(a.deepest, t.d);
     const bool button = ctl == Control::Curve || ctl == Control::Reset || ctl == Control::Dock || ctl == Control::Close;
-    if (sd.below < p_.pressFrames || !(over || button)) return;
+    if (!(over || button)) return (void)(a.why |= kOffContent);
+    if (sd.below < (sd.quick ? 1 : p_.pressFrames)) return;
+    if (sd.below > p_.lateFrames || t.d < p_.lateDepth) return (void)(a.why |= kLate);
     const bool fast = sd.fastIn;
     const bool rePress = sd.releasedAt >= 0 && in.nowNs - sd.releasedAt < int64_t(p_.rePressMs * 1e6);
     const handcut::Gesture &pinch = in.hands->pinch(s), &grip = in.hands->grip(s);
-    if (!h->stereo) return (void)++stats.heldNotStereo;
-    if (!extended) return (void)++stats.heldNotExtended;
-    if (!nearest) return (void)++stats.heldNotNearest;
-    if (pinch.down || grip.down) return (void)++stats.heldPinching;
-    if (in.pointerBusy || otherPressing || rePress || sd.spent) return (void)++stats.heldBusy;
-    if (resting) return (void)++stats.heldResting;
-    if (in.typing[s]) return (void)++stats.heldTyping;
-    if (!Along(*P, t, *h, p_.fingerAngle)) return (void)++stats.heldAskew;
-    if (!fast) return (void)++stats.heldSlow;
+    const double angle = FingerAngle(*P, t, *h);
+    a.angle = angle, a.ext = ext;
+    if (!h->stereo) return (void)(++stats.heldNotStereo, a.why |= kOneView);
+    if (!extended) return (void)(++stats.heldNotExtended, a.why |= kBent);
+    if (!nearest) return (void)(++stats.heldNotNearest, a.why |= kNotNearest);
+    if (pinch.down || grip.down) return (void)(++stats.heldPinching, a.why |= kPinching);
+    if (in.pointerBusy) return (void)(++stats.heldBusy, a.why |= kBusy);
+    if (otherPressing) return (void)(++stats.heldBusy, a.why |= kOtherHand);
+    if (rePress) return (void)(++stats.heldBusy, a.why |= kTooSoon);
+    if (sd.spent) return (void)(++stats.heldBusy, a.why |= kSpent);
+    if (!sd.rearmed) return (void)(++stats.heldBusy, a.why |= kNotOut);
+    if (resting) return (void)(++stats.heldResting, a.why |= kResting);
+    if (in.typing[s]) return (void)(++stats.heldTyping, a.why |= kTyping);
+    if (angle > p_.fingerAngle) return (void)(++stats.heldAskew, a.why |= kAskew);
+    if (!fast) return (void)(++stats.heldSlow, a.why |= kSlow);
     // pressed
-    sd.state = State::Press, sd.lockU = t.u, sd.lockV = t.v, sd.deepest = t.d, sd.dragging = false;
+    a.pressed = true;
+    stats.quickPresses += sd.below < p_.pressFrames;
+    sd.state = State::Press, sd.lockU = t.u, sd.lockV = t.v, sd.deepest = t.d, sd.dragging = false, sd.byPinch = false;
+    sd.pressedNs = in.nowNs;
     if (over) {
         sd.control = Control::None, sd.lastX = x, sd.lastY = y;
         Emit(Event::Press, s, P->index, x, y);
         ++stats.presses;
+        Log("%s poke pressed screen %d at %.0f,%.0f (%+.1f cm, in at %.2f m/s from %.1f cm out, %d frame(s) past, "
+            "the finger %.0f deg off)", SideName(s), P->index + 1, x, y, t.d * 100, sd.inSpeed, sd.travelled * 100, sd.below, angle);
     } else {
         sd.control = ctl;
         Event e;
         e.type = Event::Control, e.side = s, e.panel = P->index, e.control = ctl;
         events_.push_back(e);
         ++stats.controls;
+        Log("%s poke pressed a button of screen %d", SideName(s), P->index + 1);
+    }
+}
+
+void HandInput::PinchPress(int s, const Input &in, const std::vector<Panel> &panels, const Hand *h) {
+    Side &sd = side_[s];
+    const Panel *P = Find(panels, sd.panel);
+    if (!P) return;
+    // the knuckles' move since the pinch began, on the panel: they hold still as the fingers close
+    const Hit k = Locate(*P, h->pinchPoint);
+    const double u = sd.lockU + (k.u - sd.pinchU0), v = sd.lockV + (k.v - sd.pinchV0);
+    if (!sd.dragging && std::hypot(u - sd.lockU, v - sd.lockV) >= p_.slide) sd.dragging = true;
+    if (!sd.dragging) return;
+    double dx, dy;
+    if (ToBuffer(*P, std::clamp(u, -P->width / 2, P->width / 2), std::clamp(v, -P->height / 2, P->height / 2), &dx, &dy) &&
+        (std::fabs(dx - sd.lastX) >= 0.5 || std::fabs(dy - sd.lastY) >= 0.5)) {
+        sd.lastX = dx, sd.lastY = dy;
+        Emit(Event::Motion, s, P->index, dx, dy);
     }
 }
 
 void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     Side &sd = side_[s];
-    const handcut::Gesture &g = in.hands->pinch(s);
+    const handcut::Gesture &g = in.hands->pinch(s), &gr = in.hands->grip(s);
     if (!sd.knowBegins) sd.begins = g.begins, sd.knowBegins = true;   // not a pinch that began before
+    if (!sd.knowGrip) sd.gripBegins = gr.begins, sd.knowGrip = true;
+    const bool newPinch = g.begins != sd.begins, newGrip = gr.begins != sd.gripBegins;
+    sd.begins = g.begins, sd.gripBegins = gr.begins;
     if (sd.state == State::Grab) {
-        if (!g.down || g.begins != sd.begins) EndGrab(s, g.lost);
-        if (g.begins != sd.begins) sd.begins = g.begins;
+        if (sd.byGrip ? !gr.down || newGrip : !g.down || newPinch) EndGrab(s, sd.byGrip ? gr.lost : g.lost);
         return;
     }
-    if (g.begins == sd.begins) return;
-    sd.begins = g.begins;
-    // a new pinch: the near claim had this hand, and it began in a grab zone (decided once,
-    // at the pinch's begin; on the content a near pinch does nothing)
-    if (!g.down || sd.state != State::Hover || in.typing[s]) return;
+    if (sd.state == State::Press && sd.byPinch) {
+        if (!g.down || newPinch) EndPress(s, g.lost, g.lost ? "the pinch was lost" : "the pinch opened");
+        return;
+    }
+    // a fist or pinch waiting on "grab that": it let the hand go (or the wait is over), so it's ours
+    const bool waited = in.nowNs - sd.waitSince > int64_t(p_.grabThatWaitMs * 1e6);
+    if (sd.fistWait) {
+        if (!gr.down || newGrip || sd.state != State::Hover || in.typing[s]) sd.fistWait = false;
+        else if (!in.grabThatArmed[s] || waited) sd.fistWait = false, FistBegin(s, in, panels, true);
+    }
+    if (sd.pinchWait) {
+        if (!g.down || newPinch || sd.state != State::Hover || in.typing[s]) sd.pinchWait = false;
+        else if (!in.grabThatArmed[s] || waited) sd.pinchWait = false, PinchBegin(s, in, panels, true);
+    }
+    if (newGrip && gr.down) FistBegin(s, in, panels, false);
+    if (newPinch && g.down && sd.state == State::Hover) PinchBegin(s, in, panels, false);
+}
+
+bool HandInput::Straddled(int s, const Panel &P, int64_t now) const {
+    const Side &sd = side_[s];
+    const double cosMax = std::cos(p_.cardAngle * M_PI / 180);
+    for (const Side::Sample &q : sd.hist) {
+        if (now - q.t > int64_t(p_.cardMs * 1e6) || q.t > now) continue;
+        const Hit ti = Locate(P, q.tip), th = Locate(P, q.thumb), c = Locate(P, q.contact);
+        if (ti.d * th.d >= 0 || std::min(std::fabs(ti.d), std::fabs(th.d)) < p_.cardSide) continue;
+        const double du = ti.u - th.u, dv = ti.v - th.v, dd = ti.d - th.d, len = std::sqrt(du * du + dv * dv + dd * dd);
+        if (len < 1e-6 || std::fabs(dd) / len < cosMax) continue;
+        // the hand along the panel, not pointing into it (a front pinch whose index went through)
+        double al[3];
+        for (int i = 0; i < 3; ++i) al[i] = P.pose.m[0][i] * q.along[0] + P.pose.m[1][i] * q.along[1] + P.pose.m[2][i] * q.along[2];
+        const double alen = std::sqrt(Dot(al, al));
+        if (alen < 1e-6 || std::fabs(al[2]) / alen > std::cos(p_.cardAlong * M_PI / 180)) continue;
+        if (std::fabs(FromBorder(P, c.u, c.v)) <= p_.cardBand) return true;
+    }
+    return false;
+}
+
+void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited) {
+    Side &sd = side_[s];
+    const handcut::Gesture &g = in.hands->pinch(s);
+    if (in.typing[s]) return;
+    if (!waited && in.grabThatArmed[s]) {   // "grab that" may be under way: wait for it to fire or not
+        sd.pinchWait = true, sd.waitSince = in.nowNs, sd.waitPanel = sd.panel;
+        ++stats.fistsWaited;
+        return;
+    }
+    const Hand *h = HandFor(s, in.hands->seen(), g.handId ? g.handId : sd.handId);
+    // where the fingers meet (the gestures file's point is the knuckles, 5-8 cm behind)
+    const float *c = h ? h->contact : g.beginPoint;
+    // the card pinch: the thumb and index tips were either side of a panel's plane at its border
+    if (p_.cardPinch && h) {
+        const Panel *best = nullptr;
+        double key = 1e9;
+        for (const Panel &P : panels) {
+            if (P.held) continue;
+            const Hit b = Locate(P, c);
+            if (std::fabs(b.d) <= p_.bandDepth && std::fabs(FromBorder(P, b.u, b.v)) <= p_.cardBand + 0.01 &&
+                Straddled(s, P, h->captureNs) && std::fabs(b.d) < key)
+                key = std::fabs(b.d), best = &P;
+        }
+        if (best) {
+            ++stats.cards;
+            StartGrab(s, in, *best, Zone::Card, 1, -1, h, g.point, false);
+            return;
+        }
+    }
+    // a grab zone (the border band, the bar, the tab, a floating window's title bar)
     const Panel *bestP = nullptr;
     Zone zone = Zone::None;
     int sx = 1, sy = -1;
     double key = 1e9;
     for (const Panel &P : panels) {
         if (P.held) continue;
-        const Hit b = Locate(P, g.beginPoint);
+        const Hit b = Locate(P, c);
         int x, y;
         double e;
         const Zone z = GrabZone(P, b, p_, &x, &y, &e);
         if (e <= 0 && std::fabs(b.d) < key) key = std::fabs(b.d), bestP = &P, zone = z, sx = x, sy = y;
     }
-    if (!bestP) return;
-    // the pinch point as the cameras saw it (the smoothing starts afresh from it: Carried)
-    const Hand *h = HandFor(s, in.hands->seen(), g.handId ? g.handId : sd.handId);
+    if (bestP) {
+        StartGrab(s, in, *bestP, zone, sx, sy, h, g.point, false);
+        return;
+    }
+    // the content: a click where the pointer is (the fingertip's cursor, or where the fingers meet)
+    const Panel *P = Find(panels, sd.panel);
+    if (!P) return;
+    const Hit t = Locate(*P, c);
+    double u = t.u, v = t.v, x, y;
+    if (sd.hoverNs >= 0 && in.nowNs - sd.hoverNs <= int64_t(p_.pinchCursorMs * 1e6) &&
+        std::hypot(sd.hoverU - t.u, sd.hoverV - t.v) <= p_.pinchCursor)
+        u = sd.hoverU, v = sd.hoverV;
+    if (!p_.pinchClick || !h) return;
+    if (t.d > p_.nearFront || t.d < p_.nearBack) {
+        Log("%s pinch near screen %d: the fingers %+.1f cm from it, out of the touch zone: nothing", SideName(s), P->index + 1, t.d * 100);
+        return;
+    }
+    if (!ToBuffer(*P, u, v, &x, &y)) {
+        Log("%s pinch near screen %d: not on its content or a grab zone (%.1f cm from its border, %+.1f cm out): nothing",
+            SideName(s), P->index + 1, FromBorder(*P, t.u, t.v) * 100, t.d * 100);
+        return;
+    }
+    // (not from a hand resting low by the body, typing's thumbs touch fingers too; nor one camera's)
+    if (in.pointerBusy || side_[1 - s].state == State::Press || sd.resting || !h->stereo) {
+        Log("%s pinch on screen %d: no click (%s)", SideName(s), P->index + 1,
+            in.pointerBusy ? "a laser or the mouse holds the button" : side_[1 - s].state == State::Press ? "the other hand is pressing"
+            : sd.resting ? "the hand rests low by the body" : "seen by one camera");
+        return;
+    }
+    EndAttempt(s);
+    const Hit k = Locate(*P, h->pinchPoint);
+    sd.state = State::Press, sd.byPinch = true, sd.control = Control::None, sd.dragging = false;
+    sd.lockU = u, sd.lockV = v, sd.pinchU0 = k.u, sd.pinchV0 = k.v, sd.lastX = x, sd.lastY = y, sd.deepest = t.d;
+    sd.pressedNs = in.nowNs;
+    if (std::fabs(x - sd.hoverX) >= 0.5 || std::fabs(y - sd.hoverY) >= 0.5) Emit(Event::Motion, s, P->index, x, y);
+    sd.hoverX = x, sd.hoverY = y;
+    Emit(Event::Press, s, P->index, x, y);
+    ++stats.presses, ++stats.pinchClicks;
+    Log("%s pinch pressed screen %d at %.0f,%.0f (on its content, %+.1f cm out)", SideName(s), P->index + 1, x, y, t.d * 100);
+}
+
+void HandInput::FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited) {
+    Side &sd = side_[s];
+    const handcut::Gesture &gr = in.hands->grip(s);
+    if (!p_.fistGrab || sd.state != State::Hover || in.typing[s]) return;
+    const Panel *P = Find(panels, sd.panel);
+    if (!P || P->held) return;
+    const Hand *h = HandFor(s, in.hands->seen(), gr.handId ? gr.handId : sd.handId);
+    if (!h) return;
+    // the hand at the panel: its palm or knuckles within the near zone, over it
+    double palm[3];
+    h->Palm(palm);
+    float palmF[3];
+    ToF(palm, palmF);
+    double nearest = 1e9;
+    bool at = false;
+    for (const float *pt : {(const float *)palmF, h->pinchPoint}) {
+        const Hit t = Locate(*P, pt);
+        nearest = std::min(nearest, t.d);
+        if (t.d > p_.nearBack && t.d <= p_.nearFront + p_.nearLeave && InFootprint(*P, t, std::max(p_.nearMargin, 0.03))) at = true;
+    }
+    if (!at) {
+        Log("%s fist by screen %d: not at it (the knuckles or palm %.1f cm out): nothing", SideName(s), P->index + 1, nearest * 100);
+        return;
+    }
+    if (!waited && in.grabThatArmed[s]) {   // "grab that" may be under way: wait for it to fire or not
+        sd.fistWait = true, sd.waitSince = in.nowNs, sd.waitPanel = P->index;
+        ++stats.fistsWaited;
+        return;
+    }
+    ++stats.fists;
+    StartGrab(s, in, *P, Zone::Fist, 1, -1, h, gr.point, true);
+}
+
+void HandInput::StartGrab(int s, const Input &in, const Panel &P, Zone zone, int sx, int sy, const Hand *h,
+                          const float *fallback, bool byGrip) {
+    Side &sd = side_[s];
+    EndAttempt(s);
+    // the knuckles as the cameras saw them (the smoothing starts afresh from them: Carried)
     double pinch[3];
     if (h) Copy3(h->pinchPoint, pinch);
-    else Copy3(g.point, pinch);
-    sd.state = State::Grab, sd.panel = bestP->index, sd.zone = zone, sd.sx = sx, sd.sy = sy;
-    sd.start = sd.last = bestP->pose, sd.width0 = bestP->width;
+    else Copy3(fallback, pinch);
+    sd.state = State::Grab, sd.panel = P.index, sd.zone = zone, sd.sx = sx, sd.sy = sy, sd.byGrip = byGrip;
+    sd.start = sd.last = P.pose, sd.width0 = P.width;
+    sd.grabbedNs = in.nowNs;
     sd.point.Set({p_.grabMinCutoff, p_.grabBeta, 1.0});
     sd.point.Reset();
     sd.point.Sample({pinch[0], pinch[1], pinch[2]}, in.hands->captureNs() / 1e9, in.nowNs / 1e9);
     sd.from = {pinch[0], pinch[1], pinch[2]}, sd.shift = {}, sd.engaged = false;
     sd.along.Reset(), sd.across.Reset(), sd.haveRot0 = sd.turning = false;   // the wrist's turn: afresh
     if (h) SampleTurn(s, *h, in);
-    ToLocal(bestP->pose, pinch, sd.grabLocal);
+    ToLocal(P.pose, pinch, sd.grabLocal);
     if (in.haveHead) {
         const fhsmooth::V3 hd = head_.Last();
         sd.startHead[0] = hd.x, sd.startHead[1] = hd.y, sd.startHead[2] = hd.z;
     } else {
         std::copy(pinch, pinch + 3, sd.startHead), sd.startHead[2] += 1;
     }
-    const Hit n = Locate(*bestP, pinch);
-    sd.grabX = n.u - sx * bestP->width / 2, sd.grabY = n.v - sy * bestP->height / 2;
+    const Hit n = Locate(P, pinch);
+    sd.grabX = n.u - sx * P.width / 2, sd.grabY = n.v - sy * P.height / 2;
     Event e;
-    e.type = Event::GrabStart, e.side = s, e.panel = bestP->index, e.zone = zone;
+    e.type = Event::GrabStart, e.side = s, e.panel = P.index, e.zone = zone;
     events_.push_back(e);
     ++stats.grabs;
+    const bool resize = zone == Zone::Tab || zone == Zone::Corner;
+    Log("%s %s took screen %d by %s (%s)", SideName(s), byGrip ? "fist" : "pinch", P.index + 1, ZoneName(zone),
+        resize ? "resize" : zone == Zone::Card ? "it goes with the hand" : "move, the wrist turns it");
 }
 
 void HandInput::SampleTurn(int s, const Hand &h, const Input &in) {
@@ -648,6 +981,31 @@ bool HandInput::Turn(int s, const Input &in, const double pinch[3], const double
         Mul3(by, sd.rot0, moved);
         std::memcpy(sd.rot0, moved, sizeof moved);
         MulBT3(rel, sd.rot0, out);
+        sd.turning = true;
+    }
+    return true;
+}
+
+bool HandInput::RoomTurn(int s, const Input &in, double out[3][3]) {
+    Side &sd = side_[s];
+    if (!sd.along.Ready() || !sd.across.Ready()) return false;
+    double hand[3][3];
+    if (!HandFrame(sd.along.At(in.nowNs / 1e9), sd.across.At(in.nowNs / 1e9), hand)) return false;
+    if (!sd.haveRot0) {
+        std::memcpy(sd.rot0, hand, sizeof hand);
+        sd.haveRot0 = true, sd.turning = false;
+        return false;
+    }
+    MulBT3(hand, sd.rot0, out);   // the hand's turn in the room since the grab
+    if (!sd.turning) {
+        double axis[3];
+        const double a = AngleAxis(out, axis), dead = p_.cardRotDeadzone * M_PI / 180;
+        if (a <= dead) return false;
+        double by[3][3], moved[3][3];
+        FromAxis(axis, dead, by);
+        Mul3(by, sd.rot0, moved);
+        std::memcpy(sd.rot0, moved, sizeof moved);
+        MulBT3(hand, sd.rot0, out);
         sd.turning = true;
     }
     return true;
@@ -697,6 +1055,7 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
                 stretch_.panel = sd.panel, stretch_.start = P->pose, stretch_.width0 = P->width;
                 std::copy(l, l + 3, stretch_.l0), std::copy(r, r + 3, stretch_.r0);
                 ++stats.stretches;
+                Log("both hands on screen %d: stretch and turn", sd.panel + 1);
             }
             Carry c;
             c.panel = sd.panel, c.sides = 3, c.kind = Carry::Stretch;
@@ -726,6 +1085,18 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
                 const double a = P->height / std::max(1e-6, P->width), cx = n.u - sd.grabX, cy = n.v - sd.grabY;
                 c.width = std::clamp(2 * (sd.sx * cx + sd.sy * a * cy) / (1 + a * a), p_.minWidth, p_.maxWidth);
             }
+        } else if (sd.zone == Zone::Card) {
+            // rigidly with the hand: its turn in the room since the grab, about the knuckles
+            c.kind = Carry::Move;
+            double R[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+            RoomTurn(s, in, R);
+            const double rel[3] = {sd.start.m[0][3] - sd.from.x, sd.start.m[1][3] - sd.from.y, sd.start.m[2][3] - sd.from.z};
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j)
+                    c.pose.m[i][j] = float(R[i][0] * sd.start.m[0][j] + R[i][1] * sd.start.m[1][j] + R[i][2] * sd.start.m[2][j]);
+                c.pose.m[i][3] = float(p[i] + R[i][0] * rel[0] + R[i][1] * rel[1] + R[i][2] * rel[2]);
+            }
+            sd.last = c.pose;
         } else {
             c.kind = Carry::Move;
             const double *faces = in.haveHead ? head : sd.startHead;
@@ -740,7 +1111,10 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
 }
 
 void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
-    static const float kWhite[3] = {0.92f, 0.96f, 1.0f}, kBlue[3] = {90 / 255.f, 170 / 255.f, 1.0f};
+    // white: the fingertip; blue: a pinch here moves the panel; amber: it resizes it; green: it
+    // takes it like a card. A ring until it holds, then a dot.
+    static const float kWhite[3] = {0.92f, 0.96f, 1.0f}, kBlue[3] = {90 / 255.f, 170 / 255.f, 1.0f},
+                       kAmber[3] = {1.0f, 0.72f, 0.25f}, kGreen[3] = {0.45f, 1.0f, 0.6f};
     for (int s = 0; s < 2; ++s) {
         const Side &sd = side_[s];
         if (sd.state != State::Hover && sd.state != State::Press && sd.state != State::Grab) continue;
@@ -749,38 +1123,59 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
         nearPanels_.insert(P->index);
         const Hand *h = HandFor(s, in.hands->shown(), sd.handId);
         const double k = PxPerM(*P);
-        auto glow = [&](double x, double y, double rm, double alpha, bool ring, const float rgb[3]) {
+        auto glow = [&](double u, double v, double rm, double alpha, bool ring, const float rgb[3]) {
+            double x, y;
             if (!P->glows || alpha <= 0.01) return;
+            u = std::clamp(u, -P->width / 2 + 0.004, P->width / 2 - 0.004), v = std::clamp(v, -P->height / 2 + 0.004, P->height / 2 - 0.004);
+            if (!ToBuffer(*P, u, v, &x, &y)) return;
             glows_[P->index].push_back({float(x), float(y), float(rm * k), float(alpha), ring, {rgb[0], rgb[1], rgb[2]}});
         };
         // the fingertip: a ring that tightens and brightens as it comes to the surface, a dot
         // while pressed
         if (sd.state == State::Press && sd.control == Control::None) {
-            glow(sd.lastX, sd.lastY, 0.005, 0.9, false, kWhite);
+            if (P->glows)   // where it's pressed (or dragged to), in pixels
+                glows_[P->index].push_back({float(sd.lastX), float(sd.lastY), float(0.005 * k), 0.9f, false,
+                                            {kWhite[0], kWhite[1], kWhite[2]}});
         } else if (sd.state == State::Hover && h && Extension(*h) >= p_.extended) {
             const Hit t = Locate(*P, h->p[8]);
             double x, y;
             if (t.d > p_.nearBack && t.d <= p_.nearFront && ToBuffer(*P, t.u, t.v, &x, &y)) {
                 const double f = std::clamp(t.d / p_.nearFront, 0.0, 1.0);
-                glow(x, y, 0.004 + 0.008 * f, 0.8 * (1 - f), true, kWhite);
+                glow(t.u, t.v, 0.004 + 0.008 * f, 0.8 * (1 - f), true, kWhite);
             }
         }
-        // the pinch point near a grab zone: bigger as the pinch closes, blue while it holds
-        if (!h) continue;
+        if (!h || sd.state == State::Press) continue;
+        // what a pinch (or the fist) does here: at the corner it resizes, on the border it moves,
+        // either side of the edge it carries like a card
         const handcut::Gesture &g = in.hands->pinch(s);
-        double strength = g.tracked ? g.strength : std::clamp((0.06 - h->pinchD[0]) / 0.04, 0.0, 1.0);
-        const Hit q = Locate(*P, h->pinchPoint);
+        const double strength = g.tracked ? g.strength : std::clamp((0.06 - h->pinchD[0]) / 0.04, 0.0, 1.0);
+        if (sd.state == State::Grab) {
+            const float *col = sd.zone == Zone::Corner || sd.zone == Zone::Tab ? kAmber : sd.zone == Zone::Card ? kGreen : kBlue;
+            double pt[3];
+            if (sd.byGrip) h->Palm(pt);
+            else Copy3(h->contact, pt);
+            const Hit q = Locate(*P, pt);
+            if (sd.zone == Zone::Corner) glow(sd.sx * P->width / 2, sd.sy * P->height / 2, 0.014, 0.9, false, col);
+            else glow(q.u, q.v, sd.byGrip ? 0.02 : 0.012, 0.9, false, col);
+            if (sd.zone == Zone::Bar) hovered_[P->index] |= 1u << int(Control::Bar);
+            if (sd.zone == Zone::Tab) hovered_[P->index] |= 1u << int(Control::Tab);
+            continue;
+        }
+        const Hit q = Locate(*P, h->contact);
+        if (p_.cardPinch && std::fabs(q.d) <= p_.bandDepth && std::fabs(FromBorder(*P, q.u, q.v)) <= p_.cardBand &&
+            Straddled(s, *P, h->captureNs)) {
+            glow(q.u, q.v, 0.010 + 0.008 * strength, 0.85, true, kGreen);
+            continue;
+        }
         int sx, sy;
         double excess;
-        const Zone z = sd.state == State::Grab ? sd.zone : GrabZone(*P, q, p_, &sx, &sy, &excess);
-        if (sd.state != State::Grab && excess > p_.glowReach) continue;
+        const Zone z = GrabZone(*P, q, p_, &sx, &sy, &excess);
+        if (excess > p_.glowReach) continue;
         if (z == Zone::Bar) hovered_[P->index] |= 1u << int(Control::Bar);
         if (z == Zone::Tab) hovered_[P->index] |= 1u << int(Control::Tab);
-        double x, y;
-        const double u = std::clamp(q.u, -P->width / 2, P->width / 2), v = std::clamp(q.v, -P->height / 2, P->height / 2);
-        if (std::hypot(u - q.u, v - q.v) > 0.01 || !ToBuffer(*P, u, v, &x, &y)) continue;   // off the panel (the bar)
-        if (sd.state == State::Grab) glow(x, y, 0.006 + 0.008 * strength, 0.9, false, kBlue);
-        else glow(x, y, 0.006 + 0.008 * strength, 0.3 + 0.5 * (1 - std::clamp(excess / p_.glowReach, 0.0, 1.0)), true, kWhite);
+        const double alpha = 0.35 + 0.55 * (1 - std::clamp(excess / p_.glowReach, 0.0, 1.0));
+        if (z == Zone::Corner) glow(sx * P->width / 2, sy * P->height / 2, 0.012 + 0.008 * strength, alpha, true, kAmber);
+        else if (z == Zone::Edge || z == Zone::Title) glow(q.u, q.v, 0.010 + 0.008 * strength, alpha, true, kBlue);
     }
 }
 
@@ -793,6 +1188,9 @@ std::string HandInput::Describe() const {
         std::snprintf(b, sizeof b, "%s%s %s", s ? ", " : "", s ? "right" : "left", names[int(sd.state)]);
         out += b;
         if (sd.panel >= 0 && sd.state != State::Idle && sd.state != State::Off) out += " " + std::to_string(sd.panel + 1);
+        if (sd.state == State::Grab && (sd.zone == Zone::Card || sd.zone == Zone::Fist)) out += sd.zone == Zone::Card ? " (card)" : " (fist)";
+        if (sd.state == State::Press && sd.byPinch) out += " (pinch)";
+        if (sd.fistWait || sd.pinchWait) out += sd.fistWait ? " (fist waits)" : " (pinch waits)";
     }
     return out;
 }

@@ -71,20 +71,26 @@ HANDS_GRAB_ROTATE_DEADZONE=5  # ... once the hand has turned this many degrees (
 HANDS_GRAB_BAND=0.06       # Frametop panels: a near pinch where the fingers meet within this far (m) outside a panel's border (or 2.5 cm inside) takes it: the corners resize, the rest of the border moves
 HANDS_PINCH_CLICK=1        # Frametop panels: a near pinch on a panel's content clicks where the fingertip's pointer was, held while the pinch is | 0 = nothing
 HANDS_CARD_PINCH=1         # Frametop panels: the thumb behind a panel's edge and the index and middle fingers together in front (or all four fingertips bunched at the thumb), like holding a card, carries it rigidly with the hand, turn and all; the index alone is the border's move | 0 = off
-HANDS_FIST_GRAB=1          # Frametop panels: a fist made at a panel (the palm within reach of it) carries it and turns it with the wrist; two fists stretch it | 0 = off
+HANDS_FIST_GRAB=1          # Frametop panels: a fist made at a panel (the palm within reach of it; a closed hand ft-hands calls a pinch too) carries it and turns it with the wrist; two fists stretch it | 0 = off
+HANDS_STRETCH_TURN=1       # Frametop panels: two hands holding one panel turn it on every axis with the line between them, and roll it with their wrists | 0 = about the vertical only
+HANDS_TRACK_GATE=1         # Frametop panels: a held panel ignores tracking no hand makes (a jump faster than 4 m/s or 100 m/s^2, a hand frame flipping), is smoothed harder on one camera's or edge-of-view frames, and holds still when the hand leaves the view at the side | 0 = takes every frame (the 12 cm jump rule only)
 HANDS_HOLD_LOST_MS=1750    # Frametop panels: what a hand holds (a pinch, a card, a fist, a poke's press) stays held while the hand is lost this long (ms); it lets go only when the hand is seen open again
 HANDS_FLICK=1              # Frametop panels: flick a panel away: the hand at it, flicked out fast with the fingers opening, sends it 3 m out (HANDS_THROW_DISTANCE); "grab that" brings it back | 0 = off
 HANDS_FLICK_SPEED=1.2      # ... the hand moving out this fast (m/s), 12 cm or more
 HANDS_FLICK_OPENING=0.15   # ... the fingers opening this much on the way (their mean extension; 0 = an open hand pushed out flicks too)
 HANDS_THROW=1              # Frametop panels: let go of a carried panel (a card, a fist, a pinch on its border) while the hand moves out fast and it flies on that way, to 3 m out | 0 = off (it stays where you let go)
 HANDS_THROW_SPEED=1.0      # ... the hand moving at least this fast (m/s) as it lets go, within 60 degrees of straight away from you
-HANDS_THROW_DISTANCE=3     # ... and where thrown and flicked panels go: this far (m) from the eyes, facing you
+HANDS_THROW_DISTANCE=3     # ... and where thrown, flicked and pushed panels go: this far (m) from the eyes, facing you
+HANDS_PUSH=1               # Frametop panels: push one away: an open hand, palm to it, pushed straight into it fast (or 15 cm in slowly) sends it 3 m out (HANDS_THROW_DISTANCE); an open hand then doesn't poke | 0 = off
+HANDS_PUSH_SPEED=0.5       # ... the palm moving into it this fast (m/s), 5 cm or more in
+HANDS_SEND_AWAY_WIDTH=restore  # Frametop panels: a panel sent away (thrown, flicked, pushed, grab that's send-back) keeps its width; restore = one grab that shrank to bring it, still that wide, gets its width back | keep = never
+HANDS_TARGET_GLOW=1        # Frametop panels: a glow round the panel "grab that" would take as the open hand is held out to it (blue), or a push or flick would throw (warm) | 0 = off
 HANDS_GRAB_THAT=1          # Frametop panels: hold an open hand out to one, palm to it, then pull back making a fist: it comes to arm's reach (again at it: back where it was; at one near you already: centred at arm's reach) | 0 = off
 HANDS_GRAB_THAT_DISTANCE=0.45  # ... this far (m) ahead of the eyes, at the fist's height, facing you
 HANDS_GRAB_THAT_WIDTH=0.6  # ... a screen wider than this (m) comes at this width (0 = as it is; floating windows keep their size)
 HANDS_NEAR=1               # Frametop panels (direct touch): poke to click, pinch the border to move or resize, a fist to carry, gaze or not (1 = with POINTER_HANDS=1, when the pointer helper says a hand is bare | on = the same without POINTER_HANDS: the helper runs only the handoff for it | 0 = off | force = always, for testing)
 HANDS_CUTOUTS=0            # hands: 1 = also cut a round hole per hand in Frametop's panels, so Room View shows the real hand through them (off: ft-handview draws the hands)
-HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face and look at it, and a ring shows above the palm; pinch with that hand to open the Steam menu (or close the dashboard). 0 = off
+HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face, held still, away from the panels, and look at it, and a ring shows above the palm; a plain thumb-index pinch with that hand opens the Steam menu (or closes the dashboard). 0 = off
 HANDS_VIEW_MODEL=asset     # rendered hands (ft-handview): a 3D hand model posed by the tracking, asset (WebXR's generic hand) | babylon | mrtk3 | godot | mrtk2 (screens/assets/hands/README.md) | robot = a robot hand built from the skeleton (white shells, dark joints, cyan accents) | capsules = tubes from the skeleton (the older look)
 HANDS_VIEW_STYLE=ghost     # rendered hands: ghost = light, see-through, glowing toward its edges | solid = matte light grey lit from above, a soft rim light
 HANDS_VIEW_ROOMVIEW=1      # rendered hands: 1 = drawn with Room View on too, over the cutout | 0 = only with Room View off

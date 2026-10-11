@@ -19,7 +19,9 @@
 //   pinch on the content, within the zone              click at the cursor, held with the pinch
 //   fist (grip) with the palm or knuckles at it        carry and turn with the wrist (Zone::Fist);
 //     (or a closed hand ft-hands calls a pinch)          not a click (Params::fistIndex)
-//   two grabs (pinches or fists) on one panel          stretch, and turn on every axis with them
+//   two grabs (pinches or fists) on one panel          stretch, and turn on every axis with them; the
+//     (the second: anywhere on a panel the other holds)  second hand's pinch or fist joins (joinFront)
+//   pinch or poke on a round button (curve, reset...)   presses it (buttonReach: a bigger hit area)
 //   a carry by one hand let go moving out fast         thrown 3 m out along that line (cardThrow)
 //   an open-ing hand at a panel flicked out fast       flicked 3 m out from the eyes (flick); not
 //                                                       a poke, a wave, or "grab that"'s pull back
@@ -28,8 +30,10 @@
 //   a pinch or fist on a hand "grab that" has          waits: that gesture's, or ours if it lets go
 //   pinch or fist beyond the zone (or in its margin)   the pointer helper's (ray, gaze, grip drag)
 // A hold (a grab, a poke's or pinch's press) lasts through tracking loss and flickers until a clear
-// release (Params::holdLostMs); what it carries ignores frames no hand makes (Params::gate). The resize handle a laser or the gaze presses is vr.cpp's
-// (UpdateCorner); corners() tells it which corner a hand is at. The helper tells ft-screens which
+// release (Params::holdLostMs); what it carries ignores frames no hand makes (Params::gate). The
+// resize handle a laser or the gaze presses is vr.cpp's (UpdateCorner); corners() tells it which
+// corner a hand is at, and guide() what each hand's soft glow round a panel's corner, edge or button
+// shows (vr.cpp draws it). The helper tells ft-screens which
 // hands are bare and whether hand input is allowed now ("hands <L> <R> <allowed>" on @ft_screens;
 // vr.cpp).
 //
@@ -55,6 +59,10 @@ using Mat = handcut::Mat;
 
 // A panel's controls (vr.cpp's ControlOffsets), in the order of Screen::Controls().
 enum class Control { Bar, Curve, Roll, Tab, Dock, Close, Reset, None };
+
+// The round buttons a poke or a pinch presses (not the bar, the roll knob or the resize tab).
+inline bool PressableButton(Control c) { return c == Control::Curve || c == Control::Reset || c == Control::Dock || c == Control::Close; }
+const char *ControlName(Control c);
 
 // A control on (or by) the panel's surface: its centre u (right) and v (up), metres from
 // the panel's centre, and its half size.
@@ -248,6 +256,42 @@ struct Params {
     // it's that) or lets the hand go, at most grabThatWaitMs: on the user's flag, with a panel where
     // the gesture brings one, a pinch-click on the closing hand took the hand from it.
     double grabThatWaitMs = 600;
+    // The fourth live test (2026-10-10, flags 215945 and 215955: "I can't grab using fists to pull and
+    // resize and rearrange a display with the two anchor points"). The left fist took the panel; the
+    // right fist was a pinch to ft-hands that began with the thumb on the index while the other fingers
+    // were still closing (the index 1.07, the others 1.36; a frame later 0.86 and 0.82): a click on the
+    // content, held 1.8 s, and no second anchor; later in the live log a right fist went 8.5 cm through
+    // the panel ("not at it"), and fists held 11-13 cm in front of it were nobody's. So:
+    // a pinch on the content by a hand closing (its middle, ring and little fingers' mean under
+    // fistSettleCurl, down by fistSettleDrop or more over the last fistSettleMs) waits up to fistSettleMs
+    // to become a fist; if it doesn't, it clicks then (where it began), or as it ends. On the flags 27 of
+    // 146 pinches began as a hand closed into a fist (the three fingers 0.94-1.37 then, under 0.95 within
+    // 130 ms); a pinch by a still hand (those fingers where they were) clicks at once, as before;
+    double fistSettleMs = 150, fistSettleCurl = 1.4, fistSettleDrop = 0.1;
+    // a fist is at a panel with its palm, knuckles or curled middle finger up to fistFront in front of
+    // it (fistBack behind), over it or by its edge; a hand curled that far (the three fingers' mean
+    // under fistClaimCurl) is claimed that far out, so the pointer helper leaves its grip.
+    // HANDS_FIST_REACH (fistFront).
+    double fistFront = 0.11, fistBack = -0.10, fistClaimCurl = 1.2;
+    // A second hand at a panel the other hand holds: within joinFront in front of it (joinBack behind,
+    // joinMargin round it) its pinch or fist, anywhere on it, is the second anchor (a stretch: move with
+    // their midpoint, scale with their distance, turn with them), never a click or a poke, and it doesn't
+    // wait on "grab that". Nor does a push or a flick throw a panel a hand holds. 0: off (the second hand
+    // had to find a grab zone like the first). HANDS_JOIN_REACH (joinFront).
+    double joinFront = 0.15, joinBack = -0.12, joinMargin = 0.10;
+    // Buttons for hands (the fourth live test: "it's extremely difficult to interact with the button to
+    // make the curve curve and not"). At arm's reach the curve button is 8 mm across, 3.5 mm past the
+    // bar's end; the log's six pokes at it landed 3-5 mm left of its centre and the bar, listed first
+    // with a 1 cm margin, took them ("on the bar: not a poke"); a pinch there took the bar's grab zone.
+    // Now the nearest control wins, round buttons have a hit area at least buttonReach each way for a
+    // fingertip or a pinch, and a pinch on one presses it (pinchButtons, HANDS_PINCH_BUTTONS); a hand at
+    // one lights it (hovered) and shows a soft ring round it (guide). HANDS_BUTTON_REACH.
+    double buttonReach = 0.015;
+    bool pinchButtons = true;
+    // The soft white glow round a panel's corner (where a pinch resizes it), along its edge (where a pinch
+    // moves it) and round a button, per hand (guide(); vr.cpp draws it, cutouts on or off), instead of the
+    // cutout buffer's rings there and the resize handle following the hand. HANDS_EDGE_GLOW.
+    bool edgeGlow = true;
     double stretchDead = 0.01;  // two hands: their distance changes this much before the panel scales
     // Two hands turn the panel on every axis with the line between them, and roll it about that line
     // with their wrists (the mean of the two hands' turns about it, past rotDeadzone); off: about the
@@ -283,6 +327,11 @@ struct Params {
     // ...with `gate`, the turn's smoothing at most rotMaxCutoff Hz however fast the hand turns: a
     // flip the gate takes (gateFrames frames in a row of it) is followed over about 40 ms, not at once
     double rotMaxCutoff = 4;
+    // ...and a carried panel (one hand, not a card, or two) turns at most maxTurn degrees a tick (540
+    // deg/s at 90 Hz) about the hand's point: the fourth live test's fists made more carries, and a
+    // fist pulled in toward the face (flag-20261009-201252, replayed) flipped the panel 30-90 deg
+    // between ticks where CarryPose's facing has no steady answer. 0: no limit.
+    double maxTurn = 6;
     // Throws (user, 2026-10-10). Both send the panel throwDistance from the eyes, facing them, over
     // throwMs (ease-out); "grab that" brings it back.
     // The flick (HANDS_FLICK): a quick outward flick of an open hand at a panel. The palm within
@@ -346,7 +395,7 @@ struct Event {
     int side = 0;               // 0 left, 1 right
     int panel = -1;
     double x = 0, y = 0;        // buffer pixels (Motion, Press, Release)
-    handinput::Control control = Control::None;   // Control: the button poked
+    handinput::Control control = Control::None;   // Control: the button poked or pinched
     Zone zone = Zone::None;     // GrabStart
     int sx = 1, sy = -1;        // GrabStart by a corner: which one (+1 right, top)
     Mat to{};                   // Throw: where the panel goes
@@ -377,6 +426,21 @@ struct CornerAim {
     int sx = 1, sy = -1;
     double closeness = 0;
     bool held = false;
+};
+
+// What a hand's soft glow shows (Params::edgeGlow): a corner where a pinch resizes the panel (an L
+// round it: sx, sy), an edge where a pinch moves it (a short segment centred at u, v on that edge: sx
+// (left/right) or sy (bottom/top) nonzero), or a button (centre u, v, half size `size`). strength 0..1:
+// brighter the closer the fingers; selected: the hand holds it (resizing from that corner, pressing
+// the button).
+struct Guide {
+    enum Kind { None, Corner, Edge, Button } kind = None;
+    int panel = -1;
+    int sx = 0, sy = 0;
+    double u = 0, v = 0, size = 0;
+    double strength = 0;
+    bool selected = false;
+    handinput::Control control = Control::None;
 };
 
 // A hand at a panel, closer than the touch zone and its margin: its tip, the thumb-index contact or
@@ -420,8 +484,10 @@ void FromSurface(const Panel &p, double u, double v, double d, double out[3]);
 // Buffer pixels at u, v on the panel's content (a floating window's crop, or a popup over
 // it). False off the content.
 bool ToBuffer(const Panel &p, double u, double v, double *x, double *y);
-// The control under u, v (within `margin`), or Control::None.
-Control ControlAt(const Panel &p, double u, double v, double margin);
+// The control under u, v: the nearest one (by its own rectangle; a round button before the bar on a
+// tie) whose rectangle, round buttons' grown to at least buttonMin each way, is within `margin`; or
+// Control::None. (Before the fourth live test: the first in the list within `margin`.)
+Control ControlAt(const Panel &p, double u, double v, double margin, double buttonMin = 0);
 // The grab zone a pinch's contact at h is in (3.6, Params::band*), and for corners which one (sx,
 // sy: +1 right, top). excess: how far it is outside that zone (<= 0 inside), for the glow; the
 // zone is the nearest one then.
@@ -479,6 +545,8 @@ public:
     // Per panel index: an open hand's palm at it, facing it (a flick or a push would throw it), 0..1
     // nearer (vr.cpp highlights it).
     const std::map<int, double> &throwAims() const { return throwAims_; }
+    // Per side: the soft glow at a corner, edge or button (Params::edgeGlow).
+    const Guide &guide(int side) const { return guides_[side]; }
     const std::set<int> &nearPanels() const { return nearPanels_; }
     // The near claim, per side, for the last hands frame (for the helper's "near"): near, the hand's
     // ray stays hidden (with the leave margin and linger, so it doesn't flicker at the zone's edge);
@@ -487,7 +555,8 @@ public:
     bool near(int side) const { return side_[side].state != State::Idle && side_[side].state != State::Off; }
     bool claims(int side) const {
         const Side &sd = side_[side];
-        return sd.state == State::Press || sd.state == State::Grab || (sd.state == State::Hover && (sd.inZone || sd.fistWait || sd.pinchWait));
+        return sd.state == State::Press || sd.state == State::Grab ||
+               (sd.state == State::Hover && (sd.inZone || sd.fistWait || sd.pinchWait || sd.settleWait));
     }
     bool anyNear() const { return near(0) || near(1); }
     // A hand within Params::rateReach of a panel (for want-hz).
@@ -504,6 +573,10 @@ public:
     // ...and turning it with the wrist (past the dead zone)
     bool turning(int side) const { return grabbing(side) && side_[side].turning; }
     int grabPanel(int side) const { return side_[side].state == State::Grab ? side_[side].panel : -1; }
+    // A hand holds this panel.
+    bool heldByHand(int panel) const { return grabPanel(0) == panel || grabPanel(1) == panel; }
+    // A hand presses KWin's button on this panel (a poke's or a pinch's).
+    int pressPanel(int side) const { return pressingKwin(side) ? side_[side].panel : -1; }
     // "left hover 2 d 0.031, right idle"
     std::string Describe() const;
 
@@ -523,6 +596,9 @@ public:
         int flicks = 0, throws = 0, heldFlick = 0;   // flicks and card throws; pokes not taken from a flick
         int pushes = 0, heldOpen = 0;                // pushes; pokes not taken from an open hand (Params::push)
         int fistPinches = 0;                         // fist grabs ft-hands called pinches (Params::fistIndex)
+        int settles = 0, settledFists = 0;           // pinches that waited to become fists (Params::fistSettleMs), and did
+        int joins = 0;                               // second hands joining a held panel (Params::joinFront)
+        int buttonPinches = 0, heldByOther = 0;      // buttons pressed by a pinch; pokes refused on a panel the other hand holds
         int gated = 0, turnsGated = 0, moved = 0;    // frames the gates dropped; places they took after gateFrames
         int edgeFrames = 0, monoFrames = 0;          // held frames smoothed harder: near the edge of view, one camera
     } stats;
@@ -582,6 +658,10 @@ private:
         bool fistByPinch = false;            // ...that ft-hands called a pinch (Params::fistIndex): either ends it
         bool fistWait = false, pinchWait = false;   // a fist or pinch waiting on "grab that"
         int64_t waitSince = 0;
+        // a pinch on the content waiting to become a fist (Params::fistSettleMs): where it began
+        bool settleWait = false;
+        int64_t settleSince = 0;
+        float settleAt[3] = {0, 0, 0};
         int waitPanel = -1;
         Zone zone = Zone::None;
         int sx = 1, sy = -1;
@@ -626,7 +706,7 @@ private:
     enum Why : unsigned {
         kOneFrame = 1, kOneView = 2, kBent = 4, kNotNearest = 8, kPinching = 16, kBusy = 32, kOtherHand = 64,
         kTooSoon = 128, kSpent = 256, kNotOut = 16384, kLate = 32768, kResting = 512, kTyping = 1024, kAskew = 2048, kSlow = 4096, kOffContent = 8192,
-        kFlick = 65536, kOpenHand = 131072
+        kFlick = 65536, kOpenHand = 131072, kHeld = 262144
     };
     const handcut::Hand *HandFor(int side, const std::vector<handcut::Hand> &hands, uint32_t prefer) const;
     void Poke(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand *h);
@@ -638,6 +718,16 @@ private:
     // A grip began (or waited on "grab that": waited): the fist grab, if the hand is at its panel.
     // byPinch: ft-hands called it a pinch (a closed hand, Params::fistIndex).
     void FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited, bool byPinch = false);
+    // A pinch on the content (not a grab zone): a click where the fingers met (at c), held with the pinch.
+    void PinchClick(int s, const Input &in, const std::vector<Panel> &panels, const float c[3]);
+    // A pinch or a grip that began at a panel the other hand holds: the second anchor (Params::joinFront).
+    void Join(int s, const Input &in, const std::vector<Panel> &panels, bool byGrip);
+    // A pinch on a round button (Params::pinchButtons): pressed, held with the pinch. False: none there.
+    bool PinchButton(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand &h);
+    // The hand is a fist (Params::fistIndex, fistCurl).
+    bool IsFist(const handcut::Hand &h) const;
+    // The other hand holds this side's panel (the join's zone applies).
+    bool JoinsOther(int s) const;
     // Which panel the hand is near (the claim), before the pinch and grip begins are read.
     void Near(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand *h);
     // Takes the panel by a hand: the carried point (knuckles) and the wrist's turn start afresh.
@@ -654,6 +744,8 @@ private:
     void Log(const char *fmt, ...) __attribute__((format(printf, 2, 3)));
     void Carries(const Input &in, const std::vector<Panel> &panels);
     void Glows(const Input &in, const std::vector<Panel> &panels);
+    // Each hand's soft glow (guides_): a button it's at or pressing, the corner or edge a pinch would take.
+    void Guides(const Input &in, const std::vector<Panel> &panels);
     // A flick by this hand at a panel (Params::flick), on a hands frame.
     void Flick(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand &h);
     // A push by this hand into a panel (Params::push), on a hands frame.
@@ -705,6 +797,7 @@ private:
     std::map<int, unsigned> hovered_;
     std::map<int, CornerAim> corners_;
     std::map<int, double> throwAims_;
+    Guide guides_[2];
     std::set<int> nearPanels_;
     uint64_t frame_ = 0;
     bool newFrame_ = false;
@@ -721,6 +814,8 @@ private:
         double hand0[2][3][3] = {};
         bool haveHand0[2] = {false, false}, twisting = false;
         double twistFrom = 0;
+        Mat last{};                  // its pose last tick (Params::maxTurn)
+        bool haveLast = false;
     } stretch_;
 };
 

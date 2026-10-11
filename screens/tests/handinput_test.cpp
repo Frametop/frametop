@@ -151,6 +151,7 @@ struct SynthHand {
     double tiltDeg = 20;               // fingertips up: the palm turns toward the head behind it
     int curl = 0;                      // middle, ring and little: 0 open, 1 half curled, 2 a fist
     int curlIndex = 0;                 // ...and the index, likewise (grab that's fist)
+    double curlT = -1, curlIndexT = -1;   // ...or in between (0..2: open, half, fist), a hand closing
     // a pointing hand (PointingHand) whose middle finger the tracker has nearly straight: its tip
     // this much deeper (toward where the index points) than the index tip (NaN: curled)
     double middleTip = NAN;
@@ -173,10 +174,21 @@ void PalmHand(const SynthHand &h, float out[21][3]) {
     static const float fist[3][3][3] = {{{0.005f, 0.03f, -0.11f}, {0.005f, 0.04f, -0.09f}, {0.005f, 0.03f, -0.07f}},
                                         {{-0.013f, 0.03f, -0.105f}, {-0.013f, 0.04f, -0.085f}, {-0.013f, 0.03f, -0.068f}},
                                         {{-0.03f, 0.03f, -0.095f}, {-0.03f, 0.035f, -0.08f}, {-0.03f, 0.028f, -0.065f}}};
-    for (int f = 0; f < 3 && h.curl; ++f) std::memcpy(out[10 + 4 * f], h.curl == 1 ? half[f] : fist[f], sizeof half[f]);
+    for (int f = 0; f < 3 && h.curl && h.curlT < 0; ++f) std::memcpy(out[10 + 4 * f], h.curl == 1 ? half[f] : fist[f], sizeof half[f]);
     static const float halfIndex[3][3] = {{0.027f, 0.02f, -0.13f}, {0.027f, 0.035f, -0.135f}, {0.027f, 0.04f, -0.13f}};
     static const float fistIndex[3][3] = {{0.027f, 0.03f, -0.11f}, {0.027f, 0.04f, -0.09f}, {0.027f, 0.03f, -0.07f}};
-    if (h.curlIndex) std::memcpy(out[6], h.curlIndex == 1 ? halfIndex : fistIndex, sizeof halfIndex);
+    if (h.curlIndex && h.curlIndexT < 0) std::memcpy(out[6], h.curlIndex == 1 ? halfIndex : fistIndex, sizeof halfIndex);
+    // in between: open (as base) to half curled to a fist
+    auto mix = [](const float open[3][3], const float a[3][3], const float b[3][3], double t, float dst[][3]) {
+        for (int j = 0; j < 3; ++j)
+            for (int i = 0; i < 3; ++i) {
+                const double x = t <= 1 ? open[j][i] + (a[j][i] - open[j][i]) * t : a[j][i] + (b[j][i] - a[j][i]) * (t - 1);
+                dst[j][i] = float(x);
+            }
+    };
+    if (h.curlT >= 0)
+        for (int f = 0; f < 3; ++f) mix(&base[10 + 4 * f], half[f], fist[f], std::clamp(h.curlT, 0.0, 2.0), &out[10 + 4 * f]);
+    if (h.curlIndexT >= 0) mix(&base[6], halfIndex, fistIndex, std::clamp(h.curlIndexT, 0.0, 2.0), &out[6]);
     const double r = h.rollDeg * M_PI / 180, a = h.tiltDeg * M_PI / 180;
     double c[3] = {0, 0, 0};
     for (int j = 0; j < 21; ++j) {
@@ -1524,7 +1536,7 @@ void TestForgivingZones() {
         {-0.35, -0.29, 0.0, Zone::Edge, "on the bottom edge"},
         {0.53, 0.30, 0.01, Zone::Corner, "by the top right corner"},
         {-0.47, -0.25, 0.0, Zone::Corner, "inside the bottom left corner"},
-        {0.2, -0.30, 0.01, Zone::Bar, "by the bar"},
+        {0.1, -0.30, 0.01, Zone::Bar, "by the bar"},
         {0.0, 0.0, 0.01, Zone::None, "the middle (a click)"},
         {0.44, 0.0, 0.01, Zone::None, "6 cm inside the right edge (a click)"},
     };
@@ -1539,9 +1551,11 @@ void TestForgivingZones() {
         if (!ok) std::printf("forgiving zones: %s: %s\n", c.what, g ? ZoneName(g->zone) : r.Count(Event::Press) ? "a click" : "nothing");
         CHECK(ok);
     }
-    // the glow before the pinch: amber at a corner (resize), blue by an edge (move)
+    // the cutout buffer's glow before the pinch (HANDS_EDGE_GLOW=0): amber at a corner (resize), blue by
+    // an edge (move)
     auto glowColour = [](double u, double v) {
         Rig r;
+        r.in.params().edgeGlow = false;
         SynthHand h = PinchAt(u, v, 0.01);
         h.open = 0.6;
         for (int k = 0; k < 5; ++k) r.Frame({h});
@@ -3161,9 +3175,30 @@ void TestGrabThatPlace() {
     CHECK(aim(0.05, -0.02, -0.4) == 0);
     CHECK(aim(-0.28, 0, -0.28) == 1);    // 45 degrees left
     CHECK(aim(0.28, 0.04, -0.28) == 2);  // the curved one, 45 degrees right
-    CHECK(aim(0.5, 0.3, -0.05) == 0);    // nothing that way (off to the right and up): where the head points
-    f.head = RotY(-M_PI / 2, 0, 0, 0);    // looking right, palm at nothing: nothing within 20 deg
-    CHECK(aim(0, -0.4, 0.3) == -1);
+    CHECK(aim(0.5, 0.3, -0.05) == -1);   // nothing that way (off to the right and up): nothing (the fourth live test)
+    {
+        grabthat::Params cone = k;        // ...with the head's cone (before it): where the head points
+        cone.headCone = 20;
+        f.palm[0] = 0.5, f.palm[1] = 0.3, f.palm[2] = -0.05;
+        CHECK(grabthat::Pick(panels, f, cone) == 0);
+        f.head = RotY(-M_PI / 2, 0, 0, 0);    // looking right, palm at nothing: nothing within 20 deg
+        f.palm[0] = 0, f.palm[1] = -0.4, f.palm[2] = 0.3;
+        CHECK(grabthat::Pick(panels, f, cone) == -1);
+        f.head = Identity();
+    }
+    // the line has to meet the panel itself now (no margin): 2 cm past the big one's left edge, nothing
+    CHECK(aim(-(0.8 + 0.02) * 0.4 / 2, 0, -0.4) == -1);
+    CHECK(aim(-(0.8 - 0.02) * 0.4 / 2, 0, -0.4) == 0);
+    {   // a panel within arm's reach (0.8 m of the eyes) isn't taken: the one behind it is
+        std::vector<Target> two = panels;
+        two.push_back(Target{});
+        two.back().index = 7, two.back().pose = At(0, -0.1, -0.45), two.back().width = 0.6, two.back().height = 0.34;
+        f.palm[0] = 0.02, f.palm[1] = -0.02, f.palm[2] = -0.4;
+        CHECK(grabthat::Pick(two, f, k) == 0);
+        grabthat::Params old = k;
+        old.nearest = 0;   // (before: the near one)
+        CHECK(grabthat::Pick(two, f, old) == 7);
+    }
     // the curved panel's surface: from its axis straight ahead, it's met r away at u = 0
     double u, v, t;
     const double from[3] = {1.5, 0.2, -1.5 + 1.5}, dir[3] = {0, 0, -1};
@@ -3212,10 +3247,12 @@ void TestGrabThatPlace() {
         const double off = 0.30 + 0.14;   // at 3 m
         g.palm[0] = off * 0.4 / 3, g.palm[1] = 0, g.palm[2] = -0.4;
         g.head = RotY(M_PI / 2, 0, 0, 0);   // looking left: the head's cone can't pick it, only the palm's line
+        grabthat::Params wide = k;          // (with the margin it had before the fourth live test)
+        wide.aimMargin = 0.10, wide.aimMarginDeg = 3;
+        CHECK(grabthat::Pick(far, g, wide) == 5);
+        CHECK(grabthat::Pick(far, g, k) == -1);   // now: the line has to meet it
+        g.palm[0] = 0.25 * 0.4 / 3;               // ...on it: it comes
         CHECK(grabthat::Pick(far, g, k) == 5);
-        grabthat::Params narrow = k;
-        narrow.aimMarginDeg = 0;
-        CHECK(grabthat::Pick(far, g, narrow) == -1);
         CHECK(grabthat::Decide(false, far[0].pose, Identity(), k) == Outcome::Bring);
     }
 }
@@ -3359,9 +3396,18 @@ struct FlagFrame {
     std::shared_ptr<fh_hands_v2_t> file;
     fh_gestures_t g{};
 };
-bool LoadFlag(const std::string &dir, std::vector<FlagFrame> &frames) {
+bool LoadFlags(const std::vector<std::string> &dirs, std::vector<FlagFrame> &frames);
+bool LoadFlag(const std::string &dir, std::vector<FlagFrame> &frames) { return LoadFlags({dir}, frames); }
+// ...flags one after the other as one (their frames in time order, each once)
+bool LoadFlags(const std::vector<std::string> &dirs, std::vector<FlagFrame> &frames) {
     std::vector<Json> sets, poses;
-    if (!ReadJsonLines(dir + "/sets.jsonl", sets) || !ReadJsonLines(dir + "/hmd.jsonl", poses)) return false;
+    for (const std::string &dir : dirs)
+        if (!ReadJsonLines(dir + "/sets.jsonl", sets) || !ReadJsonLines(dir + "/hmd.jsonl", poses)) return false;
+    auto t = [](const Json &j, const char *k) { return j[k] ? j[k]->num : 0.0; };
+    std::stable_sort(sets.begin(), sets.end(), [&](const Json &x, const Json &y) { return t(x, "t_raw_ns") < t(y, "t_raw_ns"); });
+    sets.erase(std::unique(sets.begin(), sets.end(), [&](const Json &x, const Json &y) { return t(x, "t_raw_ns") == t(y, "t_raw_ns"); }),
+               sets.end());
+    std::stable_sort(poses.begin(), poses.end(), [&](const Json &x, const Json &y) { return t(x, "t_ns") < t(y, "t_ns"); });
     std::vector<std::pair<double, Mat>> heads;
     for (const Json &j : poses) {
         if (!j["t_ns"] || !j["m"] || j["m"]->items.size() != 12) continue;
@@ -3457,7 +3503,14 @@ void PlayFrames(const std::vector<FlagFrame> &fr, size_t from, size_t to, handcu
                 palm->Update(pin);
                 for (int s2 = 0; s2 < 2; ++s2) i.allowed[s2] = !palm->shown(s2);
             }
-            for (int s2 = 0; s2 < 2; ++s2) i.grabThatArmed[s2] = det && det->armed(s2);
+            // ("grab that" has the hand only while it aims at a panel it would take: vr.cpp's GrabThatAims)
+            for (int s2 = 0; s2 < 2; ++s2) {
+                grabthat::Fire aim;
+                double progress = 0;
+                std::vector<grabthat::Target> targets;
+                for (const Panel &P : panels) targets.push_back({P.index, P.pose, P.width, P.height, P.curve});
+                i.grabThatArmed[s2] = det && det->armed(s2) && det->Aim(s2, &aim, &progress) && grabthat::Pick(targets, aim, det->params()) >= 0;
+            }
             in.Update(i, panels);
             if (first && det) {
                 bool allowed[2];
@@ -3853,7 +3906,8 @@ void TestFistPinch() {
         const double l[3] = {-0.3, 0, -0.45}, rr[3] = {0.3, 0, -0.45};
         r.synth.Pinch(0, true, r.t, l, 1), r.synth.Pinch(1, true, r.t, rr, 2);
         r.Frame(both(0, 0, 0));
-        CHECK(r.Count(Event::GrabStart) == 2 && r.in.stats.fistPinches == 2 && r.Count(Event::Press) == 0);
+        // (the left one takes it, the right one joins it: Params::joinFront)
+        CHECK(r.Count(Event::GrabStart) == 2 && r.in.stats.fistPinches + r.in.stats.joins == 2 && r.Count(Event::Press) == 0);
         auto run = [&](double sep, double lift, double tilt) {
             for (int k = 1; k <= 45; ++k) {
                 const double f = std::min(1.0, k / 30.0);
@@ -3956,10 +4010,10 @@ void TestPinchSlack() {
         Rig r;
         r.in.params().nearFront = 0.10, r.in.params().pinchSlack = slack;   // (claimed at 9 cm: a wider zone)
         const double v = -0.28125 - 0.01;   // just under the bottom edge
-        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0.2, v, 0.09)});
-        const double at[3] = {0.2, v, -0.41};
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0.1, v, 0.09)});
+        const double at[3] = {0.1, v, -0.41};
         r.synth.Pinch(1, true, r.t, at, 1);
-        r.Frame({PinchAt(0.2, v, 0.09)});
+        r.Frame({PinchAt(0.1, v, 0.09)});
         std::printf("pinch slack %.0f cm: a pinch 9 cm out by the border: %s\n", slack * 100, r.Count(Event::GrabStart) ? "grabs" : "nothing");
         CHECK((r.Count(Event::GrabStart) == 1) == (slack > 0));
     }
@@ -4056,9 +4110,30 @@ void TestGrabThatAtNearPanel() {
                     run.stats.fistsWaited, run.stats.fistsCancelled, run.stats.nearFrames, run.stats.frames);
         if (std::getenv("HANDINPUT_LOG"))
             for (const std::string &l : run.logs) std::printf("    %s\n", l.c_str());
-        CHECK(run.fires.size() == 2);
-        CHECK(presses == 0 && grabs == 0 && run.stats.flicks == 0);   // (grab that's pull back isn't a flick)
+        // since the fourth live test grab that doesn't take a panel at arm's reach: the closing hand's
+        // fist takes it instead (it doesn't wait on grab that), and nothing clicks, flicks or pushes it
+        const std::vector<grabthat::Target> t{{P.index, P.pose, P.width, P.height, P.curve}};
+        CHECK(grabthat::Pick(t, fires[0], gk) == -1);
+        CHECK(presses == 0 && run.stats.flicks == 0);   // (grab that's pull back isn't a flick)
         CHECK(run.stats.pushes == 0);   // (nor its open hand held out to the panel a push)
+    }
+    {   // the same at a panel 1.6 m out along the aim: both fire at it, and no hand input
+        const grabthat::Fire &f = fires[0];
+        const double aim[3] = {f.palm[0] - f.eye[0], f.palm[1] - f.eye[1], f.palm[2] - f.eye[2]};
+        const double l = std::sqrt(aim[0] * aim[0] + aim[1] * aim[1] + aim[2] * aim[2]);
+        const double at[3] = {f.eye[0] + aim[0] / l * 1.6, f.eye[1] + aim[1] / l * 1.6, f.eye[2] + aim[2] / l * 1.6};
+        Panel P = Facing(at, 0, f.eye);
+        P.width = 1.0, P.height = 0.5625;
+        FlagRun run;
+        FlagThroughHandInput(dir, {P}, run);
+        int presses = 0, grabs = 0;
+        for (const Event &e : run.events) presses += e.type == Event::Press, grabs += e.type == Event::GrabStart;
+        const std::vector<grabthat::Target> t{{P.index, P.pose, P.width, P.height, P.curve}};
+        int picked = 0;
+        for (const auto &x : run.fires) picked += grabthat::Pick(t, x, grabthat::Params{}) == P.index;
+        std::printf("grab that at a panel 1.6 m out along the aim (the user's flag): %zu fire(s), %d at it, %d presses, %d grabs\n",
+                    run.fires.size(), picked, presses, grabs);
+        CHECK(run.fires.size() == 2 && picked == 2 && presses == 0 && grabs == 0);
     }
 }
 
@@ -4082,20 +4157,413 @@ void TestGrabThatFlag() {
     }
 }
 
+// ------------------------------------------------------------------- the fourth live test (2026-10-10)
+
+// A panel as the live test had it after "grab that": 0.6 m wide, 3440x1440, half a metre ahead (as
+// TestPanel), with vr.cpp's controls for its distance (0.45 m: chrome 5.7 cm, buttons 8 mm).
+Panel LivePanel() {
+    Panel p = TestPanel();
+    p.width = 0.6, p.height = 0.6 * 1440 / 3440, p.pxW = 3440, p.pxH = 1440;
+    const double chrome = 0.057, grip = 0.0081, gap = chrome * 0.06, barY = -(p.height / 2 + gap + chrome * 12 / 256);
+    p.controls = {{Control::Bar, 0, barY, chrome / 2, chrome * 12 / 256},
+                  {Control::Curve, chrome / 2 + gap + grip / 2, barY, grip / 2, grip / 2},
+                  {Control::Roll, chrome / 2 + gap * 2 + grip * 1.5, barY, grip / 2, grip / 2},
+                  {Control::Tab, p.width / 2 + grip / 2, -(p.height / 2 + grip / 2), grip / 2, grip / 2},
+                  {Control::Reset, -(chrome / 2 + gap + grip / 2), barY, grip / 2, grip / 2}};
+    return p;
+}
+
+// Buttons for hands: the nearest control wins, round ones have a bigger hit area, a pinch presses them.
+void TestButtons() {
+    const Panel p = LivePanel();
+    const Spot &bar = p.controls[0], &curve = p.controls[1];
+    const double v = curve.v;
+    // the live log's pokes at the curve button: 3-5 mm left of its centre, which the bar took
+    CHECK(ControlAt(p, curve.u - 0.005, v, 0.01, 0.015) == Control::Curve);
+    CHECK(ControlAt(p, curve.u - 0.004, v + 0.002, 0.01) == Control::Curve);   // (nearest: even without the bigger area)
+    CHECK(ControlAt(p, bar.u + 0.02, v, 0.01, 0.015) == Control::Bar);        // on the bar: the bar
+    CHECK(ControlAt(p, curve.u, v - 0.016, 0.005, 0.015) == Control::Curve);  // 1.6 cm under it: the bigger area
+    CHECK(ControlAt(p, curve.u, v - 0.016, 0.005) == Control::None);
+    CHECK(ControlAt(p, p.controls[2].u + 0.002, v, 0.005, 0.015) == Control::Roll);   // the roll button next to it
+    // a poke 4 mm left of the curve button's centre presses it
+    {
+        Rig r;
+        r.panels = {LivePanel()};
+        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(curve.u - 0.004, v, mm / 1000.0)});
+        CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == Control::Curve && r.Count(Event::Press) == 0);
+        std::printf("buttons: a poke 4 mm left of the 8 mm curve button: %s\n", r.Count(Event::Control) ? "pressed it" : "nothing");
+    }
+    // a pinch on it: lit before (hovered, its guide), pressed once, held with the pinch, no grab
+    {
+        Rig r;
+        r.panels = {LivePanel()};
+        SynthHand h = PinchAt(curve.u - 0.003, v, 0.01);
+        h.open = 0.6;
+        for (int k = 0; k < 5; ++k) r.Frame({h});
+        CHECK(r.in.hovered().count(0) && (r.in.hovered().at(0) >> int(Control::Curve) & 1));
+        CHECK(r.in.guide(1).kind == Guide::Button && r.in.guide(1).control == Control::Curve && !r.in.guide(1).selected);
+        const double at[3] = {curve.u, v, -0.49};
+        h.open = 0;
+        r.synth.Pinch(1, true, r.t, at, 1);
+        for (int k = 0; k < 5; ++k) r.Frame({h});
+        CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == Control::Curve);
+        CHECK(r.Count(Event::GrabStart) == 0 && r.Count(Event::Press) == 0 && r.in.pressing(1) && r.in.stats.buttonPinches == 1);
+        CHECK(r.in.guide(1).kind == Guide::Button && r.in.guide(1).selected);
+        r.synth.Pinch(1, false, r.t, at, 1);
+        h.open = 1;
+        for (int k = 0; k < 4; ++k) r.Frame({h});
+        CHECK(!r.in.pressing(1) && r.Count(Event::Release) == 0 && r.Count(Event::Control) == 1);
+        // HANDS_PINCH_BUTTONS=0: the bar's grab zone takes it (before the fourth live test)
+        Rig o;
+        o.panels = {LivePanel()};
+        o.in.params().pinchButtons = false;
+        h.open = 0.6;
+        for (int k = 0; k < 5; ++k) o.Frame({h});
+        o.synth.Pinch(1, true, o.t, at, 1);
+        h.open = 0;
+        o.Frame({h});
+        CHECK(o.Count(Event::Control) == 0 && o.Count(Event::GrabStart) == 1 && o.Last(Event::GrabStart)->zone == Zone::Bar);
+    }
+    // a pinch on the bar still takes the bar
+    {
+        Rig r;
+        r.panels = {LivePanel()};
+        SynthHand h = PinchAt(bar.u - 0.01, v, 0.01);
+        for (int k = 0; k < 5; ++k) r.Frame({h});
+        const double at[3] = {bar.u, v, -0.49};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({h});
+        CHECK(r.Count(Event::Control) == 0 && r.Count(Event::GrabStart) == 1 && r.Last(Event::GrabStart)->zone == Zone::Bar);
+    }
+}
+
+// The soft glow per hand (Guide, Params::edgeGlow): what a pinch would take, brighter closer.
+void TestGuides() {
+    auto at = [](double u, double v, double d, int pinchFrames = 0) {
+        Rig r;
+        SynthHand h = PinchAt(u, v, d);
+        h.open = 0.6;
+        for (int k = 0; k < 5; ++k) r.Frame({h});
+        if (pinchFrames) {
+            const double p[3] = {u, v, -0.5 + d};
+            r.synth.Pinch(1, true, r.t, p, 1);
+            h.open = 0;
+            for (int k = 0; k < pinchFrames; ++k) r.Frame({h});
+        }
+        return r.in.guide(1);
+    };
+    const double W = 0.5, H = 0.5625 / 2;
+    Guide g = at(0.0, 0.0, 0.02);   // the middle: nothing
+    CHECK(g.kind == Guide::None);
+    g = at(W + 0.01, H + 0.01, 0.20);   // 20 cm in front of the top right corner: nothing yet
+    CHECK(g.kind == Guide::None);
+    // (a hand shows one once it's near the panel: in the touch zone, or just out of it)
+    const Guide outside = at(W + 0.06, H + 0.04, 0.02), inside = at(W - 0.005, H - 0.005, 0.01), atCorner = at(W, H, 0.0);
+    std::printf("guides: the top right corner, the fingers 7 cm off it %.2f, 1 cm inside it %.2f, at it %.2f\n", outside.strength,
+                inside.strength, atCorner.strength);
+    CHECK(outside.kind == Guide::Corner && outside.sx == 1 && outside.sy == 1 && !outside.selected);
+    CHECK(inside.kind == Guide::Corner && atCorner.kind == Guide::Corner);
+    CHECK(outside.strength > 0 && outside.strength < 0.5 && inside.strength > outside.strength && atCorner.strength >= inside.strength &&
+          atCorner.strength > 0.9);
+    g = at(-W - 0.02, -H + 0.01, 0.01);   // the bottom left
+    CHECK(g.kind == Guide::Corner && g.sx == -1 && g.sy == -1);
+    g = at(W + 0.02, 0.05, 0.01);         // by the right edge, 5 cm above the middle: a segment there
+    CHECK(g.kind == Guide::Edge && g.sx == 1 && g.sy == 0);
+    NEAR(g.u, W, 1e-6), NEAR(g.v, 0.05, 0.01);
+    g = at(-0.2, H + 0.02, 0.01);         // over the top edge
+    CHECK(g.kind == Guide::Edge && g.sy == 1 && g.sx == 0);
+    NEAR(g.u, -0.2, 0.01);
+    // resizing from that corner: lit
+    g = at(W - 0.01, -H + 0.01, 0.01, 3);
+    CHECK(g.kind == Guide::Corner && g.selected && g.strength == 1 && g.sx == 1 && g.sy == -1);
+    // the cutout buffer's corner and edge rings give way to it (HANDS_EDGE_GLOW)
+    Rig r;
+    SynthHand h = PinchAt(W + 0.01, H + 0.01, 0.01);
+    h.open = 0.6;
+    for (int k = 0; k < 5; ++k) r.Frame({h});
+    bool ring = false;
+    if (r.in.glows().count(0))
+        for (const auto &x : r.in.glows().at(0)) ring = ring || x.ring;
+    CHECK(!ring);
+}
+
+// A fist made at a panel: the hand closing (the thumb meets the index first: a pinch to ft-hands)
+// waits to become a fist; a still pinch clicks at once; fists reach 11 cm in front, 10 cm behind.
+SynthHand Closing(double u, double v, double palmD, double t, bool right = true, uint32_t id = 1) {
+    SynthHand h = FistAt(u, v, palmD, right, id);
+    h.curl = h.curlIndex = 0, h.curlT = t, h.curlIndexT = t;
+    return h;
+}
+void TestFistSettle() {
+    {   // closing: open -> half (the pinch begins, the others 1.3) -> a fist 67 ms later: a fist grab
+        Rig r;
+        for (int k = 0; k < 5; ++k) r.Frame({Closing(0.1, 0, 0.05, 0)});
+        r.Frame({Closing(0.1, 0, 0.05, 0.6)});
+        const double at[3] = {0.1, 0, -0.45};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({Closing(0.1, 0, 0.05, 1.2)});
+        CHECK(r.Count(Event::Press) == 0 && r.Count(Event::GrabStart) == 0 && r.in.stats.settles == 1);
+        r.Frame({Closing(0.1, 0, 0.05, 1.7)});
+        r.Frame({Closing(0.1, 0, 0.05, 2.0)});
+        CHECK(r.Count(Event::Press) == 0 && r.Count(Event::GrabStart) == 1 && r.Last(Event::GrabStart)->zone == Zone::Fist);
+        CHECK(r.in.stats.settledFists == 1);
+        // before (no wait): the click on the content, as in the live test
+        Rig o;
+        o.in.params().fistSettleMs = 0;
+        for (int k = 0; k < 5; ++k) o.Frame({Closing(0.1, 0, 0.05, 0)});
+        o.Frame({Closing(0.1, 0, 0.05, 0.6)});
+        o.synth.Pinch(1, true, o.t, at, 1);
+        o.Frame({Closing(0.1, 0, 0.05, 1.2)});
+        o.Frame({Closing(0.1, 0, 0.05, 2.0)});
+        CHECK(o.Count(Event::Press) == 1 && o.Count(Event::GrabStart) == 0);
+    }
+    {   // a still pinch (the other fingers where they were): a click at once
+        Rig r;
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0.1, 0, 0.02)});
+        const double at[3] = {0.1, 0, -0.48};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({PinchAt(0.1, 0, 0.02)});
+        CHECK(r.Count(Event::Press) == 1 && r.in.stats.settles == 0);
+    }
+    {   // closing, but it stays a pinch: the click 150 ms on, where it began
+        Rig r;
+        for (int k = 0; k < 5; ++k) r.Frame({Closing(0.1, 0, 0.05, 0)});
+        r.Frame({Closing(0.1, 0, 0.05, 0.6)});
+        const double at[3] = {0.1, 0, -0.45};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        int frames = 0;
+        for (; frames < 10 && !r.Count(Event::Press); ++frames) r.Frame({Closing(0.1, 0, 0.05, 1.2)});
+        std::printf("fist settle: a closing hand's pinch that stays a pinch clicks %d frame(s) on\n", frames - 1);
+        CHECK(r.Count(Event::Press) == 1 && frames >= 4 && frames <= 7 && r.Count(Event::GrabStart) == 0);
+    }
+    // the fist's reach: 10 cm in front, 8.5 cm behind (the live log's "not at it"): it takes it; 14 cm: not
+    for (double d : {0.10, -0.085, 0.14}) {
+        Rig r;
+        for (int k = 0; k < 5; ++k) r.Frame({FistAt(0.1, 0, d)});
+        const double at[3] = {0.1, 0, -0.5 + d};
+        r.synth.Grip(1, true, r.t, at, 1);
+        r.Frame({FistAt(0.1, 0, d)});
+        CHECK((r.Count(Event::GrabStart) == 1) == (d < 0.12));
+        CHECK(r.in.claims(1) == (d < 0.12));   // (claimed: the pointer helper leaves its grip)
+    }
+}
+
+// Two anchors: a second hand's pinch or fist anywhere on a panel the other hand holds joins it.
+void TestJoin() {
+    auto leftHolds = [](Rig &r) {
+        for (int k = 0; k < 5; ++k) r.Frame({FistAt(-0.45, 0, 0.05, false, 1)});
+        const double l[3] = {-0.45, 0, -0.45};
+        r.synth.Grip(0, true, r.t, l, 1);
+        r.Frame({FistAt(-0.45, 0, 0.05, false, 1)});
+        CHECK(r.in.grabbing(0));
+    };
+    {   // a pinch on the content: joins (no click), and they stretch it
+        Rig r;
+        leftHolds(r);
+        SynthHand p = PinchAt(0.2, 0.05, 0.03, true, 2);
+        p.open = 0.6;
+        for (int k = 0; k < 4; ++k) r.Frame({FistAt(-0.45, 0, 0.05, false, 1), p});
+        const double at[3] = {0.2, 0.05, -0.47};
+        r.synth.Pinch(1, true, r.t, at, 2);
+        p.open = 0;
+        r.Frame({FistAt(-0.45, 0, 0.05, false, 1), p});
+        CHECK(r.Count(Event::Press) == 0 && r.in.grabbing(1) && r.in.stats.joins == 1);
+        CHECK(r.carries.size() == 1 && r.carries[0].kind == Carry::Stretch && r.carries[0].sides == 3);
+        // HANDS_JOIN_REACH=0: the pinch clicks the content (the live test's second hand)
+        Rig o;
+        o.in.params().joinFront = 0;
+        leftHolds(o);
+        p.open = 0.6;
+        for (int k = 0; k < 4; ++k) o.Frame({FistAt(-0.45, 0, 0.05, false, 1), p});
+        o.synth.Pinch(1, true, o.t, at, 2);
+        p.open = 0;
+        o.Frame({FistAt(-0.45, 0, 0.05, false, 1), p});
+        CHECK(o.Count(Event::Press) == 1 && !o.in.grabbing(1));
+    }
+    {   // a fist 13 cm in front of the held panel (out of the fist's own reach): joins; then the pair moves
+        // it (midpoint 10 cm right), scales it (20 cm further apart) and rolls it (the right one 10 cm up)
+        Rig r;
+        leftHolds(r);
+        for (int k = 0; k < 4; ++k) r.Frame({FistAt(-0.45, 0, 0.05, false, 1), FistAt(0.45, 0, 0.13, true, 2)});
+        const double at[3] = {0.45, 0, -0.37};
+        r.synth.Grip(1, true, r.t, at, 2);
+        r.Frame({FistAt(-0.45, 0, 0.05, false, 1), FistAt(0.45, 0, 0.13, true, 2)});
+        CHECK(r.in.grabbing(1) && r.in.stats.joins == 1 && r.Last(Event::GrabStart)->zone == Zone::Fist);
+        const Mat start = r.panels[0].pose;
+        for (int k = 1; k <= 45; ++k) {
+            const double f = std::min(1.0, k / 30.0);
+            r.Frame({FistAt(-0.45 + 0.1 * f - 0.1 * f, 0, 0.05, false, 1), FistAt(0.45 + 0.1 * f + 0.1 * f, 0.1 * f, 0.13, true, 2)});
+        }
+        CHECK(r.carries.size() == 1 && r.carries[0].kind == Carry::Stretch);
+        if (r.carries.size() == 1) {
+            double y = 0, p = 0, w = 0;
+            FacingTurn(r.carries[0].pose, &y, &p, &w);
+            const double moved = r.carries[0].pose.m[0][3] - start.m[0][3];
+            std::printf("two anchors (a fist joining 13 cm out): the pair 10 cm right, 20 cm apart, the right 10 cm up -> moved "
+                        "%.1f cm, %.2f m wide (from 1.00), roll %.1f deg\n", moved * 100, r.carries[0].width, w);
+            CHECK(r.carries[0].width > 1.15 && r.carries[0].width < 1.30);
+            NEAR(std::fabs(w), std::atan2(0.1, 1.1) * 180 / M_PI, 2.0);
+            CHECK(moved > 0.06 && moved < 0.16);
+        }
+    }
+    {   // the other hand's poke on it: not a press; its open hand pushed into it: not thrown
+        Rig r;
+        leftHolds(r);
+        for (int mm = 50; mm >= -15; mm -= 10) {
+            SynthHand tip = TipAt(0.2, 0.05, mm / 1000.0);
+            tip.id = 2;
+            r.Frame({FistAt(-0.45, 0, 0.05, false, 1), tip});
+        }
+        CHECK(r.Count(Event::Press) == 0 && r.in.stats.heldByOther >= 1);
+        Rig q;
+        leftHolds(q);
+        for (int k = 0; k < 8; ++k) q.Frame({FistAt(-0.45, 0, 0.05, false, 1), OpenAt(0.2, 0, -0.42)});
+        for (int k = 1; k <= 12; ++k) q.Frame({FistAt(-0.45, 0, 0.05, false, 1), OpenAt(0.2, 0, -0.42 - 0.02 * k)});
+        CHECK(q.Count(Event::Throw) == 0 && q.in.grabbing(0));
+    }
+}
+
+// The user's two-fist flags (2026-10-10 21:59:29-21:59:57, flags 215945 and 215955, one after the
+// other): the right hand closes on the panel (ft-hands: a pinch, the thumb on the index first) at
+// +0.81 s, the left grips at +1.21 s, both held 9 s. The panel's place isn't recorded: it's put where
+// the live log's click had the right hand's fingers (on its content at 2600,654 of 3440x1440, 3.3 cm
+// past its surface), 0.6 m wide, facing the eyes; and moved by a few cm either way. Played from half
+// a second before that pinch.
+bool LoadFlags(const std::vector<std::string> &dirs, std::vector<FlagFrame> &frames);
+void TestFlagTwoFists() {
+    const std::string a = FlagsDir() + "/flag-20261010-215945", b = FlagsDir() + "/flag-20261010-215955";
+    std::vector<FlagFrame> fr;
+    if (!LoadFlags({a, b}, fr) || fr.size() < 100) {
+        std::printf("two fists: the flags aren't here, skipped\n");
+        return;
+    }
+    std::vector<Json> man;
+    std::ifstream mf(a + "/manifest.json");
+    std::string text((std::istreambuf_iterator<char>(mf)), std::istreambuf_iterator<char>());
+    const char *mp = text.c_str();
+    Json m;
+    if (!ParseJson(mp, m) || !m["flag_t_raw_ns"]) return;
+    const int64_t flagT = int64_t(m["flag_t_raw_ns"]->num);
+    // the right pinch's first frame after +0.7 s: its contact (room) and the eyes
+    size_t at = 0;
+    for (size_t i = 0; i < fr.size(); ++i)
+        if (fr[i].t >= flagT + 700'000'000 && (fr[i].g.pinch[1].flags & FH_PINCH_DOWN)) {
+            at = i;
+            break;
+        }
+    double contact[3] = {0, 0, 0}, eye[3] = {fr[at].head.m[0][3], fr[at].head.m[1][3], fr[at].head.m[2][3]};
+    for (uint32_t k = 0; k < fr[at].file->v1.nhands; ++k) {
+        const fh_hand_t &h = fr[at].file->v1.hands[k];
+        if (!(h.flags & FH_HAND_RIGHT)) continue;
+        for (int i = 0; i < 3; ++i) {
+            const double q[3] = {(h.pts[4][0] + h.pts[8][0]) / 2.0, (h.pts[4][1] + h.pts[8][1]) / 2.0, (h.pts[4][2] + h.pts[8][2]) / 2.0};
+            contact[i] = fr[at].head.m[i][0] * q[0] + fr[at].head.m[i][1] * q[1] + fr[at].head.m[i][2] * q[2] + fr[at].head.m[i][3];
+        }
+    }
+    const double W = 0.6, H = 0.6 * 1440 / 3440, u = (2600.0 / 3440 - 0.5) * W, v = (0.5 - 654.0 / 1440) * H, d = -0.033;
+    if (std::getenv("HANDINPUT_LOG"))
+        std::printf("two fists: the right pinch at %+.2f s, its fingers at %.3f %.3f %.3f (room), the eyes at %.3f %.3f %.3f\n",
+                    (fr[at].t - flagT) / 1e9, contact[0], contact[1], contact[2], eye[0], eye[1], eye[2]);
+    // (presses and grabs from the right hand's pinch to the end of the two-hand hold)
+    struct Out { int presses = 0, grabs = 0, joins = 0, stretches = 0, settled = 0; double both = 0, w0 = 0, w1 = 0; };
+    auto run = [&](const Params &k, double shift) {
+        double c[3] = {contact[0], contact[1], contact[2]};
+        Mat pose{};
+        for (int it = 0; it < 8; ++it) {   // facing the eyes, the fingers at (u, v, d) on it
+            pose = Facing(c, 0, eye).pose;
+            for (int i = 0; i < 3; ++i) c[i] = contact[i] - (pose.m[i][0] * u + pose.m[i][1] * v + pose.m[i][2] * (d + shift));
+        }
+        pose = Facing(c, 0, eye).pose;
+        Panel P = LivePanel();
+        P.pose = pose;
+        if (std::getenv("HANDINPUT_LOG")) {
+            const Hit h = Locate(P, contact);
+            std::printf("two fists: the panel at %.3f %.3f %.3f, the right pinch's fingers on it at %+.3f %+.3f %+.3f\n", pose.m[0][3],
+                        pose.m[1][3], pose.m[2][3], h.u, h.v, h.d);
+        }
+        std::vector<Panel> panels{P};
+        handcut::Hands hands;
+        HandInput in(k);
+        grabthat::Detector det;
+        Out o;
+        o.w0 = W;
+        int64_t bothSince = -1;
+        // (from half a second before the right hand's pinch: earlier grabs would have moved the panel)
+        const size_t from = at > 15 ? at - 15 : 0;
+        bool held = false;   // (the two-hand hold has begun; presses after it ends are another gesture)
+        PlayFrames(fr, from, fr.size(), hands, in, &det, panels, [&](int64_t now, bool) {
+            // (from the right hand's pinch: with the panel 4 cm nearer, the left index pokes it on the way in)
+            const bool over = (held && bothSince < 0) || now < fr[at].t;
+            for (const Event &e : in.events()) o.presses += e.type == Event::Press && !over, o.grabs += e.type == Event::GrabStart && !over;
+            if (std::getenv("HANDINPUT_LOG"))
+                for (const std::string &l : in.logs()) std::printf("    [%+.2f] %s\n", (now - flagT) / 1e9, l.c_str());
+            if (std::getenv("TWOFISTS_TRACE") && in.newFrame() && (now - flagT) / 1e9 > 0.6 && (now - flagT) / 1e9 < 1.5) {
+                std::printf("    [%+.2f] %s; pinch %d/%d grip %d/%d (begins %u %u)", (now - flagT) / 1e9, in.Describe().c_str(),
+                            hands.pinch(0).down, hands.pinch(1).down, hands.grip(0).down, hands.grip(1).down, hands.pinch(1).begins,
+                            hands.grip(0).begins);
+                for (const handcut::Hand &h : hands.seen()) {
+                    double pc[3];
+                    h.Palm(pc);
+                    const Hit c = Locate(panels[0], h.contact), q = Locate(panels[0], pc);
+                    std::printf("; %s fingers %+.3f %+.3f %+.3f palm %+.3f", h.right ? "R" : "L", c.u, c.v, c.d, q.d);
+                }
+                std::printf("\n");
+            }
+            const bool both = in.grabbing(0) && in.grabbing(1) && in.grabPanel(0) == in.grabPanel(1);
+            if (both && bothSince < 0) bothSince = now, held = true;
+            if (!both && bothSince >= 0) o.both = std::max(o.both, (now - bothSince) / 1e9), bothSince = -1;
+            ApplyCarries(in, panels);
+        });
+        if (bothSince >= 0) o.both = std::max(o.both, (fr.back().t + 30'000'000 - bothSince) / 1e9);
+        o.joins = in.stats.joins, o.stretches = in.stats.stretches, o.settled = in.stats.settledFists, o.w1 = panels[0].width;
+        return o;
+    };
+    Params before;   // as the live test ran
+    before.fistSettleMs = 0, before.joinFront = 0, before.fistFront = 0, before.fistBack = 0, before.fistClaimCurl = 0;
+    const Out was = run(before, 0);
+    std::printf("two fists, the user's flags (before): %d press(es), %d grab(s), %d stretch(es), both hands %.1f s\n", was.presses,
+                was.grabs, was.stretches, was.both);
+    CHECK(was.presses >= 1 && was.both < 1);   // the live failure: a click, no two-hand hold
+    for (double shift : {0.0, -0.04, 0.04, 0.08}) {
+        if (std::getenv("TWOFISTS_SHIFT") && std::fabs(std::atof(std::getenv("TWOFISTS_SHIFT")) - shift) > 1e-6) continue;
+        const Out now = run(Params{}, shift);
+        std::printf("two fists, the user's flags (now, the panel %+.0f cm): %d press(es), %d grab(s) (%d joined, %d settled to a "
+                    "fist), %d stretch(es), both hands %.1f s, %.2f m wide after\n", shift * 100, now.presses, now.grabs, now.joins,
+                    now.settled, now.stretches, now.both, now.w1);
+        CHECK(now.presses == 0 && now.stretches >= 1 && now.both >= 5);
+    }
+}
+
 // --grabthat FLAG_DIR...: the fires in each flag (false fires: flags taken for something else).
 int ScanFlags(int n, char **dirs) {
     int total = 0, totals[4] = {0, 0, 0, 0};   // pushes, palm menu toggles, flicks with the panel at arm's reach; the old palm menu's toggles
     double all = 0;
+    grabthat::Params gk;   // (GRABTHAT_FACING, GRABTHAT_SPEED: other thresholds, for tuning)
+    if (const char *e = std::getenv("GRABTHAT_FACING")) gk.aimFacing = std::atof(e);
+    if (const char *e = std::getenv("GRABTHAT_SPEED")) gk.holdSpeed = std::atof(e);
     for (int i = 0; i < n; ++i) {
         std::vector<grabthat::Fire> fires;
         double flagT = 0, secs = 0;
         int claimed = 0, arms = 0;
-        if (!ReplayFlag(dirs[i], fires, &flagT, &secs, &claimed, &arms)) {
+        if (!ReplayFlag(dirs[i], fires, &flagT, &secs, &claimed, &arms, gk)) {
             std::printf("%s: can't read\n", dirs[i]);
             continue;
         }
         std::printf("%s: %.0f s, armed %d, claimed %d frames, %zu fire(s)", dirs[i], secs, arms, claimed, fires.size());
-        for (const auto &f : fires) std::printf(" %s at %+.2f s", f.side ? "right" : "left", (f.t - flagT) / 1e9);
+        for (const auto &f : fires)
+            std::printf(" %s at %+.2f s (palm %.0f deg off the aim, %.2f m/s at most)", f.side ? "right" : "left", (f.t - flagT) / 1e9,
+                        f.facing, f.speed);
+        {   // ...as before the fourth live test (no facing or stillness rule)
+            grabthat::Params loose;
+            loose.aimFacing = 0, loose.holdSpeed = 0;
+            std::vector<grabthat::Fire> was;
+            double t2 = 0, s2 = 0;
+            if (ReplayFlag(dirs[i], was, &t2, &s2, nullptr, nullptr, loose) && was.size() != fires.size()) {
+                std::printf("; without the facing and stillness rules %zu:", was.size());
+                for (const auto &f : was)
+                    std::printf(" %s at %+.2f s (%.0f deg, %.2f m/s)", f.side ? "right" : "left", (f.t - t2) / 1e9, f.facing, f.speed);
+            }
+        }
         std::printf("\n");
         // ...and with near hand input, a panel at arm's reach (0.45 m ahead of the head's first heading,
         // 0.15 m under the eyes): what the hands did to it
@@ -4197,6 +4665,11 @@ int main(int argc, char **argv) {
     TestGrabThatPlace();
     TestGrabThatFlag();
     TestGrabThatAtNearPanel();
+    TestButtons();
+    TestGuides();
+    TestFistSettle();
+    TestJoin();
+    TestFlagTwoFists();
     std::printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

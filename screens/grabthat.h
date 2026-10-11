@@ -90,14 +90,33 @@ struct Params {
     double reachSlack = 0.35;
     double animMs = 250;
     // Which window: the one the line from the eyes through the open palm meets (within aimMargin
-    // of its edges, or aimMarginDeg seen from the eyes if that's more: a panel thrown 3 m away, the
-    // nearest), else the one nearest the head's forward direction within headCone.
-    double aimMargin = 0.10, aimMarginDeg = 3, headCone = 20;   // m, degrees, degrees
+    // of its edges, or aimMarginDeg seen from the eyes if that's more), the nearest; with headCone
+    // > 0, else the one nearest the head's forward direction within it. Since the fourth live test
+    // (user, 2026-10-10: "make the trigger more precise") the line has to meet the panel itself:
+    // 0, 0 and no head cone (0.10 m, 3 deg and 20 deg before). HANDS_GRAB_THAT_MARGIN (m).
+    double aimMargin = 0, aimMarginDeg = 0, headCone = 0;   // m, degrees, degrees
+    // ...and only a panel farther than `nearest` from the eyes (its centre): one at arm's reach is
+    // the hands' already (user: "only activate if the window is not already held and closed up";
+    // push, flick or throw it to send it away). 0: any, and the gesture at a near one sends it back
+    // or centres it (Decide; before the fourth live test). HANDS_GRAB_THAT_FROM.
+    double nearest = 0.8;
+    // Precision: the arming hold (armMs) with the palm facing along the aim (its normal within aimFacing
+    // degrees of the line from the eyes through it, on average over the hold) and still (the palm's way
+    // over the hold under holdSpeed m/s: an open hand swept at a panel isn't held out to it); else the
+    // hold starts again. The user's own example (flag 150115) holds 41 and 51 deg off, at 0.25 and 0.46
+    // m/s: 55 and 0.5 keep both its fires; tighter loses the first. 0: off. HANDS_GRAB_THAT_FACING.
+    double aimFacing = 55, holdSpeed = 0.5;
+    // After a panel was sent away (a push, a flick or a throw), no gesture for this long: a push's open
+    // hand held out, then pulled back closing, is the gesture's shape. (In the fourth live test every
+    // fire came after a send-away, but the view recording shows the user reaching for the far panel
+    // 1.5 s or more after it went: deliberate. This only keeps the push's own pull-back from firing.)
+    double quietAfterSendMs = 1000;
 };
 
 // What a hand frame shows of the gesture (head frame at capture time).
+// aim: the palm's normal along the line from the eyes through the palm (1: facing straight along it).
 struct Features {
-    double open = 0, curl3 = 0, palmFwd = 0, fwd = 0;
+    double open = 0, curl3 = 0, palmFwd = 0, fwd = 0, aim = 0;
 };
 Features Measure(const handcut::Hand &h, const Mat &head);
 
@@ -108,6 +127,9 @@ struct Fire {
     int64_t t = 0;
     double eye[3] = {0, 0, 0}, palm[3] = {0, 0, 0}, fist[3] = {0, 0, 0};
     Mat head{};
+    // how it was held out (for the log and the flag replays): the palm's facing off the aim on average
+    // (degrees) and its speed (its way over the hold, m/s) over the arming hold
+    double facing = 0, speed = 0;
 };
 
 class Detector {
@@ -128,11 +150,13 @@ public:
     // window grab that is targeting"): the aim it would fire with now (Pick takes it), and how far
     // along it is: rising 0..1 over armMs as the hand is held out, 1 armed or closing. False idle.
     bool Aim(int side, Fire *out, double *progress) const;
+    // A panel was sent away: no gesture on either side until `until` (Params::quietAfterSendMs).
+    void Quiet(int64_t until);
     void Reset();
     std::string Describe() const;   // "left idle, right armed"
 
     struct Stats {
-        int arms = 0, closings = 0, fires = 0, timeouts = 0;
+        int arms = 0, closings = 0, fires = 0, timeouts = 0, unsteady = 0;   // unsteady: holds that started again (facing, stillness)
     } stats;
 
 private:
@@ -144,6 +168,10 @@ private:
         double eye[3] = {0, 0, 0}, palm[3] = {0, 0, 0};
         Mat head{};                   // the head on the last frame
         double thumb = 0;             // thumb tip to index tip now (m)
+        double holdFrom[3] = {0, 0, 0};   // the arming hold: where the palm was as it began,
+        double facingSum = 0;             // ...its facing off the aim summed over its frames
+        int facingN = 0;
+        double facing = 0, speed = 0;     // the last hold that armed: its mean facing, the palm's speed over it (Fire's)
         struct Sample { int64_t t; double fwd, palm; };
         std::vector<Sample> recent;   // the wrist's fwd and the palm's palmFwd over the last pullMs
     };
@@ -164,6 +192,7 @@ struct Target {
 // doesn't, in front of `from`.
 bool RayHit(const Target &p, const double from[3], const double dir[3], double *u, double *v, double *t);
 // The panel a fired gesture means (see Params::aimMargin), or -1.
+// Panels nearer the eyes than Params::nearest aren't taken.
 int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k);
 // Where a panel comes to (see Params::distance), facing the eyes.
 Mat Arrival(const Fire &f, const Params &k);

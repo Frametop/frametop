@@ -86,12 +86,24 @@ Features Measure(const Hand &h, const Mat &head) {
     f.palmFwd = Dot(n, fw);
     const double w[3] = {h.p[0][0] - head.m[0][3], h.p[0][1] - head.m[1][3], h.p[0][2] - head.m[2][3]};
     f.fwd = Dot(w, fw);
+    double palm[3];
+    h.Palm(palm);
+    double a[3] = {palm[0] - head.m[0][3], palm[1] - head.m[1][3], palm[2] - head.m[2][3]};
+    const double al = std::sqrt(Dot(a, a));
+    f.aim = al > 1e-6 ? Dot(n, a) / al : 0;
     return f;
 }
 
 void Detector::Reset() {
     for (Side &sd : side_) sd = Side{};
     fired_.clear();
+}
+
+void Detector::Quiet(int64_t until) {
+    for (Side &sd : side_) {
+        sd.quietUntil = std::max(sd.quietUntil, until);
+        if (sd.state != State::Idle) sd.state = State::Idle, sd.recent.clear();
+    }
 }
 
 void Detector::Open(Side &sd, int64_t t, const Hand &h, const Mat &head) {
@@ -126,22 +138,47 @@ void Detector::Frame(int64_t t, const std::vector<Hand> &hands, const Mat &head,
         sd.thumb = Dist3(h->p[4], h->p[8]);
         sd.recent.push_back({t, f.fwd, f.palmFwd});
         while (!sd.recent.empty() && t - sd.recent.front().t > int64_t(p_.pullMs * 1e6)) sd.recent.erase(sd.recent.begin());
+        double palmNow[3];
+        h->Palm(palmNow);
+        const double facingDeg = std::acos(std::clamp(f.aim, -1.0, 1.0)) * 180 / M_PI;
         const bool enter = f.open >= p_.openArm && f.palmFwd >= p_.palmArm && f.fwd >= p_.fwdArm;
         const bool keep = f.open >= p_.openKeep && f.palmFwd >= p_.palmKeep && f.fwd >= p_.fwdKeep;
         const bool closing = f.curl3 < p_.claimCurl;
         const bool stale = t - sd.lastOpen > int64_t(p_.closeMs * 1e6);
+        // the arming hold: from here, its facing summed and where the palm started
+        auto hold = [&] {
+            sd.since = t, sd.facingSum = 0, sd.facingN = 0;
+            std::copy(palmNow, palmNow + 3, sd.holdFrom);
+        };
         switch (sd.state) {
             case State::Idle:
-                if (enter && t >= sd.quietUntil) sd.state = State::Opening, sd.since = t, Open(sd, t, *h, head);
+                if (enter && t >= sd.quietUntil) {
+                    sd.state = State::Opening, hold(), Open(sd, t, *h, head);
+                    sd.facingSum += facingDeg, ++sd.facingN;
+                }
                 break;
-            case State::Opening:
-                if (!keep) {
+            case State::Opening: {
+                if (!keep || t < sd.quietUntil) {
                     sd.state = State::Idle;
                     break;
                 }
                 Open(sd, t, *h, head);
-                if (t - sd.since >= int64_t(p_.armMs * 1e6)) sd.state = State::Armed, ++stats.arms;
+                sd.facingSum += facingDeg, ++sd.facingN;
+                if (t - sd.since < int64_t(p_.armMs * 1e6)) break;
+                // held armMs: facing along the aim on average (Params::aimFacing), and still (the palm's
+                // way over it, Params::holdSpeed); else the hold starts again from here
+                const double secs = (t - sd.since) / 1e9;
+                const double d[3] = {palmNow[0] - sd.holdFrom[0], palmNow[1] - sd.holdFrom[1], palmNow[2] - sd.holdFrom[2]};
+                const double facing = sd.facingSum / std::max(1, sd.facingN), moved = std::sqrt(Dot(d, d)) / std::max(1e-3, secs);
+                if ((p_.aimFacing > 0 && facing > p_.aimFacing) || (p_.holdSpeed > 0 && moved > p_.holdSpeed)) {
+                    ++stats.unsteady;
+                    hold();
+                    break;
+                }
+                sd.facing = facing, sd.speed = moved;
+                sd.state = State::Armed, ++stats.arms;
                 break;
+            }
             case State::Armed:
             case State::Closing:
                 if (sd.state == State::Armed) {
@@ -174,7 +211,7 @@ void Detector::Frame(int64_t t, const std::vector<Hand> &hands, const Mat &head,
                 for (const Side::Sample &q : sd.recent) farthest = std::max(farthest, q.fwd);
                 if (f.open <= p_.fist && farthest - f.fwd >= p_.pull && f.palmFwd <= p_.palmFlip) {
                     Fire x;
-                    x.side = s, x.t = t, x.head = head;
+                    x.side = s, x.t = t, x.head = head, x.facing = sd.facing, x.speed = sd.speed;
                     std::copy(sd.eye, sd.eye + 3, x.eye), std::copy(sd.palm, sd.palm + 3, x.palm);
                     h->Palm(x.fist);
                     fired_.push_back(x);
@@ -241,22 +278,27 @@ int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k) {
     const double l = std::sqrt(Dot(dir, dir));
     int best = -1;
     double bestT = 1e9;
+    // (not one near the eyes: Params::nearest)
+    auto near = [&](const Target &p) {
+        return k.nearest > 0 && std::hypot(p.pose.m[0][3] - f.eye[0], p.pose.m[1][3] - f.eye[1], p.pose.m[2][3] - f.eye[2]) < k.nearest;
+    };
     if (l > 1e-6) {
         for (double &x : dir) x /= l;
         for (const Target &p : panels) {
             double u, v, t;
-            if (!RayHit(p, f.eye, dir, &u, &v, &t)) continue;
+            if (near(p) || !RayHit(p, f.eye, dir, &u, &v, &t)) continue;
             const double margin = std::max(k.aimMargin, t * std::tan(k.aimMarginDeg * M_PI / 180));
             if (std::fabs(u) <= p.width / 2 + margin && std::fabs(v) <= p.height / 2 + margin && t < bestT)
                 bestT = t, best = p.index;
         }
     }
-    if (best >= 0) return best;
+    if (best >= 0 || k.headCone <= 0) return best;
     // where the head points
     double fw[3];
     Forward(f.head, fw);
     double bestA = k.headCone;
     for (const Target &p : panels) {
+        if (near(p)) continue;
         double to[3] = {p.pose.m[0][3] - f.head.m[0][3], p.pose.m[1][3] - f.head.m[1][3], p.pose.m[2][3] - f.head.m[2][3]};
         const double tl = std::sqrt(Dot(to, to));
         if (tl < 1e-6) continue;

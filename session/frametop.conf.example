@@ -72,6 +72,11 @@ HANDS_GRAB_BAND=0.06       # Frametop panels: a near pinch where the fingers mee
 HANDS_PINCH_CLICK=1        # Frametop panels: a near pinch on a panel's content clicks where the fingertip's pointer was, held while the pinch is | 0 = nothing
 HANDS_CARD_PINCH=1         # Frametop panels: the thumb behind a panel's edge and the index and middle fingers together in front (or all four fingertips bunched at the thumb), like holding a card, carries it rigidly with the hand, turn and all; the index alone is the border's move | 0 = off
 HANDS_FIST_GRAB=1          # Frametop panels: a fist made at a panel (the palm within reach of it; a closed hand ft-hands calls a pinch too) carries it and turns it with the wrist; two fists stretch it | 0 = off
+HANDS_FIST_REACH=0.11      # ... a fist counts as at a panel with its palm or knuckles this far (m) in front of it (10 cm behind); a curled hand is the panel's that far out (0 = the touch zone's)
+HANDS_JOIN_REACH=0.15      # Frametop panels: while one hand holds a panel, the other's pinch or fist anywhere on it, within this far (m) in front (12 cm behind), joins as the second anchor: move, scale and turn it with both | 0 = the second hand has to find a grab zone like the first
+HANDS_BUTTON_REACH=0.015   # Frametop panels: a panel's round buttons (curve, reset, dock, close) take a fingertip or a pinch this far (m) each way from their centre at least; the nearest control wins
+HANDS_PINCH_BUTTONS=1      # ... and a pinch on one presses it | 0 = a pinch there takes the bar (moves the panel)
+HANDS_EDGE_GLOW=1          # Frametop panels: a soft white glow round the corner a pinch would resize from (an L), along the edge it would move the panel by, or round a button, brighter as the fingers come; brightest while resizing | 0 = the resize handle follows the hand instead
 HANDS_STRETCH_TURN=1       # Frametop panels: two hands holding one panel turn it on every axis with the line between them, and roll it with their wrists | 0 = about the vertical only
 HANDS_TRACK_GATE=1         # Frametop panels: a held panel ignores tracking no hand makes (a jump faster than 4 m/s or 100 m/s^2, a hand frame flipping), is smoothed harder on one camera's or edge-of-view frames, and holds still when the hand leaves the view at the side | 0 = takes every frame (the 12 cm jump rule only)
 HANDS_HOLD_LOST_MS=1750    # Frametop panels: what a hand holds (a pinch, a card, a fist, a poke's press) stays held while the hand is lost this long (ms); it lets go only when the hand is seen open again
@@ -84,10 +89,13 @@ HANDS_THROW_DISTANCE=3     # ... and where thrown, flicked and pushed panels go:
 HANDS_PUSH=1               # Frametop panels: push one away: an open hand, palm to it, pushed straight into it fast (or 15 cm in slowly) sends it 3 m out (HANDS_THROW_DISTANCE); an open hand then doesn't poke | 0 = off
 HANDS_PUSH_SPEED=0.5       # ... the palm moving into it this fast (m/s), 5 cm or more in
 HANDS_SEND_AWAY_WIDTH=restore  # Frametop panels: a panel sent away (thrown, flicked, pushed, grab that's send-back) keeps its width; restore = one grab that shrank to bring it, still that wide, gets its width back | keep = never
-HANDS_TARGET_GLOW=1        # Frametop panels: a glow round the panel "grab that" would take as the open hand is held out to it (blue), or a push or flick would throw (warm) | 0 = off
-HANDS_GRAB_THAT=1          # Frametop panels: hold an open hand out to one, palm to it, then pull back making a fist: it comes to arm's reach (again at it: back where it was; at one near you already: centred at arm's reach) | 0 = off
+HANDS_TARGET_GLOW=1        # Frametop panels: a soft white halo outside the edges of the panel "grab that" would take as the open hand is held out to it (or, dimmer, one a push or flick would throw) | 0 = off
+HANDS_GRAB_THAT=1          # Frametop panels: hold an open hand out to one farther than HANDS_GRAB_THAT_FROM, palm to it, then pull back making a fist: it comes to arm's reach (push, flick or throw it to send it away) | 0 = off
 HANDS_GRAB_THAT_DISTANCE=0.45  # ... this far (m) ahead of the eyes, at the fist's height, facing you
 HANDS_GRAB_THAT_WIDTH=0.6  # ... a screen wider than this (m) comes at this width (0 = as it is; floating windows keep their size)
+HANDS_GRAB_THAT_FROM=0.8   # ... only a panel whose centre is farther than this (m) from the eyes, and not one held (0 = any: at one near you it goes back where it came from, or is centred)
+HANDS_GRAB_THAT_MARGIN=0   # ... the line from the eyes through the open palm has to meet the panel, or pass this close (m) to it
+HANDS_GRAB_THAT_FACING=55  # ... the palm facing along that line within this many degrees while it's held out (0 = any way)
 HANDS_NEAR=1               # Frametop panels (direct touch): poke to click, pinch the border to move or resize, a fist to carry, gaze or not (1 = with POINTER_HANDS=1, when the pointer helper says a hand is bare | on = the same without POINTER_HANDS: the helper runs only the handoff for it | 0 = off | force = always, for testing)
 HANDS_CUTOUTS=0            # hands: 1 = also cut a round hole per hand in Frametop's panels, so Room View shows the real hand through them (off: ft-handview draws the hands)
 HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face, held still, away from the panels, and look at it, and a ring shows above the palm; a plain thumb-index pinch with that hand opens the Steam menu (or closes the dashboard). 0 = off

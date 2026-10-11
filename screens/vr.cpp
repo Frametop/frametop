@@ -3881,7 +3881,8 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
                       "%d poke attempts, %d refused, %d off the content, %d at the edge; held back: %d one view, %d bent, "
                       "%d not nearest, %d pinching, %d busy, %d resting, %d typing, %d askew, %d slow, %d flicks, %d open; %d flicks, "
                       "%d throws, %d pushes; holds: %d coasts, %d back, %d glitches, %d held through, %d ended unseen; gates: %d frames "
-                      "and %d turns dropped, %d moved, %d near the edge, %d one camera; %d fists ft-hands called pinches",
+                      "and %d turns dropped, %d moved, %d near the edge, %d one camera; %d fists ft-hands called pinches; %d second "
+                      "hands joined, %d pinches waited to be fists (%d were), %d buttons pinched, %d pokes on a panel the other hand held",
                       g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
                       NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
                       g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
@@ -3890,7 +3891,8 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
                       st.refused, st.offContent, st.edgePresses, st.heldNotStereo, st.heldNotExtended, st.heldNotNearest,
                       st.heldPinching, st.heldBusy, st.heldResting, st.heldTyping, st.heldAskew, st.heldSlow, st.heldFlick, st.heldOpen,
                       st.flicks, st.throws, st.pushes, st.coasts, st.reacquired, st.glitches, st.heldThrough, st.lostEnds, st.gated,
-                      st.turnsGated, st.moved, st.edgeFrames, st.monoFrames, st.fistPinches);
+                      st.turnsGated, st.moved, st.edgeFrames, st.monoFrames, st.fistPinches, st.joins, st.settles, st.settledFists,
+                      st.buttonPinches, st.heldByOther);
     } else if (std::sscanf(cmd, "palmmenu %15s", word) == 1) {
         if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_palm.params().on = !std::strcmp(word, "on");
         else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error palmmenu on|off|state");

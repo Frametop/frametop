@@ -533,7 +533,13 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
             EndPress(s, true), EndGrab(s, true);
             sd.state = State::Idle, sd.panel = -1;
         }
-        if (!h && sd.state != State::Idle && in.nowNs - sd.lastSeen > int64_t(p_.lostMs * 1e6)) {
+        // (holding: through a longer loss, Params::holdLostMs)
+        const bool holding = sd.state == State::Grab || sd.state == State::Press;
+        if (!h && sd.state != State::Idle && in.nowNs - sd.lastSeen > int64_t((holding ? p_.holdLostMs : p_.lostMs) * 1e6)) {
+            if (holding) {
+                ++stats.lostEnds;
+                Log("%s hand unseen for %.2f s: what it held stays where it is", SideName(s), (in.nowNs - sd.lastSeen) / 1e9);
+            }
             EndPress(s, true), EndGrab(s, true), EndAttempt(s);
             sd.state = State::Idle, sd.panel = -1, sd.fistWait = sd.pinchWait = false;
         }
@@ -799,11 +805,11 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     const bool newPinch = g.begins != sd.begins, newGrip = gr.begins != sd.gripBegins;
     sd.begins = g.begins, sd.gripBegins = gr.begins;
     if (sd.state == State::Grab) {
-        if (sd.byGrip ? !gr.down || newGrip : !g.down || newPinch) EndGrab(s, sd.byGrip ? gr.lost : g.lost);
+        if (!StillHeld(s, in, sd.byGrip ? gr : g, sd.byGrip ? newGrip : newPinch, sd.byGrip)) EndGrab(s, false);
         return;
     }
     if (sd.state == State::Press && sd.byPinch) {
-        if (!g.down || newPinch) EndPress(s, g.lost, g.lost ? "the pinch was lost" : "the pinch opened");
+        if (!StillHeld(s, in, g, newPinch, false)) EndPress(s, false, "the pinch opened");
         return;
     }
     // a fist or pinch waiting on "grab that": it let the hand go (or the wait is over), so it's ours
@@ -819,6 +825,129 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     if (newGrip && gr.down) FistBegin(s, in, panels, false);
     // (in the zone's margin the hand isn't ours: the pointer helper has its pinches)
     if (newPinch && g.down && sd.state == State::Hover && sd.inZone) PinchBegin(s, in, panels, false);
+}
+
+namespace {
+// How open a hand is: its four fingers' mean extension (as FingerExtension; a fist about 1, open 1.8).
+double Openness(const Hand &h) {
+    double sum = 0;
+    for (int mcp : {5, 9, 13, 17}) sum += FingerExtension(h, mcp);
+    return sum / 4;
+}
+}  // namespace
+
+bool HandInput::StillHeld(int s, const Input &in, const handcut::Gesture &g, bool isNew, bool grip) {
+    Side &sd = side_[s];
+    if (g.down) {
+        if (sd.upFrames > 0 || isNew) {
+            ++stats.heldThrough;
+            Log("%s %s held on through %d frame(s) %s", SideName(s), grip ? "fist" : "pinch", sd.upFrames,
+                isNew ? "(it ended and began again)" : "with it up");
+        }
+        sd.upFrames = 0;
+        return true;
+    }
+    if (!newFrame_) return true;   // (counted on hands frames)
+    const Hand *h = HandFor(s, in.hands->seen(), sd.handId);
+    if (!h) return true;           // unseen: holdLostMs decides
+    const bool closed = grip ? Openness(*h) < p_.holdGripOpen : Dist3(h->p[4], h->p[8]) < p_.holdPinchOpen;
+    ++sd.upFrames;
+    if (closed && g.lost) {        // ft-hands lost it, and the hand is back still closed: held
+        sd.upFrames = 0;
+        return true;
+    }
+    return sd.upFrames < (closed ? p_.releaseMaxFrames : p_.releaseFrames);
+}
+
+bool HandInput::Velocity(int s, int64_t endNs, double ms, fhsmooth::V3 *out) const {
+    const std::vector<Side::Pt> &tr = side_[s].track;
+    if (tr.empty()) return false;
+    const int64_t end = endNs ? endNs : tr.back().t, from = end - int64_t(ms * 1e6);
+    double mt = 0;
+    fhsmooth::V3 mp;
+    int n = 0;
+    for (const Side::Pt &q : tr)
+        if (q.t >= from && q.t <= end) mt += (q.t - end) / 1e9, mp = mp + q.p, ++n;
+    if (n < 3) return false;
+    mt /= n, mp = mp * (1.0 / n);
+    double tt = 0;
+    fhsmooth::V3 tp;
+    for (const Side::Pt &q : tr)
+        if (q.t >= from && q.t <= end) {
+            const double dt = (q.t - end) / 1e9 - mt;
+            tt += dt * dt, tp = tp + (q.p - mp) * dt;
+        }
+    if (tt < 1e-6) return false;
+    *out = tp * (1 / tt);
+    return true;
+}
+
+fhsmooth::V3 HandInput::Shown(int s, double now) {
+    Side &sd = side_[s];
+    if (sd.coasting) {   // the last velocity, slowing to a stop over coastMs
+        const double dt = std::max(0.0, now - sd.coastNs / 1e9), T = std::max(1e-3, p_.coastMs / 1000);
+        return sd.coastFrom + sd.coastVel * (dt < T ? dt - dt * dt / (2 * T) : T / 2);
+    }
+    fhsmooth::V3 p = sd.point.At(now);
+    if (sd.blending) {   // from where the coast left it to the hand: smoothly, at most catchUp (m/s) on average
+        const double T = std::max({1e-3, p_.blendMs / 1000, fhsmooth::Len(sd.blendOff) / std::max(0.1, p_.catchUp)});
+        const double u = (now - sd.blendNs / 1e9) / T;
+        if (u >= 1) sd.blending = false;
+        else p = p + sd.blendOff * (1 - u * u * (3 - 2 * u));
+    }
+    return p;
+}
+
+void HandInput::Track(int s, const Input &in, const Hand *h) {
+    Side &sd = side_[s];
+    const double now = in.nowNs / 1e9;
+    bool ok = h != nullptr, jumped = false;
+    fhsmooth::V3 raw;
+    if (ok) {
+        raw = {h->pinchPoint[0], h->pinchPoint[1], h->pinchPoint[2]};
+        if (!sd.track.empty() && h->captureNs - sd.track.back().t < 200'000'000 && fhsmooth::Len(raw - sd.track.back().p) > p_.jumpMax)
+            jumped = true;
+        if (jumped && ++sd.jumps < p_.jumpFrames) ok = false, ++stats.glitches;   // a glitch: as unseen
+        else if (!jumped) sd.jumps = 0;
+    }
+    if (!ok) {
+        if (!sd.coasting && sd.point.Ready()) {
+            fhsmooth::V3 v;
+            if (!Velocity(s, 0, p_.velocityMs, &v)) v = {};
+            sd.coastFrom = Shown(s, now), sd.coastVel = v, sd.coastNs = in.nowNs;
+            sd.coasting = true, sd.blending = false;
+            ++stats.coasts;
+        }
+        if (sd.unseenNs < 0) sd.unseenNs = in.nowNs;
+        return;
+    }
+    if (sd.coasting || jumped) {
+        // back (or somewhere else, jumpFrames in a row): the smoothing afresh from the hand, moving at
+        // the gap's average velocity (the missed path, inferred: from the last point seen to this one),
+        // and the shown point blending over to it from where the coast had it; the track afresh (a
+        // throw's velocity doesn't see the gap)
+        const fhsmooth::V3 shown = Shown(s, now);
+        fhsmooth::V3 rate;
+        if (!sd.track.empty() && h->captureNs > sd.track.back().t && !jumped)
+            rate = (raw - sd.track.back().p) * (1e9 / double(h->captureNs - sd.track.back().t));
+        sd.point.Set({p_.grabMinCutoff, p_.grabBeta, 1.0});
+        sd.point.Reset();
+        sd.point.Sample(raw, in.hands->captureNs() / 1e9, now);
+        sd.point.Seed(rate);
+        sd.coasting = false;
+        sd.blendOff = shown - raw, sd.blendNs = in.nowNs, sd.blending = true;
+        sd.track.clear(), sd.jumps = 0;
+        ++stats.reacquired, ++sd.reacquired;
+        Log("%s hand back after %.0f ms holding screen %d: %.1f cm from where the panel went",
+            SideName(s), sd.unseenNs >= 0 ? (in.nowNs - sd.unseenNs) / 1e6 : 0.0, sd.panel + 1, fhsmooth::Len(shown - raw) * 100);
+    } else {
+        sd.point.Set({p_.grabMinCutoff, p_.grabBeta, 1.0});
+        sd.point.Sample(raw, in.hands->captureNs() / 1e9, now);
+    }
+    sd.unseenNs = -1;
+    sd.track.push_back({h->captureNs, raw});
+    while (sd.track.size() > 2 && h->captureNs - sd.track.front().t > 500'000'000) sd.track.erase(sd.track.begin());
+    SampleTurn(s, *h, in);
 }
 
 bool HandInput::Straddled(int s, const Panel &P, int64_t now) const {
@@ -913,7 +1042,7 @@ void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &pan
     }
     EndAttempt(s);
     const Hit k = Locate(*P, h->pinchPoint);
-    sd.state = State::Press, sd.byPinch = true, sd.control = Control::None, sd.dragging = false;
+    sd.state = State::Press, sd.byPinch = true, sd.control = Control::None, sd.dragging = false, sd.upFrames = 0;
     sd.lockU = u, sd.lockV = v, sd.pinchU0 = k.u, sd.pinchV0 = k.v, sd.lastX = x, sd.lastY = y, sd.deepest = t.d;
     sd.pressedNs = in.nowNs;
     if (std::fabs(x - sd.hoverX) >= 0.5 || std::fabs(y - sd.hoverY) >= 0.5) Emit(Event::Motion, s, P->index, x, y);
@@ -971,6 +1100,8 @@ void HandInput::StartGrab(int s, const Input &in, const Panel &P, Zone zone, int
     sd.point.Reset();
     sd.point.Sample({pinch[0], pinch[1], pinch[2]}, in.hands->captureNs() / 1e9, in.nowNs / 1e9);
     sd.from = {pinch[0], pinch[1], pinch[2]}, sd.shift = {}, sd.engaged = false;
+    sd.upFrames = 0, sd.coasting = sd.blending = false, sd.jumps = 0, sd.unseenNs = -1, sd.reacquired = 0;
+    sd.track.assign(1, {h ? h->captureNs : in.hands->captureNs(), sd.from});
     sd.along.Reset(), sd.across.Reset(), sd.haveRot0 = sd.turning = false;   // the wrist's turn: afresh
     if (h) SampleTurn(s, *h, in);
     ToLocal(P.pose, pinch, sd.grabLocal);
@@ -1062,7 +1193,7 @@ bool HandInput::RoomTurn(int s, const Input &in, double out[3][3]) {
 bool HandInput::Carried(int s, const Input &in, double out[3], bool deadzone) {
     Side &sd = side_[s];
     if (!sd.point.Ready()) return false;
-    fhsmooth::V3 p = sd.point.At(in.nowNs / 1e9);
+    fhsmooth::V3 p = Shown(s, in.nowNs / 1e9);
     if (!sd.engaged && fhsmooth::Len(p - sd.from) > p_.grabDeadzone) sd.engaged = true, sd.shift = p - sd.from;
     if (deadzone) p = sd.engaged ? p - sd.shift : sd.from;
     out[0] = p.x, out[1] = p.y, out[2] = p.z;
@@ -1076,15 +1207,10 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
         head[0] = hd.x, head[1] = hd.y, head[2] = hd.z;
     }
     // each grabbing hand's new frame into its smoothing: the pinch point as the cameras saw it
+    // (unseen, or a glitch: it coasts, Params::holdLostMs)
     if (newFrame_)
-        for (int s = 0; s < 2; ++s) {
-            Side &sd = side_[s];
-            const Hand *h = sd.state == State::Grab ? HandFor(s, in.hands->seen(), sd.handId) : nullptr;
-            if (!h) continue;   // briefly unseen: the panel stays where the smoothing has it
-            sd.point.Set({p_.grabMinCutoff, p_.grabBeta, 1.0});
-            sd.point.Sample({h->pinchPoint[0], h->pinchPoint[1], h->pinchPoint[2]}, in.hands->captureNs() / 1e9, in.nowNs / 1e9);
-            SampleTurn(s, *h, in);
-        }
+        for (int s = 0; s < 2; ++s)
+            if (side_[s].state == State::Grab) Track(s, in, HandFor(s, in.hands->seen(), side_[s].handId));
     // (a stretch has its own dead zone, on the hands' distance)
     auto pinchOf = [&](int s, double out[3]) { return Carried(s, in, out, false); };
     for (int s = 0; s < 2; ++s) {

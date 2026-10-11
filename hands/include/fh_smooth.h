@@ -118,6 +118,13 @@ public:
         Advance(now);
         return x_;
     }
+    // After Reset and a first Sample: the speed it's moving at (units per second, per axis), so it
+    // follows a moving input at once instead of from rest (a hand back after a gap, at the gap's speed).
+    void Seed(const double rate[N]) {
+        double s2 = 0;
+        for (int i = 0; i < N; ++i) d_[i] = rate[i], s2 += rate[i] * rate[i];
+        speed_ = std::sqrt(s2), cutoff_ = p_.minCutoff + p_.beta * speed_;
+    }
     const double *Last() const { return x_; }   // the output where the timeline stands
     const double *Raw() const { return r_; }    // the newest sample
     double Speed() const { return speed_; }     // low-passed, units per second
@@ -164,6 +171,10 @@ public:
     }
     V3 Last() const { return {f_.Last()[0], f_.Last()[1], f_.Last()[2]}; }
     double Speed() const { return f_.Speed(); }
+    void Seed(V3 rate) {
+        const double a[3] = {rate.x, rate.y, rate.z};
+        f_.Seed(a);
+    }
 
 private:
     Point<3> f_;

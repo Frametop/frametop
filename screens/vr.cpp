@@ -2558,6 +2558,8 @@ bool ft_vr_init(void) {
     // a panel one hand carries turns with the wrist (handinput.h, Params::grabRotate)
     k.grabRotate = handcut::Setting("HANDS_GRAB_ROTATE", "1") != "0";
     num("HANDS_GRAB_ROTATE_DEADZONE", k.rotDeadzone, 0, 45);
+    // what a hand holds stays held through a tracking loss this long (handinput.h, Params::holdLostMs)
+    num("HANDS_HOLD_LOST_MS", k.holdLostMs, 250, 10000);
     const std::string near = handcut::Setting("HANDS_NEAR", "1");
     g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
     // The passthrough holes in the panels: off by default since ft-handview draws the hands
@@ -2585,8 +2587,9 @@ bool ft_vr_init(void) {
                 "a fist at a panel %s\n",
                 k.bandOut * 100, k.cardPinch ? ", either side of its edge like a card" : "", k.pinchClick ? "click" : "do nothing",
                 k.fistGrab ? "carries and turns it (two stretch it)" : "does nothing (HANDS_FIST_GRAB=0)");
-    std::printf("hands: grabs smoothed from %.2f Hz (+%.1f Hz per m/s), a %.1f cm dead zone; the wrist turns them %s\n",
-                k.grabMinCutoff, k.grabBeta, k.grabDeadzone * 100,
+    std::printf("hands: grabs smoothed from %.2f Hz (+%.1f Hz per m/s), a %.1f cm dead zone, held through %.2f s of "
+                "tracking loss; the wrist turns them %s\n",
+                k.grabMinCutoff, k.grabBeta, k.grabDeadzone * 100, k.holdLostMs / 1000,
                 k.grabRotate ? ("past " + std::to_string(int(std::lround(k.rotDeadzone))) + " deg").c_str() : "not (HANDS_GRAB_ROTATE=0)");
     std::printf("hands: matte %s, margin %.2f deg + %.0f ms of motion (at most %.2f more), lead %.0f ms, shift %s; near input %s%s%s\n",
                 handcut::ShapeName(g_matte.shape), g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,

@@ -144,7 +144,25 @@ struct Params {
     double rearm = 0.01;        // ...nor until the tip has been this far out in front since (a noisy
                                 // pull-back let go mid-tap and pressed again: a double click)
     double tooDeep = -0.08;     // through the panel: released where it was
-    double lostMs = 250;        // a hand unseen this long ends what it holds
+    double lostMs = 250;        // a hovering hand unseen this long isn't near any more
+    // Holding through tracking loss (user, 2026-10-10: losing the hand dropped what it held). A hand
+    // that holds a panel (a pinch, card or fist grab) or KWin's button (a poke or a pinch on the
+    // content) keeps it until a clear release: seen again with the gesture ended (ft-hands' pinch or
+    // grip up) and its fingers open (thumb to index tip over holdPinchOpen; for a fist, the fingers'
+    // mean extension over holdGripOpen) on releaseFrames hands frames in a row (or the gesture ended on
+    // releaseMaxFrames, whatever the fingers say). A gesture that ft-hands ended as lost (or that
+    // flickered: ended and began again) on a hand still seen closed goes on holding. Unseen for
+    // holdLostMs, it ends where it is (HANDS_HOLD_LOST_MS). Meanwhile the carried point goes on with
+    // the hand's last velocity (over velocityMs), slowing to a stop over coastMs; when the hand is
+    // back, it blends from there to the hand over blendMs (smoothstep), longer when that's more than
+    // catchUp m/s on average. A frame whose point jumped more than
+    // jumpMax from the last one counts as unseen (a tracker glitch), unless jumpFrames in a row do.
+    double holdLostMs = 1750;
+    int releaseFrames = 2, releaseMaxFrames = 6;
+    double holdPinchOpen = 0.035, holdGripOpen = 1.35;
+    double velocityMs = 110, coastMs = 150, blendMs = 100, catchUp = 0.6;   // (blend: longer for more than catchUp m/s)
+    double jumpMax = 0.12;
+    int jumpFrames = 3;
     // Pinch grab zones (3.6), tested at the pinch's begin with the thumb-index contact (where the
     // fingers meet; the gestures file's point is the knuckles, 5-8 cm behind it, which a 3 cm deep
     // zone rarely had). A band along the panel's border, bandOut outside it to bandIn inside, within
@@ -341,6 +359,7 @@ public:
         int offContent = 0;              // ...and crossings off the content and its controls (not pokes)
         int edgePresses = 0;             // presses just past the content's edge (Params::edgeSlack)
         int pinchClicks = 0, cards = 0, fists = 0, fistsWaited = 0, fistsCancelled = 0;   // (and pinches)
+        int coasts = 0, reacquired = 0, glitches = 0, heldThrough = 0, lostEnds = 0;   // holding through loss
     } stats;
 
 private:
@@ -411,6 +430,17 @@ private:
         fhsmooth::Direction along, across;
         double rot0[3][3] = {};
         bool haveRot0 = false, turning = false;
+        // holding through tracking loss (Params::holdLostMs): hands frames in a row with the gesture
+        // up; the carried point's raw track (capture time, room) since the hand was last (re)acquired;
+        // coasting on the last velocity while unseen; the blend back once seen; glitch frames in a row
+        int upFrames = 0;
+        struct Pt { int64_t t; fhsmooth::V3 p; };
+        std::vector<Pt> track;
+        bool coasting = false, blending = false;
+        int64_t coastNs = 0, blendNs = 0, unseenNs = -1;
+        fhsmooth::V3 coastFrom, coastVel, blendOff;
+        int jumps = 0;
+        int reacquired = 0;               // ...times the hand came back mid-hold
     };
     enum Why : unsigned {
         kOneFrame = 1, kOneView = 2, kBent = 4, kNotNearest = 8, kPinching = 16, kBusy = 32, kOtherHand = 64,
@@ -445,6 +475,17 @@ private:
     void SampleTurn(int s, const handcut::Hand &h, const Input &in);
     void EndPress(int s, bool lost, const char *why = nullptr);
     void EndGrab(int s, bool lost);
+    // A held gesture (a grab's or a pinch press's) this tick: false once it's clearly let go (see
+    // Params::holdLostMs), counting hands frames.
+    bool StillHeld(int s, const Input &in, const handcut::Gesture &g, bool isNew, bool grip);
+    // The hand's velocity (m/s, room) from the carried point's raw track, over `ms` up to `endNs`
+    // (0: its newest sample); false with too few samples.
+    bool Velocity(int s, int64_t endNs, double ms, fhsmooth::V3 *out) const;
+    // The grabbing side's raw point this hands frame (the knuckles), the hand seen and sane: into the
+    // smoothing, or the coast and blend.
+    void Track(int s, const Input &in, const handcut::Hand *h);
+    // The grabbing side's carried point shown now: smoothed, coasting, or blending back.
+    fhsmooth::V3 Shown(int s, double now);
     // A grabbing side's pinch point: smoothed, at the tick's time, within its dead zone (deadzone).
     bool Carried(int s, const Input &in, double out[3], bool deadzone = true);
     void Emit(Event::Type t, int s, int panel, double x = 0, double y = 0, bool lost = false);

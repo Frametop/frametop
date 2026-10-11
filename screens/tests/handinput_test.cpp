@@ -731,9 +731,9 @@ void TestLost() {
     CHECK(r.in.pressing(1));
     SynthHand gone;
     gone.present = false;
-    for (int k = 0; k < 5; ++k) r.Frame({gone});   // 167 ms: held
+    for (int k = 0; k < 45; ++k) r.Frame({gone});   // 1.5 s: held (Params::holdLostMs)
     CHECK(r.in.pressing(1) && r.Count(Event::Release) == 0);
-    for (int k = 0; k < 5; ++k) r.Frame({gone});
+    for (int k = 0; k < 10; ++k) r.Frame({gone});
     CHECK(r.Count(Event::Release) == 1 && r.Last(Event::Release)->lost);
     // taken away mid-press (a controller picked up): released as lost at once
     Rig q;
@@ -882,7 +882,13 @@ void TestGrabMove() {
         NEAR(r.hands.shown()[0].pinchPoint[2], -0.28, 0.002);
     }
     r.synth.Pinch(1, false, r.t, at, 1);
-    r.Frame({KnucklesAt(0.05, barY + 0.1, 0.22)});
+    {
+        SynthHand o = KnucklesAt(0.05, barY + 0.1, 0.22);
+        o.open = 1;   // (the fingers open: let go on the second frame, Params::releaseFrames)
+        r.Frame({o});
+        CHECK(r.in.grabbing(1));
+        r.Frame({o});
+    }
     CHECK(r.Count(Event::GrabEnd) == 1 && !r.in.grabbing(1));
     // a pinch on the content clicks where the fingers meet (Params::pinchClick), held while it is
     Rig c;
@@ -895,7 +901,11 @@ void TestGrabMove() {
     for (int k = 0; k < 5; ++k) c.Frame({PinchAt(0, 0, 0.01)});
     CHECK(c.Count(Event::Release) == 0);
     c.synth.Pinch(1, false, c.t, mid, 1);
-    c.Frame({PinchAt(0, 0, 0.01)});
+    {
+        SynthHand o = PinchAt(0, 0, 0.01);
+        o.open = 1;
+        c.Frame({o}), c.Frame({o});
+    }
     CHECK(c.Count(Event::Release) == 1 && !c.in.pressing(1));
     // ...off (HANDS_PINCH_CLICK=0): nothing
     Rig o;
@@ -982,7 +992,11 @@ void TestGrabSmooth() {
     // let go, then a new grab further along: it starts from the hand, not the old smoothing
     r.panels[0].pose = r.carries[0].pose;
     r.synth.Pinch(1, false, r.t, at, 1);
-    r.Frame({PinchAt(0.35, barY, 0.02)});
+    {
+        SynthHand o = PinchAt(0.35, barY, 0.02);
+        o.open = 1;
+        r.Frame({o}), r.Frame({o});
+    }
     CHECK(!r.in.grabbing(1));
     for (int k = 0; k < 10; ++k) r.Frame({PinchAt(0.35, barY, 0.02)});
     const Hit g1 = Locate(r.panels[0], r.hands.seen()[0].pinchPoint);
@@ -1019,7 +1033,7 @@ void FacingTurn(const Mat &p, double *yaw, double *pitch, double *roll) {
 struct WristRig {
     Rig r;
     double barY = 0, u = 0.05;
-    double yaw = 0, pitch = 0, twist = 0;
+    double yaw = 0, pitch = 0, twist = 0, open = 0;
     explicit WristRig(bool rotate = true, double u0 = 0.05) : u(u0) {
         r.in.params().grabRotate = rotate;
         barY = r.panels[0].controls[0].v;
@@ -1031,7 +1045,7 @@ struct WristRig {
     }
     SynthHand Hand() const {
         SynthHand h = KnucklesAt(u, barY, 0.02);
-        h.yawDeg = yaw, h.pitchDeg = pitch, h.twistDeg = twist;
+        h.yawDeg = yaw, h.pitchDeg = pitch, h.twistDeg = twist, h.open = open;
         return h;
     }
     void Step() {
@@ -1146,8 +1160,10 @@ void TestGrabTurn() {
         t.Angles(&y1, &p, &w);
         const double at[3] = {t.u, t.barY, -0.48};
         t.r.synth.Pinch(1, false, t.r.t, at, 1);
-        t.Step();
+        t.open = 1;   // (the fingers open: let go on the second frame, Params::releaseFrames)
+        t.Step(), t.Step();
         CHECK(!t.r.in.grabbing(1));
+        t.open = 0;
         for (int k = 0; k < 10; ++k) t.Step();
         t.Angles(&y, &p, &w);
         NEAR(y, y1, 0.01);
@@ -1218,7 +1234,11 @@ void TestStretchHands() {
     r.panels[0].pose = r.carries[0].pose, r.panels[0].width = r.carries[0].width;
     // the left hand lets go: the right one carries on alone, from where the panel is
     r.synth.Pinch(0, false, r.t, l, 1);
-    r.Frame({KnucklesAt(-0.6, 0, 0.01, false, 1), KnucklesAt(0.6, 0, 0.01, true, 2)});
+    {
+        SynthHand o = KnucklesAt(-0.6, 0, 0.01, false, 1);
+        o.open = 1;
+        r.Frame({o, KnucklesAt(0.6, 0, 0.01, true, 2)}), r.Frame({o, KnucklesAt(0.6, 0, 0.01, true, 2)});
+    }
     CHECK(r.Count(Event::GrabEnd) == 1 && r.in.grabbing(1) && !r.in.grabbing(0));
     for (int k = 1; k <= 20; ++k) {
         const int j = std::min(k, 10);
@@ -1230,11 +1250,135 @@ void TestStretchHands() {
         const Hit g = Locate(PanelAt(r.carries[0].pose, 1.19), r.hands.shown()[0].right ? r.hands.shown()[0].pinchPoint : r.hands.shown()[1].pinchPoint);
         NEAR(g.u, 0.595, 0.01), NEAR(g.v, 0, 0.015);
     }
-    // the right hand lost: its pinch ends as lost
+    // the right hand lost: its pinch ends as lost, and it holds on (Params::holdLostMs) until it's
+    // been unseen 1.75 s; then it lets go where it is, as lost
     r.synth.Pinch(1, false, r.t, rr, 2);
     r.synth.g.pinch[1].flags |= FH_PINCH_LOST;
-    r.Frame({KnucklesAt(-0.6, 0, 0.01, false, 1)});
+    SynthHand left = KnucklesAt(-0.6, 0, 0.01, false, 1);
+    left.open = 1;
+    for (int k = 0; k < 45; ++k) r.Frame({left});
+    CHECK(r.Count(Event::GrabEnd) == 1 && r.in.grabbing(1));
+    for (int k = 0; k < 10; ++k) r.Frame({left});
     CHECK(r.Count(Event::GrabEnd) == 2 && r.Last(Event::GrabEnd)->lost);
+}
+
+// Holding through tracking loss (Params::holdLostMs, 2026-10-10): a bar grab carried right at
+// 0.6 m/s (2 cm a frame) loses its hand for `gap` frames mid-carry (or gets glitch frames, or its
+// pinch flickers up), and the hand comes back where it would be. Returns the largest step the panel
+// took in one 90 Hz tick, and how far the grab point is from under the hand 0.4 s after.
+struct HoldRun { bool held = false; double step = 0, after = 0; int ends = 0; };
+HoldRun CarryThrough(int gap, int what, double jitter = 0) {   // what: 0 unseen, 1 glitch, 2 pinch flicker, 3 lost and back closed
+    Rig r;
+    const double barY = r.panels[0].controls[0].v;
+    auto hand = [&](double x) {
+        SynthHand h = KnucklesAt(x, barY, 0.02);
+        h.jitter = jitter;
+        return h;
+    };
+    for (int k = 0; k < 5; ++k) r.Frame({hand(0)});
+    const double at[3] = {0, barY, -0.48};
+    r.synth.Pinch(1, true, r.t, at, 1);
+    r.Frame({hand(0)});
+    HoldRun out;
+    double lastX = r.panels[0].pose.m[0][3];
+    double x = 0;
+    for (int f = 1; f <= 60; ++f) {
+        x = std::min(0.6, 0.02 * f);   // then still at 0.6
+        const bool off = f >= 15 && f < 15 + gap;
+        SynthHand h = hand(x);
+        if (off && what == 0) h.present = false;
+        if (off && what == 1) h = hand(x + 0.3);   // a glitch: 30 cm off
+        if (what == 2 && f == 15) r.synth.Pinch(1, false, r.t, at, 1);   // up for a frame, then down again
+        if (what == 2 && f == 16) r.synth.Pinch(1, true, r.t, at, 1);
+        if (what == 3 && f == 15) {
+            r.synth.Pinch(1, false, r.t, at, 1);
+            r.synth.g.pinch[1].flags |= FH_PINCH_LOST;
+            h.present = false;
+        }
+        if (what == 3 && f > 15 && f < 15 + gap) h.present = false;
+        r.Frame({h});
+        if (!r.carries.empty()) {
+            // (per tick: the rig keeps only the last tick's carries, so a frame's largest step is
+            // the change over its three ticks, at most 3x a tick's)
+            out.step = std::max(out.step, std::fabs(r.carries[0].pose.m[0][3] - lastX) / 3);
+            if (std::getenv("HOLD_DEBUG"))
+                std::printf("    f %d hand %.3f panel %.3f step %.1f mm%s\n", f, x, r.carries[0].pose.m[0][3],
+                            (r.carries[0].pose.m[0][3] - lastX) / 3 * 1000, off ? " (off)" : "");
+            lastX = r.carries[0].pose.m[0][3];
+            r.panels[0].pose = r.carries[0].pose;
+        }
+        if (f == 55) {   // 0.4 s or more after it's back, and still
+            out.after = r.hands.seen().empty() ? 1 : std::fabs(Locate(r.panels[0], r.hands.seen()[0].pinchPoint).u);
+        }
+    }
+    out.held = r.in.grabbing(1);
+    out.ends = r.Count(Event::GrabEnd);
+    return out;
+}
+
+void TestHoldThroughLoss() {
+    for (int gap : {3, 6, 10}) {
+        const HoldRun a = CarryThrough(gap, 0), b = CarryThrough(gap, 0, 0.003);
+        std::printf("hold through loss: %2d frames unseen at 0.6 m/s: held %d, the panel's largest step %.1f mm a tick "
+                    "(6.7 moving), %.1f cm off the hand 0.4 s on; with 3 mm noise: held %d, %.1f mm, %.1f cm\n",
+                    gap, a.held, a.step * 1000, a.after * 100, b.held, b.step * 1000, b.after * 100);
+        CHECK(a.held && a.ends == 0 && b.held && b.ends == 0);
+        // no jump: a tick at 0.6 m/s is 6.7 mm; the panel catches up what the coast missed (the hand
+        // went 20 cm in 10 frames, the coast 4.5 cm) at Params::catchUp on average, on top of that
+        // (3 mm of noise adds about 3 mm a tick: a noisy carry's steps are up to 9-10 mm without a gap)
+        CHECK(a.step < 0.018 && b.step < 0.025);
+        CHECK(a.after < 0.02 && b.after < 0.025);   // under the hand again (behind by the 1 cm dead zone)
+    }
+    {
+        const HoldRun g = CarryThrough(2, 1);
+        std::printf("hold through loss: 2 glitch frames 30 cm off: held %d, largest step %.1f mm a tick\n", g.held, g.step * 1000);
+        CHECK(g.held && g.step < 0.015 && g.after < 0.02);
+    }
+    {
+        const HoldRun f = CarryThrough(1, 2);
+        CHECK(f.held && f.ends == 0 && f.step < 0.015);
+        const HoldRun l = CarryThrough(8, 3);   // ft-hands ended it as lost; the hand is back, still pinched
+        std::printf("hold through loss: the pinch lost for 8 frames, back closed: held %d, %d end(s), largest step %.1f mm\n",
+                    l.held, l.ends, l.step * 1000);
+        CHECK(l.held && l.ends == 0 && l.step < 0.018);
+    }
+    {
+        // a pinch on the content (a press in KWin) whose pinch flickers up for a frame, the fingers
+        // still together: held; then opened: released two frames on
+        Rig c;
+        for (int k = 0; k < 5; ++k) c.Frame({PinchAt(0, 0, 0.01)});
+        const double mid[3] = {0, 0, -0.48};
+        c.synth.Pinch(1, true, c.t, mid, 1);
+        c.Frame({PinchAt(0, 0, 0.01)});
+        CHECK(c.in.pressing(1));
+        c.synth.Pinch(1, false, c.t, mid, 1);
+        c.Frame({PinchAt(0, 0, 0.01)});
+        c.synth.Pinch(1, true, c.t, mid, 1);
+        for (int k = 0; k < 3; ++k) c.Frame({PinchAt(0, 0, 0.01)});
+        CHECK(c.in.pressing(1) && c.Count(Event::Release) == 0 && c.Count(Event::Press) == 1);
+        c.synth.Pinch(1, false, c.t, mid, 1);
+        SynthHand o = PinchAt(0, 0, 0.01);
+        o.open = 1;
+        c.Frame({o});
+        CHECK(c.in.pressing(1));
+        c.Frame({o});
+        CHECK(!c.in.pressing(1) && c.Count(Event::Release) == 1);
+    }
+    {
+        // gone for good: it lets go where it is, as lost, after holdLostMs
+        Rig r;
+        const double barY = r.panels[0].controls[0].v;
+        for (int k = 0; k < 5; ++k) r.Frame({KnucklesAt(0, barY, 0.02)});
+        const double at[3] = {0, barY, -0.48};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({KnucklesAt(0, barY, 0.02)});
+        SynthHand gone;
+        gone.present = false;
+        for (int k = 0; k < 50; ++k) r.Frame({gone});
+        CHECK(r.in.grabbing(1));
+        for (int k = 0; k < 6; ++k) r.Frame({gone});
+        CHECK(!r.in.grabbing(1) && r.Count(Event::GrabEnd) == 1 && r.Last(Event::GrabEnd)->lost);
+    }
 }
 
 // Near pinches by the border (Params::band*, 2026-10-10: "I still can't pinch to grab displays
@@ -1351,7 +1495,7 @@ void TestCardPinch() {
             NEAR(std::fabs(roll), 20, 2.0);
         }
         r.synth.Pinch(1, false, r.t, at, 1);
-        r.Frame({CardHand(0.1, v, 0.5, 30, 0.10, 20)});
+        r.Frame({CardHand(0.1, v, 1.0, 30, 0.10, 20)}), r.Frame({CardHand(0.1, v, 1.0, 30, 0.10, 20)});
         CHECK(r.Count(Event::GrabEnd) == 1 && !r.in.grabbing(1));
     }
     {
@@ -1433,7 +1577,9 @@ void TestFistGrab() {
         if (!r.carries.empty()) NEAR(r.carries[0].pose.m[0][3] - x0, 0.15, 0.015);
         // the fist opens: let go
         r.synth.Grip(1, false, r.t, at, 1);
-        r.Frame({FistAt(0.15, 0, 0.05, true, 1, 70)});
+        SynthHand o = FistAt(0.15, 0, 0.05, true, 1, 70);
+        o.curl = o.curlIndex = 0;
+        r.Frame({o}), r.Frame({o});
         CHECK(r.Count(Event::GrabEnd) == 1 && !r.in.grabbing(1));
     }
     {
@@ -3068,6 +3214,7 @@ int main(int argc, char **argv) {
     TestGrabTurn();
     TestGrabResize();
     TestStretchHands();
+    TestHoldThroughLoss();
     TestForgivingZones();
     TestCardPinch();
     TestFistGrab();

@@ -338,6 +338,8 @@ struct Screen {
     float controls = 0;                       // the controls' fade, 0 (hidden) .. 1
     bool controlsUp = false;                  // the controls' overlays are shown
     long nearUntil = 0;                       // a laser was near the controls until this tick
+    bool handNear = false;                    // a hand is at it (its buttons grow: ChromeSize)
+    long handNearUntil = 0;
     long aimUntil = 0;                        // a hand controller pointed at it until this tick (UpdateAim)
     vr::TrackedDeviceIndex_t pinTarget = kNone;  // moving: rides on this controller when let go
     vr::TrackedDeviceIndex_t onWrist = kNone;    // moving: the laser is in this controller's ring
@@ -711,6 +713,8 @@ bool ScreenPose(const Screen &s, Mat *out) {
 // The controls' size from both the screen's width and its distance from the head (the
 // geometric mean of 12% of the width and 10% of the distance), so a small screen near you
 // gets small controls and a big or far one gets big ones, never under about 1.7 degrees.
+double g_handButton = 0.024;   // HANDS_BUTTON_SIZE: a hand at a panel makes its round buttons at least this wide (m)
+
 void ChromeSize(Screen &s) {
     Mat head, p;
     double dist = 2;
@@ -721,6 +725,9 @@ void ChromeSize(Screen &s) {
     const double least = dist * 0.03;
     s.chrome = std::clamp(std::sqrt(0.012 * dist * s.metres), least, std::max(least, s.metres * 0.5));
     s.grip = std::max(s.chrome * 0.13, dist * 0.018);
+    // a hand at the panel: its round buttons at least handButton across (user, 2026-10-11: the bar's
+    // buttons were hard to hit with a finger right after moving a display; about 1 cm at arm's reach)
+    if (s.handNear) s.grip = std::max(s.grip, g_handButton);
 }
 
 // A point on the screen's surface, u metres along it from the centre (along the arc when
@@ -2747,6 +2754,9 @@ void UpdateHandGuides() {
                 halo = hb;
                 break;
             }
+            case handinput::Guide::Touch:   // the dot: its halo in proportion, so one texture each way
+                r = std::max(1e-3, hg.g.size), halo = 0.7 * r, wm = hm = 2 * (2.2 * r), tw = th = 64;
+                break;
             default: break;
         }
         char key[160];
@@ -2763,7 +2773,7 @@ void UpdateHandGuides() {
         }
         vr::VROverlay()->SetOverlayWidthInMeters(hg.overlay, float(wm));
         vr::VROverlay()->SetOverlayCurvature(hg.overlay, curved && s.curve > 0 ? float(std::clamp(wm / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f);
-        const Mat m = Mul(p, OnSurface(s, u, v, 0));
+        const Mat m = Mul(p, OnSurface(s, u, v, hg.g.kind == handinput::Guide::Touch ? 0.003 : 0));   // (the dot just over the content)
         vr::VROverlay()->SetOverlayTransformAbsolute(hg.overlay, vr::TrackingUniverseStanding, &m);
         if (std::fabs(hg.alpha - hg.shownAlpha) > 0.01) {
             vr::VROverlay()->SetOverlayAlpha(hg.overlay, float(hg.alpha));
@@ -2934,7 +2944,10 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         const auto h = hovered.find(i);
         const unsigned bits = h == hovered.end() ? 0 : h->second;
         if (bits != s.handHover) s.handHover = bits, ApplyAlpha(s);
-        if (g_handInput.nearPanels().count(i)) s.nearUntil = g_tick + kControlsLinger;   // the controls show
+        const bool near = g_handInput.nearPanels().count(i) > 0;
+        if (near) s.nearUntil = g_tick + kControlsLinger, s.handNearUntil = g_tick + kControlsLinger;   // the controls show
+        const bool grown = g_tick < s.handNearUntil;
+        if (grown != s.handNear) s.handNear = grown, PlaceChrome(s);   // (and grow for a finger)
     }
     // the near claim, for each hands frame (the helper waits for it at a pinch's begin): 1, the hand's
     // pinches and grips are ours (within the touch zone; a hand the palm menu has, so its pinch
@@ -3039,6 +3052,9 @@ bool ft_vr_init(void) {
     k.fistResizeOnly = handcut::Setting("HANDS_FIST_RESIZE_ONLY", "1") != "0";
     k.fistPair = handcut::Setting("HANDS_FIST_PAIR", "1") != "0";
     k.twoFingerScroll = handcut::Setting("HANDS_TWO_FINGER_SCROLL", "1") != "0";
+    k.motionPress = handcut::Setting("HANDS_MOTION_PRESS", "1") != "0";
+    k.touchDot = handcut::Setting("HANDS_TOUCH_DOT", "1") != "0";
+    if (handcut::Setting("HANDS_TAP_LOCK", "1") == "0") k.lockOut = 0;
     num("HANDS_POKE_REST_BELOW", k.restBelow, 0, 2);
     num("HANDS_POKE_REST_NEAR", k.restNear, 0, 2);
     // what a near grab carries, smoothed (handinput.h, Params::grab*)
@@ -3072,6 +3088,7 @@ bool ft_vr_init(void) {
     num("HANDS_FIST_REACH", k.fistFront, 0, 0.3);   // 0: the touch zone's (as before)
     if (k.fistFront <= 0) k.fistBack = 0, k.fistClaimCurl = 0;
     num("HANDS_BUTTON_REACH", k.buttonReach, 0, 0.05);
+    num("HANDS_BUTTON_SIZE", g_handButton, 0, 0.08);
     k.pinchButtons = handcut::Setting("HANDS_PINCH_BUTTONS", "1") != "0";
     k.edgeGlow = handcut::Setting("HANDS_EDGE_GLOW", "1") != "0";
     const std::string near = handcut::Setting("HANDS_NEAR", "1");

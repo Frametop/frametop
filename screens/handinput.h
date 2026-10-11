@@ -184,6 +184,21 @@ struct Params {
     double pullBack = 0.01;     // ...or pulled back this far from the deepest point
     double slide = 0.015;       // the click stays where it was pressed until the tip slides this far
     double tapMs = 250;         // ...and for this long after the press: a tap is a click where it went down (HANDS_TAP_MS)
+    // The aim locks on the way in (user, 2026-10-11, "how can we make tapping more reliable"): the point a
+    // tap lands on follows the fingertip until it's lockOut from the surface, then holds there (the tip's
+    // jitter and its slide as the finger goes in and curls don't move it), unless the tip slides lockSlip
+    // along the panel (a new target). The cursor and the fingertip dot show it. HANDS_TAP_LOCK (0: off).
+    double lockOut = 0.015, lockSlip = 0.025;
+    // A press by motion: a tip that came in quickly (motionSpeed m/s on the frame before, motionTravel
+    // within 300 ms) and stopped or turned back short of the surface (within motionShort of it) presses
+    // there too: the depth is the weakest number, a tap that "touched" often reads 0.5-1.5 cm out.
+    // HANDS_MOTION_PRESS (0: off).
+    bool motionPress = true;
+    double motionSpeed = 0.25, motionStop = 0.05, motionShort = 0.015, motionTravel = 0.03;
+    // The fingertip dot (Guide::Touch; HANDS_TOUCH_DOT): its radius from dotFar (at the touch zone's
+    // edge) to dotNear (at the surface), metres.
+    bool touchDot = true;
+    double dotFar = 0.012, dotNear = 0.005;
     double rePressMs = 150;     // no new press this soon after a release,
     double rearm = 0.01;        // ...nor until the tip has been this far out in front since (a noisy
                                 // pull-back let go mid-tap and pressed again: a double click)
@@ -325,7 +340,7 @@ struct Params {
     // Now the nearest control wins, round buttons have a hit area at least buttonReach each way for a
     // fingertip or a pinch, and a pinch on one presses it (pinchButtons, HANDS_PINCH_BUTTONS); a hand at
     // one lights it (hovered) and shows a soft ring round it (guide). HANDS_BUTTON_REACH.
-    double buttonReach = 0.015;
+    double buttonReach = 0.025;   // (1.5 cm until 2026-10-11: buttons on the bar were hard to hit right after a move)
     bool pinchButtons = true;
     // The soft white glow round a panel's corner (where a pinch resizes it), along its edge (where a pinch
     // moves it) and round a button, per hand (guide(); vr.cpp draws it, cutouts on or off), instead of the
@@ -473,7 +488,7 @@ struct CornerAim {
 // brighter the closer the fingers; selected: the hand holds it (resizing from that corner, pressing
 // the button).
 struct Guide {
-    enum Kind { None, Corner, Edge, Button } kind = None;
+    enum Kind { None, Corner, Edge, Button, Touch } kind = None;   // Touch: where a tap would land (u, v; size: the dot's radius)
     int panel = -1;
     int sx = 0, sy = 0;
     double u = 0, v = 0, size = 0;
@@ -639,6 +654,7 @@ public:
         int fistPinches = 0;                         // fist grabs ft-hands called pinches (Params::fistIndex)
         int fistPairs = 0;                           // two fists that took a panel by their shape (Params::fistPair)
         int scrolls = 0, scrollNotches = 0;          // two-finger scrolls, and the notches they sent
+        int motionPresses = 0;                       // presses by motion (Params::motionPress)
         int settles = 0, settledFists = 0;           // pinches that waited to become fists (Params::fistSettleMs), and did
         int joins = 0;                               // second hands joining a held panel (Params::joinFront)
         int buttonPinches = 0, heldByOther = 0;      // buttons pressed by a pinch; pokes refused on a panel the other hand holds
@@ -672,6 +688,9 @@ private:
         int64_t grabbedNs = 0;
         Control control = Control::None;     // pressed a control (no KWin press)
         double hoverX = -1, hoverY = -1, hoverU = 0, hoverV = 0;
+        // the aim (Params::lockOut): where a tap will land, frozen as the tip comes within lockOut
+        double aimU = 0, aimV = 0, tipD = 1;
+        bool aimSet = false;
         int64_t hoverNs = -1;                // when the cursor last followed the fingertip
         int64_t pressedNs = 0;
         // a pinch on the content (Params::pinchClick): pressed while the pinch is held; the

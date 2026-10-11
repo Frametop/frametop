@@ -73,6 +73,10 @@ inline std::vector<uint8_t> GuideTexture(const handinput::Guide &g, int w, int h
             } else if (g.kind == handinput::Guide::Button) {
                 const double d = std::hypot(X, Y) - r;
                 if (d >= 0 && Y < edge) a = Alpha(d, halo, peak);
+            } else if (g.kind == handinput::Guide::Touch) {   // a soft dot of radius r (a ring round it when pressed)
+                const double d = std::hypot(X, Y);
+                a = (d <= r ? 0.55 : Alpha(d - r, halo, 0.55)) * (g.selected ? 1.4 : 1);
+                if (g.selected) a = std::max(a, Alpha(std::fabs(d - 1.6 * r), 0.35 * r, 0.7));
             }
             Pixel(&px[(size_t(y) * w + x) * 4], a);
         }

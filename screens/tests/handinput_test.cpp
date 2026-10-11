@@ -4446,6 +4446,24 @@ void TestButtons() {
 }
 
 // The soft glow per hand (Guide, Params::edgeGlow): what a pinch would take, brighter closer.
+// The fingertip's dot (Guide::Touch): a pointing hand over the content shows where a tap lands; it
+// holds still once the tip is within lockOut (the aim), and the press lands there.
+void TestTouchDot() {
+    Rig r;
+    for (int mm = 60; mm >= 20; mm -= 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+    Guide g = r.in.guide(1);
+    CHECK(g.kind == Guide::Touch && std::fabs(g.u - 0.1) < 0.005 && std::fabs(g.v - 0.05) < 0.005 && !g.selected);
+    // within lockOut the tip slides 1.5 cm sideways as it goes in: the aim (and the press) stay
+    r.Frame({TipAt(0.1, 0.05, 0.012)});
+    r.Frame({TipAt(0.107, 0.05, 0.005)});
+    r.Frame({TipAt(0.115, 0.05, -0.005)});
+    r.Frame({TipAt(0.115, 0.05, -0.012)});
+    const auto p = r.Last(Event::Press);
+    CHECK(p && std::fabs(p->x - (0.5 + 0.1 / 1.0) * 1920) < 4);   // (TestPanel: 1 m wide, 1920 px)
+    g = r.in.guide(1);
+    CHECK(g.kind == Guide::Touch && g.selected);
+}
+
 void TestGuides() {
     auto at = [](double u, double v, double d, int pinchFrames = 0) {
         Rig r;
@@ -4461,7 +4479,7 @@ void TestGuides() {
         return r.in.guide(1);
     };
     const double W = 0.5, H = 0.5625 / 2;
-    Guide g = at(0.0, 0.0, 0.02);   // the middle: nothing
+    Guide g = at(0.0, 0.0, 0.02);   // the middle, a hand shaping a pinch: nothing (no edge, corner or fingertip dot)
     CHECK(g.kind == Guide::None);
     g = at(W + 0.01, H + 0.01, 0.20);   // 20 cm in front of the top right corner: nothing yet
     CHECK(g.kind == Guide::None);
@@ -4960,6 +4978,7 @@ int main(int argc, char **argv) {
     TestGrabThatAtNearPanel();
     TestGrabThatAfterThrow();
     TestButtons();
+    TestTouchDot();
     TestGuides();
     TestFistSettle();
     TestJoin();

@@ -861,7 +861,10 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
             Log("%s two fingers tapped screen %d at %.0f,%.0f (as they left)", SideName(s), sd.pendingPanel + 1, sd.pendingX, sd.pendingY);
         }
     }
-    if (sd.state != State::Hover && sd.state != State::Press) return;
+    if (sd.state != State::Hover && sd.state != State::Press) {
+        sd.aimSet = false;
+        return;
+    }
     const Panel *P = Find(panels, sd.panel);
     if (!P) {
         sd.state = State::Idle, sd.panel = -1;
@@ -942,6 +945,17 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     const bool otherPressing = side_[1 - s].state == State::Press;
     const bool otherHolds = side_[1 - s].state == State::Grab && side_[1 - s].panel == P->index;   // (joining it)
     char why[96];
+    // the aim: follows the tip until lockOut from the surface, then holds (Params::lockOut)
+    if (sd.state != State::Press) {
+        sd.tipD = t.d;
+        if (!sd.aimSet || p_.lockOut <= 0 || t.d > p_.lockOut || std::hypot(t.u - sd.aimU, t.v - sd.aimV) > p_.lockSlip)
+            sd.aimU = t.u, sd.aimV = t.v, sd.aimSet = true;
+    }
+    double ax = x, ay = y;
+    if (over && sd.aimSet && !edge) {
+        double bx, by;
+        if (ToBuffer(*P, sd.aimU, sd.aimV, &bx, &by)) ax = bx, ay = by;
+    }
 
     if (sd.state == State::Press) {
         sd.deepest = std::min(sd.deepest, t.d);
@@ -1040,9 +1054,9 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     if (over && extended && !resting && !in.typing[s] && t.d <= p_.cursor && t.d > p_.nearBack && !in.pointerBusy && !otherPressing &&
         !otherHolds) {
         sd.hoverNs = in.nowNs, sd.hoverU = t.u, sd.hoverV = t.v;
-        if (std::fabs(x - sd.hoverX) >= 0.5 || std::fabs(y - sd.hoverY) >= 0.5) {
-            sd.hoverX = x, sd.hoverY = y;
-            Emit(Event::Motion, s, P->index, x, y);
+        if (std::fabs(ax - sd.hoverX) >= 0.5 || std::fabs(ay - sd.hoverY) >= 0.5) {   // (the aim: frozen near the surface)
+            sd.hoverX = ax, sd.hoverY = ay;
+            Emit(Event::Motion, s, P->index, ax, ay);
         }
     }
     // an attempt: from crossing the surface until it's back out past `release` (or leaves); not one
@@ -1066,6 +1080,29 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     }
     if (!crossed) {
         if (a.on && t.d >= p_.release) EndAttempt(s);
+        // a press by motion: came in quickly and stopped short (Params::motionPress)
+        if (p_.motionPress && !a.on && over && !edge && ctl == Control::None && t.d <= p_.motionShort && sd.hist.size() >= 3 &&
+            extended && nearest && !resting && !in.typing[s] && !in.pointerBusy && !otherPressing && !otherHolds && !sd.spent &&
+            sd.rearmed && h->stereo && !(sd.releasedAt >= 0 && in.nowNs - sd.releasedAt < int64_t(p_.rePressMs * 1e6)) &&
+            !in.hands->pinch(s).down && !in.hands->grip(s).down && FingerAngle(*P, t, *h) <= p_.fingerAngle) {
+            const size_t n = sd.hist.size();
+            const Side::Sample &q0 = sd.hist[n - 1], &q1 = sd.hist[n - 2], &q2 = sd.hist[n - 3];
+            const double d0 = Locate(*P, q0.tip).d, d1 = Locate(*P, q1.tip).d, d2 = Locate(*P, q2.tip).d;
+            const double dt1 = (q1.t - q2.t) / 1e9, dt0 = (q0.t - q1.t) / 1e9;
+            double far = d0;
+            for (const Side::Sample &q : sd.hist)
+                if (q0.t - q.t <= 300'000'000) far = std::max(far, Locate(*P, q.tip).d);
+            if (dt1 > 1e-3 && dt0 > 1e-3 && (d2 - d1) / dt1 >= p_.motionSpeed && (d1 - d0) / dt0 <= p_.motionStop &&
+                far - d0 >= p_.motionTravel) {
+                sd.state = State::Press, sd.lockU = sd.aimSet ? sd.aimU : t.u, sd.lockV = sd.aimSet ? sd.aimV : t.v;
+                sd.deepest = t.d, sd.dragging = false, sd.byPinch = false, sd.pressedNs = in.nowNs;
+                sd.control = Control::None, sd.lastX = ax, sd.lastY = ay;
+                Emit(Event::Press, s, P->index, ax, ay);
+                ++stats.presses, ++stats.motionPresses;
+                Log("%s poke pressed screen %d at %.0f,%.0f by its motion (stopped %+.1f cm out, in at %.2f m/s, %.1f cm travel)",
+                    SideName(s), P->index + 1, ax, ay, t.d * 100, (d2 - d1) / dt1, (far - d0) * 100);
+            }
+        }
         return;
     }
     ++a.frames, a.deepest = std::min(a.deepest, t.d);
@@ -1104,6 +1141,8 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     sd.state = State::Press, sd.lockU = t.u, sd.lockV = t.v, sd.deepest = t.d, sd.dragging = false, sd.byPinch = false;
     sd.pressedNs = in.nowNs;
     if (over) {
+        // (at the aim, where the tip was as it came within lockOut: Params::lockOut)
+        if (sd.aimSet && !edge) sd.lockU = sd.aimU, sd.lockV = sd.aimV, x = ax, y = ay;
         sd.control = Control::None, sd.lastX = x, sd.lastY = y;
         Emit(Event::Press, s, P->index, x, y);
         ++stats.presses, stats.edgePresses += edge;
@@ -2331,8 +2370,11 @@ void HandInput::Guides(const Input &in, const std::vector<Panel> &panels) {
             const double f = 1 - std::clamp(excess / std::max(1e-6, p_.glowReach), 0.0, 1.0);
             return 0.5 * f * f;
         };
-        if (sd.state == State::Press) {   // a button pressed (poked or pinched): its ring, lit
+        if (sd.state == State::Press) {   // a button pressed (poked or pinched): its ring, lit; a tap: its dot, lit
             if (sd.control != Control::None) button(sd.control, 1, true);
+            else if (p_.touchDot && !sd.byPinch)
+                gd.kind = Guide::Touch, gd.panel = P->index, gd.u = sd.lockU, gd.v = sd.lockV, gd.size = p_.dotNear * 1.6,
+                gd.strength = 1, gd.selected = true;
             continue;
         }
         if (sd.state == State::Grab) {    // resizing from a corner: that corner, lit
@@ -2357,6 +2399,21 @@ void HandInput::Guides(const Input &in, const std::vector<Panel> &panels) {
         if (bc != Control::None) {
             button(bc, bs, false);
             continue;
+        }
+        // a pointing fingertip over the content: the dot where a tap would land (the aim), smaller and
+        // brighter as it comes in (Params::touchDot)
+        // (pointing: not a hand shaping a pinch, its thumb by the index tip)
+        if (p_.touchDot && Extension(*h) >= p_.extended - 0.1 &&
+            std::hypot(h->p[4][0] - h->p[8][0], h->p[4][1] - h->p[8][1], h->p[4][2] - h->p[8][2]) > p_.pinchApart) {
+            const Hit tt = Locate(*P, h->p[8]);
+            const double u = sd.aimSet ? sd.aimU : tt.u, v = sd.aimSet ? sd.aimV : tt.v;
+            double x, y;
+            if (tt.d <= p_.nearFront && tt.d > p_.nearBack && ToBuffer(*P, u, v, &x, &y)) {
+                const double k = std::clamp(1 - std::max(0.0, tt.d) / std::max(1e-3, p_.nearFront), 0.0, 1.0);
+                gd.kind = Guide::Touch, gd.panel = P->index, gd.u = u, gd.v = v;
+                gd.size = p_.dotFar + (p_.dotNear - p_.dotFar) * k, gd.strength = 0.35 + 0.45 * k, gd.selected = false;
+                continue;
+            }
         }
         // the corner a pinch here would resize from, or the edge it would move the panel by
         const Hit q = Locate(*P, h->contact);

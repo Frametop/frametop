@@ -274,7 +274,9 @@
 // "ctl <side> press", "ctl <side> gone", "ctl ws 0|1", read from vrserver's web socket), the helper
 // adds each controller's motion, charging and tracking, and the hands from ft-hands' hands file
 // (handsin.h). Transitions go to the log ("handoff right: controller -> hand (no touch 1.5 s,
-// still 3.0 s)"). ft-screens gets "hands <L> <R> <allowed>" on @ft_screens, on a change and every
+// still 3.0 s)"), and so does the hands file going quiet for 1.5 s, which turns both bare sides
+// off ("hand tracking: nothing new for 1.5 s: sides off", then "hand tracking: publishing";
+// feedage.h on a frame newer than the loop's clock). ft-screens gets "hands <L> <R> <allowed>" on @ft_screens, on a change and every
 // second: L and R are hand, controller or off (no hand tracking and no controller in use), and
 // allowed is 1 when hands may work at all: the headset worn, and outside VR games, or in one with
 // the dashboard open or Frametop toggled back on (the relay's "paused 0"; it sends "paused 1|0"
@@ -1253,6 +1255,7 @@ int main() {
     // it last told ft-screens.
     int raySide = -1;  // the bare hand whose ray drives the pointer (see "Hand ray"), -1: none
     hin::HandsInRoom handsRoom;
+    bool handsLiveSeen = false;         // Live() at the last pass: its changes go to the log
     handoff::Handoff arbiter;
     bool framePaused = false;           // the relay's "paused 1|0": Frametop paused (for a VR game)
     bool dashboardUp = false;           // IsDashboardVisible, read at most every 100 ms
@@ -1346,7 +1349,7 @@ int main() {
         if (gazeOn) gazeOwns = true, nudging = false;
         // that side's controller is in use, or hands aren't allowed now (a VR game): the laser goes back,
         // as when a controller moves (last used wins), unless the mouse is in use
-        if (controller && active && Clock::now() - lastMouse > std::chrono::seconds(1)) releasePointer("hand ray off (a controller, or a game)");
+        if (controller && active && Clock::now() - lastMouse > std::chrono::seconds(1)) releasePointer("hand ray off (a controller, a game, or no hand tracking)");
     };
     // The ray owner's changes (rayowner.h), to the log, one line each; apply: the pointer follows
     // (rayEnter, rayLeave).
@@ -1356,7 +1359,8 @@ int main() {
             // which one, for an "off" (a drag that ends this way says why in the log)
             std::string why = c.why;
             if (c.off && c.from >= 0)
-                why = arbiter.State(c.from) != handoff::Owner::Hand ? "off: its controller is in use"
+                why = arbiter.State(c.from) == handoff::Owner::Controller ? "off: its controller is in use"
+                    : arbiter.State(c.from) == handoff::Owner::Off ? "off: no hand tracking (nothing new for 1.5 s)"
                     : !handsAllowed ? (headsetOff ? "off: the headset is off" : "off: a VR game")
                     : Clock::now() - lastMouse < std::chrono::seconds(1) ? "off: the mouse moved"
                     : c.why;
@@ -2183,6 +2187,13 @@ int main() {
             const uint64_t ns =
                 uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(tnow.time_since_epoch()).count());
             const bool live = handsRoom.Live(ns);
+            if (live != handsLiveSeen) {
+                handsLiveSeen = live;
+                if (live) std::printf("hand tracking: publishing\n");
+                else std::printf("hand tracking: nothing new for %.1f s: sides off\n",
+                                 handsRoom.publish_ns ? double(hin::AgeNs(ns, handsRoom.publish_ns)) / 1e9 : 0.0);
+                std::fflush(stdout);
+            }
             std::vector<handoff::Hand> seen;
             if (live)
                 for (const hin::RoomHand &h : handsRoom.hands) {

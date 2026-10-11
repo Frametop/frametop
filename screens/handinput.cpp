@@ -256,9 +256,9 @@ Zone GrabZone(const Panel &p, const Hit &h, const Params &k, int *sx, int *sy, d
     const double W = p.width / 2, H = p.height / 2, depth = std::fabs(h.d) - k.bandDepth;
     struct Cand { Zone z; double e; int sx, sy; };
     std::vector<Cand> c;   // in priority order
-    for (const Spot &s : p.controls)
+    for (const Spot &s : p.controls)   // (the resize handle: at whichever corner vr.cpp has it now)
         if (s.kind == Control::Tab)
-            c.push_back({Zone::Tab, std::max(std::hypot(h.u - s.u, h.v - s.v) - k.cornerReach, depth), 1, -1});
+            c.push_back({Zone::Tab, std::max(std::hypot(h.u - s.u, h.v - s.v) - k.cornerReach, depth), s.u >= 0 ? 1 : -1, s.v >= 0 ? 1 : -1});
     for (int cx : {1, -1})
         for (int cy : {-1, 1}) {
             c.push_back({Zone::Corner, std::max(std::hypot(h.u - cx * W, h.v - cy * H) - k.cornerReach, depth), cx, cy});
@@ -1573,7 +1573,7 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
             const double close = 1 - std::clamp(excess / p_.glowReach, 0.0, 1.0);
             auto it = corners_.find(P->index);
             if (it == corners_.end() || (!it->second.held && it->second.closeness < close))
-                corners_[P->index] = {z == Zone::Tab ? 1 : sx, z == Zone::Tab ? -1 : sy, close, false};
+                corners_[P->index] = {sx, sy, close, false};
         }
         if (z == Zone::Corner) glow(sx * P->width / 2, sy * P->height / 2, 0.012 + 0.008 * strength, alpha, true, kAmber);
         else if (z == Zone::Edge || z == Zone::Title) glow(q.u, q.v, 0.010 + 0.008 * strength, alpha, true, kBlue);

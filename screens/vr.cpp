@@ -323,6 +323,7 @@ struct Screen {
     bool cornerLit = false;                   // its texture lit (resizing)
     long cornerUntil = 0;                     // aimed at until this tick (then back to the bottom right)
     int keepX = -1, keepY = 1;                // a floating window's corner that stays put as it changes size
+    long keepUntil = 0;                       // ...after a resize from another corner ends, until this tick (late answers)
     Mat rollFrom = Identity();                // roll: the pose at the press (pinRel when pinned)
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
     bool hover[7] = {};                       // a laser is on the bar, curve, roll, resize, dock, close, reset control
@@ -1334,10 +1335,12 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
 // Stop moving where it is (a command took over).
 void EndDrag(Screen &s) {
     if (s.drag != Drag::None) std::printf("screen %d: %s ended\n", ScreenIndexOf(s) + 1, DragName(s.drag));
+    // (a floating window's last resize may be answered after the release: its corner stays kept a while)
+    if (s.drag == Drag::Resize) s.keepUntil = g_tick + 45;
+    else s.keepX = -1, s.keepY = 1;
     s.drag = Drag::None;
     s.dragDevice = kNone;
     s.pinTarget = s.onWrist = kNone;
-    s.keepX = -1, s.keepY = 1;
     LightBar(s, false);
     ApplyAlpha(s);
 }
@@ -1599,7 +1602,9 @@ void SetFloat(Screen &s, double mpp, int x, int y, int w, int h, int title) {
     ApplyCurve(s);
     ApplyCrop(s);
     // the corner keepX, keepY (the top left, or the one opposite a corner being dragged) stays put
-    const double dx = -s.keepX * (s.metres - oldW) / 2, dy = -s.keepY * (s.heightMetres() - oldH) / 2;
+    const bool keep = s.drag == Drag::Resize || g_tick < s.keepUntil;
+    const int kx = keep ? s.keepX : -1, ky = keep ? s.keepY : 1;
+    const double dx = -kx * (s.metres - oldW) / 2, dy = -ky * (s.heightMetres() - oldH) / 2;
     if (!first && (std::fabs(dx) > 1e-6 || std::fabs(dy) > 1e-6)) {
         if (s.pinned != kNone) Pin(s, s.pinned, Mul(s.pinRel, Translation(dx, dy, 0)));
         else SetAbsolute(s, Mul(s.pose, Translation(dx, dy, 0)));

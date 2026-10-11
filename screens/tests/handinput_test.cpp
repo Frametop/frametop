@@ -1268,6 +1268,16 @@ void TestGrabResizeCorners() {
         NEAR(u, 1.0 - 0.075, 1e-9);   // the bottom right corner kept: the centre half the new width left of it
     }
     {
+        // the resize handle moved to the top left (vr.cpp put it where a laser aimed): a pinch on it
+        // resizes from the top left
+        Panel P = TestPanel();
+        for (Spot &c : P.controls)
+            if (c.kind == Control::Tab) c.u = -c.u, c.v = -c.v;
+        int sx = 0, sy = 0;
+        double e = 1;
+        CHECK(GrabZone(P, {-0.52, 0.30, 0.0}, Params(), &sx, &sy, &e) == Zone::Tab && sx == -1 && sy == 1 && e <= 0);
+    }
+    {
         // a pinch near a corner (not yet in it): the handle there, dimmer
         Rig r;
         r.panels[0].controls.clear();

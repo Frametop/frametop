@@ -2789,6 +2789,40 @@ void UpdateHandGuides() {
     }
 }
 
+// The hand interactions Input Settings switches on and off live ("handsetting KEY 0|1"); each also read
+// from frametop.conf at start (ft_vr_init). A number-valued one goes back to its default when switched on.
+bool SetHandSetting(const char *key, bool on) {
+    handinput::Params &k = g_handInput.params();
+    const handinput::Params d;
+    const std::string n = key;
+    if (n == "HANDS_PINCH_CLICK") k.pinchClick = on;
+    else if (n == "HANDS_CARD_PINCH") k.cardPinch = on;
+    else if (n == "HANDS_TWO_FINGER_SCROLL") k.twoFingerScroll = on;
+    else if (n == "HANDS_TOUCH_DOT") k.touchDot = on;
+    else if (n == "HANDS_TAP_LOCK") k.lockOut = on ? d.lockOut : 0;
+    else if (n == "HANDS_MOTION_PRESS") k.motionPress = on;
+    else if (n == "HANDS_LOCK_PUSH") k.lockPushDepth = on ? d.lockPushDepth : 0;
+    else if (n == "HANDS_GRAB_ROTATE") k.grabRotate = on;
+    else if (n == "HANDS_STRETCH_TURN") k.stretchTurn = on;
+    else if (n == "HANDS_FIST_GRAB") k.fistGrab = on;
+    else if (n == "HANDS_FIST_PAIR") k.fistPair = on;
+    else if (n == "HANDS_FIST_RESIZE_ONLY") k.fistResizeOnly = on;
+    else if (n == "HANDS_PINCH_BUTTONS") k.pinchButtons = on;
+    else if (n == "HANDS_EDGE_GLOW") k.edgeGlow = on;
+    else if (n == "HANDS_RELEASE_FREEZE") k.openFreeze = on ? d.openFreeze : 0;
+    else if (n == "HANDS_FLICK") k.flick = on;
+    else if (n == "HANDS_PUSH") k.push = on;
+    else if (n == "HANDS_THROW") k.cardThrow = on;
+    else if (n == "HANDS_SWEEP") k.sweep = on;
+    else if (n == "HANDS_TRACK_GATE") k.gate = on;
+    else if (n == "HANDS_GRAB_THAT") g_grabThat.params().on = on;
+    else if (n == "HANDS_TARGET_GLOW") g_targetGlowOn = on;
+    else if (n == "HANDS_PUSH_GLOW") g_pushGlowOn = on;
+    else if (n == "HANDS_PALM_MENU") g_palm.params().on = on;
+    else return false;
+    return true;
+}
+
 void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data) {
     std::vector<handinput::Panel> panels;
     for (auto &[i, s] : g_screens) {
@@ -3972,6 +4006,12 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         else return (void)std::snprintf(reply, size, "error modes: always outside_games dashboard");
         UpdateLasers();
         std::snprintf(reply, size, "ok %s", LasersName());
+    } else if (char key[48]; !std::strncmp(cmd, "handsetting ", 12) && std::sscanf(cmd, "handsetting %47s %15s", key, word) == 2) {
+        // one hand interaction on or off now (Frametop Input Settings' Hands page writes frametop.conf too)
+        const int on = !std::strcmp(word, "1") || !std::strcmp(word, "on") ? 1 : !std::strcmp(word, "0") || !std::strcmp(word, "off") ? 0 : -1;
+        if (on < 0 || !SetHandSetting(key, on)) return (void)std::snprintf(reply, size, "error handsetting <HANDS_...> 0|1");
+        std::printf("hands: %s %s (Input Settings)\n", key, on ? "on" : "off");
+        std::snprintf(reply, size, "ok %s %d", key, on);
     } else if (char sl[16], sr[16]; std::sscanf(cmd, "hands %15s %15s %d", sl, sr, &n) == 3) {
         const bool l = !std::strcmp(sl, "hand"), r = !std::strcmp(sr, "hand"), allowed = n != 0;
         if (l != g_handsWord.hand[0] || r != g_handsWord.hand[1] || allowed != g_handsWord.allowed)

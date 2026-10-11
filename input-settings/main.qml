@@ -1572,6 +1572,24 @@ Kirigami.ApplicationWindow {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
+
+                // Every interaction on Frametop's screens, each on its own (ft_input_settings.HAND_INTERACTIONS);
+                // they apply at once. Direct touch above switches all of them.
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand interactions" }
+                Repeater {
+                    model: backend.handInteractions
+                    delegate: Controls.Switch {
+                        required property var modelData
+                        Kirigami.FormData.label: modelData.group ? modelData.group + ":" : ""
+                        text: modelData.label
+                        checked: modelData.on
+                        enabled: !!backend.handMethods.touch
+                        onToggled: backend.setHandInteraction(modelData.key, checked)
+                        Controls.ToolTip.visible: hovered
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        Controls.ToolTip.text: modelData.tip
+                    }
+                }
             }
 
             footer: Controls.Label {

@@ -79,6 +79,60 @@ HANDS_MODES = {"frametop": "With Frametop: while the Frametop desktop runs",
 # POINTER_GAZE_PINCH or POINTER_HAND_RAY for the pointer, HANDS_NEAR for ft-screens.
 HAND_METHODS = {"gaze_clicks": "Hand clicks in gaze mode", "ray": "Hand ray with gaze off",
                 "touch": "Direct touch"}
+# Every hand interaction on Frametop's panels, each switched on and off on its own (Hands page): the
+# frametop.conf key ft-screens reads at start, sent live too ("handsetting KEY 0|1"), its default, the
+# value written for on, and the page's group, label and tooltip.
+HAND_INTERACTIONS = [
+    # (key, default on, value written for on, group, label, tooltip)
+    ("HANDS_TOUCH_DOT", True, "1", "Tapping", "Fingertip dot",
+     "A soft white dot on the screen where a tap would land, frozen as the fingertip comes close."),
+    ("HANDS_TAP_LOCK", True, "1", "Tapping", "Lock the aim on the way in",
+     "The tap lands where the dot froze 1.5 cm out, not where the fingertip's jitter takes it."),
+    ("HANDS_MOTION_PRESS", True, "1", "Tapping", "Taps that stop just short",
+     "A quick tap that stops or bounces back just before the surface still clicks."),
+    ("HANDS_LOCK_PUSH", True, "0.01", "Tapping", "Push through to tap",
+     "Pushing the finger 1 cm through the screen taps at the frozen dot, however slowly."),
+    ("HANDS_PINCH_CLICK", True, "1", "Tapping", "Pinch on a screen clicks",
+     "Up close, a pinch on a screen's content clicks there, and drags while held."),
+    ("HANDS_TWO_FINGER_SCROLL", True, "1", "Tapping", "Two-finger scroll",
+     "Index and middle finger together on a screen: swipe to scroll, lift without moving to click."),
+    ("HANDS_PINCH_BUTTONS", True, "1", "Tapping", "Pinch the bar's buttons",
+     "A pinch at a round button under a screen (curve, reset, dock, close) presses it."),
+    ("HANDS_GRAB_ROTATE", True, "1", "Moving screens", "Turn with the wrist",
+     "A screen held by its bar or edge turns as the wrist turns."),
+    ("HANDS_CARD_PINCH", True, "1", "Moving screens", "Card grab",
+     "Index and middle finger (or all fingertips) pinching an edge hold the screen like a card."),
+    ("HANDS_FIST_GRAB", True, "1", "Moving screens", "Fists",
+     "A fist at a screen holds it; two fists resize it."),
+    ("HANDS_FIST_PAIR", True, "1", "Moving screens", "Two fists near a screen resize it",
+     "Two closed hands anywhere near one screen start a resize, without a grip at the screen first."),
+    ("HANDS_FIST_RESIZE_ONLY", True, "1", "Moving screens", "Fists only resize",
+     "Fists don't move or turn screens (the tracking's too rough for placing): one holds still, two resize."),
+    ("HANDS_STRETCH_TURN", True, "1", "Moving screens", "Two hands turn a screen",
+     "Holding a screen with both hands turns it on every axis with them."),
+    ("HANDS_RELEASE_FREEZE", True, "1", "Moving screens", "Let go without a nudge",
+     "A held screen stops following as the fingers start to open, so letting go doesn't move it."),
+    ("HANDS_GRAB_THAT", True, "1", "Gestures", "Grab that",
+     "Reach toward a far screen with an open hand, then pull back into a fist: it comes to arm's reach."),
+    ("HANDS_PUSH", True, "1", "Gestures", "Push away",
+     "An open palm pushed into a near screen sends it 3 m out."),
+    ("HANDS_FLICK", True, "1", "Gestures", "Flick away",
+     "A quick outward flick of an open hand at a screen sends it 3 m out."),
+    ("HANDS_THROW", True, "1", "Gestures", "Throw",
+     "Letting go of a held screen while moving it fast throws it 3 m out along the throw."),
+    ("HANDS_SWEEP", True, "1", "Gestures", "Sweep to spin (lazy susan)",
+     "An open hand on its edge swept 30 cm sideways spins the next screen on that side to the front."),
+    ("HANDS_PALM_MENU", True, "1", "Gestures", "Palm menu",
+     "Palm toward your face, away from screens, and a plain pinch: the Steam menu."),
+    ("HANDS_TARGET_GLOW", True, "1", "Feedback", "Grab that's glow",
+     "A faint white glow round the screen \"grab that\" would take."),
+    ("HANDS_EDGE_GLOW", True, "1", "Feedback", "Resize and edge glows",
+     "A glow at the corner or edge a pinch there would resize or move."),
+    ("HANDS_PUSH_GLOW", False, "1", "Feedback", "Push hint glow",
+     "A dim glow on a near screen an open palm faces (a push or flick would send it away)."),
+    ("HANDS_TRACK_GATE", True, "1", "Feedback", "Steady through tracking glitches",
+     "A held screen ignores impossible jumps of the hand and holds still when the hand leaves the cameras' view."),
+]
 sys.path.insert(0, os.path.join(REPO, "voice"))
 import voice_commands  # noqa: E402  Frametop Voice's commands and settings (standard library)
 import voice_settings  # noqa: E402
@@ -1453,6 +1507,29 @@ class Backend(QObject):
         self.reload_timer.start()
         self.handsChanged.emit()
         self.message.emit(f"{HAND_METHODS[method]}: {'on' if on else 'off'}", False)
+
+    @Property("QVariantList", notify=handsChanged)
+    def handInteractions(self):
+        """The Hands page's interaction switches, in order: key, label, tip, group (the first of each
+        group carries it, for the section's label), on."""
+        conf, out, last = read_conf(), [], None
+        for key, default, _, group, label, tip in HAND_INTERACTIONS:
+            raw = conf.get(key, "").strip()
+            on = default if raw == "" else raw not in ("0", "0.0", "off", "no")
+            out.append({"key": key, "label": label, "tip": tip, "group": group if group != last else "", "on": on})
+            last = group
+        return out
+
+    @Slot(str, bool)
+    def setHandInteraction(self, key, on):
+        """One interaction on or off: frametop.conf (ft-screens reads it at start) and ft-screens now."""
+        entry = next((e for e in HAND_INTERACTIONS if e[0] == key), None)
+        if entry is None:
+            return
+        write_conf_value(key, entry[2] if on else "0")
+        self._send(f"handsetting {key} {1 if on else 0}", SCREENS)
+        self.handsChanged.emit()
+        self.message.emit(f"{entry[4]}: {'on' if on else 'off'}", False)
 
     @Property("QVariantMap", constant=True)
     def handsMarginRange(self):

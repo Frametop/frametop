@@ -384,7 +384,7 @@ struct CornerAim {
 // For the palm menu (not by a panel: a card pinch from below has the palm up).
 bool HandAtPanel(const handcut::Hand &h, const std::vector<Panel> &panels, const Params &k, double front, double margin);
 bool HandAtPanel(const handcut::Hands &hands, int side, const std::vector<Panel> &panels, const Params &k,
-                 double front = 0.175, double margin = 0.10);
+                 double front = 0.12, double margin = 0.08);
 
 // Resizing a panel from one corner, the opposite corner staying put, keeping its aspect (height over
 // width): the corner (sx, sy: +1 right, top) wanted at cu, cv (m from the centre, on the surface),

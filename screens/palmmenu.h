@@ -41,8 +41,8 @@ struct Params {
     double showMs = 300;            // held this long (and still: the palm under `still` m/s) before the ring shows
     double still = 0.25;
     // Not by a panel, nor busy (user, 2026-10-10: "make the palm menu much stricter"): no ring while
-    // the hand is at a panel (Input::atPanel: in or near its touch zone, or within 17.5 cm in front
-    // of one and 10 cm round it) or near input or "grab that" has it (Input::busy), nor for quietMs
+    // the hand is at a panel (Input::atPanel: in or near its touch zone, or within 12 cm in front
+    // of one and 8 cm round it) or near input or "grab that" has it (Input::busy), nor for quietMs
     // after.
     double quietMs = 1000;
     // The pinch: a plain thumb-index one, the middle finger out of it (its tip plainMiddle or more

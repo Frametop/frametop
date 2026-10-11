@@ -3970,6 +3970,16 @@ void TestPinchSlack() {
 // nothing; a plain one toggles.
 void TestPalmMenuStrict() {
     {
+        // HandAtPanel: a palm up just under a panel's bottom edge (a card pinch from below) is at it;
+        // one 25 cm in front of it (its fingertips 15 cm) isn't
+        const std::vector<Panel> panels{TestPanel()};
+        SynthHand under = PalmUpHand(), before = PalmUpHand();
+        under.palmAt[0] = 0, under.palmAt[1] = -0.33, under.palmAt[2] = -0.49;
+        before.palmAt[2] = -0.25;
+        CHECK(HandAtPanel(Seen(under), panels, Params{}, 0.12, 0.08));
+        CHECK(!HandAtPanel(Seen(before), panels, Params{}, 0.12, 0.08));
+    }
+    {
         PalmRig r;
         r.atPanel[1] = true;
         r.Frames(15, {PalmUpHand()});
@@ -4074,7 +4084,7 @@ void TestGrabThatFlag() {
 
 // --grabthat FLAG_DIR...: the fires in each flag (false fires: flags taken for something else).
 int ScanFlags(int n, char **dirs) {
-    int total = 0, totals[3] = {0, 0, 0};   // pushes, palm menu toggles, flicks with the panel at arm's reach
+    int total = 0, totals[4] = {0, 0, 0, 0};   // pushes, palm menu toggles, flicks with the panel at arm's reach; the old palm menu's toggles
     double all = 0;
     for (int i = 0; i < n; ++i) {
         std::vector<grabthat::Fire> fires;
@@ -4113,12 +4123,21 @@ int ScanFlags(int n, char **dirs) {
                         l.find("push") != std::string::npos || l.find("both hands") != std::string::npos)
                         std::printf("    %s\n", l.c_str());
                 totals[0] += run.stats.pushes, totals[1] += run.palm.toggles, totals[2] += run.stats.flicks;
+                // ...and the palm menu as it was before the third live test (palm 60/75 deg, no stillness,
+                // panel or quiet rule, any pinch), no panels: what it did then
+                palmmenu::PalmMenu was;
+                palmmenu::Params &q = was.params();
+                q.facing = 60, q.facingLeave = 75, q.still = 1e9, q.quietMs = 0, q.plainMiddle = 0, q.plainExtended = 0, q.pinchStill = 1e9;
+                FlagRun old;
+                if (FlagThroughHandInput(dirs[i], {}, old, Params{}, false, &was) && (old.palm.shows || old.palm.toggles))
+                    std::printf("  the palm menu before the third live test (no panels): %d shown, %d toggles\n", old.palm.shows, old.palm.toggles);
+                totals[3] += old.palm.toggles;
             }
         }
         total += int(fires.size()), all += secs;
     }
-    std::printf("%d fire(s) in %.0f s; with a panel at arm's reach: %d pushes, %d flicks, %d palm menu toggles\n", total, all,
-                totals[0], totals[2], totals[1]);
+    std::printf("%d fire(s) in %.0f s; with a panel at arm's reach: %d pushes, %d flicks, %d palm menu toggles (%d with the old "
+                "palm menu and no panels)\n", total, all, totals[0], totals[2], totals[1], totals[3]);
     return 0;
 }
 

@@ -288,6 +288,16 @@ int main(int argc, char **argv) {
     PinchParams pinch_params;
     pinch_params.dip = setting("HANDS_PINCH_DIP") == "1";
     if (const std::string v = setting("HANDS_PINCH_FIST_CURL"); !v.empty()) pinch_params.fist_curl = std::atof(v.c_str());
+    // How easily a pinch lets go (user, 2026-10-11, gaze + hands: "taps and pinches release way too easily
+    // even when I haven't actually released them": ends came at 4-6 cm, and grips took pinches 130 ms in):
+    // HANDS_PINCH_END (m), HANDS_PINCH_DRAG_OPEN (m), HANDS_PINCH_DRAG_OPEN_S, HANDS_GRIP_TAKEOVER_S.
+    auto num = [&](const char *key, double &v, double lo, double hi) {
+        if (const std::string t = setting(key); !t.empty()) v = std::clamp(std::atof(t.c_str()), lo, hi);
+    };
+    num("HANDS_PINCH_END", pinch_params.end_m, 0.025, 0.08);
+    num("HANDS_PINCH_DRAG_OPEN", pinch_params.drag_open_m, 0.03, 0.12);
+    num("HANDS_PINCH_DRAG_OPEN_S", pinch_params.drag_open_s, 0.0, 1.0);
+    num("HANDS_GRIP_TAKEOVER_S", pinch_params.grip_takeover_s, 0.0, 1.0);
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)

@@ -853,9 +853,19 @@ void Pin(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel) {
     PlaceChrome(s);
 }
 
+// A curved screen bends at most this far round (radians, SCREEN_CURVE_MAX_DEG): its radius grows to keep
+// a wide one under it (user, 2026-10-11: a curved screen far away "curves way too much, sometimes a whole
+// 360: a cylinder floating in space": the radius was the head's distance when the curve was turned on,
+// and a screen curved up close, then thrown 3 m out at full width, wrapped round).
+double g_curveMaxArc = 100 * M_PI / 180;
+void CapCurve(Screen &s) {
+    if (s.curve > 0 && s.metres / s.curve > g_curveMaxArc) s.curve = s.metres / g_curveMaxArc;
+}
+
 void SetWidth(Screen &s, double metres) {
     s.metres = std::clamp(metres, kMinWidth, 12.0);
     vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+    CapCurve(s);
     ApplyCurve(s);  // same radius, so the curvature fraction changes with the width
     PlaceChrome(s);
 }
@@ -868,7 +878,21 @@ void ToggleCurve(Screen &s) {
     } else {
         const double dx = p.m[0][3] - head.m[0][3], dy = p.m[1][3] - head.m[1][3], dz = p.m[2][3] - head.m[2][3];
         s.curve = std::max(0.5, std::sqrt(dx * dx + dy * dy + dz * dz));
+        CapCurve(s);
     }
+    ApplyCurve(s);
+    PlaceChrome(s);
+}
+
+// After a curved screen moved (a drag or a carry ended, grab that or a throw put it somewhere): its
+// radius becomes its distance from the head again, so it stays curved round you wherever it went.
+void FitCurve(Screen &s) {
+    Mat head, p;
+    if (s.curve <= 0 || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) || !ScreenPose(s, &p)) return;
+    const double was = s.curve;
+    s.curve = std::max(0.5, double(std::hypot(p.m[0][3] - head.m[0][3], p.m[1][3] - head.m[1][3], p.m[2][3] - head.m[2][3])));
+    CapCurve(s);
+    if (std::fabs(s.curve - was) < 0.01) return void(s.curve = was);
     ApplyCurve(s);
     PlaceChrome(s);
 }
@@ -1345,6 +1369,7 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
 // Stop moving where it is (a command took over).
 void EndDrag(Screen &s) {
     if (s.drag != Drag::None) std::printf("screen %d: %s ended\n", ScreenIndexOf(s) + 1, DragName(s.drag));
+    const bool moved = s.drag != Drag::None;
     // (a floating window's last resize may be answered after the release: its corner stays kept a while)
     if (s.drag == Drag::Resize) s.keepUntil = g_tick + 45;
     else s.keepX = -1, s.keepY = 1;
@@ -1353,6 +1378,7 @@ void EndDrag(Screen &s) {
     s.pinTarget = s.onWrist = kNone;
     LightBar(s, false);
     ApplyAlpha(s);
+    if (moved) FitCurve(s);
 }
 
 // Run one of Frametop's tools, `<repo>/<tool> <arg>`, in the background. log: its output goes
@@ -2376,6 +2402,10 @@ struct Brought {
     double cameWidth = 1;   // ...and the width it came at (screens wider than grab that's maxWidth shrink)
 };
 std::map<int, Brought> g_brought;      // panels that came by the gesture: where from, where to
+// The width each panel had when it was last sent away from arm's reach (thrown, pushed, flicked or sent
+// back): "grab that" brings it back at that width (user, 2026-10-11: "when you pull a display towards
+// you, it should remember the last size the display was when you pushed it away"), not grab that's maxWidth.
+std::map<int, double> g_nearWidth;
 
 // The width a panel goes away at (user, 2026-10-10: "windows should not resize to be smaller when
 // they're sent back. It should just push them back further away keeping their existing size"): its
@@ -2461,6 +2491,7 @@ void GrabThat(const grabthat::Fire &f) {
         const double w = SendAwayWidth(s, &b->second);
         std::printf("grab that (%s hand): screen %d goes back%s\n", hand, i + 1,
                     w != s.metres ? (", " + std::to_string(w).substr(0, 4) + " m wide as it was").c_str() : ", as wide as it is");
+        g_nearWidth[i] = s.metres;
         StartGrabMove(i, s, b->second.from, w);
         g_brought.erase(b);
         return;
@@ -2476,14 +2507,18 @@ void GrabThat(const grabthat::Fire &f) {
             continue;
         }
         std::printf("grab that (%s hand): screen %d goes back to make room\n", hand, it->first + 1);
+        g_nearWidth[it->first] = o->second.metres;
         StartGrabMove(it->first, o->second, it->second.from, SendAwayWidth(o->second, &it->second));
         it = g_brought.erase(it);
     }
     const Mat to = grabthat::Arrival(f, k);
-    const double width = !s.floating && k.maxWidth > 0 ? std::min(s.metres, k.maxWidth) : s.metres;
+    const auto nw = g_nearWidth.find(i);
+    const bool remembered = !s.floating && nw != g_nearWidth.end();
+    const double width = remembered ? nw->second : !s.floating && k.maxWidth > 0 ? std::min(s.metres, k.maxWidth) : s.metres;
     g_brought[i] = {now, to, s.metres, width};
     std::printf("grab that (%s hand): screen %d %s%s\n", hand, i + 1, grabthat::OutcomeName(what),
-                width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "");
+                remembered ? (", " + std::to_string(width).substr(0, 4) + " m wide as it was when sent away").c_str()
+                : width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "");
     StartGrabMove(i, s, to, width);
 }
 
@@ -2505,6 +2540,7 @@ void AnimateGrabMoves() {
         if (m.w1 != m.w0) {
             s.metres = std::clamp(m.w0 + (m.w1 - m.w0) * t, kMinWidth, 12.0);
             vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+            CapCurve(s);
             ApplyCurve(s);
         }
         m.lastSet = grabthat::Blend(m.from, m.to, t);
@@ -2513,6 +2549,7 @@ void AnimateGrabMoves() {
             ++it;
             continue;
         }
+        FitCurve(s);
         if (!s.floating && !s.remote) ArrangeDesktopSoon();
         it = g_grabMoves.erase(it);
     }
@@ -2531,6 +2568,7 @@ void GrabThatReset() {
             StartGrabMove(i, it->second, b.from, SendAwayWidth(it->second, &b));
     }
     g_brought.clear();
+    g_nearWidth.clear();
 }
 
 void UpdateGrabThat(const handinput::Input &in) {
@@ -2836,6 +2874,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 const auto b = g_brought.find(e.panel);
                 const double w = SendAwayWidth(s, b == g_brought.end() ? nullptr : &b->second);
                 if (b != g_brought.end()) g_brought.erase(b);
+                g_nearWidth[e.panel] = s.metres;   // (grab that brings it back at this width)
                 Mat head;
                 double far = 0;
                 if (DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) far = Apart(head, e.to);
@@ -2990,6 +3029,7 @@ bool ft_vr_init(void) {
     k.pinchClick = handcut::Setting("HANDS_PINCH_CLICK", "1") != "0";
     k.cardPinch = handcut::Setting("HANDS_CARD_PINCH", "1") != "0";
     k.fistGrab = handcut::Setting("HANDS_FIST_GRAB", "1") != "0";
+    k.fistResizeOnly = handcut::Setting("HANDS_FIST_RESIZE_ONLY", "1") != "0";
     num("HANDS_POKE_REST_BELOW", k.restBelow, 0, 2);
     num("HANDS_POKE_REST_NEAR", k.restNear, 0, 2);
     // what a near grab carries, smoothed (handinput.h, Params::grab*)
@@ -3040,6 +3080,11 @@ bool ft_vr_init(void) {
     num("HANDS_GRAB_THAT_MARGIN", gt.aimMargin, 0, 0.5);  // the line through the palm may pass this far off a panel
     num("HANDS_GRAB_THAT_MARGIN_DEG", gt.aimMarginDeg, 0, 20);   // ...or this far (deg seen from the eyes) when it meets none
     num("HANDS_GRAB_THAT_FACING", gt.aimFacing, 0, 90);   // the palm along the aim within this (deg; 0: any)
+    {
+        double deg = g_curveMaxArc * 180 / M_PI;
+        num("SCREEN_CURVE_MAX_DEG", deg, 20, 300);   // a curved screen bends at most this far round (CapCurve)
+        g_curveMaxArc = deg * M_PI / 180;
+    }
     if (gt.on)
         std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s); "
                     "it takes a panel the line through the palm meets%s, %s, not one held, the palm within %.0f deg of the line\n",
@@ -3062,7 +3107,7 @@ bool ft_vr_init(void) {
     std::printf("hands: near pinches take a panel within %.0f cm of its border (corners resize)%s; on its content they %s; "
                 "a fist at a panel %s\n",
                 k.bandOut * 100, k.cardPinch ? ", either side of its edge like a card" : "", k.pinchClick ? "click" : "do nothing",
-                k.fistGrab ? "carries and turns it (two stretch it)" : "does nothing (HANDS_FIST_GRAB=0)");
+                !k.fistGrab ? "does nothing (HANDS_FIST_GRAB=0)" : k.fistResizeOnly ? "holds it still, two hands with a fist resize it (HANDS_FIST_RESIZE_ONLY)" : "carries and turns it (two stretch it)");
     std::printf("hands: throws %.1f m out: a flick %s, a carry let go %s, a push %s; sent away, a panel %s\n", k.throwDistance,
                 k.flick ? ("at " + std::to_string(k.flickSpeed).substr(0, 4) + " m/s, the fingers opening by " +
                            std::to_string(k.flickOpening).substr(0, 4)).c_str() : "off (HANDS_FLICK=0)",
@@ -3283,6 +3328,7 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
         const Parked &k = pk->second;
         SetWidth(s, k.metres);
         s.curve = k.curve;
+        CapCurve(s);
         ApplyCurve(s);
         Mat d;
         if (k.pinned != kNone && DevicePose(k.pinned, &d)) Pin(s, k.pinned, k.pinRel);

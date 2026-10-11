@@ -2344,6 +2344,13 @@ int main() {
             tnow - lastMouse > std::chrono::duration<double>(rayRelease)) {
             releasePointer("hand ray gone");
         }
+        // A hand at a panel (ft-screens' near claim: it pokes and taps there): no laser at all (user,
+        // 2026-10-11: the laser from the head to where the fingertip put the cursor got in the way of
+        // tapping, and held the button so pokes were refused). The mouse's next move claims it back.
+        if (active && hold.src == Src::None && !leftHeld && tnow - nearAt < std::chrono::milliseconds(200) &&
+            (nearClaim[0] || nearClaim[1]) && tnow - lastMouse > std::chrono::seconds(1)) {
+            releasePointer("a hand touches a panel");
+        }
         // Where a gesture's point is, seen from the hold's origin: yaw and pitch, degrees.
         auto handAngles = [&](const float p[3], uint64_t t_ns, const Vec3 &from, double &hy, double &hp) {
             vr::HmdMatrix34_t head;

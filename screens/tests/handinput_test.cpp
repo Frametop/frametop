@@ -1719,6 +1719,7 @@ SynthHand FistAt(double u, double v, double palmD, bool right = true, uint32_t i
 void TestFistGrab() {
     {
         Rig r;
+        r.in.params().fistResizeOnly = false;   // (the fist's carry; resize-only: TestFistResizeOnly)
         for (int k = 0; k < 5; ++k) r.Frame({FistAt(0.0, 0, 0.05)});
         CHECK(r.in.near(1));
         const double at[3] = {0.0, 0, -0.45};
@@ -3885,6 +3886,46 @@ void TestTrackGate() {
 
 // A fist ft-hands calls a pinch (the thumb on the index of a closed hand): a fist grab, not a pinch
 // click; two of them stretch, and the pair turns the panel on every axis (Params::stretchTurn).
+// Fists only resize (Params::fistResizeOnly, user 2026-10-11): one fist holds the panel still; two fists
+// pulled apart and moved and turned only scale it, about its centre where it was.
+void TestFistResizeOnly() {
+    {
+        Rig r;
+        for (int k = 0; k < 5; ++k) r.Frame({FistAt(0.0, 0, 0.05)});
+        const double at[3] = {0.0, 0, -0.45};
+        r.synth.Grip(1, true, r.t, at, 1);
+        r.Frame({FistAt(0.0, 0, 0.05)});
+        CHECK(r.Count(Event::GrabStart) == 1 && r.in.grabbing(1));
+        for (int k = 1; k <= 45; ++k) r.Frame({FistAt(0.15 * std::min(1.0, k / 30.0), 0, 0.05, true, 1, 70)});
+        CHECK(r.carries.empty());   // the panel stays
+        r.synth.Grip(1, false, r.t, at, 1);
+        SynthHand o = FistAt(0.15, 0, 0.05, true, 1, 70);
+        o.curl = o.curlIndex = 0;
+        r.Frame({o}), r.Frame({o});
+        CHECK(r.Count(Event::GrabEnd) == 1 && r.Count(Event::Throw) == 0);
+    }
+    {
+        Rig r;
+        const Mat start = r.panels[0].pose;
+        for (int k = 0; k < 5; ++k) r.Frame({FistAt(-0.3, 0, 0.05, false, 1), FistAt(0.3, 0, 0.05, true, 2)});
+        const double l[3] = {-0.3, 0, -0.45}, rr[3] = {0.3, 0, -0.45};
+        r.synth.Grip(0, true, r.t, l, 1), r.synth.Grip(1, true, r.t, rr, 2);
+        r.Frame({FistAt(-0.3, 0, 0.05, false, 1), FistAt(0.3, 0, 0.05, true, 2)});
+        for (int k = 1; k <= 45; ++k) {
+            const double f = std::min(1.0, k / 30.0);   // apart 20 cm, both 10 cm right, the right one 10 cm up
+            r.Frame({FistAt(-0.3 + 0.1 * f - 0.1 * f, 0, 0.05, false, 1), FistAt(0.3 + 0.1 * f + 0.1 * f, 0.1 * f, 0.05, true, 2)});
+        }
+        CHECK(r.carries.size() == 1 && r.carries[0].kind == Carry::Stretch);
+        if (r.carries.size() == 1) {
+            const Mat &c = r.carries[0].pose;
+            std::printf("two fists, resize only: %.2f m wide (from 1.00), centre moved %.1f cm\n", r.carries[0].width,
+                        100 * std::hypot(c.m[0][3] - start.m[0][3], c.m[1][3] - start.m[1][3], c.m[2][3] - start.m[2][3]));
+            CHECK(r.carries[0].width > 1.15);
+            NEAR(c.m[0][3], start.m[0][3], 1e-4), NEAR(c.m[1][3], start.m[1][3], 1e-4), NEAR(c.m[0][0], start.m[0][0], 1e-4);
+        }
+    }
+}
+
 void TestFistPinch() {
     {
         Rig r;
@@ -3914,6 +3955,7 @@ void TestFistPinch() {
     // 10 cm (the panel rolls), both wrists tipped 25 deg about the line between them (it pitches)
     {
         Rig r;
+        r.in.params().fistResizeOnly = false;
         auto both = [&](double sep, double lift, double tilt) {
             return std::vector<SynthHand>{FistAt(-0.3 - sep, 0, 0.05, false, 1, 90 - tilt), FistAt(0.3 + sep, lift, 0.05, true, 2, 90 - tilt)};
         };
@@ -4198,7 +4240,7 @@ void TestGrabThatAfterThrow() {
     pair.erase(pair.begin());
     CHECK(grabthat::Pick(pair, *f, k) == 7);   // (alone, it's taken)
     std::vector<Target> off = seen;
-    off[0].pose = At(0, 3 * std::tan(pitch + 10 * M_PI / 180) + H / 2, -3);   // its bottom edge 10 deg over the line
+    off[0].pose = At(0, 3 * std::tan(pitch + 14 * M_PI / 180) + H / 2, -3);   // its bottom edge 14 deg over the line (the margin's 10)
     CHECK(grabthat::Pick(off, *f, k) == -1);
     std::vector<Target> nearOne = seen;
     nearOne[0].pose = grabthat::Arrival(*f, k), nearOne[0].width = 0.6, nearOne[0].height = 0.25;
@@ -4496,6 +4538,7 @@ void TestJoin() {
     };
     {   // a pinch on the content: joins (no click), and they stretch it
         Rig r;
+        r.in.params().fistResizeOnly = false;
         leftHolds(r);
         SynthHand p = PinchAt(0.2, 0.05, 0.03, true, 2);
         p.open = 0.6;
@@ -4520,6 +4563,7 @@ void TestJoin() {
     {   // a fist 13 cm in front of the held panel (out of the fist's own reach): joins; then the pair moves
         // it (midpoint 10 cm right), scales it (20 cm further apart) and rolls it (the right one 10 cm up)
         Rig r;
+        r.in.params().fistResizeOnly = false;
         leftHolds(r);
         for (int k = 0; k < 4; ++k) r.Frame({FistAt(-0.45, 0, 0.05, false, 1), FistAt(0.45, 0, 0.13, true, 2)});
         const double at[3] = {0.45, 0, -0.37};
@@ -4867,6 +4911,7 @@ int main(int argc, char **argv) {
     TestFlick();
     TestCardThrow();
     TestTrackGate();
+    TestFistResizeOnly();
     TestFistPinch();
     TestPush();
     TestPinchSlack();

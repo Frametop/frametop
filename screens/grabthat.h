@@ -68,13 +68,16 @@ using Mat = handcut::Mat;
 struct Params {
     bool on = true;                      // HANDS_GRAB_THAT
     double openArm = 1.55, openKeep = 1.45;
-    double palmArm = 0.45, palmKeep = 0.30;
+    // (0.45/0.30 until 2026-10-11; user: "you have to uncomfortably turn your wrist to have your palm
+    // facing it; it should look like you're just reaching out to the display": a hand reaching out
+    // naturally has its palm half down, 0.2-0.4 forward)
+    double palmArm = 0.2, palmKeep = 0.1;
     double fwdArm = 0.28, fwdKeep = 0.24;   // m
     double armMs = 200;
     double closeMs = 450;
     double claimCurl = 1.5;              // the middle, ring and little fingers' mean extension
     double claimThumb = 0.025;           // ...with the thumb tip this far (m) from the index tip: not a pinch
-    double closePalm = 0.2, closePalmMs = 100;
+    double closePalm = 0.05, closePalmMs = 100;
     double fist = 1.0;
     double pull = 0.08, pullMs = 500;    // m, within ms
     double palmFlip = 0.0;
@@ -100,7 +103,7 @@ struct Params {
     // a panel the user looks at the middle of (one thrown 3 m out, 1.35 m tall, is 12.7 degrees
     // each way). 6 degrees takes those; a line that meets a panel still beats one that only passes
     // near another. HANDS_GRAB_THAT_MARGIN (m), HANDS_GRAB_THAT_MARGIN_DEG.
-    double aimMargin = 0, aimMarginDeg = 6, headCone = 0;   // m, degrees, degrees
+    double aimMargin = 0, aimMarginDeg = 10, headCone = 0;   // m, degrees, degrees (6 deg until 2026-10-11: "increase the size of the target")
     // ...and only a panel farther than `nearest` from the eyes (its centre): one at arm's reach is
     // the hands' already (user: "only activate if the window is not already held and closed up";
     // push, flick or throw it to send it away). 0: any, and the gesture at a near one sends it back
@@ -111,7 +114,7 @@ struct Params {
     // over the hold under holdSpeed m/s: an open hand swept at a panel isn't held out to it); else the
     // hold starts again. The user's own example (flag 150115) holds 41 and 51 deg off, at 0.25 and 0.46
     // m/s: 55 and 0.5 keep both its fires; tighter loses the first. 0: off. HANDS_GRAB_THAT_FACING.
-    double aimFacing = 55, holdSpeed = 0.5;
+    double aimFacing = 80, holdSpeed = 0.5;   // (55 until 2026-10-11: the natural reach, as palmArm)
     // After a panel was sent away (a push, a flick or a throw), no gesture for this long: a push's open
     // hand held out, then pulled back closing, is the gesture's shape. (In the fourth live test every
     // fire came after a send-away, but the view recording shows the user reaching for the far panel

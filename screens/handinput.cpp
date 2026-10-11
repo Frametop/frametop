@@ -602,8 +602,8 @@ void HandInput::EndGrab(int s, bool lost) {
     if (sd.state != State::Grab) return;
     Emit(Event::GrabEnd, s, sd.panel, 0, 0, lost);
     // let go fast, outward: thrown on along that line (Params::cardThrow)
-    const bool carried = sd.zone == Zone::Card || sd.zone == Zone::Fist || sd.zone == Zone::Edge || sd.zone == Zone::Bar ||
-                         sd.zone == Zone::Title;
+    const bool carried = sd.zone == Zone::Card || (sd.zone == Zone::Fist && !p_.fistResizeOnly) || sd.zone == Zone::Edge ||
+                         sd.zone == Zone::Bar || sd.zone == Zone::Title;
     fhsmooth::V3 v;
     if (!lost && p_.cardThrow && carried && stretch_.panel != sd.panel && haveHead_ && !sd.track.empty() &&
         Velocity(s, sd.upNs ? sd.upNs : 0, p_.throwFitMs, &v)) {
@@ -1758,7 +1758,12 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
             }
             Carry c;
             c.panel = sd.panel, c.sides = 3, c.kind = Carry::Stretch;
-            if (p_.stretchTurn) {
+            if (p_.fistResizeOnly && (side_[0].byGrip || side_[1].byGrip)) {
+                // a fist among them: scale only, about the panel's centre where it was (Params::fistResizeOnly)
+                StretchPose(stretch_.start, stretch_.width0, stretch_.l0, stretch_.r0, l, r, p_.stretchDead, p_.minWidth,
+                            p_.maxWidth, true, &c.width);
+                c.pose = stretch_.start;
+            } else if (p_.stretchTurn) {
                 const double v[3] = {r[0] - l[0], r[1] - l[1], r[2] - l[2]}, n = std::sqrt(Dot(v, v));
                 const double u[3] = {n > 1e-6 ? v[0] / n : 1, n > 1e-6 ? v[1] / n : 0, n > 1e-6 ? v[2] / n : 0};
                 const double twist = p_.grabRotate ? StretchTwist(in, u) : 0;
@@ -1781,6 +1786,10 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
         }
         if (sd.width0 < 0 && sd.point.Ready()) sd.from = sd.point.At(in.nowNs / 1e9), sd.engaged = false;   // (below)
         if (!Carried(s, in, p)) continue;
+        if (sd.zone == Zone::Fist && p_.fistResizeOnly) {   // one fist: an anchor, the panel stays (Params::fistResizeOnly)
+            sd.width0 = -1;   // (the other hand's grab, when it comes, starts the scale from here)
+            continue;
+        }
         if (sd.width0 < 0) {
             // the other hand let go: carry on alone from where it is now (its dead zone afresh)
             sd.start = sd.last = P->pose, sd.width0 = P->width;

@@ -243,6 +243,11 @@ struct Params {
     // panel (its palm or knuckles within the near zone, over it) takes it: carried like a pinch on
     // its bar (the knuckles 1:1, the wrist turning it), two on one panel stretch it. HANDS_FIST_GRAB.
     bool fistGrab = true;
+    // ...for resizing only (user, 2026-10-11: "gripping should only be for resizing windows: the
+    // tracking is too wonky to pinpoint, refine and move windows with it"): one fist holds the panel
+    // still (an anchor), and two hands on it with a fist among them only scale it about its centre,
+    // no move or turn. Pinches keep carrying and turning. HANDS_FIST_RESIZE_ONLY (0: the fist carries).
+    bool fistResizeOnly = true;
     // ...and a pinch by a closed hand: the index curled (its extension, as `extended`, fistIndex or
     // less) with the middle, ring and little (their mean fistCurl or less). ft-hands calls a fist with
     // the thumb on the index a pinch: the third live test's two-fist stretch (flag-20261010-203215:
@@ -355,7 +360,7 @@ struct Params {
     // throwFitMs before the fingers opened), within throwAngle of away from the eyes: the panel goes on
     // along that line, to where it's throwDistance from the eyes. Slower, it stays where it was let go.
     bool cardThrow = true;
-    double throwSpeed = 1.0, throwFitMs = 100, throwAngle = 60;
+    double throwSpeed = 0.55, throwFitMs = 100, throwAngle = 60;
     double throwDistance = 3.0, throwMs = 400;
     // The push (HANDS_PUSH; user, 2026-10-10: "pushing against the monitor or window does not make it
     // go away or fly back"): an open hand (the four fingers' mean extension pushOpen or more, the

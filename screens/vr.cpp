@@ -2860,6 +2860,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 f.controller = true;   // the click filter holds a poke's wobble still (controller-click.h)
                 handle(&f, data);
                 break;
+            case handinput::Event::Spin: break;   // (handled above)
             case handinput::Event::Settle:   // a let-go's rewind (handinput Params::rewindMs): just after its GrabEnd
                 if (s.drag == Drag::None && s.pinned == kNone) SetAbsolute(s, e.to);
                 break;

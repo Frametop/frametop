@@ -137,6 +137,9 @@ struct SynthHand {
     double tiltDeg = 20;               // fingertips up: the palm turns toward the head behind it
     int curl = 0;                      // middle, ring and little: 0 open, 1 half curled, 2 a fist
     int curlIndex = 0;                 // ...and the index, likewise (grab that's fist)
+    // a pointing hand (PointingHand) whose middle finger the tracker has nearly straight: its tip
+    // this much deeper (toward where the index points) than the index tip (NaN: curled)
+    double middleTip = NAN;
 };
 
 // An open hand, palm up, fingers ahead (-z), as SynthHand says; the right hand's thumb is on +x.
@@ -201,6 +204,11 @@ struct Synth {
             float pts[21][3];
             if (h.pinching) PinchingHand(pts, h.open);
             else PointingHand(pts, h.bent);
+            if (!h.pinching && !std::isnan(h.middleTip)) {   // the middle finger straight, beside the index
+                const float tipZ = pts[8][2] - float(h.middleTip), mcpZ = pts[9][2];
+                for (int j = 10; j <= 12; ++j)
+                    pts[j][0] = pts[9][0], pts[j][1] = pts[9][1], pts[j][2] = mcpZ + (tipZ - mcpZ) * float(j - 9) / 3;
+            }
             const double a = h.pitchDeg * M_PI / 180, b = h.yawDeg * M_PI / 180, w = h.twistDeg * M_PI / 180;
             for (auto &q : pts) {   // about z (twist), then x (pitch), then y (yaw); the tip is the origin here
                 if (h.useRot) {
@@ -460,6 +468,50 @@ void TestPoke() {
     CHECK(!r.in.pressing(1));
 }
 
+// The second live test's refusals (2026-10-10): the middle finger read nearly as straight as the
+// index, its tip about as deep; a tap just past the bottom edge (the desktop's panel is there); a
+// short tap; a hand reaching under the panel for its bar.
+void TestPokeRefusals() {
+    // the middle tip 2 mm behind the index tip's depth, then 4 mm deeper: presses (the old rule wanted
+    // it 5 mm behind); 1.2 cm deeper (a flat hand, the middle finger longest): no press
+    for (double gap : {-0.002, 0.004, 0.012}) {
+        Rig r;
+        for (int mm = 60; mm >= -15; mm -= 10) {
+            SynthHand h = TipAt(0.1, 0.05, mm / 1000.0);
+            h.middleTip = gap, h.pitchDeg = 25;
+            r.Frame({h});
+        }
+        std::printf("poke with the middle finger straight, its tip %+.1f cm deeper than the index's: %d press(es)\n", gap * 100,
+                    r.Count(Event::Press));
+        CHECK(r.Count(Event::Press) == (gap < 0.01 ? 1 : 0));
+        if (gap > 0.01) CHECK(r.in.stats.heldNotNearest > 0);
+    }
+    {
+        // just under the bottom edge (1 cm): presses at the bottom row of pixels
+        Rig r;
+        r.panels[0].controls.clear();
+        for (int mm = 60; mm >= -15; mm -= 10) r.Frame({TipAt(0.2, -0.28125 - 0.01, mm / 1000.0)});
+        CHECK(r.Count(Event::Press) == 1 && r.in.stats.edgePresses == 1);
+        const auto p = r.Last(Event::Press);
+        CHECK(p && p->y > 1078 && std::fabs(p->x - 1344) < 3);
+    }
+    {
+        // 4 cm under it (a hand reaching for the bar): no press, and not a refused poke
+        Rig r;
+        r.panels[0].controls.clear();
+        for (int mm = 60; mm >= -50; mm -= 10) r.Frame({TipAt(0.2, -0.28125 - 0.04, mm / 1000.0)});
+        CHECK(r.Count(Event::Press) == 0 && r.in.stats.refused == 0 && r.in.stats.offContent == 1);
+    }
+    {
+        // a short tap: hovering 2 cm out, then 1.8 cm in at 0.15 m/s (5 mm a frame), one frame past
+        Rig r;
+        for (int k = 0; k < 10; ++k) r.Frame({TipAt(0, 0, 0.02)});
+        for (int mm = 15; mm >= -2; mm -= 5) r.Frame({TipAt(0, 0, mm / 1000.0)});
+        for (int mm = 10; mm <= 30; mm += 10) r.Frame({TipAt(0, 0, mm / 1000.0)});
+        CHECK(r.Count(Event::Press) == 1 && r.in.stats.quickPresses == 1);
+    }
+}
+
 void TestSlowDrift() {
     Rig r;
     // creeping in at 3 mm/s, 2 cm past the surface: not coming at it, no press
@@ -552,7 +604,10 @@ void TestPokeNoisy() {
         // the noise a still hand has: 3-6 mm, the replays' 12-23 mm range in a second)
         // (10 mm a frame on a still hand is past what ft-hands does: there both rules press from a
         // finger held 1.5-2.5 cm out, the one-frame rule more)
-        if (sigma < 0.008) CHECK(h15 <= o15 + 0.5), CHECK(h25 == 0);
+        // (since 2026-10-10's second live test, one frame presses after 1.7 cm in: at 1.5 cm out with
+        // 6 mm of noise that's 4 a minute against the old 2; the 2.5 cm hover and 3 mm stay at none)
+        if (sigma < 0.008) CHECK(h15 <= o15 + 2.5), CHECK(h25 == 0);
+        if (sigma < 0.004) CHECK(h15 == 0);
     }
 }
 
@@ -1671,6 +1726,7 @@ Run Play(const std::vector<Record> &recs, size_t from, size_t to, const std::vec
     if (const char *v = std::getenv("HANDINPUT_REST_NEAR")) params.restNear = std::atof(v);   // trying other values
     if (const char *v = std::getenv("HANDINPUT_TRAVEL")) params.travel = std::atof(v);
     if (const char *v = std::getenv("HANDINPUT_EXTENDED")) params.extended = std::atof(v);
+    if (const char *v = std::getenv("HANDINPUT_NEAREST")) params.nearest = std::atof(v);
     if (const char *v = std::getenv("HANDINPUT_ANGLE")) params.fingerAngle = std::atof(v);
     if (const char *v = std::getenv("HANDINPUT_PINCH_CLICK")) params.pinchClick = std::atoi(v) != 0;
     HandInput in(params);
@@ -1685,6 +1741,8 @@ Run Play(const std::vector<Record> &recs, size_t from, size_t to, const std::vec
             Input i;
             i.nowNs = t, i.hands = &hands, i.head = r.head, i.haveHead = true, i.allowed[0] = sides & 1, i.allowed[1] = sides & 2;
             in.Update(i, panels);
+            if (std::getenv("HANDINPUT_LOG"))
+                for (const std::string &l : in.logs()) std::printf("    [%.3f] %s\n", (r.capture - recs.front().capture) / 1e9, l.c_str());
             for (const Event &e : in.events()) {
                 if (e.type == Event::Press && std::getenv("HANDINPUT_VERBOSE")) {
                     for (const handcut::Hand &h : hands.seen())
@@ -2993,6 +3051,7 @@ int main(int argc, char **argv) {
     TestStretch();
     TestHover();
     TestPoke();
+    TestPokeRefusals();
     TestSlowDrift();
     TestPokeNoisy();
     TestApproachFromFront();

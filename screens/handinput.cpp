@@ -454,7 +454,11 @@ void HandInput::EndAttempt(int s) {
     std::string why;
     auto add = [&](const char *t) { why += (why.empty() ? "" : "; ") + std::string(t); };
     char b[200];
-    if (a.why & kOffContent) add("off the content (a control that takes no poke, or past the edge)");
+    if (a.why & kOffContent) {
+        std::snprintf(b, sizeof b, "off the content (a control that takes no poke, or past the edge: at %+.1f, %+.1f cm from "
+                      "its centre, %.1f cm outside its edge)", a.u * 100, a.v * 100, a.outside * 100);
+        add(b);
+    }
     if (a.frames < (a.quick ? 1 : p_.pressFrames)) {
         std::snprintf(b, sizeof b, "past the surface for %d frame(s); one frame presses after %.1f cm in at %.2f m/s, "
                       "it came %.1f cm at %.2f m/s", a.frames, p_.travel * 100, p_.quickSpeed, a.travel * 100, a.speed);
@@ -463,7 +467,13 @@ void HandInput::EndAttempt(int s) {
     if (a.why & kLate) std::snprintf(b, sizeof b, "reaching through: past it over %d frames or %.0f cm", p_.lateFrames, -p_.lateDepth * 100), add(b);
     if (a.why & kOneView) add("seen by one camera");
     if (a.why & kBent) std::snprintf(b, sizeof b, "the index bent (%.2f, needs %.2f)", a.ext, p_.extended), add(b);
-    if (a.why & kNotNearest) add("another fingertip nearer the panel than the index");
+    if (a.why & kNotNearest) {
+        static const char *tips[] = {"middle", "ring", "little"};
+        std::snprintf(b, sizeof b, "another fingertip nearer the panel than the index (the %s %+.1f cm from the index tip's "
+                      "depth, the index %.2f straight, the straightest other %.2f, the finger %.0f deg off)",
+                      tips[std::clamp((a.otherTip - 12) / 4, 0, 2)], a.otherGap * 100, a.ext, a.straightest, a.angle);
+        add(b);
+    }
     if (a.why & kPinching) add("pinching or gripping");
     if (a.why & kBusy) add("a laser or the mouse holds the button");
     if (a.why & kOtherHand) add("the other hand is pressing");
@@ -592,13 +602,21 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     const double ext = Extension(*h);
     const bool extended = ext >= p_.extended;
     double others = 1e9;
-    for (int j : {12, 16, 20}) others = std::min(others, Locate(*P, h->p[j]).d);
+    int otherTip = 12;
+    for (int j : {12, 16, 20}) {
+        const double d = Locate(*P, h->p[j]).d;
+        if (d < others) others = d, otherTip = j;
+    }
     double straightest = 0;   // of the other fingers
     for (int f : {9, 13, 17}) straightest = std::max(straightest, FingerExtension(*h, f));
     const bool nearest = t.d + p_.nearest <= others || ext - straightest >= p_.pointing;
     double x = 0, y = 0;
-    const bool over = ToBuffer(*P, t.u, t.v, &x, &y);
+    bool over = ToBuffer(*P, t.u, t.v, &x, &y);
     const Control ctl = over ? Control::None : ControlAt(*P, t.u, t.v, 0.01);
+    // just past the content's edge (not on a control): at the edge
+    const bool edge = !over && ctl == Control::None && FromBorder(*P, t.u, t.v) <= p_.edgeSlack &&
+                      ToBuffer(*P, std::clamp(t.u, -P->width / 2, P->width / 2), std::clamp(t.v, -P->height / 2, P->height / 2), &x, &y);
+    over = over || edge;
     const bool otherPressing = side_[1 - s].state == State::Press;
     char why[96];
 
@@ -666,7 +684,19 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         // jitter dips past the surface on one frame from anywhere
         const double base = n >= 2 ? sum / n : far;
         const bool onTheWay = prev < 1e8 && prev - t.d >= 0.002 && base - prev >= 0.005;
-        sd.quick = sd.fastIn && onTheWay && sd.inSpeed >= p_.quickSpeed && sd.travelled >= p_.travel;
+        // a short one (under steadyTravel): coming in steadily, each of the last steadySteps frames
+        // nearer than the one before by 2 mm or more (a still finger's jitter dips 1.5 cm from 1.5 cm out
+        // now and then, but rarely three frames running)
+        bool steady = sd.travelled >= p_.steadyTravel;
+        if (!steady && int(sd.hist.size()) > p_.steadySteps) {
+            steady = true;
+            double later = t.d;
+            for (int k = 1; k <= p_.steadySteps && steady; ++k) {
+                const double qd = Locate(*P, sd.hist[sd.hist.size() - 1 - k].tip).d;
+                steady = qd - later >= 0.002, later = qd;
+            }
+        }
+        sd.quick = sd.fastIn && onTheWay && steady && sd.inSpeed >= p_.quickSpeed && sd.travelled >= p_.travel;
     }
     if (over && extended && !resting && !in.typing[s] && t.d <= p_.cursor && t.d > p_.nearBack && !in.pointerBusy && !otherPressing) {
         sd.hoverNs = in.nowNs, sd.hoverU = t.u, sd.hoverV = t.v;
@@ -675,8 +705,20 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
             Emit(Event::Motion, s, P->index, x, y);
         }
     }
-    // an attempt: from crossing the surface until it's back out past `release` (or leaves)
+    // an attempt: from crossing the surface until it's back out past `release` (or leaves); not one
+    // off the content and its buttons (a hand reaching for the bar or a corner): counted, logged
+    // once, no poke
     Side::Attempt &a = sd.attempt;
+    const bool button = ctl == Control::Curve || ctl == Control::Reset || ctl == Control::Dock || ctl == Control::Close;
+    if (crossed && !a.on && !over && !button) {
+        if (sd.below == 1) {
+            ++stats.offContent;
+            Log("%s index past screen %d's plane off its content (at %+.1f, %+.1f cm from its centre, %.1f cm outside its "
+                "edge%s): not a poke", SideName(s), P->index + 1, t.u * 100, t.v * 100, FromBorder(*P, t.u, t.v) * 100,
+                ctl == Control::Bar ? ", on the bar" : ctl == Control::Tab ? ", on the resize tab" : ctl == Control::Roll ? ", on the roll button" : "");
+        }
+        return;
+    }
     if (crossed && !a.on) {
         a = Side::Attempt{};
         a.on = true, a.quick = sd.quick, a.speed = sd.inSpeed, a.travel = sd.travelled;
@@ -687,8 +729,9 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         return;
     }
     ++a.frames, a.deepest = std::min(a.deepest, t.d);
-    const bool button = ctl == Control::Curve || ctl == Control::Reset || ctl == Control::Dock || ctl == Control::Close;
-    if (!(over || button)) return (void)(a.why |= kOffContent);
+    a.u = t.u, a.v = t.v, a.over = over, a.outside = FromBorder(*P, t.u, t.v);
+    a.otherGap = others - t.d, a.otherTip = otherTip, a.straightest = straightest;
+    if (!(over || button)) return (void)(a.why |= kOffContent);   // (slid off it, past the edge)
     if (sd.below < (sd.quick ? 1 : p_.pressFrames)) return;
     if (sd.below > p_.lateFrames || t.d < p_.lateDepth) return (void)(a.why |= kLate);
     const bool fast = sd.fastIn;
@@ -717,9 +760,10 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     if (over) {
         sd.control = Control::None, sd.lastX = x, sd.lastY = y;
         Emit(Event::Press, s, P->index, x, y);
-        ++stats.presses;
-        Log("%s poke pressed screen %d at %.0f,%.0f (%+.1f cm, in at %.2f m/s from %.1f cm out, %d frame(s) past, "
-            "the finger %.0f deg off)", SideName(s), P->index + 1, x, y, t.d * 100, sd.inSpeed, sd.travelled * 100, sd.below, angle);
+        ++stats.presses, stats.edgePresses += edge;
+        Log("%s poke pressed screen %d at %.0f,%.0f%s (%+.1f cm, in at %.2f m/s from %.1f cm out, %d frame(s) past, "
+            "the finger %.0f deg off)", SideName(s), P->index + 1, x, y, edge ? " (just past its edge)" : "", t.d * 100,
+            sd.inSpeed, sd.travelled * 100, sd.below, angle);
     } else {
         sd.control = ctl;
         Event e;

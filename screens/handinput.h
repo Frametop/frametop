@@ -89,18 +89,35 @@ struct Params {
     // the poke (3.5)
     double extended = 1.5;      // index tip-to-wrist over knuckle-to-wrist: the finger is straight
                                 // (1.6 until 2026-10-10: a relaxed pointing finger read 1.5-1.6)
-    double nearest = 0.005;     // the index is this much nearer the surface than the other fingertips,
+    // The index is the finger that touches: the other fingertips no deeper than the index tip by more
+    // than this (a negative `nearest`: they may be this much deeper; 0.005, the index 5 mm nearer,
+    // until 2026-10-10: 14 of 39 refused pokes in the second live test. The replays show why: at
+    // 20-30 deg the tracker reads a pointing hand's middle finger nearly as straight as the index
+    // (1.65-1.75 against 1.7-1.8) and its tip within -7..+4 mm of the index tip's depth),
+    double nearest = -0.006;
     double pointing = 0.2;      // ...or the hand points: the index straighter than each other finger by
                                 // this (as `extended`). A pointing hand coming at a panel from below at
                                 // an angle has its loosely curled fingertips 1-3 cm nearer the surface
                                 // than the index tip (the hand recorder's touch take: index 1.9, the
                                 // others 1.3-1.65)
+    // A poke just past the content's edge (within edgeSlack, not on a control) presses at the edge:
+    // the desktop's panel sits on the bottom edge, and the tracker's 1 cm puts a tap on it outside.
+    // Farther out it isn't a poke (a hand reaching for the bar or a corner crosses the plane there),
+    // and isn't counted as one.
+    double edgeSlack = 0.015;
     // At d <= 0 for pressFrames processed frames in a row; or for one frame when it came in
     // decisively: from at least `travel` farther out within travelMs, at quickSpeed or faster. A quick
     // tap at 30 Hz is past the surface for one or two frames, and a tap the tracker has 1 cm short is
-    // past it for none: two frames in a row lost most of them (live test, 2026-10-10).
+    // past it for none: two frames in a row lost most of them (live test, 2026-10-10). travel 0.017
+    // since the second live test (0.025 before: taps on the content came 1.7 and 2.0 cm, at 0.36 and
+    // 0.10 m/s, one frame past). A travel under steadyTravel also needs the tip coming in on each of
+    // the last steadySteps frames by 2 mm or more. A finger held still 1.5 cm out with 6 mm of noise
+    // a frame presses 4 times a minute (2 with the old rule, 8 at 1.5 cm without the steady rule, 5
+    // with it); at 2.5 cm out, or with 3 mm of noise, none. HANDS_POKE_TRAVEL.
     int pressFrames = 2;
-    double travel = 0.025, travelMs = 300, quickSpeed = 0.10;
+    double travel = 0.017, travelMs = 300, quickSpeed = 0.10;
+    double steadyTravel = 0.025;
+    int steadySteps = 3;
     // ...within lateFrames of crossing it and no deeper than lateDepth: a finger that has been past
     // the surface longer, or deeper, is reaching through it (a flag replay pressed 9 cm deep, 19
     // frames in, once the finger's angle came right)
@@ -321,6 +338,8 @@ public:
             heldAskew = 0, heldResting = 0, heldTyping = 0;
         int quickPresses = 0;   // pressed on one frame (Params::travel)
         int attempts = 0, refused = 0;   // pokes that crossed the surface, and those that didn't press
+        int offContent = 0;              // ...and crossings off the content and its controls (not pokes)
+        int edgePresses = 0;             // presses just past the content's edge (Params::edgeSlack)
         int pinchClicks = 0, cards = 0, fists = 0, fistsWaited = 0, fistsCancelled = 0;   // (and pinches)
     } stats;
 
@@ -361,6 +380,12 @@ private:
             int frames = 0;                  // at d <= 0
             bool quick = false;              // came in decisively (Params::travel)
             double deepest = 0, speed = 0, travel = 0, angle = 0, ext = 0;
+            // where it crossed (u, v on the panel), and on its last frame past the surface: the nearest
+            // other fingertip's depth over the index tip's (m; < 0: deeper than it), which tip, and the
+            // straightest other finger (as `extended`)
+            double u = 0, v = 0, outside = 0, otherGap = 0, straightest = 0;
+            int otherTip = 12;
+            bool over = true;
         } attempt;
         // the grab
         uint32_t begins = 0;                 // the pinch slot's begins counter last seen

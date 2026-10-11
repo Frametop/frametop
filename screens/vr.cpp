@@ -416,6 +416,7 @@ int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
 roomview::Detector g_roomView;   // no cutouts with Room View off
 handinput::HandInput g_handInput;   // near hand input (handinput.h; UpdateHandInput)
+grabthat::Detector g_grabThat;      // "grab that" (grabthat.h; UpdateGrabThat)
 bool g_constructRoomView = true; // camera/enableConstructRoomView
 
 // Visibility (see the top). g_manual is the hide/show switch: in the always mode it hides
@@ -2201,8 +2202,10 @@ void UpdateCutouts() {
 // or Frametop's panels up during one). Older than 3 s, it lapses: no near input.
 struct HandsWord {
     bool hand[2] = {false, false};
+    bool controller[2] = {false, false};
     bool allowed = false;
     int64_t atMs = INT64_MIN / 2;
+    int64_t handMs[2] = {INT64_MIN / 2, INT64_MIN / 2};   // when each side's word last said "hand"
 } g_handsWord;
 // The pointer helper's word on typing ("typing <L 0|1> <R 0|1>", on change and every second): the
 // hands typing on a real keyboard holds back (pointer/helper/typing.h): no pokes, near grabs or
@@ -2227,6 +2230,17 @@ bool HandsAllowed(int side) {
 bool SideAllowed(int side) { return g_nearMode != NearMode::Off && !g_paused && HandsAllowed(side); }
 
 bool HandInputOn() { return g_nearMode != NearMode::Off; }
+
+// A hand holding a panel (a grab, or a press in KWin) holds on while the helper's word says its side
+// is "off" (not a controller's) for up to handinput's holdLostMs: the third live test's log has the
+// word going "left off, right off" for a moment 24 times in 7 minutes, and three holds dropped there
+// (after 0.23, 4.51 and 9.80 s). The hands, if ft-hands still has them, go on as ever; if not, the
+// hold's own tracking-loss rule ends it.
+bool HoldsThroughWord(int side) {
+    if (g_nearMode != NearMode::Helper || g_paused) return false;
+    if (NowMs() - g_handsWord.atMs >= 3000 || !g_handsWord.allowed || g_handsWord.controller[side] || g_handsWord.hand[side]) return false;
+    return NowMs() - g_handsWord.handMs[side] < int64_t(g_handInput.params().holdLostMs);
+}
 
 // The panel as hand input sees it: its place, size, buffer, controls and popups.
 handinput::Panel InputPanel(const Screen &s, int index, const Mat &p) {
@@ -2299,11 +2313,18 @@ void WantHz(bool near) {
 palmmenu::PalmMenu g_palm;
 GuidePart g_palmRing[2];
 
-void UpdatePalmMenu(const handinput::Input &in) {
+void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Panel> &panels) {
     palmmenu::Input pin;
     pin.nowNs = in.nowNs, pin.hands = &g_hands, pin.head = in.head, pin.haveHead = in.haveHead;
-    for (int k = 0; k < 2; ++k)
-        pin.allowed[k] = in.haveHead && !g_beside && HandsAllowed(k), pin.busy[k] = g_handInput.pressing(k) || g_handInput.grabbing(k);
+    // busy: near input presses or holds with that hand, or "grab that" has it; at a panel: near input
+    // has it near one, or it's within the touch zone and a margin of one (a card pinch from below has
+    // the palm up toward the face)
+    for (int k = 0; k < 2; ++k) {
+        pin.allowed[k] = in.haveHead && !g_beside && HandsAllowed(k);
+        pin.busy[k] = g_handInput.pressing(k) || g_handInput.grabbing(k) || g_grabThat.armed(k) ||
+                      g_grabThat.claims(k, g_handInput.frameNs());
+        pin.atPanel[k] = g_handInput.near(k) || handinput::HandAtPanel(g_hands, k, panels, g_handInput.params());
+    }
     g_palm.Update(pin);
     if (g_palm.toggled() >= 0) {
         std::printf("palm menu (%s hand): the Steam menu\n", g_palm.toggled() ? "right" : "left");
@@ -2331,8 +2352,7 @@ void UpdatePalmMenu(const handinput::Input &in) {
 
 // "Grab that" (grabthat.h): the detector reads each hands frame after near input (which leaves it
 // a hand it's not pressing or grabbing with, nor one typing holds back); a fired gesture moves the
-// panel it means over animMs, and remembers where it was.
-grabthat::Detector g_grabThat;
+// panel it means over animMs, and remembers where it was (g_grabThat, with near input's globals).
 struct GrabMove {
     Mat from, to, lastSet;
     double w0 = 1, w1 = 1;
@@ -2343,9 +2363,21 @@ struct GrabMove {
 std::map<int, GrabMove> g_grabMoves;   // panels on their way
 struct Brought {
     Mat from, to;
-    double width = 1;
+    double width = 1;       // its width before it came
+    double cameWidth = 1;   // ...and the width it came at (screens wider than grab that's maxWidth shrink)
 };
 std::map<int, Brought> g_brought;      // panels that came by the gesture: where from, where to
+
+// The width a panel goes away at (user, 2026-10-10: "windows should not resize to be smaller when
+// they're sent back. It should just push them back further away keeping their existing size"): its
+// own width, as it is now; except one "grab that" shrank to come to arm's reach and still at that
+// width gets the width it had back (the third live test: the 2.5 m desktop came at 0.6 m and was
+// thrown 3 m out at 0.6, a fifth of its size). HANDS_SEND_AWAY_WIDTH: restore (that), keep (never).
+bool g_sendAwayRestore = true;
+double SendAwayWidth(const Screen &s, const Brought *b) {
+    if (g_sendAwayRestore && b && std::fabs(s.metres - b->cameWidth) < 0.01 && b->width > s.metres) return b->width;
+    return s.metres;
+}
 
 double Apart(const Mat &a, const Mat &b) {
     return std::hypot(a.m[0][3] - b.m[0][3], a.m[1][3] - b.m[1][3], a.m[2][3] - b.m[2][3]);
@@ -2382,8 +2414,10 @@ void GrabThat(const grabthat::Fire &f) {
     const auto b = g_brought.find(i);
     const grabthat::Outcome what = grabthat::Decide(b != g_brought.end(), now, f.head, k);
     if (what == grabthat::Outcome::Back) {   // it came by the gesture: back
-        std::printf("grab that (%s hand): screen %d goes back\n", hand, i + 1);
-        StartGrabMove(i, s, b->second.from, b->second.width);
+        const double w = SendAwayWidth(s, &b->second);
+        std::printf("grab that (%s hand): screen %d goes back%s\n", hand, i + 1,
+                    w != s.metres ? (", " + std::to_string(w).substr(0, 4) + " m wide as it was").c_str() : ", as wide as it is");
+        StartGrabMove(i, s, b->second.from, w);
         g_brought.erase(b);
         return;
     }
@@ -2398,12 +2432,12 @@ void GrabThat(const grabthat::Fire &f) {
             continue;
         }
         std::printf("grab that (%s hand): screen %d goes back to make room\n", hand, it->first + 1);
-        StartGrabMove(it->first, o->second, it->second.from, it->second.width);
+        StartGrabMove(it->first, o->second, it->second.from, SendAwayWidth(o->second, &it->second));
         it = g_brought.erase(it);
     }
     const Mat to = grabthat::Arrival(f, k);
     const double width = !s.floating && k.maxWidth > 0 ? std::min(s.metres, k.maxWidth) : s.metres;
-    g_brought[i] = {now, to, s.metres};
+    g_brought[i] = {now, to, s.metres, width};
     std::printf("grab that (%s hand): screen %d %s%s\n", hand, i + 1, grabthat::OutcomeName(what),
                 width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "");
     StartGrabMove(i, s, to, width);
@@ -2450,7 +2484,7 @@ void GrabThatReset() {
     for (const auto &[i, b] : g_brought) {
         const auto it = g_screens.find(i);
         if (it != g_screens.end() && it->second.floating && it->second.pinned == kNone && it->second.drag == Drag::None)
-            StartGrabMove(i, it->second, b.from, b.width);
+            StartGrabMove(i, it->second, b.from, SendAwayWidth(it->second, &b));
     }
     g_brought.clear();
 }
@@ -2470,6 +2504,110 @@ void UpdateGrabThat(const handinput::Input &in) {
     AnimateGrabMoves();
 }
 
+// The glow on the panel a gesture under way would take (user, 2026-10-10: "a glow over the window
+// that grab that is targeting, so the user knows the motion will trigger on it"): an edge glow round
+// the whole panel and a faint tint over it, one overlay ("frametop.guide.target": the pointer
+// helper's cursor and rays pass through guides) in front of the panel, sized and curved to it, that
+// doesn't need the cutouts. Blue: "grab that" (an open hand held out to it; it fades in as the gesture
+// arms, over armMs, and goes as it's let go or fires); warm white: a push or a flick would throw it
+// (an open palm close in front of it, toward it). HANDS_TARGET_GLOW.
+bool g_targetGlowOn = true;
+struct TargetGlow {
+    vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
+    int panel = -1, texH = 0;
+    bool warm = false, shown = false;
+    double alpha = 0, shownAlpha = -1;
+    int64_t lastMs = 0;
+} g_target;
+
+// The glow's texture: kTargetW wide, the panel kTargetM pixels in from each side, its aspect h/w.
+constexpr int kTargetW = 320, kTargetM = 10;
+std::vector<uint8_t> TargetTexture(int h, bool warm) {
+    const int w = kTargetW, m = kTargetM;
+    std::vector<uint8_t> px(size_t(w) * h * 4, 0);
+    const double r = 6;   // the corners' rounding, pixels
+    const uint8_t rgb[3] = {uint8_t(warm ? 255 : 90), uint8_t(warm ? 214 : 170), uint8_t(warm ? 150 : 255)};
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            // signed distance to the panel's rounded rectangle (> 0 outside)
+            const double cx = std::fabs(x + 0.5 - w / 2.0) - (w / 2.0 - m - r), cy = std::fabs(y + 0.5 - h / 2.0) - (h / 2.0 - m - r);
+            const double d = std::hypot(std::max(cx, 0.0), std::max(cy, 0.0)) + std::min(std::max(cx, cy), 0.0) - r;
+            const double a = d > 0 ? 0.9 * std::exp(-(d / 4) * (d / 4)) : 0.95 * std::exp(-(d / 2) * (d / 2)) + 0.07;
+            uint8_t *p = &px[(size_t(y) * w + x) * 4];
+            p[0] = rgb[0], p[1] = rgb[1], p[2] = rgb[2], p[3] = uint8_t(std::clamp(a, 0.0, 1.0) * 255);
+        }
+    return px;
+}
+
+void UpdateTargetGlow() {
+    int best = -1;
+    double want = 0;
+    bool warm = false;
+    if (g_targetGlowOn && g_vr) {
+        // "grab that": the panel it would take now, as far along as the gesture is
+        std::vector<grabthat::Target> targets;
+        for (int k = 0; k < 2; ++k) {
+            grabthat::Fire f;
+            double progress = 0;
+            if (!g_grabThat.Aim(k, &f, &progress)) continue;
+            if (targets.empty())
+                for (auto &[i, s] : g_screens) {
+                    Mat p;
+                    if (!s.visible || s.width <= 0 || s.height <= 0 || (s.floating && s.cropW <= 0) || s.pinned != kNone ||
+                        s.drag != Drag::None || !ScreenPose(s, &p))
+                        continue;
+                    targets.push_back({i, p, s.metres, s.heightMetres(), s.curve});
+                }
+            const int i = grabthat::Pick(targets, f, g_grabThat.params());
+            if (i >= 0 && progress > want) best = i, want = progress, warm = false;
+        }
+        // a push or a flick (dimmer)
+        if (best < 0)
+            for (const auto &[i, a] : g_handInput.throwAims())
+                if (0.7 * a > want) best = i, want = 0.7 * a, warm = true;
+    }
+    const auto it = best >= 0 ? g_screens.find(best) : g_screens.end();
+    if (it == g_screens.end() || !it->second.visible) best = -1, want = 0;
+    // fade: in over about 120 ms (on top of grab that's own arming), out over 150
+    const int64_t now = NowMs();
+    const double dt = g_target.lastMs ? std::clamp((now - g_target.lastMs) / 1000.0, 0.0, 0.1) : 0;
+    g_target.lastMs = now;
+    if (best >= 0 && (best != g_target.panel || warm != g_target.warm)) g_target.panel = best, g_target.warm = warm, g_target.texH = 0;
+    if (best < 0) want = 0;
+    g_target.alpha = want > g_target.alpha ? std::min(want, g_target.alpha + dt / 0.12) : std::max(want, g_target.alpha - dt / 0.15);
+    auto hide = [&] {
+        if (g_target.shown) vr::VROverlay()->HideOverlay(g_target.overlay), g_target.shown = false;
+    };
+    const auto pit = g_screens.find(g_target.panel);
+    if (g_target.alpha < 0.01 || pit == g_screens.end() || !pit->second.visible) return hide();
+    if (g_target.overlay == vr::k_ulOverlayHandleInvalid) {
+        if (vr::VROverlay()->CreateOverlay("frametop.guide.target", "Frametop: gesture target", &g_target.overlay) != vr::VROverlayError_None)
+            return;
+        vr::VROverlay()->SetOverlaySortOrder(g_target.overlay, 5);
+    }
+    Screen &s = pit->second;
+    Mat p;
+    if (!ScreenPose(s, &p)) return hide();
+    const double aspect = s.heightMetres() / std::max(1e-6, s.metres);
+    const int h = std::clamp(int(std::lround((kTargetW - 2 * kTargetM) * aspect)) + 2 * kTargetM, 2 * kTargetM + 4, 1200);
+    if (h != g_target.texH) {
+        const std::vector<uint8_t> px = TargetTexture(h, g_target.warm);
+        vr::VROverlay()->SetOverlayRaw(g_target.overlay, const_cast<uint8_t *>(px.data()), kTargetW, uint32_t(h), 4);
+        g_target.texH = h;
+    }
+    const double width = s.metres * kTargetW / (kTargetW - 2 * kTargetM);
+    vr::VROverlay()->SetOverlayWidthInMeters(g_target.overlay, float(width));
+    const double radius = s.curve > 0 ? std::max(0.05, s.curve - 0.004) : 0;
+    vr::VROverlay()->SetOverlayCurvature(g_target.overlay, radius > 0 ? float(std::clamp(width / (2 * M_PI * radius), 0.0, 1.0)) : 0.f);
+    for (int i = 0; i < 3; ++i) p.m[i][3] += float(p.m[i][2] * 0.004);   // 4 mm in front of it
+    vr::VROverlay()->SetOverlayTransformAbsolute(g_target.overlay, vr::TrackingUniverseStanding, &p);
+    if (std::fabs(g_target.alpha - g_target.shownAlpha) > 0.01) {
+        vr::VROverlay()->SetOverlayAlpha(g_target.overlay, float(g_target.alpha));
+        g_target.shownAlpha = g_target.alpha;
+    }
+    if (!g_target.shown) vr::VROverlay()->ShowOverlay(g_target.overlay), g_target.shown = true;
+}
+
 void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data) {
     std::vector<handinput::Panel> panels;
     for (auto &[i, s] : g_screens) {
@@ -2481,18 +2619,32 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     in.nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
     in.hands = &g_hands;
     in.haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &in.head);
-    for (int k = 0; k < 2; ++k) in.allowed[k] = in.haveHead && SideAllowed(k);
+    for (int k = 0; k < 2; ++k) {
+        in.allowed[k] = in.haveHead && SideAllowed(k);
+        static bool heldOn[2] = {false, false};
+        const bool holding = g_handInput.grabbing(k) || g_handInput.pressing(k);
+        if (!in.allowed[k] && in.haveHead && holding && HoldsThroughWord(k)) {
+            in.allowed[k] = true;
+            if (!heldOn[k])
+                std::printf("hands: %s hand \"off\" in the pointer helper's word while it %s: held on\n", k ? "right" : "left",
+                            g_handInput.grabbing(k) ? ("holds screen " + std::to_string(g_handInput.grabPanel(k) + 1)).c_str() : "presses");
+            heldOn[k] = true;
+        } else if (in.allowed[k] || !holding) {
+            heldOn[k] = false;
+        }
+    }
     for (int k = 0; k < 2; ++k) in.typing[k] = NowMs() - g_typingWord.atMs < 3000 && g_typingWord.side[k];
     in.pointerBusy = g_press.buttons && !IsHandHolder(g_press.device);
     // KWin's button, let go of by someone else (ReleaseStuck: its screen hid, or paused)
     for (int k = 0; k < 2; ++k)
         if (g_handInput.pressingKwin(k) && !(g_press.buttons && g_press.device == kHandHolder[k])) g_handInput.ForgetPress(k);
-    UpdatePalmMenu(in);
+    UpdatePalmMenu(in, panels);
     for (int k = 0; k < 2; ++k) in.allowed[k] = in.allowed[k] && !g_palm.shown(k);   // the palm menu has that hand
     for (int k = 0; k < 2; ++k) in.grabThatArmed[k] = g_grabThat.params().on && g_grabThat.armed(k);   // a fist waits on it
     g_handInput.Update(in, panels);
     for (const std::string &l : g_handInput.logs()) std::printf("hands: %s\n", l.c_str());
     UpdateGrabThat(in);
+    UpdateTargetGlow();
 
     for (const handinput::Event &e : g_handInput.events()) {
         const auto it = g_screens.find(e.panel);
@@ -2548,12 +2700,15 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 // on a wrist): out to throwDistance, easing out; that's its place now, and "grab that"
                 // brings it back from there (and sends it back there)
                 if (s.drag != Drag::None || s.pinned != kNone) break;
-                g_brought.erase(e.panel);
+                const auto b = g_brought.find(e.panel);
+                const double w = SendAwayWidth(s, b == g_brought.end() ? nullptr : &b->second);
+                if (b != g_brought.end()) g_brought.erase(b);
                 Mat head;
                 double far = 0;
                 if (DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) far = Apart(head, e.to);
-                std::printf("screen %d: %s, %.1f m out\n", e.panel + 1, e.flick ? "flicked away" : "thrown", far);
-                StartGrabMove(e.panel, s, e.to, s.metres, e.ms, true);
+                std::printf("screen %d: %s, %.1f m out%s\n", e.panel + 1, e.push ? "pushed away" : e.flick ? "flicked away" : "thrown",
+                            far, w != s.metres ? (", " + std::to_string(w).substr(0, 4) + " m wide as before grab that").c_str() : "");
+                StartGrabMove(e.panel, s, e.to, w, e.ms, true);
                 break;
             }
             case handinput::Event::GrabEnd:
@@ -2716,6 +2871,14 @@ bool ft_vr_init(void) {
     k.cardThrow = handcut::Setting("HANDS_THROW", "1") != "0";
     num("HANDS_THROW_SPEED", k.throwSpeed, 0.3, 10);
     num("HANDS_THROW_DISTANCE", k.throwDistance, 0.5, 10);
+    // the third live test (2026-10-10): pushes, two hands turning, tracking gates, the target's glow,
+    // the width a panel goes away at (handinput.h Params::push, stretchTurn, gate; vr.cpp)
+    k.push = handcut::Setting("HANDS_PUSH", "1") != "0";
+    num("HANDS_PUSH_SPEED", k.pushSpeed, 0.2, 5);
+    k.stretchTurn = handcut::Setting("HANDS_STRETCH_TURN", "1") != "0";
+    k.gate = handcut::Setting("HANDS_TRACK_GATE", "1") != "0";
+    g_targetGlowOn = handcut::Setting("HANDS_TARGET_GLOW", "1") != "0";
+    g_sendAwayRestore = handcut::Setting("HANDS_SEND_AWAY_WIDTH", "restore") != "keep";
     const std::string near = handcut::Setting("HANDS_NEAR", "1");
     g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
     // The passthrough holes in the panels: off by default since ft-handview draws the hands
@@ -2743,10 +2906,15 @@ bool ft_vr_init(void) {
                 "a fist at a panel %s\n",
                 k.bandOut * 100, k.cardPinch ? ", either side of its edge like a card" : "", k.pinchClick ? "click" : "do nothing",
                 k.fistGrab ? "carries and turns it (two stretch it)" : "does nothing (HANDS_FIST_GRAB=0)");
-    std::printf("hands: throws %.1f m out: a flick %s, a carry let go %s\n", k.throwDistance,
+    std::printf("hands: throws %.1f m out: a flick %s, a carry let go %s, a push %s; sent away, a panel %s\n", k.throwDistance,
                 k.flick ? ("at " + std::to_string(k.flickSpeed).substr(0, 4) + " m/s, the fingers opening by " +
                            std::to_string(k.flickOpening).substr(0, 4)).c_str() : "off (HANDS_FLICK=0)",
-                k.cardThrow ? ("at " + std::to_string(k.throwSpeed).substr(0, 4) + " m/s").c_str() : "off (HANDS_THROW=0)");
+                k.cardThrow ? ("at " + std::to_string(k.throwSpeed).substr(0, 4) + " m/s").c_str() : "off (HANDS_THROW=0)",
+                k.push ? ("at " + std::to_string(k.pushSpeed).substr(0, 4) + " m/s (or 15 cm in)").c_str() : "off (HANDS_PUSH=0)",
+                g_sendAwayRestore ? "keeps its width (one grab that shrank gets its width back)" : "keeps its width (HANDS_SEND_AWAY_WIDTH=keep)");
+    std::printf("hands: two hands turn a panel %s; held hands' impossible frames %s; the gesture target glows %s\n",
+                k.stretchTurn ? "on every axis" : "about the vertical (HANDS_STRETCH_TURN=0)",
+                k.gate ? "dropped (HANDS_TRACK_GATE)" : "taken (HANDS_TRACK_GATE=0)", g_targetGlowOn ? "(HANDS_TARGET_GLOW)" : "not (HANDS_TARGET_GLOW=0)");
     std::printf("hands: grabs smoothed from %.2f Hz (+%.1f Hz per m/s), a %.1f cm dead zone, held through %.2f s of "
                 "tracking loss; the wrist turns them %s\n",
                 k.grabMinCutoff, k.grabBeta, k.grabDeadzone * 100, k.holdLostMs / 1000,
@@ -2789,6 +2957,7 @@ void ft_vr_shutdown(void) {
         for (auto o : {g.ring.overlay, g.dot.overlay}) vr::VROverlay()->DestroyOverlay(o);
     for (GuidePart &r : g_palmRing)
         if (r.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(r.overlay), r = GuidePart{};
+    if (g_target.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(g_target.overlay), g_target = TargetGlow{};
     keyboard::Destroy();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     for (auto &[k, h] : g_imports) vr::VRIPCResourceManager()->UnrefResource(h);
@@ -3540,6 +3709,9 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         if (l != g_handsWord.hand[0] || r != g_handsWord.hand[1] || allowed != g_handsWord.allowed)
             std::printf("hands from the pointer helper: left %s, right %s, %s\n", sl, sr, allowed ? "allowed" : "not allowed");
         g_handsWord.hand[0] = l, g_handsWord.hand[1] = r, g_handsWord.allowed = allowed, g_handsWord.atMs = NowMs();
+        g_handsWord.controller[0] = !std::strcmp(sl, "controller"), g_handsWord.controller[1] = !std::strcmp(sr, "controller");
+        for (int k = 0; k < 2; ++k)
+            if (g_handsWord.hand[k]) g_handsWord.handMs[k] = NowMs();
         std::snprintf(reply, size, "ok");
     } else if (int tl = 0, tr = 0; std::sscanf(cmd, "typing %d %d", &tl, &tr) == 2) {
         g_typingWord.side[0] = tl != 0, g_typingWord.side[1] = tr != 0, g_typingWord.atMs = NowMs();
@@ -3554,22 +3726,25 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
                       "ok %s, helper %s (left %s, right %s, %s); %s; %d frames, %d near, %d presses (%d on one frame, %d by "
                       "pinch), %d controls, %d grabs (%d card, %d fist; %d fists waited, %d were grab that), %d stretches; "
                       "%d poke attempts, %d refused, %d off the content, %d at the edge; held back: %d one view, %d bent, "
-                      "%d not nearest, %d pinching, %d busy, %d resting, %d typing, %d askew, %d slow, %d flicks; %d flicks, "
-                      "%d throws; holds: %d coasts, %d back, %d glitches, %d held through, %d ended unseen",
+                      "%d not nearest, %d pinching, %d busy, %d resting, %d typing, %d askew, %d slow, %d flicks, %d open; %d flicks, "
+                      "%d throws, %d pushes; holds: %d coasts, %d back, %d glitches, %d held through, %d ended unseen; gates: %d frames "
+                      "and %d turns dropped, %d moved, %d near the edge, %d one camera; %d fists ft-hands called pinches",
                       g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
                       NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
                       g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
                       g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.quickPresses, st.pinchClicks,
                       st.controls, st.grabs, st.cards, st.fists, st.fistsWaited, st.fistsCancelled, st.stretches, st.attempts,
                       st.refused, st.offContent, st.edgePresses, st.heldNotStereo, st.heldNotExtended, st.heldNotNearest,
-                      st.heldPinching, st.heldBusy, st.heldResting, st.heldTyping, st.heldAskew, st.heldSlow, st.heldFlick, st.flicks,
-                      st.throws, st.coasts, st.reacquired, st.glitches, st.heldThrough, st.lostEnds);
+                      st.heldPinching, st.heldBusy, st.heldResting, st.heldTyping, st.heldAskew, st.heldSlow, st.heldFlick, st.heldOpen,
+                      st.flicks, st.throws, st.pushes, st.coasts, st.reacquired, st.glitches, st.heldThrough, st.lostEnds, st.gated,
+                      st.turnsGated, st.moved, st.edgeFrames, st.monoFrames, st.fistPinches);
     } else if (std::sscanf(cmd, "palmmenu %15s", word) == 1) {
         if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_palm.params().on = !std::strcmp(word, "on");
         else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error palmmenu on|off|state");
         const auto &st = g_palm.stats;
-        std::snprintf(reply, size, "ok %s; %s; %d shown, %d pinches, %d toggles, %d cancelled", g_palm.params().on ? "on" : "off",
-                      g_palm.Describe().c_str(), st.shows, st.pinches, st.toggles, st.cancels);
+        std::snprintf(reply, size, "ok %s; %s; %d shown, %d pinches, %d toggles, %d cancelled, %d not a plain pinch",
+                      g_palm.params().on ? "on" : "off", g_palm.Describe().c_str(), st.shows, st.pinches, st.toggles, st.cancels,
+                      st.notPlain);
     } else if (std::sscanf(cmd, "grabthat %15s", word) == 1) {
         if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_grabThat.params().on = !std::strcmp(word, "on");
         else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error grabthat on|off|state");

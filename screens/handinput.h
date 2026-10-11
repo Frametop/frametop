@@ -132,9 +132,11 @@ struct Params {
     // fingers meet; the gestures file's point is the knuckles, 5-8 cm behind it, which a 3 cm deep
     // zone rarely had). A band along the panel's border, bandOut outside it to bandIn inside, within
     // bandDepth of its surface either side: corners (within cornerReach) resize, the rest of it
-    // moves; and the bar (barReach) and resize tab. HANDS_GRAB_BAND (bandOut). 2026-10-10: user, "I
-    // still can't pinch to grab displays easily" (4 cm, 3 cm, 2.5 out, 1.5 in, 3 deep before).
-    double barReach = 0.06, cornerReach = 0.06, bandOut = 0.06, bandIn = 0.025, bandDepth = 0.04;
+    // moves; and the bar (barReach) and resize tab. bandDepth is the touch zone's depth (vr.cpp sets
+    // it to nearFront, at least 4 cm), so a pinch in the zone by the border always takes the panel.
+    // HANDS_GRAB_BAND (bandOut). 2026-10-10: user, "I still can't pinch to grab displays easily"
+    // (4 cm, 3 cm, 2.5 out, 1.5 in, 3 deep before).
+    double barReach = 0.06, cornerReach = 0.06, bandOut = 0.06, bandIn = 0.025, bandDepth = 0.075;
     double glowReach = 0.05;    // a pinch's glow shows this close to a grab zone
     // A pinch on the content within the near zone (not in a grab zone) is a click where the
     // pointer is (the fingertip's cursor, if it was there in the last pinchCursorMs and is within

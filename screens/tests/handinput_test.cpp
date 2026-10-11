@@ -360,7 +360,7 @@ void TestZones() {
     const double barY = p.controls[0].v;
     CHECK(GrabZone(p, {0.05, barY, 0.01}, k, &sx, &sy, &e) == Zone::Bar && e <= 0);
     CHECK(GrabZone(p, {0.05, barY - 0.035, 0.0}, k, &sx, &sy, &e) == Zone::Bar && e <= 0);
-    CHECK(GrabZone(p, {0.05, barY, 0.05}, k, &sx, &sy, &e) == Zone::Bar && e > 0);   // too far in front
+    CHECK(GrabZone(p, {0.05, barY, 0.09}, k, &sx, &sy, &e) == Zone::Bar && e > 0);   // too far in front (past the zone)
     CHECK(GrabZone(p, {0.52, -0.30, 0}, k, &sx, &sy, &e) == Zone::Tab && e <= 0);
     CHECK(GrabZone(p, {-0.5, 0.28, 0.01}, k, &sx, &sy, &e) == Zone::Corner && e <= 0 && sx == -1 && sy == 1);
     CHECK(GrabZone(p, {-0.51, 0.0, 0.01}, k, &sx, &sy, &e) == Zone::Edge && e <= 0);

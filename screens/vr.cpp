@@ -2540,6 +2540,7 @@ bool ft_vr_init(void) {
     // the leave margin and a resting hand's reach keep their proportion to the reach (0.025 and
     // 0.04 at the default 0.075)
     k.nearLeave = std::clamp(k.nearFront / 3, 0.015, 0.05), k.restFront = std::min(k.restFront, k.nearFront);
+    k.bandDepth = std::max(0.04, k.nearFront);   // a pinch in the zone by the border takes the panel
     num("HANDS_POKE_ANGLE", k.fingerAngle, 10, 90);
     num("HANDS_POKE_TRAVEL", k.travel, 0, 0.2);   // a one-frame press needs this much travel in; 0: never one frame
     if (k.travel <= 0) k.travel = 1e9;

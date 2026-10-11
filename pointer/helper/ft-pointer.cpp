@@ -585,6 +585,21 @@ bool FramePanel(const std::string &key) {
     return false;
 }
 
+// One of ft-screens' drag controls on such a panel: its grab bar or its resize handle
+// (frametop.screen.N.bar, frametop.remote.N.resize, ...). A gaze pinch on one presses at once
+// (gazehand.h, POINTER_GAZE_CONTROL_HOLD): there's nothing to click on them.
+bool FrameControl(const std::string &key) {
+    for (const char *prefix : {"frametop.screen.", "frametop.remote.", "frametop.float."}) {
+        if (key.rfind(prefix, 0) != 0) continue;
+        const std::string rest = key.substr(std::strlen(prefix));
+        const size_t dot = rest.find('.');
+        if (dot == std::string::npos) return false;
+        const std::string part = rest.substr(dot + 1);
+        return part == "bar" || part == "resize";
+    }
+    return false;
+}
+
 void SendTo(int fd, const char *name, const std::string &msg) {
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
@@ -894,7 +909,7 @@ int main() {
     bool follow = false, followConf = false, followReset = true;
     // Gaze mode (see the top); gazeConf is POINTER_GAZE as last read, like followConf.
     bool gazeOn = false, gazeConf = false;
-    double gazeRetake = 5, gazeNudgeMax = 55, gazeHold = 0.5, gazeShow = 1;
+    double gazeRetake = 5, gazeNudgeMax = 55, gazeHold = 0.5, gazeShow = 1, gazeControlHold = 0.12;
     bool gazeDotAlways = true;  // POINTER_GAZE_DOT (see the top)
     double headDeadzone = 0.5, keyTap = 0.25;  // POINTER_HEAD_DEADZONE, POINTER_KEY_TAP (keyboard clicks, see the top)
     // Hands (see the top): POINTER_HANDS, POINTER_PINCH_GAIN, POINTER_PINCH_DEADZONE, POINTER_GRIP_GAIN.
@@ -948,6 +963,7 @@ int main() {
         gazeRetake = std::clamp(ConfDouble(conf, "POINTER_GAZE_RETAKE", 5), 1.0, 45.0);
         gazeNudgeMax = std::clamp(ConfDouble(conf, "POINTER_GAZE_NUDGE_MAX", 55), 1.0, 110.0);
         gazeHold = std::clamp(ConfDouble(conf, "POINTER_GAZE_HOLD", 0.5), 0.1, 5.0);
+        gazeControlHold = std::clamp(ConfDouble(conf, "POINTER_GAZE_CONTROL_HOLD", 0.12), 0.05, 5.0);
         gazeShow = std::clamp(ConfDouble(conf, "POINTER_GAZE_SHOW", 1), 0.0, 30.0);
         headDeadzone = std::clamp(ConfDouble(conf, "POINTER_HEAD_DEADZONE", 0.5), 0.0, 5.0);
         keyTap = std::clamp(ConfDouble(conf, "POINTER_KEY_TAP", 0.25), 0.0, 1.0);
@@ -2720,6 +2736,7 @@ int main() {
             if (!handAngles(g.begin_point, g.begin_ns, h.origin, h.refYaw, h.refPitch)) return;
             gazehand::Params gp;
             gp.deadzone = gazePinchDeadzone, gp.gain = gazePinchGain, gp.hold = gazeHold, gp.dragGain = gripGain;
+            gp.controlHold = gazeControlHold;
             gazehand::GazeSample gs;
             double lockAge = -1;
             vr::HmdMatrix34_t gazeHead;
@@ -3455,7 +3472,8 @@ int main() {
         }
         // A gaze pinch held still for POINTER_GAZE_HOLD: a real press at the locked gaze, then the hand
         // drags (see "Gaze pinch" at the top).
-        if (hold.src == Src::Hand && hold.gaze.On() && aimHeld && hold.gaze.Promote(secsOf(tnow))) {
+        // (on a screen's resize handle or grab bar: sooner, POINTER_GAZE_CONTROL_HOLD)
+        if (hold.src == Src::Hand && hold.gaze.On() && aimHeld && hold.gaze.Promote(secsOf(tnow), FrameControl(lastHit))) {
             aimHeld = aimHand = false;
             hold.pressed = true;
             gazeBack = gazeOn;

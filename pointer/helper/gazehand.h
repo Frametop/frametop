@@ -28,6 +28,11 @@
 // (POINTER_GRIP_GAIN, 1). A pinch that has nudged only clicks, as the mouse's held-back press does
 // once it has moved. A middle pinch (the right button) never becomes a press.
 //
+// Frametop's drag controls (2026-10-10, Vision Pro-style resize from any corner): a pinch whose
+// pointer is on a screen's resize handle or grab bar (frametop.screen.N.resize, frametop.remote.N.bar,
+// ...; FrameControl in ft-pointer.cpp) is a press after controlHold (0.12 s,
+// POINTER_GAZE_CONTROL_HOLD) still, not hold: there's nothing to click on them, and the hand drags.
+//
 // Chord: both buttons held, as with both of a mouse's (user, 2026-10-10). While one hand's index
 // pinch is held (held back, nudged, or pressed), an index pinch by the other hand presses the right
 // button, and holds it until that pinch ends; the first hand's left button stays down until its own
@@ -60,6 +65,7 @@ struct Params {
     double deadzone = 4.0;      // POINTER_GAZE_PINCH_DEADZONE: hand degrees before a nudge
     double gain = 0.3;          // POINTER_GAZE_PINCH_GAIN: pointer degrees per hand degree
     double hold = 0.5;          // POINTER_GAZE_HOLD: held still this long, a real press
+    double controlHold = 0.12;  // POINTER_GAZE_CONTROL_HOLD: ...on one of Frametop's drag controls
     double dragDeadzone = 0.5;  // after the press (the grip's)
     double dragGain = 1.0;      // POINTER_GRIP_GAIN
     double lead = 0.075;        // gaze lock: the newest sample at least this long before the begin
@@ -169,9 +175,11 @@ public:
         return true;
     }
 
-    // Each frame: true once, when a pinch held inside the dead zone for hold becomes a real press.
-    bool Promote(double t) {
-        if (phase_ != Phase::Aim || right_ || t - t0_ < p_.hold - 1e-9) return false;
+    // Each frame: true once, when a pinch held inside the dead zone for hold (controlHold with the pointer
+    // on one of Frametop's drag controls) becomes a real press.
+    bool Promote(double t, bool onControl = false) {
+        const double hold = onControl ? std::min(p_.hold, p_.controlHold) : p_.hold;
+        if (phase_ != Phase::Aim || right_ || t - t0_ < hold - 1e-9) return false;
         phase_ = Phase::Press;
         engaged_ = false;
         refY_ = lastHy_, refP_ = lastHp_;  // the drag counts from the hand now

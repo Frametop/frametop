@@ -171,6 +171,31 @@ void TestHoldStillBecomesAPress() {
     CHECK(Has(says, "let go: its side has a controller in use"), "%s", says.c_str());
 }
 
+// On one of Frametop's drag controls (a resize handle, a grab bar): a press after controlHold.
+void TestControlPressesSooner() {
+    Params prm;
+    Pinch p;
+    p.Begin(prm, 0, 30, 5, -20, -35, false, 0.08);
+    double t = 0, at = -1;
+    while (t < 1.0 && at < 0) {
+        t += 0.008;
+        if (p.Promote(t, true)) at = t;
+    }
+    CHECK(at >= prm.controlHold - 1e-9 && at < prm.controlHold + 0.009, "pressed at %.3f s", at);
+    // a nudge first: no press (it clicks on the release, as anywhere)
+    Pinch q;
+    q.Begin(prm, 0, 30, 5, -20, -35, false, 0.08);
+    q.Hand(-20 + 5, -35);
+    q.Hand(-20 + 6, -35);
+    bool pressed = false;
+    for (double u = 0.01; u < 1.0; u += 0.008) pressed = pressed || q.Promote(u, true);
+    CHECK(!pressed, "a nudged pinch doesn't press");
+    // a middle pinch: never
+    Pinch m;
+    m.Begin(prm, 0, 30, 5, -20, -35, true, 0.08);
+    CHECK(!m.Promote(0.5, true), "a middle pinch doesn't press");
+}
+
 void TestMiddlePinch() {
     Pinch p;
     p.Begin(Params(), 0, 10, 0, 0, -30, true, 0.09);
@@ -407,6 +432,7 @@ int main() {
     TestNudgePastTheDeadZone();
     TestGainAndDeadZoneSettings();
     TestHoldStillBecomesAPress();
+    TestControlPressesSooner();
     TestMiddlePinch();
     TestRefused();
     TestChordable();

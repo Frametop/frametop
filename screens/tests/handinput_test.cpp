@@ -388,11 +388,12 @@ void TestZones() {
     CHECK(GrabZone(p, {0.49, 0.1, -0.01}, k, &sx, &sy, &e) == Zone::Edge && e <= 0);
     CHECK(GrabZone(p, {0.0, 0.29, 0.0}, k, &sx, &sy, &e) == Zone::Edge && e <= 0);   // the top edge
     CHECK(GrabZone(p, {0.0, 0.0, 0.0}, k, &sx, &sy, &e) != Zone::None && e > 0.1);   // the content: no zone
-    // a floating window: the title bar, and only the bottom right corner resizes
+    // a floating window: the title bar, and every corner resizes (2026-10-10; the bottom right only before)
     Panel f = TestPanel();
     f.floating = true, f.cropW = 1600, f.cropH = 900, f.titleH = 60;
     CHECK(GrabZone(f, {0.1, 0.27, 0.0}, k, &sx, &sy, &e) == Zone::Title && e <= 0);
-    CHECK(GrabZone(f, {-0.5, 0.28, 0.0}, k, &sx, &sy, &e) == Zone::Title);   // top left: no resize there
+    CHECK(GrabZone(f, {-0.5, 0.28, 0.0}, k, &sx, &sy, &e) == Zone::Corner && sx == -1 && sy == 1);
+    CHECK(GrabZone(f, {-0.4, 0.27, 0.0}, k, &sx, &sy, &e) == Zone::Title);   // the title bar next to it
     f.controls.clear();
     CHECK(GrabZone(f, {0.5, -0.28, 0.0}, k, &sx, &sy, &e) == Zone::Corner && sx == 1 && sy == -1);
 }
@@ -1212,6 +1213,71 @@ void TestGrabTurn() {
     }
 }
 
+// Each corner, pulled 10 cm out along the diagonal (the panel following what the carries say, as
+// vr.cpp applies them): 1.1 m wide, the opposite corner where it was (2026-10-10: it stayed centred
+// before, and only the bottom right corner worked by laser).
+void TestGrabResizeCorners() {
+    for (int sx : {1, -1})
+        for (int sy : {-1, 1}) {
+            Rig r;
+            r.panels[0].controls.clear();
+            Panel &P = r.panels[0];
+            const double a = P.height / P.width;
+            double opp0[3];
+            FromSurface(P, -sx * P.width / 2, -sy * P.height / 2, 0, opp0);
+            const double cu = sx * 0.5, cv = sy * 0.28125;
+            for (int k = 0; k < 5; ++k) r.Frame({PinchAt(cu, cv, 0.01)});
+            const double at[3] = {cu, cv, -0.49};
+            r.synth.Pinch(1, true, r.t, at, 1);
+            r.Frame({PinchAt(cu, cv, 0.01)});
+            CHECK(r.Count(Event::GrabStart) == 1 && r.Last(Event::GrabStart)->zone == Zone::Corner &&
+                  r.Last(Event::GrabStart)->sx == sx && r.Last(Event::GrabStart)->sy == sy);
+            for (int k = 1; k <= 30; ++k) {
+                const double f = std::min(1.0, k / 10.0) * 0.1 / std::sqrt(1 + a * a);   // 10 cm along the diagonal
+                r.Frame({PinchAt(cu + sx * f, cv + sy * a * f, 0.01)});
+                if (!r.carries.empty() && r.carries[0].kind == Carry::Resize && r.carries[0].width > 0)
+                    P.pose = r.carries[0].pose, P.width = r.carries[0].width, P.height = P.width * a;
+            }
+            double opp[3];
+            FromSurface(P, -sx * P.width / 2, -sy * P.height / 2, 0, opp);
+            const double moved = std::hypot(std::hypot(opp[0] - opp0[0], opp[1] - opp0[1]), opp[2] - opp0[2]);
+            std::printf("resize by the %s %s corner, 10 cm out: %.3f m wide (1.0 + 0.1 along the diagonal, %.3f), the "
+                        "opposite corner moved %.1f mm\n", sy > 0 ? "top" : "bottom", sx > 0 ? "right" : "left", P.width,
+                        1.0 + 0.1 / std::sqrt(1 + a * a), moved * 1000);
+            NEAR(P.width, 1.0 + 0.1 / std::sqrt(1 + a * a), 0.02);
+            CHECK(moved < 0.005);
+            // the handle there shows held
+            CHECK(r.in.corners().count(0) && r.in.corners().at(0).held && r.in.corners().at(0).sx == sx && r.in.corners().at(0).sy == sy);
+        }
+    {
+        // the same math vr.cpp's laser resize uses, on a curved screen (2 m radius): from the top left
+        // corner, the bottom right stays on the cylinder where it was; clamped at the smallest width
+        Panel P = TestPanel(-2.0);
+        P.curve = 2.0, P.width = 2.0, P.height = 1.125;
+        const double a = P.height / P.width;
+        double opp0[3], opp[3], u, v;
+        FromSurface(P, P.width / 2, -P.height / 2, 0, opp0);
+        const double w = ResizeFromCorner(P.width, a, -1, 1, -1.2, 0.65, 0.15, 12, &u, &v);
+        Panel Q = P;
+        Q.pose = SurfacePose(P.pose, P.curve, u, v), Q.width = w, Q.height = w * a;
+        FromSurface(Q, Q.width / 2, -Q.height / 2, 0, opp);
+        NEAR(std::hypot(std::hypot(opp[0] - opp0[0], opp[1] - opp0[1]), opp[2] - opp0[2]), 0, 0.002);
+        CHECK(w > 2.1 && w < 2.3);
+        const double small = ResizeFromCorner(P.width, a, -1, 1, 0.9, -0.5, 0.15, 12, &u, &v);
+        NEAR(small, 0.15, 1e-9);
+        NEAR(u, 1.0 - 0.075, 1e-9);   // the bottom right corner kept: the centre half the new width left of it
+    }
+    {
+        // a pinch near a corner (not yet in it): the handle there, dimmer
+        Rig r;
+        r.panels[0].controls.clear();
+        r.Frame({PinchAt(-0.5 - 0.05, 0.28125 + 0.05, 0.01)});
+        r.Frame({PinchAt(-0.5 - 0.05, 0.28125 + 0.05, 0.01)});
+        const auto &c = r.in.corners();
+        CHECK(c.count(0) && c.at(0).sx == -1 && c.at(0).sy == 1 && !c.at(0).held && c.at(0).closeness > 0 && c.at(0).closeness < 1);
+    }
+}
+
 void TestGrabResize() {
     Rig r;
     // the bottom right corner, pulled 10 cm out along the diagonal
@@ -1225,7 +1291,8 @@ void TestGrabResize() {
         r.Frame({PinchAt(0.5 + 0.01 * j, -0.28 - 0.005625 * j, 0.01)});
     }
     CHECK(!r.carries.empty() && r.carries[0].kind == Carry::Resize);
-    if (!r.carries.empty()) NEAR(r.carries[0].width, 1.2, 0.03);
+    // (the panel isn't moved here: the corner 10 cm out from where it was, the opposite one kept)
+    if (!r.carries.empty()) NEAR(r.carries[0].width, 1.1, 0.03);
 }
 
 void TestStretchHands() {
@@ -3250,6 +3317,7 @@ int main(int argc, char **argv) {
     TestGrabSmooth();
     TestGrabTurn();
     TestGrabResize();
+    TestGrabResizeCorners();
     TestStretchHands();
     TestHoldThroughLoss();
     TestForgivingZones();

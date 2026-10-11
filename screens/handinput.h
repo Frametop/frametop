@@ -243,6 +243,7 @@ struct Event {
     double x = 0, y = 0;        // buffer pixels (Motion, Press, Release)
     handinput::Control control = Control::None;   // Control: the button poked
     Zone zone = Zone::None;     // GrabStart
+    int sx = 1, sy = -1;        // GrabStart by a corner: which one (+1 right, top)
     bool lost = false;          // Release, GrabEnd: the hand was lost, or input was taken away
 };
 
@@ -251,13 +252,32 @@ struct Carry {
     int panel = -1;
     int sides = 0;              // bit 0: the left hand holds it, bit 1: the right
     enum Kind { Move, Resize, Stretch } kind = Move;
-    Mat pose{};                 // Move, Stretch: where it goes now
+    Mat pose{};                 // Move, Stretch, Resize (not floating): where it goes now
     double width = -1;          // Stretch, Resize (not floating): its width now (m); -1: as it is
     // Resize: the pinch point on the panel (x right, y up, m from its centre), the corner held
-    // (+1 right or top), and the pinch point's offset from that corner at the start
+    // (+1 right or top), and the pinch point's offset from that corner at the start. A screen keeps
+    // its aspect and the opposite corner stays put (ResizeFromCorner); a floating window takes the
+    // pixels (vr.cpp's ResizeFloat, the opposite corner kept likewise).
     double hx = 0, hy = 0, grabX = 0, grabY = 0;
     int sx = 1, sy = -1;
 };
+
+// A corner of a panel a hand is at (the pinch's contact in its corner zone, or near it): the resize
+// handle shows there, brighter the closer (1 in the zone), "held" while the hand resizes from it.
+struct CornerAim {
+    int sx = 1, sy = -1;
+    double closeness = 0;
+    bool held = false;
+};
+
+// Resizing a panel from one corner, the opposite corner staying put, keeping its aspect (height over
+// width): the corner (sx, sy: +1 right, top) wanted at cu, cv (m from the centre, on the surface),
+// the panel `width` wide now. Its new width (clamped to minW..maxW) and its centre's new place (u, v
+// from the old centre, on the surface).
+double ResizeFromCorner(double width, double aspect, int sx, int sy, double cu, double cv, double minW, double maxW,
+                        double *u, double *v);
+// The pose of the point u, v on the panel's surface (turned with a curved one's surface there).
+Mat SurfacePose(const Mat &pose, double curve, double u, double v);
 
 struct Input {
     int64_t nowNs = 0;
@@ -326,6 +346,7 @@ public:
     // (bit k: Control k), the panels a hand is near (their controls show).
     const std::map<int, std::vector<handcut::Glow>> &glows() const { return glows_; }
     const std::map<int, unsigned> &hovered() const { return hovered_; }
+    const std::map<int, CornerAim> &corners() const { return corners_; }
     const std::set<int> &nearPanels() const { return nearPanels_; }
     // The near claim, per side, for the last hands frame (for the helper's "near"): near, the hand's
     // ray stays hidden (with the leave margin and linger, so it doesn't flicker at the zone's edge);
@@ -510,6 +531,7 @@ private:
     bool approaching_ = false;
     std::map<int, std::vector<handcut::Glow>> glows_;
     std::map<int, unsigned> hovered_;
+    std::map<int, CornerAim> corners_;
     std::set<int> nearPanels_;
     uint64_t frame_ = 0;
     bool newFrame_ = false;

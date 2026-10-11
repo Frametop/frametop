@@ -311,6 +311,14 @@ struct Screen {
     vr::TrackedDeviceIndex_t dragDevice = kNone;
     Mat dragRel = Identity();                 // device -> screen, while moving
     double grabX = 0, grabY = 0;              // resize: the grab point relative to the corner
+    // The resize handle (Controls()[3], "<prefix>.resize"): one overlay, at the corner a laser, the gaze
+    // or a hand aims at (UpdateCorner; the bottom right otherwise), brighter the closer the aim, lit
+    // while resizing. Any corner resizes, the opposite one staying put.
+    int cornerX = 1, cornerY = -1;            // +1 right, top
+    float cornerGlow = 0;                     // the aim's closeness, 0..1
+    bool cornerLit = false;                   // its texture lit (resizing)
+    long cornerUntil = 0;                     // aimed at until this tick (then back to the bottom right)
+    int keepX = -1, keepY = 1;                // a floating window's corner that stays put as it changes size
     Mat rollFrom = Identity();                // roll: the pose at the press (pinRel when pinned)
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
     bool hover[7] = {};                       // a laser is on the bar, curve, roll, resize, dock, close, reset control
@@ -402,6 +410,7 @@ handcut::Renderer g_cutter;
 int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
 roomview::Detector g_roomView;   // no cutouts with Room View off
+handinput::HandInput g_handInput;   // near hand input (handinput.h; UpdateHandInput)
 bool g_constructRoomView = true; // camera/enableConstructRoomView
 
 // Visibility (see the top). g_manual is the hide/show switch: in the always mode it hides
@@ -482,6 +491,22 @@ std::vector<uint8_t> CornerTexture(int n) {
             return std::fabs(d - 0.5) < 0.035 || std::fabs(d - 0.75) < 0.035;
         },
         [&](double u, double v) { return r(u, v) > 0.93; });
+}
+
+// The handle while resizing: its arcs blue, like the lit bar.
+std::vector<uint8_t> CornerTextureLit(int n) {
+    std::vector<uint8_t> px = CornerTexture(n);
+    for (size_t i = 0; i < px.size(); i += 4) {
+        const double shade = px[i] / 255.0;   // grey: dark inside, white arcs
+        px[i] = uint8_t(std::lround(38 + (90 - 38) * shade)), px[i + 1] = uint8_t(std::lround(38 + (170 - 38) * shade)),
+        px[i + 2] = uint8_t(std::lround(38 + (255 - 38) * shade));
+        px[i + 3] = uint8_t(std::min(255.0, px[i + 3] * 1.15));
+    }
+    return px;
+}
+const std::vector<uint8_t> &HandleTexture(bool lit) {
+    static const auto normal = CornerTexture(64), glow = CornerTextureLit(64);
+    return lit ? glow : normal;
 }
 
 std::vector<uint8_t> CurveTexture(int n) {
@@ -711,16 +736,21 @@ Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 void ControlUV(const Screen &s, double u[7], double v[7]) {
     const double h = s.heightMetres(), bar = s.chrome, button = s.grip, gap = bar * 0.06;
     const double uu[7] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
-                          // The tab's top left corner is the screen's bottom right corner.
-                          s.metres / 2 + s.grip / 2, -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
+                          // The handle's inner corner is the screen's corner it's at (bottom right:
+                          // its top left corner on the screen's bottom right corner).
+                          s.cornerX * (s.metres / 2 + s.grip / 2), -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
                           -(bar / 2 + gap + button / 2)};
-    for (int k = 0; k < 7; ++k) u[k] = uu[k], v[k] = k == 3 ? -(h / 2 + s.grip / 2) : BarY(s);
+    for (int k = 0; k < 7; ++k) u[k] = uu[k], v[k] = k == 3 ? s.cornerY * (h / 2 + s.grip / 2) : BarY(s);
 }
+Mat RollZ(double rad);
 std::array<Mat, 7> ControlOffsets(const Screen &s) {
     double u[7], v[7];
     ControlUV(s, u, v);
     std::array<Mat, 7> m;
     for (int k = 0; k < 7; ++k) m[k] = OnSurface(s, u[k], v[k], 0.003);
+    // the handle's texture is for the bottom right corner: turned for the others
+    const double turn = s.cornerX > 0 ? (s.cornerY < 0 ? 0 : M_PI / 2) : (s.cornerY < 0 ? -M_PI / 2 : M_PI);
+    if (turn != 0) m[3] = Mul(m[3], RollZ(turn));
     return m;
 }
 
@@ -890,9 +920,12 @@ void ApplyAlpha(const Screen &s) {
                       s.hover[3] || s.drag == Drag::Resize, s.hover[4], s.hover[5], s.hover[6]};
     for (int k = 0; k < 7; ++k) active[k] = active[k] || (s.handHover >> k & 1);
     const auto controls = s.Controls();
-    for (int k = 0; k < 7; ++k)
-        if (controls[k] != vr::k_ulOverlayHandleInvalid)
-            vr::VROverlay()->SetOverlayAlpha(controls[k], s.alpha * s.controls * (active[k] ? 1.f : kChromeIdle));
+    for (int k = 0; k < 7; ++k) {
+        if (controls[k] == vr::k_ulOverlayHandleInvalid) continue;
+        // the resize handle brightens as an aim comes to its corner (UpdateCorner)
+        const float idle = k == 3 ? kChromeIdle + (1 - kChromeIdle) * std::clamp(s.cornerGlow, 0.f, 1.f) : kChromeIdle;
+        vr::VROverlay()->SetOverlayAlpha(controls[k], s.alpha * s.controls * (active[k] ? 1.f : idle));
+    }
 }
 
 void SetVisible(Screen &s, bool visible, float alpha) {
@@ -1029,6 +1062,67 @@ double RayDistance(const Mat &d, const Mat &c) {
 // The controls are invisible until a laser is on one of them (SteamVR's hover event) or
 // passes very close (within `reach`, about 1.5 times a button's size); they stay
 // kControlsLinger ticks after it leaves, and while in use.
+// The resize handle goes to the corner something aims at, and brightens the closer the aim (user,
+// 2026-10-10: Vision Pro-style resize from any corner, for hands, the gaze and lasers): a laser's ray
+// (a controller's, or the pointer helper's for the gaze and the hand ray) landing within the corner
+// zone (a fifth of the screen's height, 5 to 20 cm) of a corner, or a hand's pinch at one
+// (handinput's corners()). Lit while resizing. With no aim for kControlsLinger ticks it goes back
+// to the bottom right.
+// Where a laser meets the screen's surface: u along it (along the arc when curved), v up, metres from
+// its centre, and how far along the laser.
+bool RayOnSurface(const Screen &s, const Mat &p, const Mat &laser, double *u, double *v, double *dist = nullptr);
+
+void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
+    const double W = s.metres, H = s.heightMetres();
+    const double zone = std::clamp(0.2 * std::min(W, H), 0.05, 0.2);
+    int cx = s.cornerX, cy = s.cornerY;
+    double best = 0;
+    bool held = false;
+    if (s.drag == Drag::Resize) {
+        best = 1, held = true;   // stays where it is, lit
+    } else {
+        for (const Mat &d : lasers) {
+            double u, v;
+            if (!RayOnSurface(s, p, d, &u, &v)) continue;
+            for (int x : {1, -1})
+                for (int y : {-1, 1}) {
+                    const double dist = std::hypot(u - x * W / 2, v - y * H / 2);
+                    const double close = 1 - std::clamp((dist - s.grip) / std::max(1e-3, zone - s.grip), 0.0, 1.0);
+                    // (the corner it's at keeps it on a tie, so it doesn't flip between two)
+                    if (close > best + (x == s.cornerX && y == s.cornerY ? -1e-3 : 1e-3)) best = close, cx = x, cy = y;
+                }
+        }
+        const auto &hc = g_handInput.corners();
+        const auto it = hc.find(ScreenIndexOf(s));
+        if (it != hc.end() && it->second.closeness >= best)
+            best = it->second.closeness, cx = it->second.sx, cy = it->second.sy, held = it->second.held;
+    }
+    if (best > 0) {
+        s.cornerUntil = g_tick + kControlsLinger;
+        s.nearUntil = std::max(s.nearUntil, g_tick + kControlsLinger);   // the controls show
+    } else if (g_tick >= s.cornerUntil && !s.hover[3]) {
+        cx = 1, cy = -1;   // back to the bottom right
+    } else {
+        cx = s.cornerX, cy = s.cornerY;   // lingering where it was
+    }
+    // (not away from under a laser that's on it)
+    if ((cx != s.cornerX || cy != s.cornerY) && !s.hover[3]) {
+        s.cornerX = cx, s.cornerY = cy;
+        PlaceChrome(s);
+    }
+    const float glow = float(best);
+    const bool lit = held || s.drag == Drag::Resize;
+    if (lit != s.cornerLit && s.handle != vr::k_ulOverlayHandleInvalid) {
+        s.cornerLit = lit;
+        const auto &px = HandleTexture(lit);
+        vr::VROverlay()->SetOverlayRaw(s.handle, const_cast<uint8_t *>(px.data()), 64, 64, 4);
+    }
+    if (std::fabs(glow - s.cornerGlow) > 0.02f || (glow == 0) != (s.cornerGlow == 0)) {
+        s.cornerGlow = glow;
+        ApplyAlpha(s);
+    }
+}
+
 void UpdateControls() {
     std::vector<Mat> lasers;
     for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
@@ -1048,6 +1142,7 @@ void UpdateControls() {
             const auto controls = s.Controls();
             for (int k = 1; k < 7; ++k)
                 if (controls[k] != vr::k_ulOverlayHandleInvalid) spots.push_back(Mul(p, offsets[k]));
+            UpdateCorner(s, p, lasers);
             const double reach = std::max(s.grip * 1.5, s.chrome * 0.12);
             for (const Mat &d : lasers) {
                 bool close = false;
@@ -1127,10 +1222,6 @@ bool RayOnPlane(const Mat &p, const Mat &d, double *x, double *y) {
     const double rel[3] = {o[0] + dir[0] * t - c[0], o[1] + dir[1] * t - c[1], o[2] + dir[2] * t - c[2]};
     *x = Dot3(rel, ax), *y = Dot3(rel, ay);
     return true;
-}
-bool RayOnScreen(const Screen &s, const Mat &d, double *x, double *y) {
-    Mat p;
-    return ScreenPose(s, &p) && RayOnPlane(p, d, x, y);
 }
 
 // Roll: a rotation about the screen's own front axis (counterclockwise as you see it).
@@ -1217,10 +1308,13 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     s.onWrist = mode == Drag::Move ? WristOnLaser(s, d, p) : kNone;
     LightBar(s, s.pinTarget != kNone);
     if (mode == Drag::Resize) {
+        // from the corner the handle is at; the opposite one stays put
         double hx, hy;
         Mat l;
-        if (LaserPose(dev, &l) && RayOnScreen(s, l, &hx, &hy)) s.grabX = hx - s.metres / 2, s.grabY = hy + s.heightMetres() / 2;
+        if (LaserPose(dev, &l) && RayOnSurface(s, p, l, &hx, &hy))
+            s.grabX = hx - s.cornerX * s.metres / 2, s.grabY = hy - s.cornerY * s.heightMetres() / 2;
         else s.grabX = s.grabY = 0;
+        s.keepX = -s.cornerX, s.keepY = -s.cornerY;
     }
     if (mode == Drag::Roll) {
         s.rollFrom = s.pinned != kNone ? s.pinRel : p;
@@ -1239,6 +1333,7 @@ void EndDrag(Screen &s) {
     s.drag = Drag::None;
     s.dragDevice = kNone;
     s.pinTarget = s.onWrist = kNone;
+    s.keepX = -1, s.keepY = 1;
     LightBar(s, false);
     ApplyAlpha(s);
 }
@@ -1364,14 +1459,33 @@ void UpdateGuides() {
 // hy on the panel, in both directions, and the window gets that many pixels at the same
 // density (ft-floatd resizes it, and the new crop comes back as "float", with the top left
 // corner kept where it is).
-void ResizeFloat(Screen &s, int index, double hx, double hy, double grabX, double grabY) {
+// From any corner (sx, sy: +1 right, top): the opposite one stays put (keepX, keepY: SetFloat moves
+// the panel so).
+void ResizeFloat(Screen &s, int index, double hx, double hy, double grabX, double grabY, int sx = 1, int sy = -1) {
+    s.keepX = -sx, s.keepY = -sy;
     if (s.mpp <= 0 || g_tick - s.resizeSent < 4) return;  // about 20 a second
-    const double left = -s.metres / 2, top = s.heightMetres() / 2;
-    const int w = std::max(320, int(std::lround((hx - grabX - left) / s.mpp)));
-    const int h = std::max(200, int(std::lround((top - (hy - grabY)) / s.mpp)));
+    const int w = std::max(320, int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp)));
+    const int h = std::max(200, int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp)));
     if (w == s.resizeW && h == s.resizeH) return;
     s.resizeW = w, s.resizeH = h, s.resizeSent = g_tick;
     SendFloat("resize " + std::to_string(index + 1) + " " + std::to_string(w) + " " + std::to_string(h));
+}
+
+// A screen (or remote display) resized from the handle's corner to cu, cv (m from its centre, on its
+// surface): its width along the diagonal, the opposite corner where it was.
+void ResizeScreen(Screen &s, double cu, double cv) {
+    Mat p;
+    if (!ScreenPose(s, &p)) return;
+    const double a = s.width > 0 ? double(s.height) / s.width : 9.0 / 16;
+    double u, v;
+    const double w = handinput::ResizeFromCorner(s.metres, a, s.cornerX, s.cornerY, cu, cv, kMinWidth, 12.0, &u, &v);
+    if (std::fabs(w - s.metres) < 1e-5) return;
+    const Mat moved = OnSurface(s, u, v, 0);
+    s.metres = w;
+    vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+    ApplyCurve(s);
+    if (s.pinned != kNone) Pin(s, s.pinned, Mul(s.pinRel, moved));
+    else SetAbsolute(s, Mul(p, moved));
 }
 
 void UpdateDrag(Screen &s, int index) {
@@ -1392,14 +1506,13 @@ void UpdateDrag(Screen &s, int index) {
         return;
     }
     // Resize: the corner follows the ray along the screen's diagonal (so it shrinks and
-    // grows from any direction), keeping where on the handle it was grabbed.
+    // grows from any direction), keeping where on the handle it was grabbed, and the opposite
+    // corner stays put.
     double hx, hy;
-    Mat l;
-    if (!LaserPose(s.dragDevice, &l) || !RayOnScreen(s, l, &hx, &hy)) return;
-    if (s.floating) return ResizeFloat(s, index, hx, hy, s.grabX, s.grabY);
-    const double a = s.width > 0 ? double(s.height) / s.width : 9.0 / 16;
-    const double cx = hx - s.grabX, cy = hy - s.grabY;  // where the corner should be
-    SetWidth(s, 2 * (cx - a * cy) / (1 + a * a));
+    Mat l, p;
+    if (!LaserPose(s.dragDevice, &l) || !ScreenPose(s, &p) || !RayOnSurface(s, p, l, &hx, &hy)) return;
+    if (s.floating) return ResizeFloat(s, index, hx, hy, s.grabX, s.grabY, s.cornerX, s.cornerY);
+    ResizeScreen(s, hx - s.grabX, hy - s.grabY);
 }
 
 // Scroll while moving: push the screen away (up) or pull it closer, along the line from
@@ -1465,7 +1578,7 @@ void DropFloatPanel(Screen &s) {
         if (o != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(o);
     s.overlay = s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton =
         vr::k_ulOverlayHandleInvalid;
-    s.visible = s.controlsUp = s.barLit = false;
+    s.visible = s.controlsUp = s.barLit = s.cornerLit = false;
     s.controls = 0;
     std::fill(std::begin(s.hover), std::end(s.hover), false);
 }
@@ -1481,7 +1594,8 @@ void SetFloat(Screen &s, double mpp, int x, int y, int w, int h, int title) {
     vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
     ApplyCurve(s);
     ApplyCrop(s);
-    const double dx = (s.metres - oldW) / 2, dy = -(s.heightMetres() - oldH) / 2;
+    // the corner keepX, keepY (the top left, or the one opposite a corner being dragged) stays put
+    const double dx = -s.keepX * (s.metres - oldW) / 2, dy = -s.keepY * (s.heightMetres() - oldH) / 2;
     if (!first && (std::fabs(dx) > 1e-6 || std::fabs(dy) > 1e-6)) {
         if (s.pinned != kNone) Pin(s, s.pinned, Mul(s.pinRel, Translation(dx, dy, 0)));
         else SetAbsolute(s, Mul(s.pose, Translation(dx, dy, 0)));
@@ -1830,7 +1944,7 @@ void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handl
 // Where a laser meets a panel's surface, in the panel's u (metres along it from the centre,
 // along the arc when curved) and v (up). OpenVR curves a screen into a cylinder toward its
 // front, centred `curve` metres in front of it (see OnSurface).
-bool RayOnSurface(const Screen &s, const Mat &p, const Mat &laser, double *u, double *v, double *dist = nullptr) {
+bool RayOnSurface(const Screen &s, const Mat &p, const Mat &laser, double *u, double *v, double *dist) {
     const Mat inv = Inverse(p);
     const double o[3] = {inv.m[0][0] * laser.m[0][3] + inv.m[0][1] * laser.m[1][3] + inv.m[0][2] * laser.m[2][3] + inv.m[0][3],
                          inv.m[1][0] * laser.m[0][3] + inv.m[1][1] * laser.m[1][3] + inv.m[1][2] * laser.m[2][3] + inv.m[1][3],
@@ -2023,7 +2137,6 @@ void StopCutting(Screen &s) {
 // show that; else show the client buffer.
 // Floating windows don't get cutouts yet: their panel and popups show crops of the client
 // buffer (texture bounds), which a side-by-side buffer doesn't match.
-handinput::HandInput g_handInput;
 
 void UpdateCutouts() {
     Mat head;
@@ -2413,6 +2526,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 }
                 break;
             case handinput::Event::GrabStart:
+                if (e.zone == handinput::Zone::Tab || e.zone == handinput::Zone::Corner)   // the handle goes to that corner
+                    s.cornerX = e.sx, s.cornerY = e.sy, s.keepX = -e.sx, s.keepY = -e.sy, PlaceChrome(s);
                 StartHandDrag(s, e.side, e.zone);
                 break;
             case handinput::Event::GrabEnd:
@@ -2433,8 +2548,16 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         Screen &s = it->second;
         if (s.drag == Drag::None || !IsHandHolder(s.dragDevice)) continue;   // a laser took it, or it was let go
         if (c.kind == handinput::Carry::Resize) {
-            if (s.floating) ResizeFloat(s, c.panel, c.hx, c.hy, c.grabX, c.grabY);
-            else if (c.width > 0) SetWidth(s, c.width);
+            if (s.floating) {
+                ResizeFloat(s, c.panel, c.hx, c.hy, c.grabX, c.grabY, c.sx, c.sy);
+            } else if (c.width > 0) {   // the width, and the centre so the opposite corner stays put
+                s.metres = std::clamp(c.width, kMinWidth, 12.0);
+                vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+                ApplyCurve(s);
+                Mat d;
+                if (s.pinned != kNone && DevicePose(s.pinned, &d)) Pin(s, s.pinned, Mul(Inverse(d), c.pose));
+                else if (s.pinned == kNone) SetAbsolute(s, c.pose);
+            }
             continue;
         }
         if (c.width > 0 && !s.floating) {
@@ -2698,10 +2821,13 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
     static const auto corner = CornerTexture(64);
     static const auto curve = CurveTexture(64);
     static const auto roll = RollTexture(64);
+    // (each told to the pointer helper, as the panel is: its ray and the gaze find them at once)
     auto chrome = [&](const char *part, const char *what, const std::vector<uint8_t> &px, int w, int h) {
         std::snprintf(key, sizeof key, "%s.%s", prefix, part);
         std::snprintf(name, sizeof name, "%s: %s", label, what);
-        return MakeChrome(key, name, px, w, h);
+        const vr::VROverlayHandle_t o = MakeChrome(key, name, px, w, h);
+        if (o != vr::k_ulOverlayHandleInvalid) AnnounceOverlay(key);
+        return o;
     };
     s.bar = chrome("bar", "move", BarTexture(false), 256, 24);
     vr::VROverlay()->SetOverlayFlag(s.bar, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);

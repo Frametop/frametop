@@ -254,7 +254,6 @@ Zone GrabZone(const Panel &p, const Hit &h, const Params &k, int *sx, int *sy, d
             c.push_back({Zone::Tab, std::max(std::hypot(h.u - s.u, h.v - s.v) - k.cornerReach, depth), 1, -1});
     for (int cx : {1, -1})
         for (int cy : {-1, 1}) {
-            if (p.floating && !(cx == 1 && cy == -1)) continue;   // a window resizes from its bottom right only
             c.push_back({Zone::Corner, std::max(std::hypot(h.u - cx * W, h.v - cy * H) - k.cornerReach, depth), cx, cy});
         }
     for (const Spot &s : p.controls)
@@ -316,6 +315,29 @@ Mat CarryPose(const Mat &start, const double startHead[3], const double grabLoca
     for (int i = 0; i < 3; ++i)
         r.m[i][3] = float(pinch[i] - (r.m[i][0] * grabLocal[0] + r.m[i][1] * grabLocal[1] + r.m[i][2] * grabLocal[2]));
     return r;
+}
+
+double ResizeFromCorner(double width, double aspect, int sx, int sy, double cu, double cv, double minW, double maxW,
+                        double *u, double *v) {
+    // the opposite corner, and the wanted corner projected on the diagonal from it
+    const double ou = -sx * width / 2, ov = -sy * aspect * width / 2;
+    const double w = std::clamp((sx * (cu - ou) + sy * aspect * (cv - ov)) / (1 + aspect * aspect), minW, maxW);
+    *u = ou + sx * w / 2, *v = ov + sy * aspect * w / 2;
+    return w;
+}
+
+Mat SurfacePose(const Mat &pose, double curve, double u, double v) {
+    double l[3][4] = {{1, 0, 0, u}, {0, 1, 0, v}, {0, 0, 1, 0}};
+    if (curve > 0) {   // vr.cpp's OnSurface
+        const double a = u / curve, c = std::cos(a), sn = std::sin(a);
+        l[0][0] = c, l[0][2] = -sn, l[2][0] = sn, l[2][2] = c;
+        l[0][3] = curve * sn, l[2][3] = curve - curve * c;
+    }
+    Mat out{};
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 4; ++j)
+            out.m[i][j] = float(pose.m[i][0] * l[0][j] + pose.m[i][1] * l[1][j] + pose.m[i][2] * l[2][j] + (j == 3 ? pose.m[i][3] : 0));
+    return out;
 }
 
 Mat StretchPose(const Mat &start, double width0, const double l0[3], const double r0[3], const double l[3],
@@ -490,7 +512,7 @@ void HandInput::EndAttempt(int s) {
 
 void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
     g_now = in.nowNs;
-    events_.clear(), carries_.clear(), glows_.clear(), hovered_.clear(), nearPanels_.clear(), logs_.clear();
+    events_.clear(), carries_.clear(), glows_.clear(), hovered_.clear(), corners_.clear(), nearPanels_.clear(), logs_.clear();
     const handcut::Hands &H = *in.hands;
     newFrame_ = H.frame() != frame_;
     frame_ = H.frame();
@@ -1136,7 +1158,7 @@ void HandInput::StartGrab(int s, const Input &in, const Panel &P, Zone zone, int
     const Hit n = Locate(P, pinch);
     sd.grabX = n.u - sx * P.width / 2, sd.grabY = n.v - sy * P.height / 2;
     Event e;
-    e.type = Event::GrabStart, e.side = s, e.panel = P.index, e.zone = zone;
+    e.type = Event::GrabStart, e.side = s, e.panel = P.index, e.zone = zone, e.sx = sx, e.sy = sy;
     events_.push_back(e);
     ++stats.grabs;
     const bool resize = zone == Zone::Tab || zone == Zone::Corner;
@@ -1298,9 +1320,12 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
             const Hit n = Locate(*P, p);
             c.hx = n.u, c.hy = n.v, c.grabX = sd.grabX, c.grabY = sd.grabY, c.sx = sd.sx, c.sy = sd.sy;
             if (!P->floating) {
-                // the corner follows the pinch along the diagonal (vr.cpp's laser resize)
-                const double a = P->height / std::max(1e-6, P->width), cx = n.u - sd.grabX, cy = n.v - sd.grabY;
-                c.width = std::clamp(2 * (sd.sx * cx + sd.sy * a * cy) / (1 + a * a), p_.minWidth, p_.maxWidth);
+                // the corner follows the pinch along the diagonal, the opposite one staying put (vr.cpp's
+                // laser resize likewise)
+                double u, v;
+                const double a = P->height / std::max(1e-6, P->width);
+                c.width = ResizeFromCorner(P->width, a, sd.sx, sd.sy, n.u - sd.grabX, n.v - sd.grabY, p_.minWidth, p_.maxWidth, &u, &v);
+                c.pose = SurfacePose(P->pose, P->curve, u, v);
             }
         } else if (sd.zone == Zone::Card) {
             // rigidly with the hand: its turn in the room since the grab, about the knuckles
@@ -1372,6 +1397,7 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
             if (sd.byGrip) h->Palm(pt);
             else Copy3(h->contact, pt);
             const Hit q = Locate(*P, pt);
+            if (sd.zone == Zone::Corner || sd.zone == Zone::Tab) corners_[P->index] = {sd.sx, sd.sy, 1.0, true};
             if (sd.zone == Zone::Corner) glow(sd.sx * P->width / 2, sd.sy * P->height / 2, 0.014, 0.9, false, col);
             else glow(q.u, q.v, sd.byGrip ? 0.02 : 0.012, 0.9, false, col);
             if (sd.zone == Zone::Bar) hovered_[P->index] |= 1u << int(Control::Bar);
@@ -1391,6 +1417,12 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
         if (z == Zone::Bar) hovered_[P->index] |= 1u << int(Control::Bar);
         if (z == Zone::Tab) hovered_[P->index] |= 1u << int(Control::Tab);
         const double alpha = 0.35 + 0.55 * (1 - std::clamp(excess / p_.glowReach, 0.0, 1.0));
+        if (z == Zone::Corner || z == Zone::Tab) {   // the resize handle there, brighter the closer
+            const double close = 1 - std::clamp(excess / p_.glowReach, 0.0, 1.0);
+            auto it = corners_.find(P->index);
+            if (it == corners_.end() || (!it->second.held && it->second.closeness < close))
+                corners_[P->index] = {z == Zone::Tab ? 1 : sx, z == Zone::Tab ? -1 : sy, close, false};
+        }
         if (z == Zone::Corner) glow(sx * P->width / 2, sy * P->height / 2, 0.012 + 0.008 * strength, alpha, true, kAmber);
         else if (z == Zone::Edge || z == Zone::Title) glow(q.u, q.v, 0.010 + 0.008 * strength, alpha, true, kBlue);
     }

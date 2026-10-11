@@ -2982,7 +2982,7 @@ int main() {
             const char *why = !active ? "the pointer went"
                             : handsOn && tnow - handOkAt > std::chrono::milliseconds(500) ? "the gestures file can't be read"
                             : !handsOn ? "hand input turned off"
-                            : nowNs - handPublished > 1'500'000'000ull ? "hand tracking stopped (nothing new for 1.5 s)"
+                            : hin::AgeNs(nowNs, handPublished) > 1'500'000'000ull ? "hand tracking stopped (nothing new for 1.5 s)"
                             : nullptr;
             if (why && (hold.src == Src::Hand || hold.src == Src::Ray)) endGesture(true, why);
             if (why) chordEnds(true, why);

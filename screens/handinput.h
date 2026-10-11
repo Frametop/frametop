@@ -280,6 +280,9 @@ struct Params {
     // stays turned; the next grab keeps that turn. HANDS_GRAB_ROTATE, HANDS_GRAB_ROTATE_DEADZONE.
     bool grabRotate = true;
     double rotDeadzone = 5, rotMinCutoff = 1.0, rotBeta = 0.05, rollSnap = 2.5;
+    // ...with `gate`, the turn's smoothing at most rotMaxCutoff Hz however fast the hand turns: a
+    // flip the gate takes (gateFrames frames in a row of it) is followed over about 40 ms, not at once
+    double rotMaxCutoff = 4;
     // Throws (user, 2026-10-10). Both send the panel throwDistance from the eyes, facing them, over
     // throwMs (ease-out); "grab that" brings it back.
     // The flick (HANDS_FLICK): a quick outward flick of an open hand at a panel. The palm within

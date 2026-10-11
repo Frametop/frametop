@@ -1444,7 +1444,7 @@ void HandInput::SampleTurn(int s, const Hand &h, const Input &in, double w) {
     Side &sd = side_[s];
     fhsmooth::V3 along, across;
     HandAxes(h, &along, &across);
-    const fhsmooth::Params k{p_.rotMinCutoff * w, p_.rotBeta * w, 1.0};
+    const fhsmooth::Params k{p_.rotMinCutoff * w, p_.rotBeta * w, 1.0, p_.gate ? p_.rotMaxCutoff : 0.0};
     sd.along.Set(k), sd.across.Set(k);
     const double tc = h.captureNs / 1e9, now = in.nowNs / 1e9;
     sd.along.Sample(along, tc, now), sd.across.Sample(across, tc, now);

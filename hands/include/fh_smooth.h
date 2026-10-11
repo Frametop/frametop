@@ -60,7 +60,12 @@ struct Params {
     double minCutoff = 1;  // Hz, still
     double beta = 0;       // Hz more per unit of speed (per m/s for points, per deg/s for directions)
     double dCutoff = 1;    // Hz: the speed's own low-pass
+    double maxCutoff = 0;  // Hz: at most this (0: no limit), however fast it moves
 };
+inline double CutoffAt(const Params &p, double speed) {
+    const double c = p.minCutoff + p.beta * speed;
+    return p.maxCutoff > 0 ? std::min(c, p.maxCutoff) : c;
+}
 
 namespace detail {
 // The discrete low-pass's weight for a step dt at this cutoff (the derivative's, as One Euro's).
@@ -80,7 +85,7 @@ public:
     // New settings (a held drag's precision, say): the cutoff changes from now, the output doesn't jump.
     void Set(const Params &p) {
         p_ = p;
-        cutoff_ = p_.minCutoff + p_.beta * speed_;
+        cutoff_ = CutoffAt(p_, speed_);
     }
     const Params &Get() const { return p_; }
     void Reset() { init_ = false; }
@@ -111,7 +116,7 @@ public:
         Input(now, from_);  // the slide starts where the input is now
         std::copy(v, v + N, r_);
         start_ = now, slide_ = std::clamp(dt, 0.0, kMaxSlide);
-        cutoff_ = p_.minCutoff + p_.beta * speed_;
+        cutoff_ = CutoffAt(p_, speed_);
     }
     // The output at now (moves the filter's timeline there; a time before it reads the output as it is).
     const double *At(double now) {
@@ -123,7 +128,7 @@ public:
     void Seed(const double rate[N]) {
         double s2 = 0;
         for (int i = 0; i < N; ++i) d_[i] = rate[i], s2 += rate[i] * rate[i];
-        speed_ = std::sqrt(s2), cutoff_ = p_.minCutoff + p_.beta * speed_;
+        speed_ = std::sqrt(s2), cutoff_ = CutoffAt(p_, speed_);
     }
     const double *Last() const { return x_; }   // the output where the timeline stands
     const double *Raw() const { return r_; }    // the newest sample
@@ -201,7 +206,7 @@ public:
     explicit Direction(const Params &p = {}) : p_(p) {}
     void Set(const Params &p) {
         p_ = p;
-        cutoff_ = p_.minCutoff + p_.beta * speed_;
+        cutoff_ = CutoffAt(p_, speed_);
     }
     const Params &Get() const { return p_; }
     void Reset() { init_ = false; }
@@ -227,7 +232,7 @@ public:
         from_ = Input(now);
         r_ = v;
         start_ = now, slide_ = std::clamp(dt, 0.0, kMaxSlide);
-        cutoff_ = p_.minCutoff + p_.beta * speed_;
+        cutoff_ = CutoffAt(p_, speed_);
     }
     V3 At(double now) {
         Advance(now);

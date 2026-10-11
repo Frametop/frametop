@@ -1,7 +1,14 @@
 // "Grab that" (user, 2026-10-10): hold an open hand out toward a window, palm to it, then pull
 // the arm back while making a fist, and the window comes to arm's reach (about 45 cm in front of
 // the eyes, at the hand's height, facing you) so the hands can work on it. The same gesture at a
-// window that came that way sends it back where it was.
+// window that came that way and is still within arm's reach sends it back where it was; at one
+// that's within arm's reach without having come that way, it centres it at arm's reach (Decide).
+// One at a time: a window that came and is still where it came goes back as another one comes.
+//
+// With a window that near, the open hand held out to it is in its touch zone (handinput.h): an
+// open hand's fingers pointing up don't poke it, and its fist waits on this gesture before it
+// grabs the window (handinput's Params::fistGrab): the fist pulled back and turned over is this,
+// a fist made at the window without that is a fist grab.
 //
 // The gesture, from the user's own example (frame-hands captures/flags/flag-20261010-150115, the
 // right hand, done twice; head frame at capture time):
@@ -79,6 +86,8 @@ struct Params {
     // A screen wider than maxWidth comes at that width (0: as it is); floating windows keep their
     // size (ft-floatd owns their density). HANDS_GRAB_THAT_DISTANCE, HANDS_GRAB_THAT_WIDTH.
     double distance = 0.45, below = 0.45, above = 0.10, maxWidth = 0.6;
+    // Within arm's reach: its centre within distance + reachSlack of the eyes (Decide).
+    double reachSlack = 0.35;
     double animMs = 250;
     // Which window: the one the line from the eyes through the open palm meets (within aimMargin
     // of its edges, the nearest), else the one nearest the head's forward direction within headCone.
@@ -152,6 +161,12 @@ bool RayHit(const Target &p, const double from[3], const double dir[3], double *
 int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k);
 // Where a panel comes to (see Params::distance), facing the eyes.
 Mat Arrival(const Fire &f, const Params &k);
+// What the gesture does to the panel it picked: it came by the gesture (`came`) and is within arm's
+// reach now (Params::reachSlack): Back where it was; within arm's reach, not come by it: Centre it
+// at arm's reach (and remember where it was, so the gesture again sends it back); else Bring it.
+enum class Outcome { Bring, Back, Centre };
+Outcome Decide(bool came, const Mat &now, const Mat &head, const Params &k);
+const char *OutcomeName(Outcome o);
 // From a to b by k (0..1): the position along the line, the turn along the shortest arc.
 Mat Blend(const Mat &a, const Mat &b, double k);
 // Slow in, slow out (0..1).

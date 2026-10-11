@@ -268,6 +268,20 @@ Mat Arrival(const Fire &f, const Params &k) {
     return Facing(c, eye);
 }
 
+Outcome Decide(bool came, const Mat &now, const Mat &head, const Params &k) {
+    const double d = std::hypot(now.m[0][3] - head.m[0][3], now.m[1][3] - head.m[1][3], now.m[2][3] - head.m[2][3]);
+    const bool near = d <= k.distance + k.reachSlack;
+    return near ? (came ? Outcome::Back : Outcome::Centre) : Outcome::Bring;
+}
+
+const char *OutcomeName(Outcome o) {
+    switch (o) {
+        case Outcome::Back: return "goes back";
+        case Outcome::Centre: return "is near already: centred at arm's reach";
+        default: return "comes to arm's reach";
+    }
+}
+
 Mat Blend(const Mat &a, const Mat &b, double k) {
     Quat qa = ToQuat(a), qb = ToQuat(b);
     double c = qa.w * qb.w + qa.x * qb.x + qa.y * qb.y + qa.z * qb.z;

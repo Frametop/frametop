@@ -2229,6 +2229,12 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width) {
     g_grabMoves[index] = {p, to, p, s.metres, s.floating ? s.metres : width, NowMs()};
 }
 
+// The gesture fired (user, 2026-10-10: consistent with a display already near you): at a panel that
+// came by it and is still within arm's reach (where it came, or moved about there since), it goes
+// back where it was; at another panel within arm's reach, it comes to the middle of arm's reach
+// (and the gesture again sends it back there); at one farther away, it comes to arm's reach. One at
+// a time: a panel that came before and is still where it came goes back as another comes, so they
+// don't stack up in the same spot (three remote displays did, 2026-10-10).
 void GrabThat(const grabthat::Fire &f) {
     std::vector<grabthat::Target> targets;
     for (auto &[i, s] : g_screens) {
@@ -2246,16 +2252,31 @@ void GrabThat(const grabthat::Fire &f) {
     Mat now;
     if (!ScreenPose(s, &now)) return;
     const auto b = g_brought.find(i);
-    if (b != g_brought.end() && Apart(now, b->second.to) < 0.15) {   // still where it came: back
+    const grabthat::Outcome what = grabthat::Decide(b != g_brought.end(), now, f.head, k);
+    if (what == grabthat::Outcome::Back) {   // it came by the gesture: back
         std::printf("grab that (%s hand): screen %d goes back\n", hand, i + 1);
         StartGrabMove(i, s, b->second.from, b->second.width);
         g_brought.erase(b);
         return;
     }
+    if (b != g_brought.end()) g_brought.erase(b);   // came once, since taken far away: it comes afresh
+    // the one that came before, still where it came: back, to make room
+    for (auto it = g_brought.begin(); it != g_brought.end();) {
+        const auto o = g_screens.find(it->first);
+        Mat op;
+        if (o == g_screens.end() || o->second.drag != Drag::None || o->second.pinned != kNone || !ScreenPose(o->second, &op) ||
+            Apart(op, it->second.to) >= 0.15) {
+            ++it;
+            continue;
+        }
+        std::printf("grab that (%s hand): screen %d goes back to make room\n", hand, it->first + 1);
+        StartGrabMove(it->first, o->second, it->second.from, it->second.width);
+        it = g_brought.erase(it);
+    }
     const Mat to = grabthat::Arrival(f, k);
     const double width = !s.floating && k.maxWidth > 0 ? std::min(s.metres, k.maxWidth) : s.metres;
     g_brought[i] = {now, to, s.metres};
-    std::printf("grab that (%s hand): screen %d comes to arm's reach%s\n", hand, i + 1,
+    std::printf("grab that (%s hand): screen %d %s%s\n", hand, i + 1, grabthat::OutcomeName(what),
                 width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "");
     StartGrabMove(i, s, to, width);
 }

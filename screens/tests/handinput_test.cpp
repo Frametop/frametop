@@ -2632,6 +2632,17 @@ void TestGrabThatPlace() {
     h = grabthat::Blend(a, b, 0.5);
     NEAR(h.m[0][3], 0.5, 1e-6), NEAR(std::atan2(h.m[0][2], h.m[2][2]), M_PI / 4, 1e-5);
     NEAR(grabthat::Ease(0.5), 0.5, 1e-9), NEAR(grabthat::Ease(0), 0, 1e-9), NEAR(grabthat::Ease(2), 1, 1e-9);
+    // at a panel near you: back if it came by the gesture (wherever about arm's reach it is now),
+    // else centred at arm's reach; a far one comes (2026-10-10: it fired 3 times at near displays and
+    // never sent one back)
+    using grabthat::Outcome;
+    const Mat head = At(0, 1.6, 0);
+    CHECK(grabthat::Decide(true, At(0, 1.45, -0.45), head, k) == Outcome::Back);
+    CHECK(grabthat::Decide(true, At(0.3, 1.3, -0.5), head, k) == Outcome::Back);   // moved about since
+    CHECK(grabthat::Decide(false, At(0, 1.45, -0.45), head, k) == Outcome::Centre);
+    CHECK(grabthat::Decide(false, At(0.2, 1.5, -0.6), head, k) == Outcome::Centre);
+    CHECK(grabthat::Decide(true, At(0, 1.6, -2), head, k) == Outcome::Bring);       // taken far away since
+    CHECK(grabthat::Decide(false, At(0, 1.6, -2), head, k) == Outcome::Bring);
 }
 
 // --- the user's flags (frame-hands captures/flags/<flag>: sets.jsonl, hmd.jsonl, manifest.json)

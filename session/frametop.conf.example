@@ -99,8 +99,10 @@ HANDS_GRAB_THAT_MARGIN_DEG=6  # ... or, meeting none, the panel it passes neares
 HANDS_GRAB_THAT_FACING=55  # ... the palm facing along that line within this many degrees while it's held out (0 = any way)
 HANDS_GRAB_THAT_VIEW_DEG=75 # ... a screen that would span more of the view than this (degrees) at arm's reach comes farther out (at most 1.5 m) so it doesn't
 HANDS_SWEEP=1              # the lazy susan by hand: an open hand on its edge (palm or back leading, not flat), off the screens, swept 25 cm sideways within 0.5 s: the next screen on that side, one per stroke | 0 = off
-SCREEN_SPIN_BRING=1        # the lazy susan (the sweep, Meta+Alt+Tab) brings the next screen in front of you and gives it the typing; it goes home on the next stroke, when pushed, flicked or thrown away, or when you turn away from it; moved by hand or laser it stays | 0 = the screens turn around you instead
-SCREEN_SPIN_VIEW_DEG=60    # ... a brought screen comes as far out (0.6 to 1.5 m) as it spans at most this much of the view (wider ones narrow at 1.5 m)
+SCREEN_SPIN_BRING=1        # the lazy susan (the sweep, Meta+Alt+Tab) brings the next screen round (by where each lives) in front of you and gives it the typing; it goes home on the next stroke, when pushed, flicked or thrown away, or when you turn away from it; moved by hand or laser it stays | 0 = the screens turn around you instead
+SCREEN_SPIN_DISTANCE=1.0   # ... a brought screen comes this far ahead (m)
+SCREEN_SPIN_PPD=26         # ... as big as its text needs to read: its logical pixels (KWin's scale undone) at this many per degree of view
+SCREEN_SPIN_MAX_DEG=100    # ... at most this wide (degrees; wider than 60 it curves round you) and SCREEN_SPIN_MAX_TALL_DEG (55) tall, its shape kept
 HANDS_NEAR=1               # Frametop panels (direct touch): poke to click, pinch the border to move or resize, a fist to carry, gaze or not (1 = with POINTER_HANDS=1, when the pointer helper says a hand is bare | on = the same without POINTER_HANDS: the helper runs only the handoff for it | 0 = off | force = always, for testing)
 HANDS_CUTOUTS=0            # hands: 1 = also cut a round hole per hand in Frametop's panels, so Room View shows the real hand through them (off: ft-handview draws the hands)
 HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face, held still, away from the panels, and look at it, and a ring shows above the palm; a plain thumb-index pinch with that hand opens the Steam menu (or closes the dashboard). 0 = off
@@ -127,6 +129,9 @@ POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out push
 POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle pinch moved up or down (-1 turns the direction round)
 POINTER_RAY_RELEASE=2      # hand ray: seconds after the ray goes before the pointer it woke lets go of the laser
 POINTER_RAY_GRACE=0.5      # hand ray: seconds a hand keeps the laser after its ray drops (the other hand's ray takes it after this, or at once by pinching or raising)
+POINTER_RAY_READY=6        # hand ray: shows only with the thumb and index tips within this many cm (gone past POINTER_RAY_READY_HIDE, 10): a laser for pinching | 0 = whenever the hand points
+POINTER_RAY_FIST_CURL=1.1  # hand ray: a fist (the index and the other fingers curled under this, tip-to-wrist over knuckle-to-wrist) drops the laser, and a pinch made closing into one doesn't click | 0 = off
+POINTER_PINCH_NO_RAY=0     # hands, gaze off: 1 = a pinch or fist with no laser up presses where the pointer is and drags it (air mouse; most accidental clicks of the 2026-10-11 test) | 0 = it only wakes the pointer
 POINTER_RAY_SMOOTH_MINCUTOFF=0.8  # hand ray: smoothing with the hand still (Hz; lower = steadier, laggier)
 POINTER_RAY_SMOOTH_BETA=0.06  # hand ray: ... and how much it lets up as the hand turns (Hz per deg/s; higher = keeps up better)
 POINTER_RAY_SMOOTH_HOLD=0.5 # hand ray: the still smoothing while a pinch is held (a drag's precision; Hz)

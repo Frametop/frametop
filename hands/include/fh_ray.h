@@ -70,6 +70,13 @@
 //   not near    not near a panel (ft-screens' near      near: at once (near wins)
 //               claim, or the fingertip at an overlay)
 //   not a fist  no grip down                            a grip down
+//   ready       the thumb and index tips within         readyHide (0.10 m) apart: the laser is
+//               readyShow (0.06 m) (user, 2026-10-11:   for pinching, not a hand held up (0: off;
+//               "the aiming laser only activates when   frames without the gap pass)
+//               your fingers get within a distance")
+//   open        not a fist: HandFrame::curl (the more   fistCurl - 0.05: a hand closing into a
+//               open of the index and the other three   fist drops its laser, so the fist's
+//               fingers) at least fistCurl (1.1)        thumb-to-index touch isn't a click
 // While a ray pinch is held (Hold), the ray stays up whatever the tests say, until hideFor after
 // the release. A pinch may also bring a ray up (ShowForPinch): one that hid within a moment (the
 // pointer helper's grace; not one hidden for "off", "near" or a reset), or one whose show tests
@@ -140,6 +147,8 @@ struct Params {
     double forearmShow = -35, forearmHide = -50, elbowConfMin = 0.5;
     double pitchMin = -45, pitchMax = 60, pitchMinHide = -60, pitchMaxHide = 75;
     double yawShow = 70, yawHide = 80;
+    double readyShow = 0.06, readyHide = 0.10;   // the thumb and index tips apart (0: no "ready" test)
+    double fistCurl = 1.1;                       // HandFrame::curl under this: a fist (0: no "open" test)
     // filter (see the top)
     double minCutoff = 0.8, beta = 0.06, dCutoff = 1.0, originMinCutoff = 1.5, originBeta = 0.5;
     double holdMinCutoff = 0.5;
@@ -267,7 +276,26 @@ struct HandFrame {
     double elbowConf = 0;    // 0: the arm model's guess
     bool grip = false;       // a grip (closed hand) is down
     bool near = false;       // near a panel (see "not near" at the top)
+    double gap = -1;         // the thumb and index tips apart (m); < 0 unknown (the "ready" test passes)
+    double curl = -1;        // how open the hand is (FistCurl): about 1.9 open, under 1.1 a fist; < 0 unknown
 };
+
+// HandFrame::curl from MediaPipe's 21 landmarks (any 3D type with operator-, and len its length): a
+// finger's tip-to-wrist distance over its knuckle's; the larger of the index's and the mean of the
+// middle, ring and little's. A fist has both low; a pinch with the other fingers curled keeps the index
+// out (the flags of 2026-10-09..11, 47k hands: the other three alone read under 1.25 in a fifth of the
+// pinches with the index out; both under 1.1 in 70% of the frames with the index curled, a fist).
+template <class P, class L> double FistCurl(const P *pts, L len) {
+    double sum = 0;
+    for (int tip : {12, 16, 20}) {
+        const double k = len(pts[tip - 3] - pts[0]);
+        if (k < 1e-4) return -1;
+        sum += len(pts[tip] - pts[0]) / k;
+    }
+    const double k = len(pts[5] - pts[0]);
+    if (k < 1e-4) return -1;
+    return std::max(sum / 3, len(pts[8] - pts[0]) / k);
+}
 
 // What each test said for one frame (degrees and metres, for logs and the offline evaluation).
 struct Tests {
@@ -300,6 +328,8 @@ inline Tests Evaluate(const Params &p, const Body &body, const HandFrame &f, con
     test(r.pitch >= p.pitchMin && r.pitch <= p.pitchMax, r.pitch >= p.pitchMinHide && r.pitch <= p.pitchMaxHide, "aim");
     test(r.yawOff <= p.yawShow, r.yawOff <= p.yawHide, "yaw");
     test(!f.grip, !f.grip, "grip");
+    if (p.readyShow > 0 && f.gap >= 0) test(f.gap <= p.readyShow, f.gap <= std::max(p.readyShow, p.readyHide), "ready");
+    if (p.fistCurl > 0 && f.curl >= 0) test(f.curl >= p.fistCurl, f.curl >= p.fistCurl - 0.05, "fist");
     r.show = show, r.keep = keep;
     return r;
 }

@@ -244,6 +244,8 @@
 //   In gaze mode a pinch clicks where you looked, and held and moved, its hand nudges the pointer
 // first (see "Gaze pinch" below). A pinch ended by losing the hand (or by a grip taking over)
 // doesn't click.
+//   Without gaze mode and with no ray up, a pinch or a grip does nothing but wake the pointer, unless
+// POINTER_PINCH_NO_RAY=1 (off since 2026-10-11: these were most accidental clicks). With it on:
 //   Without gaze mode, a pinch is a real press, like the mouse's button: pressed when it closes
 // and released when it opens, and held, its hand drags the pointer: past POINTER_PINCH_DEADZONE
 // (1.5 deg of hand movement, seen from the eye; a tap's jitter and the pinch point shifting as the
@@ -918,6 +920,12 @@ int main() {
     // HANDS_NEAR=on: ft-screens' direct touch without POINTER_HANDS, so the handoff runs and its
     // "hands" word goes out for it (handsTrack) while the pointer takes no gestures (see "Hands").
     bool gazePinchOn = true, nearOn = false, handsTrack = false;
+    // POINTER_PINCH_NO_RAY (0): without gaze mode, a pinch or a fist with no laser up presses where the
+    // pointer is and drags it (the air mouse; "Hands" at the top). Off since the user's 2026-10-11 test:
+    // most accidental clicks were these ("no ray up: a press where the pointer is", a dozen in 2 minutes,
+    // on a remote display the pointer was last on); a pinch with no laser only wakes the pointer.
+    bool pinchNoRay = false;
+    double handCurl[2] = {-1, -1};   // each ray side's hand, newest frame: fhray::HandFrame::curl (FistCurl)
     double pinchGain = 0.5, pinchDeadzone = 1.5, gripGain = 1.0, handBelow = 0.35;
     // Typing (see the top): POINTER_PINCH_TYPING, POINTER_TYPING_RAISE, POINTER_TYPING_BELOW,
     // POINTER_TYPING_POSTURE, POINTER_TYPING_RECENT.
@@ -973,6 +981,7 @@ int main() {
         if (wantGaze != gazeConf) gazeOn = gazeConf = wantGaze;
         handsOn = ConfDouble(conf, "POINTER_HANDS", 0) != 0;
         gazePinchOn = ConfDouble(conf, "POINTER_GAZE_PINCH", 1) != 0;
+        pinchNoRay = ConfDouble(conf, "POINTER_PINCH_NO_RAY", 0) != 0;
         const auto hn = conf.find("HANDS_NEAR");
         nearOn = hn != conf.end() && hn->second == "on";
         handsTrack = handsOn || nearOn;
@@ -1000,6 +1009,10 @@ int main() {
         rayParams.handPitch = std::clamp(ConfDouble(conf, "POINTER_RAY_HAND_PITCH", -30), -90.0, 90.0);
         rayParams.handYaw = std::clamp(ConfDouble(conf, "POINTER_RAY_HAND_YAW", 8), -90.0, 90.0);
         rayParams.pinchAnchor = ConfDouble(conf, "POINTER_RAY_ANCHOR", 0) != 0;
+        // the laser for pinching: up only with the thumb and index this close (cm; 0: any), and not in a fist
+        rayParams.readyShow = std::clamp(ConfDouble(conf, "POINTER_RAY_READY", 6), 0.0, 30.0) / 100;
+        rayParams.readyHide = rayParams.readyShow > 0 ? std::max(rayParams.readyShow, std::clamp(ConfDouble(conf, "POINTER_RAY_READY_HIDE", 10), 0.0, 40.0) / 100) : 0;
+        rayParams.fistCurl = std::clamp(ConfDouble(conf, "POINTER_RAY_FIST_CURL", 1.1), 0.0, 2.0);
         rayParamsNew = true;
         rayTap = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP", 0.3), 0.0, 2.0);
         rayTapDeadzone = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP_DEADZONE", 6.0), 0.0, 30.0);
@@ -2284,6 +2297,8 @@ int main() {
                     f.middle = fv(h->pts[9]), f.ring = fv(h->pts[13]), f.little = fv(h->pts[17]), f.palm = true;
                     f.elbow = fv(h->elbow), f.elbowConf = h->elbowConf;
                     f.grip = gripDown[s];
+                    f.gap = h->pinchD[0] >= 0 ? h->pinchD[0] : Length(h->pts[4] - h->pts[8]);
+                    f.curl = handCurl[s] = fhray::FistCurl(h->pts, [](Vec3 v) { return Length(v); });
                     // near: ft-screens says so (a fresh report), or the fingertip is at an overlay: a cast
                     // from 20 cm behind the index tip along the finger meets one within 25 cm (the tip
                     // within 5 cm of it). Only while the ray could show, so it costs nothing otherwise.
@@ -2769,6 +2784,12 @@ int main() {
             ray = ray && (kind == 1 ? rays[rs].Shown() : canRay(rs));
             if (chordable(s, kind)) {
                 beginGazePinch(s, kind, g);  // the chord, ray or not (see "Gaze pinch" at the top)
+            } else if (ray && kind != 1 && rayParams.fistCurl > 0 && handCurl[rs] >= 0 && handCurl[rs] < rayParams.fistCurl) {
+                // the hand closing into a fist passes a thumb-to-index touch: not a click
+                char why[96];
+                std::snprintf(why, sizeof why, "ignored (a closing hand: open %.2f, a fist under %.2f)", handCurl[rs],
+                              rayParams.fistCurl);
+                pinchLog(s, kind, why);
             } else if (ray && kind != 1) {
                 beginRayHold(s, rs, kind, g);
             } else if (gazeOn && !gazePinchOn) {
@@ -2781,6 +2802,11 @@ int main() {
                 // a fist with the ray up, or a middle pinch without it: nothing
                 if (kind == 2) pinchLog(s, kind, "ignored (no ray up)");
                 else if (debug) std::printf("hand %s grip ignored (the ray is up)\n", s ? "right" : "left");
+            } else if (!pinchNoRay) {
+                // no laser up: no press (POINTER_PINCH_NO_RAY); the first one wakes the pointer
+                handUsed = tnow;
+                if (!active) wake(tnow);
+                if (kind == 0) pinchLog(s, kind, "ignored (no ray up: bring thumb and index together to raise the laser)");
             } else {
                 beginHold(s, kind == 1, g);
             }

@@ -763,6 +763,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             } else {
                 if (s->scale[index - 1] != scale) wlr_log(WLR_INFO, "screen %d: KWin scale %g", index, scale);
                 s->scale[index - 1] = scale;
+                ft_vr_screen_scale(index - 1, scale);
                 snprintf(reply, sizeof reply, "ok");
             }
         } else if (sscanf(buf, "key %u %d", &code, &value) == 2) {

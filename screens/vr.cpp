@@ -2617,17 +2617,23 @@ void UpdateGrabThat(const handinput::Input &in) {
 // window in front of you. You can interact with it, and then when you dismiss it, it'll go back to
 // where it was previously and pull up the next window on the list"): a stroke (or Meta+Alt+Tab, "spin
 // next|prev") sends the one it brought back home and brings the next one round, by where each one
-// lives, to straight ahead at a distance it spans at most susanViewDeg of the view at, and it takes
-// the typing (FT_FRONT). Out of view (you turned away), pushed, flicked or thrown, it goes home; moved
+// lives, to straight ahead about 1 m out, as big as its resolution needs for its text to read
+// (grabthat::ReadableSize; wide ones curve round you), and it takes the typing (FT_FRONT). Out of view (you turned away), pushed, flicked or thrown, it goes home; moved
 // by hand or laser, it stays where you put it. SCREEN_SPIN_BRING=0: the old spin (the room turns).
 bool g_susanBring = true;
-double g_susanViewDeg = 60, g_susanNear = 0.6, g_susanFar = 1.5, g_susanDrop = 0.08;
+double g_susanFar = 1.5, g_susanDrop = 0.08;   // grab that's view fit goes at most g_susanFar out; a brought one sits g_susanDrop under the eyes
+// Readable (user, 2026-10-11, the third live test): about 1 m ahead, as big as its resolution needs for its
+// text to read (grabthat::ReadableSize: SCREEN_SPIN_DISTANCE, SCREEN_SPIN_PPD, SCREEN_SPIN_MAX_DEG).
+double g_susanDistance = 1.0;
+grabthat::ReadParams g_susanRead;
+std::map<int, double> g_uiScale;   // KWin's scale for each screen (ft-layout's "scale", via the compositor)
 constexpr double kSusanAway = 70;          // degrees off where you face: out of view
 constexpr int64_t kSusanAwayMs = 600;      // ...for this long: it goes home
 struct Susan {
     int panel = -1;          // the one brought (-1 none)
     Mat home{}, to{};        // where it lives, and where it came
     double homeWidth = 0;    // its width there
+    double homeCurve = 0;    // ...and its curve
     int64_t awaySinceMs = -1;
 } g_susan;
 
@@ -2645,6 +2651,7 @@ void SusanHome(const char *why) {
     const auto it = g_screens.find(g_susan.panel);
     if (it != g_screens.end()) {
         std::printf("lazy susan: screen %d goes home (%s)\n", g_susan.panel + 1, why);
+        it->second.curve = g_susan.homeCurve;
         StartGrabMove(g_susan.panel, it->second, g_susan.home, g_susan.homeWidth);
     }
     g_susan = {};
@@ -2654,6 +2661,9 @@ void SusanCommand(bool next, char *reply, int size) {
     Mat head;
     if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head))
         return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
+    // each one where it lives: the brought one at home, one on its way somewhere (sent home a moment
+    // ago) where it's going (the third live test: a panel still flying home read as straight ahead, so
+    // the strokes went 104, 1, 104 with three panels up)
     std::vector<grabthat::Bearing> panels;
     double from = 0;
     for (auto &[i, s] : g_screens) {
@@ -2662,7 +2672,10 @@ void SusanCommand(bool next, char *reply, int size) {
             panels.push_back({i, from = SusanBearing(head, g_susan.home)});
             continue;
         }
-        if (!s.visible || !Spinnable(s) || g_handInput.heldByHand(i) || !ScreenPose(s, &p)) continue;
+        if (!s.visible || !Spinnable(s) || g_handInput.heldByHand(i)) continue;
+        const auto m = g_grabMoves.find(i);
+        if (m != g_grabMoves.end()) p = m->second.to;
+        else if (!ScreenPose(s, &p)) continue;
         panels.push_back({i, SusanBearing(head, p)});
     }
     const int was = g_susan.panel;
@@ -2673,15 +2686,23 @@ void SusanCommand(bool next, char *reply, int size) {
     Mat now;
     if (!ScreenPose(s, &now)) return (void)std::snprintf(reply, size, "error no pose for screen %d", i + 1);
     g_brought.erase(i);   // (it lives where it is now, whatever brought it there)
-    double width = s.metres;
-    const double d = grabthat::ViewDistance(s.metres, g_susanViewDeg, g_susanNear, g_susanFar, &width);
-    g_susan.panel = i, g_susan.home = now, g_susan.homeWidth = s.metres, g_susan.awaySinceMs = -1;
-    g_susan.to = grabthat::InFront(head, d, g_susanDrop);
-    StartGrabMove(i, s, g_susan.to, s.floating ? s.metres : width);
+    const auto m = g_grabMoves.find(i);   // (on its way home: home is where it was going)
+    g_susan.panel = i, g_susan.home = m != g_grabMoves.end() ? m->second.to : now, g_susan.awaySinceMs = -1;
+    g_susan.homeWidth = m != g_grabMoves.end() ? m->second.w1 : s.metres, g_susan.homeCurve = s.curve;
+    // readable: its logical pixels (KWin's scale undone) at the asked density, 1 m ahead
+    const auto ui = g_uiScale.find(i);
+    const double scale = ui != g_uiScale.end() ? ui->second : 1;
+    const double pxW = (s.floating ? s.cropW : s.width) / scale, pxH = (s.floating ? s.cropH : s.height) / scale;
+    const grabthat::Readable r = grabthat::ReadableSize(pxW, pxH, g_susanDistance, g_susanRead);
+    const double width = s.floating || r.width <= 0 ? s.metres : r.width;
+    if (!s.floating && r.width > 0) s.curve = r.curve;
+    g_susan.to = grabthat::InFront(head, g_susanDistance, g_susanDrop);
+    StartGrabMove(i, s, g_susan.to, width);
     g_spin.front = i;   // typing and the active window go to it (ft_vr_poll: FT_FRONT)
     SendPointer("recenter");
-    std::printf("lazy susan: screen %d comes to the front, %.2f m out%s\n", i + 1, d,
-                width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "");
+    std::printf("lazy susan: screen %d comes to the front, %.2f m out, %.2f m wide%s (%.0fx%.0f px at UI scale %g: %.0fx%.0f deg, "
+                "%.0f px/deg)\n", i + 1, g_susanDistance, width, s.curve > 0 ? " curved round you" : "", pxW * scale, pxH * scale,
+                scale, r.degW, r.degH, r.ppd);
     std::snprintf(reply, size, "ok screen %d", i + 1);
 }
 
@@ -3297,9 +3318,13 @@ bool ft_vr_init(void) {
     }
     num("HANDS_GRAB_THAT_VIEW_DEG", g_grabThatViewDeg, 20, 170);   // grab that: a wide one comes farther out to fit
     g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";   // the lazy susan brings panels (0: the room turns)
-    num("SCREEN_SPIN_VIEW_DEG", g_susanViewDeg, 20, 170);   // a brought panel spans at most this much of the view
-    std::printf("lazy susan: %s\n", g_susanBring ? ("brings the next panel to the front (at most " + std::to_string(int(g_susanViewDeg)) +
-                                                     " deg of the view), home when you turn away or send it away").c_str()
+    num("SCREEN_SPIN_DISTANCE", g_susanDistance, 0.4, 3);   // a brought panel comes this far ahead (m)
+    num("SCREEN_SPIN_PPD", g_susanRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need
+    num("SCREEN_SPIN_MAX_DEG", g_susanRead.maxW, 30, 100);   // ...at most this wide (deg; wider ones curve round you)
+    num("SCREEN_SPIN_MAX_TALL_DEG", g_susanRead.maxH, 20, 90);
+    std::printf("lazy susan: %s\n", g_susanBring ? ("brings the next panel " + std::to_string(g_susanDistance).substr(0, 4) +
+                                                     " m ahead, readable (" + std::to_string(int(g_susanRead.ppd)) + " px/deg, at most " +
+                                                     std::to_string(int(g_susanRead.maxW)) + " deg wide), home when you turn away or send it away").c_str()
                                                   : "turns the room (SCREEN_SPIN_BRING=0)");
     if (gt.on)
         std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s); "
@@ -3571,6 +3596,8 @@ void ft_vr_float_output(int index, bool on) {
     auto it = g_screens.find(index);
     if (it != g_screens.end()) it->second.outputOn = on;
 }
+
+void ft_vr_screen_scale(int index, double scale) { g_uiScale[index] = scale; }
 
 void ft_vr_screen_destroy(int index) {
     auto it = g_screens.find(index);

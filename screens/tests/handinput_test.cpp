@@ -4009,6 +4009,34 @@ void TestSusanPick() {
     CHECK(grabthat::SusanPick({{2, 5}}, 2, 5, true, 8) == -1);    // only the brought one: nothing
 }
 
+void TestReadableSize() {
+    const grabthat::ReadParams k;   // 26 px/deg, at most 100 x 55 deg, at least 40 wide, flat to 60
+    // a 1920x1080 window: 74 x 42 deg, curved round you 1 m out
+    grabthat::Readable r = grabthat::ReadableSize(1920, 1080, 1.0, k);
+    NEAR(r.degW, 1920 / 26.0, 1e-9);
+    NEAR(r.degH, 1080 / 26.0, 1e-9);
+    NEAR(r.curve, 1.0, 1e-9);
+    NEAR(r.width, r.degW * M_PI / 180, 1e-9);
+    // the native screen: 3440x1440 at 125% = 2752x1152 logical: capped at 100 deg wide, its shape kept
+    r = grabthat::ReadableSize(2752, 1152, 1.0, k);
+    NEAR(r.degW, 100, 1e-9);
+    NEAR(r.degH, 100 * 1152 / 2752.0, 1e-9);
+    NEAR(r.ppd, 27.52, 1e-9);
+    // the Mac (3024x1964): 55 deg tall at most, so 85 wide
+    r = grabthat::ReadableSize(3024, 1964, 1.0, k);
+    NEAR(r.degH, 55, 1e-9);
+    NEAR(r.degW, 55 * 3024 / 1964.0, 1e-9);
+    // the 5120x1440 remote: 100 deg wide, 28 tall, 51 px/deg: its text can't read at this size
+    r = grabthat::ReadableSize(5120, 1440, 1.0, k);
+    NEAR(r.degW, 100, 1e-9);
+    CHECK(r.ppd > 50);
+    // a small window (800x600): grown to 40 deg wide, flat
+    r = grabthat::ReadableSize(800, 600, 1.0, k);
+    NEAR(r.degW, 40, 1e-9);
+    NEAR(r.curve, 0, 1e-9);
+    NEAR(r.width, 2 * std::tan(20 * M_PI / 180), 1e-9);
+}
+
 void TestViewDistance() {
     double w = 0;
     // 0.6 m at arm's reach (0.45) spans 67 deg: stays
@@ -5094,6 +5122,7 @@ int main(int argc, char **argv) {
     TestTrackGate();
     TestSweep();
     TestSusanPick();
+    TestReadableSize();
     TestViewDistance();
     TestFistPair();
     TestFistResizeOnly();

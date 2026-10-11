@@ -418,6 +418,24 @@ double ViewDistance(double width, double maxDeg, double nearest, double farthest
     return d;
 }
 
+Readable ReadableSize(double pxW, double pxH, double distance, const ReadParams &k) {
+    Readable r;
+    if (pxW < 1 || pxH < 1 || distance <= 0) return r;
+    const double ppd = std::max(1.0, k.ppd);
+    double w = pxW / ppd, h = pxH / ppd;
+    const double shrink = std::min({1.0, k.maxW / w, k.maxH / h});
+    w *= shrink, h *= shrink;
+    if (w < k.minW) h *= k.minW / w, w = k.minW;
+    r.degW = w, r.degH = h, r.ppd = pxW / w;
+    if (w <= k.flatDeg) {
+        r.width = 2 * distance * std::tan(w * M_PI / 360);
+    } else {
+        r.width = distance * w * M_PI / 180;   // round the eyes: the arc
+        r.curve = distance;
+    }
+    return r;
+}
+
 int SusanPick(const std::vector<Bearing> &panels, int current, double from, bool next, double aheadDeg) {
     int best = -1;
     double bestA = 1e9;

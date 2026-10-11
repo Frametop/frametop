@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <functional>
 #include <random>
+#include <string>
 #include <vector>
 
 using namespace fhray;
@@ -412,7 +413,47 @@ void TestPinchAnchor() {
 
 }  // namespace
 
+// The laser for pinching (user, 2026-10-11): up only with the thumb and index close, never in a fist.
+void TestReadyAndFist() {
+    auto with = [](double gap, double curl) {
+        return [gap, curl](double tt) {
+            HandFrame f = Pointing(tt);
+            f.gap = gap, f.curl = curl;
+            return f;
+        };
+    };
+    {
+        Body b;
+        HandRay r(1);
+        double t = 0;
+        CHECK(RunUntil(r, b, t, 1.0, true, with(0.12, 1.8)) < 0, "fingers 12 cm apart: no laser");
+        CHECK(r.LastTests().fails.find("ready") != std::string::npos, "the ready test says why: %s", r.LastTests().fails.c_str());
+        const double t0 = t;
+        const double up = RunUntil(r, b, t, 1.0, true, with(0.04, 1.8));
+        CHECK(up >= 0 && up - t0 < 0.2, "fingers 4 cm apart: the laser within 0.2 s (%.2f)", up - t0);
+        CHECK(RunUntil(r, b, t, 0.6, false, with(0.08, 1.8)) < 0, "8 cm apart again (under readyHide): it stays");
+        const double t1 = t;
+        const double down = RunUntil(r, b, t, 1.0, false, with(0.14, 1.8));
+        CHECK(down >= 0 && down - t1 < 0.4, "opened to 14 cm: it goes (%.2f)", down - t1);
+    }
+    {
+        Body b;
+        HandRay r(1);
+        double t = 0;
+        CHECK(RunUntil(r, b, t, 1.0, true, with(0.01, 1.0)) < 0, "a fist (thumb on the index): no laser");
+        CHECK(RunUntil(r, b, t, 1.0, true, with(0.01, 1.45)) >= 0, "a pinch, the index out (1.45): the laser");
+        CHECK(RunUntil(r, b, t, 1.0, false, with(0.01, 0.98)) >= 0, "closing into a fist: it goes");
+    }
+    {
+        Body b;
+        HandRay r(1);
+        double t = 0;
+        CHECK(RunUntil(r, b, t, 1.0, true, Pointing) >= 0, "no gap or curl known: the old gate");
+    }
+}
+
 int main() {
+    TestReadyAndFist();
     TestHandAxes();
     TestTorsoWrists();
     TestHandWeight();

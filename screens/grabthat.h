@@ -233,6 +233,21 @@ Mat InFront(const Mat &head, double distance, double drop);
 // at most `farthest`; at `farthest` and still wider, *fit is the width that spans maxDeg there (else width).
 double ViewDistance(double width, double maxDeg, double nearest, double farthest, double *fit);
 
+// How big a panel shows to be readable (user, 2026-10-11: "always appear about 1 m in front of the user,
+// and it should always be large enough that the text is readable ... based on the display's resolution,
+// correcting for resolution and aspect ratio"): its logical pixels (px / its UI scale) at ppd pixels per
+// degree of view, shrunk (keeping its shape) to at most maxW wide and maxH tall, grown to at least
+// minW wide; at `distance`, flat up to flatDeg wide, wider ones curved round the eyes (radius distance).
+struct ReadParams {
+    double ppd = 26, maxW = 100, maxH = 55, minW = 40, flatDeg = 60;
+};
+struct Readable {
+    double width = 0, curve = 0;   // metres (along the arc when curved); curve: radius, 0 flat
+    double degW = 0, degH = 0;     // the view it spans
+    double ppd = 0;                // its pixels per degree as shown (over ReadParams::ppd: text smaller than asked)
+};
+Readable ReadableSize(double pxW, double pxH, double distance, const ReadParams &k);
+
 // The lazy susan (user, 2026-10-11: "rather than just spinning your perspective, it pulls the window in
 // front of you"): the panels by bearing from where you face (degrees, right positive, -180..180, where
 // each one lives, not where it was brought). The next one round to the right (next) or left (!next) of

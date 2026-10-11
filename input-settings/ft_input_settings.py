@@ -131,6 +131,14 @@ HAND_INTERACTIONS = [
      "A faint white glow round the screen \"grab that\" would take."),
     ("HANDS_EDGE_GLOW", True, "1", "Feedback", "Resize and edge glows",
      "A glow at the corner or edge a pinch there would resize or move."),
+    ("POINTER_RAY_READY", True, "6", "Laser", "Laser only when about to pinch",
+     "A hand's laser shows once its thumb and index are within 6 cm, and goes when they open past 10 cm. "
+     "Off: whenever the hand is raised and pointing."),
+    ("POINTER_RAY_FIST_CURL", True, "1.1", "Laser", "No laser or clicks in a fist",
+     "Closing the hand drops its laser, and a pinch made while the hand closes into a fist doesn't click."),
+    ("POINTER_PINCH_NO_RAY", False, "1", "Laser", "Pinch with no laser clicks at the pointer",
+     "With no laser up, a pinch or a fist presses where the pointer is and drags it (an air mouse). "
+     "Off: a pinch with no laser does nothing."),
     ("HANDS_PUSH_GLOW", False, "1", "Feedback", "Push hint glow",
      "A dim glow on a near screen an open palm faces (a push or flick would send it away)."),
     ("HANDS_TRACK_GATE", True, "1", "Feedback", "Steady through tracking glitches",
@@ -1525,12 +1533,16 @@ class Backend(QObject):
 
     @Slot(str, bool)
     def setHandInteraction(self, key, on):
-        """One interaction on or off: frametop.conf (ft-screens reads it at start) and ft-screens now."""
+        """One interaction on or off: frametop.conf (ft-screens reads it at start) and ft-screens now
+        (the pointer helper's POINTER_ ones: it reloads its settings)."""
         entry = next((e for e in HAND_INTERACTIONS if e[0] == key), None)
         if entry is None:
             return
         write_conf_value(key, entry[2] if on else "0")
-        self._send(f"handsetting {key} {1 if on else 0}", SCREENS)
+        if key.startswith("POINTER_"):   # the pointer helper's: it re-reads frametop.conf
+            self._send("reload", HELPER)
+        else:
+            self._send(f"handsetting {key} {1 if on else 0}", SCREENS)
         self.handsChanged.emit()
         self.message.emit(f"{entry[4]}: {'on' if on else 'off'}", False)
 

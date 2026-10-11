@@ -889,7 +889,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         sd.state = State::Idle, sd.panel = -1;
         return;
     }
-    const Hit t = Locate(*P, h->p[8]);
+    const Hit t = FingerHit(*P, *h);   // (where the finger points: Params::fingerRay)
     const double ext = Extension(*h);
     const bool extended = ext >= p_.extended;
     // two fingers on the content: a swipe scrolls, a lift clicks (Params::twoFingerScroll)
@@ -1741,6 +1741,27 @@ bool HandInput::Opening(int s, const Input &in) {
     return sd.frozen;
 }
 
+// Where the index finger points on the panel: the line from its middle joint through its tip, met with the
+// surface (user, 2026-10-11: "the tap is offset from where I'm actually trying to tap", most at the
+// edges): the tip's own point (straight in from it) sits short of where the finger points when it comes
+// in at an angle (30-50 degrees off the normal, a hand reaching up from below for the bottom edge), by
+// the tip's distance times that angle's tangent. Its depth stays the tip's. At most fingerRayMax from
+// the tip's own point; a finger not pointing at the panel: the tip's own point.
+Hit HandInput::FingerHit(const Panel &P, const Hand &h) const {
+    const Hit tip = Locate(P, h.p[8]);
+    if (!p_.fingerRay) return tip;
+    const Hit mid = Locate(P, h.p[6]);
+    const double dd = mid.d - tip.d;
+    if (dd < 0.005) return tip;
+    const double k = mid.d / dd;
+    double du = mid.u + k * (tip.u - mid.u) - tip.u, dv = mid.v + k * (tip.v - mid.v) - tip.v;
+    const double n = std::hypot(du, dv);
+    if (n > p_.fingerRayMax) du *= p_.fingerRayMax / n, dv *= p_.fingerRayMax / n;
+    Hit out = tip;
+    out.u += du, out.v += dv;
+    return out;
+}
+
 void HandInput::FistPair(const Input &in, const std::vector<Panel> &panels) {
     const Hand *h[2] = {nullptr, nullptr};
     for (int s = 0; s < 2; ++s) {
@@ -2389,7 +2410,7 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
                 glows_[P->index].push_back({float(sd.lastX), float(sd.lastY), float(0.005 * k), 0.9f, false,
                                             {kWhite[0], kWhite[1], kWhite[2]}});
         } else if (sd.state == State::Hover && h && Extension(*h) >= p_.extended) {
-            const Hit t = Locate(*P, h->p[8]);
+            const Hit t = FingerHit(*P, *h);
             double x, y;
             if (t.d > p_.nearBack && t.d <= p_.nearFront && ToBuffer(*P, t.u, t.v, &x, &y)) {
                 const double f = std::clamp(t.d / p_.nearFront, 0.0, 1.0);
@@ -2501,7 +2522,7 @@ void HandInput::Guides(const Input &in, const std::vector<Panel> &panels) {
         // (pointing: not a hand shaping a pinch, its thumb by the index tip)
         if (p_.touchDot && Extension(*h) >= p_.extended - 0.1 &&
             std::hypot(h->p[4][0] - h->p[8][0], h->p[4][1] - h->p[8][1], h->p[4][2] - h->p[8][2]) > p_.pinchApart) {
-            const Hit tt = Locate(*P, h->p[8]);
+            const Hit tt = FingerHit(*P, *h);
             const double u = sd.aimSet ? sd.aimU : tt.u, v = sd.aimSet ? sd.aimV : tt.v;
             double x, y;
             if (tt.d <= p_.nearFront && tt.d > p_.nearBack && ToBuffer(*P, u, v, &x, &y)) {

@@ -189,6 +189,10 @@ struct Params {
     // jitter and its slide as the finger goes in and curls don't move it), unless the tip slides lockSlip
     // along the panel (a new target). The cursor and the fingertip dot show it. HANDS_TAP_LOCK (0: off).
     double lockOut = 0.015, lockSlip = 0.025;
+    // Taps land where the finger points (FingerHit: its middle joint through its tip, met with the panel),
+    // at most fingerRayMax from the tip's own point. HANDS_FINGER_RAY (0: straight in from the tip).
+    bool fingerRay = true;
+    double fingerRayMax = 0.04;
     // A press by motion: a tip that came in quickly (motionSpeed m/s on the frame before, motionTravel
     // within 300 ms) and stopped or turned back short of the surface (within motionShort of it) presses
     // there too: the depth is the weakest number, a tap that "touched" often reads 0.5-1.5 cm out.
@@ -815,6 +819,7 @@ private:
     void FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited, bool byPinch = false);
     void FistPair(const Input &in, const std::vector<Panel> &panels);
     bool Opening(int s, const Input &in);
+    Hit FingerHit(const Panel &P, const handcut::Hand &h) const;
     // A pinch on the content (not a grab zone): a click where the fingers met (at c), held with the pinch.
     void PinchClick(int s, const Input &in, const std::vector<Panel> &panels, const float c[3]);
     // A pinch or a grip that began at a panel the other hand holds: the second anchor (Params::joinFront).

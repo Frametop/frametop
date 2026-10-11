@@ -372,6 +372,7 @@ struct Screen {
     // it stays focused or in view after the last reason for it.
     ft_attention attention = FT_FOCUSED;
     int64_t inputMs = INT64_MIN / 2;  // the last pointer event on it or its controls
+    int64_t laserMs = INT64_MIN / 2;  // ...from a laser (SteamVR's: a controller's, the 3D mouse's, a hand ray's)
     int64_t handPointerMs = INT64_MIN / 2;  // a hand last moved the pointer on it (kHandPointerMs)
     int64_t focusUntil = 0, viewUntil = 0;
     double heightMetres() const {
@@ -743,7 +744,9 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
     return m;
 }
 
-double BarY(const Screen &s) { return -(s.heightMetres() / 2 + s.chrome * 0.06 + s.chrome * 12 / 256); }
+// (the row's middle: under the screen by a gap and the taller of the bar's half and a button's, so grown
+// buttons (a hand near: ChromeSize) don't overlap the screen; user, 2026-10-11)
+double BarY(const Screen &s) { return -(s.heightMetres() / 2 + s.chrome * 0.06 + std::max(s.chrome * 12 / 256, s.grip / 2)); }
 Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 
 // Put the bar, the curve button, and the corner tab under the screen (same parent: the
@@ -2633,6 +2636,9 @@ void UpdateTargetGlow() {
     }
     const auto it = best >= 0 ? g_screens.find(best) : g_screens.end();
     if (it == g_screens.end() || !it->second.visible) best = -1, want = 0;
+    // not over a panel a laser is on (user, 2026-10-11: no pull highlight while the laser points at it; the
+    // gesture still works there)
+    else if (NowMs() - it->second.laserMs < 400) best = -1, want = 0;
     // fade: in over about 120 ms (on top of grab that's own arming), out over 150
     const int64_t now = NowMs();
     const double dt = g_target.lastMs ? std::clamp((now - g_target.lastMs) / 1000.0, 0.0, 0.1) : 0;
@@ -3056,6 +3062,7 @@ bool ft_vr_init(void) {
     k.fistPair = handcut::Setting("HANDS_FIST_PAIR", "1") != "0";
     k.twoFingerScroll = handcut::Setting("HANDS_TWO_FINGER_SCROLL", "1") != "0";
     k.motionPress = handcut::Setting("HANDS_MOTION_PRESS", "1") != "0";
+    k.fingerRay = handcut::Setting("HANDS_FINGER_RAY", "1") != "0";
     if (handcut::Setting("HANDS_RELEASE_FREEZE", "1") == "0") k.openFreeze = 0;
     k.touchDot = handcut::Setting("HANDS_TOUCH_DOT", "1") != "0";
     if (handcut::Setting("HANDS_TAP_LOCK", "1") == "0") k.lockOut = 0;
@@ -3490,7 +3497,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         auto panelEvent = [&](const vr::VREvent_t &ev, bool sub) {
             ft_event e{};
             e.screen = index;
-            if (ev.eventType != vr::VREvent_FocusLeave) s.inputMs = NowMs();
+            if (ev.eventType != vr::VREvent_FocusLeave) s.inputMs = s.laserMs = NowMs();
             auto at = [&] { s.ToBuffer(ev.data.mouse.x, ev.data.mouse.y, &e.x, &e.y); };
             switch (ev.eventType) {
                 case vr::VREvent_MouseMove:
@@ -3554,7 +3561,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         // The controls light up under a laser.
         auto hover = [&](int k) {
             const bool on = ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_FocusEnter;
-            if (on) s.inputMs = NowMs();
+            if (on) s.inputMs = s.laserMs = NowMs();
             if (!on && ev.eventType != vr::VREvent_FocusLeave) return;
             if (s.hover[k] != on) s.hover[k] = on, ApplyAlpha(s);
         };

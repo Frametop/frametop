@@ -1466,6 +1466,46 @@ HoldRun CarryThrough(int gap, int what, double jitter = 0) {   // what: 0 unseen
     return out;
 }
 
+// Letting go without a nudge (Params::openFreeze, rewindMs): a carry by the bar, still; then the fingers
+// open over a few frames while the hand sags 2 cm, and the pinch ends: the panel stays where it was held.
+void TestLetGoStill() {
+    for (bool freeze : {true, false}) {
+        Rig r;
+        if (!freeze) r.in.params().openFreeze = 0, r.in.params().rewindMs = 0;
+        r.in.params().grabRotate = false;
+        const double barY = r.panels[0].controls[0].v;
+        auto hand = [&](double x, double y, double open) {
+            SynthHand h = KnucklesAt(x, barY + y, 0.02);
+            h.open = open;
+            return h;
+        };
+        for (int k = 0; k < 5; ++k) r.Frame({hand(0, 0, 0)});
+        const double at[3] = {0, barY, -0.48};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({hand(0, 0, 0)});
+        for (int k = 1; k <= 30; ++k) {   // carried 10 cm right, then held still
+            r.Frame({hand(0.1 * std::min(1.0, k / 20.0), 0, 0)});
+            if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
+        }
+        const double held[2] = {r.panels[0].pose.m[0][3], r.panels[0].pose.m[1][3]};
+        for (int k = 1; k <= 6; ++k) {    // the let-go: fingers opening, the hand sagging 2 cm
+            r.Frame({hand(0.1, -0.02 * k / 6.0, k / 6.0)});
+            if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
+        }
+        r.synth.Pinch(1, false, r.t, at, 1);
+        for (int k = 0; k < 3; ++k) {
+            r.Frame({hand(0.1, -0.02, 1)});
+            if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
+        }
+        if (const auto e = r.Last(Event::Settle)) r.panels[0].pose = e->to;
+        const double off = std::hypot(r.panels[0].pose.m[0][3] - held[0], r.panels[0].pose.m[1][3] - held[1]);
+        std::printf("let go %s: the panel %.1f mm from where it was held (%d freezes, %d rewinds)\n",
+                    freeze ? "with the freeze and rewind" : "without", off * 1000, r.in.stats.releaseFreezes, r.in.stats.rewinds);
+        if (freeze) CHECK(off < 0.004);
+        CHECK(r.Count(Event::GrabEnd) == 1);
+    }
+}
+
 void TestHoldThroughLoss() {
     for (int gap : {3, 6, 10}) {
         const HoldRun a = CarryThrough(gap, 0), b = CarryThrough(gap, 0, 0.003);
@@ -4896,7 +4936,8 @@ int ScanFlags(int n, char **dirs) {
                             run.fires.size(), run.palm.shows, run.palm.toggles, run.palm.notPlain);
                 for (const std::string &l : run.logs)
                     if (l.find("pressed") != std::string::npos || l.find("took") != std::string::npos || l.find("flick") != std::string::npos ||
-                        l.find("two fingers") != std::string::npos ||
+                        l.find("two fingers") != std::string::npos || l.find("hand opening") != std::string::npos ||
+                        l.find("closed again") != std::string::npos || l.find("let go of") != std::string::npos ||
                         l.find("push") != std::string::npos || l.find("both hands") != std::string::npos)
                         std::printf("    %s\n", l.c_str());
                 totals[0] += run.stats.pushes, totals[1] += run.palm.toggles, totals[2] += run.stats.flicks;
@@ -4953,6 +4994,7 @@ int main(int argc, char **argv) {
     TestGrabResize();
     TestGrabResizeCorners();
     TestStretchHands();
+    TestLetGoStill();
     TestHoldThroughLoss();
     TestForgivingZones();
     TestCardPinch();

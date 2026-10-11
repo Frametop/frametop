@@ -2848,6 +2848,9 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 f.controller = true;   // the click filter holds a poke's wobble still (controller-click.h)
                 handle(&f, data);
                 break;
+            case handinput::Event::Settle:   // a let-go's rewind (handinput Params::rewindMs): just after its GrabEnd
+                if (s.drag == Drag::None && s.pinned == kNone) SetAbsolute(s, e.to);
+                break;
             case handinput::Event::Scroll:
                 s.inputMs = NowMs();
                 f.type = FT_SCROLL, f.dx = e.x, f.dy = e.y;
@@ -3053,6 +3056,7 @@ bool ft_vr_init(void) {
     k.fistPair = handcut::Setting("HANDS_FIST_PAIR", "1") != "0";
     k.twoFingerScroll = handcut::Setting("HANDS_TWO_FINGER_SCROLL", "1") != "0";
     k.motionPress = handcut::Setting("HANDS_MOTION_PRESS", "1") != "0";
+    if (handcut::Setting("HANDS_RELEASE_FREEZE", "1") == "0") k.openFreeze = 0;
     k.touchDot = handcut::Setting("HANDS_TOUCH_DOT", "1") != "0";
     if (handcut::Setting("HANDS_TAP_LOCK", "1") == "0") k.lockOut = 0;
     num("HANDS_POKE_REST_BELOW", k.restBelow, 0, 2);
@@ -3103,6 +3107,7 @@ bool ft_vr_init(void) {
     gt.on = handcut::Setting("HANDS_GRAB_THAT", "1") != "0";
     num("HANDS_GRAB_THAT_DISTANCE", gt.distance, 0.2, 1.5);
     num("HANDS_GRAB_THAT_WIDTH", gt.maxWidth, 0, 12);
+    num("HANDS_RELEASE_REWIND_MS", g_handInput.params().rewindMs, 0, 400);   // a slow let-go goes back this far (0: off)
     num("HANDS_TAP_MS", g_handInput.params().tapMs, 0, 2000);   // a press doesn't drag this soon: a tap clicks where it went down
     num("HANDS_PRESS_STILL_MS", g_handInput.params().pressStillMs, 0, 60000);   // a still press lets go after this
     num("HANDS_RAY_HIDE_REACH", g_handInput.params().rayReach, 0, 1);   // a hand this near a panel hides its ray

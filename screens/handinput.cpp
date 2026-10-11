@@ -605,6 +605,7 @@ void HandInput::EndGrab(int s, bool lost) {
     const bool carried = sd.zone == Zone::Card || (sd.zone == Zone::Fist && !p_.fistResizeOnly) || sd.zone == Zone::Edge ||
                          sd.zone == Zone::Bar || sd.zone == Zone::Title;
     fhsmooth::V3 v;
+    const int throwsBefore = stats.throws;
     if (!lost && p_.cardThrow && carried && stretch_.panel != sd.panel && haveHead_ && !sd.track.empty() &&
         Velocity(s, sd.upNs ? sd.upNs : 0, p_.throwFitMs, &v)) {
         const double speed = fhsmooth::Len(v);
@@ -632,6 +633,24 @@ void HandInput::EndGrab(int s, bool lost) {
                 p_.throwSpeed, p_.throwAngle);
         }
     }
+    // let go slowly and not already held still by the freeze: back to where it was rewindMs before (Params::rewindMs)
+    fhsmooth::V3 w;
+    if (!lost && p_.rewindMs > 0 && carried && !sd.frozen && stats.throws == throwsBefore && stretch_.panel != sd.panel &&
+        sd.poses.size() >= 2 && (!Velocity(s, sd.upNs ? sd.upNs : 0, p_.rewindMs, &w) || fhsmooth::Len(w) < p_.rewindSpeed)) {
+        const int64_t at = g_now - int64_t(p_.rewindMs * 1e6);
+        const Mat *to = &sd.poses.front().second;
+        for (const auto &[t, m] : sd.poses)
+            if (t <= at) to = &m;
+        const double moved = std::hypot(to->m[0][3] - sd.last.m[0][3], to->m[1][3] - sd.last.m[1][3], to->m[2][3] - sd.last.m[2][3]);
+        if (moved > 0.001 && moved < 0.08) {
+            Event e;
+            e.type = Event::Settle, e.side = s, e.panel = sd.panel, e.to = *to;
+            events_.push_back(e);
+            ++stats.rewinds;
+            Log("%s let-go on screen %d: back %.1f cm to where it was %.0f ms before", SideName(s), sd.panel + 1, moved * 100, p_.rewindMs);
+        }
+    }
+    sd.letGoNs = g_now, sd.letGoPanel = sd.panel, sd.poses.clear();
     ++stats.grabEnds;
     Log("%s %s let go of screen %d after %.2f s%s", SideName(s), sd.byGrip ? "fist" : "pinch", sd.panel + 1,
         (g_now - sd.grabbedNs) / 1e9, lost ? " (the hand was lost, or hand input was taken away)" : "");
@@ -1676,6 +1695,52 @@ void HandInput::PinchClick(int s, const Input &in, const std::vector<Panel> &pan
     Log("%s pinch pressed screen %d at %.0f,%.0f (on its content, %+.1f cm out)", SideName(s), P->index + 1, x, y, t.d * 100);
 }
 
+// The hand holding a panel has begun to let go (Params::openFreeze): its fingers (a fist: its curl)
+// opened past their tightest this hold. While so, the panel stays where it is; closed again, it follows
+// on from there (the carry, or the two hands' stretch, starts afresh).
+bool HandInput::Opening(int s, const Input &in) {
+    Side &sd = side_[s];
+    if (p_.openFreeze <= 0 || sd.state != State::Grab) return false;
+    const Hand *h = HandFor(s, in.hands->seen(), sd.handId);
+    if (!h || !newFrame_) return sd.frozen;   // (unseen, or no new frame: as it was)
+    if (!h->stereo) return sd.frozen;         // (one camera's fingers are the noisiest: not on them)
+    auto gap = [&](int a, int b) { return double(std::hypot(h->p[a][0] - h->p[b][0], h->p[a][1] - h->p[b][1], h->p[a][2] - h->p[b][2])); };
+    // smoothed (a third of each new frame); the tightest a floor that creeps up 1 mm (a fist: 0.015) a
+    // frame, so one low misread doesn't set it for the whole hold; open on two frames running
+    bool over;
+    if (sd.byGrip) {
+        const double now = Curl3(*h);
+        if (sd.curlEma >= 0 && !sd.frozen) sd.curlDev = 0.9 * sd.curlDev + 0.1 * std::fabs(now - sd.curlEma);
+        sd.curlEma = sd.curlEma < 0 ? now : (2 * sd.curlEma + now) / 3;
+        if (!sd.frozen) sd.tightestCurl = std::min(sd.tightestCurl + 0.015, sd.curlEma);
+        over = sd.curlEma > sd.tightestCurl + (sd.frozen ? p_.openFreezeCurl / 2 : std::max(p_.openFreezeCurl, 3 * sd.curlDev));
+    } else {
+        double now = gap(4, 8);
+        if (sd.zone == Zone::Card) now = std::min(now, gap(4, 12));
+        // (and past the reading's own noise: three times its mean wobble, slowly tracked while held tight)
+        if (sd.apartEma >= 0 && !sd.frozen) sd.apartDev = 0.9 * sd.apartDev + 0.1 * std::fabs(now - sd.apartEma);
+        sd.apartEma = sd.apartEma < 0 ? now : (2 * sd.apartEma + now) / 3;
+        if (!sd.frozen) sd.tightest = std::min(sd.tightest + 0.001, sd.apartEma);
+        over = sd.apartEma > sd.tightest + (sd.frozen ? p_.openRelax : std::max(p_.openFreeze, 3 * sd.apartDev));
+    }
+    sd.openRun = over == sd.frozen ? 0 : sd.openRun + 1;   // frames running that say the other way
+    if (!sd.frozen && sd.openRun == 1) sd.openNs = in.nowNs - int64_t(p_.openBackMs * 1e6);   // (the opening began about here)
+    if (!sd.frozen && sd.openRun >= 2) {
+        sd.frozen = true, sd.openRun = 0, sd.snapBack = true;
+        ++stats.releaseFreezes;
+        Log("%s hand opening on screen %d (%s %.2f past its tightest): it stays where it is", SideName(s), sd.panel + 1,
+            sd.byGrip ? "curl" : "fingers, cm", sd.byGrip ? sd.curlEma - sd.tightestCurl : (sd.apartEma - sd.tightest) * 100);
+    } else if (sd.frozen && sd.openRun >= 2) {
+        sd.frozen = false, sd.openRun = 0;
+        if (sd.byGrip) sd.tightestCurl = sd.curlEma;
+        else sd.tightest = sd.apartEma;
+        sd.width0 = -1;                                         // (one hand: carried on from where it is)
+        if (stretch_.panel == sd.panel) stretch_.panel = -1;   // (two: their stretch starts afresh)
+        Log("%s hand closed again on screen %d: it follows on", SideName(s), sd.panel + 1);
+    }
+    return sd.frozen;
+}
+
 void HandInput::FistPair(const Input &in, const std::vector<Panel> &panels) {
     const Hand *h[2] = {nullptr, nullptr};
     for (int s = 0; s < 2; ++s) {
@@ -1710,6 +1775,11 @@ void HandInput::FistPair(const Input &in, const std::vector<Panel> &panels) {
         fistPairRun_ = 0;
         return;
     }
+    for (int s = 0; s < 2; ++s)
+        if (side_[s].letGoPanel == best->index && in.nowNs - side_[s].letGoNs < int64_t(p_.regrabMs * 1e6)) {
+            fistPairRun_ = 0;
+            return;
+        }
     if (best->index != fistPairPanel_) fistPairRun_ = 0, fistPairPanel_ = best->index;
     if (++fistPairRun_ < p_.fistPairFrames) return;
     fistPairRun_ = 0;
@@ -1763,6 +1833,13 @@ void HandInput::FistBegin(int s, const Input &in, const std::vector<Panel> &pane
 void HandInput::StartGrab(int s, const Input &in, const Panel &P, Zone zone, int sx, int sy, const Hand *h,
                           const float *fallback, bool byGrip) {
     Side &sd = side_[s];
+    if (sd.letGoPanel == P.index && g_now - sd.letGoNs < int64_t(p_.regrabMs * 1e6)) {   // (Params::regrabMs)
+        ++stats.regrabsRefused;
+        Log("%s hand took screen %d again %.0f ms after letting go: not yet (a let-go's flicker)", SideName(s), P.index + 1,
+            (g_now - sd.letGoNs) / 1e6);
+        return;
+    }
+    sd.frozen = false, sd.tightest = 1, sd.tightestCurl = 9, sd.apartEma = sd.curlEma = -1, sd.apartDev = sd.curlDev = 0, sd.openRun = 0, sd.poses.clear();
     EndAttempt(s);
     // the knuckles as the cameras saw them (the smoothing starts afresh from them: Carried)
     double pinch[3];
@@ -1925,6 +2002,8 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
         if (both) {
             double l[3], r[3];
             if (!pinchOf(0, l) || !pinchOf(1, r)) continue;
+            const bool open0 = Opening(0, in), open1 = Opening(1, in);
+            if (open0 || open1) continue;   // a hand letting go: the panel stays (Params::openFreeze)
             if (stretch_.panel != sd.panel) {
                 stretch_.panel = sd.panel, stretch_.start = P->pose, stretch_.width0 = P->width;
                 std::copy(l, l + 3, stretch_.l0), std::copy(r, r + 3, stretch_.r0);
@@ -1973,6 +2052,19 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
             sd.width0 = -1;   // (the other hand's grab, when it comes, starts the scale from here)
             continue;
         }
+        if (Opening(s, in)) {   // letting go: the panel stays, where it was as the opening began (Params::openFreeze)
+            if (sd.snapBack) {
+                sd.snapBack = false;
+                for (const auto &[t, m] : sd.poses)
+                    if (t <= sd.openNs) sd.last = m;
+            }
+            if (sd.zone != Zone::Tab && sd.zone != Zone::Corner) {   // (held there each tick)
+                Carry c;
+                c.panel = sd.panel, c.sides = 1 << s, c.kind = Carry::Move, c.pose = sd.last;
+                carries_.push_back(c);
+            }
+            continue;
+        }
         if (sd.width0 < 0) {
             // the other hand let go: carry on alone from where it is now (its dead zone afresh)
             sd.start = sd.last = P->pose, sd.width0 = P->width;
@@ -2017,6 +2109,10 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
             // with the hand near the eyes: a fist pulled to the face flipped the panel between ticks)
             if (p_.maxTurn > 0) LimitTurn(sd.last, &c.pose, p_.maxTurn, p, sd.grabLocal);
             sd.last = c.pose;
+        }
+        if (c.kind == Carry::Move) {   // (for the let-go's rewind: Params::rewindMs)
+            sd.poses.emplace_back(in.nowNs, c.pose);
+            while (sd.poses.size() > 2 && in.nowNs - sd.poses.front().first > 500'000'000) sd.poses.erase(sd.poses.begin());
         }
         carries_.push_back(c);
     }

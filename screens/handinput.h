@@ -410,6 +410,17 @@ struct Params {
     // along that line, to where it's throwDistance from the eyes. Slower, it stays where it was let go.
     bool cardThrow = true;
     double throwSpeed = 0.55, throwFitMs = 100, throwAngle = 60;
+    // Letting go without a nudge (user, 2026-10-11: "when I release, it sees a slight movement of the hand
+    // as I let go of the two fingers or the full hand"): while a hand holds a panel, the panel stops
+    // following it once its fingers open openFreeze past their tightest this hold (a fist's curl
+    // openFreezeCurl past its tightest), before ft-hands calls it let go; closed again (within
+    // openRelax): it follows on from where it is. Let go without that, slowly (under rewindSpeed m/s):
+    // it goes back to where it was rewindMs before (the opening the freeze didn't see). And the same
+    // hand doesn't take the panel it let go of again within regrabMs (a let-go's flicker).
+    // HANDS_RELEASE_FREEZE (0: off), HANDS_RELEASE_REWIND_MS (0: off).
+    double openFreeze = 0.008, openRelax = 0.004, openFreezeCurl = 0.3;
+    double rewindMs = 120, rewindSpeed = 0.3, regrabMs = 250;
+    double openBackMs = 70;   // ...the freeze puts it back where it was this long before the opening first showed
     double throwDistance = 3.0, throwMs = 400;
     // The push (HANDS_PUSH; user, 2026-10-10: "pushing against the monitor or window does not make it
     // go away or fly back"): an open hand (the four fingers' mean extension pushOpen or more, the
@@ -445,7 +456,8 @@ const char *ZoneName(Zone z);
 
 struct Event {
     // Throw: the panel goes to `to` over `ms` (ease-out): a flick at it, or a carry let go fast
-    enum Type { Motion, Press, Release, Control, GrabStart, GrabEnd, Throw, Scroll } type;   // Scroll: x, y notches (y > 0: down)
+    // Settle: after a GrabEnd, the panel goes back to `to` at once (Params::rewindMs)
+    enum Type { Motion, Press, Release, Control, GrabStart, GrabEnd, Throw, Scroll, Settle } type;   // Scroll: x, y notches (y > 0: down)
     int side = 0;               // 0 left, 1 right
     int panel = -1;
     double x = 0, y = 0;        // buffer pixels (Motion, Press, Release)
@@ -655,6 +667,7 @@ public:
         int fistPairs = 0;                           // two fists that took a panel by their shape (Params::fistPair)
         int scrolls = 0, scrollNotches = 0;          // two-finger scrolls, and the notches they sent
         int motionPresses = 0;                       // presses by motion (Params::motionPress)
+        int releaseFreezes = 0, rewinds = 0, regrabsRefused = 0;   // letting go (Params::openFreeze, rewindMs, regrabMs)
         int settles = 0, settledFists = 0;           // pinches that waited to become fists (Params::fistSettleMs), and did
         int joins = 0;                               // second hands joining a held panel (Params::joinFront)
         int buttonPinches = 0, heldByOther = 0;      // buttons pressed by a pinch; pokes refused on a panel the other hand holds
@@ -772,6 +785,18 @@ private:
         int64_t upNs = 0;                 // the capture time of the first hands frame its gesture was up
         int64_t flickNs = INT64_MIN / 2;  // the last flick or push (Params::flickRefractoryMs)
         int64_t busyNs = INT64_MIN / 2;   // the last tick it pressed or held (Params::pushAfterMs)
+        // letting go (Params::openFreeze): the fingers' tightest gap this hold (a fist: its tightest curl),
+        // and whether the panel has stopped following (they began to open); the panel's recent poses
+        // (Params::rewindMs); when and what it last let go of (Params::regrabMs)
+        double tightest = 1, tightestCurl = 9, apartEma = -1, curlEma = -1;
+        int openRun = 0;
+        int64_t openNs = 0;
+        bool snapBack = false;
+        double apartDev = 0, curlDev = 0;
+        bool frozen = false;
+        std::vector<std::pair<int64_t, Mat>> poses;
+        int64_t letGoNs = INT64_MIN / 2;
+        int letGoPanel = -1;
     };
     enum Why : unsigned {
         kOneFrame = 1, kOneView = 2, kBent = 4, kNotNearest = 8, kPinching = 16, kBusy = 32, kOtherHand = 64,
@@ -789,6 +814,7 @@ private:
     // byPinch: ft-hands called it a pinch (a closed hand, Params::fistIndex).
     void FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited, bool byPinch = false);
     void FistPair(const Input &in, const std::vector<Panel> &panels);
+    bool Opening(int s, const Input &in);
     // A pinch on the content (not a grab zone): a click where the fingers met (at c), held with the pinch.
     void PinchClick(int s, const Input &in, const std::vector<Panel> &panels, const float c[3]);
     // A pinch or a grip that began at a panel the other hand holds: the second anchor (Params::joinFront).

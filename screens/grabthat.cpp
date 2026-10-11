@@ -110,6 +110,7 @@ void Detector::Open(Side &sd, int64_t t, const Hand &h, const Mat &head) {
     sd.lastOpen = t;
     for (int i = 0; i < 3; ++i) sd.eye[i] = head.m[i][3];
     h.Palm(sd.palm);
+    palmmenu::PalmNormal(h, sd.normal);
 }
 
 void Detector::Frame(int64_t t, const std::vector<Hand> &hands, const Mat &head, const bool allowed[2]) {
@@ -213,6 +214,7 @@ void Detector::Frame(int64_t t, const std::vector<Hand> &hands, const Mat &head,
                     Fire x;
                     x.side = s, x.t = t, x.head = head, x.facing = sd.facing, x.speed = sd.speed;
                     std::copy(sd.eye, sd.eye + 3, x.eye), std::copy(sd.palm, sd.palm + 3, x.palm);
+                    std::copy(sd.normal, sd.normal + 3, x.normal);
                     h->Palm(x.fist);
                     fired_.push_back(x);
                     ++stats.fires;
@@ -229,6 +231,7 @@ bool Detector::Aim(int side, Fire *out, double *progress) const {
     if (!p_.on || sd.state == State::Idle) return false;
     out->side = side, out->t = sd.lastSeen, out->head = sd.head;
     std::copy(sd.eye, sd.eye + 3, out->eye), std::copy(sd.palm, sd.palm + 3, out->palm);
+    std::copy(sd.normal, sd.normal + 3, out->normal);
     for (int i = 0; i < 3; ++i) out->fist[i] = sd.palm[i];
     *progress = sd.state == State::Opening ? std::clamp((sd.lastSeen - sd.since) / (p_.armMs * 1e6), 0.0, 1.0) : 1.0;
     return true;
@@ -273,7 +276,27 @@ bool RayHit(const Target &p, const double from[3], const double dir[3], double *
     return false;
 }
 
-int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k) {
+double OffDeg(const Target &p, const double from[3], const double dir[3]) {
+    // the outline, sampled (n steps an edge): seen from outside it, the nearest point is on it
+    const int n = 48;
+    double best = 180;
+    for (int e = 0; e < 4; ++e)
+        for (int i = 0; i <= n; ++i) {
+            const double s = double(i) / n - 0.5;
+            const double u = e < 2 ? s * p.width : (e == 2 ? -0.5 : 0.5) * p.width;
+            const double v = e < 2 ? (e == 0 ? -0.5 : 0.5) * p.height : s * p.height;
+            double x = u, z = 0;   // (on a curved one along its curve, as RayHit)
+            if (p.curve > 0) x = p.curve * std::sin(u / p.curve), z = p.curve * (1 - std::cos(u / p.curve));
+            double d[3];
+            for (int r = 0; r < 3; ++r) d[r] = p.pose.m[r][0] * x + p.pose.m[r][1] * v + p.pose.m[r][2] * z + p.pose.m[r][3] - from[r];
+            const double l = std::sqrt(Dot(d, d));
+            if (l < 1e-6) continue;
+            best = std::min(best, std::acos(std::clamp(Dot(d, dir) / l, -1.0, 1.0)) * 180 / M_PI);
+        }
+    return best;
+}
+
+int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k, Closest *closest) {
     double dir[3] = {f.palm[0] - f.eye[0], f.palm[1] - f.eye[1], f.palm[2] - f.eye[2]};
     const double l = std::sqrt(Dot(dir, dir));
     int best = -1;
@@ -284,12 +307,24 @@ int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k) {
     };
     if (l > 1e-6) {
         for (double &x : dir) x /= l;
+        // one the line meets (within aimMargin), the nearest
         for (const Target &p : panels) {
             double u, v, t;
             if (near(p) || !RayHit(p, f.eye, dir, &u, &v, &t)) continue;
-            const double margin = std::max(k.aimMargin, t * std::tan(k.aimMarginDeg * M_PI / 180));
-            if (std::fabs(u) <= p.width / 2 + margin && std::fabs(v) <= p.height / 2 + margin && t < bestT)
+            if (std::fabs(u) <= p.width / 2 + k.aimMargin && std::fabs(v) <= p.height / 2 + k.aimMargin && t < bestT) {
                 bestT = t, best = p.index;
+                if (closest) closest->index = p.index, closest->deg = 0;
+            }
+        }
+        // else the one it passes nearest, within aimMarginDeg
+        if (best < 0) {
+            double bestDeg = k.aimMarginDeg;
+            for (const Target &p : panels) {
+                if (near(p)) continue;
+                const double off = OffDeg(p, f.eye, dir);
+                if (closest && off < closest->deg) closest->index = p.index, closest->deg = off;
+                if (off <= bestDeg) bestDeg = off, best = p.index;
+            }
         }
     }
     if (best >= 0 || k.headCone <= 0) return best;

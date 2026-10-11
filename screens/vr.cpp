@@ -2438,10 +2438,20 @@ void GrabThat(const grabthat::Fire &f) {
     const std::vector<grabthat::Target> targets = GrabThatTargets();
     const grabthat::Params &k = g_grabThat.params();
     const char *hand = f.side ? "right" : "left";
-    const int i = grabthat::Pick(targets, f, k);
-    if (i < 0)
-        return (void)std::printf("grab that (%s hand): no panel there (the palm %.0f deg off its line, %.2f m/s as it was held out)\n",
-                                 hand, f.facing, f.speed);
+    grabthat::Closest closest;
+    const int i = grabthat::Pick(targets, f, k, &closest);
+    if (i < 0) {
+        // where the line went (seen from the head: right and up of straight ahead), and the panel it passed nearest
+        double d[3], h[3];
+        for (int q = 0; q < 3; ++q) d[q] = f.palm[q] - f.eye[q];
+        for (int q = 0; q < 3; ++q) h[q] = f.head.m[0][q] * d[0] + f.head.m[1][q] * d[1] + f.head.m[2][q] * d[2];
+        const std::string near = closest.index >= 0 ? "; nearest screen " + std::to_string(closest.index + 1) + ", " +
+                                                          std::to_string(int(std::lround(closest.deg))) + " deg off" : "; no panel it may take";
+        return (void)std::printf("grab that (%s hand): no panel there (the line %+.0f deg right, %+.0f deg up of where the head points%s; "
+                                 "%zu it may take; the palm %.0f deg off its line, %.2f m/s as it was held out)\n",
+                                 hand, std::atan2(h[0], -h[2]) * 180 / M_PI, std::atan2(h[1], std::hypot(h[0], h[2])) * 180 / M_PI,
+                                 near.c_str(), targets.size(), f.facing, f.speed);
+    }
     Screen &s = g_screens[i];
     Mat now;
     if (!ScreenPose(s, &now)) return;
@@ -3028,12 +3038,16 @@ bool ft_vr_init(void) {
     num("HANDS_GRAB_THAT_WIDTH", gt.maxWidth, 0, 12);
     num("HANDS_GRAB_THAT_FROM", gt.nearest, 0, 5);      // panels nearer than this aren't taken (0: any, near ones go back)
     num("HANDS_GRAB_THAT_MARGIN", gt.aimMargin, 0, 0.5);  // the line through the palm may pass this far off a panel
+    num("HANDS_GRAB_THAT_MARGIN_DEG", gt.aimMarginDeg, 0, 20);   // ...or this far (deg seen from the eyes) when it meets none
     num("HANDS_GRAB_THAT_FACING", gt.aimFacing, 0, 90);   // the palm along the aim within this (deg; 0: any)
     if (gt.on)
         std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s); "
                     "it takes a panel the line through the palm meets%s, %s, not one held, the palm within %.0f deg of the line\n",
                     gt.distance, gt.maxWidth > 0 ? (", screens at most " + std::to_string(gt.maxWidth).substr(0, 4) + " m wide").c_str() : "",
-                    gt.aimMargin > 0 ? (" (or passes " + std::to_string(int(std::lround(gt.aimMargin * 100))) + " cm off)").c_str() : "",
+                    ((gt.aimMargin > 0 ? " (or passes " + std::to_string(int(std::lround(gt.aimMargin * 100))) + " cm off)" : std::string()) +
+                     (gt.aimMarginDeg > 0 ? " (else the one it passes nearest, within " + std::to_string(int(std::lround(gt.aimMarginDeg))) + " deg)"
+                                          : std::string()))
+                        .c_str(),
                     gt.nearest > 0 ? ("farther than " + std::to_string(gt.nearest).substr(0, 4) + " m (push, flick or throw near ones away)").c_str()
                                    : "any distance (at a near one: back where it came from)",
                     gt.aimFacing > 0 ? gt.aimFacing : 180.0);

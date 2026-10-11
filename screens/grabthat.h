@@ -90,11 +90,17 @@ struct Params {
     double reachSlack = 0.35;
     double animMs = 250;
     // Which window: the one the line from the eyes through the open palm meets (within aimMargin
-    // of its edges, or aimMarginDeg seen from the eyes if that's more), the nearest; with headCone
-    // > 0, else the one nearest the head's forward direction within it. Since the fourth live test
-    // (user, 2026-10-10: "make the trigger more precise") the line has to meet the panel itself:
-    // 0, 0 and no head cone (0.10 m, 3 deg and 20 deg before). HANDS_GRAB_THAT_MARGIN (m).
-    double aimMargin = 0, aimMarginDeg = 0, headCone = 0;   // m, degrees, degrees
+    // of its edges), the nearest; else the one whose outline the line passes nearest, within
+    // aimMarginDeg seen from the eyes; with headCone > 0, else the one nearest the head's forward
+    // direction within it. The fourth live test (user, 2026-10-10: "make the trigger more precise")
+    // made the line meet the panel itself (0, 0 and no head cone; 0.10 m, 3 deg and 20 deg before),
+    // and the fifth found that too strict (user: "it couldn't be pulled back in"): the open palm is
+    // held out below the line of sight, not over the window, so the line from the eyes through it
+    // runs 12-15 degrees under where the head points (the user's flag 150115) and passes just under
+    // a panel the user looks at the middle of (one thrown 3 m out, 1.35 m tall, is 12.7 degrees
+    // each way). 6 degrees takes those; a line that meets a panel still beats one that only passes
+    // near another. HANDS_GRAB_THAT_MARGIN (m), HANDS_GRAB_THAT_MARGIN_DEG.
+    double aimMargin = 0, aimMarginDeg = 6, headCone = 0;   // m, degrees, degrees
     // ...and only a panel farther than `nearest` from the eyes (its centre): one at arm's reach is
     // the hands' already (user: "only activate if the window is not already held and closed up";
     // push, flick or throw it to send it away). 0: any, and the gesture at a near one sends it back
@@ -126,6 +132,7 @@ struct Fire {
     int side = 0;
     int64_t t = 0;
     double eye[3] = {0, 0, 0}, palm[3] = {0, 0, 0}, fist[3] = {0, 0, 0};
+    double normal[3] = {0, 0, 0};   // the palm's normal at the last open frame (out of the palm)
     Mat head{};
     // how it was held out (for the log and the flag replays): the palm's facing off the aim on average
     // (degrees) and its speed (its way over the hold, m/s) over the arming hold
@@ -165,7 +172,7 @@ private:
         State state = State::Idle;
         uint32_t handId = 0;
         int64_t since = 0, lastSeen = 0, lastOpen = 0, quietUntil = 0, claimUntil = 0;
-        double eye[3] = {0, 0, 0}, palm[3] = {0, 0, 0};
+        double eye[3] = {0, 0, 0}, palm[3] = {0, 0, 0}, normal[3] = {0, 0, 0};
         Mat head{};                   // the head on the last frame
         double thumb = 0;             // thumb tip to index tip now (m)
         double holdFrom[3] = {0, 0, 0};   // the arming hold: where the palm was as it began,
@@ -193,7 +200,16 @@ struct Target {
 bool RayHit(const Target &p, const double from[3], const double dir[3], double *u, double *v, double *t);
 // The panel a fired gesture means (see Params::aimMargin), or -1.
 // Panels nearer the eyes than Params::nearest aren't taken.
-int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k);
+// closest (optional): of those it could take, the one whose outline the line passes nearest, and
+// how far off (degrees seen from the eyes; 0 on it): for the log when nothing is taken.
+struct Closest {
+    int index = -1;
+    double deg = 180;
+};
+int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k, Closest *closest = nullptr);
+// How far (degrees, seen from `from`) the line along `dir` (unit) passes off the panel's outline
+// (its edges, along the curve on a curved one); for a line that meets the panel, its nearest edge.
+double OffDeg(const Target &p, const double from[3], const double dir[3]);
 // Where a panel comes to (see Params::distance), facing the eyes.
 Mat Arrival(const Fire &f, const Params &k);
 // What the gesture does to the panel it picked: it came by the gesture (`came`) and is within arm's

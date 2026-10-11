@@ -95,6 +95,7 @@ HANDS_GRAB_THAT_DISTANCE=0.45  # ... this far (m) ahead of the eyes, at the fist
 HANDS_GRAB_THAT_WIDTH=0.6  # ... a screen wider than this (m) comes at this width (0 = as it is; floating windows keep their size)
 HANDS_GRAB_THAT_FROM=0.8   # ... only a panel whose centre is farther than this (m) from the eyes, and not one held (0 = any: at one near you it goes back where it came from, or is centred)
 HANDS_GRAB_THAT_MARGIN=0   # ... the line from the eyes through the open palm has to meet the panel, or pass this close (m) to it
+HANDS_GRAB_THAT_MARGIN_DEG=6  # ... or, meeting none, the panel it passes nearest within this many degrees (seen from the eyes: the open palm is held under the line of sight, so the line runs just under a panel you look at) (0 = it has to meet one)
 HANDS_GRAB_THAT_FACING=55  # ... the palm facing along that line within this many degrees while it's held out (0 = any way)
 HANDS_NEAR=1               # Frametop panels (direct touch): poke to click, pinch the border to move or resize, a fist to carry, gaze or not (1 = with POINTER_HANDS=1, when the pointer helper says a hand is bare | on = the same without POINTER_HANDS: the helper runs only the handoff for it | 0 = off | force = always, for testing)
 HANDS_CUTOUTS=0            # hands: 1 = also cut a round hole per hand in Frametop's panels, so Room View shows the real hand through them (off: ft-handview draws the hands)

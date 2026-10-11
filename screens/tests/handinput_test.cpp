@@ -3187,9 +3187,20 @@ void TestGrabThatPlace() {
         CHECK(grabthat::Pick(panels, f, cone) == -1);
         f.head = Identity();
     }
-    // the line has to meet the panel itself now (no margin): 2 cm past the big one's left edge, nothing
-    CHECK(aim(-(0.8 + 0.02) * 0.4 / 2, 0, -0.4) == -1);
+    // past the big one's left edge: 2 cm (0.6 deg) takes it (6 deg since the fifth live test); with no
+    // margin (the fourth) nothing; 10 deg past it, nothing
+    CHECK(aim(-(0.8 + 0.02) * 0.4 / 2, 0, -0.4) == 0);
     CHECK(aim(-(0.8 - 0.02) * 0.4 / 2, 0, -0.4) == 0);
+    {
+        grabthat::Params exact = k;
+        exact.aimMarginDeg = 0;
+        f.palm[0] = -(0.8 + 0.02) * 0.4 / 2, f.palm[1] = 0, f.palm[2] = -0.4;
+        grabthat::Closest c;
+        CHECK(grabthat::Pick(panels, f, exact, &c) == -1 && c.index == 0);
+        NEAR(c.deg, (std::atan(0.82 / 2) - std::atan(0.8 / 2)) * 180 / M_PI, 0.05);
+        const double a = std::atan(0.45 / 2) + 10 * M_PI / 180;   // 10 deg over its top edge
+        CHECK(aim(0, 0.4 * std::tan(a), -0.4) == -1);
+    }
     {   // a panel within arm's reach (0.8 m of the eyes) isn't taken: the one behind it is
         std::vector<Target> two = panels;
         two.push_back(Target{});
@@ -3251,9 +3262,12 @@ void TestGrabThatPlace() {
         grabthat::Params wide = k;          // (with the margin it had before the fourth live test)
         wide.aimMargin = 0.10, wide.aimMarginDeg = 3;
         CHECK(grabthat::Pick(far, g, wide) == 5);
-        CHECK(grabthat::Pick(far, g, k) == -1);   // now: the line has to meet it
-        g.palm[0] = 0.25 * 0.4 / 3;               // ...on it: it comes
-        CHECK(grabthat::Pick(far, g, k) == 5);
+        CHECK(grabthat::Pick(far, g, k) == 5);    // (2.7 deg: within 6 since the fifth live test)
+        grabthat::Params exact = k;
+        exact.aimMarginDeg = 0;
+        CHECK(grabthat::Pick(far, g, exact) == -1);   // the fourth live test's: the line has to meet it
+        g.palm[0] = 0.25 * 0.4 / 3;                   // ...on it: it comes
+        CHECK(grabthat::Pick(far, g, exact) == 5);
         CHECK(grabthat::Decide(false, far[0].pose, Identity(), k) == Outcome::Bring);
     }
 }
@@ -4089,6 +4103,128 @@ void TestPalmMenuStrict() {
 
 // The user's "grab that" at a panel already at arm's reach (where the gesture would bring one): it
 // still fires, twice; the open hand doesn't poke it, nor the fist grab it.
+// The fifth live test (2026-10-10 22:55): "grab that" brought the 3.22 m desktop in (0.6 m wide), the
+// user carried it by the bar and threw it (3.0 m out, 3.22 m wide again), then "grab that" at it found
+// "no panel there" five times, the palm 36-38 deg off its line each time. The open palm is held out
+// under the line of sight, not over the window: from the eyes through it is 12-15 deg under where the
+// head points and 10-15 right (the user's flag 150115), so at a panel the user looks at the middle of,
+// thrown 3 m out and 1.35 m tall (12.7 deg each way), it passes just under its bottom edge.
+void TestGrabThatAfterThrow() {
+    using grabthat::Target;
+    const double W = 3.22, H = 3.22 * 1440 / 3440, R = 2.888;   // the live desktop: 3440x1440, curved
+    GrabRig g;   // head at the origin, looking along -z
+    const double palm[3] = {0.1, -0.11, -0.45};   // as the flag holds it: 12 deg right, 14 under
+    auto gesture = [&]() -> const grabthat::Fire * {
+        const size_t n = g.fires.size();
+        for (int k = 0; k < 10; ++k) g.Frame({StopHand(palm[0], palm[1], palm[2])});
+        for (int k = 1; k <= 6; ++k) {
+            const double f = k / 6.0;
+            g.Frame({StopHand(palm[0], palm[1], palm[2] + 0.15 * f, f, k >= 2 ? 2 : 1)});
+        }
+        for (int k = 0; k < 40; ++k) g.Frame({StopHand(palm[0], palm[1], palm[2] + 0.15, 1, 2)});   // (past againMs)
+        return g.fires.size() == n + 1 ? &g.fires.back() : nullptr;
+    };
+    grabthat::Params k, exact = k;
+    exact.aimMarginDeg = 0;   // (the fourth live test's: the line has to meet it)
+    // 1. the desktop 2.5 m ahead at eye level (15 deg each way): it comes, as it did live
+    std::vector<Target> t(1);
+    t[0].index = 0, t[0].pose = At(0, 0, -2.5), t[0].width = W, t[0].height = H, t[0].curve = R;
+    const grabthat::Fire *f = gesture();
+    CHECK(f && grabthat::Pick(t, *f, exact) == 0 && grabthat::Pick(t, *f, k) == 0);
+    if (!f) return;
+    t[0].pose = grabthat::Arrival(*f, k), t[0].width = 0.6, t[0].height = 0.6 * 1440 / 3440;
+    // 2. carried by the bar and let go moving out and up (the live one: 1.30 m/s, 26 deg off straight out)
+    Rig r;
+    r.panels[0].controls.clear();
+    const double v = -0.28125 + 0.01;
+    double x = 0.1, y = v, z = 0;
+    auto hand = [&](double open) {
+        SynthHand h = CardHand(x, y, open);
+        h.contact[2] += z;
+        return h;
+    };
+    for (double o : {1.0, 1.0, 0.8, 0.6, 0.4, 0.2}) r.Frame({hand(o)});
+    const double at[3] = {0.1, v, -0.5};
+    r.Frame({hand(0)});
+    r.synth.Pinch(1, true, r.t, at, 1);
+    r.Frame({hand(0)});
+    for (int q = 0; q < 10; ++q) r.Frame({hand(0)});
+    const double dir[3] = {0, std::sin(26 * M_PI / 180), -std::cos(26 * M_PI / 180)};
+    for (int q = 1; q <= 8; ++q) {
+        x += dir[0] * 1.3 / 30, y += dir[1] * 1.3 / 30, z += dir[2] * 1.3 / 30;
+        if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
+        r.Frame({hand(0)});
+    }
+    r.synth.Pinch(1, false, r.t, at, 1);
+    for (int q = 0; q < 4; ++q) {
+        x += dir[0] * 1.3 / 30, y += dir[1] * 1.3 / 30, z += dir[2] * 1.3 / 30;
+        r.Frame({hand(1.0)});
+    }
+    const auto thrown = r.Last(Event::Throw);
+    CHECK(thrown.has_value());
+    if (!thrown) return;
+    const double out = std::hypot(std::hypot(thrown->to.m[0][3], thrown->to.m[1][3]), thrown->to.m[2][3]);
+    NEAR(out, 3.0, 0.01);
+    CHECK(thrown->to.m[1][3] > 0.3);   // up along the throw: above the eyes
+    t[0].pose = thrown->to, t[0].width = W, t[0].height = H;   // (its width back: vr.cpp's SendAwayWidth)
+    // 3. "grab that" at it again, the head turned to its middle: seen from there it's 3 m straight ahead,
+    // facing the eyes (the throw faces it at them). The line passes under it: the fourth live test's rule
+    // found nothing there (as live); 6 deg takes it.
+    std::vector<Target> seen = t;
+    seen[0].pose = At(0, 0, -out);
+    f = gesture();
+    CHECK(f != nullptr);
+    if (!f) return;
+    grabthat::Closest c;
+    const int before = grabthat::Pick(seen, *f, exact, &c), now = grabthat::Pick(seen, *f, k);
+    std::printf("grab that after a throw (the fifth live test): the line passes %.1f deg under the thrown desktop; "
+                "it %s (with no margin: %s)\n", c.deg, now == 0 ? "comes" : "doesn't come", before == 0 ? "comes" : "nothing there");
+    CHECK(before == -1 && c.index == 0 && c.deg > 0.5 && c.deg < 6);
+    CHECK(now == 0);
+    // 4. ...or at a remote display after that (live 103: 4.85 x 1.36 m, curved 2.11 m, 2.1 m to the
+    // right), the head turned to it: it comes, not the thrown desktop (90 deg to the left now)
+    std::vector<Target> two = seen;
+    two[0].pose = RotY(M_PI / 2, -out, 0, 0);
+    two.push_back(Target{102, At(0, 0, -2.1), 4.85, 1.36, 2.11});
+    CHECK(grabthat::Pick(two, *f, k) == 102);
+    // 5. still precise: a line meeting a panel beats one passing near another nearer; one passing 10
+    // deg off every panel takes none; a near one (at arm's reach) isn't taken
+    const double pitch = std::atan2(f->palm[1] - f->eye[1], -(f->palm[2] - f->eye[2])),
+                 yaw = std::atan2(f->palm[0] - f->eye[0], -(f->palm[2] - f->eye[2]));
+    std::vector<Target> pair = seen;
+    pair[0].pose = At(3 * std::tan(yaw), 3 * std::tan(pitch), -3);   // the line meets it in its middle now
+    pair.push_back(Target{7, At(1.5 * std::tan(yaw), 1.5 * std::tan(pitch + 3 * M_PI / 180) + 0.17, -1.5), 0.6, 0.34, 0});   // nearer, 3 deg over the line
+    CHECK(grabthat::Pick(pair, *f, k) == 0);
+    pair.erase(pair.begin());
+    CHECK(grabthat::Pick(pair, *f, k) == 7);   // (alone, it's taken)
+    std::vector<Target> off = seen;
+    off[0].pose = At(0, 3 * std::tan(pitch + 10 * M_PI / 180) + H / 2, -3);   // its bottom edge 10 deg over the line
+    CHECK(grabthat::Pick(off, *f, k) == -1);
+    std::vector<Target> nearOne = seen;
+    nearOne[0].pose = grabthat::Arrival(*f, k), nearOne[0].width = 0.6, nearOne[0].height = 0.25;
+    CHECK(grabthat::Pick(nearOne, *f, k) == -1);
+    // the user's own example: both fires at a desktop like the live one, 3 m out where the head pointed
+    // as each fired
+    const std::string dir2 = FlagsDir() + "/flag-20261010-150115";
+    std::vector<grabthat::Fire> fires;
+    double flagT = 0, secs = 0;
+    if (!ReplayFlag(dir2, fires, &flagT, &secs) || fires.size() != 2) {
+        std::printf("grab that after a throw: %s not here, its fires skipped\n", dir2.c_str());
+        return;
+    }
+    int took = 0, tookExact = 0;
+    for (const auto &x2 : fires) {
+        const double fw[3] = {-x2.head.m[0][2], -x2.head.m[1][2], -x2.head.m[2][2]};
+        const double ctr[3] = {x2.eye[0] + 3 * fw[0], x2.eye[1] + 3 * fw[1], x2.eye[2] + 3 * fw[2]};
+        const Panel P = Facing(ctr, 0, x2.eye);
+        const std::vector<Target> one{{0, P.pose, W, H, R}};
+        took += grabthat::Pick(one, x2, k) == 0, tookExact += grabthat::Pick(one, x2, exact) == 0;
+    }
+    std::printf("grab that after a throw, the user's flag: %d of 2 fires take a 3.22 m desktop 3 m out where the head points "
+                "(%d with no margin)\n", took, tookExact);
+    CHECK(took == 2);
+}
+
 void TestGrabThatAtNearPanel() {
     const std::string dir = FlagsDir() + "/flag-20261010-150115";
     std::vector<grabthat::Fire> fires;
@@ -4620,8 +4756,19 @@ int ScanFlags(int n, char **dirs) {
         }
         std::printf("%s: %.0f s, armed %d, claimed %d frames, %zu fire(s)", dirs[i], secs, arms, claimed, fires.size());
         for (const auto &f : fires)
-            std::printf(" %s at %+.2f s (palm %.0f deg off the aim, %.2f m/s at most)", f.side ? "right" : "left", (f.t - flagT) / 1e9,
+        {
+            std::printf(" %s at %+.2f s (palm %.0f deg off the aim, %.2f m/s at most", f.side ? "right" : "left", (f.t - flagT) / 1e9,
                         f.facing, f.speed);
+            // the line from the eyes through the palm, seen from the head: degrees right and up of straight ahead
+            double d[3], h[3];
+            for (int q = 0; q < 3; ++q) d[q] = f.palm[q] - f.eye[q];
+            for (int q = 0; q < 3; ++q) h[q] = f.head.m[0][q] * d[0] + f.head.m[1][q] * d[1] + f.head.m[2][q] * d[2];
+            std::printf("; the eyes' line through it %+.0f deg right, %+.0f deg up, %.2f m out", std::atan2(h[0], -h[2]) * 180 / M_PI,
+                        std::atan2(h[1], std::hypot(h[0], h[2])) * 180 / M_PI, std::sqrt(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]));
+            for (int q = 0; q < 3; ++q) h[q] = f.head.m[0][q] * f.normal[0] + f.head.m[1][q] * f.normal[1] + f.head.m[2][q] * f.normal[2];
+            std::printf("; the palm faces %+.0f deg right, %+.0f deg up)", std::atan2(h[0], -h[2]) * 180 / M_PI,
+                        std::atan2(h[1], std::hypot(h[0], h[2])) * 180 / M_PI);
+        }
         {   // ...as before the fourth live test (no facing or stillness rule)
             grabthat::Params loose;
             loose.aimFacing = 0, loose.holdSpeed = 0;
@@ -4734,6 +4881,7 @@ int main(int argc, char **argv) {
     TestGrabThatPlace();
     TestGrabThatFlag();
     TestGrabThatAtNearPanel();
+    TestGrabThatAfterThrow();
     TestButtons();
     TestGuides();
     TestFistSettle();

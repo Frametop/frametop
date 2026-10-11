@@ -718,6 +718,17 @@ void TestNearClaim() {
     CHECK(!r.in.near(1));
     r.Frame({TipAt(0.7, 0, 0.05)});   // off to the side of the panel
     CHECK(!r.in.near(1));
+    // in the zone's margin (7.5-10 cm, after being in it) the ray stays hidden (near: "2" to the
+    // helper), but the hand's pinches are the helper's (not claimed: "1" only within the zone)
+    Rig m;
+    for (int k = 0; k < 5; ++k) m.Frame({PinchAt(0, 0, 0.05)});
+    CHECK(m.in.near(1) && m.in.claims(1));
+    for (int k = 0; k < 3; ++k) m.Frame({PinchAt(0, 0, 0.09)});
+    CHECK(m.in.near(1) && !m.in.claims(1));
+    const double mat[3] = {0, 0, -0.41};
+    m.synth.Pinch(1, true, m.t, mat, 1);
+    m.Frame({PinchAt(0, 0, 0.09)});
+    CHECK(m.Count(Event::Press) == 0 && m.Count(Event::GrabStart) == 0);
     // a pinch 10 cm out (beyond the zone) is the ray's or the gaze's: no grab, no click
     Rig f;
     for (int k = 0; k < 5; ++k) f.Frame({PinchAt(0, 0, 0.10)});

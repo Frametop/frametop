@@ -271,8 +271,15 @@ public:
     const std::map<int, std::vector<handcut::Glow>> &glows() const { return glows_; }
     const std::map<int, unsigned> &hovered() const { return hovered_; }
     const std::set<int> &nearPanels() const { return nearPanels_; }
-    // The near claim, per side, for the last hands frame (for the helper's "near").
+    // The near claim, per side, for the last hands frame (for the helper's "near"): near, the hand's
+    // ray stays hidden (with the leave margin and linger, so it doesn't flicker at the zone's edge);
+    // claims, its pinches and grips are ours: within the zone itself (or pressing, grabbing, or one
+    // waiting on "grab that"), so a pinch in the margin goes to the ray or the gaze.
     bool near(int side) const { return side_[side].state != State::Idle && side_[side].state != State::Off; }
+    bool claims(int side) const {
+        const Side &sd = side_[side];
+        return sd.state == State::Press || sd.state == State::Grab || (sd.state == State::Hover && (sd.inZone || sd.fistWait || sd.pinchWait));
+    }
     bool anyNear() const { return near(0) || near(1); }
     // A hand within Params::rateReach of a panel (for want-hz).
     bool approaching() const { return approaching_; }
@@ -316,6 +323,7 @@ private:
         bool quick = false;                  // ...decisively (Params::travel): one frame presses
         double inSpeed = 0, travelled = 0;   // ...how fast and from how far
         bool resting = false;                // the hand rests low by the body (Params::restBelow)
+        bool inZone = false;                 // within the zone itself on the last frame (not the margin)
         // The fingers over the last 400 ms (room, capture time): the index tip (the poke's approach),
         // and the thumb tip and the contact (the card pinch).
         struct Sample { int64_t t; float tip[3], thumb[3], contact[3], along[3]; };   // along: wrist to knuckles

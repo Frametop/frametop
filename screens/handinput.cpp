@@ -554,13 +554,15 @@ void HandInput::Near(int s, const Input &in, const std::vector<Panel> &panels, c
     ToF(palm, palmF);
     int best = -1;
     double key = 1e9;
+    sd.inZone = false;
     for (const Panel &P : panels) {
-        double reach = p_.nearFront + (sd.state == State::Hover && P.index == sd.panel ? p_.nearLeave : 0);
-        if (sd.resting) reach = std::min(reach, p_.restFront);
+        const double zone = sd.resting ? std::min(p_.nearFront, p_.restFront) : p_.nearFront;
+        const double reach = sd.state == State::Hover && P.index == sd.panel ? zone + p_.nearLeave : zone;
         for (const float *pt : {h->p[8], h->contact, h->pinchPoint, (const float *)palmF}) {
             const Hit t = Locate(P, pt);
-            if (t.d > p_.nearBack && t.d <= reach && InFootprint(P, t, margin) && std::fabs(t.d) < key)
-                key = std::fabs(t.d), best = P.index;
+            if (t.d <= p_.nearBack || t.d > reach || !InFootprint(P, t, margin)) continue;
+            if (t.d <= zone) sd.inZone = true;
+            if (std::fabs(t.d) < key) key = std::fabs(t.d), best = P.index;
         }
     }
     if (best >= 0) {
@@ -575,6 +577,7 @@ void HandInput::Near(int s, const Input &in, const std::vector<Panel> &panels, c
         if (sd.outSince < 0) sd.outSince = in.nowNs;
         if (in.nowNs - sd.outSince > int64_t(p_.leaveMs * 1e6)) EndAttempt(s), sd.state = State::Idle, sd.panel = -1;
     }
+    if (sd.state != State::Hover) sd.inZone = false;
 }
 
 void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, const Hand *h) {
@@ -770,7 +773,8 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
         else if (!in.grabThatArmed[s] || waited) sd.pinchWait = false, PinchBegin(s, in, panels, true);
     }
     if (newGrip && gr.down) FistBegin(s, in, panels, false);
-    if (newPinch && g.down && sd.state == State::Hover) PinchBegin(s, in, panels, false);
+    // (in the zone's margin the hand isn't ours: the pointer helper has its pinches)
+    if (newPinch && g.down && sd.state == State::Hover && sd.inZone) PinchBegin(s, in, panels, false);
 }
 
 bool HandInput::Straddled(int s, const Panel &P, int64_t now) const {
@@ -878,7 +882,7 @@ void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &pan
 void HandInput::FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited) {
     Side &sd = side_[s];
     const handcut::Gesture &gr = in.hands->grip(s);
-    if (!p_.fistGrab || sd.state != State::Hover || in.typing[s]) return;
+    if (!p_.fistGrab || sd.state != State::Hover || !sd.inZone || in.typing[s]) return;
     const Panel *P = Find(panels, sd.panel);
     if (!P || P->held) return;
     const Hand *h = HandFor(s, in.hands->seen(), gr.handId ? gr.handId : sd.handId);
@@ -893,7 +897,7 @@ void HandInput::FistBegin(int s, const Input &in, const std::vector<Panel> &pane
     for (const float *pt : {(const float *)palmF, h->pinchPoint}) {
         const Hit t = Locate(*P, pt);
         nearest = std::min(nearest, t.d);
-        if (t.d > p_.nearBack && t.d <= p_.nearFront + p_.nearLeave && InFootprint(*P, t, std::max(p_.nearMargin, 0.03))) at = true;
+        if (t.d > p_.nearBack && t.d <= p_.nearFront && InFootprint(*P, t, std::max(p_.nearMargin, 0.03))) at = true;
     }
     if (!at) {
         Log("%s fist by screen %d: not at it (the knuckles or palm %.1f cm out): nothing", SideName(s), P->index + 1, nearest * 100);

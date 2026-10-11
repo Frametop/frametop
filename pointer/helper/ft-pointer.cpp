@@ -344,11 +344,13 @@
 // (shoulder to knuckles) and h0, d0 those at the press, past 1.5 cm of reach, within 0.3-10 m.
 // Both ft-screens and the dashboard follow our device rigidly, so the panel goes with it. The
 // offset holds through the drop hold after the release.
-//   ft-screens' near claims: "near <capture_ns> <L 0|1> <R 0|1>" says, for each hands frame it
-// processed, which hands are near its panels (poke, grab). While those reports come, a gesture
-// waits up to 60 ms for the report on its begin's frame and is left to ft-screens if its hand was
-// near; a near hand has no ray. The fingertip at any overlay (a cast from 20 cm behind the index tip
-// along the finger, meeting one within 25 cm) counts as near too.
+//   ft-screens' near claims: "near <capture_ns> <L 0|1|2> <R 0|1|2>" says, for each hands frame it
+// processed, which hands are near its panels: 1 within its touch zone (poke, pinch, fist: the
+// gestures are its), 2 only in the zone's margin (the ray stays hidden so it doesn't flicker at the
+// edge, but the gestures stay ours; older ft-screens send only 0 and 1). While those reports come,
+// a gesture waits up to 60 ms for the report on its begin's frame and is left to ft-screens if its
+// hand was claimed (1); a near hand (1 or 2) has no ray. The fingertip at any overlay (a cast from
+// 20 cm behind the index tip along the finger, meeting one within 25 cm) counts as near too.
 //   A ray that woke the pointer lets it go POINTER_RAY_RELEASE (2 s) after it went, with no mouse
 // use and no gaze mode meanwhile. A ray that goes because its side's controller is in use or hands
 // aren't allowed lets it go at once, unless the mouse is in use. In gaze mode the gaze takes the
@@ -437,8 +439,8 @@
 // reload (re-read the settings below), debug (toggle a twice-a-second state log),
 // overlays (replies with the overlay list as JSON, see OverlayList),
 // vrbind/vrglobal/vrstatus (Frame controller buttons, see vrbuttons.h),
-// ctl ... and paused 0|1 (the relay, see Handoff), near <capture_ns> <L 0|1> <R 0|1> (ft-screens:
-// which hands are near its panels, for the hand ray),
+// ctl ... and paused 0|1 (the relay, see Handoff), near <capture_ns> <L 0|1|2> <R 0|1|2> (ft-screens:
+// which hands are near its panels, for the hand ray and the gestures),
 // and btn/scroll lines, which are forwarded to the driver unchanged. For layouts, with a
 // reply datagram to the sender's (abstract) address:
 //   place <overlay> <x> <y> <z> <yaw> <pitch> [roll [grab]]: centre in the standing
@@ -1253,7 +1255,8 @@ int main() {
     Clock::time_point devicesAt{};
     // ft-screens' near reports ("near <capture_ns> <L> <R>"): the last one, and when it came.
     uint64_t nearNs = 0;
-    bool nearSide[2] = {false, false};
+    bool nearSide[2] = {false, false};    // near (1 or 2): the hand's ray hides
+    bool nearClaim[2] = {false, false};   // ...and (1) its pinches and grips go to ft-screens
     Clock::time_point nearAt{};
     auto secsOf = [](Clock::time_point t) { return std::chrono::duration<double>(t.time_since_epoch()).count(); };
     // The hand ray (see "Hand ray" at the top): the body model, each side's ray, which one drives the
@@ -1842,6 +1845,7 @@ int main() {
                 int l, r;
                 if (std::sscanf(buf, "near %llu %d %d", &ns, &l, &r) == 3) {
                     nearNs = ns, nearSide[0] = l != 0, nearSide[1] = r != 0, nearAt = Clock::now();
+                    nearClaim[0] = l == 1, nearClaim[1] = r == 1;   // 2: the ray hides, the gestures stay ours
                     continue;
                 }
             }
@@ -2838,7 +2842,7 @@ int main() {
                         pendingBegins.push_back(p);
                         continue;
                     }
-                    if (screensNear && nearSide[s]) {  // ft-screens' (a grab or a poke)
+                    if (screensNear && nearClaim[s]) {  // ft-screens' (a grab, a poke, a click)
                         if (k != 1) pinchLog(s, k, "left to ft-screens (the hand is near its panel)");
                         continue;
                     }
@@ -2916,7 +2920,7 @@ int main() {
             }
             const PendingBegin q = p;
             pendingBegins.erase(pendingBegins.begin() + long(i));
-            if (reported && nearSide[q.side]) {
+            if (reported && nearClaim[q.side]) {
                 if (q.kind != 1) pinchLog(q.side, q.kind, "left to ft-screens (the hand is near its panel)");
                 else if (debug) std::printf("hand %s grip left to ft-screens (near)\n", q.side ? "right" : "left");
                 continue;

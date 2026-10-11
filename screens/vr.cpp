@@ -2447,13 +2447,17 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         if (bits != s.handHover) s.handHover = bits, ApplyAlpha(s);
         if (g_handInput.nearPanels().count(i)) s.nearUntil = g_tick + kControlsLinger;   // the controls show
     }
-    // the near claim, for each hands frame (the helper waits for it at a pinch's begin); a hand
-    // the palm menu has counts too, so its pinch doesn't click for the helper, and one closing
-    // into "grab that"'s fist, so its grip isn't a gaze grip
-    auto near = [](int k) { return g_handInput.near(k) || g_palm.shown(k) || g_grabThat.claims(k, g_handInput.frameNs()); };
+    // the near claim, for each hands frame (the helper waits for it at a pinch's begin): 1, the hand's
+    // pinches and grips are ours (within the touch zone; a hand the palm menu has, so its pinch
+    // doesn't click for the helper; one closing into "grab that"'s fist, so its grip isn't a gaze
+    // grip); 2, only its ray stays hidden (the zone's margin and linger: its pinches are the
+    // helper's); 0, neither. An older helper takes 2 as 1.
+    auto near = [](int k) {
+        if (g_handInput.claims(k) || g_palm.shown(k) || g_grabThat.claims(k, g_handInput.frameNs())) return "1";
+        return g_handInput.near(k) ? "2" : "0";
+    };
     if (g_handInput.newFrame() && (HandInputOn() || g_palm.params().on))
-        SendPointer("near " + std::to_string(g_handInput.frameNs()) + " " + (near(0) ? "1" : "0") + " " +
-                    (near(1) ? "1" : "0"));
+        SendPointer("near " + std::to_string(g_handInput.frameNs()) + " " + near(0) + " " + near(1));
     WantHz(g_handInput.anyNear() || g_handInput.approaching() || g_palm.anyShown() || g_grabThat.armed(0) || g_grabThat.armed(1));
 }
 

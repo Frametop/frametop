@@ -546,6 +546,11 @@ void TestPokeRefusals() {
             h.middleTip = gap, h.pitchDeg = 25;
             r.Frame({h});
         }
+        for (int mm = -5; mm <= 45; mm += 10) {   // and off again (two fingers about level click on the lift)
+            SynthHand h = TipAt(0.1, 0.05, mm / 1000.0);
+            h.middleTip = gap, h.pitchDeg = 25;
+            r.Frame({h});
+        }
         std::printf("poke with the middle finger straight, its tip %+.1f cm deeper than the index's: %d press(es)\n", gap * 100,
                     r.Count(Event::Press));
         CHECK(r.Count(Event::Press) == (gap < 0.01 ? 1 : 0));
@@ -796,9 +801,9 @@ void TestLost() {
     CHECK(r.in.pressing(1));
     SynthHand gone;
     gone.present = false;
-    for (int k = 0; k < 45; ++k) r.Frame({gone});   // 1.5 s: held (Params::holdLostMs)
+    for (int k = 0; k < 5; ++k) r.Frame({gone});   // a short gap: still pressed (Params::lostMs)
     CHECK(r.in.pressing(1) && r.Count(Event::Release) == 0);
-    for (int k = 0; k < 10; ++k) r.Frame({gone});
+    for (int k = 0; k < 10; ++k) r.Frame({gone});   // a press isn't held through a loss (2026-10-11: stuck taps)
     CHECK(r.Count(Event::Release) == 1 && r.Last(Event::Release)->lost);
     // taken away mid-press (a controller picked up): released as lost at once
     Rig q;
@@ -1502,9 +1507,7 @@ void TestHoldThroughLoss() {
         c.synth.Pinch(1, false, c.t, mid, 1);
         SynthHand o = PinchAt(0, 0, 0.01);
         o.open = 1;
-        c.Frame({o});
-        CHECK(c.in.pressing(1));
-        c.Frame({o});
+        c.Frame({o});   // the fingers seen apart: let go at once (Params::pinchApart, 2026-10-11: stuck clicks)
         CHECK(!c.in.pressing(1) && c.Count(Event::Release) == 1);
     }
     {
@@ -3265,7 +3268,7 @@ void TestGrabThatPlace() {
         CHECK(grabthat::Pick(far, g, wide) == 5);
         CHECK(grabthat::Pick(far, g, k) == 5);    // (2.7 deg: within 6 since the fifth live test)
         grabthat::Params exact = k;
-        exact.aimMarginDeg = 0;
+        exact.aimMarginDeg = 0, exact.smallDeg = 0;
         CHECK(grabthat::Pick(far, g, exact) == -1);   // the fourth live test's: the line has to meet it
         g.palm[0] = 0.25 * 0.4 / 3;                   // ...on it: it comes
         CHECK(grabthat::Pick(far, g, exact) == 5);
@@ -3888,6 +3891,30 @@ void TestTrackGate() {
 // click; two of them stretch, and the pair turns the panel on every axis (Params::stretchTurn).
 // Fists only resize (Params::fistResizeOnly, user 2026-10-11): one fist holds the panel still; two fists
 // pulled apart and moved and turned only scale it, about its centre where it was.
+// Two fists near a panel resize it by their shape alone, no grip from ft-hands (Params::fistPair).
+void TestFistPair() {
+    Rig r;
+    const Mat start = r.panels[0].pose;
+    // two fists 20 cm in front of the panel (beyond the fist grab's own reach), no grip or pinch events
+    for (int k = 0; k < 6; ++k) r.Frame({FistAt(-0.3, 0, 0.20, false, 1), FistAt(0.3, 0, 0.20, true, 2)});
+    CHECK(r.in.grabbing(0) && r.in.grabbing(1) && r.in.stats.fistPairs == 1);
+    for (int k = 1; k <= 30; ++k) {
+        const double f = k / 30.0;
+        r.Frame({FistAt(-0.3 - 0.1 * f, 0, 0.20, false, 1), FistAt(0.3 + 0.1 * f, 0, 0.20, true, 2)});
+    }
+    CHECK(r.carries.size() == 1 && r.carries[0].kind == Carry::Stretch && r.carries[0].width > 1.15);
+    if (r.carries.size() == 1) NEAR(r.carries[0].pose.m[0][3], start.m[0][3], 1e-4);
+    // the right hand opens: let go
+    SynthHand o = FistAt(0.4, 0, 0.20, true, 2);
+    o.curl = o.curlIndex = 0;
+    for (int k = 0; k < 3; ++k) r.Frame({FistAt(-0.4, 0, 0.20, false, 1), o});
+    CHECK(!r.in.grabbing(1));
+    // one fist alone, or two fists far from any panel: nothing
+    Rig q;
+    for (int k = 0; k < 6; ++k) q.Frame({FistAt(-0.3, 0, 0.60, false, 1), FistAt(0.3, 0, 0.60, true, 2)});
+    CHECK(!q.in.grabbing(0) && !q.in.grabbing(1));
+}
+
 void TestFistResizeOnly() {
     {
         Rig r;
@@ -3955,7 +3982,7 @@ void TestFistPinch() {
     // 10 cm (the panel rolls), both wrists tipped 25 deg about the line between them (it pitches)
     {
         Rig r;
-        r.in.params().fistResizeOnly = false;
+        r.in.params().fistResizeOnly = false, r.in.params().fistPair = false;   // (ft-hands' pinches; the shape: TestFistPair)
         auto both = [&](double sep, double lift, double tilt) {
             return std::vector<SynthHand>{FistAt(-0.3 - sep, 0, 0.05, false, 1, 90 - tilt), FistAt(0.3 + sep, lift, 0.05, true, 2, 90 - tilt)};
         };
@@ -4701,6 +4728,7 @@ void TestFlagTwoFists() {
     };
     Params before;   // as the live test ran
     before.fistSettleMs = 0, before.joinFront = 0, before.fistFront = 0, before.fistBack = 0, before.fistClaimCurl = 0;
+    before.fistPair = false;
     const Out was = run(before, 0);
     std::printf("two fists, the user's flags (before): %d press(es), %d grab(s), %d stretch(es), both hands %.1f s\n", was.presses,
                 was.grabs, was.stretches, was.both);
@@ -4848,6 +4876,7 @@ int ScanFlags(int n, char **dirs) {
                             run.fires.size(), run.palm.shows, run.palm.toggles, run.palm.notPlain);
                 for (const std::string &l : run.logs)
                     if (l.find("pressed") != std::string::npos || l.find("took") != std::string::npos || l.find("flick") != std::string::npos ||
+                        l.find("two fingers") != std::string::npos ||
                         l.find("push") != std::string::npos || l.find("both hands") != std::string::npos)
                         std::printf("    %s\n", l.c_str());
                 totals[0] += run.stats.pushes, totals[1] += run.palm.toggles, totals[2] += run.stats.flicks;
@@ -4911,6 +4940,7 @@ int main(int argc, char **argv) {
     TestFlick();
     TestCardThrow();
     TestTrackGate();
+    TestFistPair();
     TestFistResizeOnly();
     TestFistPinch();
     TestPush();

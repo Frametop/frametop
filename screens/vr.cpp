@@ -2596,6 +2596,7 @@ void UpdateGrabThat(const handinput::Input &in) {
 // fires; a push or a flick would throw it (an open palm close in front of it, toward it): dimmer.
 // HANDS_TARGET_GLOW.
 bool g_targetGlowOn = true;
+bool g_pushGlowOn = false;
 struct TargetGlow {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
     int panel = -1, texW = 0, texH = 0, texM = 0;
@@ -2617,8 +2618,9 @@ void UpdateTargetGlow() {
         // "grab that": the panel it would take now, as far along as the gesture is
         for (int k = 0; k < 2; ++k)
             if (g_grabThatAim[k] >= 0 && g_grabThatProgress[k] > want) best = g_grabThatAim[k], want = g_grabThatProgress[k];
-        // a push or a flick (dimmer)
-        if (best < 0)
+        // a push or a flick (dimmer; HANDS_PUSH_GLOW, off since 2026-10-11: "a near display that can't be
+        // pulled shouldn't have the white overlay when your palm faces it: it makes clicking annoying")
+        if (best < 0 && g_pushGlowOn)
             for (const auto &[i, a] : g_handInput.throwAims())
                 if (0.6 * a > want) best = i, want = 0.6 * a;
     }
@@ -2836,6 +2838,11 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 f.controller = true;   // the click filter holds a poke's wobble still (controller-click.h)
                 handle(&f, data);
                 break;
+            case handinput::Event::Scroll:
+                s.inputMs = NowMs();
+                f.type = FT_SCROLL, f.dx = e.x, f.dy = e.y;
+                handle(&f, data);
+                break;
             case handinput::Event::Release:
                 if (g_press.device == holder && (g_press.buttons & ButtonBit(BTN_LEFT))) {
                     g_press.buttons &= ~ButtonBit(BTN_LEFT);
@@ -2938,7 +2945,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         if (g_handInput.claims(k) || g_palm.shown(k) ||
             (g_grabThat.claims(k, g_handInput.frameNs()) && (!g_grabThat.armed(k) || g_grabThatAim[k] >= 0)))
             return "1";
-        return g_handInput.near(k) ? "2" : "0";
+        return g_handInput.rayHidden(k) ? "2" : "0";
     };
     if (g_handInput.newFrame() && (HandInputOn() || g_palm.params().on))
         SendPointer("near " + std::to_string(g_handInput.frameNs()) + " " + near(0) + " " + near(1));
@@ -3030,6 +3037,8 @@ bool ft_vr_init(void) {
     k.cardPinch = handcut::Setting("HANDS_CARD_PINCH", "1") != "0";
     k.fistGrab = handcut::Setting("HANDS_FIST_GRAB", "1") != "0";
     k.fistResizeOnly = handcut::Setting("HANDS_FIST_RESIZE_ONLY", "1") != "0";
+    k.fistPair = handcut::Setting("HANDS_FIST_PAIR", "1") != "0";
+    k.twoFingerScroll = handcut::Setting("HANDS_TWO_FINGER_SCROLL", "1") != "0";
     num("HANDS_POKE_REST_BELOW", k.restBelow, 0, 2);
     num("HANDS_POKE_REST_NEAR", k.restNear, 0, 2);
     // what a near grab carries, smoothed (handinput.h, Params::grab*)
@@ -3055,6 +3064,7 @@ bool ft_vr_init(void) {
     k.stretchTurn = handcut::Setting("HANDS_STRETCH_TURN", "1") != "0";
     k.gate = handcut::Setting("HANDS_TRACK_GATE", "1") != "0";
     g_targetGlowOn = handcut::Setting("HANDS_TARGET_GLOW", "1") != "0";
+    g_pushGlowOn = handcut::Setting("HANDS_PUSH_GLOW", "0") != "0";
     g_sendAwayRestore = handcut::Setting("HANDS_SEND_AWAY_WIDTH", "restore") != "keep";
     // the fourth live test (2026-10-10): two anchors, fists, buttons for hands, the soft glow at corners,
     // edges and buttons (handinput.h Params::joinFront, fistFront, buttonReach, pinchButtons, edgeGlow)
@@ -3076,8 +3086,11 @@ bool ft_vr_init(void) {
     gt.on = handcut::Setting("HANDS_GRAB_THAT", "1") != "0";
     num("HANDS_GRAB_THAT_DISTANCE", gt.distance, 0.2, 1.5);
     num("HANDS_GRAB_THAT_WIDTH", gt.maxWidth, 0, 12);
+    num("HANDS_PRESS_STILL_MS", g_handInput.params().pressStillMs, 0, 60000);   // a still press lets go after this
+    num("HANDS_RAY_HIDE_REACH", g_handInput.params().rayReach, 0, 1);   // a hand this near a panel hides its ray
     num("HANDS_GRAB_THAT_FROM", gt.nearest, 0, 5);      // panels nearer than this aren't taken (0: any, near ones go back)
     num("HANDS_GRAB_THAT_MARGIN", gt.aimMargin, 0, 0.5);  // the line through the palm may pass this far off a panel
+    num("HANDS_GRAB_THAT_SMALL", gt.smallDeg, 0, 30);   // small-looking panels: more margin
     num("HANDS_GRAB_THAT_MARGIN_DEG", gt.aimMarginDeg, 0, 20);   // ...or this far (deg seen from the eyes) when it meets none
     num("HANDS_GRAB_THAT_FACING", gt.aimFacing, 0, 90);   // the palm along the aim within this (deg; 0: any)
     {

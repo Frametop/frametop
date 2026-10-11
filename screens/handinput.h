@@ -108,6 +108,27 @@ struct Params {
     // ft-hands is asked for its full rate (want-hz) while a hand is this close to a panel, so a poke
     // that comes in from outside the near zone is seen at 30 Hz, not a still hand's 15
     double rateReach = 0.30;
+    // Stuck presses (user, 2026-10-11): a poke's press ends as the index curls under pressCurl; a pinch's
+    // click as the thumb and index tips are seen pinchApart apart; either held still (not dragging) past
+    // pressStillMs (0: never). HANDS_PRESS_STILL_MS.
+    double pressCurl = 1.2, pinchApart = 0.045, pressStillMs = 1500;
+    // Two-finger scroll (user, 2026-10-11: "tap on a display with two fingers, you can swipe to scroll"):
+    // the index and middle straight (scrollExtended) and together (tips within scrollTogether), one of
+    // them at the surface (scrollTouch in front or past it), on the content: the pointer goes there and
+    // moving them along the panel scrolls, a notch per scrollNotch (m), the content following the fingers
+    // (up: scroll down). Ends as they come off (release), part, or bend. HANDS_TWO_FINGER_SCROLL.
+    bool twoFingerScroll = true;
+    // A straight-middle poke looks like two fingers (the second live test: the middle reads nearly as
+    // straight, its tip as deep), so two fingers touching don't press: they wait. Moved scrollStart along
+    // the panel: a scroll; off again within scrollWaitMs: a click where they touched; still longer: a
+    // press there, as a poke's.
+    double scrollExtended = 1.4, scrollTogether = 0.035, scrollTouch = 0.006, scrollNotch = 0.012;
+    double scrollStart = 0.012, scrollWaitMs = 350, scrollLevel = 0.008, scrollOthersCurl = 1.3;
+    // A hand's fingertip or palm within rayReach in front of a panel (over it, 10 cm round) hides its
+    // ray, and for rayLingerMs after it leaves (user, 2026-10-11: "the laser still comes back at odd
+    // moments": the ray came up for a moment as the hand rose to a panel, 10-25 cm before the touch
+    // zone, and as it came away). HANDS_RAY_HIDE_REACH (0: only the touch zone and its margin).
+    double rayReach = 0.22, rayLingerMs = 800;
     // the poke (3.5)
     double extended = 1.5;      // index tip-to-wrist over knuckle-to-wrist: the finger is straight
                                 // (1.6 until 2026-10-10: a relaxed pointing finger read 1.5-1.6)
@@ -248,6 +269,18 @@ struct Params {
     // still (an anchor), and two hands on it with a fist among them only scale it about its centre,
     // no move or turn. Pinches keep carrying and turning. HANDS_FIST_RESIZE_ONLY (0: the fist carries).
     bool fistResizeOnly = true;
+    // Two fists near one panel resize it, by the hands' shape alone (user, 2026-10-11: "really hard to
+    // trigger: if there are two fists anywhere near the display, you should be able to resize it"; the
+    // fist grab waits on ft-hands' grip, which begins only on a hand seen open just before, at the
+    // panel): both hands closed (the index's extension fistPairIndex or less, the other three's mean
+    // fistPairCurl or less) with their palms within fistPairFront in front of the same panel (fistPairBack
+    // behind), over it or fistPairMargin round it, for fistPairFrames frames: both take it, as fists.
+    // Held while each stays closed (fistPairKeep: the curls' threshold to open); a hand lost: as any
+    // grab. HANDS_FIST_PAIR (0: off).
+    bool fistPair = true;
+    double fistPairIndex = 1.3, fistPairCurl = 1.25, fistPairKeep = 1.45;
+    double fistPairFront = 0.30, fistPairBack = -0.15, fistPairMargin = 0.30;
+    int fistPairFrames = 3;
     // ...and a pinch by a closed hand: the index curled (its extension, as `extended`, fistIndex or
     // less) with the middle, ring and little (their mean fistCurl or less). ft-hands calls a fist with
     // the thumb on the index a pinch: the third live test's two-fist stretch (flag-20261010-203215:
@@ -396,7 +429,7 @@ const char *ZoneName(Zone z);
 
 struct Event {
     // Throw: the panel goes to `to` over `ms` (ease-out): a flick at it, or a carry let go fast
-    enum Type { Motion, Press, Release, Control, GrabStart, GrabEnd, Throw } type;
+    enum Type { Motion, Press, Release, Control, GrabStart, GrabEnd, Throw, Scroll } type;   // Scroll: x, y notches (y > 0: down)
     int side = 0;               // 0 left, 1 right
     int panel = -1;
     double x = 0, y = 0;        // buffer pixels (Motion, Press, Release)
@@ -566,6 +599,8 @@ public:
     bool anyNear() const { return near(0) || near(1); }
     // A hand within Params::rateReach of a panel (for want-hz).
     bool approaching() const { return approaching_; }
+    // That hand hides its ray (Params::rayReach): at a panel, or was within rayLingerMs.
+    bool rayHidden(int side) const { return near(side) || frameNs_ < rayHideUntil_[side]; }
     // This Update processed a new hands frame, captured at frameNs().
     bool newFrame() const { return newFrame_; }
     int64_t frameNs() const { return frameNs_; }
@@ -601,6 +636,8 @@ public:
         int flicks = 0, throws = 0, heldFlick = 0;   // flicks and card throws; pokes not taken from a flick
         int pushes = 0, heldOpen = 0;                // pushes; pokes not taken from an open hand (Params::push)
         int fistPinches = 0;                         // fist grabs ft-hands called pinches (Params::fistIndex)
+        int fistPairs = 0;                           // two fists that took a panel by their shape (Params::fistPair)
+        int scrolls = 0, scrollNotches = 0;          // two-finger scrolls, and the notches they sent
         int settles = 0, settledFists = 0;           // pinches that waited to become fists (Params::fistSettleMs), and did
         int joins = 0;                               // second hands joining a held panel (Params::joinFront)
         int buttonPinches = 0, heldByOther = 0;      // buttons pressed by a pinch; pokes refused on a panel the other hand holds
@@ -660,6 +697,14 @@ private:
         uint32_t gripBegins = 0;             // ...the grip slot's
         bool knowGrip = false;
         bool byGrip = false;                 // a fist grab: the grip's end ends it
+        bool byShape = false;                // ...a two-fist pair's (Params::fistPair): the hand opening ends it
+        bool scrolling = false;              // two fingers on the panel, scrolling (Params::twoFingerScroll)
+        bool scrollPending = false;          // ...touching, not yet moved: a swipe scrolls, a lift clicks
+        int64_t pendingNs = 0;
+        double pendingX = 0, pendingY = 0;   // ...the buffer pixel it touched
+        int pendingPanel = -1;
+        double scrollU = 0, scrollV = 0;     // ...where the last notch was counted from (m on the panel)
+        int scrollOff = 0;                   // ...frames the fingers haven't looked like two fingers
         bool fistByPinch = false;            // ...that ft-hands called a pinch (Params::fistIndex): either ends it
         bool fistWait = false, pinchWait = false;   // a fist or pinch waiting on "grab that"
         int64_t waitSince = 0;
@@ -723,6 +768,7 @@ private:
     // A grip began (or waited on "grab that": waited): the fist grab, if the hand is at its panel.
     // byPinch: ft-hands called it a pinch (a closed hand, Params::fistIndex).
     void FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited, bool byPinch = false);
+    void FistPair(const Input &in, const std::vector<Panel> &panels);
     // A pinch on the content (not a grab zone): a click where the fingers met (at c), held with the pinch.
     void PinchClick(int s, const Input &in, const std::vector<Panel> &panels, const float c[3]);
     // A pinch or a grip that began at a panel the other hand holds: the second anchor (Params::joinFront).
@@ -798,6 +844,8 @@ private:
     std::vector<Carry> carries_;
     std::vector<std::string> logs_;
     bool approaching_ = false;
+    int64_t rayHideUntil_[2] = {0, 0};
+    int fistPairRun_ = 0, fistPairPanel_ = -1;
     std::map<int, std::vector<handcut::Glow>> glows_;
     std::map<int, unsigned> hovered_;
     std::map<int, CornerAim> corners_;

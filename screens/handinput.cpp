@@ -645,7 +645,7 @@ void HandInput::EndGrab(int s, bool lost) {
             o.width0 = -1;   // re-seeded in Carries
         }
     }
-    sd.state = State::Hover, sd.below = 0, sd.byGrip = sd.fistByPinch = false;
+    sd.state = State::Hover, sd.below = 0, sd.byGrip = sd.fistByPinch = sd.byShape = false;
 }
 
 void HandInput::ForgetPress(int s) {
@@ -758,15 +758,20 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
             double palm[3];
             h->Palm(palm);
             for (const Panel &P : panels)
-                for (const Hit &t : {Locate(P, h->p[8]), Locate(P, palm)})
+                for (const Hit &t : {Locate(P, h->p[8]), Locate(P, palm)}) {
                     if (t.d > p_.nearBack && t.d <= p_.rateReach && InFootprint(P, t, 0.10)) approaching_ = true;
+                    if (p_.rayReach > 0 && t.d > p_.nearBack && t.d <= p_.rayReach && InFootprint(P, t, 0.10))
+                        rayHideUntil_[s] = std::max(rayHideUntil_[s], frameNs_ + int64_t(p_.rayLingerMs * 1e6));
+                }
         }
         if ((sd.state == State::Press || sd.state == State::Grab) && !Find(panels, sd.panel)) {   // hidden, gone
             EndPress(s, true), EndGrab(s, true);
             sd.state = State::Idle, sd.panel = -1;
         }
         // (holding: through a longer loss, Params::holdLostMs)
-        const bool holding = sd.state == State::Grab || sd.state == State::Press;
+        // (a press (a poke's or a pinch's click) isn't held through a loss: a click held on a lost hand was
+        // a stuck long press, user 2026-10-11; only a grab is)
+        const bool holding = sd.state == State::Grab;
         if (!h && sd.state != State::Idle && in.nowNs - sd.lastSeen > int64_t((holding ? p_.holdLostMs : p_.lostMs) * 1e6)) {
             if (holding) {
                 ++stats.lostEnds;
@@ -788,6 +793,7 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
         if (newFrame_ && h && p_.push && (sd.state == State::Idle || sd.state == State::Hover)) Push(s, in, panels);
     }
     if (newFrame_ && anyNear()) ++stats.nearFrames;
+    if (newFrame_ && p_.fistPair && p_.fistGrab) FistPair(in, panels);
     Carries(in, panels);
     Glows(in, panels);
     Guides(in, panels);
@@ -846,6 +852,15 @@ void HandInput::Near(int s, const Input &in, const std::vector<Panel> &panels, c
 
 void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, const Hand *h) {
     Side &sd = side_[s];
+    if (sd.scrollPending && sd.state != State::Hover) {   // two fingers that left the zone unmoved: their tap
+        sd.scrollPending = false, sd.spent = true;
+        if (Find(panels, sd.pendingPanel)) {
+            Emit(Event::Press, s, sd.pendingPanel, sd.pendingX, sd.pendingY);
+            Emit(Event::Release, s, sd.pendingPanel, sd.pendingX, sd.pendingY);
+            ++stats.presses;
+            Log("%s two fingers tapped screen %d at %.0f,%.0f (as they left)", SideName(s), sd.pendingPanel + 1, sd.pendingX, sd.pendingY);
+        }
+    }
     if (sd.state != State::Hover && sd.state != State::Press) return;
     const Panel *P = Find(panels, sd.panel);
     if (!P) {
@@ -855,6 +870,58 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     const Hit t = Locate(*P, h->p[8]);
     const double ext = Extension(*h);
     const bool extended = ext >= p_.extended;
+    // two fingers on the content: a swipe scrolls, a lift clicks (Params::twoFingerScroll)
+    if (p_.twoFingerScroll && sd.state == State::Hover && !in.typing[s]) {
+        const Hit m = Locate(*P, h->p[12]);
+        const double together = std::hypot(h->p[8][0] - h->p[12][0], h->p[8][1] - h->p[12][1], h->p[8][2] - h->p[12][2]);
+        // (both tips at about one depth: a flat hand's longer middle finger, 1 cm and more deeper, isn't two)
+        // (and the ring and little curled: an open hand's push or rest isn't two fingers)
+        const bool two = ext >= p_.scrollExtended && FingerExtension(*h, 9) >= p_.scrollExtended && together <= p_.scrollTogether &&
+                         std::fabs(t.d - m.d) <= p_.scrollLevel &&
+                         (FingerExtension(*h, 13) + FingerExtension(*h, 17)) / 2 <= p_.scrollOthersCurl;
+        const double u = (t.u + m.u) / 2, v = (t.v + m.v) / 2, d = std::min(t.d, m.d);
+        double bx, by;
+        const bool onIt = ToBuffer(*P, u, v, &bx, &by);
+        if (sd.scrolling) {
+            sd.scrollOff = two ? 0 : sd.scrollOff + 1;
+            if (d >= p_.release || together > 2 * p_.scrollTogether || sd.scrollOff >= 3 || !onIt) {
+                Log("%s two fingers off screen %d: scrolled", SideName(s), P->index + 1);
+                sd.scrolling = false, sd.spent = true;
+                return;
+            }
+            const double dv = v - sd.scrollV, du = u - sd.scrollU;
+            const int ny = int(dv / p_.scrollNotch), nx = int(-du / p_.scrollNotch);
+            if (ny || nx) {
+                Emit(Event::Scroll, s, P->index, nx, ny);
+                stats.scrollNotches += std::abs(nx) + std::abs(ny);
+                sd.scrollV += ny * p_.scrollNotch, sd.scrollU -= nx * p_.scrollNotch;
+            }
+            return;
+        }
+        if (sd.scrollPending) {
+            if (std::hypot(u - sd.scrollU, v - sd.scrollV) >= p_.scrollStart) {   // a swipe: scroll from here
+                sd.scrollPending = false, sd.scrolling = true, sd.scrollOff = 0, sd.scrollU = u, sd.scrollV = v;
+                ++stats.scrolls;
+                Log("%s two fingers on screen %d: scrolling", SideName(s), P->index + 1);
+                return;
+            }
+            if (d >= p_.release) {   // off again, unmoved: a click where they touched
+                sd.scrollPending = false, sd.spent = true;
+                Emit(Event::Press, s, P->index, sd.pendingX, sd.pendingY);
+                Emit(Event::Release, s, P->index, sd.pendingX, sd.pendingY);
+                ++stats.presses;
+                Log("%s two fingers tapped screen %d at %.0f,%.0f", SideName(s), P->index + 1, sd.pendingX, sd.pendingY);
+                return;
+            }
+            if (in.nowNs - sd.pendingNs <= int64_t(p_.scrollWaitMs * 1e6)) return;
+            sd.scrollPending = false;   // held still: the poke's rules from here (it presses if they let it)
+        } else if (two && onIt && d <= p_.scrollTouch && !sd.spent && sd.state == State::Hover) {
+            sd.scrollPending = true, sd.pendingNs = in.nowNs, sd.scrollU = u, sd.scrollV = v, sd.pendingX = bx, sd.pendingY = by;
+            sd.pendingPanel = P->index;
+            Emit(Event::Motion, s, P->index, bx, by);   // (a scroll or the click goes where the fingers are)
+            return;
+        }
+    }
     double others = 1e9;
     int otherTip = 12;
     for (int j : {12, 16, 20}) {
@@ -880,6 +947,19 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         if (t.d < p_.tooDeep) {   // reaching through the panel isn't a drag
             ++stats.deepReleases;
             std::snprintf(why, sizeof why, "%.1f cm through the panel", -t.d * 100);
+            EndPress(s, false, why);
+            sd.spent = true;
+            return;
+        }
+        // stuck taps (user, 2026-10-11: "really easy to get a long click or tap stuck"): the index curling
+        // away, or a press held still past pressStillMs (no drag), lets go too
+        if (ext < p_.pressCurl) {
+            std::snprintf(why, sizeof why, "the index curled (%.2f)", ext);
+            EndPress(s, false, why);
+            return;
+        }
+        if (!sd.dragging && p_.pressStillMs > 0 && in.nowNs - sd.pressedNs > int64_t(p_.pressStillMs * 1e6)) {
+            std::snprintf(why, sizeof why, "held still %.1f s", (in.nowNs - sd.pressedNs) / 1e9);
             EndPress(s, false, why);
             sd.spent = true;
             return;
@@ -1040,6 +1120,16 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
 void HandInput::PinchPress(int s, const Input &in, const std::vector<Panel> &panels, const Hand *h) {
     Side &sd = side_[s];
     const Panel *P = Find(panels, sd.panel);
+    // stuck pinch-clicks: the fingers seen apart (thumb tip to index tip over pinchApart) let go, whatever
+    // ft-hands' drag slack says; and one held still past pressStillMs (user, 2026-10-11)
+    const double apart = std::hypot(h->p[4][0] - h->p[8][0], h->p[4][1] - h->p[8][1], h->p[4][2] - h->p[8][2]);
+    if (apart > p_.pinchApart) {
+        char why[64];
+        std::snprintf(why, sizeof why, "the fingers %.1f cm apart", apart * 100);
+        return EndPress(s, false, why);
+    }
+    if (!sd.dragging && p_.pressStillMs > 0 && in.nowNs - sd.pressedNs > int64_t(p_.pressStillMs * 1e6))
+        return EndPress(s, false, "held still");
     if (!P || sd.control != Control::None) return;   // (a button: nothing to drag)
     // the knuckles' move since the pinch began, on the panel: they hold still as the fingers close
     const Hit k = Locate(*P, h->pinchPoint);
@@ -1063,7 +1153,11 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     sd.begins = g.begins, sd.gripBegins = gr.begins;
     if (sd.state == State::Grab) {
         bool held;
-        if (sd.byGrip) {   // a fist: held while its grip or its pinch is (ft-hands calls a fist either, Params::fistIndex)
+        if (sd.byShape) {   // a two-fist pair's: held while the hand stays closed (Params::fistPair)
+            const Hand *h = HandFor(s, in.hands->seen(), sd.handId);
+            held = h ? Extension(*h) <= p_.fistPairKeep + 0.2 && Curl3(*h) <= p_.fistPairKeep
+                     : in.nowNs - sd.lastSeen <= int64_t(p_.holdLostMs * 1e6);
+        } else if (sd.byGrip) {   // a fist: held while its grip or its pinch is (ft-hands calls a fist either, Params::fistIndex)
             const handcut::Gesture &m = gr.down || !g.down ? gr : g;
             held = StillHeld(s, in, m, gr.down ? newGrip : g.down && newPinch, true);
         } else {
@@ -1537,6 +1631,52 @@ void HandInput::PinchClick(int s, const Input &in, const std::vector<Panel> &pan
     Emit(Event::Press, s, P->index, x, y);
     ++stats.presses, ++stats.pinchClicks;
     Log("%s pinch pressed screen %d at %.0f,%.0f (on its content, %+.1f cm out)", SideName(s), P->index + 1, x, y, t.d * 100);
+}
+
+void HandInput::FistPair(const Input &in, const std::vector<Panel> &panels) {
+    const Hand *h[2] = {nullptr, nullptr};
+    for (int s = 0; s < 2; ++s) {
+        const Side &sd = side_[s];
+        if (!in.allowed[s] || in.typing[s] || (sd.state != State::Idle && sd.state != State::Hover) || sd.fistWait) {
+            fistPairRun_ = 0;
+            return;
+        }
+        h[s] = HandFor(s, in.hands->seen(), sd.state == State::Idle ? 0 : sd.handId);
+        if (!h[s] || Extension(*h[s]) > p_.fistPairIndex || Curl3(*h[s]) > p_.fistPairCurl) {
+            fistPairRun_ = 0;
+            return;
+        }
+    }
+    // the panel both palms are at (the nearest on average)
+    const Panel *best = nullptr;
+    double bestD = 1e9;
+    for (const Panel &P : panels) {
+        if (P.held) continue;
+        double sum = 0;
+        bool ok = true;
+        for (int s = 0; s < 2 && ok; ++s) {
+            double palm[3];
+            h[s]->Palm(palm);
+            const Hit t = Locate(P, palm);
+            ok = t.d > p_.fistPairBack && t.d <= p_.fistPairFront && InFootprint(P, t, p_.fistPairMargin);
+            sum += std::fabs(t.d);
+        }
+        if (ok && sum < bestD) bestD = sum, best = &P;
+    }
+    if (!best) {
+        fistPairRun_ = 0;
+        return;
+    }
+    if (best->index != fistPairPanel_) fistPairRun_ = 0, fistPairPanel_ = best->index;
+    if (++fistPairRun_ < p_.fistPairFrames) return;
+    fistPairRun_ = 0;
+    for (int s = 0; s < 2; ++s) {
+        side_[s].handId = h[s]->id, side_[s].lastSeen = in.nowNs;
+        StartGrab(s, in, *best, Zone::Fist, 1, -1, h[s], h[s]->pinchPoint, true);
+        side_[s].byShape = true;
+    }
+    ++stats.fistPairs;
+    Log("two fists at screen %d: they resize it", best->index + 1);
 }
 
 void HandInput::FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited, bool byPinch) {

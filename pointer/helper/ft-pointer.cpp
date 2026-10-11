@@ -2870,6 +2870,13 @@ int main() {
                         if (k != 1) pinchLog(s, k, "left to ft-screens (the hand is near its panel)");
                         continue;
                     }
+                    // A hand just in front of a panel (its ray hidden there) without the gaze: nothing to aim
+                    // with, so no press at the mouse's pointer and no wake (user, 2026-10-11: the laser came
+                    // back at odd moments, a pinch by a panel woke the pointer).
+                    if (screensNear && nearSide[s] && tnow - nearAt < std::chrono::milliseconds(200) && !ray && !gazeOn) {
+                        if (k != 1) pinchLog(s, k, "ignored (the hand is at a panel: no laser there)");
+                        continue;
+                    }
                     startGesture(s, k, g, ray);
                     // begun and ended since the last read (a quick tap): its release too
                     if (!(g.flags & FH_PINCH_DOWN) && holdingKind(s, k)) endGesture(lost, kLostPinch);
@@ -2947,6 +2954,10 @@ int main() {
             if (reported && nearClaim[q.side]) {
                 if (q.kind != 1) pinchLog(q.side, q.kind, "left to ft-screens (the hand is near its panel)");
                 else if (debug) std::printf("hand %s grip left to ft-screens (near)\n", q.side ? "right" : "left");
+                continue;
+            }
+            if (reported && nearSide[q.side] && !q.ray && !gazeOn) {   // (as above)
+                if (q.kind != 1) pinchLog(q.side, q.kind, "ignored (the hand is at a panel: no laser there)");
                 continue;
             }
             startGesture(q.side, q.kind, q.g, q.ray);

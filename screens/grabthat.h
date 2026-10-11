@@ -103,6 +103,7 @@ struct Params {
     // a panel the user looks at the middle of (one thrown 3 m out, 1.35 m tall, is 12.7 degrees
     // each way). 6 degrees takes those; a line that meets a panel still beats one that only passes
     // near another. HANDS_GRAB_THAT_MARGIN (m), HANDS_GRAB_THAT_MARGIN_DEG.
+    double smallDeg = 10;   // a panel spanning under this (half, deg) gets that much more margin (HANDS_GRAB_THAT_SMALL)
     double aimMargin = 0, aimMarginDeg = 10, headCone = 0;   // m, degrees, degrees (6 deg until 2026-10-11: "increase the size of the target")
     // ...and only a panel farther than `nearest` from the eyes (its centre): one at arm's reach is
     // the hands' already (user: "only activate if the window is not already held and closed up";

@@ -317,13 +317,19 @@ int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k, Clos
             }
         }
         // else the one it passes nearest, within aimMarginDeg
+        // (a panel that looks small, e.g. a little window pushed far out, gets a wider margin: up to
+        // smallDeg more for one that spans nothing, less as it spans more; user, 2026-10-11)
         if (best < 0) {
-            double bestDeg = k.aimMarginDeg;
+            double bestScore = 1e9;
             for (const Target &p : panels) {
                 if (near(p)) continue;
                 const double off = OffDeg(p, f.eye, dir);
                 if (closest && off < closest->deg) closest->index = p.index, closest->deg = off;
-                if (off <= bestDeg) bestDeg = off, best = p.index;
+                const double dist = std::max(0.1, std::hypot(p.pose.m[0][3] - f.eye[0], p.pose.m[1][3] - f.eye[1],
+                                                             p.pose.m[2][3] - f.eye[2]));
+                const double half = std::atan(std::max(p.width, p.height) / 2 / dist) * 180 / M_PI;
+                const double extra = std::max(0.0, k.smallDeg - half);
+                if (off <= k.aimMarginDeg + extra && off - extra < bestScore) bestScore = off - extra, best = p.index;
             }
         }
     }

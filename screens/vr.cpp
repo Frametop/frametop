@@ -273,6 +273,13 @@ constexpr vr::TrackedDeviceIndex_t kNone = vr::k_unTrackedDeviceIndexInvalid;
 // catch), and a laser's release never ends what a hand holds.
 constexpr vr::TrackedDeviceIndex_t kHandHolder[2] = {vr::k_unMaxTrackedDeviceCount + 1, vr::k_unMaxTrackedDeviceCount + 2};
 bool IsHandHolder(vr::TrackedDeviceIndex_t d) { return d == kHandHolder[0] || d == kHandHolder[1]; }
+// A hand at a panel owns the pointer (live test 2026-10-10): while a hand holds the button, SteamVR's
+// laser moves (the pointer helper's head or gaze pointer, a controller) go nowhere, and on a panel
+// whose pointer a fingertip moved within this long, neither do they nor its leaving. Else the
+// helper's pointer, a few cm off the fingertip, pulled KWin's or the remote host's pointer away
+// between the hand's press and release: a drag, not a click (and on a remote display the host's
+// pointer jumped between the two as the finger hovered).
+constexpr int64_t kHandPointerMs = 250;
 
 // A popup or dialog of a floating window: a small panel over it, cut from the same buffer.
 struct Sub {
@@ -340,6 +347,7 @@ struct Screen {
     // it stays focused or in view after the last reason for it.
     ft_attention attention = FT_FOCUSED;
     int64_t inputMs = INT64_MIN / 2;  // the last pointer event on it or its controls
+    int64_t handPointerMs = INT64_MIN / 2;  // a hand last moved the pointer on it (kHandPointerMs)
     int64_t focusUntil = 0, viewUntil = 0;
     double heightMetres() const {
         if (floating && cropW > 0) return metres * cropH / cropW;
@@ -2339,13 +2347,13 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         f.x = e.x, f.y = e.y;
         switch (e.type) {
             case handinput::Event::Motion:
-                s.inputMs = NowMs();
+                s.inputMs = s.handPointerMs = NowMs();
                 if (g_press.buttons && g_press.device == holder) g_press.screen = e.panel, g_press.x = e.x, g_press.y = e.y;
                 f.type = FT_MOTION;
                 handle(&f, data);
                 break;
             case handinput::Event::Press:
-                s.inputMs = NowMs();
+                s.inputMs = s.handPointerMs = NowMs();
                 PressDown(holder, BTN_LEFT, e.panel, e.x, e.y);
                 f.type = FT_BUTTON, f.button = BTN_LEFT, f.pressed = true;
                 f.controller = true;   // the click filter holds a poke's wobble still (controller-click.h)
@@ -2357,6 +2365,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                     if (!g_press.buttons) g_press.upAt = -1;
                 }
                 f.type = FT_BUTTON, f.button = BTN_LEFT, f.pressed = false, f.controller = true;
+                s.handPointerMs = NowMs();
                 handle(&f, data);
                 break;
             case handinput::Event::Control:
@@ -2848,6 +2857,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             switch (ev.eventType) {
                 case vr::VREvent_MouseMove:
                     if (s.titleCarry) return;  // KWin's pointer stays where the title bar was pressed
+                    // a hand holds the button, or moved this panel's pointer just now: it's the hand's
+                    if ((g_press.buttons && IsHandHolder(g_press.device)) || NowMs() - s.handPointerMs < kHandPointerMs) return;
                     e.type = FT_MOTION;
                     at();
                     // A press on a remote screen with the laser on another one, or off its
@@ -2891,6 +2902,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 case vr::VREvent_FocusLeave:
                     if (g_press.buttons) return;  // KWin keeps the pointer while a button is held
                     if (sub) return;              // off a popup is usually onto its window
+                    if (NowMs() - s.handPointerMs < kHandPointerMs) return;  // a hand has it
                     e.type = FT_LEAVE;
                     break;
                 default:

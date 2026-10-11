@@ -2451,6 +2451,9 @@ struct Front {
 bool g_susanBring = true;
 double g_frontReading = 1.0, g_frontDrop = 0.08;   // reading distance (m), and how far under the eyes its centre sits
 double g_frontKeepMs = 3000;                       // SCREEN_FRONT_KEEP_MS: this much use keeps it (0: never)
+// Turned away from, it goes home (SCREEN_FRONT_AWAY=1). Off since the user's 2026-10-11 call: "the lazy susan can
+// be considered in use and remain active until I move it out of its spot manually" (a gaze-pinch drag, a hand grab).
+bool g_frontAway = false;
 grabthat::ReadParams g_frontRead;
 std::map<int, double> g_frontDeg;   // a screen resized in the slot: the view it spans (deg wide), next time too
 std::map<int, double> g_uiScale;    // KWin's scale for each screen (ft-layout's "scale", via the compositor)
@@ -2867,7 +2870,7 @@ void UpdateFront() {
             std::printf("front: screen %d kept (used %.1f s): it stays when you look away\n", i + 1, g_front.usedMs / 1000);
         }
     }
-    if (held || g_front.kept || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+    if (!g_frontAway || held || g_front.kept || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
         g_front.awaySinceMs = -1;
         return;
     }
@@ -3105,6 +3108,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "HANDS_PUSH_GLOW") g_pushGlowOn = on;
     else if (n == "HANDS_PALM_MENU") g_palm.params().on = on;
     else if (n == "SCREEN_SPIN_BRING") g_susanBring = on;
+    else if (n == "SCREEN_FRONT_AWAY") g_frontAway = on;
     else return false;
     return true;
 }
@@ -3460,6 +3464,7 @@ bool ft_vr_init(void) {
     num("SCREEN_SPIN_MAX_DEG", g_frontRead.maxW, 30, 100);   // ...at most this wide (deg; wider ones curve round you)
     num("SCREEN_SPIN_MAX_TALL_DEG", g_frontRead.maxH, 20, 90);
     num("SCREEN_FRONT_KEEP_MS", g_frontKeepMs, 0, 600000);   // this much use keeps it in the slot when you look away
+    g_frontAway = handcut::Setting("SCREEN_FRONT_AWAY", "0") != "0";   // turned away from, it goes home
     num("HANDS_RESET_HOLD_MS", g_resetHoldMs, 0, 5000);       // the reset button needs this long a hold (0: a press)
     {   // SCREEN_UI_SCALE="104=2 103=1.5": a remote display's own UI scale (its OS's), for its readable size
         std::istringstream in(handcut::Setting("SCREEN_UI_SCALE", ""));
@@ -3473,9 +3478,11 @@ bool ft_vr_init(void) {
         }
     }
     std::printf("front slot: %s; reading %.2f m, readable at %.0f px/deg (at most %.0fx%.0f deg), arm's reach by grab that; "
-                "home when sent away or turned from (kept after %.1f s of use)\n",
+                "home on the next stroke%s\n",
                 g_susanBring ? "the lazy susan brings the next screen to it" : "the lazy susan turns the room (SCREEN_SPIN_BRING=0)",
-                g_frontReading, g_frontRead.ppd, g_frontRead.maxW, g_frontRead.maxH, g_frontKeepMs / 1000);
+                g_frontReading, g_frontRead.ppd, g_frontRead.maxW, g_frontRead.maxH,
+                g_frontAway ? (", or turned from (kept after " + std::to_string(g_frontKeepMs / 1000).substr(0, 3) + " s of use)").c_str()
+                            : "; it stays until you move it (SCREEN_FRONT_AWAY=0)");
     if (gt.on)
         std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s); "
                     "it takes a panel the line through the palm meets%s, %s, not one held, the palm within %.0f deg of the line\n",

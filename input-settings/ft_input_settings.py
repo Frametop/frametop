@@ -123,6 +123,8 @@ HAND_INTERACTIONS = [
     ("HANDS_SWEEP", True, "1", "Gestures", "Sweep for the lazy susan",
      "An open hand on its edge, palm leading, swept 25 cm sideways, quickly: the next screen on that side "
      "(Meta+Alt+Tab too). The return stroke does nothing: the other hand palms the other way."),
+    ("SCREEN_FRONT_AWAY", False, "1", "Gestures", "A brought screen goes home when you look away",
+     "Off: it stays in front of you until you move it yourself or the next stroke sends it home."),
     ("HANDS_SWEEP_BACK", False, "1", "Gestures", "Lazy susan on the return stroke too",
      "A stroke with the back of the hand leading counts too (one hand going back and forth)."),
     ("SCREEN_SPIN_BRING", True, "1", "Gestures", "Lazy susan brings screens to you",

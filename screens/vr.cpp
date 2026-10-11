@@ -3086,6 +3086,7 @@ bool ft_vr_init(void) {
     gt.on = handcut::Setting("HANDS_GRAB_THAT", "1") != "0";
     num("HANDS_GRAB_THAT_DISTANCE", gt.distance, 0.2, 1.5);
     num("HANDS_GRAB_THAT_WIDTH", gt.maxWidth, 0, 12);
+    num("HANDS_TAP_MS", g_handInput.params().tapMs, 0, 2000);   // a press doesn't drag this soon: a tap clicks where it went down
     num("HANDS_PRESS_STILL_MS", g_handInput.params().pressStillMs, 0, 60000);   // a still press lets go after this
     num("HANDS_RAY_HIDE_REACH", g_handInput.params().rayReach, 0, 1);   // a hand this near a panel hides its ray
     num("HANDS_GRAB_THAT_FROM", gt.nearest, 0, 5);      // panels nearer than this aren't taken (0: any, near ones go back)

@@ -784,7 +784,9 @@ void TestDrag() {
     Rig r;
     for (int mm = 50; mm >= -12; mm -= 10) { const double d = mm / 1000.0; r.Frame({TipAt(0, 0, d)}); }
     const int motions = r.Count(Event::Motion);
-    r.Frame({TipAt(0.01, 0, -0.012)});   // 1 cm: still locked
+    r.Frame({TipAt(0.03, 0, -0.012)});   // 3 cm at once: still a tap (Params::tapMs), locked
+    CHECK(r.Count(Event::Motion) == motions);
+    for (int k = 0; k < 8; ++k) r.Frame({TipAt(0.01, 0, -0.012)});   // held a while, 1 cm: still locked
     CHECK(r.Count(Event::Motion) == motions);
     r.Frame({TipAt(0.03, 0, -0.012)});   // 3 cm: a drag
     CHECK(r.Count(Event::Motion) == motions + 1);

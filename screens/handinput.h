@@ -123,7 +123,7 @@ struct Params {
     // the panel: a scroll; off again within scrollWaitMs: a click where they touched; still longer: a
     // press there, as a poke's.
     double scrollExtended = 1.4, scrollTogether = 0.035, scrollTouch = 0.006, scrollNotch = 0.012;
-    double scrollStart = 0.012, scrollWaitMs = 350, scrollLevel = 0.008, scrollOthersCurl = 1.3;
+    double scrollStart = 0.012, scrollWaitMs = 350, scrollLevel = 0.008, scrollOthersCurl = 1.3, scrollLift = 0.05;
     // A hand's fingertip or palm within rayReach in front of a panel (over it, 10 cm round) hides its
     // ray, and for rayLingerMs after it leaves (user, 2026-10-11: "the laser still comes back at odd
     // moments": the ray came up for a moment as the hand rose to a panel, 10-25 cm before the touch
@@ -183,6 +183,7 @@ struct Params {
     double release = 0.015;     // up at d >= this
     double pullBack = 0.01;     // ...or pulled back this far from the deepest point
     double slide = 0.015;       // the click stays where it was pressed until the tip slides this far
+    double tapMs = 250;         // ...and for this long after the press: a tap is a click where it went down (HANDS_TAP_MS)
     double rePressMs = 150;     // no new press this soon after a release,
     double rearm = 0.01;        // ...nor until the tip has been this far out in front since (a noisy
                                 // pull-back let go mid-tap and pressed again: a double click)

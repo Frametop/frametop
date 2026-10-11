@@ -884,7 +884,8 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         const bool onIt = ToBuffer(*P, u, v, &bx, &by);
         if (sd.scrolling) {
             sd.scrollOff = two ? 0 : sd.scrollOff + 1;
-            if (d >= p_.release || together > 2 * p_.scrollTogether || sd.scrollOff >= 3 || !onIt) {
+            // (a swipe in the air drifts off the surface and the fingers part a little: only clearly off ends it)
+            if (d >= p_.scrollLift || together > 3 * p_.scrollTogether || sd.scrollOff >= 6 || !onIt) {
                 Log("%s two fingers off screen %d: scrolled", SideName(s), P->index + 1);
                 sd.scrolling = false, sd.spent = true;
                 return;
@@ -971,7 +972,10 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
             return;
         }
         if (sd.control != Control::None) return;
-        if (!sd.dragging && std::hypot(t.u - sd.lockU, t.v - sd.lockV) >= p_.slide) sd.dragging = true;
+        // a tap stays a click: no drag in its first tapMs (user, 2026-10-11: taps went down at one spot and
+        // up 10-30 cm of pixels away: the tip slides down the panel as the finger curls back off it)
+        if (!sd.dragging && in.nowNs - sd.pressedNs >= int64_t(p_.tapMs * 1e6) && std::hypot(t.u - sd.lockU, t.v - sd.lockV) >= p_.slide)
+            sd.dragging = true;
         if (sd.dragging) {
             const double u = std::clamp(t.u, -P->width / 2, P->width / 2), v = std::clamp(t.v, -P->height / 2, P->height / 2);
             double dx, dy;

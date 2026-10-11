@@ -67,9 +67,12 @@
 //     (by any corner: resize), its content to click; hold its edge like a card (thumb behind, index
 //     and middle in front) to carry and turn it rigidly; make a fist at it to carry and turn it;
 //     hold it with both hands to stretch and turn it; flick it away, or let go of it moving out
-//     fast, and it goes 3 m out (animated, as "grab that" moves). What a hand holds stays held
-//     through a short tracking loss. A glow on the screen shows where the fingertip is and what a pinch
-//     would do there. It takes the pointer helper's word on which hands are bare and whether hand
+//     fast, and it goes 3 m out (animated, as "grab that" moves). A second hand's pinch or fist
+//     anywhere on a panel the other holds joins it (two anchors: move, scale, turn). A poke or a pinch
+//     on a round button (curve, reset, dock, close) presses it. What a hand holds stays held
+//     through a short tracking loss. A soft white glow shows the corner a pinch would resize from, the
+//     edge it would move the panel by, or the button it would press (UpdateHandGuides, cutouts on or
+//     off); with cutouts, a glow on the screen also shows where the fingertip is. It takes the pointer helper's word on which hands are bare and whether hand
 //     input is allowed ("hands"), and which hands typing on a real keyboard holds back ("typing":
 //     no pokes, grabs or "grab that" by them), and tells it which hands are near a panel ("near":
 //     1 its gestures are ours, 2 only its ray hides), so a pinch is either ours or the helper's.
@@ -78,9 +81,11 @@
 //     at it, gets a small ring above the palm; a pinch tap by that hand opens the Steam menu
 //     (steam/ft-steam menu), or closes the dashboard. That hand counts as near meanwhile.
 //   - "grab that" (grabthat.cpp): an open hand held out to a screen or floating window, then a
-//     fist pulled back, brings it to arm's reach (about 45 cm ahead, facing you); the same at
-//     one that came that way sends it back, at one near you already centres it. The closing hand
-//     counts as near, and a fist or pinch it makes at a panel waits on it.
+//     fist pulled back, brings it to arm's reach (about 45 cm ahead, facing you). Only a panel the
+//     line from the eyes through the palm meets, farther than 0.8 m, not held (near ones: push,
+//     flick or throw them away). A soft white halo round it shows what it would take
+//     (UpdateTargetGlow). The closing hand counts as near, and a fist or pinch it makes at a panel
+//     waits on it while it aims at one it would take.
 //   - the catcher: a button pressed on a screen is released in KWin even when the laser
 //     lets go between panels (UpdateCatcher).
 //   - floating windows (docs/floating-windows.md): KWin's spare outputs, after the screens,
@@ -99,6 +104,7 @@
 #include "handcut.h"
 #include "grabthat.h"
 #include "handinput.h"
+#include "softglow.h"
 #include "palmmenu.h"
 #include "keyboard.h"
 #include "roomview.h"
@@ -1081,8 +1087,11 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     int cx = s.cornerX, cy = s.cornerY;
     double best = 0;
     bool held = false;
-    if (s.drag == Drag::Resize) {
+    const bool handGlow = g_handInput.params().edgeGlow;   // (hands have their own glow at the corner: UpdateHandGuides)
+    if (s.drag == Drag::Resize && !(handGlow && IsHandHolder(s.dragDevice))) {
         best = 1, held = true;   // stays where it is, lit
+    } else if (s.drag == Drag::Resize) {
+        best = 0;
     } else {
         for (const Mat &d : lasers) {
             double u, v;
@@ -1096,7 +1105,7 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
                 }
         }
         const auto &hc = g_handInput.corners();
-        const auto it = hc.find(ScreenIndexOf(s));
+        const auto it = handGlow ? hc.end() : hc.find(ScreenIndexOf(s));
         if (it != hc.end() && it->second.closeness >= best)
             best = it->second.closeness, cx = it->second.sx, cy = it->second.sy, held = it->second.held;
     }
@@ -2395,19 +2404,44 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms 
 // (and the gesture again sends it back there); at one farther away, it comes to arm's reach. One at
 // a time: a panel that came before and is still where it came goes back as another comes, so they
 // don't stack up in the same spot (three remote displays did, 2026-10-10).
-void GrabThat(const grabthat::Fire &f) {
+// The panels "grab that" may take: shown, not pinned, not held (a laser or a hand carries it: s.drag) nor
+// one a hand presses on (user, after the fourth live test: "only activate if the window is not already
+// held and closed up"; near ones: grabthat's Params::nearest, in Pick).
+std::vector<grabthat::Target> GrabThatTargets() {
     std::vector<grabthat::Target> targets;
     for (auto &[i, s] : g_screens) {
         Mat p;
         if (!s.visible || s.width <= 0 || s.height <= 0 || (s.floating && s.cropW <= 0) || s.pinned != kNone ||
-            s.drag != Drag::None || !ScreenPose(s, &p))
+            s.drag != Drag::None || g_handInput.heldByHand(i) || g_handInput.pressPanel(0) == i || g_handInput.pressPanel(1) == i ||
+            !ScreenPose(s, &p))
             continue;
         targets.push_back({i, p, s.metres, s.heightMetres(), s.curve});
     }
+    return targets;
+}
+
+// Per side: the panel "grab that" under way would take now (-1: none: it's idle, or aims at nothing it
+// would take), and how far along it is (its glow; a fist or pinch at a panel waits on it only then).
+int g_grabThatAim[2] = {-1, -1};
+double g_grabThatProgress[2] = {0, 0};
+void UpdateGrabThatAims() {
+    const std::vector<grabthat::Target> targets = GrabThatTargets();
+    for (int k = 0; k < 2; ++k) {
+        grabthat::Fire f;
+        double progress = 0;
+        g_grabThatAim[k] = g_grabThat.params().on && g_grabThat.Aim(k, &f, &progress) ? grabthat::Pick(targets, f, g_grabThat.params()) : -1;
+        g_grabThatProgress[k] = g_grabThatAim[k] >= 0 ? progress : 0;
+    }
+}
+
+void GrabThat(const grabthat::Fire &f) {
+    const std::vector<grabthat::Target> targets = GrabThatTargets();
     const grabthat::Params &k = g_grabThat.params();
     const char *hand = f.side ? "right" : "left";
     const int i = grabthat::Pick(targets, f, k);
-    if (i < 0) return (void)std::printf("grab that (%s hand): no panel there\n", hand);
+    if (i < 0)
+        return (void)std::printf("grab that (%s hand): no panel there (the palm %.0f deg off its line, %.2f m/s as it was held out)\n",
+                                 hand, f.facing, f.speed);
     Screen &s = g_screens[i];
     Mat now;
     if (!ScreenPose(s, &now)) return;
@@ -2505,66 +2539,40 @@ void UpdateGrabThat(const handinput::Input &in) {
 }
 
 // The glow on the panel a gesture under way would take (user, 2026-10-10: "a glow over the window
-// that grab that is targeting, so the user knows the motion will trigger on it"): an edge glow round
-// the whole panel and a faint tint over it, one overlay ("frametop.guide.target": the pointer
-// helper's cursor and rays pass through guides) in front of the panel, sized and curved to it, that
-// doesn't need the cutouts. Blue: "grab that" (an open hand held out to it; it fades in as the gesture
-// arms, over armMs, and goes as it's let go or fires); warm white: a push or a flick would throw it
-// (an open palm close in front of it, toward it). HANDS_TARGET_GLOW.
+// that grab that is targeting, so the user knows the motion will trigger on it"), and after the fourth
+// live test ("The glow is too powerful. It should be a white glow and far more subtle. It should only be
+// around the outside of the window."): a soft white halo outside the panel's edges, about 1.3 degrees
+// wide, nothing over its content; one overlay ("frametop.guide.target": the pointer helper's cursor and
+// rays pass through guides), sized and curved to the panel, in its plane, drawn after it. "Grab that" (an
+// open hand held out to it): it fades in as the gesture arms, over armMs, and goes as it's let go or
+// fires; a push or a flick would throw it (an open palm close in front of it, toward it): dimmer.
+// HANDS_TARGET_GLOW.
 bool g_targetGlowOn = true;
 struct TargetGlow {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
-    int panel = -1, texH = 0;
-    bool warm = false, shown = false;
+    int panel = -1, texW = 0, texH = 0, texM = 0;
+    bool shown = false;
     double alpha = 0, shownAlpha = -1;
     int64_t lastMs = 0;
 } g_target;
 
-// The glow's texture: kTargetW wide, the panel kTargetM pixels in from each side, its aspect h/w.
-constexpr int kTargetW = 320, kTargetM = 10;
-std::vector<uint8_t> TargetTexture(int h, bool warm) {
-    const int w = kTargetW, m = kTargetM;
-    std::vector<uint8_t> px(size_t(w) * h * 4, 0);
-    const double r = 6;   // the corners' rounding, pixels
-    const uint8_t rgb[3] = {uint8_t(warm ? 255 : 90), uint8_t(warm ? 214 : 170), uint8_t(warm ? 150 : 255)};
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-            // signed distance to the panel's rounded rectangle (> 0 outside)
-            const double cx = std::fabs(x + 0.5 - w / 2.0) - (w / 2.0 - m - r), cy = std::fabs(y + 0.5 - h / 2.0) - (h / 2.0 - m - r);
-            const double d = std::hypot(std::max(cx, 0.0), std::max(cy, 0.0)) + std::min(std::max(cx, cy), 0.0) - r;
-            const double a = d > 0 ? 0.9 * std::exp(-(d / 4) * (d / 4)) : 0.95 * std::exp(-(d / 2) * (d / 2)) + 0.07;
-            uint8_t *p = &px[(size_t(y) * w + x) * 4];
-            p[0] = rgb[0], p[1] = rgb[1], p[2] = rgb[2], p[3] = uint8_t(std::clamp(a, 0.0, 1.0) * 255);
-        }
-    return px;
+double HeadDistance(const Mat &p) {
+    Mat head;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return 1;
+    return Apart(head, p);
 }
 
 void UpdateTargetGlow() {
     int best = -1;
     double want = 0;
-    bool warm = false;
     if (g_targetGlowOn && g_vr) {
         // "grab that": the panel it would take now, as far along as the gesture is
-        std::vector<grabthat::Target> targets;
-        for (int k = 0; k < 2; ++k) {
-            grabthat::Fire f;
-            double progress = 0;
-            if (!g_grabThat.Aim(k, &f, &progress)) continue;
-            if (targets.empty())
-                for (auto &[i, s] : g_screens) {
-                    Mat p;
-                    if (!s.visible || s.width <= 0 || s.height <= 0 || (s.floating && s.cropW <= 0) || s.pinned != kNone ||
-                        s.drag != Drag::None || !ScreenPose(s, &p))
-                        continue;
-                    targets.push_back({i, p, s.metres, s.heightMetres(), s.curve});
-                }
-            const int i = grabthat::Pick(targets, f, g_grabThat.params());
-            if (i >= 0 && progress > want) best = i, want = progress, warm = false;
-        }
+        for (int k = 0; k < 2; ++k)
+            if (g_grabThatAim[k] >= 0 && g_grabThatProgress[k] > want) best = g_grabThatAim[k], want = g_grabThatProgress[k];
         // a push or a flick (dimmer)
         if (best < 0)
             for (const auto &[i, a] : g_handInput.throwAims())
-                if (0.7 * a > want) best = i, want = 0.7 * a, warm = true;
+                if (0.6 * a > want) best = i, want = 0.6 * a;
     }
     const auto it = best >= 0 ? g_screens.find(best) : g_screens.end();
     if (it == g_screens.end() || !it->second.visible) best = -1, want = 0;
@@ -2572,8 +2580,7 @@ void UpdateTargetGlow() {
     const int64_t now = NowMs();
     const double dt = g_target.lastMs ? std::clamp((now - g_target.lastMs) / 1000.0, 0.0, 0.1) : 0;
     g_target.lastMs = now;
-    if (best >= 0 && (best != g_target.panel || warm != g_target.warm)) g_target.panel = best, g_target.warm = warm, g_target.texH = 0;
-    if (best < 0) want = 0;
+    if (best >= 0) g_target.panel = best;
     g_target.alpha = want > g_target.alpha ? std::min(want, g_target.alpha + dt / 0.12) : std::max(want, g_target.alpha - dt / 0.15);
     auto hide = [&] {
         if (g_target.shown) vr::VROverlay()->HideOverlay(g_target.overlay), g_target.shown = false;
@@ -2583,29 +2590,137 @@ void UpdateTargetGlow() {
     if (g_target.overlay == vr::k_ulOverlayHandleInvalid) {
         if (vr::VROverlay()->CreateOverlay("frametop.guide.target", "Frametop: gesture target", &g_target.overlay) != vr::VROverlayError_None)
             return;
-        vr::VROverlay()->SetOverlaySortOrder(g_target.overlay, 5);
+        vr::VROverlay()->SetOverlaySortOrder(g_target.overlay, 1);   // (after the panels, under their controls)
     }
     Screen &s = pit->second;
     Mat p;
     if (!ScreenPose(s, &p)) return hide();
-    const double aspect = s.heightMetres() / std::max(1e-6, s.metres);
-    const int h = std::clamp(int(std::lround((kTargetW - 2 * kTargetM) * aspect)) + 2 * kTargetM, 2 * kTargetM + 4, 1200);
-    if (h != g_target.texH) {
-        const std::vector<uint8_t> px = TargetTexture(h, g_target.warm);
+    // the panel kTargetW - 2m pixels wide in it, m the halo's width
+    constexpr int kTargetW = 512;
+    const double W = s.metres, H = s.heightMetres(), halo = softglow::Width(HeadDistance(p));
+    const int m = std::clamp(int(std::lround(kTargetW * halo / (W + 2 * halo))), 3, 48);
+    const int h = std::clamp(int(std::lround((kTargetW - 2 * m) * H / std::max(1e-6, W))) + 2 * m, 2 * m + 4, 2048);
+    if (kTargetW != g_target.texW || h != g_target.texH || m != g_target.texM) {
+        const std::vector<uint8_t> px = softglow::TargetTexture(kTargetW, h, m);
         vr::VROverlay()->SetOverlayRaw(g_target.overlay, const_cast<uint8_t *>(px.data()), kTargetW, uint32_t(h), 4);
-        g_target.texH = h;
+        g_target.texW = kTargetW, g_target.texH = h, g_target.texM = m;
     }
-    const double width = s.metres * kTargetW / (kTargetW - 2 * kTargetM);
+    const double width = W * kTargetW / double(kTargetW - 2 * m);
     vr::VROverlay()->SetOverlayWidthInMeters(g_target.overlay, float(width));
-    const double radius = s.curve > 0 ? std::max(0.05, s.curve - 0.004) : 0;
-    vr::VROverlay()->SetOverlayCurvature(g_target.overlay, radius > 0 ? float(std::clamp(width / (2 * M_PI * radius), 0.0, 1.0)) : 0.f);
-    for (int i = 0; i < 3; ++i) p.m[i][3] += float(p.m[i][2] * 0.004);   // 4 mm in front of it
+    vr::VROverlay()->SetOverlayCurvature(g_target.overlay, s.curve > 0 ? float(std::clamp(width / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f);
     vr::VROverlay()->SetOverlayTransformAbsolute(g_target.overlay, vr::TrackingUniverseStanding, &p);
     if (std::fabs(g_target.alpha - g_target.shownAlpha) > 0.01) {
         vr::VROverlay()->SetOverlayAlpha(g_target.overlay, float(g_target.alpha));
         g_target.shownAlpha = g_target.alpha;
     }
     if (!g_target.shown) vr::VROverlay()->ShowOverlay(g_target.overlay), g_target.shown = true;
+}
+
+// Each hand's soft glow at a panel (handinput's guide(), Params::edgeGlow; user, after the fourth live
+// test: "for resizing, I'd like the indicators to be almost like a cutout of the soft glow we had for
+// highlighting, just around the edges and corners when you're within the interaction zone"): the same
+// white halo, only round the corner a pinch there would resize from (an L along its two edges), along
+// the edge it would move the panel by (a short segment), or round a button (a ring); brighter as the
+// fingers come closer, brightest while resizing from that corner or pressing that button. One overlay
+// per hand ("frametop.guide.hand.left/right"), in the panel's plane, clear over the panel, so it shows
+// with the cutouts off. HANDS_EDGE_GLOW (off: the resize handle follows the hand, as before).
+struct HandGuide {
+    vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
+    std::string key;           // the texture on it
+    bool shown = false;
+    double alpha = 0, shownAlpha = -1;
+    int64_t lastMs = 0;
+    handinput::Guide g;        // what it shows (kept while it fades out)
+} g_handGuides[2];
+
+void UpdateHandGuides() {
+    static std::map<std::string, std::vector<uint8_t>> textures;
+    const bool on = g_vr && g_handInput.params().edgeGlow && HandInputOn();
+    const int64_t now = NowMs();
+    for (int k = 0; k < 2; ++k) {
+        HandGuide &hg = g_handGuides[k];
+        const handinput::Guide g = on ? g_handInput.guide(k) : handinput::Guide{};
+        const double dt = hg.lastMs ? std::clamp((now - hg.lastMs) / 1000.0, 0.0, 0.1) : 0;
+        hg.lastMs = now;
+        const bool same = g.kind == hg.g.kind && g.panel == hg.g.panel && g.sx == hg.g.sx && g.sy == hg.g.sy && g.control == hg.g.control;
+        double want = g.kind != handinput::Guide::None ? std::clamp(g.strength, 0.0, 1.0) : 0;
+        if (g.kind != handinput::Guide::None && (same || hg.alpha < 0.02)) hg.g = g;   // (a new one when the old has faded)
+        else if (g.kind != handinput::Guide::None) want = 0;                         // ...first fade the old out
+        hg.alpha = want > hg.alpha ? std::min(want, hg.alpha + dt / 0.08) : std::max(want, hg.alpha - dt / 0.15);
+        auto hide = [&] {
+            if (hg.shown) vr::VROverlay()->HideOverlay(hg.overlay), hg.shown = false;
+        };
+        const auto it = g_screens.find(hg.g.panel);
+        if (hg.alpha < 0.01 || hg.g.kind == handinput::Guide::None || it == g_screens.end() || !it->second.visible) {
+            hide();
+            continue;
+        }
+        if (hg.overlay == vr::k_ulOverlayHandleInvalid) {
+            const char *key = k ? "frametop.guide.hand.right" : "frametop.guide.hand.left";
+            if (vr::VROverlay()->CreateOverlay(key, "Frametop: hand guide", &hg.overlay) != vr::VROverlayError_None) continue;
+            vr::VROverlay()->SetOverlaySortOrder(hg.overlay, 1);
+        }
+        Screen &s = it->second;
+        Mat p;
+        if (!ScreenPose(s, &p)) {
+            hide();
+            continue;
+        }
+        const double W = s.metres, H = s.heightMetres();
+        double halo = std::round(softglow::Width(HeadDistance(p)) * 1000) / 1000;   // (by the mm: fewer textures)
+        // its size and place on the panel
+        double u = hg.g.u, v = hg.g.v, wm = 0, hm = 0, arm = 0, r = 0, edge = 1e9;
+        int tw = 128, th = 128;
+        bool curved = false;
+        switch (hg.g.kind) {
+            case handinput::Guide::Corner:
+                arm = std::clamp(0.25 * std::min(W, H), 0.03, 0.10);
+                u = hg.g.sx * W / 2, v = hg.g.sy * H / 2, wm = hm = 2 * std::max(arm, halo) * 1.05, curved = true;
+                break;
+            case handinput::Guide::Edge: {
+                const double along = hg.g.sy ? W : H;
+                arm = std::clamp(0.3 * along, 0.05, 0.16);
+                if (hg.g.sy) {
+                    u = along > arm ? std::clamp(u, -W / 2 + arm / 2, W / 2 - arm / 2) : 0, v = hg.g.sy * H / 2;
+                    wm = arm, hm = 2 * halo, curved = true, th = std::max(8, int(std::lround(tw * hm / wm)));
+                } else {
+                    v = along > arm ? std::clamp(v, -H / 2 + arm / 2, H / 2 - arm / 2) : 0, u = hg.g.sx * W / 2;
+                    wm = 2 * halo, hm = arm, tw = std::max(8, int(std::lround(th * wm / hm)));
+                }
+                break;
+            }
+            case handinput::Guide::Button: {
+                r = std::max(1e-3, hg.g.size);
+                const double hb = std::clamp(r, 0.005, halo);
+                wm = hm = 2 * (r + hb), tw = th = 64;
+                edge = -H / 2 - v;   // (the panel's bottom edge, over a button under it)
+                halo = hb;
+                break;
+            }
+            default: break;
+        }
+        char key[160];
+        std::snprintf(key, sizeof key, "%d %d %d %d %d %d %.0f %.0f %.0f %.0f", int(hg.g.kind), hg.g.sx, hg.g.sy, hg.g.selected, tw, th,
+                      halo / wm * 200, arm / wm * 200, r / wm * 200, std::min(edge, wm) / wm * 200);
+        if (hg.key != key) {
+            auto t = textures.find(key);
+            if (t == textures.end()) {
+                if (textures.size() > 48) textures.clear();
+                t = textures.emplace(key, softglow::GuideTexture(hg.g, tw, th, wm, halo, arm, r, edge)).first;
+            }
+            vr::VROverlay()->SetOverlayRaw(hg.overlay, const_cast<uint8_t *>(t->second.data()), uint32_t(tw), uint32_t(th), 4);
+            hg.key = key;
+        }
+        vr::VROverlay()->SetOverlayWidthInMeters(hg.overlay, float(wm));
+        vr::VROverlay()->SetOverlayCurvature(hg.overlay, curved && s.curve > 0 ? float(std::clamp(wm / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f);
+        const Mat m = Mul(p, OnSurface(s, u, v, 0));
+        vr::VROverlay()->SetOverlayTransformAbsolute(hg.overlay, vr::TrackingUniverseStanding, &m);
+        if (std::fabs(hg.alpha - hg.shownAlpha) > 0.01) {
+            vr::VROverlay()->SetOverlayAlpha(hg.overlay, float(hg.alpha));
+            hg.shownAlpha = hg.alpha;
+        }
+        if (!hg.shown) vr::VROverlay()->ShowOverlay(hg.overlay), hg.shown = true;
+    }
 }
 
 void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data) {
@@ -2640,11 +2755,16 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         if (g_handInput.pressingKwin(k) && !(g_press.buttons && g_press.device == kHandHolder[k])) g_handInput.ForgetPress(k);
     UpdatePalmMenu(in, panels);
     for (int k = 0; k < 2; ++k) in.allowed[k] = in.allowed[k] && !g_palm.shown(k);   // the palm menu has that hand
-    for (int k = 0; k < 2; ++k) in.grabThatArmed[k] = g_grabThat.params().on && g_grabThat.armed(k);   // a fist waits on it
+    // a fist or pinch waits on "grab that" only while it aims at a panel it would take (one at arm's
+    // reach it doesn't: the fourth live test's fist at the near panel waited, then clicked)
+    UpdateGrabThatAims();
+    for (int k = 0; k < 2; ++k) in.grabThatArmed[k] = g_grabThat.params().on && g_grabThat.armed(k) && g_grabThatAim[k] >= 0;
     g_handInput.Update(in, panels);
     for (const std::string &l : g_handInput.logs()) std::printf("hands: %s\n", l.c_str());
     UpdateGrabThat(in);
+    UpdateGrabThatAims();
     UpdateTargetGlow();
+    UpdateHandGuides();
 
     for (const handinput::Event &e : g_handInput.events()) {
         const auto it = g_screens.find(e.panel);
@@ -2679,6 +2799,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 break;
             case handinput::Event::Control:
                 s.inputMs = NowMs();
+                std::printf("screen %d: %s (%s hand)\n", e.panel + 1, handinput::ControlName(e.control), e.side ? "right" : "left");
                 if (e.control == handinput::Control::Curve) {
                     ToggleCurve(s);
                 } else if (e.control == handinput::Control::Reset) {
@@ -2691,8 +2812,10 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 break;
             case handinput::Event::GrabStart:
                 // the handle goes to that corner (not while the other hand holds it: a stretch)
-                if ((e.zone == handinput::Zone::Tab || e.zone == handinput::Zone::Corner) && s.drag == Drag::None)
-                    s.cornerX = e.sx, s.cornerY = e.sy, s.keepX = -e.sx, s.keepY = -e.sy, PlaceChrome(s);
+                if ((e.zone == handinput::Zone::Tab || e.zone == handinput::Zone::Corner) && s.drag == Drag::None) {
+                    s.keepX = -e.sx, s.keepY = -e.sy;   // (a floating window's opposite corner stays put)
+                    if (!g_handInput.params().edgeGlow) s.cornerX = e.sx, s.cornerY = e.sy, PlaceChrome(s);   // (else its glow shows it)
+                }
                 StartHandDrag(s, e.side, e.zone);
                 break;
             case handinput::Event::Throw: {
@@ -2709,6 +2832,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 std::printf("screen %d: %s, %.1f m out%s\n", e.panel + 1, e.push ? "pushed away" : e.flick ? "flicked away" : "thrown",
                             far, w != s.metres ? (", " + std::to_string(w).substr(0, 4) + " m wide as before grab that").c_str() : "");
                 StartGrabMove(e.panel, s, e.to, w, e.ms, true);
+                // (the hand that sent it held out open and pulled back closing isn't "grab that")
+                g_grabThat.Quiet(g_handInput.frameNs() + int64_t(g_grabThat.params().quietAfterSendMs * 1e6));
                 break;
             }
             case handinput::Event::GrabEnd:
@@ -2761,7 +2886,9 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     // grip); 2, only its ray stays hidden (the zone's margin and linger: its pinches are the
     // helper's); 0, neither. An older helper takes 2 as 1.
     auto near = [](int k) {
-        if (g_handInput.claims(k) || g_palm.shown(k) || g_grabThat.claims(k, g_handInput.frameNs())) return "1";
+        if (g_handInput.claims(k) || g_palm.shown(k) ||
+            (g_grabThat.claims(k, g_handInput.frameNs()) && (!g_grabThat.armed(k) || g_grabThatAim[k] >= 0)))
+            return "1";
         return g_handInput.near(k) ? "2" : "0";
     };
     if (g_handInput.newFrame() && (HandInputOn() || g_palm.params().on))
@@ -2879,6 +3006,14 @@ bool ft_vr_init(void) {
     k.gate = handcut::Setting("HANDS_TRACK_GATE", "1") != "0";
     g_targetGlowOn = handcut::Setting("HANDS_TARGET_GLOW", "1") != "0";
     g_sendAwayRestore = handcut::Setting("HANDS_SEND_AWAY_WIDTH", "restore") != "keep";
+    // the fourth live test (2026-10-10): two anchors, fists, buttons for hands, the soft glow at corners,
+    // edges and buttons (handinput.h Params::joinFront, fistFront, buttonReach, pinchButtons, edgeGlow)
+    num("HANDS_JOIN_REACH", k.joinFront, 0, 0.5);   // 0: off
+    num("HANDS_FIST_REACH", k.fistFront, 0, 0.3);   // 0: the touch zone's (as before)
+    if (k.fistFront <= 0) k.fistBack = 0, k.fistClaimCurl = 0;
+    num("HANDS_BUTTON_REACH", k.buttonReach, 0, 0.05);
+    k.pinchButtons = handcut::Setting("HANDS_PINCH_BUTTONS", "1") != "0";
+    k.edgeGlow = handcut::Setting("HANDS_EDGE_GLOW", "1") != "0";
     const std::string near = handcut::Setting("HANDS_NEAR", "1");
     g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
     // The passthrough holes in the panels: off by default since ft-handview draws the hands
@@ -2891,9 +3026,17 @@ bool ft_vr_init(void) {
     gt.on = handcut::Setting("HANDS_GRAB_THAT", "1") != "0";
     num("HANDS_GRAB_THAT_DISTANCE", gt.distance, 0.2, 1.5);
     num("HANDS_GRAB_THAT_WIDTH", gt.maxWidth, 0, 12);
+    num("HANDS_GRAB_THAT_FROM", gt.nearest, 0, 5);      // panels nearer than this aren't taken (0: any, near ones go back)
+    num("HANDS_GRAB_THAT_MARGIN", gt.aimMargin, 0, 0.5);  // the line through the palm may pass this far off a panel
+    num("HANDS_GRAB_THAT_FACING", gt.aimFacing, 0, 90);   // the palm along the aim within this (deg; 0: any)
     if (gt.on)
-        std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s)\n",
-                    gt.distance, gt.maxWidth > 0 ? (", screens at most " + std::to_string(gt.maxWidth).substr(0, 4) + " m wide").c_str() : "");
+        std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s); "
+                    "it takes a panel the line through the palm meets%s, %s, not one held, the palm within %.0f deg of the line\n",
+                    gt.distance, gt.maxWidth > 0 ? (", screens at most " + std::to_string(gt.maxWidth).substr(0, 4) + " m wide").c_str() : "",
+                    gt.aimMargin > 0 ? (" (or passes " + std::to_string(int(std::lround(gt.aimMargin * 100))) + " cm off)").c_str() : "",
+                    gt.nearest > 0 ? ("farther than " + std::to_string(gt.nearest).substr(0, 4) + " m (push, flick or throw near ones away)").c_str()
+                                   : "any distance (at a near one: back where it came from)",
+                    gt.aimFacing > 0 ? gt.aimFacing : 180.0);
     else
         std::printf("hands: grab that off\n");
     std::printf("hands: near (touch, no ray) within %.3f m of a panel (%.3f resting low), pokes within %.0f deg of its "
@@ -2914,7 +3057,15 @@ bool ft_vr_init(void) {
                 g_sendAwayRestore ? "keeps its width (one grab that shrank gets its width back)" : "keeps its width (HANDS_SEND_AWAY_WIDTH=keep)");
     std::printf("hands: two hands turn a panel %s; held hands' impossible frames %s; the gesture target glows %s\n",
                 k.stretchTurn ? "on every axis" : "about the vertical (HANDS_STRETCH_TURN=0)",
-                k.gate ? "dropped (HANDS_TRACK_GATE)" : "taken (HANDS_TRACK_GATE=0)", g_targetGlowOn ? "(HANDS_TARGET_GLOW)" : "not (HANDS_TARGET_GLOW=0)");
+                k.gate ? "dropped (HANDS_TRACK_GATE)" : "taken (HANDS_TRACK_GATE=0)",
+                g_targetGlowOn ? "softly white round its edges (HANDS_TARGET_GLOW)" : "not (HANDS_TARGET_GLOW=0)");
+    std::printf("hands: a second hand %s; fists reach %.0f cm in front and %.0f behind; buttons %.1f cm each way for a fingertip%s; "
+                "corners, edges and buttons glow %s\n",
+                k.joinFront > 0 ? ("within " + std::to_string(int(std::lround(k.joinFront * 100))) +
+                                   " cm of a panel the other holds joins it (two anchors)").c_str() : "has to find a grab zone (HANDS_JOIN_REACH=0)",
+                std::max(k.nearFront, k.fistFront) * 100, -std::min(k.nearBack, k.fistBack) * 100, k.buttonReach * 100,
+                k.pinchButtons ? " or a pinch" : " (a pinch takes the bar: HANDS_PINCH_BUTTONS=0)",
+                k.edgeGlow ? "softly as a hand comes to them (HANDS_EDGE_GLOW)" : "not; the resize handle follows the hand (HANDS_EDGE_GLOW=0)");
     std::printf("hands: grabs smoothed from %.2f Hz (+%.1f Hz per m/s), a %.1f cm dead zone, held through %.2f s of "
                 "tracking loss; the wrist turns them %s\n",
                 k.grabMinCutoff, k.grabBeta, k.grabDeadzone * 100, k.holdLostMs / 1000,
@@ -2958,6 +3109,8 @@ void ft_vr_shutdown(void) {
     for (GuidePart &r : g_palmRing)
         if (r.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(r.overlay), r = GuidePart{};
     if (g_target.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(g_target.overlay), g_target = TargetGlow{};
+    for (HandGuide &hg : g_handGuides)
+        if (hg.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(hg.overlay), hg = HandGuide{};
     keyboard::Destroy();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     for (auto &[k, h] : g_imports) vr::VRIPCResourceManager()->UnrefResource(h);

@@ -12,6 +12,7 @@
 #include "../handinput.h"
 #include "../grabthat.h"
 #include "../palmmenu.h"
+#include "../softglow.h"
 
 #include <algorithm>
 #include <cctype>
@@ -4534,6 +4535,74 @@ void TestFlagTwoFists() {
     }
 }
 
+// The soft white glow's textures (softglow.h): clear over the panel, at most half opaque at its edge,
+// gone a halo's width out; a corner's L, an edge's segment, a button's ring.
+void TestSoftGlow() {
+    auto alpha = [](const std::vector<uint8_t> &px, int w, int x, int y) { return px[(size_t(y) * w + x) * 4 + 3] / 255.0; };
+    auto dump = [](const char *name, const std::vector<uint8_t> &px, int w, int h) {   // (GLOW_DUMP=dir: PGMs to look at)
+        const char *dir = std::getenv("GLOW_DUMP");
+        if (!dir) return;
+        std::FILE *f = std::fopen((std::string(dir) + "/" + name + ".pgm").c_str(), "wb");
+        if (!f) return;
+        std::fprintf(f, "P5 %d %d 255\n", w, h);
+        for (size_t i = 0; i < size_t(w) * h; ++i) std::fputc(px[i * 4 + 3], f);
+        std::fclose(f);
+    };
+    {   // the target: 512 wide, the halo 9 px (1 cm round a 0.6 m panel at arm's reach)
+        const int w = 512, m = 9, h = 230;
+        const auto px = softglow::TargetTexture(w, h, m);
+        dump("target", px, w, h);
+        double inside = 0;
+        for (int y = m; y < h - m; ++y)
+            for (int x = m; x < w - m; ++x) inside = std::max(inside, alpha(px, w, x, y));
+        CHECK(inside == 0);                                   // nothing over the content
+        CHECK(alpha(px, w, w / 2, m - 1) > 0.35 && alpha(px, w, w / 2, m - 1) <= 0.5);   // at its edge: soft, at most half
+        CHECK(alpha(px, w, w / 2, 0) < 0.02 && alpha(px, w, 0, h / 2) < 0.02);         // gone at the halo's outer edge
+        CHECK(alpha(px, w, m - 1, m - 1) > 0.2);              // round the corners too
+        NEAR(softglow::Width(0.45), 0.0099, 1e-4), NEAR(softglow::Width(0.1), 0.008, 1e-9), NEAR(softglow::Width(5), 0.05, 1e-9);
+    }
+    {   // a hand's guide at the top right corner: an L outside it, clear inside, fading along the edges
+        Guide g;
+        g.kind = Guide::Corner, g.sx = 1, g.sy = 1;
+        const int n = 128;
+        const double size = 0.105, halo = 0.01, arm = 0.05, perM = n / size;
+        const auto px = softglow::GuideTexture(g, n, n, size, halo, arm, 0, 1e9);
+        dump("corner", px, n, n);
+        auto at = [&](double X, double Y) { return alpha(px, n, int(n / 2.0 + X * perM), int(n / 2.0 - Y * perM)); };
+        CHECK(at(-0.01, -0.01) == 0 && at(-0.04, -0.002) == 0);    // inside the panel: clear
+        CHECK(at(0.002, -0.01) > 0.3 && at(-0.01, 0.002) > 0.3);   // just past the right and top edges by the corner
+        CHECK(at(0.003, 0.003) > 0.12);                            // round the corner itself
+        CHECK(at(0.002, -0.052) < 0.02 && at(-0.052, 0.002) < 0.02);   // gone an arm's length along each edge
+        CHECK(at(0.012, -0.01) == 0);                              // a halo's width out: gone
+        g.selected = true;
+        const auto lit = softglow::GuideTexture(g, n, n, size, halo, arm, 0, 1e9);
+        CHECK(alpha(lit, n, int(n / 2.0 + 0.002 * perM), int(n / 2.0 + 0.01 * perM)) > at(0.002, -0.01) + 0.15);   // brighter held
+    }
+    {   // the bottom edge's segment: outside (under) it only, fading toward its ends
+        Guide g;
+        g.kind = Guide::Edge, g.sy = -1;
+        const int w = 128, h = 16;
+        const double len = 0.12, perM = w / len;
+        const auto px = softglow::GuideTexture(g, w, h, len, 0.01, len, 0, 1e9);
+        dump("edge", px, w, h);
+        CHECK(alpha(px, w, w / 2, h / 2 - 2) == 0);                // above the edge (the panel): clear
+        CHECK(alpha(px, w, w / 2, h / 2 + 1) > 0.3);               // just under it
+        CHECK(alpha(px, w, 1, h / 2 + 1) < 0.02);                  // its ends faded
+        (void)perM;
+    }
+    {   // a button's ring: clear over the button and above the panel's edge
+        Guide g;
+        g.kind = Guide::Button;
+        const int n = 64;
+        const double r = 0.004, hb = 0.004, size = 2 * (r + hb), perM = n / size;
+        const auto px = softglow::GuideTexture(g, n, n, size, hb, 0, r, 0.006);
+        dump("button", px, n, n);
+        CHECK(alpha(px, n, n / 2, n / 2) == 0);                                       // over the button
+        CHECK(alpha(px, n, int(n / 2.0 + (r + 0.0005) * perM), n / 2) > 0.3);         // just round it
+        CHECK(alpha(px, n, n / 2, int(n / 2.0 - 0.0065 * perM)) == 0);                 // above the panel's edge (6 mm up): masked
+    }
+}
+
 // --grabthat FLAG_DIR...: the fires in each flag (false fires: flags taken for something else).
 int ScanFlags(int n, char **dirs) {
     int total = 0, totals[4] = {0, 0, 0, 0};   // pushes, palm menu toggles, flicks with the panel at arm's reach; the old palm menu's toggles
@@ -4670,6 +4739,7 @@ int main(int argc, char **argv) {
     TestFistSettle();
     TestJoin();
     TestFlagTwoFists();
+    TestSoftGlow();
     std::printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

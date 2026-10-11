@@ -62,6 +62,18 @@ struct PinchParams {
     // curled too (6 false middle pinches in the recorder's gestures take, PR #8, all at curls 1.2-1.4).
     int extended_finger = 0;
     double extended_min = 1.5;
+    // The fist guard (HANDS_PINCH_FIST_CURL; 0 turns it off): no pinch begins while the index and the
+    // middle finger are both curled, each tip nearer the wrist than fist_curl times its knuckle (Grip's
+    // curl measure). A fist puts the thumb tip on the curled index: in the held-out flags a median 28.5 mm
+    // from it and under 20 mm on 22% of fist frames, and live ft-hands read 96% of fist frames as pinched
+    // (frame-hands notes/taps.md, "Fists are partly a gesture-rule problem"). A close held back so has to
+    // open past end_m before a pinch can begin: a held fist's curls flicker over the line for a frame now
+    // and then. A pinch already down carries on: a drag's other fingers curling around it don't end it.
+    // 1.2, not the flag analysis' 1.3 (FIST_CURL, on the teacher's 3D): the model's world landmarks read
+    // pinching fingers more curled (index 1.06-1.34 at quick taps). Replays with student v11c against the
+    // tap labels (2026-10-11): clear non-fist pinches lost 2 of 204 at 1.2 (4 at 1.3), the labelled fists
+    // read as pinches 8 -> 5 at either; typing pinches on the desk recordings 29 -> 22.
+    double fist_curl = 1.2;
     // And only on a hand tracked at least this many frames (a hand just found is often misread).
     int min_frames = 0;
     // The dip rule (HANDS_PINCH_DIP=1, off by default): a pinch also begins on a sharp dip that
@@ -116,6 +128,8 @@ public:
     double other_d[2] = {-1, -1};       // the thumb to the other fingertip (other_finger), same measure
     double palm_down[2] = {-1, -1};   // |palm normal . up| of each side's hand
     int held_back[2] = {0, 0};          // pinches that didn't begin because the palm faced down
+    int fist_held[2] = {0, 0};          // closes the fist guard held back
+    double curl[2][4] = {{-1, -1, -1, -1}, {-1, -1, -1, -1}};   // each side's hand: the fingers' curls, for logs
     int dip_begins[2] = {0, 0};         // pinches the dip rule began (PinchParams::dip)
 
 private:
@@ -137,7 +151,7 @@ private:
     int open_frames_[2] = {0, 0};
     int64_t open_since_[2] = {0, 0};   // the first frame of this run past end_m
     int64_t seen_ns_[2] = {0, 0};
-    bool held_[2] = {false, false};  // a close held back (palm down) that hasn't opened yet
+    bool held_[2] = {false, false};  // a close held back (palm down, a fist) that hasn't opened yet
 };
 
 struct GripParams {

@@ -25,6 +25,37 @@ void put3(float out[3], V3 v) {
     for (int k = 0; k < 3; ++k) out[k] = float(v[k]);
 }
 
+constexpr int kWrist = 0, kFingers[4][2] = {{5, 8}, {9, 12}, {13, 16}, {17, 20}};   // knuckle, tip
+
+// Each finger's curl (see GripParams), and the thumb tip's distance from the index tip (m):
+// from the model's world landmarks averaged over the hand's views this step, or the
+// tracker's 3D points without any.
+bool curls(const Hand &h, const std::vector<Seen> &views, double out[4], double *thumb) {
+    double sum[4] = {}, gap = 0;
+    int n = 0;
+    for (const Seen &v : views) {
+        if (v.hand != h.id) continue;
+        auto p = [&](int i) { return V3{v.lm.world[i][0], v.lm.world[i][1], v.lm.world[i][2]}; };
+        for (int f = 0; f < 4; ++f) {
+            const double k = norm(p(kFingers[f][0]) - p(kWrist));
+            sum[f] += k > 1e-4 ? norm(p(kFingers[f][1]) - p(kWrist)) / k : 2;
+        }
+        gap += norm(p(4) - p(8)) * h.scale;
+        ++n;
+    }
+    *thumb = n ? gap / n : norm(h.smooth[4] - h.smooth[8]);
+    for (int f = 0; f < 4; ++f) {
+        if (n) {
+            out[f] = sum[f] / n;
+            continue;
+        }
+        const double k = norm(h.smooth[kFingers[f][0]] - h.smooth[kWrist]);
+        if (k < 1e-4) return false;
+        out[f] = norm(h.smooth[kFingers[f][1]] - h.smooth[kWrist]) / k;
+    }
+    return true;
+}
+
 }  // namespace
 
 void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<Seen> &views, int64_t t_ns,
@@ -53,6 +84,7 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
             if (!h || c->frames > h->frames) h = c;
         }
         world_d[s] = tri_d[s] = fit_d[s] = palm_down[s] = other_d[s] = -1;
+        for (double &c : curl[s]) c = -1;
         if (!h) {
             o.flags &= ~FH_PINCH_TRACKED;
             if (down && (t_ns - seen_ns_[s]) / 1e9 > p_.grace_s) end(s, t_ns, true);
@@ -104,6 +136,11 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
             own = ratio >= p_.extended_min;
         }
         if (own && h->frames < p_.min_frames) own = false;
+        // the fist guard: the index and middle both curled (see PinchParams::fist_curl)
+        double f[4], unused_thumb;
+        const bool curled = curls(*h, views, f, &unused_thumb);
+        for (int k = 0; k < 4; ++k) curl[s][k] = curled ? f[k] : -1;
+        const bool fist = p_.fist_curl > 0 && curled && f[0] < p_.fist_curl && f[1] < p_.fist_curl;
         // Where the pinch is, for drags: the index and middle knuckles, which hold still while
         // the fingers open and close. The point between the tips moved 1-2 cm as a pinch
         // opened, so every release dragged the pointer off what it pressed (headset test,
@@ -135,6 +172,10 @@ void Pinch::update(const std::vector<const Hand *> &hands, const std::vector<See
                 // closed, or the other pinch is down on it: no pinch until it opens
             } else if (d < p_.begin_m && !own) {
                 // the thumb is on the other fingertip
+            } else if (fist) {
+                // a fist, not a pinch (nor a dip); like a close held back, the fingers have to open
+                // again before one can begin: a fist's curls flicker over fist_curl for a frame
+                if (d < p_.begin_m && !held_[s]) held_[s] = true, ++fist_held[s];
             } else if (d < p_.begin_m && !held_[s] && palm_down[s] > p_.palm_down_max) {
                 held_[s] = true;
                 ++held_back[s];
@@ -228,37 +269,6 @@ bool Pinch::engaged() const {
 // ---------------------------------------------------------------------------- grip
 
 namespace {
-
-constexpr int kWrist = 0, kFingers[4][2] = {{5, 8}, {9, 12}, {13, 16}, {17, 20}};   // knuckle, tip
-
-// Each finger's curl (see GripParams), and the thumb tip's distance from the index tip (m):
-// from the model's world landmarks averaged over the hand's views this step, or the
-// tracker's 3D points without any.
-bool curls(const Hand &h, const std::vector<Seen> &views, double out[4], double *thumb) {
-    double sum[4] = {}, gap = 0;
-    int n = 0;
-    for (const Seen &v : views) {
-        if (v.hand != h.id) continue;
-        auto p = [&](int i) { return V3{v.lm.world[i][0], v.lm.world[i][1], v.lm.world[i][2]}; };
-        for (int f = 0; f < 4; ++f) {
-            const double k = norm(p(kFingers[f][0]) - p(kWrist));
-            sum[f] += k > 1e-4 ? norm(p(kFingers[f][1]) - p(kWrist)) / k : 2;
-        }
-        gap += norm(p(4) - p(8)) * h.scale;
-        ++n;
-    }
-    *thumb = n ? gap / n : norm(h.smooth[4] - h.smooth[8]);
-    for (int f = 0; f < 4; ++f) {
-        if (n) {
-            out[f] = sum[f] / n;
-            continue;
-        }
-        const double k = norm(h.smooth[kFingers[f][0]] - h.smooth[kWrist]);
-        if (k < 1e-4) return false;
-        out[f] = norm(h.smooth[kFingers[f][1]] - h.smooth[kWrist]) / k;
-    }
-    return true;
-}
 
 V3 palm_centre(const Hand &h) {
     return (h.smooth[0] + h.smooth[5] + h.smooth[9] + h.smooth[13] + h.smooth[17]) * 0.2;

@@ -1,6 +1,6 @@
 // Unit tests for the pinch and grip detectors' hold on a drag (track/pinch.h: PinchParams' drag_*
-// and grip_takeover_s) and the dip rule (PinchParams::dip): made-up hands at 30 Hz, the distances
-// from their points (no views).
+// and grip_takeover_s), the dip rule (PinchParams::dip) and the fist guard (fist_curl): made-up hands
+// at 30 Hz, the distances from their points (no views).
 // Build and run: make check (in the dev container; hands/build.sh's environment).
 #include "../track/pinch.h"
 
@@ -25,16 +25,17 @@ constexpr int64_t kFrame = 33'333'333;
 
 // A right hand 0.4 m ahead (moved by shift), the thumb tip d from the index tip, the other fingers
 // open (curl 2) or closed around (fist: curl 0.85); middle_gap > 0 puts the middle tip that far
-// from the thumb tip (a hand closing into a grab).
-Hand MakeHand(double d, bool fist = false, V3 shift = {0, 0, 0}, double middle_gap = 0) {
+// from the thumb tip (a hand closing into a grab). curled: the fingers closed (bit 0 index .. 3 little)
+// when not a fist.
+Hand MakeHand(double d, bool fist = false, V3 shift = {0, 0, 0}, double middle_gap = 0, int curled = 0) {
     Hand h;
     h.id = 1, h.side = 1, h.frames = 30, h.has_pts = true;
     const V3 wrist = V3{0, -0.1, -0.35} + shift;
     auto at = [&](double x, double y, double z) { return V3{wrist[0] + x, wrist[1] + y, wrist[2] + z}; };
-    const double knuckle = 0.08, tip = fist ? 0.068 : 0.16;
+    const double knuckle = 0.08;
     h.pts[0] = at(0, 0, 0);
     for (int f = 0; f < 4; ++f) {
-        const double x = -0.02 + 0.015 * f;
+        const double x = -0.02 + 0.015 * f, tip = fist || (curled >> f & 1) ? 0.068 : 0.16;
         h.pts[5 + 4 * f] = at(x, 0, -knuckle);
         h.pts[6 + 4 * f] = at(x, 0, -knuckle - 0.02);
         h.pts[7 + 4 * f] = at(x, 0, -knuckle - 0.04);
@@ -57,8 +58,9 @@ struct Run {
     int begins = 0;
     V3 shift{0, 0, 0}, velocity{0, 0, 0};   // the hand's offset and its motion, m/s
     double middle_gap = 0;
+    int curled = 0;
     void Step(double d, bool fist = false) {
-        Hand h = MakeHand(d, fist, shift, middle_gap);
+        Hand h = MakeHand(d, fist, shift, middle_gap, curled);
         shift = shift + velocity * (kFrame / 1e9);
         const std::vector<const Hand *> hands{&h};
         grip.update(hands, {}, t, pinch.holding(t));
@@ -212,6 +214,51 @@ void TestDip() {
           settle.begins);
 }
 
+void TestFistGuard() {
+    // a fist with the thumb tip 1.5 cm from the curled index tip: no pinch, counted as held back
+    Run fist{Pinch(Params()), Grip()};
+    for (int k = 0; k < 10; ++k) fist.Step(0.06);
+    for (int k = 0; k < 15; ++k) fist.Step(0.015, true);
+    CHECK(fist.begins == 0 && fist.pinch.fist_held[1] == 1, "a fist isn't a pinch (%d begins)", fist.begins);
+    // its curls flickering open for a frame, the thumb still on the index: still no pinch
+    fist.Step(0.015), fist.Step(0.015, true);
+    CHECK(fist.begins == 0, "a fist's curls flickering open don't begin a pinch (%d)", fist.begins);
+    // the hand opens (the tips past end_m), then pinches: it begins
+    fist.Step(0.06), fist.Step(0.015), fist.Step(0.015);
+    CHECK(fist.begins == 1, "a pinch once the fist opened (%d)", fist.begins);
+    // the index and middle curled, ring and little open: still a fist for the guard
+    Run two{Pinch(Params()), Grip()};
+    two.curled = 0b0011;
+    for (int k = 0; k < 15; ++k) two.Step(0.015);
+    CHECK(two.begins == 0, "index and middle curled: no pinch (%d)", two.begins);
+    // ring and little curled (a pinch with the other fingers tucked in), or the index alone: a pinch
+    Run tucked{Pinch(Params()), Grip()};
+    tucked.curled = 0b1100;
+    for (int k = 0; k < 5; ++k) tucked.Step(0.015);
+    CHECK(tucked.begins == 1, "ring and little curled: a pinch (%d)", tucked.begins);
+    Run index{Pinch(Params()), Grip()};
+    index.curled = 0b0001;
+    for (int k = 0; k < 5; ++k) index.Step(0.015);
+    CHECK(index.begins == 1, "the index alone curled: a pinch (%d)", index.begins);
+    // a pinch already down carries on while the index and middle curl around it
+    Run held{Pinch(Params()), Grip()};
+    for (int k = 0; k < 10; ++k) held.Step(0.015);
+    held.curled = 0b0011;
+    for (int k = 0; k < 15; ++k) held.Step(0.015);
+    CHECK(held.down() && held.ends == 0, "a pinch down survives its fingers curling");
+    // the fist opening with the fingers apart, then a pinch: it begins
+    held.curled = 0;
+    held.Step(0.06), held.Step(0.06);
+    for (int k = 0; k < 3; ++k) held.Step(0.015);
+    CHECK(held.begins == 2, "a pinch after the fist opened (%d)", held.begins);
+    // fist_curl 0: the guard off, a fist with the thumb on the index pinches as before
+    PinchParams off = Params();
+    off.fist_curl = 0;
+    Run old{Pinch(off), Grip()};
+    for (int k = 0; k < 5; ++k) old.Step(0.015, true);
+    CHECK(old.begins == 1, "guard off: the fist pinches (%d)", old.begins);
+}
+
 }  // namespace
 
 int main() {
@@ -219,6 +266,7 @@ int main() {
     TestTapUnchanged();
     TestGripTakeover();
     TestDip();
+    TestFistGuard();
     if (failures) {
         std::printf("%d failures\n", failures);
         return 1;

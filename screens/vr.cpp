@@ -1064,19 +1064,16 @@ double RayDistance(const Mat &d, const Mat &c) {
     return std::sqrt(Dot3(q, q));
 }
 
-// The controls are invisible until a laser is on one of them (SteamVR's hover event) or
-// passes very close (within `reach`, about 1.5 times a button's size); they stay
-// kControlsLinger ticks after it leaves, and while in use.
+// Where a laser meets the screen's surface: u along it (along the arc when curved), v up, metres from
+// its centre, and how far along the laser.
+bool RayOnSurface(const Screen &s, const Mat &p, const Mat &laser, double *u, double *v, double *dist = nullptr);
+
 // The resize handle goes to the corner something aims at, and brightens the closer the aim (user,
 // 2026-10-10: Vision Pro-style resize from any corner, for hands, the gaze and lasers): a laser's ray
 // (a controller's, or the pointer helper's for the gaze and the hand ray) landing within the corner
 // zone (a fifth of the screen's height, 5 to 20 cm) of a corner, or a hand's pinch at one
 // (handinput's corners()). Lit while resizing. With no aim for kControlsLinger ticks it goes back
 // to the bottom right.
-// Where a laser meets the screen's surface: u along it (along the arc when curved), v up, metres from
-// its centre, and how far along the laser.
-bool RayOnSurface(const Screen &s, const Mat &p, const Mat &laser, double *u, double *v, double *dist = nullptr);
-
 void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     const double W = s.metres, H = s.heightMetres();
     const double zone = std::clamp(0.2 * std::min(W, H), 0.05, 0.2);
@@ -1128,6 +1125,9 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     }
 }
 
+// The controls are invisible until a laser is on one of them (SteamVR's hover event) or
+// passes very close (within `reach`, about 1.5 times a button's size); they stay
+// kControlsLinger ticks after it leaves, and while in use.
 void UpdateControls() {
     std::vector<Mat> lasers;
     for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
@@ -2538,7 +2538,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 }
                 break;
             case handinput::Event::GrabStart:
-                if (e.zone == handinput::Zone::Tab || e.zone == handinput::Zone::Corner)   // the handle goes to that corner
+                // the handle goes to that corner (not while the other hand holds it: a stretch)
+                if ((e.zone == handinput::Zone::Tab || e.zone == handinput::Zone::Corner) && s.drag == Drag::None)
                     s.cornerX = e.sx, s.cornerY = e.sy, s.keepX = -e.sx, s.keepY = -e.sy, PlaceChrome(s);
                 StartHandDrag(s, e.side, e.zone);
                 break;

@@ -1755,6 +1755,156 @@ void TestFistGrab() {
     }
 }
 
+// Throws (2026-10-10). An open hand, palm toward the panel and fingers up, at x, y, z (its palm).
+SynthHand OpenAt(double x, double y, double z, double jitter = 0) {
+    SynthHand h;
+    h.palm = true, h.palmAt[0] = x, h.palmAt[1] = y, h.palmAt[2] = z, h.rollDeg = 180, h.tiltDeg = 90, h.jitter = jitter;
+    return h;
+}
+
+// A hand moving from `a` to `b` (palm or tip, as made) at `speed` m/s, frames at 30 Hz; then held.
+template <typename Make>
+void Sweep(Rig &r, const double a[3], const double b[3], double speed, Make make, int hold = 10) {
+    const double d = std::hypot(std::hypot(b[0] - a[0], b[1] - a[1]), b[2] - a[2]);
+    const int n = std::max(1, int(std::ceil(d / (speed / 30))));
+    for (int k = 0; k <= n + hold; ++k) {
+        const double f = std::min(1.0, double(k) / n);
+        r.Frame({make(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f)});
+    }
+}
+
+void TestFlick() {
+    struct Case { const char *what; int hand; double from[3], to[3], speed; double jitter; bool throws; };
+    // the panel 0.5 m ahead (z -0.5), the head at the origin; hand 0: curled, opening as it goes out
+    // (a flick), 2: open throughout; 1: pointing (the tip)
+    const Case cases[] = {
+        {"a hand flicked out through it, the fingers opening, 1.5 m/s", 0, {0.05, 0, -0.44}, {0.05, 0, -0.76}, 1.5, 0, true},
+        {"...with 3 mm of noise", 0, {0.05, 0, -0.44}, {0.05, 0, -0.76}, 1.5, 0.003, true},
+        {"...at 0.8 m/s (a push)", 0, {0.05, 0, -0.44}, {0.05, 0, -0.76}, 0.8, 0, false},
+        {"an open hand pushed out through it, 1.5 m/s (open throughout)", 2, {0.05, 0, -0.44}, {0.05, 0, -0.76}, 1.5, 0, false},
+        {"a hand waved across it, the fingers opening, 1.5 m/s", 0, {-0.3, 0, -0.45}, {0.3, 0, -0.45}, 1.5, 0, false},
+        {"a hand pulled back from it, the fingers opening, 1.5 m/s", 0, {0.05, 0, -0.46}, {0.05, 0, -0.16}, 1.5, 0, false},
+        {"a hand flicked out 30 cm away from it", 0, {0.05, 0, -0.14}, {0.05, 0, -0.30}, 1.5, 0, false},
+        {"a pointing hand jabbed through it, 1.5 m/s", 1, {0.05, 0, -0.42}, {0.05, 0, -0.62}, 1.5, 0, false},
+        {"a poke, 0.3 m/s", 1, {0.05, 0, -0.42}, {0.05, 0, -0.515}, 0.3, 0, false},
+    };
+    for (const Case &c : cases) {
+        Rig r;
+        r.panels[0].controls.clear();
+        auto make = [&](double x, double y, double z) {
+            if (c.hand == 1) {
+                SynthHand h = TipAt(x, y, z + 0.5);
+                h.jitter = c.jitter;
+                return h;
+            }
+            SynthHand h = OpenAt(x, y, z, c.jitter);
+            // curled until a third of the way out, then open
+            const double gone = std::hypot(std::hypot(x - c.from[0], y - c.from[1]), z - c.from[2]);
+            const double all = std::hypot(std::hypot(c.to[0] - c.from[0], c.to[1] - c.from[1]), c.to[2] - c.from[2]);
+            if (c.hand == 0 && gone < all / 3) h.curl = h.curlIndex = 1;
+            return h;
+        };
+        for (int k = 0; k < 8; ++k) r.Frame({make(c.from[0], c.from[1], c.from[2])});
+        Sweep(r, c.from, c.to, c.speed, make);
+        const auto t = r.Last(Event::Throw);
+        std::printf("flick: %s: %s%s\n", c.what, t ? "thrown" : "stays", r.Count(Event::Press) ? ", a press" : "");
+        CHECK(bool(t) == c.throws);
+        if (c.throws) {
+            CHECK(r.Count(Event::Press) == 0 && t->flick);
+            if (t) NEAR(t->to.m[2][3], -3.0, 0.01), NEAR(t->to.m[0][3], 0.0, 0.01), NEAR(t->to.m[2][2], 1.0, 0.01);
+        }
+        if (c.hand == 1 && c.speed < 1) CHECK(r.Count(Event::Press) == 1);
+    }
+    {
+        // the hand lost for 6 frames at the panel, back 25 cm out and moving on out (opening): its
+        // velocity and travel don't reach back over the gap: no flick until it has really flicked
+        Rig r;
+        SynthHand gone;
+        gone.present = false;
+        auto curled = [](double z) {
+            SynthHand h = OpenAt(0.05, 0, z);
+            h.curl = h.curlIndex = 1;
+            return h;
+        };
+        for (int k = 0; k < 8; ++k) r.Frame({curled(-0.44)});
+        for (int k = 0; k < 3; ++k) r.Frame({gone});
+        for (int k = 0; k < 3; ++k) r.Frame({OpenAt(0.05, 0, -0.60 - 0.05 * k)});   // 1.5 m/s, 10 cm since it's back
+        CHECK(r.Count(Event::Throw) == 0);
+        r.in.params().flickTravel = 0.05;   // (it is a flick from where it came back, once that's far enough)
+        r.Frame({OpenAt(0.05, 0, -0.75)});
+        CHECK(r.Count(Event::Throw) == 0);   // ...but it didn't start from the panel (it came back 10 cm behind it)
+    }
+    {
+        // HANDS_FLICK_OPENING=0: an open hand pushed out flicks too; HANDS_FLICK=0: nothing
+        const double a[3] = {0.05, 0, -0.44}, b[3] = {0.05, 0, -0.76};
+        Rig r;
+        r.in.params().flickOpening = 0;
+        for (int k = 0; k < 8; ++k) r.Frame({OpenAt(a[0], a[1], a[2])});
+        Sweep(r, a, b, 1.5, [](double x, double y, double z) { return OpenAt(x, y, z); });
+        CHECK(r.Count(Event::Throw) == 1);
+        Rig q;
+        q.in.params().flick = false, q.in.params().flickOpening = 0;
+        for (int k = 0; k < 8; ++k) q.Frame({OpenAt(a[0], a[1], a[2])});
+        Sweep(q, a, b, 1.5, [](double x, double y, double z) { return OpenAt(x, y, z); });
+        CHECK(q.Count(Event::Throw) == 0);
+    }
+}
+
+// The card throw: a card carried, let go moving out fast (or slowly, or sideways, or just after the
+// hand came back from a gap).
+void TestCardThrow() {
+    const double v = -0.28125 + 0.01;
+    struct Case { const char *what; double dir[3], speed; int gap; bool throws; };
+    const Case cases[] = {
+        {"let go moving straight out at 1.5 m/s", {0, 0, -1}, 1.5, 0, true},
+        {"let go moving out and up at 1.5 m/s", {0, 0.5, -0.866}, 1.5, 0, true},
+        {"let go moving out at 0.5 m/s", {0, 0, -1}, 0.5, 0, false},
+        {"let go moving sideways at 1.5 m/s", {-1, 0, 0}, 1.5, 0, false},
+        {"let go moving in at 1.5 m/s", {0, 0, 1}, 1.5, 0, false},
+        {"let go the frame it came back from a 6-frame gap", {0, 0, -1}, 1.5, 6, false},
+    };
+    for (const Case &c : cases) {
+        Rig r;
+        r.panels[0].controls.clear();
+        double x = 0.1, y = v, z = 0;
+        auto hand = [&](double open) {
+            SynthHand h = CardHand(x, y, open);
+            h.contact[2] += z;
+            return h;
+        };
+        for (double o : {1.0, 1.0, 0.8, 0.6, 0.4, 0.2}) r.Frame({hand(o)});
+        const double at[3] = {0.1, v, -0.5};
+        r.Frame({hand(0)});
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({hand(0)});
+        CHECK(r.Last(Event::GrabStart) && r.Last(Event::GrabStart)->zone == Zone::Card);
+        for (int k = 0; k < 10; ++k) r.Frame({hand(0)});
+        // the throw: 8 frames along dir at speed (the last ones with the hand back after a gap)
+        for (int k = 1; k <= 8; ++k) {
+            x += c.dir[0] * c.speed / 30, y += c.dir[1] * c.speed / 30, z += c.dir[2] * c.speed / 30;
+            SynthHand h = hand(0);
+            if (c.gap && k > 8 - 1 - c.gap && k < 8) h.present = false;
+            if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
+            r.Frame({h});
+        }
+        r.synth.Pinch(1, false, r.t, at, 1);
+        for (int k = 0; k < 4; ++k) {
+            x += c.dir[0] * c.speed / 30, y += c.dir[1] * c.speed / 30, z += c.dir[2] * c.speed / 30;
+            r.Frame({hand(1.0)});
+        }
+        const auto t = r.Last(Event::Throw);
+        std::printf("card throw: %s: %s\n", c.what, t ? "thrown" : "stays");
+        CHECK(r.Count(Event::GrabEnd) == 1);
+        CHECK(bool(t) == c.throws);
+        if (t) {
+            const double d = std::hypot(std::hypot(t->to.m[0][3], t->to.m[1][3]), t->to.m[2][3]);
+            NEAR(d, 3.0, 0.01);
+            CHECK(!t->flick);
+            if (c.dir[1] > 0) CHECK(t->to.m[1][3] > 0.5);   // up along the throw
+        }
+    }
+}
+
 void TestV2Ingest() {
     // a version 2 file: the skeleton's joints, elbow and pinch point are used
     static fh_hands_v2_t f{};
@@ -2397,9 +2547,10 @@ int Replay(const char *path) {
         P.pose = Mul(g_ref, P.pose);
         const Run r = Play(recs, 0, recs.size(), {P});
         const auto &s = r.stats;
-        std::printf("%s panel %.2f m ahead: near %4.1f%% of frames, %3d presses (%.1f/min), %d grabs; held back: %d one view, "
+        std::printf("%s panel %.2f m ahead: near %4.1f%% of frames, %3d presses (%.1f/min), %d grabs, %d flicks; held back: %d one view, "
                     "%d bent, %d not nearest, %d pinching, %d busy, %d resting, %d askew, %d slow\n",
                     low ? "low " : "eye ", z, 100.0 * r.nearFrames / std::max(1, r.frames), r.presses, r.presses / secs * 60, r.grabs,
+                    r.stats.flicks,
                     s.heldNotStereo, s.heldNotExtended, s.heldNotNearest, s.heldPinching, s.heldBusy, s.heldResting,
                     s.heldAskew, s.heldSlow);
     }
@@ -2962,6 +3113,22 @@ void TestGrabThatPlace() {
     CHECK(grabthat::Decide(false, At(0.2, 1.5, -0.6), head, k) == Outcome::Centre);
     CHECK(grabthat::Decide(true, At(0, 1.6, -2), head, k) == Outcome::Bring);       // taken far away since
     CHECK(grabthat::Decide(false, At(0, 1.6, -2), head, k) == Outcome::Bring);
+    // a panel thrown 3 m out (handinput's throws, 2026-10-10), 0.6 m wide: the open palm's line passing
+    // 14 cm off its edge still finds it (3 deg seen from the eyes; 10 cm alone missed it), and it comes
+    {
+        std::vector<Target> far(1);
+        far[0].index = 5, far[0].pose = At(0, 0, -3), far[0].width = 0.6, far[0].height = 0.34;
+        grabthat::Fire g;
+        g.head = Identity();
+        const double off = 0.30 + 0.14;   // at 3 m
+        g.palm[0] = off * 0.4 / 3, g.palm[1] = 0, g.palm[2] = -0.4;
+        g.head = RotY(M_PI / 2, 0, 0, 0);   // looking left: the head's cone can't pick it, only the palm's line
+        CHECK(grabthat::Pick(far, g, k) == 5);
+        grabthat::Params narrow = k;
+        narrow.aimMarginDeg = 0;
+        CHECK(grabthat::Pick(far, g, narrow) == -1);
+        CHECK(grabthat::Decide(false, far[0].pose, Identity(), k) == Outcome::Bring);
+    }
 }
 
 // --- the user's flags (frame-hands captures/flags/<flag>: sets.jsonl, hmd.jsonl, manifest.json)
@@ -3213,13 +3380,13 @@ void TestGrabThatAtNearPanel() {
         FlagThroughHandInput(dir, {P}, run);
         int presses = 0, grabs = 0;
         for (const Event &e : run.events) presses += e.type == Event::Press, grabs += e.type == Event::GrabStart;
-        std::printf("grab that at a panel %.2f m ahead (the user's flag): %zu fire(s), %d presses, %d grabs, %d fist(s) "
-                    "waited, %d were grab that, near %d of %d frames\n", distance, run.fires.size(), presses, grabs,
+        std::printf("grab that at a panel %.2f m ahead (the user's flag): %zu fire(s), %d presses, %d grabs, %d flicks, %d fist(s) "
+                    "waited, %d were grab that, near %d of %d frames\n", distance, run.fires.size(), presses, grabs, run.stats.flicks,
                     run.stats.fistsWaited, run.stats.fistsCancelled, run.stats.nearFrames, run.stats.frames);
         if (std::getenv("HANDINPUT_LOG"))
             for (const std::string &l : run.logs) std::printf("    %s\n", l.c_str());
         CHECK(run.fires.size() == 2);
-        CHECK(presses == 0 && grabs == 0);
+        CHECK(presses == 0 && grabs == 0 && run.stats.flicks == 0);   // (grab that's pull back isn't a flick)
     }
 }
 
@@ -3273,10 +3440,11 @@ int ScanFlags(int n, char **dirs) {
             if (FlagThroughHandInput(dirs[i], {P}, run)) {
                 int presses = 0, grabs = 0;
                 for (const Event &e : run.events) presses += e.type == Event::Press, grabs += e.type == Event::GrabStart;
-                std::printf("  with a panel at arm's reach: near %d of %d frames, %d presses (%d by pinch), %d grabs, %zu fire(s)\n",
-                            run.stats.nearFrames, run.stats.frames, presses, run.stats.pinchClicks, grabs, run.fires.size());
+                std::printf("  with a panel at arm's reach: near %d of %d frames, %d presses (%d by pinch), %d grabs, %d flicks, %zu fire(s)\n",
+                            run.stats.nearFrames, run.stats.frames, presses, run.stats.pinchClicks, grabs, run.stats.flicks, run.fires.size());
                 for (const std::string &l : run.logs)
-                    if (l.find("pressed") != std::string::npos || l.find("took") != std::string::npos) std::printf("    %s\n", l.c_str());
+                    if (l.find("pressed") != std::string::npos || l.find("took") != std::string::npos || l.find("flick") != std::string::npos)
+                        std::printf("    %s\n", l.c_str());
             }
         }
         total += int(fires.size()), all += secs;
@@ -3323,6 +3491,8 @@ int main(int argc, char **argv) {
     TestForgivingZones();
     TestCardPinch();
     TestFistGrab();
+    TestFlick();
+    TestCardThrow();
     TestV2Ingest();
     TestMatte();
     TestPalmUp();

@@ -230,6 +230,31 @@ struct Params {
     // stays turned; the next grab keeps that turn. HANDS_GRAB_ROTATE, HANDS_GRAB_ROTATE_DEADZONE.
     bool grabRotate = true;
     double rotDeadzone = 5, rotMinCutoff = 1.0, rotBeta = 0.05, rollSnap = 2.5;
+    // Throws (user, 2026-10-10). Both send the panel throwDistance from the eyes, facing them, over
+    // throwMs (ease-out); "grab that" brings it back.
+    // The flick (HANDS_FLICK): a quick outward flick of an open hand at a panel. The palm within
+    // flickNear in front of a panel (or flickBack behind it), over it, and moving slower than
+    // flickStartSpeed there (a flick starts from the panel; a hand reaching through one passes it at
+    // speed: without this the recordings' probe moves threw a panel 0.3-0.45 m ahead 1-3 times in
+    // 2-3 minutes), on some frame in the last flickMs; since then moving away from the eyes (within flickAngle of the line from them to the
+    // palm) at flickSpeed or more (a fit over the last flickFitMs), flickTravel or more from there; the
+    // fingers open (their mean extension flickOpen or more: a pointing hand's is about 1.3, an open
+    // one's 1.7-1.9) and opening on the way (by flickOpening or more since the start: a flick, not an
+    // open hand reaching out, which the recordings have now and then; 0: an open hand flicks too,
+    // HANDS_FLICK_OPENING); no pinch or grip down; the hand not pressing or grabbing. Where to: on the line
+    // from the eyes through the panel's centre. An open hand that comes through a panel faster than
+    // flickPokeSpeed doesn't poke it. Once a second at most.
+    bool flick = true;
+    double flickSpeed = 1.2, flickTravel = 0.12, flickMs = 200, flickFitMs = 100, flickNear = 0.12, flickBack = 0.04;
+    double flickAngle = 40, flickOpen = 1.5, flickPokeSpeed = 0.8, flickRefractoryMs = 1000, flickStartSpeed = 0.6;
+    double flickOpening = 0.15;
+    // The card throw (HANDS_THROW): a hand carrying a panel (a card, a fist, a pinch on its border or
+    // bar; not a resize or two hands) that lets go moving at throwSpeed or more (its velocity over the
+    // throwFitMs before the fingers opened), within throwAngle of away from the eyes: the panel goes on
+    // along that line, to where it's throwDistance from the eyes. Slower, it stays where it was let go.
+    bool cardThrow = true;
+    double throwSpeed = 1.0, throwFitMs = 100, throwAngle = 60;
+    double throwDistance = 3.0, throwMs = 400;
 };
 
 // Card: the card pinch; Fist: the fist grab (both carry it).
@@ -237,13 +262,17 @@ enum class Zone { None, Bar, Tab, Corner, Edge, Title, Card, Fist };
 const char *ZoneName(Zone z);
 
 struct Event {
-    enum Type { Motion, Press, Release, Control, GrabStart, GrabEnd } type;
+    // Throw: the panel goes to `to` over `ms` (ease-out): a flick at it, or a carry let go fast
+    enum Type { Motion, Press, Release, Control, GrabStart, GrabEnd, Throw } type;
     int side = 0;               // 0 left, 1 right
     int panel = -1;
     double x = 0, y = 0;        // buffer pixels (Motion, Press, Release)
     handinput::Control control = Control::None;   // Control: the button poked
     Zone zone = Zone::None;     // GrabStart
     int sx = 1, sy = -1;        // GrabStart by a corner: which one (+1 right, top)
+    Mat to{};                   // Throw: where the panel goes
+    double ms = 0;              // ...over this long
+    bool flick = false;         // ...by a flick (else a carry let go fast)
     bool lost = false;          // Release, GrabEnd: the hand was lost, or input was taken away
 };
 
@@ -388,6 +417,7 @@ public:
         int edgePresses = 0;             // presses just past the content's edge (Params::edgeSlack)
         int pinchClicks = 0, cards = 0, fists = 0, fistsWaited = 0, fistsCancelled = 0;   // (and pinches)
         int coasts = 0, reacquired = 0, glitches = 0, heldThrough = 0, lostEnds = 0;   // holding through loss
+        int flicks = 0, throws = 0, heldFlick = 0;   // flicks and card throws; pokes not taken from a flick
     } stats;
 
 private:
@@ -406,7 +436,7 @@ private:
         bool inZone = false;                 // within the zone itself on the last frame (not the margin)
         // The fingers over the last 400 ms (room, capture time): the index tip (the poke's approach),
         // and the thumb tip and the contact (the card pinch).
-        struct Sample { int64_t t; float tip[3], thumb[3], contact[3], along[3]; };   // along: wrist to knuckles
+        struct Sample { int64_t t; float tip[3], thumb[3], contact[3], along[3], palm[3]; float open; };   // along: wrist to knuckles
         std::vector<Sample> hist;
         double lockU = 0, lockV = 0, lastX = -1, lastY = -1, deepest = 0;
         bool dragging = false, spent = false;
@@ -470,10 +500,13 @@ private:
         int jumps = 0;
         int reacquired = 0;               // ...times the hand came back mid-hold
         bool cardCandidate = false;       // a border move begun straddling the edge: a card if the fingers join
+        int64_t upNs = 0;                 // the capture time of the first hands frame its gesture was up
+        int64_t flickNs = INT64_MIN / 2;  // the last flick (Params::flickRefractoryMs)
     };
     enum Why : unsigned {
         kOneFrame = 1, kOneView = 2, kBent = 4, kNotNearest = 8, kPinching = 16, kBusy = 32, kOtherHand = 64,
-        kTooSoon = 128, kSpent = 256, kNotOut = 16384, kLate = 32768, kResting = 512, kTyping = 1024, kAskew = 2048, kSlow = 4096, kOffContent = 8192
+        kTooSoon = 128, kSpent = 256, kNotOut = 16384, kLate = 32768, kResting = 512, kTyping = 1024, kAskew = 2048, kSlow = 4096, kOffContent = 8192,
+        kFlick = 65536
     };
     const handcut::Hand *HandFor(int side, const std::vector<handcut::Hand> &hands, uint32_t prefer) const;
     void Poke(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand *h);
@@ -500,6 +533,12 @@ private:
     void Log(const char *fmt, ...) __attribute__((format(printf, 2, 3)));
     void Carries(const Input &in, const std::vector<Panel> &panels);
     void Glows(const Input &in, const std::vector<Panel> &panels);
+    // A flick by this hand at a panel (Params::flick), on a hands frame.
+    void Flick(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand &h);
+    // Where a thrown panel goes: the point throwDistance from the head along the line from `from`
+    // in `dir` (unit), facing the head. False if `from` is that far already, or the line doesn't get there.
+    bool ThrowTarget(const double from[3], const double dir[3], Mat *to) const;
+    void EmitThrow(int s, int panel, const Mat &to, bool flick);
     // A grabbing side's wrist turn since the grab (Params::grabRotate), in the frame facing the head
     // across the floor from the pinch point (CarryPose applies it in the frame the panel faces the
     // head in); false while within the dead zone (or off).
@@ -536,6 +575,8 @@ private:
     uint64_t frame_ = 0;
     bool newFrame_ = false;
     fhsmooth::Point3 head_;   // the head carried panels face, smoothed
+    Mat lastHead_{};          // the head as last given (throws aim from the eyes)
+    bool haveHead_ = false;
     int64_t frameNs_ = 0;
     // two hands on one panel: what it was when the second hand took it
     struct Stretch {

@@ -235,8 +235,9 @@ int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k) {
         for (double &x : dir) x /= l;
         for (const Target &p : panels) {
             double u, v, t;
-            if (RayHit(p, f.eye, dir, &u, &v, &t) && std::fabs(u) <= p.width / 2 + k.aimMargin &&
-                std::fabs(v) <= p.height / 2 + k.aimMargin && t < bestT)
+            if (!RayHit(p, f.eye, dir, &u, &v, &t)) continue;
+            const double margin = std::max(k.aimMargin, t * std::tan(k.aimMarginDeg * M_PI / 180));
+            if (std::fabs(u) <= p.width / 2 + margin && std::fabs(v) <= p.height / 2 + margin && t < bestT)
                 bestT = t, best = p.index;
         }
     }

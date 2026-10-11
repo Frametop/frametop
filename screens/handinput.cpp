@@ -32,6 +32,13 @@ double FingerExtension(const Hand &h, int mcp) {
     return Dist3(h.p[mcp + 3], h.p[0]) / std::max(1e-6, Dist3(h.p[mcp], h.p[0]));
 }
 double Extension(const Hand &h) { return FingerExtension(h, 5); }
+// How open a hand is: its four fingers' mean extension (as FingerExtension; a fist about 1, a pointing
+// hand about 1.3, an open one 1.7-1.9).
+double Openness(const Hand &h) {
+    double sum = 0;
+    for (int mcp : {5, 9, 13, 17}) sum += FingerExtension(h, mcp);
+    return sum / 4;
+}
 
 // The angle (degrees) between the index finger (its knuckle to its tip: the last bone alone is 2 cm
 // long, and a few mm of tracking noise on its ends turned it 15-20 degrees) and the way into the
@@ -434,6 +441,37 @@ void HandInput::EndGrab(int s, bool lost) {
     Side &sd = side_[s];
     if (sd.state != State::Grab) return;
     Emit(Event::GrabEnd, s, sd.panel, 0, 0, lost);
+    // let go fast, outward: thrown on along that line (Params::cardThrow)
+    const bool carried = sd.zone == Zone::Card || sd.zone == Zone::Fist || sd.zone == Zone::Edge || sd.zone == Zone::Bar ||
+                         sd.zone == Zone::Title;
+    fhsmooth::V3 v;
+    if (!lost && p_.cardThrow && carried && stretch_.panel != sd.panel && haveHead_ && !sd.track.empty() &&
+        Velocity(s, sd.upNs ? sd.upNs : 0, p_.throwFitMs, &v)) {
+        const double speed = fhsmooth::Len(v);
+        // outward: away from the eyes, from where the hand was as the throw's last fitMs began
+        fhsmooth::V3 hand = sd.track.back().p;
+        const int64_t end = sd.upNs ? sd.upNs : sd.track.back().t;
+        for (const Side::Pt &q : sd.track)
+            if (q.t >= end - int64_t(p_.throwFitMs * 1e6)) {
+                hand = q.p;
+                break;
+            }
+        const fhsmooth::V3 eye{lastHead_.m[0][3], lastHead_.m[1][3], lastHead_.m[2][3]};
+        const double out = fhsmooth::Dot(fhsmooth::Norm(v), fhsmooth::Norm(hand - eye));
+        const double c[3] = {sd.last.m[0][3], sd.last.m[1][3], sd.last.m[2][3]};
+        const fhsmooth::V3 n = fhsmooth::Norm(v);
+        const double dir[3] = {n.x, n.y, n.z};
+        Mat to;
+        if (speed >= p_.throwSpeed && out >= std::cos(p_.throwAngle * M_PI / 180) && ThrowTarget(c, dir, &to)) {
+            Log("%s %s let go of screen %d at %.2f m/s, %.0f deg off straight out: thrown", SideName(s),
+                sd.byGrip ? "fist" : "pinch", sd.panel + 1, speed, std::acos(std::clamp(out, -1.0, 1.0)) * 180 / M_PI);
+            EmitThrow(s, sd.panel, to, false);
+        } else if (speed >= 0.5) {
+            Log("%s %s let go of screen %d at %.2f m/s, %.0f deg off straight out: not thrown (%.1f m/s and %.0f deg)", SideName(s),
+                sd.byGrip ? "fist" : "pinch", sd.panel + 1, speed, std::acos(std::clamp(out, -1.0, 1.0)) * 180 / M_PI,
+                p_.throwSpeed, p_.throwAngle);
+        }
+    }
     ++stats.grabEnds;
     Log("%s %s let go of screen %d after %.2f s%s", SideName(s), sd.byGrip ? "fist" : "pinch", sd.panel + 1,
         (g_now - sd.grabbedNs) / 1e9, lost ? " (the hand was lost, or hand input was taken away)" : "");
@@ -488,6 +526,7 @@ void HandInput::EndAttempt(int s) {
     }
     if (a.why & kLate) std::snprintf(b, sizeof b, "reaching through: past it over %d frames or %.0f cm", p_.lateFrames, -p_.lateDepth * 100), add(b);
     if (a.why & kOneView) add("seen by one camera");
+    if (a.why & kFlick) std::snprintf(b, sizeof b, "an open hand coming at %.2f m/s (a flick, not a poke)", a.speed), add(b);
     if (a.why & kBent) std::snprintf(b, sizeof b, "the index bent (%.2f, needs %.2f)", a.ext, p_.extended), add(b);
     if (a.why & kNotNearest) {
         static const char *tips[] = {"middle", "ring", "little"};
@@ -512,6 +551,7 @@ void HandInput::EndAttempt(int s) {
 
 void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
     g_now = in.nowNs;
+    if (in.haveHead) lastHead_ = in.head, haveHead_ = true;
     events_.clear(), carries_.clear(), glows_.clear(), hovered_.clear(), corners_.clear(), nearPanels_.clear(), logs_.clear();
     const handcut::Hands &H = *in.hands;
     newFrame_ = H.frame() != frame_;
@@ -543,6 +583,12 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
             std::memcpy(q.tip, h->p[8], sizeof q.tip), std::memcpy(q.thumb, h->p[4], sizeof q.thumb);
             std::memcpy(q.contact, h->contact, sizeof q.contact);
             for (int i = 0; i < 3; ++i) q.along[i] = (h->p[5][i] + h->p[17][i]) / 2 - h->p[0][i];
+            {
+                double pc[3];
+                h->Palm(pc);
+                ToF(pc, q.palm);
+                q.open = float(Openness(*h));
+            }
             if (sd.hist.empty() || q.t > sd.hist.back().t) sd.hist.push_back(q);
             while (sd.hist.size() > 2 && q.t - sd.hist.front().t > 400'000'000) sd.hist.erase(sd.hist.begin());
             double palm[3];
@@ -573,6 +619,7 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
             if (sd.state == State::Press && sd.byPinch) PinchPress(s, in, panels, h);
             else Poke(s, in, panels, h);
         }
+        if (newFrame_ && h && p_.flick && (sd.state == State::Idle || sd.state == State::Hover)) Flick(s, in, panels, *h);
     }
     if (newFrame_ && anyNear()) ++stats.nearFrames;
     Carries(in, panels);
@@ -770,6 +817,8 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     if (!h->stereo) return (void)(++stats.heldNotStereo, a.why |= kOneView);
     if (!extended) return (void)(++stats.heldNotExtended, a.why |= kBent);
     if (!nearest) return (void)(++stats.heldNotNearest, a.why |= kNotNearest);
+    if (p_.flick && sd.inSpeed >= p_.flickPokeSpeed && Openness(*h) >= p_.flickOpen)   // a flick through it
+        return (void)(++stats.heldFlick, a.why |= kFlick);
     if (pinch.down || grip.down) return (void)(++stats.heldPinching, a.why |= kPinching);
     if (in.pointerBusy) return (void)(++stats.heldBusy, a.why |= kBusy);
     if (otherPressing) return (void)(++stats.heldBusy, a.why |= kOtherHand);
@@ -849,15 +898,6 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
     if (newPinch && g.down && sd.state == State::Hover && sd.inZone) PinchBegin(s, in, panels, false);
 }
 
-namespace {
-// How open a hand is: its four fingers' mean extension (as FingerExtension; a fist about 1, open 1.8).
-double Openness(const Hand &h) {
-    double sum = 0;
-    for (int mcp : {5, 9, 13, 17}) sum += FingerExtension(h, mcp);
-    return sum / 4;
-}
-}  // namespace
-
 bool HandInput::StillHeld(int s, const Input &in, const handcut::Gesture &g, bool isNew, bool grip) {
     Side &sd = side_[s];
     if (g.down) {
@@ -873,6 +913,7 @@ bool HandInput::StillHeld(int s, const Input &in, const handcut::Gesture &g, boo
     const Hand *h = HandFor(s, in.hands->seen(), sd.handId);
     if (!h) return true;           // unseen: holdLostMs decides
     const bool closed = grip ? Openness(*h) < p_.holdGripOpen : Dist3(h->p[4], h->p[8]) < p_.holdPinchOpen;
+    if (sd.upFrames == 0) sd.upNs = h->captureNs;   // (a throw's velocity is taken up to here)
     ++sd.upFrames;
     if (closed && g.lost) {        // ft-hands lost it, and the hand is back still closed: held
         sd.upFrames = 0;
@@ -1350,6 +1391,117 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
         }
         carries_.push_back(c);
     }
+}
+
+bool HandInput::ThrowTarget(const double from[3], const double dir[3], Mat *to) const {
+    if (!haveHead_) return false;
+    const double head[3] = {lastHead_.m[0][3], lastHead_.m[1][3], lastHead_.m[2][3]};
+    const double w[3] = {from[0] - head[0], from[1] - head[1], from[2] - head[2]};
+    const double D = p_.throwDistance, b = Dot(w, dir), c = Dot(w, w) - D * D;
+    if (c >= 0) return false;   // that far already
+    const double t = -b + std::sqrt(b * b - c);
+    const double at[3] = {from[0] + t * dir[0], from[1] + t * dir[1], from[2] + t * dir[2]};
+    *to = Facing(at, head);
+    return true;
+}
+
+void HandInput::EmitThrow(int s, int panel, const Mat &to, bool flick) {
+    Event e;
+    e.type = Event::Throw, e.side = s, e.panel = panel, e.to = to, e.ms = p_.throwMs, e.flick = flick;
+    events_.push_back(e);
+    ++(flick ? stats.flicks : stats.throws);
+}
+
+void HandInput::Flick(int s, const Input &in, const std::vector<Panel> &panels, const Hand &h) {
+    Side &sd = side_[s];
+    if (in.typing[s] || !haveHead_ || in.nowNs - sd.flickNs < int64_t(p_.flickRefractoryMs * 1e6)) return;
+    if (in.hands->pinch(s).down || in.hands->grip(s).down || sd.hist.size() < 4) return;
+    const Side::Sample &now = sd.hist.back();
+    if (now.open < p_.flickOpen) return;
+    // the palm's velocity over the last flickFitMs (a least-squares line)
+    int n = 0;
+    double mt = 0, mp[3] = {0, 0, 0};
+    for (const Side::Sample &q : sd.hist)   // (a gap in the tracking leaves too few samples here)
+        if (now.t - q.t <= int64_t(p_.flickFitMs * 1e6) + 5'000'000)
+            mt += (q.t - now.t) / 1e9, mp[0] += q.palm[0], mp[1] += q.palm[1], mp[2] += q.palm[2], ++n;
+    if (n < 3) return;
+    mt /= n;
+    for (double &x : mp) x /= n;
+    double tt = 0, v[3] = {0, 0, 0};
+    for (const Side::Sample &q : sd.hist)
+        if (now.t - q.t <= int64_t(p_.flickFitMs * 1e6) + 5'000'000) {
+            const double dt = (q.t - now.t) / 1e9 - mt;
+            tt += dt * dt;
+            for (int i = 0; i < 3; ++i) v[i] += dt * (q.palm[i] - mp[i]);
+        }
+    if (tt < 1e-6) return;
+    for (double &x : v) x /= tt;
+    const double speed = std::sqrt(Dot(v, v));
+    if (speed < p_.flickSpeed) return;
+    // where it started: the oldest frame in flickMs with the palm at a panel (just in front of it, over
+    // it) and nearly still there (a hand reaching through a panel passes it at speed: the recordings'
+    // probe moves did, a flick starts from it)
+    const double eye[3] = {lastHead_.m[0][3], lastHead_.m[1][3], lastHead_.m[2][3]};
+    const Panel *P = nullptr;
+    const Side::Sample *from = nullptr;
+    // (not from before a gap in the tracking: the hand coming back elsewhere isn't a flick)
+    size_t first = 1;
+    for (size_t i = sd.hist.size() - 1; i >= 1; --i)
+        if (sd.hist[i].t - sd.hist[i - 1].t > 100'000'000) {
+            first = i + 1;
+            break;
+        }
+    for (size_t i = first; i < sd.hist.size(); ++i) {
+        const Side::Sample &q = sd.hist[i], &before = sd.hist[i - 1];
+        if (now.t - q.t > int64_t(p_.flickMs * 1e6) || &q == &now || q.t <= before.t) continue;
+        const double step[3] = {double(q.palm[0]) - before.palm[0], double(q.palm[1]) - before.palm[1], double(q.palm[2]) - before.palm[2]};
+        if (std::sqrt(Dot(step, step)) / ((q.t - before.t) / 1e9) > p_.flickStartSpeed) continue;
+        double key = 1e9;
+        for (const Panel &c : panels) {
+            if (c.held) continue;
+            const Hit t = Locate(c, q.palm);
+            if (t.d >= -p_.flickBack && t.d <= p_.flickNear && InFootprint(c, t, 0.05) && t.d < key) key = t.d, P = &c;
+        }
+        if (P) {
+            from = &q;
+            break;
+        }
+    }
+    if (!P) return;
+    const double moved[3] = {now.palm[0] - from->palm[0], now.palm[1] - from->palm[1], now.palm[2] - from->palm[2]};
+    const double travel = std::sqrt(Dot(moved, moved));
+    if (travel < p_.flickTravel) return;
+    // the fingers opening on the way out (a flick), not a hand already open throughout (a reach)
+    if (p_.flickOpening > 0 && now.open - from->open < p_.flickOpening) {
+        double least = from->open;
+        for (const Side::Sample &q : sd.hist)
+            if (q.t >= from->t) least = std::min(least, double(q.open));
+        if (now.open - least < p_.flickOpening) return;
+    }
+    // away from the eyes: along the line from them to the palm where it started
+    double away[3] = {from->palm[0] - eye[0], from->palm[1] - eye[1], from->palm[2] - eye[2]};
+    const double al = std::sqrt(Dot(away, away));
+    if (al < 1e-3) return;
+    for (double &x : away) x /= al;
+    const double cosMin = std::cos(p_.flickAngle * M_PI / 180);
+    const double off = std::acos(std::clamp(Dot(v, away) / speed, -1.0, 1.0)) * 180 / M_PI;
+    if (Dot(v, away) / speed < cosMin || Dot(moved, away) / travel < cosMin) return;
+    // the panel straight out: on the line from the eyes through its centre
+    const double c[3] = {P->pose.m[0][3], P->pose.m[1][3], P->pose.m[2][3]};
+    double dir[3] = {c[0] - eye[0], c[1] - eye[1], c[2] - eye[2]};
+    const double dl = std::sqrt(Dot(dir, dir));
+    if (dl < 1e-3) return;
+    for (double &x : dir) x /= dl;
+    Mat to;
+    sd.flickNs = in.nowNs;
+    if (!ThrowTarget(eye, dir, &to) || dl >= p_.throwDistance - 0.05) {
+        Log("%s flick at screen %d (%.2f m/s, %.0f cm): it's %.1f m away already", SideName(s), P->index + 1, speed, travel * 100, dl);
+        return;
+    }
+    EndAttempt(s);
+    Log("%s flick at screen %d: %.2f m/s, %.0f cm, %.0f deg off straight out, the hand %.2f open (%.2f at the start): thrown "
+        "%.1f m out", SideName(s), P->index + 1, speed, travel * 100, off, now.open, from->open, p_.throwDistance);
+    EmitThrow(s, P->index, to, true);
 }
 
 void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {

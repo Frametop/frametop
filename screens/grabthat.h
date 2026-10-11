@@ -90,8 +90,9 @@ struct Params {
     double reachSlack = 0.35;
     double animMs = 250;
     // Which window: the one the line from the eyes through the open palm meets (within aimMargin
-    // of its edges, the nearest), else the one nearest the head's forward direction within headCone.
-    double aimMargin = 0.10, headCone = 20;   // m, degrees
+    // of its edges, or aimMarginDeg seen from the eyes if that's more: a panel thrown 3 m away, the
+    // nearest), else the one nearest the head's forward direction within headCone.
+    double aimMargin = 0.10, aimMarginDeg = 3, headCone = 20;   // m, degrees, degrees
 };
 
 // What a hand frame shows of the gesture (head frame at capture time).

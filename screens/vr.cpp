@@ -374,6 +374,7 @@ struct Screen {
     // it stays focused or in view after the last reason for it.
     ft_attention attention = FT_FOCUSED;
     int64_t inputMs = INT64_MIN / 2;  // the last pointer event on it or its controls
+    int64_t useMs = INT64_MIN / 2;    // the last click, scroll or drag on it (not a pointer passing over: the front slot's keep)
     int64_t laserMs = INT64_MIN / 2;  // ...from a laser (SteamVR's: a controller's, the 3D mouse's, a hand ray's)
     int64_t handPointerMs = INT64_MIN / 2;  // a hand last moved the pointer on it (kHandPointerMs)
     int64_t focusUntil = 0, viewUntil = 0;
@@ -2454,6 +2455,7 @@ grabthat::ReadParams g_frontRead;
 std::map<int, double> g_frontDeg;   // a screen resized in the slot: the view it spans (deg wide), next time too
 std::map<int, double> g_uiScale;    // KWin's scale for each screen (ft-layout's "scale", via the compositor)
 std::map<int, double> g_uiScaleConf;   // SCREEN_UI_SCALE: a remote display's own UI scale ("104=2 103=1.5")
+int64_t g_keyMs = INT64_MIN / 2;   // the last key typed (ft_vr_key: the front slot's screen has the typing)
 constexpr double kFrontAway = 70;          // degrees off where you face: out of view
 constexpr int64_t kFrontAwayMs = 600;      // ...for this long: it goes home
 void ShowCarousel();
@@ -2829,7 +2831,8 @@ void UpdateCarousel() {
     }
 }
 
-// Each tick: the one in the slot goes home when you turn away from it (unless kept); moved elsewhere,
+// Each tick: the one in the slot goes home when you turn away from it (unless kept: clicks, scrolls, drags or
+// keys on it add up to g_frontKeepMs; a pointer passing over it doesn't, user 2026-10-11: gaze kept every one); moved elsewhere,
 // it leaves the slot and lives there; resized there, that's its size in the slot from now on.
 void UpdateFront() {
     UpdateCarousel();
@@ -2857,7 +2860,7 @@ void UpdateFront() {
         return FrontRelease(i, "moved");
     }
     // used a while: kept (input on it within the last moment counts as use)
-    if (!g_front.kept && g_frontKeepMs > 0 && (held || now - s.inputMs < 250)) {
+    if (!g_front.kept && g_frontKeepMs > 0 && (held || now - s.useMs < 250 || now - g_keyMs < 250)) {
         g_front.usedMs += dt;
         if (g_front.usedMs >= g_frontKeepMs) {
             g_front.kept = true;
@@ -3171,7 +3174,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 handle(&f, data);
                 break;
             case handinput::Event::Press:
-                s.inputMs = s.handPointerMs = NowMs();
+                s.inputMs = s.handPointerMs = s.useMs = NowMs();
                 PressDown(holder, BTN_LEFT, e.panel, e.x, e.y);
                 f.type = FT_BUTTON, f.button = BTN_LEFT, f.pressed = true;
                 f.controller = true;   // the click filter holds a poke's wobble still (controller-click.h)
@@ -3182,7 +3185,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 if (s.drag == Drag::None && s.pinned == kNone) SetAbsolute(s, e.to);
                 break;
             case handinput::Event::Scroll:
-                s.inputMs = NowMs();
+                s.inputMs = s.useMs = NowMs();
                 f.type = FT_SCROLL, f.dx = e.x, f.dy = e.y;
                 handle(&f, data);
                 break;
@@ -3746,6 +3749,7 @@ void ft_vr_float_output(int index, bool on) {
 }
 
 void ft_vr_screen_scale(int index, double scale) { g_uiScale[index] = scale; }
+void ft_vr_key(void) { g_keyMs = NowMs(); }
 
 void ft_vr_screen_destroy(int index) {
     auto it = g_screens.find(index);
@@ -3846,6 +3850,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             ft_event e{};
             e.screen = index;
             if (ev.eventType != vr::VREvent_FocusLeave) s.inputMs = s.laserMs = NowMs();
+            if (ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_ScrollDiscrete ||
+                ev.eventType == vr::VREvent_ScrollSmooth || g_press.buttons)
+                s.useMs = NowMs();
             auto at = [&] { s.ToBuffer(ev.data.mouse.x, ev.data.mouse.y, &e.x, &e.y); };
             switch (ev.eventType) {
                 case vr::VREvent_MouseMove:

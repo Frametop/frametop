@@ -33,11 +33,14 @@
 // ...; FrameControl in ft-pointer.cpp) is a press after controlHold (0.12 s,
 // POINTER_GAZE_CONTROL_HOLD) still, not hold: there's nothing to click on them, and the hand drags.
 //
-// Right-drag (user, 2026-10-11: "an index tap on one hand, followed by an index tap on the other" for
-// the right button held): an index pinch that begins within POINTER_GAZE_RIGHT_DRAG (1 s) of the other
-// hand's index tap (a click) presses the right button at once, at its gaze lock, and its hand drags
-// until it ends (PressNow). The tap before it clicked as usual. It replaces the chord below, which is
-// off unless POINTER_GAZE_CHORD=1.
+// Two-hand press (user, 2026-10-11: "tap nudge into the right spot, and then tap with the other hand to
+// drag"): while one hand's pinch is held back (aiming, or nudged into place), the other hand's index tap
+// presses the left button where the pointer is (Chord), a middle tap the right (PressNow); the first hand
+// drags until it lets go; the tap itself clicks nothing (the helper, POINTER_GAZE_TWO_HAND).
+//
+// Right-drag (off by default, POINTER_GAZE_RIGHT_DRAG > 0): an index pinch that begins within that many
+// seconds of the other hand's index tap presses the right button at once, at its gaze lock (PressNow).
+// The chord below is off unless POINTER_GAZE_CHORD=1.
 //
 // Scroll (user, 2026-10-11): a pinch with the thumb on both the index and middle tips (each within
 // POINTER_GAZE_SCROLL_GAP, 3 cm, at the begin or within 0.25 s of it) scrolls where you looked: the
@@ -253,8 +256,10 @@ public:
         if (dragged_ > 0) std::snprintf(drag, sizeof drag, "dragged %.1f deg, ", dragged_);
         if (byTap_) {
             const std::string pressed = pressHit.empty() ? "nothing" : pressHit;
-            std::snprintf(b, sizeof b, "the right button held (the other hand tapped %.2f s before) on %s, %slet go%s%s (held %.2f s; %s)",
-                          tapAfter_, pressed.c_str(), drag, lost ? ": " : "", lost ? why.c_str() : "", held, gaze);
+            char after[64] = "the other hand's middle tap";
+            if (tapAfter_ > 0) std::snprintf(after, sizeof after, "the other hand tapped %.2f s before", tapAfter_);
+            std::snprintf(b, sizeof b, "the right button held (%s) on %s, %snudged %.1f deg first, let go%s%s (held %.2f s; %s)",
+                          after, pressed.c_str(), drag, moved_, lost ? ": " : "", lost ? why.c_str() : "", held, gaze);
         } else if (chord_) {
             const std::string pressed = pressHit.empty() ? "nothing" : pressHit;
             std::snprintf(b, sizeof b, "the right button with the other hand's press, on %s, %slet go%s%s (held %.2f s)",

@@ -134,9 +134,16 @@ HAND_INTERACTIONS = [
      "A faint white glow round the screen \"grab that\" would take."),
     ("HANDS_EDGE_GLOW", True, "1", "Feedback", "Resize and edge glows",
      "A glow at the corner or edge a pinch there would resize or move."),
-    ("POINTER_GAZE_RIGHT_DRAG", True, "1", "Gaze + hands", "Right-drag: tap one hand, pinch the other",
+    ("POINTER_GAZE_TWO_HAND", True, "1", "Gaze + hands", "Two-hand drag: hold one pinch, tap with the other",
+     "With gaze on: hold a pinch on one hand (nudge it into place), then tap with the other hand: index = the left "
+     "button, middle = the right; the first hand drags until you let go."),
+    ("POINTER_GAZE_RIGHT_DRAG", False, "1", "Gaze + hands", "Right-drag: tap one hand, then pinch the other",
      "With gaze on: an index tap on one hand, then an index pinch on the other within a second, holds the right "
      "button where you look; that hand drags until you let go."),
+    ("POINTER_TYPING_HIDE", True, "1.5", "Gaze + hands", "Hide the gaze pointer while typing",
+     "The gaze dot and its laser hide for 1.5 s after each key."),
+    ("POINTER_PINCH_MAX_SPEED", True, "0.6", "Gaze + hands", "No clicks from moving hands",
+     "A pinch that begins while the hand moves fast (a lazy susan stroke, a wave) doesn't click."),
     ("POINTER_GAZE_SCROLL", True, "1", "Gaze + hands", "Three-finger pinch scrolls",
      "With gaze on: thumb on both the index and middle fingertips, then move the hand up, down or across: it "
      "scrolls where you looked."),

@@ -929,6 +929,11 @@ int main() {
     // does; user 2026-10-11, SteamVR's beam width is one setting for every laser and can't change live). 1:
     // the whole beam from the hand.
     bool rayBeam = false;
+    // Typing in gaze mode (user, 2026-10-11: "the laser is still turned on while I am typing ... with the dot
+    // close it is massive"): a key within POINTER_TYPING_HIDE (1.5 s) and nothing held hides the gaze dot,
+    // and the laser starts at the point (SteamVR's hit dot shrinks to nothing); the next look after it shows it.
+    std::chrono::steady_clock::time_point lastKeyAt{};
+    double typingHide = 1.5;
     double rayBeamOffset = 0;   // how far along the ray the beam starts now (m)
     double sideCurl[2] = {-1, -1};   // each side's hand (ft-hands' call), newest frame: fhray::FistCurl
     double sideGap[2][2] = {{-1, -1}, {-1, -1}};   // ...its thumb to the index and middle tips (m)
@@ -936,7 +941,17 @@ int main() {
     // hand's index tap; 0 off), the three-finger scroll (POINTER_GAZE_SCROLL gain, 0 off; POINTER_GAZE_SCROLL_GAP
     // m), the chord (POINTER_GAZE_CHORD, off since the right-drag).
     bool gazeChord = false;
-    double gazeRightDrag = 1.0, gazeScroll = 1.0, gazeScrollGap = 0.03;
+    double gazeRightDrag = 0, gazeScroll = 1.0, gazeScrollGap = 0.035;
+    // The two-hand press (user, 2026-10-11: "tap nudge into the right spot, and then tap with the other hand to
+    // drag"): while one hand's gaze pinch is held back (aiming or nudged), the other hand's index tap presses the
+    // left button where the pointer is, a middle tap the right; the first hand drags until it lets go
+    // (POINTER_GAZE_TWO_HAND, 1). handPressPending: 1 left, 2 right, pressed this frame after the pose.
+    bool gazeTwoHand = true;
+    int handPressPending = 0;
+    // A pinch begun while its hand moves fast (a lazy susan stroke, a wave) isn't a click: the palm over
+    // POINTER_PINCH_MAX_SPEED (0.6 m/s) within the last 0.25 s (sideFastAt).
+    double pinchMaxSpeed = 0.6;
+    std::chrono::steady_clock::time_point sideFastAt[2]{};
     gazehand::TapArm tapArm;
     bool rightDragPending = false;
     double pinchGain = 0.5, pinchDeadzone = 1.5, gripGain = 1.0, handBelow = 0.35;
@@ -997,9 +1012,12 @@ int main() {
         pinchNoRay = ConfDouble(conf, "POINTER_PINCH_NO_RAY", 0) != 0;
         rayBeam = ConfDouble(conf, "POINTER_RAY_BEAM", 0) != 0;
         gazeChord = ConfDouble(conf, "POINTER_GAZE_CHORD", 0) != 0;
-        gazeRightDrag = std::clamp(ConfDouble(conf, "POINTER_GAZE_RIGHT_DRAG", 1.0), 0.0, 5.0);
+        gazeRightDrag = std::clamp(ConfDouble(conf, "POINTER_GAZE_RIGHT_DRAG", 0), 0.0, 5.0);
+        gazeTwoHand = ConfDouble(conf, "POINTER_GAZE_TWO_HAND", 1) != 0;
+        pinchMaxSpeed = std::clamp(ConfDouble(conf, "POINTER_PINCH_MAX_SPEED", 0.6), 0.0, 10.0);
+        typingHide = std::clamp(ConfDouble(conf, "POINTER_TYPING_HIDE", 1.5), 0.0, 30.0);
         gazeScroll = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL", 1.0), -5.0, 5.0);
-        gazeScrollGap = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL_GAP", 0.03), 0.01, 0.08);
+        gazeScrollGap = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL_GAP", 0.035), 0.01, 0.08);
         const auto hn = conf.find("HANDS_NEAR");
         nearOn = hn != conf.end() && hn->second == "on";
         handsTrack = handsOn || nearOn;
@@ -1902,6 +1920,7 @@ int main() {
             }
             if (std::strcmp(buf, "typing") == 0) {  // not mouse input: it never wakes the pointer
                 typist.Key(secsOf(Clock::now()));
+                lastKeyAt = Clock::now();
                 continue;
             }
             if (std::strncmp(buf, "vrbind", 6) == 0) {
@@ -2294,6 +2313,7 @@ int main() {
                         sideCurl[c.side] = fhray::FistCurl(c.pts, [](Vec3 v) { return Length(v); });
                         sideGap[c.side][0] = c.pinchD[0] >= 0 ? c.pinchD[0] : Length(c.pts[4] - c.pts[8]);
                         sideGap[c.side][1] = c.pinchD[1] >= 0 ? c.pinchD[1] : Length(c.pts[4] - c.pts[12]);
+                        if (c.velValid && pinchMaxSpeed > 0 && Length(c.vel) > pinchMaxSpeed) sideFastAt[c.side] = tnow;
                     }
             }
             // The hand ray (see "Hand ray" at the top): each side's hand, when a new frame came.
@@ -2844,6 +2864,17 @@ int main() {
                 std::snprintf(why, sizeof why, "ignored (a closing hand: open %.2f, a fist under %.2f)", sideCurl[s],
                               rayParams.fistCurl);
                 pinchLog(s, kind, why);
+            } else if (kind != 1 && pinchMaxSpeed > 0 && tnow - sideFastAt[s] < std::chrono::milliseconds(250)) {
+                pinchLog(s, kind, "ignored (the hand was moving fast: a stroke or a wave, not a pinch)");
+            } else if (gazeOn && gazeTwoHand && kind != 1 && hold.src == Src::Hand && hold.side != s && hold.gaze.On() &&
+                       !hold.pressed && aimHeld && !hold.gazeScroll && !hold.rightDrag) {
+                // the two-hand press: the held pinch presses where the pointer is (its nudge), and drags
+                handUsed = tnow;
+                if (kind == 2) hold.gaze.PressNow(secsOf(tnow), 0);
+                else hold.gaze.Chord(secsOf(tnow));
+                handPressPending = kind == 2 ? 2 : 1;
+                pinchLog(s, kind, kind == 2 ? "the right button down where the other hand's pinch aims: it drags"
+                                            : "the left button down where the other hand's pinch aims: it drags");
             } else if (chordable(s, kind)) {
                 beginGazePinch(s, kind, g);  // the chord, ray or not (see "Gaze pinch" at the top)
             } else if (ray && kind != 1) {
@@ -2974,9 +3005,15 @@ int main() {
                 const fh_pinch_t &g = hold.grip ? hg.grip[hold.side] : hold.right ? hg.pinch2[hold.side] : hg.pinch[hold.side];
                 double hy, hp;
                 if ((g.flags & FH_PINCH_TRACKED) && handAngles(g.point, hg.capture_ns, hold.origin, hy, hp)) {
+                    // the hand closing into a fist while a gaze pinch is held back: no click (ft-hands' grip may
+                    // no longer take a pinch past its first 0.1 s, HANDS_GRIP_TAKEOVER_S)
+                    if (hold.gaze.On() && !hold.pressed && aimHeld && !hold.gazeScroll && rayParams.fistCurl > 0 &&
+                        sideCurl[hold.side] >= 0 && sideCurl[hold.side] < rayParams.fistCurl) {
+                        endGesture(true, "the hand closed into a fist");
+                    }
                     // the other finger joining a gaze pinch just begun (still held back): a three-finger scroll
                     if (hold.gaze.On() && !hold.gazeScroll && !hold.pressed && aimHeld && gazeScroll != 0 &&
-                        secsOf(tnow) - hold.gaze.Began() < 0.25 && hold.gaze.Moved() < 0.2 && sideGap[hold.side][0] >= 0 &&
+                        secsOf(tnow) - hold.gaze.Began() < 0.4 && hold.gaze.Moved() < 0.2 && sideGap[hold.side][0] >= 0 &&
                         sideGap[hold.side][0] < gazeScrollGap && sideGap[hold.side][1] >= 0 && sideGap[hold.side][1] < gazeScrollGap) {
                         vr::HmdMatrix34_t hh;
                         if (rayRoom(g.point, hg.capture_ns, hold.beginPoint) && poses.At(hg.capture_ns, hh))
@@ -2996,7 +3033,7 @@ int main() {
                                 SendTo(out, "ft_pointer", msg);
                             }
                         }
-                    } else if (!hold.gaze.On()) {
+                    } else if (hold.src == Src::Hand && !hold.gaze.On()) {   // (not one the fist just ended)
                         steer(hy, hp, hold.grip ? 0.5 : pinchDeadzone, hold.grip ? gripGain : pinchGain);
                     } else if (hold.gaze.Hand(hy, hp)) {  // a gaze pinch: nudged, or dragged once pressed
                         yaw = hold.gaze.Yaw(), pitch = hold.gaze.Pitch();
@@ -3101,10 +3138,18 @@ int main() {
         const uint64_t nowNs =
             uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(tnow.time_since_epoch()).count());
         if (hold.src == Src::Hand || hold.src == Src::Ray || chordBtn.On()) {
+            // (patient: 4 s while nothing is pressed, 2.5 s while it is; user 2026-10-11, held gaze pinches ended
+            // here 1.5 s in while ft-hands still held them: the log line says what the file looked like)
+            const uint64_t staleNs = hold.pressed || leftHeld || chordBtn.On() ? 2'500'000'000ull : 4'000'000'000ull;
+            static char stale[160];
+            if (nowNs - handPublished > staleNs)
+                std::snprintf(stale, sizeof stale, "hand tracking stopped (nothing new for %.1f s: seq %llu, published %.2f s ago, captured %.2f s ago)",
+                              staleNs / 1e9, (unsigned long long)handSeq, (nowNs - handPublished) / 1e9,
+                              handOk ? (double(nowNs) - double(hg.capture_ns)) / 1e9 : -1.0);
             const char *why = !active ? "the pointer went"
                             : handsOn && tnow - handOkAt > std::chrono::milliseconds(500) ? "the gestures file can't be read"
                             : !handsOn ? "hand input turned off"
-                            : nowNs - handPublished > 1'500'000'000ull ? "hand tracking stopped (nothing new for 1.5 s)"
+                            : nowNs - handPublished > staleNs ? stale
                             : nullptr;
             if (why && (hold.src == Src::Hand || hold.src == Src::Ray)) endGesture(true, why);
             if (why) chordEnds(true, why);
@@ -3272,6 +3317,8 @@ int main() {
             const bool dragging = leftHeld || tnow < dropHoldUntil;
             if (!dragging) tiltYaw = tiltPitch = 0;  // drop finished: back to plain pointing
             const Vec3 dir = Direction(yaw, pitch);
+            const bool typingQuiet = gazeOn && typingHide > 0 && tnow - lastKeyAt < std::chrono::duration<double>(typingHide) &&
+                                     hold.src == Src::None && !leftHeld && !aimHeld;
             // Nearest visible overlay along a ray (frozen while dragging).
             struct Hit {
                 double along = 1e9;
@@ -3453,7 +3500,7 @@ int main() {
                     auto secs = [&](Clock::time_point t) { return std::chrono::duration<double>(tnow - t).count(); };
                     alpha = std::clamp(1 - std::min(secs(lastMove) - gazeShow, secs(lastHeld)) / 0.25, 0.0, 1.0);
                 }
-                if (tnow < calPanelUntil) alpha = 0;
+                if (tnow < calPanelUntil || typingQuiet) alpha = 0;
                 markerDot.Alpha(float(alpha));
                 markerDot.Place(near, eye, float(2 * SETTINGS_DOT * std::tan(cursorDeg * M_PI / 360)));
                 cursorDot.Alpha(0);
@@ -3480,6 +3527,7 @@ int main() {
                     }
                 }
                 if (tnow < calPanelUntil) alpha = 0;  // the calibration panel is up (see the top)
+                if (typingQuiet) alpha = 0;           // typing (see lastKeyAt)
                 show.Alpha(float(alpha));
                 show.Place(at, eye, float(2 * dist * std::tan(scale * cursorDeg * M_PI / 360)));
                 show.Show(true);
@@ -3496,6 +3544,7 @@ int main() {
             const double toPoint = std::sqrt(Dot(point - eye, point - eye));
             double originDist = std::max(0.0, std::min(toPoint * originFraction, toPoint - originMargin));
             if (onVrSettings) originDist = std::min(originDist, SETTINGS_ORIGIN);  // SteamVR finds the page
+            if (typingQuiet && !rayMode) originDist = std::max(0.0, toPoint - 0.003);   // no beam, no hit dot while typing
             // a hand's ray, dot only (POINTER_RAY_BEAM=0, user 2026-10-11): it starts most of the way to the point,
             // as the eye's does, so the beam is a few centimetres and only the dot shows; held still from a
             // press to the end of its drop hold, so a carried panel (it follows the device rigidly) doesn't move
@@ -3597,6 +3646,18 @@ int main() {
         }
         // The right-drag (gazehand.h): the right button pressed now, where the pointer is (this frame's pose
         // has gone out: the gaze lock), and the hand drags until its pinch ends.
+        if (handPressPending) {   // the two-hand press (see gazeTwoHand): now, where the pointer is
+            const int b = handPressPending;
+            handPressPending = 0;
+            if (hold.src == Src::Hand && hold.gaze.On() && aimHeld) {
+                aimHeld = aimHand = false;
+                hold.pressed = true;
+                gazeBack = gazeOn;
+                pressRight = b == 2;
+                pressLeft();
+                hold.gaze.pressHit = lastHit;
+            }
+        }
         if (rightDragPending) {
             rightDragPending = false;
             if (hold.src == Src::Hand && hold.rightDrag && aimHeld) {

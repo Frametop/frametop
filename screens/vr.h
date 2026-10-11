@@ -54,6 +54,8 @@ void ft_vr_screen_create(int index, double metres, int count);
 void ft_vr_screen_destroy(int index);
 // KWin's scale for a screen (its logical pixels: buffer pixels / scale; the lazy susan sizes by them).
 void ft_vr_screen_scale(int index, double scale);
+// A key went to the desktop (the front slot's screen counts it as use).
+void ft_vr_key(void);
 // A remote screen's panel (remote.c): another machine's display, streamed by ft-stream. It
 // has a screen's controls and takes the same commands; its frames come through
 // ft_vr_screen_present, and its input arrives as events for its index. *restored: it's back

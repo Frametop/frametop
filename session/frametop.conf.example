@@ -147,8 +147,11 @@ POINTER_RAY_HAND_PITCH=-30 # hand ray: with a weight, degrees the hand's own dir
 POINTER_RAY_HAND_YAW=8     # ... and turns out, away from the thumb
 POINTER_RAY_ANCHOR=0       # hand ray: 1 = during a pinch, the knuckle point the ray aims through is pinned to the palm (measured no steadier, so 0)
 POINTER_GAZE_PINCH=1       # hands in gaze mode: 1 = a pinch clicks where you look (middle pinch: right click; a pinch by each hand holds left and right together) | 0 = no clicks at the gaze (direct touch, and a ray with POINTER_GAZE_HAND_RAY=1, still work)
-POINTER_GAZE_RIGHT_DRAG=1.0  # hands in gaze mode: an index pinch within this many seconds of the other hand's index tap holds the right button where you look, its hand dragging until it ends (the tap itself clicks) | 0 = off
-POINTER_GAZE_SCROLL=1      # hands in gaze mode: the thumb on both the index and middle tips (within POINTER_GAZE_SCROLL_GAP, 0.03 m) scrolls where you looked as the hand moves (0.5 cm dead zone, full at 4 cm), times this (-1 turns it round) | 0 = off
+POINTER_GAZE_TWO_HAND=1    # hands in gaze mode: while one hand's pinch is held back (aiming or nudged), the other hand's index tap presses the left button where the pointer is, a middle tap the right; the first hand drags until it lets go | 0 = off
+POINTER_GAZE_RIGHT_DRAG=0  # hands in gaze mode: an index pinch within this many seconds of the other hand's index tap holds the right button where you look (the tap itself clicks) | 0 = off
+POINTER_TYPING_HIDE=1.5    # gaze mode: the dot and its laser hide this many seconds after each key (0 = never)
+POINTER_PINCH_MAX_SPEED=0.6  # a pinch begun with its palm moving faster than this (m/s) within 0.25 s doesn't click (lazy susan strokes, waves) | 0 = off
+POINTER_GAZE_SCROLL=1      # hands in gaze mode: the thumb on both the index and middle tips (within POINTER_GAZE_SCROLL_GAP, 0.035 m) scrolls where you looked as the hand moves (0.5 cm dead zone, full at 4 cm), times this (-1 turns it round) | 0 = off
 POINTER_GAZE_CHORD=0       # hands in gaze mode: 1 = while one hand's pinch is held, the other hand's pinch holds the right button (the chord; the right-drag replaced it)
 POINTER_GAZE_HAND_RAY=0    # hands in gaze mode: 0 = no hand ray, your eyes aim and a pinch clicks where you look | 1 = a raised, pointing hand's ray works beside the gaze
 POINTER_GAZE_PINCH_DEADZONE=4 # hands in gaze mode: degrees (seen from the eye; about 3 cm at arm's length) a held pinch moves before it nudges the pointer; held still for POINTER_GAZE_HOLD it's a press, to drag

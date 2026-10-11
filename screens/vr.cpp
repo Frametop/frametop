@@ -9,8 +9,10 @@
 //     radius: your distance to it when pressed), or flat again.
 //   - a roll button next to that: drag it sideways like a knob to roll the screen about
 //     its centre (it snaps level within kRollSnap), or scroll on it for kRollStep steps.
-//   - a resize tab on the bottom right corner: drag it to set the width (the height
-//     follows the screen's resolution).
+//   - a resize handle on a corner: drag it to resize from that corner, the opposite one staying
+//     put (a screen's height follows its resolution; a floating window gets the pixels). It sits
+//     on the bottom right and goes to whichever corner a laser, the gaze or a hand comes near,
+//     brightening as it comes (UpdateCorner), lit while resizing.
 //   - a reset button left of the bar: the profile in use opened again, or every screen back
 //     in its layout, around where you are now (`ft-layout reset`, like Meta+Shift+R).
 //   The controls are translucent, like SteamVR's own, and brighten under a laser. They
@@ -62,9 +64,11 @@
 //     and ft-handview (handview.cpp) draws the hands instead.
 //   - near hand input (handinput.cpp), within about 3 inches of a panel: poke a screen, remote
 //     display or floating window with the index finger to click it; pinch its border to move it
-//     (by a corner: resize), its content to click; pinch its edge from either side like a card to
-//     carry and turn it rigidly; make a fist at it to carry and turn it; hold it with both hands
-//     to stretch and turn it. A glow on the screen shows where the fingertip is and what a pinch
+//     (by any corner: resize), its content to click; hold its edge like a card (thumb behind, index
+//     and middle in front) to carry and turn it rigidly; make a fist at it to carry and turn it;
+//     hold it with both hands to stretch and turn it; flick it away, or let go of it moving out
+//     fast, and it goes 3 m out (animated, as "grab that" moves). What a hand holds stays held
+//     through a short tracking loss. A glow on the screen shows where the fingertip is and what a pinch
 //     would do there. It takes the pointer helper's word on which hands are bare and whether hand
 //     input is allowed ("hands"), and which hands typing on a real keyboard holds back ("typing":
 //     no pokes, grabs or "grab that" by them), and tells it which hands are near a panel ("near":

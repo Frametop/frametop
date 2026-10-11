@@ -33,6 +33,7 @@ POINTER_GAZE=0             # 1 = the pointer goes where you look, the mouse does
 POINTER_GAZE_RETAKE=5      # gaze mode: how far (degrees) you look away from the pointer before the gaze takes it back from the mouse
 POINTER_GAZE_NUDGE_MAX=55  # gaze mode: a correction up to this far (degrees) before a click is learned as the eye tracker's error; a bigger one runs the quick check (55: half the headset's view)
 POINTER_GAZE_HOLD=0.5      # gaze mode: a press held this long (s) without moving becomes a real press (to drag); moved or released sooner, it clicks where you let go
+POINTER_GAZE_CONTROL_HOLD=0.12  # gaze mode, hands: a pinch with the pointer on a panel's resize handle or grab bar is a press after this long (s) held still, to drag it
 POINTER_GAZE_MOUSE_MOVE=held  # gaze mode: the mouse moves the pointer only while a button is held, as a correction (held) | any time (free)
 POINTER_GAZE_DOT=always    # gaze mode: the dot shows all the time (always) | only while the mouse moves it (moving)
 POINTER_GAZE_SHOW=1        # gaze mode, with POINTER_GAZE_DOT=moving: the dot shows this long (s) after the mouse moves it; also while a press is held, and a pulse per click
@@ -59,7 +60,7 @@ HANDS_MATTE_LEAD=36        # hand cutouts: ms ahead the hands are moved along th
 #HANDS_MATTE_SHIFT=        # hand cutouts: a correction by distance, "metres:yaw,pitch ..." in degrees (right, up); off when empty
 HANDS_NEAR_REACH=0.075     # Frametop panels: a bare hand this close (m) in front of one touches it (about 3 inches): its ray hides, the index pokes, its pinches and fists are the panel's (beyond it they're the ray's or the gaze's; a hand resting low by the body: 0.04 at most)
 HANDS_POKE_ANGLE=50        # Frametop panels: a poke counts with the finger (knuckle to tip) within this many degrees of the panel's normal (coming at its face)
-HANDS_POKE_TRAVEL=0.025    # ... and presses on its first frame past the surface when it came this far (m) in, decisively; slower ones need two frames (0 = always two)
+HANDS_POKE_TRAVEL=0.017    # ... and presses on its first frame past the surface when it came this far (m) in, decisively (under 2.5 cm: steadily, each of the last 3 frames nearer); slower ones need two frames (0 = always two)
 HANDS_POKE_REST_BELOW=0.30 # ... and not from a hand resting low by the body: its palm this far (m) under the eyes
 HANDS_POKE_REST_NEAR=0.32  # ... and this close (m) to the head across the floor (typing under a low panel)
 HANDS_GRAB_SMOOTH_MINCUTOFF=1  # Frametop panels: a near grab's pinch point is smoothed this much held still (Hz; lower = steadier, laggier)
@@ -69,8 +70,15 @@ HANDS_GRAB_ROTATE=1        # Frametop panels: one hand carrying a panel turns it
 HANDS_GRAB_ROTATE_DEADZONE=5  # ... once the hand has turned this many degrees (then from there, no jump)
 HANDS_GRAB_BAND=0.06       # Frametop panels: a near pinch where the fingers meet within this far (m) outside a panel's border (or 2.5 cm inside) takes it: the corners resize, the rest of the border moves
 HANDS_PINCH_CLICK=1        # Frametop panels: a near pinch on a panel's content clicks where the fingertip's pointer was, held while the pinch is | 0 = nothing
-HANDS_CARD_PINCH=1         # Frametop panels: a pinch closing on a panel's edge with the thumb behind it and the index in front (from below, like holding a card) carries it rigidly with the hand, turn and all | 0 = off (the border's move)
+HANDS_CARD_PINCH=1         # Frametop panels: the thumb behind a panel's edge and the index and middle fingers together in front (or all four fingertips bunched at the thumb), like holding a card, carries it rigidly with the hand, turn and all; the index alone is the border's move | 0 = off
 HANDS_FIST_GRAB=1          # Frametop panels: a fist made at a panel (the palm within reach of it) carries it and turns it with the wrist; two fists stretch it | 0 = off
+HANDS_HOLD_LOST_MS=1750    # Frametop panels: what a hand holds (a pinch, a card, a fist, a poke's press) stays held while the hand is lost this long (ms); it lets go only when the hand is seen open again
+HANDS_FLICK=1              # Frametop panels: flick a panel away: the hand at it, flicked out fast with the fingers opening, sends it 3 m out (HANDS_THROW_DISTANCE); "grab that" brings it back | 0 = off
+HANDS_FLICK_SPEED=1.2      # ... the hand moving out this fast (m/s), 12 cm or more
+HANDS_FLICK_OPENING=0.15   # ... the fingers opening this much on the way (their mean extension; 0 = an open hand pushed out flicks too)
+HANDS_THROW=1              # Frametop panels: let go of a carried panel (a card, a fist, a pinch on its border) while the hand moves out fast and it flies on that way, to 3 m out | 0 = off (it stays where you let go)
+HANDS_THROW_SPEED=1.0      # ... the hand moving at least this fast (m/s) as it lets go, within 60 degrees of straight away from you
+HANDS_THROW_DISTANCE=3     # ... and where thrown and flicked panels go: this far (m) from the eyes, facing you
 HANDS_GRAB_THAT=1          # Frametop panels: hold an open hand out to one, palm to it, then pull back making a fist: it comes to arm's reach (again at it: back where it was; at one near you already: centred at arm's reach) | 0 = off
 HANDS_GRAB_THAT_DISTANCE=0.45  # ... this far (m) ahead of the eyes, at the fist's height, facing you
 HANDS_GRAB_THAT_WIDTH=0.6  # ... a screen wider than this (m) comes at this width (0 = as it is; floating windows keep their size)

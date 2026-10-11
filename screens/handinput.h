@@ -1,23 +1,34 @@
-// Near hand input on Frametop's own panels (frame-hands/notes/hand-interaction.md, sections 3 and
-// 16), within Params::nearFront (about 3 inches): poke a panel with the index finger to click it;
-// pinch its border to move it (by a corner: resize it), its content to click; pinch its edge with
-// the panel between thumb and index to carry it like a card; make a fist at it to carry it; hold
-// it with both hands to stretch and turn it. The pointer helper does everything farther away (the
-// hand ray, the gaze); the two meet through the near claim: for each hands frame, ft-screens tells
-// the helper which hands are near a panel ("near <capture_ns> <L> <R>" to @ft_pointer_helper: 1
-// claims(), 2 near() only), and the helper leaves a pinch or grip that began on a claimed hand.
+// Near hand input on Frametop's own panels (frame-hands/notes/hand-interaction.md, sections 3,
+// 16 and 17), within Params::nearFront (about 3 inches): poke a panel with the index finger to click
+// it; pinch its border to move it (by any corner: resize it, the opposite corner staying put), its
+// content to click; hold its edge like a card (the index and middle against the thumb, or the
+// fingertips bunched) to carry it; make a fist at it to carry it; hold it with both hands to stretch
+// and turn it; flick it away, or throw it as you let go. The pointer helper does everything farther
+// away (the hand ray, the gaze); the two meet through the near claim: for each hands frame,
+// ft-screens tells the helper which hands are near a panel ("near <capture_ns> <L> <R>" to
+// @ft_pointer_helper: 1 claims(), 2 near() only), and the helper leaves a pinch or grip that began
+// on a claimed hand.
 //
-// Gesture -> action, and what wins (2026-10-10):
+// Gesture -> action, and what wins (2026-10-10, after the second live test):
 //   index tip through the surface, from the front     poke: press, release, drag (Poke)
-//   pinch, thumb and index either side of the edge     card: rigid carry (Zone::Card)
-//   pinch where the fingers meet in the border band    corner/tab: resize; border, bar, title: move
+//   pinch at the edge, thumb behind, index and middle  card: rigid carry (Zone::Card); the index
+//     together in front (or four tips bunched)          alone is the border's move, a card if the
+//                                                       middle joins within cardJoinMs
+//   pinch where the fingers meet in the border band    any corner or the tab: resize from it, the
+//                                                       opposite corner kept; border, bar, title: move
 //   pinch on the content, within the zone              click at the cursor, held with the pinch
 //   fist (grip) with the palm or knuckles at it        carry and turn with the wrist (Zone::Fist)
 //   two grabs (pinches or fists) on one panel          stretch and turn
+//   a carry by one hand let go moving out fast         thrown 3 m out along that line (cardThrow)
+//   an open-ing hand at a panel flicked out fast       flicked 3 m out from the eyes (flick); not
+//                                                       a poke, a wave, or "grab that"'s pull back
 //   a pinch or fist on a hand "grab that" has          waits: that gesture's, or ours if it lets go
 //   pinch or fist beyond the zone (or in its margin)   the pointer helper's (ray, gaze, grip drag)
-// The helper tells ft-screens which hands are bare and whether hand input is allowed now
-// ("hands <L> <R> <allowed>" on @ft_screens; vr.cpp).
+// A hold (a grab, a poke's or pinch's press) lasts through tracking loss and flickers until a clear
+// release (Params::holdLostMs). The resize handle a laser or the gaze presses is vr.cpp's
+// (UpdateCorner); corners() tells it which corner a hand is at. The helper tells ft-screens which
+// hands are bare and whether hand input is allowed now ("hands <L> <R> <allowed>" on @ft_screens;
+// vr.cpp).
 //
 // Pure logic: no OpenVR or GL calls, so tests (screens/tests/handinput_test.cpp) run it
 // against synthetic hands and recorded ones (ft-handreplay --publish-dump). vr.cpp builds the

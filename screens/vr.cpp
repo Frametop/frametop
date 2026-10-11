@@ -60,19 +60,23 @@
 //     capsules: HANDS_MATTE).
 //     Only with Room View on (roomview.h): with it off a cutout would show the void or the game,
 //     and ft-handview (handview.cpp) draws the hands instead.
-//   - near hand input (handinput.cpp): poke a screen or floating window with the index finger
-//     to click it; pinch its bar, edges, title bar or corners to move or resize it; hold it
-//     with both hands to stretch and turn it. A glow on the screen shows where the fingertip
-//     and the pinch point are. It takes the pointer helper's word on which hands are bare and
-//     whether hand input is allowed ("hands"), and which hands typing on a real keyboard holds
-//     back ("typing": no pokes, grabs or "grab that" by them), and tells it which hands are near a panel
-//     ("near"), so a pinch is either ours or the helper's.
+//   - near hand input (handinput.cpp), within about 3 inches of a panel: poke a screen, remote
+//     display or floating window with the index finger to click it; pinch its border to move it
+//     (by a corner: resize), its content to click; pinch its edge from either side like a card to
+//     carry and turn it rigidly; make a fist at it to carry and turn it; hold it with both hands
+//     to stretch and turn it. A glow on the screen shows where the fingertip is and what a pinch
+//     would do there. It takes the pointer helper's word on which hands are bare and whether hand
+//     input is allowed ("hands"), and which hands typing on a real keyboard holds back ("typing":
+//     no pokes, grabs or "grab that" by them), and tells it which hands are near a panel ("near":
+//     1 its gestures are ours, 2 only its ray hides), so a pinch is either ours or the helper's.
+//     A hand at a panel owns the pointer there (kHandPointerMs). Its log lines start "hands:".
 //   - the palm menu (palmmenu.cpp): a bare hand turned palm up toward your face, while you look
 //     at it, gets a small ring above the palm; a pinch tap by that hand opens the Steam menu
 //     (steam/ft-steam menu), or closes the dashboard. That hand counts as near meanwhile.
 //   - "grab that" (grabthat.cpp): an open hand held out to a screen or floating window, then a
 //     fist pulled back, brings it to arm's reach (about 45 cm ahead, facing you); the same at
-//     one that came that way sends it back. The closing hand counts as near.
+//     one that came that way sends it back, at one near you already centres it. The closing hand
+//     counts as near, and a fist or pinch it makes at a panel waits on it.
 //   - the catcher: a button pressed on a screen is released in KWin even when the laser
 //     lets go between panels (UpdateCatcher).
 //   - floating windows (docs/floating-windows.md): KWin's spare outputs, after the screens,

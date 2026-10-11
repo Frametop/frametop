@@ -188,8 +188,15 @@ struct Params {
     // panel then goes rigidly with the hand: the knuckles' place and the hand's turn, 1:1, smoothed,
     // past grabDeadzone and cardRotDeadzone degrees. An edge pinch from the front or the side has both
     // tips on one side of the plane, or the hand pointing into it. HANDS_CARD_PINCH.
+    // Since the second live test (user, 2026-10-10) a card takes more than the index: the index and
+    // middle fingers together against the thumb (thumb to middle tip within cardMiddle, index to middle
+    // tip within cardTogether), or all four fingertips bunched at the thumb (each within cardBunch of
+    // its tip: the "pinched fingers" hand). A plain thumb-index pinch at the edge is the border's move
+    // (or a corner's resize). The middle finger often closes a little after the index: a border move
+    // the fingers turn into a card within cardJoinMs of its start becomes one, from there.
     bool cardPinch = true;
     double cardSide = 0.003, cardAngle = 60, cardAlong = 45, cardMs = 300, cardBand = 0.05, cardRotDeadzone = 3;
+    double cardMiddle = 0.045, cardTogether = 0.035, cardBunch = 0.05, cardJoinMs = 300;
     // The fist grab (user, 2026-10-10: "grab a display and use the fist to expand and rotate it, as
     // well as change its angle"): a grip (ft-hands' closed hand) that begins with the hand near a
     // panel (its palm or knuckles within the near zone, over it) takes it: carried like a pinch on
@@ -441,6 +448,7 @@ private:
         fhsmooth::V3 coastFrom, coastVel, blendOff;
         int jumps = 0;
         int reacquired = 0;               // ...times the hand came back mid-hold
+        bool cardCandidate = false;       // a border move begun straddling the edge: a card if the fingers join
     };
     enum Why : unsigned {
         kOneFrame = 1, kOneView = 2, kBent = 4, kNotNearest = 8, kPinching = 16, kBusy = 32, kOtherHand = 64,
@@ -462,6 +470,9 @@ private:
                    const float *fallback, bool byGrip);
     // Whether the thumb and index tips straddled P's plane at its border in the last cardMs.
     bool Straddled(int s, const Panel &P, int64_t now) const;
+    // Whether the hand holds like a card: the index and middle against the thumb, or the four
+    // fingertips bunched (Params::cardMiddle); what it is, for the log.
+    bool CardFingers(const handcut::Hand &h, const char **how = nullptr) const;
     // The room turn of a card-pinching hand since the grab (Params::cardRotDeadzone); false within it.
     bool RoomTurn(int s, const Input &in, double out[3][3]);
     void EndAttempt(int s);

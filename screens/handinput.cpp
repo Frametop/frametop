@@ -969,6 +969,17 @@ bool HandInput::Straddled(int s, const Panel &P, int64_t now) const {
     return false;
 }
 
+bool HandInput::CardFingers(const Hand &h, const char **how) const {
+    if (Dist3(h.p[4], h.p[12]) <= p_.cardMiddle && Dist3(h.p[8], h.p[12]) <= p_.cardTogether) {
+        if (how) *how = "the index and middle against the thumb";
+        return true;
+    }
+    for (int j : {8, 12, 16, 20})
+        if (Dist3(h.p[4], h.p[j]) > p_.cardBunch) return false;
+    if (how) *how = "the fingertips bunched";
+    return true;
+}
+
 void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited) {
     Side &sd = side_[s];
     const handcut::Gesture &g = in.hands->pinch(s);
@@ -981,20 +992,24 @@ void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &pan
     const Hand *h = HandFor(s, in.hands->seen(), g.handId ? g.handId : sd.handId);
     // where the fingers meet (the gestures file's point is the knuckles, 5-8 cm behind)
     const float *c = h ? h->contact : g.beginPoint;
-    // the card pinch: the thumb and index tips were either side of a panel's plane at its border
+    // the card pinch: the thumb and index tips were either side of a panel's plane at its border, and
+    // the middle finger is with the index (or all four bunched): a plain pinch there is a border move,
+    // a card if the middle joins it soon (cardCandidate)
+    const Panel *straddled = nullptr;
     if (p_.cardPinch && h) {
-        const Panel *best = nullptr;
         double key = 1e9;
         for (const Panel &P : panels) {
             if (P.held) continue;
             const Hit b = Locate(P, c);
             if (std::fabs(b.d) <= p_.bandDepth && std::fabs(FromBorder(P, b.u, b.v)) <= p_.cardBand + 0.01 &&
                 Straddled(s, P, h->captureNs) && std::fabs(b.d) < key)
-                key = std::fabs(b.d), best = &P;
+                key = std::fabs(b.d), straddled = &P;
         }
-        if (best) {
+        const char *how = nullptr;
+        if (straddled && CardFingers(*h, &how)) {
             ++stats.cards;
-            StartGrab(s, in, *best, Zone::Card, 1, -1, h, g.point, false);
+            StartGrab(s, in, *straddled, Zone::Card, 1, -1, h, g.point, false);
+            Log("%s card: %s", SideName(s), how);
             return;
         }
     }
@@ -1013,6 +1028,12 @@ void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &pan
     }
     if (bestP) {
         StartGrab(s, in, *bestP, zone, sx, sy, h, g.point, false);
+        sd.cardCandidate = straddled == bestP && (zone == Zone::Edge || zone == Zone::Bar || zone == Zone::Title);
+        return;
+    }
+    if (straddled) {   // straddling the edge, out of the band's zones: a border move, a card if the fingers join
+        StartGrab(s, in, *straddled, Zone::Edge, 1, -1, h, g.point, false);
+        sd.cardCandidate = true;
         return;
     }
     // the content: a click where the pointer is (the fingertip's cursor, or where the fingers meet)
@@ -1101,6 +1122,7 @@ void HandInput::StartGrab(int s, const Input &in, const Panel &P, Zone zone, int
     sd.point.Sample({pinch[0], pinch[1], pinch[2]}, in.hands->captureNs() / 1e9, in.nowNs / 1e9);
     sd.from = {pinch[0], pinch[1], pinch[2]}, sd.shift = {}, sd.engaged = false;
     sd.upFrames = 0, sd.coasting = sd.blending = false, sd.jumps = 0, sd.unseenNs = -1, sd.reacquired = 0;
+    sd.cardCandidate = false;
     sd.track.assign(1, {h ? h->captureNs : in.hands->captureNs(), sd.from});
     sd.along.Reset(), sd.across.Reset(), sd.haveRot0 = sd.turning = false;   // the wrist's turn: afresh
     if (h) SampleTurn(s, *h, in);
@@ -1211,6 +1233,27 @@ void HandInput::Carries(const Input &in, const std::vector<Panel> &panels) {
     if (newFrame_)
         for (int s = 0; s < 2; ++s)
             if (side_[s].state == State::Grab) Track(s, in, HandFor(s, in.hands->seen(), side_[s].handId));
+    // a border move begun straddling the edge: the middle finger joining within cardJoinMs makes it a
+    // card, from where it is now
+    if (newFrame_)
+        for (int s = 0; s < 2; ++s) {
+            Side &sd = side_[s];
+            if (sd.state != State::Grab || !sd.cardCandidate) continue;
+            if (in.nowNs - sd.grabbedNs > int64_t(p_.cardJoinMs * 1e6) || side_[1 - s].state == State::Grab) {
+                sd.cardCandidate = false;
+                continue;
+            }
+            const Hand *h = HandFor(s, in.hands->seen(), sd.handId);
+            const Panel *P = Find(panels, sd.panel);
+            const char *how = nullptr;
+            if (!h || !P || !CardFingers(*h, &how) || !sd.point.Ready()) continue;
+            sd.cardCandidate = false, sd.zone = Zone::Card;
+            sd.start = sd.last = P->pose, sd.from = Shown(s, in.nowNs / 1e9), sd.shift = {}, sd.engaged = false;
+            sd.haveRot0 = sd.turning = false;
+            ++stats.cards;
+            Log("%s pinch on screen %d became a card (%s, %.0f ms in)", SideName(s), P->index + 1, how,
+                (in.nowNs - sd.grabbedNs) / 1e6);
+        }
     // (a stretch has its own dead zone, on the hands' distance)
     auto pinchOf = [&](int s, double out[3]) { return Carried(s, in, out, false); };
     for (int s = 0; s < 2; ++s) {
@@ -1337,7 +1380,7 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
         }
         const Hit q = Locate(*P, h->contact);
         if (p_.cardPinch && std::fabs(q.d) <= p_.bandDepth && std::fabs(FromBorder(*P, q.u, q.v)) <= p_.cardBand &&
-            Straddled(s, *P, h->captureNs)) {
+            Straddled(s, *P, h->captureNs) && CardFingers(*h)) {
             glow(q.u, q.v, 0.010 + 0.008 * strength, 0.85, true, kGreen);
             continue;
         }

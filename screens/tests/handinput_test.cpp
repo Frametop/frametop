@@ -95,7 +95,7 @@ void PointingHand(float out[21][3], bool bent = false) {
 // A right hand pinching, pointing ahead (-z), palm down: the thumb and index tips together 3 cm
 // ahead of the knuckles and 4.5 cm under them; `open` 0..1 parts them (the thumb down and in, the
 // index up and out), 5 cm apart at 1. Points relative to the wrist.
-void PinchingHand(float out[21][3], double open = 0) {
+void PinchingHand(float out[21][3], double open = 0, int fingers = 0) {
     static const float base[21][3] = {
         {0, 0, 0},           {-0.025f, -0.005f, -0.03f}, {-0.04f, -0.015f, -0.055f}, {-0.04f, -0.03f, -0.085f},
         {-0.03f, -0.045f, -0.108f}, {-0.02f, 0, -0.085f},  {-0.022f, -0.012f, -0.118f}, {-0.024f, -0.03f, -0.128f},
@@ -104,10 +104,22 @@ void PinchingHand(float out[21][3], double open = 0) {
         {0.018f, -0.02f, -0.07f}, {0.034f, 0, -0.075f},   {0.034f, -0.025f, -0.085f}, {0.034f, -0.028f, -0.07f},
         {0.034f, -0.018f, -0.065f}};
     std::memcpy(out, base, sizeof base);
+    // fingers 1: the middle finger with the index, its tip beside the index tip (a card held between
+    // the thumb and two fingers); 2: all four fingertips bunched at the thumb
+    if (fingers >= 1) {
+        static const float mid[3][3] = {{0.0f, -0.015f, -0.12f}, {-0.004f, -0.035f, -0.128f}, {-0.008f, -0.048f, -0.12f}};
+        std::memcpy(out[10], mid, sizeof mid);
+    }
+    if (fingers >= 2) {
+        static const float ring[3][3] = {{0.016f, -0.015f, -0.112f}, {0.01f, -0.035f, -0.12f}, {0.005f, -0.05f, -0.115f}};
+        static const float little[3][3] = {{0.03f, -0.015f, -0.1f}, {0.02f, -0.035f, -0.108f}, {0.012f, -0.048f, -0.105f}};
+        std::memcpy(out[14], ring, sizeof ring), std::memcpy(out[18], little, sizeof little);
+    }
     const float th[3] = {-0.004f, -0.03f, 0.012f}, ix[3] = {0.0f, 0.012f, -0.02f};
     for (int i = 0; i < 3; ++i) {
         out[4][i] += float(open * th[i]), out[3][i] += float(open * th[i] * 0.5);
         out[8][i] += float(open * ix[i]), out[7][i] += float(open * ix[i] * 0.6);
+        if (fingers >= 1) out[12][i] += float(open * ix[i]), out[11][i] += float(open * ix[i] * 0.6);
     }
 }
 
@@ -123,6 +135,7 @@ struct SynthHand {
     // or a pinching hand (PinchingHand), placed by where its thumb and index tips meet (contact)
     bool pinching = false, byContact = false;
     double open = 0;
+    int fingers = 0;                   // PinchingHand's: 1 the middle with the index, 2 all four bunched
     double contact[3] = {0, 0, 0};
     // ...turned by this (room from hand: its columns are the hand's x, y, z) instead of the angles below
     bool useRot = false;
@@ -202,7 +215,7 @@ struct Synth {
                 continue;
             }
             float pts[21][3];
-            if (h.pinching) PinchingHand(pts, h.open);
+            if (h.pinching) PinchingHand(pts, h.open, h.fingers);
             else PointingHand(pts, h.bent);
             if (!h.pinching && !std::isnan(h.middleTip)) {   // the middle finger straight, beside the index
                 const float tipZ = pts[8][2] - float(h.middleTip), mcpZ = pts[9][2];
@@ -1428,9 +1441,9 @@ void TestForgivingZones() {
 // The card pinch: the hand under the bottom edge, fingers up, the back of the hand toward you, the
 // thumb behind the panel and the index in front, closing on it 1 cm inside the edge (and open: 5 cm
 // apart). turn: the hand turned about the vertical by this (degrees), up: raised (m).
-SynthHand CardHand(double u, double v, double open, double turnDeg = 0, double up = 0, double rollDeg = 0) {
+SynthHand CardHand(double u, double v, double open, double turnDeg = 0, double up = 0, double rollDeg = 0, int fingers = 1) {
     SynthHand h;
-    h.pinching = h.byContact = h.useRot = true, h.open = open;
+    h.pinching = h.byContact = h.useRot = true, h.open = open, h.fingers = fingers;
     // hand x -> room x, hand y (the back of the hand) -> +z, hand z -> -y (the fingers up); then
     // turned about the vertical, and rolled about the panel's normal
     const double a = turnDeg * M_PI / 180, r = rollDeg * M_PI / 180;
@@ -1497,6 +1510,30 @@ void TestCardPinch() {
         r.synth.Pinch(1, false, r.t, at, 1);
         r.Frame({CardHand(0.1, v, 1.0, 30, 0.10, 20)}), r.Frame({CardHand(0.1, v, 1.0, 30, 0.10, 20)});
         CHECK(r.Count(Event::GrabEnd) == 1 && !r.in.grabbing(1));
+    }
+    // which fingers (user, 2026-10-10): the index alone against the thumb is the border's move; the
+    // index and middle together, or all four bunched, a card; the middle joining within cardJoinMs
+    // turns the move into a card, later it stays a move
+    for (int fingers : {0, 2, 3, 4}) {
+        Rig r;
+        r.panels[0].controls.clear();
+        const int first = fingers == 2 ? 2 : fingers == 0 ? 0 : 0;   // 3, 4: the index first, the middle later
+        for (double o : {1.0, 1.0, 0.8, 0.6, 0.4, 0.2}) r.Frame({CardHand(0.1, v, o, 0, 0, 0, first)});
+        const double at[3] = {0.1, v, -0.5};
+        r.Frame({CardHand(0.1, v, 0, 0, 0, 0, first)});
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({CardHand(0.1, v, 0, 0, 0, 0, first)});
+        CHECK(r.Count(Event::GrabStart) == 1);
+        const Zone z0 = r.Last(Event::GrabStart) ? r.Last(Event::GrabStart)->zone : Zone::None;
+        const int join = fingers == 3 ? 4 : fingers == 4 ? 15 : 1000;   // frames on
+        for (int k = 1; k <= 20; ++k) r.Frame({CardHand(0.1, v, 0, 0, 0, 0, k >= join ? 1 : first)});
+        const bool card = r.in.Describe().find("(card)") != std::string::npos;
+        std::printf("card pinch, %s: took it by %s, %s\n",
+                    fingers == 0 ? "the index alone" : fingers == 2 ? "four fingertips bunched"
+                    : fingers == 3 ? "the middle joining 130 ms on" : "the middle joining 500 ms on",
+                    ZoneName(z0), card ? "a card now" : "a border move");
+        CHECK(card == (fingers == 2 || fingers == 3));
+        CHECK(z0 == (fingers == 2 ? Zone::Card : Zone::Edge));
     }
     {
         // the same edge pinched from the front (both tips in front of it): the border's move, not a card

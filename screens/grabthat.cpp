@@ -121,7 +121,7 @@ void Detector::Frame(int64_t t, const std::vector<Hand> &hands, const Mat &head,
             continue;
         }
         if (h->id != sd.handId) sd.recent.clear();
-        sd.lastSeen = t, sd.handId = h->id;
+        sd.lastSeen = t, sd.handId = h->id, sd.head = head;
         const Features f = Measure(*h, head);
         sd.thumb = Dist3(h->p[4], h->p[8]);
         sd.recent.push_back({t, f.fwd, f.palmFwd});
@@ -185,6 +185,16 @@ void Detector::Frame(int64_t t, const std::vector<Hand> &hands, const Mat &head,
                 break;
         }
     }
+}
+
+bool Detector::Aim(int side, Fire *out, double *progress) const {
+    const Side &sd = side_[side];
+    if (!p_.on || sd.state == State::Idle) return false;
+    out->side = side, out->t = sd.lastSeen, out->head = sd.head;
+    std::copy(sd.eye, sd.eye + 3, out->eye), std::copy(sd.palm, sd.palm + 3, out->palm);
+    for (int i = 0; i < 3; ++i) out->fist[i] = sd.palm[i];
+    *progress = sd.state == State::Opening ? std::clamp((sd.lastSeen - sd.since) / (p_.armMs * 1e6), 0.0, 1.0) : 1.0;
+    return true;
 }
 
 bool Detector::claims(int side, int64_t t) const {

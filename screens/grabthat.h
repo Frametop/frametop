@@ -124,6 +124,10 @@ public:
     bool claims(int side, int64_t t) const;
     // Held out and armed, or closing: ft-hands should track at its full rate.
     bool armed(int side) const { return side_[side].state == State::Armed || side_[side].state == State::Closing; }
+    // The gesture under way on this side, for the target's glow (user, 2026-10-10: "a glow over the
+    // window grab that is targeting"): the aim it would fire with now (Pick takes it), and how far
+    // along it is: rising 0..1 over armMs as the hand is held out, 1 armed or closing. False idle.
+    bool Aim(int side, Fire *out, double *progress) const;
     void Reset();
     std::string Describe() const;   // "left idle, right armed"
 
@@ -138,6 +142,7 @@ private:
         uint32_t handId = 0;
         int64_t since = 0, lastSeen = 0, lastOpen = 0, quietUntil = 0, claimUntil = 0;
         double eye[3] = {0, 0, 0}, palm[3] = {0, 0, 0};
+        Mat head{};                   // the head on the last frame
         double thumb = 0;             // thumb tip to index tip now (m)
         struct Sample { int64_t t; double fwd, palm; };
         std::vector<Sample> recent;   // the wrist's fwd and the palm's palmFwd over the last pullMs

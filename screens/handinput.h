@@ -9,7 +9,7 @@
 // @ft_pointer_helper: 1 claims(), 2 near() only), and the helper leaves a pinch or grip that began
 // on a claimed hand.
 //
-// Gesture -> action, and what wins (2026-10-10, after the second live test):
+// Gesture -> action, and what wins (2026-10-10, after the third live test):
 //   index tip through the surface, from the front     poke: press, release, drag (Poke)
 //   pinch at the edge, thumb behind, index and middle  card: rigid carry (Zone::Card); the index
 //     together in front (or four tips bunched)          alone is the border's move, a card if the
@@ -17,15 +17,18 @@
 //   pinch where the fingers meet in the border band    any corner or the tab: resize from it, the
 //                                                       opposite corner kept; border, bar, title: move
 //   pinch on the content, within the zone              click at the cursor, held with the pinch
-//   fist (grip) with the palm or knuckles at it        carry and turn with the wrist (Zone::Fist)
-//   two grabs (pinches or fists) on one panel          stretch and turn
+//   fist (grip) with the palm or knuckles at it        carry and turn with the wrist (Zone::Fist);
+//     (or a closed hand ft-hands calls a pinch)          not a click (Params::fistIndex)
+//   two grabs (pinches or fists) on one panel          stretch, and turn on every axis with them
 //   a carry by one hand let go moving out fast         thrown 3 m out along that line (cardThrow)
 //   an open-ing hand at a panel flicked out fast       flicked 3 m out from the eyes (flick); not
 //                                                       a poke, a wave, or "grab that"'s pull back
+//   an open hand, palm to it, pushed into it           pushed 3 m out from the eyes (push); not a
+//                                                       poke, a rest, a wave or the back of the hand
 //   a pinch or fist on a hand "grab that" has          waits: that gesture's, or ours if it lets go
 //   pinch or fist beyond the zone (or in its margin)   the pointer helper's (ray, gaze, grip drag)
 // A hold (a grab, a poke's or pinch's press) lasts through tracking loss and flickers until a clear
-// release (Params::holdLostMs). The resize handle a laser or the gaze presses is vr.cpp's
+// release (Params::holdLostMs); what it carries ignores frames no hand makes (Params::gate). The resize handle a laser or the gaze presses is vr.cpp's
 // (UpdateCorner); corners() tells it which corner a hand is at. The helper tells ft-screens which
 // hands are bare and whether hand input is allowed now ("hands <L> <R> <allowed>" on @ft_screens;
 // vr.cpp).
@@ -174,6 +177,25 @@ struct Params {
     double velocityMs = 110, coastMs = 150, blendMs = 100, catchUp = 0.6;   // (blend: longer for more than catchUp m/s)
     double jumpMax = 0.12;
     int jumpFrames = 3;
+    // Tracking that can't be a hand (the third live test, 2026-10-10: "grabbing the side of the monitor
+    // (e.g. from the left side), my hand moves off to the left and tracking gets lost: the grabbed
+    // monitor is jittery"). On its flag (flag-20261010-203635) the left hand, 45-60 deg left of the
+    // head's forward, seen by both cameras, read alternately at two places 10-20 cm apart (6-7 m/s
+    // back and forth), its frame flipping 100-180 deg between frames; then by one camera at 85 deg.
+    // With `gate` (HANDS_TRACK_GATE), a holding hand's frame that is an impossible move from the last
+    // one kept is dropped: faster than gateSpeed, or farther than 0.5 gateAccel dt^2 + gateNoise from
+    // where its velocity had it (jumpMax's rule when off); unless gateFrames frames in a row agree on
+    // the new place (it did move: the blend takes the panel there). The hand's turn likewise: faster
+    // than gateTurn deg/s (at least gateTurnMin a frame). A frame one camera saw (its depth 2-6 cm off)
+    // or near the edge of view (edgeDeg..edgeLostDeg off the head's forward, the weight falling to
+    // monoWeight) is smoothed harder (the cutoffs times its weight) and doesn't turn the panel; past
+    // edgeLostDeg it counts as unseen (the panel holds, holdLostMs). A coast goes at most coastSpeed.
+    bool gate = true;
+    double gateSpeed = 4.0, gateAccel = 100, gateNoise = 0.02;
+    int gateFrames = 3;
+    double gateTurn = 540, gateTurnMin = 20;
+    double monoWeight = 0.35, edgeDeg = 50, edgeLostDeg = 80;
+    double coastSpeed = 0.8;
     // Pinch grab zones (3.6), tested at the pinch's begin with the thumb-index contact (where the
     // fingers meet; the gestures file's point is the knuckles, 5-8 cm behind it, which a 3 cm deep
     // zone rarely had). A band along the panel's border, bandOut outside it to bandIn inside, within
@@ -213,12 +235,29 @@ struct Params {
     // panel (its palm or knuckles within the near zone, over it) takes it: carried like a pinch on
     // its bar (the knuckles 1:1, the wrist turning it), two on one panel stretch it. HANDS_FIST_GRAB.
     bool fistGrab = true;
+    // ...and a pinch by a closed hand: the index curled (its extension, as `extended`, fistIndex or
+    // less) with the middle, ring and little (their mean fistCurl or less). ft-hands calls a fist with
+    // the thumb on the index a pinch: the third live test's two-fist stretch (flag-20261010-203215:
+    // index 0.79 and 1.11, the others 0.78 and 0.94) pinch-clicked the content instead, one hand,
+    // then "the other hand is pressing". The user's pinches on the ten flags: the index 1.24-1.65 (a
+    // few 0.84-1.04 with the others at 1.18-1.32), the others 1.09-1.45; their fists: the index
+    // 0.79-1.13, the others 0.71-1.00.
+    double fistIndex = 1.15, fistCurl = 1.05;
     // A fist or a pinch that begins on a hand "grab that" has (held out open, or closing: the thumb
     // passes the index tip as a hand closes, a pinch to ft-hands) waits until that gesture fires (then
     // it's that) or lets the hand go, at most grabThatWaitMs: on the user's flag, with a panel where
     // the gesture brings one, a pinch-click on the closing hand took the hand from it.
     double grabThatWaitMs = 600;
     double stretchDead = 0.01;  // two hands: their distance changes this much before the panel scales
+    // Two hands turn the panel on every axis with the line between them, and roll it about that line
+    // with their wrists (the mean of the two hands' turns about it, past rotDeadzone); off: about the
+    // vertical only (before 2026-10-10's third live test: "grabbing the monitor with two fists doesn't
+    // let me resize or rotate"). HANDS_STRETCH_TURN.
+    bool stretchTurn = true;
+    // A pinch claimed by the touch zone whose fingers met a little farther out than the grab band's
+    // depth still takes the border (the third live test: "the fingers +9.0 cm from it, out of the
+    // touch zone: nothing", the helper having left the pinch to us).
+    double pinchSlack = 0.03;
     double minWidth = 0.15, maxWidth = 12;
     // Smoothing what a grab carries (hands/include/fh_smooth.h: One Euro, in continuous time, read
     // each tick): the pinch point as the cameras saw it (not moved ahead, whose speed is noise
@@ -266,6 +305,32 @@ struct Params {
     bool cardThrow = true;
     double throwSpeed = 1.0, throwFitMs = 100, throwAngle = 60;
     double throwDistance = 3.0, throwMs = 400;
+    // The push (HANDS_PUSH; user, 2026-10-10: "pushing against the monitor or window does not make it
+    // go away or fly back"): an open hand (the four fingers' mean extension pushOpen or more, the
+    // middle, ring and little pushCurl or more: not a poke's index alone; a pointing hand's middle
+    // reads up to 1.75 straight, its ring and little 1.2-1.4, so about 1.45 for the three), its palm
+    // toward the panel (within pushFacing degrees of into it), over it, moving straight into it (the
+    // way it came within pushAngle of the panel's normal), pushDepth or more past the
+    // surface, from at most pushFrom in front of it (or resting on it) within the last second, open
+    // and facing it all the way: moving into it at pushSpeed or more (a fit over flickFitMs) and
+    // pushFastTravel or more in since; or pushTravel or more past the surface, at pushSlow or more on
+    // average since it crossed it.
+    // Thrown like a flick (throwDistance from the eyes on the line through the panel's centre). Not a
+    // hand resting or typing, pinching or gripping, pressing or holding, nor within pushAfterMs of a
+    // press or a hold (the hand opening as it lets go); once a second at most (flickRefractoryMs,
+    // shared). An open hand doesn't poke while push is on (pokeOpen). The flags: "grab
+    // that"'s open hand held out to a panel at arm's reach goes 5-7 cm into it at 0.43 m/s, or 8 cm at
+    // 0.14 m/s (flag-20261010-203144, flag-20261009-201252): neither is a push. HANDS_PUSH_SPEED.
+    // (Arm's reach is 0.55-0.6 m: a panel at 0.45 can't be pushed far in slowly; push it quickly.)
+    bool push = true;
+    double pushOpen = 1.6, pushCurl = 1.6, pushFacing = 50, pushAngle = 30, pushFrom = -0.005, pushDepth = -0.02, pushSpeed = 0.5;
+    double pushFastTravel = 0.05, pushTravel = 0.15, pushSlow = 0.10, pushAfterMs = 600;
+    // An open hand doesn't poke while push is on: the middle, ring and little fingers and all four
+    // pokeOpen or straighter on average (flat), or pushCurl or straighter coming in at pushSpeed or
+    // more (a push on its way). The replays' made-up pokes along the finger (frames where the index
+    // points, the other fingers as the tracker had them) pressed 19 of 23 (probe-moves), 4 of 6 (the
+    // 2026-09-29 recording) and 31 of 55 (lit) without it; 11, 4 and 30 at 1.8 (17, 2 and 55 at 1.6).
+    double pokeOpen = 1.8;
 };
 
 // Card: the card pinch; Fist: the fist grab (both carry it).
@@ -284,6 +349,7 @@ struct Event {
     Mat to{};                   // Throw: where the panel goes
     double ms = 0;              // ...over this long
     bool flick = false;         // ...by a flick (else a carry let go fast)
+    bool push = false;          // ...by a push
     bool lost = false;          // Release, GrabEnd: the hand was lost, or input was taken away
 };
 
@@ -309,6 +375,13 @@ struct CornerAim {
     double closeness = 0;
     bool held = false;
 };
+
+// A hand at a panel, closer than the touch zone and its margin: its tip, the thumb-index contact or
+// its palm within `front` in front of a panel (or nearBack behind it), over it with `margin` round it.
+// For the palm menu (not by a panel: a card pinch from below has the palm up).
+bool HandAtPanel(const handcut::Hand &h, const std::vector<Panel> &panels, const Params &k, double front, double margin);
+bool HandAtPanel(const handcut::Hands &hands, int side, const std::vector<Panel> &panels, const Params &k,
+                 double front = 0.175, double margin = 0.10);
 
 // Resizing a panel from one corner, the opposite corner staying put, keeping its aspect (height over
 // width): the corner (sx, sy: +1 right, top) wanted at cu, cv (m from the centre, on the surface),
@@ -350,9 +423,17 @@ Control ControlAt(const Panel &p, double u, double v, double margin);
 // sy: +1 right, top). excess: how far it is outside that zone (<= 0 inside), for the glow; the
 // zone is the nearest one then.
 Zone GrabZone(const Panel &p, const Hit &h, const Params &k, int *sx, int *sy, double *excess);
+// What a carried panel faces the head from (CarryPose): its centre; held nearer the eyes than
+// kCarryShare times the grab point's distance from the centre, a point between the two, that share
+// of the way from the grab point (pose: the panel, grabLocal: the grab point on it, panel-local).
+// Facing from the centre turns the panel about the hand, which moves the centre, which turns it:
+// held by an edge close to the eyes that loop has no steady answer (the third live test's replays:
+// a 0.6 m panel held by its edge at arm's reach spun and flipped from tick to tick).
+constexpr double kCarryShare = 2;
+void CarryAnchor(const Mat &pose, const double grabLocal[3], const double head[3], double out[3]);
 // One hand carrying a panel: the grab point (panel-local, at the start) follows the pinch
 // point, and the panel keeps the turn it had from facing the head (its yaw, pitch and roll
-// relative to that), so carrying it around you keeps it facing you. turn (optional): the wrist's
+// relative to that; from CarryAnchor's point), so carrying it around you keeps it facing you. turn (optional): the wrist's
 // turn since the grab, in the frame facing the head (x right, y up, z toward the head), applied on
 // top; rollSnap: then the panel snaps level within this many degrees of roll (0: never).
 Mat CarryPose(const Mat &start, const double startHead[3], const double grabLocal[3], const double pinch[3],
@@ -363,6 +444,11 @@ Mat CarryPose(const Mat &start, const double startHead[3], const double grabLoca
 // no scaling.
 Mat StretchPose(const Mat &start, double width0, const double l0[3], const double r0[3], const double l[3],
                 const double r[3], double dead, double minW, double maxW, bool scale, double *width);
+// ...turned on every axis: the shortest turn from the line l0-r0 to l-r, then `twist` (radians) about
+// that line (the hands' wrists), about the hands' midpoint; level within rollSnap degrees of roll.
+Mat StretchTurn(const Mat &start, double width0, const double l0[3], const double r0[3], const double l[3],
+                const double r[3], double twist, double dead, double minW, double maxW, bool scale, double rollSnap,
+                double *width);
 
 class HandInput {
 public:
@@ -387,6 +473,9 @@ public:
     const std::map<int, std::vector<handcut::Glow>> &glows() const { return glows_; }
     const std::map<int, unsigned> &hovered() const { return hovered_; }
     const std::map<int, CornerAim> &corners() const { return corners_; }
+    // Per panel index: an open hand's palm at it, facing it (a flick or a push would throw it), 0..1
+    // nearer (vr.cpp highlights it).
+    const std::map<int, double> &throwAims() const { return throwAims_; }
     const std::set<int> &nearPanels() const { return nearPanels_; }
     // The near claim, per side, for the last hands frame (for the helper's "near"): near, the hand's
     // ray stays hidden (with the leave margin and linger, so it doesn't flicker at the zone's edge);
@@ -429,6 +518,10 @@ public:
         int pinchClicks = 0, cards = 0, fists = 0, fistsWaited = 0, fistsCancelled = 0;   // (and pinches)
         int coasts = 0, reacquired = 0, glitches = 0, heldThrough = 0, lostEnds = 0;   // holding through loss
         int flicks = 0, throws = 0, heldFlick = 0;   // flicks and card throws; pokes not taken from a flick
+        int pushes = 0, heldOpen = 0;                // pushes; pokes not taken from an open hand (Params::push)
+        int fistPinches = 0;                         // fist grabs ft-hands called pinches (Params::fistIndex)
+        int gated = 0, turnsGated = 0, moved = 0;    // frames the gates dropped; places they took after gateFrames
+        int edgeFrames = 0, monoFrames = 0;          // held frames smoothed harder: near the edge of view, one camera
     } stats;
 
 private:
@@ -445,9 +538,11 @@ private:
         double inSpeed = 0, travelled = 0;   // ...how fast and from how far
         bool resting = false;                // the hand rests low by the body (Params::restBelow)
         bool inZone = false;                 // within the zone itself on the last frame (not the margin)
-        // The fingers over the last 400 ms (room, capture time): the index tip (the poke's approach),
+        // The fingers over the last second (room, capture time): the index tip (the poke's approach),
         // and the thumb tip and the contact (the card pinch).
-        struct Sample { int64_t t; float tip[3], thumb[3], contact[3], along[3], palm[3]; float open; };   // along: wrist to knuckles
+        // along: wrist to knuckles; normal: out of the palm; curl3: the middle, ring and little fingers'
+        // mean extension
+        struct Sample { int64_t t; float tip[3], thumb[3], contact[3], along[3], palm[3], normal[3]; float open, curl3; };
         std::vector<Sample> hist;
         double lockU = 0, lockV = 0, lastX = -1, lastY = -1, deepest = 0;
         bool dragging = false, spent = false;
@@ -481,6 +576,7 @@ private:
         uint32_t gripBegins = 0;             // ...the grip slot's
         bool knowGrip = false;
         bool byGrip = false;                 // a fist grab: the grip's end ends it
+        bool fistByPinch = false;            // ...that ft-hands called a pinch (Params::fistIndex): either ends it
         bool fistWait = false, pinchWait = false;   // a fist or pinch waiting on "grab that"
         int64_t waitSince = 0;
         int waitPanel = -1;
@@ -509,15 +605,25 @@ private:
         int64_t coastNs = 0, blendNs = 0, unseenNs = -1;
         fhsmooth::V3 coastFrom, coastVel, blendOff;
         int jumps = 0;
+        // the gates (Params::gate): frames dropped in a row and the last of them (the last kept is the
+        // track's newest); the hand's frame likewise (the last kept, dropped in a row, the last dropped)
+        fhsmooth::V3 dropped;
+        int drops = 0;
+        int64_t turnNs = 0;
+        int64_t droppedNs = 0;
+        fhsmooth::V3 turnAlong, turnAcross, droppedAlong, droppedAcross;
+        int turnDrops = 0;
+        double weight = 1;                   // the last frame's confidence (Params::monoWeight)
         int reacquired = 0;               // ...times the hand came back mid-hold
         bool cardCandidate = false;       // a border move begun straddling the edge: a card if the fingers join
         int64_t upNs = 0;                 // the capture time of the first hands frame its gesture was up
-        int64_t flickNs = INT64_MIN / 2;  // the last flick (Params::flickRefractoryMs)
+        int64_t flickNs = INT64_MIN / 2;  // the last flick or push (Params::flickRefractoryMs)
+        int64_t busyNs = INT64_MIN / 2;   // the last tick it pressed or held (Params::pushAfterMs)
     };
     enum Why : unsigned {
         kOneFrame = 1, kOneView = 2, kBent = 4, kNotNearest = 8, kPinching = 16, kBusy = 32, kOtherHand = 64,
         kTooSoon = 128, kSpent = 256, kNotOut = 16384, kLate = 32768, kResting = 512, kTyping = 1024, kAskew = 2048, kSlow = 4096, kOffContent = 8192,
-        kFlick = 65536
+        kFlick = 65536, kOpenHand = 131072
     };
     const handcut::Hand *HandFor(int side, const std::vector<handcut::Hand> &hands, uint32_t prefer) const;
     void Poke(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand *h);
@@ -527,7 +633,8 @@ private:
     // click on the content.
     void PinchBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited);
     // A grip began (or waited on "grab that": waited): the fist grab, if the hand is at its panel.
-    void FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited);
+    // byPinch: ft-hands called it a pinch (a closed hand, Params::fistIndex).
+    void FistBegin(int s, const Input &in, const std::vector<Panel> &panels, bool waited, bool byPinch = false);
     // Which panel the hand is near (the claim), before the pinch and grip begins are read.
     void Near(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand *h);
     // Takes the panel by a hand: the carried point (knuckles) and the wrist's turn start afresh.
@@ -546,15 +653,27 @@ private:
     void Glows(const Input &in, const std::vector<Panel> &panels);
     // A flick by this hand at a panel (Params::flick), on a hands frame.
     void Flick(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand &h);
+    // A push by this hand into a panel (Params::push), on a hands frame.
+    void Push(int s, const Input &in, const std::vector<Panel> &panels);
+    // A frame's confidence for a held hand (Params::monoWeight): 1, less for one camera or near the
+    // edge of view; 0: past the edge (as unseen).
+    double Weight(const Input &in, const handcut::Hand &h);
+    // Whether the hand's frame (wrist and knuckles) is a plausible turn from the last one kept
+    // (Params::gateTurn); the first is.
+    bool TurnOk(int s, const handcut::Hand &h);
+    // The two hands' mean turn about the line between them since the stretch began (radians; 0
+    // without their frames), past the dead zone.
+    double StretchTwist(const Input &in, const double axis[3]);
     // Where a thrown panel goes: the point throwDistance from the head along the line from `from`
     // in `dir` (unit), facing the head. False if `from` is that far already, or the line doesn't get there.
     bool ThrowTarget(const double from[3], const double dir[3], Mat *to) const;
-    void EmitThrow(int s, int panel, const Mat &to, bool flick);
+    void EmitThrow(int s, int panel, const Mat &to, bool flick, bool push = false);
     // A grabbing side's wrist turn since the grab (Params::grabRotate), in the frame facing the head
     // across the floor from the pinch point (CarryPose applies it in the frame the panel faces the
     // head in); false while within the dead zone (or off).
     bool Turn(int s, const Input &in, const double pinch[3], const double head[3], double out[3][3]);
-    void SampleTurn(int s, const handcut::Hand &h, const Input &in);
+    // w: the frame's confidence (Weight): the smoothing's cutoffs times it.
+    void SampleTurn(int s, const handcut::Hand &h, const Input &in, double w = 1);
     void EndPress(int s, bool lost, const char *why = nullptr);
     void EndGrab(int s, bool lost);
     // A held gesture (a grab's or a pinch press's) this tick: false once it's clearly let go (see
@@ -582,6 +701,7 @@ private:
     std::map<int, std::vector<handcut::Glow>> glows_;
     std::map<int, unsigned> hovered_;
     std::map<int, CornerAim> corners_;
+    std::map<int, double> throwAims_;
     std::set<int> nearPanels_;
     uint64_t frame_ = 0;
     bool newFrame_ = false;
@@ -594,6 +714,10 @@ private:
         int panel = -1;
         Mat start{};
         double width0 = 1, l0[3] = {0, 0, 0}, r0[3] = {0, 0, 0};
+        // each hand's frame then (Params::stretchTurn), and whether the twist is past its dead zone
+        double hand0[2][3][3] = {};
+        bool haveHand0[2] = {false, false}, twisting = false;
+        double twistFrom = 0;
     } stretch_;
 };
 

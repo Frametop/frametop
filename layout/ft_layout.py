@@ -1617,7 +1617,10 @@ def main(argv):
             wait = float(argv[argv.index("--wait") + 1]) if "--wait" in argv else 60
             with open(LOCK_PATH, "w") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX)
-                apply(wait)
+                try:
+                    apply(wait)
+                except RuntimeError as e:   # (no head pose with the headset off): the scales still go
+                    log(f"not arranged now: {e}")
                 for _ in range(30):  # Plasma may still be starting
                     try:
                         log("kwin: " + (" ".join(apply_scales()) or "unchanged"))
@@ -1669,7 +1672,16 @@ def main(argv):
                             profile_remotes(layout, name)
                             open_remotes(layout, name)
                             save_layout(layout)
-                        apply(wait)
+                        try:
+                            apply(wait)
+                        except RuntimeError as e:
+                            if not wait:
+                                raise
+                            # Desktop start with the headset off (no head pose): KWin's scales must
+                            # still reach ft-screens, or every click on a scaled screen lands at
+                            # scale x its distance from the top-left (2026-10-11: 1.25, hundreds of
+                            # pixels off on the native screen).
+                            log(f"not arranged now: {e}")
                     if not wait:
                         kwin_follow()
                     if wait:

@@ -130,6 +130,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -357,6 +358,7 @@ struct Screen {
     bool floating = false;        // a spare output's panel
     int slot = 0;                 // ...its number, from 1 (its overlays exist only while a window floats)
     bool remote = false;          // a remote display: another machine's monitor, streamed (remote.c)
+    std::string label;            // its name (MakePanel's: "Screen 1", "host: display", "Floating window 2")
     bool floatOn = false;         // ft-floatd has a window on it ("float" .. "unfloat")
     bool outputOn = false;        // KWin has the spare output turned on
     bool minimized = false;
@@ -2411,30 +2413,6 @@ struct GrabMove {
     bool easeOut = false;   // a throw: fast, then slowing (else grab that's smoothstep)
 };
 std::map<int, GrabMove> g_grabMoves;   // panels on their way
-struct Brought {
-    Mat from, to;
-    double width = 1;       // its width before it came
-    double cameWidth = 1;   // ...and the width it came at (screens wider than grab that's maxWidth shrink)
-};
-std::map<int, Brought> g_brought;      // panels that came by the gesture: where from, where to
-// The width each panel had when it was last sent away from arm's reach (thrown, pushed, flicked or sent
-// back): "grab that" brings it back at that width (user, 2026-10-11: "when you pull a display towards
-// you, it should remember the last size the display was when you pushed it away"), not grab that's maxWidth.
-std::map<int, double> g_nearWidth;
-double g_grabThatViewDeg = 75;   // HANDS_GRAB_THAT_VIEW_DEG: a panel grab that brings spans at most this much of the view
-extern double g_susanFar;
-
-// The width a panel goes away at (user, 2026-10-10: "windows should not resize to be smaller when
-// they're sent back. It should just push them back further away keeping their existing size"): its
-// own width, as it is now; except one "grab that" shrank to come to arm's reach and still at that
-// width gets the width it had back (the third live test: the 2.5 m desktop came at 0.6 m and was
-// thrown 3 m out at 0.6, a fifth of its size). HANDS_SEND_AWAY_WIDTH: restore (that), keep (never).
-bool g_sendAwayRestore = true;
-double SendAwayWidth(const Screen &s, const Brought *b) {
-    if (g_sendAwayRestore && b && std::fabs(s.metres - b->cameWidth) < 0.01 && b->width > s.metres) return b->width;
-    return s.metres;
-}
-
 double Apart(const Mat &a, const Mat &b) {
     return std::hypot(a.m[0][3] - b.m[0][3], a.m[1][3] - b.m[1][3], a.m[2][3] - b.m[2][3]);
 }
@@ -2443,6 +2421,136 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms 
     Mat p;
     if (!ScreenPose(s, &p)) return;
     g_grabMoves[index] = {p, to, p, s.metres, s.floating ? s.metres : width, NowMs(), ms, easeOut};
+}
+
+// ---------------------------------------------------------------- the front slot
+// One place in front of you (user, 2026-10-11: "make the system a bit more logical with the lazy susan";
+// the proposals they took): the lazy susan (a stroke, Meta+Alt+Tab) and "grab that" both bring a screen
+// to it, one at a time: whatever was there goes home first. Two distances in it: reading (the lazy
+// susan's: g_frontReading, 1 m) and touch (grab that's arm's reach), both as big as the screen's
+// resolution needs for its text to read (grabthat::ReadableSize; the same view at either distance).
+// Grab that at the one there pulls it from reading to touch. Sending it away (a push, flick or throw)
+// steps it back: touch to reading, reading home. A stroke sends it home and brings the next. Turned away
+// from, it goes home, unless you used it a while (g_frontKeepMs of input on it: kept). Moved by hand or
+// laser, it leaves the slot and that's its home now; resized there, it comes that size next time
+// (g_frontDeg). Its home: where it lives (the layout's place, or where you last put it).
+// SCREEN_SPIN_BRING=0: the lazy susan turns the room instead (and grab that still uses the slot).
+enum class Stage { Reading, Touch };
+const char *StageName(Stage st) { return st == Stage::Touch ? "arm's reach" : "reading distance"; }
+struct Front {
+    int panel = -1;          // the screen in the slot (-1: empty)
+    Stage stage = Stage::Reading;
+    Mat home{}, to{};        // where it lives, and where it is in the slot
+    double homeWidth = 0, homeCurve = 0;
+    double width = 0;        // its width in the slot (as brought, or as resized there)
+    int64_t awaySinceMs = -1, lastTickMs = 0;
+    double usedMs = 0;       // input on it while in the slot
+    bool kept = false;       // used long enough: it stays when you look away
+} g_front;
+bool g_susanBring = true;
+double g_frontReading = 1.0, g_frontDrop = 0.08;   // reading distance (m), and how far under the eyes its centre sits
+double g_frontKeepMs = 3000;                       // SCREEN_FRONT_KEEP_MS: this much use keeps it (0: never)
+grabthat::ReadParams g_frontRead;
+std::map<int, double> g_frontDeg;   // a screen resized in the slot: the view it spans (deg wide), next time too
+std::map<int, double> g_uiScale;    // KWin's scale for each screen (ft-layout's "scale", via the compositor)
+std::map<int, double> g_uiScaleConf;   // SCREEN_UI_SCALE: a remote display's own UI scale ("104=2 103=1.5")
+constexpr double kFrontAway = 70;          // degrees off where you face: out of view
+constexpr int64_t kFrontAwayMs = 600;      // ...for this long: it goes home
+void ShowCarousel();
+
+// Where a pose is from where the head faces (deg, right +).
+double BearingFrom(const Mat &head, const Mat &p) {
+    double fx = -head.m[0][2], fz = -head.m[2][2];
+    const double n = std::hypot(fx, fz) + 1e-9;
+    fx /= n, fz /= n;
+    const double rx = -fz, rz = fx;
+    const double dx = p.m[0][3] - head.m[0][3], dz = p.m[2][3] - head.m[2][3];
+    return std::atan2(dx * rx + dz * rz, dx * fx + dz * fz) * 180 / M_PI;
+}
+
+// Where a screen lives: the one in the slot at home, one on its way somewhere where it's going.
+bool HomeOf(int i, const Screen &s, Mat *p) {
+    if (i == g_front.panel) return *p = g_front.home, true;
+    const auto m = g_grabMoves.find(i);
+    if (m != g_grabMoves.end()) return *p = m->second.to, true;
+    return ScreenPose(s, p);
+}
+
+// The screens the lazy susan goes round, left to right as they live around you now.
+std::vector<grabthat::Bearing> CarouselOrder(const Mat &head) {
+    std::vector<grabthat::Bearing> out;
+    for (auto &[i, s] : g_screens) {
+        Mat p;
+        if (i != g_front.panel && (!s.visible || !Spinnable(s) || g_handInput.heldByHand(i))) continue;
+        if (HomeOf(i, s, &p)) out.push_back({i, BearingFrom(head, p)});
+    }
+    std::sort(out.begin(), out.end(), [](const grabthat::Bearing &a, const grabthat::Bearing &b) { return a.deg < b.deg; });
+    return out;
+}
+
+// Its size in the slot at distance d: readable, or the view it was resized to there.
+grabthat::Readable FrontSize(int i, const Screen &s, double d) {
+    const auto ui = g_uiScale.find(i);
+    const auto uc = g_uiScaleConf.find(i);
+    const double scale = ui != g_uiScale.end() ? ui->second : uc != g_uiScaleConf.end() ? uc->second : 1;
+    const double pxW = (s.floating ? s.cropW : s.width) / scale, pxH = (s.floating ? s.cropH : s.height) / scale;
+    grabthat::ReadParams k = g_frontRead;
+    const auto deg = g_frontDeg.find(i);
+    if (deg != g_frontDeg.end() && deg->second > 1) k.ppd = pxW / deg->second, k.minW = 1, k.maxW = 170, k.maxH = 170;
+    grabthat::Readable r = grabthat::ReadableSize(pxW, pxH, d, k);
+    if (r.width <= 0 || s.floating) r.width = s.metres, r.curve = s.curve;   // (floating windows keep their size)
+    return r;
+}
+
+void FrontHome(const char *why) {
+    const auto it = g_screens.find(g_front.panel);
+    if (it != g_screens.end()) {
+        std::printf("front: screen %d goes home (%s)\n", g_front.panel + 1, why);
+        it->second.curve = g_front.homeCurve;
+        StartGrabMove(g_front.panel, it->second, g_front.home, g_front.homeWidth);
+    }
+    g_front = {};
+}
+
+// Screen i to the slot at stage st, at `to` (facing you): the one there goes home first; the same one
+// changes distance. why: for the log.
+void FrontBring(int i, Stage st, const Mat &to, const char *why) {
+    const auto it = g_screens.find(i);
+    if (it == g_screens.end()) return;
+    Screen &s = it->second;
+    if (g_front.panel >= 0 && g_front.panel != i) FrontHome("another comes");
+    Mat now;
+    if (!ScreenPose(s, &now)) return;
+    if (g_front.panel != i) {
+        const auto m = g_grabMoves.find(i);   // (on its way home: home is where it was going)
+        g_front = {};
+        g_front.panel = i;
+        g_front.home = m != g_grabMoves.end() ? m->second.to : now;
+        g_front.homeWidth = m != g_grabMoves.end() ? m->second.w1 : s.metres, g_front.homeCurve = s.curve;
+        g_spin.front = i;   // typing and the active window go to it (ft_vr_poll: FT_FRONT)
+        SendPointer("recenter");
+    }
+    double head[3] = {0, 0, 0};
+    Mat hp;
+    if (DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &hp)) head[0] = hp.m[0][3], head[1] = hp.m[1][3], head[2] = hp.m[2][3];
+    const double d = std::max(0.2, std::hypot(to.m[0][3] - head[0], to.m[2][3] - head[2]));
+    const grabthat::Readable r = FrontSize(i, s, d);
+    if (!s.floating) s.curve = r.curve;
+    g_front.stage = st, g_front.to = to, g_front.width = r.width, g_front.awaySinceMs = -1;
+    StartGrabMove(i, s, to, r.width);
+    std::printf("front: screen %d to %s (%s), %.2f m out, %.2f m wide%s (%.0fx%.0f deg, %.0f px/deg)\n", i + 1, StageName(st), why, d,
+                r.width, s.curve > 0 ? ", curved round you" : "", r.degW, r.degH, r.ppd);
+    ShowCarousel();
+}
+
+// Sent away (a push, flick or throw): one step back.
+void FrontStepBack(const char *why) {
+    Mat head;
+    if (g_front.stage == Stage::Touch && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+        FrontBring(g_front.panel, Stage::Reading, grabthat::InFront(head, g_frontReading, g_frontDrop), why);
+        return;
+    }
+    FrontHome(why);
 }
 
 // The gesture fired (user, 2026-10-10: consistent with a display already near you): at a panel that
@@ -2499,54 +2607,9 @@ void GrabThat(const grabthat::Fire &f) {
                                  hand, std::atan2(h[0], -h[2]) * 180 / M_PI, std::atan2(h[1], std::hypot(h[0], h[2])) * 180 / M_PI,
                                  near.c_str(), targets.size(), f.facing, f.speed);
     }
-    Screen &s = g_screens[i];
-    Mat now;
-    if (!ScreenPose(s, &now)) return;
-    const auto b = g_brought.find(i);
-    const grabthat::Outcome what = grabthat::Decide(b != g_brought.end(), now, f.head, k);
-    if (what == grabthat::Outcome::Back) {   // it came by the gesture: back
-        const double w = SendAwayWidth(s, &b->second);
-        std::printf("grab that (%s hand): screen %d goes back%s\n", hand, i + 1,
-                    w != s.metres ? (", " + std::to_string(w).substr(0, 4) + " m wide as it was").c_str() : ", as wide as it is");
-        g_nearWidth[i] = s.metres;
-        StartGrabMove(i, s, b->second.from, w);
-        g_brought.erase(b);
-        return;
-    }
-    if (b != g_brought.end()) g_brought.erase(b);   // came once, since taken far away: it comes afresh
-    // the one that came before, still where it came: back, to make room
-    for (auto it = g_brought.begin(); it != g_brought.end();) {
-        const auto o = g_screens.find(it->first);
-        Mat op;
-        if (o == g_screens.end() || o->second.drag != Drag::None || o->second.pinned != kNone || !ScreenPose(o->second, &op) ||
-            Apart(op, it->second.to) >= 0.15) {
-            ++it;
-            continue;
-        }
-        std::printf("grab that (%s hand): screen %d goes back to make room\n", hand, it->first + 1);
-        g_nearWidth[it->first] = o->second.metres;
-        StartGrabMove(it->first, o->second, it->second.from, SendAwayWidth(o->second, &it->second));
-        it = g_brought.erase(it);
-    }
-    Mat to = grabthat::Arrival(f, k);
-    const auto nw = g_nearWidth.find(i);
-    const bool remembered = !s.floating && nw != g_nearWidth.end();
-    double width = remembered ? nw->second : !s.floating && k.maxWidth > 0 ? std::min(s.metres, k.maxWidth) : s.metres;
-    // A wide one comes as far out as it spans at most g_grabThatViewDeg of the view (user's flags, 2026-10-11:
-    // a remote display made 1.62 m wide at arm's reach came back at that width 0.45 m ahead, filling the
-    // view, and no poke could land: the hands were through it before they saw it).
-    const double d = grabthat::ViewDistance(s.floating ? 0 : width, g_grabThatViewDeg, k.distance, g_susanFar, &width);
-    if (d > k.distance + 1e-3) {
-        const double e[3] = {f.head.m[0][3], f.head.m[1][3], f.head.m[2][3]}, r = d / k.distance;
-        to.m[0][3] = float(e[0] + (to.m[0][3] - e[0]) * r), to.m[2][3] = float(e[2] + (to.m[2][3] - e[2]) * r);
-    }
-    if (s.floating) width = s.metres;
-    g_brought[i] = {now, to, s.metres, width};
-    std::printf("grab that (%s hand): screen %d %s%s%s\n", hand, i + 1, grabthat::OutcomeName(what),
-                remembered ? (", " + std::to_string(width).substr(0, 4) + " m wide as it was when sent away").c_str()
-                : width < s.metres ? (", " + std::to_string(width).substr(0, 4) + " m wide").c_str() : "",
-                d > k.distance + 1e-3 ? (", " + std::to_string(d).substr(0, 4) + " m out to fit the view").c_str() : "");
-    StartGrabMove(i, s, to, width);
+    // to the front slot at arm's reach (the one there goes home; the one there comes closer)
+    FrontBring(i, Stage::Touch, grabthat::Arrival(f, k), i == g_front.panel ? "grab that: closer" : "grab that");
+    (void)hand;
 }
 
 // Each tick: the panels on their way. One that something else moved meanwhile (a laser or a hand
@@ -2582,20 +2645,56 @@ void AnimateGrabMoves() {
     }
 }
 
-// The reset button: the layout puts the screens and remote displays back; floating windows that
-// came by the gesture go back where they were. The rest is forgotten.
+// The reset button: the layout puts the screens and remote displays back; the one in the front slot
+// goes home first (a floating window stays where that puts it). Sizes set in the slot are forgotten.
 void GrabThatReset() {
     for (auto it = g_grabMoves.begin(); it != g_grabMoves.end();) {
         const auto sit = g_screens.find(it->first);
         it = sit == g_screens.end() || !sit->second.floating ? g_grabMoves.erase(it) : std::next(it);
     }
-    for (const auto &[i, b] : g_brought) {
-        const auto it = g_screens.find(i);
-        if (it != g_screens.end() && it->second.floating && it->second.pinned == kNone && it->second.drag == Drag::None)
-            StartGrabMove(i, it->second, b.from, SendAwayWidth(it->second, &b));
+    if (g_front.panel >= 0) FrontHome("the reset button");
+    g_frontDeg.clear();
+}
+
+// The reset button takes a hold (user, 2026-10-11, the proposals: a stray poke reset the whole layout):
+// pressed for g_resetHoldMs (HANDS_RESET_HOLD_MS) by the same laser or hand, the layout resets; let go
+// sooner, nothing.
+double g_resetHoldMs = 500;
+struct ResetHold {
+    int panel = -1;
+    vr::TrackedDeviceIndex_t device = kNone;   // a laser's
+    int side = -1;                             // ...or a hand's
+    int64_t startMs = 0;
+} g_resetHold;
+
+void DoReset(int panel, const char *how) {
+    std::printf("screen %d: reset the layout (%s)\n", panel + 1, how);
+    GrabThatReset();
+    RunLayout("reset");
+}
+void ResetHoldStart(int panel, vr::TrackedDeviceIndex_t device, int side) {
+    if (g_resetHoldMs <= 0) return DoReset(panel, side >= 0 ? "poked" : "clicked");
+    g_resetHold = {panel, device, side, NowMs()};
+    std::printf("screen %d: the reset button held (%s): resets in %.1f s\n", panel + 1, side >= 0 ? "a hand" : "a laser", g_resetHoldMs / 1000);
+}
+void ResetHoldEnd(vr::TrackedDeviceIndex_t device) {
+    if (g_resetHold.panel < 0 || g_resetHold.device != device) return;
+    std::printf("screen %d: the reset button let go after %.2f s: no reset (hold it)\n", g_resetHold.panel + 1,
+                (NowMs() - g_resetHold.startMs) / 1000.0);
+    g_resetHold = {};
+}
+void UpdateResetHold() {
+    if (g_resetHold.panel < 0) return;
+    if (g_resetHold.side >= 0 && g_handInput.pressControl(g_resetHold.side) != handinput::Control::Reset) {
+        std::printf("screen %d: the reset button let go after %.2f s: no reset (hold it)\n", g_resetHold.panel + 1,
+                    (NowMs() - g_resetHold.startMs) / 1000.0);
+        return void(g_resetHold = {});
     }
-    g_brought.clear();
-    g_nearWidth.clear();
+    if (NowMs() - g_resetHold.startMs >= g_resetHoldMs) {
+        const ResetHold h = g_resetHold;
+        g_resetHold = {};
+        DoReset(h.panel, h.side >= 0 ? "held by a hand" : "held by a laser");
+    }
 }
 
 void UpdateGrabThat(const handinput::Input &in) {
@@ -2613,122 +2712,170 @@ void UpdateGrabThat(const handinput::Input &in) {
     AnimateGrabMoves();
 }
 
-// The lazy susan brings (user, 2026-10-11: "rather than just spinning your perspective, it pulls the
-// window in front of you. You can interact with it, and then when you dismiss it, it'll go back to
-// where it was previously and pull up the next window on the list"): a stroke (or Meta+Alt+Tab, "spin
-// next|prev") sends the one it brought back home and brings the next one round, by where each one
-// lives, to straight ahead about 1 m out, as big as its resolution needs for its text to read
-// (grabthat::ReadableSize; wide ones curve round you), and it takes the typing (FT_FRONT). Out of view (you turned away), pushed, flicked or thrown, it goes home; moved
-// by hand or laser, it stays where you put it. SCREEN_SPIN_BRING=0: the old spin (the room turns).
-bool g_susanBring = true;
-double g_susanFar = 1.5, g_susanDrop = 0.08;   // grab that's view fit goes at most g_susanFar out; a brought one sits g_susanDrop under the eyes
-// Readable (user, 2026-10-11, the third live test): about 1 m ahead, as big as its resolution needs for its
-// text to read (grabthat::ReadableSize: SCREEN_SPIN_DISTANCE, SCREEN_SPIN_PPD, SCREEN_SPIN_MAX_DEG).
-double g_susanDistance = 1.0;
-grabthat::ReadParams g_susanRead;
-std::map<int, double> g_uiScale;   // KWin's scale for each screen (ft-layout's "scale", via the compositor)
-constexpr double kSusanAway = 70;          // degrees off where you face: out of view
-constexpr int64_t kSusanAwayMs = 600;      // ...for this long: it goes home
-struct Susan {
-    int panel = -1;          // the one brought (-1 none)
-    Mat home{}, to{};        // where it lives, and where it came
-    double homeWidth = 0;    // its width there
-    double homeCurve = 0;    // ...and its curve
-    int64_t awaySinceMs = -1;
-} g_susan;
-
-// Where a panel lives (the brought one: home), and its bearing from where the head faces (deg, right +).
-double SusanBearing(const Mat &head, const Mat &p) {
-    double fx = -head.m[0][2], fz = -head.m[2][2];
-    const double n = std::hypot(fx, fz) + 1e-9;
-    fx /= n, fz /= n;
-    const double rx = -fz, rz = fx;
-    const double dx = p.m[0][3] - head.m[0][3], dz = p.m[2][3] - head.m[2][3];
-    return std::atan2(dx * rx + dz * rz, dx * fx + dz * fz) * 180 / M_PI;
-}
-
-void SusanHome(const char *why) {
-    const auto it = g_screens.find(g_susan.panel);
-    if (it != g_screens.end()) {
-        std::printf("lazy susan: screen %d goes home (%s)\n", g_susan.panel + 1, why);
-        it->second.curve = g_susan.homeCurve;
-        StartGrabMove(g_susan.panel, it->second, g_susan.home, g_susan.homeWidth);
-    }
-    g_susan = {};
-}
-
+// The lazy susan (a stroke, Meta+Alt+Tab: "spin next|prev"): the next screen round, by where each one
+// lives, to the slot at reading distance (see "the front slot" above).
 void SusanCommand(bool next, char *reply, int size) {
     Mat head;
     if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head))
         return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
-    // each one where it lives: the brought one at home, one on its way somewhere (sent home a moment
-    // ago) where it's going (the third live test: a panel still flying home read as straight ahead, so
-    // the strokes went 104, 1, 104 with three panels up)
-    std::vector<grabthat::Bearing> panels;
+    const std::vector<grabthat::Bearing> order = CarouselOrder(head);
     double from = 0;
-    for (auto &[i, s] : g_screens) {
-        Mat p;
-        if (i == g_susan.panel) {
-            panels.push_back({i, from = SusanBearing(head, g_susan.home)});
-            continue;
-        }
-        if (!s.visible || !Spinnable(s) || g_handInput.heldByHand(i)) continue;
-        const auto m = g_grabMoves.find(i);
-        if (m != g_grabMoves.end()) p = m->second.to;
-        else if (!ScreenPose(s, &p)) continue;
-        panels.push_back({i, SusanBearing(head, p)});
+    for (const grabthat::Bearing &b : order)
+        if (b.index == g_front.panel) from = b.deg;
+    const int i = grabthat::SusanPick(order, g_front.panel, from, next, kSpinAhead);
+    if (i < 0) {
+        ShowCarousel();
+        return (void)std::snprintf(reply, size, "ok 0 (no other panel)");
     }
-    const int was = g_susan.panel;
-    const int i = grabthat::SusanPick(panels, was, from, next, kSpinAhead);
-    if (was >= 0) SusanHome(i >= 0 ? "the next one comes" : "no other panel");
-    if (i < 0) return (void)std::snprintf(reply, size, "ok 0 (no other panel)");
-    Screen &s = g_screens[i];
-    Mat now;
-    if (!ScreenPose(s, &now)) return (void)std::snprintf(reply, size, "error no pose for screen %d", i + 1);
-    g_brought.erase(i);   // (it lives where it is now, whatever brought it there)
-    const auto m = g_grabMoves.find(i);   // (on its way home: home is where it was going)
-    g_susan.panel = i, g_susan.home = m != g_grabMoves.end() ? m->second.to : now, g_susan.awaySinceMs = -1;
-    g_susan.homeWidth = m != g_grabMoves.end() ? m->second.w1 : s.metres, g_susan.homeCurve = s.curve;
-    // readable: its logical pixels (KWin's scale undone) at the asked density, 1 m ahead
-    const auto ui = g_uiScale.find(i);
-    const double scale = ui != g_uiScale.end() ? ui->second : 1;
-    const double pxW = (s.floating ? s.cropW : s.width) / scale, pxH = (s.floating ? s.cropH : s.height) / scale;
-    const grabthat::Readable r = grabthat::ReadableSize(pxW, pxH, g_susanDistance, g_susanRead);
-    const double width = s.floating || r.width <= 0 ? s.metres : r.width;
-    if (!s.floating && r.width > 0) s.curve = r.curve;
-    g_susan.to = grabthat::InFront(head, g_susanDistance, g_susanDrop);
-    StartGrabMove(i, s, g_susan.to, width);
-    g_spin.front = i;   // typing and the active window go to it (ft_vr_poll: FT_FRONT)
-    SendPointer("recenter");
-    std::printf("lazy susan: screen %d comes to the front, %.2f m out, %.2f m wide%s (%.0fx%.0f px at UI scale %g: %.0fx%.0f deg, "
-                "%.0f px/deg)\n", i + 1, g_susanDistance, width, s.curve > 0 ? " curved round you" : "", pxW * scale, pxH * scale,
-                scale, r.degW, r.degH, r.ppd);
+    FrontBring(i, Stage::Reading, grabthat::InFront(head, g_frontReading, g_frontDrop), next ? "the lazy susan, next" : "the lazy susan, back");
     std::snprintf(reply, size, "ok screen %d", i + 1);
 }
 
-// Each tick: the brought one goes home when you turn away from it; moved elsewhere, it's yours.
-void UpdateSusan() {
-    if (g_susan.panel < 0) return;
-    const auto it = g_screens.find(g_susan.panel);
-    if (it == g_screens.end()) return void(g_susan = {});
-    if (g_grabMoves.count(g_susan.panel)) return;   // (still on its way)
+// ---------------------------------------------------------------- the carousel strip
+// For a moment after each stroke (user, 2026-10-11, the proposals: "it wasn't clear which ones it would
+// switch to"): every screen the lazy susan goes round, by name, left to right as they live around you,
+// under the one in the slot: it lit, the next each way marked with an arrow.
+struct Carousel {
+    vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
+    int64_t shownMs = -1;
+} g_carousel;
+constexpr int64_t kCarouselMs = 2500, kCarouselFadeMs = 500;
+
+void FillRound(std::vector<uint8_t> &px, int w, int h, int x0, int y0, int x1, int y1, int r, const uint8_t c[4]) {
+    for (int y = std::max(0, y0); y < std::min(h, y1); ++y)
+        for (int x = std::max(0, x0); x < std::min(w, x1); ++x) {
+            const int dx = x < x0 + r ? x0 + r - x : x >= x1 - r ? x - (x1 - r - 1) : 0;
+            const int dy = y < y0 + r ? y0 + r - y : y >= y1 - r ? y - (y1 - r - 1) : 0;
+            const double out = std::sqrt(double(dx * dx + dy * dy)) - r;
+            const double a = std::clamp(0.5 - out, 0.0, 1.0) * c[3] / 255.0;
+            if (a <= 0) continue;
+            uint8_t *p = &px[(size_t(y) * w + x) * 4];
+            for (int k = 0; k < 3; ++k) p[k] = uint8_t(std::lround(p[k] + (c[k] - p[k]) * a));
+            p[3] = uint8_t(std::max<double>(p[3], 255 * a));
+        }
+}
+
+std::string ShortLabel(const Screen &s, int i) {
+    std::string l = s.label.empty() ? "Screen " + std::to_string(i + 1) : s.label;
+    for (const char *pre : {"frametop-", "Frametop "})
+        if (l.rfind(pre, 0) == 0) l = l.substr(std::strlen(pre));
+    if (l.size() > 26) l = l.substr(0, 25) + "\xe2\x80\xa6";   // (an ellipsis)
+    return l;
+}
+
+void ShowCarousel() {
+    Mat head;
+    if (g_front.panel < 0 || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
+    const std::vector<grabthat::Bearing> order = CarouselOrder(head);
+    if (order.size() < 2) return;
+    int at = 0;
+    for (size_t k = 0; k < order.size(); ++k)
+        if (order[k].index == g_front.panel) at = int(k);
+    const int n = int(order.size()), size = 30, padX = 26, gap = 14, H = 64;
+    std::vector<std::string> text(static_cast<size_t>(n));
+    std::vector<int> widths(static_cast<size_t>(n));
+    int W = gap;
+    for (int k = 0; k < n; ++k) {
+        const Screen &s = g_screens[order[size_t(k)].index];
+        std::string t = ShortLabel(s, order[size_t(k)].index);
+        if (k == (at + 1) % n) t += "  \xe2\x80\xba";                 // the next (a stroke to the left)
+        if (k == (at + n - 1) % n && n > 2) t = "\xe2\x80\xb9  " + t;  // the one before
+        text[size_t(k)] = t;
+        widths[size_t(k)] = std::max(120, keyboard::LabelWidth(t.c_str(), size) + 2 * padX);
+        W += widths[size_t(k)] + gap;
+    }
+    W = std::min(W, 2048);
+    std::vector<uint8_t> px(size_t(W) * H * 4, 0);
+    int x = gap;
+    for (int k = 0; k < n && x < W; ++k) {
+        const bool lit = k == at;
+        const uint8_t bg[4] = {uint8_t(lit ? 240 : 24), uint8_t(lit ? 240 : 24), uint8_t(lit ? 244 : 30), uint8_t(lit ? 235 : 190)};
+        const uint8_t fg[3] = {uint8_t(lit ? 20 : 235), uint8_t(lit ? 20 : 235), uint8_t(lit ? 24 : 240)};
+        FillRound(px, W, H, x, 6, x + widths[size_t(k)], H - 6, (H - 12) / 2, bg);
+        keyboard::DrawLabel(px.data(), W, H, text[size_t(k)].c_str(), size, x + widths[size_t(k)] / 2, H / 2, lit ? 255 : 210, fg);
+        x += widths[size_t(k)] + gap;
+    }
+    if (g_carousel.overlay == vr::k_ulOverlayHandleInvalid &&
+        vr::VROverlay()->CreateOverlay("frametop.carousel", "Frametop: screens", &g_carousel.overlay) != vr::VROverlayError_None)
+        return;
+    const vr::VROverlayHandle_t o = g_carousel.overlay;
+    vr::VROverlay()->SetOverlayRaw(o, px.data(), uint32_t(W), uint32_t(H), 4);
+    // under the screen in the slot, past its bar: 0.45 mm a pixel at 1 m (30 px text: about 0.8 deg)
+    const Screen &s = g_screens[g_front.panel];
+    const double d = std::max(0.3, Apart(head, g_front.to));
+    const double mpp = 0.00045 * d, pxW = s.floating ? s.cropW : s.width, pxH = s.floating ? s.cropH : s.height;
+    const double h = pxW > 0 ? g_front.width * pxH / pxW : 0.3;
+    vr::VROverlay()->SetOverlayWidthInMeters(o, float(W * mpp));
+    vr::VROverlay()->SetOverlaySortOrder(o, 10);
+    const Mat at3 = Mul(g_front.to, Translation(0, -(h / 2 + 0.07 * d + H * mpp / 2), 0.02));
+    vr::HmdMatrix34_t m;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c) m.m[r][c] = at3.m[r][c];
+    vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &m);
+    vr::VROverlay()->SetOverlayAlpha(o, 1.f);
+    vr::VROverlay()->ShowOverlay(o);
+    g_carousel.shownMs = NowMs();
+}
+
+void UpdateCarousel() {
+    if (g_carousel.shownMs < 0 || g_carousel.overlay == vr::k_ulOverlayHandleInvalid) return;
+    const int64_t age = NowMs() - g_carousel.shownMs;
+    if (age >= kCarouselMs || g_front.panel < 0) {
+        vr::VROverlay()->HideOverlay(g_carousel.overlay);
+        g_carousel.shownMs = -1;
+    } else if (age > kCarouselMs - kCarouselFadeMs) {
+        vr::VROverlay()->SetOverlayAlpha(g_carousel.overlay, float(double(kCarouselMs - age) / kCarouselFadeMs));
+    }
+}
+
+// Each tick: the one in the slot goes home when you turn away from it (unless kept); moved elsewhere,
+// it leaves the slot and lives there; resized there, that's its size in the slot from now on.
+void UpdateFront() {
+    UpdateCarousel();
+    if (g_front.panel < 0) return;
+    const auto it = g_screens.find(g_front.panel);
+    if (it == g_screens.end()) return void(g_front = {});
+    const int64_t now = NowMs();
+    const double dt = g_front.lastTickMs ? double(now - g_front.lastTickMs) : 0;
+    g_front.lastTickMs = now;
+    if (g_grabMoves.count(g_front.panel)) return;   // (still on its way)
     Screen &s = it->second;
     Mat p, head;
     if (!ScreenPose(s, &p)) return;
-    if (s.pinned != kNone || (s.drag == Drag::None && Apart(p, g_susan.to) > 0.05)) {
-        std::printf("lazy susan: screen %d was moved: it stays there\n", g_susan.panel + 1);
-        return void(g_susan = {});
+    const int i = g_front.panel;
+    if (s.pinned != kNone) {
+        std::printf("front: screen %d was pinned: it leaves the slot\n", i + 1);
+        return void(g_front = {});
     }
-    if (s.drag != Drag::None || g_handInput.heldByHand(g_susan.panel) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
-        g_susan.awaySinceMs = -1;
+    const bool held = s.drag != Drag::None || g_handInput.heldByHand(i);
+    if (!held && std::fabs(s.metres - g_front.width) > 0.01 * g_front.width && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+        // resized there (two fists, a corner): that's its size in the slot, here and next time
+        const double d = std::max(0.2, Apart(head, p));
+        g_frontDeg[i] = (s.curve > 0 ? s.metres / d : 2 * std::atan(s.metres / (2 * d))) * 180 / M_PI;
+        std::printf("front: screen %d resized in the slot: %.2f m, %.0f deg wide from now on\n", i + 1, s.metres, g_frontDeg[i]);
+        g_front.width = s.metres, g_front.to = p;
+    } else if (!held && Apart(p, g_front.to) > 0.05) {
+        std::printf("front: screen %d was moved: it lives there now\n", i + 1);
+        return void(g_front = {});
+    }
+    // used a while: kept (input on it within the last moment counts as use)
+    if (!g_front.kept && g_frontKeepMs > 0 && (held || now - s.inputMs < 250)) {
+        g_front.usedMs += dt;
+        if (g_front.usedMs >= g_frontKeepMs) {
+            g_front.kept = true;
+            std::printf("front: screen %d kept (used %.1f s): it stays when you look away\n", i + 1, g_front.usedMs / 1000);
+        }
+    }
+    if (held || g_front.kept || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+        g_front.awaySinceMs = -1;
         return;
     }
-    if (std::fabs(SusanBearing(head, p)) <= kSusanAway) {
-        g_susan.awaySinceMs = -1;
-    } else if (g_susan.awaySinceMs < 0) {
-        g_susan.awaySinceMs = NowMs();
-    } else if (NowMs() - g_susan.awaySinceMs >= kSusanAwayMs) {
-        SusanHome("out of view");
+    if (std::fabs(BearingFrom(head, p)) <= kFrontAway) {
+        g_front.awaySinceMs = -1;
+    } else if (g_front.awaySinceMs < 0) {
+        g_front.awaySinceMs = now;
+    } else if (now - g_front.awaySinceMs >= kFrontAwayMs) {
+        FrontHome("out of view");
     }
 }
 
@@ -3055,9 +3202,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 if (e.control == handinput::Control::Curve) {
                     ToggleCurve(s);
                 } else if (e.control == handinput::Control::Reset) {
-                    std::printf("screen %d: reset the layout (poked)\n", e.panel + 1);
-                    GrabThatReset();
-                    RunLayout("reset");
+                    ResetHoldStart(e.panel, kNone, e.side);   // (held g_resetHoldMs: the layout resets)
                 } else if (e.control == handinput::Control::Dock || e.control == handinput::Control::Close) {
                     SendFloat((e.control == handinput::Control::Dock ? "dock " : "close ") + std::to_string(e.panel + 1));
                 }
@@ -3072,24 +3217,20 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 break;
             case handinput::Event::Throw: {
                 // a flick at it, or a carry let go fast (after its GrabEnd: let go, unless it went back
-                // on a wrist): out to throwDistance, easing out; that's its place now, and "grab that"
-                // brings it back from there (and sends it back there)
+                // on a wrist): the one in the front slot steps back (arm's reach to reading distance,
+                // reading distance home); another goes out to throwDistance, easing out, at its width:
+                // that's its place now
                 if (s.drag != Drag::None || s.pinned != kNone) break;
-                if (e.panel == g_susan.panel) {   // the lazy susan brought it: sent away, it goes home
-                    SusanHome(e.push ? "pushed away" : e.flick ? "flicked away" : "thrown");
+                if (e.panel == g_front.panel) {
+                    FrontStepBack(e.push ? "pushed away" : e.flick ? "flicked away" : "thrown");
                     g_grabThat.Quiet(g_handInput.frameNs() + int64_t(g_grabThat.params().quietAfterSendMs * 1e6));
                     break;
                 }
-                const auto b = g_brought.find(e.panel);
-                const double w = SendAwayWidth(s, b == g_brought.end() ? nullptr : &b->second);
-                if (b != g_brought.end()) g_brought.erase(b);
-                g_nearWidth[e.panel] = s.metres;   // (grab that brings it back at this width)
                 Mat head;
                 double far = 0;
                 if (DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) far = Apart(head, e.to);
-                std::printf("screen %d: %s, %.1f m out%s\n", e.panel + 1, e.push ? "pushed away" : e.flick ? "flicked away" : "thrown",
-                            far, w != s.metres ? (", " + std::to_string(w).substr(0, 4) + " m wide as before grab that").c_str() : "");
-                StartGrabMove(e.panel, s, e.to, w, e.ms, true);
+                std::printf("screen %d: %s, %.1f m out\n", e.panel + 1, e.push ? "pushed away" : e.flick ? "flicked away" : "thrown", far);
+                StartGrabMove(e.panel, s, e.to, s.metres, e.ms, true);
                 // (the hand that sent it held out open and pulled back closing isn't "grab that")
                 g_grabThat.Quiet(g_handInput.frameNs() + int64_t(g_grabThat.params().quietAfterSendMs * 1e6));
                 break;
@@ -3279,7 +3420,6 @@ bool ft_vr_init(void) {
     k.gate = handcut::Setting("HANDS_TRACK_GATE", "1") != "0";
     g_targetGlowOn = handcut::Setting("HANDS_TARGET_GLOW", "1") != "0";
     g_pushGlowOn = handcut::Setting("HANDS_PUSH_GLOW", "0") != "0";
-    g_sendAwayRestore = handcut::Setting("HANDS_SEND_AWAY_WIDTH", "restore") != "keep";
     // the fourth live test (2026-10-10): two anchors, fists, buttons for hands, the soft glow at corners,
     // edges and buttons (handinput.h Params::joinFront, fistFront, buttonReach, pinchButtons, edgeGlow)
     num("HANDS_JOIN_REACH", k.joinFront, 0, 0.5);   // 0: off
@@ -3316,16 +3456,28 @@ bool ft_vr_init(void) {
         num("SCREEN_CURVE_MAX_DEG", deg, 20, 300);   // a curved screen bends at most this far round (CapCurve)
         g_curveMaxArc = deg * M_PI / 180;
     }
-    num("HANDS_GRAB_THAT_VIEW_DEG", g_grabThatViewDeg, 20, 170);   // grab that: a wide one comes farther out to fit
     g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";   // the lazy susan brings panels (0: the room turns)
-    num("SCREEN_SPIN_DISTANCE", g_susanDistance, 0.4, 3);   // a brought panel comes this far ahead (m)
-    num("SCREEN_SPIN_PPD", g_susanRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need
-    num("SCREEN_SPIN_MAX_DEG", g_susanRead.maxW, 30, 100);   // ...at most this wide (deg; wider ones curve round you)
-    num("SCREEN_SPIN_MAX_TALL_DEG", g_susanRead.maxH, 20, 90);
-    std::printf("lazy susan: %s\n", g_susanBring ? ("brings the next panel " + std::to_string(g_susanDistance).substr(0, 4) +
-                                                     " m ahead, readable (" + std::to_string(int(g_susanRead.ppd)) + " px/deg, at most " +
-                                                     std::to_string(int(g_susanRead.maxW)) + " deg wide), home when you turn away or send it away").c_str()
-                                                  : "turns the room (SCREEN_SPIN_BRING=0)");
+    num("SCREEN_SPIN_DISTANCE", g_frontReading, 0.4, 3);   // the front slot's reading distance (m)
+    num("SCREEN_SPIN_PPD", g_frontRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need
+    num("SCREEN_SPIN_MAX_DEG", g_frontRead.maxW, 30, 100);   // ...at most this wide (deg; wider ones curve round you)
+    num("SCREEN_SPIN_MAX_TALL_DEG", g_frontRead.maxH, 20, 90);
+    num("SCREEN_FRONT_KEEP_MS", g_frontKeepMs, 0, 600000);   // this much use keeps it in the slot when you look away
+    num("HANDS_RESET_HOLD_MS", g_resetHoldMs, 0, 5000);       // the reset button needs this long a hold (0: a press)
+    {   // SCREEN_UI_SCALE="104=2 103=1.5": a remote display's own UI scale (its OS's), for its readable size
+        std::istringstream in(handcut::Setting("SCREEN_UI_SCALE", ""));
+        std::string kv;
+        while (in >> kv) {
+            const size_t eq = kv.find('=');
+            if (eq == std::string::npos) continue;
+            const int n = std::atoi(kv.substr(0, eq).c_str());
+            const double sc = std::atof(kv.substr(eq + 1).c_str());
+            if (n >= 1 && sc >= 0.25 && sc <= 8) g_uiScaleConf[n - 1] = sc;
+        }
+    }
+    std::printf("front slot: %s; reading %.2f m, readable at %.0f px/deg (at most %.0fx%.0f deg), arm's reach by grab that; "
+                "home when sent away or turned from (kept after %.1f s of use)\n",
+                g_susanBring ? "the lazy susan brings the next screen to it" : "the lazy susan turns the room (SCREEN_SPIN_BRING=0)",
+                g_frontReading, g_frontRead.ppd, g_frontRead.maxW, g_frontRead.maxH, g_frontKeepMs / 1000);
     if (gt.on)
         std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s); "
                     "it takes a panel the line through the palm meets%s, %s, not one held, the palm within %.0f deg of the line\n",
@@ -3354,7 +3506,7 @@ bool ft_vr_init(void) {
                            std::to_string(k.flickOpening).substr(0, 4)).c_str() : "off (HANDS_FLICK=0)",
                 k.cardThrow ? ("at " + std::to_string(k.throwSpeed).substr(0, 4) + " m/s").c_str() : "off (HANDS_THROW=0)",
                 k.push ? ("at " + std::to_string(k.pushSpeed).substr(0, 4) + " m/s (or 15 cm in)").c_str() : "off (HANDS_PUSH=0)",
-                g_sendAwayRestore ? "keeps its width (one grab that shrank gets its width back)" : "keeps its width (HANDS_SEND_AWAY_WIDTH=keep)");
+                "keeps its width (the one in the front slot steps back instead)");
     std::printf("hands: two hands turn a panel %s; held hands' impossible frames %s; the gesture target glows %s\n",
                 k.stretchTurn ? "on every axis" : "about the vertical (HANDS_STRETCH_TURN=0)",
                 k.gate ? "dropped (HANDS_TRACK_GATE)" : "taken (HANDS_TRACK_GATE=0)",
@@ -3468,6 +3620,7 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
     char key[64], name[64];
     std::snprintf(key, sizeof key, "%s", prefix);
     std::snprintf(name, sizeof name, "%s", label);
+    s.label = label;
     if (const auto err = vr::VROverlay()->CreateOverlay(key, name, &s.overlay); err != vr::VROverlayError_None) {
         std::fprintf(stderr, "openvr: can't create overlay %s: %s\n", key, vr::VROverlay()->GetOverlayErrorNameFromEnum(err));
         return false;
@@ -3817,10 +3970,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                vr::VROverlay()->PollNextOverlayEvent(s.resetButton, &ev, sizeof ev)) {
             hover(6);
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
-                std::printf("screen %d: reset the layout\n", index + 1);
-                GrabThatReset();
-                RunLayout("reset");
+                ResetHoldStart(index, ev.trackedDeviceIndex, -1);   // (held g_resetHoldMs: the layout resets)
             } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
+                ResetHoldEnd(ev.trackedDeviceIndex);
                 EndDragsBy(ev.trackedDeviceIndex);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
@@ -3890,7 +4042,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     }
     ++g_tick;
     UpdateSpin();
-    UpdateSusan();
+    UpdateFront();
+    UpdateResetHold();
     if (g_spin.front >= 0) {
         ft_event e{};
         e.type = FT_FRONT;
@@ -4215,7 +4368,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error grabthat on|off|state");
         const auto &st = g_grabThat.stats;
         std::string came;
-        for (const auto &[i, b] : g_brought) came += (came.empty() ? "" : " ") + std::to_string(i + 1);
+        if (g_front.panel >= 0) came = std::to_string(g_front.panel + 1) + " (" + StageName(g_front.stage) + (g_front.kept ? ", kept" : "") + ")";
         std::snprintf(reply, size, "ok %s; %s; %d armed, %d closed, %d fired, %d timed out; came: %s",
                       g_grabThat.params().on ? "on" : "off", g_grabThat.Describe().c_str(), st.arms, st.closings, st.fires,
                       st.timeouts, came.empty() ? "none" : came.c_str());

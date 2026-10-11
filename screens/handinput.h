@@ -660,6 +660,8 @@ public:
     // The caller ended this side's press in KWin itself (vr.cpp's ReleaseStuck): forget it.
     void ForgetPress(int side);
     bool pressing(int side) const { return side_[side].state == State::Press; }
+    // the control a side is pressing (None: not pressing one): a hold on the reset button
+    Control pressControl(int side) const { return pressing(side) ? side_[side].control : Control::None; }
     // ...holding KWin's button (not a poked control)
     bool pressingKwin(int side) const { return pressing(side) && side_[side].control == Control::None; }
     bool grabbing(int side) const { return side_[side].state == State::Grab; }

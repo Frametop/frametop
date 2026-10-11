@@ -32,4 +32,12 @@ bool Aimed(const vr::HmdMatrix34_t &laser);
 void Poll(void (*handle)(const Event &, void *), void *data);
 void Destroy();
 
+// Text in the keyboard's font (Noto Sans), centred on (cx, cy) in an RGBA buffer w x h, blended
+// toward `rgb` at `alpha` (other panels' labels: the lazy susan's carousel). Its width in pixels, or
+// 0 with no font.
+int DrawLabel(uint8_t *px, int w, int h, const char *text, int size, int cx, int cy, uint8_t alpha,
+              const uint8_t rgb[3]);
+// How wide `text` would be at `size`.
+int LabelWidth(const char *text, int size);
+
 }  // namespace keyboard

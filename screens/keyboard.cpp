@@ -555,4 +555,38 @@ void Destroy() {
     g_shown = false;
 }
 
+
+int LabelWidth(const char *text, int size) {
+    static bool tried = false;   // (the keyboard loads it too; once is enough either way)
+    if (!g_fontOk && !tried) tried = true, LoadFont();
+    if (!g_fontOk || !*text) return 0;
+    int width = 0;
+    for (uint32_t cp : Codepoints(text)) width += GetGlyph(cp, size).advance;
+    return width;
+}
+
+int DrawLabel(uint8_t *px, int w, int h, const char *text, int size, int cx, int cy, uint8_t alpha, const uint8_t rgb[3]) {
+    const int width = LabelWidth(text, size);
+    if (!width) return 0;
+    int ascent, descent, gap;
+    stbtt_GetFontVMetrics(&g_font, &ascent, &descent, &gap);
+    const float scale = stbtt_ScaleForPixelHeight(&g_font, float(size));
+    int x = cx - width / 2;
+    const int baseline = cy + int(std::lround((ascent + descent) * scale / 2));
+    for (uint32_t cp : Codepoints(text)) {
+        const Glyph &g = GetGlyph(cp, size);
+        for (int gy = 0; gy < g.h; ++gy)
+            for (int gx = 0; gx < g.w; ++gx) {
+                const int qx = x + g.xoff + gx, qy = baseline + g.yoff + gy;
+                if (qx < 0 || qy < 0 || qx >= w || qy >= h) continue;
+                const double a = g.bitmap[size_t(gy) * g.w + gx] / 255.0 * alpha / 255.0;
+                uint8_t *p = &px[(size_t(qy) * w + qx) * 4];
+                for (int c = 0; c < 3; ++c) p[c] = uint8_t(std::lround(p[c] + (rgb[c] - p[c]) * a));
+                p[3] = uint8_t(std::max<double>(p[3], 255 * a));
+            }
+        x += g.advance;
+    }
+    return width;
+}
+
 }  // namespace keyboard

@@ -122,7 +122,8 @@ class Backend(QObject):
         self._steam_busy = False
         self._steamDone.connect(self._steam_done, Qt.QueuedConnection)
         self._pins = []     # each running screen's pin: none | left | right | head
-        self._native_portal = PortalSettings(self, address=FT_SCREENS)
+        self._native_portal = PortalSettings(self, address=FT_SCREENS,
+            tracker_command=host_command(os.path.join(HERE, "..", "hands", "ft-cutouts"), "ensure"))
         self._native_portal.message.connect(self.message)
         self.poll = QTimer(interval=3000, timeout=self._check_running)
         self.poll.start()

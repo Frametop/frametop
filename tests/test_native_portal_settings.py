@@ -28,7 +28,7 @@ class Native(Server):
     def __init__(self):
         self.value = status()
         self.volume = json.loads(json.dumps(VOLUME))
-        self.controls = self.layer = False
+        self.controls = self.layer = self.hands = False
         self.delay = 0
         self.bad = None
         super().__init__(self.respond)
@@ -43,7 +43,7 @@ class Native(Server):
                 on = cmd.endswith(" on")
                 self.value.update(wanted=on)
             return wire(self.value)
-        for key in ("controls", "layer"):
+        for key in ("controls", "layer", "hands"):
             if cmd.startswith("passthrough " + key + " "):
                 if not cmd.endswith(" state"):
                     setattr(self, key, cmd.endswith(" 1"))
@@ -430,7 +430,7 @@ def test_actual_shipped_qml_groups_controls_without_raw_geometry(setup, tmp_path
             pending.extend(obj.childItems())
         raise AssertionError(name)
     APP.processEvents()
-    for name in ("passthroughPlace", "passthroughControls", "portalAboveSteam"):
+    for name in ("passthroughPlace", "passthroughControls", "portalAboveSteam", "handPassthroughEnabled"):
         item(name)
     for name in ("passthroughWidth", "passthroughDepth", "passthroughHeight", "passthroughX", "passthroughY", "passthroughZ", "passthroughYaw", "passthroughPitch", "passthroughRoll"):
         with pytest.raises(AssertionError):
@@ -489,7 +489,44 @@ def test_full_kirigami_window_opens_native_page_without_activation(setup, monkey
     APP.processEvents()
 
 
+def test_hands_independent_intent_starts_shared_tracker_only_on_enable(setup, monkeypatch):
+    model, server, config, _ = setup
+    module = importlib.import_module("native_portal_settings")
+    starts = []
+    from types import SimpleNamespace
+    monkeypatch.setattr(module.subprocess, "run", lambda command, **kw: starts.append(command) or SimpleNamespace(returncode=0))
+    before = config.read_bytes()
+    model.setHands(True)
+    wait(lambda: not model.busy)
+    assert model.hands["wanted"] and server.hands
+    assert not server.value["wanted"]
+    model.setHands(False)
+    wait(lambda: not model.busy)
+    assert not model.hands["wanted"] and not server.hands
+    assert len(starts) == 1 and starts[0][-1] == "ensure"
+    assert config.read_bytes() == before
 
 
+def test_hands_start_failure_does_not_request_mask(setup, monkeypatch):
+    model, server, *_ = setup
+    module = importlib.import_module("native_portal_settings")
+    from types import SimpleNamespace
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1, stderr="tracker unavailable", stdout=""))
+    server.commands.clear()
+    model.setHands(True)
+    wait(lambda: not model.busy)
+    assert not model.hands["known"]
+    assert model.hands["summary"] == "tracker unavailable"
+    assert "passthrough hands 1" not in server.commands
 
 
+def test_hands_only_reports_missing_publisher_without_changing_intent(setup):
+    model, server, *_ = setup
+    server.hands = True
+    server.value.update(wanted=False, connected=False)
+    model.refresh()
+    wait(lambda: not model.busy)
+    assert model.hands["wanted"] and model.hands["known"]
+    assert model.hands["connected"] is False
+    assert "publisher unavailable" in model.hands["summary"]
+    assert not model.portal["wanted"]

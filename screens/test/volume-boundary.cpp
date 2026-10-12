@@ -9,7 +9,7 @@
 namespace handcut {
 Renderer::~Renderer() = default;
 bool Renderer::Init(const std::vector<uint64_t> &, std::function<void(const Output *)>) { std::abort(); }
-const Output *Renderer::Composite(int, const void *, uint64_t, const ft_dmabuf &, const std::vector<Capsule2D>[]) { std::abort(); }
+const Output *Renderer::Composite(int, const void *, uint64_t, const ft_dmabuf &, const std::vector<Capsule2D>[], const NativeMask *) { std::abort(); }
 void Renderer::Forget(const void *) { std::abort(); }
 void Renderer::DropPanel(int) { std::abort(); }
 bool Hands::Update(const Mat &, int64_t) { return false; } // no hands file reads

@@ -72,6 +72,28 @@ ColumnLayout {
             }
         }
     }
+    Controls.GroupBox {
+        title: "Hand passthrough"
+        Layout.fillWidth: true
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+            Controls.Switch {
+                id: handSwitch
+                objectName: "handPassthroughEnabled"
+                text: "Hand passthrough"
+                Binding { target: handSwitch; property: "checked"; value: page.model.hands.wanted === true }
+                onToggled: page.model.setHands(checked)
+            }
+            Controls.Label {
+                objectName: "handPassthroughStatus"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                text: page.model.hands.summary
+            }
+        }
+    }
     Controls.Switch {
         id: layerCheck
         objectName: "portalAboveSteam"

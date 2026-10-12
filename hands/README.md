@@ -24,6 +24,7 @@ ft-handsctl cutouts on|off|state  # ft-screens' hand cutouts, without stopping t
 ft-handsctl gestures            # pinches and grips, live (tools/watch_gestures.py --distance)
 
 hands/ft-cutouts on | off | status   # the cutouts only: no pinches or grips
+hands/ft-cutouts ensure              # start tracking without changing panel cutouts or active gestures
 
 hands/run.sh install            # build, give ft-camd its capabilities (sudo, once per build), install disabled
 hands/run.sh start|stop         # start or stop the services

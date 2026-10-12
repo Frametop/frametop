@@ -364,6 +364,7 @@ std::map<const void *, vr::SharedTextureHandle_t> g_imports;
 // Hand cutouts (see the top and handcut.h).
 bool g_cutouts = true;          // the cutouts command turns them off
 handcut::Hands g_hands;
+bool g_handPassthrough = false; // explicit native mask intent; independent of panel alpha cutouts
 handcut::Renderer g_cutter;
 int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
@@ -2305,25 +2306,49 @@ void StopCutting(Screen &s) {
     s.cutting = false, s.cutShown = 0;
 }
 
-// Each tick: for each visible screen with a hand in front of it (for either eye), draw its
-// client buffer with the hands cut out and show that; else show the client buffer.
-// Floating windows don't get cutouts yet: their panel and popups show crops of the client
-// buffer (texture bounds), which a side-by-side buffer doesn't match.
+// Desktop alpha follows native camera coverage when Steam menus render above it.
+// Floating windows use cropped texture bounds and do not support stereo cutouts yet.
 void UpdateCutouts() {
     Mat head;
     const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
-    const bool hands = g_cutouts && haveHead &&
+    const bool hands = (g_cutouts || g_handPassthrough) && haveHead &&
                        g_hands.Update(head, std::chrono::duration_cast<std::chrono::nanoseconds>(
                                                 Clock::now().time_since_epoch()).count());
-    double eyes[2][3];
-    if (hands) handcut::EyePositions(head, eyes);
+    handcut::NativeMask mask;
+    const bool native = !g_portalAboveSteam && g_nativePortal.connected() && !g_paused &&
+                        haveHead && RigidPose(head) &&
+                        RigidPose(vr::VRSystem()->GetRawZeroPoseToStandingAbsoluteTrackingPose());
+    if (native && g_nativePortal.wanted() && passthrough::Valid(g_passthrough)) {
+        const auto plane = passthrough::TopFace(g_passthrough);
+        mask.rectangle = true;
+        for (int k = 0; k < 3; ++k) {
+            mask.center[k] = plane.pose[k][3];
+            mask.u[k] = plane.pose[k][0] * plane.width / 2;
+            mask.v[k] = plane.pose[k][1] * plane.length / 2;
+        }
+    }
+    if (native && g_handPassthrough && hands) {
+        for (const auto &c : g_hands.capsules()) {
+            if (mask.capsules.size() == 64) break;
+            if (!std::isfinite(c.ra) || !std::isfinite(c.rb) || c.ra <= 0 || c.rb <= 0 || c.ra >= 1 || c.rb >= 1) continue;
+            bool finite = true;
+            for (int k = 0; k < 3; ++k) finite = finite && std::isfinite(c.a[k]) && std::isfinite(c.b[k]);
+            if (finite) mask.capsules.push_back(c);
+        }
+    }
+    const bool camera = mask.rectangle || !mask.capsules.empty();
+    if (hands || camera) handcut::EyePositions(head, mask.eyes);
     for (auto &[i, s] : g_screens) {
         std::vector<handcut::Capsule2D> spots[2];
         Mat p;
-        bool cut = hands && s.visible && !s.floating && s.key && s.width > 0 && ScreenPose(s, &p) &&
-                   handcut::Project({p, s.metres, s.heightMetres(), s.curve, s.width, s.height}, g_hands.capsules(),
-                                    eyes, spots);
-        const handcut::Output *out = cut && CutterReady() ? g_cutter.Composite(i, s.key, s.frames, s.buf, spots) : nullptr;
+        const bool panel = s.visible && !s.floating && s.key && s.width > 0 && ScreenPose(s, &p);
+        bool cut = false;
+        if (panel) {
+            mask.panel = {p, s.metres, s.heightMetres(), s.curve, s.width, s.height};
+            cut = g_cutouts && hands && handcut::Project(mask.panel, g_hands.capsules(), mask.eyes, spots);
+        }
+        const handcut::Output *out = panel && (cut || camera) && CutterReady()
+            ? g_cutter.Composite(i, s.key, s.frames, s.buf, spots, camera ? &mask : nullptr) : nullptr;
         const vr::SharedTextureHandle_t h = out ? ImportCutout(out) : 0;
         if (!h) {
             StopCutting(s);
@@ -2407,6 +2432,7 @@ bool ft_vr_init(void) {
 
 void ft_vr_shutdown(void) {
     g_nativePortal.shutdown();
+    g_handPassthrough = false;
     if (!g_vr) return;
     // The panels go first, their textures cleared, and the imports only after SteamVR has had
     // a moment to take them down (see the shutdown in compositor.c).
@@ -3031,6 +3057,12 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
     std::istringstream input(cmd);
     std::string subsystem, action, value, extra;
     input >> subsystem >> action;
+    if (subsystem == "passthrough" && action == "hands") {
+        if (!(input >> value) || input >> extra || (value != "state" && value != "0" && value != "1"))
+            return (void)std::snprintf(reply, size, "error passthrough hands <0|1|state>");
+        if (value != "state") g_handPassthrough = value == "1";
+        return (void)std::snprintf(reply, size, "ok hands %d", g_handPassthrough);
+    }
     if (subsystem == "passthrough" && action == "mask") {
         if (input >> extra) return (void)std::snprintf(reply,size,"error passthrough mask");
         // One VR-thread snapshot follows live drags and the current origin.
@@ -3053,12 +3085,15 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
                 v[i]+=raw.m[i][j]*plane.pose[j][1]*plane.length/2;
             }
         }
+        const bool handsValid = g_handPassthrough && tracking && !g_paused && RigidPose(origin) &&
+            g_hands.Update(g_poses[vr::k_unTrackedDeviceIndex_Hmd].mDeviceToAbsoluteTracking,
+                std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count());
         std::ostringstream out;
         out.precision(9);
         out << std::boolalpha << "ok mask {\"wanted\":" << g_nativePortal.wanted()
             << ",\"valid\":" << valid << ",\"tracking\":" << tracking << ",\"paused\":" << g_paused
-            << ",\"above\":" << g_portalAboveSteam << ",\"hands_wanted\":" << false
-            << ",\"hands_valid\":" << false;
+            << ",\"above\":" << g_portalAboveSteam << ",\"hands_wanted\":" << g_handPassthrough
+            << ",\"hands_valid\":" << handsValid;
         auto vector = [&](const char* name, const double* point) {
             out << ",\"" << name << "\":[" << point[0] << ',' << point[1] << ',' << point[2] << ']';
         };
@@ -3066,6 +3101,27 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         out << ",\"raw_to_standing\":[";
         for (int i = 0; i < 12; ++i) out << (i ? "," : "") << origin.m[i/4][i%4];
         out << "],\"capsules\":[";
+        unsigned count = 0;
+        if (handsValid) for (const auto& capsule : g_hands.capsules()) {
+            if (count == 64) break;
+            if (!std::isfinite(capsule.ra) || !std::isfinite(capsule.rb) || capsule.ra <= 0 || capsule.rb <= 0 || capsule.ra >= 1 || capsule.rb >= 1) continue;
+            double endpoints[2][3]{};
+            bool finite = true;
+            for (int end = 0; end < 2; ++end) for (int i = 0; i < 3; ++i) {
+                endpoints[end][i] = raw.m[i][3];
+                for (int j = 0; j < 3; ++j) endpoints[end][i] += raw.m[i][j] * (end ? capsule.b[j] : capsule.a[j]);
+                finite = finite && std::isfinite(endpoints[end][i]);
+            }
+            if (!finite) continue;
+            if (count++) out << ',';
+            out << '[';
+            for (int end = 0; end < 2; ++end) {
+                if (end) out << ',';
+                for (int i = 0; i < 3; ++i) out << endpoints[end][i] << ',';
+                out << (end ? capsule.rb : capsule.ra);
+            }
+            out << ']';
+        }
         out << "]}";
         const auto snapshot = out.str();
         if (snapshot.size() >= size_t(size)) return (void)std::snprintf(reply, size, "error mask reply too small");

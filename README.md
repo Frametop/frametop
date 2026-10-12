@@ -15,6 +15,10 @@ Frametop is an independent project, not made by or affiliated with Valve.
 
 Frametop lives at [Frametop/frametop](https://github.com/Frametop/frametop): code, releases, issues, and pull requests. It moved there from DeeJanuz/frametop on 2026-10-09; the old links and clones still work.
 
+This development branch includes [native masked passthrough](native-portal/README.md).
+Display Settings has independent desk-rectangle and tracked-hand options; SteamVR retains camera processing.
+Setup is separate from the normal installer and pinned to the tested headset runtime.
+
 Join the [Frametop Discord](https://discord.gg/W3X9f7z3Bc) for questions, ideas, and help with your setup.
 
 ## Install on the headset

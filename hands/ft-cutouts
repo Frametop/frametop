@@ -4,7 +4,8 @@
 # the full version; each stops the other. Like it, this doesn't start with SteamVR, and it
 # stops when SteamVR does. On the Frame.
 #
-#   ft-cutouts on | off | status
+#   ft-cutouts on | off | status | ensure
+#   ensure: start tracking if needed, preserving current gestures and panel cutout state
 #
 # Runs this checkout's hands/build as transient user units, so it doesn't need hands/run.sh
 # install: only a build (hands/build.sh) and ft-camd's capabilities (hands/run.sh caps).
@@ -24,8 +25,18 @@ run_unit() {  # unit, the ft-handsctl unit it replaces, description, then the co
 }
 
 case ${1:-status} in
-  on)
+  on|ensure)
+    # A native hand mask shares the tracker without changing gestures or panel cutouts.
     systemctl --user -q is-active steamvr.service || die "SteamVR isn't running"
+    if [ "$1" = ensure ] && systemctl --user -q is-active frametop-hands.service; then
+      # Preserve gesture tracking, but repair its missing camera producer.
+      systemctl --user start frametop-camd.service
+      exit 0
+    fi
+    if [ "$1" = ensure ] && systemctl --user -q is-active "$hands" &&
+       systemctl --user -q is-active "$camd"; then
+      exit 0
+    fi
     [ -x "$here/build/ft-camd" ] && [ -x "$here/build/ft-hands" ] || die "not built: hands/build.sh"
     grep -qa -- --no-gestures "$here/build/ft-hands" || die "ft-hands predates --no-gestures: hands/build.sh"
     getcap "$here/build/ft-camd" | grep -q cap_sys_ptrace ||
@@ -40,9 +51,8 @@ case ${1:-status} in
     fi
     run_unit $hands frametop-hands.service "hand tracking, no gestures" "$HOME/.local/bin/distrobox" enter dev -- \
       "$here/build/ft-hands" --status 60 --no-gestures
-    "$here/ft-handsctl" cutouts on >/dev/null || true
-    sleep 4
-    "$0" status ;;
+    if [ "$1" = on ]; then "$here/ft-handsctl" cutouts on >/dev/null || true; fi
+    if [ "$1" = on ]; then sleep 4; "$0" status; fi ;;
   off)
     systemctl --user stop $hands $camd 2>/dev/null || true
     systemctl --user -q is-active frametop-hands.service || pkill -x ft-hands || true

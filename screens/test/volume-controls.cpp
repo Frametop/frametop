@@ -182,10 +182,15 @@ int main(int argc, char **argv) {
 #endif
     assert(Reply("passthrough state3d") == "ok 0 0 0.75 -0.65 1 0.35 0.65 0 0 0 no-vr");
     assert(Reply("passthrough committed") == Reply("passthrough state3d"));
-    const auto deskMask = Reply("passthrough mask");
-    assert(deskMask.find("\"hands_wanted\":false") != std::string::npos);
-    assert(deskMask.find("\"hands_valid\":false") != std::string::npos);
-    assert(deskMask.find("\"capsules\":[]") != std::string::npos);
+    assert(Reply("passthrough hands state") == "ok hands 0");
+    assert(Reply("passthrough hands 1") == "ok hands 1");
+    const auto noHands = Reply("passthrough mask");
+    assert(noHands.find("\"hands_wanted\":true") != std::string::npos);
+    assert(noHands.find("\"hands_valid\":false") != std::string::npos);
+    assert(noHands.find("\"capsules\":[]") != std::string::npos);
+    assert(!g_nativePortal.wanted()); // independent of desk mask intent
+    assert(Reply("passthrough hands 0") == "ok hands 0");
+    assert(Reply("passthrough hands 2").find("error") == 0);
     assert(Reply("passthrough controls state") == "ok controls 0"); // safe without VR
     assert(Reply("passthrough controls 1") == "ok controls 1");
     assert(overlay.parts.empty());
@@ -693,6 +698,14 @@ int main(int argc, char **argv) {
     Send(regressionScreen.resetButton, vr::VREvent_MouseButtonDown, 3); Tick();
     assert(launches.size() == 1 && launches[0][1] == "reset"); launches.clear();
     ft_vr_screen_destroy(0);
+    // Sampling intent is not proof that the bridge published it successfully.
+    assert(Reply("passthrough publisher 0") == "ok publisher 0");
+    Reply("passthrough mask");
+    assert(!g_nativePortal.connected());
+    assert(Reply("passthrough publisher 1") == "ok publisher 1");
+    assert(g_nativePortal.connected());
+    Reply("passthrough publisher 0");
+    assert(!g_nativePortal.connected());
     // Hand renderer readiness must never be reported as native portal readiness.
     g_cutterState = 1;
     assert(Reply("passthrough state3d").find(" idle") != std::string::npos);

@@ -3,6 +3,7 @@ import copy
 import math
 import os
 import sys
+import subprocess
 import threading
 import time
 from collections import deque
@@ -29,9 +30,11 @@ class PortalSettings(QObject):
     message = Signal(str, bool)
     _done = Signal(int, str, object)
 
-    def __init__(self, parent=None, *, address=ADDRESS, timeout=1.0):
+    def __init__(self, parent=None, *, address=ADDRESS, timeout=1.0, tracker_command=None):
         super().__init__(parent)
         self._client = Client(address, timeout)
+        self._tracker_command = tracker_command or [os.path.join(os.path.dirname(__file__), "..", "hands", "ft-cutouts"), "ensure"]
+        self._hands = {"known": False, "wanted": False, "summary": "Hand passthrough state unknown"}
         self._portal = unknown("awaiting backend status")
         self._requested = None
         self._volume = ft_layout.passthrough(ft_layout.load_layout())
@@ -58,6 +61,10 @@ class PortalSettings(QObject):
     @Property("QVariantMap", notify=changed)
     def portal(self):
         return dict(self._portal, requested=self._requested, busy=self.busy)
+
+    @Property("QVariantMap", notify=changed)
+    def hands(self):
+        return dict(self._hands)
 
     @Property("QVariantMap", notify=changed)
     def volume(self):
@@ -98,6 +105,10 @@ class PortalSettings(QObject):
         self._requested = enabled
         self._portal = unknown("request pending; acknowledgement and readback required")
         self._enqueue("intent", enabled)
+
+    @Slot(bool)
+    def setHands(self, enabled):
+        self._enqueue("hands", enabled)
 
     @Slot(bool)
     def setControls(self, enabled):
@@ -239,10 +250,38 @@ class PortalSettings(QObject):
         except (PortalError, ValueError) as exc:
             return {"volume": volume, "geometryKnown": False, "geometrySummary": "Saved placement; not applied: " + str(exc)}
 
+    def _hand_intent(self, enabled=None):
+        # Like desk intent, hand intent is live only; reopening settings never starts cameras.
+        try:
+            if enabled:
+                try:
+                    result = subprocess.run(self._tracker_command, capture_output=True, text=True, timeout=20)
+                except subprocess.TimeoutExpired as exc:
+                    raise RuntimeError("Hand tracker startup timed out") from exc
+                if result.returncode:
+                    raise RuntimeError((result.stderr or result.stdout).strip() or "Hand tracker could not start")
+            def parse(reply):
+                if reply not in ("ok hands 0", "ok hands 1"):
+                    raise ValueError("Hand passthrough reply invalid: " + reply)
+                return reply.endswith("1")
+            if enabled is not None and parse(self._client.ask(f"passthrough hands {int(enabled)}")) != enabled:
+                raise ValueError("Hand passthrough acknowledgement did not match")
+            actual = parse(self._client.ask("passthrough hands state"))
+            if enabled is not None and actual != enabled:
+                raise ValueError("Hand passthrough readback did not match")
+            connected = self._client.status()["connected"] if actual else None
+            return {"known": True, "wanted": actual, "connected": connected,
+                    "summary": ("Hand passthrough requested" if connected else "Hand passthrough publisher unavailable")
+                               if actual else "Hand passthrough off"}
+        except (OSError, RuntimeError, ValueError) as exc:
+            return {"known": False, "wanted": False, "summary": str(exc)}
+
     def _perform(self, kind, value):
         if kind == "poll":
-            return dict(portal=self._status(), preferences={key: self._preference(key) for key in ("controls", "layer")},
+            return dict(portal=self._status(), hands=self._hand_intent(), preferences={key: self._preference(key) for key in ("controls", "layer")},
                         **self._geometry("poll"))
+        if kind == "hands":
+            return {"hands": self._hand_intent(value)}
         if kind == "intent":
             actual = self._client.set_wanted(value)
             return {"portal": dict(actual, known=True, summary=status_summary(actual))}
@@ -265,6 +304,8 @@ class PortalSettings(QObject):
             if "portal" in result and generation == self._generation:
                 self._portal = result["portal"]
                 self._requested = self._portal["wanted"]
+            if "hands" in result:
+                self._hands = result["hands"]
             self._preferences.update(result.get("preferences", {}))
             if "volume" in result:
                 self._volume = result["volume"]

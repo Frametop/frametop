@@ -5,6 +5,7 @@ Profiles are built: Display Settings, `ft-layout`, each profile's launcher entry
 A profile is a named layout that also opens apps. It holds:
 
 - where each screen goes, with its size in metres, curve, roll, and pin (what a named layout held before profiles);
+- the desktop passthrough rectangle's standing-space position, size, and rotation. Saving captures its live placement; opening or resetting the layout restores it without changing the camera toggle. Older layouts without a saved rectangle leave the current placement unchanged;
 - which screens show and which are hidden;
 - the apps, one entry per window: on a screen at a place and size, or floating at a pose, size, and scale;
 - the remote displays connected when it was saved, each with its place and whether it's hidden ([remote-displays.md](remote-displays.md)). Opening the profile connects them, if their computer answers, and puts them back. Like its apps, it leaves other displays connected.

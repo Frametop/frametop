@@ -73,6 +73,9 @@
 #include "vr.h"
 
 #include "handcut.h"
+#include "passthrough.h"
+#include "native_portal.h"
+#include <sstream>
 #include "keyboard.h"
 
 #include <drm_fourcc.h>
@@ -246,6 +249,11 @@ constexpr long kControlsLinger = 35; // ticks (~0.4 s) the controls stay after a
 constexpr long kAimLinger = 25;      // ticks (~0.3 s) a panel keeps the laser on after the aim leaves it
 long g_tick = 0;                     // ft_vr_poll calls
 bool g_vr = false;                   // connected to SteamVR (ft-screens --no-vr runs without it)
+// Authoritative placement. Legacy enabled is data only, never native camera intent.
+passthrough::Volume g_passthrough;
+// Held edits stay live for camera consumers, never for delayed release persistence.
+passthrough::Volume g_passthroughCommitted;
+native_portal::Owner g_nativePortal;
 constexpr vr::TrackedDeviceIndex_t kNone = vr::k_unTrackedDeviceIndexInvalid;
 
 // A popup or dialog of a floating window: a small panel over it, cut from the same buffer.
@@ -1027,6 +1035,313 @@ void UpdateControls() {
     }
 }
 
+// ---------------------------------------------------------------- desk volume controls
+
+struct VolumePart {
+    vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
+    bool shown = false;
+    bool hover = false;
+    int pixels = 0;
+    void Show(bool on) {
+        if (overlay == vr::k_ulOverlayHandleInvalid || shown == on) return;
+        const auto result = on ? vr::VROverlay()->ShowOverlay(overlay) : vr::VROverlay()->HideOverlay(overlay);
+        if (result != vr::VROverlayError_None) return; // retry next tick; no resource churn
+        shown = on;
+        if (!on) hover = false;
+    }
+};
+std::array<VolumePart, 4> g_volumeEdges;
+std::array<VolumePart, 6> g_volumeFaces;
+passthrough::ResizeDrag g_volumeDrag;
+passthrough::TranslateDrag g_volumeMove;
+Mat g_volumeMoveRel = Identity(), g_volumeMovePress = Identity();
+passthrough::Pose g_volumeMoveStart{};
+VolumePart g_volumeGrab;
+bool g_volumeControls = false; // independent of legacy screen alpha cutouts
+bool g_portalAboveSteam = false;
+Mat g_volumeDisplayHead = Identity();
+Clock::time_point g_volumeHeadUntil{};
+// Controls stay visible and interactive across Steam menu transitions.
+// Camera/menu composition is handled by the native passthrough layer, not visibility.
+uint32_t VolumeSort(bool /*above*/, int index, bool face) {
+    return 10000u + (face ? 13u : 1u) + uint32_t(index);
+}
+bool VolumeLayers(bool above, bool apply) {
+    auto part = [&](VolumePart &p, int index, bool face) {
+        if (p.overlay == vr::k_ulOverlayHandleInvalid) return true;
+        const auto order = VolumeSort(above, index, face);
+        uint32_t actual = 0;
+        if (apply && vr::VROverlay()->SetOverlaySortOrder(p.overlay, order) != vr::VROverlayError_None) return false;
+        return vr::VROverlay()->GetOverlaySortOrder(p.overlay, &actual) == vr::VROverlayError_None && actual == order;
+    };
+    bool ok = true;
+    for (int i=0;i<4;++i) ok = part(g_volumeEdges[i], i, false) && ok;
+    for (int i=0;i<6;++i) ok = part(g_volumeFaces[i], i, true) && ok;
+    return part(g_volumeGrab, 6, true) && ok;
+}
+bool VolumeDragging() { return g_volumeDrag.Active() || g_volumeMove.Active(); }
+vr::TrackedDeviceIndex_t VolumeDevice() {
+    return g_volumeDrag.Active() ? g_volumeDrag.Device() : g_volumeMove.Active() ? g_volumeMove.Device() : kNone;
+}
+VolumePart &VolumeControl(int index) { return index < 6 ? g_volumeFaces[index] : g_volumeGrab; }
+bool RigidPose(const Mat &matrix) {
+    passthrough::Pose pose{};
+    for (int i=0;i<3;++i) for (int j=0;j<4;++j) pose[i][j]=matrix.m[i][j];
+    return passthrough::ValidPose(pose);
+}
+bool VolumeControlsReady(Mat &head) {
+    return g_volumeControls && !g_paused && passthrough::Valid(g_passthrough) &&
+           DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) && RigidPose(head);
+}
+void CancelVolumeDrag();
+bool ScreenPressed();
+long g_volumeUpAt = -1; // pointer helper release fallback, independent of KWin clicks
+
+passthrough::Ray VolumeRay(const Mat &laser) {
+    return {{laser.m[0][3], laser.m[1][3], laser.m[2][3]},
+            {-laser.m[0][2], -laser.m[1][2], -laser.m[2][2]}};
+}
+
+// A ribbon's X axis is the room-fixed edge; its plane rotates around that axis to
+// remain visible. Its world-space endpoints never follow the head.
+Mat EdgePose(const passthrough::Edge &edge, const Mat &head) {
+    double x[3], z[3], center[3];
+    for (int k = 0; k < 3; ++k) {
+        x[k] = edge.b[k] - edge.a[k];
+        center[k] = (edge.a[k] + edge.b[k]) / 2;
+        z[k] = head.m[k][3] - center[k];
+    }
+    const double length = std::sqrt(Dot3(x, x));
+    for (double &v : x) v /= length;
+    const double along = Dot3(x, z);
+    for (int k = 0; k < 3; ++k) z[k] -= x[k] * along;
+    double normal = std::sqrt(Dot3(z, z));
+    if (normal < 1e-6) {
+        const double fallback[3] = {0, std::fabs(x[1]) < 0.9 ? 1. : 0., std::fabs(x[1]) < 0.9 ? 0. : 1.};
+        const double projection = Dot3(x, fallback);
+        for (int k = 0; k < 3; ++k) z[k] = fallback[k] - projection * x[k];
+        normal = std::sqrt(Dot3(z, z));
+    }
+    for (double &v : z) v /= normal;
+    const double y[3] = {z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
+    Mat pose{};
+    for (int k = 0; k < 3; ++k)
+        pose.m[k][0] = float(x[k]), pose.m[k][1] = float(y[k]), pose.m[k][2] = float(z[k]), pose.m[k][3] = float(center[k]);
+    return pose;
+}
+
+void MakeVolumePart(VolumePart &part, int index, bool face) {
+    if (part.overlay != vr::k_ulOverlayHandleInvalid) return;
+    char key[80], name[80];
+    // The existing pointer helper skips guide overlays; an input method of None
+    // alone does not keep its ComputeOverlayIntersection scan off a ribbon.
+    std::snprintf(key, sizeof key, face ? "frametop.passthrough.face.%d" : "frametop.guide.passthrough.edge.%d", index);
+    const bool grab = face && index == 6;
+    if (grab) std::snprintf(key, sizeof key, "frametop.passthrough.grab");
+    std::snprintf(name, sizeof name, "Desk rectangle: %s %d", grab ? "grab" : face ? "resize" : "edge", index);
+    if (vr::VROverlay()->CreateOverlay(key, name, &part.overlay) != vr::VROverlayError_None) return;
+    vr::VROverlay()->SetOverlayInputMethod(part.overlay, face ? vr::VROverlayInputMethod_Mouse : vr::VROverlayInputMethod_None);
+    vr::VROverlay()->SetOverlaySortOrder(part.overlay, VolumeSort(g_portalAboveSteam, index, face));
+    // Keep placement controls available while the dashboard is open.
+    vr::VROverlay()->SetOverlayFlag(part.overlay, vr::VROverlayFlags_VisibleInDashboard, true);
+    if (face) {
+        // The whole transparent rectangle accepts input; only its thin central
+        // bar is painted. Keep targeting forgiving without bulky visible chrome.
+        // Keep the move target clear of rays aimed at the near resize bar.
+        const int height = grab ? 56 : 96;
+        std::vector<uint8_t> texture(256 * height * 4, 0);
+        for (int y = 0; y < height; ++y) for (int x = 0; x < 256; ++x) {
+            const bool ink = x >= 32 && x < 224 && std::abs(y - height / 2) <= (grab ? 6 : 5);
+            if (!ink) continue;
+            const bool tick = grab && std::abs(y - height / 2) <= 4 &&
+                              (std::abs(x - 116) <= 1 || std::abs(x - 128) <= 1 || std::abs(x - 140) <= 1);
+            const size_t p = size_t(y * 256 + x) * 4;
+            texture[p] = texture[p + 1] = texture[p + 2] = tick ? 55 : 255;
+            texture[p + 3] = 255;
+        }
+        vr::VROverlay()->SetOverlayRaw(part.overlay, texture.data(), 256, height, 4);
+        // Native hit testing uses this aspect too; its default 1:1 makes thin bars square targets.
+        const vr::HmdVector2_t mouseScale{{256.f, float(height)}};
+        vr::VROverlay()->SetOverlayMouseScale(part.overlay, &mouseScale);
+        vr::VROverlay()->SetOverlayWidthInMeters(part.overlay, grab ? 0.18f : 0.14f);
+        vr::VROverlay()->SetOverlayColor(part.overlay, 0.7f, 0.85f, 0.9f);
+        vr::VROverlay()->SetOverlayAlpha(part.overlay, 0.9f);
+    }
+}
+
+void UpdateVolumeControls() {
+    Mat head;
+    const bool ready = VolumeControlsReady(head);
+    const auto now = Clock::now();
+    bool want = ready;
+    if (ready) {
+        g_volumeDisplayHead = head;
+        g_volumeHeadUntil = now + std::chrono::milliseconds(100);
+    } else {
+        // Input uses only the current valid sample and cancels immediately.
+        // For display-only billboarding, bridge a brief invalid-bit dropout.
+        // Never retain after explicit off, bad metadata, or past this bound.
+        CancelVolumeDrag();
+        want = g_volumeControls && !g_paused && passthrough::Valid(g_passthrough) &&
+               !g_poses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid && now < g_volumeHeadUntil;
+        if (want) head = g_volumeDisplayHead;
+        else g_volumeHeadUntil = {};
+    }
+    if (!want) {
+        CancelVolumeDrag();
+        for (auto &part : g_volumeEdges) part.Show(false);
+        for (auto &part : g_volumeFaces) part.Show(false);
+        g_volumeGrab.Show(false);
+        return;
+    }
+    const auto edges = passthrough::RectangleEdges(g_passthrough);
+    for (int i = 0; i < 4; ++i) {
+        auto &part = g_volumeEdges[i];
+        MakeVolumePart(part, i, false);
+        if (part.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        double length = 0;
+        for (int k = 0; k < 3; ++k) length += std::pow(edges[i].b[k] - edges[i].a[k], 2);
+        length = std::sqrt(length);
+        // About 4 mm thick, independent of each dimension's length.
+        const int pixels = std::max(1, int(std::ceil(length / 0.004)));
+        if (pixels != part.pixels) {
+            std::vector<uint8_t> texture(size_t(pixels) * 4, 255);
+            vr::VROverlay()->SetOverlayRaw(part.overlay, texture.data(), uint32_t(pixels), 1, 4);
+            part.pixels = pixels;
+        }
+        vr::VROverlay()->SetOverlayColor(part.overlay, 0.35f, 0.7f, 1.f);
+        vr::VROverlay()->SetOverlayAlpha(part.overlay, 0.7f);
+        vr::VROverlay()->SetOverlayWidthInMeters(part.overlay, float(length));
+        const Mat pose = EdgePose(edges[i], head);
+        vr::VROverlay()->SetOverlayTransformAbsolute(part.overlay, vr::TrackingUniverseStanding, &pose);
+        part.Show(true);
+    }
+    // Never claim real controllers from a scene game, even in the "always" mode.
+    // The 3D mouse or the dashboard still works; screen visibility is irrelevant.
+    const bool lasers = g_lasers != Lasers::Dashboard && !g_gameRunning &&
+                        vr::VRApplications()->GetCurrentSceneProcessId() == 0;
+    const auto centers = passthrough::RectangleControls(g_passthrough);
+    for (int i = 0; i < 6; ++i) {
+        auto &part = g_volumeFaces[i];
+        if (i == 2 || i == 3) { part.Show(false); continue; }
+        MakeVolumePart(part, i, true);
+        if (part.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        // Side bars follow depth, front/back bars follow width. Their midpoint
+        // is also the resize gesture anchor; head motion only rotates the ribbon.
+        const int axis = i < 2 ? 2 : 0;
+        const auto basis = passthrough::VolumePose(g_passthrough);
+        passthrough::Edge edge{centers[i], centers[i]};
+        for (int k = 0; k < 3; ++k) {
+            edge.a[k] -= basis[k][axis] * 0.07;
+            edge.b[k] += basis[k][axis] * 0.07;
+        }
+        const Mat pose = EdgePose(edge, head);
+        vr::VROverlay()->SetOverlayTransformAbsolute(part.overlay, vr::TrackingUniverseStanding, &pose);
+        vr::VROverlay()->SetOverlayFlag(part.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, lasers);
+        part.Show(true);
+    }
+    MakeVolumePart(g_volumeGrab, 6, true);
+    if (g_volumeGrab.overlay != vr::k_ulOverlayHandleInvalid) {
+        const double width = 0.18;
+        // Keep the bar across the local X near edge; only its display plane faces
+        // the head. Geometry and this edge follow the full rigid volume rotation.
+        const passthrough::Edge edge{
+            passthrough::ToWorld(g_passthrough, {-width / 2, g_passthrough.size[1] / 2, g_passthrough.size[2] / 2 + 0.085}),
+            passthrough::ToWorld(g_passthrough, { width / 2, g_passthrough.size[1] / 2, g_passthrough.size[2] / 2 + 0.085})};
+        const Mat pose = EdgePose(edge, head);
+        vr::VROverlay()->SetOverlayTransformAbsolute(g_volumeGrab.overlay, vr::TrackingUniverseStanding, &pose);
+        vr::VROverlay()->SetOverlayWidthInMeters(g_volumeGrab.overlay, float(width));
+        vr::VROverlay()->SetOverlayFlag(g_volumeGrab.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, lasers);
+        g_volumeGrab.Show(true);
+    }
+}
+
+void EndDragsBy(vr::TrackedDeviceIndex_t dev, uint32_t button = vr::VRMouseButton_Left);
+void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t button,
+                   void (*handle)(const ft_event *, void *), void *data);
+
+void CancelVolumeDrag() {
+    g_volumeDrag.Cancel(g_passthrough);
+    g_volumeMove.Cancel(g_passthrough);
+    g_volumeUpAt = -1;
+}
+
+void PollVolumeControls(void (*handle)(const ft_event *, void *), void *data) {
+    Mat head, laser;
+    const bool ready = VolumeControlsReady(head);
+    if (VolumeDragging() && (!ready || !LaserPose(VolumeDevice(), &laser) || !RigidPose(laser)))
+        CancelVolumeDrag();
+    auto updateDrag = [&] {
+        if (VolumeDragging() && LaserPose(VolumeDevice(), &laser)) {
+            if (g_volumeDrag.Active()) g_volumeDrag.Update(g_passthrough, VolumeRay(laser));
+            else {
+                Mat device;
+                if (DevicePose(VolumeDevice(), &device)) {
+                    // Identical to desktop StartDrag/UpdateDrag: carry the press-relative
+                    // rigid pose. Use the device, not the tip ray or a new angular gesture.
+                    const Mat carried = Mul(device, g_volumeMoveRel);
+                    passthrough::Pose pose{};
+                    for(int i=0;i<3;++i) for(int j=0;j<4;++j) pose[i][j]=carried.m[i][j];
+                    // Preserve the exact JSON pose when the device has not moved,
+                    // including a return to the press pose. Float D * inverse(D)
+                    // is not exact and must not cause a jump or a spurious save.
+                    if (std::memcmp(device.m, g_volumeMovePress.m, sizeof device.m) == 0)
+                        pose = g_volumeMoveStart;
+                    if (!g_volumeMove.UpdatePose(g_passthrough, pose)) CancelVolumeDrag();
+                }
+            }
+        }
+    };
+    updateDrag(); // sample the release tick before an event finishes and captures it
+    for (int control = 0; control < 7; ++control) {
+        auto &part = VolumeControl(control);
+        if (part.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        vr::VREvent_t event;
+        while (vr::VROverlay()->PollNextOverlayEvent(part.overlay, &event, sizeof event)) {
+            if (event.eventType == vr::VREvent_MouseMove || event.eventType == vr::VREvent_FocusEnter)
+                part.hover = ready && part.shown;
+            else if (event.eventType == vr::VREvent_FocusLeave) part.hover = false;
+            if (event.eventType == vr::VREvent_MouseButtonDown && event.data.mouse.button == vr::VRMouseButton_Left &&
+                ready && part.shown && event.trackedDeviceIndex != kNone && !VolumeDragging()) {
+                // The single catcher belongs to either a desktop or portal gesture,
+                // including when different controllers press the two targets.
+                const bool busy = ScreenPressed() ||
+                    std::any_of(g_screens.begin(), g_screens.end(), [](const auto &entry) {
+                        return entry.second.drag != Drag::None;
+                    });
+                if (!busy && LaserPose(event.trackedDeviceIndex, &laser) && RigidPose(laser)) {
+                    if (control == 6) {
+                        Mat device, pose{};
+                        if (DevicePose(event.trackedDeviceIndex, &device) && RigidPose(device) &&
+                            g_volumeMove.Begin(g_passthrough, event.trackedDeviceIndex)) {
+                            const auto volume = passthrough::VolumePose(g_passthrough);
+                            for(int i=0;i<3;++i) for(int j=0;j<4;++j) pose.m[i][j]=float(volume[i][j]);
+                            g_volumeMoveRel = Mul(Inverse(device), pose);
+                            g_volumeMovePress = device;
+                            g_volumeMoveStart = volume;
+                        }
+                    }
+                    else g_volumeDrag.Begin(g_passthrough, control, event.trackedDeviceIndex, VolumeRay(laser));
+                }
+            } else if (event.eventType == vr::VREvent_MouseButtonUp) {
+                EndDragsBy(event.trackedDeviceIndex, event.data.mouse.button);
+                ReleaseAwayBy(event.trackedDeviceIndex, event.data.mouse.button, handle, data);
+            }
+        }
+    }
+    updateDrag(); // also update a gesture that began in this event batch
+    for (int control = 0; control < 7; ++control) {
+        const auto &part = VolumeControl(control);
+        const bool active = control == 6 ? g_volumeMove.Active() : g_volumeDrag.Face() == control;
+        if (part.overlay != vr::k_ulOverlayHandleInvalid) {
+            vr::VROverlay()->SetOverlayAlpha(part.overlay, part.hover || active ? 1.f : 0.9f);
+            vr::VROverlay()->SetOverlayColor(part.overlay, part.hover || active ? 0.1f : 0.7f,
+                                           part.hover || active ? 1.f : 0.85f,
+                                           part.hover || active ? 1.f : 0.9f);
+        }
+    }
+}
+
 // ---------------------------------------------------------------- moving, resizing, pinning
 
 // To ft-floatd (@frametop_float), for floating windows: dock, close, resize. From an unbound
@@ -1147,6 +1462,7 @@ vr::TrackedDeviceIndex_t WristOnLaser(const Screen &s, const Mat &d, const Mat &
 }
 
 void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
+    if (VolumeDragging()) return;
     Mat d, p;
     if (dev == kNone || !DevicePose(dev, &d) || !ScreenPose(s, &p)) {
         std::printf("screen %d: %s not started: no pose for the %s or the screen\n", ScreenIndexOf(s) + 1,
@@ -1248,8 +1564,17 @@ void FinishDrag(Screen &s, int index) {
 
 // A button release on any of our panels ends that device's drags (it may be over another
 // screen by then).
-void EndDragsBy(vr::TrackedDeviceIndex_t dev) {
-    keyboard::EndDragBy(dev);
+void EndDragsBy(vr::TrackedDeviceIndex_t dev, uint32_t button) {
+    if (button == vr::VRMouseButton_Left && VolumeDragging() && VolumeDevice() == dev) {
+        g_volumeUpAt = -1;
+        const bool changed = g_volumeDrag.Active() ? g_volumeDrag.Finish(g_passthrough, dev) :
+                                                    g_volumeMove.Finish(g_passthrough, dev);
+        if (changed) {
+            g_passthroughCommitted = g_passthrough;
+            if (g_vr) RunLayout("passthrough-capture-release");
+        }
+    }
+    if (button == vr::VRMouseButton_Left) keyboard::EndDragBy(dev);
     for (auto &[index, s] : g_screens)
         if (s.drag != Drag::None && s.dragDevice == dev) FinishDrag(s, index);
 }
@@ -1502,6 +1827,7 @@ struct Press {
     int64_t idleSince = -1;                   // the pressing controller has held nothing since (ms, ReleaseStuck)
 };
 Press g_press;
+bool ScreenPressed() { return g_press.buttons != 0; }
 vr::VROverlayHandle_t g_catcher = vr::k_ulOverlayHandleInvalid;
 bool g_catcherShown = false;
 
@@ -1588,6 +1914,23 @@ void ShowCatcher(bool on) {
 // panels or controls, note how far away; on none, put the catcher across it there.
 void UpdateCatcher() {
     Mat l;
+    if (VolumeDragging() && g_catcher != vr::k_ulOverlayHandleInvalid && LaserPose(VolumeDevice(), &l)) {
+        const auto center = g_volumeDrag.Active() ? passthrough::RectangleControls(g_passthrough)[g_volumeDrag.Face()] :
+                                                   passthrough::GrabCenter(g_passthrough);
+        double distance = 0;
+        for (int k = 0; k < 3; ++k) distance += (center[k] - l.m[k][3]) * -l.m[k][2];
+        distance = std::max(0.05, distance);
+        const double point[3] = {l.m[0][3] - l.m[0][2] * distance, l.m[1][3] - l.m[1][2] * distance,
+                                 l.m[2][3] - l.m[2][2] * distance};
+        const Mat pose = FacingPose(point, l);
+        vr::VROverlay()->SetOverlayTransformAbsolute(g_catcher, vr::TrackingUniverseStanding, &pose);
+        vr::VROverlay()->SetOverlayWidthInMeters(g_catcher, float(std::max(0.5, 2 * distance)));
+        vr::VROverlay()->SetOverlayFlag(g_catcher, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible,
+                                      g_lasers != Lasers::Dashboard && !g_gameRunning &&
+                                      vr::VRApplications()->GetCurrentSceneProcessId() == 0);
+        ShowCatcher(true);
+        return;
+    }
     if (!g_press.buttons || g_catcher == vr::k_ulOverlayHandleInvalid || !LaserPose(g_press.device, &l)) {
         ShowCatcher(false);
         return;
@@ -1609,6 +1952,8 @@ void UpdateCatcher() {
             }
         }
     }
+    // Restore upstream screen-catcher policy after an independently edited volume.
+    vr::VROverlay()->SetOverlayFlag(g_catcher, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
     const double d = g_press.distance;
     const double pt[3] = {l.m[0][3] - l.m[0][2] * d, l.m[1][3] - l.m[1][2] * d, l.m[2][3] - l.m[2][2] * d};
     const Mat m = FacingPose(pt, l);  // across the laser, facing its start
@@ -2061,6 +2406,7 @@ bool ft_vr_init(void) {
 }
 
 void ft_vr_shutdown(void) {
+    g_nativePortal.shutdown();
     if (!g_vr) return;
     // The panels go first, their textures cleared, and the imports only after SteamVR has had
     // a moment to take them down (see the shutdown in compositor.c).
@@ -2072,6 +2418,18 @@ void ft_vr_shutdown(void) {
         for (auto &[i, s] : g_screens) g_cutter.DropPanel(i);  // drops their imports while SteamVR is up
     if (g_catcher != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(g_catcher);
     g_catcher = vr::k_ulOverlayHandleInvalid;
+    CancelVolumeDrag();
+    for (auto &part : g_volumeEdges) {
+        if (part.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(part.overlay);
+        part = {};
+    }
+    for (auto &part : g_volumeFaces) {
+        if (part.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(part.overlay);
+        part = {};
+    }
+    if (g_volumeGrab.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(g_volumeGrab.overlay);
+    g_volumeGrab = {};
+    g_volumeHeadUntil = {};
     for (auto &[i, s] : g_screens) {
         for (auto o : s.All()) vr::VROverlay()->DestroyOverlay(o);
         for (auto &[k, sub] : s.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);
@@ -2346,10 +2704,17 @@ void ft_vr_forget(const void *key) {
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     if (!g_vr) return;
     RefreshPoses();
+    PollVolumeControls(handle, data); // samples held pose before any release event
     for (auto &[index, s] : g_screens) {
         vr::VREvent_t ev;
         // The screen itself (and a floating window's popups): input for KWin.
         auto panelEvent = [&](const vr::VREvent_t &ev, bool sub) {
+            // A desk gesture may cross a desktop panel, but never belongs to KWin.
+            if (VolumeDragging()) {
+                if (ev.eventType == vr::VREvent_MouseButtonUp)
+                    EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
+                return;
+            }
             ft_event e{};
             e.screen = index;
             if (ev.eventType != vr::VREvent_FocusLeave) s.inputMs = NowMs();
@@ -2366,10 +2731,13 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     break;
                 case vr::VREvent_MouseButtonDown:
                 case vr::VREvent_MouseButtonUp:
-                    if (ev.eventType == vr::VREvent_MouseButtonUp) EndDragsBy(ev.trackedDeviceIndex);
+                    if (ev.eventType == vr::VREvent_MouseButtonUp) EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
                     e.type = FT_BUTTON;
                     e.button = LinuxButton(ev.data.mouse.button);
                     e.pressed = ev.eventType == vr::VREvent_MouseButtonDown;
+                    // Admit presses and releases from the same desktop owner.
+                    // A second device must not send a down whose up we reject.
+                    if (g_press.buttons && g_press.device != ev.trackedDeviceIndex) return;
                     e.controller = IsHandController(ev.trackedDeviceIndex);
                     at();
                     if (!e.pressed && s.titleCarry) e.x = s.carryX, e.y = s.carryY, s.titleCarry = false;
@@ -2423,7 +2791,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
                 StartDrag(s, Drag::Move, ev.trackedDeviceIndex);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                EndDragsBy(ev.trackedDeviceIndex);
+                EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
             else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::Move)
@@ -2435,7 +2803,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
                 StartDrag(s, Drag::Resize, ev.trackedDeviceIndex);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                EndDragsBy(ev.trackedDeviceIndex);
+                EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
         }
@@ -2445,7 +2813,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
                 ToggleCurve(s);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                EndDragsBy(ev.trackedDeviceIndex);
+                EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
         }
@@ -2458,7 +2826,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
                     SendFloat((k == 4 ? "dock " : "close ") + std::to_string(index + 1));
                 } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                    EndDragsBy(ev.trackedDeviceIndex);
+                    EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
                     ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
                 }
             }
@@ -2472,7 +2840,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 std::printf("screen %d: reset the layout\n", index + 1);
                 RunLayout("reset");
             } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                EndDragsBy(ev.trackedDeviceIndex);
+                EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
         }
@@ -2482,7 +2850,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
                 StartDrag(s, Drag::Roll, ev.trackedDeviceIndex);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                EndDragsBy(ev.trackedDeviceIndex);
+                EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
             else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::None) {
@@ -2498,9 +2866,15 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
     while (g_catcher != vr::k_ulOverlayHandleInvalid &&
            vr::VROverlay()->PollNextOverlayEvent(g_catcher, &ev, sizeof ev))
-        if (ev.eventType == vr::VREvent_MouseButtonUp)
+        if (ev.eventType == vr::VREvent_MouseButtonUp) {
+            EndDragsBy(ev.trackedDeviceIndex, ev.data.mouse.button);
             ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+        }
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
+    if (g_volumeUpAt >= 0 && g_tick >= g_volumeUpAt) {
+        if (VolumeDragging()) EndDragsBy(VolumeDevice());
+        g_volumeUpAt = -1;
+    }
     ReleaseStuck(handle, data);
     UpdateRemoteDrag(handle, data);
     RefreshChrome();
@@ -2511,7 +2885,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             handle(&e, data);
         }
         // A carrying controller that goes away drops its screen.
-        if (ev.eventType == vr::VREvent_TrackedDeviceDeactivated) EndDragsBy(ev.trackedDeviceIndex);
+        if (ev.eventType == vr::VREvent_TrackedDeviceDeactivated) {
+            if (VolumeDragging() && (VolumeDevice() == ev.trackedDeviceIndex ||
+                                    ev.trackedDeviceIndex == vr::k_unTrackedDeviceIndex_Hmd)) CancelVolumeDrag();
+            EndDragsBy(ev.trackedDeviceIndex);
+        }
     }
     // Our keyboard: its keys, and its Close key. It goes when the screens do.
     struct Forward {
@@ -2520,6 +2898,12 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     } forward{handle, data};
     keyboard::Poll(
         [](const keyboard::Event &k, void *f) {
+            auto *forward = static_cast<Forward *>(f);
+            if (k.type == keyboard::Event::RawMouseButtonUp) {
+                EndDragsBy(k.device, k.button);
+                ReleaseAwayBy(k.device, k.button, forward->handle, forward->data);
+                return;
+            }
             ft_event e{};
             e.screen = -1;
             e.type = k.type == keyboard::Event::Key ? FT_KEY : FT_KEYBOARD_CLOSED;
@@ -2553,6 +2937,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdateAim();
     UpdateLasers();
     UpdateControls();
+    UpdateVolumeControls();
     UpdateGuides();
     UpdateCutouts();
     UpdateCatcher();
@@ -2641,6 +3026,86 @@ void ft_vr_keyboard_hide(void) {
 // numbered from 1 here, like everywhere the user sees them. "screens" and "all" leave out
 // floating windows.
 void ft_vr_command(const char *cmd, char *reply, int size) {
+    if (g_nativePortal.command(cmd, reply, size)) return;
+    // Keep controls separate: the original passthrough state wire form is unchanged.
+    std::istringstream input(cmd);
+    std::string subsystem, action, value, extra;
+    input >> subsystem >> action;
+    if (subsystem == "passthrough" && action == "mask") {
+        if (input >> extra) return (void)std::snprintf(reply,size,"error passthrough mask");
+        // One VR-thread snapshot follows live drags and the current origin.
+        Mat origin=Identity(); bool tracking=false;
+        if(g_vr) {
+            RefreshPoses();
+            const auto& head=g_poses[vr::k_unTrackedDeviceIndex_Hmd];
+            tracking=head.bPoseIsValid&&head.bDeviceIsConnected&&RigidPose(head.mDeviceToAbsoluteTracking);
+            origin=vr::VRSystem()->GetRawZeroPoseToStandingAbsoluteTrackingPose();
+        }
+        const bool valid=tracking&&!g_paused&&RigidPose(origin)&&passthrough::Valid(g_passthrough);
+        const auto plane=passthrough::TopFace(g_passthrough);
+        const auto raw=Inverse(origin);
+        double c[3]{},u[3]{},v[3]{};
+        for(int i=0;i<3;++i) {
+            c[i]=raw.m[i][3];
+            for(int j=0;j<3;++j) {
+                c[i]+=raw.m[i][j]*plane.pose[j][3];
+                u[i]+=raw.m[i][j]*plane.pose[j][0]*plane.width/2;
+                v[i]+=raw.m[i][j]*plane.pose[j][1]*plane.length/2;
+            }
+        }
+        std::ostringstream out;
+        out.precision(9);
+        out << std::boolalpha << "ok mask {\"wanted\":" << g_nativePortal.wanted()
+            << ",\"valid\":" << valid << ",\"tracking\":" << tracking << ",\"paused\":" << g_paused
+            << ",\"above\":" << g_portalAboveSteam << ",\"hands_wanted\":" << false
+            << ",\"hands_valid\":" << false;
+        auto vector = [&](const char* name, const double* point) {
+            out << ",\"" << name << "\":[" << point[0] << ',' << point[1] << ',' << point[2] << ']';
+        };
+        vector("center", c); vector("u", u); vector("v", v);
+        out << ",\"raw_to_standing\":[";
+        for (int i = 0; i < 12; ++i) out << (i ? "," : "") << origin.m[i/4][i%4];
+        out << "],\"capsules\":[";
+        out << "]}";
+        const auto snapshot = out.str();
+        if (snapshot.size() >= size_t(size)) return (void)std::snprintf(reply, size, "error mask reply too small");
+        return (void)std::snprintf(reply, size, "%s", snapshot.c_str());
+    }
+    if (subsystem == "passthrough" && action == "layer") {
+        if (!(input >> value) || input >> extra || (value != "state" && value != "0" && value != "1"))
+            return (void)std::snprintf(reply, size, "error passthrough layer <0|1|state>");
+        const bool above = value == "state" ? g_portalAboveSteam : value == "1";
+        if (g_vr && !VolumeLayers(above, value != "state")) {
+            if (value != "state") VolumeLayers(g_portalAboveSteam, true);
+            return (void)std::snprintf(reply, size, "error portal layer readback failed");
+        }
+        g_portalAboveSteam = above;
+        return (void)std::snprintf(reply, size, "ok layer %d", above);
+    }
+    if (subsystem == "passthrough" && action == "controls") {
+        if (!(input >> value) || input >> extra || (value != "state" && value != "0" && value != "1"))
+            return (void)std::snprintf(reply, size, "error passthrough controls <0|1|state>");
+        if (value != "state") {
+            g_volumeControls = value == "1";
+            if (!g_volumeControls) CancelVolumeDrag();
+            if (g_vr) { RefreshPoses(); UpdateVolumeControls(); UpdateCatcher(); }
+        }
+        return (void)std::snprintf(reply, size, "ok controls %d", g_volumeControls);
+    }
+    const bool committed = subsystem == "passthrough" && action == "committed";
+    if (committed && input >> extra)
+        return (void)std::snprintf(reply, size, "error passthrough committed");
+    if (passthrough::Command(committed ? "passthrough state3d" : cmd,
+                             committed ? g_passthroughCommitted : g_passthrough,
+                             reply, size, &g_volumeDrag, &g_volumeMove)) {
+        if (!VolumeDragging()) g_volumeUpAt = -1;
+        if (std::strncmp(reply, "ok ", 3) == 0) {
+            if (action == "set") g_passthroughCommitted = g_passthrough;
+            const int used = int(std::strlen(reply));
+            if (used < size) std::snprintf(reply + used, size - used, " %s", !g_vr ? "no-vr" : "idle");
+        }
+        return;
+    }
     if (!g_vr) return (void)std::snprintf(reply, size, "error no SteamVR (--no-vr)");
     RefreshPoses();
     int n;
@@ -2867,6 +3332,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
     } else if (std::strcmp(cmd, "up") == 0) {
         if ((g_press.buttons & ButtonBit(BTN_LEFT)) && g_press.device != kNone && !IsHandController(g_press.device))
             g_press.upAt = g_tick + 9;
+        if (VolumeDragging() && !IsHandController(VolumeDevice())) g_volumeUpAt = g_tick + 9;
         std::snprintf(reply, size, "ok");
     } else if (std::sscanf(cmd, "spin %15s", word) == 1) {
         SpinCommand(word, reply, size);

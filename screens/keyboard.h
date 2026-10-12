@@ -10,9 +10,10 @@ namespace keyboard {
 
 // What happened on the panel since the last Poll.
 struct Event {
-    enum Type { Key, Closed } type;
+    enum Type { Key, Closed, RawMouseButtonUp } type;
     uint32_t code;  // Key: linux KEY_*
     bool pressed;   // Key: down or up
+    uint32_t device = vr::k_unTrackedDeviceIndexInvalid, button = 0; // RawMouseButtonUp
 };
 
 // Show the panel at `pose` (standing universe; its front faces +z), creating it the first
@@ -28,7 +29,7 @@ void EndDragBy(uint32_t device);
 void SetLasers(bool on);
 // A laser (its pose, aiming along -z) points at the panel.
 bool Aimed(const vr::HmdMatrix34_t &laser);
-// The panel's input: key presses and releases, and Closed for its Close key.
+// The panel's keys, Close key, and raw releases for the shared drag/press owner.
 void Poll(void (*handle)(const Event &, void *), void *data);
 void Destroy();
 

@@ -41,6 +41,12 @@ test-c:
       -o build/tests/relay-buttons-test
     build/tests/relay-buttons-test && echo "screens/tests/relay-buttons-test.c: ok"
 
+# Passthrough geometry, input ownership, and persistence. Offline after the
+# pinned OpenVR header has been provisioned by screens/build.sh; no headset needed.
+test-passthrough header="screens/build/include/openvr.h":
+    python3 screens/test/volume-controls.py --openvr-header '{{header}}'
+    QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software TMPDIR=/tmp pytest -q tests/test_native_portal_bridge.py tests/test_portal_layout.py tests/test_portal_layer.py tests/test_portal_release.py tests/test_passthrough_rotation.py tests/test_native_portal_client.py tests/test_native_portal_settings.py
+
 # shell scripts: syntax-gate everything that ships. No git: the image has
 # none, and a mounted checkout can trip "dubious ownership" — find lists
 # what the repo actually ships. The count guard makes a silently short

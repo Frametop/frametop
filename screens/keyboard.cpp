@@ -530,6 +530,7 @@ void Poll(void (*handle)(const Event &, void *), void *data) {
             }
             case vr::VREvent_MouseButtonUp:
                 if (ev.data.mouse.button == vr::VRMouseButton_Left) release(), EndDragBy(ev.trackedDeviceIndex);
+                handle(Event{Event::RawMouseButtonUp, 0, false, ev.trackedDeviceIndex, ev.data.mouse.button}, data);
                 break;
             case vr::VREvent_FocusLeave:
                 release();

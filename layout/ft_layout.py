@@ -67,6 +67,7 @@ Usage (on the Frame host; Frametop Display Settings calls it too):
   ft-layout reset                    a quick reset (Meta+Shift+R, a screen's reset button, a mapped
                                      button): open the profile in use again, as use NAME does, or
                                      else apply
+  ft-layout passthrough-capture      save only portal placement, never camera On intent
   ft-layout capture                  save the current arrangement as the custom layout
   ft-layout save NAME                save it as a named layout too, and use that; with the
                                      desktop's apps and hidden screens, as a profile
@@ -129,10 +130,12 @@ PIXELS_PER_METRE = 800         # ft-screens: a new screen's default size in VR (
 # or leaves them up (visible).
 VISIBILITY = {"mode": "always", "wrist_angle": 60, "gesture_hand": "left", "gesture_angle": 20,
               "controllers": "outside_games", "in_games": "hide"}
+PASSTHROUGH = {"enabled": False, "center": [0, 0.75, -0.65], "size": [1, 0.35, 0.65], "yaw": 0}
 SPATIAL = ("pos", "face", "roll", "metres", "curve", "pin")  # what a named layout keeps of a screen
 DEFAULTS = {"auto": True, "mode": "preset",
             "preset": {"kind": "arc", "rows": 1, "distance": 2.0, "gap": 0.05, "height": 0.0},
-            "screens": [], "panel_size": list(DEFAULT_PANEL), "hosts": []}
+            "screens": [], "panel_size": list(DEFAULT_PANEL), "hosts": [],
+            "passthrough": PASSTHROUGH, "passthrough_controls": False, "portal_above_steam": False}
 REMOTE_FIRST = 101  # ft-screens' remote screens (screens/remote.h)
 REMOTE_MAX = 16
 REMOTE_PIXELS_PER_METRE = 2400  # a new remote display's width in VR (5120 px: 2.1 m), at least 1 m
@@ -438,10 +441,181 @@ def screen_args(layout=None):
                     for i, (w, h) in ((i, screen_pixels(layout, i)) for i in range(screen_count(layout))))
 
 
+def validate_passthrough(value):
+    """Return a detached, canonical volume; reject rather than clamp unsafe edits."""
+    def number(v, low, high):
+        if type(v) not in (int, float) or not low <= v <= high or not math.isfinite(v):
+            raise ValueError(f"Passthrough needs finite numbers from {low:g} to {high:g}")
+        return float(v)
+
+    def vector(v, low, high):
+        if not isinstance(v, (list, tuple)) or len(v) != 3:
+            raise ValueError("Passthrough center and size need three numbers")
+        return [number(n, low, high) for n in v]
+
+    if not isinstance(value, dict) or type(value.get("enabled")) is not bool:
+        raise ValueError("Passthrough enabled must be true or false")
+    return {"enabled": value["enabled"],
+            "center": vector(value.get("center"), -100, 100),
+            "size": vector(value.get("size"), 0.05, 5.0),
+            "yaw": number(value.get("yaw"), -180, 180),
+            **{key: number(value.get(key, 0), -180, 180)
+               for key in ("pitch", "roll") if key in value}}
+
+
+def passthrough(layout):
+    """One world-anchored standing-space box. Malformed old settings never enable it."""
+    try:
+        return validate_passthrough(layout.get("passthrough"))
+    except ValueError:
+        return validate_passthrough(PASSTHROUGH)
+
+
+def passthrough_rectangle_center(volume):
+    """Expose the retained top face as a 2D rectangle without moving old layouts."""
+    yaw, pitch, roll = (math.radians(volume.get(key, 0)) for key in ("yaw", "pitch", "roll"))
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cr, sr = math.cos(roll), math.sin(roll)
+    normal = [-cy * sr + sy * sp * cr, cp * cr, sy * sr + cy * sp * cr]
+    return [volume["center"][i] + normal[i] * volume["size"][1] / 2 for i in range(3)]
+
+
+def set_passthrough_rectangle_center(volume, center):
+    """Move the visible plane while preserving legacy storage and hidden thickness."""
+    old = passthrough_rectangle_center(volume)
+    volume["center"] = [volume["center"][i] + center[i] - old[i] for i in range(3)]
+
+
+def parse_passthrough_state(reply):
+    """The native standing-space volume and optional renderer status."""
+    fields = reply.split() if isinstance(reply, str) else []
+    end = 11 if len(fields) in (11, 12) else 9
+    if (len(fields) not in (9, 10, 11, 12) or fields[0] != "ok" or fields[1] not in ("0", "1")
+            or (len(fields) == end+1 and fields[end] not in ("no-vr", "idle", "ready", "unavailable"))):
+        raise ValueError("Malformed passthrough state")
+    if not all(re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", n)
+               for n in fields[2:end]):
+        raise ValueError("Passthrough state needs seven finite numbers")
+    numbers = list(map(float, fields[2:end]))
+    volume = validate_passthrough({"enabled": fields[1] == "1", "center": numbers[:3],
+                                   "size": numbers[3:6], "yaw": numbers[6],
+                                   **(dict(pitch=numbers[7], roll=numbers[8]) if end==11 else {})})
+    return volume, fields[end] if len(fields) > end else None
+
+
+def capture_passthrough(*, committed=False):
+    """Capture only the volume; release helpers exclude any later held edits."""
+    try:
+        return _capture_passthrough(committed=committed)
+    except (OSError, ValueError) as e:
+        raise RuntimeError(f"couldn't capture passthrough: {e}") from e
+
+
+def _capture_passthrough(*, committed=False):
+    with open(LOCK_PATH, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        sock = screens_socket()
+        try:
+            # Query after acquiring the lock: old helpers coalesce to the latest
+            # release or external set, without sampling a later uncommitted drag.
+            command = "passthrough committed" if committed else "passthrough state3d"
+            volume, _status = parse_passthrough_state(sock.ask(command, timeout=1.0))
+        finally:
+            sock.sock.close()
+        _write_passthrough(volume)
+    return volume
+
+
+def _write_passthrough(volume):
+    """Caller holds LOCK_PATH: update raw JSON without normalizing screens/profiles."""
+    _write_layout_field("passthrough", volume)
+
+
+def _write_layout_field(key, value):
+    """Caller holds LOCK_PATH. Preserve unknown fields and raw screen/profile data."""
+    try:
+        with open(LAYOUT_PATH) as f:
+            layout = json.load(f)
+    except FileNotFoundError:
+        layout = {}
+    if not isinstance(layout, dict):
+        raise ValueError("layout must be an object; saved layout was not changed")
+    layout[key] = value
+    save_layout(layout)
+
+
+def passthrough_controls(layout):
+    """Global edit handles, independent of camera visibility and legacy alpha holes."""
+    return layout.get("passthrough_controls") is True
+
+
+def save_passthrough_controls(enabled):
+    if type(enabled) is not bool:
+        raise ValueError("Passthrough controls must be true or false")
+    with open(LOCK_PATH, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        _write_layout_field("passthrough_controls", enabled)
+
+
+def parse_passthrough_controls(reply):
+    if reply not in ("ok controls 0", "ok controls 1"):
+        raise ValueError("Unsupported or invalid passthrough controls reply: " + str(reply)[:200])
+    return reply == "ok controls 1"
+
+
+def send_passthrough_controls(sock, enabled):
+    """Exact acknowledgement plus readback, without touching any screen geometry."""
+    if type(enabled) is not bool:
+        raise ValueError("Passthrough controls must be true or false")
+    acknowledged = parse_passthrough_controls(sock.ask(f"passthrough controls {int(enabled)}", timeout=1.0))
+    actual = parse_passthrough_controls(sock.ask("passthrough controls state", timeout=1.0))
+    if acknowledged != enabled or actual != enabled:
+        raise ValueError("Passthrough controls readback did not match the request")
+    return actual
+
+
+def portal_above_steam(layout):
+    """Only the JSON boolean true opts in. Legacy or invalid values default off."""
+    return layout.get("portal_above_steam") is True
+
+
+def save_portal_above_steam(enabled):
+    if type(enabled) is not bool:
+        raise ValueError("Portal above Steam menu must be true or false")
+    with open(LOCK_PATH, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        _write_layout_field("portal_above_steam", enabled)
+
+
+def parse_portal_above_steam(reply):
+    if reply not in ("ok layer 0", "ok layer 1"):
+        raise ValueError("Unsupported or invalid portal layer reply: " + str(reply)[:200])
+    return reply == "ok layer 1"
+
+
+def send_portal_above_steam(sock, enabled):
+    if type(enabled) is not bool:
+        raise ValueError("Portal above Steam menu must be true or false")
+    acknowledged = parse_portal_above_steam(sock.ask(f"passthrough layer {int(enabled)}", timeout=1.0))
+    actual = parse_portal_above_steam(sock.ask("passthrough layer state", timeout=1.0))
+    if acknowledged != enabled or actual != enabled:
+        raise ValueError("Portal layer readback did not match the request")
+    return actual
+
+
 def visibility(layout):
     v = dict(VISIBILITY)
     v.update(layout.get("visibility", {}))
     return v
+
+
+def passthrough_command(layout):
+    volume = passthrough(layout)
+    numbers = [*volume["center"], *volume["size"], volume["yaw"]]
+    if volume.get("pitch", 0) or volume.get("roll", 0):
+        numbers += [volume.get("pitch", 0), volume.get("roll", 0)]
+    return f"passthrough set {int(volume['enabled'])} " + " ".join(f"{n:.17g}" for n in numbers)
 
 
 def send_visibility(sock, layout):
@@ -451,6 +625,19 @@ def send_visibility(sock, layout):
     sock.ask(f"gesture {v['gesture_hand']} {float(v['gesture_angle']):.1f}")
     sock.ask(f"controllers {v['controllers']}")
     sock.ask(f"ingames {v['in_games']}")
+    try:
+        sock.ask(passthrough_command(layout), timeout=1.0)
+    except RuntimeError as e:
+        # Older compositors must still arrange screens and restore hidden screens.
+        log(f"passthrough not applied: {e}")
+    try:
+        send_portal_above_steam(sock, portal_above_steam(layout))
+    except (RuntimeError, ValueError) as e:
+        log(f"portal layer not applied: {e}")
+    try:
+        send_passthrough_controls(sock, passthrough_controls(layout))
+    except (RuntimeError, ValueError) as e:
+        log(f"passthrough controls not applied: {e}")
 
 
 def send_hidden(sock, layout):
@@ -579,6 +766,10 @@ def capture_screens():
     layout["screens"] = screens + layout.get("screens", [])[len(screens):]
     layout["mode"] = "custom"
     capture_remotes(sock, layout, eye, heading)
+    try:
+        layout["passthrough"], _ = parse_passthrough_state(sock.ask("passthrough state3d", timeout=1.0))
+    except (RuntimeError, ValueError) as e:
+        log(f"passthrough placement not captured: {e}")
     save_layout(layout)
     return screens
 
@@ -1160,6 +1351,7 @@ def save_named(layout, name):
     remote = {d["id"]: {k: d[k] for k in SPATIAL if k in d} for _, _, d in remote_displays(layout)
               if not d.get("off") and "pos" in d}
     profile = layout.setdefault("profiles", {}).setdefault(name, {})
+    profile["passthrough"] = passthrough(layout)
     if remote:
         profile["remote"] = remote
     else:
@@ -1189,6 +1381,12 @@ def use_named(layout, name):
             screens[i].update({"pos": list(preset[i]["pos"]), "face": list(preset[i]["face"]),
                                "roll": preset[i]["roll"]})
     profile_remotes(layout, name)
+    placement = layout.get("profiles", {}).get(name, {}).get("passthrough")
+    if placement is not None:
+        try:
+            layout["passthrough"] = validate_passthrough(placement)
+        except ValueError as e:
+            log(f"saved passthrough placement not applied: {e}")
     layout["mode"], layout["active"] = "custom", name
 
 
@@ -1538,6 +1736,10 @@ def main(argv):
             print(screen_args())
         elif cmd == "remote-view":
             print(remote_view())
+        elif cmd == "passthrough-capture" and len(argv) == 2:
+            log(f"passthrough: {capture_passthrough()}")
+        elif cmd == "passthrough-capture-release" and len(argv) == 2:
+            log(f"passthrough: {capture_passthrough(committed=True)}")
         elif cmd == "toggle":
             log(screens_socket().ask("toggle"))
         elif cmd in ("hide", "show") and len(argv) == 3:

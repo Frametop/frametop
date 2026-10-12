@@ -19,11 +19,14 @@ $cc -c -o build/compositor.o compositor.c
 $cc -c -o build/remote.o remote.c
 cxx="g++ -std=c++17 -O2 -Wall -Wno-missing-field-initializers -Ibuild/include $(pkg-config --cflags egl glesv2 gbm libdrm)"
 $cxx -c -o build/vr.o vr.cpp
+$cxx -c -o build/passthrough.o passthrough.cpp
+$cxx -c -o build/native_portal.o native_portal.cpp
 $cxx -c -o build/keyboard.o keyboard.cpp
 $cxx -c -o build/handcut.o handcut.cpp
 $cxx -c -o build/handtest.o handtest.cpp
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/keyboard.o build/handcut.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/passthrough.o build/keyboard.o build/handcut.o \
+  build/native_portal.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o $vrlibs
 echo "built build/ft-screens build/ft-handtest"'

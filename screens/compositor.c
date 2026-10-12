@@ -721,7 +721,7 @@ static void panel_key(struct server *s, uint32_t code, bool pressed) {
 // that panel, "-" for none); the rest is in vr.cpp (ft_vr_command).
 static int control_readable(int fd, uint32_t mask, void *data) {
     struct server *s = data;
-    char buf[512], reply[2048];
+    char buf[512], reply[16384];
     struct sockaddr_un from;
     socklen_t len = sizeof from;
     ssize_t n;

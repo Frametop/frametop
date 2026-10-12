@@ -2,6 +2,7 @@
 #include "handcut.h"
 
 #include "../hands/include/fh_hands.h"
+#include "../native-portal/hand_bounds.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -322,8 +323,87 @@ const char *kCopy = R"(
 #extension GL_OES_EGL_image_external : require
 precision highp float;   // mediump (16-bit on Adreno) steps 1.7 texels across a 3440-pixel screen
 uniform samplerExternalOES tex;
+uniform bool nativeMask, rectangle;
+uniform vec3 center, extentU, extentV, eye, panelSize;
+uniform vec4 panelRows[3];
+uniform int capsuleCount;
+uniform vec4 capsules[128];
+uniform vec4 handBounds[8];
+uniform ivec2 boundRanges[8];
 varying vec2 uv;
-void main() { gl_FragColor = vec4(texture2D(tex, uv).rgb, 1.0); })";
+
+// The native camera tests the swept spheres, limited to centres at least 12 cm
+// along the eye ray. There is deliberately no panel-depth clipping here.
+bool capsuleHit(vec3 d, vec4 a, vec4 b) {
+    vec3 w = a.xyz - eye, bone = b.xyz - a.xyz;
+    float depth = dot(w, d), slope = dot(bone, d);
+    vec3 p = w - d * depth, v = bone - d * slope;
+    float dr = b.w - a.w;
+    float qa = dot(v, v) - dr * dr;
+    float qb = dot(p, v) - a.w * dr;
+    float qc = dot(p, p) - a.w * a.w;
+    bool positive = slope > 1e-8, negative = slope < -1e-8;
+    bool moving = positive || negative;
+    float crossing = (0.12 - depth) / (moving ? slope : 1.0);
+    float lo = positive ? max(0.0, crossing) : 0.0;
+    float hi = negative ? min(1.0, crossing) : 1.0;
+    if (lo > hi || (!moving && depth < 0.12)) return false;
+    float best = min((qa * lo + 2.0 * qb) * lo + qc,
+                     (qa * hi + 2.0 * qb) * hi + qc);
+    if (qa > 1e-8) {
+        float t = clamp(-qb / qa, lo, hi);
+        best = min(best, (qa * t + 2.0 * qb) * t + qc);
+    }
+    return best <= 0.0;
+}
+bool boundHit(vec3 d, vec4 sphere) {
+    vec3 w = sphere.xyz - eye;
+    float t = dot(w, d);
+    return t + sphere.w >= 0.12 && dot(w, w) - t*t <= sphere.w*sphere.w;
+}
+bool groupCovered(vec3 ray, int group) {
+    int begin = boundRanges[group].x, end = boundRanges[group].y;
+    if (begin >= end || !boundHit(ray, handBounds[group])) return false;
+    for (int offset = 0; offset < 8; ++offset) {
+        int i = begin + offset;
+        if (i >= end) break;
+        if (capsuleHit(ray, capsules[2*i], capsules[2*i+1])) return true;
+    }
+    return false;
+}
+bool covered() {
+    if (!rectangle && capsuleCount == 0) return false;
+    vec3 local = vec3((uv.x - 0.5) * panelSize.x,
+                      (0.5 - uv.y) * panelSize.y, 0.0);
+    // Same cylindrical surface as vr.cpp OnSurface (texture x is arc length).
+    if (panelSize.z > 0.0) {
+        float angle = local.x / panelSize.z;
+        local.x = panelSize.z * sin(angle);
+        local.z = panelSize.z * (1.0 - cos(angle));
+    }
+    vec4 point = vec4(local, 1.0);
+    vec3 ray = normalize(vec3(dot(panelRows[0], point), dot(panelRows[1], point),
+                              dot(panelRows[2], point)) - eye);
+    if (rectangle) {
+        vec3 ce = center - eye, normal = cross(extentU, extentV);
+        float determinant = dot(normal, ce);
+        // Homogeneous plane coordinates, matching the native shader. A zero
+        // determinant has no finite forward intersection and must not cut alpha.
+        if (determinant != 0.0) {
+            vec3 q = vec3(dot(cross(extentV, ce), ray),
+                          dot(cross(ce, extentU), ray), dot(normal, ray)) / determinant;
+            if (all(lessThanEqual(abs(q), vec3(3.402823466e38))) &&
+                q.z > 0.0 && abs(q.x) <= q.z && abs(q.y) <= q.z) return true;
+        }
+    }
+    return groupCovered(ray,0) || groupCovered(ray,1) || groupCovered(ray,2) || groupCovered(ray,3)
+        || groupCovered(ray,4) || groupCovered(ray,5) || groupCovered(ray,6) || groupCovered(ray,7);
+}
+void main() {
+    float alpha = 1.0;
+    if (nativeMask && covered()) alpha = 0.0;
+    gl_FragColor = vec4(texture2D(tex, uv).rgb, alpha);
+})";
 
 // Coverage of one tapered capsule; blended to take that much alpha away.
 const char *kCut = R"(
@@ -576,6 +656,29 @@ bool SameSpots(const std::vector<Capsule2D> a[2], const std::vector<Capsule2D> b
     return true;
 }
 
+bool SameMask(const Output &output, const NativeMask *mask) {
+    if (output.masked != bool(mask)) return false;
+    if (!mask) return true;
+    const NativeMask &a = output.mask, &b = *mask;
+    if (a.rectangle != b.rectangle || a.panel.width != b.panel.width ||
+        a.panel.height != b.panel.height || a.panel.curve != b.panel.curve ||
+        std::min(a.capsules.size(), size_t(64)) != std::min(b.capsules.size(), size_t(64))) return false;
+    for (int j = 0; j < 3; ++j) {
+        if (a.center[j] != b.center[j] || a.u[j] != b.u[j] || a.v[j] != b.v[j]) return false;
+        for (int k = 0; k < 4; ++k)
+            if (a.panel.pose.m[j][k] != b.panel.pose.m[j][k]) return false;
+        for (int e = 0; e < 2; ++e)
+            if (a.eyes[e][j] != b.eyes[e][j]) return false;
+    }
+    for (size_t i = 0; i < std::min(a.capsules.size(), size_t(64)); ++i) {
+        const Capsule &p = a.capsules[i], &q = b.capsules[i];
+        if (p.ra != q.ra || p.rb != q.rb) return false;
+        for (int j = 0; j < 3; ++j)
+            if (p.a[j] != q.a[j] || p.b[j] != q.b[j]) return false;
+    }
+    return true;
+}
+
 int64_t SteadyNs() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -593,7 +696,7 @@ bool Renderer::Passed(Output &o, int64_t timeoutNs) {
 
 // Draws one buffer. Partial: the buffer holds this client frame already, with o.spots cut
 // out, so each eye is drawn again only inside the box around those and the new cutouts.
-void Renderer::Draw(Output &o, unsigned tex, int w, int h, const std::vector<Capsule2D> eyes[2], bool partial) {
+void Renderer::Draw(Output &o, unsigned tex, int w, int h, const std::vector<Capsule2D> eyes[2], bool partial, const NativeMask *mask) {
     glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glEnableVertexAttribArray(0);
@@ -621,6 +724,37 @@ void Renderer::Draw(Output &o, unsigned tex, int w, int h, const std::vector<Cap
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
         glUniform1i(glGetUniformLocation(copyProg_, "tex"), 0);
+        glUniform1i(glGetUniformLocation(copyProg_, "nativeMask"), mask != nullptr);
+        if (mask) {
+            glUniform1i(glGetUniformLocation(copyProg_, "rectangle"), mask->rectangle);
+            auto vec3 = [&](const char *name, const double *v) {
+                glUniform3f(glGetUniformLocation(copyProg_, name), float(v[0]), float(v[1]), float(v[2]));
+            };
+            vec3("center", mask->center); vec3("extentU", mask->u); vec3("extentV", mask->v);
+            vec3("eye", mask->eyes[e]);
+            glUniform3f(glGetUniformLocation(copyProg_, "panelSize"), float(mask->panel.width),
+                        float(mask->panel.height), float(mask->panel.curve));
+            glUniform4fv(glGetUniformLocation(copyProg_, "panelRows[0]"), 3, &mask->panel.pose.m[0][0]);
+            const int count = int(std::min(mask->capsules.size(), size_t(64)));
+            float packed[64 * 8];
+            for (int i = 0; i < count; ++i) {
+                const Capsule &c = mask->capsules[i];
+                for (int j = 0; j < 3; ++j) packed[8*i+j] = c.a[j], packed[8*i+4+j] = c.b[j];
+                packed[8*i+3] = c.ra; packed[8*i+7] = c.rb;
+            }
+            glUniform1i(glGetUniformLocation(copyProg_, "capsuleCount"), count);
+            if (count) glUniform4fv(glGetUniformLocation(copyProg_, "capsules[0]"), count * 2, packed);
+            float bounds[hand_bounds::kGroups * 4];
+            hand_bounds::compute(packed, unsigned(count), bounds);
+            glUniform4fv(glGetUniformLocation(copyProg_, "handBounds[0]"), hand_bounds::kGroups, bounds);
+            GLint ranges[hand_bounds::kGroups * 2];
+            for (unsigned group = 0; group < hand_bounds::kGroups; ++group) {
+                unsigned begin, end;
+                hand_bounds::range(unsigned(count), group, begin, end);
+                ranges[group*2] = GLint(begin); ranges[group*2+1] = GLint(end);
+            }
+            glUniform2iv(glGetUniformLocation(copyProg_, "boundRanges[0]"), hand_bounds::kGroups, ranges);
+        }
         glUniform4f(glGetUniformLocation(copyProg_, "rect"), 0, 0, float(w), float(h));
         glUniform2f(glGetUniformLocation(copyProg_, "size"), float(w), float(h));
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -648,7 +782,8 @@ void Renderer::Draw(Output &o, unsigned tex, int w, int h, const std::vector<Cap
 }
 
 const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, const ft_dmabuf &src,
-                                  const std::vector<Capsule2D> eyes[2]) {
+                                  const std::vector<Capsule2D> eyes[2], const NativeMask *mask) {
+    if (mask && !mask->rectangle && mask->capsules.empty()) mask = nullptr;
     if (!ready_) return nullptr;
     const int64_t t0 = SteadyNs();
     const int w = src.width, h = src.height;
@@ -667,7 +802,7 @@ const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, c
 
     const int newest = ring.drawing >= 0 ? ring.drawing : ring.shown;
     const Output *n = newest >= 0 ? &ring.out[newest] : nullptr;
-    if (n && n->key == key && n->serial == serial && SameSpots(n->spots, eyes)) {
+    if (n && n->key == key && n->serial == serial && SameSpots(n->spots, eyes) && SameMask(*n, mask)) {
         ++stats_.same;
     } else if (ring.drawing >= 0) {
         ++stats_.busy;   // drawn on a later tick, from what's current then
@@ -678,12 +813,17 @@ const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, c
         if (!o.bo && !MakeOutput(o, 2 * w, h)) return nullptr;
         const GLuint tex = Texture(key, src);
         if (!tex) return nullptr;
-        const bool partial = o.drawn && o.key == key && o.serial == serial;
-        Draw(o, tex, w, h, eyes, partial);
+        // Generic camera masks cover arbitrary angular regions, so changes and removal
+        // must restore the complete client image rather than only old hand bounds.
+        const bool partial = !mask && !o.masked && o.drawn && o.key == key && o.serial == serial;
+        Draw(o, tex, w, h, eyes, partial, mask);
         o.fence = pCreateSync(EGLDisplay(dpy_), EGL_SYNC_FENCE_KHR, nullptr);
         glFlush();
         if (!o.fence) glFinish();   // no fence: wait here, as before
         o.key = key, o.serial = serial, o.drawn = true;
+        o.masked = mask != nullptr;
+        o.mask = mask ? *mask : NativeMask{};
+        if (o.mask.capsules.size() > 64) o.mask.capsules.resize(64);
         for (int e = 0; e < 2; ++e) o.spots[e] = eyes[e];
         ring.drawing = i;
         ++stats_.draws, stats_.partial += partial;

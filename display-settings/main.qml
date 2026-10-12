@@ -15,6 +15,7 @@ Kirigami.ApplicationWindow {
         ? [{ name: "screens", text: "Screens", icon: "video-display", page: screensPage },
            { name: "layout", text: "Layout", icon: "view-grid", page: layoutPage },
            { name: "visibility", text: "Visibility & pins", icon: "view-visible", page: visibilityPage },
+           { name: "passthrough", text: "Passthrough", icon: "camera-web", page: passthroughPage },
            { name: "power", text: "Power", icon: "preferences-system-power-management", page: powerPage }]
         : [{ name: "screens", text: "Screens", icon: "video-display", page: screensPage },
            { name: "layout", text: "Layout", icon: "view-grid", page: layoutPage },
@@ -39,8 +40,17 @@ Kirigami.ApplicationWindow {
         pageStack.push(page)
     }
 
-    // FT_DISPLAY_PAGE=layout|visibility|power opens the app on that page.
-    pageStack.initialPage: ({ layout: layoutPage, visibility: visibilityPage, power: powerPage })[startPage] || screensPage
+    // FT_DISPLAY_PAGE=layout|visibility|passthrough|power opens the app on that page.
+    pageStack.initialPage: ({ layout: layoutPage, visibility: visibilityPage,
+        passthrough: backend.backend === "screens" ? passthroughPage : screensPage, power: powerPage })[startPage] || screensPage
+
+    Component {
+        id: passthroughPage
+        Kirigami.ScrollablePage {
+            title: "Passthrough"
+            PortalSettings { model: backend.nativePortal }
+        }
+    }
 
     // "1 hour", "15 minutes", "30 seconds".
     function duration(seconds) {

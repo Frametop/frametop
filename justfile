@@ -19,7 +19,7 @@ test-python:
     set -uo pipefail
     python3 -c 'import PySide6, numpy, cv2' || { echo "python3 can't import PySide6, numpy, and cv2"; exit 1; }
     status=0
-    for t in input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py gaze/test/*.py pack/test/*.py; do
+    for t in input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py gaze/test/*.py pack/test/*.py native-portal/test_*.py; do
         [ -f "$t" ] || continue
         if python3 "$t" >/dev/null; then echo "$t: ok"; else echo "$t: FAILED"; status=1; fi
     done
@@ -40,6 +40,14 @@ test-c:
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/relay-buttons-test.c \
       -o build/tests/relay-buttons-test
     build/tests/relay-buttons-test && echo "screens/tests/relay-buttons-test.c: ok"
+    g++ -std=c++17 -Wall -Wextra -Werror screens/tests/hand_bounds_test.cpp -o build/tests/hand-bounds-test
+    build/tests/hand-bounds-test
+
+# Passthrough geometry, input ownership, and persistence. Offline after the
+# pinned OpenVR header has been provisioned by screens/build.sh; no headset needed.
+test-passthrough header="screens/build/include/openvr.h":
+    python3 screens/test/volume-controls.py --openvr-header '{{header}}'
+    QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software TMPDIR=/tmp pytest -q tests/test_native_portal_bridge.py tests/test_portal_layout.py tests/test_portal_layer.py tests/test_portal_release.py tests/test_passthrough_rotation.py tests/test_native_portal_client.py tests/test_native_portal_settings.py
 
 # shell scripts: syntax-gate everything that ships. No git: the image has
 # none, and a mounted checkout can trip "dubious ownership" — find lists

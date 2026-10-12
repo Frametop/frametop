@@ -18,6 +18,8 @@ packages=(
   mesa-libgbm-devel wayland-devel vulkan-loader-devel vulkan-headers plasma-wayland-protocols wlroots-devel
   # ft_pointer SteamVR driver: static C++ runtime (the host has an older glibc)
   libstdc++-static
+  # native portal: loader ELF hashing and build-time shader patching/validation
+  openssl-devel spirv-tools
   # hand tracking (deferred: not installed by install.sh; hands/run.sh install builds it): ft-hands
   # reads the calibration with jsoncpp; ft-camd runs on the host, linked statically. Its Python
   # tools (hands/tools) need NumPy and OpenCV, which aren't here: Fedora's python3-opencv pulls

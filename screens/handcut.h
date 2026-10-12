@@ -45,6 +45,16 @@ struct Panel {
     int pxWidth, pxHeight;
 };
 
+// Camera coverage in standing space. Unlike physical hand cutouts, these rays
+// continue past the panel: the native camera is composed behind desktop overlays.
+struct NativeMask {
+    bool rectangle = false;
+    double center[3]{}, u[3]{}, v[3]{}; // rectangle centre and half-extent vectors
+    std::vector<Capsule> capsules;    // at most the first 64 are used
+    Panel panel{};
+    double eyes[2][3]{};
+};
+
 class Hands {
 public:
     // Once per tick: the head pose now, CLOCK_MONOTONIC ns. Re-reads the hands file when
@@ -110,6 +120,8 @@ struct Output {
     uint64_t serial = 0;
     bool drawn = false;
     std::vector<Capsule2D> spots[2];
+    NativeMask mask;
+    bool masked = false;
 };
 
 // A dot for ft-handtest --probe: centre and radius in pixels of the eye's half, colour.
@@ -146,7 +158,7 @@ public:
     // 3 ticks: the panel showed its client buffer meanwhile) waits for its buffer, so a stale
     // one never shows.
     const Output *Composite(int panel, const void *key, uint64_t serial, const ft_dmabuf &src,
-                            const std::vector<Capsule2D> eyes[2]);
+                            const std::vector<Capsule2D> eyes[2], const NativeMask *mask = nullptr);
     // ft-handtest --probe: a transparent w x h buffer per eye (side by side) with only the
     // dots in it, drawn every call, fenced as Composite's. Returns the newest finished one.
     const Output *Marks(int panel, int w, int h, const std::vector<Mark> eyes[2]);
@@ -163,7 +175,7 @@ private:
     bool MakeOutput(Output &o, int w, int h);
     void FreeOutput(Output &o);
     bool Passed(Output &o, int64_t timeoutNs);
-    void Draw(Output &o, unsigned tex, int w, int h, const std::vector<Capsule2D> eyes[2], bool partial);
+    void Draw(Output &o, unsigned tex, int w, int h, const std::vector<Capsule2D> eyes[2], bool partial, const NativeMask *mask);
     bool ready_ = false;
     int drm_ = -1;
     void *gbm_ = nullptr, *dpy_ = nullptr, *ctx_ = nullptr;

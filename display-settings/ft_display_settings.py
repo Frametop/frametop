@@ -42,6 +42,7 @@ LAYOUT_DIR = os.path.join(HERE, "..", "layout")
 sys.path.insert(0, LAYOUT_DIR)
 import ft_layout  # noqa: E402  (pure Python: the same geometry ft-layout uses)
 import steam_settings  # noqa: E402
+from native_portal_settings import PortalSettings  # noqa: E402
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 DESKTOPS = os.path.join(HERE, "..", "desktops.sh")
@@ -121,9 +122,16 @@ class Backend(QObject):
         self._steam_busy = False
         self._steamDone.connect(self._steam_done, Qt.QueuedConnection)
         self._pins = []     # each running screen's pin: none | left | right | head
+        self._native_portal = PortalSettings(self, address=FT_SCREENS,
+            tracker_command=host_command(os.path.join(HERE, "..", "hands", "ft-cutouts"), "ensure"))
+        self._native_portal.message.connect(self.message)
         self.poll = QTimer(interval=3000, timeout=self._check_running)
         self.poll.start()
         self._check_running()
+
+    @Property(QObject, constant=True)
+    def nativePortal(self):
+        return self._native_portal
 
     # --- state ---
     def _conf(self):
@@ -705,6 +713,7 @@ def main():
     QQuickStyle.setStyle("org.kde.desktop")
     engine = QQmlApplicationEngine()
     backend = Backend()
+    app.aboutToQuit.connect(backend.nativePortal.close)
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("startPage", os.environ.get("FT_DISPLAY_PAGE", "screens"))
     engine.load(QUrl.fromLocalFile(os.path.join(HERE, "main.qml")))

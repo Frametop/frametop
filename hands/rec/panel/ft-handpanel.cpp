@@ -28,6 +28,13 @@
 //                                the pose picture (a PNG, square, RGBA, a right hand as the wearer
 //                                sees it) in a column on the left, the text moving right: mirror
 //                                flips it (a left hand), both shows a flipped copy on its left
+//   demo <path> [mirror] / demo restart / demo off
+//                                a demo clip (an animated GIF, hands/rec/demos) playing in a wider
+//                                column on the left, looped, with the key to its colours under it
+//                                (light: palm, dark: back of hand); it takes the place of the
+//                                image. A new path starts it from its first frame, the same one
+//                                again leaves it playing (mirror only flips it), restart starts
+//                                it again. It stands still while paused
 //   where <position|-> <distance|-> / where off
 //                                a small diagram under the picture: where to hold the hands, a
 //                                front view (centre, left, right, up, down; or the bar's chest,
@@ -63,7 +70,9 @@
 // Each picture goes into the next of three shared buffers (linear DMA-BUFs SteamVR imported
 // once), and the overlay switches to it, as gaze/panel/ft-gazepanel.cpp does: SetOverlayRaw
 // flickered and lagged there, so it's only the fallback. The target has its own three small
-// buffers. Pictures are drawn only when a command changed something.
+// buffers. Pictures are drawn only when a command changed something; while a demo clip plays,
+// each of its frames redraws only the clip's rectangle, and copies only that to a buffer that
+// already has the rest.
 //
 // The pose log runs on a thread of its own, so a slow picture or command never delays a
 // sample. OpenVR's client isn't documented as thread-safe, so both threads take g_vr around
@@ -82,6 +91,7 @@
 #include "stb_truetype.h"
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
+#define STBI_ONLY_GIF
 #define STBI_NO_HDR
 #define STBI_NO_LINEAR
 #pragma GCC diagnostic push
@@ -108,6 +118,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -373,6 +384,99 @@ Image &StripImage(const std::string &path) {
 }
 
 // The where-to diagram's cells: a front view, 3 x 3, (column, row) from the top left.
+// A demo clip: an animated GIF decoded a frame at a time as it plays, so a long clip holds
+// three frames in memory, not all of them. stb_image keeps its GIF decoder to itself, but this
+// file compiles it, so it steps stbi__gif_load_next as stbi_load_gif_from_memory does.
+struct Demo {
+    std::string path;
+    bool mirror = false;
+    std::vector<uint8_t> file;
+    stbi__context ctx{};
+    stbi__gif g{};
+    int w = 0, h = 0, frame = -1;     // frame: from 0 at the clip's start
+    int loops = 0;                    // times it went back to the start by itself
+    std::vector<uint8_t> cur, prev;   // this frame and the one before (GIF's "restore to previous")
+    int64_t due = 0;                  // when the next frame shows (NowNs)
+    Picture scaled{0, 0, {}};         // this frame as drawn
+    bool fresh = false;               // scaled is out of date
+
+    Demo() = default;
+    Demo(const Demo &) = delete;
+    Demo &operator=(const Demo &) = delete;
+    ~Demo() { Free(); }
+
+    void Free() {
+        STBI_FREE(g.out), STBI_FREE(g.history), STBI_FREE(g.background);
+        std::memset(&g, 0, sizeof g);
+    }
+
+    bool Load(const std::string &p) {
+        FILE *f = std::fopen(p.c_str(), "rb");
+        if (!f) return stbi__err("can't open file", "can't open file"), false;
+        uint8_t chunk[65536];
+        size_t n;
+        while ((n = std::fread(chunk, 1, sizeof chunk, f)) > 0) file.insert(file.end(), chunk, chunk + n);
+        std::fclose(f);
+        path = p;
+        return Start(NowNs());
+    }
+
+    // From the first frame again.
+    bool Start(int64_t now) {
+        Free();
+        stbi__start_mem(&ctx, file.data(), int(file.size()));
+        cur.clear(), prev.clear(), frame = -1;
+        return Next(now, false);
+    }
+
+    // The next frame into cur, the first again after the last. false: the file is no GIF, or broken.
+    bool Next(int64_t now, bool loop = true) {
+        int comp = 0;
+        stbi_uc *u = stbi__gif_load_next(&ctx, &g, &comp, 4, prev.empty() ? nullptr : prev.data());
+        if (u == reinterpret_cast<stbi_uc *>(&ctx)) return loop && frame >= 0 && (++loops, Start(now));  // the end
+        if (!u) return false;
+        w = g.w, h = g.h, ++frame;
+        prev.swap(cur);
+        cur.assign(u, u + size_t(w) * h * 4);
+        // As browsers: a delay under 20 ms is 100 ms.
+        due = now + int64_t(g.delay >= 20 ? g.delay : 100) * 1'000'000;
+        fresh = true;
+        return true;
+    }
+};
+
+// The demo's frame drawn opaque at x0, y0 in dw x dh, averaging the source pixels each output
+// pixel covers (the frame is scaled again only when it or the size changed).
+void DrawDemo(Picture &pic, Demo &d, int x0, int y0, int dw, int dh) {
+    if (d.cur.empty() || dw <= 0 || dh <= 0) return;
+    if (d.fresh || d.scaled.w != dw || d.scaled.h != dh) {
+        d.scaled = Picture{dw, dh, std::vector<uint8_t>(size_t(dw) * dh * 4)};
+        const double sx = double(d.w) / dw, sy = double(d.h) / dh;
+        for (int y = 0; y < dh; ++y) {
+            const int ya = std::min(d.h - 1, int(y * sy)), yb = std::clamp(int(std::ceil((y + 1) * sy)), ya + 1, d.h);
+            for (int x = 0; x < dw; ++x) {
+                const int xa = std::min(d.w - 1, int(x * sx)), xb = std::clamp(int(std::ceil((x + 1) * sx)), xa + 1, d.w);
+                unsigned r = 0, g = 0, b = 0, n = 0;
+                for (int yy = ya; yy < yb; ++yy)
+                    for (int xx = xa; xx < xb; ++xx) {
+                        const uint8_t *q = &d.cur[(size_t(yy) * d.w + (d.mirror ? d.w - 1 - xx : xx)) * 4];
+                        r += q[0], g += q[1], b += q[2], ++n;
+                    }
+                uint8_t *o = &d.scaled.px[(size_t(y) * dw + x) * 4];
+                o[0] = uint8_t(r / n), o[1] = uint8_t(g / n), o[2] = uint8_t(b / n), o[3] = 255;
+            }
+        }
+        d.fresh = false;
+    }
+    for (int y = 0; y < dh; ++y) {
+        if (y0 + y < 0 || y0 + y >= pic.h) continue;
+        const int xa = std::max(0, -x0), xb = std::min(dw, pic.w - x0);
+        if (xb > xa)
+            std::memcpy(&pic.px[(size_t(y0 + y) * pic.w + x0 + xa) * 4], &d.scaled.px[(size_t(y) * dw + xa) * 4],
+                        size_t(xb - xa) * 4);
+    }
+}
+
 bool WhereCell(const std::string &pos, int &col, int &row) {
     col = 1, row = 1;
     if (pos == "left") col = 0;
@@ -399,6 +503,9 @@ int DistanceStep(const std::string &dist) { return dist == "near" ? 0 : dist == 
 const char *DistanceLabel(int k) { return k == 0 ? "Close" : k == 1 ? "Halfway out" : "Arm out"; }
 
 constexpr double kCyan[3] = {0.3, 0.85, 1.0};
+// The demo clips' palm and back of the hand (hands/rec/demos): the key's swatches.
+constexpr double kPalm[3] = {0xd5 / 255.0, 0xd1 / 255.0, 0xfe / 255.0};
+constexpr double kBack[3] = {0x6a / 255.0, 0x62 / 255.0, 0xd8 / 255.0};
 
 // The diagram in x0..x0+w, y0..y0+h: the front view on the left, the distance on the right
 // (or either alone, centred), each with its caption under it.
@@ -456,6 +563,8 @@ struct Panel {
     std::string wherePos, whereDist; // the diagram's, "" for none
     std::vector<StripItem> strip;    // a sweep's pictures, or none
     int stripCue = -1;               // the lit one
+    std::unique_ptr<Demo> demo;      // the demo clip, or none
+    int demoX = 0, demoY = 0, demoW = 0, demoH = 0;  // where the last Draw put it (demoW 0: nowhere)
     // What the last Draw laid out, for --no-vr's printout.
     std::vector<std::string> lines, noteLines;
     double textDeg = 0;
@@ -471,6 +580,7 @@ void Draw(Panel &p) {
     }
     Picture &pic = p.pic;
     pic.px = back.px;
+    p.demoW = 0;
     const double ppd = kPxPerDeg, faint = 0.75;
     const int margin = int(ppd * 1.6), width = kW - 2 * margin;
 
@@ -534,7 +644,8 @@ void Draw(Panel &p) {
     // diagram at its right end; the text goes above it.
     int textX0 = margin, textX1 = kW - margin;
     int col, row;
-    const bool imageOn = !p.image.path.empty() && p.strip.empty();
+    const bool demoOn = p.demo && p.strip.empty();
+    const bool imageOn = !p.image.path.empty() && p.strip.empty() && !demoOn;
     const bool whereOn = WhereCell(p.wherePos, col, row) || DistanceStep(p.whereDist) >= 0;
     if (!p.strip.empty()) {
         const int n = int(p.strip.size()), gap = int(ppd * 0.6), whereW = whereOn ? int(ppd * 9) : 0;
@@ -557,6 +668,37 @@ void Draw(Panel &p) {
         if (whereOn) DrawWhere(pic, kW - margin - whereW, y0 + (side + labelH - int(ppd * 4.4)) / 2, whereW, int(ppd * 4.4),
                                p.wherePos, p.whereDist);
         bottom = y0 - frame - int(ppd * 0.8);
+    } else if (demoOn) {
+        // The demo clip in a wider column, the key to its colours under it (on one line if it
+        // fits), the text to the right.
+        const int colW = int(ppd * 16), gap = int(ppd * 0.6), keySize = int(ppd * 0.75), keyLh = int(keySize * 1.6);
+        const int sw = std::max(1, p.demo->w), sh = std::max(1, p.demo->h), swatch = keySize, sgap = int(ppd * 0.3);
+        const std::string light = "Light: palm", dark = "Dark: back of hand";
+        const int lightW = swatch + sgap + TextWidth(light, keySize), darkW = swatch + sgap + TextWidth(dark, keySize);
+        const bool oneLine = lightW + int(ppd) + darkW <= colW;
+        const int room = bottom - top - gap - (oneLine ? 1 : 2) * keyLh;
+        int dw = colW, dh = dw * sh / sw;
+        if (dh > room) dh = std::max(0, room), dw = dh * sw / sh;
+        int y = top + std::max(0, (room - dh) / 2);
+        const int x = margin + (colW - dw) / 2;
+        RoundRect(pic, x - gap / 2, y - gap / 2, x + dw + gap / 2, y + dh + gap / 2, ppd * 0.6, 1, 1, 1, 0.05);
+        DrawDemo(pic, *p.demo, x, y, dw, dh);
+        p.demoX = x, p.demoY = y, p.demoW = dw, p.demoH = dh;
+        y += dh + gap;
+        auto key = [&](const std::string &label, const double *c, int kx, int cy) {
+            RoundRect(pic, kx, cy - swatch / 2, kx + swatch, cy + swatch / 2, swatch * 0.25, c[0], c[1], c[2], 1);
+            Text(pic, label, keySize, kx + swatch + sgap, cy, 0.85, kLeft);
+        };
+        if (oneLine) {
+            const int kx = margin + (colW - lightW - int(ppd) - darkW) / 2;
+            key(light, kPalm, kx, y + keyLh / 2);
+            key(dark, kBack, kx + lightW + int(ppd), y + keyLh / 2);
+        } else {
+            const int kx = margin + (colW - std::max(lightW, darkW)) / 2;
+            key(light, kPalm, kx, y + keyLh / 2);
+            key(dark, kBack, kx, y + keyLh + keyLh / 2);
+        }
+        textX0 = margin + colW + int(ppd * 1.2);
     } else if (imageOn || whereOn) {
         const int colW = int(ppd * 14), gap = int(ppd * 0.6);
         const int whereH = whereOn ? int(ppd * 4.4) : 0, between = imageOn && whereOn ? gap : 0;
@@ -578,6 +720,9 @@ void Draw(Panel &p) {
         textX0 = margin + colW + int(ppd * 1.2);
     }
     const int textW = textX1 - textX0, textCx = (textX0 + textX1) / 2;
+    // Beside a demo clip the text is its list of motions: from the left, not centred.
+    const int textX = demoOn ? textX0 : textCx;
+    const Align textAlign = demoOn ? kLeft : kCentre;
 
     // The instruction, the note, the big countdown and the action line, centred together in
     // the space between. A long instruction gets smaller, down to 1 degree a line, before it runs over.
@@ -598,20 +743,21 @@ void Draw(Panel &p) {
     auto gapBefore = [&] { if (!first) y += gapY; first = false; };
     if (!p.lines.empty()) {
         first = false;
-        for (const std::string &line : p.lines) Text(pic, line, size, textCx, y + lh / 2, 1.0), y += lh;
+        for (const std::string &line : p.lines) Text(pic, line, size, textX, y + lh / 2, 1.0, textAlign), y += lh;
     }
     if (!p.noteLines.empty()) {
         gapBefore();
-        for (const std::string &line : p.noteLines) Text(pic, line, noteSize, textCx, y + noteLh / 2, 1.0, 0.62, 0.3), y += noteLh;
+        for (const std::string &line : p.noteLines)
+            Text(pic, line, noteSize, textX, y + noteLh / 2, 1.0, 0.62, 0.3, textAlign), y += noteLh;
     }
     if (!p.big.empty()) {
         gapBefore();
-        Text(pic, p.big, bigSize, textCx, y + bigLh / 2, kCyan[0], kCyan[1], kCyan[2]), y += bigLh;
+        Text(pic, p.big, bigSize, textX, y + bigLh / 2, kCyan[0], kCyan[1], kCyan[2], textAlign), y += bigLh;
     }
     if (!actionLines.empty()) {
         gapBefore();
         for (const std::string &line : actionLines)
-            Text(pic, line, actionSize, textCx, y + actionLh / 2, kCyan[0], kCyan[1], kCyan[2]), y += actionLh;
+            Text(pic, line, actionSize, textX, y + actionLh / 2, kCyan[0], kCyan[1], kCyan[2], textAlign), y += actionLh;
     }
 
     if (p.paused) {
@@ -690,6 +836,10 @@ void Print(const Panel &p, const Target &t, bool visible, int number) {
         std::printf("image: %s %dx%d%s%s\n", p.image.path.c_str(), p.image.src.w, p.image.src.h,
                     p.imageMode.empty() ? "" : " ", p.imageMode.c_str());
     else std::printf("image: off\n");
+    if (p.demo)
+        std::printf("demo: %s %dx%d frame %d loop %d%s, drawn %dx%d\n", p.demo->path.c_str(), p.demo->w, p.demo->h,
+                    p.demo->frame, p.demo->loops, p.demo->mirror ? " mirror" : "", p.demoW, p.demoH);
+    else std::printf("demo: off\n");
     if (!p.wherePos.empty() || !p.whereDist.empty())
         std::printf("where: %s %s\n", p.wherePos.empty() ? "-" : p.wherePos.c_str(), p.whereDist.empty() ? "-" : p.whereDist.c_str());
     else std::printf("where: off\n");
@@ -715,6 +865,11 @@ struct Buffer {
     gbm_bo *bo = nullptr;
     int fd = -1;
     vr::SharedTextureHandle_t handle = 0;
+    uint64_t whole = 0;  // the whole picture it last had (Buffers::whole), 0: none
+};
+
+struct Area {
+    int x, y, w, h;
 };
 
 struct Buffers {
@@ -724,6 +879,7 @@ struct Buffers {
     Buffer b[3];
     int next = 0;
     bool ok = false;
+    uint64_t whole = 0;  // counts the pictures presented whole
 
     bool Make(int width, int height) {
         w = width, h = height;
@@ -767,8 +923,9 @@ struct Buffers {
 
     // A picture to the overlay: into the next buffer, premultiplied (the overlay's flag says
     // so), then the overlay switches to it. The copy runs outside g_vr, so the pose log waits
-    // only for the two calls at the end.
-    void Present(vr::IVROverlay *ov, vr::VROverlayHandle_t oh, const Picture &p) {
+    // only for the two calls at the end. With area (a demo clip's frame): only that changed
+    // since the last whole picture, so a buffer that has that picture gets only the area.
+    void Present(vr::IVROverlay *ov, vr::VROverlayHandle_t oh, const Picture &p, const Area *area = nullptr) {
         vr::EVROverlayError e;
         if (!ok) {
             std::lock_guard<std::mutex> lk(g_vr);
@@ -776,6 +933,11 @@ struct Buffers {
         } else {
             Buffer &x = b[next];
             next = (next + 1) % 3;
+            if (!area) ++whole;
+            Area all{0, 0, p.w, p.h}, a = area && x.whole == whole ? *area : all;
+            a.x = std::clamp(a.x, 0, p.w), a.y = std::clamp(a.y, 0, p.h);
+            a.w = std::clamp(a.w, 0, p.w - a.x), a.h = std::clamp(a.h, 0, p.h - a.y);
+            x.whole = whole;
             uint32_t stride = 0;
             void *mapping = nullptr;
             auto *dst = static_cast<uint8_t *>(gbm_bo_map(x.bo, 0, 0, p.w, p.h, GBM_BO_TRANSFER_WRITE, &stride, &mapping));
@@ -783,10 +945,10 @@ struct Buffers {
                 std::fprintf(stderr, "ft-handpanel: can't map a buffer\n");
                 return;
             }
-            for (int y = 0; y < p.h; ++y) {
-                const uint8_t *src = &p.px[size_t(y) * p.w * 4];
-                uint8_t *row = dst + size_t(y) * stride;
-                for (int i = 0; i < p.w * 4; i += 4) {
+            for (int y = a.y; y < a.y + a.h; ++y) {
+                const uint8_t *src = &p.px[(size_t(y) * p.w + a.x) * 4];
+                uint8_t *row = dst + size_t(y) * stride + size_t(a.x) * 4;
+                for (int i = 0; i < a.w * 4; i += 4) {
                     const unsigned a = src[i + 3];
                     row[i] = uint8_t(src[i] * a / 255), row[i + 1] = uint8_t(src[i + 1] * a / 255);
                     row[i + 2] = uint8_t(src[i + 2] * a / 255), row[i + 3] = uint8_t(a);
@@ -1017,7 +1179,10 @@ int main(int argc, char **argv) {
 
     while (!g_stop) {
         pollfd pfd{sock, POLLIN, 0};
-        poll(&pfd, 1, 50);
+        int wait = 50;
+        if (p.demo && visible && !p.paused)  // up to the demo's next frame
+            wait = int(std::clamp<int64_t>((p.demo->due - NowNs()) / 1'000'000 + 1, 0, 50));
+        poll(&pfd, 1, wait);
         char buf[4096];
         sockaddr_un from{};
         socklen_t fromLen = sizeof from;
@@ -1102,6 +1267,28 @@ int main(int argc, char **argv) {
                     p.imageMode.clear(), dirty = true;  // no picture rather than the last one
                 } else {
                     p.imageMode = mode, dirty = true;
+                }
+            } else if (Is(buf, "demo", &rest)) {
+                // demo <path> [mirror] / demo restart / demo off: the path may hold spaces
+                std::string path = rest;
+                const bool mirror = path.size() > 7 && !path.compare(path.size() - 7, 7, " mirror");
+                if (mirror) path.resize(path.size() - 7);
+                if (path.empty()) {
+                    reply = "error usage: demo <path> [mirror] | demo restart | demo off";
+                } else if (path == "off") {
+                    p.demo.reset(), dirty = true;
+                } else if (path == "restart") {
+                    if (p.demo) p.demo->loops = 0;
+                    if (p.demo && !p.demo->Start(NowNs())) reply = "error can't read " + p.demo->path, p.demo.reset();
+                    dirty = true;
+                } else if (!p.demo || path != p.demo->path) {
+                    auto d = std::make_unique<Demo>();
+                    d->mirror = mirror;
+                    if (d->Load(path)) p.demo = std::move(d);
+                    else reply = "error can't read " + path + ": " + stbi_failure_reason(), p.demo.reset();
+                    dirty = true;  // no clip rather than the last one
+                } else if (mirror != p.demo->mirror) {
+                    p.demo->mirror = mirror, p.demo->fresh = dirty = true;
                 }
             } else if (Is(buf, "strip", &rest)) {
                 // strip <cue> <path>|<mode>|<label>;...
@@ -1248,6 +1435,16 @@ int main(int argc, char **argv) {
                     g_stop = true;
                 }
         }
+        // The demo's next frame when it's due: drawn into the picture's clip rectangle alone,
+        // unless something else changed too (then the whole picture). Hidden or paused, it waits.
+        bool frameNow = false;
+        if (p.demo && visible && !p.paused && NowNs() >= p.demo->due) {
+            const int64_t now = NowNs();
+            if (now - p.demo->due > 500'000'000) p.demo->due = now;  // after a wait: no catching up
+            if (!p.demo->Next(p.demo->due))
+                std::fprintf(stderr, "ft-handpanel: %s: %s\n", p.demo->path.c_str(), stbi_failure_reason()), p.demo.reset(), dirty = true;
+            else frameNow = !dirty && p.demoW > 0;
+        }
         const bool panelNow = visible && dirty, targetNow = targetDirty;
         if (panelNow) {
             Draw(p);
@@ -1257,6 +1454,10 @@ int main(int argc, char **argv) {
                 if (!shown) ov->ShowOverlay(h), shown = true;
             }
             dirty = false;
+        } else if (frameNow) {
+            DrawDemo(p.pic, *p.demo, p.demoX, p.demoY, p.demoW, p.demoH);
+            const Area area{p.demoX, p.demoY, p.demoW, p.demoH};
+            if (ov && shown) buffers.Present(ov, h, p.pic, &area);
         }
         if (targetNow) {
             if (t.on) {

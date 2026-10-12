@@ -11,7 +11,9 @@ The plan this belongs to is `~/Desktop/Projects/frame-hands/notes/hands-plan.md`
 | `hands/rec/panel/ft-handpanel.cpp` (C++, dev container) | The headset panel: a SteamVR overlay fixed to the head that shows the prompts. It also places the "touch the dot" target in the room and logs head and controller poses. Driven over `@ft_handpanel`. |
 | `hands/rec/session.py` (Python, no Qt) | The session runner. It reads `script.json`, starts and stops the recordings, and drives the panel. It reads the live hands file for feedback and writes each take's files. It also runs from the command line (`--dry-run`) for testing. |
 | `hands/rec/script.json` | The guided script: sections, prompts, timings. |
+| `hands/rec/script-v2.json` | The v2 script (`ft-handrec --script script-v2.json`, `session.py --script`): a demo clip per step (below). Being tried; it becomes `script.json` once settled. |
 | `hands/rec/poses/` | The pose pictures, `poses.json` and its PNGs (below). |
+| `hands/rec/demos/` | The demo clips, `<id>.gif`, made from `demo/parts.json` (below). |
 | `hands/rec/takes.py` (Python, no Qt) | Reads sessions and takes from disk: frame sets for review, deleted ranges, export (compress, strip, manifest, checksums). |
 | `hands/rec/ft_handrec.py` + `main.qml` (PySide6 + Kirigami, dev container) | The desktop window: consent, the before-you-start checklist, the session controls, review, export and upload instructions. |
 | `hands/rec/ft-handrec` | The host launcher, like `input-settings/ft-input-settings`. |
@@ -50,7 +52,7 @@ Test hooks:
 - `--dry-run` runs no processes and only prints the panel commands, with timing sped up by `--speed X`.
 - `--next-after S` presses Next by itself after S seconds of waiting (real time), so a step-mode session runs unattended. Lines on stdin steer it too: `n` or an empty line is Next, `p` pause or resume, `r` redo, `s` skip the section, `q` stop.
 - `--no-headset-button` leaves the headset's button alone (`ft-handrec --no-headset-button` too). `--button-device PATH` reads it from PATH instead, an event device or a FIFO of `input_event` structs, also in a dry run: a simulated button for tests.
-- `--auto` runs the timed flow; `--poses DIR` takes the pose pictures from DIR; `--plan` prints the sections, their steps and length.
+- `--auto` runs the timed flow; `--poses DIR` takes the pose pictures from DIR, `--demos DIR` the demo clips (`ft-handrec --demos` too); `--plan` prints the sections, their steps and length.
 - `--ignore-cameras` (`ft-handrec --ignore-cameras` too) starts even when the camera check fails. A dry run and `--ring` skip the check by themselves.
 
 ## Files
@@ -131,6 +133,7 @@ One JSON object per line:
 {"t": 123, "event": "take", "section": "static-poses", "take": "03-static-poses"}
 {"t": 123, "event": "prompt", "id": "static-poses/fist/left/near", "text": "...", "hands": "left|right|both|none",
  "pose": "fist", "distance": "near|mid|far|", "position": "centre|left|right|up|down|", "object": "", "controller": false}
+{"t": 123, "event": "prompt", "id": "index-taps/2a/left", "...": "...", "demo": "2a"}
 {"t": 123, "event": "target", "id": "touch/3", "head": [x, y, z], "room": [x, y, z], "state": "show|hold|done|timeout"}
 {"t": 123, "event": "bar", "target": 0.0}
 {"t": 123, "event": "feedback", "left": true, "right": false, "palm_m": [0.0, 0.0]}
@@ -169,7 +172,7 @@ ft-handpanel writes one line per sample, 250 a second, from `GetDeviceToAbsolute
 
 ## The panel (`ft-handpanel`)
 
-- **Placement.** A SteamVR overlay fixed to the head, like `gaze/panel/ft-gazepanel.cpp`: key `frametop.handpanel`, sort order 250. It sits 1.2 m ahead, centred 12 degrees above straight ahead, so the hands stay clear below it. It's 36 degrees wide, 4:3, 1024x768 pixels, dim and see-through. It's drawn on the CPU with stb_truetype (and stb_image for the pose pictures, PNG only, the same pinned stb commit) into three shared DMA-BUFs SteamVR imports once, as ft-gazepanel does, and is drawn again only when something changes.
+- **Placement.** A SteamVR overlay fixed to the head, like `gaze/panel/ft-gazepanel.cpp`: key `frametop.handpanel`, sort order 250. It sits 1.2 m ahead, centred 12 degrees above straight ahead, so the hands stay clear below it. It's 36 degrees wide, 4:3, 1024x768 pixels, dim and see-through. It's drawn on the CPU with stb_truetype (and stb_image for the pose pictures and demo clips, PNG and GIF, the same pinned stb commit) into three shared DMA-BUFs SteamVR imports once, as ft-gazepanel does, and is drawn again only when something changes.
 - **Layout.** The title and step on top (a red "Rec" by the step while recording), a rule. With a pose picture or a diagram, a 14-degree column on the left holds the picture (or the flipped copy and the picture side by side) and the where-to diagram under it; the text takes the right. The text column holds the instruction, the orange note, the big countdown ("3", "2", "1", then "Hold" or "Go") and the cyan action line ("Ready? Press Space or click Next"), centred together. At the bottom: the near/far bar, the hand chips, the time-left bar and the key hints.
 - **Socket.** Abstract unix datagram `@ft_handpanel` (`--socket NAME`). A sender with an address gets `ok ...` or `error ...`.
 - **Options:** `--watch-stdin` (quit when stdin closes), `--socket NAME`, `--distance M`, `--no-vr`. `--no-vr` makes no SteamVR connection and prints each picture's text to stdout: for testing without a headset.
@@ -187,6 +190,7 @@ Commands (UTF-8; `|` starts a new line in text):
 | `hands <left> <right>` | Two chips, "Left hand" and "Right hand", each `seen` (green), `lost` (orange) or `off` (hidden). |
 | `bar <target 0..1> <current 0..1 or -1> [near label] [far label]` / `bar off` | The near/far bar for the push out and back: a horizontal track with a target marker and the hand's current position. |
 | `paused on` / `paused off` | A "Paused" overlay over the picture. |
+| `demo <path> [mirror]` / `demo restart` / `demo off` | A demo clip (below) playing in a wider left column (16 degrees), looped, with the key to its colours under it: a light swatch "Light: palm", a dark one "Dark: back of hand". It takes the picture's place, and the text beside it is left-aligned (a list of motions). A new path starts it from its first frame; the same one again leaves it playing (`mirror` only flips it); `restart` starts it again. It stands still while paused. A file that can't be read: `error can't read ...` and no clip. |
 | `image <path> [mirror\|both]` / `image off` | The pose picture, a PNG (below), in the left column. `mirror` flips it (a left hand); `both` draws a flipped copy on its left. A file that can't be read: `error ...` and no picture. |
 | `where <position\|-> <distance\|->` / `where off` | The where-to diagram under the picture: a 3x3 front view with the asked cell lit (`centre`, `left`, `right`, `up`, `down`, and the push sections' `chest`, `desk`, `eye`), and a side view of the head and three marks for `near` ("Close"), `mid` ("Halfway out") and `far` ("Arm out"). `-` leaves that half out. |
 | `action <text>` | The cyan line under the instruction (empty clears it). |
@@ -214,6 +218,15 @@ It quits on SteamVR's quit event, as ft-gazepanel does. `--no-vr --dump DIR` wri
 | anything, `two_hands` | as drawn |
 
 A pose with no entry, or whose file is missing, shows no picture: the text alone. The session reads `poses.json` when it starts. The window shows the same picture (QML `Image.mirror`), its caption, and the same diagram.
+
+## Demo clips (`demos/`)
+
+The v2 script shows a looping clip for each step instead of a pose picture: generated animation of a stick-figure hand in the colours of Steam Frame passthrough, one GIF per part of `demo/parts.json` (`<id>.gif`, 640x360, 12 frames a second, 6-16 s, under 2 MB). They're made outside the Frame (Blender), so their source isn't here. The palm side of the hand is drawn light (#d5d1fe) and the back dark (#6a62d8); the panel and the window say so under each clip, and the welcome screen too.
+
+- A prompt's `"demo": "<id>"` names its clip; `"demo_mirror": true` flips it (`session.demo_view`): the clips show a right hand, or both hands, so a left-hand step flips a right hand's clip. A missing file shows no clip: the text alone.
+- The clip starts on the step's ready screen and starts again from its first frame when the hold begins (after the 3-2-1), so it can be followed. The status's `demo_run` counts those starts for the window, which plays the same clip (QML `AnimatedImage`).
+- The panel decodes a frame at a time as it plays (stb_image's GIF decoder, stepped as `stbi_load_gif_from_memory` steps it), so a clip costs three frames of memory however long it is. A frame redraws only the clip's rectangle and copies only that to a buffer that already has the rest of the picture: about 450x250 pixels 12 times a second.
+- In `script-v2.json` a one-hand part runs three steps: the left hand alone (the clip flipped), the right alone, then both at once. A part made for two hands runs once. Each step lasts about 1.2 times its clip. `"name": "v2"` goes into `session.json`'s `script`.
 
 ## The script (`script.json`)
 
@@ -245,6 +258,7 @@ A pose with no entry, or whose file is missing, shows no picture: the text alone
   - `bar`: the target marker sweeps near to far and back, `reps` times per height, at `period_s` per sweep. The current marker follows the live palm distance.
 - Each section is one take. Prompts within it are marked in `prompts.jsonl`.
 - `cue_names`: the short labels under the strip's pictures (otherwise the pose id).
+- `name`: the script's name, recorded in `session.json` (`script.name`); `demo`, `demo_mirror`: a prompt's demo clip (above).
 
 ### Sweeps
 

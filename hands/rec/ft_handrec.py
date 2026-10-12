@@ -1176,6 +1176,9 @@ def main():
                     help="test: sessions start no processes and print the panel's commands")
     ap.add_argument("--speed", type=float, default=1.0, help="test, with --dry-run: run sessions this much faster")
     ap.add_argument("--poses", help="test: the pose pictures' folder (default hands/rec/poses)")
+    ap.add_argument("--script", help="the recording script (default hands/rec/script.json; script-v2.json: "
+                                     "the v2 script with demo clips)")
+    ap.add_argument("--demos", help="the demo clips' folder, <id>.gif (default hands/rec/demos)")
     ap.add_argument("--no-headset-button", action="store_true",
                     help="sessions don't read the headset's button (Next, pause, resume)")
     ap.add_argument("--hub-dry-run", action="store_true",
@@ -1199,6 +1202,11 @@ def main():
     options = {"dry_run": True, "speed": a.speed} if a.dry_run else {}
     if a.poses:
         options["poses_dir"] = a.poses
+    if a.demos:
+        options["demos_dir"] = a.demos
+    if a.script:
+        global SCRIPT_PATH
+        SCRIPT_PATH = os.path.abspath(a.script if os.path.exists(a.script) else os.path.join(HERE, a.script))
     if a.no_headset_button:
         options["button"] = False
     if a.ignore_cameras:

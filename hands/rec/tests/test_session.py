@@ -386,6 +386,115 @@ class StripPanelTest(unittest.TestCase):
         self.assertIn("strip: off", out)
 
 
+def tiny_gif(frames, delay_cs=5):
+    """A GIF of 2x2 frames, each 4 palette indices (0-3: black, red, green, blue). Every pixel
+    is coded after a clear code, so the LZW table never grows (a valid, uncompressed GIF)."""
+    def lzw(pixels):
+        bits, out = [], bytearray()
+        for v in [x for p in pixels for x in (4, p)] + [5]:   # clear, pixel ... end
+            bits += [(v >> k) & 1 for k in range(3)]
+        for i in range(0, len(bits), 8):
+            out.append(sum(b << k for k, b in enumerate(bits[i:i + 8])))
+        return bytes([2, len(out)]) + bytes(out) + b"\0"
+    head = b"GIF89a" + struct.pack("<HHBBB", 2, 2, 0xF1, 0, 0) + bytes([0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255])
+    loop = b"\x21\xff\x0bNETSCAPE2.0\x03\x01\0\0\0"
+    body = b"".join(b"\x21\xf9\x04\x04" + struct.pack("<H", delay_cs) + b"\0\0" + b"\x2c" + struct.pack("<HHHHB", 0, 0, 2, 2, 0)
+                    + lzw(f) for f in frames)
+    return head + loop + body + b"\x3b"
+
+
+class ScriptV2Test(unittest.TestCase):
+    """script-v2.json: a step per demo clip, one-hand parts left (the clip flipped), right, both."""
+
+    def setUp(self):
+        self.script = session.load_script(os.path.join(session.HERE, "script-v2.json"))
+        with open(os.path.join(session.HERE, "demo", "parts.json")) as f:
+            self.parts = [p["id"] for p in json.load(f)["parts"]]
+
+    def test_plan(self):
+        full, skipped = session.build_plan(self.script, {"controllers": "straps", "objects": ["keyboard"]})
+        self.assertEqual(skipped, [])
+        self.assertEqual(full[0]["id"], session.HANDS_CHECK_SECTION)   # the no-hands check runs first
+        demos = [p for s in full for p in s["prompts"] if p.get("demo")]
+        self.assertEqual(sorted(set(p["demo"] for p in demos)), sorted(self.parts))   # every part, and no others
+        ids = [p["id"] for s in full for p in s["prompts"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        for p in demos:
+            self.assertEqual(bool(p.get("demo_mirror")), p["hands"] == "left", p["id"])
+            self.assertGreater(p["seconds"], 0)
+        self.assertEqual([p["hands"] for p in demos if p["demo"] == "2a"], ["left", "right", "both"])
+        self.assertLess(session.plan_seconds(self.script, full, auto=False), 15 * 60)
+        quick, _ = session.build_plan(self.script, {}, quick=True)
+        self.assertEqual([p["id"] for s in quick for p in s["prompts"]],
+                         ["hand-size/1/both/mid", "index-taps/2a/right", "palm-up/7a/both", "no-hands/none"])
+
+    def test_clips(self):
+        if not os.path.isdir(session.DEMOS_DIR):
+            self.skipTest("no demo clips in %s" % session.DEMOS_DIR)
+        for pid in self.parts:
+            self.assertTrue(os.path.isfile(os.path.join(session.DEMOS_DIR, pid + ".gif")), pid)
+
+    def test_view(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        with open(os.path.join(tmp, "2a.gif"), "wb") as f:
+            f.write(tiny_gif([[0, 1, 2, 3]]))
+        self.assertEqual(session.demo_view(tmp, {"demo": "2a", "demo_mirror": True}), (os.path.join(tmp, "2a.gif"), "mirror"))
+        self.assertEqual(session.demo_view(tmp, {"demo": "2a"}), (os.path.join(tmp, "2a.gif"), ""))
+        self.assertEqual(session.demo_view(tmp, {"demo": "3a"}), ("", ""))
+        self.assertEqual(session.demo_view(tmp, {}), ("", ""))
+
+
+class DemoPanelTest(unittest.TestCase):
+    """The panel's demo command on ft-handpanel --no-vr (skipped if it isn't built)."""
+
+    def test_demo(self):
+        import subprocess
+        binary = session.PANEL_BIN
+        if not os.access(binary, os.X_OK):
+            self.skipTest("ft-handpanel isn't built")
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        clip = os.path.join(tmp, "clip one.gif")   # a space: the path may hold them
+        with open(clip, "wb") as f:
+            f.write(tiny_gif([[0, 1, 2, 3], [3, 2, 1, 0], [1, 1, 1, 1]], delay_cs=5))
+        with open(os.path.join(tmp, "bad.gif"), "wb") as f:
+            f.write(b"GIF89a broken")
+        name = "hrtest-demo-%d" % os.getpid()
+        proc = subprocess.Popen([binary, "--no-vr", "--socket", name, "--dump", tmp], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        try:
+            panel = session.Panel(name=name)
+            for _ in range(50):
+                if panel.cmd("ping", reply=True, timeout=0.1):
+                    break
+                if proc.poll() is not None:
+                    self.skipTest("ft-handpanel doesn't run here: " + proc.stderr.read().strip()[-200:])
+                time.sleep(0.1)
+            else:
+                self.fail("ft-handpanel --no-vr doesn't answer")
+            replies = [panel.cmd("demo %s mirror" % clip, reply=True), panel.cmd("show", reply=True)]
+            time.sleep(0.4)   # 3 frames of 50 ms: it loops
+            replies.append(panel.cmd("note looped", reply=True))
+            replies.append(panel.cmd("demo restart", reply=True))
+            replies += [panel.cmd("demo", reply=True), panel.cmd("demo %s/missing.gif" % tmp, reply=True),
+                        panel.cmd("demo %s/bad.gif" % tmp, reply=True), panel.cmd("demo off", reply=True)]
+            panel.close()
+        finally:
+            proc.terminate()
+            out = proc.communicate(timeout=5)[0]
+        self.assertEqual(replies[:4], ["ok"] * 4)
+        self.assertTrue(replies[4].startswith("error usage: demo"))
+        self.assertTrue(replies[5].startswith("error can't read"))
+        self.assertTrue(replies[6].startswith("error can't read"))
+        self.assertEqual(replies[7], "ok")
+        demos = [l for l in out.splitlines() if l.startswith("demo:")]
+        self.assertIn("demo: %s 2x2 frame 0 loop 0 mirror, drawn" % clip, demos[0])
+        self.assertGreater(int(demos[1].split(" loop ")[1].split()[0]), 0)   # past the last frame, from the start again
+        self.assertIn("demo: %s 2x2 frame 0 loop 0 mirror" % clip, demos[2])   # restart
+        self.assertEqual(demos[-1], "demo: off")
+
+
 # /proc/bus/input/devices as the Frame has it (2026-10-02), trimmed, plus a USB mouse.
 DEVICES = """I: Bus=0019 Vendor=0001 Product=0001 Version=0100
 N: Name="gpio-keys"

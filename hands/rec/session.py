@@ -57,6 +57,7 @@ FT_CAMD = os.path.join(HANDS, "build", "ft-camd")
 PANEL_BIN = os.path.join(HERE, "build", "ft-handpanel")
 SCRIPT_PATH = os.path.join(HERE, "script.json")
 POSES_DIR = os.path.join(HERE, "poses")   # the pose pictures: poses.json and its PNGs
+DEMOS_DIR = os.path.join(HERE, "demos")   # the demo clips: <id>.gif (DESIGN.md "Demo clips")
 BASE_DIR = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 PANEL_SOCKET = "ft_handpanel"
 CAMD_UNIT = "frametop-handrec-camd.service"
@@ -946,11 +947,22 @@ def pose_view(poses, p):
     return e["path"], mode, e["caption"]
 
 
+def demo_view(demos_dir, p):
+    """A prompt's demo clip: (path, mode), mode "" (as made: a right hand, or both hands) or
+    "mirror" (the prompt's "demo_mirror": a right hand's clip for the left hand). ("", "")
+    when it has none, or its file isn't there."""
+    demo = p.get("demo") or ""
+    path = os.path.join(demos_dir, os.path.basename(demo) + ".gif") if demo else ""
+    if not path or not os.path.isfile(path):
+        return "", ""
+    return path, "mirror" if p.get("demo_mirror") else ""
+
+
 # ------------------------------------------------------------------------------------------
 # The script
 
 HAND_VALUES = ("left", "right", "both", "none", "any", "")
-PROMPT_KEYS = ("text", "seconds", "hands", "pose", "distance", "position", "object", "controller")
+PROMPT_KEYS = ("text", "seconds", "hands", "pose", "distance", "position", "object", "controller", "demo")
 
 
 def _when_ok(cond, ctx):
@@ -989,7 +1001,7 @@ def _set_ids(section, prompts):
     for p in prompts:
         if not p.get("id"):
             parts = [section["id"]] + [re.sub(r"[^a-z0-9]+", "-", str(p[k]).lower()).strip("-")
-                                       for k in ("pose", "hands", "distance", "position", "object") if p[k]]
+                                       for k in ("demo", "pose", "hands", "distance", "position", "object") if p[k]]
             p["id"] = "/".join(parts) if len(parts) > 1 else "%s/%d" % (section["id"], len(seen) + 1)
         n = seen.get(p["id"], 0) + 1
         seen[p["id"]] = n
@@ -1292,7 +1304,7 @@ class Session:
     def __init__(self, base_dir, profile, checklist, lighting_choice, script_path, *, ring=None,
                  start_processes=True, dry_run=False, speed=1.0, on_status=None, hands_dir=None, panel_bin=None,
                  auto=False, next_after=None, poses_dir=None, button=True, button_device=None,
-                 check_cameras=True, hands_reader=None, quick=False, seed=None):
+                 check_cameras=True, hands_reader=None, quick=False, seed=None, demos_dir=None):
         self.base_dir = os.path.abspath(os.path.expanduser(base_dir or BASE_DIR))
         self.profile = dict(profile or {})
         self.checklist = dict(checklist or {})
@@ -1320,6 +1332,7 @@ class Session:
         # the plan in the script's order; the session's own shuffle comes with its id (_make_dir)
         self.plan, self.skipped = build_plan(self.script, self.checklist, seed=seed, quick=self.quick)
         self._poses = load_poses(poses_dir or POSES_DIR)
+        self._demos_dir = demos_dir or DEMOS_DIR
         self.session_dir = ""
         self._thread = None
         self._lock = threading.Lock()
@@ -1334,7 +1347,7 @@ class Session:
                         "prompt": "", "seconds_left": 0.0, "note": "", "hands": {"left": None, "right": None},
                         "take": None, "error": "", "waiting": False, "countdown": 0, "big": "", "can_redo": False,
                         "image": "", "image_mode": "", "caption": "", "position": "", "distance": "",
-                        "ready_text": READY_TEXT, "button": False, "mouse": True,
+                        "demo": "", "demo_mode": "", "demo_run": 0, "ready_text": READY_TEXT, "button": False, "mouse": True,
                         "camera": None, "nohands": False, "strip": [], "cue": -1, "quick": self.quick}
         self._last_emit = 0.0
         self._log_file = None
@@ -1560,7 +1573,8 @@ class Session:
             "checklist": self.checklist,
             "device": {"steamos": _os_version(), "steamvr": _steamvr_version(), "cameras": cams},
             "calibration_removed": removed,
-            "script": {"version": self.script.get("version"), "sections": [s["id"] for s in self.plan],
+            "script": {"version": self.script.get("version"), "name": self.script.get("name", ""),
+                       "sections": [s["id"] for s in self.plan],
                        "skipped": self.skipped},
             "mode": "auto" if self.auto else "step", "quick": self.quick,
             "shuffle": {"seed": self.seed, "sweeps": plan_record(self.plan)},
@@ -1586,7 +1600,7 @@ class Session:
         self._panel.cmd("paused off")
         for key, c in (("note", "note "), ("countdown", "countdown off"), ("hands", "hands off off"),
                        ("bar", "bar off"), ("target", "target off"), ("image", "image off"), ("where", "where off"),
-                       ("big", "big "), ("action", "action "), ("rec", "rec off"), ("strip", "strip off")):
+                       ("demo", "demo off"), ("big", "big "), ("action", "action "), ("rec", "rec off"), ("strip", "strip off")):
             self._panel.set(key, c)
         self._hints(action=False)
 
@@ -1788,7 +1802,7 @@ class Session:
                    prompt=error or (self._stop_note if state == "stopped" else "") or screen.get("text", "").replace("|", "\n"),
                    hands={"left": None, "right": None}, nohands=False,
                    waiting=False, countdown=0, big="", can_redo=False, image="", image_mode="", caption="",
-                   position="", distance="", strip=[], cue=-1)
+                   position="", distance="", strip=[], cue=-1, demo="", demo_mode="")
 
     # --- the timing loop
     def _controls(self):
@@ -1992,10 +2006,13 @@ class Session:
             self._panel.set("text", "text " + clean_text(text))
 
     def _view(self, p=None):
-        """The prompt's picture and where-to diagram, on the panel and in the status (sent with
-        the next _emit); none without a prompt."""
+        """The prompt's picture or demo clip and where-to diagram, on the panel and in the status
+        (sent with the next _emit); none without a prompt. A demo clip takes the picture's place."""
         p = p or {}
-        path, mode, caption = ("", "", "") if p.get("cues") else pose_view(self._poses, p)
+        demo, demo_mode = demo_view(self._demos_dir, p)
+        path, mode, caption = ("", "", "") if p.get("cues") or demo else pose_view(self._poses, p)
+        self._panel.set("demo", "demo %s%s" % (demo, " " + demo_mode if demo_mode else "") if demo else "demo off")
+        self._status.update(demo=demo, demo_mode=demo_mode)
         self._strip(p)
         pos, dist = p.get("position") or "", p.get("distance") or ""
         self._panel.set("image", "image %s%s" % (path, " " + mode if mode else "") if path else "image off")
@@ -2193,6 +2210,8 @@ class Session:
 
     def _prompt_event(self, p):
         extra = {"controllers": p["controllers"]} if p["controllers"] else {}
+        if p.get("demo"):
+            extra["demo"] = p["demo"]
         if p.get("cue"):   # a sweep's cue: the pose highlighted from now, within the step
             extra.update(cue=True, step=p["step"])
         return self._event("prompt", id=p["id"], text=p["text"], hands=p["hands"], pose=p["pose"],
@@ -2204,6 +2223,11 @@ class Session:
         self._fb.pop("lost_key", None)
         self._show(s["title"], step, p["text"])
         self._view(p)
+        if state == "running" and self._status["demo"]:
+            # The hold starts: the clip from its start, so it can be followed (the window's too:
+            # demo_run counts the starts).
+            self._panel.cmd("demo restart")
+            self._status["demo_run"] += 1
         t = self._prompt_event(p)
         if self._step_t0 is None:
             self._step_t0 = t
@@ -2589,6 +2613,7 @@ def main():
     ap.add_argument("--next-after", type=float, metavar="S",
                     help="test: press Next by itself after S seconds of waiting (real time)")
     ap.add_argument("--poses", help="the pose pictures' folder, with poses.json (default hands/rec/poses)")
+    ap.add_argument("--demos", help="the demo clips' folder, <id>.gif (default hands/rec/demos)")
     ap.add_argument("--no-headset-button", action="store_true",
                     help="don't read the headset's button (gpio-keys KEY_SELECT: a press is Next, pause or resume; "
                          "two are redo; a hold is stop)")
@@ -2635,6 +2660,8 @@ def main():
                                                     st["prompt"].replace("\n", " | "))
         if st["image"]:
             line += "  [%s%s]" % (os.path.basename(st["image"]), " " + st["image_mode"] if st["image_mode"] else "")
+        if st["demo"]:
+            line += "  [%s%s]" % (os.path.basename(st["demo"]), " " + st["demo_mode"] if st["demo_mode"] else "")
         if st["waiting"]:
             line += "  (waiting for Next)"
         if st["note"]:
@@ -2646,7 +2673,8 @@ def main():
     s = Session(base, profile, checklist, a.lighting, a.script, ring=a.ring, start_processes=not a.no_start,
                 dry_run=a.dry_run, speed=a.speed, on_status=on_status, hands_dir=a.hands_dir, panel_bin=a.panel,
                 auto=a.auto, next_after=a.next_after, poses_dir=a.poses, button=not a.no_headset_button,
-                button_device=a.button_device, check_cameras=not a.ignore_cameras, quick=a.quick, seed=a.seed)
+                button_device=a.button_device, check_cameras=not a.ignore_cameras, quick=a.quick, seed=a.seed,
+                demos_dir=a.demos)
     est = plan_seconds(s.script, s.plan, auto=a.auto)
     worst = plan_seconds(s.script, s.plan, worst=True, auto=a.auto)
     print("%d sections%s, %s mode: about %.1f min%s (at most %.1f)%s" % (

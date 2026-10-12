@@ -18,7 +18,7 @@ import tempfile
 
 GIFSICLE = os.environ.get("HANDDEMO_GIFSICLE") or shutil.which("gifsicle") or os.path.expanduser(
     "~/.cache/gifwork/gifsicle-src/src/gifsicle")
-MAX_S = 10.0
+MAX_S = 15.0   # 10 s for most parts; 2b, 7a and 11a run longer
 
 
 def make(video, out, t_in, t_out, crop, width, fps, lossy):

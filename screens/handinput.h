@@ -421,13 +421,17 @@ struct Params {
     // (Easier since the second live test, 2026-10-11: "really difficult": strokes counted came at 30-35 cm,
     // just over the 30 cm asked; was open 1.55, edge 0.55, lead 0.6, front 0.18, 30 cm in 600 ms, drift 0.15.
     // The flags replayed: 22 cm caught 3 strokes in 49 flags of other use (fists and drags), 25 cm one.)
+    // (Easier again after the gaze test, 2026-10-11 18:05: "way too difficult": the strokes counted came at
+    // 25-30 cm in 230-470 ms, at both limits. Now 22 cm (18 caught 3 strokes of 19-21 cm in 45 flags of other use), quick somewhere along it (sweepPeak, 0.7 m/s, so a
+    // slow drift isn't one) within sweepMs 900; open 1.3, edge 0.75, lead 0.4.)
+    double sweepPeak = 0.7;
     bool sweep = true;
     // only the palm leading (user, 2026-10-11: "the reverse, moving towards the back of the hand, doesn't do
     // anything; using it will require palming through with both hands": the right hand palming left brings
     // the next, the left hand palming right the one before). HANDS_SWEEP_BACK=1: the back of the hand too.
     bool sweepBack = false;
-    double sweepOpen = 1.4, sweepEdge = 0.7, sweepLead = 0.45, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
-    double sweepDistance = 0.25, sweepMs = 500, sweepDrift = 0.2, sweepRest = 0.15;
+    double sweepOpen = 1.3, sweepEdge = 0.75, sweepLead = 0.4, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
+    double sweepDistance = 0.22, sweepMs = 900, sweepDrift = 0.2, sweepRest = 0.15;
     bool flick = true;
     double flickSpeed = 1.2, flickTravel = 0.12, flickMs = 200, flickFitMs = 100, flickNear = 0.12, flickBack = 0.04;
     double flickAngle = 40, flickOpen = 1.5, flickPokeSpeed = 0.8, flickRefractoryMs = 1000, flickStartSpeed = 0.6;
@@ -831,7 +835,7 @@ private:
         int64_t letGoNs = INT64_MIN / 2;
         // the stroke under way (Params::sweep): where it began (sideways, up, forward: m in the head's
         // level frame), when, which way, whether it's spun or been refused, and the last frame's sideways place
-        double swX0 = 0, swY0 = 0, swZ0 = 0, swLast = 0;
+        double swX0 = 0, swY0 = 0, swZ0 = 0, swLast = 0, swPeak = 0;   // swPeak: the stroke's fastest (m/s)
         int64_t swT0 = 0, swLastT = 0;
         int swDir = 0;
         bool swDone = false, swHave = false;

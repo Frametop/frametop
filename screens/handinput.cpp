@@ -1836,7 +1836,9 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
     // a new stroke where it turns, slows, or starts
     if (!sd.swHave || dt <= 1e-3 || dt > 0.2 || dir != sd.swDir || std::fabs(v) < p_.sweepRest) {
         sd.swX0 = x, sd.swY0 = y, sd.swZ0 = z, sd.swT0 = t, sd.swDir = std::fabs(v) < p_.sweepRest ? 0 : dir, sd.swDone = false;
+        sd.swPeak = std::fabs(v);
     } else if (!sd.swDone) {
+        sd.swPeak = std::max(sd.swPeak, std::fabs(v));
         const double along = (x - sd.swX0) * dir;
         if (!place || !shape || std::fabs(y - sd.swY0) > p_.sweepDrift || std::fabs(z - sd.swZ0) > p_.sweepDrift ||
             t - sd.swT0 > int64_t(p_.sweepMs * 1e6)) {
@@ -1846,6 +1848,8 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
                     !place ? "not in front, at a panel, or busy" : !shape ? "not an open hand on its edge" : "too slow or off level");
             }
             sd.swDone = true;
+        } else if (along >= p_.sweepDistance && sd.swPeak < p_.sweepPeak) {
+            // far enough, not quick enough yet: it may still speed up (until sweepMs)
         } else if (along >= p_.sweepDistance && !p_.sweepBack && nSide * dir <= 0) {
             sd.swDone = true;   // the back of the hand leading: the return stroke, nothing (Params::sweepBack)
             Log("%s hand swept %s %.0f cm with the back of the hand leading: the return stroke, not the lazy susan", SideName(s),
@@ -1856,8 +1860,8 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
             Event e;
             e.type = Event::Spin, e.side = s, e.x = dir;
             events_.push_back(e);
-            Log("%s hand swept %s %.0f cm in %.0f ms (the %s leading): the lazy susan, one panel", SideName(s), dir > 0 ? "right" : "left",
-                along * 100, (t - sd.swT0) / 1e6, nSide * dir > 0 ? "palm" : "back of the hand");
+            Log("%s hand swept %s %.0f cm in %.0f ms (the %s leading, %.1f m/s at most): the lazy susan, one panel", SideName(s),
+                dir > 0 ? "right" : "left", along * 100, (t - sd.swT0) / 1e6, nSide * dir > 0 ? "palm" : "back of the hand", sd.swPeak);
         }
     }
     sd.swLast = x, sd.swLastT = t, sd.swHave = true;

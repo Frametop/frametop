@@ -950,8 +950,10 @@ int main() {
     int handPressPending = 0;
     // A pinch begun while its hand moves fast (a lazy susan stroke, a wave) isn't a click: the palm over
     // POINTER_PINCH_MAX_SPEED (0.6 m/s) within the last 0.25 s (sideFastAt).
-    double pinchMaxSpeed = 0.6;
+    double pinchMaxSpeed = 1.0;
     std::chrono::steady_clock::time_point sideFastAt[2]{};
+    double sideSpeed[2] = {0, 0};   // each hand's palm speed, smoothed (frame-to-frame speed alone is noisy: at 0.6
+                                    // m/s it refused dozens of still pinches, 2026-10-11 18:02-18:04)
     gazehand::TapArm tapArm;
     bool rightDragPending = false;
     double pinchGain = 0.5, pinchDeadzone = 1.5, gripGain = 1.0, handBelow = 0.35;
@@ -1014,7 +1016,7 @@ int main() {
         gazeChord = ConfDouble(conf, "POINTER_GAZE_CHORD", 0) != 0;
         gazeRightDrag = std::clamp(ConfDouble(conf, "POINTER_GAZE_RIGHT_DRAG", 0), 0.0, 5.0);
         gazeTwoHand = ConfDouble(conf, "POINTER_GAZE_TWO_HAND", 1) != 0;
-        pinchMaxSpeed = std::clamp(ConfDouble(conf, "POINTER_PINCH_MAX_SPEED", 0.6), 0.0, 10.0);
+        pinchMaxSpeed = std::clamp(ConfDouble(conf, "POINTER_PINCH_MAX_SPEED", 1.0), 0.0, 10.0);
         typingHide = std::clamp(ConfDouble(conf, "POINTER_TYPING_HIDE", 1.5), 0.0, 30.0);
         gazeScroll = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL", 1.0), -5.0, 5.0);
         gazeScrollGap = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL_GAP", 0.035), 0.01, 0.08);
@@ -1266,6 +1268,7 @@ int main() {
         bool gazeScroll = false;  // ...a three-finger pinch: it scrolls (gazehand.h), from beginPoint
         Vec3 scrollRight;         // ...across: the head's right at the begin
         double scrollMax = 0;     // ...the largest stick deflection, for its log line
+        int second = -1, secondKind = 0;   // the two-hand press: the other hand's pinch that pressed, while it's held
     } hold;
     // Gaze pinches (see "Gaze pinch" at the top): the gaze as it came, for the lock; a click one is
     // due (its log line goes out with the click, gazeClickSide: its side); why the held one ended;
@@ -2313,7 +2316,8 @@ int main() {
                         sideCurl[c.side] = fhray::FistCurl(c.pts, [](Vec3 v) { return Length(v); });
                         sideGap[c.side][0] = c.pinchD[0] >= 0 ? c.pinchD[0] : Length(c.pts[4] - c.pts[8]);
                         sideGap[c.side][1] = c.pinchD[1] >= 0 ? c.pinchD[1] : Length(c.pts[4] - c.pts[12]);
-                        if (c.velValid && pinchMaxSpeed > 0 && Length(c.vel) > pinchMaxSpeed) sideFastAt[c.side] = tnow;
+                        if (c.velValid) sideSpeed[c.side] = 0.6 * sideSpeed[c.side] + 0.4 * Length(c.vel);
+                        if (pinchMaxSpeed > 0 && sideSpeed[c.side] > pinchMaxSpeed) sideFastAt[c.side] = tnow;
                     }
             }
             // The hand ray (see "Hand ray" at the top): each side's hand, when a new frame came.
@@ -2869,12 +2873,19 @@ int main() {
             } else if (gazeOn && gazeTwoHand && kind != 1 && hold.src == Src::Hand && hold.side != s && hold.gaze.On() &&
                        !hold.pressed && aimHeld && !hold.gazeScroll && !hold.rightDrag) {
                 // the two-hand press: the held pinch presses where the pointer is (its nudge), and drags
+                // as Meta+K with Meta+J held: the left button where the dot is now; the drag lasts while either
+                // hand's pinch is held, and the one still pinching drags
                 handUsed = tnow;
-                if (kind == 2) hold.gaze.PressNow(secsOf(tnow), 0);
-                else hold.gaze.Chord(secsOf(tnow));
-                handPressPending = kind == 2 ? 2 : 1;
-                pinchLog(s, kind, kind == 2 ? "the right button down where the other hand's pinch aims: it drags"
-                                            : "the left button down where the other hand's pinch aims: it drags");
+                hold.gaze.Chord(secsOf(tnow));
+                handPressPending = 1;
+                hold.second = s, hold.secondKind = kind;
+                pinchLog(s, kind, "the left button down where the other hand's pinch aims: a drag while either pinch holds");
+            } else if (gazeOn && gazeTwoHand && kind != 1 && hold.src == Src::Hand && hold.side != s && hold.gaze.On() &&
+                       hold.pressed && hold.second < 0 && !hold.gazeScroll) {
+                // the other hand's pinch during a drag: it joins it (the drag lasts while either pinch holds)
+                handUsed = tnow;
+                hold.second = s, hold.secondKind = kind;
+                pinchLog(s, kind, "joined the other hand's drag: it lasts while either pinch holds");
             } else if (chordable(s, kind)) {
                 beginGazePinch(s, kind, g);  // the chord, ray or not (see "Gaze pinch" at the top)
             } else if (ray && kind != 1) {
@@ -2944,7 +2955,20 @@ int main() {
                     const bool began = g.begins != seenBegins[k][s], ended = g.ends != seenEnds[k][s];
                     const bool lost = g.flags & FH_PINCH_LOST;
                     seenBegins[k][s] = g.begins, seenEnds[k][s] = g.ends;
-                    if (holdingKind(s, k) && ended) endGesture(lost, kLostPinch);  // the one held ended (another may have begun)
+                    if (hold.second == s && hold.secondKind == k && ended) hold.second = -1;   // the two-hand press's other pinch let go
+                    if (holdingKind(s, k) && ended) {   // the one held ended (another may have begun)
+                        const int other = k == 0 ? 2 : k == 2 ? 0 : -1;
+                        if (hold.gazeScroll && other >= 0 && (slots[other][s].flags & FH_PINCH_DOWN)) {
+                            hold.right = other == 2;   // a three-finger pinch: ft-hands calls the other finger now; it goes on
+                        } else if (hold.pressed && hold.second >= 0 && hold.second != s) {
+                            // the two-hand press (see gazeTwoHand): the other hand's pinch still holds it, and drags now
+                            hold.side = hold.second, hold.right = hold.secondKind == 2, hold.second = -1;
+                            hold.gaze.Take(yaw, pitch);
+                            if (debug) std::printf("two-hand press: the %s hand drags on\n", hold.side ? "right" : "left");
+                        } else {
+                            endGesture(lost, kLostPinch);
+                        }
+                    }
                     if (chordHolding(s, k) && ended) chordEnds(lost, kLostPinch);
                     for (PendingBegin &p : pendingBegins)
                         if (p.side == s && p.kind == k && ended) p.ended = true, p.lost = lost;
@@ -3140,16 +3164,19 @@ int main() {
         if (hold.src == Src::Hand || hold.src == Src::Ray || chordBtn.On()) {
             // (patient: 4 s while nothing is pressed, 2.5 s while it is; user 2026-10-11, held gaze pinches ended
             // here 1.5 s in while ft-hands still held them: the log line says what the file looked like)
-            const uint64_t staleNs = hold.pressed || leftHeld || chordBtn.On() ? 2'500'000'000ull : 4'000'000'000ull;
+            const int64_t staleNs = hold.pressed || leftHeld || chordBtn.On() ? 2'500'000'000ll : 4'000'000'000ll;
+            // signed: ft-hands may publish just after this loop's tnow, and an unsigned age wrapped to 584 years
+            // and ended the gesture (user 2026-10-11: "taps and pinches release way too easily")
+            const int64_t pubAge = int64_t(nowNs) - int64_t(handPublished);
             static char stale[160];
-            if (nowNs - handPublished > staleNs)
+            if (pubAge > staleNs)
                 std::snprintf(stale, sizeof stale, "hand tracking stopped (nothing new for %.1f s: seq %llu, published %.2f s ago, captured %.2f s ago)",
-                              staleNs / 1e9, (unsigned long long)handSeq, (nowNs - handPublished) / 1e9,
+                              staleNs / 1e9, (unsigned long long)handSeq, pubAge / 1e9,
                               handOk ? (double(nowNs) - double(hg.capture_ns)) / 1e9 : -1.0);
             const char *why = !active ? "the pointer went"
                             : handsOn && tnow - handOkAt > std::chrono::milliseconds(500) ? "the gestures file can't be read"
                             : !handsOn ? "hand input turned off"
-                            : nowNs - handPublished > staleNs ? stale
+                            : pubAge > staleNs ? stale
                             : nullptr;
             if (why && (hold.src == Src::Hand || hold.src == Src::Ray)) endGesture(true, why);
             if (why) chordEnds(true, why);

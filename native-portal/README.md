@@ -100,8 +100,10 @@ The current 2112-byte payload begins with four float4 values:
 
 The remaining 2048 bytes hold up to 64 capsules, each two float4 values:
 `(A.x,A.y,A.z,ra), (B.x,B.y,B.z,rb)`. Unused slots are zero. Endpoints are in
-raw tracking coordinates and radii are metres. A private uniform buffer at set 1
-holds these capsules; the native camera descriptors stay at set 0. Each native
+raw tracking coordinates and radii are metres. A private 2304-byte uniform buffer
+at set 1 holds these capsules, eight conservative bounding spheres and eight
+capsule ranges. The layer derives the bounds and ranges from the same snapshot;
+the public payload stays 2112 bytes. The native camera descriptors stay at set 0. Each native
 command recording owns its buffer and descriptor until reset or destruction,
 so subsequent snapshots cannot overwrite data still used by the GPU.
 
@@ -111,8 +113,21 @@ this plane's local coordinates. The fragment shader currently accepts the unit
 rectangle. Hand coverage is the union of rays intersecting tapered capsules,
 using the native eye origin separately for each eye. The shader minimizes ray
 distance squared minus radius squared along each capsule and stops on the first
-hit; rectangle hits skip the capsule loop. Native camera processing and the
+hit. Eight static groups reject rays outside their bounding spheres before
+testing up to eight capsules per group. Rectangle hits, full-room passthrough
+and empty hand snapshots skip capsule tests. The desktop uses the same bounds
+to open alpha in its stereo panels. Native camera processing and the
 528-byte camera uniform buffer are intact.
+
+An isolated GLES benchmark on the Frame GPU used 50 capsules reconstructed from
+a two-hand recording and the installed three-screen layout, totaling 24,652,800
+stereo pixels per update. The original desktop masking pass took 65.8 ms; the
+bounded version took 8.3 ms. Both versions produced identical pixel hashes for
+zero, one and two hands. This benchmark substitutes a simple texture for the
+desktop source and excludes native camera rendering and the rest of SteamVR.
+It measures the desktop mask cost, not total compositor frame time. Verify the
+complete worn-headset session after loading both graphics components, without
+full-rate raw camera recording competing for storage and memory bandwidth.
 
 The Hands option reuses upstream `handcut::Hands` capture-pose reconstruction,
 motion prediction and 300-ms expiry. It does not depend on panel cutouts or the

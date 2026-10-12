@@ -6,7 +6,8 @@ reads four vec4 push constants: plane center, two half-extent vectors, control.
 Location 3 carries homogeneous plane coordinates, 4 the raw eye ray, and 5
 the eye origin and capsule count. Flat location 6 carries control.w: values above
 0.5 bypass our mask for full-room passthrough. The fragment mask unions the rectangle with
-upstream hand capsules supplied through a separate 2048-byte uniform buffer.
+upstream hand capsules supplied through a separate 2304-byte uniform buffer,
+including conservative group bounds and capsule ranges computed on the CPU.
 """
 import argparse
 import hashlib
@@ -213,8 +214,8 @@ def patch(text, stage, raw_position=None):
         # Minimizing squared ray distance minus radius squared is a quadratic;
         # endpoints plus its stationary point give exact coverage for this shape.
         glsl = next(line.split()[0] for line in lines if '= OpExtInstImport "GLSL.std.450"' in line)
-        n128 = a.declaration(f'OpConstant {u32} 128')
-        array = a.declaration(f'OpTypeArray {v4} {n128}')
+        n144 = a.declaration(f'OpConstant {u32} 144')
+        array = a.declaration(f'OpTypeArray {v4} {n144}')
         hand_block = a.declaration(f'OpTypeStruct {array}')
         hand_ptr = a.declaration(f'OpTypePointer Uniform {hand_block}')
         hand = a.declaration(f'OpVariable {hand_ptr} Uniform')
@@ -234,68 +235,107 @@ def patch(text, stage, raw_position=None):
         ray = emit(f'OpLoad {v3} {ray_var}')
         direction = emit(f'OpExtInst {v3} {glsl} Normalize {ray}')
         good = emit(f'OpLogicalNot {boolean} {bad}')
-        # Full room bypasses only our injected discard; native sampling stays intact.
         half = a.declaration(f'OpConstant {f32} 0.5')
         full = emit(f'OpLoad {f32} {full_var}')
         bypass = emit(f'OpFOrdGreaterThan {boolean} {full} {half}')
-        good = emit(f'OpLogicalOr {boolean} {good} {bypass}')
-        header, body, continuing, done = [a.fresh() for _ in range(4)]
-        index_id, next_index, hit, next_hit = [a.fresh() for _ in range(4)]
-        code += [f'OpBranch {header}', f'{header} = OpLabel',
-                 f'{index_id} = OpPhi {u32} {izero} {entry_label} {next_index} {continuing}',
-                 f'{hit} = OpPhi {boolean} {good} {entry_label} {next_hit} {continuing}']
-        remaining = emit(f'OpULessThan {boolean} {index_id} {count}')
-        missed = emit(f'OpLogicalNot {boolean} {hit}')
-        again = emit(f'OpLogicalAnd {boolean} {remaining} {missed}')
-        code += [f'OpLoopMerge {done} {continuing} None', f'OpBranchConditional {again} {body} {done}',
-                 f'{body} = OpLabel']
-        ai = emit(f'OpIMul {u32} {index_id} {itwo}')
-        bi = emit(f'OpIAdd {u32} {ai} {ione}')
-        ends = []
-        for idx in (ai, bi):
-            address = emit(f'OpAccessChain {member_ptr} {hand} {izero} {idx}')
-            ends.append(emit(f'OpLoad {v4} {address}'))
-        av, bv = [emit(f'OpVectorShuffle {v3} {x} {x} 0 1 2') for x in ends]
-        ra, rb = [emit(f'OpCompositeExtract {f32} {x} 3') for x in ends]
-        def op(name, typ, *values):
-            return emit(f'Op{name} {typ} ' + ' '.join(values))
-        def scalar(name, *values):
-            return op(name, f32, *values)
-        def ext(name, *values):
-            return emit(f'OpExtInst {f32} {glsl} {name} ' + ' '.join(values))
-        w = op('FSub', v3, av, eye3)
-        bone = op('FSub', v3, bv, av)
-        depth = scalar('Dot', w, direction)
-        slope = scalar('Dot', bone, direction)
-        p = op('FSub', v3, w, op('VectorTimesScalar', v3, direction, depth))
-        b = op('FSub', v3, bone, op('VectorTimesScalar', v3, direction, slope))
-        dr = scalar('FSub', rb, ra)
-        qa = scalar('FSub', scalar('Dot', b, b), scalar('FMul', dr, dr))
-        qb = scalar('FSub', scalar('Dot', p, b), scalar('FMul', ra, dr))
-        qc = scalar('FSub', scalar('Dot', p, p), scalar('FMul', ra, ra))
-        positive = op('FOrdGreaterThan', boolean, slope, eps)
-        negative = op('FOrdLessThan', boolean, slope, scalar('FNegate', eps))
-        moving = op('LogicalOr', boolean, positive, negative)
-        safe_slope = op('Select', f32, moving, slope, one)
-        crossing = scalar('FDiv', scalar('FSub', near, depth), safe_slope)
-        lo = op('Select', f32, positive, ext('FMax', zero, crossing), zero)
-        hi = op('Select', f32, negative, ext('FMin', one, crossing), one)
-        interval = op('FOrdLessThanEqual', boolean, lo, hi)
-        forward = op('LogicalOr', boolean, moving, op('FOrdGreaterThanEqual', boolean, depth, near))
-        valid = op('LogicalAnd', boolean, interval, forward)
-        convex = op('FOrdGreaterThan', boolean, qa, eps)
-        safe_a = op('Select', f32, convex, qa, one)
-        stationary = ext('FClamp', scalar('FDiv', scalar('FNegate', qb), safe_a), lo, hi)
-        def quadratic(t):
-            twice_b = scalar('FAdd', qb, qb)
-            return scalar('FAdd', scalar('FMul', scalar('FAdd', scalar('FMul', qa, t), twice_b), t), qc)
-        minimum = ext('FMin', quadratic(lo), quadratic(hi))
-        minimum = op('Select', f32, convex, ext('FMin', minimum, quadratic(stationary)), minimum)
-        inside = op('FOrdLessThanEqual', boolean, minimum, zero)
-        code += [f'{next_hit} = OpLogicalAnd {boolean} {valid} {inside}',
-                 f'OpBranch {continuing}', f'{continuing} = OpLabel',
-                 f'{next_index} = OpIAdd {u32} {index_id} {ione}', f'OpBranch {header}', f'{done} = OpLabel']
-        bad = emit(f'OpLogicalNot {boolean} {hit}')
+        previous_hit = emit(f'OpLogicalOr {boolean} {good} {bypass}')
+        original_hit, original_entry = previous_hit, entry_label
+        has_capsules = emit(f'OpUGreaterThan {boolean} {count} {izero}')
+        needs_hit = emit(f'OpLogicalNot {boolean} {previous_hit}')
+        needs_capsules = emit(f'OpLogicalAnd {boolean} {has_capsules} {needs_hit}')
+        hand_entry, hand_done = a.fresh(), a.fresh()
+        code += [f'OpSelectionMerge {hand_done} None',
+                 f'OpBranchConditional {needs_capsules} {hand_entry} {hand_done}',
+                 f'{hand_entry} = OpLabel']
+        entry_label = hand_entry
+        # Static group indices avoid costly per-fragment group indexing. Bounds
+        # and ranges are computed from the same immutable CPU snapshot.
+        for group in range(8):
+            bound_index = a.declaration(f'OpConstant {u32} {128+group}')
+            address = emit(f'OpAccessChain {member_ptr} {hand} {izero} {bound_index}')
+            sphere = emit(f'OpLoad {v4} {address}')
+            center = emit(f'OpVectorShuffle {v3} {sphere} {sphere} 0 1 2')
+            radius = emit(f'OpCompositeExtract {f32} {sphere} 3')
+            w = emit(f'OpFSub {v3} {center} {eye3}')
+            t = emit(f'OpDot {f32} {w} {direction}')
+            far = emit(f'OpFAdd {f32} {t} {radius}')
+            forward = emit(f'OpFOrdGreaterThanEqual {boolean} {far} {near}')
+            length2 = emit(f'OpDot {f32} {w} {w}')
+            t2 = emit(f'OpFMul {f32} {t} {t}')
+            distance2 = emit(f'OpFSub {f32} {length2} {t2}')
+            radius2 = emit(f'OpFMul {f32} {radius} {radius}')
+            inside = emit(f'OpFOrdLessThanEqual {boolean} {distance2} {radius2}')
+            eligible = emit(f'OpLogicalAnd {boolean} {forward} {inside}')
+            range_index = a.declaration(f'OpConstant {u32} {136+group}')
+            address = emit(f'OpAccessChain {member_ptr} {hand} {izero} {range_index}')
+            span = emit(f'OpLoad {v4} {address}')
+            beginf = emit(f'OpCompositeExtract {f32} {span} 0')
+            endf = emit(f'OpCompositeExtract {f32} {span} 1')
+            first = emit(f'OpConvertFToU {u32} {beginf}')
+            last = emit(f'OpConvertFToU {u32} {endf}')
+            header, body, continuing, done = [a.fresh() for _ in range(4)]
+            index_id, next_index, hit, next_hit = [a.fresh() for _ in range(4)]
+            code += [f'OpBranch {header}', f'{header} = OpLabel',
+                     f'{index_id} = OpPhi {u32} {first} {entry_label} {next_index} {continuing}',
+                     f'{hit} = OpPhi {boolean} {previous_hit} {entry_label} {next_hit} {continuing}']
+            remaining = emit(f'OpULessThan {boolean} {index_id} {last}')
+            missed = emit(f'OpLogicalNot {boolean} {hit}')
+            candidate = emit(f'OpLogicalAnd {boolean} {remaining} {eligible}')
+            again = emit(f'OpLogicalAnd {boolean} {candidate} {missed}')
+            code += [f'OpLoopMerge {done} {continuing} None', f'OpBranchConditional {again} {body} {done}',
+                     f'{body} = OpLabel']
+            ai = emit(f'OpIMul {u32} {index_id} {itwo}')
+            bi = emit(f'OpIAdd {u32} {ai} {ione}')
+            ends = []
+            for idx in (ai, bi):
+                address = emit(f'OpAccessChain {member_ptr} {hand} {izero} {idx}')
+                ends.append(emit(f'OpLoad {v4} {address}'))
+            av, bv = [emit(f'OpVectorShuffle {v3} {x} {x} 0 1 2') for x in ends]
+            ra, rb = [emit(f'OpCompositeExtract {f32} {x} 3') for x in ends]
+            def op(name, typ, *values):
+                return emit(f'Op{name} {typ} ' + ' '.join(values))
+            def scalar(name, *values):
+                return op(name, f32, *values)
+            def ext(name, *values):
+                return emit(f'OpExtInst {f32} {glsl} {name} ' + ' '.join(values))
+            w = op('FSub', v3, av, eye3)
+            bone = op('FSub', v3, bv, av)
+            depth = scalar('Dot', w, direction)
+            slope = scalar('Dot', bone, direction)
+            p = op('FSub', v3, w, op('VectorTimesScalar', v3, direction, depth))
+            b = op('FSub', v3, bone, op('VectorTimesScalar', v3, direction, slope))
+            dr = scalar('FSub', rb, ra)
+            qa = scalar('FSub', scalar('Dot', b, b), scalar('FMul', dr, dr))
+            qb = scalar('FSub', scalar('Dot', p, b), scalar('FMul', ra, dr))
+            qc = scalar('FSub', scalar('Dot', p, p), scalar('FMul', ra, ra))
+            positive = op('FOrdGreaterThan', boolean, slope, eps)
+            negative = op('FOrdLessThan', boolean, slope, scalar('FNegate', eps))
+            moving = op('LogicalOr', boolean, positive, negative)
+            safe_slope = op('Select', f32, moving, slope, one)
+            crossing = scalar('FDiv', scalar('FSub', near, depth), safe_slope)
+            lo = op('Select', f32, positive, ext('FMax', zero, crossing), zero)
+            hi = op('Select', f32, negative, ext('FMin', one, crossing), one)
+            interval = op('FOrdLessThanEqual', boolean, lo, hi)
+            forward = op('LogicalOr', boolean, moving, op('FOrdGreaterThanEqual', boolean, depth, near))
+            valid = op('LogicalAnd', boolean, interval, forward)
+            convex = op('FOrdGreaterThan', boolean, qa, eps)
+            safe_a = op('Select', f32, convex, qa, one)
+            stationary = ext('FClamp', scalar('FDiv', scalar('FNegate', qb), safe_a), lo, hi)
+            def quadratic(t):
+                twice_b = scalar('FAdd', qb, qb)
+                return scalar('FAdd', scalar('FMul', scalar('FAdd', scalar('FMul', qa, t), twice_b), t), qc)
+            minimum = ext('FMin', quadratic(lo), quadratic(hi))
+            minimum = op('Select', f32, convex, ext('FMin', minimum, quadratic(stationary)), minimum)
+            inside = op('FOrdLessThanEqual', boolean, minimum, zero)
+            code += [f'{next_hit} = OpLogicalAnd {boolean} {valid} {inside}',
+                     f'OpBranch {continuing}', f'{continuing} = OpLabel',
+                     f'{next_index} = OpIAdd {u32} {index_id} {ione}', f'OpBranch {header}', f'{done} = OpLabel']
+            previous_hit = hit
+            entry_label = done
+        final_hit = a.fresh()
+        code += [f'OpBranch {hand_done}', f'{hand_done} = OpLabel',
+                 f'{final_hit} = OpPhi {boolean} {original_hit} {original_entry} {previous_hit} {entry_label}']
+        bad = emit(f'OpLogicalNot {boolean} {final_hit}')
         kill = a.fresh()
         code += [f'OpSelectionMerge {label} None', f'OpBranchConditional {bad} {kill} {label}',
                  f'{kill} = OpLabel', 'OpKill']
@@ -329,7 +369,7 @@ def main():
     manifest_path.unlink(missing_ok=True)
     report = {'geometry_mode': 'frametop-push-constants', 'push_constant_bytes': 64,
               'ubo_bytes': 528, 'mask_coordinate_location': 3, 'full_room_location': 6,
-              'hand_ubo_bytes': 2048, 'hand_descriptor_set': 1, 'shaders': {}}
+              'hand_ubo_bytes': 2304, 'hand_descriptor_set': 1, 'shaders': {}}
     for ident, info in MANIFEST['shaders'].items():
         native = output/(ident+'.original.spv')
         native.write_bytes(inputs[ident])

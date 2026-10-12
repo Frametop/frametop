@@ -2,6 +2,7 @@
 #include "handcut.h"
 
 #include "../hands/include/fh_hands.h"
+#include "../native-portal/hand_bounds.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -327,6 +328,8 @@ uniform vec3 center, extentU, extentV, eye, panelSize;
 uniform vec4 panelRows[3];
 uniform int capsuleCount;
 uniform vec4 capsules[128];
+uniform vec4 handBounds[8];
+uniform ivec2 boundRanges[8];
 varying vec2 uv;
 
 // The native camera tests the swept spheres, limited to centres at least 12 cm
@@ -353,7 +356,23 @@ bool capsuleHit(vec3 d, vec4 a, vec4 b) {
     }
     return best <= 0.0;
 }
+bool boundHit(vec3 d, vec4 sphere) {
+    vec3 w = sphere.xyz - eye;
+    float t = dot(w, d);
+    return t + sphere.w >= 0.12 && dot(w, w) - t*t <= sphere.w*sphere.w;
+}
+bool groupCovered(vec3 ray, int group) {
+    int begin = boundRanges[group].x, end = boundRanges[group].y;
+    if (begin >= end || !boundHit(ray, handBounds[group])) return false;
+    for (int offset = 0; offset < 8; ++offset) {
+        int i = begin + offset;
+        if (i >= end) break;
+        if (capsuleHit(ray, capsules[2*i], capsules[2*i+1])) return true;
+    }
+    return false;
+}
 bool covered() {
+    if (!rectangle && capsuleCount == 0) return false;
     vec3 local = vec3((uv.x - 0.5) * panelSize.x,
                       (0.5 - uv.y) * panelSize.y, 0.0);
     // Same cylindrical surface as vr.cpp OnSurface (texture x is arc length).
@@ -377,11 +396,8 @@ bool covered() {
                 q.z > 0.0 && abs(q.x) <= q.z && abs(q.y) <= q.z) return true;
         }
     }
-    for (int i = 0; i < 64; ++i) {
-        if (i >= capsuleCount) break;
-        if (capsuleHit(ray, capsules[2*i], capsules[2*i+1])) return true;
-    }
-    return false;
+    return groupCovered(ray,0) || groupCovered(ray,1) || groupCovered(ray,2) || groupCovered(ray,3)
+        || groupCovered(ray,4) || groupCovered(ray,5) || groupCovered(ray,6) || groupCovered(ray,7);
 }
 void main() {
     float alpha = 1.0;
@@ -728,6 +744,16 @@ void Renderer::Draw(Output &o, unsigned tex, int w, int h, const std::vector<Cap
             }
             glUniform1i(glGetUniformLocation(copyProg_, "capsuleCount"), count);
             if (count) glUniform4fv(glGetUniformLocation(copyProg_, "capsules[0]"), count * 2, packed);
+            float bounds[hand_bounds::kGroups * 4];
+            hand_bounds::compute(packed, unsigned(count), bounds);
+            glUniform4fv(glGetUniformLocation(copyProg_, "handBounds[0]"), hand_bounds::kGroups, bounds);
+            GLint ranges[hand_bounds::kGroups * 2];
+            for (unsigned group = 0; group < hand_bounds::kGroups; ++group) {
+                unsigned begin, end;
+                hand_bounds::range(unsigned(count), group, begin, end);
+                ranges[group*2] = GLint(begin); ranges[group*2+1] = GLint(end);
+            }
+            glUniform2iv(glGetUniformLocation(copyProg_, "boundRanges[0]"), hand_bounds::kGroups, ranges);
         }
         glUniform4f(glGetUniformLocation(copyProg_, "rect"), 0, 0, float(w), float(h));
         glUniform2f(glGetUniformLocation(copyProg_, "size"), float(w), float(h));

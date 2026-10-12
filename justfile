@@ -40,6 +40,8 @@ test-c:
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/relay-buttons-test.c \
       -o build/tests/relay-buttons-test
     build/tests/relay-buttons-test && echo "screens/tests/relay-buttons-test.c: ok"
+    g++ -std=c++17 -Wall -Wextra -Werror screens/tests/hand_bounds_test.cpp -o build/tests/hand-bounds-test
+    build/tests/hand-bounds-test
 
 # Passthrough geometry, input ownership, and persistence. Offline after the
 # pinned OpenVR header has been provisioned by screens/build.sh; no headset needed.

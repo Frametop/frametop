@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <mutex>
 #include "compatibility.h"
+#include "hand_bounds.h"
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,6 +22,7 @@
 #include "pinned.hpp"
 #define EXPORT extern "C" __attribute__((visibility("default")))
 namespace {
+constexpr size_t kHandUniformBytes = 2304; // capsules, eight bounds and eight ranges
 struct InstanceDispatch {
   VkInstance instance;
   PFN_vkGetInstanceProcAddr gipa;
@@ -101,7 +103,7 @@ bool prepare_hands(const DeviceDispatch &d, CommandState &s) {
   // only happen once previous execution has completed, so mapped reuse is safe.
   if (!s.buffer) {
     VkBufferCreateInfo buffer{}; buffer.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer.size = 2048; buffer.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    buffer.size = kHandUniformBytes; buffer.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     if (FN(d, vkCreateBuffer)(d.device, &buffer, nullptr, &s.buffer) != VK_SUCCESS) goto fail;
     VkMemoryRequirements req;
@@ -124,13 +126,21 @@ bool prepare_hands(const DeviceDispatch &d, CommandState &s) {
     VkDescriptorSetAllocateInfo sets{}; sets.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     sets.descriptorPool = s.descriptors; sets.descriptorSetCount = 1; sets.pSetLayouts = &d.hand_layout;
     if (FN(d, vkAllocateDescriptorSets)(d.device, &sets, &s.hands) != VK_SUCCESS) goto fail;
-    VkDescriptorBufferInfo info{s.buffer, 0, 2048};
+    VkDescriptorBufferInfo info{s.buffer, 0, kHandUniformBytes};
     VkWriteDescriptorSet write{}; write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = s.hands; write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; write.pBufferInfo = &info;
     FN(d, vkUpdateDescriptorSets)(d.device, 1, &write, 0, nullptr);
   }
   memcpy(s.mapped, s.geometry.data()+16, 2048);
+  hand_bounds::compute(s.geometry.data()+16, unsigned(s.geometry[14]),
+                       static_cast<float *>(s.mapped)+512);
+  for (unsigned group = 0; group < hand_bounds::kGroups; ++group) {
+    unsigned begin, end;
+    hand_bounds::range(unsigned(s.geometry[14]), group, begin, end);
+    float *span = static_cast<float *>(s.mapped)+544+group*4;
+    span[0] = float(begin); span[1] = float(end); span[2] = span[3] = 0;
+  }
   return true;
 fail:
   release_hands(d, s);

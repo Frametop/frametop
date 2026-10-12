@@ -4,7 +4,8 @@
 The native 528-byte UBO and camera processing stay unchanged. The vertex stage
 reads four vec4 push constants: plane center, two half-extent vectors, control.
 Location 3 carries homogeneous plane coordinates, 4 the raw eye ray, and 5
-the eye origin and capsule count. The fragment mask unions the rectangle with
+the eye origin and capsule count. Flat location 6 carries control.w: values above
+0.5 bypass our mask for full-room passthrough. The fragment mask unions the rectangle with
 upstream hand capsules supplied through a separate 2048-byte uniform buffer.
 """
 import argparse
@@ -85,15 +86,18 @@ def patch(text, stage, raw_position=None):
     lines[lines.index(entries[0])] += ' ' + varying
     ray_ptr = a.declaration(f'OpTypePointer {storage} {v3}')
     eye_ptr = a.declaration(f'OpTypePointer {storage} {v4}')
-    ray_var, eye_var = a.fresh(), a.fresh()
+    flag_ptr = a.declaration(f'OpTypePointer {storage} {f32}')
+    ray_var, eye_var, full_var = a.fresh(), a.fresh(), a.fresh()
     a.declarations += [f'{ray_var} = OpVariable {ray_ptr} {storage}',
-                       f'{eye_var} = OpVariable {eye_ptr} {storage}']
-    for location in (4, 5):
+                       f'{eye_var} = OpVariable {eye_ptr} {storage}',
+                       f'{full_var} = OpVariable {flag_ptr} {storage}']
+    for location in (4, 5, 6):
         if any(line.endswith(f' Location {location}') for line in lines):
             raise ValueError('hand varying location occupied')
-    lines[lines.index(entries[0] + ' ' + varying)] += f' {ray_var} {eye_var}'
+    lines[lines.index(entries[0] + ' ' + varying)] += f' {ray_var} {eye_var} {full_var}'
     annotations = [f'OpDecorate {varying} Location 3', f'OpDecorate {ray_var} Location 4',
-                   f'OpDecorate {eye_var} Location 5', f'OpDecorate {eye_var} Flat']
+                   f'OpDecorate {eye_var} Location 5', f'OpDecorate {eye_var} Flat',
+                   f'OpDecorate {full_var} Location 6', f'OpDecorate {full_var} Flat']
     code = []
 
     def emit(rhs):
@@ -151,6 +155,8 @@ def patch(text, stage, raw_position=None):
             vectors.append(emit(f'OpLoad {v4} {address}'))
         center, u, v = [emit(f'OpVectorShuffle {v3} {value} {value} 0 1 2') for value in vectors[:3]]
         active = emit(f'OpCompositeExtract {f32} {vectors[3]} 0')
+        full = emit(f'OpCompositeExtract {f32} {vectors[3]} 3')
+        code.append(f'OpStore {full_var} {full}')
         w = emit(f'OpFSub {v3} {center} {eye}')
         normal = emit(f'OpExtInst {v3} {glsl} Cross {u} {v}')
         determinant = emit(f'OpDot {f32} {normal} {w}')
@@ -228,6 +234,11 @@ def patch(text, stage, raw_position=None):
         ray = emit(f'OpLoad {v3} {ray_var}')
         direction = emit(f'OpExtInst {v3} {glsl} Normalize {ray}')
         good = emit(f'OpLogicalNot {boolean} {bad}')
+        # Full room bypasses only our injected discard; native sampling stays intact.
+        half = a.declaration(f'OpConstant {f32} 0.5')
+        full = emit(f'OpLoad {f32} {full_var}')
+        bypass = emit(f'OpFOrdGreaterThan {boolean} {full} {half}')
+        good = emit(f'OpLogicalOr {boolean} {good} {bypass}')
         header, body, continuing, done = [a.fresh() for _ in range(4)]
         index_id, next_index, hit, next_hit = [a.fresh() for _ in range(4)]
         code += [f'OpBranch {header}', f'{header} = OpLabel',
@@ -317,7 +328,7 @@ def main():
     manifest_path = output/'shaders.json'
     manifest_path.unlink(missing_ok=True)
     report = {'geometry_mode': 'frametop-push-constants', 'push_constant_bytes': 64,
-              'ubo_bytes': 528, 'mask_coordinate_location': 3,
+              'ubo_bytes': 528, 'mask_coordinate_location': 3, 'full_room_location': 6,
               'hand_ubo_bytes': 2048, 'hand_descriptor_set': 1, 'shaders': {}}
     for ident, info in MANIFEST['shaders'].items():
         native = output/(ident+'.original.spv')

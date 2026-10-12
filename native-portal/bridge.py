@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Follow the live Frametop desk top face and portal intent for the passthrough layer."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
@@ -14,7 +13,6 @@ import struct
 import sys
 import time
 
-import control
 
 STOP = False
 
@@ -60,7 +58,7 @@ def sample():
     if not (state['hands_wanted'] and state['hands_valid']):
         capsules = []
     desk = state['wanted'] and state['valid']
-    return vectors, desk, state['above'], capsules, desk or (state['hands_wanted'] and not state.get('paused', False) and state.get('tracking', True))
+    return vectors, desk, state['above'], capsules
 
 
 def publish(path, vectors=None, enabled=False, above=False, capsules=()):
@@ -96,60 +94,6 @@ def native_status(path, proc=Path('/proc')):
     return state['pid'], state['start_ticks'], state['exe_dev'], state['exe_ino']
 
 
-class RoomView:
-    """One bounded control request at a time; network waits never stop mask updates."""
-    def __init__(self, send=control.send, identity_check=None):
-        self.send = send
-        self.identity_check = identity_check
-        self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='roomview')
-        self.future = None
-        self.submitted = None
-        self.confirmed = None
-        self.completed = 0.0
-        self.next_attempt = 0.0
-        self.desired = None
-        self.error = None
-
-    def deliver(self, enabled, identity):
-        if self.identity_check is not None and self.identity_check() != identity:
-            raise RuntimeError('native compositor changed before control request')
-        self.send(enabled)
-
-    def update(self, enabled, identity, now):
-        desired = (identity, enabled) if identity is not None else None
-        if desired != self.desired:
-            self.desired = desired
-            self.confirmed = None
-            self.next_attempt = 0.0
-        if self.future is not None and self.future.done():
-            try:
-                self.future.result()
-                self.confirmed = self.submitted
-                self.completed = now
-                self.error = None
-            except (OSError, RuntimeError, ValueError, KeyError, IndexError) as error:
-                self.confirmed = None
-                self.error = str(error)
-            self.future = None
-        # Reassert On in a worker after native environment/game transitions.
-        # Off is sent only on transitions or retry, so stock user toggles are not
-        # repeatedly suppressed while Frametop passthrough is disabled.
-        refresh = enabled and now - self.completed >= 1.0
-        if desired is not None and self.future is None and now >= self.next_attempt and (self.confirmed != desired or refresh):
-            self.submitted = desired
-            self.future = self.worker.submit(self.deliver, enabled, identity)
-            self.next_attempt = now + 1.0
-        return desired is not None and self.confirmed == desired and (not enabled or now-self.completed < 2.0)
-
-    def close(self):
-        self.worker.shutdown(wait=True, cancel_futures=True)
-        if self.desired is not None:
-            try:
-                self.deliver(False, self.desired[0])
-            except (OSError, RuntimeError, ValueError, KeyError, IndexError):
-                pass
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--geometry', type=Path, required=True)
@@ -159,7 +103,6 @@ def main():
     signal.signal(signal.SIGTERM, stopping)
     signal.signal(signal.SIGINT, stopping)
     status_path = Path(os.environ.get('FT_PASSTHROUGH_STATUS', str(args.geometry)+'.status'))
-    camera = RoomView(identity_check=lambda: native_status(status_path))
     last_error = None
     identity = None
     status_error = None
@@ -177,22 +120,17 @@ def main():
                         status_error = str(error)
                     next_status = started + 0.25
                 if identity is None:
-                    camera.update(False, None, started)
                     raise RuntimeError(status_error or 'native backend unavailable')
-                vectors, desk, above, capsules, enabled = sample()
+                vectors, desk, above, capsules = sample()
                 publish(args.geometry, vectors, desk, above, capsules)
-                ready = camera.update(enabled, identity, started)
-                acknowledge(ready)
-                if camera.error != last_error and camera.error:
-                    print('passthrough control unavailable: ' + camera.error, file=sys.stderr, flush=True)
-                last_error = camera.error
+                acknowledge(True)
+                last_error = None
             except (OSError, RuntimeError, ValueError, struct.error) as error:
                 try:
                     acknowledge(False, str(error))
                 except (OSError, RuntimeError):
                     pass
                 publish(args.geometry)
-                camera.update(False, identity, started)
                 message = str(error)
                 if message != last_error:
                     print('passthrough unavailable: ' + message, file=sys.stderr, flush=True)
@@ -204,7 +142,6 @@ def main():
         except (OSError, RuntimeError):
             pass
         publish(args.geometry)
-        camera.close()
 
 
 if __name__ == '__main__':

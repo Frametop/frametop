@@ -46,9 +46,6 @@ class Lifecycle(unittest.TestCase):
             context = patch.object(run, target, value)
             context.start()
             self.addCleanup(context.stop)
-        context = patch('control.send')
-        context.start()
-        self.addCleanup(context.stop)
 
     def install(self, minutes=0):
         run.install(self.output, self.dropin, self.bridge, self.state,

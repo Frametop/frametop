@@ -60,12 +60,14 @@ Steam's standing-origin Y translation changed from 1.600000 to 0.723369 metres,
 however, so identical saved coordinates did not retain the rectangle's physical
 height relative to the headset. Placement across origin changes remains unresolved.
 
-The actual Steam dashboard's "Toggle Room View" button was exercised through its
-live DOM click handler. Its active state cleared at 100 ms and returned by two
-seconds, and stereo capture confirmed masked camera rendering returned. This
-demonstrates recovery but also a conflict: the bridge's periodic On request
-overrides the user's Room View Off choice. Independent full-room/Aurora switching
-is not supported correctly while masks are enabled. Another OS update and actual
+Independent camera demand replaced the bridge's periodic Room View requests.
+Live tests on 0.4.5 exercised the actual Steam dashboard's "Toggle Room View"
+button through its DOM click handler. Off remained Off while stereo masks
+rendered in Aurora; On showed full-room stereo passthrough; returning to Off
+restored masks. Stopping the bridge cleared masks without changing Steam's
+toggle or interrupting full-room passthrough, and restarting restored masks.
+Hand-only synthetic capsules also rendered with Room View Off and expired
+normally; real tracking was restored afterward. Another OS update and actual
 game launch/exit remain untested with this lifecycle change.
 
 Desk and hand On/Off intent is saved independently in global layout settings and
@@ -95,49 +97,96 @@ are selected only by full-image SHA-256; an unknown image is refused.
 ## Executable patches
 
 Addresses below are ELF virtual addresses relative to the main executable's load
-bias, not file offsets or absolute process addresses. The preload constructor
-only considers a process named `vrcompositor`, with the exact executable hash
-and one thread. It requires the sites to lie in executable `PT_LOAD` memory and
-on the same writable patch page. All checked words must match before any edit.
+bias. The preload constructor requires a process named `vrcompositor`, an exact
+executable hash and one thread. Every site must lie inside executable `PT_LOAD`
+memory and match its original instruction before any edit. The independent camera
+contracts were statically checked for both recorded images. Independent-mode live
+tests used SteamOS 0.4.5 / SteamVR 2.18.2; the earlier 0.3.0 live results concern
+the former shared-RoomView implementation, so its independent mode still needs a
+live regression test when that runtime is available.
 
-| Site (SteamOS 0.3.0 / 0.4.5) | Original | Change and meaning |
+| Site (0.4.5) | Original | Change |
 |---|---|---|
-| `0x9f404` / `0xa246c` | `0x34003577`, `cbz w23,...` | Replace with AArch64 NOP `0xd503201f`; permits the native Aurora scene path while RoomView is active. |
-| `0x9fab0` / `0xa2b18` | `0xb9410be0`, `ldr w0,[sp,#0x108]` | Branch to the selector trampoline. The next two words must be `0x7100001f` (`cmp w0,#0`) and `0xb940d3e0` (`ldr w0,[sp,#0xd0]`). |
+| `0xa1ecc` | `0x94073da9`, `bl 0x271570` | Request trampoline combines native demand with fresh Frametop demand, then calls the original singleton getter. |
+| `0xa2b18` | `0xb9410be0`, `ldr w0,[sp,#0x108]` | Selector trampoline changes order only when stock camera demand is absent. Next words must be `0x7100001f` and `0xb940d3e0`. |
+| `0xa3e30` | `0x940303fa`, `bl 0x164e18` | Camera call before overlays passes through the mask-only argument wrapper. |
+| `0xa3464` | `0x9403066d`, `bl 0x164e18` | Camera call after overlays uses the same wrapper. |
+| `0xa246c` | `0x34003577`, `cbz w23,...` | Checked but left unchanged. Native Aurora/full-room scene policy is preserved. |
 
-At the selector site, stack slot `0x108` chooses the existing pre/post-overlay
-camera path. Stack slot `0xd0` denotes the native stencil mode: when nonzero,
-the trampoline leaves its selector unchanged. Otherwise it writes the current
-Frametop above-overlay flag to `0x108`, executes the displaced load, and returns
-at selector + 4. Native camera and overlay call sites are:
+The equivalent 0.3.0 sites were read from the retained executable with matching
+SHA-256, not calculated from an assumed version delta:
 
-| Call | SteamOS 0.3.0 | SteamOS 0.4.5 |
+| Site (0.3.0) | Original | Role |
 |---|---|---|
-| Camera before overlays | `0xa0dbc` to `0x160be8` | `0xa3e30` to `0x164e18` |
-| Overlay processing | `0xa0034` to `0x98c60` | `0xa30a0` to `0x9bb98` |
-| Camera after overlays | `0xa03f8` to `0x160be8` | `0xa3464` to `0x164e18` |
+| `0x9ee6c` | `0x94072d43`, `bl 0x26a378` | Completed camera-demand hook |
+| `0x9fab0` | Same three selector words as 0.4.5 | Before/after selector |
+| `0xa0dbc` | `0x9402ff8b`, `bl 0x160be8` | Camera before overlays |
+| `0xa03f8` | `0x940301fc`, `bl 0x160be8` | Camera after overlays |
+| `0x9f404` | `0x34003577` | Aurora condition retained |
 
-Those addresses describe control flow, not additional patched sites. In 0.4.5,
-the before-overlay camera block returns to `0xa2b34`; the after-overlay block
-still reads stack slot `0x108` at `0xa3358`. The gated Aurora call is at
-`0xa2730` to `0x72568`. REA/Ghidra inspected the full containing function
-`0xa1880..0xa4917`; its provider addresses add `0x100000` to these ELF addresses.
-The retained instruction evidence ID is
+At the request site, x0 still contains the low-byte camera availability result
+from `0x162238`; w27 is the completed native camera-demand predicate. It includes
+shared system state byte `0xd6d`, per-render camera flag `0x62c`, and the native
+boundary/proximity condition involving byte `0xd6a` and float `0x648`. The helper
+records that unmodified predicate as stock/full-room demand, then returns native
+OR (available AND requested mask). It never writes the shared RoomView flag.
+The existing code uses w27 for native acquisition/update and draw selection,
+including calls to `0x163e88` and acquisition setup `0x163c10`.
+In 0.3.0 the availability call is `0x15e008`, shared demand/boundary bytes are
+`0xd5d`/`0xd5a`, and acquisition update is `0x15fc58`. The fallback branches leave
+x0 intact and merge at `0x9ee6c` with the same w27 predicate. Neither version's
+shared byte offsets are directly accessed by the hooks.
+
+The request trampoline replaces an existing BL. It saves/restores x29 and x30 on
+an aligned 16-byte stack frame, calls the helper, updates w27 deliberately, then
+executes the original singleton getter so x0 has its original return value.
+Other callee-saved registers follow AAPCS64; caller-saved registers and flags are
+already clobberable at the displaced native call. No native object is replaced.
+
+Stack slot `0x108` selects pre/post-overlay camera rendering; `0xd0` is the native
+stencil mode. The selector trampoline preserves the original selector whenever
+stock camera demand or stencil mode is active. Otherwise it writes Frametop's
+above-overlay flag to `0x108`. Only x0 is scratch, matching the displaced load;
+NZCV, SP, LR and SIMD registers are preserved. The before-overlay block returns
+to `0xa2b34`, overlay rendering is called at `0xa30a0` to `0x9bb98`, and the
+post-overlay path reads `0x108` at `0xa3358` before its camera call.
+
+The native camera function independently checks flags and opacity, so combining
+demand alone cannot produce masked camera pixels with stock RoomView off. Its
+mask-only wrapper copies 0x18 bytes of per-call controls and 0x90 bytes of draw
+arguments onto an aligned stack. Those bounds cover all direct reads in the
+pinned renderer: controls byte 0 and float +0x14; draw arguments through byte
++0x8c. The wrapper changes controls byte 0 to 1 and draw-argument float +0x0c to
+1.0. This selects an explicit camera draw with opaque coverage while retaining
+native matrices, handles, capture and reprojection. Copies live through the
+synchronous native call, which reads their values without retaining their
+addresses. Stock-demand calls receive their original pointers unchanged.
+No shared setting, persistent native packet or native camera resource is copied.
+
+The camera-call trampoline tail-branches to the C++ wrapper, retaining the BL
+return address. All trampoline instructions are little-endian AArch64 with
+64-bit pointers. Direct branches must fit the signed 26-bit word displacement
+(128 MiB reach). One nearby page is allocated using `MAP_FIXED_NOREPLACE`, filled,
+cache-flushed and made RX. All original pages are made RW before writing any
+instruction, then cache-flushed and restored RX. Failure to restore execute
+permission terminates startup. Disabling restarts stock SteamVR; no live unpatch
+is attempted.
+
+REA/Ghidra inspected the full containing function `0xa1880..0xa4917`; its provider
+addresses add `0x100000` to ELF addresses. Retained instruction evidence is
 `ev_f6d608c5d2615e59e35e51dc2a42cd9738314eee8e38a632eaa858475eef381a`;
-decompilation is `ev_2e041ee6e96969a5c81f146d5e668d4db757959bea2f4f684cfc145822638d38`.
-
-The trampoline assumes AArch64 little-endian instructions and 64-bit pointers.
-Its eight instruction words precede the selector pointer at byte 32. Only x0 is
-used as scratch, matching the displaced w0 load's clobber; NZCV, SP, LR and SIMD
-registers are preserved. Direct branches must fit the signed 26-bit word offset
-(128 MiB reach). Allocation uses `MAP_FIXED_NOREPLACE` near the site; no existing
-mapping is replaced. Code is flushed and made RX before patching. The original
-page is temporarily RW and restored RX; failure to restore execute protection
-terminates startup. There is no live unpatch: disabling restarts stock SteamVR.
-
-These control-flow meanings were checked against native REA/Ghidra disassembly
-for both images and runtime captures on 0.3.0. The full executable hash is essential: three matching
-instruction words alone would not establish stack-slot or control-flow meaning.
+SystemLayer decompilation is
+`ev_2e041ee6e96969a5c81f146d5e668d4db757959bea2f4f684cfc145822638d38`.
+Focused availability, acquisition and camera renderer decompilation is
+`ev_5f2cdd3514a8e247f076df234d01f4a10fe131bf68397db5be04a8087e344ba7`.
+For 0.3.0, complete SystemLayer instruction evidence is
+`ev_6b6fff062186d3503ed3bd53240ce1b753619ab8dcd27acf0f2cbeff3c0fac13`;
+SystemLayer and camera-renderer decompilation is
+`ev_a163a0ed82eadc5e47c54d1c7d637c0394d100f2ace6a634b577f84717eb26fd`.
+The older renderer has the same direct control/argument read bounds, opacity
+offset, explicit camera flag and synchronous pointer lifetimes described above.
+The full executable pin is essential: matching isolated instruction words would
+not establish these register, argument or lifetime contracts.
 
 ## Shader transformation
 
@@ -229,17 +278,21 @@ the mask is disabled, tracking expires, or the bridge stops publishing.
 
 ## Control and mask transport
 
-`control.py` assumes the local SteamVR WebSocket at 127.0.0.1:27062 accepts an
+The optional development helper `control.py` assumes the local SteamVR WebSocket at 127.0.0.1:27062 accepts an
 HTTP Upgrade with the same host/origin. It validates the WebSocket accept key
 and sends a masked text frame containing `mailbox_send vrcompositor_systemlayer`
 and JSON `type=set_camera_roomview_enabled, enabled=<bool>`. This private setter
-has no acknowledgement; delivery is not rendering verification.
+has no acknowledgement; delivery is not rendering verification. Neither the
+bridge nor installer uses this setter. Normal operation leaves Steam's Room View
+state alone.
 
 `bridge.py` uses Frametop's abstract Unix datagram socket `ft_screens`, command
 `passthrough mask`, and its JSON plane/intent/capsule snapshot. This is our own
 interface. It atomically publishes 2112 little-endian bytes: the 64-byte plane
 prefix plus 64 tapered capsules, each `(A.xyz,ra,B.xyz,rb)`. Prefix floats 12/13/14
-mean desk enabled / above overlays / capsule count. The layer requires a regular,
+mean desk enabled / above overlays / capsule count. The layer overrides float 15
+with native full-room demand before drawing; external data cannot enable this
+bypass. Flat shader location 6 carries it to the fragment mask. The layer requires a regular,
 current-user-owned file, exact length, finite floats, count 0..64 and positive
 radii below 1 metre; data older than 500 ms is rejected. Hands separately inherit
 upstream `handcut::Hands` prediction and 300-ms tracking expiry. Rectangle and
@@ -263,11 +316,9 @@ Do not overwrite libraries mapped by the compositor. Steam startup/update or
 scene transitions can temporarily obscure rendering; inspect a settled scene
 before concluding a shader regression. See also `scripts/update-check.py`.
 
-The bridge validates native status against the compositor PID, process start time
-and executable identity before sending camera requests or acknowledging its
-heartbeat. Errors clear readiness and desktop alpha openings. RoomView delivery
-runs in a worker so transport waits do not stop mask publication. Enabled intent
-is reasserted once per second, and compositor changes invalidate cached delivery;
-manual Off/On cycling is not required after native state resets. Off is sent on
-transitions or retry, preserving stock RoomView controls while Frametop is off.
-These checks establish initialization and transport readiness, not rendered frames.
+The bridge validates native status against compositor PID, process start time
+and executable identity before publishing masks and acknowledging its heartbeat.
+Errors clear readiness and desktop alpha openings. Native scene command recording
+feeds fresh mask demand to the request hook even when the camera is off, avoiding
+a dependency on an existing camera draw. Expired data clears that demand.
+These checks establish initialization and publication readiness, not rendered frames.

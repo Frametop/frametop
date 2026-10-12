@@ -436,11 +436,17 @@ std::array<float, 528> read_geometry() {
   result[12] = result[12] > 0.5f ? 1.0f : 0.0f;
   return result;
 }
-void update_native_order(const std::array<float,528> &geometry) {
-  using SetOrder = void (*)(uint32_t);
-  static const auto set_order = reinterpret_cast<SetOrder>(
-      dlsym(RTLD_DEFAULT,"ft_passthrough_set_above_menu"));
-  if (set_order) set_order((geometry[12] > .5f || geometry[14] > 0) && geometry[13] > .5f);
+void update_native_request(const std::array<float,528> &geometry) {
+  using SetRequest = void (*)(uint32_t, uint32_t);
+  static const auto set_request = reinterpret_cast<SetRequest>(
+      dlsym(RTLD_DEFAULT,"ft_passthrough_set_request"));
+  if (set_request) set_request(geometry[12] > .5f || geometry[14] > 0, geometry[13] > .5f);
+}
+bool native_full_room() {
+  using FullRoom = bool (*)();
+  static const auto full_room = reinterpret_cast<FullRoom>(
+      dlsym(RTLD_DEFAULT,"ft_passthrough_full_room"));
+  return full_room && full_room();
 }
 VkResult VKAPI_CALL create_layout(VkDevice device,
                                   const VkPipelineLayoutCreateInfo *ci,
@@ -544,6 +550,9 @@ void clear_command(CommandState &state) {
 VkResult VKAPI_CALL begin_command(VkCommandBuffer command,
                                   const VkCommandBufferBeginInfo *ci) {
   auto d = device_dispatch(reinterpret_cast<VkDevice>(command));
+  // Native scene recordings continue when Room View is off. Feeding demand here
+  // lets the next frame start camera rendering without changing Steam's toggle.
+  if (enabled) update_native_request(read_geometry());
   {
     std::lock_guard<std::mutex> lock(dispatch_mutex);
     auto it = commands.find(command);
@@ -624,7 +633,9 @@ void VKAPI_CALL draw_indexed(VkCommandBuffer command, uint32_t indexCount,
       layout = state.layout;
       if (!state.sampled) {
         state.geometry = read_geometry();
-        update_native_order(state.geometry);
+        // Steam's native camera requests retain full coverage, including when
+        // the bridge is absent. This flag never comes from an external payload.
+        state.geometry[15] = native_full_room() ? 1.0f : 0.0f;
         if (!prepare_hands(d, state)) return;
         state.sampled = true;
       }

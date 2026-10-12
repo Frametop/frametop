@@ -61,6 +61,8 @@ PACKAGES = {
                            "stale bridge suppression, native camera pre/post-overlay selection "
                            "and both Steam menu orders, rectangle grab/resize input, added hand-capsule "
                            "descriptor set compatibility, hand-only stereo coverage and tracking expiry, "
+                           "independent Steam Room View On/Off with full-room coverage and mask recovery, "
+                           "native camera demand and call-local draw argument layouts, "
                            "and restoration after disabling the trial",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
             "after a desktop restart; floating a window; no blur behind the taskbar's menus",

@@ -3,7 +3,8 @@
 SteamVR owns camera acquisition, stereo reprojection, GPU resources and submission.
 This component changes camera coverage and ordering relative to overlays. It is
 pinned to the tested Steam Frame compositor and eight native shaders; mismatched
-binaries are rejected. It also affects stock RoomView while loaded.
+binaries are rejected. Stock full-room RoomView bypasses Frametop's masks and
+retains native ordering. Returning to Aurora resumes the requested masks.
 
 ## Build and run on the headset
 
@@ -50,8 +51,8 @@ Files installed outside the checkout are:
 The bridge restarts after failure and follows SteamVR stop/restart. Native
 executable and shader guards remain exact. A supported update can resume the
 saved intent when the desktop and native backend are ready. An unknown compositor
-keeps passthrough unavailable: the bridge publishes an empty mask and does not
-request RoomView without current native initialization evidence. The installation
+keeps passthrough unavailable: the bridge publishes an empty mask without current
+native initialization evidence. The installation
 and saved On/Off choices remain in place. Supporting a changed binary still needs
 reverse engineering, a verified compatibility profile, and a separately built
 output selected with enable; persistence does not make unknown updates compatible. Keep the checkout and selected build at
@@ -116,8 +117,9 @@ hit; rectangle hits skip the capsule loop. Native camera processing and the
 The Hands option reuses upstream `handcut::Hands` capture-pose reconstruction,
 motion prediction and 300-ms expiry. It does not depend on panel cutouts or the
 desk toggle. The desktop publishes `hands_wanted`, `hands_valid`, and raw-space
-`capsules`; invalid hands clear only hand coverage. The bridge keeps native
-RoomView requested while either desk coverage or hand intent needs it. Missing
+`capsules`; invalid hands clear only hand coverage. The layer supplies fresh mask
+demand to the native camera gate through call-local arguments, leaving the stock
+RoomView flag untouched. Missing
 or stale bridge data clears both masks. Coverage ignores capsule centres within
 12 cm of the eye, matching upstream's near-eye guard. This is a hard-edged
 geometric mask; upstream panel cutout feathering is not copied.
@@ -147,7 +149,7 @@ No camera commands are copied.
 
 Desktop status distinguishes requested intent from backend readiness and reports
 an unavailable reason. Readiness combines current compositor initialization
-evidence, mask publication and RoomView transport delivery; it does not measure
+evidence and mask publication; it does not measure
 submitted camera frames. Rendering is verified on the headset.
 
 After changes, check both eyes, On/Off, mask placement under head motion, both
@@ -157,10 +159,10 @@ are optional development tools, not runtime dependencies. The previous packet,
 lease and graph-observer implementation remains in Git history at `4adf5bb`.
 
 The bridge validates native status against the compositor PID, process start time
-and executable identity before sending camera requests or acknowledging its
-heartbeat. Errors clear readiness and desktop alpha openings. RoomView delivery
-runs in a worker so transport waits do not stop mask publication. Enabled intent
-is reasserted once per second, and compositor changes invalidate cached delivery;
-manual Off/On cycling is not required after native state resets. Off is sent on
-transitions or retry, preserving stock RoomView controls while Frametop is off.
-These checks establish initialization and transport readiness, not rendered frames.
+and executable identity before publishing masks and acknowledging readiness.
+Errors clear readiness and desktop alpha openings. It sends no camera On/Off
+commands and has no camera-control worker. Native camera demand follows fresh
+mask data, so bridge failure removes Frametop coverage without changing stock
+RoomView. These checks establish initialization and publication readiness, not
+rendered frames. `control.py` is an optional development tool for native camera
+experiments; the installed backend does not use it.

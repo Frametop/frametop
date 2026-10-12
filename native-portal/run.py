@@ -169,11 +169,6 @@ def disable(dropin, bridge, state_path, legacy_dropin, legacy_state_path):
     command('systemctl', '--user', 'stop', BRIDGE, check=False)
     command('systemctl', '--user', 'disable', BRIDGE, check=False)
     cancel_rollback()
-    try:
-        import control
-        control.send(False)
-    except (OSError, RuntimeError) as error:
-        print('RoomView Off transport unavailable; restarting stock SteamVR: ' + str(error), file=sys.stderr)
     for path in (dropin, bridge) if saved else ():
         path.unlink(missing_ok=True)
     if legacy:

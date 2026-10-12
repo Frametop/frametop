@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "pairs": [
+    [
+      57,
+      125
+    ],
+    [
+      57,
+      126
+    ],
+    [
+      57,
+      127
+    ],
+    [
+      58,
+      128
+    ],
+    [
+      58,
+      129
+    ],
+    [
+      58,
+      130
+    ]
+  ],
+  "shaders": {
+    "57": {
+      "filename": "tracked_camera_reprojection_simplified_vs.spv",
+      "sha256": "69baab1403c153fcdf06a87ae05a25a6678c9bc1dbeebfa3b295145182ac09f3",
+      "stage": "vertex",
+      "raw_position_id": 371
+    },
+    "58": {
+      "filename": "tracked_camera_reprojection_simplified_sharpen_vs.spv",
+      "sha256": "5a22b4540c45361f7a88302158094c010fc216645a5997517623cbca64b57bdc",
+      "stage": "vertex",
+      "raw_position_id": 385
+    },
+    "125": {
+      "filename": "tracked_camera_reprojection_simplified_monochrome_ps.spv",
+      "sha256": "4f35e060498e6603a3c40cb091c051c789b2098b85c8ca0ce11b62879048180e",
+      "stage": "fragment",
+      "raw_position_id": null
+    },
+    "126": {
+      "filename": "tracked_camera_reprojection_simplified_monochrome_nv12_ps.spv",
+      "sha256": "8d020cdd10de057a545a54a1b37eac9769ea433bd6127c59575be52ebf82171a",
+      "stage": "fragment",
+      "raw_position_id": null
+    },
+    "127": {
+      "filename": "tracked_camera_reprojection_simplified_rgb_nv12_ps.spv",
+      "sha256": "07d34d631e4609d4289c402c1fe9d37bbc662f7201bad098d3ad0918c4c9bc97",
+      "stage": "fragment",
+      "raw_position_id": null
+    },
+    "128": {
+      "filename": "tracked_camera_reprojection_simplified_sharpen_monochrome_ps.spv",
+      "sha256": "31f5645f37bb8889fd21eaf56f2da81b94f49b45f840bec97cce317e30c4818f",
+      "stage": "fragment",
+      "raw_position_id": null
+    },
+    "129": {
+      "filename": "tracked_camera_reprojection_simplified_sharpen_monochrome_nv12_ps.spv",
+      "sha256": "cbd615dfe3ada1d66afa3652083815c601fa5f52d532c04491edf88e582ae19f",
+      "stage": "fragment",
+      "raw_position_id": null
+    },
+    "130": {
+      "filename": "tracked_camera_reprojection_simplified_sharpen_rgb_nv12_ps.spv",
+      "sha256": "5ef0a90f1cd68f692e426dcb26369dae44dc1b96b71ca633247cc95b0e97e06f",
+      "stage": "fragment",
+      "raw_position_id": null
+    }
+  }
+}

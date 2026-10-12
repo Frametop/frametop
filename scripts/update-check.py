@@ -52,7 +52,16 @@ HOST_GLIBC = (2, 39)  # the newest the pointer driver may need (pointer/driver/b
 PACKAGES = {
     "deckard-steamvr-rel": "the 3D mouse on the dashboard, on SteamVR Settings, and on a SteamVR "
                            "window's grab bar; picking up a controller; mapped controller buttons; gaze, "
-                           "and a gaze calibration with Track Dominant Eye Only on",
+                           "and a gaze calibration with Track Dominant Eye Only on; "
+                           "native passthrough: recheck the binary contract in native-portal/compatibility.h and "
+                           "native-portal/COMPATIBILITY.md, including native-shaders.json pins, then verify "
+                           "both-eye masking, scene outside the aperture, tracking-space placement "
+                           "under motion, zero-range pipeline layout compatibility with the added 64-byte "
+                           "vertex push constants, live desktop top-face placement across origin changes, "
+                           "stale bridge suppression, native camera pre/post-overlay selection "
+                           "and both Steam menu orders, rectangle grab/resize input, added hand-capsule "
+                           "descriptor set compatibility, hand-only stereo coverage and tracking expiry, "
+                           "and restoration after disabling the trial",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
             "after a desktop restart; floating a window; no blur behind the taskbar's menus",
     "plasma-workspace": "the taskbar and panels after a desktop restart; no DiscoverNotifier or "

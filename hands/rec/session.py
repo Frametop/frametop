@@ -64,6 +64,13 @@ CAMD_UNIT = "frametop-handrec-camd.service"
 # Frametop's live hand tracking (hands/run.sh, ft-handsctl): an ft-camd the recorder uses as it is
 LIVE_CAMD_UNIT, LIVE_HANDS_UNIT = "frametop-camd.service", "frametop-hands.service"
 SIDE_CAMERAS = ("slam_left", "slam_right")   # a recording needs these (Session._first_set)
+CAMERAS_BACK_S = 120     # how long a lost recording waits for the cameras (Session._cameras_back)
+STALL_S = 3.0            # a recording with no new set for this long is lost (Session._watch_recording)
+MAX_CAMERA_LOSSES = 3    # then the session stops
+CAMERAS_TITLE = "Waiting for the cameras"
+CAMERAS_TEXT = ("The headset's cameras restarted (SteamVR moves them when the colour camera module is unplugged "
+                "or plugged in), or they stopped. If you took the headset off, put it back on. This step goes "
+                "again once they're back.")
 HANDS_UNIT = "frametop-handrec-hands.service"
 # The standalone Hand Recorder (takes.standalone()): its binaries run on the host, so ft-hands
 # starts directly rather than in the dev container, and repairs mean its install command.
@@ -662,6 +669,17 @@ class Recorder:
         except OSError:
             return False
 
+    def sets_written(self):
+        """How many sets the part has written so far (0 before the first)."""
+        try:
+            path = os.path.join(self.dir, "sets.bin")
+            with open(path, "rb") as f:
+                head = f.read(16)
+            magic, _, size = struct.unpack("<8sII", head)
+            return os.path.getsize(path) // size if magic.rstrip(b"\0") == b"FHSET01" and size else 0
+        except (OSError, struct.error):
+            return 0
+
     def cameras(self):
         """The cameras in the first set written (their calibration names), [] before there is one."""
         try:
@@ -1235,6 +1253,12 @@ class _Redo(Exception):
     pass
 
 
+class _CamerasLost(_Fail):
+    """The recording stopped by itself or has no side cameras: usually ft-camd restarting after
+    XRService moved the cameras (camd.c, SILENT_S). Step mode waits for them and does the step
+    again (Session._cameras_back); anywhere else it fails the session like any _Fail."""
+
+
 def _os_version():
     path = "/run/host/etc/os-release" if in_container() else "/etc/os-release"
     try:
@@ -1362,6 +1386,9 @@ class Session:
         self.seed = seed   # set from the session's id when it starts, unless given
         # the camera check (a test hook: tests swap it); a dry run looks at no real cameras
         self.camera_check_fn = (lambda: None) if dry_run else camera_check
+        self.repair_cameras_fn = (lambda: None) if dry_run else (lambda: camera_check(repair=True))
+        self._camera_losses = 0
+        self._rec_watch = None   # (recorder, sets written, when that changed): _watch_recording
         self.input_devices = INPUT_DEVICES   # where mice are looked for (a test hook)
         self._button = None                  # the ButtonReader
         self.print = print   # where dry-run panel commands go (the CLI's stdout)
@@ -1543,6 +1570,8 @@ class Session:
         if self.dry_run or self.ring or not self.check_cameras:
             return False
         r = self.camera_check_fn()
+        if camcheck.is_ring_short(r):   # an ft-camd left on moved cameras: nothing records yet, so restart it
+            r = self.repair_cameras_fn() or r
         self._status["camera"] = r
         text = camera_text(r)
         if not text:
@@ -1939,7 +1968,8 @@ class Session:
         if self._panel_proc and self._panel_proc.poll() is not None:
             raise _Fail("The headset panel closed (did SteamVR quit?)")
         if self._recorder and self._recorder.exited():
-            raise _Fail("The recording stopped by itself: see session.log")
+            raise _CamerasLost("The recording stopped by itself: see session.log")
+        self._watch_recording(now)
         if not self.dry_run and now - fb.get("disk", 0) > 5:
             fb["disk"] = now
             if shutil.disk_usage(self.session_dir).free < MIN_FREE:
@@ -2346,6 +2376,16 @@ class Session:
                     self._hold_end()
                 again.discard(k)
                 k += 1
+            except _CamerasLost as e:
+                if self.auto:
+                    raise
+                from_ns = started if started is not None else self._step_t0
+                self._hold_end()
+                if from_ns is not None:
+                    self._event("redo", id=p["id"], **{"from": from_ns, "to": mono_ns()})
+                self._cameras_back(p, str(e), where)
+                again.add(k)
+                retry = False
             except _Redo:
                 self._redo_ok = False
                 from_ns = started if started is not None else self._step_t0
@@ -2365,6 +2405,55 @@ class Session:
                     self._event("redo", id=pid, **{"from": a, "to": b})
                     self._log("    redo %s" % pid)
                     again.add(k)
+
+    def _watch_recording(self, now):
+        """A recording that has started writing sets but writes no new one for STALL_S is lost
+        (_CamerasLost): the cameras stopped or moved, and the rest of the hold would be empty."""
+        rec = self._recorder
+        if rec is None or self.dry_run or not hasattr(rec, "sets_written"):
+            self._rec_watch = None
+            return
+        n = rec.sets_written()
+        w = self._rec_watch
+        if w is None or w[0] is not rec or n != w[1]:
+            self._rec_watch = (rec, n, now)
+        elif n > 0 and now - w[2] > STALL_S:
+            self._rec_watch = None
+            raise _CamerasLost("The recording got no new frames for %.0f s (after %d sets)" % (now - w[2], n))
+
+    def _cameras_back(self, p, why, where):
+        """A step's recording was lost (_CamerasLost): its try is marked redone. Wait for the
+        camera check to pass, restarting a camera broker left on moved cameras (camera_check's
+        repair), then the step shows again. _Fail if they don't come back, or too often."""
+        self._camera_losses += 1
+        self._log("    %s: %s (%d this session); waiting for the cameras" % (p["id"], why, self._camera_losses))
+        if self._camera_losses > MAX_CAMERA_LOSSES:
+            raise _Fail("The recording kept stopping (%d times): %s" % (self._camera_losses, why))
+        self._prompt = None
+        self._view()
+        self._show(CAMERAS_TITLE, where, CAMERAS_TEXT)
+        for key, c in (("big", "big "), ("countdown", "countdown off"), ("note", "note ")):
+            self._panel.set(key, c)
+        self._emit(state="between", prompt=CAMERAS_TEXT, big="", countdown=0, seconds_left=0.0, can_redo=False)
+        if self.ring:
+            return
+        end, r = time.monotonic() + CAMERAS_BACK_S / self.speed, None
+        while time.monotonic() < end:
+            if self._want["stop"]:
+                raise _Stop()
+            r = self.repair_cameras_fn()
+            if r is None:   # a dry run: nothing to check
+                return
+            if r.get("status") == "ok":
+                self._log("    cameras back: %s" % r.get("summary", "ok"))
+                return
+            self._wake.wait(2.0 / self.speed)
+            self._wake.clear()
+        summary = (r or {}).get("summary", "not run")
+        for line in (r or {}).get("evidence", []):
+            self._log("      " + line)
+        raise _Fail("The recording stopped and the cameras didn't come back (camera check: %s). %s"
+                    % (summary, camera_text(r) or why))
 
     def _no_hands_seen(self, p, w):
         """The no-hands check's verdict on a hold (logged either way): True if the tracker
@@ -2474,7 +2563,7 @@ class Session:
         end = time.monotonic() + FIRST_SET_S
         while not rec.has_data():
             if rec.exited():
-                raise _Fail("The recording stopped by itself: see session.log")
+                raise _CamerasLost("The recording stopped by itself: see session.log")
             if self._want["stop"]:
                 raise _Stop()
             if time.monotonic() > end:
@@ -2488,9 +2577,9 @@ class Session:
         missing = [c for c in SIDE_CAMERAS if c not in cams]
         if cams and missing:
             self._log("recording part %d has only %s" % (rec.part, " ".join(cams)))
-            raise _Fail("The recording is missing the side cameras (%s), so it can't be used. Close the Hand "
-                        "Recorder and open it again: it checks the cameras and restarts the camera broker if "
-                        "it needs to." % " ".join(missing))
+            raise _CamerasLost("The recording is missing the side cameras (%s), so it can't be used. Close the "
+                               "Hand Recorder and open it again: it checks the cameras and restarts the camera "
+                               "broker if it needs to." % " ".join(missing))
 
     def _hold_end(self):
         """Step mode: the step is over. A "wait" event ends its labels and the recording stops

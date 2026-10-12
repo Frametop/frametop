@@ -920,5 +920,83 @@ class SideCameraGuardTest(unittest.TestCase):
         self.assertIn("open it again: it restarts the camera broker", text)
 
 
+class CamerasLostTest(SessionBase):
+    """A step whose recording is lost (ft-camd restarting after XRService moved the cameras)
+    waits for the camera check, then goes again; too many losses stop the session."""
+
+    def lose(self, s, times):
+        real = session.Session._run_step
+        lost = {"n": 0}
+
+        def run_step(self_, *a):
+            if lost["n"] < times:
+                lost["n"] += 1
+                raise session._CamerasLost("The recording stopped by itself: see session.log")
+            return real(self_, *a)
+        return mock.patch.object(session.Session, "_run_step", run_step)
+
+    def test_waits_and_redoes_the_step(self):
+        s = self.session(next_after=0.0)
+        checks = iter([{"status": "degraded", "summary": "degraded: moved"}, {"status": "ok", "summary": "ok"}])
+        s.repair_cameras_fn = lambda: next(checks)
+        with self.lose(s, 1):
+            s.start()
+            s.join(20)
+        self.assertEqual(s.state, "done")
+        ev = self.events(s)
+        self.assertEqual([e["event"] for e in ev],
+                         ["take", "ready", "wait", "redo", "ready", "prompt", "wait", "ready", "prompt", "wait",
+                          "end"])
+        self.assertEqual(ev[3]["id"], ev[5]["id"])
+        with open(os.path.join(s.session_dir, "session.log")) as f:
+            log = f.read()
+        self.assertIn("waiting for the cameras", log)
+        self.assertIn("cameras back: ok", log)
+
+    def test_cameras_dont_come_back(self):
+        s = self.session(next_after=0.0, speed=100)
+        s.repair_cameras_fn = lambda: {"status": "degraded", "summary": "degraded: moved", "reason": "moved",
+                                       "evidence": []}
+        with self.lose(s, 1):
+            s.start()
+            s.join(20)
+        self.assertEqual(s.state, "error")
+        self.assertIn("the cameras didn't come back", s._status["error"])
+
+    def test_too_many_losses(self):
+        s = self.session(next_after=0.0)
+        s.repair_cameras_fn = lambda: None
+        with self.lose(s, session.MAX_CAMERA_LOSSES + 1):
+            s.start()
+            s.join(20)
+        self.assertEqual(s.state, "error")
+        self.assertIn("kept stopping", s._status["error"])
+
+    def test_stalled_recording(self):
+        rec = mock.Mock(sets_written=mock.Mock(return_value=12))
+        fake = mock.Mock(_recorder=rec, dry_run=False, _rec_watch=None)
+        session.Session._watch_recording(fake, 100.0)
+        session.Session._watch_recording(fake, 100.0 + session.STALL_S - 0.5)   # not yet
+        with self.assertRaises(session._CamerasLost) as cm:
+            session.Session._watch_recording(fake, 100.0 + session.STALL_S + 0.5)
+        self.assertIn("no new frames", str(cm.exception))
+        rec.sets_written.return_value = 0   # not started writing yet: the first-set wait covers that
+        fake._rec_watch = None
+        session.Session._watch_recording(fake, 200.0)
+        session.Session._watch_recording(fake, 200.0 + 2 * session.STALL_S)
+        rec.sets_written.side_effect = [20, 21]   # writing: fine however long
+        session.Session._watch_recording(fake, 300.0)
+        session.Session._watch_recording(fake, 300.0 + 2 * session.STALL_S)
+
+    def test_sets_written(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = mock.Mock(dir=d)
+            self.assertEqual(session.Recorder.sets_written(rec), 0)
+            one = struct.pack("<8sII", b"FHSET01", 0, 16)
+            with open(os.path.join(d, "sets.bin"), "wb") as f:
+                f.write(one * 5)
+            self.assertEqual(session.Recorder.sets_written(rec), 5)
+
+
 if __name__ == "__main__":
     unittest.main()

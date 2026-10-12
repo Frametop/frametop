@@ -8,7 +8,8 @@
  * Then it gives up its privileges for good, creates the frame ring in the
  * user's runtime folder (/run/user/UID/frametop-hands/cam-ring, fhring.h), learns
  * which buffer holds which V4L2 index, and copies each complete bright frame
- * into the ring. It exits when XRService exits or reallocates its buffers;
+ * into the ring. It exits when XRService exits, reallocates its buffers or moves
+ * a camera to another device (SILENT_S);
  * start it again (or let systemd) to re-attach.
  *
  * XRService itself runs as the same user. The privileges are needed only
@@ -67,6 +68,15 @@
 #define SEAM_LIMIT    2.0   /* seam_score above this: the frame carries the half-size copy */
 #define STALE_RELEARN 30    /* consecutive unchanged frames: the mapping changed      */
 #define MAX_RELEARNS  5     /* then assume XRService has new buffers, and exit        */
+/*
+ * A mono camera that has delivered frames and then stays silent for SILENT_S while another
+ * keeps going: XRService has moved it to another device. Unplugging or plugging in the colour
+ * module does that (the side pair goes between video9/13 and video0/3, seen 2026-10-12): the
+ * old device just stops, nothing gets reallocated, and ft-camd would publish two dead cameras
+ * for as long as it runs. It exits instead (status 4), so systemd starts it on the new devices.
+ * The cameras all stop together when the headset is taken off; that isn't this.
+ */
+#define SILENT_S      3
 /*
  * The color cameras never take the mono ones down with them. Each color buffer is ~9 MB,
  * and every probe for a fresh one syncs a whole buffer's cache, so a color camera looks
@@ -127,6 +137,7 @@ typedef struct {
     uint64_t        events, bright, dark, stale, torn, repairs;
     uint64_t        sync_ns, copy_ns, nsync;    /* cost of cache sync and copy */
     uint64_t        last_bright;        /* for the status line */
+    uint64_t        last_event_ns;      /* its last v4l2_dqbuf, 0 before the first (see SILENT_S) */
 } cam_t;
 
 static cam_t       cams[MAX_CAMS];
@@ -838,10 +849,32 @@ static void on_sample(void *ctx, const tp_sample_t *s)
 
     cam_t *c = cam_by_minor(tp_get(s->ev, f_dq_minor, s->raw, s->rawlen));
 
-    if (c)
+    if (c) {
+        c->last_event_ns = mono_ns();
         on_frame(c, tp_get(s->ev, f_dq_index, s->raw, s->rawlen),
                  (uint32_t)tp_get(s->ev, f_dq_seq, s->raw, s->rawlen),
                  (uint64_t)tp_get(s->ev, f_dq_ts, s->raw, s->rawlen), s->time);
+    }
+}
+
+/* A mono camera gone silent while another runs (see SILENT_S), or NULL. */
+static const cam_t *silent_camera(uint64_t now)
+{
+    uint64_t newest = 0;
+
+    for (int i = 0; i < ncams; i++)
+        if (!cams[i].color && cams[i].last_event_ns > newest)
+            newest = cams[i].last_event_ns;
+
+    if (!newest || now - newest > 1000000000ull)
+        return NULL;    /* none running: the headset is off or asleep */
+
+    for (int i = 0; i < ncams; i++) {
+        const cam_t *c = &cams[i];
+        if (!c->color && c->last_event_ns && now - c->last_event_ns > SILENT_S * 1000000000ull)
+            return c;
+    }
+    return NULL;
 }
 
 /* ------------------------------------------------------------ ring + user */
@@ -1308,6 +1341,16 @@ int main(int argc, char **argv)
         if (now - last_hands >= 200000000ull) {   /* a stat: often, so an unparked tracker gets frames soon */
             hands_want();
             last_hands = now;
+        }
+
+        const cam_t *silent = silent_camera(now);
+        if (silent) {
+            fprintf(stderr, "%s (video%d): no frames for %.1f s while the others run: XRService has moved "
+                    "the cameras (colour module unplugged or plugged in?); exiting so ft-camd starts on the "
+                    "new devices\n", silent->slug, silent->cam->node,
+                    (double)(now - silent->last_event_ns) / 1e9);
+            rc = 4;
+            break;
         }
 
         struct pollfd pf = { .fd = pidfd, .events = POLLIN };

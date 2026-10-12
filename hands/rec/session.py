@@ -61,6 +61,9 @@ DEMOS_DIR = os.path.join(HERE, "demos")   # the demo clips: <id>.gif (DESIGN.md 
 BASE_DIR = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 PANEL_SOCKET = "ft_handpanel"
 CAMD_UNIT = "frametop-handrec-camd.service"
+# Frametop's live hand tracking (hands/run.sh, ft-handsctl): an ft-camd the recorder uses as it is
+LIVE_CAMD_UNIT, LIVE_HANDS_UNIT = "frametop-camd.service", "frametop-hands.service"
+SIDE_CAMERAS = ("slam_left", "slam_right")   # a recording needs these (Session._first_set)
 HANDS_UNIT = "frametop-handrec-hands.service"
 # The standalone Hand Recorder (takes.standalone()): its binaries run on the host, so ft-hands
 # starts directly rather than in the dev container, and repairs mean its install command.
@@ -375,6 +378,12 @@ def stop_unit(unit):
     subprocess.run(host_command("systemctl", "--user", "stop", unit), capture_output=True, timeout=30)
 
 
+def restart_units(units):
+    """Restart those that are running, in order."""
+    for unit in units:
+        subprocess.run(host_command("systemctl", "--user", "try-restart", unit), capture_output=True, timeout=60)
+
+
 def ring_alive(path=None):
     try:
         r = Ring(path or os.path.join(run_dir(), "cam-ring"))
@@ -652,6 +661,19 @@ class Recorder:
             return os.path.getsize(os.path.join(self.dir, "sets.bin")) > 0
         except OSError:
             return False
+
+    def cameras(self):
+        """The cameras in the first set written (their calibration names), [] before there is one."""
+        try:
+            with open(os.path.join(self.dir, "sets.bin"), "rb") as f:
+                data = f.read(16 + 8 * 40)
+            magic, n, _ = struct.unpack_from("<8sII", data, 0)
+            if magic.rstrip(b"\0") != b"FHSET01" or len(data) < 16 + n * 40:
+                return []
+            return [struct.unpack_from("<16s", data, 16 + i * 40)[0].split(b"\0", 1)[0].decode(errors="replace")
+                    for i in range(n)]
+        except (OSError, struct.error):
+            return []
 
     def stop(self):
         """End it (SIGTERM: ft-hands writes out its queue) and put the part in place. Afterwards
@@ -1260,10 +1282,21 @@ def camera_check(repair=False):
     try:
         r = camcheck.check()
         pid = (r.get("ring") or {}).get("writer_pid")
-        if repair and camcheck.is_ring_short(r) and pid not in _camd_restarted and _unit_pid(CAMD_UNIT) == pid:
-            _camd_restarted.add(pid)
-            stop_unit(CAMD_UNIT)
-            start_camd()
+        if repair and camcheck.is_ring_short(r) and pid not in _camd_restarted:
+            if _unit_pid(CAMD_UNIT) == pid:
+                _camd_restarted.add(pid)
+                stop_unit(CAMD_UNIT)
+                start_camd()
+            elif _unit_pid(LIVE_CAMD_UNIT) == pid:
+                # Frametop's live hand tracking: its ft-hands names the cameras when it starts,
+                # so it goes again after ft-camd
+                _camd_restarted.add(pid)
+                restart_units([LIVE_CAMD_UNIT, LIVE_HANDS_UNIT])
+                end = time.monotonic() + 15
+                while not ring_alive() and time.monotonic() < end:
+                    time.sleep(0.2)
+            else:
+                return r
             r = camcheck.check()
             r["evidence"].append("restarted ft-camd (pid %d) because it published only some of the cameras" % pid)
         return r
@@ -1278,6 +1311,10 @@ def camera_text(result):
         return ""
     if camcheck.is_vcint_failure(result):
         return camcheck.USER_TEXT
+    if camcheck.is_ring_short(result) and "moved them" in result.get("reason", ""):
+        return ("SteamVR moved the headset's tracking cameras after the camera broker started (the colour "
+                "camera module was unplugged or plugged in), so the recorder can't read the side cameras. Close "
+                "the Hand Recorder and open it again: it restarts the camera broker.")
     if camcheck.is_ring_short(result):
         return ("The headset's tracking cameras are all running, but the recorder can't read some of them (%s). "
                 "Close the Hand Recorder, %s, and open it again. If that doesn't help, ask in the Frametop "
@@ -2444,6 +2481,16 @@ class Session:
                 self._log("recording part %d: no set yet after the countdown" % rec.part)
                 return
             time.sleep(0.02)
+        # Without the side pair a recording is no use for training (2026-10-12: XRService moved
+        # the side cameras while ft-camd kept publishing the old devices, and ft-hands left them
+        # out of a whole session). Stop at once rather than record the rest of the session.
+        cams = rec.cameras()
+        missing = [c for c in SIDE_CAMERAS if c not in cams]
+        if cams and missing:
+            self._log("recording part %d has only %s" % (rec.part, " ".join(cams)))
+            raise _Fail("The recording is missing the side cameras (%s), so it can't be used. Close the Hand "
+                        "Recorder and open it again: it checks the cameras and restarts the camera broker if "
+                        "it needs to." % " ".join(missing))
 
     def _hold_end(self):
         """Step mode: the step is over. A "wait" event ends its labels and the recording stops

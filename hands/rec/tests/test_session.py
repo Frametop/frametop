@@ -876,5 +876,49 @@ class StandaloneTest(unittest.TestCase):
         self.assertNotIn("~/frametop", text)
 
 
+class SideCameraGuardTest(unittest.TestCase):
+    """A part whose first set has no side cameras stops the session (2026-10-12: a whole
+    session recorded only the upper pair after XRService moved the side cameras)."""
+
+    def write_set(self, d, names):
+        data = bytearray(struct.pack("<8sII", b"FHSET01", len(names), 16 + 40 * len(names)))
+        for n in names:
+            data += struct.pack("<16sIIQQ", n.encode(), 2, 2, 1, 1)
+        with open(os.path.join(d, "sets.bin"), "wb") as f:
+            f.write(bytes(data))
+
+    def first_set(self, d):
+        rec = mock.Mock(dir=d, part=1, exited=lambda: False)
+        rec.has_data = lambda: True
+        rec.cameras = lambda: session.Recorder.cameras(rec)
+        fake = mock.Mock(_recorder=rec, _want={"stop": False})
+        session.Session._first_set(fake)
+        return fake
+
+    def test_upper_pair_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.write_set(d, ["upper_left", "upper_right"])
+            with self.assertRaises(session._Fail) as cm:
+                self.first_set(d)
+            self.assertIn("missing the side cameras (slam_left slam_right)", str(cm.exception))
+
+    def test_all_four(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.write_set(d, ["slam_left", "slam_right", "upper_left", "upper_right"])
+            self.first_set(d)
+
+    def test_unreadable_first_set_goes_on(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "sets.bin"), "wb") as f:
+                f.write(b"xx")
+            self.first_set(d)
+
+    def test_moved_cameras_text(self):
+        text = session.camera_text({"status": "degraded", "ring_missing": [0, 3],
+                                    "reason": "ft-camd publishes video9 video13, but XRService runs those cameras "
+                                              "on video0 video3 now (it moved them after ft-camd started)"})
+        self.assertIn("open it again: it restarts the camera broker", text)
+
+
 if __name__ == "__main__":
     unittest.main()

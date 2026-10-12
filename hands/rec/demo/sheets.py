@@ -20,7 +20,8 @@ WHISPER = os.environ.get("HANDDEMO_WHISPER") or os.path.expanduser(
 WHISPER_MODEL = os.environ.get("HANDDEMO_WHISPER_MODEL") or os.path.expanduser(
     "~/Desktop/Projects/frame-voice/models/ggml-small.en-q5_1.bin")
 WORDS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7",
-         "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13"}
+         "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+         "won": "1", "to": "2", "too": "2", "for": "4", "ate": "8"}   # "two a" is heard as "to a"
 
 
 def takes(session):

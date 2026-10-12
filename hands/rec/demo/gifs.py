@@ -5,7 +5,9 @@
 
 SESSION/trims.json, written by hand from the contact sheets (sheets.py):
   {"7a": {"take": 2, "in": 1.4, "out": 9.6}, "2b": {"take": 1, "in": 0.8, "out": 10.2, "crop": [x, y, w, h]}, ...}
-"in"/"out" are seconds in the take; "crop" (optional) is in the 1920x1080 headset view.
+"in"/"out" are seconds in the take; "crop" (optional) is in the 1920x1080 headset view. Without one,
+the strip at the top where the app's headset panel dipped into the view (SESSION/session.json) is
+cropped off.
 Writes SESSION/gifs/<part>.gif: 640 px wide, 10 fps, one palette per GIF, then gifsicle's lossy pass
 when it's there (HANDDEMO_GIFSICLE or ~/.cache/gifwork/gifsicle-src/src/gifsicle), and prints sizes.
 """
@@ -14,11 +16,35 @@ import json
 import os
 import shutil
 import subprocess
+import math
 import tempfile
 
 GIFSICLE = os.environ.get("HANDDEMO_GIFSICLE") or shutil.which("gifsicle") or os.path.expanduser(
     "~/.cache/gifwork/gifsicle-src/src/gifsicle")
 MAX_S = 15.0   # 10 s for most parts; 2b, 7a and 11a run longer
+W, H, FOCAL = 1920, 1080, 1081.0   # the headset view (vr-recorder's VR_RECORD_VIEW_FOCAL)
+
+
+def panel_crop(session):
+    """The crop below the headset panel's bottom edge, or None. ft-handpanel's panel is fixed to the
+    head, centred up degrees above straight ahead and square to that line, 4:3; the headset view is a
+    pinhole picture, so the bottom edge is a straight line across it."""
+    try:
+        with open(os.path.join(session, "session.json")) as f:
+            p = json.load(f).get("panel")
+    except (OSError, ValueError):
+        return None
+    if not p:
+        return None
+    up = math.radians(p["up"])
+    half_h = 0.75 * math.tan(math.radians(p["width"]) / 2)   # in units of the panel's distance
+    y = math.sin(up) - half_h * math.cos(up)
+    z = math.cos(up) + half_h * math.sin(up)
+    top = int(H / 2 - FOCAL * y / z) + 16   # a margin for the head's sway against the view's lag
+    if top <= 0:
+        return None
+    top += top % 2
+    return [0, top, W, H - top]
 
 
 def make(video, out, t_in, t_out, crop, width, fps, lossy):
@@ -53,6 +79,9 @@ def main():
     with open(os.path.join(a.session, "trims.json")) as f:
         trims = json.load(f)
     os.makedirs(os.path.join(a.session, "gifs"), exist_ok=True)
+    default_crop = panel_crop(a.session)
+    if default_crop:
+        print("cropping the panel off: the top %d px" % default_crop[1])
     for part, t in trims.items():
         if a.part and part != a.part:
             continue
@@ -61,7 +90,7 @@ def main():
         if length > MAX_S:
             print("%s: %.1f s, longer than %g s" % (part, length, MAX_S))
         out = os.path.join(a.session, "gifs", part + ".gif")
-        make(video, out, t["in"], t["out"], t.get("crop"), a.width, a.fps, a.lossy)
+        make(video, out, t["in"], t["out"], t.get("crop") or default_crop, a.width, a.fps, a.lossy)
         print("%-4s take %d  %5.1f-%5.1f s  %.2f MB" % (part, t["take"], t["in"], t["out"],
                                                        os.path.getsize(out) / 1e6), flush=True)
 

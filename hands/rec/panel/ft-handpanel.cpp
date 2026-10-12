@@ -70,7 +70,8 @@
 // every OpenVR call.
 //
 // Options: --watch-stdin (quit when stdin closes: the session runs it), --socket NAME,
-// --distance METRES, --no-vr. --no-vr is for testing without a headset: no SteamVR at all; each
+// --distance METRES, --up DEG and --width DEG (UP_DEG and WIDTH_DEG: the demo recorder,
+// hands/rec/demo, raises it out of the recorded headset view), --no-vr. --no-vr is for testing without a headset: no SteamVR at all; each
 // picture's text goes to stdout instead (and with --dump DIR, the pictures to DIR/panel.pam
 // and DIR/target.pam), "poses start" writes nothing, "devices" and "head" reply with an error,
 // and "target" places the point as if the headset were at the room's origin.
@@ -933,15 +934,17 @@ bool HandState(const std::string &s) { return s == "seen" || s == "lost" || s ==
 int main(int argc, char **argv) {
     bool watchStdin = false, noVr = false;
     std::string sockName = "ft_handpanel", dumpDir;
-    double distance = 1.2;
+    double distance = 1.2, upDeg = kUpDeg, widthDeg = kWidthDeg;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--watch-stdin")) watchStdin = true;
         else if (!std::strcmp(argv[i], "--no-vr")) noVr = true;
         else if (!std::strcmp(argv[i], "--socket") && i + 1 < argc) sockName = argv[++i];
         else if (!std::strcmp(argv[i], "--distance") && i + 1 < argc) distance = std::clamp(std::atof(argv[++i]), 0.5, 5.0);
+        else if (!std::strcmp(argv[i], "--up") && i + 1 < argc) upDeg = std::clamp(std::atof(argv[++i]), -60.0, 60.0);
+        else if (!std::strcmp(argv[i], "--width") && i + 1 < argc) widthDeg = std::clamp(std::atof(argv[++i]), 5.0, 90.0);
         else if (!std::strcmp(argv[i], "--dump") && i + 1 < argc) dumpDir = argv[++i];
         else {
-            std::fprintf(stderr, "usage: %s [--watch-stdin] [--socket NAME] [--distance METRES] [--no-vr [--dump DIR]]\n",
+            std::fprintf(stderr, "usage: %s [--watch-stdin] [--socket NAME] [--distance METRES] [--up DEG] [--width DEG] [--no-vr [--dump DIR]]\n",
                          argv[0]);
             return 2;
         }
@@ -992,14 +995,14 @@ int main(int argc, char **argv) {
         if (targetBuffers.Make(kTargetPx, kTargetPx)) ov->SetOverlayFlag(th, vr::VROverlayFlags_IsPremultiplied, true);
         // Fixed to the head: distance along a line UP_DEG above straight ahead, tilted back by
         // as much so it faces the eyes square on.
-        const double up = kUpDeg * M_PI / 180;
+        const double up = upDeg * M_PI / 180;
         vr::HmdMatrix34_t m{};
         m.m[0][0] = 1;
         m.m[1][1] = float(std::cos(up)), m.m[1][2] = float(-std::sin(up));
         m.m[2][1] = float(std::sin(up)), m.m[2][2] = float(std::cos(up));
         m.m[1][3] = float(distance * std::sin(up)), m.m[2][3] = float(-distance * std::cos(up));
         ov->SetOverlayTransformTrackedDeviceRelative(h, vr::k_unTrackedDeviceIndex_Hmd, &m);
-        ov->SetOverlayWidthInMeters(h, float(2 * distance * std::tan(kWidthDeg * M_PI / 360)));
+        ov->SetOverlayWidthInMeters(h, float(2 * distance * std::tan(widthDeg * M_PI / 360)));
         ov->SetOverlayWidthInMeters(th, float(kTargetM));
     }
     LoadFont();

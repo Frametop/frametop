@@ -4,7 +4,9 @@ shows them (Room View passthrough, from SteamVR's headset view on /dev/video99 t
 
   hands/rec/demo/ft-handdemo [--out DIR] [--from PART] [--here] [--dry]
 
-The window shows the next part and the motions to make. The headset's right-side button:
+The window shows the next part and the motions to make, and so does a panel in the headset
+(hands/rec's ft-handpanel, fixed to the head) that stays up while a take records: it sits above the
+part of the view that's recorded (--panel-up, --panel-width). The headset's right-side button:
   press   start: 3, 2, 1, then the panels hide and the recording starts (say the part's number);
           during a recording: stop it and go on to the next part
   twice   during a recording: stop it and record the same part again; otherwise back one part
@@ -12,8 +14,9 @@ The window shows the next part and the motions to make. The headset's right-side
 The window's buttons do the same.
 
 While a take records, nothing but passthrough and your hands is in view: Frametop's panels hide
-(ft-screens "pause on"), hand tracking is parked (no drawn hands, no laser) and gaze mode is off.
-Each comes back as it was after the take, and when the app quits.
+(ft-screens "pause on"), hand tracking is parked (no drawn hands, no laser), gaze mode is off and
+Steam's menu is closed (SteamVR opens it on the same button). Each comes back as it was after the
+take, and when the app quits; the Steam menu doesn't.
 
 Each take is DIR/<part>-take<N>.mp4 (with the mic, for the spoken number), listed in DIR/takes.jsonl.
 Trimming and the GIFs are done afterwards (sheets.py, gifs.py; README.md).
@@ -34,14 +37,22 @@ import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(REPO, "steam"))
 import session as hs  # noqa: E402  (hands/rec/session.py: the headset button)
+import steamui  # noqa: E402  (steam/steamui.py: Steam's UI, for its menu)
 
 UID = os.getuid()
 RUN = f"/run/user/{UID}"
 PARK_PATH = f"{RUN}/frametop-hands/park"   # input/game_pause.py's: ft-hands idles while it exists
 VR_RECORD_STATE = f"{RUN}/vr-record"
 COUNTDOWN = 3
+# The headset panel, mostly above the recorded view: SteamVR's headset view (/dev/video99) is
+# 1920x1080 at a focal length of about 1081 px (vr-recorder), about 26.5° above and below straight
+# ahead, while the display shows more. The panel's text shrinks with it, so it stays wide enough to
+# read and its bottom edge dips into the view's top; gifs.py crops that strip off (session.json).
+PANEL_UP, PANEL_WIDTH = 32.0, 28.0
 
 
 def frametop_wayland():
@@ -93,6 +104,68 @@ def find_vr_record():
         if p and os.access(p, os.X_OK):
             return p
     return None
+
+
+def close_steam_menu(log):
+    """Closes SteamVR's dashboard (Steam's menu) if it's open: the headset button opens it too."""
+    try:
+        if steamui.evaluate("""(async () => {
+                const vr = SteamClient.OpenVR.VROverlay;
+                if (await vr.IsDashboardVisible()) { vr.HideDashboard(); return true; }
+                return false; })()"""):
+            log("closed Steam's menu")
+    except steamui.SteamUnreachable as e:
+        log("can't check Steam's menu: %s" % e)
+
+
+class Panel:
+    """The instructions in the headset: ft-handpanel in the dev container (as the hand recorder
+    runs it, scripts/frame.sh), fixed to the head above the recorded view. It quits with the app
+    (--watch-stdin)."""
+
+    SOCKET = "ft_handdemo_panel"
+
+    def __init__(self, log, up, width):
+        self.log, self.up, self.width = log, up, width
+        self.proc = None
+
+    def start(self):
+        if not os.path.exists(os.path.join(HERE, "..", "build", "ft-handpanel")):
+            self.log("no headset panel: hands/rec/build.sh builds ft-handpanel")
+            return
+        cmd = "exec build/ft-handpanel --watch-stdin --socket %s --up %g --width %g" % (self.SOCKET, self.up, self.width)
+        self.proc = subprocess.Popen([os.path.join(REPO, "scripts", "frame.sh"), "-C", "hands/rec", cmd],
+                                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, env=host_env())
+        for _ in range(60):   # the container can take a few seconds
+            if ask(self.SOCKET, "ping", 0.25):
+                self.log("headset panel up (%g° up, %g° wide)" % (self.up, self.width))
+                return
+            if self.proc.poll() is not None:
+                break
+            time.sleep(0.25)
+        self.log("the headset panel didn't start (is SteamVR running?)")
+
+    def send(self, *commands):
+        if not self.proc:
+            return
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            for c in commands:
+                s.sendto(c.encode(), "\0" + self.SOCKET)
+        except OSError:
+            pass
+        finally:
+            s.close()
+
+    def stop(self):
+        if self.proc:
+            self.send("hide")
+            try:
+                self.proc.stdin.close()
+                self.proc.wait(5)
+            except (OSError, subprocess.TimeoutExpired):
+                self.proc.kill()
+            self.proc = None
 
 
 class CleanView:
@@ -197,6 +270,10 @@ def main():
     ap.add_argument("--parts", default=os.path.join(HERE, "parts.json"))
     ap.add_argument("--here", action="store_true", help="open the window here, not on Frametop's desktop")
     ap.add_argument("--dry", action="store_true", help="no recording, no clean view: try the window and button")
+    ap.add_argument("--panel-up", type=float, default=PANEL_UP, help="the headset panel's centre, degrees above "
+                    "straight ahead (default %(default)g: clear of the recorded view)")
+    ap.add_argument("--panel-width", type=float, default=PANEL_WIDTH, help="its width in degrees (4:3)")
+    ap.add_argument("--no-panel", action="store_true", help="no panel in the headset, the window only")
     a = ap.parse_args()
 
     if not a.here:
@@ -235,6 +312,9 @@ def main():
         print(time.strftime("%H:%M:%S ") + msg, flush=True)
 
     clean = CleanView(log, a.dry)
+    panel = Panel(log, a.panel_up, a.panel_width)
+    with open(os.path.join(out, "session.json"), "w") as f:   # for gifs.py: where the panel was
+        json.dump({"panel": None if a.no_panel else {"up": a.panel_up, "width": a.panel_width}}, f)
     rec = Recorder(out, log, a.dry)
 
     css = Gtk.CssProvider()
@@ -298,6 +378,11 @@ def main():
                 self.button = hs.ButtonReader(path, lambda g: GLib.idle_add(self.gesture, g), log).start()
             GLib.timeout_add_seconds(2, self.refresh_info)
             self.show()
+            if not a.no_panel:
+                def up():
+                    panel.start()
+                    GLib.idle_add(self.show)
+                threading.Thread(target=up, daemon=True).start()
 
         def show(self):
             p = parts[self.index] if self.index < len(parts) else None
@@ -332,6 +417,30 @@ def main():
             self.b_back.set_sensitive(self.state == "ready" and self.index > 0)
             self.b_skip.set_sensitive(self.state == "ready" and p is not None)
             self.refresh_info()
+            self.show_panel(p)
+            return False
+
+        def show_panel(self, p):
+            """The headset panel: the same part, motions and next step as the window."""
+            if p is None:
+                panel.send("step ", "title All parts recorded", "text Hold the button to finish.",
+                           "action ", "big ", "rec off", "show")
+                return
+            step = "Part %d of %d" % (self.index + 1, len(parts))
+            n = counts.get(p["id"], 0)
+            if self.state == "recording":
+                step += ", take %d" % (n + 1)
+            action = {"ready": "Press: start" + (" (take %d)" % (n + 1) if n else "") + "   ·   twice: back   ·   hold: end",
+                      "countdown": "Then say \u201c%s\u201d   ·   press: cancel" % p["id"],
+                      "recording": "Say \u201c%s\u201d, do it, press: next   ·   twice: redo" % p["id"],
+                      "saving": "Saving\u2026"}[self.state]
+            panel.send("step " + step,
+                       "title %s  %s" % (p["id"], p["section"] + (": " + p["title"] if p.get("title") else "")),
+                       "text " + "|".join(p["motions"]),
+                       "action " + action,
+                       "big " + (str(self.count_left) if self.state == "countdown" else ""),
+                       "rec " + ("on" if self.state == "recording" else "off"),
+                       "show")
 
         def refresh_info(self):
             nxt = parts[self.index + 1] if self.index + 1 < len(parts) else None
@@ -348,6 +457,8 @@ def main():
         def gesture(self, g):
             p = parts[self.index] if self.index < len(parts) else None
             log("button %s (%s, part %s)" % (g, self.state, p["id"] if p else "-"))
+            if not a.dry:   # SteamVR takes the same press for Steam's menu: close it once it's up
+                threading.Timer(0.8, close_steam_menu, (log,)).start()
             if g == "hold":
                 if self.state == "recording":
                     self.stop("end")
@@ -387,6 +498,8 @@ def main():
 
         def _start(self):
             clean.enter()
+            if not a.dry:
+                close_steam_menu(log)
             time.sleep(0.3)   # the panels gone before the first frame
             ok = rec.start()
             if not ok:
@@ -444,6 +557,7 @@ def main():
                                         "start": self.started, "stop": time.time(), "result": "end"}) + "\n")
                 self.state = "ready"
             clean.leave()
+            panel.stop()
             if self.button:
                 self.button.stop()
                 self.button = None
@@ -460,6 +574,7 @@ def main():
         app.run([sys.argv[0]])
     finally:
         clean.leave()
+        panel.stop()
     log("session folder: %s" % out)
 
 

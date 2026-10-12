@@ -51,9 +51,22 @@ Persistence checks on the 0.4.5 installation passed a bridge restart, compositor
 restart followed by a fresh desktop launch, and the game's pause/resume command
 path. Both saved toggles restored. Stereo capture confirmed camera coverage
 returned after a forced RoomView Off without cycling either setting. Persistent
-unit installation and migration also passed offline tests. A full OS reboot,
-another OS update, and the Steam UI's full-room/Aurora switch have not been
-retested with this lifecycle change; the native layer still affects stock RoomView.
+unit installation and migration also passed offline tests.
+
+A full reboot on 2026-10-12 changed the kernel boot ID and automatically started
+the native backend. Starting the desktop then restored both enabled toggles and
+the exact saved rectangle coordinates. Stereo capture confirmed camera rendering.
+Steam's standing-origin Y translation changed from 1.600000 to 0.723369 metres,
+however, so identical saved coordinates did not retain the rectangle's physical
+height relative to the headset. Placement across origin changes remains unresolved.
+
+The actual Steam dashboard's "Toggle Room View" button was exercised through its
+live DOM click handler. Its active state cleared at 100 ms and returned by two
+seconds, and stereo capture confirmed masked camera rendering returned. This
+demonstrates recovery but also a conflict: the bridge's periodic On request
+overrides the user's Room View Off choice. Independent full-room/Aurora switching
+is not supported correctly while masks are enabled. Another OS update and actual
+game launch/exit remain untested with this lifecycle change.
 
 Desk and hand On/Off intent is saved independently in global layout settings and
 reapplied during layout restore. Pause, tracking expiry or backend unavailability

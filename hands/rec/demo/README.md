@@ -15,7 +15,7 @@ motions, as the headset shows them (Room View passthrough). These tools make the
    per take (a frame every 0.5 s with its time) and checks the spoken number with whisper.cpp
    (`heard.json`; a take whose words don't hold its part's number is printed).
 3. **Trim by hand.** From the sheets, write `SESSION/trims.json`: per part, the take to use and its in
-   and out seconds (at most 10 s), optionally a crop of the 1920x1080 view.
+   and out seconds (about 10 s; up to 15 s for 2b, 7a and 11a), optionally a crop of the 1920x1080 view.
 4. **GIFs.** `frame-job --local -- python3 hands/rec/demo/gifs.py SESSION` writes `SESSION/gifs/<part>.gif`
    (640 px, 10 fps, gifsicle `--lossy=60`; `--width`, `--fps`, `--lossy` to make them smaller).
 

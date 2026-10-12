@@ -1,0 +1,3 @@
+#!/bin/sh
+# The hand recorder's demo clip recorder (handdemo.py): GTK 4 on the host's Python.
+exec python3 "$(dirname "$(readlink -f "$0")")/handdemo.py" "$@"

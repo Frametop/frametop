@@ -137,8 +137,9 @@ placement unchanged. The UI and controls expose only the resulting rectangle.
 
 ## Native changes and verification
 
-The Vulkan layer replaces only exact pinned camera shader modules, sets camera
-source-over blending, and supplies projection push constants through compatible
+The Vulkan layer replaces only exact pinned camera shader modules, uses a private
+source-over pipeline for masked draws while preserving native full-room blending,
+and supplies projection push constants through compatible
 pipeline layouts. Shader generation preserves native instructions and validates
 all eight outputs. The separate startup gate checks the compositor hash and
 instructions before modifying the Aurora gate and the existing pre/post-overlay

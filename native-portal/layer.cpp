@@ -57,6 +57,7 @@ struct CommandState {
   void *device{};
   VkCommandPool pool{};
   VkPipelineLayout layout{};
+  VkPipeline pipeline{}; // caller-owned original, never the private masked variant
   bool sampled{};
   std::array<float, 528> geometry{};
   VkBuffer buffer{};
@@ -68,6 +69,9 @@ struct CommandState {
 std::unordered_map<void *, std::unordered_set<VkPipelineLayout>> layouts;
 std::unordered_map<void *, std::unordered_map<VkPipeline, VkPipelineLayout>>
     camera_pipelines;
+// Private source-over variants use the default allocator; caller originals keep
+// their native blend state and allocation callbacks, including full-room mode.
+std::unordered_map<void *, std::unordered_map<VkPipeline, VkPipeline>> masked_pipelines;
 std::unordered_map<VkCommandBuffer, CommandState> commands;
 unsigned draw_logs = 0;
 void *key(const void *handle) {
@@ -269,6 +273,11 @@ void VKAPI_CALL destroy_device(VkDevice device,
     modules.erase(key(device));
     layouts.erase(key(device));
     camera_pipelines.erase(key(device));
+    auto variants = masked_pipelines.find(key(device));
+    if (variants != masked_pipelines.end()) {
+      for (const auto &pair : variants->second) d.destroy_pipeline(device, pair.second, nullptr);
+      masked_pipelines.erase(variants);
+    }
     for (auto it = commands.begin(); it != commands.end();)
       if (it->second.device == key(device)) {
         release_hands(d, it->second);
@@ -392,17 +401,52 @@ VkResult VKAPI_CALL create_pipelines(VkDevice device, VkPipelineCache cache,
           changed++;
         }
     }
-    VkResult result =
-        d.pipelines(device, cache, count, changed ? copies.data() : ci, a, out);
-    {
+    // Native caller receives its original blend pipeline. Only masked draws use
+    // the private source-over variant; full-room UI blending remains stock.
+    std::vector<VkPipeline> variants(count, VK_NULL_HANDLE);
+    VkResult result = d.pipelines(device, cache, count, ci, a, out);
+    try {
+      for (uint32_t i = 0; i < count; ++i) {
+        if (!camera[i] || !out[i] || copies[i].pColorBlendState == ci[i].pColorBlendState) continue;
+        auto variant = copies[i];
+        // A one-element call cannot reference the original batch by index.
+        if ((variant.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) && variant.basePipelineIndex >= 0) {
+          const uint32_t base = uint32_t(variant.basePipelineIndex);
+          if (base >= count || !out[base]) throw VK_ERROR_INITIALIZATION_FAILED;
+          variant.basePipelineHandle = out[base];
+          variant.basePipelineIndex = -1;
+        }
+        const VkResult made = d.pipelines(device, cache, 1, &variant, nullptr, &variants[i]);
+        if (made != VK_SUCCESS) throw made;
+      }
       std::lock_guard<std::mutex> lock(dispatch_mutex);
-      for (uint32_t i = 0; i < count; i++)
-        if (camera[i] && out[i] != VK_NULL_HANDLE)
-          camera_pipelines[key(device)][out[i]] = ci[i].layout;
+      for (uint32_t i = 0; i < count; ++i) if (camera[i] && out[i]) {
+        camera_pipelines[key(device)][out[i]] = ci[i].layout;
+        if (variants[i]) masked_pipelines[key(device)][out[i]] = variants[i];
+      }
+    } catch (...) {
+      // Do not leave untracked replacement shaders or private variants behind
+      // on partial Vulkan success or bookkeeping allocation failure.
+      {
+        std::lock_guard<std::mutex> lock(dispatch_mutex);
+        for (uint32_t i = 0; i < count; ++i) {
+          auto known = camera_pipelines.find(key(device));
+          if (known != camera_pipelines.end()) known->second.erase(out[i]);
+          auto owned = masked_pipelines.find(key(device));
+          if (owned != masked_pipelines.end()) owned->second.erase(out[i]);
+        }
+      }
+      for (uint32_t i = 0; i < count; ++i) {
+        if (variants[i]) d.destroy_pipeline(device, variants[i], nullptr);
+        if (out[i]) d.destroy_pipeline(device, out[i], a);
+        out[i] = VK_NULL_HANDLE;
+      }
+      throw;
     }
     if (changed)
-      fprintf(stderr, "ft-passthrough: source-over pipelines %u result %d\n", changed,
-              int(result));
+      fprintf(stderr, "ft-passthrough: paired native/masked pipelines %u result %d\n", changed, int(result));
+    return result;
+  } catch (VkResult result) {
     return result;
   } catch (...) {
     return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -509,6 +553,14 @@ void VKAPI_CALL destroy_pipeline(VkDevice device, VkPipeline pipeline,
   {
     std::lock_guard<std::mutex> lock(dispatch_mutex);
     camera_pipelines[key(device)].erase(pipeline);
+    auto owned = masked_pipelines.find(key(device));
+    if (owned != masked_pipelines.end()) {
+      auto variant = owned->second.find(pipeline);
+      if (variant != owned->second.end()) {
+        d.destroy_pipeline(device, variant->second, nullptr);
+        owned->second.erase(variant);
+      }
+    }
   }
   d.destroy_pipeline(device, pipeline, a);
 }
@@ -544,6 +596,7 @@ void VKAPI_CALL free_commands(VkDevice device, VkCommandPool pool,
 }
 void clear_command(CommandState &state) {
   state.layout = VK_NULL_HANDLE;
+  state.pipeline = VK_NULL_HANDLE;
   state.sampled = false;
   state.geometry.fill(0);
 }
@@ -607,11 +660,14 @@ void VKAPI_CALL bind_pipeline(VkCommandBuffer command,
     auto state = commands.find(command);
     if (state != commands.end()) {
       state->second.layout = VK_NULL_HANDLE;
+      state->second.pipeline = VK_NULL_HANDLE;
       auto known = camera_pipelines.find(key(command));
       if (known != camera_pipelines.end()) {
         auto it = known->second.find(pipeline);
-        if (it != known->second.end())
+        if (it != known->second.end()) {
           state->second.layout = it->second;
+          state->second.pipeline = pipeline;
+        }
       }
     }
   }
@@ -622,6 +678,7 @@ void VKAPI_CALL draw_indexed(VkCommandBuffer command, uint32_t indexCount,
                              int32_t vertexOffset, uint32_t firstInstance) {
   auto d = device_dispatch(reinterpret_cast<VkDevice>(command));
   VkPipelineLayout layout = VK_NULL_HANDLE;
+  VkPipeline selected = VK_NULL_HANDLE;
   std::array<float, 528> geometry{};
   VkDescriptorSet hands{};
   bool log_draw = false;
@@ -640,6 +697,14 @@ void VKAPI_CALL draw_indexed(VkCommandBuffer command, uint32_t indexCount,
         state.sampled = true;
       }
       geometry = state.geometry;
+      selected = state.pipeline;
+      if (geometry[15] <= .5f) {
+        auto owned = masked_pipelines.find(key(command));
+        if (owned != masked_pipelines.end()) {
+          auto variant = owned->second.find(state.pipeline);
+          if (variant != owned->second.end()) selected = variant->second;
+        }
+      }
       hands = state.hands;
       if (draw_logs < 4) {
         ++draw_logs;
@@ -648,6 +713,7 @@ void VKAPI_CALL draw_indexed(VkCommandBuffer command, uint32_t indexCount,
     }
   }
   if (layout) {
+    d.bind_pipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, selected);
     d.push(command, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, geometry.data());
     FN(d, vkCmdBindDescriptorSets)(command, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &hands, 0, nullptr);
   }

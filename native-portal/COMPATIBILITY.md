@@ -238,9 +238,15 @@ layouts with exactly one descriptor set, the layer appends its hand set at index
 1; the original set 0 handle is retained. Camera pipelines using other layout
 shapes are rejected. The observed camera draw uses one color attachment with
 blending already enabled, ADD color/alpha operations and no logic operation.
-Its factors become ONE / ONE_MINUS_SRC_ALPHA for source-over. An unexpected
-blend shape is not rewritten; the executable/shader pins and live validation
-are what establish this tested shape.
+The caller retains its original pipeline and native blending. A private variant
+uses ONE / ONE_MINUS_SRC_ALPHA for masked draws. Full-room draws select the
+original pipeline using the same sampled flag as the shader's mask bypass, so
+the camera does not cover Steam menus. Private variants use the default allocator
+and are destroyed with the original pipeline or device. An unexpected blend
+shape is not rewritten; the executable/shader pins and live validation establish
+this tested shape. On SteamOS 0.4.5 / SteamVR 2.18.2, stereo captures verified
+Steam's dashboard over full-room camera and after switching back to Aurora
+through Steam's Room View control on 2026-10-12.
 
 The pinned compositor records camera `vkCmdDrawIndexed` calls anew during
 rendering. A command recording samples the mask once and pushes the same plane

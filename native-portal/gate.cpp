@@ -12,6 +12,7 @@
 namespace {
 using namespace compatibility;
 alignas(4) uint32_t above_menu = 0;
+bool gate_ready = false;
 bool branch(uintptr_t from, uintptr_t to, uint32_t &out) {
   const int64_t delta = int64_t(to) - int64_t(from);
   if ((delta & 3) || delta < -(INT64_C(1) << 27) ||
@@ -94,6 +95,8 @@ int gate(dl_phdr_info *info, size_t, void *context) {
                           reinterpret_cast<char *>(order + 1));
   if (mprotect(page, size_t(ps), PROT_READ | PROT_EXEC))
     _exit(190);
+  gate_ready = true;
+  publish_status(false, "waiting-for-device", &profile);
   fprintf(stderr, "ft-passthrough: Aurora gate patched\n");
   fprintf(stderr,"ft-passthrough: native camera pre/post-overlay selector installed\n");
   return 1;
@@ -112,6 +115,7 @@ __attribute__((constructor)) void launch_gate() {
   const char *base = strrchr(executable, '/');
   if (!base || strcmp(base + 1, kCompositorName))
     return;
+  publish_status(false, "gate-not-ready");
   DIR *dir = opendir("/proc/self/task");
   if (!dir)
     return;
@@ -121,11 +125,13 @@ __attribute__((constructor)) void launch_gate() {
       threads++;
   closedir(dir);
   if (threads != 1) {
+    publish_status(false, "gate-requires-single-thread");
     fprintf(stderr, "ft-passthrough: Aurora gate requires single-threaded preload\n");
     return;
   }
   const auto *profile = executable_profile();
   if (!profile) {
+    publish_status(false, "unsupported-executable");
     fprintf(stderr, "ft-passthrough: Aurora gate executable pin rejected\n");
     return;
   }
@@ -136,3 +142,6 @@ extern "C" __attribute__((visibility("default")))
 void ft_passthrough_set_above_menu(uint32_t enabled) {
   __atomic_store_n(&above_menu, enabled ? 1u : 0u, __ATOMIC_RELAXED);
 }
+
+extern "C" __attribute__((visibility("default")))
+bool ft_passthrough_gate_ready() { return gate_ready; }

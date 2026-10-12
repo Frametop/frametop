@@ -3,6 +3,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <string>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <openssl/evp.h>
 
 namespace compatibility {
@@ -63,6 +68,56 @@ inline const CompositorProfile *executable_profile() {
   if (ok) for (const auto &profile : kCompositors)
     if (!strcmp(hex, profile.sha256)) return &profile;
   return nullptr;
+}
+// Initialization evidence, not a promise that camera pixels have been rendered.
+// A reader must match PID/start time and /proc/PID/exe identity before trusting it.
+inline bool compositor_process() {
+  char path[4096];
+  const ssize_t n = readlink("/proc/self/exe", path, sizeof(path)-1);
+  if (n <= 0 || size_t(n) >= sizeof(path)-1) return false;
+  path[n] = 0;
+  const char *base = strrchr(path, '/');
+  return base && !strcmp(base+1, kCompositorName);
+}
+inline void publish_status(bool ready, const char *reason,
+                           const CompositorProfile *profile = nullptr) {
+  if (!compositor_process()) return; // inherited layer/preload in launch helpers
+  const char *configured = getenv("FT_PASSTHROUGH_STATUS");
+  const char *mask = getenv("FT_PASSTHROUGH_MASK");
+  std::string path = configured ? configured : mask ? std::string(mask)+".status" : "";
+  if (path.empty() || path[0] != '/') return;
+  struct stat target{}, executable{};
+  // Never replace a symlink, special file, or another user's status file.
+  if (lstat(path.c_str(), &target) == 0 &&
+      (!S_ISREG(target.st_mode) || target.st_uid != getuid())) return;
+  if (stat("/proc/self/exe", &executable)) return;
+  FILE *proc = fopen("/proc/self/stat", "r");
+  if (!proc) return;
+  char line[4096];
+  const bool read = fgets(line, sizeof line, proc) != nullptr;
+  fclose(proc);
+  char *tail = read ? strrchr(line, ')') : nullptr;
+  if (!tail) return;
+  char *save = nullptr, *field = strtok_r(tail+1, " ", &save);
+  for (int number = 3; field && number < 22; ++number) field = strtok_r(nullptr, " ", &save);
+  if (!field) return;
+  const unsigned long long start = strtoull(field, nullptr, 10);
+  if (!start) return;
+  std::string temporary = path + ".tmp.XXXXXX";
+  int fd = mkstemp(temporary.data()); // private 0600, never follows an existing link
+  if (fd < 0) return;
+  fcntl(fd, F_SETFD, FD_CLOEXEC);
+  FILE *out = fdopen(fd, "w");
+  if (!out) { close(fd); unlink(temporary.c_str()); return; }
+  const int written = fprintf(out,
+      "{\"version\":1,\"pid\":%ld,\"start_ticks\":%llu,\"exe_dev\":%llu,"
+      "\"exe_ino\":%llu,\"sha256\":\"%s\",\"ready\":%s,\"reason\":\"%s\"}\n",
+      long(getpid()), start, static_cast<unsigned long long>(executable.st_dev),
+      static_cast<unsigned long long>(executable.st_ino), profile ? profile->sha256 : "",
+      ready ? "true" : "false", reason);
+  const bool closed = fclose(out) == 0;
+  if (written > 0 && closed) rename(temporary.c_str(), path.c_str());
+  unlink(temporary.c_str());
 }
 inline bool executable_matches() { return executable_profile() != nullptr; }
 } // namespace compatibility

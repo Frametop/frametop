@@ -20,21 +20,62 @@ requires SPIR-V Tools; compilation requires C++17, Vulkan headers and OpenSSL.
 Generated native shader bytes stay in ignored build output.
 
 Enable restarts SteamVR and restores the running Frametop desktop and companion
-services. Use the updated Display Settings to toggle passthrough and manipulate
-the desk rectangle. The launch configuration lasts for this boot. Disable with:
+services. It installs an opt-in user SteamVR override and a bridge service that
+starts alongside SteamVR, including after reboot. Display Settings controls the
+desk and hand masks independently. Disable removes this installation:
 
 ```sh
 python3 native-portal/run.py disable
 ```
 
 For an experimental build, `enable --rollback-minutes 10` schedules automatic
-disable; `retain` cancels that timer. Use `--output` consistently when testing a
-different build directory. Never overwrite libraries mapped by the compositor.
-After a reboot, disable clears saved launch state before the next enable.
+uninstall; `retain` cancels that timer and keeps the persistent installation.
+The rollback timer lasts only for the current boot: disable a failed trial before
+rebooting. `--output` selects the build for enable; disable and retain use the
+installed ownership record, so they also work after reboot without repeating it.
+Never overwrite libraries mapped by the compositor.
 
-`uninstall.sh` removes the owned boot-only launch override and cancels any
-rollback timer without restarting SteamVR. The loaded layer and transient bridge
-keep running until reboot; uninstall detects them and defers deleting the repo.
+Re-running enable can switch to a separately built output. It also migrates our
+previous boot-only installation, discovering its build from the owned runtime
+override and validating the exact saved ownership state before removing it. Other
+preloads and Vulkan layers are preserved; our own entries are not accumulated.
+Unknown or externally changed owned files are refused rather than overwritten.
+
+Files installed outside the checkout are:
+
+- `~/.config/systemd/user/steamvr.service.d/99-ft-passthrough.conf`
+- `~/.config/systemd/user/frametop-passthrough.service` and its SteamVR wants link
+- `~/.config/frametop/native-passthrough.json` (paths and ownership only)
+
+The bridge restarts after failure and follows SteamVR stop/restart. Native
+executable and shader guards remain exact. A supported update can resume the
+saved intent when the desktop and native backend are ready. An unknown compositor
+keeps passthrough unavailable: the bridge publishes an empty mask and does not
+request RoomView without current native initialization evidence. The installation
+and saved On/Off choices remain in place. Supporting a changed binary still needs
+reverse engineering, a verified compatibility profile, and a separately built
+output selected with enable; persistence does not make unknown updates compatible. Keep the checkout and selected build at
+their installed paths. The override and bridge survive OS updates in the user
+home directory; they do not modify `/opt/steamvr`.
+
+This installs the passthrough backend, not a new desktop autostart mechanism.
+Frametop's desktop still follows its launcher/session configuration. Enable and
+disable restore a desktop that was running during that command; no desktop
+process environment is saved for reuse after reboot.
+
+Display Settings saves desk and hand passthrough intent independently as global
+layout settings (`portal_wanted` and `hand_passthrough`). Placement and the Steam
+menu preference retain their existing layout/profile behavior. Layout restore
+reapplies both choices and ensures the hand tracker is running when requested.
+Pause, tracking loss, a stopped desktop or an unavailable backend temporarily
+remove coverage without changing those saved choices. They resume when their
+required services and tracking recover. Disabling the backend with run.py removes
+its installation; it does not erase the user's saved intent.
+
+`uninstall.sh` removes persistent and legacy boot-only launch overrides, the
+bridge's startup link/unit, ownership record and rollback timer without restarting
+SteamVR. The loaded layer and running bridge keep working until reboot; uninstall
+detects them and defers deleting the checkout.
 
 Only the gate library is preloaded. The rendering library is an explicit Vulkan
 layer; preloading its Vulkan exports would interfere with the loader chain.
@@ -104,8 +145,10 @@ and SteamVR builds, every native layout/control-flow assumption and the upgrade
 checks. The shared executable pin and patch constants live in `compatibility.h`.
 No camera commands are copied.
 
-The desktop status reports only `wanted` and `connected`; it does not pretend to
-measure submitted frames. Rendering is verified on the headset.
+Desktop status distinguishes requested intent from backend readiness and reports
+an unavailable reason. Readiness combines current compositor initialization
+evidence, mask publication and RoomView transport delivery; it does not measure
+submitted camera frames. Rendering is verified on the headset.
 
 After changes, check both eyes, On/Off, mask placement under head motion, both
 Steam menu orders, grab/resize and stale-publisher shutdown. Keep targeted
@@ -113,8 +156,11 @@ geometry, UI, shader and native-interface checks. REA, GDB and frame-testbench
 are optional development tools, not runtime dependencies. The previous packet,
 lease and graph-observer implementation remains in Git history at `4adf5bb`.
 
-The bridge acknowledges its heartbeat only after publishing a valid mask and
-delivering the RoomView request. Errors clear readiness, so desktop alpha does
-not stay cut out when publication fails. This is transport readiness, not
-confirmation of rendered camera frames. If native RoomView resets independently
-while intent remains unchanged, toggle passthrough Off/On to reassert it.
+The bridge validates native status against the compositor PID, process start time
+and executable identity before sending camera requests or acknowledging its
+heartbeat. Errors clear readiness and desktop alpha openings. RoomView delivery
+runs in a worker so transport waits do not stop mask publication. Enabled intent
+is reasserted once per second, and compositor changes invalidate cached delivery;
+manual Off/On cycling is not required after native state resets. Off is sent on
+transitions or retry, preserving stock RoomView controls while Frametop is off.
+These checks establish initialization and transport readiness, not rendered frames.

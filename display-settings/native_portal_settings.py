@@ -17,7 +17,10 @@ from native_portal_client import ADDRESS, Client, PortalError
 def status_summary(value):
     if not value["wanted"]:
         return "Desk passthrough off"
-    return "Desk passthrough requested" if value["connected"] else "Passthrough publisher unavailable"
+    if value["connected"]:
+        return "Desk passthrough requested"
+    reason = value.get("reason")
+    return "Passthrough unavailable: " + reason.replace("-", " ") if reason else "Passthrough publisher unavailable"
 
 
 def unknown(reason):
@@ -159,11 +162,16 @@ class PortalSettings(QObject):
                 pass  # UI destruction must not discard the next accepted command.
 
     def _status(self):
+        saved = ft_layout.load_layout().get("portal_wanted") is True
         try:
             value = self._client.status()
-            return dict(value, known=True, summary=status_summary(value))
+            summary = status_summary(value)
+            if saved != value["wanted"]:
+                summary = "Saved desk passthrough " + ("on" if saved else "off") + "; live state differs"
+            return dict(value, known=True, saved=saved, summary=summary)
         except PortalError as exc:
-            return unknown(str(exc))
+            return dict(unknown(str(exc)), saved=saved,
+                        summary="Saved desk passthrough " + ("on" if saved else "off") + "; backend unavailable")
 
     def _save_field(self, key, value):
         # Keep the existing raw-JSON writer and shared layout lock, but do not let
@@ -251,15 +259,24 @@ class PortalSettings(QObject):
             return {"volume": volume, "geometryKnown": False, "geometrySummary": "Saved placement; not applied: " + str(exc)}
 
     def _hand_intent(self, enabled=None):
-        # Like desk intent, hand intent is live only; reopening settings never starts cameras.
+        # Polling never starts tracking. Explicit changes persist before applying.
+        saved = ft_layout.load_layout().get("hand_passthrough") is True
+        tracker_error = None
         try:
+            if enabled is not None:
+                self._save_field("hand_passthrough", enabled)
+                saved = enabled
             if enabled:
                 try:
                     result = subprocess.run(self._tracker_command, capture_output=True, text=True, timeout=20)
-                except subprocess.TimeoutExpired as exc:
-                    raise RuntimeError("Hand tracker startup timed out") from exc
-                if result.returncode:
-                    raise RuntimeError((result.stderr or result.stdout).strip() or "Hand tracker could not start")
+                    if result.returncode:
+                        tracker_error = (result.stderr or result.stdout).strip() or "Hand tracker could not start"
+                except subprocess.TimeoutExpired:
+                    tracker_error = "Hand tracker startup timed out"
+                except OSError as exc:
+                    tracker_error = str(exc)
+                # Keep the desired mask active even when startup fails: fresh
+                # tracker output can then recover it without another toggle.
             def parse(reply):
                 if reply not in ("ok hands 0", "ok hands 1"):
                     raise ValueError("Hand passthrough reply invalid: " + reply)
@@ -270,11 +287,18 @@ class PortalSettings(QObject):
             if enabled is not None and actual != enabled:
                 raise ValueError("Hand passthrough readback did not match")
             connected = self._client.status()["connected"] if actual else None
-            return {"known": True, "wanted": actual, "connected": connected,
-                    "summary": ("Hand passthrough requested" if connected else "Hand passthrough publisher unavailable")
-                               if actual else "Hand passthrough off"}
+            summary = (("Hand passthrough requested" if connected else "Hand passthrough publisher unavailable")
+                       if actual else "Hand passthrough off")
+            desired = saved if "hand_passthrough" in ft_layout.load_layout() else actual
+            if desired != actual:
+                summary = "Saved hand passthrough " + ("on" if desired else "off") + "; live state differs"
+            if tracker_error:
+                summary += "; tracker not started: " + tracker_error
+            return {"known": True, "wanted": desired, "runtime_wanted": actual, "saved": saved,
+                    "connected": connected, "summary": summary}
         except (OSError, RuntimeError, ValueError) as exc:
-            return {"known": False, "wanted": False, "summary": str(exc)}
+            return {"known": False, "wanted": saved, "saved": saved,
+                    "summary": "Saved hand passthrough " + ("on" if saved else "off") + "; not applied: " + str(exc)}
 
     def _perform(self, kind, value):
         if kind == "poll":
@@ -283,8 +307,19 @@ class PortalSettings(QObject):
         if kind == "hands":
             return {"hands": self._hand_intent(value)}
         if kind == "intent":
-            actual = self._client.set_wanted(value)
-            return {"portal": dict(actual, known=True, summary=status_summary(actual))}
+            save_error = None
+            try:
+                self._save_field("portal_wanted", value)
+            except (OSError, RuntimeError, ValueError) as exc:
+                save_error = str(exc)
+            try:
+                actual = self._client.set_wanted(value)
+                return {"portal": dict(actual, known=True, saved=value,
+                    summary=status_summary(actual) + ("; not saved: " + save_error if save_error else ""))}
+            except PortalError as exc:
+                return {"portal": dict(unknown(str(exc)), saved=value,
+                    summary=("Not saved: " + save_error if save_error else
+                             "Saved desk passthrough " + ("on" if value else "off")) + "; live state unknown: " + str(exc))}
         if kind in ("controls", "layer"):
             if type(value) is not bool:
                 raise ValueError("Portal preference must be true or false")
@@ -303,7 +338,7 @@ class PortalSettings(QObject):
                 self.message.emit(result["error"], True)
             if "portal" in result and generation == self._generation:
                 self._portal = result["portal"]
-                self._requested = self._portal["wanted"]
+                self._requested = self._portal.get("saved", self._portal["wanted"])
             if "hands" in result:
                 self._hands = result["hands"]
             self._preferences.update(result.get("preferences", {}))

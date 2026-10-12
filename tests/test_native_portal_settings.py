@@ -107,7 +107,7 @@ def test_open_poll_close_never_change_intent_or_persist(setup):
     assert model.volume == VOLUME
 
 
-def test_portal_commands_are_nonblocking_serialized_and_not_saved(setup):
+def test_portal_commands_are_nonblocking_serialized_and_saved(setup):
     model, server, config, _raw = setup
     before = config.read_bytes()
     server.commands.clear()
@@ -121,7 +121,7 @@ def test_portal_commands_are_nonblocking_serialized_and_not_saved(setup):
     assert server.commands == [f"passthrough portal {c}" for c in ("on", "status", "off", "status", "on", "status")]
     assert model.portal["wanted"] is True
     assert model.portal["summary"] == "Desk passthrough requested"
-    assert config.read_bytes() == before
+    assert json.loads(config.read_text()) == dict(json.loads(before), portal_wanted=True)
 
 
 def test_off_works_when_publisher_disconnected(setup):
@@ -135,7 +135,34 @@ def test_off_works_when_publisher_disconnected(setup):
     wait(lambda: not model.busy)
     assert model.portal["wanted"] is False
     assert model.portal["summary"] == "Desk passthrough off"
+    assert json.loads(config.read_text()) == dict(json.loads(before), portal_wanted=False)
+
+
+def test_saved_desk_intent_survives_unavailable_backend_and_read_only_poll(setup):
+    model, server, config, _ = setup
+    server.bad = "error unavailable"
+    model.setWanted(True)
+    wait(lambda: not model.busy)
+    assert json.loads(config.read_text())["portal_wanted"] is True
+    assert not model.portal["known"] and model.portal["requested"] is True
+    assert "Saved desk passthrough on" in model.portal["summary"]
+    before = config.read_bytes()
+    model.refresh()
+    wait(lambda: not model.busy)
+    assert model.portal["requested"] is True
     assert config.read_bytes() == before
+
+
+def test_poll_before_startup_restore_preserves_saved_camera_preferences(setup):
+    model, server, config, raw = setup
+    config.write_text(json.dumps(dict(raw, portal_wanted=True, hand_passthrough=True)))
+    assert not server.value["wanted"] and not server.hands
+    model.refresh()
+    wait(lambda: not model.busy)
+    assert model.portal["requested"] is True and model.portal["wanted"] is False
+    assert model.hands["wanted"] is True and model.hands["runtime_wanted"] is False
+    assert "live state differs" in model.hands["summary"]
+    assert json.loads(config.read_text())["portal_wanted"] is True
 
 
 
@@ -173,7 +200,7 @@ def test_close_preserves_accepted_off_after_pending_on(setup):
     wait(lambda: not model.busy)
     assert server.commands == [f"passthrough portal {c}" for c in ("on", "status", "off", "status")]
     assert server.value["wanted"] is False
-    assert config.read_bytes() == before
+    assert json.loads(config.read_text()) == dict(json.loads(before), portal_wanted=False)
 
 
 @pytest.mark.parametrize("mode", ["quit", "destroyed", "unresponsive", "locked"])
@@ -250,7 +277,10 @@ def test_application_exit_completes_accepted_commands_without_qt_delivery(setup,
     if mode != "unresponsive":
         assert server.commands[-4:] == [f"passthrough portal {c}" for c in ("on", "status", "off", "status")]
     assert server.value["wanted"] is False
-    assert config.read_bytes() == before
+    expected = json.loads(before)
+    if mode != "locked":
+        expected["portal_wanted"] = False
+    assert json.loads(config.read_text()) == expected
 
 
 def test_stale_poll_cannot_overwrite_new_command(setup):
@@ -504,10 +534,10 @@ def test_hands_independent_intent_starts_shared_tracker_only_on_enable(setup, mo
     wait(lambda: not model.busy)
     assert not model.hands["wanted"] and not server.hands
     assert len(starts) == 1 and starts[0][-1] == "ensure"
-    assert config.read_bytes() == before
+    assert json.loads(config.read_text()) == dict(json.loads(before), hand_passthrough=False)
 
 
-def test_hands_start_failure_does_not_request_mask(setup, monkeypatch):
+def test_hands_start_failure_still_restores_mask_intent_for_tracker_recovery(setup, monkeypatch):
     model, server, *_ = setup
     module = importlib.import_module("native_portal_settings")
     from types import SimpleNamespace
@@ -515,9 +545,11 @@ def test_hands_start_failure_does_not_request_mask(setup, monkeypatch):
     server.commands.clear()
     model.setHands(True)
     wait(lambda: not model.busy)
-    assert not model.hands["known"]
-    assert model.hands["summary"] == "tracker unavailable"
-    assert "passthrough hands 1" not in server.commands
+    assert model.hands["known"]
+    assert "tracker not started: tracker unavailable" in model.hands["summary"]
+    assert model.hands["wanted"] is True
+    assert model.hands["runtime_wanted"] is True and server.hands
+    assert "passthrough hands 1" in server.commands
 
 
 def test_hands_only_reports_missing_publisher_without_changing_intent(setup):

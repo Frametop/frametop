@@ -638,6 +638,25 @@ def send_visibility(sock, layout):
         send_passthrough_controls(sock, passthrough_controls(layout))
     except (RuntimeError, ValueError) as e:
         log(f"passthrough controls not applied: {e}")
+    # Desired camera state is global, independent of profile geometry and pause.
+    wanted = layout.get("portal_wanted") is True
+    try:
+        sock.ask("passthrough portal " + ("on" if wanted else "off"), timeout=1.0)
+    except RuntimeError as e:
+        log(f"saved desk passthrough not applied: {e}")
+    hands = layout.get("hand_passthrough") is True
+    if hands:
+        try:
+            helper = os.path.join(os.path.dirname(__file__), "..", "hands", "ft-cutouts")
+            result = subprocess.run([helper, "ensure"], capture_output=True, text=True, timeout=20)
+            if result.returncode:
+                raise RuntimeError((result.stderr or result.stdout).strip() or "Hand tracker could not start")
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
+            log(f"hand tracker not started: {e}")
+    try:
+        sock.ask(f"passthrough hands {int(hands)}", timeout=1.0)
+    except RuntimeError as e:
+        log(f"saved hand passthrough not applied: {e}")
 
 
 def send_hidden(sock, layout):
@@ -719,9 +738,9 @@ def apply_screens(wait=0):
         time.sleep(1)
     start_remotes(sock, layout)
     save_layout(layout)  # screen numbers given to new remote displays
+    send_visibility(sock, layout)
     f = sock.ask("head").split()
     eye, heading = tuple(map(float, f[1:4])), float(f[4])
-    send_visibility(sock, layout)
     results = []
     for i, t in enumerate(plan(layout, count)):
         world = turn_yaw(t["pos"], heading)

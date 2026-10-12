@@ -61,7 +61,7 @@ def test_controls_ack_and_readback():
         with pytest.raises(ValueError):
             layout.parse_passthrough_controls(reply)
 
-def test_startup_auto_off_restores_only_global_placement_and_preferences(saved, monkeypatch):
+def test_startup_auto_off_restores_global_placement_and_default_off_intents(saved, monkeypatch):
     path, raw = saved
     before = path.read_bytes()
     commands = []
@@ -79,8 +79,27 @@ def test_startup_auto_off_restores_only_global_placement_and_preferences(saved, 
     assert layout.main(["ft-layout", "start", "--wait", "1"]) == 0
     assert layout.passthrough_command(raw) in commands
     assert "passthrough controls 1" in commands and "passthrough layer 1" in commands
+    assert "passthrough portal off" in commands and "passthrough hands 0" in commands
     assert not any(c.startswith(("place ", "portal ")) for c in commands)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("wanted", [True, False, "true", 1])
+def test_startup_restores_strict_intents_after_geometry(monkeypatch, wanted):
+    commands, starts = [], []
+    def ask(command, **kwargs):
+        commands.append(command)
+        if command.startswith("passthrough controls"): return "ok controls 0"
+        if command.startswith("passthrough layer"): return "ok layer 0"
+        return "ok"
+    monkeypatch.setattr(layout.subprocess, "run", lambda command, **kwargs:
+                        starts.append(command) or SimpleNamespace(returncode=0))
+    layout.send_visibility(SimpleNamespace(ask=ask), dict(passthrough=VOLUME,
+                           portal_wanted=wanted, hand_passthrough=wanted))
+    enabled = wanted is True
+    assert commands[-2:] == ["passthrough portal " + ("on" if enabled else "off"),
+                            f"passthrough hands {int(enabled)}"]
+    assert bool(starts) is enabled
 
 def test_capture_cli_rejects_extra_arguments(monkeypatch):
     capture = Mock(return_value=VOLUME)

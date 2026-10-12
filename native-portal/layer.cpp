@@ -136,9 +136,15 @@ fail:
 
 std::once_flag config_once;
 bool enabled = false;
+const compatibility::CompositorProfile *profile = nullptr;
 
 void load_configuration() {
-  enabled = compatibility::executable_matches();
+  profile = compatibility::executable_profile();
+  using GateReady = bool (*)();
+  const auto gate_ready = reinterpret_cast<GateReady>(dlsym(RTLD_DEFAULT, "ft_passthrough_gate_ready"));
+  enabled = profile && gate_ready && gate_ready();
+  compatibility::publish_status(false, !profile ? "unsupported-executable" :
+      !enabled ? "gate-not-ready" : "waiting-for-device", profile);
   fprintf(stderr, "ft-passthrough: executable pin %s\n",
           enabled ? "accepted" : "rejected");
 }
@@ -189,6 +195,7 @@ VkResult VKAPI_CALL create_device(VkPhysicalDevice p,
                                   const VkDeviceCreateInfo *ci,
                                   const VkAllocationCallbacks *a,
                                   VkDevice *out) {
+  if (enabled) compatibility::publish_status(false, "device-initializing", profile);
   auto parent = instance_dispatch((VkInstance)p);
   if (!parent.gipa)
     return VK_ERROR_INITIALIZATION_FAILED;
@@ -234,7 +241,10 @@ VkResult VKAPI_CALL create_device(VkPhysicalDevice p,
     VkDescriptorSetLayoutCreateInfo info{}; info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     info.bindingCount = 1; info.pBindings = &binding;
     r = FN(d, vkCreateDescriptorSetLayout)(*out, &info, nullptr, &d.hand_layout);
-    if (r != VK_SUCCESS) { d.destroy(*out, a); return r; }
+    if (r != VK_SUCCESS) {
+      compatibility::publish_status(false, "descriptor-init-failed", profile);
+      d.destroy(*out, a); return r;
+    }
   }
   try {
     std::lock_guard<std::mutex> l(dispatch_mutex);
@@ -244,11 +254,13 @@ VkResult VKAPI_CALL create_device(VkPhysicalDevice p,
     d.destroy(*out, a);
     return VK_ERROR_OUT_OF_HOST_MEMORY;
   }
+  if (enabled) compatibility::publish_status(true, "initialized", profile);
   return r;
 }
 void VKAPI_CALL destroy_device(VkDevice device,
                                const VkAllocationCallbacks *a) {
   auto d = device_dispatch(device);
+  if (enabled) compatibility::publish_status(false, "device-destroyed", profile);
   if (!d.destroy)
     return;
   {

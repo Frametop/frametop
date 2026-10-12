@@ -48,7 +48,6 @@ def send(enabled):
         # The setter has no response message. Give the local server a chance to
         # process the command before the connection closes.
         time.sleep(0.15)
-    print(json.dumps({'command_sent': True, 'enabled': enabled, 'rendering_verified': False}))
 
 
 def main():
@@ -56,6 +55,7 @@ def main():
     parser.add_argument('state', choices=['on', 'off'])
     args = parser.parse_args()
     send(args.state == 'on')
+    print(json.dumps({'command_sent': True, 'enabled': args.state == 'on', 'rendering_verified': False}))
 
 
 if __name__ == '__main__':

@@ -41,7 +41,9 @@ driver=$HOME/.local/share/frametop/ft_pointer
 releases=$HOME/.local/share/frametop/releases  # pack/install-release.sh
 vrpathreg=/opt/steamvr/bin/linuxarm64/vrpathreg
 handsctl=$HOME/.local/bin/ft-handsctl
-passthrough_dropin=/run/user/$(id -u)/systemd/user/steamvr.service.d/99-ft-passthrough.conf
+passthrough_dropins=(/run/user/$(id -u)/systemd/user/steamvr.service.d/99-ft-passthrough.conf
+                     "$HOME/.config/systemd/user/steamvr.service.d/99-ft-passthrough.conf")
+passthrough_state=$HOME/.config/frametop/native-passthrough.json
 passthrough_timer=0
 eyegrab_files=(/etc/systemd/system/frametop-eyegrab.service /etc/frametop/ft-eyegrab
                /etc/atomic-update.conf.d/frametop-eyegrab.conf)
@@ -122,10 +124,15 @@ main() {
   [ -f "$override" ] && grep -q 'Frametop' "$override" || override=
   [ -f "$native_copy" ] || native_copy=
   units=("$HOME"/.config/systemd/user/frametop-*.service)
-  # Native passthrough writes a boot-only SteamVR drop-in and optional rollback
-  # timer. Remove our launch override, but leave the loaded camera layer and its
-  # transient bridge running until reboot, like the rest of the desktop.
-  [ -f "$passthrough_dropin" ] && grep -qx '# Managed by frametop native-portal/run.py' "$passthrough_dropin" || passthrough_dropin=
+  # Remove persistent and legacy boot-only launch overrides without interrupting
+  # the running compositor. The bridge unit is handled by frametop-*.service.
+  local owned_passthrough=()
+  for f in "${passthrough_dropins[@]}"; do
+    if [ -f "$f" ] && grep -qx '# Managed by frametop native-portal/run.py' "$f"; then
+      owned_passthrough+=("$f")
+    fi
+  done
+  [ -f "$passthrough_state" ] && grep -q '# Managed by frametop native-portal/run.py' "$passthrough_state" || passthrough_state=
   if [ "$(systemctl --user show ft-passthrough-rollback.timer -p LoadState --value 2>/dev/null || true)" = loaded ]; then
     passthrough_timer=1
   fi
@@ -139,7 +146,7 @@ main() {
 
   if [ -n "$override" ] || [ -n "$native_copy" ] || [ ${#units[@]} -gt 0 ] || [ ${#entries[@]} -gt 0 ] ||
      [ -d "$driver" ] || [ -n "$handsctl" ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] ||
-     [ -n "$passthrough_dropin" ] || [ "$passthrough_timer" = 1 ]; then
+     [ ${#owned_passthrough[@]} -gt 0 ] || [ -n "$passthrough_state" ] || [ "$passthrough_timer" = 1 ]; then
     step "Step 1 of 2: stop Frametop from starting"
     echo "This removes:"
     [ -n "$override" ] && echo "  - the launcher's Desktop entry (Launch a program -> Desktop opens the stock desktop again)"
@@ -149,7 +156,7 @@ main() {
     [ ${#entries[@]} -gt 0 ] && echo "  - ${#entries[@]} menu entries (Frametop Display Settings, Input Settings, ...)"
     [ -n "$handsctl" ] && echo "  - $handsctl"
     [ -n "$camd_caps" ] && echo "  - the hand camera broker's file capabilities (needs your password)"
-    [ -n "$passthrough_dropin" ] && echo "  - native passthrough's SteamVR launch override (the current camera session keeps running)"
+    [ ${#owned_passthrough[@]} -gt 0 ] && echo "  - native passthrough's SteamVR launch override (the current camera session keeps running)"
     [ "$passthrough_timer" = 1 ] && echo "  - native passthrough's scheduled rollback"
     exists "${eyegrab_files[@]}" && echo "  - our eye tracker's frame grabber (a system service: needs your password)"
     exists "${bt_files[@]}" && echo "  - the Bluetooth fixes (system files: needs your password)"
@@ -162,10 +169,11 @@ main() {
     if [ "$passthrough_timer" = 1 ]; then
       run systemctl --user stop ft-passthrough-rollback.timer ft-passthrough-rollback.service 2>/dev/null || true
     fi
-    if [ -n "$passthrough_dropin" ]; then
-      run rm -f "$passthrough_dropin"
+    if [ ${#owned_passthrough[@]} -gt 0 ]; then
+      run rm -f "${owned_passthrough[@]}"
       run systemctl --user daemon-reload
     fi
+    [ -n "$passthrough_state" ] && run rm -f "$passthrough_state"
     if [ ${#units[@]} -gt 0 ]; then
       for f in "${units[@]}"; do names+=("$(basename "$f")"); done
       run systemctl --user disable "${names[@]}" 2>/dev/null || true

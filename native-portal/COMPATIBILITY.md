@@ -39,11 +39,30 @@ reported no hands during this check; real-hand alignment on this build remains
 to be checked while wearing the headset. The user's rectangle placement and
 behind-menu preference were restored after the temporary test placement.
 
-The update's reboot removed the boot-only native override and transient desktop
-and bridge services. A settings window can still open without `ft-screens`, in
-which case its abstract socket returns connection refused. Starting the desktop
-restores that socket; enabling the verified native build restores the bridge.
-This proof-of-concept launch configuration still needs re-enabling after reboot.
+At the time of that update test, the earlier boot-only override disappeared on
+reboot. The current installer replaces it with a persistent user SteamVR override
+and bridge service. The bridge follows SteamVR startup/restart and restarts on
+failure. Desktop startup remains the launcher's responsibility: a settings window
+can open without `ft-screens`, in which case its abstract socket is unavailable.
+The backend waits for the desktop rather than recreating a session using an old
+saved process environment.
+
+Persistence checks on the 0.4.5 installation passed a bridge restart, compositor
+restart followed by a fresh desktop launch, and the game's pause/resume command
+path. Both saved toggles restored. Stereo capture confirmed camera coverage
+returned after a forced RoomView Off without cycling either setting. Persistent
+unit installation and migration also passed offline tests. A full OS reboot,
+another OS update, and the Steam UI's full-room/Aurora switch have not been
+retested with this lifecycle change; the native layer still affects stock RoomView.
+
+Desk and hand On/Off intent is saved independently in global layout settings and
+reapplied during layout restore. Pause, tracking expiry or backend unavailability
+suppresses coverage without clearing that intent. A supported compositor can
+resume it after restart; a new, unrecognized executable cannot. Unknown images
+are rejected by the native libraries and produce no ready initialization evidence,
+so the bridge leaves coverage empty and does not enable RoomView. Persistent
+installation survives an OS update, but adding support still requires the binary
+and runtime validation described below.
 
 | Item | Observed value | Source |
 |---|---|---|
@@ -231,8 +250,11 @@ Do not overwrite libraries mapped by the compositor. Steam startup/update or
 scene transitions can temporarily obscure rendering; inspect a settled scene
 before concluding a shader regression. See also `scripts/update-check.py`.
 
-The bridge acknowledges its heartbeat only after publishing a valid mask and
-delivering the RoomView request. Errors clear readiness, so desktop alpha does
-not stay cut out when publication fails. This is transport readiness, not
-confirmation of rendered camera frames. If native RoomView resets independently
-while intent remains unchanged, toggle passthrough Off/On to reassert it.
+The bridge validates native status against the compositor PID, process start time
+and executable identity before sending camera requests or acknowledging its
+heartbeat. Errors clear readiness and desktop alpha openings. RoomView delivery
+runs in a worker so transport waits do not stop mask publication. Enabled intent
+is reasserted once per second, and compositor changes invalidate cached delivery;
+manual Off/On cycling is not required after native state resets. Off is sent on
+transitions or retry, preserving stock RoomView controls while Frametop is off.
+These checks establish initialization and transport readiness, not rendered frames.

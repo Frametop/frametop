@@ -734,6 +734,12 @@ def find_display(layout, display_id):
     raise RuntimeError(f"no remote display {display_id!r}")
 
 
+def stream_size(w, h):
+    """A stream's size in pixels, rounded down to even numbers: hosts' encoders (NVENC's 4:2:0)
+    send no video at all for an odd width or height, and the stream reconnects forever."""
+    return max(2, int(w) // 2 * 2), max(2, int(h) // 2 * 2)
+
+
 def remote_size(d):
     """A remote display's size in VR (width, height) in metres."""
     w, h = d.get("size", [2560, 1440])
@@ -788,7 +794,7 @@ def display_target(host, d):
 def start_remote(sock, n, host, d):
     """Its stream (ft-screens starts it over only if the settings changed). ft-screens'
     reply: "ok restored" when its panel is back where it was before a disconnect."""
-    w, h = d.get("size", [2560, 1440])
+    w, h = stream_size(*d.get("size", [2560, 1440]))
     label = f"{host.get('name') or host['address']}: {d.get('label') or d['id']}"
     return sock.ask(f"remote {n} start {d['client']} {display_target(host, d)} {d['app']} {int(w)}x{int(h)} "
                     f"{int(d.get('fps', 60))} {int(d.get('bitrate', 0))} {remote_size(d)[0]:.3f} {label}")
@@ -1072,7 +1078,7 @@ def remote_command(args):
             raise RuntimeError("remote add: the client name has other characters")
         size = [2560, 1440]
         if "--size" in opts:
-            size = [int(v) for v in opts["--size"].lower().split("x")]
+            size = list(stream_size(*(int(v) for v in opts["--size"].lower().split("x"))))
         elif app.startswith("display:"):  # the monitor's own resolution
             code, out, _ = run_stream("monitors", address)
             try:
@@ -1111,7 +1117,7 @@ def remote_command(args):
         for kv in args[2:]:
             k, _, v = kv.partition("=")
             if k == "size" and re.fullmatch(r"\d+x\d+", v.lower()):
-                d["size"] = [int(x) for x in v.lower().split("x")]
+                d["size"] = list(stream_size(*(int(x) for x in v.lower().split("x"))))
             elif k in ("fps", "bitrate") and v.isdigit():
                 d[k] = int(v)
             elif k == "label" and v:

@@ -83,9 +83,9 @@ HANDS_HOLD_LOST_MS=1750    # Frametop panels: what a hand holds (a pinch, a card
 HANDS_FLICK=1              # Frametop panels: flick a panel away: the hand at it, flicked out fast with the fingers opening, sends it 3 m out (HANDS_THROW_DISTANCE); "grab that" brings it back | 0 = off
 HANDS_FLICK_SPEED=1.2      # ... the hand moving out this fast (m/s), 12 cm or more
 HANDS_FLICK_OPENING=0.15   # ... the fingers opening this much on the way (their mean extension; 0 = an open hand pushed out flicks too)
-HANDS_THROW=1              # Frametop panels: let go of a carried panel (a card, a fist, a pinch on its border) while the hand moves out fast and it flies on that way, to 3 m out | 0 = off (it stays where you let go)
-HANDS_THROW_SPEED=0.55     # ... the hand moving at least this fast (m/s) as it lets go, within 60 degrees of straight away from you
-HANDS_THROW_DISTANCE=3     # ... and where thrown, flicked and pushed panels go: this far (m) from the eyes, facing you
+HANDS_THROW=1              # Frametop panels: let go of a carried panel (a card, a fist, a pinch on its border) while the hand moves out fast and it flies on that way, out as far and as big as it was before you took it (one you never moved: to 3 m out) | 0 = off (it stays where you let go)
+HANDS_THROW_SPEED=0.45     # ... the hand moving at least this fast (m/s) in the last 0.15 s before it lets go, within 70 degrees of straight away from you
+HANDS_THROW_DISTANCE=3     # ... and where thrown, flicked and pushed panels go when they have no distance to go back to (taken by a hand or "grab that" and not put down past 1.2 m: as far and as big as they were): this far (m) from the eyes, facing you
 HANDS_PUSH=1               # Frametop panels: push one away: an open hand, palm to it, pushed straight into it fast (or 15 cm in slowly) sends it 3 m out (HANDS_THROW_DISTANCE); an open hand then doesn't poke | 0 = off
 HANDS_PUSH_SPEED=0.5       # ... the palm moving into it this fast (m/s), 5 cm or more in
 HANDS_TARGET_GLOW=1        # Frametop panels: a soft white halo outside the edges of the panel "grab that" would take as the open hand is held out to it (or, dimmer, one a push or flick would throw) | 0 = off
@@ -102,7 +102,7 @@ SCREEN_SPIN_BRING=1        # the front slot: the lazy susan (the sweep, Meta+Alt
 SCREEN_FRONT_AWAY=0        # ... 1 = turned away from, it goes home (unless used SCREEN_FRONT_KEEP_MS); 0 = it stays until you move it (a gaze-pinch drag, a hand grab, a push, grab that) or the next stroke
 SCREEN_FRONT_KEEP_MS=3000  # ... this much input on the screen in the slot keeps it there when you look away (0 = never kept)
 SCREEN_UI_SCALE=           # ... a remote display's own UI scale for its readable size, by screen number: "102=2" (a Mac's Retina display); KWin's screens use their own scale
-HANDS_RESET_HOLD_MS=500    # the reset button under a screen resets the layout only when held this long (ms; laser or finger) | 0 = a press
+HANDS_RESET_HOLD_MS=0      # the reset button under a screen resets the layout when held this long (ms; laser or finger) | 0 = a press
 SCREEN_SPIN_DISTANCE=1.0   # ... a brought screen comes this far ahead (m)
 SCREEN_SPIN_PPD=26         # ... as big as its text needs to read: its logical pixels (KWin's scale undone) at this many per degree of view
 SCREEN_SPIN_MAX_DEG=100    # ... at most this wide (degrees; wider than 60 it curves round you) and SCREEN_SPIN_MAX_TALL_DEG (55) tall, its shape kept

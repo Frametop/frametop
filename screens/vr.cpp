@@ -131,6 +131,7 @@
 #include <cstring>
 #include <map>
 #include <sstream>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -377,6 +378,11 @@ struct Screen {
     int64_t useMs = INT64_MIN / 2;    // the last click, scroll or drag on it (not a pointer passing over: the front slot's keep)
     int64_t laserMs = INT64_MIN / 2;  // ...from a laser (SteamVR's: a controller's, the 3D mouse's, a hand ray's; FromLaser)
     uint32_t laserDevice = vr::k_unTrackedDeviceIndexInvalid;   // ...whose (for the log)
+    // How far out and how big it was before a hand or "grab that" took it (RememberPlace): a throw,
+    // flick or push sends it out that far, at that size (SendBack). Forgotten once it's put down out
+    // past kPlacedFar (that's its distance now).
+    bool hasBefore = false;
+    double beforeDist = 0, beforeWidth = 0, beforeCurve = 0;
     int64_t handPointerMs = INT64_MIN / 2;  // a hand last moved the pointer on it (kHandPointerMs)
     int64_t focusUntil = 0, viewUntil = 0;
     double heightMetres() const {
@@ -759,8 +765,11 @@ Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 // floating window's dock and close buttons (left of the bar), and a desktop screen's reset
 // button (left of the bar, where a floating window has its dock button).
 // Their centres on the surface: u along it, v up, metres from the screen's centre.
+//   Between the bar and a button, and button and button, a button's width or more (user, 2026-10-13:
+// "farther apart so it's harder to accidentally click"; was 6% of the bar's width, about a third of a
+// button). It grows with them as a hand comes (ChromeSize).
 void ControlUV(const Screen &s, double u[7], double v[7]) {
-    const double h = s.heightMetres(), bar = s.chrome, button = s.grip, gap = bar * 0.06;
+    const double h = s.heightMetres(), bar = s.chrome, button = s.grip, gap = std::max(bar * 0.06, button);
     const double uu[7] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
                           // The handle's inner corner is the screen's corner it's at (bottom right:
                           // its top left corner on the screen's bottom right corner).
@@ -1457,12 +1466,15 @@ void FinishDrag(Screen &s, int index) {
     }
 }
 
+void RememberPlace(int i, Screen &s);       // (how far out a sent-away panel goes: by SendBack)
+void ForgetIfPlacedFar(int i, Screen &s);
+
 // A button release on any of our panels ends that device's drags (it may be over another
 // screen by then).
 void EndDragsBy(vr::TrackedDeviceIndex_t dev) {
     keyboard::EndDragBy(dev);
     for (auto &[index, s] : g_screens)
-        if (s.drag != Drag::None && s.dragDevice == dev) FinishDrag(s, index);
+        if (s.drag != Drag::None && s.dragDevice == dev) FinishDrag(s, index), ForgetIfPlacedFar(index, s);
 }
 
 // While moving: the laser entering a controller's ring flips whether the screen pins to
@@ -2271,6 +2283,9 @@ struct TypingWord {
     bool side[2] = {false, false};
     int64_t atMs = INT64_MIN / 2;
 } g_typingWord;
+// ...and on its hand rays ("ray <L 0|1> <R 0|1>", the same way): our laser (ft_pointer's) is a hand
+// pointing only while one is up; else it's the mouse's or the gaze's (FromLaser).
+TypingWord g_rayWord;
 // HANDS_NEAR: 1 (default) follows the helper's word, 0 is off, force is on without it (for
 // testing without the helper; the "handinput" command switches it too).
 enum class NearMode { Off, Helper, Force } g_nearMode = NearMode::Helper;
@@ -2532,6 +2547,7 @@ void BringReadable(int i, const Mat &to, bool slot, const char *why) {
     if (!ScreenPose(s, &now)) return;
     if (!slot) {
         if (g_front.panel == i) g_front.released = true;   // (grab that at the slot's one: a manual control)
+        RememberPlace(i, s);
     } else if (g_front.panel != i) {
         const auto m = g_grabMoves.find(i);   // (on its way home: home is where it was going)
         g_front = {};
@@ -2559,6 +2575,54 @@ void FrontRelease(int i, const char *why) {
     if (i != g_front.panel || g_front.released) return;
     g_front.released = true;
     std::printf("front: screen %d released (%s): it stays where you put it; the next stroke puts it home\n", i + 1, why);
+}
+
+// Sent away, a panel goes back out as far as it was before it was taken, at the size it was (user,
+// 2026-10-13: "when you throw a monitor away, it should actually have the monitor return to where it
+// was before you had grabbed it", then: "it only saves the size and distance it was at, but still
+// allows you to move the screen around to other places ... If people want to have a saved layout,
+// they can save and restore that layout"): along the throw's line, that far from the eyes. A hand's
+// grab or "grab that" remembers it, unless it's remembered already (taken again before it was sent:
+// still the first) or it's the front slot's (its home's). Put down out past kPlacedFar from the eyes,
+// that's its distance now: forgotten, and a throw from there keeps it. A panel with nothing
+// remembered flies out to throwDistance at its size, as before.
+constexpr double kPlacedFar = 1.2;
+void RememberPlace(int i, Screen &s) {
+    Mat p, head;
+    if (s.hasBefore || i == g_front.panel || !HomeOf(i, s, &p) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
+    const auto m = g_grabMoves.find(i);
+    s.beforeDist = Apart(head, p), s.beforeWidth = m != g_grabMoves.end() ? m->second.w1 : s.metres, s.beforeCurve = s.curve;
+    s.hasBefore = true;
+}
+
+void ForgetIfPlacedFar(int i, Screen &s) {
+    Mat head, p;
+    if (!s.hasBefore || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) || !ScreenPose(s, &p)) return;
+    if (Apart(head, p) > kPlacedFar) s.hasBefore = false;
+    (void)i;
+}
+
+// Out along the line to `to` (a throw's place, facing the eyes), as far and as big as it was (the
+// front slot's: as at home, and it leaves the slot), over ms, easing out. False: nothing remembered.
+bool SendBack(int i, Screen &s, const Mat &to, double ms, const char *why) {
+    Mat head;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
+    if (i == g_front.panel) {
+        s.beforeDist = Apart(head, g_front.home), s.beforeWidth = g_front.homeWidth, s.beforeCurve = g_front.homeCurve;
+        s.hasBefore = true;
+        std::printf("front: screen %d leaves the slot (%s)\n", i + 1, why);
+        g_front = {};
+    }
+    if (!s.hasBefore) return false;
+    s.hasBefore = false;
+    const double d[3] = {to.m[0][3] - head.m[0][3], to.m[1][3] - head.m[1][3], to.m[2][3] - head.m[2][3]};
+    const double n = std::max(1e-6, std::hypot(d[0], d[1], d[2]));
+    Mat at = to;
+    for (int q = 0; q < 3; ++q) at.m[q][3] = head.m[q][3] + d[q] / n * s.beforeDist;
+    std::printf("screen %d: %s, out as far as it was (%.1f m), %.2f m wide\n", i + 1, why, s.beforeDist, s.beforeWidth);
+    if (!s.floating) s.curve = s.beforeCurve;
+    StartGrabMove(i, s, at, s.beforeWidth, ms, true);
+    return true;
 }
 
 
@@ -2663,12 +2727,14 @@ void GrabThatReset() {
     }
     if (g_front.panel >= 0) FrontHome("the reset button");
     g_frontDeg.clear();
+    for (auto &[i, s] : g_screens) s.hasBefore = false;
 }
 
-// The reset button takes a hold (user, 2026-10-11, the proposals: a stray poke reset the whole layout):
-// pressed for g_resetHoldMs (HANDS_RESET_HOLD_MS) by the same laser or hand, the layout resets; let go
-// sooner, nothing.
-double g_resetHoldMs = 500;
+// The reset button may take a hold: pressed for g_resetHoldMs (HANDS_RESET_HOLD_MS) by the same laser
+// or hand, the layout resets; let go sooner, nothing. (500 ms from 2026-10-11, after a stray poke reset
+// the whole layout; a press again since 2026-10-13: "clicking the reset ... button that's underneath
+// doesn't actually do anything", taps of 0.09-0.16 s, and the buttons sit farther apart: ControlUV.)
+double g_resetHoldMs = 0;
 struct ResetHold {
     int panel = -1;
     vr::TrackedDeviceIndex_t device = kNone;   // a laser's
@@ -2899,12 +2965,22 @@ void UpdateFront() {
 bool g_targetGlowOn = true;
 bool g_pushGlowOn = false;
 
-// An overlay event from a laser: a controller's (the pointer helper's 3D mouse and hand ray are
-// ft_pointer controllers). SteamVR also sends panels events from the headset and from no device at
-// all, which aren't a laser on them (2026-10-13: those kept the grab-that glow off every panel).
+// An overlay event from a laser: a controller's, or our own (ft_pointer's) while a hand ray is up
+// (the pointer helper's "ray"; else it's the mouse's or the gaze's, which sits on a panel all the
+// time). SteamVR also sends panels events from the headset and from no device at all. (2026-10-13:
+// those, then the mouse's, kept the grab-that glow off the panels.)
 bool FromLaser(const vr::VREvent_t &ev) {
-    return ev.trackedDeviceIndex < vr::k_unMaxTrackedDeviceCount &&
-           vr::VRSystem()->GetTrackedDeviceClass(ev.trackedDeviceIndex) == vr::TrackedDeviceClass_Controller;
+    const uint32_t d = ev.trackedDeviceIndex;
+    if (d >= vr::k_unMaxTrackedDeviceCount || vr::VRSystem()->GetTrackedDeviceClass(d) != vr::TrackedDeviceClass_Controller) return false;
+    static int64_t ours[vr::k_unMaxTrackedDeviceCount] = {};   // ft_pointer's: 1, another's: -1, as last looked up (every 10 s)
+    static int64_t lookedMs[vr::k_unMaxTrackedDeviceCount] = {};
+    if (!ours[d] || NowMs() - lookedMs[d] > 10000) {
+        char type[64] = "";
+        vr::VRSystem()->GetStringTrackedDeviceProperty(d, vr::Prop_ControllerType_String, type, sizeof type);
+        ours[d] = std::strcmp(type, "ft_pointer") ? -1 : 1, lookedMs[d] = NowMs();
+    }
+    if (ours[d] < 0) return true;
+    return NowMs() - g_rayWord.atMs < 3000 && (g_rayWord.side[0] || g_rayWord.side[1]);
 }
 struct TargetGlow {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
@@ -3182,6 +3258,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     UpdateTargetGlow();
     UpdateHandGuides();
 
+    std::set<int> letGo, thrown;   // panels a hand let go of, and ones thrown, this tick
     for (const handinput::Event &e : g_handInput.events()) {
         if (e.type == handinput::Event::Spin) {   // the lazy susan by hand: swept left, the panel on the right comes (next)
             char reply[96];
@@ -3245,6 +3322,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                     s.keepX = -e.sx, s.keepY = -e.sy;   // (a floating window's opposite corner stays put)
                     if (!g_handInput.params().edgeGlow) s.cornerX = e.sx, s.cornerY = e.sy, PlaceChrome(s);   // (else its glow shows it)
                 }
+                RememberPlace(e.panel, s);
                 StartHandDrag(s, e.side, e.zone);
                 break;
             case handinput::Event::Throw: {
@@ -3252,6 +3330,11 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 // on a wrist): out to throwDistance, easing out, at its width: that's its place now (the
                 // front slot's one too: released, until the next stroke puts it home)
                 if (s.drag != Drag::None || s.pinned != kNone) break;
+                thrown.insert(e.panel);
+                if (SendBack(e.panel, s, e.to, e.ms, e.push ? "pushed away" : e.flick ? "flicked away" : "thrown")) {
+                    g_grabThat.Quiet(g_handInput.frameNs() + int64_t(g_grabThat.params().quietAfterSendMs * 1e6));
+                    break;
+                }
                 FrontRelease(e.panel, e.push ? "pushed away" : e.flick ? "flicked away" : "thrown");   // (yours: it flies)
                 Mat head;
                 double far = 0;
@@ -3270,9 +3353,15 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                     ApplyAlpha(s);
                 } else {
                     FinishDrag(s, e.panel);
+                    letGo.insert(e.panel);
                 }
                 break;
         }
+    }
+    // put down (not thrown) out past kPlacedFar: it lives there now
+    for (int i : letGo) {
+        const auto it = g_screens.find(i);
+        if (it != g_screens.end() && !thrown.count(i)) ForgetIfPlacedFar(i, it->second);
     }
     for (const handinput::Carry &c : g_handInput.carries()) {
         const auto it = g_screens.find(c.panel);
@@ -4182,6 +4271,8 @@ void ft_vr_keyboard_hide(void) {
 //   cutouts shift off|"<dist>:<yaw>,<pitch> ..."   the per-distance correction (degrees; off by default)
 //   hands <L> <R> <allowed>   the pointer helper: each side hand|controller|off, hand input allowed 0|1
 //                             (on change and every second; older than 3 s it lapses)
+//   ray <L> <R>               the pointer helper: that side's hand ray is up 0|1 (on change and every
+//                             second, older than 3 s it lapses)
 //   typing <L> <R>            the pointer helper: typing holds that side's hand back 0|1 (no pokes,
 //                             near grabs or "grab that"); on change and every second, older than 3 s it lapses
 //   handinput on|off|force|state   near hand input: on follows the helper's word, force ignores it
@@ -4374,6 +4465,9 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         std::snprintf(reply, size, "ok");
     } else if (int tl = 0, tr = 0; std::sscanf(cmd, "typing %d %d", &tl, &tr) == 2) {
         g_typingWord.side[0] = tl != 0, g_typingWord.side[1] = tr != 0, g_typingWord.atMs = NowMs();
+        std::snprintf(reply, size, "ok");
+    } else if (int rl = 0, rr = 0; std::sscanf(cmd, "ray %d %d", &rl, &rr) == 2) {
+        g_rayWord.side[0] = rl != 0, g_rayWord.side[1] = rr != 0, g_rayWord.atMs = NowMs();
         std::snprintf(reply, size, "ok");
     } else if (std::sscanf(cmd, "handinput %15s", word) == 1) {
         if (!std::strcmp(word, "on")) g_nearMode = NearMode::Helper;

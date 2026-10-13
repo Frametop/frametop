@@ -605,32 +605,40 @@ void HandInput::EndGrab(int s, bool lost) {
     // let go fast, outward: thrown on along that line (Params::cardThrow)
     const bool carried = sd.zone == Zone::Card || (sd.zone == Zone::Fist && !p_.fistResizeOnly) || sd.zone == Zone::Edge ||
                          sd.zone == Zone::Bar || sd.zone == Zone::Title;
-    fhsmooth::V3 v;
     const int throwsBefore = stats.throws;
-    if (!lost && p_.cardThrow && carried && stretch_.panel != sd.panel && haveHead_ && !sd.track.empty() &&
-        Velocity(s, sd.upNs ? sd.upNs : 0, p_.throwFitMs, &v)) {
-        const double speed = fhsmooth::Len(v);
-        // outward: away from the eyes, from where the hand was as the throw's last fitMs began
-        fhsmooth::V3 hand = sd.track.back().p;
+    if (!lost && p_.cardThrow && carried && stretch_.panel != sd.panel && haveHead_ && !sd.track.empty()) {
+        // the fastest stretch outward in the last throwPeakMs before the fingers opened (a hand slows as
+        // it lets go: the user, 2026-10-13, "too difficult to throw ... when you're doing the pinch grab")
         const int64_t end = sd.upNs ? sd.upNs : sd.track.back().t;
-        for (const Side::Pt &q : sd.track)
-            if (q.t >= end - int64_t(p_.throwFitMs * 1e6)) {
-                hand = q.p;
-                break;
-            }
         const fhsmooth::V3 eye{lastHead_.m[0][3], lastHead_.m[1][3], lastHead_.m[2][3]};
-        const double out = fhsmooth::Dot(fhsmooth::Norm(v), fhsmooth::Norm(hand - eye));
+        double speed = -1, out = -1, anySpeed = -1, anyOut = -1;
+        fhsmooth::V3 v;
+        for (double back = 0; back <= p_.throwPeakMs + 1e-6; back += 25) {
+            const int64_t e = end - int64_t(back * 1e6);
+            fhsmooth::V3 w;
+            if (!Velocity(s, e, p_.throwFitMs, &w)) continue;
+            // outward: away from the eyes, from where the hand was as this stretch began
+            fhsmooth::V3 hand = sd.track.back().p;
+            for (const Side::Pt &q : sd.track)
+                if (q.t >= e - int64_t(p_.throwFitMs * 1e6)) {
+                    hand = q.p;
+                    break;
+                }
+            const double sp = fhsmooth::Len(w), o = fhsmooth::Dot(fhsmooth::Norm(w), fhsmooth::Norm(hand - eye));
+            if (sp > anySpeed) anySpeed = sp, anyOut = o;
+            if (o >= std::cos(p_.throwAngle * M_PI / 180) && sp > speed) speed = sp, out = o, v = w;
+        }
         const double c[3] = {sd.last.m[0][3], sd.last.m[1][3], sd.last.m[2][3]};
         const fhsmooth::V3 n = fhsmooth::Norm(v);
         const double dir[3] = {n.x, n.y, n.z};
         Mat to;
-        if (speed >= p_.throwSpeed && out >= std::cos(p_.throwAngle * M_PI / 180) && ThrowTarget(c, dir, &to)) {
+        if (speed >= p_.throwSpeed && ThrowTarget(c, dir, &to)) {
             Log("%s %s let go of screen %d at %.2f m/s, %.0f deg off straight out: thrown", SideName(s),
                 sd.byGrip ? "fist" : "pinch", sd.panel + 1, speed, std::acos(std::clamp(out, -1.0, 1.0)) * 180 / M_PI);
             EmitThrow(s, sd.panel, to, false);
-        } else if (speed >= 0.5) {
-            Log("%s %s let go of screen %d at %.2f m/s, %.0f deg off straight out: not thrown (%.1f m/s and %.0f deg)", SideName(s),
-                sd.byGrip ? "fist" : "pinch", sd.panel + 1, speed, std::acos(std::clamp(out, -1.0, 1.0)) * 180 / M_PI,
+        } else if (anySpeed >= 0.3) {
+            Log("%s %s let go of screen %d at %.2f m/s at most, %.0f deg off straight out: not thrown (%.2f m/s within %.0f deg)",
+                SideName(s), sd.byGrip ? "fist" : "pinch", sd.panel + 1, anySpeed, std::acos(std::clamp(anyOut, -1.0, 1.0)) * 180 / M_PI,
                 p_.throwSpeed, p_.throwAngle);
         }
     }
@@ -2367,7 +2375,7 @@ void HandInput::Push(int s, const Input &in, const std::vector<Panel> &panels) {
         }
         EndAttempt(s);
         Log("%s push at screen %d: the palm %.0f cm in from %.0f cm out over %.2f s (%.2f m/s into it now), the hand %.2f open: "
-            "thrown %.1f m out", SideName(s), P.index + 1, -t.d * 100, fromD * 100, dt, vin, now.open,
+            "thrown (as far out as it was, or %.1f m)", SideName(s), P.index + 1, -t.d * 100, fromD * 100, dt, vin, now.open,
             p_.throwDistance);
         EmitThrow(s, P.index, to, true, true);
         return;
@@ -2462,7 +2470,7 @@ void HandInput::Flick(int s, const Input &in, const std::vector<Panel> &panels, 
     }
     EndAttempt(s);
     Log("%s flick at screen %d: %.2f m/s, %.0f cm, %.0f deg off straight out, the hand %.2f open (%.2f at the start): thrown "
-        "%.1f m out", SideName(s), P->index + 1, speed, travel * 100, off, now.open, from->open, p_.throwDistance);
+        "(as far out as it was, or %.1f m)", SideName(s), P->index + 1, speed, travel * 100, off, now.open, from->open, p_.throwDistance);
     EmitThrow(s, P->index, to, true);
 }
 

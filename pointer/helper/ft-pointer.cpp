@@ -1305,6 +1305,8 @@ int main() {
     typing::Typing typist;           // the relay's "typing" (a key) and the hands: which hands typing holds back
     std::string typingSent;          // "typing L R" as last sent to ft-screens
     Clock::time_point typingSentAt{};
+    std::string raySent;             // "ray L R" as last sent to ft-screens
+    Clock::time_point raySentAt{};
     // Hand interaction (see "Handoff" at the top): the hands in the room, the arbiter, and what
     // it last told ft-screens.
     int raySide = -1;  // the bare hand whose ray drives the pointer (see "Hand ray"), -1: none
@@ -2305,6 +2307,13 @@ int main() {
                 if (typingMsg != typingSent && debug) std::printf("%s\n", typingMsg.c_str());
                 typingSent = typingMsg, typingSentAt = tnow;
                 SendTo(out, "ft_screens", typingMsg);   // no pokes, near grabs or "grab that" by those hands
+            }
+            // Which hands' rays are up: our laser on a panel is a hand pointing at it only then (else it's
+            // the mouse's or the gaze's), for ft-screens' "no grab-that glow under a laser".
+            const std::string rayMsg = std::string("ray ") + (rays[0].Shown() ? "1" : "0") + (rays[1].Shown() ? " 1" : " 0");
+            if (rayMsg != raySent || tnow - raySentAt > std::chrono::seconds(1)) {
+                raySent = rayMsg, raySentAt = tnow;
+                SendTo(out, "ft_screens", rayMsg);
             }
 
             // Each hand's openness (fhray::FistCurl), for the fist guard on every pinch (gaze or ray).

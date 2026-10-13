@@ -438,10 +438,13 @@ struct Params {
     double flickOpening = 0.15;
     // The card throw (HANDS_THROW): a hand carrying a panel (a card, a fist, a pinch on its border or
     // bar; not a resize or two hands) that lets go moving at throwSpeed or more (its velocity over the
-    // throwFitMs before the fingers opened), within throwAngle of away from the eyes: the panel goes on
-    // along that line, to where it's throwDistance from the eyes. Slower, it stays where it was let go.
+    // throwFitMs, its fastest such stretch in the last throwPeakMs before the fingers opened), within
+    // throwAngle of away from the eyes: the panel goes on along that line (vr.cpp: as far out and as big
+    // as it was before it was taken, if it remembers). Slower, it stays where it was let go. (Easier since
+    // 2026-10-13, "too difficult to throw ... when you're doing the pinch grab": was 0.55 m/s within
+    // 60 deg, over the last 100 ms only, when a hand letting go has slowed already.)
     bool cardThrow = true;
-    double throwSpeed = 0.55, throwFitMs = 100, throwAngle = 60;
+    double throwSpeed = 0.45, throwFitMs = 100, throwAngle = 70, throwPeakMs = 150;
     // Letting go without a nudge (user, 2026-10-11: "when I release, it sees a slight movement of the hand
     // as I let go of the two fingers or the full hand"): while a hand holds a panel, the panel stops
     // following it once its fingers open openFreeze past their tightest this hold (a fist's curl

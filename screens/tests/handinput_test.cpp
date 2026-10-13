@@ -1968,14 +1968,19 @@ void TestFlick() {
 // hand came back from a gap).
 void TestCardThrow() {
     const double v = -0.28125 + 0.01;
-    struct Case { const char *what; double dir[3], speed; int gap; bool throws; };
+    // slow: the last frames before the let-go at this speed instead (a hand slowing as it lets go, or
+    // one that came to rest), how many
+    struct Case { const char *what; double dir[3], speed; int gap; bool throws; double slow = 0; int slowFrames = 0; };
     const Case cases[] = {
         {"let go moving straight out at 1.5 m/s", {0, 0, -1}, 1.5, 0, true},
         {"let go moving out and up at 1.5 m/s", {0, 0.5, -0.866}, 1.5, 0, true},
-        {"let go moving out at 0.5 m/s", {0, 0, -1}, 0.5, 0, false},
+        {"let go moving out at 0.5 m/s", {0, 0, -1}, 0.5, 0, true},
+        {"let go moving out at 0.3 m/s", {0, 0, -1}, 0.3, 0, false},
         {"let go moving sideways at 1.5 m/s", {-1, 0, 0}, 1.5, 0, false},
         {"let go moving in at 1.5 m/s", {0, 0, 1}, 1.5, 0, false},
         {"let go the frame it came back from a 6-frame gap", {0, 0, -1}, 1.5, 6, false},
+        {"out at 1 m/s, slowing to 0.15 over the last 3 frames", {0, 0, -1}, 1.0, 0, true, 0.15, 3},
+        {"out at 1 m/s, then at rest 8 frames before the let-go", {0, 0, -1}, 1.0, 0, false, 0, 8},
     };
     for (const Case &c : cases) {
         Rig r;
@@ -1993,9 +1998,11 @@ void TestCardThrow() {
         r.Frame({hand(0)});
         CHECK(r.Last(Event::GrabStart) && r.Last(Event::GrabStart)->zone == Zone::Card);
         for (int k = 0; k < 10; ++k) r.Frame({hand(0)});
-        // the throw: 8 frames along dir at speed (the last ones with the hand back after a gap)
-        for (int k = 1; k <= 8; ++k) {
-            x += c.dir[0] * c.speed / 30, y += c.dir[1] * c.speed / 30, z += c.dir[2] * c.speed / 30;
+        // the throw: 8 frames along dir at speed (the last ones with the hand back after a gap), and
+        // slowFrames more at slow
+        for (int k = 1; k <= 8 + c.slowFrames; ++k) {
+            const double sp = k > 8 ? c.slow : c.speed;
+            x += c.dir[0] * sp / 30, y += c.dir[1] * sp / 30, z += c.dir[2] * sp / 30;
             SynthHand h = hand(0);
             if (c.gap && k > 8 - 1 - c.gap && k < 8) h.present = false;
             if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
@@ -2003,7 +2010,8 @@ void TestCardThrow() {
         }
         r.synth.Pinch(1, false, r.t, at, 1);
         for (int k = 0; k < 4; ++k) {
-            x += c.dir[0] * c.speed / 30, y += c.dir[1] * c.speed / 30, z += c.dir[2] * c.speed / 30;
+            const double sp = c.slowFrames ? c.slow : c.speed;
+            x += c.dir[0] * sp / 30, y += c.dir[1] * sp / 30, z += c.dir[2] * sp / 30;
             r.Frame({hand(1.0)});
         }
         const auto t = r.Last(Event::Throw);

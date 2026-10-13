@@ -2,6 +2,7 @@
 # Replays recordings through ft-handreplay with a timeline (trace events + oracle) for
 # tools/gap_report.py. Runs several at once; meant for the 7i through frame-job:
 #   frame-job -- tools/replay_gaps.sh OUT MODELS "EXTRA ARGS" REC[:FROM:TO]...
+# REPLAY=BINARY replays with another ft-handreplay build (a baseline).
 # OUT gets REC.txt (the summary) and REC.tl (the timeline) per recording.
 set -uo pipefail
 out=$1 models=$2 extra=$3
@@ -30,7 +31,7 @@ for spec in "$@"; do
   done
   while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do wait -n; done
   # shellcheck disable=SC2086
-  ${devroot[@]+"${devroot[@]}"} "$here/build/ft-handreplay" "$rec" --cost --threads ${THREADS:-3} --models "$models" --timeline "$out/$name.tl" \
+  ${devroot[@]+"${devroot[@]}"} "${REPLAY:-$here/build/ft-handreplay}" "$rec" --cost --threads ${THREADS:-3} --models "$models" --timeline "$out/$name.tl" \
     ${range[@]+"${range[@]}"} $extra > "$out/$name.txt" 2>&1 &
 done
 wait

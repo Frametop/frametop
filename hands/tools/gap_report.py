@@ -11,7 +11,9 @@ Per gap:
 - time held (the hand kept for 0.3 s, its crops retried where it was), time with the search blocked
   (two hand ids tracked), time searching, and time waiting between searches;
 - the oracle (a full search every N sets): in how many of its samples the side's hand was findable,
-  and whether any tile it was found in was searched during the gap;
+  and whether any tile it was found in was searched during the gap; and how late the hand came back:
+  from the oracle's first sample finding it (through to the gap's end) to the end, for gaps where it
+  was out of the full search's reach for a while (back in view) and for the rest;
 - palms the search found on the way that the landmark model rejected, and how the hand came back.
 
 Causes, one per gap, by where most of the missing time went:
@@ -133,6 +135,14 @@ def report(path, min_gap=0.3, listing=False):
                     if (h['right'] > 0.5) == (side == 'R'):
                         otiles.add((h['cam'], h['tile']))
             frac = len(found) / len(osamp) if osamp else None
+            # how late it came back: from the first of the oracle samples that found it through to the end
+            # of the gap (none of them missing it) to the end; reentry: the gap had samples not finding it
+            late = None
+            fset = set(found)
+            for o in reversed(osamp):
+                if o not in fset:
+                    break
+                late = t1 - o
             end_ev = procs[b][1]['ev']
             how = 'search' if any(e.startswith('palm ') and e.endswith('kept') for e in end_ev) else \
                   'split-off' if any('split off' in e for e in end_ev) else \
@@ -156,7 +166,8 @@ def report(path, min_gap=0.3, listing=False):
                 cause = 'not-findable' if frac is not None else 'no-oracle'
             rows.append(dict(t0=t0, t1=t1, dur=dur, hid=hid, back=back_id, start=start, cause=cause, t=t,
                              frac=frac, rejected=rejected, kept=kept, how=how, ntiles=len(searched_tiles),
-                             otiles=len(otiles), hit=len(otiles & searched_tiles), blocked=blocked_ids))
+                             otiles=len(otiles), hit=len(otiles & searched_tiles), blocked=blocked_ids,
+                             late=late, reentry=len(found) < len(osamp)))
         out[side] = rows
     print(f'{path}: {total_time:.0f} s processed')
     # label-free: per oracle sample, hands the full search found (distinct left/right calls) against
@@ -185,6 +196,12 @@ def report(path, min_gap=0.3, listing=False):
             n[r['cause']] += 1
         for c, s in by.most_common():
             print(f'     {c:22s} {n[c]:3d} gaps {s:6.1f} s ({100 * s / max(tot, 1e-9):.0f}%)')
+        for what, sel in (('back in view', True), ('in view all along', False)):
+            lates = sorted(r['late'] for r in rows if r['late'] is not None and r['reentry'] == sel)
+            if lates:
+                q = lambda f: lates[min(len(lates) - 1, int(f * len(lates)))]
+                print(f'     {what}: {len(lates)} gaps, found again after it could be: median {q(0.5):.2f} s, '
+                      f'90% {q(0.9):.2f} s, total {sum(lates):.1f} s')
         st = collections.Counter()
         for r in rows:
             st[r['start']] += 1

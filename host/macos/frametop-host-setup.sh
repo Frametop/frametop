@@ -15,6 +15,9 @@
 #     LaunchAgent frametop.sunshine.N and started again if it stops. An instance is tied to its
 #     monitor, not to a port: plug the monitor in elsewhere and it keeps its instance, and while
 #     it's unplugged its instance waits for it. Run this again after connecting a new monitor.
+#     Frametop Streams, a menu bar icon started at login, turns each one on or off with a
+#     click, or all of them; ft-sunshine off|on|status does the same in Terminal. Off lasts
+#     through logins until on, or until this runs again.
 #  3. The Web UI login you sign in with once from the Steam Frame, the same for every instance:
 #     keep the one there is, take the one an earlier Sunshine install had, or set one. The
 #     password is typed here and never shown or saved.
@@ -27,7 +30,8 @@
 #   --set-login     set a new Web UI login even if there is one
 #   --skip-login    leave the Web UI login alone
 #   --check         only say what would change
-#   --undo          remove the instances' LaunchAgents (settings, pairings and Sunshine stay)
+#   --undo          remove the instances' LaunchAgents, Frametop Streams and ft-sunshine
+#                   (settings, pairings and Sunshine stay)
 # A log goes to ~/Library/Logs/Frametop/host-setup.log.
 set -euo pipefail
 
@@ -45,6 +49,9 @@ BASE_PORT=47989
 GUI="gui/$(id -u)"
 OLD_STATE="$HOME/.config/sunshine/sunshine_state.json"  # a stock Sunshine install's login
 BREW_LABEL=homebrew.mxcl.sunshine
+STREAMS_APP="$HOME/Applications/Frametop Streams.app"
+STREAMS_LABEL=frametop.streams  # its LaunchAgent and bundle id
+LINK="$HOME/.local/bin/ft-sunshine"  # only when there's a ~/.local/bin
 HERE=$(cd "$(dirname "$0")" && pwd)
 
 check=0 undo=0 login=auto
@@ -69,6 +76,8 @@ our_agents() { ls "$AGENTS" 2>/dev/null | sed -n "s/^\($LABEL\.[0-9][0-9]*\)\.pl
 # bootout returns before the job is gone, and bootstrap fails until it is.
 start_agent() {
     local i
+    # ft-sunshine off disables the agents, and bootstrap fails while they are.
+    launchctl enable "$GUI/$1"
     for i in 1 2 3 4 5; do
         launchctl bootstrap "$GUI" "$AGENTS/$1.plist" 2>/dev/null && return 0
         agent_loaded "$1" && return 0
@@ -82,6 +91,50 @@ stop_agents() {
     for label in $(our_agents); do
         launchctl bootout "$GUI/$label" 2>/dev/null || true
     done
+}
+
+# Frametop Streams: a menu bar icon that turns each instance on or off through ft-sunshine,
+# started at login. It's a stay-open AppleScript app, so nothing needs compiling. LSUIElement
+# keeps it out of the Dock, and changing Info.plist means signing it again (ad hoc, as osacompile
+# does).
+install_streams_app() {
+    local where="$DATA/bin/ft-sunshine" info="$STREAMS_APP/Contents/Info.plist"
+    if [ -d "$HOME/.local/bin" ] && { [ ! -e "$LINK" ] || [ -L "$LINK" ]; }; then
+        ln -sf "$DATA/bin/ft-sunshine" "$LINK"
+        where=ft-sunshine
+    fi
+    launchctl bootout "$GUI/$STREAMS_LABEL" 2>/dev/null || true
+    pkill -f "$STREAMS_APP/Contents/MacOS/applet" 2>/dev/null || true
+    mkdir -p "$(dirname "$STREAMS_APP")"
+    rm -rf "$STREAMS_APP"
+    if ! osacompile -s -o "$STREAMS_APP" "$HERE/Frametop Streams.applescript" 2>/dev/null ||
+        ! plutil -replace LSUIElement -bool true "$info" ||
+        ! plutil -replace CFBundleIdentifier -string "$STREAMS_LABEL" "$info" ||
+        ! codesign -f -s - "$STREAMS_APP" 2>/dev/null; then
+        say "Couldn't make $STREAMS_APP. To turn the instances off or on: $where off|on."
+        return 0
+    fi
+    cat > "$AGENTS/$STREAMS_LABEL.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$STREAMS_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$STREAMS_APP/Contents/MacOS/applet</string>
+    </array>
+    <key>AssociatedBundleIdentifiers</key><string>$STREAMS_LABEL</string>
+    <key>RunAtLoad</key><true/>
+    <!-- Quit from its menu, it stays quit until the next login; after a crash it starts again. -->
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+    <key>ProcessType</key><string>Interactive</string>
+    <key>LimitLoadToSessionType</key><string>Aqua</string>
+</dict>
+</plist>
+EOF
+    start_agent "$STREAMS_LABEL" || true
+    say "Frametop Streams is in the menu bar: click a display there to turn it on or off. In Terminal: $where off|on|status."
 }
 
 # Answers when the instance on this port is up (its HTTP serverinfo, port N).
@@ -204,6 +257,18 @@ undo() {
         rm -f "$AGENTS/$label.plist"
         say "Removed the LaunchAgent $label."
     done
+    if [ -e "$AGENTS/$STREAMS_LABEL.plist" ] || [ -e "$STREAMS_APP" ] || [ -L "$LINK" ]; then
+        if [ $check = 1 ]; then
+            say "Would remove Frametop Streams and ft-sunshine."
+        else
+            launchctl bootout "$GUI/$STREAMS_LABEL" 2>/dev/null || true
+            pkill -f "$STREAMS_APP/Contents/MacOS/applet" 2>/dev/null || true
+            rm -f "$AGENTS/$STREAMS_LABEL.plist"
+            rm -rf "$STREAMS_APP"
+            [ "$(readlink "$LINK" 2>/dev/null)" = "$DATA/bin/ft-sunshine" ] && rm -f "$LINK"
+            say "Removed Frametop Streams and ft-sunshine."
+        fi
+    fi
     if [ -e "$DATA/.disabled-$BREW_LABEL" ]; then
         if [ $check = 1 ]; then
             say "Would turn Homebrew's Sunshine LaunchAgent back on."
@@ -272,11 +337,13 @@ $n"
             [ -n "$n" ] || continue
             say "Would $([ -e "$DATA/instance-$n/display" ] && echo keep || echo add) instance $n: $name ($w x $h), port $((BASE_PORT + 100 * n))."
         done <<< "$lines"
+        say "Would install Frametop Streams ($STREAMS_APP), a menu bar icon that turns each instance on or off, and ft-sunshine, the same in Terminal."
     else
         stop_agents
         mkdir -p "$DATA/bin" "$DATA/credentials" "$AGENTS"
-        cp "$HERE/ft-sunshine-instance" "$HERE/displays.js" "$DATA/bin/"
-        chmod 755 "$DATA/bin/ft-sunshine-instance"
+        cp "$HERE/ft-sunshine-instance" "$HERE/ft-sunshine" "$HERE/displays.js" "$DATA/bin/"
+        chmod 755 "$DATA/bin/ft-sunshine-instance" "$DATA/bin/ft-sunshine"
+        install_streams_app
         # One certificate for every instance, so Frametop pins one key for the Mac.
         if [ ! -s "$DATA/credentials/cacert.pem" ] || [ ! -s "$DATA/credentials/cakey.pem" ]; then
             (umask 077 && openssl req -x509 -newkey rsa:2048 -nodes -days 7300 -subj "/CN=Sunshine Gamestream Host" \

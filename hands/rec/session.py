@@ -63,6 +63,10 @@ PANEL_SOCKET = "ft_handpanel"
 CAMD_UNIT = "frametop-handrec-camd.service"
 # Frametop's live hand tracking (hands/run.sh, ft-handsctl): an ft-camd the recorder uses as it is
 LIVE_CAMD_UNIT, LIVE_HANDS_UNIT = "frametop-camd.service", "frametop-hands.service"
+# Frametop's drawn hands and hand pointer: off for a session, so no hand overlay is in view and no gesture
+# clicks or opens Steam's menu while the person performs the steps (Session._quiet_hands)
+QUIET_UNITS = ("frametop-handview.service", "frametop-pointer.service")
+PAUSED_UNITS_FILE = "handrec-paused-units"   # in run_dir(): the ones to start again, if a session didn't
 SIDE_CAMERAS = ("slam_left", "slam_right")   # a recording needs these (Session._first_set)
 CAMERAS_BACK_S = 120     # how long a lost recording waits for the cameras (Session._cameras_back)
 STALL_S = 3.0            # a recording with no new set for this long is lost (Session._watch_recording)
@@ -383,6 +387,39 @@ def start_unit(unit, what, argv, log=lambda line: None):
 
 def stop_unit(unit):
     subprocess.run(host_command("systemctl", "--user", "stop", unit), capture_output=True, timeout=30)
+
+
+def pause_units(units, path, log=lambda line: None):
+    """Stop those of units that are running, listed in path first so resume_units starts them again
+    even after a crash. Returns the ones stopped."""
+    paused = [u for u in units if unit_active(u)]
+    if not paused:
+        return []
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(paused, f)
+    for unit in paused:
+        stop_unit(unit)
+        log("paused %s for the session" % unit)
+    return paused
+
+
+def resume_units(path, log=lambda line: None):
+    """Start the units pause_units listed in path, and forget them. Returns them."""
+    try:
+        with open(path) as f:
+            units = [u for u in json.load(f) if isinstance(u, str) and u.endswith(".service")]
+    except (OSError, ValueError, TypeError):
+        return []
+    for unit in units:
+        r = subprocess.run(host_command("systemctl", "--user", "start", unit), capture_output=True, text=True, timeout=60)
+        log("started %s again%s" % (unit, "" if r.returncode == 0 else
+                                     " FAILED (exit %d): %s" % (r.returncode, (r.stderr or r.stdout).strip())))
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return units
 
 
 def restart_units(units):
@@ -1388,6 +1425,8 @@ class Session:
         self.camera_check_fn = (lambda: None) if dry_run else camera_check
         self.repair_cameras_fn = (lambda: None) if dry_run else (lambda: camera_check(repair=True))
         self._camera_losses = 0
+        # Frametop's drawn hands and hand pointer, paused for the session (a test hook: tests empty it)
+        self.quiet_units = () if dry_run or ring else QUIET_UNITS
         self._rec_watch = None   # (recorder, sets written, when that changed): _watch_recording
         self.input_devices = INPUT_DEVICES   # where mice are looked for (a test hook)
         self._button = None                  # the ButtonReader
@@ -1546,6 +1585,7 @@ class Session:
     # --- the run
     def _run(self):
         try:
+            self._resume_quiet()   # left paused by a session that crashed
             if self._preflight():
                 return
             self._make_dir()
@@ -1622,6 +1662,7 @@ class Session:
                     self._start_tracker()
                 else:
                     self._log("no tracking ft-hands found: feedback only if one publishes")
+            self._quiet_hands()
         lighting = ring_lighting(ring_path)
         cams = []
         try:
@@ -1789,6 +1830,16 @@ class Session:
         except RuntimeError as e:
             raise _Fail(str(e))
 
+    def _quiet_hands(self):
+        """Frametop's drawn hands and hand pointer off until the session ends: the hand overlay
+        covers what the person watches, and gestures would click or open Steam's menu."""
+        if self.quiet_units:
+            pause_units(self.quiet_units, os.path.join(self.hands_dir, PAUSED_UNITS_FILE), self._log)
+
+    def _resume_quiet(self):
+        if self.quiet_units:
+            resume_units(os.path.join(self.hands_dir, PAUSED_UNITS_FILE), self._log)
+
     def _stop_units(self):
         for unit in reversed(self._units):
             stop_unit(unit)
@@ -1844,6 +1895,7 @@ class Session:
         if self._stop_note and state == "stopped":
             self._log(self._stop_note)
         self._stop_units()
+        self._resume_quiet()
         if self._button:
             self._button.stop()
             self._button = None

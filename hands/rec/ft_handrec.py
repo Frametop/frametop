@@ -1213,6 +1213,9 @@ def main():
         options["check_cameras"] = False
     backend = Backend(store, options, hub_dry_run=a.hub_dry_run, ignore_cameras=a.ignore_cameras)
     app.aboutToQuit.connect(backend.shutdown)
+    mod = None if a.dry_run else backend._runner()
+    if mod:   # Frametop's drawn hands and hand pointer, if a session that was killed left them paused
+        backend._thread(lambda: mod.resume_units(os.path.join(mod.run_dir(), mod.PAUSED_UNITS_FILE)))
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("startPage", a.page)
     engine.load(QUrl.fromLocalFile(os.path.abspath(a.qml)))

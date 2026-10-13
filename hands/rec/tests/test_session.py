@@ -998,5 +998,57 @@ class CamerasLostTest(SessionBase):
             self.assertEqual(session.Recorder.sets_written(rec), 5)
 
 
+class QuietHandsTest(SessionBase):
+    """Frametop's drawn hands and hand pointer are paused for a session and started again after,
+    also when an earlier session was killed and left them paused."""
+
+    def setUp(self):
+        super().setUp()
+        self.path = os.path.join(self.tmp, "run", session.PAUSED_UNITS_FILE)
+        self.calls = []
+
+    def systemctl(self):
+        calls = self.calls
+
+        def run(cmd, **kw):
+            if "systemctl" in cmd:
+                calls.append(cmd[-2:])
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        return mock.patch.object(session.subprocess, "run", run)
+
+    def test_pauses_only_running_units_and_resumes_them(self):
+        active = {"frametop-handview.service": True, "frametop-pointer.service": False}
+        with mock.patch.object(session, "unit_active", lambda u: active[u]), \
+                mock.patch.object(session, "stop_unit", lambda u: self.calls.append(["stop", u])):
+            paused = session.pause_units(session.QUIET_UNITS, self.path)
+        self.assertEqual(paused, ["frametop-handview.service"])
+        self.assertEqual(self.calls, [["stop", "frametop-handview.service"]])
+        with open(self.path) as f:
+            self.assertEqual(json.load(f), paused)
+        with self.systemctl():
+            self.assertEqual(session.resume_units(self.path), paused)
+        self.assertEqual(self.calls[1:], [["start", "frametop-handview.service"]])
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_nothing_running_nothing_paused(self):
+        with mock.patch.object(session, "unit_active", lambda u: False):
+            self.assertEqual(session.pause_units(session.QUIET_UNITS, self.path), [])
+        self.assertFalse(os.path.exists(self.path))
+        self.assertEqual(session.resume_units(self.path), [])
+
+    def test_a_session_starts_what_a_killed_one_left_paused(self):
+        os.makedirs(os.path.dirname(self.path))
+        with open(self.path, "w") as f:
+            json.dump(["frametop-pointer.service", "rm -rf"], f)
+        s = self.session(next_after=0.0, hands_dir=os.path.dirname(self.path))
+        s.quiet_units = session.QUIET_UNITS
+        with self.systemctl():
+            s.start()
+            s.join(20)
+        self.assertEqual(s.state, "done")
+        self.assertEqual(self.calls, [["start", "frametop-pointer.service"]])   # not the junk entry
+        self.assertFalse(os.path.exists(self.path))
+
+
 if __name__ == "__main__":
     unittest.main()

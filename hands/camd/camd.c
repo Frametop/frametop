@@ -144,6 +144,7 @@ typedef struct {
     uint64_t        sync_ns, copy_ns, nsync;    /* cost of cache sync and copy */
     uint64_t        last_bright;        /* for the status line */
     uint64_t        last_event_ns;      /* its last v4l2_dqbuf, 0 before the first (see SILENT_S) */
+    int             vfd;                /* our own handle on its node, for format_moved, or -1 */
 } cam_t;
 
 static cam_t       cams[MAX_CAMS];
@@ -270,6 +271,7 @@ static void setup_camera(cam_t *c, xr_camera_t *cam, int pidfd)
 {
     memset(c, 0, sizeof(*c));
     c->cam  = cam;
+    c->vfd  = open(cam->path, O_RDWR | O_CLOEXEC | O_NONBLOCK);   /* opened while privileged */
     xr_camera_layout(cam, &c->lay);
     c->color = c->lay.fmt == XR_FMT_YUV420_10P;
     /* Color: just the luma rows, not the chroma after them. Whether a frame is new is judged
@@ -922,6 +924,49 @@ static const cam_t *silent_camera(uint64_t now)
  * Ring cameras: every camera (mono and color) at its own index, then with --with-dark a
  * dark twin for each mono camera. Returns how many, with which camera each one shows.
  */
+/*
+ * A camera whose node now has another format: XRService gave the node to another camera.
+ * Plugging the colour module in with passthrough working moves the side cameras off the
+ * ISP nodes (video0/3) and puts the colour cameras there; the nodes keep streaming, so
+ * silent_camera never sees it (2026-10-13: tracker fed 2464x2464 NV12 as side frames).
+ */
+static const cam_t *format_moved(void)
+{
+    for (int i = 0; i < ncams; i++) {
+
+        const cam_t *c = &cams[i];
+        struct v4l2_format fmt;
+
+        if (c->vfd < 0)
+            continue;
+
+        memset(&fmt, 0, sizeof(fmt));
+        fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+
+        unsigned w, h, bpl;
+        uint32_t pix;
+
+        if (ioctl(c->vfd, VIDIOC_G_FMT, &fmt) == 0) {
+            w = fmt.fmt.pix_mp.width, h = fmt.fmt.pix_mp.height;
+            pix = fmt.fmt.pix_mp.pixelformat, bpl = fmt.fmt.pix_mp.plane_fmt[0].bytesperline;
+        } else {
+            memset(&fmt, 0, sizeof(fmt));
+            fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            if (ioctl(c->vfd, VIDIOC_G_FMT, &fmt) < 0) {
+                if (errno == ENODEV)
+                    return c;
+                continue;
+            }
+            w = fmt.fmt.pix.width, h = fmt.fmt.pix.height;
+            pix = fmt.fmt.pix.pixelformat, bpl = fmt.fmt.pix.bytesperline;
+        }
+
+        if (w != c->cam->width || h != c->cam->height || pix != c->cam->pixfmt || bpl != c->cam->bytesperline)
+            return c;
+    }
+    return NULL;
+}
+
 static int ring_layout(int cam_of[], bool dark_of[], int max)
 {
     int n = 0;
@@ -1359,7 +1404,7 @@ int main(int argc, char **argv)
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
-    uint64_t start = mono_ns(), last_status = start, last_want = 0, last_hands = 0;
+    uint64_t start = mono_ns(), last_status = start, last_want = 0, last_hands = 0, last_fmt = start;
     int rc = 0;
 
     while (!stop) {
@@ -1390,6 +1435,18 @@ int main(int argc, char **argv)
                     (double)(now - silent->last_event_ns) / 1e9);
             rc = 4;
             break;
+        }
+
+        if (now - last_fmt >= 1000000000ull) {
+            last_fmt = now;
+            const cam_t *moved = format_moved();
+            if (moved) {
+                fprintf(stderr, "%s (video%d): its node has another format now: XRService has moved the "
+                        "cameras (colour module plugged in or unplugged?); exiting so ft-camd starts on the "
+                        "new devices\n", moved->slug, moved->cam->node);
+                rc = 4;
+                break;
+            }
         }
 
         struct pollfd pf = { .fd = pidfd, .events = POLLIN };

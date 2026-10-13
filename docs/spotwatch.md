@@ -55,7 +55,7 @@ ft-spotwatch turns key codes into text on the desktop's keyboard layout (Plasma'
 Bringing a window to the front takes three commands:
 
 1. ft-floatd's `activate ID` makes the window KWin's active window, unminimized.
-2. ft-screens' `spin to N` turns the ring of panels the short way, so panel N ends straight ahead. Screens are 1 to S, floating windows come after them, and remote displays start at 101.
+2. ft-screens' `spin to N` brings panel N to the front slot at reading distance (or, with `SCREEN_SPIN_BRING=0`, turns the ring of panels the short way so it ends straight ahead). Screens are 1 to S, floating windows come after them, and remote displays start at 101.
 3. When the spin settles, ft-screens gives that panel the typing, as any spin does. When the panel can't spin (pinned, or a floating window that's minimized), `front N` gives it the typing where it is.
 
 ft-floatd's `spotlist` lists every app window with its desktop file name, title, panel, and when it was last active. The KWin script keeps that timestamp.

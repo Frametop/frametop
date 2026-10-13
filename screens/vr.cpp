@@ -1953,6 +1953,7 @@ void UpdateSpin() {
 
 extern bool g_susanBring;
 void SusanCommand(bool next, char *reply, int size);
+void SusanBring(int i, const Mat &head, char *reply, int size);
 
 void SpinCommand(const char *arg, char *reply, int size) {
     if (g_susanBring && (!std::strcmp(arg, "next") || !std::strcmp(arg, "prev")))
@@ -1969,6 +1970,7 @@ void SpinCommand(const char *arg, char *reply, int size) {
         if (s->pinned != kNone) return (void)std::snprintf(reply, size, "error pinned");
         if (!Spinnable(*s)) return (void)std::snprintf(reply, size, "error not in the room");
         target = int(n) - 1;
+        if (g_susanBring) return SusanBring(target, head, reply, size);   // the front slot's way, as next and prev
     }
     if (g_spin.on) {
         g_spin.from = SpinNow();  // carry on from where the panels are now
@@ -3014,6 +3016,14 @@ void SusanCommand(bool next, char *reply, int size) {
     }
     if (g_front.released) FrontHome("restored by the next stroke");
     BringReadable(i, grabthat::InFront(head, g_frontReading, g_frontDrop), true, next ? "the lazy susan, next" : "the lazy susan, back");
+    std::snprintf(reply, size, "ok screen %d", i + 1);
+}
+// "spin to N" (spotwatch) while the lazy susan brings: panel N to the front slot, the rest stay put.
+void SusanBring(int i, const Mat &head, char *reply, int size) {
+    if (g_front.panel != i) {
+        if (g_front.released) FrontHome("restored by spin to");
+        BringReadable(i, grabthat::InFront(head, g_frontReading, g_frontDrop), true, "spin to");
+    }
     std::snprintf(reply, size, "ok screen %d", i + 1);
 }
 

@@ -375,7 +375,8 @@ struct Screen {
     ft_attention attention = FT_FOCUSED;
     int64_t inputMs = INT64_MIN / 2;  // the last pointer event on it or its controls
     int64_t useMs = INT64_MIN / 2;    // the last click, scroll or drag on it (not a pointer passing over: the front slot's keep)
-    int64_t laserMs = INT64_MIN / 2;  // ...from a laser (SteamVR's: a controller's, the 3D mouse's, a hand ray's)
+    int64_t laserMs = INT64_MIN / 2;  // ...from a laser (SteamVR's: a controller's, the 3D mouse's, a hand ray's; FromLaser)
+    uint32_t laserDevice = vr::k_unTrackedDeviceIndexInvalid;   // ...whose (for the log)
     int64_t handPointerMs = INT64_MIN / 2;  // a hand last moved the pointer on it (kHandPointerMs)
     int64_t focusUntil = 0, viewUntil = 0;
     double heightMetres() const {
@@ -2897,6 +2898,14 @@ void UpdateFront() {
 // HANDS_TARGET_GLOW.
 bool g_targetGlowOn = true;
 bool g_pushGlowOn = false;
+
+// An overlay event from a laser: a controller's (the pointer helper's 3D mouse and hand ray are
+// ft_pointer controllers). SteamVR also sends panels events from the headset and from no device at
+// all, which aren't a laser on them (2026-10-13: those kept the grab-that glow off every panel).
+bool FromLaser(const vr::VREvent_t &ev) {
+    return ev.trackedDeviceIndex < vr::k_unMaxTrackedDeviceCount &&
+           vr::VRSystem()->GetTrackedDeviceClass(ev.trackedDeviceIndex) == vr::TrackedDeviceClass_Controller;
+}
 struct TargetGlow {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
     int panel = -1, texW = 0, texH = 0, texM = 0;
@@ -2928,7 +2937,17 @@ void UpdateTargetGlow() {
     if (it == g_screens.end() || !it->second.visible) best = -1, want = 0;
     // not over a panel a laser is on (user, 2026-10-11: no pull highlight while the laser points at it; the
     // gesture still works there)
-    else if (NowMs() - it->second.laserMs < 400) best = -1, want = 0;
+    else if (NowMs() - it->second.laserMs < 400) {
+        static int heldBack = -1;
+        if (heldBack != best) {
+            char name[64] = "?";
+            if (it->second.laserDevice < vr::k_unMaxTrackedDeviceCount && g_vr)
+                vr::VRSystem()->GetStringTrackedDeviceProperty(it->second.laserDevice, vr::Prop_ControllerType_String, name, sizeof name);
+            std::printf("grab that: no glow on screen %d, a laser is on it (device %u, %s)\n", best + 1, it->second.laserDevice, name);
+            heldBack = best;
+        }
+        best = -1, want = 0;
+    }
     // fade: in over about 120 ms (on top of grab that's own arming), out over 150
     const int64_t now = NowMs();
     const double dt = g_target.lastMs ? std::clamp((now - g_target.lastMs) / 1000.0, 0.0, 0.1) : 0;
@@ -2957,6 +2976,10 @@ void UpdateTargetGlow() {
         const std::vector<uint8_t> px = softglow::TargetTexture(kTargetW, h, m);
         vr::VROverlay()->SetOverlayRaw(g_target.overlay, const_cast<uint8_t *>(px.data()), kTargetW, uint32_t(h), 4);
         g_target.texW = kTargetW, g_target.texH = h, g_target.texM = m;
+        static int logged = -1;
+        if (logged != g_target.panel)
+            std::printf("grab that: glow on screen %d, %dx%d (halo %d px), %.2f x %.2f m\n", g_target.panel + 1, kTargetW, h, m, W, H);
+        logged = g_target.panel;
     }
     const double width = W * kTargetW / double(kTargetW - 2 * m);
     vr::VROverlay()->SetOverlayWidthInMeters(g_target.overlay, float(width));
@@ -3861,7 +3884,10 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         auto panelEvent = [&](const vr::VREvent_t &ev, bool sub) {
             ft_event e{};
             e.screen = index;
-            if (ev.eventType != vr::VREvent_FocusLeave) s.inputMs = s.laserMs = NowMs();
+            if (ev.eventType != vr::VREvent_FocusLeave) {
+                s.inputMs = NowMs();
+                if (FromLaser(ev)) s.laserMs = NowMs(), s.laserDevice = ev.trackedDeviceIndex;
+            }
             if (ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_ScrollDiscrete ||
                 ev.eventType == vr::VREvent_ScrollSmooth || g_press.buttons)
                 s.useMs = NowMs();
@@ -3928,7 +3954,10 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         // The controls light up under a laser.
         auto hover = [&](int k) {
             const bool on = ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_FocusEnter;
-            if (on) s.inputMs = s.laserMs = NowMs();
+            if (on) {
+                s.inputMs = NowMs();
+                if (FromLaser(ev)) s.laserMs = NowMs(), s.laserDevice = ev.trackedDeviceIndex;
+            }
             if (!on && ev.eventType != vr::VREvent_FocusLeave) return;
             if (s.hover[k] != on) s.hover[k] = on, ApplyAlpha(s);
         };

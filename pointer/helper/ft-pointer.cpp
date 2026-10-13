@@ -2885,7 +2885,7 @@ int main() {
                 // as Meta+K with Meta+J held: the left button where the dot is now; the drag lasts while either
                 // hand's pinch is held, and the one still pinching drags
                 handUsed = tnow;
-                hold.gaze.Chord(secsOf(tnow));
+                hold.gaze.Chord(secsOf(tnow), false);   // (the left button alone: not "with the right button")
                 handPressPending = 1;
                 hold.second = s, hold.secondKind = kind;
                 pinchLog(s, kind, "the left button down where the other hand's pinch aims: a drag while either pinch holds");

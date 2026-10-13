@@ -432,6 +432,14 @@ struct Params {
     bool sweepBack = false;
     double sweepOpen = 1.3, sweepEdge = 0.75, sweepLead = 0.4, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
     double sweepDistance = 0.22, sweepMs = 900, sweepDrift = 0.2, sweepRest = 0.15;
+    // One hand on its own (user, 2026-10-13: "make it easier to trigger intentionally when one hand is being
+    // moved"; the misses were "not an open hand on its edge"): with the other hand unseen or still (its palm
+    // under sweepCalm m/s), a looser shape and a shorter stroke count: open sweepSoloOpen, edge sweepSoloEdge,
+    // lead sweepSoloLead, sweepSoloDistance, quick at sweepSoloPeak somewhere. Either way a stroke rides out
+    // sweepBadFrames frames off its shape (one view's jitter ended strokes).
+    double sweepCalm = 0.3, sweepSoloOpen = 1.1, sweepSoloEdge = 0.85, sweepSoloLead = 0.25, sweepSoloDistance = 0.18;
+    double sweepSoloPeak = 0.5;
+    int sweepBadFrames = 2;
     bool flick = true;
     double flickSpeed = 1.2, flickTravel = 0.12, flickMs = 200, flickFitMs = 100, flickNear = 0.12, flickBack = 0.04;
     double flickAngle = 40, flickOpen = 1.5, flickPokeSpeed = 0.8, flickRefractoryMs = 1000, flickStartSpeed = 0.6;
@@ -840,6 +848,9 @@ private:
         // level frame), when, which way, whether it's spun or been refused, and the last frame's sideways place
         double swX0 = 0, swY0 = 0, swZ0 = 0, swLast = 0, swPeak = 0;   // swPeak: the stroke's fastest (m/s)
         int64_t swT0 = 0, swLastT = 0;
+        double swPalm[3] = {0, 0, 0}, swSpeed = 0;   // the palm, and its speed (m/s, smoothed): is this hand still?
+        int64_t swSeenT = 0;
+        int swBad = 0;                               // frames off the shape this stroke
         int swDir = 0;
         bool swDone = false, swHave = false;
         int letGoPanel = -1;

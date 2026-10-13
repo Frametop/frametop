@@ -3988,6 +3988,13 @@ void TestSweep() {
     auto shortOne = run(90, {0.1, -0.05}, 0.3);
     show("edge-on, 15 cm", shortOne);
     CHECK(shortOne.empty());
+    // one hand on its own (the other unseen): 20 cm counts, and a hand turned a little toward flat
+    auto solo20 = run(90, {0.1, -0.10}, 0.3);
+    show("edge-on, 20 cm, one hand", solo20);
+    CHECK(solo20.size() == 1 && solo20[0] == -1);
+    auto tilted53 = run(143, {0.25, -0.15}, 0.4);
+    show("tilted 53 deg, 40 cm, one hand", tilted53);
+    CHECK(tilted53.size() == 1 && tilted53[0] == -1);
     // back and forth with one hand: only the palm-led strokes (user, 2026-10-11: the return stroke, the
     // back of the hand leading, does nothing; the other hand palms the other way)
     auto paw = run(90, {0.25, -0.15, 0.25, -0.15}, 0.4);

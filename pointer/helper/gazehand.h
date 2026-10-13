@@ -204,9 +204,10 @@ public:
     // The chord (see the top), on the left's pinch: the other hand pinched. Held back (aiming or
     // nudged), it becomes a real press now, where the pointer is, and the hand drags from there; true
     // when it did (the helper presses the left button, then the right).
-    bool Chord(double t) {
+    // (right: the other hand's pinch holds the right button too; false: the two-hand press, the left alone)
+    bool Chord(double t, bool right = true) {
         if (phase_ == Phase::Off || right_) return false;
-        ++chords_;
+        if (right) ++chords_;
         if (phase_ == Phase::Press) return false;
         phase_ = Phase::Press;
         engaged_ = false;

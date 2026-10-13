@@ -2742,8 +2742,10 @@ struct ResetHold {
     int64_t startMs = 0;
 } g_resetHold;
 
+void HideResetAsk();
 void DoReset(int panel, const char *how) {
     std::printf("screen %d: reset the layout (%s)\n", panel + 1, how);
+    HideResetAsk();
     GrabThatReset();
     RunLayout("reset");
 }
@@ -2772,16 +2774,195 @@ void UpdateResetHold() {
     }
 }
 
+// ---------------------------------------------------------------- the far stretch
+// Both palms held out at the same far panel ("grab that" arming at it with both hands), then both closed
+// into fists within kFarPairMs of each other: the panel scales round its centre as the fists move apart or
+// together, until a hand opens or is lost (user, 2026-10-13: "when you have both palms facing a display
+// even if it's far away, if you make two fists at the same time you should be able to resize the display
+// even if you're not physically touching it"). "Grab that" doesn't fire meanwhile; a fire while both hands
+// are at a panel waits kFarPairMs for the other fist.
+//   Easier from the first live test ("functional but a little hard to trigger": fists 33-366 ms apart of
+// 400): half an arming hold each (kFarArmed), the panel the line through the palms' midpoint meets when the
+// two hands' lines part (hands apart, their lines from the eyes spread round a smaller panel), 600 ms, a
+// looser fist, and one camera's view will do (its distance smoothed).
+constexpr int64_t kFarPairMs = 600, kFarAimMs = 600, kFarLostMs = 300;
+constexpr double kFarArmed = 0.5;   // grab that's progress (0..1 over its arming hold) that counts
+constexpr double kFarFist = 1.15;   // grabthat::Features::open at most this: a fist (~0.8; grab that's 1.0)
+constexpr double kFarOpen = 1.35;   // ...over this: the hand opened
+struct FarStretch {
+    int panel = -1;                     // under way (-1: not)
+    double sep0 = 0, sep = 0, w0 = 0;   // the fists' distance at the start and now (smoothed), the width then (m)
+    int px0 = 0, py0 = 0;               // a floating window's pixels at the start
+    int64_t seenNs[2] = {0, 0};
+    // before it: each hand's last arming (grab that's aim then, and the panel its line met), and its fist
+    grabthat::Fire aim[2];
+    int aimPanel[2] = {-1, -1};
+    int64_t aimNs[2] = {INT64_MIN / 2, INT64_MIN / 2}, fistNs[2] = {INT64_MIN / 2, INT64_MIN / 2};
+    bool fist[2] = {false, false};
+    int64_t triedNs = INT64_MIN / 2;    // the fists last looked at (one log line each)
+    std::vector<grabthat::Fire> held;   // fires waiting on the other fist
+} g_far;
+
+// That side's hand (its most confident), or none.
+const handcut::Hand *SideHand(int k) {
+    const handcut::Hand *h = nullptr;
+    for (const handcut::Hand &c : g_hands.seen())
+        if (c.right == (k == 1) && (!h || c.confidence > h->confidence)) h = &c;
+    return h;
+}
+
+double FistsApart() {
+    const handcut::Hand *a = SideHand(0), *b = SideHand(1);
+    if (!a || !b) return -1;
+    double p[3], q[3];
+    a->Palm(p), b->Palm(q);
+    return std::hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+}
+
+int64_t NsToMs(int64_t ns) { return ns / 1000000; }
+
+// Both hands armed at a panel lately (grab that's aims, before this frame's).
+bool FarPair(int64_t t) {
+    return NsToMs(t - g_far.aimNs[0]) <= kFarAimMs && NsToMs(t - g_far.aimNs[1]) <= kFarAimMs;
+}
+
+// Both hands are ours from both palms held out (a fist passes through a pinch, and with a hand ray up that
+// pinch pressed on the panel: user, 2026-10-13, "I was able to resize and also drag a window with a left
+// click at the same time") until the far stretch ends.
+bool FarClaims(int64_t t) { return g_far.panel >= 0 || FarPair(t); }
+
+void EndFarStretch(const char *why) {
+    const auto it = g_screens.find(g_far.panel);
+    if (it != g_screens.end()) {
+        Screen &s = it->second;
+        std::printf("screen %d: far stretch ended (%s), %.2f m wide (was %.2f)\n", g_far.panel + 1, why, s.metres, g_far.w0);
+        if (!s.floating) {
+            FitCurve(s);
+            if (!s.remote) ArrangeDesktopSoon();
+        }
+        ForgetIfPlacedFar(g_far.panel, s);   // (out there, that's its size now)
+    }
+    g_far.panel = -1;
+    g_far.fist[0] = g_far.fist[1] = false;
+    g_far.aimNs[0] = g_far.aimNs[1] = INT64_MIN / 2;
+}
+
+// The panel both fists are for, or -1 (why: for the log).
+int FarPanel(std::string *why) {
+    const int a = g_far.aimPanel[0], b = g_far.aimPanel[1];
+    if (a >= 0 && a == b) return a;
+    // the line from between the eyes through between the palms
+    grabthat::Fire mid = g_far.aim[1];
+    for (int q = 0; q < 3; ++q)
+        mid.eye[q] = (g_far.aim[0].eye[q] + g_far.aim[1].eye[q]) / 2, mid.palm[q] = (g_far.aim[0].palm[q] + g_far.aim[1].palm[q]) / 2;
+    grabthat::Closest closest;
+    const int m = grabthat::Pick(GrabThatTargets(), mid, g_grabThat.params(), &closest);
+    if (m >= 0) return m;
+    char b2[160];
+    std::snprintf(b2, sizeof b2, "the hands at screens %d and %d, between them at none (nearest %d, %.0f deg off)", a + 1, b + 1,
+                  closest.index + 1, closest.deg);
+    *why = b2;
+    return -1;
+}
+
+// Each hands frame, after "grab that" took it.
+void UpdateFarStretch(int64_t t) {
+    const Mat &head = g_hands.captureHead();
+    for (int k = 0; k < 2; ++k) {
+        const handcut::Hand *h = SideHand(k);
+        if (!h) continue;
+        g_far.seenNs[k] = t;
+        const double open = grabthat::Measure(*h, head).open;
+        if (!g_far.fist[k] && open <= kFarFist) g_far.fist[k] = true, g_far.fistNs[k] = t;
+        else if (g_far.fist[k] && open > kFarOpen) g_far.fist[k] = false;
+    }
+    if (g_far.panel < 0) {
+        if (!g_far.fist[0] || !g_far.fist[1]) return;
+        const int64_t last = std::max(g_far.fistNs[0], g_far.fistNs[1]);
+        if (last == g_far.triedNs || NsToMs(t - last) > 200) return;   // (a few frames for a hand's view)
+        const int64_t apart = std::llabs(NsToMs(g_far.fistNs[0] - g_far.fistNs[1]));
+        std::string why;
+        int i = -1;
+        // each hand armed at a panel within kFarAimMs before its fist
+        bool armed[2];
+        for (int k = 0; k < 2; ++k) armed[k] = NsToMs(g_far.fistNs[k] - g_far.aimNs[k]) <= kFarAimMs;
+        if (apart > kFarPairMs) why = std::to_string(apart) + " ms apart";
+        else if (!armed[0] && !armed[1]) return;   // (fists, not at a panel: not for us, no log)
+        else if (!armed[0] || !armed[1]) why = std::string("only the ") + (armed[0] ? "left" : "right") + " hand was held out at a panel";
+        else i = FarPanel(&why);
+        const double sep = FistsApart();
+        Screen *s = nullptr;
+        if (i >= 0) {
+            const auto it = g_screens.find(i);
+            if (it == g_screens.end() || !it->second.visible) why = "the panel went";
+            else if (it->second.drag != Drag::None || it->second.pinned != kNone) why = "the panel is held or pinned";
+            else if (sep < 0) { if (NsToMs(t - last) < 200) return; why = "a hand not seen"; }
+            else if (sep < 0.05) why = "the fists together";
+            else s = &it->second;
+        }
+        g_far.triedNs = last;
+        if (!s) return (void)std::printf("far stretch: both fists (%lld ms apart), not started: %s\n", (long long)apart, why.c_str());
+        g_far.panel = i, g_far.sep0 = g_far.sep = sep, g_far.w0 = s->metres, g_far.px0 = s->cropW, g_far.py0 = s->cropH;
+        g_far.held.clear();
+        g_grabMoves.erase(i);
+        std::printf("screen %d: far stretch (both fists, %lld ms apart%s), the fists %.2f m apart, %.2f m wide\n", i + 1,
+                    (long long)apart, g_far.aimPanel[0] == g_far.aimPanel[1] ? "" : ", aimed between the hands", sep, s->metres);
+    }
+    g_grabThat.Quiet(t + int64_t(500 * 1e6));   // (not armed meanwhile, nor just after)
+    const auto it = g_screens.find(g_far.panel);
+    if (it == g_screens.end() || !it->second.visible) return EndFarStretch("the panel went");
+    Screen &s = it->second;
+    if (s.drag != Drag::None || s.pinned != kNone) return EndFarStretch("taken");
+    for (int k = 0; k < 2; ++k) {
+        if (NsToMs(t - g_far.seenNs[k]) > kFarLostMs) return EndFarStretch(k ? "the right hand lost" : "the left hand lost");
+        if (!g_far.fist[k]) return EndFarStretch(k ? "the right hand opened" : "the left hand opened");
+    }
+    const double now = FistsApart();
+    if (now < 0) return;
+    g_far.sep += 0.5 * (now - g_far.sep);   // (one camera's view jumps a centimetre or two)
+    const double scale = g_far.sep / g_far.sep0;
+    if (s.floating) {
+        if (g_far.px0 <= 0 || s.mpp <= 0 || g_tick - s.resizeSent < 4) return;   // about 20 a second
+        const int w = std::max(320, int(std::lround(g_far.px0 * scale))), h = std::max(200, int(std::lround(g_far.py0 * scale)));
+        if (w == s.resizeW && h == s.resizeH) return;
+        s.resizeW = w, s.resizeH = h, s.resizeSent = g_tick;
+        s.keepX = 0, s.keepY = 0, s.keepUntil = g_tick + 45;   // (round its centre)
+        SendFloat("resize " + std::to_string(g_far.panel + 1) + " " + std::to_string(w) + " " + std::to_string(h));
+        return;
+    }
+    const double w = std::clamp(g_far.w0 * scale, kMinWidth, 12.0);
+    if (std::fabs(w - s.metres) < 0.002 * s.metres) return;
+    SetWidth(s, w);
+}
+
 void UpdateGrabThat(const handinput::Input &in) {
     if (g_handInput.newFrame()) {
         bool allowed[2];
         // (not a hand typing holds back: the helper's "typing" word, as for pokes and near grabs)
         for (int k = 0; k < 2; ++k)
             allowed[k] = in.allowed[k] && !in.typing[k] && !g_handInput.pressing(k) && !g_handInput.grabbing(k);
-        g_grabThat.Frame(g_hands.captureNs(), g_hands.seen(), g_hands.captureHead(), allowed);
-        for (const grabthat::Fire &f : g_grabThat.fired()) {
+        const int64_t t = g_hands.captureNs();
+        // each hand's arming (before this frame: a fist ends it), for the far stretch
+        for (int k = 0; k < 2; ++k) {
+            grabthat::Fire f;
+            double progress = 0;
+            if (g_far.panel < 0 && g_grabThat.params().on && g_grabThat.Aim(k, &f, &progress) && progress >= kFarArmed)
+                g_far.aim[k] = f, g_far.aimPanel[k] = g_grabThatAim[k], g_far.aimNs[k] = t;
+        }
+        g_grabThat.Frame(t, g_hands.seen(), g_hands.captureHead(), allowed);
+        for (const grabthat::Fire &f : g_grabThat.fired()) g_far.held.push_back(f);
+        UpdateFarStretch(t);
+        // both hands at a panel: a fire waits on the other fist (a far stretch drops it)
+        const bool pair = g_far.panel < 0 && FarPair(t);
+        for (auto it = g_far.held.begin(); it != g_far.held.end();) {
+            if (pair && NsToMs(t - it->t) < kFarPairMs) {
+                ++it;
+                continue;
+            }
+            const grabthat::Fire f = *it;
+            it = g_far.held.erase(it);
             g_handInput.GrabThatFired(f.side);   // a fist waiting on it isn't a fist grab
-            GrabThat(f);
+            if (g_far.panel < 0) GrabThat(f);
         }
     }
     AnimateGrabMoves();
@@ -2904,11 +3085,114 @@ void UpdateCarousel() {
     }
 }
 
+// ---------------------------------------------------------------- the reset confirmation
+// A hand's tap on the reset button asks first (user, 2026-10-13: "add a confirmation dialogue you have to
+// tap to reset the displays as well ONLY for while you're doing hand tracking"): "Reset the layout?" shows
+// under the button for kResetAskMs, and a tap on it (or on the button again) resets. A laser's click
+// resets straight away.
+struct ResetAsk {
+    int panel = -1;
+    int64_t shownMs = -1;
+    vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
+    double w = 0, h = 0;                  // its size now (m)
+    Mat pose{};                           // ...and where it is
+    double tipZ[2] = {1, 1};              // each index tip's way in front of it last frame (m; 1: away)
+    int px = 0;                           // its width in pixels
+} g_resetAsk;
+constexpr int64_t kResetAskMs = 5000, kResetAskLeastMs = 300;
+constexpr int kResetAskH = 84;
+constexpr const char *kResetAskText = "Reset the layout? Tap";
+
+void HideResetAsk() {
+    if (g_resetAsk.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->HideOverlay(g_resetAsk.overlay);
+    g_resetAsk.panel = -1, g_resetAsk.shownMs = -1;
+}
+
+// Under the reset button, a button's height lower, and at least a finger's size.
+bool PlaceResetAsk(Screen &s) {
+    Mat p, head;
+    if (!ScreenPose(s, &p)) return false;
+    const double d = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? std::max(0.3, Apart(head, p)) : 1.0;
+    g_resetAsk.h = std::max(0.00045 * d * kResetAskH, 1.4 * s.grip);
+    g_resetAsk.w = g_resetAsk.h * g_resetAsk.px / kResetAskH;
+    double u[7], v[7];
+    ControlUV(s, u, v);
+    const double at = v[6] - s.grip / 2 - std::max(s.grip, s.chrome * 0.06) - g_resetAsk.h / 2;
+    g_resetAsk.pose = Mul(p, OnSurface(s, u[6], at, 0.004));
+    const vr::VROverlayHandle_t o = g_resetAsk.overlay;
+    vr::VROverlay()->SetOverlayWidthInMeters(o, float(g_resetAsk.w));
+    vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &g_resetAsk.pose);
+    return true;
+}
+
+void ShowResetAsk(int panel) {
+    const auto it = g_screens.find(panel);
+    if (it == g_screens.end()) return;
+    const int H = kResetAskH, W = keyboard::LabelWidth(kResetAskText, 32) + 2 * 40;
+    std::vector<uint8_t> px(size_t(W) * H * 4, 0);
+    const uint8_t bg[4] = {196, 52, 48, 240}, fg[3] = {255, 255, 255};
+    FillRound(px, W, H, 2, 2, W - 2, H - 2, (H - 4) / 2, bg);
+    keyboard::DrawLabel(px.data(), W, H, kResetAskText, 32, W / 2, H / 2, 255, fg);
+    if (g_resetAsk.overlay == vr::k_ulOverlayHandleInvalid &&
+        vr::VROverlay()->CreateOverlay("frametop.resetask", "Frametop: reset the layout?", &g_resetAsk.overlay) != vr::VROverlayError_None)
+        return;
+    vr::VROverlay()->SetOverlayRaw(g_resetAsk.overlay, px.data(), uint32_t(W), uint32_t(H), 4);
+    vr::VROverlay()->SetOverlaySortOrder(g_resetAsk.overlay, 10);
+    g_resetAsk.panel = panel, g_resetAsk.shownMs = NowMs(), g_resetAsk.px = W;
+    g_resetAsk.tipZ[0] = g_resetAsk.tipZ[1] = 1;
+    if (!PlaceResetAsk(it->second)) return HideResetAsk();
+    vr::VROverlay()->ShowOverlay(g_resetAsk.overlay);
+}
+
+void ResetTapped(int panel, int side) {
+    const int64_t age = NowMs() - g_resetAsk.shownMs;
+    if (g_resetAsk.panel == panel && age < kResetAskLeastMs) return;   // (the same tap)
+    if (g_resetAsk.panel == panel) {
+        HideResetAsk();
+        return DoReset(panel, side ? "the right hand, the button twice" : "the left hand, the button twice");
+    }
+    ShowResetAsk(panel);
+    std::printf("screen %d: reset the layout? (a hand's tap: asks, %.0f s)\n", panel + 1, kResetAskMs / 1000.0);
+}
+
+// Each tick: it follows its panel, and goes after kResetAskMs; each hands frame, an index tip coming through
+// it from the front is the tap.
+void UpdateResetAsk() {
+    if (g_resetAsk.panel < 0) return;
+    const auto it = g_screens.find(g_resetAsk.panel);
+    if (it == g_screens.end() || !it->second.visible || NowMs() - g_resetAsk.shownMs >= kResetAskMs) {
+        if (it != g_screens.end()) std::printf("screen %d: reset the layout? not tapped: no reset\n", g_resetAsk.panel + 1);
+        return HideResetAsk();
+    }
+    if (!PlaceResetAsk(it->second)) return HideResetAsk();
+    if (!g_handInput.newFrame()) return;
+    const Mat in = Inverse(g_resetAsk.pose);
+    for (int k = 0; k < 2; ++k) {
+        const handcut::Hand *h = SideHand(k);
+        double z = 1;
+        if (h) {
+            const float *q = h->p[8];
+            double l[3];
+            for (int r = 0; r < 3; ++r) l[r] = in.m[r][0] * q[0] + in.m[r][1] * q[1] + in.m[r][2] * q[2] + in.m[r][3];
+            const double margin = 0.01;
+            if (std::fabs(l[0]) <= g_resetAsk.w / 2 + margin && std::fabs(l[1]) <= g_resetAsk.h / 2 + margin && l[2] > -0.03) z = l[2];
+        }
+        const bool through = g_resetAsk.tipZ[k] > 0.008 && g_resetAsk.tipZ[k] < 0.08 && z <= 0.003;
+        g_resetAsk.tipZ[k] = z;
+        if (through && NowMs() - g_resetAsk.shownMs >= kResetAskLeastMs) {
+            const int panel = g_resetAsk.panel;
+            HideResetAsk();
+            return DoReset(panel, k ? "the right hand, confirmed" : "the left hand, confirmed");
+        }
+    }
+}
+
 // Each tick: the one in the slot goes home when you turn away from it (unless kept: clicks, scrolls, drags or
 // keys on it add up to g_frontKeepMs; a pointer passing over it doesn't, user 2026-10-11: gaze kept every one); moved elsewhere,
 // it leaves the slot and lives there; resized there, that's its size in the slot from now on.
 void UpdateFront() {
     UpdateCarousel();
+    UpdateResetAsk();
     if (g_front.panel < 0) return;
     const auto it = g_screens.find(g_front.panel);
     if (it == g_screens.end()) return void(g_front = {});
@@ -3003,6 +3287,7 @@ void UpdateTargetGlow() {
         // "grab that": the panel it would take now, as far along as the gesture is
         for (int k = 0; k < 2; ++k)
             if (g_grabThatAim[k] >= 0 && g_grabThatProgress[k] > want) best = g_grabThatAim[k], want = g_grabThatProgress[k];
+        if (g_far.panel >= 0) best = g_far.panel, want = 1;   // (a far stretch: the one it sizes)
         // a push or a flick (dimmer; HANDS_PUSH_GLOW, off since 2026-10-11: "a near display that can't be
         // pulled shouldn't have the white overlay when your palm faces it: it makes clicking annoying")
         if (best < 0 && g_pushGlowOn)
@@ -3311,7 +3596,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 if (e.control == handinput::Control::Curve) {
                     ToggleCurve(s);
                 } else if (e.control == handinput::Control::Reset) {
-                    ResetHoldStart(e.panel, kNone, e.side);   // (held g_resetHoldMs: the layout resets)
+                    ResetTapped(e.panel, e.side);   // (a hand: it asks first)
                 } else if (e.control == handinput::Control::Dock || e.control == handinput::Control::Close) {
                     SendFloat((e.control == handinput::Control::Dock ? "dock " : "close ") + std::to_string(e.panel + 1));
                 }
@@ -3404,14 +3689,14 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     // grip); 2, only its ray stays hidden (the zone's margin and linger: its pinches are the
     // helper's); 0, neither. An older helper takes 2 as 1.
     auto near = [](int k) {
-        if (g_handInput.claims(k) || g_palm.shown(k) ||
+        if (g_handInput.claims(k) || g_palm.shown(k) || FarClaims(g_handInput.frameNs()) ||
             (g_grabThat.claims(k, g_handInput.frameNs()) && (!g_grabThat.armed(k) || g_grabThatAim[k] >= 0)))
             return "1";
         return g_handInput.rayHidden(k) ? "2" : "0";
     };
     if (g_handInput.newFrame() && (HandInputOn() || g_palm.params().on))
         SendPointer("near " + std::to_string(g_handInput.frameNs()) + " " + near(0) + " " + near(1));
-    WantHz(g_handInput.anyNear() || g_handInput.approaching() || g_palm.anyShown() || g_grabThat.armed(0) || g_grabThat.armed(1));
+    WantHz(g_handInput.anyNear() || g_handInput.approaching() || g_palm.anyShown() || g_grabThat.armed(0) || g_grabThat.armed(1) || g_far.panel >= 0);
 }
 
 // Steam in front: the dashboard (the Steam menu) is open, or Steam's own keyboard is up

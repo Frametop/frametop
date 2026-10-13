@@ -871,8 +871,11 @@ void Pin(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel) {
 // 360: a cylinder floating in space": the radius was the head's distance when the curve was turned on,
 // and a screen curved up close, then thrown 3 m out at full width, wrapped round).
 double g_curveMaxArc = 100 * M_PI / 180;
+double g_wideCurveMaxArc = 150 * M_PI / 180;   // an ultrawide's (grabthat::kWideAspect): SCREEN_SPIN_MAX_WIDE_DEG, so it fits round you
 void CapCurve(Screen &s) {
-    if (s.curve > 0 && s.metres / s.curve > g_curveMaxArc) s.curve = s.metres / g_curveMaxArc;
+    const double pxW = s.floating ? s.cropW : s.width, pxH = s.floating ? s.cropH : s.height;
+    const double cap = pxH > 0 && pxW / pxH >= grabthat::kWideAspect ? std::max(g_curveMaxArc, g_wideCurveMaxArc) : g_curveMaxArc;
+    if (s.curve > 0 && s.metres / s.curve > cap) s.curve = s.metres / cap;
 }
 
 void SetWidth(Screen &s, double metres) {
@@ -3463,6 +3466,8 @@ bool ft_vr_init(void) {
     num("SCREEN_SPIN_PPD", g_frontRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need
     num("SCREEN_SPIN_MAX_DEG", g_frontRead.maxW, 30, 100);   // ...at most this wide (deg; wider ones curve round you)
     num("SCREEN_SPIN_MAX_TALL_DEG", g_frontRead.maxH, 20, 90);
+    num("SCREEN_SPIN_MAX_WIDE_DEG", g_frontRead.maxWideW, 30, 170);   // ...an ultrawide (3:1 or wider) at most this wide
+    g_wideCurveMaxArc = g_frontRead.maxWideW * M_PI / 180;
     num("SCREEN_FRONT_KEEP_MS", g_frontKeepMs, 0, 600000);   // this much use keeps it in the slot when you look away
     g_frontAway = handcut::Setting("SCREEN_FRONT_AWAY", "0") != "0";   // turned away from, it goes home
     num("HANDS_RESET_HOLD_MS", g_resetHoldMs, 0, 5000);       // the reset button needs this long a hold (0: a press)
@@ -3477,10 +3482,10 @@ bool ft_vr_init(void) {
             if (n >= 1 && sc >= 0.25 && sc <= 8) g_uiScaleConf[n - 1] = sc;
         }
     }
-    std::printf("front slot: %s; reading %.2f m, readable at %.0f px/deg (at most %.0fx%.0f deg), arm's reach by grab that; "
+    std::printf("front slot: %s; reading %.2f m, readable at %.0f px/deg (at most %.0fx%.0f deg, ultrawides %.0f wide), arm's reach by grab that; "
                 "home on the next stroke%s\n",
                 g_susanBring ? "the lazy susan brings the next screen to it" : "the lazy susan turns the room (SCREEN_SPIN_BRING=0)",
-                g_frontReading, g_frontRead.ppd, g_frontRead.maxW, g_frontRead.maxH,
+                g_frontReading, g_frontRead.ppd, g_frontRead.maxW, g_frontRead.maxH, g_frontRead.maxWideW,
                 g_frontAway ? (", or turned from (kept after " + std::to_string(g_frontKeepMs / 1000).substr(0, 3) + " s of use)").c_str()
                             : "; it stays until you move it (SCREEN_FRONT_AWAY=0)");
     if (gt.on)

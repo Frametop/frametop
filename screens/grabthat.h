@@ -238,8 +238,11 @@ double ViewDistance(double width, double maxDeg, double nearest, double farthest
 // correcting for resolution and aspect ratio"): its logical pixels (px / its UI scale) at ppd pixels per
 // degree of view, shrunk (keeping its shape) to at most maxW wide and maxH tall, grown to at least
 // minW wide; at `distance`, flat up to flatDeg wide, wider ones curved round the eyes (radius distance).
+// An ultrawide (kWideAspect wide to 1 tall or more) may go to maxWideW instead (user, 2026-10-13: the
+// 5120x1440 remote "is too small when using the lazy susan": at 100 deg it read at 51 px/deg).
+constexpr double kWideAspect = 3;
 struct ReadParams {
-    double ppd = 26, maxW = 100, maxH = 55, minW = 40, flatDeg = 60;
+    double ppd = 26, maxW = 100, maxH = 55, minW = 40, flatDeg = 60, maxWideW = 150;
 };
 struct Readable {
     double width = 0, curve = 0;   // metres (along the arc when curved); curve: radius, 0 flat

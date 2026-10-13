@@ -106,6 +106,7 @@ HANDS_RESET_HOLD_MS=500    # the reset button under a screen resets the layout o
 SCREEN_SPIN_DISTANCE=1.0   # ... a brought screen comes this far ahead (m)
 SCREEN_SPIN_PPD=26         # ... as big as its text needs to read: its logical pixels (KWin's scale undone) at this many per degree of view
 SCREEN_SPIN_MAX_DEG=100    # ... at most this wide (degrees; wider than 60 it curves round you) and SCREEN_SPIN_MAX_TALL_DEG (55) tall, its shape kept
+SCREEN_SPIN_MAX_WIDE_DEG=150   # ... an ultrawide (3:1 or wider, like 5120x1440) at most this wide instead, so its text reads too
 HANDS_NEAR=1               # Frametop panels (direct touch): poke to click, pinch the border to move or resize, a fist to carry, gaze or not (1 = with POINTER_HANDS=1, when the pointer helper says a hand is bare | on = the same without POINTER_HANDS: the helper runs only the handoff for it | 0 = off | force = always, for testing)
 HANDS_CUTOUTS=0            # hands: 1 = also cut a round hole per hand in Frametop's panels, so Room View shows the real hand through them (off: ft-handview draws the hands)
 HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face, held still, away from the panels, and look at it, and a ring shows above the palm; a plain thumb-index pinch with that hand opens the Steam menu (or closes the dashboard). 0 = off

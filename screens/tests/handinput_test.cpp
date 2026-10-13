@@ -4028,10 +4028,14 @@ void TestReadableSize() {
     r = grabthat::ReadableSize(3024, 1964, 1.0, k);
     NEAR(r.degH, 55, 1e-9);
     NEAR(r.degW, 55 * 3024 / 1964.0, 1e-9);
-    // the 5120x1440 remote: 100 deg wide, 28 tall, 51 px/deg: its text can't read at this size
+    // the 5120x1440 remote, an ultrawide: up to 150 deg wide, so 42 tall at 34 px/deg (at 100: 51, too small to read)
     r = grabthat::ReadableSize(5120, 1440, 1.0, k);
-    NEAR(r.degW, 100, 1e-9);
-    CHECK(r.ppd > 50);
+    NEAR(r.degW, 150, 1e-9);
+    NEAR(r.degH, 150 * 1440 / 5120.0, 1e-9);
+    NEAR(r.ppd, 5120 / 150.0, 1e-9);
+    // 3840x1080 (32:9) too; the 21:9 3440x1440 isn't one: 100 deg at most
+    NEAR(grabthat::ReadableSize(3840, 1080, 1.0, k).degW, 3840 / 26.0 > 150 ? 150 : 3840 / 26.0, 1e-9);
+    NEAR(grabthat::ReadableSize(3440, 1440, 1.0, k).degW, 100, 1e-9);
     // a small window (800x600): grown to 40 deg wide, flat
     r = grabthat::ReadableSize(800, 600, 1.0, k);
     NEAR(r.degW, 40, 1e-9);

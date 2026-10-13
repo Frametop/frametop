@@ -5,6 +5,7 @@
 
 #include <openvr.h>
 
+#include "feedage.h"
 #include "vrmath.h"
 
 extern "C" {
@@ -203,8 +204,9 @@ public:
         }
         return true;
     }
-    // ft-hands publishes (a file written within the last 1.5 s).
-    bool Live(uint64_t nowNs) const { return publish_ns && nowNs - publish_ns < 1'500'000'000ull; }
+    // ft-hands publishes (a file written within the last 1.5 s, or after nowNs: feedage.h).
+    bool Live(uint64_t nowNs) const { return Fresh(nowNs, publish_ns, kLiveNs); }
+    static constexpr uint64_t kLiveNs = 1'500'000'000ull;
     std::vector<RoomHand> hands;
     uint64_t capture_ns = 0, publish_ns = 0;
 

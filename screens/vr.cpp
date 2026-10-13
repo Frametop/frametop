@@ -737,6 +737,10 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
 
 // (the row's middle: under the screen by a gap and the taller of the bar's half and a button's, so grown
 // buttons (a hand near: ChromeSize) don't overlap the screen; user, 2026-10-11)
+// The resize handle's side: wider than a button (user, 2026-10-13: "make the glow area a little bit wider
+// off the edge of the displays so it's easier to trigger"), all of it outside the corner. The laser's
+// corner glow is as wide (UpdateHandGuides).
+double HandleSize(const Screen &s) { return s.grip * 1.8; }
 double BarY(const Screen &s) { return -(s.heightMetres() / 2 + s.chrome * 0.06 + std::max(s.chrome * 12 / 256, s.grip / 2)); }
 Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 
@@ -754,9 +758,9 @@ void ControlUV(const Screen &s, double u[7], double v[7]) {
     const double uu[7] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
                           // The handle's inner corner is the screen's corner it's at (bottom right:
                           // its top left corner on the screen's bottom right corner).
-                          s.cornerX * (s.metres / 2 + s.grip / 2), -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
+                          s.cornerX * (s.metres / 2 + HandleSize(s) / 2), -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
                           -(bar / 2 + gap + button / 2)};
-    for (int k = 0; k < 7; ++k) u[k] = uu[k], v[k] = k == 3 ? s.cornerY * (h / 2 + s.grip / 2) : BarY(s);
+    for (int k = 0; k < 7; ++k) u[k] = uu[k], v[k] = k == 3 ? s.cornerY * (h / 2 + HandleSize(s) / 2) : BarY(s);
 }
 Mat RollZ(double rad);
 std::array<Mat, 7> ControlOffsets(const Screen &s) {
@@ -798,7 +802,7 @@ void PlaceChrome(Screen &s) {
     vr::VROverlay()->SetOverlayWidthInMeters(s.bar, float(bar));
     vr::VROverlay()->SetOverlayWidthInMeters(s.curveButton, float(button));
     vr::VROverlay()->SetOverlayWidthInMeters(s.rollButton, float(button));
-    vr::VROverlay()->SetOverlayWidthInMeters(s.handle, float(s.grip));
+    vr::VROverlay()->SetOverlayWidthInMeters(s.handle, float(HandleSize(s)));
     if (s.floating) {
         vr::VROverlay()->SetOverlayWidthInMeters(s.dockButton, float(button));
         vr::VROverlay()->SetOverlayWidthInMeters(s.closeButton, float(button));
@@ -1133,7 +1137,7 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
             for (int x : {1, -1})
                 for (int y : {-1, 1}) {
                     const double dist = std::hypot(u - x * W / 2, v - y * H / 2);
-                    const double close = 1 - std::clamp((dist - s.grip) / std::max(1e-3, zone - s.grip), 0.0, 1.0);
+                    const double close = 1 - std::clamp((dist - HandleSize(s)) / std::max(1e-3, zone - HandleSize(s)), 0.0, 1.0);
                     // (the corner it's at keeps it on a tie, so it doesn't flip between two)
                     if (close > best + (x == s.cornerX && y == s.cornerY ? -1e-3 : 1e-3)) best = close, cx = x, cy = y;
                 }
@@ -2136,8 +2140,8 @@ void UpdateAim() {
         }
         const double m = s.grip * (g_tick < s.aimUntil ? 2.0 : 0.25), h = s.heightMetres();
         // The panel and its controls: the bar row under it, the resize tab off its corner.
-        const double halfW = std::max(s.metres / 2 + s.grip, s.chrome / 2 + s.chrome * 0.12 + s.grip * 2) + m;
-        const double top = h / 2 + m, bottom = std::min(BarY(s) - s.grip, -(h / 2 + s.grip)) - m;
+        const double halfW = std::max(s.metres / 2 + HandleSize(s), s.chrome / 2 + s.chrome * 0.12 + s.grip * 2) + m;
+        const double top = h / 2 + HandleSize(s) + m, bottom = std::min(BarY(s) - s.grip, -(h / 2 + HandleSize(s))) - m;
         for (const Mat &l : lasers) {
             double u, v;
             if (!RayOnSurface(s, p, l, &u, &v)) continue;
@@ -2352,7 +2356,8 @@ handinput::Panel InputPanel(const Screen &s, int index, const Mat &p) {
                                                 handinput::Control::Reset};
     for (int k = 0; k < 7; ++k) {
         if (controls[k] == vr::k_ulOverlayHandleInvalid) continue;
-        const double hw = k == 0 ? s.chrome / 2 : s.grip / 2, hh = k == 0 ? s.chrome * 12 / 256 : s.grip / 2;
+        const double c = k == 3 ? HandleSize(s) : s.grip;
+        const double hw = k == 0 ? s.chrome / 2 : c / 2, hh = k == 0 ? s.chrome * 12 / 256 : c / 2;
         P.controls.push_back({kinds[k], u[k], v[k], hw, hh});
     }
     if (s.floating && s.mpp > 0)
@@ -3440,6 +3445,7 @@ void UpdateHandGuides() {
         bool curved = false;
         switch (hg.g.kind) {
             case handinput::Guide::Corner:
+                if (k == 2) halo = std::max(halo, HandleSize(s));   // (the laser's: as wide as the handle it presses)
                 arm = std::clamp(0.25 * std::min(W, H), 0.03, 0.10);
                 u = hg.g.sx * W / 2, v = hg.g.sy * H / 2, wm = hm = 2 * std::max(arm, halo) * 1.05, curved = true;
                 break;

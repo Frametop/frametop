@@ -74,9 +74,13 @@
  * module does that (the side pair goes between video9/13 and video0/3, seen 2026-10-12): the
  * old device just stops, nothing gets reallocated, and ft-camd would publish two dead cameras
  * for as long as it runs. It exits instead (status 4), so systemd starts it on the new devices.
- * The cameras all stop together when the headset is taken off; that isn't this.
+ * The cameras all stop together when the headset is taken off; that isn't this. Nor is one that
+ * starts later than the others when it goes back on (seen 2026-10-13: video13 just behind, then
+ * video0 over 3 s behind): for RESUME_GRACE_S after the cameras start again, a camera may stay
+ * silent. One the module moved while the headset was off is caught after that.
  */
 #define SILENT_S      3
+#define RESUME_GRACE_S 10
 /*
  * The color cameras never take the mono ones down with them. Each color buffer is ~9 MB,
  * and every probe for a fresh one syncs a whole buffer's cache, so a color camera looks
@@ -888,15 +892,22 @@ static void on_sample(void *ctx, const tp_sample_t *s)
 /* A mono camera gone silent while another runs (see SILENT_S), or NULL. */
 static const cam_t *silent_camera(uint64_t now)
 {
+    static uint64_t running_since;   /* when a camera last started again after none ran */
     uint64_t newest = 0;
 
     for (int i = 0; i < ncams; i++)
         if (!cams[i].color && cams[i].last_event_ns > newest)
             newest = cams[i].last_event_ns;
 
-    if (!newest || now - newest > 1000000000ull)
+    if (!newest || now - newest > 1000000000ull) {
+        running_since = 0;
         return NULL;    /* none running: the headset is off or asleep */
+    }
+    if (!running_since)
+        running_since = now;
 
+    if (now - running_since < RESUME_GRACE_S * 1000000000ull)
+        return NULL;
     for (int i = 0; i < ncams; i++) {
         const cam_t *c = &cams[i];
         if (!c->color && c->last_event_ns && now - c->last_event_ns > SILENT_S * 1000000000ull)

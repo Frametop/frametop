@@ -53,7 +53,7 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 
 | Do this | To get this |
 | --- | --- |
-| Point near the bottom of a screen | Its controls fade in: the bar, the curve and roll buttons, and the resize tab on the corner |
+| Point near the bottom of a screen | Its controls fade in: the bar, the curve and roll buttons, and, near a corner, a soft glow round it: press there and drag to resize |
 | Drag the bar under a screen | Moves the screen; scroll while dragging to push it away or pull it closer. With the mouse, hold right while dragging to tilt it |
 | Drag the tab on a screen's bottom right corner | Resizes the screen |
 | Click the curve button (next to the bar) | Curves the screen around you, or flattens it |

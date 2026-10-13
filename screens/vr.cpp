@@ -11,8 +11,9 @@
 //     its centre (it snaps level within kRollSnap), or scroll on it for kRollStep steps.
 //   - a resize handle on a corner: drag it to resize from that corner, the opposite one staying
 //     put (a screen's height follows its resolution; a floating window gets the pixels). It sits
-//     on the bottom right and goes to whichever corner a laser, the gaze or a hand comes near,
-//     brightening as it comes (UpdateCorner), lit while resizing.
+//     on the bottom right and goes to whichever corner a laser, the gaze or a hand comes near
+//     (UpdateCorner). It draws nothing since 2026-10-13: a soft white glow round the corner, as
+//     a hand's, shows it, brighter as the aim comes, brightest while resizing.
 //   - a reset button left of the bar: the profile in use opened again, or every screen back
 //     in its layout, around where you are now (`ft-layout reset`, like Meta+Shift+R).
 //   The controls are translucent, like SteamVR's own, and brighten under a laser. They
@@ -505,33 +506,13 @@ std::vector<uint8_t> ControlTexture(int n, In inside, Glyph glyph, Rim rim) {
 bool InDisc(double u, double v) { return u * u + v * v <= 1; }
 bool DiscRim(double u, double v) { return u * u + v * v > 0.86 * 0.86; }
 
-std::vector<uint8_t> CornerTexture(int n) {
-    // A quarter disc whose corner (the texture's top left) sits on the screen's bottom
-    // right corner, with two grip arcs: "drag this corner".
-    auto r = [](double u, double v) { return std::hypot(u + 1, v - 1) / 2; };  // 0..1 from the corner
-    return ControlTexture(
-        n, [&](double u, double v) { return r(u, v) <= 1; },
-        [&](double u, double v) {
-            const double d = r(u, v);
-            return std::fabs(d - 0.5) < 0.035 || std::fabs(d - 0.75) < 0.035;
-        },
-        [&](double u, double v) { return r(u, v) > 0.93; });
-}
-
-// The handle while resizing: its arcs blue, like the lit bar.
-std::vector<uint8_t> CornerTextureLit(int n) {
-    std::vector<uint8_t> px = CornerTexture(n);
-    for (size_t i = 0; i < px.size(); i += 4) {
-        const double shade = px[i] / 255.0;   // grey: dark inside, white arcs
-        px[i] = uint8_t(std::lround(38 + (90 - 38) * shade)), px[i + 1] = uint8_t(std::lround(38 + (170 - 38) * shade)),
-        px[i + 2] = uint8_t(std::lround(38 + (255 - 38) * shade));
-        px[i + 3] = uint8_t(std::min(255.0, px[i + 3] * 1.15));
-    }
-    return px;
-}
-const std::vector<uint8_t> &HandleTexture(bool lit) {
-    static const auto normal = CornerTexture(64), glow = CornerTextureLit(64);
-    return lit ? glow : normal;
+// The resize handle draws nothing (user, 2026-10-13: "remove the radio icon thing on corners for resizing
+// and replace them with the glow that is used for grabbing with hand tracking"): it stays as the laser's
+// hit area just outside the corner (its mouse scale, not its texture, sizes that), and the corner's soft
+// glow (UpdateHandGuides: the laser's guide, as a hand's) shows it.
+const std::vector<uint8_t> &HandleTexture(bool) {
+    static const std::vector<uint8_t> clear(64 * 64 * 4, 0);
+    return clear;
 }
 
 std::vector<uint8_t> CurveTexture(int n) {
@@ -1131,6 +1112,9 @@ bool RayOnSurface(const Screen &s, const Mat &p, const Mat &laser, double *u, do
 // zone (a fifth of the screen's height, 5 to 20 cm) of a corner, or a hand's pinch at one
 // (handinput's corners()). Lit while resizing. With no aim for kControlsLinger ticks it goes back
 // to the bottom right.
+// The corner a laser (or, with HANDS_EDGE_GLOW off, a hand) aims at this tick, the closest on any panel:
+// its soft glow (UpdateHandGuides).
+handinput::Guide g_laserCorner, g_laserCornerNext;
 void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     const double W = s.metres, H = s.heightMetres();
     const double zone = std::clamp(0.2 * std::min(W, H), 0.05, 0.2);
@@ -1174,6 +1158,10 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     }
     const float glow = float(best);
     const bool lit = held || s.drag == Drag::Resize;
+    if (best > 0 && best > g_laserCornerNext.strength) {
+        g_laserCornerNext.kind = handinput::Guide::Corner, g_laserCornerNext.panel = ScreenIndexOf(s);
+        g_laserCornerNext.sx = s.cornerX, g_laserCornerNext.sy = s.cornerY, g_laserCornerNext.strength = best, g_laserCornerNext.selected = lit;
+    }
     if (lit != s.cornerLit && s.handle != vr::k_ulOverlayHandleInvalid) {
         s.cornerLit = lit;
         const auto &px = HandleTexture(lit);
@@ -1195,6 +1183,7 @@ void UpdateControls() {
         if (vr::VRSystem()->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_Controller && LaserPose(i, &d))
             lasers.push_back(d);
     }
+    g_laserCorner = g_laserCornerNext, g_laserCornerNext = {};   // (last tick's: UpdateCorner fills the next)
     for (auto &[i, s] : g_screens) {
         Mat p;
         if (s.visible && ScreenPose(s, &p)) {
@@ -3408,15 +3397,15 @@ struct HandGuide {
     double alpha = 0, shownAlpha = -1;
     int64_t lastMs = 0;
     handinput::Guide g;        // what it shows (kept while it fades out)
-} g_handGuides[2];
+} g_handGuides[3];   // the left hand's, the right's, and the lasers' (a corner: g_laserCorner)
 
 void UpdateHandGuides() {
     static std::map<std::string, std::vector<uint8_t>> textures;
     const bool on = g_vr && g_handInput.params().edgeGlow && HandInputOn();
     const int64_t now = NowMs();
-    for (int k = 0; k < 2; ++k) {
+    for (int k = 0; k < 3; ++k) {
         HandGuide &hg = g_handGuides[k];
-        const handinput::Guide g = on ? g_handInput.guide(k) : handinput::Guide{};
+        const handinput::Guide g = k == 2 ? (g_vr ? g_laserCorner : handinput::Guide{}) : on ? g_handInput.guide(k) : handinput::Guide{};
         const double dt = hg.lastMs ? std::clamp((now - hg.lastMs) / 1000.0, 0.0, 0.1) : 0;
         hg.lastMs = now;
         const bool same = g.kind == hg.g.kind && g.panel == hg.g.panel && g.sx == hg.g.sx && g.sy == hg.g.sy && g.control == hg.g.control;
@@ -3433,7 +3422,7 @@ void UpdateHandGuides() {
             continue;
         }
         if (hg.overlay == vr::k_ulOverlayHandleInvalid) {
-            const char *key = k ? "frametop.guide.hand.right" : "frametop.guide.hand.left";
+            const char *key = k == 2 ? "frametop.guide.laser" : k ? "frametop.guide.hand.right" : "frametop.guide.hand.left";
             if (vr::VROverlay()->CreateOverlay(key, "Frametop: hand guide", &hg.overlay) != vr::VROverlayError_None) continue;
             vr::VROverlay()->SetOverlaySortOrder(hg.overlay, 1);
         }
@@ -4079,7 +4068,7 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
     vr::VROverlay()->SetOverlayFlag(s.overlay, vr::VROverlayFlags_IgnoreTextureAlpha, true);
     vr::VROverlay()->SetOverlayFlag(s.overlay, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
     vr::VROverlay()->SetOverlayFlag(s.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
-    static const auto corner = CornerTexture(64);
+    const auto &corner = HandleTexture(false);
     static const auto curve = CurveTexture(64);
     static const auto roll = RollTexture(64);
     // (each told to the pointer helper, as the panel is: its ray and the gaze find them at once)

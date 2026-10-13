@@ -917,6 +917,8 @@ class Spotwatch:
             if self.sel != i:
                 self.sel = i
                 self.render()
+            if cmd != "hover":
+                log(f"{cmd} on {self.entries[i].title!r} ({self.mode})")
             if cmd == "click":
                 self.activate()
             elif cmd == "menu":

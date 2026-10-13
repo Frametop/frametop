@@ -227,6 +227,14 @@ def recordable(ev):
     return app not in SKIP_APPS and not any(n.startswith(("ft-", "frametop", "ksplash")) for n in (app, cls))
 
 
+def listable(ev):
+    """An app's top-level window, the kind spotwatch finds: Frametop's own settings apps too,
+    which profiles leave out (an open Input Settings launched a second copy, 2026-10-13)."""
+    if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
+        return False
+    return ev.get("app", "") not in SKIP_APPS and not any(n.startswith("ksplash") for n in (ev.get("app", ""), ev.get("cls", "")))
+
+
 def cmdline(pid):
     try:
         with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
@@ -884,7 +892,7 @@ class Daemon:
         it's on (a screen or a floating window's; None elsewhere), and when it was last active."""
         out = []
         for wid, ev in self.windows.items():
-            if not recordable(ev):
+            if not listable(ev):
                 continue
             f = self.floats.get(wid)
             m = re.match(r"WL-(\d+)$", ev.get("output", ""))

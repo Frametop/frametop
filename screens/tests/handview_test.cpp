@@ -1,10 +1,12 @@
 // Offline tests for ft-handview's CPU side: Room View's detector (roomview.h) against a fake
 // shared state, the rendered hand's mesh and square (handmesh.cpp), the hand model's posing
-// (handskin.cpp) and the robot hand's (handrobot.cpp). No OpenVR, GPU or headset.
+// (handskin.cpp), the robot hand's (handrobot.cpp), and the drawn hand between and past the
+// tracking's frames (handhold.h). No OpenVR, GPU or headset.
 //
 // Build and run: the justfile's test-c.
 #include "../handmesh.h"
 #include "../handasset.h"
+#include "../handhold.h"
 #include "../handrobot.h"
 #include "../handskin.h"
 #include "../roomview.h"
@@ -559,8 +561,113 @@ void TestRobot() {
     CHECK(!handrobot::Pose(flat, b));
 }
 
+// handhold.h: blending between frames, holding a lost hand, refusing a jump
+handcut::Hand HeldHand(double x, double y = 0, double z = -0.4, bool flipped = false) {
+    handcut::Hand h{};
+    h.right = true;
+    for (int j = 0; j < 21; ++j) h.p[j][0] = float(x), h.p[j][1] = float(y + 0.01 * j), h.p[j][2] = float(z);
+    // a palm: the wrist, the index knuckle up, the little knuckle beside it (flipped: the other side)
+    h.p[5][1] = float(y + 0.08), h.p[17][1] = float(y + 0.07);
+    h.p[17][0] = float(x + (flipped ? -0.06 : 0.06));
+    for (int j : {0, 9, 13}) h.p[j][1] = float(y + (j ? 0.08 : 0));
+    return h;
+}
+
+double PalmX(const handcut::Hand *h) {
+    double p[3];
+    h->Palm(p);
+    return p[0];
+}
+
+void TestHold() {
+    handhold::Params k;
+    handhold::Side s;
+    const int64_t ms = 1'000'000;
+    int64_t t = 1000 * ms;
+    uint64_t frame = 1;
+    // first seen: drawn on the second frame that agrees
+    handcut::Hand a = HeldHand(0.0);
+    CHECK(!s.Update(&a, frame, t, k));
+    a = HeldHand(0.01), t += 33 * ms, ++frame;
+    const handcut::Hand *d = s.Update(&a, frame, t, k);
+    CHECK(d && std::fabs(PalmX(d) - PalmX(&a)) < 1e-6);
+    // a new frame 3 cm on: blended in over about the frame's interval
+    handcut::Hand b = HeldHand(0.04);
+    t += 33 * ms, ++frame;
+    d = s.Update(&b, frame, t, k);
+    NEAR(PalmX(d), PalmX(&a), 1e-6);   // starts where it was drawn
+    CHECK(s.blending(t + 10 * ms));
+    d = s.Update(&b, frame, t + 16 * ms, k);
+    CHECK(PalmX(d) > PalmX(&a) + 0.01 && PalmX(d) < PalmX(&b) - 0.01);
+    d = s.Update(&b, frame, t + 40 * ms, k);
+    NEAR(PalmX(d), PalmX(&b), 1e-6);
+    CHECK(!s.blending(t + 40 * ms));
+    t += 40 * ms;
+    // one misread frame 60 cm off: not drawn; the next one back on the track is
+    handcut::Hand wild = HeldHand(0.64), c = HeldHand(0.05);
+    t += 33 * ms, ++frame;
+    d = s.Update(&wild, frame, t, k);
+    NEAR(PalmX(d), PalmX(&b), 1e-6);
+    CHECK(s.frozen() && s.jumps == 1);
+    t += 33 * ms, ++frame;
+    s.Update(&c, frame, t, k);
+    CHECK(!s.frozen());
+    t += 80 * ms;
+    d = s.Update(&c, frame, t, k);
+    NEAR(PalmX(d), PalmX(&c), 1e-6);
+    // the palm turned over in one frame: a misreading too
+    handcut::Hand over = HeldHand(0.05, 0, -0.4, true);
+    t += 33 * ms, ++frame;
+    d = s.Update(&over, frame, t, k);
+    CHECK(s.frozen() && s.jumps == 2);
+    // a real move far away (two frames agreeing): drawn there on the second, straight there
+    handcut::Hand far1 = HeldHand(1.2), far2 = HeldHand(1.21);   // (146 ms since the last frame taken)
+    t += 33 * ms, ++frame;
+    s.Update(&far1, frame, t, k);
+    t += 33 * ms, ++frame;
+    d = s.Update(&far2, frame, t, k);
+    CHECK(!s.frozen());
+    NEAR(PalmX(d), PalmX(&far2), 1e-6);
+    // fast but steady (5 m/s, 16.5 cm a frame): followed frame by frame
+    handcut::Hand fast = far2;
+    bool kept = true;
+    for (int i = 0; i < 5; ++i) {
+        fast = HeldHand(1.21 - 0.165 * (i + 1));
+        t += 33 * ms, ++frame;
+        s.Update(&fast, frame, t, k);
+        kept = kept && !s.frozen();
+    }
+    CHECK(kept);
+    // lost: held still for holdS, then gone
+    t += 100 * ms;
+    const double lastX = PalmX(s.Update(&fast, frame, t, k));
+    t += 33 * ms, ++frame;
+    d = s.Update(nullptr, frame, t, k);
+    CHECK(d && s.frozen() && s.holds == 1);
+    NEAR(PalmX(d), lastX, 1e-6);
+    d = s.Update(nullptr, frame, t + int64_t(k.holdS * 1000 - 50) * ms, k);
+    CHECK(d);
+    // back within the hold, 30 cm away: drawn there on the second frame, without sweeping across
+    handcut::Hand back1 = HeldHand(lastX + 0.3), back2 = HeldHand(lastX + 0.31);
+    t += 500 * ms, ++frame;
+    d = s.Update(&back1, frame, t, k);
+    NEAR(PalmX(d), lastX, 1e-6);
+    t += 33 * ms, ++frame;
+    d = s.Update(&back2, frame, t, k);
+    NEAR(PalmX(d), PalmX(&back2), 1e-6);
+    // lost past the hold: nothing
+    t += 33 * ms, ++frame;
+    s.Update(nullptr, frame, t, k);
+    CHECK(!s.Update(nullptr, frame, t + int64_t(k.holdS * 1000 + 50) * ms, k));
+    // a reset (a controller taken up): gone at once, and a hand seen after starts afresh
+    s.Update(&back2, ++frame, t + 4000 * ms, k);
+    s.Reset();
+    CHECK(!s.Update(nullptr, frame, t + 4010 * ms, k));
+}
+
 int main() {
     TestRoomView();
+    TestHold();
     TestRobot();
     TestMesh();
     TestModels();

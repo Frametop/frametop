@@ -38,7 +38,8 @@
 // Room View: roomview.h. HANDS_ROOMVIEW=auto|on|off in ~/.config/frametop.conf forces it.
 // Settings (~/.config/frametop.conf): HANDS_VIEW_MODEL asset|babylon|mrtk3|godot|mrtk2|robot|capsules
 // (screens/assets/hands/README.md), HANDS_VIEW_STYLE ghost|solid,
-// HANDS_VIEW_ROOMVIEW 1|0 (draw with Room View on too).
+// HANDS_VIEW_ROOMVIEW 1|0 (draw with Room View on too), HANDS_VIEW_SMOOTH 1|0 and HANDS_VIEW_HOLD S
+// (handhold.h: each frame blended in, a lost hand held still S seconds (3), a misread jump held off).
 // Commands (datagrams on @ft_handview, replies to the sender):
 //   hands <L> <R> <allowed>   the pointer helper's word: each side hand|controller|off
 //   roomview auto|on|off      force Room View's state (auto: detect it) -> "ok <on|off> (<why>)"
@@ -51,6 +52,7 @@
 //                             second) -> "ok" and a line each: "<CLOCK_MONOTONIC ns> <3x4 row-major,
 //                             standing universe>" (ft-handsctl saves them with a flag)
 #include "handcut.h"
+#include "handhold.h"
 #include "handmesh.h"
 #include "handskin.h"
 #include "handasset.h"
@@ -844,6 +846,7 @@ struct Side {
     double lastPalm[3] = {};
     float flash = 0;                   // the flash's pulse it was last drawn with
     const char *why = "not tracked";   // why it's hidden
+    handhold::Side hold;               // between frames, a lost hand held, jumps refused (handhold.h)
     // since the last status line
     int draws = 0, busy = 0;
     double cpuMs = 0, worstMs = 0, meshMs = 0, gpuMs = 0;
@@ -1184,6 +1187,11 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "HANDS_ROOMVIEW: auto, on or off; taking auto\n");
     room.SetForce(force);
     handcut::Hands hands;
+    // between the tracking's frames and past them (handhold.h): HANDS_VIEW_SMOOTH=0 draws each frame as it
+    // comes, and a hand only while it's tracked; HANDS_VIEW_HOLD seconds a lost hand stays (3)
+    const bool smooth = handcut::Setting("HANDS_VIEW_SMOOTH", "1") != "0";
+    handhold::Params holdK;
+    holdK.holdS = std::clamp(std::atof(handcut::Setting("HANDS_VIEW_HOLD", "3").c_str()), 0.0, 30.0);
     handmesh::Mesh mesh;
     handskin::Bones bones;
     handrobot::Bones robot;
@@ -1312,17 +1320,23 @@ int main(int argc, char **argv) {
 
         for (int si = 0; si < 2; ++si) {
             Side &s = sides[si];
-            const handcut::Hand *h = nullptr;
+            const handcut::Hand *tracked = nullptr;
             for (const handcut::Hand &c : shown)
-                if (c.right == bool(si)) h = &c;
+                if (c.right == bool(si)) tracked = &c;
             double palm[3] = {};
-            if (h) h->Palm(palm);
+            if (tracked) tracked->Palm(palm);
             const char *why = nullptr;
             if (!hp.bPoseIsValid) why = "no head pose";
             else if (roomOn && !demo && !look.inRoom) why = "Room View on";
-            else if (!h) why = "not tracked";
-            else if (demo) why = nullptr;
-            else if (heard ? g_word.side[si] == 2 : ControllerAt(si, palm, poses, now)) why = heard ? "controller (helper)" : "controller near";
+            else if (demo) why = tracked ? nullptr : "not tracked";
+            else if (heard ? g_word.side[si] == 2 : tracked && ControllerAt(si, palm, poses, now))
+                why = heard ? "controller (helper)" : "controller near";
+            // the pose to draw: the tracked one, blended in; a lost one held still a while
+            const handcut::Hand *h = tracked;
+            if (why || demo || !smooth) s.hold.Reset();
+            else h = s.hold.Update(tracked, frame, now, holdK);
+            if (!why && !h) why = "not tracked";
+            if (h && h != tracked) h->Palm(palm);
             // a finished buffer goes up, with the square it was drawn for (shown unless the hand went)
             if (s.drawing >= 0 && gpu.Passed(s.out[s.drawing])) {
                 Output &o = s.out[s.drawing];
@@ -1339,14 +1353,17 @@ int main(int argc, char **argv) {
                 if (s.visible) vr::VROverlay()->HideOverlay(s.overlay), s.visible = false;
                 continue;
             }
-            s.why = "shown";
-            // draw on a new hands frame, or every 20 ms while it moves (3 mm or more)
+            s.why = s.hold.frozen() ? "held" : "shown";
+            // draw on a new hands frame, or every 20 ms while it moves (3 mm or more), and every 15 ms
+            // while a frame blends in; a held hand stays as it was drawn
             const double moved = std::sqrt((palm[0] - s.lastPalm[0]) * (palm[0] - s.lastPalm[0]) +
                                            (palm[1] - s.lastPalm[1]) * (palm[1] - s.lastPalm[1]) +
                                            (palm[2] - s.lastPalm[2]) * (palm[2] - s.lastPalm[2]));
             // and through a flash, until it's drawn without it again
             const bool flashing = (flash > 0 || s.flash > 0) && now - s.lastDraw >= 20'000'000;
-            const bool want = frame != s.lastFrame || (moved > 0.003 && now - s.lastDraw >= 20'000'000) || !s.visible || flashing;
+            const bool held = s.hold.frozen();
+            const bool want = (frame != s.lastFrame && !held) || (moved > 0.003 && now - s.lastDraw >= 20'000'000) ||
+                              (s.hold.blending(now) && now - s.lastDraw >= 15'000'000) || !s.visible || flashing;
             if (!want) continue;
             if (s.drawing >= 0) {   // the GPU is still on the last one
                 s.busy += s.visible;
@@ -1376,18 +1393,19 @@ int main(int argc, char **argv) {
 
         if (now - lastStatus >= int64_t((statusS > 0 ? statusS : 2) * 1e9)) {
             const double dt = (now - lastStatus) / 1e9, cpu1 = CpuSeconds();
-            char line[640];
+            char line[768];
             int k = std::snprintf(line, sizeof line, "room view %s (%s%s), helper %s; %s, %s; CPU %.1f%%", roomOn ? "on" : "off",
                                   room.why(), roomOn && !look.inRoom ? ": not drawn" : "", heard ? "heard" : "silent",
                                   ModelName(look.model), look.style->name, 100 * (cpu1 - cpu0) / dt);
             for (Side &s : sides)
-                k += std::snprintf(line + k, sizeof line - k, "; %s %s, %.1f draws/s, CPU %.2f ms avg (posing %.2f) %.2f worst, up after %.1f ms, %d busy",
+                k += std::snprintf(line + k, sizeof line - k, "; %s %s, %.1f draws/s, CPU %.2f ms avg (posing %.2f) %.2f worst, up after %.1f ms, %d busy, "
+                                   "%d losses held, %d jumps held off",
                                    s.name, s.why, s.draws / dt, s.draws ? s.cpuMs / s.draws : 0.0,
                                    s.draws ? s.meshMs / s.draws : 0.0, s.worstMs,
-                                   s.draws ? s.gpuMs / s.draws : 0.0, s.busy);
+                                   s.draws ? s.gpuMs / s.draws : 0.0, s.busy, s.hold.holds, s.hold.jumps);
             statusLine = line;
             if (statusS > 0) std::printf("%s\n", line);
-            for (Side &s : sides) s.draws = s.busy = 0, s.cpuMs = s.worstMs = s.meshMs = s.gpuMs = 0;
+            for (Side &s : sides) s.draws = s.busy = s.hold.holds = s.hold.jumps = 0, s.cpuMs = s.worstMs = s.meshMs = s.gpuMs = 0;
             lastStatus = now, cpu0 = cpu1;
         }
         // about the displays' rate while a hand shows; else 20 times a second, and 10 with Room View

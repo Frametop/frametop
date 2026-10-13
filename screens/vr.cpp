@@ -3928,8 +3928,9 @@ bool ft_vr_init(void) {
                             : "; it stays until you move it (SCREEN_FRONT_AWAY=0)");
     if (gt.on)
         std::printf("hands: grab that on (an open hand held out, then a fist pulled back: the panel comes %.2f m ahead%s); "
-                    "it takes a panel the line through the palm meets%s, %s, not one held, the palm within %.0f deg of the line\n",
+                    "it takes a panel %s meets%s, %s, not one held, the palm within %.0f deg of the line from the eyes\n",
                     gt.distance, gt.maxWidth > 0 ? (", screens at most " + std::to_string(gt.maxWidth).substr(0, 4) + " m wide").c_str() : "",
+                    gt.aimPalm ? "the palm faces: the line out of it along its normal" : "the line from the eyes through the palm",
                     ((gt.aimMargin > 0 ? " (or passes " + std::to_string(int(std::lround(gt.aimMargin * 100))) + " cm off)" : std::string()) +
                      (gt.aimMarginDeg > 0 ? " (else the one it passes nearest, within " + std::to_string(int(std::lround(gt.aimMarginDeg))) + " deg)"
                                           : std::string()))

@@ -430,16 +430,20 @@ struct Params {
     // anything; using it will require palming through with both hands": the right hand palming left brings
     // the next, the left hand palming right the one before). HANDS_SWEEP_BACK=1: the back of the hand too.
     bool sweepBack = false;
-    double sweepOpen = 1.3, sweepEdge = 0.75, sweepLead = 0.4, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
-    double sweepDistance = 0.22, sweepMs = 900, sweepDrift = 0.2, sweepRest = 0.15;
+    // (Easier again 2026-10-13, "still too hard to trigger": the live misses were palm-led strokes with the
+    // palm's lead 0.16-0.24 of 0.25, palm-led ones tilted 0.81-0.88 toward flat, and strokes drifting 21-22
+    // cm up of 20. Lead 0.3 (one hand 0.12; a flat hand's is 0.05-0.07), edge 0.85 (one hand 0.9: 64 deg off
+    // its edge; flat strokes read 0.93-0.98), drift 0.3, 4 frames off shape ridden out.)
+    double sweepOpen = 1.3, sweepEdge = 0.85, sweepLead = 0.3, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
+    double sweepDistance = 0.22, sweepMs = 900, sweepDrift = 0.3, sweepRest = 0.15;
     // One hand on its own (user, 2026-10-13: "make it easier to trigger intentionally when one hand is being
     // moved"; the misses were "not an open hand on its edge"): with the other hand unseen or still (its palm
     // under sweepCalm m/s), a looser shape and a shorter stroke count: open sweepSoloOpen, edge sweepSoloEdge,
     // lead sweepSoloLead, sweepSoloDistance, quick at sweepSoloPeak somewhere. Either way a stroke rides out
     // sweepBadFrames frames off its shape (one view's jitter ended strokes).
-    double sweepCalm = 0.3, sweepSoloOpen = 1.1, sweepSoloEdge = 0.85, sweepSoloLead = 0.25, sweepSoloDistance = 0.18;
+    double sweepCalm = 0.3, sweepSoloOpen = 1.1, sweepSoloEdge = 0.9, sweepSoloLead = 0.12, sweepSoloDistance = 0.18;
     double sweepSoloPeak = 0.5;
-    int sweepBadFrames = 2;
+    int sweepBadFrames = 4;
     bool flick = true;
     double flickSpeed = 1.2, flickTravel = 0.12, flickMs = 200, flickFitMs = 100, flickNear = 0.12, flickBack = 0.04;
     double flickAngle = 40, flickOpen = 1.5, flickPokeSpeed = 0.8, flickRefractoryMs = 1000, flickStartSpeed = 0.6;

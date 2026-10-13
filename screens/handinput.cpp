@@ -1850,9 +1850,10 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
     const double distance = solo ? std::min(p_.sweepDistance, p_.sweepSoloDistance) : p_.sweepDistance;
     const double peak = solo ? std::min(p_.sweepPeak, p_.sweepSoloPeak) : p_.sweepPeak;
     // where it can be: in front, at chest to eye height, not pressing or holding a panel (near one is fine), not typing
-    const bool place = z >= p_.sweepFront && y >= -p_.sweepBelow && y <= p_.sweepAbove &&
-                       (sd.state == State::Idle || sd.state == State::Hover) &&
-                       !in.typing[s] && !in.grabThatArmed[s] && !in.hands->pinch(s).down && !in.hands->grip(s).down;
+    const bool inFront = z >= p_.sweepFront && y >= -p_.sweepBelow && y <= p_.sweepAbove;
+    const bool free = sd.state == State::Idle || sd.state == State::Hover;
+    const bool busy = in.typing[s] || in.grabThatArmed[s] || in.hands->pinch(s).down || in.hands->grip(s).down;
+    const bool place = inFront && free && !busy;
     // the shape: open, on its edge, the palm or the back leading
     const double nUp = n[1], nSide = n[0] * rx + n[2] * rz;
     const double open = Openness(h);
@@ -1870,7 +1871,9 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
             if (along >= distance / 2) {   // (a stroke well under way that went wrong: counted, logged once)
                 ++stats.sweepsRefused;
                 char why[160];
-                if (!place) std::snprintf(why, sizeof why, "not in front, at a panel, or busy");
+                if (!inFront) std::snprintf(why, sizeof why, "out of place: %.0f cm in front (%.0f or more), %+.0f cm from the eyes' height", z * 100, p_.sweepFront * 100, y * 100);
+                else if (!free) std::snprintf(why, sizeof why, "at a panel (pressing or holding it)");
+                else if (!place) std::snprintf(why, sizeof why, "busy: %s", in.typing[s] ? "typing" : in.grabThatArmed[s] ? "grab that armed" : in.hands->pinch(s).down ? "a pinch down" : "a grip down");
                 else if (badShape)
                     std::snprintf(why, sizeof why, "not an open hand on its edge: open %.2f of %.2f, tilt %.2f of %.2f, lead %.2f of %.2f%s", open,
                                   needOpen, std::fabs(nUp), edge, std::fabs(nSide), lead, solo ? ", one hand" : ", both hands moving");

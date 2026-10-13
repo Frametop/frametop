@@ -4030,9 +4030,12 @@ void TestSweep() {
     auto tilted = run(120, {0.25, -0.15}, 0.4);
     show("tilted 30 deg, 40 cm", tilted);
     CHECK(tilted.size() == 1);
-    auto halfFlat = run(150, {0.25, -0.15}, 0.4);   // 60 deg off its edge: mostly flat
-    show("tilted 60 deg (mostly flat)", halfFlat);
+    auto halfFlat = run(160, {0.25, -0.15}, 0.4);   // 70 deg off its edge: mostly flat (60 counts since 2026-10-13)
+    show("tilted 70 deg (mostly flat)", halfFlat);
     CHECK(halfFlat.empty());
+    auto sixty = run(150, {0.25, -0.15}, 0.4);
+    show("tilted 60 deg, one hand", sixty);
+    CHECK(sixty.size() == 1);
 }
 
 void TestSusanPick() {

@@ -28,10 +28,11 @@
 //                                the pose picture (a PNG, square, RGBA, a right hand as the wearer
 //                                sees it) in a column on the left, the text moving right: mirror
 //                                flips it (a left hand), both shows a flipped copy on its left
-//   demo <path> [mirror] / demo restart / demo off
+//   demo <path> [mirror] [nokey] / demo restart / demo off
 //                                a demo clip (an animated GIF, hands/rec/demos) playing in a wider
 //                                column on the left, looped, with the key to its colours under it
-//                                (light: palm, dark: back of hand); it takes the place of the
+//                                (light: palm, dark: back of hand; nokey: none, for a clip of
+//                                real hands from hands/rec/demos-recorded); it takes the place of the
 //                                image. A new path starts it from its first frame, the same one
 //                                again leaves it playing (mirror only flips it), restart starts
 //                                it again. It stands still while paused
@@ -390,6 +391,7 @@ Image &StripImage(const std::string &path) {
 struct Demo {
     std::string path;
     bool mirror = false;
+    bool key = true;                  // the key to the skeleton clips' colours under it
     std::vector<uint8_t> file;
     stbi__context ctx{};
     stbi__gif g{};
@@ -670,13 +672,13 @@ void Draw(Panel &p) {
         bottom = y0 - frame - int(ppd * 0.8);
     } else if (demoOn) {
         // The demo clip in a wider column, the key to its colours under it (on one line if it
-        // fits), the text to the right.
+        // fits; none for a clip of real hands), the text to the right.
         const int colW = int(ppd * 16), gap = int(ppd * 0.6), keySize = int(ppd * 0.75), keyLh = int(keySize * 1.6);
         const int sw = std::max(1, p.demo->w), sh = std::max(1, p.demo->h), swatch = keySize, sgap = int(ppd * 0.3);
         const std::string light = "Light: palm", dark = "Dark: back of hand";
         const int lightW = swatch + sgap + TextWidth(light, keySize), darkW = swatch + sgap + TextWidth(dark, keySize);
-        const bool oneLine = lightW + int(ppd) + darkW <= colW;
-        const int room = bottom - top - gap - (oneLine ? 1 : 2) * keyLh;
+        const bool keyOn = p.demo->key, oneLine = lightW + int(ppd) + darkW <= colW;
+        const int room = bottom - top - (keyOn ? gap + (oneLine ? 1 : 2) * keyLh : 0);
         int dw = colW, dh = dw * sh / sw;
         if (dh > room) dh = std::max(0, room), dw = dh * sw / sh;
         int y = top + std::max(0, (room - dh) / 2);
@@ -689,11 +691,11 @@ void Draw(Panel &p) {
             RoundRect(pic, kx, cy - swatch / 2, kx + swatch, cy + swatch / 2, swatch * 0.25, c[0], c[1], c[2], 1);
             Text(pic, label, keySize, kx + swatch + sgap, cy, 0.85, kLeft);
         };
-        if (oneLine) {
+        if (keyOn && oneLine) {
             const int kx = margin + (colW - lightW - int(ppd) - darkW) / 2;
             key(light, kPalm, kx, y + keyLh / 2);
             key(dark, kBack, kx + lightW + int(ppd), y + keyLh / 2);
-        } else {
+        } else if (keyOn) {
             const int kx = margin + (colW - std::max(lightW, darkW)) / 2;
             key(light, kPalm, kx, y + keyLh / 2);
             key(dark, kBack, kx, y + keyLh + keyLh / 2);
@@ -837,8 +839,8 @@ void Print(const Panel &p, const Target &t, bool visible, int number) {
                     p.imageMode.empty() ? "" : " ", p.imageMode.c_str());
     else std::printf("image: off\n");
     if (p.demo)
-        std::printf("demo: %s %dx%d frame %d loop %d%s, drawn %dx%d\n", p.demo->path.c_str(), p.demo->w, p.demo->h,
-                    p.demo->frame, p.demo->loops, p.demo->mirror ? " mirror" : "", p.demoW, p.demoH);
+        std::printf("demo: %s %dx%d frame %d loop %d%s%s, drawn %dx%d\n", p.demo->path.c_str(), p.demo->w, p.demo->h,
+                    p.demo->frame, p.demo->loops, p.demo->mirror ? " mirror" : "", p.demo->key ? "" : " nokey", p.demoW, p.demoH);
     else std::printf("demo: off\n");
     if (!p.wherePos.empty() || !p.whereDist.empty())
         std::printf("where: %s %s\n", p.wherePos.empty() ? "-" : p.wherePos.c_str(), p.whereDist.empty() ? "-" : p.whereDist.c_str());
@@ -1269,12 +1271,18 @@ int main(int argc, char **argv) {
                     p.imageMode = mode, dirty = true;
                 }
             } else if (Is(buf, "demo", &rest)) {
-                // demo <path> [mirror] / demo restart / demo off: the path may hold spaces
+                // demo <path> [mirror] [nokey] / demo restart / demo off: the path may hold spaces
                 std::string path = rest;
-                const bool mirror = path.size() > 7 && !path.compare(path.size() - 7, 7, " mirror");
-                if (mirror) path.resize(path.size() - 7);
+                auto flag = [&path](const char *word) {
+                    const size_t n = std::strlen(word) + 1;
+                    if (path.size() <= n || path.compare(path.size() - n, n, std::string(" ") + word)) return false;
+                    path.resize(path.size() - n);
+                    return true;
+                };
+                const bool nokey = flag("nokey");
+                const bool mirror = flag("mirror");
                 if (path.empty()) {
-                    reply = "error usage: demo <path> [mirror] | demo restart | demo off";
+                    reply = "error usage: demo <path> [mirror] [nokey] | demo restart | demo off";
                 } else if (path == "off") {
                     p.demo.reset(), dirty = true;
                 } else if (path == "restart") {
@@ -1283,12 +1291,12 @@ int main(int argc, char **argv) {
                     dirty = true;
                 } else if (!p.demo || path != p.demo->path) {
                     auto d = std::make_unique<Demo>();
-                    d->mirror = mirror;
+                    d->mirror = mirror, d->key = !nokey;
                     if (d->Load(path)) p.demo = std::move(d);
                     else reply = "error can't read " + path + ": " + stbi_failure_reason(), p.demo.reset();
                     dirty = true;  // no clip rather than the last one
-                } else if (mirror != p.demo->mirror) {
-                    p.demo->mirror = mirror, p.demo->fresh = dirty = true;
+                } else if (mirror != p.demo->mirror || nokey == p.demo->key) {
+                    p.demo->mirror = mirror, p.demo->key = !nokey, p.demo->fresh = dirty = true;
                 }
             } else if (Is(buf, "strip", &rest)) {
                 // strip <cue> <path>|<mode>|<label>;...

@@ -529,6 +529,21 @@ Kirigami.ApplicationWindow {
                              + "know the steps already. "
                            : "") + "Length: " + backend.planText(checklist.answers(), autoAdvance.checked, quickRound.checked) + "."
                 }
+                ColumnLayout {
+                    Kirigami.FormData.label: "Guidance:"
+                    visible: backend.scriptHasDemos
+                    Repeater {
+                        model: backend.guidanceChoices
+                        Controls.RadioButton {
+                            required property var modelData
+                            text: modelData.text + (modelData.value === "recorded"
+                                                    ? ": clips of a real person's hands, from the headset's cameras"
+                                                    : ": a drawn hand, its palm light and its back dark")
+                            checked: backend.guidance === modelData.value
+                            onToggled: if (checked) backend.setGuidance(modelData.value)
+                        }
+                    }
+                }
                 Controls.Button {
                     text: "Start"
                     icon.name: "media-record"
@@ -638,13 +653,14 @@ Kirigami.ApplicationWindow {
 
             // A demo clip as the panel plays it (DESIGN.md "Demo clips"): looped, a left hand's
             // flipped, from its start again when a hold starts (run counts the starts), the key
-            // to its colours under it.
+            // to a skeleton clip's colours under it.
             component DemoClip: ColumnLayout {
                 id: demoClip
                 property string path
                 property string mode
                 property int run
                 property bool paused
+                property bool key: true
                 spacing: Kirigami.Units.smallSpacing
                 visible: path !== ""
                 onRunChanged: clip.currentFrame = 0
@@ -661,6 +677,7 @@ Kirigami.ApplicationWindow {
                 }
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter
+                    visible: demoClip.key
                     spacing: Kirigami.Units.largeSpacing
                     Repeater {
                         model: [{ color: "#d5d1fe", text: "Light: palm" }, { color: "#6a62d8", text: "Dark: back of hand" }]
@@ -836,6 +853,7 @@ Kirigami.ApplicationWindow {
                             mode: sessionView.st.demo_mode || ""
                             run: sessionView.st.demo_run || 0
                             paused: sessionView.state === "paused"
+                            key: !!sessionView.st.demo_key
                         }
                         PosePicture {
                             Layout.alignment: Qt.AlignHCenter

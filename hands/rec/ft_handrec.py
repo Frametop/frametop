@@ -7,8 +7,9 @@ A Kirigami (QML) app with a Python backend. It runs in the dev container:
   - Before you start: the checklist (objects, controller straps, lighting, sleeves, privacy,
     free space), the camera check (hands/camcheck.py: Start stays off while the upper cameras
     are off, with a Restart SteamVR button; --ignore-cameras overrides it), a full session or a
-    quick round (suggested once a full one is done) and what will happen. Start hands it to
-    the session runner (session.py).
+    quick round (suggested once a full one is done), the demo clips to follow when the script
+    has them (recorded hands or skeleton hands, kept in settings.json) and what will happen.
+    Start hands it to the session runner (session.py).
   - Session: the runner's live status with the step's pose picture and where-to diagram, Next,
     Pause/Resume, Redo, Skip section and Stop (Space: Next, P, R, S and Esc while the window has
     focus; the button on the headset's right side is Next, pause and resume). The prompts appear
@@ -223,6 +224,7 @@ class Backend(QObject):
     _uploadFinished = Signal(dict)
     cameraChanged = Signal()
     _cameraArrived = Signal(dict)
+    guidanceChanged = Signal()
 
     def __init__(self, store, session_options=None, hub_dry_run=False, ignore_cameras=False):
         super().__init__()
@@ -350,6 +352,41 @@ class Backend(QObject):
         takes.write_json(self.store.profile_path, profile)
         self.profileChanged.emit()
         self.message.emit("Thank you. Your contributor id: " + profile["contributor"], False)
+
+    # --- the demo clips to follow (the v2 script): kept in BASE/settings.json
+    @Property(bool, constant=True)
+    def scriptHasDemos(self):
+        mod = self._runner()
+        try:
+            script = mod.load_script(SCRIPT_PATH) if mod else {}
+        except Exception:
+            return False
+        return any(p.get("demo") for sec in script.get("sections", []) for p in sec.get("prompts", []))
+
+    @Property("QVariantList", constant=True)
+    def guidanceChoices(self):
+        mod = self._runner()
+        return [{"value": k, "text": v} for k, v in (mod.GUIDANCE if mod else ())]
+
+    @Property(str, notify=guidanceChanged)
+    def guidance(self):
+        mod = self._runner()
+        if not mod:
+            return ""
+        chosen = takes.read_json(os.path.join(self.store.base, "settings.json")).get("guidance")
+        return chosen if chosen in dict(mod.GUIDANCE) else mod.default_guidance(
+            self._session_options.get("recorded_demos_dir"))
+
+    @Slot(str)
+    def setGuidance(self, value):
+        mod = self._runner()
+        if not mod or value not in dict(mod.GUIDANCE) or value == self.guidance:
+            return
+        path = os.path.join(self.store.base, "settings.json")
+        settings = takes.read_json(path)
+        settings["guidance"] = value
+        takes.write_json(path, settings)
+        self.guidanceChanged.emit()
 
     # --- the checklist
     @Property("QVariantList", constant=True)
@@ -580,7 +617,7 @@ class Backend(QObject):
         try:
             self._session = mod.Session(self.store.base, self.store.profile(), checklist, lighting, SCRIPT_PATH,
                                         on_status=lambda s: self._statusArrived.emit(dict(s)), auto=auto,
-                                        quick=quick, **self._session_options)
+                                        quick=quick, guidance=self.guidance, **self._session_options)
         except Exception as e:
             self.message.emit(f"Couldn't set up the session: {e}", True)
             return False
@@ -1178,7 +1215,8 @@ def main():
     ap.add_argument("--poses", help="test: the pose pictures' folder (default hands/rec/poses)")
     ap.add_argument("--script", help="the recording script (default hands/rec/script.json; script-v2.json: "
                                      "the v2 script with demo clips)")
-    ap.add_argument("--demos", help="the demo clips' folder, <id>.gif (default hands/rec/demos)")
+    ap.add_argument("--demos", help="the skeleton demo clips' folder, <id>.gif (default hands/rec/demos)")
+    ap.add_argument("--recorded-demos", help="the recorded demo clips' folder (default hands/rec/demos-recorded)")
     ap.add_argument("--no-headset-button", action="store_true",
                     help="sessions don't read the headset's button (Next, pause, resume)")
     ap.add_argument("--hub-dry-run", action="store_true",
@@ -1204,6 +1242,8 @@ def main():
         options["poses_dir"] = a.poses
     if a.demos:
         options["demos_dir"] = a.demos
+    if a.recorded_demos:
+        options["recorded_demos_dir"] = a.recorded_demos
     if a.script:
         global SCRIPT_PATH
         SCRIPT_PATH = os.path.abspath(a.script if os.path.exists(a.script) else os.path.join(HERE, a.script))

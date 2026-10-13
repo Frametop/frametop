@@ -58,6 +58,10 @@ PANEL_BIN = os.path.join(HERE, "build", "ft-handpanel")
 SCRIPT_PATH = os.path.join(HERE, "script.json")
 POSES_DIR = os.path.join(HERE, "poses")   # the pose pictures: poses.json and its PNGs
 DEMOS_DIR = os.path.join(HERE, "demos")   # the demo clips: <id>.gif (DESIGN.md "Demo clips")
+RECORDED_DEMOS_DIR = os.path.join(HERE, "demos-recorded")   # the same parts from real camera frames
+# The demo clips a contributor follows: recorded (a real person's hands, from a session's side
+# cameras: demo/camgifs.py) or skeleton (the drawn hand, its palm light and its back dark).
+GUIDANCE = (("recorded", "Recorded hands"), ("skeleton", "Skeleton hands"))
 BASE_DIR = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 PANEL_SOCKET = "ft_handpanel"
 CAMD_UNIT = "frametop-handrec-camd.service"
@@ -1035,6 +1039,31 @@ def demo_view(demos_dir, p):
     return path, "mirror" if p.get("demo_mirror") else ""
 
 
+def has_clips(demos_dir):
+    try:
+        return any(n.endswith(".gif") for n in os.listdir(demos_dir))
+    except OSError:
+        return False
+
+
+def default_guidance(recorded_dir=None):
+    """Recorded clips when there are any, else the skeleton ones."""
+    return "recorded" if has_clips(recorded_dir or RECORDED_DEMOS_DIR) else "skeleton"
+
+
+def guided_demo_view(guidance, skeleton_dir, recorded_dir, p):
+    """demo_view in the guidance's folder, else the other one (a part with no clip of that kind):
+    (path, mode, key), key true for a skeleton clip (the panel and window show its colours' key)."""
+    dirs = [(recorded_dir, False), (skeleton_dir, True)]
+    if guidance != "recorded":
+        dirs.reverse()
+    for d, key in dirs:
+        path, mode = demo_view(d, p)
+        if path:
+            return path, mode, key
+    return "", "", False
+
+
 # ------------------------------------------------------------------------------------------
 # The script
 
@@ -1402,7 +1431,8 @@ class Session:
     def __init__(self, base_dir, profile, checklist, lighting_choice, script_path, *, ring=None,
                  start_processes=True, dry_run=False, speed=1.0, on_status=None, hands_dir=None, panel_bin=None,
                  auto=False, next_after=None, poses_dir=None, button=True, button_device=None,
-                 check_cameras=True, hands_reader=None, quick=False, seed=None, demos_dir=None):
+                 check_cameras=True, hands_reader=None, quick=False, seed=None, demos_dir=None,
+                 recorded_demos_dir=None, guidance=None):
         self.base_dir = os.path.abspath(os.path.expanduser(base_dir or BASE_DIR))
         self.profile = dict(profile or {})
         self.checklist = dict(checklist or {})
@@ -1436,6 +1466,8 @@ class Session:
         self.plan, self.skipped = build_plan(self.script, self.checklist, seed=seed, quick=self.quick)
         self._poses = load_poses(poses_dir or POSES_DIR)
         self._demos_dir = demos_dir or DEMOS_DIR
+        self._recorded_demos_dir = recorded_demos_dir or RECORDED_DEMOS_DIR
+        self.guidance = guidance if guidance in dict(GUIDANCE) else default_guidance(self._recorded_demos_dir)
         self.session_dir = ""
         self._thread = None
         self._lock = threading.Lock()
@@ -1450,7 +1482,7 @@ class Session:
                         "prompt": "", "seconds_left": 0.0, "note": "", "hands": {"left": None, "right": None},
                         "take": None, "error": "", "waiting": False, "countdown": 0, "big": "", "can_redo": False,
                         "image": "", "image_mode": "", "caption": "", "position": "", "distance": "",
-                        "demo": "", "demo_mode": "", "demo_run": 0, "ready_text": READY_TEXT, "button": False, "mouse": True,
+                        "demo": "", "demo_mode": "", "demo_key": False, "demo_run": 0, "ready_text": READY_TEXT, "button": False, "mouse": True,
                         "camera": None, "nohands": False, "strip": [], "cue": -1, "quick": self.quick}
         self._last_emit = 0.0
         self._log_file = None
@@ -1683,7 +1715,7 @@ class Session:
             "script": {"version": self.script.get("version"), "name": self.script.get("name", ""),
                        "sections": [s["id"] for s in self.plan],
                        "skipped": self.skipped},
-            "mode": "auto" if self.auto else "step", "quick": self.quick,
+            "mode": "auto" if self.auto else "step", "quick": self.quick, "guidance": self.guidance,
             "shuffle": {"seed": self.seed, "sweeps": plan_record(self.plan)},
             "takes": [], "status": "recording", "sides": {"swapped": None}}
         self._read_sides(force=True)
@@ -1920,7 +1952,7 @@ class Session:
                    prompt=error or (self._stop_note if state == "stopped" else "") or screen.get("text", "").replace("|", "\n"),
                    hands={"left": None, "right": None}, nohands=False,
                    waiting=False, countdown=0, big="", can_redo=False, image="", image_mode="", caption="",
-                   position="", distance="", strip=[], cue=-1, demo="", demo_mode="")
+                   position="", distance="", strip=[], cue=-1, demo="", demo_mode="", demo_key=False)
 
     # --- the timing loop
     def _controls(self):
@@ -2128,10 +2160,11 @@ class Session:
         """The prompt's picture or demo clip and where-to diagram, on the panel and in the status
         (sent with the next _emit); none without a prompt. A demo clip takes the picture's place."""
         p = p or {}
-        demo, demo_mode = demo_view(self._demos_dir, p)
+        demo, demo_mode, demo_key = guided_demo_view(self.guidance, self._demos_dir, self._recorded_demos_dir, p)
         path, mode, caption = ("", "", "") if p.get("cues") or demo else pose_view(self._poses, p)
-        self._panel.set("demo", "demo %s%s" % (demo, " " + demo_mode if demo_mode else "") if demo else "demo off")
-        self._status.update(demo=demo, demo_mode=demo_mode)
+        self._panel.set("demo", "demo %s%s%s" % (demo, " " + demo_mode if demo_mode else "", "" if demo_key else " nokey")
+                        if demo else "demo off")
+        self._status.update(demo=demo, demo_mode=demo_mode, demo_key=demo_key)
         self._strip(p)
         pos, dist = p.get("position") or "", p.get("distance") or ""
         self._panel.set("image", "image %s%s" % (path, " " + mode if mode else "") if path else "image off")
@@ -2801,7 +2834,10 @@ def main():
     ap.add_argument("--next-after", type=float, metavar="S",
                     help="test: press Next by itself after S seconds of waiting (real time)")
     ap.add_argument("--poses", help="the pose pictures' folder, with poses.json (default hands/rec/poses)")
-    ap.add_argument("--demos", help="the demo clips' folder, <id>.gif (default hands/rec/demos)")
+    ap.add_argument("--demos", help="the skeleton demo clips' folder, <id>.gif (default hands/rec/demos)")
+    ap.add_argument("--recorded-demos", help="the recorded demo clips' folder (default hands/rec/demos-recorded)")
+    ap.add_argument("--guidance", choices=[k for k, _ in GUIDANCE],
+                    help="the demo clips to follow (default recorded when there are any, else skeleton)")
     ap.add_argument("--no-headset-button", action="store_true",
                     help="don't read the headset's button (gpio-keys KEY_SELECT: a press is Next, pause or resume; "
                          "two are redo; a hold is stop)")
@@ -2862,7 +2898,7 @@ def main():
                 dry_run=a.dry_run, speed=a.speed, on_status=on_status, hands_dir=a.hands_dir, panel_bin=a.panel,
                 auto=a.auto, next_after=a.next_after, poses_dir=a.poses, button=not a.no_headset_button,
                 button_device=a.button_device, check_cameras=not a.ignore_cameras, quick=a.quick, seed=a.seed,
-                demos_dir=a.demos)
+                demos_dir=a.demos, recorded_demos_dir=a.recorded_demos, guidance=a.guidance)
     est = plan_seconds(s.script, s.plan, auto=a.auto)
     worst = plan_seconds(s.script, s.plan, worst=True, auto=a.auto)
     print("%d sections%s, %s mode: about %.1f min%s (at most %.1f)%s" % (

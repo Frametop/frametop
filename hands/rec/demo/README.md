@@ -27,3 +27,13 @@ motions, as the headset shows them (Room View passthrough). These tools make the
 The display shows less than the cameras see: look toward your hands in each take. VR Recorder's
 censor blocks are applied to the takes too; the GIFs are public, so leave them on and face away
 from what they cover.
+
+## Recorded clips from a recorder session
+
+The window's "Recorded hands" guidance plays clips of real hands from a Hand Recorder session that
+ran the v2 script, instead of the drawn ones:
+`frame-job --local -- PYTHON hands/rec/demo/camgifs.py SESSION_DIR` (PYTHON with NumPy, e.g.
+frame-hands' `.venv/bin/python`) writes `hands/rec/demos-recorded/<id>.gif`. Each part uses its
+right-hand step (or its both-hands step), redrawn from the two side cameras as a plain picture.
+`--sheets` writes contact sheets first; `--view ID=PITCH,HFOV` aims a part's view, kept in
+`views.json` next to the clips. They show the room: check them before they go anywhere public.

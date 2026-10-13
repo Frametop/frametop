@@ -102,6 +102,31 @@ class SessionTest(SessionBase):
         self.assertIn("panel: where left near", self.panel)
         self.assertIn("panel: rec on", self.panel)
 
+    def test_guidance(self):
+        """The chosen guidance's clip on the panel (a recorded one without the colours' key), and
+        the choice in session.json."""
+        script = json.loads(json.dumps(SCRIPT))
+        script["sections"][0]["prompts"][0].update(demo="2a", demo_mirror=True)
+        with open(self.script, "w") as f:
+            json.dump(script, f)
+        skel, rec = os.path.join(self.tmp, "skel"), os.path.join(self.tmp, "rec")
+        for d in (skel, rec):
+            os.makedirs(d)
+            with open(os.path.join(d, "2a.gif"), "wb") as f:
+                f.write(tiny_gif([[0, 1, 2, 3]]))
+        for guidance, want in (("recorded", "panel: demo %s/2a.gif mirror nokey" % rec),
+                               ("skeleton", "panel: demo %s/2a.gif mirror" % skel)):
+            self.panel.clear()
+            s = self.session(next_after=0.0, demos_dir=skel, recorded_demos_dir=rec, guidance=guidance)
+            s.start()
+            s.join(20)
+            self.assertEqual(s.state, "done")
+            self.assertIn(want, self.panel)
+            with open(os.path.join(s.session_dir, "session.json")) as f:
+                self.assertEqual(json.load(f)["guidance"], guidance)
+        # no choice: recorded, since there are recorded clips
+        self.assertEqual(self.session(demos_dir=skel, recorded_demos_dir=rec).guidance, "recorded")
+
     def test_redo(self):
         s = self.session()
         s.start()
@@ -444,6 +469,34 @@ class ScriptV2Test(unittest.TestCase):
         self.assertEqual(session.demo_view(tmp, {"demo": "3a"}), ("", ""))
         self.assertEqual(session.demo_view(tmp, {}), ("", ""))
 
+    def test_guidance(self):
+        """Recorded or skeleton clips, each falling back to the other kind for a part it lacks; only
+        a skeleton clip gets the colours' key."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        skel, rec = os.path.join(tmp, "skel"), os.path.join(tmp, "rec")
+        os.makedirs(skel)
+        os.makedirs(rec)
+        self.assertEqual(session.default_guidance(rec), "skeleton")   # no recorded clips yet
+        self.assertEqual(session.default_guidance(os.path.join(tmp, "none")), "skeleton")
+        for d, ids in ((skel, ("2a", "3a")), (rec, ("2a",))):
+            for i in ids:
+                with open(os.path.join(d, i + ".gif"), "wb") as f:
+                    f.write(tiny_gif([[0, 1, 2, 3]]))
+        self.assertEqual(session.default_guidance(rec), "recorded")
+        left = {"demo": "2a", "demo_mirror": True}
+        self.assertEqual(session.guided_demo_view("recorded", skel, rec, left), (os.path.join(rec, "2a.gif"), "mirror", False))
+        self.assertEqual(session.guided_demo_view("skeleton", skel, rec, left), (os.path.join(skel, "2a.gif"), "mirror", True))
+        self.assertEqual(session.guided_demo_view("recorded", skel, rec, {"demo": "3a"}), (os.path.join(skel, "3a.gif"), "", True))
+        self.assertEqual(session.guided_demo_view("recorded", skel, rec, {"demo": "4a"}), ("", "", False))
+        self.assertEqual(session.guided_demo_view("skeleton", skel, rec, {}), ("", "", False))
+
+    def test_recorded_clips(self):
+        if not session.has_clips(session.RECORDED_DEMOS_DIR):
+            self.skipTest("no recorded demo clips in %s" % session.RECORDED_DEMOS_DIR)
+        for pid in self.parts:
+            self.assertTrue(os.path.isfile(os.path.join(session.RECORDED_DEMOS_DIR, pid + ".gif")), pid)
+
 
 class DemoPanelTest(unittest.TestCase):
     """The panel's demo command on ft-handpanel --no-vr (skipped if it isn't built)."""
@@ -479,6 +532,10 @@ class DemoPanelTest(unittest.TestCase):
             replies.append(panel.cmd("demo restart", reply=True))
             replies += [panel.cmd("demo", reply=True), panel.cmd("demo %s/missing.gif" % tmp, reply=True),
                         panel.cmd("demo %s/bad.gif" % tmp, reply=True), panel.cmd("demo off", reply=True)]
+            # a recorded clip: no key; the same clip again with the key back
+            replies += [panel.cmd("demo %s mirror nokey" % clip, reply=True), panel.cmd("show", reply=True),
+                        panel.cmd("demo %s nokey" % clip, reply=True), panel.cmd("demo %s" % clip, reply=True),
+                        panel.cmd("demo off", reply=True)]
             panel.close()
         finally:
             proc.terminate()
@@ -487,8 +544,9 @@ class DemoPanelTest(unittest.TestCase):
         self.assertTrue(replies[4].startswith("error usage: demo"))
         self.assertTrue(replies[5].startswith("error can't read"))
         self.assertTrue(replies[6].startswith("error can't read"))
-        self.assertEqual(replies[7], "ok")
+        self.assertEqual(replies[7:], ["ok"] * 6)
         demos = [l for l in out.splitlines() if l.startswith("demo:")]
+        self.assertTrue(any(l.startswith("demo: %s 2x2 frame" % clip) and " mirror nokey, drawn" in l for l in demos), demos)
         self.assertIn("demo: %s 2x2 frame 0 loop 0 mirror, drawn" % clip, demos[0])
         self.assertGreater(int(demos[1].split(" loop ")[1].split()[0]), 0)   # past the last frame, from the start again
         self.assertIn("demo: %s 2x2 frame 0 loop 0 mirror" % clip, demos[2])   # restart

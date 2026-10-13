@@ -112,6 +112,8 @@ typedef struct {
     int             slot_of[MAX_INDEX]; /* buffer holding each V4L2 index     */
     int             relearns;
     bool            shared;             /* its buffers sit among another camera's  */
+    bool            exact;              /* its own run, bound to indices by VIDIOC_QUERYBUF */
+    bool            each;               /* mapped one by one (resolve_each)        */
 
     double          recent[8];          /* means of the last frames, for dark detection */
     int             nrecent;
@@ -282,6 +284,7 @@ static void setup_camera(cam_t *c, xr_camera_t *cam, int pidfd)
     for (int g = 0; g < xr.ngroups; g++)
         if (xr.groups[g].cam == cam && group_fits(&xr.groups[g], cam, c->need))
             own = true, exact = exact || xr.groups[g].exact;
+    c->exact = own && exact;
 
     char model[16];
     model_of(cam->sensor, model, sizeof(model));
@@ -398,6 +401,15 @@ static bool resolve_block(cam_t *c)
  * the same every time, so their dequeues change no buffer and get no votes. Such
  * an index is left unmapped (slot -1): on_frame counts its frames as dark without
  * reading them. Most of a camera's indices silent means it isn't streaming yet.
+ *
+ * Which indices are the dark ones doesn't stay put, though: measured 2026-10-13 with
+ * the headset worn, the bright half moved to other indices every few seconds. With a
+ * fixed split, bright frames landing on a silent index were dropped unread, and
+ * find_fresh then published them at the next dequeue under that frame's timestamp,
+ * 8 ms late. The side cameras lost about 4 of 10 sets with the upper ones, tracking
+ * ran at half rate with 3x the stereo error. So a camera whose buffers are bound by
+ * VIDIOC_QUERYBUF maps its silent indices to their own buffers too, and on_frame
+ * tells bright from dark by each frame's pixels, as for the upper cameras.
  */
 static bool resolve_each(cam_t *c)
 {
@@ -432,11 +444,18 @@ static bool resolve_each(cam_t *c)
     if (silent * 2 > depth)
         return false;
 
+    for (int i = 0; i < depth && c->exact; i++)    /* see above: silent indices get their own buffers */
+        for (int s = 0; s < c->nslots && c->slot_of[i] < 0; s++)
+            if (c->slot_pos[s] == i && !taken[s])
+                taken[s] = true, c->slot_of[i] = s, silent--;
+
     printf("%s: queue depth %d, buffers mapped one by one:", c->slug, depth);
     for (int i = 0; i < depth; i++)
         c->slot_of[i] < 0 ? printf(" -") : printf(" %d", c->slot_of[i]);
     if (silent)
         printf(" (- : %d indices whose frames are all zeros, skipped as dark)", silent);
+    else if (c->exact)
+        printf(" (bright and dark told apart frame by frame)");
     printf("\n");
     return true;
 }
@@ -457,7 +476,8 @@ static void resolve_map(cam_t *c)
 
     /* a shuffled shared run can't be split by change votes alone */
     c->shared = shared;
-    c->mapped = resolve_block(c) || (!shared && resolve_each(c));
+    c->each   = false;
+    c->mapped = resolve_block(c) || (!shared && (c->each = resolve_each(c)));
 
     if (c->mapped) {
         fflush(stdout);
@@ -735,6 +755,14 @@ static void on_frame(cam_t *c, int64_t index, uint32_t seq, uint64_t ts, uint64_
 
     int nchanged;
     int found = -1;
+
+    if (c->each && c->exact && !fresh(cur, c->samp[slot], &nchanged)) {
+        /* the same all-zero dark frame again (see resolve_each); never another buffer's frame */
+        buf_sync(c->fd[slot], DMA_BUF_SYNC_END);
+        c->dark++;
+        c->rc->dropped++;
+        return;
+    }
 
     if (!fresh(cur, c->samp[slot], &nchanged)) {
         buf_sync(c->fd[slot], DMA_BUF_SYNC_END);

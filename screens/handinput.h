@@ -441,9 +441,12 @@ struct Params {
     // under sweepCalm m/s), a looser shape and a shorter stroke count: open sweepSoloOpen, edge sweepSoloEdge,
     // lead sweepSoloLead, sweepSoloDistance, quick at sweepSoloPeak somewhere. Either way a stroke rides out
     // sweepBadFrames frames off its shape (one view's jitter ended strokes).
-    double sweepCalm = 0.3, sweepSoloOpen = 1.1, sweepSoloEdge = 0.9, sweepSoloLead = 0.12, sweepSoloDistance = 0.18;
-    double sweepSoloPeak = 0.5;
-    int sweepBadFrames = 4;
+    // (A little harder again 2026-10-13, "just slightly more difficult": one hand edge 0.88, lead 0.16, 20 cm,
+    // quick at 0.75 m/s (every practice stroke in the flags peaked at 0.8 or more; a false one at 0.6), 3 frames
+    // off shape. The flags replayed: 47 practice strokes still count, other use 3 strokes, from 4.)
+    double sweepCalm = 0.3, sweepSoloOpen = 1.1, sweepSoloEdge = 0.88, sweepSoloLead = 0.16, sweepSoloDistance = 0.2;
+    double sweepSoloPeak = 0.75;
+    int sweepBadFrames = 3;
     bool flick = true;
     double flickSpeed = 1.2, flickTravel = 0.12, flickMs = 200, flickFitMs = 100, flickNear = 0.12, flickBack = 0.04;
     double flickAngle = 40, flickOpen = 1.5, flickPokeSpeed = 0.8, flickRefractoryMs = 1000, flickStartSpeed = 0.6;

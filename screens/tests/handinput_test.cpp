@@ -4011,9 +4011,10 @@ void TestSweep() {
     auto shortOne = run(90, {0.1, -0.05}, 0.3);
     show("edge-on, 15 cm", shortOne);
     CHECK(shortOne.empty());
-    // one hand on its own (the other unseen): 20 cm counts, and a hand turned a little toward flat
-    auto solo20 = run(90, {0.1, -0.10}, 0.3);
-    show("edge-on, 20 cm, one hand", solo20);
+    // one hand on its own (the other unseen): 22 cm counts (20 asked: the frames land just inside the ends), and
+    // a hand turned a little toward flat
+    auto solo20 = run(90, {0.11, -0.11}, 0.3);
+    show("edge-on, 22 cm, one hand", solo20);
     CHECK(solo20.size() == 1 && solo20[0] == -1);
     auto tilted53 = run(143, {0.25, -0.15}, 0.4);
     show("tilted 53 deg, 40 cm, one hand", tilted53);

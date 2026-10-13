@@ -2,7 +2,7 @@
 """A look at spotwatch's panel without a headset: ft-spotpanel --render draws a made-up search
 (or the state given as a file) into a PNG, over a dark checkerboard so the glass shows.
 
-  spotwatch/test/render.py OUT.png [STATE_FILE]
+  spotwatch/tools/render.py OUT.png [STATE_FILE]
 """
 import os
 import subprocess

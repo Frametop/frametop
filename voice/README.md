@@ -107,7 +107,7 @@ ft-voiced doesn't wait for the program. A malformed entry is skipped with a warn
 ```json
   "advanced": {
     "dictation": {"min_seconds": 1.5, "pause_seconds": 1.0},
-    "wake": {"threshold": 0.3, "command_hook": "/home/steamos/bin/assistant"},
+    "wake": {"threshold": 0.3, "command_hook": "hooks/on-command"},
     "audio": {"source": "alsa_input.some_mic"}
   }
 ```

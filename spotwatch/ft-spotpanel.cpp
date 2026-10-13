@@ -34,7 +34,7 @@
 // Options: --watch-stdin (quit when stdin closes: ft-spotwatch runs it), --socket NAME,
 // --notify NAME, --distance METRES, --width METRES; --render FILE draws the state on stdin
 // (the lines after "state") into FILE as raw RGBA, 1120x720, and quits: no SteamVR (a look at
-// the picture: spotwatch/test/render.py). Runs in the container (screens/build.sh
+// the picture: spotwatch/tools/render.py). Runs in the container (screens/build.sh
 // builds it into screens/build).
 #include <openvr.h>
 

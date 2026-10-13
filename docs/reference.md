@@ -231,7 +231,7 @@ Meta+Space opens spotwatch, a search pill straight ahead of where your head poin
 
 ```
 spotwatch/test/spotwatch-test.py   # the ranking and the search against a fake ft-screens and ft-floatd (offline)
-spotwatch/test/render.py OUT.png   # the panel's picture, without a headset
+spotwatch/tools/render.py OUT.png   # the panel's picture, without a headset
 ```
 
 ## Displays off and sleep

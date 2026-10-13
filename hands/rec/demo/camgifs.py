@@ -15,7 +15,7 @@ picture from between the eyes: a virtual camera PITCH degrees below straight ahe
 filled from both side cameras (the session's calibration.json) for points 45 cm away, each
 pixel from the camera that sees it nearer its centre. Clips run at the recording's 10 sets/s,
 640x360 like the skeleton clips, grey, smoothed (steady), gifsicle's lossy pass when it's there
-(gifs.py): about 1.4 MB for 10 s.
+(HANDDEMO_GIFSICLE, or gifsicle on the PATH): about 1.4 MB for 10 s.
 --sheets writes a contact sheet per clip instead (<id>.png, a frame every 2 s), to pick
 --view per part before making the GIFs; views.json in the out folder keeps them
 ({"12": [-55, 100]}).
@@ -27,6 +27,7 @@ looks).
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,7 +38,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REC = os.path.dirname(HERE)
 sys.path.insert(0, REC)
 import takes  # noqa: E402  (hands/rec/takes.py)
-from gifs import GIFSICLE  # noqa: E402  (hands/rec/demo/gifs.py)
+
+GIFSICLE = os.environ.get("HANDDEMO_GIFSICLE") or shutil.which("gifsicle") or os.path.expanduser(
+    "~/.cache/gifwork/gifsicle-src/src/gifsicle")
 
 SCRIPT = os.path.join(REC, "script-v2.json")
 OUT = os.path.join(REC, "demos-recorded")

@@ -80,8 +80,8 @@
 // every OpenVR call.
 //
 // Options: --watch-stdin (quit when stdin closes: the session runs it), --socket NAME,
-// --distance METRES, --up DEG and --width DEG (UP_DEG and WIDTH_DEG: the demo recorder,
-// hands/rec/demo, raises it out of the recorded headset view), --no-vr. --no-vr is for testing without a headset: no SteamVR at all; each
+// --distance METRES, --up DEG and --width DEG (UP_DEG and WIDTH_DEG: raise it out of a
+// recorded headset view), --no-vr. --no-vr is for testing without a headset: no SteamVR at all; each
 // picture's text goes to stdout instead (and with --dump DIR, the pictures to DIR/panel.pam
 // and DIR/target.pam), "poses start" writes nothing, "devices" and "head" reply with an error,
 // and "target" places the point as if the headset were at the room's origin.

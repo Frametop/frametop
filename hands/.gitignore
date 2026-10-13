@@ -7,3 +7,5 @@ dumps/
 # tap replays' output and their per-host drivers (frame-hands notes/taps.md)
 taps-out/
 tools/taps-*.sh
+# recorded demo clips (hands/rec/demo/camgifs.py) show the room around the recorder: never shipped
+rec/demos-recorded/

@@ -66,7 +66,7 @@ Apps' icons come from the desktop's icon theme (`kdeglobals`, then breeze and hi
 
 ```
 spotwatch/test/spotwatch-test.py    # the ranking, then ft-spotwatch against a fake ft-screens and ft-floatd (offline)
-spotwatch/test/render.py OUT.png    # what the panel draws, without a headset (ft-spotpanel --render)
+spotwatch/tools/render.py OUT.png    # what the panel draws, without a headset (ft-spotpanel --render)
 ```
 
 ## Risks

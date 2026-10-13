@@ -35,8 +35,8 @@ Defaults: FT_SCREEN_COUNT (from the session) or the layout's count, FLOAT_SLOTS 
 FLOAT_MARGIN from ~/.config/frametop.conf (8 and 300), @ft_screens, @frametop_float.
 
 Launching floating: "launch" starts a desktop file's app (Gio), "run" a command. The next
-normal window from that process (or a child), or with that desktop file name, within
-LAUNCH_SECONDS floats: where that app last floated, or in front of you. Single-instance and
+normal window from that process (or a child), or of that desktop file (desktop_name: by its app
+id, else its class, so Flatpak and X11 apps match too), within LAUNCH_SECONDS floats: where that app last floated, or in front of you. Single-instance and
 D-Bus-activated apps open their window from a process that was already running, hence the
 name. Each app's last floating place (its pose relative to the primary screen, so it moves
 with the screens' layout), size in pixels, and scale are kept in PLACES_PATH, by desktop
@@ -243,22 +243,56 @@ def cmdline(pid):
         return []
 
 
+_names = {}  # (app, cls) -> (desktop file name, when): desktop_name's answers for a minute
+
+
 def desktop_name(app, cls):
-    """The desktop file name for a window's app id and class. A Flatpak app's window can give an
-    id with no desktop file: RustDesk's (an X11 window) says com.carriez.flutter_hbb, and its
-    desktop file is com.rustdesk.RustDesk. That file's StartupWMClass names the window's class
-    then. The app id itself when nothing matches."""
+    now = time.monotonic()
+    hit = _names.get((app, cls))
+    if hit and now - hit[1] < 60:
+        return hit[0]
+    if len(_names) > 512:
+        _names.clear()
+    name = _desktop_name(app, cls)
+    _names[(app, cls)] = (name, now)
+    return name
+
+
+def _desktop_name(app, cls):
+    """The desktop file name (without .desktop) for a window's app id and class, or "" when no
+    desktop file is its. Most windows give their desktop file name as the app id. The others:
+    - A Flatpak app's window can give an id with no desktop file: RustDesk's (an X11 window)
+      says com.carriez.flutter_hbb, and its desktop file is com.rustdesk.RustDesk.
+    - An X11 window can give no app id at all, only its class: Brave's Flatpak says
+      "Brave-browser" (2026-10-13), and its desktop file is com.brave.Browser.
+    Then, by the class (or the id), in this order: a desktop file's StartupWMClass; a desktop
+    file whose name, or its last dotted part, is that name; the program a desktop file runs
+    (Flatpak's --command=, else the Exec's own), by its name."""
     try:
-        if not app or Gio.DesktopAppInfo.new(app + ".desktop"):
+        if app and Gio.DesktopAppInfo.new(app + ".desktop"):
             return app
     except TypeError:  # PyGObject raises for the NULL a missing desktop file returns
         pass
     names = {n.lower() for n in (app, cls) if n}
-    for info in Gio.AppInfo.get_all():
-        wm = info.get_startup_wm_class() if isinstance(info, Gio.DesktopAppInfo) else None
+    if not names:
+        return ""
+    infos = [i for i in Gio.AppInfo.get_all() if isinstance(i, Gio.DesktopAppInfo) and i.get_id()]
+    for info in infos:
+        wm = info.get_startup_wm_class()
         if wm and wm.lower() in names:
             return info.get_id().removesuffix(".desktop")
-    return app
+    for info in infos:
+        did = info.get_id().removesuffix(".desktop").lower()
+        if did in names or did.rsplit(".", 1)[-1] in names:
+            return info.get_id().removesuffix(".desktop")
+    for info in infos:
+        line = info.get_commandline() or ""
+        m = re.search(r"--command=(\S+)", line)
+        prog = os.path.basename(m.group(1) if m else (info.get_executable() or ""))
+        if prog and prog.lower() not in ("flatpak", "env", "sh", "bash", "python3", "snap") and \
+                any(n == prog.lower() or n.startswith(prog.lower() + "-") for n in names):
+            return info.get_id().removesuffix(".desktop")
+    return ""
 
 
 class Launch:
@@ -487,7 +521,7 @@ class Daemon:
                 return
             # Floating when ft-floatd (re)started: take it over where it is.
             f = Float(wid, slot, None)
-            f.app = ev.get("app", "")
+            f.app = desktop_name(ev.get("app", ""), ev.get("cls", "")) or ev.get("app", "")
             slot.window = f
             self.floats[wid] = f
             f.scale = slot.kscale = output_scales().get(slot.output, 1.0)
@@ -575,7 +609,7 @@ class Daemon:
                         "to float another.")
             return None
         f = Float(wid, slot, {"output": ev["output"], "frame": ev["frame"], "onAllDesktops": ev.get("onAllDesktops")})
-        f.app = ev.get("app", "")
+        f.app = desktop_name(ev.get("app", ""), ev.get("cls", "")) or ev.get("app", "")
         slot.window = f
         self.floats[wid] = f
         scales = output_scales()
@@ -826,15 +860,25 @@ class Daemon:
         if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
             return None
         chain = pid_chain(int(ev.get("pid") or 0))
-        app = ev.get("app", "")
-        # (An X11 window in a Flatpak gives its pid in the sandbox: only its app id can match.)
-        apps = {app, desktop_name(app, ev.get("cls", ""))} if app and any(la.app for la in self.launches) else {app}
+        # A window in a sandbox (Flatpak, Snap) gives its pid in there, and a single-instance app
+        # opens it from a process that was already running: then only its desktop file can match.
+        name = desktop_name(ev.get("app", ""), ev.get("cls", "")) if any(la.app for la in self.launches) else ""
         for la in self.launches:
-            if any(p in chain for p in la.pids) or (la.app and app and la.app in apps):
-                if not la.entries or len(la.entries) <= 1:
-                    self.launches.remove(la)
-                return la
+            if any(p in chain for p in la.pids) or (la.app and name == la.app):
+                return self.took(la)
+        # Last: a window no desktop file claims, while exactly one app launch waits and none of
+        # its processes made it (an app whose window names itself after nothing we can find).
+        waiting = [la for la in self.launches if la.app]
+        if not name and len(waiting) == 1 and not any(p in chain for la in self.launches for p in la.pids):
+            log(f"{ev.get('id', '')[:9]} ({ev.get('cls', '') or '?'}): no desktop file claims it; "
+                f"taken as {waiting[0].app}'s, the one launch waiting")
+            return self.took(waiting[0])
         return None
+
+    def took(self, la):
+        if not la.entries or len(la.entries) <= 1:
+            self.launches.remove(la)
+        return la
 
     def concealed(self):
         """The screens (1-based) hidden on their own (ft-layout hide N)."""
@@ -853,7 +897,7 @@ class Daemon:
     def float_launched(self, ev, launch):
         """Float a launched app's window (or one that opened on a hidden screen) where that app
         last floated (its size too), or in front of you, at the primary screen's density."""
-        app = ev.get("app") or (launch.app if launch else "")
+        app = (launch.app if launch and launch.app else "") or desktop_name(ev.get("app", ""), ev.get("cls", "")) or ev.get("app", "")
         known = self.places.get(app) if app else None
         ref = self.reference()
         place = to_world(ref, known["rel"]) if known and ref and len(known.get("rel", [])) == 12 else self.in_front()
@@ -897,7 +941,7 @@ class Daemon:
             f = self.floats.get(wid)
             m = re.match(r"WL-(\d+)$", ev.get("output", ""))
             panel = f.slot.index if f else (int(m.group(1)) + 1 if m and int(m.group(1)) < self.screens_n else None)
-            out.append({"id": wid, "app": desktop_name(ev.get("app", ""), ev.get("cls", "")) if ev.get("app") else "",
+            out.append({"id": wid, "app": desktop_name(ev.get("app", ""), ev.get("cls", "")),
                         "class": ev.get("cls", ""), "pid": ev.get("pid") or 0, "title": ev.get("caption", ""),
                         "panel": panel, "floating": bool(f), "minimized": bool(ev.get("minimized")),
                         "activeAt": ev.get("activeAt") or 0})
@@ -911,7 +955,8 @@ class Daemon:
         for wid, ev in self.windows.items():
             if not recordable(ev):
                 continue
-            entry = {"app": desktop_name(ev["app"], ev.get("cls", ""))} if ev.get("app") else {"cmd": cmdline(ev.get("pid")), "class": ev.get("cls", "")}
+            app = desktop_name(ev.get("app", ""), ev.get("cls", ""))
+            entry = {"app": app} if app else {"cmd": cmdline(ev.get("pid")), "class": ev.get("cls", "")}
             if not entry.get("app") and not entry.get("cmd"):
                 continue
             f = self.floats.get(wid)

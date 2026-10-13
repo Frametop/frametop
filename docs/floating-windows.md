@@ -28,7 +28,7 @@ The numbers are cited in the code, so they stay as they are. Struck-out text was
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | How many windows can float at once | 8 spare outputs by default, configurable with `FLOAT_SLOTS` (at most 16); a change needs a desktop restart. A Display Settings control isn't built |
+| 1 | How many windows can float at once | 16 spare outputs by default (also the most), configurable with `FLOAT_SLOTS`; a change needs a desktop restart. A Display Settings control isn't built |
 | 2 | Menus and dropdowns | Each floating output has a margin around the window. The panel shows only the window, and each open popup gets a small overlay of its own, cut from the same buffer |
 | 3 | Tearing off | Not built. Drag the title bar past a screen's edge and let go in the air, with a small dead zone past the edge |
 | 4 | Docking by dragging | Not built. Push the window flush against a screen (within about 10 cm), with the landing spot highlighted, and let go |
@@ -73,7 +73,7 @@ Alternatives considered:
 
 ### Where the extra outputs come from: spare outputs
 
-KWin's nested backend opens its outputs at start (`--output-count`). The session starts KWin with the screen count plus `FLOAT_SLOTS` outputs (default 8, at most 16). ft-floatd turns off the spares nothing floats on with `kscreen-doctor` once it starts. Floating a window enables a spare, and docking the window disables it again. `FLOAT_SLOTS` limits how many windows can float at once, and changing it means restarting the desktop. How KWin's nested backend treats disabled outputs, and why its virtual outputs can't be used instead, is in [design.md](design.md#floating-windows).
+KWin's nested backend opens its outputs at start (`--output-count`). The session starts KWin with the screen count plus `FLOAT_SLOTS` outputs (default and most 16). ft-floatd turns off the spares nothing floats on with `kscreen-doctor` once it starts. Floating a window enables a spare, and docking the window disables it again. `FLOAT_SLOTS` limits how many windows can float at once, and changing it means restarting the desktop. How KWin's nested backend treats disabled outputs, and why its virtual outputs can't be used instead, is in [design.md](design.md#floating-windows).
 
 ft-screens creates a `screen` for each toplevel in the order they appear, and indexes its settings by that order. Spares come after the screens, so they get indices `SCREENS` and up. Their panels are hidden while their output is disabled.
 

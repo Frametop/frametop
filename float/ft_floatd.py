@@ -1262,7 +1262,7 @@ def main():
     conf = ft_layout.read_conf()
     p = argparse.ArgumentParser(description="Floating windows for the Frametop desktop")
     p.add_argument("--screens", type=int, default=int(os.environ.get("FT_SCREEN_COUNT") or 0))
-    p.add_argument("--slots", type=int, default=int(conf.get("FLOAT_SLOTS") or 8))
+    p.add_argument("--slots", type=int, default=int(conf.get("FLOAT_SLOTS") or 16))
     p.add_argument("--margin", type=int, default=int(conf.get("FLOAT_MARGIN") or 300))
     p.add_argument("--control", default="ft_screens")
     p.add_argument("--socket", default="frametop_float")

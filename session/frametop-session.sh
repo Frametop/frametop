@@ -34,7 +34,7 @@ for var in $(compgen -e); do
 done
 
 conf=$HOME/.config/frametop.conf
-BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_SLOTS=8 FLOAT_MARGIN=300
+BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_SLOTS=16 FLOAT_MARGIN=300
 NOTIFY_FORWARD=auto
 # shellcheck disable=SC1090
 [ -f "$conf" ] && . "$conf"
@@ -49,7 +49,7 @@ notify_forward=${FT_NOTIFY_FORWARD:-$NOTIFY_FORWARD}
 # and ft-floatd floats a window on each (docs/floating-windows.md). Changing it takes a
 # desktop restart.
 float_slots=${FT_FLOAT_SLOTS:-$FLOAT_SLOTS}
-[[ $float_slots =~ ^[0-9]+$ ]] || float_slots=8
+[[ $float_slots =~ ^[0-9]+$ ]] || float_slots=16
 [ "$float_slots" -le 16 ] || float_slots=16
 [ "$backend" = screens ] || float_slots=0
 if [ "$backend" = gamescope ] && [ $((width * height)) -gt $((1920 * 1080)) ]; then

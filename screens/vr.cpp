@@ -324,6 +324,7 @@ struct Screen {
     vr::TrackedDeviceIndex_t dragDevice = kNone;
     Mat dragRel = Identity();                 // device -> screen, while moving
     double grabX = 0, grabY = 0;              // resize: the grab point relative to the corner
+    bool dragFacing = false;                  // move: kept facing the head (a hand ray carries it: HandRay)
     // The resize handle (Controls()[3], "<prefix>.resize"): one overlay, at the corner a laser, the gaze
     // or a hand aims at (UpdateCorner; the bottom right otherwise), brighter the closer the aim, lit
     // while resizing. Any corner resizes, the opposite one staying put.
@@ -1346,6 +1347,7 @@ vr::TrackedDeviceIndex_t WristOnLaser(const Screen &s, const Mat &d, const Mat &
     return kNone;
 }
 
+bool HandRay(uint32_t d);
 void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     Mat d, p;
     if (dev == kNone || !DevicePose(dev, &d) || !ScreenPose(s, &p)) {
@@ -1361,6 +1363,10 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     }
     s.drag = mode;
     s.dragDevice = dev;
+    // A hand ray carrying it by the bar keeps it facing you (user, 2026-10-13: "the display should remain
+    // centered facing the user since we have no way to tilt displays up and down without grabbing them"):
+    // the ray places it, the wrist doesn't turn it. Controllers and the mouse carry it rigidly.
+    s.dragFacing = mode == Drag::Move && HandRay(dev);
     s.dragRel = Mul(Inverse(d), p);
     // Already in a ring when grabbed: that doesn't count as crossing it.
     s.onWrist = mode == Drag::Move ? WristOnLaser(s, d, p) : kNone;
@@ -1394,6 +1400,7 @@ void EndDrag(Screen &s) {
     else s.keepX = -1, s.keepY = 1;
     s.drag = Drag::None;
     s.dragDevice = kNone;
+    s.dragFacing = false;
     s.pinTarget = s.onWrist = kNone;
     LightBar(s, false);
     ApplyAlpha(s);
@@ -1557,7 +1564,11 @@ void UpdateDrag(Screen &s, int index) {
     Mat d;
     if (!DevicePose(s.dragDevice, &d)) return;
     if (s.drag == Drag::Move) {
-        const Mat p = Mul(d, s.dragRel);
+        Mat p = Mul(d, s.dragRel), head;
+        if (s.dragFacing && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+            const double at[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
+            p = FacingPose(at, head);
+        }
         SetAbsolute(s, p);
         CheckWristAim(s, d, p);
         return;
@@ -3287,18 +3298,26 @@ bool g_pushGlowOn = false;
 // (the pointer helper's "ray"; else it's the mouse's or the gaze's, which sits on a panel all the
 // time). SteamVR also sends panels events from the headset and from no device at all. (2026-10-13:
 // those, then the mouse's, kept the grab-that glow off the panels.)
-bool FromLaser(const vr::VREvent_t &ev) {
-    const uint32_t d = ev.trackedDeviceIndex;
-    if (d >= vr::k_unMaxTrackedDeviceCount || vr::VRSystem()->GetTrackedDeviceClass(d) != vr::TrackedDeviceClass_Controller) return false;
-    static int64_t ours[vr::k_unMaxTrackedDeviceCount] = {};   // ft_pointer's: 1, another's: -1, as last looked up (every 10 s)
+// ft_pointer's (our 3D mouse: the mouse's, the gaze's, or a hand ray's): 1; another controller's: -1;
+// not a controller: 0. Looked up every 10 s.
+int OurPointer(uint32_t d) {
+    if (d >= vr::k_unMaxTrackedDeviceCount || vr::VRSystem()->GetTrackedDeviceClass(d) != vr::TrackedDeviceClass_Controller) return 0;
+    static int64_t ours[vr::k_unMaxTrackedDeviceCount] = {};
     static int64_t lookedMs[vr::k_unMaxTrackedDeviceCount] = {};
     if (!ours[d] || NowMs() - lookedMs[d] > 10000) {
         char type[64] = "";
         vr::VRSystem()->GetStringTrackedDeviceProperty(d, vr::Prop_ControllerType_String, type, sizeof type);
         ours[d] = std::strcmp(type, "ft_pointer") ? -1 : 1, lookedMs[d] = NowMs();
     }
-    if (ours[d] < 0) return true;
-    return NowMs() - g_rayWord.atMs < 3000 && (g_rayWord.side[0] || g_rayWord.side[1]);
+    return int(ours[d]);
+}
+// ft_pointer while a hand ray is up (the pointer helper's "ray", every second).
+bool HandRay(uint32_t d) {
+    return OurPointer(d) > 0 && NowMs() - g_rayWord.atMs < 3000 && (g_rayWord.side[0] || g_rayWord.side[1]);
+}
+bool FromLaser(const vr::VREvent_t &ev) {
+    const int ours = OurPointer(ev.trackedDeviceIndex);
+    return ours < 0 || (ours > 0 && HandRay(ev.trackedDeviceIndex));
 }
 struct TargetGlow {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;

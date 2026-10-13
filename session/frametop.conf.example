@@ -163,3 +163,7 @@ DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (
 DISPLAY_MOVE_DEG=0.5 # displays off: or turning this far (degrees) within 10 s
 LAYOUT_GRAB_OFFSET=0.075   # arranging screens: where the floating window's grab bar is, in metres below the screen
 LAYOUT_SLIDE_SPEED=0.5     # arranging screens: how fast the invisible controller slides a grabbed screen (m/s)
+
+HANDS_PINCH_END=0.035      # ft-hands: a pinch ends once thumb and index are this far apart (m)
+HANDS_PINCH_DRAG_OPEN=0.05 # ... a pinch held 0.3 s or more (a drag) ends this far apart, or HANDS_PINCH_DRAG_OPEN_S (0.12) past HANDS_PINCH_END
+HANDS_GRIP_TAKEOVER_S=0.3  # ... a grip (fist) ends a pinch only this soon after it began

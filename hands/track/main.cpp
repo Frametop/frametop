@@ -49,7 +49,8 @@
 // --models: a folder with palm.ncnn.* and hand.ncnn.*, e.g. fine-tuned ones), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
 // hands are one left and one right, Tracker::set_pair_sides), HANDS_PINCH_DIP (0 or 1: pinches also
-// begin on a sharp dip of the thumb-index distance, PinchParams::dip).
+// begin on a sharp dip of the thumb-index distance, PinchParams::dip), HANDS_PINCH_FIST_CURL (1.2; 0 off:
+// no pinch begins while the index and middle are curled under this, PinchParams::fist_curl).
 //
 // Flags (track/flagbuf.h; HANDS_FLAG_BUFFER, default 1): ft-hands keeps the last HANDS_FLAG_SECONDS
 // (12) of hand crops and its output in RAM (at most HANDS_FLAG_MB, 80, of crops HANDS_FLAG_CROP, 224
@@ -286,6 +287,17 @@ int main(int argc, char **argv) {
     bool skeleton = setting("HANDS_SKELETON") != "0";
     PinchParams pinch_params;
     pinch_params.dip = setting("HANDS_PINCH_DIP") == "1";
+    if (const std::string v = setting("HANDS_PINCH_FIST_CURL"); !v.empty()) pinch_params.fist_curl = std::atof(v.c_str());
+    // How easily a pinch lets go (user, 2026-10-11, gaze + hands: "taps and pinches release way too easily
+    // even when I haven't actually released them": ends came at 4-6 cm, and grips took pinches 130 ms in):
+    // HANDS_PINCH_END (m), HANDS_PINCH_DRAG_OPEN (m), HANDS_PINCH_DRAG_OPEN_S, HANDS_GRIP_TAKEOVER_S.
+    auto num = [&](const char *key, double &v, double lo, double hi) {
+        if (const std::string t = setting(key); !t.empty()) v = std::clamp(std::atof(t.c_str()), lo, hi);
+    };
+    num("HANDS_PINCH_END", pinch_params.end_m, 0.025, 0.08);
+    num("HANDS_PINCH_DRAG_OPEN", pinch_params.drag_open_m, 0.03, 0.12);
+    num("HANDS_PINCH_DRAG_OPEN_S", pinch_params.drag_open_s, 0.0, 1.0);
+    num("HANDS_GRIP_TAKEOVER_S", pinch_params.grip_takeover_s, 0.0, 1.0);
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)
@@ -312,6 +324,7 @@ int main(int argc, char **argv) {
         else if (a == "--pinch-triangulated") pinch_params.triangulated = true;
         else if (a == "--pinch-palm-down" && more) pinch_params.palm_down_max = std::atof(argv[++i]);
         else if (a == "--pinch-dip" && more) pinch_params.dip = std::atoi(argv[++i]) != 0;
+        else if (a == "--pinch-fist-curl" && more) pinch_params.fist_curl = std::atof(argv[++i]);
         else if (a == "--grip-begin" && more) grip_params.begin = std::atof(argv[++i]);
         else if (a == "--grip-end" && more) grip_params.end = std::atof(argv[++i]);
         else if (a == "--gesture-log") gesture_log = true;
@@ -357,6 +370,8 @@ int main(int argc, char **argv) {
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
                         "          [--pinch-begin M] (0.020) [--pinch-end M] (0.035) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
                         "          [--pinch-dip 0|1] (0; 1: also on a sharp dip, see PinchParams::dip; HANDS_PINCH_DIP)\n"
+                        "          [--pinch-fist-curl R] (1.2; 0: off: no pinch begins on a fist, see PinchParams::fist_curl;\n"
+                        "          HANDS_PINCH_FIST_CURL)\n"
                         "          [--grip-begin R] (1.2) [--grip-end R] (1.45) [--gesture-log]\n"
                         "          [--contrast MODE|PALM/HAND] (clahe[:CLIP], none, stretch; default clahe:2/none)\n"
                         "Recording saves every frame set (at most N a second with --record-hz) for S seconds (120) to DIR/sets.bin,\n"
@@ -367,7 +382,7 @@ int main(int argc, char **argv) {
                         "auto picks the cameras by the light (see the top of track/main.cpp).\n"
                         "Settings in ~/.config/frametop.conf: HANDS_SWAP_SIDES=auto|0|1, HANDS_CPUS=5,6,7, HANDS_CAMERAS, HANDS_BRIGHT,\n"
                         "HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT, HANDS_COLOR_CROP, HANDS_MISREAD_GUARD=0|1, HANDS_MODELS=DIR,\n"
-                        "HANDS_PINCH_DIP=0|1, HANDS_FLAG_BUFFER=0|1, HANDS_FLAG_SECONDS, HANDS_FLAG_CROP, HANDS_FLAG_MB\n"
+                        "HANDS_PINCH_DIP=0|1, HANDS_PINCH_FIST_CURL, HANDS_FLAG_BUFFER=0|1, HANDS_FLAG_SECONDS, HANDS_FLAG_CROP, HANDS_FLAG_MB\n"
                         "(FT_<name> overrides).\n",
                         argv[0]);
             return a == "--help" ? 0 : 1;
@@ -567,12 +582,14 @@ int main(int argc, char **argv) {
         std::snprintf(cfg, sizeof cfg,
                       "{\"models\": %s, \"int8\": %s, \"threads\": %d, \"cpus\": \"%s\", \"cams\": \"%s\", \"bright\": \"%s\", "
                       "\"keep_presence\": %.2f, \"misread_guard\": %s, \"reacquire\": %.2f, \"pair_sides\": %s, \"hold\": %.2f, "
-                      "\"skeleton\": %s, \"gestures\": %s, \"pinch_begin\": %.3f, \"pinch_end\": %.3f, \"grip_begin\": %.2f, "
+                      "\"skeleton\": %s, \"gestures\": %s, \"pinch_begin\": %.3f, \"pinch_end\": %.3f, \"pinch_dip\": %s, "
+                      "\"pinch_fist_curl\": %.2f, \"grip_begin\": %.2f, "
                       "\"grip_end\": %.2f, \"sides\": \"%s\", \"flag_seconds\": %.1f, \"flag_crop\": %d, \"flag_mb\": %.0f}",
                       json_string(models).c_str(), int8 ? "true" : "false", threads, cpu_list.c_str(), cams_arg.c_str(),
                       bright_arg.c_str(), keep_presence, misread_guard ? "true" : "false", reacquire, pair_sides ? "true" : "false",
                       hold, skeleton ? "true" : "false", gestures_on ? "true" : "false", pinch_params.begin_m, pinch_params.end_m,
-                      grip_params.begin, grip_params.end, sides_mode.c_str(), flag_cfg.before_s, flag_cfg.crop_px,
+                      pinch_params.dip ? "true" : "false", pinch_params.fist_curl, grip_params.begin, grip_params.end,
+                      sides_mode.c_str(), flag_cfg.before_s, flag_cfg.crop_px,
                       flag_cfg.max_bytes / 1048576.0);
         flags->set_static(cameras_json(used), cfg);
     }

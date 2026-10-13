@@ -25,9 +25,11 @@
 //             the time to find a hand that never left the view.
 // --pair-sides: two hands seen at once get one left and one right (Tracker::set_pair_sides).
 // --misread-guard: the tracker's guards for fine-tuned landmark models (Tracker::set_misread_guard).
-// --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX, --pinch-dip 0|1: the pinch
-//             detector (track/pinch.h; --pinch-dip 1: PinchParams::dip, as HANDS_PINCH_DIP=1);
-//             the timeline gets its begin/end/lost events and both distance measures per set.
+// --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX, --pinch-dip 0|1,
+//             --pinch-fist-curl R: the pinch detector (track/pinch.h; --pinch-dip 1: PinchParams::dip, as
+//             HANDS_PINCH_DIP=1; --pinch-fist-curl: PinchParams::fist_curl, 1.2 as ft-hands, 0 off, as
+//             HANDS_PINCH_FIST_CURL); the timeline gets its begin/end/lost events, both distance measures
+//             and each side's finger curls (index, middle, ring, little) per set.
 // --grip-begin R, --grip-end R: the grip detector (a closed hand; track/pinch.h); the timeline
 //             gets its events and each side's finger curl per set.
 // --cams mono|color|all: which cameras to track with (default mono). color and all need a
@@ -231,6 +233,7 @@ int main(int argc, char **argv) {
         else if (a == "--pinch-triangulated") pinch_params.triangulated = true;
         else if (a == "--pinch-palm-down" && more) pinch_params.palm_down_max = std::atof(argv[++i]);
         else if (a == "--pinch-dip" && more) pinch_params.dip = std::atoi(argv[++i]) != 0;
+        else if (a == "--pinch-fist-curl" && more) pinch_params.fist_curl = std::atof(argv[++i]);
         else if (a == "--grip-begin" && more) grip_params.begin = std::atof(argv[++i]);
         else if (a == "--grip-end" && more) grip_params.end = std::atof(argv[++i]);
         else if (a == "--color-left" && more) color_left = argv[++i];
@@ -653,9 +656,10 @@ int main(int argc, char **argv) {
                                      e.what, e.distance, e.point[0], e.point[1], e.point[2], pinch.side(e.side).hand_id);
             }
             if (tl && (pinch.world_d[0] >= 0 || pinch.world_d[1] >= 0))   // both measures, for choosing one
-                std::fprintf(tl, "%.3f pinchd L world %.3f tri %.3f R world %.3f tri %.3f palm %.2f %.2f\n", ts,
-                             pinch.world_d[0], pinch.tri_d[0], pinch.world_d[1], pinch.tri_d[1], pinch.palm_down[0],
-                             pinch.palm_down[1]);
+                std::fprintf(tl, "%.3f pinchd L world %.3f tri %.3f R world %.3f tri %.3f palm %.2f %.2f curl L %.2f %.2f %.2f %.2f R %.2f %.2f %.2f %.2f\n",
+                             ts, pinch.world_d[0], pinch.tri_d[0], pinch.world_d[1], pinch.tri_d[1], pinch.palm_down[0],
+                             pinch.palm_down[1], pinch.curl[0][0], pinch.curl[0][1], pinch.curl[0][2], pinch.curl[0][3],
+                             pinch.curl[1][0], pinch.curl[1][1], pinch.curl[1][2], pinch.curl[1][3]);
             if (pubf) {
                 pub.write(out, t);
                 pub_g.write(pinch, grip, t);
@@ -840,6 +844,8 @@ int main(int argc, char **argv) {
                 pinch_len[0].size(), pinch_len[0].empty() ? 0 : pinch_len[0][pinch_len[0].size() / 2], pinch_len[1].size(),
                 pinch_len[1].empty() ? 0 : pinch_len[1][pinch_len[1].size() / 2], pinch_lost, pinch.held_back[0],
                 pinch.held_back[1]);
+    std::printf("fist guard (index and middle curled under %.2f; 0 off): held back %d closes left, %d right\n",
+                pinch_params.fist_curl, pinch.fist_held[0], pinch.fist_held[1]);
     if (pinch_params.dip)
         std::printf("pinches begun on a dip (--pinch-dip): left %d, right %d\n", pinch.dip_begins[0], pinch.dip_begins[1]);
     for (int k = 0; k < 2; ++k) std::sort(grip_len[k].begin(), grip_len[k].end());

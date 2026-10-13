@@ -3221,6 +3221,7 @@ void TestGrabThatPlace() {
     panels[2].index = 2, panels[2].pose = At(1.5, 0.2, -1.5), panels[2].width = 1.0, panels[2].height = 0.6,
     panels[2].curve = 1.5;
     grabthat::Params k;
+    k.aimPalm = false;   // (these are the line from the eyes through the palm; the palm's own is below)
     grabthat::Fire f;
     f.head = Identity();
     auto aim = [&](double x, double y, double z) {
@@ -3323,6 +3324,28 @@ void TestGrabThatPlace() {
         g.palm[0] = 0.25 * 0.4 / 3;                   // ...on it: it comes
         CHECK(grabthat::Pick(far, g, exact) == 5);
         CHECK(grabthat::Decide(false, far[0].pose, Identity(), k) == Outcome::Bring);
+    }
+    {   // the palm's own line (2026-10-13, "the glow should be where the palm is facing"): a palm held out
+        // ahead takes the panel it faces, not the one the line from the eyes through it meets
+        grabthat::Params pk;
+        grabthat::Fire g;
+        g.head = Identity(), g.palm[0] = 0.05, g.palm[1] = -0.05, g.palm[2] = -0.4;
+        auto facing = [&](double x, double y, double z) {   // the palm facing toward x, y, z
+            const double d[3] = {x - g.palm[0], y - g.palm[1], z - g.palm[2]};
+            const double l = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            for (int i = 0; i < 3; ++i) g.normal[i] = d[i] / l;
+            return grabthat::Pick(panels, g, pk);
+        };
+        CHECK(facing(-1.4, 0, -1.4) == 1);     // turned to the one 45 degrees left
+        CHECK(facing(0.05, -0.05, -2) == 0);   // straight out: the one ahead
+        CHECK(facing(1.5, 0.2, -1.5) == 2);    // the curved one on the right
+        CHECK(facing(0.05, -2, -0.6) == -1);   // palm down: nothing
+        CHECK(facing(-2, 0, 0.5) == -1);       // to the left, past them all: nothing
+        g.normal[0] = g.normal[1] = g.normal[2] = 0;
+        CHECK(grabthat::Pick(panels, g, pk) == -1);
+        grabthat::Params ek = pk;              // ...with the eyes' line, the one ahead whatever it faces
+        ek.aimPalm = false;
+        CHECK(facing(-1.4, 0, -1.4) == 1 && grabthat::Pick(panels, g, ek) == 0);
     }
 }
 
@@ -4373,7 +4396,9 @@ void TestGrabThatAfterThrow() {
         for (int k = 0; k < 40; ++k) g.Frame({StopHand(palm[0], palm[1], palm[2] + 0.15, 1, 2)});   // (past againMs)
         return g.fires.size() == n + 1 ? &g.fires.back() : nullptr;
     };
-    grabthat::Params k, exact = k;
+    grabthat::Params k;
+    k.aimPalm = false;   // (the line from the eyes through the palm, as these live tests had; the palm's own: below)
+    grabthat::Params exact = k;
     exact.aimMarginDeg = 0;   // (the fourth live test's: the line has to meet it)
     // 1. the desktop 2.5 m ahead at eye level (15 deg each way): it comes, as it did live
     std::vector<Target> t(1);
@@ -4461,16 +4486,19 @@ void TestGrabThatAfterThrow() {
         std::printf("grab that after a throw: %s not here, its fires skipped\n", dir2.c_str());
         return;
     }
-    int took = 0, tookExact = 0;
+    int took = 0, tookExact = 0, tookPalm = 0;
     for (const auto &x2 : fires) {
         const double fw[3] = {-x2.head.m[0][2], -x2.head.m[1][2], -x2.head.m[2][2]};
         const double ctr[3] = {x2.eye[0] + 3 * fw[0], x2.eye[1] + 3 * fw[1], x2.eye[2] + 3 * fw[2]};
         const Panel P = Facing(ctr, 0, x2.eye);
         const std::vector<Target> one{{0, P.pose, W, H, R}};
         took += grabthat::Pick(one, x2, k) == 0, tookExact += grabthat::Pick(one, x2, exact) == 0;
+        tookPalm += grabthat::Pick(one, x2, grabthat::Params{}) == 0;
     }
+    // (the palm's own line, since 2026-10-13: this flag's palm was held 41 and 51 deg off the line from the
+    // eyes, half down, so it faced under the desktop: the palm now has to face what it takes)
     std::printf("grab that after a throw, the user's flag: %d of 2 fires take a 3.22 m desktop 3 m out where the head points "
-                "(%d with no margin)\n", took, tookExact);
+                "(%d with no margin, %d along the palm's own line)\n", took, tookExact, tookPalm);
     CHECK(took == 2);
 }
 
@@ -4516,7 +4544,9 @@ void TestGrabThatAtNearPanel() {
         for (const Event &e : run.events) presses += e.type == Event::Press, grabs += e.type == Event::GrabStart;
         const std::vector<grabthat::Target> t{{P.index, P.pose, P.width, P.height, P.curve}};
         int picked = 0;
-        for (const auto &x : run.fires) picked += grabthat::Pick(t, x, grabthat::Params{}) == P.index;
+        grabthat::Params eyes;
+        eyes.aimPalm = false;   // (the panel is on the line from the eyes through the palm)
+        for (const auto &x : run.fires) picked += grabthat::Pick(t, x, eyes) == P.index;
         std::printf("grab that at a panel 1.6 m out along the aim (the user's flag): %zu fire(s), %d at it, %d presses, %d grabs\n",
                     run.fires.size(), picked, presses, grabs);
         CHECK(run.fires.size() == 2 && picked == 2 && presses == 0 && grabs == 0);

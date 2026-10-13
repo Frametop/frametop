@@ -297,7 +297,10 @@ double OffDeg(const Target &p, const double from[3], const double dir[3]) {
 }
 
 int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k, Closest *closest) {
-    double dir[3] = {f.palm[0] - f.eye[0], f.palm[1] - f.eye[1], f.palm[2] - f.eye[2]};
+    // the line: from the palm along its normal (Params::aimPalm), or from the eyes through the palm
+    const double *from = k.aimPalm ? f.palm : f.eye;
+    double dir[3];
+    for (int i = 0; i < 3; ++i) dir[i] = k.aimPalm ? f.normal[i] : f.palm[i] - f.eye[i];
     const double l = std::sqrt(Dot(dir, dir));
     int best = -1;
     double bestT = 1e9;
@@ -310,7 +313,7 @@ int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k, Clos
         // one the line meets (within aimMargin), the nearest
         for (const Target &p : panels) {
             double u, v, t;
-            if (near(p) || !RayHit(p, f.eye, dir, &u, &v, &t)) continue;
+            if (near(p) || !RayHit(p, from, dir, &u, &v, &t)) continue;
             if (std::fabs(u) <= p.width / 2 + k.aimMargin && std::fabs(v) <= p.height / 2 + k.aimMargin && t < bestT) {
                 bestT = t, best = p.index;
                 if (closest) closest->index = p.index, closest->deg = 0;
@@ -323,10 +326,10 @@ int Pick(const std::vector<Target> &panels, const Fire &f, const Params &k, Clos
             double bestScore = 1e9;
             for (const Target &p : panels) {
                 if (near(p)) continue;
-                const double off = OffDeg(p, f.eye, dir);
+                const double off = OffDeg(p, from, dir);
                 if (closest && off < closest->deg) closest->index = p.index, closest->deg = off;
-                const double dist = std::max(0.1, std::hypot(p.pose.m[0][3] - f.eye[0], p.pose.m[1][3] - f.eye[1],
-                                                             p.pose.m[2][3] - f.eye[2]));
+                const double dist = std::max(0.1, std::hypot(p.pose.m[0][3] - from[0], p.pose.m[1][3] - from[1],
+                                                             p.pose.m[2][3] - from[2]));
                 const double half = std::atan(std::max(p.width, p.height) / 2 / dist) * 180 / M_PI;
                 const double extra = std::max(0.0, k.smallDeg - half);
                 if (off <= k.aimMarginDeg + extra && off - extra < bestScore) bestScore = off - extra, best = p.index;

@@ -82,7 +82,7 @@
 //     (steam/ft-steam menu), or closes the dashboard. That hand counts as near meanwhile.
 //   - "grab that" (grabthat.cpp): an open hand held out to a screen or floating window, then a
 //     fist pulled back, brings it to arm's reach (about 45 cm ahead, facing you). Only a panel the
-//     line from the eyes through the palm meets, farther than 0.8 m, not held (near ones: push,
+//     palm faces (its normal's line meets it), farther than 0.8 m, not held (near ones: push,
 //     flick or throw them away). A soft white halo round it shows what it would take
 //     (UpdateTargetGlow). The closing hand counts as near, and a fist or pinch it makes at a panel
 //     waits on it while it aims at one it would take.
@@ -2702,7 +2702,7 @@ void GrabThat(const grabthat::Fire &f) {
     if (i < 0) {
         // where the line went (seen from the head: right and up of straight ahead), and the panel it passed nearest
         double d[3], h[3];
-        for (int q = 0; q < 3; ++q) d[q] = f.palm[q] - f.eye[q];
+        for (int q = 0; q < 3; ++q) d[q] = k.aimPalm ? f.normal[q] : f.palm[q] - f.eye[q];
         for (int q = 0; q < 3; ++q) h[q] = f.head.m[0][q] * d[0] + f.head.m[1][q] * d[1] + f.head.m[2][q] * d[2];
         const std::string near = closest.index >= 0 ? "; nearest screen " + std::to_string(closest.index + 1) + ", " +
                                                           std::to_string(int(std::lround(closest.deg))) + " deg off" : "; no panel it may take";
@@ -2882,10 +2882,11 @@ void EndFarStretch(const char *why) {
 int FarPanel(std::string *why) {
     const int a = g_far.aimPanel[0], b = g_far.aimPanel[1];
     if (a >= 0 && a == b) return a;
-    // the line from between the eyes through between the palms
+    // the line from between the palms along their normals between them (or from between the eyes through it)
     grabthat::Fire mid = g_far.aim[1];
     for (int q = 0; q < 3; ++q)
-        mid.eye[q] = (g_far.aim[0].eye[q] + g_far.aim[1].eye[q]) / 2, mid.palm[q] = (g_far.aim[0].palm[q] + g_far.aim[1].palm[q]) / 2;
+        mid.eye[q] = (g_far.aim[0].eye[q] + g_far.aim[1].eye[q]) / 2, mid.palm[q] = (g_far.aim[0].palm[q] + g_far.aim[1].palm[q]) / 2,
+        mid.normal[q] = (g_far.aim[0].normal[q] + g_far.aim[1].normal[q]) / 2;
     grabthat::Closest closest;
     const int m = grabthat::Pick(GrabThatTargets(), mid, g_grabThat.params(), &closest);
     if (m >= 0) return m;
@@ -3887,6 +3888,7 @@ bool ft_vr_init(void) {
     num("HANDS_TAP_MS", g_handInput.params().tapMs, 0, 2000);   // a press doesn't drag this soon: a tap clicks where it went down
     num("HANDS_PRESS_STILL_MS", g_handInput.params().pressStillMs, 0, 60000);   // a still press lets go after this
     num("HANDS_RAY_HIDE_REACH", g_handInput.params().rayReach, 0, 1);   // a hand this near a panel hides its ray
+    gt.aimPalm = handcut::Setting("HANDS_GRAB_THAT_AIM", "palm") != "eyes";   // the line: the palm's normal, or eyes through palm
     num("HANDS_GRAB_THAT_FROM", gt.nearest, 0, 5);      // panels nearer than this aren't taken (0: any, near ones go back)
     num("HANDS_GRAB_THAT_MARGIN", gt.aimMargin, 0, 0.5);  // the line through the palm may pass this far off a panel
     num("HANDS_GRAB_THAT_SMALL", gt.smallDeg, 0, 30);   // small-looking panels: more margin

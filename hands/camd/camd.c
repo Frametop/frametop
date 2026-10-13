@@ -8,7 +8,8 @@
  * Then it gives up its privileges for good, creates the frame ring in the
  * user's runtime folder (/run/user/UID/frametop-hands/cam-ring, fhring.h), learns
  * which buffer holds which V4L2 index, and copies each complete bright frame
- * into the ring. It exits when XRService exits or reallocates its buffers;
+ * into the ring. It exits when XRService exits, reallocates its buffers or moves
+ * a camera to another device (SILENT_S);
  * start it again (or let systemd) to re-attach.
  *
  * XRService itself runs as the same user. The privileges are needed only
@@ -68,6 +69,19 @@
 #define STALE_RELEARN 30    /* consecutive unchanged frames: the mapping changed      */
 #define MAX_RELEARNS  5     /* then assume XRService has new buffers, and exit        */
 /*
+ * A mono camera that has delivered frames and then stays silent for SILENT_S while another
+ * keeps going: XRService has moved it to another device. Unplugging or plugging in the colour
+ * module does that (the side pair goes between video9/13 and video0/3, seen 2026-10-12): the
+ * old device just stops, nothing gets reallocated, and ft-camd would publish two dead cameras
+ * for as long as it runs. It exits instead (status 4), so systemd starts it on the new devices.
+ * The cameras all stop together when the headset is taken off; that isn't this. Nor is one that
+ * starts later than the others when it goes back on (seen 2026-10-13: video13 just behind, then
+ * video0 over 3 s behind): for RESUME_GRACE_S after the cameras start again, a camera may stay
+ * silent. One the module moved while the headset was off is caught after that.
+ */
+#define SILENT_S      3
+#define RESUME_GRACE_S 10
+/*
  * The color cameras never take the mono ones down with them. Each color buffer is ~9 MB,
  * and every probe for a fresh one syncs a whole buffer's cache, so a color camera looks
  * at no more than COLOR_PROBES buffers a frame. One that keeps going stale (on 2026-09-30
@@ -102,6 +116,8 @@ typedef struct {
     int             slot_of[MAX_INDEX]; /* buffer holding each V4L2 index     */
     int             relearns;
     bool            shared;             /* its buffers sit among another camera's  */
+    bool            exact;              /* its own run, bound to indices by VIDIOC_QUERYBUF */
+    bool            each;               /* mapped one by one (resolve_each)        */
 
     double          recent[8];          /* means of the last frames, for dark detection */
     int             nrecent;
@@ -116,6 +132,7 @@ typedef struct {
     unsigned        out_w, out_h;       /* image size in the ring                     */
     uint64_t        last_pub_ns;        /* --color-fps pacing                         */
     uint64_t        paced, seams;       /* color frames skipped: pacing, the half-size copy */
+    uint64_t        idled;              /* mono frames skipped while ft-hands is parked (hands_want) */
     uint64_t        paused_until;       /* color: going stale, left alone until then  */
     unsigned        pause_s;            /* ... for this long the next time            */
     uint64_t        pauses;
@@ -126,6 +143,8 @@ typedef struct {
     uint64_t        events, bright, dark, stale, torn, repairs;
     uint64_t        sync_ns, copy_ns, nsync;    /* cost of cache sync and copy */
     uint64_t        last_bright;        /* for the status line */
+    uint64_t        last_event_ns;      /* its last v4l2_dqbuf, 0 before the first (see SILENT_S) */
+    int             vfd;                /* our own handle on its node, for format_moved, or -1 */
 } cam_t;
 
 static cam_t       cams[MAX_CAMS];
@@ -150,6 +169,7 @@ static double      opt_color_idle = 2;  /* ... and this often while no reader as
  * saves most of the decoding (about 11% of a core at 30 fps).
  */
 static double      color_fps = 2;
+static bool        hands_parked = false;  /* ft-hands is parked: the mono frames aren't copied (hands_want) */
 static double      opt_status = 10.0;
 
 static volatile sig_atomic_t stop;
@@ -251,6 +271,7 @@ static void setup_camera(cam_t *c, xr_camera_t *cam, int pidfd)
 {
     memset(c, 0, sizeof(*c));
     c->cam  = cam;
+    c->vfd  = open(cam->path, O_RDWR | O_CLOEXEC | O_NONBLOCK);   /* opened while privileged */
     xr_camera_layout(cam, &c->lay);
     c->color = c->lay.fmt == XR_FMT_YUV420_10P;
     /* Color: just the luma rows, not the chroma after them. Whether a frame is new is judged
@@ -269,6 +290,7 @@ static void setup_camera(cam_t *c, xr_camera_t *cam, int pidfd)
     for (int g = 0; g < xr.ngroups; g++)
         if (xr.groups[g].cam == cam && group_fits(&xr.groups[g], cam, c->need))
             own = true, exact = exact || xr.groups[g].exact;
+    c->exact = own && exact;
 
     char model[16];
     model_of(cam->sensor, model, sizeof(model));
@@ -385,6 +407,15 @@ static bool resolve_block(cam_t *c)
  * the same every time, so their dequeues change no buffer and get no votes. Such
  * an index is left unmapped (slot -1): on_frame counts its frames as dark without
  * reading them. Most of a camera's indices silent means it isn't streaming yet.
+ *
+ * Which indices are the dark ones doesn't stay put, though: measured 2026-10-13 with
+ * the headset worn, the bright half moved to other indices every few seconds. With a
+ * fixed split, bright frames landing on a silent index were dropped unread, and
+ * find_fresh then published them at the next dequeue under that frame's timestamp,
+ * 8 ms late. The side cameras lost about 4 of 10 sets with the upper ones, tracking
+ * ran at half rate with 3x the stereo error. So a camera whose buffers are bound by
+ * VIDIOC_QUERYBUF maps its silent indices to their own buffers too, and on_frame
+ * tells bright from dark by each frame's pixels, as for the upper cameras.
  */
 static bool resolve_each(cam_t *c)
 {
@@ -419,11 +450,18 @@ static bool resolve_each(cam_t *c)
     if (silent * 2 > depth)
         return false;
 
+    for (int i = 0; i < depth && c->exact; i++)    /* see above: silent indices get their own buffers */
+        for (int s = 0; s < c->nslots && c->slot_of[i] < 0; s++)
+            if (c->slot_pos[s] == i && !taken[s])
+                taken[s] = true, c->slot_of[i] = s, silent--;
+
     printf("%s: queue depth %d, buffers mapped one by one:", c->slug, depth);
     for (int i = 0; i < depth; i++)
         c->slot_of[i] < 0 ? printf(" -") : printf(" %d", c->slot_of[i]);
     if (silent)
         printf(" (- : %d indices whose frames are all zeros, skipped as dark)", silent);
+    else if (c->exact)
+        printf(" (bright and dark told apart frame by frame)");
     printf("\n");
     return true;
 }
@@ -444,7 +482,8 @@ static void resolve_map(cam_t *c)
 
     /* a shuffled shared run can't be split by change votes alone */
     c->shared = shared;
-    c->mapped = resolve_block(c) || (!shared && resolve_each(c));
+    c->each   = false;
+    c->mapped = resolve_block(c) || (!shared && (c->each = resolve_each(c)));
 
     if (c->mapped) {
         fflush(stdout);
@@ -688,6 +727,11 @@ static void on_frame(cam_t *c, int64_t index, uint32_t seq, uint64_t ts, uint64_
         return;
     }
 
+    if (hands_parked && !c->color) {    /* nobody tracks: no copies (the colour ones still tell the light) */
+        c->idled++;
+        return;
+    }
+
     if (index > c->maxindex) {
         reset_learning(c);     /* the queue grew */
         return;
@@ -717,6 +761,14 @@ static void on_frame(cam_t *c, int64_t index, uint32_t seq, uint64_t ts, uint64_
 
     int nchanged;
     int found = -1;
+
+    if (c->each && c->exact && !fresh(cur, c->samp[slot], &nchanged)) {
+        /* the same all-zero dark frame again (see resolve_each); never another buffer's frame */
+        buf_sync(c->fd[slot], DMA_BUF_SYNC_END);
+        c->dark++;
+        c->rc->dropped++;
+        return;
+    }
 
     if (!fresh(cur, c->samp[slot], &nchanged)) {
         buf_sync(c->fd[slot], DMA_BUF_SYNC_END);
@@ -831,10 +883,39 @@ static void on_sample(void *ctx, const tp_sample_t *s)
 
     cam_t *c = cam_by_minor(tp_get(s->ev, f_dq_minor, s->raw, s->rawlen));
 
-    if (c)
+    if (c) {
+        c->last_event_ns = mono_ns();
         on_frame(c, tp_get(s->ev, f_dq_index, s->raw, s->rawlen),
                  (uint32_t)tp_get(s->ev, f_dq_seq, s->raw, s->rawlen),
                  (uint64_t)tp_get(s->ev, f_dq_ts, s->raw, s->rawlen), s->time);
+    }
+}
+
+/* A mono camera gone silent while another runs (see SILENT_S), or NULL. */
+static const cam_t *silent_camera(uint64_t now)
+{
+    static uint64_t running_since;   /* when a camera last started again after none ran */
+    uint64_t newest = 0;
+
+    for (int i = 0; i < ncams; i++)
+        if (!cams[i].color && cams[i].last_event_ns > newest)
+            newest = cams[i].last_event_ns;
+
+    if (!newest || now - newest > 1000000000ull) {
+        running_since = 0;
+        return NULL;    /* none running: the headset is off or asleep */
+    }
+    if (!running_since)
+        running_since = now;
+
+    if (now - running_since < RESUME_GRACE_S * 1000000000ull)
+        return NULL;
+    for (int i = 0; i < ncams; i++) {
+        const cam_t *c = &cams[i];
+        if (!c->color && c->last_event_ns && now - c->last_event_ns > SILENT_S * 1000000000ull)
+            return c;
+    }
+    return NULL;
 }
 
 /* ------------------------------------------------------------ ring + user */
@@ -843,6 +924,49 @@ static void on_sample(void *ctx, const tp_sample_t *s)
  * Ring cameras: every camera (mono and color) at its own index, then with --with-dark a
  * dark twin for each mono camera. Returns how many, with which camera each one shows.
  */
+/*
+ * A camera whose node now has another format: XRService gave the node to another camera.
+ * Plugging the colour module in with passthrough working moves the side cameras off the
+ * ISP nodes (video0/3) and puts the colour cameras there; the nodes keep streaming, so
+ * silent_camera never sees it (2026-10-13: tracker fed 2464x2464 NV12 as side frames).
+ */
+static const cam_t *format_moved(void)
+{
+    for (int i = 0; i < ncams; i++) {
+
+        const cam_t *c = &cams[i];
+        struct v4l2_format fmt;
+
+        if (c->vfd < 0)
+            continue;
+
+        memset(&fmt, 0, sizeof(fmt));
+        fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+
+        unsigned w, h, bpl;
+        uint32_t pix;
+
+        if (ioctl(c->vfd, VIDIOC_G_FMT, &fmt) == 0) {
+            w = fmt.fmt.pix_mp.width, h = fmt.fmt.pix_mp.height;
+            pix = fmt.fmt.pix_mp.pixelformat, bpl = fmt.fmt.pix_mp.plane_fmt[0].bytesperline;
+        } else {
+            memset(&fmt, 0, sizeof(fmt));
+            fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            if (ioctl(c->vfd, VIDIOC_G_FMT, &fmt) < 0) {
+                if (errno == ENODEV)
+                    return c;
+                continue;
+            }
+            w = fmt.fmt.pix.width, h = fmt.fmt.pix.height;
+            pix = fmt.fmt.pix.pixelformat, bpl = fmt.fmt.pix.bytesperline;
+        }
+
+        if (w != c->cam->width || h != c->cam->height || pix != c->cam->pixfmt || bpl != c->cam->bytesperline)
+            return c;
+    }
+    return NULL;
+}
+
 static int ring_layout(int cam_of[], bool dark_of[], int max)
 {
     int n = 0;
@@ -895,6 +1019,39 @@ static void color_want(void)
         printf("color cameras: %.0f fps\n", want);
         fflush(stdout);
         color_fps = want;
+    }
+}
+
+/*
+ * Whether ft-hands is parked (hand interaction in VR games, hands/track/main.cpp "Parked"): it writes
+ * "0" to ring_dir/hands-want every second while parked. A file newer than 3 s saying 0 stops the mono
+ * frames' copies; anything else (no file, a stale one: ft-hands gone) copies them as usual, so other
+ * readers of the ring (the hand recorder, ft-cutouts) are never starved by a parked tracker that died.
+ */
+static void hands_want(void)
+{
+    char path[128], buf[32] = "";
+    struct stat st;
+    struct timespec now;
+    bool parked = false;
+
+    snprintf(path, sizeof(path), "%s/hands-want", ring_dir);
+    clock_gettime(CLOCK_REALTIME, &now);
+
+    if (stat(path, &st) == 0 && now.tv_sec - st.st_mtim.tv_sec <= 3) {
+        FILE *f = fopen(path, "r");
+        if (f) {
+            if (fgets(buf, sizeof(buf), f) && buf[0] == '0')
+                parked = true;
+            fclose(f);
+        }
+    }
+
+    if (parked != hands_parked) {
+        printf("hand tracking %s: %s the mono cameras' frames\n", parked ? "parked" : "back",
+               parked ? "not copying" : "copying");
+        fflush(stdout);
+        hands_parked = parked;
     }
 }
 
@@ -1099,10 +1256,10 @@ static void status(double secs)
             c->last_bright = c->bright;
             continue;
         }
-        printf("  %s %s%.1f fps (dark %llu at %.1f stale %llu torn %llu remapped %llu, sync %.2f ms copy %.2f ms)",
-               c->slug, c->mapped ? "" : "learning ", (double)(c->bright - c->last_bright) / opt_status,
+        printf("  %s %s%s%.1f fps (dark %llu at %.1f stale %llu torn %llu remapped %llu idled %llu, sync %.2f ms copy %.2f ms)",
+               c->slug, hands_parked ? "PARKED " : "", c->mapped ? "" : "learning ", (double)(c->bright - c->last_bright) / opt_status,
                (unsigned long long)c->dark, c->rc->dark_mean, (unsigned long long)c->stale,
-               (unsigned long long)c->torn, (unsigned long long)c->repairs,
+               (unsigned long long)c->torn, (unsigned long long)c->repairs, (unsigned long long)c->idled,
                c->nsync ? c->sync_ns / 1e6 / c->nsync : 0.0, c->bright ? c->copy_ns / 1e6 / c->bright : 0.0);
         c->last_bright = c->bright;
     }
@@ -1247,7 +1404,7 @@ int main(int argc, char **argv)
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
-    uint64_t start = mono_ns(), last_status = start, last_want = 0;
+    uint64_t start = mono_ns(), last_status = start, last_want = 0, last_hands = 0, last_fmt = start;
     int rc = 0;
 
     while (!stop) {
@@ -1263,6 +1420,33 @@ int main(int argc, char **argv)
         if (opt_with_color && now - last_want >= 500000000ull) {
             color_want();
             last_want = now;
+        }
+
+        if (now - last_hands >= 200000000ull) {   /* a stat: often, so an unparked tracker gets frames soon */
+            hands_want();
+            last_hands = now;
+        }
+
+        const cam_t *silent = silent_camera(now);
+        if (silent) {
+            fprintf(stderr, "%s (video%d): no frames for %.1f s while the others run: XRService has moved "
+                    "the cameras (colour module unplugged or plugged in?); exiting so ft-camd starts on the "
+                    "new devices\n", silent->slug, silent->cam->node,
+                    (double)(now - silent->last_event_ns) / 1e9);
+            rc = 4;
+            break;
+        }
+
+        if (now - last_fmt >= 1000000000ull) {
+            last_fmt = now;
+            const cam_t *moved = format_moved();
+            if (moved) {
+                fprintf(stderr, "%s (video%d): its node has another format now: XRService has moved the "
+                        "cameras (colour module plugged in or unplugged?); exiting so ft-camd starts on the "
+                        "new devices\n", moved->slug, moved->cam->node);
+                rc = 4;
+                break;
+            }
         }
 
         struct pollfd pf = { .fd = pidfd, .events = POLLIN };

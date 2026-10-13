@@ -3,3 +3,7 @@ models/onnx/
 models/*.task
 # frame-job settings (where replays run, and the lab's capture folder): personal, not shipped
 .frame-job
+dumps/
+# tap replays' output and their per-host drivers (frame-hands notes/taps.md)
+taps-out/
+tools/taps-*.sh

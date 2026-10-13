@@ -4,6 +4,7 @@
 
 #include "calib.h"
 #include "nets.h"
+#include "skeleton.h"
 
 #include <condition_variable>
 #include <functional>
@@ -36,7 +37,8 @@ struct Hand {
     V3 pts[21]{};               // as measured this frame; the tracker steers crops by these
     V3 smooth[21]{};            // filtered (One Euro, see Tracker::smooth): publish these
     bool has_pts = false;
-    double residual = -1;       // rms ray distance of the triangulation (m); -1: one view
+    double residual = -1;       // rms ray distance of the triangulation (m), the landmarks' median; -1: one view
+    double res_pt[21]{};        // each landmark's (-1: one view)
     int nviews = 0;
     double right_score = 0.5;   // the model's right-hand score (these images aren't mirrored)
     double scale = 1.0;         // this user's hand size / the model's world landmarks
@@ -47,7 +49,11 @@ struct Hand {
     V3 last_palm{};
     V3 dpalm{};                 // the filter's palm velocity, m/s
     int64_t smooth_ns = 0;
-    bool right() const { return right_score > 0.5; }
+    double side_evidence = 0;   // log-odds of a right hand, from every reading, fading (Tracker::set_pair_sides)
+    int side = -1;              // the side the pairing settled this step (0 left, 1 right), or -1: by right_score
+    V3 eye{};                   // the centre of the cameras it was seen with this frame (depth is along eye -> point)
+    skel::Fit fit;              // the skeleton fitted to pts (track/skeleton.h); fit.valid when it fitted this frame
+    bool right() const { return side >= 0 ? side == 1 : right_score > 0.5; }
 };
 
 struct Stats {
@@ -71,6 +77,7 @@ struct Seen {
     Roi roi;
     Landmarks lm;
     V3 wrist{};             // exhaustive(): single-view 3D guess at the model's hand size
+    int tile = -1;          // exhaustive(): the search tile whose palm gave this crop
 };
 
 class Tracker {
@@ -100,6 +107,41 @@ public:
     // view split off where its hand already is in that camera is dropped instead of starting a new
     // hand. Off by default: the stock model's side is noisier and the first guard costs it tracking.
     void set_misread_guard(bool on) { misread_guard_ = on; }
+    // Diagnostics (ft-handreplay --timeline): when set, every step appends one line per event that
+    // makes views and hands come and go (lost, handoff miss, search, palm rejected, new, forgotten...),
+    // so a gap in a hand's track can be put down to its cause. Off (null) live.
+    void set_trace(std::vector<std::string> *trace) { trace_ = trace; }
+    // Re-acquiring lost hands: for window_s after a hand (seen 3+ frames) stops being seen, the palm
+    // search puts up to `tiles` of its tiles on where that hand should be, in the cameras that see that
+    // spot best, before its usual rotation; with every_step, it searches on every processed set while
+    // such a hand is missing, not only 5 times a second. window_s 0: off (as before).
+    void set_reacquire(double window_s, int tiles, bool every_step, double clear_m = 0.12) {
+        reacquire_s_ = window_s, reacquire_tiles_ = tiles, reacquire_fast_ = every_step, reacquire_clear_ = clear_m;
+    }
+    // Two hands seen at once are one left and one right: when on, the pair's sides are settled together
+    // each step from each hand's accumulated left/right evidence (plus, weakly, which is further left),
+    // instead of each hand by its own running average, which let both hands be called the same side.
+    void set_pair_sides(bool on) { pair_sides_ = on; }
+    // A palm the search finds is skipped as a hand already tracked when its crop's centre is within
+    // this share of the crop's size of a tracked view's crop in that camera (0.5 before 2026-10-08).
+    // Smaller lets a hand right beside a tracked one be found; its landmarks then decide (same_hand).
+    void set_near(double frac) { near_frac_ = frac; }
+    // How long a lost hand tracked for 30+ frames is kept (not published) while its crops are retried
+    // where it was heading, before it's forgotten. Newer hands get 0.3 s (as all did before 2026-10-08).
+    void set_hold(double s) { hold_s_ = std::max(0.3, s); }
+    // Palm search tiles per round with no hand tracked, and with one (3 and 2 before 2026-10-08). A
+    // round runs its tiles in parallel, one per model thread, so up to --threads tiles cost one
+    // tile's wall time (but each tile's CPU).
+    void set_search_budget(int none, int one) { search_budget_ = std::max(1, none), search_budget1_ = std::max(1, one); }
+    // Testing re-acquisition (ft-handreplay --drop-every): until until_ns, the landmark model "misses"
+    // this hand: its views read presence 0, and new views within 15 cm of where it was are dropped.
+    // Returns false if there's no such hand with 3D.
+    bool blind(int id, int64_t until_ns);
+    // The palm search's tiles, a line each: index, camera, centre, size, rotation, weight.
+    std::vector<std::string> describe_tiles() const;
+    // The skeleton fit (track/skeleton.h), after each hand's 3D. On by default.
+    void set_skeleton(bool on) { skeleton_on_ = on; }
+    skel::Skeleton &skeleton() { return skel_; }
     // One view's 3D hand: each landmark along its ray, as far as how big the palm looks says
     // for a hand `scale` times the model's (Hand::scale). False if the palm is degenerate.
     static bool single_view(const Camera &cam, const Landmarks &lm, double scale, V3 out[21]);
@@ -131,13 +173,34 @@ private:
     static void smooth(Hand &h, int64_t t_ns);
     bool inside(const Camera &cam, V2 uv) const;
     void add_tiles(const Camera &cam, double frac, int gx, int gy);
+    double tile_rotation(const Camera &cam, V3 p) const;
+    // a hand that stopped being seen: where and how fast it was
+    struct Lost {
+        int id;
+        V3 palm, vel;
+        int64_t t_ns;
+    };
+    std::vector<Lost> lost_;
+    bool pair_sides_ = false;
+    int blind_id_ = 0;
+    int64_t blind_until_ = 0;
+    V3 blind_at_{};
+    double near_frac_ = 0.5;
+    double hold_s_ = 0.3;
+    double reacquire_s_ = 0, reacquire_clear_ = 0.12;   // a lost hand this near a tracked one isn't aimed at
+    int reacquire_tiles_ = 2;
+    bool reacquire_fast_ = false;
 
     std::map<std::string, const Camera *> cams_;
     const Nets &nets_;
     Pool &pool_;
-    int max_views_, hand_budget_ = 4, search_budget_ = 3;
+    int max_views_, hand_budget_ = 4, search_budget_ = 3, search_budget1_ = 2;
     double min_presence_ = 0.5, keep_presence_ = 0.5;
     bool misread_guard_ = false;
+    std::vector<std::string> *trace_ = nullptr;
+    void note(const char *fmt, ...) const __attribute__((format(printf, 2, 3)));
+    bool skeleton_on_ = true;
+    skel::Skeleton skel_;
     std::vector<View> views_;
     std::map<int, Hand> hands_;
     std::vector<Tile> tiles_;

@@ -16,7 +16,7 @@ POINTER_IDLE=30    # seconds without mouse use before the controllers get their 
 POINTER_WAKE_COUNTS=40     # mouse counts within 1 s needed to wake or re-claim the laser (ignores desk jitter)
 POINTER_CONTROLLER_PICKUP=1 # how hard a controller must move (x 0.35 m/s or 2 rad/s, for 100 ms) to take the laser back; raise it if resting controllers do (0.5 to 5)
 POINTER_DISTANCE=1.5       # metres to the cursor when it isn't on a panel
-POINTER_ROLE=right         # the hand role the pointer's controller takes: right | left | stylus (no hand); with a Frame controller held in that hand, clicks don't land, so pick the other
+POINTER_ROLE=treadmill     # the role the pointer's controller takes: treadmill (no hand: controllers keep theirs; needs the driver's default role 4 and a SteamVR restart) | right | left | stylus
 POINTER_CURSOR_DEG=0.4     # size of the free-space dot, in degrees
 POINTER_ORIGIN_FRACTION=0.95 # laser starts this far along eye->cursor: its beam is a few cm, SteamVR's hit dot tiny
 POINTER_LASER_WIDTH=0.8    # controller beam width (dashboard.laserRayWidthScale), set once at helper start
@@ -33,6 +33,7 @@ POINTER_GAZE=0             # 1 = the pointer goes where you look, the mouse does
 POINTER_GAZE_RETAKE=5      # gaze mode: how far (degrees) you look away from the pointer before the gaze takes it back from the mouse
 POINTER_GAZE_NUDGE_MAX=55  # gaze mode: a correction up to this far (degrees) before a click is learned as the eye tracker's error; a bigger one runs the quick check (55: half the headset's view)
 POINTER_GAZE_HOLD=0.5      # gaze mode: a press held this long (s) without moving becomes a real press (to drag); moved or released sooner, it clicks where you let go
+POINTER_GAZE_CONTROL_HOLD=0.12  # gaze mode, hands: a pinch with the pointer on a panel's resize handle or grab bar is a press after this long (s) held still, to drag it
 POINTER_GAZE_MOUSE_MOVE=held  # gaze mode: the mouse moves the pointer only while a button is held, as a correction (held) | any time (free)
 POINTER_GAZE_DOT=always    # gaze mode: the dot shows all the time (always) | only while the mouse moves it (moving)
 POINTER_GAZE_SHOW=1        # gaze mode, with POINTER_GAZE_DOT=moving: the dot shows this long (s) after the mouse moves it; also while a press is held, and a pulse per click
@@ -41,6 +42,7 @@ POINTER_HEAD_DEADZONE=0.5  # keyboard clicks at the gaze (Meta+J, Meta+K): degre
 POINTER_KEY_TAP=0.25       # keyboard clicks: let go within this (s) and it clicks where the dot was at the press, and tells the gaze tracker it was right
 GAZE_TRACKER=auto          # gaze service: auto = our own eye tracker when it's installed (gaze/tracker/install.sh, which install.sh offers), else SteamVR's | own = ours | steam = SteamVR's. Each keeps its own calibration (Calibrate on Frametop Input Settings' Gaze page)
 GAZE_EYE=auto              # gaze service: eye bias. auto = each eye weighted by how far off it was at your recent nudges | left | right = that eye counts twice
+HANDS_MODE=off             # hand tracking (hands/run.sh install), when it runs: frametop = while the Frametop desktop runs | always = whenever SteamVR runs, in games and the dashboard too | off = only by hand (ft-handsctl on). Frametop Input Settings' Hands page applies it at once
 HANDS_SWAP_SIDES=auto      # hand tracking: which side camera is which. auto = ft-hands tells from the hands and fixes ft-camd's names, which some SteamVR restarts swap | 0 = keep ft-camd's | 1 = exchange them
 HANDS_CPUS=5,6,7           # hand tracking: the CPUs its model threads run on
 HANDS_CAMERAS=auto         # hand tracking: auto (by the light) | mono (the IR cameras; also keeps ft-camd off the colour ones) | color | all
@@ -50,12 +52,112 @@ HANDS_BRIGHT_OFF=25        # ... and back to the mono cameras under this
 HANDS_COLOR_LEFT=color_video0  # hand tracking: which colour camera is passthrough_left (hands/tools/check_color.py tells)
 HANDS_COLOR_CROP=subtract  # hand tracking: how the colour calibration's crop applies, subtract | none (check_color.py tells)
 #HANDS_MODELS=            # hand tracking: a folder of palm.ncnn.* and hand.ncnn.* to use instead of the stock models (hands/models/ncnn)
+HANDS_MATTE=circle         # hand cutouts: circle = a round hole per hand | mesh = hand-shaped, from the skeleton | capsules = ft-hands' capsules (the old look)
+HANDS_MATTE_MARGIN=1.5     # hand cutouts: degrees (seen from the eyes) the hole reaches past the hand, held still (Hand cutout margin on the Hands page, live)
+HANDS_MATTE_MOTION=25      # ... plus how far the hand moves in this many ms
+HANDS_MATTE_MOTION_MAX=1.5 # ... up to this many degrees more
+HANDS_MATTE_LEAD=36        # hand cutouts: ms ahead the hands are moved along their velocity (about when a frame reaches the displays)
+#HANDS_MATTE_SHIFT=        # hand cutouts: a correction by distance, "metres:yaw,pitch ..." in degrees (right, up); off when empty
+HANDS_NEAR_REACH=0.075     # Frametop panels: a bare hand this close (m) in front of one touches it (about 3 inches): its ray hides, the index pokes, its pinches and fists are the panel's (beyond it they're the ray's or the gaze's; a hand resting low by the body: 0.04 at most)
+HANDS_POKE_ANGLE=50        # Frametop panels: a poke counts with the finger (knuckle to tip) within this many degrees of the panel's normal (coming at its face)
+HANDS_POKE_TRAVEL=0.017    # ... and presses on its first frame past the surface when it came this far (m) in, decisively (under 2.5 cm: steadily, each of the last 3 frames nearer); slower ones need two frames (0 = always two)
+HANDS_POKE_REST_BELOW=0.30 # ... and not from a hand resting low by the body: its palm this far (m) under the eyes
+HANDS_POKE_REST_NEAR=0.32  # ... and this close (m) to the head across the floor (typing under a low panel)
+HANDS_GRAB_SMOOTH_MINCUTOFF=1  # Frametop panels: a near grab's pinch point is smoothed this much held still (Hz; lower = steadier, laggier)
+HANDS_GRAB_SMOOTH_BETA=15  # ... and this much less as it moves (Hz per m/s; higher = keeps up better, wobbles more)
+HANDS_GRAB_DEADZONE=0.01   # ... and moves the panel only once it's this far (m) from where the pinch began
+HANDS_GRAB_ROTATE=1        # Frametop panels: one hand carrying a panel turns it with the wrist (yaw, pitch, roll, 1:1 on top of facing you) | 0 = it only faces you
+HANDS_GRAB_ROTATE_DEADZONE=5  # ... once the hand has turned this many degrees (then from there, no jump)
+HANDS_GRAB_BAND=0.06       # Frametop panels: a near pinch where the fingers meet within this far (m) outside a panel's border (or 2.5 cm inside) takes it: the corners resize, the rest of the border moves
+HANDS_PINCH_CLICK=1        # Frametop panels: a near pinch on a panel's content clicks where the fingertip's pointer was, held while the pinch is | 0 = nothing
+HANDS_CARD_PINCH=1         # Frametop panels: the thumb behind a panel's edge and the index and middle fingers together in front (or all four fingertips bunched at the thumb), like holding a card, carries it rigidly with the hand, turn and all; the index alone is the border's move | 0 = off
+HANDS_FIST_GRAB=1          # Frametop panels: a fist made at a panel (the palm within reach of it; a closed hand ft-hands calls a pinch too) carries it and turns it with the wrist; two fists stretch it | 0 = off
+HANDS_FIST_REACH=0.11      # ... a fist counts as at a panel with its palm or knuckles this far (m) in front of it (10 cm behind); a curled hand is the panel's that far out (0 = the touch zone's)
+HANDS_JOIN_REACH=0.15      # Frametop panels: while one hand holds a panel, the other's pinch or fist anywhere on it, within this far (m) in front (12 cm behind), joins as the second anchor: move, scale and turn it with both | 0 = the second hand has to find a grab zone like the first
+HANDS_BUTTON_REACH=0.015   # Frametop panels: a panel's round buttons (curve, reset, dock, close) take a fingertip or a pinch this far (m) each way from their centre at least; the nearest control wins
+HANDS_PINCH_BUTTONS=1      # ... and a pinch on one presses it | 0 = a pinch there takes the bar (moves the panel)
+HANDS_EDGE_GLOW=1          # Frametop panels: a soft white glow round the corner a pinch would resize from (an L), along the edge it would move the panel by, or round a button, brighter as the fingers come; brightest while resizing | 0 = the resize handle follows the hand instead
+HANDS_STRETCH_TURN=1       # Frametop panels: two hands holding one panel turn it on every axis with the line between them, and roll it with their wrists | 0 = about the vertical only
+HANDS_TRACK_GATE=1         # Frametop panels: a held panel ignores tracking no hand makes (a jump faster than 4 m/s or 100 m/s^2, a hand frame flipping), is smoothed harder on one camera's or edge-of-view frames, and holds still when the hand leaves the view at the side | 0 = takes every frame (the 12 cm jump rule only)
+HANDS_HOLD_LOST_MS=1750    # Frametop panels: what a hand holds (a pinch, a card, a fist, a poke's press) stays held while the hand is lost this long (ms); it lets go only when the hand is seen open again
+HANDS_FLICK=1              # Frametop panels: flick a panel away: the hand at it, flicked out fast with the fingers opening, sends it 3 m out (HANDS_THROW_DISTANCE); "grab that" brings it back | 0 = off
+HANDS_FLICK_SPEED=1.2      # ... the hand moving out this fast (m/s), 12 cm or more
+HANDS_FLICK_OPENING=0.15   # ... the fingers opening this much on the way (their mean extension; 0 = an open hand pushed out flicks too)
+HANDS_THROW=1              # Frametop panels: let go of a carried panel (a card, a fist, a pinch on its border) while the hand moves out fast and it flies on that way, out as far and as big as it was before you took it (one you never moved: to 3 m out) | 0 = off (it stays where you let go)
+HANDS_THROW_SPEED=0.45     # ... the hand moving at least this fast (m/s) in the last 0.15 s before it lets go, within 70 degrees of straight away from you
+HANDS_THROW_DISTANCE=3     # ... and where thrown, flicked and pushed panels go when they have no distance to go back to (taken by a hand or "grab that" and not put down past 1.2 m: as far and as big as they were): this far (m) from the eyes, facing you
+HANDS_PUSH=1               # Frametop panels: push one away: an open hand, palm to it, pushed straight into it fast (or 15 cm in slowly) sends it 3 m out (HANDS_THROW_DISTANCE); an open hand then doesn't poke | 0 = off
+HANDS_PUSH_SPEED=0.5       # ... the palm moving into it this fast (m/s), 5 cm or more in
+HANDS_TARGET_GLOW=1        # Frametop panels: a soft white halo outside the edges of the panel "grab that" would take as the open hand is held out to it (or, dimmer, one a push or flick would throw) | 0 = off
+HANDS_GRAB_THAT=1          # Frametop panels: hold an open hand out to one farther than HANDS_GRAB_THAT_FROM, palm to it, then pull back making a fist: it comes to arm's reach (push, flick or throw it to send it away) | 0 = off
+HANDS_GRAB_THAT_DISTANCE=0.45  # ... to the front slot at arm's reach: this far (m) ahead of the eyes, at the fist's height, facing you, as big as its text needs to read (see SCREEN_SPIN_PPD); the one in the slot goes home first
+HANDS_GRAB_THAT_WIDTH=0.6  # ... (unused since the front slot, 2026-10-11: screens come readable, SCREEN_SPIN_PPD)
+HANDS_GRAB_THAT_FROM=0.8   # ... only a panel whose centre is farther than this (m) from the eyes, and not one held (0 = any: at one near you it goes back where it came from, or is centred)
+HANDS_GRAB_THAT_MARGIN=0   # ... the line from the eyes through the open palm has to meet the panel, or pass this close (m) to it
+HANDS_GRAB_THAT_MARGIN_DEG=6  # ... or, meeting none, the panel it passes nearest within this many degrees (seen from the eyes: the open palm is held under the line of sight, so the line runs just under a panel you look at) (0 = it has to meet one)
+HANDS_GRAB_THAT_FACING=55  # ... the palm facing along that line within this many degrees while it's held out (0 = any way)
+HANDS_SWEEP=1              # the lazy susan by hand: an open hand on its edge (the palm leading, not flat; the return stroke does nothing), off the screens, swept 25 cm sideways within 0.5 s: the next screen on that side, one per stroke | 0 = off
+HANDS_SWEEP_BACK=0         # ... 1 = a stroke with the back of the hand leading counts too
+SCREEN_SPIN_BRING=1        # the front slot: the lazy susan (the sweep, Meta+Alt+Tab) brings the next screen round (by where each lives) to reading distance in front of you and gives it the typing; grab that brings one to arm's reach (grab that at the one in the slot: closer). One at a time: the one there goes home first. A push, flick or throw steps it back (arm's reach -> reading -> home); turned away from it goes home unless used a while (SCREEN_FRONT_KEEP_MS); moved by hand or laser it lives there; resized there it keeps that size in the slot. A strip of names shows the order for 2.5 s | 0 = the lazy susan turns the room instead
+SCREEN_FRONT_AWAY=0        # ... 1 = turned away from, it goes home (unless used SCREEN_FRONT_KEEP_MS); 0 = it stays until you move it (a gaze-pinch drag, a hand grab, a push, grab that) or the next stroke
+SCREEN_FRONT_KEEP_MS=3000  # ... this much input on the screen in the slot keeps it there when you look away (0 = never kept)
+SCREEN_UI_SCALE=           # ... a remote display's own UI scale for its readable size, by screen number: "102=2" (a Mac's Retina display); KWin's screens use their own scale
+HANDS_RESET_HOLD_MS=0      # the reset button under a screen resets the layout when held this long (ms; laser or finger) | 0 = a press
+SCREEN_SPIN_DISTANCE=1.0   # ... a brought screen comes this far ahead (m)
+SCREEN_SPIN_PPD=26         # ... as big as its text needs to read: its logical pixels (KWin's scale undone) at this many per degree of view
+SCREEN_SPIN_MAX_DEG=100    # ... at most this wide (degrees; wider than 60 it curves round you) and SCREEN_SPIN_MAX_TALL_DEG (55) tall, its shape kept
+SCREEN_SPIN_MAX_WIDE_DEG=150   # ... an ultrawide (3:1 or wider, like 5120x1440) at most this wide instead, so its text reads too
+HANDS_NEAR=1               # Frametop panels (direct touch): poke to click, pinch the border to move or resize, a fist to carry, gaze or not (1 = with POINTER_HANDS=1, when the pointer helper says a hand is bare | on = the same without POINTER_HANDS: the helper runs only the handoff for it | 0 = off | force = always, for testing)
+HANDS_CUTOUTS=0            # hands: 1 = also cut a round hole per hand in Frametop's panels, so Room View shows the real hand through them (off: ft-handview draws the hands)
+HANDS_PALM_MENU=1          # hands: turn a bare hand palm up toward your face, held still, away from the panels, and look at it, and a ring shows above the palm; a plain thumb-index pinch with that hand opens the Steam menu (or closes the dashboard). 0 = off
+HANDS_VIEW_MODEL=asset     # rendered hands (ft-handview): a 3D hand model posed by the tracking, asset (WebXR's generic hand) | babylon | mrtk3 | godot | mrtk2 (screens/assets/hands/README.md) | robot = a robot hand built from the skeleton (white shells, dark joints, cyan accents) | capsules = tubes from the skeleton (the older look)
+HANDS_VIEW_STYLE=ghost     # rendered hands: ghost = light, see-through, glowing toward its edges | solid = matte light grey lit from above, a soft rim light
+HANDS_VIEW_ROOMVIEW=1      # rendered hands: 1 = drawn with Room View on too, over the cutout | 0 = only with Room View off
+HANDS_FLAG_BUFFER=1        # hands: keep the last seconds of hand crops in RAM (about 50 MB) so `ft-handsctl flag [note]` can save a tracking failure for the offline tools | 0 = keep nothing
+HANDS_FLAG_DIR=~/.local/share/frametop/hands/flags  # hands: where `ft-handsctl flag` saves flags (they show your hands and some of the room)
+HANDS_FLAG_FLASH=1         # hands: the drawn hands pulse cyan when a flag is taken | 0 = no pulse
+HANDS_FLAG_TONE=0          # hands: 1 = also a short tone when a flag is taken
 POINTER_HANDS=0            # 1 = pinches click (on the release; hold and move to nudge the pointer first) and grips press and drag, with hand tracking
-POINTER_PINCH_GAIN=0.5     # hands: the pointer moves this times the pinching hand's angle (precision)
-POINTER_PINCH_DEADZONE=1.5 # hands: degrees the pinching hand moves before the pointer does (a tap's jitter)
+POINTER_PINCH_GAIN=0.5     # hands without gaze mode: a held pinch drags the pointer this times the hand's angle (precision)
+POINTER_PINCH_DEADZONE=1.5 # hands without gaze mode: degrees the pinching hand moves before the pointer does (a tap's jitter)
 POINTER_GRIP_GAIN=1        # hands: the pointer moves this times the gripping hand's angle
 POINTER_GRIP_BELOW=0.35    # hands: grips beginning more than this (m) below the eyes are ignored (hands on a desk)
-POINTER_PINCH_TYPING=1     # hands: no pinch within this many seconds of a key (typing touches thumb to index)
+POINTER_PINCH_TYPING=2     # hands: typing on a keyboard: no pinch, grip, poke or hand ray within this many seconds of a key, except by a hand lifted off the keys (typing touches thumb to index); 0 = no typing guard
+POINTER_TYPING_RAISE=0.08  # hands: a hand that was typing stays held back, however long you pause, until it rises this far (m) above where it typed, or turns its palm up
+POINTER_TYPING_BELOW=0.2   # hands: the keyboard is where the palms are at least this far (m) below the eyes, in front of you, palms down
+POINTER_TYPING_POSTURE=0.3 # hands: both hands down on the keyboard together this long (s) count as typing before the first key; 0 = only keys
+POINTER_TYPING_RECENT=600  # hands: ... only within this many seconds of a key (a keyboard in use; both hands resting on a desk otherwise hold gaze pinches back); 0 = always
+POINTER_HAND_RAY=1         # hands: a bare hand raised and pointing shows a ray that drives the pointer like a controller's laser (pinch = click, middle pinch = right click or scroll); 0 = gaze pinches only
+POINTER_RAY_DEADZONE=2.5   # hand ray: degrees the ray turns during a pinch before the press drags (a click's own wobble stays inside)
+POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out pushes it away and pulling in brings it near
+POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle pinch moved up or down (-1 turns the direction round)
+POINTER_RAY_RELEASE=2      # hand ray: seconds after the ray goes before the pointer it woke lets go of the laser
+POINTER_RAY_GRACE=0.5      # hand ray: seconds a hand keeps the laser after its ray drops (the other hand's ray takes it after this, or at once by pinching or raising)
+POINTER_RAY_BEAM=0         # hand ray: 0 = only its dot shows (the beam starts just short of it; SteamVR's beam width is one setting for every laser, read only when SteamVR starts) | 1 = the whole beam from the hand
+POINTER_RAY_READY=6        # hand ray: shows only with the thumb and index tips within this many cm (gone past POINTER_RAY_READY_HIDE, 10): a laser for pinching | 0 = whenever the hand points
+POINTER_RAY_FIST_CURL=1.1  # hand ray: a fist (the index and the other fingers curled under this, tip-to-wrist over knuckle-to-wrist) drops the laser, and a pinch made closing into one doesn't click | 0 = off
+POINTER_PINCH_NO_RAY=0     # hands, gaze off: 1 = a pinch or fist with no laser up presses where the pointer is and drags it (air mouse; most accidental clicks of the 2026-10-11 test) | 0 = it only wakes the pointer
+POINTER_RAY_SMOOTH_MINCUTOFF=0.8  # hand ray: smoothing with the hand still (Hz; lower = steadier, laggier)
+POINTER_RAY_SMOOTH_BETA=0.06  # hand ray: ... and how much it lets up as the hand turns (Hz per deg/s; higher = keeps up better)
+POINTER_RAY_SMOOTH_HOLD=0.5 # hand ray: the still smoothing while a pinch is held (a drag's precision; Hz)
+POINTER_RAY_STEADY=1       # hand ray: while a pinch is held, the ray pivots on where the shoulder was at the press, so looking around doesn't move what you drag
+POINTER_RAY_TAP=0.3        # hand ray: for this many seconds after a pinch begins ...
+POINTER_RAY_TAP_DEADZONE=6 # ... the ray turns this many degrees before the press drags (a quick tap stays a click)
+POINTER_RAY_TORSO_WRISTS=1 # hand ray: 1 = the shoulders the ray starts from face between your head and your hands, so looking aside while pointing moves the ray less | 0 = they follow the head
+POINTER_RAY_HAND_WEIGHT=0  # hand ray: 0..1, how far the ray turns toward where the hand itself points (1 = the hand alone); measured shakier, so 0
+POINTER_RAY_HAND_PITCH=-30 # hand ray: with a weight, degrees the hand's own direction tilts from the wrist-to-knuckles line (negative: toward the palm) ...
+POINTER_RAY_HAND_YAW=8     # ... and turns out, away from the thumb
+POINTER_RAY_ANCHOR=0       # hand ray: 1 = during a pinch, the knuckle point the ray aims through is pinned to the palm (measured no steadier, so 0)
+POINTER_GAZE_PINCH=1       # hands in gaze mode: 1 = a pinch clicks where you look (middle pinch: right click; a pinch by each hand holds left and right together) | 0 = no clicks at the gaze (direct touch, and a ray with POINTER_GAZE_HAND_RAY=1, still work)
+POINTER_GAZE_TWO_HAND=1    # hands in gaze mode, as Meta+J then Meta+K: while one hand's pinch is held back (aiming, nudged), the other hand's pinch presses the left button where the dot is; the drag lasts while either pinch is held, the hand still pinching drags | 0 = off
+POINTER_GAZE_RIGHT_DRAG=0  # hands in gaze mode: an index pinch within this many seconds of the other hand's index tap holds the right button where you look (the tap itself clicks) | 0 = off
+POINTER_TYPING_HIDE=1.5    # gaze mode: the dot and its laser hide this many seconds after each key (0 = never)
+POINTER_PINCH_MAX_SPEED=1.0  # a pinch begun with its palm moving faster than this (m/s, smoothed) within 0.25 s doesn't click (lazy susan strokes, waves) | 0 = off
+POINTER_GAZE_SCROLL=1      # hands in gaze mode: the thumb on both the index and middle tips (within POINTER_GAZE_SCROLL_GAP, 0.035 m) scrolls where you looked as the hand moves (0.5 cm dead zone, full at 4 cm), times this (-1 turns it round) | 0 = off
+POINTER_GAZE_CHORD=0       # hands in gaze mode: 1 = while one hand's pinch is held, the other hand's pinch holds the right button (the chord; the right-drag replaced it)
+POINTER_GAZE_HAND_RAY=0    # hands in gaze mode: 0 = no hand ray, your eyes aim and a pinch clicks where you look | 1 = a raised, pointing hand's ray works beside the gaze
+POINTER_GAZE_PINCH_DEADZONE=4 # hands in gaze mode: degrees (seen from the eye; about 3 cm at arm's length) a held pinch moves before it nudges the pointer; held still for POINTER_GAZE_HOLD it's a press, to drag
+POINTER_GAZE_PINCH_GAIN=0.3   # hands in gaze mode: past that, the pointer moves this times the pinching hand's angle (low, for small corrections)
 DISPLAY_OFF_MIN=0  # minutes without use before frametop-power turns the displays off, even if the headset seems worn (0 = never)
 DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (mm) within 10 s counts as use
 DISPLAY_MOVE_DEG=0.5 # displays off: or turning this far (degrees) within 10 s

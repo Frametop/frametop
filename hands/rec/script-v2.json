@@ -1,0 +1,115 @@
+{
+ "version": 1,
+ "name": "v2",
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {"title": "Hand recorder", "seconds": 8, "text": "Follow the steps on this panel. Each one plays a short clip of what to do: copy it. In the clips the palm is light and the back of the hand is dark.|The button on the right side of the headset goes on when a step waits for you, and pauses while recording."},
+ "done": {"title": "All done", "seconds": 6, "text": "Thank you! You can take off the headset.|Review your recordings in the Hand recorder window."},
+ "stopped": {"title": "Stopped", "seconds": 4, "text": "What was recorded so far is saved. Review it in the Hand recorder window."},
+ "objects": {"pencil": "pencil or pen", "phone": "phone", "cup": "cup", "keyboard": "keyboard", "mouse": "mouse", "gamepad": "gamepad", "small": "small thing"},
+ "sections": [
+  {"id": "hand-size", "title": "Hand size", "requires": [], "go": "Hold", "quick": true, "intro": "First, your hand size. Copy the clip: both hands about 40 cm out, still, about 1 s for each shape.",
+   "prompts": [
+    {"text": "Both hands about 40 cm out, still|Palms toward you, then backs toward you|Fingers spread, then a fist, then point|About 1 s for each shape", "seconds": 10, "hands": "both", "demo": "1", "distance": "mid"}
+   ]},
+
+  {"id": "index-taps", "title": "Index taps", "requires": [], "quick": true, "intro": "Thumb to index fingertip taps: light and lazy, about 2 a second, the way you'd click.",
+   "prompts": [
+    {"text": "Left hand only, the right one down and out of view.|One hand low and relaxed, other fingers loosely curled: look down at it|2 light taps palm down|2 taps edge-on, 2 palm up, 2 palm toward your face", "seconds": 12, "hands": "left", "demo": "2a", "demo_mirror": true, "quick": false},
+    {"text": "Right hand only, the left one down and out of view.|One hand low and relaxed, other fingers loosely curled: look down at it|2 light taps palm down|2 taps edge-on, 2 palm up, 2 palm toward your face", "seconds": 12, "hands": "right", "demo": "2a"},
+    {"text": "Now both hands at once, each doing the same.|One hand low and relaxed, other fingers loosely curled: look down at it|2 light taps palm down|2 taps edge-on, 2 palm up, 2 palm toward your face", "seconds": 12, "hands": "both", "demo": "2a", "quick": false},
+    {"text": "Left hand only, the right one down and out of view.|Keep tapping while you move: centre at chest height|Far out to your side, then crossed past the middle|Close to your face, then at arm's length|Quick taps, a double tap, one slow press", "seconds": 18, "hands": "left", "demo": "2b", "demo_mirror": true, "quick": false},
+    {"text": "Right hand only, the left one down and out of view.|Keep tapping while you move: centre at chest height|Far out to your side, then crossed past the middle|Close to your face, then at arm's length|Quick taps, a double tap, one slow press", "seconds": 18, "hands": "right", "demo": "2b", "quick": false},
+    {"text": "Now both hands at once, each doing the same.|Keep tapping while you move: centre at chest height|Far out to your side, then crossed past the middle|Close to your face, then at arm's length|Quick taps, a double tap, one slow press", "seconds": 18, "hands": "both", "demo": "2b", "quick": false},
+    {"text": "Both hands tapping|Then one hand over the other, still tapping", "seconds": 10, "hands": "both", "demo": "2c", "quick": false}
+   ]},
+
+  {"id": "middle-taps", "title": "Middle taps", "requires": [], "intro": "Now the thumb meets the middle finger's pad. Keep the index half-curled, out of the way.",
+   "prompts": [
+    {"text": "Left hand only, the right one down and out of view.|Thumb to the middle finger's pad, index half-curled: look down at the hand|2 taps palm down, edge-on, palm up, toward your face|Then a few taps out to the side and close to your face", "seconds": 12, "hands": "left", "demo": "3a", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|Thumb to the middle finger's pad, index half-curled: look down at the hand|2 taps palm down, edge-on, palm up, toward your face|Then a few taps out to the side and close to your face", "seconds": 12, "hands": "right", "demo": "3a"},
+    {"text": "Now both hands at once, each doing the same.|Thumb to the middle finger's pad, index half-curled: look down at the hand|2 taps palm down, edge-on, palm up, toward your face|Then a few taps out to the side and close to your face", "seconds": 12, "hands": "both", "demo": "3a"},
+    {"text": "Left hand only, the right one down and out of view.|3 slow, firm presses|Keep tapping and turn your head until the hand reaches the edge of the view|Then turn the other way", "seconds": 13, "hands": "left", "demo": "3b", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|3 slow, firm presses|Keep tapping and turn your head until the hand reaches the edge of the view|Then turn the other way", "seconds": 13, "hands": "right", "demo": "3b"},
+    {"text": "Now both hands at once, each doing the same.|3 slow, firm presses|Keep tapping and turn your head until the hand reaches the edge of the view|Then turn the other way", "seconds": 13, "hands": "both", "demo": "3b"}
+   ]},
+
+  {"id": "look-alikes", "title": "Look-alikes", "requires": [], "intro": "Things that look like taps but aren't: near misses, rubbing, other fingers, fists. None of them should touch thumb to index.",
+   "prompts": [
+    {"text": "Left hand only, the right one down and out of view.|Stop 1 cm short of a tap|Rub the thumb along the side of the index|Ring finger to thumb|Let a loosely curled hand rest", "seconds": 12, "hands": "left", "demo": "4a", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|Stop 1 cm short of a tap|Rub the thumb along the side of the index|Ring finger to thumb|Let a loosely curled hand rest", "seconds": 12, "hands": "right", "demo": "4a"},
+    {"text": "Now both hands at once, each doing the same.|Stop 1 cm short of a tap|Rub the thumb along the side of the index|Ring finger to thumb|Let a loosely curled hand rest", "seconds": 12, "hands": "both", "demo": "4a"},
+    {"text": "Left hand only, the right one down and out of view.|Close a fist slowly, open it|Close it fast, open it|Once at chest height, once low", "seconds": 12, "hands": "left", "demo": "4b", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|Close a fist slowly, open it|Close it fast, open it|Once at chest height, once low", "seconds": 12, "hands": "right", "demo": "4b"},
+    {"text": "Now both hands at once, each doing the same.|Close a fist slowly, open it|Close it fast, open it|Once at chest height, once low", "seconds": 12, "hands": "both", "demo": "4b"}
+   ]},
+
+  {"id": "hold-drag", "title": "Hold and drag", "requires": [], "intro": "Pinch and hold, then move while holding, as if dragging a window.",
+   "prompts": [
+    {"text": "Left hand only, the right one down and out of view.|Pinch and hold 3 s|Drag up, down, left, right|Roll the wrist while holding|Loosen the other fingers without letting go", "seconds": 13, "hands": "left", "demo": "5a", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|Pinch and hold 3 s|Drag up, down, left, right|Roll the wrist while holding|Loosen the other fingers without letting go", "seconds": 13, "hands": "right", "demo": "5a"},
+    {"text": "Now both hands at once, each doing the same.|Pinch and hold 3 s|Drag up, down, left, right|Roll the wrist while holding|Loosen the other fingers without letting go", "seconds": 13, "hands": "both", "demo": "5a"},
+    {"text": "One hand holds a pinch, the other taps|Hands apart, then close, then crossed", "seconds": 10, "hands": "both", "demo": "5b"}
+   ]},
+
+  {"id": "scroll", "title": "Three-finger scroll", "requires": [], "intro": "Thumb on the index and middle fingertips together, held while the hand moves.",
+   "prompts": [
+    {"text": "Left hand only, the right one down and out of view.|Thumb on the index and middle tips|Move up and down slowly, then fast|Let the ring finger join once", "seconds": 11, "hands": "left", "demo": "6", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|Thumb on the index and middle tips|Move up and down slowly, then fast|Let the ring finger join once", "seconds": 11, "hands": "right", "demo": "6"},
+    {"text": "Now both hands at once, each doing the same.|Thumb on the index and middle tips|Move up and down slowly, then fast|Let the ring finger join once", "seconds": 11, "hands": "both", "demo": "6"}
+   ]},
+
+  {"id": "palm-up", "title": "Palm up", "requires": [], "quick": true, "intro": "Palms up. This is where tracking gets lost today, so take your time: the fingertips drop toward the floor, then rise toward you.",
+   "prompts": [
+    {"text": "Arms forward, palms up, fingers flat: hands close (elbows tucked)|Fingertips drop toward the floor and back: 1 slow, 2 fast|Same with forearms half out, then arms straight|One drop low at the waist, one at eye height", "seconds": 19, "hands": "both", "demo": "7a"},
+    {"text": "Palms up at the same three distances|Fingertips curl up toward you and back: 1 slow, 2 fast each", "seconds": 15, "hands": "both", "demo": "7b", "quick": false},
+    {"text": "Left hand only, the right one down and out of view.|Palm up, hold a pinch|Drop the fingertips and raise them, still pinching|Flip palm up and down with the wrist bent", "seconds": 12, "hands": "left", "demo": "7c", "demo_mirror": true, "quick": false},
+    {"text": "Right hand only, the left one down and out of view.|Palm up, hold a pinch|Drop the fingertips and raise them, still pinching|Flip palm up and down with the wrist bent", "seconds": 12, "hands": "right", "demo": "7c", "quick": false},
+    {"text": "Now both hands at once, each doing the same.|Palm up, hold a pinch|Drop the fingertips and raise them, still pinching|Flip palm up and down with the wrist bent", "seconds": 12, "hands": "both", "demo": "7c", "quick": false}
+   ]},
+
+  {"id": "strokes", "title": "Strokes and gestures", "requires": [], "intro": "Quick strokes, a wave, and talking with your hands.",
+   "prompts": [
+    {"text": "Left hand only, the right one down and out of view.|Lazy susan stroke each way, with the return stroke|A wave|5 s of talking with your hands", "seconds": 14, "hands": "left", "demo": "8", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|Lazy susan stroke each way, with the return stroke|A wave|5 s of talking with your hands", "seconds": 14, "hands": "right", "demo": "8"},
+    {"text": "Now both hands at once, each doing the same.|Lazy susan stroke each way, with the return stroke|A wave|5 s of talking with your hands", "seconds": 14, "hands": "both", "demo": "8"}
+   ]},
+
+  {"id": "reach", "title": "Reach and pull", "requires": [], "intro": "Reaching out: grab something far away and pull it in, push and flick away, then a real object. Have a cup or your phone in reach.",
+   "prompts": [
+    {"text": "Left hand only, the right one down and out of view.|Open palm at a far target|Close to a fist and pull back", "seconds": 8, "hands": "left", "demo": "9a", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|Open palm at a far target|Close to a fist and pull back", "seconds": 8, "hands": "right", "demo": "9a"},
+    {"text": "Now both hands at once, each doing the same.|Open palm at a far target|Close to a fist and pull back", "seconds": 8, "hands": "both", "demo": "9a"},
+    {"text": "Left hand only, the right one down and out of view.|Push away, then flick away|Reach for a cup or your phone", "seconds": 10, "hands": "left", "demo": "9b", "demo_mirror": true},
+    {"text": "Right hand only, the left one down and out of view.|Push away, then flick away|Reach for a cup or your phone", "seconds": 10, "hands": "right", "demo": "9b"},
+    {"text": "Now both hands at once, each doing the same.|Push away, then flick away|Reach for a cup or your phone", "seconds": 10, "hands": "both", "demo": "9b"}
+   ]},
+
+  {"id": "fists", "title": "Fists", "requires": [], "intro": "Two fists, as if holding a big screen by its edges.",
+   "prompts": [
+    {"text": "Two fists: hold, pull apart, push together|Fists with the palms in, down, then up", "seconds": 9, "hands": "both", "demo": "10"}
+   ]},
+
+  {"id": "edges", "title": "Edges and exits", "requires": [], "intro": "Hands leaving the view and coming back. Keep your head still and go slowly near the edges.",
+   "prompts": [
+    {"text": "Right hand open: slide out past the right edge until gone, wait 1 s, back|Same up past your face|Left hand pinching: out past the left edge, then down past your lap", "seconds": 19, "hands": "both", "demo": "11a"},
+    {"text": "Both hands cross fully to the opposite sides|Hold a moment, come back", "seconds": 10, "hands": "both", "demo": "11b"}
+   ]},
+
+  {"id": "desk-work", "title": "Desk work", "requires": [], "intro": "Now your desk. Look down at your hands while you work.", "defaults": {"position": "down"},
+   "prompts": [
+    {"text": "Type a few words, use the mouse, pick up the phone|One tap, then back to the keys", "seconds": 15, "hands": "both", "demo": "12", "when": "objects:keyboard"},
+    {"text": "No keyboard: rest your hands on the desk and pretend.|Type a few words, use the mouse, pick up the phone|One tap, then back to the keys", "seconds": 15, "hands": "both", "demo": "12", "when": "!objects:keyboard"}
+   ]},
+
+  {"id": "controllers", "title": "Controllers", "requires": ["controllers"], "intro": "Put both controllers on the desk in front of you, in view.",
+   "prompts": [
+    {"text": "Pick up the controllers, set them down|A tap in between", "seconds": 10, "hands": "both", "demo": "13"}
+   ]},
+
+  {"id": "no-hands", "title": "No hands", "requires": [], "quick": true, "intro": "Last one: put your hands down, out of view.",
+   "prompts": [
+    {"text": "Keep your hands out of view and look slowly around the room.", "seconds": 10, "hands": "none", "picture": "no-hands"}
+   ]}
+ ]
+}

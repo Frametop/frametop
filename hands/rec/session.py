@@ -57,9 +57,28 @@ FT_CAMD = os.path.join(HANDS, "build", "ft-camd")
 PANEL_BIN = os.path.join(HERE, "build", "ft-handpanel")
 SCRIPT_PATH = os.path.join(HERE, "script.json")
 POSES_DIR = os.path.join(HERE, "poses")   # the pose pictures: poses.json and its PNGs
+DEMOS_DIR = os.path.join(HERE, "demos")   # the demo clips: <id>.gif (DESIGN.md "Demo clips")
+RECORDED_DEMOS_DIR = os.path.join(HERE, "demos-recorded")   # the same parts from real camera frames
+# The demo clips a contributor follows: recorded (a real person's hands, from a session's side
+# cameras: demo/camgifs.py) or skeleton (the drawn hand, its palm light and its back dark).
+GUIDANCE = (("recorded", "Recorded hands"), ("skeleton", "Skeleton hands"))
 BASE_DIR = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 PANEL_SOCKET = "ft_handpanel"
 CAMD_UNIT = "frametop-handrec-camd.service"
+# Frametop's live hand tracking (hands/run.sh, ft-handsctl): an ft-camd the recorder uses as it is
+LIVE_CAMD_UNIT, LIVE_HANDS_UNIT = "frametop-camd.service", "frametop-hands.service"
+# Frametop's drawn hands and hand pointer: off for a session, so no hand overlay is in view and no gesture
+# clicks or opens Steam's menu while the person performs the steps (Session._quiet_hands)
+QUIET_UNITS = ("frametop-handview.service", "frametop-pointer.service")
+PAUSED_UNITS_FILE = "handrec-paused-units"   # in run_dir(): the ones to start again, if a session didn't
+SIDE_CAMERAS = ("slam_left", "slam_right")   # a recording needs these (Session._first_set)
+CAMERAS_BACK_S = 120     # how long a lost recording waits for the cameras (Session._cameras_back)
+STALL_S = 3.0            # a recording with no new set for this long is lost (Session._watch_recording)
+MAX_CAMERA_LOSSES = 3    # then the session stops
+CAMERAS_TITLE = "Waiting for the cameras"
+CAMERAS_TEXT = ("The headset's cameras restarted (SteamVR moves them when the colour camera module is unplugged "
+                "or plugged in), or they stopped. If you took the headset off, put it back on. This step goes "
+                "again once they're back.")
 HANDS_UNIT = "frametop-handrec-hands.service"
 # The standalone Hand Recorder (takes.standalone()): its binaries run on the host, so ft-hands
 # starts directly rather than in the dev container, and repairs mean its install command.
@@ -374,6 +393,45 @@ def stop_unit(unit):
     subprocess.run(host_command("systemctl", "--user", "stop", unit), capture_output=True, timeout=30)
 
 
+def pause_units(units, path, log=lambda line: None):
+    """Stop those of units that are running, listed in path first so resume_units starts them again
+    even after a crash. Returns the ones stopped."""
+    paused = [u for u in units if unit_active(u)]
+    if not paused:
+        return []
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(paused, f)
+    for unit in paused:
+        stop_unit(unit)
+        log("paused %s for the session" % unit)
+    return paused
+
+
+def resume_units(path, log=lambda line: None):
+    """Start the units pause_units listed in path, and forget them. Returns them."""
+    try:
+        with open(path) as f:
+            units = [u for u in json.load(f) if isinstance(u, str) and u.endswith(".service")]
+    except (OSError, ValueError, TypeError):
+        return []
+    for unit in units:
+        r = subprocess.run(host_command("systemctl", "--user", "start", unit), capture_output=True, text=True, timeout=60)
+        log("started %s again%s" % (unit, "" if r.returncode == 0 else
+                                     " FAILED (exit %d): %s" % (r.returncode, (r.stderr or r.stdout).strip())))
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return units
+
+
+def restart_units(units):
+    """Restart those that are running, in order."""
+    for unit in units:
+        subprocess.run(host_command("systemctl", "--user", "try-restart", unit), capture_output=True, timeout=60)
+
+
 def ring_alive(path=None):
     try:
         r = Ring(path or os.path.join(run_dir(), "cam-ring"))
@@ -493,7 +551,7 @@ class HandsFile:
                 if len(data) < size:
                     return None
                 magic, version, _, seq, _, publish_ns, nhands, _ = HANDS_HDR.unpack_from(data, 0)
-                if magic != b"FHHANDS1" or version != 1:
+                if magic != b"FHHANDS1" or version < 1:   # 2 appends the skeleton; the start is unchanged
                     return None
                 if seq % 2 or os.pread(fd, 8, 16) != data[16:24]:
                     continue
@@ -651,6 +709,30 @@ class Recorder:
             return os.path.getsize(os.path.join(self.dir, "sets.bin")) > 0
         except OSError:
             return False
+
+    def sets_written(self):
+        """How many sets the part has written so far (0 before the first)."""
+        try:
+            path = os.path.join(self.dir, "sets.bin")
+            with open(path, "rb") as f:
+                head = f.read(16)
+            magic, _, size = struct.unpack("<8sII", head)
+            return os.path.getsize(path) // size if magic.rstrip(b"\0") == b"FHSET01" and size else 0
+        except (OSError, struct.error):
+            return 0
+
+    def cameras(self):
+        """The cameras in the first set written (their calibration names), [] before there is one."""
+        try:
+            with open(os.path.join(self.dir, "sets.bin"), "rb") as f:
+                data = f.read(16 + 8 * 40)
+            magic, n, _ = struct.unpack_from("<8sII", data, 0)
+            if magic.rstrip(b"\0") != b"FHSET01" or len(data) < 16 + n * 40:
+                return []
+            return [struct.unpack_from("<16s", data, 16 + i * 40)[0].split(b"\0", 1)[0].decode(errors="replace")
+                    for i in range(n)]
+        except (OSError, struct.error):
+            return []
 
     def stop(self):
         """End it (SIGTERM: ft-hands writes out its queue) and put the part in place. Afterwards
@@ -946,11 +1028,47 @@ def pose_view(poses, p):
     return e["path"], mode, e["caption"]
 
 
+def demo_view(demos_dir, p):
+    """A prompt's demo clip: (path, mode), mode "" (as made: a right hand, or both hands) or
+    "mirror" (the prompt's "demo_mirror": a right hand's clip for the left hand). ("", "")
+    when it has none, or its file isn't there."""
+    demo = p.get("demo") or ""
+    path = os.path.join(demos_dir, os.path.basename(demo) + ".gif") if demo else ""
+    if not path or not os.path.isfile(path):
+        return "", ""
+    return path, "mirror" if p.get("demo_mirror") else ""
+
+
+def has_clips(demos_dir):
+    try:
+        return any(n.endswith(".gif") for n in os.listdir(demos_dir))
+    except OSError:
+        return False
+
+
+def default_guidance(recorded_dir=None):
+    """Recorded clips when there are any, else the skeleton ones."""
+    return "recorded" if has_clips(recorded_dir or RECORDED_DEMOS_DIR) else "skeleton"
+
+
+def guided_demo_view(guidance, skeleton_dir, recorded_dir, p):
+    """demo_view in the guidance's folder, else the other one (a part with no clip of that kind):
+    (path, mode, key), key true for a skeleton clip (the panel and window show its colours' key)."""
+    dirs = [(recorded_dir, False), (skeleton_dir, True)]
+    if guidance != "recorded":
+        dirs.reverse()
+    for d, key in dirs:
+        path, mode = demo_view(d, p)
+        if path:
+            return path, mode, key
+    return "", "", False
+
+
 # ------------------------------------------------------------------------------------------
 # The script
 
 HAND_VALUES = ("left", "right", "both", "none", "any", "")
-PROMPT_KEYS = ("text", "seconds", "hands", "pose", "distance", "position", "object", "controller")
+PROMPT_KEYS = ("text", "seconds", "hands", "pose", "distance", "position", "object", "controller", "demo")
 
 
 def _when_ok(cond, ctx):
@@ -989,7 +1107,7 @@ def _set_ids(section, prompts):
     for p in prompts:
         if not p.get("id"):
             parts = [section["id"]] + [re.sub(r"[^a-z0-9]+", "-", str(p[k]).lower()).strip("-")
-                                       for k in ("pose", "hands", "distance", "position", "object") if p[k]]
+                                       for k in ("demo", "pose", "hands", "distance", "position", "object") if p[k]]
             p["id"] = "/".join(parts) if len(parts) > 1 else "%s/%d" % (section["id"], len(seen) + 1)
         n = seen.get(p["id"], 0) + 1
         seen[p["id"]] = n
@@ -1201,6 +1319,12 @@ class _Redo(Exception):
     pass
 
 
+class _CamerasLost(_Fail):
+    """The recording stopped by itself or has no side cameras: usually ft-camd restarting after
+    XRService moved the cameras (camd.c, SILENT_S). Step mode waits for them and does the step
+    again (Session._cameras_back); anywhere else it fails the session like any _Fail."""
+
+
 def _os_version():
     path = "/run/host/etc/os-release" if in_container() else "/etc/os-release"
     try:
@@ -1248,10 +1372,21 @@ def camera_check(repair=False):
     try:
         r = camcheck.check()
         pid = (r.get("ring") or {}).get("writer_pid")
-        if repair and camcheck.is_ring_short(r) and pid not in _camd_restarted and _unit_pid(CAMD_UNIT) == pid:
-            _camd_restarted.add(pid)
-            stop_unit(CAMD_UNIT)
-            start_camd()
+        if repair and camcheck.is_ring_short(r) and pid not in _camd_restarted:
+            if _unit_pid(CAMD_UNIT) == pid:
+                _camd_restarted.add(pid)
+                stop_unit(CAMD_UNIT)
+                start_camd()
+            elif _unit_pid(LIVE_CAMD_UNIT) == pid:
+                # Frametop's live hand tracking: its ft-hands names the cameras when it starts,
+                # so it goes again after ft-camd
+                _camd_restarted.add(pid)
+                restart_units([LIVE_CAMD_UNIT, LIVE_HANDS_UNIT])
+                end = time.monotonic() + 15
+                while not ring_alive() and time.monotonic() < end:
+                    time.sleep(0.2)
+            else:
+                return r
             r = camcheck.check()
             r["evidence"].append("restarted ft-camd (pid %d) because it published only some of the cameras" % pid)
         return r
@@ -1266,6 +1401,10 @@ def camera_text(result):
         return ""
     if camcheck.is_vcint_failure(result):
         return camcheck.USER_TEXT
+    if camcheck.is_ring_short(result) and "moved them" in result.get("reason", ""):
+        return ("SteamVR moved the headset's tracking cameras after the camera broker started (the colour "
+                "camera module was unplugged or plugged in), so the recorder can't read the side cameras. Close "
+                "the Hand Recorder and open it again: it restarts the camera broker.")
     if camcheck.is_ring_short(result):
         return ("The headset's tracking cameras are all running, but the recorder can't read some of them (%s). "
                 "Close the Hand Recorder, %s, and open it again. If that doesn't help, ask in the Frametop "
@@ -1292,7 +1431,8 @@ class Session:
     def __init__(self, base_dir, profile, checklist, lighting_choice, script_path, *, ring=None,
                  start_processes=True, dry_run=False, speed=1.0, on_status=None, hands_dir=None, panel_bin=None,
                  auto=False, next_after=None, poses_dir=None, button=True, button_device=None,
-                 check_cameras=True, hands_reader=None, quick=False, seed=None):
+                 check_cameras=True, hands_reader=None, quick=False, seed=None, demos_dir=None,
+                 recorded_demos_dir=None, guidance=None):
         self.base_dir = os.path.abspath(os.path.expanduser(base_dir or BASE_DIR))
         self.profile = dict(profile or {})
         self.checklist = dict(checklist or {})
@@ -1313,6 +1453,11 @@ class Session:
         self.seed = seed   # set from the session's id when it starts, unless given
         # the camera check (a test hook: tests swap it); a dry run looks at no real cameras
         self.camera_check_fn = (lambda: None) if dry_run else camera_check
+        self.repair_cameras_fn = (lambda: None) if dry_run else (lambda: camera_check(repair=True))
+        self._camera_losses = 0
+        # Frametop's drawn hands and hand pointer, paused for the session (a test hook: tests empty it)
+        self.quiet_units = () if dry_run or ring else QUIET_UNITS
+        self._rec_watch = None   # (recorder, sets written, when that changed): _watch_recording
         self.input_devices = INPUT_DEVICES   # where mice are looked for (a test hook)
         self._button = None                  # the ButtonReader
         self.print = print   # where dry-run panel commands go (the CLI's stdout)
@@ -1320,6 +1465,9 @@ class Session:
         # the plan in the script's order; the session's own shuffle comes with its id (_make_dir)
         self.plan, self.skipped = build_plan(self.script, self.checklist, seed=seed, quick=self.quick)
         self._poses = load_poses(poses_dir or POSES_DIR)
+        self._demos_dir = demos_dir or DEMOS_DIR
+        self._recorded_demos_dir = recorded_demos_dir or RECORDED_DEMOS_DIR
+        self.guidance = guidance if guidance in dict(GUIDANCE) else default_guidance(self._recorded_demos_dir)
         self.session_dir = ""
         self._thread = None
         self._lock = threading.Lock()
@@ -1334,7 +1482,7 @@ class Session:
                         "prompt": "", "seconds_left": 0.0, "note": "", "hands": {"left": None, "right": None},
                         "take": None, "error": "", "waiting": False, "countdown": 0, "big": "", "can_redo": False,
                         "image": "", "image_mode": "", "caption": "", "position": "", "distance": "",
-                        "ready_text": READY_TEXT, "button": False, "mouse": True,
+                        "demo": "", "demo_mode": "", "demo_key": False, "demo_run": 0, "ready_text": READY_TEXT, "button": False, "mouse": True,
                         "camera": None, "nohands": False, "strip": [], "cue": -1, "quick": self.quick}
         self._last_emit = 0.0
         self._log_file = None
@@ -1469,6 +1617,7 @@ class Session:
     # --- the run
     def _run(self):
         try:
+            self._resume_quiet()   # left paused by a session that crashed
             if self._preflight():
                 return
             self._make_dir()
@@ -1493,6 +1642,8 @@ class Session:
         if self.dry_run or self.ring or not self.check_cameras:
             return False
         r = self.camera_check_fn()
+        if camcheck.is_ring_short(r):   # an ft-camd left on moved cameras: nothing records yet, so restart it
+            r = self.repair_cameras_fn() or r
         self._status["camera"] = r
         text = camera_text(r)
         if not text:
@@ -1543,6 +1694,7 @@ class Session:
                     self._start_tracker()
                 else:
                     self._log("no tracking ft-hands found: feedback only if one publishes")
+            self._quiet_hands()
         lighting = ring_lighting(ring_path)
         cams = []
         try:
@@ -1560,9 +1712,10 @@ class Session:
             "checklist": self.checklist,
             "device": {"steamos": _os_version(), "steamvr": _steamvr_version(), "cameras": cams},
             "calibration_removed": removed,
-            "script": {"version": self.script.get("version"), "sections": [s["id"] for s in self.plan],
+            "script": {"version": self.script.get("version"), "name": self.script.get("name", ""),
+                       "sections": [s["id"] for s in self.plan],
                        "skipped": self.skipped},
-            "mode": "auto" if self.auto else "step", "quick": self.quick,
+            "mode": "auto" if self.auto else "step", "quick": self.quick, "guidance": self.guidance,
             "shuffle": {"seed": self.seed, "sweeps": plan_record(self.plan)},
             "takes": [], "status": "recording", "sides": {"swapped": None}}
         self._read_sides(force=True)
@@ -1586,7 +1739,7 @@ class Session:
         self._panel.cmd("paused off")
         for key, c in (("note", "note "), ("countdown", "countdown off"), ("hands", "hands off off"),
                        ("bar", "bar off"), ("target", "target off"), ("image", "image off"), ("where", "where off"),
-                       ("big", "big "), ("action", "action "), ("rec", "rec off"), ("strip", "strip off")):
+                       ("demo", "demo off"), ("big", "big "), ("action", "action "), ("rec", "rec off"), ("strip", "strip off")):
             self._panel.set(key, c)
         self._hints(action=False)
 
@@ -1709,6 +1862,16 @@ class Session:
         except RuntimeError as e:
             raise _Fail(str(e))
 
+    def _quiet_hands(self):
+        """Frametop's drawn hands and hand pointer off until the session ends: the hand overlay
+        covers what the person watches, and gestures would click or open Steam's menu."""
+        if self.quiet_units:
+            pause_units(self.quiet_units, os.path.join(self.hands_dir, PAUSED_UNITS_FILE), self._log)
+
+    def _resume_quiet(self):
+        if self.quiet_units:
+            resume_units(os.path.join(self.hands_dir, PAUSED_UNITS_FILE), self._log)
+
     def _stop_units(self):
         for unit in reversed(self._units):
             stop_unit(unit)
@@ -1764,6 +1927,7 @@ class Session:
         if self._stop_note and state == "stopped":
             self._log(self._stop_note)
         self._stop_units()
+        self._resume_quiet()
         if self._button:
             self._button.stop()
             self._button = None
@@ -1788,7 +1952,7 @@ class Session:
                    prompt=error or (self._stop_note if state == "stopped" else "") or screen.get("text", "").replace("|", "\n"),
                    hands={"left": None, "right": None}, nohands=False,
                    waiting=False, countdown=0, big="", can_redo=False, image="", image_mode="", caption="",
-                   position="", distance="", strip=[], cue=-1)
+                   position="", distance="", strip=[], cue=-1, demo="", demo_mode="", demo_key=False)
 
     # --- the timing loop
     def _controls(self):
@@ -1888,7 +2052,8 @@ class Session:
         if self._panel_proc and self._panel_proc.poll() is not None:
             raise _Fail("The headset panel closed (did SteamVR quit?)")
         if self._recorder and self._recorder.exited():
-            raise _Fail("The recording stopped by itself: see session.log")
+            raise _CamerasLost("The recording stopped by itself: see session.log")
+        self._watch_recording(now)
         if not self.dry_run and now - fb.get("disk", 0) > 5:
             fb["disk"] = now
             if shutil.disk_usage(self.session_dir).free < MIN_FREE:
@@ -1992,10 +2157,14 @@ class Session:
             self._panel.set("text", "text " + clean_text(text))
 
     def _view(self, p=None):
-        """The prompt's picture and where-to diagram, on the panel and in the status (sent with
-        the next _emit); none without a prompt."""
+        """The prompt's picture or demo clip and where-to diagram, on the panel and in the status
+        (sent with the next _emit); none without a prompt. A demo clip takes the picture's place."""
         p = p or {}
-        path, mode, caption = ("", "", "") if p.get("cues") else pose_view(self._poses, p)
+        demo, demo_mode, demo_key = guided_demo_view(self.guidance, self._demos_dir, self._recorded_demos_dir, p)
+        path, mode, caption = ("", "", "") if p.get("cues") or demo else pose_view(self._poses, p)
+        self._panel.set("demo", "demo %s%s%s" % (demo, " " + demo_mode if demo_mode else "", "" if demo_key else " nokey")
+                        if demo else "demo off")
+        self._status.update(demo=demo, demo_mode=demo_mode, demo_key=demo_key)
         self._strip(p)
         pos, dist = p.get("position") or "", p.get("distance") or ""
         self._panel.set("image", "image %s%s" % (path, " " + mode if mode else "") if path else "image off")
@@ -2193,6 +2362,8 @@ class Session:
 
     def _prompt_event(self, p):
         extra = {"controllers": p["controllers"]} if p["controllers"] else {}
+        if p.get("demo"):
+            extra["demo"] = p["demo"]
         if p.get("cue"):   # a sweep's cue: the pose highlighted from now, within the step
             extra.update(cue=True, step=p["step"])
         return self._event("prompt", id=p["id"], text=p["text"], hands=p["hands"], pose=p["pose"],
@@ -2204,6 +2375,11 @@ class Session:
         self._fb.pop("lost_key", None)
         self._show(s["title"], step, p["text"])
         self._view(p)
+        if state == "running" and self._status["demo"]:
+            # The hold starts: the clip from its start, so it can be followed (the window's too:
+            # demo_run counts the starts).
+            self._panel.cmd("demo restart")
+            self._status["demo_run"] += 1
         t = self._prompt_event(p)
         if self._step_t0 is None:
             self._step_t0 = t
@@ -2285,6 +2461,16 @@ class Session:
                     self._hold_end()
                 again.discard(k)
                 k += 1
+            except _CamerasLost as e:
+                if self.auto:
+                    raise
+                from_ns = started if started is not None else self._step_t0
+                self._hold_end()
+                if from_ns is not None:
+                    self._event("redo", id=p["id"], **{"from": from_ns, "to": mono_ns()})
+                self._cameras_back(p, str(e), where)
+                again.add(k)
+                retry = False
             except _Redo:
                 self._redo_ok = False
                 from_ns = started if started is not None else self._step_t0
@@ -2304,6 +2490,55 @@ class Session:
                     self._event("redo", id=pid, **{"from": a, "to": b})
                     self._log("    redo %s" % pid)
                     again.add(k)
+
+    def _watch_recording(self, now):
+        """A recording that has started writing sets but writes no new one for STALL_S is lost
+        (_CamerasLost): the cameras stopped or moved, and the rest of the hold would be empty."""
+        rec = self._recorder
+        if rec is None or self.dry_run or not hasattr(rec, "sets_written"):
+            self._rec_watch = None
+            return
+        n = rec.sets_written()
+        w = self._rec_watch
+        if w is None or w[0] is not rec or n != w[1]:
+            self._rec_watch = (rec, n, now)
+        elif n > 0 and now - w[2] > STALL_S:
+            self._rec_watch = None
+            raise _CamerasLost("The recording got no new frames for %.0f s (after %d sets)" % (now - w[2], n))
+
+    def _cameras_back(self, p, why, where):
+        """A step's recording was lost (_CamerasLost): its try is marked redone. Wait for the
+        camera check to pass, restarting a camera broker left on moved cameras (camera_check's
+        repair), then the step shows again. _Fail if they don't come back, or too often."""
+        self._camera_losses += 1
+        self._log("    %s: %s (%d this session); waiting for the cameras" % (p["id"], why, self._camera_losses))
+        if self._camera_losses > MAX_CAMERA_LOSSES:
+            raise _Fail("The recording kept stopping (%d times): %s" % (self._camera_losses, why))
+        self._prompt = None
+        self._view()
+        self._show(CAMERAS_TITLE, where, CAMERAS_TEXT)
+        for key, c in (("big", "big "), ("countdown", "countdown off"), ("note", "note ")):
+            self._panel.set(key, c)
+        self._emit(state="between", prompt=CAMERAS_TEXT, big="", countdown=0, seconds_left=0.0, can_redo=False)
+        if self.ring:
+            return
+        end, r = time.monotonic() + CAMERAS_BACK_S / self.speed, None
+        while time.monotonic() < end:
+            if self._want["stop"]:
+                raise _Stop()
+            r = self.repair_cameras_fn()
+            if r is None:   # a dry run: nothing to check
+                return
+            if r.get("status") == "ok":
+                self._log("    cameras back: %s" % r.get("summary", "ok"))
+                return
+            self._wake.wait(2.0 / self.speed)
+            self._wake.clear()
+        summary = (r or {}).get("summary", "not run")
+        for line in (r or {}).get("evidence", []):
+            self._log("      " + line)
+        raise _Fail("The recording stopped and the cameras didn't come back (camera check: %s). %s"
+                    % (summary, camera_text(r) or why))
 
     def _no_hands_seen(self, p, w):
         """The no-hands check's verdict on a hold (logged either way): True if the tracker
@@ -2413,13 +2648,23 @@ class Session:
         end = time.monotonic() + FIRST_SET_S
         while not rec.has_data():
             if rec.exited():
-                raise _Fail("The recording stopped by itself: see session.log")
+                raise _CamerasLost("The recording stopped by itself: see session.log")
             if self._want["stop"]:
                 raise _Stop()
             if time.monotonic() > end:
                 self._log("recording part %d: no set yet after the countdown" % rec.part)
                 return
             time.sleep(0.02)
+        # Without the side pair a recording is no use for training (2026-10-12: XRService moved
+        # the side cameras while ft-camd kept publishing the old devices, and ft-hands left them
+        # out of a whole session). Stop at once rather than record the rest of the session.
+        cams = rec.cameras()
+        missing = [c for c in SIDE_CAMERAS if c not in cams]
+        if cams and missing:
+            self._log("recording part %d has only %s" % (rec.part, " ".join(cams)))
+            raise _CamerasLost("The recording is missing the side cameras (%s), so it can't be used. Close the "
+                               "Hand Recorder and open it again: it checks the cameras and restarts the camera "
+                               "broker if it needs to." % " ".join(missing))
 
     def _hold_end(self):
         """Step mode: the step is over. A "wait" event ends its labels and the recording stops
@@ -2589,6 +2834,10 @@ def main():
     ap.add_argument("--next-after", type=float, metavar="S",
                     help="test: press Next by itself after S seconds of waiting (real time)")
     ap.add_argument("--poses", help="the pose pictures' folder, with poses.json (default hands/rec/poses)")
+    ap.add_argument("--demos", help="the skeleton demo clips' folder, <id>.gif (default hands/rec/demos)")
+    ap.add_argument("--recorded-demos", help="the recorded demo clips' folder (default hands/rec/demos-recorded)")
+    ap.add_argument("--guidance", choices=[k for k, _ in GUIDANCE],
+                    help="the demo clips to follow (default recorded when there are any, else skeleton)")
     ap.add_argument("--no-headset-button", action="store_true",
                     help="don't read the headset's button (gpio-keys KEY_SELECT: a press is Next, pause or resume; "
                          "two are redo; a hold is stop)")
@@ -2635,6 +2884,8 @@ def main():
                                                     st["prompt"].replace("\n", " | "))
         if st["image"]:
             line += "  [%s%s]" % (os.path.basename(st["image"]), " " + st["image_mode"] if st["image_mode"] else "")
+        if st["demo"]:
+            line += "  [%s%s]" % (os.path.basename(st["demo"]), " " + st["demo_mode"] if st["demo_mode"] else "")
         if st["waiting"]:
             line += "  (waiting for Next)"
         if st["note"]:
@@ -2646,7 +2897,8 @@ def main():
     s = Session(base, profile, checklist, a.lighting, a.script, ring=a.ring, start_processes=not a.no_start,
                 dry_run=a.dry_run, speed=a.speed, on_status=on_status, hands_dir=a.hands_dir, panel_bin=a.panel,
                 auto=a.auto, next_after=a.next_after, poses_dir=a.poses, button=not a.no_headset_button,
-                button_device=a.button_device, check_cameras=not a.ignore_cameras, quick=a.quick, seed=a.seed)
+                button_device=a.button_device, check_cameras=not a.ignore_cameras, quick=a.quick, seed=a.seed,
+                demos_dir=a.demos, recorded_demos_dir=a.recorded_demos, guidance=a.guidance)
     est = plan_seconds(s.script, s.plan, auto=a.auto)
     worst = plan_seconds(s.script, s.plan, worst=True, auto=a.auto)
     print("%d sections%s, %s mode: about %.1f min%s (at most %.1f)%s" % (

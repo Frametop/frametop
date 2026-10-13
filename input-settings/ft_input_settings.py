@@ -25,6 +25,12 @@ to the input relay over its control socket (@frametop_relay):
   - Gaze: the pointer's gaze mode (@ft_pointer_helper "gaze") and the gaze service
     (gaze/ft-gazed, @ft_gazed: status, forget, reload), with its eye tracker (SteamVR's or
     our own) and eye bias (GAZE_TRACKER, GAZE_EYE in frametop.conf).
+  - Hands: when hand tracking runs (HANDS_MODE: with the Frametop desktop, always with SteamVR,
+    or off; hands/handsmode.py on the host starts and stops its services), the hand cutouts'
+    margin (HANDS_MATTE_MARGIN, sent live to ft-screens: "cutouts margin DEG"), and three hand
+    inputs, each on its own (handsmode.METHODS): clicks at the gaze (POINTER_HANDS,
+    POINTER_GAZE_PINCH), the hand ray with gaze off (POINTER_HAND_RAY), and direct touch on
+    Frametop's panels (HANDS_NEAR, sent live to ft-screens: "handinput on|off").
   - Bluetooth: paired devices, and re-applying the Bluetooth LE fixes after pairing.
   - A warning on every page when SteamVR won't load the ft_pointer driver (blocked after a
     crash, disabled, or SteamVR in safe mode) or hasn't loaded it (@ft_pointer doesn't answer
@@ -42,6 +48,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 from PySide6.QtCore import Property, QObject, QSocketNotifier, QTimer, QUrl, Signal, Slot
@@ -60,6 +67,106 @@ VRSETTINGS_PATHS = [os.path.expanduser("~/.config/openvr/config/steamvr.vrsettin
                     os.path.expanduser("~/.steam/steam/config/steamvr.vrsettings")]
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAZE_PROBE = os.path.join(REPO, "gaze", "probe", "ft-gazeprobe")
+# Hand tracking's mode and the cutouts' margin (standard library only, so it imports here too).
+sys.path.insert(0, os.path.join(REPO, "hands"))
+import handsmode  # noqa: E402
+HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
+SCREENS = "\0ft_screens"
+HANDS_MODES = {"frametop": "With Frametop: while the Frametop desktop runs",
+               "always": "Always: whenever SteamVR runs, in games and the SteamVR dashboard too",
+               "off": "Off"}
+# The Hands page's input switches, each on its own (handsmode.METHODS): POINTER_HANDS with
+# POINTER_GAZE_PINCH or POINTER_HAND_RAY for the pointer, HANDS_NEAR for ft-screens.
+HAND_METHODS = {"gaze_clicks": "Hand clicks in gaze mode", "ray": "Hand ray with gaze off",
+                "touch": "Direct touch"}
+# Every hand interaction on Frametop's panels, each switched on and off on its own (Hands page): the
+# frametop.conf key ft-screens reads at start, sent live too ("handsetting KEY 0|1"), its default, the
+# value written for on, and the page's group, label and tooltip.
+HAND_INTERACTIONS = [
+    # (key, default on, value written for on, group, label, tooltip)
+    ("HANDS_TOUCH_DOT", True, "1", "Tapping", "Fingertip dot",
+     "A soft white dot on the screen where a tap would land, frozen as the fingertip comes close."),
+    ("HANDS_TAP_LOCK", True, "1", "Tapping", "Lock the aim on the way in",
+     "The tap lands where the dot froze 1.5 cm out, not where the fingertip's jitter takes it."),
+    ("HANDS_MOTION_PRESS", True, "1", "Tapping", "Taps that stop just short",
+     "A quick tap that stops or bounces back just before the surface still clicks."),
+    ("HANDS_LOCK_PUSH", True, "0.01", "Tapping", "Push through to tap",
+     "Pushing the finger 1 cm through the screen taps at the frozen dot, however slowly."),
+    ("HANDS_PINCH_CLICK", True, "1", "Tapping", "Pinch on a screen clicks",
+     "Up close, a pinch on a screen's content clicks there, and drags while held."),
+    ("HANDS_TWO_FINGER_SCROLL", True, "1", "Tapping", "Two-finger scroll",
+     "Index and middle finger together on a screen: swipe to scroll, lift without moving to click."),
+    ("HANDS_PINCH_BUTTONS", True, "1", "Tapping", "Pinch the bar's buttons",
+     "A pinch at a round button under a screen (curve, reset, dock, close) presses it."),
+    ("HANDS_GRAB_ROTATE", True, "1", "Moving screens", "Turn with the wrist",
+     "A screen held by its bar or edge turns as the wrist turns."),
+    ("HANDS_CARD_PINCH", True, "1", "Moving screens", "Card grab",
+     "Index and middle finger (or all fingertips) pinching an edge hold the screen like a card."),
+    ("HANDS_FIST_GRAB", True, "1", "Moving screens", "Fists",
+     "A fist at a screen holds it; two fists resize it."),
+    ("HANDS_FIST_PAIR", True, "1", "Moving screens", "Two fists near a screen resize it",
+     "Two closed hands anywhere near one screen start a resize, without a grip at the screen first."),
+    ("HANDS_FIST_RESIZE_ONLY", True, "1", "Moving screens", "Fists only resize",
+     "Fists don't move or turn screens (the tracking's too rough for placing): one holds still, two resize."),
+    ("HANDS_STRETCH_TURN", True, "1", "Moving screens", "Two hands turn a screen",
+     "Holding a screen with both hands turns it on every axis with them."),
+    ("HANDS_RELEASE_FREEZE", True, "1", "Moving screens", "Let go without a nudge",
+     "A held screen stops following as the fingers start to open, so letting go doesn't move it."),
+    ("HANDS_GRAB_THAT", True, "1", "Gestures", "Grab that",
+     "Reach toward a far screen with an open hand, then pull back into a fist: it comes to arm's reach."),
+    ("HANDS_PUSH", True, "1", "Gestures", "Push away",
+     "An open palm pushed into a near screen sends it 3 m out."),
+    ("HANDS_FLICK", True, "1", "Gestures", "Flick away",
+     "A quick outward flick of an open hand at a screen sends it 3 m out."),
+    ("HANDS_THROW", True, "1", "Gestures", "Throw",
+     "Letting go of a held screen while moving it fast throws it 3 m out along the throw."),
+    ("HANDS_SWEEP", True, "1", "Gestures", "Sweep for the lazy susan",
+     "An open hand on its edge, palm leading, swept 25 cm sideways, quickly: the next screen on that side "
+     "(Meta+Alt+Tab too). The return stroke does nothing: the other hand palms the other way."),
+    ("SCREEN_FRONT_AWAY", False, "1", "Gestures", "A brought screen goes home when you look away",
+     "Off: it stays in front of you until you move it yourself or the next stroke sends it home."),
+    ("HANDS_SWEEP_BACK", False, "1", "Gestures", "Lazy susan on the return stroke too",
+     "A stroke with the back of the hand leading counts too (one hand going back and forth)."),
+    ("SCREEN_SPIN_BRING", True, "1", "Gestures", "Lazy susan brings screens to you",
+     "The next screen comes 1 m in front of you, big enough to read, and takes the typing; the next stroke sends "
+     "it home. Grab that pulls it to arm's reach; a push steps it back. Off: the screens turn around you instead."),
+    ("HANDS_PALM_MENU", True, "1", "Gestures", "Palm menu",
+     "Palm toward your face, away from screens, and a plain pinch: the Steam menu."),
+    ("HANDS_TARGET_GLOW", True, "1", "Feedback", "Grab that's glow",
+     "A faint white glow round the screen \"grab that\" would take."),
+    ("HANDS_EDGE_GLOW", True, "1", "Feedback", "Resize and edge glows",
+     "A glow at the corner or edge a pinch there would resize or move."),
+    ("POINTER_GAZE_TWO_HAND", True, "1", "Gaze + hands", "Two-hand drag (like Meta+J, then Meta+K)",
+     "With gaze on: hold a pinch on one hand (nudge it into place), then pinch with the other: the left button "
+     "goes down where the dot is; the drag lasts while either pinch is held, and the hand still pinching drags."),
+    ("POINTER_GAZE_RIGHT_DRAG", False, "1", "Gaze + hands", "Right-drag: tap one hand, then pinch the other",
+     "With gaze on: an index tap on one hand, then an index pinch on the other within a second, holds the right "
+     "button where you look; that hand drags until you let go."),
+    ("POINTER_TYPING_HIDE", True, "1.5", "Gaze + hands", "Hide the gaze pointer while typing",
+     "The gaze dot and its laser hide for 1.5 s after each key."),
+    ("POINTER_PINCH_MAX_SPEED", True, "1.0", "Gaze + hands", "No clicks from moving hands",
+     "A pinch that begins while the hand moves fast (a lazy susan stroke, a wave) doesn't click."),
+    ("POINTER_GAZE_SCROLL", True, "1", "Gaze + hands", "Three-finger pinch scrolls",
+     "With gaze on: thumb on both the index and middle fingertips, then move the hand up, down or across: it "
+     "scrolls where you looked."),
+    ("POINTER_GAZE_CHORD", False, "1", "Gaze + hands", "Hold both buttons (chord)",
+     "With gaze on: while one hand's pinch is held, the other hand's pinch holds the right button too "
+     "(replaced by the right-drag)."),
+    ("POINTER_RAY_BEAM", False, "1", "Laser", "Show the hand laser's beam",
+     "Off: a hand's laser shows only its dot. On: the whole beam from the hand."),
+    ("POINTER_RAY_READY", True, "6", "Laser", "Laser only when about to pinch",
+     "A hand's laser shows once its thumb and index are within 6 cm, and goes when they open past 10 cm. "
+     "Off: whenever the hand is raised and pointing."),
+    ("POINTER_RAY_FIST_CURL", True, "1.1", "Laser", "No laser or clicks in a fist",
+     "Closing the hand drops its laser, and a pinch made while the hand closes into a fist doesn't click."),
+    ("POINTER_PINCH_NO_RAY", False, "1", "Laser", "Pinch with no laser clicks at the pointer",
+     "With no laser up, a pinch or a fist presses where the pointer is and drags it (an air mouse). "
+     "Off: a pinch with no laser does nothing."),
+    ("HANDS_PUSH_GLOW", False, "1", "Feedback", "Push hint glow",
+     "A dim glow on a near screen an open palm faces (a push or flick would send it away)."),
+    ("HANDS_TRACK_GATE", True, "1", "Feedback", "Steady through tracking glitches",
+     "A held screen ignores impossible jumps of the hand and holds still when the hand leaves the cameras' view."),
+]
 sys.path.insert(0, os.path.join(REPO, "voice"))
 import voice_commands  # noqa: E402  Frametop Voice's commands and settings (standard library)
 import voice_settings  # noqa: E402
@@ -173,6 +280,9 @@ GAZE_SETTINGS = [
     ("POINTER_GAZE_NUDGE_MAX", "Largest correction to learn", 55, 1, 110, 1, "°"),
     ("POINTER_GAZE_HOLD", "Hold still to drag", 0.5, 0.1, 2.0, 0.05, "s"),
     ("POINTER_GAZE_SHOW", "Dot shows after moving", 1.0, 0.0, 5.0, 0.1, "s"),
+    # with hand tracking (POINTER_HANDS): how far a held pinch moves before it nudges, and how fast
+    ("POINTER_GAZE_PINCH_DEADZONE", "Pinch nudge starts after", 4.0, 1.0, 10.0, 0.5, "°"),
+    ("POINTER_GAZE_PINCH_GAIN", "Pinch nudge speed", 0.3, 0.1, 1.0, 0.05, "×"),
 ]
 # In gaze mode, what the mouse's left button does (POINTER_GAZE_MOUSE).
 GAZE_MOUSE = {"precision": "Gaze precision: hold to steer with the mouse, release to click",
@@ -333,6 +443,7 @@ class Backend(QObject):
     driverChanged = Signal()
     panelsChanged = Signal()
     pauseChanged = Signal()
+    handsChanged = Signal()
     voiceChanged = Signal()
     activity = Signal(str)  # device id
     captured = Signal(int, str)  # code, name
@@ -366,6 +477,9 @@ class Backend(QObject):
         self._panels = None  # SteamVR's overlays, from the helper; None until it answers
         self._pause = {}  # the relay's pause state ("pause ?"), {} when it doesn't answer
         self._pause_at = 0.0
+        self._hands = {}  # handsmode.py's status, {} until it answers
+        self._hands_lock = threading.Lock()  # one handsmode.py at a time
+        self._hands_refreshing = False
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         self.sock.bind("")  # autobind an abstract address the relay can reply to
         self.sock.setblocking(False)
@@ -1355,6 +1469,125 @@ class Backend(QObject):
             self.message.emit(done, False)
         except OSError as e:
             self.message.emit(f"Couldn't open the gaze probe: {e}", True)
+
+    # --- hands ---
+    @Property("QVariantList", constant=True)
+    def handsModes(self):
+        return [{"value": k, "text": v} for k, v in HANDS_MODES.items()]
+
+    @Property(str, notify=handsChanged)
+    def handsMode(self):
+        return handsmode.mode_of(read_conf())
+
+    @Property("QVariantMap", notify=handsChanged)
+    def handsStatus(self):
+        """handsmode.py's status: "summary", "problem" (why it can't run, or ""), and the rest."""
+        return self._hands
+
+    def _hands_run(self, *args):
+        """handsmode.py on the host (systemctl, getcap and the cameras are there), off the UI
+        thread: distrobox-host-exec takes a moment. Then its status."""
+        with self._hands_lock:
+            result = host("python3", HANDSMODE, *args) if args else None
+            st = host("python3", HANDSMODE, "status", "--json")
+            try:
+                self._hands = json.loads(st.stdout)
+            except ValueError:
+                self._hands = {"summary": "", "problem": "Couldn't ask the host about hand tracking: "
+                               + (st.stderr.strip() or st.stdout.strip() or "no answer")[:160]}
+            self._hands_refreshing = False
+        self.handsChanged.emit()
+        return result
+
+    @Slot()
+    def refreshHands(self):
+        if not self._hands_refreshing:
+            self._hands_refreshing = True
+            threading.Thread(target=self._hands_run, daemon=True).start()
+
+    @Slot(str)
+    def setHandsMode(self, mode):
+        """Written here so the page follows at once; handsmode.py set writes the same and applies it
+        (starts and stops the services), and the input relay rereads it (games keep the hands with
+        HANDS_MODE=always)."""
+        if mode not in HANDS_MODES:
+            return
+        write_conf_value("HANDS_MODE", mode)
+        self.handsChanged.emit()
+        self.reload_timer.start()
+
+        def job():
+            result = self._hands_run("set", mode)
+            if result.returncode != 0:
+                self.message.emit("Couldn't apply it: " + (result.stderr.strip() or "no answer")[:160], True)
+            else:
+                self.message.emit("Hand tracking: " + HANDS_MODES[mode].split(":")[0], False)
+        threading.Thread(target=job, daemon=True).start()
+
+    @Property("QVariantMap", notify=handsChanged)
+    def handMethods(self):
+        """{method: on} for the Hands page's input switches (handsmode.methods_of)."""
+        return handsmode.methods_of(read_conf())
+
+    @Slot(str, bool)
+    def setHandMethod(self, method, on):
+        """One hand input on or off, the other two left as they are (handsmode.method_writes). The
+        helper and the relay reread frametop.conf; ft-screens hears direct touch now."""
+        if method not in HAND_METHODS:
+            return
+        writes = handsmode.method_writes(read_conf(), method, on)
+        for key, value in writes.items():
+            write_conf_value(key, value)
+        if "HANDS_NEAR" in writes:
+            self._send("handinput " + ("off" if writes["HANDS_NEAR"] == "0" else "on"), SCREENS)
+        self.reload_timer.start()
+        self.handsChanged.emit()
+        self.message.emit(f"{HAND_METHODS[method]}: {'on' if on else 'off'}", False)
+
+    @Property("QVariantList", notify=handsChanged)
+    def handInteractions(self):
+        """The Hands page's interaction switches, in order: key, label, tip, group (the first of each
+        group carries it, for the section's label), on."""
+        conf, out, last = read_conf(), [], None
+        for key, default, _, group, label, tip in HAND_INTERACTIONS:
+            raw = conf.get(key, "").strip()
+            on = default if raw == "" else raw not in ("0", "0.0", "off", "no")
+            out.append({"key": key, "label": label, "tip": tip, "group": group if group != last else "", "on": on})
+            last = group
+        return out
+
+    @Slot(str, bool)
+    def setHandInteraction(self, key, on):
+        """One interaction on or off: frametop.conf (ft-screens reads it at start) and ft-screens now
+        (the pointer helper's POINTER_ ones: it reloads its settings)."""
+        entry = next((e for e in HAND_INTERACTIONS if e[0] == key), None)
+        if entry is None:
+            return
+        write_conf_value(key, entry[2] if on else "0")
+        if key.startswith("POINTER_"):   # the pointer helper's: it re-reads frametop.conf
+            self._send("reload", HELPER)
+        else:
+            self._send(f"handsetting {key} {1 if on else 0}", SCREENS)
+        self.handsChanged.emit()
+        self.message.emit(f"{entry[4]}: {'on' if on else 'off'}", False)
+
+    @Property("QVariantMap", constant=True)
+    def handsMarginRange(self):
+        return {"min": handsmode.MARGIN_MIN, "max": handsmode.MARGIN_MAX, "step": handsmode.MARGIN_STEP,
+                "default": handsmode.MARGIN_DEFAULT}
+
+    @Property(float, notify=handsChanged)
+    def handsMargin(self):
+        return handsmode.margin_of(read_conf())
+
+    @Slot(float)
+    def setHandsMargin(self, value):
+        """HANDS_MATTE_MARGIN, and to ft-screens now (only the still margin: its motion part stays).
+        Without the desktop running it takes it when it starts."""
+        value = format(round(min(max(value, 0.0), 10.0), 2), "g")
+        write_conf_value("HANDS_MATTE_MARGIN", value)
+        self._send(f"cutouts margin {value}", SCREENS)
+        self.handsChanged.emit()
 
     # --- bluetooth ---
     @Property("QVariantList", notify=bluetoothChanged)

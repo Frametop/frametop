@@ -317,10 +317,28 @@ class Ring(unittest.TestCase):
         self.assertEqual(r["map"]["slam_left"]["node"], 0)
 
     def test_four_cameras_in_ring(self):
-        make_ring(self.ring, ["a_video9", "b_video13", "c_video6", "d_video7", "a_video9_dk"])
+        make_ring(self.ring, ["a_video9", "b_video13", "c_video6", "d_video7", "a_video9_dk"], nodes=[9, 13, 6, 7, 9])
         r = camcheck.check(log=self.log, proc=False, ring_path=self.ring)
         self.assertEqual(r["status"], "ok")
         self.assertEqual(len(r["ring"]["mono"]), 4)   # the dark twin doesn't count
+
+    def test_ring_from_before_the_cameras_moved(self):
+        # 2026-10-12: the colour module disconnected at 08:10 and XRService moved the side pair
+        # to video0/3; ft-camd, started the day before, still published video9/13, and a whole
+        # session recorded only the upper pair
+        unplugged = [L("11:00:00", "[buildMediaCtlSetupTasks] ISP enabled for tracking cameras (main VFE available)")] + \
+            [L("11:00:01", "TrackingCameraInit: index: %d. video device: /dev/video%d. v4l subdevice: x" % (i, n))
+             for i, n in enumerate((0, 3, 6, 7))]
+        with open(self.log, "w") as f:
+            f.write("\n".join(START + GOOD_OPEN + unplugged) + "\n")
+        make_ring(self.ring, ["og01a1b_4-0036_video9", "og01a1b_4-0060_video13", "og0ve10_5-0060_video6",
+                              "og0ve10_5-0060_video7"], nodes=[9, 13, 6, 7])
+        r = camcheck.check(log=self.log, proc=False, ring_path=self.ring)
+        self.assertEqual(r["status"], "degraded")
+        self.assertEqual(r["ring_missing"], [0, 3])
+        self.assertIn("ft-camd publishes video9 video13, but XRService runs those cameras on video0 video3",
+                      r["reason"])
+        self.assertTrue(camcheck.is_ring_short(r))
 
     def test_stale_ring_ignored(self):
         make_ring(self.ring, ["slam_video9"], alive=False)

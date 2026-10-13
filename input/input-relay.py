@@ -108,6 +108,13 @@ keyboards) get their volume entries remapped to unused stand-in codes, so their
 other keys keep working for SteamVR; a device without a keymap that has only volume
 keys (the headset's pmic_resin) is grabbed. The keymaps go back when the relay exits.
 
+Hand interaction (POINTER_HANDS=1, or HANDS_NEAR=on for ft-screens' direct touch alone): the
+pointer helper decides per side whether a hand holds a controller or is bare
+(pointer/helper/handoff.h). The relay's web socket reader (game_pause.py, TouchTracker) sends it
+"ctl <side> touch 0|1", "ctl <side> press", "ctl <side> gone" and "ctl ws 0|1", and the pause
+state as "paused 1|0" (hands work in a VR game only with the dashboard open or Frametop toggled
+back on).
+
 Frametop can pause for VR games (game_pause.py: by hand, with a controller gesture, or by itself
 while a game runs). Paused, it stops the services that cost the game CPU and GPU, and the relay
 plays a plain one: the pointer devices feed the virtual mouse and keyboard as without pointer
@@ -127,6 +134,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     app can capture one; watchers see them as events with id frame_controller
   vrbtn, vrhello, gazeawake   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
+  vrdash 1|0        from the pointer helper (hand interaction): the dashboard is open, so hand
+                    tracking parked for a game wakes (game_pause.py, PARK_PATH)
   textfield 1|0     from the desktop's input method (above)
   pause on|off|toggle [reason]   pause Frametop or resume it (input/ft-pause; the gesture reader)
   pause ?           the pause state, as {"t": "pause", ...}
@@ -917,6 +926,11 @@ def main():
             log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
         state["pointer"] = None if pause.paused else state["pointer_conf"]
         pause.configure(state["rules"])
+        # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
+        # HANDS_MODE=always keeps hand tracking running through games.
+        # Direct touch alone (HANDS_NEAR=on) needs the same: the helper's handoff runs for it.
+        pause.set_hands(conf.get("POINTER_HANDS", "0") == "1" or conf.get("HANDS_NEAR") == "on",
+                        conf.get("HANDS_MODE") == "always")
 
     load_config()
     tap = None  # the modifier (folded, MODIFIERS) pressed alone, with nothing since: its release is a tap
@@ -1366,6 +1380,9 @@ def main():
                     continue
                 if cmd == "vrgame" and len(words) == 2:
                     pause.game_state(words[1] == "1", now)
+                    continue
+                if cmd == "vrdash" and len(words) == 2:
+                    pause.dashboard_state(words[1] == "1")
                     continue
                 if cmd == "pause" and len(words) >= 2 and words[1] in ("on", "off", "toggle", "?"):
                     # From input/ft-pause, the settings app, or the gesture reader (unbound, no reply).

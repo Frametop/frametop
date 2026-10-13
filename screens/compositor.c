@@ -667,6 +667,7 @@ static void release_relay_buttons(struct server *s, const char *why) {
 // Steam would otherwise modify every key typed after it). Mouse buttons go where the
 // pointer is instead (relay_button), and codes that are neither go nowhere.
 static void handle_key(struct server *s, uint32_t code, int value, char *reply, int size) {
+    if (value) ft_vr_key();
     if (value == 2) return (void)snprintf(reply, size, "ok repeat ignored");  // KWin repeats itself
     const enum ft_relay_key kind = ft_relay_key_kind(code);
     if (kind == FT_RELAY_BUTTON) {
@@ -814,6 +815,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             } else {
                 if (s->scale[index - 1] != scale) wlr_log(WLR_INFO, "screen %d: KWin scale %g", index, scale);
                 s->scale[index - 1] = scale;
+                ft_vr_screen_scale(index - 1, scale);
                 snprintf(reply, sizeof reply, "ok");
             }
         } else if (sscanf(buf, "key %u %d", &code, &value) == 2) {

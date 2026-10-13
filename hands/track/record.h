@@ -59,7 +59,8 @@ private:
     size_t written_ = 0, dropped_ = 0, added_ = 0;
 };
 
-// Reads a recording back one set at a time.
+// Reads a recording back one set at a time: DIR/sets.bin, then the hand recorder's later
+// parts (sets-2.bin, sets-3.bin, ...) if there are any.
 class SetReader {
 public:
     bool open(const std::string &dir, std::string &err);
@@ -69,4 +70,6 @@ public:
 
 private:
     FILE *f_ = nullptr;
+    std::string dir_;
+    int part_ = 1;
 };

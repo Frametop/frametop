@@ -122,16 +122,55 @@ std::string run_dir() {
 bool Publisher::open(std::string &err) {
     const std::string path = run_dir() + "/hands";
     const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
-    if (fd < 0 || ftruncate(fd, sizeof(fh_hands_t)) < 0) return err = path + ": " + std::strerror(errno), false;
-    void *m = mmap(nullptr, sizeof(fh_hands_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (fd < 0 || ftruncate(fd, sizeof(fh_hands_v2_t)) < 0) return err = path + ": " + std::strerror(errno), false;
+    void *m = mmap(nullptr, sizeof(fh_hands_v2_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (m == MAP_FAILED) return err = path + ": can't map it", false;
-    out_ = static_cast<fh_hands_t *>(m);
-    std::memset(out_, 0, sizeof *out_);
+    use(static_cast<fh_hands_v2_t *>(m));
+    return true;
+}
+
+void Publisher::use(fh_hands_v2_t *mem) {
+    file_ = mem;
+    out_ = &file_->v1;
+    std::memset(file_, 0, sizeof *file_);
     std::memcpy(out_->magic, FH_HANDS_MAGIC, 8);
     out_->version = FH_HANDS_VERSION;
-    out_->size = sizeof(fh_hands_t);
-    return true;
+    out_->size = sizeof(fh_hands_v2_t);
+}
+
+static_assert(sizeof(fh_hand_fit_t::angles) / sizeof(float) == skel::kAngles, "fh_hand_fit_t angles");
+
+void Publisher::fill_fit(const Hand &h, uint64_t capture_ns, fh_hand_fit_t &o) {
+    std::memset(&o, 0, sizeof o);
+    o.id = uint32_t(h.id);
+    const skel::Fit &f = h.fit;
+    if (!f.valid) return;
+    auto put = [](float *out, V3 v) {
+        for (int k = 0; k < 3; ++k) out[k] = float(v[k]);
+    };
+    o.flags = FH_FIT_VALID | FH_FIT_ELBOW_HEAD_UP | (f.side > 0 ? FH_FIT_RIGHT : 0) | (f.settled >= 1 ? FH_FIT_SETTLED : 0) |
+              (f.flipped ? FH_FIT_FLIPPED : 0);
+    o.tracked_ns = capture_ns;
+    for (int i = 0; i < 21; ++i) {
+        put(o.joints[i].p, f.pts[i]);
+        o.joints[i].radius = float(f.radius[i]);
+        double q[4];
+        skel::to_quat(f.frames[i], q);
+        for (int k = 0; k < 4; ++k) o.joints[i].q[k] = float(q[k]);
+    }
+    for (int b = 0; b < 20; ++b) o.bone_len[b] = float(f.len[b]);
+    for (int a = 0; a < skel::kAngles; ++a) o.angles[a] = float(f.qf[a]);
+    put(o.elbow, f.elbow);
+    o.elbow_conf = 0;
+    put(o.pinch_point, (f.pts[5] + f.pts[9]) * 0.5);
+    put(o.contact, (f.pts[4] + f.pts[8]) * 0.5);
+    o.pinch_d[0] = float(norm(f.pts[4] - f.pts[8]));
+    o.pinch_d[1] = float(norm(f.pts[4] - f.pts[12]));
+    o.fit_rms = float(f.rms);
+    o.settled = float(f.settled);
+    put(o.vel_head, f.vel);
+    put(o.angvel_head, f.angvel);
 }
 
 void Publisher::write(const std::vector<const Hand *> &in, uint64_t capture_ns) {
@@ -146,21 +185,28 @@ void Publisher::write(const std::vector<const Hand *> &in, uint64_t capture_ns) 
         std::memset(&o, 0, sizeof o);
         if (k >= hands.size()) continue;
         const Hand &h = *hands[k];
+        // the fitted skeleton's points when there is one (fingers keep their length), else the
+        // filtered landmarks (ft-hands --skeleton 0)
+        const V3 *pts = h.fit.valid ? h.fit.pts : h.smooth;
         o.id = uint32_t(h.id);
         o.flags = (h.right() ? FH_HAND_RIGHT : 0) | (h.nviews >= 2 ? FH_HAND_STEREO : 0);
         o.confidence = float(std::min(1.0, h.frames / 5.0));
         for (int i = 0; i < 21; ++i)
-            for (int j = 0; j < 3; ++j) o.pts[i][j] = float(h.smooth[i][j]);
+            for (int j = 0; j < 3; ++j) o.pts[i][j] = float(pts[i][j]);
         const uint32_t first = nc;
-        for (auto &b : kThumb) put(out_->capsules, nc, h.smooth[b[0]], h.smooth[b[1]], kThumbR, kThumbR);
-        for (auto &b : kFingers) put(out_->capsules, nc, h.smooth[b[0]], h.smooth[b[1]], kFinger, kFinger);
-        for (auto &b : kPalm) put(out_->capsules, nc, h.smooth[b[0]], h.smooth[b[1]], kPalmR, kPalmR);
+        for (auto &b : kThumb) put(out_->capsules, nc, pts[b[0]], pts[b[1]], kThumbR, kThumbR);
+        for (auto &b : kFingers) put(out_->capsules, nc, pts[b[0]], pts[b[1]], kFinger, kFinger);
+        for (auto &b : kPalm) put(out_->capsules, nc, pts[b[0]], pts[b[1]], kPalmR, kPalmR);
         // the forearm carries on from the hand's own axis (middle knuckle -> wrist); the
         // wrist bends, but much less than a guess at where the elbow is gets wrong
-        const V3 wrist = h.smooth[0], d = wrist - h.smooth[9];
+        const V3 wrist = pts[0], d = wrist - pts[9];
         const double n = norm(d);
         if (n > 0.02) put(out_->capsules, nc, wrist, wrist + d * (kArmLen / n), kArm[0], kArm[1]);
         o.ncapsules = nc - first;
+    }
+    for (size_t k = 0; k < FH_HANDS_MAX_HANDS; ++k) {
+        if (k < hands.size()) fill_fit(*hands[k], capture_ns, file_->fits[k]);
+        else std::memset(&file_->fits[k], 0, sizeof file_->fits[k]);
     }
     for (uint32_t k = nc; k < FH_HANDS_MAX_CAPSULES; ++k) std::memset(&out_->capsules[k], 0, sizeof(fh_capsule_t));
     out_->capture_ns = capture_ns;

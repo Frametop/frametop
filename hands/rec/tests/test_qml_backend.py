@@ -68,5 +68,36 @@ class QmlBackendTest(unittest.TestCase):
         self.assertEqual(sorted(read - self.props - self.slots), [], "read in main.qml but not on Backend")
 
 
+
+class GuidanceTest(unittest.TestCase):
+    """The demo clips to follow: recorded by default when there are recorded clips, the choice
+    kept in BASE/settings.json and handed to the session."""
+
+    def test_choice(self):
+        import json
+        import shutil
+        import tempfile
+        try:
+            import ft_handrec
+            import takes
+        except ImportError as e:
+            self.skipTest(f"no PySide6: {e}")
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        rec = os.path.join(tmp, "rec")
+        os.makedirs(rec)
+        backend = ft_handrec.Backend(takes.Store(os.path.join(tmp, "base")), {"recorded_demos_dir": rec})
+        self.assertEqual([c["value"] for c in backend.guidanceChoices], ["recorded", "skeleton"])
+        self.assertEqual(backend.guidance, "skeleton")   # no recorded clips
+        with open(os.path.join(rec, "2a.gif"), "wb") as f:
+            f.write(b"GIF89a")
+        self.assertEqual(backend.guidance, "recorded")
+        backend.setGuidance("skeleton")
+        backend.setGuidance("nonsense")
+        with open(os.path.join(tmp, "base", "settings.json")) as f:
+            self.assertEqual(json.load(f), {"guidance": "skeleton"})
+        self.assertEqual(backend.guidance, "skeleton")
+
+
 if __name__ == "__main__":
     unittest.main()

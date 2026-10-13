@@ -28,7 +28,7 @@ test-python:
     exit $status
 
 # the C/C++ unit tests that need no model runtime: header-only logic with
-# made-up events. sides_test.cpp is NOT here: it pulls in ncnn (hands'
+# made-up events (pointer/tests: the helper's hand interaction logic). sides_test.cpp is NOT here: it pulls in ncnn (hands'
 # deferred heavy build) and stays with `make check` in the hands build
 # (hands/Makefile).
 test-c:
@@ -41,6 +41,18 @@ test-c:
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/relay-buttons-test.c \
       -o build/tests/relay-buttons-test
     build/tests/relay-buttons-test && echo "screens/tests/relay-buttons-test.c: ok"
+    g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handinput_test.cpp \
+      screens/handcut.cpp screens/handinput.cpp screens/palmmenu.cpp screens/grabthat.cpp -o build/tests/handinput-test
+    build/tests/handinput-test && echo "screens/tests/handinput_test.cpp: ok"
+    g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handview_test.cpp \
+      screens/handmesh.cpp screens/handskin.cpp screens/handrobot.cpp screens/handcut.cpp -o build/tests/handview-test
+    build/tests/handview-test >/dev/null && echo "screens/tests/handview_test.cpp: ok"
+    python3 -I screens/tools/hand-asset.py --check
+    for t in pointer/tests/*-test.cpp; do
+        n=$(basename "$t" .cpp)
+        g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"
+        "build/tests/$n" >/dev/null && echo "$t: ok"
+    done
 
 # shell scripts: syntax-gate everything that ships. No git: the image has
 # none, and a mounted checkout can trip "dubious ownership" — find lists

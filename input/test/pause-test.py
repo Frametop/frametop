@@ -8,6 +8,7 @@ renamed, so nothing reaches the live Frametop, SteamVR, or the running relay.
 """
 import os
 import sys
+import shutil
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -115,10 +116,19 @@ class StubWatch:
     def set_gesture(self, spec):
         self.spec = spec
 
+    def set_touch_feed(self, on):
+        self.touch = on
+
+    def helper_started(self):
+        pass
+
 
 tmp = tempfile.mkdtemp(prefix="ft-pause-test-")
 gp.STATE_PATH = os.path.join(tmp, "pause.json")
 gp.SCREENS = f"\0ft_pause_test_{os.getpid()}_screens"
+gp.HELPER = f"\0ft_pause_test_{os.getpid()}_helper"  # "paused 1|0" mustn't reach the live pointer helper
+os.makedirs(os.path.join(tmp, "frametop-hands"))
+gp.PARK_PATH = os.path.join(tmp, "frametop-hands", "park")
 gp.Worker, gp.ControllerWatch = StubWorker, StubWatch
 changes = []
 
@@ -198,6 +208,34 @@ p.toggle("gesture", 0)
 q = gp.GamePause(lambda *a: None, changes.append, VR)
 check("a relay restarted while paused stays paused", (q.paused, q.reason), (True, "gesture"))
 check("and stops the services again", q.worker.jobs, ["enforce"])
+
+# ---------------------------------------------------------------- hand tracking parked for games
+parked = lambda: os.path.exists(gp.PARK_PATH)  # noqa: E731
+p = new()
+p.set_hands(True)
+check("hand interaction on: the worker leaves hand tracking running", p.worker.keep, gp.HAND_UNITS)
+check("not paused: not parked", parked(), False)
+p.game_state(True, 0)
+check("a game pauses Frametop: hand tracking parked", parked(), True)
+p.dashboard_state(True)
+check("the dashboard opens: unparked", parked(), False)
+p.dashboard_state(False)
+check("it closes: parked again", parked(), True)
+p.toggle("gesture", 1)
+check("Frametop toggled back on during the game: unparked", parked(), False)
+p.game_state(False, 10)
+p.game_state(True, 20)
+check("the next game: parked", parked(), True)
+p.set_hands(False)
+check("hand interaction off: unparked (the worker stops it as before)", (parked(), p.worker.keep), (False, ()))
+p.set_hands(True, always=True)
+check("HANDS_MODE=always: the worker leaves hand tracking running", p.worker.keep, gp.HAND_UNITS)
+check("and it isn't parked in the game", parked(), False)
+p.set_hands(False, always=True)
+check("always without hand interaction: still left running", (parked(), p.worker.keep), (False, gp.HAND_UNITS))
+p.set_hands(True)
+check("back to the other modes: parked again", parked(), True)
+p.set_hands(False)
 q.toggle("gesture", 1)
 r = gp.GamePause(lambda *a: None, changes.append, VR)
 check("resumed: the next relay starts running", r.paused, False)
@@ -208,7 +246,5 @@ check("status", sorted(p.status()), sorted(["t", "paused", "reason", "since", "e
                                             "stopped", "gesture_reader", "auto", "desktop"]))
 
 print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
-for f in os.listdir(tmp):
-    os.remove(os.path.join(tmp, f))
-os.rmdir(tmp)
+shutil.rmtree(tmp)
 sys.exit(1 if failures else 0)

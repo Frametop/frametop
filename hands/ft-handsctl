@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # ft-handsctl: turn hand tracking on and off by hand, on the Frame. With it on, your hands show
 # through Frametop's screens (the hand cutouts); pinches and grips only move the pointer with
-# POINTER_HANDS=1. It doesn't start with SteamVR (hands/run.sh install leaves it off), and it
-# stops when SteamVR does.
+# POINTER_HANDS=1. HANDS_MODE says when it starts by itself (off, the default: never); on lasts
+# until SteamVR stops, or with HANDS_MODE=frametop, the desktop.
 #
 #   ft-handsctl on | off | status | log [lines]
+#   ft-handsctl mode [frametop|always|off]  HANDS_MODE: with the Frametop desktop, with SteamVR, or off
 #   ft-handsctl cutouts on|off|state   ft-screens' hand cutouts, without stopping tracking
 #   ft-handsctl gestures               watch pinches and grips live (Ctrl+C to stop)
+#   ft-handsctl flag [note...]         flag a tracking failure: the last seconds of hand crops and
+#                                      ft-hands' output go to HANDS_FLAG_DIR/flag-<time> (handsflag.py)
 #
 # Needs the services installed once: hands/run.sh install (it sets ft-camd's capabilities).
 set -euo pipefail
@@ -40,9 +43,12 @@ case ${1:-status} in
     for u in $units; do echo "$u: $(systemctl --user is-active $u || true)"; done
     journalctl --user -u frametop-hands.service --no-pager -o cat -n 40 |
       grep -E '^ *[0-9.]+s |sets with a hand|cameras:' | tail -2 | cut -c1-160 || true ;;
+  mode)  # hands/handsmode.py; the Hands page of Frametop Input Settings does the same
+    if [ -n "${2:-}" ]; then python3 "$here/handsmode.py" set "$2"; else python3 "$here/handsmode.py" status; fi ;;
   log) journalctl --user -u frametop-camd.service -u frametop-hands.service --no-pager -o short -n "${2:-30}" ;;
   cutouts)
     ask_screens "cutouts ${2:-state}" ;;
   gestures) exec python3 "$here/tools/watch_gestures.py" --distance ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  flag) shift; exec python3 "$here/handsflag.py" "$@" ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

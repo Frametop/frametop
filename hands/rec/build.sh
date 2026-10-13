@@ -2,7 +2,7 @@
 # Build the hand recorder's headset panel ft-handpanel in the dev container on the Frame
 # (hands/rec/build/; it also runs there). Like gaze/build.sh: the pinned public OpenVR header
 # (the DMA-BUF import is newer than the header shipped with SteamVR's samples), stb_truetype
-# for the text and stb_image (PNG only) for the pose pictures, at the same stb commit.
+# for the text and stb_image (PNG and GIF) for the pose pictures and the demo clips, at the same stb commit.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 "$root/scripts/sync.sh" >/dev/null

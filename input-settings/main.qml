@@ -25,6 +25,7 @@ Kirigami.ApplicationWindow {
             Kirigami.Action { text: "Pointer"; icon.name: "transform-move"; onTriggered: root.show(pointerPage) },
             Kirigami.Action { text: "Ignored panels"; icon.name: "view-hidden"; onTriggered: root.show(ignorePage) },
             Kirigami.Action { text: "Gaze"; icon.name: "view-visible"; onTriggered: root.show(gazePage) },
+            Kirigami.Action { text: "Hands"; icon.name: "transform-browse"; onTriggered: root.show(handsPage) },
             Kirigami.Action { text: "Bluetooth"; icon.name: "preferences-system-bluetooth"; onTriggered: root.show(bluetoothPage) }
         ]
     }
@@ -58,9 +59,9 @@ Kirigami.ApplicationWindow {
         pageStack.push(page)
     }
 
-    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|voice|pointer|ignore|gaze|bluetooth opens the app on that page.
+    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|voice|pointer|ignore|gaze|hands|bluetooth opens the app on that page.
     pageStack.initialPage: ({ buttons: buttonsPage, controllers: controllersPage, games: gamesPage, keyboard: keyboardPage,
-                              voice: voicePage, pointer: pointerPage, ignore: ignorePage, gaze: gazePage,
+                              voice: voicePage, pointer: pointerPage, ignore: ignorePage, gaze: gazePage, hands: handsPage,
                               bluetooth: bluetoothPage })[startPage] || devicesPage
 
     Connections {
@@ -1449,10 +1450,157 @@ Kirigami.ApplicationWindow {
                       + "with the button held and let go there. Hold still to drag: hold a press this long without moving "
                       + "to drag something instead. Look away to hand back: how far from the pointer you look before the "
                       + "gaze takes it back from the mouse. Largest correction to learn: a click corrected further than "
-                      + "this isn't learned; the tracker is that far off, so the quick check runs instead. Eye tracker: SteamVR's, or our own "
+                      + "this isn't learned; the tracker is that far off, so the quick check runs instead. With hand tracking, "
+                      + "a pinch clicks where you look; pinch, hold and move the hand to nudge the pointer first. Pinch nudge "
+                      + "starts after: how far the hand moves before the pointer does. Pinch nudge speed: how far the pointer "
+                      + "moves for each degree of hand movement after that. Eye tracker: SteamVR's, or our own "
                       + "(gaze/tracker), which keeps its own calibration. Eye bias: the gaze "
                       + "combines both eyes, since their errors partly cancel; Left or Right counts that eye twice as "
                       + "much, and Auto weights each by how far off it was at your recent nudges."
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Hands
+    Component {
+        id: handsPage
+        Kirigami.ScrollablePage {
+            id: hpage
+            title: "Hands"
+            header: DriverWarning {}
+            property var st: backend.handsStatus
+            readonly property var range: backend.handsMarginRange
+            // What runs, and why it can't: asked on the host, while this page is open.
+            Timer {
+                running: true
+                repeat: true
+                interval: 5000
+                triggeredOnStart: true
+                onTriggered: backend.refreshHands()
+            }
+
+            Kirigami.FormLayout {
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                    visible: !!hpage.st.problem
+                    type: backend.handsMode === "off" ? Kirigami.MessageType.Information : Kirigami.MessageType.Warning
+                    text: hpage.st.problem || ""
+                }
+                ColumnLayout {
+                    Kirigami.FormData.label: "Hand tracking:"
+                    Repeater {
+                        model: backend.handsModes
+                        delegate: Controls.RadioButton {
+                            required property var modelData
+                            text: modelData.text
+                            checked: backend.handsMode === modelData.value
+                            onToggled: if (checked) backend.setHandsMode(modelData.value)
+                        }
+                    }
+                }
+                Controls.Label {
+                    text: hpage.st.summary === undefined ? "…" : hpage.st.summary
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                }
+                RowLayout {
+                    Kirigami.FormData.label: "Hand cutout margin:"
+                    Controls.Label { text: "smaller"; opacity: 0.7 }
+                    Controls.Slider {
+                        id: marginSlider
+                        from: hpage.range.min
+                        to: hpage.range.max
+                        stepSize: hpage.range.step
+                        snapMode: Controls.Slider.SnapAlways
+                        value: backend.handsMargin
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                        onMoved: backend.setHandsMargin(value)
+                    }
+                    Controls.Label { text: "bigger"; opacity: 0.7 }
+                    Controls.Label {
+                        text: marginSlider.value.toFixed(2) + "°"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                    }
+                    Controls.ToolButton {
+                        icon.name: "edit-undo"
+                        display: Controls.AbstractButton.IconOnly
+                        text: "Default (" + hpage.range.default + "°)"
+                        Controls.ToolTip.text: text
+                        Controls.ToolTip.visible: hovered
+                        onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
+                    }
+                }
+
+                // Three ways the hands work the desktop, each on its own (handsmode.METHODS).
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand input" }
+                Controls.Switch {
+                    Kirigami.FormData.label: "With gaze on:"
+                    text: "Pinch to click where you look"
+                    checked: !!backend.handMethods.gaze_clicks
+                    onToggled: backend.setHandMethod("gaze_clicks", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "Your eyes aim and your hands are the mouse's buttons. Index pinch: left click. "
+                        + "Middle finger to thumb: right click. Pinch and hold still to press and drag. Hold a pinch "
+                        + "with one hand and pinch with the other: both buttons held, each until its pinch opens."
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "With gaze off:"
+                    text: "Point a raised hand for a ray"
+                    checked: !!backend.handMethods.ray
+                    onToggled: backend.setHandMethod("ray", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "A hand raised in front and pointing shows a ray that works like a controller's "
+                        + "laser: pinch to click, middle pinch to right-click or scroll. A pinch with the hand held low "
+                        + "presses where the pointer is."
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Direct touch:"
+                    text: "Poke and grab Frametop's screens, gaze on or off"
+                    checked: !!backend.handMethods.touch
+                    onToggled: backend.setHandMethod("touch", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "Touch a screen with your index finger to click it. Pinch its bar, an edge or "
+                        + "a corner to move or resize it."
+                }
+                Controls.Label {
+                    visible: backend.handsMode === "off"
+                    text: "These need hand tracking on (above)."
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                }
+
+                // Every interaction on Frametop's screens, each on its own (ft_input_settings.HAND_INTERACTIONS);
+                // they apply at once. Direct touch above switches all of them.
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand interactions" }
+                Repeater {
+                    model: backend.handInteractions
+                    delegate: Controls.Switch {
+                        required property var modelData
+                        Kirigami.FormData.label: modelData.group ? modelData.group + ":" : ""
+                        text: modelData.label
+                        checked: modelData.on
+                        enabled: !!backend.handMethods.touch
+                        onToggled: backend.setHandInteraction(modelData.key, checked)
+                        Controls.ToolTip.visible: hovered
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        Controls.ToolTip.text: modelData.tip
+                    }
+                }
+            }
+
+            footer: Controls.Label {
+                padding: Kirigami.Units.largeSpacing
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: "Your hands show through Frametop's screens where they're in front of them. Hand tracking "
+                      + "uses a lot of the headset's CPU. The margin is how far past your hand the screen opens up; "
+                      + "it applies right away. The hand inputs are separate: any of them can be on alone, and they "
+                      + "apply within a second. A hand holding a controller, or whose controller you just used, "
+                      + "does none of them."
             }
         }
     }

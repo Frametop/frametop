@@ -264,4 +264,9 @@ Programs built in the `dev` container link against its glibc, which is newer tha
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The rendered hands' 3D models in `screens/assets/hands` (see its [README](screens/assets/hands/README.md); each folder has its licence) are from:
+
+- the W3C Immersive Web Working Group's WebXR Input Profiles, `generic-hand` (MIT, Copyright (c) 2019 Amazon), the default;
+- Babylon.js's hand meshes by Patrick Ryan, https://github.com/BabylonJS/Assets (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/), unchanged;
+- the Mixed Reality Toolkit: MRTK3's OpenXR hand (BSD-3-Clause, Copyright (c) 2025, Mixed Reality Toolkit Contributors) and MRTK2's rigged hand (MIT, Copyright (c) Microsoft Corporation), converted to glTF;
+- Godot XR Tools' hands by DigitalN8m4r3 (Miodrag Sejic), CC0 1.0.

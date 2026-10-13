@@ -102,6 +102,31 @@ class SessionTest(SessionBase):
         self.assertIn("panel: where left near", self.panel)
         self.assertIn("panel: rec on", self.panel)
 
+    def test_guidance(self):
+        """The chosen guidance's clip on the panel (a recorded one without the colours' key), and
+        the choice in session.json."""
+        script = json.loads(json.dumps(SCRIPT))
+        script["sections"][0]["prompts"][0].update(demo="2a", demo_mirror=True)
+        with open(self.script, "w") as f:
+            json.dump(script, f)
+        skel, rec = os.path.join(self.tmp, "skel"), os.path.join(self.tmp, "rec")
+        for d in (skel, rec):
+            os.makedirs(d)
+            with open(os.path.join(d, "2a.gif"), "wb") as f:
+                f.write(tiny_gif([[0, 1, 2, 3]]))
+        for guidance, want in (("recorded", "panel: demo %s/2a.gif mirror nokey" % rec),
+                               ("skeleton", "panel: demo %s/2a.gif mirror" % skel)):
+            self.panel.clear()
+            s = self.session(next_after=0.0, demos_dir=skel, recorded_demos_dir=rec, guidance=guidance)
+            s.start()
+            s.join(20)
+            self.assertEqual(s.state, "done")
+            self.assertIn(want, self.panel)
+            with open(os.path.join(s.session_dir, "session.json")) as f:
+                self.assertEqual(json.load(f)["guidance"], guidance)
+        # no choice: recorded, since there are recorded clips
+        self.assertEqual(self.session(demos_dir=skel, recorded_demos_dir=rec).guidance, "recorded")
+
     def test_redo(self):
         s = self.session()
         s.start()
@@ -384,6 +409,148 @@ class StripPanelTest(unittest.TestCase):
         self.assertTrue(missing.startswith("error can't read"))
         self.assertIn("strip: cue 0: Gone(/nonexistent.png)", out)
         self.assertIn("strip: off", out)
+
+
+def tiny_gif(frames, delay_cs=5):
+    """A GIF of 2x2 frames, each 4 palette indices (0-3: black, red, green, blue). Every pixel
+    is coded after a clear code, so the LZW table never grows (a valid, uncompressed GIF)."""
+    def lzw(pixels):
+        bits, out = [], bytearray()
+        for v in [x for p in pixels for x in (4, p)] + [5]:   # clear, pixel ... end
+            bits += [(v >> k) & 1 for k in range(3)]
+        for i in range(0, len(bits), 8):
+            out.append(sum(b << k for k, b in enumerate(bits[i:i + 8])))
+        return bytes([2, len(out)]) + bytes(out) + b"\0"
+    head = b"GIF89a" + struct.pack("<HHBBB", 2, 2, 0xF1, 0, 0) + bytes([0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255])
+    loop = b"\x21\xff\x0bNETSCAPE2.0\x03\x01\0\0\0"
+    body = b"".join(b"\x21\xf9\x04\x04" + struct.pack("<H", delay_cs) + b"\0\0" + b"\x2c" + struct.pack("<HHHHB", 0, 0, 2, 2, 0)
+                    + lzw(f) for f in frames)
+    return head + loop + body + b"\x3b"
+
+
+class ScriptV2Test(unittest.TestCase):
+    """script-v2.json: a step per demo clip, one-hand parts left (the clip flipped), right, both."""
+
+    def setUp(self):
+        self.script = session.load_script(os.path.join(session.HERE, "script-v2.json"))
+        with open(os.path.join(session.HERE, "demo", "parts.json")) as f:
+            self.parts = [p["id"] for p in json.load(f)["parts"]]
+
+    def test_plan(self):
+        full, skipped = session.build_plan(self.script, {"controllers": "straps", "objects": ["keyboard"]})
+        self.assertEqual(skipped, [])
+        self.assertEqual(full[0]["id"], session.HANDS_CHECK_SECTION)   # the no-hands check runs first
+        demos = [p for s in full for p in s["prompts"] if p.get("demo")]
+        self.assertEqual(sorted(set(p["demo"] for p in demos)), sorted(self.parts))   # every part, and no others
+        ids = [p["id"] for s in full for p in s["prompts"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        for p in demos:
+            self.assertEqual(bool(p.get("demo_mirror")), p["hands"] == "left", p["id"])
+            self.assertGreater(p["seconds"], 0)
+        self.assertEqual([p["hands"] for p in demos if p["demo"] == "2a"], ["left", "right", "both"])
+        self.assertLess(session.plan_seconds(self.script, full, auto=False), 15 * 60)
+        quick, _ = session.build_plan(self.script, {}, quick=True)
+        self.assertEqual([p["id"] for s in quick for p in s["prompts"]],
+                         ["hand-size/1/both/mid", "index-taps/2a/right", "palm-up/7a/both", "no-hands/none"])
+
+    def test_clips(self):
+        if not os.path.isdir(session.DEMOS_DIR):
+            self.skipTest("no demo clips in %s" % session.DEMOS_DIR)
+        for pid in self.parts:
+            self.assertTrue(os.path.isfile(os.path.join(session.DEMOS_DIR, pid + ".gif")), pid)
+
+    def test_view(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        with open(os.path.join(tmp, "2a.gif"), "wb") as f:
+            f.write(tiny_gif([[0, 1, 2, 3]]))
+        self.assertEqual(session.demo_view(tmp, {"demo": "2a", "demo_mirror": True}), (os.path.join(tmp, "2a.gif"), "mirror"))
+        self.assertEqual(session.demo_view(tmp, {"demo": "2a"}), (os.path.join(tmp, "2a.gif"), ""))
+        self.assertEqual(session.demo_view(tmp, {"demo": "3a"}), ("", ""))
+        self.assertEqual(session.demo_view(tmp, {}), ("", ""))
+
+    def test_guidance(self):
+        """Recorded or skeleton clips, each falling back to the other kind for a part it lacks; only
+        a skeleton clip gets the colours' key."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        skel, rec = os.path.join(tmp, "skel"), os.path.join(tmp, "rec")
+        os.makedirs(skel)
+        os.makedirs(rec)
+        self.assertEqual(session.default_guidance(rec), "skeleton")   # no recorded clips yet
+        self.assertEqual(session.default_guidance(os.path.join(tmp, "none")), "skeleton")
+        for d, ids in ((skel, ("2a", "3a")), (rec, ("2a",))):
+            for i in ids:
+                with open(os.path.join(d, i + ".gif"), "wb") as f:
+                    f.write(tiny_gif([[0, 1, 2, 3]]))
+        self.assertEqual(session.default_guidance(rec), "recorded")
+        left = {"demo": "2a", "demo_mirror": True}
+        self.assertEqual(session.guided_demo_view("recorded", skel, rec, left), (os.path.join(rec, "2a.gif"), "mirror", False))
+        self.assertEqual(session.guided_demo_view("skeleton", skel, rec, left), (os.path.join(skel, "2a.gif"), "mirror", True))
+        self.assertEqual(session.guided_demo_view("recorded", skel, rec, {"demo": "3a"}), (os.path.join(skel, "3a.gif"), "", True))
+        self.assertEqual(session.guided_demo_view("recorded", skel, rec, {"demo": "4a"}), ("", "", False))
+        self.assertEqual(session.guided_demo_view("skeleton", skel, rec, {}), ("", "", False))
+
+    def test_recorded_clips(self):
+        if not session.has_clips(session.RECORDED_DEMOS_DIR):
+            self.skipTest("no recorded demo clips in %s" % session.RECORDED_DEMOS_DIR)
+        for pid in self.parts:
+            self.assertTrue(os.path.isfile(os.path.join(session.RECORDED_DEMOS_DIR, pid + ".gif")), pid)
+
+
+class DemoPanelTest(unittest.TestCase):
+    """The panel's demo command on ft-handpanel --no-vr (skipped if it isn't built)."""
+
+    def test_demo(self):
+        import subprocess
+        binary = session.PANEL_BIN
+        if not os.access(binary, os.X_OK):
+            self.skipTest("ft-handpanel isn't built")
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        clip = os.path.join(tmp, "clip one.gif")   # a space: the path may hold them
+        with open(clip, "wb") as f:
+            f.write(tiny_gif([[0, 1, 2, 3], [3, 2, 1, 0], [1, 1, 1, 1]], delay_cs=5))
+        with open(os.path.join(tmp, "bad.gif"), "wb") as f:
+            f.write(b"GIF89a broken")
+        name = "hrtest-demo-%d" % os.getpid()
+        proc = subprocess.Popen([binary, "--no-vr", "--socket", name, "--dump", tmp], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        try:
+            panel = session.Panel(name=name)
+            for _ in range(50):
+                if panel.cmd("ping", reply=True, timeout=0.1):
+                    break
+                if proc.poll() is not None:
+                    self.skipTest("ft-handpanel doesn't run here: " + proc.stderr.read().strip()[-200:])
+                time.sleep(0.1)
+            else:
+                self.fail("ft-handpanel --no-vr doesn't answer")
+            replies = [panel.cmd("demo %s mirror" % clip, reply=True), panel.cmd("show", reply=True)]
+            time.sleep(0.4)   # 3 frames of 50 ms: it loops
+            replies.append(panel.cmd("note looped", reply=True))
+            replies.append(panel.cmd("demo restart", reply=True))
+            replies += [panel.cmd("demo", reply=True), panel.cmd("demo %s/missing.gif" % tmp, reply=True),
+                        panel.cmd("demo %s/bad.gif" % tmp, reply=True), panel.cmd("demo off", reply=True)]
+            # a recorded clip: no key; the same clip again with the key back
+            replies += [panel.cmd("demo %s mirror nokey" % clip, reply=True), panel.cmd("show", reply=True),
+                        panel.cmd("demo %s nokey" % clip, reply=True), panel.cmd("demo %s" % clip, reply=True),
+                        panel.cmd("demo off", reply=True)]
+            panel.close()
+        finally:
+            proc.terminate()
+            out = proc.communicate(timeout=5)[0]
+        self.assertEqual(replies[:4], ["ok"] * 4)
+        self.assertTrue(replies[4].startswith("error usage: demo"))
+        self.assertTrue(replies[5].startswith("error can't read"))
+        self.assertTrue(replies[6].startswith("error can't read"))
+        self.assertEqual(replies[7:], ["ok"] * 6)
+        demos = [l for l in out.splitlines() if l.startswith("demo:")]
+        self.assertTrue(any(l.startswith("demo: %s 2x2 frame" % clip) and " mirror nokey, drawn" in l for l in demos), demos)
+        self.assertIn("demo: %s 2x2 frame 0 loop 0 mirror, drawn" % clip, demos[0])
+        self.assertGreater(int(demos[1].split(" loop ")[1].split()[0]), 0)   # past the last frame, from the start again
+        self.assertIn("demo: %s 2x2 frame 0 loop 0 mirror" % clip, demos[2])   # restart
+        self.assertEqual(demos[-1], "demo: off")
 
 
 # /proc/bus/input/devices as the Frame has it (2026-10-02), trimmed, plus a USB mouse.
@@ -765,6 +932,180 @@ class StandaloneTest(unittest.TestCase):
             self.assertEqual(session.fix_hint("hands/build.sh"), "hands/build.sh")
         self.assertIn("run the install command again", text)
         self.assertNotIn("~/frametop", text)
+
+
+class SideCameraGuardTest(unittest.TestCase):
+    """A part whose first set has no side cameras stops the session (2026-10-12: a whole
+    session recorded only the upper pair after XRService moved the side cameras)."""
+
+    def write_set(self, d, names):
+        data = bytearray(struct.pack("<8sII", b"FHSET01", len(names), 16 + 40 * len(names)))
+        for n in names:
+            data += struct.pack("<16sIIQQ", n.encode(), 2, 2, 1, 1)
+        with open(os.path.join(d, "sets.bin"), "wb") as f:
+            f.write(bytes(data))
+
+    def first_set(self, d):
+        rec = mock.Mock(dir=d, part=1, exited=lambda: False)
+        rec.has_data = lambda: True
+        rec.cameras = lambda: session.Recorder.cameras(rec)
+        fake = mock.Mock(_recorder=rec, _want={"stop": False})
+        session.Session._first_set(fake)
+        return fake
+
+    def test_upper_pair_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.write_set(d, ["upper_left", "upper_right"])
+            with self.assertRaises(session._Fail) as cm:
+                self.first_set(d)
+            self.assertIn("missing the side cameras (slam_left slam_right)", str(cm.exception))
+
+    def test_all_four(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.write_set(d, ["slam_left", "slam_right", "upper_left", "upper_right"])
+            self.first_set(d)
+
+    def test_unreadable_first_set_goes_on(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "sets.bin"), "wb") as f:
+                f.write(b"xx")
+            self.first_set(d)
+
+    def test_moved_cameras_text(self):
+        text = session.camera_text({"status": "degraded", "ring_missing": [0, 3],
+                                    "reason": "ft-camd publishes video9 video13, but XRService runs those cameras "
+                                              "on video0 video3 now (it moved them after ft-camd started)"})
+        self.assertIn("open it again: it restarts the camera broker", text)
+
+
+class CamerasLostTest(SessionBase):
+    """A step whose recording is lost (ft-camd restarting after XRService moved the cameras)
+    waits for the camera check, then goes again; too many losses stop the session."""
+
+    def lose(self, s, times):
+        real = session.Session._run_step
+        lost = {"n": 0}
+
+        def run_step(self_, *a):
+            if lost["n"] < times:
+                lost["n"] += 1
+                raise session._CamerasLost("The recording stopped by itself: see session.log")
+            return real(self_, *a)
+        return mock.patch.object(session.Session, "_run_step", run_step)
+
+    def test_waits_and_redoes_the_step(self):
+        s = self.session(next_after=0.0)
+        checks = iter([{"status": "degraded", "summary": "degraded: moved"}, {"status": "ok", "summary": "ok"}])
+        s.repair_cameras_fn = lambda: next(checks)
+        with self.lose(s, 1):
+            s.start()
+            s.join(20)
+        self.assertEqual(s.state, "done")
+        ev = self.events(s)
+        self.assertEqual([e["event"] for e in ev],
+                         ["take", "ready", "wait", "redo", "ready", "prompt", "wait", "ready", "prompt", "wait",
+                          "end"])
+        self.assertEqual(ev[3]["id"], ev[5]["id"])
+        with open(os.path.join(s.session_dir, "session.log")) as f:
+            log = f.read()
+        self.assertIn("waiting for the cameras", log)
+        self.assertIn("cameras back: ok", log)
+
+    def test_cameras_dont_come_back(self):
+        s = self.session(next_after=0.0, speed=100)
+        s.repair_cameras_fn = lambda: {"status": "degraded", "summary": "degraded: moved", "reason": "moved",
+                                       "evidence": []}
+        with self.lose(s, 1):
+            s.start()
+            s.join(20)
+        self.assertEqual(s.state, "error")
+        self.assertIn("the cameras didn't come back", s._status["error"])
+
+    def test_too_many_losses(self):
+        s = self.session(next_after=0.0)
+        s.repair_cameras_fn = lambda: None
+        with self.lose(s, session.MAX_CAMERA_LOSSES + 1):
+            s.start()
+            s.join(20)
+        self.assertEqual(s.state, "error")
+        self.assertIn("kept stopping", s._status["error"])
+
+    def test_stalled_recording(self):
+        rec = mock.Mock(sets_written=mock.Mock(return_value=12))
+        fake = mock.Mock(_recorder=rec, dry_run=False, _rec_watch=None)
+        session.Session._watch_recording(fake, 100.0)
+        session.Session._watch_recording(fake, 100.0 + session.STALL_S - 0.5)   # not yet
+        with self.assertRaises(session._CamerasLost) as cm:
+            session.Session._watch_recording(fake, 100.0 + session.STALL_S + 0.5)
+        self.assertIn("no new frames", str(cm.exception))
+        rec.sets_written.return_value = 0   # not started writing yet: the first-set wait covers that
+        fake._rec_watch = None
+        session.Session._watch_recording(fake, 200.0)
+        session.Session._watch_recording(fake, 200.0 + 2 * session.STALL_S)
+        rec.sets_written.side_effect = [20, 21]   # writing: fine however long
+        session.Session._watch_recording(fake, 300.0)
+        session.Session._watch_recording(fake, 300.0 + 2 * session.STALL_S)
+
+    def test_sets_written(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = mock.Mock(dir=d)
+            self.assertEqual(session.Recorder.sets_written(rec), 0)
+            one = struct.pack("<8sII", b"FHSET01", 0, 16)
+            with open(os.path.join(d, "sets.bin"), "wb") as f:
+                f.write(one * 5)
+            self.assertEqual(session.Recorder.sets_written(rec), 5)
+
+
+class QuietHandsTest(SessionBase):
+    """Frametop's drawn hands and hand pointer are paused for a session and started again after,
+    also when an earlier session was killed and left them paused."""
+
+    def setUp(self):
+        super().setUp()
+        self.path = os.path.join(self.tmp, "run", session.PAUSED_UNITS_FILE)
+        self.calls = []
+
+    def systemctl(self):
+        calls = self.calls
+
+        def run(cmd, **kw):
+            if "systemctl" in cmd:
+                calls.append(cmd[-2:])
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        return mock.patch.object(session.subprocess, "run", run)
+
+    def test_pauses_only_running_units_and_resumes_them(self):
+        active = {"frametop-handview.service": True, "frametop-pointer.service": False}
+        with mock.patch.object(session, "unit_active", lambda u: active[u]), \
+                mock.patch.object(session, "stop_unit", lambda u: self.calls.append(["stop", u])):
+            paused = session.pause_units(session.QUIET_UNITS, self.path)
+        self.assertEqual(paused, ["frametop-handview.service"])
+        self.assertEqual(self.calls, [["stop", "frametop-handview.service"]])
+        with open(self.path) as f:
+            self.assertEqual(json.load(f), paused)
+        with self.systemctl():
+            self.assertEqual(session.resume_units(self.path), paused)
+        self.assertEqual(self.calls[1:], [["start", "frametop-handview.service"]])
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_nothing_running_nothing_paused(self):
+        with mock.patch.object(session, "unit_active", lambda u: False):
+            self.assertEqual(session.pause_units(session.QUIET_UNITS, self.path), [])
+        self.assertFalse(os.path.exists(self.path))
+        self.assertEqual(session.resume_units(self.path), [])
+
+    def test_a_session_starts_what_a_killed_one_left_paused(self):
+        os.makedirs(os.path.dirname(self.path))
+        with open(self.path, "w") as f:
+            json.dump(["frametop-pointer.service", "rm -rf"], f)
+        s = self.session(next_after=0.0, hands_dir=os.path.dirname(self.path))
+        s.quiet_units = session.QUIET_UNITS
+        with self.systemctl():
+            s.start()
+            s.join(20)
+        self.assertEqual(s.state, "done")
+        self.assertEqual(self.calls, [["start", "frametop-pointer.service"]])   # not the junk entry
+        self.assertFalse(os.path.exists(self.path))
 
 
 if __name__ == "__main__":

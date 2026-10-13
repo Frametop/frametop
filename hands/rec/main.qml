@@ -529,6 +529,21 @@ Kirigami.ApplicationWindow {
                              + "know the steps already. "
                            : "") + "Length: " + backend.planText(checklist.answers(), autoAdvance.checked, quickRound.checked) + "."
                 }
+                ColumnLayout {
+                    Kirigami.FormData.label: "Guidance:"
+                    visible: backend.scriptHasDemos
+                    Repeater {
+                        model: backend.guidanceChoices
+                        Controls.RadioButton {
+                            required property var modelData
+                            text: modelData.text + (modelData.value === "recorded"
+                                                    ? ": clips of a real person's hands, from the headset's cameras"
+                                                    : ": a drawn hand, its palm light and its back dark")
+                            checked: backend.guidance === modelData.value
+                            onToggled: if (checked) backend.setGuidance(modelData.value)
+                        }
+                    }
+                }
                 Controls.Button {
                     text: "Start"
                     icon.name: "media-record"
@@ -633,6 +648,55 @@ Kirigami.ApplicationWindow {
                     mirror: parent.mode === "mirror"
                     smooth: true
                     mipmap: true
+                }
+            }
+
+            // A demo clip as the panel plays it (DESIGN.md "Demo clips"): looped, a left hand's
+            // flipped, from its start again when a hold starts (run counts the starts), the key
+            // to a skeleton clip's colours under it.
+            component DemoClip: ColumnLayout {
+                id: demoClip
+                property string path
+                property string mode
+                property int run
+                property bool paused
+                property bool key: true
+                spacing: Kirigami.Units.smallSpacing
+                visible: path !== ""
+                onRunChanged: clip.currentFrame = 0
+                AnimatedImage {
+                    id: clip
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 20
+                    Layout.preferredHeight: Layout.preferredWidth * 9 / 16
+                    source: demoClip.path ? "file://" + demoClip.path : ""
+                    fillMode: Image.PreserveAspectFit
+                    mirror: demoClip.mode === "mirror"
+                    playing: demoClip.visible && !demoClip.paused
+                    cache: false
+                    smooth: true
+                }
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    visible: demoClip.key
+                    spacing: Kirigami.Units.largeSpacing
+                    Repeater {
+                        model: [{ color: "#d5d1fe", text: "Light: palm" }, { color: "#6a62d8", text: "Dark: back of hand" }]
+                        RowLayout {
+                            required property var modelData
+                            spacing: Kirigami.Units.smallSpacing
+                            Rectangle {
+                                implicitWidth: Kirigami.Units.gridUnit * 0.8
+                                implicitHeight: implicitWidth
+                                radius: implicitWidth / 4
+                                color: parent.modelData.color
+                            }
+                            Controls.Label {
+                                text: parent.modelData.text
+                                font: Kirigami.Theme.smallFont
+                                opacity: 0.8
+                            }
+                        }
+                    }
                 }
             }
 
@@ -780,8 +844,17 @@ Kirigami.ApplicationWindow {
                     spacing: Kirigami.Units.gridUnit * 1.5
 
                     ColumnLayout {
-                        visible: !!sessionView.st.image || !!sessionView.st.position || !!sessionView.st.distance
+                        visible: !!sessionView.st.image || !!sessionView.st.demo || !!sessionView.st.position
+                                 || !!sessionView.st.distance
                         spacing: Kirigami.Units.largeSpacing
+                        DemoClip {
+                            Layout.alignment: Qt.AlignHCenter
+                            path: sessionView.st.demo || ""
+                            mode: sessionView.st.demo_mode || ""
+                            run: sessionView.st.demo_run || 0
+                            paused: sessionView.state === "paused"
+                            key: !!sessionView.st.demo_key
+                        }
                         PosePicture {
                             Layout.alignment: Qt.AlignHCenter
                             path: sessionView.st.image || ""

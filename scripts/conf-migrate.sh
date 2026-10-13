@@ -9,6 +9,10 @@
 #   SHARE_KEYS: gone on 2026-10-10. It sent the keys of keyboards grabbed for the desktop to
 #   @frametop_keys for frame-voice, which is now Frametop Voice and gets its keys from the relay.
 #   The example's line goes; a changed one stays, unread, and gets a note.
+#   HANDS_NEAR_REACH=0.30: the example's value from the hands-reach branch (2026-10-10, a foot). The
+#   live test that day asked for about 3 inches: 0.075.
+#   HANDS_POKE_TRAVEL=0.025: the example's value from the hands-touch branch (2026-10-10). The second
+#   live test that day refused taps that came 1.7-2.0 cm in: 0.017.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
@@ -24,6 +28,24 @@ if grep -qxF "$old" "$f"; then
   cat "$tmp" > "$f"   # in place: the file keeps its owner and mode
   rm -f "$tmp"
   echo "settings: HANDS_SWAP_SIDES=0 (the old default) is now auto: hand tracking tells the side cameras apart itself"
+fi
+old="HANDS_NEAR_REACH=0.30      # Frametop panels: a bare hand this close (m) in front of one touches it: its ray hides and takes no pinches, the index pokes (0.15 = the old reach; a hand resting low by the body: 0.15 at most)"
+new="HANDS_NEAR_REACH=0.075     # Frametop panels: a bare hand this close (m) in front of one touches it (about 3 inches): its ray hides, the index pokes, its pinches and fists are the panel's (beyond it they're the ray's or the gaze's; a hand resting low by the body: 0.04 at most)"
+if grep -qxF "$old" "$f"; then
+  tmp=$(mktemp)
+  awk -v old="$old" -v new="$new" '$0 == old { print new; next } { print }' "$f" > "$tmp"
+  cat "$tmp" > "$f"
+  rm -f "$tmp"
+  echo "settings: HANDS_NEAR_REACH=0.30 (a foot, the old default) is now 0.075: hands touch Frametop's panels within about 3 inches"
+fi
+old="HANDS_POKE_TRAVEL=0.025    # ... and presses on its first frame past the surface when it came this far (m) in, decisively; slower ones need two frames (0 = always two)"
+new="HANDS_POKE_TRAVEL=0.017    # ... and presses on its first frame past the surface when it came this far (m) in, decisively (under 2.5 cm: steadily, each of the last 3 frames nearer); slower ones need two frames (0 = always two)"
+if grep -qxF "$old" "$f"; then
+  tmp=$(mktemp)
+  awk -v old="$old" -v new="$new" '$0 == old { print new; next } { print }' "$f" > "$tmp"
+  cat "$tmp" > "$f"
+  rm -f "$tmp"
+  echo "settings: HANDS_POKE_TRAVEL=0.025 (the old default) is now 0.017: a quick short tap presses"
 fi
 old="SHARE_KEYS=0       # 1 = keys of keyboards grabbed for the desktop also go to @frametop_keys, for hotkey tools (any local process can listen)"
 if grep -qxF "$old" "$f"; then

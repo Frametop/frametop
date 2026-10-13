@@ -19,9 +19,11 @@ small RFC 6455 client of its own.
                   "components": {"/input/thumbstick/click": true, ...}} with the components
                   that changed (mostly capacitive sensing, about 160 a second)
 
-Run as a program, it prints the controllers' button changes for a while (default 10 s):
+Run as a program, it prints the controllers' button changes for a while (default 10 s), or with
+--touch, every touch and value component too (probe P3 of the hand interaction design: which
+components say a controller is held, and how soon they let go):
 
-  input/vrws.py [seconds]
+  input/vrws.py [--touch] [seconds]
 """
 import base64
 import json
@@ -167,7 +169,10 @@ class VrSocket:
 
 
 def main():
-    seconds = float(sys.argv[1]) if len(sys.argv) > 1 else 10.0
+    args = sys.argv[1:]
+    touch = "--touch" in args
+    args = [a for a in args if a != "--touch"]
+    seconds = float(args[0]) if args else 10.0
     ws = VrSocket()
     ws.open(f"frametop_vrws_{os.getpid()}")
     sides = controllers()
@@ -182,7 +187,7 @@ def main():
         while time.monotonic() - start < seconds:
             for text in ws.messages(timeout=0.5):
                 count += 1
-                if "/click" not in text:
+                if "/click" not in text and not (touch and ("/touch" in text or "/value" in text)):
                     continue
                 msg = json.loads(text)
                 side = sides.get(msg.get("device"), msg.get("device"))
@@ -190,6 +195,11 @@ def main():
                     if name.endswith("/click"):
                         print(f"{time.monotonic() - start:7.3f}  {side} {name[len('/input/'):-len('/click')]} "
                               f"{'down' if value else 'up'}", flush=True)
+                    elif touch and name.endswith("/touch"):
+                        print(f"{time.monotonic() - start:7.3f}  {side} {name[len('/input/'):-len('/touch')]} "
+                              f"{'touched' if value else 'let go'}", flush=True)
+                    elif touch and name.endswith("/value"):
+                        print(f"{time.monotonic() - start:7.3f}  {side} {name} {value}", flush=True)
     finally:
         ws.close()
     print(f"{count} messages in {seconds:.0f} s")

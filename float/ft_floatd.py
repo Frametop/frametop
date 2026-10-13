@@ -28,7 +28,7 @@ command-line side). Replies go to the sender:
 Spare outputs are WL-<screens> .. WL-<screens + slots - 1>. A floating window's output is its
 frame plus a margin on each side (FLOAT_MARGIN pixels), so menus have room; the panel shows
 only the window. Spares are placed apart from the screens and from each other in KWin's
-layout, all within Xwayland's 32767-pixel limit.
+layout, within Xwayland's 32767-pixel limit at scales up to 1.6.
 
 Usage: ft-floatd [--screens N] [--slots N] [--margin PX] [--control NAME] [--socket NAME]
 Defaults: FT_SCREEN_COUNT (from the session) or the layout's count, FLOAT_SLOTS and
@@ -77,7 +77,11 @@ SERVICE = IFACE = "org.frametop.Float"
 PATH = "/Float"
 SCRIPT = "frametop-float"
 POLL_SECONDS = 20        # NextCommand answers empty after this (KWin's D-Bus timeout is 25 s)
-SPARE_X, SPARE_CELL = 12000, 5000  # spares in KWin's layout: a grid from here, 4 across
+# Spares in KWin's layout: a grid 4 across, below the screens. X11 windows get Xwayland
+# coordinates of the layout's times its largest scale, which wrap past 32767: a window there
+# takes no clicks. 16 spares end at 20000, fine up to scale 1.6 (12000 across had the 4th
+# column past it at 1.25).
+SPARE_Y, SPARE_CELL = 4000, 4000
 PULL_OUT = 0.3           # a floated window starts this far in front of its screen (metres), clear of it
 DEFAULT_MPP = 1.6 / 1920  # metres per pixel when ft-screens can't say (no SteamVR)
 PLACES_PATH = os.path.expanduser("~/.config/frametop-float.json")  # each app's last floating place
@@ -334,7 +338,7 @@ class Slot:
         self.k = k
         self.output = f"WL-{screens + k}"
         self.index = screens + k + 1  # ft-screens' number (1-based)
-        self.pos = (SPARE_X + (k % 4) * SPARE_CELL, (k // 4) * SPARE_CELL)
+        self.pos = ((k % 4) * SPARE_CELL, SPARE_Y + (k // 4) * SPARE_CELL)
         self.size = None              # its output's size in pixels, as last set
         self.want = None              # the size in pixels asked for (size is at least that)
         self.kscale = 1.0             # its output's scale in KWin, as last set

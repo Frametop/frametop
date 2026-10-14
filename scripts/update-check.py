@@ -32,6 +32,7 @@ HOME = os.path.expanduser("~")
 UID = os.getuid()
 KNOWN_GOOD = os.path.join(HOME, ".local/state/frametop/known-good.json")
 STEAMVR_BIN = "/opt/steamvr/bin/linuxarm64"
+DASHBOARD_JS = "/opt/steamvr/resources/webinterface/dashboard"
 LAUNCHER = os.path.join(HOME, ".local/share/applications/deckard-nested-desktop.desktop")
 STOCK_LAUNCHER = "/usr/share/applications/deckard-nested-desktop.desktop"
 NATIVE_LAUNCHER = os.path.join(HOME, ".local/share/applications/native-deckard-nested-desktop.desktop")
@@ -498,16 +499,17 @@ def check_vr_socket():
     except (OSError, ValueError) as e:
         report("FAIL", label, f"/input/getstate.json didn't answer ({e}); the pause gesture can't read the controllers")
         return
-    # The 3D mouse's virtual controller on a hand (the driver's default role 2). As a treadmill (role 4)
-    # SteamVR's windows don't move by their grab bars for it (docs/design.md, "Treadmill role").
+    # The 3D mouse's virtual controller as a treadmill (the driver's default role 4): SteamVR gives it
+    # /user/treadmill, where its compositor binding has its laser entries (docs/design.md, "Treadmill role").
     for d in devices:
         if d.get("controller_type") == "ft_pointer":
             path = d.get("root_path") or "?"
             if path == "/user/treadmill":
-                report("warn", "pointer device role", "the virtual controller is at /user/treadmill: its laser "
-                       "clicks but can't move SteamVR's windows; set the driver's role to 2 (right hand)")
+                report("ok", "pointer device role", "the virtual controller is at /user/treadmill")
             else:
-                report("ok", "pointer device role", f"the virtual controller is at {path}")
+                report("warn", "pointer device role", f"the virtual controller is at {path}, not /user/treadmill: "
+                       "an older driver (role 2), or SteamVR moved the treadmill path. Retest the laser with "
+                       "pointer/probe/build/lasertest (frame-hands/notes/hand-interaction.md, probe P1)")
     found = [d for d in devices if d.get("controller_type") == "frame_controller" and d.get("root_path")
              and d.get("side") in ("left", "right")]
     if found and not all(any(str(c.get("path", "")).endswith("/touch") for c in d.get("components", [])) for d in found):
@@ -655,6 +657,46 @@ def check_eye_rate():
                " (steamvr.gazeDepEyeToHeadEnable on" + (", set by Frametop)" if os.path.exists(EYE_RATE_MARK) else ")"))
 
 
+def check_dashpatch():
+    """pointer/dashpatch: the treadmill moves SteamVR's windows only with the patch in SteamVR's
+    dashboard. It wraps UndockedOverlay.startFloatingWindowMove, found by name, and needs the
+    dashboard's debugger on 127.0.0.1:8089 (from SteamVR's start)."""
+    if systemctl("is-enabled", "frametop-dashpatch") != "enabled":
+        return
+    label = "dashboard patch"
+    found = False
+    for root, _, files in os.walk(DASHBOARD_JS):
+        for name in files:
+            if name.endswith(".js"):
+                try:
+                    with open(os.path.join(root, name), errors="replace") as f:
+                        if "startFloatingWindowMove" in f.read():
+                            found = True
+                            break
+                except OSError:
+                    pass
+        if found:
+            break
+    if not found:
+        report("FAIL", label, "SteamVR's dashboard has no startFloatingWindowMove any more, so the 3D mouse "
+               "(a treadmill) can't move SteamVR's windows; pointer/dashpatch/treadmill-move.js needs updating")
+        return
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8089/json", timeout=3) as r:
+            titles = [t.get("title") for t in json.load(r)]
+    except (OSError, ValueError):
+        report("warn", label, "SteamVR's dashboard debugger isn't on 127.0.0.1:8089, so the 3D mouse can't move "
+               "SteamVR's windows: run pointer/dashpatch/ft-dashpatch.py on, then restart SteamVR")
+        return
+    if "systemui" not in titles:
+        report("warn", label, "the dashboard debugger answers but lists no systemui page")
+        return
+    state = systemctl("is-active", "frametop-dashpatch")
+    report("ok" if state == "active" else "warn", label, f"debugger on 127.0.0.1:8089, frametop-dashpatch {state} "
+           "(pointer/dashpatch/run.sh status shows the patch)")
+
+
 def main():
     args = sys.argv[1:]
     if args not in ([], ["--mark-good"]):
@@ -682,6 +724,7 @@ def main():
         check_vr_socket()
         check_eye_tracker()
         check_eye_rate()
+        check_dashpatch()
 
     if args == ["--mark-good"]:
         if failed:

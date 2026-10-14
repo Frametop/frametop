@@ -32,10 +32,10 @@
 // that hand, so the real controller would never get it back otherwise.
 //
 // Settings (steamvr.vrsettings section "driver_ft_pointer", defaults in
-// ft_pointer/resources/settings/default.vrsettings): role (int, 2 = right hand, the default,
-// 4 = treadmill, 5 = stylus). A treadmill is hinted from Activate on, shown or not: SteamVR gives it
+// ft_pointer/resources/settings/default.vrsettings): role (int, 2 = right hand, 4 = treadmill, the
+// default, 5 = stylus). A treadmill is hinted from Activate on, shown or not: SteamVR gives it
 // /user/treadmill only when the device is added. Only a hand role switches to OptOut while hidden.
-// A treadmill can't move SteamVR's windows by their grab bars (docs/design.md, "Treadmill role").
+// A treadmill moves SteamVR's windows by their grab bars only with pointer/dashpatch in.
 #include <openvr_driver.h>
 
 #include <atomic>

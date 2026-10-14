@@ -230,14 +230,14 @@
 // the dot hides and a press answers the panel instead of clicking: a left click, gaze_left, or
 // a gaze_precision or gaze_drag press sends "calaccept" to @ft_gazed (take this dot now), a right
 // click or gaze_right "calquit" (calpanel.h).
-//   POINTER_ROLE (right, the default, or left, stylus, treadmill): the role our device takes while
-// connected. With a hand role, a Frame controller in your hand counts as used through its touch
-// sensors and takes its hand's role back, and then no click lands (see "no hand role" in the main
-// loop): with a controller held in the right hand, the pointer needs the left hand, or the stylus
-// role. Treadmill is no hand, so the real controllers keep both hand roles, but SteamVR's windows
-// don't move by their grab bars for it. The driver must hint it from the start (its
-// default.vrsettings role 4, or driver_ft_pointer/role; a SteamVR restart to change), so this
-// setting can't make a device added as a hand into a treadmill. docs/design.md, "Treadmill role".
+//   POINTER_ROLE (treadmill, the default, or right, left, stylus): the role our device takes while
+// connected. Treadmill is no hand, so the real controllers keep both hand roles and a controller
+// can be used beside the pointer (or a bare hand's ray). The driver must hint it from the start
+// (its default.vrsettings role 4, or driver_ft_pointer/role; a SteamVR restart to change), so this
+// setting can't make a device added as a hand into a treadmill. With a hand role, a Frame controller
+// in your hand counts as used through its touch sensors and takes its hand's role back, and then
+// no click lands (see "no hand role" in the main loop): with a controller held in the right hand,
+// the pointer needs the left hand, or the stylus role. docs/design.md, "Treadmill role".
 //
 // Hands (POINTER_HANDS, off by default; needs hand tracking, hands/): ft-hands publishes
 // pinches and grips (hands/include/fh_gestures.h), read here every frame.
@@ -1005,7 +1005,7 @@ int main() {
     // holds back its press in gaze mode; direct: it clicks at once), POINTER_ROLE.
     bool gazeMousePrecision = true;
     bool gazeMouseHeld = true;  // POINTER_GAZE_MOUSE_MOVE (see the top)
-    std::string role = "right";
+    std::string role = "treadmill";
     double pickupScale = 1;  // POINTER_CONTROLLER_PICKUP: scales the controller-moved limits
     std::vector<std::string> ignore;  // POINTER_IGNORE (see ParseIgnore)
     auto loadConfig = [&] {
@@ -1088,9 +1088,9 @@ int main() {
         const auto mm = conf.find("POINTER_GAZE_MOUSE_MOVE");
         gazeMouseHeld = mm == conf.end() || mm->second != "free";
         const auto ro = conf.find("POINTER_ROLE");
-        role = ro != conf.end() && (ro->second == "left" || ro->second == "stylus" || ro->second == "treadmill")
+        role = ro != conf.end() && (ro->second == "left" || ro->second == "right" || ro->second == "stylus")
                    ? ro->second
-                   : "right";
+                   : "treadmill";
         pickupScale = std::clamp(ConfDouble(conf, "POINTER_CONTROLLER_PICKUP", 1), 0.5, 5.0);
         const auto ig = conf.find("POINTER_IGNORE");
         ignore = ParseIgnore(ig == conf.end() ? "" : ig->second);

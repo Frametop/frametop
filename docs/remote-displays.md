@@ -1,6 +1,6 @@
-# Remote displays (exploration)
+# Remote displays: design notes
 
-Status: exploration. Spike S1 is done; nothing in Frametop has changed yet. Branch `remote-displays`, written 2026-10-06.
+These are the notes from building remote displays, from the first exploration (2026-10-06) on: what the Frame's hardware gives us, the spikes, and the decisions. To set a computer up, see [Remote displays in the README](../README.md#remote-displays) and the host kits: [Windows](../host/windows/README.md), [macOS](../host/macos/README.md), [Linux](../host/linux/README.md). How the pieces work now is in [reference.md](reference.md#frametop-remote-displays).
 
 The idea: show desktops streamed from other machines as Frametop panels that behave like the native screens. They get placement, curve, pinning, layouts, lasers, gaze, and attention-based frame rates. The target is up to 5 remote displays from 2 hosts, with no more headset overhead than 5 native screens.
 

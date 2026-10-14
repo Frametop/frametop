@@ -4,6 +4,7 @@ Frametop is a desktop for the Steam Frame that runs on the headset itself, with 
 
 - **Screens that are real monitors.** Each KDE Plasma screen has its own resolution and shape: an ultrawide in front, portrait screens beside it. Move, resize, curve, and roll them, or pin one to your wrist or your head. They come back to your layout when the desktop starts.
 - **Windows that float on their own.** Take any app window off the screens into a panel of its own with Meta+Shift+F, its title bar button, or Launch as Standalone. It stays part of the desktop, so drag and drop and the clipboard still work between floating windows and the screens.
+- **Your other computers' monitors.** Stream a Windows PC's or a Mac's monitors, or a virtual monitor at any size, as screens of their own, with the same controls. See [Remote displays](#remote-displays).
 - **Profiles.** Save where your screens are, which ones show, and which apps are open where. Switch to a profile from Display Settings, a key, or its launcher entry, or start the desktop in one.
 - **One mouse for all of SteamVR.** A Bluetooth mouse drives a small dot anchored in the room. It works the screens, the dashboard, Steam, and overlays, and hands the laser back when you pick up a controller.
 - **Look and click (experimental).** In gaze mode the pointer goes where you look. Meta+J and Meta+K, or the mouse buttons, click and fine-tune, and each correction teaches the tracker. Calibration runs in the headset.
@@ -100,6 +101,22 @@ A profile is a named setup: where the screens are, with their sizes and pins, wh
 | Save as profile… (Frametop Display Settings, Layout & profiles) | Saves the current setup under a name, or updates the profile you're in |
 | Pick a profile under Arrangement and press Open profile | Switches to it: the screens move, open windows of its apps go to their places, and the apps that aren't open start. Nothing closes |
 | Pick a profile under Start in profile, or run its entry (Frametop: NAME) from SteamVR's Launch a program list | The desktop starts in that profile, or switches to it if it's running. A profile can also go on a key combination, mouse button, or controller button in Frametop Input Settings |
+
+### Remote displays
+
+Remote displays bring another computer's monitors into Frametop. Each one is a panel with a screen's controls: move it, resize it, curve it, pin it, and save it in a profile. The mouse, the keyboard and the lasers work on it, and its sound plays on the Frame. The computer streams with Sunshine's protocol, and the Frame decodes the streams in hardware.
+
+Each computer needs a host kit once:
+
+| Computer | What it streams | Set up with |
+| --- | --- | --- |
+| Windows PC | Its monitors, and virtual monitors at any size | Vibepollo with Frametop's build: [host/windows/README.md](host/windows/README.md) |
+| Mac with Apple silicon | Its monitors | Sunshine, one instance per monitor, and Frametop Streams in the menu bar to turn them on and off: [host/macos/README.md](host/macos/README.md) |
+| Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Vibepollo with Frametop's build, not tested yet: [host/linux/README.md](host/linux/README.md) |
+
+Then, on the Frame, open Frametop Remote Displays (in the app menu, or Remote displays in Display Settings), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
+
+A monitor you stream switches to the stream's resolution while it streams (Windows), so pick a size the monitor has, or one with the same shape. A computer that's asleep can't be reached. [docs/reference.md](docs/reference.md#frametop-remote-displays) has the details.
 
 ### Pause for VR games
 
@@ -220,6 +237,9 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `hands/` | Hand tracking (experimental, deferred: the installer doesn't offer it). See [hands/README.md](hands/README.md). |
 | `display-settings/`, `input-settings/` | The two settings apps (Kirigami, Python). |
 | `remote/` | Frametop Remote Access, the app that turns remote desktop over VNC on and off. |
+| `remote-displays/` | Frametop Remote Displays, the app that adds other computers' monitors as screens. |
+| `stream/` | ft-stream, one per remote display: receives and decodes its stream for ft-screens. |
+| `host/` | The host kits for remote displays: Windows, macOS and Linux. |
 | `setup/` | The build container and the Bluetooth fixes. See [setup/README.md](setup/README.md). |
 | `scripts/` | Helpers the installers use. They run commands locally on the Frame, or over SSH from a PC. |
 

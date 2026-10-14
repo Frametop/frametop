@@ -13,6 +13,7 @@
 #include "../grabthat.h"
 #include "../palmmenu.h"
 #include "../softglow.h"
+#include "../steampanels.h"
 
 #include <algorithm>
 #include <cctype>
@@ -5133,6 +5134,202 @@ int ScanFlags(int n, char **dirs) {
 }
 
 
+// SteamVR's own panels (steampanels.h, vr.cpp's "SteamVR's panels by hand"): the fit from a cone's
+// hits, and the laser's touch, grab point and carry.
+void TestSteamPanels() {
+    using namespace steampanels;
+    // a 0.8 x 0.5 m panel 0.6 m ahead, 1.1 m up, turned 0.4 rad: the hits on a patch of it
+    const Mat P = RotY(0.4, 0.2, 1.1, -0.6);
+    const double W = 0.8, H = 0.5;
+    auto pointAt = [&](double u, double v, double out[3]) {   // texture u, v (v up) to the room
+        for (int i = 0; i < 3; ++i) out[i] = P.m[i][3] + P.m[i][0] * (u - 0.5) * W + P.m[i][1] * (v - 0.5) * H;
+    };
+    std::vector<Sample> s;
+    for (int i = 0; i < 7; ++i)
+        for (int j = 0; j < 7; ++j) {
+            Sample x;
+            x.u = 0.3 + 0.05 * i, x.v = 0.6 + 0.04 * j;
+            pointAt(x.u, x.v, x.p);
+            s.push_back(x);
+        }
+    const Fit f = FitPanel(s);
+    CHECK(f.ok && f.hits == 49);
+    NEAR(f.width, W, 1e-4), NEAR(f.height, H, 1e-4);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 4; ++j) NEAR(f.pose.m[i][j], P.m[i][j], 1e-4);
+    // ...a line of hits fits no plane; too few hits fit nothing
+    std::vector<Sample> line;
+    for (const Sample &x : s)
+        if (std::fabs(x.v - 0.6) < 1e-9) line.push_back(x);
+    CHECK(!FitPanel(line).ok && !FitPanel(std::vector<Sample>(s.begin(), s.begin() + 5)).ok);
+    // ...a speck (2 cm across) isn't a panel
+    std::vector<Sample> speck = s;
+    for (Sample &x : speck) x.p[0] = P.m[0][3] + (x.u - 0.5) * 0.02, x.p[1] = P.m[1][3] + (x.v - 0.5) * 0.02, x.p[2] = P.m[2][3];
+    CHECK(!FitPanel(speck).ok);
+
+    // the cone: n x n unit rays, the middle one along the line, the corners halfDeg off each way
+    const double eye[3] = {0, 1.6, 0}, tip[3] = {0.1, 1.3, -0.5};
+    const auto rays = Cone(eye, tip, 12, 7);
+    CHECK(rays.size() == 49);
+    double ax[3] = {tip[0] - eye[0], tip[1] - eye[1], tip[2] - eye[2]};
+    const double al = std::sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+    double most = 0;
+    for (const auto &r : rays) {
+        NEAR(std::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]), 1.0, 1e-9);
+        most = std::max(most, std::acos(std::min(1.0, (r[0] * ax[0] + r[1] * ax[1] + r[2] * ax[2]) / al)) * 180 / M_PI);
+    }
+    NEAR((rays[24][0] * ax[0] + rays[24][1] * ax[1] + rays[24][2] * ax[2]) / al, 1.0, 1e-9);
+    NEAR(most, std::atan(std::tan(12 * M_PI / 180) * std::sqrt(2.0)) * 180 / M_PI, 0.01);
+
+    // pixels (a millimetre each) to the point on it
+    double u = 0, v = 0;
+    FromPixels(W, H, 400, 250, &u, &v);
+    NEAR(u, 0, 1e-9), NEAR(v, 0, 1e-9);
+    FromPixels(W, H, 0, 0, &u, &v);
+    NEAR(u, -0.4, 1e-9), NEAR(v, 0.25, 1e-9);
+    // the touch: 10 cm out in front of the point, turned as the panel is (its -z aims in)
+    const Mat t = Touch(P, 0.1, -0.05, 0.1);
+    for (int i = 0; i < 3; ++i) {
+        NEAR(t.m[i][3], P.m[i][3] + P.m[i][0] * 0.1 - P.m[i][1] * 0.05 + P.m[i][2] * 0.1, 1e-5);
+        for (int j = 0; j < 3; ++j) NEAR(t.m[i][j], P.m[i][j], 1e-6);
+    }
+    // where a move and a resize press
+    GrabPoint(W, H, false, 0, 0, 0.075, 0.01, &u, &v);
+    NEAR(u, 0, 1e-9), NEAR(v, -0.325, 1e-9);
+    GrabPoint(W, H, true, 1, -1, 0.075, 0.01, &u, &v);
+    NEAR(u, 0.41, 1e-9), NEAR(v, -0.26, 1e-9);
+    GrabPoint(W, H, true, -1, 1, 0.075, 0.01, &u, &v);
+    NEAR(u, -0.41, 1e-9), NEAR(v, 0.26, 1e-9);
+    // the laser follows a carried panel: where it touched it, it still does
+    const Mat Q = RotY(-0.3, -0.4, 1.3, -0.5);
+    const Mat moved = Follow(P, Q, t), want = Touch(Q, 0.1, -0.05, 0.1);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 4; ++j) NEAR(moved.m[i][j], want.m[i][j], 1e-5);
+    // the quaternion: about y by 0.4, and one past 90 degrees (the trace below zero), unit with w >= 0
+    double q[4];
+    Quat(P, q);
+    NEAR(q[0], std::cos(0.2), 1e-6), NEAR(q[1], 0, 1e-6), NEAR(q[2], std::sin(0.2), 1e-6), NEAR(q[3], 0, 1e-6);
+    Quat(RotY(3.0, 0, 0, 0), q);
+    NEAR(q[0], std::cos(1.5), 1e-5), NEAR(q[2], std::sin(1.5), 1e-5);
+    Quat(RotY(-3.0, 0, 0, 0), q);
+    CHECK(q[0] >= 0), NEAR(std::fabs(q[2]), std::sin(1.5), 1e-5), NEAR(q[0] * q[0] + q[2] * q[2], 1.0, 1e-5);
+}
+
+// SteamVR's panels in near input (Panel::foreign): a poke and a pinch click, the border and corners
+// take them (vr.cpp moves and resizes them with the laser), but nothing throws, flicks, pushes or
+// rewinds them, a fist doesn't take them, and a second hand doesn't join one.
+void TestForeignPanel() {
+    auto rig = [](Rig &r) {
+        r.panels[0].index = 1000, r.panels[0].foreign = true, r.panels[0].controls.clear();
+        r.panels[0].pxW = 1000, r.panels[0].pxH = 563;
+    };
+    {   // a poke presses where it touches
+        Rig r;
+        rig(r);
+        for (int mm = 100; mm >= -15; mm -= 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+        CHECK(r.Count(Event::Press) == 1);
+        if (const auto p = r.Last(Event::Press)) CHECK(p->panel == 1000), NEAR(p->x, 600, 3), NEAR(p->y, 563 * (0.5 - 0.05 / 0.5625), 3);
+        for (int mm = -15; mm <= 50; mm += 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+        CHECK(r.Count(Event::Release) == 1);
+    }
+    {   // a pinch on the content clicks
+        Rig r;
+        rig(r);
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0, 0, 0.01)});
+        const double mid[3] = {0, 0, -0.49};
+        r.synth.Pinch(1, true, r.t, mid, 1);
+        r.Frame({PinchAt(0, 0, 0.01)});
+        CHECK(r.Count(Event::GrabStart) == 0 && r.Count(Event::Press) == 1);
+    }
+    {   // the right edge takes it; carried 10 cm right it moves; let go moving fast, it stays (no throw)
+        Rig r;
+        rig(r);
+        double x = 0.55;
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(x, 0, 0.01)});
+        const double at[3] = {x, 0, -0.49};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({PinchAt(x, 0, 0.01)});
+        CHECK(r.Last(Event::GrabStart) && r.Last(Event::GrabStart)->zone == Zone::Edge && r.in.grabbing(1));
+        for (int k = 1; k <= 20; ++k) {
+            if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
+            r.Frame({PinchAt(x += 0.005, 0, 0.01)});
+        }
+        CHECK(!r.carries.empty() && r.carries[0].kind == Carry::Move && r.carries[0].panel == 1000);
+        for (int k = 0; k < 6; ++k) {   // out at 1.5 m/s
+            if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
+            r.Frame({PinchAt(x, 0, 0.01 - 0.05 * k)});
+        }
+        r.synth.Pinch(1, false, r.t, at, 1);
+        for (int k = 0; k < 4; ++k) {
+            SynthHand o = PinchAt(x, 0, -0.3 - 0.05 * k);
+            o.open = 1;
+            r.Frame({o});
+        }
+        CHECK(r.Count(Event::GrabEnd) == 1 && r.Count(Event::Throw) == 0 && !r.in.grabbing(1));
+        // ...nor does it go back (the rewind, Settle)
+        for (int k = 0; k < 30; ++k) r.Frame({OpenAt(0.3, 0, -0.1)});
+        CHECK(r.Count(Event::Settle) == 0 && r.Count(Event::Throw) == 0);
+    }
+    {   // a corner resizes
+        Rig r;
+        rig(r);
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0.53, 0.30, 0.01)});
+        const double at[3] = {0.53, 0.30, -0.49};
+        r.synth.Pinch(1, true, r.t, at, 1);
+        r.Frame({PinchAt(0.53, 0.30, 0.01)});
+        const auto g = r.Last(Event::GrabStart);
+        CHECK(g && g->zone == Zone::Corner && g->sx == 1 && g->sy == 1);
+    }
+    {   // a fist doesn't take it
+        Rig r;
+        rig(r);
+        r.in.params().fistResizeOnly = false;
+        for (int k = 0; k < 5; ++k) r.Frame({FistAt(0.0, 0, 0.05)});
+        const double at[3] = {0.0, 0, -0.45};
+        r.synth.Grip(1, true, r.t, at, 1);
+        for (int k = 0; k < 5; ++k) r.Frame({FistAt(0.0, 0, 0.05)});
+        CHECK(r.Count(Event::GrabStart) == 0 && !r.in.grabbing(1));
+    }
+    {   // a flick out through it and an open hand pushed into it: no throw, no throw aim
+        const double a[3] = {0.05, 0, -0.44}, b[3] = {0.05, 0, -0.76};
+        Rig r;
+        rig(r);
+        auto flick = [&](double x, double y, double z) {
+            SynthHand h = OpenAt(x, y, z);
+            if (z > -0.55) h.curl = h.curlIndex = 1;
+            return h;
+        };
+        for (int k = 0; k < 8; ++k) r.Frame({flick(a[0], a[1], a[2])});
+        Sweep(r, a, b, 1.5, flick);
+        CHECK(r.Count(Event::Throw) == 0);
+        Rig p;
+        rig(p);
+        const double c[3] = {0.05, 0, -0.42}, d[3] = {0.05, 0, -0.58};
+        p.Frame({OpenAt(0.05, 0, -0.45)}), p.Frame({OpenAt(0.05, 0, -0.45)});
+        CHECK(!p.in.throwAims().count(1000));
+        for (int k = 0; k < 8; ++k) p.Frame({OpenAt(c[0], c[1], c[2])});
+        Sweep(p, c, d, 0.6, [](double x, double y, double z) { return OpenAt(x, y, z); });
+        CHECK(p.Count(Event::Throw) == 0);
+    }
+    {   // the left hand holds its left edge; the right hand's pinch on the content clicks (no join)
+        Rig r;
+        rig(r);
+        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(-0.55, 0, 0.01, false, 1)});
+        const double l[3] = {-0.55, 0, -0.49};
+        r.synth.Pinch(0, true, r.t, l, 1);
+        r.Frame({PinchAt(-0.55, 0, 0.01, false, 1)});
+        CHECK(r.in.grabbing(0));
+        SynthHand p = PinchAt(0.2, 0.05, 0.01, true, 2);
+        p.open = 0.6;
+        for (int k = 0; k < 4; ++k) r.Frame({PinchAt(-0.55, 0, 0.01, false, 1), p});
+        const double at[3] = {0.2, 0.05, -0.49};
+        r.synth.Pinch(1, true, r.t, at, 2);
+        p.open = 0;
+        r.Frame({PinchAt(-0.55, 0, 0.01, false, 1), p});
+        CHECK(r.in.stats.joins == 0 && !r.in.grabbing(1) && r.Count(Event::Press) == 1);
+    }
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -5203,6 +5400,8 @@ int main(int argc, char **argv) {
     TestJoin();
     TestFlagTwoFists();
     TestSoftGlow();
+    TestSteamPanels();
+    TestForeignPanel();
     std::printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

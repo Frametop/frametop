@@ -436,6 +436,26 @@
 // laser starts just before the cursor point (see Looks), so a panel nearer to you doesn't
 // catch it either.
 //
+// Touch (ft-screens' hands on SteamVR's own panels; screens/vr.cpp's "SteamVR's panels by hand"):
+// ft-screens finds the dashboard's panels, the Steam menu, Steam's keyboard and other apps' overlays
+// near a hand and works out what the hand does there, but only a laser can click them, so it drives
+// ours: "touch <left|right> <verb> [x y z qw qx qy qz] [key]", the laser's origin and turn in the
+// standing universe (just in front of the point, its -z aimed in). hover: the laser there; press: the
+// trigger down, and "click <key>" to ft-screens as a mouse click on that panel sends (typing goes to
+// Steam); move: there, held; up: the trigger up; grab: there, hovering kTouchHover (a floating panel's
+// grab bar comes up) before the press (a move by the grab bar, a resize by the margin past a corner,
+// the pose then following the hand); end: the hand has left, and a pointer the touch woke goes as a
+// ray's does (POINTER_RAY_RELEASE). A touch wakes the pointer, or claims the laser back from the
+// mouse's gaze, and a press waits for the claim; a tap's up goes 40 ms after its press at the
+// least, and after an up the laser holds still kTouchDrop (the dashboard reads the pose a carried
+// panel drops at a little late). One hand at a time: the other hand's touch waits while the button
+// is down, and none starts while the mouse, a ray or a gaze pinch holds it. While a touch has the
+// laser nothing else poses it, and the "a hand touches a panel" and "hand ray gone" releases wait.
+// For it the overlay list (see OverlayList) runs while hands are allowed, and goes to ft-screens
+// whenever it changes and every 5 s: "steamvr <seq> <part> <parts> key...", in parts under 400 bytes
+// (ft-screens reads 512-byte datagrams), without ours (frametop.*), POINTER_IGNORE's, or keys with
+// spaces.
+//
 // Commands (datagrams on @ft_pointer_helper): show, hide, recenter, move <dyaw> <dpitch>,
 // follow on|off|toggle (head follow, until the next restart or a change to POINTER_FOLLOW),
 // gaze on|off|toggle|? (gaze mode, likewise with POINTER_GAZE; ? only asks, and "? headset" adds
@@ -444,7 +464,8 @@
 // overlays (replies with the overlay list as JSON, see OverlayList),
 // vrbind/vrglobal/vrstatus (Frame controller buttons, see vrbuttons.h),
 // ctl ... and paused 0|1 (the relay, see Handoff), near <capture_ns> <L 0|1|2> <R 0|1|2> (ft-screens:
-// which hands are near its panels, for the hand ray and the gestures),
+// which hands are near its panels, for the hand ray and the gestures), touch <left|right> <verb> ...
+// (ft-screens: a hand on a SteamVR panel, see Touch),
 // and btn/scroll lines, which are forwarded to the driver unchanged. For layouts, with a
 // reply datagram to the sender's (abstract) address:
 //   place <overlay> <x> <y> <z> <yaw> <pitch> [roll [grab]]: centre in the standing
@@ -880,6 +901,9 @@ Vec3 LimitPitch(Vec3 d, double maxDeg) {
 // SteamVR Settings page (see the top): the laser starts this far from the eye, the dot is
 // drawn this far out, and the laser-catching dot sits this far out (metres).
 constexpr double SETTINGS_ORIGIN = 0.25, SETTINGS_DOT = 0.6, SETTINGS_CATCHER = 8.0;
+// A touch's grab hovers this long before it presses (a floating panel's grab bar comes up under the
+// laser), and after a release the laser holds still this long (see "Touch" at the top).
+constexpr auto kTouchHover = std::chrono::milliseconds(120), kTouchDrop = std::chrono::milliseconds(250);
 
 // Whether the line of sight from `eye` along `d` crosses the SteamVR Settings page, drawn by
 // the dashboard's scene-graph panel (valve.steam.gamepadui.frame.menu.N, transform t); see
@@ -1323,6 +1347,9 @@ int main() {
     std::string handsSent;              // "hands L R allowed" as last sent to ft-screens
     Clock::time_point handsSentAt{};
     bool handsAllowed = false;          // hand interaction allowed now (see "Handoff" at the top)
+    unsigned steamListGen = ~0u;        // the overlay list as last sent to ft-screens ("steamvr ...", see "Touch")
+    long steamListSeq = 0;
+    Clock::time_point steamListAt{};
     // Controllers, looked at once a second: type (ours is left out), side from the role hint, charging.
     struct DeviceInfo {
         bool controller = false, ours = false, charging = false;
@@ -1349,6 +1376,21 @@ int main() {
     bool rayInactive = false;           // a controller took the laser: our dot hides until a pinch claims
     bool rayWoke = false;               // the ray woke the pointer (it goes again when the ray has gone a while)
     Clock::time_point rayGoneAt{};      // when the last ray went
+    // ft-screens' touches on SteamVR's panels (see "Touch" at the top): the laser goes where it says.
+    struct Touch {
+        int side = -1;                  // the hand whose touch has the laser (-1: none)
+        Vec3 origin;                    // where the laser is to be (standing universe)
+        Basis basis{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+        bool posed = false;             // a pose came for this touch
+        bool wantDown = false;          // the button is to be down
+        bool pressPending = false;      // a press to go out (a tap whose "up" came first still clicks)
+        bool down = false;              // the button is down (sent)
+        bool grab = false;              // a move or resize: it hovers there first (kTouchHover)
+        std::string key;                // the panel pressed (for ft-screens' typing, as a click's)
+        Clock::time_point grabAt{}, downAt{}, holdUntil{}, endAt{}, sentAt{};
+        Vec3 sentOrigin;
+        Basis sentBasis{};
+    } touch;
     double pushOffset = 0;              // push and pull: the origin moved this far along the ray (m)
     Vec3 rayOrigin, rayDir{0, 0, -1};   // the driving ray this frame (standing universe)
     // Gestures that began while ft-screens may still claim them (see "near" at the top).
@@ -1926,6 +1968,69 @@ int main() {
                     nearClaim[0] = l == 1, nearClaim[1] = r == 1;   // 2: the ray hides, the gestures stay ours
                     continue;
                 }
+                // ft-screens' touch on a SteamVR panel (see "Touch" at the top)
+                char tside[8], verb[8], tkey[128] = "";
+                double tp[7];
+                const int tgot = std::sscanf(buf, "touch %7s %7s %lf %lf %lf %lf %lf %lf %lf %127s", tside, verb, &tp[0], &tp[1],
+                                             &tp[2], &tp[3], &tp[4], &tp[5], &tp[6], tkey);
+                if (tgot >= 2) {
+                    const auto t = Clock::now();
+                    const int k = !std::strcmp(tside, "right") ? 1 : 0;
+                    const char *hand = k ? "right" : "left";
+                    if (!std::strcmp(verb, "end")) {
+                        if (touch.side == k) {
+                            if (touch.down) SendTo(out, "ft_pointer", "btn trigger 0");
+                            touch.side = -1, touch.down = touch.wantDown = touch.pressPending = false;
+                            touch.endAt = t, rayGoneAt = t;   // (a pointer it woke goes POINTER_RAY_RELEASE on)
+                            posed.valid = false;
+                            std::printf("touch %s: off SteamVR's panels\n", hand);
+                            std::fflush(stdout);
+                        }
+                        continue;
+                    }
+                    // the other hand holds the laser down, or the mouse, a ray or the gaze does: not now
+                    if ((touch.side >= 0 && touch.side != k && (touch.down || touch.wantDown || touch.pressPending)) ||
+                        (touch.side < 0 && (hold.src != Src::None || leftHeld || aimHeld)))
+                        continue;
+                    if (touch.side != k) {
+                        if (touch.side >= 0 && touch.down) SendTo(out, "ft_pointer", "btn trigger 0");
+                        touch = Touch{};
+                        touch.side = k;
+                        cursorDot.Show(false);
+                        markerDot.Show(false);
+                        std::printf("touch %s: on SteamVR's panels\n", hand);
+                        std::fflush(stdout);
+                    }
+                    handUsed = t;
+                    if (!active) {
+                        wake(t);   // role, show, and the claim 300 ms on
+                        rayWoke = active;
+                    } else if (!laserOurs() && !claimPending && !claimHeld) {
+                        claimPending = true, claimAt = t;
+                    }
+                    if (tgot >= 9) {
+                        // the quaternion (w x y z) to the frame
+                        const double n = std::sqrt(tp[3] * tp[3] + tp[4] * tp[4] + tp[5] * tp[5] + tp[6] * tp[6]);
+                        if (n > 1e-6) {
+                            const double w = tp[3] / n, x = tp[4] / n, y = tp[5] / n, z = tp[6] / n;
+                            touch.basis = {{1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)},
+                                           {2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)},
+                                           {2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)}};
+                            touch.origin = {tp[0], tp[1], tp[2]};
+                            touch.posed = true;
+                        }
+                    }
+                    if (!std::strcmp(verb, "press")) {
+                        touch.wantDown = touch.pressPending = true, touch.grab = false;
+                        touch.key = tgot >= 10 ? tkey : "-";
+                    } else if (!std::strcmp(verb, "grab")) {
+                        touch.wantDown = touch.pressPending = touch.grab = true, touch.grabAt = t;
+                        touch.key = "-";
+                    } else if (!std::strcmp(verb, "up") || !std::strcmp(verb, "hover")) {
+                        touch.wantDown = false;
+                    }
+                    continue;
+                }
             }
             if (std::strcmp(buf, "typing") == 0) {  // not mouse input: it never wakes the pointer
                 typist.Key(secsOf(Clock::now()));
@@ -2098,8 +2203,48 @@ int main() {
             claimHeld = false;
         }
 
-        // The overlay list is only needed while the pointer is awake (see OverlayList).
-        overlays.SetPaused(!active || headsetOff);
+        // ft-screens' touch on a SteamVR panel (see "Touch" at the top): the laser there, its button as
+        // asked once the laser is ours (a press that came before the claim landed goes out after it, and a
+        // tap's release 40 ms after its press). After a release the pose holds kTouchDrop, as the
+        // dashboard reads it for a carried panel's drop.
+        if (!active && touch.side >= 0) touch = Touch{};   // (released: the headset off, a controller took it)
+        if (active && touch.side >= 0 && touch.posed) {
+            const bool holdPose = tnow < touch.holdUntil;
+            if (!holdPose && (tnow - touch.sentAt > std::chrono::milliseconds(100) || Length(touch.origin - touch.sentOrigin) > 0.0002 ||
+                              Dot(touch.basis.z, touch.sentBasis.z) < 0.999999 || Dot(touch.basis.x, touch.sentBasis.x) < 0.999999)) {
+                sendPose(touch.origin, touch.basis);
+                touch.sentOrigin = touch.origin, touch.sentBasis = touch.basis, touch.sentAt = tnow;
+            }
+            const bool laserReady = !claimPending && !claimHeld && laserOurs() && tnow - touch.sentAt < std::chrono::seconds(1);
+            if (touch.pressPending && laserReady && (!touch.grab || tnow - touch.grabAt >= kTouchHover)) {
+                SendTo(out, "ft_screens", "click " + touch.key);   // (typing goes to Steam on a click on its panels)
+                SendTo(out, "ft_pointer", "btn trigger 1");
+                touch.pressPending = false, touch.down = true, touch.downAt = tnow;
+            } else if (touch.down && !touch.wantDown && !touch.pressPending && tnow - touch.downAt >= std::chrono::milliseconds(40)) {
+                SendTo(out, "ft_pointer", "btn trigger 0");
+                touch.down = false, touch.holdUntil = tnow + kTouchDrop;
+            }
+        }
+
+        // The overlay list is only needed while the pointer is awake (see OverlayList), and while hands
+        // may touch SteamVR's panels: ft-screens finds them by it (see "Touch" at the top).
+        overlays.SetPaused(headsetOff || (!active && !(handsOn && handsAllowed)));
+        if (handsOn && handsAllowed && !headsetOff &&
+            (overlays.Generation() != steamListGen || tnow - steamListAt > std::chrono::seconds(5))) {
+            steamListGen = overlays.Generation(), steamListAt = tnow;
+            // "steamvr <seq> <part> <parts> key...", each part within ft-screens' 512-byte datagrams; not
+            // ours, not ignored, nor keys with spaces (the reader splits on them)
+            std::vector<std::string> parts(1);
+            for (const std::string &key : overlays.Keys()) {
+                if (key.rfind("frametop.", 0) == 0 || Ignored(ignore, key) || key.find(' ') != std::string::npos || key.size() > 200) continue;
+                if (parts.back().size() + key.size() > 400) parts.emplace_back();
+                parts.back() += " " + key;
+            }
+            for (size_t i = 0; i < parts.size(); ++i)
+                SendTo(out, "ft_screens", "steamvr " + std::to_string(steamListSeq) + " " + std::to_string(i) + " " +
+                                              std::to_string(parts.size()) + parts[i]);
+            ++steamListSeq;
+        }
 
         // Laser mode on while the pointer is awake.
         if (active != laserModeShown) {
@@ -2431,7 +2576,7 @@ int main() {
             rayLeave(false);
         }
         // The ray woke the pointer and has been gone a while (no mouse, no gaze meanwhile): release it.
-        if (active && rayWoke && raySide < 0 && hold.src == Src::None && !leftHeld && !gazeOn &&
+        if (active && rayWoke && raySide < 0 && touch.side < 0 && hold.src == Src::None && !leftHeld && !gazeOn &&
             tnow - rayGoneAt > std::chrono::duration<double>(rayRelease) &&
             tnow - lastMouse > std::chrono::duration<double>(rayRelease)) {
             releasePointer("hand ray gone");
@@ -2439,7 +2584,7 @@ int main() {
         // A hand at a panel (ft-screens' near claim: it pokes and taps there): no laser at all (user,
         // 2026-10-11: the laser from the head to where the fingertip put the cursor got in the way of
         // tapping, and held the button so pokes were refused). The mouse's next move claims it back.
-        if (active && hold.src == Src::None && !leftHeld && tnow - nearAt < std::chrono::milliseconds(200) &&
+        if (active && hold.src == Src::None && !leftHeld && touch.side < 0 && tnow - nearAt < std::chrono::milliseconds(200) &&
             (nearClaim[0] || nearClaim[1]) && tnow - lastMouse > std::chrono::seconds(1)) {
             releasePointer("a hand touches a panel");
         }
@@ -3335,7 +3480,9 @@ int main() {
             if (seen != visible) visible.swap(seen), ++visibleGen;
         }
 
-        if (active && anchored && hmd.bPoseIsValid && tilting) {
+        if (active && touch.side >= 0) {
+            // (a touch on a SteamVR panel has the laser: posed above)
+        } else if (active && anchored && hmd.bPoseIsValid && tilting) {
             // Rotate the device around the grab point; the grabbed panel turns with it.
             if (tiltStart) {
                 pivot = lastPoint;

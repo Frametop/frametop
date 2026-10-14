@@ -512,6 +512,17 @@ def coach_words(r):
     return words
 
 
+def fit_card(r):
+    """A reading for the window's fit card: the state, each eye's (by name), the hints' texts."""
+    if r is None:
+        return None
+    eyes = {}
+    for cam, e in r["eyes"].items():
+        eyes[e["name"]] = {"state": e["state"], "found": e["found"], "offset_deg": e.get("offset_deg")}
+    return {"state": r["state"], "eyes": eyes, "hints": [h["text"] for h in r["hints"]],
+            "provisional": r["provisional"], "against": r["against"]}
+
+
 def compact(r):
     """A reading for fit.json: no per-hint text."""
     return {"state": r["state"], "terms": r["terms"], "hints": [h["key"] for h in r["hints"]], "eyes": r["eyes"],
@@ -577,8 +588,8 @@ class Session:
         self._wake = threading.Event()
         self._status = {"state": "starting", "bounty": self.bounty["id"], "title": "", "step": "", "step_index": 0,
                         "step_count": 0, "prompt": "", "note": "", "take": None, "error": "", "waiting": False,
-                        "countdown": 0, "big": "", "can_redo": False, "fit": None, "fit_words": "",
-                        "ready_text": READY_TEXT, "button": False, "seconds_left": 0.0}
+                        "countdown": 0, "big": "", "can_redo": False, "fit": None, "fit_words": "", "fit_card": None,
+                        "ipd": None, "ready_text": READY_TEXT, "button": False, "seconds_left": 0.0}
         self._last_emit = 0.0
         self._log_file = None
         self._panel = self._eyes = None
@@ -743,6 +754,7 @@ class Session:
             self._start_button()
         r = self._panel.cmd("ipd", reply=True)
         self._ipd = float(r.split()[1]) if r and r.startswith("ok ") else None
+        self._status["ipd"] = self._ipd
         last = self.profile.get("eyes_ipd")
         sweep = self._ipd is not None and (not isinstance(last, (int, float)) or abs(self._ipd - last) >= SPLIT_IPD_M)
         self.plan = build_plan(self.round, self.seed, sweep)
@@ -1058,7 +1070,7 @@ class Session:
             self._panel.cmd("dot 0 0 %s" % ("done" if good else "look"))
             self._panel.set("action", "action " + (self._status["ready_text"] if good or f["warned"] else FIT_ADJUST))
             self._show(title, "Headset position: " + words + ("||" + intro if intro else ""))
-            self._emit(force=False, fit=r["state"] if r else None, fit_words=words)
+            self._emit(force=False, fit=r["state"] if r else None, fit_words=words, fit_card=fit_card(r))
 
         self._redo_ok = False
         while True:
@@ -1079,7 +1091,7 @@ class Session:
         self._log("fitment: %s%s" % (result, (", " + coach_words(f["reading"])) if f["reading"] else ""))
         self._panel.set("note", "note ")
         self._panel.cmd("dot 0 0 off")
-        self._emit(note="", fit=None, fit_words="")
+        self._emit(note="", fit=None, fit_words="", fit_card=None)
 
     def _shift_check(self, step):
         """After a centre dot's hold: has the headset moved since the fitment?"""

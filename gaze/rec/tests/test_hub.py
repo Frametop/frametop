@@ -63,7 +63,7 @@ class HubTest(unittest.TestCase):
         self.assertEqual(hub.rhub.uploads(hub.meta_path(self.store, RID)), [])
 
     def test_gate(self):
-        self.assertFalse(hub.texts_ready(), "the texts aren't written yet")
+        self.assertFalse(hub.texts_ready(), "the texts are drafts")
         with mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: ""}):
             self.assertFalse(hub.upload_allowed(hub.dataset_id()), "never the real dataset before the review")
             with self.assertRaises(hub.HubError) as cm:

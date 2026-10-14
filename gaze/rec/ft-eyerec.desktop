@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Frametop Eye Recorder
+GenericName=Record your eyes for the eye dataset
+Comment=Fit the headset, then record, review and export eye recordings for Frametop's eye dataset
+Exec=@REPO@/gaze/rec/ft-eyerec
+Icon=camera-video
+Categories=Utility;
+Keywords=eyes;eye tracking;gaze;dataset;record;frametop;

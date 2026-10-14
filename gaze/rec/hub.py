@@ -16,8 +16,13 @@ nobody types a token anywhere. An upload:
 The images and health answers are encrypted already (takes.py's export): nothing here can read
 them, and the dataset's readers need one of its keys.
 
+`hub.py board` fetches the bounty board (bounties.json) from the dataset into BASE/board-cache.json,
+with the saved login when there is one (the dataset is gated): the window's board then uses it
+when it's newer than the one shipped here (recorder/bounties.py checks what it may say).
+
 usage: hub.py [--base DIR] whoami [--json]
        hub.py [--base DIR] login [--json]
+       hub.py [--base DIR] board [--json]
        hub.py [--base DIR] upload ROUND [--dry-run] [--again] [--json]
 With --json, each line of output is one JSON object, as the hand recorder's hub.py.
 """
@@ -30,6 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 import takes  # noqa: E402  (next to this file)
+from recorder import bounties  # noqa: E402
 from recorder import hub as rhub  # noqa: E402
 from recorder.common import write_json  # noqa: E402
 from recorder.hub import HubError, export_sha, is_draft, now_iso  # noqa: E402,F401
@@ -92,6 +98,34 @@ def whoami():
 def login(progress=None):
     _hf()
     return rhub.login(dataset_id(), progress, lambda: whoami(), "update the dev container (setup/dev-container.sh).")
+
+
+def board_url(repo):
+    return f"{rhub.dataset_url(repo)}/resolve/main/bounties.json"
+
+
+def fetch_board(base):
+    """The dataset's bounties.json into base/board-cache.json (session.load_board reads it).
+    Returns {"updated", "bounties"}; raises HubError."""
+    repo = dataset_id()
+    token = None
+    try:
+        token = _hf().get_token()
+    except (HubError, AttributeError):
+        pass   # no huggingface_hub, or an old one: try without a login
+    try:
+        board = bounties.fetch(board_url(repo), os.path.join(base, "board-cache.json"), token)
+    except ValueError as e:
+        raise HubError("hub", f"The dataset's bounty board isn't valid: {e}") from None
+    except OSError as e:
+        status = getattr(e, "code", None)
+        if status in (401, 403):
+            raise HubError("terms", "Log in and accept the dataset's terms to get its newest bounty board.",
+                           rhub.dataset_url(repo)) from None
+        if status == 404:
+            raise HubError("not-found", f"{repo} has no bounty board yet.") from None
+        raise HubError("network", f"Couldn't fetch the bounty board ({type(e).__name__}: {e}).") from None
+    return {"updated": board["updated"], "bounties": len(board["bounties"])}
 
 
 def upload(store, rnd, dry_run=False, again=False, progress=None, log=None):
@@ -157,6 +191,8 @@ def main():
     w.add_argument("--json", action="store_true")
     li = sub.add_parser("login", help="log in to Hugging Face in the browser")
     li.add_argument("--json", action="store_true")
+    b = sub.add_parser("board", help="fetch the dataset's bounty board")
+    b.add_argument("--json", action="store_true")
     u = sub.add_parser("upload", help="upload exports/ROUND as a pull request")
     u.add_argument("round")
     u.add_argument("--dry-run", action="store_true", help="no network: say what would be uploaded")
@@ -174,6 +210,13 @@ def main():
                 emit({"done": who})
             else:
                 print(f"logged in as {who['name']} (token role: {who['role'] or 'unknown'})")
+            return 0
+        if a.cmd == "board":
+            got = fetch_board(os.path.abspath(os.path.expanduser(a.base)))
+            if a.json:
+                emit({"done": got})
+            else:
+                print(f"bounty board of {got['updated']}: {got['bounties']} bounties")
             return 0
         if a.cmd == "login":
             def code(phase, text, **extra):

@@ -1,4 +1,4 @@
-# Eye recorder: design (draft, 2026-10-14)
+# Eye recorder: design (2026-10-14)
 
 The eye recorder guides a person through recording their eyes with the headset's two eye cameras, at known gaze targets and through the cases where eye tracking breaks. It also fits the headset: it shows whether each eye sits where the cameras see it best, helps set the IPD, and catches the headset shifting on the face, with instructions to put it back. Recordings stay on the headset until the person uploads them. Only the maintainers can read what's uploaded (below, "Privacy").
 
@@ -6,23 +6,30 @@ It's the hand recorder's sibling (`hands/rec/DESIGN.md`): the same session runne
 
 The data is for training a better eye tracker than `gaze/tracker/` (ft-eyes, a classic pupil and glint finder) and SteamVR's, one that holds up at the edges of view, through blinks and squints, with glasses and makeup, and when the headset moves.
 
-## Decisions so far
+## Decisions (2026-10-14)
 
-| | Decided (2026-10-14) |
+| | Decided |
 |---|---|
 | Who reads the recordings | Maintainers only. The eye cameras see the iris, which identifies a person. Trained models can be public; the images never are. |
+| How | Encrypted frames in a gated dataset, `DeeJanuz/frametop-eyes` (below, "Privacy"). |
+| Keys | Two maintainer keys, one on dody and one on the Frame, both recipients of every upload. |
 | Packaging | Backend here in `gaze/rec/`, then a standalone repo with Frametop as a submodule, as the hand recorder does. |
+| Sessions | Short rounds picked from a bounty board (below, "Bounty board"), not one long session. Each round starts with a fit check and 9 dots. |
+| Bounty list | `bounties.json` in the dataset repo, fetched by the app (a copy ships for offline use). The board shows your own done marks and a maintainer-set priority tag per bounty, not community counts. |
 | Fit and slip source | Our tracker, ft-eyes: pupil and glint positions in the camera image. It needs ft-eyegrab, the root service `gaze/tracker/install.sh` installs. |
+| Where the fit coach runs | A fitment step in the recorder before each round, for better recordings, and the put-on and slip check in Frametop's gaze service. |
+| Shared code | The hand recorder's non-hand parts move into a shared module first, and the bounty board is built there too, so the hand recorder can use it next. |
+| Checklist | Glasses/inserts/contacts, eye makeup, measured IPD, and eye surgery or conditions. That last one is health data: a separate opt-in, and its answers are encrypted like the images. |
 
-### Open: how "maintainers only" works on Hugging Face
+## Privacy
 
-A private Hugging Face repo can't take contributions: people outside the org can't see it, so they can't open a pull request. Org membership would let every member read every contribution. So "private" needs another mechanism. Options:
+A private Hugging Face repo can't take contributions: people outside the org can't see it, so they can't open a pull request, and org membership would let every member read every contribution. So the dataset is gated like `DeeJanuz/frametop-hands`, and the export encrypts what identifies a person before upload:
+- Every frame chunk is encrypted with [age](https://age-encryption.org) (pyrage, which has aarch64 wheels: `pyrage-1.4.0-cp310-abi3-manylinux_2_17_aarch64`) to the recipients in `recipients.txt`: the maintainers' public keys, one on dody and one on the Frame. The private keys never go in a repo.
+- The health answers go in `health.json.age`, encrypted the same way.
+- Labels, timings, fit readings, the IPD and the rest of session.json stay readable, so `validate.py` and a review can check a pull request before anyone decrypts it.
+- Contributors open pull requests from their own accounts, so `hub.py` and the review tools carry over from hands.
 
-1. **Encrypted files in a gated dataset (recommended).** The export encrypts every image file to the maintainers' public keys with [age](https://age-encryption.org) (pyrage, which has aarch64 wheels: `pyrage-1.4.0-cp310-abi3-manylinux_2_17_aarch64`). The dataset repo works like `DeeJanuz/frametop-hands`: gated, contributors open pull requests from their own accounts, and `hub.py` and the review tools carry over. Only the frame files are encrypted. Labels, timings, fit readings and session.json stay readable, so `validate.py` and the review can check a pull request before anyone decrypts it. The private keys stay with the maintainers (the Frame and dody), never in a repo. age takes several recipients, so a second maintainer or a new key is one more line in `recipients.txt`. The risk: if a private key leaks, every upload made to it can be read. Withdrawal still means deleting the files and squashing history, as with hands.
-2. **An upload service.** A small service (a Hugging Face Space, or a bucket with signed upload links) holds the write token and puts uploads into a truly private repo. Nothing is public, even encrypted. But it's a server to run and pay for, and the 10 GB uploads go through it.
-3. **Per-contributor private repos.** Each person uploads to a private repo under their own account, then shares it. Hugging Face can't share a private user repo with one other user, so this doesn't work without an org.
-
-The rest of this design assumes option 1.
+The risk: if a private key leaks, every upload made to it can be read. A new key is one more recipient for new uploads; old uploads stay readable to the old key until they're re-encrypted. Withdrawal means deleting the files and squashing history, as with hands.
 
 ## What's measured already
 
@@ -35,8 +42,8 @@ The rest of this design assumes option 1.
 
 | Part | What it does |
 |---|---|
-| `gaze/rec/session.py` (Python, no Qt) | The session runner, like `hands/rec/session.py`: reads `script.json`, drives the panel, starts and stops the frame writer per step, reads the live fit for feedback, writes each take. `--dry-run`, `--next-after`, stdin steering and `--button-device` as in hands. |
-| `gaze/rec/script.json` | Sections, steps, targets and timings (below, "Script"). |
+| `gaze/rec/session.py` (Python, no Qt) | The session runner, like `hands/rec/session.py`: reads a round's script, drives the panel, starts and stops the frame writer per step, reads the live fit for feedback, writes each take. `--dry-run`, `--next-after`, stdin steering and `--button-device` as in hands. |
+| `gaze/rec/rounds/<id>.json` | Each kind of round's steps, targets and timings (below, "Bounty board"). |
 | `gaze/rec/eyerec.py` | The frame writer: reads the shared frames (as `lab/ft-eyes-record` does) and writes zstd-1 chunks, one per second per camera, with an index (below, "Files"). A thread of the session, not a process: ft-eyes-record shows the copy needs no numpy. |
 | `gaze/fitcoach.py` (shared) | The fit coach: from ft-eyes' pupil and glint positions, how the headset sits on this face, and what to do about it (below, "Fit coach"). The recorder, the Gaze page's fit check and the put-on check all use it. |
 | ft-gazepanel `rec` mode | The headset panel. The gaze panel already draws dots at exact head-relative directions, which the ground truth needs, so it gains a `rec` mode with the hand panel's text, step, countdown and paused lines rather than a second panel (below, "Panel"). |
@@ -46,7 +53,7 @@ The rest of this design assumes option 1.
 
 ## Fit coach
 
-It reads, per eye, from ft-eyes: the pupil centre, its ellipse, the glint pair (both glints and their spacing), and how often the eye was found over the last second. It compares them with a reference: where a well-fitted eye sits in that camera's image. At first the reference comes from the maintainer's headset; once contributions come in, it comes from their sessions with good calibrations (the "fit" section below records exactly that), per headset model. The coach says which reference it used, and until it's built from more than one face its hints are marked provisional.
+It reads, per eye, from ft-eyes: the pupil centre, its ellipse, the glint pair (both glints and their spacing), and how often the eye was found over the last second. It compares them with a reference: where a well-fitted eye sits in that camera's image. At first the reference comes from the maintainer's headset; once contributions come in, it comes from their rounds with good nine-dot fits (every round's fitment step records exactly that), per headset model. The coach says which reference it used, and until it's built from more than one face its hints are marked provisional.
 
 What it can tell, and the instruction it gives:
 
@@ -60,59 +67,81 @@ What it can tell, and the instruction it gives:
 | A glint missing, or extra bright spots | Glasses reflections, or the lens fogged or smudged | "Tilt your glasses" / "Wipe the lenses" |
 | An eye found in under half the frames, looking straight ahead | Lashes on the lens, a droopy lid, or the eye outside the camera's view | The per-eye card says which |
 
-The IPD row depends on the first headset test. If the cameras move with the lenses, a pupil's sideways offset in its image directly says how far that eye is from its lens axis, and the coach turns the IPD wheel's direction into "wider" or "narrower" until both offsets are about zero, at any IPD. If the cameras are fixed, the offset depends on the IPD setting too, and the coach needs the reference at each IPD step: the fit section records an IPD sweep (below) to build that.
+The IPD row depends on the first headset test. If the cameras move with the lenses, a pupil's sideways offset in its image directly says how far that eye is from its lens axis, and the coach turns the IPD wheel's direction into "wider" or "narrower" until both offsets are about zero, at any IPD. If the cameras are fixed, the offset depends on the IPD setting too, and the coach needs the reference at each IPD step: the fitment step's IPD sweep (below, "Bounty board") builds that.
 
 **Put-on and shift check.** After a good fit, the coach keeps that fit as the person's baseline (`~/.local/state/frametop/gaze/fit-baseline.json`: per eye, the pupil looking straight ahead and the glint pair, with the IPD setting). Then:
 - When the headset goes back on (frames resume after ft-eyes' 3 s gap), it shows the fit card for a few seconds while the person looks ahead. If the pupils sit more than a threshold (start with 1.5 mm equivalent, tuned from data) from the baseline, it says which way to move the headset, live, until it's back. If the IPD setting changed, it says so first.
 - While in use, ft-eyes' glint slip estimate already tracks small movement. A shift past the threshold that stays for 2 s gets a quiet notice ("Your headset slipped down: push it up, or look at the dot to recalibrate"), not a modal.
-In the recorder this runs at every section start. In Frametop it becomes part of the gaze service, off by default until it's been tried.
+In the recorder the fit coach runs as each round's fitment step, and the shift warning runs during the round. In Frametop the put-on and slip check becomes part of the gaze service, off by default until it's been tried.
 
-## Script
+## Bounty board
 
-One session is about 20 minutes, about 10 of them recorded, in step mode: the headset's right button starts each step (press = next or pause, two presses = redo, hold = stop), as in the hand recorder. Every step records the panel's targets as ground truth. Each section starts with a fit check, which isn't recorded unless the section is about fit.
+People pick what to record from a board of bounties. Each bounty is one round of about 5 minutes, in step mode: the headset's right button starts each step (press = next or pause, two presses = redo, hold = stop), as in the hand recorder. Every round starts the same way:
+1. **Fitment** (not recorded as a take, but its readings go into fit.json): the fit coach until the headset sits well (below, "Fit coach"). Skippable after a warning, and the round records that it was skipped. On a contributor's first round, and whenever the IPD setting has changed since their last, it ends with an IPD sweep: turn the wheel slowly from narrow to wide and back while looking at a centre dot, with the IPD logged at 90 Hz.
+2. **Nine dots** (recorded): a 3x3 grid to 20 degrees on the mid background. It's the round's own reference, so each round can be labelled alone, even after a re-seat.
+3. **The bounty's steps.**
 
-| # | Section | What | Edge case it covers |
-|---|---|---|---|
-| 1 | Fit | The fit coach, then 5 dots. Then the IPD sweep: turn the wheel slowly from narrow to wide and back, looking at a centre dot (the IPD setting is logged at 90 Hz) | Fit reference; IPD per camera position |
-| 2 | Calibration grid | 25 dots on a 5x5 grid to 25 degrees, three backgrounds (dark, mid, bright), shuffled | Baseline per session; pupil size against brightness |
-| 3 | Edges | Dots at 30 to 45 degrees and the corners, as far as the panel reaches | Eyes turned far: the lid, the glints lost, the pupil foreshortened |
-| 4 | Saccades | A dot jumping between random spots, 0.5 to 1.5 s each | Fast movement, overshoot, settling |
-| 5 | Pursuit | A dot moving on circles, lines and a figure eight at two speeds | Smooth pursuit; the tracker's lag |
-| 6 | Depth | Dots at 0.5 m, 1.5 m and 5 m in turn (the panel's distance changes) | Vergence; the eyes' angle with distance |
-| 7 | Blinks and lids | Blink on cue, close both for 2 s, wink each eye, squint, eyes wide, half-closed, looking down with lids lowered | Closed and partly closed eyes; one eye missing |
-| 8 | Light | The background steps dark to bright and back while looking at a dot | Pupil dilation and constriction |
-| 9 | Face | Smile, raise eyebrows, frown, yawn, talk (read a line aloud: the microphone isn't recorded), chew | The face moving the headset and the lids |
-| 10 | Head moving | A dot fixed in the room while turning the head (head poses logged) | The eyes counter-rotating (VOR), headset jiggle |
-| 11 | Slip | Nudge the headset up, down, left, right, tilt it; then take it off and put it back on; dots after each | Headset shifting on the face: the put-on check's data |
-| 12 | Reading | Lines of text to read, then a page of icons to look over | Natural use |
-| 13 | Glasses (if worn) | Section 2's grid again with glasses on (the checklist asks) | Lens reflections, the glasses' frame in view |
-| 14 | Grid again | Section 2's grid, the mid background only | Drift and tiredness over the session |
+Every round uploads on its own. The board marks the bounties you've done, by your contributor id in `profile.json`, with how many times. You can do one again.
 
-The checklist before a session asks (all optional, none identifying): glasses (none, glasses, prescription inserts, contacts), eye makeup (none, mascara, eyeliner, lash extensions), the face pad and strap in use, a measured IPD if they know it (from an optician), and whether they've had eye surgery that changed how the eye looks. Eye colour isn't asked: the IR images show what matters about it.
+The launch bounties:
+
+| Bounty | What | Edge case it covers |
+|---|---|---|
+| View edges | Dots at 30 to 45 degrees and the corners, as far as the panel reaches | Eyes turned far: the lid, the glints lost, the pupil foreshortened |
+| Blinks and lids | Blink on cue, close both for 2 s, wink each eye, squint, eyes wide, half-closed, looking down with lids lowered | Closed and partly closed eyes; one eye missing |
+| Headset slips | Nudge the headset up, down, left, right, tilt it; then take it off and put it back on; dots after each | Headset shifting on the face: the put-on check's data |
+| Glasses | A 5x5 grid and the edges with glasses or inserts on (offered when the checklist says so) | Lens reflections, the glasses' frame in view |
+| Jumps and pursuit | A dot jumping between random spots (0.5 to 1.5 s each), then moving on circles, lines and a figure eight at two speeds | Saccades, overshoot, smooth pursuit, the tracker's lag |
+| Depth | Dots at 0.5 m, 1.5 m and 5 m in turn (the panel's distance changes) | Vergence; the eyes' angle with distance |
+| Light changes | The background steps dark to bright and back while looking at a dot, then a 5x5 grid at each of three backgrounds | Pupil dilation and constriction; error against pupil size |
+| Face moves | Smile, raise eyebrows, frown, yawn, talk (read a line aloud: the microphone isn't recorded), chew | The face moving the headset and the lids |
+| Head turning | A dot fixed in the room while turning the head (head poses logged) | The eyes counter-rotating (VOR), headset jiggle |
+| Reading | Lines of text to read, then a page of icons to look over | Natural use |
+
+Later candidates, not at launch: eye makeup (the grid and blinks with mascara or eyeliner; the checklist still records makeup on every round), long wear (the grid after 30+ minutes in the headset).
+
+### bounties.json
+
+In the dataset repo, fetched when the board opens (a copy in the app for offline use, used when the fetch fails):
+
+```json
+{"schema": 1, "updated": "2026-10-14",
+ "bounties": [{"id": "edges", "title": "View edges", "blurb": "...", "minutes": 5,
+               "priority": "high|normal|low|retired", "script": "edges", "needs": {"glasses": true}}]}
+```
+
+`script` names a round in the app's `rounds/` folder: a new kind of round needs a release, but the list, wording and priorities don't. `needs` hides a bounty unless the checklist matches. A bounty id the app doesn't know is shown as "needs an update".
+
+The board is in the shared recorder module, so the hand recorder's v2 sections can become bounties later.
+
+### Checklist
+
+Asked once and kept in profile.json, editable before each round, all optional, none identifying: glasses (none, glasses, prescription inserts, contacts), eye makeup today (none, mascara, eyeliner, lash extensions), the face pad and strap in use, and a measured IPD if they know it (from an optician). Separately, behind its own consent tick: eye surgery or conditions (LASIK or other surgery, a lazy or turned eye, a droopy lid, nystagmus, other). Those answers go into `health.json`, which the export encrypts. Eye colour isn't asked: the IR images show what matters about it.
 
 ## Panel
 
 ft-gazepanel gains `show rec`: a large head-locked panel (FULL_DEG, 64 degrees, with a solid background whose brightness the script sets) that keeps every existing command (`dot`, `bg`, `title`, `text`, `note`, `eye`, `hints`) and adds what the hand panel has: `step`, `big` (countdown), `action`, `keys`, `rec on|off`, `paused on|off`. New for the ground truth:
 - `path <kind> <params> <seconds>`: the panel moves a dot itself (circle, line, figure eight), so it's smooth at the headset's frame rate, not at the socket's.
-- `distance <metres>`: moves the panel for the depth section.
-- `world <x> <y> <z>`: a dot fixed in the room (section 10), as the hand panel's touch target.
+- `distance <metres>`: moves the panel for the Depth bounty.
+- `world <x> <y> <z>`: a dot fixed in the room (the Head turning bounty), as the hand panel's touch target.
 - Every picture the panel shows with a dot logs that dot's direction and the frame's time to `targets.jsonl` (CLOCK_MONOTONIC_RAW, the eye frames' clock). The ground truth is what was on screen when, not what was asked.
 
 ## Files
 
 ```
 ~/.local/share/frametop/eyes/contrib/
-  profile.json                  consent and contributor id, as hands
-  sessions/<YYYYMMDD-HHMMSS>/
-    session.json                checklist, versions, mode, takes, eye camera rate, IPD at start
-    fit.json                    the fit coach's readings at the start and per section
-    takes/<NN>-<section>/
+  profile.json                  consent, contributor id, checklist, bounties done
+  rounds/<YYYYMMDD-HHMMSS>-<bounty>/
+    session.json                the bounty, checklist, versions, takes, eye camera rate, IPD at start
+    fit.json                    the fit coach's readings: the fitment step, and any slip warnings
+    health.json                 the opt-in health answers (encrypted in the export)
+    takes/<NN>-<step group>/        00-dots is the round's nine dots
       cam0/000000.zst ...       right eye: one zstd chunk per second, frames back to back (512x400 u8)
       cam1/000000.zst ...       left eye
       index.tsv                 per frame: camera, chunk, offset in it, slot, CLOCK_MONOTONIC_RAW time
       targets.jsonl             what the panel showed, when (direction, distance, state, background)
       prompts.jsonl             what the person was asked to do, when (as hands)
-      poses.jsonl               head poses, 250 Hz (as hands; needed for section 10)
+      poses.jsonl               head poses, 250 Hz (as hands; needed for Head turning)
       ipd.jsonl                 the IPD setting when it changes (90 Hz during the sweep)
       steamvr.jsonl             SteamVR's gaze from ft-gaze, per sample (a baseline, not a label)
       own.jsonl                 ft-eyes' pupils, glints and gaze (a baseline, not a label)
@@ -120,11 +149,11 @@ ft-gazepanel gains `show rec`: a large head-locked panel (FULL_DEG, 64 degrees, 
   exports/<session>/
 ```
 
-The export recompresses nothing (the chunks are zstd already), drops deleted ranges by rewriting the chunks they touch, encrypts each chunk to `recipients.txt` (`.zst.age`), and writes the manifest and `SHA256SUMS` over the encrypted files. It never includes `/persist` files: unlike hands, nothing here needs the unit's calibration, and the eye cameras' isn't in `/persist` anyway (2026-10-14: `device_config.json` has the displays' transforms only).
+The export recompresses nothing (the chunks are zstd already), drops deleted ranges by rewriting the chunks they touch, encrypts each chunk and `health.json` to `recipients.txt` (`.age`), and writes the manifest and `SHA256SUMS` over the encrypted files. It never includes `/persist` files: unlike hands, nothing here needs the unit's calibration, and the eye cameras' isn't in `/persist` anyway (2026-10-14: `device_config.json` has the displays' transforms only).
 
 ## Shared with the hand recorder
 
-Much of `hands/rec/` isn't about hands: the headset button reader, profile and consent, take bookkeeping (deleted ranges, redo, parts, clock samples), the Hugging Face login and upload, validate's manifest and checksum checks, and most of the window. These move to `rec/common/` (or `ft/rec/`), and both recorders use them. That's a refactor of the hand recorder, so it's done first, on its own commit, with the hand recorder's tests passing before anything eye-specific lands on it.
+Much of `hands/rec/` isn't about hands: the headset button reader, profile and consent, take bookkeeping (deleted ranges, redo, parts, clock samples), the Hugging Face login and upload, validate's manifest and checksum checks, and most of the window. These move to a shared module, `rec/` at the top of the tree, with the bounty board, and both recorders use them. That's a refactor of the hand recorder, so it's done first, on its own commit, with the hand recorder's tests passing before anything eye-specific lands on it.
 
 ## Build order
 
@@ -133,9 +162,11 @@ Much of `hands/rec/` isn't about hands: the headset button reader, profile and c
 3. `eyerec.py` (frame writer) and its replay test against a capture.
 4. `fitcoach.py` with readings from a capture, and the fit card on the existing fit panel.
 5. ft-gazepanel `rec` mode, `path`, `distance`, target logging.
-6. `session.py` and `script.json`, run with `--dry-run`, then on a replay.
-7. Review, export with encryption, `validate.py`, `hub.py` against a test dataset.
+6. `session.py`, the nine-dot opener and the first rounds, run with `--dry-run`, then on a replay. The bounty board and `bounties.json`.
+7. Review, export with encryption (two recipients), `validate.py`, `hub.py` against a test dataset.
 8. The window, then the standalone repo.
 9. The put-on check in the gaze service.
+
+Before uploads open: the consent texts and a review like `frame-hands/notes/legal-review-2026-10-03.md`, with the health opt-in in it.
 
 Not in scope here: the training. The dataset format is designed so that frame-eyes or a later trainer can label pupils from the targets and `own.jsonl`, but that's its own project.

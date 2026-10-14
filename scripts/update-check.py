@@ -498,17 +498,16 @@ def check_vr_socket():
     except (OSError, ValueError) as e:
         report("FAIL", label, f"/input/getstate.json didn't answer ({e}); the pause gesture can't read the controllers")
         return
-    # The 3D mouse's virtual controller as a treadmill (the driver's default role 4): SteamVR gives it
-    # /user/treadmill, where its compositor binding has its laser entries (docs/design.md, "Treadmill role").
+    # The 3D mouse's virtual controller on a hand (the driver's default role 2). As a treadmill (role 4)
+    # SteamVR's windows don't move by their grab bars for it (docs/design.md, "Treadmill role").
     for d in devices:
         if d.get("controller_type") == "ft_pointer":
             path = d.get("root_path") or "?"
             if path == "/user/treadmill":
-                report("ok", "pointer device role", "the virtual controller is at /user/treadmill")
+                report("warn", "pointer device role", "the virtual controller is at /user/treadmill: its laser "
+                       "clicks but can't move SteamVR's windows; set the driver's role to 2 (right hand)")
             else:
-                report("warn", "pointer device role", f"the virtual controller is at {path}, not /user/treadmill: "
-                       "an older driver (role 2), or SteamVR moved the treadmill path. Retest the laser with "
-                       "pointer/probe/build/lasertest (frame-hands/notes/hand-interaction.md, probe P1)")
+                report("ok", "pointer device role", f"the virtual controller is at {path}")
     found = [d for d in devices if d.get("controller_type") == "frame_controller" and d.get("root_path")
              and d.get("side") in ("left", "right")]
     if found and not all(any(str(c.get("path", "")).endswith("/touch") for c in d.get("components", [])) for d in found):

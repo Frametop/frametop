@@ -1,0 +1,4 @@
+# The eye dataset's recipients (gaze/rec/DESIGN.md "Files"): exports encrypt each chunk and health.json
+# to all of them (recorder/age.py). Key 1 is kept on the maintainer's training machine, key 2 offline.
+age1a0tc98pj2s7gdfgrv4gam6ah0qv69ymf3t2cc25hcwepmats69hst35z2e
+age1r0zlq7kcyg4dz4y3vkl9j36jw3zc6ly6reddh9ag5kfy6aw0fy6s5hepat

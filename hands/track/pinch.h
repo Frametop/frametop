@@ -15,7 +15,10 @@ extern "C" {
 
 struct PinchParams {
     double begin_m = 0.020;   // thumb and index tips closer than this: the pinch begins
-    double end_m = 0.035;     // further apart than this: it ends (the gap keeps it from flickering)
+    // further apart than this: it ends (the gap keeps it from flickering). 0.045 since 2026-10-14
+    // (0.035 before): taps and pinches let go while still held (user, 2026-10-11, gaze + hands: ends
+    // came at 4-6 cm); these four were the headset's HANDS_PINCH_* settings since, now everyone's.
+    double end_m = 0.045;
     int end_frames = 2;       // processed frames in a row past end_m before it ends, so one
                               // noisy frame doesn't drop a drag
     double grace_s = 0.25;    // a pinching hand lost this long ends its pinch (FH_PINCH_LOST)
@@ -27,11 +30,12 @@ struct PinchParams {
     // replay (pinches held 0.3 s or more, typing among them) the ends came 33-134 ms later, at most
     // 200, where any dip under end_m starting the wait over kept one held 6 s longer. A tap ends as
     // before: its release is the click.
-    double drag_s = 0.3, drag_open_m = 0.05, drag_open_s = 0.12, drag_reclose_m = 0.03;
+    double drag_s = 0.3, drag_open_m = 0.065, drag_open_s = 0.2, drag_reclose_m = 0.03;   // 0.05, 0.12 before 2026-10-14
     // A grip takes this pinch's hand (ends it, as lost) only within grip_takeover_s of its begin:
     // closing the hand into a fist passes through a pinch. Later the pinch is being held (a drag),
     // and the other fingers curling around it don't end it (3 of 28 pinches ended so, the same test).
-    double grip_takeover_s = 0.3;
+    // 0.1 since 2026-10-14 (0.3 before: grips took pinches 130 ms in).
+    double grip_takeover_s = 0.1;
     // Where the distance comes from: MediaPipe's world landmarks (the model's own 3D hand
     // pose, averaged over the hand's views, at the user's hand size), or the tracker's
     // triangulated tips. The model's pose should hold up better when the fingers hide each

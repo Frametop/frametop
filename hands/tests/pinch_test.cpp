@@ -75,10 +75,38 @@ struct Run {
     bool down() const { return pinch.side(1).flags & FH_PINCH_DOWN; }
 };
 
+// The values these tests were written for (the defaults before 2026-10-14): they test the rules,
+// TestDefaults the defaults.
 PinchParams Params() {
     PinchParams p;
     p.other_finger = 12;   // as ft-hands
+    p.end_m = 0.035, p.drag_open_m = 0.05, p.drag_open_s = 0.12, p.grip_takeover_s = 0.3;
     return p;
+}
+
+void TestDefaults() {
+    // since 2026-10-14 a pinch lets go less easily: a tap still reading 4 cm hasn't ended
+    PinchParams p;
+    p.other_finger = 12;
+    Run tap{Pinch(p), Grip()};
+    for (int k = 0; k < 5; ++k) tap.Step(0.06);
+    for (int k = 0; k < 3; ++k) tap.Step(0.01);
+    tap.Step(0.04), tap.Step(0.04);
+    CHECK(tap.down(), "defaults: a tap at 4 cm is still down");
+    tap.Step(0.05), tap.Step(0.05);
+    CHECK(!tap.down() && tap.lost == 0, "defaults: a tap ends on the second frame past 4.5 cm");
+    // a drag loosened to 5.5 cm ends after drag_open_s (0.2 s: six or seven frames), opened to 7 cm at once
+    Run drag{Pinch(p), Grip()};
+    for (int k = 0; k < 5; ++k) drag.Step(0.06);
+    for (int k = 0; k < 30; ++k) drag.Step(0.01);
+    int frames = 0;
+    while (drag.down() && frames < 20) drag.Step(0.055), ++frames;
+    CHECK(!drag.down() && frames >= 6 && frames <= 8, "defaults: a drag at 5.5 cm ended after %d frames", frames);
+    Run open{Pinch(p), Grip()};
+    for (int k = 0; k < 5; ++k) open.Step(0.06);
+    for (int k = 0; k < 30; ++k) open.Step(0.01);
+    open.Step(0.07), open.Step(0.07);
+    CHECK(!open.down() && open.lost == 0, "defaults: a drag opened to 7 cm ends on the second frame");
 }
 
 void TestDragSpike() {
@@ -267,6 +295,7 @@ int main() {
     TestGripTakeover();
     TestDip();
     TestFistGuard();
+    TestDefaults();
     if (failures) {
         std::printf("%d failures\n", failures);
         return 1;

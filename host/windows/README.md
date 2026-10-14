@@ -26,6 +26,8 @@ If Sunshine runs on this PC, uninstall it first: Vibepollo uses the same ports. 
 
 When a newer kit comes out, run its setup the same way. It replaces an older Frametop build.
 
+Monitors you plug in later need nothing on the PC: Add displays asks Vibepollo for the PC's monitors each time it opens. A virtual monitor is made when its stream starts and goes away when you disconnect or remove it in Remote Displays. It stays through a dropped stream, so its windows keep their places. At most four virtual monitors exist at once.
+
 ## What Frametop's build changes
 
 Frametop's build is Vibepollo 2.0.0 with a few changes, from [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo):

@@ -27,7 +27,9 @@ This kit makes a Mac a host for Frametop's remote displays: the Mac's monitors a
 4. When macOS asks, allow Sunshine both Screen Recording and Accessibility in System Settings > Privacy & Security. Then go back to Terminal and press Enter. Without Accessibility, the pointer moves but clicks, scrolling and typing don't reach the Mac. The setup checks both permissions and offers to ask again if Accessibility is missing.
 5. On the Steam Frame, open Frametop Remote Displays and choose Add computer. Pick this Mac, sign in with the Web UI login, and choose the displays to show.
 
-Run the setup again after you connect a new monitor.
+### Monitors that come and go
+
+Each instance belongs to one monitor, found by its maker, model and serial number, not by its place or the number macOS gives it. When that monitor is unplugged or the lid closes, its instance stops and waits, and starts again by itself once the monitor is back. Frametop Streams and `ft-sunshine status` show it as waiting. A monitor the Mac hasn't had before gets no instance on its own: run the setup again after you connect one, and then add it in Remote Displays on the Steam Frame. Nothing makes virtual monitors on a Mac: Sunshine can't on macOS.
 
 ## Turn the streams on and off
 

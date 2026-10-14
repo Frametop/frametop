@@ -2423,13 +2423,13 @@ void WantHz(bool near) {
 // the dashboard, the Steam menu, Steam's keyboard, other apps' overlays. A poke or a pinch on one
 // clicks it. Grabs there (a pinch on its border or like a card to move it, at a corner to resize) are
 // off: handinput's GrabZone gives SteamVR's panels none (user, 2026-10-13: out of scope; the hand ray's
-// pinch on a window's grab bar moves it). The grab path below stays for a later try. ft-screens can't click them itself, so the pointer helper's laser (our virtual
-// controller) does what the hand does: "touch <left|right> <verb> [x y z qw qx qy qz] [key]" on
-// @ft_pointer_helper, the laser's pose in the standing universe (pointer/helper/ft-pointer.cpp's
-// "Touch"). Its origin kSteamBack in front of the point, aimed in: hover (the hand near, the laser
-// there), press (a click: its key goes to ft-screens' typing as a click there would), move (held:
-// dragging), up, grab (go there, hover, then press: a move or resize), end (the hand has left: the
-// laser goes back to whoever had it).
+// pinch on a window's grab bar moves it). The grab path below stays for a later try. ft-screens can't
+// click them itself, so the pointer helper's laser (our virtual controller) does what the hand does:
+// "touch <left|right> <verb> [x y z qw qx qy qz] [key]" on @ft_pointer_helper, the laser's pose in
+// the standing universe (pointer/helper/ft-pointer.cpp's "Touch"). Its origin kSteamBack in front
+// of the point, aimed in: hover (the hand near, the laser there), press (a click: its key goes to
+// ft-screens' typing as a click there would), move (held: dragging), up, grab (go there, hover,
+// then press: a move or resize), end (the hand has left: the laser goes back to whoever had it).
 // OpenVR won't say where a dashboard panel is or how big (most report a 0x0 texture), so for each hands
 // frame a cone of rays from the eyes past each index tip finds the panels near the hands, and
 // steampanels::FitPanel fits each to its hits (steampanels.h). The keys come from the helper's overlay

@@ -33,7 +33,7 @@ Five 1440p displays fit at full rate with room left. Five 4K displays only fit a
 
 ### The planned setup
 
-Two hosts that share the same two desk monitors: a Mac (14-inch MacBook Pro) with those two plus its built-in display, and the test PC (Windows, RTX 5090) with the two. Windows and Linux hosts run Vibepollo, which streams real displays and creates virtual ones on demand. The Mac runs Sunshine and is limited to one display for now (see "Host side"). At 60 fps:
+Two hosts that share the same two desk monitors: a Mac (14-inch MacBook Pro) with those two plus its built-in display, and the test PC (Windows, RTX 5090) with the two. Windows and Linux hosts run Vibepollo, which streams real displays and creates virtual ones on demand. The Mac runs Sunshine, which began with one display; it now runs one instance per display (see "Host side"). At 60 fps:
 
 | Display | Share of the decoder |
 |---|---|

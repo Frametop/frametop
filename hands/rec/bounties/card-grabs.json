@@ -1,0 +1,558 @@
+{
+ "version": 1,
+ "name": "card-grabs",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Three-finger grabs",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! You can take off the headset.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "card-grabs",
+   "title": "Three-finger grabs",
+   "kind": "scene",
+   "intro": "Grab the window's lit edge like a playing card: thumb on one side, index and middle on the other. It won't move: move your hand as if it did, then let go.",
+   "prompts": [
+    {
+     "id": "hold",
+     "hands": "both",
+     "text": "Grab the lit edge like a card and hold until it goes out: the right edge with your right hand, the left edge with your left.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "card",
+      "every_s": 2.5,
+      "gap_s": 1.0,
+      "shuffle": false,
+      "moves": [
+       {
+        "grab": "right",
+        "hand": "right",
+        "label": "R"
+       },
+       {
+        "grab": "left",
+        "hand": "left",
+        "label": "L"
+       },
+       {
+        "grab": "right",
+        "hand": "right",
+        "label": "R"
+       },
+       {
+        "grab": "left",
+        "hand": "left",
+        "label": "L"
+       }
+      ],
+      "say": "Grab the lit edge like a card and hold"
+     }
+    },
+    {
+     "id": "mime",
+     "hands": "right",
+     "text": "Right hand. Grab the right edge and move it up and down, then turn it around, as if it came with your hand.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": [
+      {
+       "s": 8,
+       "lit": "right",
+       "gesture": "card",
+       "say": "Grab it: move it up and down, turn it around"
+      },
+      {
+       "s": 1,
+       "gesture": "rest",
+       "say": "Let go"
+      }
+     ]
+    },
+    {
+     "id": "place",
+     "hands": "right",
+     "text": "Right hand. Grab the right edge and take the window to the ghost, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "card",
+      "grab": "right",
+      "every_s": 3.5,
+      "gap_s": 1.0,
+      "count": 3,
+      "moves": [
+       [
+        0.2,
+        0.1,
+        0
+       ],
+       [
+        -0.25,
+        0,
+        0.05
+       ],
+       [
+        0,
+        -0.15,
+        0.1
+       ],
+       [
+        0.1,
+        0.05,
+        -0.2
+       ]
+      ],
+      "say": "Grab it, take it to the ghost"
+     }
+    },
+    {
+     "id": "push",
+     "hands": "both",
+     "text": "Grab the lit edge, take the window to the ghost, then push it away from you and let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": [
+      {
+       "s": 3,
+       "lit": "right",
+       "gesture": "card",
+       "ghost": [
+        0.12,
+        0.05,
+        0
+       ],
+       "say": "Right hand: grab it, take it to the ghost",
+       "hand": "right",
+       "label": "R"
+      },
+      {
+       "s": 2.5,
+       "lit": "right",
+       "gesture": "card",
+       "ghost": [
+        0.15,
+        0.1,
+        -0.8
+       ],
+       "say": "Now push it away and let go",
+       "hand": "right",
+       "label": "R"
+      },
+      {
+       "s": 1,
+       "gesture": "rest",
+       "say": "Let go"
+      },
+      {
+       "s": 3,
+       "lit": "left",
+       "gesture": "card",
+       "ghost": [
+        -0.12,
+        0.05,
+        0
+       ],
+       "say": "Left hand: grab it, take it to the ghost",
+       "hand": "left",
+       "label": "L"
+      },
+      {
+       "s": 2.5,
+       "lit": "left",
+       "gesture": "card",
+       "ghost": [
+        -0.15,
+        0.1,
+        -0.8
+       ],
+       "say": "Now push it away and let go",
+       "hand": "left",
+       "label": "L"
+      },
+      {
+       "s": 1,
+       "gesture": "rest",
+       "say": "Let go"
+      }
+     ]
+    },
+    {
+     "id": "flick",
+     "hands": "right",
+     "text": "Right hand. Grab the edge and flick the window away toward the ghost, like throwing it into space.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "card",
+      "grab": "right",
+      "every_s": 2.5,
+      "gap_s": 1.2,
+      "count": 3,
+      "moves": [
+       [
+        0.9,
+        0.3,
+        -1.5,
+        30,
+        0,
+        0
+       ],
+       [
+        -0.9,
+        0.2,
+        -1.4,
+        -30,
+        0,
+        0
+       ],
+       [
+        0,
+        0.6,
+        -2.0
+       ],
+       [
+        0.4,
+        -0.3,
+        -1.2,
+        20,
+        0,
+        0
+       ]
+      ],
+      "say": "Grab it, throw it toward the ghost"
+     }
+    },
+    {
+     "id": "two-hands",
+     "hands": "both",
+     "text": "Both hands, one on each lit edge: turn the window like the ghost, or stretch it.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "card",
+      "grab": "left+right",
+      "every_s": 3.5,
+      "gap_s": 1.0,
+      "moves": [
+       [
+        0,
+        0,
+        0,
+        35,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        20
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1.4
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.75
+       ]
+      ],
+      "count": 3,
+      "say": "Both edges: turn or stretch it like the ghost"
+     }
+    },
+    {
+     "id": "places",
+     "hands": "right",
+     "text": "Four windows: low, high, close to your face and out to the right. Grab whichever edge lights up, with your right hand.",
+     "windows": [
+      {
+       "id": "low",
+       "at": [
+        0,
+        -0.45,
+        -0.35
+       ],
+       "size": [
+        0.28,
+        0.2
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "high",
+       "at": [
+        0.05,
+        0.2,
+        -0.45
+       ],
+       "size": [
+        0.28,
+        0.2
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "face",
+       "at": [
+        0.1,
+        -0.02,
+        -0.25
+       ],
+       "size": [
+        0.18,
+        0.13
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "side",
+       "at": [
+        0.55,
+        -0.1,
+        -0.35
+       ],
+       "size": [
+        0.28,
+        0.2
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "card",
+      "every_s": 2.5,
+      "gap_s": 0.8,
+      "moves": [
+       {
+        "win": "low",
+        "grab": "right"
+       },
+       {
+        "win": "high",
+        "grab": "right"
+       },
+       {
+        "win": "face",
+        "grab": "right"
+       },
+       {
+        "win": "side",
+        "grab": "left"
+       }
+      ],
+      "say": "Grab the lit edge like a card"
+     }
+    },
+    {
+     "id": "look-alikes",
+     "hands": "right",
+     "text": "Right hand, on the lit edge. Each says how: a card grab, a fist, an open-hand touch, a two-finger pinch, or orange: stop short.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "every_s": 2.5,
+      "gap_s": 0.8,
+      "moves": [
+       {
+        "grab": "right",
+        "gesture": "card"
+       },
+       {
+        "grab": "right",
+        "gesture": "fist"
+       },
+       {
+        "grab": "right",
+        "gesture": "touch"
+       },
+       {
+        "grab": "right",
+        "gesture": "pinch",
+        "say": "Pinch it with two fingers: thumb and index only"
+       },
+       {
+        "grab": "left",
+        "gesture": "nogo"
+       }
+      ]
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace, either hand or both: grab it like a card, move it, turn it, throw it, any way you like.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": [
+      {
+       "s": 14,
+       "lit": "left+right",
+       "gesture": "card",
+       "say": "Your own pace: grab it, move it, turn it, throw it"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

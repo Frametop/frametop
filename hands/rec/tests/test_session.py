@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import session  # noqa: E402
 import takes  # noqa: E402
 import validate  # noqa: E402
+import recorder.units  # noqa: E402  (pause_units is there now; session.py re-exports it)
 from test_validate import fhset, make_session, SESSION  # noqa: E402
 
 SCRIPT = {
@@ -1081,8 +1082,8 @@ class QuietHandsTest(SessionBase):
 
     def test_pauses_only_running_units_and_resumes_them(self):
         active = {"frametop-handview.service": True, "frametop-pointer.service": False}
-        with mock.patch.object(session, "unit_active", lambda u: active[u]), \
-                mock.patch.object(session, "stop_unit", lambda u: self.calls.append(["stop", u])):
+        with mock.patch.object(recorder.units, "unit_active", lambda u: active[u]), \
+                mock.patch.object(recorder.units, "stop_unit", lambda u: self.calls.append(["stop", u])):
             paused = session.pause_units(session.QUIET_UNITS, self.path)
         self.assertEqual(paused, ["frametop-handview.service"])
         self.assertEqual(self.calls, [["stop", "frametop-handview.service"]])

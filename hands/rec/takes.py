@@ -25,7 +25,6 @@ usage: takes.py [--base DIR] list | takes SESSION | export SESSION | sides SESSI
 """
 import argparse
 import datetime
-import hashlib
 import json
 import os
 import re
@@ -37,6 +36,10 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from recorder import age  # noqa: E402  (a debug session's recordings are encrypted)
+from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge_ranges, read_json,  # noqa: E402,F401
+                            sha256_file, tree_bytes, tree_stat, write_sums)
 
 DEFAULT_BASE = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,25 +48,34 @@ HDR = struct.Struct("<8sII")       # fh_set_hdr_t: magic, ncams, bytes (the whol
 CAM = struct.Struct("<16sIIQQ")    # fh_set_cam_t: name, width, height, capture_ns, dqbuf_ns
 MAX_CAMS = 16                      # SetReader's limit
 PART_RE = re.compile(r"^sets(?:-(\d+))?\.bin$")
+LIVE_RE = re.compile(r"^live(?:-(\d+))?\.bin$")    # a debug session's copies of the live tracker's output
+LIVE_HDR = struct.Struct("<8sII")                   # livelog.py: magic, version, 0
+LIVE_REC = struct.Struct("<B3xIQQ")                 # source, length, read_ns, seq
+TEST_RECIPIENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-recipients.txt")
+# The bounties' test phase (DESIGN.md "Testing"): bounty rounds and debug sessions are recorded under
+# TESTING.md's consent (profile.json "testing_consent"), and their exports are encrypted for the test
+# dataset. Full sessions and quick rounds stay under CONSENT.md, for the public dataset.
+TEST_PHASE = True
+CONSENT_KEYS = {"public": "consent", "testing": "testing_consent"}   # profile.json's record of each
+
+
+def round_consent_kind(bounty=False, debug=False):
+    """Which consent a new session is recorded under: "testing" for a debug session, and for a
+    bounty's round in the test phase; else "public"."""
+    return "testing" if debug or (bounty and TEST_PHASE) else "public"
+
+
+def consent_kind(meta):
+    """The consent a session was recorded under (session.json "consent", session.py): "testing"
+    or "public" (sessions from before it was recorded, and full sessions)."""
+    kind = (meta.get("consent") or {}).get("kind") if isinstance(meta.get("consent"), dict) else None
+    return "testing" if kind == "testing" or meta.get("debug") else "public"
 SESSION_RE = re.compile(r"^\d{8}-\d{6}(?:-\d+)?$")   # session.py adds -2, -3 to a second one in a second
 EXPORT_SCHEMA = 1
 # zstd as DESIGN.md has it: level 10, two threads, at the lowest CPU priority (CPU work while
 # someone is in VR makes the headset stutter).
 ZSTD_ARGS = ["-10", "-T2", "-q", "-c"]
 ZSTD_PATHS = ("/usr/bin/zstd", "/usr/local/bin/zstd", "/run/host/usr/bin/zstd")
-CHUNK = 1 << 20
-
-
-class Cancelled(Exception):
-    pass
-
-
-def read_json(path, default=None):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {} if default is None else default
 
 
 def write_json(path, obj):
@@ -112,38 +124,6 @@ def tool_version():
     return "ft-handrec " + (described or "unknown")
 
 
-def free_bytes(path):
-    """Free space on the file system that holds path (or its nearest existing parent)."""
-    while path and not os.path.exists(path):
-        path = os.path.dirname(path)
-    try:
-        return shutil.disk_usage(path or "/").free
-    except OSError:
-        return 0
-
-
-def tree_stat(path):
-    """(bytes, newest mtime) of the files under path."""
-    total, newest = 0, 0.0
-    for root, _, files in os.walk(path):
-        for name in files:
-            try:
-                st = os.lstat(os.path.join(root, name))
-            except OSError:
-                continue
-            total += st.st_size
-            newest = max(newest, st.st_mtime)
-    return total, newest
-
-
-def tree_bytes(path):
-    return tree_stat(path)[0]
-
-
-def in_ranges(t, ranges):
-    return any(a <= t <= b for a, b in ranges)
-
-
 def export_jsonl(src, dst, ranges, keep_controllers):
     """Copy a take's poses.jsonl or prompts.jsonl for export:
     - poses in the deleted ranges are left out, and the live tracker's feedback there (the
@@ -178,15 +158,47 @@ def export_jsonl(src, dst, ranges, keep_controllers):
             out.write(json.dumps(obj, separators=(", ", ": ")) + "\n")
 
 
-def merge_ranges(ranges):
-    """Sorted, with overlapping or touching ranges joined."""
-    out = []
-    for a, b in sorted((min(a, b), max(a, b)) for a, b in ranges):
-        if out and a <= out[-1][1] + 1:
-            out[-1][1] = max(out[-1][1], b)
-        else:
-            out.append([a, b])
-    return out
+def live_parts(take_dir):
+    """A debug take's live.bin, live-2.bin, ... in order."""
+    try:
+        names = os.listdir(take_dir)
+    except OSError:
+        return []
+    found = [(int(m.group(1) or 1), name) for name in names for m in [LIVE_RE.match(name)] if m]
+    return [os.path.join(take_dir, name) for _, name in sorted(found)]
+
+
+def export_live(take_dir, ranges, zstd, dest, recipients=None):
+    """A debug take's live parts as one live.bin (livelog.py's format), records in deleted ranges
+    left out, through zstd into dest, encrypted to recipients if given. None without live
+    parts; else {"records": {"hands": n, "gestures": n}, "raw_bytes": n}."""
+    parts = live_parts(take_dir)
+    if not parts:
+        return None
+    out = bytearray(LIVE_HDR.pack(b"FHLIVE01", 1, 0))
+    counts = {"hands": 0, "gestures": 0}
+    for path in parts:
+        with open(path, "rb") as f:
+            data = f.read()
+        if len(data) < LIVE_HDR.size or data[:8] != b"FHLIVE01":
+            continue
+        off = LIVE_HDR.size
+        while off + LIVE_REC.size <= len(data):
+            src, n, read_ns, _ = LIVE_REC.unpack_from(data, off)
+            end = off + LIVE_REC.size + n
+            if end > len(data) or src > 1:
+                break   # cut off: the session ended mid-write
+            if not in_ranges(read_ns, ranges):
+                out += data[off:end]
+                counts["hands" if src == 0 else "gestures"] += 1
+            off = end
+    r = subprocess.run(["nice", "-n", "19", zstd] + ZSTD_ARGS, input=bytes(out), capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError("zstd failed: %s" % (r.stderr.decode(errors="replace").strip() or r.returncode))
+    payload = age.encrypt_bytes(r.stdout, recipients) if recipients else r.stdout
+    with open(dest, "wb") as f:
+        f.write(payload)
+    return {"records": counts, "raw_bytes": len(out)}
 
 
 # ---------------------------------------------------------------- one take's recording
@@ -380,6 +392,8 @@ class Store:
                         "bytes": size, "contributor": meta.get("contributor", ""),
                         "lighting": (meta.get("lighting") or {}).get("chosen", ""),
                         "status": meta.get("status", ""), "dry_run": bool(meta.get("dry_run")),
+                        "bounty": ((meta.get("bounty") or {}).get("title") or "") if isinstance(meta.get("bounty"), dict) else "",
+                        "debug": bool(meta.get("debug")), "testing": consent_kind(meta) == "testing",
                         "exported": bool(exported), "export_stale": bool(exported) and changed > exported,
                         "export_bytes": tree_bytes(self.export_dir(sid)) if exported else 0})
         return sorted(out, key=lambda s: s["id"], reverse=True)
@@ -525,6 +539,10 @@ class Store:
         done = 0
         take_entries = []
         keep_controllers = (meta.get("checklist") or {}).get("controllers") == "straps"
+        # A test-phase session's recordings go to the test dataset encrypted (DESIGN.md "Testing")
+        kind = consent_kind(meta)
+        recipients = age.read_recipients(TEST_RECIPIENTS) if kind == "testing" else None
+        encrypted = []
         for t in takes:
             if cancelled():
                 raise Cancelled()
@@ -552,47 +570,65 @@ class Store:
                      "duration_s": round(t["duration_s"], 2), "file": None,
                      "sides": {"names_swapped": names_swapped, "renamed_sets": index.renamed_sets(keep)}}
             done += index.bytes() - sum(index.sets[i][2] for i in keep)   # deleted sets count as done
+            suffix = ".age" if recipients else ""
             if keep:
-                entry["file"] = "takes/%s/sets.bin.zst" % t["id"]
+                entry["file"] = "takes/%s/sets.bin.zst%s" % (t["id"], suffix)
 
                 def step(nbytes, title=t["title"]):
                     nonlocal done
                     done += nbytes
-                    report(min(done / total, 0.99), f"Compressing {title}")
-                entry["raw_bytes"] = self._compress(index, keep, zstd, os.path.join(out, "sets.bin.zst"),
-                                                    step, cancelled)
+                    report(min(done / total, 0.99), f"{'Compressing and encrypting' if recipients else 'Compressing'} {title}")
+                entry["raw_bytes"] = self._compress(index, keep, zstd, os.path.join(work, entry["file"]),
+                                                    step, cancelled, recipients)
+                if recipients:
+                    encrypted.append(entry["file"])
+            live = export_live(tdir, ranges, zstd, os.path.join(out, "live.bin.zst" + suffix), recipients)
+            if live is not None:
+                entry["live"] = dict(live, file="takes/%s/live.bin.zst%s" % (t["id"], suffix))
+                if recipients:
+                    encrypted.append(entry["live"]["file"])
             take_entries.append(entry)
         if cancelled():
             raise Cancelled()
         for name in ("calibration.json", "device.json"):
             if os.path.isfile(os.path.join(src, name)):
                 shutil.copyfile(os.path.join(src, name), os.path.join(work, name))
-        shown_profile = json.loads(json.dumps(profile))
+        # the profile as the dataset sees it: the consent this session was recorded under, not the
+        # window's own keys (the bounties done) nor the other consent's record
+        shown_profile = json.loads(json.dumps({k: profile[k] for k in ("schema", "contributor", CONSENT_KEYS[kind],
+                                                                       "optional") if k in profile}))
         if not keep_notes and isinstance(shown_profile.get("optional"), dict):
             shown_profile["optional"].pop("notes", None)
         manifest = {"schema": EXPORT_SCHEMA, "tool": tool_version(),
                     "exported": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
                     "session_id": session, "contributor": profile.get("contributor", meta.get("contributor", "")),
-                    "consent_version": (profile.get("consent") or {}).get("version", ""),
+                    "consent_kind": kind,
+                    "consent_version": (profile.get(CONSENT_KEYS[kind]) or {}).get("version", ""),
                     "profile": shown_profile, "session": meta, "takes": take_entries}
+        if recipients:
+            manifest["encryption"] = {"scheme": "age-v1-x25519", "recipients": recipients, "files": encrypted}
         write_json(os.path.join(work, "manifest.json"), manifest)
         report(0.995, "Writing checksums")
-        sums = []
-        for root, _, files in os.walk(work):
-            for name in files:
-                path = os.path.join(root, name)
-                sums.append((os.path.relpath(path, work), sha256_file(path, cancelled)))
-        with open(os.path.join(work, "SHA256SUMS"), "w") as f:
-            for rel, digest in sorted(sums):
-                f.write(f"{digest}  {rel}\n")
+        write_sums(work, cancelled)
 
     @staticmethod
-    def _compress(index, keep, zstd, dest, step, cancelled):
-        """Stream the kept sets through zstd into dest. Returns the uncompressed size."""
+    def _compress(index, keep, zstd, dest, step, cancelled, recipients=None):
+        """Stream the kept sets through zstd into dest, encrypted to recipients if given (age,
+        as zstd writes). Returns the uncompressed size."""
         raw = 0
         with open(dest, "wb") as out:
-            proc = subprocess.Popen(["nice", "-n", "19", zstd] + ZSTD_ARGS, stdin=subprocess.PIPE, stdout=out,
-                                    stderr=subprocess.PIPE)
+            proc = subprocess.Popen(["nice", "-n", "19", zstd] + ZSTD_ARGS, stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE if recipients else out, stderr=subprocess.PIPE)
+            sealer, sealed = None, {}
+            if recipients:
+                def seal():
+                    try:
+                        age.encrypt_stream(proc.stdout, out, recipients)
+                    except BaseException as e:   # reported below, after zstd
+                        sealed["error"] = e
+                        proc.stdout.read()   # keep zstd from blocking on a full pipe
+                sealer = threading.Thread(target=seal, name="handrec-seal", daemon=True)
+                sealer.start()
             try:
                 for i in keep:
                     if cancelled():
@@ -605,31 +641,21 @@ class Store:
                 err = proc.stderr.read().decode(errors="replace").strip()
                 if proc.wait() != 0:
                     raise RuntimeError(f"zstd failed: {err or proc.returncode}")
+                if sealer:
+                    sealer.join()
+                    if "error" in sealed:
+                        raise RuntimeError(f"encrypting failed: {sealed['error']}")
             except BaseException:
                 proc.kill()
                 proc.wait()
+                if sealer:
+                    sealer.join(10)
                 raise
             finally:
                 proc.stderr.close()
+                if proc.stdout:
+                    proc.stdout.close()
         return raw
-
-
-def sha256_file(path, cancelled=lambda: False):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(CHUNK):
-            if cancelled():
-                raise Cancelled()
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def human_bytes(n):
-    for unit in ("B", "KB", "MB", "GB"):
-        if n < 1000 or unit == "GB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1000
-    return f"{n:.1f} TB"
 
 
 def main():

@@ -545,6 +545,9 @@ class Service:
         self.proc = None
         self.mmap_unknown = False
 
+    def own_installed(self):
+        return own_installed()  # (for the checks: the fit coach needs ft-eyes)
+
     def eyes_wanted(self):
         return (self.tracker == "own" and not self.override and self.awake) or time.monotonic() < self.eyes_until
 

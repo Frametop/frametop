@@ -1,0 +1,231 @@
+{
+ "schema": 1,
+ "id": "slips",
+ "title": "Headset slips",
+ "intro": "You'll nudge the headset on your face on purpose, then put it back. Use one hand, gently: a few millimetres is enough.",
+ "steps": [
+  {
+   "id": "nudge-up",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Keep looking at the dot and push the headset up a little. Hold it there.",
+   "dot": [
+    0,
+    0
+   ],
+   "seconds": 5
+  },
+  {
+   "id": "after-up",
+   "kind": "dots",
+   "group": "nudges",
+   "ready": false,
+   "text": "Hold the headset there. Look at each dot until its ring fills. Keep your head still.",
+   "dots": [
+    [
+     0,
+     0
+    ],
+    [
+     15,
+     12
+    ],
+    [
+     -15,
+     -12
+    ],
+    [
+     15,
+     -12
+    ],
+    [
+     -15,
+     12
+    ]
+   ],
+   "hold": 1.0
+  },
+  {
+   "id": "nudge-down",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Let go, then pull the headset down a little. Hold it there.",
+   "dot": [
+    0,
+    0
+   ],
+   "seconds": 5
+  },
+  {
+   "id": "after-down",
+   "kind": "dots",
+   "group": "nudges",
+   "ready": false,
+   "text": "Hold it there. Look at each dot until its ring fills. Keep your head still.",
+   "dots": [
+    [
+     0,
+     0
+    ],
+    [
+     15,
+     12
+    ],
+    [
+     -15,
+     -12
+    ],
+    [
+     15,
+     -12
+    ],
+    [
+     -15,
+     12
+    ]
+   ],
+   "hold": 1.0
+  },
+  {
+   "id": "nudge-left",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Let go, then slide the headset a little to your left.",
+   "dot": [
+    0,
+    0
+   ],
+   "seconds": 5
+  },
+  {
+   "id": "after-left",
+   "kind": "dots",
+   "group": "nudges",
+   "ready": false,
+   "text": "Hold it there. Look at each dot until its ring fills. Keep your head still.",
+   "dots": [
+    [
+     0,
+     0
+    ],
+    [
+     15,
+     12
+    ],
+    [
+     -15,
+     -12
+    ],
+    [
+     15,
+     -12
+    ],
+    [
+     -15,
+     12
+    ]
+   ],
+   "hold": 1.0
+  },
+  {
+   "id": "nudge-right",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Let go, then slide it a little to your right.",
+   "dot": [
+    0,
+    0
+   ],
+   "seconds": 5
+  },
+  {
+   "id": "after-right",
+   "kind": "dots",
+   "group": "nudges",
+   "ready": false,
+   "text": "Hold it there. Look at each dot until its ring fills. Keep your head still.",
+   "dots": [
+    [
+     0,
+     0
+    ],
+    [
+     15,
+     12
+    ],
+    [
+     -15,
+     -12
+    ],
+    [
+     15,
+     -12
+    ],
+    [
+     -15,
+     12
+    ]
+   ],
+   "hold": 1.0
+  },
+  {
+   "id": "nudge-tilt",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Let go, then tilt the headset a little: one side up.",
+   "dot": [
+    0,
+    0
+   ],
+   "seconds": 5
+  },
+  {
+   "id": "after-tilt",
+   "kind": "dots",
+   "group": "nudges",
+   "ready": false,
+   "text": "Hold it there. Look at each dot until its ring fills. Keep your head still.",
+   "dots": [
+    [
+     0,
+     0
+    ],
+    [
+     15,
+     12
+    ],
+    [
+     -15,
+     -12
+    ],
+    [
+     15,
+     -12
+    ],
+    [
+     -15,
+     12
+    ]
+   ],
+   "hold": 1.0
+  },
+  {
+   "id": "reseat",
+   "kind": "reseat",
+   "text": "Take the headset off, put it back on as you usually do, then press the button."
+  },
+  {
+   "id": "after-reseat",
+   "kind": "dots",
+   "text": "Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    3,
+    3,
+    20,
+    20
+   ],
+   "hold": 1.2,
+   "shuffle": true
+  }
+ ]
+}

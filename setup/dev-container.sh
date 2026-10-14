@@ -26,6 +26,9 @@ packages=(
   # hand recorder (hands/rec): its export compresses recordings with zstd; its Upload page and
   # hub.py upload to Hugging Face with huggingface_hub (also the hf command, for hf auth login)
   zstd python3-huggingface-hub
+  # eye recorder (gaze/rec): its export encrypts to the dataset's keys with age (recorder/age.py),
+  # on Python's cryptography
+  python3-cryptography
   # Frametop Input Settings app (Kirigami, PySide6)
   python3-pyside6 kf6-kirigami kf6-qqc2-desktop-style qt6-qtwayland breeze-icon-theme plasma-breeze
   # Frametop remote desktop (VNC bridge through krdp)

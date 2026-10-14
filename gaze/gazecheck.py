@@ -32,6 +32,28 @@ directions: look at each one.
           seen) and hints, from the gaze probe's Headset fit (gaze/fitcheck.py), while you
           adjust the headset. A left click or Meta+J runs its guided check (dots, then looks
           down, up, left and right); a right click or Meta+K closes it, as does FIT_TIMEOUT.
+          With our tracker installed, its first hint line is the fit coach's (gaze/fitcoach.py):
+          where the headset sits, from where ft-eyes sees each pupil and glint (ft-eyes "fit",
+          run for the check whichever tracker is in use). It's judged only while you look
+          straight ahead (COACH_CENTRE), since the pupils move with the gaze. A good reading
+          (the coach's "ok") is kept as your saved fit when the check closes (fitcoach.BASELINE,
+          with SteamVR's IPD setting from the panel): the put-on check compares with it.
+
+The fit watch (GAZE_FIT_WATCH=1 in frametop.conf, off by default until it's been tried; read
+again when the file changes) adds two things, with our tracker installed, its reference
+(gaze/fit-reference.json) and a saved fit:
+  put-on  the quick check that opens when the headset goes on first reads the fit coach while
+          you look at its dot, against your saved fit, and holds the dot meanwhile (at most
+          PUTON_READ). If the headset sits more than fitcoach.MOVED_DEG from it, or the IPD
+          setting changed, the panel widens (five's size) and says which way to move it, live,
+          until it's back; then the dot is taken as usual. A left click or Meta+J takes it as
+          it sits, and after PUTON_TIMEOUT it's taken anyway. So the click teaches our tracker
+          the headset where you meant it to be, not where it landed.
+  slip    while gaze mode is on with our tracker, ft-eyes' glint jump (the headset slipped
+          since the last click; "jump_px" in its status) past fitcoach.MOVED_DEG for SLIP_HOLD
+          shows a small note low in view for NOTE_SECONDS (the panel's "note" strip: "Your
+          headset slipped" and which way to push it), at most once every NOTE_COOLDOWN, and
+          never over a check. It goes sooner once the slip is gone.
 
 A check asked for while the gaze service idles (quickcal, calibrate, fitcheck) wakes it and
 waits until the tracker sends, at most ft-gazed's WAKE_SETTLE; then it opens, or logs why not.
@@ -83,8 +105,10 @@ import statistics
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
+import fitcoach
 from fitcheck import MIN_REGION, FitCheck, wrap
 from gazecal import DEFAULT_MODEL, EYE_LOST, STATE, steady_samples
 
@@ -121,6 +145,15 @@ FULL_RETRY = 10.0      # seconds before an automatic calibration that failed to 
 FIT_TIMEOUT = 300.0    # seconds the fit check stays up
 FIT_EVERY = 0.5        # seconds between its cards' updates (each is a new picture for the panel)
 FIT_HINT_WIDTH = 95    # characters a hint line holds in the panel
+COACH_CENTRE = 8.0     # degrees: the fit coach judges only while the gaze stays this near straight ahead
+COACH_LEASE = 5.0      # seconds of ft-eyes asked for at a time, while the fit check is up
+PUTON_REASON = "the headset went on"
+PUTON_READ = 4.0       # seconds the put-on check holds the dot for a straight-ahead reading
+PUTON_TIMEOUT = 30.0   # seconds it says what to move before the dot is taken as it sits
+PUTON_GONE = 5.0       # seconds without eyes that close it meanwhile (adjusting loses them)
+SLIP_HOLD = 2.0        # seconds a slip lasts before its note
+NOTE_SECONDS = 8.0
+NOTE_COOLDOWN = 120.0
 
 
 def log(msg):
@@ -269,6 +302,11 @@ class Checks:
         self.screens_shown = None
         self.last_progress = 0.0
         self.asking = None       # (socket, deadline, done): a command to ft-eyes waiting for its reply
+        self.watch = (None, False)  # (frametop.conf's mtime, GAZE_FIT_WATCH on)
+        self.slip_ref = None     # the fit coach's reference, for the slip note (loaded once)
+        self.slip_since = None   # a slip past MOVED_DEG since then
+        self.note_until = None   # the slip note shows until then
+        self.note_next = 0.0     # and not again before
 
     @property
     def active(self):
@@ -490,6 +528,34 @@ class Checks:
             return
         self.start("quick", reason)
 
+    def fit_watch(self):
+        """GAZE_FIT_WATCH=1 in frametop.conf: the put-on check and the slip note (see the top)."""
+        try:
+            m = CONF.stat().st_mtime_ns
+        except OSError:
+            m = None
+        if m != self.watch[0]:
+            on = False
+            try:
+                for line in CONF.read_text().splitlines():
+                    k, _, v = line.split("#", 1)[0].partition("=")
+                    if k.strip() == "GAZE_FIT_WATCH":
+                        on = v.strip() == "1"
+            except OSError:
+                pass
+            if on != self.watch[1]:
+                log(f"fit watch {'on' if on else 'off'}")
+            self.watch = (m, on)
+        return self.watch[1]
+
+    def panel_ipd(self):
+        """SteamVR's IPD setting (metres) from the panel, or None."""
+        words = ask(PANEL, "ipd", 0.3).split()
+        try:
+            return float(words[1]) if words[:1] == ["ok"] and float(words[1]) > 0 else None
+        except (IndexError, ValueError):
+            return None
+
     # --- Running a check ---
 
     def start(self, kind, reason):
@@ -518,6 +584,9 @@ class Checks:
                       "blind": blind}
         log(f"{kind} check: {reason}" + (" (our tracker's first: no gaze yet, so each click takes the look "
                                          "up to it)" if blind else ""))
+        self.note_until = None   # the check's panel replaces the slip note
+        if kind == "quick" and reason == PUTON_REASON:
+            self.start_puton(now)
         if kind == "full":
             st = ask(SCREENS, "state", 0.5).split()
             if len(st) >= 3 and st[0] == "ok":
@@ -541,17 +610,216 @@ class Checks:
         ignore = None if self.svc.one_eye is None else 1 - self.svc.one_eye  # the eye SteamVR ignores
         self.check = {"kind": "fit", "reason": reason, "own": False, "dots": [], "i": 0, "started": now, "shown": now,
                       "run": [], "accept": False, "done_at": None, "tries": 0, "skipped": 0, "captured": 0,
-                      "points": {}, "fit": FitCheck(ignore=ignore), "drawn": {}, "drawn_at": 0.0, "step": None}
+                      "points": {}, "fit": FitCheck(ignore=ignore), "drawn": {}, "drawn_at": 0.0, "step": None,
+                      "coach": self.new_coach()}
         log(f"fit check: {reason}")
+        self.note_until = None
+        if self.check["coach"]:
+            self.check["coach"]["ipd"] = self.panel_ipd()
         self.to_helper("calpanel 1")
         self.to_panel("show fit")
         self.to_panel("title Headset fit: adjust the headset while you watch")
         self.to_panel("text Left click or Meta+J: guided check · Right click or Meta+K: done")
         return "ok"
 
+    def new_coach(self):
+        """The fit coach's part of the fit check, or None without our tracker (or its reference)."""
+        if not self.svc.own_installed():
+            return None
+        ref = fitcoach.Reference.load()
+        if ref is None:
+            log(f"fit coach: no reference ({fitcoach.REFERENCE})")
+            return None
+        return {"ref": ref, "baseline": fitcoach.load_baseline(), "reading": None, "summary": None,
+                "looks": deque(), "centred": False, "logged": None, "ipd": None, "good": None}
+
+    def coach_feed(self, s, now):
+        k = self.check["coach"]
+        m1 = s["src"].get("mmap1") or {}
+        if k is None or "hy" not in m1:
+            return
+        k["looks"].append((now, m1["hy"], m1["hp"]))
+        while k["looks"] and k["looks"][0][0] < now - fitcoach.WINDOW:
+            k["looks"].popleft()
+
+    def coach_tick(self, now):
+        """Keeps ft-eyes running and asks it for the last second of finds; judged when centred."""
+        k = self.check["coach"]
+        if k is None:
+            return
+        svc = self.svc
+        svc.eyes_until = max(svc.eyes_until, now + COACH_LEASE)
+        looks = k["looks"]
+        k["centred"] = (len(looks) >= 10 and looks[-1][0] - looks[0][0] > 0.8 * fitcoach.WINDOW
+                        and all(math.hypot(y, p) <= COACH_CENTRE for _, y, p in looks))
+        if self.asking:
+            if now >= self.asking[1]:
+                self.drop_ask()
+            return
+        if not svc.eyes_proc:
+            k["summary"] = None
+            return
+        centred = k["centred"]
+
+        def got(reply):
+            try:
+                summary = {int(cam): v for cam, v in json.loads(reply).items()}
+            except (ValueError, AttributeError):
+                k["summary"] = None
+                return
+            k["summary"] = summary
+            if centred and self.check and self.check.get("coach") is k:
+                k["reading"] = fitcoach.assess(summary, k["ref"], ipd=k["ipd"], baseline=k["baseline"],
+                                               previous=k["reading"])
+                if k["reading"]["state"] == "ok":
+                    k["good"] = summary   # (the fit check keeps the last as your saved fit)
+        self.ask_eyes("fit", 0.4, got)
+
+    def coach_lines(self):
+        """The fit coach's hints for the panel (first), or [] without it."""
+        c = self.check
+        k = c.get("coach")
+        if k is None:
+            return []
+        if k["summary"] is None:
+            return ["Headset position: starting our eye tracker..."]
+        if not k["centred"]:
+            if k["reading"] is None:
+                return ["Headset position: look straight ahead for a moment."]
+            return [f"Headset position (when you last looked straight ahead): {self.coach_words(k['reading'])}"]
+        return [f"Headset position: {self.coach_words(k['reading'])}"] if k["reading"] else []
+
+    @staticmethod
+    def coach_words(r):
+        if r["state"] == "waiting":
+            return "waiting for both eyes."
+        hints = " ".join(h["text"] for h in r["hints"][:2])
+        if r["state"] == "ok":
+            words = "good." + (f" {hints}" if hints else "")
+        else:
+            words = hints or "a little off."
+        if r["provisional"] and r["against"] == "reference":
+            words += " (A first guess: measured on one face so far.)"
+        return words
+
+    # --- The put-on check (the fit watch: see the top) ---
+
+    def start_puton(self, now):
+        c = self.check
+        if not self.fit_watch():
+            return
+        k = self.new_coach()
+        if k is None or not k["baseline"]:
+            if k is not None:
+                log("put-on check: no saved fit yet (Check headset fit saves a good one)")
+            return
+        k["ipd"] = self.panel_ipd()
+        c["coach"] = k
+        c["puton"] = {"state": "reading", "until": now + PUTON_READ, "since": now, "lines": None}
+        log("put-on check: reading the fit against your saved one")
+
+    def puton_holds(self, c):
+        """The put-on check holds the quick check's dot (reading, or the headset moved)."""
+        return (c.get("puton") or {}).get("state") in ("reading", "moved")
+
+    def puton_tick(self, now):
+        c = self.check
+        pu, k = c["puton"], c["coach"]
+        if not self.puton_holds(c):
+            return   # (no more asks: the quick check skips samples while one waits)
+        self.coach_tick(now)
+        if c["accept"]:
+            self.puton_done("the dot taken as the headset sits (a click)")
+            return
+        r = k["reading"] if k["centred"] and k["summary"] is not None else None
+        if r is not None and r["state"] == "waiting":
+            r = None
+        if pu["state"] == "reading":
+            if r is None:
+                if now > pu["until"]:
+                    self.puton_done("no straight-ahead reading in time; the dot is taken as usual")
+                return
+            if not fitcoach.moved(r):
+                self.puton_done("the headset sits as your saved fit")
+                return
+            pu["state"], pu["since"] = "moved", now
+            log("put-on check: the headset moved since your saved fit: terms "
+                + ", ".join(f"{n} {v:+.1f}" for n, v in r["terms"].items()))
+            self.to_panel("show five")   # wider: the hints don't fit quick's square
+            self.to_panel("title The headset sits differently from your saved fit")
+            self.show_dot()
+            self.puton_lines(r)
+            return
+        if r is not None and not fitcoach.moved(r):
+            self.note("Good: it's back where it was")
+            self.puton_done("the headset is back as your saved fit")
+            return
+        if r is not None:
+            self.puton_lines(r)
+        if now - pu["since"] > PUTON_TIMEOUT:
+            self.puton_done(f"not back after {PUTON_TIMEOUT:.0f} s: the dot is taken as the headset sits")
+
+    def puton_lines(self, r):
+        """What to move, in the panel: the position hint at the bottom, a changed IPD over it."""
+        pu = self.check["puton"]
+        ipd = next((h["text"] for h in r["hints"] if h["key"] == "ipd-changed"), "")
+        pos = fitcoach.position_hint(r["terms"])
+        lines = (pos["text"] if pos else "Move the headset back where it sat, then look at the dot", ipd)
+        if lines != pu["lines"]:
+            pu["lines"] = lines
+            self.to_panel(f"text {lines[0]}")
+            self.note(lines[1])
+
+    def puton_done(self, why):
+        c = self.check
+        now = time.monotonic()
+        c["puton"]["state"], c["puton"]["why"] = "done", why
+        log(f"put-on check: {why}")
+        c["run"], c["started"], c["shown"] = [], now, now   # the quick check's own time starts now
+        if c["puton"]["lines"]:
+            self.to_panel("text Look at the dot")
+
+    # --- The slip note (the fit watch: see the top) ---
+
+    def slip_watch(self, now):
+        svc = self.svc
+        own = svc.own if now - svc.own_at < 3 else {}
+        on = (svc.kind == "own" and svc.eyes_proc is not None and own and self.gaze_on
+              and self.headset is not False and not self.check and self.fit_watch())
+        hint = None
+        if on:
+            if self.slip_ref is None:
+                self.slip_ref = fitcoach.Reference.load() or False
+            jumps = {}
+            for cam, name in enumerate(fitcoach.EYES):
+                j = (own.get("eyes") or {}).get(name, {}).get("jump_px")
+                if j and any(j):
+                    jumps[cam] = j
+            hint = fitcoach.position_hint(fitcoach.slip_terms(jumps, self.slip_ref or None))
+        if hint is None:
+            self.slip_since = None
+            if self.note_until is not None and not self.check:
+                self.to_panel("hide")
+            self.note_until = None
+            return
+        if self.note_until is not None:
+            if now >= self.note_until:
+                self.to_panel("hide")
+                self.note_until = None
+            return
+        if self.slip_since is None:
+            self.slip_since = now
+        if now - self.slip_since >= SLIP_HOLD and now >= self.note_next:
+            self.to_panel("show note")
+            self.to_panel("title Your headset slipped")
+            self.to_panel(f"text {hint['text']}")
+            self.note_until, self.note_next = now + NOTE_SECONDS, now + NOTE_COOLDOWN
+            log(f"slip note: {hint['text']} ({hint['amount']:+.1f} deg)")
+
     def fit_tick(self, now):
         c = self.check
         fit = c["fit"]
+        self.coach_tick(now)
         # The guided check: its dots at head-relative directions in the panel (the probe's
         # screen fractions, spread over the middle of the panel), and its looks as the title.
         step = fit.guide_step(now)
@@ -584,6 +852,7 @@ class Checks:
             hints = ["Look around slowly: up, down, left and right. Or left click (Meta+J) for a guided check."]
         else:
             hints = fit.hints()
+        hints = self.coach_lines() + hints
         lines = [line for h in hints for line in wrap(h, FIT_HINT_WIDTH)][:8]
         cmd = "hints " + "|".join(lines)
         if drawn.get("hints") != cmd:
@@ -619,7 +888,10 @@ class Checks:
         c = self.check
         if c and c["kind"] == "fit":
             c["fit"].feed(s, self.sample_at)
+            self.coach_feed(s, self.sample_at)
             return
+        if c and self.puton_holds(c):
+            self.coach_feed(s, self.sample_at)
         if not c or c["done_at"] or self.asking:
             return  # (asking: ft-eyes has this dot's look, or the fit)
         if c["own"]:
@@ -640,7 +912,7 @@ class Checks:
             return
         now = time.monotonic()
         c["gaze_at"] = now
-        if now < c["shown"] + CHECK_SETTLE:
+        if now < c["shown"] + CHECK_SETTLE or self.puton_holds(c):
             return
         g = (src["hy"], src["hp"])
         run = c["run"]
@@ -872,6 +1144,17 @@ class Checks:
             return
         if why:
             log(f"{self.check['kind']} check closed: {why}")
+        k = self.check.get("coach")
+        if k and k["reading"]:
+            r = k["reading"]
+            log(f"fit coach, last reading: {r['state']} against the {r['against']}, terms "
+                + ", ".join(f"{n} {v:+.1f}" for n, v in r["terms"].items()))
+        if k and k["good"] and self.check["kind"] == "fit":
+            try:
+                fitcoach.save_baseline(fitcoach.make_baseline(k["good"], k["ipd"]))
+                log(f"fit coach: a good fit, saved as yours ({fitcoach.BASELINE})")
+            except OSError as e:
+                log(f"fit coach: can't save the fit: {e}")
         self.drop_ask()
         self.to_panel("hide")
         self.to_helper("calpanel 0")
@@ -937,7 +1220,8 @@ class Checks:
         if cmd == "calaccept":
             if self.check and self.check["kind"] == "fit":
                 self.check["fit"].toggle_guide(time.monotonic())
-            elif self.check and not self.asking:  # (asking: this dot's click landed already)
+            elif self.check and (not self.asking or self.puton_holds(self.check)):
+                # (asking: this dot's click landed already; the put-on check's asks are the coach's)
                 if not self.check["accept"]:
                     self.check["accept_at"] = time.monotonic()
                 self.check["accept"] = True
@@ -975,6 +1259,11 @@ class Checks:
             else:
                 self.fit_tick(now)
             return
+        if c.get("puton"):
+            self.puton_tick(now)
+            c = self.check
+            if not c:
+                return
         if self.asking:
             # ft-eyes has a dot's look or the fit: wait for its answer, at most to the deadline.
             if now >= self.asking[1]:
@@ -988,7 +1277,7 @@ class Checks:
             else:
                 self.advance()
             return
-        if not self.eyes_seen(EYES_GONE):
+        if not self.eyes_seen(PUTON_GONE if self.puton_holds(c) else EYES_GONE):
             self.close("the headset came off")
             return
         if c["done_at"]:
@@ -1000,7 +1289,7 @@ class Checks:
                 self.note("Waiting: the eye tracker isn't sending a gaze" if big else "Waiting: no gaze")
             else:
                 self.note("Waiting for your gaze to hold still on the dot" if big else "Hold your look still")
-        if c["kind"] == "quick" and now - c["started"] > QUICK_TIMEOUT:
+        if c["kind"] == "quick" and now - c["started"] > QUICK_TIMEOUT and not self.puton_holds(c):
             self.close("ignored")
         elif c["kind"] != "quick" and now - c["shown"] > CLICK_IDLE:
             self.close(f"no click on dot {c['i'] + 1} for {CLICK_IDLE:.0f} s")
@@ -1037,6 +1326,7 @@ class Checks:
                 self.reseat_seen = True
                 self.auto_quick("our tracker asked for a click")
         self.need_full("gaze mode is on without a calibration")
+        self.slip_watch(now)
 
     def status(self):
         c = self.check
@@ -1044,10 +1334,13 @@ class Checks:
               if self.pending else None, "calibrated": self.calibrated(), "eyes": self.eyes_seen(),
               "problem": self.problem(),
               "panel": self.panel_proc is not None,
-              "last_quick_s": round(time.monotonic() - self.last_quick) if self.last_quick else None}
+              "last_quick_s": round(time.monotonic() - self.last_quick) if self.last_quick else None,
+              "fit_watch": self.watch[1], "slip_note": self.note_until is not None}
         if c:
             st["check"] = {"kind": c["kind"], "dot": c["i"] + 1, "dots": len(c["dots"]), "captured": c["captured"],
                            "skipped": c["skipped"], "reason": c["reason"]}
+            if c.get("puton"):
+                st["check"]["puton"] = c["puton"]["state"]
         return st
 
     def stop(self):

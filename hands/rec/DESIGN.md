@@ -12,6 +12,7 @@ The plan this belongs to is `~/Desktop/Projects/frame-hands/notes/hands-plan.md`
 | `hands/rec/session.py` (Python, no Qt) | The session runner. It reads `script.json`, starts and stops the recordings, and drives the panel. It reads the live hands file for feedback and writes each take's files. It also runs from the command line (`--dry-run`) for testing. |
 | `hands/rec/script.json` | The guided script: sections, prompts, timings. |
 | `hands/rec/script-v2.json` | The v2 script (`ft-handrec --script script-v2.json`, `session.py --script`): a demo clip per step (below). Being tried; it becomes `script.json` once settled. |
+| `hands/rec/bounties.json`, `hands/rec/bounties/` | The bounty board and each bounty's round script (below, "Bounties"). |
 | `hands/rec/poses/` | The pose pictures, `poses.json` and its PNGs (below). |
 | `hands/rec/demos/` | The demo clips, `<id>.gif`, made from `demo/parts.json` (below). |
 | `hands/rec/takes.py` (Python, no Qt) | Reads sessions and takes from disk: frame sets for review, deleted ranges, export (compress, strip, manifest, checksums). |
@@ -20,7 +21,7 @@ The plan this belongs to is `~/Desktop/Projects/frame-hands/notes/hands-plan.md`
 | `hands/rec/build.sh` | Builds `ft-handpanel` into `hands/rec/build/`, like `gaze/build.sh`. |
 | `hands/rec/CONSENT.md`, `hands/rec/UPLOAD.md` | The texts the window shows. |
 | `hands/rec/install.sh` | Installs the recorder on a Frame with Frametop: the dev container's packages, hands/build.sh, the panel, ft-camd's capabilities, and the menu entry (`uninstall` removes the entry). |
-| ft-hands `--record-hz N` (done) | Records at most N frame sets a second. The recorder uses 10. |
+| ft-hands `--record-hz N` (done) | Records at most N frame sets a second. The recorder uses 10, or a script's `record_hz` (the bounties: 30). |
 | `hands/camcheck.py` (shared, standard library) | Are all four mono cameras running? The recorder runs it before a session and when a step sees no hands (below; `hands/README.md`, "Camera check"). |
 
 Every part runs in the dev container, as ft-hands and Input Settings do. The host Python isn't used: it lacks PySide6 and zstd. `setup/dev-container.sh` gains `zstd`.
@@ -65,10 +66,11 @@ Test hooks:
     calibration.json            /persist/xrservice.json with identifying fields removed (below)
     device.json                 the rig's pose in the CAD frame from /persist/device_config.json (below)
     takes/<NN>-<section>/
-      sets.bin                  ft-hands' recording (FHSET01, hands/track/record.h), 10 sets/s: the first part
+      sets.bin                  ft-hands' recording (FHSET01, hands/track/record.h), 10 sets/s (a bounty: 30): the first part
       sets-2.bin, sets-3.bin, ...  the next parts (step mode: one per step; any mode: after a pause)
       prompts.jsonl             what the person was asked to do, when (below)
       poses.jsonl               head and controller poses from ft-handpanel (below)
+      live.bin, live-2.bin, ... a testing session: the live tracker's output per part (below, "Testing sessions")
       take.json                 {"section", "title", "started_ns", "ended_ns", "status": "complete"|"stopped"|"skipped",
                                  "deleted": [[from_ns, to_ns], ...], "notes": "",
                                  "parts": {"sets.bin": {"names_swapped": false}, "sets-2.bin": {...}},
@@ -82,8 +84,14 @@ All `_ns` times are CLOCK_MONOTONIC nanoseconds, the clock of `dqbuf_ns` in sets
 
 ```json
 {"schema": 1, "contributor": "<random uuid4>", "consent": {"version": "2026-10-02", "accepted": "<ISO time>", "adult": true},
- "optional": {"handedness": "right|left|both|", "notes": ""}}
+ "testing_consent": {"version": "2026-10-14", "accepted": "<ISO time>", "adult": true},
+ "optional": {"handedness": "right|left|both|", "notes": ""},
+ "bounties": {"<id>": {"rounds": 2, "last": "<session id>"}}}
 ```
+
+`consent` is the agreement to CONSENT.md (the public dataset), `testing_consent` to TESTING.md (the test phase, below); either can be there without the other, and writing one keeps the other.
+
+`bounties`: how often each bounty was done (recorder/bounties.py `mark_done`, when a bounty's round ends `done`); a new consent keeps it.
 
 No name, email, or account. The contributor id is random, so several sessions from one person can be held out together in evaluation. Withdrawal also goes by that id.
 
@@ -96,7 +104,7 @@ No name, email, or account. The contributor id is random, so several sessions fr
  "checklist": {"objects": ["pencil", "phone", "cup", "keyboard", "mouse", "gamepad", "small"], "own_objects": ["..."],
                "controllers": "straps|none", "sleeves": "short|long|", "rings": false, "watch": false, "notes": ""},
  "device": {"steamos": "<VERSION_ID from /etc/os-release>", "steamvr": "<version if known>", "cameras": [{"name", "width", "height"}]},
- "mode": "step|auto", "quick": false, "shuffle": {"seed": 123, "sweeps": {"pose-sweeps": [{"id", "hands", "cues"}]}},
+ "mode": "step|auto", "quick": false, "record_hz": 10, "bounty": {"id": "pinches", "title": "Pinches", "board_updated": "2026-10-14"}, "shuffle": {"seed": 123, "sweeps": {"pose-sweeps": [{"id", "hands", "cues"}]}},
  "takes": ["01-hand-size", "..."],
  "camera": {"status": "ok|unknown|degraded", "reason": "..."}, "stop_reason": "...",
  "sides": {"swapped": true|false|null, "decided_by": "auto|config|option|manual", "state": "decided|confirmed|...",
@@ -107,6 +115,10 @@ No name, email, or account. The contributor id is random, so several sessions fr
 `sides`: whether ft-camd's side camera names were backwards during the session (`swapped`), as the live tracker decided it (above, "Side cameras"); `null` while nobody knows. A part's names are right when its take.json `names_swapped` equals `swapped`. Parts without a `parts` entry were recorded with ft-camd's names. Sessions from before this have no `sides`.
 
 `camera` is the camera check's verdict at the start (no paths or log lines: those go to `session.log`). `stop_reason` is there when a session was stopped at the no-hands screen, with the check's result.
+
+`consent` (`{"kind": "public"|"testing", "version"}`) is the consent the session was recorded under, and `debug` is there for a testing session (below, "Testing sessions"). Sessions before 2026-10-14 have neither: they're public.
+
+`record_hz` is the sets a second recorded; `bounty` is there for a bounty's round (below, "Bounties"). Sessions before the bounties have neither: they were recorded at 10.
 
 A session started before step mode existed has no `mode`: it ran as `auto`. `quick` and `shuffle` (below, "Sweeps" and "Quick round") are missing from sessions before the sweeps.
 
@@ -144,7 +156,14 @@ One JSON object per line:
 {"t": 123, "event": "redo", "id": "static-poses/fist/left/near", "from": 123, "to": 123}
 {"t": 123, "event": "nohands", "id": "hand-size/flat/both", "reads": 120, "published": 118}
 {"t": 123, "event": "end", "status": "complete|stopped|skipped"}
+{"t": 123, "event": "scene", "id": "pinches/drag-right", "windows": [{"id": "a", "at": [x, y, z], "size": [w, h], "turn": [yaw, pitch], "look": "plain", "room": [12 floats]}]}
+{"t": 123, "event": "steady", "win": "a", "lit": "bar", "gesture": "pinch", "hand": ""}
+{"t": 123, "event": "switch", "id": "hand-size/both", "to": "backs toward you", "k": 1}
+{"t": 123, "event": "prompt", "id": "pinches/drag-right/3-pinch", "text": "...", "pose": "pinch", "cue": true, "step": "pinches/drag-right",
+ "act": {"win": "a", "lit": "bar", "gesture": "pinch", "hand": "", "label": "", "ghost": [dx, dy, dz, yaw, pitch, roll], "ghost_room": [12 floats]}}
 ```
+
+A scene step (below, "Scenes") logs `scene` when its windows go up, with each one's pose in the room (`room`, from the panel; null in a dry run), and `scene` with no windows when they go. Each act is a `prompt` like a sweep's cue, with `act`: the window, the lit part, the gesture asked for (`rest`: let go, nothing lit), the hand when the act names one, and the ghost (in the window's frame, and its pose in the room). `steady` is a light that stays on for the whole step. `switch` is a step's change of pose (below, "Two poses in a step"): the pose asked for from then until the step's end or the next `switch`.
 
 `feedback` is written about twice a second while recording. It's the live tracker's view, kept for later checks; it's not a label.
 
@@ -187,6 +206,7 @@ Commands (UTF-8; `|` starts a new line in text):
 | `text <text>` | The instruction, large, wrapped to the panel's width, centred. |
 | `note <text>` | An orange line under the instruction: a warning ("I can't see your left hand"). Empty clears it. |
 | `countdown <0..1>` / `countdown off` | A thin bar along the bottom: the share of this prompt's time left. |
+| `split <at> <label>;...` / `split off` | Ticks on that bar where the step changes pose, each at `at` (the share of time left then) with "Switch to <label>" over it, cyan once the bar comes down to it ("Two poses in a step"). |
 | `hands <left> <right>` | Two chips, "Left hand" and "Right hand", each `seen` (green), `lost` (orange) or `off` (hidden). |
 | `bar <target 0..1> <current 0..1 or -1> [near label] [far label]` / `bar off` | The near/far bar for the push out and back: a horizontal track with a target marker and the hand's current position. |
 | `paused on` / `paused off` | A "Paused" overlay over the picture. |
@@ -199,12 +219,17 @@ Commands (UTF-8; `|` starts a new line in text):
 | `rec on` / `rec off` | The red "Rec" by the step line. |
 | `strip <cue> <path>\|<mode>\|<label>;...` / `strip off` | A sweep's row of pose pictures (path `-`: none; mode `-` or `mirror`), each with its label under it; the one at index `cue` (from 0, -1 for none) framed in cyan and bright, the others dim. It sits along the bottom of the space left, the where-to diagram at its right end if there is one, and the text above it; it takes the left column's place. Each picture is loaded once. A file that can't be read: `error can't read ...`, and that item shows an empty frame. |
 | `target <x> <y> <z> [show\|hold <0..1>\|done]` / `target off` | The touch target: a small sphere-like dot about 2 cm across, in its own overlay (`frametop.handpanel.target`). The point is in the head frame (metres, +x right, +y up, -z forward). The first `target` with a new point places it in the room with the current HMD pose, and it stays there. Later commands with the same point change only the state. `hold` draws a filling ring, `done` turns it green. Reply: `ok <room x> <room y> <room z>`. |
+| `layout full` / `layout top` | `top`: only a band along the panel's top (title, step, Rec, the big text, two lines of text, a note and the time-left bar), the rest clear, so a scene's windows can be seen below it. |
+| `win <id> place <x> <y> <z> <w> <h> [<yaw> <pitch>] [<look>]` | A scene's window (below, "Scenes"; at most 4), in its own overlay (`frametop.handpanel.win.<id>`): w x h metres, centred at the point in the head frame made level (the head's forward direction, flattened, +y up), facing the eye, turned by yaw and pitch. It stays where it was put. `look`: `plain` (faint text lines), `grid:CxR` (1-6 each way) or `list:N` (1-10 rows). Reply: `ok <12 floats>`, its pose in the room. |
+| `win <id> lit <part>[+<part>...] [<colour>] [<label>]` | Lights parts: `none`, `bar` (the title bar), `left`, `right`, `top`, `bottom`, `tl`, `tr`, `bl`, `br`, `button:N`, `item:N`. Colours: `cyan` (default), `purple`, `orange` (a button drawn hollow with a cross: don't touch), `green`. The label (`_` for a space) goes beside the first part. |
+| `win <id> ghost <dx> <dy> <dz> <yaw> <pitch> <roll> [<scale>]` / `win <id> ghost off` | A dashed outline of the window, moved, turned and scaled in the window's frame: where to take it. Reply: `ok <12 floats>`. |
+| `win <id> off` / `win clear` | Hides one window and its ghost, or all of them. |
 | `poses start <path>` / `poses stop` | Log poses to the path (appending, `poses.jsonl` format above) from a thread at 250 Hz, until stopped. |
 | `devices` | Reply: `ok hmd <r> left <r or -> right <r or ->`, the current `ETrackingResult` values (`-` for no device in that role). |
 | `head` | Reply: `ok <12 floats>`, the current HMD pose (standing universe). |
 | `ping` | `ok shown` or `ok hidden`. |
 
-It quits on SteamVR's quit event, as ft-gazepanel does. `--no-vr --dump DIR` writes each picture to `DIR/panel.pam`, to check the layout without a headset.
+It quits on SteamVR's quit event, as ft-gazepanel does. `--no-vr --dump DIR` writes each picture to `DIR/panel.pam` (and the windows to `win-<id>.pam`, the ghosts to `ghost-<id>.pam`), to check the layout without a headset.
 
 ## The pose pictures (`poses/`)
 
@@ -276,6 +301,34 @@ The second in-headset session (sessions/20261002-202734) took about 16 min and w
 
 For more lighting rounds: "Quick round (about 3 min)" on the checklist page, `session.py --quick`. It has the sections marked `quick` (hand size, the pose sweeps without the one-hand ones, touch the dot, no hands), about 2 min recorded in 6 steps. session.json gets `"quick": true`. The checklist page suggests it (and picks it) once a full session has gone to the end (`Backend.hasFullSession`: a session.json with status `done`, not quick, not a dry run).
 
+### Scenes
+
+A section with `"kind": "scene"` (the bounties, below) puts windows in front of the person and asks for real interactions on them: tap the lit button, pinch the lit corner and drag the window to a ghost, grab the edge like a playing card and throw it. The windows don't move or click. The point is the hand doing the whole motion as it would on a real window (the reach, the fingers shaping on the way, the contact, the carry, the let-go), with each try's target and time as weak labels, instead of held poses. The cameras don't see the windows, so the steps put them where the tracker struggles: low, close, at the view's edge, two hands, near misses.
+
+A step:
+
+```json
+{"id": "drag-right", "hands": "right", "text": "Pinch the lit bar and take it to the ghost.",
+ "windows": [{"id": "a", "at": [0.05, -0.2, -0.45], "size": [0.34, 0.24], "turn": [0, 0], "look": "plain|grid:3x3|list:6"}],
+ "steady": [{"win": "b", "lit": "bar", "gesture": "pinch", "label": "L"}],
+ "acts": {"gen": "moves", "gesture": "pinch", "grab": "bar", "every_s": 3.5, "gap_s": 1.2, "count": 3,
+          "moves": [[0, 0.15, 0], {"grab": "br", "ghost": [0.05, -0.04, 0, 0, 0, 0, 1.3], "gesture": "nogo"}]}}
+```
+
+- `windows`: 1 to 4, placed when Next is pressed, where the head faces then (levelled), and left there for the step (the panel's `win ... place`). `at` is in that frame, metres.
+- `acts`: a list of acts, `{"s", "win", "lit", "gesture", "hand", "label", "say", "ghost"}`, or a generator (or a list mixing both):
+  - `"gen": "buttons"`: a lit button or row every `every_s`, lit for `lit_s` with a rest after, never the same one twice running; `count` or `seconds`; `mix` weights the gestures (`{"tap": 2, "double": 1}`); `hands: ["left", "right"]` labels each button L or R; `says` gives a gesture its own line; `windows` limits it to some.
+  - `"gen": "moves"`: each move lights a part to grab (`grab`, `+` for two: `tl+br`) and, with a ghost, shows where to take the window; `every_s` each, then a `gap_s` rest ("Let go"); shuffled unless `"shuffle": false`; `count` repeats or cuts the list. A move is a ghost `[dx, dy, dz, yaw, pitch, roll, scale]` or an object overriding the generator's keys.
+- `steady`: lights that stay on for the whole step, on windows no act uses (hold a pinch on one while the other hand taps).
+- Gestures (`session.GESTURES`), each with its colour, mark and default line: `tap`, `double` ("2"), `hold` ("hold"), `middle` (purple), `middle-hold`, `pinch`, `card` (three fingers, a playing card), `fist` (green), `touch` (open hand, orange), `nogo` (orange, stop about 1 cm short), `rest` (nothing lit).
+- A step whose acts switch between the hands (L and R buttons, or acts naming each hand) gives every act at least `CHOICE_MIN_S` (2 s) lit, so there's time to see which hand and use it (user, 2026-10-14): the buttons generator stretches its lit time to that (keeping the rest after), and a written act shorter than that fails the plan.
+- The step's `seconds` are its acts'. The acts are drawn with `random.Random("<seed>/<section>/<step>")`, so `build_plan` with the session's seed gives them again; session.json's `shuffle.sweeps` lists each scene step's acts as `[gesture, window, part, hand]`.
+- While a scene runs, the panel is in its `layout top` band, which shows the act's line; a scene's acts get no pose picture. The events are above (prompts.jsonl).
+
+### Two poses in a step
+
+A step that asks for one pose and then another (hand size: palms toward you, then the backs) says when to change: `"switch": "backs toward you"` (at half time), or `[{"at": 0.5, "to": "backs toward you", "text": "Both hands about 40 cm out, still|Backs toward you"}]`, each `at` a share of the step's time, after the one before. The time-left bar gets a tick there with "Switch to <to>" over it (the panel's `split`), lit cyan once the bar comes down to it; `text`, if given, replaces the instruction then (not in a scene, whose acts keep their own lines). The step's prompt event lists its `switch`, and a `switch` event (`id`, `to`, `k`, counting from 1) marks each one's time, so labels can tell the two poses apart. Plain steps and scene steps take it; a sweep has its own cues.
+
 ### Step mode (the default) and auto mode
 
 The first in-headset session (2026-10-02) went too fast: each prompt advanced after 4-8 s, before there was time to read it and find the hand shape. So by default every step waits:
@@ -335,6 +388,36 @@ On 2026-10-02 a whole session showed "I can't see your hands": after the headset
 - **The Next hint follows what's there.** No mouse connected: "Ready? Press the button on the right side of the headset" (the window's Next can't be clicked, and Space needs the window focused). A mouse: "Ready? Press Space, click Next, or press the headset button". No button: "Ready? Press Space or click Next". The panel's bottom line leads with "Headset button: press for next or pause · press twice to redo · hold to stop", then the window's keys by letter. With the button, the pause note and the no-hands question say how to resume or stop with it too. A mouse is a device in `/proc/bus/input/devices` with EV_REL, REL_X and REL_Y that isn't made in software: uinput devices (Frametop's virtual mouse, frame-voice's keyboard) sit under `/devices/virtual/input` or on the virtual bus (6), and are left out; Bluetooth mice come through uhid, under `/devices/virtual/misc/uhid`, and count. It's looked at again at each step, so a mouse plugged in mid-session counts from the next step.
 - **R (redo).** During a step's countdown or hold: that step starts again from its ready screen. At a step's ready screen: the step before it (in this section) goes again. Either way a `redo` event marks the range of the try being redone, so its labels are skipped; the sets stay, to delete in review if wanted.
 - A pause stops the take's recording and starts it again on resume as the next part of the same take (`sets-2.bin`, and so on). takes.py reads all parts in order. A pause while a step waits only shows "Paused"; a Next pressed while paused doesn't count.
+
+## Bounties
+
+Short rounds (about 3 min recorded, 4 with reading) of what the hand tracker needs most, so people can help where it counts without a 15-minute session. As in the eye recorder (gaze/rec/DESIGN.md, "Bounty board"), using the shared `recorder/bounties.py`:
+
+- `bounties.json` is the board: `{"schema": 1, "updated", "bounties": [{"id", "title", "blurb", "minutes", "priority", "script"}]}`. A newer copy fetched from the dataset (`hub.py board`, the window's "Get the newest board", into `BASE/board-cache.json`) can only describe, reorder, reprioritise or retire bounties: each one's steps come from `bounties/<script>.json`, shipped with the recorder. A bounty whose script this recorder lacks shows "Needs a newer recorder".
+- A round script is a normal script (above) with `"record_hz": 30`: hand size first (the no-hands check), then one scene section. At 30 sets a second a round is about 2.5 min recorded, about 2.1 MB a second exported.
+- The window opens on the Bounties page: the board, least done first, each with Record (Record again once done), "Get the newest board", and below them the full session and the quick round. Picking a round goes to the consent page if this contributor hasn't agreed to the current version, else straight to the checklist; the checklist's Round section shows the pick (or the full/quick choice) with "Pick another…" back to the board, and hides what a bounty doesn't use (objects within reach, controllers, guidance). Its camera check and Start then run the script (`session.py --bounty ID`; `--board` lists them). When the round is done, the Session page's "Export and upload" exports it and opens the Upload page for that export once the export finishes (`exportDone`). session.json gets `"bounty"`, the upload's title and description name it, and Review shows its title by the session. A round that ends `done` (not a dry run) counts in profile.json's `bounties`.
+
+The first four (2026-10-14), each on the gestures Frametop uses:
+
+| Bounty | What | Steps |
+|---|---|---|
+| `index-taps` | Thumb to index taps (click), the hand raised and pointing at the button as with Frametop's hand ray (user, 2026-10-14: not gaze-and-tap from the lap) | Each hand, palm away, the arm straight then bent (a switch); two windows left and right, the head ahead then turning; high and low; a big far window; both hands (L/R); double taps and holds, each hand; near misses (orange: stop short); own pace, then the other hand |
+| `middle-taps` | Thumb to middle taps (right click), pointing the same way | The index round's shape with middle taps and middle holds, index and middle mixed on each hand, near misses and a slow fist |
+| `pinches` | Thumb and index pinches | Pinch and hold the bar or a corner; drag to ghosts with each hand (across, nearer, farther); resize from a corner; tilt; two hands on two corners; hold a pinch on one window while tapping another; a far window pinched with the hand low; pinch vs stop short vs open touch; own pace |
+| `card-grabs` | Thumb, index and middle (a playing card) | Hold the right edge (R) and left (L); move and turn it while held; place it on ghosts; push it away; throw it to far ghosts; two hands on both edges; four windows low, high, close and to the side; card vs fist vs touch vs two-finger pinch vs stop short; own pace |
+
+## Testing sessions and the test phase
+
+**The test phase.** While the bounties are tried out with a few people (`takes.TEST_PHASE`), their rounds are recorded under a short testing-only consent, `TESTING.md`, instead of CONSENT.md, and go to a separate gated dataset, `DeeJanuz/frametop-hands-test` (`hub.HF_TEST_DATASET`; `FT_HANDREC_TEST_DATASET` overrides it). Nothing in it is used for training or published; moving a recording into the public dataset needs the person's agreement to CONSENT.md. The full session and the quick round stay public. `takes.round_consent_kind(bounty, debug)` says which kind a round uses; the window shows that kind's text on the Welcome page when a round is picked (`setConsentKind`), and gates and labels uploads per session (`uploadAllowedFor`, `datasetFor`). Each kind's text has its own draft gate: TESTING.md's first line says DRAFT until the maintainer approves it.
+
+**Encryption.** A test-phase export is encrypted on the headset to the maintainer's keys in `hands/rec/test-recipients.txt` (age X25519, `recorder/age.py`, as the eye recordings), so people who can see the test dataset can't open each other's recordings. `sets.bin.zst.age` and `live.bin.zst.age` replace the plain files (zstd piped into age while compressing). The manifest says `"consent_kind": "testing"` and `"encryption": {"scheme": "age-v1-x25519", "recipients": [...], "files": [...]}`; what stays readable is the manifest: lengths, lighting, checklist, contributor id. Key 1 is on the maintainer's machine, key 2 offline; both are the only recipients `validate.py` accepts. The manifest's profile holds only the schema, the contributor, that kind's consent record and the optional answers.
+
+**Testing sessions** (`debug.json`, `session.py --debug`, the board's first row "Testing session" when Frametop's hand tracking is installed: `frametop-hands.service` is known to systemd, or `FT_HANDREC_FRAMETOP_HANDS=1`). The person uses Frametop as usual for up to 3 minutes at 30 sets a second while the cameras record, so new versions of the tracker can be replayed on that person's own recording and compared with what the live one did. Frametop's hands and pointer keep running (nothing is paused), and the preflight wants `frametop-hands.service` active.
+
+- One free step: the panel hides while it records. The headset button's press (the window's Mark, M) is a `mark` event, the panel flashing "Marked" for a second; its hold (Finish, F) ends the step early with an `end_early` event, and the session is `done`. Pause and Stop work as usual; Redo and Skip aren't offered.
+- **`live.bin`** (`livelog.py`): every new publish of the live tracker's hands and gestures files (include/fh_hands.h, fh_gestures.h), copied whole under their sequence lock, one file per part. A 16-byte header (`"FHLIVE01"`, u32 version 1, u32 0), then records: u8 source (0 hands, 1 gestures), 3 pad, u32 length, u64 read_ns (CLOCK_MONOTONIC), u64 seq, then the bytes. The files' own `capture_ns` and `publish_ns` are inside. take.json gets `"live": {"hands": n, "gestures": n}`. The tracker publishes only while the headset is in use.
+- session.json `debug`: `{"use": "testing", "max_s", "settings": {HANDS_* and POINTER_* from ~/.config/frametop.conf, paths cut to file names}, "frametop": "<git describe of the running ft-hands' checkout>", "models": {"<file>": "<sha256[:16]>"}, "models_dir"}`.
+- Export joins the parts into `live.bin.zst.age`, leaving out records read in deleted ranges; the manifest's take entry gets `"live": {"records", "raw_bytes", "file"}`. `validate.py` allows a live file only in a testing session, and requires `debug.use` "testing" and the testing consent.
 
 ## Review and export (`takes.py`, the window)
 
@@ -396,3 +479,4 @@ On 2026-10-02 a whole session showed "I can't see your hands": after the headset
 - The text explains what's recorded and that nothing uploads automatically, how review works, how to withdraw (by contributor id), and that a withdrawal is purged from the repo's history.
 - The texts need a legal review before the dataset launches. Until then they carry a "draft" banner, and the Upload page says contributions aren't open yet.
 - The dataset repo: `HF_DATASET` in `hub.py`, `DeeJanuz/frametop-hands` (private until launch).
+- The test phase has its own short text, `TESTING.md`: testing only, no training, nothing published, encrypted, deleted when the test ends or on request (above, "Testing sessions and the test phase").

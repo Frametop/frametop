@@ -1,0 +1,78 @@
+{
+ "schema": 1,
+ "id": "jumps",
+ "title": "Jumps and pursuit",
+ "intro": "A dot that jumps around, then one that glides. Follow it with your eyes, as quickly as you can, without moving your head.",
+ "steps": [
+  {
+   "id": "jumps",
+   "kind": "jumps",
+   "text": "Look at the dot wherever it jumps.",
+   "count": 40,
+   "range": [
+    24,
+    18
+   ],
+   "each": [
+    0.5,
+    1.5
+   ]
+  },
+  {
+   "id": "circle-slow",
+   "kind": "path",
+   "group": "pursuit",
+   "text": "Follow the dot with your eyes.",
+   "path": "circle 0 0 15 6",
+   "seconds": 12
+  },
+  {
+   "id": "circle-fast",
+   "kind": "path",
+   "group": "pursuit",
+   "text": "Follow the dot with your eyes. It's faster now.",
+   "path": "circle 0 0 15 2.5",
+   "seconds": 10
+  },
+  {
+   "id": "line-slow",
+   "kind": "path",
+   "group": "pursuit",
+   "text": "Follow the dot from side to side.",
+   "path": "line -24 0 24 0 3",
+   "seconds": 12
+  },
+  {
+   "id": "line-fast",
+   "kind": "path",
+   "group": "pursuit",
+   "text": "Follow the dot from side to side, faster.",
+   "path": "line -24 0 24 0 1.2",
+   "seconds": 8
+  },
+  {
+   "id": "line-up",
+   "kind": "path",
+   "group": "pursuit",
+   "text": "Follow the dot up and down.",
+   "path": "line 0 -18 0 18 2.5",
+   "seconds": 10
+  },
+  {
+   "id": "eight",
+   "kind": "path",
+   "group": "pursuit",
+   "text": "Follow the dot along the figure eight.",
+   "path": "eight 0 0 22 12 6",
+   "seconds": 12
+  },
+  {
+   "id": "eight-fast",
+   "kind": "path",
+   "group": "pursuit",
+   "text": "Follow the dot along the figure eight, faster.",
+   "path": "eight 0 0 22 12 3",
+   "seconds": 9
+  }
+ ]
+}

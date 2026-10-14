@@ -75,6 +75,7 @@ class RecPanelTest(unittest.TestCase):
         self.assertTrue(self.ask("path spiral 0 0 1 2").startswith("error"))
         self.assertTrue(self.ask("path circle 0 0 10 0").startswith("error"), "seconds must be positive")
         self.assertTrue(self.ask("log start /nonexistent/dir").startswith("error"))
+        self.assertEqual(self.ask("ipd"), "ok 0.06300")
         time.sleep(0.2)
         self.assertTrue(os.listdir(os.path.join(self.tmp, "pics")), "pictures were drawn")
         self.ask("show quick")

@@ -32,6 +32,11 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
                                shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured)
   fit                          JSON: the last second of pupil finds per camera, for the fit
                                coach (gaze/fitcoach.py, Observations.summary); works uncalibrated
+  finds start PATH | finds stop
+                               append every frame looked at to PATH as JSON lines (the eye
+                               recorder's own.jsonl): {"t", "cam", "x", "y", "a", "b", "angle",
+                               "glints": [[x, y], ...], "gaze": [yaw, pitch] once calibrated},
+                               or {"t", "cam", "lost": true}. "finds stop" replies "ok ROWS"
 
 Environment, for replays (lab/ft-eyes-e2e): FT_EYES_CAMS, FT_EYES_GAZE, FT_EYES_STATE (the
 state folder), FT_EYES_SOCKET (the socket's name). With FT_EYES_CAMS set, the want file isn't
@@ -179,6 +184,7 @@ class Eye:
         self.last_t = None      # the previous frame's time
         self.obs = None         # the fit coach's window (fitcoach.Observations), shared by both eyes
         self.fed = None         # (frame time, CLOCK_MONOTONIC_RAW then) of the newest frame fed
+        self.finds = None       # the finds log (Tracker.finds), shared by both eyes
 
     def use(self, cal, shift=None):
         self.cal = cal if cal is not None and cal.has("pupil", self.eye) else None
@@ -215,6 +221,8 @@ class Eye:
                 self.shift.glint(self.slip.get(), t)
                 g = self.cal.gaze(self.eye, p["x"], p["y"], self.shift.value)
                 self.gaze = (t, float(g[0]), float(g[1]), p["x"], p["y"])
+        if self.finds is not None:
+            self.finds.write(self, t, p)
         self.work += time.perf_counter() - t0
 
     def window(self, t0, t1):
@@ -227,6 +235,30 @@ class Eye:
         mids = rows[~np.isnan(rows[:, 3]), 3:5]
         mid = np.median(mids, axis=0) if len(mids) >= 3 else None
         return dict(pupil=pupil, mid=mid, n=len(rows), spread=spread)
+
+
+class Finds:
+    """The finds log (the "finds" command): a JSON line per frame looked at."""
+
+    def __init__(self, path):
+        self.f = open(path, "a", buffering=1 << 16)
+        self.rows = 0
+
+    def write(self, eye, t, p):
+        if p is None:
+            row = {"t": round(t, 6), "cam": eye.eye, "lost": True}
+        else:
+            row = {"t": round(t, 6), "cam": eye.eye, "x": round(float(p["x"]), 2), "y": round(float(p["y"]), 2),
+                   "a": round(float(p["a"]), 2), "b": round(float(p["b"]), 2), "angle": round(float(p["angle"]), 1),
+                   "glints": [[round(float(x), 1), round(float(y), 1)] for x, y in p.get("glints") or []]}
+            if eye.gaze and eye.gaze[0] == t:
+                row["gaze"] = [round(eye.gaze[1], 3), round(eye.gaze[2], 3)]
+        self.f.write(json.dumps(row) + "\n")
+        self.rows += 1
+
+    def close(self):
+        self.f.close()
+        return self.rows
 
 
 class Tracker:
@@ -268,6 +300,22 @@ class Tracker:
             return "fail empty"
         if w[0] == "status":
             return json.dumps(self.status())
+        if w[0] == "finds" and len(w) >= 2:
+            rows = None
+            for e in self.eyes:
+                if e.finds is not None:
+                    rows = e.finds.close()
+                    break
+            for e in self.eyes:
+                e.finds = None
+            if w[1] == "stop":
+                return f"ok {rows or 0}"
+            if w[1] == "start" and len(w) == 3:
+                log = Finds(w[2])
+                for e in self.eyes:
+                    e.finds = log
+                return "ok"
+            return "fail finds start PATH | finds stop"
         if w[0] == "fit":
             # In frame time, which a replay's frames keep from the recording: the newest frame's,
             # plus how long ago it came (frames stopping, the headset off, empty the window).

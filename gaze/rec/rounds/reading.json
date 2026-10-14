@@ -1,0 +1,31 @@
+{
+ "schema": 1,
+ "id": "reading",
+ "title": "Reading",
+ "intro": "Reading and looking around, as in everyday use.",
+ "steps": [
+  {
+   "id": "read-1",
+   "kind": "prompt",
+   "group": "reading",
+   "dot": null,
+   "seconds": 20,
+   "text": "Read this at your own pace.||The lighthouse keeper climbed the spiral stairs every evening, counting each of the one hundred and twelve steps. At the top, he polished the great lens until it shone, then lit the lamp and watched its beam sweep across the dark water. Ships far out at sea would see the flash and know where the rocks were."
+  },
+  {
+   "id": "read-2",
+   "kind": "prompt",
+   "group": "reading",
+   "dot": null,
+   "seconds": 20,
+   "text": "And this one.||In the morning the market filled with stalls of oranges, peppers and fresh bread. A boy on a bicycle wove between the crates, ringing his bell. Somewhere a radio played an old song, and an old woman hummed along while she weighed out a bag of cherries for a customer who couldn't decide."
+  },
+  {
+   "id": "free",
+   "kind": "prompt",
+   "dot": null,
+   "seconds": 15,
+   "text": "Look around the panel freely: the corners, the edges, wherever you like."
+  }
+ ]
+}

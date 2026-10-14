@@ -62,6 +62,7 @@
 //                                (standing universe)
 //   distance <metres>            the panel and its dot that far away (0.25 to 10), the same size
 //                                in degrees (the Depth bounty)
+//   ipd                          "ok <metres>": SteamVR's IPD setting now (--no-vr: 0.0630)
 //   log start <dir> / log stop   append to <dir>/targets.jsonl, poses.jsonl and ipd.jsonl (below)
 //                                until stopped; "log stop" replies "ok <targets> <poses> <ipd>"
 // targets.jsonl, the ground truth: what the dot did, when. A row for each frame the dot moves in
@@ -1036,6 +1037,16 @@ int main(int argc, char **argv) {
             } else if (std::sscanf(buf, "distance %lf", &a) == 1) {
                 distance = std::clamp(a, 0.25, 10.0), dot.changed = true;
                 place();
+            } else if (Is(buf, "ipd")) {
+                float v = 0.063f;
+                vr::ETrackedPropertyError pe = vr::TrackedProp_Success;
+                if (!noVr) {
+                    std::lock_guard<std::mutex> lk(g_vr);
+                    v = vr::VRSystem()->GetFloatTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_UserIpdMeters_Float, &pe);
+                }
+                char r[48];
+                std::snprintf(r, sizeof r, "ok %.5f", v);
+                reply = pe == vr::TrackedProp_Success ? r : "error no IPD from SteamVR";
             } else if (Is(buf, "log", &arg)) {
                 if (!std::strncmp(arg, "start ", 6)) {
                     const std::string dir = arg + 6;

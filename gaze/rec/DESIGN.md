@@ -77,7 +77,7 @@ In the recorder the fit coach runs as each round's fitment step, and the shift w
 ## Bounty board
 
 People pick what to record from a board of bounties. Each bounty is one round of about 5 minutes, in step mode: the headset's right button starts each step (press = next or pause, two presses = redo, hold = stop), as in the hand recorder. Every round starts the same way:
-1. **Fitment** (not recorded as a take, but its readings go into fit.json): the fit coach until the headset sits well (below, "Fit coach"). Skippable after a warning, and the round records that it was skipped. On a contributor's first round, and whenever the IPD setting has changed since their last, it ends with an IPD sweep: turn the wheel slowly from narrow to wide and back while looking at a centre dot, with the IPD logged at 90 Hz.
+1. **Fitment** (not recorded as a take, but its readings go into fit.json): the fit coach until the headset sits well (below, "Fit coach"). Skippable after a warning, and the round records that it was skipped. On a contributor's first round, and whenever the IPD setting has changed since their last, it ends with an IPD sweep: turn the wheel slowly from narrow to wide and back while looking at a centre dot, with the IPD logged as it changes (the panel looks 30 times a second, and on SteamVR's IPD event). Its own take, `NN-ipd`, before the nine dots.
 2. **Nine dots** (recorded): a 3x3 grid to 20 degrees on the mid background. It's the round's own reference, so each round can be labelled alone, even after a re-seat.
 3. **The bounty's steps.**
 
@@ -87,7 +87,7 @@ The launch bounties:
 
 | Bounty | What | Edge case it covers |
 |---|---|---|
-| View edges | Dots at 30 to 45 degrees and the corners, as far as the panel reaches | Eyes turned far: the lid, the glints lost, the pupil foreshortened |
+| View edges | Dots at the panel's edges and corners: 30 degrees to the sides, 23 up and down, about 35 in the corners (the rec panel is 64 degrees across; every round's dots are checked against it) | Eyes turned far: the lid, the glints lost, the pupil foreshortened |
 | Blinks and lids | Blink on cue, close both for 2 s, wink each eye, squint, eyes wide, half-closed, looking down with lids lowered | Closed and partly closed eyes; one eye missing |
 | Headset slips | Nudge the headset up, down, left, right, tilt it; then take it off and put it back on; dots after each | Headset shifting on the face: the put-on check's data |
 | Glasses | A 5x5 grid and the edges with glasses or inserts on (offered when the checklist says so) | Lens reflections, the glasses' frame in view |
@@ -135,14 +135,14 @@ ft-gazepanel gains `show rec`: a large head-locked panel (FULL_DEG, 64 degrees, 
     session.json                the bounty, checklist, versions, takes, eye camera rate, IPD at start
     fit.json                    the fit coach's readings: the fitment step, and any slip warnings
     health.json                 the opt-in health answers (encrypted in the export)
-    takes/<NN>-<step group>/        00-dots is the round's nine dots
+    takes/<NN>-<step group>/    numbered in order: NN-ipd (when there's a sweep), NN-dots (the nine dots), then the bounty's
       cam0/000000.zst ...       right eye: one zstd chunk per second, frames back to back (512x400 u8)
       cam1/000000.zst ...       left eye
       index.tsv                 per frame: camera, chunk, offset in it, slot, CLOCK_MONOTONIC_RAW time
       targets.jsonl             what the panel showed, when (direction, distance, state, background)
       prompts.jsonl             what the person was asked to do, when (as hands)
       poses.jsonl               head poses, 250 Hz (as hands; needed for Head turning)
-      ipd.jsonl                 the IPD setting when it changes (90 Hz during the sweep)
+      ipd.jsonl                 the IPD setting at the start and when it changes
       steamvr.jsonl             SteamVR's gaze from ft-gaze, per sample (a baseline, not a label)
       own.jsonl                 ft-eyes' pupils, glints and gaze (a baseline, not a label)
       take.json                 status, deleted ranges, parts, clock samples, as hands

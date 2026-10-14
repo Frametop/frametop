@@ -1,0 +1,233 @@
+{
+ "schema": 1,
+ "id": "blinks",
+ "title": "Blinks and lids",
+ "intro": "Blinks, closed and half-closed eyes. Keep looking at the dot whenever your eyes are open.",
+ "steps": [
+  {
+   "id": "blink-cue",
+   "kind": "prompt",
+   "text": "Look at the dot and blink each time the word says so.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Blink",
+     1.5
+    ],
+    [
+     "Blink",
+     1.5
+    ],
+    [
+     "Blink",
+     1.5
+    ],
+    [
+     "Blink",
+     1.5
+    ],
+    [
+     "Blink",
+     1.5
+    ],
+    [
+     "Blink",
+     1.5
+    ],
+    [
+     "Blink",
+     1.5
+    ],
+    [
+     "Blink",
+     1.5
+    ]
+   ]
+  },
+  {
+   "id": "closed",
+   "kind": "prompt",
+   "text": "Look at the dot, then close both eyes when it says so.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Look",
+     2
+    ],
+    [
+     "Close both eyes",
+     2.5
+    ],
+    [
+     "Open",
+     2
+    ],
+    [
+     "Close both eyes",
+     2.5
+    ],
+    [
+     "Open",
+     2
+    ]
+   ]
+  },
+  {
+   "id": "winks",
+   "kind": "prompt",
+   "text": "Wink each eye in turn when it says so (as well as you can).",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Look",
+     1.5
+    ],
+    [
+     "Close your left eye",
+     2
+    ],
+    [
+     "Open",
+     1.5
+    ],
+    [
+     "Close your right eye",
+     2
+    ],
+    [
+     "Open",
+     1.5
+    ],
+    [
+     "Close your left eye",
+     2
+    ],
+    [
+     "Open",
+     1.5
+    ],
+    [
+     "Close your right eye",
+     2
+    ],
+    [
+     "Open",
+     1.5
+    ]
+   ]
+  },
+  {
+   "id": "squint",
+   "kind": "prompt",
+   "text": "Keep looking at the dot while you change how open your eyes are.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Normal",
+     2
+    ],
+    [
+     "Squint",
+     3
+    ],
+    [
+     "Normal",
+     2
+    ],
+    [
+     "Eyes wide open",
+     3
+    ],
+    [
+     "Normal",
+     2
+    ],
+    [
+     "Half closed",
+     3
+    ],
+    [
+     "Normal",
+     2
+    ]
+   ]
+  },
+  {
+   "id": "lids-down",
+   "kind": "dots",
+   "text": "Look down at each dot. Let your lids drop as they do when you look down.",
+   "dots": [
+    [
+     0,
+     -12
+    ],
+    [
+     0,
+     -18
+    ],
+    [
+     12,
+     -18
+    ],
+    [
+     -12,
+     -18
+    ],
+    [
+     0,
+     -23
+    ],
+    [
+     18,
+     -20
+    ],
+    [
+     -18,
+     -20
+    ]
+   ],
+   "hold": 1.5,
+   "shuffle": true
+  },
+  {
+   "id": "blink-dots",
+   "kind": "dots",
+   "text": "Look at each dot and blink once while its ring fills.",
+   "dots": [
+    [
+     0,
+     0
+    ],
+    [
+     15,
+     10
+    ],
+    [
+     -15,
+     10
+    ],
+    [
+     15,
+     -10
+    ],
+    [
+     -15,
+     -10
+    ]
+   ],
+   "hold": 2.0
+  }
+ ]
+}

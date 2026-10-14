@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Collect what a Frametop bug report needs into one text file: versions, service states,
-# settings, Frametop's keyboard and the Steam menu, recent logs, and the gaze report
-# (scripts/gaze-report.py). Bluetooth addresses and the headset's serial number are masked.
+# settings, Frametop's keyboard and the Steam menu, recent logs, the gaze report
+# (scripts/gaze-report.py), and hand tracking's state: its models, cameras, and counts.
+# Bluetooth addresses and the headset's serial number are masked.
 # Usage: scripts/report.sh [--watch [SECONDS]]   (in a terminal on the Frame, or from a PC over SSH)
 #   --watch   then record SECONDS (default 60) while you make the problem happen: the
 #             desktop's state (the Steam menu, our keyboard, which laser drags what, where
-#             typing goes) whenever it changes, and the logs from that time
+#             typing goes) whenever it changes, and the logs from that time (hand tracking's too)
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
@@ -15,7 +16,7 @@ case ${1:-} in
   --watch) watch=${2:-60}
            [[ $watch =~ ^[0-9]+$ ]] && [ "$watch" -ge 5 ] && [ "$watch" -le 600 ] ||
              { echo "--watch takes 5 to 600 seconds" >&2; exit 2; } ;;
-  -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
   *) echo "usage: $0 [--watch [SECONDS]]" >&2; exit 2 ;;
 esac
 out=$root/frametop-report-$(date +%Y%m%d-%H%M%S).txt
@@ -159,6 +160,41 @@ fi
 # The gaze service, SteamVR's eye tracker and ours, the checks and calibrations, with what
 # looks wrong first. It wakes an idle gaze service for about 20 s, to see the tracker send.
 python3 "$repo/scripts/gaze-report.py" </dev/null 2>&1 || echo "scripts/gaze-report.py failed"
+# Hand tracking: whether it runs, which models ft-hands loaded and whether they're the pinned ones,
+# the cameras (hands/camcheck.py), and ft-hands' own counts: how often each hand was seen, what it
+# lost, how long a step took. Its pinch and grip lines are left out (the counts are in the status).
+section "Hand tracking"
+python3 "$repo/hands/handsmode.py" status 2>&1 || true
+for u in frametop-camd frametop-hands frametop-handview; do
+  echo "$u: $(systemctl --user is-enabled $u 2>/dev/null) / $(systemctl --user is-active $u 2>/dev/null)"
+done
+student=$repo/hands/models/student
+echo "fine-tuned models: $(cat "$student/VERSION" 2>/dev/null || echo 'none in this install (then the stock MediaPipe ones)')"
+[ -d "$student" ] && "$repo/hands/models.sh" check 2>&1 | tail -n 3
+echo "last checked for newer ones: $(date -r "$repo/hands/models/.student-checked" '+%F %T' 2>/dev/null || echo never)"
+grep -E '^\s*(FT_)?HANDS_MODELS(_UPDATE)?=' ~/.config/frametop.conf 2>/dev/null | sed 's/\s*#.*//; s/^/override (ft-hands loads these instead): /'
+python3 "$repo/hands/camcheck.py" 2>&1 | head -n 30
+echo "sides: $(cat "$XDG_RUNTIME_DIR/frametop-hands/sides.json" 2>/dev/null || echo 'no sides.json')"
+for c in 5 6 7; do
+  f=/sys/devices/system/cpu/cpu$c/cpufreq
+  [ -r $f/scaling_cur_freq ] && echo "cpu$c: $(( $(cat $f/scaling_cur_freq) / 1000 )) of $(( $(cat $f/cpuinfo_max_freq) / 1000 )) MHz"
+done
+echo "hottest thermal zone: $(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -n 1 | awk '{printf "%.1f C", $1 / 1000}')"
+noise='container (exec|exec_died|init|start|died)|pinch (left|right)|grip  (left|right)'
+echo "ft-hands' starts, cameras and side decisions (last 20):"
+journalctl --user -u frametop-hands -n 5000 --no-pager -o short 2>/dev/null | grep -a -v -E "$noise" |
+  grep -a -E 'cameras|models|colour|side cameras|hand model|heartbeat|error|failed|Failed|Started|not ' | tail -n 20 | sed 's/^/  /'
+echo "ft-hands' last status (every minute):"
+journalctl --user -u frametop-hands -n 5000 --no-pager -o cat 2>/dev/null | grep -a -v -E "$noise" |
+  awk '/^[0-9.]+s +[0-9.]+ sets\/s/ { block = $0; next } /^ +(sets with|flag buffer|pinches)/ { block = block "\n" $0 }
+       END { print block }' | sed 's/^/  /'
+# ft-camd prints each camera's rate once a minute: its other lines (starts, cameras, errors), then
+# only the last 3 of those.
+section "Camera broker ft-camd (last 20 lines but its rates, then its last 3 rates)"
+journalctl --user -u frametop-camd -n 3000 --no-pager -o short 2>/dev/null | grep -a -v -E "$noise" > /tmp/ft-report-camd.$$
+grep -a -v -E '\]: \[[0-9]+ s\] ' /tmp/ft-report-camd.$$ | tail -n 20
+grep -a -E '\]: \[[0-9]+ s\] ' /tmp/ft-report-camd.$$ | tail -n 3
+rm -f /tmp/ft-report-camd.$$
 for f in /tmp/frametop-session.log /tmp/frametop-screens.log "$XDG_RUNTIME_DIR/frametop-layout.log"; do
   section "$f (last 60 lines)"
   tail -n 60 "$f" 2>/dev/null || echo "missing"
@@ -196,9 +232,9 @@ while time.monotonic() < end:
 PY
 printf '\n===== ft-screens log while watching\n'
 tail -n +"$((start + 1))" /tmp/frametop-screens.log 2>/dev/null | tail -n 300
-for u in frametop-input-relay frametop-pointer; do
+for u in frametop-input-relay frametop-pointer frametop-hands; do
   printf '\n===== %s while watching\n' "$u"
-  journalctl --user -u $u --since "$since" --no-pager -o short 2>/dev/null | tail -n 200
+  journalctl --user -u $u --since "$since" --no-pager -o short 2>/dev/null | grep -a -v 'container exec' | tail -n 200
 done
 EOF
   echo "Recorded."

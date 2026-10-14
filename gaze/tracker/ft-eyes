@@ -30,6 +30,8 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
   calib-fit                    fit the dots, save, and start the shifts and clicks over
   click T YAW PITCH            a click: you were looking there just before T; teaches the
                                shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured)
+  fit                          JSON: the last second of pupil finds per camera, for the fit
+                               coach (gaze/fitcoach.py, Observations.summary); works uncalibrated
 
 Environment, for replays (lab/ft-eyes-e2e): FT_EYES_CAMS, FT_EYES_GAZE, FT_EYES_STATE (the
 state folder), FT_EYES_SOCKET (the socket's name). With FT_EYES_CAMS set, the want file isn't
@@ -67,8 +69,10 @@ for _var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS"):
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import eyes_model  # noqa: E402
 import eyes_pupil  # noqa: E402
+import fitcoach  # noqa: E402
 
 CAMS = os.environ.get("FT_EYES_CAMS", "/dev/shm/frametop-eyes-cams")  # overrides for replays
 OUT = os.environ.get("FT_EYES_GAZE", "/dev/shm/frametop-eyes-gaze")
@@ -173,6 +177,8 @@ class Eye:
         self.frames = self.found = 0
         self.work = 0.0
         self.last_t = None      # the previous frame's time
+        self.obs = None         # the fit coach's window (fitcoach.Observations), shared by both eyes
+        self.fed = None         # (frame time, CLOCK_MONOTONIC_RAW then) of the newest frame fed
 
     def use(self, cal, shift=None):
         self.cal = cal if cal is not None and cal.has("pupil", self.eye) else None
@@ -192,6 +198,9 @@ class Eye:
         t0 = time.perf_counter()
         p = eyes_pupil.find_pupil(img, self.last)
         self.last = p
+        if self.obs is not None:
+            self.obs.add(self.eye, t, p)
+            self.fed = (t, time.clock_gettime(time.CLOCK_MONOTONIC_RAW))
         if p is not None:
             self.found += 1
             self.lost = 0
@@ -226,6 +235,9 @@ class Tracker:
         self.cal = None
         self.dots = []  # calibration dots so far, in ft-eyes-score's click form
         self.calibrating = False
+        self.fit = fitcoach.Observations()
+        for e in self.eyes:
+            e.obs = self.fit
         if CALIBRATION.exists():
             self.cal = eyes_model.Calibration.load(CALIBRATION)
             if not self.cal.spread:
@@ -256,6 +268,14 @@ class Tracker:
             return "fail empty"
         if w[0] == "status":
             return json.dumps(self.status())
+        if w[0] == "fit":
+            # In frame time, which a replay's frames keep from the recording: the newest frame's,
+            # plus how long ago it came (frames stopping, the headset off, empty the window).
+            fed = [e.fed for e in self.eyes if e.fed]
+            if not fed:
+                return json.dumps(self.fit.summary(0.0))
+            t, at = max(fed)
+            return json.dumps(self.fit.summary(t + time.clock_gettime(time.CLOCK_MONOTONIC_RAW) - at))
         if w[0] == "calib-start":
             self.dots, self.calibrating = [], True
             return "ok"

@@ -133,6 +133,9 @@ class AssessTest(unittest.TestCase):
         self.assertEqual(fitcoach.assess(mid, ref(), previous={"state": "adjust"})["state"], "adjust")
         self.assertEqual(fitcoach.assess(mid, ref())["state"], "adjust")
         self.assertEqual(fitcoach.assess(mid, ref(), previous={"state": "lost"})["state"], "adjust")
+        # Adjust without a term past ADJUST_DEG: the biggest one's hint, so there's something to do.
+        self.assertEqual(keys(fitcoach.assess(mid, ref())), ["up"])
+        self.assertEqual(keys(fitcoach.assess(mid, ref(), previous={"state": "ok"})), [])
 
     def test_a_lost_eye_comes_first(self):
         r = fitcoach.assess(summary(right=(0, 12), left=(0, 12), found=(1.0, 0.3)), ref())

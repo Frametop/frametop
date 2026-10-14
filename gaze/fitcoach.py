@@ -357,6 +357,14 @@ def assess(summary, ref, ipd=None, baseline=None, previous=None):
         state = "ok"
     else:
         state = (previous or {}).get("state") if (previous or {}).get("state") in ("ok", "adjust") else "adjust"
+    if state == "adjust" and not hints:
+        # Between OK_DEG and ADJUST_DEG, and not OK before: name the biggest term.
+        names = {"up": ("up", "down"), "left": ("left", "right")}
+        if ipd_advice:
+            names["ipd"] = ("ipd-wider", "ipd-narrower")
+        term = max((k for k in names if k in t), key=lambda k: abs(t[k]), default=None)
+        if term:
+            hints.append(_hint(names[term][0] if t[term] > 0 else names[term][1], t[term]))
     hints.sort(key=lambda h: (h["key"] not in ("ipd-changed", "lost"), -abs(h["amount"])))
     return {"state": state, "eyes": eyes, "terms": {k: round(v, 3) for k, v in terms.items()}, "hints": hints,
             "provisional": bool(ref is None or ref.provisional), "against": "baseline" if centres else "reference",

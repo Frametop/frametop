@@ -32,6 +32,10 @@ directions: look at each one.
           seen) and hints, from the gaze probe's Headset fit (gaze/fitcheck.py), while you
           adjust the headset. A left click or Meta+J runs its guided check (dots, then looks
           down, up, left and right); a right click or Meta+K closes it, as does FIT_TIMEOUT.
+          With our tracker installed, its first hint line is the fit coach's (gaze/fitcoach.py):
+          where the headset sits, from where ft-eyes sees each pupil and glint (ft-eyes "fit",
+          run for the check whichever tracker is in use). It's judged only while you look
+          straight ahead (COACH_CENTRE), since the pupils move with the gaze.
 
 A check asked for while the gaze service idles (quickcal, calibrate, fitcheck) wakes it and
 waits until the tracker sends, at most ft-gazed's WAKE_SETTLE; then it opens, or logs why not.
@@ -83,8 +87,10 @@ import statistics
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
+import fitcoach
 from fitcheck import MIN_REGION, FitCheck, wrap
 from gazecal import DEFAULT_MODEL, EYE_LOST, STATE, steady_samples
 
@@ -121,6 +127,8 @@ FULL_RETRY = 10.0      # seconds before an automatic calibration that failed to 
 FIT_TIMEOUT = 300.0    # seconds the fit check stays up
 FIT_EVERY = 0.5        # seconds between its cards' updates (each is a new picture for the panel)
 FIT_HINT_WIDTH = 95    # characters a hint line holds in the panel
+COACH_CENTRE = 8.0     # degrees: the fit coach judges only while the gaze stays this near straight ahead
+COACH_LEASE = 5.0      # seconds of ft-eyes asked for at a time, while the fit check is up
 
 
 def log(msg):
@@ -541,7 +549,8 @@ class Checks:
         ignore = None if self.svc.one_eye is None else 1 - self.svc.one_eye  # the eye SteamVR ignores
         self.check = {"kind": "fit", "reason": reason, "own": False, "dots": [], "i": 0, "started": now, "shown": now,
                       "run": [], "accept": False, "done_at": None, "tries": 0, "skipped": 0, "captured": 0,
-                      "points": {}, "fit": FitCheck(ignore=ignore), "drawn": {}, "drawn_at": 0.0, "step": None}
+                      "points": {}, "fit": FitCheck(ignore=ignore), "drawn": {}, "drawn_at": 0.0, "step": None,
+                      "coach": self.new_coach()}
         log(f"fit check: {reason}")
         self.to_helper("calpanel 1")
         self.to_panel("show fit")
@@ -549,9 +558,87 @@ class Checks:
         self.to_panel("text Left click or Meta+J: guided check · Right click or Meta+K: done")
         return "ok"
 
+    def new_coach(self):
+        """The fit coach's part of the fit check, or None without our tracker (or its reference)."""
+        if not self.svc.own_installed():
+            return None
+        ref = fitcoach.Reference.load()
+        if ref is None:
+            log(f"fit coach: no reference ({fitcoach.REFERENCE})")
+            return None
+        return {"ref": ref, "baseline": fitcoach.load_baseline(), "reading": None, "summary": None,
+                "looks": deque(), "centred": False, "logged": None}
+
+    def coach_feed(self, s, now):
+        k = self.check["coach"]
+        m1 = s["src"].get("mmap1") or {}
+        if k is None or "hy" not in m1:
+            return
+        k["looks"].append((now, m1["hy"], m1["hp"]))
+        while k["looks"] and k["looks"][0][0] < now - fitcoach.WINDOW:
+            k["looks"].popleft()
+
+    def coach_tick(self, now):
+        """Keeps ft-eyes running and asks it for the last second of finds; judged when centred."""
+        k = self.check["coach"]
+        if k is None:
+            return
+        svc = self.svc
+        svc.eyes_until = max(svc.eyes_until, now + COACH_LEASE)
+        looks = k["looks"]
+        k["centred"] = (len(looks) >= 10 and looks[-1][0] - looks[0][0] > 0.8 * fitcoach.WINDOW
+                        and all(math.hypot(y, p) <= COACH_CENTRE for _, y, p in looks))
+        if self.asking:
+            if now >= self.asking[1]:
+                self.drop_ask()
+            return
+        if not svc.eyes_proc:
+            k["summary"] = None
+            return
+        centred = k["centred"]
+
+        def got(reply):
+            try:
+                summary = {int(cam): v for cam, v in json.loads(reply).items()}
+            except (ValueError, AttributeError):
+                k["summary"] = None
+                return
+            k["summary"] = summary
+            if centred and self.check and self.check.get("coach") is k:
+                k["reading"] = fitcoach.assess(summary, k["ref"], baseline=k["baseline"], previous=k["reading"])
+        self.ask_eyes("fit", 0.4, got)
+
+    def coach_lines(self):
+        """The fit coach's hints for the panel (first), or [] without it."""
+        c = self.check
+        k = c.get("coach")
+        if k is None:
+            return []
+        if k["summary"] is None:
+            return ["Headset position: starting our eye tracker..."]
+        if not k["centred"]:
+            if k["reading"] is None:
+                return ["Headset position: look straight ahead for a moment."]
+            return [f"Headset position (when you last looked straight ahead): {self.coach_words(k['reading'])}"]
+        return [f"Headset position: {self.coach_words(k['reading'])}"] if k["reading"] else []
+
+    @staticmethod
+    def coach_words(r):
+        if r["state"] == "waiting":
+            return "waiting for both eyes."
+        hints = " ".join(h["text"] for h in r["hints"][:2])
+        if r["state"] == "ok":
+            words = "good." + (f" {hints}" if hints else "")
+        else:
+            words = hints or "a little off."
+        if r["provisional"] and r["against"] == "reference":
+            words += " (A first guess: measured on one face so far.)"
+        return words
+
     def fit_tick(self, now):
         c = self.check
         fit = c["fit"]
+        self.coach_tick(now)
         # The guided check: its dots at head-relative directions in the panel (the probe's
         # screen fractions, spread over the middle of the panel), and its looks as the title.
         step = fit.guide_step(now)
@@ -584,6 +671,7 @@ class Checks:
             hints = ["Look around slowly: up, down, left and right. Or left click (Meta+J) for a guided check."]
         else:
             hints = fit.hints()
+        hints = self.coach_lines() + hints
         lines = [line for h in hints for line in wrap(h, FIT_HINT_WIDTH)][:8]
         cmd = "hints " + "|".join(lines)
         if drawn.get("hints") != cmd:
@@ -619,6 +707,7 @@ class Checks:
         c = self.check
         if c and c["kind"] == "fit":
             c["fit"].feed(s, self.sample_at)
+            self.coach_feed(s, self.sample_at)
             return
         if not c or c["done_at"] or self.asking:
             return  # (asking: ft-eyes has this dot's look, or the fit)
@@ -872,6 +961,11 @@ class Checks:
             return
         if why:
             log(f"{self.check['kind']} check closed: {why}")
+        k = self.check.get("coach")
+        if k and k["reading"]:
+            r = k["reading"]
+            log(f"fit coach, last reading: {r['state']} against the {r['against']}, terms "
+                + ", ".join(f"{n} {v:+.1f}" for n, v in r["terms"].items()))
         self.drop_ask()
         self.to_panel("hide")
         self.to_helper("calpanel 0")

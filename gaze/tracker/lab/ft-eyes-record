@@ -12,81 +12,25 @@ clicks are added later, on the Frame: `lab/py lab/ft-eyes-score --clicks NAME`.
 
 Usage: lab/ft-eyes-record NAME [SECONDS]   (host Python is enough: no numpy)
 """
-import mmap
-import os
 import shutil
 import signal
-import struct
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from eyes_lab import new_capture  # noqa: E402
+import eyes_share  # noqa: E402  (gaze/tracker, on the path through eyes_lab)
+from eyes_share import touch_want  # noqa: E402
 
-CAMS = os.environ.get("FT_EYES_CAMS", "/dev/shm/frametop-eyes-cams")
-WANT = "/dev/shm/frametop-eyes-want"
-W, H = 512, 400
 MIN_FREE_GB = 20
 
 
-class Share:
-    """The shared frames. Layout: ft-eyegrab.c, share_head_t/share_entry_t."""
-
-    def __init__(self):
-        fd = os.open(CAMS, os.O_RDONLY)
-        try:
-            self.ino = os.fstat(fd).st_ino
-            self.mm = mmap.mmap(fd, 0, prot=mmap.PROT_READ)
-        finally:
-            os.close(fd)
-        magic, version, w, h, self.slots, self.esize = struct.unpack_from("<6I", self.mm, 0)
-        if magic != 0x31434546 or version != 1 or (w, h) != (W, H):
-            raise RuntimeError(f"{CAMS}: unexpected header")
-
-    def replaced(self):
-        try:
-            return os.stat(CAMS).st_ino != self.ino
-        except OSError:
-            return True
-
-    def count(self, cam):
-        return struct.unpack_from("<Q", self.mm, 24 + 8 * cam)[0]
-
-    def frame(self, cam, n):
-        """(time, slot, bytes) of frame n of a camera, or None if it was overwritten."""
-        off = 64 + (cam * self.slots + n % self.slots) * self.esize
-        for _ in range(3):
-            seq = struct.unpack_from("<Q", self.mm, off)[0]
-            if seq & 1:
-                continue
-            data = self.mm[off + 64:off + 64 + W * H]
-            t, got, _cam, slot = struct.unpack_from("<dQII", self.mm, off + 8)
-            if struct.unpack_from("<Q", self.mm, off)[0] == seq and got == n:
-                return t, slot, data
-        return None
-
-
-def touch_want():
-    """Tell ft-eyegrab someone wants frames (it idles otherwise)."""
-    if "FT_EYES_CAMS" in os.environ:
-        return
-    try:
-        fd = os.open(WANT, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
-        os.utime(fd)
-        os.close(fd)
-    except OSError:
-        pass
-
-
-def open_share(deadline):
-    while time.monotonic() < deadline:
-        touch_want()
-        try:
-            return Share()
-        except (OSError, ValueError, RuntimeError):
-            time.sleep(0.5)
-    sys.exit(f"ft-eyes-record: no {CAMS} (is frametop-eyegrab.service running? gaze/tracker/install.sh)")
+def open_share(timeout):
+    share = eyes_share.open_share(timeout)
+    if share is None:
+        sys.exit(f"ft-eyes-record: no {eyes_share.CAMS} (is frametop-eyegrab.service running? gaze/tracker/install.sh)")
+    return share
 
 
 def main(argv):
@@ -97,7 +41,7 @@ def main(argv):
     stop = []
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.append(1))
-    share = open_share(time.monotonic() + 10)
+    share = open_share(10)
     (out / "clocks.txt").write_text(f"{time.time()} {time.clock_gettime(time.CLOCK_MONOTONIC_RAW)}\n")
     seen = [share.count(0), share.count(1)]
     written = dropped = 0
@@ -134,7 +78,7 @@ def main(argv):
                     break
                 if share.replaced():
                     print("ft-eyes-record: the frame share was restarted; following it", file=sys.stderr)
-                    share = open_share(time.monotonic() + 10)
+                    share = open_share(10)
                     seen = [share.count(0), share.count(1)]
     print(f"ft-eyes-record: {written} frames ({dropped} dropped) in {out}", file=sys.stderr)
 

@@ -33,7 +33,6 @@ import mmap
 import os
 import random
 import re
-import select
 import shutil
 import signal
 import socket
@@ -52,6 +51,16 @@ import camcheck  # noqa: E402  (hands/camcheck.py: are all four mono cameras run
 sys.path.insert(0, HERE)
 import sides  # noqa: E402  (hands/rec/sides.py: which side camera is which)
 import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone recorder's build info)
+sys.path.insert(0, REPO)
+# What the recorders share (recorder/), under the names this module always had: the window,
+# the standalone recorder's spike and the tests use them from here.
+from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402,F401
+                             write_json, clean_text, os_version as _os_version, steamvr_version as _steamvr_version)
+from recorder.units import unit_active, start_unit, stop_unit, pause_units, resume_units, restart_units  # noqa: E402,F401
+from recorder.button import (INPUT_DEVICES, INPUT_EVENT, EV_KEY, EV_REL, REL_X, REL_Y, KEY_SELECT,  # noqa: E402,F401
+                             BUTTON_DEVICE, BUTTON_DOUBLE_S, BUTTON_HOLD_S, BUTTON_BOUNCE_S, parse_input_devices,
+                             find_button, real_mouse, read_input_devices, mouse_connected, button_events,
+                             ButtonGestures, ButtonReader)
 FT_HANDS = os.path.join(HANDS, "build", "ft-hands")
 FT_CAMD = os.path.join(HANDS, "build", "ft-camd")
 PANEL_BIN = os.path.join(HERE, "build", "ft-handpanel")
@@ -124,40 +133,8 @@ NO_HANDS_RETRY_BUTTON = ("Try again: hold both hands up in front of you, about 4
                          "button. To stop instead: hold the button, or Esc or Stop in the Hand recorder window.")
 
 
-def mono_ns():
-    return time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-
-
-def clock_sample():
-    """[CLOCK_MONOTONIC ns, CLOCK_MONOTONIC_RAW - CLOCK_MONOTONIC ns], as ft-hands' raw_minus_mono_ns().
-    sets.bin's capture_ns is on the RAW clock and everything else on MONOTONIC; the two drift
-    apart with NTP's corrections (0.8 s apart and ~10 ppm on 2026-10-03), so take.json keeps
-    samples to turn capture_ns into MONOTONIC: capture_ns - offset, interpolated by time."""
-    a = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-    r = time.clock_gettime_ns(time.CLOCK_MONOTONIC_RAW)
-    b = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-    mid = (a + b) // 2
-    return [mid, r - mid]
-
-
 def run_dir():
     return "/run/user/%d/frametop-hands" % os.getuid()
-
-
-def in_container():
-    return os.path.exists("/run/.containerenv") or os.path.exists("/.dockerenv")
-
-
-def host_command(*cmd):
-    """argv to run a command on the SteamOS host from the dev container (as in
-    display-settings: distrobox-host-exec needs the user's real session bus). It runs from the
-    home folder: host-spawn starts the command in the caller's folder, and a container-only
-    one such as /run/host/tmp doesn't exist on the host (every command then exits 127)."""
-    exe = shutil.which("distrobox-host-exec")
-    if not in_container() or not exe:
-        return list(cmd)
-    return ["env", "-C", os.path.expanduser("~"), "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%d/bus" % os.getuid(),
-            exe] + list(cmd)
 
 
 def fix_hint(frametop):
@@ -165,27 +142,6 @@ def fix_hint(frametop):
     if STANDALONE:
         return STANDALONE.get("reinstall") or "run the Hand Recorder's install command again"
     return frametop
-
-
-def host_path(path):
-    """A host file, from the container (/run/host) or the host itself."""
-    for p in ("/run/host" + path, path):
-        if os.path.exists(p):
-            return p
-    return None
-
-
-def write_json(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=1)
-        f.write("\n")
-    os.replace(tmp, path)
-
-
-def clean_text(s):
-    """Text for a panel command: one line; "|" is the panel's line break, so callers use it."""
-    return " ".join(str(s).replace("\r", " ").replace("\n", " ").split())
 
 
 # ------------------------------------------------------------------------------------------
@@ -362,74 +318,6 @@ def lighting_record(choice, ring):
     picked = choice if choice in ("dim", "room", "daylight") else ""
     return {"chosen": picked or measured, "source": "picked" if picked else "measured",
             "measured": measured, "ambient_ir": ambient_ir(ring), "ring": ring or {}}
-
-
-def unit_active(unit):
-    return subprocess.run(host_command("systemctl", "--user", "-q", "is-active", unit),
-                          capture_output=True, timeout=30).returncode == 0
-
-
-def start_unit(unit, what, argv, log=lambda line: None):
-    """Start argv as a transient user unit that stops with SteamVR. True if it started it,
-    False if it was running already; raises RuntimeError if it couldn't."""
-    if unit_active(unit):
-        log("%s is running already" % unit)
-        return False
-    cmd = host_command("systemd-run", "--user", "--quiet", "--collect", "--unit=" + unit,
-                       "--description=Frametop hand recorder: " + what,
-                       "-p", "PartOf=steamvr.service", "-p", "After=steamvr.service",
-                       "-p", "Restart=on-failure", "-p", "RestartSec=3", "-p", "TimeoutStopSec=5", *argv)
-    for attempt in range(3):   # distrobox-host-exec has failed once, silently, and worked again
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if r.returncode == 0 or unit_active(unit):
-            log("started %s" % unit)
-            return True
-        log("starting %s failed (exit %d): %s" % (unit, r.returncode, (r.stderr or r.stdout).strip()))
-        time.sleep(0.5)
-    raise RuntimeError("couldn't start %s (exit %d): %s" % (unit, r.returncode, (r.stderr or r.stdout).strip()))
-
-
-def stop_unit(unit):
-    subprocess.run(host_command("systemctl", "--user", "stop", unit), capture_output=True, timeout=30)
-
-
-def pause_units(units, path, log=lambda line: None):
-    """Stop those of units that are running, listed in path first so resume_units starts them again
-    even after a crash. Returns the ones stopped."""
-    paused = [u for u in units if unit_active(u)]
-    if not paused:
-        return []
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(paused, f)
-    for unit in paused:
-        stop_unit(unit)
-        log("paused %s for the session" % unit)
-    return paused
-
-
-def resume_units(path, log=lambda line: None):
-    """Start the units pause_units listed in path, and forget them. Returns them."""
-    try:
-        with open(path) as f:
-            units = [u for u in json.load(f) if isinstance(u, str) and u.endswith(".service")]
-    except (OSError, ValueError, TypeError):
-        return []
-    for unit in units:
-        r = subprocess.run(host_command("systemctl", "--user", "start", unit), capture_output=True, text=True, timeout=60)
-        log("started %s again%s" % (unit, "" if r.returncode == 0 else
-                                     " FAILED (exit %d): %s" % (r.returncode, (r.stderr or r.stdout).strip())))
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-    return units
-
-
-def restart_units(units):
-    """Restart those that are running, in order."""
-    for unit in units:
-        subprocess.run(host_command("systemctl", "--user", "try-restart", unit), capture_output=True, timeout=60)
 
 
 def ring_alive(path=None):
@@ -765,236 +653,6 @@ class Recorder:
         return self.proc.returncode
 
 
-# ------------------------------------------------------------------------------------------
-# The headset's button, and mice (/proc/bus/input/devices, linux/input.h)
-#
-# The Frame's click button on its right side is KEY_SELECT on the "gpio-keys" device. It's read
-# as any other reader does, never grabbed (EVIOCGRAB): Frametop's input relay, ft-powerd, SteamVR
-# and gamescope read the same device, and the relay remaps its volume keys.
-
-INPUT_DEVICES = "/proc/bus/input/devices"
-INPUT_EVENT = struct.Struct("@llHHi")   # struct input_event: a timeval, type, code, value (24 bytes on 64-bit)
-EV_KEY, EV_REL = 0x01, 0x02
-REL_X, REL_Y = 0x00, 0x01
-KEY_SELECT = 353
-BUTTON_DEVICE = "gpio-keys"
-BUTTON_DOUBLE_S = 0.45    # a second press this soon after the first one's release: a double press
-BUTTON_HOLD_S = 1.5       # held down this long: a hold
-BUTTON_BOUNCE_S = 0.03    # a release and press closer than this are one press (gpio-keys debounces too)
-
-
-def parse_input_devices(text):
-    """/proc/bus/input/devices as [{"name", "phys", "sysfs", "bus", "handlers": [...], "bits": {"EV": int, ...}}]."""
-    out, dev = [], None
-    for line in text.splitlines() + [""]:
-        line = line.strip()
-        if not line:
-            if dev:
-                out.append(dev)
-            dev = None
-            continue
-        if dev is None:
-            dev = {"name": "", "phys": "", "sysfs": "", "bus": 0, "handlers": [], "bits": {}}
-        tag, _, rest = line.partition(": ")
-        if tag == "I":
-            m = re.search(r"Bus=([0-9a-fA-F]+)", rest)
-            dev["bus"] = int(m.group(1), 16) if m else 0
-        elif tag == "N":
-            dev["name"] = rest.partition("=")[2].strip('"')
-        elif tag == "P":
-            dev["phys"] = rest.partition("=")[2]
-        elif tag == "S":
-            dev["sysfs"] = rest.partition("=")[2]
-        elif tag == "H":
-            dev["handlers"] = rest.partition("=")[2].split()
-        elif tag == "B":
-            key, _, words = rest.partition("=")
-            value = 0
-            for w in words.split():   # the highest long first
-                try:
-                    value = (value << 64) | int(w, 16)
-                except ValueError:
-                    value = 0
-                    break
-            dev["bits"][key] = value
-    return out
-
-
-def _event_node(dev):
-    for h in dev["handlers"]:
-        if re.fullmatch(r"event\d+", h):
-            return "/dev/input/" + h
-    return None
-
-
-def find_button(devices):
-    """The headset button's event device: "gpio-keys" with KEY_SELECT, or None."""
-    for dev in devices:
-        if dev["name"] == BUTTON_DEVICE and dev["bits"].get("KEY", 0) >> KEY_SELECT & 1:
-            return _event_node(dev)
-    return None
-
-
-def real_mouse(dev):
-    """A pointing device a person holds: relative X and Y, not made in software. uinput devices
-    (Frametop's virtual mouse, frame-voice's keyboard) sit under /devices/virtual/input or on the
-    virtual bus (6); Bluetooth mice come through uhid, also under /devices/virtual, so those count."""
-    bits = dev["bits"]
-    if not (bits.get("EV", 0) >> EV_REL & 1) or (bits.get("REL", 0) & 3) != 3:   # REL_X and REL_Y
-        return False
-    sysfs = dev["sysfs"]
-    if dev["bus"] == 0x06 or "virtual" in dev["name"].lower() or "uinput" in dev["phys"]:
-        return False
-    return not sysfs.startswith("/devices/virtual/") or sysfs.startswith("/devices/virtual/misc/uhid/")
-
-
-def read_input_devices(path=INPUT_DEVICES):
-    try:
-        with open(path) as f:
-            return parse_input_devices(f.read())
-    except OSError:
-        return []
-
-
-def mouse_connected(path=INPUT_DEVICES):
-    return any(real_mouse(d) for d in read_input_devices(path))
-
-
-def button_events(data):
-    """KEY_SELECT downs and ups in a run of input_event structs: [(True for a down or False for
-    an up, the event's time in seconds), ...] (autorepeat, value 2, is left out). Returns (them,
-    the bytes left over after the last whole event)."""
-    out, usable = [], len(data) - len(data) % INPUT_EVENT.size
-    for off in range(0, usable, INPUT_EVENT.size):
-        sec, usec, etype, code, value = INPUT_EVENT.unpack_from(data, off)
-        if etype == EV_KEY and code == KEY_SELECT and value in (0, 1):
-            out.append((value == 1, sec + usec / 1e6))
-    return out, data[usable:]
-
-
-class ButtonGestures:
-    """The headset button's downs and ups, with their times, as gestures:
-      "press": one short press, reported once the double-press time has passed without a second;
-      "double": two presses, the second down within double_s of the first one's release, reported
-        at the second down;
-      "hold": held down for hold_s, reported while still down.
-    A release and a press closer than bounce_s are one press. Each call returns the gestures that
-    are due, in order; tick() is called now and then to report the ones that are due by time."""
-
-    def __init__(self, double_s=BUTTON_DOUBLE_S, hold_s=BUTTON_HOLD_S, bounce_s=BUTTON_BOUNCE_S):
-        self.double_s, self.hold_s, self.bounce_s = double_s, hold_s, bounce_s
-        self.down_at = None    # when the button went down, while it's down
-        self.done = False      # the press that's down was already reported (a double, a hold)
-        self.released = None   # when a short press was let go, until it's reported or doubled
-        self._up = None        # the last release, for the bounce: (time, down_at, done, released before it)
-
-    def down(self, t):
-        if self.down_at is not None:   # a missed release
-            return []
-        if self._up and t - self._up[0] < self.bounce_s:   # a bounce: still the same press
-            _, self.down_at, self.done, self.released = self._up
-            self._up = None
-            return []
-        out = self.tick(t)
-        self.down_at, self.done = t, False
-        if self.released is not None:   # within the double-press time (else tick reported it)
-            self.released, self.done = None, True
-            out.append("double")
-        return out
-
-    def up(self, t):
-        if self.down_at is None:
-            return []
-        out = self.tick(t)
-        self._up = (t, self.down_at, self.done, self.released)
-        if not self.done:
-            self.released = t
-        self.down_at, self.done = None, False
-        return out
-
-    def tick(self, t):
-        if self.down_at is not None and not self.done and t - self.down_at >= self.hold_s:
-            self.done = True
-            return ["hold"]
-        if self.released is not None and t - self.released > self.double_s:
-            self.released = None
-            return ["press"]
-        return []
-
-    def waiting(self):
-        """Something is due by time alone: a hold, or a press that may still become a double."""
-        return (self.down_at is not None and not self.done) or self.released is not None
-
-
-class ButtonReader:
-    """Reads the headset button on a thread and calls on_gesture("press" | "double" | "hold")
-    (ButtonGestures). path: an event device or, for testing, a FIFO carrying input_event
-    structs. It's opened read-only and shared; if it can't be opened (no device, no permission,
-    /dev/input not reachable in a container) it says so in the log and tries again now and then."""
-
-    def __init__(self, path, on_gesture, log=None, double_s=BUTTON_DOUBLE_S, hold_s=BUTTON_HOLD_S,
-                 bounce_s=BUTTON_BOUNCE_S):
-        self.path, self.on_gesture, self.log = path, on_gesture, log or (lambda s: None)
-        self.gestures = ButtonGestures(double_s, hold_s, bounce_s)
-        self.ok = False      # opened at least once
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="handrec-button", daemon=True)
-
-    def start(self):
-        self._thread.start()
-        return self
-
-    def stop(self):
-        self._stop.set()
-        self._thread.join(2)
-
-    def _report(self, gestures):
-        for g in gestures:
-            self.on_gesture(g)
-
-    def _run(self):
-        failed = False
-        while not self._stop.is_set():
-            try:
-                fd = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-            except OSError as e:
-                if not failed:
-                    self.log("headset button: can't open %s (%s): the window's keys still work" % (self.path, e.strerror))
-                failed = True
-                self._stop.wait(5)
-                continue
-            if failed or not self.ok:
-                self.log("headset button: reading %s" % self.path)
-            self.ok, failed = True, False
-            rest = b""
-            try:
-                while not self._stop.is_set():
-                    r, _, _ = select.select([fd], [], [], 0.02 if self.gestures.waiting() else 0.2)
-                    if not r:
-                        self._report(self.gestures.tick(time.monotonic()))
-                        continue
-                    try:
-                        data = os.read(fd, INPUT_EVENT.size * 64)
-                    except BlockingIOError:
-                        continue
-                    if not data:   # a FIFO's writer left: open it again
-                        self._stop.wait(0.2)
-                        break
-                    events, rest = button_events(rest + data)
-                    # The kernel's times (the realtime clock) keep the gaps between events that
-                    # came in one read; the last one is taken as now.
-                    now = time.monotonic()
-                    for is_down, t in events:
-                        at = now - min(max(events[-1][1] - t, 0.0), 2.0)
-                        self._report(self.gestures.down(at) if is_down else self.gestures.up(at))
-            except OSError as e:   # the device went away
-                self.log("headset button: %s: %s" % (self.path, e.strerror))
-                self._stop.wait(2)
-            finally:
-                os.close(fd)
-
-
-# ------------------------------------------------------------------------------------------
 # The pose pictures (poses/poses.json: {"<pose>": {"file": "<name>.png", "two_hands", "caption"}})
 
 def load_poses(poses_dir):
@@ -1323,33 +981,6 @@ class _CamerasLost(_Fail):
     """The recording stopped by itself or has no side cameras: usually ft-camd restarting after
     XRService moved the cameras (camd.c, SILENT_S). Step mode waits for them and does the step
     again (Session._cameras_back); anywhere else it fails the session like any _Fail."""
-
-
-def _os_version():
-    path = "/run/host/etc/os-release" if in_container() else "/etc/os-release"
-    try:
-        with open(path) as f:
-            for line in f:
-                if line.startswith("VERSION_ID="):
-                    return line.split("=", 1)[1].strip().strip('"')
-    except OSError:
-        pass
-    return ""
-
-
-def _steamvr_version():
-    for db in ("/usr/lib/holo/pacmandb", "/var/lib/pacman"):   # SteamOS keeps it in the image
-        found = sorted(glob.glob(("/run/host" if in_container() else "") + db + "/local/deckard-steamvr-rel-*"))
-        if found:
-            return os.path.basename(found[-1])[len("deckard-steamvr-rel-"):]
-    p = host_path("/opt/steamvr/bin/version.txt")
-    if p:
-        try:
-            with open(p) as f:
-                return "build " + f.read().strip()
-        except OSError:
-            pass
-    return ""
 
 
 _camd_restarted = set()   # ft-camd pids camera_check(repair=True) has restarted: once each

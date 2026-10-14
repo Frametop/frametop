@@ -2,6 +2,12 @@
 """Frametop Hand Recorder: record your hands for the open hand dataset (hands/rec/DESIGN.md).
 
 A Kirigami (QML) app with a Python backend. It runs in the dev container:
+  - Bounties (where it opens): the bounty board (recorder/bounties.py, hands/rec/bounties.json):
+    short rounds on windows in the headset, what the hand tracker needs most, the most wanted
+    first, with how often you've done each. Get the newest board fetches the dataset's (hub.py
+    board). Picking one goes to Welcome if the consent isn't agreed to yet, then Before you start;
+    a full session or a quick round can be picked there too. After a round, Export and upload
+    exports it and goes on to Upload by itself.
   - Welcome: the consent text (CONSENT.md), shown the first time and again when its version
     changes. Agreeing writes profile.json with a random contributor id.
   - Before you start: the checklist (objects, controller straps, lighting, sleeves, privacy,
@@ -708,7 +714,7 @@ class Backend(RecorderBackend):
 def main():
     ap = argparse.ArgumentParser(description="Frametop Hand Recorder")
     ap.add_argument("--base", default=takes.DEFAULT_BASE, help="where profile.json, sessions/ and exports/ go")
-    ap.add_argument("--page", default="", help="open on this page: welcome, checklist, session, review, export, upload")
+    ap.add_argument("--page", default="", help="open on this page: bounties (the default), welcome, checklist, session, review, export, upload")
     ap.add_argument("--dry-run", action="store_true",
                     help="test: sessions start no processes and print the panel's commands")
     ap.add_argument("--speed", type=float, default=1.0, help="test, with --dry-run: run sessions this much faster")

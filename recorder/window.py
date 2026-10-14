@@ -107,6 +107,7 @@ class RecorderBackend(QObject):
     statusChanged = Signal()
     sessionsChanged = Signal()
     exportChanged = Signal()
+    exportDone = Signal(str, bool)   # session, exported (False: failed or cancelled), after the list is fresh
     message = Signal(str, bool)  # text, is error
     loginChanged = Signal()
     uploadChanged = Signal()
@@ -437,6 +438,7 @@ class RecorderBackend(QObject):
             self.message.emit("Export ready", False)
         self.exportChanged.emit()
         self.refreshSessions()
+        self.exportDone.emit(self._export_session, not error)
 
     @Slot(str)
     def deleteExport(self, session):

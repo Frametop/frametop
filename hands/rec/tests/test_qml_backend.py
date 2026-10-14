@@ -67,6 +67,23 @@ class QmlBackendTest(unittest.TestCase):
         self.assertTrue(read)
         self.assertEqual(sorted(read - self.props - self.slots), [], "read in main.qml but not on Backend")
 
+    def test_handlers_are_signals(self):
+        """Each function onName(...) in a Connections on backend has a signal name (a renamed
+        signal leaves its handler silently unused: Export and upload would stop at Export)."""
+        meta = self.meta
+        signals = {bytes(meta.method(i).name()).decode() for i in range(meta.methodCount())
+                   if meta.method(i).methodType() == meta.method(i).MethodType.Signal}
+        handlers = set()
+        for m in re.finditer(r"Connections\s*\{\s*target:\s*backend\b", self.qml):
+            depth, k = 1, m.end()
+            while depth and k < len(self.qml):
+                depth += {"{": 1, "}": -1}.get(self.qml[k], 0)
+                k += 1
+            block = self.qml[m.end():k]
+            handlers |= {h[0].lower() + h[1:] for h in re.findall(r"function on([A-Z]\w*)\s*\(", block)}
+        self.assertIn("exportDone", handlers)
+        self.assertEqual(sorted(handlers - signals), [], "handled in main.qml but not a Backend signal")
+
 
 
 class GuidanceTest(unittest.TestCase):

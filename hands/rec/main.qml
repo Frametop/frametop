@@ -13,6 +13,13 @@ Kirigami.ApplicationWindow {
 
     // The session chosen on the Export page, for the Upload page.
     property string chosenSession: ""
+    // The round picked on the Bounties page: a bounty's id, or "" for a full session or (quick)
+    // a quick round. roundPicked: something was picked (else Welcome's Continue goes to Bounties).
+    property string chosenBounty: ""
+    property bool chosenQuick: false
+    property bool roundPicked: false
+    // "Export and upload" on the Session page: once the export is done, the Upload page.
+    property bool sendAfterExport: false
 
     globalDrawer: Kirigami.GlobalDrawer {
         isMenu: false
@@ -20,6 +27,7 @@ Kirigami.ApplicationWindow {
         collapsible: true
         collapsed: root.width < Kirigami.Units.gridUnit * 34
         actions: [
+            Kirigami.Action { text: "Bounties"; icon.name: "view-list-details"; onTriggered: root.show(bountiesPage) },
             Kirigami.Action { text: "Welcome"; icon.name: "help-about"; onTriggered: root.show(welcomePage) },
             Kirigami.Action {
                 text: "Before you start"; icon.name: "view-task"; enabled: !backend.needsConsent
@@ -82,16 +90,32 @@ Kirigami.ApplicationWindow {
         pageStack.push(page)
     }
 
-    // --page welcome|checklist|session|review|export|upload opens the app on that page; the
-    // Welcome page comes first until the consent is agreed to.
-    pageStack.initialPage: backend.needsConsent && startPage !== "review" ? welcomePage
-        : (({ welcome: welcomePage, checklist: checklistPage, session: sessionPage, review: reviewPage,
-              export: exportPage, upload: uploadPage })[startPage] || checklistPage)
+    // A round picked on the Bounties page: the consent first if it isn't agreed to yet, then
+    // Before you start (the camera check, the privacy checks), then Start.
+    function pickRound(bounty, quick) {
+        chosenBounty = bounty
+        chosenQuick = quick
+        roundPicked = true
+        show(backend.needsConsent ? welcomePage : checklistPage)
+    }
+
+    // --page bounties|welcome|checklist|session|review|export|upload opens the app on that page;
+    // it opens on Bounties. Pages that record or send need the consent: they lead to Welcome.
+    pageStack.initialPage: (({ welcome: welcomePage, checklist: backend.needsConsent ? welcomePage : checklistPage,
+                              session: sessionPage, review: reviewPage, export: exportPage,
+                              upload: uploadPage })[startPage] || bountiesPage)
 
     Connections {
         target: backend
         function onMessage(text, isError) {
             root.showPassiveNotification(text, isError ? "long" : "short")
+        }
+        function onExportDone(session, ok) {
+            if (root.sendAfterExport && session === root.chosenSession) {
+                root.sendAfterExport = false
+                if (ok)
+                    root.show(uploadPage)
+            }
         }
     }
 
@@ -156,6 +180,147 @@ Kirigami.ApplicationWindow {
             close.accepted = false
             confirm.ask("Cancel the upload?", "An upload is running. Closing cancels it; you can start it again later.",
                         () => { root.quitting = true; Qt.quit() })
+        }
+    }
+
+    // ---------------------------------------------------------------- Bounties
+    Component {
+        id: bountiesPage
+        Kirigami.ScrollablePage {
+            id: board
+            title: "Bounties"
+            actions: [
+                Kirigami.Action {
+                    text: "Get the newest board"
+                    icon.name: "view-refresh"
+                    enabled: backend.boardFetch.state !== "fetching" && !backend.hubDryRun
+                    onTriggered: backend.refreshBoard()
+                }
+            ]
+
+            header: ColumnLayout {
+                spacing: 0
+                DraftBanner { Layout.fillWidth: true }
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: backend.runnerError !== ""
+                    position: Kirigami.InlineMessage.Position.Header
+                    type: Kirigami.MessageType.Error
+                    text: backend.runnerError
+                }
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: backend.sessionActive
+                    position: Kirigami.InlineMessage.Position.Header
+                    type: Kirigami.MessageType.Information
+                    text: "A session is running."
+                    actions: [ Kirigami.Action { text: "Go to it"; onTriggered: root.show(sessionPage) } ]
+                }
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: backend.boardFetch.state === "error" || backend.boardFetch.state === "ok"
+                    position: Kirigami.InlineMessage.Position.Header
+                    type: backend.boardFetch.state === "ok" ? Kirigami.MessageType.Positive : Kirigami.MessageType.Information
+                    text: backend.boardFetch.text || ""
+                }
+            }
+
+            ListView {
+                model: backend.bounties
+                spacing: Kirigami.Units.smallSpacing
+
+                header: Controls.Label {
+                    width: ListView.view.width
+                    padding: Kirigami.Units.largeSpacing
+                    wrapMode: Text.Wrap
+                    text: "Each bounty is a short round, about 4 minutes, of what the hand tracker needs most. "
+                          + "Windows appear in front of you in the headset and you tap, pinch and grab them as you "
+                          + "would real ones, while the cameras record your hands. The most wanted come first, and "
+                          + "you can do one again. Afterwards you look over the recording and send it to the hand "
+                          + "dataset." + (backend.boardUpdated ? " (Board of " + backend.boardUpdated + ".)" : "")
+                }
+
+                Kirigami.PlaceholderMessage {
+                    anchors.centerIn: parent
+                    width: parent.width - Kirigami.Units.gridUnit * 4
+                    visible: parent.count === 0
+                    text: "No bounties"
+                    explanation: "The board that came with the recorder is missing (hands/rec/bounties.json)."
+                }
+
+                delegate: Controls.ItemDelegate {
+                    id: bountyRow
+                    required property var modelData
+                    width: ListView.view.width
+                    enabled: modelData.available === ""
+                    onClicked: root.pickRound(modelData.id, false)
+
+                    contentItem: RowLayout {
+                        spacing: Kirigami.Units.largeSpacing
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                font.bold: true
+                                text: bountyRow.modelData.title
+                                      + (bountyRow.modelData.priority === "high" ? " · wanted most"
+                                         : bountyRow.modelData.priority === "low" ? " · low priority" : "")
+                                      + (bountyRow.modelData.done === 1 ? " · done"
+                                         : bountyRow.modelData.done > 1 ? " · done " + bountyRow.modelData.done + " times" : "")
+                            }
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: bountyRow.modelData.blurb
+                            }
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                opacity: 0.7
+                                font: Kirigami.Theme.smallFont
+                                text: [bountyRow.modelData.minutesText,
+                                       bountyRow.modelData.lastText ? "last done " + bountyRow.modelData.lastText : "",
+                                       bountyRow.modelData.available].filter(s => s !== "").join(" · ")
+                            }
+                        }
+                        Controls.Button {
+                            text: bountyRow.modelData.done > 0 ? "Record again" : "Record"
+                            icon.name: "media-record"
+                            enabled: bountyRow.modelData.available === "" && !backend.sessionActive
+                            onClicked: bountyRow.clicked()
+                        }
+                    }
+                }
+
+                footer: ColumnLayout {
+                    width: ListView.view.width
+                    spacing: Kirigami.Units.smallSpacing
+                    Kirigami.Separator { Layout.fillWidth: true; Layout.topMargin: Kirigami.Units.largeSpacing }
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        Layout.margins: Kirigami.Units.largeSpacing
+                        wrapMode: Text.Wrap
+                        text: "Or a longer round of held poses, gestures and the things on your desk: the full "
+                              + "session (about 15 minutes), or a quick round (about 3) in a different light once "
+                              + "you've done a full one."
+                    }
+                    RowLayout {
+                        Layout.leftMargin: Kirigami.Units.largeSpacing
+                        Controls.Button {
+                            text: "Full session"
+                            enabled: !backend.sessionActive
+                            onClicked: root.pickRound("", false)
+                        }
+                        Controls.Button {
+                            text: "Quick round"
+                            enabled: !backend.sessionActive
+                            onClicked: root.pickRound("", true)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -230,14 +395,14 @@ Kirigami.ApplicationWindow {
                     onClicked: {
                         backend.acceptConsent(adult.checked, region.checked, agree.checked, handed.currentValue)
                         if (!backend.needsConsent)
-                            root.show(checklistPage)
+                            root.show(root.roundPicked ? checklistPage : bountiesPage)
                     }
                 }
                 Controls.Button {
                     visible: !backend.needsConsent
                     text: "Continue"
                     icon.name: "go-next"
-                    onClicked: root.show(checklistPage)
+                    onClicked: root.show(root.roundPicked ? checklistPage : bountiesPage)
                 }
             }
         }
@@ -250,22 +415,29 @@ Kirigami.ApplicationWindow {
             id: checklist
             title: "Before you start"
             readonly property bool privacyOk: privacy1.checked && privacy2.checked && privacy3.checked
-            // The round: a bounty's id, or "" for a full session or a quick round.
-            property string bountyId: ""
+            // The round: a bounty's id (picked on the Bounties page), or "" for a full session or a quick round.
+            readonly property string bountyId: root.chosenBounty
+            readonly property bool isBounty: bountyId !== ""
+            readonly property var bounty: {
+                for (const b of backend.bounties)
+                    if (b.id === bountyId)
+                        return b
+                return null
+            }
             readonly property bool ready: privacyOk && backend.diskOk
                                           && backend.runnerError === "" && !backend.sessionActive
 
             function answers() {
                 const objects = []
-                for (let i = 0; i < objectBoxes.count; ++i) {
+                for (let i = 0; i < objectBoxes.count && !isBounty; ++i) {
                     const box = objectBoxes.itemAt(i)
                     if (box.checked)
                         objects.push(box.value)
                 }
                 return {
                     objects: objects,
-                    own_objects: ownObjects.text.split(",").map(s => s.trim()).filter(s => s !== ""),
-                    controllers: straps.checked ? "straps" : "none",
+                    own_objects: isBounty ? [] : ownObjects.text.split(",").map(s => s.trim()).filter(s => s !== ""),
+                    controllers: straps.checked && !isBounty ? "straps" : "none",
                     sleeves: sleeves.currentValue,
                     rings: rings.checked,
                     watch: watch.checked,
@@ -300,8 +472,60 @@ Kirigami.ApplicationWindow {
             Component.onCompleted: backend.checkCameras()
 
             Kirigami.FormLayout {
-                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Within reach" }
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Round" }
+                ColumnLayout {
+                    Kirigami.FormData.label: checklist.isBounty ? "Bounty:" : "Round:"
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        visible: checklist.isBounty
+                        wrapMode: Text.Wrap
+                        font.bold: true
+                        text: checklist.bounty ? checklist.bounty.title : checklist.bountyId
+                    }
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        visible: checklist.isBounty
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        text: checklist.bounty ? checklist.bounty.blurb : "This recorder doesn't have that bounty."
+                    }
+                    Controls.RadioButton {
+                        id: fullRound
+                        visible: !checklist.isBounty
+                        text: "Full session"
+                        checked: !(root.roundPicked ? root.chosenQuick : backend.hasFullSession)
+                    }
+                    Controls.RadioButton {
+                        id: quickRound
+                        visible: !checklist.isBounty
+                        text: "Quick round (about 3 min): hand size, poses, the dot, no hands"
+                        checked: root.roundPicked ? root.chosenQuick : backend.hasFullSession
+                    }
+                    Controls.Button {
+                        text: checklist.isBounty ? "Pick another…" : "Pick a bounty instead…"
+                        icon.name: "view-list-details"
+                        flat: true
+                        enabled: !backend.sessionActive
+                        onClicked: root.show(bountiesPage)
+                    }
+                }
+                Kirigami.InlineMessage {
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    Layout.fillWidth: true
+                    visible: backend.hasFullSession && !checklist.isBounty
+                    Layout.preferredHeight: visible ? implicitHeight : 0
+                    type: Kirigami.MessageType.Information
+                    text: "You've recorded a full session already. A quick round in a different light (dim, "
+                          + "daylight), or a bounty, adds the most now."
+                }
+
+                Kirigami.Separator {
+                    visible: !checklist.isBounty
+                    Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Within reach"
+                }
                 Controls.Label {
+                    visible: !checklist.isBounty
                     Kirigami.FormData.label: ""
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     wrapMode: Text.Wrap
@@ -315,6 +539,7 @@ Kirigami.ApplicationWindow {
                         required property var modelData
                         required property int index
                         readonly property string value: modelData.value
+                        visible: !checklist.isBounty
                         Kirigami.FormData.label: index === 0 ? "Objects:" : ""
                         text: modelData.text
                         checked: true
@@ -322,18 +547,24 @@ Kirigami.ApplicationWindow {
                 }
                 Controls.TextField {
                     id: ownObjects
+                    visible: !checklist.isBounty
                     Kirigami.FormData.label: "Your own:"
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 20
                     placeholderText: "other things you use, separated by commas"
                 }
 
-                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Controllers" }
+                Kirigami.Separator {
+                    visible: !checklist.isBounty
+                    Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Controllers"
+                }
                 ColumnLayout {
+                    visible: !checklist.isBounty
                     Kirigami.FormData.label: "Ergonomic Kit straps:"
                     Controls.RadioButton { id: straps; text: "Yes, I have the controllers with the straps" }
                     Controls.RadioButton { text: "No"; checked: true }
                 }
                 Controls.Label {
+                    visible: !checklist.isBounty
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     wrapMode: Text.Wrap
                     opacity: 0.7
@@ -506,88 +737,6 @@ Kirigami.ApplicationWindow {
                           + "pauses, R records the last step again, S skips a section and Esc stops.\n\n"
                           + "Nothing leaves the headset. Afterwards you watch the takes in Review, delete anything "
                           + "you don't want to share, and only then export."
-                }
-                Controls.ButtonGroup { id: roundGroup }
-                ColumnLayout {
-                    Kirigami.FormData.label: "Round:"
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                    Controls.RadioButton {
-                        id: fullRound
-                        Controls.ButtonGroup.group: roundGroup
-                        text: "Full session"
-                        checked: !backend.hasFullSession
-                        onToggled: if (checked) checklist.bountyId = ""
-                    }
-                    Controls.RadioButton {
-                        id: quickRound
-                        Controls.ButtonGroup.group: roundGroup
-                        text: "Quick round (about 3 min): hand size, poses, the dot, no hands"
-                        checked: backend.hasFullSession
-                        onToggled: if (checked) checklist.bountyId = ""
-                    }
-                    Controls.Label {
-                        Layout.fillWidth: true
-                        Layout.topMargin: Kirigami.Units.smallSpacing
-                        visible: backend.bounties.length > 0
-                        wrapMode: Text.Wrap
-                        text: "Bounties: short rounds of what the hand tracker needs most, on windows in front of "
-                              + "you. You can do one again." + (backend.boardUpdated ? " (Board of "
-                              + backend.boardUpdated + ".)" : "")
-                    }
-                    Repeater {
-                        model: backend.bounties
-                        ColumnLayout {
-                            id: bountyItem
-                            required property var modelData
-                            Layout.fillWidth: true
-                            spacing: 0
-                            Controls.RadioButton {
-                                Controls.ButtonGroup.group: roundGroup
-                                enabled: bountyItem.modelData.available === ""
-                                checked: checklist.bountyId === bountyItem.modelData.id
-                                text: bountyItem.modelData.title
-                                      + (bountyItem.modelData.priority === "high" ? " (wanted most)" : "")
-                                      + (bountyItem.modelData.done === 1 ? ", done"
-                                         : bountyItem.modelData.done > 1 ? ", done " + bountyItem.modelData.done + " times" : "")
-                                onToggled: if (checked) checklist.bountyId = bountyItem.modelData.id
-                            }
-                            Controls.Label {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: Kirigami.Units.gridUnit * 1.5
-                                wrapMode: Text.Wrap
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                                text: [bountyItem.modelData.blurb, bountyItem.modelData.minutesText,
-                                       bountyItem.modelData.lastText ? "last done " + bountyItem.modelData.lastText : "",
-                                       bountyItem.modelData.available].filter(s => s !== "").join(" · ")
-                            }
-                        }
-                    }
-                    RowLayout {
-                        visible: !backend.hubDryRun
-                        Controls.Button {
-                            text: "Get the newest board"
-                            icon.name: "view-refresh"
-                            enabled: backend.boardFetch.state !== "fetching"
-                            onClicked: backend.refreshBoard()
-                        }
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            opacity: 0.7
-                            font: Kirigami.Theme.smallFont
-                            text: backend.boardFetch.text || ""
-                        }
-                    }
-                }
-                Kirigami.InlineMessage {
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                    Layout.fillWidth: true
-                    visible: backend.hasFullSession && checklist.bountyId === ""
-                    Layout.preferredHeight: visible ? implicitHeight : 0
-                    type: Kirigami.MessageType.Information
-                    text: "You've recorded a full session already. A quick round in a different light (dim, "
-                          + "daylight) adds the most now."
                 }
                 Controls.CheckBox {
                     id: autoAdvance
@@ -877,10 +1026,10 @@ Kirigami.ApplicationWindow {
                 visible: sessionView.state === ""
                 icon.name: "media-record"
                 text: "No session yet"
-                explanation: "Go through Before you start, then press Start there."
+                explanation: "Pick a bounty, go through Before you start, then press Start there."
                 helpfulAction: Kirigami.Action {
-                    text: "Before you start"; icon.name: "view-task"
-                    onTriggered: root.show(checklistPage)
+                    text: "Bounties"; icon.name: "view-list-details"
+                    onTriggered: root.show(bountiesPage)
                 }
             }
 
@@ -1081,9 +1230,9 @@ Kirigami.ApplicationWindow {
                     Controls.Button {
                         visible: !backend.sessionActive
                         focusPolicy: Qt.NoFocus
-                        text: "New session…"
+                        text: "Another round…"
                         icon.name: "media-record"
-                        onClicked: root.show(checklistPage)
+                        onClicked: root.show(bountiesPage)
                     }
                     Controls.Button {
                         visible: backend.sessionActive
@@ -1113,6 +1262,18 @@ Kirigami.ApplicationWindow {
                         text: "Stop"
                         icon.name: "media-playback-stop"
                         onClicked: backend.stopSession()
+                    }
+                    Controls.Button {
+                        visible: !backend.sessionActive && backend.sessionId !== "" && !backend.exporting
+                        focusPolicy: Qt.NoFocus
+                        text: "Export and upload"
+                        icon.name: "cloud-upload"
+                        onClicked: {
+                            root.chosenSession = backend.sessionId
+                            root.sendAfterExport = true
+                            backend.exportSession(backend.sessionId, false)
+                            root.show(exportPage)
+                        }
                     }
                     Controls.Button {
                         visible: !backend.sessionActive && backend.sessionId !== ""
@@ -1509,6 +1670,13 @@ Kirigami.ApplicationWindow {
                 DraftBanner { Layout.fillWidth: true }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
+                    visible: root.sendAfterExport
+                    position: Kirigami.InlineMessage.Position.Header
+                    type: Kirigami.MessageType.Information
+                    text: "Exporting your session: the Upload page follows by itself once it's done."
+                }
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
                     visible: exportView.worn && backend.exporting
                     position: Kirigami.InlineMessage.Position.Header
                     type: Kirigami.MessageType.Information
@@ -1570,7 +1738,7 @@ Kirigami.ApplicationWindow {
                         visible: backend.exporting
                         text: "Cancel"
                         icon.name: "dialog-cancel"
-                        onClicked: backend.cancelExport()
+                        onClicked: { root.sendAfterExport = false; backend.cancelExport() }
                     }
                 }
                 // Drawn here: the desktop style's ProgressBar paints nothing without a QApplication.

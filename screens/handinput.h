@@ -87,6 +87,11 @@ struct Panel {
     int cropX = 0, cropY = 0, cropW = 0, cropH = 0, titleH = 0;
     bool glows = false;       // its cutout buffer can show glows (screens, not floating windows)
     bool held = false;        // a laser is carrying it: hands don't grab it
+    // One of SteamVR's own panels (vr.cpp's SteamPanels: the dashboard, the Steam menu, Steam's keyboard,
+    // other apps' overlays), clicked and carried through the pointer helper's laser: pokes, pinch clicks,
+    // the border's move and a corner's resize, and the glows. No fist grabs, two-hand stretch, throws,
+    // flicks, pushes, two-finger scroll or let-go rewind (the laser can't do them).
+    bool foreign = false;
     std::vector<Spot> controls;
     std::vector<Popup> popups;
 };
@@ -670,6 +675,7 @@ public:
     // claims, its pinches and grips are ours: within the zone itself (or pressing, grabbing, or one
     // waiting on "grab that"), so a pinch in the margin goes to the ray or the gaze.
     bool near(int side) const { return side_[side].state != State::Idle && side_[side].state != State::Off; }
+    int nearPanel(int side) const { return near(side) ? side_[side].panel : -1; }
     bool claims(int side) const {
         const Side &sd = side_[side];
         return sd.state == State::Press || sd.state == State::Grab ||
@@ -964,6 +970,7 @@ private:
     std::map<int, double> throwAims_;
     Guide guides_[2];
     std::set<int> nearPanels_;
+    std::set<int> foreign_;   // this tick's SteamVR panels (Panel::foreign)
     uint64_t frame_ = 0;
     bool newFrame_ = false;
     fhsmooth::Point3 head_;   // the head carried panels face, smoothed

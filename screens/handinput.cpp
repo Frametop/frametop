@@ -603,8 +603,9 @@ void HandInput::EndGrab(int s, bool lost) {
     if (sd.state != State::Grab) return;
     Emit(Event::GrabEnd, s, sd.panel, 0, 0, lost);
     // let go fast, outward: thrown on along that line (Params::cardThrow)
-    const bool carried = sd.zone == Zone::Card || (sd.zone == Zone::Fist && !p_.fistResizeOnly) || sd.zone == Zone::Edge ||
-                         sd.zone == Zone::Bar || sd.zone == Zone::Title;
+    // (not SteamVR's panels: the laser lets go where it is)
+    const bool carried = (sd.zone == Zone::Card || (sd.zone == Zone::Fist && !p_.fistResizeOnly) || sd.zone == Zone::Edge ||
+                          sd.zone == Zone::Bar || sd.zone == Zone::Title) && !foreign_.count(sd.panel);
     const int throwsBefore = stats.throws;
     if (!lost && p_.cardThrow && carried && stretch_.panel != sd.panel && haveHead_ && !sd.track.empty()) {
         // the fastest stretch outward in the last throwPeakMs before the fingers opened (a hand slows as
@@ -743,6 +744,9 @@ void HandInput::Update(const Input &in, const std::vector<Panel> &panels) {
     g_now = in.nowNs;
     if (in.haveHead) lastHead_ = in.head, haveHead_ = true;
     events_.clear(), carries_.clear(), glows_.clear(), hovered_.clear(), corners_.clear(), nearPanels_.clear(), logs_.clear();
+    foreign_.clear();
+    for (const Panel &P : panels)
+        if (P.foreign) foreign_.insert(P.index);
     const handcut::Hands &H = *in.hands;
     newFrame_ = H.frame() != frame_;
     frame_ = H.frame();
@@ -903,7 +907,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     const double ext = Extension(*h);
     const bool extended = ext >= p_.extended;
     // two fingers on the content: a swipe scrolls, a lift clicks (Params::twoFingerScroll)
-    if (p_.twoFingerScroll && sd.state == State::Hover && !in.typing[s]) {
+    if (p_.twoFingerScroll && sd.state == State::Hover && !in.typing[s] && !P->foreign) {
         const Hit m = Locate(*P, h->p[12]);
         const double together = std::hypot(h->p[8][0] - h->p[12][0], h->p[8][1] - h->p[12][1], h->p[8][2] - h->p[12][2]);
         // (both tips at about one depth: a flat hand's longer middle finger, 1 cm and more deeper, isn't two)
@@ -1320,7 +1324,8 @@ bool HandInput::IsFist(const Hand &h) const { return Extension(h) <= p_.fistInde
 
 bool HandInput::JoinsOther(int s) const {
     const Side &sd = side_[s], &o = side_[1 - s];
-    return p_.joinFront > 0 && sd.state == State::Hover && sd.inZone && o.state == State::Grab && o.panel == sd.panel;
+    return p_.joinFront > 0 && sd.state == State::Hover && sd.inZone && o.state == State::Grab && o.panel == sd.panel &&
+           !foreign_.count(sd.panel);   // (SteamVR's panels: one laser, one hand)
 }
 
 void HandInput::Join(int s, const Input &in, const std::vector<Panel> &panels, bool byGrip) {
@@ -1922,7 +1927,7 @@ void HandInput::FistPair(const Input &in, const std::vector<Panel> &panels) {
     const Panel *best = nullptr;
     double bestD = 1e9;
     for (const Panel &P : panels) {
-        if (P.held) continue;
+        if (P.held || P.foreign) continue;
         double sum = 0;
         bool ok = true;
         for (int s = 0; s < 2 && ok; ++s) {
@@ -1960,7 +1965,7 @@ void HandInput::FistBegin(int s, const Input &in, const std::vector<Panel> &pane
     const handcut::Gesture &gr = byPinch ? in.hands->pinch(s) : in.hands->grip(s);
     if (!p_.fistGrab || sd.state != State::Hover || !sd.inZone || in.typing[s]) return;
     const Panel *P = Find(panels, sd.panel);
-    if (!P || P->held) return;
+    if (!P || P->held || P->foreign) return;
     const Hand *h = HandFor(s, in.hands->seen(), gr.handId ? gr.handId : sd.handId);
     if (!h) return;
     // the hand at the panel: its palm, knuckles or curled middle finger within the near zone, over it
@@ -2337,7 +2342,7 @@ void HandInput::Push(int s, const Input &in, const std::vector<Panel> &panels) {
         return -(q.normal[0] * n[0] + q.normal[1] * n[1] + q.normal[2] * n[2]);
     };
     for (const Panel &P : panels) {
-        if (P.held || heldByHand(P.index)) continue;
+        if (P.held || P.foreign || heldByHand(P.index)) continue;
         const Hit t = Locate(P, now.palm);
         if (t.d > p_.pushDepth || t.d < -0.30 || !InFootprint(P, t, 0.02) || facing(P, now, t) < cosFacing) continue;
         // where it came from: the farthest out the palm was in the last second, at or in front of the
@@ -2457,7 +2462,7 @@ void HandInput::Flick(int s, const Input &in, const std::vector<Panel> &panels, 
         if (std::sqrt(Dot(step, step)) / ((q.t - before.t) / 1e9) > p_.flickStartSpeed) continue;
         double key = 1e9;
         for (const Panel &c : panels) {
-            if (c.held || heldByHand(c.index)) continue;
+            if (c.held || c.foreign || heldByHand(c.index)) continue;
             const Hit t = Locate(c, q.palm);
             if (t.d >= -p_.flickBack && t.d <= p_.flickNear && InFootprint(c, t, 0.05) && t.d < key) key = t.d, P = &c;
         }
@@ -2520,7 +2525,7 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
         h->Palm(palm);
         PalmOut(*h, out);
         for (const Panel &P : panels) {
-            if (P.held || heldByHand(P.index)) continue;
+            if (P.held || P.foreign || heldByHand(P.index)) continue;
             const Hit t = Locate(P, palm);
             if (t.d < -p_.flickBack || t.d > p_.flickNear || !InFootprint(P, t, 0.02)) continue;
             SurfaceNormal(P, t.u, n);

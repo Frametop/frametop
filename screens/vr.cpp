@@ -109,6 +109,7 @@
 #include "palmmenu.h"
 #include "keyboard.h"
 #include "roomview.h"
+#include "steampanels.h"
 
 #include <drm_fourcc.h>
 #include <openvr.h>
@@ -2416,6 +2417,324 @@ void WantHz(bool near) {
     close(fd);
 }
 
+// ---------------------------------------------------------------- SteamVR's panels by hand
+
+// Near input on SteamVR's own panels (user, 2026-10-13: "work on the native SteamVR overlay windows"):
+// the dashboard, the Steam menu, Steam's keyboard, other apps' overlays. A poke or a pinch on one
+// clicks it, a pinch on its border (or like a card) moves it, at a corner resizes it, and the same
+// glows show. ft-screens can't click them itself, so the pointer helper's laser (our virtual
+// controller) does what the hand does: "touch <left|right> <verb> [x y z qw qx qy qz] [key]" on
+// @ft_pointer_helper, the laser's pose in the standing universe (pointer/helper/ft-pointer.cpp's
+// "Touch"). Its origin kSteamBack in front of the point, aimed in: hover (the hand near, the laser
+// there), press (a click: its key goes to ft-screens' typing as a click there would), move (held:
+// dragging), up, grab (go there, hover, then press: a move or resize), end (the hand has left: the
+// laser goes back to whoever had it).
+// OpenVR won't say where a dashboard panel is or how big (most report a 0x0 texture), so for each hands
+// frame a cone of rays from the eyes past each index tip finds the panels near the hands, and
+// steampanels::FitPanel fits each to its hits (steampanels.h). The keys come from the helper's overlay
+// list ("steamvr <seq> <part> <parts> key...", which it keeps while hands are allowed); ours (frametop.*)
+// and POINTER_IGNORE's aren't on it, and panels the rays can't hit (SteamVR's scene-graph controls)
+// never fit. A move or a resize first hovers just inside the panel's edge: only a floating panel shows
+// its window controls then (valve.steam.gamepadui.floatingfooter, under it), and only then does the
+// laser press its grab bar (kSteamBar under the bottom edge, as the helper's layout placement does) or
+// its resize margin (kSteamMargin past the corner), and follow the hand rigidly (steampanels::Follow).
+// A docked dashboard or another app's overlay has none: the pinch does nothing, and the log says so.
+// No fist grabs, stretch, throws, flicks, pushes or two-finger scroll there (handinput's
+// Panel::foreign). Only while ft-screens runs (its desktop).
+constexpr int kSteamIndex = 1000;      // near input's panel indices from here on are SteamVR's
+constexpr double kSteamBack = 0.10;    // the laser starts this far in front (its small controls float a few cm out)
+constexpr double kSteamBar = 0.075;    // a floating panel's grab bar under its bottom edge (LAYOUT_GRAB_OFFSET)
+constexpr double kSteamMargin = 0.01;  // ...its resize margin, past a corner each way
+constexpr double kSteamCone = 12;      // the rays, degrees each way round the line from the eyes to the index tip
+constexpr int kSteamRays = 7;          // ...7 x 7 of them
+constexpr double kSteamReach = 0.40;   // ...hitting within this of the tip
+constexpr int64_t kSteamFitMs = 500;   // a panel the rays haven't found this long isn't near input's (unless a hand is at it)
+
+struct SteamPanel {
+    std::string key;
+    vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
+    int index = -1;
+    bool visible = false;
+    steampanels::Fit fit;
+    int64_t fitMs = INT64_MIN / 2;
+};
+std::vector<SteamPanel> g_steamPanels;
+std::map<std::string, int> g_steamIndex;   // a key keeps its index
+std::vector<std::string> g_steamParts;     // the list as it comes, part by part
+long g_steamSeq = -1;
+int g_steamPart = 0;
+int64_t g_steamListMs = INT64_MIN / 2, g_steamLookMs = INT64_MIN / 2;
+
+// What each hand is doing with the laser on a SteamVR panel.
+struct SteamTouch {
+    enum class St { None, Hover, Down, GrabWait, Grab, Refused } st = St::None;
+    int panel = -1;
+    std::string key;
+    Mat panel0{}, laser0{};   // the panel as the grab began, and the laser that holds it
+    double w0 = 0, h0 = 0;
+    bool resize = false;
+    int sx = 1, sy = -1;
+    int64_t sinceMs = 0, leftMs = 0;
+} g_steamTouch[2];
+
+const SteamPanel *FindSteam(int index) {
+    for (const SteamPanel &sp : g_steamPanels)
+        if (sp.index == index) return &sp;
+    return nullptr;
+}
+
+// "steamvr <seq> <part> <parts> key key...": the helper's overlay list, in parts that fit a datagram.
+void SteamListPart(const char *cmd) {
+    long seq;
+    int part, parts, at = 0;
+    if (std::sscanf(cmd, "steamvr %ld %d %d%n", &seq, &part, &parts, &at) < 3 || parts < 1) return;
+    if (part == 0) g_steamParts.clear(), g_steamSeq = seq, g_steamPart = 0;
+    if (seq != g_steamSeq || part != g_steamPart) return;   // (a part lost: the next list, a few seconds on)
+    ++g_steamPart;
+    std::istringstream words(cmd + at);
+    for (std::string k; words >> k;)
+        if (k.rfind("frametop.", 0) != 0) g_steamParts.push_back(k);
+    if (part != parts - 1) return;
+    g_steamListMs = NowMs();
+    std::vector<SteamPanel> next;
+    for (const std::string &k : g_steamParts) {
+        SteamPanel sp;
+        for (const SteamPanel &o : g_steamPanels)
+            if (o.key == k) sp = o;
+        if (sp.key.empty()) {
+            sp.key = k;
+            auto it = g_steamIndex.find(k);
+            if (it == g_steamIndex.end()) it = g_steamIndex.emplace(k, kSteamIndex + int(g_steamIndex.size())).first;
+            sp.index = it->second;
+        }
+        next.push_back(sp);
+    }
+    g_steamPanels.swap(next);
+    g_steamLookMs = INT64_MIN / 2;   // look them up now
+}
+
+// For each new hands frame: the panels near the hands, fitted to the rays' hits. Their handles and
+// whether they show, four times a second.
+void ScanSteamPanels(const handinput::Input &in) {
+    static uint64_t lastFrame = 0;
+    const int64_t now = NowMs();
+    if (now - g_steamListMs > 60000) g_steamPanels.clear();   // (the helper's list stopped: it's gone)
+    if (g_hands.frame() == lastFrame || !in.haveHead || g_steamPanels.empty()) return;
+    lastFrame = g_hands.frame();
+    if (now - g_steamLookMs >= 250) {
+        g_steamLookMs = now;
+        for (SteamPanel &sp : g_steamPanels) {
+            if (sp.h == vr::k_ulOverlayHandleInvalid || !sp.visible)   // (Steam makes some of them again now and then)
+                if (vr::VROverlay()->FindOverlay(sp.key.c_str(), &sp.h) != vr::VROverlayError_None) sp.h = vr::k_ulOverlayHandleInvalid;
+            sp.visible = sp.h != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->IsOverlayVisible(sp.h);
+        }
+    }
+    bool any = false;
+    for (const SteamPanel &sp : g_steamPanels) any = any || sp.visible;
+    if (!any) return;
+    const double eye[3] = {in.head.m[0][3], in.head.m[1][3], in.head.m[2][3]};
+    std::vector<std::vector<steampanels::Sample>> hits(g_steamPanels.size());
+    for (const handcut::Hand &h : g_hands.seen()) {
+        if (!in.allowed[h.right ? 1 : 0]) continue;
+        const double tip[3] = {h.p[8][0], h.p[8][1], h.p[8][2]};
+        for (const auto &d : steampanels::Cone(eye, tip, kSteamCone, kSteamRays))
+            for (size_t i = 0; i < g_steamPanels.size(); ++i) {
+                const SteamPanel &sp = g_steamPanels[i];
+                if (!sp.visible) continue;
+                vr::VROverlayIntersectionParams_t params{};
+                params.vSource = {float(eye[0]), float(eye[1]), float(eye[2])};
+                params.vDirection = {float(d[0]), float(d[1]), float(d[2])};
+                params.eOrigin = vr::TrackingUniverseStanding;
+                vr::VROverlayIntersectionResults_t r{};
+                if (!vr::VROverlay()->ComputeOverlayIntersection(sp.h, &params, &r)) continue;
+                const double off = std::hypot(r.vPoint.v[0] - tip[0], r.vPoint.v[1] - tip[1], r.vPoint.v[2] - tip[2]);
+                if (off > kSteamReach) continue;
+                steampanels::Sample q;
+                q.u = r.vUVs.v[0], q.v = r.vUVs.v[1];
+                for (int k = 0; k < 3; ++k) q.p[k] = r.vPoint.v[k];
+                hits[i].push_back(q);
+            }
+    }
+    for (size_t i = 0; i < g_steamPanels.size(); ++i) {
+        steampanels::Fit f = steampanels::FitPanel(hits[i]);
+        if (!f.ok) continue;
+        // its front toward the eyes (a texture upside down fits facing away: turned about x, it's the same panel)
+        const double to[3] = {eye[0] - f.pose.m[0][3], eye[1] - f.pose.m[1][3], eye[2] - f.pose.m[2][3]};
+        if (to[0] * f.pose.m[0][2] + to[1] * f.pose.m[1][2] + to[2] * f.pose.m[2][2] < 0)
+            for (int k = 0; k < 3; ++k) f.pose.m[k][1] = -f.pose.m[k][1], f.pose.m[k][2] = -f.pose.m[k][2];
+        g_steamPanels[i].fit = f, g_steamPanels[i].fitMs = now;
+    }
+}
+
+// SteamVR's panels for near input this tick: those the rays found lately, and those a hand is at.
+void SteamInputPanels(std::vector<handinput::Panel> &panels) {
+    const int64_t now = NowMs();
+    for (const SteamPanel &sp : g_steamPanels) {
+        if (!sp.visible || !sp.fit.ok) continue;
+        const bool at = g_handInput.nearPanel(0) == sp.index || g_handInput.nearPanel(1) == sp.index ||
+                        g_steamTouch[0].panel == sp.index || g_steamTouch[1].panel == sp.index;
+        if (now - sp.fitMs > kSteamFitMs && !at) continue;
+        handinput::Panel P;
+        P.index = sp.index, P.pose = sp.fit.pose, P.width = sp.fit.width, P.height = sp.fit.height, P.curve = 0;
+        P.pxW = int(std::lround(sp.fit.width * steampanels::kPxPerM)), P.pxH = int(std::lround(sp.fit.height * steampanels::kPxPerM));
+        P.foreign = true;
+        panels.push_back(P);
+    }
+}
+
+void SendTouch(int side, const char *verb, const Mat *laser, const std::string &key = "") {
+    std::string msg = std::string("touch ") + (side ? "right " : "left ") + verb;
+    if (laser) {
+        double q[4];
+        steampanels::Quat(*laser, q);
+        char b[160];
+        std::snprintf(b, sizeof b, " %.4f %.4f %.4f %.5f %.5f %.5f %.5f", laser->m[0][3], laser->m[1][3], laser->m[2][3], q[0], q[1],
+                      q[2], q[3]);
+        msg += b;
+    }
+    if (!key.empty() && key.size() < 100) msg += " " + key;
+    SendPointer(msg);
+}
+
+// A floating panel's window controls showing under it (valve.steam.gamepadui.floatingfooter): it's one
+// the dashboard lets a laser move and resize.
+bool FooterUnder(const Mat &panel, double w, double h) {
+    vr::VROverlayHandle_t f = vr::k_ulOverlayHandleInvalid;
+    if (vr::VROverlay()->FindOverlay("valve.steam.gamepadui.floatingfooter", &f) != vr::VROverlayError_None ||
+        !vr::VROverlay()->IsOverlayVisible(f))
+        return false;
+    vr::ETrackingUniverseOrigin o;
+    Mat m;
+    if (vr::VROverlay()->GetOverlayTransformAbsolute(f, &o, &m) != vr::VROverlayError_None) return false;
+    const Mat l = Mul(Inverse(panel), m);
+    const double x = l.m[0][3], y = l.m[1][3], z = l.m[2][3];
+    return std::fabs(x) < w / 2 + 0.10 && y < -h / 2 + 0.05 && y > -h / 2 - 0.35 && std::fabs(z) < 0.15;
+}
+
+// Near input's event on a SteamVR panel: the laser does it. False: not one of theirs.
+bool SteamEvent(const handinput::Event &e) {
+    if (e.panel < kSteamIndex) return false;
+    const SteamPanel *sp = FindSteam(e.panel);
+    if (!sp || !sp->fit.ok) return true;
+    SteamTouch &t = g_steamTouch[e.side];
+    const steampanels::Fit &f = sp->fit;
+    const char *hand = e.side ? "right" : "left";
+    double u, v;
+    switch (e.type) {
+        case handinput::Event::Motion:
+        case handinput::Event::Press:
+        case handinput::Event::Release: {
+            steampanels::FromPixels(f.width, f.height, e.x, e.y, &u, &v);
+            const Mat l = steampanels::Touch(f.pose, u, v, kSteamBack);
+            if (t.panel != e.panel) t = SteamTouch{}, t.panel = e.panel, t.key = sp->key;
+            if (e.type == handinput::Event::Press) {
+                SendTouch(e.side, "press", &l, sp->key);
+                t.st = SteamTouch::St::Down;
+                std::printf("SteamVR panel %s: pressed (%s hand)\n", sp->key.c_str(), hand);
+            } else if (e.type == handinput::Event::Release) {
+                SendTouch(e.side, "up", &l);
+                t.st = SteamTouch::St::Hover;
+            } else {
+                SendTouch(e.side, t.st == SteamTouch::St::Down ? "move" : "hover", &l);
+                if (t.st == SteamTouch::St::None) t.st = SteamTouch::St::Hover;
+            }
+            t.leftMs = 0;
+            break;
+        }
+        case handinput::Event::GrabStart: {
+            t = SteamTouch{};
+            t.panel = e.panel, t.key = sp->key, t.panel0 = f.pose, t.w0 = f.width, t.h0 = f.height;
+            t.resize = e.zone == handinput::Zone::Corner || e.zone == handinput::Zone::Tab;
+            t.sx = e.sx, t.sy = e.sy;
+            // first a hover just inside the edge (the corner): a floating panel's window controls come up
+            u = t.resize ? t.sx * std::max(0.0, f.width / 2 - 0.02) : 0;
+            v = t.resize ? t.sy * std::max(0.0, f.height / 2 - 0.02) : -std::max(0.0, f.height / 2 - 0.02);
+            const Mat l = steampanels::Touch(f.pose, u, v, kSteamBack);
+            SendTouch(e.side, "hover", &l);
+            t.st = SteamTouch::St::GrabWait, t.sinceMs = NowMs();
+            break;
+        }
+        case handinput::Event::GrabEnd:
+            if (t.panel == e.panel && t.st == SteamTouch::St::Grab) {
+                SendTouch(e.side, "up", nullptr);
+                std::printf("SteamVR panel %s: let go (%s hand)\n", t.key.c_str(), hand);
+            }
+            if (t.panel == e.panel) t.st = SteamTouch::St::Hover, t.leftMs = 0;
+            break;
+        default: break;   // (no throws, flicks, pushes, rewinds or scrolls on them: Panel::foreign)
+    }
+    return true;
+}
+
+// Hand input taken away (paused, off): every laser touch ends.
+void EndSteamTouches() {
+    for (int k = 0; k < 2; ++k)
+        if (g_steamTouch[k].st != SteamTouch::St::None) {
+            if (g_steamTouch[k].st == SteamTouch::St::Down || g_steamTouch[k].st == SteamTouch::St::Grab) SendTouch(k, "up", nullptr);
+            SendTouch(k, "end", nullptr);
+            g_steamTouch[k] = SteamTouch{};
+        }
+}
+
+// Each tick: a grab's hover, then its press; carries; and a hand that has left lets the laser go.
+void UpdateSteamTouches(const std::vector<handinput::Carry> &carries) {
+    if (!HandInputOn()) return EndSteamTouches();
+    const int64_t now = NowMs();
+    for (int k = 0; k < 2; ++k) {
+        SteamTouch &t = g_steamTouch[k];
+        const char *hand = k ? "right" : "left";
+        if (t.st == SteamTouch::St::None) continue;
+        if (t.st == SteamTouch::St::GrabWait) {
+            if (g_handInput.grabPanel(k) != t.panel) {
+                t.st = SteamTouch::St::Hover;
+            } else if (now - t.sinceMs >= 150 && FooterUnder(t.panel0, t.w0, t.h0)) {
+                double u, v;
+                steampanels::GrabPoint(t.w0, t.h0, t.resize, t.sx, t.sy, kSteamBar, kSteamMargin, &u, &v);
+                t.laser0 = steampanels::Touch(t.panel0, u, v, kSteamBack);
+                SendTouch(k, "grab", &t.laser0);
+                t.st = SteamTouch::St::Grab;
+                std::printf("SteamVR panel %s: %s by the %s hand\n", t.key.c_str(), t.resize ? "resized" : "moved", hand);
+            } else if (now - t.sinceMs >= 600) {
+                t.st = SteamTouch::St::Refused;
+                std::printf("SteamVR panel %s: no window controls under it (not a floating panel): the %s hand can't %s it\n",
+                            t.key.c_str(), hand, t.resize ? "resize" : "move");
+            }
+        }
+        if (t.st == SteamTouch::St::Down && !g_handInput.pressing(k)) {   // (a press that ended without its release)
+            SendTouch(k, "up", nullptr);
+            t.st = SteamTouch::St::Hover;
+        }
+        if (t.st == SteamTouch::St::Refused && g_handInput.grabPanel(k) != t.panel) t.st = SteamTouch::St::Hover;
+        if (t.st == SteamTouch::St::Hover) {
+            if (g_handInput.nearPanel(k) == t.panel) {
+                t.leftMs = 0;
+            } else if (!t.leftMs) {
+                t.leftMs = now;
+            } else if (now - t.leftMs >= 300) {
+                SendTouch(k, "end", nullptr);
+                t = SteamTouch{};
+            }
+        }
+    }
+    for (const handinput::Carry &c : carries) {
+        if (c.panel < kSteamIndex) continue;
+        for (int k = 0; k < 2; ++k) {
+            SteamTouch &t = g_steamTouch[k];
+            if (t.panel != c.panel || t.st != SteamTouch::St::Grab) continue;
+            Mat l;
+            if (c.kind == handinput::Carry::Resize) {
+                const double w = c.width > 0 ? c.width : t.w0, h = w * t.h0 / std::max(1e-6, t.w0);
+                double u, v;
+                steampanels::GrabPoint(w, h, true, t.sx, t.sy, 0, kSteamMargin, &u, &v);
+                l = steampanels::Touch(c.pose, u, v, kSteamBack);
+            } else {
+                l = steampanels::Follow(t.panel0, c.pose, t.laser0);
+            }
+            SendTouch(k, "move", &l);
+        }
+    }
+}
+
 // The palm menu (palmmenu.h): before near input, which leaves it the hand it has. Its ring is
 // a guide ("frametop.guide.palm.*"), so the pointer helper's cursor and rays pass through it.
 palmmenu::PalmMenu g_palm;
@@ -3440,8 +3759,11 @@ void UpdateHandGuides() {
         auto hide = [&] {
             if (hg.shown) vr::VROverlay()->HideOverlay(hg.overlay), hg.shown = false;
         };
+        // on one of our screens, or on one of SteamVR's panels (see "SteamVR's panels by hand")
         const auto it = g_screens.find(hg.g.panel);
-        if (hg.alpha < 0.01 || hg.g.kind == handinput::Guide::None || it == g_screens.end() || !it->second.visible) {
+        const SteamPanel *sp = it == g_screens.end() ? FindSteam(hg.g.panel) : nullptr;
+        const bool there = it != g_screens.end() ? it->second.visible : sp && sp->visible && sp->fit.ok;
+        if (hg.alpha < 0.01 || hg.g.kind == handinput::Guide::None || !there) {
             hide();
             continue;
         }
@@ -3450,13 +3772,13 @@ void UpdateHandGuides() {
             if (vr::VROverlay()->CreateOverlay(key, "Frametop: hand guide", &hg.overlay) != vr::VROverlayError_None) continue;
             vr::VROverlay()->SetOverlaySortOrder(hg.overlay, 1);
         }
-        Screen &s = it->second;
-        Mat p;
-        if (!ScreenPose(s, &p)) {
+        Screen *s = sp ? nullptr : &it->second;
+        Mat p = sp ? sp->fit.pose : Identity();
+        if (s && !ScreenPose(*s, &p)) {
             hide();
             continue;
         }
-        const double W = s.metres, H = s.heightMetres();
+        const double W = s ? s->metres : sp->fit.width, H = s ? s->heightMetres() : sp->fit.height, curve = s ? s->curve : 0;
         double halo = std::round(softglow::Width(HeadDistance(p)) * 1000) / 1000;   // (by the mm: fewer textures)
         // its size and place on the panel
         double u = hg.g.u, v = hg.g.v, wm = 0, hm = 0, arm = 0, r = 0, edge = 1e9;
@@ -3464,7 +3786,7 @@ void UpdateHandGuides() {
         bool curved = false;
         switch (hg.g.kind) {
             case handinput::Guide::Corner:
-                if (k == 2) halo = std::max(halo, HandleSize(s));   // (the laser's: as wide as the handle it presses)
+                if (k == 2 && s) halo = std::max(halo, HandleSize(*s));   // (the laser's: as wide as the handle it presses)
                 arm = std::clamp(0.25 * std::min(W, H), 0.03, 0.10);
                 u = hg.g.sx * W / 2, v = hg.g.sy * H / 2, wm = hm = 2 * std::max(arm, halo) * 1.05, curved = true;
                 break;
@@ -3506,8 +3828,10 @@ void UpdateHandGuides() {
             hg.key = key;
         }
         vr::VROverlay()->SetOverlayWidthInMeters(hg.overlay, float(wm));
-        vr::VROverlay()->SetOverlayCurvature(hg.overlay, curved && s.curve > 0 ? float(std::clamp(wm / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f);
-        const Mat m = Mul(p, OnSurface(s, u, v, hg.g.kind == handinput::Guide::Touch ? 0.003 : 0));   // (the dot just over the content)
+        vr::VROverlay()->SetOverlayCurvature(hg.overlay, curved && curve > 0 ? float(std::clamp(wm / (2 * M_PI * curve), 0.0, 1.0)) : 0.f);
+        // (the dot just over the content; on SteamVR's panels all of it a little out, over theirs)
+        const double out = hg.g.kind == handinput::Guide::Touch ? 0.003 : 0;
+        const Mat m = Mul(p, s ? OnSurface(*s, u, v, out) : Translation(u, v, out + 0.003));
         vr::VROverlay()->SetOverlayTransformAbsolute(hg.overlay, vr::TrackingUniverseStanding, &m);
         if (std::fabs(hg.alpha - hg.shownAlpha) > 0.01) {
             vr::VROverlay()->SetOverlayAlpha(hg.overlay, float(hg.alpha));
@@ -3581,6 +3905,11 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     }
     for (int k = 0; k < 2; ++k) in.typing[k] = NowMs() - g_typingWord.atMs < 3000 && g_typingWord.side[k];
     in.pointerBusy = g_press.buttons && !IsHandHolder(g_press.device);
+    // SteamVR's own panels near the hands (see "SteamVR's panels by hand")
+    if (HandInputOn()) {
+        ScanSteamPanels(in);
+        SteamInputPanels(panels);
+    }
     // KWin's button, let go of by someone else (ReleaseStuck: its screen hid, or paused)
     for (int k = 0; k < 2; ++k)
         if (g_handInput.pressingKwin(k) && !(g_press.buttons && g_press.device == kHandHolder[k])) g_handInput.ForgetPress(k);
@@ -3605,6 +3934,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
             std::printf("lazy susan by hand (%s, swept %s): %s\n", e.side ? "right" : "left", e.x < 0 ? "left" : "right", reply);
             continue;
         }
+        if (SteamEvent(e)) continue;   // one of SteamVR's panels: the pointer helper's laser does it
         const auto it = g_screens.find(e.panel);
         if (it == g_screens.end()) continue;
         Screen &s = it->second;
@@ -3727,6 +4057,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         }
         SetAbsolute(s, c.pose);
     }
+    UpdateSteamTouches(g_handInput.carries());
     const auto &hovered = g_handInput.hovered();
     for (auto &[i, s] : g_screens) {
         const auto h = hovered.find(i);
@@ -4807,6 +5138,9 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         g_handsWord.controller[0] = !std::strcmp(sl, "controller"), g_handsWord.controller[1] = !std::strcmp(sr, "controller");
         for (int k = 0; k < 2; ++k)
             if (g_handsWord.hand[k]) g_handsWord.handMs[k] = NowMs();
+        std::snprintf(reply, size, "ok");
+    } else if (!std::strncmp(cmd, "steamvr ", 8)) {   // the helper's overlay list (see "SteamVR's panels by hand")
+        SteamListPart(cmd);
         std::snprintf(reply, size, "ok");
     } else if (int tl = 0, tr = 0; std::sscanf(cmd, "typing %d %d", &tl, &tr) == 2) {
         g_typingWord.side[0] = tl != 0, g_typingWord.side[1] = tr != 0, g_typingWord.atMs = NowMs();

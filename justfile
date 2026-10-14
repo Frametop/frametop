@@ -29,7 +29,7 @@ test-python:
 
 # the C/C++ unit tests that need no model runtime: header-only logic with
 # made-up events (pointer/tests: the helper's hand interaction logic). sides_test.cpp is NOT here: it pulls in ncnn (hands'
-# deferred heavy build) and stays with `make check` in the hands build
+# heavy build) and stays with `make check` in the hands build
 # (hands/Makefile).
 test-c:
     #!/usr/bin/env bash

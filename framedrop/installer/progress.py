@@ -101,7 +101,7 @@ def in_unit(pid):
         return False
 
 
-def install_command(eye_tracker, bluetooth, voice=True):
+def install_command(eye_tracker, bluetooth, voice=True, hands=True):
     if RELEASE:
         args = [str(HERE / "install-release.sh"), "--yes"]
         if DRY_RUN:
@@ -112,6 +112,8 @@ def install_command(eye_tracker, bluetooth, voice=True):
             args += ["--clone-only", "--dir", str(STATE / "dry-run")]
     if not voice:
         args.append("--no-voice")
+    if not hands:
+        args.append("--no-hands")
     if not eye_tracker:
         args.append("--no-eye-tracker")
     if bluetooth:
@@ -304,10 +306,12 @@ class Window(Adw.ApplicationWindow):
     def show_choices(self):
         what = f"Frametop {release_version()}" if RELEASE else "Frametop from GitHub"
         self.detail.set_label(f"This installs {what}: the multi-screen desktop, the 3D mouse, gaze "
-                              "mode, and Frametop's settings apps. Optional: voice dictation, and two "
+                              "mode, and Frametop's settings apps. Optional: voice dictation, and three "
                               "parts that need your SteamOS password (sudo):")
         self.voice = Gtk.CheckButton(label="Voice dictation: a Right Ctrl tap or holding the left d-pad down, and "
                                            "what you say is typed (downloads about 320 MB)", active=True)
+        self.hands = Gtk.CheckButton(label="Hand tracking (experimental): poke, pinch and grab the screens with "
+                                           "your hands. It uses a lot of the headset's CPU", active=True)
         self.eye = Gtk.CheckButton(label="Our own eye tracker for gaze mode (more accurate than SteamVR's)",
                                    active=True)
         self.bt = Gtk.CheckButton(label="Bluetooth fixes (LE mice and keyboards, like the Swiftpoint Z3, "
@@ -323,27 +327,26 @@ class Window(Adw.ApplicationWindow):
         self.go.connect("clicked", self.install)
         self.pw.connect("activate", self.install)
         pw_row, keypad = keypad_row(self.pw)
-        self.choices = [self.voice, self.eye, self.bt, pw_row, keypad, pw_note, self.error, self.go]
+        self.choices = [self.voice, self.hands, self.eye, self.bt, pw_row, keypad, pw_note, self.error, self.go]
         if not password_set():
-            for c in (self.eye, self.bt):
+            for c in (self.hands, self.eye, self.bt):
                 c.set_active(False)
                 c.set_sensitive(False)
             pw_row.set_visible(False)
             keypad.set_visible(False)
-            pw_note.set_label("Your user has no password, so sudo can't run and these two can't be "
+            pw_note.set_label("Your user has no password, so sudo can't run and these three can't be "
                               "installed from here. To set one, run passwd in Konsole; then play "
                               "Frametop again, or install them later from a terminal "
-                              "(gaze/tracker/install.sh, setup/bluetooth/install.sh).")
-        for c in (self.eye, self.bt):
-            c.connect("toggled", lambda *_: pw_row.set_sensitive(self.eye.get_active() or self.bt.get_active()))
+                              "(hands/run.sh install, gaze/tracker/install.sh, setup/bluetooth/install.sh).")
+        for c in (self.hands, self.eye, self.bt):
+            c.connect("toggled", lambda *_: pw_row.set_sensitive(self.needs_password()))
         for w in self.choices:
             self.box.append(w)
 
     def install(self, *_):
         if self.checking:
             return
-        needs = self.eye.get_active() or self.bt.get_active()
-        if not needs:
+        if not self.needs_password():
             return self.begin(None)
         text = self.pw.get_text()
         if not text:
@@ -370,12 +373,16 @@ class Window(Adw.ApplicationWindow):
 
         threading.Thread(target=check, daemon=True).start()
 
+    def needs_password(self):
+        return self.hands.get_active() or self.eye.get_active() or self.bt.get_active()
+
     def say(self, text):
         self.error.set_label(text)
         self.error.set_visible(True)
 
     def begin(self, pw):
-        args = install_command(self.eye.get_active(), self.bt.get_active(), self.voice.get_active())
+        args = install_command(self.eye.get_active(), self.bt.get_active(), self.voice.get_active(),
+                               self.hands.get_active())
         if pw is not None:
             try:
                 self.askpass = Askpass(self.ask_again)

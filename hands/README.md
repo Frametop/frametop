@@ -1,6 +1,6 @@
-# Hands (experimental, deferred)
+# Hands (experimental)
 
-Hand tracking from the headset's own cameras. It's deferred: it costs a lot of the headset's CPU and needs more work, so `install.sh` doesn't offer it and the README doesn't list it. It still builds and runs, installed by hand (below), for working on it.
+Hand tracking from the headset's own cameras. It's experimental and costs a lot of the headset's CPU. `install.sh` offers it (yes by default; `--no-hands` skips it), a release brings it built, and installed, it runs while the Frametop desktop does (`HANDS_MODE=frametop`). `hands/run.sh install` (below) installs it later.
 
 It serves two things in Frametop:
 
@@ -14,9 +14,9 @@ Two programs, each a user service that stops when SteamVR does:
 - `ft-camd` (`camd/`, C) borrows XRService's camera buffers and publishes the four IR tracking cameras' frames to a shared-memory ring. It runs on the host.
 - `ft-hands` (`track/`, C++) finds hands in those frames with MediaPipe's palm and landmark models on ncnn, triangulates them, and publishes them. It runs in the dev container.
 
-`hands/run.sh install` builds them, gives ft-camd its capabilities, installs both services, and links `hands/ft-handsctl` into `~/.local/bin`. `install.sh` doesn't install it. When they run is `HANDS_MODE` in `~/.config/frametop.conf`, set on the Hands page of Frametop Input Settings or with `ft-handsctl mode`; `hands/handsmode.py` does the starting and stopping, for these two and the hand view (`frametop-handview.service`, when it's installed):
+`hands/run.sh install` builds them (a release brings them built), gives ft-camd its capabilities, installs both services, and links `hands/ft-handsctl` into `~/.local/bin`. `install.sh` runs it when you choose hand tracking, then sets `HANDS_MODE=frametop` unless it's `always`. When they run is `HANDS_MODE` in `~/.config/frametop.conf`, set on the Hands page of Frametop Input Settings or with `ft-handsctl mode`; `hands/handsmode.py` does the starting and stopping, for these two and the hand view (`frametop-handview.service`, when it's installed):
 
-- `off` (the default): nothing starts them. `ft-handsctl on` starts hand tracking and `ft-handsctl off` stops it, as before; it stops with SteamVR.
+- `off` (the default before hand tracking is installed): nothing starts them. `ft-handsctl on` starts hand tracking and `ft-handsctl off` stops it, as before; it stops with SteamVR.
 - `frametop`: they run while the Frametop desktop does. The session (`session/frametop-session.sh`, screens backend) starts them once ft-screens is up and stops them as it ends.
 - `always`: they're wanted by `steamvr.service` (`systemctl --user add-wants`), so they run whenever SteamVR does, in games and the SteamVR dashboard too, with or without the desktop. Pausing Frametop for a VR game leaves them running and unparked.
 

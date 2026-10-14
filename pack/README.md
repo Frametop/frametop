@@ -32,8 +32,9 @@ The native binaries (`ft-screens`, `ft-pointer`, the `ft_pointer` driver,
 `build.sh` scripts, run inside the image with `FRAME_IN_BOX=1`, so there is
 one build recipe for the image and the Frame. They stay in their `build/`
 folders under `/src/frametop` and are copied to `/opt/frametop`. Hand
-tracking stays deferred exactly as in `install.sh` (ncnn is a heavy,
-separately triggered build).
+tracking's `ft-camd` and `ft-hands` (with ncnn, built from the tag
+`hands/Makefile` pins) stay in `hands/build/`, where their units and
+`ft-camd`'s file capabilities point.
 
 What deliberately stays outside the image for now: the **host payload** — the
 SteamVR driver registration (`vrpathreg`), ft-camd's file capabilities

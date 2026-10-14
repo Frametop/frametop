@@ -5,7 +5,7 @@
 # give ft-camd its capabilities (hands/run.sh caps: asks for the password, once per build), and add
 # "Frametop Hand Recorder" to the app menu (for Frametop's desktop: it isn't tested from SteamVR's
 # "Launch a program", which runs apps outside it; the standalone recorder is for that).
-# It doesn't turn on Frametop's live hand tracking (that's hands/run.sh install, still deferred).
+# It doesn't turn on Frametop's live hand tracking (that's hands/run.sh install, which install.sh offers).
 # Usage: hands/rec/install.sh            install or update
 #        hands/rec/install.sh uninstall  remove the menu entry, and ft-camd's capabilities unless
 #                                        hand tracking's services use them (hands/run.sh uncaps).

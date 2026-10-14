@@ -7,6 +7,7 @@ Frametop is a desktop for the Steam Frame that runs on the headset itself, with 
 - **Your other computers' monitors.** Stream a Windows PC's or a Mac's monitors, or a virtual monitor at any size, as screens of their own, with the same controls. See [Remote displays](#remote-displays).
 - **Profiles.** Save where your screens are, which ones show, and which apps are open where. Switch to a profile from Display Settings, a key, or its launcher entry, or start the desktop in one.
 - **One mouse for all of SteamVR.** A Bluetooth mouse drives a small dot anchored in the room. It works the screens, the dashboard, Steam, and overlays, and hands the laser back when you pick up a controller.
+- **Your hands (experimental).** Hand tracking from the headset's own cameras: poke a screen to click, pinch and grab screens to move, resize, and throw them, and see your hands over the screens.
 - **Look and click (experimental).** In gaze mode the pointer goes where you look. Meta+J and Meta+K, or the mouse buttons, click and fine-tune, and each correction teaches the tracker. Calibration runs in the headset.
 - **Made for long sessions.** The displays turn off when the headset isn't used, even on a stand that makes it seem worn. It stays awake on the charger, and you can reach the desktop remotely over VNC.
 
@@ -36,7 +37,7 @@ You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or th
 
    The third and fourth choices, stable release and experimental release, download Frametop already built (`Frametop.zip`, about 1.1 GB, from the [releases](https://github.com/Frametop/frametop/releases)) and install it without compiling anything. `-s -- --release` picks the stable release without the question, and `-s -- --release --experimental` the experimental one.
 
-   The installer sets up distrobox in your home folder (the system files aren't touched), a Fedora build container, and everything else. The first run downloads 1–2 GB. It asks you five things along the way: whether to install voice dictation (yes by default; it downloads about 320 MB of speech models), gaze mode (experimental, yes by default), our own eye tracker for it (yes by default), and the Bluetooth fixes, then whether to restart SteamVR. The eye tracker and the Bluetooth fixes need your `sudo` password; if you've never set one, run `passwd` first, or skip them for now. SteamVR has to restart once at the end, which closes everything open in VR, including the terminal. Rebooting the headset works too.
+   The installer sets up distrobox in your home folder (the system files aren't touched), a Fedora build container, and everything else. The first run downloads 1–2 GB. It asks you six things along the way: whether to install voice dictation (yes by default; it downloads about 320 MB of speech models), hand tracking (experimental, yes by default), gaze mode (experimental, yes by default), our own eye tracker for it (yes by default), and the Bluetooth fixes, then whether to restart SteamVR. Hand tracking, the eye tracker, and the Bluetooth fixes need your `sudo` password; if you've never set one, run `passwd` first, or skip them for now. SteamVR has to restart once at the end, which closes everything open in VR, including the terminal. Rebooting the headset works too.
 
 After the restart, Launch a program → Desktop opens the multi-screen desktop, with its screens arranged around where you're facing. Frametop Display Settings and Frametop Input Settings are in the desktop's application menu, under Settings. SteamOS's own single-screen desktop is still there, as Native Desktop in the same list.
 
@@ -144,6 +145,21 @@ In gaze mode the pointer goes where you look, and the mouse or the keyboard does
 
 By default the mouse only corrects: while the gaze has the pointer, moving the mouse does nothing until you hold a button. Each correction before a click teaches the tracker where it was off. A correction past the learning limit (55 degrees by default, about half of what you can see) starts a quick check instead. Calibrate, on the Gaze page, runs a full calibration in a panel in front of you: look at each dot and click. Check headset fit shows how well the eye tracker sees your eyes. [gaze/README.md](gaze/README.md) has the details.
 
+### Hand tracking (experimental)
+
+Hand tracking uses the headset's own cameras, with no controllers. The installer offers it (or run `hands/run.sh install` later; it needs `sudo` once, to let its camera broker read the cameras). Installed, it runs while the Frametop desktop does, and parks while Frametop is paused for a VR game. It uses a lot of the headset's CPU.
+
+| Do this | To get this |
+| --- | --- |
+| Poke a screen with your index finger | A click there |
+| Pinch a screen's bar, edge, or corner, and move | Moves or resizes the screen |
+| Hold a screen like a card, or in a fist | Carries it; turn your wrist to turn it. Flick it away, or let go fast to throw it |
+| Hold both hands on a screen and pull them apart | Stretches it |
+| Hold an open hand out to a far screen, then make a fist and pull it back ("grab that") | Brings it to arm's reach |
+| Turn a hand palm up toward your face, look at it, and pinch the ring that shows | Opens the Steam menu |
+
+The Hands page of Frametop Input Settings sets when it runs (with Frametop, always with SteamVR, or off) and switches each hand interaction on or off, live. `ft-handsctl status` shows how it's doing. [hands/README.md](hands/README.md) has the details.
+
 ### Leave the headset on a stand and reach it remotely
 
 To keep the Frame on and connected while you're not wearing it, for SSH, remote desktop, or anything else running on it, open the Power tab in Frametop Display Settings:
@@ -234,7 +250,7 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `power/` | ft-powerd: turns the displays off while the headset isn't used. |
 | `voice/` | Frametop Voice: dictation and wake words, recognised on the headset; the input relay types the text. See [voice/README.md](voice/README.md). |
 | `gaze/` | Gaze mode (experimental): the gaze service, its calibration panel, our own eye tracker, and the gaze probe. See [gaze/README.md](gaze/README.md). |
-| `hands/` | Hand tracking (experimental, deferred: the installer doesn't offer it). See [hands/README.md](hands/README.md). |
+| `hands/` | Hand tracking (experimental): the camera broker and the tracker. See [hands/README.md](hands/README.md). |
 | `display-settings/`, `input-settings/` | The two settings apps (Kirigami, Python). |
 | `remote/` | Frametop Remote Access, the app that turns remote desktop over VNC on and off. |
 | `remote-displays/` | Frametop Remote Displays, the app that adds other computers' monitors as screens. |

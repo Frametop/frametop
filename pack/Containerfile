@@ -69,8 +69,7 @@ RUN uv venv --system-site-packages /opt/frametop/venv \
 # The sources, then the binaries, built by the same build scripts as on the
 # Frame (FRAME_IN_BOX=1: they run here instead of entering the dev container).
 # Each program stays in its build/ folder in /src/frametop and is copied to
-# /opt/frametop. Hand tracking is deferred exactly as in install.sh: it builds
-# ncnn from source and isn't needed until hands/run.sh install runs.
+# /opt/frametop.
 COPY . /src/frametop
 WORKDIR /src/frametop
 ENV FRAME_IN_BOX=1 OPENVR_LIB=/opt/frametop/lib
@@ -93,6 +92,12 @@ RUN gaze/tracker/build.sh \
 # above. Its speech models aren't in the image: voice/models.sh fetches them on install.
 RUN voice/build.sh \
  && install -t /opt/frametop/bin voice/build/bin/whisper-server
+# Hand tracking: ft-camd (static: it runs on the host, with the file
+# capabilities hands/run.sh install sets) and ft-hands, which builds ncnn at the
+# tag hands/Makefile pins. Both stay in hands/build/, where their units and
+# file capabilities point, so they aren't copied to /opt/frametop.
+RUN hands/build.sh \
+ && test -x hands/build/ft-camd && test -x hands/build/ft-hands
 
 # A release installs from this image (pack/install-release.sh): it copies
 # /src/frametop, built, to the Frame for its host side (services, the driver,

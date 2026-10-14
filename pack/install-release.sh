@@ -4,7 +4,8 @@
 # are frametop-image.tar (Frametop, built, as a container image) and frametop-release.json (its
 # version, commit, the image file's sha256 and the image's ID, and the SteamOS table). Nothing
 # builds on the headset, and nothing else is downloaded, but voice dictation's speech models
-# (about 320 MB, fixed URLs checked by sha256: voice/models.sh) if you install it.
+# (about 320 MB, fixed URLs checked by sha256: voice/models.sh) if you install it. Hand tracking
+# comes built too: its install only sets its camera broker's file capabilities (sudo).
 #
 # 1. It checks this SteamOS build against the SteamOS table: Frametop's newest from GitHub
 #    (pack/steamos.json on main) when it can get it, else the one in the release. Tested: on.
@@ -17,7 +18,7 @@
 #    are removed, with their containers and images.
 #
 # Usage: install-release.sh [--yes] [--any-steamos] [--unpack-only] [--dir DIR]
-#                           [--no-voice] [--no-eye-tracker] [--no-bluetooth | --bluetooth]
+#                           [--no-voice] [--no-hands] [--no-eye-tracker] [--no-bluetooth | --bluetooth]
 #   --unpack-only  stop after step 2 and the copy: don't run install.sh
 #   --dir DIR      where the releases go (default ~/.local/share/frametop/releases)
 # The rest go to install.sh. FRAMETOP_STEAMOS_TABLE names another table to fetch (a URL), or
@@ -110,7 +111,7 @@ main() {
       --any-steamos) any=1 ;;
       --unpack-only) unpack_only=1 ;;
       --dir) base=${2:?--dir needs a folder}; shift ;;
-      --no-voice|--no-eye-tracker|--no-bluetooth|--bluetooth) pass+=("$1") ;;
+      --no-voice|--no-hands|--no-eye-tracker|--no-bluetooth|--bluetooth) pass+=("$1") ;;
       -h|--help) sed -n '2,24p' "$0"; return 0 ;;
       *) echo "unknown option: $1" >&2; return 2 ;;
     esac
@@ -167,7 +168,7 @@ main() {
     return 1
   fi
 
-  printf '\n\033[1m== 0/11 loading Frametop %s (a minute or two)\033[0m\n' "$version"
+  printf '\n\033[1m== 0/12 loading Frametop %s (a minute or two)\033[0m\n' "$version"
   if [ "$(podman image inspect -f '{{.Id}}' "$image" 2>/dev/null)" = "$id" ]; then
     echo "already loaded"
   else

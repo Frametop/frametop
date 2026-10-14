@@ -42,7 +42,7 @@ POINTER_HEAD_DEADZONE=0.5  # keyboard clicks at the gaze (Meta+J, Meta+K): degre
 POINTER_KEY_TAP=0.25       # keyboard clicks: let go within this (s) and it clicks where the dot was at the press, and tells the gaze tracker it was right
 GAZE_TRACKER=auto          # gaze service: auto = our own eye tracker when it's installed (gaze/tracker/install.sh, which install.sh offers), else SteamVR's | own = ours | steam = SteamVR's. Each keeps its own calibration (Calibrate on Frametop Input Settings' Gaze page)
 GAZE_EYE=auto              # gaze service: eye bias. auto = each eye weighted by how far off it was at your recent nudges | left | right = that eye counts twice
-HANDS_MODE=off             # hand tracking (hands/run.sh install), when it runs: frametop = while the Frametop desktop runs | always = whenever SteamVR runs, in games and the dashboard too | off = only by hand (ft-handsctl on). Frametop Input Settings' Hands page applies it at once
+HANDS_MODE=off             # hand tracking (hands/run.sh install; install.sh sets frametop when it installs it), when it runs: frametop = while the Frametop desktop runs | always = whenever SteamVR runs, in games and the dashboard too | off = only by hand (ft-handsctl on). Frametop Input Settings' Hands page applies it at once
 HANDS_SWAP_SIDES=auto      # hand tracking: which side camera is which. auto = ft-hands tells from the hands and fixes ft-camd's names, which some SteamVR restarts swap | 0 = keep ft-camd's | 1 = exchange them
 HANDS_CPUS=5,6,7           # hand tracking: the CPUs its model threads run on
 HANDS_CAMERAS=auto         # hand tracking: auto (by the light) | mono (the IR cameras; also keeps ft-camd off the colour ones) | color | all

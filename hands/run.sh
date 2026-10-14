@@ -58,7 +58,8 @@ states="for u in $units; do echo \"\$u: \$(systemctl --user is-active \$u)\"; do
 
 case ${1:-status} in
   install)
-    "$root/hands/build.sh"
+    # A release brings them built (pack/Containerfile), and never builds (FRAME_RELEASE).
+    [ "$FRAME_RELEASE" = 1 ] || "$root/hands/build.sh"
     set_caps
     for u in $units; do
       fill_template "$root/$(unit_dir $u)/$u" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$u"

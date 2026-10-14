@@ -21,8 +21,10 @@ off), the next click starts that eye's shift over, since the headset may sit dif
 
 Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
   status                       JSON: calibration, and per eye its shift, clicks, whether a
-                               glint jump is applied, and "reseat" (the next click starts
-                               the shift over: the probe asks for a one-dot check then)
+                               glint jump is applied ("jump", and "jump_px": how far, pixels:
+                               the headset slipped since the last click; the gaze service's
+                               slip notice reads it), and "reseat" (the next click starts the
+                               shift over: the probe asks for a one-dot check then)
   calib-start                  a new calibration: collect dots from now on
   calib-point T0 T1 YAW PITCH  a dot you looked at from T0 to T1 (CLOCK_MONOTONIC_RAW) in
                                that direction (head-relative degrees): "ok N0 N1 SD0 SD1"
@@ -389,7 +391,7 @@ class Tracker:
         return {"calibration": self.cal.info if self.cal else None, "calibrating": self.calibrating,
                 "dots": len(self.dots),
                 "eyes": {EYES[e.eye]: {"shift": e.shift.value.tolist(), "clicks": len(e.shift.meas),
-                                       "jump": bool(np.any(e.shift.jump)),
+                                       "jump": bool(np.any(e.shift.jump)), "jump_px": e.shift.jump.tolist(),
                                        "reseat": e.shift.reseated} for e in self.eyes}}
 
 

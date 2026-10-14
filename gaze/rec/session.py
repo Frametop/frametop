@@ -1085,6 +1085,11 @@ class Session:
                                 "last": compact(f["reading"]) if f["reading"] else None}
         if f["summary"] and f["good"]:
             self._fit["baseline"] = fitcoach.make_baseline(f["summary"], self._ipd)
+            if not self.dry_run and not self.cams:   # (not a replay's eyes): the gaze service's put-on check uses it
+                try:
+                    fitcoach.save_baseline(self._fit["baseline"])
+                except OSError as e:
+                    self._log("can't save the fit as yours: %s" % e)
         self._session_json["fit"] = result
         self._save_session()
         self._save_fit()

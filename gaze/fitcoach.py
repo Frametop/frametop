@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """fitcoach: how the headset sits on this face, from where our tracker sees each eye, and what
 to do about it (gaze/rec/DESIGN.md, "Fit coach"). The eye recorder runs it before each round;
-the gaze service's put-on and slip check is to use it too.
+the gaze service's fit check, put-on check and slip notice use it too (gaze/gazecheck.py).
 
 It takes per-frame pupil finds (gaze/tracker/eyes_pupil.find_pupil: centre, axes, glints) for
 each camera (0 the right eye, 1 the left), keeps the last second, and compares the medians
@@ -60,7 +60,8 @@ MANY_GLINTS = 5                # a find with this many glints has stray reflecti
                                # (three maintainer captures, 2026-10-14) 3+ glints came in up to 37 % of
                                # finds and 5+ in up to 12 %: a guess until the Glasses bounty's data
 EXTRA_GLINTS = 0.5             # share of finds with MANY_GLINTS: reflections (glasses, a smudge)
-MOVED_DEG = 5.0                # put-on check: this far from the baseline, the headset moved
+MOVED_DEG = 5.0                # put-on check: this far from the baseline, the headset moved; the slip
+                               # notice: ft-eyes' glint jump this far
 
 
 # ------------------------------------------------------------------------------------------
@@ -249,6 +250,11 @@ def load_baseline(path=BASELINE):
         return None
 
 
+def save_baseline(baseline, path=None):
+    """Keep a good fit as the person's (the gaze service's fit check, the eye recorder's fitment)."""
+    _write_json(path or BASELINE, baseline)
+
+
 def _write_json(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
@@ -381,6 +387,26 @@ def moved(reading):
     return reading.get("against") == "baseline" and (
         max(abs(t.get("up", 0.0)), abs(t.get("left", 0.0))) > MOVED_DEG or
         any(h["key"] == "ipd-changed" for h in reading.get("hints", [])))
+
+
+def position_hint(terms, limit=MOVED_DEG):
+    """The biggest position term (up, left) past limit as a hint ("up", "down", "left" or
+    "right"), or None."""
+    names = {"up": ("up", "down"), "left": ("left", "right")}
+    term = max((k for k in names if abs(terms.get(k, 0.0)) > limit), key=lambda k: abs(terms[k]), default=None)
+    if term is None:
+        return None
+    return _hint(names[term][0] if terms[term] > 0 else names[term][1], terms[term])
+
+
+def slip_terms(jumps, ref):
+    """ft-eyes' glint jumps ({camera: (dx, dy)}, pixels: how far each pupil moved in its image
+    since the last click, the headset having slipped) as the coach's position terms, {"up",
+    "left"} in degrees, through the reference's Jacobian as assess() does; {} without any."""
+    offsets = [ref.degrees(cam, dx, dy) for cam, (dx, dy) in jumps.items() if ref and cam in ref.eyes]
+    if not offsets:
+        return {}
+    return {"up": sum(o[1] for o in offsets) / len(offsets), "left": sum(o[0] for o in offsets) / len(offsets)}
 
 
 # ------------------------------------------------------------------------------------------

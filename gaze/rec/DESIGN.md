@@ -169,7 +169,7 @@ Uploads: `gaze/rec/hub.py` sends nothing to the real dataset until `CONSENT.md` 
 6. `session.py`, the nine-dot opener and the first rounds, run with `--dry-run`, then on a replay. The bounty board and `bounties.json`.
 7. Review, export with encryption (two recipients), `validate.py`, `hub.py` against a test dataset.
 8. The window, then the standalone repo.
-9. The put-on check in the gaze service.
+9. The put-on check in the gaze service. Built 2026-10-14 behind `GAZE_FIT_WATCH=1`: the quick check holds its dot while the coach reads the fit against the saved one (the fit check and the recorder's fitment save a good fit), and the slip note is a strip the gaze panel draws (`show note`) from ft-eyes' `jump_px`. Thresholds are the coach's 5 degrees, not 1.5 mm yet; tuned from the headset tests.
 
 Before uploads open: the consent texts and a review like `frame-hands/notes/legal-review-2026-10-03.md`, with the health opt-in in it.
 

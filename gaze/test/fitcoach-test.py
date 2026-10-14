@@ -213,5 +213,26 @@ class ObservationsTest(unittest.TestCase):
                 self.assertAlmostEqual(got, want, places=6)
 
 
+class SlipTest(unittest.TestCase):
+    """The slip notice's reading: ft-eyes' glint jumps (pupil px) as position terms and a hint."""
+
+    def jumps(self, yaw, pitch):
+        # Both pupils moved as if the eyes looked (yaw, pitch): each camera's own direction.
+        return {c: (pupil(c, yaw, pitch)[0] - CENTRE[c][0], pupil(c, yaw, pitch)[1] - CENTRE[c][1]) for c in (0, 1)}
+
+    def test_terms(self):
+        t = fitcoach.slip_terms(self.jumps(2.0, 9.0), ref())
+        self.assertAlmostEqual(t["up"], 9.0, places=6)
+        self.assertAlmostEqual(t["left"], 2.0, places=6)
+        self.assertEqual(fitcoach.slip_terms({}, ref()), {})
+        self.assertEqual(fitcoach.slip_terms({0: (3.0, 4.0)}, None), {})
+
+    def test_hint(self):
+        self.assertEqual(fitcoach.position_hint(fitcoach.slip_terms(self.jumps(0, 9.0), ref()))["key"], "up")
+        self.assertEqual(fitcoach.position_hint(fitcoach.slip_terms(self.jumps(0, -9.0), ref()))["key"], "down")
+        self.assertEqual(fitcoach.position_hint(fitcoach.slip_terms(self.jumps(-7.0, 6.0), ref()))["key"], "right")
+        self.assertIsNone(fitcoach.position_hint(fitcoach.slip_terms(self.jumps(3.0, -4.0), ref())))
+
+
 if __name__ == "__main__":
     unittest.main()

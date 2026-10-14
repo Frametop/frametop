@@ -232,6 +232,8 @@ class DryRunTest(unittest.TestCase):
                 while time.monotonic() < end and not cond():
                     time.sleep(0.01)
             # In the jumps take: redo the step while it runs, then skip the rest of the take.
+            # (Its ready first: the step's name comes one emit before the dots take's "running" goes.)
+            wait_for(lambda: s._status["step"] == "jumps" and s._status["state"] == "ready")
             wait_for(lambda: s._status["step"] == "jumps" and s._status["state"] == "running")
             s.redo()
             wait_for(lambda: s._status["step"] == "jumps" and s._status["state"] == "ready")

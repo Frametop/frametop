@@ -459,7 +459,8 @@ def check_services(sockets, desktop_up):
         report("ok", "desktop", "ft-screens is running")
     else:
         report("FAIL", "desktop", "ft-screens runs, but hasn't opened @ft_screens")
-    if systemctl("is-enabled", "frametop-camd") == "enabled" and run("pgrep", "-x", "XRService")[0] != 0:
+    # By its command line: XRService renames its main thread (comm "XRServiceLoopTh"), so -x misses it.
+    if systemctl("is-enabled", "frametop-camd") == "enabled" and run("pgrep", "-f", "^(/[^ ]*/)?XRService( |$)")[0] != 0:
         report("FAIL", "XRService", "not running, so hand tracking has no cameras")
 
 

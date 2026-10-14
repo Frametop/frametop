@@ -250,7 +250,10 @@ int main(int argc, char **argv) {
     double seconds = 0, status = 5;
     int threads = 3, niceness = 5;
     bool int8 = false, publish = true, track = true, gestures_on = true;
-    std::string models = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/ncnn";
+    // The models: HANDS_MODELS or --models, else the fine-tuned ones hands/models.sh fetched
+    // (models/student, chosen below once --int8 is known: they have no 8-bit files), else the stock ones.
+    const std::string model_root = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/";
+    std::string models;
     std::string record, ring_path = "/run/user/" + std::to_string(getuid()) + "/" FH_RING_NAME;
     // SteamOS starts user processes on CPUs 0-4 and keeps 5-7 (two A720s and the X4) for
     // SteamVR's compositor, whose threads there run at real-time priority, so they always
@@ -453,6 +456,10 @@ int main(int argc, char **argv) {
         std::fflush(stdout);
         return true;
     };
+    if (models.empty())
+        models = model_root + (!int8 && access((model_root + "student/hand.ncnn.param").c_str(), R_OK) == 0 &&
+                                       access((model_root + "student/palm.ncnn.param").c_str(), R_OK) == 0
+                                   ? "student" : "ncnn");
     if (!load_calibration(calib, err) || !ring.open(ring_path.c_str(), err) || !nets.load(models, int8, err) ||
         (publish && (!pub.open(err) || (gestures_on && !gestures.open(pinch, grip, err)))) ||
         (!record.empty() && !start_recording(record, err))) {

@@ -109,6 +109,7 @@
 
 #include <json/json.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
@@ -175,7 +176,12 @@ int main(int argc, char **argv) {
     std::string flag_out;
     FlagConfig flag_cfg;
     flag_cfg.max_bytes = size_t(400) << 20, flag_cfg.writer_cpus.clear();
-    std::string timeline, depth, poses, models = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/ncnn";
+    // as ft-hands: the fine-tuned models (models/student) when hands/models.sh fetched them, else the stock ones
+    const std::string model_root = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/";
+    std::string timeline, depth, poses,
+        models = model_root + (access((model_root + "student/hand.ncnn.param").c_str(), R_OK) == 0 &&
+                                       access((model_root + "student/palm.ncnn.param").c_str(), R_OK) == 0
+                                   ? "student" : "ncnn");
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
         const bool more = i + 1 < argc;

@@ -16,3 +16,5 @@
 **/.env.*
 frametop-report-*.txt
 .frame-job.d/
+# the fine-tuned hand models: the image fetches its own pinned copy (hands/models.sh)
+hands/models/student/

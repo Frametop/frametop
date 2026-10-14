@@ -197,9 +197,19 @@ cd ~/frametop && scripts/report.sh
 
 From a release, start in `~/.local/share/frametop/releases/current` instead of `~/frametop`.
 
-This writes `frametop-report-<date>.txt` with version numbers, service states, settings, Frametop's keyboard and the Steam menu, and recent logs. Bluetooth addresses and the headset's serial number are masked.
+This writes `frametop-report-<date>.txt` with version numbers, settings, service states, CPU, memory and heat, and the state and recent logs of every part: the desktop (Frametop's keyboard, the Steam menu, the screens), gaze, hand tracking (its models, cameras, and how often it sees each hand), and voice (its models and the microphone). It takes up to half a minute, because it starts the gaze service for a moment to see whether the eye tracker sends. Bluetooth addresses and the headset's serial number are masked, and what you said to Frametop Voice is left out.
 
-If the problem is something you can make happen, like a window that won't drag or a keyboard that doesn't open, run `scripts/report.sh --watch` instead. After the usual report it records for 60 seconds (`--watch 120` for longer) while you make it happen in the headset. It notes when the Steam menu opens and closes, which laser drags what, where typing goes, and when Frametop's keyboard opens or why it doesn't. It takes up to half a minute, because it also checks gaze mode: it starts the gaze service for a moment to see whether the eye tracker sends. If gaze or its calibration doesn't work, run it while you wear the headset. `scripts/gaze-report.py` prints only the gaze part, with what looks wrong first. Then [open an issue](https://github.com/Frametop/frametop/issues), describe what you did, what you expected, and what happened, and attach the file. Quick questions can go to [Discord](https://discord.gg/W3X9f7z3Bc) instead.
+To report on one part only, name it: `--system`, `--desktop`, `--gaze`, `--hands` or `--voice` (several are fine, for example `scripts/report.sh --hands --voice`).
+
+If the problem is something you can make happen, like a window that won't drag, a pinch that doesn't register, or dictation that types nothing, add `--watch`. After the report it records for 60 seconds (`--watch 120` for longer) while you make it happen in the headset, and keeps the logs from that time:
+
+- desktop: when the Steam menu opens and closes, which laser drags what, where typing goes, and when Frametop's keyboard opens or why it doesn't
+- gaze: which eye tracker the gaze service uses, and whether its samples come in
+- hands: each second, how many frames hand tracking made, how often it saw each hand, and how close the fingertips came
+- voice: what Frametop Voice did (the number of words, not the words) and the microphone's level each second (no sound is kept)
+- system: every 5 seconds, the CPU's load, clocks and heat, and the busiest programs
+
+If gaze or its calibration doesn't work, run the report while you wear the headset. `scripts/gaze-report.py` prints only the gaze part, with what looks wrong first. Then [open an issue](https://github.com/Frametop/frametop/issues), describe what you did, what you expected, and what happened, and attach the file. Quick questions can go to [Discord](https://discord.gg/W3X9f7z3Bc) instead.
 
 ## Update
 

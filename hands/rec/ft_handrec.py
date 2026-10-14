@@ -81,7 +81,7 @@ DEBUG_ROW = {"id": DEBUG_ID, "title": "Testing session", "priority": "", "minute
                       "press the headset button: new versions of the hand tracking are then tested on your "
                       "recording, at those moments. For testing only, never for training."}
 LIVE_HANDS_UNIT = "frametop-hands.service"
-ROUND_BYTES = 10 * 1000 ** 3  # about what one round of recording takes
+ROUND_BYTES = 16 * 1000 ** 3  # about what one round of recording takes (a bounty: 2.5-3 min at 30 sets/s, ~85 MB/s)
 # The checklist's choices; the keys are what session.json stores.
 OBJECTS = [("pencil", "Pencil or pen"), ("phone", "Phone"), ("cup", "Cup or mug (empty)"),
            ("keyboard", "Keyboard"), ("mouse", "Mouse"), ("gamepad", "Gamepad"),

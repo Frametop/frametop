@@ -361,7 +361,7 @@ Kirigami.ApplicationWindow {
                 }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
-                    visible: backend.needsConsent && backend.contributor !== ""
+                    visible: backend.needsConsent && backend.consentAccepted !== ""
                     type: Kirigami.MessageType.Information
                     text: "This text changed since you last agreed to it. Please read it again; your contributor id stays the same."
                 }
@@ -659,7 +659,7 @@ Kirigami.ApplicationWindow {
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Space" }
                 Controls.Label {
                     Kirigami.FormData.label: "Free space:"
-                    text: backend.freeText + " (a round takes about 10 GB)"
+                    text: backend.freeText + " (a round takes about 15 GB, and its export about 12 GB more)"
                 }
                 Kirigami.InlineMessage {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
@@ -1235,7 +1235,13 @@ Kirigami.ApplicationWindow {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "The instructions appear in the headset. "
+                    text: sessionView.st.debug
+                          ? "The panel in the headset hides while you record. "
+                            + (sessionView.st.button ? "The button on the right side of the headset: next; while "
+                               + "recording, press it to mark a moment the tracking got wrong, hold it to finish. " : "")
+                            + "While this window has focus: Space: next · M: mark · P: pause or resume · Esc: stop. "
+                            + "Stopping keeps what's recorded so far."
+                          : "The instructions appear in the headset. "
                           + (sessionView.st.button ? "The button on the right side of the headset: "
                              + (sessionView.stepMode ? "next, " : "") + "pause or resume; twice: record "
                              + "the last step again; hold: stop. " : "")

@@ -3,6 +3,8 @@ models/onnx/
 models/*.task
 # the fine-tuned models hands/models.sh fetches (their own licence, CC BY-NC 4.0: not in the repo)
 models/student/
+# hands/models.sh update's download folder, lock and last check
+models/.student-*
 # frame-job settings (where replays run, and the lab's capture folder): personal, not shipped
 .frame-job
 dumps/

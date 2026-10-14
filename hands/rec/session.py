@@ -67,6 +67,9 @@ from recorder.button import (INPUT_DEVICES, INPUT_EVENT, EV_KEY, EV_REL, REL_X, 
 FT_HANDS = os.path.join(HANDS, "build", "ft-hands")
 FT_CAMD = os.path.join(HANDS, "build", "ft-camd")
 PANEL_BIN = os.path.join(HERE, "build", "ft-handpanel")
+# Runs a program in the container this tree was built for: "dev" in a clone, the release's own in a
+# release (it starts the container first)
+IN_BOX = os.path.join(REPO, "scripts", "in-box")
 SCRIPT_PATH = os.path.join(HERE, "script.json")
 BOARD_PATH = os.path.join(HERE, "bounties.json")      # the bounty board shipped with the recorder
 BOUNTIES_DIR = os.path.join(HERE, "bounties")         # a bounty's round script: bounties/<script>.json
@@ -97,6 +100,8 @@ HANDS_UNIT = "frametop-handrec-hands.service"
 # The standalone Hand Recorder (takes.standalone()): its binaries run on the host, so ft-hands
 # starts directly rather than in the dev container, and repairs mean its install command.
 STANDALONE = takes.standalone()
+# A Frametop release (pack/install-release.sh) rather than a clone
+RELEASE = os.path.exists(os.path.join(REPO, ".frametop-release"))
 
 RECORD_HZ = 10           # sets a second; a script's "record_hz" sets its own (the bounties: 30)
 SIDES_READ_S = 0.5       # how often the tracking ft-hands' side camera decision is read
@@ -143,9 +148,13 @@ def run_dir():
 
 
 def fix_hint(frametop):
-    """How to repair a missing or broken part: Frametop's command, or the standalone install's."""
+    """How to repair a missing or broken part: Frametop's command, or the standalone install's.
+    A Frametop release never builds (its programs come in its image), so a build there means
+    installing the release again."""
     if STANDALONE:
         return STANDALONE.get("reinstall") or "run the Hand Recorder's install command again"
+    if RELEASE and frametop.endswith("build.sh"):
+        return "install this Frametop release again"
     return frametop
 
 
@@ -603,7 +612,7 @@ class Recorder:
         if ring:
             argv += ["--ring", ring]
         if not in_container() and not STANDALONE:
-            argv = [os.path.expanduser("~/.local/bin/distrobox"), "enter", "dev", "--"] + argv
+            argv = [IN_BOX] + argv
         self.proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log_file, stderr=log_file)
         self.started_ns = mono_ns()
 
@@ -1243,7 +1252,7 @@ def camera_text(result):
     if camcheck.is_ring_short(result):
         return ("The headset's tracking cameras are all running, but the recorder can't read some of them (%s). "
                 "Close the Hand Recorder, %s, and open it again. If that doesn't help, ask in the Frametop "
-                "Discord." % (result.get("reason", ""), fix_hint("run ~/frametop/hands/rec/install.sh again")))
+                "Discord." % (result.get("reason", ""), fix_hint("run %s again" % os.path.join(REPO, "hands", "rec", "install.sh"))))
     return ("Not all of the headset's tracking cameras are running (%s). Restart SteamVR, or restart the "
             "headset if that doesn't fix it." % result.get("reason", ""))
 
@@ -1689,11 +1698,8 @@ class Session:
 
     def _start_tracker(self):
         argv = [FT_HANDS, "--no-gestures", "--status", "0"]
-        if not STANDALONE:   # built in the dev container: it runs there
-            up = os.path.join(REPO, "scripts", "container-up.sh")
-            if os.access(up, os.X_OK):
-                subprocess.run(host_command(up), capture_output=True, timeout=120)
-            argv = [os.path.expanduser("~/.local/bin/distrobox"), "enter", "dev", "--"] + argv
+        if not STANDALONE:   # built in Frametop's container: it runs there
+            argv = [IN_BOX] + argv
         if self.ring:
             argv += ["--ring", self.ring]
         self._start_unit(HANDS_UNIT, "hand tracking for feedback", argv)

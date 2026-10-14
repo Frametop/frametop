@@ -10,7 +10,10 @@ PartOf=steamvr.service
 # In the container it was built in (scripts/in-box: dev for a clone, the release's own for a
 # release; it's built against Fedora's libraries). It reads ft-camd's ring and
 # writes /run/user/UID/frametop-hands/hands and gestures. Settings: HANDS_* in ~/.config/frametop.conf.
+# Before it starts, newer fine-tuned models if its branch pins them (hands/models.sh auto: at most
+# every 15 minutes, never more than a minute, offline or failing it starts with the ones it has).
 ExecStartPre=-/usr/bin/pkill -x ft-hands
+ExecStartPre=-/usr/bin/timeout 60 @REPO@/hands/models.sh auto
 ExecStart=@REPO@/scripts/in-box @REPO@/hands/build/ft-hands --status 60
 ExecStopPost=-/usr/bin/pkill -x ft-hands
 Restart=always

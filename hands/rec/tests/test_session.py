@@ -919,18 +919,23 @@ class StandaloneTest(unittest.TestCase):
         self.assertIn("--no-gestures", argv)
         run.assert_not_called()   # no container to bring up
 
-    def test_ft_hands_in_the_dev_container(self):
-        self.assertTrue(self.recorder_argv(None)[0].endswith("distrobox"))
+    def test_ft_hands_in_frametops_container(self):
+        # scripts/in-box: "dev" in a clone, the release's own container in a release
+        self.assertEqual(self.recorder_argv(None)[:2], [session.IN_BOX, session.FT_HANDS])
         argv, _ = self.tracker_argv(None)
-        self.assertEqual(argv[:4], [os.path.expanduser("~/.local/bin/distrobox"), "enter", "dev", "--"])
-        self.assertEqual(argv[4], session.FT_HANDS)
+        self.assertEqual(argv[:2], [session.IN_BOX, session.FT_HANDS])
+        self.assertTrue(os.access(session.IN_BOX, os.X_OK))
 
     def test_fix_hint(self):
         with mock.patch.object(session, "STANDALONE", self.INFO):
             self.assertEqual(session.fix_hint("hands/build.sh"), "run the install command again")
             text = session.camera_text({"status": "degraded", "reason": "2 of 4", "ring_missing": ["upper_left"]})
-        with mock.patch.object(session, "STANDALONE", None):
+        with mock.patch.object(session, "STANDALONE", None), mock.patch.object(session, "RELEASE", False):
             self.assertEqual(session.fix_hint("hands/build.sh"), "hands/build.sh")
+        with mock.patch.object(session, "STANDALONE", None), mock.patch.object(session, "RELEASE", True):
+            # a release never builds: its programs come in its image
+            self.assertEqual(session.fix_hint("hands/rec/build.sh"), "install this Frametop release again")
+            self.assertEqual(session.fix_hint("hands/run.sh caps (asks for sudo)"), "hands/run.sh caps (asks for sudo)")
         self.assertIn("run the install command again", text)
         self.assertNotIn("~/frametop", text)
 

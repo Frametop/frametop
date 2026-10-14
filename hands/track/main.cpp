@@ -371,7 +371,7 @@ int main(int argc, char **argv) {
                         "          [--flag-buffer 0|1] (1: keep the last seconds for `ft-handsctl flag`; HANDS_FLAG_BUFFER)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
-                        "          [--pinch-begin M] (0.020) [--pinch-end M] (0.035) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
+                        "          [--pinch-begin M] (0.020) [--pinch-end M] (0.045) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
                         "          [--pinch-dip 0|1] (0; 1: also on a sharp dip, see PinchParams::dip; HANDS_PINCH_DIP)\n"
                         "          [--pinch-fist-curl R] (1.2; 0: off: no pinch begins on a fist, see PinchParams::fist_curl;\n"
                         "          HANDS_PINCH_FIST_CURL)\n"

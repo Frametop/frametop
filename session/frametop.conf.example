@@ -53,6 +53,7 @@ HANDS_BRIGHT_OFF=25        # ... and back to the mono cameras under this
 HANDS_COLOR_LEFT=color_video0  # hand tracking: which colour camera is passthrough_left (hands/tools/check_color.py tells)
 HANDS_COLOR_CROP=subtract  # hand tracking: how the colour calibration's crop applies, subtract | none (check_color.py tells)
 #HANDS_MODELS=            # hand tracking: a folder of palm.ncnn.* and hand.ncnn.* to use instead of the fine-tuned models (hands/models/student; hands/models/ncnn has the stock ones)
+HANDS_MODELS_UPDATE=1      # hand tracking: 1 = when it starts, fetch newer fine-tuned models if GitHub's main (stable) or experimental branch pins them (hands/models.pin), without a new release | 0 = keep the ones it came with
 HANDS_MATTE=circle         # hand cutouts: circle = a round hole per hand | mesh = hand-shaped, from the skeleton | capsules = ft-hands' capsules (the old look)
 HANDS_MATTE_MARGIN=1.5     # hand cutouts: degrees (seen from the eyes) the hole reaches past the hand, held still (Hand cutout margin on the Hands page, live)
 HANDS_MATTE_MOTION=25      # ... plus how far the hand moves in this many ms
@@ -168,6 +169,6 @@ DISPLAY_MOVE_DEG=0.5 # displays off: or turning this far (degrees) within 10 s
 LAYOUT_GRAB_OFFSET=0.075   # arranging screens: where the floating window's grab bar is, in metres below the screen
 LAYOUT_SLIDE_SPEED=0.5     # arranging screens: how fast the invisible controller slides a grabbed screen (m/s)
 
-HANDS_PINCH_END=0.035      # ft-hands: a pinch ends once thumb and index are this far apart (m)
-HANDS_PINCH_DRAG_OPEN=0.05 # ... a pinch held 0.3 s or more (a drag) ends this far apart, or HANDS_PINCH_DRAG_OPEN_S (0.12) past HANDS_PINCH_END
-HANDS_GRIP_TAKEOVER_S=0.3  # ... a grip (fist) ends a pinch only this soon after it began
+HANDS_PINCH_END=0.045      # ft-hands: a pinch ends once thumb and index are this far apart (m)
+HANDS_PINCH_DRAG_OPEN=0.065 # ... a pinch held 0.3 s or more (a drag) ends this far apart, or HANDS_PINCH_DRAG_OPEN_S (0.2) past HANDS_PINCH_END
+HANDS_GRIP_TAKEOVER_S=0.1  # ... a grip (fist) ends a pinch only this soon after it began

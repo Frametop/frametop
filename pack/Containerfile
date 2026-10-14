@@ -98,6 +98,10 @@ RUN voice/build.sh \
 # file capabilities point, so they aren't copied to /opt/frametop.
 RUN hands/build.sh \
  && test -x hands/build/ft-camd && test -x hands/build/ft-hands
+# The Hand Recorder's headset panel: it stays in hands/rec/build/, where the recorder
+# (hands/rec/session.py) runs it from.
+RUN hands/rec/build.sh \
+ && test -x hands/rec/build/ft-handpanel
 
 # A release installs from this image (pack/install-release.sh): it copies
 # /src/frametop, built, to the Frame for its host side (services, the driver,

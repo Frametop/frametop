@@ -37,6 +37,10 @@ Its tarball keeps this tree's layout (`hands/build/`, `hands/rec/`, `hands/model
 
 The recordings go to the same `~/.local/share/frametop/hands/contrib`, so either recorder shows both's sessions.
 
+Its window has a **Getting ready** page between the consent and Before you start (`Backend.getReady`, `session.get_ready`). It checks that SteamVR runs, then starts what isn't running yet: the cameras, hand tracking and the headset panel, in that order. With Frametop's hand tracking installed (`frametopHands`) that means Frametop's own `frametop-hands` (which brings `frametop-camd`); a testing session needs that one. Otherwise it starts the recorder's units (`frametop-handrec-camd`, `frametop-handrec-hands`). The first part that can't start stops it with a message and Try again. What it started stops when the window closes; the panel stays up hidden until then, and the session reuses it.
+
+From Frametop's desktop, the window inherits that session's `XDG_RUNTIME_DIR` (`/run/user/UID/frametop`) and `XDG_CONFIG_HOME` (`~/.config/frametop`). With those, `systemctl --user` can't reach the user's systemd, and OpenVR finds no `openvrpaths.vrpath`. The launcher (`bin/frametop-hand-recorder`) puts the real ones back. ft-handpanel also gets `openvr_env()` wherever it starts. On a Plasma desktop the window runs on Wayland and 0.85 times Plasma's scale (`FT_HANDREC_SCALE` sets another factor).
+
 ## Processes during a session
 
 - **ft-camd** publishes the camera ring. If it isn't running, the session starts it as the transient user unit `frametop-handrec-camd.service`, the way `hands/ft-cutouts` starts `frametop-cutouts-camd.service` (needs `hands/build/ft-camd` with capabilities: `hands/run.sh caps`). An ft-camd already running from ft-cutouts or ft-handsctl is used as it is.

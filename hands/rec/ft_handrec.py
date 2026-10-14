@@ -204,6 +204,9 @@ class Backend(RecorderBackend):
     guidanceChanged = Signal()
     boardChanged = Signal()
     _boardArrived = Signal(dict)
+    readyChanged = Signal()
+    _readyPart = Signal(str, str, str)
+    _readyDone = Signal(dict)
 
     def __init__(self, store, session_options=None, hub_dry_run=False, ignore_cameras=False):
         super().__init__(store, hub, hub_dry_run)
@@ -227,6 +230,11 @@ class Backend(RecorderBackend):
         self._board_busy = False
         self._boardArrived.connect(self._on_board)
         self._frametop_hands = None   # Frametop's hand tracking is installed (frametopHands)
+        self._ready = {"state": "", "error": "", "round": "", "parts": {}}   # getReady
+        self._ready_units = []       # units getReady started: stopped on quit
+        self._ready_panel = None     # the ft-handpanel getReady started: ends on quit
+        self._readyPart.connect(self._on_ready_part)
+        self._readyDone.connect(self._on_ready_done)
 
     def _texts_draft(self):
         return hub.texts_draft(self._consent_kind)
@@ -684,13 +692,86 @@ class Backend(RecorderBackend):
             self.profileChanged.emit()    # a bounty's round is marked done
 
     def shutdown(self):
-        """The window closes: recorder/window.py's, then ft-camd if the light check started it."""
+        """The window closes: recorder/window.py's, then the panel and units getReady started,
+        and ft-camd if the light check started it."""
         super().shutdown()
+        if self._ready_panel is not None:
+            try:
+                self._ready_panel.stdin.close()
+                self._ready_panel.wait(3)
+            except Exception:
+                self._ready_panel.kill()
+        for unit in reversed(self._ready_units):
+            try:
+                self._session_mod.stop_unit(unit)
+            except Exception:
+                pass
         if self._camd_started and self._session_mod:
             try:
                 self._session_mod.stop_unit(self._session_mod.CAMD_UNIT)
             except Exception:
                 pass
+
+    # --- getting ready: what a round needs, started after the consent (session.get_ready)
+    @Slot(str)
+    def getReady(self, bounty_id):
+        """Start (off this thread) what the round bounty_id needs before its checklist: SteamVR
+        checked, the cameras, hand tracking and the headset panel."""
+        if self._ready["state"] == "busy":
+            return
+        mod = self._runner()
+        self._ready = {"state": "busy", "error": "", "round": bounty_id, "parts": {}}
+        self.readyChanged.emit()
+        if self._session_options.get("dry_run") or self.sessionActive:
+            self._readyDone.emit({"ok": True, "error": "", "units": []})
+            return
+        if not mod:
+            self._readyDone.emit({"ok": False, "error": self._session_error, "units": []})
+            return
+        frametop_hands, debug = self.frametopHands, bounty_id == DEBUG_ID
+
+        def work():
+            try:
+                r = mod.get_ready(frametop_hands=frametop_hands, need_live=debug,
+                                  on_part=lambda key, state, text: self._readyPart.emit(key, state, text))
+            except Exception as e:
+                r = {"ok": False, "error": f"{type(e).__name__}: {e}", "units": [], "panel": None}
+            panel = r.pop("panel", None)
+            if panel is not None:      # kept here: a signal's dict carries no process
+                self._ready_panel = panel
+            self._readyDone.emit(r)
+        self._thread(work)
+
+    def _on_ready_part(self, key, state, text):
+        self._ready["parts"][key] = {"state": state, "text": text}
+        self.readyChanged.emit()
+
+    def _on_ready_done(self, result):
+        self._ready_units += [u for u in result.get("units", []) if u not in self._ready_units]
+        self._ready["state"] = "ok" if result.get("ok") else "failed"
+        self._ready["error"] = result.get("error", "")
+        self.readyChanged.emit()
+
+    @Property(str, notify=readyChanged)
+    def readyState(self):
+        """"" (not asked yet), "busy", "ok" or "failed"."""
+        return self._ready["state"]
+
+    @Property(str, notify=readyChanged)
+    def readyError(self):
+        return self._ready["error"]
+
+    @Property(str, notify=readyChanged)
+    def readyRound(self):
+        """The round the last getReady was for."""
+        return self._ready["round"]
+
+    @Property(list, notify=readyChanged)
+    def readyParts(self):
+        """[{key, title, state ("", "busy", "ok", "failed"), text}] in order."""
+        mod = self._session_mod
+        parts = mod.READY_PARTS if mod else ()
+        return [dict(key=k, title=t, **self._ready["parts"].get(k, {"state": "", "text": ""})) for k, t in parts]
 
     # --- review
     def _session_rows(self):

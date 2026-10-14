@@ -375,6 +375,143 @@ def start_camd(path=None, log=lambda line: None, stop=lambda: False, timeout=15.
     raise RuntimeError("ft-camd didn't start (is SteamVR running?): journalctl --user -u " + CAMD_UNIT)
 
 
+def openvr_env():
+    """The environment for an OpenVR client (ft-handpanel): Frametop's desktop points
+    XDG_CONFIG_HOME at ~/.config/frametop, where OpenVR finds no openvrpaths.vrpath."""
+    env = dict(os.environ)
+    config = env.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    home = os.path.expanduser("~/.config")
+    if (not os.path.exists(os.path.join(config, "openvr", "openvrpaths.vrpath"))
+            and os.path.exists(os.path.join(home, "openvr", "openvrpaths.vrpath"))):
+        env["XDG_CONFIG_HOME"] = home
+    return env
+
+
+def start_panel(panel_bin=None, stdout=None, timeout=15.0):
+    """Start ft-handpanel (--watch-stdin: it ends when the returned process's stdin closes) and
+    wait until it answers. Returns the process; raises RuntimeError if it can't."""
+    panel_bin = panel_bin or PANEL_BIN
+    if not os.access(panel_bin, os.X_OK):
+        raise RuntimeError("ft-handpanel isn't built: " + fix_hint("hands/rec/build.sh"))
+    out = stdout if stdout is not None else subprocess.DEVNULL
+    proc = subprocess.Popen([panel_bin, "--watch-stdin"], stdin=subprocess.PIPE, stdout=out, stderr=out,
+                            env=openvr_env())
+    panel = Panel()
+    try:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if panel.cmd("ping", reply=True, timeout=0.2):
+                return proc
+            if proc.poll() is not None:
+                raise RuntimeError("ft-handpanel exited (is SteamVR running?)")
+            time.sleep(0.1)
+    finally:
+        panel.close()
+    proc.kill()
+    raise RuntimeError("ft-handpanel doesn't answer")
+
+
+def steamvr_running():
+    return bool(find_processes("vrserver"))
+
+
+READY_PARTS = (("steamvr", "SteamVR"), ("cameras", "The cameras"), ("hands", "Hand tracking"),
+               ("panel", "The headset panel"))
+READY_WAIT_S = 20.0      # how long get_ready waits for each part it starts
+
+
+def get_ready(frametop_hands=False, need_live=False, panel_bin=None, on_part=lambda key, state, text: None,
+              log=lambda line: None):
+    """Start what a round needs before its checklist, in order: SteamVR (only checked), the
+    cameras (ft-camd), hand tracking (ft-hands) and the headset panel (ft-handpanel). With
+    Frametop's hand tracking installed (frametop_hands) its own units start; otherwise the
+    recorder's. need_live: a testing session, which records Frametop's own tracking.
+    on_part(key, state, text) reports each part ("busy", "ok" or "failed"). Returns
+    {"ok", "error", "units" (the units it started, to stop later), "panel" (the ft-handpanel
+    process it started, or None)}."""
+    out = {"ok": False, "error": "", "units": [], "panel": None}
+
+    def fail(key, text):
+        on_part(key, "failed", text)
+        out["error"] = text
+        return out
+
+    def wait(test):
+        end = time.monotonic() + READY_WAIT_S
+        while time.monotonic() < end:
+            if test():
+                return True
+            time.sleep(0.2)
+        return test()
+
+    def start_live(key):
+        if unit_active(LIVE_HANDS_UNIT):
+            return True
+        r = subprocess.run(host_command("systemctl", "--user", "start", LIVE_HANDS_UNIT),
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            fail(key, "Frametop's hand tracking didn't start: %s" % (r.stderr or r.stdout).strip())
+            return False
+        out["units"].append(LIVE_HANDS_UNIT)
+        log("started %s" % LIVE_HANDS_UNIT)
+        return True
+
+    on_part("steamvr", "busy", "")
+    if not steamvr_running():
+        return fail("steamvr", "SteamVR isn't running. Put the headset on (or start SteamVR), then try again.")
+    on_part("steamvr", "ok", "Running")
+
+    if need_live and not frametop_hands:
+        return fail("cameras", DEBUG_NEEDS_HANDS)
+    on_part("cameras", "busy", "")
+    if not ring_alive():
+        if frametop_hands:
+            if not start_live("cameras"):
+                return out
+            if not wait(ring_alive):
+                return fail("cameras", "The cameras didn't start (journalctl --user -u %s)" % LIVE_CAMD_UNIT)
+        else:
+            try:
+                if start_camd(log=log, timeout=READY_WAIT_S):
+                    out["units"].append(CAMD_UNIT)
+            except RuntimeError as e:
+                return fail("cameras", str(e))
+    on_part("cameras", "ok", "Running")
+
+    on_part("hands", "busy", "")
+    if not tracker_running() or (need_live and not unit_active(LIVE_HANDS_UNIT)):
+        if frametop_hands:
+            if not start_live("hands"):
+                return out
+        else:
+            argv = [FT_HANDS, "--no-gestures", "--status", "0"]
+            if not STANDALONE:   # built in Frametop's container: it runs there
+                argv = [IN_BOX] + argv
+            try:
+                if start_unit(HANDS_UNIT, "hand tracking for feedback", argv, log):
+                    out["units"].append(HANDS_UNIT)
+            except RuntimeError as e:
+                return fail("hands", str(e))
+        if not wait(tracker_running):
+            return fail("hands", "Hand tracking didn't start")
+    on_part("hands", "ok", "Running")
+
+    on_part("panel", "busy", "")
+    panel = Panel()
+    try:
+        running = bool(panel.cmd("ping", reply=True))
+    finally:
+        panel.close()
+    if not running:
+        try:
+            out["panel"] = start_panel(panel_bin)
+        except RuntimeError as e:
+            return fail("panel", str(e))
+    on_part("panel", "ok", "Ready (it shows when the round starts)")
+    out["ok"] = True
+    return out
+
+
 # ------------------------------------------------------------------------------------------
 # The factory calibration, without what identifies the unit
 
@@ -1880,7 +2017,7 @@ class Session:
         if not os.access(self.panel_bin, os.X_OK):
             raise _Fail("ft-handpanel isn't built: " + fix_hint("hands/rec/build.sh"))
         self._panel_proc = subprocess.Popen([self.panel_bin, "--watch-stdin"], stdin=subprocess.PIPE,
-                                            stdout=self._log_file, stderr=self._log_file)
+                                            stdout=self._log_file, stderr=self._log_file, env=openvr_env())
         end = time.monotonic() + 15
         while time.monotonic() < end:
             if self._panel.cmd("ping", reply=True, timeout=0.2):

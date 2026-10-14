@@ -184,6 +184,7 @@ static void track_buffer(struct server *s, struct wlr_buffer *buffer) {
 
 static bool relay_can_press(struct server *s);
 static void release_relay_buttons(struct server *s, const char *why);
+static void release_seat_buttons(struct server *s, const char *why);
 
 // A video (or anything moving over a large area) on a screen you don't look at keeps the
 // full frame rate (see frame_interval): its commits keep redrawing much of it, and keep
@@ -453,6 +454,10 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
         case FT_LEAVE:
             if (s->pointer_focus == sc) {
                 release_relay_buttons(s, "the pointer left the screens");
+                // Any other button still held (the 3D mouse's or a laser's press) is released
+                // here too: clearing the focus forgets it, its release would be dropped, and
+                // KWin would keep a move or drag going until the next click.
+                release_seat_buttons(s, "the pointer left the screens");
                 wlr_seat_pointer_notify_clear_focus(s->seat);
                 s->pointer_focus = NULL;
             }
@@ -626,6 +631,21 @@ static void release_relay_buttons(struct server *s, const char *why) {
     while ((code = ft_relay_buttons_take(&s->relay_buttons))) {
         wlr_seat_pointer_notify_button(s->seat, now_ms(), code, WL_POINTER_BUTTON_STATE_RELEASED);
         wlr_log(WLR_INFO, "relay button %u released (%s)", code, why);
+    }
+    wlr_seat_pointer_notify_frame(s->seat);
+}
+
+// Release every button the seat still holds, to the surface it was pressed on. wlroots
+// counts presses of the same button (n_pressed) and sends the release with the last one,
+// so release the first button until the seat's list is empty.
+static void release_seat_buttons(struct server *s, const char *why) {
+    struct wlr_seat_pointer_state *ps = &s->seat->pointer_state;
+    if (!ps->button_count || !ps->focused_surface) return;
+    while (ps->button_count) {
+        const uint32_t code = ps->buttons[0].button;
+        const bool last = ps->buttons[0].n_pressed == 1;
+        wlr_seat_pointer_notify_button(s->seat, now_ms(), code, WL_POINTER_BUTTON_STATE_RELEASED);
+        if (last) wlr_log(WLR_INFO, "button %u released (%s)", code, why);
     }
     wlr_seat_pointer_notify_frame(s->seat);
 }

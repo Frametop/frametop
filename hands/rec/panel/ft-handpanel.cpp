@@ -59,6 +59,28 @@
 //                                filling to the share given, done turns it green. "target off"
 //                                hides it and forgets the point. Reply: "ok <room x> <y> <z>"
 //                                (standing universe)
+//   layout full|top              full: the panel as above. top: only a band along its top (title,
+//                                step, Rec, big, two lines of text, a note, the time-left bar),
+//                                the rest clear, so a scene's windows below it can be seen
+//   win <id> place <x> <y> <z> <w> <h> [<yaw> <pitch>] [<look>]
+//                                a scene's window (at most 4; id: a short name): w x h metres,
+//                                centred at x y z in the head frame made level (the head's forward
+//                                direction, flattened; +y up), facing the eye, turned by yaw and
+//                                pitch degrees. It stays where it was put in the room. look: plain
+//                                (faint text lines), grid:CxR (1-6 buttons each way) or list:N
+//                                (1-10 rows). Its own overlay, frametop.handpanel.win.<id>, made
+//                                at first use. Reply: "ok <12 floats>", its pose in the room
+//                                (standing universe, row-major 3x4)
+//   win <id> lit <part>[+<part>...] [<colour>] [<label>]
+//                                light parts of it: none, bar (the title bar), left, right, top,
+//                                bottom (edges), tl, tr, bl, br (corners), button:N or item:N
+//                                (from 0). colour: cyan (default), purple, orange (a button drawn
+//                                hollow with a cross: don't touch) or green. label: a short mark
+//                                beside the first part ("_" for a space)
+//   win <id> ghost <dx> <dy> <dz> <yaw> <pitch> <roll> [<scale>] / win <id> ghost off
+//                                a dashed outline of the window, moved and turned in the window's
+//                                own frame and scaled: where to take it. Reply: "ok <12 floats>"
+//   win <id> off / win clear     hide one window (and its ghost) / all of them
 //   poses start <path> / poses stop
 //                                log poses, appending to path (poses.jsonl, DESIGN.md) at
 //                                250 Hz until stopped. "poses stop" replies "ok <samples>"
@@ -71,7 +93,7 @@
 // Each picture goes into the next of three shared buffers (linear DMA-BUFs SteamVR imported
 // once), and the overlay switches to it, as gaze/panel/ft-gazepanel.cpp does: SetOverlayRaw
 // flickered and lagged there, so it's only the fallback. The target has its own three small
-// buffers. Pictures are drawn only when a command changed something; while a demo clip plays,
+// buffers, and so does each window and ghost (made again only when its size changes). Pictures are drawn only when a command changed something; while a demo clip plays,
 // each of its frames redraws only the clip's rectangle, and copies only that to a buffer that
 // already has the rest.
 //
@@ -82,8 +104,9 @@
 // Options: --watch-stdin (quit when stdin closes: the session runs it), --socket NAME,
 // --distance METRES, --up DEG and --width DEG (UP_DEG and WIDTH_DEG: raise it out of a
 // recorded headset view), --no-vr. --no-vr is for testing without a headset: no SteamVR at all; each
-// picture's text goes to stdout instead (and with --dump DIR, the pictures to DIR/panel.pam
-// and DIR/target.pam), "poses start" writes nothing, "devices" and "head" reply with an error,
+// picture's text goes to stdout instead (and with --dump DIR, the pictures to DIR/panel.pam,
+// DIR/target.pam, DIR/win-<id>.pam and DIR/ghost-<id>.pam), the windows are placed as if the
+// headset were at the room's origin, "poses start" writes nothing, "devices" and "head" reply with an error,
 // and "target" places the point as if the headset were at the room's origin.
 // Runs in the dev container (hands/rec/build.sh builds it into hands/rec/build).
 #include <openvr.h>
@@ -560,6 +583,7 @@ struct Panel {
     double barTarget = 0, barCurrent = -1;
     std::string nearLabel = "Near", farLabel = "Far";
     bool paused = false, rec = false;
+    bool compact = false;            // layout top: only a band at the top, clear of a scene's windows
     Image image;                     // the pose picture, if image.path isn't empty
     std::string imageMode;           // "", "mirror" or "both"
     std::string wherePos, whereDist; // the diagram's, "" for none
@@ -585,6 +609,45 @@ void Draw(Panel &p) {
     p.demoW = 0;
     const double ppd = kPxPerDeg, faint = 0.75;
     const int margin = int(ppd * 1.6), width = kW - 2 * margin;
+    if (p.compact) {
+        // A scene's step: a band along the top with the cue, the hold's word and the time
+        // left; the rest is clear, so the windows below show through nothing.
+        pic.px.assign(size_t(kW) * kH * 4, 0);
+        const int bandH = int(ppd * 6.2), m = int(ppd * 0.9), stepSize = int(ppd * 0.8);
+        RoundRect(pic, 0, 0, kW, bandH, ppd * 1.2, 0.06, 0.06, 0.07, 0.85);
+        const int cy0 = m + stepSize / 2;
+        Text(pic, p.step, stepSize, kW - m, cy0, faint, kRight);
+        if (p.rec) {
+            const int rx = kW - m - TextWidth(p.step, stepSize) - (p.step.empty() ? 0 : int(ppd * 0.6));
+            Text(pic, "Rec", stepSize, rx, cy0, 1.0, 0.45, 0.4, kRight);
+            Disc(pic, rx - TextWidth("Rec", stepSize) - ppd * 0.4, cy0, ppd * 0.22, 0, 0.95, 0.2, 0.15, 1);
+        }
+        Text(pic, p.title, stepSize, m, cy0, faint, kLeft);
+        const int bigW = p.big.empty() ? 0 : int(ppd * 6), size = int(ppd * 1.15), lh = int(size * 1.25);
+        const int x0 = m + bigW, x1 = kW - m, noteSize = int(ppd * 0.95);
+        p.lines = Wrap(p.text, size, x1 - x0);
+        if (p.lines.size() > 2) p.lines.resize(2);
+        p.noteLines = Wrap(p.note, noteSize, x1 - x0);
+        if (p.noteLines.size() > 1) p.noteLines.resize(1);
+        p.textDeg = 1.15;
+        const int foot = bandH - m, block = int(p.lines.size()) * lh + int(p.noteLines.size()) * int(noteSize * 1.3);
+        int y = cy0 + stepSize / 2 + (foot - int(ppd * 0.5) - cy0 - stepSize / 2 - block) / 2;
+        if (!p.big.empty()) Text(pic, p.big, int(ppd * 2.2), m + bigW / 2, (cy0 + foot) / 2, kCyan[0], kCyan[1], kCyan[2]);
+        for (const std::string &line : p.lines) Text(pic, line, size, (x0 + x1) / 2, y + lh / 2, 1.0), y += lh;
+        for (const std::string &line : p.noteLines)
+            Text(pic, line, noteSize, (x0 + x1) / 2, y + int(noteSize * 0.65), 1.0, 0.62, 0.3), y += int(noteSize * 1.3);
+        if (p.countdown >= 0) {
+            const int th = std::max(4, int(ppd * 0.18));
+            Rect(pic, m, foot - th, kW - m, foot, 1, 1, 1, 0.15);
+            Rect(pic, m, foot - th, m + int(std::lround((kW - 2 * m) * p.countdown)), foot, kCyan[0], kCyan[1], kCyan[2], 0.95);
+        }
+        if (p.paused) {
+            const int size = int(ppd * 1.6);
+            RoundRect(pic, 0, 0, kW, bandH, ppd * 1.2, 0.02, 0.02, 0.03, 0.8);
+            Text(pic, "Paused", size, kW / 2, bandH / 2, 1.0);
+        }
+        return;
+    }
 
     // The title and the step share the top line, a red "Rec" by the step while recording; a
     // faint rule under them.
@@ -804,6 +867,176 @@ void DrawTarget(Target &t) {
         Disc(pic, c, c, r1 + outline, r0 - outline, 0.05, 0.05, 0.06, 0.6);
         Disc(pic, c, c, r1, r0, 1, 1, 1, 0.3);
         Disc(pic, c, c, r1, r0, 0.3, 0.85, 1.0, 1, std::clamp(t.progress, 0.0, 1.0));
+    }
+}
+
+// ---------------------------------------------------------------- the scene's windows
+
+// A bounty's scene (DESIGN.md, "Scenes"): plain window shapes fixed in the room, with a part
+// lit to say where to tap or grab, and a ghost outline to say where to take it. They take no
+// input and never move by themselves: the person acts on them, the cameras record.
+constexpr int kWinMax = 4;
+constexpr int kWinPx = 768;     // a window's picture: its longer side
+constexpr int kGhostPx = 384;   // a ghost's
+constexpr double kWinEdgeM = 0.03;    // a lit edge's band
+constexpr double kWinCornerM = 0.07;  // a lit corner's arms
+
+struct Win {
+    std::string id;
+    bool on = false;
+    double w = 0.4, h = 0.3;      // metres
+    std::string look = "plain";   // plain, grid:CxR (buttons), list:N (rows)
+    int cols = 0, rows = 0;
+    std::string lit = "none", colour = "cyan", label;
+    vr::HmdMatrix34_t pose{};     // in the room (standing universe)
+    Picture pic{0, 0, {}};
+    bool dirty = false, shown = false;
+    bool ghostOn = false, ghostDirty = false, ghostShown = false;
+    vr::HmdMatrix34_t ghostPose{};
+    double ghostScale = 1;
+    Picture ghostPic{0, 0, {}};
+    vr::VROverlayHandle_t oh = vr::k_ulOverlayHandleInvalid, gh = vr::k_ulOverlayHandleInvalid;
+};
+
+const double *Colour(const std::string &name) {
+    static const double cyan[3] = {0.3, 0.85, 1.0}, purple[3] = {0.78, 0.48, 1.0}, orange[3] = {1.0, 0.56, 0.16},
+                        green[3] = {0.32, 0.9, 0.42};
+    return name == "purple" ? purple : name == "orange" ? orange : name == "green" ? green : cyan;
+}
+
+bool WinLook(Win &w, const std::string &look) {
+    int a = 0, b = 0;
+    if (look == "plain") w.cols = w.rows = 0;
+    else if (std::sscanf(look.c_str(), "grid:%dx%d", &a, &b) == 2 && a >= 1 && a <= 6 && b >= 1 && b <= 6) w.cols = a, w.rows = b;
+    else if (std::sscanf(look.c_str(), "list:%d", &a) == 1 && a >= 1 && a <= 10) w.cols = 1, w.rows = a;
+    else return false;
+    w.look = look;
+    return true;
+}
+
+bool WinPart1(const std::string &part) {
+    static const char *parts[] = {"none", "bar", "left", "right", "top", "bottom", "tl", "tr", "bl", "br"};
+    for (const char *p : parts)
+        if (part == p) return true;
+    int n = -1;
+    return (std::sscanf(part.c_str(), "button:%d", &n) == 1 || std::sscanf(part.c_str(), "item:%d", &n) == 1) && n >= 0;
+}
+
+// The parts of "a+b+...": a two-hand grab lights two corners or both edges at once.
+std::vector<std::string> WinParts(const std::string &lit) {
+    std::vector<std::string> out;
+    for (size_t at = 0; at <= lit.size();) {
+        const size_t end = std::min(lit.find('+', at), lit.size());
+        out.push_back(lit.substr(at, end - at));
+        at = end + 1;
+    }
+    return out;
+}
+
+bool WinPart(const std::string &lit) {
+    for (const std::string &part : WinParts(lit))
+        if (!WinPart1(part)) return false;
+    return true;
+}
+
+// A window as it shows: a dark body, a title bar, its content (buttons, list rows or faint
+// lines of text), and the lit part in its colour, with its label.
+void DrawWin(Win &w) {
+    const int pw = w.w >= w.h ? kWinPx : std::max(16, int(std::lround(kWinPx * w.w / w.h)));
+    const int ph = w.w >= w.h ? std::max(16, int(std::lround(kWinPx * w.h / w.w))) : kWinPx;
+    Picture &pic = w.pic;
+    pic.w = pw, pic.h = ph;
+    pic.px.assign(size_t(pw) * ph * 4, 0);
+    const double s = pw / w.w;  // pixels a metre
+    const double *c = Colour(w.colour);
+    const int rad = int(0.012 * s), bar = int(std::min(0.035, 0.16 * w.h) * s), m = int(0.012 * s);
+    const std::vector<std::string> parts = WinParts(w.lit);
+    auto isLit = [&parts](const std::string &part) { return std::find(parts.begin(), parts.end(), part) != parts.end(); };
+    const bool litBar = isLit("bar");
+    RoundRect(pic, 0, 0, pw, ph, rad, 0.11, 0.12, 0.15, 0.94);
+    RoundRect(pic, 0, 0, pw, bar + rad, rad, litBar ? c[0] : 0.22, litBar ? c[1] : 0.23, litBar ? c[2] : 0.27, 1);
+    Rect(pic, 0, bar, pw, bar + rad, 0.11, 0.12, 0.15, 1);
+    for (int k = 0; k < 3; ++k)  // the title bar's three dots, and a short title
+        Disc(pic, pw - m - bar * 0.3 - k * bar * 0.55, bar / 2.0, bar * 0.14, 0, litBar ? 0.05 : 0.6, litBar ? 0.05 : 0.6,
+             litBar ? 0.06 : 0.62, 0.9);
+    Rect(pic, m, bar / 2 - std::max(1, bar / 12), m + int(0.08 * s), bar / 2 + std::max(1, bar / 12), litBar ? 0.05 : 0.6,
+         litBar ? 0.05 : 0.6, litBar ? 0.06 : 0.62, 0.8);
+    const int x0 = m, y0 = bar + m, x1 = pw - m, y1 = ph - m;
+    int litCell = -1;
+    for (const std::string &part : parts)
+        if (std::sscanf(part.c_str(), "button:%d", &litCell) == 1 || std::sscanf(part.c_str(), "item:%d", &litCell) == 1) break;
+        else litCell = -1;
+    const int labelSize = std::max(10, int(0.035 * s));
+    if (w.cols > 0) {
+        const int gap = int(0.01 * s);
+        const int cw = (x1 - x0 - (w.cols - 1) * gap) / w.cols, chh = (y1 - y0 - (w.rows - 1) * gap) / w.rows;
+        for (int r = 0; r < w.rows; ++r)
+            for (int k = 0; k < w.cols; ++k) {
+                const int cx = x0 + k * (cw + gap), cy = y0 + r * (chh + gap), cell = r * w.cols + k;
+                const bool lit = cell == litCell;
+                const bool hollow = lit && w.colour == "orange";  // a no-go: outlined, with its cross
+                if (lit && !hollow) RoundRect(pic, cx, cy, cx + cw, cy + chh, rad, c[0], c[1], c[2], 1);
+                else RoundRect(pic, cx, cy, cx + cw, cy + chh, rad, 0.22, 0.23, 0.28, 1);
+                if (hollow) {
+                    const int b = std::max(3, int(0.005 * s));
+                    RoundRect(pic, cx, cy, cx + cw, cy + chh, rad, c[0], c[1], c[2], 1);
+                    RoundRect(pic, cx + b, cy + b, cx + cw - b, cy + chh - b, std::max(1, rad - b), 0.16, 0.12, 0.1, 1);
+                    Text(pic, w.label.empty() ? "×" : w.label, std::min(chh, cw) * 2 / 3, cx + cw / 2, cy + chh / 2, c[0],
+                         c[1], c[2]);
+                } else if (lit && !w.label.empty()) {
+                    Text(pic, w.label, std::min({chh * 2 / 3, cw / 2, labelSize * 3}), cx + cw / 2, cy + chh / 2, 0.05, 0.05, 0.07);
+                } else if (w.rows > 1 && w.cols == 1) {  // a list row: a faint line of text
+                    Rect(pic, cx + m, cy + chh / 2 - std::max(1, chh / 10), cx + cw / 2, cy + chh / 2 + std::max(1, chh / 10),
+                         0.45, 0.46, 0.5, 0.7);
+                }
+            }
+    } else {
+        const int lh = int(0.022 * s);  // faint lines of text: the window has something in it
+        for (int y = y0 + lh; y + lh < y1; y += 2 * lh)
+            Rect(pic, x0 + m, y, x0 + m + int((x1 - x0 - 2 * m) * (0.55 + 0.4 * ((y / lh) % 3) / 2.0)), y + lh / 2, 0.36,
+                 0.37, 0.42, 0.6);
+    }
+    // A lit edge or corner: a band in the window's colour along it, the label beside the first.
+    const int band = int(kWinEdgeM * s), arm = int(kWinCornerM * s);
+    int lx = -1, ly = -1;
+    auto at = [&lx, &ly](int x, int y) {
+        if (lx < 0) lx = x, ly = y;
+    };
+    for (const std::string &part : parts) {
+        if (part == "left") RoundRect(pic, 0, 0, band, ph, rad, c[0], c[1], c[2], 0.95), at(band + labelSize, ph / 2);
+        else if (part == "right") RoundRect(pic, pw - band, 0, pw, ph, rad, c[0], c[1], c[2], 0.95), at(pw - band - labelSize, ph / 2);
+        else if (part == "top") RoundRect(pic, 0, 0, pw, band, rad, c[0], c[1], c[2], 0.95), at(pw / 2, band + labelSize);
+        else if (part == "bottom") RoundRect(pic, 0, ph - band, pw, ph, rad, c[0], c[1], c[2], 0.95), at(pw / 2, ph - band - labelSize);
+        else if (part.size() == 2 && (part[0] == 't' || part[0] == 'b') && (part[1] == 'l' || part[1] == 'r')) {
+            const bool top = part[0] == 't', left = part[1] == 'l';
+            const int ax = left ? 0 : pw - arm, ay = top ? 0 : ph - arm, bx = left ? 0 : pw - band, by = top ? 0 : ph - band;
+            RoundRect(pic, ax, by, ax + arm, by + band, rad, c[0], c[1], c[2], 0.95);
+            RoundRect(pic, bx, ay, bx + band, ay + arm, rad, c[0], c[1], c[2], 0.95);
+            at(left ? arm + labelSize : pw - arm - labelSize, top ? arm / 2 + band : ph - arm / 2 - band);
+        } else if (part == "bar") {
+            at(pw / 2, bar + labelSize);
+        }
+    }
+    if (lx >= 0 && !w.label.empty()) Text(pic, w.label, labelSize, lx, ly, c[0], c[1], c[2]);
+}
+
+// The ghost: where to take the window, as a dashed outline with a faint fill, in its colour.
+void DrawGhost(Win &w) {
+    const int pw = w.w >= w.h ? kGhostPx : std::max(8, int(std::lround(kGhostPx * w.w / w.h)));
+    const int ph = w.w >= w.h ? std::max(8, int(std::lround(kGhostPx * w.h / w.w))) : kGhostPx;
+    Picture &pic = w.ghostPic;
+    pic.w = pw, pic.h = ph;
+    pic.px.assign(size_t(pw) * ph * 4, 0);
+    const double *c = Colour(w.colour);
+    const int t = std::max(3, pw / 90), dash = std::max(8, pw / 18);
+    RoundRect(pic, 0, 0, pw, ph, pw / 40.0, c[0], c[1], c[2], 0.1);
+    for (int x = 0; x < pw; x += 2 * dash) {
+        Rect(pic, x, 0, std::min(pw, x + dash), t, c[0], c[1], c[2], 0.95);
+        Rect(pic, x, ph - t, std::min(pw, x + dash), ph, c[0], c[1], c[2], 0.95);
+    }
+    for (int y = 0; y < ph; y += 2 * dash) {
+        Rect(pic, 0, y, t, std::min(ph, y + dash), c[0], c[1], c[2], 0.95);
+        Rect(pic, pw - t, y, pw, std::min(ph, y + dash), c[0], c[1], c[2], 0.95);
     }
 }
 
@@ -1083,6 +1316,55 @@ vr::HmdMatrix34_t Facing(const double at[3], const double eye[3]) {
     return m;
 }
 
+// a then b: 3x4 transforms, each with an unwritten last row of 0 0 0 1.
+vr::HmdMatrix34_t Mul(const vr::HmdMatrix34_t &a, const vr::HmdMatrix34_t &b) {
+    vr::HmdMatrix34_t m{};
+    for (int r = 0; r < 3; ++r)
+        for (int k = 0; k < 4; ++k)
+            m.m[r][k] = a.m[r][0] * b.m[0][k] + a.m[r][1] * b.m[1][k] + a.m[r][2] * b.m[2][k] + (k == 3 ? a.m[r][3] : 0);
+    return m;
+}
+
+// Moved by (x, y, z), then turned by yaw (about +y), pitch (about +x) and roll (about +z), in
+// degrees, in that order: a window's or a ghost's pose in its parent's frame.
+vr::HmdMatrix34_t Local(double x, double y, double z, double yaw, double pitch, double roll) {
+    const double a = yaw * M_PI / 180, b = pitch * M_PI / 180, c = roll * M_PI / 180;
+    const double ry[3][3] = {{std::cos(a), 0, std::sin(a)}, {0, 1, 0}, {-std::sin(a), 0, std::cos(a)}};
+    const double rx[3][3] = {{1, 0, 0}, {0, std::cos(b), -std::sin(b)}, {0, std::sin(b), std::cos(b)}};
+    const double rz[3][3] = {{std::cos(c), -std::sin(c), 0}, {std::sin(c), std::cos(c), 0}, {0, 0, 1}};
+    double t[3][3], r[3][3];
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) t[i][j] = ry[i][0] * rx[0][j] + ry[i][1] * rx[1][j] + ry[i][2] * rx[2][j];
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) r[i][j] = t[i][0] * rz[0][j] + t[i][1] * rz[1][j] + t[i][2] * rz[2][j];
+    vr::HmdMatrix34_t m{};
+    for (int i = 0; i < 3; ++i) m.m[i][0] = float(r[i][0]), m.m[i][1] = float(r[i][1]), m.m[i][2] = float(r[i][2]);
+    m.m[0][3] = float(x), m.m[1][3] = float(y), m.m[2][3] = float(z);
+    return m;
+}
+
+std::string PoseReply(const vr::HmdMatrix34_t &m) {
+    char out[256];
+    int len = std::snprintf(out, sizeof out, "ok");
+    for (int i = 0; i < 12; ++i) len += std::snprintf(out + len, sizeof out - len, " %.5f", m.m[i / 4][i % 4]);
+    return out;
+}
+
+// --no-vr: the windows as text.
+void PrintWins(const Win *wins) {
+    for (int k = 0; k < kWinMax; ++k) {
+        const Win &w = wins[k];
+        if (!w.on) continue;
+        std::printf("win %s: %.2f x %.2f m %s at %.3f %.3f %.3f, lit %s %s%s%s\n", w.id.c_str(), w.w, w.h, w.look.c_str(),
+                    w.pose.m[0][3], w.pose.m[1][3], w.pose.m[2][3], w.lit.c_str(), w.colour.c_str(),
+                    w.label.empty() ? "" : " ", w.label.c_str());
+        if (w.ghostOn)
+            std::printf("ghost %s: at %.3f %.3f %.3f, scale %.2f\n", w.id.c_str(), w.ghostPose.m[0][3], w.ghostPose.m[1][3],
+                        w.ghostPose.m[2][3], w.ghostScale);
+    }
+    std::fflush(stdout);
+}
+
 // The command word: buf starts with word, then a space or the end; rest is what follows.
 bool Is(const char *buf, const char *word, const char **rest = nullptr) {
     const size_t n = std::strlen(word);
@@ -1177,6 +1459,145 @@ int main(int argc, char **argv) {
     bool visible = false, dirty = false, shown = false;  // shown: SteamVR shows it (after its first picture)
     bool targetDirty = false, targetShown = false;
     int pictures = 0;
+    Win wins[kWinMax];
+    Buffers winBuffers[kWinMax], ghostBuffers[kWinMax];
+    bool winsChanged = false;  // --no-vr: print them
+
+    // A window's slot by id, or (place) a free one; -1: none.
+    auto winSlot = [&wins](const std::string &id, bool make) {
+        for (int k = 0; k < kWinMax; ++k)
+            if (wins[k].on && wins[k].id == id) return k;
+        if (make)
+            for (int k = 0; k < kWinMax; ++k)
+                if (!wins[k].on) return k;
+        return -1;
+    };
+    auto winOff = [&](Win &w) {
+        if (ov) {
+            std::lock_guard<std::mutex> lk(g_vr);
+            if (w.shown) ov->HideOverlay(w.oh);
+            if (w.ghostShown) ov->HideOverlay(w.gh);
+        }
+        const vr::VROverlayHandle_t oh = w.oh, gh = w.gh;
+        w = Win{};
+        w.oh = oh, w.gh = gh;
+        winsChanged = true;
+    };
+    // win <id> place|lit|ghost|off ..., win clear: the reply.
+    auto winCommand = [&](const char *rest) -> std::string {
+        char id[32] = "", verb[16] = "";
+        int used = 0;
+        if (!std::strcmp(rest, "clear")) {
+            for (Win &w : wins)
+                if (w.on) winOff(w);
+            return "ok";
+        }
+        if (std::sscanf(rest, "%31s %15s %n", id, verb, &used) < 2)
+            return "error usage: win <id> place|lit|ghost|off ... | win clear";
+        const char *args = rest + used;
+        const std::string v = verb;
+        const int k = winSlot(id, v == "place");
+        if (k < 0) return v == "place" ? "error no free window (at most 4)" : std::string("error no window ") + id;
+        Win &w = wins[k];
+        if (v == "off") {
+            winOff(w);
+            return "ok";
+        }
+        if (v == "place") {
+            // place <x> <y> <z> <w> <h> [<yaw> <pitch>] [<look>]: the centre in the head's frame now, levelled
+            double x, y, z, ww, hh, yaw = 0, pitch = 0;
+            char look[32] = "plain";
+            int n = 0;
+            if (std::sscanf(args, "%lf %lf %lf %lf %lf %n", &x, &y, &z, &ww, &hh, &n) < 5 || ww < 0.02 || hh < 0.02 || ww > 3 || hh > 3)
+                return "error usage: win <id> place <x> <y> <z> <w> <h> [<yaw> <pitch>] [<look>]";
+            const char *more = args + n;
+            int n2 = 0;
+            if (std::sscanf(more, "%lf %lf %n", &yaw, &pitch, &n2) == 2) more += n2;
+            std::sscanf(more, "%31s", look);
+            Win next = w;
+            if (!WinLook(next, look)) return std::string("error look ") + look + ": plain, grid:CxR or list:N";
+            vr::HmdMatrix34_t head{};
+            head.m[0][0] = head.m[1][1] = head.m[2][2] = 1;  // --no-vr: the head at the room's origin
+            if (!noVr && !HeadPose(head)) return "error no head pose";
+            // The head's frame made level: turned with the head, not tipped with it, so a window
+            // "ahead" stays at the same height whether the person looks down at their lap or up.
+            const double fx = head.m[0][2], fz = head.m[2][2], fn = std::hypot(fx, fz);
+            if (fn > 0.05) {
+                const double z[3] = {fx / fn, 0, fz / fn}, x[3] = {z[2], 0, -z[0]};
+                for (int r = 0; r < 3; ++r) head.m[r][0] = float(x[r]), head.m[r][1] = r == 1, head.m[r][2] = float(z[r]);
+            }
+            const double local[3] = {x, y, z}, eye[3] = {head.m[0][3], head.m[1][3], head.m[2][3]};
+            double at[3];
+            for (int r = 0; r < 3; ++r) at[r] = head.m[r][0] * local[0] + head.m[r][1] * local[1] + head.m[r][2] * local[2] + head.m[r][3];
+            next.id = id, next.on = true, next.w = ww, next.h = hh;
+            next.pose = Mul(Facing(at, eye), Local(0, 0, 0, yaw, pitch, 0));
+            next.lit = "none", next.label.clear(), next.colour = "cyan";
+            next.ghostOn = false;
+            if (w.ghostShown && ov) {
+                std::lock_guard<std::mutex> lk(g_vr);
+                ov->HideOverlay(w.gh);
+            }
+            next.ghostShown = false;
+            next.dirty = true;
+            w = next;
+            if (ov) {
+                if (w.oh == vr::k_ulOverlayHandleInvalid) {
+                    const std::string key = "frametop.handpanel.win." + std::to_string(k);
+                    std::lock_guard<std::mutex> lk(g_vr);
+                    if (ov->CreateOverlay(key.c_str(), "Frametop hand recorder window", &w.oh) != vr::VROverlayError_None)
+                        return "error can't create the window's overlay";
+                    ov->SetOverlaySortOrder(w.oh, 240);  // under the panel
+                }
+                std::lock_guard<std::mutex> lk(g_vr);
+                ov->SetOverlayTransformAbsolute(w.oh, vr::TrackingUniverseStanding, &w.pose);
+                ov->SetOverlayWidthInMeters(w.oh, float(w.w));
+            }
+            winsChanged = true;
+            return PoseReply(w.pose);
+        }
+        if (v == "lit") {
+            // lit <part> [<colour>] [<label>]
+            char part[64] = "", colour[16] = "cyan", label[32] = "";
+            if (std::sscanf(args, "%63s %15s %31s", part, colour, label) < 1 || !WinPart(part))
+                return "error usage: win <id> lit none|bar|left|right|top|bottom|tl|tr|bl|br|button:N|item:N[+...] [<colour>] [<label>]";
+            w.lit = part, w.colour = colour, w.label = label;
+            for (char &ch : w.label)
+                if (ch == '_') ch = ' ';
+            w.dirty = winsChanged = true;
+            if (w.ghostOn) w.ghostDirty = true;  // the ghost takes the lit colour
+            return "ok";
+        }
+        if (v == "ghost") {
+            // ghost <dx> <dy> <dz> <yaw> <pitch> <roll> [<scale>]: in the window's own frame
+            if (!std::strcmp(args, "off")) {
+                if (ov && w.ghostShown) {
+                    std::lock_guard<std::mutex> lk(g_vr);
+                    ov->HideOverlay(w.gh);
+                }
+                w.ghostOn = w.ghostShown = false, winsChanged = true;
+                return "ok";
+            }
+            double dx, dy, dz, yaw, pitch, roll, scale = 1;
+            if (std::sscanf(args, "%lf %lf %lf %lf %lf %lf %lf", &dx, &dy, &dz, &yaw, &pitch, &roll, &scale) < 6 || scale < 0.2 || scale > 5)
+                return "error usage: win <id> ghost <dx> <dy> <dz> <yaw> <pitch> <roll> [<scale>] | win <id> ghost off";
+            w.ghostPose = Mul(w.pose, Local(dx, dy, dz, yaw, pitch, roll));
+            w.ghostScale = scale, w.ghostOn = w.ghostDirty = winsChanged = true;
+            if (ov) {
+                if (w.gh == vr::k_ulOverlayHandleInvalid) {
+                    const std::string key = "frametop.handpanel.ghost." + std::to_string(k);
+                    std::lock_guard<std::mutex> lk(g_vr);
+                    if (ov->CreateOverlay(key.c_str(), "Frametop hand recorder ghost", &w.gh) != vr::VROverlayError_None)
+                        return "error can't create the ghost's overlay";
+                    ov->SetOverlaySortOrder(w.gh, 245);
+                }
+                std::lock_guard<std::mutex> lk(g_vr);
+                ov->SetOverlayTransformAbsolute(w.gh, vr::TrackingUniverseStanding, &w.ghostPose);
+                ov->SetOverlayWidthInMeters(w.gh, float(w.w * scale));
+            }
+            return PoseReply(w.ghostPose);
+        }
+        return "error usage: win <id> place|lit|ghost|off ... | win clear";
+    };
     std::fprintf(stderr, "ft-handpanel running: @%s, %.2f m%s\n", sockName.c_str(), distance, noVr ? ", no VR" : "");
 
     while (!g_stop) {
@@ -1425,6 +1846,11 @@ int main(int argc, char **argv) {
                     for (int i = 0; i < 12; ++i) len += std::snprintf(out + len, sizeof out - len, " %.6f", m.m[i / 4][i % 4]);
                     reply = out;
                 }
+            } else if (Is(buf, "win", &rest)) {
+                reply = winCommand(rest);
+            } else if (Is(buf, "layout", &rest)) {
+                if (!std::strcmp(rest, "full") || !std::strcmp(rest, "top")) p.compact = rest[0] == 't', dirty = true;
+                else reply = "error usage: layout full|top";
             } else if (Is(buf, "ping")) {
                 reply = visible ? "ok shown" : "ok hidden";
             } else {
@@ -1478,6 +1904,42 @@ int main(int argc, char **argv) {
             }
             targetDirty = false;
         }
+        // The windows and their ghosts that changed. A picture of a new size gets buffers of its size.
+        for (int k = 0; k < kWinMax; ++k) {
+            Win &w = wins[k];
+            if (w.on && w.dirty) {
+                DrawWin(w);
+                if (ov) {
+                    if (winBuffers[k].w != w.pic.w || winBuffers[k].h != w.pic.h) {  // (a failed Make keeps the size: SetOverlayRaw then)
+                        std::lock_guard<std::mutex> lk(g_vr);  // Make and Drop call OpenVR
+                        winBuffers[k].Drop();
+                        if (winBuffers[k].Make(w.pic.w, w.pic.h)) ov->SetOverlayFlag(w.oh, vr::VROverlayFlags_IsPremultiplied, true);
+                    }
+                    winBuffers[k].Present(ov, w.oh, w.pic);
+                    std::lock_guard<std::mutex> lk(g_vr);
+                    if (!w.shown) ov->ShowOverlay(w.oh), w.shown = true;
+                }
+                if (noVr && !dumpDir.empty()) Dump(w.pic, dumpDir + "/win-" + w.id + ".pam");
+                w.dirty = false;
+            }
+            if (w.on && w.ghostOn && w.ghostDirty) {
+                DrawGhost(w);
+                if (ov) {
+                    if (ghostBuffers[k].w != w.ghostPic.w || ghostBuffers[k].h != w.ghostPic.h) {  // (a failed Make keeps the size: SetOverlayRaw then)
+                        std::lock_guard<std::mutex> lk(g_vr);  // Make and Drop call OpenVR
+                        ghostBuffers[k].Drop();
+                        if (ghostBuffers[k].Make(w.ghostPic.w, w.ghostPic.h)) ov->SetOverlayFlag(w.gh, vr::VROverlayFlags_IsPremultiplied, true);
+                    }
+                    ghostBuffers[k].Present(ov, w.gh, w.ghostPic);
+                    std::lock_guard<std::mutex> lk(g_vr);
+                    if (!w.ghostShown) ov->ShowOverlay(w.gh), w.ghostShown = true;
+                }
+                if (noVr && !dumpDir.empty()) Dump(w.ghostPic, dumpDir + "/ghost-" + w.id + ".pam");
+                w.ghostDirty = false;
+            }
+        }
+        if (noVr && winsChanged) std::printf("--- windows\n"), PrintWins(wins);
+        winsChanged = false;
         if (noVr && (panelNow || targetNow)) {
             Print(p, t, visible, ++pictures);
             if (!dumpDir.empty() && panelNow) Dump(p.pic, dumpDir + "/panel.pam");
@@ -1490,6 +1952,12 @@ int main(int argc, char **argv) {
         ov->DestroyOverlay(th);
         buffers.Drop();
         targetBuffers.Drop();
+        for (int k = 0; k < kWinMax; ++k) {
+            if (wins[k].oh != vr::k_ulOverlayHandleInvalid) ov->DestroyOverlay(wins[k].oh);
+            if (wins[k].gh != vr::k_ulOverlayHandleInvalid) ov->DestroyOverlay(wins[k].gh);
+            winBuffers[k].Drop();
+            ghostBuffers[k].Drop();
+        }
         vr::VR_Shutdown();
     }
     return 0;

@@ -27,7 +27,12 @@ it would upload.
 
 The dataset is HF_DATASET; FT_HANDREC_DATASET overrides it (a test repo, for rehearsals).
 
+`board` fetches the bounty board (bounties.json) from the dataset into BASE/board-cache.json,
+with the saved login when there is one (the dataset is gated): the window's board then uses it
+when it's newer than the one shipped here (recorder/bounties.py checks what it may say).
+
 usage: hub.py [--base DIR] whoami [--json]
+       hub.py [--base DIR] board [--json]
        hub.py [--base DIR] login [--json]
        hub.py [--base DIR] upload SESSION [--dry-run] [--again] [--json]
 With --json, each line of output is one JSON object: {"phase", "text", "fraction"} as it goes,
@@ -44,6 +49,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import takes  # noqa: E402  (next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+from recorder import bounties  # noqa: E402
 from recorder import hub as rhub  # noqa: E402
 from recorder.hub import HF_ENV, REPO_RE, TOKENS_URL, HubError, explain, export_sha, is_draft, now_iso  # noqa: E402,F401
 
@@ -104,11 +110,14 @@ def describe(summary, report, sha, nbytes):
     objects = ", ".join(s.get("objects") or []) or "none"
     if s.get("own_objects"):
         objects += f" (+{s['own_objects']} of their own)"
-    message = f"Hands: session {s.get('session')} from {s.get('contributor')}"
+    bounty = f"{s['bounty']} " if s.get("bounty") else ""
+    message = f"Hands: {bounty}session {s.get('session')} from {s.get('contributor')}"
     lines = ["Contribution to the Frametop hand dataset, uploaded from the hand recorder.", "",
              f"- Session: {s.get('session')}",
+             f"- Bounty: {s.get('bounty') or 'none (a full session or a quick round)'}",
              f"- Contributor: {s.get('contributor')}",
-             f"- Takes: {s.get('takes')} ({s.get('minutes')} minutes, {s.get('sets')} frame sets)",
+             f"- Takes: {s.get('takes')} ({s.get('minutes')} minutes, {s.get('sets')} frame sets"
+             f"{', %g a second' % s['record_hz'] if s.get('record_hz') else ''})",
              f"- Lighting: {s.get('lighting') or 'not given'}",
              f"- Objects: {objects}",
              f"- Controllers: {s.get('controllers') or 'not given'}",
@@ -120,6 +129,36 @@ def describe(summary, report, sha, nbytes):
                                                                  if report.warnings else ".")]
     lines += [f"- {w}" for w in report.warnings]
     return message, "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------- the bounty board
+
+def board_url(repo):
+    return f"{rhub.dataset_url(repo)}/resolve/main/bounties.json"
+
+
+def fetch_board(base):
+    """The dataset's bounties.json into base/board-cache.json (session.load_board reads it).
+    Returns {"updated", "bounties"}; raises HubError."""
+    repo = dataset_id()
+    token = None
+    try:
+        token = _hf().get_token()
+    except (HubError, AttributeError):
+        pass   # no huggingface_hub, or an old one: try without a login
+    try:
+        board = bounties.fetch(board_url(repo), os.path.join(base, "board-cache.json"), token)
+    except ValueError as e:
+        raise HubError("hub", f"The dataset's bounty board isn't valid: {e}") from None
+    except OSError as e:
+        status = getattr(e, "code", None)
+        if status in (401, 403):
+            raise HubError("terms", "Log in and accept the dataset's terms to get its newest bounty board.",
+                           rhub.dataset_url(repo)) from None
+        if status == 404:
+            raise HubError("not-found", f"{repo} has no bounty board yet.") from None
+        raise HubError("network", f"Couldn't fetch the bounty board ({type(e).__name__}: {e}).") from None
+    return {"updated": board["updated"], "bounties": len(board["bounties"])}
 
 
 # ---------------------------------------------------------------- talking to the Hub
@@ -206,6 +245,8 @@ def main():
     w.add_argument("--json", action="store_true")
     li = sub.add_parser("login", help="log in to Hugging Face in the browser")
     li.add_argument("--json", action="store_true")
+    b = sub.add_parser("board", help="fetch the dataset's bounty board")
+    b.add_argument("--json", action="store_true")
     u = sub.add_parser("upload", help="upload exports/SESSION as a pull request")
     u.add_argument("session")
     u.add_argument("--dry-run", action="store_true", help="no network: say what would be uploaded")
@@ -223,6 +264,13 @@ def main():
                 emit({"done": who})
             else:
                 print(f"logged in as {who['name']} (token role: {who['role'] or 'unknown'})")
+            return 0
+        if a.cmd == "board":
+            got = fetch_board(os.path.abspath(os.path.expanduser(a.base)))
+            if a.json:
+                emit({"done": got})
+            else:
+                print(f"bounty board of {got['updated']}: {got['bounties']} bounties")
             return 0
         if a.cmd == "login":
             def code(phase, text, **extra):

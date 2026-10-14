@@ -31,6 +31,7 @@ its own window for SteamVR's dashboard: --qml its main.qml, --style Basic.
 """
 import argparse
 import datetime
+import json
 import os
 import signal
 import subprocess
@@ -50,6 +51,7 @@ import hub  # noqa: E402
 import takes  # noqa: E402  (next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 # The window's shared part (recorder/window.py): consent, export, login, upload, keeping awake.
+from recorder import bounties  # noqa: E402
 from recorder.window import (RecorderBackend, consent_version as _consent_version, gigabytes,  # noqa: E402,F401
                              headset_worn, process_running, read_text)
 
@@ -169,6 +171,7 @@ class Backend(RecorderBackend):
     UPLOAD_PATH = UPLOAD_PATH
     ACTIVE_STATES = ACTIVE_STATES
     ROUND_BYTES = ROUND_BYTES
+    PROFILE_KEEP = ("bounties",)
 
     # A property here can't notify with the base's signals (PySide6 6.11 leaves it without
     # one), so these relay them.
@@ -179,6 +182,8 @@ class Backend(RecorderBackend):
     cameraChanged = Signal()
     _cameraArrived = Signal(dict)
     guidanceChanged = Signal()
+    boardChanged = Signal()
+    _boardArrived = Signal(dict)
 
     def __init__(self, store, session_options=None, hub_dry_run=False, ignore_cameras=False):
         super().__init__(store, hub, hub_dry_run)
@@ -197,6 +202,10 @@ class Backend(RecorderBackend):
         self._restarting = False
         self._cameraArrived.connect(self._on_camera)
         self._lightingArrived.connect(self._on_lighting)
+        self.profileChanged.connect(self.boardChanged)    # the board's done marks
+        self._board = {"state": "", "text": ""}
+        self._board_busy = False
+        self._boardArrived.connect(self._on_board)
 
     def _texts_draft(self):
         return hub.texts_draft()
@@ -276,6 +285,67 @@ class Backend(RecorderBackend):
         settings["guidance"] = value
         takes.write_json(path, settings)
         self.guidanceChanged.emit()
+
+    # --- the bounty board (recorder/bounties.py): short rounds for what the tracker needs most
+    def _board_now(self):
+        mod = self._runner()
+        return mod.load_board(self.store.base) if mod else None
+
+    @Property("QVariantList", notify=boardChanged)
+    def bounties(self):
+        """The board's bounties (bounties.view), with "lastText" for the last round."""
+        mod = self._runner()
+        if not mod:
+            return []
+        rows = bounties.view(self._board_now(), self.store.profile(), {}, mod.have_bounty_script)
+        for b in rows:
+            b["lastText"] = session_label(b["last"]) if b["last"] else ""
+            b["minutesText"] = f"about {b['minutes']:g} min" if b["minutes"] else ""
+        return rows
+
+    @Property(str, notify=boardChanged)
+    def boardUpdated(self):
+        board = self._board_now()
+        return board["updated"] if board else ""
+
+    @Property("QVariantMap", notify=boardChanged)
+    def boardFetch(self):
+        """The last fetch: {"state": ""|fetching|ok|error, "text"}."""
+        return self._board
+
+    @Slot()
+    def refreshBoard(self):
+        """hub.py board in a child process: the dataset's board into board-cache.json."""
+        if self._board_busy or self._hub_dry_run:
+            return
+        self._board_busy = True
+        self._board = {"state": "fetching", "text": "Getting the newest board"}
+        self.boardChanged.emit()
+        argv = self._hub_argv("board", "--json")
+
+        def run():
+            try:
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+                lines = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
+                result = lines[-1] if lines else {"error": {"text": (r.stderr.strip().splitlines() or ["hub.py failed"])[-1]}}
+            except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+                result = {"error": {"text": f"The board didn't come: {e}"}}
+            self._boardArrived.emit(result)
+        self._thread(run)
+
+    def _on_board(self, result):
+        self._board_busy = False
+        if "done" in result:
+            self._board = {"state": "ok", "text": f"The newest board, of {result['done'].get('updated', '?')}"}
+        else:
+            self._board = {"state": "error", "text": (result.get("error") or {}).get("text", "The board didn't come")
+                           + " The board that came with the recorder is used."}
+        self.boardChanged.emit()
+
+    def _bounty(self, bounty_id):
+        """The board's entry for a bounty that can be recorded, with the board's date, or None."""
+        b = next((b for b in self.bounties if b["id"] == bounty_id and b["available"] == ""), None)
+        return dict(b, updated=self.boardUpdated) if b else None
 
     # --- the checklist
     @Property("QVariantList", constant=True)
@@ -440,14 +510,20 @@ class Backend(RecorderBackend):
         self._thread(run)
 
     # --- the session
-    @Slot("QVariantMap", bool, bool, result=str)
-    def planText(self, checklist, auto, quick):
-        """How long a session with these answers takes (session.plan_summary), or a quick round."""
+    @Slot("QVariantMap", bool, bool, result=str)       # the standalone recorder's window: no bounties yet
+    @Slot("QVariantMap", bool, bool, str, result=str)
+    def planText(self, checklist, auto, quick, bounty_id=""):
+        """How long a session with these answers takes (session.plan_summary): a full one, a
+        quick round, or a bounty's round (bounty_id, else "")."""
         mod = self._runner()
         if not mod:
             return ""
+        entry = self._bounty(bounty_id) if bounty_id else None
+        if bounty_id and not entry:
+            return "Pick a bounty"
         try:
-            script = mod.load_script(SCRIPT_PATH)
+            script = mod.load_script(mod.bounty_script(entry["script"]) if entry else SCRIPT_PATH)
+            quick = quick and not entry
             plan, _ = mod.build_plan(script, dict(checklist), quick=quick)
             return mod.plan_summary(script, plan, auto=auto)
         except Exception as e:
@@ -459,12 +535,15 @@ class Backend(RecorderBackend):
         suggests a quick round, in another light."""
         for s in self.store.sessions():
             meta = takes.read_json(os.path.join(self.store.session_dir(s["id"]), "session.json"))
-            if meta.get("status") == "done" and not meta.get("quick") and not meta.get("dry_run"):
+            if (meta.get("status") == "done" and not meta.get("quick") and not meta.get("bounty")
+                    and not meta.get("dry_run")):
                 return True
         return False
 
-    @Slot("QVariantMap", str, bool, bool, result=bool)
-    def startSession(self, checklist, lighting, auto, quick):
+    @Slot("QVariantMap", str, bool, bool, result=bool)  # the standalone recorder's window: no bounties yet
+    @Slot("QVariantMap", str, bool, bool, str, result=bool)
+    def startSession(self, checklist, lighting, auto, quick, bounty_id=""):
+        """Start a session: a full one, a quick round, or a bounty's round (bounty_id, else "")."""
         if self.sessionActive:
             return False
         mod = self._runner()
@@ -480,13 +559,21 @@ class Backend(RecorderBackend):
             if self._camera.get("status") == "degraded":
                 self.message.emit(mod.camera_text(self._camera), True)
                 return False
+        entry = None
+        if bounty_id:
+            entry = self._bounty(bounty_id)
+            if not entry:
+                self.message.emit("That bounty can't be recorded with this recorder", True)
+                return False
         checklist = dict(checklist)
         checklist["objects"] = [o for o in checklist.get("objects", []) if o in dict(OBJECTS)]
         checklist["own_objects"] = [o.strip() for o in checklist.get("own_objects", []) if str(o).strip()]
         try:
-            self._session = mod.Session(self.store.base, self.store.profile(), checklist, lighting, SCRIPT_PATH,
+            script = mod.bounty_script(entry["script"]) if entry else SCRIPT_PATH
+            self._session = mod.Session(self.store.base, self.store.profile(), checklist, lighting, script,
                                         on_status=lambda s: self._statusArrived.emit(dict(s)), auto=auto,
-                                        quick=quick, guidance=self.guidance, **self._session_options)
+                                        quick=quick and not entry, guidance=self.guidance, bounty=entry,
+                                        **self._session_options)
         except Exception as e:
             self.message.emit(f"Couldn't set up the session: {e}", True)
             return False
@@ -508,6 +595,8 @@ class Backend(RecorderBackend):
             self._camera = status["camera"]   # the session's own check (at its start, or after no hands)
             self.cameraChanged.emit()
         super()._on_status(status)
+        if status.get("state") == "done":
+            self.profileChanged.emit()    # a bounty's round is marked done
 
     def shutdown(self):
         """The window closes: recorder/window.py's, then ft-camd if the light check started it."""
@@ -522,7 +611,7 @@ class Backend(RecorderBackend):
     def _session_rows(self):
         out = []
         for s in self.store.sessions():
-            s["label"] = session_label(s["id"])
+            s["label"] = session_label(s["id"]) + (f" · {s['bounty']}" if s["bounty"] else "")
             s["sizeText"] = takes.human_bytes(s["bytes"])
             s["exportText"] = takes.human_bytes(s["export_bytes"]) if s["exported"] else ""
             s["lightingText"] = LIGHTING_TEXT.get(s["lighting"], "")

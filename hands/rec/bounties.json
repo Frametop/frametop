@@ -1,0 +1,7 @@
+{"schema": 1, "updated": "2026-10-14",
+ "bounties": [
+  {"id": "index-taps", "title": "Index taps", "blurb": "Thumb to index taps on lit buttons: hands low, raised, at the view's edge, both hands, near misses and long presses.", "minutes": 4, "priority": "high", "script": "index-taps"},
+  {"id": "middle-taps", "title": "Middle taps", "blurb": "Thumb to middle finger taps (right clicks), mixed with index taps so the two can be told apart.", "minutes": 4, "priority": "high", "script": "middle-taps"},
+  {"id": "pinches", "title": "Pinches", "blurb": "Pinch a window's bar or corner and drag, resize, tilt and stretch it to a ghost outline.", "minutes": 4, "priority": "high", "script": "pinches"},
+  {"id": "card-grabs", "title": "Three-finger grabs", "blurb": "Grab a window's edge like a playing card: hold it, place it, push it away, throw it.", "minutes": 4, "priority": "high", "script": "card-grabs"}
+ ]}

@@ -250,6 +250,8 @@ Kirigami.ApplicationWindow {
             id: checklist
             title: "Before you start"
             readonly property bool privacyOk: privacy1.checked && privacy2.checked && privacy3.checked
+            // The round: a bounty's id, or "" for a full session or a quick round.
+            property string bountyId: ""
             readonly property bool ready: privacyOk && backend.diskOk
                                           && backend.runnerError === "" && !backend.sessionActive
 
@@ -479,7 +481,19 @@ Kirigami.ApplicationWindow {
                 Controls.Label {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     wrapMode: Text.Wrap
-                    text: "Press Start, then put the headset on. A panel in the headset shows each step: a picture "
+                    text: checklist.bountyId !== ""
+                          ? "Press Start, then put the headset on. After a few seconds of your hands held up, windows "
+                            + "appear in front of you, and a band along the top says what to do. Do it as you would "
+                            + "on a real window: tap the lit button, pinch the lit corner, grab the lit edge. The "
+                            + "windows don't move or click; a ghost outline shows where to take one, and your hand "
+                            + "goes there as if it came along. Some steps ask you to stop short or touch without "
+                            + "grabbing: those count just as much.\n\n"
+                            + "Each step waits until you're ready: press the button on the right side of the headset, "
+                            + "or Space or Next in this window. The windows appear where you're facing when you press "
+                            + "it. Press it twice to record a step again, or hold it to stop.\n\n"
+                            + "Nothing leaves the headset. Afterwards you watch the takes in Review, delete anything "
+                            + "you don't want to share, and only then export."
+                          : "Press Start, then put the headset on. A panel in the headset shows each step: a picture "
                           + "of the hand pose, where to hold your hands, and what to do. The sections: hand poses, "
                           + "gestures, typing and the mouse, your objects, touching a dot, and moves with the "
                           + "controllers on and off. Each section is recorded as one take. In the pose steps your "
@@ -493,23 +507,83 @@ Kirigami.ApplicationWindow {
                           + "Nothing leaves the headset. Afterwards you watch the takes in Review, delete anything "
                           + "you don't want to share, and only then export."
                 }
+                Controls.ButtonGroup { id: roundGroup }
                 ColumnLayout {
                     Kirigami.FormData.label: "Round:"
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     Controls.RadioButton {
                         id: fullRound
+                        Controls.ButtonGroup.group: roundGroup
                         text: "Full session"
                         checked: !backend.hasFullSession
+                        onToggled: if (checked) checklist.bountyId = ""
                     }
                     Controls.RadioButton {
                         id: quickRound
+                        Controls.ButtonGroup.group: roundGroup
                         text: "Quick round (about 3 min): hand size, poses, the dot, no hands"
                         checked: backend.hasFullSession
+                        onToggled: if (checked) checklist.bountyId = ""
+                    }
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Kirigami.Units.smallSpacing
+                        visible: backend.bounties.length > 0
+                        wrapMode: Text.Wrap
+                        text: "Bounties: short rounds of what the hand tracker needs most, on windows in front of "
+                              + "you. You can do one again." + (backend.boardUpdated ? " (Board of "
+                              + backend.boardUpdated + ".)" : "")
+                    }
+                    Repeater {
+                        model: backend.bounties
+                        ColumnLayout {
+                            id: bountyItem
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: 0
+                            Controls.RadioButton {
+                                Controls.ButtonGroup.group: roundGroup
+                                enabled: bountyItem.modelData.available === ""
+                                checked: checklist.bountyId === bountyItem.modelData.id
+                                text: bountyItem.modelData.title
+                                      + (bountyItem.modelData.priority === "high" ? " (wanted most)" : "")
+                                      + (bountyItem.modelData.done === 1 ? ", done"
+                                         : bountyItem.modelData.done > 1 ? ", done " + bountyItem.modelData.done + " times" : "")
+                                onToggled: if (checked) checklist.bountyId = bountyItem.modelData.id
+                            }
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: Kirigami.Units.gridUnit * 1.5
+                                wrapMode: Text.Wrap
+                                opacity: 0.7
+                                font: Kirigami.Theme.smallFont
+                                text: [bountyItem.modelData.blurb, bountyItem.modelData.minutesText,
+                                       bountyItem.modelData.lastText ? "last done " + bountyItem.modelData.lastText : "",
+                                       bountyItem.modelData.available].filter(s => s !== "").join(" · ")
+                            }
+                        }
+                    }
+                    RowLayout {
+                        visible: !backend.hubDryRun
+                        Controls.Button {
+                            text: "Get the newest board"
+                            icon.name: "view-refresh"
+                            enabled: backend.boardFetch.state !== "fetching"
+                            onClicked: backend.refreshBoard()
+                        }
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            opacity: 0.7
+                            font: Kirigami.Theme.smallFont
+                            text: backend.boardFetch.text || ""
+                        }
                     }
                 }
                 Kirigami.InlineMessage {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     Layout.fillWidth: true
-                    visible: backend.hasFullSession
+                    visible: backend.hasFullSession && checklist.bountyId === ""
                     Layout.preferredHeight: visible ? implicitHeight : 0
                     type: Kirigami.MessageType.Information
                     text: "You've recorded a full session already. A quick round in a different light (dim, "
@@ -527,11 +601,12 @@ Kirigami.ApplicationWindow {
                     text: (autoAdvance.checked
                            ? "Each step shows for a few seconds and the next follows by itself. Quicker if you "
                              + "know the steps already. "
-                           : "") + "Length: " + backend.planText(checklist.answers(), autoAdvance.checked, quickRound.checked) + "."
+                           : "") + "Length: " + backend.planText(checklist.answers(), autoAdvance.checked, quickRound.checked,
+                                                             checklist.bountyId) + "."
                 }
                 ColumnLayout {
                     Kirigami.FormData.label: "Guidance:"
-                    visible: backend.scriptHasDemos
+                    visible: backend.scriptHasDemos && checklist.bountyId === ""
                     Repeater {
                         model: backend.guidanceChoices
                         Controls.RadioButton {
@@ -550,7 +625,7 @@ Kirigami.ApplicationWindow {
                     enabled: checklist.ready && !backend.camerasBlockStart && !backend.restartingSteamVR
                     onClicked: {
                         if (backend.startSession(checklist.answers(), lighting.currentValue, autoAdvance.checked,
-                                                 quickRound.checked))
+                                                 quickRound.checked, checklist.bountyId))
                             root.show(sessionPage)
                     }
                 }

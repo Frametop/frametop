@@ -326,6 +326,7 @@ class Store:
                         "bytes": size, "contributor": meta.get("contributor", ""),
                         "lighting": (meta.get("lighting") or {}).get("chosen", ""),
                         "status": meta.get("status", ""), "dry_run": bool(meta.get("dry_run")),
+                        "bounty": ((meta.get("bounty") or {}).get("title") or "") if isinstance(meta.get("bounty"), dict) else "",
                         "exported": bool(exported), "export_stale": bool(exported) and changed > exported,
                         "export_bytes": tree_bytes(self.export_dir(sid)) if exported else 0})
         return sorted(out, key=lambda s: s["id"], reverse=True)

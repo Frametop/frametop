@@ -510,12 +510,13 @@ def check_sides(m, entries, report):
 
 def summarize(m):
     """What a pull request's description says about the export: takes, minutes, lighting,
-    objects, controllers, the consent and tool versions."""
+    objects, controllers, the bounty and sets a second, the consent and tool versions."""
     if not isinstance(m, dict):
         return {}
     session = m.get("session") if isinstance(m.get("session"), dict) else {}
     checklist = session.get("checklist") if isinstance(session.get("checklist"), dict) else {}
     lighting = session.get("lighting") if isinstance(session.get("lighting"), dict) else {}
+    bounty = session.get("bounty") if isinstance(session.get("bounty"), dict) else {}
     takes = [t for t in m.get("takes") or [] if isinstance(t, dict)]
     seconds = sum(t.get("duration_s") or 0 for t in takes if isinstance(t.get("duration_s"), (int, float)))
     return {"session": m.get("session_id", ""), "contributor": m.get("contributor", ""),
@@ -524,7 +525,8 @@ def summarize(m):
             "minutes": round(seconds / 60, 1), "lighting": lighting.get("chosen", ""),
             "objects": list(checklist.get("objects") or []), "own_objects": len(checklist.get("own_objects") or []),
             "controllers": checklist.get("controllers", ""), "consent_version": m.get("consent_version", ""),
-            "tool": m.get("tool", "")}
+            "tool": m.get("tool", ""), "bounty": bounty.get("id", "") if isinstance(bounty.get("id"), str) else "",
+            "record_hz": session.get("record_hz") if isinstance(session.get("record_hz"), (int, float)) else None}
 
 
 # ---------------------------------------------------------------- all of it

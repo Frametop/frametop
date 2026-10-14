@@ -404,7 +404,15 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
                 // pointer until the next move: a press right after crossing onto another
                 // screen landed where the pointer had been. Entering one unit off makes the
                 // motion below go through.
-                wlr_seat_pointer_notify_enter(s->seat, surface, x + 1, y);
+                // With a button held (a window or a drag carried onto another screen), enter
+                // without wlroots' notify_enter: on a new surface it forgets the held buttons
+                // (reset_buttons), so their release was dropped and KWin kept the window moving
+                // until the next click. KWin is one client with a surface per screen, so the
+                // release belongs on the new one.
+                if (s->seat->pointer_state.button_count && !wlr_seat_pointer_has_grab(s->seat))
+                    wlr_seat_pointer_enter(s->seat, surface, x + 1, y);
+                else
+                    wlr_seat_pointer_notify_enter(s->seat, surface, x + 1, y);
                 s->pointer_focus = sc;
             }
             wlr_seat_pointer_notify_motion(s->seat, t, x, y);

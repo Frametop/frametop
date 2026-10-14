@@ -1,5 +1,3 @@
-DRAFT: waiting for the maintainer's review. Please don't upload anything until this line is gone.
-
 # Testing the hand recorder's bounties
 
 Version: 2026-10-14

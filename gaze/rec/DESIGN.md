@@ -19,6 +19,8 @@ The data is for training a better eye tracker than `gaze/tracker/` (ft-eyes, a c
 | Fit and slip source | Our tracker, ft-eyes: pupil and glint positions in the camera image. It needs ft-eyegrab, the root service `gaze/tracker/install.sh` installs. |
 | Where the fit coach runs | A fitment step in the recorder before each round, for better recordings, and the put-on and slip check in Frametop's gaze service. |
 | Shared code | The hand recorder's non-hand parts move into a shared module first, and the bounty board is built there too, so the hand recorder can use it next. |
+| License | As hands: contributors give the maintainer a license for any use, including commercial models; the eye images and health answers are never published or shared outside the maintainers (user, 2026-10-14). |
+| Standalone repo | Created after the window and a full round pass in the headset; step 9 comes first (user, 2026-10-14). |
 | Checklist | Glasses/inserts/contacts, eye makeup, measured IPD, and eye surgery or conditions. That last one is health data: a separate opt-in, and its answers are encrypted like the images. |
 
 ## Privacy

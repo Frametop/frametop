@@ -313,6 +313,10 @@ const char *ZoneName(Zone z) {
 }
 
 Zone GrabZone(const Panel &p, const Hit &h, const Params &k, int *sx, int *sy, double *excess) {
+    if (p.foreign) {   // SteamVR's panels: taps only, no grabs (user, 2026-10-13: card pinches there out of scope)
+        *sx = 1, *sy = -1, *excess = 1e9;
+        return Zone::None;
+    }
     const double W = p.width / 2, H = p.height / 2, depth = std::fabs(h.d) - k.bandDepth;
     struct Cand { Zone z; double e; int sx, sy; };
     std::vector<Cand> c;   // in priority order
@@ -1601,7 +1605,7 @@ void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &pan
     if (p_.cardPinch && h) {
         double key = 1e9;
         for (const Panel &P : panels) {
-            if (P.held) continue;
+            if (P.held || P.foreign) continue;
             const Hit b = Locate(P, c);
             if (std::fabs(b.d) <= p_.bandDepth && std::fabs(FromBorder(P, b.u, b.v)) <= p_.cardBand + 0.01 &&
                 Straddled(s, P, h->captureNs) && std::fabs(b.d) < key)
@@ -2583,7 +2587,7 @@ void HandInput::Glows(const Input &in, const std::vector<Panel> &panels) {
             continue;
         }
         const Hit q = Locate(*P, h->contact);
-        if (p_.cardPinch && std::fabs(q.d) <= p_.bandDepth && std::fabs(FromBorder(*P, q.u, q.v)) <= p_.cardBand &&
+        if (p_.cardPinch && !P->foreign && std::fabs(q.d) <= p_.bandDepth && std::fabs(FromBorder(*P, q.u, q.v)) <= p_.cardBand &&
             Straddled(s, *P, h->captureNs) && CardFingers(*h)) {
             glow(q.u, q.v, 0.010 + 0.008 * strength, 0.85, true, kGreen);
             continue;

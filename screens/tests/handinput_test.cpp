@@ -5241,44 +5241,18 @@ void TestForeignPanel() {
         r.Frame({PinchAt(0, 0, 0.01)});
         CHECK(r.Count(Event::GrabStart) == 0 && r.Count(Event::Press) == 1);
     }
-    {   // the right edge takes it; carried 10 cm right it moves; let go moving fast, it stays (no throw)
-        Rig r;
-        rig(r);
-        double x = 0.55;
-        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(x, 0, 0.01)});
-        const double at[3] = {x, 0, -0.49};
-        r.synth.Pinch(1, true, r.t, at, 1);
-        r.Frame({PinchAt(x, 0, 0.01)});
-        CHECK(r.Last(Event::GrabStart) && r.Last(Event::GrabStart)->zone == Zone::Edge && r.in.grabbing(1));
-        for (int k = 1; k <= 20; ++k) {
-            if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
-            r.Frame({PinchAt(x += 0.005, 0, 0.01)});
+    {   // its edge and its corner take nothing (no grabs on SteamVR's panels: GrabZone), nor glow as if they would
+        for (const double at : {0.0, 1.0}) {
+            Rig r;
+            rig(r);
+            const double x = 0.55, y = at > 0 ? 0.30 : 0.0;   // the right edge, then the top right corner
+            for (int k = 0; k < 5; ++k) r.Frame({PinchAt(x - (at > 0 ? 0.02 : 0), y, 0.01)});
+            const double p[3] = {x - (at > 0 ? 0.02 : 0), y, -0.49};
+            r.synth.Pinch(1, true, r.t, p, 1);
+            for (int k = 0; k < 5; ++k) r.Frame({PinchAt(x - (at > 0 ? 0.02 : 0), y, 0.01)});
+            CHECK(r.Count(Event::GrabStart) == 0 && !r.in.grabbing(1));
+            CHECK(r.carries.empty());
         }
-        CHECK(!r.carries.empty() && r.carries[0].kind == Carry::Move && r.carries[0].panel == 1000);
-        for (int k = 0; k < 6; ++k) {   // out at 1.5 m/s
-            if (!r.carries.empty()) r.panels[0].pose = r.carries[0].pose;
-            r.Frame({PinchAt(x, 0, 0.01 - 0.05 * k)});
-        }
-        r.synth.Pinch(1, false, r.t, at, 1);
-        for (int k = 0; k < 4; ++k) {
-            SynthHand o = PinchAt(x, 0, -0.3 - 0.05 * k);
-            o.open = 1;
-            r.Frame({o});
-        }
-        CHECK(r.Count(Event::GrabEnd) == 1 && r.Count(Event::Throw) == 0 && !r.in.grabbing(1));
-        // ...nor does it go back (the rewind, Settle)
-        for (int k = 0; k < 30; ++k) r.Frame({OpenAt(0.3, 0, -0.1)});
-        CHECK(r.Count(Event::Settle) == 0 && r.Count(Event::Throw) == 0);
-    }
-    {   // a corner resizes
-        Rig r;
-        rig(r);
-        for (int k = 0; k < 5; ++k) r.Frame({PinchAt(0.53, 0.30, 0.01)});
-        const double at[3] = {0.53, 0.30, -0.49};
-        r.synth.Pinch(1, true, r.t, at, 1);
-        r.Frame({PinchAt(0.53, 0.30, 0.01)});
-        const auto g = r.Last(Event::GrabStart);
-        CHECK(g && g->zone == Zone::Corner && g->sx == 1 && g->sy == 1);
     }
     {   // a fist doesn't take it
         Rig r;
@@ -5311,14 +5285,14 @@ void TestForeignPanel() {
         Sweep(p, c, d, 0.6, [](double x, double y, double z) { return OpenAt(x, y, z); });
         CHECK(p.Count(Event::Throw) == 0);
     }
-    {   // the left hand holds its left edge; the right hand's pinch on the content clicks (no join)
+    {   // the left hand's pinch at its left edge takes nothing; the right hand's pinch on the content clicks
         Rig r;
         rig(r);
         for (int k = 0; k < 5; ++k) r.Frame({PinchAt(-0.55, 0, 0.01, false, 1)});
         const double l[3] = {-0.55, 0, -0.49};
         r.synth.Pinch(0, true, r.t, l, 1);
         r.Frame({PinchAt(-0.55, 0, 0.01, false, 1)});
-        CHECK(r.in.grabbing(0));
+        CHECK(!r.in.grabbing(0));
         SynthHand p = PinchAt(0.2, 0.05, 0.01, true, 2);
         p.open = 0.6;
         for (int k = 0; k < 4; ++k) r.Frame({PinchAt(-0.55, 0, 0.01, false, 1), p});

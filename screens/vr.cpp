@@ -2421,8 +2421,9 @@ void WantHz(bool near) {
 
 // Near input on SteamVR's own panels (user, 2026-10-13: "work on the native SteamVR overlay windows"):
 // the dashboard, the Steam menu, Steam's keyboard, other apps' overlays. A poke or a pinch on one
-// clicks it, a pinch on its border (or like a card) moves it, at a corner resizes it, and the same
-// glows show. ft-screens can't click them itself, so the pointer helper's laser (our virtual
+// clicks it. Grabs there (a pinch on its border or like a card to move it, at a corner to resize) are
+// off: handinput's GrabZone gives SteamVR's panels none (user, 2026-10-13: out of scope; the hand ray's
+// pinch on a window's grab bar moves it). The grab path below stays for a later try. ft-screens can't click them itself, so the pointer helper's laser (our virtual
 // controller) does what the hand does: "touch <left|right> <verb> [x y z qw qx qy qz] [key]" on
 // @ft_pointer_helper, the laser's pose in the standing universe (pointer/helper/ft-pointer.cpp's
 // "Touch"). Its origin kSteamBack in front of the point, aimed in: hover (the hand near, the laser

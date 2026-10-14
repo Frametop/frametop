@@ -103,7 +103,7 @@ class SceneTest(unittest.TestCase):
             self.assertRegex(a["lit"], r"^button:[0-8]$")
             self.assertEqual(a["label"][0], "L" if a["hand"] == "left" else "R")
             self.assertEqual(a["colour"], {"tap": "cyan", "nogo": "orange"}[a["gesture"]])
-        self.assertAlmostEqual(p["seconds"], 18.0)
+        self.assertAlmostEqual(p["seconds"], 12 * (session.CHOICE_MIN_S + 1.5 * 0.3))   # L/R: 2 s lit, the rest kept
         self.assertEqual(p["pose"], lit[0]["gesture"])
 
     def test_buttons_need_a_grid(self):
@@ -123,6 +123,19 @@ class SceneTest(unittest.TestCase):
         self.assertIsNone(acts[4]["ghost"])
         self.assertEqual(acts[1]["say"], "Let go")
         self.assertAlmostEqual(p["seconds"], 12.0)
+
+    def test_hand_choice(self):
+        """Acts that switch hands get CHOICE_MIN_S each: the generator stretches them, written ones fail."""
+        p = step({"text": "x", "windows": [WIN], "acts": {"gen": "buttons", "every_s": 1.25, "count": 6,
+                                                           "hands": ["left", "right"]}})
+        lit = [a for a in p["scene"]["acts"] if a["gesture"] != "rest"]
+        self.assertTrue(all(a["s"] >= session.CHOICE_MIN_S for a in lit))
+        one = step({"text": "x", "windows": [WIN], "acts": {"gen": "buttons", "every_s": 1.25, "count": 6, "hands": ["right"]}})
+        self.assertLess(one["scene"]["acts"][0]["s"], session.CHOICE_MIN_S)   # one hand: no choice, no stretch
+        with self.assertRaises(ValueError):
+            step({"text": "x", "windows": [WIN], "acts": [{"s": 1, "hand": "left"}, {"s": 1, "hand": "right"}]})
+        step({"text": "x", "windows": [WIN], "acts": [{"s": 2, "hand": "left"}, {"s": 0.5, "gesture": "rest"},
+                                                       {"s": 2, "hand": "right"}]})
 
     def test_bad_steps(self):
         bad = [{"windows": [], "acts": [{"s": 1}]},                                       # no window

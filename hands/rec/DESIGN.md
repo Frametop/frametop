@@ -315,6 +315,7 @@ A step:
   - `"gen": "moves"`: each move lights a part to grab (`grab`, `+` for two: `tl+br`) and, with a ghost, shows where to take the window; `every_s` each, then a `gap_s` rest ("Let go"); shuffled unless `"shuffle": false`; `count` repeats or cuts the list. A move is a ghost `[dx, dy, dz, yaw, pitch, roll, scale]` or an object overriding the generator's keys.
 - `steady`: lights that stay on for the whole step, on windows no act uses (hold a pinch on one while the other hand taps).
 - Gestures (`session.GESTURES`), each with its colour, mark and default line: `tap`, `double` ("2"), `hold` ("hold"), `middle` (purple), `middle-hold`, `pinch`, `card` (three fingers, a playing card), `fist` (green), `touch` (open hand, orange), `nogo` (orange, stop about 1 cm short), `rest` (nothing lit).
+- A step whose acts switch between the hands (L and R buttons, or acts naming each hand) gives every act at least `CHOICE_MIN_S` (2 s) lit, so there's time to see which hand and use it (user, 2026-10-14): the buttons generator stretches its lit time to that (keeping the rest after), and a written act shorter than that fails the plan.
 - The step's `seconds` are its acts'. The acts are drawn with `random.Random("<seed>/<section>/<step>")`, so `build_plan` with the session's seed gives them again; session.json's `shuffle.sweeps` lists each scene step's acts as `[gesture, window, part, hand]`.
 - While a scene runs, the panel is in its `layout top` band, which shows the act's line; a scene's acts get no pose picture. The events are above (prompts.jsonl).
 

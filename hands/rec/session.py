@@ -904,6 +904,10 @@ def _sweep_prompts(s, raw, ctx, rng):
 
 # A scene's gestures (DESIGN.md, "Scenes"): the lit part's colour and label for each, and what
 # the band says while it's lit. A no-go is drawn hollow with a cross.
+# A scene step whose acts switch between the hands (L or R on the button) gives each act at
+# least this long lit, so there's time to see which hand and use it (user, 2026-10-14).
+CHOICE_MIN_S = 2.0
+
 GESTURES = {
     "tap": ("cyan", "", "Tap: thumb to index fingertip"),
     "double": ("cyan", "2", "Double tap"),
@@ -960,13 +964,15 @@ def _scene_buttons(p, a, windows, rng):
     hands, each act names the hand to use (L or R on the button)."""
     every = float(a.get("every_s", 1.5))
     lit_s = min(every, float(a.get("lit_s", every * 0.7)))
+    hands = list(a.get("hands") or [])
+    if len(set(hands)) > 1 and lit_s < CHOICE_MIN_S:   # a hand to pick: lit long enough, the rest kept
+        every, lit_s = every - lit_s + CHOICE_MIN_S, CHOICE_MIN_S
     n = int(a.get("count") or max(1, round(float(a.get("seconds", 12)) / every)))
     wins = [w for w in windows if w["id"] in (a.get("windows") or [w["id"] for w in windows]) and _cells(w["look"])]
     if not wins:
         raise ValueError("%s: buttons need a window with a grid or a list" % p.get("text", "")[:30])
     mix = a.get("mix") or {a.get("gesture", "tap"): 1}
     names, weights = list(mix), [float(mix[k]) for k in mix]
-    hands = list(a.get("hands") or [])
     says = a.get("says") or {}
     out, last = [], None
     for _ in range(n):
@@ -1047,6 +1053,12 @@ def _scene_step(s, p, rng):
             acts.append(_act(p, a, windows))
     if not acts:
         raise ValueError("%s: a scene step needs acts" % s["id"])
+    asked = [a for a in acts if a["gesture"] != "rest"]
+    if len({a["hand"] for a in asked if a["hand"] in ("left", "right")}) > 1:
+        short = [a for a in asked if a["s"] < CHOICE_MIN_S - 1e-9]
+        if short:
+            raise ValueError("%s: its acts switch hands, so each needs at least %g s (%g here)"
+                             % (p.get("id") or s["id"], CHOICE_MIN_S, short[0]["s"]))
     # Lit for the whole step (one hand holds a pinch while the other taps): on windows no act uses.
     steady = [_act(p, dict(x, s=0), windows) for x in p.get("steady") or []]
     if {x["win"] for x in steady} & {a["win"] for a in acts}:

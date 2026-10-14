@@ -254,8 +254,8 @@
      ],
      "acts": {
       "gen": "buttons",
-      "every_s": 1.25,
-      "seconds": 10,
+      "every_s": 2.4,
+      "seconds": 16,
       "mix": {
        "middle": 1
       },

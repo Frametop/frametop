@@ -153,7 +153,9 @@ The export recompresses nothing (the chunks are zstd already), drops deleted ran
 
 ## Shared with the hand recorder
 
-Much of `hands/rec/` isn't about hands: the headset button reader, profile and consent, take bookkeeping (deleted ranges, redo, parts, clock samples), the Hugging Face login and upload, validate's manifest and checksum checks, and most of the window. These move to a shared module, `rec/` at the top of the tree, with the bounty board, and both recorders use them. That's a refactor of the hand recorder, so it's done first, on its own commit, with the hand recorder's tests passing before anything eye-specific lands on it.
+Much of `hands/rec/` isn't about hands: the headset button reader, profile and consent, take bookkeeping (deleted ranges, redo, parts, clock samples), the Hugging Face login and upload, validate's manifest and checksum checks, and most of the window. These live in `recorder/` at the top of the tree, with the bounty board, and both recorders use them: `common.py`, `units.py`, `button.py`, `bounties.py`, `files.py` (ranges, checksums, sizes), `checks.py` (validate's report, SHA256SUMS, typed manifest lookups), `hub.py` (login, errors, upload records, the pull request flow) and `age.py` (the export's encryption). The hand recorder's modules keep their names on top of them, and its tests pass.
+
+Uploads: `gaze/rec/hub.py` sends nothing to the real dataset until `CONSENT.md` and `UPLOAD.md` exist and aren't drafts. `FT_EYEREC_ALLOW_UPLOAD=1` opens rehearsals, and only to another dataset (`FT_EYEREC_DATASET`). Rehearsed 2026-10-14 against the private `DeeJanuz/frametop-eyes-test` with a round of random bytes: uploaded, downloaded, checked, and decrypted with both keys by age 1.1.1 on the 7i.
 
 ## Build order
 

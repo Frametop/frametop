@@ -483,7 +483,7 @@ class Backend(QObject):
                         info = m.get("info") or {}
                         res = info.get("resolution") or {}
                         virtual = (m.get("edid") or {}).get("manufacturer_id") == "SDD" or \
-                            str(m.get("friendly_name", "")).startswith("frametop")
+                            str(m.get("friendly_name", "")).startswith(("frametop", "Vibepollo Private Display"))
                         monitors.append({"app": "display:" + m.get("device_id", ""), "port": 0,
                                          "key": "display:" + m.get("device_id", ""),
                                          "name": m.get("friendly_name") or m.get("display_name") or "?",

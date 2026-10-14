@@ -25,6 +25,8 @@ tracker = [
     "numpy>=2.2",
     "opencv-python-headless>=4.11",
     "huggingface_hub>=0.34",
+    # the eye recorder's export encrypts with age (recorder/age.py), written on cryptography
+    "cryptography>=42",
 ]
 # Frametop Voice (voice/ft-voiced): Moonshine, the wake word spotter and Silero VAD run
 # through sherpa-onnx; sentencepiece spells out wake phrases (voice/requirements.txt has the

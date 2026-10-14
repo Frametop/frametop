@@ -220,6 +220,23 @@ class DebugSessionTest(unittest.TestCase):
         recs = livelog.read(os.path.join(s.session_dir, "takes", "01-free", "live.bin"))
         self.assertEqual(len(recs), tj["live"]["live.bin"]["hands"] + tj["live"]["live.bin"]["gestures"])
 
+    def test_double_press_marks(self):
+        """Two quick presses mark (twice pressed, one moment): never a redo, which would throw the
+        recording away (2026-10-14: a testing session lost its recording that way)."""
+        def act(s):
+            s.button_gesture("double")
+            time.sleep(0.1)
+            s.redo()   # the window's R does nothing either
+            time.sleep(0.1)
+            s.button_gesture("hold")
+        s = self.run_debug(act)
+        self.assertEqual(s.state, "done")
+        ev = self.events(s)
+        self.assertEqual([e["n"] for e in ev if e["event"] == "mark"], [1])
+        self.assertNotIn("redo", [e["event"] for e in ev])
+        with open(os.path.join(s.session_dir, "takes", "01-free", "take.json")) as f:
+            self.assertEqual(sorted(json.load(f)["live"]), ["live.bin"])
+
     def test_pause_parts(self):
         """A pause ends the recording part, and its live log with it: live-2.bin for the next."""
         def act(s):

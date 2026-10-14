@@ -1632,14 +1632,17 @@ class Session:
     def button_gesture(self, gesture):
         """The headset's button (ButtonGestures). A press: Next while a step waits, pause during
         a countdown or hold (and auto mode's timed screens), resume while paused. A double press:
-        redo, as R. A hold: stop, as Esc. In a debug session's free step a press marks the
-        moment and a hold ends the step (the session is done, not stopped)."""
-        if self.debug and self._status["state"] == "running" and gesture in ("press", "hold"):
-            if gesture == "press":
-                self.mark()
-            else:
+        redo, as R. A hold: stop, as Esc. In a debug session's free step a press (or a double:
+        someone marking twice quickly) marks the moment and a hold ends the step (the session is
+        done, not stopped); a debug session has no redo, which would throw its recording away."""
+        if self.debug and self._status["state"] == "running" and gesture in ("press", "double", "hold"):
+            if gesture == "hold":
                 self.finish()
-            self._log("headset button (%s)" % ("mark" if gesture == "press" else "finish"))
+            else:
+                self.mark()
+            self._log("headset button (%s)" % ("finish" if gesture == "hold" else "mark"))
+            return
+        if self.debug and gesture == "double":
             return
         if gesture == "press":
             self.button_press()
@@ -1685,7 +1688,10 @@ class Session:
         self._set("end", True)
 
     def redo(self):
-        """Record a step again: the one running, or at a step's ready screen the one before."""
+        """Record a step again: the one running, or at a step's ready screen the one before. Not in
+        a debug session: its one step is the whole recording."""
+        if self.debug:
+            return
         self._set("redo", True)
 
     def pause(self):

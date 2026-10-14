@@ -2438,13 +2438,17 @@ void WantHz(bool near) {
 // its window controls then (valve.steam.gamepadui.floatingfooter, under it), and only then does the
 // laser press its grab bar (kSteamBar under the bottom edge, as the helper's layout placement does) or
 // its resize margin (kSteamMargin past the corner), and follow the hand rigidly (steampanels::Follow).
-// A docked dashboard or another app's overlay has none: the pinch does nothing, and the log says so.
+// A gamescope app window (Spotifast's) shows no footer but has the grab bar and resize handle all the
+// same, only past the bottom right corner (headset probing, 2026-10-13), so it counts as floating
+// (AppWindow). A docked dashboard or another app's overlay has none: the pinch does nothing, and the
+// log says so.
 // No fist grabs, stretch, throws, flicks, pushes or two-finger scroll there (handinput's
 // Panel::foreign). Only while ft-screens runs (its desktop).
 constexpr int kSteamIndex = 1000;      // near input's panel indices from here on are SteamVR's
 constexpr double kSteamBack = 0.10;    // the laser starts this far in front (its small controls float a few cm out)
 constexpr double kSteamBar = 0.075;    // a floating panel's grab bar under its bottom edge (LAYOUT_GRAB_OFFSET)
 constexpr double kSteamMargin = 0.01;  // ...its resize margin, past a corner each way
+constexpr double kSteamAppMargin = 0.03;  // ...an app window's (its handle is 1-5 cm out)
 constexpr double kSteamCone = 12;      // the rays, degrees each way round the line from the eyes to the index tip
 constexpr int kSteamRays = 7;          // ...7 x 7 of them
 constexpr double kSteamReach = 0.40;   // ...hitting within this of the tip
@@ -2596,6 +2600,11 @@ void SendTouch(int side, const char *verb, const Mat *laser, const std::string &
     SendPointer(msg);
 }
 
+// A gamescope app window's overlay (gamescope.gamescope-0.window.N): floating, footer or not.
+bool AppWindow(const std::string &key) {
+    return key.rfind("gamescope.gamescope-", 0) == 0 && key.find(".window.") != std::string::npos;
+}
+
 // A floating panel's window controls showing under it (valve.steam.gamepadui.floatingfooter): it's one
 // the dashboard lets a laser move and resize.
 bool FooterUnder(const Mat &panel, double w, double h) {
@@ -2687,9 +2696,10 @@ void UpdateSteamTouches(const std::vector<handinput::Carry> &carries) {
         if (t.st == SteamTouch::St::GrabWait) {
             if (g_handInput.grabPanel(k) != t.panel) {
                 t.st = SteamTouch::St::Hover;
-            } else if (now - t.sinceMs >= 150 && FooterUnder(t.panel0, t.w0, t.h0)) {
+            } else if (now - t.sinceMs >= 150 && (AppWindow(t.key) || FooterUnder(t.panel0, t.w0, t.h0))) {
                 double u, v;
-                steampanels::GrabPoint(t.w0, t.h0, t.resize, t.sx, t.sy, kSteamBar, kSteamMargin, &u, &v);
+                steampanels::GrabPoint(t.w0, t.h0, t.resize, t.sx, t.sy, kSteamBar,
+                                       AppWindow(t.key) ? kSteamAppMargin : kSteamMargin, &u, &v);
                 t.laser0 = steampanels::Touch(t.panel0, u, v, kSteamBack);
                 SendTouch(k, "grab", &t.laser0);
                 t.st = SteamTouch::St::Grab;

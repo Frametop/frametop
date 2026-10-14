@@ -1,0 +1,16 @@
+# The fine-tuned hand models ft-hands uses by default (hands/models.sh): a version folder of the
+# Hugging Face repo DeeJanuz/frametop-hands-models at a fixed commit, and every file's sha256.
+# Installs read this file from GitHub (main or experimental, by their channel) when hand tracking
+# starts, so a new pin pushed there reaches them without a release. "format" is what ft-hands
+# needs to run them: raise it when a model needs a newer ft-hands, and older installs keep theirs.
+# Made by frame-hands' model-repo/pin.py.
+format 1
+rev 41afd78fbd4527456fc4cbd840ffc9f39fdc939a
+model v13b-p1
+file NOTICE 0e6b4fa8ea37665cb699abc36fcf1ee0ffaa63a78dfee788be6613dea6607f84
+file hand.ncnn.bin d6a6f00d845fb9ee490276d84b1e978da884361c372614546ed2b1b4d2f5c449
+file hand.ncnn.param 54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd
+file palm.ncnn.bin 9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909
+file palm.ncnn.param c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e
+file LICENSE 41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0
+file README.md 29c6c5460e47412a9a37b22d6a7c8a9ed266a872bbcce93d3867f9e56cfe0ca1

@@ -17,6 +17,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REC = os.path.dirname(HERE)
 sys.path.insert(0, REC)
+sys.path.insert(0, HERE)   # test_validate, also under python -I
 import session  # noqa: E402
 import livelog  # noqa: E402
 

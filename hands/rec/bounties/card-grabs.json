@@ -29,10 +29,17 @@
    "intro": "First, your hand size: both hands up about 40 cm out, still.",
    "prompts": [
     {
-     "text": "Both hands about 40 cm out, still|Palms toward you, then backs toward you",
+     "text": "Both hands about 40 cm out, still|Palms toward you",
      "seconds": 6,
      "hands": "both",
-     "distance": "mid"
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
     }
    ]
   },

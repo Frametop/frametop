@@ -17,6 +17,10 @@
 //   text <text>                  the instruction: large, wrapped to the panel's width, centred
 //   note <text>                  an orange warning line under the instruction (empty to clear)
 //   countdown <0..1> | off       a thin bar along the bottom: the share of the prompt's time left
+//   split <at> <label>;... / split off
+//                                ticks on the countdown's bar where a step changes pose, each at
+//                                <at> (the share of time left then, 0..1) with "Switch to <label>"
+//                                above it; lit cyan once the bar has come down to it
 //   hands <left> <right>         the "Left hand" and "Right hand" chips: seen (green), lost
 //                                (orange) or off (hidden)
 //   bar <target 0..1> <current 0..1|-1> [<near label>|<far label>] / bar off
@@ -578,6 +582,7 @@ struct Panel {
     Picture pic{kW, kH, {}};
     std::string title, step, text, note, action, big, keys;
     double countdown = -1;  // the share of the prompt's time left, or -1: off
+    std::vector<std::pair<double, std::string>> splits;  // the countdown's ticks: share left, the pose after
     std::string hands[2] = {"off", "off"};
     bool barOn = false;
     double barTarget = 0, barCurrent = -1;
@@ -596,6 +601,23 @@ struct Panel {
     double textDeg = 0;
 };
 
+// The countdown's ticks (a step's pose changes): a line across the bar at each, "Switch to ..."
+// over it, kept inside the bar's span; cyan once the bar has come down to it. labelY is the
+// label's centre line.
+void DrawSplits(Picture &pic, const Panel &p, int x0, int width, int y0, int y1, int labelY, int size) {
+    const double ppd = kPxPerDeg;
+    for (const auto &[at, label] : p.splits) {
+        const bool reached = p.countdown >= 0 && p.countdown <= at + 1e-6;
+        const int x = x0 + int(std::lround(width * at)), lw = std::max(3, int(ppd * 0.12));
+        Rect(pic, x - lw / 2, y0 - int(ppd * 0.3), x - lw / 2 + lw, y1 + int(ppd * 0.15), 1, 1, 1, reached ? 0.95 : 0.7);
+        const std::string text = "Switch to " + label;
+        const int w = TextWidth(text, size);
+        const int cx = std::clamp(x, x0 + w / 2, std::max(x0 + w / 2, x0 + width - w / 2));
+        if (reached) Text(pic, text, size, cx, labelY, kCyan[0], kCyan[1], kCyan[2]);
+        else Text(pic, text, size, cx, labelY, 0.85);
+    }
+}
+
 void Draw(Panel &p) {
     // The dim rounded panel, see-through so it's clear of what's behind (the quick check's look,
     // with the same corner radius in degrees). It never changes, so it's drawn once.
@@ -613,7 +635,8 @@ void Draw(Panel &p) {
         // A scene's step: a band along the top with the cue, the hold's word and the time
         // left; the rest is clear, so the windows below show through nothing.
         pic.px.assign(size_t(kW) * kH * 4, 0);
-        const int bandH = int(ppd * 6.2), m = int(ppd * 0.9), stepSize = int(ppd * 0.8);
+        const int splitSize = int(ppd * 0.8), splitH = p.splits.empty() || p.countdown < 0 ? 0 : int(splitSize * 1.5);
+        const int bandH = int(ppd * 6.2) + splitH, m = int(ppd * 0.9), stepSize = int(ppd * 0.8);
         RoundRect(pic, 0, 0, kW, bandH, ppd * 1.2, 0.06, 0.06, 0.07, 0.85);
         const int cy0 = m + stepSize / 2;
         Text(pic, p.step, stepSize, kW - m, cy0, faint, kRight);
@@ -631,7 +654,7 @@ void Draw(Panel &p) {
         if (p.noteLines.size() > 1) p.noteLines.resize(1);
         p.textDeg = 1.15;
         const int foot = bandH - m, block = int(p.lines.size()) * lh + int(p.noteLines.size()) * int(noteSize * 1.3);
-        int y = cy0 + stepSize / 2 + (foot - int(ppd * 0.5) - cy0 - stepSize / 2 - block) / 2;
+        int y = cy0 + stepSize / 2 + (foot - int(ppd * 0.5) - splitH - cy0 - stepSize / 2 - block) / 2;
         if (!p.big.empty()) Text(pic, p.big, int(ppd * 2.2), m + bigW / 2, (cy0 + foot) / 2, kCyan[0], kCyan[1], kCyan[2]);
         for (const std::string &line : p.lines) Text(pic, line, size, (x0 + x1) / 2, y + lh / 2, 1.0), y += lh;
         for (const std::string &line : p.noteLines)
@@ -640,6 +663,7 @@ void Draw(Panel &p) {
             const int th = std::max(4, int(ppd * 0.18));
             Rect(pic, m, foot - th, kW - m, foot, 1, 1, 1, 0.15);
             Rect(pic, m, foot - th, m + int(std::lround((kW - 2 * m) * p.countdown)), foot, kCyan[0], kCyan[1], kCyan[2], 0.95);
+            if (splitH) DrawSplits(pic, p, m, kW - 2 * m, foot - th, foot, foot - th - int(ppd * 0.3) - splitH / 2, splitSize);
         }
         if (p.paused) {
             const int size = int(ppd * 1.6);
@@ -678,6 +702,11 @@ void Draw(Panel &p) {
         Rect(pic, margin, y, kW - margin, y + th, 1, 1, 1, 0.15);
         Rect(pic, margin, y, margin + int(std::lround(width * p.countdown)), y + th, kCyan[0], kCyan[1], kCyan[2], 0.95);
         bottom = std::min(bottom, y - int(ppd * 0.6));
+        if (!p.splits.empty()) {
+            const int size = int(ppd * 0.9), ly = y - int(ppd * 0.35) - size * 3 / 4;
+            DrawSplits(pic, p, margin, width, y, y + th, ly, size);
+            bottom = std::min(bottom, ly - size - int(ppd * 0.3));
+        }
     }
     if (p.hands[0] != "off" || p.hands[1] != "off") {
         const int ch = int(ppd * 1.25), size = int(ppd * 0.85), cy = bottom - ch / 2, gap = int(ppd * 0.6);
@@ -1059,6 +1088,8 @@ void Print(const Panel &p, const Target &t, bool visible, int number) {
     for (const std::string &line : p.noteLines) std::printf("  | %s\n", line.c_str());
     if (p.countdown >= 0) std::printf("countdown: %.2f\n", p.countdown);
     else std::printf("countdown: off\n");
+    for (const auto &[at, label] : p.splits)
+        std::printf("split: %.2f \"Switch to %s\"%s\n", at, label.c_str(), p.countdown >= 0 && p.countdown <= at + 1e-6 ? " (reached)" : "");
     std::printf("hands: left %s, right %s\n", p.hands[0].c_str(), p.hands[1].c_str());
     if (p.barOn)
         std::printf("bar: target %.2f, current %.2f, near \"%s\", far \"%s\"\n", p.barTarget, p.barCurrent,
@@ -1638,6 +1669,27 @@ int main(int argc, char **argv) {
                 if (!std::strcmp(rest, "off")) p.countdown = -1, dirty = true;
                 else if (std::sscanf(rest, "%lf", &a) == 1) p.countdown = std::clamp(a, 0.0, 1.0), dirty = true;
                 else reply = "error usage: countdown <0..1>|off";
+            } else if (Is(buf, "split", &rest)) {
+                // split <at> <label>;...
+                std::vector<std::pair<double, std::string>> items;
+                bool ok = std::strcmp(rest, "off") == 0;
+                if (!ok) {
+                    std::string all = rest;
+                    ok = true;
+                    for (size_t at = 0; at <= all.size();) {
+                        const size_t end = std::min(all.find(';', at), all.size());
+                        const std::string item = all.substr(at, end - at);
+                        at = end + 1;
+                        if (item.empty()) continue;
+                        double share = 0;
+                        int n = 0;
+                        if (std::sscanf(item.c_str(), "%lf %n", &share, &n) < 1 || !n || !item[n]) { ok = false; break; }
+                        items.emplace_back(std::clamp(share, 0.0, 1.0), item.substr(n));
+                    }
+                    ok = ok && !items.empty();
+                }
+                if (ok) p.splits = items, dirty = true;
+                else reply = "error usage: split <at 0..1> <label>;... | split off";
             } else if (Is(buf, "hands", &rest)) {
                 char l[16] = "", r[16] = "";
                 if (std::sscanf(rest, "%15s %15s", l, r) == 2 && HandState(l) && HandState(r))

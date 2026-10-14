@@ -152,11 +152,12 @@ One JSON object per line:
 {"t": 123, "event": "end", "status": "complete|stopped|skipped"}
 {"t": 123, "event": "scene", "id": "pinches/drag-right", "windows": [{"id": "a", "at": [x, y, z], "size": [w, h], "turn": [yaw, pitch], "look": "plain", "room": [12 floats]}]}
 {"t": 123, "event": "steady", "win": "a", "lit": "bar", "gesture": "pinch", "hand": ""}
+{"t": 123, "event": "switch", "id": "hand-size/both", "to": "backs toward you", "k": 1}
 {"t": 123, "event": "prompt", "id": "pinches/drag-right/3-pinch", "text": "...", "pose": "pinch", "cue": true, "step": "pinches/drag-right",
  "act": {"win": "a", "lit": "bar", "gesture": "pinch", "hand": "", "label": "", "ghost": [dx, dy, dz, yaw, pitch, roll], "ghost_room": [12 floats]}}
 ```
 
-A scene step (below, "Scenes") logs `scene` when its windows go up, with each one's pose in the room (`room`, from the panel; null in a dry run), and `scene` with no windows when they go. Each act is a `prompt` like a sweep's cue, with `act`: the window, the lit part, the gesture asked for (`rest`: let go, nothing lit), the hand when the act names one, and the ghost (in the window's frame, and its pose in the room). `steady` is a light that stays on for the whole step.
+A scene step (below, "Scenes") logs `scene` when its windows go up, with each one's pose in the room (`room`, from the panel; null in a dry run), and `scene` with no windows when they go. Each act is a `prompt` like a sweep's cue, with `act`: the window, the lit part, the gesture asked for (`rest`: let go, nothing lit), the hand when the act names one, and the ghost (in the window's frame, and its pose in the room). `steady` is a light that stays on for the whole step. `switch` is a step's change of pose (below, "Two poses in a step"): the pose asked for from then until the step's end or the next `switch`.
 
 `feedback` is written about twice a second while recording. It's the live tracker's view, kept for later checks; it's not a label.
 
@@ -199,6 +200,7 @@ Commands (UTF-8; `|` starts a new line in text):
 | `text <text>` | The instruction, large, wrapped to the panel's width, centred. |
 | `note <text>` | An orange line under the instruction: a warning ("I can't see your left hand"). Empty clears it. |
 | `countdown <0..1>` / `countdown off` | A thin bar along the bottom: the share of this prompt's time left. |
+| `split <at> <label>;...` / `split off` | Ticks on that bar where the step changes pose, each at `at` (the share of time left then) with "Switch to <label>" over it, cyan once the bar comes down to it ("Two poses in a step"). |
 | `hands <left> <right>` | Two chips, "Left hand" and "Right hand", each `seen` (green), `lost` (orange) or `off` (hidden). |
 | `bar <target 0..1> <current 0..1 or -1> [near label] [far label]` / `bar off` | The near/far bar for the push out and back: a horizontal track with a target marker and the hand's current position. |
 | `paused on` / `paused off` | A "Paused" overlay over the picture. |
@@ -316,6 +318,10 @@ A step:
 - The step's `seconds` are its acts'. The acts are drawn with `random.Random("<seed>/<section>/<step>")`, so `build_plan` with the session's seed gives them again; session.json's `shuffle.sweeps` lists each scene step's acts as `[gesture, window, part, hand]`.
 - While a scene runs, the panel is in its `layout top` band, which shows the act's line; a scene's acts get no pose picture. The events are above (prompts.jsonl).
 
+### Two poses in a step
+
+A step that asks for one pose and then another (hand size: palms toward you, then the backs) says when to change: `"switch": "backs toward you"` (at half time), or `[{"at": 0.5, "to": "backs toward you", "text": "Both hands about 40 cm out, still|Backs toward you"}]`, each `at` a share of the step's time, after the one before. The time-left bar gets a tick there with "Switch to <to>" over it (the panel's `split`), lit cyan once the bar comes down to it; `text`, if given, replaces the instruction then (not in a scene, whose acts keep their own lines). The step's prompt event lists its `switch`, and a `switch` event (`id`, `to`, `k`, counting from 1) marks each one's time, so labels can tell the two poses apart. Plain steps and scene steps take it; a sweep has its own cues.
+
 ### Step mode (the default) and auto mode
 
 The first in-headset session (2026-10-02) went too fast: each prompt advanced after 4-8 s, before there was time to read it and find the hand shape. So by default every step waits:
@@ -388,8 +394,8 @@ The first four (2026-10-14), each on the gestures Frametop uses:
 
 | Bounty | What | Steps |
 |---|---|---|
-| `index-taps` | Thumb to index taps (click) | Hand in the lap, each hand; raised, palm down then edge-on, palm up then to the face; a window at the view's edge with double taps and holds; two windows far apart; both hands (L/R); near misses (orange: stop short); long presses with the hand resting; own pace |
-| `middle-taps` | Thumb to middle taps (right click) | The same shape, with middle holds, index and middle mixed on each hand, near misses and a slow fist |
+| `index-taps` | Thumb to index taps (click), the hand raised and pointing at the button as with Frametop's hand ray (user, 2026-10-14: not gaze-and-tap from the lap) | Each hand, palm away, the arm straight then bent (a switch); two windows left and right, the head ahead then turning; high and low; a big far window; both hands (L/R); double taps and holds, each hand; near misses (orange: stop short); own pace, then the other hand |
+| `middle-taps` | Thumb to middle taps (right click), pointing the same way | The index round's shape with middle taps and middle holds, index and middle mixed on each hand, near misses and a slow fist |
 | `pinches` | Thumb and index pinches | Pinch and hold the bar or a corner; drag to ghosts with each hand (across, nearer, farther); resize from a corner; tilt; two hands on two corners; hold a pinch on one window while tapping another; a far window pinched with the hand low; pinch vs stop short vs open touch; own pace |
 | `card-grabs` | Thumb, index and middle (a playing card) | Hold the right edge (R) and left (L); move and turn it while held; place it on ghosts; push it away; throw it to far ghosts; two hands on both edges; four windows low, high, close and to the side; card vs fist vs touch vs two-finger pinch vs stop short; own pace |
 

@@ -783,9 +783,31 @@ def _prompt(section, raw, ctx, subst=None):
     for key in PROMPT_KEYS:
         p.setdefault(key, False if key == "controller" else 0 if key == "seconds" else "")
     p["controllers"] = list(p.get("controllers") or [])
+    p["switch"] = _switch_list(section, p.get("switch"))
     if p["hands"] not in HAND_VALUES:
         raise ValueError("%s: hands %r" % (section["id"], p["hands"]))
     return p
+
+
+def _switch_list(section, raw):
+    """A step's pose changes (DESIGN.md, "Two poses in a step"): "backs toward you" (at half
+    time), or [{"at": share of the step's time, "to": the pose after, "text": the instruction
+    after (optional; a scene's acts keep their own)}] in order."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        raw = [{"at": 0.5, "to": raw}]
+    out, last = [], 0.0
+    for w in raw if isinstance(raw, list) else [raw]:
+        at = w.get("at") if isinstance(w, dict) else None
+        to = w.get("to") if isinstance(w, dict) else None
+        if not isinstance(at, (int, float)) or not last < at < 1 or not isinstance(to, str) or not to.strip():
+            raise ValueError("%s: switch %r: each needs \"at\" (after the one before, under 1) and \"to\"" % (section["id"], w))
+        if isinstance(w, dict) and not isinstance(w.get("text", ""), str):
+            raise ValueError("%s: switch %r: \"text\" is the instruction after" % (section["id"], w))
+        out.append({"at": float(at), "to": to.strip(), "text": w.get("text", "") if isinstance(w, dict) else ""})
+        last = at
+    return out
 
 
 def _set_ids(section, prompts):
@@ -1591,7 +1613,7 @@ class Session:
         self._panel.cmd("paused off")
         for key, c in (("note", "note "), ("countdown", "countdown off"), ("hands", "hands off off"),
                        ("bar", "bar off"), ("target", "target off"), ("image", "image off"), ("where", "where off"),
-                       ("demo", "demo off"), ("big", "big "), ("action", "action "), ("rec", "rec off"), ("strip", "strip off")):
+                       ("demo", "demo off"), ("big", "big "), ("action", "action "), ("rec", "rec off"), ("strip", "strip off"), ("split", "split off")):
             self._panel.set(key, c)
         self._hints(action=False)
 
@@ -2234,6 +2256,8 @@ class Session:
             extra.update(cue=True, step=p["step"])
         if p.get("act"):   # a scene's act: what's lit (and the ghost's pose in the room) from now
             extra["act"] = p["act"]
+        if p.get("switch") and not p.get("cue"):   # the step's pose changes, each logged as a "switch" when it comes
+            extra["switch"] = p["switch"]
         return self._event("prompt", id=p["id"], text=p["text"], hands=p["hands"], pose=p["pose"],
                            distance=p["distance"], position=p["position"], object=p["object"],
                            controller=bool(p["controller"]), **extra)
@@ -2258,7 +2282,33 @@ class Session:
         if intro and not p["text"]:
             return
         self._begin_prompt(s, p, step, state="intro" if intro else "running")
-        self._wait(p["seconds"])
+        self._wait(p["seconds"], None if intro else self._switches(p))
+
+    def _switches(self, p, tick=None):
+        """A step's pose changes: the panel's ticks on the time-left bar ("Switch to ..."), and
+        a "switch" event as each one's time comes, so the labels say which pose when. Returns
+        the tick for _wait (tick, if given, runs after)."""
+        sw, seconds = p.get("switch") or [], float(p["seconds"])
+        if not sw or seconds <= 0:
+            self._panel.set("split", "split off")
+            return tick
+        self._panel.set("split", "split " + ";".join("%.3f %s" % (1 - w["at"], clean_text(w["to"]).replace(";", ","))
+                                                     for w in sw))
+        state = {"t": 0.0, "k": 0}
+
+        def both(dt):
+            state["t"] += dt
+            while state["k"] < len(sw) and state["t"] >= sw[state["k"]]["at"] * seconds - 1e-9:
+                w = sw[state["k"]]
+                state["k"] += 1
+                self._event("switch", id=p["id"], to=w["to"], k=state["k"])
+                self._log("    switch to %s" % w["to"])
+                if w["text"] and not p.get("scene"):
+                    self._panel.set("text", "text " + clean_text(w["text"]))
+                    self._status["prompt"] = w["text"].replace("|", "\n")
+                    self._emit()
+            return tick(dt) if tick else False
+        return both
 
     # --- steps: a section's prompts, bar heights and targets
     def _step_list(self, s):
@@ -2476,7 +2526,8 @@ class Session:
         self._fb.pop("lost_key", None)
         self._show(s["title"], where, p["text"])
         self._view(p)
-        for key, c in (("big", "big "), ("countdown", "countdown off"), ("bar", "bar off"), ("target", "target off")):
+        for key, c in (("big", "big "), ("countdown", "countdown off"), ("bar", "bar off"), ("target", "target off"),
+                       ("split", "split off")):
             self._panel.set(key, c)
         self._clear_scene()
         self._emit(state="ready", prompt=p["text"].replace("|", "\n"), seconds_left=float(p["seconds"]),
@@ -2545,7 +2596,8 @@ class Session:
         self._event("wait")
         self._stop_recording()
         self._status["big"] = ""
-        for key, c in (("big", "big "), ("countdown", "countdown off"), ("bar", "bar off"), ("target", "target off")):
+        for key, c in (("big", "big "), ("countdown", "countdown off"), ("bar", "bar off"), ("target", "target off"),
+                       ("split", "split off")):
             self._panel.set(key, c)
         self._clear_scene()
 
@@ -2670,7 +2722,7 @@ class Session:
         first = act(0)
         self._begin_prompt(s, dict(first, seconds=p["seconds"]), where)
         self._panel.set("text", "text " + clean_text(first["text"]))
-        self._wait(p["seconds"], tick)
+        self._wait(p["seconds"], self._switches(p, tick))
         if self.auto:
             self._clear_scene()
 

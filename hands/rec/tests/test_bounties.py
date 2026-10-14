@@ -206,5 +206,64 @@ class RoundTest(unittest.TestCase):
         self.assertEqual(mark, {"rounds": 2, "last": os.path.basename(s.session_dir)})
 
 
+SWITCH_SCRIPT = dict(SCRIPT, sections=[
+    {"id": "size", "title": "Size", "intro": "", "prompts": [
+        {"text": "Palms toward you", "seconds": 2, "hands": "both",
+         "switch": [{"at": 0.5, "to": "backs toward you", "text": "Backs toward you"}]}]},
+    {"id": "taps", "title": "Taps", "kind": "scene", "intro": "Tap.", "prompts": [
+        {"id": "one", "hands": "right", "text": "Tap.", "windows": [WIN], "switch": "elbow bent",
+         "acts": {"gen": "buttons", "every_s": 1.0, "lit_s": 0.6, "count": 2}}]}])
+
+
+class SwitchTest(unittest.TestCase):
+    """Two poses in a step (DESIGN.md): the bar's tick, "Switch to ...", a "switch" event."""
+
+    def test_list(self):
+        sec = {"id": "s"}
+        self.assertEqual(session._switch_list(sec, None), [])
+        self.assertEqual(session._switch_list(sec, "backs"), [{"at": 0.5, "to": "backs", "text": ""}])
+        two = session._switch_list(sec, [{"at": 0.3, "to": "a"}, {"at": 0.6, "to": "b", "text": "B"}])
+        self.assertEqual([(w["at"], w["to"], w["text"]) for w in two], [(0.3, "a", ""), (0.6, "b", "B")])
+        for bad in ([{"at": 0.6, "to": "a"}, {"at": 0.3, "to": "b"}], [{"at": 1, "to": "a"}], [{"at": 0.5}],
+                    [{"at": 0.5, "to": " "}], [{"at": 0.5, "to": "a", "text": 3}], 5):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                session._switch_list(sec, bad)
+
+    def test_round(self):
+        tmp = tempfile.mkdtemp(prefix="handrec-switch-test-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        base, script = os.path.join(tmp, "base"), os.path.join(tmp, "test.json")
+        os.makedirs(base)
+        with open(script, "w") as f:
+            json.dump(SWITCH_SCRIPT, f)
+        panel = []
+        s = session.Session(base, {}, {}, "room", script, dry_run=True, speed=10, next_after=0.02,
+                            poses_dir=os.path.join(tmp, "no-poses"), button=False)
+        s.print = panel.append
+        s.start()
+        end = time.monotonic() + 30
+        while s._thread.is_alive() and time.monotonic() < end:
+            s.join(0.1)
+        self.assertEqual(s.state, "done")
+        events = []
+        takes = os.path.join(s.session_dir, "takes")
+        for t in sorted(os.listdir(takes)):
+            with open(os.path.join(takes, t, "prompts.jsonl")) as f:
+                events += [json.loads(line) for line in f]
+        switches = [e for e in events if e.get("event") == "switch"]
+        self.assertEqual([(e["id"], e["to"]) for e in switches], [("size/both", "backs toward you"), ("taps/one", "elbow bent")])
+        size = [e for e in events if e.get("event") == "prompt" and e["id"] == "size/both"]
+        self.assertEqual(size[0]["switch"][0]["to"], "backs toward you")
+        # the switch comes between the step's prompt event and its end
+        k = events.index(switches[0])
+        self.assertLess(events.index(size[0]), k)
+        self.assertEqual(events[k + 1]["event"], "wait")
+        cmds = [c for c in panel if c.startswith("panel: split") or c.startswith("panel: text Backs")]
+        self.assertIn("panel: split 0.500 backs toward you", cmds)
+        self.assertIn("panel: split 0.500 elbow bent", cmds)
+        self.assertIn("panel: text Backs toward you", cmds)
+        self.assertEqual(cmds[-1], "panel: split off")
+
+
 if __name__ == "__main__":
     unittest.main()

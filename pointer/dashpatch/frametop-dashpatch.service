@@ -1,0 +1,16 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop dashboard patch: the 3D mouse's treadmill device moves SteamVR's floating windows
+Documentation=file://@REPO@/pointer/dashpatch/ft-dashpatch.py
+# The dashboard runs in SteamVR's vrwebhelper; it starts and stops with SteamVR.
+After=steamvr.service
+PartOf=steamvr.service
+Requisite=steamvr.service
+
+[Service]
+ExecStart=/usr/bin/python3 -I @REPO@/pointer/dashpatch/ft-dashpatch.py run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=steamvr.service

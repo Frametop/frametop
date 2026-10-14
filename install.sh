@@ -98,9 +98,10 @@ step "4/11 3D mouse: SteamVR driver"
 build "$root/pointer/driver/build.sh"
 "$root/pointer/driver/install.sh" install
 
-step "5/11 3D mouse: pointer helper service"
+step "5/11 3D mouse: pointer helper service, and the dashboard patch that lets it move SteamVR's windows"
 build "$root/pointer/helper/build.sh"
 "$root/pointer/helper/run.sh" install
+"$root/pointer/dashpatch/run.sh" install
 
 step "6/11 power service (turns the displays off while the headset isn't used, even on a stand)"
 build "$root/power/build.sh"

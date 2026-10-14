@@ -42,6 +42,7 @@ releases=$HOME/.local/share/frametop/releases  # pack/install-release.sh
 vrpathreg=/opt/steamvr/bin/linuxarm64/vrpathreg
 handsctl=$HOME/.local/bin/ft-handsctl
 eye_rate=$HOME/.local/state/frametop/gaze/steamvr-eye-rate  # gaze/eye-rate.py turned the setting on
+dash_debugger=$HOME/.local/state/frametop/pointer/dashboard-debugger  # pointer/dashpatch/ft-dashpatch.py turned it on
 eyegrab_files=(/etc/systemd/system/frametop-eyegrab.service /etc/frametop/ft-eyegrab
                /etc/atomic-update.conf.d/frametop-eyegrab.conf)
 bt_files=(/etc/systemd/system/steamframe-bt-fixups.service /etc/systemd/system/bluetooth.service.d/steamframe.conf
@@ -122,10 +123,11 @@ main() {
   entries+=("$apps"/frametop-profile-*.desktop)  # one per layout profile (layout/ft_layout.py)
   [ -L "$handsctl" ] || handsctl=
   [ -f "$eye_rate" ] && [ -f "$repo/gaze/eye-rate.py" ] || eye_rate=
+  [ -f "$dash_debugger" ] && [ -f "$repo/pointer/dashpatch/ft-dashpatch.py" ] || dash_debugger=
   exists "${eyegrab_files[@]}" "${bt_files[@]}" && sys=1
 
   if [ -n "$override" ] || [ -n "$native_copy" ] || [ ${#units[@]} -gt 0 ] || [ ${#entries[@]} -gt 0 ] ||
-     [ -d "$driver" ] || [ -n "$handsctl" ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] || [ -n "$eye_rate" ]; then
+     [ -d "$driver" ] || [ -n "$handsctl" ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] || [ -n "$eye_rate" ] || [ -n "$dash_debugger" ]; then
     step "Step 1 of 2: stop Frametop from starting"
     echo "This removes:"
     [ -n "$override" ] && echo "  - the launcher's Desktop entry (Launch a program -> Desktop opens the stock desktop again)"
@@ -135,6 +137,7 @@ main() {
     [ ${#entries[@]} -gt 0 ] && echo "  - ${#entries[@]} menu entries (Frametop Display Settings, Input Settings, ...)"
     [ -n "$handsctl" ] && echo "  - $handsctl"
     [ -n "$eye_rate" ] && echo "  - gaze mode's SteamVR setting for 90 fps eye cameras (steamvr.gazeDepEyeToHeadEnable)"
+    [ -n "$dash_debugger" ] && echo "  - SteamVR's dashboard debugger, which the 3D mouse's window moves use (VRWebHelper.DebuggerEnabled)"
     [ -n "$camd_caps" ] && echo "  - the hand camera broker's file capabilities (needs your password)"
     exists "${eyegrab_files[@]}" && echo "  - our eye tracker's frame grabber (a system service: needs your password)"
     exists "${bt_files[@]}" && echo "  - the Bluetooth fixes (system files: needs your password)"
@@ -161,6 +164,8 @@ main() {
     [ -n "$handsctl" ] && run rm -f "$handsctl"
     [ -n "$eye_rate" ] && { run python3 "$repo/gaze/eye-rate.py" off ||
       echo "warning: SteamVR's eye camera setting stays on. Turn it off with: python3 $repo/gaze/eye-rate.py off" >&2; }
+    [ -n "$dash_debugger" ] && { run python3 -I "$repo/pointer/dashpatch/ft-dashpatch.py" off ||
+      echo "warning: SteamVR's dashboard debugger stays on. Turn it off with: python3 -I $repo/pointer/dashpatch/ft-dashpatch.py off" >&2; }
     if [ "$sys" = 1 ]; then
       echo "The system files need your password (sudo)."
       # $1 is ft-camd when it has capabilities to remove, else empty; the system files follow.

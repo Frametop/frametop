@@ -16,9 +16,9 @@ checks:
     manifest; the pixels themselves aren't looked at;
   - every .jsonl line parses, and take.json does;
   - a test-phase export (a bounty round or debug session under TESTING.md, DESIGN.md "Testing"):
-    its recordings (sets.bin.zst.age, live.bin.zst.age) are whole age files to the test dataset's
-    keys (test-recipients.txt), nothing of them unencrypted; their insides aren't checked (that
-    needs a key);
+    its recordings (sets.bin.zst.age, live.bin.zst.age, voice.bin.zst.age) are whole age files
+    to the test dataset's keys (test-recipients.txt), nothing of them unencrypted; their insides
+    aren't checked (that needs a key);
   - the side cameras (sides.py): the session's "sides" decision, and each take's files named
     right by it (a warning when it wasn't decided: the maintainer's check tells then);
   - the total size.
@@ -58,7 +58,8 @@ except ImportError:
 EXPORT_SCHEMA = 1
 TOP_FILES = {"manifest.json", "calibration.json", "device.json", "SHA256SUMS"}
 REGION_CONSENT = "2026-10-03"   # the consent version that added the residency confirmation
-TAKE_FILES = {"prompts.jsonl", "poses.jsonl", "take.json", "sets.bin.zst", "sets.bin.zst.age", "live.bin.zst.age"}
+TAKE_FILES = {"prompts.jsonl", "poses.jsonl", "take.json", "sets.bin.zst", "sets.bin.zst.age", "live.bin.zst.age",
+              "voice.bin.zst.age"}
 TEST_RECIPIENTS = os.path.join(HERE, "test-recipients.txt")
 CONSENT_KEYS = {"public": "consent", "testing": "testing_consent"}   # profile.json's record of each consent
 TAKE_RE = re.compile(r"^\d{2}-[a-z0-9][a-z0-9-]*$")
@@ -537,8 +538,15 @@ def check_manifest(m, report, root):
                 report.error(f"manifest: take {tid} has a live log, but this isn't a debug session")
             elif not isinstance(live, dict) or live.get("file") != f"takes/{tid}/live.bin.zst.age":
                 report.error(f"manifest: take {tid}'s live log is {live!r}")
+        voice = t.get("voice")
+        if voice is not None:
+            if not debug:
+                report.error(f"manifest: take {tid} has a voice recording, but this isn't a debug session")
+            elif not isinstance(voice, dict) or voice.get("file") != f"takes/{tid}/voice.bin.zst.age":
+                report.error(f"manifest: take {tid}'s voice recording is {voice!r}")
         if testing and isinstance(enc_files, list):
-            for name in (f, (live or {}).get("file") if isinstance(live, dict) else None):
+            for name in (f, (live or {}).get("file") if isinstance(live, dict) else None,
+                         (voice or {}).get("file") if isinstance(voice, dict) else None):
                 if name and name not in enc_files:
                     report.error(f"manifest: {name} isn't in encryption.files")
     check_sides(m, entries, report)
@@ -679,7 +687,8 @@ def validate(root, progress=None, cancel=None):
             if base + "sets.bin.zst" in sizes:
                 report.error(f"{base}sets.bin.zst: a test-phase recording unencrypted (export it again)")
             for name, listed_file in (("sets.bin.zst.age", (entry or {}).get("file")),
-                                      ("live.bin.zst.age", ((entry or {}).get("live") or {}).get("file"))):
+                                      ("live.bin.zst.age", ((entry or {}).get("live") or {}).get("file")),
+                                      ("voice.bin.zst.age", ((entry or {}).get("voice") or {}).get("file"))):
                 rel = base + name
                 if rel in sizes:
                     problem = age.shape(os.path.join(root, rel), recipients)
@@ -689,7 +698,7 @@ def validate(root, progress=None, cancel=None):
                 elif listed_file:
                     report.error(f"{rel} is missing")
             continue
-        for name in ("sets.bin.zst.age", "live.bin.zst.age"):
+        for name in ("sets.bin.zst.age", "live.bin.zst.age", "voice.bin.zst.age"):
             if base + name in sizes:
                 report.error(f"{base}{name}: encrypted, but this export isn't for the test dataset")
         rel = base + "sets.bin.zst"

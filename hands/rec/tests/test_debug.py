@@ -20,6 +20,7 @@ sys.path.insert(0, REC)
 sys.path.insert(0, HERE)   # test_validate, also under python -I
 import session  # noqa: E402
 import livelog  # noqa: E402
+import voicelog  # noqa: E402
 
 
 class FakeTracker:
@@ -88,6 +89,66 @@ class LiveLogTest(unittest.TestCase):
         time.sleep(0.05)
         self.assertEqual(counts.stop(), {"hands": 0, "gestures": 0})
         self.assertEqual(livelog.read(path), [])
+
+
+FAKE_PW_RECORD = """#!/bin/sh
+# 0.5 s of a 1000-step ramp, then waits to be stopped
+python3 -c 'import struct, sys; sys.stdout.buffer.write(struct.pack("<8000h", *range(-4000, 4000)))'
+exec sleep 30
+"""
+
+
+class VoiceLogTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.path = os.environ.get("PATH", "")
+        self.addCleanup(os.environ.__setitem__, "PATH", self.path)
+
+    def fake(self, script):
+        bindir = os.path.join(self.tmp, "bin")
+        os.makedirs(bindir, exist_ok=True)
+        exe = os.path.join(bindir, "pw-record")
+        with open(exe, "w") as f:
+            f.write(script)
+        os.chmod(exe, 0o755)
+        os.environ["PATH"] = bindir + os.pathsep + self.path
+
+    def test_records(self):
+        self.fake(FAKE_PW_RECORD)
+        path = os.path.join(self.tmp, "voice.bin")
+        log = voicelog.VoiceLog(path).start()
+        end = time.monotonic() + 5
+        while log.samples < 8000 and time.monotonic() < end:
+            time.sleep(0.02)
+        counts = log.stop()
+        self.assertEqual(counts["error"], "")
+        self.assertEqual(counts["seconds"], 0.5)
+        self.assertEqual(counts["peak"], round(4000 / 32768, 3))
+        rate, recs = voicelog.read(path)
+        self.assertEqual(rate, 16000)
+        self.assertEqual(len(recs), counts["chunks"])
+        self.assertEqual(sum(len(d) for _, d in recs), 16000)
+        self.assertEqual(recs, sorted(recs, key=lambda r: r[0]))
+        wav = os.path.join(self.tmp, "voice.wav")
+        voicelog.to_wav(path, wav)
+        import wave
+        with wave.open(wav) as w:
+            self.assertEqual(w.getframerate(), 16000)
+            self.assertGreaterEqual(w.getnframes(), 8000)
+
+    def test_no_microphone(self):
+        """No pw-record, or one that fails at once: an error to report, nothing raised."""
+        os.environ["PATH"] = os.path.join(self.tmp, "empty")
+        counts = voicelog.VoiceLog(os.path.join(self.tmp, "voice.bin")).start().stop()
+        self.assertIn("pw-record", counts["error"])
+        self.fake("#!/bin/sh\nexit 1\n")
+        counts = voicelog.VoiceLog(os.path.join(self.tmp, "voice.bin")).start()
+        time.sleep(0.2)
+        counts = counts.stop()
+        self.assertEqual(counts["seconds"], 0)
+        self.assertIn("exited", counts["error"])
+        self.assertEqual(voicelog.read(os.path.join(self.tmp, "voice.bin")), (16000, []))
 
 
 class SettingsTest(unittest.TestCase):
@@ -171,6 +232,47 @@ class DebugSessionTest(unittest.TestCase):
         self.assertEqual(s.state, "done")
         with open(os.path.join(s.session_dir, "takes", "01-free", "take.json")) as f:
             self.assertEqual(sorted(json.load(f)["live"]), ["live-2.bin", "live.bin"])
+
+    def test_voice(self):
+        """Ticked "Record my voice": each recording part has its voice file beside the live log."""
+        made = []
+
+        class FakeVoice:
+            def __init__(self, path):
+                self.path, self.error = path, ""
+                made.append(os.path.basename(path))
+
+            def start(self):
+                with open(self.path, "wb") as f:
+                    f.write(voicelog.HDR.pack(voicelog.MAGIC, 1, voicelog.RATE))
+                return self
+
+            def stop(self):
+                return {"seconds": 1.0, "chunks": 10, "peak": 0.2, "error": ""}
+
+        orig = session.voicelog.VoiceLog
+        session.voicelog.VoiceLog = FakeVoice
+        self.addCleanup(setattr, session.voicelog, "VoiceLog", orig)
+
+        def act(s):
+            s.pause()
+            time.sleep(0.2)
+            s.resume()
+            time.sleep(0.2)
+            s.finish()
+        orig_init = session.Session.__init__
+
+        def init(s, *a, **k):
+            orig_init(s, *a, **k)
+            self.assertFalse(s.voice)   # a dry run records no voice, even ticked
+            s.voice = True
+        session.Session.__init__ = init
+        self.addCleanup(setattr, session.Session, "__init__", orig_init)
+        s = self.run_debug(act)
+        self.assertEqual(s.state, "done")
+        self.assertEqual(made, ["voice.bin", "voice-2.bin"])
+        with open(os.path.join(s.session_dir, "takes", "01-free", "take.json")) as f:
+            self.assertEqual(sorted(json.load(f)["voice"]), ["voice-2.bin", "voice.bin"])
 
     def test_needs_live_hands(self):
         s = session.Session(os.path.join(self.tmp, "base"), {}, {}, "room", session.DEBUG_SCRIPT, button=False)
@@ -273,6 +375,57 @@ class DebugExportTest(unittest.TestCase):
                                   capture_output=True, check=True).stdout
         self.assertEqual(len(sets), m["takes"][1]["raw_bytes"])
 
+    def write_voice(self):
+        """voice.bin and voice-2.bin around the deleted range: a chunk before it, one ending in it,
+        one inside, one starting in it, one after; the second file also cut off mid-write."""
+        a, b = self.takes.read_json(os.path.join(self.tdir, "take.json"))["deleted"][0]
+        ms = 1_000_000
+        chunk = bytes(range(64)) * 50   # 3200 bytes: 100 ms at 16 kHz
+        ends = [(a - 500 * ms, a + 50 * ms, (a + b) // 2), (min(b, a + 50 * ms) + 120 * ms, b + 500 * ms)]
+        for name, part in zip(("voice.bin", "voice-2.bin"), ends):
+            with open(os.path.join(self.tdir, name), "wb") as f:
+                f.write(voicelog.HDR.pack(voicelog.MAGIC, 1, 16000))
+                for t in part:
+                    f.write(voicelog.REC.pack(t, len(chunk)) + chunk)
+                if name == "voice-2.bin":
+                    f.write(voicelog.REC.pack(b + 900 * ms, len(chunk)) + chunk[:100])
+        # chunks: kept, ends in range (gone), inside (gone), starts in range (gone if b - a > 70 ms), kept
+        return 2 if b - a > 70 * ms else 3
+
+    def test_voice(self):
+        kept = self.write_voice()
+        export = self.store.export(self.sid, low_priority=False)
+        with open(os.path.join(export, "manifest.json")) as f:
+            m = json.load(f)
+        voice = m["takes"][0]["voice"]
+        self.assertEqual(voice["file"], "takes/01-hand-size/voice.bin.zst.age")
+        self.assertIn(voice["file"], m["encryption"]["files"])
+        self.assertNotIn("voice", m["takes"][1])
+        self.assertEqual(voice["chunks"], kept)
+        self.assertEqual(voice["seconds"], kept / 10)
+        r = self.validate.validate(export)
+        self.assertEqual(r.errors, [])
+        import subprocess
+        with open(os.path.join(export, voice["file"]), "rb") as f:
+            raw = subprocess.run([self.takes.find_zstd(), "-dc"], input=self.age.decrypt_bytes(f.read(), self.identity),
+                                 capture_output=True, check=True).stdout
+        out = os.path.join(self.tmp, "voice.bin")
+        with open(out, "wb") as f:
+            f.write(raw)
+        self.assertEqual(len(raw), voice["raw_bytes"])
+        rate, recs = voicelog.read(out)
+        self.assertEqual((rate, len(recs)), (16000, kept))
+        # not ticked as a debug session's, or encrypted
+        files = sorted(os.path.relpath(os.path.join(r, n), export) for r, _, ns in os.walk(export) for n in ns)
+        self.assertFalse(any(f.endswith("voice.bin.zst") for f in files))
+        m["takes"][0]["voice"]["file"] = "takes/01-hand-size/voice.bin.zst"
+        m["session"].pop("debug")
+        self.takes.write_json(os.path.join(export, "manifest.json"), m)
+        from test_validate import write_sums
+        write_sums(export)
+        r = self.validate.validate(export)
+        self.assertTrue(any("voice recording" in e for e in r.errors), r.errors)
+
     def test_bounty_round(self):
         """A bounty's round in the test phase (no debug): encrypted the same way, no live log."""
         sj = self.takes.read_json(self.session_json)
@@ -307,6 +460,20 @@ class DebugExportTest(unittest.TestCase):
         r = self.validate.validate(export)
         # the live log is a debug session's only
         self.assertTrue(any("live log" in e for e in r.errors), r.errors)
+
+    def test_public_no_voice(self):
+        """Voice is only ever exported encrypted: a public export leaves it out."""
+        self.write_voice()
+        sj = self.takes.read_json(self.session_json)
+        del sj["debug"]
+        sj["consent"] = {"kind": "public", "version": "2026-10-02"}
+        self.takes.write_json(self.session_json, sj)
+        profile = self.takes.read_json(os.path.join(self.base, "profile.json"))
+        profile["consent"] = dict(profile["testing_consent"], version="2026-10-02")
+        self.takes.write_json(os.path.join(self.base, "profile.json"), profile)
+        export = self.store.export(self.sid, low_priority=False)
+        files = [n for _, _, ns in os.walk(export) for n in ns]
+        self.assertFalse(any(n.startswith("voice") for n in files), files)
 
     def test_checks(self):
         export = self.store.export(self.sid, low_priority=False)

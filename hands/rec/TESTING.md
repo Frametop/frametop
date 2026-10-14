@@ -1,6 +1,6 @@
 # Testing the hand recorder's bounties
 
-Version: 2026-10-14
+Version: 2026-10-14b
 
 The bounties and testing sessions are new, and we're trying them out with a few people before they open to everyone. This page says what you agree to by taking part in that test. It's shorter than the hand dataset's consent because **nothing you send now is published**.
 
@@ -19,9 +19,10 @@ Frametop is an independent open-source project, maintained by DeeJanuz (<https:/
 - **Motion** of the headset and, if you use them, the controllers; **what you were asked to do** and when.
 - **Calibration** of the cameras, with serial numbers and other fields that identify your headset removed.
 - In a **testing session**, also what Frametop's hand tracking made of your hands, moment by moment, the moments you marked, and your hand tracking settings (file paths left out).
+- **Your voice**, only in a testing session where you tick "Record my voice": the headset's microphone while you record, so you can say what went wrong. Anyone else who can be heard is recorded too. The maintainer turns it into text on their own computers (not an online service) and uses it to find those moments.
 - **Your answers** in the checklist, the **times** of the recordings, and a **contributor id**: a random number made on your headset, not from your name, Steam account or headset.
 
-No sound, no name, no email address, no Steam account. The cameras look outward, so your face isn't recorded unless a mirror shows it.
+No other sound, no name, no email address, no Steam account. The cameras look outward, so your face isn't recorded unless a mirror shows it.
 
 ## Where it goes and who sees it
 

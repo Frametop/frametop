@@ -56,6 +56,7 @@ import sides  # noqa: E402  (hands/rec/sides.py: which side camera is which)
 import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone recorder's build info)
 sys.path.insert(0, REPO)
 import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
+import voicelog  # noqa: E402  (hands/rec/voicelog.py: a debug session's microphone, if ticked)
 # What the recorders share (recorder/), under the names this module always had: the window,
 # the standalone recorder's spike and the tests use them from here.
 from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402,F401
@@ -1558,6 +1559,11 @@ class Session:
         self.consent_kind = takes.round_consent_kind(bool(bounty), self.debug)   # DESIGN.md "Testing"
         self.live_dir = self.hands_dir   # where Frametop's ft-hands publishes (a test hook)
         self._live_log = None      # the LiveLog of the recording part running
+        # the person's voice beside it, if they ticked "Record my voice" (voicelog.py): what they
+        # say about what went wrong becomes flags later, transcribed on the maintainer's machines
+        # (not in a dry run: a rehearsal records nothing)
+        self.voice = self.debug and bool(self.checklist.get("voice")) and not dry_run
+        self._voice_log = None
         self._marks = 0            # marks asked for (any thread); _marked: those logged
         self._marked = 0
         self.record_hz = max(1.0, min(30.0, float(self.script.get("record_hz", RECORD_HZ))))
@@ -2481,6 +2487,12 @@ class Session:
             name = "live.bin" if t["part"] == 1 else "live-%d.bin" % t["part"]
             self._live_log = livelog.LiveLog(self.live_dir, os.path.join(t["dir"], name)).start()
             self._live_log.name = name
+        if self.voice:
+            name = "voice.bin" if t["part"] == 1 else "voice-%d.bin" % t["part"]
+            self._voice_log = voicelog.VoiceLog(os.path.join(t["dir"], name)).start()
+            self._voice_log.name = name
+            if self._voice_log.error:
+                self._log("voice: %s" % self._voice_log.error)
         self._recording = True
         self._panel.cmd("poses start " + os.path.join(t["dir"], "poses.jsonl"))
         self._panel.set("rec", "rec on")
@@ -2497,6 +2509,14 @@ class Session:
             self._log("live log %s: %d hands, %d gestures" % (log.name, counts["hands"], counts["gestures"]))
             if self._take:
                 self._take["json"].setdefault("live", {})[log.name] = counts
+                write_json(os.path.join(self._take["dir"], "take.json"), self._take["json"])
+        if self._voice_log:
+            log, self._voice_log = self._voice_log, None
+            counts = log.stop()
+            self._log("voice %s: %.1f s, peak %.3f%s" % (log.name, counts["seconds"], counts["peak"],
+                                                       ", " + counts["error"] if counts["error"] else ""))
+            if self._take:
+                self._take["json"].setdefault("voice", {})[log.name] = counts
                 write_json(os.path.join(self._take["dir"], "take.json"), self._take["json"])
         if self._recorder:
             rec, self._recorder = self._recorder, None

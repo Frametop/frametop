@@ -447,7 +447,8 @@ Kirigami.ApplicationWindow {
                     rings: rings.checked,
                     watch: watch.checked,
                     notes: notes.text,
-                    privacy: privacyOk
+                    privacy: privacyOk,
+                    voice: bountyId === "debug" && voice.checked
                 }
             }
 
@@ -713,6 +714,27 @@ Kirigami.ApplicationWindow {
                     text: backend.cameraSummary + "\n" + backend.cameraEvidence
                 }
 
+                Kirigami.Separator {
+                    visible: checklist.bountyId === "debug"
+                    Kirigami.FormData.isSection: true
+                    Kirigami.FormData.label: "Your voice"
+                }
+                Controls.CheckBox {
+                    id: voice
+                    visible: checklist.bountyId === "debug"
+                    text: "Record my voice (optional)"
+                }
+                Controls.Label {
+                    visible: checklist.bountyId === "debug"
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    text: "The headset's microphone records while you do: say what went wrong as it happens, e.g. "
+                          + "\"that opened the lazy susan, I didn't mean to\". We turn what you say into notes at "
+                          + "those moments. It's sent encrypted with the rest, for testing only. Leave it off if "
+                          + "other people can be heard."
+                }
+
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "What will happen" }
                 Controls.Label {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
@@ -723,7 +745,8 @@ Kirigami.ApplicationWindow {
                             + "minutes: point, tap, pinch, drag, scroll. Do what gives you trouble. Frametop's hand "
                             + "tracking stays on, and what it made of your hands is recorded with the cameras.\n\n"
                             + "When the tracking gets something wrong, press the headset button at once: that marks "
-                            + "the moment (the panel flashes \"Marked\"). Hold the button to finish early.\n\n"
+                            + "the moment (the panel flashes \"Marked\"). Hold the button to finish early."
+                            + (voice.checked ? " Say what went wrong too: the microphone is recording." : "") + "\n\n"
                             + "Nothing leaves the headset. Afterwards you watch it in Review, delete anything you "
                             + "don't want to share, and only then export. It's sent encrypted, for testing only."
                           : checklist.bountyId !== ""

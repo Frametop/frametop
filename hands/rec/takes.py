@@ -51,6 +51,9 @@ PART_RE = re.compile(r"^sets(?:-(\d+))?\.bin$")
 LIVE_RE = re.compile(r"^live(?:-(\d+))?\.bin$")    # a debug session's copies of the live tracker's output
 LIVE_HDR = struct.Struct("<8sII")                   # livelog.py: magic, version, 0
 LIVE_REC = struct.Struct("<B3xIQQ")                 # source, length, read_ns, seq
+VOICE_RE = re.compile(r"^voice(?:-(\d+))?\.bin$")  # a debug session's microphone, if ticked
+VOICE_HDR = struct.Struct("<8sII")                  # voicelog.py: magic, version, sample rate
+VOICE_REC = struct.Struct("<QI")                    # read_ns, bytes of s16le samples
 TEST_RECIPIENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-recipients.txt")
 # The bounties' test phase (DESIGN.md "Testing"): bounty rounds and debug sessions are recorded under
 # TESTING.md's consent (profile.json "testing_consent"), and their exports are encrypted for the test
@@ -158,13 +161,13 @@ def export_jsonl(src, dst, ranges, keep_controllers):
             out.write(json.dumps(obj, separators=(", ", ": ")) + "\n")
 
 
-def live_parts(take_dir):
-    """A debug take's live.bin, live-2.bin, ... in order."""
+def live_parts(take_dir, pattern=LIVE_RE):
+    """A debug take's live.bin, live-2.bin, ... in order (pattern=VOICE_RE: voice.bin, ...)."""
     try:
         names = os.listdir(take_dir)
     except OSError:
         return []
-    found = [(int(m.group(1) or 1), name) for name in names for m in [LIVE_RE.match(name)] if m]
+    found = [(int(m.group(1) or 1), name) for name in names for m in [pattern.match(name)] if m]
     return [os.path.join(take_dir, name) for _, name in sorted(found)]
 
 
@@ -199,6 +202,47 @@ def export_live(take_dir, ranges, zstd, dest, recipients=None):
     with open(dest, "wb") as f:
         f.write(payload)
     return {"records": counts, "raw_bytes": len(out)}
+
+
+def export_voice(take_dir, ranges, zstd, dest, recipients):
+    """A debug take's voice parts as one voice.bin (voicelog.py's format), chunks touching a
+    deleted range left out, through zstd into dest, always encrypted (no recipients: nothing
+    written, None). None without voice parts; else {"chunks": n, "seconds": s, "raw_bytes": n}."""
+    parts = live_parts(take_dir, VOICE_RE)
+    if not parts or not recipients:
+        return None
+    out, rate, chunks, samples = bytearray(), None, 0, 0
+    for path in parts:
+        with open(path, "rb") as f:
+            data = f.read()
+        if len(data) < VOICE_HDR.size or data[:8] != b"FHVOIC01":
+            continue
+        _, _, part_rate = VOICE_HDR.unpack_from(data, 0)
+        if rate is None:
+            rate = part_rate
+            out += VOICE_HDR.pack(b"FHVOIC01", 1, rate)
+        elif part_rate != rate:
+            continue
+        off = VOICE_HDR.size
+        while off + VOICE_REC.size <= len(data):
+            read_ns, n = VOICE_REC.unpack_from(data, off)
+            end = off + VOICE_REC.size + n
+            if end > len(data):
+                break   # cut off: the session ended mid-write
+            first_ns = read_ns - n // 2 * 1_000_000_000 // max(1, rate)
+            if not any(a <= read_ns and first_ns <= b for a, b in ranges):
+                out += data[off:end]
+                chunks += 1
+                samples += n // 2
+            off = end
+    if rate is None:
+        return None
+    r = subprocess.run(["nice", "-n", "19", zstd] + ZSTD_ARGS, input=bytes(out), capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError("zstd failed: %s" % (r.stderr.decode(errors="replace").strip() or r.returncode))
+    with open(dest, "wb") as f:
+        f.write(age.encrypt_bytes(r.stdout, recipients))
+    return {"chunks": chunks, "seconds": round(samples / rate, 2), "raw_bytes": len(out)}
 
 
 # ---------------------------------------------------------------- one take's recording
@@ -587,6 +631,10 @@ class Store:
                 entry["live"] = dict(live, file="takes/%s/live.bin.zst%s" % (t["id"], suffix))
                 if recipients:
                     encrypted.append(entry["live"]["file"])
+            voice = export_voice(tdir, ranges, zstd, os.path.join(out, "voice.bin.zst.age"), recipients)
+            if voice is not None:
+                entry["voice"] = dict(voice, file="takes/%s/voice.bin.zst.age" % t["id"])
+                encrypted.append(entry["voice"]["file"])
             take_entries.append(entry)
         if cancelled():
             raise Cancelled()

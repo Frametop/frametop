@@ -25,7 +25,6 @@ usage: takes.py [--base DIR] list | takes SESSION | export SESSION | sides SESSI
 """
 import argparse
 import datetime
-import hashlib
 import json
 import os
 import re
@@ -37,6 +36,9 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge_ranges, read_json,  # noqa: E402,F401
+                            sha256_file, tree_bytes, tree_stat, write_sums)
 
 DEFAULT_BASE = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -51,19 +53,6 @@ EXPORT_SCHEMA = 1
 # someone is in VR makes the headset stutter).
 ZSTD_ARGS = ["-10", "-T2", "-q", "-c"]
 ZSTD_PATHS = ("/usr/bin/zstd", "/usr/local/bin/zstd", "/run/host/usr/bin/zstd")
-CHUNK = 1 << 20
-
-
-class Cancelled(Exception):
-    pass
-
-
-def read_json(path, default=None):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {} if default is None else default
 
 
 def write_json(path, obj):
@@ -112,38 +101,6 @@ def tool_version():
     return "ft-handrec " + (described or "unknown")
 
 
-def free_bytes(path):
-    """Free space on the file system that holds path (or its nearest existing parent)."""
-    while path and not os.path.exists(path):
-        path = os.path.dirname(path)
-    try:
-        return shutil.disk_usage(path or "/").free
-    except OSError:
-        return 0
-
-
-def tree_stat(path):
-    """(bytes, newest mtime) of the files under path."""
-    total, newest = 0, 0.0
-    for root, _, files in os.walk(path):
-        for name in files:
-            try:
-                st = os.lstat(os.path.join(root, name))
-            except OSError:
-                continue
-            total += st.st_size
-            newest = max(newest, st.st_mtime)
-    return total, newest
-
-
-def tree_bytes(path):
-    return tree_stat(path)[0]
-
-
-def in_ranges(t, ranges):
-    return any(a <= t <= b for a, b in ranges)
-
-
 def export_jsonl(src, dst, ranges, keep_controllers):
     """Copy a take's poses.jsonl or prompts.jsonl for export:
     - poses in the deleted ranges are left out, and the live tracker's feedback there (the
@@ -176,17 +133,6 @@ def export_jsonl(src, dst, ranges, keep_controllers):
                 if not keep_controllers:
                     obj.pop("controller", None)
             out.write(json.dumps(obj, separators=(", ", ": ")) + "\n")
-
-
-def merge_ranges(ranges):
-    """Sorted, with overlapping or touching ranges joined."""
-    out = []
-    for a, b in sorted((min(a, b), max(a, b)) for a, b in ranges):
-        if out and a <= out[-1][1] + 1:
-            out[-1][1] = max(out[-1][1], b)
-        else:
-            out.append([a, b])
-    return out
 
 
 # ---------------------------------------------------------------- one take's recording
@@ -577,14 +523,7 @@ class Store:
                     "profile": shown_profile, "session": meta, "takes": take_entries}
         write_json(os.path.join(work, "manifest.json"), manifest)
         report(0.995, "Writing checksums")
-        sums = []
-        for root, _, files in os.walk(work):
-            for name in files:
-                path = os.path.join(root, name)
-                sums.append((os.path.relpath(path, work), sha256_file(path, cancelled)))
-        with open(os.path.join(work, "SHA256SUMS"), "w") as f:
-            for rel, digest in sorted(sums):
-                f.write(f"{digest}  {rel}\n")
+        write_sums(work, cancelled)
 
     @staticmethod
     def _compress(index, keep, zstd, dest, step, cancelled):
@@ -612,24 +551,6 @@ class Store:
             finally:
                 proc.stderr.close()
         return raw
-
-
-def sha256_file(path, cancelled=lambda: False):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(CHUNK):
-            if cancelled():
-                raise Cancelled()
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def human_bytes(n):
-    for unit in ("B", "KB", "MB", "GB"):
-        if n < 1000 or unit == "GB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1000
-    return f"{n:.1f} TB"
 
 
 def main():

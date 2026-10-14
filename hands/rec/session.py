@@ -15,6 +15,7 @@ for testing (in the dev container):
   python3 hands/rec/session.py --ring /tmp/ring --base /tmp/hr        # ft-ringplay's frames, no headset needed
   python3 hands/rec/session.py --board                                # the bounty board, and which are done
   python3 hands/rec/session.py --bounty index-taps --dry-run --speed 20 --next-after 0.2   # a bounty's round
+  python3 hands/rec/session.py --debug        # a debug session: Frametop's hand tracking used as usual, recorded
 
 Before anything starts it runs the camera check (hands/camcheck.py) and won't start while the
 upper cameras are off (--ignore-cameras overrides it). If the hand-size section's first step sees
@@ -54,6 +55,7 @@ sys.path.insert(0, HERE)
 import sides  # noqa: E402  (hands/rec/sides.py: which side camera is which)
 import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone recorder's build info)
 sys.path.insert(0, REPO)
+import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
 # What the recorders share (recorder/), under the names this module always had: the window,
 # the standalone recorder's spike and the tests use them from here.
 from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402,F401
@@ -71,6 +73,7 @@ PANEL_BIN = os.path.join(HERE, "build", "ft-handpanel")
 # release (it starts the container first)
 IN_BOX = os.path.join(REPO, "scripts", "in-box")
 SCRIPT_PATH = os.path.join(HERE, "script.json")
+DEBUG_SCRIPT = os.path.join(HERE, "debug.json")         # a debug session: Frametop's own hand tracking, used as usual
 BOARD_PATH = os.path.join(HERE, "bounties.json")      # the bounty board shipped with the recorder
 BOUNTIES_DIR = os.path.join(HERE, "bounties")         # a bounty's round script: bounties/<script>.json
 POSES_DIR = os.path.join(HERE, "poses")   # the pose pictures: poses.json and its PNGs
@@ -97,6 +100,11 @@ CAMERAS_TEXT = ("The headset's cameras restarted (SteamVR moves them when the co
                 "or plugged in), or they stopped. If you took the headset off, put it back on. This step goes "
                 "again once they're back.")
 HANDS_UNIT = "frametop-handrec-hands.service"
+CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
+LIVE_KEYS = re.compile(r"^(HANDS|POINTER)_[A-Z0-9_]+$")   # the settings a debug session records
+MARK_FLASH_S = 1.0       # a debug session's mark: the panel shows "Marked" this long
+DEBUG_NEEDS_HANDS = ("A testing session records Frametop's own hand tracking, and it isn't running. Turn on "
+                     "hand tracking in Frametop (or start the desktop), then try again.")
 # The standalone Hand Recorder (takes.standalone()): its binaries run on the host, so ft-hands
 # starts directly rather than in the dev container, and repairs mean its install command.
 STANDALONE = takes.standalone()
@@ -1242,6 +1250,71 @@ def _unit_pid(unit):
         return 0
 
 
+def live_settings(conf_path=None):
+    """The HANDS_* and POINTER_* lines of ~/.config/frametop.conf, comments dropped; a value
+    naming a path keeps only its last part (a path says whose home it is)."""
+    out = {}
+    try:
+        with open(conf_path or CONF_PATH) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        key, eq, value = line.partition("=")
+        key = key.strip()
+        if not eq or not LIVE_KEYS.match(key):
+            continue
+        value = value.split("#", 1)[0].strip().strip("\"'")
+        if "/" in value:
+            value = os.path.basename(value.rstrip("/"))
+        out[key] = value
+    return out
+
+
+def live_tracker(unit=LIVE_HANDS_UNIT):
+    """What Frametop's live ft-hands is: {"frametop": its checkout's git describe, "models":
+    {file: sha256 (16 hex)}} of the models it loads (HANDS_MODELS, else hands/models/student
+    or the stock hands/models/ncnn next to it). Empty fields when it can't be told."""
+    out = {"frametop": "", "models": {}}
+    try:
+        r = subprocess.run(host_command("systemctl", "--user", "show", "-p", "ExecStart", "--value", unit),
+                           capture_output=True, text=True, timeout=30)
+        exe = next((w for w in r.stdout.split() if w.endswith("/ft-hands")), "")
+    except (OSError, subprocess.SubprocessError):
+        exe = ""
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(exe))) if exe else ""
+    if repo:
+        try:
+            out["frametop"] = subprocess.run(["git", "-C", repo, "describe", "--always", "--dirty", "--tags"],
+                                             capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    conf = {}
+    try:
+        with open(CONF_PATH) as f:
+            for line in f:
+                key, eq, value = line.partition("=")
+                if eq and key.strip() == "HANDS_MODELS":
+                    conf["HANDS_MODELS"] = value.split("#", 1)[0].strip().strip("\"'")
+    except OSError:
+        pass
+    dirs = [os.path.expanduser(conf["HANDS_MODELS"])] if conf.get("HANDS_MODELS") else []
+    if repo:
+        dirs += [os.path.join(repo, "hands", "models", d) for d in ("student", "ncnn")]
+    for d in dirs:
+        files = sorted(glob.glob(os.path.join(d, "*.param")) + glob.glob(os.path.join(d, "*.bin")))
+        if files:
+            for path in files:
+                h = hashlib.sha256()
+                with open(path, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                out["models"][os.path.basename(path)] = h.hexdigest()[:16]
+            out["models_dir"] = os.path.basename(d.rstrip("/"))
+            break
+    return out
+
+
 def camera_check(repair=False):
     """camcheck.check() (the XRService log, its open cameras where readable, ft-camd's ring);
     never raises: a failure is "unknown". repair (the window, never during a session): when
@@ -1340,6 +1413,16 @@ class Session:
         self._button = None                  # the ButtonReader
         self.print = print   # where dry-run panel commands go (the CLI's stdout)
         self.script = load_script(self.script_path)
+        # A debug session (debug.json): one long free step with Frametop's own hand tracking on,
+        # its output copied beside the recording (livelog.py); the button marks what went wrong.
+        self.debug = bool(self.script.get("debug"))
+        if self.debug:
+            self.quiet_units = ()
+        self.consent_kind = takes.round_consent_kind(bool(bounty), self.debug)   # DESIGN.md "Testing"
+        self.live_dir = self.hands_dir   # where Frametop's ft-hands publishes (a test hook)
+        self._live_log = None      # the LiveLog of the recording part running
+        self._marks = 0            # marks asked for (any thread); _marked: those logged
+        self._marked = 0
         self.record_hz = max(1.0, min(30.0, float(self.script.get("record_hz", RECORD_HZ))))
         # the board's entry this round is for (bounties.validate's, plus the board's "updated"), or None
         self.bounty = dict(bounty) if bounty else None
@@ -1353,7 +1436,7 @@ class Session:
         self.session_dir = ""
         self._thread = None
         self._lock = threading.Lock()
-        self._want = {"pause": False, "skip": False, "stop": False, "next": False, "redo": False}
+        self._want = {"pause": False, "skip": False, "stop": False, "next": False, "redo": False, "end": False}
         self._wake = threading.Event()
         # state: starting, intro, ready (a step waits for Next), countdown, running (a hold),
         # between, paused, done, stopped, error. waiting: Next is wanted. big: the countdown's
@@ -1365,7 +1448,8 @@ class Session:
                         "take": None, "error": "", "waiting": False, "countdown": 0, "big": "", "can_redo": False,
                         "image": "", "image_mode": "", "caption": "", "position": "", "distance": "",
                         "demo": "", "demo_mode": "", "demo_key": False, "demo_run": 0, "ready_text": READY_TEXT, "button": False, "mouse": True,
-                        "camera": None, "nohands": False, "strip": [], "cue": -1, "quick": self.quick}
+                        "camera": None, "nohands": False, "strip": [], "cue": -1, "quick": self.quick,
+                        "debug": self.debug, "marks": 0}
         self._last_emit = 0.0
         self._log_file = None
         self._panel = None
@@ -1405,7 +1489,15 @@ class Session:
     def button_gesture(self, gesture):
         """The headset's button (ButtonGestures). A press: Next while a step waits, pause during
         a countdown or hold (and auto mode's timed screens), resume while paused. A double press:
-        redo, as R. A hold: stop, as Esc."""
+        redo, as R. A hold: stop, as Esc. In a debug session's free step a press marks the
+        moment and a hold ends the step (the session is done, not stopped)."""
+        if self.debug and self._status["state"] == "running" and gesture in ("press", "hold"):
+            if gesture == "press":
+                self.mark()
+            else:
+                self.finish()
+            self._log("headset button (%s)" % ("mark" if gesture == "press" else "finish"))
+            return
         if gesture == "press":
             self.button_press()
         elif gesture == "double":
@@ -1438,6 +1530,16 @@ class Session:
     def next_step(self):
         """Step mode: start the step that's waiting (its countdown)."""
         self._set("next", True)
+
+    def mark(self):
+        """A debug session: something went wrong just now (a "mark" event in the take)."""
+        with self._lock:
+            self._marks += 1
+        self._wake.set()
+
+    def finish(self):
+        """A debug session: end the free step there; the session is done."""
+        self._set("end", True)
 
     def redo(self):
         """Record a step again: the one running, or at a step's ready screen the one before."""
@@ -1521,6 +1623,9 @@ class Session:
         """The camera check, before anything is made or started (camcheck.py): with the upper
         cameras off a session records nothing useful. True if it stopped the session (state
         "error", no session folder)."""
+        if self.debug and not (self.dry_run or self.ring) and not unit_active(LIVE_HANDS_UNIT):
+            self._emit(state="error", error=DEBUG_NEEDS_HANDS, prompt=DEBUG_NEEDS_HANDS)
+            return True
         if self.dry_run or self.ring or not self.check_cameras:
             return False
         r = self.camera_check_fn()
@@ -1600,7 +1705,9 @@ class Session:
             "mode": "auto" if self.auto else "step", "quick": self.quick, "guidance": self.guidance,
             "shuffle": {"seed": self.seed, "sweeps": plan_record(self.plan)},
             "record_hz": self.record_hz,
-            "takes": [], "status": "recording", "sides": {"swapped": None}}
+            "takes": [], "status": "recording", "sides": {"swapped": None},
+            "consent": {"kind": self.consent_kind,
+                        "version": (self.profile.get(takes.CONSENT_KEYS[self.consent_kind]) or {}).get("version", "")}}
         if self.bounty:
             self._session_json["bounty"] = {"id": self.bounty["id"], "title": self.bounty.get("title", ""),
                                             "board_updated": self.bounty.get("updated")}
@@ -1612,6 +1719,11 @@ class Session:
             # ran the side cameras through the ISP (no colour module): to check the names later
             self._session_json["device"]["camera_map"] = cam.get("map") or {}
             self._session_json["device"]["isp"] = (cam.get("episode") or {}).get("isp")
+        if self.debug:
+            # testing only, never training (the debug dataset's terms); what the live tracker was
+            self._session_json["debug"] = {"use": "testing", "max_s": max(section_seconds(s) for s in self.plan),
+                                           "settings": live_settings(),
+                                           **(live_tracker() if not self.dry_run else {"frametop": "", "models": {}})}
         if self.dry_run:
             self._session_json["dry_run"] = True
         if self.speed != 1:
@@ -2228,6 +2340,10 @@ class Session:
             remaining = section_seconds(t["section"], worst=True, auto=self.auto) / self.speed
             self._recorder = Recorder(t["dir"], t["part"], remaining * 1.5 + 60, self.ring, self._log_file,
                                       swap=self._sides_swapped(), hz=self.record_hz)
+        if self.debug:
+            name = "live.bin" if t["part"] == 1 else "live-%d.bin" % t["part"]
+            self._live_log = livelog.LiveLog(self.live_dir, os.path.join(t["dir"], name)).start()
+            self._live_log.name = name
         self._recording = True
         self._panel.cmd("poses start " + os.path.join(t["dir"], "poses.jsonl"))
         self._panel.set("rec", "rec on")
@@ -2238,6 +2354,13 @@ class Session:
         self._recording = False
         self._panel.set("rec", "rec off")
         self._panel.cmd("poses stop", reply=not self.dry_run, timeout=1.0)
+        if self._live_log:
+            log, self._live_log = self._live_log, None
+            counts = log.stop()
+            self._log("live log %s: %d hands, %d gestures" % (log.name, counts["hands"], counts["gestures"]))
+            if self._take:
+                self._take["json"].setdefault("live", {})[log.name] = counts
+                write_json(os.path.join(self._take["dir"], "take.json"), self._take["json"])
         if self._recorder:
             rec, self._recorder = self._recorder, None
             code = rec.stop()
@@ -2294,7 +2417,48 @@ class Session:
         if intro and not p["text"]:
             return
         self._begin_prompt(s, p, step, state="intro" if intro else "running")
+        if self.debug and not intro:
+            self._free(p)
+            return
         self._wait(p["seconds"], None if intro else self._switches(p))
+
+    def _free(self, p):
+        """A debug session's free step: the panel out of the way while the person uses Frametop
+        as usual, up to the step's seconds. The button's press is a "mark" (the panel flashes
+        "Marked"), its hold (or finish()) ends the step early, with an "end_early" event."""
+        with self._lock:
+            self._want["end"] = False
+            self._marks = self._marked
+        self._panel.cmd("hide")
+        flash = [0.0]
+
+        def tick(dt):
+            with self._lock:
+                marks, end = self._marks, self._want["end"]
+            while self._marked < marks:
+                self._marked += 1
+                self._event("mark", id=p["id"], n=self._marked)
+                self._log("    mark %d" % self._marked)
+                self._panel.set("big", "big Marked")
+                self._panel.cmd("show")
+                flash[0] = MARK_FLASH_S
+                self._emit(marks=self._marked)
+            if flash[0] > 0:
+                flash[0] -= dt / self.speed
+                if flash[0] <= 0:
+                    self._panel.cmd("hide")
+                    self._panel.set("big", "big ")
+            if end:
+                self._event("end_early", id=p["id"])
+                self._log("    finished early")
+            return end
+        try:
+            self._wait(p["seconds"], tick)
+        finally:
+            with self._lock:
+                self._want["end"] = False
+            self._panel.set("big", "big ")
+            self._panel.cmd("show")
 
     def _switches(self, p, tick=None):
         """A step's pose changes: the panel's ticks on the time-left bar ("Switch to ..."), and
@@ -2854,6 +3018,8 @@ def main():
     ap = argparse.ArgumentParser(description="Run a hand recording session (the hand recorder's session runner).")
     ap.add_argument("--bounty", metavar="ID", help="a round for this bounty (its id on the board): its own script")
     ap.add_argument("--board", action="store_true", help="print the bounty board and exit")
+    ap.add_argument("--debug", action="store_true",
+                    help="a debug session (debug.json): use Frametop's hand tracking as usual, its output recorded too")
     ap.add_argument("--dry-run", action="store_true", help="run no processes; print the panel commands")
     ap.add_argument("--speed", type=float, default=1.0, help="run the script this many times faster")
     ap.add_argument("--ring", help="read frames from this ring (ft-ringplay's) instead of ft-camd's")
@@ -2908,6 +3074,10 @@ def main():
     except (OSError, ValueError):
         pass
     entry, script = None, a.script
+    if a.debug:
+        if a.bounty or a.quick or script != SCRIPT_PATH:
+            ap.error("--debug runs debug.json: no --bounty, --quick or --script")
+        script = DEBUG_SCRIPT
     if a.bounty:
         if a.quick or script != SCRIPT_PATH:
             ap.error("--bounty runs the bounty's own script: no --quick or --script")
@@ -3001,7 +3171,8 @@ def main():
     def keys():
         # From a terminal, or lines piped in (a test); /dev/null ends at once.
         if sys.stdin.isatty():
-            print("keys (then Enter): n or just Enter next, p pause/resume, r redo, s skip section, q stop", flush=True)
+            print("keys (then Enter): n or just Enter next, p pause/resume, r redo, s skip section, q stop"
+                  "; debug: m mark, f finish", flush=True)
         for line in sys.stdin:
             c = line.strip()[:1].lower()
             if c in ("n", ""):
@@ -3014,6 +3185,10 @@ def main():
                 s.skip()
             elif c == "q":
                 s.stop(wait=0)
+            elif c == "m":
+                s.mark()
+            elif c == "f":
+                s.finish()
     if sys.stdin is not None:
         threading.Thread(target=keys, daemon=True).start()
     s.start()

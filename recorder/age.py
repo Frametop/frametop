@@ -9,6 +9,7 @@ against itself, and against the age tool (age 1.1.1 on the 7i) in both direction
   encrypt_file(src, dst, recipients)    recipients: "age1..." strings
   decrypt_file(src, dst, identity)      identity: an "AGE-SECRET-KEY-1..." string (tests, tools)
   read_recipients(path)                 a recipients file: one "age1..." a line, # comments
+  shape(path, recipients)               None if path looks like a whole age file to that many keys
 
 Only X25519 recipients, no passphrases or plugins, no armor.
 """
@@ -301,6 +302,35 @@ def decrypt_stream(src, dst, identity):
 def decrypt_file(src, dst, identity):
     with open(src, "rb") as fi, open(dst, "wb") as fo:
         return decrypt_stream(fi, fo, identity)
+
+
+HEADER_MAX = 8192   # an age header to a few X25519 recipients is far shorter
+
+
+def shape(path, recipients):
+    """None if path looks like a whole age v1 file to len(recipients) X25519 recipients, else
+    what's wrong. Reads the header and the size only: nothing can be decrypted without a key."""
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        head = f.read(HEADER_MAX)
+    end = head.find(b"\n---")
+    if not head.startswith(VERSION_LINE + b"\n") or end < 0:
+        return "not an age v1 file"
+    mac_end = head.find(b"\n", end + 1)
+    if mac_end < 0:
+        return "its header is cut short"
+    stanzas = [line for line in head[:end].split(b"\n") if line.startswith(b"-> ")]
+    if any(not s.startswith(b"-> X25519 ") for s in stanzas):
+        return "a recipient that isn't X25519"
+    if recipients and len(stanzas) != len(recipients):
+        return f"encrypted to {len(stanzas)} recipients, not {len(recipients)}"
+    payload = size - (mac_end + 1) - 16
+    if payload < TAG:
+        return "cut short"
+    whole, rest = divmod(payload, CHUNK + TAG)
+    if (rest and rest < TAG) or (not rest and whole == 0) or (rest == TAG and whole):
+        return "a size no age file has (cut short?)"
+    return None
 
 
 def decrypt_bytes(data, identity):

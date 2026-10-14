@@ -53,7 +53,6 @@ CHUNK_FRAMES_MAX = 1000   # eyerec.py writes 90 a chunk
 # One round is about 2.6 GB (2026-10-14 replay: 20 MB/s on disk); encryption adds next to nothing.
 WARN_BYTES = 6 * 1000 ** 3
 MAX_BYTES = 15 * 1000 ** 3
-HEADER_MAX = 8192
 
 
 # ---------------------------------------------------------------- the files
@@ -90,30 +89,7 @@ def walk_files(root, report):
     return sorted(files)
 
 
-def age_shape(path, recipients):
-    """None if path looks like a whole age v1 file to len(recipients) X25519 recipients, else
-    what's wrong. Reads the header and the size only: nothing can be decrypted without a key."""
-    size = os.path.getsize(path)
-    with open(path, "rb") as f:
-        head = f.read(HEADER_MAX)
-    end = head.find(b"\n---")
-    if not head.startswith(age.VERSION_LINE + b"\n") or end < 0:
-        return "not an age v1 file"
-    mac_end = head.find(b"\n", end + 1)
-    if mac_end < 0:
-        return "its header is cut short"
-    stanzas = [line for line in head[:end].split(b"\n") if line.startswith(b"-> ")]
-    if any(not s.startswith(b"-> X25519 ") for s in stanzas):
-        return "a recipient that isn't X25519"
-    if recipients and len(stanzas) != len(recipients):
-        return f"encrypted to {len(stanzas)} recipients, not {len(recipients)}"
-    payload = size - (mac_end + 1) - 16
-    if payload < age.TAG:
-        return "cut short"
-    whole, rest = divmod(payload, age.CHUNK + age.TAG)
-    if (rest and rest < age.TAG) or (not rest and whole == 0) or (rest == age.TAG and whole):
-        return "a size no age file has (cut short?)"
-    return None
+age_shape = age.shape   # recorder/age.py: shared with the hand recorder's debug exports
 
 
 def check_jsonl(path, rel, report, cancelled):

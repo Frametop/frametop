@@ -70,6 +70,7 @@ Test hooks:
       sets-2.bin, sets-3.bin, ...  the next parts (step mode: one per step; any mode: after a pause)
       prompts.jsonl             what the person was asked to do, when (below)
       poses.jsonl               head and controller poses from ft-handpanel (below)
+      live.bin, live-2.bin, ... a testing session: the live tracker's output per part (below, "Testing sessions")
       take.json                 {"section", "title", "started_ns", "ended_ns", "status": "complete"|"stopped"|"skipped",
                                  "deleted": [[from_ns, to_ns], ...], "notes": "",
                                  "parts": {"sets.bin": {"names_swapped": false}, "sets-2.bin": {...}},
@@ -83,9 +84,12 @@ All `_ns` times are CLOCK_MONOTONIC nanoseconds, the clock of `dqbuf_ns` in sets
 
 ```json
 {"schema": 1, "contributor": "<random uuid4>", "consent": {"version": "2026-10-02", "accepted": "<ISO time>", "adult": true},
+ "testing_consent": {"version": "2026-10-14", "accepted": "<ISO time>", "adult": true},
  "optional": {"handedness": "right|left|both|", "notes": ""},
  "bounties": {"<id>": {"rounds": 2, "last": "<session id>"}}}
 ```
+
+`consent` is the agreement to CONSENT.md (the public dataset), `testing_consent` to TESTING.md (the test phase, below); either can be there without the other, and writing one keeps the other.
 
 `bounties`: how often each bounty was done (recorder/bounties.py `mark_done`, when a bounty's round ends `done`); a new consent keeps it.
 
@@ -111,6 +115,8 @@ No name, email, or account. The contributor id is random, so several sessions fr
 `sides`: whether ft-camd's side camera names were backwards during the session (`swapped`), as the live tracker decided it (above, "Side cameras"); `null` while nobody knows. A part's names are right when its take.json `names_swapped` equals `swapped`. Parts without a `parts` entry were recorded with ft-camd's names. Sessions from before this have no `sides`.
 
 `camera` is the camera check's verdict at the start (no paths or log lines: those go to `session.log`). `stop_reason` is there when a session was stopped at the no-hands screen, with the check's result.
+
+`consent` (`{"kind": "public"|"testing", "version"}`) is the consent the session was recorded under, and `debug` is there for a testing session (below, "Testing sessions"). Sessions before 2026-10-14 have neither: they're public.
 
 `record_hz` is the sets a second recorded; `bounty` is there for a bounty's round (below, "Bounties"). Sessions before the bounties have neither: they were recorded at 10.
 
@@ -400,6 +406,19 @@ The first four (2026-10-14), each on the gestures Frametop uses:
 | `pinches` | Thumb and index pinches | Pinch and hold the bar or a corner; drag to ghosts with each hand (across, nearer, farther); resize from a corner; tilt; two hands on two corners; hold a pinch on one window while tapping another; a far window pinched with the hand low; pinch vs stop short vs open touch; own pace |
 | `card-grabs` | Thumb, index and middle (a playing card) | Hold the right edge (R) and left (L); move and turn it while held; place it on ghosts; push it away; throw it to far ghosts; two hands on both edges; four windows low, high, close and to the side; card vs fist vs touch vs two-finger pinch vs stop short; own pace |
 
+## Testing sessions and the test phase
+
+**The test phase.** While the bounties are tried out with a few people (`takes.TEST_PHASE`), their rounds are recorded under a short testing-only consent, `TESTING.md`, instead of CONSENT.md, and go to a separate gated dataset, `DeeJanuz/frametop-hands-test` (`hub.HF_TEST_DATASET`; `FT_HANDREC_TEST_DATASET` overrides it). Nothing in it is used for training or published; moving a recording into the public dataset needs the person's agreement to CONSENT.md. The full session and the quick round stay public. `takes.round_consent_kind(bounty, debug)` says which kind a round uses; the window shows that kind's text on the Welcome page when a round is picked (`setConsentKind`), and gates and labels uploads per session (`uploadAllowedFor`, `datasetFor`). Each kind's text has its own draft gate: TESTING.md's first line says DRAFT until the maintainer approves it.
+
+**Encryption.** A test-phase export is encrypted on the headset to the maintainer's keys in `hands/rec/test-recipients.txt` (age X25519, `recorder/age.py`, as the eye recordings), so people who can see the test dataset can't open each other's recordings. `sets.bin.zst.age` and `live.bin.zst.age` replace the plain files (zstd piped into age while compressing). The manifest says `"consent_kind": "testing"` and `"encryption": {"scheme": "age-v1-x25519", "recipients": [...], "files": [...]}`; what stays readable is the manifest: lengths, lighting, checklist, contributor id. Key 1 is on the maintainer's machine, key 2 offline; both are the only recipients `validate.py` accepts. The manifest's profile holds only the schema, the contributor, that kind's consent record and the optional answers.
+
+**Testing sessions** (`debug.json`, `session.py --debug`, the board's first row "Testing session" when Frametop's hand tracking is installed: `frametop-hands.service` is known to systemd, or `FT_HANDREC_FRAMETOP_HANDS=1`). The person uses Frametop as usual for up to 3 minutes at 30 sets a second while the cameras record, so new versions of the tracker can be replayed on that person's own recording and compared with what the live one did. Frametop's hands and pointer keep running (nothing is paused), and the preflight wants `frametop-hands.service` active.
+
+- One free step: the panel hides while it records. The headset button's press (the window's Mark, M) is a `mark` event, the panel flashing "Marked" for a second; its hold (Finish, F) ends the step early with an `end_early` event, and the session is `done`. Pause and Stop work as usual; Redo and Skip aren't offered.
+- **`live.bin`** (`livelog.py`): every new publish of the live tracker's hands and gestures files (include/fh_hands.h, fh_gestures.h), copied whole under their sequence lock, one file per part. A 16-byte header (`"FHLIVE01"`, u32 version 1, u32 0), then records: u8 source (0 hands, 1 gestures), 3 pad, u32 length, u64 read_ns (CLOCK_MONOTONIC), u64 seq, then the bytes. The files' own `capture_ns` and `publish_ns` are inside. take.json gets `"live": {"hands": n, "gestures": n}`. The tracker publishes only while the headset is in use.
+- session.json `debug`: `{"use": "testing", "max_s", "settings": {HANDS_* and POINTER_* from ~/.config/frametop.conf, paths cut to file names}, "frametop": "<git describe of the running ft-hands' checkout>", "models": {"<file>": "<sha256[:16]>"}, "models_dir"}`.
+- Export joins the parts into `live.bin.zst.age`, leaving out records read in deleted ranges; the manifest's take entry gets `"live": {"records", "raw_bytes", "file"}`. `validate.py` allows a live file only in a testing session, and requires `debug.use` "testing" and the testing consent.
+
 ## Review and export (`takes.py`, the window)
 
 - **Review.** Each session lists its takes: title, duration, status, a thumbnail (the first set's `slam_left`). A viewer shows one frame set (all cameras side by side, 8-bit grey) at a time with a slider. It can mark a range and delete it. Deleted ranges go into `take.json`, and export leaves them out; the files keep everything until export. A whole take or session can be deleted (files removed, after a confirmation).
@@ -460,3 +479,4 @@ The first four (2026-10-14), each on the gestures Frametop uses:
 - The text explains what's recorded and that nothing uploads automatically, how review works, how to withdraw (by contributor id), and that a withdrawal is purged from the repo's history.
 - The texts need a legal review before the dataset launches. Until then they carry a "draft" banner, and the Upload page says contributions aren't open yet.
 - The dataset repo: `HF_DATASET` in `hub.py`, `DeeJanuz/frametop-hands` (private until launch).
+- The test phase has its own short text, `TESTING.md`: testing only, no training, nothing published, encrypted, deleted when the test ends or on request (above, "Testing sessions and the test phase").

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "debug",
+  "debug": true,
+  "record_hz": 30,
+  "intro_s": 4,
+  "between_s": 3,
+  "welcome": {"title": "Testing session", "seconds": 6,
+              "text": "Use your hands in Frametop as you always do, for up to 3 minutes. The cameras record them, and what the hand tracking made of them.|Something went wrong? Press the headset button right then: it marks the moment. Hold the button to finish."},
+  "done": {"title": "All done", "seconds": 5,
+           "text": "Thank you! Upload it from the Hand recorder window, so new versions of the hand tracking can be tested on it."},
+  "stopped": {"title": "Stopped", "seconds": 4,
+              "text": "What was recorded so far is saved. You can upload it from the Hand recorder window."},
+  "sections": [
+    {"id": "free", "title": "Testing session", "go": "Go",
+     "intro": "Use Frametop as you normally would: point, tap, pinch, drag and scroll windows. Do what gives you trouble.",
+     "prompts": [
+       {"id": "use", "text": "Use Frametop as you normally would.|This panel goes away while you record. Press the headset button when something goes wrong; hold it to finish.",
+        "seconds": 180, "hands": ""}
+     ]}
+  ]
+}

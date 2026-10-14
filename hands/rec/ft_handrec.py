@@ -58,6 +58,7 @@ import takes  # noqa: E402  (next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 # The window's shared part (recorder/window.py): consent, export, login, upload, keeping awake.
 from recorder import bounties  # noqa: E402
+from recorder.common import host_command  # noqa: E402
 from recorder.window import (RecorderBackend, consent_version as _consent_version, gigabytes,  # noqa: E402,F401
                              headset_worn, process_running, read_text)
 
@@ -65,10 +66,21 @@ from recorder.window import (RecorderBackend, consent_version as _consent_versio
 HF_DATASET = hub.HF_DATASET
 CONSENT_PATH = hub.CONSENT_PATH
 UPLOAD_PATH = hub.UPLOAD_PATH
+TESTING_PATH = hub.TESTING_PATH
 HUB_PATH = os.path.join(HERE, "hub.py")
 VALIDATE_PATH = os.path.join(HERE, "validate.py")
 AWAKE_UNIT = "frametop-handrec-awake.service"
 SCRIPT_PATH = os.path.join(HERE, "script.json")
+DEBUG_SCRIPT = os.path.join(HERE, "debug.json")
+# The testing session (session.py's debug.json): first on the board when Frametop's hand tracking
+# is installed, picked like a bounty by this id.
+DEBUG_ID = "debug"
+DEBUG_ROW = {"id": DEBUG_ID, "title": "Testing session", "priority": "", "minutes": 3, "script": "",
+             "blurb": "Use Frametop as you always do, for up to 3 minutes, while the cameras record your hands "
+                      "and what Frametop's hand tracking made of them. When the tracking gets something wrong, "
+                      "press the headset button: new versions of the hand tracking are then tested on your "
+                      "recording, at those moments. For testing only, never for training."}
+LIVE_HANDS_UNIT = "frametop-hands.service"
 ROUND_BYTES = 10 * 1000 ** 3  # about what one round of recording takes
 # The checklist's choices; the keys are what session.json stores.
 OBJECTS = [("pencil", "Pencil or pen"), ("phone", "Phone"), ("cup", "Cup or mug (empty)"),
@@ -174,6 +186,8 @@ class Backend(RecorderBackend):
     AWAKE_WHY = "Exporting or uploading hand recordings"
     HUB_PATH = HUB_PATH
     CONSENT_PATH = CONSENT_PATH
+    CONSENT_PATHS = {"testing": TESTING_PATH}   # the bounties' test phase (DESIGN.md "Testing")
+    CONSENT_KIND = "testing" if takes.TEST_PHASE else "public"
     UPLOAD_PATH = UPLOAD_PATH
     ACTIVE_STATES = ACTIVE_STATES
     ROUND_BYTES = ROUND_BYTES
@@ -212,13 +226,36 @@ class Backend(RecorderBackend):
         self._board = {"state": "", "text": ""}
         self._board_busy = False
         self._boardArrived.connect(self._on_board)
+        self._frametop_hands = None   # Frametop's hand tracking is installed (frametopHands)
 
     def _texts_draft(self):
-        return hub.texts_draft()
+        return hub.texts_draft(self._consent_kind)
 
     def _upload_allowed(self):
-        """Real uploads may start: the texts aren't drafts, or FT_HANDREC_ALLOW_UPLOAD=1."""
-        return hub.upload_allowed()
+        """Real uploads under the window's consent may start: its texts aren't drafts, or
+        FT_HANDREC_ALLOW_UPLOAD=1."""
+        return hub.upload_allowed(self._consent_kind)
+
+    def _upload_allowed_for(self, session):
+        return hub.upload_allowed(hub.session_kind(self.store, session))
+
+    def _dataset(self):
+        try:
+            return hub.dataset_id(self._consent_kind)
+        except hub.HubError:
+            return hub.HF_TEST_DATASET if self._consent_kind == "testing" else hub.HF_DATASET
+
+    def _session_dataset(self, session):
+        try:
+            return hub.dataset_id(hub.session_kind(self.store, session))
+        except (hub.HubError, OSError, ValueError):
+            return self._dataset()
+
+    @Slot(str, result=str)
+    def roundConsentKind(self, bounty_id):
+        """The consent a round picked on the Bounties page is recorded under: a bounty's or the
+        testing session's ("testing" in the test phase), or a full session's ("public")."""
+        return takes.round_consent_kind(bool(bounty_id), bounty_id == DEBUG_ID)
 
     # --- the session runner, imported when first needed (it's written separately)
     def _runner(self):
@@ -304,10 +341,34 @@ class Backend(RecorderBackend):
         if not mod:
             return []
         rows = bounties.view(self._board_now(), self.store.profile(), {}, mod.have_bounty_script)
+        if self.frametopHands:
+            rows.insert(0, self._debug_row())
         for b in rows:
             b["lastText"] = session_label(b["last"]) if b["last"] else ""
             b["minutesText"] = f"about {b['minutes']:g} min" if b["minutes"] else ""
         return rows
+
+    @Property(bool, constant=True)
+    def frametopHands(self):
+        """Frametop's hand tracking is installed here (its unit is known to systemd): the testing
+        session records it in use, so it's offered only then."""
+        if self._frametop_hands is None:
+            forced = os.environ.get("FT_HANDREC_FRAMETOP_HANDS", "")   # tests: 1 or 0
+            if forced in ("0", "1"):
+                self._frametop_hands = forced == "1"
+                return self._frametop_hands
+            try:
+                r = subprocess.run(host_command("systemctl", "--user", "show", "-p", "LoadState", "--value",
+                                                LIVE_HANDS_UNIT), capture_output=True, text=True, timeout=10)
+                self._frametop_hands = r.stdout.strip() == "loaded"
+            except (OSError, subprocess.SubprocessError):
+                self._frametop_hands = False
+        return self._frametop_hands
+
+    def _debug_row(self):
+        """The testing session as a row of the board (bounties.view's keys)."""
+        done = [s for s in self.store.sessions() if s.get("debug") and s["status"] == "done" and not s["dry_run"]]
+        return dict(DEBUG_ROW, done=len(done), last=done[0]["id"] if done else "", available="")
 
     @Property(str, notify=boardChanged)
     def boardUpdated(self):
@@ -349,7 +410,8 @@ class Backend(RecorderBackend):
         self.boardChanged.emit()
 
     def _bounty(self, bounty_id):
-        """The board's entry for a bounty that can be recorded, with the board's date, or None."""
+        """The board's entry for a bounty that can be recorded, with the board's date, or None.
+        (The testing session isn't a bounty: DEBUG_ID gives None.)"""
         b = next((b for b in self.bounties if b["id"] == bounty_id and b["available"] == ""), None)
         return dict(b, updated=self.boardUpdated) if b else None
 
@@ -524,11 +586,13 @@ class Backend(RecorderBackend):
         mod = self._runner()
         if not mod:
             return ""
-        entry = self._bounty(bounty_id) if bounty_id else None
-        if bounty_id and not entry:
+        debug = bounty_id == DEBUG_ID
+        entry = self._bounty(bounty_id) if bounty_id and not debug else None
+        if bounty_id and not entry and not debug:
             return "Pick a bounty"
         try:
-            script = mod.load_script(mod.bounty_script(entry["script"]) if entry else SCRIPT_PATH)
+            script = mod.load_script(DEBUG_SCRIPT if debug else mod.bounty_script(entry["script"]) if entry
+                                     else SCRIPT_PATH)
             quick = quick and not entry
             plan, _ = mod.build_plan(script, dict(checklist), quick=quick)
             return mod.plan_summary(script, plan, auto=auto)
@@ -556,7 +620,10 @@ class Backend(RecorderBackend):
         if not mod:
             self.message.emit(self._session_error, True)
             return False
-        if self.needsConsent:
+        debug = bounty_id == DEBUG_ID
+        kind = takes.round_consent_kind(bool(bounty_id), debug)
+        if not self.has_consent(kind):
+            self.setConsentKind(kind)
             self.message.emit("Agree to the consent text first (Welcome page)", True)
             return False
         if not self._ignore_cameras and not self._session_options.get("dry_run"):
@@ -566,7 +633,7 @@ class Backend(RecorderBackend):
                 self.message.emit(mod.camera_text(self._camera), True)
                 return False
         entry = None
-        if bounty_id:
+        if bounty_id and not debug:
             entry = self._bounty(bounty_id)
             if not entry:
                 self.message.emit("That bounty can't be recorded with this recorder", True)
@@ -575,7 +642,7 @@ class Backend(RecorderBackend):
         checklist["objects"] = [o for o in checklist.get("objects", []) if o in dict(OBJECTS)]
         checklist["own_objects"] = [o.strip() for o in checklist.get("own_objects", []) if str(o).strip()]
         try:
-            script = mod.bounty_script(entry["script"]) if entry else SCRIPT_PATH
+            script = DEBUG_SCRIPT if debug else mod.bounty_script(entry["script"]) if entry else SCRIPT_PATH
             self._session = mod.Session(self.store.base, self.store.profile(), checklist, lighting, script,
                                         on_status=lambda s: self._statusArrived.emit(dict(s)), auto=auto,
                                         quick=quick and not entry, guidance=self.guidance, bounty=entry,
@@ -595,6 +662,18 @@ class Backend(RecorderBackend):
                 self._statusArrived.emit({"state": "error", "error": str(e)})
         self._thread(run)
         return True
+
+    @Slot()
+    def markMoment(self):
+        """A testing session: the tracking went wrong just now (the headset button's press)."""
+        if self._session is not None and self.sessionActive:
+            self._session.mark()
+
+    @Slot()
+    def finishSession(self):
+        """A testing session: end the recording here; the session is done (the button's hold)."""
+        if self._session is not None and self.sessionActive:
+            self._session.finish()
 
     def _on_status(self, status):
         if status.get("camera") and status.get("camera") is not self._camera:
@@ -617,7 +696,8 @@ class Backend(RecorderBackend):
     def _session_rows(self):
         out = []
         for s in self.store.sessions():
-            s["label"] = session_label(s["id"]) + (f" · {s['bounty']}" if s["bounty"] else "")
+            s["label"] = session_label(s["id"]) + (f" · {s['bounty']}" if s["bounty"] else
+                                                   " · testing session" if s.get("debug") else "")
             s["sizeText"] = takes.human_bytes(s["bytes"])
             s["exportText"] = takes.human_bytes(s["export_bytes"]) if s["exported"] else ""
             s["lightingText"] = LIGHTING_TEXT.get(s["lighting"], "")

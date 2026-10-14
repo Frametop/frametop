@@ -92,10 +92,13 @@ Kirigami.ApplicationWindow {
 
     // A round picked on the Bounties page: the consent first if it isn't agreed to yet, then
     // Before you start (the camera check, the privacy checks), then Start.
+    // The consent asked for follows the round: a bounty's or the testing session's is the testing
+    // one (TESTING.md) while the bounties are tested, a full session's the dataset's (CONSENT.md).
     function pickRound(bounty, quick) {
         chosenBounty = bounty
         chosenQuick = quick
         roundPicked = true
+        backend.setConsentKind(backend.roundConsentKind(bounty))
         show(backend.needsConsent ? welcomePage : checklistPage)
     }
 
@@ -236,8 +239,10 @@ Kirigami.ApplicationWindow {
                     text: "Each bounty is a short round, about 4 minutes, of what the hand tracker needs most. "
                           + "Windows appear in front of you in the headset and you tap, pinch and grab them as you "
                           + "would real ones, while the cameras record your hands. The most wanted come first, and "
-                          + "you can do one again. Afterwards you look over the recording and send it to the hand "
-                          + "dataset." + (backend.boardUpdated ? " (Board of " + backend.boardUpdated + ".)" : "")
+                          + "you can do one again. Afterwards you look over the recording and send it "
+                          + (backend.roundConsentKind("bounty") === "testing"
+                             ? "in: while the bounties are being tested, to a test dataset, for testing only."
+                             : "to the hand dataset.") + (backend.boardUpdated ? " (Board of " + backend.boardUpdated + ".)" : "")
                 }
 
                 Kirigami.PlaceholderMessage {
@@ -712,7 +717,16 @@ Kirigami.ApplicationWindow {
                 Controls.Label {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     wrapMode: Text.Wrap
-                    text: checklist.bountyId !== ""
+                    text: checklist.bountyId === "debug"
+                          ? "Press Start, then put the headset on. Press the headset button to start recording: "
+                            + "after a 3-2-1 the panel goes away, and you use Frametop as you always do for up to 3 "
+                            + "minutes: point, tap, pinch, drag, scroll. Do what gives you trouble. Frametop's hand "
+                            + "tracking stays on, and what it made of your hands is recorded with the cameras.\n\n"
+                            + "When the tracking gets something wrong, press the headset button at once: that marks "
+                            + "the moment (the panel flashes \"Marked\"). Hold the button to finish early.\n\n"
+                            + "Nothing leaves the headset. Afterwards you watch it in Review, delete anything you "
+                            + "don't want to share, and only then export. It's sent encrypted, for testing only."
+                          : checklist.bountyId !== ""
                           ? "Press Start, then put the headset on. After a few seconds of your hands held up, windows "
                             + "appear in front of you, and a band along the top says what to do. Do it as you would "
                             + "on a real window: tap the lit button, pinch the lit corner, grab the lit edge. The "
@@ -829,6 +843,11 @@ Kirigami.ApplicationWindow {
                 sequence: "Esc"
                 enabled: backend.sessionActive
                 onActivated: backend.stopSession()
+            }
+            Shortcut {
+                sequence: "M"
+                enabled: backend.sessionActive && !!sessionView.st.debug
+                onActivated: backend.markMoment()
             }
 
             // A hand chip like the panel's: seen (green), lost (orange) or hidden.
@@ -1242,7 +1261,23 @@ Kirigami.ApplicationWindow {
                         onClicked: backend.togglePause()
                     }
                     Controls.Button {
-                        visible: backend.sessionActive
+                        visible: backend.sessionActive && !!sessionView.st.debug
+                        enabled: sessionView.state === "running"
+                        focusPolicy: Qt.NoFocus
+                        text: "Mark (M)" + (sessionView.st.marks ? " · " + sessionView.st.marks : "")
+                        icon.name: "flag"
+                        onClicked: backend.markMoment()
+                    }
+                    Controls.Button {
+                        visible: backend.sessionActive && !!sessionView.st.debug
+                        enabled: sessionView.state === "running"
+                        focusPolicy: Qt.NoFocus
+                        text: "Finish"
+                        icon.name: "dialog-ok"
+                        onClicked: backend.finishSession()
+                    }
+                    Controls.Button {
+                        visible: backend.sessionActive && !sessionView.st.debug
                         enabled: !!sessionView.st.can_redo
                         focusPolicy: Qt.NoFocus
                         text: "Redo step"
@@ -1250,7 +1285,7 @@ Kirigami.ApplicationWindow {
                         onClicked: backend.redo()
                     }
                     Controls.Button {
-                        visible: backend.sessionActive
+                        visible: backend.sessionActive && !sessionView.st.debug
                         focusPolicy: Qt.NoFocus
                         text: "Skip section"
                         icon.name: "media-skip-forward"
@@ -1817,7 +1852,7 @@ Kirigami.ApplicationWindow {
                 if (backend.exporting) return "Wait for the export to finish"
                 if (backend.uploading) return ""
                 if (backend.hubDryRun) return ""
-                if (!backend.uploadAllowed) return "Contributions aren't open yet"
+                if (!backend.uploadAllowedFor(session)) return "Contributions aren't open yet"
                 if (!loggedIn) return "Log in first (step 2)"
                 return ""
             }
@@ -1859,7 +1894,7 @@ Kirigami.ApplicationWindow {
                     visible: backend.textsDraft && backend.allowUploadSet && !backend.hubDryRun
                     position: Kirigami.InlineMessage.Position.Header
                     type: Kirigami.MessageType.Warning
-                    text: "Rehearsal: FT_HANDREC_ALLOW_UPLOAD=1 allows uploads to " + backend.dataset
+                    text: "Rehearsal: FT_HANDREC_ALLOW_UPLOAD=1 allows uploads to " + backend.datasetFor(uploadView.session)
                           + " while the texts are drafts."
                 }
             }
@@ -1888,7 +1923,7 @@ Kirigami.ApplicationWindow {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         textFormat: Text.StyledText
-                        text: "Your export goes to <a href=\"" + backend.datasetUrl + "\">" + backend.dataset + "</a> as a "
+                        text: "Your export goes to <a href=\"" + backend.datasetUrlFor(uploadView.session) + "\">" + backend.datasetFor(uploadView.session) + "</a> as a "
                               + "pull request from your own Hugging Face account. Nothing is published until the "
                               + "maintainer has checked it."
                         onLinkActivated: link => Qt.openUrlExternally(link)
@@ -2017,7 +2052,7 @@ Kirigami.ApplicationWindow {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         textFormat: Text.StyledText
-                        text: "The first time, accept the dataset's terms on <a href=\"" + backend.datasetUrl
+                        text: "The first time, accept the dataset's terms on <a href=\"" + backend.datasetUrlFor(uploadView.session)
                               + "\">its page</a>. Upload checks the export, opens your pull request, then sends the files."
                         onLinkActivated: link => Qt.openUrlExternally(link)
                     }

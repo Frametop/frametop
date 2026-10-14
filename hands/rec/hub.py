@@ -25,7 +25,10 @@ An upload:
 --dry-run does all of it except the network calls (4 to 6) and recording (5, 7), and says what
 it would upload.
 
-The dataset is HF_DATASET; FT_HANDREC_DATASET overrides it (a test repo, for rehearsals).
+The dataset is HF_DATASET; FT_HANDREC_DATASET overrides it (a test repo, for rehearsals). In the
+bounties' test phase (DESIGN.md "Testing") a session recorded under TESTING.md's consent (a bounty
+round or a debug session: manifest "consent_kind": "testing", its recordings encrypted) goes to
+HF_TEST_DATASET instead (FT_HANDREC_TEST_DATASET overrides it), and its gate is TESTING.md's.
 
 `board` fetches the bounty board (bounties.json) from the dataset into BASE/board-cache.json,
 with the saved login when there is one (the dataset is gated): the window's board then uses it
@@ -53,16 +56,23 @@ from recorder import bounties  # noqa: E402
 from recorder import hub as rhub  # noqa: E402
 from recorder.hub import HF_ENV, REPO_RE, TOKENS_URL, HubError, explain, export_sha, is_draft, now_iso  # noqa: E402,F401
 
-# The dataset contributions go to (DESIGN.md "Licensing and consent").
+# The datasets contributions go to (DESIGN.md "Licensing and consent", "Testing").
 HF_DATASET = "DeeJanuz/frametop-hands"
+HF_TEST_DATASET = "DeeJanuz/frametop-hands-test"   # gated; everything in it encrypted to the maintainer
 DATASET_ENV = "FT_HANDREC_DATASET"
+TEST_DATASET_ENV = "FT_HANDREC_TEST_DATASET"
 ALLOW_ENV = "FT_HANDREC_ALLOW_UPLOAD"
 CONSENT_PATH = os.path.join(HERE, "CONSENT.md")
+TESTING_PATH = os.path.join(HERE, "TESTING.md")
 UPLOAD_PATH = os.path.join(HERE, "UPLOAD.md")
+KINDS = ("public", "testing")
 
 
-def dataset_id():
-    """HF_DATASET, or FT_HANDREC_DATASET when set."""
+def dataset_id(kind="public"):
+    """HF_DATASET (FT_HANDREC_DATASET when set), or for "testing" HF_TEST_DATASET
+    (FT_HANDREC_TEST_DATASET when set)."""
+    if kind == "testing":
+        return rhub.dataset_id(TEST_DATASET_ENV, HF_TEST_DATASET)
     return rhub.dataset_id(DATASET_ENV, HF_DATASET)
 
 
@@ -70,14 +80,19 @@ def dataset_url(repo=None):
     return rhub.dataset_url(repo or dataset_id())
 
 
-def texts_draft():
-    return is_draft(CONSENT_PATH) or is_draft(UPLOAD_PATH)
+def texts_draft(kind="public"):
+    return is_draft(TESTING_PATH if kind == "testing" else CONSENT_PATH) or is_draft(UPLOAD_PATH)
 
 
-def upload_allowed():
-    """Real uploads: once the texts aren't drafts, or for the maintainer's rehearsal against a
-    test repo (FT_HANDREC_ALLOW_UPLOAD=1)."""
-    return not texts_draft() or os.environ.get(ALLOW_ENV) == "1"
+def upload_allowed(kind="public"):
+    """Real uploads: once the kind's texts aren't drafts, or for the maintainer's rehearsal
+    against a test repo (FT_HANDREC_ALLOW_UPLOAD=1)."""
+    return not texts_draft(kind) or os.environ.get(ALLOW_ENV) == "1"
+
+
+def session_kind(store, session):
+    """The consent a session was recorded under (takes.consent_kind of its session.json)."""
+    return takes.consent_kind(takes.read_json(meta_path(store, session)))
 
 
 # ---------------------------------------------------------------- records in session.json
@@ -107,6 +122,25 @@ def record_upload(store, session, record):
 def describe(summary, report, sha, nbytes):
     """(commit message, commit description) from validate's summary of the manifest."""
     s = summary
+    if s.get("testing"):
+        what = "debug session" if s.get("debug") else f"{s.get('bounty') or 'test'} round"
+        lines = [f"Test upload ({what}) for the Frametop hand tracking, from the hand recorder. Its recordings are "
+                 "encrypted to the maintainer's keys; for testing only.", "",
+                 f"- Session: {s.get('session')}",
+                 f"- Kind: {'debug session (Frametop in use, the live tracker recorded)' if s.get('debug') else 'bounty round'}",
+                 f"- Bounty: {s.get('bounty') or 'none'}",
+                 f"- Contributor: {s.get('contributor')}",
+                 f"- Takes: {s.get('takes')} ({s.get('minutes')} minutes, {s.get('sets')} frame sets"
+                 f"{', %g a second' % s['record_hz'] if s.get('record_hz') else ''})",
+                 f"- Lighting: {s.get('lighting') or 'not given'}",
+                 f"- Consent: testing, version {s.get('consent_version')}",
+                 f"- Tool: {s.get('tool')}",
+                 f"- Size: {takes.human_bytes(nbytes)}",
+                 f"- SHA256 of SHA256SUMS: {sha}", "",
+                 "Checked with hands/rec/validate.py: no errors" + (f", {len(report.warnings)} warnings:"
+                                                                     if report.warnings else ".")]
+        lines += [f"- {w}" for w in report.warnings]
+        return f"Hands test: {what} {s.get('session')} from {s.get('contributor')}", "\n".join(lines) + "\n"
     objects = ", ".join(s.get("objects") or []) or "none"
     if s.get("own_objects"):
         objects += f" (+{s['own_objects']} of their own)"
@@ -140,7 +174,7 @@ def board_url(repo):
 def fetch_board(base):
     """The dataset's bounties.json into base/board-cache.json (session.load_board reads it).
     Returns {"updated", "bounties"}; raises HubError."""
-    repo = dataset_id()
+    repo = dataset_id("public")   # the board is the public dataset's
     token = None
     try:
         token = _hf().get_token()
@@ -184,7 +218,6 @@ def upload(store, session, dry_run=False, again=False, progress=None, log=None):
     tell = progress or (lambda phase, text, fraction=None, **extra: None)
     say = log or (lambda text: None)
     import validate
-    repo = dataset_id()
     try:
         export = store.export_dir(session)
     except ValueError as e:
@@ -198,13 +231,18 @@ def upload(store, session, dry_run=False, again=False, progress=None, log=None):
         raise HubError("invalid", f"The export has {len(report.errors)} problems, so it can't be uploaded. Export "
                                   "the session again; if that doesn't help, report it.", errors=report.errors)
     summary = report.summary
+    kind = "testing" if summary.get("testing") else "public"
+    repo = dataset_id(kind)
     contributor = summary.get("contributor", "")
     sha = export_sha(export)
     before = previous_upload(store, session, sha)
     if before and not again:
         raise HubError("duplicate", f"This export was uploaded already, on {before.get('uploaded', '?')}: "
                                     f"{before.get('pr_url', '')}", before.get("pr_url", ""), extra={"previous": before})
-    if not dry_run and not upload_allowed():
+    if not dry_run and not upload_allowed(kind):
+        if kind == "testing":
+            raise HubError("closed", "Test uploads aren't open yet: the testing text is a draft waiting for the "
+                                     f"maintainer. (For a rehearsal against a test repo: {ALLOW_ENV}=1.)")
         raise HubError("closed", "Contributions aren't open yet: the texts are drafts waiting for a legal review. "
                                  f"(For a rehearsal against a test repo: {ALLOW_ENV}=1.)")
     path_in_repo = f"contributions/{contributor}/{session}"

@@ -15,6 +15,10 @@ checks:
     every set's header is checked (camera names, sizes, record length) and counted against the
     manifest; the pixels themselves aren't looked at;
   - every .jsonl line parses, and take.json does;
+  - a test-phase export (a bounty round or debug session under TESTING.md, DESIGN.md "Testing"):
+    its recordings (sets.bin.zst.age, live.bin.zst.age) are whole age files to the test dataset's
+    keys (test-recipients.txt), nothing of them unencrypted; their insides aren't checked (that
+    needs a key);
   - the side cameras (sides.py): the session's "sides" decision, and each take's files named
     right by it (a warning when it wasn't decided: the maintainer's check tells then);
   - the total size.
@@ -36,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from session import _key_identifies, strip_calibration  # noqa: E402  (standard library only, next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+from recorder import age  # noqa: E402  (its shape check needs no cryptography library)
 from recorder.checks import (Cancelled, Report, check_sums, is_uuid4, listed, need,  # noqa: E402,F401
                              read_json_file)
 
@@ -53,7 +58,9 @@ except ImportError:
 EXPORT_SCHEMA = 1
 TOP_FILES = {"manifest.json", "calibration.json", "device.json", "SHA256SUMS"}
 REGION_CONSENT = "2026-10-03"   # the consent version that added the residency confirmation
-TAKE_FILES = {"prompts.jsonl", "poses.jsonl", "take.json", "sets.bin.zst"}
+TAKE_FILES = {"prompts.jsonl", "poses.jsonl", "take.json", "sets.bin.zst", "sets.bin.zst.age", "live.bin.zst.age"}
+TEST_RECIPIENTS = os.path.join(HERE, "test-recipients.txt")
+CONSENT_KEYS = {"public": "consent", "testing": "testing_consent"}   # profile.json's record of each consent
 TAKE_RE = re.compile(r"^\d{2}-[a-z0-9][a-z0-9-]*$")
 SESSION_RE = re.compile(r"^\d{8}-\d{6}(?:-\d+)?$")
 CAM_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,15}$")
@@ -378,11 +385,58 @@ def identifying_keys(o, path):
     return out
 
 
+def is_debug(m):
+    """A debug session's export: session.debug in the manifest."""
+    return isinstance(m, dict) and isinstance(m.get("session"), dict) and isinstance(m["session"].get("debug"), dict)
+
+
+def is_testing(m):
+    """An export for the test dataset (DESIGN.md "Testing"): recorded under TESTING.md's consent,
+    its recordings encrypted. A debug session always is."""
+    return isinstance(m, dict) and (m.get("consent_kind") == "testing" or is_debug(m))
+
+
+def check_encryption(m, report):
+    """A test export's manifest "encryption": to the test dataset's keys. Returns the keys."""
+    enc = m.get("encryption")
+    if not isinstance(enc, dict):
+        report.error("manifest: a test-phase export without encryption (export it again)")
+        return []
+    try:
+        shipped = age.read_recipients(TEST_RECIPIENTS)
+    except (OSError, ValueError) as e:
+        report.error(f"the test dataset's keys ({TEST_RECIPIENTS}): {e}")
+        shipped = None
+    r = enc.get("recipients")
+    if not isinstance(r, list) or not r or not all(isinstance(x, str) for x in r):
+        report.error("manifest: encryption.recipients isn't a list of keys")
+        return []
+    if shipped is not None and sorted(r) != sorted(shipped):
+        report.error("manifest: encrypted to other keys than the test dataset's (test-recipients.txt)")
+    if not isinstance(enc.get("files"), list):
+        report.error("manifest: encryption.files isn't a list")
+    return r
+
+
 def check_manifest(m, report, root):
     """The manifest's keys and types. Returns {take id: entry} for the file checks."""
     if not isinstance(m, dict):
         report.error("manifest: not a JSON object")
         return {}
+    debug, testing = is_debug(m), is_testing(m)
+    suffix = ".age" if testing else ""
+    kind = "testing" if testing else "public"
+    if m.get("consent_kind", "public") not in CONSENT_KEYS:
+        report.error(f"manifest: consent_kind {m.get('consent_kind')!r}")
+    if debug and m.get("consent_kind") != "testing":
+        report.error("manifest: a debug session not recorded under the testing consent")
+    if debug and m["session"]["debug"].get("use") != "testing":
+        report.error("manifest: a debug session not marked for testing only")
+    enc_files = None
+    if testing:
+        enc_files = (m.get("encryption") or {}).get("files") if isinstance(m.get("encryption"), dict) else None
+    elif "encryption" in m:
+        report.error("manifest: encryption in an export that isn't for the test dataset")
     if m.get("schema") != EXPORT_SCHEMA:
         report.error(f"manifest: schema {m.get('schema')!r}, expected {EXPORT_SCHEMA}")
     tool = need(m, "tool", str, "", report)
@@ -408,7 +462,7 @@ def check_manifest(m, report, root):
     if profile is not None:
         if profile.get("contributor") != contributor:
             report.error("manifest: profile.contributor differs from contributor")
-        pc = need(profile, "consent", dict, "profile.", report)
+        pc = need(profile, CONSENT_KEYS[kind], dict, "profile.", report)
         if pc is not None:
             if pc.get("version") != consent:
                 report.error("manifest: profile.consent.version differs from consent_version")
@@ -421,7 +475,7 @@ def check_manifest(m, report, root):
         optional = profile.get("optional")
         if isinstance(optional, dict) and str(optional.get("notes") or "").strip():
             report.warn("the profile's notes are included: check they hold nothing private")
-        extra = set(profile) - {"schema", "contributor", "consent", "optional"}
+        extra = set(profile) - {"schema", "contributor", CONSENT_KEYS[kind], "optional"}
         if extra:
             report.error(f"manifest: the profile has unexpected keys: {listed(sorted(extra))}")
 
@@ -473,10 +527,20 @@ def check_manifest(m, report, root):
         if f is None:
             if t.get("sets"):
                 report.error(f"manifest: take {tid} has {t.get('sets')} sets but no file")
-        elif f != f"takes/{tid}/sets.bin.zst":
+        elif f != f"takes/{tid}/sets.bin.zst{suffix}":
             report.error(f"manifest: take {tid}'s file is {f!r}")
         elif not isinstance(t.get("raw_bytes"), int):
             report.error(f"manifest: take {tid} has a file but no raw_bytes")
+        live = t.get("live")
+        if live is not None:
+            if not debug:
+                report.error(f"manifest: take {tid} has a live log, but this isn't a debug session")
+            elif not isinstance(live, dict) or live.get("file") != f"takes/{tid}/live.bin.zst.age":
+                report.error(f"manifest: take {tid}'s live log is {live!r}")
+        if testing and isinstance(enc_files, list):
+            for name in (f, (live or {}).get("file") if isinstance(live, dict) else None):
+                if name and name not in enc_files:
+                    report.error(f"manifest: {name} isn't in encryption.files")
     check_sides(m, entries, report)
     return entries
 
@@ -526,7 +590,8 @@ def summarize(m):
             "objects": list(checklist.get("objects") or []), "own_objects": len(checklist.get("own_objects") or []),
             "controllers": checklist.get("controllers", ""), "consent_version": m.get("consent_version", ""),
             "tool": m.get("tool", ""), "bounty": bounty.get("id", "") if isinstance(bounty.get("id"), str) else "",
-            "record_hz": session.get("record_hz") if isinstance(session.get("record_hz"), (int, float)) else None}
+            "record_hz": session.get("record_hz") if isinstance(session.get("record_hz"), (int, float)) else None,
+            "debug": is_debug(m), "testing": is_testing(m)}
 
 
 # ---------------------------------------------------------------- all of it
@@ -562,6 +627,8 @@ def validate(root, progress=None, cancel=None):
     else:
         report.error("manifest.json is missing")
     entries = check_manifest(manifest, report, root) if manifest is not None else {}
+    testing = is_testing(manifest)
+    recipients = check_encryption(manifest, report) if testing else []
     report.summary = summarize(manifest)
 
     if "calibration.json" in files:
@@ -607,8 +674,25 @@ def validate(root, progress=None, cancel=None):
                 report.error(f"{base}take.json: not a JSON object")
         else:
             report.warn(f"{base}take.json is missing")
-        rel = base + "sets.bin.zst"
         entry = entries.get(tid)
+        if testing:
+            if base + "sets.bin.zst" in sizes:
+                report.error(f"{base}sets.bin.zst: a test-phase recording unencrypted (export it again)")
+            for name, listed_file in (("sets.bin.zst.age", (entry or {}).get("file")),
+                                      ("live.bin.zst.age", ((entry or {}).get("live") or {}).get("file"))):
+                rel = base + name
+                if rel in sizes:
+                    problem = age.shape(os.path.join(root, rel), recipients)
+                    if problem:
+                        report.error(f"{rel}: {problem}")
+                    step(sizes[rel], f"Checking {title}")
+                elif listed_file:
+                    report.error(f"{rel} is missing")
+            continue
+        for name in ("sets.bin.zst.age", "live.bin.zst.age"):
+            if base + name in sizes:
+                report.error(f"{base}{name}: encrypted, but this export isn't for the test dataset")
+        rel = base + "sets.bin.zst"
         if rel in sizes:
             check_sets(os.path.join(root, rel), rel, entry, report,
                        lambda n, title=title: step(n, f"Checking {title}"), cancelled)

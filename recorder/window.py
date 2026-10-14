@@ -101,6 +101,11 @@ class RecorderBackend(QObject):
     ACTIVE_STATES = ()                  # the session states in which it records or waits
     ROUND_BYTES = 10 * 1000 ** 3        # free space a session needs
     PROFILE_KEEP = ()                   # profile.json keys a new consent keeps
+    # A second consent text the window can switch to (the hand recorder's TESTING.md for its test
+    # phase): {kind: path}, each agreed to under its own profile.json key (CONSENT_KEYS).
+    CONSENT_PATHS = {}
+    CONSENT_KEYS = {"public": "consent", "testing": "testing_consent"}
+    CONSENT_KIND = "public"             # the kind the window starts with
 
     profileChanged = Signal()
     diskChanged = Signal()
@@ -124,6 +129,7 @@ class RecorderBackend(QObject):
         super().__init__()
         self.store = store
         self.hub = hub
+        self._consent_kind = self.CONSENT_KIND
         self._hub_dry_run = hub_dry_run
         self._login = {"state": "dry" if hub_dry_run else "unknown"}
         self._login_busy = False
@@ -177,6 +183,14 @@ class RecorderBackend(QObject):
     def _upload_allowed(self):
         return False
 
+    def _upload_allowed_for(self, session):
+        """Real uploads of this session may start (a subclass with more than one dataset says)."""
+        return self._upload_allowed()
+
+    def _session_dataset(self, session):
+        """The dataset this session's export goes to."""
+        return self._dataset()
+
     def _upload_values(self, session, path):
         """UPLOAD.md's @NAME@ placeholders beyond the export's path and size, the contributor and
         the dataset."""
@@ -187,24 +201,47 @@ class RecorderBackend(QObject):
         return not self._hub_dry_run
 
     # --- consent and profile
-    @Property(str, constant=True)
+    def _consent_path(self, kind=None):
+        kind = kind or self._consent_kind
+        return self.CONSENT_PATHS.get(kind) or self.CONSENT_PATH
+
+    def has_consent(self, kind=None):
+        """profile.json holds an agreement to the current version of that kind's text (default:
+        the window's kind) by an adult, with a contributor id."""
+        kind = kind or self._consent_kind
+        profile = self.store.profile()
+        consent = profile.get(self.CONSENT_KEYS.get(kind, "consent")) or {}
+        return bool(profile.get("contributor") and consent.get("adult") is True
+                    and consent.get("version") == consent_version(self._consent_path(kind)))
+
+    @Property(str, notify=profileChanged)
+    def consentKind(self):
+        return self._consent_kind
+
+    @Slot(str)
+    def setConsentKind(self, kind):
+        """Which consent the Welcome page shows and needsConsent asks about: "public" (CONSENT.md)
+        or one of CONSENT_PATHS (the hand recorder's "testing")."""
+        if kind in self.CONSENT_KEYS and (kind == "public" or kind in self.CONSENT_PATHS) and kind != self._consent_kind:
+            self._consent_kind = kind
+            self.profileChanged.emit()
+
+    @Property(str, notify=profileChanged)
     def consentText(self):
-        return read_text(self.CONSENT_PATH) or "CONSENT.md is missing."
+        path = self._consent_path()
+        return read_text(path) or f"{os.path.basename(path)} is missing."
 
-    @Property(str, constant=True)
+    @Property(str, notify=profileChanged)
     def consentVersion(self):
-        return consent_version(self.CONSENT_PATH)
+        return consent_version(self._consent_path())
 
-    @Property(bool, constant=True)
+    @Property(bool, notify=profileChanged)
     def textsDraft(self):
         return self._texts_draft()
 
     @Property(bool, notify=profileChanged)
     def needsConsent(self):
-        profile = self.store.profile()
-        consent = profile.get("consent") or {}
-        return not (profile.get("contributor") and consent.get("adult") is True
-                    and consent.get("version") == consent_version(self.CONSENT_PATH))
+        return not self.has_consent()
 
     @Property(str, notify=profileChanged)
     def contributor(self):
@@ -212,7 +249,7 @@ class RecorderBackend(QObject):
 
     @Property(str, notify=profileChanged)
     def consentAccepted(self):
-        return (self.store.profile().get("consent") or {}).get("accepted", "")
+        return (self.store.profile().get(self.CONSENT_KEYS.get(self._consent_kind, "consent")) or {}).get("accepted", "")
 
     def _write_consent(self, adult, region, agree, optional):
         """Write profile.json: a contributor id, once made, stays (a new consent version keeps it),
@@ -222,12 +259,15 @@ class RecorderBackend(QObject):
             self.message.emit("All three boxes need ticking to take part", True)
             return False
         old = self.store.profile()
+        key = self.CONSENT_KEYS.get(self._consent_kind, "consent")
         profile = {"schema": 1, "contributor": old.get("contributor") or str(uuid.uuid4()),
-                   "consent": {"version": consent_version(self.CONSENT_PATH),
-                               "accepted": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
-                               "adult": True, "region_ok": True},
+                   key: {"version": consent_version(self._consent_path()),
+                         "accepted": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+                         "adult": True, "region_ok": True},
                    "optional": optional}
-        profile.update({k: old[k] for k in self.PROFILE_KEEP if k in old})
+        # the other consent's record stays: agreeing to one text doesn't withdraw the other
+        profile.update({k: old[k] for k in tuple(self.PROFILE_KEEP) + tuple(self.CONSENT_KEYS.values())
+                        if k in old and k not in profile})
         write_json(self.store.profile_path, profile)
         self.profileChanged.emit()
         self.message.emit("Thank you. Your contributor id: " + profile["contributor"], False)
@@ -450,22 +490,39 @@ class RecorderBackend(QObject):
         self.refreshSessions()
 
     # --- upload
-    @Property(str, constant=True)
-    def dataset(self):
+    def _dataset(self):
+        """The dataset the window's consent kind uploads to (a subclass with more than one says)."""
         try:
             return self.hub.dataset_id()
         except rhub.HubError:
             return os.environ.get(self.hub.DATASET_ENV, self.hub.HF_DATASET)
 
-    @Property(str, constant=True)
+    @Property(str, notify=profileChanged)
+    def dataset(self):
+        return self._dataset()
+
+    @Property(str, notify=profileChanged)
     def datasetUrl(self):
         return rhub.dataset_url(self.dataset)
+
+    @Slot(str, result=str)
+    def datasetFor(self, session):
+        """The dataset a session's export goes to (the Upload page's)."""
+        return self._session_dataset(session) if session else self._dataset()
+
+    @Slot(str, result=str)
+    def datasetUrlFor(self, session):
+        return rhub.dataset_url(self.datasetFor(session))
+
+    @Slot(str, result=bool)
+    def uploadAllowedFor(self, session):
+        return self._upload_allowed_for(session) if session else self._upload_allowed()
 
     @Property(bool, constant=True)
     def hubDryRun(self):
         return self._hub_dry_run
 
-    @Property(bool, constant=True)
+    @Property(bool, notify=profileChanged)
     def uploadAllowed(self):
         """Real uploads may start (the subclass's _upload_allowed: the texts are reviewed, or a
         rehearsal)."""
@@ -613,7 +670,7 @@ class RecorderBackend(QObject):
     def startUpload(self, session, again):
         if self.uploading or self.exporting or self._active_guard(session):
             return
-        if not self._hub_dry_run and not self._upload_allowed():
+        if not self._hub_dry_run and not self._upload_allowed_for(session):
             self.message.emit("Contributions aren't open yet", True)
             return
         argv = self._hub_argv("upload", session, "--json")
@@ -689,7 +746,7 @@ class RecorderBackend(QObject):
         except ValueError:
             return ""
         values = {"EXPORT_PATH": path, "EXPORT_SIZE": human_bytes(tree_bytes(path)),
-                  "CONTRIBUTOR": self.contributor or "CONTRIBUTOR", "DATASET": self.dataset}
+                  "CONTRIBUTOR": self.contributor or "CONTRIBUTOR", "DATASET": self._session_dataset(session)}
         values.update(self._upload_values(session, path))
         text = read_text(self.UPLOAD_PATH) or "UPLOAD.md is missing."
         if rhub.is_draft(self.UPLOAD_PATH):

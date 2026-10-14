@@ -70,7 +70,8 @@ try:
     import gi
     gi.require_version("GdkPixbuf", "2.0")
     from gi.repository import Gio  # noqa: F401
-except (ImportError, ValueError):
+# AttributeError: a "gi" that isn't PyGObject (the release image's test stage has one).
+except (ImportError, ValueError, AttributeError):
     print("skip  ft-spotwatch itself: no PyGObject here")
     sys.exit(1 if failed else 0)
 

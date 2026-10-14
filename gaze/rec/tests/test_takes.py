@@ -60,7 +60,7 @@ def make_round(base, health=True):
         f.writelines(lines)
     end = MONO0 + int(CHUNKS * PER_CHUNK / FPS * 1e9)
     with open(os.path.join(tdir, "take.json"), "w") as f:
-        json.dump({"group": "dots", "started_ns": MONO0, "ended_ns": end, "status": "done", "steps": [],
+        json.dump({"group": "dots", "started_ns": MONO0, "ended_ns": end, "status": "complete", "steps": [],
                    "deleted": [], "clock": [[MONO0, OFF], [end, OFF]], "notes": ""}, f)
     with open(os.path.join(tdir, "own.jsonl"), "w") as f:
         for k in range(CHUNKS * PER_CHUNK):
@@ -71,6 +71,7 @@ def make_round(base, health=True):
         f.write(json.dumps({"t": raw_s(MONO0), "dot": "on", "yaw": 0, "pitch": 0}) + "\n")
     with open(os.path.join(rdir, "session.json"), "w") as f:
         json.dump({"schema": 1, "round": RID, "bounty": "edges", "status": "done", "takes": [TID],
+                   "started": "2026-10-14T12:00:00+0000", "checklist": {"glasses": "none"},
                    "uploads": [{"pr": 1}]}, f)
     with open(os.path.join(rdir, "fit.json"), "w") as f:
         json.dump({"fitment": {"state": "ok"}}, f)

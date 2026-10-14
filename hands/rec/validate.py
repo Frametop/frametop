@@ -23,7 +23,6 @@ It runs on Linux and Windows, with Python 3.12 or later. It reports errors (don'
 usage: validate.py DIR [--json]      exit status 0: no errors, 1: errors, 2: not an export
 """
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -32,11 +31,13 @@ import shutil
 import struct
 import subprocess
 import sys
-import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from session import _key_identifies, strip_calibration  # noqa: E402  (standard library only, next to this file)
+sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+from recorder.checks import (Cancelled, Report, check_sums, is_uuid4, listed, need,  # noqa: E402,F401
+                             read_json_file)
 
 # Decompression, the first that's there: Python 3.14's compression.zstd, the zstandard package
 # (pip install zstandard: the maintainer's Windows PC), the zstd program.
@@ -55,7 +56,6 @@ REGION_CONSENT = "2026-10-03"   # the consent version that added the residency c
 TAKE_FILES = {"prompts.jsonl", "poses.jsonl", "take.json", "sets.bin.zst"}
 TAKE_RE = re.compile(r"^\d{2}-[a-z0-9][a-z0-9-]*$")
 SESSION_RE = re.compile(r"^\d{8}-\d{6}(?:-\d+)?$")
-SUM_RE = re.compile(r"^([0-9a-f]{64})  (\S.*)$")
 CAM_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,15}$")
 TAKE_STATUSES = ("complete", "stopped", "skipped")
 HDR = struct.Struct("<8sII")       # fh_set_hdr_t: magic, ncams, bytes (hands/track/record.h)
@@ -70,60 +70,6 @@ OUT_CHUNK = 8 << 20
 # zstandard's decompressobj has no output limit: it gets the input this much at a time, so even a
 # stream made to inflate hugely gives out a few hundred MB at most per call.
 ZSTANDARD_PIECE = 8 << 10
-MAX_LISTED = 10   # removed calibration paths and the like: list this many, then "and N more"
-
-
-class Cancelled(Exception):
-    pass
-
-
-class Report:
-    def __init__(self, path):
-        self.path = path
-        self.errors = []
-        self.warnings = []
-        self.summary = {}
-        self.bytes = 0
-
-    def error(self, text):
-        self.errors.append(text)
-
-    def warn(self, text):
-        self.warnings.append(text)
-
-    @property
-    def ok(self):
-        return not self.errors
-
-    def as_dict(self):
-        return {"path": self.path, "ok": self.ok, "errors": self.errors, "warnings": self.warnings,
-                "summary": self.summary, "bytes": self.bytes}
-
-
-def listed(items):
-    items = list(items)
-    more = len(items) - MAX_LISTED
-    return ", ".join(items[:MAX_LISTED]) + (f" and {more} more" if more > 0 else "")
-
-
-def is_uuid4(s):
-    try:
-        u = uuid.UUID(s)
-    except (TypeError, ValueError, AttributeError):
-        return False
-    return u.version == 4 and str(u) == s
-
-
-def sha256_file(path, step=None, cancelled=lambda: False):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(CHUNK):
-            if cancelled():
-                raise Cancelled()
-            h.update(chunk)
-            if step:
-                step(len(chunk))
-    return h.hexdigest()
 
 
 # ---------------------------------------------------------------- the files
@@ -154,52 +100,6 @@ def walk_files(root, report):
                 report.error(f"{rel}: not an allowed file")
             files.append(rel)
     return sorted(files)
-
-
-def check_sums(root, files, report, step, cancelled):
-    path = os.path.join(root, "SHA256SUMS")
-    if not os.path.isfile(path):
-        report.error("SHA256SUMS is missing")
-        return
-    sums = {}
-    with open(path, encoding="utf-8", errors="replace") as f:
-        for n, line in enumerate(f, 1):
-            line = line.rstrip("\n")
-            m = SUM_RE.match(line)
-            if not m:
-                report.error(f"SHA256SUMS line {n}: not \"<sha256>  <path>\"")
-                continue
-            digest, rel = m.groups()
-            if rel.startswith("/") or ".." in rel.split("/") or rel == "SHA256SUMS":
-                report.error(f"SHA256SUMS line {n}: a path that doesn't belong: {rel}")
-                continue
-            if rel in sums:
-                report.error(f"SHA256SUMS lists {rel} twice")
-            sums[rel] = digest
-    present = set(files) - {"SHA256SUMS"}
-    missing = sorted(set(sums) - present)
-    if missing:
-        report.error(f"in SHA256SUMS but missing: {listed(missing)}")
-    unlisted = sorted(present - set(sums))
-    if unlisted:
-        report.error(f"not in SHA256SUMS: {listed(unlisted)}")
-    bad = []
-    for rel in sorted(set(sums) & present):
-        if sha256_file(os.path.join(root, rel), step, cancelled) != sums[rel]:
-            bad.append(rel)
-    if bad:
-        report.error(f"checksum mismatch: {listed(bad)}")
-
-
-def read_json_file(path, rel, report):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except OSError as e:
-        report.error(f"{rel}: can't read it: {e.strerror or e}")
-    except ValueError as e:
-        report.error(f"{rel}: not valid JSON: {e}")
-    return None
 
 
 def check_jsonl(path, rel, report, cancelled):
@@ -428,20 +328,6 @@ def check_sets(path, rel, entry, report, step, cancelled):
 
 
 # ---------------------------------------------------------------- the manifest
-
-def need(obj, key, types, where, report, required=True):
-    """obj[key] if it's of the given type(s); an error otherwise."""
-    if not isinstance(obj, dict) or key not in obj:
-        if required:
-            report.error(f"manifest: {where}{key} is missing")
-        return None
-    v = obj[key]
-    allowed = types if isinstance(types, tuple) else (types,)
-    if not isinstance(v, allowed) or (isinstance(v, bool) and bool not in allowed):
-        report.error(f"manifest: {where}{key} has the wrong type ({type(v).__name__})")
-        return None
-    return v
-
 
 def check_pose(pose, where, report, extra=()):
     """A pose as device_config.json has it: plus_x, plus_z, position, each 3 finite numbers."""

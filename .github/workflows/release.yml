@@ -59,11 +59,13 @@ jobs:
             test -f /src/frametop/pointer/driver/build/driver_ft_pointer.so
             test -x /src/frametop/hands/build/ft-camd
             test -x /src/frametop/hands/build/ft-hands
+            test -x /src/frametop/hands/rec/build/ft-handpanel
             /src/frametop/hands/models.sh check
             test -x /src/frametop/pack/build/distrobox/install
             /src/frametop/gaze/tracker/build/venv/bin/python -c "import numpy, cv2"
             /src/frametop/voice/build/venv/bin/python -c "import numpy, sentencepiece, sherpa_onnx"
-            python3 -c "import PySide6"'
+            python3 -c "import PySide6, huggingface_hub"
+            command -v zstd >/dev/null'
 
       # The FrameDrop manifest names the zip's URL in this repo's release (a fork's, in a fork).
       - name: Frametop.zip

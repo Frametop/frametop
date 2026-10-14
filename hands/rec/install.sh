@@ -6,6 +6,8 @@
 # "Frametop Hand Recorder" to the app menu (for Frametop's desktop: it isn't tested from SteamVR's
 # "Launch a program", which runs apps outside it; the standalone recorder is for that).
 # It doesn't turn on Frametop's live hand tracking (that's hands/run.sh install, which install.sh offers).
+# A release (FRAME_RELEASE) brings the three built in its image (pack/Containerfile), so there it only
+# sets the capabilities and adds the menu entry; its install.sh offers this.
 # Usage: hands/rec/install.sh            install or update
 #        hands/rec/install.sh uninstall  remove the menu entry, and ft-camd's capabilities unless
 #                                        hand tracking's services use them (hands/run.sh uncaps).
@@ -17,13 +19,17 @@ entry='~/.local/share/applications/frametop-handrec.desktop'
 
 case ${1:-install} in
   install)
-    echo "== 1/4 dev container packages"
-    "$root/setup/dev-container.sh"
-    echo "== 2/4 hand tracking: ft-camd and ft-hands"
-    "$root/hands/build.sh"
-    echo "== 3/4 the headset panel: ft-handpanel"
-    "$root/hands/rec/build.sh"
-    echo "== 4/4 ft-camd's capabilities (asks for your password) and the menu entry"
+    if [ "$FRAME_RELEASE" = 1 ]; then
+      echo "== ft-camd's capabilities (asks for your password, unless it has them) and the menu entry"
+    else
+      echo "== 1/4 dev container packages"
+      "$root/setup/dev-container.sh"
+      echo "== 2/4 hand tracking: ft-camd and ft-hands"
+      "$root/hands/build.sh"
+      echo "== 3/4 the headset panel: ft-handpanel"
+      "$root/hands/rec/build.sh"
+      echo "== 4/4 ft-camd's capabilities (asks for your password) and the menu entry"
+    fi
     "$root/hands/run.sh" caps
     "$root/scripts/conf-migrate.sh"   # HANDS_SWAP_SIDES=0, the old default, becomes auto
     fill_template "$root/hands/rec/ft-handrec.desktop" |

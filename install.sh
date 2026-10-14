@@ -7,12 +7,15 @@
 # In a release (pack/install-release.sh), the programs come built from its image: this installs the
 # distrobox the release brings, makes the release's container from its image, and builds nothing.
 #
-# Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-eye-tracker] [--no-bluetooth | --bluetooth]
-#   --yes           don't ask; installs voice dictation and gaze mode, and hand tracking and our
-#                   eye tracker if sudo can run without a password prompt; skips the Bluetooth
-#                   fixes and the SteamVR restart
+# Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
+#                    [--no-bluetooth | --bluetooth]
+#   --yes           don't ask; installs voice dictation and gaze mode, and hand tracking, the Hand
+#                   Recorder and our eye tracker if sudo can run without a password prompt; skips
+#                   the Bluetooth fixes and the SteamVR restart
 #   --no-voice      don't offer voice dictation (Frametop Voice: it downloads about 320 MB)
-#   --no-hands      don't offer hand tracking
+#   --no-hands      don't offer hand tracking or the Hand Recorder
+#   --no-hand-recorder  don't offer the Hand Recorder (a release's; a clone builds it with
+#                   hands/rec/install.sh)
 #   --no-eye-tracker  don't offer our own eye tracker
 #   --no-bluetooth  don't offer the Bluetooth fixes
 #   --bluetooth     install the Bluetooth fixes without asking (with --yes: if sudo can run
@@ -22,7 +25,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$root/scripts/_env.sh"
 
-assume_yes=0 bluetooth=1 eye_tracker=1 hands=1 voice=1
+assume_yes=0 bluetooth=1 eye_tracker=1 hands=1 hand_recorder=1 voice=1
 for arg in "$@"; do
   case $arg in
     --yes) assume_yes=1 ;;
@@ -30,8 +33,9 @@ for arg in "$@"; do
     --bluetooth) bluetooth=2 ;;
     --no-eye-tracker) eye_tracker=0 ;;
     --no-voice) voice=0 ;;
-    --no-hands) hands=0 ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    --no-hands) hands=0 hand_recorder=0 ;;
+    --no-hand-recorder) hand_recorder=0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -143,6 +147,7 @@ elif [ "$assume_yes" = 1 ] && ! sudo_quiet; then
   echo "skipped: it needs your password (sudo), and --yes doesn't ask. Install it later with: hands/run.sh install"
 elif ask "Install hand tracking? Poke, pinch and grab the screens with your hands. It runs while the Frametop desktop does (change that on the Hands page of Frametop Input Settings), and its camera broker needs your password (sudo)." y; then
   if "$root/hands/run.sh" install; then
+    hands_caps=1
     mode=$(on_frame "sed -n 's/^HANDS_MODE=\([a-z]*\).*/\1/p' ~/.config/frametop.conf | tail -1") || mode=
     if [ "$mode" = always ]; then
       echo "hand tracking runs whenever SteamVR does (HANDS_MODE=always, kept from your settings)"
@@ -158,6 +163,26 @@ elif ask "Install hand tracking? Poke, pinch and grab the screens with your hand
   fi
 else
   echo "skipped. Install later with: hands/run.sh install"
+fi
+# The Hand Recorder (hands/rec): a release brings it built, so it's only ft-camd's capabilities
+# (set already if hand tracking just installed) and the menu entry. An entry from the release
+# before points into that release's folder, which goes two releases on: it's renewed without asking.
+# A clone builds it with hands/rec/install.sh (a few minutes), so it isn't offered here.
+if [ "$FRAME_RELEASE" = 1 ]; then
+  recorder="the Hand Recorder (records your hands for Frametop's open hand dataset)"
+  if [ "$hand_recorder" = 0 ]; then
+    echo "$recorder: skipped. Add it later with: hands/rec/install.sh"
+  elif on_frame '[ -e ~/.local/share/applications/frametop-handrec.desktop ]'; then
+    "$root/hands/rec/install.sh" install >/dev/null && echo "$recorder: updated" ||
+      echo "$recorder: couldn't update it (above). Try again with: hands/rec/install.sh"
+  elif [ "$assume_yes" = 1 ] && [ "${hands_caps:-0}" = 0 ] && ! sudo_quiet; then
+    echo "$recorder: skipped: it needs your password (sudo), and --yes doesn't ask. Add it later with: hands/rec/install.sh"
+  elif ask "Add the Hand Recorder to the app menu? It records your hands for Frametop's open hand dataset, which trains hand tracking; nothing leaves the headset until you press Upload. Its camera broker needs your password (sudo), as hand tracking does." y; then
+    "$root/hands/rec/install.sh" install ||
+      echo "$recorder: not installed (above). Try again later with: hands/rec/install.sh"
+  else
+    echo "$recorder: skipped. Add it later with: hands/rec/install.sh"
+  fi
 fi
 
 step "10/12 gaze mode (optional, experimental: the pointer goes where you look)"

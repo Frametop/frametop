@@ -12,6 +12,8 @@ Join the [Frametop Discord](https://discord.gg/W3X9f7z3Bc) for questions and hel
 
 For now the recorder runs inside Frametop's desktop, so these steps install Frametop first. A standalone recorder that runs from the SteamVR dashboard without Frametop is planned.
 
+Installing a Frametop release (Frametop.zip, FrameDrop, or `get.sh --release`) instead? Its installer offers the Hand Recorder, built, so there's nothing to compile: leave Hand Recorder ticked (or answer yes) and skip step 2. To add it to a release later, run `~/.local/share/frametop/releases/current/hands/rec/install.sh`.
+
 ## Before you start
 
 - You must be 18 or older, and for now you can't take part if you live in Illinois, Texas or Washington (USA). The [consent text](https://github.com/Frametop/frametop/blob/main/hands/rec/CONSENT.md) explains what's recorded and what you agree to. The recorder shows it again before your first session.

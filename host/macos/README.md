@@ -29,7 +29,7 @@ This kit makes a Mac a host for Frametop's remote displays: the Mac's monitors a
 
 ### Monitors that come and go
 
-Each instance belongs to one monitor, found by its maker, model and serial number, not by its place or the number macOS gives it. When that monitor is unplugged or the lid closes, its instance stops and waits, and starts again by itself once the monitor is back. Frametop Streams and `ft-sunshine status` show it as waiting. A monitor the Mac hasn't had before gets no instance on its own: run the setup again after you connect one, and then add it in Remote Displays on the Steam Frame. Nothing makes virtual monitors on a Mac: Sunshine can't on macOS.
+Each instance belongs to one monitor, found by its maker, model and serial number, not by its place or the number macOS gives it. When that monitor is unplugged or the lid closes, its instance stops and waits, and starts again by itself once the monitor is back. Frametop Streams and `ft-sunshine status` show it as waiting. A monitor the Mac hasn't had before gets no instance on its own: run the setup again after you connect one (or set its instance up [by hand](#set-up-the-streams-by-hand)), and then add it in Remote Displays on the Steam Frame. Nothing makes virtual monitors on a Mac: Sunshine can't on macOS.
 
 ## Turn the streams on and off
 
@@ -60,6 +60,72 @@ If you quit Frametop Streams, it starts again at your next login. You can also o
 
 - `bash frametop-host-setup.sh --check` shows what the setup would change, without changing anything.
 - `bash frametop-host-setup.sh --undo` removes the instances' LaunchAgents, Frametop Streams and `ft-sunshine`. Sunshine and its settings and pairings stay, and the setup says how to remove those too.
+
+## Set up the streams by hand
+
+The setup does all of this for you. These steps are for setting up an instance yourself, for example to see what the setup does or to fix one display. Each display needs its own Sunshine instance, with its own settings file, ports and display. The Steam Frame looks for instances on ports 47989, 48089 and so on, up to 48689, so a Mac can stream up to eight displays.
+
+1. Install [Sunshine 2026.1010.141104](https://github.com/LizardByte/Sunshine/releases/tag/v2026.1010.141104) (`Sunshine-macOS-arm64.dmg`) in /Applications. Older releases move the mouse only on the main display.
+2. List the displays, from the kit's folder:
+
+   ```
+   osascript -l JavaScript displays.js
+   ```
+
+   Each line is one display: its id, its key (maker, model and serial number), its name, its width and height in pixels, and its place. Sunshine wants the id. The id can change when a monitor is plugged in again; the key doesn't.
+3. Make one certificate for every instance, so the Steam Frame sees one Mac rather than one per display:
+
+   ```
+   dir="$HOME/Library/Application Support/Frametop/sunshine"
+   mkdir -p "$dir/credentials" ~/Library/Logs/Frametop
+   (umask 077; openssl req -x509 -newkey rsa:2048 -nodes -days 7300 -subj "/CN=Sunshine Gamestream Host" \
+     -keyout "$dir/credentials/cakey.pem" -out "$dir/credentials/cacert.pem")
+   ```
+
+4. For each display, pick a number N from 0 to 7. Make a folder `instance-N` in that folder, with this `sunshine.conf` in it. Replace N, the port (47989 + 100 x N), the names, the size and the display's id:
+
+   ```
+   sunshine_name = My Mac: DELL U2723QE (3840x2160)
+   port = 48089
+   output_name = 2
+   file_state = /Users/you/Library/Application Support/Frametop/sunshine/instance-1/sunshine_state.json
+   credentials_file = /Users/you/Library/Application Support/Frametop/sunshine/credentials.json
+   file_apps = /Users/you/Library/Application Support/Frametop/sunshine/instance-1/apps.json
+   log_path = /Users/you/Library/Logs/Frametop/sunshine-1.log
+   pkey = /Users/you/Library/Application Support/Frametop/sunshine/credentials/cakey.pem
+   cert = /Users/you/Library/Application Support/Frametop/sunshine/credentials/cacert.pem
+   minimum_fps_target = 1
+   system_tray = disabled
+   ```
+
+   - Keep the name's form, `COMPUTER: DISPLAY (WIDTHxHEIGHT)`. Remote Displays shows the part after the colon, and reads the display's size from the end.
+   - Every instance shares the one `credentials_file`, so one Web UI login works for all of them.
+   - `minimum_fps_target = 1` lets a still desktop drop to 1 frame a second.
+   - Turn `system_tray` on for one instance only, or you get one Sunshine icon per display.
+
+   Next to it, put an `apps.json` with one app named Desktop, which the Steam Frame opens:
+
+   ```
+   {"env": {}, "apps": [{"name": "Desktop", "image-path": "desktop.png"}]}
+   ```
+
+5. Set the Web UI login once. It's saved in the shared `credentials_file`:
+
+   ```
+   /Applications/Sunshine.app/Contents/MacOS/Sunshine "$dir/instance-0/sunshine.conf" --creds USER PASSWORD
+   ```
+
+6. Start each instance:
+
+   ```
+   /Applications/Sunshine.app/Contents/MacOS/Sunshine "$dir/instance-0/sunshine.conf"
+   ```
+
+   Its Web UI is on the next port up from its `port`, for example https://localhost:47990 for instance 0. To start it at login, make a LaunchAgent that runs the same command. The setup's agents run `ft-sunshine-instance N` instead, which looks the display's id up by its key at every start and waits while the display is unplugged. A hand-written `output_name` is fixed, so check it after you plug monitors in again: when it names no display, Sunshine streams the main one.
+7. Allow Sunshine Screen Recording and Accessibility in System Settings > Privacy & Security, as in the setup's step 4.
+8. On the Steam Frame, choose Add computer in Frametop Remote Displays, pick the Mac and sign in. It lists every instance that answers.
+
+To add a monitor later, give it the next free number and repeat steps 4 and 6. Don't mix this with the setup on one Mac: the setup keeps track of its instances by a `display` file it writes in each folder, so it can give a hand-made instance's number to another display and rewrite that instance's settings.
 
 ## Source
 

@@ -4696,6 +4696,46 @@ void TestButtons() {
         r.Frame({h});
         CHECK(r.Count(Event::Control) == 0 && r.Count(Event::GrabStart) == 1 && r.Last(Event::GrabStart)->zone == Zone::Bar);
     }
+    // a bar pinch ft-hands doesn't call (Params::barPinch; the 2026-10-14 testing session: the tips at
+    // 2.0-2.5 cm): the tips closing to 2.3 cm at the bar take it, held while they stay within 3.5 cm
+    // (PinchingHand's tips: open 0.3 2.3 cm, 0.5 3.3 cm, 0.6 3.9 cm, 1 5.9 cm apart)
+    {
+        auto run = [&](double u, double startOpen, bool on, double *heldTo = nullptr) {
+            Rig r;
+            r.panels = {LivePanel()};
+            if (!on) r.in.params().barPinch = 0;
+            SynthHand h = PinchAt(u, v, 0.01);
+            h.open = startOpen;
+            for (int k = 0; k < 5; ++k) r.Frame({h});
+            h.open = 0.3;
+            for (int k = 0; k < 3; ++k) r.Frame({h});
+            const int took = r.Count(Event::GrabStart);
+            if (heldTo) {
+                h.open = 0.5;
+                for (int k = 0; k < 4; ++k) r.Frame({h});
+                *heldTo = r.Count(Event::GrabEnd) == 0;
+                h.open = 1;
+                for (int k = 0; k < 4; ++k) r.Frame({h});
+                CHECK(r.Count(Event::GrabEnd) == 1);
+            }
+            return took && r.Last(Event::GrabStart)->zone == Zone::Bar && r.in.stats.barPinches == 1;
+        };
+        double held = 0;
+        CHECK(run(bar.u - 0.01, 0.6, true, &held));          // closing at the bar: a bar grab
+        CHECK(held == 1);                                     // ...held at 3.3 cm, let go at 5.9
+        CHECK(!run(bar.u - 0.01, 0.3, true));                 // resting at 2.3 cm, never opened: nothing
+        CHECK(!run(bar.u - 0.01, 0.6, false));                // HANDS_BAR_PINCH=0: ft-hands' pinch only
+        CHECK(!run(curve.u - 0.003, 0.6, true));              // at the curve button: left to the pinch
+        Rig c;                                                // on the content, not the bar: nothing
+        c.panels = {LivePanel()};
+        SynthHand h = PinchAt(0, 0, 0.01);
+        h.open = 0.6;
+        for (int k = 0; k < 5; ++k) c.Frame({h});
+        h.open = 0.3;
+        for (int k = 0; k < 3; ++k) c.Frame({h});
+        CHECK(c.Count(Event::GrabStart) == 0 && c.Count(Event::Press) == 0 && c.in.stats.barPinches == 0);
+        std::printf("buttons: a bar pinch with the tips 2.3 cm apart, ft-hands calling none: %s\n", held ? "took the bar, held" : "nothing");
+    }
 }
 
 // The soft glow per hand (Guide, Params::edgeGlow): what a pinch would take, brighter closer.

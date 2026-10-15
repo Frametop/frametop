@@ -4237,6 +4237,7 @@ bool ft_vr_init(void) {
     num("HANDS_FIST_REACH", k.fistFront, 0, 0.3);   // 0: the touch zone's (as before)
     if (k.fistFront <= 0) k.fistBack = 0, k.fistClaimCurl = 0;
     num("HANDS_BUTTON_REACH", k.buttonReach, 0, 0.05);
+    num("HANDS_BAR_PINCH", k.barPinch, 0, 0.04);   // a bar grab with the tips this close (0: only ft-hands' pinch)
     num("HANDS_BUTTON_SIZE", g_handButton, 0, 0.08);
     k.pinchButtons = handcut::Setting("HANDS_PINCH_BUTTONS", "1") != "0";
     k.edgeGlow = handcut::Setting("HANDS_EDGE_GLOW", "1") != "0";

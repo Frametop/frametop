@@ -1267,10 +1267,20 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
             const Hand *h = HandFor(s, in.hands->seen(), sd.handId);
             held = h ? Extension(*h) <= p_.fistPairKeep + 0.2 && Curl3(*h) <= p_.fistPairKeep
                      : in.nowNs - sd.lastSeen <= int64_t(p_.holdLostMs * 1e6);
+        } else if (sd.byTips && !g.down) {   // a bar pinch ft-hands didn't call (Params::barPinch): held while the tips are close
+            const Hand *h = HandFor(s, in.hands->seen(), sd.handId);
+            if (!h || Dist3(h->p[4], h->p[8]) < p_.holdPinchOpen) {   // (unseen: holdLostMs decides)
+                if (h) sd.upFrames = 0;
+                held = true;
+            } else {
+                if (newFrame_) ++sd.upFrames;
+                held = sd.upFrames < p_.releaseFrames;
+            }
         } else if (sd.byGrip) {   // a fist: held while its grip or its pinch is (ft-hands calls a fist either, Params::fistIndex)
             const handcut::Gesture &m = gr.down || !g.down ? gr : g;
             held = StillHeld(s, in, m, gr.down ? newGrip : g.down && newPinch, true);
         } else {
+            sd.byTips = false;   // (ft-hands called the bar pinch after all: its pinch from here)
             held = StillHeld(s, in, g, newPinch, false);
         }
         if (!held) EndGrab(s, false);
@@ -1327,6 +1337,7 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
         if (JoinsOther(s)) Join(s, in, panels, true);
         else FistBegin(s, in, panels, false);
     }
+    if (p_.barPinch > 0 && newFrame_ && sd.state == State::Hover) BarPinch(s, in, panels);
     // (in the zone's margin the hand isn't ours: the pointer helper has its pinches). A pinch by a
     // closed hand is a fist (Params::fistIndex): the thumb on the index of a fist reads as one.
     if (newPinch && g.down && sd.state == State::Hover && sd.inZone) {
@@ -1335,6 +1346,42 @@ void HandInput::Grab(int s, const Input &in, const std::vector<Panel> &panels) {
         else if (p_.fistGrab && h && IsFist(*h)) FistBegin(s, in, panels, false, true);
         else PinchBegin(s, in, panels, false);
     }
+}
+
+void HandInput::BarPinch(int s, const Input &in, const std::vector<Panel> &panels) {
+    Side &sd = side_[s];
+    const handcut::Gesture &g = in.hands->pinch(s), &gr = in.hands->grip(s);
+    const Hand *h = HandFor(s, in.hands->seen(), sd.handId);
+    if (!h) return;
+    if (g.down || gr.down) return (void)(sd.barArmed = false);   // ft-hands' own: the usual way
+    const double tips = Dist3(h->p[4], h->p[8]);
+    if (tips > p_.barPinch + 0.005) return (void)(sd.barArmed = true);
+    if (tips >= p_.barPinch || !sd.barArmed || !sd.inZone || in.typing[s] || in.grabThatArmed[s] || sd.pinchWait ||
+        sd.fistWait || sd.settleWait || IsFist(*h))
+        return;
+    // where the tips meet, in a bar's zone (as a pinch's: a little farther out than the band counts)
+    Params kz = p_;
+    kz.bandDepth += p_.pinchSlack;
+    const Panel *bestP = nullptr;
+    int sx = 1, sy = -1;
+    double key = 1e9;
+    for (const Panel &P : panels) {
+        if (P.held || P.foreign) continue;
+        const Hit b = Locate(P, h->contact);
+        int x, y;
+        double e;
+        if (GrabZone(P, b, kz, &x, &y, &e) == Zone::Bar && e <= 0 && std::fabs(b.d) < key) key = std::fabs(b.d), bestP = &P, sx = x, sy = y;
+    }
+    if (!bestP) return;
+    // at a round button on the bar (the curve, roll...): left to ft-hands' pinch, which presses it
+    const Hit b = Locate(*bestP, h->contact);
+    if (p_.pinchButtons && PressableButton(ControlAt(*bestP, b.u, b.v, 0.005, p_.buttonReach))) return;
+    sd.barArmed = false;
+    StartGrab(s, in, *bestP, Zone::Bar, sx, sy, h, h->pinchPoint, false);
+    if (sd.state != State::Grab) return;
+    sd.byTips = true, ++stats.barPinches;
+    Did("grab", "info", s, bestP->index + 1, "%s bar pinch with the tips %.1f cm apart (ft-hands' pinch begins closer): held while they stay within %.1f cm",
+        SideName(s), tips * 100, p_.holdPinchOpen * 100);
 }
 
 bool HandInput::IsFist(const Hand &h) const { return Extension(h) <= p_.fistIndex && Curl3(h) <= p_.fistCurl; }
@@ -2041,7 +2088,7 @@ void HandInput::StartGrab(int s, const Input &in, const Panel &P, Zone zone, int
     double pinch[3];
     if (h) Copy3(h->pinchPoint, pinch);
     else Copy3(fallback, pinch);
-    sd.state = State::Grab, sd.panel = P.index, sd.zone = zone, sd.sx = sx, sd.sy = sy, sd.byGrip = byGrip;
+    sd.state = State::Grab, sd.panel = P.index, sd.zone = zone, sd.sx = sx, sd.sy = sy, sd.byGrip = byGrip, sd.byTips = false;
     sd.start = sd.last = P.pose, sd.width0 = P.width;
     sd.grabbedNs = in.nowNs;
     sd.point.Set({p_.grabMinCutoff, p_.grabBeta, 1.0});

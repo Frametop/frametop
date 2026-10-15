@@ -355,6 +355,13 @@ struct Params {
     // one lights it (hovered) and shows a soft ring round it (guide). HANDS_BUTTON_REACH.
     double buttonReach = 0.025;   // (1.5 cm until 2026-10-11: buttons on the bar were hard to hit right after a move)
     bool pinchButtons = true;
+    // A bar pinch ft-hands doesn't call (2026-10-14 testing session: the user's pinches on a panel's bar
+    // closed the thumb and index tips to 2.0-2.5 cm, and ft-hands' pinch begins under 2.0): a hand whose
+    // tips close under barPinch with the point between them in a panel's bar zone takes the bar. Only a
+    // closing hand (the tips over barPinch + 5 mm since the last one), not a fist, and nowhere but the
+    // bar; held while the tips stay under holdPinchOpen (releaseFrames frames apart let go). 0: off.
+    // HANDS_BAR_PINCH.
+    double barPinch = 0.025;
     // The soft white glow round a panel's corner (where a pinch resizes it), along its edge (where a pinch
     // moves it) and round a button, per hand (guide(); vr.cpp draws it, cutouts on or off), instead of the
     // cutout buffer's rings there and the resize handle following the hand. HANDS_EDGE_GLOW.
@@ -746,6 +753,7 @@ public:
         int lockPushes = 0;                          // presses pushed through at the frozen aim (Params::lockPushDepth)
         int sweeps = 0, sweepsRefused = 0;           // lazy susan strokes, and strokes the hand's shape or place refused
         int releaseFreezes = 0, rewinds = 0, regrabsRefused = 0;   // letting go (Params::openFreeze, rewindMs, regrabMs)
+        int barPinches = 0;                          // bar grabs ft-hands didn't call a pinch (Params::barPinch)
         int settles = 0, settledFists = 0;           // pinches that waited to become fists (Params::fistSettleMs), and did
         int joins = 0;                               // second hands joining a held panel (Params::joinFront)
         int buttonPinches = 0, heldByOther = 0;      // buttons pressed by a pinch; pokes refused on a panel the other hand holds
@@ -809,6 +817,8 @@ private:
         bool knowGrip = false;
         bool byGrip = false;                 // a fist grab: the grip's end ends it
         bool byShape = false;                // ...a two-fist pair's (Params::fistPair): the hand opening ends it
+        bool byTips = false;                 // ...a bar pinch ft-hands didn't call (Params::barPinch): the tips opening end it
+        bool barArmed = false;               // the tips were open since the last bar pinch
         bool scrolling = false;              // two fingers on the panel, scrolling (Params::twoFingerScroll)
         bool scrollPending = false;          // ...touching, not yet moved: a swipe scrolls, a lift clicks
         int64_t pendingNs = 0;
@@ -907,6 +917,7 @@ private:
     void PinchClick(int s, const Input &in, const std::vector<Panel> &panels, const float c[3]);
     // A pinch or a grip that began at a panel the other hand holds: the second anchor (Params::joinFront).
     void Join(int s, const Input &in, const std::vector<Panel> &panels, bool byGrip);
+    void BarPinch(int s, const Input &in, const std::vector<Panel> &panels);
     // A pinch on a round button (Params::pinchButtons): pressed, held with the pinch. False: none there.
     bool PinchButton(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand &h);
     // The hand is a fist (Params::fistIndex, fistCurl).

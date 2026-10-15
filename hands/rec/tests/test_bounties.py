@@ -51,13 +51,14 @@ class ShippedTest(unittest.TestCase):
         board = bounties.load(session.BOARD_PATH)
         self.assertIsNotNone(board, "bounties.json doesn't validate")
         ids = [b["id"] for b in board["bounties"]]
-        self.assertEqual(ids, ["index-taps", "middle-taps", "pinches", "card-grabs"])
+        self.assertEqual(ids, ["pokes", "middle-taps", "index-taps", "hand-gestures", "daylight-taps", "pinches",
+                               "card-grabs"])
         for b in board["bounties"]:
             self.assertTrue(session.have_bounty_script(b["script"]), b["script"])
 
     def test_scripts(self):
         """Each round: hand size first, then a scene section of 100 to 180 s of acts (plus the
-        countdowns) at 30 sets a second,
+        countdowns) at 30 sets a second, maybe a short plain section after it (the palm up),
         every act's gesture and lit part valid (build_plan raises otherwise)."""
         board = bounties.load(session.BOARD_PATH)
         for b in board["bounties"]:
@@ -65,10 +66,13 @@ class ShippedTest(unittest.TestCase):
             self.assertEqual(script.get("record_hz"), 30, b["id"])
             plan, skipped = session.build_plan(script, {}, seed=1)
             self.assertEqual(skipped, [])
-            self.assertEqual([s["kind"] for s in plan], ["prompts", "scene"], b["id"])
+            self.assertEqual([s["kind"] for s in plan][:2], ["prompts", "scene"], b["id"])
+            self.assertTrue(all(s["kind"] == "prompts" for s in plan[2:]), b["id"])
             scene = plan[1]
             seconds = sum(p["seconds"] for p in scene["prompts"])
             self.assertTrue(100 <= seconds <= 180, "%s: %.0f s" % (b["id"], seconds))
+            after = sum(p["seconds"] for s in plan[2:] for p in s["prompts"])
+            self.assertLessEqual(after, 30, b["id"])
             gestures = set()
             for p in scene["prompts"]:
                 self.assertTrue(p["id"].startswith(scene["id"] + "/"), p["id"])
@@ -76,9 +80,28 @@ class ShippedTest(unittest.TestCase):
                     gestures.add(a["gesture"])
                     if a["gesture"] != "rest":
                         self.assertNotEqual(a["lit"], "none", p["id"])
-            want = {"index-taps": "tap", "middle-taps": "middle", "pinches": "pinch", "card-grabs": "card"}[b["id"]]
+            want = {"index-taps": "tap", "middle-taps": "middle", "pinches": "pinch", "card-grabs": "card",
+                    "pokes": "poke", "hand-gestures": "sweep"}[b["script"]]
             self.assertIn(want, gestures)
             self.assertIn("nogo", gestures, "%s: no near misses" % b["id"])
+
+    def test_pokes_and_gestures(self):
+        """The rounds made from the 2026-10-15 testing sessions: pokes on windows within reach (low ones
+        too) with holds, slides and hovers; sweeps with look-alikes, pulls, pushes, fists and the palm up
+        with each hand."""
+        def round_of(name):
+            plan = session.build_plan(session.load_script(session.bounty_script(name)), {}, seed=1)[0]
+            acts = [a for s in plan if s["kind"] == "scene" for p in s["prompts"] for a in p["scene"]["acts"]]
+            wins = [w for s in plan if s["kind"] == "scene" for p in s["prompts"] for w in p["scene"]["windows"]]
+            return plan, {a["gesture"] for a in acts}, wins
+        plan, gestures, wins = round_of("pokes")
+        self.assertLessEqual({"poke", "poke-hold", "poke-slide", "nogo"}, gestures)
+        self.assertTrue(all(-w["at"][2] <= 0.5 for w in wins), "pokes: every window within reach")
+        self.assertTrue(any(w["at"][1] <= -0.4 for w in wins), "pokes: a low window")
+        plan, gestures, wins = round_of("hand-gestures")
+        self.assertLessEqual({"sweep", "pull", "push", "fist", "nogo"}, gestures)
+        palm = [p for s in plan if s["id"] == "palm-up" for p in s["prompts"]]
+        self.assertEqual(sorted(p["hands"] for p in palm), ["left", "right"])
 
     def test_same_plan_for_a_seed(self):
         script = session.load_script(session.bounty_script("index-taps"))

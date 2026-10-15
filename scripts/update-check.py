@@ -57,7 +57,9 @@ PACKAGES = {
                            "window's grab bar; picking up a controller; mapped controller buttons; gaze, "
                            "and a gaze calibration with Track Dominant Eye Only on",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
-            "after a desktop restart; floating a window; no blur behind the taskbar's menus",
+            "after a desktop restart; floating a window; no blur behind the taskbar's menus; "
+            "logging out with a Deskflow client connected (6.2.5 crashes there, and the session's "
+            "logout watcher ends it: if it no longer crashes, the watcher can go)",
     "plasma-workspace": "the taskbar and panels after a desktop restart; no DiscoverNotifier or "
                         "ibus-daemon inside the desktop; a notification in the desktop shows in the "
                         "Steam session and its buttons work (ft-notifyfwd)",

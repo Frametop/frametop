@@ -11,7 +11,8 @@
 #              calibrations, the gaze service; it wakes an idle gaze service for about 20 s
 #   --hands    hand tracking: its services, models, cameras, side cameras, ft-hands' counts, ft-camd
 #   --voice    Frametop Voice: its services, state, settings, speech models, and the microphone: its
-#              gain, PipeWire's capture chain, and its level over one second (no sound is kept)
+#              gain, PipeWire's capture chain, and its level over one second, which whisper-server
+#              then transcribes if it runs (no sound or text is kept, only the word count)
 #   --watch    then record SECONDS (default 60, 5 to 600) of the chosen areas while you make the
 #              problem happen (scripts/report-watch.py), and their logs from that time
 # Left out: what was said to Frametop Voice (its word counts stay). Bluetooth addresses and the
@@ -30,7 +31,7 @@ while [ $# -gt 0 ]; do
       watch=60
       if [[ ${2:-} =~ ^[0-9]+$ ]]; then watch=$2; shift; fi
       [ "$watch" -ge 5 ] && [ "$watch" -le 600 ] || { echo "--watch takes 5 to 600 seconds" >&2; exit 2; } ;;
-    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
     *) usage ;;
   esac
   shift
@@ -250,6 +251,10 @@ fi
 if has voice; then
   section "Voice"
   units frametop-voice frametop-voice-whisper steamvr-proxmicmute
+  # frame-voice, the standalone project Frametop Voice came from, uses the same mic and port
+  for u in frame-voice frame-voice-whisper; do
+    systemctl --user cat $u >/dev/null 2>&1 && echo "standalone $(units $u)"
+  done
   echo "state: $(timeout 5 python3 "$repo/voice/ft-voice" status 2>&1 | tr -d '\n')"
   python3 - "$repo" <<'PY' 2>&1 || true
 import sys
@@ -280,8 +285,9 @@ for o in json.load(sys.stdin):
             print(f"  {name}: {state}" + (f", {error}" if error else ""))
 ' 2>&1 || echo "  pw-dump failed"
   echo "who has the capture device open: $(fuser /dev/snd/pcmC*c 2>/dev/null | xargs -r -n 1 sh -c 'cat /proc/$0/comm' 2>/dev/null | sort | uniq -c | xargs | grep . || echo nobody)"
-  python3 -I - <<'PY' 2>&1
-import math, subprocess
+  clip=$(mktemp --suffix=.wav)
+  python3 -I - "$clip" <<'PY' 2>&1
+import math, subprocess, sys, wave
 from array import array
 try:
     raw = subprocess.run(["timeout", "1.2", "pw-record", "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-"],
@@ -295,11 +301,42 @@ peak = max(abs(x) for x in a) / 32768
 rms = math.sqrt(sum(x * x for x in a) / len(a)) / 32768
 print("mic level over 1 s: " + ("digital silence (all zeros)" if peak == 0 else
       f"peak {20 * math.log10(peak):.0f} dBFS, RMS {20 * math.log10(max(rms, 1e-9)):.0f} dBFS"))
+with wave.open(sys.argv[1], "wb") as w:  # for the whisper-server check below
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(16000)
+    w.writeframes(a.tobytes())
 PY
+  # whisper-server gets that second of the mic, as ft-voiced sends it (audio_ctx 512, its floor).
+  # Only the answer's status, time and word count are kept, never its text.
+  whisper=http://127.0.0.1:8178
+  if ! curl -s -o /dev/null --max-time 2 $whisper/; then
+    echo "whisper-server: not listening on ${whisper#http://} (it runs only while the wake word is on, or with the whisper engine)"
+  elif [ ! -s "$clip" ]; then
+    echo "whisper-server: listening, not tried (no clip from the mic)"
+  else
+    r=$(curl -sS --max-time 60 $whisper/inference -F file=@"$clip" -F response_format=json -F temperature=0 \
+      -F temperature_inc=0 -F no_timestamps=true -F language=en -F audio_ctx=512 -w '\n%{http_code} %{time_total}' 2>&1)
+    python3 -I - "$r" "$clip" <<'PY' 2>&1
+import json, re, sys, wave
+body, _, tail = sys.argv[1].rpartition("\n")
+code, _, secs = tail.partition(" ")
+try:
+    text = json.loads(body).get("text", "")
+except ValueError:
+    raise SystemExit(f"whisper-server: HTTP {code} after {secs} s, not JSON ({len(body)} bytes)")
+words = len(re.sub(r"\[[^\]]*\]|\([^)]*\)", "", text).split())  # as ft-voiced: [BLANK_AUDIO] isn't a word
+with wave.open(sys.argv[2]) as w:
+    silent = not any(w.readframes(w.getnframes()))
+print(f"whisper-server: HTTP {code} in {float(secs or 0):.2f} s for 1 s of the mic, {words} word(s)"
+      + (" (the clip was silence: words are whisper's guesses)" if silent and words else ""))
+PY
+  fi
+  rm -f "$clip"
   echo "PipeWire and WirePlumber errors (last 15):"
   journalctl --user -u pipewire -u wireplumber -n 3000 --no-pager -o short 2>/dev/null | grep -a -i -E 'error|cannot|failed' | tail -n 15 | sed 's/^/  /'
   section "Voice dictation (last 30 lines, without what was said)"
-  journalctl --user -u frametop-voice -u frametop-voice-whisper -n 200 --no-pager -o short 2>/dev/null | grep -a -v -E "$noise" |
+  journalctl --user -u frametop-voice -u frametop-voice-whisper -u frame-voice -u frame-voice-whisper -n 200 --no-pager -o short 2>/dev/null | grep -a -v -E "$noise" |
     grep -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|decode skipped|line up with' | tail -n 30
 fi
 EOF
@@ -352,7 +389,7 @@ if has hands; then
 fi
 if has voice; then
   printf '\n===== Frametop Voice while watching (without what was said)\n'
-  journalctl --user -u frametop-voice -u frametop-voice-whisper --since "$since" --no-pager -o short 2>/dev/null |
+  journalctl --user -u frametop-voice -u frametop-voice-whisper -u frame-voice -u frame-voice-whisper --since "$since" --no-pager -o short 2>/dev/null |
     grep -a -v -E "$noise" | grep -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|decode skipped|line up with' | tail -n 200
   log "PipeWire, WirePlumber and proxmicmute" pipewire wireplumber steamvr-proxmicmute
 fi

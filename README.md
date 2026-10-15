@@ -197,7 +197,7 @@ cd ~/frametop && scripts/report.sh
 
 From a release, start in `~/.local/share/frametop/releases/current` instead of `~/frametop`.
 
-This writes `frametop-report-<date>.txt` with version numbers, settings, service states, CPU, memory and heat, and the state and recent logs of every part: the desktop (Frametop's keyboard, the Steam menu, the screens), gaze, hand tracking (its models, cameras, and how often it sees each hand), and voice (its models and the microphone). It takes up to half a minute, because it starts the gaze service for a moment to see whether the eye tracker sends. Bluetooth addresses and the headset's serial number are masked, and what you said to Frametop Voice is left out.
+This writes `frametop-report-<date>.txt` with version numbers, settings, service states, CPU, memory and heat, and the state and recent logs of every part: the desktop (Frametop's keyboard, the Steam menu, the screens), gaze, hand tracking (its models, cameras, and how often it sees each hand), and voice (its models, the microphone, and whether whisper-server transcribes). It takes up to half a minute, because it starts the gaze service for a moment to see whether the eye tracker sends. Bluetooth addresses and the headset's serial number are masked, and what you said to Frametop Voice is left out.
 
 To report on one part only, name it: `--system`, `--desktop`, `--gaze`, `--hands` or `--voice` (several are fine, for example `scripts/report.sh --hands --voice`).
 

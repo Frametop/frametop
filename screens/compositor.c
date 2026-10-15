@@ -261,10 +261,11 @@ static struct screen *screen_for_surface(struct server *s, struct wlr_surface *s
     return NULL;
 }
 
+// The largest DMA-BUF of this frame: on the toplevel itself in KWin 6.2, on a
+// synchronized child in KWin 6.6, whose toplevel has a 1x1 single-pixel buffer.
 // wlroots drops a synchronized child's current buffer again before the parent's commit
 // signal, so the layer's DMA-BUF is only visible in the child's own commit. Keep it.
 static void note_layer_buffer(struct screen *sc, struct wlr_surface *surface) {
-    if (surface == sc->toplevel->base->surface) return;
     struct wlr_buffer *buffer = surface->current.buffer;
     struct wlr_dmabuf_attributes attrs;
     if (!buffer || !wlr_buffer_get_dmabuf(buffer, &attrs)) return;
@@ -320,8 +321,9 @@ static void screen_commit(struct wl_listener *l, void *data) {
             wlr_xdg_toplevel_decoration_v1_set_mode(sc->decoration, WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
         return;
     }
+    note_layer_buffer(sc, xdg->surface);  // KWin 6.2 draws on the toplevel
     struct wlr_buffer *buffer = sc->latest;
-    struct wlr_surface *content = sc->latest_surface;
+    struct wlr_surface *content = sc->latest_surface ? sc->latest_surface : xdg->surface;
     sc->latest = NULL;
     sc->latest_surface = NULL;
     sc->latest_area = -1;
@@ -331,14 +333,15 @@ static void screen_commit(struct wl_listener *l, void *data) {
     send_presented(xdg->surface, (uint32_t)sc->server->period_ns, ++sc->present_seq);
     if (!buffer) {
         if (sc->present_seq == 40 && sc->commits == 0)
-            wlr_log(WLR_ERROR, "screen %d: no DMA-BUF in 40 commits; the output layer was not presented",
-                    sc->index + 1);
+            wlr_log(WLR_ERROR, "screen %d: no DMA-BUF in 40 commits (shm, or a surface we don't look at); "
+                    "nothing was presented", sc->index + 1);
         return;
     }
     static int logged;
     if (logged < 4) {
         ++logged;
-        wlr_log(WLR_INFO, "screen %d: output layer %dx%d", sc->index + 1, buffer->width, buffer->height);
+        wlr_log(WLR_INFO, "screen %d: %s %dx%d", sc->index + 1,
+                content == xdg->surface ? "buffer" : "output layer", buffer->width, buffer->height);
     }
     ++sc->commits;
     note_damage(sc, content, buffer);
@@ -1050,6 +1053,11 @@ struct surface_watch {
 };
 static void surface_watch_destroy(struct wl_listener *l, void *data) {
     struct surface_watch *w = wl_container_of(l, w, destroy);
+    // A desynchronized child can commit and go before its toplevel's next commit.
+    for (int i = 0; i < MAX_SCREENS; ++i) {
+        struct screen *sc = w->server->screens[i];
+        if (sc && sc->latest_surface == data) sc->latest_surface = NULL;
+    }
     wl_list_remove(&w->commit.link);
     wl_list_remove(&w->destroy.link);
     free(w);
@@ -1058,7 +1066,7 @@ static void surface_watch_commit(struct wl_listener *l, void *data) {
     struct surface_watch *w = wl_container_of(l, w, commit);
     struct wlr_surface *surface = data;
     struct screen *sc = screen_for_surface(w->server, surface);
-    if (sc) note_layer_buffer(sc, surface);
+    if (sc && surface != sc->toplevel->base->surface) note_layer_buffer(sc, surface);  // screen_commit does it
 }
 static void surface_watch_new(struct wl_listener *l, void *data) {
     struct server *s = wl_container_of(l, s, new_surface);

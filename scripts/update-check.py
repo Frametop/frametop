@@ -377,8 +377,9 @@ def ft_screens_binary():
 
 def check_kwin_host_protocols():
     """KWin 6.6 exits when ft-screens lacks a host protocol. The built binary names the ones it offers."""
-    blob, src = b"", ""
-    for path in sorted(glob.glob("/usr/lib/libkwin.so*")):
+    blob, src, newest = b"", "", ""
+    for path in sorted({os.path.realpath(p) for p in glob.glob("/usr/lib/libkwin.so*")}):
+        newest = max(newest, os.path.basename(path))
         try:
             with open(path, "rb") as f:
                 data = f.read()
@@ -387,7 +388,13 @@ def check_kwin_host_protocols():
         if b"isn't supported by the host compositor" in data and len(data) >= len(blob):
             blob, src = data, path
     if not blob:
-        report("warn", "KWin host protocols", "libkwin has no host-compositor requirement strings")
+        version = tuple(int(n) for n in re.findall(r"\d+", newest.removeprefix("libkwin.so"))[:2])
+        if version and version < (6, 6):
+            report("ok", "KWin host protocols", f"{newest} doesn't check its host compositor's protocols "
+                   "(KWin 6.6 does)")
+        else:
+            report("warn", "KWin host protocols", f"{newest or 'libkwin'} has no host-compositor requirement "
+                   "strings: reworded? ft-screens may lack a protocol this KWin needs")
         return
     names = host_protocol_names(blob)
     required = [KWIN_HOST_PROTOCOLS[n] for n in names if n in KWIN_HOST_PROTOCOLS]

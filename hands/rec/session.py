@@ -61,7 +61,8 @@ import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's copy of
 # What the recorders share (recorder/), under the names this module always had: the window,
 # the standalone recorder's spike and the tests use them from here.
 from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402,F401
-                             write_json, clean_text, os_version as _os_version, steamvr_version as _steamvr_version)
+                             write_json, clean_text, tree_version, os_version as _os_version,
+                             steamvr_version as _steamvr_version)
 from recorder import bounties  # noqa: E402
 from recorder.units import unit_active, start_unit, stop_unit, pause_units, resume_units, restart_units  # noqa: E402,F401
 from recorder.button import (INPUT_DEVICES, INPUT_EVENT, EV_KEY, EV_REL, REL_X, REL_Y, KEY_SELECT,  # noqa: E402,F401
@@ -1419,7 +1420,7 @@ def live_settings(conf_path=None):
 
 
 def live_tracker(unit=LIVE_HANDS_UNIT):
-    """What Frametop's live ft-hands is: {"frametop": its checkout's git describe, "models":
+    """What Frametop's live ft-hands is: {"frametop": its tree's version (common.tree_version), "models":
     {file: sha256 (16 hex)}} of the models it loads (HANDS_MODELS, else hands/models/student
     or the stock hands/models/ncnn next to it). Empty fields when it can't be told."""
     out = {"frametop": "", "models": {}}
@@ -1431,11 +1432,7 @@ def live_tracker(unit=LIVE_HANDS_UNIT):
         exe = ""
     repo = os.path.dirname(os.path.dirname(os.path.dirname(exe))) if exe else ""
     if repo:
-        try:
-            out["frametop"] = subprocess.run(["git", "-C", repo, "describe", "--always", "--dirty", "--tags"],
-                                             capture_output=True, text=True, timeout=10).stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            pass
+        out["frametop"] = tree_version(repo)
     conf = {}
     try:
         with open(CONF_PATH) as f:

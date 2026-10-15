@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from recorder import age  # noqa: E402  (a debug session's recordings are encrypted)
+from recorder.common import tree_version  # noqa: E402
 import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's panel and pointer decisions)
 from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge_ranges, read_json,  # noqa: E402,F401
                             sha256_file, tree_bytes, tree_stat, write_sums)
@@ -144,19 +145,14 @@ def standalone(path=None):
 
 
 def tool_version():
-    """ft-handrec plus the checkout's git describe, for session.json and the manifest. The
-    standalone Hand Recorder has no checkout: the describe it was built from, and its version."""
+    """ft-handrec plus the tree's version (a checkout's git describe, a release's version and
+    commit), for session.json and the manifest. The standalone Hand Recorder has neither: the
+    describe it was built from, and its version."""
     info = standalone()
     if info:
         return "ft-handrec %s (%s %s)" % (info.get("frametop") or "unknown", info.get("name") or "standalone",
                                           info.get("version") or "unknown")
-    try:
-        out = subprocess.run(["git", "-C", REPO, "describe", "--always", "--dirty", "--tags"],
-                             capture_output=True, text=True, timeout=5)
-        described = out.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        described = ""
-    return "ft-handrec " + (described or "unknown")
+    return "ft-handrec " + (tree_version(REPO) or "unknown")
 
 
 def export_jsonl(src, dst, ranges, keep_controllers):

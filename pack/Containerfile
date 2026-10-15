@@ -54,8 +54,10 @@ RUN install -d /opt/frametop/bin /opt/frametop/lib \
 # Python: Fedora's own python3 (the digest-pinned base freezes it), with the
 # locked packages in a venv on top. The venv sees the system site-packages,
 # because PySide6 and Kirigami come from dnf for this python3: one interpreter
-# imports both, as in the dev container on the Frame. Rebuilt only when the
-# lockfile changes, so source edits below reuse this layer.
+# imports both, as in the dev container on the Frame. The check names the
+# recorders' huggingface_hub (uploads) and cryptography (encrypted exports) too:
+# the tests that need them skip without them. Rebuilt only when the lockfile
+# changes, so source edits below reuse this layer.
 # uv sync --frozen --group tracker --group voice: the default dev group (pytest/ruff
 # for CI's in-image tests) plus the tracker stack and Frametop Voice's (sherpa-onnx);
 # the types group (mypy) stays out.
@@ -64,7 +66,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/frametop/venv UV_PYTHON=/usr/bin/python3 UV_PYTH
 COPY pyproject.toml uv.lock .python-version /src/frametop/
 RUN uv venv --system-site-packages /opt/frametop/venv \
  && cd /src/frametop && uv sync --frozen --group tracker --group voice --no-cache \
- && /opt/frametop/venv/bin/python -c 'import PySide6, numpy, cv2, sherpa_onnx, sentencepiece'
+ && /opt/frametop/venv/bin/python -c 'import PySide6, numpy, cv2, sherpa_onnx, sentencepiece, huggingface_hub, cryptography'
 
 # The sources, then the binaries, built by the same build scripts as on the
 # Frame (FRAME_IN_BOX=1: they run here instead of entering the dev container).

@@ -402,10 +402,15 @@ def write_conf_value(key, value):
 
 
 def host(*cmd):
-    """Run a command on the SteamOS host (we live in the dev container)."""
+    """Run a command on the SteamOS host (we live in the dev container), on the host's user
+    bus. The app itself has the bus of the session it was opened from (ft-input-settings),
+    in the Frametop desktop a private one from dbus-run-session; distrobox-host-exec run on
+    that one leaves `systemctl --user` on the host without its user manager ("Failed to
+    connect to user scope bus via local transport")."""
     runner = ["distrobox-host-exec"] if shutil.which("distrobox-host-exec") else []
+    env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=f"unix:path=/run/user/{os.getuid()}/bus")
     try:
-        return subprocess.run(runner + list(cmd), capture_output=True, text=True, timeout=20)
+        return subprocess.run(runner + list(cmd), capture_output=True, text=True, timeout=20, env=env)
     except (OSError, subprocess.TimeoutExpired) as e:
         return subprocess.CompletedProcess(cmd, 1, "", str(e))
 

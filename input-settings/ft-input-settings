@@ -3,7 +3,8 @@
 # The app runs in Frametop's container (PySide6 and Kirigami come from Fedora there).
 # podman needs the real XDG_RUNTIME_DIR and the real user bus (to reach systemd for
 # the container's cgroup; the Frametop session runs on a private bus from
-# dbus-run-session). The session's Wayland socket and bus go to the app itself.
+# dbus-run-session). The session's Wayland socket and bus go to the app itself; its
+# commands on the host (host() in ft_input_settings.py) use the real user bus again.
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 wl=${WAYLAND_DISPLAY:-wayland-0}
 case $wl in /*) ;; *) wl="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$wl" ;; esac

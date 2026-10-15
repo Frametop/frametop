@@ -1,14 +1,16 @@
 # Recording your hands for the Frametop hand dataset
 
-Version: 2026-10-03
+Version: 2026-10-14
 
 Frametop's hand tracking needs a small model that finds hands in the headset's camera images. To train it, we're collecting recordings of many people's hands into a public dataset. This page explains what the hand recorder records, where it goes, and what you agree to if you take part. Please read all of it.
+
+It covers the **bounty rounds** (short rounds of what the hand tracker needs most, such as taps, pinches and grabs on windows that appear in front of you) and Frametop's **full sessions** and **quick rounds**. **Testing sessions**, where you use Frametop and mark what went wrong, have their own, separate text: they're never used for training and aren't part of this dataset.
 
 ## Who runs this
 
 Frametop is an independent open-source project, maintained by DeeJanuz (<https://github.com/DeeJanuz>). It isn't affiliated with or endorsed by Valve or Hugging Face. Steam and Steam Frame are trademarks of Valve Corporation. This text was written without a lawyer, in good faith; if something in it seems wrong or unclear, please say so before you take part.
 
-You can reach the maintainer through the Frametop repository's issues (<https://github.com/DeeJanuz/frametop/issues>) or the dataset's discussion page on Hugging Face. Both are public.
+You can reach the maintainer through the Frametop repository's issues (<https://github.com/Frametop/frametop/issues>) or the dataset's discussion page on Hugging Face. Both are public.
 
 ## Who can take part
 
@@ -20,9 +22,9 @@ You can reach the maintainer through the Frametop repository's issues (<https://
 
 While a session runs, the hand recorder saves:
 
-- **Camera images.** Infrared images from the headset's 4 tracking cameras, about 10 sets a second. They show your hands, your arms, your clothing and whatever is in front of you: your room, your desk and the things on it. They're grey, low-detail images, but people and things can be recognised in them. The size and shape of your hands can be measured from them: that's part of what they're for.
+- **Camera images.** Infrared images from the headset's 4 tracking cameras: about 10 sets a second in a full session, 30 in a bounty round. They show your hands, your arms, your clothing and whatever is in front of you: your room, your desk and the things on it. They're grey, low-detail images, but people and things can be recognised in them. The size and shape of your hands can be measured from them: that's part of what they're for.
 - **Motion.** The position and rotation of the headset, many times a second, and of the controllers when you use them in the recording.
-- **Prompts.** What you were asked to do and when, and what the live hand tracker saw at the time.
+- **Prompts.** What you were asked to do and when (in a bounty round, which window and which part of it), and what the live hand tracker saw at the time.
 - **Calibration.** Where the cameras sit on the headset and how their lenses bend the image. Serial numbers and other fields that identify your headset are removed first, and the export lists what was removed.
 - **Your answers.** Which objects you had, the lighting, whether you wore sleeves, rings or a watch, your handedness if you gave it, and any notes you typed in the checklist or in Review. Notes are uploaded with the recordings and read by the maintainer: don't put anything in them that identifies you.
 - **Times.** When each session was recorded, with your time zone.

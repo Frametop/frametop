@@ -1,8 +1,10 @@
-# Testing the hand recorder's bounties
+# Testing sessions
 
-Version: 2026-10-14c
+Version: 2026-10-14d
 
-The bounties and testing sessions are new, and we're trying them out with a few people before they open to everyone. This page says what you agree to by taking part in that test. It's shorter than the hand dataset's consent because **nothing you send now is published**.
+A testing session records you using Frametop as you always do, while you press the headset button whenever the hand tracking gets something wrong. New versions of the hand tracking are then tested on your recording before they ship. This page says what you agree to by recording one. It's shorter than the hand dataset's consent because **nothing you send from a testing session is published or used for training**.
+
+This page covers testing sessions only. Bounty rounds are different: they go to the public hand dataset and are used for training, under that dataset's own consent, which the Hand Recorder shows before your first bounty.
 
 ## Who runs this
 
@@ -18,8 +20,8 @@ Frametop is an independent open-source project, maintained by DeeJanuz (<https:/
 - **Camera images** from the headset's 4 tracking cameras, 30 sets a second: your hands and arms, your clothing and whatever is in front of you. The size and shape of your hands can be measured from them.
 - **Motion** of the headset and, if you use them, the controllers; **what you were asked to do** and when.
 - **Calibration** of the cameras, with serial numbers and other fields that identify your headset removed.
-- In a **testing session**, also what Frametop's hand tracking made of your hands, moment by moment, what Frametop did with them (each poke, pinch, grab or stroke it acted on or held back, and which of its windows, by number, not by what was in them), the moments you marked, and your hand tracking settings (file paths left out).
-- **Your voice**, only in a testing session where you tick "Record my voice": the headset's microphone while you record, so you can say what went wrong. Anyone else who can be heard is recorded too. The maintainer turns it into text on their own computers (not an online service) and uses it to find those moments.
+- What Frametop's hand tracking made of your hands, moment by moment, what Frametop did with them (each poke, pinch, grab or stroke it acted on or held back, and which of its windows, by number, not by what was in them), the moments you marked, and your hand tracking settings (file paths left out).
+- **Your voice**, only if you tick "Record my voice": the headset's microphone while you record, so you can say what went wrong. Anyone else who can be heard is recorded too. The maintainer turns it into text on their own computers (not an online service) and uses it to find those moments.
 - **Your answers** in the checklist, the **times** of the recordings, and a **contributor id**: a random number made on your headset, not from your name, Steam account or headset.
 
 No other sound, no name, no email address, no Steam account. The cameras look outward, so your face isn't recorded unless a mirror shows it.
@@ -33,12 +35,12 @@ No other sound, no name, no email address, no Steam account. The cameras look ou
 
 ## What it's used for
 
-- Checking that the bounties and the recorder work, and **testing** Frametop's hand tracking: new versions are run on your recordings to see whether they do better, especially at the moments you marked.
-- **Not for training** models, and **not published**. If we'd like to move your test recordings into the public hand dataset later, we'll ask you first, and they move only if you agree to that dataset's own terms.
+- **Testing** Frametop's hand tracking: new versions are run on your recordings to see whether they do better, especially at the moments you marked. Also checking that the recorder works.
+- **Never for training** models, and **not published**. Testing sessions stay out of the public hand dataset.
 
 ## Withdrawing
 
-- Your uploads are deleted when the test ends, or earlier if you ask: close your pull request, or open an issue with your contributor id (shown in the Hand Recorder) and "delete my test uploads".
+- Your uploads are deleted when they're no longer needed for testing, or earlier if you ask: close your pull request, or open an issue with your contributor id (shown in the Hand Recorder) and "delete my test uploads".
 - You can delete recordings on your headset at any time in Review.
 
 ## Keep other people and private things out of view

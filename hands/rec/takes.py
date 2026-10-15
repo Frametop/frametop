@@ -57,10 +57,11 @@ VOICE_HDR = struct.Struct("<8sII")                  # voicelog.py: magic, versio
 VOICE_REC = struct.Struct("<QI")                    # read_ns, bytes of s16le samples
 EVENTS_RE = re.compile(r"^events(?:-(\d+))?\.jsonl$")  # a debug session's panel and pointer decisions
 TEST_RECIPIENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-recipients.txt")
-# The bounties' test phase (DESIGN.md "Testing"): bounty rounds and debug sessions are recorded under
-# TESTING.md's consent (profile.json "testing_consent"), and their exports are encrypted for the test
-# dataset. Full sessions and quick rounds stay under CONSENT.md, for the public dataset.
-TEST_PHASE = True
+# The bounties' test phase (DESIGN.md "Testing"): while it's on, bounty rounds are recorded under
+# TESTING.md's consent (profile.json "testing_consent") like debug sessions, and their exports are
+# encrypted for the test dataset. It ended 2026-10-14: bounty rounds go under CONSENT.md to the public
+# dataset, like full sessions and quick rounds; only debug (testing) sessions stay under TESTING.md.
+TEST_PHASE = False
 CONSENT_KEYS = {"public": "consent", "testing": "testing_consent"}   # profile.json's record of each
 
 

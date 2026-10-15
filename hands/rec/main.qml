@@ -92,8 +92,9 @@ Kirigami.ApplicationWindow {
 
     // A round picked on the Bounties page: the consent first if it isn't agreed to yet, then
     // Before you start (the camera check, the privacy checks), then Start.
-    // The consent asked for follows the round: a bounty's or the testing session's is the testing
-    // one (TESTING.md) while the bounties are tested, a full session's the dataset's (CONSENT.md).
+    // The consent asked for follows the round: the testing session's is the testing one (TESTING.md),
+    // a bounty's or a full session's the dataset's (CONSENT.md; a bounty's was the testing one
+    // during the bounties' test phase, takes.TEST_PHASE).
     function pickRound(bounty, quick) {
         chosenBounty = bounty
         chosenQuick = quick

@@ -10,7 +10,7 @@ The Hand Recorder records your hands with the Steam Frame's tracking cameras for
 
 Join the [Frametop Discord](https://discord.gg/W3X9f7z3Bc) for questions and help with recording.
 
-For now the recorder runs inside Frametop's desktop, so these steps install Frametop first. A standalone recorder that runs from the SteamVR dashboard without Frametop is planned.
+These steps install Frametop first, and the recorder runs inside Frametop's desktop. To record **bounty rounds** (short rounds of taps, pinches and grabs, about 4 minutes each) without installing Frametop, use the standalone [Frametop Hand Recorder](https://github.com/Frametop/frametop-hand-recorder) instead: it runs from the SteamVR dashboard and installs with one command. Bounty rounds go to the same public dataset. In Frametop itself they need the experimental version (`--experimental` instead of `--stable` below).
 
 Installing a Frametop release (Frametop.zip, FrameDrop, or `get.sh --release`) instead? Its installer offers the Hand Recorder, built, so there's nothing to compile: leave Hand Recorder ticked (or answer yes) and skip step 2. To add it to a release later, run `~/.local/share/frametop/releases/current/hands/rec/install.sh`.
 

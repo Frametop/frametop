@@ -159,7 +159,7 @@ class TestingSessionTest(unittest.TestCase):
         self.assertFalse(backend.startSession({}, "auto", True, False, ft.DEBUG_ID))
         self.assertEqual(backend.consentKind, "testing")   # switched to the text to agree to
         self.assertTrue(backend.needsConsent)
-        self.assertIn("Testing the hand recorder", backend.consentText)
+        self.assertIn("# Testing sessions", backend.consentText)
         self.assertEqual(backend.dataset, ft.hub.HF_TEST_DATASET)
         backend.acceptConsent(True, True, True, "right")
         self.assertFalse(backend.needsConsent)
@@ -171,6 +171,13 @@ class TestingSessionTest(unittest.TestCase):
         profile = backend.store.profile()
         self.assertIn("testing_consent", profile)
         self.assertNotIn("consent", profile)
+        # after the test phase a bounty asks for the dataset's own consent and goes to it
+        if not takes.TEST_PHASE:
+            backend.setConsentKind(backend.roundConsentKind(bounty))
+            self.assertEqual(backend.consentKind, "public")
+            self.assertTrue(backend.needsConsent)
+            self.assertIn("bounty rounds", backend.consentText)
+            self.assertEqual(backend.dataset, ft.hub.HF_DATASET)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ these slot and property names, which its main.qml calls.
 A "session" here is what the recorder records in one go: a hand session, or an eye round.
 
 Needs PySide6 (the dev container has it; the standalone recorders' venvs too)."""
+import collections
 import datetime
 import json
 import os
@@ -586,8 +587,13 @@ class RecorderBackend(QObject):
 
     def _read_lines(self, proc, line_signal, cancelled, stopped):
         """hub.py's JSON lines: progress to line_signal, then its last (done or error), or one
-        made from stderr when there's none."""
+        made from stderr when there's none. stderr is read as it comes, keeping its last lines: read
+        only at the end, more than a pipe holds there (huggingface_hub's retry warnings on a bad
+        network) would stop hub.py and this reader both."""
         last = {}
+        said = collections.deque(maxlen=50)
+        drain = threading.Thread(target=lambda: said.extend(proc.stderr), name="hub-stderr", daemon=True)
+        drain.start()
         for line in proc.stdout:
             try:
                 obj = json.loads(line)
@@ -598,10 +604,12 @@ class RecorderBackend(QObject):
                     last = obj
                 else:
                     line_signal.emit(obj)
-        err = proc.stderr.read()
         proc.wait()
+        drain.join(5)   # stderr ends with hub.py, unless something it started still holds it
+        err = "".join(said)
         proc.stdout.close()
-        proc.stderr.close()
+        if not drain.is_alive():
+            proc.stderr.close()
         if not last and not cancelled():
             tail = (err.strip().splitlines() or [f"exit status {proc.returncode}"])[-1]
             last = {"error": {"kind": "hub", "text": f"{stopped}: {tail}"}}

@@ -1066,6 +1066,14 @@ GESTURES = {
     "card": ("cyan", "", "Grab it like a playing card: thumb, index and middle"),
     "fist": ("green", "", "Grab it with your fist"),
     "touch": ("orange", "", "Touch it with an open hand: no grab"),
+    # Near touch and whole-hand gestures (2026-10-15: the testing sessions' refused pokes, missed and
+    # false lazy susans, "grab that" taking the wrong screen)
+    "poke": ("cyan", "", "Poke it: index fingertip in, then back out"),
+    "poke-hold": ("cyan", "hold", "Poke it and keep it pressed, about 1 s"),
+    "poke-slide": ("cyan", "slide", "Poke it and slide the fingertip down, as if scrolling"),
+    "sweep": ("cyan", "", "Sweep it aside: open hand on its edge, palm leading"),
+    "pull": ("green", "", "Open hand out to it, then close a fist and pull it to you"),
+    "push": ("cyan", "", "Push it away: open hand, palm flat against it"),
     "rest": ("cyan", "", ""),
 }
 SCENE_LOOKS = re.compile(r"^(plain|grid:[1-6]x[1-6]|list:([1-9]|10))$")

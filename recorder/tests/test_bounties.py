@@ -71,6 +71,16 @@ class ViewTest(unittest.TestCase):
         self.assertEqual(by["specs"]["available"], "For people who wear glasses or inserts")
         self.assertNotIn("gone", by)
 
+    def test_board_order_within_a_priority(self):
+        """Within a priority and a done count, the board's own order (not the title): a fetched board
+        ranks its bounties by listing them."""
+        b = bounties.validate(board({"id": "zebra", "title": "Zebra", "priority": "high"},
+                                    {"id": "apple", "title": "Apple", "priority": "high"},
+                                    {"id": "mango", "title": "Mango", "priority": "high"}))
+        self.assertEqual([x["id"] for x in bounties.view(b, {}, {}, lambda s: True)], ["zebra", "apple", "mango"])
+        done = {"bounties": {"zebra": {"rounds": 1, "last": "r"}}}
+        self.assertEqual([x["id"] for x in bounties.view(b, done, {}, lambda s: True)], ["apple", "mango", "zebra"])
+
     def test_glasses_meet_the_need(self):
         for answer, ok in (("glasses", True), ("inserts", True), ("contacts", False), (None, False)):
             v = {b["id"]: b for b in bounties.view(self.board, {}, {"glasses": answer}, self.have)}

@@ -1,0 +1,781 @@
+{
+ "version": 1,
+ "name": "hand-gestures",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Hand gestures",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! You can take off the headset.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "hand-gestures",
+   "title": "Hand gestures",
+   "kind": "scene",
+   "intro": "Now gestures with the whole hand: sweeping windows round like a lazy susan, pulling a far window to you, pushing one away and turning one with your fist. Nothing moves: the cameras record your hands.",
+   "prompts": [
+    {
+     "id": "sweep-right",
+     "hands": "right",
+     "text": "Right hand open, on its edge, palm facing left, in front of your chest.|When the edge lights, sweep the hand right to left, a quick stroke of about 30 cm, palm leading. Then bring it back slowly.",
+     "windows": [
+      {
+       "id": "l",
+       "at": [
+        -0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "c",
+       "at": [
+        0.0,
+        0.0,
+        -1.2
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "r",
+       "at": [
+        0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "sweep",
+      "win": "c",
+      "grab": "right",
+      "every_s": 2.0,
+      "gap_s": 1.0,
+      "count": 4,
+      "moves": [
+       [
+        -0.85,
+        0,
+        0.35,
+        -45,
+        0,
+        0
+       ]
+      ],
+      "rest_say": "Bring the hand back slowly",
+      "say": "Sweep it left: a quick stroke, palm leading"
+     }
+    },
+    {
+     "id": "sweep-left",
+     "hands": "left",
+     "text": "Left hand open, on its edge, palm facing right, in front of your chest.|When the edge lights, sweep it left to right, a quick stroke, palm leading. Then back slowly.",
+     "windows": [
+      {
+       "id": "l",
+       "at": [
+        -0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "c",
+       "at": [
+        0.0,
+        0.0,
+        -1.2
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "r",
+       "at": [
+        0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "sweep",
+      "win": "c",
+      "grab": "left",
+      "every_s": 2.0,
+      "gap_s": 1.0,
+      "count": 4,
+      "moves": [
+       [
+        0.85,
+        0,
+        0.35,
+        45,
+        0,
+        0
+       ]
+      ],
+      "rest_say": "Bring the hand back slowly",
+      "say": "Sweep it right: a quick stroke, palm leading"
+     }
+    },
+    {
+     "id": "sweep-look-alikes",
+     "hands": "right",
+     "text": "Right hand. Cyan: a sweep, open hand on its edge, palm leading.|Orange: something that isn't one: each says what.",
+     "windows": [
+      {
+       "id": "l",
+       "at": [
+        -0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "c",
+       "at": [
+        0.0,
+        0.0,
+        -1.2
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "r",
+       "at": [
+        0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "win": "c",
+      "grab": "right",
+      "every_s": 2.0,
+      "gap_s": 0.8,
+      "moves": [
+       {
+        "gesture": "sweep",
+        "ghost": [
+         -0.85,
+         0,
+         0.35,
+         -45,
+         0,
+         0
+        ]
+       },
+       {
+        "gesture": "nogo",
+        "say": "Orange: move the hand across with the fingers relaxed and curled, not flat"
+       },
+       {
+        "gesture": "sweep",
+        "ghost": [
+         -0.85,
+         0,
+         0.35,
+         -45,
+         0,
+         0
+        ]
+       },
+       {
+        "gesture": "nogo",
+        "say": "Orange: the way back: move it left to right, the back of the hand leading"
+       },
+       {
+        "gesture": "nogo",
+        "say": "Orange: wave, as if saying hello"
+       }
+      ]
+     }
+    },
+    {
+     "id": "pull-right",
+     "hands": "right",
+     "text": "Right hand: hold it out open toward the lit window, palm to it, then close it into a fist|as you pull your arm back. The window would come to the ghost, at arm's reach.",
+     "windows": [
+      {
+       "id": "l",
+       "at": [
+        -0.7,
+        0.05,
+        -1.8
+       ],
+       "size": [
+        0.6,
+        0.38
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "c",
+       "at": [
+        0.0,
+        0.1,
+        -2.2
+       ],
+       "size": [
+        0.6,
+        0.38
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "r",
+       "at": [
+        0.7,
+        0.0,
+        -1.8
+       ],
+       "size": [
+        0.6,
+        0.38
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pull",
+      "grab": "bar",
+      "every_s": 3.0,
+      "gap_s": 1.0,
+      "count": 4,
+      "moves": [
+       {
+        "win": "c",
+        "ghost": [
+         0,
+         -0.2,
+         1.75
+        ]
+       },
+       {
+        "win": "l",
+        "ghost": [
+         0,
+         -0.15,
+         1.48
+        ]
+       },
+       {
+        "win": "r",
+        "ghost": [
+         0,
+         -0.15,
+         1.48
+        ]
+       },
+       {
+        "win": "c",
+        "ghost": [
+         0,
+         -0.2,
+         1.75
+        ]
+       }
+      ],
+      "say": "Open hand to it, then a fist, pulled back"
+     }
+    },
+    {
+     "id": "pull-left",
+     "hands": "left",
+     "text": "Left hand: open hand toward the lit window, palm to it, then a fist as you pull back.",
+     "windows": [
+      {
+       "id": "l",
+       "at": [
+        -0.7,
+        0.05,
+        -1.8
+       ],
+       "size": [
+        0.6,
+        0.38
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "c",
+       "at": [
+        0.0,
+        0.1,
+        -2.2
+       ],
+       "size": [
+        0.6,
+        0.38
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "r",
+       "at": [
+        0.7,
+        0.0,
+        -1.8
+       ],
+       "size": [
+        0.6,
+        0.38
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pull",
+      "grab": "bar",
+      "every_s": 3.0,
+      "gap_s": 1.0,
+      "count": 3,
+      "moves": [
+       {
+        "win": "l",
+        "ghost": [
+         0,
+         -0.15,
+         1.48
+        ]
+       },
+       {
+        "win": "c",
+        "ghost": [
+         0,
+         -0.2,
+         1.75
+        ]
+       },
+       {
+        "win": "r",
+        "ghost": [
+         0,
+         -0.15,
+         1.48
+        ]
+       }
+      ],
+      "say": "Open hand to it, then a fist, pulled back"
+     }
+    },
+    {
+     "id": "pick-one",
+     "hands": "right",
+     "text": "Four windows close together. Aim your open right hand at the lit one,|then pull it to you with a fist.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.45,
+        0.25,
+        -2.0
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "b",
+       "at": [
+        0.45,
+        0.25,
+        -2.0
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "c",
+       "at": [
+        -0.45,
+        -0.2,
+        -2.0
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "d",
+       "at": [
+        0.45,
+        -0.2,
+        -2.0
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pull",
+      "grab": "bar",
+      "every_s": 3.0,
+      "gap_s": 1.0,
+      "count": 4,
+      "moves": [
+       {
+        "win": "a",
+        "ghost": [
+         0,
+         -0.15,
+         1.55
+        ]
+       },
+       {
+        "win": "b",
+        "ghost": [
+         0,
+         -0.15,
+         1.55
+        ]
+       },
+       {
+        "win": "c",
+        "ghost": [
+         0,
+         -0.15,
+         1.55
+        ]
+       },
+       {
+        "win": "d",
+        "ghost": [
+         0,
+         -0.15,
+         1.55
+        ]
+       }
+      ],
+      "say": "Aim at the lit one, then a fist, pulled back"
+     }
+    },
+    {
+     "id": "push",
+     "hands": "both",
+     "text": "Put your open hand flat on the window, the hand its button says (L or R),|then push it straight away from you and let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.0,
+        -0.15,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "grid:1x1"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "push",
+      "grab": "button:0",
+      "every_s": 2.5,
+      "gap_s": 1.0,
+      "shuffle": false,
+      "moves": [
+       {
+        "ghost": [
+         0,
+         0,
+         -1.6
+        ],
+        "hand": "right",
+        "label": "R"
+       },
+       {
+        "ghost": [
+         -0.2,
+         0.1,
+         -1.5,
+         -15,
+         0,
+         0
+        ],
+        "hand": "left",
+        "label": "L"
+       },
+       {
+        "ghost": [
+         0.3,
+         0.1,
+         -1.4,
+         20,
+         0,
+         0
+        ],
+        "hand": "right",
+        "label": "R"
+       },
+       {
+        "ghost": [
+         0,
+         0.15,
+         -1.6
+        ],
+        "hand": "left",
+        "label": "L"
+       }
+      ],
+      "say": "Open hand flat on it, push it away"
+     }
+    },
+    {
+     "id": "fists",
+     "hands": "right",
+     "text": "Right hand. Grab the lit edge with your fist and turn the window like the ghost:|the fist turns it. Then open the hand to let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "fist",
+      "grab": "right",
+      "every_s": 3.5,
+      "gap_s": 1.0,
+      "count": 4,
+      "moves": [
+       [
+        0,
+        0,
+        0,
+        30,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        20
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        -25,
+        0
+       ],
+       {
+        "grab": "left",
+        "ghost": [
+         -0.1,
+         0.05,
+         0.05,
+         -25,
+         0,
+         0
+        ]
+       }
+      ],
+      "say": "Fist on the edge, turn it like the ghost"
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace, either hand: sweep the windows round, pull one to you,|push it away. Any order, as you like.",
+     "windows": [
+      {
+       "id": "l",
+       "at": [
+        -0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "c",
+       "at": [
+        0.0,
+        0.0,
+        -1.2
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "r",
+       "at": [
+        0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": [
+      {
+       "s": 12,
+       "lit": "left+right",
+       "win": "c",
+       "gesture": "sweep",
+       "say": "Your own pace: sweep, pull and push, any way you like"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "palm-up",
+   "title": "Palm up",
+   "requires": [],
+   "go": "Go",
+   "intro": "Last: the palm menu. Turn your hand palm up toward your face, as if looking at a watch on its palm, and tap.",
+   "prompts": [
+    {
+     "text": "Right hand palm up toward your face, open, and look at it.|Tap thumb to index lightly, a few times.",
+     "seconds": 10,
+     "hands": "right",
+     "pose": "flat",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "fingers relaxed, drooping a little",
+       "text": "Right hand palm up, the fingers relaxed and drooping a little.|Keep tapping now and then."
+      }
+     ]
+    },
+    {
+     "text": "Left hand palm up toward your face, open, and look at it.|Tap thumb to index lightly, a few times.",
+     "seconds": 10,
+     "hands": "left",
+     "pose": "flat",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "fingers relaxed, drooping a little",
+       "text": "Left hand palm up, the fingers relaxed and drooping a little.|Keep tapping now and then."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

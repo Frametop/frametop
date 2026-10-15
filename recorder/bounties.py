@@ -103,13 +103,14 @@ def fetch(url, cache_path, token=None, timeout=5.0):
 def view(board, profile, checklist, have_script):
     """The board as the window lists it: the bounties that aren't retired, each with "done"
     (rounds recorded), "last" and "available" ("" when it can be done, else why not), sorted by
-    priority, then the ones done least. have_script(name) says whether this recorder has that
-    round script."""
+    priority, then the ones done least, then the board's own order (so a fetched board can rank
+    bounties within a priority). have_script(name) says whether this recorder has that round
+    script."""
     done = (profile or {}).get("bounties") or {}
     checklist = checklist or {}
     rank = {p: i for i, p in enumerate(PRIORITIES)}
     out = []
-    for b in (board or {}).get("bounties", []):
+    for k, b in enumerate((board or {}).get("bounties", [])):
         if b["priority"] == "retired":
             continue
         mark = done.get(b["id"]) if isinstance(done.get(b["id"]), dict) else {}
@@ -121,9 +122,9 @@ def view(board, profile, checklist, have_script):
                 if not NEEDS[need](checklist):
                     why = "For people who wear %s" % {"glasses": "glasses or inserts"}.get(need, need)
                     break
-        out.append(dict(b, done=int(mark.get("rounds") or 0), last=mark.get("last") or "", available=why))
-    out.sort(key=lambda b: (b["available"] != "", rank[b["priority"]], b["done"], b["title"]))
-    return out
+        out.append((k, dict(b, done=int(mark.get("rounds") or 0), last=mark.get("last") or "", available=why)))
+    out.sort(key=lambda kb: (kb[1]["available"] != "", rank[kb[1]["priority"]], kb[1]["done"], kb[0]))
+    return [b for _, b in out]
 
 
 def mark_done(profile, bounty_id, round_id):

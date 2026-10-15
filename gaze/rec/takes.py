@@ -40,7 +40,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import threading
 
@@ -50,7 +49,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, HERE)
 import eyerec  # noqa: E402  (gaze/rec/eyerec.py: the chunks' format)
 from recorder import age  # noqa: E402
-from recorder.common import write_json  # noqa: E402
+from recorder.common import tree_version, write_json  # noqa: E402
 from recorder.files import (Cancelled, human_bytes, in_ranges, merge_ranges, read_json, sha256_file,  # noqa: E402,F401
                             tree_bytes, tree_stat, write_sums)
 
@@ -66,13 +65,7 @@ GAP_S = 0.5            # frames further apart than this are a pause, not recorde
 
 
 def tool_version():
-    try:
-        out = subprocess.run(["git", "-C", REPO, "describe", "--always", "--dirty", "--tags"],
-                             capture_output=True, text=True, timeout=5)
-        described = out.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        described = ""
-    return "ft-eyerec " + (described or "unknown")
+    return "ft-eyerec " + (tree_version(REPO) or "unknown")
 
 
 # ---------------------------------------------------------------- clocks

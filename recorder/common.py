@@ -6,6 +6,7 @@ import glob
 import json
 import os
 import shutil
+import subprocess
 import time
 
 
@@ -72,6 +73,30 @@ def os_version():
     except OSError:
         pass
     return ""
+
+
+def tree_version(tree):
+    """A Frametop tree's version, for what a session records: a checkout's git describe, else a
+    release's version and commit from its .frametop-release (pack/install-release.sh writes it: a
+    release's folder has no .git). "" when neither says."""
+    if os.path.exists(os.path.join(tree, ".git")):
+        try:
+            return subprocess.run(["git", "-C", tree, "describe", "--always", "--dirty", "--tags"],
+                                  capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    info = {}
+    try:
+        with open(os.path.join(tree, ".frametop-release")) as f:
+            for line in f:
+                key, eq, value = line.strip().partition("=")
+                if eq:
+                    info[key] = value
+    except OSError:
+        return ""
+    if not info.get("VERSION"):
+        return ""   # a checkout's own .frametop-release names only its container (BOX=)
+    return ("v%s release %s" % (info["VERSION"], info.get("COMMIT", "")[:7])).strip()
 
 
 def steamvr_version():

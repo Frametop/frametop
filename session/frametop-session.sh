@@ -187,12 +187,12 @@ mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 # The cursor: the Steam client's XCURSOR_THEME=steam comes along in the environment, and
 # KWin and the apps take it over this desktop's own setting. SteamOS had no theme of that
 # name, so they fell back to Breeze; SteamOS 0.4 has one (holo-cursors: Steam's arrow, the
-# rest Breeze Light). The theme is this desktop's own (System Settings, Breeze unless
-# changed there); the size stays what it was, unless one is set there too.
+# rest Breeze Light). The theme and the size are this desktop's own (System Settings,
+# Breeze and 24 unless changed there). The gamescope session's XCURSOR_SIZE is 256, for
+# its own cursor: Breeze's SVG cursors draw at that size, times the screen's scale.
 cursor_theme=$(kreadconfig6 --file kcminputrc --group Mouse --key cursorTheme)
 cursor_size=$(kreadconfig6 --file kcminputrc --group Mouse --key cursorSize)
-export XCURSOR_THEME=${cursor_theme:-breeze_cursors}
-[ -z "$cursor_size" ] || export XCURSOR_SIZE=$cursor_size
+export XCURSOR_THEME=${cursor_theme:-breeze_cursors} XCURSOR_SIZE=${cursor_size:-24}
 
 # Remote desktop over VNC: session/remote-desktop.sh captures the desktop with
 # krdp on 127.0.0.1, and session/vnc-bridge.sh re-serves its primary screen over VNC. krdpserver runs from the container, so KWin can't

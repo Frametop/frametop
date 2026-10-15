@@ -416,7 +416,8 @@ struct Params {
     // The lazy susan by hand (user, 2026-10-11: "paw back and forth like pushing branches out of the way,
     // left or right, and lazy susan through windows and displays"): an open hand on its edge (fingers
     // open, sweepOpen or more; the palm's normal within sweepEdge of level, and along the way it moves
-    // by sweepLead or more: the palm or the back of the hand leading, never a flat hand), off every
+    // by sweepLead or more: the palm or the back of the hand leading, never a flat hand; which of them leads
+    // goes by the hand's way, the right hand's palm leading to the left), off every
     // panel's surface (not pressing or holding; hovering near one counts: the panel the lazy susan brought
     // sits right there), sweepFront or more in front of the eyes, between sweepBelow under them
     // and sweepAbove over them, sweeps sideways sweepDistance or more within sweepMs, drifting at most
@@ -439,7 +440,10 @@ struct Params {
     // palm's lead 0.16-0.24 of 0.25, palm-led ones tilted 0.81-0.88 toward flat, and strokes drifting 21-22
     // cm up of 20. Lead 0.3 (one hand 0.12; a flat hand's is 0.05-0.07), edge 0.85 (one hand 0.9: 64 deg off
     // its edge; flat strokes read 0.93-0.98), drift 0.3, 4 frames off shape ridden out.)
-    double sweepOpen = 1.3, sweepEdge = 0.85, sweepLead = 0.3, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
+    // (Open 1.4 for one hand or two, 2026-10-14, "I triggered a lazy susan when my hand wasn't flat": that
+    // stroke's hand read open 1.23-1.27, the meant ones 1.66 and more; the flags replayed lose 1 of about 60
+    // practice strokes and one in other use. The palm's lead is now the hand's way, not its normal's sign.)
+    double sweepOpen = 1.4, sweepEdge = 0.85, sweepLead = 0.3, sweepFront = 0.15, sweepBelow = 0.5, sweepAbove = 0.15;
     double sweepDistance = 0.22, sweepMs = 900, sweepDrift = 0.3, sweepRest = 0.15;
     // One hand on its own (user, 2026-10-13: "make it easier to trigger intentionally when one hand is being
     // moved"; the misses were "not an open hand on its edge"): with the other hand unseen or still (its palm
@@ -449,9 +453,13 @@ struct Params {
     // (A little harder again 2026-10-13, "just slightly more difficult": one hand edge 0.88, lead 0.16, 20 cm,
     // quick at 0.75 m/s (every practice stroke in the flags peaked at 0.8 or more; a false one at 0.6), 3 frames
     // off shape. The flags replayed: 47 practice strokes still count, other use 3 strokes, from 4.)
-    double sweepCalm = 0.3, sweepSoloOpen = 1.1, sweepSoloEdge = 0.88, sweepSoloLead = 0.16, sweepSoloDistance = 0.2;
+    double sweepCalm = 0.3, sweepSoloOpen = 1.4, sweepSoloEdge = 0.88, sweepSoloLead = 0.16, sweepSoloDistance = 0.2;
     double sweepSoloPeak = 0.75;
     int sweepBadFrames = 3;
+    // a pinch or grip down keeps a hand from stroking, unless the hand is open sweepBusyOpen or more (ft-hands
+    // read a pinch on a fully open hand mid-stroke, open 1.7: a testing session's missed stroke, 2026-10-14)
+    double sweepBusyOpen = 1.5;
+    bool sweepTrace = false;   // a log line per frame of a stroke (handinput_test --take)
     bool flick = true;
     double flickSpeed = 1.2, flickTravel = 0.12, flickMs = 200, flickFitMs = 100, flickNear = 0.12, flickBack = 0.04;
     double flickAngle = 40, flickOpen = 1.5, flickPokeSpeed = 0.8, flickRefractoryMs = 1000, flickStartSpeed = 0.6;

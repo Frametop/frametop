@@ -15,7 +15,8 @@ import json
 import os
 import sys
 
-from recorder.common import mono_ns
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))  # recorder/, run on its own
+from recorder.common import mono_ns  # noqa: E402
 
 WANT = "events-want"
 FILE = "events.jsonl"

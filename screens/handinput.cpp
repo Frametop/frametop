@@ -1049,8 +1049,11 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
         }
         return;
     }
-    // hovering (resting: from the claim above)
-    const bool resting = sd.resting;
+    // hovering (resting: from the claim above). A hand low by the body that points isn't resting for a poke:
+    // a panel pulled in close and low has its bar's buttons there (a testing session, 2026-10-14: "I cannot
+    // tap the button", 11 taps refused with the palm 31-34 cm under the eyes, 26-33 cm out, the index 0.21-0.55
+    // straighter than the other fingers; typing in the desk take, 0.17 at most)
+    const bool resting = sd.resting && ext - straightest < p_.pointing;
     if (sd.spent && t.d >= 0) sd.spent = false;
     if (t.d >= p_.rearm) sd.rearmed = true;
     const bool crossed = t.d <= 0;
@@ -1871,12 +1874,23 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
     // where it can be: in front, at chest to eye height, not pressing or holding a panel (near one is fine), not typing
     const bool inFront = z >= p_.sweepFront && y >= -p_.sweepBelow && y <= p_.sweepAbove;
     const bool free = sd.state == State::Idle || sd.state == State::Hover;
-    const bool busy = in.typing[s] || in.grabThatArmed[s] || in.hands->pinch(s).down || in.hands->grip(s).down;
-    const bool place = inFront && free && !busy;
     // the shape: open, on its edge, the palm or the back leading
     const double nUp = n[1], nSide = n[0] * rx + n[2] * rz;
     const double open = Openness(h);
+    // (a pinch or grip ft-hands reads on a hand open past sweepBusyOpen is a misread: no hand holds one so)
+    const bool held = (in.hands->pinch(s).down || in.hands->grip(s).down) && open < p_.sweepBusyOpen;
+    const bool busy = in.typing[s] || in.grabThatArmed[s] || held;
+    const bool place = inFront && free && !busy;
     const bool shape = open >= needOpen && std::fabs(nUp) <= edge && std::fabs(nSide) >= lead;
+    if (p_.sweepTrace && std::fabs(v) >= p_.sweepRest)
+        Log("%s sweep: x %+.0f y %+.0f z %.0f cm, %+.2f m/s, open %.2f/%.2f tilt %.2f/%.2f lead %+.2f/%.2f%s%s%s", SideName(s), x * 100,
+            y * 100, z * 100, v, open, needOpen, std::fabs(nUp), edge, nSide, lead, solo ? " solo" : "", place ? "" : !inFront ? " not-placed (out)" : !free ? " not-placed (at a panel)" : held ? " not-placed (pinch or grip)" : " not-placed (busy)",
+            sd.swHave && dir == sd.swDir && !sd.swDone ? " (in a stroke)" : "");
+    // which way the palm leads: the right hand's toward the left, the left's toward the right. Not from the
+    // palm's normal: on its edge the tracker swaps palm and back from frame to frame (a 180 deg turn in 33 ms:
+    // a testing session's missed stroke 2026-10-14, and 9 practice strokes in the flags, read the back leading
+    // on their last frame alone)
+    const bool palmWay = (s == 1) == (dir < 0);
     // a new stroke where it turns, slows, or starts
     if (!sd.swHave || dt <= 1e-3 || dt > 0.2 || dir != sd.swDir || std::fabs(v) < p_.sweepRest) {
         sd.swX0 = x, sd.swY0 = y, sd.swZ0 = z, sd.swT0 = t, sd.swDir = std::fabs(v) < p_.sweepRest ? 0 : dir, sd.swDone = false;
@@ -1905,7 +1919,7 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
             // a frame off its shape: ridden out (sweepBadFrames), not counted toward the end
         } else if (along >= distance && sd.swPeak < peak) {
             // far enough, not quick enough yet: it may still speed up (until sweepMs)
-        } else if (along >= distance && !p_.sweepBack && nSide * dir <= 0) {
+        } else if (along >= distance && !p_.sweepBack && !palmWay) {
             sd.swDone = true;   // the back of the hand leading: the return stroke, nothing (Params::sweepBack)
             Did("lazy-susan", "info", s, 0, "%s hand swept %s %.0f cm with the back of the hand leading: the return stroke, not the lazy susan", SideName(s),
                 dir > 0 ? "right" : "left", along * 100);
@@ -1916,7 +1930,7 @@ void HandInput::Sweep(int s, const Input &in, const Hand &h) {
             e.type = Event::Spin, e.side = s, e.x = dir;
             events_.push_back(e);
             Did("lazy-susan", "info", s, 0, "%s hand swept %s %.0f cm in %.0f ms (the %s leading, %.1f m/s at most%s): the lazy susan, one panel", SideName(s),
-                dir > 0 ? "right" : "left", along * 100, (t - sd.swT0) / 1e6, nSide * dir > 0 ? "palm" : "back of the hand", sd.swPeak,
+                dir > 0 ? "right" : "left", along * 100, (t - sd.swT0) / 1e6, palmWay ? "palm" : "back of the hand", sd.swPeak,
                 solo ? ", one hand" : "");
         }
     }

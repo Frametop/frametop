@@ -15,6 +15,7 @@
 #include "../softglow.h"
 #include "../steampanels.h"
 
+#include <dirent.h>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -723,7 +724,8 @@ Panel Tilted(double deg, double cy, double cz) {
 }
 
 // A poke along the panel's normal at u, v: from 6 cm out to 1.5 cm in, 1 cm a frame, and back.
-int Poke(Rig &r, double u, double v, double pitch, double yaw, double extraX = 0) {
+// middleTip: the middle finger nearly straight beside the index (SynthHand::middleTip), NaN curled.
+int Poke(Rig &r, double u, double v, double pitch, double yaw, double extraX = 0, double middleTip = NAN) {
     const int before = r.Count(Event::Press);
     for (int mm = 60; mm >= -15; mm -= 10) {
         double at[3];
@@ -731,7 +733,7 @@ int Poke(Rig &r, double u, double v, double pitch, double yaw, double extraX = 0
         SynthHand h;
         for (int i = 0; i < 3; ++i) h.tip[i] = at[i];
         h.tip[0] += extraX;
-        h.pitchDeg = pitch, h.yawDeg = yaw;
+        h.pitchDeg = pitch, h.yawDeg = yaw, h.middleTip = middleTip;
         r.Frame({h});
     }
     for (int k = 0; k < 6; ++k) {
@@ -740,7 +742,7 @@ int Poke(Rig &r, double u, double v, double pitch, double yaw, double extraX = 0
         SynthHand h;
         for (int i = 0; i < 3; ++i) h.tip[i] = at[i];
         h.tip[0] += extraX;
-        h.pitchDeg = pitch, h.yawDeg = yaw;
+        h.pitchDeg = pitch, h.yawDeg = yaw, h.middleTip = middleTip;
         r.Frame({h});
     }
     return r.Count(Event::Press) - before;
@@ -755,7 +757,9 @@ void TestApproachFromFront() {
         CHECK(Poke(r, -0.1, 0, 0, 40) == 1);   // within 50 degrees: still a poke
     }
     // a low panel (0.45 m under the eyes, pitched back 50 degrees to face them):
-    // reached for 0.45 m out, a poke; with the hand resting by the body (0.2 m out), none
+    // reached for 0.45 m out, a poke; with the hand resting by the body (0.2 m out), none from a
+    // typing hand (its middle finger about as straight as the index), but a pointing hand pokes it
+    // (a panel pulled in close and low: its bar's buttons, 2026-10-14)
     {
         Rig r;
         r.panels = {Tilted(50, -0.45, -0.45)};
@@ -764,7 +768,9 @@ void TestApproachFromFront() {
     {
         Rig r;
         r.panels = {Tilted(50, -0.45, -0.22)};
-        CHECK(Poke(r, 0, 0, -50, 0) == 0 && r.in.stats.heldResting > 0);
+        r.in.params().twoFingerScroll = false;   // (two fingers level: their own tap, not a poke)
+        CHECK(Poke(r, 0, 0, -50, 0, 0, 0.0) == 0 && r.in.stats.heldResting > 0);
+        CHECK(Poke(r, 0.1, 0, -50, 0) == 1);
     }
 }
 
@@ -3998,12 +4004,12 @@ void TestTrackGate() {
 // The lazy susan by hand (Params::sweep): an open hand on its edge swept 30 cm sideways in 0.6 s spins one
 // panel; a flat hand, a slow sweep, a short one don't; back and forth, each stroke counts.
 void TestSweep() {
-    auto run = [](double rollDeg, std::vector<double> xs, double seconds) {
+    auto run = [](double rollDeg, std::vector<double> xs, double seconds, bool right = true) {
         Rig r;
         const int frames = std::max(2, int(seconds * 30));
         auto at = [&](double x) {
             SynthHand h;
-            h.palm = true, h.rollDeg = rollDeg, h.tiltDeg = 0;
+            h.palm = true, h.rollDeg = rollDeg, h.tiltDeg = 0, h.right = right;
             h.palmAt[0] = x, h.palmAt[1] = -0.2, h.palmAt[2] = -0.30;
             return h;
         };
@@ -4029,9 +4035,14 @@ void TestSweep() {
     auto left = run(90, {0.25, -0.15}, 0.4);   // on its edge, 40 cm left in 0.4 s
     show("edge-on, 40 cm left", left);
     CHECK(left.size() == 1 && left[0] == -1);
-    auto right = run(-90, {-0.15, 0.25}, 0.4);  // turned the other way (the palm leading), right
-    show("edge-on, 40 cm right", right);
+    auto right = run(-90, {-0.15, 0.25}, 0.4, false);  // the left hand, right (its palm leads that way)
+    show("edge-on, 40 cm right, the left hand", right);
     CHECK(right.size() == 1 && right[0] == 1);
+    // the right hand to the right is its return stroke, whichever way the tracker reads its palm (on its
+    // edge the palm's normal flips sign from frame to frame: 2026-10-14)
+    auto outward = run(-90, {-0.15, 0.25}, 0.4);
+    show("edge-on, 40 cm right, the right hand", outward);
+    CHECK(outward.empty());
     auto flat = run(180, {0.25, -0.15}, 0.4);    // palm down
     show("flat, palm down", flat);
     CHECK(flat.empty());
@@ -5335,7 +5346,102 @@ void TestForeignPanel() {
 
 }  // namespace
 
+// A testing session's take (hands/tools/live_dump.py: its live.bin as a dump, poses beside it) played
+// through hand input with no panels, every log line with its time: seconds from t0 (CLOCK_MONOTONIC ns,
+// the take's started_ns, so the times read as the take's events.jsonl and marks), from..to only.
+// TAKE_SWEEP=1 traces the lazy susan's strokes frame by frame (Params::sweepTrace).
+int Take(const char *path, int64_t t0, double from, double to) {
+    std::vector<Record> recs;
+    if (!Load(path, recs)) return std::printf("%s: not a publish dump\n", path), 1;
+    std::string base = path;
+    if (base.size() > 5 && base.substr(base.size() - 5) == ".dump") base.resize(base.size() - 5);
+    const auto poses = LoadPoses(base + ".poses.jsonl");
+    if (poses.empty() || !recs.front().dq) return std::printf("%s: no head poses beside it\n", path), 1;
+    size_t j = 0;
+    for (Record &r : recs) {
+        const int64_t at = r.dq - 20'000'000;
+        while (j + 1 < poses.size() && std::llabs(poses[j + 1].first - at) <= std::llabs(poses[j].first - at)) ++j;
+        r.head = poses[j].second;
+    }
+    if (!t0) t0 = recs.front().capture;
+    Params params;
+    params.sweepTrace = std::getenv("TAKE_SWEEP") != nullptr;
+    if (const char *v = std::getenv("SWEEP_OPEN")) params.sweepOpen = std::atof(v);
+    if (const char *v = std::getenv("SWEEP_SOLO_OPEN")) params.sweepSoloOpen = std::atof(v);
+    if (const char *v = std::getenv("SWEEP_BUSY_OPEN")) params.sweepBusyOpen = std::atof(v);
+    handcut::Hands hands;
+    HandInput in(params);
+    const std::vector<Panel> none;
+    for (size_t k = 0; k < recs.size(); ++k) {
+        const Record &r = recs[k];
+        const int64_t next = k + 1 < recs.size() ? recs[k + 1].publish : r.publish + 33'000'000;
+        const double at = (r.capture - t0) / 1e9;
+        for (int64_t t = r.publish; t < next; t += 11'111'111) {
+            if (t == r.publish) hands.Feed(nullptr, 0, nullptr, r.head, r.capture), hands.Feed(r.hands.data(), r.hands.size(), &r.g, r.head, t);
+            else hands.Feed(nullptr, 0, nullptr, r.head, t);
+            Input i;
+            i.nowNs = t, i.hands = &hands, i.head = r.head, i.haveHead = true, i.allowed[0] = i.allowed[1] = true;
+            in.Update(i, none);
+            if (at >= from && at <= to)
+                for (const std::string &l : in.logs()) std::printf("[%7.3f] %s\n", at, l.c_str());
+            if (at >= from && at <= to && t == r.publish && std::getenv("TAKE_REST"))   // where the palms are (Params::restBelow)
+                for (const handcut::Hand &h : hands.seen()) {
+                    double palm[3];
+                    h.Palm(palm);
+                    auto ext = [&](int mcp) {   // handinput.cpp's FingerExtension
+                        auto d = [&](int a) { return double(std::hypot(std::hypot(h.p[a][0] - h.p[0][0], h.p[a][1] - h.p[0][1]), h.p[a][2] - h.p[0][2])); };
+                        return d(mcp + 3) / std::max(1e-6, d(mcp));
+                    };
+                    std::printf("[%7.3f] %s palm %.0f cm under the eyes, %.0f cm out, index tip %.0f cm under, index %.2f, others %.2f %.2f %.2f%s\n", at,
+                                h.right ? "right" : "left", (r.head.m[1][3] - palm[1]) * 100,
+                                std::hypot(palm[0] - r.head.m[0][3], palm[2] - r.head.m[2][3]) * 100, (r.head.m[1][3] - h.p[8][1]) * 100, ext(5),
+                                ext(9), ext(13), ext(17), h.stereo ? "" : " (one camera)");
+                }
+        }
+    }
+    return 0;
+}
+
+// The lazy susan over the user's flags (each dir, or every flag under FlagsDir() without any), no
+// panels: each flag's strokes counted and refused, with their log lines (SWEEPS_LOG=1). For trying a
+// change to Params::sweep against what the flags held.
+int Sweeps(int n, char **dirs) {
+    std::vector<std::string> list;
+    for (int i = 0; i < n; ++i) list.push_back(dirs[i]);
+    if (list.empty()) {
+        std::vector<std::string> names;
+        if (DIR *d = opendir(FlagsDir().c_str())) {
+            while (const dirent *e = readdir(d))
+                if (!std::strncmp(e->d_name, "flag-", 5)) names.push_back(e->d_name);
+            closedir(d);
+        }
+        std::sort(names.begin(), names.end());
+        for (const std::string &s : names) list.push_back(FlagsDir() + "/" + s);
+    }
+    Params k;
+    if (const char *v = std::getenv("SWEEP_OPEN")) k.sweepOpen = std::atof(v);   // trying other values
+    if (const char *v = std::getenv("SWEEP_SOLO_OPEN")) k.sweepSoloOpen = std::atof(v);
+    if (const char *v = std::getenv("SWEEP_BUSY_OPEN")) k.sweepBusyOpen = std::atof(v);
+    int spins = 0, refused = 0;
+    for (const std::string &dir : list) {
+        FlagRun r;
+        if (!FlagThroughHandInput(dir, {}, r, k)) continue;
+        int s = 0;
+        for (const Event &e : r.events) s += e.type == Event::Spin;
+        spins += s, refused += r.stats.sweepsRefused;
+        std::printf("%s: %d stroke(s), %d refused\n", dir.substr(dir.rfind('/') + 1).c_str(), s, r.stats.sweepsRefused);
+        if (std::getenv("SWEEPS_LOG"))
+            for (const std::string &l : r.logs)
+                if (l.find("swept") != std::string::npos) std::printf("    %s\n", l.c_str());
+    }
+    std::printf("== %zu flags: %d strokes, %d refused\n", list.size(), spins, refused);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !std::strcmp(argv[1], "--sweeps")) return Sweeps(argc - 2, argv + 2);
+    if (argc > 2 && !std::strcmp(argv[1], "--take"))
+        return Take(argv[2], argc > 3 ? std::atoll(argv[3]) : 0, argc > 4 ? std::atof(argv[4]) : -1e9, argc > 5 ? std::atof(argv[5]) : 1e9);
     if (argc > 1 && !std::strcmp(argv[1], "--grabthat")) return ScanFlags(argc - 2, argv + 2);
     if (argc > 1 && !std::strcmp(argv[1], "--carries")) return ScanCarries(argc - 2, argv + 2);
     if (argc > 2 && !std::strcmp(argv[1], "--replay")) {

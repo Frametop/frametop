@@ -31,7 +31,9 @@ Everything lives under ~/.local/share/frametop/hands/contrib (--base). Nothing i
 unless the person presses Upload; while CONSENT.md or UPLOAD.md is a draft, Upload stays off
 unless FT_HANDREC_ALLOW_UPLOAD=1 (the maintainer's rehearsal against a test repo, picked with
 FT_HANDREC_DATASET). --hub-dry-run does everything but the network calls.
-Launch with hands/rec/ft-handrec (host wrapper). The standalone Hand Recorder
+One window at a time (recorder/one_window.py): opening it again closes the open one, wherever it
+is, unless that one is busy recording, exporting or uploading. Launch with hands/rec/ft-handrec
+(host wrapper). The standalone Hand Recorder
 (github.com/Frametop/frametop-hand-recorder) runs this backend on the host, from a venv, with
 its own window for SteamVR's dashboard: --qml its main.qml, --style Basic.
 """
@@ -57,7 +59,7 @@ import hub  # noqa: E402
 import takes  # noqa: E402  (next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 # The window's shared part (recorder/window.py): consent, export, login, upload, keeping awake.
-from recorder import bounties  # noqa: E402
+from recorder import bounties, one_window  # noqa: E402
 from recorder.common import host_command  # noqa: E402
 from recorder.window import (RecorderBackend, consent_version as _consent_version, gigabytes,  # noqa: E402,F401
                              headset_worn, process_running, read_text)
@@ -81,6 +83,8 @@ DEBUG_ROW = {"id": DEBUG_ID, "title": "Testing session", "priority": "", "minute
                       "press the headset button: new versions of the hand tracking are then tested on your "
                       "recording, at those moments. For testing only, never for training."}
 LIVE_HANDS_UNIT = "frametop-hands.service"
+# One window at a time, Frametop's or the standalone one (recorder/one_window.py)
+WINDOW_NAME = "ft_handrec_window"
 ROUND_BYTES = 16 * 1000 ** 3  # about what one round of recording takes (a bounty: 2.5-3 min at 30 sets/s, ~85 MB/s)
 # The checklist's choices; the keys are what session.json stores.
 OBJECTS = [("pencil", "Pencil or pen"), ("phone", "Phone"), ("cup", "Cup or mug (empty)"),
@@ -691,6 +695,17 @@ class Backend(RecorderBackend):
         if status.get("state") == "done":
             self.profileChanged.emit()    # a bounty's round is marked done
 
+    def busy_text(self):
+        """What the window is doing that closing it would cut short ("" if nothing), for another
+        launch's message (recorder/one_window.py)."""
+        if self.sessionActive:
+            return "in the middle of a round"
+        if self.exporting:
+            return "exporting a recording"
+        if self.uploading:
+            return "uploading a recording"
+        return ""
+
     def shutdown(self):
         """The window closes: recorder/window.py's, then the panel and units getReady started,
         and ft-camd if the light check started it."""
@@ -872,6 +887,47 @@ class Backend(RecorderBackend):
         return takes.find_zstd() is not None
 
 
+MESSAGE_QML = b"""
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+ApplicationWindow {
+    visible: true
+    title: "Frametop Hand Recorder"
+    width: 600
+    height: 240
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 24
+        spacing: 16
+        Label {
+            text: message
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+        }
+        Button {
+            text: "OK"
+            Layout.alignment: Qt.AlignRight
+            onClicked: Qt.quit()
+        }
+    }
+}
+"""
+
+
+def _message(app, text):
+    """A small window with text and OK, for a launch that can't have the window. Its exit code."""
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("message", text)
+    engine.loadData(MESSAGE_QML)
+    if not engine.rootObjects():
+        return 1
+    app.exec()
+    shiboken6.delete(engine)
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser(description="Frametop Hand Recorder")
     ap.add_argument("--base", default=takes.DEFAULT_BASE, help="where profile.json, sessions/ and exports/ go")
@@ -901,6 +957,15 @@ def main():
     if not QIcon.themeName():
         QIcon.setThemeName("breeze")
     QQuickStyle.setStyle(a.style)
+    # A window already open (in SteamVR's dashboard, say, when this one opens on the desktop)
+    # closes if it's idle; a busy one stays and this launch says so. Dry runs (tests) have their
+    # own name, so they never close a real window.
+    try:
+        window_sock = one_window.take(WINDOW_NAME + ("_dry" if a.dry_run else ""), os.path.basename(__file__),
+                                      log=lambda line: print(line, file=sys.stderr, flush=True))
+    except one_window.Taken as e:
+        print("one window: " + e.text, file=sys.stderr, flush=True)
+        sys.exit(_message(app, e.text))
     store = takes.Store(a.base)
     engine = QQmlApplicationEngine()
     engine.addImageProvider("frames", FrameProvider(store))
@@ -936,6 +1001,20 @@ def main():
         app.quit()
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
+
+    def show():
+        w = engine.rootObjects()[0]
+        w.show()
+        w.raise_()
+        w.requestActivate()
+
+    def quit_if_idle():
+        if backend.busy_text():
+            return False
+        print("one window: another launch takes the window", file=sys.stderr, flush=True)
+        QTimer.singleShot(0, on_signal)   # after the answer is sent
+        return True
+    listener = one_window.Listener(window_sock, backend.busy_text, show, quit_if_idle)  # noqa: F841
     tick = QTimer(interval=500, timeout=lambda: None)
     tick.start()
     code = app.exec()

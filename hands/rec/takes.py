@@ -25,6 +25,7 @@ usage: takes.py [--base DIR] list | takes SESSION | export SESSION | sides SESSI
 """
 import argparse
 import datetime
+import errno
 import json
 import os
 import re
@@ -32,6 +33,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -82,6 +84,33 @@ EXPORT_SCHEMA = 1
 # someone is in VR makes the headset stutter).
 ZSTD_ARGS = ["-10", "-T2", "-q", "-c"]
 ZSTD_PATHS = ("/usr/bin/zstd", "/usr/local/bin/zstd", "/run/host/usr/bin/zstd")
+# An export is about three quarters of the recording's size (2026-10-14's: 15 GB sessions, 11 GB
+# exports). Under half of it free, it can't fit: export says so before it starts.
+EXPORT_RATIO = 0.75
+EXPORT_RATIO_MIN = 0.5
+
+
+class ZstdStopped(RuntimeError):
+    """zstd ended before the export was through with it. Writing into its pipe then fails with a
+    broken pipe, which says nothing: this carries what zstd said (a full disk, mostly)."""
+
+
+class DiskFull(RuntimeError):
+    """Not enough free space for the export, before it started or as it went."""
+
+
+def disk_full(e):
+    """True if e (an export's error) or what it came from is a full disk or a quota."""
+    seen = set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, OSError) and e.errno in (errno.ENOSPC, errno.EDQUOT, errno.EFBIG):
+            return True
+        if isinstance(e, ZstdStopped) and any(s in str(e).lower() for s in ("no space left", "quota exceeded",
+                                                                           "file too large")):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
 
 
 def write_json(path, obj):
@@ -582,17 +611,36 @@ class Store:
         work = final + ".partial"
         if os.path.isdir(work):
             shutil.rmtree(work)
+        kept = self.kept_bytes(session)
+        free = free_bytes(self.exports_dir)   # 0: couldn't tell, so no check
+        if 0 < free < kept * EXPORT_RATIO_MIN:
+            raise DiskFull(self.space_text(session, kept, "Not enough free space to export this session"))
         os.makedirs(work)
         try:
             self._export(session, src, work, zstd, report, cancelled, keep_notes)
             if os.path.isdir(final):
                 shutil.rmtree(final)
             os.replace(work, final)
-        except BaseException:
+        except BaseException as e:
             shutil.rmtree(work, ignore_errors=True)
+            if isinstance(e, Exception) and not isinstance(e, DiskFull) and disk_full(e):
+                raise DiskFull(self.space_text(session, kept, "The disk filled up while exporting")) from e
             raise
         report(1.0, "Done")
         return final
+
+    def kept_bytes(self, session):
+        """About how much of the session's recording an export keeps (deleted ranges left out)."""
+        return int(sum(t["bytes"] * (t["sets"] - t["deleted_sets"]) / max(1, t["sets"]) for t in self.takes(session)))
+
+    def space_text(self, session, kept, first):
+        """The disk-full message: what's free, about what the export needs, and what to do."""
+        text = (f"{first}: {human_bytes(free_bytes(self.exports_dir))} free, and the export needs about "
+                f"{human_bytes(kept * EXPORT_RATIO)}. Free some space and export again.")
+        old = tree_bytes(self.export_dir(session)) if os.path.isdir(self.export_dir(session)) else 0
+        if old:
+            text += f" Its old export ({human_bytes(old)}) stays until the new one is done: deleting it frees that too."
+        return text
 
     def _export(self, session, src, work, zstd, report, cancelled, keep_notes):
         profile = self.profile()
@@ -686,11 +734,15 @@ class Store:
     @staticmethod
     def _compress(index, keep, zstd, dest, step, cancelled, recipients=None):
         """Stream the kept sets through zstd into dest, encrypted to recipients if given (age,
-        as zstd writes). Returns the uncompressed size."""
+        as zstd writes). Returns the uncompressed size.
+        Pipes (2026-10-15): zstd's messages go to a temporary file, as a pipe read only at the end
+        could fill and stop zstd and this thread both. zstd ending early (a full disk, a signal)
+        makes the next write into its pipe a broken pipe: ZstdStopped with what zstd said instead.
+        The sealer drains what it can't encrypt a piece at a time, not into memory all at once."""
         raw = 0
-        with open(dest, "wb") as out:
+        with open(dest, "wb") as out, tempfile.TemporaryFile(prefix="handrec-zstd-") as errors:
             proc = subprocess.Popen(["nice", "-n", "19", zstd] + ZSTD_ARGS, stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE if recipients else out, stderr=subprocess.PIPE)
+                                    stdout=subprocess.PIPE if recipients else out, stderr=errors)
             sealer, sealed = None, {}
             if recipients:
                 def seal():
@@ -698,35 +750,54 @@ class Store:
                         age.encrypt_stream(proc.stdout, out, recipients)
                     except BaseException as e:   # reported below, after zstd
                         sealed["error"] = e
-                        proc.stdout.read()   # keep zstd from blocking on a full pipe
+                        try:   # keep zstd from blocking on a full pipe
+                            while proc.stdout.read(1 << 20):
+                                pass
+                        except (OSError, ValueError):
+                            pass
                 sealer = threading.Thread(target=seal, name="handrec-seal", daemon=True)
                 sealer.start()
+
+            def stopped():
+                try:
+                    code = proc.wait(30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    code = proc.wait()
+                errors.seek(0)
+                said = errors.read()[-4000:].decode(errors="replace").strip()
+                return ZstdStopped(f"zstd stopped: {said}" if said else f"zstd stopped (exit status {code})")
             try:
-                for i in keep:
-                    if cancelled():
-                        raise Cancelled()
-                    record = index.read_raw(i)
-                    proc.stdin.write(record)
-                    raw += len(record)
-                    step(len(record))
-                proc.stdin.close()
-                err = proc.stderr.read().decode(errors="replace").strip()
+                try:
+                    for i in keep:
+                        if cancelled():
+                            raise Cancelled()
+                        record = index.read_raw(i)
+                        proc.stdin.write(record)
+                        raw += len(record)
+                        step(len(record))
+                    proc.stdin.close()
+                except BrokenPipeError:
+                    raise stopped() from None
                 if proc.wait() != 0:
-                    raise RuntimeError(f"zstd failed: {err or proc.returncode}")
+                    raise stopped()
                 if sealer:
                     sealer.join()
                     if "error" in sealed:
-                        raise RuntimeError(f"encrypting failed: {sealed['error']}")
+                        raise RuntimeError(f"encrypting failed: {sealed['error']}") from sealed["error"]
             except BaseException:
                 proc.kill()
                 proc.wait()
                 if sealer:
-                    sealer.join(10)
+                    sealer.join()   # zstd has gone, so its output ends and the sealer with it
                 raise
             finally:
-                proc.stderr.close()
-                if proc.stdout:
-                    proc.stdout.close()
+                for pipe in (proc.stdin, proc.stdout):
+                    try:
+                        if pipe:
+                            pipe.close()   # a write cut short leaves bytes that won't flush
+                    except OSError:
+                        pass
         return raw
 
 
@@ -754,8 +825,12 @@ def main():
     elif a.cmd == "sides":
         print(json.dumps(store.sides(a.session, None if a.set is None else a.set == "swapped"), indent=1))
     else:
-        path = store.export(a.session, progress=lambda f, text: print(f"\r{f * 100:5.1f}% {text:40.40}", end="",
-                                                                       flush=True))
+        def show(f, text):
+            try:
+                print(f"\r{f * 100:5.1f}% {text:40.40}", end="", flush=True)
+            except BrokenPipeError:   # whatever read the output went (| head, a closed terminal): export on
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        path = store.export(a.session, progress=show)
         print(f"\n{path}  {human_bytes(tree_bytes(path))}")
 
 

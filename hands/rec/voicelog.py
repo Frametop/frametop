@@ -3,8 +3,9 @@ recording, so they can say what went wrong as it happens ("that opened the lazy 
 mean to"). Transcribed later on the maintainer's machines (to_wav, then whisper.cpp), the speech
 becomes flags at its times, beside the button's marks.
 
-pw-record captures the default microphone (16 kHz, mono, s16) in raw mode; each chunk goes into
-the take's voice.bin with the time it was read (CLOCK_MONOTONIC, the session's clock).
+pw-record captures the default microphone (16 kHz, mono, s16) in raw mode, at half volume (the
+Frame's microphone at full volume clipped loud speech); each chunk goes into the take's
+voice.bin with the time it was read (CLOCK_MONOTONIC, the session's clock).
 
 voice.bin: a 16-byte header, then records.
   header: 8s magic "FHVOIC01", u32 version (1), u32 sample rate
@@ -22,6 +23,7 @@ HDR = struct.Struct("<8sII")
 REC = struct.Struct("<QI")
 RATE = 16000
 CHUNK = RATE // 10 * 2      # 100 ms of s16 mono
+VOLUME = "0.5"              # the stream's, not the microphone's: other apps keep theirs
 
 
 def mono_ns():
@@ -51,7 +53,7 @@ class VoiceLog:
         self._file.write(HDR.pack(MAGIC, 1, self.rate))
         try:
             self.proc = subprocess.Popen([exe, "--raw", "--rate", str(self.rate), "--channels", "1",
-                                          "--format", "s16", "--latency", "20ms", "-"],
+                                          "--format", "s16", "--volume", VOLUME, "--latency", "20ms", "-"],
                                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                          stderr=subprocess.DEVNULL)
         except OSError as e:

@@ -152,6 +152,67 @@ class VoiceLogTest(unittest.TestCase):
         self.assertEqual(voicelog.read(os.path.join(self.tmp, "voice.bin")), (16000, []))
 
 
+class VoiceFlagsTest(unittest.TestCase):
+    """hands/tools/voice_flags.py: a testing take's marks and spoken notes, with the events around them."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        sys.path.insert(0, os.path.join(os.path.dirname(REC), "tools"))
+        self.addCleanup(sys.path.remove, sys.path[0])
+        import voice_flags
+        self.vf = voice_flags
+
+    def test_loopback_only(self):
+        for url in ("http://127.0.0.1:8178", "http://localhost:8178", "http://[::1]:8178"):
+            self.assertTrue(self.vf.loopback(url), url)
+        for url in ("http://192.168.1.5:8178", "https://127.0.0.1:8178", "http://example.com", "127.0.0.1:8178"):
+            self.assertFalse(self.vf.loopback(url), url)
+
+    def test_bursts(self):
+        """Speech over the noise floor, short pauses kept in, silence left out."""
+        import array
+        rate = 16000
+        noise, loud = [3, -3] * (rate // 2), [3000, -3000] * (rate // 2)
+        samples = array.array("h", noise * 2 + loud + noise[:rate // 2] + loud + noise * 3 + loud)
+        got = self.vf.bursts(samples, rate)
+        pad = int(self.vf.PAD_S * rate)
+        self.assertEqual(got, [(2 * rate - pad, 4.5 * rate + pad), (7.5 * rate - pad, 8.5 * rate)])
+
+    def test_flags(self):
+        """Marks and notes in time order, a note paired with a mark under PAIR_S away, events around each."""
+        take = os.path.join(self.tmp, "01-free")
+        os.makedirs(take)
+        rate, t0 = voicelog.RATE, 1_000_000_000_000
+        with open(os.path.join(take, "take.json"), "w") as f:
+            json.dump({"started_ns": t0}, f)
+        with open(os.path.join(take, "prompts.jsonl"), "w") as f:
+            f.write(json.dumps({"t": t0 + 11 * 10**9, "event": "mark", "id": "use", "n": 1}) + "\n")
+            f.write(json.dumps({"t": t0 + 40 * 10**9, "event": "mark", "id": "use", "n": 2}) + "\n")
+        with open(os.path.join(take, "events.jsonl"), "w") as f:
+            f.write(json.dumps({"t": t0 + 9 * 10**9, "kind": "poke", "outcome": "missed"}) + "\n")
+            f.write(json.dumps({"t": t0 + 30 * 10**9, "kind": "grab", "outcome": "done"}) + "\n")
+        with open(os.path.join(take, "voice.bin"), "wb") as f:     # speech 10-11 s and 20-21 s
+            f.write(voicelog.HDR.pack(voicelog.MAGIC, 1, rate))
+            for k in range(1, 31):
+                loud = k in (11, 21)
+                f.write(voicelog.REC.pack(t0 + k * 10**9, rate * 2))
+                f.write(struct.pack("<h", 3000 if loud else 0) * rate)
+        said = iter(["that poke missed", "fine now"])
+        orig = self.vf.transcribe
+        self.vf.transcribe = lambda wav, server: [(0.0, 1.0, next(said))]
+        self.addCleanup(setattr, self.vf, "transcribe", orig)
+        out = self.vf.flags(take)
+        self.assertEqual([(f["source"], round(f["s"])) for f in out],
+                         [("voice", 10), ("mark", 11), ("voice", 20), ("mark", 40)])
+        self.assertEqual(out[0]["text"], "that poke missed")
+        self.assertEqual(out[0]["mark"], 1)
+        self.assertIsNone(out[2]["mark"])
+        self.assertEqual([e["kind"] for e in out[0]["events"]], ["poke"])
+        self.assertEqual(out[3]["events"], [])
+        self.assertIn('voice (mark 1): "that poke missed"  [poke 1 missed]', self.vf.line(out[0]))
+
+
 class SettingsTest(unittest.TestCase):
     def test_settings(self):
         tmp = tempfile.mkdtemp()

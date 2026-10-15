@@ -432,6 +432,15 @@ class HubTest(unittest.TestCase):
         self.assertTrue(any("manifest.json" in line for line in logged))
         self.assertEqual(hub.uploads(self.store, SESSION), [])   # a dry run records nothing
 
+    def test_consent_line(self):
+        """The description says which consent the upload goes under, and the older one it was
+        recorded under when they differ."""
+        self.assertEqual(hub.consent_line({"consent_version": "2026-10-14"}), "2026-10-14")
+        self.assertEqual(hub.consent_line({"consent_version": "2026-10-14", "recorded_consent_version": "2026-10-14"}),
+                         "2026-10-14")
+        self.assertEqual(hub.consent_line({"consent_version": "2026-10-14", "recorded_consent_version": "2026-10-03"}),
+                         "2026-10-14 (recorded under 2026-10-03)")
+
     def test_dataset_env(self):
         self.assertEqual(hub.dataset_id(), hub.HF_DATASET)
         with mock.patch.dict(os.environ, {hub.DATASET_ENV: "not a repo"}):

@@ -596,6 +596,7 @@ def summarize(m):
     checklist = session.get("checklist") if isinstance(session.get("checklist"), dict) else {}
     lighting = session.get("lighting") if isinstance(session.get("lighting"), dict) else {}
     bounty = session.get("bounty") if isinstance(session.get("bounty"), dict) else {}
+    recorded = session.get("consent") if isinstance(session.get("consent"), dict) else {}
     takes = [t for t in m.get("takes") or [] if isinstance(t, dict)]
     seconds = sum(t.get("duration_s") or 0 for t in takes if isinstance(t.get("duration_s"), (int, float)))
     return {"session": m.get("session_id", ""), "contributor": m.get("contributor", ""),
@@ -604,6 +605,9 @@ def summarize(m):
             "minutes": round(seconds / 60, 1), "lighting": lighting.get("chosen", ""),
             "objects": list(checklist.get("objects") or []), "own_objects": len(checklist.get("own_objects") or []),
             "controllers": checklist.get("controllers", ""), "consent_version": m.get("consent_version", ""),
+            # the version in force when it was recorded (session.json); consent_version is the one
+            # agreed to now, which the upload goes under (CONSENT.md "Changes to this text")
+            "recorded_consent_version": recorded.get("version", "") if isinstance(recorded.get("version"), str) else "",
             "tool": m.get("tool", ""), "bounty": bounty.get("id", "") if isinstance(bounty.get("id"), str) else "",
             "record_hz": session.get("record_hz") if isinstance(session.get("record_hz"), (int, float)) else None,
             "debug": is_debug(m), "testing": is_testing(m)}

@@ -119,6 +119,12 @@ def record_upload(store, session, record):
 
 # ---------------------------------------------------------------- the pull request's text
 
+def consent_line(s):
+    """The consent the upload goes under, and the one it was recorded under when that's older."""
+    now, then = s.get("consent_version") or "", s.get("recorded_consent_version") or ""
+    return now + (f" (recorded under {then})" if then and then != now else "")
+
+
 def describe(summary, report, sha, nbytes):
     """(commit message, commit description) from validate's summary of the manifest."""
     s = summary
@@ -133,7 +139,7 @@ def describe(summary, report, sha, nbytes):
                  f"- Takes: {s.get('takes')} ({s.get('minutes')} minutes, {s.get('sets')} frame sets"
                  f"{', %g a second' % s['record_hz'] if s.get('record_hz') else ''})",
                  f"- Lighting: {s.get('lighting') or 'not given'}",
-                 f"- Consent: testing, version {s.get('consent_version')}",
+                 f"- Consent: testing, version {consent_line(s)}",
                  f"- Tool: {s.get('tool')}",
                  f"- Size: {takes.human_bytes(nbytes)}",
                  f"- SHA256 of SHA256SUMS: {sha}", "",
@@ -155,7 +161,7 @@ def describe(summary, report, sha, nbytes):
              f"- Lighting: {s.get('lighting') or 'not given'}",
              f"- Objects: {objects}",
              f"- Controllers: {s.get('controllers') or 'not given'}",
-             f"- Consent version: {s.get('consent_version')}",
+             f"- Consent version: {consent_line(s)}",
              f"- Tool: {s.get('tool')}",
              f"- Size: {takes.human_bytes(nbytes)}",
              f"- SHA256 of SHA256SUMS: {sha}", "",

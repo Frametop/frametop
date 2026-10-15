@@ -506,6 +506,7 @@
 // POINTER_ROLE (right): gaze precision and keyboard clicks, above.
 #include <openvr.h>
 
+#include "../../hands/include/fh_events.h"
 #include "../../hands/include/fh_ray.h"
 #include "calpanel.h"
 #include "gazehand.h"
@@ -515,6 +516,22 @@
 #include "typing.h"
 #include "vrbuttons.h"
 #include "vrmath.h"
+
+// A pinch's log line as a testing session's event (hands/include/fh_events.h): what it did,
+// from how the line starts (the lines are this file's own: pinchLog's callers, gazehand.h's Says).
+static void PinchEvent(int side, int kind, const std::string &what) {
+    auto starts = [&](const char *p) { return what.rfind(p, 0) == 0; };
+    const char *k = kind == 2 ? "right-click" : "click", *o = "info";
+    if (starts("dragged")) k = "drag", o = "done";
+    else if (starts("scrolled")) k = "scroll", o = "done";
+    else if (starts("ignored") || starts("no click") || starts("it woke the pointer") || starts("no ray up: it woke")) o = "refused";
+    else if (starts("left to ft-screens")) o = "passed";
+    else if (starts("pressed on")) o = "lost";   // let go by losing the hand
+    else if (starts("clicked") || starts("right click") || starts("became a press") || starts("nudged") ||
+             starts("the right button") || starts("joined") || starts("the left button down"))
+        o = "done";
+    fh_event_text("pointer", k, o, side, 0, ((kind == 2 ? "middle pinch: " : "pinch: ") + what).c_str());
+}
 
 #include <algorithm>
 #include <atomic>
@@ -1465,6 +1482,8 @@ int main() {
                     : Clock::now() - lastMouse < std::chrono::seconds(1) ? "off: the mouse moved"
                     : c.why;
             std::printf("hand ray: %s -> %s (%s)\n", rayown::SideName(c.from), rayown::SideName(c.to), why.c_str());
+            fh_event("pointer", "ray", c.to >= 0 ? "done" : "end", c.to >= 0 ? c.to : c.from, 0, "hand ray: %s -> %s (%s)",
+                     rayown::SideName(c.from), rayown::SideName(c.to), why.c_str());
             if (!apply) continue;
             if (c.to >= 0) rayEnter(c.to);
             else rayLeave(c.off);
@@ -2407,7 +2426,11 @@ int main() {
                     seen.push_back(b);
                 }
             arbiter.Update(secsOf(tnow), ctls, seen, live);
-            for (const std::string &line : arbiter.log) std::printf("%s\n", line.c_str());
+            for (const std::string &line : arbiter.log) {
+                std::printf("%s\n", line.c_str());
+                if (!line.rfind("handoff left:", 0) || !line.rfind("handoff right:", 0))
+                    fh_event_text("pointer", "handoff", "info", line[8] == 'r', 0, line.c_str());
+            }
             if (!arbiter.log.empty()) std::fflush(stdout);
             arbiter.log.clear();
             // In a VR game, only with the dashboard open or Frametop toggled back on (not paused).
@@ -2604,8 +2627,10 @@ int main() {
                 if (!hold.gaze.Right()) tapArm = {hold.side, secsOf(tnow)};   // the right-drag's first tap (gazehand.h)
             } else {
                 const std::string why = gazeEndWhy.empty() ? "the gaze calibration panel came up" : gazeEndWhy;
+                const std::string says = hold.gaze.Says(secsOf(tnow), lost, why, "", hold.gaze.ByChord() ? lessonSaid : "");
                 std::printf("%s %s: %s\n", hold.gaze.Right() && !hold.gaze.ByTap() ? "middle pinch" : "pinch", hold.side ? "right" : "left",
-                            hold.gaze.Says(secsOf(tnow), lost, why, "", hold.gaze.ByChord() ? lessonSaid : "").c_str());
+                            says.c_str());
+                PinchEvent(hold.side, hold.gaze.Right() && !hold.gaze.ByTap() ? 2 : 0, says);
                 std::fflush(stdout);
             }
             gazeEndWhy.clear();
@@ -2686,6 +2711,7 @@ int main() {
         auto pinchLog = [&](int side, int kind, const std::string &what) {
             std::printf("%s %s: %s\n", kind == 2 ? "middle pinch" : "pinch", side ? "right" : "left", what.c_str());
             std::fflush(stdout);
+            PinchEvent(side, kind, what);
         };
         // The chord's right button (see "Gaze pinch" at the top): to the driver as it changes, and the
         // pinch's log line once it's over.
@@ -3891,8 +3917,9 @@ int main() {
         }
         // A gaze pinch's click went out (or was dropped with the pointer): its log line.
         if (gazeClick.On() && !clickPress) {
-            std::printf("%s %s: %s\n", gazeClick.Right() ? "middle pinch" : "pinch", gazeClickSide ? "right" : "left",
-                        gazeClick.Says(secsOf(tnow), !clickRelease, "the pointer went", lastHit, lessonSaid).c_str());
+            const std::string says = gazeClick.Says(secsOf(tnow), !clickRelease, "the pointer went", lastHit, lessonSaid);
+            std::printf("%s %s: %s\n", gazeClick.Right() ? "middle pinch" : "pinch", gazeClickSide ? "right" : "left", says.c_str());
+            PinchEvent(gazeClickSide, gazeClick.Right() ? 2 : 0, says);
             std::fflush(stdout);
             gazeClick = {};
         }

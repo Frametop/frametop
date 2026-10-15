@@ -292,6 +292,7 @@ struct Rig {
     std::vector<Event> events;
     std::vector<Carry> carries;
     std::vector<std::string> logs;
+    std::vector<HandInput::Act> acts;
     // One hands frame (and the ticks until the next one, 30 Hz: three 90 Hz ticks)
     void Frame(const std::vector<SynthHand> &h, int ticks = 3) {
         synth.Write(h, t);
@@ -306,6 +307,7 @@ struct Rig {
             i.grabThatArmed[0] = armed[0], i.grabThatArmed[1] = armed[1];
             in.Update(i, panels);
             for (const Event &e : in.events()) events.push_back(e);
+            for (const HandInput::Act &a : in.acts()) acts.push_back(a);
             for (const std::string &l : in.logs()) {
                 logs.push_back(l);
                 if (std::getenv("HANDINPUT_LOG")) std::printf("    [%.3f] %s\n", now / 1e9, l.c_str());
@@ -532,6 +534,33 @@ void TestPoke() {
     const auto u = r.Last(Event::Release);
     CHECK(u && !u->lost && std::fabs(u->x - p->x) < 0.01 && std::fabs(u->y - p->y) < 0.01);   // where it was pressed
     CHECK(!r.in.pressing(1));
+}
+
+// A testing session's events (hands/include/fh_events.h): a press and its release, and a poke the
+// middle finger held back, as what they were and how they went, on the screen the log names.
+void TestActs() {
+    auto has = [](const Rig &r, const char *kind, const char *outcome) {
+        return std::any_of(r.acts.begin(), r.acts.end(), [&](const HandInput::Act &a) {
+            return !std::strcmp(a.kind, kind) && !std::strcmp(a.outcome, outcome) && a.side == 1 && a.panel == 1 && !a.text.empty();
+        });
+    };
+    Rig r;
+    for (int mm = 100; mm >= -15; mm -= 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+    for (int mm = -15; mm <= 50; mm += 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+    CHECK(has(r, "poke", "done") && has(r, "poke", "end") && !has(r, "poke", "refused"));
+    CHECK(r.acts.size() <= r.logs.size());   // each one is also a log line
+    Rig n;
+    for (int mm = 60; mm >= -15; mm -= 10) {
+        SynthHand h = TipAt(0.1, 0.05, mm / 1000.0);
+        h.middleTip = 0.012, h.pitchDeg = 25;
+        n.Frame({h});
+    }
+    for (int mm = -5; mm <= 45; mm += 10) {
+        SynthHand h = TipAt(0.1, 0.05, mm / 1000.0);
+        h.middleTip = 0.012, h.pitchDeg = 25;
+        n.Frame({h});
+    }
+    CHECK(has(n, "poke", "refused") && !has(n, "poke", "done"));
 }
 
 // The second live test's refusals (2026-10-10): the middle finger read nearly as straight as the
@@ -5320,6 +5349,7 @@ int main(int argc, char **argv) {
     TestStretch();
     TestHover();
     TestPoke();
+    TestActs();
     TestPokeRefusals();
     TestSlowDrift();
     TestPokeNoisy();

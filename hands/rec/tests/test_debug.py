@@ -21,6 +21,7 @@ sys.path.insert(0, HERE)   # test_validate, also under python -I
 import session  # noqa: E402
 import livelog  # noqa: E402
 import voicelog  # noqa: E402
+import eventlog  # noqa: E402
 
 
 class FakeTracker:
@@ -291,6 +292,44 @@ class DebugSessionTest(unittest.TestCase):
         with open(os.path.join(s.session_dir, "takes", "01-free", "take.json")) as f:
             self.assertEqual(sorted(json.load(f)["voice"]), ["voice-2.bin", "voice.bin"])
 
+    def test_events(self):
+        """The panels' and pointer's events (fh_events.h) while each part records go into its
+        events file: events-want asked for them, an older line is left out, and nothing is asked
+        for after the session."""
+        want = os.path.join(self.live, eventlog.WANT)
+        src = os.path.join(self.live, eventlog.FILE)
+        with open(src, "w") as f:   # a crashed session's
+            f.write('{"t": 1, "src": "screens", "kind": "poke", "outcome": "done", "hand": "right", "panel": 1, "text": "old"}\n')
+
+        def write(kind, outcome):
+            self.assertTrue(os.path.exists(want))
+            with open(src, "a") as f:
+                f.write(json.dumps({"t": eventlog.mono_ns(), "src": "screens", "kind": kind, "outcome": outcome,
+                                    "hand": "right", "panel": 2, "text": kind}) + "\n")
+                f.write("not json\n")
+
+        def act(s):
+            write("lazy-susan", "done")
+            write("poke", "refused")
+            s.pause()
+            time.sleep(0.2)
+            self.assertFalse(os.path.exists(want))
+            s.resume()
+            time.sleep(0.2)
+            write("poke", "done")
+            s.finish()
+        s = self.run_debug(act)
+        self.assertEqual(s.state, "done")
+        self.assertFalse(os.path.exists(want))
+        self.assertFalse(os.path.exists(src))
+        tdir = os.path.join(s.session_dir, "takes", "01-free")
+        self.assertEqual([e["kind"] for e in eventlog.read_lines(os.path.join(tdir, "events.jsonl"))], ["lazy-susan", "poke"])
+        self.assertEqual([e["outcome"] for e in eventlog.read_lines(os.path.join(tdir, "events-2.jsonl"))], ["done"])
+        with open(os.path.join(tdir, "take.json")) as f:
+            tj = json.load(f)
+        self.assertEqual(tj["events"]["events.jsonl"], {"events": 2, "by": {"lazy-susan": {"done": 1}, "poke": {"refused": 1}}})
+        self.assertEqual(tj["events"]["events-2.jsonl"]["by"], {"poke": {"done": 1}})
+
     def test_needs_live_hands(self):
         s = session.Session(os.path.join(self.tmp, "base"), {}, {}, "room", session.DEBUG_SCRIPT, button=False)
         s.dry_run = False   # the check, without starting anything
@@ -442,6 +481,38 @@ class DebugExportTest(unittest.TestCase):
         write_sums(export)
         r = self.validate.validate(export)
         self.assertTrue(any("voice recording" in e for e in r.errors), r.errors)
+
+    def test_events(self):
+        """The events parts as one file, those in the deleted range left out, only ever encrypted."""
+        a, b = self.takes.read_json(os.path.join(self.tdir, "take.json"))["deleted"][0]
+        for name, times in (("events.jsonl", (a - 1, (a + b) // 2)), ("events-2.jsonl", (b + 1,))):
+            with open(os.path.join(self.tdir, name), "w") as f:
+                for t in times:
+                    f.write(json.dumps({"t": t, "src": "pointer", "kind": "click", "outcome": "done", "hand": "left",
+                                        "panel": 0, "text": "pinch: clicked on x"}) + "\n")
+        export = self.store.export(self.sid, low_priority=False)
+        with open(os.path.join(export, "manifest.json")) as f:
+            m = json.load(f)
+        ev = m["takes"][0]["events"]
+        self.assertEqual(ev["file"], "takes/01-hand-size/events.jsonl.zst.age")
+        self.assertIn(ev["file"], m["encryption"]["files"])
+        self.assertEqual((ev["events"], ev["by"]), (2, {"click": {"done": 2}}))
+        self.assertEqual(self.validate.validate(export).errors, [])
+        import subprocess
+        with open(os.path.join(export, ev["file"]), "rb") as f:
+            raw = subprocess.run([self.takes.find_zstd(), "-dc"], input=self.age.decrypt_bytes(f.read(), self.identity),
+                                 capture_output=True, check=True).stdout
+        self.assertEqual([json.loads(line)["t"] for line in raw.splitlines()], [a - 1, b + 1])
+        # a public export has none
+        sj = self.takes.read_json(self.session_json)
+        del sj["debug"]
+        sj["consent"] = {"kind": "public", "version": "2026-10-02"}
+        self.takes.write_json(self.session_json, sj)
+        profile = self.takes.read_json(os.path.join(self.base, "profile.json"))
+        profile["consent"] = dict(profile["testing_consent"], version="2026-10-02")
+        self.takes.write_json(os.path.join(self.base, "profile.json"), profile)
+        export = self.store.export(self.sid, low_priority=False)
+        self.assertFalse(any(n.startswith("events") for _, _, ns in os.walk(export) for n in ns))
 
     def test_bounty_round(self):
         """A bounty's round in the test phase (no debug): encrypted the same way, no live log."""

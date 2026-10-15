@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from recorder import age  # noqa: E402  (a debug session's recordings are encrypted)
+import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's panel and pointer decisions)
 from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge_ranges, read_json,  # noqa: E402,F401
                             sha256_file, tree_bytes, tree_stat, write_sums)
 
@@ -54,6 +55,7 @@ LIVE_REC = struct.Struct("<B3xIQQ")                 # source, length, read_ns, s
 VOICE_RE = re.compile(r"^voice(?:-(\d+))?\.bin$")  # a debug session's microphone, if ticked
 VOICE_HDR = struct.Struct("<8sII")                  # voicelog.py: magic, version, sample rate
 VOICE_REC = struct.Struct("<QI")                    # read_ns, bytes of s16le samples
+EVENTS_RE = re.compile(r"^events(?:-(\d+))?\.jsonl$")  # a debug session's panel and pointer decisions
 TEST_RECIPIENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-recipients.txt")
 # The bounties' test phase (DESIGN.md "Testing"): bounty rounds and debug sessions are recorded under
 # TESTING.md's consent (profile.json "testing_consent"), and their exports are encrypted for the test
@@ -243,6 +245,23 @@ def export_voice(take_dir, ranges, zstd, dest, recipients):
     with open(dest, "wb") as f:
         f.write(age.encrypt_bytes(r.stdout, recipients))
     return {"chunks": chunks, "seconds": round(samples / rate, 2), "raw_bytes": len(out)}
+
+
+def export_events(take_dir, ranges, zstd, dest, recipients):
+    """A debug take's events parts (eventlog.py) as one events.jsonl, events in deleted ranges left
+    out, through zstd into dest, always encrypted (no recipients: nothing written, None). None
+    without events parts; else {"events": n, "by": {kind: {outcome: n}}, "raw_bytes": n}."""
+    parts = live_parts(take_dir, EVENTS_RE)
+    if not parts or not recipients:
+        return None
+    events = [e for path in parts for e in eventlog.read_lines(path) if not in_ranges(e["t"], ranges)]
+    out = "".join(json.dumps(e, separators=(", ", ": ")) + "\n" for e in events).encode()
+    r = subprocess.run(["nice", "-n", "19", zstd] + ZSTD_ARGS, input=out, capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError("zstd failed: %s" % (r.stderr.decode(errors="replace").strip() or r.returncode))
+    with open(dest, "wb") as f:
+        f.write(age.encrypt_bytes(r.stdout, recipients))
+    return {"events": len(events), "by": eventlog.summary(events), "raw_bytes": len(out)}
 
 
 # ---------------------------------------------------------------- one take's recording
@@ -635,6 +654,10 @@ class Store:
             if voice is not None:
                 entry["voice"] = dict(voice, file="takes/%s/voice.bin.zst.age" % t["id"])
                 encrypted.append(entry["voice"]["file"])
+            events = export_events(tdir, ranges, zstd, os.path.join(out, "events.jsonl.zst.age"), recipients)
+            if events is not None:
+                entry["events"] = dict(events, file="takes/%s/events.jsonl.zst.age" % t["id"])
+                encrypted.append(entry["events"]["file"])
             take_entries.append(entry)
         if cancelled():
             raise Cancelled()

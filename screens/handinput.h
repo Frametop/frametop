@@ -655,6 +655,15 @@ public:
     // press and release (panel, depth), each poke attempt that crossed the surface without a press
     // (the rule that held it back), each grab and its end.
     const std::vector<std::string> &logs() const { return logs_; }
+    // The same lines that were decisions about an interaction, with what was tried and how it went
+    // (hands/include/fh_events.h's kind and outcome; panel: the screen's number, 0 none), for a
+    // testing session's events.
+    struct Act {
+        const char *kind, *outcome;
+        int side, panel;
+        std::string text;
+    };
+    const std::vector<Act> &acts() const { return acts_; }
     // "Grab that" fired for this side: a fist or pinch waiting on it (Params::grabThatWaitMs) doesn't
     // grab or click.
     void GrabThatFired(int side);
@@ -910,6 +919,8 @@ private:
     bool RoomTurn(int s, const Input &in, double out[3][3]);
     void EndAttempt(int s);
     void Log(const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+    void Did(const char *kind, const char *outcome, int side, int panel, const char *fmt, ...)
+        __attribute__((format(printf, 6, 7)));
     void Carries(const Input &in, const std::vector<Panel> &panels);
     void Glows(const Input &in, const std::vector<Panel> &panels);
     // Each hand's soft glow (guides_): a button it's at or pressing, the corner or edge a pinch would take.
@@ -961,6 +972,7 @@ private:
     std::vector<Event> events_;
     std::vector<Carry> carries_;
     std::vector<std::string> logs_;
+    std::vector<Act> acts_;
     bool approaching_ = false;
     int64_t rayHideUntil_[2] = {0, 0};
     int fistPairRun_ = 0, fistPairPanel_ = -1;

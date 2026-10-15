@@ -57,6 +57,7 @@ import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone
 sys.path.insert(0, REPO)
 import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
 import voicelog  # noqa: E402  (hands/rec/voicelog.py: a debug session's microphone, if ticked)
+import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's copy of what the panels and pointer did)
 # What the recorders share (recorder/), under the names this module always had: the window,
 # the standalone recorder's spike and the tests use them from here.
 from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402,F401
@@ -1559,6 +1560,7 @@ class Session:
         self.consent_kind = takes.round_consent_kind(bool(bounty), self.debug)   # DESIGN.md "Testing"
         self.live_dir = self.hands_dir   # where Frametop's ft-hands publishes (a test hook)
         self._live_log = None      # the LiveLog of the recording part running
+        self._event_log = None     # ...and the EventLog: what Frametop did with the hands (fh_events.h)
         # the person's voice beside it, if they ticked "Record my voice" (voicelog.py): what they
         # say about what went wrong becomes flags later, transcribed on the maintainer's machines
         # (not in a dry run: a rehearsal records nothing)
@@ -1751,6 +1753,8 @@ class Session:
     def _run(self):
         try:
             self._resume_quiet()   # left paused by a session that crashed
+            if self.debug and not self.dry_run:
+                eventlog.stop_writers(self.live_dir)   # ...or asking for events
             if self._preflight():
                 return
             self._make_dir()
@@ -2493,6 +2497,9 @@ class Session:
             name = "live.bin" if t["part"] == 1 else "live-%d.bin" % t["part"]
             self._live_log = livelog.LiveLog(self.live_dir, os.path.join(t["dir"], name)).start()
             self._live_log.name = name
+            name = "events.jsonl" if t["part"] == 1 else "events-%d.jsonl" % t["part"]
+            self._event_log = eventlog.EventLog(self.live_dir, os.path.join(t["dir"], name)).start()
+            self._event_log.name = name
         if self.voice:
             name = "voice.bin" if t["part"] == 1 else "voice-%d.bin" % t["part"]
             self._voice_log = voicelog.VoiceLog(os.path.join(t["dir"], name)).start()
@@ -2515,6 +2522,13 @@ class Session:
             self._log("live log %s: %d hands, %d gestures" % (log.name, counts["hands"], counts["gestures"]))
             if self._take:
                 self._take["json"].setdefault("live", {})[log.name] = counts
+                write_json(os.path.join(self._take["dir"], "take.json"), self._take["json"])
+        if self._event_log:
+            log, self._event_log = self._event_log, None
+            counts = log.stop()
+            self._log("events %s: %d (%s)" % (log.name, counts["events"], eventlog.describe(counts["by"])))
+            if self._take:
+                self._take["json"].setdefault("events", {})[log.name] = counts
                 write_json(os.path.join(self._take["dir"], "take.json"), self._take["json"])
         if self._voice_log:
             log, self._voice_log = self._voice_log, None

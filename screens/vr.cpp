@@ -101,6 +101,7 @@
 // OpenVR has no overlay-relative transforms here (openvr v2.15.6), so the bar, button,
 // and handle are placed whenever their screen moves.
 #include "vr.h"
+#include "../hands/include/fh_events.h"
 
 #include "handcut.h"
 #include "grabthat.h"
@@ -2766,6 +2767,7 @@ void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Pan
     g_palm.Update(pin);
     if (g_palm.toggled() >= 0) {
         std::printf("palm menu (%s hand): the Steam menu\n", g_palm.toggled() ? "right" : "left");
+        fh_event("screens", "palm-menu", "done", g_palm.toggled(), 0, "palm menu: the Steam menu");
         RunTool("steam/ft-steam", "menu", nullptr);   // opens it, or closes the dashboard
     }
     for (int k = 0; k < 2; ++k) {
@@ -3039,6 +3041,8 @@ void GrabThat(const grabthat::Fire &f) {
         double d[3], h[3];
         for (int q = 0; q < 3; ++q) d[q] = k.aimPalm ? f.normal[q] : f.palm[q] - f.eye[q];
         for (int q = 0; q < 3; ++q) h[q] = f.head.m[0][q] * d[0] + f.head.m[1][q] * d[1] + f.head.m[2][q] * d[2];
+        fh_event("screens", "grab-that", "missed", f.side, 0, "grab that: no panel there%s",
+                 closest.index >= 0 ? " (one was near the line)" : "");
         const std::string near = closest.index >= 0 ? "; nearest screen " + std::to_string(closest.index + 1) + ", " +
                                                           std::to_string(int(std::lround(closest.deg))) + " deg off" : "; no panel it may take";
         return (void)std::printf("grab that (%s hand): no panel there (the line %+.0f deg right, %+.0f deg up of where the head points%s; "
@@ -3048,6 +3052,7 @@ void GrabThat(const grabthat::Fire &f) {
     }
     // to the front slot at arm's reach (the one there goes home; the one there comes closer)
     BringReadable(i, grabthat::Arrival(f, k), false, i == g_front.panel ? "pulled from the front slot" : "grab that");
+    fh_event("screens", "grab-that", "done", f.side, i + 1, "grab that: screen %d to arm's reach", i + 1);
     (void)hand;
 }
 
@@ -3268,7 +3273,11 @@ void UpdateFarStretch(int64_t t) {
             else s = &it->second;
         }
         g_far.triedNs = last;
-        if (!s) return (void)std::printf("far stretch: both fists (%lld ms apart), not started: %s\n", (long long)apart, why.c_str());
+        if (!s) {
+            fh_event("screens", "far-stretch", "refused", -1, i + 1, "far stretch: not started: %s", why.c_str());
+            return (void)std::printf("far stretch: both fists (%lld ms apart), not started: %s\n", (long long)apart, why.c_str());
+        }
+        fh_event("screens", "far-stretch", "done", -1, i + 1, "far stretch: screen %d, both fists", i + 1);
         g_far.panel = i, g_far.sep0 = g_far.sep = sep, g_far.w0 = s->metres, g_far.px0 = s->cropW, g_far.py0 = s->cropH;
         g_far.held.clear();
         g_grabMoves.erase(i);
@@ -3932,6 +3941,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     for (int k = 0; k < 2; ++k) in.grabThatArmed[k] = g_grabThat.params().on && g_grabThat.armed(k) && g_grabThatAim[k] >= 0;
     g_handInput.Update(in, panels);
     for (const std::string &l : g_handInput.logs()) std::printf("hands: %s\n", l.c_str());
+    for (const handinput::HandInput::Act &a : g_handInput.acts())   // a testing session's events (fh_events.h)
+        fh_event_text("screens", a.kind, a.outcome, a.side, a.panel, a.text.c_str());
     UpdateGrabThat(in);
     UpdateGrabThatAims();
     UpdateTargetGlow();
@@ -3943,6 +3954,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
             char reply[96];
             SpinCommand(e.x < 0 ? "next" : "prev", reply, sizeof reply);
             std::printf("lazy susan by hand (%s, swept %s): %s\n", e.side ? "right" : "left", e.x < 0 ? "left" : "right", reply);
+            fh_event("screens", "lazy-susan", std::strncmp(reply, "ok", 2) ? "refused" : "done", e.side, 0,
+                     "lazy susan by hand (swept %s): %s", e.x < 0 ? "left" : "right", reply);
             continue;
         }
         if (SteamEvent(e)) continue;   // one of SteamVR's panels: the pointer helper's laser does it

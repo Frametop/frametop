@@ -361,21 +361,28 @@ python3 "$here/fix-panels.py" --screens "$screens" || true
 # a Deskflow client connected, which sends its input through libei), and its wrapper then
 # starts a fresh KWin with no Plasma: a black screen that never ends. So watch for the
 # session manager leaving while KWin stays, and end KWin's wrapper, which ends startplasma
-# and this script with it.
+# and this script with it. The watcher looks for the session manager only until Plasma has
+# started it, then waitpid sleeps until it exits: looking every 3 seconds for the whole
+# session cost about 1% of a core. The wrapper is matched from the start of its command
+# line, since pgrep -f alone also matches a shell whose command names it.
 ours() { [ "$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null | sed -n 's/^XDG_RUNTIME_DIR=//p')" = "$XDG_RUNTIME_DIR" ]; }
+ours_pid() {
+  local p
+  for p in $(pgrep "$@"); do ours "$p" && { echo "$p"; return 0; }; done
+  return 1
+}
 logout_watch() {
-  local seen=0 gone=0 p alive
-  while sleep 3; do
-    alive=0
-    for p in $(pgrep -x ksmserver); do ours "$p" && { alive=1; break; }; done
-    if [ "$alive" = 1 ]; then seen=1 gone=0; continue; fi
-    [ "$seen" = 1 ] || continue
-    gone=$((gone + 1))
-    [ "$gone" -ge 3 ] || continue  # about 9 seconds after the session manager left
-    for p in $(pgrep -f kwin_wayland_wrapper); do
-      ours "$p" && { echo "frametop: Plasma logged out but KWin stayed; ending it" >&2; kill "$p" 2>/dev/null; }
-    done
-    return 0
+  local ksm= p
+  for _ in $(seq 40); do ksm=$(ours_pid -x ksmserver) && break; sleep 3; done
+  [ -n "$ksm" ] || return 0  # no Plasma after 2 minutes: nothing to watch
+  if command -v waitpid > /dev/null; then
+    waitpid "$ksm" 2>/dev/null || true
+  else
+    while [ -e "/proc/$ksm" ]; do sleep 3; done
+  fi
+  sleep 9
+  for p in $(pgrep -f '^/usr/bin/kwin_wayland_wrapper( |$)'); do
+    ours "$p" && { echo "frametop: Plasma logged out but KWin stayed; ending it" >&2; kill "$p" 2>/dev/null || true; }
   done
 }
 logout_watch &

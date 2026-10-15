@@ -1070,6 +1070,10 @@ class QuietHandsTest(SessionBase):
         super().setUp()
         self.path = os.path.join(self.tmp, "run", session.PAUSED_UNITS_FILE)
         self.calls = []
+        # never the real units: a missed patch here once stopped the live hand pointer and hands
+        guard = mock.patch.object(recorder.units, "stop_unit", lambda u: self.fail("real stop of %s" % u))
+        guard.start()
+        self.addCleanup(guard.stop)
 
     def systemctl(self):
         calls = self.calls
@@ -1095,7 +1099,7 @@ class QuietHandsTest(SessionBase):
         self.assertFalse(os.path.exists(self.path))
 
     def test_nothing_running_nothing_paused(self):
-        with mock.patch.object(session, "unit_active", lambda u: False):
+        with mock.patch.object(recorder.units, "unit_active", lambda u: False):
             self.assertEqual(session.pause_units(session.QUIET_UNITS, self.path), [])
         self.assertFalse(os.path.exists(self.path))
         self.assertEqual(session.resume_units(self.path), [])

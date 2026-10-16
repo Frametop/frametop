@@ -107,6 +107,7 @@
 #include "grabthat.h"
 #include "handinput.h"
 #include "softglow.h"
+#include "overlaytex.h"
 #include "palmmenu.h"
 #include "keyboard.h"
 #include "roomview.h"
@@ -584,7 +585,7 @@ vr::VROverlayHandle_t MakeChrome(const char *key, const char *name, const std::v
         std::fprintf(stderr, "openvr: can't create overlay %s: %s\n", key, vr::VROverlay()->GetOverlayErrorNameFromEnum(err));
         return o;
     }
-    vr::VROverlay()->SetOverlayRaw(o, const_cast<uint8_t *>(px.data()), uint32_t(w), uint32_t(h), 4);
+    overlaytex::Set(o, px.data(), w, h);
     vr::VROverlay()->SetOverlayInputMethod(o, vr::VROverlayInputMethod_Mouse);
     // SteamVR's laser and ComputeOverlayIntersection size the hit area from the mouse scale,
     // not the texture: at the default 1x1 it's a square as tall as the control is wide, so the
@@ -599,7 +600,7 @@ void LightBar(Screen &s, bool lit) {
     if (s.barLit == lit) return;
     s.barLit = lit;
     const auto &px = BarTexture(lit);
-    vr::VROverlay()->SetOverlayRaw(s.bar, const_cast<uint8_t *>(px.data()), 256, 24, 4);
+    overlaytex::Set(s.bar, px.data(), 256, 24);
 }
 
 // ---------------------------------------------------------------- wrist guides
@@ -646,7 +647,7 @@ struct GuidePart {
     void Light(bool on, const std::vector<uint8_t> &px, int n) {
         if (int(on) == lit) return;
         lit = on;
-        vr::VROverlay()->SetOverlayRaw(overlay, const_cast<uint8_t *>(px.data()), uint32_t(n), uint32_t(n), 4);
+        overlaytex::Set(overlay, px.data(), n, n);
     }
 };
 struct Guide { GuidePart ring, dot; };
@@ -1172,7 +1173,7 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     if (lit != s.cornerLit && s.handle != vr::k_ulOverlayHandleInvalid) {
         s.cornerLit = lit;
         const auto &px = HandleTexture(lit);
-        vr::VROverlay()->SetOverlayRaw(s.handle, const_cast<uint8_t *>(px.data()), 64, 64, 4);
+        overlaytex::Set(s.handle, px.data(), 64, 64);
     }
     if (std::fabs(glow - s.cornerGlow) > 0.02f || (glow == 0) != (s.cornerGlow == 0)) {
         s.cornerGlow = glow;
@@ -1653,7 +1654,7 @@ bool EnsureFloatPanel(Screen &s) {
 
 void DropFloatPanel(Screen &s) {
     for (auto o : s.All())
-        if (o != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(o);
+        if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
     s.overlay = s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton =
         vr::k_ulOverlayHandleInvalid;
     s.visible = s.controlsUp = s.barLit = s.cornerLit = false;
@@ -3440,7 +3441,7 @@ void ShowCarousel() {
         vr::VROverlay()->CreateOverlay("frametop.carousel", "Frametop: screens", &g_carousel.overlay) != vr::VROverlayError_None)
         return;
     const vr::VROverlayHandle_t o = g_carousel.overlay;
-    vr::VROverlay()->SetOverlayRaw(o, px.data(), uint32_t(W), uint32_t(H), 4);
+    overlaytex::Set(o, px.data(), W, H);
     // under the screen in the slot, past its bar: 0.45 mm a pixel at 1 m (30 px text: about 0.8 deg)
     const Screen &s = g_screens[g_front.panel];
     const double d = std::max(0.3, Apart(head, g_front.to));
@@ -3520,7 +3521,7 @@ void ShowResetAsk(int panel) {
     if (g_resetAsk.overlay == vr::k_ulOverlayHandleInvalid &&
         vr::VROverlay()->CreateOverlay("frametop.resetask", "Frametop: reset the layout?", &g_resetAsk.overlay) != vr::VROverlayError_None)
         return;
-    vr::VROverlay()->SetOverlayRaw(g_resetAsk.overlay, px.data(), uint32_t(W), uint32_t(H), 4);
+    overlaytex::Set(g_resetAsk.overlay, px.data(), W, H);
     vr::VROverlay()->SetOverlaySortOrder(g_resetAsk.overlay, 10);
     g_resetAsk.panel = panel, g_resetAsk.shownMs = NowMs(), g_resetAsk.px = W;
     g_resetAsk.tipZ[0] = g_resetAsk.tipZ[1] = 1;
@@ -3727,7 +3728,7 @@ void UpdateTargetGlow() {
     const int h = std::clamp(int(std::lround((kTargetW - 2 * m) * H / std::max(1e-6, W))) + 2 * m, 2 * m + 4, 2048);
     if (kTargetW != g_target.texW || h != g_target.texH || m != g_target.texM) {
         const std::vector<uint8_t> px = softglow::TargetTexture(kTargetW, h, m);
-        vr::VROverlay()->SetOverlayRaw(g_target.overlay, const_cast<uint8_t *>(px.data()), kTargetW, uint32_t(h), 4);
+        overlaytex::Set(g_target.overlay, px.data(), kTargetW, h);
         g_target.texW = kTargetW, g_target.texH = h, g_target.texM = m;
         static int logged = -1;
         if (logged != g_target.panel)
@@ -3844,7 +3845,7 @@ void UpdateHandGuides() {
                 if (textures.size() > 48) textures.clear();
                 t = textures.emplace(key, softglow::GuideTexture(hg.g, tw, th, wm, halo, arm, r, edge)).first;
             }
-            vr::VROverlay()->SetOverlayRaw(hg.overlay, const_cast<uint8_t *>(t->second.data()), uint32_t(tw), uint32_t(th), 4);
+            overlaytex::Set(hg.overlay, t->second.data(), tw, th);
             hg.key = key;
         }
         vr::VROverlay()->SetOverlayWidthInMeters(hg.overlay, float(wm));
@@ -4351,7 +4352,7 @@ bool ft_vr_init(void) {
     if (vr::VROverlay()->CreateOverlay("frametop.catcher", "Frametop: release catcher", &g_catcher) ==
         vr::VROverlayError_None) {
         static std::vector<uint8_t> clear(4 * 4 * 4, 0);
-        vr::VROverlay()->SetOverlayRaw(g_catcher, clear.data(), 4, 4, 4);
+        overlaytex::Set(g_catcher, clear.data(), 4, 4);
         vr::VROverlay()->SetOverlayInputMethod(g_catcher, vr::VROverlayInputMethod_Mouse);
         vr::VROverlay()->SetOverlayAlpha(g_catcher, 0);
         vr::VROverlay()->SetOverlayFlag(g_catcher, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
@@ -4385,6 +4386,7 @@ void ft_vr_shutdown(void) {
     keyboard::Destroy();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     for (auto &[k, h] : g_imports) vr::VRIPCResourceManager()->UnrefResource(h);
+    overlaytex::Shutdown();
     g_guides.clear();
     g_screens.clear();
     g_imports.clear();
@@ -4580,7 +4582,7 @@ void ft_vr_screen_destroy(int index) {
     const Screen &s = it->second;
     if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone};
     for (auto o : it->second.All())
-        if (o != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(o);
+        if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
     for (auto &[k, sub] : it->second.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);
     g_screens.erase(it);
 }

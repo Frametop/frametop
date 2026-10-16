@@ -1,6 +1,6 @@
 # Eye recorder: design (2026-10-14)
 
-The eye recorder guides a person through recording their eyes with the headset's two eye cameras, at known gaze targets and through the cases where eye tracking breaks. It also fits the headset: it shows whether each eye sits where the cameras see it best, helps set the IPD, and catches the headset shifting on the face, with instructions to put it back. Recordings stay on the headset until the person uploads them. Only the maintainers can read what's uploaded (below, "Privacy").
+The eye recorder guides a person through recording their eyes with the headset's two eye cameras, at known gaze targets and through the cases where eye tracking breaks. It also fits the headset: it shows whether each eye sits where the cameras see it best, shows the IPD setting, and catches the headset shifting on the face, with instructions to put it back. Recordings stay on the headset until the person uploads them. Only the maintainers can read what's uploaded (below, "Privacy").
 
 It's the hand recorder's sibling (`hands/rec/DESIGN.md`): the same session runner pattern, headset button, review, export and Hugging Face upload, with eye cameras instead of hand cameras. Like the hand recorder it ships in Frametop and, later, as a standalone app for people without Frametop (Frametop/frametop-eye-recorder, Frametop as a submodule).
 
@@ -69,7 +69,7 @@ What it can tell, and the instruction it gives:
 | A glint missing, or extra bright spots | Glasses reflections, or the lens fogged or smudged | "Tilt your glasses" / "Wipe the lenses" |
 | An eye found in under half the frames, looking straight ahead | Lashes on the lens, a droopy lid, or the eye outside the camera's view | The per-eye card says which |
 
-The IPD row depends on the first headset test. If the cameras move with the lenses, a pupil's sideways offset in its image directly says how far that eye is from its lens axis, and the coach turns the IPD wheel's direction into "wider" or "narrower" until both offsets are about zero, at any IPD. If the cameras are fixed, the offset depends on the IPD setting too, and the coach needs the reference at each IPD step: the fitment step's IPD sweep (below, "Bounty board") builds that.
+The IPD row depends on the first headset test. If the cameras move with the lenses, a pupil's sideways offset in its image directly says how far that eye is from its lens axis, and the coach turns the IPD wheel's direction into "wider" or "narrower" until both offsets are about zero, at any IPD. If the cameras are fixed, the offset depends on the IPD setting too, and the coach needs the reference at each IPD step, built from rounds recorded at different settings (there's no IPD sweep: the setting can't be changed with the headset on).
 
 **Put-on and shift check.** After a good fit, the coach keeps that fit as the person's baseline (`~/.local/state/frametop/gaze/fit-baseline.json`: per eye, the pupil looking straight ahead and the glint pair, with the IPD setting). Then:
 - When the headset goes back on (frames resume after ft-eyes' 3 s gap), it shows the fit card for a few seconds while the person looks ahead. If the pupils sit more than a threshold (start with 1.5 mm equivalent, tuned from data) from the baseline, it says which way to move the headset, live, until it's back. If the IPD setting changed, it says so first.
@@ -79,9 +79,11 @@ In the recorder the fit coach runs as each round's fitment step, and the shift w
 ## Bounty board
 
 People pick what to record from a board of bounties. Each bounty is one round of about 5 minutes, in step mode: the headset's right button starts each step (press = next or pause, two presses = redo, hold = stop), as in the hand recorder. Every round starts the same way:
-1. **Fitment** (not recorded as a take, but its readings go into fit.json): the fit coach until the headset sits well (below, "Fit coach"). Skippable after a warning, and the round records that it was skipped. On a contributor's first round, and whenever the IPD setting has changed since their last, it ends with an IPD sweep: turn the wheel slowly from narrow to wide and back while looking at a centre dot, with the IPD logged as it changes (the panel looks 30 times a second, and on SteamVR's IPD event). Its own take, `NN-ipd`, before the nine dots.
+1. **Fitment** (not recorded as a take, but its readings go into fit.json): the fit coach until the headset sits well (below, "Fit coach"). Skippable after a warning, and the round records that it was skipped. (The coach is off for now, 2026-10-16: then it only asks for a comfortable fit.) It shows the IPD setting, read from SteamVR when the round starts. The setting can't be changed with the headset on (2026-10-16), so there's no IPD step: a wrong setting means stopping, setting it, and starting again. Each take's ipd.jsonl still logs it.
 2. **Nine dots** (recorded): a 3x3 grid to 20 degrees on the mid background. It's the round's own reference, so each round can be labelled alone, even after a re-seat.
 3. **The bounty's steps.**
+
+How to build a new one, and the rules a round script must follow (beeps for anything done with the eyes shut, cue words as labels, timing, reach, comfort): `rounds/README.md`.
 
 Every round uploads on its own. The board marks the bounties you've done, by your contributor id in `profile.json`, with how many times. You can do one again.
 
@@ -90,7 +92,7 @@ The launch bounties:
 | Bounty | What | Edge case it covers |
 |---|---|---|
 | View edges | Dots at the panel's edges and corners: 30 degrees to the sides, 23 up and down, about 35 in the corners (the rec panel is 64 degrees across; every round's dots are checked against it) | Eyes turned far: the lid, the glints lost, the pupil foreshortened |
-| Blinks and lids | Blink on cue, close both for 2 s, wink each eye, squint, eyes wide, half-closed, looking down with lids lowered | Closed and partly closed eyes; one eye missing |
+| Blinks and lids | Blink on a beep, close both eyes on a beep and open them on the next (sounds.py: the eyes are shut, so words can't cue them), wink each eye, squint, eyes wide, half-closed, looking down with lids lowered | Closed and partly closed eyes; one eye missing |
 | Headset slips | Nudge the headset up, down, left, right, tilt it; then take it off and put it back on; dots after each | Headset shifting on the face: the put-on check's data |
 | Glasses | A 5x5 grid and the edges with glasses or inserts on (offered when the checklist says so) | Lens reflections, the glasses' frame in view |
 | Jumps and pursuit | A dot jumping between random spots (0.5 to 1.5 s each), then moving on circles, lines and a figure eight at two speeds | Saccades, overshoot, smooth pursuit, the tracker's lag |
@@ -137,7 +139,7 @@ ft-gazepanel gains `show rec`: a large head-locked panel (FULL_DEG, 64 degrees, 
     session.json                the bounty, checklist, versions, takes, eye camera rate, IPD at start
     fit.json                    the fit coach's readings: the fitment step, and any slip warnings
     health.json                 the opt-in health answers (encrypted in the export)
-    takes/<NN>-<step group>/    numbered in order: NN-ipd (when there's a sweep), NN-dots (the nine dots), then the bounty's
+    takes/<NN>-<step group>/    numbered in order: NN-dots (the nine dots), then the bounty's
       cam0/000000.zst ...       right eye: one zstd chunk per second, frames back to back (512x400 u8)
       cam1/000000.zst ...       left eye
       index.tsv                 per frame: camera, chunk, offset in it, slot, CLOCK_MONOTONIC_RAW time
@@ -161,7 +163,7 @@ Uploads: `gaze/rec/hub.py` sends nothing to the real dataset until `CONSENT.md` 
 
 ## Build order
 
-1. **Headset test 1:** do the eye cameras move with the IPD wheel? (Look at one dot, turn the wheel end to end, watch ft-eyes' pupil x.) Decides the IPD guidance.
+1. **Headset test 1:** do the eye cameras move with the lenses when the IPD changes? The setting can't be changed with the headset on, so compare nine-dot rounds recorded at two settings (ft-eyes' pupil x at the centre dot). Decides the IPD guidance.
 2. Pull the shared recorder code out of `hands/rec/` (hand recorder tests pass).
 3. `eyerec.py` (frame writer) and its replay test against a capture.
 4. `fitcoach.py` with readings from a capture, and the fit card on the existing fit panel.

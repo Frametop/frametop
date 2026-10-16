@@ -416,11 +416,11 @@ class Backend(RecorderBackend):
         if not mod or not b:
             return ""
         try:
-            plan = mod.build_plan(mod.load_round(mod.round_path(b["script"])), 0, ipd_sweep=False)
+            plan = mod.build_plan(mod.load_round(mod.round_path(b["script"])), 0)
         except (OSError, ValueError) as e:
             return f"Couldn't read the round: {e}"
-        return (f"{len(plan)} steps, about {mod.plan_seconds(plan) / 60:.0f} min recorded, after the headset's fit "
-                "check (and an IPD sweep on your first round, or when the IPD setting changed)")
+        return (f"{len(plan)} steps, about {mod.plan_seconds(plan) / 60:.0f} min recorded, after putting the "
+                "headset on")
 
     # --- the checklist and health answers
     @Property("QVariantMap", notify=profileRelay)

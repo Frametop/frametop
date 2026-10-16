@@ -298,7 +298,7 @@ Kirigami.ApplicationWindow {
                     padding: Kirigami.Units.largeSpacing
                     wrapMode: Text.Wrap
                     text: "Each bounty is a short round of about 5 minutes for one case where eye tracking struggles. "
-                          + "Pick one; the most wanted come first. Every round starts with fitting the headset and "
+                          + "Pick one; the most wanted come first. Every round starts with putting the headset on and "
                           + "nine dots. You can do a bounty again." + (backend.boardUpdated ? " (Board of "
                           + backend.boardUpdated + ".)" : "")
                 }
@@ -603,10 +603,10 @@ Kirigami.ApplicationWindow {
                 Controls.Label {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     wrapMode: Text.Wrap
-                    text: "Press Start, then put the headset on. A panel in the headset first helps you fit it: "
-                          + "look at the dot and move the headset until the panel says good (this window shows it "
-                          + "too). On your first round, and whenever the IPD setting changed, you then turn the IPD "
-                          + "wheel slowly from end to end. Then nine dots, then the bounty's steps. Look at each dot "
+                    text: "Press Start, then put the headset on so it's comfortable and the picture is sharp, "
+                          + "and look at the dot on the panel in the headset. It shows the headset's IPD setting: "
+                          + "it can't be changed with the headset on, so set it before you start. Then nine dots, "
+                          + "then the bounty's steps. Look at each dot "
                           + "until its ring fills, and keep your head still unless a step says otherwise.\n\n"
                           + "Each step waits until you're ready: press the button on the right side of the headset, "
                           + "or Space or Next in this window. A 3-2-1 countdown follows, then the step. Nothing is "
@@ -735,13 +735,6 @@ Kirigami.ApplicationWindow {
                         font: Kirigami.Theme.smallFont
                         text: "A first guess: the coach has been measured on one face so far."
                     }
-                    Controls.Label {
-                        visible: sessionView.st.ipd !== undefined && sessionView.st.ipd !== null
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        opacity: 0.7
-                        text: "The headset's IPD setting: " + ((sessionView.st.ipd || 0) * 1000).toFixed(1) + " mm"
-                    }
                 }
             }
 
@@ -805,7 +798,8 @@ Kirigami.ApplicationWindow {
                     FitCard {
                         Layout.alignment: Qt.AlignTop
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 18
-                        visible: sessionView.state === "fitment" || (sessionView.state === "paused" && sessionView.card !== null)
+                        visible: (sessionView.state === "fitment" && sessionView.st.fit_coach !== false)
+                                 || (sessionView.state === "paused" && sessionView.card !== null)
                         card: sessionView.card
                     }
 
@@ -820,6 +814,16 @@ Kirigami.ApplicationWindow {
                             font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.4
                             text: sessionView.state === "fitment" ? "Headset position: " + (sessionView.st.fit_words || "")
                                                                   : (sessionView.st.prompt || "")
+                        }
+                        // The IPD setting (SteamOS's, through SteamVR), shown while the headset goes on
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            visible: sessionView.state === "fitment"
+                            wrapMode: Text.Wrap
+                            text: sessionView.st.ipd === undefined || sessionView.st.ipd === null
+                                  ? "Couldn't read the IPD setting from SteamVR."
+                                  : "Your IPD setting: " + (sessionView.st.ipd * 1000).toFixed(1) + " mm. If that's not "
+                                    + "right for you, stop (Esc), take the headset off, set it, and start again."
                         }
                         // The countdown's 3, 2, 1, then a cue's word, big
                         Controls.Label {
@@ -849,7 +853,9 @@ Kirigami.ApplicationWindow {
                             visible: sessionView.waiting && sessionView.state !== "paused"
                             opacity: 0.7
                             text: sessionView.state === "fitment"
-                                  ? "Press Next once the fit says good. Pressing it before warns first; a second press starts anyway."
+                                  ? (sessionView.st.fit_coach === false
+                                     ? "Put the headset on comfortably, with a sharp picture, look at the dot, then press Next."
+                                     : "Press Next once the fit says good. Pressing it before warns first; a second press starts anyway.")
                                   : (sessionView.st.ready_text || "Ready? Press Space or click Next")
                                     + ". A 3-2-1 countdown starts the recording."
                             wrapMode: Text.Wrap

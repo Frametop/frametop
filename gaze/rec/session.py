@@ -8,11 +8,13 @@ Then, in step mode:
 
   1. Fitment, not a take: the fit coach (gaze/fitcoach.py) on a centre dot until the headset
      sits well and the person presses Next; Next before that warns, a second press goes on and
-     the round records it was skipped. Its readings go into fit.json.
-  2. On the contributor's first round, or when SteamVR's IPD setting changed since their last,
-     an IPD sweep: one take, the wheel turned end to end while looking at a centre dot.
-  3. Nine dots, a take: a 3x3 grid to 20 degrees on the mid background, the round's reference.
-  4. The bounty's steps, from its round script (rounds/<script>.json, below).
+     the round records it was skipped. Its readings go into fit.json. The coach is off for now
+     (FIT_COACH): then this only asks for a comfortable fit, Next goes on, and its readings are
+     kept without being shown. Either way it shows the IPD setting, read from SteamVR when the
+     round starts: it can't be changed with the headset on, so there's no IPD step, and a wrong
+     setting means stopping and setting it first.
+  2. Nine dots, a take: a 3x3 grid to 20 degrees on the mid background, the round's reference.
+  3. The bounty's steps, from its round script (rounds/<script>.json, below).
 
 Each step that's "ready" shows first and waits for Next; then a 3-2-1 countdown, recorded, then
 the step. Steps of the same group share a take (takes/NN-group): the eye frames (eyerec.py),
@@ -34,7 +36,9 @@ Round scripts, rounds/<id>.json: {"schema": 1, "id", "title", "intro", "shift_ch
   path     "path": "circle|line|eight <numbers>" (the panel's path command), "seconds"
   jumps    "count", "range": [yaw, pitch] (a box), "each": [shortest, longest] s
   prompt   "dot": [yaw, pitch] or null (none), and "seconds" or "cues": [[word, s]...] (shown
-           big in turn), "cue_distance": {word: metres}
+           big in turn; [word, s, sound] also plays a beep as it starts, for steps done with the
+           eyes shut: sound blink, close or open, sounds.py; rounds/README.md has the rules,
+           and load_round enforces them), "cue_distance": {word: metres}
   light    "dot", "levels": [[background, s]...]
   world    "point": [x, y, z] (metres from the head when it starts, -z ahead), "seconds"
   reseat   not recorded: the text, Next, then a fit reading
@@ -76,6 +80,7 @@ sys.path.insert(0, GAZE)
 sys.path.insert(0, HERE)
 import eyerec  # noqa: E402  (gaze/rec/eyerec.py: the frame writer)
 import fitcoach  # noqa: E402  (gaze/fitcoach.py)
+import sounds  # noqa: E402  (gaze/rec/sounds.py: the beeps)
 from recorder import bounties  # noqa: E402
 from recorder.button import BUTTON_DEVICE, ButtonReader, find_button, mouse_connected, read_input_devices  # noqa: E402
 from recorder.common import (clean_text, clock_sample, in_container, mono_ns, os_version,  # noqa: E402
@@ -110,7 +115,6 @@ FIT_ASK_S = 0.5           # the fit coach's reading, this often during the fitme
 FIT_GOOD_S = 2.0          # OK this long: the fit is good
 READING_WAIT_S = 6.0      # a reseat's fit reading waits this long for both eyes
 CENTRE_DEG = 1.0          # a dot this near the middle gets the shift check after its hold
-SPLIT_IPD_M = 0.0005      # the IPD setting changed: an IPD sweep
 VERSION = "ft-eyerec 0.1"
 READY_TEXT = "Ready? Press Space or click Next"
 READY_BUTTON = "Ready? Press the button on the right side of the headset"
@@ -124,11 +128,20 @@ FIT_TITLE = "Headset fit"
 FIT_TEXT = "Look at the dot. Adjust the headset until this says good."
 FIT_ADJUST = "Adjust the headset until it says good"
 FIT_SKIP_NOTE = "The fit isn't good yet: recordings may be less useful. Press again to start anyway."
-IPD_STEP = {"id": "ipd", "kind": "prompt", "group": "ipd", "dot": [0, 0], "seconds": 25,
-            "text": "Keep looking at the dot and turn the IPD wheel slowly: all the way narrow, then all the "
-                    "way wide, then back to where the picture is sharpest."}
+# The fit coach is off until it's trained on more people's fits (2026-10-16: its hints jumped
+# around and "good" was out of reach). Off, the fitment only asks for a comfortable fit and a look
+# at the dot, Next goes straight on, and the coach's readings still go into fit.json, silently:
+# they're what it will be trained on. No baseline then, so no slip notes either.
+# FT_EYEREC_FIT_COACH=1 (or session.py --fit-coach) turns it back on.
+FIT_COACH = os.environ.get("FT_EYEREC_FIT_COACH", "") == "1"
+FIT_OFF_TITLE = "Put the headset on"
+FIT_OFF_TEXT = "Put the headset on so it's comfortable and the picture is sharp. Then look at the dot."
+# The IPD setting is the headset's (SteamOS, read through SteamVR), shown at the fitment. It can't be
+# changed with the headset on, so a wrong one means stopping the round.
+IPD_TEXT = "Your IPD setting: {mm:.1f} mm. If that's not right for you, stop, take the headset off and set it."
+IPD_UNKNOWN = "Couldn't read the IPD setting from SteamVR."
 NINE_DOTS_TEXT = "Look at each dot until its ring fills. Keep your head still."
-DONE_SCREEN = {"title": "All done", "text": "Thank you! You can take off the headset.|Review the round in the Eye "
+DONE_SCREEN = {"title": "All done", "text": "Thank you! This recording session will close. Continue in the application.|Review the round in the Eye "
                                             "recorder window.", "seconds": 5}
 STOPPED_SCREEN = {"title": "Stopped", "text": "What was recorded so far is saved. Review it in the Eye recorder window.",
                   "seconds": 4}
@@ -203,6 +216,32 @@ def _dot(v, what):
     return d
 
 
+def cue_needs(word):
+    """The sound a cue must have because the person can't see the panel then (rounds/README.md):
+    "blink" for a blink, "close" for shutting both eyes, else None. Half-closed eyes and one eye
+    (a wink: the other one reads the panel) don't need one."""
+    w = word.lower()
+    if "half" in w or "left" in w or "right" in w:
+        return None
+    if "blink" in w:
+        return "blink"
+    if "close" in w or "shut" in w:
+        return "close"
+    return None
+
+
+def _check_sounds(cues, sid):
+    """Eyes-shut cues beep, and the cue after a "close" plays "open": with the eyes shut, the
+    words can't tell anyone when to open them."""
+    for k, (word, _secs, *sound) in enumerate(cues):
+        need = cue_needs(word)
+        if need and sound != [need]:
+            raise ValueError('%s: cue "%s" needs the sound "%s" (the eyes are shut then; rounds/README.md)'
+                             % (sid, word, need))
+        if sound == ["close"] and (k + 1 == len(cues) or cues[k + 1][2:] != ["open"]):
+            raise ValueError('%s: after "%s" comes a cue with the sound "open" (rounds/README.md)' % (sid, word))
+
+
 def _step(raw, i):
     """One step, checked and filled in."""
     if not isinstance(raw, dict):
@@ -263,12 +302,16 @@ def _step(raw, i):
         st["dot"] = None if "dot" in raw and raw["dot"] is None else _dot(raw.get("dot", [0, 0]), sid + " dot")
         cues = raw.get("cues")
         if cues is not None:
+            want = "%s: cues want [[word, seconds]...] or [word, seconds, sound] (sound: %s)" % (
+                sid, ", ".join(sounds.SOUNDS))
             if not isinstance(cues, list) or not cues:
-                raise ValueError("%s: cues want [[word, seconds]...]" % sid)
-            st["cues"] = [[clean_text(c[0])[:40], _num(c[1], 0.2, 60, sid + " cue")] for c in cues
-                          if isinstance(c, list) and len(c) == 2 and isinstance(c[0], str)]
+                raise ValueError(want)
+            st["cues"] = [[clean_text(c[0])[:40], _num(c[1], 0.2, 60, sid + " cue")] + c[2:] for c in cues
+                          if isinstance(c, list) and len(c) in (2, 3) and isinstance(c[0], str)
+                          and (len(c) == 2 or c[2] in sounds.SOUNDS)]
             if len(st["cues"]) != len(cues):
-                raise ValueError("%s: cues want [[word, seconds]...]" % sid)
+                raise ValueError(want)
+            _check_sounds(st["cues"], sid)
             cd = raw.get("cue_distance") or {}
             st["cue_distance"] = {str(k): _num(v, 0.25, 10, sid + " cue distance") for k, v in cd.items()}
         else:
@@ -311,8 +354,8 @@ def load_round(path):
             raise ValueError("%s: group %s comes back after another" % (path, s["group"]))
         groups.add(s["group"])
         last = s["group"]
-    if groups & {"dots", "ipd"}:
-        raise ValueError("%s: the groups dots and ipd are the opener's" % path)
+    if "dots" in groups:
+        raise ValueError("%s: the group dots is the opener's" % path)
     rid = raw.get("id")
     return {"id": rid if isinstance(rid, str) else os.path.basename(path)[:-5], "title": str(raw.get("title", rid)),
             "intro": str(raw.get("intro", "")), "shift_check": raw.get("shift_check", True) is not False and
@@ -346,13 +389,10 @@ def nine_dots(rng):
             "shuffle": False}
 
 
-def build_plan(rnd, seed, ipd_sweep):
+def build_plan(rnd, seed):
     """The round's steps in order, the opener's first, shuffles and jumps made from seed."""
     rng = random.Random(seed)
-    steps = []
-    if ipd_sweep:
-        steps.append(_step(IPD_STEP, 0))
-    steps.append(nine_dots(rng))
+    steps = [nine_dots(rng)]
     for s in rnd["steps"]:
         s = json.loads(json.dumps(s))
         if s["kind"] == "dots" and s["shuffle"]:
@@ -561,7 +601,7 @@ class Session:
     def __init__(self, base_dir, script, *, bounty=None, profile=None, checklist=None, health=None, dry_run=False,
                  speed=1.0, on_status=None, next_after=None, cams=None, panel_bin=None, panel_no_vr=False,
                  steamvr_gaze=True, button=True, button_device=None, seed=None, rounds_dir=None,
-                 profile_path=None, eyes_python=None):
+                 profile_path=None, eyes_python=None, fit_coach=None):
         self.base_dir = os.path.abspath(os.path.expanduser(base_dir or BASE_DIR))
         self.script = script
         self.round = load_round(round_path(script, rounds_dir))
@@ -575,6 +615,7 @@ class Session:
         self.steamvr_gaze = steamvr_gaze and not dry_run
         self.button, self.button_device = button, button_device
         self.eyes_python = eyes_python or EYES_PYTHON
+        self.fit_coach = FIT_COACH if fit_coach is None else bool(fit_coach)
         self.seed = seed
         self.print = print
         self.quiet_units = () if dry_run or cams else QUIET_UNITS
@@ -589,10 +630,11 @@ class Session:
         self._status = {"state": "starting", "bounty": self.bounty["id"], "title": "", "step": "", "step_index": 0,
                         "step_count": 0, "prompt": "", "note": "", "take": None, "error": "", "waiting": False,
                         "countdown": 0, "big": "", "can_redo": False, "fit": None, "fit_words": "", "fit_card": None,
-                        "ipd": None, "ready_text": READY_TEXT, "button": False, "seconds_left": 0.0}
+                        "ipd": None, "ready_text": READY_TEXT, "button": False, "seconds_left": 0.0,
+                        "fit_coach": self.fit_coach}
         self._last_emit = 0.0
         self._log_file = None
-        self._panel = self._eyes = None
+        self._panel = self._eyes = self._sounds = None
         self._procs = {}            # name: Popen
         self._gaze_thread = None
         self._gaze_lock = threading.Lock()
@@ -739,6 +781,7 @@ class Session:
     def _setup(self):
         self._panel = Socket(PANEL_SOCKET, self.dry_run, fake_panel, self._log, self.print)
         self._eyes = Socket(EYES_SOCKET, self.dry_run, fake_eyes(self.ref), self._log)
+        self._sounds = sounds.Player(on=not self.dry_run, log=self._log)
         if not self.dry_run:
             for path, build in ((self.panel_bin, "gaze/build.sh"), (FT_EYES, "gaze/tracker/build.sh")):
                 if not os.path.exists(path):
@@ -755,9 +798,8 @@ class Session:
         r = self._panel.cmd("ipd", reply=True)
         self._ipd = float(r.split()[1]) if r and r.startswith("ok ") else None
         self._status["ipd"] = self._ipd
-        last = self.profile.get("eyes_ipd")
-        sweep = self._ipd is not None and (not isinstance(last, (int, float)) or abs(self._ipd - last) >= SPLIT_IPD_M)
-        self.plan = build_plan(self.round, self.seed, sweep)
+        self._log("IPD setting: %s" % ("%.1f mm" % (self._ipd * 1000) if self._ipd is not None else "unknown"))
+        self.plan = build_plan(self.round, self.seed)
         self._fit["reference"] = {"source": self.ref.source, "faces": self.ref.faces, "made": self.ref.made,
                                   "provisional": self.ref.provisional} if self.ref else None
         self._session_json = {
@@ -765,7 +807,7 @@ class Session:
             "title": self.bounty.get("title") or self.round["title"], "board_updated": self.bounty.get("updated"),
             "checklist": self.checklist, "recorder": VERSION, "os": os_version(), "steamvr": steamvr_version(),
             "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "ended": None, "status": "running", "seed": self.seed,
-            "dry_run": self.dry_run, "replay": self.cams or None, "ipd_start": self._ipd, "ipd_sweep": sweep,
+            "dry_run": self.dry_run, "replay": self.cams or None, "ipd_start": self._ipd,
             "fit": None, "eye_fps": None, "takes": [],
             "plan": [{"id": s["id"], "kind": s["kind"], "group": s["group"]} for s in self.plan]}
         if self.health:
@@ -1029,6 +1071,9 @@ class Session:
         self._panel.set("title", "title " + clean_text(title))
         self._panel.set("text", "text " + clean_text(text))
 
+    def _ipd_text(self):
+        return IPD_UNKNOWN if self._ipd is None else IPD_TEXT.format(mm=self._ipd * 1000)
+
     # --- the fit coach
     def _reading(self, previous=None, baseline=None):
         """The fit coach's reading of ft-eyes' last second, and the finds it's from (or None, None)."""
@@ -1039,10 +1084,13 @@ class Session:
 
     def _fitment(self):
         """The fit coach on a centre dot until the fit is good and Next is pressed; Next before
-        that warns, and a second press goes on (fit.json records it was skipped)."""
+        that warns, and a second press goes on (fit.json records it was skipped). With the coach
+        off (FIT_COACH), _fitment_quiet instead."""
+        if not self.fit_coach:
+            return self._fitment_quiet()
         title = "%s: %s" % (FIT_TITLE, self._session_json["title"])
         intro = self.round["intro"]
-        self._show(title, FIT_TEXT + ("||" + intro if intro else ""))
+        self._show(title, FIT_TEXT + "||" + self._ipd_text() + ("||" + intro if intro else ""))
         self._panel.cmd("dot 0 0 look")
         f = {"reading": None, "summary": None, "since": 0.0, "good": False, "ask": 0.0, "warned": False}
         started = mono_ns()
@@ -1069,7 +1117,7 @@ class Session:
                     self._panel.set("note", "note ")
             self._panel.cmd("dot 0 0 %s" % ("done" if good else "look"))
             self._panel.set("action", "action " + (self._status["ready_text"] if good or f["warned"] else FIT_ADJUST))
-            self._show(title, "Headset position: " + words + ("||" + intro if intro else ""))
+            self._show(title, "Headset position: " + words + "||" + self._ipd_text() + ("||" + intro if intro else ""))
             self._emit(force=False, fit=r["state"] if r else None, fit_words=words, fit_card=fit_card(r))
 
         self._redo_ok = False
@@ -1097,6 +1145,37 @@ class Session:
         self._panel.set("note", "note ")
         self._panel.cmd("dot 0 0 off")
         self._emit(note="", fit=None, fit_words="", fit_card=None)
+
+    def _fitment_quiet(self):
+        """The fitment with the coach off: a comfortable fit and the centre dot, Next goes on.
+        The coach's readings are kept in fit.json, but nothing of them is shown."""
+        intro = self.round["intro"]
+        self._show("%s: %s" % (FIT_OFF_TITLE, self._session_json["title"]),
+                   FIT_OFF_TEXT + "||" + self._ipd_text() + ("||" + intro if intro else ""))
+        self._panel.cmd("dot 0 0 look")
+        self._panel.set("action", "action " + self._status["ready_text"])
+        f = {"reading": None, "ask": 0.0}
+        started = mono_ns()
+
+        def tick(dt):
+            f["ask"] -= dt
+            if f["ask"] > 0:
+                return
+            f["ask"] = FIT_ASK_S
+            r, _ = self._reading(f["reading"])
+            if r is not None:
+                f["reading"] = r
+                self._fit["readings"].append({"t": mono_ns(), "phase": "fitment", **compact(r)})
+
+        self._redo_ok = False
+        self._await_next(tick)
+        self._fit["fitment"] = {"from": started, "to": mono_ns(), "result": "off", "ipd": self._ipd,
+                                "last": compact(f["reading"]) if f["reading"] else None}
+        self._session_json["fit"] = "off"
+        self._save_session()
+        self._save_fit()
+        self._log("fitment: the coach is off%s" % ((", it read " + coach_words(f["reading"])) if f["reading"] else ""))
+        self._panel.cmd("dot 0 0 off")
 
     def _shift_check(self, step):
         """After a centre dot's hold: has the headset moved since the fitment?"""
@@ -1134,7 +1213,8 @@ class Session:
         if r:
             self._fit["readings"].append({"t": mono_ns(), "phase": "reseat", "step": step["id"], **compact(r)})
             words = coach_words(r)
-            self._panel.set("note", "note Headset position: " + words if r["state"] != "ok" else "note ")
+            if self.fit_coach:
+                self._panel.set("note", "note Headset position: " + words if r["state"] != "ok" else "note ")
             self._log("    reseat: %s" % words)
         self._save_fit()
 
@@ -1295,7 +1375,7 @@ class Session:
                    countdown=0, big="", seconds_left=round(step_seconds(st), 1))
 
     def _title(self, st):
-        return {"ipd": "IPD sweep", "dots": "Nine dots"}.get(st["group"], self.round["title"])
+        return {"dots": "Nine dots"}.get(st["group"], self.round["title"])
 
     def _first_dot(self, st):
         """Where the eyes should be when the step starts: shown during its countdown."""
@@ -1390,12 +1470,17 @@ class Session:
             self._wait(st["seconds"])
             return
         total, gone = sum(c[1] for c in st["cues"]), 0.0
-        for word, secs in st["cues"]:
+        for word, secs, *sound in st["cues"]:
             self._panel.set("big", "big " + word)
             dist = st["cue_distance"].get(word)
             if dist:
                 self._panel.cmd("distance %.3f" % dist)
-            self._event("cue", id=st["id"], word=word, **({"distance": dist} if dist else {}))
+            self._event("cue", id=st["id"], word=word, **({"distance": dist} if dist else {}),
+                        **({"sound": sound[0]} if sound else {}))
+            if sound:
+                self._sounds.play(sound[0])
+                if self.dry_run:
+                    self.print("sound: " + sound[0])
             self._emit(big=word)
             self._wait(secs, bar=False)
             gone += secs
@@ -1468,6 +1553,7 @@ def main():
     ap.add_argument("--no-headset-button", action="store_true", help="don't read the headset's button")
     ap.add_argument("--button-device", metavar="PATH", help="test: read the button from this device or FIFO")
     ap.add_argument("--seed", type=int, help="the shuffles and jumps (default: from the round's id)")
+    ap.add_argument("--fit-coach", action="store_true", help="the fit coach on (off by default for now: FIT_COACH)")
     ap.add_argument("--glasses", choices=("none", "glasses", "inserts", "contacts"), help="the checklist's answer")
     a = ap.parse_args()
 
@@ -1504,8 +1590,8 @@ def main():
         print("round %s: %s" % (script, e))
         return 2
     if a.plan:
-        plan = build_plan(rnd, a.seed or 0, ipd_sweep=False)
-        print("%s: %d steps, about %.1f min recorded (plus the fitment, and the IPD sweep on a first round)"
+        plan = build_plan(rnd, a.seed or 0)
+        print("%s: %d steps, about %.1f min recorded (plus the fitment)"
               % (rnd["title"], len(plan), plan_seconds(plan) / 60))
         for s in plan:
             extra = len(s["dots"]) if "dots" in s else ""
@@ -1536,7 +1622,8 @@ def main():
     s = Session(base, script, bounty=entry, profile=profile, checklist=checklist, dry_run=a.dry_run, speed=a.speed,
                 on_status=on_status, next_after=a.next_after, cams=a.cams, panel_bin=a.panel, panel_no_vr=a.panel_no_vr,
                 steamvr_gaze=not a.no_steamvr_gaze, button=not a.no_headset_button and (not a.dry_run or a.button_device),
-                button_device=a.button_device, seed=a.seed, profile_path=profile_path, eyes_python=a.eyes_python)
+                button_device=a.button_device, seed=a.seed, profile_path=profile_path, eyes_python=a.eyes_python,
+                fit_coach=True if a.fit_coach else None)
 
     def on_signal(*_):
         print("stopping", flush=True)

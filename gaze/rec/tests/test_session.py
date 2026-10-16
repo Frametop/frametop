@@ -69,6 +69,21 @@ class RoundTest(unittest.TestCase):
         self.bad([{"id": "a", "kind": "dots", "group": "g", "dots": [[0, 0]]}, {"id": "b", "kind": "dots", "dots": [[0, 0]]},
                   {"id": "c", "kind": "dots", "group": "g", "dots": [[0, 0]]}], "comes back")
         self.bad([{"id": "a", "kind": "dots", "group": "dots", "dots": [[0, 0]]}], "opener")
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Blink", 1, "honk"]]}], "sound: blink")
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Blink", 1, "blink", 2]]}], "cues want")
+        # The eyes-shut rules (rounds/README.md)
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Blink", 1]]}], 'needs the sound "blink"')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Close both eyes", 2], ["Open", 2]]}], 'needs the sound "close"')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Shut your eyes", 2, "close"]]}], 'comes a cue with the sound "open"')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Close your eyes", 2, "close"], ["Open", 2]]}], '"open"')
+        for word in ("Close your left eye", "Half closed", "Squint", "Open"):
+            session.load_round(write_round(self.tmp, [{"id": "a", "kind": "prompt", "cues": [[word, 1]]}]))
+
+    def test_sound_cues(self):
+        r = session.load_round(write_round(self.tmp, [{"id": "a", "kind": "prompt",
+                                                       "cues": [["Look", 1], ["Blink", 1.5, "blink"]]}]))
+        self.assertEqual(r["steps"][0]["cues"], [["Look", 1.0], ["Blink", 1.5, "blink"]])
+        self.assertEqual(session.step_seconds(r["steps"][0]), 2.5)
 
     def test_grid_and_defaults(self):
         r = session.load_round(write_round(self.tmp, [{"id": "a", "kind": "dots", "grid": [3, 2, 10, 5], "ready": False},
@@ -81,18 +96,17 @@ class RoundTest(unittest.TestCase):
 
     def test_plan(self):
         rnd = session.load_round(os.path.join(session.ROUNDS_DIR, "jumps.json"))
-        a = session.build_plan(rnd, 7, ipd_sweep=True)
-        self.assertEqual([s["group"] for s in a[:3]], ["ipd", "dots", "jumps"])
-        nine = a[1]["dots"]
+        a = session.build_plan(rnd, 7)
+        self.assertEqual([s["group"] for s in a[:2]], ["dots", "jumps"])
+        nine = a[0]["dots"]
         self.assertEqual((nine[0], nine[-1], len(nine)), ([0.0, 0.0], [0.0, 0.0], 10))
         self.assertEqual(sorted(map(tuple, nine[1:-1])), sorted(map(tuple, (d for d in session.grid(3, 3, 20, 20) if d != [0, 0]))))
-        jumps = a[2]
+        jumps = a[1]
         self.assertEqual(len(jumps["dots"]), 40)
         self.assertTrue(all(0.5 <= t <= 1.5 for t in jumps["times"]))
         self.assertTrue(all(not session.off_panel(*d) for d in jumps["dots"]))
-        self.assertEqual(a, session.build_plan(rnd, 7, ipd_sweep=True), "the same seed, the same round")
-        self.assertNotEqual(a[1]["dots"], session.build_plan(rnd, 8, ipd_sweep=True)[1]["dots"])
-        self.assertEqual(session.build_plan(rnd, 7, ipd_sweep=False)[0]["group"], "dots")
+        self.assertEqual(a, session.build_plan(rnd, 7), "the same seed, the same round")
+        self.assertNotEqual(a[0]["dots"], session.build_plan(rnd, 8)[0]["dots"])
         self.assertGreater(session.plan_seconds(a), 60)
 
 
@@ -171,6 +185,7 @@ class DryRunTest(unittest.TestCase):
         with open(path, "w") as f:
             json.dump(profile or {}, f)
         states = []
+        kw.setdefault("fit_coach", True)   # the coach's own tests; test_fitment_coach_off has it off
         s = session.Session(self.tmp, script, profile=profile, dry_run=True, speed=kw.pop("speed", 40),
                             next_after=kw.pop("next_after", 0.25), profile_path=path, button=False,
                             on_status=lambda st: states.append(dict(st)), **kw)
@@ -198,8 +213,11 @@ class DryRunTest(unittest.TestCase):
         s, states, profile = self.run_round("depth")
         self.assertEqual(s.state, "done")
         sj, fit = self.files(s)
-        self.assertEqual(sj["takes"], ["01-ipd", "02-dots", "03-near", "04-mid", "05-far", "06-near-far"])
-        self.assertEqual((sj["status"], sj["fit"], sj["ipd_sweep"], sj["ipd_start"]), ("done", "good", True, 0.063))
+        # No IPD step: the setting is read and shown at the fitment.
+        self.assertEqual(sj["takes"], ["01-dots", "02-near", "03-mid", "04-far", "05-near-far"])
+        self.assertEqual((sj["status"], sj["fit"], sj["ipd_start"]), ("done", "good", 0.063))
+        self.assertNotIn("ipd_sweep", sj)
+        self.assertIn(session.IPD_TEXT.format(mm=63.0), "\n".join(self.out))
         self.assertEqual(fit["fitment"]["result"], "good")
         self.assertIsNotNone(fit["baseline"])
         self.assertEqual(profile["bounties"]["depth"]["rounds"], 1)
@@ -207,15 +225,28 @@ class DryRunTest(unittest.TestCase):
         for take in sj["takes"]:
             with open(os.path.join(s.session_dir, "takes", take, "take.json")) as f:
                 self.assertEqual(json.load(f)["status"], "complete", take)
-        events = [e["event"] for e in self.prompts(s, "03-near")]
+        events = [e["event"] for e in self.prompts(s, "02-near")]
         self.assertEqual(events[:4], ["take", "ready", "rec", "step"])
         self.assertEqual(events[-3:], ["wait", "rec", "end"])
         self.assertIn("ft_eyerecpanel: distance 0.500", self.out)
         self.assertIn("ft_eyerecpanel: distance 5.000", self.out)
-        # The IPD is the same next time: no sweep.
         s2, _, profile = self.run_round("depth", profile=profile)
         self.assertEqual(self.files(s2)[0]["takes"][0], "01-dots")
         self.assertEqual(profile["bounties"]["depth"]["rounds"], 2)
+
+    def test_blink_beeps(self):
+        # The blinks round's beeps: each in prompts.jsonl's cue line, played as the cue starts.
+        s, _, _ = self.run_round("blinks", profile={"eyes_ipd": 0.063})
+        self.assertEqual(s.state, "done")
+        played = [line[len("sound: "):] for line in self.out if line.startswith("sound: ")]
+        self.assertEqual(played, ["blink"] * 8 + ["close", "open", "close", "open"])
+        sj, _ = self.files(s)
+        [take] = [t for t in sj["takes"] if t.endswith("blink-cue")]
+        cues = [e for e in self.prompts(s, take) if e["event"] == "cue"]
+        self.assertEqual([(e["word"], e.get("sound")) for e in cues], [("Blink", "blink")] * 8)
+        [take] = [t for t in sj["takes"] if t.endswith("closed")]
+        cues = [e.get("sound") for e in self.prompts(s, take) if e["event"] == "cue"]
+        self.assertEqual(cues, [None, "close", "open", "close", "open"])
 
     def test_fitment_warns_then_skips(self):
         # Next before the fit has been good for FIT_GOOD_S: a warning, then the round goes on.
@@ -224,6 +255,21 @@ class DryRunTest(unittest.TestCase):
         self.assertEqual((sj["fit"], fit["fitment"]["result"]), ("skipped", "skipped"))
         self.assertTrue(any(st["note"] == session.FIT_SKIP_NOTE for st in states))
         self.assertIsNone(fit["baseline"])
+
+    def test_fitment_coach_off(self):
+        # The default for now: no coaching or warning, the first Next goes on, and the coach's
+        # readings are still kept; no baseline, so no slip checks.
+        self.assertFalse(session.FIT_COACH)
+        s, states, _ = self.run_round("reading", next_after=0.6, speed=20, fit_coach=False)
+        sj, fit = self.files(s)
+        self.assertEqual(s.state, "done")
+        self.assertEqual((sj["fit"], fit["fitment"]["result"]), ("off", "off"))
+        self.assertTrue(fit["readings"])
+        self.assertIsNone(fit["baseline"])
+        self.assertFalse(fit["slips"])
+        self.assertFalse(any(st["note"] for st in states))
+        self.assertFalse(any(st["fit_words"] or st["fit_card"] for st in states))
+        self.assertTrue(all(st["fit_coach"] is False for st in states))
 
     def test_skip_redo_stop(self):
         def steer(s, states):

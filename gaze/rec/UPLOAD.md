@@ -1,4 +1,3 @@
-DRAFT: this text waits for its review, with CONSENT.md.
 ### About uploading
 
 - **What's sent:** the export in `@EXPORT_PATH@` (@EXPORT_SIZE@), into `contributions/@CONTRIBUTOR@/@ROUND@` in [@DATASET@](https://huggingface.co/datasets/@DATASET@). Upload first checks that every file is complete and matches its checksum, and that the eye images and health answers are encrypted.

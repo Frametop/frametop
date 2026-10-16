@@ -63,16 +63,35 @@ class HubTest(unittest.TestCase):
         self.assertEqual(hub.rhub.uploads(hub.meta_path(self.store, RID)), [])
 
     def test_gate(self):
-        self.assertFalse(hub.texts_ready(), "the texts are drafts")
-        with mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: ""}):
-            self.assertFalse(hub.upload_allowed(hub.dataset_id()), "never the real dataset before the review")
-            with self.assertRaises(hub.HubError) as cm:
-                hub.upload(self.store, RID)
-            self.assertEqual(cm.exception.kind, "closed")
-        with mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: "a/test"}):
+        self.assertTrue(hub.texts_ready(), "the texts are reviewed (2026-10-16)")
+        with mock.patch.dict(os.environ, {hub.ALLOW_ENV: "", hub.DATASET_ENV: ""}):
             self.assertTrue(hub.upload_allowed(hub.dataset_id()))
-        with mock.patch.dict(os.environ, {hub.ALLOW_ENV: "", hub.DATASET_ENV: "a/test"}):
-            self.assertFalse(hub.upload_allowed(hub.dataset_id()))
+        # While a text is a draft: never the real dataset, a rehearsal only with ALLOW_ENV.
+        with mock.patch.object(hub, "texts_ready", return_value=False):
+            with mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: ""}):
+                self.assertFalse(hub.upload_allowed(hub.dataset_id()), "never the real dataset before the review")
+                with self.assertRaises(hub.HubError) as cm:
+                    hub.upload(self.store, RID)
+                self.assertEqual(cm.exception.kind, "closed")
+            with mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: "a/test"}):
+                self.assertTrue(hub.upload_allowed(hub.dataset_id()))
+            with mock.patch.dict(os.environ, {hub.ALLOW_ENV: "", hub.DATASET_ENV: "a/test"}):
+                self.assertFalse(hub.upload_allowed(hub.dataset_id()))
+
+    def test_draft_consent_blocks(self):
+        # An export made under a draft consent text never goes to the real dataset.
+        prof = os.path.join(self.store.base, "profile.json")
+        with open(prof) as f:
+            p = json.load(f)
+        p["consent"]["version"] = "2026-10-14-draft"
+        with open(prof, "w") as f:
+            json.dump(p, f)
+        shutil.rmtree(self.store.export_dir(RID))
+        self.store.export(RID, low_priority=False)
+        with mock.patch.dict(os.environ, {hub.DATASET_ENV: ""}):
+            with self.assertRaises(hub.HubError) as cm:
+                hub.upload(self.store, RID, dry_run=True)
+        self.assertEqual(cm.exception.kind, "draft-consent")
 
     def test_invalid_blocks(self):
         with open(os.path.join(self.store.export_dir(RID), "health.json"), "w") as f:

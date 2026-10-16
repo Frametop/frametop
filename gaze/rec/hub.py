@@ -8,7 +8,8 @@ nobody types a token anywhere. An upload:
   2. stops if this export (same SHA256SUMS) was uploaded before, unless --again;
   3. stops unless CONSENT.md and UPLOAD.md are here and neither is a draft. FT_EYEREC_ALLOW_UPLOAD=1
      opens it for a rehearsal, and only to another dataset than the real one (FT_EYEREC_DATASET):
-     the real one takes nothing before the texts are reviewed;
+     the real one takes nothing before the texts are reviewed; and it stops for an export made under
+     a draft consent text (agree to the current one, then export again);
   4. checks the login and access to the dataset, opens the pull request first, uploads the folder
      to contributions/<contributor>/<round> in it, and records it under "uploads" in session.json.
 --dry-run does all of it except the network calls and the records, and says what it would upload.
@@ -155,6 +156,9 @@ def upload(store, rnd, dry_run=False, again=False, progress=None, log=None):
     if not dry_run and not upload_allowed(repo):
         raise HubError("closed", "Eye contributions aren't open yet: the consent and upload texts are waiting for a "
                                  f"legal review. (A rehearsal: {ALLOW_ENV}=1 with {DATASET_ENV} set to a test dataset.)")
+    if repo == HF_DATASET and str(summary.get("consent_version") or "").endswith("draft"):
+        raise HubError("draft-consent", "This export was made when you'd agreed to a draft of the consent text. "
+                                        "Agree to the current one on the Welcome page, then export the round again.")
     path_in_repo = f"contributions/{summary.get('contributor', '')}/{rnd}"
     message, description = describe(summary, report, sha, report.bytes)
     files = []

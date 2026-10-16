@@ -1,6 +1,6 @@
-# Recording your eyes for the Frametop eye dataset (DRAFT, not reviewed yet)
+# Recording your eyes for the Frametop eye dataset
 
-Version: 2026-10-14-draft
+Version: 2026-10-16
 
 Frametop's eye tracking needs a better model than it has: one that keeps working when you look far to the side, blink, squint, wear glasses or makeup, or when the headset moves on your face. To train it, we're collecting recordings of many people's eyes into a dataset that only the maintainers can read. This page explains what the eye recorder records, where it goes, who can see it, and what you agree to if you take part. Please read all of it.
 
@@ -55,7 +55,7 @@ The recorder doesn't record sound, the headset's outward cameras, your name, you
 ## Where it goes, and who can read it
 
 - The dataset is hosted on Hugging Face (<https://huggingface.co/datasets/DeeJanuz/frametop-eyes>), whose servers may be outside your country, for example in the USA. It's gated: people must accept its terms to download it, and what they get has the eye images and health answers encrypted.
-- Only the maintainers hold the keys that decrypt them. Today that's DeeJanuz, with one key on their own computer and a backup copy stored offline. The keys are never uploaded. If a key ever leaked, uploads made to it could be read: the maintainers would say so on the dataset's page and stop using it.
+- Only the maintainers hold the keys that decrypt them. Today that's DeeJanuz, with a key on each of two of their own computers (one of them trains the models) and a backup copy stored offline. The keys are never uploaded. If a key ever leaked, uploads made to it could be read: the maintainers would say so on the dataset's page and stop using it.
 - Decrypted images are kept only on the maintainers' own computers, for training and checking models, and aren't shared with anyone else or uploaded to other services.
 - Recordings stay in the dataset until they're withdrawn or the dataset is taken down.
 

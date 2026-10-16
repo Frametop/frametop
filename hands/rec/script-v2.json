@@ -4,7 +4,7 @@
  "intro_s": 4,
  "between_s": 3,
  "welcome": {"title": "Hand recorder", "seconds": 8, "text": "Follow the steps on this panel. Each one plays a short clip of what to do: copy it. In the clips the palm is light and the back of the hand is dark.|The button on the right side of the headset goes on when a step waits for you, and pauses while recording."},
- "done": {"title": "All done", "seconds": 6, "text": "Thank you! You can take off the headset.|Review your recordings in the Hand recorder window."},
+ "done": {"title": "All done", "seconds": 6, "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."},
  "stopped": {"title": "Stopped", "seconds": 4, "text": "What was recorded so far is saved. Review it in the Hand recorder window."},
  "objects": {"pencil": "pencil or pen", "phone": "phone", "cup": "cup", "keyboard": "keyboard", "mouse": "mouse", "gamepad": "gamepad", "small": "small thing"},
  "sections": [

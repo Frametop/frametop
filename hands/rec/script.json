@@ -5,7 +5,7 @@
  "welcome": {"title": "Hand recorder", "seconds": 7,
   "text": "Follow the steps on this panel. Each one shows what to do with your hands, and where. A bar shows the time left.|The button on the right side of the headset goes on when a step waits for you, and pauses while recording."},
  "done": {"title": "All done", "seconds": 6,
-  "text": "Thank you! You can take off the headset.|Review your recordings in the Hand recorder window."},
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."},
  "stopped": {"title": "Stopped", "seconds": 4,
   "text": "What was recorded so far is saved. Review it in the Hand recorder window."},
  "cue_names": {"flat": "Flat", "flat-back": "Backs", "spread": "Spread", "open": "Open", "fist": "Fist",

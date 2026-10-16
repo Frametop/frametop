@@ -12,7 +12,7 @@
  "done": {
   "title": "All done",
   "seconds": 6,
-  "text": "Thank you! You can take off the headset.|Review your recordings in the Hand recorder window."
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
  },
  "stopped": {
   "title": "Stopped",

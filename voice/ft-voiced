@@ -331,6 +331,7 @@ class Voice:
         self.loop = None  # the event loop, for the controller reader's thread
 
         self.kws = self.kws_stream = None  # built from the wake phrases in the settings
+        self.wake_phrases = []
         self.cmd_vad = self._make_vad(self.wcfg["end_silence"])
         self.clip_vad = self._make_vad(0.5)
         self.piece_vad = self._make_vad(0.1)  # per-chunk speech/silence labels for live windows
@@ -348,6 +349,7 @@ class Voice:
     def _make_kws(self, phrases):
         """Open-vocabulary spotter for the phrases: they are spelled with the model's BPE
         tokens at load time, so any English words work without training."""
+        self.wake_phrases = list(phrases or ())
         if not phrases:
             log.info("wake phrases: none")
             return None
@@ -904,7 +906,11 @@ class Voice:
         self.chime("wake")
         self.broadcast("wake", keyword=keyword)
         self.run_hook("wake_hook", keyword, env={"FRAME_VOICE_EVENT": "wake"})
-        self.command = {"chunks": [], "t0": time.monotonic(), "heard": False, "wake_unix": time.time()}
+        self.listen_for_command(time.time())
+
+    def listen_for_command(self, wake_unix, again=False):
+        self.command = {"chunks": [], "t0": time.monotonic(), "heard": False, "wake_unix": wake_unix,
+                        "again": again}
         self.cmd_vad.reset()
         self.update_mic()
 
@@ -919,7 +925,7 @@ class Voice:
         elapsed = time.monotonic() - cmd["t0"]
         if cmd["heard"] and not speaking or elapsed > self.wcfg["max_command_seconds"]:
             self.command = None
-            asyncio.create_task(self.finish_command(np.concatenate(cmd["chunks"]), cmd["wake_unix"]))
+            asyncio.create_task(self.finish_command(np.concatenate(cmd["chunks"]), cmd["wake_unix"], cmd["again"]))
         elif not cmd["heard"] and elapsed > self.wcfg["command_timeout"]:
             self.command = None
             log.info("wake: no command heard")
@@ -929,13 +935,22 @@ class Voice:
             self.reset_kws()
             self.update_mic()
 
-    async def finish_command(self, samples, wake_unix):
+    async def finish_command(self, samples, wake_unix, again=False):
         self.chime("stop")
         try:
             text = await self.transcribe(samples)
         except Exception as err:
             log.error("transcription failed: %s", err)
             self.broadcast("error", message=str(err))
+            return
+        # The capture can hold only the wake phrase's end ("Hey, Computer."): the spotter fires
+        # late, and a pause after it (waiting for the chime) ends the capture before the command.
+        # Then listen once more.
+        text, had_wake = voice_commands.strip_wake(text, self.wake_phrases)
+        if had_wake and not text.strip(" .!?,") and not again and self.command is None and self.recording is None:
+            log.info("wake: only the wake phrase heard, listening again")
+            self.chime("wake")
+            self.listen_for_command(wake_unix, again=True)
             return
         found = voice_commands.match(text, self.voice_commands) if text else None
         if found is None:

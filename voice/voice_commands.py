@@ -36,6 +36,23 @@ def words(text):
     return tuple(w.lower() for w in WORD.findall(text))
 
 
+def strip_wake(text, phrases):
+    """`text` without a wake phrase it starts with, and whether one was there. The recognizer
+    often catches the end of the wake phrase as the command starts ("Hey, Computer. Flag that."),
+    and mishears its first words ("A Computer"), so the phrase's last word
+    within the phrase's length marks it: everything up to it goes."""
+    found = list(WORD.finditer(text or ""))
+    heard = [m.group().lower() for m in found]
+    best = -1
+    for phrase in phrases:
+        pw = words(phrase)
+        if pw and pw[-1] in heard[:len(pw)]:
+            best = max(best, heard[:len(pw)].index(pw[-1]))
+    if best < 0:
+        return text, False
+    return re.sub(r"^\W+", "", text[found[best].end():]), True
+
+
 def normalise(text):
     return " ".join(words(text))
 

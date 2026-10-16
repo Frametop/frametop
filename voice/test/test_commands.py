@@ -174,3 +174,21 @@ class Settings(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StripWake(unittest.TestCase):
+    PHRASES = ["HEY COMPUTER"]
+
+    def test_wake_then_command(self):
+        self.assertEqual(vc.strip_wake("Hey, Computer. Flag that.", self.PHRASES), ("Flag that.", True))
+
+    def test_misheard_wake_alone(self):
+        text, had = vc.strip_wake("A Computer.", self.PHRASES)
+        self.assertTrue(had)
+        self.assertEqual(text.strip(" .!?,"), "")
+
+    def test_command_only(self):
+        self.assertEqual(vc.strip_wake("Flag that.", self.PHRASES), ("Flag that.", False))
+
+    def test_wake_word_later_stays(self):
+        self.assertEqual(vc.strip_wake("Flag that, Computer missed it", self.PHRASES)[1], False)

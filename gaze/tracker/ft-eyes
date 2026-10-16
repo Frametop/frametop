@@ -38,10 +38,21 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
                                append every frame looked at to PATH as JSON lines (the eye
                                recorder's own.jsonl): {"t", "cam", "x", "y", "a", "b", "angle",
                                "glints": [[x, y], ...], "gaze": [yaw, pitch] once calibrated},
-                               or {"t", "cam", "lost": true}. "finds stop" replies "ok ROWS"
+                               or {"t", "cam", "lost": true}; with the net also "net": {"gaze",
+                               "x", "y", "open", "visible"}. "finds stop" replies "ok ROWS"
+
+The eye net (eyes_net.py) instead of the pupil finder: EYES_MODEL=FOLDER in ~/.config/frametop.conf
+(or FT_EYES_MODEL), a model folder from frame-eyes' training. Each eye's raw gaze from the net
+then stands where the pupil centre would: the calibration, the shifts clicks teach and the dots'
+spread are in its degrees, and there are no glints (no slip estimate or jump notice). Each model
+has its own state folder, net-NAME/ (calibration.json, state.json, clicks.jsonl), so switching
+asks for a calibration once per model and the classic one is kept. Read at start: restart
+ft-eyes (switch the tracker off and on) after changing it. If the model can't load, ft-eyes says
+so and uses the pupil finder. While the fit coach asks ("fit") or finds are logged, the pupil
+finder runs too, for them.
 
 Environment, for replays (lab/ft-eyes-e2e): FT_EYES_CAMS, FT_EYES_GAZE, FT_EYES_STATE (the
-state folder), FT_EYES_SOCKET (the socket's name). With FT_EYES_CAMS set, the want file isn't
+state folder), FT_EYES_SOCKET (the socket's name), FT_EYES_MODEL. With FT_EYES_CAMS set, the want file isn't
 touched.
 
 /dev/shm/frametop-eyes-gaze, 128 bytes, little-endian (mirrored in ft-gaze.cpp):
@@ -81,11 +92,40 @@ import eyes_model  # noqa: E402
 import eyes_pupil  # noqa: E402
 import fitcoach  # noqa: E402
 
+CONF = Path.home() / ".config" / "frametop.conf"
+
+
+def load_net():
+    """The eye net from FT_EYES_MODEL or frametop.conf's EYES_MODEL, or None (the pupil finder)."""
+    folder = os.environ.get("FT_EYES_MODEL")
+    if folder is None:
+        try:
+            for line in CONF.read_text().splitlines():
+                k, _, v = line.split("#", 1)[0].partition("=")
+                if k.strip() == "EYES_MODEL":
+                    folder = v.strip()
+        except OSError:
+            pass
+    if not folder or folder.lower() in ("off", "none", "classic"):
+        return None
+    try:
+        import eyes_net
+        return eyes_net.Net(os.path.expanduser(folder))
+    except Exception as e:  # noqa: BLE001 (any failure: say so and track with the pupil finder)
+        print(f"ft-eyes: the eye net in {folder} didn't load ({type(e).__name__}: {e}); using the pupil finder",
+              file=sys.stderr, flush=True)
+        return None
+
+
+NET = load_net()
+
 CAMS = os.environ.get("FT_EYES_CAMS", "/dev/shm/frametop-eyes-cams")  # overrides for replays
 OUT = os.environ.get("FT_EYES_GAZE", "/dev/shm/frametop-eyes-gaze")
 WANT = None if "FT_EYES_CAMS" in os.environ else Path("/dev/shm/frametop-eyes-want")
 OUT_SIZE = 128
-CALIBRATION = Path(os.environ.get("FT_EYES_STATE", Path.home() / ".local/state/frametop/gaze/eyes")) / "calibration.json"
+STATE_BASE = Path(os.environ.get("FT_EYES_STATE", Path.home() / ".local/state/frametop/gaze/eyes"))
+FEATURE = "net:" + NET.name if NET else "pupil"   # what the calibration maps: each model has its own
+CALIBRATION = (STATE_BASE / ("net-" + NET.name) if NET else STATE_BASE) / "calibration.json"
 W, H = 512, 400
 FRESH = 0.03          # an eye's reading counts toward the output for this long (s)
 LOST_EVERY = 3        # while an eye is lost, search the whole frame only every 3rd frame
@@ -98,7 +138,8 @@ HISTORY = 12.0        # seconds of pupil positions kept per eye, for dots and cl
 GAP = 3.0             # s without frames: the headset was off, and may sit differently now
 CLICK_BEFORE = 0.3    # a click's frames: the 300 ms before it (like the probe's fixation)
 CALIB_MIN = 15        # frames an eye needs in a calibration dot's window
-CALIB_SPREAD = 4.0    # px: more than this and the eye moved during the dot
+CALIB_SPREAD = 2.5 if NET else 4.0   # px (the net: degrees): more than this and the eye moved during the dot
+CLASSIC_FOR = 3.0     # s: with the net, the pupil finder runs this long after the fit coach asks
 # Waiting for frames. They come only as a counter in shared memory, so there's nothing to block
 # on: sleep until a camera's next frame is due, then look every POLL. ft-eyegrab passes each one
 # on within a ms or two of when its camera starts the one after, so they arrive 11.1 ms apart,
@@ -187,6 +228,7 @@ class Eye:
         self.obs = None         # the fit coach's window (fitcoach.Observations), shared by both eyes
         self.fed = None         # (frame time, CLOCK_MONOTONIC_RAW then) of the newest frame fed
         self.finds = None       # the finds log (Tracker.finds), shared by both eyes
+        self.coach = [0.0]      # with the net: until when the fit coach wants pupils (monotonic), shared
 
     def use(self, cal, shift=None):
         self.cal = cal if cal is not None and cal.has("pupil", self.eye) else None
@@ -199,6 +241,8 @@ class Eye:
         if self.last_t is not None and t - self.last_t > GAP:
             self.shift.reseat()
         self.last_t = t
+        if NET:
+            return self.feed_net(t, img)
         if self.last is None:
             self.lost += 1
             if self.lost % LOST_EVERY:
@@ -227,6 +271,31 @@ class Eye:
             self.finds.write(self, t, p)
         self.work += time.perf_counter() - t0
 
+    def feed_net(self, t, img):
+        """The net's raw gaze is the feature: history, calibration and shifts as for a pupil."""
+        t0 = time.perf_counter()
+        r = NET(img, self.eye)
+        classic = self.finds is not None or time.monotonic() < self.coach[0]
+        p = None
+        if classic:
+            p = eyes_pupil.find_pupil(img, self.last)
+            self.last = p
+            if self.obs is not None:
+                self.obs.add(self.eye, t, p)
+                self.fed = (t, time.clock_gettime(time.CLOCK_MONOTONIC_RAW))
+        if r["visible"] >= 0.5:
+            self.found += 1
+            fx, fy = r["gaze"]
+            self.history.append((t, fx, fy, math.nan, math.nan))
+            while self.history and self.history[0][0] < t - HISTORY:
+                self.history.popleft()
+            if self.cal:
+                g = self.cal.gaze(self.eye, fx, fy, self.shift.value)
+                self.gaze = (t, float(g[0]), float(g[1]), r["x"], r["y"])
+        if self.finds is not None:
+            self.finds.write(self, t, p, r)
+        self.work += time.perf_counter() - t0
+
     def window(self, t0, t1):
         """Median pupil and glint midpoint over [t0, t1], the frame count, and the spread."""
         rows = np.array([r for r in self.history if t0 <= r[0] <= t1]).reshape(-1, 5)
@@ -246,13 +315,18 @@ class Finds:
         self.f = open(path, "a", buffering=1 << 16)
         self.rows = 0
 
-    def write(self, eye, t, p):
+    def write(self, eye, t, p, net=None):
         if p is None:
             row = {"t": round(t, 6), "cam": eye.eye, "lost": True}
         else:
             row = {"t": round(t, 6), "cam": eye.eye, "x": round(float(p["x"]), 2), "y": round(float(p["y"]), 2),
                    "a": round(float(p["a"]), 2), "b": round(float(p["b"]), 2), "angle": round(float(p["angle"]), 1),
                    "glints": [[round(float(x), 1), round(float(y), 1)] for x, y in p.get("glints") or []]}
+            if eye.gaze and eye.gaze[0] == t and not NET:
+                row["gaze"] = [round(eye.gaze[1], 3), round(eye.gaze[2], 3)]
+        if net is not None:
+            row["net"] = {"gaze": [round(v, 3) for v in net["gaze"]], "x": round(net["x"], 1), "y": round(net["y"], 1),
+                          "open": round(net["open"], 3), "visible": round(net["visible"], 3)}
             if eye.gaze and eye.gaze[0] == t:
                 row["gaze"] = [round(eye.gaze[1], 3), round(eye.gaze[2], 3)]
         self.f.write(json.dumps(row) + "\n")
@@ -270,10 +344,16 @@ class Tracker:
         self.dots = []  # calibration dots so far, in ft-eyes-score's click form
         self.calibrating = False
         self.fit = fitcoach.Observations()
+        coach = [0.0]
         for e in self.eyes:
-            e.obs = self.fit
+            e.obs, e.coach = self.fit, coach
         if CALIBRATION.exists():
             self.cal = eyes_model.Calibration.load(CALIBRATION)
+            if self.cal.info.get("feature", "pupil") != FEATURE:
+                print(f"ft-eyes: {CALIBRATION} is for {self.cal.info.get('feature', 'pupil')}, not {FEATURE}:"
+                      " calibrate again", file=sys.stderr, flush=True)
+                self.cal = None
+        if self.cal:
             if not self.cal.spread:
                 self.cal.spread = spread_from_dots(self.cal)
         shifts = {}
@@ -319,6 +399,7 @@ class Tracker:
                 return "ok"
             return "fail finds start PATH | finds stop"
         if w[0] == "fit":
+            self.eyes[0].coach[0] = time.monotonic() + CLASSIC_FOR
             # In frame time, which a replay's frames keep from the recording: the newest frame's,
             # plus how long ago it came (frames stopping, the headset off, empty the window).
             fed = [e.fed for e in self.eyes if e.fed]
@@ -345,7 +426,8 @@ class Tracker:
             if len(self.dots) < eyes_model.MIN_CLICKS:
                 return f"fail only {len(self.dots)} dots (need {eyes_model.MIN_CLICKS})"
             cal = eyes_model.Calibration.fit(self.dots, {"made": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                                       "dots": len(self.dots), "from": "probe calibration"})
+                                                       "dots": len(self.dots), "from": "probe calibration",
+                                                       "feature": FEATURE})
             if not all(cal.has(n, c) for n in ("pupil", "where") for c in (0, 1)):
                 return "fail not enough dots with both eyes"
             errs = [float(np.hypot(*(np.mean([cal.gaze(c, *k["eye"][c]["pupil"]) for c in (0, 1)], axis=0)
@@ -389,6 +471,7 @@ class Tracker:
 
     def status(self):
         return {"calibration": self.cal.info if self.cal else None, "calibrating": self.calibrating,
+                "feature": FEATURE, "model": NET.folder if NET else None,
                 "dots": len(self.dots),
                 "eyes": {EYES[e.eye]: {"shift": e.shift.value.tolist(), "clicks": len(e.shift.meas),
                                        "jump": bool(np.any(e.shift.jump)), "jump_px": e.shift.jump.tolist(),
@@ -493,7 +576,8 @@ def main():
     sock.bind(SOCKET)
     sock.setblocking(False)
     cal = tracker.cal
-    print("ft-eyes: " + (f"calibration from {cal.info.get('made')} ({cal.info.get('from', cal.info.get('capture'))})"
+    print("ft-eyes: " + (f"the eye net {NET.name} ({NET.folder}); " if NET else "")
+          + (f"calibration from {cal.info.get('made')} ({cal.info.get('from', cal.info.get('capture'))})"
                            if cal else "not calibrated: run the probe's calibration with the Own tracker")
           + f"; waiting for {CAMS}", file=sys.stderr, flush=True)
     cams = wait_for_cams(sock, tracker, want)

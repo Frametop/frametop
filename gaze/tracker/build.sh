@@ -21,6 +21,12 @@ if [ "${FRAME_IN_BOX:-0}" = 1 ] && [ -x /opt/frametop/venv/bin/python ]; then
   python3 -m venv --without-pip build/venv
   /opt/frametop/venv/bin/python -c "import sysconfig; print(sysconfig.get_path(\"purelib\"))" \
     >"$(build/venv/bin/python -c "import sysconfig; print(sysconfig.get_path(\"purelib\"))")/frametop-image.pth"
+  # The eye net (eyes_net.py) needs ncnn, which the image does not have yet: add it here. It needs
+  # the network; without it ft-eyes uses the pupil finder.
+  if ! build/venv/bin/python -c "import ncnn" 2>/dev/null; then
+    { build/venv/bin/python -m ensurepip >/dev/null && build/venv/bin/python -m pip install -q --disable-pip-version-check \
+        --no-deps "$(grep -E "^ncnn==" requirements.txt)"; } || echo "build/venv: no ncnn (the eye net needs it)" >&2
+  fi
 elif ! cmp -s requirements.txt build/venv/requirements.done; then
   rm -rf build/venv
   python3 -m venv build/venv

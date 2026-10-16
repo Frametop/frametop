@@ -3,3 +3,6 @@
 # VTK, GDAL, and over a gigabyte of map data; these wheels are about 165 MB.
 numpy==2.5.3
 opencv-python-headless==5.0.0.93
+# The eye net (eyes_net.py, EYES_MODEL): ncnn's own wheel. Not in the image yet: build.sh adds
+# it to build/venv there from this line.
+ncnn==1.0.20260526

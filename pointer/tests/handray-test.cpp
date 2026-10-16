@@ -450,6 +450,26 @@ void TestReadyAndFist() {
         double t = 0;
         CHECK(RunUntil(r, b, t, 1.0, true, Pointing) >= 0, "no gap or curl known: the old gate");
     }
+    {   // the middle counts too (user, 2026-10-15): its right click and the three-finger scroll
+        auto middle = [](double gap, double gap2) {
+            return [gap, gap2](double tt) {
+                HandFrame f = Pointing(tt);
+                f.gap = gap, f.gap2 = gap2, f.curl = 1.8;
+                return f;
+            };
+        };
+        Body b;
+        HandRay r(1);
+        double t = 0;
+        CHECK(RunUntil(r, b, t, 1.0, true, middle(0.12, 0.13)) < 0, "both 12-13 cm away: no laser");
+        CHECK(RunUntil(r, b, t, 1.0, true, middle(0.12, 0.04)) >= 0, "the thumb 4 cm from the middle tip: the laser");
+        CHECK(RunUntil(r, b, t, 0.6, false, middle(0.12, 0.08)) < 0, "8 cm from it (under readyHide): it stays");
+        CHECK(RunUntil(r, b, t, 1.0, false, middle(0.14, 0.14)) >= 0, "both past readyHide: it goes");
+        Body b2;
+        HandRay o(1);
+        t = 0;
+        CHECK(RunUntil(o, b2, t, 1.0, true, middle(-1, 0.04)) >= 0, "only the middle's gap known: it counts");
+    }
 }
 
 int main() {

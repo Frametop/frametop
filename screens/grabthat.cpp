@@ -136,7 +136,7 @@ void Detector::Frame(int64_t t, const std::vector<Hand> &hands, const Mat &head,
         if (h->id != sd.handId) sd.recent.clear();
         sd.lastSeen = t, sd.handId = h->id, sd.head = head;
         const Features f = Measure(*h, head);
-        sd.thumb = Dist3(h->p[4], h->p[8]);
+        sd.thumb = std::min(Dist3(h->p[4], h->p[8]), Dist3(h->p[4], h->p[12]));   // (the nearer: either pinch)
         sd.recent.push_back({t, f.fwd, f.palmFwd});
         while (!sd.recent.empty() && t - sd.recent.front().t > int64_t(p_.pullMs * 1e6)) sd.recent.erase(sd.recent.begin());
         double palmNow[3];

@@ -28,8 +28,8 @@
 // ft-hands has called it the other side for flipHold (0.3 s), or it's gone; then it takes the hand
 // called its side that the other ray doesn't follow.
 //
-// Aim lock: where a ray pinch clicks. ft-hands sees a pinch once the thumb and index tips are
-// within begin_m, and closing them turns the hand (1.3-1.6 deg median in the first 150 ms after the
+// Aim lock: where a ray pinch clicks. ft-hands sees a pinch once the thumb and index tips (the
+// middle's for a middle pinch) are within begin_m, and closing them turns the hand (1.3-1.6 deg median in the first 150 ms after the
 // begin, 2.4-3.5 at the 90th percentile, on recordings; more before it). So the press goes out
 // along the ray as it was just before the fingers began to close: the newest frame, within lockBack
 // (0.35 s) before the begin, with the tips still lockOpen (1 cm) further apart than the pinch's
@@ -217,22 +217,24 @@ private:
 class AimHistory {
 public:
     explicit AimHistory(Params p = {}) : p_(p) {}
-    // A hands frame at capture time t: the ray (filtered), whether it's up, and the thumb to index
-    // distance (m; < 0 unknown).
-    void Add(double t, const fhray::Ray &ray, bool shown, double pinchD) {
-        h_.push_back({t, ray, shown, pinchD});
+    // A hands frame at capture time t: the ray (filtered), whether it's up, and the thumb to index and
+    // thumb to middle distances (m; < 0 unknown).
+    void Add(double t, const fhray::Ray &ray, bool shown, double pinchD, double pinchD2 = -1) {
+        h_.push_back({t, ray, shown, {pinchD, pinchD2}});
         while (!h_.empty() && h_.front().t < t - 1.0) h_.pop_front();
     }
     // The ray to press along for a pinch that began at tBegin (see the top); endD: the pinch's release
-    // distance (end_m). False: no frame with the ray up within lockBack. age: how long before the begin.
-    bool Lock(double tBegin, double endD, fhray::Ray &out, double &age) const {
+    // distance (end_m); finger: 0 the index pinched, 1 the middle. False: no frame with the ray up
+    // within lockBack. age: how long before the begin.
+    bool Lock(double tBegin, double endD, fhray::Ray &out, double &age, int finger = 0) const {
         const double openD = endD + p_.lockOpen;
+        const int fi = finger == 1 ? 1 : 0;
         const S *open = nullptr, *lead = nullptr;
         for (auto it = h_.rbegin(); it != h_.rend(); ++it) {
             if (it->t > tBegin + 1e-6) continue;
             if (it->t < tBegin - p_.lockBack - 1e-6) break;
             if (!it->shown) continue;
-            if (!open && it->d >= openD) open = &*it;
+            if (!open && it->d[fi] >= openD) open = &*it;
             if (!lead && it->t <= tBegin - p_.lockLead + 1e-6) lead = &*it;
         }
         const S *pick = open ? open : lead;
@@ -254,7 +256,7 @@ private:
         double t;
         fhray::Ray ray;
         bool shown;
-        double d;
+        double d[2];
     };
     Params p_;
     std::deque<S> h_;

@@ -37,13 +37,15 @@
 // pulling back never comes back far enough, a pinch keeps the other fingers open, and typing or a
 // hand in the lap is never held out with the palm forward.
 //
-// The claim: in Closing, on frames where the thumb tip is claimThumb or more from the index tip,
-// and for claimMs after a fire, the hand is ours. vr.cpp reports it near ("near ... <L> <R>" to the
+// The claim: in Closing, on frames where the thumb tip is claimThumb or more from the index and
+// the middle tips, and for claimMs after a fire, the hand is ours. vr.cpp reports it near ("near ... <L> <R>" to the
 // pointer helper, as the palm menu does), so the grip ft-hands sees as the fist closes isn't a
 // gaze grip (a press and drag at the pointer). ft-hands' grip begins with every finger under 1.2,
 // after the three fingers' mean is under claimCurl (1.5), and with the thumb 3 cm or more from the
 // index tip; a pinch begins under 2 cm, so a pinch made from a hand held out (a ray click with the
-// other fingers curled) stays the helper's. On recordings without the gesture (probe-moves, the
+// other fingers curled) stays the helper's, and so does a middle pinch (its right click: the ring and
+// little curl with the middle; 2026-10-15, the user's right clicks were left to ft-screens). The
+// user's flag keeps the thumb 3.5 cm or more from the middle tip as the fist closes. On recordings without the gesture (probe-moves, the
 // 2026-09-29 and lit recordings, the PR #3 takes: 15 minutes), 1 of 143 pinches and 3 of 12 grips
 // began on a claimed hand (11 pinches without the thumb rule), and nothing fired (one did before
 // the palm rule above: an open palm turned over, then closed and pulled in); nor in the user's
@@ -76,7 +78,7 @@ struct Params {
     double armMs = 200;
     double closeMs = 450;
     double claimCurl = 1.5;              // the middle, ring and little fingers' mean extension
-    double claimThumb = 0.025;           // ...with the thumb tip this far (m) from the index tip: not a pinch
+    double claimThumb = 0.025;           // ...with the thumb tip this far (m) from the index and middle tips: not a pinch
     double closePalm = 0.05, closePalmMs = 100;
     double fist = 1.0;
     double pull = 0.08, pullMs = 500;    // m, within ms
@@ -183,7 +185,7 @@ private:
         int64_t since = 0, lastSeen = 0, lastOpen = 0, quietUntil = 0, claimUntil = 0;
         double eye[3] = {0, 0, 0}, palm[3] = {0, 0, 0}, normal[3] = {0, 0, 0};
         Mat head{};                   // the head on the last frame
-        double thumb = 0;             // thumb tip to index tip now (m)
+        double thumb = 0;             // thumb tip to the nearer of the index and middle tips now (m)
         double holdFrom[3] = {0, 0, 0};   // the arming hold: where the palm was as it began,
         double facingSum = 0;             // ...its facing off the aim summed over its frames
         int facingN = 0;

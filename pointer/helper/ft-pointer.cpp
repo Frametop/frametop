@@ -319,9 +319,13 @@
 // right: clicked on frametop.screen.0 (right ray, aim 100 ms before, held 0.15 s)") or why not. A middle
 // pinch (thumb to middle finger, fh_gestures v3) is a right click on a tap; held and moved, it
 // scrolls: the virtual stick deflects with the hand's displacement from the begin (0.5 cm dead zone,
-// full at 4 cm; up and down, and across the ray), times POINTER_RAY_SCROLL (1; -1 turns it round).
-// A grip with the ray up does nothing. With the ray down, pinches and grips are gaze gestures, as
-// below ("Hands"). A ray stays up while its pinch is held, and 250 ms after.
+// full at 4 cm; up and down, and across the ray), times POINTER_RAY_SCROLL (1; -1 turns it round);
+// in its first POINTER_RAY_TAP (0.3 s) only past 1.5 cm, so a right click that wobbles still clicks.
+// A three-finger pinch (the thumb on the index and middle tips, both within POINTER_GAZE_SCROLL_GAP,
+// as in gaze mode; whichever finger ft-hands calls it, at the begin or joining before anything went
+// out) scrolls the same way and never clicks (user, 2026-10-15). A middle pinch's aim lock follows
+// the thumb to middle distance. A grip with the ray up does nothing. With the ray down, pinches and
+// grips are gaze gestures, as below ("Hands"). A ray stays up while its pinch is held, and 250 ms after.
 //   Smoothing (fh_ray.h, fh_smooth.h): the ray is read at this loop's time (At), not at the tracker's
 // frames: its One Euro filters run in continuous time, so the pose sent to the driver moves every
 // loop (about 100 Hz) instead of jumping at 15-30 Hz, which the dashboard's dragger turned into jerks.
@@ -1297,8 +1301,11 @@ int main() {
         // ray that follows the pinching hand; side is the gesture's). released: the pinch ended before
         // its press went out, which then clicks (released at releaseAt). For the log: took (it took
         // the ray from the other hand), lockAge (the aim's age at the begin, s; < 0 none), the hit.
+        // rayThree: a three-finger pinch (the thumb on the index and middle tips, either kind): it
+        // scrolls as a middle pinch does, and never clicks.
         int rayKind = 0, raySlot = -1;
         bool pendingPress = false, scrolling = false, pushOn = false, aimSent = false, released = false, took = false;
+        bool rayThree = false;
         Clock::time_point pressAt{}, releaseAt{}, beganAt{};
         double lockAge = -1;
         std::string pressHit;
@@ -2543,6 +2550,7 @@ int main() {
                     f.elbow = fv(h->elbow), f.elbowConf = h->elbowConf;
                     f.grip = gripDown[s];
                     f.gap = h->pinchD[0] >= 0 ? h->pinchD[0] : Length(h->pts[4] - h->pts[8]);
+                    f.gap2 = h->pinchD[1] >= 0 ? h->pinchD[1] : Length(h->pts[4] - h->pts[12]);
                     f.curl = fhray::FistCurl(h->pts, [](Vec3 v) { return Length(v); });
                     // near: ft-screens says so (a fresh report), or the fingertip is at an overlay: a cast
                     // from 20 cm behind the index tip along the finger meets one within 25 cm (the tip
@@ -2564,7 +2572,7 @@ int main() {
                         }
                     }
                     rays[s].Frame(body, f, mayPoint(s), secsOf(tnow));
-                    rayAims[s].Add(tc, rays[s].Current(), rays[s].Shown(), h->pinchD[0]);
+                    rayAims[s].Add(tc, rays[s].Current(), rays[s].Shown(), h->pinchD[0], h->pinchD[1]);
                 }
             }
             for (int s = 0; s < 2; ++s) {
@@ -2891,6 +2899,12 @@ int main() {
             out = hin::ToRoom(head, p);
             return true;
         };
+        // The thumb on both the index and middle tips (POINTER_GAZE_SCROLL_GAP): a three-finger pinch,
+        // whichever finger ft-hands calls it (it needs the thumb nearer the middle by 1 cm for a middle pinch).
+        auto threeFingers = [&](int side) {
+            return sideGap[side][0] >= 0 && sideGap[side][0] < gazeScrollGap && sideGap[side][1] >= 0 &&
+                   sideGap[side][1] < gazeScrollGap;
+        };
         // A ray pinch (see "Hand ray" at the top). side: the gesture's; rs: the ray's (the one that follows
         // the pinching hand). The aim is locked where the ray pointed just before the fingers began to
         // close (rayowner.h), and the dead zone counts from the ray now.
@@ -2914,7 +2928,8 @@ int main() {
             };
             angles(rays[rs].Current().dir, h.refYaw, h.refPitch);
             fhray::Ray lock;
-            if (rayAims[rs].Lock(double(g.begin_ns) / 1e9, handOk && hg.end_m > 0 ? hg.end_m : 0.035, lock, h.lockAge))
+            if (rayAims[rs].Lock(double(g.begin_ns) / 1e9, handOk && hg.end_m > 0 ? hg.end_m : 0.035, lock, h.lockAge,
+                                 kind == 2 ? 1 : 0))
                 angles(lock.dir, yaw, pitch);
             else
                 yaw = h.refYaw, pitch = h.refPitch, h.lockAge = -1;
@@ -2924,11 +2939,13 @@ int main() {
             rayInactive = false;
             const bool ours_ = laserOurs();
             if (!ours_ && !claimPending && !claimHeld) claimPending = true, claimAt = tnow;
-            h.pendingPress = kind == 0;
+            h.rayThree = rayScroll != 0 && threeFingers(side);   // a scroll, not a click (user, 2026-10-15)
+            h.pendingPress = kind == 0 && !h.rayThree;
             h.pressAt = tnow + std::chrono::milliseconds(ours_ ? 0 : 30 + (claimHeld ? 0 : 8));
             hold = h;
             rays[rs].Hold(true, secsOf(tnow));
-            if (debug) std::printf("ray %s %s began\n", rs ? "right" : "left", kind ? "middle pinch" : "pinch");
+            if (debug)
+                std::printf("ray %s %s began\n", rs ? "right" : "left", h.rayThree ? "three-finger pinch" : kind ? "middle pinch" : "pinch");
             if (debug) std::fflush(stdout);
         };
         // What a ray pinch did, for its log line.
@@ -2950,16 +2967,23 @@ int main() {
         // A ray pinch ended (lost: by losing the hand, a grip, or the ray; why says which).
         auto endRayHold = [&](bool lost, const char *why) {
             const int side = hold.side, kind = hold.rayKind;
-            if (!lost && !hold.pressed && (kind == 0 || !hold.scrolling)) {
+            if (!lost && !hold.pressed && !hold.rayThree && (kind == 0 || !hold.scrolling)) {
                 // a tap before its press went out (or a middle tap): it clicks once the press can go
                 // (the press block below), along the locked aim
                 hold.released = hold.pendingPress = true;
                 return;
             }
             if (kind == 0 && hold.pressed && leftHeld) releaseLeft();
-            if (kind == 2 && hold.scrolling) SendTo(out, "ft_pointer", "scroll 0 0");
+            const bool scrolls = kind == 2 || hold.rayThree;
+            if (scrolls && hold.scrolling) SendTo(out, "ft_pointer", "scroll 0 0");
             std::string what;
-            if (kind == 2 && hold.scrolling) what = "scrolled";
+            if (hold.rayThree) {
+                char b[96];
+                std::snprintf(b, sizeof b, "three-finger pinch: %s (stick up to %.2f)%s%s",
+                              hold.scrolling ? "scrolled" : "no scroll, it didn't move", hold.scrollMax, lost ? ": " : "",
+                              lost ? why : "");
+                what = b;
+            } else if (scrolls && hold.scrolling) what = "scrolled";
             else if (!hold.pressed) what = std::string("no click: ") + why;
             else if (lost) what = "pressed on " + hitName(hold.pressHit) + ", let go: " + why;
             else what = (hold.engaged ? "dragged from " : "clicked on ") + hitName(hold.pressHit);
@@ -3095,7 +3119,7 @@ int main() {
                 // no laser up: no press (POINTER_PINCH_NO_RAY); the first one wakes the pointer
                 handUsed = tnow;
                 if (!active) wake(tnow);
-                if (kind == 0) pinchLog(s, kind, "ignored (no ray up: bring thumb and index together to raise the laser)");
+                if (kind == 0) pinchLog(s, kind, "ignored (no ray up: bring the thumb to the index or middle tip to raise the laser)");
             } else {
                 beginHold(s, kind == 1, g);
             }
@@ -3151,6 +3175,8 @@ int main() {
                         const int other = k == 0 ? 2 : k == 2 ? 0 : -1;
                         if (hold.gazeScroll && other >= 0 && (slots[other][s].flags & FH_PINCH_DOWN)) {
                             hold.right = other == 2;   // a three-finger pinch: ft-hands calls the other finger now; it goes on
+                        } else if (hold.src == Src::Ray && hold.rayThree && other >= 0 && (slots[other][s].flags & FH_PINCH_DOWN)) {
+                            hold.rayKind = other;      // (the same on the ray: both kinds' point is the knuckles)
                         } else if (hold.pressed && hold.second >= 0 && hold.second != s) {
                             // the two-hand press (see gazeTwoHand): the other hand's pinch still holds it, and drags now
                             hold.side = hold.second, hold.right = hold.secondKind == 2, hold.second = -1;
@@ -3164,6 +3190,7 @@ int main() {
                     for (PendingBegin &p : pendingBegins)
                         if (p.side == s && p.kind == k && ended) p.ended = true, p.lost = lost;
                     if (!began) continue;
+                    if (k != 1 && hold.src == Src::Ray && hold.rayThree && hold.side == s) continue;   // its other finger
                     if (!allowed) {
                         if (k != 1) pinchLog(s, k, "ignored (hands not allowed: a VR game, or the headset off)");
                         continue;
@@ -3271,16 +3298,30 @@ int main() {
                     }
                 }
             }
-            // A middle pinch held and moved: scrolling, the stick deflected by the hand's displacement
-            // from the begin (0.5 cm dead zone, full at 4 cm): up and down, and across the ray.
-            if (hold.src == Src::Ray && hold.rayKind == 2) {
-                const fh_pinch_t &g = hg.pinch2[hold.side];
+            // The other finger joining a ray pinch just begun, before anything went out (no press, no
+            // scroll, not a tap already over): a three-finger scroll from here.
+            if (hold.src == Src::Ray && !hold.rayThree && !hold.pressed && !hold.scrolling && !hold.released &&
+                (hold.rayKind == 2 || hold.pendingPress) && rayScroll != 0 &&
+                tnow - hold.beganAt < std::chrono::milliseconds(400) && threeFingers(hold.side)) {
+                const fh_pinch_t &g = hold.rayKind == 2 ? hg.pinch2[hold.side] : hg.pinch[hold.side];
+                if ((g.flags & FH_PINCH_TRACKED) && rayRoom(g.point, hg.capture_ns, hold.beginPoint)) {
+                    hold.rayThree = true, hold.pendingPress = false;
+                    if (debug) std::printf("ray %s: the other finger joined, a three-finger pinch\n", hold.raySlot ? "right" : "left");
+                }
+            }
+            // A middle or three-finger pinch held and moved: scrolling, the stick deflected by the hand's
+            // displacement from the begin (0.5 cm dead zone, full at 4 cm): up and down, and across the ray.
+            // A middle pinch's first rayTap (0.3 s) is a tap's: it scrolls only past 1.5 cm then, so a
+            // right click that wobbles still clicks (2026-10-15: two of the user's turned into scrolls).
+            if (hold.src == Src::Ray && (hold.rayKind == 2 || hold.rayThree)) {
+                const fh_pinch_t &g = hold.rayKind == 2 ? hg.pinch2[hold.side] : hg.pinch[hold.side];
                 Vec3 now;
                 if ((g.flags & FH_PINCH_TRACKED) && rayRoom(g.point, hg.capture_ns, now)) {
                     const Vec3 d = now - hold.beginPoint;
                     const Vec3 right = Normalize(Cross(rayDir, {0, 1, 0}));
                     const double dx = Dot(d, right), dy = d.y;
-                    if (!hold.scrolling && std::hypot(dx, dy) > 0.005) hold.scrolling = true;
+                    const bool tap = !hold.rayThree && tnow - hold.beganAt < std::chrono::duration<double>(rayTap);
+                    if (!hold.scrolling && std::hypot(dx, dy) > (tap ? 0.015 : 0.005)) hold.scrolling = true;
                     if (hold.scrolling) {
                         auto axis = [&](double v) {
                             const double a = std::clamp((std::fabs(v) - 0.005) / 0.035, 0.0, 1.0) * rayScroll;
@@ -3289,6 +3330,7 @@ int main() {
                         const double sx = std::clamp(axis(dx), -1.0, 1.0), sy = std::clamp(axis(dy), -1.0, 1.0);
                         if (sx != hold.scrollX || sy != hold.scrollY) {
                             hold.scrollX = sx, hold.scrollY = sy;
+                            hold.scrollMax = std::max(hold.scrollMax, std::max(std::fabs(sx), std::fabs(sy)));
                             char msg[64];
                             std::snprintf(msg, sizeof msg, "scroll %.2f %.2f", sx, sy);
                             SendTo(out, "ft_pointer", msg);
@@ -3376,7 +3418,7 @@ int main() {
 
         // The driving ray (see "Hand ray" at the top): the pointer's origin and direction. During a ray
         // pinch the direction holds still until the ray has turned rayDeadzone, then follows (steer);
-        // a middle pinch holds it. Push and pull move the origin along the ray while a carry is held.
+        // a middle or three-finger pinch holds it. Push and pull move the origin along the ray while a carry is held.
         // rayMode: a hand's ray has the pointer, driving it or (its owner's grace, rayowner.h) holding
         // its last pose.
         const bool rayDrives = active && raySide >= 0 && rays[raySide].Shown();
@@ -3390,7 +3432,7 @@ int main() {
             if (hold.src == Src::Ray && hold.raySlot == raySide) {
                 // a tap's dead zone first: a quick pinch whose hand turned a little still clicks
                 const bool tap = tnow - hold.beganAt < std::chrono::duration<double>(rayTap);
-                if (hold.rayKind == 0) steer(ry, rp, tap ? std::max(rayDeadzone, rayTapDeadzone) : rayDeadzone, 1.0);
+                if (hold.rayKind == 0 && !hold.rayThree) steer(ry, rp, tap ? std::max(rayDeadzone, rayTapDeadzone) : rayDeadzone, 1.0);
             } else {
                 yaw = ry, pitch = std::clamp(rp, -85.0, 85.0);
             }

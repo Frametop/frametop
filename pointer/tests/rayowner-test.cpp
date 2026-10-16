@@ -290,6 +290,16 @@ void TestAimLock() {
     AimHistory f;
     for (double t = 1.0; t <= begin + 1e-9; t += kFrame) f.Add(t, RayAt(t), t > begin - 0.07, 0.01);
     CHECK(f.Lock(begin, 0.035, r, age) && age <= 0.07 + 1e-9 && age > 0.03, "a ray just up: its oldest frame (%.3f)", age);
+    // a middle pinch: the thumb closing on the middle tip with the index held out (its distance
+    // never closes): the lock follows the middle's distance, as the index's for a pinch
+    AimHistory m;
+    for (double t = 1.0; t <= begin + 1e-9; t += kFrame) {
+        const double closing = std::clamp((t - (begin - 0.15)) / 0.15, 0.0, 1.0);
+        m.Add(t, RayAt(-3 * closing), true, 0.07, 0.06 - 0.04 * closing);
+    }
+    CHECK(m.Lock(begin, 0.035, r, age, 1) && std::fabs(YawDeg(r)) < 1.3 && age > 0.05 && age < 0.15,
+          "a middle pinch: from before the middle closed (%.2f deg, %.3f s)", YawDeg(r), age);
+    CHECK(m.Lock(begin, 0.035, r, age, 0) && age < kFrame, "by the index's distance: the begin's own frame (%.3f s)", age);
 }
 
 // fh_ray's ShowForPinch: a pinch brings back a ray that just dropped, not one sent away.

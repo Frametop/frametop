@@ -135,11 +135,11 @@ POINTER_TYPING_RECENT=600  # hands: ... only within this many seconds of a key (
 POINTER_HAND_RAY=1         # hands: a bare hand raised and pointing shows a ray that drives the pointer like a controller's laser (pinch = click, middle pinch = right click or scroll); 0 = gaze pinches only
 POINTER_RAY_DEADZONE=2.5   # hand ray: degrees the ray turns during a pinch before the press drags (a click's own wobble stays inside)
 POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out pushes it away and pulling in brings it near
-POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle pinch moved up or down (-1 turns the direction round)
+POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle or three-finger pinch moved up or down (-1 turns the direction round; 0 = no ray scrolling, a three-finger pinch is then a pinch)
 POINTER_RAY_RELEASE=2      # hand ray: seconds after the ray goes before the pointer it woke lets go of the laser
 POINTER_RAY_GRACE=0.5      # hand ray: seconds a hand keeps the laser after its ray drops (the other hand's ray takes it after this, or at once by pinching or raising)
 POINTER_RAY_BEAM=0         # hand ray: 0 = only its dot shows (the beam starts just short of it; SteamVR's beam width is one setting for every laser, read only when SteamVR starts) | 1 = the whole beam from the hand
-POINTER_RAY_READY=6        # hand ray: shows only with the thumb and index tips within this many cm (gone past POINTER_RAY_READY_HIDE, 10): a laser for pinching | 0 = whenever the hand points
+POINTER_RAY_READY=6        # hand ray: shows only with the thumb tip within this many cm of the index or middle tip (gone past POINTER_RAY_READY_HIDE, 10): a laser for pinching | 0 = whenever the hand points
 POINTER_RAY_FIST_CURL=1.1  # hand ray: a fist (the index and the other fingers curled under this, tip-to-wrist over knuckle-to-wrist) drops the laser, and a pinch made closing into one doesn't click | 0 = off
 POINTER_PINCH_NO_RAY=0     # hands, gaze off: 1 = a pinch or fist with no laser up presses where the pointer is and drags it (air mouse; most accidental clicks of the 2026-10-11 test) | 0 = it only wakes the pointer
 POINTER_RAY_SMOOTH_MINCUTOFF=0.8  # hand ray: smoothing with the hand still (Hz; lower = steadier, laggier)
@@ -158,7 +158,7 @@ POINTER_GAZE_TWO_HAND=1    # hands in gaze mode, as Meta+J then Meta+K: while on
 POINTER_GAZE_RIGHT_DRAG=0  # hands in gaze mode: an index pinch within this many seconds of the other hand's index tap holds the right button where you look (the tap itself clicks) | 0 = off
 POINTER_TYPING_HIDE=1.5    # gaze mode: the dot and its laser hide this many seconds after each key (0 = never)
 POINTER_PINCH_MAX_SPEED=1.0  # a pinch begun with its palm moving faster than this (m/s, smoothed) within 0.25 s doesn't click (lazy susan strokes, waves) | 0 = off
-POINTER_GAZE_SCROLL=1      # hands in gaze mode: the thumb on both the index and middle tips (within POINTER_GAZE_SCROLL_GAP, 0.035 m) scrolls where you looked as the hand moves (0.5 cm dead zone, full at 4 cm), times this (-1 turns it round) | 0 = off
+POINTER_GAZE_SCROLL=1      # hands in gaze mode: the thumb on both the index and middle tips (within POINTER_GAZE_SCROLL_GAP, 0.035 m, which the hand ray's three-finger scroll uses too) scrolls where you looked as the hand moves (0.5 cm dead zone, full at 4 cm), times this (-1 turns it round) | 0 = off
 POINTER_GAZE_CHORD=0       # hands in gaze mode: 1 = while one hand's pinch is held, the other hand's pinch holds the right button (the chord; the right-drag replaced it)
 POINTER_GAZE_HAND_RAY=0    # hands in gaze mode: 0 = no hand ray, your eyes aim and a pinch clicks where you look | 1 = a raised, pointing hand's ray works beside the gaze
 POINTER_GAZE_PINCH_DEADZONE=4 # hands in gaze mode: degrees (seen from the eye; about 3 cm at arm's length) a held pinch moves before it nudges the pointer; held still for POINTER_GAZE_HOLD it's a press, to drag

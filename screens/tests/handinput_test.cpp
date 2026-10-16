@@ -154,6 +154,7 @@ struct SynthHand {
     double tiltDeg = 20;               // fingertips up: the palm turns toward the head behind it
     int curl = 0;                      // middle, ring and little: 0 open, 1 half curled, 2 a fist
     int curlIndex = 0;                 // ...and the index, likewise (grab that's fist)
+    bool thumbOnMiddle = false;        // ...the thumb tip on the middle's (a middle pinch)
     double curlT = -1, curlIndexT = -1;   // ...or in between (0..2: open, half, fist), a hand closing
     // a pointing hand (PointingHand) whose middle finger the tracker has nearly straight: its tip
     // this much deeper (toward where the index points) than the index tip (NaN: curled)
@@ -192,6 +193,7 @@ void PalmHand(const SynthHand &h, float out[21][3]) {
     if (h.curlT >= 0)
         for (int f = 0; f < 3; ++f) mix(&base[10 + 4 * f], half[f], fist[f], std::clamp(h.curlT, 0.0, 2.0), &out[10 + 4 * f]);
     if (h.curlIndexT >= 0) mix(&base[6], halfIndex, fistIndex, std::clamp(h.curlIndexT, 0.0, 2.0), &out[6]);
+    if (h.thumbOnMiddle) out[4][0] = out[12][0] + 0.008f, out[4][1] = out[12][1], out[4][2] = out[12][2];
     const double r = h.rollDeg * M_PI / 180, a = h.tiltDeg * M_PI / 180;
     double c[3] = {0, 0, 0};
     for (int j = 0; j < 21; ++j) {
@@ -3159,6 +3161,23 @@ void TestGrabThatGesture() {
         for (int k = 0; k < 4; ++k) q.Frame({StopHand(0.1, -0.15, -0.42)});
         for (int k = 1; k <= 6; ++k) q.Frame({StopHand(0.1, -0.15, -0.42 + 0.025 * k, k / 6.0, 2)});
         CHECK(q.fires.empty());
+    }
+    {   // a middle pinch from a hand held out (a ray's right click, the other two curled with it): the
+        // pointer helper's, not claimed (2026-10-15: the user's right clicks were "left to ft-screens")
+        auto closing = [](bool middlePinch) {
+            GrabRig r;
+            for (int k = 0; k < 10; ++k) r.Frame({StopHand(0.1, -0.15, -0.42)});
+            for (int k = 0; k < 6; ++k) {
+                SynthHand h = StopHand(0.1, -0.15, -0.42, 0, 1);
+                h.thumbOnMiddle = middlePinch;
+                r.Frame({h});
+            }
+            return r.claimed[1];
+        };
+        const int fist = closing(false), pinch = closing(true);
+        std::printf("grab that: the three curled from a hand held out claim %d frames, with the thumb on the middle %d\n",
+                    fist, pinch);
+        CHECK(fist >= 2 && pinch == 0);
     }
     {   // a wave: held out open, palm forward, swinging 15 cm either way at 1.5 Hz for 3 s
         GrabRig r;

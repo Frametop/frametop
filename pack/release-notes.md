@@ -1,6 +1,6 @@
 ## Install
 
-On a Steam Frame (SteamOS, VR variant). Download **Frametop.zip** below (about 1.1 GB), then either:
+On a Steam Frame (SteamOS, VR variant). Download **Frametop.zip** below (about 1.4 GB), then either:
 
 - **With [FrameDrop](https://framedropvr.com) on a PC:** drop Frametop.zip on your paired headset. In the headset, open Frametop in your library and press Play.
 - **On the headset:** unpack Frametop.zip (in the desktop's Dolphin or Konsole) and run `Frametop/frametop-install.sh`.

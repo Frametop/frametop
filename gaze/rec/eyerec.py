@@ -165,6 +165,8 @@ class Writer:
             got = False
             for c in CAMERAS:
                 n = share.count(c)
+                if n <= seen[c]:   # nothing new (and never step back: that would copy frames twice)
+                    continue
                 if n - seen[c] > share.slots:   # fell behind: those are gone
                     with self._lock:
                         if self._on:

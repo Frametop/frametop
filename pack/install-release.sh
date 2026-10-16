@@ -20,6 +20,7 @@
 #
 # Usage: install-release.sh [--yes] [--any-steamos] [--unpack-only] [--dir DIR]
 #                           [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
+#                           [--no-eye-recorder]
 #                           [--no-bluetooth | --bluetooth]
 #   --unpack-only  stop after step 2 and the copy: don't run install.sh
 #   --dir DIR      where the releases go (default ~/.local/share/frametop/releases)
@@ -113,7 +114,7 @@ main() {
       --any-steamos) any=1 ;;
       --unpack-only) unpack_only=1 ;;
       --dir) base=${2:?--dir needs a folder}; shift ;;
-      --no-voice|--no-hands|--no-hand-recorder|--no-eye-tracker|--no-bluetooth|--bluetooth) pass+=("$1") ;;
+      --no-voice|--no-hands|--no-hand-recorder|--no-eye-tracker|--no-eye-recorder|--no-bluetooth|--bluetooth) pass+=("$1") ;;
       -h|--help) sed -n '2,27p' "$0"; return 0 ;;
       *) echo "unknown option: $1" >&2; return 2 ;;
     esac

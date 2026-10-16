@@ -8,15 +8,17 @@
 # distrobox the release brings, makes the release's container from its image, and builds nothing.
 #
 # Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
-#                    [--no-bluetooth | --bluetooth]
-#   --yes           don't ask; installs voice dictation and gaze mode, and hand tracking, the Hand
-#                   Recorder and our eye tracker if sudo can run without a password prompt; skips
-#                   the Bluetooth fixes and the SteamVR restart
+#                    [--no-eye-recorder] [--no-bluetooth | --bluetooth]
+#   --yes           don't ask; installs voice dictation, gaze mode and the Eye Recorder, and hand
+#                   tracking, the Hand Recorder and our eye tracker if sudo can run without a
+#                   password prompt; skips the Bluetooth fixes and the SteamVR restart
 #   --no-voice      don't offer voice dictation (Frametop Voice: it downloads about 320 MB)
 #   --no-hands      don't offer hand tracking or the Hand Recorder
 #   --no-hand-recorder  don't offer the Hand Recorder (a release's; a clone builds it with
 #                   hands/rec/install.sh)
-#   --no-eye-tracker  don't offer our own eye tracker
+#   --no-eye-tracker  don't offer our own eye tracker (or the Eye Recorder, which needs it)
+#   --no-eye-recorder  don't offer the Eye Recorder (a release's; a clone builds it with
+#                   gaze/rec/install.sh)
 #   --no-bluetooth  don't offer the Bluetooth fixes
 #   --bluetooth     install the Bluetooth fixes without asking (with --yes: if sudo can run
 #                   without a password prompt)
@@ -25,17 +27,18 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$root/scripts/_env.sh"
 
-assume_yes=0 bluetooth=1 eye_tracker=1 hands=1 hand_recorder=1 voice=1
+assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 hands=1 hand_recorder=1 voice=1
 for arg in "$@"; do
   case $arg in
     --yes) assume_yes=1 ;;
     --no-bluetooth) bluetooth=0 ;;
     --bluetooth) bluetooth=2 ;;
-    --no-eye-tracker) eye_tracker=0 ;;
+    --no-eye-tracker) eye_tracker=0 eye_recorder=0 ;;
+    --no-eye-recorder) eye_recorder=0 ;;
     --no-voice) voice=0 ;;
     --no-hands) hands=0 hand_recorder=0 ;;
     --no-hand-recorder) hand_recorder=0 ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -222,6 +225,27 @@ elif ask "Install our own eye tracker? Gaze mode then uses it instead of SteamVR
   fi
 else
   echo "skipped: gaze mode uses SteamVR's eye tracker. Install ours later with: gaze/tracker/install.sh"
+fi
+
+# The Eye Recorder (gaze/rec), as the Hand Recorder: a release brings it built, so it's only the menu
+# entry, which needs our eye tracker's frame grabber (step 11). An entry from the release before
+# points into that release's folder: it's renewed without asking. A clone builds it with
+# gaze/rec/install.sh (a few minutes), so it isn't offered here.
+if [ "$FRAME_RELEASE" = 1 ]; then
+  recorder="the Eye Recorder (records your eyes for Frametop's eye tracking dataset)"
+  if [ "$eye_recorder" = 0 ]; then
+    echo "$recorder: skipped. Add it later with: gaze/rec/install.sh"
+  elif on_frame '[ -e ~/.local/share/applications/frametop-eyerec.desktop ]'; then
+    "$root/gaze/rec/install.sh" install >/dev/null && echo "$recorder: updated" ||
+      echo "$recorder: couldn't update it (above). Try again with: gaze/rec/install.sh"
+  elif ! on_frame 'systemctl is-enabled -q frametop-eyegrab.service 2>/dev/null'; then
+    echo "$recorder: skipped: it needs our eye tracker. Install both later with: gaze/tracker/install.sh, then gaze/rec/install.sh"
+  elif ask "Add the Eye Recorder to the app menu? It records your eyes for Frametop's eye tracking dataset, which trains our eye tracker; nothing leaves the headset until you press Upload, and uploads are encrypted." y; then
+    "$root/gaze/rec/install.sh" install ||
+      echo "$recorder: not installed (above). Try again later with: gaze/rec/install.sh"
+  else
+    echo "$recorder: skipped. Add it later with: gaze/rec/install.sh"
+  fi
 fi
 
 step "12/12 Bluetooth fixes (optional; they let LE mice and keyboards like the Swiftpoint Z3 reconnect)"

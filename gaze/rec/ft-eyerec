@@ -1,6 +1,9 @@
 #!/bin/bash
-# Launch the Frametop Eye Recorder from a Plasma session on the Frame host.
-# The app runs in the dev container (PySide6, Kirigami and zstd come from Fedora there).
+# Launch the Frametop Eye Recorder from a Plasma session on the Frame host (its app menu entry,
+# gaze/rec/install.sh).
+# The app runs in Frametop's container (PySide6, Kirigami and zstd come from Fedora there; a
+# release's image has the recorders' cryptography and huggingface_hub in /opt/frametop/venv, which
+# distrobox leaves off the front of PATH, so it goes first here).
 # podman needs the real XDG_RUNTIME_DIR and the real user bus (to reach systemd for
 # the container's cgroup; the Frametop session runs on a private bus from
 # dbus-run-session). The session's Wayland socket and bus go to the app itself.
@@ -14,8 +17,8 @@ export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
 # From the home folder: the app's host commands (distrobox-host-exec) run in its folder on the
 # host, and a folder only the container has, such as /run/host/tmp, makes them all fail.
 cd "$HOME" || exit 1
-"$here/../../scripts/container-up.sh"
-exec "$HOME/.local/bin/distrobox" enter dev -- env WAYLAND_DISPLAY="$wl" DISPLAY="${DISPLAY:-}" \
+exec "$here/../../scripts/in-box" env PATH="/opt/frametop/venv/bin:/opt/frametop/bin:$PATH:/usr/sbin:/sbin" \
+  WAYLAND_DISPLAY="$wl" DISPLAY="${DISPLAY:-}" \
   XAUTHORITY="${XAUTHORITY:-}" DBUS_SESSION_BUS_ADDRESS="$session_bus" \
   QT_QPA_PLATFORM="wayland;xcb" \
   python3 "$here/ft_eyerec.py" "$@"

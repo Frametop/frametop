@@ -120,6 +120,7 @@ main() {
     [ -e "$apps/$f.desktop" ] && entries+=("$apps/$f.desktop")
   done
   [ -e "$apps/frametop-handrec.desktop" ] && entries+=("$apps/frametop-handrec.desktop")
+  [ -e "$apps/frametop-eyerec.desktop" ] && entries+=("$apps/frametop-eyerec.desktop")
   entries+=("$apps"/frametop-profile-*.desktop)  # one per layout profile (layout/ft_layout.py)
   [ -L "$handsctl" ] || handsctl=
   [ -f "$eye_rate" ] && [ -f "$repo/gaze/eye-rate.py" ] || eye_rate=

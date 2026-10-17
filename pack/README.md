@@ -41,6 +41,27 @@ Component builds strip non-runtime symbols before the binaries are copied into
 the image. The pointer driver and gaze panel also discard unused sections;
 they keep `-O2`, the existing floating-point flags, and the host glibc checks.
 
+The image has a shared Fedora/toolchain stage, a builder, and the final runtime.
+The builder installs Fedora's full PySide6 RPM, then `pyside-runtime.py` exports
+the bindings imported by the four Frametop settings/recording applications.
+Their native binaries and support libraries are copied unchanged to the same
+Fedora paths, so both the system Python used by distrobox and the locked venv
+can import them. A manifest records their source RPMs and file hashes; the
+image build and offline tests check imports, hashes and shared-library resolution.
+The available-module metadata describes the exported subset rather than the
+full SDK. Keep `BACKENDS` in that script current when adding another Qt app.
+
+The native Qt/Kirigami libraries, desktop style, Breeze icons, platform plugins
+and image formats (including SVG and PDF) remain distro packages. Qt WebEngine,
+3D and other bindings unused by Frametop stay in the builder. This is Frametop's
+private application runtime; the separate `dev` container still installs the
+full PySide SDK. The runtime also keeps its compilers, headers and test tools,
+so the native build recipes and `ft dev test` still work. Base/environment
+layers stay separate from the source payload: the pinned toolbox base is
+shared with the retained rollback release, and cached builds can also reuse
+the added environment layers. Clean builds on independent runners need not
+produce identical environment layers, even with identical RPM versions.
+
 What deliberately stays outside the image for now: the **host payload** — the
 SteamVR driver registration (`vrpathreg`), ft-camd's file capabilities
 (setcap), systemd units, the KWin script. Those need the SteamOS host, and

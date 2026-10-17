@@ -22,9 +22,9 @@ RUN dnf -y install --setopt=install_weak_deps=False \
       openssl-devel libcurl-devel expat-devel libuuid-devel json-devel \
       opus-devel pulseaudio-libs-devel \
       # Frametop Input Settings (Kirigami, PySide6) and remote desktop (krdp):
-      # the KDE/Qt stack has no PyPI wheels, so it stays a dnf package
+      # keep the native KDE/Qt stack in matching Fedora packages
       python3-shiboken6 kf6-kirigami kf6-qqc2-desktop-style \
-      qt6-qtwayland qt6-qtsvg qt6-qtimageformats \
+      qt6-qtwayland qt6-qtsvg qt6-qtimageformats qt6-qtpdf \
       breeze-icon-theme plasma-breeze krdp freerdp tigervnc-x11-server xrandr \
     && dnf -y remove 'glibc-langpack-*' \
     && dnf -y install glibc-langpack-en \
@@ -43,7 +43,7 @@ RUN install -d /opt/frametop/bin /opt/frametop/lib \
 
 # Python: Fedora's own python3 (the digest-pinned base freezes it), with the
 # locked packages in a venv on top. The venv sees the system site-packages,
-# because PySide6 and Kirigami come from dnf for this python3: one interpreter
+# because PySide6 and Kirigami come from Fedora for this python3: one interpreter
 # imports both, as in the dev container on the Frame. Rebuilt only when the
 # lockfile changes, so source edits below reuse this layer.
 # uv sync --frozen --group tracker: the default dev group (pytest/ruff for CI's
@@ -64,7 +64,7 @@ RUN uvdir=$(mktemp -d) \
  && /opt/frametop/venv/bin/python -c 'import numpy, cv2' \
  && rm -rf "$uvdir"
 
-# Stable runtime layers are shared by successive releases (including rollback).
+# Preserve separate base/environment layers for cached builds and rollback.
 # Keep the toolchain and headers: ft dev shell/test still work in this image.
 # PySide's full Fedora RPM also requires WebEngine/3D/etc. The builder exports
 # the unchanged bindings Frametop uses, against these same system Qt libraries.
@@ -120,7 +120,7 @@ RUN git init -q pack/build/distrobox \
 RUN python3 pack/pyside-runtime.py --repo /src/frametop --destination /runtime
 
 # The default environment: Frametop's binaries and the venv's python3 (Fedora's
-# interpreter, with the locked packages and the dnf Qt stack) first.
+# interpreter, with the locked packages and the Fedora Qt stack) first.
 # sleep infinity as the default command keeps the image usable with distrobox
 # create, like the toolbox base.
 FROM runtime-common AS runtime

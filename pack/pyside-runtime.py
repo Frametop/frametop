@@ -49,11 +49,12 @@ def export(dest, repo):
     imports(repo)
     import PySide6
     from PySide6 import _config
+    from PySide6.QtCore import qVersion
 
     package = Path(PySide6.__file__).parent.resolve()
     modules = {name.split(".")[-1]: Path(m.__file__).resolve()
                for name, m in sys.modules.items() if name.startswith("PySide6.Qt")
-               and getattr(m, "__file__", "").endswith(".so")}
+               and isinstance(getattr(m, "__file__", None), str) and m.__file__.endswith(".so")}
     if not set(DIRECT) <= modules.keys():
         raise RuntimeError("a required binding was not imported")
     if (dest / package.relative_to("/")).exists() or (dest / MANIFEST).exists():
@@ -63,6 +64,8 @@ def export(dest, repo):
         src = Path(name)
         if not src.is_file() and not src.is_symlink():
             continue
+        if src.name == "entry_points.txt":
+            continue  # this private runtime does not advertise the omitted SDK commands
         if src.is_relative_to(package):
             rel = src.relative_to(package)
             if "__pycache__" in rel.parts or rel.parts[0] == "Qt":
@@ -84,11 +87,12 @@ def export(dest, repo):
         copied.append(name)
         if ".so" in src.name:
             elf.append(name)
-            if src.read_bytes() != out.read_bytes():
+            if not src.is_symlink() and src.read_bytes() != out.read_bytes():
                 raise RuntimeError(f"ELF changed during export: {src}")
 
     # __all__ discovers the available extension files. The build metadata must agree.
     cfg = dest / (package / "_config.py").relative_to("/")
+    cfg_stat = cfg.stat()
     text = cfg.read_text()
     nodes = [n for n in ast.parse(text).body if isinstance(n, ast.Assign)
              and any(isinstance(t, ast.Name) and t.id == "built_modules" for t in n.targets)]
@@ -100,7 +104,9 @@ def export(dest, repo):
     node, lines = nodes[0], text.splitlines(keepends=True)
     cfg.write_text("".join(lines[:node.lineno - 1]) + f"built_modules = {available!r}\n"
                    + "".join(lines[node.end_lineno:]))
+    os.utime(cfg, ns=(cfg_stat.st_atime_ns, cfg_stat.st_mtime_ns))
     staged = dest / package.relative_to("/")
+    check_elf([dest / n.lstrip("/") for n in elf])
     probe = ("import PySide6; from PySide6 import _config; "
              f"assert set(PySide6.__all__) == {set(modules)!r}; "
              f"assert _config.built_modules == {available!r}")
@@ -108,9 +114,12 @@ def export(dest, repo):
                                              PYTHONDONTWRITEBYTECODE="1"))
     if not compileall.compile_dir(str(staged), ddir=str(package), quiet=1, optimize=[0, 1]):
         raise RuntimeError("PySide bytecode compilation failed")
-    manifest = {"private_app_runtime": True, "pyside": PySide6.__version__, "modules": sorted(modules),
+    for pyc in staged.rglob("*.pyc"):
+        stat = Path(importlib.util.source_from_cache(str(pyc))).stat()
+        os.utime(pyc, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    manifest = {"private_app_runtime": True, "pyside": PySide6.__version__, "qt": qVersion(), "modules": sorted(modules),
                 "source_rpms": run("rpm", "-q", "python3-pyside6", "python3-shiboken6").splitlines(),
-                "metadata_change": "_config.built_modules narrowed to the available bindings",
+                "metadata_change": "_config.built_modules narrowed; omitted SDK entry_points.txt",
                 "elf": elf, "sha256": {n: hashlib.sha256((dest / n.lstrip("/")).read_bytes()).hexdigest()
                                        for n in copied if not (dest / n.lstrip("/")).is_symlink()}}
     target = dest / MANIFEST
@@ -139,6 +148,9 @@ def main():
             importlib.import_module("PySide6." + name)
         imports(a.repo.resolve())
         import PySide6
+        from PySide6.QtCore import qVersion
+        if qVersion() != manifest["qt"] or run("rpm", "-q", "python3-shiboken6") not in manifest["source_rpms"]:
+            raise RuntimeError("runtime Qt/Shiboken version differs from the builder")
         if set(PySide6.__all__) != set(manifest["modules"]):
             raise RuntimeError("runtime module advertisement differs")
         print("PySide runtime: all checks passed")

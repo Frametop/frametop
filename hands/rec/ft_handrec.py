@@ -266,6 +266,9 @@ class Backend(RecorderBackend):
         except hub.HubError:
             return hub.HF_TEST_DATASET if self._consent_kind == "testing" else hub.HF_DATASET
 
+    def _session_label(self, session):
+        return session_label(session)
+
     def _session_dataset(self, session):
         try:
             return hub.dataset_id(hub.session_kind(self.store, session))
@@ -716,6 +719,8 @@ class Backend(RecorderBackend):
             return "exporting a recording"
         if self.uploading:
             return "uploading a recording"
+        if self._upload_queue:
+            return "waiting to upload a recording"
         return ""
 
     def shutdown(self):
@@ -887,7 +892,7 @@ class Backend(RecorderBackend):
 
     @Slot(str)
     def deleteSession(self, session):
-        if self._active_guard(session):
+        if self._active_guard(session) or self._busy_guard(session):
             return
         try:
             self.store.delete_session(session)
@@ -900,7 +905,7 @@ class Backend(RecorderBackend):
     def _freeable(self):
         busy = {self._session_id if self.sessionActive else "", self._export_session if self.exporting else "",
                 (self._upload or {}).get("session", "") if self.uploading else ""}
-        return [f for f in self.store.freeable() if f["id"] not in busy]
+        return [f for f in self.store.freeable() if f["id"] not in busy and not self._queued(f["id"])]
 
     @Property(int, notify=sessionsRelay)
     def freeableCount(self):

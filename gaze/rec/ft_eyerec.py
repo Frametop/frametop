@@ -337,6 +337,9 @@ class Backend(RecorderBackend):
     def _upload_values(self, session, path):
         return {"ROUND": session}
 
+    def _session_label(self, session):
+        return round_label(session)
+
     @Property(str, constant=True)
     def toolVersion(self):
         return takes.tool_version()
@@ -739,7 +742,7 @@ class Backend(RecorderBackend):
 
     @Slot(str)
     def deleteSession(self, rnd):
-        if self._active_guard(rnd):
+        if self._active_guard(rnd) or self._busy_guard(rnd):
             return
         try:
             self.store.delete_round(rnd)

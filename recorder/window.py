@@ -1,7 +1,7 @@
 """What the recorders' windows share (hands/rec/ft_handrec.py, gaze/rec/ft_eyerec.py): a QObject
-backend with the consent and profile, the session's controls, export on a thread, the Hugging Face
-login and upload in hub.py child processes, the Frame kept awake while they run, and small
-helpers. Each recorder's Backend inherits it, adds its checklist, session and review, and keeps
+backend with the consent and profile, the session's controls, export on a thread (one at a time,
+the rest queued), the Hugging Face login and upload in hub.py child processes (an export can upload
+by itself once it's done), the Frame kept awake while they run, and small helpers. Each recorder's Backend inherits it, adds its checklist, session and review, and keeps
 these slot and property names, which its main.qml calls.
 
 A "session" here is what the recorder records in one go: a hand session, or an eye round.
@@ -145,12 +145,21 @@ class RecorderBackend(QObject):
         self._session_id = ""
         self._status = {}
         self._awake = set()          # what keeps the Frame awake now: "export", "upload"
+        self._awake_on = False       # the awake unit runs (set under _awake_lock)
         self._awake_lock = threading.Lock()
         self._export_cancel = None
         self._export_thread = None
         self._export_fraction = 0.0
         self._export_text = ""
         self._export_session = ""
+        # Waiting their turn: exports [{"session", "keep_notes"}], then uploads [session]. The
+        # sessions in _upload_after upload by themselves once exported (queued or running).
+        self._export_queue = []
+        self._upload_after = set()
+        self._upload_queue = []
+        # What the exports and uploads came to, newest last, for whoever comes back to the
+        # headset: [{"text", "error", "link"}].
+        self._done_log = []
         self._statusArrived.connect(self._on_status)
         self._exportProgress.connect(self._on_export_progress)
         self._exportFinished.connect(self._on_export_finished)
@@ -196,6 +205,10 @@ class RecorderBackend(QObject):
         """UPLOAD.md's @NAME@ placeholders beyond the export's path and size, the contributor and
         the dataset."""
         return {"SESSION": session}
+
+    def _session_label(self, session):
+        """How the window names a session in a message."""
+        return session
 
     def _keep_awake(self):
         """False: don't start the awake unit (a dry run)."""
@@ -369,6 +382,8 @@ class RecorderBackend(QObject):
                 self._session.stop()
             except Exception:
                 pass
+        self._export_queue, self._upload_queue = [], []
+        self._upload_after.clear()
         if self._export_cancel:
             self._export_cancel.set()
             self._export_thread.join(15)
@@ -376,7 +391,7 @@ class RecorderBackend(QObject):
         if self._upload_proc:
             self.cancelUpload()
             self._upload_thread.join(10)
-        if self._awake and self.AWAKE_UNIT:
+        if (self._awake or self._awake_on) and self.AWAKE_UNIT:
             try:
                 units.stop_unit(self.AWAKE_UNIT)
             except Exception:
@@ -410,22 +425,27 @@ class RecorderBackend(QObject):
     def _stay_awake(self, why, on):
         """Hold off sleep while an export or upload runs, so the headset can be taken off and
         left plugged in: a host unit running systemd-inhibit, started with the first reason
-        and stopped with the last."""
+        and stopped with the last. The reasons change here, on this thread; each worker brings
+        the unit to what they are when it runs, so workers finishing out of order (an export's
+        end, then its upload's start) leave it right."""
         if not self.AWAKE_UNIT or not self._keep_awake():
             return
+        (self._awake.add if on else self._awake.discard)(why)
 
         def run():
             with self._awake_lock:
-                had = bool(self._awake)
-                (self._awake.add if on else self._awake.discard)(why)
+                want = bool(self._awake)
+                if want == self._awake_on:
+                    return
                 try:
-                    if self._awake and not had:
+                    if want:
                         units.start_unit(self.AWAKE_UNIT, "keeps the Frame awake while exporting or uploading",
                                          ["systemd-inhibit", "--what=sleep:idle", "--mode=block",
                                           "--who=" + self.APP, "--why=" + self.AWAKE_WHY, "sleep", "infinity"],
                                          app=self.APP)
-                    elif had and not self._awake:
+                    else:
                         units.stop_unit(self.AWAKE_UNIT)
+                    self._awake_on = want
                 except Exception as e:
                     print(f"keeping the Frame awake: {e}", file=sys.stderr, flush=True)
         self._thread(run)
@@ -436,12 +456,99 @@ class RecorderBackend(QObject):
     def _uploading(self, session):
         return self.uploading and self._upload.get("session") == session
 
+    def _queued(self, session):
+        """Waiting to export, or to upload."""
+        return (any(q["session"] == session for q in self._export_queue)
+                or session in self._upload_queue)
+
+    def _busy_guard(self, session):
+        """Its export or upload runs or waits: its recordings and export stay until then."""
+        if self._exporting(session) or self._uploading(session) or self._queued(session):
+            self.message.emit("This session is exporting or uploading, or waiting to: "
+                              "cancel that first (on the Export page)", True)
+            return True
+        return False
+
+    @Property("QVariantList", notify=exportChanged)
+    def exportQueue(self):
+        """The exports waiting their turn, in order: [{"session", "upload"}]."""
+        return [{"session": q["session"], "upload": q["session"] in self._upload_after} for q in self._export_queue]
+
+    @Property("QVariantList", notify=exportChanged)
+    def uploadAfter(self):
+        """The sessions that upload by themselves once exported (the running export's too)."""
+        return sorted(self._upload_after)
+
+    @Property("QVariantList", notify=uploadChanged)
+    def uploadQueue(self):
+        """The exported sessions waiting to upload, in order."""
+        return list(self._upload_queue)
+
+    @Property("QVariantList", notify=exportChanged)
+    def doneLog(self):
+        return list(self._done_log)
+
+    def _log_done(self, text, error=False, link=""):
+        self._done_log = (self._done_log + [{"text": text, "error": error, "link": link}])[-20:]
+        self.exportChanged.emit()
+
+    @Slot()
+    def clearDoneLog(self):
+        self._done_log = []
+        self.exportChanged.emit()
+
     @Slot(str, bool)
     def exportSession(self, session, keep_notes):
-        # One export at a time. Another session's upload can go on: the export writes beside its
-        # own export (.partial) and only replaces that one at the end, so not while it's uploading.
-        if self.exporting or self._uploading(session) or self._active_guard(session):
+        self.queueExport(session, keep_notes, False)
+
+    @Slot(str, bool, bool)
+    def queueExport(self, session, keep_notes, upload):
+        """Export it now, or after the exports already waiting (one at a time). upload: once it's
+        exported, it uploads by itself (it waits for any upload before it)."""
+        # Another session's upload can go on: the export writes beside its own export (.partial)
+        # and only replaces that one at the end, so not while it's uploading or waiting to.
+        if self._uploading(session) or session in self._upload_queue or self._active_guard(session):
             return
+        if upload:
+            self._upload_after.add(session)
+        if self._exporting(session) or any(q["session"] == session for q in self._export_queue):
+            self.exportChanged.emit()   # already on its way: only whether it uploads changed
+            return
+        self._export_queue.append({"session": session, "keep_notes": keep_notes})
+        if self.exporting:
+            self.exportChanged.emit()
+        else:
+            self._next_export()
+
+    @Slot(str, bool)
+    def setUploadAfter(self, session, on):
+        """Whether a queued or running export uploads by itself once it's done."""
+        if not (self._exporting(session) or any(q["session"] == session for q in self._export_queue)):
+            return
+        (self._upload_after.add if on else self._upload_after.discard)(session)
+        self.exportChanged.emit()
+
+    @Slot(str)
+    def unqueueExport(self, session):
+        """Take a waiting export out of the queue (the running one: cancelExport)."""
+        self._export_queue = [q for q in self._export_queue if q["session"] != session]
+        self._upload_after.discard(session)
+        self.exportChanged.emit()
+
+    @Slot(str)
+    def unqueueUpload(self, session):
+        if session in self._upload_queue:
+            self._upload_queue.remove(session)
+            self.uploadChanged.emit()
+
+    def _next_export(self):
+        """Start the first waiting export, if none runs."""
+        if self.exporting or not self._export_queue:
+            return
+        q = self._export_queue.pop(0)
+        self._start_export(q["session"], q["keep_notes"])
+
+    def _start_export(self, session, keep_notes):
         cancel = threading.Event()
         self._export_cancel = cancel
         self._export_session = session
@@ -463,7 +570,9 @@ class RecorderBackend(QObject):
 
     @Slot()
     def cancelExport(self):
+        """Cancel the running export (and its upload after); the next waiting one starts."""
         if self._export_cancel:
+            self._upload_after.discard(self._export_session)
             self._export_cancel.set()
             self._export_text = "Cancelling"
             self.exportChanged.emit()
@@ -474,23 +583,54 @@ class RecorderBackend(QObject):
             self.exportChanged.emit()
 
     def _on_export_finished(self, path, error):
+        session = self._export_session
+        send = session in self._upload_after
+        self._upload_after.discard(session)
         self._export_cancel = None
-        self._stay_awake("export", False)
+        label = self._session_label(session)
         if error == "cancelled":
             self._export_text = "Cancelled: nothing was kept"
+            self._log_done(f"{label}: export cancelled")
         elif error:
             self._export_text = "Failed: " + error
             self.message.emit("Export failed: " + error, True)
+            self._log_done(f"{label}: export failed: {error}", True)
         else:
             self._export_fraction = 1.0
             self._export_text = f"Exported to {path} ({human_bytes(tree_bytes(path))})"
             self.message.emit("Export ready", False)
+            self._log_done(f"{label}: exported ({human_bytes(tree_bytes(path))})")
         self.exportChanged.emit()
         self.refreshSessions()
-        self.exportDone.emit(self._export_session, not error)
+        self.exportDone.emit(session, not error)
+        if send and not error:
+            self._queue_upload(session)
+        self._next_export()
+        if not self.exporting:
+            self._stay_awake("export", False)
+
+    def _queue_upload(self, session):
+        """An export done that uploads by itself: now, or after the upload running."""
+        if session not in self._upload_queue and not self._uploading(session):
+            self._upload_queue.append(session)
+            self.uploadChanged.emit()
+        self._next_upload()
+
+    def _next_upload(self):
+        """Start the first waiting upload that still can, if none runs. One already uploaded
+        (the same export) isn't sent again; one that can't go now says why and leaves the queue."""
+        while not self.uploading and self._upload_queue:
+            session = self._upload_queue.pop(0)
+            if self.uploadInfo(session)["previous"].get("export_sha"):
+                self._log_done(f"{self._session_label(session)}: this export was uploaded before, so it wasn't sent again")
+            elif self._start_upload(session, False):
+                return
+        self.uploadChanged.emit()
 
     @Slot(str)
     def deleteExport(self, session):
+        if self._busy_guard(session):
+            return
         try:
             self.store.delete_export(session)
             self.message.emit("Export deleted; the recordings stay", False)
@@ -682,14 +822,28 @@ class RecorderBackend(QObject):
             return {"previous": {}, "uploads": 0}
         return {"previous": before or {}, "uploads": count}
 
+    @Property(bool, notify=loginChanged)
+    def canUploadAfter(self):
+        """An export can be set to upload by itself: logged in (or a dry run). Whether its
+        dataset takes contributions yet: uploadAllowedFor."""
+        return self._hub_dry_run or self._login.get("state") == "ok"
+
     @Slot(str, bool)
     def startUpload(self, session, again):
+        if session in self._upload_queue:
+            self._upload_queue.remove(session)   # pressed by hand: it goes now
+        self._start_upload(session, again)
+        self.uploadChanged.emit()
+
+    def _start_upload(self, session, again):
+        """Start hub.py upload; False if it couldn't (and it said why)."""
         # Not while this session exports again (its export is replaced at the end); another's is fine.
-        if self.uploading or self._exporting(session) or self._active_guard(session):
-            return
+        if (self.uploading or self._exporting(session) or any(q["session"] == session for q in self._export_queue)
+                or self._active_guard(session)):
+            return False
         if not self._hub_dry_run and not self._upload_allowed_for(session):
             self.message.emit("Contributions aren't open yet", True)
-            return
+            return False
         argv = self._hub_argv("upload", session, "--json")
         if self._hub_dry_run:
             argv.append("--dry-run")
@@ -700,7 +854,7 @@ class RecorderBackend(QObject):
                                     text=True, bufsize=1)
         except OSError as e:
             self.message.emit(f"Couldn't start the upload: {e}", True)
-            return
+            return False
         self._upload_proc = proc
         self._upload_cancelled = False
         self._upload = {"session": session, "phase": "check", "text": "Starting", "fraction": 0.0, "log": "",
@@ -712,6 +866,7 @@ class RecorderBackend(QObject):
             last = self._read_lines(proc, self._uploadLine, lambda: self._upload_cancelled, "The upload stopped")
             self._uploadFinished.emit(last or {"error": {"kind": "cancelled", "text": "Cancelled"}})
         self._upload_thread = self._thread(run)
+        return True
 
     @Slot()
     def cancelUpload(self):
@@ -735,7 +890,6 @@ class RecorderBackend(QObject):
 
     def _on_upload_finished(self, last):
         self._upload_proc = None
-        self._stay_awake("upload", False)
         up = dict(self._upload)
         if "done" in last:
             result = last["done"]
@@ -743,6 +897,9 @@ class RecorderBackend(QObject):
                       text="Dry run: nothing was uploaded" if result.get("dry_run") else "Uploaded")
             if not result.get("dry_run"):
                 self.message.emit("Uploaded: the pull request is open", False)
+            self._log_done(f"{self._session_label(up.get('session', ''))}: "
+                           + ("dry run, nothing sent" if result.get("dry_run") else "uploaded"),
+                           link=result.get("pr_url", ""))
         else:
             e = last.get("error") or {}
             cancelled = e.get("kind") == "cancelled"
@@ -751,9 +908,15 @@ class RecorderBackend(QObject):
                             if up.get("pr_url") else "Cancelled") if cancelled else e.get("text", ""))
             if not cancelled:
                 self.message.emit("Upload failed", True)
+            self._log_done(f"{self._session_label(up.get('session', ''))}: upload "
+                           + ("cancelled" if cancelled else "failed: " + e.get("text", "")),
+                           not cancelled, up.get("pr_url", "") or e.get("link", ""))
         self._upload = up
         self.uploadChanged.emit()
         self.sessionsChanged.emit()
+        self._next_upload()
+        if not self.uploading:
+            self._stay_awake("upload", False)
 
     @Slot(str, result=str)
     def uploadText(self, session):

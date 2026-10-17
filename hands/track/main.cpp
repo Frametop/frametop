@@ -45,8 +45,9 @@
 // HANDS_CAMERAS, HANDS_BRIGHT, HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT (which
 // colour camera is passthrough_left: color_video0 or color_video3), HANDS_COLOR_CROP
 // (subtract or none: tools/check_color.py tells both), HANDS_MISREAD_GUARD (0 or 1: the
-// tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODELS (as
-// --models: a folder with palm.ncnn.* and hand.ncnn.*, e.g. fine-tuned ones), HANDS_REACQUIRE (seconds
+// tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODEL (latest,
+// stock, or a version's name: models/catalog.py), HANDS_MODELS (as --models: a folder with palm.ncnn.*
+// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
 // hands are one left and one right, Tracker::set_pair_sides), HANDS_PINCH_DIP (0 or 1: pinches also
 // begin on a sharp dip of the thumb-index distance, PinchParams::dip), HANDS_PINCH_FIST_CURL (1.2; 0 off:
@@ -69,6 +70,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <ctime>
 #include <memory>
@@ -456,10 +458,29 @@ int main(int argc, char **argv) {
         std::fflush(stdout);
         return true;
     };
-    if (models.empty())
-        models = model_root + (!int8 && access((model_root + "student/hand.ncnn.param").c_str(), R_OK) == 0 &&
-                                       access((model_root + "student/palm.ncnn.param").c_str(), R_OK) == 0
-                                   ? "student" : "ncnn");
+    // HANDS_MODEL (Input Settings' Hands page, models/catalog.py): latest (models/student, which
+    // hands/models.sh keeps current), stock (models/ncnn), or a downloaded version (models/versions/NAME).
+    // None of the fine-tuned ones has 8-bit files, so --int8 always takes the stock ones.
+    auto has_models = [](const std::string &dir) {
+        return access((dir + "/hand.ncnn.param").c_str(), R_OK) == 0 && access((dir + "/palm.ncnn.param").c_str(), R_OK) == 0;
+    };
+    if (models.empty()) {
+        const std::string pick = setting("HANDS_MODEL");
+        const bool name_ok = !pick.empty() && pick.size() <= 64 && std::isalnum((unsigned char)pick[0]) &&
+                             pick.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-") ==
+                                 std::string::npos;
+        if (pick == "stock" || pick == "off" || pick == "none") {
+            models = model_root + "ncnn";
+        } else if (name_ok && pick != "latest") {
+            if (!int8 && has_models(model_root + "versions/" + pick)) models = model_root + "versions/" + pick;
+            else if (!int8)
+                std::fprintf(stderr, "HANDS_MODEL=%s isn't downloaded (Frametop Input Settings > Hands, or "
+                             "models/ft-models fetch hands %s): using the latest\n", pick.c_str(), pick.c_str());
+        } else if (!pick.empty() && pick != "latest") {
+            std::fprintf(stderr, "HANDS_MODEL=%s isn't a model name: using the latest\n", pick.c_str());
+        }
+        if (models.empty()) models = model_root + (!int8 && has_models(model_root + "student") ? "student" : "ncnn");
+    }
     if (!load_calibration(calib, err) || !ring.open(ring_path.c_str(), err) || !nets.load(models, int8, err) ||
         (publish && (!pub.open(err) || (gestures_on && !gestures.open(pinch, grip, err)))) ||
         (!record.empty() && !start_recording(record, err))) {

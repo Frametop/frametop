@@ -23,14 +23,17 @@ to the input relay over its control socket (@frametop_relay):
     go to ~/.config/frametop-voice.json (voice/voice_settings.py); ft-voiced reads them again
     within 2 s, and answers "status" on its control socket.
   - Gaze: the pointer's gaze mode (@ft_pointer_helper "gaze") and the gaze service
-    (gaze/ft-gazed, @ft_gazed: status, forget, reload), with its eye tracker (SteamVR's or
-    our own) and eye bias (GAZE_TRACKER, GAZE_EYE in frametop.conf).
+    (gaze/ft-gazed, @ft_gazed: status, forget, reload), with its eye tracker and eye bias
+    (GAZE_TRACKER, GAZE_EYE in frametop.conf). The tracker is picked from a catalog (models/catalog.py,
+    gaze/tracker/models.json): SteamVR's, our classic one, or one of our eye nets (EYES_MODEL: latest,
+    which follows new versions, or a version), each with notes and benchmarks, downloaded on use.
   - Hands: when hand tracking runs (HANDS_MODE: with the Frametop desktop, always with SteamVR,
     or off; hands/handsmode.py on the host starts and stops its services), the hand cutouts'
     margin (HANDS_MATTE_MARGIN, sent live to ft-screens: "cutouts margin DEG"), and three hand
     inputs, each on its own (handsmode.METHODS): clicks at the gaze (POINTER_HANDS,
     POINTER_GAZE_PINCH), the hand ray with gaze off (POINTER_HAND_RAY), and direct touch on
-    Frametop's panels (HANDS_NEAR, sent live to ft-screens: "handinput on|off").
+    Frametop's panels (HANDS_NEAR, sent live to ft-screens: "handinput on|off"), and the hand
+    models (HANDS_MODEL, from hands/models.json: latest, a version, or stock MediaPipe), the same way.
   - Bluetooth: paired devices, and re-applying the Bluetooth LE fixes after pairing.
   - A warning on every page when SteamVR won't load the ft_pointer driver (blocked after a
     crash, disabled, or SteamVR in safe mode) or hasn't loaded it (@ft_pointer doesn't answer
@@ -71,6 +74,12 @@ GAZE_PROBE = os.path.join(REPO, "gaze", "probe", "ft-gazeprobe")
 sys.path.insert(0, os.path.join(REPO, "hands"))
 import handsmode  # noqa: E402
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
+# The hand and eye model catalogs: versions, notes, benchmarks, downloads (standard library only).
+sys.path.insert(0, os.path.join(REPO, "models"))
+import catalog as model_catalog  # noqa: E402
+# How the pickers tag each entry: by status, and builtins by what they are.
+MODEL_TAGS = {"recommended": "Recommended", "testing": "Testing", "older": "Older"}
+MODEL_KIND_TAGS = {"stock": "Off the shelf", "valve": "Valve", "classic": "Built in", "custom": "Frametop"}
 SCREENS = "\0ft_screens"
 HANDS_MODES = {"frametop": "With Frametop: while the Frametop desktop runs",
                "always": "Always: whenever SteamVR runs, in games and the SteamVR dashboard too",
@@ -454,6 +463,7 @@ class Backend(QObject):
     captured = Signal(int, str)  # code, name
     capturedController = Signal(str, str)  # button, label
     shortcutCaptureChanged = Signal()
+    modelsChanged = Signal()
     message = Signal(str, bool)  # text, is error
 
     def __init__(self):
@@ -485,6 +495,8 @@ class Backend(QObject):
         self._hands = {}  # handsmode.py's status, {} until it answers
         self._hands_lock = threading.Lock()  # one handsmode.py at a time
         self._hands_refreshing = False
+        self._model_busy = {"hands": "", "eyes": ""}  # what a model download is doing, per kind
+        self._model_views = {}
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         self.sock.bind("")  # autobind an abstract address the relay can reply to
         self.sock.setblocking(False)
@@ -1593,6 +1605,166 @@ class Backend(QObject):
         write_conf_value("HANDS_MATTE_MARGIN", value)
         self._send(f"cutouts margin {value}", SCREENS)
         self.handsChanged.emit()
+
+    # --- models (hands and eyes: models/catalog.py) ---
+    def _model_view(self, kind):
+        """The picker's view of a kind: the catalog's entries as options, a "latest" one first (it
+        follows new versions), which one the settings pick ("choice") and which version runs ("running")."""
+        try:
+            v = model_catalog.view(kind)
+        except (OSError, ValueError, model_catalog.CatalogError) as e:
+            return {"error": f"The {kind} model list didn't load: {e}", "options": [], "metrics": []}
+        conf = read_conf()
+        by = {m["name"]: m for m in v["models"]}
+        choice = v["setting"]
+        note = ""
+        if kind == "eyes" and self.gazeTracker == "steam":
+            choice = "steamvr"
+        elif "/" in choice:
+            note = f"EYES_MODEL is a folder of your own ({choice}); pick one here to replace it."
+            choice = ""
+        if kind == "hands" and (os.environ.get("FT_HANDS_MODELS") or conf.get("HANDS_MODELS")):
+            note = ("HANDS_MODELS in frametop.conf names a folder of its own, and ft-hands uses that instead "
+                    "of what's picked here. Remove it to use this choice.")
+        running = v["latest"] if choice == "latest" else choice
+        if kind == "hands" and choice == "latest":
+            # hands/models.sh keeps latest in hands/models/student, on its own pin.
+            here = ""
+            try:
+                with open(os.path.join(REPO, "hands", "models", "student", "PIN")) as f:
+                    here = next((ln.split()[1] for ln in f if ln.startswith("model ")), "")
+            except (OSError, IndexError):
+                pass
+            running = here or "stock"
+            if not here:
+                note = note or (f"This install has no fine-tuned models yet, so stock runs: {v['latest']} comes "
+                                "when hand tracking next starts online (hands/models.sh).")
+            elif here != v["latest"]:
+                note = note or f"This install still has {here}: {v['latest']} comes when hand tracking next starts."
+        elif kind == "eyes" and choice == "latest":
+            running = v["resolved"]["name"] or "classic"
+            if not v["resolved"]["folder"]:
+                note = note or f"{v['latest']} isn't downloaded yet: the classic tracker runs until it is."
+        opts = []
+        latest = by.get(v["latest"])
+        if latest:
+            opts.append(dict(latest, name="latest", target=latest["name"], follows=True,
+                             title=f"Latest (follows updates): {latest['title']}",
+                             tag=MODEL_TAGS.get(latest["status"], ""),
+                             installed=True if kind == "hands" else latest["installed"]))
+        for m in v["models"]:
+            tag = MODEL_TAGS.get(m["status"]) or MODEL_KIND_TAGS.get(m["kind"], "")
+            opts.append(dict(m, target=m["name"], follows=False, tag=tag))
+        for o in opts:
+            o["bench"] = {k: (None if val is None else float(val)) for k, val in o["bench"].items()}
+        checked = time.strftime("%H:%M", time.localtime(v["checked"])) if v["checked"] else ""
+        return {"options": opts, "metrics": v["metrics"], "byName": by, "latest": v["latest"],
+                "baseline": v["baseline"], "choice": choice, "running": running, "note": note,
+                "source": v["source"], "checked": checked, "error": ""}
+
+    def _models_update(self):
+        self._model_views = {k: self._model_view(k) for k in ("hands", "eyes")}
+        self.modelsChanged.emit()
+
+    @Property("QVariantMap", notify=modelsChanged)
+    def handModels(self):
+        if "hands" not in self._model_views:   # (no signal from inside a getter: a binding loop)
+            self._model_views["hands"] = self._model_view("hands")
+        return self._model_views["hands"]
+
+    @Property("QVariantMap", notify=modelsChanged)
+    def eyeModels(self):
+        if "eyes" not in self._model_views:   # (no signal from inside a getter: a binding loop)
+            self._model_views["eyes"] = self._model_view("eyes")
+        return self._model_views["eyes"]
+
+    @Property("QVariantMap", notify=modelsChanged)
+    def modelBusy(self):
+        return self._model_busy
+
+    def _model_job(self, kind, work):
+        """Run a download (or a catalog check) off the UI thread, one per kind at a time."""
+        if self._model_busy[kind]:
+            return
+
+        def job():
+            try:
+                work()
+            except (OSError, ValueError, model_catalog.CatalogError) as e:
+                self.message.emit(str(e), True)
+            finally:
+                self._model_busy[kind] = ""
+                self._models_update()
+        self._model_busy[kind] = "working…"
+        self.modelsChanged.emit()
+        threading.Thread(target=job, daemon=True).start()
+
+    def _busy(self, kind, text):
+        self._model_busy[kind] = text
+        self.modelsChanged.emit()
+
+    @Slot()
+    def reloadModels(self):
+        """Read the catalogs and the downloads again (the pages call it when they open)."""
+        self._models_update()
+
+    @Slot(str)
+    def refreshModels(self, kind):
+        """The kind's catalog from GitHub (this install's branch): new versions and notes."""
+        if kind not in model_catalog.SPECS:
+            return
+
+        def work():
+            self._busy(kind, "checking for new versions…")
+            ok, msg = model_catalog.refresh(kind)
+            self.message.emit(("Hand" if kind == "hands" else "Eye") + " models: " + msg, not ok)
+        self._model_job(kind, work)
+
+    @Slot(str, str)
+    def useModel(self, kind, name):
+        """Pick a model: download it first if it needs that, then write the setting and apply it.
+        hands: HANDS_MODEL (latest, stock or a version), and hand tracking restarts to load it.
+        eyes: steamvr is GAZE_TRACKER=steam; anything else is our tracker (GAZE_TRACKER=own) with
+        EYES_MODEL (classic, latest or a version), which the gaze service applies (it restarts ft-eyes)."""
+        if kind not in model_catalog.SPECS or not (name == "latest" or model_catalog.NAME.fullmatch(name)):
+            return
+        view = self._model_views.get(kind) or self._model_view(kind)
+        target = view["latest"] if name == "latest" else name
+        e = view["byName"].get(target)
+        if e is None:
+            return
+
+        def work():
+            if not e["builtin"] and not (kind == "hands" and name == "latest"):
+                if not e["usable"]:
+                    raise model_catalog.CatalogError(f"{target} needs a newer Frametop")
+                if not e["installed"]:
+                    model_catalog.fetch(kind, target, progress=lambda t: self._busy(kind, t + "…"))
+            if kind == "hands":
+                write_conf_value("HANDS_MODEL", name)
+                r = host("systemctl", "--user", "try-restart", "frametop-hands.service")
+                running = r.returncode == 0 and host("systemctl", "--user", "is-active", "--quiet",
+                                                     "frametop-hands.service").returncode == 0
+                self.message.emit(f"Hand model: {e['title']}" + (", hand tracking restarted" if running
+                                                                  else " (used when hand tracking starts)"), False)
+                self.handsChanged.emit()
+            elif name == "steamvr":
+                self._set_gaze("GAZE_TRACKER", "steam", "Eye tracker: SteamVR's")
+            else:
+                write_conf_value("EYES_MODEL", name)
+                self._set_gaze("GAZE_TRACKER", "own", f"Eye tracker: {e['title']}"
+                               + ("" if e["builtin"] else " (calibrate it once: each net keeps its own calibration)"))
+        self._model_job(kind, work)
+
+    @Slot(str, str)
+    def removeModel(self, kind, name):
+        """Delete a downloaded version (not the one in use)."""
+        view = self._model_views.get(kind) or self._model_view(kind)
+        if kind not in model_catalog.SPECS or name in (view["running"], view["choice"]):
+            return
+        if model_catalog.remove(kind, name):
+            self.message.emit(f"Removed the download of {name}", False)
+        self._models_update()
 
     # --- bluetooth ---
     @Property("QVariantList", notify=bluetoothChanged)

@@ -1,0 +1,59 @@
+{
+ "catalog": 1,
+ "kind": "eyes",
+ "latest": "eyes-v0",
+ "default": "classic",
+ "baseline": "steamvr",
+ "metrics": [
+  {"key": "fresh", "label": "Right after calibrating, median", "unit": "°", "better": "lower",
+   "note": "One person, a later recording after taking the headset off and on again, 124 click targets."},
+  {"key": "fresh_p90", "label": "Right after calibrating, 90% of looks within", "unit": "°", "better": "lower"},
+  {"key": "reseat_clicks", "label": "After a re-seat, old calibration + click corrections, median", "unit": "°", "better": "lower",
+   "note": "The headset was taken off and put back on; the calibration is the one from before, and the pointer's clicks correct it."},
+  {"key": "reseat_clicks_p90", "label": "After a re-seat, with click corrections, 90% within", "unit": "°", "better": "lower"},
+  {"key": "reseat", "label": "After a re-seat, old calibration alone, median", "unit": "°", "better": "lower"}
+ ],
+ "models": [
+  {
+   "name": "classic",
+   "title": "Frametop classic (pupil and glints)",
+   "kind": "classic",
+   "status": "builtin",
+   "summary": "Our hand-written tracker: finds each pupil and its glints. Best once your clicks have corrected it.",
+   "notes": "No learned model: it finds the pupil and the two glints in each eye camera's frame and maps them with your calibration. The glints show when the headset slips, so the pointer's clicks correct it quickly after a re-seat. Right after a calibration it's less precise than SteamVR's.",
+   "cost": "CPU, in Frametop's container, while the gaze is in use. Not yet measured side by side with the nets.",
+   "bench": {"fresh": 2.83, "fresh_p90": 4.71, "reseat_clicks": 1.25, "reseat_clicks_p90": 3.35, "reseat": 14.03}
+  },
+  {
+   "name": "steamvr",
+   "title": "SteamVR (Valve's tracker)",
+   "kind": "valve",
+   "status": "builtin",
+   "summary": "Valve's own eye tracking, as SteamVR reports it, with Frametop's calibration on top.",
+   "notes": "The most precise right after calibrating, and it needs nothing installed. It drifts when the headset moves, and our click corrections help it less than the classic tracker.",
+   "cost": "None for Frametop: Valve's tracker runs on the headset's own processors.",
+   "bench": {"fresh": 1.18, "fresh_p90": 2.32, "reseat_clicks": 3.11, "reseat_clicks_p90": 5.43, "reseat": 3.73}
+  },
+  {
+   "name": "eyes-v0",
+   "title": "Frametop eye net v0",
+   "kind": "custom",
+   "status": "testing",
+   "date": "2026-10-16",
+   "summary": "Experimental: our first deep-learning eye net. Better than classic right after calibrating, worse after the headset moves.",
+   "notes": "A small network that reads each eye camera's frame and gives a raw gaze, which your calibration fits (each net keeps its own calibration, so calibrate once after switching).\n\nTrained on one person in one headset seating, so it doesn't carry over well when the headset sits differently: after a re-seat, the classic tracker with click corrections is more than twice as precise. Try it to help test the pipeline; later versions trained on more people should do better.",
+   "cost": "CPU, while the gaze is in use: 1.4 ms per pair of eye frames in a benchmark (12% of one big core at 90 frames a second), about 1.2 ms per frame inside ft-eyes.",
+   "bench": {"fresh": 1.61, "fresh_p90": 3.23, "reseat_clicks": 2.87, "reseat_clicks_p90": 6.41, "reseat": 4.0},
+   "format": 1,
+   "rev": "5f4341cc53d698f622368c22bf4bae1addbe20a0",
+   "files": {
+    "NOTICE": "2894eeb7d9269890ea54a5546b3fd7ee1c7e4cba0d0c1c64f8207dab68de7acf",
+    "model.json": "9d7e252137348148597b1a951066053868d4504229520459bb31e95795cd2101",
+    "model.ncnn.bin": "230cac3489333257ad99ad1ce5ce6fa76fe60a80f4fa92fb8bc78c7f50a9a44a",
+    "model.ncnn.param": "ec82393354ff522bbd17be57d96a68ebdd1337915f48dfa86ac989f4756f984b",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "2625af9abfe4bd350c268f39c0f7ee315cd40f83ada2f93253a0abf68c2f78c2"
+   }
+  }
+ ]
+}

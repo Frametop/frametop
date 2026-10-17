@@ -65,7 +65,10 @@ relearn the offset.
 Our own tracker (gaze/tracker/ft-eyes) runs here too, in the dev container, while
 GAZE_TRACKER=own and the gaze is in use (below), or the gaze probe asks for it ("eyes SECONDS",
 a lease the probe renews). It reads the eye-camera frames the root service frametop-eyegrab
-copies (gaze/tracker/install.sh), which copies them only while ft-eyes runs.
+copies (gaze/tracker/install.sh), which copies them only while ft-eyes runs. Which eye net it runs
+(EYES_MODEL: models/catalog.py) is read at its start, so ft-eyes restarts when that changes; starting
+it also runs `models/ft-models auto eyes` in the background (the catalog from GitHub, and the net
+EYES_MODEL needs if it isn't downloaded), and ft-eyes moves to a net that brings.
 
 Idle: ft-gaze and our own tracker run only while the gaze is in use: gaze mode on with someone
 wearing the headset (the pointer helper says both: "gaze ? headset" -> "ok on|off worn|away"), a
@@ -135,6 +138,9 @@ from gazecal import (DEFAULT_MODEL, EYE_FOUND, EYE_LOST, MODELS, STATE, Correcti
                      EyeWeights, Fixation, LiveCorrection, SteamEyeLog, TrackedEye)
 from gazecheck import Checks  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "models"))
+import catalog  # noqa: E402  (which eye net EYES_MODEL means: models/catalog.py)
+
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "gaze" / "build" / "ft-gaze"
 IN_BOX = REPO / "scripts" / "in-box"  # runs a program in the container it was built in
@@ -160,6 +166,7 @@ LOOK = 0.3        # seconds of samples before that moment make the look (the pro
 RETRY = 3.0       # seconds before starting ft-gaze again
 EYES_RETRY = 10.0  # seconds before starting ft-eyes again after it stopped on its own
 EYES_LEASE_MAX = 120.0
+MODELS_CLI = REPO / "models" / "ft-models"  # "auto eyes": the eye catalog, and the net EYES_MODEL needs
 SETTLE = 0.3      # seconds after an eye is found again before the fallback learns from it
 IDLE_AFTER = 30.0  # seconds after the gaze was last in use before ft-gaze and our tracker stop
 WAKE_SETTLE = 15.0  # seconds after waking that the tracker may take to start sending
@@ -257,6 +264,8 @@ class Service:
         self.eyes_proc = None  # ft-eyes, while it runs
         self.eyes_until = 0.0  # the probe's lease (monotonic time)
         self.eyes_restart_at = 0.0
+        self.eyes_model = self.eyes_model_now()  # what EYES_MODEL means now: ft-eyes restarts when it changes
+        self.models_proc = None  # ft-models auto eyes, while it runs
         self.awake = False      # ft-gaze (and our tracker) run: the gaze is in use (see the top)
         self.idle_at = 0.0      # idle from then, unless it's in use again first
         self.woke_at = 0.0
@@ -293,8 +302,39 @@ class Service:
 
     # --- Settings, calibration and lessons ---
 
+    @staticmethod
+    def eyes_model_now():
+        """(EYES_MODEL, the folder it resolves to): ft-eyes reads it at start."""
+        try:
+            r = catalog.resolve("eyes")
+            return r["setting"], r["folder"]
+        except Exception as e:  # noqa: BLE001 (a broken catalog: ft-eyes falls back to the pupil finder)
+            return f"error {e}", None
+
+    def check_eyes_model(self):
+        now = self.eyes_model_now()
+        if now != self.eyes_model:
+            log(f"eye model {now[0]}" + (f" ({now[1]})" if now[1] else "") + (": restarting ft-eyes" if self.eyes_proc else ""))
+            self.eyes_model = now
+            if self.eyes_proc:
+                self.stop_eyes()
+                self.eyes_restart_at = 0.0
+
+    def models_auto(self):
+        """The eye catalog from GitHub (at most every 15 minutes) and the net EYES_MODEL needs, if it's
+        missing, in the background: ft-eyes starts with what's here, and moves to the new one after."""
+        if self.models_proc and self.models_proc.poll() is None:
+            return
+        try:
+            self.models_proc = subprocess.Popen([sys.executable, str(MODELS_CLI), "auto", "eyes"], stdin=subprocess.DEVNULL,
+                                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                                start_new_session=True)
+        except OSError as e:
+            log(f"couldn't check for eye models: {e}")
+
     def load_settings(self):
         self.conf_mtime = mtime(CONF)
+        self.check_eyes_model()
         tracker, self.tracker_setting, bias, self.nudge_max = read_settings()
         if (tracker, bias) != (self.tracker, self.bias):
             auto = ""
@@ -558,6 +598,8 @@ class Service:
             log(f"ft-eyes isn't built: run {REPO}/gaze/tracker/build.sh")
             self.eyes_restart_at = time.monotonic() + 30
             return
+        self.models_auto()
+        self.eyes_model = self.eyes_model_now()
         env = dict(os.environ)
         env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
         self.eyes_proc = subprocess.Popen([str(IN_BOX), str(EYES_PYTHON), str(EYES_PROG), "-v", "--watch-stdin"],
@@ -920,6 +962,9 @@ class Service:
         if mtime(CONF) != self.conf_mtime or (self.tracker_setting == "auto"
                                               and own_installed() != (self.tracker == "own")):
             self.load_settings()
+        if self.models_proc and self.models_proc.poll() is not None:
+            self.models_proc = None
+            self.check_eyes_model()   # a net it fetched: ft-eyes moves to it
         self.update_awake()
         want = self.eyes_wanted()
         if want and not self.eyes_proc and time.monotonic() >= self.eyes_restart_at:

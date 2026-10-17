@@ -1,0 +1,55 @@
+{
+ "catalog": 1,
+ "kind": "hands",
+ "latest": "v13b-p1",
+ "default": "latest",
+ "baseline": "stock",
+ "metrics": [
+  {"key": "replay_bright", "label": "Hands tracked, bright room (90 s replay)", "unit": "", "better": "higher",
+   "note": "The maintainer's recordings replayed through ft-hands with its default settings."},
+  {"key": "replay_dim", "label": "Hands tracked, dim room (120 s replay)", "unit": "", "better": "higher"},
+  {"key": "replay_lit", "label": "Hands tracked, lit room (120 s replay)", "unit": "", "better": "higher"},
+  {"key": "found", "label": "Hand found in ft-hands' crops (held-out people)", "unit": "%", "better": "higher",
+   "note": "Contributors the model never trained on (Frametop Hands #4, #7, #8)."},
+  {"key": "landmark_px", "label": "Finger point error, median (held-out people)", "unit": "px", "better": "lower"},
+  {"key": "within5", "label": "Points within 5% of hand size (held-out people)", "unit": "%", "better": "higher"},
+  {"key": "shape_mm", "label": "3D hand shape error, median (held-out people)", "unit": "mm", "better": "lower"},
+  {"key": "side_ok", "label": "Left or right hand told correctly (held-out people)", "unit": "%", "better": "higher"}
+ ],
+ "models": [
+  {
+   "name": "v13b-p1",
+   "title": "Frametop v13b-p1",
+   "kind": "custom",
+   "status": "recommended",
+   "date": "2026-10-14",
+   "summary": "Retrained on the Steam Frame's own cameras: about twice as many hands found in bright rooms as stock, and steadier fingers.",
+   "notes": "MediaPipe's palm detector and hand landmark model, retrained on the Frametop Hands dataset (contributions #3 to #7), the maintainer's recordings and flagged tracking failures. Same networks as stock, so the same CPU cost.\n\nWhat to expect against stock: hands are found far more often, most of all in bright rooms (twice as many tracked in the bright replay, 1.3 to 1.8 times in dim and lit ones), the finger points sit about a quarter closer, and the 3D hand shape is about 40% closer.\n\nKnown weak spot: a thumb touching the middle finger is often read as a near miss, so middle-finger pinches (right click) can need a firmer touch.",
+   "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 960, "replay_dim": 1224, "replay_lit": 1433, "found": 98.7, "landmark_px": 3.8,
+             "within5": 94.6, "shape_mm": 8.3, "side_ok": 96.5},
+   "format": 1,
+   "rev": "41afd78fbd4527456fc4cbd840ffc9f39fdc939a",
+   "files": {
+    "NOTICE": "0e6b4fa8ea37665cb699abc36fcf1ee0ffaa63a78dfee788be6613dea6607f84",
+    "hand.ncnn.bin": "d6a6f00d845fb9ee490276d84b1e978da884361c372614546ed2b1b4d2f5c449",
+    "hand.ncnn.param": "54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd",
+    "palm.ncnn.bin": "9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909",
+    "palm.ncnn.param": "c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "29c6c5460e47412a9a37b22d6a7c8a9ed266a872bbcce93d3867f9e56cfe0ca1"
+   }
+  },
+  {
+   "name": "stock",
+   "title": "MediaPipe (stock, off the shelf)",
+   "kind": "stock",
+   "status": "builtin",
+   "summary": "Google's original palm and hand models, unchanged. Comes with Frametop.",
+   "notes": "Trained on colour photos from ordinary lenses. The Frame's tracking cameras are infrared, monochrome and fisheye, so these lose hands often, most of all in bright rooms. Useful to compare, or to go back to if a retrained version tracks worse for you.",
+   "cost": "Two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 442, "replay_dim": 912, "replay_lit": 782, "found": 94.8, "landmark_px": 5.2,
+             "within5": 88.5, "shape_mm": 14.3, "side_ok": 93.8}
+  }
+ ]
+}

@@ -206,6 +206,7 @@ fi
 # looks wrong first. It wakes an idle gaze service for about 20 s, to see the tracker send.
 if has gaze; then
   python3 "$repo/scripts/gaze-report.py" </dev/null 2>&1 || echo "scripts/gaze-report.py failed"
+  python3 "$repo/models/ft-models" list eyes 2>&1 | head -n 12
 fi
 
 # Hand tracking: whether it runs, which models ft-hands loaded and whether they're the pinned ones,
@@ -220,6 +221,7 @@ if has hands; then
   [ -d "$student" ] && "$repo/hands/models.sh" check 2>&1 | tail -n 3
   echo "last checked for newer ones: $(date -r "$repo/hands/models/.student-checked" '+%F %T' 2>/dev/null || echo never)"
   grep -E '^\s*(FT_)?HANDS_MODELS(_UPDATE)?=' ~/.config/frametop.conf 2>/dev/null | sed 's/\s*#.*//; s/^/override (ft-hands loads these instead): /'
+  python3 "$repo/models/ft-models" list hands 2>&1 | head -n 12
   python3 "$repo/hands/camcheck.py" 2>&1 | head -n 30
   echo "sides: $(cat "$XDG_RUNTIME_DIR/frametop-hands/sides.json" 2>/dev/null || echo 'no sides.json')"
   for c in 5 6 7; do   # ft-hands' CPUs (HANDS_CPUS)

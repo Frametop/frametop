@@ -41,13 +41,15 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
                                or {"t", "cam", "lost": true}; with the net also "net": {"gaze",
                                "x", "y", "open", "visible"}. "finds stop" replies "ok ROWS"
 
-The eye net (eyes_net.py) instead of the pupil finder: EYES_MODEL=FOLDER in ~/.config/frametop.conf
-(or FT_EYES_MODEL), a model folder from frame-eyes' training. Each eye's raw gaze from the net
+The eye net (eyes_net.py) instead of the pupil finder: EYES_MODEL in ~/.config/frametop.conf (or
+FT_EYES_MODEL), picked on Input Settings' Gaze page: latest, a version's name (gaze/tracker/models.json,
+downloaded into gaze/tracker/models/NAME by models/catalog.py), or a model folder from frame-eyes'
+training (anything with a "/"); classic or unset is the pupil finder. Each eye's raw gaze from the net
 then stands where the pupil centre would: the calibration, the shifts clicks teach and the dots'
 spread are in its degrees, and there are no glints (no slip estimate or jump notice). Each model
 has its own state folder, net-NAME/ (calibration.json, state.json, clicks.jsonl), so switching
-asks for a calibration once per model and the classic one is kept. Read at start: restart
-ft-eyes (switch the tracker off and on) after changing it. If the model can't load, ft-eyes says
+asks for a calibration once per model and the classic one is kept. Read at start: the gaze
+service restarts ft-eyes when EYES_MODEL changes. If the model can't load, ft-eyes says
 so and uses the pupil finder. While the fit coach asks ("fit") or finds are logged, the pupil
 finder runs too, for them.
 
@@ -92,27 +94,27 @@ import eyes_model  # noqa: E402
 import eyes_pupil  # noqa: E402
 import fitcoach  # noqa: E402
 
-CONF = Path.home() / ".config" / "frametop.conf"
-
-
 def load_net():
-    """The eye net from FT_EYES_MODEL or frametop.conf's EYES_MODEL, or None (the pupil finder)."""
-    folder = os.environ.get("FT_EYES_MODEL")
-    if folder is None:
-        try:
-            for line in CONF.read_text().splitlines():
-                k, _, v = line.split("#", 1)[0].partition("=")
-                if k.strip() == "EYES_MODEL":
-                    folder = v.strip()
-        except OSError:
-            pass
-    if not folder or folder.lower() in ("off", "none", "classic"):
+    """The eye net EYES_MODEL picks (FT_EYES_MODEL wins), or None (the pupil finder). models/catalog.py
+    resolves it: classic (or unset: the catalog's default), latest (the newest version, once downloaded),
+    a downloaded version's name, or a folder of one's own (anything with a "/")."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "models"))
+        import catalog
+        r = catalog.resolve("eyes")
+    except Exception as e:  # noqa: BLE001 (a broken catalog mustn't stop the tracker)
+        print(f"ft-eyes: the model catalog didn't load ({type(e).__name__}: {e}); using the pupil finder",
+              file=sys.stderr, flush=True)
+        return None
+    if not r["folder"]:
+        if r["setting"] not in ("classic", "steamvr"):
+            print(f"ft-eyes: EYES_MODEL={r['setting']}: {r['why']}; using the pupil finder", file=sys.stderr, flush=True)
         return None
     try:
         import eyes_net
-        return eyes_net.Net(os.path.expanduser(folder))
+        return eyes_net.Net(r["folder"])
     except Exception as e:  # noqa: BLE001 (any failure: say so and track with the pupil finder)
-        print(f"ft-eyes: the eye net in {folder} didn't load ({type(e).__name__}: {e}); using the pupil finder",
+        print(f"ft-eyes: the eye net in {r['folder']} didn't load ({type(e).__name__}: {e}); using the pupil finder",
               file=sys.stderr, flush=True)
         return None
 

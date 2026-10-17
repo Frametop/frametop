@@ -13,3 +13,5 @@ taps-out/
 tools/taps-*.sh
 # recorded demo clips (hands/rec/demo/camgifs.py) show the room around the recorder: never shipped
 rec/demos-recorded/
+# hand model versions picked in Input Settings (models/catalog.py downloads them; CC BY-NC 4.0)
+models/versions/

@@ -54,6 +54,212 @@ Kirigami.ApplicationWindow {
         })[backend.driverBlock] || ""
     }
 
+    // A model picker (Hands and Gaze pages): the catalog's versions (models/catalog.py) with their notes
+    // and benchmarks, set against the one running (viewing that one: against the baseline, stock or
+    // SteamVR). Choosing a version only shows it; "Use" downloads it if needed and switches to it.
+    // The catalog's texts come from GitHub, so they're shown as plain text.
+    component ModelPicker: ColumnLayout {
+        id: picker
+        property string kind
+        property var view: ({})
+        readonly property string busy: (backend.modelBusy || {})[kind] || ""
+        property string viewed: ""
+        readonly property var options: view.options || []
+        readonly property var opt: options.find(o => o.name === (viewed || view.choice)) || options[0] || ({})
+        readonly property string running: view.running || ""
+        readonly property string otherName: opt.target !== running ? running
+                                            : opt.target !== view.baseline ? (view.baseline || "") : ""
+        readonly property var other: otherName ? ((view.byName || {})[otherName] || null) : null
+        readonly property bool inUse: opt.name === view.choice
+        spacing: Kirigami.Units.smallSpacing
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+
+        function fmt(v, unit) {
+            if (v === undefined || v === null) return "–"
+            const n = Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 100) / 100
+            return n + (unit === "" || unit === "%" || unit === "°" ? unit : " " + unit)
+        }
+        function better(m, v, o) {
+            if (v === undefined || v === null || o === undefined || o === null || v === o) return 0
+            return (m.better === "lower" ? v < o : v > o) ? 1 : -1
+        }
+
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            visible: !!picker.view.error
+            type: Kirigami.MessageType.Error
+            text: picker.view.error || ""
+        }
+        Repeater {
+            model: picker.options
+            delegate: Controls.RadioButton {
+                required property var modelData
+                text: modelData.title + (modelData.tag ? "  ·  " + modelData.tag : "")
+                      + (modelData.name === picker.view.choice ? "  ·  in use" : "")
+                      + (!modelData.usable ? "  ·  needs a newer Frametop"
+                         : !modelData.installed ? "  ·  not downloaded" : "")
+                font.bold: modelData.name === picker.view.choice
+                checked: picker.opt.name === modelData.name
+                onToggled: if (checked) picker.viewed = modelData.name
+            }
+        }
+        Controls.Label {
+            visible: !!picker.view.note
+            text: picker.view.note || ""
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Kirigami.Theme.neutralTextColor
+            font: Kirigami.Theme.smallFont
+        }
+
+        // The one being looked at: what it is, what to expect, what it costs, and its numbers.
+        Kirigami.Separator { Layout.fillWidth: true; visible: !!picker.opt.name }
+        Controls.Label {
+            text: (picker.opt.follows ? "Latest: " + picker.opt.target : picker.opt.title || "")
+                  + (picker.opt.date ? " (" + picker.opt.date + ")" : "")
+            textFormat: Text.PlainText
+            font.bold: true
+        }
+        Controls.Label {
+            visible: picker.opt.follows === true
+            text: "Moves to each new version we recommend, without asking. Pick a version below it to stay on that one."
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        Controls.Label {
+            text: picker.opt.summary || ""
+            visible: text !== ""
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+        }
+        Controls.Label {
+            text: picker.opt.notes || ""
+            visible: text !== ""
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            opacity: 0.85
+        }
+        Controls.Label {
+            text: picker.opt.cost ? "Cost: " + picker.opt.cost : ""
+            visible: text !== ""
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        GridLayout {
+            visible: (picker.view.metrics || []).some(m => picker.opt.bench && picker.opt.bench[m.key] !== undefined)
+            columns: 3
+            columnSpacing: Kirigami.Units.largeSpacing
+            rowSpacing: 2
+            Controls.Label { text: "Benchmark"; font.bold: true; Layout.fillWidth: true }
+            Controls.Label { text: picker.opt.target || ""; textFormat: Text.PlainText; font.bold: true }
+            Controls.Label {
+                text: picker.other ? picker.otherName + (picker.otherName === picker.running ? " (in use)" : "") : ""
+                textFormat: Text.PlainText
+                font.bold: true
+                opacity: 0.7
+            }
+            Repeater {
+                model: picker.view.metrics || []
+                delegate: Controls.Label {
+                    required property var modelData
+                    required property int index
+                    text: modelData.label
+                    textFormat: Text.PlainText
+                    Layout.row: index + 1
+                    Layout.column: 0
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    font: Kirigami.Theme.smallFont
+                    Controls.ToolTip.visible: !!modelData.note && mhover.hovered
+                    Controls.ToolTip.text: modelData.note || ""
+                    HoverHandler { id: mhover }
+                }
+            }
+            Repeater {
+                model: picker.view.metrics || []
+                delegate: Controls.Label {
+                    required property var modelData
+                    required property int index
+                    readonly property var v: (picker.opt.bench || {})[modelData.key]
+                    readonly property int b: picker.other ? picker.better(modelData, v, (picker.other.bench || {})[modelData.key]) : 0
+                    text: picker.fmt(v, modelData.unit)
+                    Layout.row: index + 1
+                    Layout.column: 1
+                    color: b > 0 ? Kirigami.Theme.positiveTextColor : b < 0 ? Kirigami.Theme.negativeTextColor
+                                                                       : Kirigami.Theme.textColor
+                }
+            }
+            Repeater {
+                model: picker.view.metrics || []
+                delegate: Controls.Label {
+                    required property var modelData
+                    required property int index
+                    text: picker.other ? picker.fmt((picker.other.bench || {})[modelData.key], modelData.unit) : ""
+                    Layout.row: index + 1
+                    Layout.column: 2
+                    opacity: 0.7
+                }
+            }
+        }
+        Controls.Label {
+            visible: (picker.view.metrics || []).some(m => picker.opt.bench && picker.opt.bench[m.key] !== undefined)
+            text: "Green: better than " + (picker.otherName || "the other") + ", red: worse. Hover a row for how it was measured."
+            textFormat: Text.PlainText
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        RowLayout {
+            Controls.Button {
+                text: picker.inUse ? "In use"
+                      : !picker.opt.installed ? "Download and use"
+                      : "Use this"
+                icon.name: picker.inUse ? "checkmark" : !picker.opt.installed ? "download" : "dialog-ok-apply"
+                enabled: !picker.inUse && picker.opt.usable !== false && picker.busy === "" && !!picker.opt.name
+                onClicked: backend.useModel(picker.kind, picker.opt.name)
+            }
+            Controls.Button {
+                text: "Remove download"
+                icon.name: "edit-delete"
+                visible: !picker.opt.builtin && !picker.opt.follows && picker.opt.installed === true
+                         && picker.opt.target !== picker.running && picker.opt.name !== picker.view.choice
+                enabled: picker.busy === ""
+                onClicked: backend.removeModel(picker.kind, picker.opt.name)
+            }
+            Controls.Button {
+                text: "Check for new versions"
+                icon.name: "view-refresh"
+                enabled: picker.busy === ""
+                onClicked: backend.refreshModels(picker.kind)
+            }
+            Controls.BusyIndicator {
+                visible: picker.busy !== ""
+                running: visible
+                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                Layout.preferredWidth: Layout.preferredHeight
+            }
+            Controls.Label {
+                visible: picker.busy !== ""
+                text: picker.busy
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+            }
+        }
+        Controls.Label {
+            text: "List from " + (picker.view.source || "this install")
+                  + (picker.view.checked ? ", checked " + picker.view.checked : "")
+            opacity: 0.6
+            font: Kirigami.Theme.smallFont
+        }
+    }
+
     function show(page) {
         pageStack.clear()
         pageStack.push(page)
@@ -1285,26 +1491,22 @@ Kirigami.ApplicationWindow {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
-                RowLayout {
-                    Kirigami.FormData.label: "Eye tracker:"
-                    Controls.RadioButton {
-                        text: "Own tracker (recommended)"
-                        checked: backend.gazeTracker === "own"
-                        onToggled: if (checked) backend.setGazeTracker("own")
-                    }
-                    Controls.RadioButton {
-                        text: "SteamVR"
-                        checked: backend.gazeTracker === "steam"
-                        onToggled: if (checked) backend.setGazeTracker("steam")
-                    }
+                // Whose eye tracking: SteamVR's (GAZE_TRACKER=steam), or ours (own) with the classic
+                // pupil finder or an eye net (EYES_MODEL: latest or a version).
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Eye tracker" }
+                ModelPicker {
+                    Kirigami.FormData.label: "Tracker:"
+                    kind: "eyes"
+                    view: backend.eyeModels
+                    Component.onCompleted: backend.reloadModels()
                 }
                 Controls.Label {
                     // Ours is the default once it's installed (GAZE_TRACKER=auto, gaze/ft-gazed).
                     visible: backend.gazeTracker === "steam" && !backend.gazeOwnInstalled
-                    text: "Our own tracker is more accurate. Install it with gaze/tracker/install.sh in the "
-                          + "Frametop folder, in a terminal (asks for sudo)"
+                    text: "Our own tracker (the classic one and the eye nets) needs its frame grabber. Install it "
+                          + "with gaze/tracker/install.sh in the Frametop folder, in a terminal (asks for sudo)"
                           + (backend.gazeTrackerAuto ? "; gaze then uses it, and you calibrate it once."
-                                                     : ", then pick Own tracker here and calibrate it once.")
+                                                     : ", then pick it here and calibrate it once.")
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                     wrapMode: Text.WordWrap
                     opacity: 0.7
@@ -1354,6 +1556,7 @@ Kirigami.ApplicationWindow {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Gaze pointer tuning" }
                 Repeater {
                     model: backend.gazeSettings
                     delegate: RowLayout {
@@ -1454,7 +1657,7 @@ Kirigami.ApplicationWindow {
                       + "a pinch clicks where you look; pinch, hold and move the hand to nudge the pointer first. Pinch nudge "
                       + "starts after: how far the hand moves before the pointer does. Pinch nudge speed: how far the pointer "
                       + "moves for each degree of hand movement after that. Eye tracker: SteamVR's, or our own "
-                      + "(gaze/tracker), which keeps its own calibration. Eye bias: the gaze "
+                      + "(gaze/tracker), the classic pupil finder or an eye net; each keeps its own calibration. Eye bias: the gaze "
                       + "combines both eyes, since their errors partly cancel; Left or Right counts that eye twice as "
                       + "much, and Auto weights each by how far off it was at your recent nudges."
             }
@@ -1530,6 +1733,15 @@ Kirigami.ApplicationWindow {
                         Controls.ToolTip.visible: hovered
                         onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
                     }
+                }
+
+                // Which hand models ft-hands runs (HANDS_MODEL): latest, a version, or stock MediaPipe.
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand model" }
+                ModelPicker {
+                    Kirigami.FormData.label: "Model:"
+                    kind: "hands"
+                    view: backend.handModels
+                    Component.onCompleted: backend.reloadModels()
                 }
 
                 // Three ways the hands work the desktop, each on its own (handsmode.METHODS).

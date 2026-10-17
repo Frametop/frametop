@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""ft-models: the hand and eye model catalogs (models/catalog.py) from a terminal.
+
+  ft-models list hands|eyes [--json]    the versions, their notes, and what's in use
+  ft-models refresh hands|eyes          fetch this install's branch's catalog from GitHub
+  ft-models fetch hands|eyes NAME       download a version (every file checked against the catalog)
+  ft-models verify hands|eyes NAME      check a downloaded version's files again
+  ft-models remove hands|eyes NAME      delete a downloaded version
+  ft-models resolve hands|eyes [VALUE]  what the setting (or VALUE) runs now, as JSON
+  ft-models auto hands|eyes             what the services run at start: refresh at most every
+                                        15 minutes, fetch what the setting needs if it's missing
+  ft-models hashes hands|eyes STAGING VERSION
+                                        for a new catalog entry: the "files" of STAGING/VERSION and
+                                        STAGING's LICENSE and README.md, as uploaded (models/README.md)
+
+Pick a model in Frametop Input Settings (Hands and Gaze pages), or set HANDS_MODEL / EYES_MODEL in
+~/.config/frametop.conf: latest (follows new versions), a version's name, or a builtin (stock for
+hands; classic for eyes, and GAZE_TRACKER=steam for SteamVR's).
+"""
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import catalog  # noqa: E402
+
+
+def main(argv):
+    if len(argv) < 2 or argv[0] not in ("list", "refresh", "fetch", "verify", "remove", "resolve", "auto", "hashes") \
+            or argv[1] not in catalog.SPECS:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    cmd, kind, rest = argv[0], argv[1], argv[2:]
+    try:
+        if cmd == "list":
+            v = catalog.view(kind)
+            if "--json" in rest:
+                print(json.dumps(v, indent=1))
+                return 0
+            print(f"{kind} models ({v['source']}); setting {v['setting']!r} -> {v['resolved']['why']}")
+            for m in v["models"]:
+                mark = "*" if m["name"] == v["resolved"]["name"] else " "
+                latest = " (latest)" if m["name"] == v["latest"] else ""
+                state = "builtin" if m["builtin"] else "downloaded" if m["installed"] else \
+                    "needs a newer Frametop" if not m["usable"] else "not downloaded"
+                print(f"{mark} {m['name']:<16} {m['status']:<12} {state:<15} {m['title']}{latest}")
+                if m["summary"]:
+                    print(f"  {'':<16} {m['summary']}")
+            return 0
+        if cmd == "refresh":
+            ok, msg = catalog.refresh(kind)
+            print(f"{kind} catalog: {msg}")
+            return 0 if ok else 1
+        if cmd == "resolve":
+            print(json.dumps(catalog.resolve(kind, rest[0] if rest else None)))
+            return 0
+        if cmd == "auto":
+            print(catalog.auto(kind))
+            return 0
+        if cmd == "hashes" and len(rest) == 2:
+            staging, version = Path(rest[0]), rest[1]
+            spec = catalog.SPECS[kind]
+            files = {p.name: catalog._sha(p) for p in sorted((staging / version).iterdir()) if p.is_file()}
+            files.update({n: catalog._sha(staging / n) for n in sorted(spec["top"]) if (staging / n).is_file()})
+            if set(files) - spec["files"] - spec["top"] or spec["required"] - set(files):
+                print(f"ft-models: a {kind} version has {sorted(spec['files'])} (needs {sorted(spec['required'])}),"
+                      f" plus {sorted(spec['top'])} at the top; found {sorted(files)}", file=sys.stderr)
+                return 1
+            print(json.dumps({"files": files}, indent=1))
+            return 0
+        if not rest:
+            print(f"ft-models {cmd} {kind} NAME", file=sys.stderr)
+            return 2
+        name = rest[0]
+        if cmd == "fetch":
+            d = catalog.fetch(kind, name, progress=lambda s: print(s, flush=True))
+            print(f"{kind} model {name} in {d}")
+        elif cmd == "verify":
+            bad = catalog.verify(kind, name)
+            print(f"{kind} model {name}: " + ("all files match" if not bad else "doesn't match: " + ", ".join(bad)))
+            return 1 if bad else 0
+        elif cmd == "remove":
+            print(f"{kind} model {name}: " + ("removed" if catalog.remove(kind, name) else "wasn't downloaded"))
+    except (catalog.CatalogError, OSError, ValueError) as e:
+        print(f"ft-models: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -19,3 +19,6 @@ frametop-report-*.txt
 # the fine-tuned hand models: the image fetches its own pinned copy (hands/models.sh)
 hands/models/student/
 hands/models/.student-*
+# model versions downloaded from Input Settings (models/catalog.py): each install fetches its own
+hands/models/versions/
+gaze/tracker/models/

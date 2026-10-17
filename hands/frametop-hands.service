@@ -14,6 +14,8 @@ PartOf=steamvr.service
 # every 15 minutes, never more than a minute, offline or failing it starts with the ones it has).
 ExecStartPre=-/usr/bin/pkill -x ft-hands
 ExecStartPre=-/usr/bin/timeout 60 @REPO@/hands/models.sh auto
+# A version picked by name (HANDS_MODEL, Input Settings' Hands page) that isn't downloaded yet.
+ExecStartPre=-/usr/bin/timeout 60 /usr/bin/python3 @REPO@/models/ft-models auto hands
 ExecStart=@REPO@/scripts/in-box @REPO@/hands/build/ft-hands --status 60
 ExecStopPost=-/usr/bin/pkill -x ft-hands
 Restart=always

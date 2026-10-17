@@ -1876,6 +1876,7 @@ Kirigami.ApplicationWindow {
                         icon.name: "document-export"
                         enabled: exportView.chosen !== null && !backend.exporting && backend.zstdFound
                                  && !exportView.chosen.active
+                                 && !(backend.uploading && backend.upload.session === exportView.chosen.id)
                         onClicked: backend.exportSession(exportView.chosen.id, false)
                     }
                     // Shows the moment Export is pressed: the first progress can take a few seconds.
@@ -1980,7 +1981,7 @@ Kirigami.ApplicationWindow {
             readonly property string blocked: {
                 if (session === "") return "Choose an export"
                 if (chosen && chosen.export_stale) return "Export the session again first"
-                if (backend.exporting) return "Wait for the export to finish"
+                if (backend.exporting && backend.exportSessionId === session) return "Wait for its export to finish"
                 if (backend.uploading) return ""
                 if (backend.hubDryRun) return ""
                 if (!backend.uploadAllowedFor(session)) return "Contributions aren't open yet"
@@ -2072,8 +2073,19 @@ Kirigami.ApplicationWindow {
                             textRole: "label"
                             valueRole: "id"
                             enabled: !backend.uploading
-                            Component.onCompleted: currentIndex = Math.max(0, indexOfValue(root.chosenSession))
-                            onActivated: root.chosenSession = currentValue
+                            // An export that finishes meanwhile adds a row (newest first): stay on the
+                            // same export, the uploading one while an upload runs.
+                            property string keep: ""
+                            Component.onCompleted: {
+                                currentIndex = Math.max(0, indexOfValue(root.chosenSession))
+                                keep = currentValue || ""
+                            }
+                            onActivated: root.chosenSession = keep = currentValue
+                            onModelChanged: Qt.callLater(() => {
+                                const i = indexOfValue(backend.uploading ? backend.upload.session : keep)
+                                currentIndex = i >= 0 ? i : (count > 0 ? Math.max(0, currentIndex) : -1)
+                                keep = currentValue || ""
+                            })
                         }
                         Controls.Label {
                             opacity: 0.7

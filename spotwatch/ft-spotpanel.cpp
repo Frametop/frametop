@@ -10,7 +10,8 @@
 //
 // Control socket: abstract unix datagram "@ft_spotpanel" (--socket NAME); a sender with an
 // address gets "ok" or "error ...":
-//   show          place it in front of you (head direction, at --distance) and show it with
+//   show          place it in front of you (head direction, at --distance: its reserved spot,
+//                 spotwatch/reserve.h) and show it with
 //                 its next picture
 //   show toast    the same, for a toast: the lasers pass through it
 //   hide
@@ -40,6 +41,7 @@
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
+#include "reserve.h"
 
 #include <drm_fourcc.h>
 #include <fcntl.h>
@@ -509,7 +511,7 @@ void ParseState(const std::string &text, State &s) {
 int main(int argc, char **argv) {
     bool watchStdin = false;
     std::string sockName = "ft_spotpanel", notifyName = "ft_spotwatch", renderPath;
-    double distance = 1.0, width = 0.56;
+    double distance = spotreserve::kDistance, width = spotreserve::kWidth;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--watch-stdin")) watchStdin = true;
         else if (!std::strcmp(argv[i], "--socket") && i + 1 < argc) sockName = argv[++i];
@@ -580,8 +582,8 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "ft-spotpanel: can't create the overlay (another copy running?)\n");
         return 1;
     }
-    // Over the screens and their controls (10), under Frametop's keyboard (15), which may open
-    // with it, and the 3D mouse's dot (200).
+    // Over the screens and their controls (10), so it shows through a panel nearer than it, under
+    // Frametop's keyboard (15), which may open with it, and the 3D mouse's dot (200).
     ov->SetOverlaySortOrder(h, 14);
     ov->SetOverlayWidthInMeters(h, float(width));
     ov->SetOverlayInputMethod(h, vr::VROverlayInputMethod_Mouse);

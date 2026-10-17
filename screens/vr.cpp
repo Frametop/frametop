@@ -112,6 +112,7 @@
 #include "keyboard.h"
 #include "roomview.h"
 #include "steampanels.h"
+#include "../spotwatch/reserve.h"
 
 #include <drm_fourcc.h>
 #include <openvr.h>
@@ -2815,7 +2816,7 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms 
 // ---------------------------------------------------------------- the front slot
 // One place in front of you for the lazy susan (user, 2026-10-11: "make the system a bit more logical
 // with the lazy susan"; the proposals they took): a stroke (or Meta+Alt+Tab) brings the next screen
-// there, 1 m ahead (g_frontReading), as big as its resolution needs for its text to read
+// there, 1 m ahead (g_frontReading; never nearer than behind spotwatch's reserved spot), as big as its resolution needs for its text to read
 // (grabthat::ReadableSize), one at a time: the one there goes home first. Turned away from, it goes
 // home, unless you used it a while (g_frontKeepMs of input on it: kept). Resized there, it comes that
 // size next time (g_frontDeg). Its home: where it lived before it came.
@@ -4271,7 +4272,8 @@ bool ft_vr_init(void) {
         g_curveMaxArc = deg * M_PI / 180;
     }
     g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";   // the lazy susan brings panels (0: the room turns)
-    num("SCREEN_SPIN_DISTANCE", g_frontReading, 0.4, 3);   // the front slot's reading distance (m)
+    num("SCREEN_SPIN_DISTANCE", g_frontReading, 0.4, 3);   // the front slot's reading distance (m)...
+    g_frontReading = std::max(g_frontReading, spotreserve::kDistance + spotreserve::kFrontGap);   // ...behind spotwatch's spot
     num("SCREEN_SPIN_PPD", g_frontRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need
     num("SCREEN_SPIN_MAX_DEG", g_frontRead.maxW, 30, 100);   // ...at most this wide (deg; wider ones curve round you)
     num("SCREEN_SPIN_MAX_TALL_DEG", g_frontRead.maxH, 20, 90);

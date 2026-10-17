@@ -19,7 +19,7 @@ Spotwatch works while the Frametop desktop is running and Frametop isn't paused 
 
 - Searching open windows by title, Frametop's own actions ("Reset layout"), and profiles (decision 4).
 - Moving the caret within the query. Typing and Backspace work at the end only.
-- A setting for its distance and size (`--distance` and `--width` on ft-spotpanel; 1 m and 0.56 m).
+- A setting for its distance and size (`--distance` and `--width` on ft-spotpanel; 0.75 m and 0.42 m, `spotwatch/reserve.h`).
 
 ## Decisions
 
@@ -28,7 +28,7 @@ These were settled with the user on 2026-10-10. The numbers may be cited in the 
 | # | Question | Decision |
 |---|---|---|
 | 1 | The look | A rounded glass pill with a results card under it. The glass is faux, because SteamVR's overlays have alpha but no backdrop blur: a translucent dark tint, a soft sheen from the top, a bright rim fading down the edges, and a shadow outside. Real blur would mean reading the panels back every frame on the Frame's GPU |
-| 2 | Where it opens | Fixed in the room, centred where the head points (not the eye gaze), at 1 m, upright, tilted no more than 60° up or down. The card hangs below the pill, so the pill stays put as results change |
+| 2 | Where it opens | Fixed in the room, centred where the head points (not the eye gaze), at 0.75 m, upright, tilted no more than 60° up or down. The card hangs below the pill, so the pill stays put as results change. That spot is reserved (2026-10-17): the lazy susan's front slot stays at least 0.15 m behind it, and the search draws over any panel nearer than it |
 | 3 | An app with several windows | One row per app. Enter goes to its most recently active window, and Shift+Enter or a right click lists the others with the menu items |
 | 4 | What it searches | Apps and remote displays only. Hidden remote displays are left out, and disconnected ones show with Connect |
 | 5 | Disconnected remote displays | Enter connects the display (`ft-layout remote connect`), waits for its panel, then spins to it |

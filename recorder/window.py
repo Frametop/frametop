@@ -430,9 +430,17 @@ class RecorderBackend(QObject):
                     print(f"keeping the Frame awake: {e}", file=sys.stderr, flush=True)
         self._thread(run)
 
+    def _exporting(self, session):
+        return self.exporting and self._export_session == session
+
+    def _uploading(self, session):
+        return self.uploading and self._upload.get("session") == session
+
     @Slot(str, bool)
     def exportSession(self, session, keep_notes):
-        if self.exporting or self._active_guard(session):
+        # One export at a time. Another session's upload can go on: the export writes beside its
+        # own export (.partial) and only replaces that one at the end, so not while it's uploading.
+        if self.exporting or self._uploading(session) or self._active_guard(session):
             return
         cancel = threading.Event()
         self._export_cancel = cancel
@@ -676,7 +684,8 @@ class RecorderBackend(QObject):
 
     @Slot(str, bool)
     def startUpload(self, session, again):
-        if self.uploading or self.exporting or self._active_guard(session):
+        # Not while this session exports again (its export is replaced at the end); another's is fine.
+        if self.uploading or self._exporting(session) or self._active_guard(session):
             return
         if not self._hub_dry_run and not self._upload_allowed_for(session):
             self.message.emit("Contributions aren't open yet", True)

@@ -599,6 +599,63 @@ int main(int argc, char **argv) {
     tracker.set_hold(reacquire > 0 ? hold : 0.3);
     tracker.set_skeleton(skeleton);
     std::map<std::string, std::vector<uint8_t>> pixels;
+    // A mono set is the side pair's newer frames (all the mono cameras' without both sides) with
+    // the upper pair's from the same moment. XRService keeps the uppers in step with the sides,
+    // but after a colour module hot plug they may stay out of step ("Set upper camera driver not
+    // in-sync", 2026-10-17: 40 fps against the sides' 30, no dark frames, for good). Waiting for
+    // all four to meet then left 6-7 sets a second; out of step, sets hold the side pair alone
+    // (until the uppers keep meeting them again).
+    std::vector<std::string> lead, follow;
+    for (auto &[name, i] : index)
+        (!have_sides || name == "slam_left" || name == "slam_right" ? lead : follow).push_back(name);
+    bool follow_in_step = true;
+    double follow_rate = 1;      // how often the uppers met a set lately (a moving average)
+    uint64_t prev_t0 = 0, prev_t1 = 0;
+    // a camera's frame from within 3 ms of the set's frames (taken t0 to t1), newer than after, or 0
+    auto follow_frame = [&](int i, uint64_t t0, uint64_t t1, uint64_t after) -> uint64_t {
+        uint64_t n = ring.latest(i);
+        for (int k = 0; k < 4 && n > after; ++k, --n) {
+            fh_ring_slot_t m;
+            if (!ring.meta(i, n, &m)) continue;
+            if (m.capture_ns + 3'000'000 < t1) break;   // older than the set: earlier ones are too
+            if (m.capture_ns <= t0 + 3'000'000) return n;
+        }
+        return 0;
+    };
+    // Did camera i take a frame within 3 ms of t0 to t1? 1 yes, 0 no, -1 can't tell: the ring
+    // (4 frames) no longer reaches back that far, as when a step took long.
+    auto met_set = [&](int i, uint64_t t0, uint64_t t1) -> int {
+        const uint64_t latest = ring.latest(i);
+        for (uint64_t n = latest; n > 0 && latest - n < 4; --n) {
+            fh_ring_slot_t m;
+            if (!ring.meta(i, n, &m)) return -1;
+            if (m.capture_ns + 3'000'000 < t1) return 0;
+            if (m.capture_ns <= t0 + 3'000'000) return 1;
+        }
+        return -1;
+    };
+    // A set used or passed by: did the uppers meet the one before it? (theirs have come by now)
+    auto note_step = [&](uint64_t t0, uint64_t t1) {
+        int met = 1;
+        if (!follow.empty() && prev_t1)
+            for (const std::string &name : follow) met = std::min(met, met_set(index[name], prev_t0, prev_t1));
+        if (!follow.empty() && prev_t1 && met >= 0) {
+            follow_rate += 0.1 * (met - follow_rate);
+            if (follow_in_step && follow_rate < 0.5) {
+                follow_in_step = false;
+                for (const std::string &name : follow) tracker.drop_camera(name);
+                std::printf("upper cameras out of step with the side ones (XRService's \"upper camera driver not in-sync\", "
+                            "after a colour module hot plug): tracking with the side pair alone. Taking the headset off "
+                            "and putting it back on may bring them back.\n");
+                std::fflush(stdout);
+            } else if (!follow_in_step && follow_rate > 0.95) {
+                follow_in_step = true;
+                std::printf("upper cameras in step with the side ones again: tracking with all four\n");
+                std::fflush(stdout);
+            }
+        }
+        prev_t0 = t0, prev_t1 = t1;
+    };
     // The flag buffer (see the top), and its request file.
     std::unique_ptr<FlagBuffer> flags;
     const std::string flag_file = run_dir() + "/flag";
@@ -894,37 +951,53 @@ int main(int argc, char **argv) {
         uint64_t tmin = UINT64_MAX, dq = 0;
 
         if (mono_driven) {
-            // a new frame set: every mono camera has a newer frame, taken at the same moment
+            // a new frame set: the side pair has newer frames, taken at the same moment (see lead)
             std::map<std::string, uint64_t> latest;
             bool ready = true;
-            for (auto &[name, i] : index) {
-                latest[name] = ring.latest(i);
+            for (const std::string &name : lead) {
+                latest[name] = ring.latest(index[name]);
                 ready = ready && latest[name] > last[name];
             }
             if (!ready) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
-            // not needed at the current rate, and not recorded: skip it without copying images
-            if (track && !rec && !g_record) {
-                uint64_t t0 = UINT64_MAX, t1 = 0;
-                bool ok = true;
-                for (auto &[name, i] : index) {
-                    fh_ring_slot_t meta;
-                    ok = ok && ring.meta(i, latest[name], &meta);
-                    if (ok) t0 = std::min(t0, meta.capture_ns), t1 = std::max(t1, meta.capture_ns);
-                }
-                if (ok && t1 - t0 <= 3'000'000 && t0 < next_ns) {
-                    for (auto &[name, i] : index) last[name] = latest[name];
-                    continue;
-                }
+            uint64_t t0 = UINT64_MAX, t1 = 0, lead_dq = 0;
+            bool met = true;
+            for (const std::string &name : lead) {
+                fh_ring_slot_t meta;
+                met = met && ring.meta(index[name], latest[name], &meta);
+                if (met) t0 = std::min(t0, meta.capture_ns), t1 = std::max(t1, meta.capture_ns), lead_dq = std::max(lead_dq, meta.dqbuf_ns);
             }
+            if (!met || t1 - t0 > 3'000'000) {   // one is a frame ahead: wait for the other
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            // the uppers' frames from the same moment: in step, theirs may be a few ms behind
+            std::map<std::string, uint64_t> with;
+            if (follow_in_step)
+                for (const std::string &name : follow)
+                    if (const uint64_t n = follow_frame(index[name], t0, t1, last[name])) with[name] = n;
+            if (follow_in_step && with.size() < follow.size() && mono_ns() < lead_dq + 8'000'000) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            const bool full = with.size() == follow.size();
+            // not needed at the current rate, and not recorded: skip it without copying images
+            if (track && !rec && !g_record && t0 < next_ns) {
+                note_step(t0, t1);
+                for (const std::string &name : lead) last[name] = latest[name];
+                for (auto &[name, n] : with) last[name] = n;
+                continue;
+            }
+            for (auto &[name, n] : with) latest[name] = n;
             std::vector<SetFrame> frames;
             uint64_t tmax = 0;
             bool ok = true;
-            for (auto &[name, i] : index) {
+            for (auto &[name, n] : latest) {
+                const int i = index[name];
                 fh_ring_slot_t meta;
-                ok = ok && ring.read(i, latest[name], pixels[name], &meta);
+                ok = ok && ring.read(i, n, pixels[name], &meta);
                 if (!ok) break;
                 const auto &c = ring.camera(i);
                 images[name] = {pixels[name].data(), int(c.width), int(c.height), int(c.width)};
@@ -937,7 +1010,8 @@ int main(int argc, char **argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
-            for (auto &[name, i] : index) last[name] = latest[name];
+            note_step(t0, t1);
+            for (auto &[name, n] : latest) last[name] = n;
             if (g_record && !rec) {
                 g_record = 0;
                 char name[64];
@@ -957,7 +1031,7 @@ int main(int argc, char **argv) {
                     std::printf("recording done: %zu sets, %zu dropped\n", n, d);
                     std::fflush(stdout);
                     if (!track) break;
-                } else if (due) {
+                } else if (due && full) {   // a set without the uppers isn't recorded
                     for (auto &[name, i] : dark) {   // the newest dark and color frames, as they are
                         fh_ring_slot_t meta;
                         const uint64_t n = ring.latest(i);
@@ -1090,6 +1164,9 @@ int main(int argc, char **argv) {
                             s.handoff_miss, s.dups, s.splits, s.created, s.merged, s.forgotten,
                             !rec ? "" : ("  recorded " + std::to_string(rec->written()) + " dropped " +
                                          std::to_string(rec->dropped())).c_str());
+            if (!follow.empty() && !follow_in_step)
+                std::printf("        upper cameras out of step with the side ones (met %.0f%% of sets lately): side pair alone\n",
+                            100 * follow_rate);
             if (flags) {
                 const FlagBuffer::Stats fs = flags->stats();
                 std::printf("        flag buffer: %zu sets, %zu crops (%zu ghosts) in %.1f MB, %.0f us a crop, %zu dropped, %zu flags written%s%s\n",
@@ -1135,6 +1212,29 @@ int main(int argc, char **argv) {
         middle.release(int64_t(mono_ns()));
         grip.release(int64_t(mono_ns()));
         gestures.write(pinch, grip, mono_ns(), &middle);
+    }
+    // ft-camd stopped: a new one comes when XRService moves the cameras (a colour module hot plug)
+    // or restarts. Wait for it here and start again on its cameras, rather than exit and wait out
+    // the unit's RestartSec as well. Its ring is a new file (camd.c unlinks the old one).
+    if (exit_code == 2 && publish && track && !g_stop) {
+        rec.reset();   // writes out what's queued
+        Ring next;
+        ino_t next_ino = ring_st.st_ino;
+        for (const uint64_t t = mono_ns(); !g_stop && mono_ns() - t < 15'000'000'000ull;
+             std::this_thread::sleep_for(std::chrono::milliseconds(100))) {
+            struct stat st;
+            std::string e;
+            if (next_ino == ring_st.st_ino && stat(ring_path.c_str(), &st) == 0 && st.st_ino != ring_st.st_ino &&
+                next.open(ring_path.c_str(), e))
+                next_ino = st.st_ino;
+            if (next_ino != ring_st.st_ino && next.alive()) {
+                std::printf("ft-camd is back: starting again on its cameras\n");
+                std::fflush(stdout);
+                execv("/proc/self/exe", argv);
+                std::perror("execv /proc/self/exe");
+                break;
+            }
+        }
     }
     return exit_code;
 }

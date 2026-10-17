@@ -1358,8 +1358,8 @@ def main():
                 data, anc, _, addr = control.recvmsg(65536, socket.CMSG_SPACE(creds.size))
             except BlockingIOError:
                 return
-            uid = next((creds.unpack(d[:creds.size])[1] for level, kind, d in anc
-                        if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
+            pid, uid = next((creds.unpack(d[:creds.size])[:2] for level, kind, d in anc
+                             if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), (None, None))
             words = data.decode(errors="replace").split()
             cmd = words[0] if words else ""
             # One malformed datagram must not end the relay: it would drop every grab,
@@ -1370,6 +1370,8 @@ def main():
                     # From ft-screens (unbound, no reply): where typing goes, repeated every second.
                     desktop = len(words) > 1 and words[1] == "desktop" and not pause.paused
                     state["desktop_until"] = now + 3.0 if desktop else 0.0
+                    if uid == os.getuid():
+                        pause.screens_seen(pid)  # a desktop started while paused hides too
                     continue
                 if cmd == "vrbtn" and len(words) == 3 and words[1] in VR_BUTTONS and words[2] in ("0", "1"):
                     vr_button(words[1], int(words[2]), now)

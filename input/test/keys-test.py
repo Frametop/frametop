@@ -59,7 +59,7 @@ class StubPause:
     def configure(self, *args):
         pass
 
-    game_state = tick = helper_started = controllers_changed = set_hands = dashboard_state = configure
+    game_state = tick = helper_started = controllers_changed = set_hands = dashboard_state = screens_seen = configure
 
 
 stub = {}

@@ -269,7 +269,7 @@ Resuming starts again only what pausing stopped, and plays a second sound. The p
 
 Ways to pause and resume:
 
-- The controller gesture, by default both thumbsticks clicked together twice: both go down within 0.3 seconds of each other, and the second time within 0.7 seconds of the first. The relay reads it from vrserver's web socket (`input/vrws.py`), which works whatever has input focus and takes nothing from the game, so the game sees the clicks too. The Game optimization page changes it: one or two of the buttons the Controllers page lists, pressed once or twice (one button always takes two), or none.
+- The controller gesture, by default both thumbsticks clicked together twice: both go down within 0.3 seconds of each other, and the second time within 0.7 seconds of the first. Once it goes off, it's ignored for 3 seconds, so a repeat or a triple press doesn't toggle Frametop straight back. The relay reads it from vrserver's web socket (`input/vrws.py`), which works whatever has input focus and takes nothing from the game, so the game sees the clicks too. The Game optimization page changes it: one or two of the buttons the Controllers page lists, pressed once or twice (one button always takes two), or none.
 - The Pause/resume Frametop action, on a mouse button, a key combination, or a controller button (outside games, like every mapped controller button).
 - VR games, with Pause while a VR game runs on (`pause_auto`, the default). The pointer helper tells the relay when a scene app starts and ends (`vrgame 1|0`, repeated every 5 seconds). A game starting pauses Frametop. A pause that starts while a game runs ends 5 seconds after the game does, unless another game starts first. Resumed during a game, Frametop stays on until that game ends. A pause that starts outside a game lasts until you resume. Flatscreen games aren't scene apps, so they don't pause it.
 - From a terminal or a script:
@@ -282,7 +282,7 @@ input/test/pause-test.py           # the gesture and the automatic pause, offlin
 input/test/pause-buttons-test.py   # a click held into a pause comes up, offline
 ```
 
-The state outlives a relay restart, in `/run/user/UID/frametop-pause.json`. A SteamVR restart while paused starts the gaze service with it, and the relay stops it again when the pointer helper comes back.
+The state outlives a relay restart, in `/run/user/UID/frametop-pause.json`. A desktop that starts while paused (a restart, an update) is told so the first time it reports to the relay, so it hides too instead of showing with the 3D mouse off. A SteamVR restart while paused starts the gaze service with it, and the relay stops it again when the pointer helper comes back.
 
 ## Voice dictation
 

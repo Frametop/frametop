@@ -8,7 +8,7 @@
 # Frame's dev container; the list below freezes the runtime-relevant subset of
 # it plus the toolchain (the binaries are built in this image). Keep the two in
 # sync on purpose: dev-container.sh documents *why* each package is there.
-FROM registry.fedoraproject.org/fedora-toolbox:44@sha256:034cb7c472038e2d879ddc19568106a1342aa24403f0d641a0f73dda638707ad
+FROM registry.fedoraproject.org/fedora-toolbox:44@sha256:034cb7c472038e2d879ddc19568106a1342aa24403f0d641a0f73dda638707ad AS runtime-common
 
 # Toolchain (the binaries are built in here) and the libraries they link.
 RUN dnf -y install --setopt=install_weak_deps=False \
@@ -23,7 +23,8 @@ RUN dnf -y install --setopt=install_weak_deps=False \
       opus-devel pulseaudio-libs-devel \
       # Frametop Input Settings (Kirigami, PySide6) and remote desktop (krdp):
       # the KDE/Qt stack has no PyPI wheels, so it stays a dnf package
-      python3-pyside6 kf6-kirigami kf6-qqc2-desktop-style qt6-qtwayland \
+      python3-shiboken6 kf6-kirigami kf6-qqc2-desktop-style \
+      qt6-qtwayland qt6-qtsvg qt6-qtimageformats \
       breeze-icon-theme plasma-breeze krdp freerdp tigervnc-x11-server xrandr \
     && dnf -y remove 'glibc-langpack-*' \
     && dnf -y install glibc-langpack-en \
@@ -60,8 +61,26 @@ RUN uvdir=$(mktemp -d) \
  && tar -xzf "$uvdir/uv.tar.gz" --strip-components=1 -C "$uvdir" uv-aarch64-unknown-linux-gnu/uv \
  && "$uvdir/uv" venv --system-site-packages /opt/frametop/venv \
  && cd /src/frametop && "$uvdir/uv" sync --frozen --group tracker --no-cache \
- && /opt/frametop/venv/bin/python -c 'import PySide6, numpy, cv2' \
+ && /opt/frametop/venv/bin/python -c 'import numpy, cv2' \
  && rm -rf "$uvdir"
+
+# Stable runtime layers are shared by successive releases (including rollback).
+# Keep the toolchain and headers: ft dev shell/test still work in this image.
+# PySide's full Fedora RPM also requires WebEngine/3D/etc. The builder exports
+# the unchanged bindings Frametop uses, against these same system Qt libraries.
+WORKDIR /src/frametop
+ENV FRAME_IN_BOX=1 OPENVR_LIB=/opt/frametop/lib
+ENV PATH=/opt/frametop/venv/bin:/opt/frametop/bin:/usr/local/bin:/usr/bin:/usr/sbin
+RUN ln -s /run/host/opt/steamvr /opt/steamvr
+CMD ["sleep", "infinity"]
+
+FROM runtime-common AS builder
+RUN rpm -qa --qf '%{NEVRA}\n' | sort > /tmp/runtime-rpms \
+ && dnf -y install --setopt=install_weak_deps=False python3-pyside6 \
+ && rpm -qa --qf '%{NEVRA}\n' | sort > /tmp/builder-rpms \
+ && test -z "$(comm -23 /tmp/runtime-rpms /tmp/builder-rpms)" \
+ && dnf clean all \
+ && install -d /runtime/opt/frametop/bin /runtime/opt/frametop/lib
 
 # The sources, then the binaries, built by the same build scripts as on the
 # Frame (FRAME_IN_BOX=1: they run here instead of entering the dev container).
@@ -69,25 +88,23 @@ RUN uvdir=$(mktemp -d) \
 # /opt/frametop. Hand tracking is deferred exactly as in install.sh: it builds
 # ncnn from source and isn't needed until hands/run.sh install runs.
 COPY . /src/frametop
-WORKDIR /src/frametop
-ENV FRAME_IN_BOX=1 OPENVR_LIB=/opt/frametop/lib
 RUN screens/build.sh \
- && install -t /opt/frametop/bin screens/build/ft-screens screens/build/ft-handtest \
+ && install -t /runtime/opt/frametop/bin screens/build/ft-screens screens/build/ft-handtest \
  && rm -f screens/build/*.o
 RUN pointer/helper/build.sh && pointer/driver/build.sh \
- && install -t /opt/frametop/bin pointer/helper/build/ft-pointer \
- && install -t /opt/frametop/lib pointer/driver/build/driver_ft_pointer.so
+ && install -t /runtime/opt/frametop/bin pointer/helper/build/ft-pointer \
+ && install -t /runtime/opt/frametop/lib pointer/driver/build/driver_ft_pointer.so
 RUN gaze/build.sh \
- && install -t /opt/frametop/bin gaze/build/ft-gaze gaze/build/ft-gazepanel
+ && install -t /runtime/opt/frametop/bin gaze/build/ft-gaze gaze/build/ft-gazepanel
 RUN power/build.sh \
- && install -t /opt/frametop/bin power/build/ft-powerd
+ && install -t /runtime/opt/frametop/bin power/build/ft-powerd
 RUN stream/build.sh \
- && install -t /opt/frametop/bin stream/build/ft-stream \
+ && install -t /runtime/opt/frametop/bin stream/build/ft-stream \
  && rm -rf stream/build/mlc stream/build/gamestream
 # Our own eye tracker: ft-eyegrab (it runs on the host, as root) and ft-eyes'
 # build/venv, which here only points at the venv above.
 RUN gaze/tracker/build.sh \
- && install -t /opt/frametop/bin gaze/tracker/build/ft-eyegrab
+ && install -t /runtime/opt/frametop/bin gaze/tracker/build/ft-eyegrab
 
 # A release installs from this image (pack/install-release.sh): it copies
 # /src/frametop, built, to the Frame for its host side (services, the driver,
@@ -99,14 +116,17 @@ RUN git init -q pack/build/distrobox \
  && git fetch -q --depth 1 https://github.com/89luca89/distrobox.git 40c3cd724faa434aeb0a23e28776665b92de68bd \
  && git checkout -q FETCH_HEAD \
  && rm -rf .git
-# Programs built against OpenVR look for SteamVR's library here first. In the
-# container on the Frame, distrobox mounts the host at /run/host; elsewhere the
-# link leads nowhere and they use /opt/frametop/lib's.
-RUN ln -s /run/host/opt/steamvr /opt/steamvr
+# Export Fedora's selected Python bindings without changing their native code.
+RUN python3 pack/pyside-runtime.py --repo /src/frametop --destination /runtime
 
 # The default environment: Frametop's binaries and the venv's python3 (Fedora's
 # interpreter, with the locked packages and the dnf Qt stack) first.
 # sleep infinity as the default command keeps the image usable with distrobox
 # create, like the toolbox base.
-ENV PATH=/opt/frametop/venv/bin:/opt/frametop/bin:/usr/local/bin:/usr/bin:/usr/sbin
-CMD ["sleep", "infinity"]
+FROM runtime-common AS runtime
+COPY --from=builder /runtime/usr/ /usr/
+COPY --from=builder /runtime/opt/ /opt/
+COPY --from=builder /src/frametop/ /src/frametop/
+RUN python3 pack/pyside-runtime.py --verify /usr/share/frametop/pyside-runtime.json \
+ && /usr/bin/python3 -c 'from PySide6 import QtCore, QtGui, QtQml, QtQuick, QtQuickControls2' \
+ && python3 -c 'import numpy, cv2'

@@ -489,7 +489,11 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Current mappings" }
+                    Kirigami.Separator {
+                        visible: bpage.rows.length > 0
+                        Kirigami.FormData.isSection: true
+                        Kirigami.FormData.label: "Current mappings"
+                    }
 
                     Repeater {
                         model: bpage.rows
@@ -521,9 +525,9 @@ Kirigami.ApplicationWindow {
                             Controls.Button {
                                 text: modelData.custom ? (modelData.isDefault ? "Reset" : "Remove") : "Unbind"
                                 icon.name: modelData.custom ? (modelData.isDefault ? "edit-undo" : "edit-delete-remove")
-                                : "list-remove"
+                                                            : "list-remove"
                                 onClicked: modelData.custom ? backend.removeMapping(bpage.deviceId, modelData.code)
-                                : backend.unbind(bpage.deviceId, modelData.code)
+                                                            : backend.unbind(bpage.deviceId, modelData.code)
                             }
                             Item { Layout.fillWidth: true }
                         }

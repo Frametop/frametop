@@ -4,6 +4,7 @@
 Standard library only (no Qt, no NumPy), so the window and the command line share it.
 The layout is hands/rec/DESIGN.md's "Files":
   BASE/profile.json
+  BASE/contributions.json  (finished uploads, kept after their sessions go: recorder/contributions.py)
   BASE/sessions/<YYYYMMDD-HHMMSS>/session.json, calibration.json
   BASE/sessions/<id>/takes/<NN>-<section>/sets.bin (sets-2.bin, ... after pauses),
                                           prompts.jsonl, poses.jsonl, take.json
@@ -26,6 +27,7 @@ usage: takes.py [--base DIR] list | takes SESSION | export SESSION | sides SESSI
 import argparse
 import datetime
 import errno
+import hashlib
 import json
 import os
 import re
@@ -35,11 +37,13 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from recorder import age  # noqa: E402  (a debug session's recordings are encrypted)
+from recorder import contributions  # noqa: E402  (the log of uploads that outlives the sessions)
 from recorder.common import tree_version  # noqa: E402
 import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's panel and pointer decisions)
 from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge_ranges, read_json,  # noqa: E402,F401
@@ -85,10 +89,16 @@ EXPORT_SCHEMA = 1
 # someone is in VR makes the headset stutter).
 ZSTD_ARGS = ["-10", "-T2", "-q", "-c"]
 ZSTD_PATHS = ("/usr/bin/zstd", "/usr/local/bin/zstd", "/run/host/usr/bin/zstd")
-# An export is about three quarters of the recording's size (2026-10-14's: 15 GB sessions, 11 GB
-# exports). Under half of it free, it can't fit: export says so before it starts.
+# An export is about three quarters of the recording's size (2026-10-17, the Frame's five
+# exports: 0.72 to 0.76). Export starts only with room for EXPORT_RATIO_NEED of it plus
+# EXPORT_RESERVE, and stops when the disk gets down to EXPORT_MIN_FREE: a full home disk breaks
+# more than the export (SteamVR, Steam and the desktop write there too). Until 2026-10-17 it
+# started with half free and ran until zstd failed on a full disk.
 EXPORT_RATIO = 0.75
-EXPORT_RATIO_MIN = 0.5
+EXPORT_RATIO_NEED = 0.8
+EXPORT_RESERVE = 2 * 1000 ** 3
+EXPORT_MIN_FREE = 1.5e9       # as session.py's MIN_FREE for recording
+ROOM_CHECK_S = 1.0
 
 
 class ZstdStopped(RuntimeError):
@@ -98,6 +108,33 @@ class ZstdStopped(RuntimeError):
 
 class DiskFull(RuntimeError):
     """Not enough free space for the export, before it started or as it went."""
+
+
+class NearlyFull(OSError):
+    """The export stopped itself: the disk got down to EXPORT_MIN_FREE."""
+
+    def __init__(self, free):
+        super().__init__(errno.ENOSPC, f"only {human_bytes(free)} left on the disk")
+
+
+def export_need(kept):
+    """The free space an export of kept bytes of recording needs to start."""
+    return int(kept * EXPORT_RATIO_NEED + EXPORT_RESERVE)
+
+
+_room_checked = [0.0]   # when check_room last looked (monotonic s)
+
+
+def check_room(path):
+    """Raise NearlyFull when the disk holding path is down to EXPORT_MIN_FREE. Looks at most once
+    every ROOM_CHECK_S (a statvfs per set would cost more than it saves)."""
+    now = time.monotonic()
+    if now - _room_checked[0] < ROOM_CHECK_S:
+        return
+    _room_checked[0] = now
+    free = free_bytes(path)
+    if 0 < free < EXPORT_MIN_FREE:
+        raise NearlyFull(free)
 
 
 def disk_full(e):
@@ -433,6 +470,41 @@ def take_index(take_dir):
     return index
 
 
+def export_sha(export_dir):
+    """The export's identity, as hub.py records it: the SHA256 of its SHA256SUMS ("" if none)."""
+    try:
+        with open(os.path.join(export_dir, "SHA256SUMS"), "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _epoch(iso):
+    try:
+        return datetime.datetime.fromisoformat(iso).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def upload_state(meta, changed, export_dir):
+    """A session's uploads, from its session.json (meta) and its files' newest change (changed,
+    tree_stat's): {"uploaded": a finished upload exists, "pr_url": the last one's, "freeable":
+    deleting the local copy loses nothing that wasn't uploaded}. That's when the recordings haven't
+    changed since the last finished upload, or (an upload without a readable time) the export
+    there now is the one uploaded."""
+    done = contributions.done_uploads(meta)
+    if not done:
+        return {"uploaded": False, "pr_url": "", "freeable": False}
+    last = done[-1]
+    when = _epoch(last.get("uploaded", ""))
+    if when is not None:
+        freeable = changed <= when
+    else:
+        sha = export_sha(export_dir)
+        freeable = bool(sha) and any(u.get("export_sha") == sha for u in done)
+    return {"uploaded": True, "pr_url": last.get("pr_url", ""), "freeable": freeable}
+
+
 # ---------------------------------------------------------------- the store
 
 class Store:
@@ -463,7 +535,8 @@ class Store:
     # --- listing
     def sessions(self):
         """Newest first: [{id, started, takes, bytes, lighting, status, dry_run, contributor, exported,
-        export_stale (changed since), export_bytes}]."""
+        export_stale (changed since), export_bytes, uploaded, pr_url, freeable}] (upload_state's
+        last three)."""
         out = []
         try:
             names = os.listdir(self.sessions_dir)
@@ -484,7 +557,8 @@ class Store:
                         "bounty": ((meta.get("bounty") or {}).get("title") or "") if isinstance(meta.get("bounty"), dict) else "",
                         "debug": bool(meta.get("debug")), "testing": consent_kind(meta) == "testing",
                         "exported": bool(exported), "export_stale": bool(exported) and changed > exported,
-                        "export_bytes": tree_bytes(self.export_dir(sid)) if exported else 0})
+                        "export_bytes": tree_bytes(self.export_dir(sid)) if exported else 0,
+                        **upload_state(meta, changed, self.export_dir(sid))})
         return sorted(out, key=lambda s: s["id"], reverse=True)
 
     def take_ids(self, session):
@@ -559,6 +633,53 @@ class Store:
         if os.path.isdir(path):
             shutil.rmtree(path)
 
+    # --- freeing space: uploaded sessions go, their record stays (recorder/contributions.py)
+    def log_uploads(self, session=None):
+        """Copy finished uploads from session.json into the contributions log: one session's, or
+        every session's (uploads older recorders recorded only there). Returns how many were new."""
+        items = []
+        for sid in [session] if session else [s for s in os.listdir(self.sessions_dir)
+                                              if SESSION_RE.match(s)] if os.path.isdir(self.sessions_dir) else []:
+            meta = read_json(os.path.join(self.session_dir(sid), "session.json"))
+            export = self.export_dir(sid)
+            size = tree_bytes(export) if os.path.isdir(export) else 0
+            items += [contributions.entry(sid, meta, u, size if u.get("export_sha") == export_sha(export) else 0)
+                      for u in contributions.done_uploads(meta)]
+        return contributions.add(self.base, items) if items else 0
+
+    def free_session(self, session):
+        """Delete an uploaded session's recordings and export, keeping its uploads in the
+        contributions log. Refuses (ValueError) a session that isn't uploaded as it is now.
+        Returns the bytes freed."""
+        path = self.session_dir(session)
+        meta = read_json(os.path.join(path, "session.json"))
+        if not meta:
+            raise ValueError(f"no session {session}")
+        _, changed = tree_stat(path)
+        state = upload_state(meta, changed, self.export_dir(session))
+        if not state["freeable"]:
+            raise ValueError("This session isn't uploaded as it is now: upload it first, or delete it")
+        freed = tree_bytes(path) + (tree_bytes(self.export_dir(session)) if os.path.isdir(self.export_dir(session)) else 0)
+        self.log_uploads(session)   # the record first: if it can't be written, nothing is deleted
+        if session not in contributions.sessions(self.base):
+            raise OSError(f"couldn't keep the record of {session} in {contributions.FILE}")
+        self.delete_session(session)
+        contributions.mark_deleted(self.base, session)
+        return freed
+
+    def freeable(self):
+        """The sessions free_session would take: [{id, bytes (recordings + export)}], newest first."""
+        return [{"id": s["id"], "bytes": s["bytes"] + s["export_bytes"]} for s in self.sessions()
+                if s["freeable"] and s["status"] != "recording"]
+
+    def contributions(self):
+        """The contributions log, newest first, each with "local": its session is still here."""
+        out = []
+        for c in reversed(contributions.load(self.base)):
+            local = bool(SESSION_RE.match(c["session"])) and os.path.isdir(os.path.join(self.sessions_dir, c["session"]))
+            out.append(dict(c, local=local))
+        return out
+
     # --- export
     def sides(self, session, swapped=None):
         """session.json's side camera decision (sides.py) plus each take's parts; with swapped
@@ -609,7 +730,7 @@ class Store:
             shutil.rmtree(work)
         kept = self.kept_bytes(session)
         free = free_bytes(self.exports_dir)   # 0: couldn't tell, so no check
-        if 0 < free < kept * EXPORT_RATIO_MIN:
+        if 0 < free < export_need(kept):
             raise DiskFull(self.space_text(session, kept, "Not enough free space to export this session"))
         os.makedirs(work)
         try:
@@ -619,6 +740,9 @@ class Store:
             os.replace(work, final)
         except BaseException as e:
             shutil.rmtree(work, ignore_errors=True)
+            if isinstance(e, NearlyFull):
+                raise DiskFull(self.space_text(session, kept, "The disk got nearly full, so the export "
+                                                              "stopped and removed its half")) from e
             if isinstance(e, Exception) and not isinstance(e, DiskFull) and disk_full(e):
                 raise DiskFull(self.space_text(session, kept, "The disk filled up while exporting")) from e
             raise
@@ -632,7 +756,8 @@ class Store:
     def space_text(self, session, kept, first):
         """The disk-full message: what's free, about what the export needs, and what to do."""
         text = (f"{first}: {human_bytes(free_bytes(self.exports_dir))} free, and the export needs about "
-                f"{human_bytes(kept * EXPORT_RATIO)}. Free some space and export again.")
+                f"{human_bytes(export_need(kept))} to start. Free some space and export again. Rounds that "
+                "are already uploaded can be deleted on the Review page, and your record of them stays.")
         old = tree_bytes(self.export_dir(session)) if os.path.isdir(self.export_dir(session)) else 0
         if old:
             text += f" Its old export ({human_bytes(old)}) stays until the new one is done: deleting it frees that too."
@@ -768,6 +893,7 @@ class Store:
                     for i in keep:
                         if cancelled():
                             raise Cancelled()
+                        check_room(dest)
                         record = index.read_raw(i)
                         proc.stdin.write(record)
                         raw += len(record)

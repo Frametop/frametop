@@ -137,6 +137,23 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    // Freeing space: an uploaded round's recordings and export go, the record of its upload
+    // stays (contributions.json, listed on the Review page).
+    function askFreeAll() {
+        confirm.ask("Delete the uploaded rounds here?",
+                    root.plural(backend.freeableCount, "uploaded round") + " (" + backend.freeableText + ") are deleted "
+                    + "from the headset: their recordings and exports. They're already in your pull requests, and "
+                    + "your record of each upload stays on the Review page.",
+                    () => backend.freeAllUploaded())
+    }
+    function askFree(row, after) {
+        const sid = row.id
+        confirm.ask("Delete the local copy?",
+                    "The session of " + row.label + " is uploaded (" + row.pr_url + "). Its recordings and export ("
+                    + row.freeText + ") are deleted from the headset; your record of the upload stays on the Review page.",
+                    () => { if (after) after(); backend.freeSession(sid) })
+    }
+
     // Restart SteamVR (the camera check's fix). What it does to Frametop, read from the code
     // (hands/README.md, "Camera check"): ft-screens quits when SteamVR does, which ends the
     // desktop; its unit doesn't restart, and stopping it ends what was started in it.
@@ -661,15 +678,26 @@ Kirigami.ApplicationWindow {
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Space" }
                 Controls.Label {
                     Kirigami.FormData.label: "Free space:"
-                    text: backend.freeText + " (a round takes about 15 GB, and its export about 12 GB more)"
+                    text: backend.freeText + " (a round needs about " + backend.roundNeedText
+                          + ": about 16 GB to record and 15 GB to export it)"
                 }
                 Kirigami.InlineMessage {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     Layout.fillWidth: true
                     visible: !backend.diskOk
                     type: Kirigami.MessageType.Error
-                    text: "Not enough free space for a round. Export and delete earlier sessions (Review), "
-                          + "or free up space, first."
+                    text: "Not enough free space for a round and its export. "
+                          + (backend.freeableCount > 0
+                             ? root.plural(backend.freeableCount, "uploaded round") + " can go to free "
+                               + backend.freeableText + ": your record of each upload stays."
+                             : "Delete sessions you don't need (Review), or free up space, first.")
+                    actions: backend.freeableCount > 0 ? [freeAllBefore] : []
+                    Kirigami.Action {
+                        id: freeAllBefore
+                        text: "Delete uploaded rounds"
+                        icon.name: "edit-delete"
+                        onTriggered: root.askFreeAll()
+                    }
                 }
 
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Cameras" }
@@ -1368,10 +1396,58 @@ Kirigami.ApplicationWindow {
                 model: backend.sessions
                 spacing: Kirigami.Units.smallSpacing
 
+                header: ColumnLayout {
+                    width: ListView.view.width
+                    Kirigami.InlineMessage {
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: visible ? Kirigami.Units.smallSpacing : 0
+                        visible: backend.freeableCount > 0
+                        type: Kirigami.MessageType.Information
+                        text: root.plural(backend.freeableCount, "uploaded round") + " can be deleted here to free "
+                              + backend.freeableText + ". Your record of each upload stays, below."
+                        actions: [
+                            Kirigami.Action {
+                                text: "Delete uploaded rounds"
+                                icon.name: "edit-delete"
+                                onTriggered: root.askFreeAll()
+                            }
+                        ]
+                    }
+                }
+
+                // The contributions log: every upload, kept when its local copy is deleted.
+                footer: ColumnLayout {
+                    width: ListView.view.width
+                    visible: backend.contributions.length > 0
+                    spacing: Kirigami.Units.smallSpacing
+                    Kirigami.Heading {
+                        Layout.topMargin: Kirigami.Units.largeSpacing
+                        Layout.leftMargin: Kirigami.Units.largeSpacing
+                        level: 3
+                        text: "Your uploads"
+                    }
+                    Repeater {
+                        model: backend.contributions
+                        delegate: Controls.Label {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.leftMargin: Kirigami.Units.largeSpacing
+                            Layout.rightMargin: Kirigami.Units.largeSpacing
+                            wrapMode: Text.Wrap
+                            textFormat: Text.StyledText
+                            text: "<b>" + modelData.title + "</b> · " + modelData.label + " · " + modelData.uploadedText
+                                  + (modelData.prUrl ? " · <a href=\"" + modelData.prUrl + "\">" + (modelData.prText || "pull request") + "</a>" : "")
+                                  + (modelData.testing ? " · testing" : "")
+                                  + (modelData.deletedText ? " · " + modelData.deletedText : "")
+                            onLinkActivated: link => Qt.openUrlExternally(link)
+                        }
+                    }
+                }
+
                 Kirigami.PlaceholderMessage {
                     anchors.centerIn: parent
                     width: parent.width - Kirigami.Units.gridUnit * 4
-                    visible: parent.count === 0
+                    visible: parent.count === 0 && backend.contributions.length === 0
                     text: "No sessions yet"
                     explanation: "Recorded sessions appear here, to watch and trim before you export them."
                 }
@@ -1407,7 +1483,17 @@ Kirigami.ApplicationWindow {
                                       + (sessionRow.modelData.lightingText ? " · " + sessionRow.modelData.lightingText : "")
                                       + (sessionRow.modelData.export_stale ? " · changed since its export"
                                          : sessionRow.modelData.exported ? " · exported (" + sessionRow.modelData.exportText + ")" : "")
+                                      + (sessionRow.modelData.uploadText ? " · " + sessionRow.modelData.uploadText : "")
                             }
+                        }
+                        Controls.ToolButton {
+                            icon.name: "edit-clear-all"
+                            text: "Free up space: delete the local copy, keep the record of the upload"
+                            display: Controls.AbstractButton.IconOnly
+                            visible: sessionRow.modelData.freeable
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: root.askFree(sessionRow.modelData, () => pageStack.pop(pageStack.items[0]))
                         }
                         Controls.ToolButton {
                             icon.name: "edit-delete"
@@ -1827,6 +1913,21 @@ Kirigami.ApplicationWindow {
                     wrapMode: Text.WrapAnywhere
                     text: backend.exportText
                 }
+                Kirigami.InlineMessage {
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    Layout.fillWidth: true
+                    visible: !backend.exporting && backend.exportText.indexOf("Failed") === 0 && backend.freeableCount > 0
+                    type: Kirigami.MessageType.Information
+                    text: root.plural(backend.freeableCount, "uploaded round") + " can be deleted to free "
+                          + backend.freeableText + ". Your record of each upload stays."
+                    actions: [
+                        Kirigami.Action {
+                            text: "Delete uploaded rounds"
+                            icon.name: "edit-delete"
+                            onTriggered: root.askFreeAll()
+                        }
+                    ]
+                }
                 RowLayout {
                     visible: exportView.chosen !== null && exportView.chosen.exported && !backend.exporting
                     Controls.Button {
@@ -2191,6 +2292,22 @@ Kirigami.ApplicationWindow {
                             icon.name: "edit-copy"
                             onTriggered: backend.copy(uploadView.upResult.pr_url)
                         }
+                    }
+                    Kirigami.InlineMessage {
+                        Layout.fillWidth: true
+                        visible: !backend.uploading && uploadView.mine && uploadView.up.phase === "done"
+                                 && !uploadView.upResult.dry_run && uploadView.chosen !== null && uploadView.chosen.freeable
+                        type: Kirigami.MessageType.Information
+                        text: "This round doesn't need to stay on the headset now. Deleting its local copy frees "
+                              + (uploadView.chosen ? uploadView.chosen.freeText : "") + "; your record of the upload "
+                              + "stays on the Review page."
+                        actions: [
+                            Kirigami.Action {
+                                text: "Delete local copy"
+                                icon.name: "edit-clear-all"
+                                onTriggered: root.askFree(uploadView.chosen, null)
+                            }
+                        ]
                     }
                     Kirigami.InlineMessage {
                         Layout.fillWidth: true

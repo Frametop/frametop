@@ -43,7 +43,7 @@ The recorder doesn't record sound, your name, your email address or your Steam a
 
 - Recordings stay on your headset, in `~/.local/share/frametop/hands/contrib`. Nothing is uploaded automatically.
 - Before you share anything, you can watch every recording in the Review page. You can delete any stretch of a recording, a whole take or a whole session. Export leaves out what you deleted.
-- You upload the export yourself, from the Upload page. That opens a pull request on the dataset. The maintainer checks it before it becomes part of the dataset, and may decline it. Until it's merged, you can close the pull request yourself.
+- You upload the export yourself: from the Upload page, or with Export and upload, which sends it once it's exported. That opens a pull request on the dataset. The maintainer checks it before it becomes part of the dataset, and may decline it. Until it's merged, you can close the pull request yourself.
 
 ## Where it goes
 

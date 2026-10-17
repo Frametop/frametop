@@ -21,7 +21,9 @@ An upload:
      and records it under "uploads" in session.json with "status": "started";
   6. upload_folder(..., revision="refs/pr/N") to contributions/<contributor>/<session>; a retry of
      the same export goes on in the same pull request while it's still open;
-  7. marks the record {"repo", "pr_url", "pr_num", "uploaded", "export_sha", "status": "done"}.
+  7. marks the record {"repo", "pr_url", "pr_num", "uploaded", "export_sha", "status": "done"},
+     and adds it to BASE/contributions.json (recorder/contributions.py), which outlives the
+     session: deleting the local copy to free space keeps it.
 --dry-run does all of it except the network calls (4 to 6) and recording (5, 7), and says what
 it would upload.
 
@@ -53,6 +55,7 @@ sys.path.insert(0, HERE)
 import takes  # noqa: E402  (next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 from recorder import bounties  # noqa: E402
+from recorder import contributions  # noqa: E402
 from recorder import hub as rhub  # noqa: E402
 from recorder.hub import HF_ENV, REPO_RE, TOKENS_URL, HubError, explain, export_sha, is_draft, now_iso  # noqa: E402,F401
 
@@ -275,6 +278,11 @@ def upload(store, session, dry_run=False, again=False, progress=None, log=None):
 
     pr, who, record = rhub.push(_hf(), repo, export, path_in_repo, message, description, meta_path(store, session), sha,
                                 len(files), report.bytes, tell, takes.write_json, takes.human_bytes)
+    try:   # the log is for the contributor's own record: a failure to write it doesn't undo the upload
+        contributions.add(store.base, [contributions.entry(session, takes.read_json(meta_path(store, session)), record,
+                                                           report.bytes, summary.get("minutes"))])
+    except OSError as e:
+        say(f"couldn't add the upload to {contributions.FILE}: {e}")
     tell("done", "Uploaded", 1.0)
     return dict(plan, dry_run=False, pr_url=record["pr_url"], pr_num=pr.num, user=who.get("name", ""), record=record)
 

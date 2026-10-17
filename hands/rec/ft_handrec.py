@@ -21,7 +21,8 @@ A Kirigami (QML) app with a Python backend. It runs in the dev container:
     focus; the button on the headset's right side is Next, pause and resume). The prompts appear
     in the headset. Each step waits for Next unless "Advance by itself" was ticked.
   - Review: sessions, their takes, and a viewer for one frame set at a time, where ranges,
-    takes and sessions can be deleted (takes.py).
+    takes and sessions can be deleted (takes.py). Uploaded sessions can be deleted to free space
+    while the record of their uploads stays (contributions.json), listed under "Your uploads".
   - Export: compress what's kept into exports/<session>/ at nice 19 (takes.py), with a warning
     when the headset is worn.
   - Upload: the Hugging Face login status, and Upload: hub.py checks the export (validate.py)
@@ -85,7 +86,11 @@ DEBUG_ROW = {"id": DEBUG_ID, "title": "Testing session", "priority": "", "minute
 LIVE_HANDS_UNIT = "frametop-hands.service"
 # One window at a time, Frametop's or the standalone one (recorder/one_window.py)
 WINDOW_NAME = "ft_handrec_window"
-ROUND_BYTES = 16 * 1000 ** 3  # about what one round of recording takes (a bounty: 2.5-3 min at 30 sets/s, ~85 MB/s)
+RECORD_BYTES = 16 * 1000 ** 3  # about what one round of recording takes (a bounty: 2.5-3 min at 30 sets/s, ~85 MB/s)
+# The free space a round needs before it starts: the recording, then its export next to it
+# (takes.export_need). Until 2026-10-17 only the recording was asked for, so a round could be
+# recorded that couldn't be exported.
+ROUND_BYTES = RECORD_BYTES + takes.export_need(RECORD_BYTES)
 # The checklist's choices; the keys are what session.json stores.
 OBJECTS = [("pencil", "Pencil or pen"), ("phone", "Phone"), ("cup", "Cup or mug (empty)"),
            ("keyboard", "Keyboard"), ("mouse", "Mouse"), ("gamepad", "Gamepad"),
@@ -239,6 +244,10 @@ class Backend(RecorderBackend):
         self._ready_panel = None     # the ft-handpanel getReady started: ends on quit
         self._readyPart.connect(self._on_ready_part)
         self._readyDone.connect(self._on_ready_done)
+        try:   # uploads older recorders kept only in session.json join the contributions log
+            store.log_uploads()
+        except (OSError, ValueError) as e:
+            print(f"contributions log: {e}", file=sys.stderr, flush=True)
 
     def _texts_draft(self):
         return hub.texts_draft(self._consent_kind)
@@ -378,9 +387,12 @@ class Backend(RecorderBackend):
         return self._frametop_hands
 
     def _debug_row(self):
-        """The testing session as a row of the board (bounties.view's keys)."""
-        done = [s for s in self.store.sessions() if s.get("debug") and s["status"] == "done" and not s["dry_run"]]
-        return dict(DEBUG_ROW, done=len(done), last=done[0]["id"] if done else "", available="")
+        """The testing session as a row of the board (bounties.view's keys). Uploaded ones whose
+        local copy was deleted count from the contributions log."""
+        done = {s["id"] for s in self.store.sessions() if s.get("debug") and s["status"] == "done" and not s["dry_run"]}
+        done |= {c["session"] for c in self.store.contributions() if c.get("debug")}
+        last = max(done) if done else ""
+        return dict(DEBUG_ROW, done=len(done), last=last, available="")
 
     @Property(str, notify=boardChanged)
     def boardUpdated(self):
@@ -800,6 +812,9 @@ class Backend(RecorderBackend):
             s["active"] = self.sessionActive and s["id"] == self._session_id
             s["statusText"] = {"recording": "" if s["active"] else "interrupted", "error": "ended with an error",
                                "stopped": "stopped early"}.get(s["status"], "")
+            s["freeable"] = s["freeable"] and not s["active"]
+            s["freeText"] = takes.human_bytes(s["bytes"] + s["export_bytes"])
+            s["uploadText"] = ("uploaded" if s["freeable"] else "uploaded, changed since") if s["uploaded"] else ""
             out.append(s)
         return out
 
@@ -879,6 +894,84 @@ class Backend(RecorderBackend):
             self.message.emit(f"Deleted the session of {session_label(session)}", False)
         except (OSError, ValueError) as e:
             self.message.emit(f"Couldn't delete the session: {e}", True)
+        self.refreshSessions()
+
+    # --- freeing space: uploaded rounds' local copies go, the contributions log keeps the record
+    def _freeable(self):
+        busy = {self._session_id if self.sessionActive else "", self._export_session if self.exporting else "",
+                (self._upload or {}).get("session", "") if self.uploading else ""}
+        return [f for f in self.store.freeable() if f["id"] not in busy]
+
+    @Property(int, notify=sessionsRelay)
+    def freeableCount(self):
+        """Uploaded rounds whose local copies can be deleted (nothing changed since the upload)."""
+        return len(self._freeable())
+
+    @Property(str, notify=sessionsRelay)
+    def freeableText(self):
+        """What deleting them all frees, "" when nothing can go."""
+        rows = self._freeable()
+        return takes.human_bytes(sum(f["bytes"] for f in rows)) if rows else ""
+
+    @Property(str, constant=True)
+    def roundNeedText(self):
+        return gigabytes(self.ROUND_BYTES)
+
+    @Property("QVariantList", notify=sessionsRelay)
+    def contributions(self):
+        """The contributions log for the Review page, newest first: {session, label, title,
+        uploadedText, prUrl, prText, local, testing}."""
+        out = []
+        for c in self.store.contributions():
+            title = (c.get("bounty") or {}).get("title") or ("Testing session" if c.get("debug") else "Session")
+            when = (c.get("uploaded") or "")[:10]
+            out.append({"session": c["session"], "label": session_label(c["session"]), "title": title,
+                        "uploadedText": f"uploaded {when}" if when else "uploaded",
+                        "prUrl": c.get("pr_url", ""), "prText": f"pull request #{c['pr_num']}" if c.get("pr_num") else "",
+                        "local": c["local"], "testing": c.get("kind") == "testing",
+                        "deletedText": "deleted here, still in your record" if not c["local"] else ""})
+        return out
+
+    def _free(self, sids):
+        freed, failed = 0, []
+        for sid in sids:
+            try:
+                freed += self.store.free_session(sid)
+            except (OSError, ValueError) as e:
+                failed.append(f"{session_label(sid)}: {e}")
+        return freed, failed
+
+    @Slot(str)
+    def freeSession(self, session):
+        """Delete one uploaded session's recordings and export; its record stays."""
+        if self._active_guard(session):
+            return
+        if session not in {f["id"] for f in self._freeable()}:
+            self.message.emit("Only an uploaded round, unchanged since its upload, can be deleted this way", True)
+            return
+        freed, failed = self._free([session])
+        if failed:
+            self.message.emit("Couldn't delete it: " + failed[0], True)
+        else:
+            self.message.emit(f"Deleted the local copy of {session_label(session)}: {takes.human_bytes(freed)} freed. "
+                              "Your record of the upload stays.", False)
+        self.refreshSessions()
+
+    @Slot()
+    def freeAllUploaded(self):
+        """Delete every uploaded, unchanged round's local copy; their records stay."""
+        sids = [f["id"] for f in self._freeable()]
+        if not sids:
+            self.message.emit("No uploaded rounds to delete", False)
+            return
+        freed, failed = self._free(sids)
+        done = len(sids) - len(failed)
+        if failed:
+            self.message.emit(f"Deleted {done} of {len(sids)} rounds ({takes.human_bytes(freed)} freed). "
+                              "Couldn't delete " + "; ".join(failed), True)
+        else:
+            self.message.emit(f"Deleted {done} uploaded round{'s' if done != 1 else ''}: {takes.human_bytes(freed)} "
+                              "freed. Your record of the uploads stays.", False)
         self.refreshSessions()
 
     # --- export

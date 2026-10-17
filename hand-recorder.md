@@ -54,7 +54,7 @@ The [standalone recorder's README](https://github.com/Frametop/frametop-hand-rec
    curl -fsSL https://frametop.github.io/frametop/get.sh | bash -s -- --release --experimental
    ```
 
-   This downloads Frametop's newest experimental release (about 1.4 GB) and installs it without compiling anything. The installer asks what to install: say yes to the Hand Recorder, and to hand tracking if you want to record testing sessions. It asks for your `sudo` password for those. At the end SteamVR restarts, which closes Konsole. If Frametop is already installed, the same command updates it, and the Hand Recorder with it.
+   This downloads Frametop's newest experimental release (about 1.2 GB) and installs it without compiling anything. The installer asks what to install: say yes to the Hand Recorder, and to hand tracking if you want to record testing sessions. It asks for your `sudo` password for those. At the end SteamVR restarts, which closes Konsole. If Frametop is already installed, the same command updates it, and the Hand Recorder with it.
 4. Choose Launch a program → Desktop again, and open Frametop Hand Recorder from the application menu.
 
 Installing `Frametop.zip` with [FrameDrop](https://framedropvr.com), or by hand from the [releases](https://github.com/Frametop/frametop/releases), works too: leave Hand Recorder ticked in the installer's window.

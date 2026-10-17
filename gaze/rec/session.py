@@ -222,7 +222,7 @@ def _dot(v, what):
     return d
 
 
-HAND_WORDS = ("push", "pull", "slide", "tilt", "nudge")   # a cue word starting so moves the headset
+HAND_WORDS = ("push", "pull", "slide", "tilt", "tip", "nudge")   # a cue word starting so moves the headset
 HOLD_TEXT = "Keep holding"      # the text of a step done while holding the headset moved
 
 

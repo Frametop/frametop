@@ -371,8 +371,10 @@ Kirigami.ApplicationWindow {
                         }
 
                         Controls.ComboBox {
-                            // Keyboard + 3D pointer only where it splits something: a mouse node and a keyboard node.
+                            // Keyboard + 3D pointer only where it splits something: a mouse node and a keyboard
+                            // node. A device that isn't connected has no nodes to tell, so it's offered there too.
                             model: backend.roles.filter(r => r.value !== "combo" || row.modelData.role === "combo"
+                                                        || !row.modelData.connected
                                                         || (row.modelData.kinds.indexOf("mouse") >= 0
                                                             && row.modelData.kinds.indexOf("keyboard") >= 0))
                             textRole: "text"

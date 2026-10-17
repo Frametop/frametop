@@ -81,6 +81,7 @@ class UploadDuringExportTest(unittest.TestCase):
     def test_one_export_at_a_time(self):
         self.exporting(A)
         self.assertFalse(self.export(B))
+        self.assertEqual(self.backend.exportQueue, [{"session": B, "upload": False}])   # it waits its turn
 
 
 if __name__ == "__main__":

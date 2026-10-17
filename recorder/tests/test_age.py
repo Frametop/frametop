@@ -76,7 +76,7 @@ class AgeTest(unittest.TestCase):
 
     def test_files_and_recipients(self):
         rec = age.read_recipients(os.path.join(HERE, "..", "..", "gaze", "rec", "recipients.txt"))
-        self.assertEqual(len(rec), 2)
+        self.assertEqual(len(rec), 3)              # keys 1 (7i), 2 (offline), 3 (dody)
         with tempfile.TemporaryDirectory() as d:
             src, dst = os.path.join(d, "a"), os.path.join(d, "a.age")
             with open(src, "wb") as f:

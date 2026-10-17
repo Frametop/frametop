@@ -1645,21 +1645,28 @@ class Backend(QObject):
             running = v["resolved"]["name"] or "classic"
             if not v["resolved"]["folder"]:
                 note = note or f"{v['latest']} isn't downloaded yet: the classic tracker runs until it is."
+        # One row a version. The latest version's row is "latest": picking it follows updates. Set by
+        # name in frametop.conf, it shows on that row as pinned (not following) until picked here.
+        pinned = choice == v["latest"]
+        if pinned:
+            choice = "latest"
+            setting = "HANDS_MODEL" if kind == "hands" else "EYES_MODEL"
+            note = note or (f"{setting} in frametop.conf names {v['latest']}, so it stays on {v['latest']} when a "
+                            "newer version comes. Use this to follow updates.")
         opts = []
-        latest = by.get(v["latest"])
-        if latest:
-            opts.append(dict(latest, name="latest", target=latest["name"], follows=True,
-                             title=f"Latest (follows updates): {latest['title']}",
-                             tag=MODEL_TAGS.get(latest["status"], ""),
-                             installed=True if kind == "hands" else latest["installed"]))
         for m in v["models"]:
             tag = MODEL_TAGS.get(m["status"]) or MODEL_KIND_TAGS.get(m["kind"], "")
-            opts.append(dict(m, target=m["name"], follows=False, tag=tag))
+            if m["name"] == v["latest"]:
+                opts.append(dict(m, name="latest", target=m["name"], follows=True,
+                                 tag=(tag + "  ·  " if tag else "") + "Latest",
+                                 installed=True if kind == "hands" else m["installed"]))
+            else:
+                opts.append(dict(m, target=m["name"], follows=False, tag=tag))
         for o in opts:
             o["bench"] = {k: (None if val is None else float(val)) for k, val in o["bench"].items()}
         checked = time.strftime("%H:%M", time.localtime(v["checked"])) if v["checked"] else ""
         return {"options": opts, "metrics": v["metrics"], "byName": by, "latest": v["latest"],
-                "baseline": v["baseline"], "choice": choice, "running": running, "note": note,
+                "baseline": v["baseline"], "choice": choice, "pinned": pinned, "running": running, "note": note,
                 "source": v["source"], "checked": checked, "error": ""}
 
     def _models_update(self):

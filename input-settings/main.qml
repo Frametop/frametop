@@ -70,7 +70,7 @@ Kirigami.ApplicationWindow {
         readonly property string otherName: opt.target !== running ? running
                                             : opt.target !== view.baseline ? (view.baseline || "") : ""
         readonly property var other: otherName ? ((view.byName || {})[otherName] || null) : null
-        readonly property bool inUse: opt.name === view.choice
+        readonly property bool inUse: opt.name === view.choice && !view.pinned
         spacing: Kirigami.Units.smallSpacing
         Layout.maximumWidth: Kirigami.Units.gridUnit * 30
 
@@ -95,7 +95,8 @@ Kirigami.ApplicationWindow {
             delegate: Controls.RadioButton {
                 required property var modelData
                 text: modelData.title + (modelData.tag ? "  ·  " + modelData.tag : "")
-                      + (modelData.name === picker.view.choice ? "  ·  in use" : "")
+                      + (modelData.name === picker.view.choice ? (picker.view.pinned ? "  ·  in use, not following updates"
+                                                                                       : "  ·  in use") : "")
                       + (!modelData.usable ? "  ·  needs a newer Frametop"
                          : !modelData.installed ? "  ·  not downloaded" : "")
                 font.bold: modelData.name === picker.view.choice
@@ -116,14 +117,13 @@ Kirigami.ApplicationWindow {
         // The one being looked at: what it is, what to expect, what it costs, and its numbers.
         Kirigami.Separator { Layout.fillWidth: true; visible: !!picker.opt.name }
         Controls.Label {
-            text: (picker.opt.follows ? "Latest: " + picker.opt.target : picker.opt.title || "")
-                  + (picker.opt.date ? " (" + picker.opt.date + ")" : "")
+            text: (picker.opt.title || "") + (picker.opt.date ? " (" + picker.opt.date + ")" : "")
             textFormat: Text.PlainText
             font.bold: true
         }
         Controls.Label {
             visible: picker.opt.follows === true
-            text: "Moves to each new version we recommend, without asking. Pick a version below it to stay on that one."
+            text: "The newest version. Picked, it follows updates: when a newer version ships, Frametop moves to it without asking. Any other version stays put when picked."
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             opacity: 0.7

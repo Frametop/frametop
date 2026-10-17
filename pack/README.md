@@ -19,7 +19,9 @@ different glibc. This directory turns the container from a recipe into an
    versions with aarch64 wheels, installed into `/opt/frametop/venv`. The venv
    sits on Fedora's own `python3`, which the base digest freezes, and sees the
    system site-packages: PySide6 and Kirigami come from dnf for that
-   interpreter, so one `python3` imports both, as in the dev container.
+   interpreter, so one `python3` imports both, as in the dev container. The
+   checked uv executable is temporary: only the environment it creates stays
+   in the image.
 3. **OpenVR from the pinned public tag** — `v2.15.6`, in
    `scripts/openvr.sh`. The build scripts fetch its headers and check their
    sha256. The image has no SteamVR, so it links the SDK's prebuilt

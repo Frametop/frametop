@@ -31,14 +31,6 @@ RUN dnf -y install --setopt=install_weak_deps=False \
     && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* \
               /usr/share/wallpapers
 
-# uv, pinned and checked. Python dependencies come from the committed uv.lock,
-# not from whatever PyPI serves on build day.
-RUN curl -fsSL https://github.com/astral-sh/uv/releases/download/0.12.23/uv-aarch64-unknown-linux-gnu.tar.gz \
-      -o /tmp/uv.tar.gz \
- && echo "6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f  /tmp/uv.tar.gz" | sha256sum -c \
- && tar -xzf /tmp/uv.tar.gz --strip-components=1 -C /usr/local/bin \
- && rm /tmp/uv.tar.gz
-
 # OpenVR's API library for linking, from the SDK tag the build scripts pin
 # (scripts/openvr.sh fetches the headers). The image has no SteamVR, so the
 # binaries link this copy; their rpath names SteamVR's folder first, so on the
@@ -56,11 +48,20 @@ RUN install -d /opt/frametop/bin /opt/frametop/lib \
 # uv sync --frozen --group tracker: the default dev group (pytest/ruff for CI's
 # in-image tests) plus the tracker stack; the types group (mypy) stays out.
 # --no-cache keeps uv's download cache out of the image.
+# uv is a pinned, checked build tool, not a runtime dependency. Extract it,
+# create the environment, and remove it in one layer so neither uv nor uvx
+# takes space in an installed image.
 ENV UV_PROJECT_ENVIRONMENT=/opt/frametop/venv UV_PYTHON=/usr/bin/python3 UV_PYTHON_DOWNLOADS=never
 COPY pyproject.toml uv.lock .python-version /src/frametop/
-RUN uv venv --system-site-packages /opt/frametop/venv \
- && cd /src/frametop && uv sync --frozen --group tracker --no-cache \
- && /opt/frametop/venv/bin/python -c 'import PySide6, numpy, cv2'
+RUN uvdir=$(mktemp -d) \
+ && curl -fsSL https://github.com/astral-sh/uv/releases/download/0.12.23/uv-aarch64-unknown-linux-gnu.tar.gz \
+      -o "$uvdir/uv.tar.gz" \
+ && echo "6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f  $uvdir/uv.tar.gz" | sha256sum -c \
+ && tar -xzf "$uvdir/uv.tar.gz" --strip-components=1 -C "$uvdir" uv-aarch64-unknown-linux-gnu/uv \
+ && "$uvdir/uv" venv --system-site-packages /opt/frametop/venv \
+ && cd /src/frametop && "$uvdir/uv" sync --frozen --group tracker --no-cache \
+ && /opt/frametop/venv/bin/python -c 'import PySide6, numpy, cv2' \
+ && rm -rf "$uvdir"
 
 # The sources, then the binaries, built by the same build scripts as on the
 # Frame (FRAME_IN_BOX=1: they run here instead of entering the dev container).
@@ -71,7 +72,8 @@ COPY . /src/frametop
 WORKDIR /src/frametop
 ENV FRAME_IN_BOX=1 OPENVR_LIB=/opt/frametop/lib
 RUN screens/build.sh \
- && install -t /opt/frametop/bin screens/build/ft-screens screens/build/ft-handtest
+ && install -t /opt/frametop/bin screens/build/ft-screens screens/build/ft-handtest \
+ && rm -f screens/build/*.o
 RUN pointer/helper/build.sh && pointer/driver/build.sh \
  && install -t /opt/frametop/bin pointer/helper/build/ft-pointer \
  && install -t /opt/frametop/lib pointer/driver/build/driver_ft_pointer.so
@@ -80,7 +82,8 @@ RUN gaze/build.sh \
 RUN power/build.sh \
  && install -t /opt/frametop/bin power/build/ft-powerd
 RUN stream/build.sh \
- && install -t /opt/frametop/bin stream/build/ft-stream
+ && install -t /opt/frametop/bin stream/build/ft-stream \
+ && rm -rf stream/build/mlc stream/build/gamestream
 # Our own eye tracker: ft-eyegrab (it runs on the host, as root) and ft-eyes'
 # build/venv, which here only points at the venv above.
 RUN gaze/tracker/build.sh \

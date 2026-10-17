@@ -18,10 +18,12 @@ src=build/moonlight-embedded
 mlc=$src/third_party/moonlight-common-c
 if [ ! -f $src/.ft-$me ]; then
   rm -rf $src build/mlc build/gamestream
-  git clone -q https://github.com/moonlight-stream/moonlight-embedded.git $src
-  git -C $src checkout -q $me
-  git -C $src submodule update -q --init third_party/moonlight-common-c
-  git -C $mlc submodule update -q --init enet
+  # Only this revision and its pinned submodules are build inputs, not their history.
+  git init -q $src
+  git -C $src fetch -q --depth 1 https://github.com/moonlight-stream/moonlight-embedded.git $me
+  git -C $src checkout -q --detach FETCH_HEAD
+  git -C $src submodule update -q --init --depth 1 third_party/moonlight-common-c
+  git -C $mlc submodule update -q --init --depth 1 enet
   touch $src/.ft-$me
 fi
 if [ ! -f build/mlc/libmoonlight-common-c.a ]; then

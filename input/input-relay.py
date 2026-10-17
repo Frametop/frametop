@@ -10,11 +10,14 @@ the physical devices as they come and go.
 Every USB or Bluetooth mouse and keyboard is a candidate. A physical device is
 identified by its Bluetooth address (EVIOCGUNIQ) or USB bus:vendor:product:name,
 so all its event nodes share one role (the Swiftpoint Z3 has a mouse node and a
-keyboard node for its extra buttons). Roles, from ~/.config/frametop-input.json
-(written by the Frametop Input Settings app):
+keyboard node for its extra buttons), except with "combo". Roles, from
+~/.config/frametop-input.json (written by the Frametop Input Settings app):
   pointer      grabbed; drives the universal 3D mouse (default for devices with a mouse node)
   passthrough  keys go to the desktop; grabbed only while typing goes there, otherwise only observed,
                for the key combinations below (default for keyboards)
+  combo        a keyboard with a touchpad (its touchpad is a mouse node): mouse nodes are pointer,
+               keyboard nodes passthrough, as if they were two devices. Never a default: the
+               Z3's keyboard node has to stay with its mouse, and nothing on the nodes tells the two apart
   ignore       not grabbed, only observed for identification in the settings app
 Buttons and keys of pointer devices go through a per-device map to actions
 (left, right, middle, back, scroll_up, scroll_down, dashboard, recenter,
@@ -831,6 +834,18 @@ class Node:
                 "kinds": kinds, "role": self.role, "grabbed": self.grabbed, "uinput": self.uinput}
 
 
+def node_role(rule, node, nodes):
+    """A candidate node's role, from its device's rule in frametop-input.json ({} for none) and
+    the nodes there are: "combo" splits the device by node (see the top), the other roles
+    take every node of it, and without one a device with a mouse node is a pointer."""
+    if rule.get("role") == "combo":
+        return "pointer" if node.is_mouse else "passthrough"
+    if rule.get("role") in ("pointer", "passthrough", "ignore"):
+        return rule["role"]
+    has_mouse = any(n.is_mouse for n in nodes if n.id == node.id) or node.is_mouse
+    return "pointer" if has_mouse else "passthrough"
+
+
 def probe(path):
     """Open a node if it is a USB or Bluetooth mouse or keyboard, or has volume keys,
     else return None."""
@@ -1255,11 +1270,7 @@ def main():
         return node.candidate
 
     def role_of(node):
-        rule = state["rules"]["devices"].get(node.id, {})
-        if rule.get("role") in ("pointer", "passthrough", "ignore"):
-            return rule["role"]
-        has_mouse = any(n.is_mouse for n in nodes.values() if n.id == node.id) or node.is_mouse
-        return "pointer" if has_mouse else "passthrough"
+        return node_role(state["rules"]["devices"].get(node.id, {}), node, nodes.values())
 
     def release_held(node):
         for code in node.held:
@@ -1444,7 +1455,7 @@ def main():
         if etype == EV_REL and now - node.last_watch < 0.05:
             return  # motion: enough for an activity light
         node.last_watch = now
-        msg = {"t": "event", "id": node.id, "path": node.path, "name": node.name,
+        msg = {"t": "event", "id": node.id, "path": node.path, "name": node.name, "role": node.role,
                "type": EV_NAMES.get(etype, str(etype)), "code": code, "value": value}
         for addr, until in list(watchers.items()):
             if now > until:

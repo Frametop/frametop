@@ -4,7 +4,8 @@
 A Kirigami (QML) app with a Python backend. It runs in the dev container and talks
 to the input relay over its control socket (@frametop_relay):
   - Devices: every USB/Bluetooth mouse and keyboard, a live activity light to
-    identify them, and a role for each (3D pointer, pass through, ignore).
+    identify them, and a role for each (3D pointer, pass through, keyboard + 3D pointer for a
+    keyboard with a touchpad, ignore).
   - Buttons: press a button or key on a pointer device, then pick an action.
   - Controllers: the same for the Frame controllers' buttons, minus the gaze actions (gaze
     mode is a mouse feature). They're read by the pointer helper through SteamVR input
@@ -219,7 +220,10 @@ VR_KEYBOARD_MODES = {
     "button": "Only with a mapped mouse or controller button",
     "never": "Never",
 }
-ROLE_LABELS = {"pointer": "3D pointer", "passthrough": "Pass through", "ignore": "Ignore"}
+# "combo" splits a device by node (the relay's node_role): a keyboard's touchpad is the pointer, its
+# keys pass through. The Devices page offers it only for devices with a mouse and a keyboard node.
+ROLE_LABELS = {"pointer": "3D pointer", "passthrough": "Pass through", "combo": "Keyboard + 3D pointer",
+               "ignore": "Ignore"}
 # Frame controller buttons the pointer helper can read (pointer/helper/vrbuttons.h). The
 # system button stays SteamVR's.
 CONTROLLER_BUTTONS = {
@@ -631,8 +635,10 @@ class Backend(QObject):
                     self._combo_tap = None  # a mouse button: no tap
             elif t == "event":
                 self.activity.emit(msg["id"])
+                # Not a Keyboard + 3D pointer device's keys: its keyboard node passes through, so
+                # its button map never sees them.
                 if (self._capture_id and msg["id"] == self._capture_id and msg["type"] == "key"
-                        and msg["value"] == 1):
+                        and msg["value"] == 1 and msg.get("role") != "passthrough"):
                     code = int(msg["code"])
                     self._capture_id = ""
                     self.captured.emit(code, self.codeName(code))
@@ -672,6 +678,8 @@ class Backend(QObject):
                 d["name"] = n["name"].replace(" Mouse", "")  # the Z3's nodes are "Z3 Mouse"/"Z3 Keyboard"
         for d in grouped.values():
             d["connected"] = True
+            if rules.get(d["id"], {}).get("role") == "combo":
+                d["role"] = "combo"  # its nodes say pointer and passthrough
         for device_id in set(rules) | {i for i, b in bindings.items() if b}:
             if device_id in grouped:
                 continue

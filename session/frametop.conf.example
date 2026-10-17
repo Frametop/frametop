@@ -109,7 +109,7 @@ SCREEN_FRONT_AWAY=0        # ... 1 = turned away from, it goes home (unless used
 SCREEN_FRONT_KEEP_MS=3000  # ... this much input on the screen in the slot keeps it there when you look away (0 = never kept)
 SCREEN_UI_SCALE=           # ... a remote display's own UI scale for its readable size, by screen number: "102=2" (a Mac's Retina display); KWin's screens use their own scale
 HANDS_RESET_HOLD_MS=0      # the reset button under a screen resets the layout when held this long (ms; laser or finger) | 0 = a press
-SCREEN_SPIN_DISTANCE=1.0   # ... a brought screen comes this far ahead (m)
+SCREEN_SPIN_DISTANCE=1.0   # ... a brought screen comes this far ahead (m); at least 0.9, behind spotwatch's search (0.75)
 SCREEN_SPIN_PPD=26         # ... as big as its text needs to read: its logical pixels (KWin's scale undone) at this many per degree of view
 SCREEN_SPIN_MAX_DEG=100    # ... at most this wide (degrees; wider than 60 it curves round you) and SCREEN_SPIN_MAX_TALL_DEG (55) tall, its shape kept
 SCREEN_SPIN_MAX_WIDE_DEG=150   # ... an ultrawide (3:1 or wider, like 5120x1440) at most this wide instead, so its text reads too

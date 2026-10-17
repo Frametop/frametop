@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """The eye recorder's sound cues: plain beeps for steps done with the eyes shut, where the panel's
-words can't be seen. A round script names one as a cue's third field (session.py: "cues":
+words can't be seen, and for moving the headset by hand, where the timing matters. A round script names one as a cue's third field (session.py: "cues":
 [[word, seconds, sound]...]); it plays as the cue starts, and prompts.jsonl's "cue" line says which.
 
   blink   a short high beep: blink once
   close   a beep: close your eyes
   open    the same beep again: open them
+  go      a higher beep: move the headset now (the cue word says how)
+  done    a low, longer one: let go of it
 
 No voice, no sound files: the beeps are made here (a sine with a short fade, so it doesn't click)
 into the run folder, and played with PipeWire's pw-play on the default output (the headset's
@@ -31,6 +33,8 @@ SOUNDS = {
     "blink": (1000.0, 0.09),
     "close": (660.0, 0.18),
     "open": (660.0, 0.18),
+    "go": (880.0, 0.14),
+    "done": (440.0, 0.3),
 }
 FADE_S = 0.005
 

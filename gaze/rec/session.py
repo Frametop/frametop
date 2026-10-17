@@ -24,9 +24,12 @@ steps are recorded; the frame writer pauses while a step waits. During the round
 looks again at the end of each centre dot, and a headset that moved since the fitment gets a
 note (fit.json "slips").
 
-Controls, as the hand recorder's: Next, pause, redo (the step running, or at a ready screen the
-one before; the range is marked with a "redo" event), skip (the rest of the take), stop. The
-headset button: press = next or pause, two presses = redo, hold = stop.
+Controls, as the hand recorder's: Next, pause, redo, skip (the rest of the take), stop. Redo in
+the countdown or the step starts it again; at a ready screen it goes back to the step before,
+into the take before too (Back). A step that follows on without a ready screen goes again with
+the one it follows. The range done before is marked with a "redo" event. The headset button:
+press = next or pause, two presses = redo, hold = stop. The panel's keys line says what redo
+does at that moment.
 
 Round scripts, rounds/<id>.json: {"schema": 1, "id", "title", "intro", "shift_check": true,
 "steps": [step]}. A step: {"id", "kind", "text" ("|" starts a line), "group" (default its id),
@@ -37,8 +40,9 @@ Round scripts, rounds/<id>.json: {"schema": 1, "id", "title", "intro", "shift_ch
   jumps    "count", "range": [yaw, pitch] (a box), "each": [shortest, longest] s
   prompt   "dot": [yaw, pitch] or null (none), and "seconds" or "cues": [[word, s]...] (shown
            big in turn; [word, s, sound] also plays a beep as it starts, for steps done with the
-           eyes shut: sound blink, close or open, sounds.py; rounds/README.md has the rules,
-           and load_round enforces them), "cue_distance": {word: metres}
+           eyes shut or moving the headset by hand: sound blink, close, open, go or done,
+           sounds.py; rounds/README.md has the rules, and load_round enforces them),
+           "cue_distance": {word: metres}
   light    "dot", "levels": [[background, s]...]
   world    "point": [x, y, z] (metres from the head when it starts, -z ahead), "seconds"
   reseat   not recorded: the text, Next, then a fit reading
@@ -121,9 +125,11 @@ READY_BUTTON = "Ready? Press the button on the right side of the headset"
 READY_BUTTON_MOUSE = "Ready? Press Space, click Next, or press the headset button"
 RESUME_HINT = "Paused. Resume: P in the Eye recorder window"
 RESUME_HINT_BUTTON = "Paused. Resume: press the headset button, or P in the Eye recorder window"
-KEYS = "Eye recorder window:  Space next  ·  P pause  ·  R redo  ·  S skip  ·  Esc stop"
-KEYS_BUTTON = ("Headset button: press for next or pause  ·  press twice to redo  ·  hold to stop  "
-               "·  Window: Space P R S Esc")
+# What R (two presses of the headset button) does now, for the panel's keys line (_keys): during
+# the countdown and the step, it starts again; at a ready screen, the step before goes again.
+REDO_RUNNING = "start this step again"
+REDO_BACK = "back to the last step"
+NOTHING_BACK = "Nothing to go back to from here"
 FIT_TITLE = "Headset fit"
 FIT_TEXT = "Look at the dot. Adjust the headset until this says good."
 FIT_ADJUST = "Adjust the headset until it says good"
@@ -216,11 +222,20 @@ def _dot(v, what):
     return d
 
 
+HAND_WORDS = ("push", "pull", "slide", "tilt", "nudge")   # a cue word starting so moves the headset
+HOLD_TEXT = "Keep holding"      # the text of a step done while holding the headset moved
+
+
 def cue_needs(word):
-    """The sound a cue must have because the person can't see the panel then (rounds/README.md):
-    "blink" for a blink, "close" for shutting both eyes, else None. Half-closed eyes and one eye
-    (a wink: the other one reads the panel) don't need one."""
+    """The sound a cue must have because the person can't see the panel then, or the timing is
+    the point (rounds/README.md): "blink" for a blink, "close" for shutting both eyes, "go" for
+    moving the headset by hand, "done" for letting go of it, else None. Half-closed eyes and one
+    eye (a wink: the other one reads the panel) don't need one."""
     w = word.lower()
+    if w.split()[:1] and w.split()[0].strip(":,") in HAND_WORDS:
+        return "go"
+    if "let go" in w:
+        return "done"
     if "half" in w or "left" in w or "right" in w:
         return None
     if "blink" in w:
@@ -232,7 +247,8 @@ def cue_needs(word):
 
 def _check_sounds(cues, sid):
     """Eyes-shut cues beep, and the cue after a "close" plays "open": with the eyes shut, the
-    words can't tell anyone when to open them."""
+    words can't tell anyone when to open them. A push on the headset ("go") comes after a cue on
+    the dot, and letting go ("done") shows long enough to settle."""
     for k, (word, _secs, *sound) in enumerate(cues):
         need = cue_needs(word)
         if need and sound != [need]:
@@ -240,6 +256,38 @@ def _check_sounds(cues, sid):
                              % (sid, word, need))
         if sound == ["close"] and (k + 1 == len(cues) or cues[k + 1][2:] != ["open"]):
             raise ValueError('%s: after "%s" comes a cue with the sound "open" (rounds/README.md)' % (sid, word))
+        if sound == ["go"] and k == 0:
+            raise ValueError('%s: "%s" comes after a cue on the dot, so the eyes are still first (rounds/README.md)'
+                             % (sid, word))
+        if sound == ["done"] and _secs < 2:
+            raise ValueError('%s: "%s" shows 2 s or more, so the eyes settle (rounds/README.md)' % (sid, word))
+
+
+def _check_hands(steps, path):
+    """A headset moved by hand is let go of in the same chain (the steps that follow on without a
+    ready screen), and the steps done while holding it say so: the person can't take a hand off
+    the headset to press Next, and a redo does the whole chain again."""
+    holding = None      # the step whose "go" cue moved the headset
+    for k, st in enumerate(steps):
+        if holding and (st["ready"] or st["group"] != holding["group"] or st["kind"] == "reseat"):
+            raise ValueError('%s: %s moves the headset; a "done" cue ("Let go...") follows in its chain '
+                             '(rounds/README.md)' % (path, holding["id"]))
+        sounds_ = [c[2] for c in st.get("cues") or [] if len(c) > 2]
+        if holding and not st["text"].startswith(HOLD_TEXT):
+            raise ValueError('%s: %s is done holding the headset; its text starts "%s" (rounds/README.md)'
+                             % (path, st["id"], HOLD_TEXT))
+        for snd in sounds_:
+            if snd == "go":
+                if holding:
+                    raise ValueError('%s: %s moves the headset again before letting go' % (path, st["id"]))
+                holding = st
+            elif snd == "done":
+                if not holding:
+                    raise ValueError('%s: %s lets go of a headset nothing moved' % (path, st["id"]))
+                holding = None
+    if holding:
+        raise ValueError('%s: %s moves the headset; a "done" cue ("Let go...") follows in its chain '
+                         '(rounds/README.md)' % (path, holding["id"]))
 
 
 def _step(raw, i):
@@ -356,6 +404,7 @@ def load_round(path):
         last = s["group"]
     if "dots" in groups:
         raise ValueError("%s: the group dots is the opener's" % path)
+    _check_hands(steps, path)
     rid = raw.get("id")
     return {"id": rid if isinstance(rid, str) else os.path.basename(path)[:-5], "title": str(raw.get("title", rid)),
             "intro": str(raw.get("intro", "")), "shift_check": raw.get("shift_check", True) is not False and
@@ -647,6 +696,7 @@ class Session:
         self._paused = self._paused_recording = False
         self._waiting = False
         self._redo_ok = False
+        self._lingering = False
         self._button_reader = None
         self._ipd = None
         self._step_t0 = None
@@ -897,7 +947,7 @@ class Session:
     def _finish(self, state, error=""):
         if self._take:
             try:
-                self._end_take("complete" if state == "done" else "stopped")
+                self._end_take("complete" if state == "done" or self._lingering else "stopped")
             except Exception:
                 self._log(traceback.format_exc())
         if self._session_json is not None:
@@ -963,6 +1013,9 @@ class Session:
             raise _Skip()
         if want["redo"] and self._redo_ok:
             raise _Redo()
+        if want["redo"] and self._waiting:
+            self._panel.set("note", "note " + NOTHING_BACK)
+            self._emit(note=NOTHING_BACK)
         if not want["pause"]:
             return False
         self._pause()
@@ -1064,8 +1117,20 @@ class Session:
         text = (READY_BUTTON_MOUSE if mouse_connected(self.input_devices) else READY_BUTTON) if button else READY_TEXT
         if action:
             self._panel.set("action", "action " + text)
-        self._panel.set("keys", "keys " + (KEYS_BUTTON if button else KEYS))
+        self._keys(back=self._redo_ok)
         self._status.update(ready_text=text, button=button)
+
+    def _keys(self, running=False, back=False):
+        """The panel's bottom line: the controls, saying what R does now (or leaving it out)."""
+        redo = REDO_RUNNING if running else REDO_BACK if back else ""
+        if self._button_ok():
+            parts = ["Headset button: press for " + ("pause" if running else "next")]
+            parts += ["press twice: " + redo] if redo else []
+            text = "  ·  ".join(parts + ["hold to stop", "Window: Space P R S Esc"])
+        else:
+            parts = ["Eye recorder window:  Space next", "P pause"] + (["R " + redo] if redo else [])
+            text = "  ·  ".join(parts + ["S skip", "Esc stop"])
+        self._panel.set("keys", "keys " + text)
 
     def _show(self, title, text):
         self._panel.set("title", "title " + clean_text(title))
@@ -1292,15 +1357,29 @@ class Session:
             self._log("take %s %s" % (t["id"], status))
 
     # --- the steps
+    def _chain_head(self, k):
+        """The first step of k's chain: the steps that follow on without a ready screen ("ready":
+        false) go again with the one they follow (a nudge and the dots done while holding it)."""
+        plan, h = self.plan, k
+        while h > 0 and not plan[h]["ready"] and plan[h - 1]["group"] == plan[k]["group"]:
+            h -= 1
+        return h
+
     def _steps(self):
         """The plan's steps. Each "ready" one (and one to do again) shows first and waits for
         Next, then a recorded countdown; the recording pauses after a step unless the next one
-        follows straight on. A new group starts a new take. R during a step: it starts again;
-        at a ready screen: the step before (in the same take) goes again."""
+        follows straight on. A new group starts a new take, once its first step's Next is
+        pressed: until then the take before stays open, so Back can reach its last step.
+
+        R during the countdown or the step: it starts again, from the start of its chain (a step
+        that follows on goes again with the one it follows). R at a ready screen (Back): the
+        step before goes again, with its chain. Either way the range done before is marked with
+        a "redo" event. Nothing goes back over a reseat: the headset sits differently after it."""
         plan = self.plan
-        done = []       # steps finished in this take: (index, id, from_ns, to_ns)
+        done = []       # steps finished in the open take: (index, id, from_ns, to_ns)
         again = set()
         k = 0
+        self._lingering = False   # the open take's steps are done; it ends at the next step's Next
         while k < len(plan):
             st = plan[k]
             where = "%s · step %d of %d" % (self._session_json["title"], k + 1, len(plan))
@@ -1310,23 +1389,31 @@ class Session:
                 if self._take:
                     self._end_take("complete")
                 done = []
+                self._lingering = False
                 self._reseat(st)
                 k += 1
                 continue
-            if self._take and self._take["group"] != st["group"]:
-                self._end_take("complete")
+            ready = st["ready"] or k in again
+            if self._take and self._take["group"] != st["group"] and not ready:
+                self._end_take("complete")      # follows on into a new group: no screen to go back from
                 done = []
+            self._lingering = bool(self._take and self._take["group"] != st["group"])
             started = self._step_t0 = None
             try:
-                if st["ready"] or k in again:
+                if ready:
                     self._redo_ok = bool(done)
                     self._ready(st, can_redo=bool(done))
                     self._await_next()
+                    if self._take and self._take["group"] != st["group"]:
+                        self._end_take("complete")
+                        done = []
+                    self._lingering = False
                     self._redo_ok = True
                     started = self._countdown(st)
                 else:
                     self._redo_ok = True
                     self._show(self._title(st), st["text"])
+                    self._keys(running=True)
                     self._emit(can_redo=True, prompt=st["text"].replace("|", "\n"))
                     self._step_t0 = started = self._event("step", id=st["id"], kind=st["kind"])
                 self._take["json"]["steps"].append(st["id"]) if st["id"] not in self._take["json"]["steps"] else None
@@ -1340,29 +1427,43 @@ class Session:
                 k += 1
             except _Redo:
                 self._redo_ok = False
-                if started is not None:
-                    self._event("redo", id=st["id"], **{"from": started, "to": mono_ns()})
-                    self._log("    redo %s" % st["id"])
+                if started is None:
+                    started = self._step_t0   # R in the countdown: its "ready" event
+                if started is not None:   # this step again, from the start of its chain
+                    h = self._chain_head(k)
+                    while done and done[-1][0] >= h:
+                        started = done.pop()[2]
+                    self._event("redo", id=plan[h]["id"], **{"from": started, "to": mono_ns()})
+                    self._log("    redo %s" % plan[h]["id"])
                     self._step_end()
-                    again.add(k)
-                elif done:
+                    k = h
+                    again = {x for x in again if x < k} | {k}
+                elif done:                # Back: the step before, with its chain
                     k, sid, a, b = done.pop()
+                    h = self._chain_head(k)
+                    while done and done[-1][0] >= h:
+                        k, sid, a, _ = done.pop()
                     self._event("redo", id=sid, **{"from": a, "to": b})
-                    self._log("    redo %s" % sid)
-                    again.add(k)
+                    self._log("    back to %s" % sid)
+                    self._lingering = False
+                    again = {x for x in again if x < k} | {k}
             except _Skip:
                 group = st["group"]
                 self._log("skipped the rest of %s" % group)
-                if self._take:
+                if self._take and self._take["group"] != group:
+                    self._end_take("complete")      # at the first step's ready screen: the take before is done
+                elif self._take:
                     self._step_end()
                     self._end_take("skipped")
                 done = []
+                self._lingering = False
                 while k < len(plan) and plan[k]["group"] == group and plan[k]["kind"] != "reseat":
                     k += 1
             finally:
                 self._redo_ok = False
         if self._take:
             self._end_take("complete")
+        self._lingering = False
 
     def _ready(self, st, can_redo):
         self._show(self._title(st), st["text"])
@@ -1394,6 +1495,9 @@ class Session:
             self._start_take(st["group"])
         t = self._step_t0 = self._event("ready", id=st["id"], seconds=COUNTDOWN_S)
         self._record(True)
+        self._keys(running=True)
+        self._panel.set("note", "note ")
+        self._emit(note="")
         first = self._first_dot(st)
         if first:
             self._panel.cmd("dot %.3f %.3f look" % tuple(first))

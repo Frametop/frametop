@@ -979,29 +979,31 @@ double RayDistance(const Mat &d, const Mat &c) {
 // passes very close (within `reach`, about 1.5 times a button's size); they stay
 // kControlsLinger ticks after it leaves, and while in use.
 void UpdateControls() {
-    std::vector<Mat> lasers;
+    std::array<Mat, vr::k_unMaxTrackedDeviceCount> lasers;
+    size_t nLasers = 0;
     for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
         Mat d;
         if (vr::VRSystem()->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_Controller && LaserPose(i, &d))
-            lasers.push_back(d);
+            lasers[nLasers++] = d;
     }
     for (auto &[i, s] : g_screens) {
         Mat p;
         if (s.visible && ScreenPose(s, &p)) {
             // Points along the bar and at each button and the tab; a laser passing within
             // `reach` of one of them is close.
-            std::vector<Mat> spots;
+            std::array<Mat, 11> spots;  // five points along the bar and six other controls
+            size_t nSpots = 0;
             const auto offsets = ControlOffsets(s);
             for (double f : {-0.5, -0.25, 0.0, 0.25, 0.5})
-                spots.push_back(Mul(p, Mul(offsets[0], Translation(f * s.chrome, 0, 0))));
+                spots[nSpots++] = Mul(p, Mul(offsets[0], Translation(f * s.chrome, 0, 0)));
             const auto controls = s.Controls();
             for (int k = 1; k < 7; ++k)
-                if (controls[k] != vr::k_ulOverlayHandleInvalid) spots.push_back(Mul(p, offsets[k]));
+                if (controls[k] != vr::k_ulOverlayHandleInvalid) spots[nSpots++] = Mul(p, offsets[k]);
             const double reach = std::max(s.grip * 1.5, s.chrome * 0.12);
-            for (const Mat &d : lasers) {
+            for (size_t l = 0; l < nLasers; ++l) {
                 bool close = false;
-                for (const Mat &c : spots) {
-                    const double r = RayDistance(d, c);
+                for (size_t c = 0; c < nSpots; ++c) {
+                    const double r = RayDistance(lasers[l], spots[c]);
                     if (r >= 0 && r <= reach) close = true;
                 }
                 if (close) {
@@ -1597,17 +1599,19 @@ void UpdateCatcher() {
     for (int k = 0; k < 3; ++k) params.vSource.v[k] = l.m[k][3], params.vDirection.v[k] = -l.m[k][2];
     for (auto &[i, s] : g_screens) {
         if (!s.visible) continue;
-        const auto all = s.All();  // one copy: two calls give two temporaries, not one range
-        std::vector<vr::VROverlayHandle_t> parts(all.begin(), all.end());
-        for (const auto &[k, sub] : s.subs) parts.push_back(sub.overlay);
-        for (auto o : parts) {
+        auto intersects = [&](vr::VROverlayHandle_t o) {
             vr::VROverlayIntersectionResults_t hit;
             if (o != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->ComputeOverlayIntersection(o, &params, &hit)) {
                 g_press.distance = std::max(0.05, double(hit.fDistance));
                 ShowCatcher(false);
-                return;
+                return true;
             }
-        }
+            return false;
+        };
+        for (auto o : s.All())
+            if (intersects(o)) return;
+        for (const auto &[k, sub] : s.subs)
+            if (intersects(sub.overlay)) return;
     }
     const double d = g_press.distance;
     const double pt[3] = {l.m[0][3] - l.m[0][2] * d, l.m[1][3] - l.m[1][2] * d, l.m[2][3] - l.m[2][2] * d};
@@ -1851,10 +1855,11 @@ void UpdateRemoteDrag(void (*handle)(const struct ft_event *, void *), void *dat
 // on. The keyboard is one overlay, so SteamVR's own intersection test does there.
 void UpdateAim() {
     if (LasersByMode()) return;
-    std::vector<Mat> lasers;
+    std::array<Mat, vr::k_unMaxTrackedDeviceCount> lasers;
+    size_t nLasers = 0;
     for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
         Mat d;
-        if (IsHandController(i) && LaserPose(i, &d)) lasers.push_back(d);
+        if (IsHandController(i) && LaserPose(i, &d)) lasers[nLasers++] = d;
     }
     for (auto &[index, s] : g_screens) {
         Mat p;
@@ -1867,9 +1872,9 @@ void UpdateAim() {
         // The panel and its controls: the bar row under it, the resize tab off its corner.
         const double halfW = std::max(s.metres / 2 + s.grip, s.chrome / 2 + s.chrome * 0.12 + s.grip * 2) + m;
         const double top = h / 2 + m, bottom = std::min(BarY(s) - s.grip, -(h / 2 + s.grip)) - m;
-        for (const Mat &l : lasers) {
+        for (size_t l = 0; l < nLasers; ++l) {
             double u, v;
-            if (!RayOnSurface(s, p, l, &u, &v)) continue;
+            if (!RayOnSurface(s, p, lasers[l], &u, &v)) continue;
             bool on = std::fabs(u) <= halfW && v <= top && v >= bottom;
             for (const auto &[k, sub] : s.subs) {
                 if (on || s.cropW <= 0) break;
@@ -1884,8 +1889,8 @@ void UpdateAim() {
         }
     }
     if (keyboard::Shown())
-        for (const Mat &l : lasers)
-            if (keyboard::Aimed(l)) g_keyboardAimUntil = g_tick + kAimLinger;
+        for (size_t l = 0; l < nLasers; ++l)
+            if (keyboard::Aimed(lasers[l])) g_keyboardAimUntil = g_tick + kAimLinger;
 }
 
 const char *LasersName() {

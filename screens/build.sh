@@ -26,4 +26,5 @@ vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
 g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/keyboard.o build/handcut.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o $vrlibs
+strip --strip-unneeded build/ft-screens build/ft-handtest
 echo "built build/ft-screens build/ft-handtest"'

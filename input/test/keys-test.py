@@ -27,6 +27,9 @@ relay_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "inp
 tag = f"ft_keys_test_{os.getpid()}"
 with open(relay_path) as f:
     src = f.read().replace('"\\0frametop_relay"', f'"\\0{tag}_relay"')
+screens_socket = "screens_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)"
+assert src.count(screens_socket) == 1, "relay's screens socket constructor changed"
+src = src.replace(screens_socket, "screens_sock = _test_screens_sender")
 relay = importlib.util.module_from_spec(importlib.util.spec_from_loader("relay", loader=None))
 relay.__file__ = os.path.abspath(relay_path)
 sys.path.insert(0, os.path.dirname(os.path.abspath(relay_path)))  # its game_pause and vrws
@@ -173,7 +176,10 @@ def probe(path):
 
 relay.probe = probe
 
-screens = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+# A connected pair holds all 16 startup releases even when the kernel limits unconnected
+# datagram queues to 10 messages. The relay still uses real sendto(), including other peers.
+relay._test_screens_sender, screens = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+relay._test_screens_sender.setblocking(False)
 screens.bind(relay.SCREENS)
 screens.settimeout(0.05)
 EVENT = struct.Struct("llHHi")

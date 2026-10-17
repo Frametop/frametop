@@ -7,4 +7,5 @@ exec "$root/scripts/frame.sh" -C pointer/helper 'set -e; mkdir -p build
 . ../../scripts/openvr.sh
 g++ -std=c++17 -O2 -Wall -Wno-unused-parameter $OPENVR_CFLAGS -I../common \
   -o build/ft-pointer ft-pointer.cpp $OPENVR_LIBS -lpthread
+strip --strip-unneeded build/ft-pointer
 echo "built build/ft-pointer"'

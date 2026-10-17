@@ -1,7 +1,7 @@
 {
  "catalog": 1,
  "kind": "hands",
- "latest": "v13b-p1",
+ "latest": "v16b",
  "default": "latest",
  "baseline": "stock",
  "metrics": [
@@ -14,20 +14,45 @@
   {"key": "landmark_px", "label": "Finger point error, median (held-out people)", "unit": "px", "better": "lower"},
   {"key": "within5", "label": "Points within 5% of hand size (held-out people)", "unit": "%", "better": "higher"},
   {"key": "shape_mm", "label": "3D hand shape error, median (held-out people)", "unit": "mm", "better": "lower"},
-  {"key": "side_ok", "label": "Left or right hand told correctly (held-out people)", "unit": "%", "better": "higher"}
+  {"key": "side_ok", "label": "Left or right hand told correctly (held-out people)", "unit": "%", "better": "higher"},
+  {"key": "pinch_closed", "label": "Thumb-index pinch read closed (held-out people)", "unit": "%", "better": "higher",
+   "note": "Of the held-out views where the thumb and index tips touch, the share the model reads as touching."}
  ],
  "models": [
+  {
+   "name": "v16b",
+   "title": "Frametop v16b",
+   "kind": "custom",
+   "status": "recommended",
+   "date": "2026-10-16",
+   "summary": "v13b-p1 plus the pinch and tap bounty rounds: pinches and taps read closed more often.",
+   "notes": "v13b-p1's landmark model trained further with Frametop Hands contributions #12 (index taps), #13 (pinches) and #14. The palm detector is v13b-p1's, unchanged. Same networks as stock, so the same CPU cost.\n\nWhat to expect against v13b-p1: a thumb touching the index finger is read as touching more often (80% of held-out touches against 71%), so pinches and taps register more reliably. Finger points and hand shape are as close as before, and the replays track the same hands.\n\nKnown weak spots: a thumb touching the middle finger is still often read as a near miss, and empty views are taken for a hand slightly more often than with v13b-p1 (0.37% against 0.22% of empty crops).",
+   "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 960, "replay_dim": 1225, "replay_lit": 1434, "found": 98.7, "landmark_px": 3.8,
+             "within5": 94.7, "shape_mm": 8.1, "side_ok": 96.6, "pinch_closed": 80.0},
+   "format": 1,
+   "rev": "d96e56599b0af18fc05af2a0a4489985914b754a",
+   "files": {
+    "NOTICE": "0d31ad8d108fc01e9fc4c5612eb5a9b16d90f9a971e6677cafe4969c2388fc06",
+    "hand.ncnn.bin": "c602ad2344bd1676a628fc8ab4fca2f53574b9f12bc97c705f47762d23f5f941",
+    "hand.ncnn.param": "54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd",
+    "palm.ncnn.bin": "9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909",
+    "palm.ncnn.param": "c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "322fc0b146d301865592958ba4dd512bf249836816b578f0919a2f671f3f014c"
+   }
+  },
   {
    "name": "v13b-p1",
    "title": "Frametop v13b-p1",
    "kind": "custom",
-   "status": "recommended",
+   "status": "older",
    "date": "2026-10-14",
    "summary": "Retrained on the Steam Frame's own cameras: about twice as many hands found in bright rooms as stock, and steadier fingers.",
    "notes": "MediaPipe's palm detector and hand landmark model, retrained on the Frametop Hands dataset (contributions #3 to #7), the maintainer's recordings and flagged tracking failures. Same networks as stock, so the same CPU cost.\n\nWhat to expect against stock: hands are found far more often, most of all in bright rooms (twice as many tracked in the bright replay, 1.3 to 1.8 times in dim and lit ones), the finger points sit about a quarter closer, and the 3D hand shape is about 40% closer.\n\nKnown weak spot: a thumb touching the middle finger is often read as a near miss, so middle-finger pinches (right click) can need a firmer touch.",
    "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
    "bench": {"replay_bright": 960, "replay_dim": 1224, "replay_lit": 1433, "found": 98.7, "landmark_px": 3.8,
-             "within5": 94.6, "shape_mm": 8.3, "side_ok": 96.5},
+             "within5": 94.6, "shape_mm": 8.3, "side_ok": 96.5, "pinch_closed": 71.3},
    "format": 1,
    "rev": "41afd78fbd4527456fc4cbd840ffc9f39fdc939a",
    "files": {
@@ -49,7 +74,7 @@
    "notes": "Trained on colour photos from ordinary lenses. The Frame's tracking cameras are infrared, monochrome and fisheye, so these lose hands often, most of all in bright rooms. Useful to compare, or to go back to if a retrained version tracks worse for you.",
    "cost": "Two networks, fp16, on the cores hand tracking already uses.",
    "bench": {"replay_bright": 442, "replay_dim": 912, "replay_lit": 782, "found": 94.8, "landmark_px": 5.2,
-             "within5": 88.5, "shape_mm": 14.3, "side_ok": 93.8}
+             "within5": 88.5, "shape_mm": 14.3, "side_ok": 93.8, "pinch_closed": 7.8}
   }
  ]
 }

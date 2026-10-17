@@ -68,7 +68,7 @@ def export(dest, repo):
             continue  # this private runtime does not advertise the omitted SDK commands
         if src.is_relative_to(package):
             rel = src.relative_to(package)
-            if "__pycache__" in rel.parts or rel.parts[0] == "Qt":
+            if "__pycache__" in rel.parts or rel.parts[0] in ("Qt", "scripts"):
                 continue
             if len(rel.parts) == 1 and rel.name.startswith("Qt") and rel.name.split(".")[0] not in modules:
                 continue
@@ -119,7 +119,7 @@ def export(dest, repo):
         os.utime(pyc, ns=(stat.st_atime_ns, stat.st_mtime_ns))
     manifest = {"private_app_runtime": True, "pyside": PySide6.__version__, "qt": qVersion(), "modules": sorted(modules),
                 "source_rpms": run("rpm", "-q", "python3-pyside6", "python3-shiboken6").splitlines(),
-                "metadata_change": "_config.built_modules narrowed; omitted SDK entry_points.txt",
+                "metadata_change": "_config.built_modules narrowed; omitted SDK scripts and entry_points.txt",
                 "elf": elf, "sha256": {n: hashlib.sha256((dest / n.lstrip("/")).read_bytes()).hexdigest()
                                        for n in copied if not (dest / n.lstrip("/")).is_symlink()}}
     target = dest / MANIFEST

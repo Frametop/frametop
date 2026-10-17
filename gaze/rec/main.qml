@@ -907,9 +907,10 @@ Kirigami.ApplicationWindow {
                     opacity: 0.7
                     text: "The dots and instructions appear in the headset. "
                           + (sessionView.st.button ? "The button on the right side of the headset: next, pause or "
-                             + "resume; twice: record the last step again; hold: stop. " : "")
-                          + "While this window has focus: Space: next · P: pause or resume · R: record the last step "
-                          + "again · S: skip the rest of the take · Esc: stop. Stopping keeps what's recorded so far."
+                             + "resume; twice: redo; hold: stop. " : "")
+                          + "While this window has focus: Space: next · P: pause or resume · R: redo · S: skip the "
+                          + "rest of the take · Esc: stop. Redo during a step starts it again; before a step "
+                          + "starts, it goes back to the one before. Stopping keeps what's recorded so far."
                 }
                 RowLayout {
                     // No keyboard focus on the buttons, so Space always reaches the shortcut.
@@ -931,7 +932,8 @@ Kirigami.ApplicationWindow {
                         visible: backend.sessionActive
                         enabled: !!sessionView.st.can_redo
                         focusPolicy: Qt.NoFocus
-                        text: "Redo step"
+                        // At a ready screen it goes back to the step before; else this one again.
+                        text: sessionView.state === "ready" ? "Back to the last step" : "Redo this step"
                         icon.name: "edit-undo"
                         onClicked: backend.redo()
                     }

@@ -2,25 +2,35 @@
  "schema": 1,
  "id": "slips",
  "title": "Headset slips",
- "intro": "You'll nudge the headset on your face on purpose, then put it back. Use one hand, gently: a few millimetres is enough.",
+ "intro": "You'll move the headset on your face on purpose, with one hand, a few millimetres at a time, and hold it there while you look at dots. A beep says when to move it, a low beep when to let go. Then you take it off and on.",
  "steps": [
   {
    "id": "nudge-up",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Keep looking at the dot and push the headset up a little. Hold it there.",
+   "text": "Look at the dot. When it says Push up and beeps, push the headset up a few millimetres with one hand. Hold it there until it says Let go and beeps low.",
    "dot": [
     0,
     0
    ],
-   "seconds": 5
+   "cues": [
+    [
+     "Look at the dot",
+     1.5
+    ],
+    [
+     "Push up",
+     2.5,
+     "go"
+    ]
+   ]
   },
   {
    "id": "after-up",
    "kind": "dots",
    "group": "nudges",
    "ready": false,
-   "text": "Hold the headset there. Look at each dot until its ring fills. Keep your head still.",
+   "text": "Keep holding the headset there. Look at each dot until its ring fills. Keep your head still.",
    "dots": [
     [
      0,
@@ -46,22 +56,50 @@
    "hold": 1.0
   },
   {
-   "id": "nudge-down",
+   "id": "back-up",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Let go, then pull the headset down a little. Hold it there.",
+   "ready": false,
+   "text": "Keep holding it until it says Let go. Then put the headset back as it was, and look at the dot.",
    "dot": [
     0,
     0
    ],
-   "seconds": 5
+   "cues": [
+    [
+     "Let go, put it back",
+     3,
+     "done"
+    ]
+   ]
+  },
+  {
+   "id": "nudge-down",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Look at the dot. When it says Pull down and beeps, pull the headset down a few millimetres with one hand. Hold it there until it says Let go and beeps low.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Look at the dot",
+     1.5
+    ],
+    [
+     "Pull down",
+     2.5,
+     "go"
+    ]
+   ]
   },
   {
    "id": "after-down",
    "kind": "dots",
    "group": "nudges",
    "ready": false,
-   "text": "Hold it there. Look at each dot until its ring fills. Keep your head still.",
+   "text": "Keep holding the headset there. Look at each dot until its ring fills. Keep your head still.",
    "dots": [
     [
      0,
@@ -87,22 +125,50 @@
    "hold": 1.0
   },
   {
-   "id": "nudge-left",
+   "id": "back-down",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Let go, then slide the headset a little to your left.",
+   "ready": false,
+   "text": "Keep holding it until it says Let go. Then put the headset back as it was, and look at the dot.",
    "dot": [
     0,
     0
    ],
-   "seconds": 5
+   "cues": [
+    [
+     "Let go, put it back",
+     3,
+     "done"
+    ]
+   ]
+  },
+  {
+   "id": "nudge-left",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Look at the dot. When it says Slide to your left and beeps, slide the headset a few millimetres to your left with one hand. Hold it there until it says Let go and beeps low.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Look at the dot",
+     1.5
+    ],
+    [
+     "Slide to your left",
+     2.5,
+     "go"
+    ]
+   ]
   },
   {
    "id": "after-left",
    "kind": "dots",
    "group": "nudges",
    "ready": false,
-   "text": "Hold it there. Look at each dot until its ring fills. Keep your head still.",
+   "text": "Keep holding the headset there. Look at each dot until its ring fills. Keep your head still.",
    "dots": [
     [
      0,
@@ -128,22 +194,50 @@
    "hold": 1.0
   },
   {
-   "id": "nudge-right",
+   "id": "back-left",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Let go, then slide it a little to your right.",
+   "ready": false,
+   "text": "Keep holding it until it says Let go. Then put the headset back as it was, and look at the dot.",
    "dot": [
     0,
     0
    ],
-   "seconds": 5
+   "cues": [
+    [
+     "Let go, put it back",
+     3,
+     "done"
+    ]
+   ]
+  },
+  {
+   "id": "nudge-right",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Look at the dot. When it says Slide to your right and beeps, slide the headset a few millimetres to your right with one hand. Hold it there until it says Let go and beeps low.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Look at the dot",
+     1.5
+    ],
+    [
+     "Slide to your right",
+     2.5,
+     "go"
+    ]
+   ]
   },
   {
    "id": "after-right",
    "kind": "dots",
    "group": "nudges",
    "ready": false,
-   "text": "Hold it there. Look at each dot until its ring fills. Keep your head still.",
+   "text": "Keep holding the headset there. Look at each dot until its ring fills. Keep your head still.",
    "dots": [
     [
      0,
@@ -169,22 +263,50 @@
    "hold": 1.0
   },
   {
-   "id": "nudge-tilt",
+   "id": "back-right",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Let go, then tilt the headset a little: one side up.",
+   "ready": false,
+   "text": "Keep holding it until it says Let go. Then put the headset back as it was, and look at the dot.",
    "dot": [
     0,
     0
    ],
-   "seconds": 5
+   "cues": [
+    [
+     "Let go, put it back",
+     3,
+     "done"
+    ]
+   ]
+  },
+  {
+   "id": "nudge-tilt",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Look at the dot. When it says Tilt: left side up and beeps, tilt the headset so its left side goes up a little with one hand. Hold it there until it says Let go and beeps low.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Look at the dot",
+     1.5
+    ],
+    [
+     "Tilt: left side up",
+     2.5,
+     "go"
+    ]
+   ]
   },
   {
    "id": "after-tilt",
    "kind": "dots",
    "group": "nudges",
    "ready": false,
-   "text": "Hold it there. Look at each dot until its ring fills. Keep your head still.",
+   "text": "Keep holding the headset there. Look at each dot until its ring fills. Keep your head still.",
    "dots": [
     [
      0,
@@ -208,6 +330,24 @@
     ]
    ],
    "hold": 1.0
+  },
+  {
+   "id": "back-tilt",
+   "kind": "prompt",
+   "group": "nudges",
+   "ready": false,
+   "text": "Keep holding it until it says Let go. Then put the headset back as it was, and look at the dot.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Let go, put it back",
+     3,
+     "done"
+    ]
+   ]
   },
   {
    "id": "reseat",

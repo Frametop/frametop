@@ -93,7 +93,7 @@ The launch bounties:
 |---|---|---|
 | View edges | Dots at the panel's edges and corners: 30 degrees to the sides, 23 up and down, about 35 in the corners (the rec panel is 64 degrees across; every round's dots are checked against it) | Eyes turned far: the lid, the glints lost, the pupil foreshortened |
 | Blinks and lids | Blink on a beep, close both eyes on a beep and open them on the next (sounds.py: the eyes are shut, so words can't cue them), wink each eye, squint, eyes wide, half-closed, looking down with lids lowered | Closed and partly closed eyes; one eye missing |
-| Headset slips | Nudge the headset up, down, left, right, tilt it; then take it off and put it back on; dots after each | Headset shifting on the face: the put-on check's data |
+| Headset slips | Nudge the headset up, down, left, right, tilt it, on a beep, holding it through dots, letting go on a low beep; then take it off and put it back on; dots after each | Headset shifting on the face: the put-on check's data |
 | Glasses | A 5x5 grid and the edges with glasses or inserts on (offered when the checklist says so) | Lens reflections, the glasses' frame in view |
 | Jumps and pursuit | A dot jumping between random spots (0.5 to 1.5 s each), then moving on circles, lines and a figure eight at two speeds | Saccades, overshoot, smooth pursuit, the tracker's lag |
 | Depth | Dots at 0.5 m, 1.5 m and 5 m in turn (the panel's distance changes) | Vergence; the eyes' angle with distance |

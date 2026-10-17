@@ -26,6 +26,32 @@ Every recorded second becomes training data, labelled by where the dot was. So:
 - **Rounds open the same way.** The recorder adds putting the headset on and the nine dots before every
   round. Don't repeat them. The group `dots` is theirs **(checked)**.
 
+## What the person sees and hears, step by step
+
+A round moves through the same states every step. Each one has its own way of telling the person what
+to do and when, and the step's text and cues have to fit it.
+
+| State | Recorded | What they do | How they know when |
+|---|---|---|---|
+| Ready screen | no | read the text, press Next | the title, the text, the keys line |
+| Countdown 3-2-1 | yes | look at the dot it shows | the numbers |
+| Eyes on dots | yes | look at each dot | its ring fills, then the dot moves; the bar along the bottom |
+| Eyes shut | yes | close, then open | beeps (below) |
+| Moving the headset | yes | push, slide or tilt it by hand, hold, let go | a cue word and a beep each way (below) |
+| Head or reading | yes | the one action the text says, until the bar runs out | the bar along the bottom |
+
+- **The ready screen says it all, the action first.** It's the only time they read: what to do, what
+  starts it ("when it says Push up and beeps"), and what ends it ("until its ring fills", "until the bar
+  runs out", "until it says Let go"). A step with no ready screen (`"ready": false`) can only add to that
+  in a few words, as they're doing something already.
+- **Nothing starts in the countdown.** It points the eyes at the first dot. A one-off action (a blink, a
+  push) starts on a cue word after it, never on "go" from the numbers.
+- **One-off actions get a cue word; ongoing ones get the bar.** Turning the head, reading or looking
+  around run until the bar runs out. A push, a blink or closing the eyes happens on its cue.
+- **Redo does a chain again.** R or two presses during a step start it again, from the first step of its
+  chain; at a ready screen they go back to the step before. Make a chain one thing to do over: a nudge,
+  the dots done holding it, and letting go.
+
 ## Cues the person can't see get a beep
 
 The panel can't cue someone whose eyes are shut. A cue that asks for that plays a beep
@@ -41,6 +67,22 @@ The panel can't cue someone whose eyes are shut. A cue that asks for that plays 
   them. They may beep too.
 - **No voice.** Beeps only; generated speech sounds odd in the headset. A new kind of cue sound goes
   into `sounds.SOUNDS` and the tests.
+
+## Moving the headset by hand
+
+A hand on the headset can't press Next, and the moment it moves is what the data is about. So:
+
+- **A cue word and a beep start it:** a cue word starting with push, pull, slide, tilt or nudge plays
+  `go` **(checked)**: `["Push up", 2.5, "go"]`. Say the direction in the word, the same way each time
+  ("to your left", "left side up").
+- **Eyes first:** a cue on the dot comes before it, so there's a still moment to compare with
+  **(checked)**: `["Look at the dot", 1.5]`.
+- **Letting go has its own cue and beep:** "Let go" plays `done` **(checked)** and shows 2 s or more
+  **(checked)**, long enough to put the headset back and look at the dot again.
+- **In the same chain:** the `done` cue comes before the next ready screen, a new group or a reseat
+  **(checked)**, so a redo does the push, the dots and the letting go again.
+- **Steps done while holding say so:** their text starts "Keep holding" **(checked)**.
+- **A few millimetres, one hand, gently.** Say it in the round's intro.
 
 ## Cue words are labels
 

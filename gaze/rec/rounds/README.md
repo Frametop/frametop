@@ -72,7 +72,7 @@ The panel can't cue someone whose eyes are shut. A cue that asks for that plays 
 
 A hand on the headset can't press Next, and the moment it moves is what the data is about. So:
 
-- **A cue word and a beep start it:** a cue word starting with push, pull, slide, tilt or nudge plays
+- **A cue word and a beep start it:** a cue word starting with push, pull, slide, tilt, tip or nudge plays
   `go` **(checked)**: `["Push up", 2.5, "go"]`. Say the direction in the word, the same way each time
   ("to your left", "left side up").
 - **Eyes first:** a cue on the dot comes before it, so there's a still moment to compare with

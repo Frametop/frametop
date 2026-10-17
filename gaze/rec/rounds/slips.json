@@ -2,7 +2,7 @@
  "schema": 1,
  "id": "slips",
  "title": "Headset slips",
- "intro": "You'll move the headset on your face on purpose, five ways: up, down, to your left, to your right, and tilted. Each time it's one hand on the front and a few millimetres, no more; each step says how. The picture may blur a little while it's moved: that's fine. Then you take it off and put it back on.",
+ "intro": "You'll move the headset on your face on purpose, seven ways: up, down, to your left, to your right, tilted, tipped forward and away from your face. Each time it's one hand on the front and a few millimetres, no more; each step says how. The picture may blur a little while it's moved: that's fine. Then you take it off and put it back on.",
  "steps": [
   {
    "id": "nudge-up",
@@ -333,6 +333,144 @@
   },
   {
    "id": "back-tilt",
+   "kind": "prompt",
+   "group": "nudges",
+   "ready": false,
+   "text": "Keep holding it until it says Let go. Then put the headset back as it was, and look at the dot.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Let go, put it back",
+     3,
+     "done"
+    ]
+   ]
+  },
+  {
+   "id": "nudge-tip",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Look at the dot. When it says Tip the front down and beeps:|Hold the front with one hand, thumb under the bottom edge, and tip the front down a little, the way a heavy headset droops: its bottom edge goes down a few millimetres and its top stays against your forehead. Keep it level side to side.|Only the headset moves: your head stays still and your eyes stay on the dot. Hold it there until it says Let go and beeps low.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Look at the dot",
+     1.5
+    ],
+    [
+     "Tip the front down",
+     2.5,
+     "go"
+    ]
+   ]
+  },
+  {
+   "id": "after-tip",
+   "kind": "dots",
+   "group": "nudges",
+   "ready": false,
+   "text": "Keep holding the headset there. Look at each dot until its ring fills. Keep your head still.",
+   "dots": [
+    [
+     0,
+     0
+    ],
+    [
+     15,
+     12
+    ],
+    [
+     -15,
+     -12
+    ],
+    [
+     15,
+     -12
+    ],
+    [
+     -15,
+     12
+    ]
+   ],
+   "hold": 1.0
+  },
+  {
+   "id": "back-tip",
+   "kind": "prompt",
+   "group": "nudges",
+   "ready": false,
+   "text": "Keep holding it until it says Let go. Then put the headset back as it was, and look at the dot.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Let go, put it back",
+     3,
+     "done"
+    ]
+   ]
+  },
+  {
+   "id": "nudge-away",
+   "kind": "prompt",
+   "group": "nudges",
+   "text": "Look at the dot. When it says Pull away from your face and beeps:|Hold the front with one hand, thumb under the bottom edge, and pull the headset a few millimetres straight out, away from your face, so there's a small gap at your cheeks. Gently: the strap pulls back. Keep it level.|Only the headset moves: your head stays still and your eyes stay on the dot. Hold it there until it says Let go and beeps low.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Look at the dot",
+     1.5
+    ],
+    [
+     "Pull away from your face",
+     2.5,
+     "go"
+    ]
+   ]
+  },
+  {
+   "id": "after-away",
+   "kind": "dots",
+   "group": "nudges",
+   "ready": false,
+   "text": "Keep holding the headset there. Look at each dot until its ring fills. Keep your head still.",
+   "dots": [
+    [
+     0,
+     0
+    ],
+    [
+     15,
+     12
+    ],
+    [
+     -15,
+     -12
+    ],
+    [
+     15,
+     -12
+    ],
+    [
+     -15,
+     12
+    ]
+   ],
+   "hold": 1.0
+  },
+  {
+   "id": "back-away",
    "kind": "prompt",
    "group": "nudges",
    "ready": false,

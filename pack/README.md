@@ -37,6 +37,10 @@ folders under `/src/frametop` and are copied to `/opt/frametop`. Hand
 tracking stays deferred exactly as in `install.sh` (ncnn is a heavy,
 separately triggered build).
 
+Component builds strip non-runtime symbols before the binaries are copied into
+the image. The pointer driver and gaze panel also discard unused sections;
+they keep `-O2`, the existing floating-point flags, and the host glibc checks.
+
 What deliberately stays outside the image for now: the **host payload** — the
 SteamVR driver registration (`vrpathreg`), ft-camd's file capabilities
 (setcap), systemd units, the KWin script. Those need the SteamOS host, and

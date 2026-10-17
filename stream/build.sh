@@ -46,4 +46,5 @@ echo "built build/ft-streamtest"
 g++ $flags -I$mlc/src -I$src/libgamestream -I$src/src -o build/ft-stream ft-stream.cpp host.cpp build/gamestream/*.o \
   build/mlc/libmoonlight-common-c.a build/mlc/enet/libenet.a \
   $(pkg-config --libs gbm egl glesv2 libcurl openssl expat uuid opus libpulse-simple) -lpthread $vr
+strip --strip-unneeded build/ft-dectest build/ft-streamtest build/ft-stream
 echo "built build/ft-stream"'

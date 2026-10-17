@@ -22,6 +22,7 @@ MAX_ASPECT = 3.0   # long / short axis; the steep camera sees a squashed pupil
 GLINT = 200        # glints are near-saturated spots on or by the pupil
 CLOSE = 7          # px: closes the glints' holes in the pupil (the right eye's need this much)
 CLOSE_TIGHT = 3    # px: the retry, keeps a pupil near the dark background apart from it
+_KERNELS = {size: np.ones((size, size), np.uint8) for size in {3, CLOSE, CLOSE_TIGHT}}
 
 
 NEAR = 70          # the windowed search: this many pixels, or 3 pupil radii, around a hint
@@ -46,18 +47,18 @@ def find_pupil(frame, near=None):
 
 
 def _find_either(img, ox, oy):
-    p = _find(img, ox, oy)
-    return p if p is not None else _find(img, ox, oy, CLOSE_TIGHT)
+    # Both closing sizes use the same input mask; morphologyEx returns a new one.
+    dark = (cv2.GaussianBlur(img, (5, 5), 0) < DARK).astype(np.uint8)
+    p = _find(img, dark, ox, oy)
+    return p if p is not None else _find(img, dark, ox, oy, CLOSE_TIGHT)
 
 
-def _find(img, ox, oy, close=CLOSE):
-    """The pupil in `img` (a window at ox, oy of the frame), with frame coordinates. A dark
+def _find(img, dark, ox, oy, close=CLOSE):
+    """The pupil in `img` (a window at ox, oy), using its prepared `dark` mask. A dark
     region touching the window's edge doesn't count: it's background, rim, or cut off."""
-    f = cv2.GaussianBlur(img, (5, 5), 0)
-    dark = (f < DARK).astype(np.uint8)
     # Glints punch bright holes in the pupil; close them so the blob stays whole.
-    dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, np.ones((close, close), np.uint8))
-    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, _KERNELS[close])
+    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, _KERNELS[3])
     n, lab, stats, _ = cv2.connectedComponentsWithStats(dark, connectivity=8)
     h, w = img.shape
     best = None

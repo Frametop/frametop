@@ -2,13 +2,13 @@
  "schema": 1,
  "id": "slips",
  "title": "Headset slips",
- "intro": "You'll move the headset on your face on purpose, with one hand, a few millimetres at a time, and hold it there while you look at dots. A beep says when to move it, a low beep when to let go. Then you take it off and on.",
+ "intro": "You'll move the headset on your face on purpose, five ways: up, down, to your left, to your right, and tilted. Each time it's one hand on the front and a few millimetres, no more; each step says how. The picture may blur a little while it's moved: that's fine. Then you take it off and put it back on.",
  "steps": [
   {
    "id": "nudge-up",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Look at the dot. When it says Push up and beeps, push the headset up a few millimetres with one hand. Hold it there until it says Let go and beeps low.",
+   "text": "Look at the dot. When it says Push up and beeps:|Hold the front with one hand, thumb under the bottom edge, and push the headset straight up a few millimetres, so it sits higher on your face. Keep it level: both sides go up together.|Only the headset moves: your head stays still and your eyes stay on the dot. Hold it there until it says Let go and beeps low.",
    "dot": [
     0,
     0
@@ -77,7 +77,7 @@
    "id": "nudge-down",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Look at the dot. When it says Pull down and beeps, pull the headset down a few millimetres with one hand. Hold it there until it says Let go and beeps low.",
+   "text": "Look at the dot. When it says Pull down and beeps:|Hold the front with one hand, thumb under the bottom edge, and pull the headset straight down a few millimetres, the way a loose headset sags. Keep it level: both sides go down together.|Only the headset moves: your head stays still and your eyes stay on the dot. Hold it there until it says Let go and beeps low.",
    "dot": [
     0,
     0
@@ -146,7 +146,7 @@
    "id": "nudge-left",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Look at the dot. When it says Slide to your left and beeps, slide the headset a few millimetres to your left with one hand. Hold it there until it says Let go and beeps low.",
+   "text": "Look at the dot. When it says Slide to your left and beeps:|Hold the front with one hand, thumb under the bottom edge, and slide the headset a few millimetres to your left, across your face. Keep it level and at the same height.|Only the headset moves: your head stays still and your eyes stay on the dot. Hold it there until it says Let go and beeps low.",
    "dot": [
     0,
     0
@@ -215,7 +215,7 @@
    "id": "nudge-right",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Look at the dot. When it says Slide to your right and beeps, slide the headset a few millimetres to your right with one hand. Hold it there until it says Let go and beeps low.",
+   "text": "Look at the dot. When it says Slide to your right and beeps:|Hold the front with one hand, thumb under the bottom edge, and slide the headset a few millimetres to your right, across your face. Keep it level and at the same height.|Only the headset moves: your head stays still and your eyes stay on the dot. Hold it there until it says Let go and beeps low.",
    "dot": [
     0,
     0
@@ -284,7 +284,7 @@
    "id": "nudge-tilt",
    "kind": "prompt",
    "group": "nudges",
-   "text": "Look at the dot. When it says Tilt: left side up and beeps, tilt the headset so its left side goes up a little with one hand. Hold it there until it says Let go and beeps low.",
+   "text": "Look at the dot. When it says Tilt: left side up and beeps:|Hold the front with one hand, thumb under the bottom edge, and turn your wrist so the headset's left side goes up a few millimetres and its right side down, so it sits crooked on your face. Its middle stays where it is.|Only the headset moves: your head stays still and your eyes stay on the dot. Hold it there until it says Let go and beeps low.",
    "dot": [
     0,
     0

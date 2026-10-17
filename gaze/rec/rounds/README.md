@@ -82,7 +82,11 @@ A hand on the headset can't press Next, and the moment it moves is what the data
 - **In the same chain:** the `done` cue comes before the next ready screen, a new group or a reseat
   **(checked)**, so a redo does the push, the dots and the letting go again.
 - **Steps done while holding say so:** their text starts "Keep holding" **(checked)**.
-- **A few millimetres, one hand, gently.** Say it in the round's intro.
+- **Say exactly how, in the ready screen's text:** where the hand goes (the same grip each time), which way
+  it moves, how far, what stays still ("Keep it level", "Its middle stays where it is"), and that the head
+  and eyes don't move. "Push the headset up" alone leaves people guessing.
+- **A few millimetres, one hand, gently.** Say it in the round's intro, with the kinds of move to come, and
+  that a little blur while it's moved is fine. Never press it into the face.
 
 ## Cue words are labels
 

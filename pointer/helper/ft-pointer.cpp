@@ -243,7 +243,8 @@
 // both one) sends "calaccept" to @ft_gazed (take this dot now), a right click or gaze_right
 // "calquit" (calpanel.h). Another program's head-locked panel can take them the same way
 // ("calpanel 1 NAME", answered on @NAME: the gaze bench). The relay hears "calpanel 1|0" from
-// here, so it knows when Enter is the panel's and not the desktop's.
+// here, so it knows when Enter is the panel's and not the desktop's, and so does ft-screens, so
+// the palm menu waits.
 //   POINTER_ROLE (treadmill, the default, or right, left, stylus): the role our device takes while
 // connected. Treadmill is no hand, so the real controllers keep both hand roles and a controller
 // can be used beside the pointer (or a bare hand's ray). The driver must hint it from the start
@@ -1991,6 +1992,7 @@ int main() {
                         calPanelUntil = Clock::time_point{};
                     }
                     SendTo(out, "frametop_relay", Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");
+                    SendTo(out, "ft_screens", Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");   // no palm menu
                     continue;
                 }
             }

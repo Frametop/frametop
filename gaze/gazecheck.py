@@ -82,6 +82,14 @@ are enough to start it, each dot stands in for the gaze, and a click takes the C
 to it. ft-eyes then checks that each pupil was seen and held still in that window (calib-point)
 and says why not. Without this, a fresh install could never calibrate our tracker.
 
+Looked away (our tracker's full calibration): where SteamVR saw both eyes at a dot, their mean more
+than LOOKED_AWAY from it, past their usual offset in this calibration (the median over the dots
+it took, from AWAY_OFFSET_MIN of them), and the dot isn't taken: "you looked away from the dot"
+(looked_away; ft-eyes isn't asked). Live 2026-10-18 the palm menu opened the Steam menu
+mid-calibration, and three dots were taken 17-35 degrees from where the user looked. A third
+dot in a row like that is SteamVR being off, not you: it's taken, and the check stops for that
+calibration (AWAY_GIVE_UP).
+
 The service doesn't wait for ft-eyes' answers to calib-point and calib-fit (ask_eyes): the dot
 shows its ring full, and further clicks do nothing until the answer comes, or its deadline
 passes; while it fits, a right click doesn't close the panel either. Until 2026-10-09 it waited, up to 3 s a dot and 10 s for the fit, so the gaze stopped,
@@ -133,6 +141,11 @@ CHECK_WINDOW = 0.6
 CHECK_SPREAD = 1.0     # degrees
 ACCEPT_SPREAD = 2.5    # degrees: a capture asked for (calaccept) takes this much
 CLICK_IDLE = 120.0     # seconds a dot of five or full waits for its click; then the check closes
+LOOKED_AWAY = 15.0     # degrees: SteamVR's eyes this far from a full calibration's dot (our tracker's), past
+                       # their usual offset in it, and the dot isn't taken: you looked away
+AWAY_OFFSET_MIN = 3    # dots taken with SteamVR's eyes before their median offset counts
+AWAY_GIVE_UP = 2       # dots in a row turned down as looked away: at a third, SteamVR is off, not you;
+                       # that one's taken and the check stops
 QUICK_TIMEOUT = 6.0
 QUICK_COOLDOWN = 120.0
 DON_DELAY = 3.0        # seconds of eyes after AWAY_MIN without: the headset went on
@@ -211,6 +224,8 @@ def reject_reason(reply, why):
             return f"{eye} eye not seen", f"our tracker saw your {eye} eye in only {words[-2]} frames", True
         if "moved" in words:
             return f"{eye} eye moved", f"your {eye} eye moved while you looked", False
+    if reply.startswith("looked away"):  # gazecheck's own (looked_away): SteamVR's eyes were elsewhere
+        return "looked away", "you looked away from the dot (by SteamVR's eyes)", False
     if not reply:
         return "no answer", "our tracker didn't answer", False
     if reply.startswith("our tracker isn't running"):
@@ -586,7 +601,7 @@ class Checks:
         self.check = {"kind": kind, "reason": reason, "own": own, "dots": check_dots(kind, own), "i": 0,
                       "started": now, "shown": now, "run": [], "accept": False, "done_at": None, "tries": 0,
                       "skipped": 0, "captured": 0, "points": {}, "reasons": {}, "fit_reasons": set(), "note": "",
-                      "blind": blind, "fusion": []}
+                      "blind": blind, "fusion": [], "away_dots": [], "away_off": False, "steam_offsets": []}
         log(f"{kind} check: {reason}" + (" (our tracker's first: no gaze yet, so each click takes the look "
                                          "up to it)" if blind else ""))
         self.note_until = None   # the check's panel replaces the slip note
@@ -977,6 +992,9 @@ class Checks:
                               if len(pts) >= 15 else None)
                 if all(lr):
                     rec["steam"] = lr
+                    if self.looked_away(rec):
+                        self.captured(rec, False)
+                        return
             if c["kind"] == "full":
                 # ft-eyes checks the pupils held still: its answer takes the dot or not (point_done).
                 # The ring shows it full meanwhile, so the click is seen to have landed.
@@ -1039,6 +1057,33 @@ class Checks:
                     svc.weights["steam"].add(miss)
                 svc.dirty = True
         self.captured(rec, ok)
+
+    def looked_away(self, rec):
+        """A full calibration's dot for our tracker, where SteamVR saw both eyes: whether they say
+        you looked away (LOOKED_AWAY past their usual offset in this calibration). The dot isn't
+        taken then (ft-eyes isn't asked): one taken there teaches our tracker the wrong place.
+        Past AWAY_GIVE_UP dots in a row turned down, it's SteamVR that's off: the check stops."""
+        c = self.check
+        (my, mp), (ty, tp) = Fusion.mean(*rec["steam"]), rec["true"]
+        dy, dp = ty - my, tp - mp
+        offs = c["steam_offsets"]
+        if len(offs) >= AWAY_OFFSET_MIN:
+            dy -= statistics.median(o[0] for o in offs)
+            dp -= statistics.median(o[1] for o in offs)
+        rec["away"] = round(math.hypot(dy, dp), 2)
+        away = rec["away"] > LOOKED_AWAY and not c["away_off"]
+        if away and c["i"] not in c["away_dots"] and len(c["away_dots"]) >= AWAY_GIVE_UP:
+            c["away_off"], away = True, False
+            log(f"full check: SteamVR's eyes {rec['away']:.0f} deg off at {AWAY_GIVE_UP + 1} dots in a row: "
+                "taken as SteamVR being off, the looked-away check is off for this calibration")
+        if not away:
+            c["away_dots"] = []
+            offs.append((ty - my, tp - mp))
+            return False
+        if c["i"] not in c["away_dots"]:
+            c["away_dots"].append(c["i"])
+        rec["reply"] = f"looked away ({rec['away']:.0f} deg by SteamVR)"
+        return True
 
     def point_done(self, rec, miss, reply):
         """ft-eyes' answer to a full calibration dot's calib-point ("" without one)."""

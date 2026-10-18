@@ -50,6 +50,7 @@ DOTS = 4
 real_dots = gazecheck.check_dots
 gazecheck.check_dots = lambda kind, own: real_dots(kind, own)[:DOTS]  # a short calibration
 gazecheck.Fusion.MIN = DOTS   # ...whose dots still fit a fusion (SteamVR's eyes at each)
+gazecheck.LOOKED_AWAY = 1e9   # the fake SteamVR's eyes stay put whatever the dot (looked-away-test.py has that check)
 logs = []
 gazed.log = gazecheck.log = lambda msg: logs.append(msg)
 

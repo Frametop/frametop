@@ -80,7 +80,8 @@
 //     A hand at a panel owns the pointer there (kHandPointerMs). Its log lines start "hands:".
 //   - the palm menu (palmmenu.cpp): a bare hand turned palm up toward your face, while you look
 //     at it, gets a small ring above the palm; a pinch tap by that hand opens the Steam menu
-//     (steam/ft-steam menu), or closes the dashboard. That hand counts as near meanwhile.
+//     (steam/ft-steam menu), or closes the dashboard. That hand counts as near meanwhile. Not
+//     while a gaze calibration panel is up (the pointer helper's "calpanel 1").
 //   - "grab that" (grabthat.cpp): an open hand held out to a screen or floating window, then a
 //     fist pulled back, brings it to arm's reach (about 45 cm ahead, facing you). Only a panel the
 //     palm faces (its normal's line meets it), farther than 0.8 m, not held (near ones: push,
@@ -2322,6 +2323,11 @@ struct TypingWord {
     bool side[2] = {false, false};
     int64_t atMs = INT64_MIN / 2;
 } g_typingWord;
+// The pointer helper's word on the gaze calibration panel ("calpanel 1|0", passed on from the
+// panel's claims, about every second while it's up): the palm menu waits meanwhile (a palm up
+// between dots isn't a menu). Older than 3 s, it lapses.
+int64_t g_calPanelMs = INT64_MIN / 2;
+bool CalPanelUp() { return NowMs() - g_calPanelMs < 3000; }
 // ...and on its hand rays ("ray <L 0|1> <R 0|1>", the same way): our laser (ft_pointer's) is a hand
 // pointing only while one is up; else it's the mouse's or the gaze's (FromLaser).
 TypingWord g_rayWord;
@@ -2761,7 +2767,7 @@ void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Pan
     // has it near one, or it's within the touch zone and a margin of one (a card pinch from below has
     // the palm up toward the face)
     for (int k = 0; k < 2; ++k) {
-        pin.allowed[k] = in.haveHead && !g_beside && HandsAllowed(k);
+        pin.allowed[k] = in.haveHead && !g_beside && HandsAllowed(k) && !CalPanelUp();
         pin.busy[k] = g_handInput.pressing(k) || g_handInput.grabbing(k) || g_grabThat.armed(k) ||
                       g_grabThat.claims(k, g_handInput.frameNs());
         pin.atPanel[k] = g_handInput.near(k) || handinput::HandAtPanel(g_hands, k, panels, g_handInput.params());
@@ -5173,6 +5179,11 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         std::snprintf(reply, size, "ok");
     } else if (int tl = 0, tr = 0; std::sscanf(cmd, "typing %d %d", &tl, &tr) == 2) {
         g_typingWord.side[0] = tl != 0, g_typingWord.side[1] = tr != 0, g_typingWord.atMs = NowMs();
+        std::snprintf(reply, size, "ok");
+    } else if (int calOn = 0; std::sscanf(cmd, "calpanel %d", &calOn) == 1) {
+        if ((calOn != 0) != CalPanelUp())
+            std::printf("gaze calibration panel %s: the palm menu %s\n", calOn ? "up" : "gone", calOn ? "waits" : "is back");
+        g_calPanelMs = calOn ? NowMs() : INT64_MIN / 2;
         std::snprintf(reply, size, "ok");
     } else if (int rl = 0, rr = 0; std::sscanf(cmd, "ray %d %d", &rl, &rr) == 2) {
         g_rayWord.side[0] = rl != 0, g_rayWord.side[1] = rr != 0, g_rayWord.atMs = NowMs();

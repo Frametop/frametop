@@ -78,6 +78,30 @@ class FakeService(threading.Thread):
                 self.sock.sendto(r.encode(), addr)
 
 
+class GazeStreamTest(unittest.TestCase):
+    def test_restarts(self):
+        """ft-gaze quits with SteamVR: it's started again, and the samples go on."""
+        saved = benchrec.RESTART
+        benchrec.RESTART = 0.2
+        os.environ["FAKE_GAZE_QUIT_AFTER"] = "0.3"
+        logs = []
+        g = benchrec.GazeStream(prog=FAKE_GAZE, log=logs.append).start()
+        try:
+            end = time.monotonic() + 5
+            while g.restarts < 2 and time.monotonic() < end:
+                time.sleep(0.05)
+            self.assertGreaterEqual(g.restarts, 2, logs)
+            lines = g.lines
+            time.sleep(0.2)
+            self.assertGreater(g.lines, lines)
+            self.assertIn("starting it again", logs[0])
+        finally:
+            del os.environ["FAKE_GAZE_QUIT_AFTER"]
+            benchrec.RESTART = saved
+            g.stop()
+        self.assertFalse(g.reader.is_alive())
+
+
 class ScenarioTest(unittest.TestCase):
     def setUp(self):
         if gazebench is None:

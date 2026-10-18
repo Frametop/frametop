@@ -52,6 +52,7 @@ SOURCES = "mmap1,mmap2,left,right,own"
 EYES_SOCK = os.environ.get("FT_BENCH_EYES_SOCKET", "ft_eyes")     # (the tests' stand-ins)
 GAZED_SOCK = os.environ.get("FT_BENCH_GAZED_SOCKET", "ft_gazed")
 RECENT = 3.0        # s of parsed samples kept for the app's quick scores
+RESTART = 3.0       # s before ft-gaze is started again after it stopped (SteamVR restarted)
 KEEPALIVE = 2.0     # s between checks that our tracker is still logging finds
 LOG_SLACK = 3.0     # s either side of the run when copying the lesson logs
 
@@ -95,9 +96,10 @@ class Sock:
 
 
 class GazeStream:
-    """ft-gaze, for the app's life (it takes a moment to connect to SteamVR and the screens).
-    Its lines go to the current run's gaze.jsonl while one records, and the last RECENT seconds
-    are kept parsed for the app's quick scores and status."""
+    """ft-gaze, for the app's life (it takes a moment to connect to SteamVR and the screens), and
+    again RESTART seconds after it stops: it quits when SteamVR does. Its lines go to the current
+    run's gaze.jsonl while one records, and the last RECENT seconds are kept parsed for the app's
+    quick scores and status."""
 
     def __init__(self, prog=None, log=print):
         self.prog = Path(prog) if prog else next((p for p in FT_GAZES if p.exists()), FT_GAZES[0])
@@ -108,16 +110,36 @@ class GazeStream:
         self.recent = deque()
         self.lines = 0
         self.error = None
+        self.restarts = 0
+        self.stopping = threading.Event()
+        self.reader = None
 
     def start(self):
         if not self.prog.exists():
             self.error = f"{self.prog} isn't built (gaze/build.sh)"
             return self
-        self.proc = subprocess.Popen([str(self.prog), "--watch-stdin", "--sources", SOURCES],
-                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        self.reader = threading.Thread(target=self._read, name="ft-gaze", daemon=True)
+        self.reader = threading.Thread(target=self._run, name="ft-gaze", daemon=True)
         self.reader.start()
         return self
+
+    def _run(self):
+        while True:
+            with self.lock:
+                if self.stopping.is_set():
+                    return
+                self.proc = subprocess.Popen([str(self.prog), "--watch-stdin", "--sources", SOURCES],
+                                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            before = self.lines
+            self._read()
+            code = self.proc.wait()
+            self.proc.stdout.close()
+            if self.stopping.is_set():
+                return
+            self.error = f"ft-gaze stopped (exit {code}); starting it again"
+            if self.lines > before or not self.restarts:   # not every few seconds while SteamVR is down
+                self.log(self.error)
+            self.restarts += 1
+            self.stopping.wait(RESTART)
 
     def _read(self):
         for line in self.proc.stdout:
@@ -129,11 +151,11 @@ class GazeStream:
                 s = json.loads(line)
             except ValueError:
                 continue
+            self.error = None
             with self.lock:
                 self.recent.append(s)
                 while self.recent and self.recent[0].get("t", 0) < s.get("t", 0) - RECENT:
                     self.recent.popleft()
-        self.error = f"ft-gaze stopped (exit {self.proc.wait()})"
 
     def to(self, path):
         """Write the samples to path from now on (None: stop writing)."""
@@ -152,17 +174,20 @@ class GazeStream:
 
     def stop(self):
         self.to(None)
-        if self.proc:
+        with self.lock:
+            self.stopping.set()
+            proc = self.proc
+        if proc:
             try:
-                self.proc.stdin.close()
+                proc.stdin.close()
             except OSError:
                 pass
             try:
-                self.proc.wait(3)
+                proc.wait(3)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
+                proc.kill()
+        if self.reader:
             self.reader.join(2)
-            self.proc.stdout.close()
 
 
 def conf_lines():

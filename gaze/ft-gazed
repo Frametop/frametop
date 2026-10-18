@@ -190,9 +190,15 @@ def log(msg):
     print(f"ft-gazed: {msg}", file=sys.stderr, flush=True)
 
 
+def venv_built(python):
+    """Is a build/venv's python there? It's for the container: in a release its link points at the
+    image's Python (/usr/bin/python3.14), which the host doesn't have, so the link itself counts."""
+    return os.path.lexists(python)
+
+
 def own_installed():
     """Is our own tracker installed: its frame grabber, and ft-eyes' Python here?"""
-    return all(p.exists() for p in EYEGRAB) and EYES_PYTHON.exists()
+    return all(p.exists() for p in EYEGRAB) and venv_built(EYES_PYTHON)
 
 
 def read_settings():
@@ -594,7 +600,7 @@ class Service:
     def start_eyes(self):
         """Our own tracker, in the container, with build/venv's numpy and OpenCV. Like
         ft-gaze, it quits when its stdin closes."""
-        if not EYES_PYTHON.exists():
+        if not venv_built(EYES_PYTHON):
             log(f"ft-eyes isn't built: run {REPO}/gaze/tracker/build.sh")
             self.eyes_restart_at = time.monotonic() + 30
             return

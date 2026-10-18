@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Frametop Gaze Bench
+GenericName=Test the gaze pointer on hard targets
+Comment=Look at targets in hard places and click what you're looking at, to compare gaze techniques
+Exec=@REPO@/gaze/bench/ft-gazebench
+Icon=view-visible
+Categories=Utility;
+Keywords=eyes;eye tracking;gaze;test;bench;frametop;

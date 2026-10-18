@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Add "Frametop Gaze Bench" to the app menu on a Frame with Frametop, for this tree (README.md).
-# It needs ft-gaze (gaze/build.sh; a release brings it built, and a tree without a build uses the
-# installed release's) and, to record our tracker, ft-eyes (gaze/tracker/install.sh).
+# It needs ft-gaze and ft-gazepanel (gaze/build.sh; a release brings them built, and a tree
+# without a build uses the installed release's) and, to record our tracker, ft-eyes
+# (gaze/tracker/install.sh).
 # Usage: gaze/bench/install.sh            install or update
 #        gaze/bench/install.sh uninstall  remove the menu entry. Runs stay where they are.
 set -euo pipefail

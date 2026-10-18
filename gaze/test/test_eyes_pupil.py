@@ -91,6 +91,28 @@ class PupilTest(unittest.TestCase):
         self.assertEqual(pupil.find_pupil(img, {"x": 50, "y": 50, "a": 5}), expected)
         self.assertEqual(pupil.find_pupil(np.zeros_like(img), expected), None)
 
+    def test_a_much_smaller_spot_isnt_the_pupil(self):
+        """The right camera's dark spot of 2026-10-17: darker and smaller than the pupil, so it
+        wins on score unless the pupil's recent size rules it out."""
+        img = np.full((400, 512), 100, np.uint8)
+        cv2.ellipse(img, (256, 200), (30, 24), 0, 0, 360, 20, -1)
+        cv2.ellipse(img, (215, 250), (10, 7), 0, 0, 360, 0, -1)
+        self.assertAlmostEqual(pupil.find_pupil(img)["x"], 215, delta=0.5)
+        p = pupil.find_pupil(img, smallest=15)
+        self.assertAlmostEqual(p["x"], 256, delta=0.5)
+        self.assertAlmostEqual(pupil.find_pupil(img, p, 15)["x"], 256, delta=0.5)
+        self.assertIsNone(pupil.find_pupil(img, p, 40))
+
+    def test_pupil_size(self):
+        size = pupil.PupilSize()
+        for i in range(pupil.SIZE_FINDS - 1):
+            size.add(i / 90, {"a": 20.0})
+        self.assertEqual(size.smallest(9 / 90), 0.0)  # too few finds yet
+        size.add(9 / 90, {"a": 24.0})
+        size.add(10 / 90, None)  # lost frames don't count
+        self.assertAlmostEqual(size.smallest(10 / 90), pupil.SMALLEST * 20.0)
+        self.assertEqual(size.smallest(10 / 90 + pupil.SIZE_WINDOW + 0.2), 0.0)  # all of them too old
+
 
 if __name__ == "__main__":
     unittest.main()

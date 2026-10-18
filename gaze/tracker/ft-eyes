@@ -222,6 +222,7 @@ class Eye:
         self.shift = eyes_model.Shift()
         self.history = deque()  # (t, x, y, glint mid x, y)
         self.last = None        # the previous pupil (window hint)
+        self.size = eyes_pupil.PupilSize()   # its recent size: much smaller finds are something else
         self.gaze = None        # (t, yaw, pitch, x, y)
         self.lost = 0
         self.frames = self.found = 0
@@ -250,8 +251,9 @@ class Eye:
             if self.lost % LOST_EVERY:
                 return
         t0 = time.perf_counter()
-        p = eyes_pupil.find_pupil(img, self.last)
+        p = eyes_pupil.find_pupil(img, self.last, self.size.smallest(t))
         self.last = p
+        self.size.add(t, p)
         if self.obs is not None:
             self.obs.add(self.eye, t, p)
             self.fed = (t, time.clock_gettime(time.CLOCK_MONOTONIC_RAW))
@@ -280,8 +282,9 @@ class Eye:
         classic = self.finds is not None or time.monotonic() < self.coach[0]
         p = None
         if classic:
-            p = eyes_pupil.find_pupil(img, self.last)
+            p = eyes_pupil.find_pupil(img, self.last, self.size.smallest(t))
             self.last = p
+            self.size.add(t, p)
             if self.obs is not None:
                 self.obs.add(self.eye, t, p)
                 self.fed = (t, time.clock_gettime(time.CLOCK_MONOTONIC_RAW))

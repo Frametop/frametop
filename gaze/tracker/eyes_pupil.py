@@ -5,7 +5,14 @@ background are just as dark, but they touch the image edge, so any dark region t
 the edge is dropped. Closing the glints' holes can join the pupil to that background (the
 left camera's, when you look more than about 20 degrees left), so when nothing is found
 the search runs again with a smaller closing.
+
+A dark spot well inside the frame can pass all that too: on 2026-10-17 the right camera took
+one about 9 px across for the pupil (23 px) about once a second, for 3-7 frames at a time, and
+the gaze jumped 60 degrees. A pupil doesn't shrink to half its size in a frame, so a find that
+much smaller than the last half second's (PupilSize) is skipped.
 """
+from collections import deque
+
 import cv2
 import numpy as np
 
@@ -28,32 +35,33 @@ _KERNELS = {size: np.ones((size, size), np.uint8) for size in {3, CLOSE, CLOSE_T
 NEAR = 70          # the windowed search: this many pixels, or 3 pupil radii, around a hint
 
 
-def find_pupil(frame, near=None):
+def find_pupil(frame, near=None, smallest=0.0):
     """Return dict(x, y, a, b, angle, area, fill, glints) or None.
 
     `near` (a previous result) searches a window around it first (0.4 ms, not 1.4-2.1);
-    if the pupil isn't wholly inside the window it falls back to the whole frame."""
+    if the pupil isn't wholly inside the window it falls back to the whole frame. Blobs whose
+    long semi-axis is under `smallest` px don't count (PupilSize.smallest)."""
     if near is not None:
         r = int(max(NEAR, 3 * near['a']))
         x0, y0 = max(int(near['x']) - r, 0), max(int(near['y']) - r, 0)
-        p = _find_either(frame[y0:int(near['y']) + r, x0:int(near['x']) + r], x0, y0)
+        p = _find_either(frame[y0:int(near['y']) + r, x0:int(near['x']) + r], x0, y0, smallest)
         if p is not None:
             p['glints'] = find_glints(frame, p)
             return p
-    p = _find_either(frame, 0, 0)
+    p = _find_either(frame, 0, 0, smallest)
     if p is not None:
         p['glints'] = find_glints(frame, p)
     return p
 
 
-def _find_either(img, ox, oy):
+def _find_either(img, ox, oy, smallest=0.0):
     # Both closing sizes use the same input mask; morphologyEx returns a new one.
     dark = (cv2.GaussianBlur(img, (5, 5), 0) < DARK).astype(np.uint8)
-    p = _find(img, dark, ox, oy)
-    return p if p is not None else _find(img, dark, ox, oy, CLOSE_TIGHT)
+    p = _find(img, dark, ox, oy, smallest=smallest)
+    return p if p is not None else _find(img, dark, ox, oy, CLOSE_TIGHT, smallest)
 
 
-def _find(img, dark, ox, oy, close=CLOSE):
+def _find(img, dark, ox, oy, close=CLOSE, smallest=0.0):
     """The pupil in `img` (a window at ox, oy), using its prepared `dark` mask. A dark
     region touching the window's edge doesn't count: it's background, rim, or cut off."""
     # Glints punch bright holes in the pupil; close them so the blob stays whole.
@@ -75,7 +83,7 @@ def _find(img, dark, ox, oy, close=CLOSE):
             continue
         (ex, ey), (d1, d2), ang = cv2.fitEllipse(c)
         a, b = max(d1, d2) / 2, min(d1, d2) / 2
-        if b < 3 or a / b > MAX_ASPECT:
+        if b < 3 or a / b > MAX_ASPECT or a < smallest:
             continue
         fill = area / (np.pi * a * b)
         if fill < MIN_FILL or fill > 1.25:
@@ -89,6 +97,35 @@ def _find(img, dark, ox, oy, close=CLOSE):
             best = (score, dict(x=ex + x + ox, y=ey + y + oy, a=a, b=b, angle=ang, major=major,
                                 area=int(area), fill=fill, box=(x + ox, y + oy, bw, bh)))
     return best[1] if best else None
+
+
+SMALLEST = 0.5     # a find under this share of the pupil's recent size is something else
+SIZE_WINDOW = 0.5  # s of finds the recent size comes from
+SIZE_FINDS = 10    # and at least this many of them
+
+
+class PupilSize:
+    """One eye's recent pupil size, the median long semi-axis of its finds over the last
+    SIZE_WINDOW s. A pupil narrows in bright light over a second or so, and turning the eye
+    changes how big the camera sees it by a few percent per frame; in the practice captures
+    (2026-09-29) under 0.4 % of finds were below half this median, many of them strays as well.
+    Only smaller finds are refused: if a wrong spot gets in (after a loss, with no recent size),
+    the real pupil isn't refused when it's back, and the median follows it."""
+
+    def __init__(self):
+        self.finds = deque()   # (t, a)
+
+    def smallest(self, t):
+        """The smallest long semi-axis a find at time t may have, in px (0: no limit yet)."""
+        while self.finds and self.finds[0][0] < t - SIZE_WINDOW:
+            self.finds.popleft()
+        if len(self.finds) < SIZE_FINDS:
+            return 0.0
+        return SMALLEST * float(np.median([a for _, a in self.finds]))
+
+    def add(self, t, p):
+        if p is not None:
+            self.finds.append((t, p['a']))
 
 
 GLINT_RING = 140   # a glint sits on dark iris or pupil: its surroundings are below this

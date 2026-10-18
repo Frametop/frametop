@@ -7,7 +7,10 @@ mode (gaze/rec/session.py): wherever the head turns, a target stays at the same 
 it, so every run asks the same of the eyes. Pick a scenario (scenarios.json) in the window; the
 panel shows one dot at a time. Look at the dot and press the button on the headset's right side:
 where you looked is the dot. Two presses take the last one back, a hold ends the scenario. The
-window's keys do the same: Space marks, Backspace takes back, S skips, Esc ends.
+window's keys do the same: Space marks, Backspace takes back, S skips, Esc ends. As in Frametop's
+gaze calibration, a left click, Enter, an index pinch (hand tracking) or Meta+J marks too, and a
+right click or Meta+K ends: the bench claims the pointer helper's calibration panel while its
+panel shows (pointer/helper/calpanel.h), so the helper answers those here and hides the pointer.
 
 Each scenario played is a run, recorded by benchrec.py into BASE/<time>-<scenario>/, with the
 panel's own log of what the dot did and when it reached the eyes, and the headset's pose. After
@@ -30,7 +33,7 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QSocketNotifier, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -50,6 +53,8 @@ MARGIN = 1.5            # degrees from the panel's edge to a target at 0 or 1, m
                         # out from its middle) still fits
 PANEL_SOCK = os.environ.get("FT_BENCH_PANEL_SOCKET", "ft_benchpanel")   # (the tests' stand-in)
 PANEL_OVERLAY = "frametop.benchpanel"
+HELPER_SOCK = os.environ.get("FT_BENCH_HELPER_SOCKET", "ft_pointer_helper")   # (the tests' stand-in)
+CLAIM_EVERY = 1.0       # s between claims of the helper's calibration panel (it lets one go after 3 s)
 PANELS = [Path(p) for p in (os.environ.get("FT_GAZEPANEL"), os.path.join(GAZE, "build", "ft-gazepanel"),
                             Path.home() / ".local/share/frametop/releases/current/gaze/build/ft-gazepanel") if p]
 IN_BOX = os.path.join(REPO, "scripts", "in-box")
@@ -61,8 +66,8 @@ DONE_S = 0.25           # s a dot marked from the window's keys shows done befor
 WAKE = 60               # s: the gaze service's wake lease while a run records (Input Settings' Gaze
                         # page does the same), so the trackers run whether gaze mode is on or not
 QUICK_SOURCES = (("own", "Our tracker"), ("mmap1", "SteamVR"))
-KEYS_START = "Press the button to start. Hold it to end."
-KEYS_END = "Press the button to close this."
+KEYS_START = "Press the button, click, Enter or pinch to start. Hold the button or right click to end."
+KEYS_END = "Press the button, click, Enter or pinch to close this."
 
 
 def boxed(argv):
@@ -354,6 +359,18 @@ class Bench(QObject):
         if path:
             self.reader = ButtonReader(path, self._gesture, self.log, on_down=self._down).start()
         self.button_path = path or None
+        # The pointer helper's calibration panel (see the top): claimed as @ft_gazebench.PID while
+        # a run or its summary shows; its answers ("calaccept", "calquit") come back there.
+        self.claim_name = f"ft_gazebench.{os.getpid()}"
+        self.claim_at = None       # monotonic: the last claim; None while not claiming
+        self.helper = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK | socket.SOCK_CLOEXEC)
+        self.helper_note = None
+        try:
+            self.helper.bind("\0" + self.claim_name)
+            self.helper_note = QSocketNotifier(self.helper.fileno(), QSocketNotifier.Type.Read, self)
+            self.helper_note.activated.connect(self.from_helper)
+        except OSError as e:
+            self.log(f"pointer helper socket: {e} (clicks, Enter and pinches won't mark)")
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(50)
@@ -429,7 +446,7 @@ class Bench(QObject):
         else:
             lines.append(f"Headset panel: not running ({self.panel.error or 'it stopped'}). Starting a scenario tries again.")
         lines.append(f"Headset button: {self.button_path}" if self.button_path else
-                     "Headset button: not found. Use the keys in this window (Space marks).")
+                     "Headset button: not found. Click, press Enter or pinch, or use this window's keys (Space marks).")
         g = self.gazed.json("status")
         if g is None:
             lines.append("The gaze service isn't answering (frametop-gaze.service).")
@@ -487,6 +504,50 @@ class Bench(QObject):
             self.log("headset button: hold (end)")
             self.finish(early=True)
 
+    # --- the pointer helper's calibration panel: clicks, Enter and pinches
+
+    def claim(self):
+        """Claim the helper's panel while a run or its summary shows on ours, and let it go after."""
+        want = (self.run is not None or self.phase == "end") and self.panel.alive()
+        now = time.monotonic()
+        if want and (self.claim_at is None or now - self.claim_at >= CLAIM_EVERY):
+            self.claim_at = now
+            self.to_helper(f"calpanel 1 {self.claim_name}")
+        elif not want and self.claim_at is not None:
+            self.claim_at = None
+            self.to_helper(f"calpanel 0 {self.claim_name}")
+
+    def to_helper(self, text):
+        try:
+            self.helper.sendto(text.encode(), "\0" + HELPER_SOCK)
+        except OSError:
+            pass  # the helper isn't running (SteamVR isn't)
+
+    @Slot()
+    def from_helper(self):
+        while True:
+            try:
+                data = self.helper.recv(256)
+            except OSError:
+                return
+            t = benchrec.raw_now()
+            what = data.decode(errors="replace").strip()
+            if self.claim_at is None:
+                continue  # a late answer: the panel is gone
+            if what == "calaccept":     # a press: as the button's, at its arrival
+                if self.phase == "end":
+                    self.close_panel()
+                elif self.phase == "intro":
+                    self.begin()
+                elif self.run:
+                    self.mark(t, "helper")
+            elif what == "calquit":     # as holding the button
+                if self.run:
+                    self.log("pointer helper: quit (end)")
+                    self.finish(early=True)
+                else:
+                    self.close_panel()
+
     # --- a run
 
     @Slot(str)
@@ -515,7 +576,7 @@ class Bench(QObject):
             self.run.info["panel"]["log_error"] = r or "no answer"
             self.run.write_info()
         self._page, self._summary, self._last, self._notice = "run", "", "", ""
-        prompt = self.sc.get("prompt", self.all.get("prompt", "Look at the dot and press the button."))
+        prompt = self.sc.get("prompt", self.all.get("prompt", "Look at the dot and press the button (or click, Enter or pinch)."))
         intro = [self.sc["message"]] if self.sc.get("message") else []
         self._message = "\n".join(intro + [prompt])
         self.phase, self.target, self.next_at = "intro", None, None
@@ -525,6 +586,7 @@ class Bench(QObject):
         self._progress = f"{self.sc['name']}: {len(self.trials)} targets. Press the headset button (or Space) to start."
         self.run.trial({"kind": "message", "text": self._message, "t": benchrec.raw_now()})
         self.wake_at = 0.0
+        self.claim()
         self.changed.emit()
 
     def begin(self):
@@ -662,6 +724,7 @@ class Bench(QObject):
         if self.phase == "end":
             self.phase = None
             self.panel.cmd("hide")
+            self.claim()
 
     def summarize(self, early, why=None):
         marks = [r for r in self.results if not r.get("skipped")]
@@ -691,6 +754,7 @@ class Bench(QObject):
         if self._page != "run" and now - self.status_at > 2:
             self.status_at = now
             self.refresh_status()
+        self.claim()
         if not self.run:
             return
         if now - self.wake_at > WAKE / 2:
@@ -724,6 +788,12 @@ class Bench(QObject):
             self.reader.stop()
         if self.panel.alive():
             self.panel.cmd("hide")
+        if self.claim_at is not None:
+            self.to_helper(f"calpanel 0 {self.claim_name}")
+            self.claim_at = None
+        if self.helper_note:
+            self.helper_note.setEnabled(False)
+        self.helper.close()
         for t in (self.panel_starting, self.status_thread):
             if t:
                 t.join(PANEL_WAIT + 1)

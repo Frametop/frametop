@@ -575,6 +575,51 @@ def tests():
           (text_field(), said()), ([], ["text field focused: not opening Frametop's keyboard (Keyboard setting: never)"]))
     vr_keyboard["mode"] = None
     use(None)
+
+    # The gaze calibration panel (the helper's "calpanel 1"): Enter takes its dot ("calkey 1" to
+    # the helper) and isn't typed, its press, repeats and release; with a modifier held, or once
+    # the panel is gone or lapsed, Enter is typed again.
+    ENTER, KPENTER = relay.KEY_ENTER, relay.KEY_KPENTER
+
+    def cal_keys():
+        got = []
+        while True:
+            try:
+                m = helper.recv(256).decode()
+            except socket.timeout:
+                return got
+            if m.startswith("calkey"):
+                got.append(m)
+
+    def panel(on):
+        to_relay(f"calpanel {on}")
+        time.sleep(0.1)
+
+    use({})
+    typed(), cal_keys()
+    key(ENTER, 1); key(ENTER, 0)
+    check("Enter without the panel: typed", (cal_keys(), typed()), ([], ["key 28 1", "key 28 0"]))
+    panel(1)
+    key(ENTER, 1); key(ENTER, 2); key(ENTER, 2); key(ENTER, 0)
+    check("panel up: Enter takes the dot, once", cal_keys(), ["calkey 1"])
+    check("...and its press, repeats and release aren't typed", typed(), [])
+    key(KPENTER, 1); key(KPENTER, 0)
+    check("panel up: keypad Enter too", (cal_keys(), typed()), (["calkey 1"], []))
+    key(SHIFT, 1); key(ENTER, 1); key(ENTER, 0); key(SHIFT, 0)
+    check("panel up, Shift held: Enter is typed", (cal_keys(), typed()),
+          ([], ["key 42 1", "key 28 1", "key 28 0", "key 42 0"]))
+    key(A, 1); key(A, 0)
+    check("panel up: other keys are typed", (cal_keys(), typed()), ([], ["key 30 1", "key 30 0"]))
+    key(ENTER, 1); panel(0); key(ENTER, 0)
+    check("panel gone while Enter is held: it took the dot, and its release isn't typed",
+          (cal_keys(), typed()), (["calkey 1"], []))
+    key(ENTER, 1); key(ENTER, 0)
+    check("panel gone: Enter is typed", (cal_keys(), typed()), ([], ["key 28 1", "key 28 0"]))
+    panel(1)
+    time.sleep(3.1)  # no renewal: the claim lapses after 3 s
+    key(ENTER, 1); key(ENTER, 0)
+    check("panel claim lapsed: Enter is typed", (cal_keys(), typed()), ([], ["key 28 1", "key 28 0"]))
+    use(None)
     print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
     shutil.rmtree(OUT, ignore_errors=True)
     os._exit(1 if failures else 0)

@@ -2,7 +2,7 @@
   "version": 2,
   "about": "The gaze bench's scenarios (README.md). Targets show on the headset's panel (gazebench.py), 64 degrees across (4:3), fixed to the head. They're fractions of the panel across (u) and down (v); 0 and 1 are 1 degree in from its edges: 31 degrees left or right, 24 up or down, the corners 37 out. Generators: grid [cols, rows] over span; edges N per edge, corners included; rays: fractions of the way from the middle to the edge along dirs directions; random N with edge_share of them on an edge; steps N, each size [lo, hi] degrees from the last, within box [yaw, pitch] degrees of the middle. background and backgrounds are the panel's brightness, 0 to 1.",
   "background": 0.15,
-  "prompt": "Look at the dot and press the button.",
+  "prompt": "Look at the dot and press the button (or click, Enter or pinch).",
   "scenarios": [
     {
       "id": "warmup",

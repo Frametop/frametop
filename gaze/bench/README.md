@@ -21,10 +21,15 @@ eyes, and you never have to turn your head to find a target. Your eyes do all th
 3. For each dot: look at it and press the button. The dot turns green and the next one shows.
    Where you looked is the dot, so only press while you're on it.
    Two presses take the last one back. Holding the button ends the scenario.
+   As in the gaze calibration, a left click, Enter or an index pinch (index to thumb, with hand
+   tracking) marks too, and a right click or Meta+K ends: while the panel shows, the bench claims
+   the pointer helper's calibration panel (`calpanel 1 ft_gazebench.PID`), so the helper sends
+   those here and hides the pointer. Those marks are recorded `"by": "helper"`, at the time the
+   helper's answer came in (a pinch's a frame or two after it began).
    The window's keys do the same: Space marks, Backspace takes the last one back, S skips a
    dot, Esc ends.
 4. At the end, the panel and the window say how far our tracker and SteamVR's were off. A press
-   closes the panel. Then run `compare.py` on the runs.
+   (or a click, Enter or a pinch) closes the panel. Then run `compare.py` on the runs.
 
 | Scenario | What it tests |
 |---|---|

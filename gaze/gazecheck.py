@@ -30,7 +30,7 @@ directions: look at each one.
   fit     the headset fit check (on "fitcheck", Check headset fit on the Gaze page): live, a
           card per eye (tracked or lost, the tracker's signal, how much of the last 10 s it was
           seen) and hints, from the gaze probe's Headset fit (gaze/fitcheck.py), while you
-          adjust the headset. A left click or Meta+J runs its guided check (dots, then looks
+          adjust the headset. A left click, Enter, a pinch or Meta+J runs its guided check (dots, then looks
           down, up, left and right); a right click or Meta+K closes it, as does FIT_TIMEOUT.
           With our tracker installed, its first hint line is the fit coach's (gaze/fitcoach.py):
           where the headset sits, from where ft-eyes sees each pupil and glint (ft-eyes "fit",
@@ -46,7 +46,7 @@ again when the file changes) adds two things, with our tracker installed, its re
           you look at its dot, against your saved fit, and holds the dot meanwhile (at most
           PUTON_READ). If the headset sits more than fitcoach.MOVED_DEG from it, or the IPD
           setting changed, the panel widens (five's size) and says which way to move it, live,
-          until it's back; then the dot is taken as usual. A left click or Meta+J takes it as
+          until it's back; then the dot is taken as usual. A left click, Enter, a pinch or Meta+J takes it as
           it sits, and after PUTON_TIMEOUT it's taken anyway. So the click teaches our tracker
           the headset where you meant it to be, not where it landed.
   slip    while gaze mode is on with our tracker, ft-eyes' glint jump (the headset slipped
@@ -61,15 +61,17 @@ waits until the tracker sends, at most ft-gazed's WAKE_SETTLE; then it opens, or
 The quick check's dot captures itself: from CHECK_SETTLE after it shows (the eyes getting
 there), once the gaze has held within CHECK_SPREAD for CHECK_WINDOW (the probe's max spread and
 capture time). It's the gaze holding still that counts, not where the tracker puts it, so it
-works however far off the tracker is; a left click or Meta+J (the pointer helper's
-"calaccept") takes it now. The full calibration's and five's dots wait for that click: you
+works however far off the tracker is; a left click, Enter, an index pinch with hand tracking,
+or Meta+J (the pointer helper's "calaccept") takes it now. The full calibration's and five's dots wait for that click: you
 click when you're looking at the dot (the user asked for that: a steady gaze isn't always on
 the dot), and the gaze held still up to then is taken (ACCEPT_SPREAD). They wait as long as
 it takes, up to CLICK_IDLE. A dot not taken says why in the panel's note line (reject_reason:
 gazecal.steady_samples' drop counts for SteamVR's tracker, ft-eyes' reply for ours), as does a
 click with nothing taken after ACCEPT_WAIT, and a failed calibration names its most common
 reason there and in the status. A right click or Meta+K ("calquit") closes the panel. A press
-mapped to gaze precision or gaze drag counts as the left click (pointer/helper/calpanel.h). The
+mapped to gaze precision or gaze drag counts as the left click (pointer/helper/calpanel.h);
+Enter is the input relay's ("calkey 1" to the helper while the panel is up), and a pinch the
+helper's own, read from ft-hands whether or not hand interaction is on. The
 pointer hides meanwhile ("calpanel 1", renewed every second; the helper shows it again by itself
 when that stops).
 
@@ -619,7 +621,7 @@ class Checks:
         self.to_helper("calpanel 1")
         self.to_panel("show fit")
         self.to_panel("title Headset fit: adjust the headset while you watch")
-        self.to_panel("text Left click or Meta+J: guided check · Right click or Meta+K: done")
+        self.to_panel("text Left click, Enter or pinch: guided check · Right click or Meta+K: done")
         return "ok"
 
     def new_coach(self):
@@ -849,7 +851,7 @@ class Checks:
                 drawn[k] = cmd
                 self.to_panel(cmd)
         if fit.have_eye_data and fit.samples < 3 * MIN_REGION:
-            hints = ["Look around slowly: up, down, left and right. Or left click (Meta+J) for a guided check."]
+            hints = ["Look around slowly: up, down, left and right. Or left click, press Enter or pinch for a guided check."]
         else:
             hints = fit.hints()
         hints = self.coach_lines() + hints
@@ -865,9 +867,9 @@ class Checks:
         if c["kind"] == "full":
             self.to_panel(f"bg {ROUND_BG[rnd]}")
             self.to_panel(f"title Gaze calibration: {ROUND_NAMES[rnd]} round, {rnd + 1} of 3")
-            self.to_panel("text Look at the dot and click (left click or Meta+J). Right click or Meta+K: stop")
+            self.to_panel("text Look at the dot, then left click, press Enter or pinch. Right click or Meta+K: stop")
         elif c["kind"] == "five":
-            self.to_panel(f"text Look at the dot and click ({c['i'] + 1} of {len(c['dots'])})")
+            self.to_panel(f"text Look at the dot, then click, Enter or pinch ({c['i'] + 1} of {len(c['dots'])})")
         else:
             self.to_panel("text Look at the dot")
         self.to_panel(f"dot {yaw:.3f} {pitch:.3f} look")

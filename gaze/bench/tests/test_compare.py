@@ -207,6 +207,37 @@ class CompareTest(unittest.TestCase):
             self.assertAlmostEqual(r["truth"][0], hy, places=6)
             self.assertAlmostEqual(r["truth"][1], hp, places=6)
 
+    def test_panel_run(self):
+        """A run on the headset's panel: the truth is the target's direction (no screen), there's
+        no pointer, and the nudges' lessons (none would come from the bench) aren't matched."""
+        d = Path(self.tmp.name) / "panel"
+        d.mkdir()
+        for f in self.dir.iterdir():
+            if f.is_file():
+                (d / f.name).write_bytes(f.read_bytes())
+        (d / "start").symlink_to(self.dir / "start")
+        info = json.loads((d / "run.json").read_text())
+        del info["screen"]
+        info.update(display="panel", look=[0.4, 0.1])
+        (d / "run.json").write_text(json.dumps(info))
+        with open(d / "trials.jsonl", "w") as f:
+            for i, (tc, hy, hp, _) in enumerate(TRIALS):
+                f.write(json.dumps({"kind": "trial", "i": i, "u": 0.0 if hy == 25 else 0.5, "v": 0.5, "yaw": hy, "pitch": hp,
+                                    "click": {"t": T0 + tc, "by": "button"},
+                                    "truth": {"yaw": hy, "pitch": hp, "from": "target"}}) + "\n")
+        run = compare.Run(d)
+        self.assertTrue(run.panel)
+        self.assertEqual(run.notes, [])
+        recs = compare.score(run)
+        self.assertEqual(len(recs), len(TRIALS))
+        for r, (_, hy, hp, _) in zip(recs, TRIALS):
+            self.assertEqual(r["truth"], (hy, hp))
+            self.assertFalse(r["nudged"])
+            self.assertNotIn("pointer", r["err"])
+            self.assertAlmostEqual(r["err"]["steamvr"], compare.angle((hy, hp + 1), (hy, hp)), places=4)
+            self.assertAlmostEqual(r["err"]["own-live"], compare.angle((hy + 0.5, hp), (hy, hp)), places=4)
+        self.assertEqual([r["where"] for r in recs], ["edge" if t[1] == 25 else "inside" for t in TRIALS])
+
     def test_main(self):
         out = Path(self.tmp.name) / "recs.json"
         sys.argv = ["compare.py", str(self.dir.parent), "--json", str(out)]

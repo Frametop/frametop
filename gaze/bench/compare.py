@@ -4,10 +4,12 @@ at every click.
 
   compare.py RUN [RUN...] [--per-click] [--json OUT] [--only a,b]
 
-RUN is a run's folder (benchrec.py), or a folder of them (all runs in it). Where you looked at a
-click is the target's middle, or the click if it landed off the target (gazebench.py's "truth"),
-turned into a head-relative direction through ft-gaze's screen hits just before the click: the
-hit nearest that point, and its pixels per degree there (ft-gaze.cpp's HIT "j"). Each technique's
+RUN is a run's folder (benchrec.py), or a folder of them (all runs in it). A click is a mark:
+you looked at the target and pressed. Where you looked is the target, a head-relative direction
+on runs with the headset's panel (run.json "display": "panel", from 2026-10-17). The runs before
+showed targets on a Frametop screen: there it's the target's middle, or the click if it landed off
+the target, turned into a direction through ft-gaze's screen hits just before the click (the hit
+nearest that point, and its pixels per degree there: ft-gaze.cpp's HIT "j"). Each technique's
 gaze is its median over the same LOOK window (run.json), and its error the angle between the two.
 
 Techniques: what ran live, from gaze.jsonl:
@@ -16,6 +18,7 @@ Techniques: what ran live, from gaze.jsonl:
   steamvr         SteamVR's combined gaze (ft-gaze's mmap1, its own calibration)
   steamvr-eyes    the mean of SteamVR's two eyes (left, right: set 2, no calibration of ours)
   pointer         where the pointer was: a nudge's raw gaze (lessons.jsonl), else the click
+                  (screen runs only: on the panel there's no pointer)
   fuse            70 % our tracker, 30 % SteamVR's (both live)
   steamvr+clicks  SteamVR's, less the median error of the last SHIFT_KEEP clicks before
 Replays of our tracker on its finds (own.jsonl), from the calibration and the shift it had when
@@ -127,13 +130,20 @@ class Run:
         self.scenario = self.info["scenario"]["id"]
         self.samples = sorted(jsonl(self.dir / "gaze.jsonl"), key=lambda s: s.get("t", 0))
         self.ts = [s.get("t", 0) for s in self.samples]
+        self.notes = []
+        self.lessons = sorted((r for r in jsonl(self.dir / "lessons.jsonl") if "refused" not in r),
+                              key=lambda r: r["time"])
+        self.panel = self.info.get("display") == "panel"
+        if self.panel:   # the targets' directions are in trials.jsonl
+            self.screen, self.sx, self.sy = None, 1.0, 1.0
+            self.trials = self.load_trials()
+            return
         votes = {}
         for s in self.samples:
             hit = (s.get("head") or {}).get("hit")
             if hit:
                 votes[hit["s"]] = votes.get(hit["s"], 0) + 1
         self.screen = max(votes, key=votes.get) if votes else None
-        self.notes = []
         # ft-screens' pixels per window pixel: its size over the window's (gazebench.Bench.scale)
         win, size = self.info.get("screen") or {}, (self.info.get("screens") or {}).get(str(self.screen))
         if size and win.get("w") and win.get("h"):
@@ -142,12 +152,11 @@ class Run:
             self.sx = self.sy = win.get("dpr") or 1.0
             self.notes.append("no screen sizes in run.json (a run before 2026-10-17): window pixels at Qt's "
                               "pixel ratio, wrong where it isn't the desktop's scale")
-        self.lessons = sorted((r for r in jsonl(self.dir / "lessons.jsonl") if "refused" not in r),
-                              key=lambda r: r["time"])
         self.trials = self.load_trials()
 
     def load_trials(self):
-        """The trials that stand: the last click on each target, unless taken back or skipped."""
+        """The trials that stand: the last click on each target, unless taken back or skipped. On a
+        screen run, each with the nudge's lesson that came with its click, if there was one."""
         by_i = {}
         for r in jsonl(self.dir / "trials.jsonl"):
             if r.get("kind") == "trial":
@@ -160,6 +169,9 @@ class Run:
             if r.get("skipped") or "truth" not in r:
                 continue
             r = dict(r)
+            if self.panel:
+                out.append(r)
+                continue
             wall = r["click"]["t"] + self.wall
             best = None
             for k, ls in enumerate(self.lessons):
@@ -207,6 +219,8 @@ class Run:
         return median2(out)
 
     def truth(self, r):
+        if "yaw" in r["truth"]:   # the panel's target
+            return r["truth"]["yaw"], r["truth"]["pitch"]
         t0, t1 = self.look_window(r)
         return self.direction(self.window(t0, t1), r["truth"]["x"] * self.sx, r["truth"]["y"] * self.sy)
 
@@ -396,7 +410,7 @@ def score(run, only=None):
         ls = r.get("lesson")
         if ls:
             g["pointer"] = tuple(ls["raw"])
-        else:
+        elif not run.panel:
             c = r["click"]
             g["pointer"] = run.direction(run.window(t0, t1), c["x"] * run.sx, c["y"] * run.sy)
         g["fuse"] = (tuple(FUSE * a + (1 - FUSE) * b for a, b in zip(own, steam)) if own and steam else None)

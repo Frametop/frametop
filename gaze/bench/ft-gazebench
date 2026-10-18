@@ -3,7 +3,7 @@
 # gaze/bench/install.sh), as the eye recorder's gaze/rec/ft-eyerec: the app runs in Frametop's
 # container (PySide6), on the session's Wayland socket and bus; podman gets the real
 # XDG_RUNTIME_DIR and user bus.
-# Options go to gazebench.py: --base DIR (where runs go), --no-images.
+# Options go to gazebench.py: --base DIR (where runs go), --no-images, --no-button.
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 wl=${WAYLAND_DISPLAY:-wayland-0}
 case $wl in /*) ;; *) wl="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$wl" ;; esac

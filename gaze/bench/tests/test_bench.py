@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """The gaze bench without a headset: the scenarios' targets, bench.qml against gazebench.Bench,
-and a whole run recorded with stand-ins for ft-gaze (fake_ft_gaze.py), our tracker and the gaze
-service (their sockets), into a temporary folder. Needs PySide6 (the dev container); the parts
-that need it are skipped without it.
+and whole runs recorded with stand-ins for ft-gaze (fake_ft_gaze.py), the panel
+(fake_ft_gazepanel.py), the headset button (a FIFO), our tracker and the gaze service (their
+sockets), into a temporary folder. Needs PySide6 (the dev container); the parts that need it are
+skipped without it.
 
   scripts/in-box python3 gaze/bench/tests/test_bench.py
 """
 import json
-import math
 import os
 import random
 import re
@@ -22,11 +22,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 BENCH = HERE.parent
 sys.path.insert(0, str(BENCH))
+sys.path.insert(0, str(BENCH.parent.parent))
 os.environ["FT_BENCH_EYES_SOCKET"] = f"ft_eyes_benchtest_{os.getpid()}"
 os.environ["FT_BENCH_GAZED_SOCKET"] = f"ft_gazed_benchtest_{os.getpid()}"
-os.environ["FT_BENCH_SCREENS_SOCKET"] = f"ft_screens_benchtest_{os.getpid()}"
+os.environ["FT_BENCH_PANEL_SOCKET"] = f"ft_benchpanel_test_{os.getpid()}"
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import benchrec  # noqa: E402
+from recorder.button import EV_KEY, INPUT_EVENT, KEY_SELECT  # noqa: E402
 
 try:
     from PySide6.QtCore import QUrl
@@ -41,6 +43,8 @@ except ImportError as e:
 
 SCENARIOS = json.loads((BENCH / "scenarios.json").read_text())
 FAKE_GAZE = HERE / "fake_ft_gaze.py"
+FAKE_PANEL = HERE / "fake_ft_gazepanel.py"
+OWN, STEAMVR = (-0.5, 0.0), (0.0, 1.0)   # fake_ft_gaze.py's gaze, head-relative degrees
 
 
 class FakeService(threading.Thread):
@@ -84,25 +88,39 @@ class ScenarioTest(unittest.TestCase):
             ts = gazebench.make_trials(sc, random.Random(1))
             self.assertTrue(ts, sc["id"])
             for p in ts:
-                self.assertTrue(0 <= p["u"] <= 1 and 0 <= p["v"] <= 1, (sc["id"], p))
+                self.assertTrue(-1e-9 <= p["u"] <= 1 + 1e-9 and -1e-9 <= p["v"] <= 1 + 1e-9, (sc["id"], p))
             if sc["id"] == "edges":
                 self.assertEqual(len(ts), 16)
                 self.assertTrue(all(p["u"] in (0, 1) or p["v"] in (0, 1) for p in ts))
-            if sc["id"] == "small":
-                self.assertTrue(all("decoy" in p for p in ts))
             if sc["id"] == "hold":
                 self.assertTrue(all(p["dwell"] == 3.0 for p in ts))
             if sc["id"] == "light":
                 self.assertEqual({p["bg"] for p in ts}, set(sc["backgrounds"]))
-        rays = gazebench.make_trials(next(s for s in SCENARIOS["scenarios"] if s["id"] == "eyes-only"), random.Random(1))
+            if sc["id"] == "steps":
+                dirs = [(0.0, 0.0)] + [gazebench.panel_direction(p["u"], p["v"]) for p in ts]
+                steps = [gazebench.angle(a, b) for a, b in zip(dirs, dirs[1:])]
+                self.assertTrue(all(1.9 < d < 4.1 for d in steps), steps)
+                self.assertTrue(all(abs(y) <= 12.01 and abs(p) <= 9.01 for y, p in dirs), dirs)
+        rays = gazebench.make_trials(next(s for s in SCENARIOS["scenarios"] if s["id"] == "spokes"), random.Random(1))
         outer = [p for p in rays if p["u"] in (0, 1) or p["v"] in (0, 1)]
         self.assertEqual(len(outer), 8)  # the 1.0 ring reaches the edges and corners
 
-    def test_place(self):
-        b = gazebench.Bench.__new__(gazebench.Bench)
-        b.screen = {"w": 1000, "h": 800}
-        self.assertEqual(b.place(0, 0), (gazebench.INSET, gazebench.INSET))
-        self.assertEqual(b.place(1, 1), (1000 - gazebench.INSET, 800 - gazebench.INSET))
+    def test_panel_direction(self):
+        d = gazebench.panel_direction
+        self.assertEqual(d(0.5, 0.5), (0.0, 0.0))
+        self.assertGreater(d(0, 0.5)[0], 30)    # u 0: left (+yaw)
+        self.assertGreater(d(0.5, 0)[1], 20)    # v 0: up (+pitch)
+        for u, v in ((0, 0), (1, 1), (0.2, 0.7), (0.9, 0.1)):
+            back = gazebench.panel_place(*d(u, v))
+            self.assertAlmostEqual(back[0], u, places=9)
+            self.assertAlmostEqual(back[1], v, places=9)
+        # Every scenario's dot shows whole: its ring (0.75 degrees out) is on the panel
+        for sc in SCENARIOS["scenarios"]:
+            for p in gazebench.make_trials(sc, random.Random(2)):
+                yaw, pitch = d(p["u"], p["v"])
+                for dy, dp in ((0.75, 0), (-0.75, 0), (0, 0.75), (0, -0.75)):
+                    x, y = gazebench.panel_place(yaw + dy, pitch + dp, margin=0)
+                    self.assertTrue(0 <= x <= 1 and 0 <= y <= 1, (sc["id"], p, dy, dp))
 
 
 class QmlTest(unittest.TestCase):
@@ -124,7 +142,8 @@ class QmlTest(unittest.TestCase):
 
 
 class RunTest(unittest.TestCase):
-    """A warm-up played through, recorded and summed up, and bench.qml loaded on it."""
+    """A warm-up played through with the button and the keys, recorded and summed up; a hold
+    scenario ended by holding the button; bench.qml loaded on it."""
 
     def setUp(self):
         if gazebench is None:
@@ -141,6 +160,11 @@ class RunTest(unittest.TestCase):
         benchrec.CONF.write_text("GAZE_TRACKER=own\nOTHER=1\n")
         benchrec.LESSON_LOG.write_text(json.dumps({"time": time.time() - 100, "kind": "own"}) + "\n")
         self.finds = []
+        self.panel_log = tmp / "panel.log"
+        os.environ["FT_FAKE_PANEL_LOG"] = str(self.panel_log)
+        self.fifo = tmp / "button"
+        os.mkfifo(self.fifo)
+        self.button = os.open(self.fifo, os.O_RDWR)   # (Linux: doesn't wait for the reader)
 
         def eyes(text):
             w = text.split()
@@ -159,22 +183,18 @@ class RunTest(unittest.TestCase):
         def gazed(text):
             if text == "status":
                 return json.dumps({"tracker": "own", "calibration_made": "2026-10-17 10:00:00",
-                                   "checks": {"gaze_mode": True, "headset_worn": True}})
+                                   "checks": {"gaze_mode": False, "headset_worn": True}})
             return "ok"
 
         self.eyes = FakeService(benchrec.EYES_SOCK, eyes)
         self.gazed = FakeService(benchrec.GAZED_SOCK, gazed)
-        # The fake ft-gaze's screen 2 is 1000 x 800; the window is 800 x 640 on it, and Qt's pixel
-        # ratio (2) isn't the scale between them (1.25), as on the Frame's 3440-pixel screen
-        self.screens = FakeService(benchrec.SCREENS_SOCK, lambda text: "ok 2 1:3440x1440:2.503 2:1000x800:2.0"
-                                   if text == "screens" else "fail")
 
     def tearDown(self):
         for k, v in self.saved.items():
             setattr(benchrec, k, v)
         self.eyes.stop()
         self.gazed.stop()
-        self.screens.stop()
+        os.close(self.button)
         self.tmp.cleanup()
 
     def wait(self, cond, timeout=5.0):
@@ -186,49 +206,84 @@ class RunTest(unittest.TestCase):
             time.sleep(0.02)
         return False
 
+    def key(self, down):
+        t = time.time()
+        os.write(self.button, INPUT_EVENT.pack(int(t), int(t % 1 * 1e6), EV_KEY, KEY_SELECT, 1 if down else 0))
+
+    def press(self, held=0.08):
+        self.key(True)
+        self.wait(lambda: False, held)
+        self.key(False)
+
+    def panel_said(self):
+        return self.panel_log.read_text().splitlines() if self.panel_log.exists() else []
+
+    def bench(self, base):
+        bench = gazebench.Bench(SCENARIOS, str(base), images=False, gaze_prog=FAKE_GAZE, panel_prog=FAKE_PANEL,
+                                button=str(self.fifo))
+        self.assertTrue(self.wait(lambda: bench.gaze.latest() is not None), "no samples from the fake ft-gaze")
+        self.assertTrue(self.wait(bench.panel.alive), bench.panel.error)
+        return bench
+
     def test_run(self):
         base = Path(self.tmp.name) / "runs"
-        bench = gazebench.Bench(SCENARIOS, str(base), images=False, gaze_prog=FAKE_GAZE)
+        bench = self.bench(base)
         try:
-            self.assertTrue(self.wait(lambda: bench.gaze.latest() is not None), "no samples from the fake ft-gaze")
-            self.assertTrue(self.wait(lambda: "gaze mode on" in bench.status), bench.status)
-            bench.setScreen(800, 640, 2.0, "test", 0, 0)
+            self.assertTrue(self.wait(lambda: "Headset panel: ready" in bench.status), bench.status)
+            self.assertIn(str(self.fifo), bench.status)
             bench.start("warmup")
-            self.assertEqual(bench.page, "run")
-            self.assertFalse(bench.targetOn)          # the intro first
-            self.assertIn("Click anywhere to start", bench.message)
-            bench.click(10, 10, "left")
-            self.assertTrue(bench.targetOn)
-            time.sleep(0.5)                            # samples in the look window
-            n = len(bench.trials)
-            for k in range(n):
-                if k == 2:                             # take one back, then do it again
-                    bench.undo()
-                    self.assertEqual(bench.i, 1)
-                    time.sleep(0.4)
-                    bench.click(bench.tx, bench.ty, "left")
-                if k == 4:                             # a skip
-                    bench.click(5, 5, "right")
-                    continue
-                tx, ty = bench.tx, bench.ty
-                bench.click(tx + (60 if k == 5 else 3), ty, "left")  # 5: off the target: the click is the truth
-                time.sleep(0.4)
-                self.wait(lambda: True, 0.05)
-            self.assertEqual(bench.page, "done")
-            self.assertIn("Our tracker", bench.summary)
+            self.assertEqual((bench.page, bench.phase), ("run", "intro"))
             run = next(base.iterdir())
+            self.assertTrue(self.wait(lambda: "title Warm-up" in self.panel_said()), self.panel_said())
+            said = self.panel_said()
+            self.assertIn("show rec", said)
+            self.assertIn(f"log start {run}", said)
+            self.press()                                # the intro: a press starts it
+            self.assertTrue(self.wait(lambda: bench.phase == "target"))
+            n = len(bench.trials)
+            pressed_at = None
+            for k in range(n):
+                self.assertTrue(self.wait(lambda: bench.phase == "target"), (k, bench.phase))
+                self.wait(lambda: False, 0.45)          # samples in the look window
+                if k == 0:                               # the button marks it, at its down
+                    pressed_at = benchrec.raw_now()
+                    self.press()
+                    self.assertTrue(self.wait(lambda: len(bench.results) == 1))
+                    continue
+                if k == 2:                               # two presses: back to 1, marked again
+                    self.press()
+                    self.wait(lambda: False, 0.1)
+                    self.press()
+                    self.assertTrue(self.wait(lambda: bench.i == 1 and bench.phase == "target"), (bench.i, bench.phase))
+                    self.wait(lambda: False, 0.45)
+                    bench.markKey()
+                    self.assertTrue(self.wait(lambda: bench.phase == "target"))
+                    self.wait(lambda: False, 0.45)
+                if k == 4:
+                    bench.skip()
+                    continue
+                bench.markKey()
+            self.assertTrue(self.wait(lambda: bench.page == "done"))
+            self.assertEqual(bench.phase, "end")
+            self.assertIn("Our tracker", bench.summary)
+            self.assertIn("log stop", self.panel_said())
+            self.assertTrue(self.wait(lambda: "title Done" in self.panel_said()), self.panel_said()[-5:])
+            self.press()                                 # closes the panel
+            self.assertTrue(self.wait(lambda: self.panel_said()[-1] == "hide"))
             self.assertTrue(self.wait(lambda: "end" in json.loads((run / "run.json").read_text())))
         finally:
             bench.shutdown()
         info = json.loads((run / "run.json").read_text())
         self.assertEqual(info["scenario"]["id"], "warmup")
+        self.assertEqual(info["display"], "panel")
+        self.assertEqual(info["panel"]["log_rows"], "ok 3 100 1")
+        self.assertEqual(info["button"], str(self.fifo))
         self.assertEqual(info["conf"], ["GAZE_TRACKER=own"])
-        self.assertEqual(info["screen"]["w"], 800)
-        self.assertEqual(info["screens"], {"1": [3440, 1440], "2": [1000, 800]})
         self.assertIsNotNone(info["last_lesson"])
         self.assertGreater(info["gaze_lines"], 50)
         self.assertEqual(info["finds_rows"], "ok 1")
         self.assertTrue((run / "start" / "eyes-calibration.json").exists())
+        self.assertTrue((run / "targets.jsonl").exists())
         self.assertEqual(self.finds, [str(run / "own.jsonl")])
         rows = [json.loads(line) for line in (run / "trials.jsonl").read_text().splitlines()]
         kinds = [r["kind"] for r in rows]
@@ -236,21 +291,60 @@ class RunTest(unittest.TestCase):
         self.assertIn("undo", kinds)
         trials = [r for r in rows if r["kind"] == "trial"]
         self.assertEqual(sum(1 for r in trials if r.get("skipped")), 1)
-        off = [r for r in trials if r.get("truth", {}).get("from") == "click"]
-        self.assertEqual(len(off), 1)
+        by_button = [r for r in trials if r["click"]["by"] == "button"]
+        self.assertEqual(len(by_button), 1)
+        # The mark's time is the press's down, not when the press was sure (a double-press time later)
+        self.assertLess(abs(by_button[0]["click"]["t"] - pressed_at), 0.2)
         for r in trials:
             if r.get("skipped"):
                 continue
+            target = gazebench.panel_direction(r["u"], r["v"])
+            self.assertAlmostEqual(r["truth"]["yaw"], target[0], places=3)
+            self.assertAlmostEqual(r["truth"]["pitch"], target[1], places=3)
             q = r["quick"]
-            self.assertEqual(q["screen"], 2)
-            # The fake's tracker hits (510, 400), SteamVR's (500, 380), at 20 px a degree
-            tx, ty = 1.25 * r["truth"]["x"], 1.25 * r["truth"]["y"]
-            self.assertAlmostEqual(q["own"]["deg"], math.hypot(510 - tx, 400 - ty) / 20, places=1)
-            self.assertAlmostEqual(q["mmap1"]["deg"], math.hypot(500 - tx, 380 - ty) / 20, places=1)
+            self.assertAlmostEqual(q["own"]["deg"], gazebench.angle(OWN, target), places=1)
+            self.assertAlmostEqual(q["mmap1"]["deg"], gazebench.angle(STEAMVR, target), places=1)
+        # The button's down showed the dot done before the press counted
+        self.assertTrue(any(c.startswith("dot ") and c.endswith(" done") for c in self.panel_said()))
         self.assertGreater(len((run / "gaze.jsonl").read_text().splitlines()), 50)
 
+    def test_hold(self):
+        """Hold at the edges: a press before the ring fills doesn't count; holding the button ends it."""
+        base = Path(self.tmp.name) / "runs"
+        bench = self.bench(base)
+        try:
+            bench.start("hold")
+            bench.markKey()
+            self.assertEqual(bench.phase, "target")
+            bench.markKey()                              # too soon
+            self.assertTrue(self.wait(lambda: any(re.fullmatch(r"dot \S+ \S+ capture 0\.\d+", c) for c in self.panel_said())))
+            self.key(True)
+            self.assertTrue(self.wait(lambda: bench.page == "done", 3))
+            self.key(False)
+            self.assertIn("ended early", bench.summary)
+            run = next(base.iterdir())
+            self.assertTrue(self.wait(lambda: "end" in json.loads((run / "run.json").read_text())))
+        finally:
+            bench.shutdown()
+        kinds = [json.loads(line)["kind"] for line in (run / "trials.jsonl").read_text().splitlines()]
+        self.assertIn("early", kinds)
+        self.assertNotIn("trial", kinds)
+
+    def test_no_panel(self):
+        bench = gazebench.Bench(SCENARIOS, str(Path(self.tmp.name) / "runs"), images=False, gaze_prog=FAKE_GAZE,
+                                panel_prog="/nonexistent/ft-gazepanel", button=False)
+        try:
+            self.wait(lambda: bench.panel.error is not None, 2)
+            bench.start("warmup")
+            self.assertEqual(bench.page, "menu")
+            self.assertIn("isn't running", bench.notice)
+            self.assertTrue(self.wait(lambda: "Headset panel: not running" in bench.status), bench.status)
+            self.assertIn("Headset button: not found", bench.status)
+        finally:
+            bench.shutdown()
+
     def test_qml_loads(self):
-        bench = gazebench.Bench(SCENARIOS, str(Path(self.tmp.name) / "runs"), images=False, gaze_prog=FAKE_GAZE)
+        bench = self.bench(Path(self.tmp.name) / "runs")
         warnings = []
         try:
             engine = QQmlApplicationEngine()
@@ -259,10 +353,9 @@ class RunTest(unittest.TestCase):
             engine.load(QUrl.fromLocalFile(str(BENCH / "bench.qml")))
             self.assertTrue(engine.rootObjects())
             self.wait(lambda: False, 0.3)
-            self.assertGreater(bench.screen.get("w", 0), 0)
-            bench.start("small")
+            bench.start("steps")
             self.wait(lambda: False, 0.2)
-            bench.click(1, 1, "left")
+            bench.markKey()
             self.wait(lambda: False, 0.2)
             bench.stop()
             self.wait(lambda: bench.page == "done", 1)

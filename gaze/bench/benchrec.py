@@ -1,10 +1,13 @@
 """Gaze bench recording (README.md): everything a run needs to replay gaze techniques later.
 
 A run is one scenario played once. Its folder, under BASE:
-  run.json          the scenario, the screen, the settings, and the gaze service's and our
+  run.json          the scenario, the panel, the settings, and the gaze service's and our
                     tracker's status at the start and the end
-  trials.jsonl      a line per target: where it was, when it showed, and where and when you
-                    clicked (the app's own record, see gazebench.py)
+  trials.jsonl      a line per target: where it was, when it showed, and when you marked it
+                    (gazebench.py's own record: "click" is the mark, by the button or a key)
+  targets.jsonl     the panel's record of what the dot did, with when each change reached the
+  poses.jsonl       eyes; the headset's pose 250 times a second; SteamVR's IPD setting
+  ipd.jsonl         (ft-gazepanel's log, gaze/panel/ft-gazepanel.cpp)
   gaze.jsonl        ft-gaze's samples, every source but SteamVR's input action (the one that
                     calls into vrserver): SteamVR's eyes (mmap1, mmap2, left, right), our
                     tracker's published gaze (own), the head ray, and where each lands on
@@ -48,7 +51,6 @@ CONF_KEYS = ("GAZE_", "POINTER_GAZE", "EYES_MODEL")
 SOURCES = "mmap1,mmap2,left,right,own"
 EYES_SOCK = os.environ.get("FT_BENCH_EYES_SOCKET", "ft_eyes")     # (the tests' stand-ins)
 GAZED_SOCK = os.environ.get("FT_BENCH_GAZED_SOCKET", "ft_gazed")
-SCREENS_SOCK = os.environ.get("FT_BENCH_SCREENS_SOCKET", "ft_screens")
 RECENT = 3.0        # s of parsed samples kept for the app's quick scores
 KEEPALIVE = 2.0     # s between checks that our tracker is still logging finds
 LOG_SLACK = 3.0     # s either side of the run when copying the lesson logs
@@ -90,27 +92,6 @@ class Sock:
 
     def close(self):
         self.sock.close()
-
-
-def screen_sizes():
-    """ft-screens' screens as {"index": [width, height]} in its pixels (ft-gaze's hits are in
-    them), or {} if it isn't running. The bench's window is full screen on one, so a window pixel
-    is width / the window's width of them. That isn't Qt's pixel ratio: on a 3440-pixel screen at
-    KWin's 1.25 the window is 2752 wide and Qt said 2."""
-    s = Sock(SCREENS_SOCK)
-    try:
-        r = s.ask("screens")   # "ok <count> <index>:<w>x<h>:<metres> ..."
-    finally:
-        s.close()
-    out = {}
-    for item in (r or "").split()[2:] if (r or "").startswith("ok ") else ():
-        try:
-            index, size = item.split(":")[:2]
-            w, h = size.split("x")
-            out[str(int(index))] = [int(w), int(h)]
-        except ValueError:
-            continue
-    return out
 
 
 class GazeStream:

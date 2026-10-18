@@ -1,80 +1,73 @@
 {
-  "version": 1,
-  "about": "The gaze bench's scenarios (README.md). Targets are fractions of the screen across (u) and down (v); 0 and 1 are the edges, as far out as a whole target fits. Generators: grid [cols, rows] over span; edges N per edge, corners included; rays: fractions of the way from the middle to the edge along dirs directions; random N with edge_share of them on an edge; pairs N, two targets gap px apart (click the filled one).",
-  "background": "#262626",
+  "version": 2,
+  "about": "The gaze bench's scenarios (README.md). Targets show on the headset's panel (gazebench.py), 64 degrees across (4:3), fixed to the head. They're fractions of the panel across (u) and down (v); 0 and 1 are 1 degree in from its edges: 31 degrees left or right, 24 up or down, the corners 37 out. Generators: grid [cols, rows] over span; edges N per edge, corners included; rays: fractions of the way from the middle to the edge along dirs directions; random N with edge_share of them on an edge; steps N, each size [lo, hi] degrees from the last, within box [yaw, pitch] degrees of the middle. background and backgrounds are the panel's brightness, 0 to 1.",
+  "background": 0.15,
+  "prompt": "Look at the dot and press the button.",
   "scenarios": [
     {
       "id": "warmup",
       "name": "Warm-up",
-      "about": "Nine targets in the middle of the screen.",
-      "prompt": "Look at the target, then click it.",
+      "about": "Nine dots around the middle.",
       "targets": {"grid": [3, 3], "span": [0.2, 0.8]},
       "shuffle": true
     },
     {
       "id": "edges",
-      "name": "Screen edges",
-      "about": "Sixteen targets along the four edges and in the corners.",
-      "prompt": "Look at the target, then click it.",
+      "name": "Edges",
+      "about": "Sixteen dots along the panel's edges and in its corners, 24 to 37 degrees out.",
       "targets": {"edges": 5},
       "shuffle": true
     },
     {
       "id": "hold",
       "name": "Hold at the edges",
-      "about": "Look at an edge target for 3 seconds before you click: the tracker loses an eye out there.",
-      "prompt": "Keep looking at the target. Click when it turns white.",
+      "about": "Look at an edge dot until its ring fills (3 seconds), then press: the tracker loses an eye out there.",
+      "prompt": "Keep looking at the dot. Press when its ring is full.",
       "targets": {"edges": 3},
       "dwell": 3.0,
       "shuffle": true
     },
     {
-      "id": "eyes-only",
-      "name": "Eyes only",
-      "about": "Keep your head facing the cross in the middle and move only your eyes, out to the edges.",
-      "prompt": "Keep your head facing the cross. Move only your eyes to the target, then click it.",
+      "id": "spokes",
+      "name": "Out from the middle",
+      "about": "Twenty-four dots on eight spokes, a third, two thirds and all the way out.",
       "targets": {"rays": [0.35, 0.7, 1.0], "dirs": 8},
-      "head_mark": true,
       "shuffle": true
     },
     {
-      "id": "head-turn",
-      "name": "Turn to it",
-      "about": "The same places, but turn your head to face each target first.",
-      "prompt": "Turn your head to face the target, then click it.",
-      "targets": {"rays": [0.35, 0.7, 1.0], "dirs": 8},
+      "id": "head-moving",
+      "name": "Head moving",
+      "about": "Keep looking at the dot while you turn or nod your head slowly, and press while it moves.",
+      "prompt": "Keep looking at the dot while you turn or nod your head slowly. Press while your head is still moving.",
+      "targets": {"grid": [3, 3], "span": [0.2, 0.8]},
       "shuffle": true
     },
     {
       "id": "light",
       "name": "Light changes",
-      "about": "The screen switches between dark, bright and grey: your pupils change size.",
-      "prompt": "Look at the target, then click it.",
+      "about": "The panel switches between dark, bright and grey: your pupils change size.",
       "targets": {"grid": [4, 3], "span": [0.1, 0.9]},
-      "backgrounds": ["#000000", "#f2f2f2", "#6a6a6a"],
+      "backgrounds": [0.0, 0.95, 0.42],
       "shuffle": true
     },
     {
-      "id": "small",
-      "name": "Small and close",
-      "about": "Two targets side by side: click the filled one.",
-      "prompt": "Look at the filled target, then click it.",
-      "targets": {"pairs": 12, "gap": 40}
+      "id": "steps",
+      "name": "Small steps",
+      "about": "Twenty dots, each 2 to 4 degrees from the last, near the middle.",
+      "targets": {"steps": 20, "size": [2.0, 4.0], "box": [12.0, 9.0]}
     },
     {
       "id": "reseat",
       "name": "After a nudge",
-      "about": "Lift the headset a little and set it back, then nine targets: how fast the tracker recovers.",
+      "about": "Lift the headset a little and set it back, then nine dots: how fast the tracker recovers.",
       "message": "First lift the headset a little off your face and set it back down.",
-      "prompt": "Look at the target, then click it.",
       "targets": {"grid": [3, 3], "span": [0.15, 0.85]},
       "shuffle": true
     },
     {
       "id": "long",
       "name": "Long session",
-      "about": "Sixty targets anywhere on the screen at your own pace, about six minutes: drift, slips and stale corrections.",
-      "prompt": "Look at the target, then click it.",
+      "about": "Sixty dots anywhere at your own pace, a few seconds apart, about six minutes: drift, slips and stale corrections.",
       "targets": {"random": 60, "edge_share": 0.3},
       "gap": [1.0, 5.0]
     }

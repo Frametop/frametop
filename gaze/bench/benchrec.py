@@ -133,6 +133,10 @@ class GazeStream:
             self._read()
             code = self.proc.wait()
             self.proc.stdout.close()
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
             if self.stopping.is_set():
                 return
             self.error = f"ft-gaze stopped (exit {code}); starting it again"

@@ -98,6 +98,99 @@ class Fixation:
         return self.sum[0] / self.count, self.sum[1] / self.count
 
 
+def direction(yaw, pitch):
+    """A head-relative (yaw, pitch) in degrees as a unit vector, as ft-gaze's Direction: -Z
+    forward, positive yaw turns left (about +Y), positive pitch looks up."""
+    y, p = math.radians(yaw), math.radians(pitch)
+    return (-math.sin(y) * math.cos(p), math.sin(p), -math.cos(y) * math.cos(p))
+
+
+def angles(v):
+    """(yaw, pitch) in degrees of a direction, as ft-gaze's Angles."""
+    n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) or 1.0
+    return math.degrees(math.atan2(-v[0], -v[2])), math.degrees(math.asin(max(-1.0, min(1.0, v[1] / n))))
+
+
+def rotate(q, v, inverse=False):
+    """v turned by the unit quaternion q = [w, x, y, z] (ft-gaze's "hq" and the head's "q": head
+    space into the room), or back into head space with inverse."""
+    w, x, y, z = q
+    if inverse:
+        x, y, z = -x, -y, -z
+    # v + 2w (u x v) + 2 u x (u x v), u = (x, y, z)
+    cx, cy, cz = y * v[2] - z * v[1], z * v[0] - x * v[2], x * v[1] - y * v[0]
+    dx, dy, dz = y * cz - z * cy, z * cx - x * cz, x * cy - y * cx
+    return (v[0] + 2 * (w * cx + dx), v[1] + 2 * (w * cy + dy), v[2] + 2 * (w * cz + dz))
+
+
+class GazeLock:
+    """The fixation lock (Fixation, above) on where the gaze points in the room.
+
+    A look at something that stays put (a screen) stays put in the room while the head turns:
+    the eyes turn the other way, so the head-relative gaze slides. Locked in head-relative
+    degrees, the pointer rode along with the head until the slide passed the radius, then
+    snapped back, a jump every few hundred milliseconds; replaying two practice captures, during
+    still looks with the head moving 5-30 degrees a second that was 4 jumps over 1 degree a
+    second, and 13 in the one second it turned faster. Locked in the room it's 1 to 2 (2026-10-17).
+
+    Each sample's gaze is turned into the room with the head pose of its own sample time
+    (`then`, ft-gaze's "hq"), locked there, and turned back into the head with the newest pose
+    (`now`, the head's "q"), the closest one to the pose the pointer helper draws it with.
+    Without poses (an older ft-gaze) it's the head-relative lock."""
+
+    def __init__(self, radius=1.0):
+        self.radius = radius
+        self.head = Fixation(radius)
+        self.reset()
+
+    def reset(self):
+        self.head.reset()
+        self.sum = [0.0, 0.0, 0.0]
+        self.count = 0
+        self.outside = []
+        self.last_t = None
+
+    def __call__(self, yaw, pitch, t, then=None, now=None):
+        """The locked gaze, head-relative (yaw, pitch) degrees, for a head-relative sample at t."""
+        if not then or not now:
+            if self.count:
+                self.reset()
+            return self.head(yaw, pitch, t, 1.0)
+        if self.last_t is None and self.head.count:
+            self.head.reset()
+        m = self.lock(rotate(then, direction(yaw, pitch)), t)
+        return angles(rotate(now, m, inverse=True))
+
+    @staticmethod
+    def mean(s):
+        n = math.sqrt(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]) or 1.0
+        return (s[0] / n, s[1] / n, s[2] / n)
+
+    def lock(self, v, t):
+        """Fixation's rules on room directions (unit vectors)."""
+        if self.last_t is not None and (t <= self.last_t or t - self.last_t > 0.5):
+            self.reset()
+        self.last_t = t
+        if self.count:
+            m = self.mean(self.sum)
+            dot = max(-1.0, min(1.0, m[0] * v[0] + m[1] * v[1] + m[2] * v[2]))
+            if math.degrees(math.acos(dot)) > self.radius:
+                self.outside.append(v)
+                if len(self.outside) < 2:
+                    return m  # one stray sample: probably noise
+                self.sum = [sum(p[k] for p in self.outside) for k in range(3)]
+                self.count = len(self.outside)
+                self.outside = []
+                return self.mean(self.sum)
+        self.outside = []
+        if self.count >= 90:  # the last second or so: a slow drift still gets followed
+            self.sum = [s * 89 / 90 for s in self.sum]
+            self.count = 89
+        self.sum = [self.sum[k] + v[k] for k in range(3)]
+        self.count += 1
+        return self.mean(self.sum)
+
+
 MODELS = ["none", "offset", "affine", "affine+grid", "quadratic", "quadratic+grid"]
 DEFAULT_MODEL = "quadratic"
 

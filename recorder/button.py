@@ -172,11 +172,15 @@ class ButtonReader:
     """Reads the headset button on a thread and calls on_gesture("press" | "double" | "hold")
     (ButtonGestures). path: an event device or, for testing, a FIFO carrying input_event
     structs. It's opened read-only and shared; if it can't be opened (no device, no permission,
-    /dev/input not reachable in a container) it says so in the log and tries again now and then."""
+    /dev/input not reachable in a container) it says so in the log and tries again now and then.
+    on_down(t), if given, is called at each new press as it goes down (a bounce isn't one), after
+    the gestures that down made due: t is when, on time.monotonic(). A "press" comes a double-press
+    time after its release, so the gaze bench takes its down's time from this."""
 
     def __init__(self, path, on_gesture, log=None, double_s=BUTTON_DOUBLE_S, hold_s=BUTTON_HOLD_S,
-                 bounce_s=BUTTON_BOUNCE_S):
+                 bounce_s=BUTTON_BOUNCE_S, on_down=None):
         self.path, self.on_gesture, self.log = path, on_gesture, log or (lambda s: None)
+        self.on_down = on_down
         self.gestures = ButtonGestures(double_s, hold_s, bounce_s)
         self.ok = False      # opened at least once
         self._stop = threading.Event()
@@ -229,6 +233,8 @@ class ButtonReader:
                     for is_down, t in events:
                         at = now - min(max(events[-1][1] - t, 0.0), 2.0)
                         self._report(self.gestures.down(at) if is_down else self.gestures.up(at))
+                        if is_down and self.on_down and self.gestures.down_at == at:
+                            self.on_down(at)
             except OSError as e:   # the device went away
                 self.log("headset button: %s: %s" % (self.path, e.strerror))
                 self._stop.wait(2)

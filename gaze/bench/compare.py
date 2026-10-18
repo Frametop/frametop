@@ -19,8 +19,22 @@ Techniques: what ran live, from gaze.jsonl:
   steamvr-eyes    the mean of SteamVR's two eyes (left, right: set 2, no calibration of ours)
   pointer         where the pointer was: a nudge's raw gaze (lessons.jsonl), else the click
                   (screen runs only: on the panel there's no pointer)
-  fuse            70 % our tracker, 30 % SteamVR's (both live)
+  fuse            70 % our tracker, 30 % SteamVR's eyes' mean (both live)
   steamvr+clicks  SteamVR's, less the median error of the last SHIFT_KEEP clicks before
+With the fusion the run started with (start/gazed-fusion.json: gazecal.Fusion, fitted at our
+tracker's last calibration, or by --fit-fusion), what ft-gazed's GAZE_FUSION=on sends:
+  steamvr-affine  SteamVR's eyes' mean with its affine correction
+  steamvr-affine+clicks   ...plus the median of what the run's clicks before said was still off
+  fusion          per sample: ours (its eyes, weighted as ft-gazed does) mixed half and half with
+                  steamvr-affine where both our eyes are found, steamvr-affine alone where we
+                  have one, ours alone where SteamVR has no gaze; the look's median
+The same, fitted here on the other clicks (all runs given), for runs without one:
+  steamvr-affine-loo, fusion-loo     on every other click
+  ours-else-steam-loo                fusion-loo, but ours alone where both our eyes are found
+  steamvr-affine-xrun(+clicks), fusion-xrun(+clicks)   on the other runs' clicks only: a
+                  calibration from another sitting
+  fusion-loo:REPLAY   fusion-loo with our eyes from that replay (FUSE_REPLAYS, below), not
+                  live: a guard's worth with SteamVR covering the eyes it refuses
 Replays of our tracker on its finds (own.jsonl), from the calibration and the shift it had when
 the run started (start/), with ft-eyes' own rules (eyes_model.py), and nudges teaching it when
 they did live (lessons.jsonl):
@@ -30,12 +44,18 @@ they did live (lessons.jsonl):
   edge-guard      nudges past the calibration's dots (by EDGE_MARGIN) teach nothing
   every-click     every click teaches it, not only the nudges
   bridge          one eye lost: the other, plus how far it usually reads from the two together
+  guard-both      eyes_pupil.SizeGuard "both" over the finds (refused ones count as lost)
+  guard-long      SizeGuard "long"
+  no-guard        the finds the live SizeGuard refused (own.jsonl "guard": true) back in
 Each click is scored before anything it teaches. The breakdowns: by scenario, by where the target
 was (edge, corner or inside), by how far from straight ahead you looked, and by the time since
 the last nudge (run.json's last_lesson for the first).
 
 Needs numpy and (for the glint pairs) OpenCV: the tracker's Python, e.g.
   scripts/in-box /opt/frametop/venv/bin/python gaze/bench/compare.py ~/.local/share/frametop/gaze/bench
+
+--fit-fusion OUT fits a gazecal.Fusion on all the clicks given (SteamVR's eyes' mean at each, and
+the target) and writes it to OUT, e.g. ~/.local/state/frametop/gaze/fusion.json for ft-gazed.
 """
 import argparse
 import bisect
@@ -43,6 +63,7 @@ import json
 import math
 import statistics
 import sys
+import time
 from collections import deque
 from pathlib import Path
 
@@ -50,7 +71,9 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "tracker"))
+sys.path.insert(0, str(HERE.parent))
 import eyes_model  # noqa: E402
+from gazecal import EyeWeights, Fusion  # noqa: E402
 
 LOOK = (0.35, 0.05)       # s before a click: as gazebench.py, for runs that don't say
 CLICK_BEFORE = 0.3        # ft-eyes: a click's frames are the 300 ms before it
@@ -63,7 +86,11 @@ EDGE_MARGIN = 2.0         # degrees past the calibration's outermost dots for ed
 BRIDGE_TAU = 2.0          # s: bridge's average of each eye against the two together
 FUSE = 0.7                # fuse: our tracker's share
 SHIFT_KEEP = eyes_model.SHIFT_KEEP
-LIVE = ("own-live", "steamvr", "steamvr-eyes", "pointer", "fuse", "steamvr+clicks")
+LIVE = ("own-live", "steamvr", "steamvr-eyes", "pointer", "fuse", "steamvr+clicks",
+        "steamvr-affine", "steamvr-affine+clicks", "fusion")
+CROSS = ("steamvr-affine-loo", "fusion-loo", "ours-else-steam-loo",
+         "steamvr-affine-xrun", "steamvr-affine-xrun+clicks", "fusion-xrun", "fusion-xrun+clicks")
+FUSE_REPLAYS = ("own-replay", "guard-both", "guard-long")  # fusion-loo:NAME, with that replay's eyes
 REPLAYS = {  # name: Replay options
     "own-replay": {},
     "no-jump": {"jump": None},
@@ -71,6 +98,9 @@ REPLAYS = {  # name: Replay options
     "edge-guard": {"guard": True},
     "every-click": {"teach": "every"},
     "bridge": {"bridge": True},
+    "guard-both": {"size": "both"},
+    "guard-long": {"size": "long"},
+    "no-guard": {"size": "none"},
 }
 ECC_BINS = ((0, 10, "<10°"), (10, 20, "10-20°"), (20, 30, "20-30°"), (30, 999, "30°+"))
 SINCE_BINS = ((0, 30, "<30 s"), (30, 120, "30-120 s"), (120, math.inf, "120 s+"))
@@ -131,6 +161,7 @@ class Run:
         self.samples = sorted(jsonl(self.dir / "gaze.jsonl"), key=lambda s: s.get("t", 0))
         self.ts = [s.get("t", 0) for s in self.samples]
         self.notes = []
+        self.replay_eyes = {}   # replay name: (times, [(left, right) eyes' gazes]) (replays())
         self.lessons = sorted((r for r in jsonl(self.dir / "lessons.jsonl") if "refused" not in r),
                               key=lambda r: r["time"])
         self.panel = self.info.get("display") == "panel"
@@ -232,16 +263,39 @@ class Run:
                 rows.append((src["hy"], src["hp"]))
         return median2(rows)
 
-    def frames(self):
-        """Our tracker's finds, in time order: (t, cam, x, y, glint pair midpoint or None)."""
+    def frames(self, size=None):
+        """Our tracker's finds, in time order: (t, cam, x, y, glint pair midpoint or None, gaze).
+        size: None, the live rules (the finds its SizeGuard refused are out); "none", those back
+        in; or a SizeGuard rule, run here over all of them instead."""
         import eyes_pupil  # OpenCV
+        rows = sorted((r for r in jsonl(self.dir / "own.jsonl") if not r.get("lost") and "x" in r),
+                      key=lambda r: (r["t"], r["cam"]))
+        guard = eyes_pupil.SizeGuard(size) if size not in (None, "none") else None
         out = []
-        for r in jsonl(self.dir / "own.jsonl"):
-            if r.get("lost") or "x" not in r:
+        for r in rows:
+            if size is None and r.get("guard"):
+                continue
+            if guard and not guard.keep(r["cam"], r["t"], r["a"]):
                 continue
             pair = eyes_pupil.glint_pair({"x": r["x"], "y": r["y"], "glints": r.get("glints") or []})
             out.append((r["t"], r["cam"], r["x"], r["y"], eyes_model.pair_mid(pair) if pair else None, r.get("gaze")))
-        out.sort(key=lambda f: (f[0], f[1]))
+        return out
+
+    def fusion_inputs(self, t0, t1, replay=None):
+        """Per sample over [t0, t1]: (our eyes [left, right], SteamVR's left, right), for fusions.
+        Our eyes as published, or as a replay had them then (its newest output, if FRESH)."""
+        out = []
+        if replay:
+            rt, re = self.replay_eyes[replay]
+        for s in self.window(t0, t1):
+            src = s.get("src") or {}
+            if replay:
+                k = bisect.bisect_right(rt, s.get("t", 0)) - 1
+                eyes = list(re[k]) if k >= 0 and s.get("t", 0) - rt[k] < FRESH else [None, None]
+            else:
+                eyes = [tuple(e) if e else None for e in ((src.get("own") or {}).get("eyes") or [None, None])]
+            lr = [(src[n]["hy"], src[n]["hp"]) if "hy" in (src.get(n) or {}) else None for n in ("left", "right")]
+            out.append((eyes, lr[0], lr[1]))
         return out
 
 
@@ -267,6 +321,7 @@ class Replay:
         self.last_t = {0: None, 1: None}
         self.off = {0: None, 1: None}
         self.taught = self.skipped = 0
+        self.out_e = []   # with each output: the eyes' gazes in it, (left, right)
 
     def value(self, e):
         sh = self.shift[e]
@@ -337,6 +392,7 @@ class Replay:
             last_out = t
             out_t.append(latest)
             out_g.append((float(out[0]), float(out[1])))
+            self.out_e.append(tuple(None if k not in use else (float(use[k][0]), float(use[k][1])) for k in (1, 0)))
         return out_t, out_g
 
 
@@ -373,8 +429,8 @@ def replays(run, truths, only):
             shifts = {int(k): v for k, v in st.get("shift", {}).items()}
     except (OSError, ValueError):
         pass
-    frames = run.frames()
-    if not frames:
+    frames = {}
+    if not run.frames():
         run.notes.append("no finds in own.jsonl: no replays")
         return {}
     nudges = [(ls["time"] - run.wall, ls["look_t"], tuple(ls["true"])) for ls in run.lessons
@@ -386,7 +442,12 @@ def replays(run, truths, only):
     for name in want:
         opt = dict(REPLAYS[name])
         teach = every if opt.pop("teach", None) == "every" else nudges
-        t, g = Replay(run, frames, cal, shifts, status, teach, box=box, **opt)()
+        size = opt.pop("size", None)
+        if size not in frames:
+            frames[size] = run.frames(size)
+        replay = Replay(run, frames[size], cal, shifts, status, teach, box=box, **opt)
+        t, g = replay()
+        run.replay_eyes[name] = (t, replay.out_e)
 
         def look(t0, t1, t=t, g=g):
             return median2(g[bisect.bisect_left(t, t0):bisect.bisect_right(t, t1)])
@@ -394,26 +455,57 @@ def replays(run, truths, only):
     return out
 
 
+def fuse_look(inputs, weights, fusion, share=None, clicks=False):
+    """Fusion.combine per sample (fusion_inputs), ours combined as ft-gazed does; the look's median."""
+    out = []
+    for eyes, left, right in inputs:
+        own = weights.combine(eyes)
+        out.append(fusion.combine(own, sum(e is not None for e in eyes), fusion.steam_gaze(left, right, clicks), share))
+    return median2(out)
+
+
+def own_weights(run):
+    """ft-gazed's weights for our tracker's eyes when the run started (its lessons' misses)."""
+    try:
+        misses = json.loads((run.dir / "start" / "gazed-pointer-lessons.json").read_text())["misses"]["own"]
+    except (OSError, ValueError, KeyError, TypeError):
+        misses = None
+    return EyeWeights(((run.info["start"] or {}).get("gazed") or {}).get("eye_bias", "auto"), misses)
+
+
 def score(run, only=None):
     """A record per click: where it was, and each technique's error (degrees, or None)."""
     truths = {id(r): run.truth(r) for r in run.trials}
     rep = replays(run, truths, only)
     last_lesson = run.info.get("last_lesson")
+    weights = own_weights(run)
+    fusion = Fusion.load(run.dir / "start" / "gazed-fusion.json")
+    if fusion and not fusion.ready():
+        fusion = None
+    if fusion:
+        fusion.wear = run.dir.name
     recs, steam_offsets = [], []
     for r in run.trials:
         truth = truths[id(r)]
         t0, t1 = run.look_window(r)
         own, steam = run.source("own", t0, t1), run.source("mmap1", t0, t1)
         left, right = run.source("left", t0, t1), run.source("right", t0, t1)
-        g = {"own-live": own, "steamvr": steam,
-             "steamvr-eyes": ((left[0] + right[0]) / 2, (left[1] + right[1]) / 2) if left and right else None}
+        mean = Fusion.mean(left, right)
+        inputs = run.fusion_inputs(t0, t1)
+        g = {"own-live": own, "steamvr": steam, "steamvr-eyes": mean}
         ls = r.get("lesson")
         if ls:
             g["pointer"] = tuple(ls["raw"])
         elif not run.panel:
             c = r["click"]
             g["pointer"] = run.direction(run.window(t0, t1), c["x"] * run.sx, c["y"] * run.sy)
-        g["fuse"] = (tuple(FUSE * a + (1 - FUSE) * b for a, b in zip(own, steam)) if own and steam else None)
+        g["fuse"] = (tuple(FUSE * a + (1 - FUSE) * b for a, b in zip(own, mean)) if own and mean else None)
+        if fusion:
+            g["steamvr-affine"] = fusion.steam_gaze(left, right, clicks=False)
+            g["steamvr-affine+clicks"] = fusion.steam_gaze(left, right)
+            g["fusion"] = fuse_look(inputs, weights, fusion)
+            if truth:
+                fusion.click(left, right, *truth)
         if steam and steam_offsets:
             keep = steam_offsets[-SHIFT_KEEP:]
             g["steamvr+clicks"] = (steam[0] + statistics.median(o[0] for o in keep),
@@ -433,7 +525,9 @@ def score(run, only=None):
                "where": ("corner" if edges == 2 else "edge" if edges else "inside"),
                "truth": truth, "ecc": math.hypot(*truth) if truth else None,
                "since": None if last is None else wall - last, "nudged": bool(ls),
-               "err": {k: angle(val, truth) for k, val in g.items() if not only or k in only}}
+               "err": {k: angle(val, truth) for k, val in g.items() if not only or k in only},
+               "_fz": {"left": left, "right": right, "mean": mean, "inputs": inputs, "weights": weights,
+                       "replays": {n: run.fusion_inputs(t0, t1, n) for n in FUSE_REPLAYS if n in run.replay_eyes}}}
         if ls:
             c = r["click"]
             cd = run.direction(run.window(t0, t1), c["x"] * run.sx, c["y"] * run.sy)
@@ -442,6 +536,54 @@ def score(run, only=None):
             rec["replay_vs_live"] = angle(g["own-replay"], own)
         recs.append(rec)
     return recs
+
+
+def cross(recs, only=None):
+    """CROSS: SteamVR's affine and the fusion fitted on the other clicks (every other one: -loo;
+    the other runs' only: -xrun), each record's errors with them."""
+    want = [n for n in CROSS if not only or n in only]
+    have = [r for r in recs if r["truth"] and r["_fz"]["mean"]]
+    if not want or not have:
+        return
+    pts = {id(r): (*r["_fz"]["mean"], *r["truth"]) for r in have}
+    xrun = {}
+    for name in dict.fromkeys(r["run"] for r in recs):
+        xrun[name] = Fusion()
+        xrun[name].fit([pts[id(r)] for r in have if r["run"] != name])
+        xrun[name].wear = name
+    for r in recs:
+        fz, g = r["_fz"], {}
+        loo = Fusion()
+        loo.fit([pts[id(q)] for q in have if q is not r])
+        if loo.ready():
+            g["steamvr-affine-loo"] = loo.steam_gaze(fz["left"], fz["right"])
+            g["fusion-loo"] = fuse_look(fz["inputs"], fz["weights"], loo)
+            g["ours-else-steam-loo"] = fuse_look(fz["inputs"], fz["weights"], loo, share=1.0)
+            for name, inputs in fz["replays"].items():
+                g[f"fusion-loo:{name}"] = fuse_look(inputs, fz["weights"], loo)
+        x = xrun[r["run"]]
+        if x.ready():
+            g["steamvr-affine-xrun"] = x.steam_gaze(fz["left"], fz["right"], clicks=False)
+            g["steamvr-affine-xrun+clicks"] = x.steam_gaze(fz["left"], fz["right"])
+            g["fusion-xrun"] = fuse_look(fz["inputs"], fz["weights"], x)
+            g["fusion-xrun+clicks"] = fuse_look(fz["inputs"], fz["weights"], x, clicks=True)
+            if r["truth"]:
+                x.click(fz["left"], fz["right"], *r["truth"])
+        for k, v in g.items():
+            if not only or k in only:
+                r["err"][k] = angle(v, r["truth"])
+
+
+def fit_fusion(recs, out, runs):
+    """A Fusion fitted on all the clicks, written to out."""
+    pts = [(*r["_fz"]["mean"], *r["truth"]) for r in recs if r["truth"] and r["_fz"]["mean"]]
+    f = Fusion()
+    f.fit(pts, {"how": "bench", "runs": runs, "made": time.strftime("%Y-%m-%d %H:%M:%S")})
+    if not f.ready():
+        sys.exit(f"--fit-fusion: only {len(pts)} clicks with SteamVR's two eyes (need {Fusion.MIN})")
+    f.save(out)
+    print(f"\nfusion fitted on {len(pts)} clicks from {len(runs)} runs (SteamVR's affine leaves "
+          f"{statistics.median(f.misses()):.2f}° at the median on them): {out}")
 
 
 def bin_of(value, bins):
@@ -474,6 +616,7 @@ def main():
     ap.add_argument("--per-click", action="store_true", help="a line per click")
     ap.add_argument("--json", help="write the per-click records here")
     ap.add_argument("--only", help="comma-separated techniques")
+    ap.add_argument("--fit-fusion", metavar="OUT", help="fit a gazecal.Fusion on all the clicks, write it here")
     a = ap.parse_args()
     only = set(a.only.split(",")) if a.only else None
     dirs = []
@@ -488,7 +631,9 @@ def main():
               + "".join(f"; {n}" for n in run.notes))
     if not recs:
         sys.exit("no clicks")
-    names = [n for n in LIVE + tuple(REPLAYS) if any(r["err"].get(n) is not None for r in recs)]
+    cross(recs, only)
+    names = [n for n in LIVE + CROSS + tuple(f"fusion-loo:{n}" for n in FUSE_REPLAYS) + tuple(REPLAYS)
+             if any(r["err"].get(n) is not None for r in recs)]
     print()
     w = max(len(n) for n in names) + 2
     print(f"{'':<{w}}{'median':>8}{'p90':>8}{'mean':>8}{'n':>6}")
@@ -515,8 +660,10 @@ def main():
             print(f"{r['run']} #{r['i']:<3} {r['where']:<6} ecc {r['ecc'] or 0:5.1f}°"
                   + (" nudged" if r["nudged"] else "       ")
                   + "".join(f"  {n} {r['err'][n]:.2f}" for n in names if r["err"].get(n) is not None))
+    if a.fit_fusion:
+        fit_fusion(recs, a.fit_fusion, [d.name for d in dirs])
     if a.json:
-        Path(a.json).write_text(json.dumps(recs, indent=1))
+        Path(a.json).write_text(json.dumps([{k: v for k, v in r.items() if k != "_fz"} for r in recs], indent=1))
 
 
 if __name__ == "__main__":

@@ -128,6 +128,77 @@ class PupilSize:
             self.finds.append((t, p['a']))
 
 
+GUARD_RULES = ("both", "long", "off")
+GUARD_LONG = 10.0   # s of kept finds an eye's usual size comes from
+GUARD_FINDS = 20    # and at least this many of them
+GUARD_BOTH = 0.75   # "both": a find under this share of the other eye's ratio to its usual size
+GUARD_ALONE = 0.6   # without the other eye just now (or "long"): under this share of its usual size
+GUARD_FRESH = 0.05  # s: the other eye's last find counts this long
+GUARD_RESET = 1.0   # s of refusals in a row: the pupil really did change, its usual size starts over
+
+
+class SizeGuard:
+    """Both eyes' usual pupil sizes, for the misfinds PupilSize lets through (2026-10-17, two
+    Gaze Bench runs): a dark spot two thirds of the pupil's size, held for a few frames, so the
+    last half second's median follows it in. Here each eye's usual size is the median long
+    semi-axis of its kept finds over the last GUARD_LONG s, and a find is judged by its ratio to
+    that. The pupils narrow and widen together in light (the consensual reflex), so with
+    "both" a find is refused when its ratio is under GUARD_BOTH of the other eye's latest
+    (capped at 1): light shrinks both, a misfind one. On those runs (8884 finds) good finds sat
+    at 0.84 of the usual size or more 95 % of the time, the right eye's misfinds at a median of
+    0.77 and a quarter of them under 0.52. "long" is the ratio alone, under GUARD_ALONE, which
+    is also the rule while the other eye isn't seen. A refused find counts as not found. If
+    refusals go on for GUARD_RESET s, the eye's usual size starts over, so a pupil that did
+    change (light with one eye lost) is taken again."""
+
+    def __init__(self, rule="both"):
+        self.rule = rule if rule in GUARD_RULES else "both"
+        self.finds = {0: deque(), 1: deque()}   # (t, a) of kept finds
+        self.usual = {0: None, 1: None}         # the median, recomputed every few finds
+        self.since = {0: 0, 1: 0}
+        self.last = {0: None, 1: None}          # (t, ratio) of each eye's last kept find
+        self.refusing = {0: None, 1: None}      # when the current run of refusals began
+        self.refused = {0: 0, 1: 0}
+
+    def ratio(self, e, t, a):
+        h = self.finds[e]
+        while h and h[0][0] < t - GUARD_LONG:
+            h.popleft()
+            self.usual[e] = None
+        if len(h) < GUARD_FINDS:
+            return None
+        if self.usual[e] is None or self.since[e] >= 10:
+            self.usual[e], self.since[e] = float(np.median([x for _, x in h])), 0
+        return a / self.usual[e]
+
+    def keep(self, e, t, a):
+        """Is eye e's find at time t, long semi-axis a px, its pupil? (It learns from the kept ones.)"""
+        if self.rule == "off":
+            return True
+        r = self.ratio(e, t, a)
+        ok = True
+        if r is not None:
+            o = self.last[1 - e]
+            if self.rule == "both" and o is not None and t - o[0] <= GUARD_FRESH:
+                ok = r >= GUARD_BOTH * min(1.0, o[1])
+            else:
+                ok = r >= GUARD_ALONE
+        if not ok:
+            if self.refusing[e] is None:
+                self.refusing[e] = t
+            elif t - self.refusing[e] > GUARD_RESET:
+                self.finds[e].clear()
+                self.usual[e], ok, r = None, True, None
+        if not ok:
+            self.refused[e] += 1
+            return False
+        self.refusing[e] = None
+        self.finds[e].append((t, a))
+        self.since[e] += 1
+        self.last[e] = (t, 1.0 if r is None else r)
+        return True
+
+
 GLINT_RING = 140   # a glint sits on dark iris or pupil: its surroundings are below this
 GLINT_PAIR = (5, 45)  # the two LEDs' reflections: this far apart, in pixels, mostly vertical
 

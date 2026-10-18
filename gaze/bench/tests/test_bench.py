@@ -332,7 +332,7 @@ class RunTest(unittest.TestCase):
             self.assertAlmostEqual(r["truth"]["pitch"], target[1], places=3)
             q = r["quick"]
             self.assertAlmostEqual(q["own"]["deg"], gazebench.angle(OWN, target), places=1)
-            self.assertAlmostEqual(q["mmap1"]["deg"], gazebench.angle(STEAMVR, target), places=1)
+            self.assertAlmostEqual(q["steam-eyes"]["deg"], gazebench.angle(STEAMVR, target), places=1)
         # The button's down showed the dot done before the press counted
         self.assertTrue(any(c.startswith("dot ") and c.endswith(" done") for c in self.panel_said()))
         self.assertGreater(len((run / "gaze.jsonl").read_text().splitlines()), 50)

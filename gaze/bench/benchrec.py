@@ -18,8 +18,9 @@ A run is one scenario played once. Its folder, under BASE:
                     nudge the pointer sent, its raw gaze and the true direction
   eyes-clicks.jsonl our tracker's clicks over the run (clicks.jsonl): what each nudge taught it
   start/            copies of our tracker's calibration, its dots and its state (the shift
-                    clicks taught it), and the gaze service's calibration and lessons, as they
-                    were when the run started, so a replay starts where the live tracker did
+                    clicks taught it), and the gaze service's calibration, lessons and fusion
+                    (gazed-fusion.json), as they were when the run started, so a replay starts
+                    where the live tracker did
   images/           both eye cameras, zstd chunks (gaze/rec/eyerec.py), unless images are off
 
 Eye images identify a person: they stay on this headset (and the maintainer's own training
@@ -276,7 +277,7 @@ class Run:
         for name in ("calibration.json", "calibration-dots.jsonl", "state.json"):
             if (estate / name).exists():
                 shutil.copy2(estate / name, self.dir / "start" / ("eyes-" + name))
-        for name in ("calibration.json", "pointer-lessons.json"):
+        for name in ("calibration.json", "pointer-lessons.json", "fusion.json"):
             if (STATE / name).exists():
                 shutil.copy2(STATE / name, self.dir / "start" / ("gazed-" + name))
         self.info.update(scenario=self.scenario, start=st, conf=conf_lines(), eyes_state=str(estate),

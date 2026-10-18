@@ -114,5 +114,54 @@ class PupilTest(unittest.TestCase):
         self.assertEqual(size.smallest(10 / 90 + pupil.SIZE_WINDOW + 0.2), 0.0)  # all of them too old
 
 
+def warm(guard, t=0.0, a=(20.0, 20.0)):
+    """Both eyes' usual sizes: GUARD_FINDS finds each, 90 Hz, from t. Returns the next t."""
+    for i in range(pupil.GUARD_FINDS):
+        for e in (0, 1):
+            assert guard.keep(e, t + i / 90, a[e])
+    return t + pupil.GUARD_FINDS / 90
+
+
+class SizeGuardTest(unittest.TestCase):
+    def test_a_misfind_in_one_eye(self):
+        g = pupil.SizeGuard("both")
+        t = warm(g)
+        self.assertTrue(g.keep(1, t, 19.0))
+        self.assertFalse(g.keep(0, t + 0.001, 13.0))   # 0.65 of usual, the other eye at 0.95
+        self.assertTrue(g.keep(0, t + 1 / 90, 19.5))
+        self.assertEqual(g.refused, {0: 1, 1: 0})
+
+    def test_light_shrinks_both(self):
+        """Both pupils down to under half their usual size: kept with "both", refused with "long"."""
+        for rule, kept in (("both", True), ("long", False)):
+            g = pupil.SizeGuard(rule)
+            t = warm(g)
+            ok = []
+            for i in range(20):   # narrowing over 20 frames, both eyes alike
+                a = 20.0 * (1 - 0.03 * i)
+                ok += [g.keep(0, t, a), g.keep(1, t + 0.001, a)]
+                t += 1 / 90
+            with self.subTest(rule=rule):
+                self.assertEqual(all(ok), kept)
+
+    def test_other_eye_not_seen(self):
+        g = pupil.SizeGuard("both")
+        t = warm(g) + 1.0   # the other eye's last find is old
+        self.assertTrue(g.keep(0, t, 13.0))    # 0.65: over GUARD_ALONE
+        self.assertFalse(g.keep(0, t + 0.01, 11.0))
+
+    def test_refusals_going_on_start_over(self):
+        g = pupil.SizeGuard("long")
+        t = warm(g)
+        ok = [g.keep(0, t + i / 90, 10.0) for i in range(int(pupil.GUARD_RESET * 90) + 5)]
+        self.assertFalse(ok[0])
+        self.assertTrue(ok[-1])        # taken again after GUARD_RESET s
+        self.assertTrue(g.keep(0, t + 2.0, 10.0))
+
+    def test_off_and_unknown(self):
+        self.assertTrue(pupil.SizeGuard("off").keep(0, 0.0, 1.0))
+        self.assertEqual(pupil.SizeGuard("nonsense").rule, "both")
+
+
 if __name__ == "__main__":
     unittest.main()

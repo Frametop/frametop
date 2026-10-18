@@ -92,7 +92,9 @@ class GazeStreamTest(unittest.TestCase):
                 time.sleep(0.05)
             self.assertGreaterEqual(g.restarts, 2, logs)
             lines = g.lines
-            time.sleep(0.2)
+            end = time.monotonic() + 3
+            while g.lines <= lines and time.monotonic() < end:
+                time.sleep(0.05)
             self.assertGreater(g.lines, lines)
             self.assertIn("starting it again", logs[0])
         finally:

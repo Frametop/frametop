@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """A stand-in for ft-gaze in the bench's tests: 90 lines a second, the head facing the middle of
 a 1000 x 800 screen (number 2) at 20 px per degree, our tracker 0.5 degrees right of straight
-ahead and SteamVR 1 degree up. Quits when stdin closes, as ft-gaze --watch-stdin."""
+ahead and SteamVR 1 degree up. Quits when stdin closes, as ft-gaze --watch-stdin, or after
+$FAKE_GAZE_QUIT_AFTER seconds."""
 import json
 import os
 import sys
@@ -22,8 +23,10 @@ def watch():
 
 
 threading.Thread(target=watch, daemon=True).start()
+quit_after = float(os.environ.get("FAKE_GAZE_QUIT_AFTER", "inf"))   # s: then exit, as when SteamVR quits
+start = time.monotonic()
 n = 0
-while True:
+while time.monotonic() - start < quit_after:
     t = time.clock_gettime(time.CLOCK_MONOTONIC_RAW)
     own = {"hy": -0.5, "hp": 0.0, "hit": hit(-0.5, 0.0), "eyes": [[-0.5, 0.0], [-0.5, 0.0]],
            "ehit": [hit(-0.5, 0.0), hit(-0.5, 0.0)]}

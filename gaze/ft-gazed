@@ -112,8 +112,8 @@ Control socket: abstract unix datagram "@ft_gazed":
   fivecheck                        the five-dot check now (it otherwise follows a quick check
                                    that didn't fix the tracker)
   calaccept | calquit              from the pointer helper while the panel is up: take this dot
-                                   now (a left click, Meta+J, or a gaze precision or gaze drag
-                                   press) | close it (a right click, Meta+K)
+                                   now (a left click, Enter, a pinch, Meta+J, or a gaze
+                                   precision or gaze drag press) | close it (a right click, Meta+K)
 
 Options: --source action|mmap1|mmap2 (the older one-source path with that source, whatever
 the settings say; set 2 was a little quieter in the probe, but loses the pointer whenever

@@ -227,9 +227,13 @@
 // drags again from there. Without gaze mode they work from wherever the pointer is.
 //   The gaze calibration panel (gaze/panel/ft-gazepanel, run by the gaze service): while
 // ft-gazed says it's up ("calpanel 1", renewed every second; it lapses 3 s after the last),
-// the dot hides and a press answers the panel instead of clicking: a left click, gaze_left, or
-// a gaze_precision or gaze_drag press sends "calaccept" to @ft_gazed (take this dot now), a right
-// click or gaze_right "calquit" (calpanel.h).
+// the dot hides and a press answers the panel instead of clicking: a left click, Enter (the
+// relay's "calkey 1"), gaze_left, a gaze_precision or gaze_drag press, or an index pinch with
+// hand tracking (with or without POINTER_HANDS: a pinch's begin, so a tap and a held pinch are
+// both one) sends "calaccept" to @ft_gazed (take this dot now), a right click or gaze_right
+// "calquit" (calpanel.h). Another program's head-locked panel can take them the same way
+// ("calpanel 1 NAME", answered on @NAME: the gaze bench). The relay hears "calpanel 1|0" from
+// here, so it knows when Enter is the panel's and not the desktop's.
 //   POINTER_ROLE (treadmill, the default, or right, left, stylus): the role our device takes while
 // connected. Treadmill is no hand, so the real controllers keep both hand roles and a controller
 // can be used beside the pointer (or a bare hand's ray). The driver must hint it from the start
@@ -1507,10 +1511,12 @@ int main() {
     bool pressRight = false;
     std::string heldButton = "trigger";
     bool confirmLesson = false;  // a keyboard click's quick tap: a lesson with no correction (see the top)
-    // The gaze calibration panel is up until then ("calpanel 1"; see the top); calOpened: it just
-    // came up, so a press in progress ends without a click.
+    // The gaze calibration panel is up until then ("calpanel 1"; see the top), and its answers go
+    // to calOwner; calOpened: it just came up, so a press in progress ends without a click.
     Clock::time_point calPanelUntil{};
     bool calOpened = false;
+    std::string calOwner = "ft_gazed";
+    CalPinch calPinch;
     auto pressLeft = [&] {
         // ft-screens sends the keyboard to the panel clicked last; it sees clicks on
         // its own screens, but only we know when one lands on another panel.
@@ -1934,18 +1940,24 @@ int main() {
             }
             // The gaze calibration panel (see the top): presses answer it instead of clicking.
             {
-                int on;
-                if (std::sscanf(buf, "calpanel %d", &on) == 1) {
+                bool on;
+                std::string owner;
+                if (calPanelClaim(buf, on, owner)) {
                     const bool was = Clock::now() < calPanelUntil;
-                    calPanelUntil = on ? Clock::now() + std::chrono::seconds(3) : Clock::time_point{};
-                    if (on && !was) calOpened = true;
+                    if (on) {
+                        calPanelUntil = Clock::now() + std::chrono::seconds(3), calOwner = owner;
+                        if (!was) calOpened = true, calPinch.Start();
+                    } else if (owner == calOwner) {  // (another's panel closing leaves this one up)
+                        calPanelUntil = Clock::time_point{};
+                    }
+                    SendTo(out, "frametop_relay", Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");
                     continue;
                 }
             }
             if (Clock::now() < calPanelUntil) {
                 const CalPanelAnswer answer = calPanelAnswer(buf);
                 if (answer == CalPanelAnswer::Accept || answer == CalPanelAnswer::Quit) {
-                    SendTo(out, "ft_gazed", answer == CalPanelAnswer::Accept ? "calaccept" : "calquit");
+                    SendTo(out, calOwner.c_str(), answer == CalPanelAnswer::Accept ? "calaccept" : "calquit");
                     continue;
                 }
                 if (answer == CalPanelAnswer::Ignore)
@@ -2890,6 +2902,32 @@ int main() {
         fh_gestures_t hg;
         const bool handOk = handsOn && handFile.Read(hg);
         if (handOk) handOkAt = tnow;
+        // The gaze calibration panel (see the top): an index pinch's begin takes the dot, with or
+        // without POINTER_HANDS, as long as a pinch could click now (not over a VR game, not by a
+        // hand typing holds back or one at a controller). Every gesture is the panel's meanwhile
+        // (below), so nothing else starts.
+        if (tnow < calPanelUntil) {
+            fh_gestures_t cg;
+            bool calHands = handOk;
+            if (handOk) cg = hg;
+            else if (!handsOn) calHands = handFile.Read(cg);
+            const int s = calHands ? calPinch.Began(cg, handFile.opens) : -1;
+            if (s >= 0) {
+                const char *why = nullptr;
+                vr::HmdMatrix34_t head;
+                // (handsAllowed and the arbiter keep up only with hand interaction on)
+                if (!(handsTrack ? handsAllowed : !headsetOff && !inGame)) why = "hands not allowed: a VR game, or the headset off";
+                else if (const char *t = typist.Why(s, secsOf(tnow))) why = t;
+                else if (arbiter.IsController(s)) why = "at a controller";
+                else if (poses.At(cg.pinch[s].begin_ns, head)) {
+                    const Vec3 at = hin::ToRoom(head, cg.pinch[s].begin_point);
+                    if (arbiter.NearController({at.x, at.y, at.z})) why = "at a controller";
+                }
+                if (!why) SendTo(out, calOwner.c_str(), "calaccept");
+                pinchLog(s, 0, why ? std::string("ignored by the gaze calibration panel (") + why + ")"
+                                   : std::string("took the gaze calibration panel's dot"));
+            }
+        }
         const char *const kLostPinch = "ft-hands lost the hand, or a grip took the pinch";
         // A ray hold (see "Hand ray" at the top): the pinch's press goes out once the laser claim
         // has landed; a middle pinch is a right click (a tap) or scrolling (held and moved).
@@ -3190,6 +3228,7 @@ int main() {
                     for (PendingBegin &p : pendingBegins)
                         if (p.side == s && p.kind == k && ended) p.ended = true, p.lost = lost;
                     if (!began) continue;
+                    if (tnow < calPanelUntil) continue;   // the gaze calibration panel's (above): no gesture
                     if (k != 1 && hold.src == Src::Ray && hold.rayThree && hold.side == s) continue;   // its other finger
                     if (!allowed) {
                         if (k != 1) pinchLog(s, k, "ignored (hands not allowed: a VR game, or the headset off)");
@@ -3349,6 +3388,7 @@ int main() {
             }
             const PendingBegin q = p;
             pendingBegins.erase(pendingBegins.begin() + long(i));
+            if (tnow < calPanelUntil) continue;   // the gaze calibration panel came up meanwhile
             if (reported && nearClaim[q.side]) {
                 if (q.kind != 1) pinchLog(q.side, q.kind, "left to ft-screens (the hand is near its panel)");
                 else if (debug) std::printf("hand %s grip left to ft-screens (near)\n", q.side ? "right" : "left");

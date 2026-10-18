@@ -111,7 +111,8 @@ Window {
                     wrapMode: Text.Wrap
                     color: win.dim
                     font.pixelSize: 13
-                    text: "The headset button: press = marked, two presses = back one, hold = end. "
+                    text: "The headset button: press = marked, two presses = back one, hold = end. A left click, "
+                        + "Enter or an index pinch marks too; a right click ends. "
                         + "Here: Space marks, Backspace goes back one, S skips, Esc ends."
                 }
                 Button { text: "Quit"; focusPolicy: Qt.NoFocus; onClicked: Qt.quit() }
@@ -151,7 +152,8 @@ Window {
             wrapMode: Text.Wrap
             color: win.dim
             font.pixelSize: 13
-            text: "The headset button: press = marked, two presses = back one, hold = end. "
+            text: "The headset button: press = marked, two presses = back one, hold = end. A left click, "
+                + "Enter or an index pinch marks too; a right click ends. "
                 + "Here: Space marks, Backspace goes back one, S skips, Esc ends."
         }
         RowLayout {

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The gaze bench without a headset: the scenarios' targets, bench.qml against gazebench.Bench,
 and whole runs recorded with stand-ins for ft-gaze (fake_ft_gaze.py), the panel
-(fake_ft_gazepanel.py), the headset button (a FIFO), our tracker and the gaze service (their
-sockets), into a temporary folder. Needs PySide6 (the dev container); the parts that need it are
+(fake_ft_gazepanel.py), the headset button (a FIFO), our tracker, the gaze service and the pointer
+helper (their sockets), into a temporary folder. Needs PySide6 (the dev container); the parts that need it are
 skipped without it.
 
   scripts/in-box python3 gaze/bench/tests/test_bench.py
@@ -26,6 +26,7 @@ sys.path.insert(0, str(BENCH.parent.parent))
 os.environ["FT_BENCH_EYES_SOCKET"] = f"ft_eyes_benchtest_{os.getpid()}"
 os.environ["FT_BENCH_GAZED_SOCKET"] = f"ft_gazed_benchtest_{os.getpid()}"
 os.environ["FT_BENCH_PANEL_SOCKET"] = f"ft_benchpanel_test_{os.getpid()}"
+os.environ["FT_BENCH_HELPER_SOCKET"] = f"ft_pointer_helper_benchtest_{os.getpid()}"   # (not the live helper)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import benchrec  # noqa: E402
 from recorder.button import EV_KEY, INPUT_EVENT, KEY_SELECT  # noqa: E402
@@ -214,12 +215,14 @@ class RunTest(unittest.TestCase):
 
         self.eyes = FakeService(benchrec.EYES_SOCK, eyes)
         self.gazed = FakeService(benchrec.GAZED_SOCK, gazed)
+        self.helper = FakeService(os.environ["FT_BENCH_HELPER_SOCKET"], lambda text: None)
 
     def tearDown(self):
         for k, v in self.saved.items():
             setattr(benchrec, k, v)
         self.eyes.stop()
         self.gazed.stop()
+        self.helper.stop()
         os.close(self.button)
         self.tmp.cleanup()
 
@@ -333,6 +336,49 @@ class RunTest(unittest.TestCase):
         # The button's down showed the dot done before the press counted
         self.assertTrue(any(c.startswith("dot ") and c.endswith(" done") for c in self.panel_said()))
         self.assertGreater(len((run / "gaze.jsonl").read_text().splitlines()), 50)
+
+    def answer(self, bench, text):
+        """The pointer helper's answer to the bench's panel claim."""
+        c = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        c.sendto(text.encode(), "\0" + bench.claim_name)
+        c.close()
+
+    def test_helper(self):
+        """The pointer helper's calibration panel: claimed while a run or its summary shows, renewed;
+        its calaccept starts, marks (at its arrival) and closes, calquit ends; then it's let go."""
+        base = Path(self.tmp.name) / "runs"
+        bench = self.bench(base)
+        claim, release = f"calpanel 1 {bench.claim_name}", f"calpanel 0 {bench.claim_name}"
+        try:
+            self.wait(lambda: False, 0.2)
+            self.assertEqual(self.helper.heard, [], "no claim before a run")
+            bench.start("warmup")
+            self.assertTrue(self.wait(lambda: claim in self.helper.heard))
+            self.assertTrue(self.wait(lambda: self.helper.heard.count(claim) >= 2, 2.5), self.helper.heard)
+            self.answer(bench, "calaccept")             # the intro: starts it
+            self.assertTrue(self.wait(lambda: bench.phase == "target"))
+            self.wait(lambda: False, 0.45)
+            sent = benchrec.raw_now()
+            self.answer(bench, "calaccept")
+            self.assertTrue(self.wait(lambda: len(bench.results) == 1))
+            self.assertEqual(bench.results[0]["click"]["by"], "helper")
+            self.assertLess(abs(bench.results[0]["click"]["t"] - sent), 0.1)
+            self.answer(bench, "calquit")                # ends it
+            self.assertTrue(self.wait(lambda: bench.page == "done"))
+            self.assertIn("ended early", bench.summary)
+            self.assertNotIn(release, self.helper.heard, "the summary still shows")
+            self.answer(bench, "calaccept")             # closes the summary
+            self.assertTrue(self.wait(lambda: self.panel_said()[-1] == "hide"))
+            self.assertTrue(self.wait(lambda: self.helper.heard[-1] == release), self.helper.heard[-3:])
+            n = len(self.helper.heard)
+            self.answer(bench, "calaccept")             # late: nothing
+            self.wait(lambda: False, 1.3)
+            self.assertEqual(len(self.helper.heard), n, "no claim once the panel is gone")
+            self.assertIsNone(bench.run)
+            run = next(base.iterdir())
+            self.assertTrue(self.wait(lambda: "end" in json.loads((run / "run.json").read_text())))
+        finally:
+            bench.shutdown()
 
     def test_hold(self):
         """Hold at the edges: a press before the ring fills doesn't count; holding the button ends it."""

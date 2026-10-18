@@ -90,7 +90,10 @@ behind the panel), and an answer over EYES_GONE closed the calibration as the he
 
 What a capture teaches:
   our tracker   quick and five: a click ("click T YAW PITCH", like a pointer lesson); full:
-                calib-start, a calib-point for each dot, calib-fit (its calibration)
+                calib-start, a calib-point for each dot, calib-fit (its calibration); and
+                SteamVR's two eyes at each dot ft-eyes took, where SteamVR saw both: after the
+                fit, SteamVR's affine for ft-gazed's fusion (gazecal.Fusion) is fitted on
+                them and saved to fusion.json (kept as it was with under Fusion.MIN of them)
   SteamVR's     quick and five: a lesson for each eye, like the pointer's; full: each source's
                 calibration fitted from the dots (gazecal.Correction, the probe's way), saved
                 to calibration.json, and the lessons start over on top of it
@@ -112,7 +115,7 @@ from pathlib import Path
 
 import fitcoach
 from fitcheck import MIN_REGION, FitCheck, wrap
-from gazecal import DEFAULT_MODEL, EYE_LOST, STATE, steady_samples
+from gazecal import DEFAULT_MODEL, EYE_LOST, FUSION, STATE, Fusion, steady_samples
 
 REPO = Path(__file__).resolve().parents[1]
 PANEL_PROG = REPO / "gaze" / "build" / "ft-gazepanel"
@@ -583,7 +586,7 @@ class Checks:
         self.check = {"kind": kind, "reason": reason, "own": own, "dots": check_dots(kind, own), "i": 0,
                       "started": now, "shown": now, "run": [], "accept": False, "done_at": None, "tries": 0,
                       "skipped": 0, "captured": 0, "points": {}, "reasons": {}, "fit_reasons": set(), "note": "",
-                      "blind": blind}
+                      "blind": blind, "fusion": []}
         log(f"{kind} check: {reason}" + (" (our tracker's first: no gaze yet, so each click takes the look "
                                          "up to it)" if blind else ""))
         self.note_until = None   # the check's panel replaces the slip note
@@ -962,6 +965,18 @@ class Checks:
             miss = [math.hypot(yaw - e[0], pitch - e[1]) if e else None for e in eyes]
             rec.update(eyes=eyes, miss=miss)
             t0, t1 = samples[0]["t"], samples[-1]["t"]
+            if c["kind"] == "full" and svc.one_eye is None:
+                # SteamVR's eyes at the dot too, for the fusion (finish): each one's median over
+                # the steady samples, as its own calibration takes them.
+                steady = steady_samples(samples)
+                lr = []
+                for name in ("left", "right"):
+                    pts = [(smp["src"][name]["hy"], smp["src"][name]["hp"]) for smp in steady
+                           if "hy" in (smp["src"].get(name) or {})]
+                    lr.append((statistics.median(p[0] for p in pts), statistics.median(p[1] for p in pts))
+                              if len(pts) >= 15 else None)
+                if all(lr):
+                    rec["steam"] = lr
             if c["kind"] == "full":
                 # ft-eyes checks the pupils held still: its answer takes the dot or not (point_done).
                 # The ring shows it full meanwhile, so the click is seen to have landed.
@@ -1031,6 +1046,8 @@ class Checks:
         ok = reply.startswith("ok")
         if ok:
             self.svc.weights["own"].add(miss)
+            if rec.get("steam"):
+                self.check["fusion"].append((*Fusion.mean(*rec["steam"]), *rec["true"]))
         self.captured(rec, ok)
 
     def captured(self, rec, ok):
@@ -1117,6 +1134,8 @@ class Checks:
         if c["own"]:
             def fitted(reply):
                 log(f"calibration ({c['captured']} of {n} dots): our tracker says {reply or 'nothing'}")
+                if reply.startswith("ok"):
+                    self.fit_fusion(c["fusion"])
                 self.close()
 
             self.to_panel("text Saving the calibration")
@@ -1140,6 +1159,22 @@ class Checks:
             svc.refit()
             log(f"calibration ({c['captured']} of {n} dots): {mode}, saved")
         self.close()
+
+    def fit_fusion(self, pts):
+        """SteamVR's affine for ft-gazed's fusion, from its eyes at the dots ours took."""
+        if len(pts) < Fusion.MIN:
+            log(f"fusion: SteamVR saw both eyes at only {len(pts)} of the dots; {FUSION.name} stays as it was")
+            return
+        f = Fusion()
+        f.fit(pts, {"how": "calibration", "made": time.strftime("%Y-%m-%d %H:%M:%S"), "wear": self.svc.steam.worn()})
+        try:
+            f.save(FUSION)
+        except OSError as e:
+            log(f"fusion: couldn't save {FUSION}: {e}")
+            return
+        self.svc.load_fusion()
+        log(f"fusion: SteamVR's affine from {len(pts)} dots, {statistics.median(f.misses()):.2f} deg left at the "
+            "median, saved")
 
     def close(self, why=None):
         if not self.check:

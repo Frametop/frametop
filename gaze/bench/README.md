@@ -55,10 +55,15 @@ Give it runs, or the folder they're in. For every press it prints how far each t
 where you looked: overall, by scenario, by where the dot was (edge, corner, inside), by how far
 from straight ahead, and by the time since the last nudge. `--per-click` adds a line per press;
 `--json OUT` writes the records. The techniques are described at the top of `compare.py`: what
-ran live (our tracker, SteamVR's, a 70/30 mix, SteamVR's corrected by the presses), and replays
-of our classic tracker on its recorded finds with changed rules (no glint jump, a jump only when
-both eyes see it, no lessons past the calibrated range, learning from every press, bridging a
-lost eye). The replay of the live rules should land close to what our tracker published (the
+ran live (our tracker, SteamVR's combined gaze and its two eyes averaged, a 70/30 mix, SteamVR's
+corrected by the presses), SteamVR's eyes corrected by the run's `fusion.json` (copied into
+`start/` when the run begins) and the fusion with ours, the same fitted on the run's other presses
+(`-loo`) or on the other runs only (`-xrun`), and replays of our classic tracker on its recorded
+finds with changed rules (no glint jump, a jump only when both eyes see it, no lessons past the
+calibrated range, learning from every press, bridging a lost eye, the size guard's two rules or
+none). `fusion-loo:REPLAY` fuses a replay with SteamVR's.
+`--fit-fusion OUT` fits SteamVR's correction on all the given runs' presses and saves it as a
+`fusion.json` the gaze service reads (`~/.local/state/frametop/gaze/fusion.json`). The replay of the live rules should land close to what our tracker published (the
 "replay vs live" line); the variants are only as trustworthy as that.
 
 Runs from before 2026-10-17 showed their targets on a Frametop screen, with clicks. `compare.py`

@@ -682,6 +682,126 @@ class EyeWeights:
         return (sum(wk * e[0] for wk, e in zip(w, seen)) / total, sum(wk * e[1] for wk, e in zip(w, seen)) / total)
 
 
+FUSION = STATE / "fusion.json"
+
+
+class Fusion:
+    """Our tracker and SteamVR's together (ft-gazed's GAZE_FUSION=on). On two Gaze Bench runs
+    (2026-10-17, 25 clicks on a head-locked panel out to 37 degrees) the two failed on
+    different looks: ours at its misfinds and with an eye lost, SteamVR with a steady bend
+    across the view. Ours was 2.01 degrees off at the median (6.47 at the 90th percentile),
+    SteamVR's two eyes' mean 2.67 (5.72). An affine correction fitted on the other clicks took
+    SteamVR's to 1.78 (4.26); ours where both its eyes were found, mixed half and half with
+    that, and SteamVR's alone where ours had one eye, to 1.51 (3.10). Fitted on the other run
+    only, 1.41 (4.59) (gaze/bench/compare.py's steamvr-affine-loo, fusion-loo, fusion-xrun).
+
+    So: SteamVR's eyes' mean, corrected by an affine fitted at the calibration's dots (gazecheck
+    records SteamVR's eyes at each of ours, and fits this after ours: fusion.json); then ours
+    mixed in at SHARE where both our eyes are found, SteamVR's alone where we have one, and ours
+    alone where SteamVR has no gaze.
+
+    click() adds an offset on top: the median of what the clicks since the headset went on said
+    was still off (SteamVR starts its eye model over then, and the error may move). ft-gazed
+    doesn't feed it yet: within one wear on those runs it made SteamVR's worse (2.15 to 2.72 at
+    the median, fitted on the other run), and across wears it's untested (compare.py's +clicks)."""
+
+    MODE = "affine"
+    RIDGE = 0.05    # Correction.fit's: on the gain and tilt, so a lopsided set of dots can't bend it far
+    SHARE = 0.5     # our tracker's share when both its eyes are found
+    MIN = 5         # dots for a fit
+    KEEP = 5        # clicks the offset on top comes from
+    STALE = 8.0     # degrees: a click this far off is a look elsewhere, not SteamVR's error
+
+    def __init__(self):
+        self.steam = Correction()
+        self.info = {}
+        self.points = []
+        self.clicks = []   # (wear time, dy, dp): what was still off at a click
+        self.wear = None   # the headset's current wear (SteamEyeLog.worn): clicks from others don't count
+
+    def ready(self):
+        return self.steam.samples >= self.MIN
+
+    def fit(self, points, info=None):
+        """points: (yaw, pitch, true yaw, true pitch), SteamVR's eyes' mean at a dot and the dot."""
+        self.points = [list(map(float, p)) for p in points]
+        self.steam.fit([(hy, hp, ty - hy, tp - hp) for hy, hp, ty, tp in self.points], self.MODE, ridge=self.RIDGE)
+        self.info = dict(info or {}, dots=len(self.points), fitted_at=time.time())
+        self.clicks = []
+
+    def misses(self):
+        """How far off the affine leaves each of the points it was fitted on (degrees)."""
+        out = []
+        for hy, hp, ty, tp in self.points:
+            dy, dp = self.steam.get(hy, hp, self.MODE)
+            out.append(math.hypot(ty - hy - dy, tp - hp - dp))
+        return out
+
+    @staticmethod
+    def mean(left, right):
+        if not left or not right:
+            return None
+        return (left[0] + right[0]) / 2, (left[1] + right[1]) / 2
+
+    def offset(self):
+        keep = [c for c in self.clicks if c[0] == self.wear][-self.KEEP:]
+        if not keep:
+            return 0.0, 0.0
+        return statistics.median(c[1] for c in keep), statistics.median(c[2] for c in keep)
+
+    def steam_gaze(self, left, right, clicks=True):
+        """SteamVR's corrected gaze from its two eyes' readings, or None without both."""
+        m = self.mean(left, right)
+        if m is None or not self.ready():
+            return None
+        dy, dp = self.steam.get(m[0], m[1], self.MODE)
+        oy, op = self.offset() if clicks else (0.0, 0.0)
+        return m[0] + dy + oy, m[1] + dp + op
+
+    def click(self, left, right, thy, thp):
+        """A look at (thy, thp) with SteamVR's eyes there: how far off the correction still was
+        joins the offset on top. Returns that miss (degrees), or None."""
+        g = self.steam_gaze(left, right, clicks=False)
+        if g is None:
+            return None
+        dy, dp = thy - g[0], thp - g[1]
+        miss = math.hypot(dy, dp)
+        if miss <= self.STALE:
+            self.clicks = (self.clicks + [(self.wear, dy, dp)])[-4 * self.KEEP:]
+        return miss
+
+    def combine(self, own, own_eyes, steam, share=None):
+        """own: ours, combined from own_eyes of its eyes (0-2); steam: steam_gaze(). Either may be None."""
+        share = self.SHARE if share is None else share
+        if steam is None:
+            return own
+        if own is None or own_eyes < 2:
+            return steam
+        return share * own[0] + (1 - share) * steam[0], share * own[1] + (1 - share) * steam[1]
+
+    def to_json(self):
+        return {"version": 1, "steam": self.steam.to_json(), "mode": self.MODE, "points": self.points, **self.info}
+
+    def from_json(self, d):
+        self.steam.from_json(d.get("steam") or {})
+        self.points = d.get("points") or []
+        self.info = {k: v for k, v in d.items() if k not in ("version", "steam", "mode", "points")}
+        return self
+
+    @classmethod
+    def load(cls, path=FUSION):
+        try:
+            return cls().from_json(json.loads(Path(path).read_text()))
+        except (OSError, ValueError):
+            return None
+
+    def save(self, path=FUSION):
+        path = Path(path)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.to_json(), indent=1))
+        tmp.replace(path)
+
+
 class SteamEyeLog:
     """Follows SteamVR's eye tracking log (read only) for what moves the raw gaze under a
     calibration.

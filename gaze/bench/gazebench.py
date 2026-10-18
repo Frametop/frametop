@@ -65,7 +65,20 @@ DONE_S = 0.25           # s a dot marked from the window's keys shows done befor
                         # button's shows done from its down, a double-press time before)
 WAKE = 60               # s: the gaze service's wake lease while a run records (Input Settings' Gaze
                         # page does the same), so the trackers run whether gaze mode is on or not
-QUICK_SOURCES = (("own", "Our tracker"), ("mmap1", "SteamVR"))
+# SteamVR's is the mean of its two eyes (set 2's left and right): on the 2026-10-17 runs it was
+# nearer than its combined gaze (mmap1), and it's what ft-gazed's fusion corrects.
+QUICK_SOURCES = (("own", "Our tracker"), ("steam-eyes", "SteamVR"))
+
+
+def quick_gaze(src, key):
+    """A sample's (yaw, pitch) for a QUICK_SOURCES key, or None."""
+    if key == "steam-eyes":
+        left, right = src.get("left") or {}, src.get("right") or {}
+        if "hy" in left and "hy" in right:
+            return (left["hy"] + right["hy"]) / 2, (left["hp"] + right["hp"]) / 2
+        return None
+    g = src.get(key) or {}
+    return (g["hy"], g["hp"]) if "hy" in g and g.get("ok", 1) != 0 else None
 KEYS_START = "Press the button, click, Enter or pinch to start. Hold the button or right click to end."
 KEYS_END = "Press the button, click, Enter or pinch to close this."
 
@@ -467,7 +480,7 @@ class Bench(QObject):
             lines.append("ft-gaze: no samples yet (is SteamVR running?)")
         else:
             src = s.get("src", {})
-            ok = [n for k, n in QUICK_SOURCES if src.get(k, {}).get("ok", 1) != 0 and "hy" in src.get(k, {})]
+            ok = [n for k, n in QUICK_SOURCES if quick_gaze(src, k)]
             lines.append("Gaze now from: " + (", ".join(ok) or "nothing (eyes closed, or the headset off?)"))
         lines.append("Eye images: " + ("recorded (they stay on this headset)" if self._images else "off"))
         lines.append(f"Runs go to {self.base}")
@@ -622,8 +635,7 @@ class Bench(QObject):
         samples = self.gaze.window(t - LOOK[0], t - LOOK[1])
         out = {}
         for key, _ in QUICK_SOURCES:
-            rows = [(s["src"][key]["hy"], s["src"][key]["hp"]) for s in samples
-                    if "hy" in ((s.get("src") or {}).get(key) or {})]
+            rows = [g for g in (quick_gaze(s.get("src") or {}, key) for s in samples) if g]
             if len(rows) < 3:
                 continue
             g = (statistics.median(r[0] for r in rows), statistics.median(r[1] for r in rows))

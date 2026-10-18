@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""compare.py on a made-up run with known errors: SteamVR 1 degree high, our live tracker 0.5
-degrees left, and our tracker's finds made from a calibration, with the headset slipping 8 px
-(2 degrees) a third of the way in, so the replays' jump rules differ in a known way. Needs
+"""compare.py on a made-up run with known errors: SteamVR 1 degree high (its eyes 1 degree either
+side of that), our live tracker 0.5 degrees left (both its eyes), and our tracker's finds made
+from a calibration, with the headset slipping 8 px (2 degrees) a third of the way in, so the
+replays' jump rules differ in a known way. Needs
 numpy and OpenCV (the tracker's Python):
 
   scripts/in-box /opt/frametop/venv/bin/python gaze/bench/tests/test_compare.py
 """
 import json
 import math
+import shutil
 import sys
 import tempfile
 import unittest
@@ -82,7 +84,8 @@ def make_run(d):
             src = {"mmap1": {"hy": hy, "hp": hp + 1, "hit": hit(hy, hp + 1)},
                    "left": {"hy": hy + 1, "hp": hp + 1, "hit": hit(hy + 1, hp + 1)},
                    "right": {"hy": hy - 1, "hp": hp + 1, "hit": hit(hy - 1, hp + 1)},
-                   "own": {"hy": hy + 0.5, "hp": hp, "hit": hit(hy + 0.5, hp)}}
+                   "own": {"hy": hy + 0.5, "hp": hp, "hit": hit(hy + 0.5, hp),
+                           "eyes": [[hy + 0.5, hp], [hy + 0.5, hp]]}}
             g.write(json.dumps({"t": t, "head": {"yaw": 0, "pitch": 0, "hit": hit(0, 0)}, "src": src}) + "\n")
             for e in (0, 1):
                 px, py = pupil(e, hy, hp, t - T0)
@@ -237,6 +240,45 @@ class CompareTest(unittest.TestCase):
             self.assertAlmostEqual(r["err"]["steamvr"], compare.angle((hy, hp + 1), (hy, hp)), places=4)
             self.assertAlmostEqual(r["err"]["own-live"], compare.angle((hy + 0.5, hp), (hy, hp)), places=4)
         self.assertEqual([r["where"] for r in recs], ["edge" if t[1] == 25 else "inside" for t in TRIALS])
+
+    def test_fusions(self):
+        """Fitted on the other clicks, SteamVR's affine takes out its 1 degree; the fusion is
+        halfway between that and ours (both our eyes are found), ours-else-steam is ours."""
+        recs = compare.score(self.bench_run)
+        compare.cross(recs)
+        before = [k for k, t in enumerate(TRIALS) if t[0] < SLIP_AT]
+        for k, (r, (_, hy, hp, _)) in enumerate(zip(recs, TRIALS)):
+            self.assertLess(r["err"]["steamvr-affine-loo"], 1e-6)
+            self.assertAlmostEqual(r["err"]["fusion-loo"], compare.angle((hy + 0.25, hp), (hy, hp)), places=4)
+            self.assertAlmostEqual(r["err"]["ours-else-steam-loo"], compare.angle((hy + 0.5, hp), (hy, hp)), places=4)
+            self.assertNotIn("steamvr-affine-xrun", r["err"])   # one run: no other runs to fit on
+            if k in before:   # the replay's eyes are right until the slip: so is the fusion with them
+                self.assertLess(r["err"]["fusion-loo:own-replay"], 0.05)
+        # Steady pupil sizes: the size guards refuse nothing
+        for name in ("guard-both", "guard-long", "no-guard"):
+            self.assertEqual(self.errs(name), self.errs("own-replay"), name)
+
+    def test_fusion_from_start(self):
+        """A run started with a fusion (start/gazed-fusion.json), and --fit-fusion's."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "fused"
+            shutil.copytree(self.dir, d)
+            f = compare.Fusion()
+            f.fit([(hy, hp + 1, hy, hp) for hy in (-20, 0, 20) for hp in (-10, 0, 10)], {"how": "test"})
+            f.save(d / "start" / "gazed-fusion.json")
+            recs = compare.score(compare.Run(d))
+            for r, (_, hy, hp, _) in zip(recs, TRIALS):
+                self.assertLess(r["err"]["steamvr-affine"], 1e-6)
+                self.assertLess(r["err"]["steamvr-affine+clicks"], 1e-6)
+                self.assertAlmostEqual(r["err"]["fusion"], compare.angle((hy + 0.25, hp), (hy, hp)), places=4)
+            out = Path(tmp) / "fusion.json"
+            compare.fit_fusion(recs, out, ["fused"])
+            g = compare.Fusion.load(out)
+            self.assertTrue(g.ready())
+            self.assertEqual((g.info["how"], g.info["dots"]), ("bench", len(TRIALS)))
+            dy, dp = g.steam.get(5.0, 5.0, g.MODE)
+            self.assertAlmostEqual(dy, 0.0, places=3)
+            self.assertAlmostEqual(dp, -1.0, places=2)
 
     def test_main(self):
         out = Path(self.tmp.name) / "recs.json"

@@ -124,7 +124,6 @@ class Run:
         st = self.info["start"]
         self.wall = st["time"] - st["t_raw"]          # wall clock = raw + this
         self.look = tuple(self.info.get("look") or LOOK)
-        self.dpr = (self.info.get("screen") or {}).get("dpr") or 1.0
         self.scenario = self.info["scenario"]["id"]
         self.samples = sorted(jsonl(self.dir / "gaze.jsonl"), key=lambda s: s.get("t", 0))
         self.ts = [s.get("t", 0) for s in self.samples]
@@ -134,10 +133,18 @@ class Run:
             if hit:
                 votes[hit["s"]] = votes.get(hit["s"], 0) + 1
         self.screen = max(votes, key=votes.get) if votes else None
+        self.notes = []
+        # ft-screens' pixels per window pixel: its size over the window's (gazebench.Bench.scale)
+        win, size = self.info.get("screen") or {}, (self.info.get("screens") or {}).get(str(self.screen))
+        if size and win.get("w") and win.get("h"):
+            self.sx, self.sy = size[0] / win["w"], size[1] / win["h"]
+        else:
+            self.sx = self.sy = win.get("dpr") or 1.0
+            self.notes.append("no screen sizes in run.json (a run before 2026-10-17): window pixels at Qt's "
+                              "pixel ratio, wrong where it isn't the desktop's scale")
         self.lessons = sorted((r for r in jsonl(self.dir / "lessons.jsonl") if "refused" not in r),
                               key=lambda r: r["time"])
         self.trials = self.load_trials()
-        self.notes = []
 
     def load_trials(self):
         """The trials that stand: the last click on each target, unless taken back or skipped."""
@@ -201,7 +208,7 @@ class Run:
 
     def truth(self, r):
         t0, t1 = self.look_window(r)
-        return self.direction(self.window(t0, t1), r["truth"]["x"] * self.dpr, r["truth"]["y"] * self.dpr)
+        return self.direction(self.window(t0, t1), r["truth"]["x"] * self.sx, r["truth"]["y"] * self.sy)
 
     def source(self, name, t0, t1):
         rows = []
@@ -391,7 +398,7 @@ def score(run, only=None):
             g["pointer"] = tuple(ls["raw"])
         else:
             c = r["click"]
-            g["pointer"] = run.direction(run.window(t0, t1), c["x"] * run.dpr, c["y"] * run.dpr)
+            g["pointer"] = run.direction(run.window(t0, t1), c["x"] * run.sx, c["y"] * run.sy)
         g["fuse"] = (tuple(FUSE * a + (1 - FUSE) * b for a, b in zip(own, steam)) if own and steam else None)
         if steam and steam_offsets:
             keep = steam_offsets[-SHIFT_KEEP:]
@@ -415,7 +422,7 @@ def score(run, only=None):
                "err": {k: angle(val, truth) for k, val in g.items() if not only or k in only}}
         if ls:
             c = r["click"]
-            cd = run.direction(run.window(t0, t1), c["x"] * run.dpr, c["y"] * run.dpr)
+            cd = run.direction(run.window(t0, t1), c["x"] * run.sx, c["y"] * run.sy)
             rec["check"] = angle(cd, tuple(ls["true"]))
         if g.get("own-replay") and own:
             rec["replay_vs_live"] = angle(g["own-replay"], own)

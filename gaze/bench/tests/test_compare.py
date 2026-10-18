@@ -179,6 +179,34 @@ class CompareTest(unittest.TestCase):
         rp()
         self.assertEqual((rp.taught, rp.skipped), (1, 1))
 
+    def test_screen_scale(self):
+        """A window 800 x 640 on the 1000 x 800 screen with Qt's pixel ratio 2 (on the Frame: 2752 wide
+        on 3440 pixels): the window's pixels are scaled by the sizes in run.json, not by the ratio."""
+        self.assertIn("no screen sizes", " ".join(self.bench_run.notes))   # this run has none: the ratio (1)
+        d = Path(self.tmp.name) / "scaled"
+        d.mkdir()
+        for f in self.dir.iterdir():
+            if f.is_file():
+                (d / f.name).write_bytes(f.read_bytes())
+        (d / "start").symlink_to(self.dir / "start")
+        info = json.loads((d / "run.json").read_text())
+        info.update(screen={"w": 800, "h": 640, "dpr": 2.0}, screens={"2": [1000, 800]})
+        (d / "run.json").write_text(json.dumps(info))
+        rows = []
+        for line in (d / "trials.jsonl").read_text().splitlines():
+            r = json.loads(line)
+            for k in ("click", "truth"):
+                r[k]["x"], r[k]["y"] = 0.8 * r[k]["x"], 0.8 * r[k]["y"]
+            r["x"], r["y"] = r["truth"]["x"], r["truth"]["y"]
+            rows.append(json.dumps(r))
+        (d / "trials.jsonl").write_text("\n".join(rows) + "\n")
+        run = compare.Run(d)
+        self.assertEqual((run.sx, run.sy), (1.25, 1.25))
+        self.assertEqual(run.notes, [])
+        for r, (_, hy, hp, _) in zip(compare.score(run), TRIALS):
+            self.assertAlmostEqual(r["truth"][0], hy, places=6)
+            self.assertAlmostEqual(r["truth"][1], hp, places=6)
+
     def test_main(self):
         out = Path(self.tmp.name) / "recs.json"
         sys.argv = ["compare.py", str(self.dir.parent), "--json", str(out)]

@@ -145,6 +145,7 @@ class Bench(QObject):
         self.next_at = None        # monotonic: when the next target shows (a scenario's gap)
         self.waiting_message = False
         self.screen_votes = {}     # ft-screens' screen: samples whose head ray hit it, this run
+        self.screen_px = {}        # ft-screens' screens' sizes at the run's start (benchrec.screen_sizes)
         self.rev = git_rev()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -258,8 +259,9 @@ class Bench(QObject):
         seed = self.sc.get("seed", random.randrange(1 << 30))
         self.trials = make_trials(self.sc, random.Random(seed))
         self.i, self.results, self.screen_votes = 0, [], {}
-        info = {"screen": self.screen, "seed": seed, "radius": RADIUS, "inset": INSET, "look": LOOK,
-                "app": {"rev": self.rev}, "trials_planned": len(self.trials)}
+        self.screen_px = benchrec.screen_sizes()
+        info = {"screen": self.screen, "screens": self.screen_px, "seed": seed, "radius": RADIUS, "inset": INSET,
+                "look": LOOK, "app": {"rev": self.rev}, "trials_planned": len(self.trials)}
         self.run = benchrec.Run(self.sc, self.gaze, images=self._images, base=self.base, log=self.log, info=info).start()
         self._page, self._summary = "run", ""
         self._mark = bool(self.sc.get("head_mark"))
@@ -311,17 +313,26 @@ class Bench(QObject):
             if hit:
                 self.screen_votes[hit["s"]] = self.screen_votes.get(hit["s"], 0) + 1
 
+    def scale(self):
+        """ft-screens' pixels per window pixel on the bench's screen, (x, y): its size over the
+        window's (benchrec.screen_sizes), else Qt's pixel ratio."""
+        size = self.screen_px.get(str(self.bench_screen()))
+        w, h = self.screen.get("w"), self.screen.get("h")
+        if size and w and h:
+            return size[0] / w, size[1] / h
+        dpr = self.screen.get("dpr", 1.0) or 1.0
+        return dpr, dpr
+
     def quick(self, t, cx, cy):
         """How far our tracker and SteamVR were from where you looked (cx, cy: the window's
         pixels), from ft-gaze's screen hits in the LOOK before the click: {"screen": N, source:
-        {"x", "y", "n", "deg"}}. Screen pixels are ft-screens' (the window's times its pixel
-        ratio)."""
+        {"x", "y", "n", "deg"}}. Screen pixels are ft-screens' (the window's times scale())."""
         samples = self.gaze.window(t - LOOK[0], t - LOOK[1])
         self.vote(samples)
         screen = self.bench_screen()
         if screen is None:
             return {}
-        dpr = self.screen.get("dpr", 1.0) or 1.0
+        sx, sy = self.scale()
         out = {"screen": screen}
         for key, _ in QUICK_SOURCES:
             hits = [s["src"][key]["hit"] for s in samples
@@ -332,7 +343,7 @@ class Bench(QObject):
             y = statistics.median(h["y"] for h in hits)
             dpp = statistics.median(h["dpp"] for h in hits)
             out[key] = {"x": round(x, 1), "y": round(y, 1), "n": len(hits),
-                        "deg": round(math.hypot(x - cx * dpr, y - cy * dpr) * dpp, 2)}
+                        "deg": round(math.hypot(x - cx * sx, y - cy * sy) * dpp, 2)}
         return out
 
     @Slot(float, float, str)
@@ -458,10 +469,10 @@ class Bench(QObject):
             self.vote([s])
         if self._mark:
             hit = (s or {}).get("head", {}).get("hit") if s else None
-            dpr = self.screen.get("dpr", 1.0) or 1.0
             on = bool(hit) and hit["s"] == self.bench_screen() and benchrec.raw_now() - s.get("t", 0) < 0.5
             if on:
-                self._hx, self._hy = hit["x"] / dpr, hit["y"] / dpr
+                sx, sy = self.scale()
+                self._hx, self._hy = hit["x"] / sx, hit["y"] / sy
             if on or self._head:
                 self._head = on
                 self.headChanged.emit()

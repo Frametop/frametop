@@ -165,9 +165,19 @@
 //   Outside games (no scene application), gaze mode keeps the pointer: the relay doesn't
 // release it when the mouse is idle ("gazeawake 1|0" tells it). A controller that moves
 // still releases it, as without gaze (last used wins), and in games the mouse wakes it and
-// idling releases it, as without gaze. Gaze mode is a mouse feature: the controllers aren't
-// part of it. Steam reads the Frame controllers itself, outside SteamVR's bindings, so
-// controller clicks at the gaze can't be done cleanly (docs/gaze-controllers.md).
+// idling releases it, as without gaze.
+//   Gaze owns the pointer: outside games, with Frametop not paused and the headset on, a fresh
+// gaze (GAZE_WAKE_FRESH) takes the pointer back whatever let it go, so the cursor never waits
+// for a tap (2026-10-18: a proximity blink, a hand by a panel, or the relay's idle timeout let it
+// go, and the first pinch after only woke it). Not while a hand is at a panel or for
+// GAZE_WAKE_NEAR after (ft-screens' near claim, below), during a touch, while a controller is in
+// use (hand tracking's handoff; without it, for GAZE_WAKE_CONTROLLER after a controller let it
+// go), after the relay's pointer_toggle turned it off ("hide toggle", until something wakes it
+// or gaze mode is turned on), or more than once per GAZE_WAKE_EVERY. It logs "gaze took the
+// pointer back" and tells the relay ("gazewoke"), which counts the pointer on.
+//   Gaze mode is a mouse feature: the controllers aren't part of it. Steam reads the Frame
+// controllers itself, outside SteamVR's bindings, so controller clicks at the gaze can't be done
+// cleanly (docs/gaze-controllers.md).
 //   The dot shows all the time in gaze mode (POINTER_GAZE_DOT=always, the default). With
 // POINTER_GAZE_DOT=moving it only shows while the mouse moves it (within POINTER_GAZE_SHOW,
 // 1 s), while a press is held, and briefly for each click (a pulse); otherwise it's
@@ -464,8 +474,9 @@
 // (ft-screens reads 512-byte datagrams), without ours (frametop.*), POINTER_IGNORE's, or keys with
 // spaces.
 //
-// Commands (datagrams on @ft_pointer_helper): show, hide, recenter, move <dyaw> <dpitch>,
-// follow on|off|toggle (head follow, until the next restart or a change to POINTER_FOLLOW),
+// Commands (datagrams on @ft_pointer_helper): show, hide [toggle|idle|pause] (why: see "Gaze owns
+// the pointer"), recenter, move <dyaw> <dpitch>, follow on|off|toggle (head follow, until the next
+// restart or a change to POINTER_FOLLOW),
 // gaze on|off|toggle|? (gaze mode, likewise with POINTER_GAZE; ? only asks, and "? headset" adds
 // worn|away to the reply), gz ... (the gaze, from ft-gazed),
 // reload (re-read the settings below), debug (toggle a twice-a-second state log),
@@ -929,6 +940,13 @@ constexpr double SETTINGS_ORIGIN = 0.25, SETTINGS_DOT = 0.6, SETTINGS_CATCHER = 
 // A touch's grab hovers this long before it presses (a floating panel's grab bar comes up under the
 // laser), and after a release the laser holds still this long (see "Touch" at the top).
 constexpr auto kTouchHover = std::chrono::milliseconds(120), kTouchDrop = std::chrono::milliseconds(250);
+// The headset counts as off after SteamVR has said idle this long (see the main loop).
+constexpr auto HEADSET_OFF_AFTER = std::chrono::milliseconds(1500);
+// Gaze owns the pointer (see the top): a gaze this fresh takes it back, the hand this long away
+// from a panel, a controller this long after it let it go (without hand tracking's handoff),
+// and at most once per GAZE_WAKE_EVERY.
+constexpr std::chrono::milliseconds GAZE_WAKE_FRESH{250}, GAZE_WAKE_NEAR{1000}, GAZE_WAKE_CONTROLLER{5000},
+    GAZE_WAKE_EVERY{2000};
 
 // Whether the line of sight from `eye` along `d` crosses the SteamVR Settings page, drawn by
 // the dashboard's scene-graph panel (valve.steam.gamepadui.frame.menu.N, transform t); see
@@ -1213,6 +1231,9 @@ int main() {
         double yaw = 0, pitch = 0;
     } posed;
     Clock::time_point lastMouse{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
+    // Gaze owns the pointer (see the top): a controller last let it go then; a hand was last at a
+    // panel then (ft-screens' near claim); the gaze last took it back then.
+    Clock::time_point controllerTookAt{}, nearBusyAt{}, gazeWokeAt{};
     bool claimPending = false, claimHeld = false;
     // Last used wins: since when each controller has been moving (zero: it isn't).
     Clock::time_point movingSince[vr::k_unMaxTrackedDeviceCount] = {};
@@ -1243,8 +1264,14 @@ int main() {
     Vec3 pivot, tiltOrigin, lastPoint, lastOrigin, lastAim{0, 0, -1};
     Basis tiltBasis{};
     bool headsetOff = false;  // nobody is wearing the headset (see the main loop)
+    Clock::time_point headsetIdleSince{};  // SteamVR has said idle since then (none: it doesn't)
+    bool headsetSeen = false;              // its activity level was read once
+    // Turned off on purpose (the relay's pointer_toggle, "hide toggle"): gaze mode leaves it off
+    // until something wakes it (see "Gaze owns the pointer" at the top).
+    bool pointerOff = false;
     auto wake = [&](Clock::time_point t) {
         if (t < noWakeUntil || headsetOff) return;
+        pointerOff = false;
         wokeAt = t;
         active = true;
         recenter = true;
@@ -1866,11 +1893,21 @@ int main() {
     while (true) {
         // The headset off: SteamVR drops the HMD's activity to idle as soon as it comes off.
         // An awake pointer (a connected controller, SteamVR's laser mode forced on) kept the
-        // displays from sleeping, so it's released at once, and the mouse can't wake it until
-        // the headset is back on (then the first mouse input does).
+        // displays from sleeping, so it's released, and the mouse can't wake it until the
+        // headset is back on (then the first mouse input does, or the gaze in gaze mode).
+        // Idle for HEADSET_OFF_AFTER first: settling the headset on the face blinks the
+        // proximity sensor off for 0.3-0.5 s (five times in the first minute of a wear,
+        // 2026-10-18), and each blink let the pointer go. Standby comes 5 s after it's off.
         const auto level = sys->GetTrackedDeviceActivityLevel(vr::k_unTrackedDeviceIndex_Hmd);
-        headsetOff = level == vr::k_EDeviceActivityLevel_Idle || level == vr::k_EDeviceActivityLevel_Standby ||
-                     level == vr::k_EDeviceActivityLevel_Idle_Timeout;
+        const bool headsetIdle = level == vr::k_EDeviceActivityLevel_Idle ||
+                                 level == vr::k_EDeviceActivityLevel_Standby ||
+                                 level == vr::k_EDeviceActivityLevel_Idle_Timeout;
+        if (!headsetIdle) headsetIdleSince = {};
+        else if (headsetIdleSince == Clock::time_point{})  // (idle at the start: off already)
+            headsetIdleSince = Clock::now() - (headsetSeen ? std::chrono::milliseconds(0) : HEADSET_OFF_AFTER);
+        headsetSeen = true;
+        headsetOff = headsetIdle && (level == vr::k_EDeviceActivityLevel_Standby ||
+                                     Clock::now() - headsetIdleSince >= HEADSET_OFF_AFTER);
         if (headsetOff && active) {
             active = false;
             claimPending = claimHeld = false;
@@ -1931,7 +1968,8 @@ int main() {
                 mouseMove(mx, my);
                 continue;
             }
-            // The gaze, from ft-gazed: not mouse input, it never wakes the pointer.
+            // The gaze, from ft-gazed: not mouse input. In gaze mode a fresh one takes the pointer back
+            // in the main loop (see "Gaze owns the pointer" at the top).
             double g[4];
             if (std::sscanf(buf, "gz %lf %lf %lf %lf", &g[0], &g[1], &g[2], &g[3]) == 4) {
                 gz = {g[0], g[1], g[2], g[3], Clock::now()};
@@ -2107,6 +2145,7 @@ int main() {
                              : std::strncmp(arg, "off", 3) == 0 ? false
                                                                 : !gazeOn;
                     gazeOwns = true, nudging = false;
+                    if (gazeOn) pointerOff = false;  // turning gaze mode on asks for the pointer
                     std::printf("gaze mode %s\n", gazeOn ? "on" : "off");
                     std::fflush(stdout);
                 }
@@ -2214,6 +2253,13 @@ int main() {
             } else if (std::strncmp(buf, "show", 4) == 0) {
                 if (!active) wake(Clock::now());
             } else if (std::strncmp(buf, "hide", 4) == 0) {
+                // "hide toggle": turned off on purpose, so gaze mode leaves it off (see the top);
+                // "hide idle" and "hide pause" (and a plain "hide") don't keep it from the gaze.
+                if (!std::strcmp(buf, "hide toggle") && !pointerOff) {
+                    pointerOff = true;
+                    if (gazeOn) std::printf("pointer turned off: the gaze leaves it off until you wake it\n");
+                    if (gazeOn) std::fflush(stdout);
+                }
                 active = false;
                 cursorDot.Show(false);
                 markerDot.Show(false);
@@ -2306,6 +2352,7 @@ int main() {
             SendTo(out, "ft_pointer", "btn a 0");
             SendTo(out, "ft_pointer", "hide");
             noWakeUntil = tnow + std::chrono::seconds(2);
+            controllerTookAt = tnow;
             std::printf("no hand role (a controller is in use): pointer released\n");
             std::fflush(stdout);
         }
@@ -2336,6 +2383,7 @@ int main() {
                     markerDot.Show(false);
                     SendTo(out, "ft_pointer", "btn a 0");
                     SendTo(out, "ft_pointer", "hide");
+                    controllerTookAt = tnow;
                     std::printf("controller %u moved (%.2f m/s, %.1f rad/s): pointer released\n", i, speed, spin);
                     std::fflush(stdout);
                     break;
@@ -2626,10 +2674,27 @@ int main() {
         }
         // A hand at a panel (ft-screens' near claim: it pokes and taps there): no laser at all (user,
         // 2026-10-11: the laser from the head to where the fingertip put the cursor got in the way of
-        // tapping, and held the button so pokes were refused). The mouse's next move claims it back.
+        // tapping, and held the button so pokes were refused). The mouse's next move claims it back,
+        // or in gaze mode the gaze, GAZE_WAKE_NEAR after the hand left.
         if (active && hold.src == Src::None && !leftHeld && touch.side < 0 && tnow - nearAt < std::chrono::milliseconds(200) &&
             (nearClaim[0] || nearClaim[1]) && tnow - lastMouse > std::chrono::seconds(1)) {
             releasePointer("a hand touches a panel");
+        }
+        if (tnow - nearAt < std::chrono::milliseconds(200) && (nearClaim[0] || nearClaim[1])) nearBusyAt = tnow;
+        // Gaze owns the pointer (see the top): whatever let it go, a fresh gaze takes it back once
+        // nothing else should have it.
+        if (!active && gazeOn && !pointerOff && !inGame && !framePaused && !headsetOff &&
+            tnow - gz.at < GAZE_WAKE_FRESH && tnow - nearBusyAt > GAZE_WAKE_NEAR && touch.side < 0 &&
+            tnow - gazeWokeAt > GAZE_WAKE_EVERY && !controllerBusy(tnow) &&
+            (handsTrack ? !arbiter.IsController(0) && !arbiter.IsController(1)
+                        : tnow - controllerTookAt > GAZE_WAKE_CONTROLLER)) {
+            gazeWokeAt = tnow;
+            wake(tnow);
+            if (active) {
+                SendTo(out, "frametop_relay", "gazewoke");  // the relay counts the pointer on again
+                std::printf("gaze took the pointer back\n");
+                std::fflush(stdout);
+            }
         }
         // Where a gesture's point is, seen from the hold's origin: yaw and pitch, degrees.
         auto handAngles = [&](const float p[3], uint64_t t_ns, const Vec3 &from, double &hy, double &hp) {

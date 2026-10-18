@@ -67,6 +67,9 @@ reaches games; see pointer/helper/vrbuttons.h).
 
 In gaze mode outside games, the helper keeps the pointer ("gazeawake 1", repeated every 5
 seconds; "gazeawake 0" or silence ends it): the pointer isn't released when the mouse is idle.
+When something else let the pointer go, the gaze takes it back and the helper says "gazewoke"
+(the pointer is on again here too). The hides here say why: "hide toggle" (pointer_toggle: the
+gaze leaves it off until something wakes it), "hide idle", "hide pause".
 Typing on a keyboard sends the helper "typing" (at most 4 times a second): it takes no hand
 pinches right after a key, since typing touches thumb to index like a pinch.
 
@@ -138,7 +141,7 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
   reload            re-read both config files, re-apply roles, tell the helper
   vrcapture <s>     take every controller button for s seconds (0: stop), so the settings
                     app can capture one; watchers see them as events with id frame_controller
-  vrbtn, vrhello, gazeawake   from the pointer helper (above)
+  vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
   vrdash 1|0        from the pointer helper (hand interaction): the dashboard is open, so hand
                     tracking parked for a game wakes (game_pause.py, PARK_PATH)
@@ -690,7 +693,7 @@ class Pointer:
             self.send("recenter")
         elif name == "pointer_toggle":
             if self.active:
-                self.send("hide")
+                self.send("hide toggle")  # gaze mode leaves it off until something wakes it
                 self.active = False
                 log("pointer off (toggle)")
             else:
@@ -764,7 +767,7 @@ class Pointer:
             self.send("scroll 0 0")
             self.scroll_until = None
         if self.active and now - self.last_used > self.idle and now >= self.gaze_awake_until:
-            self.send("hide")
+            self.send("hide idle")
             self.active = False
             log("pointer off (idle)")
 
@@ -807,7 +810,7 @@ class Pointer:
         self.dx = self.dy = self.pending = 0
         self.gaze_awake_until = 0.0
         if self.active or releases:
-            self.send("hide")
+            self.send("hide pause")
         if self.active:
             self.active = False
             log("pointer off (paused)")
@@ -1440,6 +1443,13 @@ def main():
                 if cmd == "gazeawake" and len(words) == 2:
                     if state["pointer"]:
                         state["pointer"].gaze_awake_until = now + 12.0 if words[1] == "1" else 0.0
+                    continue
+                if cmd == "gazewoke":
+                    # The gaze took the pointer back (gaze mode owns it): it's on, as a wake leaves it.
+                    p = state["pointer"]
+                    if p and not p.active:
+                        p.active, p.last_used = True, now
+                        log("pointer on (gaze)")
                     continue
                 if not addr:
                     continue  # unbound sender, nowhere to reply

@@ -14,10 +14,12 @@
 // about 1.5 KB, 130 KB a second through podman's relay.
 //
 //   {"t":<sample time, CLOCK_MONOTONIC_RAW s>,"age":<ms old when read>,"n":<sample counter>,
-//    "head":{"yaw":..,"pitch":..,"hit":HIT},          head forward ray (for head nudging)
+//    "head":{"yaw":..,"pitch":..,"q":Q,"hit":HIT},    head forward ray (for head nudging)
 //    "src":{"action":SRC,"mmap1":SRC,"mmap2":SRC,"left":SRC,"right":SRC,"own":SRC},"eye":EYE}
-//   SRC = {"hy":..,"hp":..,"hit":HIT} or {"ok":0}    hy/hp: gaze direction relative to the
-//                                                     head, degrees (yaw +left, pitch +up)
+//   SRC = {"hy":..,"hp":..,"hq":Q,"hit":HIT} or {"ok":0}  hy/hp: gaze direction relative to
+//                                                     the head, degrees (yaw +left, pitch +up);
+//                                                     hq: the head pose it's relative to (the
+//                                                     one at the source's own sample time)
 //         mmap1 adds "open":[l,r] (probably eye openness, 0 in a blink) and "dist" (vergence
 //         distance, m); both mmap sets add "lr", the angle between the eyes (deg), which
 //         jumps when the tracker loses an eye, and "eyes":[[hy,hp],[hy,hp]], each eye's own
@@ -39,6 +41,10 @@
 //         variance (about 2e-5 on a clear view of the eye, rising as the lid or lashes get
 //         in the way), "new" whether it changed since the last sample (it freezes while the
 //         tracker can't see that eye, and in blinks). "eye" is null without the mmap.
+//   Q = [w,x,y,z]   a head pose's rotation as a unit quaternion (standing universe), so a
+//         head-relative direction can be turned into the room and back: the gaze service's
+//         fixation lock holds the gaze still in the room, where a look at a screen stays put
+//         while the head turns (gazecal.GazeLock).
 //   HIT = {"s":<screen>,"x":..,"y":..,"j":[dx/dhy,dy/dhy,dx/dhp,dy/dhp],"dpp":<deg per px>}
 //         or null. x, y are pixels on that screen; j is pixels per degree of head-relative
 //         yaw and pitch there, so a correction in degrees can be turned into pixels and back.
@@ -468,13 +474,38 @@ std::string HitJson(const std::vector<Screen> &screens, const vr::HmdMatrix34_t 
     return buf;
 }
 
+// Q: a pose's rotation as a unit quaternion [w,x,y,z] (v' = R v, R the pose's 3x3 part).
+std::string QuatJson(const vr::HmdMatrix34_t &p) {
+    const auto &m = p.m;
+    double w, x, y, z;
+    const double tr = m[0][0] + m[1][1] + m[2][2];
+    if (tr > 0) {
+        const double s = 2 * std::sqrt(tr + 1);  // 4w
+        w = s / 4, x = (m[2][1] - m[1][2]) / s, y = (m[0][2] - m[2][0]) / s, z = (m[1][0] - m[0][1]) / s;
+    } else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
+        const double s = 2 * std::sqrt(1 + m[0][0] - m[1][1] - m[2][2]);  // 4x
+        w = (m[2][1] - m[1][2]) / s, x = s / 4, y = (m[0][1] + m[1][0]) / s, z = (m[0][2] + m[2][0]) / s;
+    } else if (m[1][1] > m[2][2]) {
+        const double s = 2 * std::sqrt(1 + m[1][1] - m[0][0] - m[2][2]);  // 4y
+        w = (m[0][2] - m[2][0]) / s, x = (m[0][1] + m[1][0]) / s, y = s / 4, z = (m[1][2] + m[2][1]) / s;
+    } else {
+        const double s = 2 * std::sqrt(1 + m[2][2] - m[0][0] - m[1][1]);  // 4z
+        w = (m[1][0] - m[0][1]) / s, x = (m[0][2] + m[2][0]) / s, y = (m[1][2] + m[2][1]) / s, z = s / 4;
+    }
+    const double n = std::sqrt(w * w + x * x + y * y + z * z);
+    if (n < 1e-9) return "[1,0,0,0]";
+    char buf[80];
+    std::snprintf(buf, sizeof buf, "[%.6f,%.6f,%.6f,%.6f]", w / n, x / n, y / n, z / n);
+    return buf;
+}
+
 std::string SrcJson(const std::vector<Screen> &screens, const vr::HmdMatrix34_t &head, Vec3 dHead,
                     const std::string &extra = "") {
     double yaw, pitch;
     Angles(Normalize(dHead), yaw, pitch);
     char buf[96];
     std::snprintf(buf, sizeof buf, "{\"hy\":%.4f,\"hp\":%.4f,", yaw, pitch);
-    return buf + extra + "\"hit\":" + HitJson(screens, head, yaw, pitch) + "}";
+    return buf + extra + "\"hq\":" + QuatJson(head) + ",\"hit\":" + HitJson(screens, head, yaw, pitch) + "}";
 }
 
 // Sources (--sources, "sources LIST" on stdin): a bit each.
@@ -798,11 +829,12 @@ int main(int argc, char **argv) {
             const Vec3 f = Rotate(headNow, {0, 0, -1});
             yaw = std::atan2(-f.x, -f.z) * 180 / M_PI;
             pitch = std::asin(std::clamp(f.y, -1.0, 1.0)) * 180 / M_PI;
-            std::printf("{\"t\":%.5f,\"age\":%.1f,\"n\":%u,\"head\":{\"yaw\":%.4f,\"pitch\":%.4f,\"hit\":%s},"
+            std::printf("{\"t\":%.5f,\"age\":%.1f,\"n\":%u,\"head\":{\"yaw\":%.4f,\"pitch\":%.4f,\"q\":%s,\"hit\":%s},"
                         "\"src\":{\"action\":%s,\"mmap1\":%s,\"mmap2\":%s,\"left\":%s,\"right\":%s,\"own\":%s},"
                         "\"eye\":%s}\n",
-                        s.t, (now - s.t) * 1000, s.n, yaw, pitch, HitJson(list, headNow, 0, 0).c_str(), action.c_str(),
-                        m1.c_str(), m2.c_str(), left.c_str(), right.c_str(), own.c_str(), eye.c_str());
+                        s.t, (now - s.t) * 1000, s.n, yaw, pitch, QuatJson(headNow).c_str(),
+                        HitJson(list, headNow, 0, 0).c_str(), action.c_str(), m1.c_str(), m2.c_str(), left.c_str(),
+                        right.c_str(), own.c_str(), eye.c_str());
             if (std::fflush(stdout) != 0) break;  // the reader went away
         }
 

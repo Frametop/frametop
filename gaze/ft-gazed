@@ -28,7 +28,10 @@ Runs ft-gaze (in the dev container), and for every eye tracker sample (90 Hz):
      pointer's corrections have taught that eye since (LiveCorrection, saved in
      pointer-lessons.json), then weighted by the eye bias. A lost or closed eye drops out.
      Our own tracker keeps its own calibration, so its eyes are used as they come;
-  3. smooths it with a fixation lock (the running mean of the current fixation, 1 degree);
+  3. smooths it with a fixation lock (the running mean of the current fixation, 1 degree), on
+     where the gaze points in the room, so a look at a screen stays put while the head turns
+     (gazecal.GazeLock: ft-gaze gives each sample's head pose). With our tracker, an eye whose
+     lids came down stays out for BLINK_SETTLE after they're up again;
   4. sends it to the pointer helper: "gz <yaw> <pitch> <raw yaw> <raw pitch>", head-relative
      degrees (yaw +left, pitch +up). The helper uses it only in gaze mode.
 
@@ -135,7 +138,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gazecal import (DEFAULT_MODEL, EYE_FOUND, EYE_LOST, MODELS, STATE, Correction, EyeFallback,  # noqa: E402
-                     EyeWeights, Fixation, LiveCorrection, SteamEyeLog, TrackedEye)
+                     EyeWeights, GazeLock, LiveCorrection, SteamEyeLog, TrackedEye)
 from gazecheck import Checks  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "models"))
@@ -172,6 +175,8 @@ IDLE_AFTER = 30.0  # seconds after the gaze was last in use before ft-gaze and o
 WAKE_SETTLE = 15.0  # seconds after waking that the tracker may take to start sending
 WAKE_MAX = 120.0
 KEYBOARD_PITCH = -20.0  # degrees: gaze under this, on no screen, is a look at the keyboard
+BLINK_SETTLE = 0.1  # seconds our tracker's eye stays out after its lids came down: the pupil the
+                    # lid cuts finds wrong for a few frames past SteamVR's openness (2026-10-17)
 
 
 class PointerLessons(LiveCorrection):
@@ -249,8 +254,9 @@ class Service:
         self.steam = SteamEyeLog()
         self.steam.poll()
         self.refit()
-        self.fix = Fixation(radius=1.0)
+        self.fix = GazeLock(radius=1.0)
         self.opens = (deque(maxlen=90), deque(maxlen=90))  # left, right
+        self.low_until = [0.0, 0.0]  # sample time until which each eye counts as closed (BLINK_SETTLE)
         self.vergence = deque(maxlen=90)
         self.fallback = EyeFallback()
         # SteamVR's tracker following one eye only (gazecal.tracked_eye): 0 left, 1 right, or None.
@@ -731,7 +737,7 @@ class Service:
             if "hy" not in src:
                 return
             eyes = [tuple(e) if e else None for e in (src.get("eyes") or [None, None])]
-            hp, hit = src["hp"], src.get("hit")
+            hp, hit, then = src["hp"], src.get("hit"), src.get("hq")
         else:
             per = [s["src"].get(name) or {} for name in SIDES]
             eyes = [(p["hy"], p["hp"]) if "hy" in p else None for p in per]
@@ -739,6 +745,7 @@ class Service:
                 return
             one = self.one_eye
             hp, hit = (eyes[one] if one is not None and eyes[one] else next(e for e in eyes if e))[1], m1.get("hit")
+            then = next((p["hq"] for p in per if "hq" in p), None)
         self.counts["samples"] += 1
         self.last_sample = time.monotonic()
         down = hp < KEYBOARD_PITCH and not hit
@@ -750,6 +757,12 @@ class Service:
             # SteamVR judges only that eye's openness, and a blink closes both: ours still
             # sees the other, so it stays in.
             low[1 - self.one_eye] = low[self.one_eye]
+        if own:
+            for k in (0, 1):
+                if low[k]:
+                    self.low_until[k] = s["t"] + BLINK_SETTLE
+                elif s["t"] < self.low_until[k]:
+                    low[k] = True
         # Our tracker finds the pupils itself; SteamVR's openness still marks the blinks.
         bad = [eyes[k] is None or low[k] or (not own and self.lost[k]) for k in (0, 1)]
         if not own and self.one_eye is not None:
@@ -769,7 +782,7 @@ class Service:
                 c = self.correction(name, *e) if e else None
                 corrected.append((e[0] + c[0], e[1] + c[1]) if e else None)
         gy, gp = self.weights["own" if own else "steam"].combine(corrected)
-        fy, fp = self.fix(gy, gp, s["t"], 1.0)
+        fy, fp = self.fix(gy, gp, s["t"], then, (s.get("head") or {}).get("q"))
         self.send(s["t"], fy, fp, fy, fp, seen)
 
     def on_source_sample(self, s):
@@ -802,7 +815,7 @@ class Service:
                     self.counts["dropped"] += 1
                     return
                 hy, hp = eyes[one]
-            fy, fp = self.fix(hy, hp, s["t"], 1.0)
+            fy, fp = self.fix(hy, hp, s["t"], src.get("hq"), (s.get("head") or {}).get("q"))
             cy, cp = self.correction(self.source, fy, fp)
             self.send(s["t"], fy + cy, fp + cp, fy, fp, None)
             return
@@ -836,8 +849,8 @@ class Service:
             if eyes and s["t"] - max(self.bad_at) > SETTLE:
                 for k in (0, 1):
                     self.fallback.update(k, eyes[k][0], eyes[k][1], hy, hp)
-        # The fixation lock works in degrees here (1 degree per "pixel").
-        fy, fp = self.fix(hy, hp, s["t"], 1.0)
+        # The fixation lock works in degrees here, on the gaze's direction in the room.
+        fy, fp = self.fix(hy, hp, s["t"], src.get("hq"), (s.get("head") or {}).get("q"))
         cy, cp = self.correction(self.source, fy, fp)
         self.send(s["t"], fy + cy, fp + cp, fy, fp, None)
 

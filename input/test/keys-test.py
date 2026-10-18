@@ -400,7 +400,7 @@ def tests():
                 m = helper.recv(256).decode()
             except socket.timeout:
                 return got
-            if m == "hide" or (m.startswith("btn ") and not m.startswith("btn a ")):
+            if m.startswith("hide") or (m.startswith("btn ") and not m.startswith("btn a ")):
                 got.append(m)
 
     conf["POINTER"] = "1"
@@ -410,7 +410,7 @@ def tests():
     check("pointer mode: a held left button reaches the helper", clicks(), ["btn trigger 1"])
     pause("on")
     check("pause with the left button held: it comes up, then the pointer hides", clicks(),
-          ["btn trigger 0", "hide"])
+          ["btn trigger 0", "hide pause"])
     key(relay.BTN_LEFT, 0, ms_w)
     check("paused: its release reaches no one", clicks(), [])
     pause("off")

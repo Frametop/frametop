@@ -24,6 +24,7 @@ BENCH = HERE.parent
 sys.path.insert(0, str(BENCH))
 os.environ["FT_BENCH_EYES_SOCKET"] = f"ft_eyes_benchtest_{os.getpid()}"
 os.environ["FT_BENCH_GAZED_SOCKET"] = f"ft_gazed_benchtest_{os.getpid()}"
+os.environ["FT_BENCH_SCREENS_SOCKET"] = f"ft_screens_benchtest_{os.getpid()}"
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import benchrec  # noqa: E402
 
@@ -163,12 +164,17 @@ class RunTest(unittest.TestCase):
 
         self.eyes = FakeService(benchrec.EYES_SOCK, eyes)
         self.gazed = FakeService(benchrec.GAZED_SOCK, gazed)
+        # The fake ft-gaze's screen 2 is 1000 x 800; the window is 800 x 640 on it, and Qt's pixel
+        # ratio (2) isn't the scale between them (1.25), as on the Frame's 3440-pixel screen
+        self.screens = FakeService(benchrec.SCREENS_SOCK, lambda text: "ok 2 1:3440x1440:2.503 2:1000x800:2.0"
+                                   if text == "screens" else "fail")
 
     def tearDown(self):
         for k, v in self.saved.items():
             setattr(benchrec, k, v)
         self.eyes.stop()
         self.gazed.stop()
+        self.screens.stop()
         self.tmp.cleanup()
 
     def wait(self, cond, timeout=5.0):
@@ -186,7 +192,7 @@ class RunTest(unittest.TestCase):
         try:
             self.assertTrue(self.wait(lambda: bench.gaze.latest() is not None), "no samples from the fake ft-gaze")
             self.assertTrue(self.wait(lambda: "gaze mode on" in bench.status), bench.status)
-            bench.setScreen(1000, 800, 1.0, "test", 0, 0)
+            bench.setScreen(800, 640, 2.0, "test", 0, 0)
             bench.start("warmup")
             self.assertEqual(bench.page, "run")
             self.assertFalse(bench.targetOn)          # the intro first
@@ -217,7 +223,8 @@ class RunTest(unittest.TestCase):
         info = json.loads((run / "run.json").read_text())
         self.assertEqual(info["scenario"]["id"], "warmup")
         self.assertEqual(info["conf"], ["GAZE_TRACKER=own"])
-        self.assertEqual(info["screen"]["w"], 1000)
+        self.assertEqual(info["screen"]["w"], 800)
+        self.assertEqual(info["screens"], {"1": [3440, 1440], "2": [1000, 800]})
         self.assertIsNotNone(info["last_lesson"])
         self.assertGreater(info["gaze_lines"], 50)
         self.assertEqual(info["finds_rows"], "ok 1")
@@ -237,7 +244,7 @@ class RunTest(unittest.TestCase):
             q = r["quick"]
             self.assertEqual(q["screen"], 2)
             # The fake's tracker hits (510, 400), SteamVR's (500, 380), at 20 px a degree
-            tx, ty = r["truth"]["x"], r["truth"]["y"]
+            tx, ty = 1.25 * r["truth"]["x"], 1.25 * r["truth"]["y"]
             self.assertAlmostEqual(q["own"]["deg"], math.hypot(510 - tx, 400 - ty) / 20, places=1)
             self.assertAlmostEqual(q["mmap1"]["deg"], math.hypot(500 - tx, 380 - ty) / 20, places=1)
         self.assertGreater(len((run / "gaze.jsonl").read_text().splitlines()), 50)

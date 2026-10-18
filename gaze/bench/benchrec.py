@@ -48,6 +48,7 @@ CONF_KEYS = ("GAZE_", "POINTER_GAZE", "EYES_MODEL")
 SOURCES = "mmap1,mmap2,left,right,own"
 EYES_SOCK = os.environ.get("FT_BENCH_EYES_SOCKET", "ft_eyes")     # (the tests' stand-ins)
 GAZED_SOCK = os.environ.get("FT_BENCH_GAZED_SOCKET", "ft_gazed")
+SCREENS_SOCK = os.environ.get("FT_BENCH_SCREENS_SOCKET", "ft_screens")
 RECENT = 3.0        # s of parsed samples kept for the app's quick scores
 KEEPALIVE = 2.0     # s between checks that our tracker is still logging finds
 LOG_SLACK = 3.0     # s either side of the run when copying the lesson logs
@@ -89,6 +90,27 @@ class Sock:
 
     def close(self):
         self.sock.close()
+
+
+def screen_sizes():
+    """ft-screens' screens as {"index": [width, height]} in its pixels (ft-gaze's hits are in
+    them), or {} if it isn't running. The bench's window is full screen on one, so a window pixel
+    is width / the window's width of them. That isn't Qt's pixel ratio: on a 3440-pixel screen at
+    KWin's 1.25 the window is 2752 wide and Qt said 2."""
+    s = Sock(SCREENS_SOCK)
+    try:
+        r = s.ask("screens")   # "ok <count> <index>:<w>x<h>:<metres> ..."
+    finally:
+        s.close()
+    out = {}
+    for item in (r or "").split()[2:] if (r or "").startswith("ok ") else ():
+        try:
+            index, size = item.split(":")[:2]
+            w, h = size.split("x")
+            out[str(int(index))] = [int(w), int(h)]
+        except ValueError:
+            continue
+    return out
 
 
 class GazeStream:

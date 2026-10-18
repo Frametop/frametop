@@ -267,7 +267,7 @@ def check_install():
     venv = repo / "gaze/tracker/build/venv"
     done = venv / "requirements.done"
     req = repo / "gaze/tracker/requirements.txt"
-    if not (venv / "bin/python").exists():
+    if not os.path.lexists(venv / "bin/python"):  # a link to the container's Python (ft-gazed's venv_built)
         say("  gaze/tracker/build/venv (our tracker's Python): missing")
     else:
         same = done.is_file() and req.is_file() and done.read_bytes() == req.read_bytes()
@@ -310,7 +310,7 @@ def gaze_settings(repo):
     except OSError:
         pass
     setting = conf.get("GAZE_TRACKER", "auto").lower()
-    venv = (repo / "gaze/tracker/build/venv/bin/python").exists() if repo else False
+    venv = os.path.lexists(repo / "gaze/tracker/build/venv/bin/python") if repo else False
     installed = EYEGRAB_BIN.exists() and EYEGRAB_UNIT.exists() and venv
     tracker = setting if setting in ("own", "steam") else "own" if installed else "steam"
     return conf, setting, installed, tracker

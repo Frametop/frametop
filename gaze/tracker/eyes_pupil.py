@@ -149,7 +149,9 @@ class SizeGuard:
     0.77 and a quarter of them under 0.52. "long" is the ratio alone, under GUARD_ALONE, which
     is also the rule while the other eye isn't seen. A refused find counts as not found. If
     refusals go on for GUARD_RESET s, the eye's usual size starts over, so a pupil that did
-    change (light with one eye lost) is taken again."""
+    change (light with one eye lost) is taken again. Each eye's kept and refused finds and those
+    restarts are counted (counts), so a session shows whether it refused real pupils: many
+    restarts, or refusals while both eyes looked fine, say it did."""
 
     def __init__(self, rule="both"):
         self.rule = rule if rule in GUARD_RULES else "both"
@@ -159,6 +161,8 @@ class SizeGuard:
         self.last = {0: None, 1: None}          # (t, ratio) of each eye's last kept find
         self.refusing = {0: None, 1: None}      # when the current run of refusals began
         self.refused = {0: 0, 1: 0}
+        self.kept = {0: 0, 1: 0}
+        self.restarts = {0: 0, 1: 0}            # runs of refusals that went on GUARD_RESET s
 
     def ratio(self, e, t, a):
         h = self.finds[e]
@@ -189,14 +193,20 @@ class SizeGuard:
             elif t - self.refusing[e] > GUARD_RESET:
                 self.finds[e].clear()
                 self.usual[e], ok, r = None, True, None
+                self.restarts[e] += 1
         if not ok:
             self.refused[e] += 1
             return False
         self.refusing[e] = None
+        self.kept[e] += 1
         self.finds[e].append((t, a))
         self.since[e] += 1
         self.last[e] = (t, 1.0 if r is None else r)
         return True
+
+    def counts(self, e):
+        """Eye e's finds judged so far: {"kept", "refused", "restarts"} (none with the rule off)."""
+        return {"kept": self.kept[e], "refused": self.refused[e], "restarts": self.restarts[e]}
 
 
 GLINT_RING = 140   # a glint sits on dark iris or pupil: its surroundings are below this

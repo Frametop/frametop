@@ -57,7 +57,10 @@ finder runs too, for them.
 The pupil finder's size guard (eyes_pupil.SizeGuard): a find much smaller than that eye's usual
 size, judged against how the other eye's size compares with its own (both narrow in light),
 counts as not found. EYES_SIZE_GUARD in frametop.conf (or FT_EYES_SIZE_GUARD): both (the
-default), long (against its own usual size only) or off. Read at start.
+default), long (against its own usual size only) or off. Read at start. Each eye's kept and
+refused finds, and its usual size's restarts, are in the status ("size_guard_counts", since the
+start), and once a minute that it refused any, a log line says how many ("size guard, the last
+60 s: right refused 40 of 3100 finds; left refused 0 of 3200 finds").
 
 Environment, for replays (lab/ft-eyes-e2e): FT_EYES_CAMS, FT_EYES_GAZE, FT_EYES_STATE (the
 state folder), FT_EYES_SOCKET (the socket's name), FT_EYES_MODEL, FT_EYES_SIZE_GUARD. With
@@ -146,6 +149,7 @@ def size_guard_rule():
 
 
 SIZE_GUARD = size_guard_rule()
+GUARD_REPORT = 60.0  # s between the size guard's log lines (only when it refused something)
 
 CAMS = os.environ.get("FT_EYES_CAMS", "/dev/shm/frametop-eyes-cams")  # overrides for replays
 OUT = os.environ.get("FT_EYES_GAZE", "/dev/shm/frametop-eyes-gaze")
@@ -514,6 +518,7 @@ class Tracker:
         return {"calibration": self.cal.info if self.cal else None, "calibrating": self.calibrating,
                 "feature": FEATURE, "model": NET.folder if NET else None,
                 "dots": len(self.dots), "size_guard": None if NET else self.guard.rule,
+                "size_guard_counts": None if NET else {EYES[e]: self.guard.counts(e) for e in (0, 1)},
                 "eyes": {EYES[e.eye]: {"shift": e.shift.value.tolist(), "clicks": len(e.shift.meas),
                                        "jump": bool(np.any(e.shift.jump)), "jump_px": e.shift.jump.tolist(),
                                        "reseat": e.shift.reseated} for e in self.eyes}}
@@ -597,6 +602,18 @@ def below_steamvr():
         print(f"ft-eyes: SCHED_BATCH: {e}", file=sys.stderr, flush=True)
 
 
+def guard_line(guard, was):
+    """The size guard since `was` (its counts then): (its counts now, a log line, or "" if it
+    refused nothing). Its own line, once a minute: ft-gazed keeps it (it drops the fps lines)."""
+    now = {e: guard.counts(e) for e in (0, 1)}
+    d = {e: {k: now[e][k] - was[e][k] for k in now[e]} for e in (0, 1)}
+    if not any(d[e]["refused"] for e in (0, 1)):
+        return now, ""
+    parts = [f"{EYES[e]} refused {d[e]['refused']} of {d[e]['kept'] + d[e]['refused']} finds"
+             + (f", {d[e]['restarts']} restarts" if d[e]["restarts"] else "") for e in (0, 1)]
+    return now, f"size guard, the last {GUARD_REPORT:.0f} s: " + "; ".join(parts)
+
+
 def main():
     below_steamvr()
     verbose = "-v" in sys.argv
@@ -624,7 +641,8 @@ def main():
     cams = wait_for_cams(sock, tracker, want)
     print("ft-eyes: frames found, tracking", file=sys.stderr, flush=True)
     seen = [cams.count(0), cams.count(1)]
-    report = time.monotonic()
+    report = guard_at = time.monotonic()
+    guard_was = {e: tracker.guard.counts(e) for e in (0, 1)}
     arrived = [0.0, 0.0]  # when each camera's newest frame was seen (monotonic)
     while True:
         serve(sock, tracker)
@@ -668,6 +686,10 @@ def main():
                     e.work = 0.0
                 print("ft-eyes: " + "; ".join(parts), file=sys.stderr, flush=True)
             report = now
+            if now - guard_at >= GUARD_REPORT:
+                guard_at, guard_was, line = now, *guard_line(tracker.guard, guard_was)
+                if line and not NET:
+                    print("ft-eyes: " + line, file=sys.stderr, flush=True)
             if cams.replaced():
                 print("ft-eyes: frames went away; waiting", file=sys.stderr, flush=True)
                 cams = wait_for_cams(sock, tracker, want)

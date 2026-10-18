@@ -243,7 +243,8 @@
 // both one) sends "calaccept" to @ft_gazed (take this dot now), a right click or gaze_right
 // "calquit" (calpanel.h). Another program's head-locked panel can take them the same way
 // ("calpanel 1 NAME", answered on @NAME: the gaze bench). The relay hears "calpanel 1|0" from
-// here, so it knows when Enter is the panel's and not the desktop's.
+// here, so it knows when Enter is the panel's and not the desktop's, and so does ft-screens, so
+// the palm menu waits.
 //   POINTER_ROLE (treadmill, the default, or right, left, stylus): the role our device takes while
 // connected. Treadmill is no hand, so the real controllers keep both hand roles and a controller
 // can be used beside the pointer (or a bare hand's ray). The driver must hint it from the start
@@ -388,7 +389,9 @@
 // typing before the first key, within POINTER_TYPING_RECENT (600 s) of one. A hand held back makes
 // no pinch, middle pinch or grip ("pinch right: ignored (typing: the hand is on the keyboard)"),
 // and has no ray: one that drove the pointer lets it go to the mouse or the gaze ("hand ray: right
-// -> none (typing)"), and it can't claim it again until the hand is lifted. ft-screens gets "typing
+// -> none (typing)"), and it can't claim it again until the hand is lifted. A hand that goes onto the
+// keyboard holding a pinch, grip or three-finger scroll lets go of it, as lost: no click ("hand left
+// pinch ended: typing: the hand is on the keyboard"). ft-screens gets "typing
 // <L 0|1> <R 0|1>" on @ft_screens, on a change and every second: no pokes, near grabs or "grab
 // that" by those hands. Changes go to the log ("typing: right hand on the keyboard", "typing: right
 // hand off the keyboard (raised 0.09 m)").
@@ -1989,6 +1992,7 @@ int main() {
                         calPanelUntil = Clock::time_point{};
                     }
                     SendTo(out, "frametop_relay", Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");
+                    SendTo(out, "ft_screens", Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");   // no palm menu
                     continue;
                 }
             }
@@ -2727,8 +2731,10 @@ int main() {
                 if (gazeOn) gazeOwns = true, nudging = false;
                 std::printf("three-finger pinch %s: scrolled at the gaze on %s (stick up to %.2f, held %.2f s)%s\n",
                             hold.side ? "right" : "left", lastHit.empty() ? "nothing" : lastHit.c_str(), hold.scrollMax,
-                            secsOf(tnow) - hold.gaze.Began(), lost ? ": the hand was lost" : "");
+                            secsOf(tnow) - hold.gaze.Began(),
+                            !lost ? "" : gazeEndWhy.empty() ? ": the hand was lost" : (": " + gazeEndWhy).c_str());
                 std::fflush(stdout);
+                gazeEndWhy.clear();
                 hold = {};
                 return;
             }
@@ -3243,6 +3249,17 @@ int main() {
             rayHoldCancel = false;
             if (hold.src == Src::Ray) endRayHold(true, "the ray went (a controller, the mouse, or hand input off)");
         }
+        // A hand that went onto the keyboard lets go of what it held (a pinch, grip or three-finger scroll,
+        // the chord's right button), as lost: no click. Ray holds end above, when typing drops the ray.
+        if (hold.src == Src::Hand && hold.side >= 0 && typist.Parked(hold.side)) {
+            if (!hold.gaze.On()) {   // gaze pinches and three-finger scrolls say why themselves
+                std::printf("hand %s %s ended: typing: the hand is on the keyboard\n", hold.side ? "right" : "left",
+                            hold.grip ? "grip" : "pinch");
+                std::fflush(stdout);
+            }
+            endGesture(true, "typing: the hand is on the keyboard");
+        }
+        if (chordBtn.On() && chordSide >= 0 && typist.Parked(chordSide)) chordEnds(true, "typing: the hand is on the keyboard");
         if (handOk && (hg.seq != handSeq || handFile.opens != handOpens)) {
             handSeq = hg.seq;
             handPublished = hg.publish_ns;

@@ -279,6 +279,22 @@ void TestPointAndEnter() {
     CHECK(k.ty.Parked(1) && k.Blocked(1), "a typing hand with its ray up: on the keyboard");
 }
 
+// A hand holding a gesture (busy: a three-finger scroll, live 2026-10-18 16:4x) out of the zone is
+// free; brought down onto the keys while the other hand types, it's on the keyboard, so the helper
+// ends what it held (Parked).
+void TestHoldOntoTheKeys() {
+    World w;
+    w.hands[0] = Pointing(0), w.hands[1] = Keys(1);
+    w.hands[0].busy = true;
+    w.Run(1, 0.2);
+    CHECK(!w.ty.Parked(0) && !w.Blocked(0), "holding, raised, the other hand typing: free (%s)", w.ty.Why(0, w.t));
+    w.hands[0] = Keys(0);
+    w.hands[0].busy = true;
+    w.Run(0.3, 0.2);
+    CHECK(w.ty.Parked(0), "still holding, down on the keys: on the keyboard");
+    CHECK(w.log.find("left hand on the keyboard") != std::string::npos, "logged: %s", w.log.c_str());
+}
+
 // A palm turned up (the palm menu's pose) leaves the keyboard too.
 void TestTurned() {
     World w;
@@ -339,6 +355,7 @@ int main() {
     TestMouseUser();
     TestLost();
     TestPointAndEnter();
+    TestHoldOntoTheKeys();
     TestTurned();
     TestOff();
     TestHeading();

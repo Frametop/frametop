@@ -1016,7 +1016,7 @@ class Service:
             st.update(calibration_samples=cal.get("dots", 0), calibration_made=cal.get("made"),
                       lessons=max(len(m) for m in w.misses), own_running=bool(own),
                       own_reseat=any(e.get("reseat") for e in own.get("eyes", {}).values()),
-                      size_guard=own.get("size_guard"))
+                      size_guard=own.get("size_guard"), size_guard_counts=own.get("size_guard_counts"))
         f = self.fusion
         st["fusion"] = {"setting": "on" if self.fusion_on else "off", "in_use": self.fusing,
                         "fitted": bool(f and f.ready()), "dots": f.info.get("dots", 0) if f else 0,

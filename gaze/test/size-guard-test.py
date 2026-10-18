@@ -69,6 +69,28 @@ for rule, refused in (("both", True), ("off", False)):
     check(abs(rows[-1]["a"] - 20) < 1.5, f"{rule}: ...with its size")
     check(left.refused == 0 and sum(1 for r in rows if r.get("guard")) == (1 if refused else 0),
           f"{rule}: nothing else refused")
+    counts = tracker.status()["size_guard_counts"]
+    got = {e: (c["kept"] >= 30, c["refused"], c["restarts"]) for e, c in counts.items()}
+    want = {"right": (True, 1, 0), "left": (True, 0, 0)} if refused else \
+        {e: (False, 0, 0) for e in ("right", "left")}   # the rule off: nothing judged
+    check(got == want, f"{rule}: status counts the guard's finds: {counts}")
+    zero = {e: {"kept": 0, "refused": 0, "restarts": 0} for e in (0, 1)}
+    _, line = fe.guard_line(tracker.guard, zero)
+    check(("right refused 1 of " in line and "left refused 0 of " in line and "restarts" not in line) if refused
+          else line == "", f"{rule}: its minute's log line: {line!r}")
+    if refused:
+        # The right pupil really smaller (one eye's light) for over GUARD_RESET: its usual size
+        # starts over, once, and that's counted.
+        was = {e: tracker.guard.counts(e) for e in (0, 1)}
+        t += 0.01
+        for i in range(int(fe.eyes_pupil.GUARD_RESET * 90) + 30):
+            left.feed(t, frame(30, 24))
+            right.feed(t + 0.001, frame(20, 15))
+            t += 1 / 90
+        check(tracker.guard.counts(1)["restarts"] == 0 and tracker.guard.counts(0)["restarts"] == 1,
+              f"{rule}: a pupil that stayed smaller: one restart: {tracker.status()['size_guard_counts']}")
+        _, line = fe.guard_line(tracker.guard, was)
+        check(", 1 restarts" in line, f"{rule}: ...in the log line: {line!r}")
 
 print(f"{'FAILED' if failed else 'ok'}: size guard")
 sys.exit(1 if failed else 0)

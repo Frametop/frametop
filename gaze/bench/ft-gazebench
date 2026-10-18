@@ -1,0 +1,18 @@
+#!/bin/bash
+# Launch the Frametop Gaze Bench from a Plasma session on the Frame host (its app menu entry,
+# gaze/bench/install.sh), as the eye recorder's gaze/rec/ft-eyerec: the app runs in Frametop's
+# container (PySide6), on the session's Wayland socket and bus; podman gets the real
+# XDG_RUNTIME_DIR and user bus.
+# Options go to gazebench.py: --base DIR (where runs go), --no-images.
+here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+wl=${WAYLAND_DISPLAY:-wayland-0}
+case $wl in /*) ;; *) wl="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$wl" ;; esac
+session_bus=${DBUS_SESSION_BUS_ADDRESS:-}
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+cd "$HOME" || exit 1
+exec "$here/../../scripts/in-box" env PATH="/opt/frametop/venv/bin:/opt/frametop/bin:$PATH:/usr/sbin:/sbin" \
+  WAYLAND_DISPLAY="$wl" DISPLAY="${DISPLAY:-}" \
+  XAUTHORITY="${XAUTHORITY:-}" DBUS_SESSION_BUS_ADDRESS="$session_bus" \
+  QT_QPA_PLATFORM="wayland;xcb" ${FT_GAZE:+FT_GAZE="$FT_GAZE"} ${FT_BENCH_BASE:+FT_BENCH_BASE="$FT_BENCH_BASE"} \
+  python3 "$here/gazebench.py" "$@"

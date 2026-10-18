@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "about": "The gaze bench's scenarios (README.md). Targets are fractions of the screen across (u) and down (v); 0 and 1 are the edges, as far out as a whole target fits. Generators: grid [cols, rows] over span; edges N per edge, corners included; rays: fractions of the way from the middle to the edge along dirs directions; random N with edge_share of them on an edge; pairs N, two targets gap px apart (click the filled one).",
+  "background": "#262626",
+  "scenarios": [
+    {
+      "id": "warmup",
+      "name": "Warm-up",
+      "about": "Nine targets in the middle of the screen.",
+      "prompt": "Look at the target, then click it.",
+      "targets": {"grid": [3, 3], "span": [0.2, 0.8]},
+      "shuffle": true
+    },
+    {
+      "id": "edges",
+      "name": "Screen edges",
+      "about": "Sixteen targets along the four edges and in the corners.",
+      "prompt": "Look at the target, then click it.",
+      "targets": {"edges": 5},
+      "shuffle": true
+    },
+    {
+      "id": "hold",
+      "name": "Hold at the edges",
+      "about": "Look at an edge target for 3 seconds before you click: the tracker loses an eye out there.",
+      "prompt": "Keep looking at the target. Click when it turns white.",
+      "targets": {"edges": 3},
+      "dwell": 3.0,
+      "shuffle": true
+    },
+    {
+      "id": "eyes-only",
+      "name": "Eyes only",
+      "about": "Keep your head facing the cross in the middle and move only your eyes, out to the edges.",
+      "prompt": "Keep your head facing the cross. Move only your eyes to the target, then click it.",
+      "targets": {"rays": [0.35, 0.7, 1.0], "dirs": 8},
+      "head_mark": true,
+      "shuffle": true
+    },
+    {
+      "id": "head-turn",
+      "name": "Turn to it",
+      "about": "The same places, but turn your head to face each target first.",
+      "prompt": "Turn your head to face the target, then click it.",
+      "targets": {"rays": [0.35, 0.7, 1.0], "dirs": 8},
+      "shuffle": true
+    },
+    {
+      "id": "light",
+      "name": "Light changes",
+      "about": "The screen switches between dark, bright and grey: your pupils change size.",
+      "prompt": "Look at the target, then click it.",
+      "targets": {"grid": [4, 3], "span": [0.1, 0.9]},
+      "backgrounds": ["#000000", "#f2f2f2", "#6a6a6a"],
+      "shuffle": true
+    },
+    {
+      "id": "small",
+      "name": "Small and close",
+      "about": "Two targets side by side: click the filled one.",
+      "prompt": "Look at the filled target, then click it.",
+      "targets": {"pairs": 12, "gap": 40}
+    },
+    {
+      "id": "reseat",
+      "name": "After a nudge",
+      "about": "Lift the headset a little and set it back, then nine targets: how fast the tracker recovers.",
+      "message": "First lift the headset a little off your face and set it back down.",
+      "prompt": "Look at the target, then click it.",
+      "targets": {"grid": [3, 3], "span": [0.15, 0.85]},
+      "shuffle": true
+    },
+    {
+      "id": "long",
+      "name": "Long session",
+      "about": "Sixty targets anywhere on the screen at your own pace, about six minutes: drift, slips and stale corrections.",
+      "prompt": "Look at the target, then click it.",
+      "targets": {"random": 60, "edge_share": 0.3},
+      "gap": [1.0, 5.0]
+    }
+  ]
+}

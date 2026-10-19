@@ -113,6 +113,7 @@ def service(one, source="mmap1"):
     svc.opens, svc.vergence = (deque(maxlen=90), deque(maxlen=90)), deque(maxlen=90)
     svc.lost, svc.bad_at, svc.fallback = [False, False], [0.0, 0.0], EyeFallback()
     svc.fix, svc.last_sample, svc.low_until = GazeLock(radius=1.0), 0.0, [0.0, 0.0]
+    svc.bridge = gazed.EyeBridge()
     svc.correction = lambda name, hy, hp: (0.0, 0.0)
     svc.sent = []
     svc.send = lambda t, hy, hp, rhy, rhp, eyes: svc.sent.append((hy, hp))

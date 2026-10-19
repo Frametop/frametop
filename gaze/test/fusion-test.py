@@ -114,6 +114,7 @@ def service(fusion_on=True, one=None):
                                 "looking_down", "dropped", "fused", "steam_only"), 0)
     svc.opens, svc.lost = (deque(maxlen=90), deque(maxlen=90)), [False, False]
     svc.fix, svc.last_sample, svc.low_until = GazeLock(radius=1.0), 0.0, [0.0, 0.0]
+    svc.bridge = gazed.EyeBridge()
     svc.weights = {"own": EyeWeights()}
     svc.fusion_on = fusion_on
     svc.fusion = Fusion()

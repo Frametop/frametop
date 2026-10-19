@@ -141,6 +141,7 @@ def service():
                                 "looking_down", "dropped"), 0)
     svc.opens, svc.lost = (deque(maxlen=90), deque(maxlen=90)), [False, False]
     svc.fix, svc.last_sample, svc.low_until = GazeLock(radius=1.0), 0.0, [0.0, 0.0]
+    svc.bridge = gazed.EyeBridge()
     svc.weights = {"own": EyeWeights()}
     svc.sent = []
     svc.send = lambda t, hy, hp, rhy, rhp, eyes: svc.sent.append((t, hy, hp))

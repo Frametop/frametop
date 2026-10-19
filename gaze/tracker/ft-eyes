@@ -28,8 +28,13 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
   calib-start                  a new calibration: collect dots from now on
   calib-point T0 T1 YAW PITCH  a dot you looked at from T0 to T1 (CLOCK_MONOTONIC_RAW) in
                                that direction (head-relative degrees): "ok N0 N1 SD0 SD1"
-                               (frames and spread in px per eye, right first) or "fail WHY"
-  calib-fit                    fit the dots, save, and start the shifts and clicks over
+                               (frames and spread in px per eye, right first), then
+                               " (EYE eye only: WHY)" if one eye wasn't seen enough or moved
+                               (the dot is kept for the other), or "fail WHY"
+  calib-fit                    fit the dots, save, and start the shifts and clicks over. Each
+                               eye is fitted on the dots it was seen at; one seen at too few
+                               (eyes_model.MIN_CLICKS) is left out, and the other maps the
+                               gaze alone ("..., left not used (9 dots, needs 12)")
   click T YAW PITCH            a click: you were looking there just before T; teaches the
                                shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured)
   fit                          JSON: the last second of pupil finds per camera, for the fit
@@ -460,23 +465,44 @@ class Tracker:
                 return "fail no calibration started"
             t0, t1, yaw, pitch = map(float, w[1:])
             got = {e.eye: e.window(t0, t1) for e in self.eyes}
+            # Each eye that was seen and held still counts: the dot is taken with one eye if
+            # the other was lost (looking far toward that eye's ear, say) or jumped about.
+            why = {}
             for c, g in got.items():
                 if g is None or g["n"] < CALIB_MIN:
-                    return f"fail the {EYES[c]} eye was seen in only {0 if g is None else g['n']} frames"
-                if g["spread"] > CALIB_SPREAD:
-                    return f"fail the {EYES[c]} eye moved ({g['spread']:.1f} px)"
-            self.dots.append(dict(truth=(yaw, pitch), eye={c: dict(pupil=g["pupil"], mid=g["mid"]) for c, g in got.items()}))
-            return "ok {} {} {:.2f} {:.2f}".format(got[0]["n"], got[1]["n"], got[0]["spread"], got[1]["spread"])
+                    why[c] = f"the {EYES[c]} eye was seen in only {0 if g is None else g['n']} frames"
+                elif g["spread"] > CALIB_SPREAD:
+                    why[c] = f"the {EYES[c]} eye moved ({g['spread']:.1f} px)"
+            if len(why) == 2:
+                moved = [c for c in (0, 1) if "moved" in why[c]]
+                if moved:
+                    return "fail " + why[moved[0]]
+                return "fail neither eye was seen enough ({})".format(
+                    ", ".join(f"{EYES[c]} {0 if got[c] is None else got[c]['n']} frames" for c in (0, 1)))
+            self.dots.append(dict(truth=(yaw, pitch), eye={c: dict(pupil=g["pupil"], mid=g["mid"])
+                                                           for c, g in got.items() if c not in why}))
+            n = [0 if got[c] is None else got[c]["n"] for c in (0, 1)]
+            spread = [math.nan if got[c] is None else got[c]["spread"] for c in (0, 1)]
+            reply = "ok {} {} {:.2f} {:.2f}".format(*n, *spread)
+            for c, text in why.items():
+                reply += f" ({EYES[1 - c]} eye only: {text})"
+            return reply
         if w[0] == "calib-fit":
             if len(self.dots) < eyes_model.MIN_CLICKS:
                 return f"fail only {len(self.dots)} dots (need {eyes_model.MIN_CLICKS})"
+            seen = {c: sum(1 for k in self.dots if c in k["eye"]) for c in (0, 1)}
             cal = eyes_model.Calibration.fit(self.dots, {"made": time.strftime("%Y-%m-%d %H:%M:%S"),
                                                        "dots": len(self.dots), "from": "probe calibration",
-                                                       "feature": FEATURE})
-            if not all(cal.has(n, c) for n in ("pupil", "where") for c in (0, 1)):
-                return "fail not enough dots with both eyes"
-            errs = [float(np.hypot(*(np.mean([cal.gaze(c, *k["eye"][c]["pupil"]) for c in (0, 1)], axis=0)
-                                     - k["truth"]))) for k in self.dots]
+                                                       "feature": FEATURE,
+                                                       "eye_dots": {EYES[c]: seen[c] for c in (0, 1)}})
+            if not cal.eyes():
+                return "fail neither eye was seen at enough dots ({}; need {})".format(
+                    ", ".join(f"{EYES[c]} {seen[c]}" for c in (0, 1)), eyes_model.MIN_CLICKS)
+            errs = []
+            for k in self.dots:
+                g = cal.combine({c: cal.gaze(c, *v["pupil"]) for c, v in k["eye"].items() if cal.has("pupil", c)})
+                if g is not None:
+                    errs.append(float(np.hypot(*(g - k["truth"]))))
             if CALIBRATION.exists():
                 CALIBRATION.replace(CALIBRATION.with_name(time.strftime("calibration-%Y%m%d-%H%M%S.json")))
             cal.save(CALIBRATION)
@@ -491,7 +517,9 @@ class Tracker:
                                                     "mid": None if v["mid"] is None else v["mid"].tolist()}
                                                 for c, v in k["eye"].items()}}) + "\n")
             return (f"ok {len(self.dots)} dots, fit median {np.median(errs):.2f} deg, eyes "
-                    + ", ".join(f"{EYES[c]} {cal.spread[c]:.2f}" for c in sorted(cal.spread)))
+                    + ", ".join(f"{EYES[c]} {cal.spread[c]:.2f} ({seen[c]} dots)" if c in cal.spread
+                                else f"{EYES[c]} not used ({seen[c]} dots, needs {eyes_model.MIN_CLICKS})"
+                                for c in (0, 1)))
         if w[0] == "click" and len(w) == 4:
             if not self.cal:
                 return "fail not calibrated"
@@ -516,6 +544,7 @@ class Tracker:
 
     def status(self):
         return {"calibration": self.cal.info if self.cal else None, "calibrating": self.calibrating,
+                "mapped": [EYES[c] for c in self.cal.eyes()] if self.cal else None,
                 "feature": FEATURE, "model": NET.folder if NET else None,
                 "dots": len(self.dots), "size_guard": None if NET else self.guard.rule,
                 "size_guard_counts": None if NET else {EYES[e]: self.guard.counts(e) for e in (0, 1)},
@@ -636,7 +665,8 @@ def main():
     cal = tracker.cal
     print("ft-eyes: " + (f"the eye net {NET.name} ({NET.folder}); " if NET else "")
           + (f"calibration from {cal.info.get('made')} ({cal.info.get('from', cal.info.get('capture'))})"
-                           if cal else "not calibrated: run the probe's calibration with the Own tracker")
+             + ("" if len(cal.eyes()) == 2 else f", the {' and '.join(EYES[c] for c in cal.eyes())} eye only")
+             if cal else "not calibrated: run the probe's calibration with the Own tracker")
           + f"; waiting for {CAMS}", file=sys.stderr, flush=True)
     cams = wait_for_cams(sock, tracker, want)
     print("ft-eyes: frames found, tracking", file=sys.stderr, flush=True)

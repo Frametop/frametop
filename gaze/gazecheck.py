@@ -79,8 +79,9 @@ Our tracker's first calibration: before it has one, ft-eyes publishes no gaze (i
 to a gaze only with a calibration), so there's no gaze to hold still. Its calibration runs
 anyway ("blind"): someone in the headset (SteamVR's tracker sees an eye) and ft-eyes answering
 are enough to start it, each dot stands in for the gaze, and a click takes the CHECK_WINDOW up
-to it. ft-eyes then checks that each pupil was seen and held still in that window (calib-point)
-and says why not. Without this, a fresh install could never calibrate our tracker.
+to it. ft-eyes then checks that the pupils were seen and held still in that window (calib-point:
+one eye is enough, and the dot is kept for that eye) and says why not. Without this, a fresh
+install could never calibrate our tracker.
 
 Looked away (our tracker's full calibration): where SteamVR saw both eyes at a dot, their mean more
 than LOOKED_AWAY from it, past their usual offset in this calibration (the median over the dots
@@ -217,7 +218,10 @@ def reject_reason(reply, why):
         key = max(why, key=why.get)
         return *STEAM_REASONS[key], key.startswith("lost")
     words = reply.removeprefix("fail ").split()
-    # ft-eyes: "fail the left eye was seen in only 3 frames", "fail the left eye moved (4.2 px)"
+    # ft-eyes: "fail the left eye moved (4.2 px)", "fail neither eye was seen enough (right 3
+    # frames, left 0 frames)"; one eye seen is enough for a dot (and its answer is "ok ...")
+    if reply.startswith("fail neither eye was seen"):
+        return "eyes not seen", "our tracker saw neither eye well enough", True
     if len(words) >= 3 and words[0] == "the" and words[2] == "eye":
         eye = words[1]
         if "seen" in words:

@@ -81,7 +81,11 @@ anyway ("blind"): someone in the headset (SteamVR's tracker sees an eye) and ft-
 are enough to start it, each dot stands in for the gaze, and a click takes the CHECK_WINDOW up
 to it. ft-eyes then checks that the pupils were seen and held still in that window (calib-point:
 one eye is enough, and the dot is kept for that eye) and says why not. Without this, a fresh
-install could never calibrate our tracker.
+install could never calibrate our tracker. A full calibration goes blind the same way whenever
+ours sends no gaze for OWN_GONE: its calibration maps one eye, and that's the one you can't
+show it now. Live 2026-10-18 a calibration with the left eye closed mapped only the right, and
+the next one, with the right eye closed, took no dot: every click waited for a gaze that
+couldn't come ("Waiting: the eye tracker isn't sending a gaze").
 
 Looked away (our tracker's full calibration): where SteamVR saw both eyes at a dot, their mean more
 than LOOKED_AWAY from it, past their usual offset in this calibration (the median over the dots
@@ -207,6 +211,7 @@ STEAM_REASONS = {"lost_left": ("left eye lost", "SteamVR lost your left eye"),
                  "vergence": ("eyes disagreed", "SteamVR's two eyes disagreed")}
 FIT_HINT = "check the headset fit"
 ACCEPT_WAIT = 1.5      # seconds after a click with no capture before the panel says what it waits for
+OWN_GONE = 0.5         # seconds without our tracker's gaze before a full calibration goes blind (see the top)
 
 
 def reject_reason(reply, why):
@@ -605,7 +610,8 @@ class Checks:
         self.check = {"kind": kind, "reason": reason, "own": own, "dots": check_dots(kind, own), "i": 0,
                       "started": now, "shown": now, "run": [], "accept": False, "done_at": None, "tries": 0,
                       "skipped": 0, "captured": 0, "points": {}, "reasons": {}, "fit_reasons": set(), "note": "",
-                      "blind": blind, "fusion": [], "away_dots": [], "away_off": False, "steam_offsets": []}
+                      "blind": blind, "fusion": [], "away_dots": [], "away_off": False, "steam_offsets": [],
+                      "own_at": now, "run_blind": blind, "went_blind": False}
         log(f"{kind} check: {reason}" + (" (our tracker's first: no gaze yet, so each click takes the look "
                                          "up to it)" if blind else ""))
         self.note_until = None   # the check's panel replaces the slip note
@@ -920,10 +926,21 @@ class Checks:
             return  # (asking: ft-eyes has this dot's look, or the fit)
         if c["own"]:
             src = s["src"].get("own") or {}
-            if c["blind"]:
-                # Our tracker's first calibration: no gaze yet, so the dot stands in for it (the
-                # gaze can't seem to move) and a click takes the look up to it. ft-eyes checks
-                # the pupils held still (see the top).
+            if "hy" in src:
+                c["own_at"] = self.sample_at
+            # Our tracker's first calibration: no gaze yet, so the dot stands in for it (the
+            # gaze can't seem to move) and a click takes the look up to it. ft-eyes checks
+            # the pupils held still (see the top). A full calibration does the same while ours
+            # sends no gaze: its calibration maps only the eye you've closed.
+            blind = c["blind"] or (c["kind"] == "full" and self.sample_at - c["own_at"] > OWN_GONE)
+            if blind != c["run_blind"]:
+                c["run"].clear()  # the dot standing in and our gaze aren't one look
+                c["run_blind"] = blind
+                if blind and not c["went_blind"]:
+                    c["went_blind"] = True
+                    log(f"{c['kind']} check: our tracker sends no gaze (its calibration's eyes aren't seen): "
+                        "each click takes the look up to it")
+            if blind:
                 yaw, pitch, _ = c["dots"][c["i"]]
                 src = {"hy": yaw, "hp": pitch}
         else:

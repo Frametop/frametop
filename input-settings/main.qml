@@ -1306,7 +1306,8 @@ Kirigami.ApplicationWindow {
                         text: (backend.pauseGesture.first === "" ? "No gesture: a mapped button, a key combination, or ft-pause still work."
                                : "Pauses and resumes Frametop, in games too. The game still gets the presses, so pick buttons it "
                                  + "doesn't use this way. Two buttons count as together when both go down within a third of a "
-                                 + "second, and twice means within 0.7 s.")
+                                 + "second, and twice means within 0.7 s. A gesture with a button on each controller works with "
+                                 + "one controller too: while only one is connected, its button alone, clicked twice, does it.")
                               + (gmpage.st.relay && backend.pauseGesture.first !== "" && !gmpage.st.gestureReader
                                  ? " Not reading the controllers right now (SteamVR isn't running?)." : "")
                     }

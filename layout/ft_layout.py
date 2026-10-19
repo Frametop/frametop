@@ -41,6 +41,8 @@ you face (yaw only), like a recenter. It lives in ~/.config/frametop-layout.json
               "direct": ["10.35.78.20"],          its Steam Link dongle on the Frame's hotspot
               "route": "auto",                    auto (the dongle when it answers) | network |
                                                           dongle (only; ft-stream reads both)
+              "mic": false,                       send the Frame's microphone to it (needs
+                                                          Frametop's Vibepollo on Windows; ft-stream)
               "displays": [{"id": "desk-pc-oled",         (docs/remote-displays.md), each a panel
                             "client": "frametop-1",       streamed by ft-stream: its paired client,
                             "app": "display:{GUID}",      what it streams (display:DEVICE, monitor:
@@ -101,8 +103,9 @@ Usage (on the Frame host; Frametop Display Settings calls it too):
                                      first, or with --login, with the Web UI login read from stdin
                                      as two lines: a Sunshine instance on PORT) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M ...
-  ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none
-                                     how a host's streams reach it; its running streams start over
+  ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
+                                     how a host's streams reach it (they start over), and whether
+                                     the Frame's microphone goes to it (within 3 s, no restart)
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
   ft-layout remote remove ID         stops it and unpairs its client (the host stays)
@@ -974,7 +977,7 @@ def remote_command(args):
         for n, host, d in remote_displays(layout):
             w, h = d.get("size", [2560, 1440])
             state = "disconnected" if d.get("off") else running.get(n, "off")
-            state += f" route {host.get('route', 'auto')}"
+            state += f" route {host.get('route', 'auto')}{' mic' if host.get('mic') else ''}"
             print(f"{n} {d['id']} {host.get('name')} {display_target(host, d)} {d['app']} {w}x{h}@{d.get('fps', 60)} "
                   f"{state}{' hidden' if d.get('hidden') else ''}  {d.get('label', '')}")
         return
@@ -983,15 +986,23 @@ def remote_command(args):
         host = next((h for h in layout.get("hosts", []) if h.get("name") == args[1]), None)
         if host is None:
             raise RuntimeError(f"no host called {args[1]!r}")
+        restart = False
         for kv in args[2:]:
             k, _, v = kv.partition("=")
             if k == "route" and v in ("auto", "network", "dongle"):
                 host["route"] = v
+                restart = True
             elif k == "direct" and (v == "none" or re.fullmatch(r"[A-Za-z0-9.:-]+(,[A-Za-z0-9.:-]+)*", v)):
                 host["direct"] = [] if v == "none" else v.split(",")
+                restart = True
+            elif k == "mic" and v in ("on", "off"):
+                host["mic"] = v == "on"  # the stream playing its sound looks every 3 s
             else:
-                raise RuntimeError(f"remote host: {kv!r}? (route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none)")
+                raise RuntimeError(f"remote host: {kv!r}? (route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none "
+                                   "mic=on|off)")
         save_layout(layout)
+        if not restart:
+            return
         # Its streams start over the new way, their panels where they are (ft-screens keeps
         # their places across a stop in the same run).
         try:
@@ -1153,7 +1164,7 @@ def remote_command(args):
         log(f"removed {d['id']}; {said[-1] if said else f'unpair exited {code}'}")
         return
     raise RuntimeError("remote list | monitors ADDRESS | add HOST ADDRESS APP [options] | set ID KEY=VALUE... | "
-                       "host NAME route=...|direct=... | connect ID... | disconnect ID... | remove ID")
+                       "host NAME route=...|direct=...|mic=... | connect ID... | disconnect ID... | remove ID")
 
 
 def apply(wait=0):

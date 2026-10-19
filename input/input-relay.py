@@ -70,6 +70,9 @@ reaches games; see pointer/helper/vrbuttons.h).
 
 In gaze mode outside games, the helper keeps the pointer ("gazeawake 1", repeated every 5
 seconds; "gazeawake 0" or silence ends it): the pointer isn't released when the mouse is idle.
+When something else let the pointer go, the gaze takes it back and the helper says "gazewoke"
+(the pointer is on again here too). The hides here say why: "hide toggle" (pointer_toggle: the
+gaze leaves it off until something wakes it), "hide idle", "hide pause".
 Typing on a keyboard sends the helper "typing" (at most 4 times a second): it takes no hand
 pinches right after a key, since typing touches thumb to index like a pinch.
 
@@ -118,6 +121,12 @@ pointer helper decides per side whether a hand holds a controller or is bare
 state as "paused 1|0" (hands work in a VR game only with the dashboard open or Frametop toggled
 back on).
 
+The gaze calibration panel (gaze/panel/ft-gazepanel; the pointer helper says "calpanel 1" while
+it's up): Enter on a pass-through keyboard (either Enter, with no modifier held) takes the
+panel's dot instead of typing: "calkey 1" to the helper, which answers the panel as it does a
+left click. Its repeats and its release go nowhere either. That works while the relay has the
+keyboard (typing goes to the desktop); while typing goes to Steam, Steam sees the Enter too.
+
 Frametop can pause for VR games (game_pause.py: by hand, with a controller gesture, or by itself
 while a game runs). Paused, it stops the services that cost the game CPU and GPU, and the relay
 plays a plain one: the pointer devices feed the virtual mouse and keyboard as without pointer
@@ -135,10 +144,12 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
   reload            re-read both config files, re-apply roles, tell the helper
   vrcapture <s>     take every controller button for s seconds (0: stop), so the settings
                     app can capture one; watchers see them as events with id frame_controller
-  vrbtn, vrhello, gazeawake   from the pointer helper (above)
+  vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
   vrdash 1|0        from the pointer helper (hand interaction): the dashboard is open, so hand
                     tracking parked for a game wakes (game_pause.py, PARK_PATH)
+  calpanel 1|0      from the pointer helper: a gaze calibration panel is up (renewed every second,
+                    lapses 3 s after the last), so Enter answers it (above)
   textfield 1|0     from the desktop's input method (above)
   pause on|off|toggle [reason]   pause Frametop or resume it (input/ft-pause; the gesture reader)
   pause ?           the pause state, as {"t": "pause", ...}
@@ -182,6 +193,7 @@ SCROLLS = {0x06, REL_WHEEL, 0x0B, 0x0C}  # REL_HWHEEL, REL_WHEEL and their _HI_R
 BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA = 0x110, 0x111, 0x112, 0x113, 0x114
 BTN_MOUSE, BTN_TASK = 0x110, 0x117  # mouse buttons, the first and the last
 KEY_LEFTMETA, KEY_RIGHTMETA = 125, 126
+KEY_ENTER, KEY_KPENTER = 28, 96
 KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP = 113, 114, 115
 # Volume keys are remapped to KEY_MACRO28, KEY_MACRO29 and KEY_MACRO30: above 255, so X11
 # can't carry them, and bound to nothing in the default keymap.
@@ -684,7 +696,7 @@ class Pointer:
             self.send("recenter")
         elif name == "pointer_toggle":
             if self.active:
-                self.send("hide")
+                self.send("hide toggle")  # gaze mode leaves it off until something wakes it
                 self.active = False
                 log("pointer off (toggle)")
             else:
@@ -758,7 +770,7 @@ class Pointer:
             self.send("scroll 0 0")
             self.scroll_until = None
         if self.active and now - self.last_used > self.idle and now >= self.gaze_awake_until:
-            self.send("hide")
+            self.send("hide idle")
             self.active = False
             log("pointer off (idle)")
 
@@ -801,7 +813,7 @@ class Pointer:
         self.dx = self.dy = self.pending = 0
         self.gaze_awake_until = 0.0
         if self.active or releases:
-            self.send("hide")
+            self.send("hide pause")
         if self.active:
             self.active = False
             log("pointer off (paused)")
@@ -909,7 +921,7 @@ def main():
     # differ while Frametop is paused).
     state = {"pointer": None, "pointer_conf": None, "rules": {},
              "desktop_until": 0.0, "typing_applied": None, "vr_capture_until": 0.0, "vr_bind_retry": False,
-             "pointer_holding": False}
+             "pointer_holding": False, "calpanel_until": 0.0}
 
     def pause_changed(paused):
         """Frametop paused or resumed (game_pause.py): the relay's own part."""
@@ -1085,6 +1097,25 @@ def main():
     held_meta = set()  # the Meta keys held, as they are (KEY_LEFTMETA, KEY_RIGHTMETA)
     meta_hidden = set()  # held Meta keys the desktop was told came up (a combination; key_binding)
     combos_down = {}  # key code -> the action its combination started (released with it)
+    cal_keys = set()  # Enter keys whose press answered the gaze calibration panel (cal_enter)
+
+    def cal_enter(code, value, now):
+        """Enter while the gaze calibration panel is up (see the top): its press goes to the helper
+        as "calkey 1", and the press, its repeats and its release aren't typed. True if taken."""
+        if value == 1 and code in (KEY_ENTER, KEY_KPENTER) and now < state["calpanel_until"] \
+                and not held_modifiers and code not in combos_down:
+            cal_keys.add(code)
+            try:
+                screens_sock.sendto(b"calkey 1", HELPER)
+            except OSError:
+                pass  # helper not running (SteamVR not running)
+            log("Enter: the gaze calibration panel's")
+            return True
+        if code in cal_keys:
+            if value == 0:
+                cal_keys.discard(code)
+            return True
+        return False
 
     def key_binding(code, value, now):
         """A key from a keyboard: does it complete a key combination ("key_bindings")? True if
@@ -1417,9 +1448,21 @@ def main():
                     else:
                         log(f"type from another user ({uid}): ignored")
                     continue
+                if cmd == "calpanel" and len(words) == 2:
+                    # From the pointer helper (see the top). Only from this user: it takes Enter.
+                    if uid == os.getuid():
+                        state["calpanel_until"] = now + 3.0 if words[1] == "1" else 0.0
+                    continue
                 if cmd == "gazeawake" and len(words) == 2:
                     if state["pointer"]:
                         state["pointer"].gaze_awake_until = now + 12.0 if words[1] == "1" else 0.0
+                    continue
+                if cmd == "gazewoke":
+                    # The gaze took the pointer back (gaze mode owns it): it's on, as a wake leaves it.
+                    p = state["pointer"]
+                    if p and not p.active:
+                        p.active, p.last_used = True, now
+                        log("pointer on (gaze)")
                     continue
                 if not addr:
                     continue  # unbound sender, nowhere to reply
@@ -1572,6 +1615,8 @@ def main():
                 if node.role != "pointer":
                     # Observed only, unless typing goes to the desktop. Key combinations work on
                     # any pass-through keyboard.
+                    if node.role == "passthrough" and etype == EV_KEY and cal_enter(code, value, now):
+                        continue
                     if node.role == "passthrough" and etype == EV_KEY and code < BTN_MISC and key_binding(code, value, now):
                         continue
                     if node.role == "passthrough" and etype == EV_KEY:

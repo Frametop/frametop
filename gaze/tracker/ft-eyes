@@ -28,8 +28,13 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
   calib-start                  a new calibration: collect dots from now on
   calib-point T0 T1 YAW PITCH  a dot you looked at from T0 to T1 (CLOCK_MONOTONIC_RAW) in
                                that direction (head-relative degrees): "ok N0 N1 SD0 SD1"
-                               (frames and spread in px per eye, right first) or "fail WHY"
-  calib-fit                    fit the dots, save, and start the shifts and clicks over
+                               (frames and spread in px per eye, right first), then
+                               " (EYE eye only: WHY)" if one eye wasn't seen enough or moved
+                               (the dot is kept for the other), or "fail WHY"
+  calib-fit                    fit the dots, save, and start the shifts and clicks over. Each
+                               eye is fitted on the dots it was seen at; one seen at too few
+                               (eyes_model.MIN_CLICKS) is left out, and the other maps the
+                               gaze alone ("..., left not used (9 dots, needs 12)")
   click T YAW PITCH            a click: you were looking there just before T; teaches the
                                shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured)
   fit                          JSON: the last second of pupil finds per camera, for the fit
@@ -37,8 +42,9 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
   finds start PATH | finds stop
                                append every frame looked at to PATH as JSON lines (the eye
                                recorder's own.jsonl): {"t", "cam", "x", "y", "a", "b", "angle",
-                               "glints": [[x, y], ...], "gaze": [yaw, pitch] once calibrated},
-                               or {"t", "cam", "lost": true}; with the net also "net": {"gaze",
+                               "glints": [[x, y], ...], "gaze": [yaw, pitch] once calibrated,
+                               "guard": true if the size guard refused it}, or {"t", "cam",
+                               "lost": true}; with the net also "net": {"gaze",
                                "x", "y", "open", "visible"}. "finds stop" replies "ok ROWS"
 
 The eye net (eyes_net.py) instead of the pupil finder: EYES_MODEL in ~/.config/frametop.conf (or
@@ -53,9 +59,17 @@ service restarts ft-eyes when EYES_MODEL changes. If the model can't load, ft-ey
 so and uses the pupil finder. While the fit coach asks ("fit") or finds are logged, the pupil
 finder runs too, for them.
 
+The pupil finder's size guard (eyes_pupil.SizeGuard): a find much smaller than that eye's usual
+size, judged against how the other eye's size compares with its own (both narrow in light),
+counts as not found. EYES_SIZE_GUARD in frametop.conf (or FT_EYES_SIZE_GUARD): both (the
+default), long (against its own usual size only) or off. Read at start. Each eye's kept and
+refused finds, and its usual size's restarts, are in the status ("size_guard_counts", since the
+start), and once a minute that it refused any, a log line says how many ("size guard, the last
+60 s: right refused 40 of 3100 finds; left refused 0 of 3200 finds").
+
 Environment, for replays (lab/ft-eyes-e2e): FT_EYES_CAMS, FT_EYES_GAZE, FT_EYES_STATE (the
-state folder), FT_EYES_SOCKET (the socket's name), FT_EYES_MODEL. With FT_EYES_CAMS set, the want file isn't
-touched.
+state folder), FT_EYES_SOCKET (the socket's name), FT_EYES_MODEL, FT_EYES_SIZE_GUARD. With
+FT_EYES_CAMS set, the want file isn't touched.
 
 /dev/shm/frametop-eyes-gaze, 128 bytes, little-endian (mirrored in ft-gaze.cpp):
    0 u32 seq      odd while it's being written: read it before and after, retry if it moved
@@ -120,6 +134,27 @@ def load_net():
 
 
 NET = load_net()
+
+
+def size_guard_rule():
+    """EYES_SIZE_GUARD in ~/.config/frametop.conf (FT_EYES_SIZE_GUARD wins): eyes_pupil.SizeGuard's
+    rule, both (the default), long or off. Read at start."""
+    v = os.environ.get("FT_EYES_SIZE_GUARD")
+    if v is None:
+        v = ""
+        try:
+            for line in (Path.home() / ".config" / "frametop.conf").read_text().splitlines():
+                k, _, val = line.split("#", 1)[0].partition("=")
+                if k.strip() == "EYES_SIZE_GUARD":
+                    v = val.strip().strip("\"'")
+        except OSError:
+            pass
+    v = v.strip().lower()
+    return v if v in eyes_pupil.GUARD_RULES else "both"
+
+
+SIZE_GUARD = size_guard_rule()
+GUARD_REPORT = 60.0  # s between the size guard's log lines (only when it refused something)
 
 CAMS = os.environ.get("FT_EYES_CAMS", "/dev/shm/frametop-eyes-cams")  # overrides for replays
 OUT = os.environ.get("FT_EYES_GAZE", "/dev/shm/frametop-eyes-gaze")
@@ -222,6 +257,9 @@ class Eye:
         self.shift = eyes_model.Shift()
         self.history = deque()  # (t, x, y, glint mid x, y)
         self.last = None        # the previous pupil (window hint)
+        self.size = eyes_pupil.PupilSize()   # its recent size: much smaller finds are something else
+        self.guard = None       # both eyes' usual sizes (eyes_pupil.SizeGuard, Tracker's), for the pupil finder
+        self.refused = 0
         self.gaze = None        # (t, yaw, pitch, x, y)
         self.lost = 0
         self.frames = self.found = 0
@@ -250,12 +288,18 @@ class Eye:
             if self.lost % LOST_EVERY:
                 return
         t0 = time.perf_counter()
-        p = eyes_pupil.find_pupil(img, self.last)
-        self.last = p
+        p = eyes_pupil.find_pupil(img, self.last, self.size.smallest(t))
+        self.size.add(t, p)
+        # A find the size guard refuses counts as not found, and the search stays where the last one was.
+        refused = p is not None and self.guard is not None and not self.guard.keep(self.eye, t, p["a"])
+        if refused:
+            self.refused += 1
+        else:
+            self.last = p
         if self.obs is not None:
             self.obs.add(self.eye, t, p)
             self.fed = (t, time.clock_gettime(time.CLOCK_MONOTONIC_RAW))
-        if p is not None:
+        if p is not None and not refused:
             self.found += 1
             self.lost = 0
             pair = eyes_pupil.glint_pair(p)
@@ -270,7 +314,7 @@ class Eye:
                 g = self.cal.gaze(self.eye, p["x"], p["y"], self.shift.value)
                 self.gaze = (t, float(g[0]), float(g[1]), p["x"], p["y"])
         if self.finds is not None:
-            self.finds.write(self, t, p)
+            self.finds.write(self, t, p, refused=refused)
         self.work += time.perf_counter() - t0
 
     def feed_net(self, t, img):
@@ -280,8 +324,9 @@ class Eye:
         classic = self.finds is not None or time.monotonic() < self.coach[0]
         p = None
         if classic:
-            p = eyes_pupil.find_pupil(img, self.last)
+            p = eyes_pupil.find_pupil(img, self.last, self.size.smallest(t))
             self.last = p
+            self.size.add(t, p)
             if self.obs is not None:
                 self.obs.add(self.eye, t, p)
                 self.fed = (t, time.clock_gettime(time.CLOCK_MONOTONIC_RAW))
@@ -317,7 +362,7 @@ class Finds:
         self.f = open(path, "a", buffering=1 << 16)
         self.rows = 0
 
-    def write(self, eye, t, p, net=None):
+    def write(self, eye, t, p, net=None, refused=False):
         if p is None:
             row = {"t": round(t, 6), "cam": eye.eye, "lost": True}
         else:
@@ -326,6 +371,8 @@ class Finds:
                    "glints": [[round(float(x), 1), round(float(y), 1)] for x, y in p.get("glints") or []]}
             if eye.gaze and eye.gaze[0] == t and not NET:
                 row["gaze"] = [round(eye.gaze[1], 3), round(eye.gaze[2], 3)]
+            if refused:
+                row["guard"] = True
         if net is not None:
             row["net"] = {"gaze": [round(v, 3) for v in net["gaze"]], "x": round(net["x"], 1), "y": round(net["y"], 1),
                           "open": round(net["open"], 3), "visible": round(net["visible"], 3)}
@@ -347,8 +394,9 @@ class Tracker:
         self.calibrating = False
         self.fit = fitcoach.Observations()
         coach = [0.0]
+        self.guard = eyes_pupil.SizeGuard(SIZE_GUARD)
         for e in self.eyes:
-            e.obs, e.coach = self.fit, coach
+            e.obs, e.coach, e.guard = self.fit, coach, self.guard
         if CALIBRATION.exists():
             self.cal = eyes_model.Calibration.load(CALIBRATION)
             if self.cal.info.get("feature", "pupil") != FEATURE:
@@ -417,23 +465,44 @@ class Tracker:
                 return "fail no calibration started"
             t0, t1, yaw, pitch = map(float, w[1:])
             got = {e.eye: e.window(t0, t1) for e in self.eyes}
+            # Each eye that was seen and held still counts: the dot is taken with one eye if
+            # the other was lost (looking far toward that eye's ear, say) or jumped about.
+            why = {}
             for c, g in got.items():
                 if g is None or g["n"] < CALIB_MIN:
-                    return f"fail the {EYES[c]} eye was seen in only {0 if g is None else g['n']} frames"
-                if g["spread"] > CALIB_SPREAD:
-                    return f"fail the {EYES[c]} eye moved ({g['spread']:.1f} px)"
-            self.dots.append(dict(truth=(yaw, pitch), eye={c: dict(pupil=g["pupil"], mid=g["mid"]) for c, g in got.items()}))
-            return "ok {} {} {:.2f} {:.2f}".format(got[0]["n"], got[1]["n"], got[0]["spread"], got[1]["spread"])
+                    why[c] = f"the {EYES[c]} eye was seen in only {0 if g is None else g['n']} frames"
+                elif g["spread"] > CALIB_SPREAD:
+                    why[c] = f"the {EYES[c]} eye moved ({g['spread']:.1f} px)"
+            if len(why) == 2:
+                moved = [c for c in (0, 1) if "moved" in why[c]]
+                if moved:
+                    return "fail " + why[moved[0]]
+                return "fail neither eye was seen enough ({})".format(
+                    ", ".join(f"{EYES[c]} {0 if got[c] is None else got[c]['n']} frames" for c in (0, 1)))
+            self.dots.append(dict(truth=(yaw, pitch), eye={c: dict(pupil=g["pupil"], mid=g["mid"])
+                                                           for c, g in got.items() if c not in why}))
+            n = [0 if got[c] is None else got[c]["n"] for c in (0, 1)]
+            spread = [math.nan if got[c] is None else got[c]["spread"] for c in (0, 1)]
+            reply = "ok {} {} {:.2f} {:.2f}".format(*n, *spread)
+            for c, text in why.items():
+                reply += f" ({EYES[1 - c]} eye only: {text})"
+            return reply
         if w[0] == "calib-fit":
             if len(self.dots) < eyes_model.MIN_CLICKS:
                 return f"fail only {len(self.dots)} dots (need {eyes_model.MIN_CLICKS})"
+            seen = {c: sum(1 for k in self.dots if c in k["eye"]) for c in (0, 1)}
             cal = eyes_model.Calibration.fit(self.dots, {"made": time.strftime("%Y-%m-%d %H:%M:%S"),
                                                        "dots": len(self.dots), "from": "probe calibration",
-                                                       "feature": FEATURE})
-            if not all(cal.has(n, c) for n in ("pupil", "where") for c in (0, 1)):
-                return "fail not enough dots with both eyes"
-            errs = [float(np.hypot(*(np.mean([cal.gaze(c, *k["eye"][c]["pupil"]) for c in (0, 1)], axis=0)
-                                     - k["truth"]))) for k in self.dots]
+                                                       "feature": FEATURE,
+                                                       "eye_dots": {EYES[c]: seen[c] for c in (0, 1)}})
+            if not cal.eyes():
+                return "fail neither eye was seen at enough dots ({}; need {})".format(
+                    ", ".join(f"{EYES[c]} {seen[c]}" for c in (0, 1)), eyes_model.MIN_CLICKS)
+            errs = []
+            for k in self.dots:
+                g = cal.combine({c: cal.gaze(c, *v["pupil"]) for c, v in k["eye"].items() if cal.has("pupil", c)})
+                if g is not None:
+                    errs.append(float(np.hypot(*(g - k["truth"]))))
             if CALIBRATION.exists():
                 CALIBRATION.replace(CALIBRATION.with_name(time.strftime("calibration-%Y%m%d-%H%M%S.json")))
             cal.save(CALIBRATION)
@@ -448,7 +517,9 @@ class Tracker:
                                                     "mid": None if v["mid"] is None else v["mid"].tolist()}
                                                 for c, v in k["eye"].items()}}) + "\n")
             return (f"ok {len(self.dots)} dots, fit median {np.median(errs):.2f} deg, eyes "
-                    + ", ".join(f"{EYES[c]} {cal.spread[c]:.2f}" for c in sorted(cal.spread)))
+                    + ", ".join(f"{EYES[c]} {cal.spread[c]:.2f} ({seen[c]} dots)" if c in cal.spread
+                                else f"{EYES[c]} not used ({seen[c]} dots, needs {eyes_model.MIN_CLICKS})"
+                                for c in (0, 1)))
         if w[0] == "click" and len(w) == 4:
             if not self.cal:
                 return "fail not calibrated"
@@ -473,8 +544,10 @@ class Tracker:
 
     def status(self):
         return {"calibration": self.cal.info if self.cal else None, "calibrating": self.calibrating,
+                "mapped": [EYES[c] for c in self.cal.eyes()] if self.cal else None,
                 "feature": FEATURE, "model": NET.folder if NET else None,
-                "dots": len(self.dots),
+                "dots": len(self.dots), "size_guard": None if NET else self.guard.rule,
+                "size_guard_counts": None if NET else {EYES[e]: self.guard.counts(e) for e in (0, 1)},
                 "eyes": {EYES[e.eye]: {"shift": e.shift.value.tolist(), "clicks": len(e.shift.meas),
                                        "jump": bool(np.any(e.shift.jump)), "jump_px": e.shift.jump.tolist(),
                                        "reseat": e.shift.reseated} for e in self.eyes}}
@@ -558,6 +631,18 @@ def below_steamvr():
         print(f"ft-eyes: SCHED_BATCH: {e}", file=sys.stderr, flush=True)
 
 
+def guard_line(guard, was):
+    """The size guard since `was` (its counts then): (its counts now, a log line, or "" if it
+    refused nothing). Its own line, once a minute: ft-gazed keeps it (it drops the fps lines)."""
+    now = {e: guard.counts(e) for e in (0, 1)}
+    d = {e: {k: now[e][k] - was[e][k] for k in now[e]} for e in (0, 1)}
+    if not any(d[e]["refused"] for e in (0, 1)):
+        return now, ""
+    parts = [f"{EYES[e]} refused {d[e]['refused']} of {d[e]['kept'] + d[e]['refused']} finds"
+             + (f", {d[e]['restarts']} restarts" if d[e]["restarts"] else "") for e in (0, 1)]
+    return now, f"size guard, the last {GUARD_REPORT:.0f} s: " + "; ".join(parts)
+
+
 def main():
     below_steamvr()
     verbose = "-v" in sys.argv
@@ -580,12 +665,14 @@ def main():
     cal = tracker.cal
     print("ft-eyes: " + (f"the eye net {NET.name} ({NET.folder}); " if NET else "")
           + (f"calibration from {cal.info.get('made')} ({cal.info.get('from', cal.info.get('capture'))})"
-                           if cal else "not calibrated: run the probe's calibration with the Own tracker")
+             + ("" if len(cal.eyes()) == 2 else f", the {' and '.join(EYES[c] for c in cal.eyes())} eye only")
+             if cal else "not calibrated: run the probe's calibration with the Own tracker")
           + f"; waiting for {CAMS}", file=sys.stderr, flush=True)
     cams = wait_for_cams(sock, tracker, want)
     print("ft-eyes: frames found, tracking", file=sys.stderr, flush=True)
     seen = [cams.count(0), cams.count(1)]
-    report = time.monotonic()
+    report = guard_at = time.monotonic()
+    guard_was = {e: tracker.guard.counts(e) for e in (0, 1)}
     arrived = [0.0, 0.0]  # when each camera's newest frame was seen (monotonic)
     while True:
         serve(sock, tracker)
@@ -621,13 +708,18 @@ def main():
                 parts = []
                 for e in eyes:
                     s = e.shift.value
-                    parts.append(f"{EYES[e.eye]} {e.frames / 5:.0f} fps, found {e.found / max(e.frames, 1):.0%}, "
+                    parts.append(f"{EYES[e.eye]} {e.frames / 5:.0f} fps, found {e.found / max(e.frames, 1):.0%}"
+                                 + (f" ({e.refused} refused by size)" if e.refused else "") + ", "
                                  f"{e.work / max(e.frames, 1) * 1000:.2f} ms/frame, shift ({s[0]:+.1f},{s[1]:+.1f})"
                                  f" from {len(e.shift.meas)} clicks" + (", jump" if np.any(e.shift.jump) else ""))
-                    e.frames = e.found = 0
+                    e.frames = e.found = e.refused = 0
                     e.work = 0.0
                 print("ft-eyes: " + "; ".join(parts), file=sys.stderr, flush=True)
             report = now
+            if now - guard_at >= GUARD_REPORT:
+                guard_at, guard_was, line = now, *guard_line(tracker.guard, guard_was)
+                if line and not NET:
+                    print("ft-eyes: " + line, file=sys.stderr, flush=True)
             if cams.replaced():
                 print("ft-eyes: frames went away; waiting", file=sys.stderr, flush=True)
                 cams = wait_for_cams(sock, tracker, want)

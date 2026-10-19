@@ -24,7 +24,8 @@ class SoundsTest(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_wavs(self):
-        self.assertEqual(set(sounds.SOUNDS), {"blink", "close", "open"})
+        self.assertEqual(set(sounds.SOUNDS), {"blink", "close", "open", "go", "done"})
+        self.assertEqual(len({sounds.SOUNDS[n] for n in ("blink", "close", "go", "done")}), 4, "told apart by ear")
         self.assertEqual(sounds.SOUNDS["close"], sounds.SOUNDS["open"], "open is the same beep again")
         for name, (hz, secs) in sounds.SOUNDS.items():
             path = sounds.wav_path(name)

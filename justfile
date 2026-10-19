@@ -53,6 +53,9 @@ test-c:
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"
         "build/tests/$n" >/dev/null && echo "$t: ok"
     done
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/rounded-test.cpp \
+      -o build/tests/rounded-test
+    build/tests/rounded-test && echo "screens/tests/rounded-test.cpp: ok"
 
 # shell scripts: syntax-gate everything that ships. No git: the image has
 # none, and a mounted checkout can trip "dubious ownership" — find lists

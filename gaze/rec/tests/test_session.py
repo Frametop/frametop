@@ -76,6 +76,24 @@ class RoundTest(unittest.TestCase):
         self.bad([{"id": "a", "kind": "prompt", "cues": [["Close both eyes", 2], ["Open", 2]]}], 'needs the sound "close"')
         self.bad([{"id": "a", "kind": "prompt", "cues": [["Shut your eyes", 2, "close"]]}], 'comes a cue with the sound "open"')
         self.bad([{"id": "a", "kind": "prompt", "cues": [["Close your eyes", 2, "close"], ["Open", 2]]}], '"open"')
+        # Moving the headset by hand
+        look = ["Look at the dot", 1.5]
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Push up", 2]]}], 'needs the sound "go"')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Push up", 2, "go"], ["Let go", 2, "done"]]}],
+                 "the eyes are still first")
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Push up", 2, "go"], ["Let go", 1, "done"]]}], "2 s or more")
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Push up", 2, "go"]]}], 'a "done" cue')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Push up", 2, "go"]]},
+                  {"id": "b", "kind": "prompt", "cues": [["Let go", 2, "done"]]}], 'a "done" cue')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Tilt: left side up", 2, "go"]]},
+                  {"id": "b", "kind": "dots", "ready": False, "group": "a", "dots": [[0, 0]], "text": "Look"},
+                  {"id": "c", "kind": "prompt", "ready": False, "group": "a", "text": "Keep holding",
+                   "cues": [["Let go", 2, "done"]]}], 'starts "Keep holding"')
+        session.load_round(write_round(self.tmp, [
+            {"id": "a", "kind": "prompt", "cues": [look, ["Slide to your left", 2, "go"]]},
+            {"id": "b", "kind": "dots", "ready": False, "group": "a", "dots": [[0, 0]], "text": "Keep holding it"},
+            {"id": "c", "kind": "prompt", "ready": False, "group": "a", "text": "Keep holding",
+             "cues": [["Let go, put it back", 2, "done"]]}]))
         for word in ("Close your left eye", "Half closed", "Squint", "Open"):
             session.load_round(write_round(self.tmp, [{"id": "a", "kind": "prompt", "cues": [[word, 1]]}]))
 
@@ -299,6 +317,116 @@ class DryRunTest(unittest.TestCase):
         self.assertEqual(len(redo), 1)
         self.assertLess(redo[0]["from"], redo[0]["to"])
         self.assertNotIn("bounties", profile, "a stopped round isn't counted")
+
+    # A round of two takes: a nudge with dots done while holding it (a chain), then one prompt.
+    TWO = [{"id": "nudge", "kind": "prompt", "group": "one", "dot": [0, 0], "seconds": 1, "text": "Push"},
+           {"id": "hold", "kind": "dots", "group": "one", "dots": [[0, 0], [5, 0]], "hold": 0.5, "ready": False,
+            "text": "Keep holding"},
+           {"id": "other", "kind": "prompt", "group": "two", "dot": [0, 0], "seconds": 1, "text": "Other"}]
+
+    def run_two(self, steer, **kw):
+        write_round(self.tmp, self.TWO)
+        return self.run_round("t", steer=steer, speed=10, next_after=0.6, rounds_dir=self.tmp, fit_coach=False,
+                              profile={"eyes_ipd": 0.063}, **kw)
+
+    @staticmethod
+    def at(s, step, state):
+        end = time.monotonic() + 30
+        while time.monotonic() < end and not (s._status["step"] == step and s._status["state"] == state):
+            time.sleep(0.005)
+        return s._status["step"] == step and s._status["state"] == state
+
+    def take_status(self, s, take):
+        with open(os.path.join(s.session_dir, "takes", take, "take.json")) as f:
+            return json.load(f)["status"]
+
+    def redos(self, s, take):
+        return [e["id"] for e in self.prompts(s, take) if e["event"] == "redo"]
+
+    def test_redo_in_the_countdown(self):
+        # R in the countdown starts this step again (it used to go back to the one before).
+        seen = {}
+        def steer(s, states):
+            self.assertTrue(self.at(s, "other", "countdown"))
+            s.redo()
+            seen["ready"] = self.at(s, "other", "ready")
+            seen["recording"] = s._recording
+        s, _, _ = self.run_two(steer)
+        self.assertEqual(s.state, "done")
+        self.assertTrue(seen["ready"])
+        self.assertFalse(seen["recording"], "the ready screen isn't recorded")
+        takes = self.files(s)[0]["takes"]
+        self.assertEqual(self.redos(s, takes[-1]), ["other"])
+        self.assertEqual(self.redos(s, takes[-2]), [])
+
+    def test_back_into_the_take_before(self):
+        # Back at a new take's first ready screen: the take before stays open until its Next,
+        # so its last step (with the nudge it follows on from) goes again in the same take.
+        seen = {}
+        def steer(s, states):
+            self.assertTrue(self.at(s, "other", "ready"))
+            seen["can_redo"] = s._status["can_redo"]
+            s.redo()
+            seen["back"] = self.at(s, "nudge", "ready")
+        s, _, _ = self.run_two(steer)
+        self.assertEqual(s.state, "done")
+        self.assertTrue(seen["can_redo"])
+        self.assertTrue(seen["back"], "back to the chain's head, not to hold")
+        takes = self.files(s)[0]["takes"]
+        self.assertEqual(len(takes), 3, takes)        # the opener's dots, one, two: no extra take
+        one = self.prompts(s, takes[1])
+        self.assertEqual(self.redos(s, takes[1]), ["nudge"])
+        self.assertEqual([e["id"] for e in one if e["event"] == "step"], ["nudge", "hold", "nudge", "hold"])
+        self.assertEqual(self.take_status(s, takes[1]), "complete")
+
+    def test_redo_a_step_that_follows_on(self):
+        # R while holding: the nudge goes again with it.
+        def steer(s, states):
+            self.assertTrue(self.at(s, "hold", "running"))
+            s.redo()
+            self.assertTrue(self.at(s, "nudge", "ready"))
+        s, _, _ = self.run_two(steer)
+        self.assertEqual(s.state, "done")
+        takes = self.files(s)[0]["takes"]
+        steps = [e["id"] for e in self.prompts(s, takes[1]) if e["event"] == "step"]
+        self.assertEqual(self.redos(s, takes[1]), ["nudge"])
+        self.assertEqual(steps, ["nudge", "hold", "nudge", "hold"])
+
+    def test_stop_or_skip_at_the_next_ready_screen(self):
+        # The take before is finished, not stopped or skipped, when the next take's ready screen
+        # is where it ends.
+        def stop(s, states):
+            self.assertTrue(self.at(s, "other", "ready"))
+            s.stop(wait=0)
+        s, _, _ = self.run_two(stop)
+        self.assertEqual(s.state, "stopped")
+        takes = self.files(s)[0]["takes"]
+        self.assertEqual(len(takes), 2)
+        self.assertEqual(self.take_status(s, takes[1]), "complete")
+
+        def skip(s, states):
+            self.assertTrue(self.at(s, "other", "ready"))
+            s.skip()
+        s, _, _ = self.run_two(skip)
+        self.assertEqual(s.state, "done")
+        takes = self.files(s)[0]["takes"]
+        self.assertEqual(len(takes), 2, "two was skipped before it started")
+        self.assertEqual(self.take_status(s, takes[1]), "complete")
+
+    def test_nothing_to_go_back_to(self):
+        # After a reseat Back is off: the headset sits differently now.
+        rnd = [{"id": "a", "kind": "prompt", "dot": [0, 0], "seconds": 1, "text": "A"},
+               {"id": "off", "kind": "reseat", "text": "off and on"},
+               {"id": "b", "kind": "prompt", "dot": [0, 0], "seconds": 1, "text": "B"}]
+        write_round(self.tmp, rnd)
+        seen = {}
+        def steer(s, states):
+            self.assertTrue(self.at(s, "b", "ready"))
+            seen["can_redo"] = s._status["can_redo"]
+        s, states, _ = self.run_round("t", steer=steer, speed=10, next_after=0.4, rounds_dir=self.tmp,
+                                      fit_coach=False, profile={"eyes_ipd": 0.063})
+        self.assertEqual(s.state, "done")
+        self.assertFalse(seen["can_redo"], "nothing goes back over a reseat")
 
     def test_pause_stops_the_recording(self):
         def steer(s, states):

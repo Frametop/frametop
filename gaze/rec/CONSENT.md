@@ -50,7 +50,7 @@ The recorder doesn't record sound, the headset's outward cameras, your name, you
 
 - Recordings stay on your headset, in `~/.local/share/frametop/eyes/contrib`. Nothing is uploaded automatically.
 - Before you share anything, you can look through every recording in the Review page. You can delete any stretch of a take, a whole take or a whole round. Export leaves out what you deleted.
-- You upload the export yourself, from the Upload page. That opens a pull request on the dataset. The maintainer checks it before it becomes part of the dataset, and may decline it. Until it's merged, you can close the pull request yourself.
+- You upload the export yourself: from the Upload page, or with Export and upload, which sends it once it's exported. That opens a pull request on the dataset. The maintainer checks it before it becomes part of the dataset, and may decline it. Until it's merged, you can close the pull request yourself.
 
 ## Where it goes, and who can read it
 

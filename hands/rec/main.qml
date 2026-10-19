@@ -85,6 +85,24 @@ Kirigami.ApplicationWindow {
         return n + " " + word + (n === 1 ? "" : "s")
     }
 
+    // A session's label, from its id (the Export page's queue).
+    function sessionLabel(id) {
+        for (const s of backend.sessions)
+            if (s.id === id)
+                return s.label
+        return id
+    }
+    // The session's export can upload by itself once done: logged in, and its dataset takes
+    // contributions (or a dry run).
+    function canUploadAfter(id) {
+        return backend.canUploadAfter && (backend.hubDryRun || backend.uploadAllowedFor(id))
+    }
+    // Waiting to export, or exporting now.
+    function exportPending(id) {
+        return backend.exportSessionId === id && backend.exporting
+               || backend.exportQueue.some(q => q.session === id)
+    }
+
     function show(page) {
         pageStack.clear()
         pageStack.push(page)
@@ -137,6 +155,23 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    // Freeing space: an uploaded round's recordings and export go, the record of its upload
+    // stays (contributions.json, listed on the Review page).
+    function askFreeAll() {
+        confirm.ask("Delete the uploaded rounds here?",
+                    root.plural(backend.freeableCount, "uploaded round") + " (" + backend.freeableText + ") are deleted "
+                    + "from the headset: their recordings and exports. They're already in your pull requests, and "
+                    + "your record of each upload stays on the Review page.",
+                    () => backend.freeAllUploaded())
+    }
+    function askFree(row, after) {
+        const sid = row.id
+        confirm.ask("Delete the local copy?",
+                    "The session of " + row.label + " is uploaded (" + row.pr_url + "). Its recordings and export ("
+                    + row.freeText + ") are deleted from the headset; your record of the upload stays on the Review page.",
+                    () => { if (after) after(); backend.freeSession(sid) })
+    }
+
     // Restart SteamVR (the camera check's fix). What it does to Frametop, read from the code
     // (hands/README.md, "Camera check"): ft-screens quits when SteamVR does, which ends the
     // desktop; its unit doesn't restart, and stopping it ends what was started in it.
@@ -180,9 +215,11 @@ Kirigami.ApplicationWindow {
             close.accepted = false
             confirm.ask("Stop the session?", "A session is recording. Closing stops it; what's recorded so far is kept.",
                         () => { root.quitting = true; Qt.quit() })
-        } else if (backend.uploading && !quitting) {
+        } else if ((backend.uploading || backend.exporting || backend.uploadQueue.length > 0) && !quitting) {
             close.accepted = false
-            confirm.ask("Cancel the upload?", "An upload is running. Closing cancels it; you can start it again later.",
+            confirm.ask("Cancel the exports and uploads?",
+                        "An export or upload is running or waiting (the Export page lists them). Closing cancels "
+                        + "them all; an export cancelled keeps nothing. You can start them again later.",
                         () => { root.quitting = true; Qt.quit() })
         }
     }
@@ -661,15 +698,26 @@ Kirigami.ApplicationWindow {
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Space" }
                 Controls.Label {
                     Kirigami.FormData.label: "Free space:"
-                    text: backend.freeText + " (a round takes about 15 GB, and its export about 12 GB more)"
+                    text: backend.freeText + " (a round needs about " + backend.roundNeedText
+                          + ": about 16 GB to record and 15 GB to export it)"
                 }
                 Kirigami.InlineMessage {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     Layout.fillWidth: true
                     visible: !backend.diskOk
                     type: Kirigami.MessageType.Error
-                    text: "Not enough free space for a round. Export and delete earlier sessions (Review), "
-                          + "or free up space, first."
+                    text: "Not enough free space for a round and its export. "
+                          + (backend.freeableCount > 0
+                             ? root.plural(backend.freeableCount, "uploaded round") + " can go to free "
+                               + backend.freeableText + ": your record of each upload stays."
+                             : "Delete sessions you don't need (Review), or free up space, first.")
+                    actions: backend.freeableCount > 0 ? [freeAllBefore] : []
+                    Kirigami.Action {
+                        id: freeAllBefore
+                        text: "Delete uploaded rounds"
+                        icon.name: "edit-delete"
+                        onTriggered: root.askFreeAll()
+                    }
                 }
 
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Cameras" }
@@ -1328,15 +1376,22 @@ Kirigami.ApplicationWindow {
                         icon.name: "media-playback-stop"
                         onClicked: backend.stopSession()
                     }
+                    // Logged in: the export uploads by itself once done (queued behind any other).
+                    // Not yet: the Upload page follows the export, to log in there.
                     Controls.Button {
-                        visible: !backend.sessionActive && backend.sessionId !== "" && !backend.exporting
+                        visible: !backend.sessionActive && backend.sessionId !== ""
+                        enabled: !root.exportPending(backend.sessionId)
                         focusPolicy: Qt.NoFocus
                         text: "Export and upload"
                         icon.name: "cloud-upload"
                         onClicked: {
                             root.chosenSession = backend.sessionId
-                            root.sendAfterExport = true
-                            backend.exportSession(backend.sessionId, false)
+                            if (root.canUploadAfter(backend.sessionId)) {
+                                backend.queueExport(backend.sessionId, false, true)
+                            } else {
+                                root.sendAfterExport = true
+                                backend.exportSession(backend.sessionId, false)
+                            }
                             root.show(exportPage)
                         }
                     }
@@ -1368,10 +1423,58 @@ Kirigami.ApplicationWindow {
                 model: backend.sessions
                 spacing: Kirigami.Units.smallSpacing
 
+                header: ColumnLayout {
+                    width: ListView.view.width
+                    Kirigami.InlineMessage {
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: visible ? Kirigami.Units.smallSpacing : 0
+                        visible: backend.freeableCount > 0
+                        type: Kirigami.MessageType.Information
+                        text: root.plural(backend.freeableCount, "uploaded round") + " can be deleted here to free "
+                              + backend.freeableText + ". Your record of each upload stays, below."
+                        actions: [
+                            Kirigami.Action {
+                                text: "Delete uploaded rounds"
+                                icon.name: "edit-delete"
+                                onTriggered: root.askFreeAll()
+                            }
+                        ]
+                    }
+                }
+
+                // The contributions log: every upload, kept when its local copy is deleted.
+                footer: ColumnLayout {
+                    width: ListView.view.width
+                    visible: backend.contributions.length > 0
+                    spacing: Kirigami.Units.smallSpacing
+                    Kirigami.Heading {
+                        Layout.topMargin: Kirigami.Units.largeSpacing
+                        Layout.leftMargin: Kirigami.Units.largeSpacing
+                        level: 3
+                        text: "Your uploads"
+                    }
+                    Repeater {
+                        model: backend.contributions
+                        delegate: Controls.Label {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.leftMargin: Kirigami.Units.largeSpacing
+                            Layout.rightMargin: Kirigami.Units.largeSpacing
+                            wrapMode: Text.Wrap
+                            textFormat: Text.StyledText
+                            text: "<b>" + modelData.title + "</b> · " + modelData.label + " · " + modelData.uploadedText
+                                  + (modelData.prUrl ? " · <a href=\"" + modelData.prUrl + "\">" + (modelData.prText || "pull request") + "</a>" : "")
+                                  + (modelData.testing ? " · testing" : "")
+                                  + (modelData.deletedText ? " · " + modelData.deletedText : "")
+                            onLinkActivated: link => Qt.openUrlExternally(link)
+                        }
+                    }
+                }
+
                 Kirigami.PlaceholderMessage {
                     anchors.centerIn: parent
                     width: parent.width - Kirigami.Units.gridUnit * 4
-                    visible: parent.count === 0
+                    visible: parent.count === 0 && backend.contributions.length === 0
                     text: "No sessions yet"
                     explanation: "Recorded sessions appear here, to watch and trim before you export them."
                 }
@@ -1407,7 +1510,17 @@ Kirigami.ApplicationWindow {
                                       + (sessionRow.modelData.lightingText ? " · " + sessionRow.modelData.lightingText : "")
                                       + (sessionRow.modelData.export_stale ? " · changed since its export"
                                          : sessionRow.modelData.exported ? " · exported (" + sessionRow.modelData.exportText + ")" : "")
+                                      + (sessionRow.modelData.uploadText ? " · " + sessionRow.modelData.uploadText : "")
                             }
+                        }
+                        Controls.ToolButton {
+                            icon.name: "edit-clear-all"
+                            text: "Free up space: delete the local copy, keep the record of the upload"
+                            display: Controls.AbstractButton.IconOnly
+                            visible: sessionRow.modelData.freeable
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: root.askFree(sessionRow.modelData, () => pageStack.pop(pageStack.items[0]))
                         }
                         Controls.ToolButton {
                             icon.name: "edit-delete"
@@ -1722,6 +1835,12 @@ Kirigami.ApplicationWindow {
                         return s
                 return null
             }
+            // The chosen session is exporting, or waiting to.
+            readonly property bool pending: chosen !== null && root.exportPending(chosen.id)
+            readonly property bool canExport: chosen !== null && !pending && backend.zstdFound && !chosen.active
+                                              && !(backend.uploading && backend.upload.session === chosen.id)
+                                              && backend.uploadQueue.indexOf(chosen.id) < 0
+            Component.onCompleted: if (backend.login.state === "unknown") backend.checkLogin()
 
             Timer {
                 interval: 5000
@@ -1739,6 +1858,15 @@ Kirigami.ApplicationWindow {
                     position: Kirigami.InlineMessage.Position.Header
                     type: Kirigami.MessageType.Information
                     text: "Exporting your session: the Upload page follows by itself once it's done."
+                }
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: backend.uploadAfter.length + backend.uploadQueue.length > 0
+                    position: Kirigami.InlineMessage.Position.Header
+                    type: Kirigami.MessageType.Positive
+                    text: "You can take the headset off and leave it plugged in: it stays awake until the "
+                          + "exports and uploads below are done, and they show here how they went. Keep this "
+                          + "window open: closing it cancels them."
                 }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
@@ -1764,7 +1892,6 @@ Kirigami.ApplicationWindow {
                     model: backend.sessions
                     textRole: "label"
                     valueRole: "id"
-                    enabled: !backend.exporting
                     Component.onCompleted: {
                         const i = indexOfValue(root.chosenSession)
                         currentIndex = i >= 0 ? i : (count > 0 ? 0 : -1)
@@ -1780,31 +1907,72 @@ Kirigami.ApplicationWindow {
                     Kirigami.FormData.label: "Export:"
                     visible: exportView.chosen !== null
                     text: !exportView.chosen ? ""
+                          : exportView.pending ? (backend.exportSessionId === exportView.chosen.id && backend.exporting
+                                                  ? "exporting now" : "waiting its turn, below")
                           : exportView.chosen.export_stale ? "changed since it was exported: export it again"
                           : exportView.chosen.exported ? "ready, " + exportView.chosen.exportText : "not exported yet"
                 }
+                // Exports run one at a time; one asked for meanwhile waits its turn. "Export and
+                // upload" sends it by itself once it's exported.
                 RowLayout {
                     Controls.Button {
-                        text: backend.exporting ? "Exporting…"
-                              : exportView.chosen && exportView.chosen.exported ? "Export again" : "Export"
+                        text: exportView.chosen && exportView.chosen.exported ? "Export again" : "Export"
                         icon.name: "document-export"
-                        enabled: exportView.chosen !== null && !backend.exporting && backend.zstdFound
-                                 && !exportView.chosen.active
-                        onClicked: backend.exportSession(exportView.chosen.id, false)
+                        enabled: exportView.canExport
+                        onClicked: backend.queueExport(exportView.chosen.id, false, false)
                     }
+                    Controls.Button {
+                        text: "Export and upload"
+                        icon.name: "cloud-upload"
+                        enabled: exportView.canExport && root.canUploadAfter(exportView.chosen.id)
+                        onClicked: backend.queueExport(exportView.chosen.id, false, true)
+                    }
+                }
+                Controls.Label {
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    visible: exportView.chosen !== null && !backend.hubDryRun
+                             && (!backend.canUploadAfter || !backend.uploadAllowedFor(exportView.chosen.id))
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    text: !backend.canUploadAfter ? "To upload by itself once exported, log in on the Upload page first."
+                          : "Contributions aren't open yet, so it can't upload by itself."
+                }
+                Controls.Label {
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    visible: backend.exporting && exportView.chosen !== null && !exportView.pending
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    text: "Another export is running: this one waits its turn."
+                }
+
+                // The running export
+                Kirigami.Separator {
+                    Kirigami.FormData.isSection: true
+                    Kirigami.FormData.label: "Exporting now"
+                    visible: backend.exporting
+                }
+                RowLayout {
+                    Kirigami.FormData.label: "Session:"
+                    visible: backend.exporting
+                    Controls.Label { text: root.sessionLabel(backend.exportSessionId) }
                     // Shows the moment Export is pressed: the first progress can take a few seconds.
                     Controls.BusyIndicator {
-                        visible: backend.exporting
-                        running: visible
+                        running: backend.exporting
                         implicitWidth: Kirigami.Units.gridUnit * 1.5
                         implicitHeight: implicitWidth
                     }
                     Controls.Button {
-                        visible: backend.exporting
                         text: "Cancel"
                         icon.name: "dialog-cancel"
                         onClicked: { root.sendAfterExport = false; backend.cancelExport() }
                     }
+                }
+                Controls.CheckBox {
+                    visible: backend.exporting
+                    text: "Upload it once exported"
+                    checked: backend.uploadAfter.indexOf(backend.exportSessionId) >= 0
+                    enabled: checked || root.canUploadAfter(backend.exportSessionId)
+                    onToggled: backend.setUploadAfter(backend.exportSessionId, checked)
                 }
                 // Drawn here: the desktop style's ProgressBar paints nothing without a QApplication.
                 Rectangle {
@@ -1827,8 +1995,23 @@ Kirigami.ApplicationWindow {
                     wrapMode: Text.WrapAnywhere
                     text: backend.exportText
                 }
+                Kirigami.InlineMessage {
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    Layout.fillWidth: true
+                    visible: !backend.exporting && backend.exportText.indexOf("Failed") === 0 && backend.freeableCount > 0
+                    type: Kirigami.MessageType.Information
+                    text: root.plural(backend.freeableCount, "uploaded round") + " can be deleted to free "
+                          + backend.freeableText + ". Your record of each upload stays."
+                    actions: [
+                        Kirigami.Action {
+                            text: "Delete uploaded rounds"
+                            icon.name: "edit-delete"
+                            onTriggered: root.askFreeAll()
+                        }
+                    ]
+                }
                 RowLayout {
-                    visible: exportView.chosen !== null && exportView.chosen.exported && !backend.exporting
+                    visible: exportView.chosen !== null && exportView.chosen.exported && !exportView.pending
                     Controls.Button {
                         text: "Upload"
                         icon.name: "go-next"
@@ -1837,12 +2020,115 @@ Kirigami.ApplicationWindow {
                     Controls.Button {
                         text: "Delete export"
                         icon.name: "edit-delete"
+                        enabled: !(backend.uploading && backend.upload.session === exportView.chosen.id)
+                                 && backend.uploadQueue.indexOf(exportView.chosen.id) < 0
                         onClicked: {
                             const sid = exportView.chosen.id
                             confirm.ask("Delete this export?", "The export is deleted; the session's recordings stay.",
                                         () => backend.deleteExport(sid))
                         }
                     }
+                }
+
+                // Waiting: exports, then uploads
+                Kirigami.Separator {
+                    Kirigami.FormData.isSection: true
+                    Kirigami.FormData.label: "Waiting to export"
+                    visible: backend.exportQueue.length > 0
+                }
+                Repeater {
+                    model: backend.exportQueue
+                    delegate: RowLayout {
+                        required property var modelData
+                        required property int index
+                        Kirigami.FormData.label: (index + 1) + "."
+                        Controls.Label { text: root.sessionLabel(modelData.session) }
+                        Controls.CheckBox {
+                            text: "then upload"
+                            checked: modelData.upload
+                            enabled: checked || root.canUploadAfter(modelData.session)
+                            onToggled: backend.setUploadAfter(modelData.session, checked)
+                        }
+                        Controls.ToolButton {
+                            icon.name: "list-remove"
+                            text: "Remove"
+                            display: Controls.AbstractButton.IconOnly
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: backend.unqueueExport(modelData.session)
+                        }
+                    }
+                }
+                Kirigami.Separator {
+                    Kirigami.FormData.isSection: true
+                    Kirigami.FormData.label: "Uploading"
+                    visible: backend.uploading || backend.uploadQueue.length > 0
+                }
+                RowLayout {
+                    Kirigami.FormData.label: "Now:"
+                    visible: backend.uploading
+                    Controls.Label {
+                        text: root.sessionLabel(backend.upload.session || "") + (backend.upload.text ? ": " + backend.upload.text : "")
+                    }
+                    Controls.Button {
+                        text: "Show"
+                        icon.name: "go-next"
+                        flat: true
+                        onClicked: { root.chosenSession = backend.upload.session; root.show(uploadPage) }
+                    }
+                }
+                Repeater {
+                    model: backend.uploadQueue
+                    delegate: RowLayout {
+                        required property var modelData
+                        required property int index
+                        Kirigami.FormData.label: "Then:"
+                        Controls.Label { text: root.sessionLabel(modelData) }
+                        Controls.ToolButton {
+                            icon.name: "list-remove"
+                            text: "Don't upload it"
+                            display: Controls.AbstractButton.IconOnly
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: backend.unqueueUpload(modelData)
+                        }
+                    }
+                }
+
+                // How they went, for whoever comes back to the headset
+                Kirigami.Separator {
+                    Kirigami.FormData.isSection: true
+                    Kirigami.FormData.label: "Done"
+                    visible: backend.doneLog.length > 0
+                }
+                Repeater {
+                    model: backend.doneLog
+                    delegate: RowLayout {
+                        required property var modelData
+                        Kirigami.Icon {
+                            source: modelData.error ? "dialog-error" : "checkmark"
+                            implicitWidth: Kirigami.Units.iconSizes.small
+                            implicitHeight: implicitWidth
+                        }
+                        Controls.Label {
+                            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                            wrapMode: Text.Wrap
+                            text: modelData.text
+                        }
+                        Controls.ToolButton {
+                            visible: modelData.link !== ""
+                            icon.name: "internet-services"
+                            text: "Open"
+                            onClicked: Qt.openUrlExternally(modelData.link)
+                        }
+                    }
+                }
+                Controls.Button {
+                    visible: backend.doneLog.length > 0
+                    text: "Clear"
+                    icon.name: "edit-clear-history"
+                    flat: true
+                    onClicked: backend.clearDoneLog()
                 }
             }
 
@@ -1852,8 +2138,8 @@ Kirigami.ApplicationWindow {
                 opacity: 0.7
                 text: "Export leaves out the ranges you deleted, compresses the rest and adds a manifest and "
                       + "checksums, in " + backend.exportsDir + ". It runs at the lowest priority "
-                      + "and takes a few minutes per round; the headset stays awake until it's done. Nothing is "
-                      + "uploaded until you press Upload on the Upload page."
+                      + "and takes a few minutes per round, one at a time; the headset stays awake until they're "
+                      + "done. Nothing is uploaded unless you press Export and upload here, or Upload on the Upload page."
             }
         }
     }
@@ -1879,7 +2165,7 @@ Kirigami.ApplicationWindow {
             readonly property string blocked: {
                 if (session === "") return "Choose an export"
                 if (chosen && chosen.export_stale) return "Export the session again first"
-                if (backend.exporting) return "Wait for the export to finish"
+                if (root.exportPending(session)) return "Wait for its export to finish"
                 if (backend.uploading) return ""
                 if (backend.hubDryRun) return ""
                 if (!backend.uploadAllowedFor(session)) return "Contributions aren't open yet"
@@ -1892,6 +2178,14 @@ Kirigami.ApplicationWindow {
             Connections {
                 target: backend
                 function onSessionsChanged() { uploadView.refreshInfo() }
+                // An upload started by itself (queued on the Export page): show it.
+                function onUploadChanged() {
+                    const i = backend.uploading ? exportBox.indexOfValue(backend.upload.session) : -1
+                    if (i >= 0 && i !== exportBox.currentIndex) {
+                        exportBox.currentIndex = i
+                        exportBox.keep = backend.upload.session
+                    }
+                }
             }
             Component.onCompleted: {
                 refreshInfo()
@@ -1971,8 +2265,19 @@ Kirigami.ApplicationWindow {
                             textRole: "label"
                             valueRole: "id"
                             enabled: !backend.uploading
-                            Component.onCompleted: currentIndex = Math.max(0, indexOfValue(root.chosenSession))
-                            onActivated: root.chosenSession = currentValue
+                            // An export that finishes meanwhile adds a row (newest first): stay on the
+                            // same export, the uploading one while an upload runs.
+                            property string keep: ""
+                            Component.onCompleted: {
+                                currentIndex = Math.max(0, indexOfValue(root.chosenSession))
+                                keep = currentValue || ""
+                            }
+                            onActivated: root.chosenSession = keep = currentValue
+                            onModelChanged: Qt.callLater(() => {
+                                const i = indexOfValue(backend.uploading ? backend.upload.session : keep)
+                                currentIndex = i >= 0 ? i : (count > 0 ? Math.max(0, currentIndex) : -1)
+                                keep = currentValue || ""
+                            })
                         }
                         Controls.Label {
                             opacity: 0.7
@@ -2086,6 +2391,14 @@ Kirigami.ApplicationWindow {
                               + "\">its page</a>. Upload checks the export, opens your pull request, then sends the files."
                         onLinkActivated: link => Qt.openUrlExternally(link)
                     }
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        visible: backend.uploadQueue.length + backend.uploadAfter.length > 0
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        text: "Queued on the Export page to upload after this one, by themselves: "
+                              + root.plural(backend.uploadQueue.length + backend.uploadAfter.length, "export") + "."
+                    }
                     RowLayout {
                         Controls.Button {
                             text: backend.uploading ? "Uploading…" : backend.hubDryRun ? "Upload (dry run)" : "Upload"
@@ -2191,6 +2504,22 @@ Kirigami.ApplicationWindow {
                             icon.name: "edit-copy"
                             onTriggered: backend.copy(uploadView.upResult.pr_url)
                         }
+                    }
+                    Kirigami.InlineMessage {
+                        Layout.fillWidth: true
+                        visible: !backend.uploading && uploadView.mine && uploadView.up.phase === "done"
+                                 && !uploadView.upResult.dry_run && uploadView.chosen !== null && uploadView.chosen.freeable
+                        type: Kirigami.MessageType.Information
+                        text: "This round doesn't need to stay on the headset now. Deleting its local copy frees "
+                              + (uploadView.chosen ? uploadView.chosen.freeText : "") + "; your record of the upload "
+                              + "stays on the Review page."
+                        actions: [
+                            Kirigami.Action {
+                                text: "Delete local copy"
+                                icon.name: "edit-clear-all"
+                                onTriggered: root.askFree(uploadView.chosen, null)
+                            }
+                        ]
                     }
                     Kirigami.InlineMessage {
                         Layout.fillWidth: true

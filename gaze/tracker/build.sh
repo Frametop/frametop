@@ -13,6 +13,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 "$root/scripts/sync.sh" >/dev/null
 exec "$root/scripts/frame.sh" -C gaze/tracker 'set -e; mkdir -p build
 gcc -std=gnu11 -O2 -Wall -Wextra -pthread -o build/ft-eyegrab ft-eyegrab.c
+strip --strip-unneeded build/ft-eyegrab
 max=$(objdump -T build/ft-eyegrab | grep -oE "GLIBC_[0-9.]+" | sort -uV | tail -1)
 echo "built build/ft-eyegrab, newest glibc symbol: $max"
 [ "$(printf "%s\n" "$max" GLIBC_2.39 | sort -V | tail -1)" = GLIBC_2.39 ] || { echo "needs newer glibc than the host has" >&2; exit 1; }

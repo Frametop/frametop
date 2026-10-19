@@ -98,6 +98,99 @@ class Fixation:
         return self.sum[0] / self.count, self.sum[1] / self.count
 
 
+def direction(yaw, pitch):
+    """A head-relative (yaw, pitch) in degrees as a unit vector, as ft-gaze's Direction: -Z
+    forward, positive yaw turns left (about +Y), positive pitch looks up."""
+    y, p = math.radians(yaw), math.radians(pitch)
+    return (-math.sin(y) * math.cos(p), math.sin(p), -math.cos(y) * math.cos(p))
+
+
+def angles(v):
+    """(yaw, pitch) in degrees of a direction, as ft-gaze's Angles."""
+    n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) or 1.0
+    return math.degrees(math.atan2(-v[0], -v[2])), math.degrees(math.asin(max(-1.0, min(1.0, v[1] / n))))
+
+
+def rotate(q, v, inverse=False):
+    """v turned by the unit quaternion q = [w, x, y, z] (ft-gaze's "hq" and the head's "q": head
+    space into the room), or back into head space with inverse."""
+    w, x, y, z = q
+    if inverse:
+        x, y, z = -x, -y, -z
+    # v + 2w (u x v) + 2 u x (u x v), u = (x, y, z)
+    cx, cy, cz = y * v[2] - z * v[1], z * v[0] - x * v[2], x * v[1] - y * v[0]
+    dx, dy, dz = y * cz - z * cy, z * cx - x * cz, x * cy - y * cx
+    return (v[0] + 2 * (w * cx + dx), v[1] + 2 * (w * cy + dy), v[2] + 2 * (w * cz + dz))
+
+
+class GazeLock:
+    """The fixation lock (Fixation, above) on where the gaze points in the room.
+
+    A look at something that stays put (a screen) stays put in the room while the head turns:
+    the eyes turn the other way, so the head-relative gaze slides. Locked in head-relative
+    degrees, the pointer rode along with the head until the slide passed the radius, then
+    snapped back, a jump every few hundred milliseconds; replaying two practice captures, during
+    still looks with the head moving 5-30 degrees a second that was 4 jumps over 1 degree a
+    second, and 13 in the one second it turned faster. Locked in the room it's 1 to 2 (2026-10-17).
+
+    Each sample's gaze is turned into the room with the head pose of its own sample time
+    (`then`, ft-gaze's "hq"), locked there, and turned back into the head with the newest pose
+    (`now`, the head's "q"), the closest one to the pose the pointer helper draws it with.
+    Without poses (an older ft-gaze) it's the head-relative lock."""
+
+    def __init__(self, radius=1.0):
+        self.radius = radius
+        self.head = Fixation(radius)
+        self.reset()
+
+    def reset(self):
+        self.head.reset()
+        self.sum = [0.0, 0.0, 0.0]
+        self.count = 0
+        self.outside = []
+        self.last_t = None
+
+    def __call__(self, yaw, pitch, t, then=None, now=None):
+        """The locked gaze, head-relative (yaw, pitch) degrees, for a head-relative sample at t."""
+        if not then or not now:
+            if self.count:
+                self.reset()
+            return self.head(yaw, pitch, t, 1.0)
+        if self.last_t is None and self.head.count:
+            self.head.reset()
+        m = self.lock(rotate(then, direction(yaw, pitch)), t)
+        return angles(rotate(now, m, inverse=True))
+
+    @staticmethod
+    def mean(s):
+        n = math.sqrt(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]) or 1.0
+        return (s[0] / n, s[1] / n, s[2] / n)
+
+    def lock(self, v, t):
+        """Fixation's rules on room directions (unit vectors)."""
+        if self.last_t is not None and (t <= self.last_t or t - self.last_t > 0.5):
+            self.reset()
+        self.last_t = t
+        if self.count:
+            m = self.mean(self.sum)
+            dot = max(-1.0, min(1.0, m[0] * v[0] + m[1] * v[1] + m[2] * v[2]))
+            if math.degrees(math.acos(dot)) > self.radius:
+                self.outside.append(v)
+                if len(self.outside) < 2:
+                    return m  # one stray sample: probably noise
+                self.sum = [sum(p[k] for p in self.outside) for k in range(3)]
+                self.count = len(self.outside)
+                self.outside = []
+                return self.mean(self.sum)
+        self.outside = []
+        if self.count >= 90:  # the last second or so: a slow drift still gets followed
+            self.sum = [s * 89 / 90 for s in self.sum]
+            self.count = 89
+        self.sum = [self.sum[k] + v[k] for k in range(3)]
+        self.count += 1
+        return self.mean(self.sum)
+
+
 MODELS = ["none", "offset", "affine", "affine+grid", "quadratic", "quadratic+grid"]
 DEFAULT_MODEL = "quadratic"
 
@@ -456,6 +549,42 @@ class TrackedEye:
         return self.eye
 
 
+class EyeBridge:
+    """Our tracker's eyes, each with its own calibration, miss in their own ways, so the gaze
+    jumped whenever one eye dropped out or came back (a median 0.3-0.85 degrees in the 10-16
+    edges round): enough to break the fixation lock. While both are seen, this averages each
+    eye's offset from their combined gaze over about LEARN seconds; with one eye, the gaze is
+    that eye plus its offset, fading out over about FADE seconds, since the offset belongs to
+    where the eyes looked then.
+
+    `__call__` takes and gives head-relative degrees (yaw, pitch)."""
+
+    LEARN = 0.3
+    FADE = 0.3
+
+    def __init__(self):
+        self.off = [None, None]   # per eye: (yaw, pitch) from it to the combined gaze
+        self.at = None            # sample time both were last seen
+
+    def __call__(self, t, eyes, combined):
+        """The gaze at sample time t (s), from `combined`, the eye-weighted gaze of `eyes`
+        [(yaw, pitch) or None, (yaw, pitch) or None]."""
+        seen = [k for k in (0, 1) if eyes[k] is not None]
+        if len(seen) == 2:
+            a = 1.0 if self.at is None else 1.0 - math.exp(-max(t - self.at, 0.0) / self.LEARN)
+            for k in seen:
+                d = (combined[0] - eyes[k][0], combined[1] - eyes[k][1])
+                o = self.off[k]
+                self.off[k] = d if o is None else (o[0] + a * (d[0] - o[0]), o[1] + a * (d[1] - o[1]))
+            self.at = t
+            return combined
+        if len(seen) == 1 and self.at is not None and self.off[seen[0]] is not None:
+            f = math.exp(-max(t - self.at, 0.0) / self.FADE)
+            o = self.off[seen[0]]
+            return combined[0] + f * o[0], combined[1] + f * o[1]
+        return combined
+
+
 class EyeFallback:
     """The gaze from one eye, while the tracker has lost the other.
 
@@ -546,7 +675,10 @@ class EyeWeights:
     alike until then. Each miss is measured before its lesson teaches anything, so each is a
     fresh test. On SteamVR's own test (2026-09-29) its calibration dots said the left eye was
     the better one and new spots said the right, so the misses come from lessons, not the fit.
-    An eye that isn't seen (None) drops out, and the other carries the gaze alone."""
+    An eye that isn't seen (None) drops out, and the other carries the gaze alone. Our
+    tracker's start over with each new calibration of it (ft-gazed's note_own_calibration).
+    Not from the new fit's per-eye spread: on 2026-10-18's replays (frame-eyes
+    one_eye_replay.py) spread and equal weights came out the same, 2.29 degrees median."""
 
     LEAN = 2.0
     KEEP = 20
@@ -587,6 +719,126 @@ class EyeWeights:
             return None
         total = sum(w)
         return (sum(wk * e[0] for wk, e in zip(w, seen)) / total, sum(wk * e[1] for wk, e in zip(w, seen)) / total)
+
+
+FUSION = STATE / "fusion.json"
+
+
+class Fusion:
+    """Our tracker and SteamVR's together (ft-gazed's GAZE_FUSION=on). On two Gaze Bench runs
+    (2026-10-17, 25 clicks on a head-locked panel out to 37 degrees) the two failed on
+    different looks: ours at its misfinds and with an eye lost, SteamVR with a steady bend
+    across the view. Ours was 2.01 degrees off at the median (6.47 at the 90th percentile),
+    SteamVR's two eyes' mean 2.67 (5.72). An affine correction fitted on the other clicks took
+    SteamVR's to 1.78 (4.26); ours where both its eyes were found, mixed half and half with
+    that, and SteamVR's alone where ours had one eye, to 1.51 (3.10). Fitted on the other run
+    only, 1.41 (4.59) (gaze/bench/compare.py's steamvr-affine-loo, fusion-loo, fusion-xrun).
+
+    So: SteamVR's eyes' mean, corrected by an affine fitted at the calibration's dots (gazecheck
+    records SteamVR's eyes at each of ours, and fits this after ours: fusion.json); then ours
+    mixed in at SHARE where both our eyes are found, SteamVR's alone where we have one, and ours
+    alone where SteamVR has no gaze.
+
+    click() adds an offset on top: the median of what the clicks since the headset went on said
+    was still off (SteamVR starts its eye model over then, and the error may move). ft-gazed
+    doesn't feed it yet: within one wear on those runs it made SteamVR's worse (2.15 to 2.72 at
+    the median, fitted on the other run), and across wears it's untested (compare.py's +clicks)."""
+
+    MODE = "affine"
+    RIDGE = 0.05    # Correction.fit's: on the gain and tilt, so a lopsided set of dots can't bend it far
+    SHARE = 0.5     # our tracker's share when both its eyes are found
+    MIN = 5         # dots for a fit
+    KEEP = 5        # clicks the offset on top comes from
+    STALE = 8.0     # degrees: a click this far off is a look elsewhere, not SteamVR's error
+
+    def __init__(self):
+        self.steam = Correction()
+        self.info = {}
+        self.points = []
+        self.clicks = []   # (wear time, dy, dp): what was still off at a click
+        self.wear = None   # the headset's current wear (SteamEyeLog.worn): clicks from others don't count
+
+    def ready(self):
+        return self.steam.samples >= self.MIN
+
+    def fit(self, points, info=None):
+        """points: (yaw, pitch, true yaw, true pitch), SteamVR's eyes' mean at a dot and the dot."""
+        self.points = [list(map(float, p)) for p in points]
+        self.steam.fit([(hy, hp, ty - hy, tp - hp) for hy, hp, ty, tp in self.points], self.MODE, ridge=self.RIDGE)
+        self.info = dict(info or {}, dots=len(self.points), fitted_at=time.time())
+        self.clicks = []
+
+    def misses(self):
+        """How far off the affine leaves each of the points it was fitted on (degrees)."""
+        out = []
+        for hy, hp, ty, tp in self.points:
+            dy, dp = self.steam.get(hy, hp, self.MODE)
+            out.append(math.hypot(ty - hy - dy, tp - hp - dp))
+        return out
+
+    @staticmethod
+    def mean(left, right):
+        if not left or not right:
+            return None
+        return (left[0] + right[0]) / 2, (left[1] + right[1]) / 2
+
+    def offset(self):
+        keep = [c for c in self.clicks if c[0] == self.wear][-self.KEEP:]
+        if not keep:
+            return 0.0, 0.0
+        return statistics.median(c[1] for c in keep), statistics.median(c[2] for c in keep)
+
+    def steam_gaze(self, left, right, clicks=True):
+        """SteamVR's corrected gaze from its two eyes' readings, or None without both."""
+        m = self.mean(left, right)
+        if m is None or not self.ready():
+            return None
+        dy, dp = self.steam.get(m[0], m[1], self.MODE)
+        oy, op = self.offset() if clicks else (0.0, 0.0)
+        return m[0] + dy + oy, m[1] + dp + op
+
+    def click(self, left, right, thy, thp):
+        """A look at (thy, thp) with SteamVR's eyes there: how far off the correction still was
+        joins the offset on top. Returns that miss (degrees), or None."""
+        g = self.steam_gaze(left, right, clicks=False)
+        if g is None:
+            return None
+        dy, dp = thy - g[0], thp - g[1]
+        miss = math.hypot(dy, dp)
+        if miss <= self.STALE:
+            self.clicks = (self.clicks + [(self.wear, dy, dp)])[-4 * self.KEEP:]
+        return miss
+
+    def combine(self, own, own_eyes, steam, share=None):
+        """own: ours, combined from own_eyes of its eyes (0-2); steam: steam_gaze(). Either may be None."""
+        share = self.SHARE if share is None else share
+        if steam is None:
+            return own
+        if own is None or own_eyes < 2:
+            return steam
+        return share * own[0] + (1 - share) * steam[0], share * own[1] + (1 - share) * steam[1]
+
+    def to_json(self):
+        return {"version": 1, "steam": self.steam.to_json(), "mode": self.MODE, "points": self.points, **self.info}
+
+    def from_json(self, d):
+        self.steam.from_json(d.get("steam") or {})
+        self.points = d.get("points") or []
+        self.info = {k: v for k, v in d.items() if k not in ("version", "steam", "mode", "points")}
+        return self
+
+    @classmethod
+    def load(cls, path=FUSION):
+        try:
+            return cls().from_json(json.loads(Path(path).read_text()))
+        except (OSError, ValueError):
+            return None
+
+    def save(self, path=FUSION):
+        path = Path(path)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.to_json(), indent=1))
+        tmp.replace(path)
 
 
 class SteamEyeLog:

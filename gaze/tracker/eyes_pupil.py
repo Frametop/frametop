@@ -5,7 +5,14 @@ background are just as dark, but they touch the image edge, so any dark region t
 the edge is dropped. Closing the glints' holes can join the pupil to that background (the
 left camera's, when you look more than about 20 degrees left), so when nothing is found
 the search runs again with a smaller closing.
+
+A dark spot well inside the frame can pass all that too: on 2026-10-17 the right camera took
+one about 9 px across for the pupil (23 px) about once a second, for 3-7 frames at a time, and
+the gaze jumped 60 degrees. A pupil doesn't shrink to half its size in a frame, so a find that
+much smaller than the last half second's (PupilSize) is skipped.
 """
+from collections import deque
+
 import cv2
 import numpy as np
 
@@ -22,42 +29,44 @@ MAX_ASPECT = 3.0   # long / short axis; the steep camera sees a squashed pupil
 GLINT = 200        # glints are near-saturated spots on or by the pupil
 CLOSE = 7          # px: closes the glints' holes in the pupil (the right eye's need this much)
 CLOSE_TIGHT = 3    # px: the retry, keeps a pupil near the dark background apart from it
+_KERNELS = {size: np.ones((size, size), np.uint8) for size in {3, CLOSE, CLOSE_TIGHT}}
 
 
 NEAR = 70          # the windowed search: this many pixels, or 3 pupil radii, around a hint
 
 
-def find_pupil(frame, near=None):
+def find_pupil(frame, near=None, smallest=0.0):
     """Return dict(x, y, a, b, angle, area, fill, glints) or None.
 
     `near` (a previous result) searches a window around it first (0.4 ms, not 1.4-2.1);
-    if the pupil isn't wholly inside the window it falls back to the whole frame."""
+    if the pupil isn't wholly inside the window it falls back to the whole frame. Blobs whose
+    long semi-axis is under `smallest` px don't count (PupilSize.smallest)."""
     if near is not None:
         r = int(max(NEAR, 3 * near['a']))
         x0, y0 = max(int(near['x']) - r, 0), max(int(near['y']) - r, 0)
-        p = _find_either(frame[y0:int(near['y']) + r, x0:int(near['x']) + r], x0, y0)
+        p = _find_either(frame[y0:int(near['y']) + r, x0:int(near['x']) + r], x0, y0, smallest)
         if p is not None:
             p['glints'] = find_glints(frame, p)
             return p
-    p = _find_either(frame, 0, 0)
+    p = _find_either(frame, 0, 0, smallest)
     if p is not None:
         p['glints'] = find_glints(frame, p)
     return p
 
 
-def _find_either(img, ox, oy):
-    p = _find(img, ox, oy)
-    return p if p is not None else _find(img, ox, oy, CLOSE_TIGHT)
+def _find_either(img, ox, oy, smallest=0.0):
+    # Both closing sizes use the same input mask; morphologyEx returns a new one.
+    dark = (cv2.GaussianBlur(img, (5, 5), 0) < DARK).astype(np.uint8)
+    p = _find(img, dark, ox, oy, smallest=smallest)
+    return p if p is not None else _find(img, dark, ox, oy, CLOSE_TIGHT, smallest)
 
 
-def _find(img, ox, oy, close=CLOSE):
-    """The pupil in `img` (a window at ox, oy of the frame), with frame coordinates. A dark
+def _find(img, dark, ox, oy, close=CLOSE, smallest=0.0):
+    """The pupil in `img` (a window at ox, oy), using its prepared `dark` mask. A dark
     region touching the window's edge doesn't count: it's background, rim, or cut off."""
-    f = cv2.GaussianBlur(img, (5, 5), 0)
-    dark = (f < DARK).astype(np.uint8)
     # Glints punch bright holes in the pupil; close them so the blob stays whole.
-    dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, np.ones((close, close), np.uint8))
-    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, _KERNELS[close])
+    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, _KERNELS[3])
     n, lab, stats, _ = cv2.connectedComponentsWithStats(dark, connectivity=8)
     h, w = img.shape
     best = None
@@ -74,7 +83,7 @@ def _find(img, ox, oy, close=CLOSE):
             continue
         (ex, ey), (d1, d2), ang = cv2.fitEllipse(c)
         a, b = max(d1, d2) / 2, min(d1, d2) / 2
-        if b < 3 or a / b > MAX_ASPECT:
+        if b < 3 or a / b > MAX_ASPECT or a < smallest:
             continue
         fill = area / (np.pi * a * b)
         if fill < MIN_FILL or fill > 1.25:
@@ -88,6 +97,116 @@ def _find(img, ox, oy, close=CLOSE):
             best = (score, dict(x=ex + x + ox, y=ey + y + oy, a=a, b=b, angle=ang, major=major,
                                 area=int(area), fill=fill, box=(x + ox, y + oy, bw, bh)))
     return best[1] if best else None
+
+
+SMALLEST = 0.5     # a find under this share of the pupil's recent size is something else
+SIZE_WINDOW = 0.5  # s of finds the recent size comes from
+SIZE_FINDS = 10    # and at least this many of them
+
+
+class PupilSize:
+    """One eye's recent pupil size, the median long semi-axis of its finds over the last
+    SIZE_WINDOW s. A pupil narrows in bright light over a second or so, and turning the eye
+    changes how big the camera sees it by a few percent per frame; in the practice captures
+    (2026-09-29) under 0.4 % of finds were below half this median, many of them strays as well.
+    Only smaller finds are refused: if a wrong spot gets in (after a loss, with no recent size),
+    the real pupil isn't refused when it's back, and the median follows it."""
+
+    def __init__(self):
+        self.finds = deque()   # (t, a)
+
+    def smallest(self, t):
+        """The smallest long semi-axis a find at time t may have, in px (0: no limit yet)."""
+        while self.finds and self.finds[0][0] < t - SIZE_WINDOW:
+            self.finds.popleft()
+        if len(self.finds) < SIZE_FINDS:
+            return 0.0
+        return SMALLEST * float(np.median([a for _, a in self.finds]))
+
+    def add(self, t, p):
+        if p is not None:
+            self.finds.append((t, p['a']))
+
+
+GUARD_RULES = ("both", "long", "off")
+GUARD_LONG = 10.0   # s of kept finds an eye's usual size comes from
+GUARD_FINDS = 20    # and at least this many of them
+GUARD_BOTH = 0.75   # "both": a find under this share of the other eye's ratio to its usual size
+GUARD_ALONE = 0.6   # without the other eye just now (or "long"): under this share of its usual size
+GUARD_FRESH = 0.05  # s: the other eye's last find counts this long
+GUARD_RESET = 1.0   # s of refusals in a row: the pupil really did change, its usual size starts over
+
+
+class SizeGuard:
+    """Both eyes' usual pupil sizes, for the misfinds PupilSize lets through (2026-10-17, two
+    Gaze Bench runs): a dark spot two thirds of the pupil's size, held for a few frames, so the
+    last half second's median follows it in. Here each eye's usual size is the median long
+    semi-axis of its kept finds over the last GUARD_LONG s, and a find is judged by its ratio to
+    that. The pupils narrow and widen together in light (the consensual reflex), so with
+    "both" a find is refused when its ratio is under GUARD_BOTH of the other eye's latest
+    (capped at 1): light shrinks both, a misfind one. On those runs (8884 finds) good finds sat
+    at 0.84 of the usual size or more 95 % of the time, the right eye's misfinds at a median of
+    0.77 and a quarter of them under 0.52. "long" is the ratio alone, under GUARD_ALONE, which
+    is also the rule while the other eye isn't seen. A refused find counts as not found. If
+    refusals go on for GUARD_RESET s, the eye's usual size starts over, so a pupil that did
+    change (light with one eye lost) is taken again. Each eye's kept and refused finds and those
+    restarts are counted (counts), so a session shows whether it refused real pupils: many
+    restarts, or refusals while both eyes looked fine, say it did."""
+
+    def __init__(self, rule="both"):
+        self.rule = rule if rule in GUARD_RULES else "both"
+        self.finds = {0: deque(), 1: deque()}   # (t, a) of kept finds
+        self.usual = {0: None, 1: None}         # the median, recomputed every few finds
+        self.since = {0: 0, 1: 0}
+        self.last = {0: None, 1: None}          # (t, ratio) of each eye's last kept find
+        self.refusing = {0: None, 1: None}      # when the current run of refusals began
+        self.refused = {0: 0, 1: 0}
+        self.kept = {0: 0, 1: 0}
+        self.restarts = {0: 0, 1: 0}            # runs of refusals that went on GUARD_RESET s
+
+    def ratio(self, e, t, a):
+        h = self.finds[e]
+        while h and h[0][0] < t - GUARD_LONG:
+            h.popleft()
+            self.usual[e] = None
+        if len(h) < GUARD_FINDS:
+            return None
+        if self.usual[e] is None or self.since[e] >= 10:
+            self.usual[e], self.since[e] = float(np.median([x for _, x in h])), 0
+        return a / self.usual[e]
+
+    def keep(self, e, t, a):
+        """Is eye e's find at time t, long semi-axis a px, its pupil? (It learns from the kept ones.)"""
+        if self.rule == "off":
+            return True
+        r = self.ratio(e, t, a)
+        ok = True
+        if r is not None:
+            o = self.last[1 - e]
+            if self.rule == "both" and o is not None and t - o[0] <= GUARD_FRESH:
+                ok = r >= GUARD_BOTH * min(1.0, o[1])
+            else:
+                ok = r >= GUARD_ALONE
+        if not ok:
+            if self.refusing[e] is None:
+                self.refusing[e] = t
+            elif t - self.refusing[e] > GUARD_RESET:
+                self.finds[e].clear()
+                self.usual[e], ok, r = None, True, None
+                self.restarts[e] += 1
+        if not ok:
+            self.refused[e] += 1
+            return False
+        self.refusing[e] = None
+        self.kept[e] += 1
+        self.finds[e].append((t, a))
+        self.since[e] += 1
+        self.last[e] = (t, 1.0 if r is None else r)
+        return True
+
+    def counts(self, e):
+        """Eye e's finds judged so far: {"kept", "refused", "restarts"} (none with the rule off)."""
+        return {"kept": self.kept[e], "refused": self.refused[e], "restarts": self.restarts[e]}
 
 
 GLINT_RING = 140   # a glint sits on dark iris or pupil: its surroundings are below this

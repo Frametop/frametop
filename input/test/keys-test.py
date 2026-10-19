@@ -28,6 +28,9 @@ relay_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "inp
 tag = f"ft_keys_test_{os.getpid()}"
 with open(relay_path) as f:
     src = f.read().replace('"\\0frametop_relay"', f'"\\0{tag}_relay"')
+screens_socket = "screens_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)"
+assert src.count(screens_socket) == 1, "relay's screens socket constructor changed"
+src = src.replace(screens_socket, "screens_sock = _test_screens_sender")
 relay = importlib.util.module_from_spec(importlib.util.spec_from_loader("relay", loader=None))
 relay.__file__ = os.path.abspath(relay_path)
 sys.path.insert(0, os.path.dirname(os.path.abspath(relay_path)))  # its game_pause and vrws
@@ -174,7 +177,10 @@ def probe(path):
 
 relay.probe = probe
 
-screens = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+# A connected pair holds all 16 startup releases even when the kernel limits unconnected
+# datagram queues to 10 messages. The relay still uses real sendto(), including other peers.
+relay._test_screens_sender, screens = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+relay._test_screens_sender.setblocking(False)
 screens.bind(relay.SCREENS)
 screens.settimeout(0.05)
 voice = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)  # Frametop Voice's socket
@@ -394,7 +400,7 @@ def tests():
                 m = helper.recv(256).decode()
             except socket.timeout:
                 return got
-            if m == "hide" or (m.startswith("btn ") and not m.startswith("btn a ")):
+            if m.startswith("hide") or (m.startswith("btn ") and not m.startswith("btn a ")):
                 got.append(m)
 
     conf["POINTER"] = "1"
@@ -404,7 +410,7 @@ def tests():
     check("pointer mode: a held left button reaches the helper", clicks(), ["btn trigger 1"])
     pause("on")
     check("pause with the left button held: it comes up, then the pointer hides", clicks(),
-          ["btn trigger 0", "hide"])
+          ["btn trigger 0", "hide pause"])
     key(relay.BTN_LEFT, 0, ms_w)
     check("paused: its release reaches no one", clicks(), [])
     pause("off")
@@ -568,6 +574,51 @@ def tests():
     check("text field, setting never: no keyboard, logged",
           (text_field(), said()), ([], ["text field focused: not opening Frametop's keyboard (Keyboard setting: never)"]))
     vr_keyboard["mode"] = None
+    use(None)
+
+    # The gaze calibration panel (the helper's "calpanel 1"): Enter takes its dot ("calkey 1" to
+    # the helper) and isn't typed, its press, repeats and release; with a modifier held, or once
+    # the panel is gone or lapsed, Enter is typed again.
+    ENTER, KPENTER = relay.KEY_ENTER, relay.KEY_KPENTER
+
+    def cal_keys():
+        got = []
+        while True:
+            try:
+                m = helper.recv(256).decode()
+            except socket.timeout:
+                return got
+            if m.startswith("calkey"):
+                got.append(m)
+
+    def panel(on):
+        to_relay(f"calpanel {on}")
+        time.sleep(0.1)
+
+    use({})
+    typed(), cal_keys()
+    key(ENTER, 1); key(ENTER, 0)
+    check("Enter without the panel: typed", (cal_keys(), typed()), ([], ["key 28 1", "key 28 0"]))
+    panel(1)
+    key(ENTER, 1); key(ENTER, 2); key(ENTER, 2); key(ENTER, 0)
+    check("panel up: Enter takes the dot, once", cal_keys(), ["calkey 1"])
+    check("...and its press, repeats and release aren't typed", typed(), [])
+    key(KPENTER, 1); key(KPENTER, 0)
+    check("panel up: keypad Enter too", (cal_keys(), typed()), (["calkey 1"], []))
+    key(SHIFT, 1); key(ENTER, 1); key(ENTER, 0); key(SHIFT, 0)
+    check("panel up, Shift held: Enter is typed", (cal_keys(), typed()),
+          ([], ["key 42 1", "key 28 1", "key 28 0", "key 42 0"]))
+    key(A, 1); key(A, 0)
+    check("panel up: other keys are typed", (cal_keys(), typed()), ([], ["key 30 1", "key 30 0"]))
+    key(ENTER, 1); panel(0); key(ENTER, 0)
+    check("panel gone while Enter is held: it took the dot, and its release isn't typed",
+          (cal_keys(), typed()), (["calkey 1"], []))
+    key(ENTER, 1); key(ENTER, 0)
+    check("panel gone: Enter is typed", (cal_keys(), typed()), ([], ["key 28 1", "key 28 0"]))
+    panel(1)
+    time.sleep(3.1)  # no renewal: the claim lapses after 3 s
+    key(ENTER, 1); key(ENTER, 0)
+    check("panel claim lapsed: Enter is typed", (cal_keys(), typed()), ([], ["key 28 1", "key 28 0"]))
     use(None)
     print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
     shutil.rmtree(OUT, ignore_errors=True)

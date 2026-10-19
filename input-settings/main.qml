@@ -493,49 +493,49 @@ Kirigami.ApplicationWindow {
                             onClicked: { backend.setMapping(bpage.deviceId, bpage.capturedCode, newAction.currentValue); bpage.capturedCode = -1 }
                         }
                     }
-                }
 
-                Kirigami.Heading {
-                    visible: bpage.rows.length > 0
-                    level: 3
-                    text: "Current mappings"
-                }
+                    Kirigami.Separator {
+                        visible: bpage.rows.length > 0
+                        Kirigami.FormData.isSection: true
+                        Kirigami.FormData.label: "Current mappings"
+                    }
 
-                Repeater {
-                    model: bpage.rows
-                    delegate: RowLayout {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.largeSpacing
-                        Controls.Label {
-                            text: modelData.name
-                            font.family: "monospace"
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                    Repeater {
+                        model: bpage.rows
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.largeSpacing
+                            Controls.Label {
+                                text: modelData.name
+                                font.family: "monospace"
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                            }
+                            Controls.ComboBox {
+                                model: backend.actions
+                                textRole: "text"
+                                valueRole: "value"
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 13
+                                Component.onCompleted: currentIndex = indexOfValue(modelData.action)
+                                onActivated: backend.setMapping(bpage.deviceId, modelData.code, currentValue)
+                            }
+                            Controls.Label {
+                                text: modelData.custom ? (modelData.isDefault ? "changed" : "custom") : "default"
+                                opacity: 0.6
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                            }
+                            // Remove: your own binding goes away (the button passes through again).
+                            // Reset: a changed built-in binding goes back to its default.
+                            // Unbind: an untouched built-in binding is set to "Do nothing".
+                            Controls.Button {
+                                text: modelData.custom ? (modelData.isDefault ? "Reset" : "Remove") : "Unbind"
+                                icon.name: modelData.custom ? (modelData.isDefault ? "edit-undo" : "edit-delete-remove")
+                                                            : "list-remove"
+                                onClicked: modelData.custom ? backend.removeMapping(bpage.deviceId, modelData.code)
+                                                            : backend.unbind(bpage.deviceId, modelData.code)
+                            }
+                            Item { Layout.fillWidth: true }
                         }
-                        Controls.ComboBox {
-                            model: backend.actions
-                            textRole: "text"
-                            valueRole: "value"
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 13
-                            Component.onCompleted: currentIndex = indexOfValue(modelData.action)
-                            onActivated: backend.setMapping(bpage.deviceId, modelData.code, currentValue)
-                        }
-                        Controls.Label {
-                            text: modelData.custom ? (modelData.isDefault ? "changed" : "custom") : "default"
-                            opacity: 0.6
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 4
-                        }
-                        // Remove: your own binding goes away (the button passes through again).
-                        // Reset: a changed built-in binding goes back to its default.
-                        // Unbind: an untouched built-in binding is set to "Do nothing".
-                        Controls.Button {
-                            text: modelData.custom ? (modelData.isDefault ? "Reset" : "Remove") : "Unbind"
-                            icon.name: modelData.custom ? (modelData.isDefault ? "edit-undo" : "edit-delete-remove")
-                                                        : "list-remove"
-                            onClicked: modelData.custom ? backend.removeMapping(bpage.deviceId, modelData.code)
-                                                        : backend.unbind(bpage.deviceId, modelData.code)
-                        }
-                        Item { Layout.fillWidth: true }
                     }
                 }
 
@@ -1638,6 +1638,8 @@ Kirigami.ApplicationWindow {
                     text: gpage.status.calibration_samples > 0
                           ? gpage.status.calibration_samples + " points ("
                             + (gpage.status.tracker === "own" ? "Own tracker, " + gpage.status.calibration_made
+                               + (gpage.status.own_mapped && gpage.status.own_mapped.length === 1
+                                  ? ", " + gpage.status.own_mapped[0] + " eye only" : "")
                                : gpage.status.kind === "eyes" ? gpage.status.model + ", each eye" : gpage.status.model) + ")"
                           : "none yet: use Calibrate"
                 }

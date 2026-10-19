@@ -37,6 +37,7 @@ Frametop's build is Vibepollo 2.0.0 with a few changes, from [Frametop/frametop-
 - An HDR monitor's HDR is off while it streams, and back on after. An HDR desktop in the stream looked washed out.
 - A virtual display that goes away leaves your monitor layout as it was.
 - The Web UI doesn't stall after a client disconnects.
+- It can take the Frame's microphone, for calls and voice chat on the PC. Turn on Send my microphone on the PC's card in Remote Displays. While its displays stream, apps on the PC can record it as "Microphone (Steam Streaming Microphone)". That's Steam's virtual microphone: the build installs it from Steam's drivers the first time if it's missing, and leaves your default microphone as it was. It only goes over the encrypted stream.
 
 ## Stream over a Steam Link dongle
 

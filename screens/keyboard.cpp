@@ -16,6 +16,7 @@
 //     uploads a new texture each time, left the panel blank for a moment on every change;
 //     it's only the fallback if the buffers can't be made.
 #include "keyboard.h"
+#include "rounded.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
@@ -236,19 +237,7 @@ void Layout() {
 
 // A rounded rectangle over what's there (straight alpha, like the other panels).
 void FillRounded(int x0, int y0, int x1, int y1, double radius, const uint8_t rgba[4]) {
-    for (int y = y0; y < y1; ++y)
-        for (int x = x0; x < x1; ++x) {
-            const double cx = std::clamp(x + 0.5, x0 + radius, x1 - radius);
-            const double cy = std::clamp(y + 0.5, y0 + radius, y1 - radius);
-            const double cover = std::clamp(radius - std::hypot(x + 0.5 - cx, y + 0.5 - cy) + 0.5, 0.0, 1.0);
-            if (cover <= 0) continue;
-            uint8_t *p = &g_px[(size_t(y) * kW + x) * 4];
-            const double a = rgba[3] / 255.0 * cover, below = p[3] / 255.0;
-            const double out = a + below * (1 - a);
-            for (int c = 0; c < 3; ++c)
-                p[c] = uint8_t(std::lround(out > 0 ? (rgba[c] * a + p[c] * below * (1 - a)) / out : 0));
-            p[3] = uint8_t(std::lround(out * 255));
-        }
+    rounded::Fill(g_px.data(), kW, x0, y0, x1, y1, radius, rgba);
 }
 
 // ---------------------------------------------------------------- buffers

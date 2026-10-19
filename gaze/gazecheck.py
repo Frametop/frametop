@@ -30,7 +30,7 @@ directions: look at each one.
   fit     the headset fit check (on "fitcheck", Check headset fit on the Gaze page): live, a
           card per eye (tracked or lost, the tracker's signal, how much of the last 10 s it was
           seen) and hints, from the gaze probe's Headset fit (gaze/fitcheck.py), while you
-          adjust the headset. A left click or Meta+J runs its guided check (dots, then looks
+          adjust the headset. A left click, Enter, a pinch or Meta+J runs its guided check (dots, then looks
           down, up, left and right); a right click or Meta+K closes it, as does FIT_TIMEOUT.
           With our tracker installed, its first hint line is the fit coach's (gaze/fitcoach.py):
           where the headset sits, from where ft-eyes sees each pupil and glint (ft-eyes "fit",
@@ -46,7 +46,7 @@ again when the file changes) adds two things, with our tracker installed, its re
           you look at its dot, against your saved fit, and holds the dot meanwhile (at most
           PUTON_READ). If the headset sits more than fitcoach.MOVED_DEG from it, or the IPD
           setting changed, the panel widens (five's size) and says which way to move it, live,
-          until it's back; then the dot is taken as usual. A left click or Meta+J takes it as
+          until it's back; then the dot is taken as usual. A left click, Enter, a pinch or Meta+J takes it as
           it sits, and after PUTON_TIMEOUT it's taken anyway. So the click teaches our tracker
           the headset where you meant it to be, not where it landed.
   slip    while gaze mode is on with our tracker, ft-eyes' glint jump (the headset slipped
@@ -61,15 +61,17 @@ waits until the tracker sends, at most ft-gazed's WAKE_SETTLE; then it opens, or
 The quick check's dot captures itself: from CHECK_SETTLE after it shows (the eyes getting
 there), once the gaze has held within CHECK_SPREAD for CHECK_WINDOW (the probe's max spread and
 capture time). It's the gaze holding still that counts, not where the tracker puts it, so it
-works however far off the tracker is; a left click or Meta+J (the pointer helper's
-"calaccept") takes it now. The full calibration's and five's dots wait for that click: you
+works however far off the tracker is; a left click, Enter, an index pinch with hand tracking,
+or Meta+J (the pointer helper's "calaccept") takes it now. The full calibration's and five's dots wait for that click: you
 click when you're looking at the dot (the user asked for that: a steady gaze isn't always on
 the dot), and the gaze held still up to then is taken (ACCEPT_SPREAD). They wait as long as
 it takes, up to CLICK_IDLE. A dot not taken says why in the panel's note line (reject_reason:
 gazecal.steady_samples' drop counts for SteamVR's tracker, ft-eyes' reply for ours), as does a
 click with nothing taken after ACCEPT_WAIT, and a failed calibration names its most common
 reason there and in the status. A right click or Meta+K ("calquit") closes the panel. A press
-mapped to gaze precision or gaze drag counts as the left click (pointer/helper/calpanel.h). The
+mapped to gaze precision or gaze drag counts as the left click (pointer/helper/calpanel.h);
+Enter is the input relay's ("calkey 1" to the helper while the panel is up), and a pinch the
+helper's own, read from ft-hands whether or not hand interaction is on. The
 pointer hides meanwhile ("calpanel 1", renewed every second; the helper shows it again by itself
 when that stops).
 
@@ -77,8 +79,21 @@ Our tracker's first calibration: before it has one, ft-eyes publishes no gaze (i
 to a gaze only with a calibration), so there's no gaze to hold still. Its calibration runs
 anyway ("blind"): someone in the headset (SteamVR's tracker sees an eye) and ft-eyes answering
 are enough to start it, each dot stands in for the gaze, and a click takes the CHECK_WINDOW up
-to it. ft-eyes then checks that each pupil was seen and held still in that window (calib-point)
-and says why not. Without this, a fresh install could never calibrate our tracker.
+to it. ft-eyes then checks that the pupils were seen and held still in that window (calib-point:
+one eye is enough, and the dot is kept for that eye) and says why not. Without this, a fresh
+install could never calibrate our tracker. A full calibration goes blind the same way whenever
+ours sends no gaze for OWN_GONE: its calibration maps one eye, and that's the one you can't
+show it now. Live 2026-10-18 a calibration with the left eye closed mapped only the right, and
+the next one, with the right eye closed, took no dot: every click waited for a gaze that
+couldn't come ("Waiting: the eye tracker isn't sending a gaze").
+
+Looked away (our tracker's full calibration): where SteamVR saw both eyes at a dot, their mean more
+than LOOKED_AWAY from it, past their usual offset in this calibration (the median over the dots
+it took, from AWAY_OFFSET_MIN of them), and the dot isn't taken: "you looked away from the dot"
+(looked_away; ft-eyes isn't asked). Live 2026-10-18 the palm menu opened the Steam menu
+mid-calibration, and three dots were taken 17-35 degrees from where the user looked. A third
+dot in a row like that is SteamVR being off, not you: it's taken, and the check stops for that
+calibration (AWAY_GIVE_UP).
 
 The service doesn't wait for ft-eyes' answers to calib-point and calib-fit (ask_eyes): the dot
 shows its ring full, and further clicks do nothing until the answer comes, or its deadline
@@ -88,7 +103,10 @@ behind the panel), and an answer over EYES_GONE closed the calibration as the he
 
 What a capture teaches:
   our tracker   quick and five: a click ("click T YAW PITCH", like a pointer lesson); full:
-                calib-start, a calib-point for each dot, calib-fit (its calibration)
+                calib-start, a calib-point for each dot, calib-fit (its calibration); and
+                SteamVR's two eyes at each dot ft-eyes took, where SteamVR saw both: after the
+                fit, SteamVR's affine for ft-gazed's fusion (gazecal.Fusion) is fitted on
+                them and saved to fusion.json (kept as it was with under Fusion.MIN of them)
   SteamVR's     quick and five: a lesson for each eye, like the pointer's; full: each source's
                 calibration fitted from the dots (gazecal.Correction, the probe's way), saved
                 to calibration.json, and the lessons start over on top of it
@@ -110,7 +128,7 @@ from pathlib import Path
 
 import fitcoach
 from fitcheck import MIN_REGION, FitCheck, wrap
-from gazecal import DEFAULT_MODEL, EYE_LOST, STATE, steady_samples
+from gazecal import DEFAULT_MODEL, EYE_LOST, FUSION, STATE, Fusion, steady_samples
 
 REPO = Path(__file__).resolve().parents[1]
 PANEL_PROG = REPO / "gaze" / "build" / "ft-gazepanel"
@@ -128,6 +146,11 @@ CHECK_WINDOW = 0.6
 CHECK_SPREAD = 1.0     # degrees
 ACCEPT_SPREAD = 2.5    # degrees: a capture asked for (calaccept) takes this much
 CLICK_IDLE = 120.0     # seconds a dot of five or full waits for its click; then the check closes
+LOOKED_AWAY = 15.0     # degrees: SteamVR's eyes this far from a full calibration's dot (our tracker's), past
+                       # their usual offset in it, and the dot isn't taken: you looked away
+AWAY_OFFSET_MIN = 3    # dots taken with SteamVR's eyes before their median offset counts
+AWAY_GIVE_UP = 2       # dots in a row turned down as looked away: at a third, SteamVR is off, not you;
+                       # that one's taken and the check stops
 QUICK_TIMEOUT = 6.0
 QUICK_COOLDOWN = 120.0
 DON_DELAY = 3.0        # seconds of eyes after AWAY_MIN without: the headset went on
@@ -188,6 +211,7 @@ STEAM_REASONS = {"lost_left": ("left eye lost", "SteamVR lost your left eye"),
                  "vergence": ("eyes disagreed", "SteamVR's two eyes disagreed")}
 FIT_HINT = "check the headset fit"
 ACCEPT_WAIT = 1.5      # seconds after a click with no capture before the panel says what it waits for
+OWN_GONE = 0.5         # seconds without our tracker's gaze before a full calibration goes blind (see the top)
 
 
 def reject_reason(reply, why):
@@ -199,13 +223,18 @@ def reject_reason(reply, why):
         key = max(why, key=why.get)
         return *STEAM_REASONS[key], key.startswith("lost")
     words = reply.removeprefix("fail ").split()
-    # ft-eyes: "fail the left eye was seen in only 3 frames", "fail the left eye moved (4.2 px)"
+    # ft-eyes: "fail the left eye moved (4.2 px)", "fail neither eye was seen enough (right 3
+    # frames, left 0 frames)"; one eye seen is enough for a dot (and its answer is "ok ...")
+    if reply.startswith("fail neither eye was seen"):
+        return "eyes not seen", "our tracker saw neither eye well enough", True
     if len(words) >= 3 and words[0] == "the" and words[2] == "eye":
         eye = words[1]
         if "seen" in words:
             return f"{eye} eye not seen", f"our tracker saw your {eye} eye in only {words[-2]} frames", True
         if "moved" in words:
             return f"{eye} eye moved", f"your {eye} eye moved while you looked", False
+    if reply.startswith("looked away"):  # gazecheck's own (looked_away): SteamVR's eyes were elsewhere
+        return "looked away", "you looked away from the dot (by SteamVR's eyes)", False
     if not reply:
         return "no answer", "our tracker didn't answer", False
     if reply.startswith("our tracker isn't running"):
@@ -581,7 +610,8 @@ class Checks:
         self.check = {"kind": kind, "reason": reason, "own": own, "dots": check_dots(kind, own), "i": 0,
                       "started": now, "shown": now, "run": [], "accept": False, "done_at": None, "tries": 0,
                       "skipped": 0, "captured": 0, "points": {}, "reasons": {}, "fit_reasons": set(), "note": "",
-                      "blind": blind}
+                      "blind": blind, "fusion": [], "away_dots": [], "away_off": False, "steam_offsets": [],
+                      "own_at": now, "run_blind": blind, "went_blind": False}
         log(f"{kind} check: {reason}" + (" (our tracker's first: no gaze yet, so each click takes the look "
                                          "up to it)" if blind else ""))
         self.note_until = None   # the check's panel replaces the slip note
@@ -619,7 +649,7 @@ class Checks:
         self.to_helper("calpanel 1")
         self.to_panel("show fit")
         self.to_panel("title Headset fit: adjust the headset while you watch")
-        self.to_panel("text Left click or Meta+J: guided check · Right click or Meta+K: done")
+        self.to_panel("text Left click, Enter or pinch: guided check · Right click or Meta+K: done")
         return "ok"
 
     def new_coach(self):
@@ -849,7 +879,7 @@ class Checks:
                 drawn[k] = cmd
                 self.to_panel(cmd)
         if fit.have_eye_data and fit.samples < 3 * MIN_REGION:
-            hints = ["Look around slowly: up, down, left and right. Or left click (Meta+J) for a guided check."]
+            hints = ["Look around slowly: up, down, left and right. Or left click, press Enter or pinch for a guided check."]
         else:
             hints = fit.hints()
         hints = self.coach_lines() + hints
@@ -865,9 +895,9 @@ class Checks:
         if c["kind"] == "full":
             self.to_panel(f"bg {ROUND_BG[rnd]}")
             self.to_panel(f"title Gaze calibration: {ROUND_NAMES[rnd]} round, {rnd + 1} of 3")
-            self.to_panel("text Look at the dot and click (left click or Meta+J). Right click or Meta+K: stop")
+            self.to_panel("text Look at the dot, then left click, press Enter or pinch. Right click or Meta+K: stop")
         elif c["kind"] == "five":
-            self.to_panel(f"text Look at the dot and click ({c['i'] + 1} of {len(c['dots'])})")
+            self.to_panel(f"text Look at the dot, then click, Enter or pinch ({c['i'] + 1} of {len(c['dots'])})")
         else:
             self.to_panel("text Look at the dot")
         self.to_panel(f"dot {yaw:.3f} {pitch:.3f} look")
@@ -896,10 +926,21 @@ class Checks:
             return  # (asking: ft-eyes has this dot's look, or the fit)
         if c["own"]:
             src = s["src"].get("own") or {}
-            if c["blind"]:
-                # Our tracker's first calibration: no gaze yet, so the dot stands in for it (the
-                # gaze can't seem to move) and a click takes the look up to it. ft-eyes checks
-                # the pupils held still (see the top).
+            if "hy" in src:
+                c["own_at"] = self.sample_at
+            # Our tracker's first calibration: no gaze yet, so the dot stands in for it (the
+            # gaze can't seem to move) and a click takes the look up to it. ft-eyes checks
+            # the pupils held still (see the top). A full calibration does the same while ours
+            # sends no gaze: its calibration maps only the eye you've closed.
+            blind = c["blind"] or (c["kind"] == "full" and self.sample_at - c["own_at"] > OWN_GONE)
+            if blind != c["run_blind"]:
+                c["run"].clear()  # the dot standing in and our gaze aren't one look
+                c["run_blind"] = blind
+                if blind and not c["went_blind"]:
+                    c["went_blind"] = True
+                    log(f"{c['kind']} check: our tracker sends no gaze (its calibration's eyes aren't seen): "
+                        "each click takes the look up to it")
+            if blind:
                 yaw, pitch, _ = c["dots"][c["i"]]
                 src = {"hy": yaw, "hp": pitch}
         else:
@@ -960,6 +1001,21 @@ class Checks:
             miss = [math.hypot(yaw - e[0], pitch - e[1]) if e else None for e in eyes]
             rec.update(eyes=eyes, miss=miss)
             t0, t1 = samples[0]["t"], samples[-1]["t"]
+            if c["kind"] == "full" and svc.one_eye is None:
+                # SteamVR's eyes at the dot too, for the fusion (finish): each one's median over
+                # the steady samples, as its own calibration takes them.
+                steady = steady_samples(samples)
+                lr = []
+                for name in ("left", "right"):
+                    pts = [(smp["src"][name]["hy"], smp["src"][name]["hp"]) for smp in steady
+                           if "hy" in (smp["src"].get(name) or {})]
+                    lr.append((statistics.median(p[0] for p in pts), statistics.median(p[1] for p in pts))
+                              if len(pts) >= 15 else None)
+                if all(lr):
+                    rec["steam"] = lr
+                    if self.looked_away(rec):
+                        self.captured(rec, False)
+                        return
             if c["kind"] == "full":
                 # ft-eyes checks the pupils held still: its answer takes the dot or not (point_done).
                 # The ring shows it full meanwhile, so the click is seen to have landed.
@@ -1023,12 +1079,41 @@ class Checks:
                 svc.dirty = True
         self.captured(rec, ok)
 
+    def looked_away(self, rec):
+        """A full calibration's dot for our tracker, where SteamVR saw both eyes: whether they say
+        you looked away (LOOKED_AWAY past their usual offset in this calibration). The dot isn't
+        taken then (ft-eyes isn't asked): one taken there teaches our tracker the wrong place.
+        Past AWAY_GIVE_UP dots in a row turned down, it's SteamVR that's off: the check stops."""
+        c = self.check
+        (my, mp), (ty, tp) = Fusion.mean(*rec["steam"]), rec["true"]
+        dy, dp = ty - my, tp - mp
+        offs = c["steam_offsets"]
+        if len(offs) >= AWAY_OFFSET_MIN:
+            dy -= statistics.median(o[0] for o in offs)
+            dp -= statistics.median(o[1] for o in offs)
+        rec["away"] = round(math.hypot(dy, dp), 2)
+        away = rec["away"] > LOOKED_AWAY and not c["away_off"]
+        if away and c["i"] not in c["away_dots"] and len(c["away_dots"]) >= AWAY_GIVE_UP:
+            c["away_off"], away = True, False
+            log(f"full check: SteamVR's eyes {rec['away']:.0f} deg off at {AWAY_GIVE_UP + 1} dots in a row: "
+                "taken as SteamVR being off, the looked-away check is off for this calibration")
+        if not away:
+            c["away_dots"] = []
+            offs.append((ty - my, tp - mp))
+            return False
+        if c["i"] not in c["away_dots"]:
+            c["away_dots"].append(c["i"])
+        rec["reply"] = f"looked away ({rec['away']:.0f} deg by SteamVR)"
+        return True
+
     def point_done(self, rec, miss, reply):
         """ft-eyes' answer to a full calibration dot's calib-point ("" without one)."""
         rec["reply"] = reply
         ok = reply.startswith("ok")
         if ok:
             self.svc.weights["own"].add(miss)
+            if rec.get("steam"):
+                self.check["fusion"].append((*Fusion.mean(*rec["steam"]), *rec["true"]))
         self.captured(rec, ok)
 
     def captured(self, rec, ok):
@@ -1115,6 +1200,8 @@ class Checks:
         if c["own"]:
             def fitted(reply):
                 log(f"calibration ({c['captured']} of {n} dots): our tracker says {reply or 'nothing'}")
+                if reply.startswith("ok"):
+                    self.fit_fusion(c["fusion"])
                 self.close()
 
             self.to_panel("text Saving the calibration")
@@ -1138,6 +1225,22 @@ class Checks:
             svc.refit()
             log(f"calibration ({c['captured']} of {n} dots): {mode}, saved")
         self.close()
+
+    def fit_fusion(self, pts):
+        """SteamVR's affine for ft-gazed's fusion, from its eyes at the dots ours took."""
+        if len(pts) < Fusion.MIN:
+            log(f"fusion: SteamVR saw both eyes at only {len(pts)} of the dots; {FUSION.name} stays as it was")
+            return
+        f = Fusion()
+        f.fit(pts, {"how": "calibration", "made": time.strftime("%Y-%m-%d %H:%M:%S"), "wear": self.svc.steam.worn()})
+        try:
+            f.save(FUSION)
+        except OSError as e:
+            log(f"fusion: couldn't save {FUSION}: {e}")
+            return
+        self.svc.load_fusion()
+        log(f"fusion: SteamVR's affine from {len(pts)} dots, {statistics.median(f.misses()):.2f} deg left at the "
+            "median, saved")
 
     def close(self, why=None):
         if not self.check:

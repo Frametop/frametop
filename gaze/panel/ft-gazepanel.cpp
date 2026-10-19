@@ -644,8 +644,12 @@ struct PoseLog {
             next += kPosePeriodNs;
             const int64_t now = RawNs();
             if (next < now - kPosePeriodNs) next = now;
-            const timespec ts{time_t(next / 1'000'000'000), long(next % 1'000'000'000)};
-            clock_nanosleep(CLOCK_MONOTONIC_RAW, TIMER_ABSTIME, &ts, nullptr);
+            // Linux has no absolute sleeps on CLOCK_MONOTONIC_RAW (EINVAL at once: the loop spun at
+            // ~160k poses/s), so sleep the gap relative on CLOCK_MONOTONIC.
+            if (const int64_t wait = next - now; wait > 0) {
+                const timespec ts{time_t(wait / 1'000'000'000), long(wait % 1'000'000'000)};
+                clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, nullptr);
+            }
         }
     }
 };

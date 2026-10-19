@@ -43,4 +43,5 @@ g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/keybo
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handrobot.o build/handcut.o build/handrender.o $vrlibs
 $cxx -o build/ft-spotpanel ../spotwatch/ft-spotpanel.cpp $(pkg-config --libs gbm libdrm) $OPENVR_LIBS -lpthread
+strip --strip-unneeded build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel
 echo "built build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel"'

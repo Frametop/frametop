@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Frametop Gaze Bench
+GenericName=Test gaze tracking on hard targets
+Comment=Look at dots in hard places on a panel in the headset and press its button, to compare gaze techniques
+Exec=@REPO@/gaze/bench/ft-gazebench
+Icon=view-visible
+Categories=Utility;
+Keywords=eyes;eye tracking;gaze;test;bench;frametop;

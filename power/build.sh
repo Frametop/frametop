@@ -7,4 +7,5 @@ exec "$root/scripts/frame.sh" -C power 'set -e; mkdir -p build
 . ../scripts/openvr.sh
 g++ -std=c++17 -O2 -Wall -Wno-unused-parameter $OPENVR_CFLAGS \
   -o build/ft-powerd ft-powerd.cpp $OPENVR_LIBS
+strip --strip-unneeded build/ft-powerd
 echo "built build/ft-powerd"'

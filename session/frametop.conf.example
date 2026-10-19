@@ -44,6 +44,8 @@ GAZE_TRACKER=auto          # gaze service: auto = our own eye tracker when it's 
 GAZE_EYE=auto              # gaze service: eye bias. auto = each eye weighted by how far off it was at your recent nudges | left | right = that eye counts twice
 #EYES_MODEL=classic        # our eye tracker (GAZE_TRACKER own): classic = the pupil finder | latest = the newest eye net, following new versions | a version's name (gaze/tracker/models.json) | a model folder of your own. Pick it on Frametop Input Settings' Gaze page, which downloads it
 EYES_MODELS_UPDATE=1       # our eye tracker: 1 = when it starts, check GitHub for the eye net list and fetch the net EYES_MODEL needs | 0 = only what's downloaded
+GAZE_FUSION=off            # gaze service, with our eye tracker: on = mix in SteamVR's gaze, corrected at your calibration (half each while ours sees both eyes, SteamVR's while ours has one or none) | off = ours alone. Calibrate again after turning it on
+#EYES_SIZE_GUARD=both     # our eye tracker, classic: a pupil find much smaller than usual counts as not found. both = unless the other eye's shrank too (light) | long = under 0.6 of usual | off
 GAZE_FIT_WATCH=0           # gaze service, with our eye tracker installed: 1 = the put-on check (the quick check, when the headset goes on, first says which way to move it back to your saved fit; the fit check saves a good one) and the slip note (our tracker in use: a small note when the headset slipped) | 0 = off
 HANDS_MODE=off             # hand tracking (hands/run.sh install; install.sh sets frametop when it installs it), when it runs: frametop = while the Frametop desktop runs | always = whenever SteamVR runs, in games and the dashboard too | off = only by hand (ft-handsctl on). Frametop Input Settings' Hands page applies it at once
 HANDS_SWAP_SIDES=auto      # hand tracking: which side camera is which. auto = ft-hands tells from the hands and fixes ft-camd's names, which some SteamVR restarts swap | 0 = keep ft-camd's | 1 = exchange them
@@ -109,7 +111,7 @@ SCREEN_FRONT_AWAY=0        # ... 1 = turned away from, it goes home (unless used
 SCREEN_FRONT_KEEP_MS=3000  # ... this much input on the screen in the slot keeps it there when you look away (0 = never kept)
 SCREEN_UI_SCALE=           # ... a remote display's own UI scale for its readable size, by screen number: "102=2" (a Mac's Retina display); KWin's screens use their own scale
 HANDS_RESET_HOLD_MS=0      # the reset button under a screen resets the layout when held this long (ms; laser or finger) | 0 = a press
-SCREEN_SPIN_DISTANCE=1.0   # ... a brought screen comes this far ahead (m)
+SCREEN_SPIN_DISTANCE=1.0   # ... a brought screen comes this far ahead (m); at least 0.9, behind spotwatch's search (0.75)
 SCREEN_SPIN_PPD=26         # ... as big as its text needs to read: its logical pixels (KWin's scale undone) at this many per degree of view
 SCREEN_SPIN_MAX_DEG=100    # ... at most this wide (degrees; wider than 60 it curves round you) and SCREEN_SPIN_MAX_TALL_DEG (55) tall, its shape kept
 SCREEN_SPIN_MAX_WIDE_DEG=150   # ... an ultrawide (3:1 or wider, like 5120x1440) at most this wide instead, so its text reads too

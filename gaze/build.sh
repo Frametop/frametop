@@ -13,7 +13,8 @@ g++ -std=c++17 -O2 -Wall -Wno-unused-parameter -Wno-missing-field-initializers -
   -o build/ft-gaze ft-gaze.cpp $OPENVR_LIBS -lpthread
 stb=2c980bb59875b0d32144a71867fbdebb2f77cd20
 [ -f build/include/stb-$stb ] || { curl -fsSL "https://raw.githubusercontent.com/nothings/stb/$stb/stb_truetype.h" -o build/include/stb_truetype.h && touch build/include/stb-$stb; }
-g++ -std=c++17 -O2 -Wall -Wno-unused-parameter -Wno-missing-field-initializers -Ibuild/include $(pkg-config --cflags gbm libdrm) \
+g++ -std=c++17 -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wno-unused-parameter -Wno-missing-field-initializers -Ibuild/include $(pkg-config --cflags gbm libdrm) \
   -o build/ft-gazepanel panel/ft-gazepanel.cpp $OPENVR_LIBS \
   $(pkg-config --libs gbm libdrm) -lpthread
+strip --strip-unneeded build/ft-gaze build/ft-gazepanel
 echo "built build/ft-gaze build/ft-gazepanel"'

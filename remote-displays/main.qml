@@ -453,6 +453,18 @@ Kirigami.ApplicationWindow {
                                     }
                                 }
                             }
+                            // The Frame's microphone rides along with its streams. Sunshine
+                            // and stock Vibepollo ignore it, so Sunshine hosts don't get the switch.
+                            Controls.Switch {
+                                visible: !hostCard.sunshine
+                                text: "Send my microphone"
+                                checked: hostCard.modelData.mic
+                                onToggled: backend.setMic(hostCard.modelData.name, checked)
+                                Controls.ToolTip.text: "Apps on it can record the Frame's microphone while its displays stream: "
+                                                       + "pick \"Microphone (Steam Streaming Microphone)\". Windows only for now, "
+                                                       + "with Frametop's build of Vibepollo."
+                                Controls.ToolTip.visible: hovered
+                            }
                             Controls.Label {
                                 visible: hostCard.modelData.displays.length === 0
                                 text: "No displays yet."

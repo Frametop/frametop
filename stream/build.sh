@@ -7,7 +7,9 @@
 # also need moonlight-embedded (GPLv3) at a pinned commit: its libgamestream for pairing and
 # launching, and the moonlight-common-c it pins for the protocol, and its table of Windows key
 # codes. ft-stream plays the host's sound with Opus and PipeWire's PulseAudio server
-# (libpulse-simple).
+# (libpulse-simple), and sends the Frame's microphone back the same way. moonlight-mic.patch adds
+# that to moonlight-common-c (LiSendMicrophoneOpusData); the checkout is made again when it
+# changes.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 "$root/scripts/sync.sh" >/dev/null
@@ -16,7 +18,8 @@ exec "$root/scripts/frame.sh" -C stream 'set -e; mkdir -p build/include
 me=f32e415aea6797d261d6b470dcf8bf18727341c2
 src=build/moonlight-embedded
 mlc=$src/third_party/moonlight-common-c
-if [ ! -f $src/.ft-$me ]; then
+mark=$me-$(sha256sum moonlight-mic.patch | cut -c1-12)
+if [ ! -f $src/.ft-$mark ]; then
   rm -rf $src build/mlc build/gamestream
   # Only this revision and its pinned submodules are build inputs, not their history.
   git init -q $src
@@ -24,7 +27,8 @@ if [ ! -f $src/.ft-$me ]; then
   git -C $src checkout -q --detach FETCH_HEAD
   git -C $src submodule update -q --init --depth 1 third_party/moonlight-common-c
   git -C $mlc submodule update -q --init --depth 1 enet
-  touch $src/.ft-$me
+  git -C $mlc apply "$PWD/moonlight-mic.patch"
+  touch $src/.ft-$mark
 fi
 if [ ! -f build/mlc/libmoonlight-common-c.a ]; then
   cmake -S $mlc -B build/mlc -G Ninja -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release >/dev/null

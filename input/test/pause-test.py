@@ -65,6 +65,18 @@ check("one button double-clicked: goes off",
 g = gp.Gesture(("right/b",), 2)
 check("other buttons don't count", presses(g, [(0, "right/a", True), (0.2, "right/a", True)]), 0)
 
+check("one controller: its stick alone", gp.one_controller((L, R), {"right"}), (R,))
+check("one controller (left): its stick alone", gp.one_controller((L, R), {"left"}), (L,))
+check("both controllers: the gesture as set", gp.one_controller((L, R), {"left", "right"}), None)
+check("no controllers: nothing", gp.one_controller((L, R), set()), None)
+check("two buttons on one controller: as set", gp.one_controller(("right/a", "right/b"), {"right"}), None)
+check("one button: as set", gp.one_controller(("right/b",), {"right"}), None)
+g = gp.Gesture(gp.one_controller((L, R), {"right"}), 2)
+check("one controller: its stick clicked twice goes off",
+      presses(g, [(0, R, True), (0.1, R, False), (0.3, R, True), (0.4, R, False)]), 1)
+g = gp.Gesture(gp.one_controller((L, R), {"right"}), 2)
+check("one controller: its stick clicked once, nothing", presses(g, [(0, R, True), (0.1, R, False)]), 0)
+
 VR = ("left/thumbstick", "right/thumbstick", "right/b", "right/a")
 check("no pause_gesture: both sticks twice", gp.gesture_of({}, VR), ((L, R), 2))
 check("pause_gesture null: none", gp.gesture_of({"pause_gesture": None}, VR), None)

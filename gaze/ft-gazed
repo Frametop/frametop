@@ -10,9 +10,10 @@ again when the file changes:
                            grabber, and ft-eyes' Python in this checkout), else SteamVR's; it
                            switches when ours is installed or removed.
   GAZE_EYE=auto|left|right the eye bias (gazecal.EyeWeights): auto weights each eye by how far
-                           off it was at your recent nudges; left or right counts that eye twice
-                           as much as the other. Either eye alone carries the gaze when the
-                           other isn't seen.
+                           off it was at your recent nudges (since our tracker's last
+                           calibration: a new one starts them over); left or right counts that
+                           eye twice as much as the other. Either eye alone carries the gaze
+                           when the other isn't seen.
   GAZE_FUSION=off|on       with our tracker: SteamVR's gaze too (gazecal.Fusion, fusion.json).
                            SteamVR's two eyes' mean, corrected by an affine fitted at our
                            calibration's dots, is mixed half and half with ours where both our
@@ -272,6 +273,7 @@ class Service:
         self.cal_mtime = None
         self.lives = {name: PointerLessons() for name in SOURCES}
         self.weights = {t: EyeWeights(self.bias) for t in TRACKERS}
+        self.own_made = None  # when our tracker's calibration was made, as its misses knew it
         self.dirty = False
         self.fusion_on = read_fusion()
         self.fusion, self.fusion_mtime = None, None
@@ -437,12 +439,14 @@ class Service:
         for t, misses in (d.get("misses") or {}).items():
             if t in self.weights:
                 self.weights[t] = EyeWeights(self.bias, misses)
+        self.own_made = d.get("own_made")
         log(", ".join(f"{n} {len(self.lives[n].samples)}" for n in (self.source,) + SIDES) + " lessons")
 
     def save_lessons(self):
         tmp = LESSONS.with_suffix(".tmp")
         tmp.write_text(json.dumps({"version": 2, "sources": {n: lv.samples for n, lv in self.lives.items() if lv.samples},
-                                   "misses": {t: w.misses for t, w in self.weights.items()}}))
+                                   "misses": {t: w.misses for t, w in self.weights.items()},
+                                   "own_made": self.own_made}))
         tmp.replace(LESSONS)
         self.dirty = False
 
@@ -996,8 +1000,28 @@ class Service:
                     self.own, self.own_at = json.loads(data), time.monotonic()
                 except ValueError:
                     pass
+                else:
+                    self.note_own_calibration()
             else:
                 log(f"our tracker: {data}")
+
+    def note_own_calibration(self):
+        """Our tracker's status names a calibration other than the one its eye misses were
+        measured on: they start over, and the eyes count alike until each has EyeWeights.MIN
+        again. The misses say how far each eye's old mapping was off, and a new calibration
+        replaces both mappings (it can drop an eye, or be someone else's). Live 2026-10-18 a
+        calibration's own dots fed the right eye misses of the right-only one before it, and the
+        balance after it was that one's. Whatever made the calibration: the panel, the probe."""
+        made = (self.own.get("calibration") or {}).get("made")
+        if not made or made == self.own_made:
+            return
+        w = self.weights["own"]
+        if self.own_made is not None and any(w.misses):
+            log(f"our tracker's calibration from {made}: the eye weights start over "
+                f"(were {', '.join(f'{v:.2f}' for v in w.weights())} from {', '.join(str(len(m)) for m in w.misses)} misses)")
+            self.weights["own"] = EyeWeights(self.bias)
+        self.own_made = made
+        self.dirty = True
 
     def status(self):
         kind = self.kind

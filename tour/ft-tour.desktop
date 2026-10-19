@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Frametop Tour
+GenericName=A walk through Frametop
+Comment=What Frametop does: screens, shortcuts, eye and hand tracking, spotwatch, floating windows, pins, profiles
+Exec=@REPO@/tour/ft-tour
+Icon=help-about
+Categories=Utility;
+Keywords=tour;onboarding;help;welcome;frametop;

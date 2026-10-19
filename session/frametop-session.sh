@@ -277,6 +277,23 @@ else
   rm -f "$autostart"
 fi
 
+# Frametop Tour (tour/ft-tour): opens when this desktop starts until it's been closed, skipped,
+# or finished once (~/.local/state/frametop/tour.json; tour/ft-tour --reset shows it again).
+autostart=$XDG_CONFIG_HOME/autostart/frametop-tour.desktop
+if [ "$backend" = screens ]; then
+  mkdir -p "$(dirname "$autostart")"
+  cat > "$autostart" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Frametop Tour
+Exec=sh -c 'exec "$here/../tour/ft-tour" --first-run > /tmp/frametop-tour.log 2>&1'
+X-KDE-autostart-phase=2
+NoDisplay=true
+EOF
+else
+  rm -f "$autostart"
+fi
+
 # Launch as Standalone in every app's right-click menu (float/ft_apps.py): copies of the
 # apps' desktop files with that action, first in XDG_DATA_DIRS, so only this desktop sees
 # them. Written now, before Plasma reads them; ft-floatd keeps them up to date.

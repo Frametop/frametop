@@ -68,7 +68,7 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 | Meta+Shift+H in the desktop | Hides or shows all screens (also in the menu as Hide/Show Screens, and mappable). The Visibility & pins tab of Frametop Display Settings can instead show them only with the dashboard open, or while you look at your wrist |
 | Tap Meta, on any keyboard | Opens the Steam menu in the SteamVR dashboard, or closes the dashboard, wherever you are. The desktop's launcher is still on the taskbar and Alt+F1. Change it in Frametop Input Settings (Keyboard page), where any key combination or modifier tap can do a Frametop or Steam action, open a profile, or run a command of your own |
 | Switch a screen to Hidden (Frametop Display Settings, Visibility & pins → Screens shown) | Hides just that screen until you switch it back, whatever the other visibility settings say; new windows that would open on it float instead |
-| Play a VR game | Frametop pauses so the game gets the headset to itself (see [Pause for VR games](#pause-for-vr-games)): the screens hide and your controllers stay in the game. Click both thumbsticks together twice to bring Frametop back. With the automatic pause off, the screens still hide, and the SteamVR dashboard or Meta+Shift+H shows them; to keep them visible over games, change During VR games on the Visibility & pins tab |
+| Play a VR game | Frametop pauses so the game gets the headset to itself (see [Pause for VR games](#pause-for-vr-games)): the screens hide and your controllers stay in the game. Click both thumbsticks together twice to bring Frametop back (with one controller, click its thumbstick twice). With the automatic pause off, the screens still hide, and the SteamVR dashboard or Meta+Shift+H shows them; to keep them visible over games, change During VR games on the Visibility & pins tab |
 
 Restarting the desktop (Restart desktop in Frametop Display Settings) closes its windows, but background work you started in it, such as servers, tmux sessions, or builds, keeps running.
 
@@ -125,7 +125,7 @@ Frametop pauses while a VR game runs, so the game gets the headset's CPU and GPU
 
 | Do this | To get this |
 | --- | --- |
-| Click both thumbsticks together, twice | Pauses Frametop, or brings it back, in a game or not. You hear a short sound. The game sees the clicks too |
+| Click both thumbsticks together, twice | Pauses Frametop, or brings it back, in a game or not. You hear a short sound. The game sees the clicks too. With only one controller connected, click its thumbstick twice |
 | Start a VR game | Frametop pauses, and comes back 5 seconds after the game ends. Bring it back during the game, and it stays on until that game ends |
 | Map Pause/resume Frametop to a mouse button, key combination, or controller button | The same, from that button (Frametop Input Settings) |
 

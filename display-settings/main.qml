@@ -868,15 +868,21 @@ Kirigami.ApplicationWindow {
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Screens shown" }
 
+                    // Counts as models, here and in Pinned screens: a new list rebuilds the rows, and
+                    // FormLayout puts rebuilt rows after the ones below (a report: pinning a screen
+                    // moved the wrist slider and All screens up between Screen 2 and Screen 3).
                     Repeater {
-                        model: backend.screensShown
+                        model: backend.screensShown.length
                         delegate: Controls.Switch {
-                            required property var modelData
+                            id: shownSwitch
                             required property int index
                             Kirigami.FormData.label: "Screen " + (index + 1) + ":"
-                            text: modelData ? "Shown" : "Hidden"
-                            checked: modelData
-                            onToggled: backend.setScreenShown(index, checked)
+                            text: checked ? "Shown" : "Hidden"
+                            checked: backend.screensShown[index]
+                            onToggled: {
+                                backend.setScreenShown(shownSwitch.index, checked)
+                                checked = Qt.binding(() => backend.screensShown[shownSwitch.index])
+                            }
                         }
                     }
                     Controls.Label {
@@ -890,10 +896,11 @@ Kirigami.ApplicationWindow {
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Pinned screens" }
 
                     Repeater {
-                        model: backend.pins
+                        model: backend.pins.length
                         delegate: Controls.ComboBox {
-                            required property var modelData
+                            id: pinBox
                             required property int index
+                            readonly property int pinIndex: Math.max(0, ["none", "left", "right", "head"].indexOf(backend.pins[index]))
                             Kirigami.FormData.label: "Screen " + (index + 1) + ":"
                             model: [
                                 { text: "In the room", value: "none" },
@@ -903,8 +910,13 @@ Kirigami.ApplicationWindow {
                             ]
                             textRole: "text"
                             valueRole: "value"
-                            currentIndex: Math.max(0, ["none", "left", "right", "head"].indexOf(modelData))
-                            onActivated: backend.pin(String(index + 1), currentValue)
+                            currentIndex: pinIndex
+                            // pinBox.index: activated's own argument is also called index (the
+                            // chosen row), so a bare index sent "On your head" to screen 4.
+                            onActivated: {
+                                backend.pin(String(pinBox.index + 1), currentValue)
+                                currentIndex = Qt.binding(() => pinBox.pinIndex)  // what ft-screens has, if the pin failed
+                            }
                         }
                     }
                     RowLayout {

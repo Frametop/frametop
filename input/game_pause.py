@@ -28,6 +28,8 @@ Toggled by:
     It's read from vrserver's web socket (vrws.py), which works in games and takes nothing from
     them, so the game sees the clicks too. Once it goes off, it's ignored for GESTURE_COOLDOWN:
     on 2026-10-16 a resume was followed by a pause 2 s later, which left Frametop paused.
+    A gesture on both controllers, with only one of them connected, is that controller's button
+    alone, clicked twice (one_controller).
   - input/ft-pause on|off|toggle|status, which uses the relay's control socket
     ("pause on|off|toggle|?").
   - VR games, with "pause_auto" (on by default): the pointer helper says "vrgame 1|0" as a SteamVR
@@ -103,6 +105,17 @@ def gesture_of(rules, buttons):
     if not chosen:
         return None
     return chosen, 1 if len(chosen) == 2 and spec.get("presses") == 1 else 2
+
+
+def one_controller(buttons, sides):
+    """A two-button gesture with a button on each controller, while only one of the two is connected
+    (`sides`: the sides there are): that one's button alone, pressed twice, so a single controller
+    can still pause. None otherwise."""
+    by_side = {b.split("/", 1)[0]: b for b in buttons}
+    if len(buttons) != 2 or len(by_side) != 2:
+        return None
+    there = [b for side, b in by_side.items() if side in sides]
+    return (there[0],) if len(there) == 1 else None
 
 
 def settings_of(rules, buttons):
@@ -307,6 +320,7 @@ class ControllerWatch(threading.Thread):
             last_poll = 0.0
             self.tracker = TouchTracker()
             touch_was = False
+            alone = None  # the one-controller gesture in use (one_controller), or None
             while True:
                 g = self.current()
                 touch = self.touch_feed
@@ -345,8 +359,17 @@ class ControllerWatch(threading.Thread):
                         self.log(f"{'pause gesture' if g is not None else 'touch feed'}: following "
                                  f"{' and '.join(sorted(sides.values())) or 'no'} "
                                  f"controller{'s' if len(sides) != 1 else ''} on SteamVR's web socket")
-                wanted = {} if g is None else \
-                    {b: (b.split("/", 1)[0], f"/input/{b.split('/', 1)[1]}/click") for b in g.buttons}
+                single = None if g is None else one_controller(g.buttons, set(sides.values()))
+                if single is None:
+                    if alone is not None and g is not None:
+                        self.log(f"pause gesture: both controllers are there again, back to {' and '.join(g.buttons)}")
+                    alone = None
+                elif alone is None or alone.buttons != single:
+                    alone = Gesture(single, 2)
+                    self.log(f"pause gesture: only one controller, so {single[0]} clicked twice")
+                use = alone or g
+                wanted = {} if use is None else \
+                    {b: (b.split("/", 1)[0], f"/input/{b.split('/', 1)[1]}/click") for b in use.buttons}
                 for text in ws.messages(timeout=1.0):
                     device = device_of(text)
                     if device and device not in sides:
@@ -367,7 +390,7 @@ class ControllerWatch(threading.Thread):
                         self.to_helper(self.tracker.feed(msg.get("device"), components))
                     for button, (s, component) in wanted.items():
                         if s == side and component in components:
-                            if g.feed(button, bool(components[component]), time.monotonic()):
+                            if use.feed(button, bool(components[component]), time.monotonic()):
                                 self.log("pause gesture")
                                 try:
                                     self.sock.sendto(b"pause toggle gesture", RELAY)

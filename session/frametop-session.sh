@@ -123,7 +123,7 @@ fi
 
 # Inside the host compositor (ft-screens or gamescope) from here on. The desktop isn't a
 # gamescope client with ft-screens, so the gamescope session's Vulkan layer stays off, and
-# the gamescope session's portal config isn't Plasma's.
+# the gamescope session's portal config isn't Plasma's (the desktop's own is set below).
 [ "$backend" = gamescope ] || unset ENABLE_GAMESCOPE_WSI
 unset XDG_DESKTOP_PORTAL_DIR
 [ "$backend" = gamescope ] || screens=${FT_SCREEN_COUNT:-$screens}
@@ -184,6 +184,35 @@ export XDG_RUNTIME_DIR=$runtime
 export XDG_CONFIG_HOME=$HOME/.config/frametop
 export XDG_STATE_HOME=$HOME/.local/state/frametop
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+
+# Title bar buttons for apps that draw their own (session/ft-gtksettings): Firefox and
+# Chromium read GTK's button layout from the Settings portal here, where nothing on SteamOS
+# fills it in, and showed Close alone. ft-gtksettings serves KWin's button order as a
+# Settings portal backend. xdg-desktop-portal 1.18 reads backends from one folder, and with
+# XDG_DESKTOP_PORTAL_DIR set, portals.conf from that folder alone. So this desktop gets its
+# own: the system's backends plus ours, and KDE's portals.conf asking KDE's backend first
+# for settings, then ours. D-Bus starts ours on the desktop's bus (the folder added to
+# XDG_DATA_DIRS has its service file).
+portals=$runtime/portals services=$runtime/share/dbus-1/services
+mkdir -p "$portals" "$services"
+ln -sf /usr/share/xdg-desktop-portal/portals/*.portal "$portals/" 2>/dev/null || true
+cat > "$portals/frametop.portal" <<EOF
+[portal]
+DBusName=org.freedesktop.impl.portal.desktop.frametop
+Interfaces=org.freedesktop.impl.portal.Settings;
+EOF
+cat > "$services/org.freedesktop.impl.portal.desktop.frametop.service" <<EOF
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.frametop
+Exec=/bin/sh -c 'exec "$here/ft-gtksettings" > /tmp/frametop-gtksettings.log 2>&1'
+EOF
+kde_portals=/usr/share/xdg-desktop-portal/kde-portals.conf
+{ [ -r "$kde_portals" ] && sed '/^org\.freedesktop\.impl\.portal\.Settings=/d' "$kde_portals" ||
+  printf '[preferred]\ndefault=kde\n'; } |
+  sed '/^\[preferred\]/a org.freedesktop.impl.portal.Settings=kde;frametop;' \
+  > "$portals/kde-portals.conf"
+export XDG_DESKTOP_PORTAL_DIR=$portals
+export XDG_DATA_DIRS=$runtime/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
 
 # The cursor: the Steam client's XCURSOR_THEME=steam comes along in the environment, and
 # KWin and the apps take it over this desktop's own setting. SteamOS had no theme of that

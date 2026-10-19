@@ -74,6 +74,8 @@ PACKAGES = {
                              "the desktop sends Steam no command line (no ExecCommandLine in "
                              "~/.local/share/Steam/logs/console_log.txt)",
     "holo-cursors": "the desktop keeps its Breeze cursor (over remote access, and with the gamescope backend)",
+    "xdg-desktop-portal": "Firefox or Chromium in the desktop shows minimize, maximize, and close, and dark "
+                          "mode still follows the desktop (ft-gtksettings, the desktop's own portal folder)",
 }
 KERNEL_HINT = "display power (ft-powerd) and hand tracking"
 
@@ -280,6 +282,22 @@ def check_host():
                "the desktop's notifications stay in the desktop (session/ft-notifyfwd)")
     else:
         report("ok", "notifications", "Plasma has its notification watcher API (ft-notifyfwd)")
+
+    # ft-gtksettings: the session gives xdg-desktop-portal its own backend folder, with KDE's
+    # portals.conf copied into it (1.18 reads portals.conf only from XDG_DESKTOP_PORTAL_DIR when set).
+    try:
+        with open("/usr/lib/xdg-desktop-portal", "rb") as f:
+            portal = f.read()
+    except OSError:
+        portal = b""
+    if not os.path.exists("/usr/share/xdg-desktop-portal/kde-portals.conf"):
+        report("warn", "title bar buttons", "no kde-portals.conf: the desktop's portal gets a minimal one "
+               "(session/ft-gtksettings)")
+    elif b"XDG_DESKTOP_PORTAL_DIR" not in portal:
+        report("warn", "title bar buttons", "xdg-desktop-portal no longer reads XDG_DESKTOP_PORTAL_DIR: "
+               "Firefox and Chromium show Close alone in the desktop (session/ft-gtksettings)")
+    else:
+        report("ok", "title bar buttons", "the desktop's portal can load ft-gtksettings")
 
     if systemctl("cat", "steamvr.service"):
         report("ok", "steamvr.service", "Frametop's services start and stop with it")

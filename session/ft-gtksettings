@@ -1,0 +1,142 @@
+#!/usr/bin/python3
+"""GTK's title bar buttons in the Frametop desktop, from KWin's button order.
+
+Apps that draw their own title bar (Firefox, Chromium and Electron apps, GTK apps) show the
+buttons in GTK's decoration layout. As Wayland clients in a Flatpak, they read it from the
+Settings portal, as org.gnome.desktop.wm.preferences button-layout. On Plasma,
+kde-gtk-config copies KWin's button order there and xdg-desktop-portal-gtk serves it.
+SteamOS ships neither, so the apps fell back to GNOME's default, 'appmenu:close', and
+showed Close alone. Under gamescope they run on X11 with no XSETTINGS, and GTK's own
+default gives them all three.
+
+This is a Settings portal backend (org.freedesktop.impl.portal.Settings), started by D-Bus
+on the desktop's bus (session/frametop-session.sh registers it). It serves button-layout
+made from kwinrc's ButtonsOnLeft and ButtonsOnRight the way kde-gtk-config makes it, and
+follows changes to them. It also writes the key to the desktop's own GSettings (its dconf
+database is under ~/.config/frametop), which GTK apps outside Flatpak read.
+"""
+import os
+import subprocess
+import sys
+
+from gi.repository import Gio, GLib
+
+NAME = "org.freedesktop.impl.portal.desktop.frametop"
+PATH = "/org/freedesktop/portal/desktop"
+IFACE = "org.freedesktop.impl.portal.Settings"
+XML = """<node><interface name="org.freedesktop.impl.portal.Settings">
+  <method name="ReadAll">
+    <arg direction="in" type="as" name="namespaces"/><arg direction="out" type="a{sa{sv}}" name="value"/>
+  </method>
+  <method name="Read">
+    <arg direction="in" type="s" name="namespace"/><arg direction="in" type="s" name="key"/>
+    <arg direction="out" type="v" name="value"/>
+  </method>
+  <signal name="SettingChanged"><arg type="s" name="namespace"/><arg type="s" name="key"/><arg type="v" name="value"/></signal>
+  <property name="version" type="u" access="read"/>
+</interface></node>"""
+WM = "org.gnome.desktop.wm.preferences"
+KEY = "button-layout"
+# KDecoration's letters that GTK has a button for (kde-gtk-config's mapping). The rest,
+# Frametop's float button among them, have none.
+GTK_BUTTONS = {"M": "icon", "I": "minimize", "A": "maximize", "X": "close"}
+
+
+def log(*args):
+    print("ft-gtksettings:", *args, file=sys.stderr, flush=True)
+
+
+def kwin_buttons(side, default):
+    try:
+        out = subprocess.run(["kreadconfig6", "--file", "kwinrc", "--group", "org.kde.kdecoration2",
+                              "--key", f"ButtonsOn{side}", "--default", default],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log("kreadconfig6:", e)
+        out = default
+    return out.rstrip("\n")
+
+
+def button_layout():
+    """GTK's decoration layout for KWin's buttons, e.g. 'icon:minimize,maximize,close'."""
+    sides = (kwin_buttons("Left", "MS"), kwin_buttons("Right", "HIAX"))  # KDecoration's defaults
+    return ":".join(",".join(GTK_BUTTONS[c] for c in side if c in GTK_BUTTONS) for side in sides)
+
+
+def matches(namespace, patterns):
+    """The portal's ReadAll filter: no patterns or "" is everything, "a.b.*" a prefix."""
+    return not patterns or any(p in ("", namespace) or (p.endswith("*") and namespace.startswith(p[:-1]))
+                               for p in patterns)
+
+
+class Settings:
+    def __init__(self, conn):
+        self.conn = conn
+        self.layout = button_layout()
+        log("button-layout", repr(self.layout))
+        self.write_gsettings()
+        info = Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0]
+        conn.register_object_with_closures2(PATH, info, self.on_call, self.on_property, None)
+        # KConfig saves by renaming a new file over the old one; any event means read again.
+        path = os.path.join(GLib.get_user_config_dir(), "kwinrc")
+        self.monitor = Gio.File.new_for_path(path).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES, None)
+        self.monitor.connect("changed", self.on_kwinrc)
+        self.pending = 0
+
+    def on_call(self, _conn, _sender, _path, _iface, method, params, invocation):
+        if method == "ReadAll":
+            patterns, = params.unpack()
+            found = {WM: {KEY: GLib.Variant("s", self.layout)}} if matches(WM, patterns) else {}
+            invocation.return_value(GLib.Variant("(a{sa{sv}})", (found,)))
+        elif method == "Read":
+            namespace, key = params.unpack()
+            if (namespace, key) == (WM, KEY):
+                invocation.return_value(GLib.Variant("(v)", (GLib.Variant("s", self.layout),)))
+            else:
+                invocation.return_dbus_error("org.freedesktop.portal.Error.NotFound", "Requested setting not found")
+
+    @staticmethod
+    def on_property(_conn, _sender, _path, _iface, name):
+        return GLib.Variant("u", 1) if name == "version" else None
+
+    def on_kwinrc(self, *_):
+        if not self.pending:  # one read for the burst of events a save makes
+            self.pending = GLib.timeout_add(200, self.reread)
+
+    def reread(self):
+        self.pending = 0
+        layout = button_layout()
+        if layout != self.layout:
+            self.layout = layout
+            log("button-layout", repr(layout))
+            self.conn.emit_signal(None, PATH, IFACE, "SettingChanged",
+                                  GLib.Variant("(ssv)", (WM, KEY, GLib.Variant("s", layout))))
+            self.write_gsettings()
+        return GLib.SOURCE_REMOVE
+
+    def write_gsettings(self):
+        source = Gio.SettingsSchemaSource.get_default()
+        if not source or not source.lookup(WM, True):
+            return  # no GNOME schemas on the host: no GTK app outside Flatpak reads it either
+        settings = Gio.Settings.new(WM)
+        if settings.get_string(KEY) != self.layout:
+            settings.set_string(KEY, self.layout)
+            Gio.Settings.sync()
+
+
+def main():
+    loop = GLib.MainLoop()
+    conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    conn.set_exit_on_close(False)
+    conn.connect("closed", lambda *_: loop.quit())  # the desktop ended
+    _settings = Settings(conn)
+
+    def lost(*_):
+        log("lost", NAME)
+        loop.quit()
+    Gio.bus_own_name_on_connection(conn, NAME, Gio.BusNameOwnerFlags.NONE, None, lost)
+    loop.run()
+
+
+if __name__ == "__main__":
+    main()

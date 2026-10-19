@@ -206,6 +206,49 @@ check("ft-gazed, our tracker: both eyes, then the left lost: no jump",
       (svc.sent[-2], abs(svc.sent[-1][0] - 5.0) < 0.05), ((5.0, 2.0), True))
 check("...counted as one eye", svc.counts["one_eye"], 1)
 
+
+# --- a new calibration starts the eye weights over (ft-gazed's note_own_calibration) ---
+logs = []
+gazed.log = lambda msg: logs.append(msg)
+svc = service()
+svc.bias, svc.own_made, svc.dirty = "auto", None, False
+svc.own = {"calibration": {"made": "2026-10-18 20:58:26", "dots": 27}}
+svc.note_own_calibration()
+check("the first calibration it hears of: adopted, nothing dropped", (svc.own_made, logs), ("2026-10-18 20:58:26", []))
+for _ in range(6):
+    svc.weights["own"].add([2.0, 0.5])   # the left eye's mapping was the worse one
+before = svc.weights["own"].weights()
+check("misses on that calibration lean toward the right eye", before[1] > 0.9, True)
+svc.note_own_calibration()
+check("the same calibration again: kept", svc.weights["own"].weights(), before)
+svc.own = {"calibration": {"made": "2026-10-18 21:11:33", "dots": 26}}
+svc.note_own_calibration()
+check("a new calibration: the misses start over", svc.weights["own"].misses, [[], []])
+check("...the eyes count alike until each has MIN again", tuple(svc.weights["own"].weights()), (0.5, 0.5))
+check("...said in the log", sum("eye weights start over" in m for m in logs), 1)
+check("...and saved with the stamp", (svc.own_made, svc.dirty), ("2026-10-18 21:11:33", True))
+svc.own = {}
+svc.note_own_calibration()
+check("a status without a calibration changes nothing", svc.own_made, "2026-10-18 21:11:33")
+
+# The stamp lives with the misses, so a restart keeps them and a calibration made meanwhile doesn't.
+svc.lives = {name: gazed.PointerLessons() for name in gazed.SOURCES}
+svc.weights["own"].add([1.0, 1.0])
+gazed.STATE.mkdir(parents=True, exist_ok=True)
+svc.save_lessons()
+again = service()
+again.bias, again.lives = "auto", {name: gazed.PointerLessons() for name in gazed.SOURCES}
+again.source = "mmap1"
+again.load_lessons()
+check("after a restart: the stamp and the misses", (again.own_made, again.weights["own"].misses),
+      ("2026-10-18 21:11:33", [[1.0], [1.0]]))
+again.own = {"calibration": {"made": "2026-10-18 21:11:33"}}
+again.note_own_calibration()
+check("...the same calibration: kept", again.weights["own"].misses, [[1.0], [1.0]])
+again.own = {"calibration": {"made": "2026-10-18 21:30:00"}}
+again.note_own_calibration()
+check("...one made while it was down: started over", again.weights["own"].misses, [[], []])
+
 shutil.rmtree(HOME, ignore_errors=True)
 print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
 sys.exit(1 if failures else 0)

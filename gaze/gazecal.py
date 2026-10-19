@@ -675,7 +675,10 @@ class EyeWeights:
     alike until then. Each miss is measured before its lesson teaches anything, so each is a
     fresh test. On SteamVR's own test (2026-09-29) its calibration dots said the left eye was
     the better one and new spots said the right, so the misses come from lessons, not the fit.
-    An eye that isn't seen (None) drops out, and the other carries the gaze alone."""
+    An eye that isn't seen (None) drops out, and the other carries the gaze alone. Our
+    tracker's start over with each new calibration of it (ft-gazed's note_own_calibration).
+    Not from the new fit's per-eye spread: on 2026-10-18's replays (frame-eyes
+    one_eye_replay.py) spread and equal weights came out the same, 2.29 degrees median."""
 
     LEAN = 2.0
     KEEP = 20

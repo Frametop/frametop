@@ -15,6 +15,9 @@ command-line side). Replies go to the sender:
   launch APP.desktop [action=ACTION] [screen=N]   run ["argv", ...]
             (start an app, or one of its desktop file's actions, and float its first window;
             with screen=N its first window opens docked on screen N instead)
+  dashlaunch CMDLINE   (ft-dashroute: an app picked in the SteamVR dashboard's Launch a program
+            list, Steam's command line for it: launch it floating -> "ok", or "steamvr REASON"
+            when it should be SteamVR's own window after all; see dash_launch)
   windows   (-> JSON: the open apps' windows and where they are, for a profile; ft-layout save)
   spotlist  (-> JSON: every app window, its title, panel, and when it was last active; spotwatch)
   activate ID   (make that window KWin's active one, unminimized; spotwatch)
@@ -58,6 +61,8 @@ import json
 import math
 import os
 import re
+import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -88,6 +93,12 @@ PLACES_PATH = os.path.expanduser("~/.config/frametop-float.json")  # each app's 
 LAUNCH_SECONDS = 30      # a launched app's window must show up within this
 IN_FRONT = 2.0           # at most this far in front of you, for an app with no remembered place
 DEBUG = os.environ.get("FT_FLOAT_DEBUG") == "1"  # log every event from the script
+# The SteamVR dashboard's Launch a program list (float/ft-dashroute): these stay SteamVR's, since
+# they aren't apps with a window for the desktop: Steam, SteamVR, the desktops themselves, and
+# Frametop's layout commands (a profile's entry, Reset Screen Layout, Hide/Show Screens).
+STEAMVR_ONLY = {"steam", "vrurlhandler", "steamos-nested-desktop", "frametop-session.sh", "ft-layout",
+                "ft-layout-reset", "ft-hide-show"}
+PAUSE_PATH = f"/run/user/{os.getuid()}/frametop-pause.json"  # input/game_pause.py's state
 
 
 def whole(*scales):
@@ -237,6 +248,37 @@ def listable(ev):
     if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
         return False
     return ev.get("app", "") not in SKIP_APPS and not any(n.startswith("ksplash") for n in (ev.get("app", ""), ev.get("cls", "")))
+
+
+def exec_argv(info):
+    """A desktop file's command, without its field codes (%U and the like), as Steam lists it."""
+    try:
+        argv = shlex.split(info.get_commandline() or "")
+    except ValueError:
+        return []
+    return [a for a in argv if not re.fullmatch(r"%[a-zA-Z]", a)]
+
+
+def app_of(argv):
+    """The desktop file (its name, without .desktop) whose command is argv, or None. Steam's
+    command line for an app is its Exec line without the field codes, each argument quoted."""
+    if not argv:
+        return None
+    want = [shutil.which(argv[0]) or argv[0]] + argv[1:]
+    for info in sorted(Gio.AppInfo.get_all(), key=lambda i: not i.should_show()):  # menu entries first
+        got = exec_argv(info)
+        if got and [shutil.which(got[0]) or got[0]] + got[1:] == want:
+            return info.get_id().removesuffix(".desktop")
+    return None
+
+
+def paused():
+    """Frametop is paused for a VR game: its windows don't show."""
+    try:
+        with open(PAUSE_PATH) as f:
+            return json.load(f).get("paused") is True
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def cmdline(pid):
@@ -879,6 +921,30 @@ class Daemon:
             return self.took(waiting[0])
         return None
 
+    def dash_launch(self, text):
+        """An app picked in the SteamVR dashboard's Launch a program list (ft-dashroute):
+        launch it with its first window floating -> "ok". Or "steamvr REASON": SteamVR
+        opens it as its own window after all."""
+        if ft_layout.read_conf().get("DASHBOARD_APPS", "steamvr") != "frametop":
+            return "steamvr the setting is off"
+        try:
+            argv = shlex.split(text)
+        except ValueError:
+            argv = []
+        if not argv:
+            return "steamvr no command"
+        if os.path.basename(argv[0]) in STEAMVR_ONLY:
+            return f"steamvr {os.path.basename(argv[0])} is SteamVR's"
+        if paused():
+            return "steamvr Frametop is paused"
+        now = time.monotonic()
+        waiting = sum(1 for la in self.launches if la.dock is None and la.until > now)
+        if sum(1 for s in self.slots if s.window is None) - waiting <= 0:
+            return f"steamvr all {len(self.slots)} floating windows are in use"
+        app = app_of(argv)
+        reply = self.launch(app=app)[0] if app else self.launch(argv=argv)[0]
+        return "ok" if reply == "ok" else f"steamvr {reply}"
+
     def took(self, la):
         if not la.entries or len(la.entries) <= 1:
             self.launches.remove(la)
@@ -1147,6 +1213,8 @@ class Daemon:
             if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
                 return "error run takes a JSON list"
             return self.launch(argv=argv)[0]
+        if cmd == "dashlaunch" and rest:
+            return self.dash_launch(text.split(None, 1)[1])
         if cmd in ("windows", "spotlist"):
             return self.capture(sender, cmd)
         if cmd == "activate" and len(rest) == 1:

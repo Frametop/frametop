@@ -92,6 +92,7 @@ Any desktop window can float in VR as a panel of its own. It stays a window of t
 | Click the float button, left of Close in a window's title bar | The same. Float in VR is also in every window's menu (Alt+F3). Apps that draw their own title bar, like Chromium and Electron apps, don't have the button: use Meta+Shift+F |
 | Right-click an app in the Application Launcher (or the taskbar) and pick Launch as Standalone | Starts the app with its window floating, where that app last floated, or in front of you the first time. From a terminal: `float/ft-float launch org.kde.dolphin`, or `float/ft-float run <command>` |
 | Meta+scroll over a floating window | Scales it up or down |
+| Set Apps from the SteamVR dashboard to Open as Frametop floating windows (Frametop Display Settings, Visibility & pins), then pick an app in the dashboard's Launch a program list | The app opens in the Frametop desktop, floating, instead of as a SteamVR window. When the desktop isn't running, Frametop is paused, or all floating windows are in use, it opens as a SteamVR window as before |
 
 ### Profiles
 

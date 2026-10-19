@@ -210,6 +210,8 @@ A desktop window can float in VR as a panel of its own, away from the screens. M
 
 `float/ft-floatd` does this. It runs inside the desktop's Plasma session (log: `/tmp/frametop-floatd.log`), loads the KWin script `float/frametop-float.js`, and moves each floating window to a spare KWin output of its own, which ft-screens shows as a panel cropped to the window. The settings are in `~/.config/frametop.conf`: `FLOAT_SLOTS` is how many windows can float at once (16, the most; 0 turns floating off; restart the desktop after a change), and `FLOAT_MARGIN` the pixels around each window on its output, so menus have room past its edges (300). Each app's last floating place, size, and scale are kept in `~/.config/frametop-float.json` by desktop file name, relative to the primary screen, so they move with the screens. `FT_FLOAT_DEBUG=1` in ft-floatd's environment logs every event from the KWin script.
 
+Apps from the SteamVR dashboard: with `DASHBOARD_APPS=frametop` (Frametop Display Settings, Visibility & pins, "Apps from the SteamVR dashboard"; the default is `steamvr`), an app picked in the dashboard's Launch a program list opens floating in the desktop, as Launch as Standalone does, not as a SteamVR window. The list is Steam's (its VR menu), and picking an app runs `SteamClient.Apps.LaunchNonSteamApp(cmdline)` in Steam's UI. `float/ft-dashroute`, which the session starts next to ft-floatd (log: `/tmp/frametop-dashroute.log`), wraps that call over Steam's DevTools port, 127.0.0.1:8080 (`float/dash-route.js`), and hands the command line to ft-floatd (`dashlaunch`). ft-floatd finds the app's desktop file by its command (Steam's command line is the Exec line without its field codes) and launches it floating, or answers that it stays SteamVR's: when the setting is off, Frametop is paused, every floating window is in use (counting launches still waiting for their window), or it's Steam, SteamVR, a desktop, or one of Frametop's layout entries (`STEAMVR_ONLY`). Then Steam's own launch runs after all. The wrapper only hands launches over while ft-dashroute's heartbeat is fresh (every 3 seconds; stale after 10), so with the desktop closed every launch is Steam's own, and ft-dashroute turns it off as it exits. The setting applies at once. `float/ft-dashroute status` shows whether the wrapper is in; `scripts/update-check.py` checks that Steam's UI still launches that way.
+
 With floating on, the session gives the desktop's windows Frametop's own decoration (`decoration/`): Breeze's look plus the float button. Apps that draw their own title bar, like Chromium and Electron apps, don't have the button. `decoration/apply.sh` puts a changed copy into the running desktop, and `decoration/apply.sh --off` goes back to Breeze until the next desktop start.
 
 ```
@@ -223,6 +225,7 @@ float/ft-float list                   # the spare outputs and what floats on the
 float/ft-float launch firefox action=new-private-window   # one of the app's own actions, floating
 float/ft-float launch org.kde.dolphin screen=2            # its first window docked on screen 2
 float/ft-float activate ID            # make a window the active one, unminimized
+float/ft-float dashlaunch CMDLINE     # what ft-dashroute sends for a dashboard launch: ok, or steamvr REASON
 ```
 
 ## Spotwatch

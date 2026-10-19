@@ -11,8 +11,10 @@ the dev container:
   - Visibility (ft-screens): when the screens show (always, only with the SteamVR
     dashboard open, while you look at a controller, or only when toggled), the wrist
     angle within which a pinned screen shows, pinning each screen to a wrist or your
-    head, and whether the desktop's notifications go to the Steam session
-    (NOTIFY_FORWARD, session/ft-notifyfwd; its state from its log).
+    head, whether the desktop's notifications go to the Steam session
+    (NOTIFY_FORWARD, session/ft-notifyfwd; its state from its log), and whether apps from
+    the SteamVR dashboard's Launch a program list open as floating windows (DASHBOARD_APPS,
+    float/ft-dashroute).
   - Layout: a preset (curved or flat, rows, distance, gap, height) or a named layout
     saved from where the screens are, with a preview; arrange now; save the current
     arrangement under a name; rename and delete; arrange automatically when the
@@ -64,6 +66,7 @@ FT_POWERD = "\0ft_powerd"
 STEAM_SLEEP_AC_DEFAULT = 3600
 SCALES = [0.75, 1.0, 1.25, 4 / 3, 1.5, 1.75, 2.0]
 NOTIFY_FORWARD = ("auto", "on", "off")  # session/ft-notifyfwd; frametop.conf's NOTIFY_FORWARD
+DASHBOARD_APPS = ("steamvr", "frametop")  # float/ft-dashroute; frametop.conf's DASHBOARD_APPS
 NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tmp is the host's)
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
@@ -138,7 +141,10 @@ class Backend(QObject):
             except ValueError:
                 return default
         notify = conf.get("NOTIFY_FORWARD", "auto")
-        return {"screens": num("SCREENS", 2, int), "width": num("WIDTH", 1920, int),
+        dash = conf.get("DASHBOARD_APPS", "steamvr")
+        floats = num("FLOAT_SLOTS", 16, int)
+        return {"dashboardApps": dash if dash in DASHBOARD_APPS else "steamvr", "floatSlots": floats,
+                "screens": num("SCREENS", 2, int), "width": num("WIDTH", 1920, int),
                 "height": num("HEIGHT", 1080, int), "physWidth": num("PHYS_WIDTH", 1.6),
                 "notifyForward": notify if notify in NOTIFY_FORWARD else "off"}
 
@@ -426,6 +432,22 @@ class Backend(QObject):
     def setNotifyForward(self, mode):
         if mode in NOTIFY_FORWARD:
             write_conf_value("NOTIFY_FORWARD", mode)
+            self.changed.emit()
+
+    # --- apps from the SteamVR dashboard's Launch a program list (float/ft-dashroute) ---
+    @Property(str, notify=changed)
+    def dashboardApps(self):
+        return self._conf()["dashboardApps"]
+
+    @Property(int, notify=changed)
+    def floatSlots(self):
+        return max(0, min(16, self._conf()["floatSlots"]))
+
+    @Slot(str)
+    def setDashboardApps(self, mode):
+        """ft-dashroute and ft-floatd read it as they go: no restart."""
+        if mode in DASHBOARD_APPS:
+            write_conf_value("DASHBOARD_APPS", mode)
             self.changed.emit()
 
     # --- ft-screens: visibility and pinning ---

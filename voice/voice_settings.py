@@ -4,15 +4,21 @@ the installer. Standard library only: the installer runs it with the host's pyth
 
 ~/.config/frametop-voice.json (written by Frametop Input Settings):
   {"controller": ["left/dpad_down"], "controller_mode": "hold",
+   "language": "de", "model": "small",
    "live_typing": true, "sounds": false, "wake_word": false,
    "wake_phrases": ["HEY COMPUTER"],
    "commands": [{"say": ["flag that", "flag"], "run": ["~/.local/bin/my-tool", "flag"]}],
-   "advanced": {"dictation": {"min_seconds": 2.0}}}
+   "advanced": {"dictation": {"min_seconds": 0.5}}}
 
 controller: Frame controller buttons for push-to-talk, as the input relay names them
   ("left/dpad_down"). They're read from SteamVR's web socket, so they still do what they do
   in games.
 controller_mode: "hold" records while held; "toggle" starts on one press and stops on the next.
+language: what you speak (LANGUAGES): "en", another language's code, or "auto" (whisper tells, per
+  piece of speech). English types live with Moonshine; the others with whisper on the GPU.
+model: the whisper model (WHISPER_MODELS). One that knows only English is taken as "small" for
+  another language. The ones not installed with Frametop Voice are fetched when chosen:
+  voice/models.sh model NAME.
 wake_phrases: what to say before a command; any English words, spelled out at load time.
 commands: wake word commands that run a program (voice_commands.py). Edited by hand; the
   settings app keeps them as they are, and every other key it doesn't manage too.
@@ -22,6 +28,7 @@ The keyboard's push-to-talk keys are Frametop key combinations ("key_bindings" i
 
   voice/voice_settings.py install   on install: carry over frame-voice's settings once, and give
                                     dictation its Right Ctrl tap in a rules file with its own keys
+  voice/voice_settings.py model-file   the whisper model file to load (voice/whisper-run)
 """
 import json
 import os
@@ -38,6 +45,8 @@ FRAME_VOICE_PATH = Path("~/.config/frame-voice/settings.json").expanduser()  # t
 DEFAULT = {
     "controller": ["left/dpad_down"],
     "controller_mode": "hold",
+    "language": "en",
+    "model": "small.en",
     "live_typing": True,
     "sounds": False,
     # Off until you turn it on: it keeps the mic open, and does nothing without commands of your own.
@@ -45,6 +54,22 @@ DEFAULT = {
     "wake_phrases": ["HEY COMPUTER"],
 }
 MODES = ("hold", "toggle")
+MODELS_DIR = Path(os.environ.get("FRAMETOP_VOICE_MODELS", "~/.local/share/frametop/voice/models")).expanduser()
+# whisper.cpp's models (ggml, quantized), in voice/models.sh with their sha256: name -> (file,
+# MB, languages). small.en comes with Frametop Voice; the others are fetched when chosen.
+WHISPER_MODELS = {
+    "small.en": ("ggml-small.en-q5_1.bin", 190, "en"),
+    "small": ("ggml-small-q5_1.bin", 190, "all"),
+    "large-v3-turbo": ("ggml-large-v3-turbo-q5_0.bin", 574, "all"),
+}
+MULTILINGUAL_DEFAULT = "small"
+# Languages to dictate in, by whisper's codes (it knows about 100; these are on the Voice page).
+LANGUAGES = {"en": "English", "auto": "Detect it", "de": "Deutsch", "fr": "Fran\u00e7ais", "es": "Espa\u00f1ol",
+             "it": "Italiano", "pt": "Portugu\u00eas", "nl": "Nederlands", "pl": "Polski",
+             "cs": "\u010ce\u0161tina", "sv": "Svenska", "da": "Dansk", "no": "Norsk", "fi": "Suomi",
+             "tr": "T\u00fcrk\u00e7e", "ru": "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
+             "uk": "\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430",
+             "ja": "\u65e5\u672c\u8a9e", "zh": "\u4e2d\u6587", "ko": "\ud55c\uad6d\uc5b4"}
 OPTIONS = ("live_typing", "sounds", "wake_word")
 # Frame controller buttons (the input relay's VR_BUTTONS; pointer/helper/vrbuttons.h).
 VR_BUTTONS = ("left/view", "left/dpad_up", "left/dpad_down", "left/dpad_left", "left/dpad_right", "left/bumper",
@@ -86,6 +111,10 @@ def load():
         out["controller"] = [b for b in data["controller"] if b in VR_BUTTONS]
     if data.get("controller_mode") in MODES:
         out["controller_mode"] = data["controller_mode"]
+    if isinstance(data.get("language"), str) and re.fullmatch(r"auto|[a-z]{2,3}", data["language"]):
+        out["language"] = data["language"]  # any of whisper's, not only LANGUAGES
+    if data.get("model") in WHISPER_MODELS:
+        out["model"] = data["model"]
     for key in OPTIONS:
         if isinstance(data.get(key), bool):
             out[key] = data[key]
@@ -97,6 +126,31 @@ def load():
     advanced = data.get("advanced")
     out["advanced"] = {k: v for k, v in advanced.items() if isinstance(v, dict)} if isinstance(advanced, dict) else {}
     return out
+
+
+def model_for(settings):
+    """The whisper model dictation uses: the chosen one, or MULTILINGUAL_DEFAULT when that one
+    knows only English and the language isn't English."""
+    name = settings["model"]
+    if WHISPER_MODELS[name][2] == "en" and settings["language"] != "en":
+        return MULTILINGUAL_DEFAULT
+    return name
+
+
+def model_path(name):
+    return MODELS_DIR / WHISPER_MODELS[name][0]
+
+
+def model_installed(name):
+    """Fetched and checked: models.sh writes FILE.sha256 once the file matches."""
+    return model_path(name).is_file() and Path(f"{model_path(name)}.sha256").is_file()
+
+
+def model_file():
+    """The model file whisper-server loads (voice/whisper-run): model_for() the settings, or
+    small.en when that one isn't there (ft-voiced says so in its log)."""
+    name = model_for(load())
+    return model_path(name if model_installed(name) else "small.en")
 
 
 def save(data):
@@ -217,5 +271,7 @@ def carry_over():
 if __name__ == "__main__":
     if sys.argv[1:] == ["install"]:
         install()
+    elif sys.argv[1:] == ["model-file"]:
+        print(model_file())
     else:
         sys.exit(__doc__)

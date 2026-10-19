@@ -25,16 +25,19 @@ def bare_daemon(**attrs):
     """A Voice without models or mic: only what the methods under test use."""
     v = object.__new__(fv.Voice)
     v.calls = []
-    v.push_to_talk = lambda command, source: v.calls.append((command, source))
+    v.push_to_talk = lambda command, source, quiet=False: v.calls.append((command, source) + (("quiet",) if quiet else ()))
     for k, val in attrs.items():
         setattr(v, k, val)
     return v
 
 
 class Text(unittest.TestCase):
-    def test_to_ascii(self):
-        self.assertEqual(fv.to_ascii("Café “hi” — it’s ok…\nyes™"),
-                         'Cafe "hi" - it\'s ok... yesTM')
+    def test_to_text(self):
+        # Accents and other scripts stay (the relay types them on the desktop's layout); typographic
+        # quotes and dashes go plain, letters are composed, control characters go.
+        self.assertEqual(fv.to_text("Café “hi” — it’s ok…\nyes™ für Привет"),
+                         'Café "hi" - it\'s ok... yes™ für Привет')
+        self.assertEqual(fv.to_text("fu\u0308r\x07"), "f\u00fcr")
 
     def test_chunks(self):
         self.assertEqual(list(fv.type_chunks("short")), ["short"])
@@ -44,6 +47,11 @@ class Text(unittest.TestCase):
         self.assertTrue(all(len(p) <= 100 for p in pieces))
         self.assertTrue(all(p.endswith(" ") for p in pieces[:-1]))
         self.assertEqual(list(fv.type_chunks("x" * 250, 100)), ["x" * 100, "x" * 100, "x" * 50])
+        # Sized in UTF-8 bytes: a datagram holds TYPE_CHUNK bytes, and "ü" is two.
+        wide = "\u00fc" * 120
+        pieces = list(fv.type_chunks(wide, 100))
+        self.assertEqual("".join(pieces), wide)
+        self.assertTrue(all(len(p.encode()) <= 100 for p in pieces))
 
     def test_sent_to_the_relay(self):
         relay = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -72,10 +80,11 @@ class FromRelay(unittest.IsolatedAsyncioTestCase):
         v = bare_daemon(loop=asyncio.get_running_loop())
         sock = v.listen_relay()
         c = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        for msg in (b"toggle keyboard", b"start mouse", b"stop", b"bogus", b""):
+        for msg in (b"toggle keyboard", b"start mouse", b"stop", b"bogus", b"", b"cancel keyboard quiet"):
             c.sendto(msg, fv.VOICE)
         await asyncio.sleep(0.1)
-        self.assertEqual(v.calls, [("toggle", "keyboard"), ("start", "mouse"), ("stop", "relay")])
+        self.assertEqual(v.calls, [("toggle", "keyboard"), ("start", "mouse"), ("stop", "relay"),
+                                   ("cancel", "keyboard", "quiet")])
         v.loop.remove_reader(sock.fileno())
         sock.close()
 
@@ -138,6 +147,90 @@ class Controller(unittest.TestCase):
         calls = self.run_session(("left/dpad_down", "right/b"), "hold", [
             [state(L, dpad_down=True)], [state(R, b=True)], [state(L, dpad_down=False)], [state(R, b=False)]])
         self.assertEqual(calls, ["start", "stop"])
+
+
+class ShortWords(unittest.IsolatedAsyncioTestCase):
+    """Moonshine hearing nothing in a lone short word, or looping on it."""
+
+    def daemon(self, heard):
+        v = bare_daemon(moonshine=object(), language="en", whisper_lock=asyncio.Lock(), tried=[])
+        v.trim_to_speech = lambda audio: audio[100:-100]
+
+        def decode(audio):
+            v.tried.append(len(audio))
+            return heard(audio)
+        v._moonshine_decode = decode
+        return v
+
+    async def test_retries_cut_then_after_silence(self):
+        audio = fv.np.ones(fv.RATE, fv.np.float32)
+        v = self.daemon(lambda a: "Way." if len(a) > fv.RATE else "")  # only with the 0.2 s lead
+        self.assertEqual(await v._decode(audio, ""), "Way.")
+        self.assertEqual(v.tried, [fv.RATE, fv.RATE - 200, int(0.2 * fv.RATE) + fv.RATE - 200])
+        v = self.daemon(lambda a: "")
+        self.assertEqual(await v._decode(audio, ""), "")
+        v = self.daemon(lambda a: "")
+        await v._decode(fv.np.ones(4 * fv.RATE, fv.np.float32), "")
+        self.assertEqual(v.tried, [4 * fv.RATE])  # a long window isn't a lone word
+
+    async def test_one_word_looped(self):
+        v = self.daemon(lambda a: "Way, way, way,")
+        self.assertEqual(await v._decode(fv.np.ones(fv.RATE, fv.np.float32), ""), "Way,")
+        v = self.daemon(lambda a: "no no")  # two can be meant
+        self.assertEqual(await v._decode(fv.np.ones(fv.RATE, fv.np.float32), ""), "no no")
+        v = self.daemon(lambda a: "very, very, very")
+        self.assertEqual(await v._decode(fv.np.ones(5 * fv.RATE, fv.np.float32), ""), "very, very, very")
+
+
+class Whisper(unittest.TestCase):
+    def daemon(self, language, **cfg):
+        v = bare_daemon(moonshine=object(), language=language, wake_enabled=False, whisper_wanted=False,
+                        dcfg={"engine": "moonshine", "streaming": True, **cfg}, ran=[])
+        v._run = lambda argv, **kw: argv
+        v.spawn = v.ran.append
+        return v
+
+    def test_wanted_for_other_languages(self):
+        v = self.daemon("en")
+        v.update_whisper()
+        self.assertEqual(v.ran, [])  # Moonshine types English; nothing uses whisper
+        v.language = "de"
+        self.assertFalse(v.live_moonshine())
+        v.update_whisper()
+        self.assertEqual(v.ran[-1][-2:], ["start", "frametop-voice-whisper.service"])
+        v.update_whisper(restart=True)
+        self.assertEqual(v.ran[-1][-2:], ["restart", "frametop-voice-whisper.service"])
+        v.language = "en"
+        v.update_whisper(restart=True)  # not wanted: stopped, not restarted
+        self.assertEqual(v.ran[-1][-2:], ["stop", "frametop-voice-whisper.service"])
+
+
+class Chimes(unittest.IsolatedAsyncioTestCase):
+    async def test_one_at_a_time_and_the_mic_waits(self):
+        v = bare_daemon(sounds={"start": "s.wav", "stop": "t.wav"}, chime_task=None, tasks=set(),
+                        played=[], mic_updates=0)
+        gate = asyncio.Event()
+
+        async def run(argv, **kw):
+            v.played.append(("begin", argv[-1]))
+            await gate.wait()
+            v.played.append(("end", argv[-1]))
+        v._run = run
+
+        def update_mic():
+            v.mic_updates += 1
+        v.update_mic = update_mic
+        v.chime("start")
+        v.chime("stop")
+        v.chime("missing")  # no such sound: nothing
+        await asyncio.sleep(0.01)
+        self.assertTrue(v.chime_playing())
+        self.assertEqual(v.played, [("begin", "s.wav")])
+        gate.set()
+        await asyncio.sleep(0.01)
+        self.assertEqual(v.played, [("begin", "s.wav"), ("end", "s.wav"), ("begin", "t.wav"), ("end", "t.wav")])
+        self.assertFalse(v.chime_playing())
+        self.assertEqual(v.mic_updates, 1)  # once, after the last tone
 
 
 if __name__ == "__main__":

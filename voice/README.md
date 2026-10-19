@@ -2,7 +2,7 @@
 
 Local voice input for the Steam Frame, part of Frametop. Nothing leaves the headset.
 
-- **Dictation**: tap Right Ctrl (or hold a controller button) and speak. Words are typed as you talk wherever you type: the desktop window you clicked last, or Steam and games. Moonshine transcribes them on the headset's CPU.
+- **Dictation**: tap Right Ctrl (or hold a controller button) and speak. Words are typed as you talk wherever you type: the desktop window you clicked last, or Steam and games. Moonshine transcribes English on the headset's CPU; whisper (on its GPU) takes other languages.
 - **Wake words** (off by default): say one ("Hey Computer", or your own), then a command. A command can run a program you set up for it (Voice commands); otherwise it goes to a hook script and to event subscribers. This is the entry point for a voice assistant.
 
 It started as the standalone [frame-voice](https://github.com/DeeJanuz/frame-voice) and moved into Frametop on 2026-10-10. The input relay now does its keyboard side: it watches the push-to-talk keys and types the text.
@@ -26,15 +26,15 @@ The input relay types the text, so it has to be one from the same Frametop. `voi
 
 | Where | How |
 | --- | --- |
-| Keyboard | Tap **Right Ctrl** to start, tap again to stop. It counts only on its own: a shortcut with it (Ctrl+C), another modifier held when you press it (Shift, then Right Ctrl), or a click in between isn't dictation. Left Ctrl isn't it (crouch in many games). It's a key combination with the action *Dictation: start or stop*, so change it or add others in Frametop Input Settings, Keyboard; *Dictation: while held* records only while the keys are held. |
+| Keyboard | Tap **Right Ctrl** to start, tap again to stop. It counts only on its own: a shortcut with it (Ctrl+C), another modifier held when you press it (Shift, then Right Ctrl), or a click in between isn't dictation. Left Ctrl isn't it (crouch in many games). It's a key combination with the action *Dictation: start or stop*, so change it or add others in Frametop Input Settings, Keyboard. *Keys do* on the Voice page switches them all between tap to start and stop and **hold to talk** (*Dictation: while held*): held, Right Ctrl records until you let go, and another key with it (Right Ctrl+C) makes it the shortcut after all, so that recording is dropped without a tone. |
 | Mouse | Map a button to either dictation action on the Buttons page (pointer mode). |
 | Steam Frame controllers | Hold left **d-pad down**, speak, release. Set the buttons and hold or press-to-toggle on the Voice page. They're read from SteamVR's web socket (`input/vrws.py`), so they work in games and the Steam menu, and whatever else the button does still happens. |
 | Commands | `voice/ft-voice toggle`, `start`, `stop`, `cancel`, `type "text"`, and from a key combination, `command:ft-voice toggle` (the relay's commands have `voice/` on their path). |
 | Voice | "<wake word>, ..." runs a matching voice command, otherwise `hooks/on-command`. "Hey Computer, type hello world" types "hello world" (the hook's example). |
 
-Recordings shorter than 2 s (`min_seconds`) are dropped, so brief or accidental presses never type anything. Dictation works while Frametop is paused for a VR game too.
+A single word works: recordings shorter than 0.3 s (`min_seconds`) are dropped, and anything longer is decoded even when the speech detector missed it. Moonshine can hear nothing in a lone short word with silence around it, so such a window is decoded again cut to its speech, then after 0.2 s of silence, and a lone word it repeats ("Way, way, way") is typed once. Dictation works while Frametop is paused for a VR game too.
 
-Frametop Input Settings has a **Voice** page: voice dictation on or off (on also means it starts at login), the dictation keys, controller buttons (capture one by pressing it) and their mode, typing as you talk, sounds, and the wake word and its phrases. Everything but the keys lives in `~/.config/frametop-voice.json`, along with voice commands and advanced settings, which you edit by hand; the app keeps them when it saves. ft-voiced applies changes within 2 s. Delete the file to go back to the defaults.
+Frametop Input Settings has a **Voice** page: voice dictation on or off (on also means it starts at login), the dictation keys and whether they're tapped or held, controller buttons (capture one by pressing it) and their mode, the language and whisper model, typing as you talk, sounds, and the wake word and its phrases. Everything but the keys lives in `~/.config/frametop-voice.json`, along with voice commands and advanced settings, which you edit by hand; the app keeps them when it saves. ft-voiced applies changes within 2 s. Delete the file to go back to the defaults.
 
 ### Live text
 
@@ -44,13 +44,27 @@ Windows join up like one recording. Each one is decoded after the last 1.5 s of 
 
 On test clips (two TTS voices, 1 s pauses placed mid-sentence and between sentences, replayed in real time) every mid-sentence seam came out without a stray period or capital. The last word of each phrase is typed 0.3-1.8 s after you say it. Moonshine adds fewer commas than whisper. `"engine": "whisper"` in the advanced settings switches live text to the whisper-server (it dropped words when re-decoded this way in testing). Wake word commands use whisper.
 
+### Languages
+
+The Voice page's **You speak** sets the language (`"language"`: `en`, `auto` to detect it, or a code such as `de`, `fr`, `ja`; the page lists 20, and any code whisper knows works in the file). English is typed as you talk by Moonshine, which knows only English. Every other language goes to whisper-server, decoded the same live way but slower, and the English-only prompt is left out.
+
+**Whisper model** (`"model"`) picks what whisper-server loads (`voice/whisper-run` asks `voice_settings.py model-file`):
+
+| Model | Size | Languages |
+| --- | --- | --- |
+| `small.en` | 190 MB | English only; fetched with the install |
+| `small` | 190 MB | multilingual; the default for any other language |
+| `large-v3-turbo` | 574 MB | multilingual, better and slower; next to VR it made the headset stutter in a 2026-09-26 test (Measurements) |
+
+An English-only model with another language means `small`. A model that isn't there yet is downloaded when you choose it (`voice/models.sh model NAME`, pinned to a whisper.cpp commit and checked by sha256); until it is, small.en is loaded and the log says so. ft-voiced restarts the whisper service when the model changes.
+
 ### Typing
 
-ft-voiced sends its text to the input relay (`type TEXT` on `@frametop_relay`, which the relay takes only from its own user). The relay types it like a keyboard, one key every 4 ms, where typing goes: to ft-screens while it's the desktop, otherwise on its own virtual keyboard, which SteamVR passes on to Steam and games. Never to both, so a dictated space can't also pause a video in the Steam app. The text is ASCII on a US layout: curly quotes and dashes become plain ones, accents are stripped, and anything else is dropped.
+ft-voiced sends its text to the input relay (`type TEXT` on `@frametop_relay`, which the relay takes only from its own user). The relay types it like a keyboard, one key every 4 ms, where typing goes: to ft-screens while it's the desktop, otherwise on its own virtual keyboard, which SteamVR passes on to Steam and games. Never to both, so a dictated space can't also pause a video in the Steam app. On the desktop each character is typed with the desktop's keyboard layout (Plasma's, in `~/.config/frametop/kxkbrc`, through libxkbcommon), Shift and AltGr included: on German QWERTZ, "way" comes out as "way" and "für" as "für". Steam and games get a US layout. Curly quotes and dashes become plain ones; a character the layout has no key for (a dead key's accent, another script) is dropped, and the relay's log says which.
 
-A character waits while Ctrl, Alt, Shift or Meta is held on any keyboard: the letters would reach apps as shortcuts. That is why the keyboard default is a tap: holding Right Ctrl to talk would hold the text back until you let go.
+A character waits while Ctrl, Alt, Shift or Meta is held on any keyboard: the letters would reach apps as shortcuts. Holding Right Ctrl to talk is the exception on the desktop: the relay keeps its press from the desktop (and sends it after all if another key comes), so live text is typed while you hold it. Steam and games read the keyboard themselves, so there the text waits until you let go; that is why the default is a tap.
 
-Sounds are off by default (Voice page): rising tone = recording, falling tone = processing, single high tone = wake word heard, low tone = cancelled or nothing heard.
+Sounds are off by default (Voice page): rising tone = recording, falling tone = processing, single high tone = wake word heard, low tone = cancelled or nothing heard. The start tone plays once the mic sends audio (or after 0.6 s), tones play one after another, and the mic stays open until the last one is done: on the Frame the speaker and the mic share an echo-cancelling filter, and closing the mic mid-tone could cut it. Each tone has 0.12 s of silence before it and 0.2 s after (`sounds.lead_seconds`, `tail_seconds` in the advanced settings), since a stream's start and end can be clipped.
 
 ## Control and events
 
@@ -63,7 +77,7 @@ voice/ft-voice type "text"     # type where typing goes
 voice/ft-voice events          # stream JSON events: wake, command, dictation_start, dictation_piece, dictation, dictation_cancel, command_timeout, error
 ```
 
-The socket is `/run/user/<uid>/frametop-voice/control.sock` (the clients ignore `$XDG_RUNTIME_DIR`, which Frametop's desktop points elsewhere), mode 0600. It can type into any focused window, so it's owner-only. Push-to-talk from the relay comes on the abstract socket `@frametop_voice` (`toggle|start|stop|cancel <source>`), taken only from ft-voiced's own user.
+The socket is `/run/user/<uid>/frametop-voice/control.sock` (the clients ignore `$XDG_RUNTIME_DIR`, which Frametop's desktop points elsewhere), mode 0600. It can type into any focused window, so it's owner-only. Push-to-talk from the relay comes on the abstract socket `@frametop_voice` (`toggle|start|stop|cancel <source> [quiet]`; `quiet` cancels without the tone), taken only from ft-voiced's own user.
 
 An assistant can either replace `hooks/on-command` or subscribe with `ft-voice events` and act on `{"event": "command", "text": ...}`.
 
@@ -106,7 +120,7 @@ ft-voiced doesn't wait for the program. A malformed entry is skipped with a warn
 
 ```json
   "advanced": {
-    "dictation": {"min_seconds": 1.5, "pause_seconds": 1.0},
+    "dictation": {"min_seconds": 0.5, "pause_seconds": 1.0},
     "wake": {"threshold": 0.3, "command_hook": "hooks/on-command"},
     "audio": {"source": "alsa_input.some_mic"}
   }
@@ -119,13 +133,14 @@ They apply when the service restarts (`voice/run.sh restart`). Wake phrase tunin
 | Part | What it does |
 | --- | --- |
 | `ft-voiced` | The service (`frametop-voice.service`): mic capture (`pw-record`), push-to-talk, the wake word, live text, the control socket. It runs in Frametop's container (`scripts/in-box`), named `ft-voiced` there. |
-| `frametop-voice-whisper.service` | `whisper-server` (whisper.cpp, Vulkan on the Adreno 750) with `ggml-small.en-q5_1` on `127.0.0.1:8178`, for wake word commands. ft-voiced starts it only while the wake word is on (it holds about 300 MB) and stops it after. |
+| `frametop-voice-whisper.service` | `whisper-server` (whisper.cpp, Vulkan on the Adreno 750) with the chosen model (`whisper-run`; `ggml-small.en-q5_1` by default) on `127.0.0.1:8178`, for wake word commands and languages other than English. ft-voiced starts it only while something uses it (it holds about 300 MB of the GPU's memory, more for large-v3-turbo) and stops it after. |
 | `ft-voice` | CLI for the control socket. |
 | `voice_settings.py` | The settings file, and carrying over frame-voice's. Standard library only: the installer runs it with the host's Python, and Input Settings reads it. |
 | `voice_commands.py` | Voice commands: matching, and checking the entries. |
 | `hooks/on-command` | Runs after a wake word with the command as `$1` when no voice command matches. The example logs it to `~/.local/state/frametop/voice/commands.log`. |
 | `build.sh` | Builds `build/bin/whisper-server` (whisper.cpp at a fixed commit, Vulkan, static) and `build/venv` (sherpa-onnx, sentencepiece, numpy; in a release, the image's locked venv). |
-| `models.sh` | Fetches and checks the models. |
+| `models.sh` | Fetches and checks the models; `models.sh model NAME` one of the extra whisper models. |
+| `whisper-run` | Starts whisper-server with the model the settings choose. |
 | `run.sh` | Installs and runs the services. |
 
 The mic is captured once. The wake word spotter (sherpa-onnx open-vocabulary KWS, about 5% of one core) listens only while the wake word is on; with it off, the mic is open only while you dictate. Silero VAD ends commands on silence and trims clips before transcription.
@@ -138,7 +153,7 @@ The journal has what was said: each live window's words, transcripts, and wake w
 
 ## Tests
 
-`voice/test/test_commands.py` (standard library: matching, settings, carrying over frame-voice's) and `voice/test/test_daemon.py` (needs the image's packages: typing through a stand-in relay, push-to-talk from the relay and from a stand-in for SteamVR's web socket) run in `just test`. The relay's side is in `input/test/keys-test.py`.
+`voice/test/test_commands.py` (standard library: matching, settings, carrying over frame-voice's) and `voice/test/test_daemon.py` (needs the image's packages: typing through a stand-in relay, push-to-talk from the relay and from a stand-in for SteamVR's web socket, short-word retries, tones, when whisper runs) and `voice/test/test_settings_page.py` (the Voice page's keys, language and model, with PySide6) run in `just test`. The relay's side is in `input/test/keys-test.py`.
 
 ## Measurements (2026-09-25, frame-voice, jfk.wav)
 
@@ -155,6 +170,7 @@ Bigger models (2026-09-26, 9 real dictations replayed, 512 window, VR running): 
 
 ## Limits
 
-- Typing assumes a US keyboard layout and ASCII.
+- Steam and games get a US keyboard layout. On the desktop, characters its layout has no key for are dropped.
+- Languages other than English aren't typed as fast as you talk: whisper decodes them on the GPU, Moonshine only knows English.
 - Wake word commands use the GPU. A heavy VR game may stutter briefly while one transcribes.
 - Not yet verified: typing into SteamVR dashboard and overlay text fields.

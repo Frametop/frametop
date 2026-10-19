@@ -898,6 +898,18 @@ Kirigami.ApplicationWindow {
                         icon.name: "input-keyboard"
                         onClicked: root.show(keyboardPage)
                     }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "Keys do:"
+                        model: backend.dictationKeyModes
+                        textRole: "text"
+                        valueRole: "value"
+                        enabled: backend.dictationKeys.length > 0
+                        displayText: backend.dictationKeyMode ? currentText : "Some tap, some are held"
+                        readonly property string want: backend.dictationKeyMode
+                        onWantChanged: currentIndex = indexOfValue(want)
+                        Component.onCompleted: currentIndex = indexOfValue(want)
+                        onActivated: backend.setDictationKeyMode(currentValue)
+                    }
                     Repeater {
                         model: backend.voiceButtons
                         delegate: RowLayout {
@@ -949,6 +961,41 @@ Kirigami.ApplicationWindow {
                         onActivated: backend.setVoiceControllerMode(currentValue)
                     }
 
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Language" }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "You speak:"
+                        model: backend.voiceLanguages
+                        textRole: "text"
+                        valueRole: "value"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                        readonly property string want: vpage.vs.language
+                        onWantChanged: currentIndex = indexOfValue(want)
+                        Component.onCompleted: currentIndex = indexOfValue(want)
+                        onActivated: backend.setVoiceLanguage(currentValue)
+                    }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "Whisper model:"
+                        model: backend.voiceModels
+                        textRole: "text"
+                        valueRole: "value"
+                        enabled: !backend.voiceModelFetching
+                        displayText: backend.voiceModelFetching ? "Downloading " + backend.voiceModelFetching + "…" : currentText
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 18
+                        readonly property string want: backend.voiceModel
+                        onWantChanged: currentIndex = indexOfValue(want)
+                        onModelChanged: currentIndex = indexOfValue(want)
+                        Component.onCompleted: currentIndex = indexOfValue(want)
+                        onActivated: backend.setVoiceModel(currentValue)
+                    }
+                    Controls.Label {
+                        text: vpage.vs.language === "en"
+                              ? "Moonshine types English as you talk. Whisper types it when \"As you talk\" is off, and hears the wake word's commands."
+                              : "Whisper types other languages, slower than Moonshine types English. Bigger models hear better and take longer; large-v3-turbo can make VR stutter."
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                    }
+
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Typing" }
                     Controls.Switch {
                         Kirigami.FormData.label: "As you talk:"
@@ -996,8 +1043,8 @@ Kirigami.ApplicationWindow {
                     opacity: 0.7
                     text: "Speech is recognised on the headset; nothing leaves it. Text is typed where you type: the "
                           + "desktop window you clicked last, or Steam and games. It waits while you hold Ctrl, Alt, "
-                          + "Shift or Meta, so letters don't turn into shortcuts. Recordings under 2 seconds are "
-                          + "dropped. A key works only on its own: with another modifier held it's a shortcut, not "
+                          + "Shift or Meta, so letters don't turn into shortcuts. A key held to talk "
+                          + "dictates while it's down; pressing another key with it cancels. A key works only on its own: with another modifier held it's a shortcut, not "
                           + "dictation. Controller buttons still do what they do in games. After the wake word, a "
                           + "command goes to voice/hooks/on-command, or runs a program you set in "
                           + "~/.config/frametop-voice.json (\"commands\"; see voice/README.md)."

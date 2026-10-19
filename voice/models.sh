@@ -6,15 +6,21 @@
 #   sherpa-onnx-moonshine-base-en-quantized-2026-02-27/   Moonshine base, live dictation  MIT
 #   sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/ the wake word spotter      Apache-2.0
 #   silero_vad.onnx          Silero VAD, where speech starts and stops                  MIT
-# Usage: voice/models.sh [fetch]   fetch what's missing or doesn't match (the default)
-#        voice/models.sh check     check every file's sha256 (exit 1 if any is missing or wrong)
+# And whisper models for other languages, fetched only when chosen on the Voice page (or here):
+#   small           ggml-small-q5_1.bin, 190 MB, multilingual                            MIT
+#   large-v3-turbo  ggml-large-v3-turbo-q5_0.bin, 574 MB, multilingual                   MIT
+# Usage: voice/models.sh [fetch]      fetch what's missing or doesn't match (the default)
+#        voice/models.sh check        check every file's sha256 (exit 1 if any is missing or wrong),
+#                                     the extra models too where they're there
+#        voice/models.sh model NAME   fetch one of the extra whisper models (voice_settings.WHISPER_MODELS)
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
 
-on_frame_script "${1:-fetch}" <<'SCRIPT'
+on_frame_script "${1:-fetch}" "${2:-}" <<'SCRIPT'
 set -euo pipefail
 mode=$1
+want=$2
 dir=$HOME/.local/share/frametop/voice/models
 hf=https://huggingface.co
 gh=https://github.com/k2-fsa/sherpa-onnx/releases/download
@@ -29,6 +35,31 @@ files=(
   "silero_vad.onnx 9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6 $gh/asr-models/silero_vad.onnx"
   "$kws.tar.bz2 f170013b4716e41b62b9bfd809687c207cef798ef9bc6534d524e17af9b6561a $gh/kws-models/$kws.tar.bz2"
 )
+# The extra whisper models: name, file, sha256, URL (the same whisper.cpp commit).
+wcpp=$hf/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1
+extra=(
+  "small ggml-small-q5_1.bin ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb $wcpp/ggml-small-q5_1.bin"
+  "large-v3-turbo ggml-large-v3-turbo-q5_0.bin 394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2 $wcpp/ggml-large-v3-turbo-q5_0.bin"
+)
+case $mode in
+  fetch|check) ;;
+  model)
+    files=()
+    for entry in "${extra[@]}"; do
+      read -r name file sum url <<<"$entry"
+      [ "$name" = "$want" ] && files=("$file $sum $url")
+    done
+    [ ${#files[@]} = 1 ] || { echo "models.sh: no whisper model \"$want\" (small, large-v3-turbo)" >&2; exit 2; }
+    mode=fetch
+    ;;
+  *) echo "usage: voice/models.sh [fetch|check|model NAME]" >&2; exit 2 ;;
+esac
+if [ "$1" = check ]; then
+  for entry in "${extra[@]}"; do
+    read -r name file sum url <<<"$entry"
+    [ -f "$dir/$file" ] && files+=("$file $sum $url")
+  done
+fi
 # What ft-voiced uses from the wake word archive (int8, the tokens and the BPE model).
 kws_files="tokens.txt bpe.model encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
 mkdir -p "$dir/$moon" "$dir/$kws"

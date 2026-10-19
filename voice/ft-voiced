@@ -8,10 +8,15 @@ One PipeWire capture stream (pw-record) feeds two consumers:
     a voice command (voice_commands.py), or the command hook and event subscribers
 
 Push-to-talk comes from the input relay (a key combination or mouse button with the dictate or
-dictate_hold action: "toggle|start|stop|cancel <source>" on @frametop_voice, taken only from this
-user) and from Frame controller buttons, read from SteamVR's web socket (input/vrws.py), so they
-still do what they do in games. Text goes to the relay as "type TEXT" on @frametop_relay; it
-types only while no modifier is held, so letters never turn into shortcuts.
+dictate_hold action: "toggle|start|stop|cancel <source> [quiet]" on @frametop_voice, taken only
+from this user; quiet: no cancel tone) and from Frame controller buttons, read from SteamVR's web
+socket (input/vrws.py), so they still do what they do in games. Text goes to the relay as "type
+TEXT" on @frametop_relay, any language's characters: it types them with the keys of the desktop's
+keyboard layout, and only while no modifier is held, so letters never turn into shortcuts.
+
+The language ("language" in the settings) picks the live engine: English is Moonshine on the
+CPU, any other language whisper-server on the GPU, with the model the settings choose
+(voice_settings.model_for, loaded by voice/whisper-run).
 
 Runs in Frametop's container (scripts/in-box: numpy, sherpa-onnx and pw-record are there),
 named ft-voiced for pkill. Programs it starts for voice commands and hooks run on the host
@@ -78,14 +83,16 @@ DEFAULTS = {
     "audio": {"source": ""},
     "whisper": {
         "url": "http://127.0.0.1:8178/inference",
-        "language": "en",
-        "prompt": "SteamOS, Steam Frame, Godot.",
+        "prompt": "SteamOS, Steam Frame, Godot.",  # for English only: it would pull others to English
         # Smallest encoder window (50 per second of audio). medium and large-v3-turbo loop
         # and take 10-20 s on short clips below 512; 512 covers pieces up to ~10 s.
         "min_audio_ctx": 512,
     },
     "dictation": {
-        "min_seconds": 2.0,  # shorter recordings are discarded, not transcribed
+        # Shorter recordings are dropped, not transcribed: a press that was a slip. A single word
+        # takes ~0.3-0.5 s; a recording without speech in it types nothing anyway (the VAD).
+        "min_seconds": 0.3,
+        "live_after_seconds": 2.0,  # no live typing before this far in (as when it was min_seconds)
         "max_seconds": 120,
         "trailing_space": True,
         # Transcribe while recording: pieces split at pauses go to whisper as soon as they end,
@@ -118,7 +125,9 @@ DEFAULTS = {
         "wake_hook": "",  # run with the keyword as $1 as soon as the wake word fires (relative: to voice/)
         "command_hook": "hooks/on-command",  # run with the transcribed command as $1
     },
-    "sounds": {"volume": 0.5},  # on or off: "sounds" in the settings
+    # On or off: "sounds" in the settings. Each tone has silence around it (lead, tail), so an
+    # output that wakes up late or a stream that ends early cuts only silence.
+    "sounds": {"volume": 0.5, "lead_seconds": 0.12, "tail_seconds": 0.2},
 }
 
 
@@ -153,20 +162,25 @@ ASCII_FIXUPS = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u20
                               "\u2013": "-", "\u2014": "-", "\u2026": "...", "\n": " ", "\t": " "})
 
 
-def to_ascii(text):
-    """What the relay can type (a US layout): curly quotes and dashes made plain, accents
-    stripped, anything else outside printable ASCII dropped."""
-    text = unicodedata.normalize("NFKD", text.translate(ASCII_FIXUPS))
-    return "".join(c for c in text if " " <= c <= "~")
+def to_text(text):
+    """Text for the relay to type: curly quotes and dashes made plain (most layouts have no key
+    for them), letters composed (NFC: "ü" as one character, the way a layout's key types it),
+    control characters dropped. Accents and other scripts stay: the relay types what the
+    desktop's layout has keys for, and logs the rest."""
+    text = unicodedata.normalize("NFC", text.translate(ASCII_FIXUPS))
+    return "".join(c for c in text if c.isprintable())
 
 
 def type_chunks(text, size=TYPE_CHUNK):
-    """text in pieces of at most size bytes, split after a space where one is near."""
+    """text in pieces of at most size bytes (UTF-8), split after a space where one is near."""
     while text:
-        if len(text) <= size:
+        if len(text.encode()) <= size:
             yield text
             return
-        cut = text.rfind(" ", size // 2, size) + 1 or size
+        end = size
+        while len(text[:end].encode()) > size:
+            end -= 1
+        cut = text.rfind(" ", end // 2, end) + 1 or end
         yield text[:cut]
         text = text[cut:]
 
@@ -270,17 +284,19 @@ def feed_vad(vad, samples):
 
 # ---------------------------------------------------------------- sounds
 
-def make_sounds(volume):
-    """Short tones so state changes are audible inside VR. Returns name -> wav path."""
+def make_sounds(volume, lead=0.12, tail=0.2):
+    """Short tones so state changes are audible inside VR, with lead and tail seconds of silence
+    around them. Returns name -> wav path."""
     specs = {"start": [660, 880], "stop": [880, 660], "wake": [988], "cancel": [330, 262]}
     out = {}
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     for name, freqs in specs.items():
-        parts = []
+        parts = [np.zeros(int(RATE * lead))]
         for f in freqs:
             t = np.arange(int(RATE * 0.11)) / RATE
             env = np.minimum(1, np.minimum(t, t[::-1]) * 200)
             parts.append(np.sin(2 * np.pi * f * t) * env * volume)
+        parts.append(np.zeros(int(RATE * tail)))
         path = RUNTIME_DIR / f"{name}.wav"
         path.write_bytes(to_wav(np.concatenate(parts).astype(np.float32)))
         out[name] = path
@@ -310,6 +326,10 @@ class Voice:
         self.relay_said = False  # logged that the relay isn't there (once until it is)
         self.type_lock = asyncio.Lock()
         self.sounds = {}  # apply_options() makes them when enabled
+        self.chime_task = None  # the tone playing or waiting; tones play one after another
+        self.start_chime = None  # dictation's start tone waits for the mic's first audio (a timer)
+        self.language = voice_settings.DEFAULT["language"]  # apply_options() sets the saved ones
+        self.model = voice_settings.DEFAULT["model"]
         self.subscribers = set()
 
         self.recording = None  # list of chunks while dictating
@@ -398,14 +418,38 @@ class Voice:
                 self.subscribers.discard(w)
 
     def chime(self, name):
+        """Play a tone, after any tone still playing (two at once garble each other). The mic
+        stays open until it's done (update_mic): on the Frame, the speaker and the mic go
+        through one echo-cancelling filter, and closing the mic while a tone plays can cut it."""
         if name in self.sounds:
-            # SteamOS runs every playback stream through a per-stream spatializer that takes
-            # ~0.35 s to set up, late enough to bury a start tone under the first word. Its
-            # WirePlumber script skips streams named like filter chains, so use such a name.
-            props = '{ node.name = "frametop-voice-chime-filter-chain" media.role = "Notification" }'
-            task = asyncio.create_task(self._run(["pw-play", "-P", props, str(self.sounds[name])], quiet=True))
-            self.tasks.add(task)
-            task.add_done_callback(self.tasks.discard)
+            self.chime_task = asyncio.create_task(self._play(name, self.chime_task))
+            self.tasks.add(self.chime_task)
+            self.chime_task.add_done_callback(self.tasks.discard)
+
+    async def _play(self, name, prev):
+        if prev and not prev.done():
+            await asyncio.wait([prev])
+        # SteamOS runs every playback stream through a per-stream spatializer that takes
+        # ~0.35 s to set up, late enough to bury a start tone under the first word. Its
+        # WirePlumber script skips streams named like filter chains, so use such a name.
+        props = '{ node.name = "frametop-voice-chime-filter-chain" media.role = "Notification" }'
+        try:
+            await self._run(["pw-play", "-P", props, str(self.sounds[name])], quiet=True)
+        finally:
+            if self.chime_task is asyncio.current_task():
+                self.chime_task = None
+                self.update_mic()  # a mic left open for the tone closes now
+
+    def chime_playing(self):
+        return self.chime_task is not None and not self.chime_task.done()
+
+    def chime_start(self):
+        """Dictation's start tone, once the mic sends audio (on_audio), or after 0.6 s without:
+        a tone while the mic is still opening can be cut, and says "talk" too early."""
+        if self.start_chime:
+            self.start_chime.cancel()
+            self.start_chime = None
+            self.chime("start")
 
     async def _run(self, argv, env=None, quiet=False, host=False):
         """Run a program and wait for it. host: on the host (voice commands, hooks), with env
@@ -456,6 +500,8 @@ class Voice:
         if self.mic_needed() and (self.mic_task is None or self.mic_task.done()):
             self.mic_task = asyncio.create_task(self._capture())
         elif not self.mic_needed() and self.mic_proc and self.mic_proc.returncode is None:
+            if self.chime_playing():
+                return  # closes when the tone is done (_play), see chime
             self.mic_proc.terminate()  # fully close the mic when nothing is listening
 
     async def _wait_for_audio_session(self):
@@ -506,6 +552,8 @@ class Voice:
     def on_audio(self, chunk):
         if self.recording is not None:
             self.recording.append(chunk)
+            if self.start_chime:
+                self.chime_start()
             if self.stream:
                 feed_vad(self.piece_vad, chunk)
                 self.stream["speech"].append(self.piece_vad.is_speech_detected())
@@ -572,8 +620,8 @@ class Voice:
         w = self.cfg["whisper"]
         # temperature_inc 0: no fallback re-decodes, which cost 10+ s on short pieces with turbo.
         fields = {"response_format": "json", "temperature": "0", "temperature_inc": "0",
-                  "no_timestamps": "true", "language": w["language"], "audio_ctx": str(audio_ctx)}
-        prompt = " ".join(filter(None, [w["prompt"], context]))
+                  "no_timestamps": "true", "language": self.language, "audio_ctx": str(audio_ctx)}
+        prompt = " ".join(filter(None, [w["prompt"] if self.language == "en" else "", context]))
         if prompt:
             fields["prompt"] = prompt
         boundary = uuid.uuid4().hex
@@ -589,7 +637,7 @@ class Voice:
 
     async def type_text(self, text):
         """Have the input relay type text where typing goes. In order: one at a time."""
-        text = to_ascii(text)
+        text = to_text(text)
         if not text:
             return
         async with self.type_lock:
@@ -627,9 +675,16 @@ class Voice:
                            "words": [], "text": "", "held": None, "typed": 0}
             self.stream["worker"] = asyncio.create_task(self._stream_worker(self.stream))
         self.update_mic()
-        self.chime("start")
+        if "start" in self.sounds:
+            self.start_chime = self.loop.call_later(0.6, self.chime_start)
         self.broadcast("dictation_start", source=source)
         log.info("dictation start (%s)", source)
+
+    def drop_start_chime(self):
+        """A dictation over before its mic sent audio gets no start tone after all."""
+        if self.start_chime:
+            self.start_chime.cancel()
+            self.start_chime = None
 
     def cancel_dictation(self, chime=True):
         if self.recording is None:
@@ -638,9 +693,10 @@ class Voice:
         if self.stream:
             self.stream["worker"].cancel()
             self.stream = None
-        self.update_mic()
+        self.drop_start_chime()
         if chime:
             self.chime("cancel")
+        self.update_mic()
         self.broadcast("dictation_cancel")
         log.info("dictation cancelled")
 
@@ -649,16 +705,17 @@ class Voice:
             return
         chunks, self.recording, self.recording_source = self.recording, None, None
         stream, self.stream = self.stream, None
-        self.update_mic()
+        self.drop_start_chime()
         seconds = len(chunks) * CHUNK / RATE
-        if seconds < self.dcfg["min_seconds"]:
+        too_short = seconds < self.dcfg["min_seconds"]
+        self.chime("cancel" if too_short else "stop")  # before the mic closes: it waits for the tone
+        self.update_mic()
+        if too_short:
             if stream:
                 stream["worker"].cancel()
             log.info("dictation discarded: %.1fs is under the %.1fs minimum", seconds, self.dcfg["min_seconds"])
-            self.chime("cancel")
             self.broadcast("dictation_cancel", reason="too_short", seconds=seconds)
             return
-        self.chime("stop")
         if stream:
             per = CHUNK / RATE
             log.info("recorded %.1fs: %.1fs labeled speech, peak level %.4f", seconds,
@@ -697,15 +754,40 @@ class Voice:
     async def _decode(self, audio, context):
         """Text for a window of audio from the live engine, without the "..." whisper puts on
         text that stops mid-sentence."""
-        if self.moonshine:
+        if self.live_moonshine():
             async with self.whisper_lock:
                 text = await asyncio.to_thread(self._moonshine_decode, audio)
+                if not text.strip() and len(audio) <= 3 * RATE:
+                    # trim_to_speech's VAD is shared, so it runs here; the decodes in a thread
+                    text = await asyncio.to_thread(self._moonshine_retry, audio, self.trim_to_speech(audio))
             text = drop_repeats(re.sub(r"\s+", " ", text).strip())
+            words = text.split()
+            if len(words) >= 3 and len(audio) <= 3 * RATE and len({norm(w) for w in words}) == 1:
+                # a lone short word Moonshine looped on ("Way, way, way,"); costs a spoken "no, no, no"
+                log.info("short window: %r is one word looped; keeping one", text)
+                text = words[-1][:1].upper() + words[-1][1:] if words[0][:1].isupper() else words[-1]
         else:
             text = await self.transcribe_speech(audio, context, quiet=True)
         text = re.sub(r"([,;:!?])\1+", r"\1", text)  # "so,," -> "so,"
         text = re.sub(r"(?<![\w'])i(?=['\s.,!?;:]|$)", "I", text)  # audio starting mid-phrase can give "i"
         return re.sub(r"^(\.\.\.|\u2026)\s*|\s*(\.\.\.|\u2026)$", "", text)
+
+    def _moonshine_retry(self, audio, speech):
+        """Moonshine often hears nothing in a lone short word with silence around it, and which
+        framing it does hear differs from clip to clip. Try a few: cut to the speech, then each
+        after 0.2 s of silence. The first text wins. `speech` is trim_to_speech(audio)."""
+        if speech is None:
+            return ""
+        lead = np.zeros(int(0.2 * RATE), np.float32)
+        tries = [speech] if len(speech) < len(audio) else []
+        tries += [np.concatenate([lead, speech])]
+        for n, clip in enumerate(tries, 1):
+            text = self._moonshine_decode(clip)
+            if text.strip():
+                log.info("short window heard nothing; try %d of %d: %r", n, len(tries), text)
+                return text
+        log.info("short window heard nothing in %d more tries", len(tries))
+        return ""
 
     def _moonshine_decode(self, audio):
         # Quiet speech is scaled up to a fixed peak first, as Faceclaw does (helped at low levels).
@@ -741,7 +823,7 @@ class Voice:
                 last = -1  # no new speech, but the context holds a word still to commit
             full = len(stream["lead"]) / RATE + len(window) * per >= self.dcfg["max_window_seconds"]
             if stream["final"]:
-                if last is None:
+                if last is None and not self._short_speech(stream, end):
                     return
                 if full:  # Moonshine returns nothing for more than ~9 s of audio
                     await self._close_window(stream, self._quiet_cut(stream, end), forced=True)
@@ -771,6 +853,17 @@ class Voice:
                 agreed = agreement(before[0], new) if before else 0
                 if agreed > 1:
                     self._commit(stream, new[:agreed - 1], boundary)
+
+    def _short_speech(self, stream, end):
+        """Speech the live labels missed in the window: they come ~0.27 s late, so a lone short
+        word ("yes") released right away can end before any chunk is labeled speech. The window's
+        audio through the VAD to its end (trim_to_speech flushes it) says."""
+        if end <= stream["win"]:
+            return False
+        found = self.trim_to_speech(np.concatenate(stream["chunks"][stream["win"]:end])) is not None
+        if found:
+            log.info("speech the live labels missed (a short word): decoding it")
+        return found
 
     async def _close_window(self, stream, cut, forced=False):
         """Decode the window once more and commit the rest of its words. After a pause the last
@@ -881,7 +974,7 @@ class Voice:
         (The relay holds it back while a modifier is held.)"""
         if not final:
             live = (self.dcfg["live_typing"] and stream is self.stream
-                    and time.monotonic() - stream["t0"] >= self.dcfg["min_seconds"])
+                    and time.monotonic() - stream["t0"] >= self.dcfg["live_after_seconds"])
             if not live:
                 return
         text = stream["text"][stream["typed"]:]
@@ -972,9 +1065,10 @@ class Voice:
 
     # --- push-to-talk
 
-    def push_to_talk(self, command, source):
+    def push_to_talk(self, command, source, quiet=False):
         """toggle, start, stop or cancel, from the relay (a key combination or mouse button) or
-        a controller button."""
+        a controller button. quiet: a cancel without its tone (a hold-to-talk key that turned out
+        to be part of a shortcut)."""
         if command == "toggle":
             self.spawn(self.toggle_dictation(source))
         elif command == "start":
@@ -982,7 +1076,7 @@ class Voice:
         elif command == "stop":
             self.spawn(self.stop_dictation())
         elif command == "cancel":
-            self.cancel_dictation()
+            self.cancel_dictation(chime=not quiet)
 
     def listen_relay(self):
         """Push-to-talk from the input relay, on @frametop_voice. Only from this user: the socket
@@ -1008,7 +1102,7 @@ class Voice:
                 words = data.decode(errors="replace").split()
                 if uid != os.getuid() or not words or words[0] not in ("toggle", "start", "stop", "cancel"):
                     continue
-                self.push_to_talk(words[0], words[1] if len(words) > 1 else "relay")
+                self.push_to_talk(words[0], words[1] if len(words) > 1 else "relay", words[2:3] == ["quiet"])
 
         self.loop.add_reader(sock.fileno(), readable)
         return sock
@@ -1112,7 +1206,7 @@ class Voice:
         """Settings from Frametop Input Settings. Only changed ones are applied, so a save doesn't
         undo e.g. `ft-voice wake off`."""
         changed = {k: b[k] for k in ("controller", "controller_mode", "wake_phrases", "commands", "advanced",
-                                     *voice_settings.OPTIONS)
+                                     "language", "model", *voice_settings.OPTIONS)
                    if self.applied.get(k) != b[k]}
         first = not self.applied
         self.applied.update(changed)
@@ -1132,12 +1226,24 @@ class Voice:
         if "live_typing" in changed:
             self.dcfg["live_typing"] = changed["live_typing"]
         if "sounds" in changed:
-            self.sounds = make_sounds(self.cfg["sounds"]["volume"]) if changed["sounds"] else {}
+            sc = self.cfg["sounds"]
+            self.sounds = make_sounds(sc["volume"], sc["lead_seconds"], sc["tail_seconds"]) if changed["sounds"] else {}
         try:
             asyncio.get_running_loop()
             running = True
         except RuntimeError:
             running = False  # at startup; run() opens the mic and starts whisper-server
+        if "language" in changed or "model" in changed:
+            model = voice_settings.model_for(b)
+            restart = model != voice_settings.model_for({"language": self.language, "model": self.model})
+            self.language, self.model = b["language"], b["model"]
+            if not voice_settings.model_installed(model):
+                log.warning("whisper model %s isn't there (%s): whisper-server loads small.en instead; "
+                            "fetch it with voice/models.sh model %s", model, voice_settings.model_path(model), model)
+            log.info("language %s: %s live, whisper model %s", self.language,
+                     "moonshine" if self.live_moonshine() else "whisper", model)
+            if running:
+                self.update_whisper(restart=restart and not first)
         if "wake_word" in changed and changed["wake_word"] != self.wake_enabled:
             self.wake_enabled = changed["wake_word"]
             self.reset_kws()
@@ -1153,10 +1259,21 @@ class Voice:
         if changed:
             log.info("settings: %s", ", ".join(f"{k}={v}" for k, v in changed.items()))
 
-    def update_whisper(self):
-        """Run whisper-server (frametop-voice-whisper.service: ~300 MB of the GPU's memory) only
-        while something uses it: wake word commands, or dictation set to use it."""
-        want = self.wake_enabled or self.dcfg["engine"] == "whisper" or not self.dcfg["streaming"]
+    def live_moonshine(self):
+        """Live dictation with Moonshine: it knows only English."""
+        return self.moonshine is not None and self.language == "en"
+
+    def update_whisper(self, restart=False):
+        """Run whisper-server (frametop-voice-whisper.service: ~300 MB of the GPU's memory, more
+        for a bigger model) only while something uses it: wake word commands, or dictation set
+        to use it (another language than English, or the engine). restart: the model changed."""
+        want = (self.wake_enabled or not self.live_moonshine() or self.dcfg["engine"] == "whisper"
+                or not self.dcfg["streaming"])
+        if restart and want and self.whisper_wanted:
+            log.info("whisper-server: restarting for the model the settings chose")
+            self.spawn(self._run(["systemctl", "--user", "restart", "frametop-voice-whisper.service"],
+                                 host=True, quiet=True))
+            return
         if want != self.whisper_wanted:
             if want or self.whisper_wanted is not None:  # at startup, not running is the start
                 log.info("whisper-server: %s", "starting" if want else "stopping (nothing uses it)")

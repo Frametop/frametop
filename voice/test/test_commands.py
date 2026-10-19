@@ -137,6 +137,31 @@ class Settings(unittest.TestCase):
         self.assertEqual((data["controller"], data["controller_mode"], data["wake_word"], data["wake_phrases"]),
                          (["right/a"], "hold", False, ["HEY SCARLET"]))
 
+    def test_language_and_model(self):
+        self.assertEqual((self.vs.load()["language"], self.vs.load()["model"]), ("en", "small.en"))
+        self.path.write_text(json.dumps({"language": "de", "model": "small.en"}))
+        self.assertEqual(self.vs.model_for(self.vs.load()), "small")  # small.en knows only English
+        self.path.write_text(json.dumps({"language": "auto", "model": "large-v3-turbo"}))
+        self.assertEqual(self.vs.model_for(self.vs.load()), "large-v3-turbo")
+        self.path.write_text(json.dumps({"language": "German", "model": "huge"}))
+        self.assertEqual((self.vs.load()["language"], self.vs.load()["model"]), ("en", "small.en"))
+        self.path.write_text(json.dumps({"language": "eu"}))  # whisper's, though not on the page
+        self.assertEqual(self.vs.load()["language"], "eu")
+
+    def test_model_file_falls_back_until_fetched(self):
+        os.environ["FRAMETOP_VOICE_MODELS"] = self.tmp.name
+        try:
+            sys.modules.pop("voice_settings", None)
+            import voice_settings as vs
+            self.path.write_text(json.dumps({"language": "fr"}))
+            self.assertEqual(vs.model_file(), Path(self.tmp.name) / "ggml-small.en-q5_1.bin")
+            (Path(self.tmp.name) / "ggml-small-q5_1.bin").write_bytes(b"x")
+            self.assertFalse(vs.model_installed("small"))  # not checked yet: no .sha256
+            (Path(self.tmp.name) / "ggml-small-q5_1.bin.sha256").write_text("sum\n")
+            self.assertEqual(vs.model_file(), Path(self.tmp.name) / "ggml-small-q5_1.bin")
+        finally:
+            del os.environ["FRAMETOP_VOICE_MODELS"]
+
     def test_frame_voice_carried_over(self):
         old = {"keyboard": ["KEY_RIGHTCTRL"], "controller": [{"device": "/user/hand/left",
                                                               "input": "/input/dpad_left/click"}],
@@ -160,6 +185,13 @@ class Settings(unittest.TestCase):
         self.assertFalse(self.vs.set_dictation_keys(rules, {"97": "dictate"}))
         self.assertTrue(self.vs.set_dictation_keys(rules, {}))
         self.assertEqual(rules["key_bindings"], {"125": "steam_menu"})
+
+    def test_models_match_models_sh(self):
+        src = (Path(__file__).resolve().parents[1] / "models.sh").read_text()
+        extra = src[src.index("\nextra=("):src.index("\n)", src.index("\nextra=("))]
+        fetched = dict(line.strip().strip('"').split()[:2] for line in extra.strip().splitlines()[1:])
+        self.assertEqual(fetched, {n: f for n, (f, _, _) in self.vs.WHISPER_MODELS.items() if n != "small.en"})
+        self.assertIn(self.vs.WHISPER_MODELS["small.en"][0], src)  # fetched with the others
 
     def test_defaults_match_the_relay(self):
         relay = Path(__file__).resolve().parents[2] / "input" / "input-relay.py"

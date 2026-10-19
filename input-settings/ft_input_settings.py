@@ -414,7 +414,7 @@ def write_conf_value(key, value):
         f.write("\n".join(lines) + "\n")
 
 
-def host(*cmd):
+def host(*cmd, timeout=20):
     """Run a command on the SteamOS host (we live in the dev container), on the host's user
     bus. The app itself has the bus of the session it was opened from (ft-input-settings),
     in the Frametop desktop a private one from dbus-run-session; distrobox-host-exec run on
@@ -423,7 +423,7 @@ def host(*cmd):
     runner = ["distrobox-host-exec"] if shutil.which("distrobox-host-exec") else []
     env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=f"unix:path=/run/user/{os.getuid()}/bus")
     try:
-        return subprocess.run(runner + list(cmd), capture_output=True, text=True, timeout=20, env=env)
+        return subprocess.run(runner + list(cmd), capture_output=True, text=True, timeout=timeout, env=env)
     except (OSError, subprocess.TimeoutExpired) as e:
         return subprocess.CompletedProcess(cmd, 1, "", str(e))
 
@@ -485,6 +485,7 @@ class Backend(QObject):
         self._combo_tap_code = None  # that modifier's key as it is (Right Ctrl: 97)
         self._voice = {}  # ft-voiced's status, {} when it isn't running
         self._voice_enabled = False  # its service starts at login (systemctl, refreshVoice)
+        self._model_fetching = ""  # the whisper model voice/models.sh is downloading
         self._vr = {}  # the helper's vrstatus, {} when it doesn't answer
         self._vr_at = 0.0
         self._gaze = {}  # ft-gazed's status, {} when it isn't running
@@ -1212,18 +1213,21 @@ class Backend(QObject):
         self.message.emit("Gaze dot: " + ("always shown" if on else "shown only while the mouse moves it"), False)
 
     # --- key combinations ("key_bindings") ---
-    def comboName(self, combo):
+    def comboName(self, combo, action=None):
+        """A combination's name. A lone modifier is a tap, or held with dictate_hold (the relay
+        starts dictation on its press and stops it on the release)."""
         parts = [int(c) for c in combo.split("+") if c.isdigit()]
+        tap = "" if action == "dictate_hold" else " tap"
         if len(parts) == 1 and parts[0] in MODIFIER_NAMES:
-            return MODIFIER_NAMES[parts[0]] + " tap"
+            return MODIFIER_NAMES[parts[0]] + tap
         if len(parts) == 1 and parts[0] in RIGHT_MODIFIER_NAMES:
-            return RIGHT_MODIFIER_NAMES[parts[0]] + " tap"
+            return RIGHT_MODIFIER_NAMES[parts[0]] + tap
         return "+".join(MODIFIER_NAMES.get(c) or self.codeName(c).removeprefix("KEY_").title() for c in parts)
 
     @Property("QVariantList", notify=mappingsChanged)
     def keyShortcuts(self):
         bound = key_bindings(read_json(RULES_PATH))
-        return [{"combo": c, "label": self.comboName(c), "action": a, "actionLabel": action_label(a)}
+        return [{"combo": c, "label": self.comboName(c, a), "action": a, "actionLabel": action_label(a)}
                 for c, a in sorted(bound.items())]
 
     @Property("QVariantList", constant=True)
@@ -1369,8 +1373,101 @@ class Backend(QObject):
 
     @Property("QVariantList", notify=mappingsChanged)
     def dictationKeys(self):
-        return [{"combo": c, "label": self.comboName(c), "actionLabel": action_label(a)}
+        return [{"combo": c, "label": self.comboName(c, a), "actionLabel": action_label(a)}
                 for c, a in sorted(key_bindings(read_json(RULES_PATH)).items()) if a in VOICE_ACTIONS]
+
+    @Property("QVariantList", constant=True)
+    def dictationKeyModes(self):
+        return [{"value": "dictate", "text": "Tap to start, tap again to stop"},
+                {"value": "dictate_hold", "text": "Hold to talk"}]
+
+    @Property(str, notify=mappingsChanged)
+    def dictationKeyMode(self):
+        """dictate or dictate_hold when all of dictation's keys do the same, else ""."""
+        modes = {a for a in key_bindings(read_json(RULES_PATH)).values() if a in VOICE_ACTIONS}
+        return modes.pop() if len(modes) == 1 else ""
+
+    @Slot(str)
+    def setDictationKeyMode(self, action):
+        """Every dictation key toggles (dictate) or is held to talk (dictate_hold)."""
+        if action not in VOICE_ACTIONS:
+            return
+        rules = read_json(RULES_PATH)
+        bound = key_bindings(rules)
+        if not any(a in VOICE_ACTIONS for a in bound.values()):
+            self.message.emit("Dictation has no keys: add one on the Keyboard page", True)
+            return
+        rules["key_bindings"] = {c: action if a in VOICE_ACTIONS else a for c, a in bound.items()}
+        self._save_rules(rules)
+        self.message.emit("Dictation keys: " + ("hold to talk" if action == "dictate_hold"
+                                                 else "tap to start, tap again to stop"), False)
+
+    @Property("QVariantList", constant=True)
+    def voiceLanguages(self):
+        return [{"value": k, "text": v} for k, v in voice_settings.LANGUAGES.items()]
+
+    @Slot(str)
+    def setVoiceLanguage(self, language):
+        if language in voice_settings.LANGUAGES:
+            s = voice_settings.load()
+            s["language"] = language
+            want = voice_settings.model_for(s)
+            self._set_voice("language", language, "Dictation language: " + voice_settings.LANGUAGES[language]
+                            + ("" if want == s["model"] else f" (with whisper {want})"))
+            if not voice_settings.model_installed(want):
+                self._fetch_model(want)
+
+    @Property("QVariantList", notify=voiceChanged)
+    def voiceModels(self):
+        """Whisper models for the Voice page: English-only ones only while the language is English."""
+        english = voice_settings.load()["language"] == "en"
+        return [{"value": name, "installed": voice_settings.model_installed(name),
+                 "text": f"{name} ({mb} MB{', English only' if langs == 'en' else ''}"
+                         f"{'' if voice_settings.model_installed(name) else ', downloads when chosen'})"}
+                for name, (_, mb, langs) in voice_settings.WHISPER_MODELS.items() if english or langs != "en"]
+
+    @Property(str, notify=voiceChanged)
+    def voiceModel(self):
+        """The model ft-voiced uses (voice_settings.model_for)."""
+        return voice_settings.model_for(voice_settings.load())
+
+    @Property(str, notify=voiceChanged)
+    def voiceModelFetching(self):
+        return self._model_fetching
+
+    @Slot(str)
+    def setVoiceModel(self, name):
+        if name not in voice_settings.WHISPER_MODELS or self._model_fetching:
+            return
+        if voice_settings.model_installed(name):
+            self._set_voice("model", name, f"Whisper model: {name}")
+        else:
+            self._fetch_model(name, then_choose=True)
+
+    def _fetch_model(self, name, then_choose=False):
+        """voice/models.sh model NAME, on the host in the background (up to 574 MB); then the
+        model is chosen. ft-voiced restarts the whisper service when its model changes."""
+        if self._model_fetching:
+            return
+        self._model_fetching = name
+        self.voiceChanged.emit()
+        self.message.emit(f"Downloading whisper {name} ({voice_settings.WHISPER_MODELS[name][1]} MB)…", False)
+
+        def job():
+            result = host(os.path.join(REPO, "voice", "models.sh"), "model", name, timeout=3600)
+            if result.returncode != 0 or not voice_settings.model_installed(name):
+                err = (result.stderr.strip() or result.stdout.strip() or "no answer").splitlines()
+                self.message.emit(f"Couldn't download whisper {name}: " + (err[-1] if err else "")[:160], True)
+            elif then_choose:
+                s = voice_settings.load()
+                s["model"] = name
+                voice_settings.save(s)
+                self.message.emit(f"Whisper model: {name}, downloaded", False)
+            else:
+                self.message.emit(f"Whisper {name} downloaded", False)
+            self._model_fetching = ""  # last: the page waits for this
+            self.voiceChanged.emit()
+        threading.Thread(target=job, daemon=True).start()
 
     @Property("QVariantList", notify=voiceChanged)
     def voiceCommands(self):

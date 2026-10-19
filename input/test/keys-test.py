@@ -239,12 +239,13 @@ def to_relay(text):
     c.close()
 
 
-def keys_for(text):
-    """The presses and releases that type text, as (code, value), Shift included."""
+def keys_for(text, keys=None):
+    """The presses and releases that type text, as (code, value), modifiers included: on a US
+    layout, or keys ({character: (code, modifiers)})."""
     out = []
     for ch in text:
-        code, shift = relay.US_KEYS[ch]
-        out += ([(42, 1)] if shift else []) + [(code, 1), (code, 0)] + ([(42, 0)] if shift else [])
+        code, mods = (keys or relay.US_KEYS)[ch]
+        out += [(m, 1) for m in mods] + [(code, 1), (code, 0)] + [(m, 0) for m in reversed(mods)]
     return out
 
 
@@ -494,8 +495,19 @@ def tests():
     key(CTRL, 1); key(CTRL, 0); key(RCTRL, 1); key(RCTRL, 0)
     check("a Ctrl tap bound by its left code: either side", dictation(), ["toggle keyboard", "toggle keyboard"])
     use({"97": "dictate_hold"})
-    key(RCTRL, 1); key(RCTRL, 0)
-    check("a tap bound to dictate_hold toggles (a tap is over before it's held)", dictation(), ["toggle keyboard"])
+    key(RCTRL, 1)
+    check("Right Ctrl bound to dictate_hold: starts on the press", dictation(), ["start keyboard"])
+    key(RCTRL, 0)
+    check("...and stops on the release", dictation(), ["stop keyboard"])
+    key(CTRL, 1); key(CTRL, 0)
+    check("...Left Ctrl doesn't", dictation(), [])
+    key(RCTRL, 1); key(F, 1)
+    check("Right Ctrl+F while held: a shortcut, so that dictation is cancelled quietly", dictation(),
+          ["start keyboard", "cancel keyboard quiet"])
+    key(F, 0); key(RCTRL, 0)
+    check("...and its release does nothing more", dictation(), [])
+    key(SHIFT, 1); key(RCTRL, 1); key(RCTRL, 0); key(SHIFT, 0)
+    check("Right Ctrl with Shift held: not on its own, no dictation", dictation(), [])
     use({"29+42+33": "dictate_hold"})
     key(CTRL, 1); key(SHIFT, 1); key(F, 1)
     check("Ctrl+Shift+F held (dictate_hold): starts", dictation(), ["start keyboard"])
@@ -539,6 +551,73 @@ def tests():
     time.sleep(0.3)
     check("type: to the desktop while typing goes there", typed(), [f"key {c} {v}" for c, v in keys_for("Ok.")])
     check("...and not to the virtual keyboard", emitted(), [])
+    use({"97": "dictate_hold"})
+    dictation()
+    key(RCTRL, 1)
+    to_relay("type ok")
+    time.sleep(0.3)
+    check("held to talk: live text reaches the desktop while Right Ctrl is held, without it",
+          typed(), [f"key {c} {v}" for c, v in keys_for("ok")])
+    key(RCTRL, 2); key(RCTRL, 0)
+    check("...nor its repeats or release", typed(), [])
+    check("...and dictation ran from press to release", dictation(), ["start keyboard", "stop keyboard"])
+    key(RCTRL, 1); key(C, 1); key(C, 0); key(RCTRL, 0)
+    check("held to talk, then C: the desktop gets Right Ctrl before C (a shortcut after all)", typed(),
+          ["key 97 1", f"key {C} 1", f"key {C} 0", "key 97 0"])
+    check("...and that dictation is cancelled quietly", dictation(), ["start keyboard", "cancel keyboard quiet"])
+    key(RCTRL, 1); key(SHIFT, 1)
+    check("held to talk, then Shift: cancelled, and the desktop gets both", (dictation(), typed()),
+          (["start keyboard", "cancel keyboard quiet"], ["key 97 1", f"key {SHIFT} 1"]))
+    key(SHIFT, 0); key(RCTRL, 0)
+    typed()
+    to_relay("keyboard steam")
+    key(RCTRL, 1)
+    to_relay("type ab")
+    time.sleep(0.3)
+    check("held to talk while typing goes to Steam (it sees the key itself): the text waits", emitted(), [])
+    key(RCTRL, 0)
+    time.sleep(0.3)
+    check("...until the release", emitted(), [("keyboard", c, v) for c, v in keys_for("ab")])
+    dictation()
+    to_relay("keyboard desktop")
+    use({})
+
+    # The desktop's own layout (kxkbrc): German QWERTZ, through libxkbcommon.
+    rc = os.path.join(OUT, "kxkbrc")
+    with open(rc, "w") as f:
+        f.write("[Layout]\nLayoutList=de,us\nUse=true\n")
+    relay.KXKBRC = rc
+    try:
+        de = relay.layout_keys("de")
+    except OSError as e:
+        de = None
+        print(f"skip  German layout typing: {e}")
+    if de:
+        check("German layout: z is the US Y key, y the US Z key, @ is AltGr+Q, < the ISO key",
+              (de["z"], de["y"], de["@"], de["<"], de["\u00e4"]),
+              ((21, ()), (44, ()), (16, (100,)), (86, ()), (40, ())))
+        to_relay("type way @ f\u00fcr")
+        time.sleep(0.3)
+        check("type on a German desktop: its keys, AltGr and umlauts included", typed(),
+              [f"key {c} {v}" for c, v in keys_for("way @ f\u00fcr", de)])
+        to_relay("type a\u00e9b")
+        time.sleep(0.3)
+        check("...a character it has no key for (a dead key's accent) is dropped", typed(),
+              [f"key {c} {v}" for c, v in keys_for("ab", de)])
+        check("...and the log says which", [m for m in LOG if m.startswith("typing: 1 characters")][-1:],
+              ["typing: 1 characters the desktop's layout (de) has no key for: \u00e9"])
+        to_relay("keyboard steam")
+        to_relay("type way")
+        time.sleep(0.3)
+        check("...Steam and games still get a US layout", emitted(), [("keyboard", c, v) for c, v in keys_for("way")])
+        to_relay("keyboard desktop")
+    with open(rc, "w") as f:
+        f.write("[Layout]\nLayoutList=de\nUse=false\n")
+    to_relay("type way")
+    time.sleep(0.3)
+    check("layouts switched off in kxkbrc (Use=false): a US layout", typed(),
+          [f"key {c} {v}" for c, v in keys_for("way")])
+    relay.KXKBRC = os.path.join(OUT, "no-kxkbrc")
     to_relay("keyboard steam")
 
     check("an empty command isn't an action", relay.known_action("command:  "), False)
@@ -627,4 +706,5 @@ def tests():
 
 threading.Thread(target=tests, daemon=True).start()
 sys.argv = [relay_path, "--no-grab"]
+relay.KXKBRC = os.path.join(OUT, "no-kxkbrc")  # a US desktop until the layout tests
 relay.main()

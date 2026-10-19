@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# whisper-server with the model Frametop Voice's settings choose (voice_settings.py model-file),
+# for frametop-voice-whisper.service. ft-voiced restarts the service when the model changes.
+set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+model=$(python3 "$here/voice_settings.py" model-file)
+echo "whisper-run: $model"
+exec "$here/build/bin/whisper-server" -m "$model" "$@"

@@ -53,7 +53,10 @@ either side, here Ctrl+Alt+G): the combination does the action, and its last key
 A modifier on its own ("125": Meta) is a tap: pressed with no other modifier held, and released
 with no other key, mouse button, or scroll in between; the desktop gets an F24 press before its
 release, so Plasma's launcher doesn't open on a Meta tap that's bound. A tap's left-hand code is
-either side's; a right-hand code ("97": Right Ctrl) is that key's alone, and comes first. A rules
+either side's; a right-hand code ("97": Right Ctrl) is that key's alone, and comes first. A lone
+modifier bound to dictate_hold is hold to talk instead: dictation starts on its press (alone) and
+stops on its release, and a key, mouse button or scroll in between makes it a shortcut, which
+cancels that dictation quietly ("cancel keyboard quiet"). A rules
 file without "key_bindings" gets DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left,
 Meta+K: gaze_right, Meta+Shift+F: float_toggle), plus a Right Ctrl tap for dictate once Frametop
 Voice is installed (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. The float,
@@ -92,9 +95,13 @@ they're released.
 
 Dictation (Frametop Voice) types here: its text comes as "type TEXT" on the control socket, only
 from this user, and goes out key by key, TYPE_STEP apart, where typing goes: to ft-screens for the
-desktop, else on the virtual keyboard, which SteamVR passes on to Steam and games (US layout,
-ASCII; the voice service turns the rest into ASCII or drops it). A character waits while a
-modifier is held on a keyboard, which would make it a shortcut (Ctrl+letter).
+desktop, else on the virtual keyboard, which SteamVR passes on to Steam and games. On the
+desktop each character is the keys that type it on the desktop's keyboard layout (Plasma's
+kxkbrc in Frametop's desktop config, worked out with libxkbcommon), Shift and AltGr included, so a
+German QWERTZ desktop gets "z" from the Z key; Steam and games get a US layout. A character the
+layout has no key for (a dead key's accent, another script) is dropped, and the log says which.
+A character waits while a modifier is held on a keyboard, which would make it a shortcut
+(Ctrl+letter).
 
 Frametop's keyboard (ft-screens' key panel): the desktop's input method (input/ft-textinput)
 says "textfield 1|0" when a text field on the desktop gains or loses keyboard focus, and
@@ -169,6 +176,9 @@ kernel's evdev and uinput interfaces.
 import array
 import atexit
 import collections
+import configparser
+import ctypes
+import ctypes.util
 import errno
 import fcntl
 import json
@@ -274,12 +284,22 @@ KEY_F24 = 194  # sent to the desktop with a Meta combination (see the top)
 # Key combinations ("key_bindings"): modifiers, each side's code folded into the left one's.
 MODIFIERS = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125}
 KEY_LEFTSHIFT = 42
-# Dictation's text, typed on a US layout (see the top): character -> (code, with Shift).
-US_KEYS = {" ": (57, False)}
+KEY_RIGHTALT = 100  # AltGr: the third level of most layouts
+# Dictation's text on a US layout (see the top), for Steam and games, and the desktop without a
+# layout of its own: character -> (code, modifiers held while it's pressed).
+US_KEYS = {" ": (57, ())}
 for _row, _shifted, _first in (("1234567890-=", "!@#$%^&*()_+", 2), ("qwertyuiop[]", "QWERTYUIOP{}", 16),
                                ("asdfghjkl;'`", 'ASDFGHJKL:"~', 30), ("\\zxcvbnm,./", "|ZXCVBNM<>?", 43)):
     for _i, (_plain, _shift) in enumerate(zip(_row, _shifted)):
-        US_KEYS[_plain], US_KEYS[_shift] = (_first + _i, False), (_first + _i, True)
+        US_KEYS[_plain], US_KEYS[_shift] = (_first + _i, ()), (_first + _i, (KEY_LEFTSHIFT,))
+# The desktop's keyboard layout: Plasma's kxkbrc in the Frametop desktop's config folder (its
+# XDG_CONFIG_HOME, session/frametop-session.sh), where its System Settings saves it.
+KXKBRC = os.path.expanduser("~/.config/frametop/kxkbrc")
+# The keys tried for each character on it, with these held (the first that types it wins): the
+# main block and the key left of Z on ISO keyboards (KEY_102ND: "<" on a German one), not the
+# keypad, which some apps read as keys of their own.
+LAYOUT_CODES = (*range(2, 54), 57, 86)
+LAYOUT_MODS = ((), (KEY_LEFTSHIFT,), (KEY_RIGHTALT,), (KEY_LEFTSHIFT, KEY_RIGHTALT))
 TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to the next key
 TYPE_MAX = 20000  # characters waiting to be typed, at most
 VR_KEYBOARD_MODES = ("always", "no_keyboard", "button", "never")  # when Frametop's keyboard opens
@@ -420,6 +440,107 @@ def read_config(path=os.path.expanduser("~/.config/frametop.conf")):
     except OSError:
         pass
     return conf
+
+
+def kxkbrc_layout(path=KXKBRC):
+    """The desktop's keyboard layout as (layout, variant, options, model): the first of kxkbrc's
+    LayoutList and VariantList; None when there's no file, no list, or layouts are switched off
+    there (Use=false: KWin's default, a US layout, then)."""
+    cp = configparser.ConfigParser(interpolation=None, strict=False)
+    cp.optionxform = str  # its keys are case-sensitive
+    try:
+        if not cp.read(path):
+            return None
+    except configparser.Error:
+        return None
+    sec = cp["Layout"] if cp.has_section("Layout") else {}
+
+    def first(key):
+        return (sec.get(key) or "").split(",")[0].strip()
+    if (sec.get("Use") or "true").strip().lower() == "false" or not first("LayoutList"):
+        return None
+    options = sec.get("Options", "") if (sec.get("ResetOldOptions") or "").strip().lower() == "true" else ""
+    return first("LayoutList"), first("VariantList"), options.strip(), (sec.get("Model") or "pc105").strip()
+
+
+class XkbNames(ctypes.Structure):
+    _fields_ = [("rules", ctypes.c_char_p), ("model", ctypes.c_char_p), ("layout", ctypes.c_char_p),
+                ("variant", ctypes.c_char_p), ("options", ctypes.c_char_p)]
+
+
+def layout_keys(layout, variant="", options="", model="pc105"):
+    """{character: (code, modifiers)} for a keyboard layout, through libxkbcommon: every key in
+    LAYOUT_CODES with each of LAYOUT_MODS held, and what it types. Dead keys type nothing, so
+    their accents aren't in it. Raises OSError without libxkbcommon or a keymap for the layout."""
+    lib = ctypes.CDLL(ctypes.util.find_library("xkbcommon") or "libxkbcommon.so.0")
+    lib.xkb_context_new.restype = ctypes.c_void_p
+    lib.xkb_context_new.argtypes = [ctypes.c_int]
+    lib.xkb_context_unref.argtypes = [ctypes.c_void_p]
+    lib.xkb_keymap_new_from_names.restype = ctypes.c_void_p
+    lib.xkb_keymap_new_from_names.argtypes = [ctypes.c_void_p, ctypes.POINTER(XkbNames), ctypes.c_int]
+    lib.xkb_keymap_unref.argtypes = [ctypes.c_void_p]
+    lib.xkb_state_new.restype = ctypes.c_void_p
+    lib.xkb_state_new.argtypes = [ctypes.c_void_p]
+    lib.xkb_state_unref.argtypes = [ctypes.c_void_p]
+    lib.xkb_state_update_key.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
+    lib.xkb_state_key_get_utf8.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p, ctypes.c_size_t]
+    ctx = lib.xkb_context_new(0)
+    if not ctx:
+        raise OSError("libxkbcommon: no context")
+    names = XkbNames(b"evdev", model.encode() or None, layout.encode(), variant.encode() or None,
+                     options.encode() or None)
+    keymap = lib.xkb_keymap_new_from_names(ctx, ctypes.byref(names), 0)
+    if not keymap:
+        lib.xkb_context_unref(ctx)
+        raise OSError(f"no keymap for layout {layout}{f'({variant})' if variant else ''}")
+    keys = {}
+    buf = ctypes.create_string_buffer(16)
+    try:
+        for mods in LAYOUT_MODS:
+            state = lib.xkb_state_new(keymap)
+            for m in mods:
+                lib.xkb_state_update_key(state, m + 8, 1)  # evdev code + 8: the XKB keycode; 1: down
+            for code in LAYOUT_CODES:
+                n = lib.xkb_state_key_get_utf8(state, code + 8, buf, len(buf))
+                ch = buf.raw[:n].decode(errors="ignore") if 0 < n < len(buf) else ""
+                if len(ch) == 1 and ch.isprintable() and ch not in keys:
+                    keys[ch] = (code, mods)
+            lib.xkb_state_unref(state)
+    finally:
+        lib.xkb_keymap_unref(keymap)
+        lib.xkb_context_unref(ctx)
+    return keys
+
+
+class DesktopLayout:
+    """The keys that type dictation's characters on the desktop (layout_keys), made again when
+    kxkbrc changes; US_KEYS without a layout or libxkbcommon."""
+
+    def __init__(self, path=None):
+        self.path, self.stamp, self.keys, self.name = path, False, US_KEYS, "us"  # path None: KXKBRC
+
+    def refresh(self):
+        path = self.path or KXKBRC
+        try:
+            st = os.stat(path)
+            stamp = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = None
+        if (path, stamp) == self.stamp:
+            return
+        self.stamp = (path, stamp)
+        found = kxkbrc_layout(path) if stamp else None
+        name = f"{found[0]}({found[1]})" if found and found[1] else found[0] if found else "us"
+        keys = US_KEYS
+        if found and name != "us":
+            try:
+                keys = layout_keys(*found)
+            except OSError as e:
+                log(f"typing on the desktop: {e}; a US layout instead")
+                name = "us"
+        if name != self.name or keys is not self.keys:
+            log(f"typing on the desktop: layout {name}")
+        self.name, self.keys = name, keys
 
 
 def default_key_bindings():
@@ -1094,6 +1215,8 @@ def main():
 
     held_modifiers = set()  # on any keyboard, folded (MODIFIERS)
     tap_code = None  # the tap's key as it is (a right-hand code isn't folded), see modifier_tap
+    talk_code = None  # a modifier bound to dictate_hold, held alone: dictation runs until its release
+    talk_hidden = False  # its press kept from the desktop, so the text typed meanwhile isn't a shortcut
     held_meta = set()  # the Meta keys held, as they are (KEY_LEFTMETA, KEY_RIGHTMETA)
     meta_hidden = set()  # held Meta keys the desktop was told came up (a combination; key_binding)
     combos_down = {}  # key code -> the action its combination started (released with it)
@@ -1120,22 +1243,42 @@ def main():
     def key_binding(code, value, now):
         """A key from a keyboard: does it complete a key combination ("key_bindings")? True if
         it was taken for one (then it isn't typed)."""
-        nonlocal tap, tap_code
+        nonlocal tap, tap_code, talk_code, talk_hidden
         if code in MODIFIERS:
             mod = MODIFIERS[code]
+            hide = value == 2 and code == talk_code and talk_hidden  # its repeats, as its press
             if value == 1:
+                if talk_code is not None and code != talk_code:
+                    cancel_talk()  # another modifier with it: a shortcut (Ctrl+Shift+T)
                 tap = mod if not held_modifiers and not combos_down else None
                 tap_code = code
+                if tap is not None and talk_code is None and tap_action(mod, code)[1] == "dictate_hold":
+                    # Hold to talk: dictation starts on the press, not the release. The desktop
+                    # doesn't get the press (cancel_talk sends it after all for a shortcut), so
+                    # live text is typed there while it's held. Steam and games read the keyboard
+                    # themselves: there the text waits for the release (typing_tick).
+                    talk_code, talk_hidden, hide = code, True, True
+                    do_action("dictate_hold", 1, now, "keyboard")
+                    log(f"key combination {tap_action(mod, code)[0]}: dictate_hold (held)")
             (held_modifiers.add if value else held_modifiers.discard)(mod)
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
                 (held_meta.add if value else held_meta.discard)(code)
                 if value == 0 and code in meta_hidden:
                     meta_hidden.discard(code)
                     return True  # the desktop already had it come up (below)
+            if value == 0 and code == talk_code:
+                talk_code, tap = None, None
+                hide, talk_hidden = talk_hidden, False
+                if not hide:
+                    # As with a tap (modifier_tap): a key in between, so a Meta release isn't one.
+                    to_screens(KEY_F24, 1)
+                    to_screens(KEY_F24, 0)
+                do_action("dictate_hold", 0, now, "keyboard")
+                return hide
             if value == 0 and tap == mod:
                 tap = None
                 modifier_tap(mod, tap_code, now)
-            return False
+            return hide
         if value == 1 and code not in combos_down and meta_hidden:
             # Another key while Meta is still held after a combination: the desktop gets Meta
             # back first, so Meta+that key still works there.
@@ -1169,16 +1312,35 @@ def main():
         log(f"key combination {combo}: {action}")
         return True
 
-    def modifier_tap(mod, code, now):
-        """A modifier pressed and released alone: its binding, if it has one ("125": Meta tap).
-        A right-hand key's own binding ("97": Right Ctrl) comes before the folded one."""
+    def tap_action(mod, code):
+        """A lone modifier's combination and action, (combo, None) when it does nothing now. A
+        right-hand key's own binding ("97": Right Ctrl) comes before the folded one."""
         bindings = state["rules"]["key_bindings"]
         combo = str(code) if code != mod and str(code) in bindings else str(mod)
         action = bindings.get(combo)
         if not known_action(action) or action in ("key", "none") or (pause.paused and not works_paused(action)):
-            return
-        if action == "dictate_hold":
-            action = "dictate"  # a tap is over before it's held: it starts, and the next one stops
+            return combo, None
+        return combo, action
+
+    def cancel_talk():
+        """A key, mouse button or scroll while a hold-to-talk modifier is held: it was a shortcut
+        (Ctrl+C), so the dictation it started is dropped, without its cancel tone."""
+        nonlocal talk_code, talk_hidden
+        if talk_code is not None:
+            if talk_hidden:
+                to_screens(talk_code, 1)  # the desktop gets the modifier before the key it's for
+            talk_code, talk_hidden = None, False
+            try:
+                screens_sock.sendto(b"cancel keyboard quiet", VOICE)
+            except OSError:
+                pass
+            log("dictate_hold: cancelled (another key while held: a shortcut)")
+
+    def modifier_tap(mod, code, now):
+        """A modifier pressed and released alone: its binding, if it has one ("125": Meta tap)."""
+        combo, action = tap_action(mod, code)
+        if action is None or action == "dictate_hold":
+            return  # nothing, or hold to talk (key_binding), which started on the press
         # The desktop gets a key in between before the release goes there, so the tap isn't one
         # there too: a Meta tap would open Plasma's launcher.
         to_screens(KEY_F24, 1)
@@ -1212,17 +1374,27 @@ def main():
     next_scan = 0.0
 
     volume = Volume()
-    typing = collections.deque()  # (code, shift): dictation's characters still to type
-    typing_down = []  # the character pressed last, (code, shift, to the desktop): its release is next
+    typing = collections.deque()  # dictation's characters still to type
+    typing_down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
     typing_at = 0.0  # the next press or release goes then
+    untyped = []  # characters with no key where typing went, logged when the queue is empty
+    desktop_layout = DesktopLayout()
 
     def type_text(text):
-        """Queue dictation's text (see the top)."""
-        keys = [US_KEYS[c] for c in text if c in US_KEYS]
+        """Queue dictation's text (see the top). Which keys type it is worked out as it goes,
+        where typing goes then."""
+        desktop_layout.refresh()
+        chars = [c for c in text if c.isprintable()]
         room = max(0, TYPE_MAX - len(typing))
-        typing.extend(keys[:room])
-        log(f"typing {min(len(keys), room)} characters for Frametop Voice"
-            + (f" ({len(keys) - room} dropped: too many waiting)" if len(keys) > room else ""))
+        typing.extend(chars[:room])
+        log(f"typing {min(len(chars), room)} characters for Frametop Voice"
+            + (f" ({len(chars) - room} dropped: too many waiting)" if len(chars) > room else ""))
+
+    def report_untyped(desktop):
+        if untyped and not typing:
+            where = f"the desktop's layout ({desktop_layout.name})" if desktop else "a US layout (Steam)"
+            log(f"typing: {len(untyped)} characters {where} has no key for: {''.join(dict.fromkeys(untyped))}")
+            untyped.clear()
 
     def type_key(code, value, desktop):
         if desktop:
@@ -1231,6 +1403,14 @@ def main():
             keyboard.emit(EV_KEY, code, value)
             keyboard.sync()
 
+    def typing_blocked(now):
+        """A modifier is held (the text would be shortcuts), except a hold-to-talk key the
+        desktop never got, when typing goes there."""
+        held = held_modifiers
+        if talk_hidden and now < state["desktop_until"]:
+            held = held - {MODIFIERS[talk_code]}
+        return bool(held)
+
     def typing_tick(now):
         """Release the character pressed last, or press the next, when it's time. A new one
         waits while a modifier is held."""
@@ -1238,23 +1418,30 @@ def main():
         if now < typing_at:
             return
         if typing_down:
-            code, shift, desktop = typing_down.pop()
+            code, mods, desktop = typing_down.pop()
             type_key(code, 0, desktop)
-            if shift:
-                type_key(KEY_LEFTSHIFT, 0, desktop)
-        elif typing and not held_modifiers:
-            code, shift = typing.popleft()
+            for m in reversed(mods):
+                type_key(m, 0, desktop)
+        elif typing and not typing_blocked(now):
             desktop = now < state["desktop_until"]
-            if shift:
-                type_key(KEY_LEFTSHIFT, 1, desktop)
+            keys = desktop_layout.keys if desktop else US_KEYS
+            ch = typing.popleft()
+            if ch not in keys:
+                untyped.append(ch)
+                report_untyped(desktop)
+                return  # the next one right away
+            code, mods = keys[ch]
+            for m in mods:
+                type_key(m, 1, desktop)
             type_key(code, 1, desktop)
-            typing_down.append((code, shift, desktop))
+            typing_down.append((code, mods, desktop))
+            report_untyped(desktop)
         else:
             return
         typing_at = now + TYPE_STEP
 
     def typing_timeout(now, default):
-        if typing_down or (typing and not held_modifiers):
+        if typing_down or (typing and not typing_blocked(now)):
             return max(0.0, min(default, typing_at - now))
         return default
 
@@ -1331,7 +1518,8 @@ def main():
         if not screens_down and not held_meta and not held_modifiers:
             return
         down = physically_down()
-        for code in sorted(screens_down - down):
+        typed = {k for code, mods, desktop in typing_down if desktop for k in (code, *mods)}  # dictation's, coming up next
+        for code in sorted(screens_down - down - typed):
             to_screens(code, 0)
             log(f"key {code} released on the desktop: no keyboard holds it")
         for code in [c for c in held_meta if c not in down]:
@@ -1600,6 +1788,7 @@ def main():
                               value, now)
                 if (etype == EV_KEY and value == 1 and code not in MODIFIERS) or (etype == EV_REL and code in SCROLLS):
                     tap = None  # a key, button or scroll in between: a modifier's release isn't a tap
+                    cancel_talk()
                 if etype == EV_KEY and ((node.remapped and code in VOLUME_ORIGINAL)
                                         or (node.grabbed and code in VOLUME_STANDIN)):
                     volume.key(fd, code, value, now)

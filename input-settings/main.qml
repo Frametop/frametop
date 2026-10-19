@@ -1633,6 +1633,8 @@ Kirigami.ApplicationWindow {
                     text: gpage.status.calibration_samples > 0
                           ? gpage.status.calibration_samples + " points ("
                             + (gpage.status.tracker === "own" ? "Own tracker, " + gpage.status.calibration_made
+                               + (gpage.status.own_mapped && gpage.status.own_mapped.length === 1
+                                  ? ", " + gpage.status.own_mapped[0] + " eye only" : "")
                                : gpage.status.kind === "eyes" ? gpage.status.model + ", each eye" : gpage.status.model) + ")"
                           : "none yet: use Calibrate"
                 }

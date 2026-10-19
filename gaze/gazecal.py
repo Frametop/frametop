@@ -549,6 +549,42 @@ class TrackedEye:
         return self.eye
 
 
+class EyeBridge:
+    """Our tracker's eyes, each with its own calibration, miss in their own ways, so the gaze
+    jumped whenever one eye dropped out or came back (a median 0.3-0.85 degrees in the 10-16
+    edges round): enough to break the fixation lock. While both are seen, this averages each
+    eye's offset from their combined gaze over about LEARN seconds; with one eye, the gaze is
+    that eye plus its offset, fading out over about FADE seconds, since the offset belongs to
+    where the eyes looked then.
+
+    `__call__` takes and gives head-relative degrees (yaw, pitch)."""
+
+    LEARN = 0.3
+    FADE = 0.3
+
+    def __init__(self):
+        self.off = [None, None]   # per eye: (yaw, pitch) from it to the combined gaze
+        self.at = None            # sample time both were last seen
+
+    def __call__(self, t, eyes, combined):
+        """The gaze at sample time t (s), from `combined`, the eye-weighted gaze of `eyes`
+        [(yaw, pitch) or None, (yaw, pitch) or None]."""
+        seen = [k for k in (0, 1) if eyes[k] is not None]
+        if len(seen) == 2:
+            a = 1.0 if self.at is None else 1.0 - math.exp(-max(t - self.at, 0.0) / self.LEARN)
+            for k in seen:
+                d = (combined[0] - eyes[k][0], combined[1] - eyes[k][1])
+                o = self.off[k]
+                self.off[k] = d if o is None else (o[0] + a * (d[0] - o[0]), o[1] + a * (d[1] - o[1]))
+            self.at = t
+            return combined
+        if len(seen) == 1 and self.at is not None and self.off[seen[0]] is not None:
+            f = math.exp(-max(t - self.at, 0.0) / self.FADE)
+            o = self.off[seen[0]]
+            return combined[0] + f * o[0], combined[1] + f * o[1]
+        return combined
+
+
 class EyeFallback:
     """The gaze from one eye, while the tracker has lost the other.
 

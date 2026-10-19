@@ -246,7 +246,8 @@ class Backend(QObject):
             out.append({"name": h.get("name", ""), "address": address, "kind": h.get("kind", "vibepollo"),
                         "hasToken": address in self._logins if sunshine else os.path.exists(token_path(address)),
                         "online": self._online.get(address), "route": h.get("route", "auto"),
-                        "direct": ", ".join(h.get("direct", [])), "displays": displays})
+                        "direct": ", ".join(h.get("direct", [])), "mic": bool(h.get("mic")),
+                        "displays": displays})
         return out
 
     # --- hosts ---
@@ -398,6 +399,12 @@ class Backend(QObject):
     def setRoute(self, name, route):
         self._run(f"Connecting {name} {dict(auto='either way', network='over the network', dongle='over the dongle')[route]}",
                   "remote", "host", name, f"route={route}")
+
+    @Slot(str, bool)
+    def setMic(self, name, on):
+        """Send the Frame's microphone to the host (its streams pick it up within 3 s)."""
+        self._run(f"{'Sending' if on else 'Not sending'} the microphone to {name}",
+                  "remote", "host", name, f"mic={'on' if on else 'off'}")
 
     @Slot(str, str)
     def setDirect(self, name, text):

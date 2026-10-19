@@ -42,12 +42,17 @@
 // It exits when ft-screens closes its end. A Remote Monitor is released then ("Disconnect
 // Monitor"); an existing display holds nothing on the host.
 //
+// The host's sound plays here, and with "mic": true on its host in the layout (Frametop Remote
+// Displays: Send my microphone) the Frame's microphone goes back to the host's virtual one; see
+// Audio and Mic.
+//
 // Runs in the dev container. Build: stream/build.sh.
 #include "spike/iris.h"
 
 #include "host.h"
 
 #include <netdb.h>
+#include <opus/opus.h>
 #include <opus/opus_multistream.h>
 #include <pulse/error.h>
 #include <pulse/simple.h>
@@ -63,6 +68,7 @@
 #include <mutex>
 #include <set>
 #include <sstream>
+#include <thread>
 
 #include <linux/input-event-codes.h>
 
@@ -160,6 +166,107 @@ void AudioPlay(char *data, int length) {
     int err = 0;
     if (n > 0) pa_simple_write(g_audio.pa, g_audio.pcm.data(), size_t(n * g_audio.channels) * sizeof(int16_t), &err);
 }
+
+// The Frame's microphone, to the host's virtual microphone: Steam Streaming Microphone on
+// Windows (Frametop's host build; others ignore it, and so does its Linux service for now).
+// Sent by the stream that plays the host's sound (Audio), so a host gets it once however many
+// of its displays stream, while its host has "mic": true in the layout. Mono Opus at 48 kHz in 20 ms
+// packets on the encrypted control stream (LiSendMicrophoneOpusData, moonlight-mic.patch), never
+// in the clear. It records PipeWire's default source, which on the Frame runs through echo
+// cancelling, so the host's sound playing here doesn't go back into a call.
+struct Mic {
+    std::string name;  // the recording stream's name in the mixer
+    std::mutex mu;     // held while a packet goes out; Stop takes it, so none goes after
+    bool run = false;
+    std::atomic<bool> done{true};
+    std::atomic<bool> refused{false};  // the control stream isn't encrypted: never for this stream
+    std::atomic<int> sent{0};
+    int64_t retryAt = 0;  // a recording that ended by itself (no source) starts again after 30 s
+    std::thread thread;
+
+    bool On() {
+        std::lock_guard<std::mutex> lock(mu);
+        return run;
+    }
+
+    void Want(bool on) {
+        if (on == On() || (on && refused)) return;
+        if (!on) return Stop();
+        if (MonoNs() < retryAt) return;
+        retryAt = MonoNs() + 30'000'000'000;
+        if (thread.joinable()) thread.join();  // a loop that ended by itself
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            run = true;
+        }
+        done = false;
+        thread = std::thread(&Mic::Loop, this);
+    }
+
+    // Afterwards no packet goes out, so the connection can stop. A recording stuck in
+    // pa_simple_read (it can't be interrupted) is left behind rather than waited for.
+    void Stop() {
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            if (!run && !thread.joinable()) return;
+            run = false;
+        }
+        for (int i = 0; i < 50 && !done; ++i) usleep(10'000);
+        if (!thread.joinable()) return;
+        if (done) thread.join();
+        else thread.detach(), std::printf("mic: the recording didn't end, left behind\n");
+        std::printf("mic: off\n");
+    }
+
+    void Loop() {
+        constexpr int kSamples = 960;  // 20 ms at 48 kHz
+        const pa_sample_spec spec = {PA_SAMPLE_S16LE, 48000, 1};
+        pa_buffer_attr attr;
+        attr.maxlength = uint32_t(-1), attr.prebuf = uint32_t(-1), attr.minreq = uint32_t(-1), attr.tlength = uint32_t(-1);
+        attr.fragsize = uint32_t(kSamples * sizeof(int16_t));
+        int err = 0;
+        pa_simple *pa = pa_simple_new(nullptr, "Frametop", PA_STREAM_RECORD, nullptr, name.c_str(), &spec, nullptr, &attr, &err);
+        OpusEncoder *enc = pa ? opus_encoder_create(48000, 1, OPUS_APPLICATION_VOIP, &err) : nullptr;
+        if (!pa) std::fprintf(stderr, "mic: can't record: %s\n", pa_strerror(err));
+        else if (!enc) std::fprintf(stderr, "mic: opus: %s\n", opus_strerror(err));
+        if (enc) {
+            opus_encoder_ctl(enc, OPUS_SET_BITRATE(64000));
+            opus_encoder_ctl(enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+            opus_encoder_ctl(enc, OPUS_SET_COMPLEXITY(5));  // speech at 48 kHz mono: a few % of a core
+            opus_encoder_ctl(enc, OPUS_SET_INBAND_FEC(1));  // the next packet carries a lost one
+            opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(5));
+            std::printf("mic: sending the default source to the host\n");
+            std::fflush(stdout);
+        }
+        int16_t pcm[kSamples];
+        unsigned char out[LI_MICROPHONE_MAX_OPUS_BYTES];
+        while (enc) {
+            if (pa_simple_read(pa, pcm, sizeof pcm, &err) < 0) {
+                std::fprintf(stderr, "mic: recording ended: %s\n", pa_strerror(err));
+                break;
+            }
+            const int n = opus_encode(enc, pcm, kSamples, out, sizeof out);
+            std::lock_guard<std::mutex> lock(mu);
+            if (!run) break;
+            if (n <= 0) continue;
+            const int r = LiSendMicrophoneOpusData(out, n);
+            if (r == 0) ++sent;
+            else if (r == -1) {
+                refused = true;
+                std::printf("mic: not sent: this host's control stream isn't encrypted\n");
+                break;
+            }
+        }
+        if (enc) opus_encoder_destroy(enc);
+        if (pa) pa_simple_free(pa);
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            run = false;
+        }
+        done = true;
+    }
+};
+Mic g_mic;
 
 int Submit(PDECODE_UNIT du) {
     const bool idr = du->frameType == FRAME_TYPE_IDR;
@@ -318,6 +425,16 @@ std::string Route(const std::string &host, int port) {
     return host;
 }
 
+// Whether the host's entry in the layout says to send it the Frame's microphone ("mic": true,
+// Frametop Remote Displays' Send my microphone). Read again every few seconds while streaming.
+bool MicWanted(const std::string &host) {
+    const nlohmann::json layout = Layout();
+    if (layout.is_null()) return false;
+    for (const auto &h : layout["hosts"])
+        if (h.is_object() && h.value("address", "") == host) return h.contains("mic") && h["mic"].is_boolean() && h["mic"].get<bool>();
+    return false;
+}
+
 // The port of the display whose client is `id`, from the layout, or 0. A Mac runs a Sunshine
 // instance per display, each on its own port, and a client is paired with one of them only. An
 // ft-layout from before ports (an older release's Reset Screen Layout or profile launchers) asks
@@ -411,6 +528,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     ar.capabilities = CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
     g_audio.name = "Remote display: " + g_host;
     g_audio.Claim(g_host, MonoNs());
+    g_mic.name = "Remote display microphone: " + g_host;
     if (LiStartConnection(&client.server.serverInfo, &cfg, &cl, &dr, &ar, nullptr, 0, nullptr, 0) != 0)
         return viewer.Send("state lost can't connect"), 1;
     std::printf("stream: connected, %d kbit/s asked\n", bitrate);
@@ -421,6 +539,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     bool live = false;
     uint64_t seq = 0;
     int64_t lastReport = MonoNs(), cpu0 = CpuNs(), lastShown = 0, allHeldSince = -1;
+    int64_t micCheck = 0;
     int shown = 0, dropped = 0, rested = 0, lastSent = -1;
     while (!g_stop) {
         pollfd p[3] = {{dec.fd, POLLIN | POLLPRI | POLLOUT, 0}, {g_wake, POLLIN, 0}, {viewer.fd, POLLIN, 0}};
@@ -459,6 +578,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
         // panel froze, 2026-10-07.)
         if (!open) break;
         g_audio.Claim(g_host, MonoNs());
+        if (MonoNs() >= micCheck) micCheck = MonoNs() + 3'000'000'000, g_mic.Want(g_audio.on && MicWanted(g_host));
         if (dec.Events()) {
             if (!conv.Setup(dec)) break;
             const int fds[3] = {conv.out[0].fd, conv.out[1].fd, conv.out[2].fd};
@@ -520,17 +640,20 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
             const double secs = (now - lastReport) / 1e9;
             uint32_t rtt = 0, rttVar = 0;
             LiGetEstimatedRttInfo(&rtt, &rttVar);
+            const int micSent = g_mic.sent.exchange(0);
             std::printf("%s: in %.1f fps (%d skipped), shown %.1f fps (%d dropped, %d out of sight), %.1f Mbit/s, rtt %u ms, "
-                        "convert %.1f ms, CPU %.1f%% of a core%s\n",
+                        "convert %.1f ms, CPU %.1f%% of a core%s%s\n",
                         g_hidden ? "hidden" : "shown", g_received.exchange(0) / secs, g_skipped.exchange(0), shown / secs,
                         dropped, rested, g_bytes.exchange(0) * 8 / secs / 1e6, rtt, shown ? conv.msSum / shown : 0.0,
-                        100 * (CpuNs() - cpu0) / 1e9 / secs, g_audio.on ? ", playing its sound" : "");
+                        100 * (CpuNs() - cpu0) / 1e9 / secs, g_audio.on ? ", playing its sound" : "",
+                        micSent ? (", mic " + std::to_string(int(micSent / secs + 0.5)) + " packets/s").c_str() : "");
             std::fflush(stdout);
             conv.msSum = 0, shown = dropped = rested = 0, lastReport = now, cpu0 = CpuNs();
         }
     }
     const int ended = g_ended;
     g_stop = 1;
+    g_mic.Stop();  // no packet after this, before the connection goes
     LiStopConnection();
     viewer.Send(ended ? "state lost the host ended the stream" : "state lost");
     dec.Close();

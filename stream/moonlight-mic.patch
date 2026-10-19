@@ -1,0 +1,78 @@
+diff --git a/src/ControlStream.c b/src/ControlStream.c
+index b7e3685..a249ec9 100644
+--- a/src/ControlStream.c
++++ b/src/ControlStream.c
+@@ -100,6 +100,7 @@ static PLT_THREAD asyncCallbackThread;
+ static uint32_t lastGoodFrame;
+ static uint32_t lastSeenFrame;
+ static bool stopping;
++static uint16_t microphoneSequence;
+ static bool disconnectPending;
+ static bool encryptedControlStream;
+ static bool hdrEnabled;
+@@ -299,6 +300,7 @@ static bool supportsIdrFrameRequest;
+ // Initializes the control stream
+ int initializeControlStream(void) {
+     stopping = false;
++    microphoneSequence = 0;
+     PltCreateEvent(&idrFrameRequiredEvent);
+     LbqInitializeLinkedBlockingQueue(&invalidReferenceFrameTuples, 20);
+     LbqInitializeLinkedBlockingQueue(&frameFecStatusQueue, 8); // Limits number of frame status reports per periodic ping interval
+@@ -1644,6 +1646,35 @@ int sendInputPacketOnControlStream(unsigned char* data, int length, uint8_t chan
+     return 0;
+ }
+ 
++// Frametop: the microphone's own channel, so a resent packet only holds up the microphone.
++#define CTRL_CHANNEL_MICROPHONE 0x07
++
++int LiSendMicrophoneOpusData(const unsigned char* opusData, int opusLength) {
++    unsigned char payload[4 + LI_MICROPHONE_MAX_OPUS_BYTES];
++
++    if (opusData == NULL || opusLength <= 0 || opusLength > LI_MICROPHONE_MAX_OPUS_BYTES) {
++        return -2;
++    }
++
++    // Never in the clear: only Sunshine-based hosts with the encrypted control stream.
++    if (AppVersionQuad[0] < 5 || !IS_SUNSHINE() || !encryptedControlStream || peer == NULL || stopping) {
++        return -1;
++    }
++
++    payload[0] = (unsigned char)(microphoneSequence >> 8);
++    payload[1] = (unsigned char)microphoneSequence;
++    payload[2] = 1;
++    payload[3] = 0;
++    memcpy(&payload[4], opusData, opusLength);
++    microphoneSequence++;
++
++    if (!sendMessageAndForget(0x3003, (short)(4 + opusLength), payload, CTRL_CHANNEL_MICROPHONE, ENET_PACKET_FLAG_RELIABLE, false)) {
++        return -3;
++    }
++
++    return 0;
++}
++
+ // Called by the input stream to flush queued packets before a batching wait
+ void flushInputOnControlStream(void) {
+     if (AppVersionQuad[0] >= 5) {
+diff --git a/src/Limelight.h b/src/Limelight.h
+index ac87a4b..eac01cf 100644
+--- a/src/Limelight.h
++++ b/src/Limelight.h
+@@ -711,6 +711,17 @@ int LiSendKeyboardEvent2(short keyCode, char keyAction, char modifiers, char fla
+ // This function queues an UTF-8 encoded text to be sent to the remote server.
+ int LiSendUtf8TextEvent(const char *text, unsigned int length);
+ 
++// Frametop: sends one Opus packet of the client's microphone (mono, 48 kHz) to the host on the
++// encrypted control stream: packet type 0x3003 (Apollo protocol extension range), its payload a
++// 4-byte header [sequence high, sequence low, channels (1), flags (0)] and the Opus packet, the
++// layout of Vibepollo PR #169. Reliable, on a channel of its own: ENet's throttle drops unreliable
++// packets whenever round trips wobble, a quarter of them on Wi-Fi beside video. Hosts without
++// Frametop's build ignore it. Returns 0 when sent, -1 when the control stream isn't connected or
++// isn't encrypted (never sent in the clear), -2 for an Opus packet over
++// LI_MICROPHONE_MAX_OPUS_BYTES, -3 when ENet couldn't send it.
++#define LI_MICROPHONE_MAX_OPUS_BYTES 240
++int LiSendMicrophoneOpusData(const unsigned char* opusData, int opusLength);
++
+ // Button flags
+ #define A_FLAG     0x1000
+ #define B_FLAG     0x2000

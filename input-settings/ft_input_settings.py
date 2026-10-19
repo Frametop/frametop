@@ -54,7 +54,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import Property, QObject, QSocketNotifier, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QProcess, QSocketNotifier, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -1457,6 +1457,13 @@ class Backend(QObject):
     def gazeCalibrate(self):
         """The full calibration in the panel fixed to the headset (gaze/gazecheck.py)."""
         self._gaze_check("calibrate", "Calibration: look at each dot in the headset; right click or Meta+K stops")
+
+    @Slot()
+    def openTour(self):
+        """Frametop Tour (tour/ft_tour.py), in this container as it runs."""
+        ok, _pid = QProcess.startDetached(sys.executable, [os.path.join(REPO, "tour", "ft_tour.py")])
+        if not ok:
+            self.message.emit("Couldn't start Frametop Tour", True)
 
     def _gaze_check(self, command, done):
         if self._send(command, GAZED):

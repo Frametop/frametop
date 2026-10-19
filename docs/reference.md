@@ -141,7 +141,7 @@ The pointer settings are in `~/.config/frametop.conf`: `POINTER_SENSITIVITY`, `P
 
 ## Frametop Input Settings
 
-A Kirigami app with a Python backend, in the Plasma menu under Settings. It runs in the `dev` container and talks to the relay over its control socket, `@frametop_relay`. It has ten pages:
+A Kirigami app with a Python backend, in the Plasma menu under Settings. It runs in the `dev` container and talks to the relay over its control socket, `@frametop_relay`. It has ten pages, and Frametop Tour at the end of its menu:
 
 - Devices lists every USB and Bluetooth mouse and keyboard, with a light that flashes when the device is used. Each device gets a role: 3D pointer (grabbed, drives the pointer; the default for anything with a mouse), Pass through (grabbed only while typing goes to the desktop; the default for keyboards, whose key combinations work everywhere), or Ignore. A device is identified by its Bluetooth address, or its USB ids and name, so all of its input nodes share one role. Forget drops everything saved for a device.
 - Buttons maps a pointer device's buttons. Choose Capture a button, press the button or key, then pick an action: a click, back, scroll, toggle dashboard, recenter, pointer on or off, head follow on or off, gaze pointer on or off, gaze precision, gaze drag, gaze quick check, faster or slower, reset the screen layout, hide or show the screens, open or close the keyboard, float a window in VR or put it back, put all floating windows back, pause or resume Frametop ([Pausing for VR games](#pausing-for-vr-games)), Open profile NAME (one per profile, [profiles.md](profiles.md)), pass the key through, or nothing. Devices with saved mappings are listed even while they're asleep.
@@ -237,6 +237,16 @@ Meta+Space opens spotwatch, a search pill straight ahead of where your head poin
 ```
 spotwatch/test/spotwatch-test.py   # the ranking and the search against a fake ft-screens and ft-floatd (offline)
 spotwatch/tools/render.py OUT.png   # the panel's picture, without a headset
+```
+
+## Frametop Tour
+
+`tour/ft-tour` (in the app menu, spotwatch, and SteamVR's Launch a program list as Frametop Tour, and in Frametop Input Settings' menu) walks through Frametop a page at a time: the screens and the 3D mouse, the key combinations the relay has now (`key_bindings`, as Frametop Input Settings shows them) and macros, gaze mode with Meta+J and Meta+K, hand tracking with and without gaze, spotwatch, floating windows (with the Apps from the SteamVR dashboard choice), pinning, profiles, pausing for VR games, and the rest. Each page has buttons that try things (spotwatch, a spin, a calibration or quick check) or open their settings page (`FT_INPUT_PAGE`, `FT_DISPLAY_PAGE`); the gaze and hands pages have a button to practise clicking on. A part that isn't installed says how to install it. A Kirigami app with a Python backend (`tour/ft_tour.py`), in the container like Frametop Input Settings; `FT_TOUR_PAGE=ID` opens it on a page.
+
+The desktop's autostart runs `ft-tour --first-run` (`frametop-tour.desktop`, written by `session/frametop-session.sh`; log: `/tmp/frametop-tour.log`), which opens it only while `~/.local/state/frametop/tour.json` is missing or from an older tour (`TOUR_VERSION`). Closing the tour, Skip the tour, and Finish write that file, unless Show this tour when the desktop starts is ticked on its last page. `ft-tour --reset` removes it.
+
+```
+tour/test/tour-test.py   # the flag, the wrapper's --first-run and --reset, and the pages for each set of installed parts (offline)
 ```
 
 ## Displays off and sleep

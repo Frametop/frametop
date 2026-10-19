@@ -41,6 +41,8 @@ You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or th
 
 After the restart, Launch a program → Desktop opens the multi-screen desktop, with its screens arranged around where you're facing. Frametop Display Settings and Frametop Input Settings are in the desktop's application menu, under Settings. SteamOS's own single-screen desktop is still there, as Native Desktop in the same list.
 
+The first time the desktop starts, Frametop Tour opens: a page at a time on the screens, the keyboard shortcuts, eye and hand tracking, spotwatch, floating windows, pins, profiles, and pausing for VR games, with buttons to try each one. Closing it, skipping it, or finishing it keeps it from opening again. It's in the application menu, in spotwatch, in SteamVR's Launch a program list, and in Frametop Input Settings' menu for whenever you want it again, and `tour/ft-tour --reset` has it open at the desktop's next start.
+
 If you work in the desktop for long stretches, or leave the headset on a stand, open Frametop Display Settings → Power. Turn on Stay awake while plugged in: by default Steam puts the Frame to sleep after an hour without input, even while it charges. And choose when the displays turn off while the headset isn't used. SteamVR turns them off a few seconds after you take the headset off, but a stand or mount that covers the proximity sensor inside it makes the headset seem worn, and its displays stay on all night.
 
 ### Add a Bluetooth mouse or keyboard

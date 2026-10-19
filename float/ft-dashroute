@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""ft-dashroute: apps picked in the SteamVR dashboard's Launch a program list open as Frametop
+floating windows, not as SteamVR windows of their own (DASHBOARD_APPS=frametop in
+~/.config/frametop.conf: Frametop Display Settings, Visibility & pins tab, "Apps from the
+SteamVR dashboard"). The default, DASHBOARD_APPS=steamvr, leaves them to SteamVR.
+
+The list is in Steam's own UI (its VR menu), and picking an app runs
+SteamClient.Apps.LaunchNonSteamApp(cmdline) in Steam's SharedJSContext, which Frametop reaches
+over the Chrome DevTools Protocol on 127.0.0.1:8080 (steam/steamui.py). With the setting on,
+this puts dash-route.js there: it wraps that call and hands the command line to this program
+(a CDP binding, Runtime.bindingCalled), which asks ft-floatd ("dashlaunch CMDLINE",
+@frametop_float). ft-floatd starts the app with its first window floating, or answers why it
+should stay SteamVR's (the setting is off, Frametop is paused, it's Steam or one of Frametop's
+own commands, or every floating window is in use), and then Steam's own launch runs after all.
+The wrapper only sends launches here while this program's heartbeat (every HEARTBEAT seconds)
+is fresh, so a launch is Steam's own whenever the desktop isn't running.
+
+Runs inside the Frametop desktop's session, next to ft-floatd (its autostart entry, written by
+session/frametop-session.sh when windows can float). It looks at the setting every HEARTBEAT
+seconds, so a change applies at once; with it off, it doesn't touch Steam at all.
+
+  ft-dashroute           keep the wrapper in Steam's UI while the setting is on
+  ft-dashroute status    the setting, and whether the wrapper is in
+"""
+import json
+import os
+import re
+import select
+import signal
+import socket
+import sys
+import time
+import urllib.request
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "steam"))
+sys.path.insert(0, os.path.join(HERE, "..", "layout"))
+import steamui  # noqa: E402  (Frametop's small CDP client)
+import ft_layout  # noqa: E402  (frametop.conf)
+
+PATCH = os.path.join(HERE, "dash-route.js")
+BINDING = "__ftDashLaunch"
+FLOAT = "\0" + os.environ.get("FT_FLOAT_SOCKET", "frametop_float")
+HEARTBEAT = 3.0  # seconds; the wrapper stops sending launches here after 10 s without one
+VERSION = int(re.search(r"const VERSION = (\d+);", open(PATCH).read()).group(1))
+BEAT = ("(() => { const s = window.__ftDashRoute; if (!s || s.version !== %d || !s.original) return 'missing';"
+        " s.alive = Date.now(); s.on = true; return 'ok'; })()" % VERSION)
+OFF = "(() => { const s = window.__ftDashRoute; if (s) s.on = false; return 'off'; })()"
+STATUS = ("JSON.stringify(window.__ftDashRoute ? {version: window.__ftDashRoute.version, on: window.__ftDashRoute.on,"
+          " age: Date.now() - window.__ftDashRoute.alive} : null)")
+
+
+def log(*args):
+    print(time.strftime("%H:%M:%S"), *args, flush=True)
+
+
+def wanted():
+    return ft_layout.read_conf().get("DASHBOARD_APPS", "steamvr") == "frametop"
+
+
+def shared_context():
+    """The SharedJSContext's debugger URL, or None (Steam's UI isn't up)."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{steamui.CDP_PORT}/json", timeout=3) as r:
+            targets = json.load(r)
+    except (OSError, ValueError):
+        return None
+    return next((t.get("webSocketDebuggerUrl") for t in targets if t.get("title") == "SharedJSContext"), None)
+
+
+class Cdp:
+    """One DevTools session: calls by id, and the binding's calls as they come."""
+
+    def __init__(self, url):
+        self.ws = steamui._WebSocket(url)
+        self.next_id = 1
+        self.calls = []  # command lines the wrapper sent, not handled yet
+
+    def close(self):
+        self.ws.close()
+
+    def _message(self):
+        msg = json.loads(self.ws.recv())
+        if msg.get("method") == "Runtime.bindingCalled" and msg.get("params", {}).get("name") == BINDING:
+            try:
+                cmdline = json.loads(msg["params"].get("payload") or "{}").get("cmdline")
+            except ValueError:
+                cmdline = None
+            if isinstance(cmdline, str):
+                self.calls.append(cmdline)
+        return msg
+
+    def call(self, method, **params):
+        n, self.next_id = self.next_id, self.next_id + 1
+        self.ws.send(json.dumps({"id": n, "method": method, "params": params}))
+        while True:
+            msg = self._message()
+            if msg.get("id") == n:
+                return msg.get("result", {})
+
+    def evaluate(self, expression):
+        result = self.call("Runtime.evaluate", expression=expression, returnByValue=True)
+        if "exceptionDetails" in result:
+            d = result["exceptionDetails"]
+            raise steamui.SteamUnreachable(d.get("exception", {}).get("description") or d.get("text", "error"))
+        return result.get("result", {}).get("value")
+
+    def wait(self, seconds):
+        """Read what comes for up to `seconds`, then return the launches that came."""
+        end = time.monotonic() + seconds
+        while not self.calls:
+            left = end - time.monotonic()
+            if left <= 0:
+                break
+            if self.ws.buf or select.select([self.ws.sock], [], [], left)[0]:
+                self._message()
+        calls, self.calls = self.calls, []
+        return calls
+
+
+def ask_floatd(cmdline):
+    """ft-floatd's answer to "dashlaunch CMDLINE": "ok", or "steamvr REASON"."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        s.bind("")
+        s.settimeout(5)
+        s.sendto(f"dashlaunch {cmdline}".encode(), FLOAT)
+        return s.recv(4096).decode(errors="replace")
+    except OSError as e:
+        return f"steamvr ft-floatd didn't answer ({e})"
+    finally:
+        s.close()
+
+
+def inject(cdp):
+    cdp.call("Runtime.addBinding", name=BINDING)
+    with open(PATCH) as f:
+        log(f"Steam's UI: {cdp.evaluate(f.read())}")
+
+
+def route(cdp, cmdline):
+    reply = ask_floatd(cmdline)
+    if reply.startswith("ok"):
+        log(f"floating: {cmdline}")
+        return
+    log(f"SteamVR window: {cmdline} ({reply.removeprefix('steamvr ').strip()})")
+    cdp.evaluate(f"window.__ftDashRoute.original.call(SteamClient.Apps, {json.dumps(cmdline)})")
+
+
+def session(url):
+    """Keep the wrapper in this page while the setting is on; returns when it's off."""
+    cdp = Cdp(url)
+    try:
+        inject(cdp)
+        while True:
+            for cmdline in cdp.wait(HEARTBEAT):
+                route(cdp, cmdline)
+            if not wanted():
+                cdp.evaluate(OFF)
+                log("setting off: dashboard apps open in SteamVR again")
+                return
+            if cdp.evaluate(BEAT) == "missing":  # Steam's UI reloaded
+                inject(cdp)
+    finally:
+        cdp.close()
+
+
+def status():
+    print(f"DASHBOARD_APPS={ft_layout.read_conf().get('DASHBOARD_APPS', 'steamvr')}")
+    url = shared_context()
+    if not url:
+        print("Steam's UI: not reachable on 127.0.0.1:8080")
+        return 0
+    try:
+        print(f"wrapper: {steamui.evaluate(STATUS)}")
+    except steamui.SteamUnreachable as e:
+        print(f"wrapper: unknown ({e})")
+    return 0
+
+
+def main():
+    if sys.argv[1:] == ["status"]:
+        return status()
+    if sys.argv[1:]:
+        sys.exit(__doc__)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    url = None
+    try:
+        while True:
+            if wanted():
+                url = shared_context()
+                if url:
+                    try:
+                        session(url)
+                        continue
+                    except (OSError, ValueError, steamui.SteamUnreachable) as e:
+                        log(f"Steam's UI went away ({e}); trying again")
+            time.sleep(HEARTBEAT)
+    finally:
+        if url:  # leaving with the wrapper in: Steam's own launch at once, not 10 s from now
+            try:
+                steamui.evaluate(OFF)
+            except steamui.SteamUnreachable:
+                pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())

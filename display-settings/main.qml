@@ -1023,6 +1023,39 @@ Kirigami.ApplicationWindow {
                             onClicked: restartDialog.open()
                         }
                     }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Apps from the SteamVR dashboard" }
+
+                    Repeater {
+                        model: [
+                            { value: "steamvr", text: "Open as SteamVR windows", help: "Apps picked in the dashboard's Launch a program list open as SteamVR's own windows, as without Frametop." },
+                            { value: "frametop", text: "Open as Frametop floating windows", help: "They open in the Frametop desktop instead, floating in front of you (where that app last floated), so drag and drop, the clipboard, spotwatch and profiles work with them. When the desktop isn't running, Frametop is paused, or all floating windows are in use, they open as SteamVR windows. Steam, SteamVR and Frametop's own layout entries always stay SteamVR's." }
+                        ]
+                        delegate: ColumnLayout {
+                            required property var modelData
+                            spacing: 0
+                            Controls.RadioButton {
+                                text: modelData.text
+                                enabled: backend.floatSlots > 0
+                                checked: backend.dashboardApps === modelData.value
+                                onToggled: if (checked) backend.setDashboardApps(modelData.value)
+                            }
+                            Controls.Label {
+                                text: modelData.help
+                                opacity: 0.7
+                                font: Kirigami.Theme.smallFont
+                                leftPadding: Kirigami.Units.gridUnit * 1.6
+                                wrapMode: Text.Wrap
+                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                            }
+                        }
+                    }
+                    Controls.Label {
+                        visible: backend.floatSlots === 0
+                        text: "Floating windows are off (FLOAT_SLOTS=0 in ~/.config/frametop.conf), so these open in SteamVR."
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
                 }
             }
         }

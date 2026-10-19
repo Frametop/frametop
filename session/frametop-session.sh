@@ -240,6 +240,23 @@ else
   rm -f "$autostart"
 fi
 
+# ft-dashroute: with DASHBOARD_APPS=frametop, apps from the SteamVR dashboard's Launch a program
+# list float in this desktop instead of opening as SteamVR windows (float/ft-dashroute). It runs
+# whenever windows can float and reads the setting as it goes.
+autostart=$XDG_CONFIG_HOME/autostart/frametop-dashroute.desktop
+if [ "$float_slots" -gt 0 ]; then
+  cat > "$autostart" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Frametop dashboard apps
+Exec=sh -c 'exec /usr/bin/python3 -I "$here/../float/ft-dashroute" > /tmp/frametop-dashroute.log 2>&1'
+X-KDE-autostart-phase=2
+NoDisplay=true
+EOF
+else
+  rm -f "$autostart"
+fi
+
 # ft-notifyfwd shows this desktop's notifications in the Steam session (in VR, with a VR
 # notification server there), with their buttons, through the user bus's notification
 # server; Plasma's own popups stay off while it does. NOTIFY_FORWARD: auto (only when that

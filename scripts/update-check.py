@@ -595,6 +595,53 @@ def check_steam_ui():
         report("warn", "Steam menu shortcut", f"{detail}; a Meta tap won't open the Steam menu (steam/ft-steam)")
 
 
+def check_dashboard_apps():
+    """float/ft-dashroute (DASHBOARD_APPS=frametop): the dashboard's Launch a program list floats
+    apps only while Steam's UI calls SteamClient.Apps.LaunchNonSteamApp when one is picked, which
+    dash-route.js wraps. A Steam client update can change that, not just a SteamOS one."""
+    conf = os.path.join(HOME, ".config/frametop.conf")
+    try:
+        with open(conf) as f:
+            on = any(line.split("#", 1)[0].strip() == "DASHBOARD_APPS=frametop" for line in f)
+    except OSError:
+        on = False
+    if not on:
+        return
+    label = "dashboard apps"
+    found = False
+    ui = os.path.join(HOME, ".steam/steam/steamui")
+    for name in (os.listdir(ui) if os.path.isdir(ui) else []):
+        if name.endswith(".js"):
+            try:
+                with open(os.path.join(ui, name), errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            if "Apps?.LaunchNonSteamApp(" in text or "Apps.LaunchNonSteamApp(" in text:
+                found = True
+                break
+    if not found:
+        report("FAIL", label, "Steam's UI no longer calls SteamClient.Apps.LaunchNonSteamApp, so apps from the "
+               "dashboard's Launch a program list open as SteamVR windows; float/dash-route.js needs updating")
+        return
+    if run("pgrep", "-x", "ft-screens")[0] != 0:
+        report("ok", label, "Steam's UI still launches through SteamClient.Apps.LaunchNonSteamApp (desktop not running)")
+        return
+    repos = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))] if "__file__" in globals() else []
+    repos += [os.path.join(HOME, "frametop"), os.path.join(HOME, "dev/frametop")]
+    tool = next((t for t in (os.path.join(r, "float/ft-dashroute") for r in repos) if os.path.exists(t)), None)
+    try:
+        out = subprocess.run(["python3", "-I", tool, "status"], capture_output=True, text=True, timeout=15).stdout if tool else ""
+        state = json.loads(out.rsplit("wrapper: ", 1)[1]) if "wrapper: {" in out else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        state = None
+    if state and state.get("on") and state.get("age", 1e9) < 10000:
+        report("ok", label, "they float: the wrapper is in Steam's UI (float/ft-dashroute status)")
+    else:
+        report("warn", label, "DASHBOARD_APPS=frametop, but the wrapper isn't working in Steam's UI, so apps from "
+               "the dashboard open as SteamVR windows: see /tmp/frametop-dashroute.log")
+
+
 def check_vr_socket():
     """vrserver's web socket, which the pause gesture reads the controllers from (input/vrws.py,
     input/game_pause.py). It's undocumented: SteamVR's controller binding page uses it."""
@@ -829,6 +876,7 @@ def main():
         check_overlays(desktop_up)
         check_services(sockets, desktop_up)
         check_steam_ui()
+        check_dashboard_apps()
         check_vr_socket()
         check_eye_tracker()
         check_eye_rate()

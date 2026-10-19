@@ -26,8 +26,10 @@ Toggled by:
     games (the pointer helper only reads those outside games).
   - A controller gesture, by default both thumbsticks clicked together twice ("pause_gesture").
     It's read from vrserver's web socket (vrws.py), which works in games and takes nothing from
-    them, so the game sees the clicks too. A gesture on both controllers, with only one of them
-    connected, is that controller's button alone, clicked twice (one_controller).
+    them, so the game sees the clicks too. Once it goes off, it's ignored for GESTURE_COOLDOWN:
+    on 2026-10-16 a resume was followed by a pause 2 s later, which left Frametop paused.
+    A gesture on both controllers, with only one of them connected, is that controller's button
+    alone, clicked twice (one_controller).
   - input/ft-pause on|off|toggle|status, which uses the relay's control socket
     ("pause on|off|toggle|?").
   - VR games, with "pause_auto" (on by default): the pointer helper says "vrgame 1|0" as a SteamVR
@@ -40,7 +42,7 @@ Settings in ~/.config/frametop-input.json (Frametop Input Settings, Game optimiz
 (bool), "pause_gesture" ({"buttons": one or two controller buttons, "presses": 1 or 2}, or null
 for none; one button always takes two presses), "pause_desktop" ("hide" or "close"), and
 "pause_sound" (a sound on pause and resume; bool). The state outlives a relay restart in
-STATE_PATH.
+STATE_PATH, and a desktop that starts while paused is told (screens_seen), so it hides too.
 """
 import json
 import os
@@ -78,6 +80,7 @@ RESUME_DELAY = 5.0  # after a VR game ends: loading the next one can end one sce
 GAME_STALE = 12.0  # the helper repeats "vrgame" every 5 s; silence this long means no game (or no SteamVR)
 CHORD_WINDOW = 0.3  # a two-button gesture's buttons go down within this of each other
 DOUBLE_WINDOW = 0.7  # a double press's second press comes within this of the first
+GESTURE_COOLDOWN = 3.0  # once the gesture goes off, it's ignored this long (a triple press, a repeat)
 LOOKUP_EVERY = 30.0  # the controllers are looked up again this often (and sooner when they may have changed)
 LOOKUP_GAP = 3.0  # but not more often than this for a message from a device it doesn't know
 
@@ -126,13 +129,14 @@ class Gesture:
     """The pause gesture, from button presses and releases. A press of a two-button gesture is
     both buttons going down within CHORD_WINDOW of each other, so a button held for a while (to
     sprint, say) and the other clicked doesn't count. Two presses within DOUBLE_WINDOW make a
-    double press."""
+    double press. Once it goes off, it's ignored for GESTURE_COOLDOWN."""
 
     def __init__(self, buttons, presses):
         self.buttons, self.presses = tuple(buttons), presses
         self.down = {}  # button -> when it went down
         self.first = None  # when the first press of a double press was
         self.fired = None
+        self.ignored = None  # a gesture the cooldown dropped: how long after the last one (for the log)
 
     def reset(self):
         self.down.clear()
@@ -154,8 +158,9 @@ class Gesture:
             self.first = now
             return False
         self.first = None
-        if self.fired is not None and now - self.fired < 1.0:
-            return False  # a triple press is still one
+        if self.fired is not None and now - self.fired < GESTURE_COOLDOWN:
+            self.ignored = now - self.fired
+            return False
         self.fired = now
         return True
 
@@ -391,6 +396,9 @@ class ControllerWatch(threading.Thread):
                                     self.sock.sendto(b"pause toggle gesture", RELAY)
                                 except OSError:
                                     pass
+                            elif g.ignored is not None:
+                                self.log(f"pause gesture ignored: {g.ignored:.1f} s after the last one")
+                                g.ignored = None
         finally:
             ws.close()
 
@@ -530,6 +538,7 @@ class GamePause:
         self.hands_always = False  # HANDS_MODE=always: hand tracking runs through games (set_hands)
         self.dashboard = False  # the SteamVR dashboard is open (the helper's "vrdash")
         self.parked = None  # hand tracking parked, as last applied (None: not yet)
+        self.screens_pid = None  # the ft-screens that last said where typing goes (screens_seen)
         self.screens = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
         self.worker = Worker(log, self.save)
         self.watch = ControllerWatch(log)
@@ -589,6 +598,19 @@ class GamePause:
             self.screens.sendto(b"pause on" if paused else b"pause off", SCREENS)
         except OSError:
             pass  # the desktop isn't running
+
+    def screens_seen(self, pid):
+        """From the relay: ft-screens `pid` said where typing goes, as it does every second. One
+        that started while paused never heard "pause on" and shows its screens, while the relay
+        keeps the 3D mouse off: on 2026-10-16 an update restarted the desktop and the relay, the
+        relay came back paused from STATE_PATH, and the desktop looked on with a dead pointer.
+        So a new ft-screens hears the pause."""
+        if not pid or pid == self.screens_pid:
+            return
+        self.screens_pid = pid
+        if self.paused:
+            self.log(f"telling ft-screens ({pid}) that Frametop is paused")
+            self.tell_screens(True)
 
     def tell_helper(self):
         """The pointer helper's hand interaction runs in a VR game only while Frametop isn't paused

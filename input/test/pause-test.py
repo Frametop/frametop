@@ -52,7 +52,12 @@ check("sticks 0.5 s apart, twice: nothing", presses(g, both(0, gap=0.5, hold=0.6
 g = gp.Gesture((L, R), 2)
 check("three double presses in a row: once", presses(g, both(0) + both(0.3) + both(0.6)), 1)
 g = gp.Gesture((L, R), 2)
-check("again after a second: twice in all", presses(g, both(0) + both(0.3) + both(2.0) + both(2.3)), 2)
+check("again 2 s later (2026-10-16: resumed, then paused again): ignored",
+      presses(g, both(0) + both(0.3) + both(2.0) + both(2.3)), 1)
+check("...and says how long after the last one", round(g.ignored, 1), 2.0)
+g = gp.Gesture((L, R), 2)
+check("again after the cooldown: twice in all",
+      presses(g, both(0) + both(0.3) + both(gp.GESTURE_COOLDOWN + 0.5) + both(gp.GESTURE_COOLDOWN + 0.8)), 2)
 g = gp.Gesture((L, R), 2)
 check("repeated down states count once",
       presses(g, [(0, L, True), (0.01, L, True), (0.02, R, True), (0.03, R, True), (0.1, L, False), (0.1, R, False)]
@@ -220,6 +225,22 @@ p.toggle("gesture", 0)
 q = gp.GamePause(lambda *a: None, changes.append, VR)
 check("a relay restarted while paused stays paused", (q.paused, q.reason), (True, "gesture"))
 check("and stops the services again", q.worker.jobs, ["enforce"])
+told = []
+q.tell_screens = told.append
+q.screens_seen(4242)
+check("the desktop that reports in first hears the pause (2026-10-16: it showed, the pointer was off)",
+      told, [True])
+q.screens_seen(4242)
+check("...once, not every second", told, [True])
+q.screens_seen(None)
+check("a sender without credentials changes nothing", told, [True])
+q.screens_seen(4343)
+check("a restarted desktop (new pid) hears it again", told, [True, True])
+p.tell_screens = told.append
+told.clear()
+p.toggle("gesture", 1)
+p.screens_seen(5151)
+check("running: a new desktop hears nothing", told, [False])
 
 # ---------------------------------------------------------------- hand tracking parked for games
 parked = lambda: os.path.exists(gp.PARK_PATH)  # noqa: E731

@@ -373,7 +373,12 @@ Kirigami.ApplicationWindow {
                         }
 
                         Controls.ComboBox {
-                            model: backend.roles
+                            // Keyboard + 3D pointer only where it splits something: a mouse node and a keyboard
+                            // node. A device that isn't connected has no nodes to tell, so it's offered there too.
+                            model: backend.roles.filter(r => r.value !== "combo" || row.modelData.role === "combo"
+                                                        || !row.modelData.connected
+                                                        || (row.modelData.kinds.indexOf("mouse") >= 0
+                                                            && row.modelData.kinds.indexOf("keyboard") >= 0))
                             textRole: "text"
                             valueRole: "value"
                             Component.onCompleted: currentIndex = indexOfValue(row.modelData.role)
@@ -425,7 +430,7 @@ Kirigami.ApplicationWindow {
                 }
             ]
             property string deviceId: pointerDevices.length > 0 ? pointerDevices[Math.max(0, deviceBox.currentIndex)].id : ""
-            property var pointerDevices: backend.devices.filter(d => d.role === "pointer")
+            property var pointerDevices: backend.devices.filter(d => d.role === "pointer" || d.role === "combo")
             property int capturedCode: -1
             property string capturedName: ""
             property bool capturing: false
@@ -726,7 +731,7 @@ Kirigami.ApplicationWindow {
             title: "Keyboard"
             // Pass-through keyboards connected now: with "no_keyboard", the keyboard waits for none.
             // A program's uinput keyboard (a remote desktop's, say) doesn't count.
-            property var keyboards: backend.devices.filter(d => d.connected && d.role === "passthrough"
+            property var keyboards: backend.devices.filter(d => d.connected && (d.role === "passthrough" || d.role === "combo")
                                                                 && d.kinds.indexOf("keyboard") >= 0 && !d.uinput)
 
             Kirigami.FormLayout {

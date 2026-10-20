@@ -87,7 +87,7 @@ One small helper per Mac (Swift, built by the Frametop CI as a universal binary,
 - A `CGEventTap` at the HID level takes key, mouse and scroll events while engaged. Motion comes from the events' delta fields. The cursor is held still so only Sunshine moves it: the tap sees a move after the cursor has moved, so the Bridge warps it back (`CGWarpMouseCursorPosition`, then `CGAssociateMouseAndMouseCursorPosition(true)` to end the warp's event suppression). Disassociating the cursor doesn't work from a background process. Volume, brightness and media keys (system-defined events, subtype 8) pass; the system-defined event every click also sends (subtype 7) is taken with it. Sunshine's own events are the ones with a nonzero source pid.
 - It listens with TLS on a port of its own, serving the Sunshine instances' shared certificate, which Frametop already pins per Mac. It takes only client certificates the instances have paired (it reads their state files; it runs as the same user). No new pairing.
 - Frametop Streams in the menu bar shows "Keyboard and mouse: in Frametop" or "here", with Take Back Now and an off switch.
-- Sunshine starts it (a global prep command), so with luck it works under Sunshine's Accessibility grant. If not, it needs its own, granted again after each update of the Bridge (its ad hoc signature changes).
+- Sunshine starts it (a global prep command), and it then works under Sunshine's Accessibility grant (S3), so it needs none of its own.
 
 On the Frame, the ft-stream holding a Mac's input lock connects to its Bridge with the display's client key.
 
@@ -125,4 +125,5 @@ Later, with the testers who run Linux hosts. Vibepollo's packaged service runs a
 - Dropping a move in the tap doesn't stop the cursor: macOS moves it first. `CGAssociateMouseAndMouseCursorPosition(false)` returned success but held nothing for a background process. Warping back on each taken move held it: every move afterwards was at the hold point, while the deltas kept coming (about 7,500 taken events in 30 s, clicks and keys taken, Secure Input off).
 - Every click comes with a system-defined event (type 14, subtype 7). Media keys are subtype 8 (`data1` = key << 16 | 0xa00 down / 0xb00 up); they passed and worked.
 - A mouse wheel sends line steps (`continuous=0`); the trackpad sends point deltas with a scroll phase, then momentum events (`momentum` 1, 2, 3). Trackpad gestures arrive as type 29 events.
-- Still to do: whether a helper Sunshine starts works under Sunshine's Accessibility grant, which needs a Sunshine instance on and a stream.
+- A helper Sunshine starts works under Sunshine's Accessibility grant. With a temporary `global_prep_cmd` on one instance and a stream from the Frame, the prep command's process (and a child it left running) had Sunshine as its responsible process, `AXIsProcessTrusted` 1, and an active tap was made. Sunshine.app is responsible for itself even though the LaunchAgent's bash starts it. So the Bridge needs no grant of its own, and an update of it (a new ad hoc signature) asks for nothing.
+- Sunshine's own input, seen from there: moves with Sunshine's pid as the source pid, source state 1 (HIDSystemState).

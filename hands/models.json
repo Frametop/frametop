@@ -1,7 +1,7 @@
 {
  "catalog": 1,
  "kind": "hands",
- "latest": "v16b",
+ "latest": "v19b",
  "default": "latest",
  "baseline": "stock",
  "metrics": [
@@ -20,10 +20,33 @@
  ],
  "models": [
   {
+   "name": "v19b",
+   "title": "Frametop v19b",
+   "kind": "custom",
+   "status": "recommended",
+   "date": "2026-10-19",
+   "summary": "Taught by the bounty rounds' prompts: held pinches and middle-finger touches read closed far more often.",
+   "notes": "v13b-p1's landmark model trained further on v16b's data plus Frametop Hands contributions #15 (pokes), #16 (middle-finger taps) and #17 (card grabs). New: where a bounty round's prompt asked for a fingertip touch, training pulls those tips together, and where it asked for a resting hand, it keeps them apart. The palm detector is v13b-p1's, unchanged. Same networks as stock, so the same CPU cost.\n\nWhat to expect against v16b: on prompted acts held back from training, a held thumb-index pinch reads closed 58% of the time (v16b 21%) and a held thumb-middle touch 100% (v16b 33%). The replays track the same hands, and finger points and hand shape are as close as before. The held-out pinch number below is lower (69% against 80%) because it counts touches by the teacher model's labels, which miss many real touches; v16b followed them more closely.\n\nKnown weak spots: it reads the thumb and index tips a few millimetres further apart than v16b, so a light pinch may need a firmer squeeze, and a resting hand reads as touching a little more often for some people.",
+   "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 961, "replay_dim": 1225, "replay_lit": 1434, "found": 98.6, "landmark_px": 3.8,
+             "within5": 94.9, "shape_mm": 8.0, "side_ok": 96.7, "pinch_closed": 69.0},
+   "format": 1,
+   "rev": "52d3a657abcf0cef7db48f90c5fefb281ff4b5b7",
+   "files": {
+    "NOTICE": "96fc8914e0220e51222362d141e0495e3425081d9898c21899b63e68df358ca6",
+    "hand.ncnn.bin": "010f96a9316d0d935f2baf4951770130402bddc126b0066b4d8b3ba2754fdc9a",
+    "hand.ncnn.param": "54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd",
+    "palm.ncnn.bin": "9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909",
+    "palm.ncnn.param": "c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "3393752d047bc3dd4e23fca47e3c29e4ae37c13be8dae1dae3412be55f4085f0"
+   }
+  },
+  {
    "name": "v16b",
    "title": "Frametop v16b",
    "kind": "custom",
-   "status": "recommended",
+   "status": "older",
    "date": "2026-10-16",
    "summary": "v13b-p1 plus the pinch and tap bounty rounds: pinches and taps read closed more often.",
    "notes": "v13b-p1's landmark model trained further with Frametop Hands contributions #12 (index taps), #13 (pinches) and #14. The palm detector is v13b-p1's, unchanged. Same networks as stock, so the same CPU cost.\n\nWhat to expect against v13b-p1: a thumb touching the index finger is read as touching more often (80% of held-out touches against 71%), so pinches and taps register more reliably. Finger points and hand shape are as close as before, and the replays track the same hands.\n\nKnown weak spots: a thumb touching the middle finger is still often read as a near miss, and empty views are taken for a hand slightly more often than with v13b-p1 (0.37% against 0.22% of empty crops).",

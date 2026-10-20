@@ -497,6 +497,7 @@ The user decided remote displays are Frametop displays, with the same controls a
 - Find the dongle again if its address changes (the hotspot's DHCP), and a host whose own address changes (the token and pin files are named by it).
 - "Approve on the PC" instead of the password (our Vibepollo fork), later if wanted.
 - A per-display mouse mode (relative, for games).
+- The host's own keyboard and mouse driving Frametop while the headset is worn: [host-input.md](host-input.md).
 - A picture for a stream that's connecting or lost.
 - The installer doesn't build ft-stream yet (`stream/build.sh`), and `uninstall.sh` leaves `~/.local/share/frametop-stream` (the client keys and host tokens).
 - For the test, the pointer and gaze services run this branch's builds through drop-ins (`~/.config/systemd/user/frametop-{pointer,gaze}.service.d/remote-displays-worktree.conf`; `gaze/tracker/build` here links to the installed tracker's). Remove them when this is merged and installed.

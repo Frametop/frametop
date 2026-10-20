@@ -1,0 +1,28 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop keyboard: Full Keyboard for Steam Frame, by TaiKeid (keyboard/FRAMETOP.md)
+Documentation=file://@REPO@/keyboard/FRAMETOP.md https://github.com/TaiKeid/steam-frame-full-keyboard
+# Needs SteamVR's IPC; it starts and stops with SteamVR.
+After=steamvr.service frametop-input-relay.service
+PartOf=steamvr.service
+Requisite=steamvr.service
+
+[Service]
+# SteamOS's Mesa settings, as Full Keyboard's own startup unit has them.
+EnvironmentFile=-/usr/share/deckard/mesavars.sh
+# Runs in the container it was built in (scripts/in-box, which starts it in a scope of its
+# own), so clean it up explicitly around it. Its layouts, themes and languages come from
+# the source folder.
+ExecStartPre=-/usr/bin/pkill -x framekeyboard
+ExecStart=@REPO@/scripts/in-box @REPO@/keyboard/build/frametop/framekeyboard --frametop --data-dir @REPO@/keyboard
+ExecStopPost=-/usr/bin/pkill -x framekeyboard
+# Quitting it from its own panel exits with 3: it stays closed until SteamVR starts again.
+SuccessExitStatus=3
+RestartPreventExitStatus=3
+Restart=on-failure
+RestartSec=3
+# The container session (conmon) ignores SIGTERM; don't wait 90 s for it.
+TimeoutStopSec=5
+
+[Install]
+WantedBy=steamvr.service

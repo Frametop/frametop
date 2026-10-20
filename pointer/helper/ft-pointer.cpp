@@ -1123,6 +1123,11 @@ int main() {
         rayParams.readyShow = std::clamp(ConfDouble(conf, "POINTER_RAY_READY", 6), 0.0, 30.0) / 100;
         rayParams.readyHide = rayParams.readyShow > 0 ? std::max(rayParams.readyShow, std::clamp(ConfDouble(conf, "POINTER_RAY_READY_HIDE", 10), 0.0, 40.0) / 100) : 0;
         rayParams.fistCurl = std::clamp(ConfDouble(conf, "POINTER_RAY_FIST_CURL", 1.1), 0.0, 2.0);
+        // the laser only for a raised hand: its knuckles within this far under the eyes, and gone 10 cm
+        // past it (cm; 0, the default: a low hand points too, and a hand typing is held back by the
+        // typing guard instead; 30 until 2026-10-19, when aiming at a keyboard below lost the laser)
+        rayParams.raisedShow = std::clamp(ConfDouble(conf, "POINTER_RAY_RAISED", 0), 0.0, 100.0) / 100;
+        rayParams.raisedHide = rayParams.raisedShow > 0 ? rayParams.raisedShow + 0.10 : 0;
         rayParamsNew = true;
         rayTap = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP", 0.3), 0.0, 2.0);
         rayTapDeadzone = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP_DEADZONE", 6.0), 0.0, 30.0);
@@ -2679,9 +2684,12 @@ int main() {
         // A hand at a panel (ft-screens' near claim: it pokes and taps there): no laser at all (user,
         // 2026-10-11: the laser from the head to where the fingertip put the cursor got in the way of
         // tapping, and held the button so pokes were refused). The mouse's next move claims it back,
-        // or in gaze mode the gaze, GAZE_WAKE_NEAR after the hand left.
+        // or in gaze mode the gaze, GAZE_WAKE_NEAR after the hand left. With a hand's ray driving it, only
+        // that hand's claim lets it go (user, 2026-10-19: typing on Full Keyboard with the right hand's
+        // laser, the resting left hand's claim released it 49 times in a row and a pinch lost its click).
+        const bool claimed = raySide >= 0 ? nearClaim[raySide] : nearClaim[0] || nearClaim[1];
         if (active && hold.src == Src::None && !leftHeld && touch.side < 0 && tnow - nearAt < std::chrono::milliseconds(200) &&
-            (nearClaim[0] || nearClaim[1]) && tnow - lastMouse > std::chrono::seconds(1)) {
+            claimed && tnow - lastMouse > std::chrono::seconds(1)) {
             releasePointer("a hand touches a panel");
         }
         if (tnow - nearAt < std::chrono::milliseconds(200) && (nearClaim[0] || nearClaim[1])) nearBusyAt = tnow;

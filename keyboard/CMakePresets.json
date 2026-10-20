@@ -1,0 +1,25 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {"major": 3, "minor": 24, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "host",
+      "displayName": "Host development build",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/host",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}
+    },
+    {
+      "name": "frame-arm64",
+      "displayName": "Steam Frame ARM64 cross-build",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/frame-arm64",
+      "toolchainFile": "${sourceDir}/cmake/steam-frame-aarch64.cmake",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "RelWithDebInfo"}
+    }
+  ],
+  "buildPresets": [
+    {"name": "host", "configurePreset": "host"},
+    {"name": "frame-arm64", "configurePreset": "frame-arm64"}
+  ]
+}

@@ -24,6 +24,11 @@ RUN dnf -y install --setopt=install_weak_deps=False \
       # Frametop Voice (voice/): glslc and the SPIR-V headers for whisper.cpp's
       # Vulkan backend; ft-voiced records with pw-record and plays its sounds with pw-play
       glslc spirv-headers-devel pipewire-utils \
+      # Frametop's keyboard (keyboard/, TaiKeid's Full Keyboard): Cairo and Pango
+      # draw it, SDL2 for its preview, and its input methods: Hangul, Pinyin (pyzy),
+      # Japanese (Anthy, loaded at run time)
+      cairo-devel pango-devel json-c-devel sdl2-compat-devel libhangul-devel pyzy-devel \
+      anthy-unicode-devel \
       # Frametop Input Settings (Kirigami, PySide6) and remote desktop (krdp):
       # keep the native KDE/Qt stack in matching Fedora packages
       python3-shiboken6 kf6-kirigami kf6-qqc2-desktop-style \
@@ -102,6 +107,14 @@ RUN pointer/helper/build.sh && pointer/driver/build.sh \
  && install -t /runtime/opt/frametop/lib pointer/driver/build/driver_ft_pointer.so
 RUN gaze/build.sh \
  && install -t /runtime/opt/frametop/bin gaze/build/ft-gaze gaze/build/ft-gazepanel
+# Frametop's keyboard (TaiKeid's Full Keyboard): it stays in keyboard/build/frametop,
+# with the input method engines, Steam bridge and SteamVR manifests it finds beside
+# itself, where frametop-keyboard.service runs it from. The rest of the build goes.
+RUN keyboard/build.sh \
+ && cd keyboard/build/frametop \
+ && find . -mindepth 1 -maxdepth 1 ! -name framekeyboard ! -name framekeyboard-native-guard \
+      ! -name engines ! -name bridge ! -name vr -exec rm -rf {} + \
+ && strip --strip-unneeded framekeyboard framekeyboard-native-guard engines/*.so
 RUN power/build.sh \
  && install -t /runtime/opt/frametop/bin power/build/ft-powerd
 RUN stream/build.sh \

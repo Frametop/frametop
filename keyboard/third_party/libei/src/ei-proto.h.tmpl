@@ -1,0 +1,113 @@
+/**
+ * GENERATED FILE, DO NOT EDIT
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+{# this is a jinja template, warning above is for the generated file
+
+   Non-obvious variables set by the scanner that are used in this template:
+   - request.fqdn/event.fqdn - the full name of a request/event with the
+     interface name prefixed, "ei_foo_request_bar" or "ei_foo_event_bar"
+   - incoming/outgoing: points to the list of requests or events, depending
+     which one is the outgoing one from the perspective of the file we're
+     generating (ei or eis)
+#}
+
+{# target: because eis is actually eis_client in the code, the target points to
+   either "ei" or "eis_client" and we need the matching get_context or
+   get_client for those. This is specific to the libei/libeis implementation
+   so it's done here in the template only. #}
+{% if component == "eis" %}
+{% set target = { "name":  "eis_client", "context": "client" }  %}
+{% else %}
+{% set target = { "name":  "ei", "context": "context" }  %}
+{% endif %}
+
+#pragma once
+
+#ifdef _cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+#include <brei-proto.h>
+/**
+ * Forward declarations. This file is intended to be compile-able without including
+ * any of the actual sources files.
+ */
+
+struct {{target.name}};
+
+/* Interface declarations */
+{% for interface in interfaces %}
+struct {{interface.name}};
+{% endfor %}
+
+{% for interface in interfaces %}
+extern const struct brei_interface {{interface.name}}_proto_interface;
+{% endfor %}
+
+{% for interface in interfaces %}
+#define {{interface.name.upper()}}_INTERFACE_NAME "{{interface.protocol_name}}"
+{% endfor %}
+
+__attribute__((unused))
+static const char *{{component.upper()}}_INTERFACE_NAMES[] = {
+	{% for interface in interfaces %}
+	{{interface.name.upper()}}_INTERFACE_NAME,
+	{% endfor %}
+};
+
+/* Interface indices as used in the protocol.xml file */
+{% for interface in interfaces %}
+#define {{interface.name.upper()}}_INTERFACE_INDEX {{loop.index0}}
+{% endfor %}
+#define {{component.upper()}}_INTERFACE_COUNT {{interfaces|length}}
+
+{% for interface in interfaces %}
+
+/**                                 {{interface.name}}                                           **/
+
+{% for request in interface.requests %}
+#define {{request.fqdn.upper()}}_SINCE_VERSION {{request.since}}
+{% endfor %}
+
+{% for event in interface.events %}
+#define {{event.fqdn.upper()}}_SINCE_VERSION {{event.since}}
+{% endfor %}
+
+{% for enum in interface.enums %}
+enum {{enum.fqdn}} {
+	{% for entry in enum.entries %}
+	{{enum.fqdn.upper()}}_{{entry.name.upper()}} = {{entry.value}},
+	{% endfor %}
+};
+
+{% for entry in enum.entries %}
+#define {{enum.fqdn.upper()}}_{{entry.name.upper()}}_SINCE_VERSION {{entry.since}}
+{% endfor %}
+{% endfor %}
+
+/* Message sender functions */
+{% for outgoing in interface.outgoing %}
+extern int
+{{outgoing.fqdn}}({{interface.as_c_arg}}{%- for arg in outgoing.arguments %}, {{arg.as_c_arg}}{% endfor %});
+
+{% endfor %}
+
+/**
+ * Interface to handle incoming messages for objects of type {{interface.name}}.
+ *
+ * After parsing the wire message, the data is dispatched into the functions below.
+ */
+struct {{interface.name}}_interface {
+   {% for incoming in interface.incoming %}
+   struct brei_result * (*{{incoming.name}})({{interface.as_c_arg}}{%- for arg in incoming.arguments %}, {{arg.as_c_arg}}{% endfor %});
+   {% endfor %}
+};
+{% endfor %}
+
+#ifdef _cplusplus
+}
+#endif

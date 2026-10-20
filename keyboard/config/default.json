@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "active": {
+    "layout": "en-us-full",
+    "language": "en-us",
+    "theme": "graphite"
+  },
+  "favorites": [],
+  "pinned": false,
+  "num_lock": false,
+  "hide_numpad": false,
+  "use_drag_to_move": false,
+  "auto_leveling": true,
+  "replace_native_keyboard": false
+}

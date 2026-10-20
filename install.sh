@@ -117,15 +117,17 @@ step "6/12 power service (turns the displays off while the headset isn't used, e
 build "$root/power/build.sh"
 "$root/power/run.sh" install
 
-step "7/12 multi-screen desktop (ft-screens), Frametop Input Settings, Display Settings, Remote Displays, and the Tour"
+step "7/12 multi-screen desktop (ft-screens), its keyboard (Full Keyboard), Frametop Input Settings, Display Settings, Remote Displays, and the Tour"
 build "$root/screens/build.sh"
 build "$root/stream/build.sh"  # ft-stream: remote displays (Frametop Remote Displays)
+build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKeid (keyboard/FRAMETOP.md)
 "$root/desktops.sh" install >/dev/null
 "$root/input-settings/install.sh"
 "$root/display-settings/install.sh"
 "$root/tour/install.sh"
 "$root/remote-displays/install.sh"
 "$root/remote/install.sh"
+"$root/keyboard/run.sh" install
 on_frame "sed -i 's/^POINTER=0/POINTER=1/' ~/.config/frametop.conf; grep -q '^POINTER=' ~/.config/frametop.conf || echo 'POINTER=1' >> ~/.config/frametop.conf"
 echo "the launcher's Desktop entry now opens the multi-screen desktop; 3D mouse on (POINTER=1 in ~/.config/frametop.conf)"
 "$root/scripts/conf-migrate.sh"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline test of the input relay's key combinations and modifier taps, of which keys and
-mouse buttons reach the desktop (ft-screens), and of dictation (Frametop Voice): the keys that
-start and stop it, and the text it has the relay type.
+mouse buttons reach the desktop (ft-screens), of dictation (Frametop Voice): the keys that
+start and stop it, and the text it has the relay type, and of Full Keyboard's typing.
 
 Runs the relay's main() against a fake pass-through keyboard, a fake mouse, and two fake nodes
 with volume keys, a keyboard's Consumer Control node and the headset's gpio-keys (pipes), with
@@ -698,6 +698,88 @@ def tests():
     time.sleep(3.1)  # no renewal: the claim lapses after 3 s
     key(ENTER, 1); key(ENTER, 0)
     check("panel claim lapsed: Enter is typed", (cal_keys(), typed()), ([], ["key 28 1", "key 28 0"]))
+
+    # Full Keyboard (keyboard/, --frametop): it says hello, hears where typing goes and whether
+    # the screens show, and types on the desktop through the relay.
+    use({})
+    kb = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    kb.bind("")  # autobound, as Full Keyboard's
+    kb.settimeout(0.05)
+
+    def heard():
+        """What Full Keyboard was sent since the last call."""
+        got = []
+        while True:
+            try:
+                got.append(kb.recv(256).decode())
+            except socket.timeout:
+                return got
+
+    def from_kb(text, sock=kb):
+        sock.sendto(text.encode(), f"\0{tag}_relay")
+        time.sleep(0.1)
+
+    typed(), emitted()
+    from_kb("kbhello 0")
+    check("Full Keyboard's hello: the word back (Steam, nothing shown)", heard(), ["kb 0 0"])
+    check("...and ft-screens hears it's there", [m for m in typed() if m.startswith("fullkb")], ["fullkb 0"])
+    check("...logged", [m for m in LOG if m.startswith("Full Keyboard")][-1:], ["Full Keyboard connected"])
+    to_relay("keyboard desktop 1")
+    time.sleep(0.1)
+    check("typing goes to the desktop, the screens show: it hears at once", heard(), ["kb 1 1"])
+    from_kb("kbhello 1")
+    check("a hello always gets the word", heard(), ["kb 1 1"])
+    check("...and ft-screens hears it's up", [m for m in typed() if m.startswith("fullkb")], ["fullkb 1"])
+    from_kb("kbkey 30 1")
+    from_kb("kbkey 30 0")
+    check("its keys reach the desktop", (typed(), emitted()), (["key 30 1", "key 30 0"], []))
+    LOG.clear()
+    from_kb("kbtext a\u00e9b")
+    from_kb(f"kbkey {ENTER} 1")
+    from_kb(f"kbkey {ENTER} 0")
+    check("its text through the desktop's layout, then its key, in order", typed(),
+          [f"key {c} {v}" for c, v in keys_for("ab")] + ["key 28 1", "key 28 0"])
+    check("...what the layout can't type isn't logged by name",
+          [m for m in LOG if m.startswith("typing")], ["typing: 1 characters the desktop's layout (us) has no key for"])
+    from_kb(f"kbkey {SHIFT} 1")
+    to_relay("keyboard steam 1")
+    time.sleep(0.1)
+    check("typing goes to Steam: it hears", heard(), ["kb 0 1"])
+    from_kb(f"kbkey {SHIFT} 0")
+    from_kb("kbkey 30 1")
+    from_kb("kbkey 30 0")
+    check("a key held from before comes up on the desktop", typed(), [f"key {SHIFT} 1", f"key {SHIFT} 0"])
+    check("...and new ones go to the virtual keyboard", emitted(), [("keyboard", 30, 1), ("keyboard", 30, 0)])
+    other = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    other.bind("")
+    to_relay("keyboard desktop 1")
+    from_kb("kbkey 30 1", other)
+    from_kb("kbtext x", other)
+    check("keys and text from another address are ignored", (typed(), emitted()), ([], []))
+    other.close()
+    heard()
+    to_relay("kbpanel show")
+    check("ft-screens' kbpanel show: Full Keyboard opens", heard(), ["kb show"])
+    to_relay("kbpanel hide")
+    check("...and hide", heard(), ["kb hide"])
+    pause("on")
+    time.sleep(0.1)
+    check("paused: typing to Steam, and not over the screens", heard(), ["kb 0 0"])
+    pause("off")
+    to_relay("keyboard desktop 1")
+    from_kb("kbhello 1")
+    heard()
+    from_kb("kbkey 30 1")
+    time.sleep(1.2)  # the relay's once-a-second check (reconcile_desktop_keys)
+    check("its held key stays down on the desktop past a second", typed(), ["fullkb 1", "key 30 1"])
+    time.sleep(2.2)  # no hello for 3 s
+    check("it stops saying hello: its held key comes up", typed(), ["key 30 0"])
+    check("...logged", [m for m in LOG if m.startswith("Full Keyboard")][-1:],
+          ["Full Keyboard stopped (no word for 3 seconds)"])
+    from_kb("kbkey 30 1")
+    check("gone: its keys reach nothing until it says hello again", (typed(), emitted()), ([], []))
+    kb.close()
+    to_relay("keyboard steam")
     use(None)
     print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
     shutil.rmtree(OUT, ignore_errors=True)

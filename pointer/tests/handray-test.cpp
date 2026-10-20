@@ -122,6 +122,41 @@ void TestLapPinch() {
           r.Why().c_str());
 }
 
+// The raised test off (the pointer helper's default since 2026-10-19): a low hand keeps its ray, and a
+// hand in the lap, palm up, still never shows (the palm test).
+void TestLowHand() {
+    Params p;
+    p.raisedShow = p.raisedHide = 0;
+    Body b;
+    HandRay r(1);
+    r.SetParams(p);
+    double t = 0;
+    CHECK(RunUntil(r, b, t, 1, true, Pointing) >= 0, "a pointing hand shows");
+    auto lower = [](double y) {
+        return [y](double tt) {
+            HandFrame f = Pointing(tt);
+            f.knuckle.y = 1.6 - y, f.wrist.y = 1.6 - y - 0.02;
+            return f;
+        };
+    };
+    t += kFrame;
+    CHECK(RunUntil(r, b, t, 1, false, lower(0.55)) < 0, "0.55 m below the eyes: still shown");
+    HandRay lapRay(0);
+    lapRay.SetParams(p);
+    double t2 = 0;
+    auto lap = [](double tt) {
+        HandFrame f;
+        f.t = tt, f.stereo = true;
+        f.knuckle = {-0.15, 1.0, -0.35};
+        f.wrist = {-0.15, 1.0, -0.27};
+        f.palmNormal = {0, 1, 0};
+        return f;
+    };
+    CHECK(RunUntil(lapRay, b, t2, 2, true, lap) < 0, "a hand in the lap, palm up, never shows");
+    CHECK(lapRay.Why().find("raised") == std::string::npos && lapRay.Why().find("palm") != std::string::npos,
+          "why: %s", lapRay.Why().c_str());
+}
+
 void TestPalmTowardYou() {
     Body b;
     HandRay r(1);
@@ -481,6 +516,7 @@ int main() {
     TestBody();
     TestGateShowHide();
     TestLapPinch();
+    TestLowHand();
     TestPalmTowardYou();
     TestTrackingAndControllerAndNear();
     TestHold();

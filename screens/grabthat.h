@@ -164,6 +164,8 @@ public:
     bool claims(int side, int64_t t) const;
     // Held out and armed, or closing: ft-hands should track at its full rate.
     bool armed(int side) const { return side_[side].state == State::Armed || side_[side].state == State::Closing; }
+    // ...closing: the middle, ring and little fingers curled with the palm still toward the window.
+    bool closing(int side) const { return side_[side].state == State::Closing; }
     // The gesture under way on this side, for the target's glow (user, 2026-10-10: "a glow over the
     // window grab that is targeting"): the aim it would fire with now (Pick takes it), and how far
     // along it is: rising 0..1 over armMs as the hand is held out, 1 armed or closing. False idle.

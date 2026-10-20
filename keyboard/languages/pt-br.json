@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "pt-br",
+  "name": "Português — Brasil ABNT2",
+  "locale": "pt-BR",
+  "keymap": {
+    "rules": "evdev",
+    "model": "abnt2",
+    "layout": "br",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans",
+    "sans-serif"
+  ],
+  "required_keys": [
+    "IntlBackslash",
+    "IntlRo",
+    "NumpadComma"
+  ]
+}

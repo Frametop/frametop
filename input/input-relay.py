@@ -88,7 +88,8 @@ Back) goes there too, and ft-screens gives it the screen the pointer is on, not 
 typing goes to (it releases the button itself when the pointer leaves the screens, they
 hide, or Frametop pauses). Other buttons and keys from KEY_OK up don't go there.
 Typing goes to the panel clicked last, and ft-screens says which ("keyboard
-desktop|steam" on the control socket, every second). While it's the desktop,
+desktop|steam SHOWN" on the control socket, every second; SHOWN 1|0, whether the screens
+show). While it's the desktop,
 pass-through keyboards are grabbed, so gamescope, which reads every keyboard itself,
 doesn't type them into its focused app too. Without word from ft-screens for 3 seconds
 they're released.
@@ -112,6 +113,18 @@ doesn't count), "button" (only the keyboard_toggle action opens it), or "never"
 (keyboard_toggle does nothing either). With "vr_keyboard_persist" (the default), it stays
 open when the text field loses focus, until its Close key, keyboard_toggle, or a layout reset
 (ft-layout reset) closes it.
+
+Full Keyboard (keyboard/, TaiKeid's, run with --frametop; keyboard/FRAMETOP.md) takes over from
+it while it runs. It says "kbhello OPEN" on the control socket every second, only taken from
+this user, and gets "kb DESKTOP SURFACE" back: whether typing goes to the desktop, and whether
+the screens show with Frametop not paused (it may show over them with the dashboard closed).
+The relay tells ft-screens "fullkb OPEN", and while that's fresh ft-screens passes its
+"vrkeyboard" commands on as "kbpanel show|hide", which the relay sends Full Keyboard as "kb
+show|hide". Its typing for the desktop comes as "kbkey CODE 0|1" and "kbtext TEXT", only from
+the address that said hello: they go in order with dictation's typing, keys as they are (a held
+modifier doesn't hold them back), text through the desktop's layout like dictation's, and
+unlogged. Its keys come up where they went down, and when it stops (no hello for 3 seconds),
+the ones it holds come up.
 
 Volume keys, from every device that has them (the headset's own buttons included),
 are handled here: wpctl steps the default output. Nothing else may see a volume key,
@@ -1040,9 +1053,13 @@ def main():
     # vr_capture_until: every controller button is taken until then (the settings app capturing one).
     # pointer: the 3D mouse while it's in use, pointer_conf: the one the config asks for (they
     # differ while Frametop is paused).
+    # shown_until: ft-screens shows the desktop's screens until then (it says so with "keyboard").
+    # kb_addr, kb_until: Full Keyboard's address, and until when it counts as running (its
+    # hello renews it); kb_said: the "kb DESKTOP SURFACE" it was told last.
     state = {"pointer": None, "pointer_conf": None, "rules": {},
              "desktop_until": 0.0, "typing_applied": None, "vr_capture_until": 0.0, "vr_bind_retry": False,
-             "pointer_holding": False, "calpanel_until": 0.0}
+             "pointer_holding": False, "calpanel_until": 0.0, "shown_until": 0.0,
+             "kb_addr": None, "kb_until": 0.0, "kb_said": None}
 
     def pause_changed(paused):
         """Frametop paused or resumed (game_pause.py): the relay's own part."""
@@ -1374,26 +1391,32 @@ def main():
     next_scan = 0.0
 
     volume = Volume()
-    typing = collections.deque()  # dictation's characters still to type
+    # What's still to type, in order: a character (str) from dictation, ("quiet", character)
+    # from Full Keyboard (its text isn't logged), or ("key", code, value), a key Full Keyboard
+    # pressed or released.
+    typing = collections.deque()
     typing_down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
     typing_at = 0.0  # the next press or release goes then
-    untyped = []  # characters with no key where typing went, logged when the queue is empty
+    untyped = []  # characters with no key where typing went, logged when the queue is empty (None: quiet)
+    kb_held = {}  # keys Full Keyboard holds down: code -> to the desktop
     desktop_layout = DesktopLayout()
 
-    def type_text(text):
-        """Queue dictation's text (see the top). Which keys type it is worked out as it goes,
-        where typing goes then."""
+    def type_text(text, quiet=False):
+        """Queue dictation's text (see the top), or with quiet, Full Keyboard's. Which keys type
+        it is worked out as it goes, where typing goes then."""
         desktop_layout.refresh()
         chars = [c for c in text if c.isprintable()]
         room = max(0, TYPE_MAX - len(typing))
-        typing.extend(chars[:room])
-        log(f"typing {min(len(chars), room)} characters for Frametop Voice"
-            + (f" ({len(chars) - room} dropped: too many waiting)" if len(chars) > room else ""))
+        typing.extend((("quiet", c) for c in chars[:room]) if quiet else chars[:room])
+        if not quiet or len(chars) > room:
+            log(f"typing {min(len(chars), room)} characters for {'Full Keyboard' if quiet else 'Frametop Voice'}"
+                + (f" ({len(chars) - room} dropped: too many waiting)" if len(chars) > room else ""))
 
     def report_untyped(desktop):
         if untyped and not typing:
             where = f"the desktop's layout ({desktop_layout.name})" if desktop else "a US layout (Steam)"
-            log(f"typing: {len(untyped)} characters {where} has no key for: {''.join(dict.fromkeys(untyped))}")
+            said = "".join(dict.fromkeys(c for c in untyped if c is not None))
+            log(f"typing: {len(untyped)} characters {where} has no key for" + (f": {said}" if said else ""))
             untyped.clear()
 
     def type_key(code, value, desktop):
@@ -1422,12 +1445,26 @@ def main():
             type_key(code, 0, desktop)
             for m in reversed(mods):
                 type_key(m, 0, desktop)
+        elif typing and typing[0][0] == "key":
+            # Full Keyboard's key, with its modifiers its own: a held one doesn't stop it. It
+            # comes up where it went down.
+            _, code, value = typing.popleft()
+            if value:
+                if code in kb_held:
+                    return  # down already
+                desktop = kb_held[code] = now < state["desktop_until"]
+            elif code in kb_held:
+                desktop = kb_held.pop(code)
+            else:
+                return  # not down
+            type_key(code, value, desktop)
         elif typing and not typing_blocked(now):
             desktop = now < state["desktop_until"]
             keys = desktop_layout.keys if desktop else US_KEYS
-            ch = typing.popleft()
+            item = typing.popleft()
+            ch = item if isinstance(item, str) else item[1]
             if ch not in keys:
-                untyped.append(ch)
+                untyped.append(ch if isinstance(item, str) else None)
                 report_untyped(desktop)
                 return  # the next one right away
             code, mods = keys[ch]
@@ -1441,7 +1478,7 @@ def main():
         typing_at = now + TYPE_STEP
 
     def typing_timeout(now, default):
-        if typing_down or (typing and not typing_blocked(now)):
+        if typing_down or (typing and (typing[0][0] == "key" or not typing_blocked(now))):
             return max(0.0, min(default, typing_at - now))
         return default
 
@@ -1519,6 +1556,7 @@ def main():
             return
         down = physically_down()
         typed = {k for code, mods, desktop in typing_down if desktop for k in (code, *mods)}  # dictation's, coming up next
+        typed |= {code for code, desktop in kb_held.items() if desktop}  # Full Keyboard's
         for code in sorted(screens_down - down - typed):
             to_screens(code, 0)
             log(f"key {code} released on the desktop: no keyboard holds it")
@@ -1582,11 +1620,43 @@ def main():
         except OSError:
             watchers.pop(addr, None)
 
+    def kb_tell(now, message=None):
+        """Tell Full Keyboard message, or with none, "kb DESKTOP SURFACE" if that changed: typing
+        goes to the desktop 0|1, and the screens show with Frametop not paused 0|1 (it may show
+        over them with the dashboard closed). From the control socket: it takes word from
+        @frametop_relay only."""
+        addr = state["kb_addr"]
+        if addr is None:
+            return
+        if message is None:
+            message = (f"kb {int(now < state['desktop_until'])}"
+                       f" {int(now < state['shown_until'] and not pause.paused)}")
+            if message == state["kb_said"]:
+                return
+            state["kb_said"] = message
+        try:
+            control.sendto(message.encode(), addr)
+        except OSError:
+            pass  # gone: its hellos stop, and kb_gone follows
+
+    def kb_gone(why):
+        """Full Keyboard stopped or restarted: its keys still to come are dropped, and the keys
+        it holds come up where they went down."""
+        state["kb_addr"], state["kb_said"] = None, None
+        kept = [item for item in typing if isinstance(item, str) or item[0] != "key"]
+        typing.clear()
+        typing.extend(kept)
+        for code, desktop in sorted(kb_held.items()):
+            type_key(code, 0, desktop)
+        kb_held.clear()
+        log(f"Full Keyboard {why}")
+
     def handle_control(now):
         while True:
             try:
                 data, anc, _, addr = control.recvmsg(65536, socket.CMSG_SPACE(creds.size))
             except BlockingIOError:
+                kb_tell(now)  # what changed reaches Full Keyboard at once
                 return
             pid, uid = next((creds.unpack(d[:creds.size])[:2] for level, kind, d in anc
                              if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), (None, None))
@@ -1598,8 +1668,10 @@ def main():
             try:
                 if cmd == "keyboard":
                     # From ft-screens (unbound, no reply): where typing goes, repeated every second.
+                    # "keyboard desktop|steam 1|0": the third word, whether the screens show.
                     desktop = len(words) > 1 and words[1] == "desktop" and not pause.paused
                     state["desktop_until"] = now + 3.0 if desktop else 0.0
+                    state["shown_until"] = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
                     if uid == os.getuid():
                         pause.screens_seen(pid)  # a desktop started while paused hides too
                     continue
@@ -1635,6 +1707,44 @@ def main():
                         type_text(data[len(b"type "):].decode(errors="replace"))
                     else:
                         log(f"type from another user ({uid}): ignored")
+                    continue
+                if cmd == "kbhello":
+                    # Full Keyboard (keyboard/, --frametop), every second and when it opens or
+                    # closes: "kbhello OPEN". Only from this user and a bound address: what it
+                    # types goes to the desktop. It gets the word on every hello, and ft-screens
+                    # hears it's there ("fullkb OPEN"), so it opens Full Keyboard, not its own.
+                    if uid != os.getuid() or not addr:
+                        continue
+                    if addr != state["kb_addr"]:
+                        if state["kb_addr"] is not None:
+                            kb_gone("restarted")
+                        log("Full Keyboard connected")
+                    state["kb_addr"], state["kb_until"], state["kb_said"] = addr, now + 3.0, None
+                    kb_tell(now)
+                    opened = "1" if len(words) > 1 and words[1] == "1" else "0"
+                    try:
+                        screens_sock.sendto(f"fullkb {opened}".encode(), SCREENS)
+                    except OSError:
+                        pass  # ft-screens not running
+                    continue
+                if cmd in ("kbkey", "kbtext"):
+                    # Full Keyboard's typing, while it was told it goes to the desktop: "kbkey CODE
+                    # 0|1" (a key's press or release) and "kbtext TEXT" (what its input methods
+                    # composed). Only from the Full Keyboard that said hello. In order with what's
+                    # still to type, where typing goes then.
+                    if uid != os.getuid() or addr is None or addr != state["kb_addr"]:
+                        continue
+                    if cmd == "kbtext":
+                        type_text(data[len(b"kbtext "):].decode(errors="replace"), quiet=True)
+                    elif (len(words) == 3 and words[1].isdigit() and 0 < int(words[1]) < BTN_MISC
+                          and words[2] in ("0", "1") and len(typing) < TYPE_MAX):
+                        typing.append(("key", int(words[1]), int(words[2])))
+                    continue
+                if cmd == "kbpanel" and len(words) == 2 and words[1] in ("show", "hide"):
+                    # From ft-screens (unbound): open or close Full Keyboard, which it does for the
+                    # "vrkeyboard" commands while Full Keyboard is there.
+                    if uid == os.getuid():
+                        kb_tell(now, f"kb {words[1]}")
                     continue
                 if cmd == "calpanel" and len(words) == 2:
                     # From the pointer helper (see the top). Only from this user: it takes Enter.
@@ -1759,6 +1869,9 @@ def main():
             vr_bind(now)
         volume.tick(now)
         typing_tick(now)
+        if state["kb_addr"] is not None and now >= state["kb_until"]:
+            kb_gone("stopped (no word for 3 seconds)")
+        kb_tell(now)
         pause.tick(now)
         if state["vr_capture_until"] and now >= state["vr_capture_until"]:
             vr_bind(now)  # capture over: back to the mapped buttons

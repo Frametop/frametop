@@ -1,0 +1,20 @@
+{
+  "action_sets": [
+    {
+      "name": "/actions/feedback",
+      "usage": "leftright"
+    }
+  ],
+  "actions": [
+    {
+      "name": "/actions/feedback/out/key",
+      "type": "vibration"
+    }
+  ],
+  "default_bindings": [
+    {
+      "controller_type": "frame_controller",
+      "binding_url": "frame-controller.json"
+    }
+  ]
+}

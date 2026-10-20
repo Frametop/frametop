@@ -1014,6 +1014,7 @@ int main() {
     // m), the chord (POINTER_GAZE_CHORD, off since the right-drag).
     bool gazeChord = false;
     double gazeRightDrag = 0, gazeScroll = 1.0, gazeScrollGap = 0.035;
+    double rayThreeWait = 0.11;   // POINTER_RAY_THREE_WAIT: a ray pinch's press waits this long for the middle (s)
     // The two-hand press (user, 2026-10-11: "tap nudge into the right spot, and then tap with the other hand to
     // drag"): while one hand's gaze pinch is held back (aiming or nudged), the other hand's index tap presses the
     // left button where the pointer is, a middle tap the right; the first hand drags until it lets go
@@ -1092,6 +1093,7 @@ int main() {
         typingHide = std::clamp(ConfDouble(conf, "POINTER_TYPING_HIDE", 1.5), 0.0, 30.0);
         gazeScroll = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL", 1.0), -5.0, 5.0);
         gazeScrollGap = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL_GAP", 0.035), 0.01, 0.08);
+        rayThreeWait = std::clamp(ConfDouble(conf, "POINTER_RAY_THREE_WAIT", 110), 0.0, 400.0) / 1000;
         const auto hn = conf.find("HANDS_NEAR");
         nearOn = hn != conf.end() && hn->second == "on";
         handsTrack = handsOn || nearOn;
@@ -1345,6 +1347,9 @@ int main() {
         int rayKind = 0, raySlot = -1;
         bool pendingPress = false, scrolling = false, pushOn = false, aimSent = false, released = false, took = false;
         bool rayThree = false;
+        // threeLoose: a three-finger pinch (ray or gaze) whose pinch ft-hands ended while the thumb is
+        // still on one of the two fingers: it goes on until the thumb leaves both (threeOn).
+        bool threeLoose = false;
         Clock::time_point pressAt{}, releaseAt{}, beganAt{};
         double lockAge = -1;
         std::string pressHit;
@@ -3022,6 +3027,14 @@ int main() {
             return sideGap[side][0] >= 0 && sideGap[side][0] < gazeScrollGap && sideGap[side][1] >= 0 &&
                    sideGap[side][1] < gazeScrollGap;
         };
+        // A three-finger pinch held on: the thumb still on either finger (within the gap and 1 cm, as
+        // ft-hands' pinch end is past its begin). ft-hands ends its index pinch as the thumb rolls onto
+        // the middle tip, and calls that a middle pinch only with the thumb 1 cm nearer the middle, so
+        // its ends alone cut scrolls short (user, 2026-10-19: 0.09 and 0.10 s scrolls that never moved).
+        auto threeOn = [&](int side) {
+            const double keep = gazeScrollGap + 0.01;
+            return (sideGap[side][0] >= 0 && sideGap[side][0] < keep) || (sideGap[side][1] >= 0 && sideGap[side][1] < keep);
+        };
         // A ray pinch (see "Hand ray" at the top). side: the gesture's; rs: the ray's (the one that follows
         // the pinching hand). The aim is locked where the ray pointed just before the fingers began to
         // close (rayowner.h), and the dead zone counts from the ray now.
@@ -3059,6 +3072,13 @@ int main() {
             h.rayThree = rayScroll != 0 && threeFingers(side);   // a scroll, not a click (user, 2026-10-15)
             h.pendingPress = kind == 0 && !h.rayThree;
             h.pressAt = tnow + std::chrono::milliseconds(ours_ ? 0 : 30 + (claimHeld ? 0 : 8));
+            // The middle tip already near the thumb (within 5 cm): the press waits up to rayThreeWait for
+            // it to join (a three-finger scroll, below). The thumb meets the index a tracker frame or two
+            // (55 ms each) before the middle, and the press used to go out first: a click and a drag
+            // instead of a scroll (user, 2026-10-19, 4 of 10 tries). The aim is locked, so the click
+            // still lands where it pointed; a pinch with the middle away clicks at once.
+            if (h.pendingPress && rayScroll != 0 && rayThreeWait > 0 && sideGap[side][1] >= 0 && sideGap[side][1] < 0.05)
+                h.pressAt = std::max(h.pressAt, tnow + std::chrono::microseconds(int64_t(rayThreeWait * 1e6)));
             hold = h;
             rays[rs].Hold(true, secsOf(tnow));
             if (debug)
@@ -3292,6 +3312,12 @@ int main() {
             // ft-screens tells which hands are near its panels; while it does (a report within 2 s), a
             // gesture waits for its report on the begin's frame (60 ms at most), and one near is left to it.
             const bool screensNear = tnow - nearAt < std::chrono::seconds(2);
+            // A three-finger pinch held on past ft-hands' end (threeLoose): it ends once the thumb has
+            // left both fingers (as lost when the hand went).
+            if (hold.threeLoose && hold.src != Src::None && hold.side >= 0 && !threeOn(hold.side)) {
+                hold.threeLoose = false;
+                endGesture(sideGap[hold.side][0] < 0 && sideGap[hold.side][1] < 0, kLostPinch);
+            }
             for (int k : {1, 0, 2})  // grips first: one takes over a pinch
                 for (int s = 0; s < 2; ++s) {
                     const fh_pinch_t &g = slots[k][s];
@@ -3305,6 +3331,9 @@ int main() {
                             hold.right = other == 2;   // a three-finger pinch: ft-hands calls the other finger now; it goes on
                         } else if (hold.src == Src::Ray && hold.rayThree && other >= 0 && (slots[other][s].flags & FH_PINCH_DOWN)) {
                             hold.rayKind = other;      // (the same on the ray: both kinds' point is the knuckles)
+                        } else if (!lost && ((hold.src == Src::Ray && hold.rayThree) || hold.gazeScroll) && threeOn(s)) {
+                            hold.threeLoose = true;    // the thumb still on a finger: it goes on (threeOn)
+                            if (debug) std::printf("three-finger pinch %s: ft-hands ended it, the thumb is still on\n", s ? "right" : "left");
                         } else if (hold.pressed && hold.second >= 0 && hold.second != s) {
                             // the two-hand press (see gazeTwoHand): the other hand's pinch still holds it, and drags now
                             hold.side = hold.second, hold.right = hold.secondKind == 2, hold.second = -1;
@@ -3319,7 +3348,12 @@ int main() {
                         if (p.side == s && p.kind == k && ended) p.ended = true, p.lost = lost;
                     if (!began) continue;
                     if (tnow < calPanelUntil) continue;   // the gaze calibration panel's (above): no gesture
-                    if (k != 1 && hold.src == Src::Ray && hold.rayThree && hold.side == s) continue;   // its other finger
+                    if (k != 1 && hold.side == s && ((hold.src == Src::Ray && hold.rayThree) || hold.gazeScroll)) {
+                        hold.threeLoose = false;   // its other finger, or the same one back: the hold follows it
+                        if (hold.src == Src::Ray) hold.rayKind = k;
+                        else hold.right = k == 2;
+                        continue;
+                    }
                     if (!allowed) {
                         if (k != 1) pinchLog(s, k, "ignored (hands not allowed: a VR game, or the headset off)");
                         continue;

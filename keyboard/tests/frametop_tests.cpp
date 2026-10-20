@@ -81,7 +81,7 @@ int main() {
 
         // Hello on the first poll; no word yet, so typing goes to Steam.
         link.poll();
-        require(relay.take() == std::vector<std::string>{"kbhello"}, "hello on first poll");
+        require(relay.take() == std::vector<std::string>{"kbhello 0"}, "hello on first poll");
         require(!link.fresh() && !link.desktop() && !link.surface(), "no word: not fresh");
         sink.send(KEY_A, 1);
         sink.send(KEY_A, 0);
@@ -131,7 +131,13 @@ int main() {
         now += FrametopLink::stale_after + .1;
         require(!link.fresh() && !link.desktop() && !link.surface(), "stale after silence");
         link.poll();
-        require(relay.take() == std::vector<std::string>{"kbhello"}, "hello again after a second");
+        require(relay.take() == std::vector<std::string>{"kbhello 0"}, "hello again after a second");
+        link.set_open(true);
+        link.poll();
+        require(relay.take() == std::vector<std::string>{"kbhello 1"}, "hello at once when it opens");
+        link.set_open(true);
+        link.poll();
+        require(relay.take().empty(), "no change, no hello within the second");
 
         // Another name can't speak for the relay.
         {

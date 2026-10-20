@@ -709,6 +709,9 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                                .now = now});
         const bool dashboard_visible = surface();
         lifecycle.dashboard_visibility(dashboard_visible);
+        if (frametop) {
+            frametop->set_open(frametop_open && lifecycle.visible());
+        }
         // Hidden panels cannot be grabbed. Do not query both render models in
         // standby; require a released grip sample again when the panel returns.
         if (!lifecycle.visible()) {

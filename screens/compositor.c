@@ -155,6 +155,7 @@ struct server {
     // panel. The input relay grabs the keyboards while it's the screens (see keys_update).
     bool keys_clicked;    // the last click was on a screen
     bool keys_desktop;    // ...and the screens are showing: typing goes to the desktop
+    bool keys_shown;      // the relay was told the screens show (see keys_update)
     int key_remote;       // the last click was on this remote screen (index): typing goes to it; -1 not
     // Spotwatch's search (spotwatch/ft-spotwatch) has the typing while it's open: "spotwatch on",
     // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
@@ -166,6 +167,11 @@ struct server {
     int kb_screen;         // the screen it's open for, -1 closed
     bool kb_auto;          // opened for a focused text field (not by a button)
     unsigned kb_close_at;  // ticks: close it then (a text field lost focus), 0 not
+    // Full Keyboard (keyboard/, through the relay's "fullkb OPEN", every second while it runs):
+    // the "vrkeyboard" commands open and close it instead (see fullkb_command).
+    uint32_t fullkb_until;  // ms; it counts as running until then, 0 not
+    bool fullkb_open;       // it's up for Frametop
+    bool fullkb_auto;       // ...opened for a focused text field
     bool vr;               // connected to SteamVR (not --no-vr)
     bool beside;           // a second instance next to the desktop (--beside): remote screens only
 };
@@ -192,6 +198,19 @@ static void spot_send(struct server *s, const char *msg) {
     memcpy(addr.sun_path + 1, name, sizeof name - 1);
     sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
            offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+}
+
+// To the input relay's control socket (@frametop_relay).
+static void relay_send(struct server *s, const char *msg) {
+    struct sockaddr_un addr = {.sun_family = AF_UNIX};
+    const char name[] = "frametop_relay";
+    memcpy(addr.sun_path + 1, name, sizeof name - 1);
+    sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
+           offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+}
+
+static bool fullkb(const struct server *s) {
+    return s->fullkb_until && (int32_t)(s->fullkb_until - now_ms()) > 0;
 }
 
 static void spot_dismiss(struct server *s, const char *why) {
@@ -595,10 +614,11 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
     wlr_seat_pointer_notify_frame(s->seat);
 }
 
-// Tell the input relay where typing goes, on a change and every second: while it's the
-// desktop, the relay grabs pass-through keyboards so SteamVR (and the Steam app with
-// gamescope's focus) doesn't get the keys too. Without word from us for a few seconds,
-// the relay gives the keyboards back, so a closed desktop doesn't keep them.
+// Tell the input relay where typing goes, and whether the screens show, on a change and every
+// second: while it's the desktop, the relay grabs pass-through keyboards so SteamVR (and the
+// Steam app with gamescope's focus) doesn't get the keys too. Without word from us for a few
+// seconds, the relay gives the keyboards back, so a closed desktop doesn't keep them. Full
+// Keyboard hears both from the relay: it shows over the screens and types into the desktop.
 static void keys_update(struct server *s) {
     if (!s->vr || s->beside) return;  // a test instance leaves the running desktop's keyboards alone
     if (s->spot_until && ft_vr_paused()) spot_dismiss(s, "paused");
@@ -607,18 +627,17 @@ static void keys_update(struct server *s) {
         wlr_log(WLR_INFO, "spotwatch's lease lapsed");
     }
     // Spotwatch's search takes typing from wherever it went, Steam too.
-    const bool desktop = spot_open(s) || (s->keys_clicked && ft_vr_screens_shown());
+    const bool shown = ft_vr_screens_shown();
+    const bool desktop = spot_open(s) || (s->keys_clicked && shown);
     const uint32_t t = now_ms();
-    if (desktop == s->keys_desktop && t - s->relay_sent < 1000) return;
+    if (desktop == s->keys_desktop && shown == s->keys_shown && t - s->relay_sent < 1000) return;
     if (desktop != s->keys_desktop) wlr_log(WLR_INFO, "typing goes to %s", desktop ? "the desktop" : "Steam");
     s->keys_desktop = desktop;
+    s->keys_shown = shown;
     s->relay_sent = t;
-    struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    const char name[] = "frametop_relay";
-    memcpy(addr.sun_path + 1, name, sizeof name - 1);
-    const char *msg = desktop ? "keyboard desktop" : "keyboard steam";
-    sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
-           offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+    char msg[32];
+    snprintf(msg, sizeof msg, "keyboard %s %d", desktop ? "desktop" : "steam", shown ? 1 : 0);
+    relay_send(s, msg);
 }
 
 // How often a screen gets its frame callback (ms; 0 every tick). KWin draws a screen only
@@ -689,6 +708,10 @@ static int tick(int fd, uint32_t mask, void *data) {
         if (s->kb_screen >= 0) {
             ft_vr_keyboard_hide();
             s->kb_screen = -1;
+        } else if (fullkb(s) && s->fullkb_open) {
+            wlr_log(WLR_INFO, "Full Keyboard closed (the text field lost focus)");
+            relay_send(s, "kbpanel hide");
+            s->fullkb_open = false;
         }
     }
     struct timespec now;
@@ -821,7 +844,8 @@ static void handle_key(struct server *s, uint32_t code, int value, char *reply, 
 // Our keyboard (keyboard.cpp). The input relay sends "vrkeyboard show" when a text field
 // on the desktop gets focus (and its setting allows), "vrkeyboard hide" when it loses it,
 // and "vrkeyboard toggle" for a mapped button; ft-layout sends "vrkeyboard close" when it
-// resets the layout. It opens for the screen KWin has keyboard focus on. A hide closes only a keyboard a text field opened, and waits a moment, so
+// resets the layout. While Full Keyboard runs, they open and close it instead (fullkb_command).
+// Ours opens for the screen KWin has keyboard focus on. A hide closes only a keyboard a text field opened, and waits a moment, so
 // moving between text fields doesn't close and reopen it.
 static int focused_screen(struct server *s) {
     struct wlr_surface *focus = s->seat->keyboard_state.focused_surface;
@@ -833,7 +857,44 @@ static int focused_screen(struct server *s) {
     return -1;
 }
 
+// Full Keyboard's turn: the same commands, through the relay ("kbpanel show|hide"). Ours
+// closes if it's open. Whether Full Keyboard is up comes back with its next "fullkb".
+static void fullkb_command(struct server *s, const char *what, char *reply, int size) {
+    if (s->kb_screen >= 0) {
+        wlr_log(WLR_INFO, "keyboard closed (Full Keyboard takes over)");
+        ft_vr_keyboard_hide();
+        s->kb_screen = -1;
+    }
+    if (strcmp(what, "hide") == 0) {
+        if (s->fullkb_open && s->fullkb_auto && !s->kb_close_at) s->kb_close_at = s->ticks + 30;  // ~1/3 s
+        return (void)snprintf(reply, size, "ok");
+    }
+    s->kb_close_at = 0;
+    const bool toggle = strcmp(what, "toggle") == 0;
+    if (strcmp(what, "close") == 0 || (toggle && s->fullkb_open)) {
+        if (s->fullkb_open) wlr_log(WLR_INFO, "Full Keyboard closed (%s)", toggle ? "button" : "reset");
+        relay_send(s, "kbpanel hide");
+        s->fullkb_open = false;
+        return (void)snprintf(reply, size, toggle ? "ok closed" : "ok");
+    }
+    if (!toggle && strcmp(what, "show") != 0) return (void)snprintf(reply, size, "error show|hide|toggle|close");
+    if (s->fullkb_open) return (void)snprintf(reply, size, "ok open");
+    if (!ft_vr_screens_shown()) {
+        wlr_log(WLR_INFO, "Full Keyboard not opened (%s): the screens are hidden", toggle ? "button" : "text field");
+        return (void)snprintf(reply, size, "ok screens hidden");
+    }
+    wlr_log(WLR_INFO, "Full Keyboard open (%s)", toggle ? "button" : "text field");
+    relay_send(s, "kbpanel show");
+    s->fullkb_open = true;
+    s->fullkb_auto = !toggle;
+    snprintf(reply, size, "ok opened");
+}
+
 static void keyboard_command(struct server *s, const char *what, char *reply, int size) {
+    if (fullkb(s)) {
+        fullkb_command(s, what, reply, size);
+        return;
+    }
     const bool open = s->kb_screen >= 0;
     if (strcmp(what, "hide") == 0) {
         if (open && s->kb_auto && !s->kb_close_at) s->kb_close_at = s->ticks + 30;  // ~1/3 s
@@ -891,9 +952,11 @@ static void panel_key(struct server *s, uint32_t code, bool pressed) {
 // "toplevels" (-> "ok <count>" and a line per KWin window: "<screen> <w>x<h> <commits>
 // <title>"), "input <screen> move|down|up|leave [x y [left|right|middle]]" (pointer input
 // as if from that panel, x and y in its pixels; for tests, mostly with --no-vr),
-// "key <code> <value>", "vrkeyboard show|hide|toggle|close" (our keyboard, from the input
-// relay), "spotwatch on|off" (spotwatch's search has the typing; see spot_open), and "click <overlay key>" (from the pointer helper: a mouse click landed on
-// that panel, "-" for none); the rest is in vr.cpp (ft_vr_command).
+// "key <code> <value>", "vrkeyboard show|hide|toggle|close" (our keyboard or Full Keyboard,
+// from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not),
+// "spotwatch on|off" (spotwatch's search has the typing; see spot_open), and "click <overlay
+// key>" (from the pointer helper: a mouse click landed on that panel, "-" for none); the rest
+// is in vr.cpp (ft_vr_command).
 static int control_readable(int fd, uint32_t mask, void *data) {
     struct server *s = data;
     char buf[512], reply[2048];
@@ -947,6 +1010,14 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             continue;  // no reply: keys are fire-and-forget
         } else if (strncmp(buf, "vrkeyboard ", 11) == 0) {
             keyboard_command(s, buf + 11, reply, sizeof reply);
+        } else if (strcmp(buf, "fullkb 0") == 0 || strcmp(buf, "fullkb 1") == 0) {
+            // From the input relay (unbound, no reply): Full Keyboard runs, and is up or not.
+            if (!fullkb(s)) wlr_log(WLR_INFO, "Full Keyboard is the keyboard");
+            s->fullkb_until = (now_ms() + 3000) | 1;
+            s->fullkb_open = buf[7] == '1';
+            if (!s->fullkb_open) s->fullkb_auto = false;
+            len = sizeof from;
+            continue;
         } else if (strncmp(buf, "input ", 6) == 0) {
             char what[8] = "", button[8] = "left";
             double x = 0, y = 0;
@@ -1009,8 +1080,10 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             }
         } else if (strncmp(buf, "click ", 6) == 0) {
             // A click on another panel takes typing to Steam. Our own panels (the screens,
-            // their controls) leave it: a click on a screen arrives as a panel event.
-            if (strcmp(buf + 6, "-") != 0 && strncmp(buf + 6, "frametop.", 9) != 0) {
+            // their controls) and Full Keyboard's leave it: a click on a screen arrives as a
+            // panel event, and Full Keyboard types where typing goes.
+            if (strcmp(buf + 6, "-") != 0 && strncmp(buf + 6, "frametop.", 9) != 0 &&
+                strncmp(buf + 6, "org.framekeyboard.", 18) != 0) {
                 s->keys_clicked = false;
                 spot_dismiss(s, "click");
             }
@@ -1033,8 +1106,10 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             // ft-screens' side of scripts/report.sh's debug line; vr.cpp adds SteamVR's.
             char vr[1024] = "ok vr=off";
             if (s->vr) ft_vr_command("debug", vr, sizeof vr);
-            snprintf(reply, sizeof reply, "%s kb_screen=%d kb_auto=%d typing=%s focused_screen=%d pointer_screen=%d",
-                     vr, s->kb_screen + 1, s->kb_auto ? 1 : 0,
+            snprintf(reply, sizeof reply,
+                     "%s kb_screen=%d kb_auto=%d fullkb=%s typing=%s focused_screen=%d pointer_screen=%d", vr,
+                     s->kb_screen + 1, s->kb_auto ? 1 : 0,
+                     !fullkb(s) ? "off" : s->fullkb_open ? (s->fullkb_auto ? "open-auto" : "open") : "closed",
                      spot_open(s) ? "spotwatch" : s->key_remote >= 0 ? "remote" : s->keys_desktop ? "desktop" : s->keys_clicked ? "desktop (hidden)" : "steam",
                      focused_screen(s) + 1, s->pointer_focus ? s->pointer_focus->index + 1 : 0);
         } else if (!ft_remote_command(buf, reply, sizeof reply)) {

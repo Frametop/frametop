@@ -61,11 +61,17 @@ bool FrametopLink::send(const std::string& message) {
 FrametopLink::Request FrametopLink::take_request() {
     return std::exchange(request_, Request::None);
 }
+void FrametopLink::set_open(bool open) {
+    if (open != open_) {
+        open_ = open;
+        hello_ = -1e9;
+    }
+}
 void FrametopLink::poll() {
     const double now = clock_();
     if (now - hello_ >= 1) {
         hello_ = now;
-        send("kbhello");
+        send(open_ ? "kbhello 1" : "kbhello 0");
     }
     socklen_t relay_length{};
     const auto relay = abstract(relay_, relay_length);

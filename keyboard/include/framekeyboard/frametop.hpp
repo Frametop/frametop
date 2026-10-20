@@ -11,9 +11,10 @@ namespace framekeyboard {
 // should open for a desktop text field, and takes the desktop's typing.
 //
 // Datagrams on the relay's abstract socket @frametop_relay; it replies to our autobound
-// address. We send "kbhello" every second, "kbkey CODE 0|1" and "kbtext TEXT". It sends
-// "kb DESKTOP SURFACE" (typing goes to the desktop 0|1, the desktop's screens show and
-// Frametop isn't paused 0|1) in reply and on a change, and "kb show|hide|toggle".
+// address. We send "kbhello OPEN" (the panel is up for Frametop 0|1) every second and on a
+// change, "kbkey CODE 0|1" and "kbtext TEXT". It sends "kb DESKTOP SURFACE" (typing goes
+// to the desktop 0|1, the desktop's screens show and Frametop isn't paused 0|1) in reply
+// and on a change, and "kb show|hide|toggle".
 // Only messages from that name and this user count, and typing goes there only while
 // its word is fresh, so a stopped relay never leaves desktop typing addressed to a name
 // another process could take.
@@ -31,6 +32,8 @@ class FrametopLink {
     bool desktop() const { return fresh() && desktop_; }
     bool surface() const { return fresh() && surface_; }
     Request take_request();
+    // Whether the panel is up for Frametop: said in the next hello, at once on a change.
+    void set_open(bool open);
     bool send(const std::string& message);
     int fd() const { return fd_; }
     static constexpr double stale_after = 3;
@@ -40,7 +43,7 @@ class FrametopLink {
     Clock clock_;
     int fd_{-1};
     double heard_{-1e9}, hello_{-1e9};
-    bool desktop_{}, surface_{};
+    bool desktop_{}, surface_{}, open_{};
     Request request_{Request::None};
 };
 

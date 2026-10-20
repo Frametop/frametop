@@ -233,7 +233,7 @@ void PanelPlacement::recenter(const Transform& head, const Transform* dashboard_
     const auto rotation = level_heading(dashboard_bottom ? *dashboard_bottom : head);
     // Tilt the top edge away from the viewer: 50 degrees from upright,
     // leaving the typing surface 40 degrees above a horizontal desk.
-    const double pitch = -50 * radians;
+    const double pitch = -(dashboard_bottom ? 50 : tilt_degrees_) * radians;
     const double c = std::cos(pitch), s = std::sin(pitch);
     for (std::size_t row = 0; row < 3; ++row) {
         world_[row][0] = rotation[row][0];
@@ -244,9 +244,14 @@ void PanelPlacement::recenter(const Transform& head, const Transform* dashboard_
         world_[row][3] = dashboard_bottom
                              ? (*dashboard_bottom)[row][3] + rotation[row][2] * .24 -
                                    rotation[row][1] * (.06 + width_ * height_over_width * c / 2)
-                             : head[row][3] - rotation[row][2] * .85 - rotation[row][1] * .65;
+                             : head[row][3] - rotation[row][2] * ahead_ - rotation[row][1] * below_;
     }
     ready_ = true;
+}
+void PanelPlacement::set_head_spot(double ahead, double below, double tilt_degrees) {
+    ahead_ = ahead;
+    below_ = below;
+    tilt_degrees_ = tilt_degrees;
 }
 void PanelPlacement::adjust(PlacementAction action) {
     switch (action) {

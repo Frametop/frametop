@@ -177,6 +177,16 @@ void placement_tests() {
     near(pose[1][1], std::cos(50 * std::numbers::pi / 180), "recenter ignores head pitch");
     near(pose[2][3], -.85, "vertical gaze uses stable horizontal heading");
     near(panel.width(), 2, "recenter preserves chosen size");
+    fk::PanelPlacement frametop;
+    frametop.set_head_spot(.70, .35, 26.6);
+    frametop.recenter(head());
+    pose = frametop.transform();
+    near(pose[1][3], 1.35, "Frametop's spot is 35 cm below eye level");
+    near(pose[2][3], 1.30, "Frametop's spot is 70 cm ahead");
+    near(pose[1][1], std::cos(26.6 * std::numbers::pi / 180), "Frametop's spot faces the eyes");
+    const fk::Transform dash{{{1, 0, 0, 0}, {0, 1, 0, 1}, {0, 0, 1, -1}}};
+    frametop.recenter(head(), &dash);
+    near(frametop.transform()[1][1], std::cos(50 * std::numbers::pi / 180), "under the dashboard keeps the desk tilt");
     const fk::Transform turned{{{0, 0, 1, 3}, {0, 1, 0, 1.7}, {-1, 0, 0, 4}}};
     panel.recenter(turned);
     pose = panel.transform();

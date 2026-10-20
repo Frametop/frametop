@@ -65,6 +65,10 @@ class PanelPlacement {
   public:
     void recenter(const Transform& head, const Transform* dashboard_bottom = nullptr,
                   double height_over_width = 600.0 / 1600.0);
+    // Where recenter puts the panel without a dashboard: its centre `ahead` along the
+    // level heading and `below` under the eyes, its top edge tilted `tilt_degrees`
+    // away from upright. Frametop's mode puts it where its own keyboard opened.
+    void set_head_spot(double ahead, double below, double tilt_degrees);
     void adjust(PlacementAction action);
     Transform transform() const { return world_; }
     void set_transform(const Transform& world);
@@ -77,6 +81,7 @@ class PanelPlacement {
     Transform world_{};
     double width_{.95};
     bool ready_{};
+    double ahead_{.85}, below_{.65}, tilt_degrees_{50};
 };
 // Store the initial controller-to-panel transform, so grabbing never snaps the
 // panel center to the ray. Later updates preserve the exact grabbed point.

@@ -572,6 +572,12 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
     bool recenter_pending = !saved, transform_dirty = false;
     std::uint64_t placement_universe = 0;
     PanelPlacement placement, displayed;
+    if (frametop) {
+        // Frametop: where its own keyboard opened (screens/vr.cpp), 0.70 m ahead and 0.35 m under
+        // the eyes, facing them (26.6 degrees). A hand's laser aimed 65 cm down lowers the hand
+        // past where Frametop puts the laser away.
+        placement.set_head_spot(.70, .35, 26.6);
+    }
     if (saved) {
         // Size survives tracking-space changes, including a reset event before
         // the first valid head pose. Restore the world pose only after checking its universe.

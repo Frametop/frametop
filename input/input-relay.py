@@ -153,6 +153,17 @@ plays a plain one: the pointer devices feed the virtual mouse and keyboard as wi
 mode, typing goes to Steam, and mapped buttons and key combinations do only pause_toggle,
 steam_menu and command:CMD (game_pause.PAUSED_ACTIONS).
 
+Host devices (docs/host-input.md): a computer whose displays stream into Frametop can lend
+it its own keyboard and mouse. Their events come from that host's ft-stream on the control
+socket, only from this user: "hostdev ID KIND NAME" (hello, every second; KIND mouse or
+keyboard), "hostev ID KIND T C V..." (evdev type, code and value triples; a report ends with
+0 0 0) and "hostbye ID KIND". Each host and kind is a node of its own (id "host:ID:KIND", bus
+"network"), fed through a pipe so the loop below reads it like an event node, with the same
+roles, mapped buttons and key bindings. Nothing else sees its events, so there's no grab: while
+typing goes to Steam, a pass-through host keyboard's keys go out on the virtual keyboard. Its
+held keys are counted here (no EVIOCGKEY), and with no word for HOST_TIMEOUT it goes away like
+an unplugged device, its keys coming up.
+
 Pointer mode (POINTER=1 in ~/.config/frametop.conf) sends pointer devices to
 the ft-pointer helper (pointer/helper), which drives the ft_pointer
 SteamVR driver. With POINTER=0, pointer devices go to the virtual mouse and
@@ -175,6 +186,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
   pause ?           the pause state, as {"t": "pause", ...}
   type TEXT         from Frametop Voice: type TEXT where typing goes (above); ignored from
                     another user
+  hostdev, hostev, hostbye   a host's keyboard and mouse, from ft-stream (above); ignored from
+                    another user
 
 Runs on the Frame host as a user service (frametop-input-relay.service). The
 virtual devices are parked in systemd's file descriptor store, so a relay
@@ -196,6 +209,7 @@ import errno
 import fcntl
 import json
 import os
+import re
 import select
 import signal
 import socket
@@ -224,6 +238,9 @@ VOLUME_STANDIN = {KEY_MUTE: 0x2AB, KEY_VOLUMEUP: 0x2AC, KEY_VOLUMEDOWN: 0x2AD}
 VOLUME_ORIGINAL = {v: k for k, v in VOLUME_STANDIN.items()}
 VOLUME_CODES = set(VOLUME_STANDIN) | set(VOLUME_ORIGINAL)
 BUS_USB, BUS_BLUETOOTH, BUS_VIRTUAL = 0x03, 0x05, 0x06
+BUS_NETWORK = 0x1000  # ours, past the kernel's: a host's keyboard or mouse (see "Host devices")
+HOST_TIMEOUT = 3.0  # a host device with no word for this long goes away
+HOST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 # struct input_event on 64-bit: struct timeval (2 x long), u16 type, u16 code, s32 value.
 EVENT = struct.Struct("llHHi")
@@ -958,8 +975,11 @@ class Node:
     or any other device with volume keys (candidate False, role "volume")."""
 
     def __init__(self, path, fd, name, bus, vendor, product, uniq, is_mouse, is_keyboard,
-                 candidate=True, volume_keys=False, only_volume=False, uinput=False):
+                 candidate=True, volume_keys=False, only_volume=False, uinput=False, network=False):
         self.path, self.fd, self.name = path, fd, name
+        # A host's keyboard or mouse (see "Host devices"): fd is a pipe's read end, wfd its write
+        # end; until: it goes away then without word; down: the keys its host holds.
+        self.network, self.wfd, self.until, self.down = network, None, 0.0, set()
         self.uinput = uinput  # made by a program (a remote desktop's keyboard, say), not a real device
         self.bus, self.vendor, self.product, self.uniq = bus, vendor, product, uniq
         self.is_mouse, self.is_keyboard = is_mouse, is_keyboard
@@ -976,7 +996,7 @@ class Node:
     def describe(self):
         kinds = [k for k, on in (("mouse", self.is_mouse), ("keyboard", self.is_keyboard)) if on]
         return {"path": self.path, "name": self.name, "id": self.id, "uniq": self.uniq,
-                "bus": {BUS_USB: "usb", BUS_BLUETOOTH: "bluetooth"}.get(self.bus, str(self.bus)),
+                "bus": {BUS_USB: "usb", BUS_BLUETOOTH: "bluetooth", BUS_NETWORK: "network"}.get(self.bus, str(self.bus)),
                 "kinds": kinds, "role": self.role, "grabbed": self.grabbed, "uinput": self.uinput}
 
 
@@ -1538,6 +1558,9 @@ def main():
         """The keys down on every device read here, as the kernel has them (EVIOCGKEY)."""
         down = set()
         for node in nodes.values():
+            if node.network:
+                down |= node.down
+                continue
             buf = bytearray((KEY_MAX + 8) // 8)
             try:
                 fcntl.ioctl(node.fd, EVIOCGKEY, buf)
@@ -1566,6 +1589,8 @@ def main():
         held_modifiers.intersection_update({MODIFIERS[c] for c in down if c in MODIFIERS})
 
     def keys_down(node):
+        if node.network:
+            return bool(node.down)
         buf = bytearray((KEY_MAX + 8) // 8)
         try:
             fcntl.ioctl(node.fd, EVIOCGKEY, buf)
@@ -1587,6 +1612,8 @@ def main():
             role = role_of(node)
             want_grab = can_grab and (role == "pointer"
                                       or (role == "passthrough" and node.is_keyboard and desktop))
+            if node.network:
+                want_grab = node.grabbed = False  # nothing else reads it
             if want_grab != node.grabbed and role == "passthrough" and keys_down(node):
                 waiting = True
             elif want_grab != node.grabbed:
@@ -1610,9 +1637,50 @@ def main():
         if volume.held and volume.held[0] == node.fd:
             volume.release()
         os.close(node.fd)
+        if node.wfd is not None:
+            os.close(node.wfd)
         del nodes[node.fd]
         seen.pop(node.path, None)
         log(f"released {node.name} ({node.path}): {reason}")
+
+    def host_message(cmd, words, now):
+        path = f"host:{words[1]}:{words[2]}"
+        node = next((n for n in nodes.values() if n.path == path), None)
+        if cmd == "hostbye":
+            if node:
+                drop(node, "its host let go")
+            return
+        if node is None:
+            if cmd != "hostdev":
+                return  # events before a hello
+            label = "".join(c for c in " ".join(words[3:]) if c.isprintable())[:60] or words[1]
+            r, w = os.pipe2(os.O_NONBLOCK | os.O_CLOEXEC)
+            mouse_kind = words[2] == "mouse"
+            node = Node(path, r, f"{label} {'Mouse' if mouse_kind else 'Keyboard'}", BUS_NETWORK, 0, 0, path,
+                        mouse_kind, not mouse_kind, network=True)
+            node.wfd = w
+            nodes[r] = node
+            apply_roles()
+        node.until = now + HOST_TIMEOUT
+        if cmd != "hostev":
+            return
+        nums = words[3:]
+        out = bytearray()
+        for i in range(0, len(nums) - 2, 3):
+            try:
+                etype, code, value = int(nums[i]), int(nums[i + 1]), int(nums[i + 2])
+            except ValueError:
+                return
+            if not ((etype == EV_SYN and code == SYN_REPORT) or (etype == EV_KEY and 0 < code <= KEY_MAX)
+                    or (etype == EV_REL and 0 <= code <= REL_MAX)) or not -2**31 <= value < 2**31:
+                continue
+            if etype == EV_KEY:
+                (node.down.add if value else node.down.discard)(code)
+            out += EVENT.pack(0, 0, etype, code, value)
+        try:
+            os.write(node.wfd, out)
+        except BlockingIOError:
+            log(f"{node.name}: events dropped, the relay is behind")
 
     def reply(addr, obj):
         try:
@@ -1700,6 +1768,14 @@ def main():
                     continue
                 if cmd == "textfield" and len(words) == 2:
                     text_field(words[1] == "1")
+                    continue
+                if cmd in ("hostdev", "hostev", "hostbye"):
+                    # A host's keyboard or mouse, from its ft-stream (see "Host devices"). Keys and
+                    # clicks, so only from this user.
+                    if uid != os.getuid():
+                        log(f"{cmd} from another user ({uid}): ignored")
+                    elif len(words) >= 3 and HOST_ID.fullmatch(words[1]) and words[2] in ("mouse", "keyboard"):
+                        host_message(cmd, words, now)
                     continue
                 if cmd == "type":
                     # From Frametop Voice (unbound, no reply). It types keys, so only from this user.
@@ -1818,6 +1894,8 @@ def main():
         pointer = state["pointer"]
         if now >= next_scan:
             next_scan = now + 1.0
+            for node in [n for n in nodes.values() if n.network and now > n.until]:
+                drop(node, "its host went quiet")
             reconcile_desktop_keys()
             current = {}
             for name in os.listdir("/dev/input"):
@@ -1882,7 +1960,9 @@ def main():
             if fd is control:
                 handle_control(now)
                 continue
-            node = nodes[fd]
+            node = nodes.get(fd)
+            if node is None:
+                continue  # dropped earlier in this batch (a host's "hostbye")
             try:
                 data = os.read(fd, EVENT.size * 64)
             except OSError as e:
@@ -1929,6 +2009,12 @@ def main():
                             except OSError:
                                 pass  # helper not running (SteamVR not running)
                         to_screens(code, value)
+                        if node.network and code < BTN_MISC and (code in node.held or
+                                                                 (value == 1 and now >= state["desktop_until"])):
+                            # Nothing else reads a host's keyboard: Steam gets it from here.
+                            keyboard.emit(etype, code, value)
+                            keyboard.sync()
+                            (node.held.add if value else node.held.discard)(code)
                     continue
                 if etype == EV_KEY:
                     action = buttons.get(str(code), DEFAULT_BUTTONS.get(code, "key"))

@@ -2,7 +2,7 @@
 Type=Application
 Name=Frametop Tour
 GenericName=A walk through Frametop
-Comment=What Frametop does: screens, shortcuts, eye and hand tracking, spotwatch, floating windows, pins, profiles
+Comment=What Frametop does: screens, shortcuts, eye and hand tracking, frunner, floating windows, pins, profiles
 Exec=@REPO@/tour/ft-tour
 Icon=help-about
 Categories=Utility;

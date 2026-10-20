@@ -113,7 +113,7 @@
 #include "keyboard.h"
 #include "roomview.h"
 #include "steampanels.h"
-#include "../spotwatch/reserve.h"
+#include "../frunner/reserve.h"
 
 #include <drm_fourcc.h>
 #include <openvr.h>
@@ -1887,7 +1887,7 @@ Screen *Find(int one_based) {
 // turns instead of you. A spin that arrives during one adds to it, from where the panels are
 // headed, so quick taps carry on smoothly. Grabbing a panel, or a command that places it,
 // takes it out of the spin where it is. The 3D mouse's pointer goes to straight ahead.
-// "spin to N" turns the ring the short way so panel N comes to straight ahead (spotwatch).
+// "spin to N" turns the ring the short way so panel N comes to straight ahead (frunner).
 constexpr double kSpinSeconds = 0.3;  // how long a spin takes
 constexpr double kSpinAhead = 8;      // degrees: a panel this near straight ahead is the current one
 constexpr double kSpinFocus = 30;     // degrees: when a spin settles, the panel this near ahead gets typing
@@ -2822,7 +2822,7 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms 
 // ---------------------------------------------------------------- the front slot
 // One place in front of you for the lazy susan (user, 2026-10-11: "make the system a bit more logical
 // with the lazy susan"; the proposals they took): a stroke (or Meta+Alt+Tab) brings the next screen
-// there, 1 m ahead (g_frontReading; never nearer than behind spotwatch's reserved spot), as big as its resolution needs for its text to read
+// there, 1 m ahead (g_frontReading; never nearer than behind frunner's reserved spot), as big as its resolution needs for its text to read
 // (grabthat::ReadableSize), one at a time: the one there goes home first. Turned away from, it goes
 // home, unless you used it a while (g_frontKeepMs of input on it: kept). Resized there, it comes that
 // size next time (g_frontDeg). Its home: where it lived before it came.
@@ -3377,7 +3377,7 @@ void SusanCommand(bool next, char *reply, int size) {
     BringReadable(i, grabthat::InFront(head, g_frontReading, g_frontDrop), true, next ? "the lazy susan, next" : "the lazy susan, back");
     std::snprintf(reply, size, "ok screen %d", i + 1);
 }
-// "spin to N" (spotwatch) while the lazy susan brings: panel N to the front slot, the rest stay put.
+// "spin to N" (frunner) while the lazy susan brings: panel N to the front slot, the rest stay put.
 void SusanBring(int i, const Mat &head, char *reply, int size) {
     if (g_front.panel != i) {
         if (g_front.released) FrontHome("restored by spin to");
@@ -4296,7 +4296,7 @@ bool ft_vr_init(void) {
     }
     g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";   // the lazy susan brings panels (0: the room turns)
     num("SCREEN_SPIN_DISTANCE", g_frontReading, 0.4, 3);   // the front slot's reading distance (m)...
-    g_frontReading = std::max(g_frontReading, spotreserve::kDistance + spotreserve::kFrontGap);   // ...behind spotwatch's spot
+    g_frontReading = std::max(g_frontReading, spotreserve::kDistance + spotreserve::kFrontGap);   // ...behind frunner's spot
     num("SCREEN_SPIN_PPD", g_frontRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need
     num("SCREEN_SPIN_MAX_DEG", g_frontRead.maxW, 30, 100);   // ...at most this wide (deg; wider ones curve round you)
     num("SCREEN_SPIN_MAX_TALL_DEG", g_frontRead.maxH, 20, 90);
@@ -5345,7 +5345,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
     } else if (!std::strncmp(cmd, "spin ", 5)) {
         SpinCommand(cmd + 5, reply, size);
     } else if (std::sscanf(cmd, "front %d", &n) == 1) {
-        // Typing and the active window go to panel N where it is, as after a spin to it (spotwatch,
+        // Typing and the active window go to panel N where it is, as after a spin to it (frunner,
         // for a pinned panel, which doesn't spin).
         if (!Find(n)) return (void)std::snprintf(reply, size, "error no panel %d", n);
         g_spin.front = n - 1;

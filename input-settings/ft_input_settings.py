@@ -211,7 +211,7 @@ ACTION_LABELS = {
     "dictate_hold": "Dictation: while held",
     "spin_next": "Spin the panels: next one on the right to the front",
     "spin_prev": "Spin the panels: next one on the left to the front",
-    "spotwatch": "Spotwatch: search apps and remote displays",
+    "frunner": "Frunner: search apps and remote displays",
     "key": "Pass through as key",
     "none": "Do nothing",
 }
@@ -310,10 +310,10 @@ MODIFIER_NAMES = {29: "Ctrl", 42: "Shift", 56: "Alt", 125: "Meta"}
 RIGHT_MODIFIER_NAMES = {97: "Right Ctrl", 54: "Right Shift", 100: "Right Alt", 126: "Right Meta"}
 # What a rules file without "key_bindings" gets (the relay's DEFAULT_KEY_BINDINGS): a Meta tap
 # opens Steam's menu, Meta+J and Meta+K click at the gaze, Meta+Shift+F floats a window,
-# Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels, Meta+Space opens spotwatch.
+# Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels, Meta+Space opens frunner.
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "spotwatch"}
+                        "125+57": "frunner"}
 
 
 def voice_installed():
@@ -377,12 +377,29 @@ def code_names():
     return names
 
 
+# Actions renamed since a release (the relay's RENAMED_ACTIONS): a rules file saved before shows
+# and saves them under their new names.
+RENAMED_ACTIONS = {"spotwatch": "frunner"}
+
+
+def renamed_actions(table):
+    if not isinstance(table, dict):
+        return table
+    return {k: renamed_actions(v) if isinstance(v, dict) else RENAMED_ACTIONS.get(v, v) if isinstance(v, str) else v
+            for k, v in table.items()}
+
+
 def read_json(path):
     try:
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
     except (OSError, ValueError):
         return {}
+    if isinstance(data, dict):
+        for table in ("buttons", "controller_buttons", "key_bindings"):
+            if table in data:
+                data[table] = renamed_actions(data[table])
+    return data
 
 
 def read_conf():

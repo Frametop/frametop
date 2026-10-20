@@ -17,7 +17,7 @@ const settled = {};    // id -> {output, frame, fullScreen, maximized}: where a 
 const held = {};       // id -> {w, h, until, asked}: a size asked for, for a second (see hold)
 const moved = {};      // id -> true, or "back" once put back: it moved while KWin changed the outputs
 let layout = "", layoutOutputs = {}, layoutSince = 0;  // the outputs at the last screensChanged
-const activeAt = {};   // id -> when it was last KWin's active window (ms), for spotwatch's most recent
+const activeAt = {};   // id -> when it was last KWin's active window (ms), for frunner's most recent
 
 function send(ev) {
     callDBus(SERVICE, PATH, IFACE, "Event", JSON.stringify(ev));
@@ -382,7 +382,7 @@ function run(c) {
             if (w && w.minimized) w.minimized = false;
             if (w) workspace.activeWindow = w;
             break;
-        case "to-output": {  // a launched window that opens docked, onto that screen (spotwatch)
+        case "to-output": {  // a launched window that opens docked, onto that screen (frunner)
             const o = outputByName(c.output);
             if (w && o && (!w.output || w.output.name !== o.name)) workspace.sendClientToScreen(w, o);
             if (w) workspace.activeWindow = w;

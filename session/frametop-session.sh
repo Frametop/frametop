@@ -306,16 +306,17 @@ EOF
   *) rm -f "$autostart" ;;
 esac
 
-# Spotwatch (spotwatch/ft-spotwatch, Meta+Space): the search for apps and remote displays, up
+# Frunner (frunner/ft-frunner, Meta+Space): the search for apps and remote displays, up
 # exactly while this desktop is. ft-screens gives it the typing while it's open (screens backend).
-autostart=$XDG_CONFIG_HOME/autostart/frametop-spotwatch.desktop
+rm -f "$XDG_CONFIG_HOME/autostart/frametop-spotwatch.desktop"  # its name before 2026-10-20
+autostart=$XDG_CONFIG_HOME/autostart/frametop-frunner.desktop
 if [ "$backend" = screens ]; then
   mkdir -p "$(dirname "$autostart")"
   cat > "$autostart" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Frametop spotwatch
-Exec=sh -c 'exec "$here/../spotwatch/ft-spotwatch" > /tmp/frametop-spotwatch.log 2>&1'
+Name=Frametop frunner
+Exec=sh -c 'exec "$here/../frunner/ft-frunner" > /tmp/frametop-frunner.log 2>&1'
 X-KDE-autostart-phase=2
 NoDisplay=true
 EOF

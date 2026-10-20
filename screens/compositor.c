@@ -157,7 +157,7 @@ struct server {
     bool keys_desktop;    // ...and the screens are showing: typing goes to the desktop
     bool keys_shown;      // the relay was told the screens show (see keys_update)
     int key_remote;       // the last click was on this remote screen (index): typing goes to it; -1 not
-    // Spotwatch's search (spotwatch/ft-spotwatch) has the typing while it's open: "spotwatch on",
+    // Frunner's search (frunner/ft-frunner) has the typing while it's open: "frunner on",
     // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
     uint32_t spot_until;  // ms; 0 closed
     int relay_fd;         // unbound, so the relay can't reply into our control socket
@@ -182,7 +182,7 @@ static uint32_t now_ms(void) {
     return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
-// ---------------------------------------------------------------- spotwatch
+// ---------------------------------------------------------------- frunner
 
 #define SPOT_LEASE_MS 3000
 
@@ -190,11 +190,11 @@ static bool spot_open(const struct server *s) {
     return s->spot_until && (int32_t)(s->spot_until - now_ms()) > 0;
 }
 
-// To ft-spotwatch's socket (@ft_spotwatch): "key <code> <value>" while it has the typing, and
+// To ft-frunner's socket (@ft_frunner): "key <code> <value>" while it has the typing, and
 // "dismiss <why>" when something else takes it (a click elsewhere, a pause).
 static void spot_send(struct server *s, const char *msg) {
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    const char name[] = "ft_spotwatch";
+    const char name[] = "ft_frunner";
     memcpy(addr.sun_path + 1, name, sizeof name - 1);
     sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
            offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
@@ -216,7 +216,7 @@ static bool fullkb(const struct server *s) {
 static void spot_dismiss(struct server *s, const char *why) {
     if (!spot_open(s)) return;
     s->spot_until = 0;
-    wlr_log(WLR_INFO, "spotwatch dismissed (%s)", why);
+    wlr_log(WLR_INFO, "frunner dismissed (%s)", why);
     char msg[64];
     snprintf(msg, sizeof msg, "dismiss %s", why);
     spot_send(s, msg);
@@ -624,9 +624,9 @@ static void keys_update(struct server *s) {
     if (s->spot_until && ft_vr_paused()) spot_dismiss(s, "paused");
     if (s->spot_until && !spot_open(s)) {
         s->spot_until = 0;
-        wlr_log(WLR_INFO, "spotwatch's lease lapsed");
+        wlr_log(WLR_INFO, "frunner's lease lapsed");
     }
-    // Spotwatch's search takes typing from wherever it went, Steam too.
+    // Frunner's search takes typing from wherever it went, Steam too.
     const bool shown = ft_vr_screens_shown();
     const bool desktop = spot_open(s) || (s->keys_clicked && shown);
     const uint32_t t = now_ms();
@@ -821,12 +821,12 @@ static void handle_key(struct server *s, uint32_t code, int value, char *reply, 
         return;
     }
     if (kind == FT_RELAY_DROP) return (void)snprintf(reply, size, "ok not a key or mouse button");
-    // Spotwatch's search has the typing, except for the release of a key the desktop holds.
+    // Frunner's search has the typing, except for the release of a key the desktop holds.
     if (spot_open(s) && (value || !key_held(&s->keyboard, code))) {
         char msg[32];
         snprintf(msg, sizeof msg, "key %u %d", code, value);
         spot_send(s, msg);
-        return (void)snprintf(reply, size, "ok spotwatch");
+        return (void)snprintf(reply, size, "ok frunner");
     }
     // A remote screen has the typing, except for the release of a key the desktop holds.
     if (s->key_remote >= 0 && ft_remote_is(s->key_remote) && (value || !key_held(&s->keyboard, code))) {
@@ -954,7 +954,7 @@ static void panel_key(struct server *s, uint32_t code, bool pressed) {
 // as if from that panel, x and y in its pixels; for tests, mostly with --no-vr),
 // "key <code> <value>", "vrkeyboard show|hide|toggle|close" (our keyboard or Full Keyboard,
 // from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not),
-// "spotwatch on|off" (spotwatch's search has the typing; see spot_open), and "click <overlay
+// "frunner on|off" (frunner's search has the typing; see spot_open), and "click <overlay
 // key>" (from the pointer helper: a mouse click landed on that panel, "-" for none); the rest
 // is in vr.cpp (ft_vr_command).
 static int control_readable(int fd, uint32_t mask, void *data) {
@@ -1089,15 +1089,15 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             }
             len = sizeof from;
             continue;
-        } else if (strcmp(buf, "spotwatch on") == 0 || strcmp(buf, "spotwatch off") == 0) {
-            // Spotwatch's search opened (renewed every second while open) or closed: it has the
+        } else if (strcmp(buf, "frunner on") == 0 || strcmp(buf, "frunner off") == 0) {
+            // Frunner's search opened (renewed every second while open) or closed: it has the
             // typing meanwhile. A remote screen lets go of the keys it holds first.
             const bool on = buf[11] == 'n';
             if (on && !spot_open(s)) {
                 if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) ft_remote_blur(s->key_remote);
-                wlr_log(WLR_INFO, "spotwatch open: typing goes to it");
+                wlr_log(WLR_INFO, "frunner open: typing goes to it");
             } else if (!on && spot_open(s)) {
-                wlr_log(WLR_INFO, "spotwatch closed");
+                wlr_log(WLR_INFO, "frunner closed");
             }
             s->spot_until = on ? (now_ms() + SPOT_LEASE_MS) | 1 : 0;
             keys_update(s);
@@ -1110,7 +1110,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                      "%s kb_screen=%d kb_auto=%d fullkb=%s typing=%s focused_screen=%d pointer_screen=%d", vr,
                      s->kb_screen + 1, s->kb_auto ? 1 : 0,
                      !fullkb(s) ? "off" : s->fullkb_open ? (s->fullkb_auto ? "open-auto" : "open") : "closed",
-                     spot_open(s) ? "spotwatch" : s->key_remote >= 0 ? "remote" : s->keys_desktop ? "desktop" : s->keys_clicked ? "desktop (hidden)" : "steam",
+                     spot_open(s) ? "frunner" : s->key_remote >= 0 ? "remote" : s->keys_desktop ? "desktop" : s->keys_clicked ? "desktop (hidden)" : "steam",
                      focused_screen(s) + 1, s->pointer_focus ? s->pointer_focus->index + 1 : 0);
         } else if (!ft_remote_command(buf, reply, sizeof reply)) {
             ft_vr_command(buf, reply, sizeof reply);

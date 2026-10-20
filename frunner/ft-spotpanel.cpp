@@ -1,7 +1,7 @@
-// ft-spotpanel: spotwatch's search panel (spotwatch/ft-spotwatch drives it; docs/spotwatch.md).
+// ft-spotpanel: frunner's search panel (frunner/ft-frunner drives it; docs/frunner.md).
 // A SteamVR overlay that opens straight ahead of where your head points and stays there in the
 // room: a glass search pill, and under it a card of results, or of an app's launch options.
-// It's drawn on the CPU and holds no state of its own beyond the picture: ft-spotwatch sends it
+// It's drawn on the CPU and holds no state of its own beyond the picture: ft-frunner sends it
 // everything to show, and it sends back what the lasers and the 3D mouse do on it.
 //
 // "Glass" is faux: SteamVR's overlays have alpha but no backdrop blur, so the pill and the card
@@ -11,7 +11,7 @@
 // Control socket: abstract unix datagram "@ft_spotpanel" (--socket NAME); a sender with an
 // address gets "ok" or "error ...":
 //   show          place it in front of you (head direction, at --distance: its reserved spot,
-//                 spotwatch/reserve.h) and show it with
+//                 frunner/reserve.h) and show it with
 //                 its next picture
 //   show toast    the same, for a toast: the lasers pass through it
 //   hide
@@ -23,19 +23,19 @@
 //       row <kind> <icon> <title> <subtitle> <badge>
 //                                      kind: item, header (a menu's top row: back on a click),
 //                                      or section (a label, not selectable); icon: the path of
-//                                      a 64x64 RGBA file ft-spotwatch made, or "-"
+//                                      a 64x64 RGBA file ft-frunner made, or "-"
 //   ping          -> "ok shown" or "ok hidden"
-// To ft-spotwatch (@ft_spotwatch, --notify NAME): "hover <row>", "click <row>", "menu <row>"
+// To ft-frunner (@ft_frunner, --notify NAME): "hover <row>", "click <row>", "menu <row>"
 // (a right click), "back" (the header), "scroll <+1|-1>", and "outside" (a click on the panel
 // but on no row or the pill, which the panel's clear part catches: it closes the search).
 //
 // Pictures go into the next of three shared buffers (linear DMA-BUFs SteamVR imported once),
 // as screens/keyboard.cpp and gaze/panel/ft-gazepanel.cpp do; SetOverlayRaw is the fallback.
 //
-// Options: --watch-stdin (quit when stdin closes: ft-spotwatch runs it), --socket NAME,
+// Options: --watch-stdin (quit when stdin closes: ft-frunner runs it), --socket NAME,
 // --notify NAME, --distance METRES, --width METRES; --render FILE draws the state on stdin
 // (the lines after "state") into FILE as raw RGBA, 1120x720, and quits: no SteamVR (a look at
-// the picture: spotwatch/tools/render.py). Runs in the container (screens/build.sh
+// the picture: frunner/tools/render.py). Runs in the container (screens/build.sh
 // builds it into screens/build).
 #include <openvr.h>
 
@@ -248,7 +248,7 @@ void Magnifier(Canvas &c, double cx, double cy, Color k) {
         }
 }
 
-// Icons: 64x64 RGBA files ft-spotwatch rasterized, kept once loaded.
+// Icons: 64x64 RGBA files ft-frunner rasterized, kept once loaded.
 std::map<std::string, std::vector<uint8_t>> g_icons;
 
 const std::vector<uint8_t> *Icon(const std::string &path) {
@@ -327,7 +327,7 @@ void Draw(Canvas &c, const State &s) {
     }
     const int tx = int(px0) + 92, tmax = int(px1 - px0) - 92 - 40, tsize = 44;
     if (s.query.empty()) {
-        Text(c, "Spotwatch Search", tsize, tx, int(cy), kDim);
+        Text(c, "Frunner Search", tsize, tx, int(cy), kDim);
         Round(c, tx - 2, cy - 24, tx + 1, cy + 24, 1.5, kAccent, 0.95);  // the caret
     } else {
         // Long queries show their end, where you type.
@@ -510,7 +510,7 @@ void ParseState(const std::string &text, State &s) {
 
 int main(int argc, char **argv) {
     bool watchStdin = false;
-    std::string sockName = "ft_spotpanel", notifyName = "ft_spotwatch", renderPath;
+    std::string sockName = "ft_spotpanel", notifyName = "ft_frunner", renderPath;
     double distance = spotreserve::kDistance, width = spotreserve::kWidth;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--watch-stdin")) watchStdin = true;
@@ -578,7 +578,7 @@ int main(int argc, char **argv) {
     }
     vr::IVROverlay *ov = vr::VROverlay();
     vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
-    if (ov->CreateOverlay("frametop.spotwatch", "Frametop spotwatch", &h) != vr::VROverlayError_None) {
+    if (ov->CreateOverlay("frametop.frunner", "Frametop frunner", &h) != vr::VROverlayError_None) {
         std::fprintf(stderr, "ft-spotpanel: can't create the overlay (another copy running?)\n");
         return 1;
     }

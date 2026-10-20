@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""ft-spotwatch: spotwatch, Frametop's search for apps and remote displays (docs/spotwatch.md).
+"""ft-frunner: frunner, Frametop's search for apps and remote displays (docs/frunner.md).
 
-Meta+Space (the input relay's spotwatch action) opens a search pill straight ahead of where your
+Meta+Space (the input relay's frunner action) opens a search pill straight ahead of where your
 head points. Type to find an app or a remote display ("{host} - {display}"); Tab, Shift+Tab,
 and the arrow keys move through what's found, and Enter or a click opens it:
   - an app that's running: its most recent window comes to the front. The lazy susan spins the
@@ -15,13 +15,13 @@ Disconnect. Esc goes back from a menu, and closes the search.
 
 Runs inside the Frametop desktop's Plasma session (its autostart, like ft-floatd), so it's up
 exactly while the desktop is, and starts apps with the desktop's environment. The pill is
-ft-spotpanel (spotwatch/ft-spotpanel.cpp, in the container), which this runs and keeps running.
-While the search is open, ft-screens sends it the typing ("spotwatch on", renewed every
+ft-spotpanel (frunner/ft-spotpanel.cpp, in the container), which this runs and keeps running.
+While the search is open, ft-screens sends it the typing ("frunner on", renewed every
 second; see compositor.c), from keyboards and Frametop's keyboard alike, so nothing reaches an
 app or Steam meanwhile.
 
-Datagrams on @ft_spotwatch (--socket NAME); a sender with an address gets "ok ..." or "error":
-  toggle [keyboard|mouse|left|right]   the input relay's spotwatch action, and what pressed it:
+Datagrams on @ft_frunner (--socket NAME); a sender with an address gets "ok ..." or "error":
+  toggle [keyboard|mouse|left|right]   the input relay's frunner action, and what pressed it:
                                        from a mouse or controller, Frametop's keyboard opens too
   open [SOURCE] | close | status       (status -> "ok open|closed list|menu <query>")
   rows                                 -> "ok [titles]" (JSON): what's listed now, for tests
@@ -31,11 +31,11 @@ Datagrams on @ft_spotwatch (--socket NAME); a sender with an address gets "ok ..
   hover N | click N | menu N | back | scroll +1|-1 | outside      ft-spotpanel: the lasers and
                                        the 3D mouse on the panel (N: a row shown)
 
-Usage counts (what you open often comes first) are in ~/.config/frametop-spotwatch.json, and
-the icons, rasterized for the panel, in ~/.cache/frametop/spotwatch. Log:
-/tmp/frametop-spotwatch.log.
+Usage counts (what you open often comes first) are in ~/.config/frametop-frunner.json, and
+the icons, rasterized for the panel, in ~/.cache/frametop/frunner. Log:
+/tmp/frametop-frunner.log.
 
-Usage: ft-spotwatch [--socket NAME] [--panel-socket NAME] [--screens NAME] [--float NAME]
+Usage: ft-frunner [--socket NAME] [--panel-socket NAME] [--screens NAME] [--float NAME]
                     [--no-panel]
 """
 import argparse
@@ -66,11 +66,12 @@ PANEL = os.path.join(REPO, "screens", "build", "ft-spotpanel")
 IN_BOX = os.path.join(REPO, "scripts", "in-box")  # runs a program in the container it was built in
 FT_LAYOUT = os.path.join(REPO, "layout", "ft-layout")
 STANDALONE_ACTION = "frametop-standalone"  # Launch as Standalone (float/ft_apps.py): what Enter does anyway
-USAGE_PATH = os.path.expanduser("~/.config/frametop-spotwatch.json")
-ICON_DIR = os.path.expanduser("~/.cache/frametop/spotwatch")
+USAGE_PATH = os.path.expanduser("~/.config/frametop-frunner.json")
+OLD_USAGE_PATH = os.path.expanduser("~/.config/frametop-spotwatch.json")  # read until the first save (its name before 2026-10-20)
+ICON_DIR = os.path.expanduser("~/.cache/frametop/frunner")
 ICON_PX = 64              # ft-spotpanel's icon files: this square, RGBA
 ROWS = 7                  # rows the panel shows (ft-spotpanel's kMaxRows)
-RENEW_MS = 1000           # "spotwatch on" again this often while open (ft-screens' lease is 3 s)
+RENEW_MS = 1000           # "frunner on" again this often while open (ft-screens' lease is 3 s)
 REPEAT_DELAY_MS, REPEAT_MS = 450, 40  # a held Backspace or arrow repeats (the relay sends no repeats)
 REPEATS = {14, 103, 108, 104, 109}
 SHIFT, CTRL, ALT, META = {42, 54}, {29, 97}, {56, 100}, {125, 126}
@@ -292,7 +293,7 @@ class Entry:
         self.item = item    # the result's spotsearch.Item (list rows)
 
 
-class Spotwatch:
+class Frunner:
     def __init__(self, args):
         self.args = args
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -623,7 +624,7 @@ class Spotwatch:
         if not self.panel and not self.args.no_panel:
             self.start_panel()
             return "error the panel isn't running yet"
-        if not self.screens("spotwatch on").startswith("ok"):
+        if not self.screens("frunner on").startswith("ok"):
             return "error ft-screens didn't answer"
         self.is_open, self.query, self.mode, self.entries, self.sel, self.top = True, "", "list", [], 0, 0
         self.held.clear()
@@ -650,7 +651,7 @@ class Spotwatch:
         if not self.is_open:
             return False
         try:
-            self.fire.sendto(b"spotwatch on", "\0" + self.args.screens)
+            self.fire.sendto(b"frunner on", "\0" + self.args.screens)
         except OSError:
             pass
         return True
@@ -665,7 +666,7 @@ class Spotwatch:
             self.renew = None
         self.stop_repeat()
         if tell:
-            self.screens("spotwatch off")
+            self.screens("frunner off")
         if self.opened_keyboard:
             self.screens("vrkeyboard close")
             self.opened_keyboard = False
@@ -702,8 +703,9 @@ class Spotwatch:
 
     @staticmethod
     def load_usage():
+        path = USAGE_PATH if os.path.exists(USAGE_PATH) else OLD_USAGE_PATH
         try:
-            with open(USAGE_PATH) as f:
+            with open(path) as f:
                 u = json.load(f).get("usage", {})
             return u if isinstance(u, dict) else {}
         except (OSError, ValueError, AttributeError):
@@ -953,17 +955,17 @@ class Spotwatch:
 
 
 def main():
-    p = argparse.ArgumentParser(description="Spotwatch: Frametop's search for apps and remote displays")
-    p.add_argument("--socket", default="ft_spotwatch")
+    p = argparse.ArgumentParser(description="Frunner: Frametop's search for apps and remote displays")
+    p.add_argument("--socket", default="ft_frunner")
     p.add_argument("--panel-socket", default="ft_spotpanel")
     p.add_argument("--screens", default="ft_screens")
     p.add_argument("--float", default="frametop_float")
     p.add_argument("--no-panel", action="store_true", help="no ft-spotpanel (tests)")
     args = p.parse_args()
     try:
-        sw = Spotwatch(args)
+        sw = Frunner(args)
     except OSError as e:
-        sys.exit(f"ft-spotwatch: @{args.socket}: {e} (another copy running?)")
+        sys.exit(f"ft-frunner: @{args.socket}: {e} (another copy running?)")
     GLib.io_add_watch(sw.sock.fileno(), GLib.IO_IN, sw.readable)
     GLib.io_add_watch(sw.float_sock.fileno(), GLib.IO_IN, sw.float_readable)
     sw.start_panel()

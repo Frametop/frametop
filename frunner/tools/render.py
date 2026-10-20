@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""A look at spotwatch's panel without a headset: ft-spotpanel --render draws a made-up search
+"""A look at frunner's panel without a headset: ft-spotpanel --render draws a made-up search
 (or the state given as a file) into a PNG, over a dark checkerboard so the glass shows.
 
-  spotwatch/tools/render.py OUT.png [STATE_FILE]
+  frunner/tools/render.py OUT.png [STATE_FILE]
 """
 import os
 import subprocess

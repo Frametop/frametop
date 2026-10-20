@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Frametop Tour: a walk through what Frametop does, the first time the desktop starts, and
-whenever it's opened again (the app menu, spotwatch, SteamVR's Launch a program list, the Tour
+whenever it's opened again (the app menu, frunner, SteamVR's Launch a program list, the Tour
 entry in Frametop Input Settings, or tour/ft-tour).
 
 A Kirigami (QML) app with a Python backend, like Frametop Input Settings, in Frametop's
@@ -29,7 +29,7 @@ DONE_PATH = os.path.expanduser("~/.local/state/frametop/tour.json")
 TOUR_VERSION = 1  # a tour with new pages can show itself again by raising this
 UNITS = os.path.expanduser("~/.config/systemd/user")
 CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
-SOCKETS = {"gazed": "\0ft_gazed", "spotwatch": "\0ft_spotwatch", "screens": "\0ft_screens",
+SOCKETS = {"gazed": "\0ft_gazed", "frunner": "\0ft_frunner", "screens": "\0ft_screens",
            "float": "\0frametop_float"}
 INPUT_SETTINGS = os.path.join(REPO, "input-settings", "ft_input_settings.py")
 DISPLAY_SETTINGS = os.path.join(REPO, "display-settings", "ft_display_settings.py")
@@ -104,7 +104,7 @@ def combo_name(combo, names, modifiers, right_modifiers):
 
 
 # Order on the keyboard page: the everyday ones first.
-BINDING_ORDER = ("steam_menu", "spotwatch", "gaze_left", "gaze_right", "float_toggle", "spin_next", "spin_prev",
+BINDING_ORDER = ("steam_menu", "frunner", "gaze_left", "gaze_right", "float_toggle", "spin_next", "spin_prev",
                  "dictate", "dictate_hold", "pause_toggle", "screens_toggle", "layout_reset")
 
 
@@ -126,7 +126,7 @@ def pages(f, keys):
         "intro": "Frametop puts a Plasma desktop around you in VR: as many screens as you like, single windows "
                  "floating on their own, and the monitors of your other computers. This tour takes a few minutes. "
                  "Each page has buttons to try things or open their settings.",
-        "note": "You can take the tour again any time: Frametop Tour is in the app menu, in spotwatch (Meta+Space), "
+        "note": "You can take the tour again any time: Frametop Tour is in the app menu, in frunner (Meta+Space), "
                 "in SteamVR's Launch a program list, and in Frametop Input Settings.",
         "rows": [], "actions": []}, {
         "id": "screens", "title": "Screens and the 3D mouse", "icon": "video-display",
@@ -203,14 +203,14 @@ def pages(f, keys):
     out.append(hands)
 
     out += [{
-        "id": "spotwatch", "title": "Spotwatch", "icon": "search",
-        "intro": "Spotwatch finds apps and remote displays by name, like Spotlight.",
+        "id": "frunner", "title": "Frunner", "icon": "search",
+        "intro": "Frunner finds apps and remote displays by name, like Spotlight.",
         "rows": [["Meta+Space, on any keyboard", "Opens the search in front of you"],
                  ["Type a name and press Enter", "A running app's window spins to the front; an app that isn't "
                                                  "running opens floating; a remote display connects"],
                  ["Shift+Enter, or a right click", "More: a private window, a new window, docked on this screen"],
                  ["Esc", "Closes it"]],
-        "actions": [{"id": "spotwatch", "text": "Open spotwatch", "icon": "search"}]}, {
+        "actions": [{"id": "frunner", "text": "Open frunner", "icon": "search"}]}, {
         "id": "floating", "title": "Floating windows", "icon": "window-new",
         "intro": "Any desktop window can float in VR as a panel of its own. It's still a window of the same desktop, "
                  "so drag and drop and the clipboard work between floating windows and the screens.",
@@ -263,7 +263,7 @@ def pages(f, keys):
         more["actions"].insert(0, {"id": "input:voice", "text": "Voice", "icon": "audio-input-microphone"})
     out.append(more)
     out.append({"id": "done", "title": "That's the tour", "icon": "checkmark",
-                "intro": "Frametop Tour stays in the app menu, spotwatch, and SteamVR's Launch a program list, for "
+                "intro": "Frametop Tour stays in the app menu, frunner, and SteamVR's Launch a program list, for "
                          "when you want it again.",
                 "rows": [], "actions": []})
     return out
@@ -355,10 +355,10 @@ def main():
                 self.message.emit(("Calibration: look at each dot in the headset; right click or Meta+K stops"
                                    if what == "gaze:calibrate" else "Quick check: look at the dot in front of you")
                                   if ok else "The gaze service isn't running (gaze mode may be off)", not ok)
-            elif what == "spotwatch":
-                ok = send("spotwatch", "open mouse")
-                self.message.emit("Spotwatch is open in front of you: type an app's name" if ok
-                                  else "Spotwatch isn't running (it runs with the Frametop desktop)", not ok)
+            elif what == "frunner":
+                ok = send("frunner", "open mouse")
+                self.message.emit("Frunner is open in front of you: type an app's name" if ok
+                                  else "Frunner isn't running (it runs with the Frametop desktop)", not ok)
             elif what == "spin":
                 ok = send("screens", "spin next")
                 self.message.emit("Spun to the next panel. Meta+Shift+R puts the screens back" if ok

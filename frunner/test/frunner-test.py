@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Spotwatch, offline: the search's ranking (spotsearch.py), then ft-spotwatch itself against a
+"""Frunner, offline: the search's ranking (spotsearch.py), then ft-frunner itself against a
 fake ft-screens and ft-floatd (sockets of its own, so it's safe next to the live desktop), with
 made-up apps and remote displays in a temporary home. No panel, no SteamVR.
 
-  spotwatch/test/spotwatch-test.py
+  frunner/test/frunner-test.py
 """
 import json
 import os
@@ -64,7 +64,7 @@ check("drop_word", (spotsearch.drop_word("hello world"), spotsearch.drop_word("h
       ("hello ", "", ""))
 check("US text fallback", (spotsearch.US_TEXT[30], spotsearch.US_TEXT[57]), (("a", "A"), (" ", " ")))
 
-# ---------------------------------------------------------------- ft-spotwatch
+# ---------------------------------------------------------------- ft-frunner
 
 try:
     import gi
@@ -72,11 +72,11 @@ try:
     from gi.repository import Gio  # noqa: F401
 # AttributeError: a "gi" that isn't PyGObject (the release image's test stage has one).
 except (ImportError, ValueError, AttributeError):
-    print("skip  ft-spotwatch itself: no PyGObject here")
+    print("skip  ft-frunner itself: no PyGObject here")
     sys.exit(1 if failed else 0)
 
 tag = f"ftsw{os.getpid()}"
-home = tempfile.mkdtemp(prefix="ft-spotwatch-test-")
+home = tempfile.mkdtemp(prefix="ft-frunner-test-")
 apps = os.path.join(home, "share", "applications")
 os.makedirs(apps)
 os.makedirs(os.path.join(home, ".config"))
@@ -161,7 +161,7 @@ screens = Fake(f"{tag}_screens", screens_answer)
 floatd = Fake(f"{tag}_float", float_answer)
 env = dict(os.environ, HOME=home, XDG_DATA_HOME=os.path.join(home, "share"), XDG_DATA_DIRS=os.path.join(home, "none"),
            XDG_CONFIG_HOME=os.path.join(home, ".config"), XDG_CACHE_HOME=os.path.join(home, ".cache"))
-daemon = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(HERE), "ft_spotwatch.py"), "--no-panel",
+daemon = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(HERE), "ft_frunner.py"), "--no-panel",
                            "--socket", f"{tag}_sw", "--screens", f"{tag}_screens", "--float", f"{tag}_float"],
                           env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 me = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -205,8 +205,8 @@ try:
             time.sleep(0.1)
     check("starts closed", ask("status").split()[1], "closed")
     check("toggle opens it", ask("toggle keyboard"), "ok")
-    check("...and takes the typing from ft-screens", [m for m in screens.take() if m.startswith("spotwatch")],
-          ["spotwatch on"])
+    check("...and takes the typing from ft-screens", [m for m in screens.take() if m.startswith("frunner")],
+          ["frunner on"])
     time.sleep(0.2)
     type_text("fir")
     check("typing goes into the query", ask("status"), "ok open list fir")
@@ -218,8 +218,8 @@ try:
     press(ENTER)
     check("Enter on a running app: its most recent window is activated", floatd.take(), ["activate w-new"])
     got = screens.take()
-    check("...typing back from spotwatch, and the lazy susan spins its panel to the front",
-          [m for m in got if m.startswith(("spotwatch", "spin"))], ["spotwatch off", "spin to 4"])
+    check("...typing back from frunner, and the lazy susan spins its panel to the front",
+          [m for m in got if m.startswith(("frunner", "spin"))], ["frunner off", "spin to 4"])
     check("...and it closed", ask("status").split()[1], "closed")
 
     ask("open")
@@ -309,7 +309,7 @@ try:
     ask("open")
     tell("dismiss click")
     check("ft-screens' dismiss closes it", ask("status").split()[1], "closed")
-    check("...without telling ft-screens again", [m for m in screens.take() if m == "spotwatch off"], [])
+    check("...without telling ft-screens again", [m for m in screens.take() if m == "frunner off"], [])
 
     ask("open")
     type_text("fi")
@@ -319,7 +319,7 @@ try:
     tell("outside")
     check("a click beside it closes it", ask("status").split()[1], "closed")
 
-    with open(os.path.join(home, ".config", "frametop-spotwatch.json")) as f:
+    with open(os.path.join(home, ".config", "frametop-frunner.json")) as f:
         counts = json.load(f)["usage"]
     check("usage is counted", sorted(counts), ["editor", "firefox", "remote:desk-oled"])
 finally:

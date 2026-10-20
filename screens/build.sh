@@ -2,7 +2,7 @@
 # Build ft-screens in the dev container on the Frame (screens/build/ft-screens), and
 # ft-handtest, which tries the hand cutouts (handcut.cpp) on a test panel of its own, and
 # ft-handview, which draws the hands when Room View is off (handview.cpp), and
-# ft-spotpanel, spotwatch's search panel (spotwatch/ft-spotpanel.cpp; ft-spotwatch runs it).
+# ft-spotpanel, frunner's search panel (frunner/ft-spotpanel.cpp; ft-frunner runs it).
 # compositor.c is the wlroots side (C; wlroots headers aren't C++), vr.cpp the OpenVR side,
 # remote.c the remote screens (their streams are ft-stream's, stream/build.sh).
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
@@ -42,6 +42,6 @@ g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/keybo
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handrobot.o build/handcut.o build/handrender.o $vrlibs
-$cxx -o build/ft-spotpanel ../spotwatch/ft-spotpanel.cpp $(pkg-config --libs gbm libdrm) $OPENVR_LIBS -lpthread
+$cxx -o build/ft-spotpanel ../frunner/ft-spotpanel.cpp $(pkg-config --libs gbm libdrm) $OPENVR_LIBS -lpthread
 strip --strip-unneeded build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel
 echo "built build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel"'

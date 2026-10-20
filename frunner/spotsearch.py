@@ -1,5 +1,5 @@
-"""Spotwatch's search: which apps and remote displays match what's typed, best first
-(spotwatch/ft-spotwatch, docs/spotwatch.md). Plain Python, no GLib, so its test runs anywhere.
+"""Frunner's search: which apps and remote displays match what's typed, best first
+(frunner/ft-frunner, docs/frunner.md). Plain Python, no GLib, so its test runs anywhere.
 
 A query matches an item's name best at its start, then at the start of one of its words, then
 by its initials ("vsc": Visual Studio Code), then anywhere in it, then as letters in order

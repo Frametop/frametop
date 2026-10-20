@@ -103,18 +103,18 @@ check("Meta+Alt+Shift+Tab", name("42+56+125+15"), "Meta+Alt+Shift+Tab")
 check("Meta+Space", name("125+57"), "Meta+Space")
 check("unknown code", name("125+999"), "Meta+999")
 
-labels = {"steam_menu": "Steam menu", "gaze_left": "Left click at the gaze", "spotwatch": "Spotwatch",
+labels = {"steam_menu": "Steam menu", "gaze_left": "Left click at the gaze", "frunner": "Frunner",
           "float_toggle": "Float a window", "dictate": "Dictate"}
-bound = {"125": "steam_menu", "125+36": "gaze_left", "42+125+33": "float_toggle", "125+57": "spotwatch",
+bound = {"125": "steam_menu", "125+36": "gaze_left", "42+125+33": "float_toggle", "125+57": "frunner",
          "97": "dictate", "125+30": "command:konsole", "125+37": "none"}
 rows = ft_tour.bindings(bound, lambda a: labels.get(a, a), name)
 check("key table: everyday ones first, none left out", [r["action"] for r in rows],
-      ["Steam menu", "Spotwatch", "Left click at the gaze", "Float a window", "Dictate", "command:konsole"])
+      ["Steam menu", "Frunner", "Left click at the gaze", "Float a window", "Dictate", "command:konsole"])
 check("key table row", rows[0], {"combo": "Meta tap", "action": "Steam menu"})
 
 # ---------------------------------------------------------------- the pages
 
-KNOWN = {"spotwatch", "spin", "remote", "gaze:calibrate", "gaze:quickcal"}
+KNOWN = {"frunner", "spin", "remote", "gaze:calibrate", "gaze:quickcal"}
 INPUT = {"buttons", "controllers", "games", "keyboard", "voice", "pointer", "ignore", "gaze", "hands", "bluetooth"}
 DISPLAY = {"screens", "layout", "visibility", "power"}
 
@@ -128,7 +128,7 @@ none = ft_tour.features(os.path.join(tmp, "empty"), conf={})
 everything = ft_tour.features(units, conf={"POINTER_GAZE": "1", "POINTER_HANDS": "1"})
 bare, full = ft_tour.pages(none, rows), ft_tour.pages(everything, rows)
 ids = [p["id"] for p in full]
-check("pages, in order", ids, ["welcome", "screens", "keys", "gaze", "hands", "spotwatch", "floating", "pinning",
+check("pages, in order", ids, ["welcome", "screens", "keys", "gaze", "hands", "frunner", "floating", "pinning",
                                "profiles", "pause", "more", "done"])
 check("the same pages with nothing installed", [p["id"] for p in bare], ids)
 for pages in (bare, full):

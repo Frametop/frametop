@@ -14,6 +14,7 @@ relay, so it's safe next to them. Rules come from the test, not ~/.config/framet
 """
 import fcntl
 import importlib.util
+import json
 import os
 import shutil
 import socket
@@ -68,7 +69,7 @@ class StubPause:
 stub = {}
 relay.game_pause.GamePause = StubPause
 
-for name in ("SCREENS", "HELPER", "FLOAT", "GAZED", "VOICE", "SPOTWATCH"):
+for name in ("SCREENS", "HELPER", "FLOAT", "GAZED", "VOICE", "FRUNNER"):
     setattr(relay, name, f"\0{tag}_{name.lower()}")
 OUT = tempfile.mkdtemp(prefix="ft-keys-test-")
 steam_log, cmd_log = f"{OUT}/steam.log", f"{OUT}/cmd.log"
@@ -114,6 +115,7 @@ def read_rules(path=None):
     return rules
 
 
+real_read_rules = relay.read_rules  # the file reader, for the renamed-actions check
 relay.read_rules = read_rules
 conf = {"POINTER": "0"}  # ~/.config/frametop.conf, as the relay reads it
 relay.read_config = lambda path=None: dict(conf)
@@ -186,9 +188,9 @@ screens.settimeout(0.05)
 voice = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)  # Frametop Voice's socket
 voice.bind(relay.VOICE)
 voice.settimeout(0.05)
-spotwatch = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)  # spotwatch's socket (spotwatch/ft-spotwatch)
-spotwatch.bind(relay.SPOTWATCH)
-spotwatch.settimeout(0.05)
+frunner = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)  # frunner's socket (frunner/ft-frunner)
+frunner.bind(relay.FRUNNER)
+frunner.settimeout(0.05)
 EVENT = struct.Struct("llHHi")
 
 
@@ -213,12 +215,12 @@ def typed():
             return got
 
 
-def spotwatched():
-    """What spotwatch was sent since the last call."""
+def frunner_got():
+    """What frunner was sent since the last call."""
     got = []
     while True:
         try:
-            got.append(spotwatch.recv(256).decode())
+            got.append(frunner.recv(256).decode())
         except socket.timeout:
             return got
 
@@ -462,18 +464,26 @@ def tests():
     check("spinning works without pointer mode", (relay.needs_pointer("spin_next"), relay.needs_pointer("spin_prev")),
           (False, False))
 
-    # Meta+Space (a default): spotwatch's search opens or closes, told it came from a keyboard.
+    # Meta+Space (a default): frunner's search opens or closes, told it came from a keyboard.
     SPACE = 57
     key(META, 1); key(SPACE, 1); key(SPACE, 0); key(META, 0)
-    check("Meta+Space (default): spotwatch toggles", spotwatched(), ["toggle keyboard"])
+    check("Meta+Space (default): frunner toggles", frunner_got(), ["toggle keyboard"])
     check("...Space isn't typed, and the desktop gets F24 and Meta's release first", typed(),
           ["key 125 1"] + F24 + ["key 125 0"])
     pause("on")
     key(META, 1); key(SPACE, 1); key(SPACE, 0); key(META, 0)
-    check("paused: Meta+Space doesn't open spotwatch", spotwatched(), [])
+    check("paused: Meta+Space doesn't open frunner", frunner_got(), [])
     pause("off")
     typed()
-    check("spotwatch works without pointer mode", relay.needs_pointer("spotwatch"), False)
+    check("frunner works without pointer mode", relay.needs_pointer("frunner"), False)
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as old:
+        json.dump({"buttons": {"mouse": {"275": "spotwatch"}}, "controller_buttons": {"left/view": "spotwatch"},
+                   "key_bindings": {"125+57": "spotwatch", "125": "steam_menu"}}, old)
+        old.flush()
+        r = real_read_rules(old.name)
+    check("a rules file from before the rename: spotwatch means frunner",
+          (r["buttons"], r["controller_buttons"], r["key_bindings"]),
+          ({"mouse": {"275": "frunner"}}, {"left/view": "frunner"}, {"125+57": "frunner", "125": "steam_menu"}))
 
     # Dictation: Right Ctrl alone (the default with Frametop Voice installed) starts and stops it.
     use({"97": "dictate"})

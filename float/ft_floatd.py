@@ -19,8 +19,8 @@ command-line side). Replies go to the sender:
             list, Steam's command line for it: launch it floating -> "ok", or "steamvr REASON"
             when it should be SteamVR's own window after all; see dash_launch)
   windows   (-> JSON: the open apps' windows and where they are, for a profile; ft-layout save)
-  spotlist  (-> JSON: every app window, its title, panel, and when it was last active; spotwatch)
-  activate ID   (make that window KWin's active one, unminimized; spotwatch)
+  spotlist  (-> JSON: every app window, its title, panel, and when it was last active; frunner)
+  activate ID   (make that window KWin's active one, unminimized; frunner)
   profile NAME   (open a profile's apps: move the matching windows, launch the missing ones)
   ("float pointer" is the float key: the window under the pointer, else the active one,
   floated or docked; the input relay sends it for float_toggle, and "dock all" for dock_all)
@@ -243,7 +243,7 @@ def recordable(ev):
 
 
 def listable(ev):
-    """An app's top-level window, the kind spotwatch finds: Frametop's own settings apps too,
+    """An app's top-level window, the kind frunner finds: Frametop's own settings apps too,
     which profiles leave out (an open Input Settings launched a second copy, 2026-10-13)."""
     if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
         return False
@@ -1002,7 +1002,7 @@ class Daemon:
                 log(f"{what}: {e}")
 
     def spot_entries(self):
-        """Every app window for spotwatch's search: its desktop file name, title, the panel
+        """Every app window for frunner's search: its desktop file name, title, the panel
         it's on (a screen or a floating window's; None elsewhere), and when it was last active."""
         out = []
         for wid, ev in self.windows.items():

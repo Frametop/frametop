@@ -1,5 +1,5 @@
-// Spotwatch's reserved spot (user, 2026-10-17: "spotwatch should be a reserved spot and should
-// ideally always display through displays"). Its search opens kDistance straight ahead, nearer than
+// Frunner's reserved spot (user, 2026-10-17, when it was named spotwatch: "spotwatch should be a
+// reserved spot and should ideally always display through displays"). Its search opens kDistance straight ahead, nearer than
 // the lazy susan's front slot, which ft-screens keeps at least kFrontGap behind it: a brought panel
 // never lands in the search's plane (both were 1 m ahead). Panels nearer than it (grab that, a
 // carry) still don't cover it: its sort order is over theirs (ft-spotpanel.cpp).

@@ -21,7 +21,7 @@ Frametop's desktop runs in a nested KWin that gamescope never sees, so keys sent
 
 - Full Keyboard says `kbhello OPEN` every second, and at once when it opens or closes. The relay answers each hello, and any change, with `kb DESKTOP SURFACE`: whether typing goes to the desktop, and whether the screens show with Frametop not paused (then it may show over them with the dashboard closed).
 - While typing goes to the desktop, its keys go to the relay as `kbkey CODE 0|1` and composed text as `kbtext TEXT`. The relay types them on the desktop's seat through ft-screens, in order with dictation's typing; the text goes through the desktop's keyboard layout and isn't logged. Otherwise they go to gamescope as before. A key comes up where it went down, whichever way typing goes by then, and when Full Keyboard stops, the relay lets go of the keys it held.
-- Opening it: the relay tells ft-screens it runs (`fullkb OPEN`), and ft-screens then passes on its `vrkeyboard` commands (a desktop text field gets focus, a mapped button, spotwatch, a layout reset) as `kbpanel show|hide`, which the relay sends Full Keyboard as `kb show|hide`. Frametop's older panel (`screens/keyboard.cpp`) is used only while Full Keyboard isn't running.
+- Opening it: the relay tells ft-screens it runs (`fullkb OPEN`), and ft-screens then passes on its `vrkeyboard` commands (a desktop text field gets focus, a mapped button, frunner, a layout reset) as `kbpanel show|hide`, which the relay sends Full Keyboard as `kb show|hide`. Frametop's older panel (`screens/keyboard.cpp`) is used only while Full Keyboard isn't running.
 - A click on its panel (`org.framekeyboard.*` overlays) doesn't take typing away from the desktop.
 - Its Steam keyboard replacement (`bridge/`) is theirs, unchanged.
 

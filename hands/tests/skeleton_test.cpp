@@ -153,6 +153,36 @@ int main() {
         CHECK(std::fabs(left.len[5] - got.len[5]) < 1e-9);
     }
 
+    // a left hand stuck fitted as a right one (the mirror won while its fingers were straight)
+    // goes back to the model's side once its fingers curl a little: the mirror follows them only
+    // by bending its own backward, and at 20 degrees it fits well enough to stay (2026-10-19,
+    // before the guard: right in every frame, knuckles at -28 degrees)
+    {
+        Skeleton sk;
+        const double D = M_PI / 180;
+        const Shape truth = Skeleton::canonical(1.0);
+        Rot R0 = exp_rot({0.3, 0.2, 0.1}), fr[21];
+        const V3 t0{-0.12, -0.2, -0.38};
+        double q0[kParams] = {};
+        for (int c = 0; c < 4; ++c) q0[6 + 5 * c + 1] = 20 * D, q0[6 + 5 * c + 3] = 20 * D, q0[6 + 5 * c + 4] = 10 * D;
+        V3 pts[21];
+        Skeleton::pose(truth, -1, R0, t0, q0, pts, fr);
+        Fit f;
+        f.valid = true, f.side = 1, f.flipped = true, f.ns = 1'000'000'000;
+        int64_t ns = f.ns;
+        int asRight = 0;
+        for (int i = 0; i < 10; ++i) {
+            ns += 33'000'000;
+            sk.update(f, pts, false, 0.1, 2, 0.0015, nullptr, {0, 0, 0}, 1.0, ns);
+            asRight += f.side == 1;
+        }
+        double mcp = 0;
+        for (int c = 0; c < 4; ++c) mcp += f.qf[6 + 5 * c + 1] / 4;
+        std::printf("flipped left hand, curled: %d of 10 frames as right, mean knuckle bend %.0f deg\n", asRight, mcp / D);
+        CHECK(asRight == 0 && f.valid && !f.flipped);
+        CHECK(mcp > 15 * D);
+    }
+
     // the elbow: behind and below a hand held in front, 2.8 palms away
     {
         const V3 wrist{0.15, -0.25, -0.35}, knuckle{0.15, -0.22, -0.43};

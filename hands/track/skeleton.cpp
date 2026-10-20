@@ -620,6 +620,29 @@ void Skeleton::update(Fit &f, const V3 pts[21], bool right, double right_score, 
     double crms[5] = {};
     double cost = solve(s, side, pts, sl, sd, eye, prev, p_.iterations, R, t, q, &rms, p_.limits, crms, p_.warm > 0);
     if (cost < 0) return;
+    // A mirror image follows fingers that bend toward the palm only by bending its own backward
+    // (the knuckles allow -35 degrees): a fit as the other side than the model's call that does,
+    // on average over the four fingers, is the wrong side however well it fits. Such a fit goes
+    // back to the model's side at once, and a mirror that needs it never wins.
+    auto backward = [](const double *qq) {
+        double m = 0;
+        for (int c = 0; c < 4; ++c) m += qq[6 + 5 * c + 1];
+        return m / 4 < -10 * D;
+    };
+    if (side != model_side && backward(q)) {
+        Rot R2;
+        V3 t2;
+        double q2[kParams] = {}, rms2 = 0, crms2[5] = {};
+        const Shape s2 = shape(model_side, scale);
+        const double cost2 = solve(s2, model_side, pts, sl, sd, eye, nullptr, p_.iterations, R2, t2, q2, &rms2, p_.limits,
+                                   crms2, p_.warm > 0);
+        if (cost2 >= 0) {
+            side = model_side, s = s2, R = R2, t = t2, rms = rms2, cost = cost2;
+            std::copy(q2, q2 + kParams, q);
+            std::copy(crms2, crms2 + 5, crms);
+            f.votes = 0;
+        }
+    }
     bool better = false;
     if (rms > 0.015) {
         Rot R2;
@@ -629,7 +652,7 @@ void Skeleton::update(Fit &f, const V3 pts[21], bool right, double right_score, 
         double crms2[5] = {};
         const double cost2 = solve(s2, -side, pts, sl, sd, eye, continuing && f.side == -side ? f.q : nullptr,
                                    p_.iterations, R2, t2, q2, &rms2, p_.limits, crms2, p_.warm > 0);
-        better = cost2 >= 0 && cost2 < 0.5 * cost;
+        better = cost2 >= 0 && cost2 < 0.5 * cost && !(-side != model_side && backward(q2));
         if (better && ++f.votes >= kFlipFrames) {
             side = -side, s = s2, R = R2, t = t2, rms = rms2, cost = cost2;
             std::copy(q2, q2 + kParams, q);

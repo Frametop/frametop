@@ -58,7 +58,11 @@
 //   tracked     a two-camera (STEREO) frame within      a frame within lostFor (250 ms); one-camera
 //               stereoWithin (200 ms)                   depth is 2-6 cm off, fine for a short gap
 //   raised      K at most raisedShow (0.30 m) below     raisedHide (0.40 m): gaze pinches sat
-//               the eyes                                0.35-0.45 m below the eyes, elbow resting
+//               the eyes (0: off; the pointer helper    0.35-0.45 m below the eyes, elbow resting
+//               turns it off: user, 2026-10-19, "hands
+//               still recognized even if they are low,
+//               just not if they are typing", which its
+//               typing guard holds back)
 //   forward     K at least forwardShow (0.25 m) ahead   forwardHide (0.20 m)
 //               of the eyes, along the torso's yaw
 //   palm away   palm normal . D >= palmShow (0.3)       palmHide (0.0): palm toward you is reserved
@@ -324,7 +328,7 @@ inline Tests Evaluate(const Params &p, const Body &body, const HandFrame &f, con
         if (!s) r.fails += r.fails.empty() ? name : std::string(",") + name;
         show = show && s, keep = keep && k;
     };
-    test(r.below <= p.raisedShow, r.below <= p.raisedHide, "raised");
+    if (p.raisedShow > 0) test(r.below <= p.raisedShow, r.below <= std::max(p.raisedShow, p.raisedHide), "raised");
     test(r.ahead >= p.forwardShow, r.ahead >= p.forwardHide, "forward");
     test(r.palm >= p.palmShow, r.palm >= p.palmHide, "palm");
     if (r.forearmUsed) test(r.forearm >= p.forearmShow, r.forearm >= p.forearmHide, "forearm");

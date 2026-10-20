@@ -1123,6 +1123,11 @@ int main() {
         rayParams.readyShow = std::clamp(ConfDouble(conf, "POINTER_RAY_READY", 6), 0.0, 30.0) / 100;
         rayParams.readyHide = rayParams.readyShow > 0 ? std::max(rayParams.readyShow, std::clamp(ConfDouble(conf, "POINTER_RAY_READY_HIDE", 10), 0.0, 40.0) / 100) : 0;
         rayParams.fistCurl = std::clamp(ConfDouble(conf, "POINTER_RAY_FIST_CURL", 1.1), 0.0, 2.0);
+        // the laser only for a raised hand: its knuckles within this far under the eyes, and gone 10 cm
+        // past it (cm; 0, the default: a low hand points too, and a hand typing is held back by the
+        // typing guard instead; 30 until 2026-10-19, when aiming at a keyboard below lost the laser)
+        rayParams.raisedShow = std::clamp(ConfDouble(conf, "POINTER_RAY_RAISED", 0), 0.0, 100.0) / 100;
+        rayParams.raisedHide = rayParams.raisedShow > 0 ? rayParams.raisedShow + 0.10 : 0;
         rayParamsNew = true;
         rayTap = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP", 0.3), 0.0, 2.0);
         rayTapDeadzone = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP_DEADZONE", 6.0), 0.0, 30.0);

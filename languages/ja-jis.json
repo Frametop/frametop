@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "ja-jis",
+  "name": "日本語 — JIS / system IME",
+  "locale": "ja-JP",
+  "keymap": {
+    "rules": "evdev",
+    "model": "jp106",
+    "layout": "jp",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans CJK JP",
+    "Noto Sans",
+    "sans-serif"
+  ],
+  "required_keys": [
+    "IntlYen",
+    "IntlRo",
+    "Convert",
+    "NonConvert",
+    "KanaMode",
+    "ZenkakuHankaku"
+  ]
+}

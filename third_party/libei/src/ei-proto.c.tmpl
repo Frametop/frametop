@@ -1,0 +1,160 @@
+/**
+ * GENERATED FILE, DO NOT EDIT
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+{#- this is a jinja template, warning above is for the generated file
+
+   Non-obvious variables set by the scanner that are used in this template:
+   - request.fqdn/event.fqdn - the full name of a request/event with the
+     interface name prefixed, "ei_foo_request_bar" or "ei_foo_event_bar"
+   - incoming/outgoing: points to the list of requests or events, depending
+     which one is the outgoing one from the perspective of the file we're
+     generating (ei or eis)
+#}
+
+{# target: because eis is actually eis_client in the code, the target points to
+   either "ei" or "eis_client" and we need the matching get_context or
+   get_client for those. This is specific to the libei/libeis implementation
+   so it's done here in the template only. #}
+{% set target = {} %}
+{% if component == "eis" %}
+{% set target = { "name":  "eis_client", "context": "client" }  %}
+{% else %}
+{% set target = { "name":  "ei", "context": "context" }  %}
+{% endif %}
+
+#include <assert.h>
+#include <errno.h>
+#include <sys/types.h>
+#include "brei-shared.h"
+#include "brei-proto.h"
+
+{% if extra.headerfile %}
+#include "{{extra.headerfile}}"
+{% endif %}
+
+/**
+ * Forward declarations. This file is intended to be compile-able without including
+ * any of the actual implementation files.
+ */
+struct {{target.name}};
+
+/**
+ * The function that converts the given arguments into a wire format and sends it.
+ * This function must be provided by the implementation, it is called by all
+ * message sending functions (requests for libei, events for libeis).
+ */
+extern int {{target.name}}_send_message(
+  {{target.name|as_c_arg}}, const struct brei_object *obj, uint32_t opcode,
+  const char *signature, size_t nargs, ...
+);
+
+{% for interface in interfaces %}
+/***************************************************************************
+ * Interface: {{interface.name.ljust(60)}} *
+ ***************************************************************************/
+
+/* returns the protocol interface from the given struct, see the dispatcher */
+const struct {{interface.name}}_interface *{{interface.name}}_get_interface({{interface.as_c_arg}});
+
+/* returns the message sending context from the given struct */
+{{target.name|c_type}} {{interface.name}}_get_{{target.context}}({{interface.as_c_arg}});
+
+/* Returns the protocol object id from the given struct */
+const struct brei_object *
+{{interface.name}}_get_proto_object({{interface.as_c_arg}});
+
+/* request opcodes */
+{% for request in interface.requests %}
+#define {{request.fqdn.upper().ljust(45)}} {{request.opcode}}
+{% endfor %}
+
+/* event opcodes */
+{% for event in interface.events %}
+#define {{event.fqdn.upper().ljust(45)}} {{event.opcode}}
+{% endfor %}
+
+/* Message sender functions */
+{% for outgoing in interface.outgoing %}
+int
+{{outgoing.fqdn}}({{interface.as_c_arg}}{%- for arg in outgoing.arguments %}, {{arg.as_c_arg}}{% endfor %})
+{
+	if (!{{interface.name}})
+		return -ENOENT;
+
+	const struct brei_object *obj = {{interface.name}}_get_proto_object({{interface.name}});
+	{{target.name|c_type}} ctx = {{interface.name}}_get_{{target.context}}({{interface.name}});
+
+	if (obj->version < {{outgoing.fqdn.upper()}}_SINCE_VERSION)
+		return -ENOTSUP;
+
+	return {{target.name}}_send_message(
+		ctx, obj, {{outgoing.fqdn.upper()}}, "{{outgoing.signature}}",
+		{{outgoing.arguments|length}}{%- for arg in outgoing.arguments %}, {{arg.name}}{% endfor -%}
+	);
+}
+
+{% endfor %}
+
+/**
+ * The dispatcher for the {{interface.name}} interface is the function called by
+ * brei with the messages parsed from the wire.
+ */
+static struct brei_result *
+{{interface.name}}_dispatcher(
+	{{interface.as_c_arg}},
+	uint32_t opcode,
+	size_t nargs,
+	union brei_arg *args
+) {
+{% if interface.incoming|length %}
+	const struct {{interface.name}}_interface *interface = {{interface.name}}_get_interface({{interface.name}});
+	const struct brei_object *obj = {{interface.name}}_get_proto_object({{interface.name}});
+
+	if (!interface)
+		return NULL;
+
+	switch (opcode) {
+		{% for incoming in interface.incoming %}
+	case {{incoming.fqdn.upper()}}:
+		if (obj->version < {{incoming.fqdn.upper()}}_SINCE_VERSION)
+			return brei_result_new(BREI_CONNECTION_DISCONNECT_REASON_ERROR,
+					       "Opcode %u not supported in this interface version", opcode);
+		assert(interface->{{incoming.name}} != NULL);
+		return interface->{{incoming.name}}({{interface.name}}{% for arg in incoming.arguments %}, (args + {{loop.index - 1}})->{{arg.signature}}{% endfor %});
+		{% endfor %}
+	}
+{% endif %}
+	return brei_result_new(BREI_CONNECTION_DISCONNECT_REASON_ERROR,
+			       "Opcode %u not supported in this interface version", opcode);
+}
+
+static const struct brei_message {{interface.name}}_requests[] = {
+	{% for request in interface.requests %}
+	{ "{{request.name}}", "{{request.signature}}"  },
+	{% endfor %}
+};
+
+static const struct brei_message {{interface.name}}_events[] = {
+	{% for event in interface.events %}
+	{ "{{event.name}}", "{{event.signature}}" },
+	{% endfor %}
+};
+
+static const struct brei_message {{interface.name}}_incoming[] = {
+	{% for msg in interface.incoming %}
+	{ "{{msg.name}}", "{{msg.signature}}" },
+	{% endfor %}
+};
+
+const struct brei_interface {{interface.name}}_proto_interface = {
+    .name = "{{interface.name}}", .version = {{interface.version}},
+    .nrequests = {{interface.requests|length}}, .requests = {{interface.name}}_requests,
+    .nevents = {{interface.events|length}}, .events = {{interface.name}}_events,
+    .nincoming = {{interface.incoming|length}}, .incoming = {{interface.name}}_incoming,
+    .dispatcher = (brei_event_dispatcher){{interface.name}}_dispatcher,
+};
+
+{% endfor %}

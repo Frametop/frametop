@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "en-us",
+  "name": "English (US)",
+  "locale": "en-US",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "us",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans",
+    "sans-serif"
+  ]
+}

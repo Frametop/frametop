@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "ja-romaji",
+  "name": "日本語 — Romaji",
+  "locale": "ja-JP",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "us",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans CJK JP",
+    "Noto Sans",
+    "sans-serif"
+  ],
+  "input_method": "japanese-romaji"
+}

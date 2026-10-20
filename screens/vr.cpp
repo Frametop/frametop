@@ -3205,10 +3205,16 @@ bool FarPair(int64_t t) {
     return NsToMs(t - g_far.aimNs[0]) <= kFarAimMs && NsToMs(t - g_far.aimNs[1]) <= kFarAimMs;
 }
 
-// Both hands are ours from both palms held out (a fist passes through a pinch, and with a hand ray up that
-// pinch pressed on the panel: user, 2026-10-13, "I was able to resize and also drag a window with a left
-// click at the same time") until the far stretch ends.
-bool FarClaims(int64_t t) { return g_far.panel >= 0 || FarPair(t); }
+// A hand is ours from both palms held out once it closes into a fist (a fist passes through a pinch, and
+// with a hand ray up that pinch pressed on the panel: user, 2026-10-13, "I was able to resize and also drag
+// a window with a left click at the same time"), and both are until the far stretch ends. Not before it
+// closes: both hands held out a little way with the fingers open is how pinches type on Full Keyboard by
+// gaze, and they stay armed through each pinch (the other three fingers stay open), so claiming them from
+// the pair alone left every pinch to us and kept the gaze from taking the pointer back (user, 2026-10-19:
+// "no amount of tapping ... gets the eye tracker pointer to show back up").
+bool FarClaims(int side, int64_t t) {
+    return g_far.panel >= 0 || (FarPair(t) && (g_grabThat.closing(side) || g_far.fist[side]));
+}
 
 void EndFarStretch(const char *why) {
     const auto it = g_screens.find(g_far.panel);
@@ -4105,10 +4111,20 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     // doesn't click for the helper; one closing into "grab that"'s fist, so its grip isn't a gaze
     // grip); 2, only its ray stays hidden (the zone's margin and linger: its pinches are the
     // helper's); 0, neither. An older helper takes 2 as 1.
+    // Claims not by touch (the palm menu, the far stretch, grab that) are logged as they begin and end:
+    // they hold the gaze off the pointer too.
+    static const char *claimedBy[2] = {"", ""};
     auto near = [](int k) {
-        if (g_handInput.claims(k) || g_palm.shown(k) || FarClaims(g_handInput.frameNs()) ||
-            (g_grabThat.claims(k, g_handInput.frameNs()) && (!g_grabThat.armed(k) || g_grabThatAim[k] >= 0)))
-            return "1";
+        const int64_t t = g_handInput.frameNs();
+        const char *by = g_handInput.claims(k) ? "" : g_palm.shown(k) ? "the palm menu" : FarClaims(k, t) ? "the far stretch"
+                         : g_grabThat.claims(k, t) && (!g_grabThat.armed(k) || g_grabThatAim[k] >= 0) ? "grab that" : nullptr;
+        const char *other = by && *by ? by : "";
+        if (std::strcmp(other, claimedBy[k]) != 0) {
+            if (*other) std::printf("%s hand: %s has it\n", k ? "right" : "left", other);
+            else std::printf("%s hand: %s let it go\n", k ? "right" : "left", claimedBy[k]);
+            claimedBy[k] = other;
+        }
+        if (by) return "1";
         return g_handInput.rayHidden(k) ? "2" : "0";
     };
     if (g_handInput.newFrame() && (HandInputOn() || g_palm.params().on))

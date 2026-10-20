@@ -88,7 +88,10 @@ else()
     find_library(OPENVR_LIBRARY openvr_api HINTS
         "$ENV{HOME}/.local/share/Steam/steamapps/common/SteamVR/bin/linux64"
         "$ENV{HOME}/.local/share/Steam/ubuntu12_64" REQUIRED)
-    get_filename_component(OPENVR_RUNTIME_PATH "${OPENVR_LIBRARY}" DIRECTORY)
+    # Frametop's build names SteamVR's folder first (keyboard/build.sh).
+    if(NOT OPENVR_RUNTIME_PATH)
+        get_filename_component(OPENVR_RUNTIME_PATH "${OPENVR_LIBRARY}" DIRECTORY)
+    endif()
 endif()
 add_library(overlay_texture third_party/overlay_texture/vk_texture.cpp)
 target_include_directories(overlay_texture PUBLIC third_party/overlay_texture third_party/openvr)

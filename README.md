@@ -259,6 +259,7 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `float/` | Floating windows: ft-floatd and the KWin script that float a desktop window in VR. |
 | `decoration/` | The desktop's window decoration: Breeze's look plus the float button. |
 | `input/` | The input relay (Bluetooth mice and keyboards, button maps). |
+| `keyboard/` | Frametop's keyboard: Full Keyboard for Steam Frame by TaiKeid, on the screens and in place of Steam's keyboard. See [keyboard/FRAMETOP.md](keyboard/FRAMETOP.md). |
 | `pointer/` | The 3D mouse: SteamVR driver, helper service, and a probe tool. |
 | `power/` | ft-powerd: turns the displays off while the headset isn't used. |
 | `voice/` | Frametop Voice: dictation and wake words, recognised on the headset; the input relay types the text. See [voice/README.md](voice/README.md). |
@@ -313,7 +314,11 @@ Programs built in the `dev` container link against its glibc, which is newer tha
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The rendered hands' 3D models in `screens/assets/hands` (see its [README](screens/assets/hands/README.md); each folder has its licence) are from:
+MIT. See [LICENSE](LICENSE).
+
+Frametop's keyboard is [Full Keyboard for Steam Frame](https://github.com/TaiKeid/steam-frame-full-keyboard) by TaiKeid and contributors (MIT, Copyright (c) 2026 TaiKeid and contributors), in `keyboard/` with Frametop's changes. [keyboard/FRAMETOP.md](keyboard/FRAMETOP.md) lists what Frametop changed, and [keyboard/third_party/README.md](keyboard/third_party/README.md) the parts it includes.
+
+The rendered hands' 3D models in `screens/assets/hands` (see its [README](screens/assets/hands/README.md); each folder has its licence) are from:
 
 - the W3C Immersive Web Working Group's WebXR Input Profiles, `generic-hand` (MIT, Copyright (c) 2019 Amazon), the default;
 - Babylon.js's hand meshes by Patrick Ryan, https://github.com/BabylonJS/Assets (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/), unchanged;

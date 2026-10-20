@@ -76,6 +76,13 @@ Input from the lasers reaches KWin through ft-screens' own seat. Keys come from 
 
 Frametop's keyboard opens by itself when a text field on the desktop gets focus, and stays open until its Close key, a layout reset, or a mapped button closes it (or, with Keep it open off in Frametop Input Settings, until the text field loses focus). While the Steam menu (the dashboard) or Steam's own keyboard is up, it steps aside, and it comes back where it was when they're gone; one asked for meanwhile appears then. In the "only with the dashboard" visibility mode, the dashboard doesn't count. It doesn't open without a head pose (the headset in standby). It's a panel of keys (a US laptop layout, with Esc where Caps Lock would be, arrows, and a Close key) that ft-screens shows 0.7 m in front of you and below your eyes, facing you. It stays where it opened, and its grab bar (the pill along the top) moves it like a screen's. Type on it with a controller's laser or the 3D mouse. Shift, Ctrl and Alt latch for the next key, and a held key repeats. KWin starts `input/ft-textinput` as the desktop's input method, and KWin activates it whenever the focused app turns on text input for a field. It tells the relay (`textfield 1` or `0`), the relay decides by the Keyboard setting in Frametop Input Settings, and ft-screens opens the keyboard for the screen that has keyboard focus (`vrkeyboard show`, `hide`, or `toggle` from a mapped button). Its keys reach the focused screen as key presses, so it works in every app, but only apps that use Wayland text input (Qt, GTK, Firefox) open it by themselves; Chromium, Electron and X11 apps need the button. The session drops the `QT_IM_MODULE=xim` and `GTK_IM_MODULE=xim` that the gamescope session sets, or Qt and GTK apps wouldn't use Wayland text input either.
 
+Frametop's keyboard is Full Keyboard for Steam Frame, by TaiKeid (`keyboard/`, MIT; [keyboard/FRAMETOP.md](../keyboard/FRAMETOP.md)), when it runs: the user service `frametop-keyboard.service` starts it with SteamVR (`framekeyboard --frametop`). It has full layouts, languages and input methods, themes, and replaces Steam's own keyboard. The same things open and close it as the panel above: while it runs, ft-screens passes its `vrkeyboard` commands to it through the input relay, and the panel above is the fallback for when it isn't running. It shows over the screens with the dashboard closed while Frametop asked for it, and in the dashboard as always. Its typing goes where typing goes: on the desktop, the relay types it on ft-screens' seat (keys by their place, so pick the desktop's layout in it too; text the desktop's layout has no key for, like Chinese or Japanese, isn't typed there yet), and Steam and games get it through gamescope as before. A click on its panel leaves typing where it was. Its settings are in `~/.config/frametop-keyboard`.
+
+```
+keyboard/run.sh status | restart | log [lines] | install | uninstall
+FULL_KEYBOARD_TESTS=1 keyboard/build.sh     # build it with its tests
+```
+
 KWin's nested backend doesn't undo a screen's scale on pointer input, so ft-screens divides panel positions (in pixels) by it. `ft-layout` sends it each screen's scale as KWin reports it (`scale N s`) whenever it applies scales: at desktop start and from Frametop Display Settings. A scale changed only in Plasma's own display settings is put back to the Frametop layout's the next time `ft-layout` runs.
 
 ft-screens listens for datagrams on the abstract socket `@ft_screens` and replies to the sender:
@@ -83,7 +90,7 @@ ft-screens listens for datagrams on the abstract socket `@ft_screens` and replie
 ```
 place N x y z yaw pitch roll     width N metres          curve N radius|on|off
 pin N|all left|right|head [matrix]    unpin N|all        size N w h
-get N    screens    head    state    key code value    scale N s    vrkeyboard show|hide|toggle|close
+get N    screens    head    state    key code value    scale N s    vrkeyboard show|hide|toggle|close    fullkb 0|1
 visibility always|dashboard|gesture|toggle    wrist degrees    gesture left|right degrees
 hide | show | toggle    controllers always|outside_games|dashboard    ingames hide|visible    pause on|off|state
 conceal N|all    reveal N|all    concealed    cutouts on|off|state    cutouts predict on|off    cutouts lead ms
@@ -112,7 +119,7 @@ The relay also owns the volume keys, on every device that has them, the headset'
 desktops.sh relay install     # enable it (starts with the next reboot or SteamVR start)
 desktops.sh relay status | log | uninstall
 input/input-relay.py --no-grab   # try it without taking devices from SteamVR
-input/test/keys-test.py          # key combinations, modifier taps, and what reaches the desktop, against fake devices (safe next to the live relay)
+input/test/keys-test.py          # key combinations, modifier taps, dictation's and Full Keyboard's typing, and what reaches the desktop, against fake devices (safe next to the live relay)
 input/test/roles-test.py         # each node's role, Keyboard + 3D pointer included, offline
 steam/ft-steam menu              # what Open Steam menu does; ft-steam check: Steam's UI still has the calls
 ```

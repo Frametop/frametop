@@ -36,6 +36,11 @@ packages=(
   # Frametop Voice (voice/): glslc and the SPIR-V headers for whisper.cpp's Vulkan backend; ft-voiced
   # records with pw-record and plays its sounds with pw-play (its Python packages: voice/build.sh's build/venv)
   glslc spirv-headers-devel pipewire-utils
+  # Frametop's keyboard (keyboard/, TaiKeid's Full Keyboard): Cairo and Pango draw it, SDL2 for its
+  # preview, and its input methods: Hangul, Pinyin (pyzy), Japanese (Anthy, loaded at run time).
+  # libX11-devel: its test probes (FULL_KEYBOARD_TESTS=1 keyboard/build.sh)
+  cairo-devel pango-devel json-c-devel sdl2-compat-devel libhangul-devel pyzy-devel anthy-unicode-devel
+  libX11-devel
   # remote displays (stream/): moonlight-common-c and moonlight-embedded's libgamestream,
   # and the host's sound (Opus, played through PipeWire's PulseAudio server)
   openssl-devel libcurl-devel expat-devel libuuid-devel json-devel opus-devel pulseaudio-libs-devel

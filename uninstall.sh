@@ -78,7 +78,7 @@ find_repo() {
 # Frametop's programs that are running now (step 1 leaves them running until the restart).
 running() {
   local n out=()
-  for n in ft-screens ft-pointer ft-powerd ft-eyegrab ft-camd ft-hands ft-voiced whisper-server; do
+  for n in ft-screens ft-pointer ft-powerd ft-eyegrab ft-camd ft-hands ft-voiced whisper-server framekeyboard; do
     pgrep -x "$n" >/dev/null && out+=("$n")
   done
   pgrep -f '[i]nput/input-relay\.py' >/dev/null && out+=("input relay")
@@ -253,11 +253,11 @@ main() {
     "$HOME/.cache/frametop"
 
   local settings=("$HOME"/.config/frametop.conf* "$HOME"/.config/frametop-*.json* "$HOME/.config/frametop-remote"
-                  "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream")
+                  "$HOME/.config/frametop-keyboard" "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream")
   local kept=()
   for f in "${settings[@]}"; do [ -e "$f" ] && kept+=("$f"); done
   if [ ${#kept[@]} -gt 0 ]; then
-    echo "Your settings: the screen layout and profiles, button maps, gaze calibration, the remote"
+    echo "Your settings: the screen layout and profiles, button maps, the keyboard's, gaze calibration, the remote"
     echo "desktop password, the remote displays' pairings and sign-ins (their computers keep Frametop's"
     echo "clients and token until you remove them in their Web UI), and the Frametop desktop's own Plasma"
     echo "setup (${kept[*]/#$HOME/\~})."

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "uk-ua",
+  "name": "Українська",
+  "locale": "uk-UA",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "ua",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans",
+    "sans-serif"
+  ]
+}

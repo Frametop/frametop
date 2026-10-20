@@ -1,0 +1,12 @@
+/build/
+/out/
+/dist/
+/.cache/
+__pycache__/
+*.pyc
+CMakeUserPresets.json
+compile_commands.json
+.env
+.env.*
+/docs/**/*.drawio
+/_bugs.md

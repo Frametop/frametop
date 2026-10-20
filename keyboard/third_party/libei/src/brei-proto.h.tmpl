@@ -1,0 +1,50 @@
+/**
+ * GENERATED FILE, DO NOT EDIT
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+{# this is a jinja template, warning above is for the generated file
+
+   Non-obvious variables set by the scanner that are used in this template:
+   - request.fqdn/event.fqdn - the full name of a request/event with the
+     interface name prefixed, "ei_foo_request_bar" or "ei_foo_event_bar"
+   - incoming/outgoing: points to the list of requests or events, depending
+     which one is the outgoing one from the perspective of the file we're
+     generating (ei or eis)
+#}
+
+{# target: because eis is actually eis_client in the code, the target points to
+   either "ei" or "eis_client" and we need the matching get_context or
+   get_client for those. This is specific to the libei/libeis implementation
+   so it's done here in the template only. #}
+{% if component == "eis" %}
+{% set target = { "name":  "eis_client", "context": "client" }  %}
+{% else %}
+{% set target = { "name":  "ei", "context": "context" }  %}
+{% endif %}
+
+#pragma once
+
+#ifdef _cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+
+typedef uint64_t object_id_t;
+typedef object_id_t new_id_t;
+
+{% for interface in interfaces %}
+{% for enum in interface.enums %}
+enum {{enum.fqdn}} {
+	{% for entry in enum.entries %}
+	{{enum.fqdn.upper()}}_{{entry.name.upper()}} = {{entry.value}},
+	{% endfor %}
+};
+{% endfor %}
+{% endfor %}
+
+#ifdef _cplusplus
+}
+#endif

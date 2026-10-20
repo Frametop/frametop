@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "fr-fr",
+  "name": "Français — AZERTY",
+  "locale": "fr-FR",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "fr",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans",
+    "sans-serif"
+  ],
+  "required_keys": [
+    "IntlBackslash"
+  ]
+}

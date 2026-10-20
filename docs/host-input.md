@@ -14,7 +14,7 @@ Nothing new is needed to control the computer itself: the 3D mouse on one of its
 | Headset off | The host gets its keyboard and mouse back and its streams stop at the same moment: when the pointer helper decides the headset is off (idle for `HEADSET_OFF_AFTER`, 1.5 s, or standby). No longer grace. Putting it back on waits for the streams, about 3-8 s |
 | Volume and media keys | Never taken: they stay on the computer |
 | A Mac keyboard's Cmd | Always Meta, wherever typing goes. No Cmd/Ctrl swap for the Frametop desktop |
-| Signing the Mac Bridge | Ad hoc, built by CI. The macOS kit pins its SHA-256, and the setup clears its quarantine after checking it. Sunshine starts it (see S3 for whether it then works under Sunshine's Accessibility grant). No Apple Developer ID |
+| Signing the Mac Bridge | Ad hoc, built by CI. The macOS kit pins its SHA-256, and the setup clears its quarantine after checking it. Sunshine starts it, and it works under Sunshine's Accessibility grant (S3). No Apple Developer ID |
 
 ## How it fits
 

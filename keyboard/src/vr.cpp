@@ -1,4 +1,5 @@
 #include "framekeyboard/app.hpp"
+#include "framekeyboard/frametop.hpp"
 #include "framekeyboard/grip.hpp"
 #include "framekeyboard/native_replacement.hpp"
 #include "framekeyboard/placement_store.hpp"
@@ -362,7 +363,9 @@ class VrPanel {
         texture_.destroy();
         vulkan_.destroy();
     }
-    void connect() {
+    // `lasers`: controllers get lasers for the panel with the dashboard closed too, as for
+    // Frametop's screens (Frametop shows it over its desktop).
+    void connect(bool lasers = false) {
         vr::EVRInitError error = vr::VRInitError_None;
         // Connect only once: a background connect/disconnect followed immediately
         // by an overlay connection can leave SteamVR using the old legacy input
@@ -388,6 +391,11 @@ class VrPanel {
         for (const auto flag : {vr::VROverlayFlags_VisibleInDashboard, vr::VROverlayFlags_MultiCursor,
                                 vr::VROverlayFlags_SendVRDiscreteScrollEvents}) {
             check(overlay->SetOverlayFlag(handle_, flag, true), "SetOverlayFlag");
+        }
+        if (lasers) {
+            check(overlay->SetOverlayFlag(handle_, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible,
+                                          true),
+                  "SetOverlayFlag");
         }
         std::string message;
         if (!vulkan_.init(message) || !texture_.create(vulkan_, handle_, message)) {
@@ -496,11 +504,12 @@ class VrPanel {
     std::optional<bool> reported_native_;
 };
 } // namespace
-int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, double duration) {
+int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, double duration,
+           FrametopLink* frametop) {
     RuntimeBinding runtime_binding(replacement);
     app.set_interaction_active(false);
     VrPanel panel;
-    panel.connect();
+    panel.connect(frametop != nullptr);
     std::atomic<double> replacement_progress{monotonic_seconds()};
     std::atomic<bool> replacement_watched{false}, replacement_stalled{false};
     replacement.prepare_watchdog();
@@ -642,8 +651,21 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
         panel.submit(app.renderer, app.view());
         std::cout << "Full Keyboard started in background.\n" << std::flush;
     }
+    // With Frametop, its desktop counts as the dashboard does: the panel can show over the
+    // screens with the dashboard closed. It shows only while Frametop asked for it (a desktop
+    // text field, a mapped button, a launch) and it wasn't closed since, or a Steam field has
+    // it. Without Frametop, the dashboard alone, as before.
+    bool frametop_open = false;
+    auto surface = [&] {
+        const bool dashboard = vr_overlay()->IsDashboardVisible();
+        if (!frametop) {
+            return dashboard;
+        }
+        return (dashboard || frametop->surface()) && (frametop_open || replacement.state().open);
+    };
     auto dismiss_panel = [&] {
         if (app.take_dismissal()) {
+            frametop_open = false;
             lifecycle.dismiss();
         }
     };
@@ -662,13 +684,30 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
         app.set_replacement_available(native.available, replacement.unavailable_reason());
         app.set_native_session(native.open);
         const bool replace = app.replace_native_keyboard();
+        bool relaunch = instance.poll_recenter();
+        if (frametop) {
+            frametop->poll();
+            auto request = frametop->take_request();
+            if (request == FrametopLink::Request::Toggle) {
+                request = frametop_open && lifecycle.visible() ? FrametopLink::Request::Hide
+                                                               : FrametopLink::Request::Show;
+            }
+            if (request == FrametopLink::Request::Show) {
+                // A text field that gets focus again while it's up doesn't move it.
+                relaunch |= !(frametop_open && lifecycle.visible());
+                frametop_open = true;
+            } else if (request == FrametopLink::Request::Hide) {
+                frametop_open = false;
+            }
+            frametop_open |= relaunch;
+        }
         lifecycle.begin_frame({.replacement_enabled = replace,
                                .native = native,
                                .routed_remote = replacement.remote(),
                                .watchdog_stalled = replacement_stalled.exchange(false),
-                               .relaunch = instance.poll_recenter(),
+                               .relaunch = relaunch,
                                .now = now});
-        const bool dashboard_visible = vr_overlay()->IsDashboardVisible();
+        const bool dashboard_visible = surface();
         lifecycle.dashboard_visibility(dashboard_visible);
         // Hidden panels cannot be grabbed. Do not query both render models in
         // standby; require a released grip sample again when the panel returns.
@@ -708,7 +747,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
         while (vr_overlay()->PollNextOverlayEvent(panel.handle(), &event, sizeof(event))) {
             // Recheck before every pointer event, not just once per batch. A
             // closing dashboard must not deliver queued clicks to a local app.
-            if (!vr_overlay()->IsDashboardVisible()) {
+            if (!surface()) {
                 hide_panel();
             }
             if (event.eventType == vr::VREvent_OverlayClosed) {
@@ -981,15 +1020,14 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                 // Read actual compositor visibility rather than trusting our cached flag.
                 // Another UI can hide an overlay without destroying its owner process.
                 const bool compositor_visible = vr_overlay()->IsOverlayVisible(panel.handle());
-                lifecycle.present(placement.ready(), vr_overlay()->IsDashboardVisible(),
-                                  compositor_visible, now);
+                lifecycle.present(placement.ready(), surface(), compositor_visible, now);
             }
         }
         if (lifecycle.visible() && placement.ready() && (transform_dirty || horizon.animating())) {
             place_panel(now);
         }
         // Repeat and text commits share the same gate as pointer presses.
-        if (!vr_overlay()->IsDashboardVisible()) {
+        if (!surface()) {
             hide_panel();
         }
         const bool repaint = app.tick(now);

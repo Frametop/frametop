@@ -90,6 +90,10 @@ struct JapaneseComposer::Engine {
         Library() {
             handle = dlopen("libanthy.so.0", RTLD_NOW | RTLD_LOCAL);
             if (!handle) {
+                // Fedora (Frametop's container) ships Anthy as anthy-unicode, with the same API.
+                handle = dlopen("libanthy-unicode.so.0", RTLD_NOW | RTLD_LOCAL);
+            }
+            if (!handle) {
                 throw std::runtime_error("Japanese conversion needs the Anthy library");
             }
             try {

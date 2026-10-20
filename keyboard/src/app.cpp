@@ -172,8 +172,10 @@ std::vector<Control> App::controls() const {
         add({ControlKind::Settings}, {"settings", "Back (Esc)", {18, 12, 60, 42}, false, Icon::Back});
         add({ControlKind::Apply}, {"apply", "Apply and save", {88, 12, 60, 42}, false, Icon::Apply});
         add({ControlKind::Reload}, {"reload", "Reload config", {158, 12, 60, 42}, false, Icon::Reload});
-        add({ControlKind::Updates},
-            {"updates", updates_ ? updates_->label() : "Check for updates", {550, 12, 500, 42}});
+        if (!options_.frametop) { // Frametop ships and updates the keyboard itself.
+            add({ControlKind::Updates},
+                {"updates", updates_ ? updates_->label() : "Check for updates", {550, 12, 500, 42}});
+        }
         if (settings_.replace_native_keyboard && native_session_) {
             add({ControlKind::NativeFallback},
                 {"native-fallback", "Use Steam keyboard", {250, 12, 245, 42}});
@@ -287,6 +289,28 @@ void App::update_settings_ui() {
     const bool favorite =
         std::any_of(pending_favorites_.begin(), pending_favorites_.end(),
                     [&](const Favorite& f) { return same_pair(f.selection, pending_); });
+    // Frametop starts the keyboard with SteamVR itself, so it has no startup option.
+    std::vector<SettingField> experimental{
+        field(ControlKind::ReplaceNativeKeyboard, {"replace-native-keyboard",
+                                                   "Replace native keyboard:",
+                                                   "",
+                                                   ControlStyle::Checkbox,
+                                                   pending_replace_native_keyboard_,
+                                                   {},
+                                                   false,
+                                                   300})};
+    if (!options_.frametop) {
+        experimental.push_back(field(ControlKind::StartWithSteamos,
+                                     {"start-with-steamos",
+                                      "Start with SteamOS",
+                                      "",
+                                      ControlStyle::Checkbox,
+                                      pending_start_with_steamos_ && pending_replace_native_keyboard_,
+                                      {},
+                                      false,
+                                      300,
+                                      pending_replace_native_keyboard_}));
+    }
     settings_ui_.set_cards(
         {{"languages",
           "Languages and Layouts",
@@ -322,26 +346,7 @@ void App::update_settings_ui() {
                                              pending_auto_leveling_,
                                              {},
                                              true})}},
-         {"experimental",
-          "Experimental",
-          {field(ControlKind::ReplaceNativeKeyboard, {"replace-native-keyboard",
-                                                      "Replace native keyboard:",
-                                                      "",
-                                                      ControlStyle::Checkbox,
-                                                      pending_replace_native_keyboard_,
-                                                      {},
-                                                      false,
-                                                      300}),
-           field(ControlKind::StartWithSteamos,
-                 {"start-with-steamos",
-                  "Start with SteamOS",
-                  "",
-                  ControlStyle::Checkbox,
-                  pending_start_with_steamos_ && pending_replace_native_keyboard_,
-                  {},
-                  false,
-                  300,
-                  pending_replace_native_keyboard_})}}});
+         {"experimental", "Experimental", std::move(experimental)}});
 }
 PanelView App::view() const {
     PanelView v;

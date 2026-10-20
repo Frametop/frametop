@@ -166,6 +166,9 @@ int main() {
         // Host developers can point this test at an extracted Anthy package;
         // production code uses only the system library/dictionary.
         void* anthy = dlopen("libanthy.so.0", RTLD_NOW | RTLD_LOCAL);
+        if (!anthy) {
+            anthy = dlopen("libanthy-unicode.so.0", RTLD_NOW | RTLD_LOCAL); // Fedora's name
+        }
         if (const auto* dictionary = std::getenv("FRAMEKEYBOARD_TEST_ANTHY_DICTIONARY")) {
             require(anthy, "test Anthy library missing");
             auto override = reinterpret_cast<void (*)(const char*, const char*)>(

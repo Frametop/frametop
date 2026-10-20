@@ -15,6 +15,7 @@
 
 namespace framekeyboard {
 class NativeReplacement;
+class FrametopLink;
 class Updates;
 enum class Mode { Help, Preview, Vr, Render, RenderSettings, Check, Describe };
 enum class InputBackend { None, Ei, Uinput };
@@ -27,6 +28,9 @@ struct Options {
     bool start_enabled{false};
     bool autostart{};
     bool background_update{};
+    // Run as Frametop's keyboard (FRAMETOP.md): resident, hidden until summoned, no
+    // self-update or SteamOS startup of its own.
+    bool frametop{};
 };
 
 class App {
@@ -59,12 +63,14 @@ class App {
         return settings_.replace_native_keyboard && settings_.start_with_steamos;
     }
     bool background_start() const {
-        return options_.autostart || (options_.background_update && settings_.replace_native_keyboard);
+        return options_.autostart || options_.frametop ||
+               (options_.background_update && settings_.replace_native_keyboard);
     }
+    bool frametop() const { return options_.frametop; }
     bool replacement_ready() const;
     bool take_native_fallback();
     bool resident_replacement() const {
-        return options_.mode == Mode::Vr && settings_.replace_native_keyboard;
+        return options_.mode == Mode::Vr && (settings_.replace_native_keyboard || options_.frametop);
     }
     void close_panel();
     bool take_dismissal();
@@ -190,5 +196,6 @@ class App {
 double monotonic_seconds();
 extern volatile std::sig_atomic_t interrupted;
 int run_preview(App& app, double duration);
-int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, double duration);
+int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, double duration,
+           FrametopLink* frametop = nullptr);
 } // namespace framekeyboard

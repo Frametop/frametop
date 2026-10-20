@@ -1,10 +1,12 @@
 #include "framekeyboard/app.hpp"
 #include "framekeyboard/ei_input.hpp"
+#include "framekeyboard/frametop.hpp"
 #include "framekeyboard/native_replacement.hpp"
 #include "framekeyboard/startup.hpp"
 #include "framekeyboard/updates.hpp"
 #include "framekeyboard/vr_runtime.hpp"
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -17,6 +19,7 @@ void help() {
               << "  --preview                 Native desktop preview, no system input\n"
               << "  --vr                      Manually launched native VR panel\n"
               << "  --autostart               Start VR replacement hidden, if enabled in Settings\n"
+              << "  --frametop                Run as Frametop's keyboard (FRAMETOP.md)\n"
               << "  --render FILE.png         Render the keyboard without a window\n"
               << "  --render-settings FILE    Render the profile selector\n"
               << "  --check                   Validate and list available profiles\n"
@@ -41,7 +44,7 @@ int main(int argc, char** argv) {
         fk::UpdateStartup startup;
         fk::Updates updates(FRAMEKEYBOARD_VERSION, std::vector<std::string>(argv + 1, argv + argc));
         fk::Options options;
-        options.config_dir = fk::default_config_dir();
+        bool config_set = false;
         bool mode_set = false;
         std::optional<fk::InputBackend> input = fk::InputBackend::None;
         for (int i = 1; i < argc; ++i) {
@@ -78,6 +81,9 @@ int main(int argc, char** argv) {
                 mode(fk::Mode::Describe);
             } else if (argument == "--config-dir") {
                 options.config_dir = value();
+                config_set = true;
+            } else if (argument == "--frametop") {
+                options.frametop = true;
             } else if (argument == "--data-dir") {
                 options.data_dir = value();
             } else if (argument == "--ei-socket") {
@@ -115,6 +121,25 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("unknown argument: " + argument);
             }
         }
+        if (options.frametop) {
+            // Frametop's keyboard: VR, typing through gamescope and Frametop's relay, its own
+            // settings beside a standalone install's.
+            if (mode_set && options.mode != fk::Mode::Vr) {
+                throw std::runtime_error("--frametop runs the VR keyboard");
+            }
+            options.mode = fk::Mode::Vr;
+            input = fk::InputBackend::Ei;
+            options.start_enabled = true;
+            if (!config_set) {
+                const char* home = std::getenv("HOME");
+                if (!home || !*home) {
+                    throw std::runtime_error("HOME is unset; pass --config-dir");
+                }
+                options.config_dir = fk::fs::path(home) / ".config/frametop-keyboard";
+            }
+        } else if (!config_set) {
+            options.config_dir = fk::default_config_dir();
+        }
         if (options.mode == fk::Mode::Help) {
             help();
             return 0;
@@ -135,9 +160,11 @@ int main(int argc, char** argv) {
         if (options.start_enabled && options.input == fk::InputBackend::None) {
             throw std::runtime_error("--start-enabled requires an input backend");
         }
-        options.background_update = options.mode == fk::Mode::Vr && startup.background_start();
-        const bool start_hidden = options.autostart || options.background_update;
-        const int deliberate_exit = fk::deliberate_exit_status(options.autostart);
+        options.background_update =
+            options.mode == fk::Mode::Vr && !options.frametop && startup.background_start();
+        const bool start_hidden = options.autostart || options.background_update || options.frametop;
+        // Frametop's service, like the SteamOS startup unit, takes a deliberate quit as done.
+        const int deliberate_exit = fk::deliberate_exit_status(options.autostart || options.frametop);
         if (options.autostart) {
             if (options.mode != fk::Mode::Vr) {
                 throw std::runtime_error("--autostart requires --vr");
@@ -189,7 +216,8 @@ int main(int argc, char** argv) {
                 }
                 return profiles.errors.empty() ? 0 : 1;
             }
-            std::unique_ptr<fk::KeySink> sink;
+            std::unique_ptr<fk::FrametopLink> frametop;
+            std::unique_ptr<fk::KeySink> steam, sink;
             if (options.input != fk::InputBackend::None && !options.target_language.empty()) {
                 const auto profiles = fk::load_profiles(options.data_dir, options.config_dir);
                 if (!profiles.languages.contains(options.target_language)) {
@@ -202,6 +230,11 @@ int main(int argc, char** argv) {
                         std::string("/run/user/") + std::to_string(getuid()) + "/gamescope-0-ei";
                 }
                 sink = std::make_unique<fk::EiSink>(options.ei_socket, options.text_socket);
+                if (options.frametop) {
+                    frametop = std::make_unique<fk::FrametopLink>();
+                    steam = std::move(sink);
+                    sink = std::make_unique<fk::FrametopSink>(*frametop, *steam);
+                }
             } else if (options.input == fk::InputBackend::Uinput) {
                 sink = std::make_unique<fk::UInputSink>();
             } else {
@@ -210,7 +243,20 @@ int main(int argc, char** argv) {
             fk::NativeReplacement replacement(*sink);
             fk::SettingsWriter::Write preferences;
             fk::SettingsWriter::Write reconcile_preferences;
-            if (options.mode == fk::Mode::Vr) {
+            if (options.frametop) {
+                // Steam keyboard replacement starts on: Frametop's keyboard is the one keyboard.
+                if (!fk::fs::exists(options.config_dir / "config.json")) {
+                    std::vector<std::string> errors;
+                    auto settings = fk::load_settings(options.config_dir, errors);
+                    settings.replace_native_keyboard = true;
+                    fk::fs::create_directories(options.config_dir);
+                    fk::save_settings(options.config_dir, settings);
+                }
+                // Frametop starts it with SteamVR, so settings never touch startup units.
+                preferences = [config = options.config_dir](const fk::Settings& settings) {
+                    fk::save_settings(config, settings);
+                };
+            } else if (options.mode == fk::Mode::Vr) {
                 preferences = [config = options.config_dir,
                                executable =
                                    fk::fs::canonical("/proc/self/exe")](const fk::Settings& settings) {
@@ -223,7 +269,7 @@ int main(int argc, char** argv) {
                     };
             }
             fk::App app(options, replacement, std::move(preferences),
-                        options.mode == fk::Mode::Vr ? &updates : nullptr,
+                        options.mode == fk::Mode::Vr && !options.frametop ? &updates : nullptr,
                         std::move(reconcile_preferences));
             if (options.mode == fk::Mode::Render || options.mode == fk::Mode::RenderSettings) {
                 if (options.mode == fk::Mode::RenderSettings) {
@@ -236,7 +282,7 @@ int main(int argc, char** argv) {
             std::signal(SIGINT, signal_handler);
             std::signal(SIGTERM, signal_handler);
             result = options.mode == fk::Mode::Vr
-                         ? fk::run_vr(app, *instance, replacement, options.duration)
+                         ? fk::run_vr(app, *instance, replacement, options.duration, frametop.get())
                          : fk::run_preview(app, options.duration);
             // A watchdog's SIGTERM must still permit service recovery. systemctl
             // stop already suppresses restart independently of our exit status.

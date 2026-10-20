@@ -35,7 +35,7 @@ done
 
 conf=$HOME/.config/frametop.conf
 BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_SLOTS=16 FLOAT_MARGIN=300
-NOTIFY_FORWARD=auto
+NOTIFY_FORWARD=auto FIREFOX_TITLEBAR=kwin
 # shellcheck disable=SC1090
 [ -f "$conf" ] && . "$conf"
 backend=${FT_BACKEND:-$BACKEND}
@@ -213,6 +213,13 @@ kde_portals=/usr/share/xdg-desktop-portal/kde-portals.conf
   > "$portals/kde-portals.conf"
 export XDG_DESKTOP_PORTAL_DIR=$portals
 export XDG_DATA_DIRS=$runtime/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
+# Firefox (and other Gecko browsers) draw their own title bar by default, without Frametop's
+# float button. FIREFOX_TITLEBAR=kwin (the default) gives them KWin's instead: with
+# MOZ_GTK_TITLEBAR_DECORATION=none, Firefox's automatic title bar setting picks the system one,
+# here only, and nothing changes in its profile, so outside this desktop it keeps its own.
+# Firefox can't draw its own then, whatever its Customize Toolbar says; FIREFOX_TITLEBAR=firefox
+# leaves it that choice (its own title bar by default).
+[ "$FIREFOX_TITLEBAR" = firefox ] || export MOZ_GTK_TITLEBAR_DECORATION=${MOZ_GTK_TITLEBAR_DECORATION:-none}
 
 # The cursor: the Steam client's XCURSOR_THEME=steam comes along in the environment, and
 # KWin and the apps take it over this desktop's own setting. SteamOS had no theme of that

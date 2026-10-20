@@ -11,6 +11,7 @@ FLOAT_SLOTS=16     # screens backend: how many windows can float in VR at once (
 FLOAT_MARGIN=300   # floating windows: pixels around each window on its output, so menus have room past its edges
 DASHBOARD_APPS=steamvr # apps from the SteamVR dashboard's Launch a program list: steamvr = SteamVR windows | frametop = Frametop floating windows (SteamVR's when the desktop isn't running, Frametop is paused, or every floating window is in use; applies at once)
 NOTIFY_FORWARD=auto # the desktop's notifications go to the Steam session's notification server (e.g. VR toasts), Plasma's popups off: auto = unless that's SteamOS's steam_notif_daemon | on | off (restart the desktop after a change)
+FIREFOX_TITLEBAR=kwin # Firefox in the desktop: kwin = KWin's title bar, with Frametop's float button | firefox = its own, tabs in the title bar (restart the desktop after a change)
 POINTER=0          # 1 = the mouse drives the universal 3D pointer (ft_pointer driver) instead of a plain mouse
 POINTER_SENSITIVITY=0.03   # degrees per mouse count
 POINTER_IDLE=30    # seconds without mouse use before the controllers get their laser back

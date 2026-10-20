@@ -230,6 +230,11 @@ class Backend(QObject):
         return self._conf()["screens"]
 
     @Property(int, notify=changed)
+    def screenCount(self):
+        """The desktop's screens: the layout's with ft-screens, SCREENS with gamescope."""
+        return ft_layout.screen_count(ft_layout.load_layout())
+
+    @Property(int, notify=changed)
     def width(self):
         return self._conf()["width"]
 
@@ -288,7 +293,8 @@ class Backend(QObject):
         if "panel_size" not in layout or layout["panel_size"] == list(ft_layout.DEFAULT_PANEL):
             layout["panel_size"] = [ft_layout.DEFAULT_PANEL[0], ft_layout.DEFAULT_PANEL[0] * c["height"] / c["width"]]
         out = []
-        for i, t in enumerate(ft_layout.plan(layout, c["screens"])):
+        # ft-screens: the layout's screens; SCREENS in frametop.conf is gamescope's count.
+        for i, t in enumerate(ft_layout.plan(layout, ft_layout.screen_count(layout))):
             w, h = ft_layout.screen_size(layout, i)
             out.append({"index": i, "x": t["pos"][0], "y": t["pos"][1], "z": t["pos"][2],
                         "faceYaw": t["face"][0], "facePitch": t["face"][1], "width": w, "height": h})

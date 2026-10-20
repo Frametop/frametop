@@ -574,7 +574,7 @@ Kirigami.ApplicationWindow {
                         Kirigami.FormData.label: "Rows:"
                         visible: lpage.layout.mode !== "custom"
                         from: 1
-                        to: Math.max(1, backend.screens)
+                        to: Math.max(1, backend.screenCount)
                         value: lpage.preset.rows || 1
                         onValueModified: backend.setPreset("rows", value)
                     }

@@ -212,6 +212,7 @@ ACTION_LABELS = {
     "spin_next": "Spin the panels: next one on the right to the front",
     "spin_prev": "Spin the panels: next one on the left to the front",
     "frunner": "Frunner: search apps and remote displays",
+    "hands_toggle": "Hand tracking on/off",
     "key": "Pass through as key",
     "none": "Do nothing",
 }
@@ -310,10 +311,11 @@ MODIFIER_NAMES = {29: "Ctrl", 42: "Shift", 56: "Alt", 125: "Meta"}
 RIGHT_MODIFIER_NAMES = {97: "Right Ctrl", 54: "Right Shift", 100: "Right Alt", 126: "Right Meta"}
 # What a rules file without "key_bindings" gets (the relay's DEFAULT_KEY_BINDINGS): a Meta tap
 # opens Steam's menu, Meta+J and Meta+K click at the gaze, Meta+Shift+F floats a window,
-# Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels, Meta+Space opens frunner.
+# Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels, Meta+Space opens frunner, Meta+H turns hand
+# tracking off or on.
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "frunner"}
+                        "125+57": "frunner", "125+35": "hands_toggle"}
 
 
 def voice_installed():

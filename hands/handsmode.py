@@ -20,6 +20,12 @@ nothing and says so ("problem"), and never asks for a password.
   python3 hands/handsmode.py set MODE          # write HANDS_MODE, then apply it, stopping what it
                                                # doesn't want (Frametop Input Settings, ft-handsctl mode)
   python3 hands/handsmode.py desktop up|down   # the session's hooks; only HANDS_MODE=frametop acts
+  python3 hands/handsmode.py toggle [--sound]  # stop hand tracking if it runs, else start it (the
+                                               # input relay's hands_toggle, ft-handsctl toggle)
+
+toggle doesn't change HANDS_MODE: what it stops starts again with the next desktop (frametop) or
+SteamVR (always), and what it starts runs until SteamVR stops, as ft-handsctl on and off. --sound
+plays the pause sounds (input/game_pause.py's): stopped as on a pause, started as on a resume.
 
 It also reads and writes the three hand input switches Frametop Input Settings shows (METHODS:
 gaze clicks, the hand ray, direct touch), which are pointer and ft-screens settings, not services.
@@ -48,6 +54,9 @@ CUTOUTS = ("frametop-cutouts-camd.service", "frametop-cutouts-hands.service")  #
 UNITS = TRACKING + (VIEW,)
 CAMD = "frametop-camd.service"
 WANTS_DIR = os.path.expanduser("~/.config/systemd/user/" + STEAMVR + ".wants")
+# toggle's sounds, the pause's (input/game_pause.py SOUNDS): True = stopped, False = started.
+SOUNDS = {True: "/usr/share/sounds/ocean/stereo/device-removed.oga",
+          False: "/usr/share/sounds/ocean/stereo/device-added.oga"}
 
 
 def read_conf(path=CONF_PATH):
@@ -320,6 +329,28 @@ def apply(host, conf=None, desktop=None, strict=False):
     return calls, st
 
 
+def toggle_plan(st):
+    """toggle's systemctl calls: ([args], "off"|"on"|"", problem). Off stops whatever runs (the hand
+    view, and ft-cutouts' units too); on starts the tracking units and the hand view, once SteamVR
+    runs and ft-camd can read the cameras."""
+    if st["active"]:
+        return [["stop", "--no-block", *st["active"]]], "off", ""
+    if not st["steamvr"]:
+        return [], "", "SteamVR isn't running"
+    if st["problem"]:
+        return [], "", st["problem"]
+    return [["start", "--no-block", *TRACKING, *([VIEW] if st["view"] else [])]], "on", ""
+
+
+def toggle(host, conf=None):
+    """Stop hand tracking if it runs, else start it (toggle_plan); returns its plan."""
+    st = status(host, read_conf() if conf is None else conf, cameras=False)
+    calls, now, problem = toggle_plan(st)
+    for args in calls:
+        host.systemctl(*args)
+    return calls, now, problem
+
+
 def main(argv):
     host = Host()
     cmd = argv[0] if argv else "status"
@@ -350,7 +381,18 @@ def main(argv):
             if st["problem"] and argv[1] == "up":
                 print("frametop: hand tracking: " + st["problem"])
         return 0
-    print("usage: handsmode.py status [--json] | apply | set frametop|always|off | desktop up|down", file=sys.stderr)
+    if cmd == "toggle" and argv[1:] in ([], ["--sound"]):
+        calls, now, problem = toggle(host)
+        if problem:
+            print("hand tracking: " + problem, file=sys.stderr)
+            return 1
+        print(f"hand tracking {now}: systemctl --user " + " ".join(calls[0]))
+        sound = SOUNDS[now == "off"]
+        if "--sound" in argv and os.path.exists(sound):
+            host.run(["pw-play", sound], timeout=5)
+        return 0
+    print("usage: handsmode.py status [--json] | apply | set frametop|always|off | desktop up|down | toggle [--sound]",
+          file=sys.stderr)
     return 2
 
 

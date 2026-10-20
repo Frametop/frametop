@@ -631,9 +631,12 @@ def tests():
     to_relay("keyboard steam")
 
     check("an empty command isn't an action", relay.known_action("command:  "), False)
-    check("steam_menu, pause_toggle and commands work without pointer mode",
-          (relay.needs_pointer("steam_menu"), relay.needs_pointer("pause_toggle"), relay.needs_pointer("command:ls")),
-          (False, False, False))
+    check("steam_menu, pause_toggle, hands_toggle and commands work without pointer mode",
+          (relay.needs_pointer("steam_menu"), relay.needs_pointer("pause_toggle"), relay.needs_pointer("hands_toggle"),
+           relay.needs_pointer("command:ls")),
+          (False, False, False, False))
+    check("Meta+H toggles hand tracking by default", (relay.known_action("hands_toggle"),
+                                                      relay.DEFAULT_KEY_BINDINGS.get("125+35")), (True, "hands_toggle"))
 
     # A text field on the desktop got focus (ft-textinput): Frametop's keyboard by the Keyboard
     # setting, and a log line saying why, once per decision (scripts/report.sh reads them).

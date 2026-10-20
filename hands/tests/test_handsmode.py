@@ -161,6 +161,38 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(calls, [["start", "--no-block", CAMD, HANDS]])
 
 
+class ToggleTest(unittest.TestCase):
+    """hands_toggle (the relay's Meta+H) and ft-handsctl toggle: off if anything runs, else on."""
+
+    def test_running_stops_everything(self):
+        h = FakeHost(loaded=(CAMD, HANDS, VIEW), active=(CAMD, HANDS, VIEW, CUT_CAMD))
+        calls, now, problem = hm.toggle(h, {"HANDS_MODE": "frametop"})
+        self.assertEqual((calls, now, problem), ([["stop", "--no-block", CAMD, HANDS, VIEW, CUT_CAMD]], "off", ""))
+        self.assertEqual(h.calls, calls)
+
+    def test_stopped_starts_with_the_hand_view(self):
+        h = FakeHost(loaded=(CAMD, HANDS, VIEW))
+        calls, now, _ = hm.toggle(h, {"HANDS_MODE": "off"})
+        self.assertEqual((calls, now), ([["start", "--no-block", CAMD, HANDS, VIEW]], "on"))
+        self.assertEqual(hm.toggle(FakeHost(), {})[0], [["start", "--no-block", CAMD, HANDS]],
+                         "no hand view installed: tracking alone")
+
+    def test_half_running_counts_as_on(self):
+        self.assertEqual(hm.toggle(FakeHost(active=(CAMD,)), {})[:2], ([["stop", "--no-block", CAMD]], "off"))
+
+    def test_cant_start(self):
+        for host, why in ((FakeHost(steamvr=False), "SteamVR isn't running"), (FakeHost(caps=False), "permissions"),
+                          (FakeHost(loaded=()), "isn't installed")):
+            calls, now, problem = hm.toggle(host, {})
+            self.assertEqual((calls, now, host.calls), ([], "", []))
+            self.assertIn(why, problem)
+
+    def test_mode_is_left_alone(self):
+        conf = {"HANDS_MODE": "always"}
+        hm.toggle(FakeHost(active=(CAMD, HANDS)), conf)
+        self.assertEqual(conf, {"HANDS_MODE": "always"})
+
+
 class StatusTest(unittest.TestCase):
     def test_problems(self):
         st = hm.status(FakeHost(loaded=()), {})

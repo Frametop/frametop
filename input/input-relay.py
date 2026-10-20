@@ -41,7 +41,9 @@ Steam's menu, or close the dashboard (steam/ft-steam menu, through Steam's UI), 
 pause Frametop for a VR game, or resume it (game_pause.py), dictate = start or stop dictation, and
 dictate_hold = dictation while held (Frametop Voice, voice/ft-voiced: "toggle|start|stop <source>"
 to @frametop_voice), frunner = open or close frunner's search for apps and remote displays
-("toggle <source>" to @ft_frunner; Meta+Space by default), command:CMD = run CMD with sh -c (on the host, as this service: its
+("toggle <source>" to @ft_frunner; Meta+Space by default), hands_toggle = stop hand tracking if
+it runs, else start it, until the next desktop or SteamVR start (hands/handsmode.py toggle; Meta+H
+by default), command:CMD = run CMD with sh -c (on the host, as this service: its
 environment, output to its log, and COMMAND_PATH, so ft-layout, ft-float, ft-steam and ft-voice
 need no path), key = pass through as a key, none).
 
@@ -60,7 +62,7 @@ cancels that dictation quietly ("cancel keyboard quiet"). A rules
 file without "key_bindings" gets DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left,
 Meta+K: gaze_right, Meta+Shift+F: float_toggle), plus a Right Ctrl tap for dictate once Frametop
 Voice is installed (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. The float,
-profile, Steam menu, pause, dictation and command actions work without pointer mode too. A combination with Meta also sends the desktop an
+profile, Steam menu, pause, dictation, hand tracking and command actions work without pointer mode too. A combination with Meta also sends the desktop an
 F24 press and Meta's release right away: so letting go of Meta doesn't open Plasma's launcher, and
 a gaze click isn't Meta+click (KWin's window move and resize). Another key while Meta is still
 held gives the desktop Meta back. While typing goes to Steam, keyboards aren't grabbed, so Steam
@@ -275,17 +277,18 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
            "dock_all", "spin_next", "spin_prev", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
-           "frunner", "key", "none")
+           "frunner", "hands_toggle", "key", "none")
 # Gaze mode is a mouse feature: these never come from a controller button (docs/gaze-controllers.md).
 GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right", "gaze_quickcal")
 # Key combinations a rules file without "key_bindings" gets: a Meta tap opens Steam's menu, Meta+J
 # and Meta+K click at the gaze (free on the Frametop desktop, and apps don't use Meta),
 # Meta+Shift+F floats a window, and Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels around
 # you (ft-screens' lazy susan); not Meta+Tab, which is Cmd+Tab on a Mac reached through a remote
-# desktop like RustDesk. Meta+Space opens frunner's search (Plasma's KRunner is Alt+Space).
+# desktop like RustDesk. Meta+Space opens frunner's search (Plasma's KRunner is Alt+Space), and
+# Meta+H turns hand tracking off or on.
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "frunner"}
+                        "125+57": "frunner", "125+35": "hands_toggle"}
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
 # file), a rules file without "key_bindings" gets these too: a Right Ctrl tap, Right Ctrl alone,
 # so a Left Ctrl tap (crouch in many games) doesn't start it.
@@ -337,6 +340,8 @@ FRUNNER = "\0ft_frunner"
 # Actions renamed since a release: rules files saved before still mean them (spotwatch was
 # frunner's name until 2026-10-20).
 RENAMED_ACTIONS = {"spotwatch": "frunner"}
+# hands_toggle: hand tracking off if it runs, else on (HANDSMODE toggle, which says which in this
+# service's log). It doesn't need pointer mode either.
 PROFILE = "profile:"  # "profile:NAME": switch to that profile (doesn't need pointer mode either)
 COMMAND = "command:"  # "command:CMD": run CMD (nor does this)
 
@@ -356,7 +361,8 @@ def known_action(a):
 
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
-            and a not in ("steam_menu", "pause_toggle", "frunner") and not a.startswith((PROFILE, COMMAND)))
+            and a not in ("steam_menu", "pause_toggle", "frunner", "hands_toggle")
+            and not a.startswith((PROFILE, COMMAND)))
 
 
 def works_paused(a):
@@ -370,6 +376,7 @@ PAUSE_SOURCES = {"mouse": "mouse button", "keyboard": "key combination", "left":
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FT_LAYOUT = os.path.join(REPO, "layout", "ft-layout")
 FT_STEAM = os.path.join(REPO, "steam", "ft-steam")
+HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
 # Commands ("command:CMD") find Frametop's own tools (ft-layout, ft-float, ft-steam, ft-voice) on
 # their PATH.
 COMMAND_PATH = ":".join([os.path.join(REPO, d) for d in ("layout", "float", "steam", "voice")]
@@ -1204,6 +1211,13 @@ def main():
                 # Talks to Steam's UI for a moment; its errors go to this service's log.
                 subprocess.Popen([FT_STEAM, "menu"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  start_new_session=True)
+                log(action)
+        elif action == "hands_toggle":
+            if value == 1:
+                # systemctl --no-block, and the pause's sounds if it plays them; the outcome goes
+                # to this service's log.
+                subprocess.Popen(["python3", HANDSMODE, "toggle", *(["--sound"] if pause.settings["sound"] else [])],
+                                 stdin=subprocess.DEVNULL, start_new_session=True)
                 log(action)
         elif action.startswith(COMMAND):
             if value == 1:

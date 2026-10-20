@@ -3212,9 +3212,9 @@ bool FarPair(int64_t t) {
 // gaze, and they stay armed through each pinch (the other three fingers stay open), so claiming them from
 // the pair alone left every pinch to us and kept the gaze from taking the pointer back (user, 2026-10-19:
 // "no amount of tapping ... gets the eye tracker pointer to show back up").
-bool FarClaims(int side, int64_t t) {
-    return g_far.panel >= 0 || (FarPair(t) && (g_grabThat.closing(side) || g_far.fist[side]));
-}
+// Closing is grab that's: fingers curling with the palm still toward the panel. A fist alone isn't (a
+// resting hand curls into one: 2026-10-19, the left hand rested while the right typed by laser).
+bool FarClaims(int side, int64_t t) { return g_far.panel >= 0 || (FarPair(t) && g_grabThat.closing(side)); }
 
 void EndFarStretch(const char *why) {
     const auto it = g_screens.find(g_far.panel);
@@ -4122,6 +4122,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         if (std::strcmp(other, claimedBy[k]) != 0) {
             if (*other) std::printf("%s hand: %s has it\n", k ? "right" : "left", other);
             else std::printf("%s hand: %s let it go\n", k ? "right" : "left", claimedBy[k]);
+            std::fflush(stdout);   // (in order with the log's timed lines)
             claimedBy[k] = other;
         }
         if (by) return "1";

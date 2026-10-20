@@ -2679,9 +2679,12 @@ int main() {
         // A hand at a panel (ft-screens' near claim: it pokes and taps there): no laser at all (user,
         // 2026-10-11: the laser from the head to where the fingertip put the cursor got in the way of
         // tapping, and held the button so pokes were refused). The mouse's next move claims it back,
-        // or in gaze mode the gaze, GAZE_WAKE_NEAR after the hand left.
+        // or in gaze mode the gaze, GAZE_WAKE_NEAR after the hand left. With a hand's ray driving it, only
+        // that hand's claim lets it go (user, 2026-10-19: typing on Full Keyboard with the right hand's
+        // laser, the resting left hand's claim released it 49 times in a row and a pinch lost its click).
+        const bool claimed = raySide >= 0 ? nearClaim[raySide] : nearClaim[0] || nearClaim[1];
         if (active && hold.src == Src::None && !leftHeld && touch.side < 0 && tnow - nearAt < std::chrono::milliseconds(200) &&
-            (nearClaim[0] || nearClaim[1]) && tnow - lastMouse > std::chrono::seconds(1)) {
+            claimed && tnow - lastMouse > std::chrono::seconds(1)) {
             releasePointer("a hand touches a panel");
         }
         if (tnow - nearAt < std::chrono::milliseconds(200) && (nearClaim[0] || nearClaim[1])) nearBusyAt = tnow;

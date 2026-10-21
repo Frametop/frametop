@@ -415,6 +415,10 @@ def relative_pose(center, x_axis, z_axis, eye, heading):
             "roll": round(roll, 2)}
 
 
+class NoAnswer(RuntimeError):
+    """The other side isn't there or didn't reply (as opposed to replying with an error)."""
+
+
 class Socket:
     """Request/reply over an abstract datagram socket (ft-screens or the pointer helper)."""
 
@@ -429,7 +433,7 @@ class Socket:
             self.sock.sendto(text.encode(), self.address)
             reply = self.sock.recv(8192).decode()
         except (OSError, socket.timeout) as e:
-            raise RuntimeError(f"{self.what} didn't answer ({e})")
+            raise NoAnswer(f"{self.what} didn't answer ({e})")
         if not reply.startswith("ok"):
             raise RuntimeError(reply)
         return reply
@@ -779,9 +783,12 @@ def plan_remotes(layout, count, displays):
 
 
 def remotes_running(sock):
-    """ft-screens' remote screens, {number: state}; None from an ft-screens without them."""
+    """ft-screens' remote screens, {number: state}; None from an ft-screens without them.
+    Raises NoAnswer when ft-screens isn't running: that's no sign of an old build."""
     try:
         fields = sock.ask("remotes").split()[2:]
+    except NoAnswer:
+        raise
     except RuntimeError:
         return None
     return {int(e.split(":")[0]): e.split(":")[2] for e in fields}
@@ -961,6 +968,8 @@ def start_remotes_now(layout, only):
             return
         eye, heading = remote_anchor(sock, layout)
         place_remotes(sock, layout, screen_count(layout), eye, heading, only=only)
+    except NoAnswer as e:
+        log(f"saved; not started now: {e}")
     except RuntimeError as e:
         log(f"not placed now: {e}")
 

@@ -348,11 +348,32 @@ bool Client::GrantByName(WebApi &api) {
     return true;
 }
 
+// Over HTTPS with this client's certificate: Vibepollo removes a client only when it asks itself
+// that way. gs_unpair's plain-HTTP request got a 200 and the client stayed paired (2026-10-21).
+// A host that doesn't say whether it did ("unpaired") counts as done, as before.
 bool Client::Unpair() {
-    const int r = gs_unpair(&server);
+    if (!server.paired) return std::printf("unpair: not paired\n"), true;
+    std::random_device rd;
+    char url[4096];
+    std::snprintf(url, sizeof url, "https://%s:%u/unpair?uniqueid=%s&uuid=%08x-0000-4000-8000-%012x",
+                  server.serverInfo.address, server.httpsPort, uniqueId.c_str(), rd(), rd());
+    PHTTP_DATA data = http_create_data();
+    if (!data) return false;
+    bool ok = false;
+    std::string why = "failed";
+    if (http_request(url, data) == GS_OK) {
+        char *unpaired = nullptr;
+        ok = xml_search(data->memory, data->size, const_cast<char *>("unpaired"), &unpaired) != GS_OK ||
+             std::strcmp(unpaired, "1") == 0;
+        if (!ok) why = "the host kept this client";
+        std::free(unpaired);
+    } else if (gs_error) {
+        why = gs_error;
+    }
+    http_free_data(data);
     DropConnection();
-    std::printf("unpair: %s\n", r == GS_OK ? "done" : gs_error ? gs_error : "failed");
-    return r == GS_OK;
+    std::printf("unpair: %s\n", ok ? "done" : why.c_str());
+    return ok;
 }
 
 int Client::FindApp(const std::string &want) {

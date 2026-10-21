@@ -115,7 +115,7 @@ check("key table row", rows[0], {"combo": "Meta tap", "action": "Steam menu"})
 # ---------------------------------------------------------------- the pages
 
 KNOWN = {"frunner", "spin", "remote", "gaze:calibrate", "gaze:quickcal"}
-INPUT = {"buttons", "controllers", "games", "keyboard", "voice", "pointer", "ignore", "gaze", "hands", "bluetooth"}
+INPUT = {"devices", "buttons", "controllers", "games", "keyboard", "voice", "pointer", "ignore", "gaze", "hands", "bluetooth"}
 DISPLAY = {"screens", "layout", "visibility", "power"}
 
 
@@ -128,28 +128,47 @@ none = ft_tour.features(os.path.join(tmp, "empty"), conf={})
 everything = ft_tour.features(units, conf={"POINTER_GAZE": "1", "POINTER_HANDS": "1"})
 bare, full = ft_tour.pages(none, rows), ft_tour.pages(everything, rows)
 ids = [p["id"] for p in full]
-check("pages, in order", ids, ["welcome", "screens", "keys", "gaze", "hands", "frunner", "floating", "pinning",
-                               "profiles", "pause", "more", "done"])
+check("pages, in order", ids, ["welcome", "screens", "floating", "frunner", "keys", "gaze", "hands", "hands-far",
+                               "pinning", "profiles", "pause", "settings", "more", "done"])
 check("the same pages with nothing installed", [p["id"] for p in bare], ids)
 for pages in (bare, full):
     for p in pages:
         check(f"page {p['id']}: has a title, intro, icon",
               all(isinstance(p.get(k), str) and p[k] for k in ("title", "intro", "icon")), True)
-        check(f"page {p['id']}: rows are pairs", all(len(r) == 2 and all(r) for r in p["rows"]), True)
-        check(f"page {p['id']}: actions are known", [a["id"] for a in p["actions"] if not known(a["id"])], [])
+        check(f"page {p['id']}: rows are headings, pairs, or pairs with an action",
+              all((isinstance(r, str) and r) or (len(r) in (2, 3) and all(isinstance(x, str) and x for x in r))
+                  for r in p["rows"]), True)
+        check(f"page {p['id']}: a heading isn't last", not p["rows"] or not isinstance(p["rows"][-1], str), True)
+        check(f"page {p['id']}: actions are known",
+              [a["id"] for a in p["actions"] if not known(a["id"])]
+              + [r[2] for r in p["rows"] if not isinstance(r, str) and len(r) == 3 and not known(r[2])], [])
+        check(f"page {p['id']}: its videos are here", all(os.path.exists(c["file"]) and c["caption"] for c in p["clips"]),
+              True)
 by = {p["id"]: p for p in bare}
 check("gaze not installed: says how", "gaze/run.sh install" in by["gaze"]["intro"], True)
 check("gaze not installed: nothing to try", (by["gaze"]["actions"], by["gaze"].get("practice")), ([], ""))
 check("hands not installed: says how", "hands/run.sh install" in by["hands"]["intro"], True)
-check("hands not installed: no gaze pinch rows", any("pinch" in r[0].lower() and "gaze" in r[0].lower()
-                                                      for r in by["hands"]["rows"]), False)
+check("gaze not installed: no gaze pinch rows", "With gaze mode on" in by["hands-far"]["rows"], False)
+check("hands not installed: says how, far too", "hands/run.sh install" in by["hands-far"]["intro"], True)
 check("no voice: no dictation row", any("Dictation" in r[0] for r in by["more"]["rows"]), False)
 by = {p["id"]: p for p in full}
 check("gaze installed: a target", by["gaze"]["practice"], "gaze")
 check("gaze on: no note", by["gaze"].get("note"), None)
-check("gaze rows: Meta+J and Meta+K", by["gaze"]["rows"][0][0], "Tap Meta+J, or Meta+K")
-check("hands and gaze: pinch at the gaze", any("look at something and pinch" in r[0] for r in by["hands"]["rows"]), True)
+check("gaze rows: Meta+J and Meta+K first", by["gaze"]["rows"][:2], ["Clicking", ["Tap Meta+J, or Meta+K",
+                                                                                 "A left or right click where you look"]])
+check("hands and gaze: pinch at the gaze", any("look at something and pinch" in r[0].lower()
+                                               for r in by["hands-far"]["rows"] if not isinstance(r, str)), True)
+check("hands far: a target", by["hands-far"]["practice"], "hands")
+check("the pages with videos", [p["id"] for p in full if p["clips"]],
+      ["screens", "floating", "frunner", "gaze", "hands", "hands-far"])
+check("settings: a row for every Input Settings page",
+      {r[2][6:] for r in by["settings"]["rows"] if not isinstance(r, str) and r[2].startswith("input:")}, INPUT)
+check("settings: a row for every Display Settings page",
+      {r[2][8:] for r in by["settings"]["rows"] if not isinstance(r, str) and r[2].startswith("display:")}, DISPLAY)
 check("hands installed: a target", by["hands"]["practice"], "hands")
+check("every clip in tour/clips is shown somewhere",
+      sorted(n[:-5] for n in os.listdir(os.path.join(TOUR, "clips")) if n.endswith(".webp")),
+      sorted(os.path.basename(c["file"])[:-5] for p in full for c in p["clips"]))
 check("voice: dictation row first", by["more"]["rows"][0][0].startswith("Dictation"), True)
 check("keyboard page has the key table", by["keys"]["keys"], rows)
 check("floating page: the dashboard choice", by["floating"]["toggle"], "dashboardApps")

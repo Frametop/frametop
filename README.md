@@ -41,7 +41,7 @@ You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or th
 
 After the restart, Launch a program → Desktop opens the multi-screen desktop, with its screens arranged around where you're facing. Frametop Display Settings and Frametop Input Settings are in the desktop's application menu, under Settings. SteamOS's own single-screen desktop is still there, as Native Desktop in the same list.
 
-The first time the desktop starts, Frametop Tour opens: a page at a time on the screens, the keyboard shortcuts, eye and hand tracking, frunner, floating windows, pins, profiles, and pausing for VR games, with buttons to try each one. Closing it, skipping it, or finishing it keeps it from opening again. It's in the application menu, in frunner, in SteamVR's Launch a program list, and in Frametop Input Settings' menu for whenever you want it again, and `tour/ft-tour --reset` has it open at the desktop's next start.
+The first time the desktop starts, Frametop Tour opens: a page at a time on the screens and the 3D mouse, floating windows, frunner, the keyboard shortcuts, eye tracking, hand tracking (up close and from a distance), pins, profiles, pausing for VR games, and what each page of Frametop's settings is for. Most pages start with short looping videos from a headset, and have buttons to try each thing or open its settings. A page list jumps to any topic, so it doubles as a reference. Closing it, skipping it, or finishing it keeps it from opening again. It's in the application menu, in frunner, in SteamVR's Launch a program list, and in Frametop Input Settings' menu for whenever you want it again, and `tour/ft-tour --reset` has it open at the desktop's next start.
 
 If you work in the desktop for long stretches, or leave the headset on a stand, open Frametop Display Settings → Power. Turn on Stay awake while plugged in: by default Steam puts the Frame to sleep after an hour without input, even while it charges. And choose when the displays turn off while the headset isn't used. SteamVR turns them off a few seconds after you take the headset off, but a stand or mount that covers the proximity sensor inside it makes the headset seem worn, and its displays stay on all night.
 
@@ -157,7 +157,8 @@ Hand tracking uses the headset's own cameras, with no controllers. The installer
 | --- | --- |
 | Poke a screen with your index finger | A click there |
 | Pinch a screen's bar, edge, or corner, and move | Moves or resizes the screen |
-| Hold a screen like a card, or in a fist | Carries it; turn your wrist to turn it. Flick it away, or let go fast to throw it |
+| Hold a screen like a card (an edge between index and middle finger, or all fingertips) | Carries it; turn your wrist to turn it. Flick it away, or let go fast to throw it |
+| Close both hands into fists near a screen | Resizes it (fists don't move screens) |
 | Hold both hands on a screen and pull them apart | Stretches it |
 | Hold an open hand out to a far screen, then make a fist and pull it back ("grab that") | Brings it to arm's reach |
 | Turn a hand palm up toward your face, look at it, and pinch the ring that shows | Opens the Steam menu |

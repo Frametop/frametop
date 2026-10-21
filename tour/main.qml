@@ -1,7 +1,9 @@
 // Frametop Tour (Kirigami). Backend: ft_tour.py ("backend"). One page at a time from
-// backend.pages: a title and intro, the key table on the keyboard page, rows of what to do and
-// what it does, a practice target on the gaze and hands pages, and buttons that try things or
-// open their settings. Closing the window, Skip, and Finish all mark the tour done.
+// backend.pages: a title and intro, the page's videos (one after another, or picked by number),
+// the key table on the keyboard page, rows of what to do and what it does under headings, a
+// practice target on the gaze and hands pages, and buttons that try things or open their
+// settings. The footer's page list jumps anywhere. Closing the window, Skip, and Finish all mark
+// the tour done.
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
@@ -10,8 +12,8 @@ import org.kde.kirigami as Kirigami
 Kirigami.ApplicationWindow {
     id: root
     title: "Frametop Tour"
-    width: Kirigami.Units.gridUnit * 40
-    height: Kirigami.Units.gridUnit * 34
+    width: Kirigami.Units.gridUnit * 42
+    height: Kirigami.Units.gridUnit * 40
 
     readonly property var pages: backend.pages
     property int index: Math.max(0, pages.findIndex(p => p.id === startPage))
@@ -28,30 +30,143 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // Two columns: what to do, and what it does.
-    component Table: GridLayout {
+    // Two columns: what to do, and what it does. A string is a heading over the rows after it,
+    // and a row's third item an action its Open button runs.
+    component Table: ColumnLayout {
+        id: table
         property var rows: []
-        columns: 2
-        columnSpacing: Kirigami.Units.largeSpacing
-        rowSpacing: Kirigami.Units.smallSpacing
+        spacing: Kirigami.Units.smallSpacing
         Layout.fillWidth: true
         Repeater {
-            model: rows.length * 2
-            Controls.Label {
+            model: table.rows
+            ColumnLayout {
+                id: row
+                required property var modelData
                 required property int index
-                readonly property bool doing: index % 2 === 0
-                text: rows[Math.floor(index / 2)][doing ? 0 : 1]
-                font.bold: doing
-                wrapMode: Text.Wrap
+                readonly property bool heading: typeof modelData === "string"
+                spacing: 0
                 Layout.fillWidth: true
-                Layout.preferredWidth: doing ? 2 : 3  // with fillWidth, the share of the width
-                Layout.alignment: Qt.AlignTop
+                Kirigami.Heading {
+                    visible: row.heading
+                    level: 3
+                    text: row.heading ? row.modelData : ""
+                    Layout.topMargin: row.index > 0 ? Kirigami.Units.largeSpacing : 0
+                }
+                RowLayout {
+                    visible: !row.heading
+                    spacing: Kirigami.Units.largeSpacing
+                    Layout.fillWidth: true
+                    Controls.Label {
+                        text: row.heading ? "" : row.modelData[0]
+                        font.bold: true
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 2  // with fillWidth, the share of the width
+                        Layout.alignment: Qt.AlignTop
+                    }
+                    Controls.Label {
+                        text: row.heading ? "" : row.modelData[1]
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 3
+                        Layout.alignment: Qt.AlignTop
+                    }
+                    Controls.Button {
+                        visible: !row.heading && row.modelData.length > 2
+                        text: "Open"
+                        icon.name: "go-next"
+                        Layout.alignment: Qt.AlignTop
+                        onClicked: backend.act(row.modelData[2])
+                    }
+                }
+            }
+        }
+    }
+
+    // The page's videos: each loops once, then the next one plays. A click pauses; a number picks.
+    component Clips: ColumnLayout {
+        id: clips
+        property var list: []
+        property int shown: 0
+        property bool paused: false
+        readonly property var current: list[Math.min(shown, list.length - 1)] || ({})
+        visible: list.length > 0
+        spacing: Kirigami.Units.smallSpacing
+        Layout.fillWidth: true
+        onListChanged: { shown = 0; paused = false }
+
+        Rectangle {
+            color: "black"
+            radius: Kirigami.Units.smallSpacing
+            clip: true
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 34
+            Layout.preferredHeight: width * 9 / 16
+            Layout.alignment: Qt.AlignHCenter
+            AnimatedImage {
+                id: video
+                anchors.fill: parent
+                source: clips.current.file ? "file://" + clips.current.file : ""
+                fillMode: Image.PreserveAspectFit
+                cache: false
+                playing: !clips.paused && root.visible
+                property int last: 0
+                onCurrentFrameChanged: {
+                    // back to its first frame: it played through once, so the next one's turn
+                    if (currentFrame < last && clips.list.length > 1)
+                        clips.shown = (clips.shown + 1) % clips.list.length
+                    last = currentFrame
+                }
+                onSourceChanged: last = 0
+            }
+            Kirigami.Icon {
+                anchors.centerIn: parent
+                visible: clips.paused
+                source: "media-playback-start"
+                implicitWidth: Kirigami.Units.iconSizes.huge
+                implicitHeight: implicitWidth
+                opacity: 0.8
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: clips.paused = !clips.paused
+            }
+        }
+        RowLayout {
+            spacing: Kirigami.Units.smallSpacing
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 34
+            Layout.alignment: Qt.AlignHCenter
+            Repeater {
+                model: clips.list.length > 1 ? clips.list.length : 0
+                Controls.Button {
+                    required property int index
+                    text: index + 1
+                    highlighted: index === clips.shown
+                    implicitWidth: implicitHeight
+                    Controls.ToolTip.text: clips.list[index].caption
+                    Controls.ToolTip.visible: hovered
+                    onClicked: { clips.shown = index; clips.paused = false }
+                }
+            }
+            Controls.Label {
+                text: clips.list.length > 1 ? "Videos " + (clips.shown + 1) + " of " + clips.list.length
+                                              + ": they play in turn" : ""
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                Layout.fillWidth: true
             }
         }
     }
 
     pageStack.initialPage: Kirigami.ScrollablePage {
+        id: tourPage
         title: root.page.title || ""
+        Connections {
+            target: root
+            function onIndexChanged() { tourPage.flickable.contentY = 0 }
+        }
         // The page's own number, not Kirigami's breadcrumb
         actions: [
             Kirigami.Action {
@@ -78,6 +193,10 @@ Kirigami.ApplicationWindow {
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
                 }
+            }
+
+            Clips {
+                list: root.page.clips || []
             }
 
             // Keyboard page: the key combinations the input relay has now.
@@ -122,8 +241,8 @@ Kirigami.ApplicationWindow {
                         text: root.page.practice === "gaze"
                               ? "Look at the button below and tap Meta+J. Then look away, hold Meta+J, turn "
                                 + "your head back onto it, and let go."
-                              : "Poke the button below with your index finger. With gaze mode on, look at it "
-                                + "and pinch instead."
+                              : "Poke the button below with your index finger. From a distance, with gaze mode "
+                                + "on, look at it and pinch; with it off, point a raised hand at it and pinch."
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
                     }
@@ -199,6 +318,18 @@ Kirigami.ApplicationWindow {
                     onClicked: { root.how = "skipped"; root.close() }
                 }
                 Item { Layout.fillWidth: true }
+                // Every page by name: the tour as a reference
+                Controls.ComboBox {
+                    id: jump
+                    model: root.pages.map((p, i) => (i + 1) + ". " + p.title)
+                    implicitWidth: Kirigami.Units.gridUnit * 14
+                    Component.onCompleted: currentIndex = root.index
+                    onActivated: (i) => root.index = i
+                    Connections {
+                        target: root
+                        function onIndexChanged() { jump.currentIndex = root.index }
+                    }
+                }
                 Controls.Button {
                     text: "Back"
                     icon.name: "go-previous"

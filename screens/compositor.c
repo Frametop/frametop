@@ -1092,7 +1092,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
         } else if (strcmp(buf, "frunner on") == 0 || strcmp(buf, "frunner off") == 0) {
             // Frunner's search opened (renewed every second while open) or closed: it has the
             // typing meanwhile. A remote screen lets go of the keys it holds first.
-            const bool on = buf[11] == 'n';
+            const bool on = strcmp(buf, "frunner on") == 0;
             if (on && !spot_open(s)) {
                 if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) ft_remote_blur(s->key_remote);
                 wlr_log(WLR_INFO, "frunner open: typing goes to it");

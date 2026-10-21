@@ -375,6 +375,13 @@ elif [ "$(kreadconfig6 --file "$kwinrc" --group org.kde.kdecoration2 --key theme
   kwriteconfig6 --file "$kwinrc" --group org.kde.kdecoration2 --key theme --delete
 fi
 
+# No edge barrier between screens: KWin holds a pointer moving to another screen at the
+# old one's edge until it has pushed past the barrier, but each screen here is a panel of
+# its own, and the pointer jumps between them. A click on the desktop right after one on a
+# floating window landed on that window again (past its width, or 200 px off).
+kwriteconfig6 --file "$kwinrc" --group EdgeBarrier --key EdgeBarrier 0
+kwriteconfig6 --file "$kwinrc" --group EdgeBarrier --key CornerBarrier false
+
 # KWin draws through zink on the headset's GPU, which vrcompositor needs, so the blur and
 # background contrast behind panels and menus and the window animations cost frames for
 # little. They're off by default in this desktop. Each is written once, before KWin first

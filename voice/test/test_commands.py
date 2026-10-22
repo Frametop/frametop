@@ -25,6 +25,34 @@ class Normalise(unittest.TestCase):
         self.assertEqual(vc.normalise("..."), "")
 
 
+class Named(unittest.TestCase):
+    """Frametop commands as voice commands: "run NAME", spaces in made-up words ignored."""
+
+    def setUp(self):
+        self.commands = parsed(FLAG) + vc.named([{"name": "stop-framecorder", "run": "killall framecorder"},
+                                                 {"name": "stop", "run": "x"}], "/bin/ft-cmd")
+
+    def argv(self, text):
+        m = vc.match(text, self.commands)
+        return m and m.argv
+
+    def test_run_name(self):
+        self.assertEqual(self.argv("Run stop framecorder."), ["/bin/ft-cmd", "run", "stop-framecorder"])
+        self.assertEqual(self.argv("run stop frame corder"), ["/bin/ft-cmd", "run", "stop-framecorder"])
+        self.assertEqual(self.argv("Run, stop. Frame-corder!"), ["/bin/ft-cmd", "run", "stop-framecorder"])
+        self.assertEqual(self.argv("Run stop."), ["/bin/ft-cmd", "run", "stop"])
+
+    def test_rest_ignored_and_no_partial_words(self):
+        self.assertEqual(self.argv("run stop framecorder now please"), ["/bin/ft-cmd", "run", "stop-framecorder"])
+        self.assertEqual(self.argv("run stop frame"), ["/bin/ft-cmd", "run", "stop"])
+        self.assertIsNone(self.argv("run start framecorder"))
+        self.assertIsNone(self.argv("stop framecorder"))
+
+    def test_settings_commands_stay_exact(self):
+        self.assertIsNone(vc.match("flagthat", parsed(FLAG)))
+        self.assertEqual(self.argv("Flag that."), [TOOL, "flag"])
+
+
 class Matching(unittest.TestCase):
     def setUp(self):
         self.commands = parsed(FLAG)

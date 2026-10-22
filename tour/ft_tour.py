@@ -369,6 +369,8 @@ def pages(f, keys):
                                        "does while paused", "input:games"],
                  ["Keyboard", "When Frametop's VR keyboard shows, and your key combinations and modifier taps",
                   "input:keyboard"],
+                 ["Commands", "Your own shell commands by name: run them from a button, frunner, your voice, or a "
+                              "terminal alias", "input:commands"],
                  ["Voice", "Dictation: push-to-talk keys and buttons, your language, typing as you talk, wake word "
                            "commands", "input:voice"],
                  ["Pointer", "The dot's speed, size, and distance, head follow, and Recenter. Changes apply live",

@@ -5,11 +5,13 @@ Frunner is Frametop's search for apps and remote displays, like Spotlight on a M
 - **An app that's already running:** its most recent window comes to you. The lazy susan spins the panel it's on, a screen or its own floating window, to straight ahead, and typing goes to it.
 - **An app that isn't running:** it starts as a floating window, where that app last floated or in front of you.
 - **A remote display:** frunner connects it if needed, then spins it to the front.
+- **One of your commands** ([commands.md](commands.md)): it runs in the background, and the pill says so.
 
 Use Tab, Shift+Tab, or the arrow keys to move through the results, and Enter or a click to open one. Shift+Enter or a right click opens the item's menu:
 
 - **For an app:** its own launch options, such as a browser's New Private Window, plus Open new window (even when one is open), Open docked on this screen, and each of its open windows.
 - **For a remote display:** Go to (connecting it first if needed) and Disconnect.
+- **For a command:** Run, and Stop (every copy still running).
 
 Esc goes back from a menu and closes the search. Meta+Space again, or a click anywhere else, closes it too.
 

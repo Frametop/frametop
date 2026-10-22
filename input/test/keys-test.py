@@ -382,6 +382,17 @@ def tests():
           ["key 125 1", "key 36 1", "key 36 0", "key 125 0"])
     key(RCTRL, 1); key(RCTRL, 0)
     check("paused: a command still runs", lines(cmd_log), ["combo", "4", "paused"])
+    # Your commands (run:NAME): a plain process here (FT_COMMANDS_NO_SYSTEMD), the list in OUT.
+    relay.ft_commands.COMMANDS_PATH = f"{OUT}/commands.json"
+    os.environ["FT_COMMANDS_NO_SYSTEMD"] = "1"
+    relay.ft_commands.save([{"name": "note-it", "run": f"echo named >> {cmd_log}"}], aliases=False)
+    use({"125+36": "gaze_left", "29": "run:note-it", "42+125+25": "pause_toggle"})
+    key(RCTRL, 1); key(RCTRL, 0)
+    for _ in range(40):
+        if lines(cmd_log)[-1:] == ["named"]:
+            break
+        time.sleep(0.05)
+    check("paused: your command (run:NAME) runs too, in the background", lines(cmd_log), ["combo", "4", "paused", "named"])
     typed()
     key(SHIFT, 1); key(META, 1); key(P, 1); key(P, 0); key(META, 0); key(SHIFT, 0)
     check("paused: Meta+Shift+P (pause_toggle) resumes", stub["pause"].paused, False)
@@ -631,6 +642,9 @@ def tests():
     to_relay("keyboard steam")
 
     check("an empty command isn't an action", relay.known_action("command:  "), False)
+    check("run:NAME: an action that needs a name, no pointer mode, and works paused",
+          (relay.known_action("run:  "), relay.known_action("run:x"), relay.needs_pointer("run:x"), relay.works_paused("run:x")),
+          (False, True, False, True))
     check("steam_menu, pause_toggle, hands_toggle and commands work without pointer mode",
           (relay.needs_pointer("steam_menu"), relay.needs_pointer("pause_toggle"), relay.needs_pointer("hands_toggle"),
            relay.needs_pointer("command:ls")),

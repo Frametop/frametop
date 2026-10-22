@@ -13,6 +13,10 @@ to the input relay over its control socket (@frametop_relay):
   - Keyboard: when Frametop's keyboard opens, and key combinations for any action, a command
     of your own too ("command:CMD"), or a modifier tapped alone (a Meta tap opens Steam's menu
     and Meta+Shift+F floats a window, unless the rules have their own list).
+  - Commands: shell commands of your own under a name (commands/ft_commands.py,
+    ~/.config/frametop-commands.json), run in the background from a button, a controller
+    button or a key combination ("run:NAME"), frunner, Frametop Voice ("run NAME"), or a
+    terminal, where each name is an alias too (~/.config/frametop/aliases.sh, from ~/.bashrc).
   - Pointer: speed, dot size, distance and the rest, applied live.
   - Ignored panels: SteamVR overlays the pointer passes through (POINTER_IGNORE), by app or
     one by one. The helper lists them (@ft_pointer_helper "overlays").
@@ -77,6 +81,8 @@ import handsmode  # noqa: E402
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
 # The hand and eye model catalogs: versions, notes, benchmarks, downloads (standard library only).
 sys.path.insert(0, os.path.join(REPO, "models"))
+sys.path.insert(0, os.path.join(REPO, "commands"))
+import ft_commands  # noqa: E402  (your commands: standard library only)
 import catalog as model_catalog  # noqa: E402
 # How the pickers tag each entry: by status, and builtins by what they are.
 MODEL_TAGS = {"recommended": "Recommended", "testing": "Testing", "older": "Older"}
@@ -259,6 +265,17 @@ LAYOUT_PATH = os.path.expanduser("~/.config/frametop-layout.json")
 PROFILE = "profile:"
 # "command:CMD": the relay runs CMD with sh -c (key combinations only, here).
 COMMAND = "command:"
+# "run:NAME": the relay runs your command NAME (the Commands page; buttons, controllers and key
+# combinations alike).
+RUN = "run:"
+# ft-cmd on the host: the relay links it there at its start (ft_commands.refresh), and this app
+# runs in a container, where the checkout's path may not be the host's.
+HOST_FT_CMD = ft_commands.CLI_LINK
+
+
+def run_actions():
+    """One action per saved command."""
+    return [RUN + c["name"] for c in ft_commands.load()]
 
 
 def profile_actions():
@@ -272,6 +289,8 @@ def action_label(a):
         return f"Open profile {a[len(PROFILE):]}"
     if a.startswith(COMMAND):
         return f"Run: {a[len(COMMAND):]}"
+    if a.startswith(RUN):
+        return f"Run command {a[len(RUN):]}"
     return ACTION_LABELS.get(a, a)
 
 
@@ -283,14 +302,18 @@ def is_command(a):
     return a.startswith(COMMAND) and bool(a[len(COMMAND):].strip())
 
 
+def is_run(a):
+    return a.startswith(RUN) and len(a) > len(RUN)
+
+
 def mappable(a):
     """An action a controller button can have."""
-    return a in CONTROLLER_ACTIONS or is_profile(a)
+    return a in CONTROLLER_ACTIONS or is_profile(a) or is_run(a)
 
 
 def shortcut_mappable(a):
     """An action a key combination can have: the gaze ones and commands too."""
-    return a in SHORTCUT_ACTIONS or is_profile(a) or is_command(a)
+    return a in SHORTCUT_ACTIONS or is_profile(a) or is_command(a) or is_run(a)
 # Gaze mode settings (pointer helper), like POINTER_SETTINGS.
 GAZE_SETTINGS = [
     ("POINTER_GAZE_RETAKE", "Look away to hand back", 5, 1, 45, 0.5, "°"),
@@ -490,6 +513,7 @@ class Backend(QObject):
     capturedController = Signal(str, str)  # button, label
     shortcutCaptureChanged = Signal()
     modelsChanged = Signal()
+    commandsChanged = Signal()
     message = Signal(str, bool)  # text, is error
 
     def __init__(self):
@@ -764,10 +788,10 @@ class Backend(QObject):
     def codeName(self, code):
         return self._names.get(code, f"code {code}")
 
-    @Property("QVariantList", constant=True)
+    @Property("QVariantList", notify=commandsChanged)
     def actions(self):
         return [{"value": k, "text": v} for k, v in ACTION_LABELS.items() if k not in KEYBOARD_ONLY] + \
-            [{"value": a, "text": action_label(a)} for a in profile_actions()]
+            [{"value": a, "text": action_label(a)} for a in profile_actions() + run_actions()]
 
     @Slot(str, result="QVariantList")
     def mappings(self, device_id):
@@ -967,7 +991,7 @@ class Backend(QObject):
     # --- controllers ---
     @Property("QVariantList", constant=True)
     def controllerActions(self):
-        return [{"value": a, "text": action_label(a)} for a in CONTROLLER_ACTIONS + profile_actions()]
+        return [{"value": a, "text": action_label(a)} for a in CONTROLLER_ACTIONS + profile_actions() + run_actions()]
 
     @Property("QVariantList", constant=True)
     def controllerButtons(self):
@@ -1252,10 +1276,74 @@ class Backend(QObject):
         return [{"combo": c, "label": self.comboName(c, a), "action": a, "actionLabel": action_label(a)}
                 for c, a in sorted(bound.items())]
 
-    @Property("QVariantList", constant=True)
+    @Property("QVariantList", notify=commandsChanged)
     def shortcutActions(self):
-        return [{"value": a, "text": action_label(a)} for a in SHORTCUT_ACTIONS + profile_actions()] + \
+        return [{"value": a, "text": action_label(a)} for a in SHORTCUT_ACTIONS + profile_actions() + run_actions()] + \
             [{"value": COMMAND, "text": "Run a command…"}]
+
+    # --- commands (ft_commands) ---
+    @Property("QVariantList", notify=commandsChanged)
+    def commands(self):
+        return [dict(c, said=ft_commands.spoken(c["name"])) for c in ft_commands.load()]
+
+    @Slot(str, result=str)
+    def commandNameProblem(self, name):
+        """Why `name` can't be a new command's name ("" if it can): checked here and on the host,
+        whose PATH an alias would hide things on."""
+        name = name.strip()
+        problem = ft_commands.name_problem(name, {c["name"] for c in ft_commands.load()})
+        if not problem and host("sh", "-c", 'command -v -- "$1"', "sh", name, timeout=5).returncode == 0:
+            problem = f"{name} is a program on the headset; an alias by that name would hide it"
+        return problem
+
+    @Slot(str, str, result=bool)
+    def addCommand(self, name, run):
+        name, run = name.strip(), run.strip()
+        problem = self.commandNameProblem(name) or ("" if run else "what should it run?")
+        if problem:
+            self.message.emit(problem, True)
+            return False
+        try:
+            ft_commands.save(ft_commands.load() + [{"name": name, "run": run}])
+        except OSError as e:
+            self.message.emit(f"Couldn't save {name}: {e}", True)
+            return False
+        self.commandsChanged.emit()
+        self.message.emit(f"{name} saved: say \"run {ft_commands.spoken(name)}\", search it in frunner, "
+                          "or map it to a button", False)
+        return True
+
+    @Slot(str)
+    def removeCommand(self, name):
+        commands = ft_commands.load()
+        try:
+            ft_commands.save([c for c in commands if c["name"] != name])
+        except OSError as e:
+            self.message.emit(f"Couldn't remove {name}: {e}", True)
+            return
+        # Buttons, controller buttons and key combinations that ran it would do nothing now.
+        rules = read_json(RULES_PATH)
+        gone = RUN + name
+        dropped = 0
+        for table in [rules.get("controller_buttons", {}), rules.get("key_bindings", {}),
+                      *rules.get("buttons", {}).values()]:
+            if isinstance(table, dict):
+                for k in [k for k, v in table.items() if v == gone]:
+                    del table[k]
+                    dropped += 1
+        if dropped:
+            self._save_rules(rules)
+        self.commandsChanged.emit()
+        self.message.emit(f"{name} removed" + (f", and {dropped} binding{'s' if dropped != 1 else ''} to it"
+                                                if dropped else ""), False)
+
+    @Slot(str)
+    def runCommand(self, name):
+        """Run it now, on the host (ft-cmd, which the relay links into ~/.local/bin)."""
+        ft_cmd = HOST_FT_CMD if os.path.exists(HOST_FT_CMD) else ft_commands.FT_CMD
+        r = host(ft_cmd, "run", name, timeout=15)
+        text = (r.stdout or r.stderr).strip() or f"{name}: started"
+        self.message.emit(text, r.returncode != 0)
 
     @Property(bool, notify=shortcutCaptureChanged)
     def capturingShortcut(self):

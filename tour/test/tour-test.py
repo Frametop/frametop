@@ -115,7 +115,7 @@ check("key table row", rows[0], {"combo": "Meta tap", "action": "Steam menu"})
 # ---------------------------------------------------------------- the pages
 
 KNOWN = {"frunner", "spin", "remote", "gaze:calibrate", "gaze:quickcal"}
-INPUT = {"devices", "buttons", "controllers", "games", "keyboard", "voice", "pointer", "ignore", "gaze", "hands", "bluetooth"}
+INPUT = {"devices", "buttons", "controllers", "games", "keyboard", "commands", "voice", "pointer", "ignore", "gaze", "hands", "bluetooth"}
 DISPLAY = {"screens", "layout", "visibility", "power"}
 
 

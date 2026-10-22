@@ -83,6 +83,8 @@ An assistant can either replace `hooks/on-command` or subscribe with `ft-voice e
 
 ## Voice commands
 
+Your Frametop commands ([docs/commands.md](../docs/commands.md), Input Settings, Commands) need no setup here: say the wake word, then "run" and the command's name.
+
 A command that starts with a set phrase can run a program. Add a `"commands"` list to `~/.config/frametop-voice.json` by hand (the Voice page lists them but doesn't edit them). It is empty by default. Example: "Hey Computer, flag that" or "Hey Computer, flag that, fingers crossed" runs a hand tracking tool's flag command.
 
 ```json

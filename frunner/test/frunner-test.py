@@ -90,6 +90,8 @@ for name, body in {
     head, _, actions = body.partition("[")
     with open(os.path.join(apps, name), "w") as f:
         f.write("[Desktop Entry]\nType=Application\n" + head + ("[" + actions if actions else ""))
+with open(os.path.join(home, ".config", "frametop-commands.json"), "w") as f:
+    json.dump({"commands": [{"name": "stop-framecorder", "run": f"echo ran > {home}/ran"}]}, f)
 with open(os.path.join(home, ".config", "frametop-layout.json"), "w") as f:
     json.dump({"screens": [{}, {}], "hosts": [
         {"name": "desk-pc", "address": "10.0.0.2", "displays": [
@@ -160,7 +162,8 @@ def float_answer(text):
 screens = Fake(f"{tag}_screens", screens_answer)
 floatd = Fake(f"{tag}_float", float_answer)
 env = dict(os.environ, HOME=home, XDG_DATA_HOME=os.path.join(home, "share"), XDG_DATA_DIRS=os.path.join(home, "none"),
-           XDG_CONFIG_HOME=os.path.join(home, ".config"), XDG_CACHE_HOME=os.path.join(home, ".cache"))
+           XDG_CONFIG_HOME=os.path.join(home, ".config"), XDG_CACHE_HOME=os.path.join(home, ".cache"),
+           FT_COMMANDS_NO_SYSTEMD="1")
 daemon = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(HERE), "ft_frunner.py"), "--no-panel",
                            "--socket", f"{tag}_sw", "--screens", f"{tag}_screens", "--float", f"{tag}_float"],
                           env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -319,9 +322,21 @@ try:
     tell("outside")
     check("a click beside it closes it", ask("status").split()[1], "closed")
 
+    ask("open")
+    type_text("stop frame")
+    check("your commands are found by name", json.loads(ask("rows")[3:]), ["stop-framecorder"])
+    press(ENTER)
+    check("Enter runs a command and closes", ask("status").split()[1], "closed")
+    ran = os.path.join(home, "ran")
+    for _ in range(40):
+        if os.path.exists(ran):
+            break
+        time.sleep(0.05)
+    check("...in the background", os.path.exists(ran), True)
+
     with open(os.path.join(home, ".config", "frametop-frunner.json")) as f:
         counts = json.load(f)["usage"]
-    check("usage is counted", sorted(counts), ["editor", "firefox", "remote:desk-oled"])
+    check("usage is counted", sorted(counts), ["command:stop-framecorder", "editor", "firefox", "remote:desk-oled"])
 finally:
     daemon.terminate()
     out = daemon.communicate(timeout=5)[0]

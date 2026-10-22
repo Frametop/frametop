@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""ft-cmd: run, list, add and remove Frametop commands (commands/ft_commands.py, docs/commands.md).
+
+Usage:
+  ft-cmd NAME                 run the command NAME in the background (also: ft-cmd run NAME)
+  ft-cmd list                 the commands, and which run now
+  ft-cmd add NAME COMMAND...  save a command (COMMAND runs with sh -c; quote it as one word or not)
+  ft-cmd remove NAME          forget it
+  ft-cmd stop NAME            stop it where it still runs
+  ft-cmd log NAME             its output (journalctl)
+
+Each NAME is also a shell alias in new terminals (~/.config/frametop/aliases.sh).
+"""
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import ft_commands  # noqa: E402
+
+VERBS = ("run", "list", "add", "remove", "stop", "log", "help", "-h", "--help")
+
+
+def main(argv):
+    if not argv or argv[0] in ("help", "-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    verb, args = (argv[0], argv[1:]) if argv[0] in VERBS else ("run", argv)
+    commands = ft_commands.load()
+    if verb == "list":
+        busy = {}
+        for _, name in ft_commands.running():
+            busy[name] = busy.get(name, 0) + 1
+        if not commands:
+            print("No commands yet. Add one: ft-cmd add NAME COMMAND")
+        for c in commands:
+            n = busy.get(c["name"], 0)
+            print(f"{c['name']}: {c['run']}" + (f"   [running{' x' + str(n) if n > 1 else ''}]" if n else ""))
+        return 0
+    if not args:
+        print(f"ft-cmd {verb}: which command?", file=sys.stderr)
+        return 2
+    name = args[0]
+    if verb == "run":
+        ok, message = ft_commands.run_named(name)
+        print(message, file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
+    if verb == "add":
+        run = " ".join(args[1:]).strip()
+        if not run:
+            print("ft-cmd add: what should it run?", file=sys.stderr)
+            return 2
+        problem = ft_commands.name_problem(name, {c["name"] for c in commands})
+        if problem:
+            print(f"ft-cmd add: {problem}", file=sys.stderr)
+            return 1
+        ft_commands.save(commands + [{"name": name, "run": run}])
+        ft_commands.link_cli()
+        print(f"{name}: saved. New terminals have it as an alias; this one after: . ~/.config/frametop/aliases.sh")
+        return 0
+    if ft_commands.find(name, commands) is None and verb in ("remove", "log"):
+        print(f"ft-cmd {verb}: no command called {name}", file=sys.stderr)
+        return 1
+    if verb == "remove":
+        ft_commands.save([c for c in commands if c["name"] != name])
+        print(f"{name}: removed")
+        return 0
+    if verb == "stop":
+        n = ft_commands.stop(name)
+        print(f"{name}: stopped {n}" if n else f"{name}: not running")
+        return 0
+    if verb == "log":
+        unit = f"{ft_commands.UNIT_PREFIX}{name}-*"
+        return subprocess.call(["journalctl", "--user", "-u", unit, "--no-pager", "-n", "100"],
+                               env=ft_commands.user_bus_env())
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

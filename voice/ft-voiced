@@ -49,7 +49,9 @@ import sentencepiece
 import sherpa_onnx
 
 ROOT = Path(__file__).resolve().parent
-sys.path[:0] = [str(ROOT), str(ROOT.parent / "input")]  # its modules, and vrws (SteamVR's web socket)
+sys.path[:0] = [str(ROOT), str(ROOT.parent / "input"),  # its modules, vrws (SteamVR's web socket),
+                str(ROOT.parent / "commands")]  # and your Frametop commands ("run NAME")
+import ft_commands
 import voice_commands
 import voice_settings
 import vrws
@@ -318,6 +320,8 @@ def to_wav(samples):
 class Voice:
     def __init__(self):
         self.settings_mtime = voice_settings.mtime()
+        self.named_commands = []  # your Frametop commands, "run NAME" (voice_commands.named)
+        self.named_mtime = None
         b = voice_settings.load()  # defaults when the file doesn't exist yet
         self.cfg = cfg = load_config(b["advanced"])
         self.dcfg, self.wcfg = cfg["dictation"], cfg["wake"]
@@ -1045,7 +1049,7 @@ class Voice:
             self.chime("wake")
             self.listen_for_command(wake_unix, again=True)
             return
-        found = voice_commands.match(text, self.voice_commands) if text else None
+        found = voice_commands.match(text, self.voice_commands + self.named_commands) if text else None
         if found is None:
             self.broadcast("command", text=text)
             if text:
@@ -1197,6 +1201,20 @@ class Voice:
             await asyncio.sleep(2)
             if voice_settings.mtime() != self.settings_mtime:
                 self.load_settings()
+            self.load_named_commands()
+
+    def load_named_commands(self):
+        """Your Frametop commands, read again when their file changes. They run through ft-cmd on
+        the host (the relay links it into ~/.local/bin)."""
+        try:
+            mtime = os.stat(ft_commands.COMMANDS_PATH).st_mtime_ns
+        except OSError:
+            mtime = 0
+        if mtime == self.named_mtime:
+            return
+        self.named_mtime = mtime
+        self.named_commands = voice_commands.named(ft_commands.load(), ft_commands.CLI_LINK)
+        log.info("Frametop commands: %s", ", ".join(c.phrases[0][0] for c in self.named_commands) or "none")
 
     def load_settings(self):
         self.settings_mtime = voice_settings.mtime()

@@ -9,6 +9,9 @@ run:  the program and its arguments, run directly (never through a shell). "~" i
 rest: "arg" (default) appends the words after the phrase as one extra argument when there
       are any. "none" never appends them.
 
+Your Frametop commands (Frametop Input Settings, Commands; commands/ft_commands.py) are voice
+commands too: "run NAME", NAME's dashes, dots and underscores said as spaces (named()).
+
 Pure standard library, so the tests can import it without the audio stack.
 """
 import os
@@ -23,6 +26,7 @@ class Command(NamedTuple):
     phrases: tuple  # (as written, normalised word tuple)
     run: tuple
     rest: str
+    loose: bool = False  # the phrase matches with the spaces between its words ignored (named())
 
 
 class Match(NamedTuple):
@@ -91,19 +95,45 @@ def parse(entries):
     return commands, warnings
 
 
+def named(commands, ft_cmd):
+    """Voice commands for your Frametop commands ([{"name", "run"}]): "run NAME" runs
+    `ft_cmd run NAME`, the words after it ignored. Loose: the recognizer splits and joins made-up
+    words as it likes ("framecorder", "frame corder"), so only the letters count."""
+    out = []
+    for c in commands:
+        said = " ".join(w for w in re.split(r"[._-]+", c["name"].lower()) if w)
+        phrase = "run " + said
+        if words(phrase)[1:]:
+            out.append(Command(((phrase, words(phrase)),), (ft_cmd, "run", c["name"]), "none", loose=True))
+    return out
+
+
+def loose_length(heard, pw):
+    """How many of the heard words spell the phrase's letters, spaces aside (0: they don't)."""
+    want, got = "".join(pw), ""
+    for i, w in enumerate(heard):
+        got += w
+        if got == want:
+            return i + 1
+        if not want.startswith(got):
+            return 0
+    return 0
+
+
 def match(text, commands):
     """The command `text` starts with, or None. Ties go to the earlier entry."""
     found = list(WORD.finditer(text or ""))
     heard = tuple(m.group().lower() for m in found)
-    best = None
+    best = None  # (cmd, phrase, phrase's words, how many heard words it took)
     for cmd in commands:
         for phrase, pw in cmd.phrases:
-            if heard[:len(pw)] == pw and (best is None or len(pw) > len(best[2])):
-                best = (cmd, phrase, pw)
+            n = len(pw) if heard[:len(pw)] == pw else loose_length(heard, pw) if cmd.loose else 0
+            if n and (best is None or len(pw) > len(best[2])):
+                best = (cmd, phrase, pw, n)
     if best is None:
         return None
-    cmd, phrase, pw = best
-    rest = text[found[len(pw) - 1].end():]
+    cmd, phrase, pw, n = best
+    rest = text[found[n - 1].end():]
     rest = re.sub(r"^\W+", "", rest).rstrip(" \t\n.")
     argv = list(cmd.run) + ([rest] if rest and cmd.rest == "arg" else [])
     return Match(phrase, rest, argv)

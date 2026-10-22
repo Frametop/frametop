@@ -21,6 +21,7 @@ Kirigami.ApplicationWindow {
             Kirigami.Action { text: "Controllers"; icon.name: "input-gamepad"; onTriggered: root.show(controllersPage) },
             Kirigami.Action { text: "Game optimization"; icon.name: "applications-games"; onTriggered: root.show(gamesPage) },
             Kirigami.Action { text: "Keyboard"; icon.name: "input-keyboard-virtual"; onTriggered: root.show(keyboardPage) },
+            Kirigami.Action { text: "Commands"; icon.name: "utilities-terminal"; onTriggered: root.show(commandsPage) },
             Kirigami.Action { text: "Voice"; icon.name: "audio-input-microphone"; onTriggered: root.show(voicePage) },
             Kirigami.Action { text: "Pointer"; icon.name: "transform-move"; onTriggered: root.show(pointerPage) },
             Kirigami.Action { text: "Ignored panels"; icon.name: "view-hidden"; onTriggered: root.show(ignorePage) },
@@ -267,8 +268,9 @@ Kirigami.ApplicationWindow {
         pageStack.push(page)
     }
 
-    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|voice|pointer|ignore|gaze|hands|bluetooth opens the app on that page.
+    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|commands|voice|pointer|ignore|gaze|hands|bluetooth opens the app on that page.
     pageStack.initialPage: ({ buttons: buttonsPage, controllers: controllersPage, games: gamesPage, keyboard: keyboardPage,
+                              commands: commandsPage,
                               voice: voicePage, pointer: pointerPage, ignore: ignorePage, gaze: gazePage, hands: handsPage,
                               bluetooth: bluetoothPage })[startPage] || devicesPage
 
@@ -1870,6 +1872,103 @@ Kirigami.ApplicationWindow {
                       + "it applies right away. The hand inputs are separate: any of them can be on alone, and they "
                       + "apply within a second. A hand holding a controller, or whose controller you just used, "
                       + "does none of them."
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Commands
+    Component {
+        id: commandsPage
+        Kirigami.ScrollablePage {
+            id: cpage
+            title: "Commands"
+            header: DriverWarning {}
+            property string problem: ""
+
+            Kirigami.FormLayout {
+                Repeater {
+                    model: backend.commands
+                    delegate: RowLayout {
+                        required property var modelData
+                        Kirigami.FormData.label: modelData.name + ":"
+                        Controls.Label {
+                            text: modelData.run
+                            font.family: "monospace"
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                        }
+                        Controls.ToolButton {
+                            icon.name: "media-playback-start"
+                            display: Controls.AbstractButton.IconOnly
+                            text: "Run now"
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: backend.runCommand(modelData.name)
+                        }
+                        Controls.ToolButton {
+                            icon.name: "edit-delete"
+                            display: Controls.AbstractButton.IconOnly
+                            text: "Remove (and the buttons mapped to it)"
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: backend.removeCommand(modelData.name)
+                        }
+                    }
+                }
+                Controls.Label {
+                    visible: backend.commands.length === 0
+                    Kirigami.FormData.label: "Your commands:"
+                    text: "none yet"
+                    opacity: 0.7
+                }
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "New command" }
+                Controls.TextField {
+                    id: commandName
+                    Kirigami.FormData.label: "Name:"
+                    placeholderText: "e.g. stop-framecorder"
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 16
+                    onTextChanged: cpage.problem = ""
+                }
+                Controls.TextField {
+                    id: commandRun
+                    Kirigami.FormData.label: "Runs:"
+                    placeholderText: "e.g. killall framecorder"
+                    font.family: "monospace"
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 24
+                    onAccepted: addButton.clicked()
+                }
+                Controls.Button {
+                    id: addButton
+                    text: "Add"
+                    icon.name: "list-add"
+                    enabled: commandName.text.trim() !== "" && commandRun.text.trim() !== ""
+                    onClicked: {
+                        cpage.problem = backend.commandNameProblem(commandName.text)
+                        if (cpage.problem === "" && backend.addCommand(commandName.text, commandRun.text)) {
+                            commandName.text = ""
+                            commandRun.text = ""
+                        }
+                    }
+                }
+                Controls.Label {
+                    visible: cpage.problem !== ""
+                    text: cpage.problem
+                    color: Kirigami.Theme.negativeTextColor
+                    wrapMode: Text.WordWrap
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                }
+            }
+
+            footer: Controls.Label {
+                padding: Kirigami.Units.largeSpacing
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: "A command runs with sh in the background, on the headset, as you. Nothing waits for it, and "
+                      + "its output goes to the journal (ft-cmd log NAME). Run it from: a button, a controller "
+                      + "button or a key combination (pick \"Run command NAME\" on those pages); frunner (Meta+Space, "
+                      + "type its name); Frametop Voice (the wake word, then \"run\" and its name, dashes said as "
+                      + "spaces); or a terminal, where its name is an alias (ft-cmd list, ft-cmd stop NAME). The "
+                      + "aliases live in ~/.config/frametop/aliases.sh, which one line in ~/.bashrc reads."
             }
         }
     }

@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""ft-frunner: frunner, Frametop's search for apps and remote displays (docs/frunner.md).
+"""ft-frunner: frunner, Frametop's search for apps, remote displays and your commands (docs/frunner.md).
 
 Meta+Space (the input relay's frunner action) opens a search pill straight ahead of where your
-head points. Type to find an app or a remote display ("{host} - {display}"); Tab, Shift+Tab,
+head points. Type to find an app, a remote display ("{host} - {display}") or one of your commands
+(Frametop Input Settings, Commands; commands/ft_commands.py); Tab, Shift+Tab,
 and the arrow keys move through what's found, and Enter or a click opens it:
   - an app that's running: its most recent window comes to the front. The lazy susan spins the
     panel it's on (a screen or its floating window) to straight ahead, and it gets typing. A
     pinned panel doesn't spin: it gets typing where it is, with a word on where that is.
   - an app that isn't: it starts, its first window floating (ft-floatd's launch).
   - a remote display: connected first if it isn't, then spun to.
+  - a command: it runs in the background (a transient systemd user unit), with a word on the panel.
 Shift+Enter or a right click opens the item's menu: an app's own actions (a browser's private
 window), Open new window, Open docked on this screen, and its windows; a display's Go to and
 Disconnect. Esc goes back from a menu, and closes the search.
@@ -60,6 +62,8 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "layout"))
 sys.path.insert(0, HERE)
 import ft_layout  # noqa: E402  (the layout: remote displays)
+sys.path.insert(0, os.path.join(REPO, "commands"))
+import ft_commands  # noqa: E402  (your commands)
 import spotsearch  # noqa: E402
 
 PANEL = os.path.join(REPO, "screens", "build", "ft-spotpanel")
@@ -78,6 +82,7 @@ SHIFT, CTRL, ALT, META = {42, 54}, {29, 97}, {56, 100}, {125, 126}
 KEY_ESC, KEY_ENTER, KEY_KPENTER, KEY_TAB, KEY_BACKSPACE = 1, 28, 96, 15, 14
 KEY_UP, KEY_DOWN, KEY_LEFT, KEY_PAGEUP, KEY_PAGEDOWN, KEY_U = 103, 108, 105, 104, 109, 22
 REMOTE_ICON = "video-display"
+COMMAND_ICON = "utilities-terminal"
 WINDOW_ICON = "window"
 
 
@@ -309,6 +314,7 @@ class Frunner:
         self.icons = Icons()
         self.apps = []          # spotsearch.Item, kind "app"; data: Gio.DesktopAppInfo
         self.remotes = []       # spotsearch.Item, kind "remote"; data: {"n", "id", "host", "label", "off"}
+        self.commands = []      # spotsearch.Item, kind "command"; data: {"name", "run"}
         self.running_remotes = {}  # screen number -> state, from ft-screens
         self.windows = []       # ft-floatd's spotlist
         self.usage = self.load_usage()
@@ -456,6 +462,12 @@ class Frunner:
         for r in self.remotes:
             r.running = r.data["n"] in self.running_remotes
 
+    def load_commands(self):
+        """Your commands, read again at each open (a small file)."""
+        self.commands = [spotsearch.Item("command", "command:" + c["name"], c["name"], "Command",
+                                         ["command", "run", ft_commands.spoken(c["name"])], "", c)
+                         for c in ft_commands.load()]
+
     def refresh_windows(self):
         """Ask ft-floatd for every window (answered when KWin's script has reported them)."""
         try:
@@ -519,6 +531,9 @@ class Frunner:
     # ------------------------------------------------------------ the rows
 
     def result_entry(self, item):
+        if item.kind == "command":
+            return Entry("item", item.title, f"Command · {item.data['run']}", COMMAND_ICON, "Run",
+                         run=lambda: self.run_command(item), item=item)
         if item.kind == "remote":
             state = self.running_remotes.get(item.data["n"])
             return Entry("item", item.title, f"Remote display · {state}" if state else "Remote display · not connected",
@@ -540,7 +555,7 @@ class Frunner:
         was = self.entries[self.sel].item if keep and 0 <= self.sel < len(self.entries) else None
         for a in self.apps:
             a.running = bool(self.windows_of(a)) if self.windows else False
-        found = spotsearch.search(self.apps + self.remotes, self.query, self.usage)
+        found = spotsearch.search(self.apps + self.remotes + self.commands, self.query, self.usage)
         self.entries = [self.result_entry(it) for it in found]
         self.sel = next((i for i, e in enumerate(self.entries) if e.item is was), 0) if was else 0
         self.top = 0
@@ -549,6 +564,10 @@ class Frunner:
     def menu_for(self, entry):
         item = entry.item
         rows = [Entry("header", item.title, "", entry.icon)]  # (a click on it goes back)
+        if item.kind == "command":
+            rows.append(Entry("item", "Run", item.data["run"], run=lambda: self.run_command(item)))
+            rows.append(Entry("item", "Stop", "where it still runs", run=lambda: self.stop_command(item)))
+            return rows
         if item.kind == "remote":
             state = self.running_remotes.get(item.data["n"])
             rows.append(Entry("item", "Go to" if state else "Connect and go to", item.title,
@@ -635,6 +654,7 @@ class Frunner:
             self.toast_timer = None
         self.refresh_windows()
         self.load_remotes()
+        self.load_commands()
         self.render()
         reply = self.ask(self.args.panel_socket, "show") if not self.args.no_panel else "ok"
         if not reply or not reply.startswith("ok"):
@@ -759,6 +779,19 @@ class Frunner:
             log(f"launched {item.key} without ft-floatd")
         except GLib.Error as e:
             log(f"launch {item.key}: {e.message}")
+
+    def run_command(self, item):
+        self.close("command")
+        self.used(item.key)
+        ok, message = ft_commands.run_named(item.data["name"])
+        log(message)
+        self.toast(f"Running {item.title}" if ok else message)
+
+    def stop_command(self, item):
+        self.close("command")
+        n = ft_commands.stop(item.data["name"])
+        log(f"{item.title}: stopped {n}")
+        self.toast(f"Stopped {item.title}" if n else f"{item.title} isn't running")
 
     def go_remote(self, item):
         self.close("remote display")

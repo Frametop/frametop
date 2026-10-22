@@ -43,9 +43,10 @@ dictate_hold = dictation while held (Frametop Voice, voice/ft-voiced: "toggle|st
 to @frametop_voice), frunner = open or close frunner's search for apps and remote displays
 ("toggle <source>" to @ft_frunner; Meta+Space by default), hands_toggle = stop hand tracking if
 it runs, else start it, until the next desktop or SteamVR start (hands/handsmode.py toggle; Meta+H
-by default), command:CMD = run CMD with sh -c (on the host, as this service: its
-environment, output to its log, and COMMAND_PATH, so ft-layout, ft-float, ft-steam and ft-voice
-need no path), key = pass through as a key, none).
+by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
+transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
+sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
+ft-layout, ft-float, ft-steam and ft-voice need no path), key = pass through as a key, none).
 
 Frame controller buttons can be mapped too ("controller_buttons": {"right/a": action} in the
 rules file; any action but key and the gaze ones, GAZE_ACTIONS: gaze mode is a mouse feature,
@@ -153,7 +154,7 @@ Frametop can pause for VR games (game_pause.py: by hand, with a controller gestu
 while a game runs). Paused, it stops the services that cost the game CPU and GPU, and the relay
 plays a plain one: the pointer devices feed the virtual mouse and keyboard as without pointer
 mode, typing goes to Steam, and mapped buttons and key combinations do only pause_toggle,
-steam_menu and command:CMD (game_pause.PAUSED_ACTIONS).
+steam_menu, run:NAME and command:CMD (game_pause.PAUSED_ACTIONS).
 
 Host devices (docs/host-input.md): a computer whose displays stream into Frametop can lend
 it its own keyboard and mouse. Their events come from that host's ft-stream on the control
@@ -221,6 +222,9 @@ import sys
 import time
 
 import game_pause
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "commands"))
+import ft_commands  # noqa: E402  (your commands, "run:NAME")
 
 # Linux input constants (include/uapi/linux/input-event-codes.h, input.h, uinput.h).
 EV_SYN, EV_KEY, EV_REL, EV_MSC = 0x00, 0x01, 0x02, 0x04
@@ -361,6 +365,7 @@ RENAMED_ACTIONS = {"spotwatch": "frunner"}
 # service's log). It doesn't need pointer mode either.
 PROFILE = "profile:"  # "profile:NAME": switch to that profile (doesn't need pointer mode either)
 COMMAND = "command:"  # "command:CMD": run CMD (nor does this)
+RUN = "run:"  # "run:NAME": run your command NAME (ft_commands; nor does this)
 
 
 def renamed_actions(table):
@@ -373,18 +378,18 @@ def renamed_actions(table):
 
 def known_action(a):
     return a in ACTIONS or (isinstance(a, str) and any(a.startswith(p) and a[len(p):].strip()
-                                                       for p in (PROFILE, COMMAND)))
+                                                       for p in (PROFILE, COMMAND, RUN)))
 
 
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
             and a not in ("steam_menu", "pause_toggle", "frunner", "hands_toggle")
-            and not a.startswith((PROFILE, COMMAND)))
+            and not a.startswith((PROFILE, COMMAND, RUN)))
 
 
 def works_paused(a):
     """An action that still does something while Frametop is paused (game_pause.py)."""
-    return a in game_pause.PAUSED_ACTIONS or a.startswith(COMMAND)
+    return a in game_pause.PAUSED_ACTIONS or a.startswith((COMMAND, RUN))
 
 
 # What pressed pause_toggle, for the log (do_action's source).
@@ -1078,6 +1083,11 @@ def main():
     keyboard = Virtual(f"{VIRTUAL_PREFIX} keyboard", 2,
                        keys=range(1, BTN_MISC), rels=(), stored=stored)
     notify("READY=1")
+    if can_grab:  # not under --no-grab: that's the tests (input/test), with the real home
+        try:
+            ft_commands.refresh()  # ft-cmd on the PATH, and the aliases, point at this install
+        except OSError as e:
+            log(f"commands: {e}")
 
     control = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     control.bind("\0frametop_relay")
@@ -1244,6 +1254,12 @@ def main():
                 subprocess.Popen(["sh", "-c", action[len(COMMAND):]], stdin=subprocess.DEVNULL,
                                  env=dict(os.environ, PATH=COMMAND_PATH), start_new_session=True)
                 log(action)
+        elif action.startswith(RUN):
+            if value == 1:
+                # A transient user unit: it never holds up the relay, and its output goes to the
+                # journal (ft-cmd log NAME).
+                _, message = ft_commands.run_named(action[len(RUN):])
+                log(message)
         elif action in FLOAT_ACTIONS:
             if value == 1:
                 try:

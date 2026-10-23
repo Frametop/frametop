@@ -3,6 +3,7 @@
 #include "framekeyboard/grip.hpp"
 #include "framekeyboard/native_replacement.hpp"
 #include "framekeyboard/placement_store.hpp"
+#include "framekeyboard/touch.hpp"
 #include "framekeyboard/updates.hpp"
 #include "framekeyboard/vr_haptics.hpp"
 #include "framekeyboard/vr_lifecycle.hpp"
@@ -345,6 +346,63 @@ class LaserDrag {
     std::optional<Transform> trigger_neutral_;
     TriggerReleaseGuard trigger_release_;
 };
+// Touch typing's tips: each Frame controller's "tip" component, the nose of its body (within
+// 4 mm along its aim in the render model), read once per device. Lasers' cursor indices are
+// small; the tips' pointers sit past them.
+constexpr unsigned touch_pointer = 0x100;
+constexpr double tip_reach = .005; // the poke point, just past the nose's surface
+class ControllerTips {
+  public:
+    // Hand 0 left, 1 right: its tip in the room, if it's a tracked Frame controller.
+    std::optional<std::array<double, 3>> read(std::size_t hand, double now) {
+        const auto role =
+            hand == 0 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand;
+        const auto device = vr_system()->GetTrackedDeviceIndexForControllerRole(role);
+        if (device != devices_[hand]) {
+            // A new device: none this frame, so a press on the old one ends.
+            devices_[hand] = device;
+            tips_[hand].reset();
+            tried_[hand] = -1e9;
+            return {};
+        }
+        if (!tips_[hand] && now - tried_[hand] > 1) {
+            tried_[hand] = now;
+            tips_[hand] = component(device, hand == 0);
+        }
+        const auto pose = tips_[hand] ? read_pointer_pose(device) : std::nullopt;
+        if (!pose) {
+            return {};
+        }
+        return tip_point(*pose, *tips_[hand], tip_reach);
+    }
+    vr::TrackedDeviceIndex_t device(std::size_t hand) const { return devices_[hand]; }
+
+  private:
+    static std::optional<Transform> component(vr::TrackedDeviceIndex_t device, bool left) {
+        if (device >= vr::k_unMaxTrackedDeviceCount || !vr_system()->IsTrackedDeviceConnected(device)) {
+            return {};
+        }
+        char model[1024]{};
+        vr::ETrackedPropertyError error{};
+        vr_system()->GetStringTrackedDeviceProperty(device, vr::Prop_RenderModelName_String, model,
+                                                    sizeof(model), &error);
+        const std::string expected = left ? "{frame_controller}frame_controller_left"
+                                          : "{frame_controller}frame_controller_right";
+        auto models = vr_models();
+        vr::VRControllerState_t released{};
+        vr::RenderModel_ControllerMode_State_t mode{};
+        vr::RenderModel_ComponentState_t tip{};
+        if (error || model != expected || !models ||
+            !models->GetComponentState(model, "tip", &released, &mode, &tip)) {
+            return {};
+        }
+        return from_vr(tip.mTrackingToComponentLocal);
+    }
+    std::array<vr::TrackedDeviceIndex_t, 2> devices_{
+        {vr::k_unTrackedDeviceIndexInvalid, vr::k_unTrackedDeviceIndexInvalid}};
+    std::array<std::optional<Transform>, 2> tips_{};
+    std::array<double, 2> tried_{{-1e9, -1e9}};
+};
 class VrPanel {
   public:
     ~VrPanel() {
@@ -534,6 +592,8 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
     }
     haptics.connect(manifest);
     KeyHaptics feedback;
+    ControllerTips tips;
+    std::array<TouchPoke, 2> pokes;
     GrabInput grip_input;
     if (!grip_input.connect() && app.use_drag_to_move()) {
         app.report_status("Native grip unavailable; use Recenter to recover the keyboard.");
@@ -921,6 +981,54 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                     break;
                 }
             }
+        }
+        // Touch typing: each controller's tip presses the key it touches. Not while the
+        // keyboard moves, nor for a hand that grips it.
+        const bool touching =
+            app.touch_typing() && lifecycle.visible() && displayed.ready() && !drag.active();
+        if (touching || pokes[0].near() || pokes[1].near()) {
+            const auto view = app.view();
+            for (std::size_t hand = 0; hand < pokes.size(); ++hand) {
+                std::optional<PanelPoint> point;
+                const auto tip = touching ? tips.read(hand, now) : std::nullopt;
+                const auto device = tips.device(hand);
+                const bool gripping = std::any_of(grips.begin(), grips.end(), [&](const auto& grip) {
+                    return grip.active && grip.held && grip.device == device;
+                });
+                if (tip && !gripping) {
+                    point = locate_on_panel(displayed.transform(), displayed.width(), *tip);
+                }
+                const auto pointer = touch_pointer + static_cast<unsigned>(hand);
+                const auto touch = pokes[hand].update(point, panel_case_bounds(view));
+                switch (touch.kind) {
+                case TouchEvent::Kind::Hover:
+                    if (app.move(pointer, touch.x, touch.y)) {
+                        feedback.hover(device);
+                    }
+                    break;
+                case TouchEvent::Kind::Move:
+                    app.move(pointer, touch.x, touch.y);
+                    break;
+                case TouchEvent::Kind::Down:
+                    if (app.down(pointer, touch.x, touch.y, now)) {
+                        feedback.press(pointer, device);
+                    }
+                    break;
+                case TouchEvent::Kind::Up:
+                    if (app.up(pointer, touch.x, touch.y)) {
+                        feedback.release(pointer);
+                    }
+                    break;
+                case TouchEvent::Kind::Leave:
+                case TouchEvent::Kind::Cancel:
+                    app.cancel_pointer(pointer);
+                    feedback.cancel_pointer(pointer);
+                    break;
+                case TouchEvent::Kind::None:
+                    break;
+                }
+            }
+            dismiss_panel();
         }
         for (const auto& [device, kind] : feedback.take(now)) {
             if (!drag.active() && lifecycle.visible()) {

@@ -1278,6 +1278,31 @@ void auto_leveling_settings() {
     load_settings(directory.path, errors);
     require(!errors.empty(), "Auto leveling requires a JSON boolean");
 }
+void touch_typing_settings() {
+    // Frametop: controller tips press keys, on unless turned off.
+    TemporaryDirectory directory;
+    Options options;
+    options.config_dir = directory.path;
+    options.mode = Mode::Render;
+    CaptureSink sink;
+    App app(options, sink);
+    require(app.touch_typing(), "Touch typing is on for a new install");
+    app.show_settings();
+    require(control(app.view(), "touch-typing").selected, "Touch typing starts checked");
+    click(app, "touch-typing");
+    require(app.touch_typing(), "Touch typing stays on until Apply");
+    click(app, "apply");
+    require(!app.touch_typing() && !saved(app).touch_typing,
+            "Apply turns Touch typing off and saves it");
+    {
+        App reopened(options, sink);
+        require(!reopened.touch_typing(), "Touch typing off survives restart");
+    }
+    std::ofstream(directory.path / "config.json")
+        << R"({"schema_version":1,"active":{"layout":"en-us-full","language":"en-us","theme":"graphite"}})";
+    require(saved(directory.path).touch_typing, "older configs have Touch typing on");
+    require(sink.events.empty(), "Touch typing settings send no desktop input");
+}
 void native_replacement_settings() {
     TemporaryDirectory directory;
     Options options;
@@ -1534,6 +1559,7 @@ int main() {
         app_settings();
         behavior_settings();
         auto_leveling_settings();
+        touch_typing_settings();
         native_replacement_settings();
         favorite_schema();
         fractional_dropdown_scroll();

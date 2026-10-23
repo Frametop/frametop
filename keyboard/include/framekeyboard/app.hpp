@@ -58,6 +58,7 @@ class App {
     bool pinned() const { return settings_.pinned; }
     bool use_drag_to_move() const { return settings_.use_drag_to_move; }
     bool auto_leveling() const { return settings_.auto_leveling; }
+    bool touch_typing() const { return settings_.touch_typing; }
     bool replace_native_keyboard() const { return settings_.replace_native_keyboard; }
     bool start_with_steamos() const {
         return settings_.replace_native_keyboard && settings_.start_with_steamos;
@@ -152,6 +153,7 @@ class App {
     bool pending_hide_numpad_{};
     bool pending_use_drag_to_move_{};
     bool pending_auto_leveling_{true};
+    bool pending_touch_typing_{true};
     bool pending_replace_native_keyboard_{};
     bool pending_start_with_steamos_{};
     bool native_fallback_{};

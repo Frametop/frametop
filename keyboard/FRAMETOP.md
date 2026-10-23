@@ -11,6 +11,7 @@ It was imported at 0.8.1, commit `ef915ef75169ac886b7de86d18df2e59150cde2f`, wit
 - `src/vr.cpp`: the panel can show over Frametop's screens with the dashboard closed, while Frametop asked for it; lasers can click it there; it tells Frametop whether it's up.
 - `src/placement.cpp`, `include/framekeyboard/placement.hpp`: in Frametop's mode it opens where Frametop's own keyboard did, 0.70 m ahead and 0.35 m under the eyes, facing them, instead of 0.85 m ahead and 0.65 m under, so a hand's laser reaches its bottom row without lowering the hand past where Frametop puts the laser away. Under the dashboard it sits as before.
 - `src/app.cpp`: no Updates button and no Start with SteamOS setting in Frametop's mode.
+- `src/touch.cpp`, `include/framekeyboard/touch.hpp`, `src/vr.cpp`, `src/app.cpp`, `src/config.cpp`, `tests/touch_tests.cpp`: touch typing (Frametop's DEE-173): a Frame controller's tip presses the key it touches, in both modes, on by default (General -> Touch typing, `touch_typing`; [configuration](docs/configuration.md)). A hand's fingertip already pokes the panel through ft-screens, as it does any SteamVR overlay (`screens/steampanels.h`), so that needed nothing here.
 - `src/japanese.cpp`, `tests/japanese_tests.cpp`: Anthy also loads as `libanthy-unicode.so.0`, Fedora's name for it.
 - `CMakeLists.txt`: the above, `frametop-tests`, and `OPENVR_RUNTIME_PATH` can be set, so the build loads SteamVR's own `libopenvr_api` first like Frametop's other programs.
 - Frametop's own files: `build.sh`, `run.sh`, `frametop-keyboard.service`, and this file.

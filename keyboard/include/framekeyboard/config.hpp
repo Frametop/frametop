@@ -52,6 +52,7 @@ struct Settings {
     bool hide_numpad{};
     bool use_drag_to_move{};
     bool auto_leveling{true};
+    bool touch_typing{true}; // Frametop: controller tips press keys
     bool replace_native_keyboard{};
     bool start_with_steamos{};
 };

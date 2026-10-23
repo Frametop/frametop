@@ -35,6 +35,7 @@ enum class ControlKind {
     HideNumpad,
     UseDragToMove,
     AutoLeveling,
+    TouchTyping,
     ReplaceNativeKeyboard,
     StartWithSteamos,
     ScrollMenu,

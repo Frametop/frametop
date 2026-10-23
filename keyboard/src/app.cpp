@@ -127,6 +127,7 @@ App::App(const Options& options, KeySink& sink, SettingsWriter::Write write_pref
     pending_hide_numpad_ = settings_.hide_numpad;
     pending_use_drag_to_move_ = settings_.use_drag_to_move;
     pending_auto_leveling_ = settings_.auto_leveling;
+    pending_touch_typing_ = settings_.touch_typing;
     pending_replace_native_keyboard_ = settings_.replace_native_keyboard;
     pending_start_with_steamos_ = settings_.start_with_steamos;
     update_settings_ui();
@@ -345,7 +346,14 @@ void App::update_settings_ui() {
                                              ControlStyle::Checkbox,
                                              pending_auto_leveling_,
                                              {},
-                                             true})}},
+                                             true}),
+           field(ControlKind::TouchTyping, {"touch-typing",
+                                            "Touch typing",
+                                            "",
+                                            ControlStyle::Checkbox,
+                                            pending_touch_typing_,
+                                            {},
+                                            true})}},
          {"experimental", "Experimental", std::move(experimental)}});
 }
 PanelView App::view() const {
@@ -734,6 +742,7 @@ void App::show_settings() {
     pending_hide_numpad_ = settings_.hide_numpad;
     pending_use_drag_to_move_ = settings_.use_drag_to_move;
     pending_auto_leveling_ = settings_.auto_leveling;
+    pending_touch_typing_ = settings_.touch_typing;
     pending_replace_native_keyboard_ = settings_.replace_native_keyboard;
     pending_start_with_steamos_ = settings_.start_with_steamos;
     update_settings_ui();
@@ -897,6 +906,7 @@ void App::reload() {
         settings_.hide_numpad = updated_settings.hide_numpad;
         settings_.use_drag_to_move = updated_settings.use_drag_to_move;
         settings_.auto_leveling = updated_settings.auto_leveling;
+        settings_.touch_typing = updated_settings.touch_typing;
         settings_.replace_native_keyboard = updated_settings.replace_native_keyboard;
         settings_.start_with_steamos = updated_settings.start_with_steamos;
         settings_writer_.reconcile(settings_);
@@ -908,6 +918,7 @@ void App::reload() {
     pending_hide_numpad_ = settings_.hide_numpad;
     pending_use_drag_to_move_ = settings_.use_drag_to_move;
     pending_auto_leveling_ = settings_.auto_leveling;
+    pending_touch_typing_ = settings_.touch_typing;
     pending_replace_native_keyboard_ = settings_.replace_native_keyboard;
     pending_start_with_steamos_ = settings_.start_with_steamos;
     rebuild_cycle_entries();
@@ -1376,6 +1387,7 @@ void App::action(const ControlAction& command) {
         settings_.hide_numpad = pending_hide_numpad_;
         settings_.use_drag_to_move = pending_use_drag_to_move_;
         settings_.auto_leveling = pending_auto_leveling_;
+        settings_.touch_typing = pending_touch_typing_;
         settings_.replace_native_keyboard = pending_replace_native_keyboard_;
         settings_.start_with_steamos = pending_start_with_steamos_;
         default_ = settings_.active;
@@ -1424,6 +1436,9 @@ void App::action(const ControlAction& command) {
         native_fallback_ = true;
     } else if (kind == ControlKind::AutoLeveling) {
         pending_auto_leveling_ = !pending_auto_leveling_;
+        update_settings_ui();
+    } else if (kind == ControlKind::TouchTyping) {
+        pending_touch_typing_ = !pending_touch_typing_;
         update_settings_ui();
     } else if (kind == ControlKind::Favorite) {
         const bool exists =

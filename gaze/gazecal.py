@@ -211,13 +211,21 @@ class Correction:
 
     Coefficients: C @ f, f = [1, x, y, x*y, x^2, y^2] with x = hy/30, y = hp/30; the
     terms a model doesn't use are 0. A polynomial runs away outside the spots it was fitted
-    on, so its input is clamped to the range of view it has seen, plus a margin.
+    on, so its curve stops at the range of view it has seen, plus a margin. Past that, the
+    correction goes on in a straight line, with the slope the fit has at that edge (at most
+    EDGE_SLOPE degrees per degree). Holding it still there instead left a tracker that
+    understates how far the eyes turn (as with eyes close to the lenses, DEE-188) falling
+    short, toward the centre, further and further past the ring: fitted on the dots within
+    18 degrees and tried on those at 24 (2026-10-23, every source), the straight line was
+    2.1 degrees off (median) for SteamVR's gaze where holding still was 3.0, and 3.1 against
+    5.2 for the left eye alone.
     """
 
     YAWS = list(range(-40, 41, 10))
     PITCHES = list(range(-30, 31, 10))
     NF = 6
     MARGIN = 3.0  # degrees past the fitted range that the polynomial still follows
+    EDGE_SLOPE = 0.5  # past that, the most the correction grows per degree (a wild fit's edge)
 
     def __init__(self):
         self.reset()
@@ -266,12 +274,35 @@ class Correction:
         return [((i, k), (1 - fy) * (1 - fp)), ((i + 1, k), fy * (1 - fp)),
                 ((i, k + 1), (1 - fy) * fp), ((i + 1, k + 1), fy * fp)]
 
+    def slope(self, hy, hp, mode):
+        """The polynomial's change per degree of hy and hp at (hy, hp), for each of the
+        correction's yaw and pitch, capped at EDGE_SLOPE."""
+        kind = self.base(mode)
+        if kind == "offset":
+            return [(0.0, 0.0), (0.0, 0.0)]
+        x, y = hy / 30.0, hp / 30.0
+        cap = self.EDGE_SLOPE
+        out = []
+        for a in self.a:
+            gx, gy = a[1], a[2]
+            if kind != "affine":
+                gx += a[3] * y + 2 * a[4] * x
+                gy += a[3] * x + 2 * a[5] * y
+            out.append(tuple(min(max(g / 30.0, -cap), cap) for g in (gx, gy)))
+        return out
+
     def get(self, hy, hp, mode):
         if mode == "none":
             return 0.0, 0.0
         f = self.features(hy, hp, mode)
         cy = sum(a * b for a, b in zip(self.a[0], f))
         cp = sum(a * b for a, b in zip(self.a[1], f))
+        # Past the edge of the curve: on in a straight line from there.
+        ey, ep = self.clamp(hy, hp)
+        if (ey, ep) != (hy, hp):
+            (yy, yp), (py, pp) = self.slope(ey, ep, mode)
+            cy += yy * (hy - ey) + yp * (hp - ep)
+            cp += py * (hy - ey) + pp * (hp - ep)
         if mode.endswith("+grid"):
             for (i, k), w in self.weights(hy, hp):
                 cy += w * self.grid[i][k][0]

@@ -4,9 +4,18 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
-#include <chrono>
+#include <ctime>
 #include <string>
-#include <thread>
+// Advance only the helper's explicit deadline clock after a selected API call.
+// This makes expiry-during-setup tests deterministic even on a loaded machine;
+// std::chrono's real countdown clock is untouched. This header is test-only.
+inline bool ft_test_deadline_expired = false;
+inline int ft_test_clock_gettime(clockid_t clock, timespec *now) {
+    const int result = ::clock_gettime(clock, now);
+    if (!result && clock == CLOCK_MONOTONIC && ft_test_deadline_expired) now->tv_sec += 120;
+    return result;
+}
+#define clock_gettime ft_test_clock_gettime
 namespace vr {
 using VROverlayHandle_t = uint64_t;
 constexpr VROverlayHandle_t k_ulOverlayHandleInvalid = 0;
@@ -30,9 +39,8 @@ inline bool Fails(const char *operation) {
     return fail && !std::strcmp(fail, operation);
 }
 inline void Delay(const char *operation) {
-    const char *where = std::getenv("COUNTDOWN_DELAY"), *ms = std::getenv("COUNTDOWN_DELAY_MS");
-    if (where && ms && !std::strcmp(where, operation))
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::atoi(ms)));
+    const char *where = std::getenv("COUNTDOWN_EXPIRE_ON");
+    if (where && !std::strcmp(where, operation)) ft_test_deadline_expired = true;
 }
 struct IVROverlay {
     EVROverlayError CreateOverlay(const char *key, const char *, VROverlayHandle_t *h) {
@@ -54,7 +62,7 @@ struct IVROverlay {
     EVROverlayError ShowOverlay(VROverlayHandle_t) { Trace("show"); return VROverlayError_None; }
     EVROverlayError HideOverlay(VROverlayHandle_t) { Trace("hide"); return VROverlayError_None; }
     EVROverlayError DestroyOverlay(VROverlayHandle_t) { Trace("destroy"); return VROverlayError_None; }
-    bool PollNextOverlayEvent(VROverlayHandle_t, VREvent_t *, uint32_t) { return false; }
+    bool PollNextOverlayEvent(VROverlayHandle_t, VREvent_t *, uint32_t) { Delay("poll"); return false; }
     const char *GetOverlayErrorNameFromEnum(EVROverlayError) { return "test failure"; }
 };
 inline IVROverlay *VROverlay() { static IVROverlay o; return &o; }

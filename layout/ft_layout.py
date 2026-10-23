@@ -149,7 +149,6 @@ GAMESTREAM_PORT = 47989  # a host's HTTP port, where ft-stream reaches it
 WEB_UI_PORT = 47990  # Vibepollo's Web UI: a host answers there when it's up
 STREAM = os.path.join(REPO, "stream", "build", "ft-stream")
 RESET_TIMER = os.path.join(REPO, "layout", "countdown", "build", "ft-reset-timer")
-LEGACY_RESET_TIMER = os.path.expanduser("~/.local/share/frametop/local-tools/reset-countdown/ft-reset-countdown")
 
 
 def log(*args):
@@ -1633,16 +1632,14 @@ def remote_view():
 def reset_countdown():
     """Give a hand-triggered reset time to face forward, even without the optional overlay."""
     started = time.monotonic()
-    if os.access(RESET_TIMER, os.X_OK):
+    try:
+        if not os.access(RESET_TIMER, os.X_OK):
+            raise FileNotFoundError(f"countdown helper unavailable: {RESET_TIMER}")
         # in-box cannot forward the host timeout to its container child. Give the
         # helper an absolute expiry so a late container start cannot show stale UI.
         command = [RESET_TIMER, "--deadline", f"{started + 6:.9f}"]
         if not in_container():
             command = [os.path.join(REPO, "scripts", "in-box"), *command]
-    else:
-        # Preserve the separately installed helper while migrating to the personal fork.
-        command = [LEGACY_RESET_TIMER]
-    try:
         result = subprocess.run(command, timeout=6, check=False)
         if result.returncode:
             log("visible countdown unavailable; continuing the delayed reset")

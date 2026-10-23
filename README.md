@@ -1,9 +1,5 @@
 # Frametop
 
-> **Personal fork:** this branch adds a visible three-second countdown, fullscreen-preserving screen reset, and an in-app **Controls guide** to upstream `v0.3.0-exp.19`. Open **Frametop Controls Guide** from the desktop app menu, or **Frametop Input Settings → Controls guide**. The guide also appears as **Recenter & controls** in Frametop Tour.
->
-> Source, build, update, and rollback instructions: [Personal fork](docs/personal-fork.md). The upstream installation commands below install upstream Frametop; they do not install this branch.
-
 Frametop is a desktop for the Steam Frame that runs on the headset itself, with no PC. Put several monitors around you, pull app windows out to float on their own, and point with a mouse, or with your eyes.
 
 - **Screens that are real monitors.** Each KDE Plasma screen has its own resolution and shape: an ultrawide in front, portrait screens beside it. Move, resize, curve, and roll them, or pin one to your wrist or your head. They come back to your layout when the desktop starts.

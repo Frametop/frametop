@@ -30,9 +30,8 @@ STB headers at the same commit as `screens/build.sh`, with SHA-256 checks. The
 renderer uses the installed Noto Sans font. There are no vendored binaries or
 headers.
 
-If the repo helper has not been built, reset tries the original local helper at
-`~/.local/share/frametop/local-tools/reset-countdown/ft-reset-countdown`. If no
-helper works, reset still waits at least three seconds before sampling the head.
+If the helper is missing or fails, reset still waits at least three seconds
+before sampling the head. A missing helper does not start a container or access VR.
 A helper timeout is bounded at six seconds; a failure does not cancel the reset.
 The repo helper also receives an absolute `CLOCK_MONOTONIC` deadline at six
 seconds from the request. The host and its Distrobox share this clock. Because
@@ -40,7 +39,7 @@ seconds from the request. The host and its Distrobox share this clock. Because
 deadline prevents a container that starts late from showing a stale countdown.
 Expiry is checked before VR initialization, after initialization and overlay
 creation, before showing, and between frames; any existing overlay is cleaned
-up. The legacy helper keeps its original no-argument invocation.
+up.
 
 ## Offline tests
 

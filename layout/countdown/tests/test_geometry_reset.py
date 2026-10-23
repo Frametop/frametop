@@ -16,7 +16,11 @@ class Harness:
     """Real planning/math with strict fake IPC and forbidden external side effects."""
     def __init__(self, lock, profile=True):
         self.m = load_layout_module()
-        self.m.RESET_TIMER = "/test/unbuilt/ft-reset-timer"
+        self.m.RESET_TIMER = "/test/repo/layout/countdown/build/ft-reset-timer"
+        real_access = self.m.os.access
+        self.m.os = types.SimpleNamespace(**vars(self.m.os))
+        self.m.os.access = lambda path, mode: path == self.m.RESET_TIMER or real_access(path, mode)
+        self.m.in_container = lambda: True
         self.m.LOCK_PATH = str(lock)
         self.events = []
         self.now = 100.0
@@ -70,8 +74,8 @@ class Harness:
             self.on_sleep(seconds)
 
     def run_helper(self, command, **kwargs):
-        expected = str(pathlib.Path.home() / ".local/share/frametop/local-tools/reset-countdown/ft-reset-countdown")
-        if command != [expected] or kwargs != {"timeout": 6, "check": False}:
+        expected = [self.m.RESET_TIMER, "--deadline", f"{self.now + 6:.9f}"]
+        if command != expected or kwargs != {"timeout": 6, "check": False}:
             raise AssertionError("Unexpected external process: " + repr((command, kwargs)))
         self.events.append(("helper_start",))
         self.now += self.helper_elapsed

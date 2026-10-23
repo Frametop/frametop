@@ -125,11 +125,10 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.lines(), [])
 
     def test_runtime_deadline_hides_and_destroys_visible_overlay(self):
-        start = time.monotonic()
-        result = subprocess.run(self.command + self.deadline(.6), env=self.env,
+        env = {**self.env, "COUNTDOWN_EXPIRE_ON": "poll"}
+        result = subprocess.run(self.command + self.deadline(60), env=env,
                                 capture_output=True, timeout=2)
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertLess(time.monotonic() - start, 1.5)
         self.assertIn("show", self.lines())
         self.assertEqual(self.lines().count("upload"), 1)
         self.assertEqual(self.lines()[-3:], ["hide", "destroy", "shutdown"])
@@ -138,8 +137,8 @@ class LifecycleTests(unittest.TestCase):
         for operation in ("init", "create", "upload"):
             with self.subTest(operation=operation):
                 self.trace.unlink(missing_ok=True)
-                env = {**self.env, "COUNTDOWN_DELAY": operation, "COUNTDOWN_DELAY_MS": "800"}
-                result = subprocess.run(self.command + self.deadline(.4), env=env,
+                env = {**self.env, "COUNTDOWN_EXPIRE_ON": operation}
+                result = subprocess.run(self.command + self.deadline(60), env=env,
                                         capture_output=True, timeout=2)
                 self.assertEqual(result.returncode, 3, result.stderr)
                 self.assertNotIn("show", self.lines())

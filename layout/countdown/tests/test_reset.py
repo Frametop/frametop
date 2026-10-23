@@ -7,7 +7,6 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest import mock
 
 
 def load_layout_module():
@@ -40,7 +39,11 @@ class Harness:
         self.m.subprocess = types.SimpleNamespace(
             run=self.run_helper, TimeoutExpired=subprocess.TimeoutExpired)
         self.m.RESET_TIMER = "/test/repo/layout/countdown/build/ft-reset-timer"
-        self.m.LEGACY_RESET_TIMER = "/test/legacy/ft-reset-countdown"
+        self.helper_available = True
+        real_access = self.m.os.access
+        self.m.os = types.SimpleNamespace(**vars(self.m.os))
+        self.m.os.access = lambda path, mode: (self.helper_available if path == self.m.RESET_TIMER
+                                              else real_access(path, mode))
         self.m.in_container = lambda: True
         self.m.load_layout = self.load_layout
         self.m.save_layout = lambda layout: self.events.append(("save",))
@@ -109,21 +112,22 @@ class ResetCountdownReview(unittest.TestCase):
     def assert_new_head_after_wait(self, h):
         def read_head():
             self.assertGreaterEqual(h.now, 103)
-            self.assertTrue(any(e[0] == "helper_end" for e in h.events))
+            self.assertEqual(any(e[0] == "helper_end" for e in h.events), h.helper_available)
         h.on_head = read_head
         self.assertEqual(h.run("reset"), 0)
         place = next(e[1] for e in h.events if e[0] == "ask" and e[1].startswith("place "))
         self.assertEqual(list(map(float, place.split()[2:5])), [8.0, 20.0, 30.0])
         self.assertEqual(float(place.split()[5]), 90.0)
         actions = [e[0] for e in h.events]
-        self.assertLess(actions.index("helper_end"), actions.index("load"))
+        waited = "helper_end" if h.helper_available else "sleep"
+        self.assertLess(actions.index(waited), actions.index("load"))
 
     def test_success_helper_has_fixed_cli_bounded_timeout_and_no_extra_wait(self):
         h = Harness(self.lock)
         h.on_helper = lambda: setattr(h, "head", [10.0, 20.0, 30.0, 90.0])
         self.assert_new_head_after_wait(h)
         helper = next(e for e in h.events if e[0] == "helper_start")
-        self.assertEqual(helper[1], (h.m.LEGACY_RESET_TIMER,))
+        self.assertEqual(helper[1], (h.m.RESET_TIMER, "--deadline", "106.000000000"))
         self.assertEqual(helper[2], {"timeout": 6, "check": False})
         self.assertFalse(any(e[0] == "sleep" for e in h.events))
 
@@ -137,12 +141,21 @@ class ResetCountdownReview(unittest.TestCase):
 
     def test_missing_helper_fallback_waits_full_three_seconds(self):
         h = Harness(self.lock)
-        h.helper_elapsed = 0
-        h.helper_error = FileNotFoundError("mock helper absent")
+        h.helper_available = False
+        h.m.in_container = lambda: self.fail("missing helper attempted container launch")
         h.on_sleep = lambda seconds: setattr(h, "head", [10.0, 20.0, 30.0, 90.0])
         self.assert_new_head_after_wait(h)
         self.assertEqual([e for e in h.events if e[0] == "sleep"], [("sleep", 3)])
+        self.assertFalse(any(e[0] == "helper_start" for e in h.events))
         self.assertTrue(any(e[0] == "log" and "unavailable" in e[1] for e in h.events))
+
+    def test_helper_execution_error_preserves_three_second_wait(self):
+        h = Harness(self.lock)
+        h.helper_elapsed = 0
+        h.helper_error = OSError("mock loader failure")
+        h.on_sleep = lambda seconds: setattr(h, "head", [10.0, 20.0, 30.0, 90.0])
+        self.assert_new_head_after_wait(h)
+        self.assertEqual([e for e in h.events if e[0] == "sleep"], [("sleep", 3)])
 
     def test_nonzero_helper_fallback_waits_remaining_time(self):
         h = Harness(self.lock)
@@ -226,16 +239,14 @@ class ResetCountdownReview(unittest.TestCase):
 
     def test_built_helper_runs_directly_inside_container(self):
         h = Harness(self.lock)
-        with mock.patch.object(h.m.os, "access", return_value=True):
-            self.assertEqual(h.run("reset"), 0)
+        self.assertEqual(h.run("reset"), 0)
         helper = next(e for e in h.events if e[0] == "helper_start")
         self.assertEqual(helper[1], (h.m.RESET_TIMER, "--deadline", "106.000000000"))
 
     def test_built_helper_enters_its_release_container_from_host(self):
         h = Harness(self.lock)
         h.m.in_container = lambda: False
-        with mock.patch.object(h.m.os, "access", return_value=True):
-            self.assertEqual(h.run("reset"), 0)
+        self.assertEqual(h.run("reset"), 0)
         helper = next(e for e in h.events if e[0] == "helper_start")
         self.assertEqual(helper[1], (str(pathlib.Path(h.m.REPO) / "scripts/in-box"),
                                      h.m.RESET_TIMER, "--deadline", "106.000000000"))
@@ -244,8 +255,7 @@ class ResetCountdownReview(unittest.TestCase):
         h = Harness(self.lock)
         h.helper_elapsed = .5
         h.helper_code = 1
-        with mock.patch.object(h.m.os, "access", return_value=True):
-            self.assertEqual(h.run("reset"), 0)
+        self.assertEqual(h.run("reset"), 0)
         self.assertEqual(sum(e[0] == "helper_start" for e in h.events), 1)
         self.assertEqual(h.now, 103)
 

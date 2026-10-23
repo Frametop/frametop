@@ -51,6 +51,7 @@ sudo ufw allow Vibepollo                                                        
 
 - The resolution switch, the HDR guard and the Frame's microphone are Windows-only for now. On Linux, a monitor keeps its own resolution and the stream scales it, and Send my microphone does nothing.
 - Vibepollo runs as system services. `sudo systemctl status vibepollo-session-controller.service vibepollo.service` shows them, and `sudo journalctl -u vibepollo-session-controller.service -u vibepollo.service --since '-10 minutes'` shows their log. Don't start `vibepollo.service` yourself: the session controller starts it when you log in.
+- Because it runs as system services, Vibepollo has no tray icon and shows no desktop notifications on Linux. Its "Enable system tray" setting does nothing there. Open the Web UI at https://localhost:47990 instead. In frametop-2.0.0-3, the Vibepollo entry in the app menu tries to start a user service that the package doesn't install, so it does nothing.
 - Settings, the Web UI login and pairings are in `/var/lib/vibepollo`.
 - Vibepollo's [Linux install guide](https://github.com/Frametop/frametop-vibepollo/blob/frametop-2.0.0-3/docs/linux/install.md) has the details and troubleshooting.
 

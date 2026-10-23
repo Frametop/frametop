@@ -5,10 +5,10 @@
 # needs to run them: raise it when a model needs a newer ft-hands, and older installs keep theirs.
 # Made by frame-hands' model-repo/pin.py.
 format 1
-rev 52d3a657abcf0cef7db48f90c5fefb281ff4b5b7
-model v19b
-file NOTICE 96fc8914e0220e51222362d141e0495e3425081d9898c21899b63e68df358ca6
-file hand.ncnn.bin 010f96a9316d0d935f2baf4951770130402bddc126b0066b4d8b3ba2754fdc9a
+rev 03d7695fecb80f6cf8f3aa9321de130b5efd08b3
+model v20a
+file NOTICE 4d99bb37c00664a1b0ea07170bab1916460bc0a44ff817e3ccd32babbcfbaf11
+file hand.ncnn.bin b7c3d1be232725a5a143e2648858ec5aec9596c7b83c6a3c508479b04057e00c
 file hand.ncnn.param 54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd
 file palm.ncnn.bin 9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909
 file palm.ncnn.param c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e

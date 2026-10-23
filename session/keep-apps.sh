@@ -14,11 +14,15 @@ own='^(frametop-sessi|dbus-|startplasma|plasma|kwin|Xwayland|ksmserver|krdpserve
 own+='kded|kactivitymanage|kaccess|kglobalaccel|kscreen|kwalletd|ksecretd|polkit-kde|org_kde_|baloo|'
 own+='xembedsniproxy|gmenudbusmenu|DiscoverNotifie|kimpanel|ibus|xdg-|at-spi|dconf-service|fusermount|agent)'
 keep=()
+# So does anything run from Frametop's own files: the session's helpers (ft-dashroute,
+# Frunner, ft-floatd...) mostly run as python3, and kept ones would hold their sockets
+# against the next desktop's copies, from a release that may be gone by then.
+root=$(cd "$(dirname "$0")/.." && pwd -P)/
 while read -r pid; do
   comm=$(cat "/proc/$pid/comm" 2>/dev/null) || continue
   [[ $comm =~ $own ]] && continue
   # ft-screens' launcher (distrobox enter, podman exec) stays too.
-  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -e 'ft-screens' -e 'ft-layout' -e 'frametop-session' && continue
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -F -e 'ft-screens' -e 'ft-layout' -e 'frametop-session' -e "$root" && continue
   keep+=("$pid")
 done < "/sys/fs/cgroup$cg/cgroup.procs"
 [ ${#keep[@]} -gt 0 ] || exit 0

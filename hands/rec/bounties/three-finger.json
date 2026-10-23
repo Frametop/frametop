@@ -1,0 +1,338 @@
+{
+ "version": 1,
+ "name": "three-finger",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Three-finger pinches",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "three-finger",
+   "title": "Three-finger pinches",
+   "kind": "scene",
+   "intro": "Pinches with three fingers: the thumb on the index and middle fingertips together, as for scrolling, mixed with ordinary taps so the tracker learns to tell them apart. Nothing happens when you do: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "taps-right",
+     "hands": "right",
+     "text": "Right hand raised and pointing. Purple 3: a three-finger tap, the thumb on the index and middle|fingertips together. Cyan: thumb to index only. Orange with a cross: stop about 1 cm short.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 14,
+      "mix": {
+       "tri": 2,
+       "tap": 1,
+       "nogo": 1
+      },
+      "lit_s": 1.1
+     }
+    },
+    {
+     "id": "taps-left",
+     "hands": "left",
+     "text": "Left hand pointing. Purple 3: three-finger tap. Cyan: thumb to index only.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.3,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 12,
+      "mix": {
+       "tri": 2,
+       "tap": 1
+      },
+      "lit_s": 1.1
+     }
+    },
+    {
+     "id": "scroll-right",
+     "hands": "right",
+     "text": "Right hand pointing at the lit row. Pinch with three fingers, move the hand down about 10 cm|as if scrolling the list, then let go. Open the fingers clearly after each.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.05,
+        -0.9
+       ],
+       "size": [
+        0.4,
+        0.5
+       ],
+       "look": "list:6"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.6,
+      "seconds": 14,
+      "mix": {
+       "tri-scroll": 1
+      },
+      "lit_s": 2.2
+     }
+    },
+    {
+     "id": "scroll-left",
+     "hands": "left",
+     "text": "Left hand: three-finger pinch on the lit row, move the hand down as if scrolling, let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.15,
+        -0.05,
+        -0.9
+       ],
+       "size": [
+        0.4,
+        0.5
+       ],
+       "look": "list:6"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.6,
+      "seconds": 12,
+      "mix": {
+       "tri-scroll": 1
+      },
+      "lit_s": 2.2
+     }
+    },
+    {
+     "id": "three-ways",
+     "hands": "right",
+     "text": "Right hand pointing. Each button says which: cyan, thumb to index; purple, thumb to middle;|purple 3, thumb to both together.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 14,
+      "mix": {
+       "tri": 2,
+       "tap": 1,
+       "middle": 1
+      },
+      "lit_s": 1.1
+     }
+    },
+    {
+     "id": "three-ways-left",
+     "hands": "left",
+     "text": "Left hand: the same three. Cyan index, purple middle, purple 3 both.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 12,
+      "mix": {
+       "tri": 2,
+       "tap": 1,
+       "middle": 1
+      },
+      "lit_s": 1.1
+     }
+    },
+    {
+     "id": "low-hand",
+     "hands": "right",
+     "text": "Right hand low by your lap, palm down, as with gaze: look at the lit button and tap there.|Purple 3: three fingers. Cyan: thumb to index.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 12,
+      "mix": {
+       "tri": 2,
+       "tap": 1
+      },
+      "lit_s": 1.1
+     }
+    },
+    {
+     "id": "both-hands",
+     "hands": "both",
+     "text": "Both hands up and pointing. Each lit button says L or R: a three-finger tap with that hand.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.4,
+      "seconds": 14,
+      "mix": {
+       "tri": 1
+      },
+      "hands": [
+       "left",
+       "right"
+      ]
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace: three-finger pinches, taps and scrolls on the list, as you like.|Move the arm while you do: straight, bent, higher and lower.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -0.9
+       ],
+       "size": [
+        0.4,
+        0.5
+       ],
+       "look": "list:6"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 4,
+      "seconds": 16,
+      "mix": {
+       "tri-scroll": 1,
+       "tri": 1
+      },
+      "lit_s": 4,
+      "says": {
+       "tri": "Your own pace: three-finger taps",
+       "tri-scroll": "Your own pace: three-finger scrolls"
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

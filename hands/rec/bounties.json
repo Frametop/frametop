@@ -1,14 +1,102 @@
-{"schema": 1, "updated": "2026-10-23",
+{
+ "schema": 1,
+ "updated": "2026-10-23",
  "bounties": [
-  {"id": "close-up", "title": "Close-up hands", "blurb": "Pokes, taps and pinches on windows very close to you, about a forearm's length from your eyes: the hand near your face, low in front of your chest and out to the side. Up close is where hand tracking loses the most fingers today.", "minutes": 4, "priority": "high", "script": "close-up"},
-  {"id": "near-misses", "title": "Near misses", "blurb": "Taps and pinches that stop about 1 cm short, and a relaxed hand aiming between clicks, mixed with real taps. These teach the tracker what isn't a click, so it stops clicking or holding when you didn't mean to.", "minutes": 4, "priority": "high", "script": "near-misses"},
-  {"id": "sideways-hands", "title": "Sideways hands", "blurb": "Pinch, drag and tap windows at arm's length with your hand on its side, thumb on top, as for a handshake, plus lazy susan sweeps. A hand on its edge is the hardest for the cameras to judge for distance.", "minutes": 4, "priority": "high", "script": "sideways-hands"},
-  {"id": "pokes", "title": "Pokes", "blurb": "Index finger pokes on windows within arm's reach, as on a touch screen: straight ahead, low near the lap, high and to the side, small buttons, holds and slides, both hands, and stopping just short.", "minutes": 4, "priority": "retired", "script": "pokes"},
-  {"id": "middle-taps", "title": "Middle taps", "blurb": "Thumb to middle finger taps (right clicks) with the hand raised and pointing, mixed with index taps so the two can be told apart.", "minutes": 4, "priority": "retired", "script": "middle-taps"},
-  {"id": "index-taps", "title": "Index taps", "blurb": "Thumb to index taps with the hand raised and pointing at lit buttons, as with the hand ray: arm out and bent, two windows, high and low, far away, both hands, near misses and holds.", "minutes": 4, "priority": "retired", "script": "index-taps"},
-  {"id": "hand-gestures", "title": "Hand gestures", "blurb": "Whole-hand moves: lazy susan sweeps and look-alikes that aren't, pulling a far window to you with a fist, pushing one away, turning one with your fist, and the palm-up menu tap.", "minutes": 5, "priority": "retired", "script": "hand-gestures"},
-  {"id": "daylight-taps", "title": "Index taps in daylight", "blurb": "The index taps round in a room lit by daylight: by day, curtains open, no lamps needed. The cameras see infrared, and sunlight is what they find hardest.", "minutes": 4, "priority": "retired", "script": "index-taps"},
-  {"id": "pinches", "title": "Pinches", "blurb": "Pinch a window's bar or corner and drag, resize, tilt and stretch it to a ghost outline.", "minutes": 4, "priority": "retired", "script": "pinches"},
-  {"id": "card-grabs", "title": "Three-finger grabs", "blurb": "Grab a window's edge like a playing card: hold it, place it, push it away, throw it.", "minutes": 4, "priority": "retired", "script": "card-grabs"}
+  {
+   "id": "close-up",
+   "title": "Close-up hands",
+   "blurb": "Pokes, taps and pinches on windows very close to you, about a forearm's length from your eyes: the hand near your face, low in front of your chest and out to the side. Up close is where hand tracking loses the most fingers today.",
+   "minutes": 4,
+   "priority": "high",
+   "script": "close-up"
+  },
+  {
+   "id": "near-misses",
+   "title": "Near misses",
+   "blurb": "Taps and pinches that stop about 1 cm short, and a relaxed hand aiming between clicks, mixed with real taps. These teach the tracker what isn't a click, so it stops clicking or holding when you didn't mean to.",
+   "minutes": 4,
+   "priority": "high",
+   "script": "near-misses"
+  },
+  {
+   "id": "three-finger",
+   "title": "Three-finger pinches",
+   "blurb": "Taps and scrolls with three fingers: the thumb on the index and middle fingertips together, mixed with ordinary taps and middle taps. Today these often read as a plain thumb and index tap.",
+   "minutes": 4,
+   "priority": "high",
+   "script": "three-finger"
+  },
+  {
+   "id": "fists",
+   "title": "Fists",
+   "blurb": "Close your fist on a window, carry it and open your hand to let go: slowly, quickly, with each hand and both, and against pinches and card grabs. Fists closing and opening are still jumpy.",
+   "minutes": 4,
+   "priority": "high",
+   "script": "fists"
+  },
+  {
+   "id": "sideways-hands",
+   "title": "Sideways hands",
+   "blurb": "Pinch, drag and tap windows at arm's length with your hand on its side, thumb on top, as for a handshake, plus lazy susan sweeps. A hand on its edge is the hardest for the cameras to judge for distance.",
+   "minutes": 4,
+   "priority": "high",
+   "script": "sideways-hands"
+  },
+  {
+   "id": "pokes",
+   "title": "Pokes",
+   "blurb": "Index finger pokes on windows within arm's reach, as on a touch screen: straight ahead, low near the lap, high and to the side, small buttons, holds and slides, both hands, and stopping just short.",
+   "minutes": 4,
+   "priority": "retired",
+   "script": "pokes"
+  },
+  {
+   "id": "middle-taps",
+   "title": "Middle taps",
+   "blurb": "Thumb to middle finger taps (right clicks) with the hand raised and pointing, mixed with index taps so the two can be told apart.",
+   "minutes": 4,
+   "priority": "retired",
+   "script": "middle-taps"
+  },
+  {
+   "id": "index-taps",
+   "title": "Index taps",
+   "blurb": "Thumb to index taps with the hand raised and pointing at lit buttons, as with the hand ray: arm out and bent, two windows, high and low, far away, both hands, near misses and holds.",
+   "minutes": 4,
+   "priority": "retired",
+   "script": "index-taps"
+  },
+  {
+   "id": "hand-gestures",
+   "title": "Hand gestures",
+   "blurb": "Whole-hand moves: lazy susan sweeps and look-alikes that aren't, pulling a far window to you with a fist, pushing one away, turning one with your fist, and the palm-up menu tap.",
+   "minutes": 5,
+   "priority": "retired",
+   "script": "hand-gestures"
+  },
+  {
+   "id": "daylight-taps",
+   "title": "Index taps in daylight",
+   "blurb": "The index taps round in a room lit by daylight: by day, curtains open, no lamps needed. The cameras see infrared, and sunlight is what they find hardest.",
+   "minutes": 4,
+   "priority": "retired",
+   "script": "index-taps"
+  },
+  {
+   "id": "pinches",
+   "title": "Pinches",
+   "blurb": "Pinch a window's bar or corner and drag, resize, tilt and stretch it to a ghost outline.",
+   "minutes": 4,
+   "priority": "retired",
+   "script": "pinches"
+  },
+  {
+   "id": "card-grabs",
+   "title": "Three-finger grabs",
+   "blurb": "Grab a window's edge like a playing card: hold it, place it, push it away, throw it.",
+   "minutes": 4,
+   "priority": "retired",
+   "script": "card-grabs"
+  }
  ]
 }

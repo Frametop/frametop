@@ -51,10 +51,10 @@ class ShippedTest(unittest.TestCase):
         board = bounties.load(session.BOARD_PATH)
         self.assertIsNotNone(board, "bounties.json doesn't validate")
         ids = [b["id"] for b in board["bounties"]]
-        self.assertEqual(ids, ["close-up", "near-misses", "sideways-hands", "pokes", "middle-taps", "index-taps",
+        self.assertEqual(ids, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands", "pokes", "middle-taps", "index-taps",
                                "hand-gestures", "daylight-taps", "pinches", "card-grabs"])
         live = [b["id"] for b in board["bounties"] if b["priority"] != "retired"]
-        self.assertEqual(live, ["close-up", "near-misses", "sideways-hands"])
+        self.assertEqual(live, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands"])
         for b in board["bounties"]:
             self.assertTrue(session.have_bounty_script(b["script"]), b["script"])
 
@@ -84,7 +84,7 @@ class ShippedTest(unittest.TestCase):
                         self.assertNotEqual(a["lit"], "none", p["id"])
             want = {"index-taps": "tap", "middle-taps": "middle", "pinches": "pinch", "card-grabs": "card",
                     "pokes": "poke", "hand-gestures": "sweep", "close-up": "poke", "sideways-hands": "pinch",
-                    "near-misses": "nogo"}[b["script"]]
+                    "near-misses": "nogo", "three-finger": "tri", "fists": "fist"}[b["script"]]
             self.assertIn(want, gestures)
             self.assertIn("nogo", gestures, "%s: no near misses" % b["id"])
 
@@ -107,8 +107,9 @@ class ShippedTest(unittest.TestCase):
         self.assertEqual(sorted(p["hands"] for p in palm), ["left", "right"])
 
     def test_v20a_rounds(self):
-        """The rounds made from v20a on the testing sessions (2026-10-23): windows close to the face (low and
-        to the side too), hands on their side at arm's length with sweeps, and near misses outnumbering taps."""
+        """The rounds of 2026-10-23: from v20a on the testing sessions, windows close to the face (low and to
+        the side too), hands on their side at arm's length with sweeps, and near misses outnumbering taps;
+        from the user, three-finger pinches among index and middle taps, and fists closing and opening."""
         def round_of(name):
             plan = session.build_plan(session.load_script(session.bounty_script(name)), {}, seed=1)[0]
             acts = [a for s in plan if s["kind"] == "scene" for p in s["prompts"] for a in p["scene"]["acts"]]
@@ -125,6 +126,12 @@ class ShippedTest(unittest.TestCase):
         gestures, wins = round_of("near-misses")
         self.assertLessEqual({"tap", "pinch", "middle", "nogo"}, set(gestures))
         self.assertGreater(gestures.count("nogo"), len(gestures) / 2, "near-misses: mostly near misses")
+        gestures, wins = round_of("three-finger")
+        self.assertLessEqual({"tri", "tri-scroll", "tap", "middle"}, set(gestures))
+        self.assertGreater(gestures.count("tri") + gestures.count("tri-scroll"), len(gestures) / 2)
+        gestures, wins = round_of("fists")
+        self.assertLessEqual({"fist", "pinch", "card", "touch", "nogo"}, set(gestures))
+        self.assertGreater(gestures.count("fist"), len(gestures) / 2)
 
     def test_same_plan_for_a_seed(self):
         script = session.load_script(session.bounty_script("index-taps"))

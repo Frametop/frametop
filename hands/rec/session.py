@@ -1075,6 +1075,10 @@ GESTURES = {
     "sweep": ("cyan", "", "Sweep it aside: open hand on its edge, palm leading"),
     "pull": ("green", "", "Open hand out to it, then close a fist and pull it to you"),
     "push": ("cyan", "", "Push it away: open hand, palm flat against it"),
+    # Three-finger pinches (2026-10-23, user: "middle finger + index + thumb taps regularly get missed and
+    # registered as just index finger + thumb taps"; v20a reads a card grab's middle tip 25 mm off the thumb)
+    "tri": ("purple", "3", "Three-finger tap: thumb to index and middle together"),
+    "tri-scroll": ("purple", "3", "Three-finger pinch, then move the hand down as if scrolling"),
     "rest": ("cyan", "", ""),
 }
 SCENE_LOOKS = re.compile(r"^(plain|grid:[1-6]x[1-6]|list:([1-9]|10))$")

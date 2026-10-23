@@ -119,6 +119,7 @@ build "$root/power/build.sh"
 
 step "7/12 multi-screen desktop (ft-screens), its keyboard (Full Keyboard), Frametop Input Settings, Display Settings, Remote Displays, and the Tour"
 build "$root/screens/build.sh"
+build "$root/layout/countdown/build.sh"  # visible three-second reset countdown
 build "$root/stream/build.sh"  # ft-stream: remote displays (Frametop Remote Displays)
 build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKeid (keyboard/FRAMETOP.md)
 "$root/desktops.sh" install >/dev/null

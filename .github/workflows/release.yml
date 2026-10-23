@@ -60,6 +60,7 @@ jobs:
             test -x /src/frametop/hands/build/ft-camd
             test -x /src/frametop/hands/build/ft-hands
             test -x /src/frametop/hands/rec/build/ft-handpanel
+            test -x /src/frametop/layout/countdown/build/ft-reset-timer
             /src/frametop/hands/models.sh check
             test -x /src/frametop/pack/build/distrobox/install
             /src/frametop/gaze/tracker/build/venv/bin/python -c "import numpy, cv2"

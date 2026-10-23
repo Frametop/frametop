@@ -56,7 +56,8 @@ HOST_GLIBC = (2, 39)  # the newest the pointer driver may need (pointer/driver/b
 PACKAGES = {
     "deckard-steamvr-rel": "the 3D mouse on the dashboard, on SteamVR Settings, and on a SteamVR "
                            "window's grab bar; picking up a controller; mapped controller buttons; gaze, "
-                           "and a gaze calibration with Track Dominant Eye Only on",
+                           "and a gaze calibration with Track Dominant Eye Only on; the reset countdown stays "
+                           "visible while turning, accepts no pointer input, and disappears before reset",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
             "after a desktop restart; floating a window; no blur behind the taskbar's menus; "
             "logging out with a Deskflow client connected (6.2.5 crashes there, and the session's "

@@ -6,7 +6,9 @@ features. No window, no container.
   tour/test/tour-test.py
 """
 import json
+import configparser
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -128,9 +130,13 @@ none = ft_tour.features(os.path.join(tmp, "empty"), conf={})
 everything = ft_tour.features(units, conf={"POINTER_GAZE": "1", "POINTER_HANDS": "1"})
 bare, full = ft_tour.pages(none, rows), ft_tour.pages(everything, rows)
 ids = [p["id"] for p in full]
-check("pages, in order", ids, ["welcome", "screens", "floating", "frunner", "keys", "gaze", "hands", "hands-far",
+check("pages, in order", ids, ["welcome", "screens", "recenter", "floating", "frunner", "keys", "gaze", "hands", "hands-far",
                                "pinning", "profiles", "pause", "settings", "more", "done"])
 check("the same pages with nothing installed", [p["id"] for p in bare], ids)
+launcher = configparser.ConfigParser(interpolation=None)
+launcher.read(os.path.join(TOUR, "ft-recenter-help.desktop"))
+check("controls guide launcher opens the recenter page through the existing wrapper",
+      shlex.split(launcher["Desktop Entry"]["Exec"]), ["env", "FT_TOUR_PAGE=recenter", "@REPO@/tour/ft-tour"])
 for pages in (bare, full):
     for p in pages:
         check(f"page {p['id']}: has a title, intro, icon",
@@ -152,6 +158,8 @@ check("gaze not installed: no gaze pinch rows", "With gaze mode on" in by["hands
 check("hands not installed: says how, far too", "hands/run.sh install" in by["hands-far"]["intro"], True)
 check("no voice: no dictation row", any("Dictation" in r[0] for r in by["more"]["rows"]), False)
 by = {p["id"]: p for p in full}
+check("recenter page offers settings only, without changing the layout",
+      all(a["id"].startswith(("input:", "display:")) for a in by["recenter"]["actions"]), True)
 check("gaze installed: a target", by["gaze"]["practice"], "gaze")
 check("gaze on: no note", by["gaze"].get("note"), None)
 check("gaze rows: Meta+J and Meta+K first", by["gaze"]["rows"][:2], ["Clicking", ["Tap Meta+J, or Meta+K",

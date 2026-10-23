@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Frametop Controls Guide
+GenericName=Hands, screens and recentering
+Comment=How to point, switch screens, recenter with the countdown, and open menus
+Exec=env FT_TOUR_PAGE=recenter "@REPO@/tour/ft-tour"
+Icon=crosshairs
+Categories=Utility;
+Keywords=help;guide;hands;pointer;recenter;recentre;countdown;lazy susan;frametop;

@@ -176,6 +176,9 @@ HAND_INTERACTIONS = [
     ("POINTER_RAY_RAISED", False, "30", "Laser", "No laser for a low hand",
      "A hand's laser shows only with the knuckles within 30 cm under your eyes, and goes past 40 cm. "
      "Off: a low hand points too. Hands typing on a keyboard never do."),
+    ("POINTER_RAY_FORWARD", False, "25", "Laser", "No laser for a hand near the body",
+     "A hand's laser shows only with the knuckles at least 25 cm in front of your eyes, and goes under 20 cm. "
+     "Off: a hand lowered toward you keeps its laser. Hands typing on a keyboard never have one."),
     ("POINTER_RAY_FIST_CURL", True, "1.1", "Laser", "No laser or clicks in a fist",
      "Closing the hand drops its laser, and a pinch made while the hand closes into a fist doesn't click."),
     ("POINTER_PINCH_NO_RAY", False, "1", "Laser", "Pinch with no laser clicks at the pointer",

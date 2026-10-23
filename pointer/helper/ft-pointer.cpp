@@ -1130,6 +1130,11 @@ int main() {
         // typing guard instead; 30 until 2026-10-19, when aiming at a keyboard below lost the laser)
         rayParams.raisedShow = std::clamp(ConfDouble(conf, "POINTER_RAY_RAISED", 0), 0.0, 100.0) / 100;
         rayParams.raisedHide = rayParams.raisedShow > 0 ? rayParams.raisedShow + 0.10 : 0;
+        // ...and only held out in front: its knuckles at least this far ahead of the eyes, gone 5 cm
+        // closer (cm; 0, the default: a hand lowered toward the body keeps its laser, and a hand typing
+        // is held back by the typing guard; 25 until 2026-10-22, when a low hand lost the laser)
+        rayParams.forwardShow = std::clamp(ConfDouble(conf, "POINTER_RAY_FORWARD", 0), 0.0, 100.0) / 100;
+        rayParams.forwardHide = rayParams.forwardShow > 0 ? std::max(0.0, rayParams.forwardShow - 0.05) : 0;
         rayParamsNew = true;
         rayTap = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP", 0.3), 0.0, 2.0);
         rayTapDeadzone = std::clamp(ConfDouble(conf, "POINTER_RAY_TAP_DEADZONE", 6.0), 0.0, 30.0);

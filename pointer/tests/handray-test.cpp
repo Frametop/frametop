@@ -157,6 +157,31 @@ void TestLowHand() {
           "why: %s", lapRay.Why().c_str());
 }
 
+// The forward test off (the pointer helper's default since 2026-10-22): a hand lowered toward the body
+// keeps its ray; on, it goes.
+void TestHandNearBody() {
+    auto close = [](double tt) {
+        HandFrame f = Pointing(tt);
+        f.knuckle.y = 1.1, f.knuckle.z = -0.12;
+        f.wrist.y = 1.08, f.wrist.z = -0.04;
+        return f;
+    };
+    for (bool on : {false, true}) {
+        Params p;
+        p.raisedShow = p.raisedHide = 0;
+        if (!on) p.forwardShow = p.forwardHide = 0;
+        Body b;
+        HandRay r(1);
+        r.SetParams(p);
+        double t = 0;
+        CHECK(RunUntil(r, b, t, 1, true, Pointing) >= 0, "a pointing hand shows (forward %s)", on ? "on" : "off");
+        t += kFrame;
+        const bool hid = RunUntil(r, b, t, 1, false, close) >= 0;
+        CHECK(hid == on, "lowered 12 cm ahead of the eyes: %s (forward %s, why: %s)", hid ? "hidden" : "shown",
+              on ? "on" : "off", r.Why().c_str());
+    }
+}
+
 void TestPalmTowardYou() {
     Body b;
     HandRay r(1);
@@ -517,6 +542,7 @@ int main() {
     TestGateShowHide();
     TestLapPinch();
     TestLowHand();
+    TestHandNearBody();
     TestPalmTowardYou();
     TestTrackingAndControllerAndNear();
     TestHold();

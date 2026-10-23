@@ -64,7 +64,13 @@
 //               just not if they are typing", which its
 //               typing guard holds back)
 //   forward     K at least forwardShow (0.25 m) ahead   forwardHide (0.20 m)
-//               of the eyes, along the torso's yaw
+//               of the eyes, along the torso's yaw (0:
+//               off; the pointer helper turns it off:
+//               user, 2026-10-22, a hand lowered toward
+//               the body lost its laser, "the laser
+//               should be dismissed if it detects hands
+//               on a keyboard but not just the hands
+//               going low")
 //   palm away   palm normal . D >= palmShow (0.3)       palmHide (0.0): palm toward you is reserved
 //   forearm     elbow-to-wrist pitch >= forearmShow     forearmHide (-50 deg); only with an elbow
 //               (-35 deg)                               of elbowConfMin (0.5) confidence
@@ -329,7 +335,7 @@ inline Tests Evaluate(const Params &p, const Body &body, const HandFrame &f, con
         show = show && s, keep = keep && k;
     };
     if (p.raisedShow > 0) test(r.below <= p.raisedShow, r.below <= std::max(p.raisedShow, p.raisedHide), "raised");
-    test(r.ahead >= p.forwardShow, r.ahead >= p.forwardHide, "forward");
+    if (p.forwardShow > 0) test(r.ahead >= p.forwardShow, r.ahead >= std::min(p.forwardShow, p.forwardHide), "forward");
     test(r.palm >= p.palmShow, r.palm >= p.palmHide, "palm");
     if (r.forearmUsed) test(r.forearm >= p.forearmShow, r.forearm >= p.forearmHide, "forearm");
     test(r.pitch >= p.pitchMin && r.pitch <= p.pitchMax, r.pitch >= p.pitchMinHide && r.pitch <= p.pitchMaxHide, "aim");

@@ -124,6 +124,25 @@ int main() {
         link.poll();
         require(link.take_request() == FrametopLink::Request::Hide, "hide");
 
+        // A fingertip's pokes, from ft-screens through the relay.
+        relay.say("kb poke right press 0.1200 1.0500 -0.6500");
+        relay.say("kb poke left end");
+        relay.say("kb poke left up");
+        relay.say("kb poke right hover");        // a hover says where
+        relay.say("kb poke middle hover 0 0 0"); // no such hand
+        relay.say("kb poke right type 0 0 0");   // no such verb
+        relay.say("kb poke right move 0 0 nan");
+        relay.say("kb poke right move 0 0 0 junk");
+        link.poll();
+        auto pokes = link.take_pokes();
+        require(pokes.size() == 3, "three good pokes, the rest dropped");
+        require(pokes[0].hand == 1 && pokes[0].verb == HandPoke::Verb::Press && pokes[0].point &&
+                    (*pokes[0].point)[1] == 1.05,
+                "the press and its point");
+        require(pokes[1].hand == 0 && pokes[1].verb == HandPoke::Verb::End && !pokes[1].point, "an end");
+        require(pokes[2].verb == HandPoke::Verb::Up && !pokes[2].point, "an up without a point");
+        require(link.take_pokes().empty(), "taken once");
+
         // Silence: the word goes stale, and typing goes back to Steam.
         relay.say("kb 1 1");
         link.poll();

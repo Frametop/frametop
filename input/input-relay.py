@@ -123,7 +123,9 @@ this user, and gets "kb DESKTOP SURFACE" back: whether typing goes to the deskto
 the screens show with Frametop not paused (it may show over them with the dashboard closed).
 The relay tells ft-screens "fullkb OPEN", and while that's fresh ft-screens passes its
 "vrkeyboard" commands on as "kbpanel show|hide", which the relay sends Full Keyboard as "kb
-show|hide". Its typing for the desktop comes as "kbkey CODE 0|1" and "kbtext TEXT", only from
+show|hide". A fingertip on its panel comes from ft-screens as "kbpoke SIDE VERB [x y z]" and goes
+to it as "kb poke SIDE VERB [x y z]", so its keys take hands as our screens do, with no laser.
+Its typing for the desktop comes as "kbkey CODE 0|1" and "kbtext TEXT", only from
 the address that said hello: they go in order with dictation's typing, keys as they are (a held
 modifier doesn't hold them back), text through the desktop's layout like dictation's, and
 unlogged. Its keys come up where they went down, and when it stops (no hello for 3 seconds),
@@ -338,6 +340,8 @@ KXKBRC = os.path.expanduser("~/.config/frametop/kxkbrc")
 LAYOUT_CODES = (*range(2, 54), 57, 86)
 LAYOUT_MODS = ((), (KEY_LEFTSHIFT,), (KEY_RIGHTALT,), (KEY_LEFTSHIFT, KEY_RIGHTALT))
 TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to the next key
+KB_POKES = ("hover", "press", "move", "up", "end")  # a fingertip on Full Keyboard (ft-screens' "kbpoke")
+KB_COORD = re.compile(r"-?\d{1,3}(\.\d{1,6})?")
 TYPE_MAX = 20000  # characters waiting to be typed, at most
 VR_KEYBOARD_MODES = ("always", "no_keyboard", "button", "never")  # when Frametop's keyboard opens
 HELPER = "\0ft_pointer_helper"
@@ -1864,6 +1868,14 @@ def main():
                     # "vrkeyboard" commands while Full Keyboard is there.
                     if uid == os.getuid():
                         kb_tell(now, f"kb {words[1]}")
+                    continue
+                if cmd == "kbpoke":
+                    # From ft-screens (unbound): a fingertip on Full Keyboard's panel, "kbpoke
+                    # <left|right> <hover|press|move|up|end> [x y z]" (its point in the standing
+                    # universe), passed on as "kb poke ...". It presses keys, so only from this user.
+                    if (uid == os.getuid() and len(words) in (3, 6) and words[1] in ("left", "right")
+                            and words[2] in KB_POKES and all(KB_COORD.fullmatch(w) for w in words[3:])):
+                        kb_tell(now, "kb poke " + " ".join(words[1:]))
                     continue
                 if cmd == "calpanel" and len(words) == 2:
                     # From the pointer helper (see the top). Only from this user: it takes Enter.

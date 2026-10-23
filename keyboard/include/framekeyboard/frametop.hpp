@@ -1,9 +1,13 @@
 #pragma once
 
 #include "input.hpp"
+#include <array>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace framekeyboard {
 // Frametop integration (FRAMETOP.md). Frametop runs Full Keyboard as its keyboard: its
@@ -14,10 +18,21 @@ namespace framekeyboard {
 // address. We send "kbhello OPEN" (the panel is up for Frametop 0|1) every second and on a
 // change, "kbkey CODE 0|1" and "kbtext TEXT". It sends "kb DESKTOP SURFACE" (typing goes
 // to the desktop 0|1, the desktop's screens show and Frametop isn't paused 0|1) in reply
-// and on a change, and "kb show|hide|toggle".
+// and on a change, "kb show|hide|toggle", and "kb poke SIDE VERB [x y z]" (a fingertip on
+// the panel, from ft-screens' hand input: its point in the standing universe).
 // Only messages from that name and this user count, and typing goes there only while
 // its word is fresh, so a stopped relay never leaves desktop typing addressed to a name
 // another process could take.
+// A fingertip on the panel: ft-screens' hand input decides hovers and presses, as on its
+// own screens, so a hand types here with no laser.
+struct HandPoke {
+    enum class Verb { Hover, Press, Move, Up, End };
+    std::size_t hand{}; // 0 left, 1 right
+    Verb verb{};
+    std::optional<std::array<double, 3>> point;
+};
+std::optional<HandPoke> parse_hand_poke(const std::string& text);
+
 class FrametopLink {
   public:
     using Clock = std::function<double()>;
@@ -32,6 +47,7 @@ class FrametopLink {
     bool desktop() const { return fresh() && desktop_; }
     bool surface() const { return fresh() && surface_; }
     Request take_request();
+    std::vector<HandPoke> take_pokes() { return std::exchange(pokes_, {}); }
     // Whether the panel is up for Frametop: said in the next hello, at once on a change.
     void set_open(bool open);
     bool send(const std::string& message);
@@ -45,6 +61,7 @@ class FrametopLink {
     double heard_{-1e9}, hello_{-1e9};
     bool desktop_{}, surface_{}, open_{};
     Request request_{Request::None};
+    std::vector<HandPoke> pokes_;
 };
 
 // Desktop typing goes to the relay (which types it on the desktop's seat, in the desktop's

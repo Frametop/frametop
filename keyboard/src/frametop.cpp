@@ -1,5 +1,7 @@
 #include "framekeyboard/frametop.hpp"
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -22,6 +24,48 @@ sockaddr_un abstract(const std::string& name, socklen_t& length) {
     return address;
 }
 } // namespace
+
+std::optional<HandPoke> parse_hand_poke(const std::string& text) {
+    char side[8]{}, verb[8]{};
+    double x{}, y{}, z{};
+    int end = 0;
+    const int count = std::sscanf(text.c_str(), "kb poke %7s %7s %n%lf %lf %lf %n", side, verb, &end, &x,
+                                  &y, &z, &end);
+    if (count < 2 || end != static_cast<int>(text.size()) || (count != 2 && count != 5)) {
+        return std::nullopt;
+    }
+    HandPoke poke;
+    if (std::strcmp(side, "left") == 0) {
+        poke.hand = 0;
+    } else if (std::strcmp(side, "right") == 0) {
+        poke.hand = 1;
+    } else {
+        return std::nullopt;
+    }
+    using Verb = HandPoke::Verb;
+    static constexpr std::pair<const char*, Verb> verbs[] = {{"hover", Verb::Hover},
+                                                             {"press", Verb::Press},
+                                                             {"move", Verb::Move},
+                                                             {"up", Verb::Up},
+                                                             {"end", Verb::End}};
+    const auto found = std::find_if(std::begin(verbs), std::end(verbs),
+                                    [&](const auto& v) { return std::strcmp(verb, v.first) == 0; });
+    if (found == std::end(verbs)) {
+        return std::nullopt;
+    }
+    poke.verb = found->second;
+    if (count == 5) {
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+            return std::nullopt;
+        }
+        poke.point = std::array<double, 3>{x, y, z};
+    }
+    // A hover, press or move says where; an up may, an end doesn't.
+    if (!poke.point && poke.verb != Verb::Up && poke.verb != Verb::End) {
+        return std::nullopt;
+    }
+    return poke;
+}
 
 FrametopLink::FrametopLink(std::string relay_name, Clock clock)
     : relay_(std::move(relay_name)), clock_(clock ? std::move(clock) : Clock([] {
@@ -109,6 +153,10 @@ void FrametopLink::poll() {
             request_ = Request::Hide;
         } else if (text == "kb toggle") {
             request_ = Request::Toggle;
+        } else if (text.rfind("kb poke ", 0) == 0) {
+            if (auto poke = parse_hand_poke(text); poke && pokes_.size() < 64) {
+                pokes_.push_back(*poke);
+            }
         } else if (std::sscanf(text.c_str(), "kb %d %d", &desktop, &surface) == 2) {
             desktop_ = desktop != 0;
             surface_ = surface != 0;

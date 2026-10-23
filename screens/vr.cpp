@@ -1267,6 +1267,17 @@ void SendPointer(const std::string &msg) {
            socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
 }
 
+// To the input relay (@frametop_relay), from an unbound socket: hand pokes on Full Keyboard.
+void SendRelay(const std::string &msg) {
+    static const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    const char name[] = "frametop_relay";
+    std::memcpy(addr.sun_path + 1, name, sizeof name - 1);
+    sendto(fd, msg.data(), msg.size(), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&addr),
+           socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
+}
+
 // A new panel: the pointer helper reads SteamVR's list of panels only every 20 s, so it's told
 // at once ("overlay <key>"), or the mouse couldn't click a menu until then.
 void AnnounceOverlay(const char *key) { SendPointer(std::string("overlay ") + key); }
@@ -2454,6 +2465,11 @@ void WantHz(bool near) {
 // log says so.
 // No fist grabs, stretch, throws, flicks, pushes or two-finger scroll there (handinput's
 // Panel::foreign). Only while ft-screens runs (its desktop).
+// Full Keyboard's panel (org.framekeyboard.panel) is the exception: its keys take the hand itself,
+// as our screens do, with no laser (user, 2026-10-22: "tapping like on our displays"). The same
+// verbs go to the input relay as "kbpoke <left|right> <hover|press|move|up|end> [x y z]", the
+// fingertip's point on the panel in the standing universe, and the relay passes them on to it
+// (keyboard/FRAMETOP.md). Grabs there do nothing.
 constexpr int kSteamIndex = 1000;      // near input's panel indices from here on are SteamVR's
 constexpr double kSteamBack = 0.10;    // the laser starts this far in front (its small controls float a few cm out)
 constexpr double kSteamBar = 0.075;    // a floating panel's grab bar under its bottom edge (LAYOUT_GRAB_OFFSET)
@@ -2596,7 +2612,21 @@ void SteamInputPanels(std::vector<handinput::Panel> &panels) {
     }
 }
 
+constexpr char kFullKeyboard[] = "org.framekeyboard.panel";
+
 void SendTouch(int side, const char *verb, const Mat *laser, const std::string &key = "") {
+    if (g_steamTouch[side].key == kFullKeyboard) {
+        std::string msg = std::string("kbpoke ") + (side ? "right " : "left ") + (std::strcmp(verb, "grab") ? verb : "end");
+        if (laser) {
+            // (the laser's origin is kSteamBack out of the panel's front, along its z)
+            char b[96];
+            std::snprintf(b, sizeof b, " %.4f %.4f %.4f", laser->m[0][3] - kSteamBack * laser->m[0][2],
+                          laser->m[1][3] - kSteamBack * laser->m[1][2], laser->m[2][3] - kSteamBack * laser->m[2][2]);
+            msg += b;
+        }
+        SendRelay(msg);
+        return;
+    }
     std::string msg = std::string("touch ") + (side ? "right " : "left ") + verb;
     if (laser) {
         double q[4];
@@ -2645,7 +2675,14 @@ bool SteamEvent(const handinput::Event &e) {
         case handinput::Event::Release: {
             steampanels::FromPixels(f.width, f.height, e.x, e.y, &u, &v);
             const Mat l = steampanels::Touch(f.pose, u, v, kSteamBack);
-            if (t.panel != e.panel) t = SteamTouch{}, t.panel = e.panel, t.key = sp->key;
+            if (t.panel != e.panel) {
+                // between Full Keyboard and the laser's panels: the one left lets go (no handover)
+                if (t.st != SteamTouch::St::None && (t.key == kFullKeyboard) != (sp->key == kFullKeyboard)) {
+                    if (t.st == SteamTouch::St::Down || t.st == SteamTouch::St::Grab) SendTouch(e.side, "up", nullptr);
+                    SendTouch(e.side, "end", nullptr);
+                }
+                t = SteamTouch{}, t.panel = e.panel, t.key = sp->key;
+            }
             if (e.type == handinput::Event::Press) {
                 SendTouch(e.side, "press", &l, sp->key);
                 t.st = SteamTouch::St::Down;
@@ -2661,6 +2698,7 @@ bool SteamEvent(const handinput::Event &e) {
             break;
         }
         case handinput::Event::GrabStart: {
+            if (sp->key == kFullKeyboard) break;   // (its own grip moves it)
             t = SteamTouch{};
             t.panel = e.panel, t.key = sp->key, t.panel0 = f.pose, t.w0 = f.width, t.h0 = f.height;
             t.resize = e.zone == handinput::Zone::Corner || e.zone == handinput::Zone::Tab;

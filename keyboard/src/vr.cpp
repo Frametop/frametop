@@ -350,6 +350,10 @@ class LaserDrag {
 // 4 mm along its aim in the render model), read once per device. Lasers' cursor indices are
 // small; the tips' pointers sit past them.
 constexpr unsigned touch_pointer = 0x100;
+// Fingertips, from ft-screens through the relay (FrametopLink's "kb poke"): theirs past the tips'.
+constexpr unsigned hand_pointer = 0x110;
+// A press heard nothing of this long (ft-screens stopped) is let go.
+constexpr double hand_silence = 3;
 constexpr double tip_reach = .005; // the poke point, just past the nose's surface
 class ControllerTips {
   public:
@@ -594,6 +598,17 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
     KeyHaptics feedback;
     ControllerTips tips;
     std::array<TouchPoke, 2> pokes;
+    struct HandTouch {
+        bool active{}, pressed{};
+        double x{}, y{}, heard{};
+    };
+    std::array<HandTouch, 2> hands;
+    auto end_hand = [&](std::size_t hand) {
+        if (hands[hand].active) {
+            app.cancel_pointer(hand_pointer + static_cast<unsigned>(hand));
+        }
+        hands[hand] = {};
+    };
     GrabInput grip_input;
     if (!grip_input.connect() && app.use_drag_to_move()) {
         app.report_status("Native grip unavailable; use Recenter to recover the keyboard.");
@@ -1026,6 +1041,56 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                     break;
                 case TouchEvent::Kind::None:
                     break;
+                }
+            }
+            dismiss_panel();
+        }
+        // A fingertip on the panel: ft-screens' hand input says when it hovers and presses, as on
+        // Frametop's screens, so no laser shows for it. Its point lands where it is on the panel
+        // as shown now. No haptics: there's no controller.
+        if (frametop) {
+            const bool takes =
+                lifecycle.visible() && displayed.ready() && !drag.active() && frametop->fresh();
+            for (const auto& poke : frametop->take_pokes()) {
+                auto& touch = hands[poke.hand];
+                const auto pointer = hand_pointer + static_cast<unsigned>(poke.hand);
+                if (!takes || poke.verb == HandPoke::Verb::End) {
+                    end_hand(poke.hand);
+                    continue;
+                }
+                if (poke.point) {
+                    const auto at =
+                        locate_on_panel(displayed.transform(), displayed.width(), *poke.point);
+                    touch.x = at.x, touch.y = at.y;
+                }
+                touch.active = true, touch.heard = now;
+                switch (poke.verb) {
+                case HandPoke::Verb::Hover:
+                case HandPoke::Verb::Move:
+                    app.move(pointer, touch.x, touch.y);
+                    break;
+                case HandPoke::Verb::Press:
+                    if (touch.pressed) {
+                        app.up(pointer, touch.x, touch.y);
+                    }
+                    // (false for a button, which still wants its up)
+                    app.down(pointer, touch.x, touch.y, now);
+                    touch.pressed = true;
+                    break;
+                case HandPoke::Verb::Up:
+                    if (touch.pressed) {
+                        app.up(pointer, touch.x, touch.y);
+                    }
+                    touch.pressed = false;
+                    break;
+                case HandPoke::Verb::End:
+                    break;
+                }
+            }
+            for (std::size_t hand = 0; hand < hands.size(); ++hand) {
+                if (hands[hand].active &&
+                    (!takes || (hands[hand].pressed && now - hands[hand].heard > hand_silence))) {
+                    end_hand(hand);
                 }
             }
             dismiss_panel();

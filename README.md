@@ -1,5 +1,9 @@
 # Frametop
 
+> **Personal fork:** this branch adds a visible three-second countdown, fullscreen-preserving screen reset, and an in-app **Controls guide** to upstream `v0.3.0-exp.19`. Open **Frametop Controls Guide** from the desktop app menu, or **Frametop Input Settings → Controls guide**. The guide also appears as **Recenter & controls** in Frametop Tour.
+>
+> Source, build, update, and rollback instructions: [Personal fork](docs/personal-fork.md). The upstream installation commands below install upstream Frametop; they do not install this branch.
+
 Frametop is a desktop for the Steam Frame that runs on the headset itself, with no PC. Put several monitors around you, pull app windows out to float on their own, and point with a mouse, or with your eyes.
 
 - **Screens that are real monitors.** Each KDE Plasma screen has its own resolution and shape: an ultrawide in front, portrait screens beside it. Move, resize, curve, and roll them, or pin one to your wrist or your head. They come back to your layout when the desktop starts.
@@ -64,7 +68,7 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 | Drag the roll button sideways, or scroll on it | Rolls the screen; it snaps level near straight |
 | While carrying a screen, sweep its laser across your other controller's ring, then let go | Pins it to that wrist, at its size and distance, as you hold it when you let go; it shows while you see its front. Grab its bar to adjust it (it stays pinned); sweep across the ring again to take it off |
 | Set a screen to On your head (Frametop Display Settings, Visibility & pins) | Pins it to your head where it is, like a HUD. Grab its bar to move it; it stays on your head |
-| Meta+Shift+R in the desktop | Puts the screens back in their layout (also in the menu as Reset Screen Layout, and mappable to a mouse button) |
+| Meta+Shift+R in the desktop | Shows a three-second countdown, then recentres existing unpinned screens around you while preserving app windows and fullscreen (also Reset Screen Layout in the menu, and mappable to a button). Open profile restores saved apps explicitly |
 | Meta+Alt+Tab, or Meta+Alt+Shift+Tab | Spins every screen and floating window around you together, like a lazy susan, so the next one on your right (or left) glides to straight ahead, with the pointer and typing going to it. Their arrangement stays the same: the room turns instead of you. Tap again to keep going; Meta+Shift+R puts the screens back. Pinned screens stay where they are |
 | Meta+Space, on any keyboard | Opens frunner, a search pill in front of you: type an app's or a remote display's name and press Enter. A running app's window spins to the front, an app that isn't running opens floating, and a remote display connects and spins to the front. Shift+Enter (or a right click) has more: a private window, a new window, docked on this screen, or one of its windows. Esc closes it. It finds your commands too. See [docs/frunner.md](docs/frunner.md) |
 | Add a command (Frametop Input Settings, Commands) | Saves a shell command of yours under a name, such as `stop-framecorder` for `killall framecorder`. Run it in the background from a controller button, a mouse button, a key combination, frunner, your voice ("run stop framecorder"), or a terminal, where the name is an alias. See [docs/commands.md](docs/commands.md) |

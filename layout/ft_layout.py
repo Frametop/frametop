@@ -69,9 +69,10 @@ is top left, then left to right.
 Usage (on the Frame host; Frametop Display Settings calls it too):
   ft-layout apply [--wait SECONDS]   arrange every screen; --wait is for desktop start:
                                      wait for the screens, skip if "auto" is off
-  ft-layout reset                    a quick reset (Meta+Shift+R, a screen's reset button, a mapped
-                                     button): open the profile in use again, as use NAME does, or
-                                     else apply
+  ft-layout reset                    recenter after the 3-second countdown (Meta+Shift+R,
+                                     screen reset button, or mapped button). With ft-screens,
+                                     move unpinned panels only; preserve apps and streams.
+                                     Use NAME explicitly to restore its full profile.
   ft-layout capture                  save the current arrangement as the custom layout
   ft-layout save NAME                save it as a named layout too, and use that; with the
                                      desktop's apps and hidden screens, as a profile
@@ -147,6 +148,8 @@ REMOTE_PIXELS_PER_METRE = 2400  # a new remote display's width in VR (5120 px: 2
 GAMESTREAM_PORT = 47989  # a host's HTTP port, where ft-stream reaches it
 WEB_UI_PORT = 47990  # Vibepollo's Web UI: a host answers there when it's up
 STREAM = os.path.join(REPO, "stream", "build", "ft-stream")
+RESET_TIMER = os.path.join(REPO, "layout", "countdown", "build", "ft-reset-timer")
+LEGACY_RESET_TIMER = os.path.expanduser("~/.local/share/frametop/local-tools/reset-countdown/ft-reset-countdown")
 
 
 def log(*args):
@@ -571,6 +574,53 @@ def apply_screens(wait=0):
         pass  # an older ft-screens
     log(f"arranged {count} screen(s)")
     return results
+
+
+def recenter_screens():
+    """Recenter existing unpinned panels without restoring apps or display state.
+
+    Named layout poses are read into this invocation only. Do not save that copy:
+    Reset must not change window state, hidden screens, or remote connections.
+    """
+    layout = load_layout()
+    name = layout.get("active") if layout.get("mode") == "custom" else None
+    if name in layout.get("layouts", {}):
+        use_named(layout, name)
+    count = screen_count(layout)
+    targets = [(i + 1, t) for i, t in enumerate(plan(layout, count))]
+    displays = remote_displays(layout)
+    targets.extend((n, t) for (n, _, d), t in zip(displays, plan_remotes(layout, count, displays))
+                   if not d.get("off") and t is not None)
+    sock = screens_socket()
+    movable = []
+    try:
+        for n, t in targets:
+            try:
+                current = parse_get(sock.ask(f"get {n}"))
+            except NoAnswer:
+                raise
+            except RuntimeError as e:
+                log(f"recenter: screen {n} unavailable; left alone ({e})")
+                continue
+            if current["hand"] != "none":
+                log(f"recenter: screen {n} is pinned; left alone")
+                continue
+            movable.append((n, t))
+        if not movable:
+            log("recenter: no unpinned panels available")
+            return []
+        # Sample once, after the countdown and inspection, immediately before moving.
+        f = sock.ask("head").split()
+        eye, heading = tuple(map(float, f[1:4])), float(f[4])
+        results = []
+        for n, t in movable:
+            center = tuple(e + v for e, v in zip(eye, turn_yaw(t["pos"], heading)))
+            results.append(sock.ask("place %d %.4f %.4f %.4f %.3f %.3f %.3f" %
+                                    (n, *center, t["face"][0] + heading, t["face"][1], t["roll"])))
+        log(f"recentered {len(results)} panel(s); app windows and streams unchanged")
+        return results
+    finally:
+        sock.sock.close()
 
 
 def capture_screens():
@@ -1580,6 +1630,29 @@ def remote_view():
     return f"{x - left} {y - top} {w} {h} {right - left} {bottom - top}"
 
 
+def reset_countdown():
+    """Give a hand-triggered reset time to face forward, even without the optional overlay."""
+    started = time.monotonic()
+    if os.access(RESET_TIMER, os.X_OK):
+        # in-box cannot forward the host timeout to its container child. Give the
+        # helper an absolute expiry so a late container start cannot show stale UI.
+        command = [RESET_TIMER, "--deadline", f"{started + 6:.9f}"]
+        if not in_container():
+            command = [os.path.join(REPO, "scripts", "in-box"), *command]
+    else:
+        # Preserve the separately installed helper while migrating to the personal fork.
+        command = [LEGACY_RESET_TIMER]
+    try:
+        result = subprocess.run(command, timeout=6, check=False)
+        if result.returncode:
+            log("visible countdown unavailable; continuing the delayed reset")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log(f"visible countdown unavailable: {e}; continuing the delayed reset")
+    remaining = 3 - (time.monotonic() - started)
+    if remaining > 0:
+        time.sleep(remaining)
+
+
 def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(__doc__.split("Usage")[1].split("\n", 1)[1])
@@ -1658,9 +1731,27 @@ def main(argv):
                     log(f"kwin: {last}")
             open_apps(name, wait=90)  # ft-floatd starts with Plasma
         elif cmd == "reset":
-            layout = load_layout()
-            name = layout.get("active") if layout.get("mode") == "custom" else None
-            return main([argv[0], "use", name] if name in layout.get("layouts", {}) else [argv[0], "apply"])
+            # Keep a separate lock through the reset so repeated clicks cannot queue jumps.
+            with open(LOCK_PATH + ".reset-delay", "w") as reset_lock:
+                try:
+                    fcntl.flock(reset_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    log("a delayed reset is already running")
+                    return 1
+                log("resetting the layout in 3 seconds; look straight ahead")
+                reset_countdown()
+                if backend() == "screens":
+                    with open(LOCK_PATH, "w") as layout_lock:
+                        try:
+                            fcntl.flock(layout_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            log("another ft-layout is already running")
+                            return 1
+                        recenter_screens()
+                    return 0
+                layout = load_layout()
+                name = layout.get("active") if layout.get("mode") == "custom" else None
+                return main([argv[0], "use", name] if name in layout.get("layouts", {}) else [argv[0], "apply"])
         elif cmd == "remote":
             remote_command(argv[2:])
         elif cmd in ("pin", "unpin") and len(argv) >= 3:

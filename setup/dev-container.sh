@@ -31,6 +31,7 @@ packages=(
   python3-cryptography
   # Frametop Input Settings app (Kirigami, PySide6)
   python3-pyside6 kf6-kirigami kf6-qqc2-desktop-style qt6-qtwayland breeze-icon-theme plasma-breeze
+  google-noto-sans-vf-fonts  # the visible reset countdown uses the installed Noto Sans font
   # Frametop remote desktop (VNC bridge through krdp)
   krdp freerdp tigervnc-x11-server xrandr
   # Frametop Voice (voice/): glslc and the SPIR-V headers for whisper.cpp's Vulkan backend; ft-voiced

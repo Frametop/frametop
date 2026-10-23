@@ -118,7 +118,7 @@ main() {
   [ -f "$override" ] && grep -q 'Frametop' "$override" || override=
   [ -f "$native_copy" ] || native_copy=
   units=("$HOME"/.config/systemd/user/frametop-*.service)
-  for f in ft-input-settings ft-display-settings ft-tour ft-remote-displays ft-layout-reset ft-screens-toggle ft-remote-settings ft-gazeprobe; do
+  for f in ft-input-settings ft-display-settings ft-tour ft-recenter-help ft-remote-displays ft-layout-reset ft-screens-toggle ft-remote-settings ft-gazeprobe; do
     [ -e "$apps/$f.desktop" ] && entries+=("$apps/$f.desktop")
   done
   [ -e "$apps/frametop-handrec.desktop" ] && entries+=("$apps/frametop-handrec.desktop")

@@ -1,0 +1,374 @@
+{
+ "version": 1,
+ "name": "near-misses",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Near misses",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "near-misses",
+   "title": "Near misses",
+   "kind": "scene",
+   "intro": "Taps and pinches that stop just short. Bring thumb and finger about 1 cm apart without touching, or aim with a relaxed hand, so the tracker learns what isn't a click. Nothing happens when you do: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "taps-right",
+     "hands": "right",
+     "text": "Right hand pointing. Cyan: tap thumb to index. Orange with a cross: bring them about 1 cm apart|and stop there, without touching.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "nogo": 2
+      }
+     }
+    },
+    {
+     "id": "taps-left",
+     "hands": "left",
+     "text": "Left hand pointing. Cyan: tap. Orange with a cross: stop about 1 cm short.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.3,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "nogo": 2
+      }
+     }
+    },
+    {
+     "id": "relaxed",
+     "hands": "right",
+     "text": "Right hand raised and relaxed, pointing at the lit button, the thumb resting loosely by the finger.|Don't tap: just aim, as between clicks.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.0,
+      "seconds": 12,
+      "mix": {
+       "nogo": 1
+      },
+      "lit_s": 1.8,
+      "says": {
+       "nogo": "Aim at it, hand relaxed: no tap"
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the left hand"
+      }
+     ]
+    },
+    {
+     "id": "quick-taps",
+     "hands": "right",
+     "text": "Right hand. Quick taps: tap and open again straight away.|2: a double tap. Open the fingers clearly after each.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.3,
+      "seconds": 12,
+      "mix": {
+       "tap": 2,
+       "double": 1,
+       "nogo": 1
+      },
+      "lit_s": 0.9
+     }
+    },
+    {
+     "id": "pinch-right",
+     "hands": "right",
+     "text": "Right hand, reaching for the lit part. Cyan: pinch it. Orange: stop with thumb and index|about 1 cm apart, no pinch.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "every_s": 2.5,
+      "gap_s": 0.8,
+      "moves": [
+       {
+        "grab": "bar",
+        "gesture": "pinch"
+       },
+       {
+        "grab": "bar",
+        "gesture": "nogo"
+       },
+       {
+        "grab": "br",
+        "gesture": "nogo"
+       },
+       {
+        "grab": "tr",
+        "gesture": "pinch"
+       },
+       {
+        "grab": "bl",
+        "gesture": "nogo"
+       }
+      ]
+     }
+    },
+    {
+     "id": "pinch-left",
+     "hands": "left",
+     "text": "Left hand. Cyan: pinch it. Orange: stop about 1 cm short, no pinch.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "every_s": 2.5,
+      "gap_s": 0.8,
+      "moves": [
+       {
+        "grab": "bar",
+        "gesture": "nogo"
+       },
+       {
+        "grab": "bl",
+        "gesture": "pinch"
+       },
+       {
+        "grab": "tl",
+        "gesture": "nogo"
+       },
+       {
+        "grab": "bar",
+        "gesture": "nogo"
+       }
+      ]
+     }
+    },
+    {
+     "id": "middle",
+     "hands": "right",
+     "text": "Right hand pointing. Purple: middle tap, thumb to middle fingertip. Orange with a cross:|thumb and middle about 1 cm apart, no tap.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "middle": 1,
+       "nogo": 2
+      }
+     }
+    },
+    {
+     "id": "both-hands",
+     "hands": "both",
+     "text": "Both hands up and pointing. Each lit button says L or R: tap it with that hand,|or stop short where it's orange.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.4,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "nogo": 1
+      },
+      "hands": [
+       "left",
+       "right"
+      ]
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace. Orange: hover just short of the button. Cyan: tap it as often as you like.|Move the arm while you do: straight, bent, higher and lower.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 4,
+      "seconds": 16,
+      "mix": {
+       "nogo": 2,
+       "tap": 1
+      },
+      "lit_s": 4,
+      "says": {
+       "nogo": "Your own pace: hover just short of it",
+       "tap": "Your own pace: tap it now and then"
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -5,6 +5,7 @@
 #                                # "Native Desktop" for the stock SteamOS desktop
 #        desktops.sh uninstall   # give the launcher back the stock SteamOS desktop
 #        desktops.sh screens N   # set the default screen count in ~/.config/frametop.conf
+#        desktops.sh autostart on|off|status  # start the desktop whenever SteamVR starts (and so at boot)
 #        desktops.sh remote on|off|info  # VNC access over the tailnet (applies on next start)
 #        desktops.sh relay install|uninstall|status|log  # input relay service (see input/input-relay.py)
 # start without a count uses the Frame's config. FT_WIDTH, FT_HEIGHT, FT_PHYS_WIDTH pass through.
@@ -20,6 +21,8 @@ override=.local/share/applications/deckard-nested-desktop.desktop
 native_copy=.local/share/applications/native-deckard-nested-desktop.desktop
 stock=/usr/share/applications/deckard-nested-desktop.desktop
 log=/tmp/frametop-session.log
+session_src=$root/session  # templates are read here, on the PC when run from one
+autostart_unit=frametop-autostart.service
 # Bracketed first letter so pgrep/pkill never match the ssh shell running them.
 match='[v]r-overlay-key frametop '
 # Is either backend's desktop running? (gamescope, or ft-screens)
@@ -50,11 +53,15 @@ else
   rm -f ~/$native_copy; echo 'no $stock: no Native Desktop entry' >&2
 fi
 [ -f ~/.config/frametop.conf ] || cp $session/frametop.conf.example ~/.config/frametop.conf
-echo \"installed ~/$override\"; grep ^Exec= ~/$override; echo; cat ~/.config/frametop.conf" ;;
+echo \"installed ~/$override\"; grep ^Exec= ~/$override; echo; cat ~/.config/frametop.conf"
+    # Start with SteamVR: always enabled, and it does nothing unless AUTOSTART=1 (session/autostart.sh).
+    fill_template "$session_src/$autostart_unit" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$autostart_unit"
+    "$frame" --host "systemctl --user daemon-reload; systemctl --user enable --quiet $autostart_unit" ;;
   uninstall)
     # Also what the session puts in place at each start: Launch as Standalone's app copies and
     # the title bar decoration (float/ft_apps.py, decoration/).
     "$frame" --host "rm -f ~/$override ~/$native_copy
+systemctl --user disable $autostart_unit 2>/dev/null; rm -f ~/.config/systemd/user/$autostart_unit; systemctl --user daemon-reload
 rm -rf ~/.local/share/frametop/apps ~/.local/share/kwin/decorations/kwin4_decoration_qml_frametop
 rmdir ~/.local/share/frametop 2>/dev/null; echo 'removed; the launcher uses the stock desktop again'" ;;
   screens)
@@ -62,6 +69,22 @@ rmdir ~/.local/share/frametop 2>/dev/null; echo 'removed; the launcher uses the 
     "$frame" --host "set -e; f=~/.config/frametop.conf
 [ -f \$f ] || cp $session/frametop.conf.example \$f
 sed -i 's/^SCREENS=[0-9]*/SCREENS=$2/' \$f; grep ^SCREENS \$f" ;;
+  autostart)
+    # The same AUTOSTART key Display Settings' Start with SteamVR switch sets.
+    case ${2:-status} in
+      on|off)
+        v=$([ "$2" = on ] && echo 1 || echo 0)
+        "$frame" --host "set -e; f=~/.config/frametop.conf
+[ -f \$f ] || cp $session/frametop.conf.example \$f
+if grep -q '^AUTOSTART=' \$f; then sed -i 's/^AUTOSTART=[^ #]*/AUTOSTART=$v/' \$f; else echo 'AUTOSTART=$v' >> \$f; fi
+grep ^AUTOSTART \$f
+systemctl --user is-enabled --quiet $autostart_unit || echo 'frametop-autostart.service is not installed: run desktops.sh install'" ;;
+      status)
+        "$frame" --host "grep ^AUTOSTART ~/.config/frametop.conf 2>/dev/null || echo 'AUTOSTART not set (off)'
+echo \"$autostart_unit: \$(systemctl --user is-enabled $autostart_unit 2>/dev/null || echo not installed)\"
+journalctl --user -u $autostart_unit --no-pager -o cat -n 3" ;;
+      *) echo "usage: $0 autostart on|off|status" >&2; exit 2 ;;
+    esac ;;
   remote)
     case ${2:-info} in
       on|off)
@@ -112,5 +135,5 @@ $running && { echo 'still running'; exit 1; } || echo 'stopped (forced)'" ;;
   restart) "$0" stop; sleep 3; exec "$0" start ${screens:+"$screens"} ;;
   status) "$frame" --host "if $running; then pgrep -af '$match|[m]d-screens --socket' | cut -c1-120; else echo 'not running'; fi" ;;
   log) "$frame" --host "grep -vE '^\s*$' $log | tail -n ${2:-40}" ;;
-  *) echo "usage: $0 start [screens] | stop | restart | status | log [lines] | install | uninstall | screens N | remote on|off|info | relay install|uninstall|status|log" >&2; exit 2 ;;
+  *) echo "usage: $0 start [screens] | stop | restart | status | log [lines] | install | uninstall | screens N | autostart on|off|status | remote on|off|info | relay install|uninstall|status|log" >&2; exit 2 ;;
 esac

@@ -1134,6 +1134,31 @@ Kirigami.ApplicationWindow {
                                 : "On"
                     }
 
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Startup" }
+
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Frametop desktop:"
+                        text: "Start with SteamVR"
+                        checked: backend.autostart
+                        enabled: backend.autostartInstalled || backend.autostart
+                        onToggled: {
+                            backend.setAutostart(checked)
+                            checked = Qt.binding(() => backend.autostart)
+                        }
+                    }
+                    Controls.Label {
+                        text: backend.autostartInstalled
+                              ? "The desktop starts by itself whenever SteamVR starts. The Frame starts SteamVR when it "
+                                + "boots, so this includes boot, and it brings the desktop back after a SteamVR restart. "
+                                + "Closing the desktop keeps it closed until SteamVR starts again."
+                              : "The service that does this (frametop-autostart) isn't installed: run ./install.sh again, "
+                                + "or desktops.sh install."
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
+
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Sleep" }
 
                     Controls.Switch {

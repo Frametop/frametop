@@ -23,8 +23,9 @@ the dev container:
     Remote Displays (remote-displays/); a button opens it.
   - Power: how long the headset can go unused before ft-powerd turns its displays off
     (DISPLAY_OFF_MIN; the service's state comes from its control socket, @ft_powerd),
-    and whether the Frame stays awake while plugged in, which is Steam's own setting
-    (steam_settings.py; the value from before is kept as STEAM_SLEEP_AC_BEFORE).
+    whether the Frame stays awake while plugged in, which is Steam's own setting
+    (steam_settings.py; the value from before is kept as STEAM_SLEEP_AC_BEFORE), and whether
+    the desktop starts with SteamVR (AUTOSTART, session/autostart.sh).
 Settings go to ~/.config/frametop.conf and ~/.config/frametop-layout.json. Anything
 that touches SteamVR runs layout/ft-layout on the host.
 Launch with display-settings/ft-display-settings (host wrapper).
@@ -68,6 +69,7 @@ SCALES = [0.75, 1.0, 1.25, 4 / 3, 1.5, 1.75, 2.0]
 NOTIFY_FORWARD = ("auto", "on", "off")  # session/ft-notifyfwd; frametop.conf's NOTIFY_FORWARD
 DASHBOARD_APPS = ("steamvr", "frametop")  # float/ft-dashroute; frametop.conf's DASHBOARD_APPS
 NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tmp is the host's)
+AUTOSTART_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-autostart.service")
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
 
@@ -146,7 +148,8 @@ class Backend(QObject):
         return {"dashboardApps": dash if dash in DASHBOARD_APPS else "steamvr", "floatSlots": floats,
                 "screens": num("SCREENS", 2, int), "width": num("WIDTH", 1920, int),
                 "height": num("HEIGHT", 1080, int), "physWidth": num("PHYS_WIDTH", 1.6),
-                "notifyForward": notify if notify in NOTIFY_FORWARD else "off"}
+                "notifyForward": notify if notify in NOTIFY_FORWARD else "off",
+                "autostart": conf.get("AUTOSTART", "0") == "1"}
 
     def _check_running(self):
         # The session's own Wayland socket (host processes' environments aren't readable
@@ -439,6 +442,22 @@ class Backend(QObject):
         if mode in NOTIFY_FORWARD:
             write_conf_value("NOTIFY_FORWARD", mode)
             self.changed.emit()
+
+    # --- Start with SteamVR (session/autostart.sh, frametop-autostart.service) ---
+    @Property(bool, notify=changed)
+    def autostart(self):
+        return self._conf()["autostart"]
+
+    @Property(bool, notify=changed)
+    def autostartInstalled(self):
+        """desktops.sh install writes the unit; the home folder is the same in the container."""
+        return os.path.exists(AUTOSTART_UNIT)
+
+    @Slot(bool)
+    def setAutostart(self, on):
+        """The unit reads AUTOSTART each time SteamVR starts: nothing to enable or restart."""
+        write_conf_value("AUTOSTART", "1" if on else "0")
+        self.changed.emit()
 
     # --- apps from the SteamVR dashboard's Launch a program list (float/ft-dashroute) ---
     @Property(str, notify=changed)

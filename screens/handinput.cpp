@@ -295,6 +295,7 @@ const char *ControlName(Control c) {
         case Control::Dock: return "the dock button";
         case Control::Close: return "the close button";
         case Control::Reset: return "the reset button";
+        case Control::Pin: return "the pin button";
         default: return "nothing";
     }
 }
@@ -1115,7 +1116,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     // off the content and its buttons (a hand reaching for the bar or a corner): counted, logged
     // once, no poke
     Side::Attempt &a = sd.attempt;
-    const bool button = ctl == Control::Curve || ctl == Control::Reset || ctl == Control::Dock || ctl == Control::Close;
+    const bool button = PressableButton(ctl);
     if (crossed && !a.on && !over && !button) {
         if (sd.below == 1) {
             ++stats.offContent;

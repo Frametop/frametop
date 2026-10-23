@@ -4653,6 +4653,27 @@ Panel LivePanel() {
     return p;
 }
 
+// The pin button (2026-10-23), left of the reset button as vr.cpp's ControlUV puts it (gap: a button's width
+// or more): a poke on it presses it, not the reset button next to it, and a poke on the reset button is still that.
+void TestPinButton() {
+    Panel p = LivePanel();
+    const double chrome = 0.057, grip = 0.0081, gap = std::max(chrome * 0.06, grip), v = p.controls[0].v;
+    p.controls[4].u = -(chrome / 2 + gap + grip / 2);
+    p.controls.push_back({Control::Pin, -(chrome / 2 + gap * 2 + grip * 1.5), v, grip / 2, grip / 2});
+    const Spot reset = p.controls[4], pin = p.controls[5];
+    CHECK(PressableButton(Control::Pin));
+    CHECK(ControlAt(p, pin.u + 0.002, v, 0.005, 0.015) == Control::Pin);
+    CHECK(ControlAt(p, reset.u - 0.002, v, 0.005, 0.015) == Control::Reset);
+    for (const Spot *at : {&pin, &reset}) {
+        Rig r;
+        r.panels = {p};
+        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(at->u + 0.002, v, mm / 1000.0)});
+        CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == at->kind && r.Count(Event::Press) == 0);
+        std::printf("buttons: a poke 2 mm right of %s: %s\n", ControlName(at->kind),
+                    r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
+    }
+}
+
 // Buttons for hands: the nearest control wins, round ones have a bigger hit area, a pinch presses them.
 void TestButtons() {
     const Panel p = LivePanel();
@@ -5563,6 +5584,7 @@ int main(int argc, char **argv) {
     TestGrabThatAtNearPanel();
     TestGrabThatAfterThrow();
     TestButtons();
+    TestPinButton();
     TestTouchDot();
     TestGuides();
     TestFistSettle();

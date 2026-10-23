@@ -355,6 +355,8 @@ constexpr unsigned hand_pointer = 0x110;
 // A press heard nothing of this long (ft-screens stopped) is let go.
 constexpr double hand_silence = 3;
 constexpr double tip_reach = .005; // the poke point, just past the nose's surface
+// How often a tip near the keyboard is read between frames (frames are 60 Hz).
+constexpr auto touch_step = std::chrono::microseconds(4000);
 class ControllerTips {
   public:
     // Hand 0 left, 1 right: its tip in the room, if it's a tracked Frame controller.
@@ -998,14 +1000,21 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
             }
         }
         // Touch typing: each controller's tip presses the key it touches. Not while the
-        // keyboard moves, nor for a hand that grips it.
+        // keyboard moves, nor for a hand that grips it. Each frame, and every few ms between
+        // frames while a tip is near (below), so a quick tap isn't missed between two frames.
         const bool touching =
             app.touch_typing() && lifecycle.visible() && displayed.ready() && !drag.active();
-        if (touching || pokes[0].near() || pokes[1].near()) {
-            const auto view = app.view();
+        std::optional<Rect> case_bounds;
+        auto touch_tick = [&](double at) {
+            if (!touching && !pokes[0].near() && !pokes[1].near()) {
+                return;
+            }
+            if (!case_bounds) {
+                case_bounds = panel_case_bounds(app.view());
+            }
             for (std::size_t hand = 0; hand < pokes.size(); ++hand) {
                 std::optional<PanelPoint> point;
-                const auto tip = touching ? tips.read(hand, now) : std::nullopt;
+                const auto tip = touching ? tips.read(hand, at) : std::nullopt;
                 const auto device = tips.device(hand);
                 const bool gripping = std::any_of(grips.begin(), grips.end(), [&](const auto& grip) {
                     return grip.active && grip.held && grip.device == device;
@@ -1014,7 +1023,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                     point = locate_on_panel(displayed.transform(), displayed.width(), *tip);
                 }
                 const auto pointer = touch_pointer + static_cast<unsigned>(hand);
-                const auto touch = pokes[hand].update(point, panel_case_bounds(view));
+                const auto touch = pokes[hand].update(point, *case_bounds, at);
                 switch (touch.kind) {
                 case TouchEvent::Kind::Hover:
                     if (app.move(pointer, touch.x, touch.y)) {
@@ -1025,7 +1034,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                     app.move(pointer, touch.x, touch.y);
                     break;
                 case TouchEvent::Kind::Down:
-                    if (app.down(pointer, touch.x, touch.y, now)) {
+                    if (app.down(pointer, touch.x, touch.y, at)) {
                         feedback.press(pointer, device);
                     }
                     break;
@@ -1044,7 +1053,8 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                 }
             }
             dismiss_panel();
-        }
+        };
+        touch_tick(now);
         // A fingertip on the panel: ft-screens' hand input says when it hovers and presses, as on
         // Frametop's screens, so no laser shows for it. Its point lands where it is on the panel
         // as shown now. No haptics: there's no controller.
@@ -1246,6 +1256,15 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
         // sleep after it. Hidden panels still idle at 4 Hz; paints are event-driven.
         const auto period = std::chrono::microseconds(lifecycle.visible() ? 16667 : 250000);
         if (lifecycle.visible()) {
+            // A tip near the keyboard: read it every touch_step until the next frame.
+            while (pokes[0].near() || pokes[1].near()) {
+                const auto next = std::chrono::steady_clock::now() + touch_step;
+                if (next >= frame_started + period) {
+                    break;
+                }
+                std::this_thread::sleep_until(next);
+                touch_tick(monotonic_seconds());
+            }
             std::this_thread::sleep_until(frame_started + period);
         } else {
             replacement.wait_until(frame_started + period);

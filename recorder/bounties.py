@@ -4,9 +4,13 @@ says which are wanted most (priority) and the profile keeps how often each was d
 
 The board ships with the recorder (its bounties.json) and a newer copy is fetched from the
 dataset when it can be. A fetched board is untrusted: it can only describe, reorder, reprioritise
-or retire bounties. Each bounty's steps come from a round script shipped with the recorder
-(its "script" names one), so a bounty whose script this recorder doesn't have is listed as
-needing a newer recorder, and nothing fetched decides what a round does.
+or retire bounties. Each bounty's steps come from a round script (its "script" names one): one
+shipped with the recorder, or for the hand recorder since 2026-10-23 one fetched from the
+dataset beside the board (bounties/<script>.json) that the recorder checks as untrusted and
+keeps only if it passes (hands/rec/session.py check_round: scene steps of known gestures, in
+limits, nothing that changes what is recorded or where it goes). A shipped script always wins
+over a fetched one of the same name. A bounty whose script the recorder has neither way is
+listed as needing a newer recorder.
 
 bounties.json:
   {"schema": 1, "updated": "YYYY-MM-DD", "bounties": [{"id", "title", "blurb", "minutes",
@@ -83,20 +87,35 @@ def newest(shipped, fetched):
     return fetched if fetched["updated"] >= shipped["updated"] else shipped
 
 
-def fetch(url, cache_path, token=None, timeout=5.0):
-    """Fetch the board from url (the dataset is gated: token is the contributor's Hugging Face
-    token), validate it and keep it at cache_path. Returns the board; raises OSError or ValueError."""
+def fetch_json(url, token=None, max_bytes=MAX_BYTES, timeout=5.0):
+    """A JSON file from url (the dataset is gated: token is the contributor's Hugging Face token),
+    at most max_bytes. Raises OSError or ValueError."""
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token} if token else {})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = r.read(MAX_BYTES + 1)
-    if len(data) > MAX_BYTES:
-        raise ValueError("the board is too big")
-    board = validate(json.loads(data.decode("utf-8")))
-    os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
-    tmp = cache_path + ".tmp"
+        data = r.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError("it is too big")
+    return json.loads(data.decode("utf-8"))
+
+
+def keep_json(path, value):
+    """value written to path whole (a temporary file, then renamed)."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(board, f, indent=1)
-    os.replace(tmp, cache_path)
+        json.dump(value, f, indent=1, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def fetch(url, cache_path, token=None, timeout=5.0):
+    """Fetch the board from url, validate it and keep it at cache_path. Returns the board; raises
+    OSError or ValueError."""
+    try:
+        data = fetch_json(url, token, MAX_BYTES, timeout)
+    except ValueError as e:
+        raise ValueError("the board: %s" % e) from None
+    board = validate(data)
+    keep_json(cache_path, board)
     return board
 
 

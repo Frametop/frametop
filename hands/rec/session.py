@@ -979,13 +979,99 @@ def load_script(path):
     return script
 
 
-def bounty_script(script, bounties_dir=None):
-    """A bounty's round script's path."""
-    return os.path.join(bounties_dir or BOUNTIES_DIR, script + ".json")
+def fetched_rounds_dir(base_dir=None):
+    """Where hub.py board keeps the round scripts it fetched from the dataset (check_round)."""
+    return os.path.join(base_dir or BASE_DIR, "board-rounds")
 
 
-def have_bounty_script(script, bounties_dir=None):
-    return bool(bounties.ID.match(script)) and os.path.exists(bounty_script(script, bounties_dir))
+def bounty_script(script, bounties_dir=None, base_dir=None):
+    """A bounty's round script's path: the one shipped with the recorder, else one fetched from the
+    dataset (hub.py board), else the shipped one's (missing) path."""
+    shipped = os.path.join(bounties_dir or BOUNTIES_DIR, script + ".json")
+    if bounties_dir or os.path.exists(shipped) or not bounties.ID.match(script):
+        return shipped
+    fetched = os.path.join(fetched_rounds_dir(base_dir), script + ".json")
+    return fetched if os.path.exists(fetched) else shipped
+
+
+def have_bounty_script(script, bounties_dir=None, base_dir=None):
+    return bool(bounties.ID.match(script)) and os.path.exists(bounty_script(script, bounties_dir, base_dir))
+
+
+def bounty_script_fetched(path, base_dir=None):
+    """Whether a round script's path is one hub.py board fetched."""
+    return os.path.dirname(os.path.abspath(path)) == os.path.abspath(fetched_rounds_dir(base_dir))
+
+
+# A round script fetched from the dataset (hub.py board) is untrusted, as the board is: check_round
+# keeps it only if it is a bounty round like the shipped ones. Its top level, its sections' kinds and
+# nothing that changes what is recorded or where it goes: no debug (a testing session: live output,
+# voice, the test dataset), objects or controllers asked for, checklist requirements or demo files.
+ROUND_MAX_BYTES = 64 * 1024
+ROUND_KEYS = {"version", "name", "record_hz", "intro_s", "between_s", "welcome", "done", "stopped", "sections",
+              "cue_names"}
+ROUND_KINDS = ("prompts", "scene")
+ROUND_NEVER = ("debug", "objects", "object", "controller", "controllers", "for_each", "demo", "demo_mirror")
+ROUND_MAX_S = 8 * 60        # the plan at its longest (the shipped rounds: 2.5-5 min)
+ROUND_MAX_TEXT = 600        # characters in any one string
+ROUND_MAX_NUMBER = 600.0    # any one number (seconds, metres, degrees)
+
+
+def check_round(name, script):
+    """A fetched round script (dict) for the board's script name: returned as it is if it passes,
+    else ValueError saying why. It must be a version 1 script of that name with a scene section,
+    only the keys and section kinds above, none of ROUND_NEVER set anywhere, an empty "requires",
+    strings and numbers in limits, sets a second 1-30, windows within 3 m and 2 m across, and a
+    plan that builds (known gestures, windows and parts) and lasts at most ROUND_MAX_S."""
+    if not isinstance(script, dict) or script.get("version") != 1 or not isinstance(script.get("sections"), list):
+        raise ValueError("not a version 1 round script")
+    if script.get("name") != name:
+        raise ValueError("its name isn't %s" % name)
+    extra = sorted(set(script) - ROUND_KEYS)
+    if extra:
+        raise ValueError("it has %s" % ", ".join(extra))
+    hz = script.get("record_hz", RECORD_HZ)
+    if not isinstance(hz, (int, float)) or isinstance(hz, bool) or not 1 <= hz <= 30:
+        raise ValueError("record_hz %r" % hz)
+
+    def walk(v, where):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                if k in ROUND_NEVER and x:
+                    raise ValueError("%s: %s" % (where, k))
+                if k == "requires" and x:
+                    raise ValueError("%s: requires %r" % (where, x))
+                walk(x, k)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x, where)
+        elif isinstance(v, str):
+            if len(v) > ROUND_MAX_TEXT:
+                raise ValueError("%s: a text over %d characters" % (where, ROUND_MAX_TEXT))
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            if not math.isfinite(v) or abs(v) > ROUND_MAX_NUMBER:
+                raise ValueError("%s: %r" % (where, v))
+        elif v is not None and not isinstance(v, bool):
+            raise ValueError("%s: %r" % (where, v))
+    walk(script, "script")
+    for sec in script["sections"]:
+        if not isinstance(sec, dict) or sec.get("kind", "prompts") not in ROUND_KINDS:
+            raise ValueError("a section of kind %r" % (sec.get("kind") if isinstance(sec, dict) else sec))
+    try:
+        plan, _ = build_plan(script, {}, seed=1)
+        seconds = plan_seconds(script, plan, worst=True)
+    except (KeyError, TypeError, AttributeError, IndexError) as e:
+        raise ValueError("its plan doesn't build (%s: %s)" % (type(e).__name__, e)) from None
+    scenes = [p for sec in plan if sec["kind"] == "scene" for p in sec["prompts"]]
+    if not scenes:
+        raise ValueError("it has no scene")
+    for p in scenes:
+        for w in p["scene"]["windows"]:
+            if max(abs(float(v)) for v in w["at"]) > 3 or max(float(v) for v in w["size"]) > 2:
+                raise ValueError("%s: window %s is too far or too big" % (p["id"], w["id"]))
+    if seconds > ROUND_MAX_S:
+        raise ValueError("it lasts %d s" % seconds)
+    return script
 
 
 def load_board(base_dir=None):
@@ -1561,6 +1647,13 @@ class Session:
         self._button = None                  # the ButtonReader
         self.print = print   # where dry-run panel commands go (the CLI's stdout)
         self.script = load_script(self.script_path)
+        with open(self.script_path, "rb") as f:
+            self.script_sha = hashlib.sha256(f.read()).hexdigest()
+        # A round fetched from the dataset (hub.py board) is checked again as it starts: the cache
+        # may be from an older recorder's check.
+        self.script_from = "board" if bounty_script_fetched(self.script_path, self.base_dir) else "recorder"
+        if self.script_from == "board":
+            check_round(os.path.splitext(os.path.basename(self.script_path))[0], self.script)
         # A debug session (debug.json): one long free step with Frametop's own hand tracking on,
         # its output copied beside the recording (livelog.py); the button marks what went wrong.
         self.debug = bool(self.script.get("debug"))
@@ -1863,7 +1956,7 @@ class Session:
             "calibration_removed": removed,
             "script": {"version": self.script.get("version"), "name": self.script.get("name", ""),
                        "sections": [s["id"] for s in self.plan],
-                       "skipped": self.skipped},
+                       "skipped": self.skipped, "from": self.script_from, "sha256": self.script_sha},
             "mode": "auto" if self.auto else "step", "quick": self.quick, "guidance": self.guidance,
             "shuffle": {"seed": self.seed, "sweeps": plan_record(self.plan)},
             "record_hz": self.record_hz,
@@ -3195,7 +3288,7 @@ def print_board(base):
         print("no bounty board (%s)" % BOARD_PATH)
         return
     print("bounty board of %s" % board["updated"])
-    for b in bounties.view(board, profile, profile.get("checklist") or {}, have_bounty_script):
+    for b in bounties.view(board, profile, profile.get("checklist") or {}, lambda n: have_bounty_script(n, base_dir=base)):
         print("  %-12s %-7s %4s min  done %d  %-20s %s" % (b["id"], b["priority"], "%g" % b["minutes"] if b["minutes"] else "?",
                                                            b["done"], b["title"], b["available"]))
 
@@ -3268,7 +3361,8 @@ def main():
         if a.quick or script != SCRIPT_PATH:
             ap.error("--bounty runs the bounty's own script: no --quick or --script")
         board = load_board(base)
-        entry = next((b for b in bounties.view(board, profile, checklist, have_bounty_script) if b["id"] == a.bounty), None)
+        entry = next((b for b in bounties.view(board, profile, checklist, lambda n: have_bounty_script(n, base_dir=base))
+                      if b["id"] == a.bounty), None)
         if not entry:
             print("no bounty %s on the board (--board lists them)" % a.bounty)
             return 2
@@ -3276,7 +3370,7 @@ def main():
             print("%s: %s" % (entry["title"], entry["available"]))
             return 2
         entry = dict(entry, updated=board["updated"])
-        script = bounty_script(entry["script"])
+        script = bounty_script(entry["script"], base_dir=base)
         print("bounty %s: %s" % (entry["id"], entry["title"]))
 
     t0 = time.monotonic()

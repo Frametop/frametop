@@ -133,6 +133,86 @@ class ShippedTest(unittest.TestCase):
         self.assertLessEqual({"fist", "pinch", "card", "touch", "nogo"}, set(gestures))
         self.assertGreater(gestures.count("fist"), len(gestures) / 2)
 
+    def test_shipped_rounds_pass_the_fetched_check(self):
+        """Each shipped round would pass check_round if it came from the dataset (the check doesn't
+        refuse what a real round is)."""
+        for n in sorted(os.listdir(session.BOUNTIES_DIR)):
+            with open(os.path.join(session.BOUNTIES_DIR, n)) as f:
+                session.check_round(n[:-5], json.load(f))
+
+    def test_check_round_refuses(self):
+        """A fetched round that could change what is recorded or where it goes, or isn't a round in
+        limits, is refused."""
+        with open(session.bounty_script("pokes")) as f:
+            good = json.load(f)
+        session.check_round("pokes", good)
+
+        def bad(change, name="pokes"):
+            s = json.loads(json.dumps(good))
+            change(s)
+            with self.assertRaises(ValueError):
+                session.check_round(name, s)
+        scene = lambda s: s["sections"][1]["prompts"][0]   # noqa: E731
+        bad(lambda s: None, name="other")                                       # not its name
+        bad(lambda s: s.update(debug=True))                                     # a testing session
+        bad(lambda s: s.update(objects={"keyboard": "a keyboard"}))
+        bad(lambda s: s.update(something=1))                                    # an unknown key
+        bad(lambda s: s.update(record_hz=60))
+        bad(lambda s: s["sections"][0].update(requires=["controllers"]))
+        bad(lambda s: s["sections"][0].update(kind="targets"))
+        bad(lambda s: scene(s).update(demo="../../x"))
+        bad(lambda s: scene(s).update(controller=True))
+        bad(lambda s: scene(s).update(text="x" * 700))
+        bad(lambda s: scene(s)["windows"][0].update(at=[0, 0, -5]))             # too far
+        bad(lambda s: scene(s)["windows"][0].update(size=[0.3, float("inf")]))
+        bad(lambda s: scene(s).update(acts={"gen": "buttons", "mix": {"explode": 1}}))   # a gesture it doesn't know
+        bad(lambda s: scene(s).update(acts={"gen": "buttons", "seconds": 500, "every_s": 0.5}))   # too long
+        bad(lambda s: s.update(sections=[s["sections"][0]]))                    # no scene
+
+    def test_fetched_rounds(self):
+        """hub.py board keeps the rounds the board names that the recorder doesn't ship (checked),
+        refuses bad ones, drops ones no longer wanted, and a shipped round wins over a fetched one."""
+        import hub
+        base = tempfile.mkdtemp(prefix="handrec-rounds-")
+        self.addCleanup(shutil.rmtree, base)
+        with open(session.bounty_script("pokes")) as f:
+            pokes = json.load(f)
+        served = {"new-round": dict(pokes, name="new-round"), "bad-round": dict(pokes, name="bad-round", debug=True),
+                  "pokes": dict(pokes, record_hz=10)}
+        asked = []
+
+        def fetch(url, token, max_bytes):
+            name = url.rsplit("/", 1)[1][:-5]
+            asked.append(name)
+            if name not in served:
+                raise OSError("404")
+            return json.loads(json.dumps(served[name]))
+        old = os.path.join(session.fetched_rounds_dir(base), "old-round.json")
+        os.makedirs(os.path.dirname(old))
+        with open(old, "w") as f:
+            json.dump(dict(pokes, name="old-round"), f)
+        board = bounties.validate({"schema": 1, "updated": "2026-10-23", "bounties": [
+            {"id": "new", "script": "new-round", "priority": "high"}, {"id": "bad", "script": "bad-round"},
+            {"id": "gone", "script": "missing-round"}, {"id": "pokes", "script": "pokes"},
+            {"id": "old", "script": "old-round", "priority": "retired"}]})
+        r = hub.fetch_rounds(board, base, "x/y", None, fetch=fetch)
+        self.assertEqual(r["rounds"], ["new-round"])
+        self.assertEqual(sorted(r["rounds_failed"]), ["bad-round", "missing-round"])
+        self.assertNotIn("pokes", asked)                       # shipped: never fetched
+        self.assertFalse(os.path.exists(old))                  # retired: dropped
+        self.assertTrue(session.have_bounty_script("new-round", base_dir=base))
+        self.assertFalse(session.have_bounty_script("bad-round", base_dir=base))
+        path = session.bounty_script("new-round", base_dir=base)
+        self.assertTrue(session.bounty_script_fetched(path, base))
+        self.assertFalse(session.bounty_script_fetched(session.bounty_script("pokes", base_dir=base), base))
+        view = {b["id"]: b["available"] for b in bounties.view(board, {}, {}, lambda n: session.have_bounty_script(n, base_dir=base))}
+        self.assertEqual(view["new"], "")
+        self.assertEqual(view["bad"], "Needs a newer recorder")
+        # A fetch that fails later keeps the copy that passed.
+        served.pop("new-round")
+        hub.fetch_rounds(board, base, "x/y", None, fetch=fetch)
+        self.assertTrue(session.have_bounty_script("new-round", base_dir=base))
+
     def test_same_plan_for_a_seed(self):
         script = session.load_script(session.bounty_script("index-taps"))
         a = session.build_plan(script, {}, seed=7)[0][1]["prompts"]

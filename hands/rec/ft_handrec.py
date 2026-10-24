@@ -364,7 +364,8 @@ class Backend(RecorderBackend):
         mod = self._runner()
         if not mod:
             return []
-        rows = bounties.view(self._board_now(), self.store.profile(), {}, mod.have_bounty_script)
+        rows = bounties.view(self._board_now(), self.store.profile(), {},
+                             lambda n: mod.have_bounty_script(n, base_dir=self.store.base))
         if self.frametopHands:
             rows.insert(0, self._debug_row())
         for b in rows:
@@ -618,8 +619,8 @@ class Backend(RecorderBackend):
         if bounty_id and not entry and not debug:
             return "Pick a bounty"
         try:
-            script = mod.load_script(DEBUG_SCRIPT if debug else mod.bounty_script(entry["script"]) if entry
-                                     else SCRIPT_PATH)
+            script = mod.load_script(DEBUG_SCRIPT if debug else
+                                     mod.bounty_script(entry["script"], base_dir=self.store.base) if entry else SCRIPT_PATH)
             quick = quick and not entry
             plan, _ = mod.build_plan(script, dict(checklist), quick=quick)
             return mod.plan_summary(script, plan, auto=auto)
@@ -669,7 +670,7 @@ class Backend(RecorderBackend):
         checklist["objects"] = [o for o in checklist.get("objects", []) if o in dict(OBJECTS)]
         checklist["own_objects"] = [o.strip() for o in checklist.get("own_objects", []) if str(o).strip()]
         try:
-            script = DEBUG_SCRIPT if debug else mod.bounty_script(entry["script"]) if entry else SCRIPT_PATH
+            script = DEBUG_SCRIPT if debug else mod.bounty_script(entry["script"], base_dir=self.store.base) if entry else SCRIPT_PATH
             self._session = mod.Session(self.store.base, self.store.profile(), checklist, lighting, script,
                                         on_status=lambda s: self._statusArrived.emit(dict(s)), auto=auto,
                                         quick=quick and not entry, guidance=self.guidance, bounty=entry,

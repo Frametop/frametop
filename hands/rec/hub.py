@@ -32,7 +32,8 @@ bounties' test phase (DESIGN.md "Testing") a session recorded under TESTING.md's
 round or a debug session: manifest "consent_kind": "testing", its recordings encrypted) goes to
 HF_TEST_DATASET instead (FT_HANDREC_TEST_DATASET overrides it), and its gate is TESTING.md's.
 
-`board` fetches the bounty board (bounties.json) from the dataset into BASE/board-cache.json,
+`board` fetches the bounty board (bounties.json) from the dataset into BASE/board-cache.json, and the
+round scripts it names that the recorder doesn't ship (bounties/<script>.json, checked) into BASE/board-rounds/,
 with the saved login when there is one (the dataset is gated): the window's board then uses it
 when it's newer than the one shipped here (recorder/bounties.py checks what it may say).
 
@@ -180,9 +181,42 @@ def board_url(repo):
     return f"{rhub.dataset_url(repo)}/resolve/main/bounties.json"
 
 
+def round_url(repo, script):
+    return f"{rhub.dataset_url(repo)}/resolve/main/bounties/{script}.json"
+
+
+def fetch_rounds(board, base, repo, token, fetch=bounties.fetch_json):
+    """The round scripts the board names that this recorder doesn't ship, from the dataset's
+    bounties/<script>.json into base/board-rounds/ (session.bounty_script finds them), each kept
+    only if session.check_round passes it; the ones no longer wanted are deleted. Returns
+    {"rounds": [names kept], "rounds_failed": {name: why}}."""
+    import session   # noqa: E402  (here: only the board needs it)
+    out_dir = session.fetched_rounds_dir(base)
+    wanted = sorted({b["script"] for b in board["bounties"] if b["priority"] != "retired"
+                     and not os.path.exists(session.bounty_script(b["script"], session.BOUNTIES_DIR))})
+    kept, failed = [], {}
+    for name in wanted:
+        path = os.path.join(out_dir, name + ".json")
+        try:
+            script = session.check_round(name, fetch(round_url(repo, name), token, session.ROUND_MAX_BYTES))
+        except (OSError, ValueError) as e:
+            failed[name] = str(e) or type(e).__name__
+            continue   # an older copy that passed when it came stays
+        bounties.keep_json(path, script)
+        kept.append(name)
+    try:
+        for n in os.listdir(out_dir):
+            if n.endswith(".json") and n[:-5] not in wanted:
+                os.remove(os.path.join(out_dir, n))
+    except OSError:
+        pass
+    return {"rounds": kept, "rounds_failed": failed}
+
+
 def fetch_board(base):
-    """The dataset's bounties.json into base/board-cache.json (session.load_board reads it).
-    Returns {"updated", "bounties"}; raises HubError."""
+    """The dataset's bounties.json into base/board-cache.json (session.load_board reads it), and the
+    round scripts it names that the recorder lacks (fetch_rounds). Returns {"updated", "bounties",
+    "rounds", "rounds_failed"}; raises HubError."""
     repo = dataset_id("public")   # the board is the public dataset's
     token = None
     try:
@@ -201,7 +235,8 @@ def fetch_board(base):
         if status == 404:
             raise HubError("not-found", f"{repo} has no bounty board yet.") from None
         raise HubError("network", f"Couldn't fetch the bounty board ({type(e).__name__}: {e}).") from None
-    return {"updated": board["updated"], "bounties": len(board["bounties"])}
+    return dict({"updated": board["updated"], "bounties": len(board["bounties"])},
+                **fetch_rounds(board, base, repo, token))
 
 
 # ---------------------------------------------------------------- talking to the Hub

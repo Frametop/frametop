@@ -146,6 +146,12 @@ SCREENS = "\0ft_screens"
 # theater window (0 for none). Read only. The game is gamescope's overlay
 # valve.steam.desktopgame.<app id> (desktopgame.0 is always there), for as long as it runs: not
 # its frame's page, which turns into Steam's own (the Steam UI's app id) while the Steam menu is used.
+# Gamepad mode with a Frametop panel on top of SteamVR's focus stack (a Frametop screen or the Full
+# Keyboard, clicked last) counts as laser mode: SteamVR goes to Gamepad mode by itself when the
+# system focus goes (the Steam menu closing), and the pad can't drive a Frametop screen, so the
+# screens turning the laser back on is what gets the controllers back (2026-10-25: stuck in Gamepad
+# mode on a clicked screen, the grips dead, until the Steam menu opened). Not frametop.gamepad: the
+# dashboard overlay that takes the pad for a Frametop screen (in the works).
 STEAMVR_STATE = """(() => {
   const f = window.inputFocusStore && window.inputFocusStore.computedInputFocus;
   if (!f || !window.OverlayStore) return '';
@@ -154,7 +160,12 @@ STEAMVR_STATE = """(() => {
     const m = /^valve\\.steam\\.desktopgame\\.(\\d+)$/.exec(o.sOverlayKey || '');
     if (m && +m[1] > 0) { app = +m[1]; break; }
   }
-  return (f.m_eSystemPanelInteractionMode == 2 ? 1 : 0) + ' ' + app;
+  let ours = false;
+  const top = f.m_entryAtTopOfStack && f.m_entryAtTopOfStack.m_unPanelSGID;
+  for (const o of window.OverlayStore.m_mapAllOverlays.values())
+    if (top && o.unStandalonePanelSGID == top) ours = /^(frametop\\.|org\\.framekeyboard\\.)/.test(o.sOverlayKey || '')
+      && !/^frametop\\.(probe\\.)?gamepad/.test(o.sOverlayKey || '');
+  return (f.m_eSystemPanelInteractionMode == 2 && !ours ? 1 : 0) + ' ' + app;
 })()"""
 
 

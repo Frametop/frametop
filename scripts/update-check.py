@@ -838,9 +838,11 @@ def check_dashpatch():
         return
     label = "dashboard patch"
     # treadmill-move.js wraps the first; ft-dashpatch's SteamVR watch reads the rest (Gamepad mode
-    # and the theater game, for ft-screens)
+    # and the theater game, for ft-screens), and the gamepad pill's click uses the last line's
     markers = {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
-               "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey"}
+               "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
+               "window.FrameStore=", "summonOverlayKey", "unVRInputPID", "m_unPIDForVRInput", "m_unSteamInputAppID",
+               "PushInputFocus", "window.Dashboard=", "hideDashboard"}
     missing = set(markers)
     for root, _, files in os.walk(DASHBOARD_JS):
         for name in files:
@@ -857,8 +859,9 @@ def check_dashpatch():
         return
     if missing:
         report("FAIL", label, f"SteamVR's dashboard lacks {', '.join(sorted(missing))}, so ft-dashpatch can't tell "
-               "ft-screens about Gamepad mode or a theater game (pointing at a screen may take the pad from a game); "
-               "STEAMVR_STATE in pointer/dashpatch/ft-dashpatch.py needs updating")
+               "ft-screens about Gamepad mode or a theater game (pointing at a screen may take the pad from a game), "
+               "or give a panel Gamepad mode (the gamepad pill); STEAMVR_STATE and GAMEPAD_PUSH in "
+               "pointer/dashpatch/ft-dashpatch.py need updating")
         return
     import urllib.request
     try:

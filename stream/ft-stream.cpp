@@ -32,7 +32,13 @@
 //     button CODE 1|0       a linux BTN_* code, pressed or released
 //     scroll DX DY          wheel notches (positive DY: down)
 //     key CODE 1|0          a linux KEY_* code, pressed or released
-//     blur                  typing went to another screen: the keys held here come up
+//     blur                  typing went to another screen: the keys held here come up, and
+//                           gamepad mode's pad goes
+//     pad B LT RT LX LY RX RY
+//                           gamepad mode (input/vrpad.py): the Frame controllers as an Xbox pad,
+//                           B its XInput buttons (hex), triggers 0-255, sticks -32767..32767 (up
+//                           positive). The host gets a pad on the first; it stays till "pad off"
+//     pad off               gamepad mode ended or went to another screen: the pad goes
 //     quit
 //   To ft-screens:
 //     state connecting|live|lost [TEXT]   (live via dongle|network: which way it came, see Route)
@@ -364,6 +370,40 @@ struct Keys {
     }
 };
 
+// Gamepad mode's pad ("pad ..." from ft-screens): controller 0, an Xbox pad with analog
+// triggers, there from its first state till "pad off" or a blur. The buttons are XInput's,
+// which are Moonlight's (A_FLAG and the rest); the guide button isn't sent.
+struct Pad {
+    bool here = false;
+
+    void Message(const std::string &msg) {
+        if (msg == "pad off") return Off();
+        unsigned b;
+        int lt, rt, lx, ly, rx, ry;
+        if (std::sscanf(msg.c_str(), "pad %x %d %d %d %d %d %d", &b, &lt, &rt, &lx, &ly, &rx, &ry) != 7) return;
+        constexpr unsigned kButtons = A_FLAG | B_FLAG | X_FLAG | Y_FLAG | UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG |
+                                      LB_FLAG | RB_FLAG | PLAY_FLAG | BACK_FLAG | LS_CLK_FLAG | RS_CLK_FLAG;
+        if (!here) {
+            here = true;
+            LiSendControllerArrivalEvent(0, 1, LI_CTYPE_XBOX, kButtons, LI_CCAP_ANALOG_TRIGGERS);
+            std::printf("gamepad: on\n");
+            std::fflush(stdout);
+        }
+        const auto axis = [](int v) { return short(std::clamp(v, -32767, 32767)); };
+        LiSendMultiControllerEvent(0, 1, int(b & kButtons), (unsigned char)std::clamp(lt, 0, 255),
+                                   (unsigned char)std::clamp(rt, 0, 255), axis(lx), axis(ly), axis(rx), axis(ry));
+    }
+
+    void Off() {
+        if (!here) return;
+        here = false;
+        LiSendMultiControllerEvent(0, 1, 0, 0, 0, 0, 0, 0, 0);  // nothing held as it goes
+        LiSendMultiControllerEvent(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        std::printf("gamepad: off\n");
+        std::fflush(stdout);
+    }
+};
+
 int MoonlightButton(unsigned code) {
     switch (code) {
         case BTN_RIGHT: return BUTTON_RIGHT;
@@ -535,6 +575,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     std::fflush(stdout);
 
     Keys keys;
+    Pad pad;
     bool owned[3] = {};  // ring buffers ft-screens shows or is about to
     bool live = false;
     uint64_t seq = 0;
@@ -565,6 +606,9 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
                 keys.Send(c, down != 0);
             } else if (msg == "blur") {
                 keys.Blur();
+                pad.Off();
+            } else if (msg.rfind("pad ", 0) == 0) {
+                pad.Message(msg);
             } else if (std::sscanf(msg.c_str(), "release %d", &i) == 1) {
                 if (i >= 0 && i < 3) owned[i] = false;
             } else if (msg.rfind("attention ", 0) == 0) {
@@ -654,6 +698,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     const int ended = g_ended;
     g_stop = 1;
     g_mic.Stop();  // no packet after this, before the connection goes
+    if (!ended) pad.Off();  // its buttons come up on the host (a lost connection drops it anyway)
     LiStopConnection();
     viewer.Send(ended ? "state lost the host ended the stream" : "state lost");
     dec.Close();

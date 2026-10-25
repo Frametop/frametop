@@ -41,6 +41,8 @@ exec(compile(src, relay_path, "exec"), relay.__dict__)
 class StubPause:
     """game_pause.GamePause without its threads, state file, or services."""
     paused = False
+    game = False
+    settings = {"sound": False}
 
     def __init__(self, log, on_change, buttons):
         self.on_change = on_change
@@ -62,6 +64,9 @@ class StubPause:
 
     def configure(self, *args):
         pass
+
+    def set_pad(self, on):
+        stub.setdefault("pad", []).append(on)
 
     game_state = tick = helper_started = controllers_changed = set_hands = dashboard_state = screens_seen = configure
 
@@ -814,6 +819,88 @@ def tests():
     from_kb("kbkey 30 1")
     check("gone: its keys reach nothing until it says hello again", (typed(), emitted()), ([], []))
     kb.close()
+
+    # Gamepad mode (vrpad.py): ft-screens says "gamepad desktop|remote" while SteamVR's Gamepad mode
+    # is Frametop's (the gamepad pill), and the controller reader's pad goes to that kind of panel.
+    pads = []
+
+    class FakePad:
+        def __init__(self, *args):
+            pads.append([])
+
+        def send(self, pad_state):
+            pads[-1].append(pad_state)
+
+    relay.vrpad.VirtualPad = FakePad
+
+    def reader():
+        """What the controller reader was told since the last look (set_pad)."""
+        time.sleep(0.05)
+        got = stub.get("pad", [])
+        stub["pad"] = []
+        return got
+
+    def pad_log():
+        return [m for m in LOG if m.startswith("gamepad mode")][-1:]
+
+    reader()
+    typed()
+    to_relay("vrpad 1001 0 0 0 0 0 0")
+    time.sleep(0.05)
+    check("gamepad mode off: the reader's pad reaches nothing", (pads, typed()), ([], []))
+    to_relay("gamepad desktop")
+    check("ft-screens: on for a desktop panel, the reader follows the controllers", (reader(), pad_log()),
+          ([True], ["gamepad mode on: the controllers are a gamepad for a Frametop desktop panel"]))
+    to_relay("vrpad 1001 0 255 0 32767 0 -100")
+    to_relay("vrpad zz 0 0 0 0 0 0")
+    to_relay("vrpad 1 0 999 0 0 0 0")
+    time.sleep(0.05)
+    check("the reader's state goes to the virtual pad (buttons held from before it came on wait for "
+          "their release), malformed ones don't", pads, [[(0, 0, 255, 0, 32767, 0, -100)]])
+    to_relay("vrpad 1000 0 0 0 0 0 0")
+    to_relay("vrpad 1001 0 0 0 0 0 0")
+    time.sleep(0.05)
+    check("...and once let go, a press goes through", pads[-1][-2:], [(0, 0, 0, 0, 0, 0, 0), (0x0001, 0, 0, 0, 0, 0, 0)])
+    to_relay("vrdash 1")
+    to_relay("vrpad 1000 0 0 0 0 0 0")
+    time.sleep(0.05)
+    check("the dashboard is open: the pad lets go and takes nothing", pads[-1][-1:], [relay.vrpad.NEUTRAL])
+    to_relay("vrdash 0")
+    to_relay("vrpad 1000 0 0 0 0 0 0")
+    to_relay("vrpad 0 0 0 0 0 0 0")
+    to_relay("vrpad 1000 0 0 0 0 0 0")
+    time.sleep(0.05)
+    check("...and as it closes, what's held waits for its release, then the pad goes on", pads[-1][-1:],
+          [(0x1000, 0, 0, 0, 0, 0, 0)])
+    typed()
+    to_relay("gamepad remote")
+    time.sleep(0.05)
+    check("now for a remote display: the desktop's pad lets go", (pads[-1][-1:], pad_log()),
+          ([relay.vrpad.NEUTRAL], ["gamepad mode: now for a remote display"]))
+    to_relay("vrpad 0 0 0 0 0 0 0")
+    to_relay("vrpad 2000 0 0 0 0 0 0")
+    time.sleep(0.05)
+    check("...and ft-screens gets the pad", typed()[-1:], ["pad 2000 0 0 0 0 0 0"])
+    time.sleep(1.2)
+    check("no word from the reader for a second: it lets go", typed(), ["pad off"])
+    to_relay("gamepad off")
+    check("SteamVR's Gamepad mode ended: off", (reader(), pad_log()),
+          ([False], ["gamepad mode off (SteamVR's Gamepad mode ended)"]))
+    to_relay("gamepad desktop")
+    reader()
+    time.sleep(3.2)
+    check("ft-screens quiet for 3 s: off", (reader(), pad_log()), ([False], ["gamepad mode off (no word from ft-screens for 3 s)"]))
+    for why, end in (("Frametop paused", lambda: pause("on")), ("a VR game started", lambda: to_relay("vrgame 1"))):
+        to_relay("gamepad desktop")
+        check(f"on again ({why} next)", reader(), [True])
+        end()
+        time.sleep(0.05)
+        check(f"{why}: it ends", (reader(), pad_log()), ([False], [f"gamepad mode off ({why})"]))
+        pause("off")
+    stub["pause"].game = True
+    to_relay("gamepad desktop")
+    check("a VR game runs: ft-screens' word doesn't start it", (reader(), pad_log()), ([], ["gamepad mode: not on (a VR game runs)"]))
+    stub["pause"].game = False
     to_relay("keyboard steam")
     use(None)
     print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)

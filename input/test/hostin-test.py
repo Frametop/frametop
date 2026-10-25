@@ -37,7 +37,8 @@ exec(compile(src, relay_path, "exec"), relay.__dict__)
 
 class StubPause:
     """game_pause.GamePause without its threads, state file, or services."""
-    paused = False
+    paused = game = False
+    settings = {"sound": False}
 
     def __init__(self, log, on_change, buttons):
         self.on_change = on_change
@@ -60,6 +61,7 @@ class StubPause:
         pass
 
     game_state = tick = helper_started = controllers_changed = set_hands = dashboard_state = screens_seen = configure
+    set_pad = configure
 
 
 relay.game_pause.GamePause = StubPause

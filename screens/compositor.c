@@ -629,6 +629,17 @@ static void keys_update(struct server *s) {
     // Frunner's search takes typing from wherever it went, Steam too.
     const bool shown = ft_vr_screens_shown();
     const bool desktop = spot_open(s) || (s->keys_clicked && shown);
+    // Gamepad mode's pill goes over the panel typing goes to: the remote screen, or the one KWin has
+    // keyboard focus on (vr.cpp, "the gamepad pill").
+    int pill = -1;
+    if (desktop && !spot_open(s)) {
+        if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) pill = s->key_remote;
+        for (int i = 0; i < MAX_SCREENS && pill < 0; ++i)
+            if (s->screens[i] && s->screens[i]->toplevel &&
+                s->screens[i]->toplevel->base->surface == s->seat->keyboard_state.focused_surface)
+                pill = i;
+    }
+    ft_vr_gamepad_target(pill);
     const uint32_t t = now_ms();
     if (desktop == s->keys_desktop && shown == s->keys_shown && t - s->relay_sent < 1000) return;
     if (desktop != s->keys_desktop) wlr_log(WLR_INFO, "typing goes to %s", desktop ? "the desktop" : "Steam");
@@ -952,7 +963,8 @@ static void panel_key(struct server *s, uint32_t code, bool pressed) {
 // "toplevels" (-> "ok <count>" and a line per KWin window: "<screen> <w>x<h> <commits>
 // <title>"), "input <screen> move|down|up|leave [x y [left|right|middle]]" (pointer input
 // as if from that panel, x and y in its pixels; for tests, mostly with --no-vr),
-// "key <code> <value>", "vrkeyboard show|hide|toggle|close" (our keyboard or Full Keyboard,
+// "key <code> <value>", "pad ..." (gamepad mode's pad, from the input relay: to the remote screen
+// SteamVR's Gamepad mode is for), "vrkeyboard show|hide|toggle|close" (our keyboard or Full Keyboard,
 // from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not),
 // "frunner on|off" (frunner's search has the typing; see spot_open), and "click <overlay
 // key>" (from the pointer helper: a mouse click landed on that panel, "-" for none); the rest
@@ -1004,6 +1016,13 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                 ft_vr_screen_scale(index - 1, scale);
                 snprintf(reply, sizeof reply, "ok");
             }
+        } else if (strncmp(buf, "pad ", 4) == 0) {
+            // Gamepad mode's pad, from the input relay (no reply): the remote screen SteamVR's
+            // Gamepad mode is for gets it (vr.cpp, "the gamepad pill"). ft-stream drops a blurred pad.
+            const int pad = ft_vr_gamepad_screen();
+            if (pad >= 0 && ft_remote_is(pad)) ft_remote_pad(pad, buf);
+            len = sizeof from;
+            continue;
         } else if (sscanf(buf, "key %u %d", &code, &value) == 2) {
             handle_key(s, code, value, reply, sizeof reply);
             len = sizeof from;

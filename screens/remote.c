@@ -353,6 +353,16 @@ void ft_remote_blur(int index) {
     if (r) say(r, "blur");
 }
 
+void ft_remote_pad(int index, const char *msg) {
+    struct remote *r = find(index);
+    if (!r) return;
+    unsigned b;
+    int lt, rt, lx, ly, rx, ry;
+    if (strcmp(msg, "pad off") == 0) say(r, "pad off");
+    else if (sscanf(msg, "pad %x %d %d %d %d %d %d", &b, &lt, &rt, &lx, &ly, &rx, &ry) == 7)
+        say(r, "pad %x %d %d %d %d %d %d", b, lt, rt, lx, ly, rx, ry);
+}
+
 void ft_remote_tick(void) {
     static const char *const names[] = {"hidden", "view", "focused"};  // enum ft_attention
     const uint32_t t = now_ms();

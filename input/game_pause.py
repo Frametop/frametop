@@ -234,12 +234,64 @@ class TouchTracker:
         return [f"ctl {side} touch {int(self.side_touched(side))}" for side in sorted(set(self.sides.values()))]
 
 
+# Gamepad mode's pad (vrpad.py) from the raw components: each side's buttons as XInput's bits (the
+# Frame controllers are a split pad: View, the d-pad, a bumper, trigger and stick on the left; Menu,
+# A, B, X, Y, a bumper, trigger and stick on the right; the grips are SteamVR's way out).
+PAD_BUTTONS = {
+    "left": {"/input/view/click": 0x0020, "/input/dpad_up/click": 0x0001, "/input/dpad_down/click": 0x0002,
+             "/input/dpad_left/click": 0x0004, "/input/dpad_right/click": 0x0008,
+             "/input/bumper/click": 0x0100, "/input/thumbstick/click": 0x0040},
+    "right": {"/input/menu/click": 0x0010, "/input/a/click": 0x1000, "/input/b/click": 0x2000,
+              "/input/x/click": 0x4000, "/input/y/click": 0x8000, "/input/bumper/click": 0x0200,
+              "/input/thumbstick/click": 0x0080},
+}
+PAD_REPEAT = 0.25  # the pad's state again this often while nothing changes (vrpad.STALE)
+
+
+def _number(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+class PadReader:
+    """The pad's state from the controllers' raw components: feed() each message's, state() the
+    "vrpad" line's values (buttons, LT, RT, LX, LY, RX, RY). A side with two devices (a leftover
+    virtual one, say) gets the buttons of either, and the farther stick and trigger."""
+
+    def __init__(self):
+        self.devices = {}  # root path -> {component: value}
+
+    def feed(self, device, components):
+        self.devices.setdefault(device, {}).update(components)
+
+    def keep(self, paths):
+        self.devices = {p: c for p, c in self.devices.items() if p in paths}
+
+    def state(self, sides):
+        buttons, pull, stick = 0, {"left": 0, "right": 0}, {"left": (0, 0), "right": (0, 0)}
+        for path, comps in self.devices.items():
+            side = sides.get(path)
+            if side not in PAD_BUTTONS:
+                continue
+            for comp, bit in PAD_BUTTONS[side].items():
+                if comps.get(comp):
+                    buttons |= bit
+            pull[side] = max(pull[side], round(min(1.0, max(0.0, _number(comps.get("/input/trigger/value")))) * 255))
+            xy = tuple(round(min(1.0, max(-1.0, _number(comps.get(f"/input/thumbstick/{a}")))) * 32767) for a in "xy")
+            if abs(xy[0]) + abs(xy[1]) > abs(stick[side][0]) + abs(stick[side][1]):
+                stick[side] = xy
+        return (buttons, pull["left"], pull["right"], *stick["left"], *stick["right"])
+
+
 class ControllerWatch(threading.Thread):
     """Follows the Frame controllers on vrserver's web socket for the pause gesture, and sends
     the relay "pause toggle gesture" when it's made. With the touch feed on (hand interaction,
     POINTER_HANDS=1), it also sends the pointer helper who holds a controller (TouchTracker).
-    Reconnects every 5 seconds while SteamVR is away. With no gesture set and no touch feed, it
-    doesn't connect."""
+    In gamepad mode (set_pad) it sends the relay the pad's state ("vrpad B LT RT LX LY RX RY",
+    PadReader) on each change and every PAD_REPEAT. Reconnects every 5 seconds while SteamVR is
+    away. With no gesture set, no touch feed and no gamepad mode, it doesn't connect."""
 
     def __init__(self, log):
         super().__init__(name="pause-gesture", daemon=True)
@@ -247,6 +299,7 @@ class ControllerWatch(threading.Thread):
         self.lock = threading.Lock()
         self.gesture = None
         self.touch_feed = False
+        self.pad = False
         self.tracker = TouchTracker()
         self.resend = False  # the helper (re)started: send it the touch state again
         self.changed = threading.Event()
@@ -260,6 +313,11 @@ class ControllerWatch(threading.Thread):
             self.log(f"controller touch feed for the pointer helper {'on' if on else 'off'}")
             if not on:
                 self.to_helper(["ctl ws 0"])
+            self.changed.set()
+
+    def set_pad(self, on):
+        if on != self.pad:
+            self.pad = on
             self.changed.set()
 
     def helper_started(self):
@@ -293,9 +351,9 @@ class ControllerWatch(threading.Thread):
 
     def run(self):
         while True:
-            if self.current() is None and not self.touch_feed:
+            if self.current() is None and not self.touch_feed and not self.pad:
                 if self.connected:
-                    self.log("pause gesture: none set, stopped reading the controllers")
+                    self.log("controller reader: no pause gesture, touch feed or gamepad mode, stopped reading the controllers")
                 self.connected = False
                 self.changed.wait()
                 self.changed.clear()
@@ -304,7 +362,7 @@ class ControllerWatch(threading.Thread):
                 self.session()
             except (OSError, ValueError) as e:  # urllib's errors are OSErrors
                 if self.connected:
-                    self.log(f"pause gesture: SteamVR's web socket went away ({e}); retrying")
+                    self.log(f"controller reader: SteamVR's web socket went away ({e}); retrying")
                 self.connected = False
             if self.touch_feed:
                 self.to_helper(["ctl ws 0"])
@@ -321,10 +379,12 @@ class ControllerWatch(threading.Thread):
             self.tracker = TouchTracker()
             touch_was = False
             alone = None  # the one-controller gesture in use (one_controller), or None
+            reader, pad_sent, pad_at = PadReader(), None, 0.0
             while True:
                 g = self.current()
                 touch = self.touch_feed
-                if g is None and not touch:
+                pad = self.pad
+                if g is None and not touch and not pad:
                     return
                 if touch and (not touch_was or self.resend):
                     # the feed just started, or the helper restarted: where things stand
@@ -349,6 +409,7 @@ class ControllerWatch(threading.Thread):
                         for path in found.keys() - sides.keys():
                             ws.subscribe(path)
                         sides = found
+                        reader.keep(sides)
                         if g is not None:
                             g.reset()
                         msgs = self.tracker.set_sides(sides)
@@ -356,7 +417,7 @@ class ControllerWatch(threading.Thread):
                             self.to_helper(msgs)
                     if not self.connected:
                         self.connected = True
-                        self.log(f"{'pause gesture' if g is not None else 'touch feed'}: following "
+                        self.log(f"controller reader: following "
                                  f"{' and '.join(sorted(sides.values())) or 'no'} "
                                  f"controller{'s' if len(sides) != 1 else ''} on SteamVR's web socket")
                 single = None if g is None else one_controller(g.buttons, set(sides.values()))
@@ -370,7 +431,7 @@ class ControllerWatch(threading.Thread):
                 use = alone or g
                 wanted = {} if use is None else \
                     {b: (b.split("/", 1)[0], f"/input/{b.split('/', 1)[1]}/click") for b in use.buttons}
-                for text in ws.messages(timeout=1.0):
+                for text in ws.messages(timeout=PAD_REPEAT if pad else 1.0):
                     device = device_of(text)
                     if device and device not in sides:
                         next_poll = min(next_poll, last_poll + LOOKUP_GAP)  # its root path changed, maybe
@@ -378,7 +439,9 @@ class ControllerWatch(threading.Thread):
                     # few that carry one of the gesture's buttons, or with the touch feed on, the
                     # touch and click ones.
                     feed = touch and device in sides and ("/touch" in text or "/click" in text)
-                    if not feed and not any(c in text for _, c in wanted.values()):
+                    # (in gamepad mode, the sticks' and triggers' values too)
+                    pad_msg = pad and device in sides and ("/click" in text or "/value" in text or "/thumbstick/" in text)
+                    if not feed and not pad_msg and not any(c in text for _, c in wanted.values()):
                         continue
                     try:
                         msg = json.loads(text)
@@ -388,6 +451,8 @@ class ControllerWatch(threading.Thread):
                     components = msg.get("components") or {}
                     if feed:
                         self.to_helper(self.tracker.feed(msg.get("device"), components))
+                    if pad_msg:
+                        reader.feed(msg.get("device"), components)
                     for button, (s, component) in wanted.items():
                         if s == side and component in components:
                             if use.feed(button, bool(components[component]), time.monotonic()):
@@ -399,6 +464,14 @@ class ControllerWatch(threading.Thread):
                             elif g.ignored is not None:
                                 self.log(f"pause gesture ignored: {g.ignored:.1f} s after the last one")
                                 g.ignored = None
+                if pad:
+                    st, at = reader.state(sides), time.monotonic()
+                    if st != pad_sent or at - pad_at >= PAD_REPEAT:
+                        pad_sent, pad_at = st, at
+                        try:
+                            self.sock.sendto(("vrpad %x %d %d %d %d %d %d" % st).encode(), RELAY)
+                        except OSError:
+                            pass
         finally:
             ws.close()
 
@@ -620,6 +693,10 @@ class GamePause:
             self.screens.sendto(b"paused 1" if self.paused else b"paused 0", HELPER)
         except OSError:
             pass  # the helper isn't running; it says vrhello when it starts
+
+    def set_pad(self, on):
+        """Gamepad mode (vrpad.py): read the controllers as a pad, and say it to the relay."""
+        self.watch.set_pad(on)
 
     def set_hands(self, on, always=False):
         """Hand interaction (POINTER_HANDS=1): feed the helper who holds a controller, and park hand

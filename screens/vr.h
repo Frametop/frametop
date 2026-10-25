@@ -81,6 +81,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data);
 // up, it waits and appears when they're gone.
 bool ft_vr_keyboard_show(int index);
 void ft_vr_keyboard_hide(void);
+// Gamepad mode's pill (vr.cpp): over the panel typing goes to, `screen` (-1: Steam, no pill), from
+// compositor.c's keys_update; and the panel SteamVR's Gamepad mode is for while it's ours (-1: none),
+// for the input relay's "pad" (a remote display's).
+void ft_vr_gamepad_target(int screen);
+int ft_vr_gamepad_screen(void);
 // A command from the control socket (@ft_screens); writes the reply (see vr.cpp).
 void ft_vr_command(const char *command, char *reply, int reply_size);
 

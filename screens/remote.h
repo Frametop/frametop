@@ -24,8 +24,11 @@ bool ft_remote_is(int index);
 void ft_remote_event(const struct ft_event *e);
 // A key (linux KEY_* code) for remote screen `index`.
 void ft_remote_key(int index, uint32_t code, bool pressed);
-// Typing went elsewhere: the keys it holds on the host come up.
+// Typing went elsewhere: the keys it holds on the host come up (and gamepad mode's pad goes).
 void ft_remote_blur(int index);
+// Gamepad mode's pad state for remote screen `index`: "pad B LT RT LX LY RX RY" or "pad off"
+// (from the input relay, input/vrpad.py).
+void ft_remote_pad(int index, const char *msg);
 // Every tick: each stream hears how much of its screen you see, and lost ones restart.
 void ft_remote_tick(void);
 // A child process exited: true if it was one of ours.

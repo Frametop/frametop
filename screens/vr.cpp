@@ -104,6 +104,9 @@
 //     pointer stays put, so the window doesn't move on its output. The corner tab resizes the
 //     window (in pixels, at the same density) instead of scaling the panel, and two more
 //     buttons close it and put it back on the desktop (both through ft-floatd).
+//   - the gamepad pill: "Enter Gamepad Mode" over the panel typing goes to while the Steam menu is
+//     open, like SteamVR's own over a game; its click gives SteamVR's Gamepad mode to that panel
+//     (through the hidden dashboard overlay frametop.gamepad, input/vrpad.py).
 // OpenVR has no overlay-relative transforms here (openvr v2.15.6), so the bar, button,
 // and handle are placed whenever their screen moves.
 #include "vr.h"
@@ -463,11 +466,13 @@ Lasers g_lasers = Lasers::OutsideGames;  // when controllers' lasers work the sc
 bool g_gameRunning = false;              // a scene app (VR game) is running
 // SteamVR's own state, from ft-dashpatch (pointer/dashpatch), which reads it in the dashboard's
 // page: its controllers in Gamepad mode (the pad goes to a game or the Steam UI), and the Steam
-// game shown in a theater window (a flatscreen game: not a scene app, so not g_gameRunning).
+// game shown in a theater window (a flatscreen game: not a scene app, so not g_gameRunning), and
+// whether that Gamepad mode is ours (frametop.gamepad has it: the gamepad pill's, below).
 // Its word lapses after kSteamVRWordMs, if ft-dashpatch stops.
 struct {
     bool gamepad = false;
     uint32_t theater = 0;  // the game's app id, 0 for none
+    bool mine = false;
     int64_t atMs = 0;
 } g_steamvr;
 constexpr int64_t kSteamVRWordMs = 5000;
@@ -1309,6 +1314,17 @@ void SendFloat(const std::string &msg) {
            socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
     if (msg.rfind("resize ", 0) != 0)  // an edge drag sends many resizes a second
         std::printf("to ft-floatd: %s\n", msg.c_str());
+}
+
+// To ft-dashpatch (@ft_dashpatch), from an unbound socket: the gamepad pill's click.
+void SendDashpatch(const std::string &msg) {
+    static const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    const char name[] = "ft_dashpatch";
+    std::memcpy(addr.sun_path + 1, name, sizeof name - 1);
+    sendto(fd, msg.data(), msg.size(), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&addr),
+           socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
 }
 
 // To the pointer helper (@ft_pointer_helper), from an unbound socket.
@@ -3704,6 +3720,163 @@ void UpdateResetAsk() {
     }
 }
 
+// ---------------------------------------------------------------- the gamepad pill
+// Gamepad mode for a panel, through SteamVR's own (user, 2026-10-24: "when you open the Steam menu, there will be an
+// 'Enter Gamepad Mode' above the Frametop window. When you click on it, interactions with that display should then
+// be done through the gamepad"). SteamVR gives its Gamepad mode only to a dashboard overlay's owner, so frametop.gamepad
+// is one, hidden: no tab (NoDashboardTab), and flag 1 << 4, which gives its page our pid for SteamVR's input
+// (2026-10-25 probes: without it no Enter Gamepad Mode, and SteamVR's controllers never come to us). While the
+// Steam menu is open, the pill shows over the panel typing goes to (compositor.c's keys_update: the desktop
+// screen or floating window KWin has keyboard focus on, or a remote display). A laser's click on it has
+// ft-dashpatch push SteamVR's input focus onto frametop.gamepad's page and close the menu, which puts the
+// controllers in Gamepad mode for it, as SteamVR's own pill does for a tab that isn't in front. ft-dashpatch then
+// says the Gamepad mode is ours ("steamvrmode 1 <app> 1"), and while it is the input relay hears "gamepad
+// desktop|remote" every second (the panel clicked's kind; "gamepad off" as it ends). SteamVR sends no input to an
+// overlay in Gamepad mode, so the relay reads the controllers raw (input/vrpad.py). The grips end it, as
+// anywhere in SteamVR. Its size is the same angle at any distance, as the carousel's.
+struct GamepadPill {
+    vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;  // the pill, frametop.gamepad.pill
+    vr::VROverlayHandle_t dash = vr::k_ulOverlayHandleInvalid;     // frametop.gamepad, the hidden dashboard overlay
+    int64_t dashRetryMs = 0;  // making it failed: again then
+    int target = -1;          // the panel typing goes to, -1 Steam
+    int clicked = -1;         // the panel the pill was over at its last click
+    int pad = -1;             // ours: the panel the relay was told has the pad, -1 none
+    int64_t padSaidMs = 0;    // ...then
+    int shown = -1;           // the panel it shows over now, -1 hidden
+    bool drawn = false, drawnLit = false;
+    bool hover = false;       // a laser is on it
+    bool lasers = false;      // MakeOverlaysInteractiveIfVisible is set
+    int px = 0;               // its texture's width
+} g_pill;
+constexpr int kPillH = 64, kPillText = 30;
+constexpr const char *kPillKey = "frametop.gamepad.pill", *kPillLabel = "Enter Gamepad Mode";
+constexpr const char *kPadKey = "frametop.gamepad";  // ft-dashpatch's GAMEPAD_KEY
+
+bool PadMine() { return SteamVRGamepad() && g_steamvr.mine; }
+
+// Once SteamVR's up, and again every 10 s while it fails.
+void EnsurePadOverlay() {
+    if (g_pill.dash != vr::k_ulOverlayHandleInvalid || NowMs() < g_pill.dashRetryMs) return;
+    g_pill.dashRetryMs = NowMs() + 10000;
+    vr::VROverlayHandle_t thumb = vr::k_ulOverlayHandleInvalid;
+    const vr::EVROverlayError err = vr::VROverlay()->CreateDashboardOverlay(kPadKey, "Frametop gamepad mode", &g_pill.dash, &thumb);
+    if (err != vr::VROverlayError_None) {
+        g_pill.dash = vr::k_ulOverlayHandleInvalid;
+        std::printf("gamepad pill: can't make %s (%s): no gamepad mode for panels\n", kPadKey,
+                    vr::VROverlay()->GetOverlayErrorNameFromEnum(err));
+        std::fflush(stdout);
+        return;
+    }
+    std::vector<uint8_t> px(16 * 16 * 4, 0);  // never seen: it has no tab
+    vr::VROverlay()->SetOverlayRaw(g_pill.dash, px.data(), 16, 16, 4);
+    vr::VROverlay()->SetOverlayRaw(thumb, px.data(), 16, 16, 4);
+    vr::VROverlay()->SetOverlayFlag(g_pill.dash, vr::VROverlayFlags_NoDashboardTab, true);
+    vr::VROverlay()->SetOverlayFlag(g_pill.dash, vr::VROverlayFlags(1 << 4), true);  // its page gets our pid for VR input
+    std::printf("gamepad pill: made %s\n", kPadKey);
+    std::fflush(stdout);
+}
+
+void HidePill() {
+    if (g_pill.shown < 0) return;
+    vr::VROverlay()->HideOverlay(g_pill.overlay);
+    g_pill.shown = -1, g_pill.hover = false;
+}
+
+void DrawPill(bool lit) {
+    const int H = kPillH, W = keyboard::LabelWidth(kPillLabel, kPillText) + 2 * 30;
+    std::vector<uint8_t> px(size_t(W) * H * 4, 0);
+    // SteamVR's dark pill, white under a laser
+    const uint8_t bg[4] = {uint8_t(lit ? 240 : 24), uint8_t(lit ? 240 : 24), uint8_t(lit ? 244 : 30), uint8_t(lit ? 240 : 200)};
+    const uint8_t fg[3] = {uint8_t(lit ? 20 : 245), uint8_t(lit ? 20 : 245), uint8_t(lit ? 24 : 250)};
+    FillRound(px, W, H, 2, 2, W - 2, H - 2, (H - 4) / 2, bg);
+    keyboard::DrawLabel(px.data(), W, H, kPillLabel, kPillText, W / 2, H / 2, 255, fg);
+    overlaytex::Set(g_pill.overlay, px.data(), W, H);
+    const vr::HmdVector2_t scale = {{float(W), float(H)}};
+    vr::VROverlay()->SetOverlayMouseScale(g_pill.overlay, &scale);
+    g_pill.px = W, g_pill.drawn = true, g_pill.drawnLit = lit;
+}
+
+// Each tick: over its panel's top edge, centred, while the Steam menu is open; or hidden.
+void UpdatePill() {
+    EnsurePadOverlay();
+    const auto it = g_screens.find(g_pill.target);
+    // (without ft-dashpatch's word its click would do nothing)
+    if (g_pill.dash == vr::k_ulOverlayHandleInvalid || it == g_screens.end() || !it->second.visible || g_paused ||
+        g_gameRunning || !vr::VROverlay()->IsDashboardVisible() || NowMs() - g_steamvr.atMs >= kSteamVRWordMs)
+        return HidePill();
+    const Screen &s = it->second;
+    Mat p, head;
+    if (!ScreenPose(s, &p)) return HidePill();
+    if (g_pill.overlay == vr::k_ulOverlayHandleInvalid) {
+        if (vr::VROverlay()->CreateOverlay(kPillKey, "Frametop: Enter Gamepad Mode", &g_pill.overlay) != vr::VROverlayError_None)
+            return;
+        vr::VROverlay()->SetOverlayInputMethod(g_pill.overlay, vr::VROverlayInputMethod_Mouse);
+        vr::VROverlay()->SetOverlaySortOrder(g_pill.overlay, 10);
+        AnnounceOverlay(kPillKey);   // (the 3D mouse's ray finds it)
+    }
+    const bool lit = g_pill.hover;
+    if (!g_pill.drawn || g_pill.drawnLit != lit) DrawPill(lit);
+    if (g_pill.lasers != s.lasers) {
+        g_pill.lasers = s.lasers;
+        vr::VROverlay()->SetOverlayFlag(g_pill.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, s.lasers);
+    }
+    // 0.45 mm a pixel at 1 m (30 px text: about 0.8 deg), a third of its height over the edge
+    const double d = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? std::max(0.3, Apart(head, p)) : 1.0;
+    const double mpp = 0.00045 * d, h = kPillH * mpp;
+    vr::VROverlay()->SetOverlayWidthInMeters(g_pill.overlay, float(g_pill.px * mpp));
+    const Mat at = Mul(p, OnSurface(s, 0, s.heightMetres() / 2 + h / 3 + h / 2, 0.003));
+    vr::VROverlay()->SetOverlayTransformAbsolute(g_pill.overlay, vr::TrackingUniverseStanding, &at);
+    if (g_pill.shown != g_pill.target) {
+        vr::VROverlay()->ShowOverlay(g_pill.overlay);
+        g_pill.shown = g_pill.target;
+    }
+}
+
+// Its input: a laser over it lights it, a click asks ft-dashpatch for SteamVR's Gamepad mode.
+void PollPill(void (*handle)(const struct ft_event *, void *), void *data) {
+    vr::VREvent_t ev;
+    while (g_pill.overlay != vr::k_ulOverlayHandleInvalid &&
+           vr::VROverlay()->PollNextOverlayEvent(g_pill.overlay, &ev, sizeof ev)) {
+        if (ev.eventType == vr::VREvent_FocusEnter || ev.eventType == vr::VREvent_MouseMove) {
+            g_pill.hover = true;
+        } else if (ev.eventType == vr::VREvent_FocusLeave) {
+            g_pill.hover = false;
+        } else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
+            if (g_pill.shown < 0) continue;
+            g_pill.clicked = g_pill.shown;
+            SendDashpatch("gamepad");
+            std::printf("gamepad pill: clicked (%s): SteamVR's Gamepad mode for panel %d\n",
+                        DeviceLabel(ev.trackedDeviceIndex).c_str(), g_pill.shown + 1);
+            std::fflush(stdout);
+        } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
+            EndDragsBy(ev.trackedDeviceIndex);
+            ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+        }
+    }
+}
+
+// Each tick: while SteamVR's Gamepad mode is ours, the relay hears every second which kind of panel has the
+// pad (the one clicked, or else the one typing goes to), and once as it ends.
+void UpdatePad() {
+    int want = -1;
+    if (PadMine() && !g_paused && !g_gameRunning)
+        for (const int i : {g_pill.pad, g_pill.clicked, g_pill.target})
+            if (i >= 0 && g_screens.count(i)) {
+                want = i;
+                break;
+            }
+    const int64_t now = NowMs();
+    if (want == g_pill.pad && (want < 0 || now - g_pill.padSaidMs < 1000)) return;
+    const bool remote = want >= 0 && g_screens[want].remote;
+    if (want != g_pill.pad) {
+        if (want >= 0) std::printf("gamepad mode: the pad is for panel %d (%s)\n", want + 1, remote ? "a remote display" : "the desktop");
+        else std::printf("gamepad mode: off%s\n", PadMine() ? " (no panel for it)" : "");
+        std::fflush(stdout);
+    }
+    g_pill.pad = want, g_pill.padSaidMs = now;
+    SendRelay(want < 0 ? "gamepad off" : remote ? "gamepad remote" : "gamepad desktop");
+}
+
 // Each tick: the one in the slot goes home when you turn away from it (unless kept: clicks, scrolls, drags or
 // keys on it add up to g_frontKeepMs; a pointer passing over it doesn't, user 2026-10-11: gaze kept every one); moved elsewhere,
 // it leaves the slot and lives there; resized there, that's its size in the slot from now on.
@@ -4554,6 +4727,15 @@ int ft_vr_modifiers(uint32_t format, uint64_t *out, int max) {
 bool ft_vr_screens_shown(void) { return g_vr && ModeVisible(); }
 bool ft_vr_paused(void) { return g_paused; }
 
+void ft_vr_gamepad_target(int screen) {
+    if (!g_vr || g_pill.target == screen) return;
+    g_pill.target = screen;
+    std::printf("gamepad pill: over %s\n", screen < 0 ? "nothing (typing goes to Steam)" : ("panel " + std::to_string(screen + 1)).c_str());
+    std::fflush(stdout);
+}
+
+int ft_vr_gamepad_screen(void) { return g_vr ? g_pill.pad : -1; }
+
 bool ft_vr_screen_visible(int index) {
     const auto it = g_screens.find(index);
     return !g_vr || (it != g_screens.end() && it->second.visible);
@@ -4993,6 +5175,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         if (ev.eventType == vr::VREvent_MouseButtonUp)
             ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
+    PollPill(handle, data);
     UpdateHandInput(handle, data);
     ReleaseStuck(handle, data);
     UpdateRemoteDrag(handle, data);
@@ -5048,6 +5231,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdateAttention();
     UpdateAim();
     UpdateLasers();
+    UpdatePill();
+    UpdatePad();
     UpdateControls();
     UpdateGuides();
     UpdateCutouts();
@@ -5111,9 +5296,12 @@ void ft_vr_keyboard_hide(void) {
 //   conceal <screen|all> | reveal <screen|all>   a screen hidden on its own, whatever the mode
 //   concealed     -> "ok [<screen> ...]"   the screens hidden on their own
 //   controllers always|outside_games|dashboard   when controllers' lasers work the screens
-//   steamvr <gamepad 0|1> <theater app id|0>   ft-dashpatch: SteamVR's controllers in Gamepad
-//                             mode, and the Steam game in a theater window (on change and every
-//                             second; older than 5 s it lapses)
+//   steamvrmode <gamepad 0|1> <theater app id|0> <ours 0|1>   ft-dashpatch: SteamVR's controllers
+//                             in Gamepad mode, the Steam game in a theater window, and whether the
+//                             Gamepad mode is ours (frametop.gamepad's; on change and every second;
+//                             older than 5 s it lapses)
+//   gamepadpill   -> "ok over <panel> shown <panel> pad <panel> ours 0|1 lasers 0|1 hover 0|1"   the
+//                    gamepad pill and gamepad mode (0: none)
 //   ingames hide|visible      during a VR game, "always" acts like "only with the dashboard"
 //                             (hide), or stays as it is (visible)
 //   up                        the pointer helper: the mouse's left button came up. If SteamVR
@@ -5269,6 +5457,9 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         g_gestureHand = std::strcmp(hand, "right") == 0 ? "right" : "left";
         g_gestureAngle = std::clamp(w, 5.0, 90.0);
         std::snprintf(reply, size, "ok");
+    } else if (std::strcmp(cmd, "gamepadpill") == 0) {
+        std::snprintf(reply, size, "ok over %d shown %d pad %d ours %d lasers %d hover %d", g_pill.target + 1, g_pill.shown + 1,
+                      g_pill.pad + 1, PadMine() ? 1 : 0, g_pill.lasers ? 1 : 0, g_pill.hover ? 1 : 0);
     } else if (std::strncmp(cmd, "concealed", 9) == 0) {
         int len = std::snprintf(reply, size, "ok");
         for (auto &[i, s] : g_screens)
@@ -5306,11 +5497,12 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         g_manual = false;
         UpdateVisibility();
         std::snprintf(reply, size, "ok %s", word);
-    } else if (unsigned pad = 0, app = 0; std::sscanf(cmd, "steamvr %u %u", &pad, &app) == 2) {
-        if (bool(pad) != g_steamvr.gamepad || app != g_steamvr.theater)
-            std::printf("SteamVR: %s, %s\n", pad ? "gamepad mode (panels leave the laser alone)" : "laser mode",
+    } else if (unsigned pad = 0, app = 0, mine = 0; std::sscanf(cmd, "steamvrmode %u %u %u", &pad, &app, &mine) == 3) {
+        if (bool(pad) != g_steamvr.gamepad || app != g_steamvr.theater || bool(mine) != g_steamvr.mine)
+            std::printf("SteamVR: %s, %s\n",
+                        pad ? mine ? "gamepad mode, ours (gamepad pill)" : "gamepad mode (panels leave the laser alone)" : "laser mode",
                         app ? ("theater game " + std::to_string(app)).c_str() : "no theater game");
-        g_steamvr.gamepad = pad, g_steamvr.theater = app, g_steamvr.atMs = NowMs();
+        g_steamvr.gamepad = pad, g_steamvr.theater = app, g_steamvr.mine = mine, g_steamvr.atMs = NowMs();
         UpdateLasers();
         std::snprintf(reply, size, "ok");
     } else if (std::sscanf(cmd, "controllers %15s", word) == 1) {

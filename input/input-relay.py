@@ -74,6 +74,17 @@ sent on start, reload, and when the helper says "vrhello"), and only while no ga
 unless "controller_in_games" is true in the rules file (then a mapped button no longer
 reaches games; see pointer/helper/vrbuttons.h).
 
+Gamepad mode (input/vrpad.py) makes the Frame controllers one Xbox pad for a Frametop panel, through
+SteamVR's own Gamepad mode: ft-screens' "Enter Gamepad Mode" pill above the panel typing goes to
+(with the Steam menu open) has ft-dashpatch give SteamVR's input focus to ft-screens' hidden
+dashboard overlay, and ft-screens says "gamepad desktop|remote" here every second while SteamVR's
+Gamepad mode is Frametop's, "gamepad off" as it ends (the grips, as anywhere in SteamVR). The
+controller reader (game_pause.py, vrserver's web socket) then reads every controller button, both
+sticks and both triggers raw, and says the pad's state here ("vrpad B LT RT LX LY RX RY"). A
+remote display gets it through ft-screens ("pad ..."), a desktop panel as a virtual Xbox 360 pad
+on uinput. It ends when Frametop pauses or a VR game starts, and with the dashboard open the pad
+lets go.
+
 In gaze mode outside games, the helper keeps the pointer ("gazeawake 1", repeated every 5
 seconds; "gazeawake 0" or silence ends it): the pointer isn't released when the mouse is idle.
 When something else let the pointer go, the gaze takes it back and the helper says "gazewoke"
@@ -182,8 +193,13 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     app can capture one; watchers see them as events with id frame_controller
   vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
-  vrdash 1|0        from the pointer helper (hand interaction): the dashboard is open, so hand
-                    tracking parked for a game wakes (game_pause.py, PARK_PATH)
+  vrdash 1|0        from the pointer helper: the dashboard is open, so hand tracking parked for a
+                    game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
+  gamepad desktop|remote|off   from ft-screens: SteamVR's Gamepad mode is Frametop's, for a desktop
+                    panel or a remote display (every second while it is), or it ended (above);
+                    ignored from another user
+  vrpad B LT RT LX LY RX RY   from the controller reader in gamepad mode: the pad's state (above);
+                    ignored from another user
   calpanel 1|0      from the pointer helper: a gaze calibration panel is up (renewed every second,
                     lapses 3 s after the last), so Enter answers it (above)
   textfield 1|0     from the desktop's input method (above)
@@ -224,6 +240,7 @@ import sys
 import time
 
 import game_pause
+import vrpad
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "commands"))
 import ft_commands  # noqa: E402  (your commands, "run:NAME")
@@ -1119,6 +1136,7 @@ def main():
         """Frametop paused or resumed (game_pause.py): the relay's own part."""
         p = state["pointer_conf"]
         if paused:
+            gamepad.stop("Frametop paused")
             if p:
                 p.stand_down()
             state["pointer"] = None
@@ -1129,6 +1147,19 @@ def main():
         vr_bind(time.monotonic())
 
     pause = game_pause.GamePause(log, pause_changed, VR_BUTTONS)
+
+    def pad_send(to, message):
+        try:
+            screens_sock.sendto(message.encode(), SCREENS)
+        except OSError:
+            pass  # not running
+
+    gamepad = vrpad.GamepadMode(log, pad_send, lambda: vrpad.VirtualPad(log, stored, notify),
+                                lambda on: pause.set_pad(on))
+
+    def gamepad_blocked():
+        """Why gamepad mode can't be on now, or None."""
+        return "Frametop is paused" if pause.paused else "a VR game runs" if pause.game else None
 
     def load_config():
         conf = read_config()
@@ -1145,6 +1176,7 @@ def main():
             log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
         state["pointer"] = None if pause.paused else state["pointer_conf"]
         pause.configure(state["rules"])
+        gamepad.sound_on = pause.settings["sound"]
         # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
         # HANDS_MODE=always keeps hand tracking running through games.
         # Direct touch alone (HANDS_NEAR=on) needs the same: the helper's handoff runs for it.
@@ -1798,10 +1830,29 @@ def main():
                     pause.helper_started()
                     continue
                 if cmd == "vrgame" and len(words) == 2:
+                    if words[1] == "1":
+                        gamepad.stop("a VR game started")
                     pause.game_state(words[1] == "1", now)
                     continue
                 if cmd == "vrdash" and len(words) == 2:
                     pause.dashboard_state(words[1] == "1")
+                    gamepad.dashboard_state(words[1] == "1")
+                    continue
+                if cmd == "gamepad" and len(words) == 2 and words[1] in ("desktop", "remote", "off"):
+                    # From ft-screens (no reply): SteamVR's Gamepad mode is Frametop's or ended. It
+                    # presses buttons, so only from this user.
+                    if uid != os.getuid():
+                        log(f"gamepad from another user ({uid}): ignored")
+                    else:
+                        gamepad.screens_word(None if words[1] == "off" else words[1], now, gamepad_blocked())
+                    continue
+                if cmd == "vrpad" and len(words) == 8:
+                    # From the controller reader in gamepad mode. It presses buttons, so only from
+                    # this user.
+                    if uid != os.getuid():
+                        log(f"vrpad from another user ({uid}): ignored")
+                    elif (pad_state := vrpad.parse(words[1:])) is not None:
+                        gamepad.reader_state(pad_state, now)
                     continue
                 if cmd == "pause" and len(words) >= 2 and words[1] in ("on", "off", "toggle", "?"):
                     # From input/ft-pause, the settings app, or the gesture reader (unbound, no reply).
@@ -1992,7 +2043,7 @@ def main():
             pause.controllers_changed()
         ready, _, _ = select.select(list(nodes) + [control], [], [],
                                     typing_timeout(now, min(volume.timeout(now, pointer.timeout() if pointer else 0.5),
-                                                            pause.timeout(now))))
+                                                            pause.timeout(now), gamepad.timeout(now))))
         now = time.monotonic()
         if pointer:
             pointer.tick(now)
@@ -2006,6 +2057,7 @@ def main():
             kb_gone("stopped (no word for 3 seconds)")
         kb_tell(now)
         pause.tick(now)
+        gamepad.tick(now)
         if state["vr_capture_until"] and now >= state["vr_capture_until"]:
             vr_bind(now)  # capture over: back to the mapped buttons
         if (now < state["desktop_until"]) != state["typing_applied"] or waiting:

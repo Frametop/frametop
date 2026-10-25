@@ -837,22 +837,28 @@ def check_dashpatch():
     if systemctl("is-enabled", "frametop-dashpatch") != "enabled":
         return
     label = "dashboard patch"
-    found = False
+    # treadmill-move.js wraps the first; ft-dashpatch's SteamVR watch reads the rest (Gamepad mode
+    # and the theater game, for ft-screens)
+    markers = {"startFloatingWindowMove", "window.inputFocusStore=", "window.FrameStore=",
+               "m_eSystemPanelInteractionMode", "isActiveAndVisiblePage", "steamInputAppID"}
+    missing = set(markers)
     for root, _, files in os.walk(DASHBOARD_JS):
         for name in files:
-            if name.endswith(".js"):
+            if name.endswith(".js") and missing:
                 try:
                     with open(os.path.join(root, name), errors="replace") as f:
-                        if "startFloatingWindowMove" in f.read():
-                            found = True
-                            break
+                        text = f.read()
+                    missing = {m for m in missing if m not in text}
                 except OSError:
                     pass
-        if found:
-            break
-    if not found:
+    if "startFloatingWindowMove" in missing:
         report("FAIL", label, "SteamVR's dashboard has no startFloatingWindowMove any more, so the 3D mouse "
                "(a treadmill) can't move SteamVR's windows; pointer/dashpatch/treadmill-move.js needs updating")
+        return
+    if missing:
+        report("FAIL", label, f"SteamVR's dashboard lacks {', '.join(sorted(missing))}, so ft-dashpatch can't tell "
+               "ft-screens about Gamepad mode or a theater game (pointing at a screen may take the pad from a game); "
+               "STEAMVR_STATE in pointer/dashpatch/ft-dashpatch.py needs updating")
         return
     import urllib.request
     try:

@@ -45,13 +45,15 @@
 //   - controllers on the screens: while visible, the screens can keep SteamVR's laser mouse
 //     on (VROverlayFlags_MakeOverlaysInteractiveIfVisible), so controllers use them with
 //     the dashboard closed. That also takes the controllers away from a VR game, so by
-//     default it's off while a game (a scene app) runs: the screens stay up over the game,
-//     the controllers stay in it, and the 3D mouse (its own laser mode) or the dashboard
-//     works the screens. Modes: always, outside_games (default), dashboard (never on its
-//     own; also for flatscreen games, which aren't scene apps). Where the mode leaves the
+//     default it's off while a game runs: a scene app, or a Steam game in SteamVR's theater
+//     window (ft-dashpatch tells). The screens stay up over the game, the controllers stay in
+//     it, and the 3D mouse (its own laser mode) or the dashboard works the screens. Modes:
+//     always, outside_games (default), dashboard (never on its own). Where the mode leaves the
 //     controllers to the game, pointing a controller at a panel (a screen, a floating window
 //     and its popups, their controls, the keyboard) turns the laser on for it until you
-//     point away, like SteamVR's own floating windows (UpdateAim).
+//     point away, like SteamVR's own floating windows (UpdateAim). Not in SteamVR's Gamepad
+//     mode (Enter Gamepad Mode in the Steam menu): the pad stays in the game until the grips
+//     bring the laser back, whatever the mode.
 //   - during a VR game the screens hide unless the dashboard is open (g_inGames, default),
 //     or stay visible over it; the hotkey still shows them.
 //   - paused ("pause on", from the input relay when Frametop pauses for a VR game,
@@ -459,6 +461,16 @@ double g_gestureAngle = 20;  // gesture: look within this of the controller
 std::string g_gestureHand = "left";
 Lasers g_lasers = Lasers::OutsideGames;  // when controllers' lasers work the screens (see the top)
 bool g_gameRunning = false;              // a scene app (VR game) is running
+// SteamVR's own state, from ft-dashpatch (pointer/dashpatch), which reads it in the dashboard's
+// page: its controllers in Gamepad mode (the pad goes to a game or the Steam UI), and the Steam
+// game shown in a theater window (a flatscreen game: not a scene app, so not g_gameRunning).
+// Its word lapses after kSteamVRWordMs, if ft-dashpatch stops.
+struct {
+    bool gamepad = false;
+    uint32_t theater = 0;  // the game's app id, 0 for none
+    int64_t atMs = 0;
+} g_steamvr;
+constexpr int64_t kSteamVRWordMs = 5000;
 bool g_paused = false;                   // Frametop paused for a VR game: everything hidden (see the top)
 InGames g_inGames = InGames::Hide;       // during a VR game, the always mode acts like the dashboard mode
 
@@ -1124,7 +1136,14 @@ void UpdateAttention() {
 // Controllers' lasers on the screens (see the top): the flag follows the mode and whether a
 // VR game runs, and where the mode leaves the controllers to the game, whether one points at
 // the panel (UpdateAim).
-bool LasersByMode() { return g_lasers == Lasers::Always || (g_lasers == Lasers::OutsideGames && !g_gameRunning); }
+// In SteamVR's Gamepad mode nothing of ours keeps the laser on: SteamVR would leave the mode at
+// once, and the game lose the pad. The grips (SteamVR's own switch) bring the laser back.
+bool SteamVRGamepad() { return g_steamvr.gamepad && NowMs() - g_steamvr.atMs < kSteamVRWordMs; }
+bool TheaterGame() { return g_steamvr.theater && NowMs() - g_steamvr.atMs < kSteamVRWordMs; }
+bool LasersByMode() {
+    if (SteamVRGamepad()) return false;
+    return g_lasers == Lasers::Always || (g_lasers == Lasers::OutsideGames && !g_gameRunning && !TheaterGame());
+}
 long g_keyboardAimUntil = 0;
 
 void UpdateLasers() {
@@ -2209,6 +2228,11 @@ void UpdateRemoteDrag(void (*handle)(const struct ft_event *, void *), void *dat
 // windows. Leaving takes a wider margin than arriving, and a drag or a held button keeps it
 // on. The keyboard is one overlay, so SteamVR's own intersection test does there.
 void UpdateAim() {
+    if (SteamVRGamepad()) {  // pointing at a panel leaves the pad in the game (see LasersByMode)
+        for (auto &[i, s] : g_screens) s.aimUntil = 0;
+        g_keyboardAimUntil = 0;
+        return;
+    }
     if (LasersByMode()) return;
     std::vector<Mat> lasers;
     for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
@@ -5087,6 +5111,9 @@ void ft_vr_keyboard_hide(void) {
 //   conceal <screen|all> | reveal <screen|all>   a screen hidden on its own, whatever the mode
 //   concealed     -> "ok [<screen> ...]"   the screens hidden on their own
 //   controllers always|outside_games|dashboard   when controllers' lasers work the screens
+//   steamvr <gamepad 0|1> <theater app id|0>   ft-dashpatch: SteamVR's controllers in Gamepad
+//                             mode, and the Steam game in a theater window (on change and every
+//                             second; older than 5 s it lapses)
 //   ingames hide|visible      during a VR game, "always" acts like "only with the dashboard"
 //                             (hide), or stays as it is (visible)
 //   up                        the pointer helper: the mouse's left button came up. If SteamVR
@@ -5279,6 +5306,13 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         g_manual = false;
         UpdateVisibility();
         std::snprintf(reply, size, "ok %s", word);
+    } else if (unsigned pad = 0, app = 0; std::sscanf(cmd, "steamvr %u %u", &pad, &app) == 2) {
+        if (bool(pad) != g_steamvr.gamepad || app != g_steamvr.theater)
+            std::printf("SteamVR: %s, %s\n", pad ? "gamepad mode (panels leave the laser alone)" : "laser mode",
+                        app ? ("theater game " + std::to_string(app)).c_str() : "no theater game");
+        g_steamvr.gamepad = pad, g_steamvr.theater = app, g_steamvr.atMs = NowMs();
+        UpdateLasers();
+        std::snprintf(reply, size, "ok");
     } else if (std::sscanf(cmd, "controllers %15s", word) == 1) {
         const std::string m = word;
         if (m == "always") g_lasers = Lasers::Always;

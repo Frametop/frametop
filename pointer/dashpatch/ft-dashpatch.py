@@ -9,6 +9,13 @@ those windows but couldn't move them. treadmill-move.js wraps the grab bar's han
 with no device moves the window with /user/treadmill. This puts it into the dashboard over the
 Chrome DevTools Protocol, again whenever the dashboard's page is new (SteamVR restarted).
 
+It also tells ft-screens (@ft_screens, "steamvr <gamepad> <theater app>") what only the
+dashboard's page knows: whether SteamVR's controllers are in Gamepad mode (Enter Gamepad Mode, so
+the pad goes to a game), and which Steam game shows in a theater window (a flatscreen game, which
+isn't a scene app). ft-screens then keeps its panels from turning SteamVR's laser on while the pad
+is in a game (screens/vr.cpp, "controllers on the screens"). That's read only, five times a
+second, on one connection.
+
 The dashboard's debugger is off by default. SteamVR turns it on with VRWebHelper.DebuggerEnabled
 and listens on VRWebHelper.DebuggerPort, on 127.0.0.1 only. Not 8087: SteamOS's
 steamvr-web-debug-portforward.service forwards 0.0.0.0:8088 to 127.0.0.1:8087, which would put
@@ -26,8 +33,10 @@ and writes over the file; without it, they go into SteamVR's settings file.
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -132,6 +141,66 @@ def evaluate(url, expression):
 
 STATE = "JSON.stringify(window.__ftTreadmillMove || null)"
 
+SCREENS = "\0ft_screens"
+STEAM_UI_APP = 769  # the Steam UI's own app id in SteamVR's input focus
+# SteamVR's system panel interaction mode (2 = Gamepad), and the app id of the Steam game in a
+# visible theater frame (0 for none). Read only.
+STEAMVR_STATE = """(() => {
+  const f = window.inputFocusStore && window.inputFocusStore.computedInputFocus;
+  if (!f) return '';
+  let app = 0;
+  for (const frame of (window.FrameStore && window.FrameStore.frames) || []) {
+    const page = frame.activePage, focus = page && page.inputFocus;
+    const id = focus && focus.componentProps && focus.componentProps.steamInputAppID;
+    if (page && page.isActiveAndVisiblePage && id && id != %d) { app = id; break; }
+  }
+  return (f.m_eSystemPanelInteractionMode == 2 ? 1 : 0) + ' ' + app;
+})()""" % STEAM_UI_APP
+
+
+def watch_steamvr():
+    """Tells ft-screens SteamVR's Gamepad mode and theater game: on change and every second."""
+    out = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    ws, rid, last, sent = None, 0, None, 0.0
+    while True:
+        time.sleep(0.2)
+        try:
+            if ws is None:
+                url = dashboard()
+                if not url:
+                    time.sleep(3)
+                    continue
+                ws = _WebSocket(url)
+            rid += 1
+            ws.send(json.dumps({"id": rid, "method": "Runtime.evaluate",
+                                "params": {"expression": STEAMVR_STATE, "returnByValue": True}}))
+            while True:
+                reply = json.loads(ws.recv())
+                if reply.get("id") == rid:
+                    break
+            value = reply.get("result", {}).get("result", {}).get("value")
+        except (OSError, ValueError):
+            if ws is not None:
+                try:
+                    ws.close()
+                except OSError:
+                    pass
+            ws = None
+            continue
+        if not isinstance(value, str) or not re.fullmatch(r"[01] \d+", value):
+            continue
+        now = time.monotonic()
+        if value != last or now - sent >= 1:
+            if value != last:
+                gamepad, app = value.split()
+                print(f"SteamVR: {'gamepad' if gamepad == '1' else 'laser'} mode, "
+                      f"{'theater game ' + app if app != '0' else 'no theater game'}", flush=True)
+            try:
+                out.sendto(f"steamvr {value}".encode(), SCREENS)
+            except OSError:
+                pass  # the desktop isn't running
+            last, sent = value, now
+
 
 def run():
     """Puts the patch in each new dashboard page, and checks it's still in every 30 s (the page
@@ -139,6 +208,7 @@ def run():
     patch = PATCH.read_text()
     version = int(re.search(r"const VERSION = (\d+);", patch).group(1))
     last_url, last_check = None, 0.0
+    threading.Thread(target=watch_steamvr, daemon=True).start()
     while True:
         url = dashboard()
         now = time.monotonic()

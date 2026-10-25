@@ -839,8 +839,8 @@ def check_dashpatch():
     label = "dashboard patch"
     # treadmill-move.js wraps the first; ft-dashpatch's SteamVR watch reads the rest (Gamepad mode
     # and the theater game, for ft-screens)
-    markers = {"startFloatingWindowMove", "window.inputFocusStore=", "window.FrameStore=",
-               "m_eSystemPanelInteractionMode", "isActiveAndVisiblePage", "steamInputAppID"}
+    markers = {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
+               "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey"}
     missing = set(markers)
     for root, _, files in os.walk(DASHBOARD_JS):
         for name in files:

@@ -142,20 +142,20 @@ def evaluate(url, expression):
 STATE = "JSON.stringify(window.__ftTreadmillMove || null)"
 
 SCREENS = "\0ft_screens"
-STEAM_UI_APP = 769  # the Steam UI's own app id in SteamVR's input focus
-# SteamVR's system panel interaction mode (2 = Gamepad), and the app id of the Steam game in a
-# visible theater frame (0 for none). Read only.
+# SteamVR's system panel interaction mode (2 = Gamepad), and the app id of a Steam game in a
+# theater window (0 for none). Read only. The game is gamescope's overlay
+# valve.steam.desktopgame.<app id> (desktopgame.0 is always there), for as long as it runs: not
+# its frame's page, which turns into Steam's own (the Steam UI's app id) while the Steam menu is used.
 STEAMVR_STATE = """(() => {
   const f = window.inputFocusStore && window.inputFocusStore.computedInputFocus;
-  if (!f) return '';
+  if (!f || !window.OverlayStore) return '';
   let app = 0;
-  for (const frame of (window.FrameStore && window.FrameStore.frames) || []) {
-    const page = frame.activePage, focus = page && page.inputFocus;
-    const id = focus && focus.componentProps && focus.componentProps.steamInputAppID;
-    if (page && page.isActiveAndVisiblePage && id && id != %d) { app = id; break; }
+  for (const o of window.OverlayStore.m_mapAllOverlays.values()) {
+    const m = /^valve\\.steam\\.desktopgame\\.(\\d+)$/.exec(o.sOverlayKey || '');
+    if (m && +m[1] > 0) { app = +m[1]; break; }
   }
   return (f.m_eSystemPanelInteractionMode == 2 ? 1 : 0) + ' ' + app;
-})()""" % STEAM_UI_APP
+})()"""
 
 
 def watch_steamvr():

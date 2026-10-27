@@ -46,6 +46,7 @@ class Harness:
                 "hidden": [], "windows": [{"class": "google-chrome", "fullScreen": False}],
                 "remote": {"remote-one": {"pos": [2, 1, -3], "face": [10, 20], "roll": 3}}}}
         self.m.load_layout = self.load_layout
+        self.m.kwin_follow = lambda: self.events.append(("kwin_follow",))
         self.m.backend = lambda: "screens"
         self.m.screens_socket = self.socket
         self.m.log = lambda *args: self.events.append(("log", " ".join(map(str, args))))
@@ -55,7 +56,7 @@ class Harness:
                                                  TimeoutExpired=subprocess.TimeoutExpired)
         for name in ("save_layout", "use_hidden", "open_apps", "open_remotes", "start_remotes",
                      "start_remote", "place_remote", "place_remotes", "send_hidden", "send_visibility",
-                     "kwin_follow", "apply_scales", "nested_env", "write_launchers", "apply"):
+                     "apply_scales", "nested_env", "write_launchers", "apply"):
             setattr(self.m, name, self.forbid(name))
 
     def forbid(self, name):
@@ -110,6 +111,8 @@ class Harness:
             if self.on_place:
                 self.on_place()
             return "ok"
+        if command.startswith("pin ") or command == "vrkeyboard close":
+            return "ok"
         raise AssertionError("Reset sent a non-geometric command: " + command)
 
     def run(self):
@@ -137,7 +140,7 @@ class GeometryResetReview(unittest.TestCase):
         self.assertEqual(sum(e == ("ask", "head") for e in h.events), 1)
         actions = [e[0] for e in h.events]
         self.assertLess(actions.index("helper_end"), actions.index("load"))
-        self.assertEqual(actions[-1], "socket_close")
+        self.assertEqual(actions[-2:], ["socket_close", "kwin_follow"])
 
     def test_preset_reset_places_screen_without_restoring_windows(self):
         h = Harness(self.lock, profile=False)
@@ -204,13 +207,37 @@ class GeometryResetReview(unittest.TestCase):
             self.assertFalse(any(e[0] == "socket" for e in h.events))
         self.assertEqual(h.run(), 0)
 
-    def test_pinned_local_and_remote_panels_are_left_untouched(self):
+    def test_wrist_pinned_local_and_remote_panels_are_left_untouched(self):
         h = Harness(self.lock)
         h.pins = {1: "left", 101: "right"}
         self.assertEqual(h.run(), 0)
         self.assertEqual(h.places(), [])
         self.assertNotIn(("ask", "head"), h.events)
+        self.assertNotIn(("kwin_follow",), h.events)
         self.assertEqual(h.events[-1], ("socket_close",))
+
+    def test_head_pinned_panels_go_back_in_the_room(self):
+        h = Harness(self.lock)
+        h.pins = {1: "head", 101: "head"}
+        self.assertEqual(h.run(), 0)
+        self.assertEqual([p.split()[1] for p in h.places()], ["1", "101"])
+        self.assertFalse(any(e[0] == "ask" and e[1].startswith("pin ") for e in h.events))
+
+    def test_head_pin_saved_in_the_profile_is_pinned_again(self):
+        h = Harness(self.lock)
+        h.pins = {1: "head"}
+        rel = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -1]
+        h.layout["layouts"]["Cockpit"][0]["pin"] = {"hand": "head", "rel": rel}
+        self.assertEqual(h.run(), 0)
+        asks = [e[1] for e in h.events if e[0] == "ask"]
+        place = asks.index(next(p for p in h.places() if p.startswith("place 1 ")))
+        self.assertTrue(asks[place + 1].startswith("pin 1 head "))
+
+    def test_moved_panels_close_the_keyboard_and_rearrange_plasma(self):
+        h = Harness(self.lock)
+        self.assertEqual(h.run(), 0)
+        self.assertIn(("ask", "vrkeyboard close"), h.events)
+        self.assertEqual(h.events[-1], ("kwin_follow",))
 
     def test_disconnected_and_absent_remote_panels_are_not_restarted(self):
         for off in (False, True):

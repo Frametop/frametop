@@ -127,7 +127,9 @@ CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
 VRCMD = "/opt/steamvr/bin/linuxarm64/vrcmd"
 HELPER = "\0ft_pointer_helper"
 SCREENS = "\0ft_screens"
-LOCK_PATH = "/tmp/ft-layout.lock"
+# One ft-layout at a time (and one pending reset: LOCK_PATH + ".reset-delay"). In the runtime
+# directory, not /tmp, where another user could put a link there first.
+LOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "ft-layout.lock")
 FLOAT = "\0frametop_float"  # ft-floatd: the apps' windows (profiles)
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 LAUNCHERS = os.path.expanduser("~/.local/share/applications")  # a profile's launcher entry each
@@ -576,24 +578,28 @@ def apply_screens(wait=0):
 
 
 def recenter_screens():
-    """Recenter existing unpinned panels without restoring apps or display state.
+    """Recenter existing panels without restoring apps or display state.
 
     Named layout poses are read into this invocation only. Do not save that copy:
     Reset must not change window state, hidden screens, or remote connections.
+    A panel pinned to the head (its pin button) goes back in the room, as with a full
+    reset, and is pinned again only if the layout saved it so; one on a wrist stays there.
     """
     layout = load_layout()
     name = layout.get("active") if layout.get("mode") == "custom" else None
     if name in layout.get("layouts", {}):
         use_named(layout, name)
     count = screen_count(layout)
-    targets = [(i + 1, t) for i, t in enumerate(plan(layout, count))]
+    custom = layout.get("mode") == "custom"
+    targets = [(i + 1, t, screen_entry(layout, i).get("pin") if custom else None)
+               for i, t in enumerate(plan(layout, count))]
     displays = remote_displays(layout)
-    targets.extend((n, t) for (n, _, d), t in zip(displays, plan_remotes(layout, count, displays))
+    targets.extend((n, t, d.get("pin")) for (n, _, d), t in zip(displays, plan_remotes(layout, count, displays))
                    if not d.get("off") and t is not None)
     sock = screens_socket()
     movable = []
     try:
-        for n, t in targets:
+        for n, t, saved in targets:
             try:
                 current = parse_get(sock.ask(f"get {n}"))
             except NoAnswer:
@@ -601,10 +607,11 @@ def recenter_screens():
             except RuntimeError as e:
                 log(f"recenter: screen {n} unavailable; left alone ({e})")
                 continue
-            if current["hand"] != "none":
-                log(f"recenter: screen {n} is pinned; left alone")
+            if current["hand"] not in ("none", "head"):
+                log(f"recenter: screen {n} is on a wrist; left alone")
                 continue
-            movable.append((n, t))
+            head_pin = saved if saved and saved.get("hand") == "head" and len(saved.get("rel", [])) == 12 else None
+            movable.append((n, t, head_pin))
         if not movable:
             log("recenter: no unpinned panels available")
             return []
@@ -612,10 +619,17 @@ def recenter_screens():
         f = sock.ask("head").split()
         eye, heading = tuple(map(float, f[1:4])), float(f[4])
         results = []
-        for n, t in movable:
+        for n, t, head_pin in movable:
             center = tuple(e + v for e, v in zip(eye, turn_yaw(t["pos"], heading)))
+            # "place" leaves a head-pinned panel in the room
             results.append(sock.ask("place %d %.4f %.4f %.4f %.3f %.3f %.3f" %
                                     (n, *center, t["face"][0] + heading, t["face"][1], t["roll"])))
+            if head_pin:
+                sock.ask(f"pin {n} head " + " ".join(f"{v:.5f}" for v in head_pin["rel"]))
+        try:
+            sock.ask("vrkeyboard close")  # the keyboard, if open, goes too, as with a full reset
+        except RuntimeError:
+            pass  # an older ft-screens
         log(f"recentered {len(results)} panel(s); app windows and streams unchanged")
         return results
     finally:
@@ -1744,7 +1758,8 @@ def main(argv):
                         except BlockingIOError:
                             log("another ft-layout is already running")
                             return 1
-                        recenter_screens()
+                        if recenter_screens():
+                            kwin_follow()  # Plasma's screen arrangement follows where they are now
                     return 0
                 layout = load_layout()
                 name = layout.get("active") if layout.get("mode") == "custom" else None

@@ -216,10 +216,11 @@ def pages(f, keys):
                  ["Tap Meta / Alt+F1 / Meta+Space", "Steam menu / desktop application launcher / search apps and "
                                                    "remote displays. Meta is the Windows key, or Cmd on a Mac keyboard"],
                  ["Meta+Shift+H", "Hides or shows the screens. Change shortcuts in Keyboard settings"]],
-        "note": "With Frametop screens, Reset moves existing, unpinned desktop and remote panels around you. "
-                "It preserves app windows, fullscreen playback, screen visibility and stream connections. "
-                "Pinned panels and independent floating windows stay in place; disconnected screens are skipped. "
-                "Open profile restores saved apps and window positions and can change fullscreen. "
+        "note": "Reset moves the screens and remote displays back around you. "
+                "It keeps app windows, fullscreen playback, hidden screens and stream connections as they are. "
+                "Screens on a wrist and floating windows stay in place; one pinned to your view goes back in the room. "
+                "To bring back a profile's apps and windows too, open the profile: type its name in frunner "
+                "(Meta+Space), or Open profile in Display Settings. That can end fullscreen. "
                 "The legacy SteamVR dashboard-screen mode still uses full profile reset.",
         "actions": [{"id": "input:hands", "text": "Hand settings", "icon": "transform-browse"},
                     {"id": "input:pointer", "text": "Pointer settings", "icon": "input-mouse"},

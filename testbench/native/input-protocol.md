@@ -34,6 +34,10 @@ redirects dlopen. Other processes inheriting LD_PRELOAD are unchanged.
 * FRAME_TESTBENCH_REAL_DRIVER: optional exact absolute cv module path. Default:
   /opt/steamvr/drivers/cv/bin/linuxarm64/driver_cv.so. Tests set this to the fake
   module. Do not point it at the proxy.
+* XDG_RUNTIME_DIR: holds SteamOS's steamvr-short-session-tracker. While it counts a
+  failed SteamVR session, the loader loads the real cv module instead of the proxy,
+  so a proxy that crashes vrserver can't loop SteamVR into SteamOS's Steam repair
+  (three failures) and OS slot fallback (four). Default: /run/user/<uid>.
 
 The loader matches only that exact absolute path, not substrings, relative paths,
 other modules, dlopen(NULL), or alternate spellings. The proxy loads cv through

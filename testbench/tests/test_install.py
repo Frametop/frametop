@@ -17,6 +17,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn('[Service]', text)
         self.assertIn('LD_PRELOAD=', text)
         self.assertIn('FRAME_TESTBENCH_PROXY=', text)
+        self.assertIn('RestartSec=30', text)
         self.assertNotIn('ExecStart=', text)
         self.assertNotIn('sshd', text)
 

@@ -40,7 +40,7 @@ class InputProxyTests(unittest.TestCase):
         scratch = os.environ.get("TMPDIR", str(ROOT / "build"))
         self.temp = tempfile.TemporaryDirectory(prefix="fi-", dir=scratch)
         self.sock = str(Path(self.temp.name) / "s")
-        self.env = dict(os.environ, FRAME_TESTBENCH_SOCKET=self.sock,
+        self.env = dict(os.environ, FRAME_TESTBENCH_SOCKET=self.sock, XDG_RUNTIME_DIR=self.temp.name,
                         FRAME_TESTBENCH_REAL_DRIVER=str(BUILD / "driver_cv.so"),
                         FRAME_TESTBENCH_PROXY=str(BUILD / "libframe_input.so"),
                         LD_PRELOAD=str(BUILD / "libframe_loader.so"))
@@ -612,6 +612,20 @@ class InputProxyTests(unittest.TestCase):
         r = subprocess.run([str(BUILD / "vrserver"), "scope"], env=self.env, text=True, capture_output=True, timeout=3)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "scope-ok")
+
+    def test_loader_skips_the_proxy_while_steamos_counts_a_failed_session(self):
+        tracker = Path(self.temp.name) / "steamvr-short-session-tracker"
+        env = dict(self.env, FRAME_TESTBENCH_SOCKET=str(Path(self.temp.name) / "after-failure"))
+        for text, injected in (("frog:glasses:", False), ("", True)):
+            tracker.write_text(text)
+            p = subprocess.Popen([str(BUILD / "vrserver")], env=env, text=True,
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert p.stdout is not None
+            self.assertEqual(p.stdout.readline().strip(), "ready")
+            self.assertEqual(os.path.exists(env["FRAME_TESTBENCH_SOCKET"]), injected)
+            out, err = p.communicate("quit\n", timeout=5)
+            self.assertEqual(p.returncode, 0, err)
+            self.assertEqual("failed SteamVR session" in err, not injected)
 
     def test_restart_reclaims_only_stale_owned_socket(self):
         path = str(Path(self.temp.name) / "stale")

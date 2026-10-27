@@ -18,7 +18,10 @@ def dropin(directory):
     if ':' in value or any(c.isspace() or ord(c) < 32 for c in value):
         raise ValueError('LD_PRELOAD library directory cannot contain whitespace or colons')
     value = value.replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%')
+    # A crashing preload must not loop: SteamOS's health check repairs Steam after three
+    # failed SteamVR sessions and boots the other OS slot after four (install.sh).
     return (MARKER + '[Service]\n'
+            'RestartSec=30\n'
             f'Environment="LD_PRELOAD={value}/libframe_loader.so"\n'
             f'Environment="FRAME_TESTBENCH_PROXY={value}/libframe_input.so"\n')
 

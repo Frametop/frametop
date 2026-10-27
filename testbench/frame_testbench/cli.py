@@ -109,9 +109,9 @@ def parser():
     capture = commands.add_parser('capture', help='fresh compositor stereo PNGs and metadata')
     capture.add_argument('--output', help='new output directory, on headset when using --host')
     capture.add_argument('--fetch', help='with --host, download PNGs into this new local directory')
+    # No --restart: install.sh restarts SteamVR with the checks SteamOS's health check needs.
     for name in ('install', 'uninstall'):
-        p = commands.add_parser(name, help='change only the SteamVR user service override')
-        p.add_argument('--restart', action='store_true', help='restart SteamVR now; interrupts VR')
+        commands.add_parser(name, help='change only the SteamVR user service override; applies at its next start')
     return ap
 
 
@@ -168,9 +168,6 @@ def dispatch(args, bench):
     if args.command in ('install', 'uninstall'):
         result = install.stage(ROOT / 'build', Path.home()) if args.command == 'install' else install.remove(Path.home())
         subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True, timeout=20)
-        if args.restart:
-            subprocess.run(['systemctl', '--user', 'restart', 'steamvr.service'], check=True, timeout=90)
-            result['restart_requested'] = True
         return result
     raise ValueError('unsupported command')
 

@@ -1,4 +1,4 @@
-"""MCP contract tests. Install .[mcp] to run; no SteamVR or SSH needed."""
+"""MCP contract tests. They need the mcp package (testbench/install.sh makes .venv with it); no SteamVR or SSH needed."""
 import importlib.util
 import json
 import tempfile
@@ -8,7 +8,7 @@ from pathlib import Path
 SDK_AVAILABLE = importlib.util.find_spec('mcp') is not None
 
 
-@unittest.skipUnless(SDK_AVAILABLE, 'install .[mcp] for MCP tests')
+@unittest.skipUnless(SDK_AVAILABLE, 'needs the mcp package (testbench/.venv)')
 class ToolTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         try:

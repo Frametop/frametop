@@ -7,11 +7,13 @@ your existing SSH configuration determine access.
 
 ## Install from a checkout
 
-`testbench/install.sh install` builds the native parts and makes `testbench/.venv`
-on the Frame's python3, with the MCP SDK and its dependencies at the versions
-pinned in `requirements-mcp.txt` (the ordinary CLI has no Python dependencies).
-The venv gets no package install: a `.pth` file puts the checkout on its path, so
-the CLI's checkout-relative `build/` and `resources/` paths keep working.
+`testbench/install.sh install` builds the native parts on the Frame and makes
+`testbench/.venv` where it runs, on the Frame or on a PC that drives the Frame
+over SSH. The venv uses that machine's python3 and holds the MCP SDK and its
+dependencies, as wheels at the versions pinned in `requirements-mcp.txt` (the
+ordinary CLI has no Python dependencies). It gets no package install: a `.pth`
+file puts the checkout on its path, so the CLI's checkout-relative `build/` and
+`resources/` paths keep working. The installer then runs the MCP tests in it.
 
 ```sh
 testbench/install.sh install
@@ -35,7 +37,6 @@ Remote Steam Frame through an already configured SSH alias:
 ```sh
 /path/to/frametop/testbench/.venv/bin/python /path/to/frametop/testbench/frame-testbench-mcp \
   --host frame \
-  --remote-root dev/frametop/testbench \
   --artifacts-dir /absolute/path/to/captures
 ```
 
@@ -54,7 +55,6 @@ Generic MCP client configuration:
       "args": [
         "/absolute/path/to/frametop/testbench/frame-testbench-mcp",
         "--host", "frame",
-        "--remote-root", "dev/frametop/testbench",
         "--artifacts-dir", "/absolute/path/to/captures"
       ]
     }
@@ -62,7 +62,8 @@ Generic MCP client configuration:
 }
 ```
 
-Omit `--host` and `--remote-root` for local use. For clients that provide a tool
+`--remote-root` defaults to `dev/frametop/testbench`, where `scripts/sync.sh` puts
+it. Omit `--host` for local use. For clients that provide a tool
 call timeout, allow at least 450 seconds for capture and leave additional time
 when queueing calls. The server's CLI subprocess timeout is 420 seconds, covering
 the CLI's separately bounded status, capture, and fetch operations.
@@ -216,12 +217,12 @@ them, and treat screenshots as potentially sensitive.
 ## Reproduce the tests
 
 ```sh
-testbench/install.sh install
+testbench/install.sh install     # runs them once the venv is ready
 cd testbench && .venv/bin/python -m unittest discover -s tests -p 'test_mcp*.py' -v
 ```
 
-`just test-testbench` runs the whole suite in the dev container, which has no MCP
-SDK. Without it, MCP-dependent tests skip; packaging metadata tests still run.
+`just test-testbench` runs the whole suite in the image, which has no MCP SDK, so
+the MCP-dependent tests skip there.
 Do not count a skipped MCP suite as MCP verification. No hardware or SSH connection
 is needed. Tests use an explicitly identified CPU-only observer fixture and a
 real SDK client/server subprocess to exercise initialize, list-tools, tool calls,

@@ -41,6 +41,7 @@ VRPATHS = os.path.join(HOME, ".config/openvr/openvrpaths.vrpath")
 # The Frametop desktop has its own XDG_CONFIG_HOME (session/frametop-session.sh). An install from a
 # terminal there, before pointer/driver/install.sh set SteamVR's, left vrpathreg's registry here.
 STRAY_VRPATHS = os.path.join(HOME, ".config/frametop/openvr/openvrpaths.vrpath")
+TESTBENCH_DROPIN = os.path.join(HOME, ".config/systemd/user/steamvr.service.d/90-frame-testbench.conf")
 BACKLIGHT = "/sys/class/backlight/ae94000.dsi.0/brightness"  # as in power/ft-powerd.cpp
 EYE_MMAP = "/dev/shm/eye-server.mmap"
 # SteamVR's settings, where SteamOS 0.4's Track Dominant Eye Only lives (as gaze/gazecal.py reads it).
@@ -304,6 +305,9 @@ def check_host():
         report("ok", "steamvr.service", "Frametop's services start and stop with it")
     else:
         report("FAIL", "steamvr.service", "gone or renamed; Frametop's services are ordered on it")
+    if os.path.exists(TESTBENCH_DROPIN):
+        report("warn", "testbench", "its preload runs inside SteamVR: after a SteamVR update, retest it before "
+               "relying on it (testbench/docs/validation.md), or remove it (testbench/install.sh uninstall)")
 
     glibc = os.confstr("CS_GNU_LIBC_VERSION") or ""
     have = tuple(int(x) for x in re.findall(r"\d+", glibc)[:2])

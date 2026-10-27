@@ -36,7 +36,7 @@ AxisInput = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=-1, le=1
 @dataclass(frozen=True)
 class Config:
     host: str | None = None
-    remote_root: str = 'dev/frame-testbench'
+    remote_root: str = 'dev/frametop/testbench'
     artifacts_dir: Path = Path('artifacts')
 
 
@@ -254,7 +254,7 @@ def create_server(config: Config, *, runner=run_cli):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', help='fixed SSH hostname or configured alias')
-    parser.add_argument('--remote-root', default='dev/frame-testbench', help='remote checkout path')
+    parser.add_argument('--remote-root', default='dev/frametop/testbench', help='remote checkout path')
     parser.add_argument('--artifacts-dir', type=Path, default=Path('artifacts'),
                         help='local directory for retained captures')
     args = parser.parse_args(argv)

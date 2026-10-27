@@ -40,4 +40,4 @@ Each issue was reproduced before its fix and covered by a regression test.
 
 ## Retesting after runtime updates
 
-Run `just test-testbench`, then the README's live loop with an unused output directory. Check the actual HMD index/model, proxy readiness, public pose matrix, both worn transitions, frame advancement, visible image changes, release, and SSH access. Compare the driver fingerprint. Unsupported interface versions pass through rather than receiving an incorrectly sized proxy vtable; absent control readiness must not be called a successful override.
+Run `./ft dev test` and `testbench/install.sh install`, then the README's live loop with an unused output directory. Check the actual HMD index/model, proxy readiness, public pose matrix, both worn transitions, frame advancement, visible image changes, release, and SSH access. Compare the driver fingerprint. Unsupported interface versions pass through rather than receiving an incorrectly sized proxy vtable; absent control readiness must not be called a successful override.

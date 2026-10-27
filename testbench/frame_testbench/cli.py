@@ -66,7 +66,7 @@ def fetch_capture(host, result, output):
 def parser():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--host', help='SSH host alias; commands execute on the headset')
-    ap.add_argument('--remote-root', default='dev/frame-testbench', help='remote checkout, relative to SSH home or absolute')
+    ap.add_argument('--remote-root', default='dev/frametop/testbench', help='remote checkout, relative to SSH home or absolute')
     ap.add_argument('--socket', help='override local input control socket')
     commands = ap.add_subparsers(dest='command', required=True)
     commands.add_parser('status', help='runtime poses, frames and input override readback')

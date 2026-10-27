@@ -80,10 +80,14 @@ test-bash:
     done
     exit $status
 
-# the testbench, a dev-only tool (.dockerignore keeps it out of the image, so this needs the
-# mounted checkout, as `ft dev test` has): its SteamVR input proxy and observer against fake
-# runtimes, pose math, the installer, the CLI. The MCP tests skip without the mcp package.
+# the testbench, a dev-only tool: its SteamVR input proxy and observer against fake runtimes,
+# pose math, the installer, the CLI. .dockerignore keeps it out of the image, so only a
+# mounted checkout (`ft dev test`) has it. The MCP tests skip here, with no mcp package;
+# testbench/install.sh runs them in its venv.
 test-testbench:
+    #!/usr/bin/env bash
+    set -e
+    [ -d testbench ] || { echo "testbench/: not in the image (dev-only), skipped"; exit 0; }
     cd testbench && python3 -m unittest discover -s tests
 
 # lint the Python side (ruff from the locked dev group). Report only for now:

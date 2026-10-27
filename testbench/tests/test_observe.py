@@ -15,6 +15,7 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+BUILD = ROOT / 'build' / 'observe-tests'
 
 
 def input_components(side):
@@ -228,7 +229,7 @@ class ObserveTests(unittest.TestCase):
         script = ROOT / 'scripts/build-observe.sh'
         if not script.exists():
             raise AssertionError('missing native observation build script')
-        subprocess.run(['sh', str(script)], cwd=ROOT, check=True)
+        subprocess.run(['sh', str(script), str(BUILD)], cwd=ROOT, check=True)
         cls.tmp = tempfile.TemporaryDirectory(prefix='observe-', dir=ROOT / 'build')
         cls.work = Path(cls.tmp.name)
         source = cls.work / 'fake.cpp'
@@ -253,7 +254,7 @@ class ObserveTests(unittest.TestCase):
 
     def run_observe(self, *args, ok=True, mode=''):
         self.env['FAKE_MODE'] = mode
-        p = subprocess.run([str(ROOT / 'build/frame-observe'), *map(str, args)], env=self.env,
+        p = subprocess.run([str(BUILD / 'frame-observe'), *map(str, args)], env=self.env,
                            capture_output=True, text=True, timeout=6, check=False)
         self.assertEqual(p.returncode == 0, ok, (p.returncode, p.stdout, p.stderr))
         data = json.loads(p.stdout)

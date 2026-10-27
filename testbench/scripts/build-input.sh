@@ -4,6 +4,7 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 out=${1:-"$root/build"}
 mkdir -p -- "$out"
 out=$(cd -- "$out" && pwd)
+# Fetches the pinned OpenVR headers into build/include.
 (cd "$root" && . ../scripts/openvr.sh)
 CXX=${CXX:-g++}
 flags=(-std=c++17 -O2 -g -fPIC -fvisibility=hidden -Wall -Wextra -Werror -pthread -isystem "$root/build/include")

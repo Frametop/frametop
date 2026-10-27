@@ -24,7 +24,7 @@ def png():
 PNG = png()
 
 
-@unittest.skipUnless(SDK_AVAILABLE, 'install .[mcp] for MCP tests')
+@unittest.skipUnless(SDK_AVAILABLE, 'needs the mcp package (testbench/.venv)')
 class StdioTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

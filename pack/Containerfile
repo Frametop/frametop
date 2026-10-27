@@ -33,6 +33,8 @@ RUN dnf -y install --setopt=install_weak_deps=False \
       # keep the native KDE/Qt stack in matching Fedora packages
       python3-shiboken6 kf6-kirigami kf6-qqc2-desktop-style \
       qt6-qtwayland qt6-qtsvg qt6-qtimageformats qt6-qtpdf \
+      # The reset countdown renders offline and in VR with this installed font.
+      google-noto-sans-vf-fonts \
       breeze-icon-theme plasma-breeze krdp freerdp tigervnc-x11-server xrandr \
     && dnf -y remove 'glibc-langpack-*' \
     && dnf -y install glibc-langpack-en \
@@ -102,6 +104,8 @@ COPY . /src/frametop
 RUN screens/build.sh \
  && install -t /runtime/opt/frametop/bin screens/build/ft-screens screens/build/ft-handtest screens/build/ft-spotpanel \
  && rm -f screens/build/*.o
+RUN layout/countdown/build.sh \
+ && test -x layout/countdown/build/ft-reset-timer
 RUN pointer/helper/build.sh && pointer/driver/build.sh \
  && install -t /runtime/opt/frametop/bin pointer/helper/build/ft-pointer \
  && install -t /runtime/opt/frametop/lib pointer/driver/build/driver_ft_pointer.so

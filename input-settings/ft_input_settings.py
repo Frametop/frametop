@@ -1683,6 +1683,14 @@ class Backend(QObject):
         if not ok:
             self.message.emit("Couldn't start Frametop Tour", True)
 
+    @Slot()
+    def openControlsGuide(self):
+        """Open the reference page without changing the running settings app's environment."""
+        ok, _pid = QProcess.startDetached("env", ["FT_TOUR_PAGE=recenter", sys.executable,
+                                                  os.path.join(REPO, "tour", "ft_tour.py")])
+        if not ok:
+            self.message.emit("Couldn't start the controls guide", True)
+
     def _gaze_check(self, command, done):
         if self._send(command, GAZED):
             self._check_asked = time.monotonic()

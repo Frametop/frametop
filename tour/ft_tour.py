@@ -179,6 +179,55 @@ def pages(f, keys):
         "actions": [{"id": "display:screens", "text": "Screens settings", "icon": "video-display"}]}]
 
     out.append({
+        "id": "recenter", "title": "Recenter & controls", "icon": "crosshairs",
+        "intro": "After changing your sitting position, reset the layout around where you are now. "
+                 "The three-second countdown gives you time to release the control and look straight ahead. "
+                 "Hand gestures need hand tracking and hand interaction enabled in Hand settings.",
+        "rows": ["Recenter with your hands",
+                 ["1. Point at the target-shaped Reset icon", "It is below a desktop screen, immediately left of "
+                                                             "its grab bar. The controls appear as the ray approaches"],
+                 ["2. Pinch thumb and index once, then release", "Let go and face the direction you want to use"],
+                 ["3. Look straight ahead during 3 → 2 → 1", "The countdown follows your head. The layout then "
+                                                           "resets using your current position and direction"],
+                 ["Touch Reset directly instead", "Tap the confirmation prompt, or tap Reset again within five "
+                                                  "seconds. The countdown starts after confirmation"],
+                 ["Meta+Shift+R, or Reset Screen Layout in the app menu", "The same countdown and reset. Repeated "
+                                                                         "requests while a reset is running are ignored"],
+                 "Lazy Susan and reset",
+                 ["Sweep an open hand on its edge sideways, away from the screens", "Cycles to the next screen. "
+                                                                                  "Keep facing your intended forward direction"],
+                 ["Meta+Alt+Tab / Meta+Alt+Shift+Tab", "Cycles to the next screen on the right / left"],
+                 ["Lazy susan brings screens to you (Hand settings)", "On: brings one screen into a front slot. "
+                                                                      "Off: turns the whole arrangement together"],
+                 ["You have moved to a new position", "Use Reset. Whole-room rotation preserves the old arrangement; "
+                                                     "it does not move the curved layout's centre to your new position"],
+                 "Pointing and handoff",
+                 ["Hold a hand in front, palm away; bring thumb near index", "Shows the hand ray. Aim and pinch to "
+                                                                            "click; hold the pinch and move to drag"],
+                 ["A controller has taken over that hand", "Put it down, move your bare hand away from it, and wait "
+                                                            "a few seconds without touching or moving the controller"],
+                 ["You have just been typing", "Lift the hand off the keyboard before trying a hand gesture"],
+                 ["Gaze mode is on", "Look at the control and pinch. The hand ray is normally off in gaze mode"],
+                 ["Recenter on the Pointer settings page", "Adjusts the pointer. Use Reset Screen Layout to "
+                                                          "reposition the screens"],
+                 "Menus and shortcuts",
+                 ["Turn a palm toward your face, hold still and look at it", "When its ring appears, pinch with "
+                                                                           "that hand to open the Steam menu or close the dashboard"],
+                 ["Tap Meta / Alt+F1 / Meta+Space", "Steam menu / desktop application launcher / search apps and "
+                                                   "remote displays. Meta is the Windows key, or Cmd on a Mac keyboard"],
+                 ["Meta+Shift+H", "Hides or shows the screens. Change shortcuts in Keyboard settings"]],
+        "note": "With Frametop screens, Reset moves existing, unpinned desktop and remote panels around you. "
+                "It preserves app windows, fullscreen playback, screen visibility and stream connections. "
+                "Pinned panels and independent floating windows stay in place; disconnected screens are skipped. "
+                "Open profile restores saved apps and window positions and can change fullscreen. "
+                "The legacy SteamVR dashboard-screen mode still uses full profile reset.",
+        "actions": [{"id": "input:hands", "text": "Hand settings", "icon": "transform-browse"},
+                    {"id": "input:pointer", "text": "Pointer settings", "icon": "input-mouse"},
+                    {"id": "input:keyboard", "text": "Keyboard settings", "icon": "input-keyboard"},
+                    {"id": "display:layout", "text": "Layout & profiles", "icon": "view-grid"}],
+        "clips": []})
+
+    out.append({
         "id": "floating", "title": "Floating windows", "icon": "window-new",
         "intro": "Any desktop window can float in VR as a panel of its own. It's still a window of the same desktop, "
                  "so drag and drop and the clipboard work between floating windows and the screens.",

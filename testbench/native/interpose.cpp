@@ -37,7 +37,7 @@ bool failure_counted() {
     close(fd);
     if (n <= 0) return false;
     text[n] = 0;
-    return strstr(text, "frog");
+    return strstr(text, "frog") != nullptr;
 }
 }
 extern "C" __attribute__((visibility("default")))

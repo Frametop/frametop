@@ -1,4 +1,5 @@
 #include "openvr_driver.h"
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
@@ -160,8 +161,9 @@ public:
     void SetRecommendedRenderTargetSize(uint32_t i, uint32_t w, uint32_t h) override { assert(i == 7 && w == 123 && h == 456); host_mask |= 512; }
 } host;
 // Served as both IVRDriverInput_004 and _005, two objects over the same components like
-// vrserver's. input005_calls counts the calls that reach the _005 one.
-int prox_count = 0, input005_calls = 0;
+// vrserver's. input005_calls counts cv's creates and eye updates that reach the _005 one.
+int prox_count = 0;
+std::atomic<int> input005_calls{0};
 class Input : public IVRDriverInput {
     const bool latest_;
 public:
@@ -177,7 +179,6 @@ public:
     EVRInputError UpdateBooleanComponent(VRInputComponentHandle_t h, bool v, double t) override {
         if (h > 1000) return update_input(h, v, true, t);
         assert(h >= 501 && h <= 504); assert(t == -0.125 || t == 0);
-        if (latest_) ++input005_calls;
         std::lock_guard<std::mutex> lock(mu);
         if (h == 501 || h == 502) { worn = v; ++worn_count; } else { other_worn = v; }
         return VRInputError_None;
@@ -190,7 +191,7 @@ public:
     EVRInputError CreatePoseComponent(PropertyContainerHandle_t c, const char *n, VRInputComponentHandle_t *h) override { assert(c == 109 && !strcmp(n,"pose")); *h = 604; input_mask |= 32; return VRInputError_None; }
     EVRInputError UpdatePoseComponent(VRInputComponentHandle_t h, const HmdMatrix34_t *p, double t) override { assert(h == 604 && p->m[0][0] == 2 && t == 0.125); input_mask |= 64; return VRInputError_InvalidParam; }
     EVRInputError CreateEyeTrackingComponent(PropertyContainerHandle_t c, const char *n, VRInputComponentHandle_t *h) override { assert(c == 109 && !strcmp(n,"eye")); *h = 605; input_mask |= 128; return VRInputError_None; }
-    EVRInputError UpdateEyeTrackingComponent(VRInputComponentHandle_t h, const VREyeTrackingData_t *p, double t) override { assert(h == 605 && p && t == 0.125); input_mask |= 256; return VRInputError_InvalidParam; }
+    EVRInputError UpdateEyeTrackingComponent(VRInputComponentHandle_t h, const VREyeTrackingData_t *p, double t) override { assert(h == 605 && p && t == 0.125); input_mask |= 256; if (latest_) ++input005_calls; return VRInputError_InvalidParam; }
 } input(false), input005(true);
 class Properties : public IVRProperties {
 public:
@@ -218,7 +219,7 @@ public:
         if (e) *e = VRInitError_None;
         if (!strcmp(n,IVRServerDriverHost_Version)) return &host;
         if (!strcmp(n,IVRDriverInput_Version)) return &input;
-        if (!strcmp(n,"IVRDriverInput_005")) return &input005;
+        if (!strcmp(n,"IVRDriverInput_005") && !std::getenv("FAKE_NO_INPUT_005")) return &input005;
         if (!strcmp(n,IVRProperties_Version)) return &properties;
         if (e) *e = VRInitError_Init_InterfaceNotFound;
         return other_interface;
@@ -229,7 +230,7 @@ void metrics() {
     std::lock_guard<std::mutex> lock(mu);
     bool raw = latest.qWorldFromDriverRotation.w == 1 && latest.qDriverFromHeadRotation.w == 1 && latest.poseTimeOffset == 0;
     for (int k = 0; k < 3; ++k) raw = raw && latest.vecWorldFromDriverTranslation[k] == 0 && latest.vecDriverFromHeadTranslation[k] == 0 && latest.vecVelocity[k] == 0 && latest.vecAngularVelocity[k] == 0 && latest.vecAcceleration[k] == 0 && latest.vecAngularAcceleration[k] == 0;
-    std::cout << "{\"hmd_pose\":[" << latest.vecPosition[0] << ',' << latest.vecPosition[1] << ',' << latest.vecPosition[2] << ',' << latest.qRotation.w << ',' << latest.qRotation.x << ',' << latest.qRotation.y << ',' << latest.qRotation.z << "],\"raw_transform\":" << raw << ",\"valid\":" << (latest.poseIsValid && latest.deviceIsConnected && latest.result == TrackingResult_Running_OK) << ",\"other_x\":" << other_x << ",\"pose_count\":" << pose_count << ",\"worn_count\":" << worn_count << ",\"worn\":" << worn << ",\"other_worn\":" << other_worn << ",\"input005_calls\":" << input005_calls << "}" << std::endl;
+    std::cout << "{\"hmd_pose\":[" << latest.vecPosition[0] << ',' << latest.vecPosition[1] << ',' << latest.vecPosition[2] << ',' << latest.qRotation.w << ',' << latest.qRotation.x << ',' << latest.qRotation.y << ',' << latest.qRotation.z << "],\"raw_transform\":" << raw << ",\"valid\":" << (latest.poseIsValid && latest.deviceIsConnected && latest.result == TrackingResult_Running_OK) << ",\"other_x\":" << other_x << ",\"pose_count\":" << pose_count << ",\"worn_count\":" << worn_count << ",\"worn\":" << worn << ",\"other_worn\":" << other_worn << ",\"input005_calls\":" << input005_calls.load() << "}" << std::endl;
 }
 }
 int main(int argc, char **) {

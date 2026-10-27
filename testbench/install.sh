@@ -48,16 +48,19 @@ frogs() { { grep -o frog "$tracker" 2>/dev/null || true; } | wc -l; }
 restart_steamvr() {
   # Stopping a SteamVR that is starting, or started under 10 s ago (the health check touches
   # its tracker when a session starts), counts as a failed session: wait those out.
-  local i state
+  local i settled=
   for i in $(seq 60); do
-    state=$(steamvr ActiveState)
-    case $state in
+    case $(steamvr ActiveState) in
       activating|deactivating|reloading) ;;
-      active) [ $(( $(date +%s) - $(stat -c %Y "$tracker" 2>/dev/null || echo 0) )) -lt 15 ] || break ;;
-      *) break ;;
+      active) [ $(( $(date +%s) - $(stat -c %Y "$tracker" 2>/dev/null || echo 0) )) -lt 15 ] || { settled=1; break; } ;;
+      *) settled=1; break ;;
     esac
     sleep 1
   done
+  if [ -z "$settled" ]; then
+    echo "SteamVR is still starting or stopping after a minute. Not restarting it." >&2
+    exit 1
+  fi
   if [ "$(frogs)" -gt 0 ]; then
     echo "SteamOS already counts a failed SteamVR session ($tracker), and a restart could add another." >&2
     [ "$1" = install ] || { echo "Not restarting: SteamVR starts without the preload when it next starts." >&2; exit 0; }
@@ -71,10 +74,10 @@ restart_steamvr() {
   first=$(steamvr InvocationID)
   for i in $(seq 60); do
     [ "$(frogs)" -eq 0 ] && [ "$(steamvr InvocationID)" = "$first" ] && [ "$(steamvr ActiveState)" = active ] ||
-      restart_failed "$1"
+      restart_failed
     sleep 0.5
   done
-  pgrep -x vrserver >/dev/null || restart_failed "$1"
+  pgrep -x vrserver >/dev/null || restart_failed
   echo "SteamVR restarted and stayed up"
 }
 
@@ -110,6 +113,9 @@ host_uninstall() {
   rm -rf -- "$libs"
   echo "removed SteamVR's preload"
 }
+
+# Tests source this file for its functions.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 restart=
 case ${2:-} in

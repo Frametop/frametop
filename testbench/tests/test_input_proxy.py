@@ -550,15 +550,23 @@ class InputProxyTests(unittest.TestCase):
         self.restart_runtime(FAKE_INPUT_VERSION="IVRDriverInput_005")
         self.assertTrue(self.rpc("status")["proximity_ready"])
         self.assertTrue(self.rpc("worn 1")["ok"])
+        self.assertTrue(self.runtime("forward")["all_forwarded"])
         self.runtime("physical")
         time.sleep(0.05)
         r = self.runtime("metrics")
         self.assertTrue(r["worn"])
         self.assertFalse(r["other_worn"])
-        # cv's own creates and updates go to _005; the worn ticks still arrive.
-        self.assertGreaterEqual(r["input005_calls"], 4)
         self.assertGreater(r["worn_count"], 3)
+        # cv's four boolean creates and its eye update (whose struct grew in _005) reach
+        # _005; the state's own updates go through _004 to the same components.
+        self.assertEqual(r["input005_calls"], 5)
+
+    def test_runtime_without_input_005_still_serves_004(self):
+        self.restart_runtime(FAKE_NO_INPUT_005="1")
+        self.assertTrue(self.rpc("status")["proximity_ready"])
+        self.assertTrue(self.rpc("worn 1")["ok"])
         self.assertTrue(self.runtime("forward")["all_forwarded"])
+        self.assertEqual(self.runtime("metrics")["input005_calls"], 0)
 
     def test_malformed_commands_do_not_mutate_state(self):
         s = self.rpc("pose 1 2 3 1 0 0 0")
@@ -634,10 +642,11 @@ class InputProxyTests(unittest.TestCase):
             tracker.write_text(text)
             p = subprocess.Popen([str(BUILD / "vrserver")], env=env, text=True,
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda p=p: p.poll() is None and p.kill())
             assert p.stdout is not None
             self.assertEqual(p.stdout.readline().strip(), "ready")
             self.assertEqual(os.path.exists(env["FRAME_TESTBENCH_SOCKET"]), injected)
-            out, err = p.communicate("quit\n", timeout=5)
+            _, err = p.communicate("quit\n", timeout=5)
             self.assertEqual(p.returncode, 0, err)
             self.assertEqual("failed SteamVR session" in err, not injected)
 

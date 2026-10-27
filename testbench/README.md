@@ -32,7 +32,7 @@ Installation copies the native libraries to a content-addressed directory under 
 ~/.config/systemd/user/steamvr.service.d/90-frame-testbench.conf
 ```
 
-`install.sh --restart` restarts the headset's `steamvr.service` and interrupts VR: only with nobody in the headset. It does not restart SSH or alter networking. Library updates get new paths rather than overwriting loaded shared objects. Without `--restart`, the change applies when SteamVR next starts. The CLI's `install` and `uninstall` only stage it: restart SteamVR through `install.sh`, which checks for the crash loop below. The CLI commands below run in `testbench/`.
+`install.sh install --restart` (or `uninstall --restart`) restarts the headset's `steamvr.service` and interrupts VR: only with nobody in the headset. It does not restart SSH or alter networking. Library updates get new paths rather than overwriting loaded shared objects. Without `--restart`, the change applies when SteamVR next starts. The CLI's `install` and `uninstall` only stage it: restart SteamVR through `install.sh`, which checks for the crash loop below. The CLI commands below run in `testbench/`.
 
 ## Development loop
 
@@ -122,7 +122,7 @@ A SteamVR that keeps crashing is more than a nuisance on the Frame. `steamvr.ser
 
 - The loader reads the health check's file (`$XDG_RUNTIME_DIR/steamvr-short-session-tracker`). A SteamVR that starts while it counts a failure runs without the proxy, so a proxy that crashes vrserver costs one failed session. That one session has no testbench, whatever the failure was (stopping SteamVR in its first 10 seconds counts too); the next start after a good session has it again.
 - The drop-in sets `RestartSec=30`: while the testbench is installed, a SteamVR that exits, crashed or not, comes back after 30 seconds.
-- `install.sh --restart` won't restart while a failure is counted. Afterwards it watches that file, the unit's `InvocationID` and state for 30 seconds, then checks that vrserver runs, and takes the preload back out at the first failure.
+- `install.sh install --restart` and `uninstall --restart` won't restart while a failure is counted, or while SteamVR is still starting. Afterwards it watches that file, the unit's `InvocationID` and state for 30 seconds, then checks that vrserver runs, and takes the preload back out at the first failure.
 
 If SteamVR is crash-looping and the CLI is unavailable, remove the single override directly:
 

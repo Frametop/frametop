@@ -161,7 +161,7 @@ public:
         // Both versions reach the same components, so the state keeps updating through _004.
         EVRInitError error = VRInitError_None;
         auto *input005 = context->GetGenericInterface(kDriverInput005, &error);
-        context_.input005.real = error == VRInitError_None ? static_cast<IVRDriverInput *>(input005) : nullptr;
+        context_.input005.real = context_.input.real && error == VRInitError_None ? static_cast<IVRDriverInput *>(input005) : nullptr;
         context_.host.properties = static_cast<IVRProperties *>(context->GetGenericInterface(IVRProperties_Version));
         state_.reset(context_.host.real, context_.input.real);
         auto result = real->Init(&context_);

@@ -29,13 +29,15 @@ Preconditions:
 - **Lose an eye.** Run `T gaze eyes open lost`, snapshot: `gaze.eyes_lost` is `[false, true]`.
 - **Gaze mode on (visual).** Run `G on` (the pointer helper keeps it until it restarts;
   `V cleanup` puts it back), aim with `T gaze look`, and capture: the cursor sits where the eyes
-  look.
+  look. Look elsewhere and capture again: it follows (proved 2026-10-27: `look 0 0` then
+  `look -15 8`, the cursor went right and up; yaw is +left).
 - **Release.** Run `T gaze release`: ft-gaze goes back to the real tracker within 2 s.
 
 ## Gotchas
 
 - Without `worn on` the samples stall: ft-gaze emits only with a valid head pose.
-- Gaze calibration still applies to faked looks, so `last` is near the look, not equal to it.
+- `gaze.last` matched the look exactly on 2026-10-27 (own tracker, no calibration samples);
+  with a calibration it is near the look, not equal to it.
 - A replayed recording (`T replay NAME --only gaze`) is a real person's eye movement: keep
   recordings local.
 - How a real look feels, and tracking quality, need a headset test.

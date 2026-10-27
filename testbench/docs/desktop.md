@@ -4,6 +4,9 @@ The testbench drives Frametop's desktop through Frametop's own control sockets, 
 devices and tools do. Nothing here touches SteamVR's inputs: for controllers and the HMD, see
 [controller inputs](controller-inputs.md).
 
+These act on the live desktop and the headset's displays. Don't run them while someone else wears
+the headset, and turn the displays back on (`power on`) if you turned them off.
+
 ```sh
 ./frame-testbench keyboard keys ctrl+l enter    # each combination pressed and let go in turn
 ./frame-testbench keyboard type -- 'hello world'   # typed where typing goes, as Frametop Voice types
@@ -14,7 +17,7 @@ devices and tools do. Nothing here touches SteamVR's inputs: for controllers and
 
 ./frame-testbench pointer state                 # head, gaze mode, worn or not
 ./frame-testbench pointer overlays              # SteamVR's overlays: key, name, visible
-./frame-testbench pointer measure KEY           # an overlay's centre, size and axes
+./frame-testbench pointer measure KEY           # a visible overlay's centre, size and axes
 ./frame-testbench pointer show|hide|recenter    # the 3D mouse's cursor
 
 ./frame-testbench power status                  # displays on, off or away; idle and timeout seconds
@@ -37,10 +40,12 @@ The MCP tools are `keyboard_keys`, `keyboard_type`, `mouse_move`, `mouse_click`,
   3 s after its last word, its keys and buttons coming up.
 - **Text.** `keyboard type` sends the relay's `type`, as Frametop Voice does: the desktop's
   keyboard layout, or a US one when typing goes to Steam. Printable characters only, up to
-  2000; press `enter` with `keyboard keys`.
+  2000 (the testbench's limit; the relay takes more); press `enter` with `keyboard keys`.
 - **Pointer helper** (`@ft_pointer_helper`): `gaze ? headset`, `head`, `overlays` and
   `measure KEY` are read-only questions; `show`, `hide` and `recenter` change only the cursor.
   `pointer state` reports a missing head pose (SteamVR not tracking) as `head.error`.
+  `measure` needs a head pose too, and finds only an overlay in view of the head: a hidden one,
+  one behind, or the pointer's own cursor says "panel not visible".
 - **ft-powerd** (`@ft_powerd`): `status` reads; `on` and `off` turn the headset displays on or off,
   as the Power tab does. `away` is SteamVR's standby.
 
@@ -57,6 +62,10 @@ punctuation by evdev name (`minus`, `comma`, `dot`, `slash`...), the modifiers `
 to 767). A combination joins up to six keys with `+`: held in order, let go in reverse.
 
 ## Limits
+
+- The relay doesn't answer keys, clicks or text, and the helper doesn't answer `show`, `hide`
+  or `recenter`: their `ok` means sent. Check the result another way (`pointer state`, a
+  capture).
 
 - Typing goes wherever typing goes, which may not be what's in front of you: click the panel
   first.

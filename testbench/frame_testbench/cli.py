@@ -204,7 +204,7 @@ def parser():
     pointers = pointer.add_subparsers(dest='pointer_command', required=True)
     pointers.add_parser('state', help='the head, gaze mode, and whether the headset is worn')
     pointers.add_parser('overlays', help="SteamVR's overlays, as the pointer helper lists them")
-    measure = pointers.add_parser('measure', help="an overlay's centre, size and axes in the standing universe")
+    measure = pointers.add_parser('measure', help="a visible overlay's centre, size and axes in the standing universe (needs a head pose)")
     measure.add_argument('overlay')
     for name in desktop.POINTER_COMMANDS:
         pointers.add_parser(name, help={'recenter': 'the cursor back in front'}.get(name))

@@ -22,7 +22,7 @@ DEVICE_ID = 'testbench'
 DEVICE_NAME = 'Frame testbench'
 
 # Linux input codes (include/uapi/linux/input-event-codes.h).
-EV_SYN, EV_KEY, EV_REL = 0, 1, 2
+EV_KEY, EV_REL = 1, 2
 REL_X, REL_Y, REL_HWHEEL, REL_WHEEL = 0, 1, 6, 8
 BUTTONS = {'left': 0x110, 'right': 0x111, 'middle': 0x112, 'back': 0x113, 'forward': 0x114}
 KEY_MAX = 0x2ff
@@ -61,7 +61,7 @@ def key_code(name):
 def combo(text):
     """"ctrl+shift+t" -> [29, 42, 20]: held in order, let go in reverse."""
     codes = [key_code(part) for part in text.split('+')]
-    if not codes or len(codes) > 6 or len(set(codes)) != len(codes):
+    if len(codes) > 6 or len(set(codes)) != len(codes):
         raise ValueError(f'{text!r}: up to six different keys joined with +')
     return codes
 
@@ -101,14 +101,18 @@ class Device:
     """A keyboard or mouse plugged into the input relay for the length of a with block. The relay
     lets it go HOST_TIMEOUT (3 s) after its last word, its keys coming up, if this stops early."""
 
-    def __init__(self, kind, link=None):
+    def __init__(self, kind):
         self.kind = kind
-        self.link = link or Datagrams()
+        self.link = Datagrams()
         self.prefix = f'hostev {DEVICE_ID} {kind}'
+        self.said = 0.0
 
-    def __enter__(self):
+    def hello(self):
         self.link.send(RELAY, f'hostdev {DEVICE_ID} {self.kind} {DEVICE_NAME}')
         self.said = time.monotonic()
+
+    def __enter__(self):
+        self.hello()
         return self
 
     def __exit__(self, *_):
@@ -122,8 +126,7 @@ class Device:
     def events(self, *triples):
         """Events (type, code, value), then a report's end."""
         if time.monotonic() - self.said > 1:   # the relay's hello, under HOST_TIMEOUT
-            self.link.send(RELAY, f'hostdev {DEVICE_ID} {self.kind} {DEVICE_NAME}')
-            self.said = time.monotonic()
+            self.hello()
         words = [str(v) for triple in triples for v in triple]
         self.link.send(RELAY, ' '.join([self.prefix, *words, '0 0 0']))
 
@@ -146,7 +149,7 @@ def press_keys(combos, gap=0.03):
 
 def type_text(text):
     """Text typed where typing goes, as Frametop Voice types it (the desktop's layout, or a US
-    one for Steam); only printable characters."""
+    one for Steam); only printable characters. The relay doesn't answer: ok means sent."""
     if not text or len(text) > TEXT_MAX or not text.isprintable():
         raise ValueError(f'type 1 to {TEXT_MAX} printable characters (no newlines: press enter instead)')
     with Datagrams() as link:
@@ -164,10 +167,10 @@ def steps(dx, dy, most=40):
         done_x, done_y = x, y
 
 
-def mouse_counts(value, limit=20000):
+def mouse_counts(value):
     value = int(value)
-    if abs(value) > limit:
-        raise ValueError(f'mouse moves are within {limit} counts')
+    if abs(value) > 20000:
+        raise ValueError('mouse moves are within 20000 counts')
     return value
 
 
@@ -181,8 +184,10 @@ def mouse_move(dx, dy, button=None):
             mouse.events((EV_KEY, BUTTONS[button], 1))
             time.sleep(0.08)
         for x, y in steps(dx, dy):
-            mouse.events(*[t for t in ((EV_REL, REL_X, x), (EV_REL, REL_Y, y)) if t[2]])
-            time.sleep(0.008)
+            moved = [t for t in ((EV_REL, REL_X, x), (EV_REL, REL_Y, y)) if t[2]]
+            if moved:
+                mouse.events(*moved)
+                time.sleep(0.008)
         if button:
             time.sleep(0.08)
             mouse.events((EV_KEY, BUTTONS[button], 0))
@@ -190,17 +195,19 @@ def mouse_move(dx, dy, button=None):
 
 
 def mouse_click(button='left', count=1):
+    """Click where the cursor is, up to a triple click."""
+    count = int(count)
     if button not in BUTTONS:
         raise ValueError(f'button is one of {", ".join(BUTTONS)}')
-    if not 1 <= int(count) <= 3:
+    if not 1 <= count <= 3:
         raise ValueError('click 1 to 3 times')
     with Device('mouse') as mouse:
-        for i in range(int(count)):
+        for _ in range(count):
             mouse.events((EV_KEY, BUTTONS[button], 1))
             time.sleep(0.06)
             mouse.events((EV_KEY, BUTTONS[button], 0))
             time.sleep(0.1)
-    return {'ok': True, 'clicked': button, 'count': int(count)}
+    return {'ok': True, 'clicked': button, 'count': count}
 
 
 def mouse_scroll(notches, horizontal=False):
@@ -215,14 +222,28 @@ def mouse_scroll(notches, horizontal=False):
     return {'ok': True, 'scrolled': notches, 'horizontal': bool(horizontal)}
 
 
-def ok_words(reply, name):
+def ok_words(reply, name, least=0):
+    """The words after a reply's "ok", at least `least` of them; anything else is the service's error."""
     words = reply.split()
     if not words or words[0] != 'ok':
         raise RuntimeError(f'@{name}: {reply.strip() or "empty reply"}')
+    if len(words) - 1 < least:
+        raise RuntimeError(f'@{name}: a short reply: {reply.strip()[:200]!r}')
     return words[1:]
 
 
+def numbers(words, name, count):
+    try:
+        values = [float(w) for w in words]
+    except ValueError:
+        values = []
+    if len(values) != count:
+        raise RuntimeError(f'@{name}: expected {count} numbers, got {" ".join(words)[:200]!r}')
+    return values
+
+
 def pointer(command):
+    """Show or hide the cursor, or bring it back in front. The helper doesn't answer: ok means sent."""
     if command not in POINTER_COMMANDS:
         raise ValueError(f'pointer command is one of {", ".join(POINTER_COMMANDS)}')
     with Datagrams() as link:
@@ -233,9 +254,9 @@ def pointer(command):
 def pointer_state():
     """What the pointer helper knows: the head (standing universe), gaze mode, worn or not."""
     with Datagrams() as link:
-        gaze = ok_words(link.ask(POINTER, 'gaze ? headset'), POINTER)
+        gaze = ok_words(link.ask(POINTER, 'gaze ? headset'), POINTER, 1)
         try:
-            x, y, z, yaw, pitch = map(float, ok_words(link.ask(POINTER, 'head'), POINTER))
+            x, y, z, yaw, pitch = numbers(ok_words(link.ask(POINTER, 'head'), POINTER), POINTER, 5)
             head = {'position': [x, y, z], 'yaw': yaw, 'pitch': pitch}
         except RuntimeError as error:
             head = {'error': str(error)}
@@ -244,30 +265,33 @@ def pointer_state():
 
 
 def overlays():
+    """SteamVR's overlays as the helper lists them: {"t": "overlays", "list": [{key, name, visible}]}."""
     with Datagrams() as link:
         reply = link.ask(POINTER, 'overlays')
     try:
         return {'ok': True, 'overlays': json.loads(reply)}
     except ValueError:
-        raise RuntimeError(f'@ft_pointer_helper: {reply.strip()[:200]}') from None
+        raise RuntimeError(f'@{POINTER}: {reply.strip()[:200]}') from None
 
 
 def measure(overlay):
-    """A SteamVR overlay's centre, size and axes in the standing universe."""
+    """A SteamVR overlay's centre, size and axes in the standing universe. The helper finds only
+    an overlay in view of the head, so this needs a head pose."""
     if not overlay or len(overlay) > 127 or any(c.isspace() or not c.isprintable() for c in overlay):
         raise ValueError('an overlay key: up to 127 characters, no spaces')
     with Datagrams() as link:
-        v = list(map(float, ok_words(link.ask(POINTER, 'measure ' + overlay), POINTER)))
+        v = numbers(ok_words(link.ask(POINTER, 'measure ' + overlay), POINTER), POINTER, 14)
     return {'ok': True, 'overlay': overlay, 'center': v[0:3], 'width': v[3], 'height': v[4],
             'right': v[5:8], 'up': v[8:11], 'front': v[11:14]}
 
 
 def power(command):
+    """ft-powerd's status (displays on, off or away: SteamVR's standby), or the displays on or off."""
     if command not in POWER_COMMANDS:
         raise ValueError(f'power command is one of {", ".join(POWER_COMMANDS)}')
     with Datagrams() as link:
-        words = ok_words(link.ask(POWERD, command), POWERD)
+        words = ok_words(link.ask(POWERD, command), POWERD, 3 if command == 'status' else 0)
     if command != 'status':
         return {'ok': True, 'power': command}
-    state, idle, timeout = words[0], float(words[1]), float(words[2])
+    state, (idle, timeout) = words[0], numbers(words[1:3], POWERD, 2)
     return {'ok': True, 'displays': state, 'idle_seconds': idle, 'off_after_seconds': timeout or None}

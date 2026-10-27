@@ -2,6 +2,7 @@
 the pointer helper and ft-powerd on private abstract names. No Frametop needed."""
 import socket
 import threading
+import time
 import unittest
 import uuid
 from unittest import mock
@@ -71,10 +72,11 @@ class DeviceTests(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def wait_for(self, last):
-        for _ in range(100):
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
             if self.relay.got and self.relay.got[-1].startswith(last):
                 return self.relay.got
-            threading.Event().wait(0.01)
+            time.sleep(0.01)
         self.fail(f'no {last!r}: {self.relay.got}')
 
     def test_keys_press_in_order_and_let_go_in_reverse(self):
@@ -86,6 +88,16 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(keys, [(1, 29, 1), (1, 38, 1), (1, 38, 0), (1, 29, 0), (1, 28, 1), (1, 28, 0)])
         with self.assertRaises(ValueError):
             desktop.press_keys([])
+
+    def test_a_long_command_says_hello_again_before_the_relay_lets_go(self):
+        clock = iter([100.0, 100.5, 101.6, 101.7])
+        with mock.patch.object(desktop.time, 'monotonic', lambda: next(clock)), \
+                mock.patch.object(desktop.time, 'sleep'):
+            with desktop.Device('keyboard') as kb:
+                kb.events((1, 30, 1))   # 0.5 s on: no hello
+                kb.events((1, 30, 0))   # 1.6 s on: hello first
+        got = self.wait_for('hostbye')
+        self.assertEqual([m.split()[0] for m in got], ['hostdev', 'hostev', 'hostdev', 'hostev', 'hostbye'])
 
     def test_text_goes_to_the_relay_as_typing(self):
         self.assertEqual(desktop.type_text('héllo wörld'), {'ok': True, 'typed': 11})
@@ -105,6 +117,9 @@ class DeviceTests(unittest.TestCase):
         self.assertTrue(all(t == 2 and abs(v) <= 40 for t, _, v in rel), rel)
         self.assertEqual(sum(v for _, c, v in rel if c == 0), -100)
         self.assertEqual(sum(v for _, c, v in rel if c == 1), 30)
+        self.relay.got.clear()
+        desktop.mouse_move(0, 0)   # nothing to move: no empty reports
+        self.assertEqual([m.split()[0] for m in self.wait_for('hostbye')], ['hostdev', 'hostbye'])
         for bad in ((20001, 0, None), (0, 0, 'thumb')):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 desktop.mouse_move(*bad)
@@ -139,6 +154,14 @@ class ServiceTests(unittest.TestCase):
         state = desktop.pointer_state()
         self.assertEqual((state['gaze_mode'], state['worn']), (False, False))
         self.assertIn('no head pose', state['head']['error'])
+        helper.answers.update({'gaze ? headset': 'ok on', 'head': 'ok 0.1 1.6'})
+        state = desktop.pointer_state()
+        self.assertEqual((state['gaze_mode'], state['worn']), (True, None))
+        self.assertIn('expected 5 numbers', state['head']['error'])
+        for reply in ('ok', 'error not now'):
+            helper.answers['gaze ? headset'] = reply
+            with self.subTest(reply=reply), self.assertRaises(RuntimeError):
+                desktop.pointer_state()
         desktop.pointer('recenter')
         with self.assertRaises(ValueError):
             desktop.pointer('reload')
@@ -154,19 +177,33 @@ class ServiceTests(unittest.TestCase):
                                                   'up': [0.0, 1.0, 0.0], 'front': [0.0, 0.0, 1.0]})
         with self.assertRaisesRegex(RuntimeError, 'no overlay gone'):
             desktop.measure('gone')
+        helper.answers.update({'measure short': 'ok 0.1 1.5', 'measure odd': 'ok ' + 'x ' * 14,
+                               'overlays': 'error busy'})
+        for key in ('short', 'odd'):
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, 'expected 14 numbers'):
+                desktop.measure(key)
+        with self.assertRaisesRegex(RuntimeError, f'@{desktop.POINTER}: error busy'):
+            desktop.overlays()
         for bad in ('', 'a b', 'x' * 128):
             with self.subTest(bad=bad[:10]), self.assertRaises(ValueError):
                 desktop.measure(bad)
-        self.assertEqual(helper.got, ['overlays', 'measure a.b', 'measure gone'])
+        self.assertEqual(helper.got, ['overlays', 'measure a.b', 'measure gone', 'measure short', 'measure odd',
+                                      'overlays'])
 
     def test_power(self):
-        self.serve('POWERD', {'status': 'ok off 640 600', 'on': 'ok',
+        powerd = self.serve('POWERD', {'status': 'ok off 640 600', 'on': 'ok',
                               'off': "error the displays are already off, or the backlight can't be written"})
         self.assertEqual(desktop.power('status'), {'ok': True, 'displays': 'off', 'idle_seconds': 640.0,
                                                    'off_after_seconds': 600.0})
         self.assertEqual(desktop.power('on'), {'ok': True, 'power': 'on'})
         with self.assertRaisesRegex(RuntimeError, 'already off'):
             desktop.power('off')
+        powerd.answers['status'] = 'ok on 3 0 later'   # no timeout set; a word more is fine
+        self.assertEqual(desktop.power('status')['off_after_seconds'], None)
+        for reply in ('ok on', 'ok on 3 soon'):
+            powerd.answers['status'] = reply
+            with self.subTest(reply=reply), self.assertRaises(RuntimeError):
+                desktop.power('status')
 
     def test_a_service_that_isnt_running_or_doesnt_answer(self):
         with mock.patch.object(desktop, 'POWERD', 'tb-test-nobody-' + uuid.uuid4().hex):
@@ -196,6 +233,8 @@ class CliTests(unittest.TestCase):
             (['pointer', 'overlays'], 'overlays', ()),
             (['pointer', 'measure', 'a.b'], 'measure', ('a.b',)),
             (['pointer', 'recenter'], 'pointer', ('recenter',)),
+            (['pointer', 'show'], 'pointer', ('show',)),
+            (['pointer', 'hide'], 'pointer', ('hide',)),
             (['power', 'off'], 'power', ('off',)),
         ]
         for argv, function, args in cases:

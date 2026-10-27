@@ -76,6 +76,14 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(reply.isError, reply)
                 self.assertEqual(self.calls[-1], expected)
 
+    async def test_desktop_limits_match_the_desktop_module(self):
+        from frame_testbench import desktop
+        schemas = {t.name: t.inputSchema['properties'] for t in await self.server.list_tools()}
+        self.assertEqual(schemas['keyboard_type']['text']['maxLength'], desktop.TEXT_MAX)
+        self.assertEqual(set(schemas['mouse_click']['button']['enum']), set(desktop.BUTTONS))
+        self.assertEqual(set(schemas['display_power']['state']['enum']), set(desktop.POWER_COMMANDS))
+        self.assertEqual(set(schemas['pointer_control']['action']['enum']), set(desktop.POINTER_COMMANDS))
+
     async def test_fake_tracker_and_desktop_argv_parses_in_the_cli(self):
         from frame_testbench import cli
         cases = [

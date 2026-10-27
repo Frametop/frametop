@@ -374,8 +374,9 @@ def create_server(config: Config, *, runner=run_cli):
 
     @server.tool()
     async def overlay_measure(overlay: OverlayKey) -> CallToolResult:
-        """An overlay's centre, width, height and right/up/front axes in the standing universe
-        (metres), e.g. to aim a controller or the gaze at it."""
+        """A visible overlay's centre, width, height and right/up/front axes in the standing universe
+        (metres), e.g. to aim a controller or the gaze at it. Only an overlay in view of the head:
+        a hidden one, or one behind, says "panel not visible". Needs a head pose (worn)."""
         return await execute(['pointer', 'measure', '--', overlay])
 
     @server.tool()

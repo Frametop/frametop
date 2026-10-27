@@ -1,0 +1,7 @@
+openvr_driver.h is an unmodified ValveSoftware/openvr public driver header.
+Pinned commit: 0924064316de3effbcd1acf1e309182a2deb1c05
+Source: https://raw.githubusercontent.com/ValveSoftware/openvr/0924064316de3effbcd1acf1e309182a2deb1c05/headers/openvr_driver.h
+License source: https://raw.githubusercontent.com/ValveSoftware/openvr/0924064316de3effbcd1acf1e309182a2deb1c05/LICENSE
+License copy: openvr_driver.LICENSE
+Required interfaces: IServerTrackedDeviceProvider_004, IVRServerDriverHost_006, IVRDriverInput_004.
+This header is independent of the client SDK header openvr.h.

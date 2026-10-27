@@ -1,0 +1,287 @@
+{
+  "controller_type": "frame_controller",
+  "name": "Frame testbench independent input observation",
+  "description": "Original bindings for public OpenVR action readback. Reserved and internal inputs may remain inactive.",
+  "bindings": {
+    "/actions/observe": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/system",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_system_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_system_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/bumper",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_bumper_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_bumper_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/trigger",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_trigger_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_trigger_touch"
+            },
+            "pull": {
+              "output": "/actions/observe/in/left_trigger_value"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/grip",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_grip_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_grip_touch"
+            },
+            "pull": {
+              "output": "/actions/observe/in/left_grip_value"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_thumbstick_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_thumbstick_touch"
+            },
+            "position": {
+              "output": "/actions/observe/in/left_thumbstick_position"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/thumbrest",
+          "mode": "button",
+          "inputs": {
+            "touch": {
+              "output": "/actions/observe/in/left_thumbrest_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/view",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_view_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_view_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/dpad_up",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_dpad_up_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_dpad_up_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/dpad_right",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_dpad_right_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_dpad_right_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/dpad_down",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_dpad_down_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_dpad_down_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/dpad_left",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/left_dpad_left_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/left_dpad_left_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/system",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_system_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_system_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/bumper",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_bumper_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_bumper_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trigger",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_trigger_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_trigger_touch"
+            },
+            "pull": {
+              "output": "/actions/observe/in/right_trigger_value"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/grip",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_grip_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_grip_touch"
+            },
+            "pull": {
+              "output": "/actions/observe/in/right_grip_value"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_thumbstick_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_thumbstick_touch"
+            },
+            "position": {
+              "output": "/actions/observe/in/right_thumbstick_position"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/thumbrest",
+          "mode": "button",
+          "inputs": {
+            "touch": {
+              "output": "/actions/observe/in/right_thumbrest_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/menu",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_menu_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_menu_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_a_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_a_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/b",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_b_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_b_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/x",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_x_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_x_touch"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/y",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/observe/in/right_y_click"
+            },
+            "touch": {
+              "output": "/actions/observe/in/right_y_touch"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

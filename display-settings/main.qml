@@ -919,6 +919,22 @@ Kirigami.ApplicationWindow {
                             }
                         }
                     }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Head pins:"
+                        text: "Pin only follows horizontal movement"
+                        checked: backend.pinLevel
+                        onToggled: {
+                            backend.setPinLevel(checked)
+                            checked = Qt.binding(() => backend.pinLevel)
+                        }
+                    }
+                    Controls.Label {
+                        text: "A screen on your head turns and walks with you but stays level: looking up or down, "
+                              + "tilting your head, or crouching leaves it where it is."
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
                     RowLayout {
                         Kirigami.FormData.label: "Wrist screens show within:"
                         Controls.Slider {

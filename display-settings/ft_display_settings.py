@@ -529,6 +529,20 @@ class Backend(QObject):
                 self.message.emit("Saved; the desktop applies it when it next starts "
                                   "(its compositor is older than hiding screens one at a time)", False)
 
+    # --- level head pins (SCREEN_PIN_LEVEL; ft-screens takes it live, "handsetting") ---
+    @Property(bool, notify=changed)
+    def pinLevel(self):
+        return ft_layout.read_conf().get("SCREEN_PIN_LEVEL", "0") == "1"
+
+    @Slot(bool)
+    def setPinLevel(self, on):
+        """Screens on your head follow it turning, not looking up or down. Pins already on the
+        head change over where they are now."""
+        write_conf_value("SCREEN_PIN_LEVEL", "1" if on else "0")
+        if self._running and ft_layout.backend() == "screens":
+            self._ask_screens(f"handsetting SCREEN_PIN_LEVEL {1 if on else 0}")
+        self.changed.emit()
+
     @Slot(str, str)
     def pin(self, which, where):
         """Pin screen `which` (1-based, or "all") to "left", "right", or "head" as it is

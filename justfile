@@ -60,6 +60,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/trackwatch-test.cpp \
       -o build/tests/trackwatch-test
     build/tests/trackwatch-test >/dev/null && echo "screens/tests/trackwatch-test.cpp: ok"
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/levelpin-test.cpp \
+      -o build/tests/levelpin-test
+    build/tests/levelpin-test >/dev/null && echo "screens/tests/levelpin-test.cpp: ok"
 
 # shell scripts: syntax-gate everything that ships. No git: the image has
 # none, and a mounted checkout can trip "dubious ownership" — find lists

@@ -120,6 +120,7 @@
 #include "palmmenu.h"
 #include "keyboard.h"
 #include "roomview.h"
+#include "trackwatch.h"
 #include "steampanels.h"
 #include "../frunner/reserve.h"
 
@@ -451,6 +452,18 @@ handcut::Renderer g_cutter;
 int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
 roomview::Detector g_roomView;   // no cutouts with Room View off
+trackwatch::Watch g_track;       // DEE-206: logs what SteamVR does to standing (trackwatch.h)
+
+// The tracking watch's reads: raw->standing, and with `universe` the universe id too.
+void WatchStanding(const char *why, bool universe) {
+    const vr::HmdMatrix34_t m = vr::VRSystem()->GetRawZeroPoseToStandingAbsoluteTrackingPose();
+    trackwatch::Pose p;
+    std::memcpy(p.m, m.m, sizeof p.m);
+    g_track.Standing(p, why);
+    if (universe)
+        g_track.Universe(vr::VRSystem()->GetUint64TrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd,
+                                                                         vr::Prop_CurrentUniverseId_Uint64));
+}
 handinput::HandInput g_handInput;   // near hand input (handinput.h; UpdateHandInput)
 grabthat::Detector g_grabThat;      // "grab that" (grabthat.h; UpdateGrabThat)
 bool g_constructRoomView = true; // camera/enableConstructRoomView
@@ -4991,6 +5004,12 @@ void ft_vr_forget(const void *key) {
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     if (!g_vr) return;
     RefreshPoses();
+    {
+        trackwatch::Pose head;
+        const auto &hp = g_poses[vr::k_unTrackedDeviceIndex_Hmd];
+        std::memcpy(head.m, hp.mDeviceToAbsoluteTracking.m, sizeof head.m);
+        g_track.Head(hp.bPoseIsValid, head, g_tick);
+    }
     // the hands, once per tick, for the cutouts and hand input
     {
         Mat head;
@@ -5180,7 +5199,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     ReleaseStuck(handle, data);
     UpdateRemoteDrag(handle, data);
     RefreshChrome();
+    bool standingEvent = false;
     while (vr::VRSystem()->PollNextEvent(&ev, sizeof ev)) {
+        standingEvent |= g_track.Event(ev.eventType);
         if (ev.eventType == vr::VREvent_Quit) {
             ft_event e{};
             e.type = FT_QUIT;
@@ -5190,6 +5211,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         if (ev.eventType == vr::VREvent_TrackedDeviceDeactivated) EndDragsBy(ev.trackedDeviceIndex);
         g_roomView.Event(ev.eventType);
     }
+    // Once a second (raw->standing) and every 5 seconds (the universe): two cheap reads.
+    if (standingEvent || g_tick % 90 == 0) WatchStanding(standingEvent ? "event" : "poll", standingEvent || g_tick % 450 == 0);
     // Our keyboard: its keys, and its Close key. It goes when the screens do.
     struct Forward {
         void (*handle)(const struct ft_event *, void *);

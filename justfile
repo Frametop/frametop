@@ -8,7 +8,7 @@ default:
     @just --list
 
 # everything, strict (the recipes are the source of truth)
-test: test-python test-c test-bash
+test: test-python test-c test-bash test-testbench
 
 # the Python suites as a strict gate: every failure fails the run. The image's
 # python3 has to import the dnf Qt stack and the locked packages together;
@@ -79,6 +79,12 @@ test-bash:
         bash -n "$f" && echo "bash -n $f: ok" || status=1
     done
     exit $status
+
+# the testbench, a dev-only tool (.dockerignore keeps it out of the image, so this needs the
+# mounted checkout, as `ft dev test` has): its SteamVR input proxy and observer against fake
+# runtimes, pose math, the installer, the CLI. The MCP tests skip without the mcp package.
+test-testbench:
+    cd testbench && python3 -m unittest discover -s tests
 
 # lint the Python side (ruff from the locked dev group). Report only for now:
 # the codebase has pre-existing findings; making it a gate is its own cleanup.

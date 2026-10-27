@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../vendor/openvr.h"
+#include "openvr.h"
 #include <cstdlib>
 #include <dlfcn.h>
 #include <filesystem>

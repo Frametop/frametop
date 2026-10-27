@@ -313,11 +313,13 @@ scripts/frame.sh --host '<cmd>'    # run on the SteamOS host
 
 The sync only goes one way. It makes the Frame's copy match your checkout, deleting files there that you've removed, and skips `.git`, `build/`, `.env`, and anything gitignored. Edit on the PC only, since the next sync overwrites changes made in `~/dev/frametop` on the Frame.
 
-Programs built in the `dev` container link against its glibc, which is newer than the host's, so they run inside the container. The SteamVR driver is the exception and is built to run on the host (see `pointer/driver/build.sh`). [AGENTS.md](AGENTS.md) has the working rules, including what not to restart while someone is using the headset.
+Programs built in the `dev` container link against its glibc, which is newer than the host's, so they run inside the container. The SteamVR driver and the testbench are the exceptions and are built to run on the host (see `pointer/driver/build.sh`). [AGENTS.md](AGENTS.md) has the working rules, including what not to restart while someone is using the headset.
+
+[testbench/](testbench/README.md) fakes the headset's pose and worn state, adds synthetic controllers, and takes SteamVR screenshots, through a CLI and an MCP server, so a change can be tried without wearing the headset. It's a development tool and never ships with Frametop.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). `testbench/` is MIT too, copyright Donn Green: see [testbench/LICENSE](testbench/LICENSE).
 
 Frametop's keyboard is [Full Keyboard for Steam Frame](https://github.com/TaiKeid/steam-frame-full-keyboard) by TaiKeid and contributors (MIT, Copyright (c) 2026 TaiKeid and contributors), in `keyboard/` with Frametop's changes. [keyboard/FRAMETOP.md](keyboard/FRAMETOP.md) lists what Frametop changed, and [keyboard/third_party/README.md](keyboard/third_party/README.md) the parts it includes.
 

@@ -1,5 +1,7 @@
 # Frame Testbench
 
+A development tool for Frametop, built from Donn Green's ([JakeGreen2145](https://github.com/JakeGreen2145)) [frame-testbench](https://github.com/JakeGreen2145/frame-testbench) at commit 1d39528, MIT licensed ([LICENSE](LICENSE)). It isn't part of a Frametop install: get.sh, the release zip, and the image leave it out, and `uninstall.sh` doesn't remove it. Install and remove it with `testbench/install.sh`.
+
 Headset and controller pose tools for closed-loop development on Steam Frame. A Python CLI and stdio MCP server drive native OpenVR adapters locally or over SSH. CLI commands return JSON; MCP captures also return image content for agent vision. This is not a replacement compositor.
 
 ## What it controls
@@ -15,13 +17,13 @@ The input adapter wraps the existing `cv` driver at public OpenVR interface boun
 
 ## Build and install
 
-Requires Linux, Python 3, a C++17 compiler, and the existing SteamVR installation. Build natively on the Frame host to match its libc. Root access and changes to `/opt` are not needed.
+Like the rest of Frametop, the native parts build in the `dev` container against the OpenVR headers pinned in `scripts/openvr.sh`, and may need only glibc symbols the SteamOS host has. Root access and changes to `/opt` are not needed. From the repo root:
 
 ```sh
-make
-make test
-./frame-testbench install --restart
-./frame-testbench status
+testbench/build.sh                       # the proxy, the loader, and frame-observe
+./ft dev test                            # or, in the dev container: just test-testbench
+testbench/install.sh install --restart   # build, stage SteamVR's preload, MCP venv
+testbench/frame-testbench status
 ```
 
 Installation copies the native libraries to a content-addressed directory under `~/.local/share/frame-testbench/` and writes only:
@@ -87,16 +89,14 @@ See [MCP setup and tools](docs/mcp.md) for installation and client configuration
 
 ## Remote agent use
 
-Sync the repository without builds, captures, or `.git`, then compile on Frame:
+From a PC, `testbench/install.sh` syncs the repo to `~/dev/frametop` on the Frame and builds there, like Frametop's other installers (see "Developing from a PC" in Frametop's README). Then drive it with `--remote-root`:
 
 ```sh
-rsync -az --exclude=.git --exclude=build --exclude=artifacts --exclude=.venv --exclude=__pycache__ ./ frame:dev/frame-testbench/
-ssh frame 'cd dev/frame-testbench && make'
-./frame-testbench --host frame install --restart
-./frame-testbench --host frame compositor awake
-./frame-testbench --host frame worn on
-./frame-testbench --host frame pose set --position 0 1.6 0
-./frame-testbench --host frame capture --fetch artifacts/remote-front
+testbench/install.sh install --restart
+testbench/frame-testbench --host frame --remote-root dev/frametop/testbench compositor awake
+testbench/frame-testbench --host frame --remote-root dev/frametop/testbench worn on
+testbench/frame-testbench --host frame --remote-root dev/frametop/testbench pose set --position 0 1.6 0
+testbench/frame-testbench --host frame --remote-root dev/frametop/testbench capture --fetch testbench/artifacts/remote-front
 ```
 
 `frame` is an SSH alias configured by the operator. The CLI requires existing SSH authentication and strict host-key checking. `--remote-root` selects a different remote checkout. `--output` is a headset-side directory when using SSH; `--fetch` creates a new local directory containing `preview.png`, `stereo.png`, and `result.json`. It never overwrites an existing capture directory.
@@ -114,8 +114,8 @@ Each capture records runtime state before and after the screenshot. Invalid trac
 First try:
 
 ```sh
-ssh frame 'cd dev/frame-testbench && ./frame-testbench release'
-ssh frame 'cd dev/frame-testbench && ./frame-testbench uninstall --restart'
+ssh frame 'cd dev/frametop && testbench/frame-testbench release'
+ssh frame 'cd dev/frametop && testbench/install.sh uninstall --restart'
 ```
 
 If SteamVR is crash-looping and the CLI is unavailable, remove the single override directly:
@@ -134,6 +134,6 @@ This leaves the stock runtime and its driver files untouched. The proxy starts w
 
 ## Verification
 
-`make test` builds and exercises the public SDK boundaries with fake runtimes, checks pose mathematics and the CLI, and tests input forwarding and loader selection without starting SteamVR. With `.[mcp]` installed in the active Python environment, it also exercises the actual stdio MCP protocol. These tests do not substitute for the live headset checks in the [original HMD validation](docs/validation.md), [controller/MCP validation](docs/controller-mcp-validation.md), and [button/analog/touch validation](docs/input-validation.md).
+`just test-testbench` (part of `just test`) builds and exercises the public SDK boundaries with fake runtimes, checks pose mathematics and the CLI, and tests input forwarding and loader selection without starting SteamVR. With the `mcp` package in the active Python environment (`testbench/.venv` has it), it also exercises the actual stdio MCP protocol. These tests do not substitute for the live headset checks in the [original HMD validation](docs/validation.md), [controller/MCP validation](docs/controller-mcp-validation.md), and [button/analog/touch validation](docs/input-validation.md).
 
-OpenVR headers retain Valve's license under `vendor/`. The remaining project code is MIT licensed.
+The testbench is MIT licensed, copyright Donn Green ([LICENSE](LICENSE)). The OpenVR headers it builds against come from `scripts/openvr.sh` and keep Valve's license.

@@ -42,7 +42,7 @@ def png():
 
 
 def fake_source():
-    header = (ROOT / 'vendor/openvr.h').read_text()
+    header = (ROOT / 'build/include/openvr.h').read_text()
     # Derive actual vtable signatures, never guessed ABI layouts. Every method
     # outside the explicit read/capture/settings/debug contract aborts.
     overrides = {
@@ -235,7 +235,7 @@ class ObserveTests(unittest.TestCase):
         source.write_text(fake_source())
         cls.library = cls.work / 'libfakeopenvr.so'
         subprocess.run([os.environ.get('CXX', 'g++'), '-std=c++17', '-shared', '-fPIC', '-pthread',
-                        '-I', str(ROOT / 'vendor'), str(source), '-o', str(cls.library)], check=True)
+                        '-I', str(ROOT / 'build/include'), str(source), '-o', str(cls.library)], check=True)
 
     @classmethod
     def tearDownClass(cls):

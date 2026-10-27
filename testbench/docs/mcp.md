@@ -7,45 +7,35 @@ your existing SSH configuration determine access.
 
 ## Install from a checkout
 
-Requires Python 3.11 or newer. The ordinary CLI has no Python dependencies; MCP
-is an optional extra. Use an isolated environment:
+`testbench/install.sh install` builds the native parts and makes `testbench/.venv`
+on the Frame's python3, with the MCP SDK and its dependencies at the versions
+pinned in `requirements-mcp.txt` (the ordinary CLI has no Python dependencies).
+The venv gets no package install: a `.pth` file puts the checkout on its path, so
+the CLI's checkout-relative `build/` and `resources/` paths keep working.
 
 ```sh
-uv venv --python python3 .venv
-uv pip install --python .venv/bin/python -e '.[mcp]'
-make all
-.venv/bin/frame-testbench-mcp --help
+testbench/install.sh install
+testbench/.venv/bin/python testbench/frame-testbench-mcp --help
 ```
 
-Without uv, use `python3 -m venv .venv` and
-`.venv/bin/python -m pip install -e '.[mcp]'`. Some Debian installations need the
-`python3-venv` OS package first. The MCP extra requires `mcp>=1.30,<2`.
-
-An editable install preserves the CLI's checkout-relative `build/` path. Run
-`make all` on the machine that actually runs the native observer. Remote-only
-MCP clients do not need a local native build. The target checkout and its native
-build must support the same CLI commands, including `controller`.
-
-The Python wheel contains only `frame_testbench` and package metadata, not the
-native binaries, build scripts, or OpenVR headers. A wheel alone is **not a
-supported local native toolkit installation**. It can act as a remote SSH MCP
-client. For local use, keep the checkout and editable installation above.
+Remote-only MCP clients do not need a local native build. The target checkout
+and its native build must support the same CLI commands, including `controller`.
 
 ## Start and connect
 
 Local SteamVR, under the same user/session as the toolkit:
 
 ```sh
-/path/to/frame-testbench/.venv/bin/frame-testbench-mcp \
+/path/to/frametop/testbench/.venv/bin/python /path/to/frametop/testbench/frame-testbench-mcp \
   --artifacts-dir /absolute/path/to/captures
 ```
 
 Remote Steam Frame through an already configured SSH alias:
 
 ```sh
-/path/to/frame-testbench/.venv/bin/frame-testbench-mcp \
+/path/to/frametop/testbench/.venv/bin/python /path/to/frametop/testbench/frame-testbench-mcp \
   --host frame \
-  --remote-root dev/frame-testbench \
+  --remote-root dev/frametop/testbench \
   --artifacts-dir /absolute/path/to/captures
 ```
 
@@ -60,10 +50,11 @@ Generic MCP client configuration:
 {
   "mcpServers": {
     "frame-testbench": {
-      "command": "/absolute/path/to/frame-testbench/.venv/bin/frame-testbench-mcp",
+      "command": "/absolute/path/to/frametop/testbench/.venv/bin/python",
       "args": [
+        "/absolute/path/to/frametop/testbench/frame-testbench-mcp",
         "--host", "frame",
-        "--remote-root", "dev/frame-testbench",
+        "--remote-root", "dev/frametop/testbench",
         "--artifacts-dir", "/absolute/path/to/captures"
       ]
     }
@@ -76,9 +67,8 @@ call timeout, allow at least 450 seconds for capture and leave additional time
 when queueing calls. The server's CLI subprocess timeout is 420 seconds, covering
 the CLI's separately bounded status, capture, and fetch operations.
 
-You can also launch `.venv/bin/python -m frame_testbench.mcp_server`, or use the
-checkout launcher `.venv/bin/python /path/to/frame-testbench/frame-testbench-mcp`.
-An editable install makes the module available regardless of working directory.
+You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
+`.pth` file makes the module available regardless of working directory.
 
 ## Tools
 
@@ -226,14 +216,12 @@ them, and treat screenshots as potentially sensitive.
 ## Reproduce the tests
 
 ```sh
-uv venv --python python3 .venv
-uv pip install --python .venv/bin/python -e '.[mcp]'
-make all
-.venv/bin/python -m unittest discover -s tests -p 'test_mcp*.py' -v
-.venv/bin/python -m unittest discover -s tests -v
+testbench/install.sh install
+cd testbench && .venv/bin/python -m unittest discover -s tests -p 'test_mcp*.py' -v
 ```
 
-Without the extra, MCP-dependent tests skip; packaging metadata tests still run.
+`just test-testbench` runs the whole suite in the dev container, which has no MCP
+SDK. Without it, MCP-dependent tests skip; packaging metadata tests still run.
 Do not count a skipped MCP suite as MCP verification. No hardware or SSH connection
 is needed. Tests use an explicitly identified CPU-only observer fixture and a
 real SDK client/server subprocess to exercise initialize, list-tools, tool calls,
@@ -242,4 +230,4 @@ Unit tests also check CLI argv, fixed remote configuration, concurrency, and
 cancellation. Existing native tests build and exercise their own CPU-only OpenVR
 boundary. Live headset verification is a separate step.
 
-License: MIT, matching the repository's `LICENSE`.
+License: MIT, matching `testbench/LICENSE`.

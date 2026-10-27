@@ -4,8 +4,9 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 out=${1:-"$root/build"}
 mkdir -p -- "$out"
 out=$(cd -- "$out" && pwd)
+(cd "$root" && . ../scripts/openvr.sh)
 CXX=${CXX:-g++}
-flags=(-std=c++17 -O2 -g -fPIC -fvisibility=hidden -Wall -Wextra -Werror -pthread -isystem "$root/vendor")
+flags=(-std=c++17 -O2 -g -fPIC -fvisibility=hidden -Wall -Wextra -Werror -pthread -isystem "$root/build/include")
 # Pass optional compiler flags as an array using conventional shell splitting.
 read -r -a extra <<< "${CXXFLAGS:-}"
 "$CXX" "${flags[@]}" "${extra[@]}" -shared -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,--version-script="$root/native/input.exports" "$root/native/input_proxy.cpp" "$root/native/input_state.cpp" "$root/native/control.cpp" -ldl -o "$out/libframe_input.so"

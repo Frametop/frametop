@@ -31,7 +31,7 @@ class InputProxyTests(unittest.TestCase):
             raise AssertionError("Missing input proxy build implementation")
         subprocess.run(["bash", str(script), str(BUILD)], check=True)
         import shlex
-        flags = [os.environ.get("CXX", "g++"), "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread", "-isystem", str(ROOT / "vendor")]
+        flags = [os.environ.get("CXX", "g++"), "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread", "-isystem", str(ROOT / "build/include")]
         flags += shlex.split(os.environ.get("CXXFLAGS", ""))
         subprocess.run(flags + ["-shared", "-fPIC", str(ROOT / "tests/input_fake_cv.cpp"), "-o", str(BUILD / "driver_cv.so")], check=True)
         subprocess.run(flags + [str(ROOT / "tests/input_fake_runtime.cpp"), "-ldl", "-o", str(BUILD / "vrserver")], check=True)

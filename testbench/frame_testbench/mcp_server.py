@@ -38,6 +38,11 @@ HandShape = Literal['open', 'point', 'pinch', 'fist']
 RecordingName = Annotated[str, Field(strict=True, pattern=r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')]
 RecordSeconds = Annotated[float, Field(strict=True, allow_inf_nan=False, gt=0, le=300)]
 Tracker = Literal['gaze', 'hands']
+KeyCombo = Annotated[str, Field(strict=True, max_length=64, pattern=r'^[A-Za-z0-9_]+(\+[A-Za-z0-9_]+){0,5}$')]
+TypedText = Annotated[str, Field(strict=True, min_length=1, max_length=2000)]
+MouseButton = Literal['left', 'right', 'middle', 'back', 'forward']
+MouseCounts = Annotated[int, Field(strict=True, ge=-20000, le=20000)]
+OverlayKey = Annotated[str, Field(strict=True, pattern=r'^[!-~]{1,127}$')]
 
 
 @dataclass(frozen=True)
@@ -316,6 +321,68 @@ def create_server(config: Config, *, runner=run_cli):
         stops that tracker's replay.
         """
         return await execute(['replay', name, *(['--loop'] if loop else []), *(['--only', only] if only else [])])
+
+    @server.tool()
+    async def keyboard_keys(keys: Annotated[list[KeyCombo], Field(min_length=1, max_length=100)]) -> CallToolResult:
+        """Press and let go of each key combination in turn, on a keyboard plugged into Frametop's
+        input relay: e.g. ["ctrl+l", "enter"]. Keys go where typing goes (the desktop panel
+        clicked last, or Steam), with the relay's key bindings (Meta+Space opens frunner).
+        Names: letters, digits, enter, esc, tab, space, backspace, delete, arrows (up, left...),
+        home, end, pageup, f1-f12, ctrl, shift, alt, altgr, meta, or an evdev code.
+        """
+        return await execute(['keyboard', 'keys', *keys])
+
+    @server.tool()
+    async def keyboard_type(text: TypedText) -> CallToolResult:
+        """Type text where typing goes, as Frametop Voice does (the desktop's keyboard layout, or
+        a US one for Steam). Printable characters only: press enter with keyboard_keys."""
+        return await execute(['keyboard', 'type', '--', text])
+
+    @server.tool()
+    async def mouse_move(dx: MouseCounts, dy: MouseCounts, drag: MouseButton | None = None) -> CallToolResult:
+        """Move a mouse plugged into Frametop's input relay, in mouse counts (+x right, +y down).
+        In pointer mode it moves the 3D mouse's cursor. drag: hold this button through the move."""
+        return await execute(['mouse', 'move', str(dx), str(dy), *(['--drag', drag] if drag else [])])
+
+    @server.tool()
+    async def mouse_click(button: MouseButton = 'left',
+                          count: Annotated[int, Field(strict=True, ge=1, le=3)] = 1) -> CallToolResult:
+        """Click the relay's mouse where the cursor is (in pointer mode, the 3D mouse's)."""
+        return await execute(['mouse', 'click', button, '--count', str(count)])
+
+    @server.tool()
+    async def mouse_scroll(notches: Annotated[int, Field(strict=True, ge=-50, le=50)],
+                           horizontal: Boolean = False) -> CallToolResult:
+        """Turn the relay's mouse wheel: + up (or right with horizontal)."""
+        return await execute(['mouse', 'scroll', str(notches), *(['--horizontal'] if horizontal else [])])
+
+    @server.tool()
+    async def pointer_state() -> CallToolResult:
+        """What Frametop's pointer helper knows: the head in the standing universe (position,
+        yaw, pitch), whether gaze mode is on, and whether the headset is worn."""
+        return await execute(['pointer', 'state'])
+
+    @server.tool()
+    async def pointer_control(action: Literal['show', 'hide', 'recenter']) -> CallToolResult:
+        """Show or hide the 3D mouse's cursor, or bring it back in front (recenter)."""
+        return await execute(['pointer', action])
+
+    @server.tool()
+    async def overlay_list() -> CallToolResult:
+        """SteamVR's overlays (key, name, visible), as the pointer helper lists them."""
+        return await execute(['pointer', 'overlays'])
+
+    @server.tool()
+    async def overlay_measure(overlay: OverlayKey) -> CallToolResult:
+        """An overlay's centre, width, height and right/up/front axes in the standing universe
+        (metres), e.g. to aim a controller or the gaze at it."""
+        return await execute(['pointer', 'measure', '--', overlay])
+
+    @server.tool()
+    async def display_power(state: Literal['status', 'on', 'off']) -> CallToolResult:
+        """ft-powerd: the headset displays' state (on, off, or away: SteamVR's standby), or turn
+        them off or back on."""
+        return await execute(['power', state])
 
     @server.tool()
     async def release_all() -> CallToolResult:

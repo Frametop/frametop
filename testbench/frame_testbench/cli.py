@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
-from . import controller_inputs, fakes, handshape, install, pose, record, transport
+from . import controller_inputs, desktop, fakes, handshape, install, pose, record, transport
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKES_UNIT = 'frame-testbench-fakes'
@@ -95,6 +95,14 @@ def recording_name(text):
     return text
 
 
+def key_combo(text):
+    try:
+        desktop.combo(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+    return text
+
+
 def hmd_button_path(text):
     if not re.fullmatch(controller_inputs.HMD_BUTTON_PATH, text):
         raise argparse.ArgumentTypeError(f'{text!r} is not an /input/... component path')
@@ -174,6 +182,34 @@ def parser():
     play.add_argument('name', type=recording_name)
     play.add_argument('--loop', action='store_true', help='over and over until released (else released at its end)')
     play.add_argument('--only', choices=tuple(RECORDING_FILES), help='just its gaze or just its hands')
+    keyboard = commands.add_parser('keyboard', help="a keyboard plugged into Frametop's input relay: keys go where typing goes")
+    keyboards = keyboard.add_subparsers(dest='keyboard_command', required=True)
+    keys = keyboards.add_parser('keys', help='press and let go of each combination in turn, e.g. ctrl+l enter')
+    keys.add_argument('combos', nargs='+', type=key_combo, metavar='COMBO')
+    typed = keyboards.add_parser('type', help='text, typed as Frametop Voice types it (no newlines: keys enter)')
+    typed.add_argument('text')
+    mouse = commands.add_parser('mouse', help="a mouse plugged into Frametop's input relay (in pointer mode, the 3D mouse)")
+    mice = mouse.add_subparsers(dest='mouse_command', required=True)
+    move = mice.add_parser('move', help='mouse counts, +x right, +y down')
+    move.add_argument('dx', type=int)
+    move.add_argument('dy', type=int)
+    move.add_argument('--drag', choices=tuple(desktop.BUTTONS), help='hold this button through the move')
+    click = mice.add_parser('click')
+    click.add_argument('button', nargs='?', default='left', choices=tuple(desktop.BUTTONS))
+    click.add_argument('--count', type=int, default=1, choices=(1, 2, 3))
+    scroll = mice.add_parser('scroll', help='wheel notches, + up')
+    scroll.add_argument('notches', type=int)
+    scroll.add_argument('--horizontal', action='store_true', help='+ right')
+    pointer = commands.add_parser('pointer', help="Frametop's pointer helper")
+    pointers = pointer.add_subparsers(dest='pointer_command', required=True)
+    pointers.add_parser('state', help='the head, gaze mode, and whether the headset is worn')
+    pointers.add_parser('overlays', help="SteamVR's overlays, as the pointer helper lists them")
+    measure = pointers.add_parser('measure', help="an overlay's centre, size and axes in the standing universe")
+    measure.add_argument('overlay')
+    for name in desktop.POINTER_COMMANDS:
+        pointers.add_parser(name, help={'recenter': 'the cursor back in front'}.get(name))
+    power = commands.add_parser('power', help="ft-powerd: the headset displays' state, or turn them on or off")
+    power.add_argument('state', choices=desktop.POWER_COMMANDS)
     commands.add_parser('release', help='restore physical HMD pose/proximity, disconnect synthetic controllers, stop fake trackers')
     capture = commands.add_parser('capture', help='fresh compositor stereo PNGs and metadata')
     capture.add_argument('--output', help='new output directory, on headset when using --host')
@@ -222,6 +258,24 @@ def dispatch(args, bench):
             return bench.fakes(f'hand {args.side} ' + ' '.join(format(v, '.17g') for v in values) + ' ' + args.shape,
                                start=True)
         return bench.fakes('hand-release ' + args.side) or {'ok': True, 'hands': None}
+    if args.command == 'keyboard':
+        return desktop.press_keys(args.combos) if args.keyboard_command == 'keys' else desktop.type_text(args.text)
+    if args.command == 'mouse':
+        if args.mouse_command == 'move':
+            return desktop.mouse_move(args.dx, args.dy, args.drag)
+        if args.mouse_command == 'click':
+            return desktop.mouse_click(args.button, args.count)
+        return desktop.mouse_scroll(args.notches, args.horizontal)
+    if args.command == 'pointer':
+        if args.pointer_command == 'state':
+            return desktop.pointer_state()
+        if args.pointer_command == 'overlays':
+            return desktop.overlays()
+        if args.pointer_command == 'measure':
+            return desktop.measure(args.overlay)
+        return desktop.pointer(args.pointer_command)
+    if args.command == 'power':
+        return desktop.power(args.state)
     if args.command == 'compositor':
         return bench.native('setting', 'false' if args.mode == 'awake' else 'true')
     if args.command == 'worn':

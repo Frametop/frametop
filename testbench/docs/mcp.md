@@ -100,6 +100,16 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | `hand_release` | `side`: `left`, `right`, or `all` | `hand SIDE release` |
 | `tracker_record` | `name`, `seconds` (up to 300); optional `only` (`gaze`, `hands`) | `record NAME --seconds N` |
 | `tracker_replay` | `name`; optional `loop`, `only` | `replay NAME` |
+| `keyboard_keys` | `keys`: 1-100 combinations such as `ctrl+l` | `keyboard keys COMBO...` |
+| `keyboard_type` | `text`: 1-2000 printable characters | `keyboard type -- TEXT` |
+| `mouse_move` | `dx`, `dy` (counts, ±20000); optional `drag` button | `mouse move DX DY [--drag BUTTON]` |
+| `mouse_click` | Optional `button` (`left`, `right`, `middle`, `back`, `forward`), `count` (1-3) | `mouse click BUTTON --count N` |
+| `mouse_scroll` | `notches` (±50, not 0); optional `horizontal` | `mouse scroll N [--horizontal]` |
+| `pointer_state` | None | `pointer state` |
+| `pointer_control` | `action`: `show`, `hide`, or `recenter` | `pointer ACTION` |
+| `overlay_list` | None | `pointer overlays` |
+| `overlay_measure` | `overlay`: an overlay key | `pointer measure -- KEY` |
+| `display_power` | `state`: `status`, `on`, or `off` | `power STATE` |
 | `release_all` | None | `release`, which also stops the fake trackers |
 
 `side` is `left` or `right`. Position and translation are three-element XYZ

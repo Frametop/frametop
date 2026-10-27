@@ -36,7 +36,9 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             'controller_touch', 'controller_inputs_reset', 'controller_input_status',
             'compositor', 'capture', 'release_all',
             'gaze_look', 'gaze_eyes', 'gaze_release', 'hand_set', 'hand_release',
-            'tracker_record', 'tracker_replay'})
+            'tracker_record', 'tracker_replay',
+            'keyboard_keys', 'keyboard_type', 'mouse_move', 'mouse_click', 'mouse_scroll',
+            'pointer_state', 'pointer_control', 'overlay_list', 'overlay_measure', 'display_power'})
         for tool in tools:
             self.assertFalse(tool.inputSchema.get('additionalProperties', True))
             self.assertFalse({'host', 'socket', 'command', 'output', 'remote_root'} &
@@ -74,7 +76,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(reply.isError, reply)
                 self.assertEqual(self.calls[-1], expected)
 
-    async def test_fake_tracker_argv_parses_in_the_cli(self):
+    async def test_fake_tracker_and_desktop_argv_parses_in_the_cli(self):
         from frame_testbench import cli
         cases = [
             ('gaze_look', dict(yaw=10, pitch=-5), ['gaze', 'look', '10', '-5']),
@@ -95,7 +97,19 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
              ['record', 'pinches', '--seconds', '300', '--only', 'hands']),
             ('tracker_replay', dict(name='pinches'), ['replay', 'pinches']),
             ('tracker_replay', dict(name='pinches', loop=True, only='gaze'),
-             ['replay', 'pinches', '--loop', '--only', 'gaze'])]
+             ['replay', 'pinches', '--loop', '--only', 'gaze']),
+            ('keyboard_keys', dict(keys=['ctrl+l', 'enter', '1']), ['keyboard', 'keys', 'ctrl+l', 'enter', '1']),
+            ('keyboard_type', dict(text='-rf --help'), ['keyboard', 'type', '--', '-rf --help']),
+            ('mouse_move', dict(dx=-100, dy=20), ['mouse', 'move', '-100', '20']),
+            ('mouse_move', dict(dx=5, dy=0, drag='left'), ['mouse', 'move', '5', '0', '--drag', 'left']),
+            ('mouse_click', {}, ['mouse', 'click', 'left', '--count', '1']),
+            ('mouse_click', dict(button='right', count=2), ['mouse', 'click', 'right', '--count', '2']),
+            ('mouse_scroll', dict(notches=-3, horizontal=True), ['mouse', 'scroll', '-3', '--horizontal']),
+            ('pointer_state', {}, ['pointer', 'state']),
+            ('pointer_control', dict(action='recenter'), ['pointer', 'recenter']),
+            ('overlay_list', {}, ['pointer', 'overlays']),
+            ('overlay_measure', dict(overlay='-frametop.panel'), ['pointer', 'measure', '--', '-frametop.panel']),
+            ('display_power', dict(state='status'), ['power', 'status'])]
         for name, args, expected in cases:
             with self.subTest(name=name, args=args):
                 reply = await self.server.call_tool(name, args)
@@ -193,6 +207,18 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             ('tracker_record', {'name': 'x', 'seconds': 1, 'only': 'eyes'}),
             ('tracker_record', {'name': 'x', 'seconds': 1, 'output': '/tmp/x'}),
             ('tracker_replay', {'name': 'x', 'loop': 'yes'}), ('tracker_replay', {'name': '/abs/path'}),
+            ('keyboard_keys', {'keys': []}), ('keyboard_keys', {'keys': 'enter'}),
+            ('keyboard_keys', {'keys': ['ctrl+']}), ('keyboard_keys', {'keys': ['-enter']}),
+            ('keyboard_keys', {'keys': ['a+b+c+d+e+f+g']}), ('keyboard_keys', {'keys': ['enter'] * 101}),
+            ('keyboard_type', {'text': ''}), ('keyboard_type', {'text': 'x' * 2001}),
+            ('mouse_move', {'dx': 20001, 'dy': 0}), ('mouse_move', {'dx': 1.5, 'dy': 0}),
+            ('mouse_move', {'dx': '1', 'dy': 0}), ('mouse_move', {'dx': 1, 'dy': 0, 'drag': 'thumb'}),
+            ('mouse_click', {'button': 'thumb'}), ('mouse_click', {'count': 4}), ('mouse_click', {'count': 0}),
+            ('mouse_scroll', {'notches': 51}), ('mouse_scroll', {'notches': 1, 'horizontal': 'yes'}),
+            ('pointer_control', {'action': 'reload'}), ('pointer_state', {'socket': 'x'}),
+            ('overlay_measure', {'overlay': ''}), ('overlay_measure', {'overlay': 'a b'}),
+            ('overlay_measure', {'overlay': 'a\nb'}), ('overlay_measure', {'overlay': 'x' * 128}),
+            ('display_power', {'state': 'toggle'}), ('display_power', {}),
         ]
         for name in ('hmd_pose_set', 'controller_pose_set', 'hmd_pose_move', 'controller_pose_move'):
             for value in (float('nan'), float('inf'), -float('inf')):

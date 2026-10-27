@@ -1,15 +1,17 @@
 # Frunner
 
-Frunner is Frametop's search for apps and remote displays, like Spotlight on a Mac. Press Meta+Space and a glass search pill opens straight ahead of where your head points. Type part of an app's name, or a remote display's `{host} - {display}`, and pick from what it finds:
+Frunner is Frametop's search for apps, profiles and remote displays, like Spotlight on a Mac. Press Meta+Space and a glass search pill opens straight ahead of where your head points. Type part of an app's name, or a remote display's `{host} - {display}`, and pick from what it finds:
 
 - **An app that's already running:** its most recent window comes to you. The lazy susan spins the panel it's on, a screen or its own floating window, to straight ahead, and typing goes to it.
 - **An app that isn't running:** it starts as a floating window, where that app last floated or in front of you.
+- **A profile:** it opens like Open profile in Display Settings (`ft-layout open NAME`): its screens, remote displays and apps, as saved. The quick reset only recenters, so this is how a profile comes back whole.
 - **A remote display:** frunner connects it if needed, then spins it to the front.
 - **One of your commands** ([commands.md](commands.md)): it runs in the background, and the pill says so.
 
 Use Tab, Shift+Tab, or the arrow keys to move through the results, and Enter or a click to open one. Shift+Enter or a right click opens the item's menu:
 
 - **For an app:** its own launch options, such as a browser's New Private Window, plus Open new window (even when one is open), Open docked on this screen, and each of its open windows.
+- **For a profile:** Open profile.
 - **For a remote display:** Go to (connecting it first if needed) and Disconnect.
 - **For a command:** Run, and Stop (every copy still running).
 
@@ -19,7 +21,7 @@ Frunner works while the Frametop desktop is running and Frametop isn't paused fo
 
 ## Not built
 
-- Searching open windows by title, Frametop's own actions ("Reset layout"), and profiles (decision 4).
+- Searching open windows by title, and Frametop's own actions ("Reset layout") (decision 4).
 - Moving the caret within the query. Typing and Backspace work at the end only.
 - A setting for its distance and size (`--distance` and `--width` on ft-spotpanel; 0.75 m and 0.42 m, `frunner/reserve.h`).
 
@@ -41,6 +43,7 @@ These were settled with the user on 2026-10-10. The numbers may be cited in the 
 | 10 | A window on a pinned panel | Pinned panels don't spin. Typing goes to it where it is (`front N`), and a short note says where it is ("on your left wrist") |
 | 11 | Shortcut | Meta+Space by default. Plasma's KRunner has Alt+Space, and nothing in Frametop used Meta+Space |
 | 12 | Branch | `spotwatch` (its first name; renamed frunner 2026-10-20), off `experimental`, merged into `experimental` |
+| 13 | Profiles (2026-10-26) | Found by their launchers (`X-Frametop-Profile=true`, written by ft-layout), and opened with `ft-layout open NAME` rather than as an app through ft-floatd. They came with PR #67, which made the quick reset only recenter |
 
 ## How it works
 

@@ -80,12 +80,19 @@ home = tempfile.mkdtemp(prefix="ft-frunner-test-")
 apps = os.path.join(home, "share", "applications")
 os.makedirs(apps)
 os.makedirs(os.path.join(home, ".config"))
+os.makedirs(os.path.join(home, "layout"))
+with open(os.path.join(home, "layout", "ft-layout"), "w") as f:
+    f.write("#!/bin/sh\n")
+os.chmod(os.path.join(home, "layout", "ft-layout"), 0o755)
 for name, body in {
     "firefox.desktop": "Name=Firefox\nGenericName=Web Browser\nExec=true\nActions=new-window;new-private-window;\n"
                        "[Desktop Action new-window]\nName=New Window\nExec=true\n"
                        "[Desktop Action new-private-window]\nName=New Private Window\nExec=true\n",
     "editor.desktop": "Name=Editor\nGenericName=Text Editor\nExec=true\n",
     "hidden.desktop": "Name=Hidden Thing\nExec=true\nNoDisplay=true\n",
+    # what ft-layout write_launchers writes for a profile (Gio skips it unless its program exists)
+    "frametop-profile-work-desk.desktop": f"Name=Frametop: Work desk\nExec={home}/layout/ft-layout open "
+                                          "\"Work desk\"\nX-Frametop-Profile=true\n",
 }.items():
     head, _, actions = body.partition("[")
     with open(os.path.join(apps, name), "w") as f:
@@ -287,7 +294,7 @@ try:
     check("...spun to", [m for m in screens.take() if m.startswith("spin")], ["spin to 1"])
 
     ask("open")
-    type_text("desk")
+    type_text("desk-pc")
     check("remote displays as {host} - {display}, not the hidden one", json.loads(ask("rows")[3:]), ["desk-pc - OLED"])
     screens.take()
     press(ENTER)
@@ -321,6 +328,15 @@ try:
     ask("open")
     tell("outside")
     check("a click beside it closes it", ask("status").split()[1], "closed")
+
+    ask("open")
+    type_text("work desk")
+    check("a profile's launcher is found as a profile", json.loads(ask("rows")[3:]), ["Frametop: Work desk"])
+    press(SHIFT, ENTER)
+    check("...its menu opens the profile (through ft-layout, not ft-floatd)", json.loads(ask("rows")[3:]),
+          ["Frametop: Work desk", "Open profile"])
+    press(ESC)
+    press(ESC)
 
     ask("open")
     type_text("stop frame")

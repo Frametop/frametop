@@ -47,6 +47,7 @@ import hashlib
 import json
 import math
 import os
+import shlex
 import socket
 import subprocess
 import sys
@@ -93,6 +94,17 @@ def log(*args):
 def clean(text):
     """A field for the panel: no tabs or newlines (its separators)."""
     return " ".join(str(text or "").split())
+
+
+def profile_name(info):
+    """The profile a Frametop profile launcher opens ("ft-layout open NAME"), or None."""
+    try:
+        if not info.get_boolean("X-Frametop-Profile"):
+            return None
+        args = shlex.split(info.get_commandline() or "")
+    except (ValueError, TypeError):
+        return None
+    return args[-1] if len(args) >= 3 and args[-2] == "open" and args[-3].endswith("ft-layout") else None
 
 
 # ---------------------------------------------------------------- typing (libxkbcommon)
@@ -313,6 +325,7 @@ class Frunner:
         self.xkb = Xkb()
         self.icons = Icons()
         self.apps = []          # spotsearch.Item, kind "app"; data: Gio.DesktopAppInfo
+        self.profiles = []      # spotsearch.Item, kind "profile"; data: {"name", "info"}
         self.remotes = []       # spotsearch.Item, kind "remote"; data: {"n", "id", "host", "label", "off"}
         self.commands = []      # spotsearch.Item, kind "command"; data: {"name", "run"}
         self.running_remotes = {}  # screen number -> state, from ft-screens
@@ -401,18 +414,23 @@ class Frunner:
     # ------------------------------------------------------------ what there is to find
 
     def load_apps(self):
-        apps = []
+        apps, profiles = [], []
         for info in Gio.AppInfo.get_all():
             if not isinstance(info, Gio.DesktopAppInfo) or not info.should_show():
                 continue
             app_id = (info.get_id() or "").removesuffix(".desktop")
             if not app_id:
                 continue
+            name = profile_name(info)
+            if name:  # a profile's launcher (ft-layout write_launchers): opened by ft-layout, not ft-floatd
+                profiles.append(spotsearch.Item("profile", app_id, info.get_display_name() or name,
+                                            "Frametop profile", ["profile", name], "", {"name": name, "info": info}))
+                continue
             it = spotsearch.Item("app", app_id, info.get_display_name() or info.get_name() or app_id,
                                  info.get_generic_name() or "", info.get_keywords() or [],
                                  os.path.basename(info.get_executable() or ""), info)
             apps.append(it)
-        self.apps = apps
+        self.apps, self.profiles = apps, profiles
         self.app_reload_pending = False
         log(f"{len(apps)} apps")
 
@@ -428,6 +446,7 @@ class Frunner:
     def warm_icons(self):
         """Every app's icon made for the panel, one per idle moment, so typing never waits on SVGs."""
         todo = [a.data.get_icon() for a in self.apps if a.data.get_icon() is not None] + [REMOTE_ICON]
+        todo += [p.data["info"].get_icon() for p in self.profiles if p.data["info"].get_icon() is not None]
 
         def one():
             if todo and not self.is_open:
@@ -534,6 +553,9 @@ class Frunner:
         if item.kind == "command":
             return Entry("item", item.title, f"Command · {item.data['run']}", COMMAND_ICON, "Run",
                          run=lambda: self.run_command(item), item=item)
+        if item.kind == "profile":
+            return Entry("item", item.title, "Profile · its screens, remote displays and apps",
+                         item.data["info"].get_icon(), "Open", run=lambda: self.open_profile(item), item=item)
         if item.kind == "remote":
             state = self.running_remotes.get(item.data["n"])
             return Entry("item", item.title, f"Remote display · {state}" if state else "Remote display · not connected",
@@ -555,7 +577,7 @@ class Frunner:
         was = self.entries[self.sel].item if keep and 0 <= self.sel < len(self.entries) else None
         for a in self.apps:
             a.running = bool(self.windows_of(a)) if self.windows else False
-        found = spotsearch.search(self.apps + self.remotes + self.commands, self.query, self.usage)
+        found = spotsearch.search(self.apps + self.profiles + self.remotes + self.commands, self.query, self.usage)
         self.entries = [self.result_entry(it) for it in found]
         self.sel = next((i for i, e in enumerate(self.entries) if e.item is was), 0) if was else 0
         self.top = 0
@@ -567,6 +589,10 @@ class Frunner:
         if item.kind == "command":
             rows.append(Entry("item", "Run", item.data["run"], run=lambda: self.run_command(item)))
             rows.append(Entry("item", "Stop", "where it still runs", run=lambda: self.stop_command(item)))
+            return rows
+        if item.kind == "profile":
+            rows.append(Entry("item", "Open profile", "Its screens, remote displays and apps, as saved",
+                              run=lambda: self.open_profile(item)))
             return rows
         if item.kind == "remote":
             state = self.running_remotes.get(item.data["n"])
@@ -811,6 +837,13 @@ class Frunner:
             GLib.timeout_add(250, lambda: self.await_remote(n, name, tries - 1) and False)
         else:
             log(f"remote display {n}: no panel after connecting")
+
+    def open_profile(self, item):
+        self.close("profile")
+        self.used(item.key)
+        name = item.data["name"]
+        self.toast(f"Opening {name}")
+        self.layout_command(["open", name], lambda ok: ok or self.toast(f"Couldn't open {name}"))
 
     def disconnect(self, item):
         self.close("disconnect")

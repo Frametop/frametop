@@ -27,7 +27,7 @@ class Item:
     """Something to search: an app, a remote display or a command."""
 
     def __init__(self, kind, key, title, generic="", keywords=(), exe="", data=None):
-        self.kind = kind          # "app", "remote" or "command"
+        self.kind = kind          # "app", "profile", "remote" or "command"
         self.key = key            # its usage key: the desktop file name, "remote:<id>" or "command:<name>"
         self.title = title
         self.generic = generic

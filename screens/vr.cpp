@@ -391,6 +391,19 @@ struct Screen {
     double carryX = 0, carryY = 0;
     long resizeSent = 0;          // g_tick of the last resize request (they're throttled)
     int resizeW = 0, resizeH = 0; // ...and its size
+    // A resize by a corner or two fists only stretches the panel, to this many pixels at its density,
+    // and the window gets them in one resize when it ends (user, 2026-10-27: "it doesn't actually update
+    // the pixels ... until I release so we can have the animation be smooth"). Kept until the answer's
+    // "float", or until the tick stretchUntil if none comes. 0: the crop's own size.
+    int stretchW = 0, stretchH = 0;
+    long stretchUntil = 0;
+    // "hold" from ft-floatd, while KWin changes the window (its scale, its size): until holdUntilMs the
+    // panel keeps its picture and crop (the compositor keeps new buffers back, ft_vr_screen_held), and a
+    // "float" waits in held* to go up with the next buffer. holdCapMs: the latest it can last.
+    int64_t holdUntilMs = 0, holdCapMs = 0;
+    bool heldFloat = false;
+    double heldMpp = 0;
+    int heldX = 0, heldY = 0, heldW = 0, heldH = 0, heldTitle = 0;
     std::map<int, Sub> subs;
     // Attention (UpdateAttention): what ft_vr_screen_attention answers, and until when (ms)
     // it stays focused or in view after the last reason for it.
@@ -407,6 +420,7 @@ struct Screen {
     int64_t handPointerMs = INT64_MIN / 2;  // a hand last moved the pointer on it (kHandPointerMs)
     int64_t focusUntil = 0, viewUntil = 0;
     double heightMetres() const {
+        if (floating && stretchW > 0) return metres * stretchH / stretchW;
         if (floating && cropW > 0) return metres * cropH / cropW;
         return width > 0 ? metres * height / width : metres * 9 / 16;
     }
@@ -1599,6 +1613,52 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     ApplyAlpha(s);
 }
 
+// After a floating panel's size changed from oldW x oldH (m): the corner keepX, keepY (the top left, or
+// the one opposite a corner being dragged) stays where it was.
+void KeepCorner(Screen &s, double oldW, double oldH) {
+    const bool keep = s.drag == Drag::Resize || g_tick < s.keepUntil;
+    const int kx = keep ? s.keepX : -1, ky = keep ? s.keepY : 1;
+    const double dx = -kx * (s.metres - oldW) / 2, dy = -ky * (s.heightMetres() - oldH) / 2;
+    if (std::fabs(dx) > 1e-6 || std::fabs(dy) > 1e-6) {
+        if (s.pinned != kNone) Pin(s, s.pinned, Mul(s.pinRel, Translation(dx, dy, 0)));
+        else SetAbsolute(s, Mul(s.pose, Translation(dx, dy, 0)));
+    } else {
+        PlaceChrome(s);
+    }
+}
+
+// A stretched panel's texels aren't square: its crop drawn at stretchW x stretchH.
+void ApplyTexelAspect(const Screen &s) {
+    const bool on = s.stretchW > 0 && s.stretchH > 0 && s.cropW > 0 && s.cropH > 0;
+    vr::VROverlay()->SetOverlayTexelAspect(
+        s.overlay, on ? float(double(s.stretchW) * s.cropH / (double(s.cropW) * s.stretchH)) : 1.0f);
+}
+
+// A floating panel the size of w x h pixels at its density, its picture stretched to fit, while a resize
+// goes on (no new pixels until it ends: SendStretch). 0, 0: back to its crop's own size.
+void Stretch(Screen &s, int w, int h) {
+    if (s.mpp <= 0 || s.cropW <= 0) return;
+    const double oldW = s.metres, oldH = s.heightMetres();
+    s.stretchW = w > 0 ? w : 0, s.stretchH = w > 0 ? h : 0;
+    s.metres = (s.stretchW > 0 ? s.stretchW : s.cropW) * s.mpp;
+    vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+    ApplyTexelAspect(s);
+    ApplyCurve(s);
+    KeepCorner(s, oldW, oldH);
+}
+
+// A stretch has ended: the window gets its pixels, in one resize. The answer ("float") sets the panel
+// to the new crop; if none comes (the window can't take that size) it goes back (stretchUntil).
+void SendStretch(Screen &s) {
+    if (s.stretchW <= 0) return;
+    if (s.stretchW == s.cropW && s.stretchH == s.cropH) return Stretch(s, 0, 0);
+    s.keepUntil = g_tick + 135, s.stretchUntil = g_tick + 120;
+    s.resizeW = s.stretchW, s.resizeH = s.stretchH, s.resizeSent = g_tick;
+    SendFloat("resize " + std::to_string(ScreenIndexOf(s) + 1) + " " + std::to_string(s.stretchW) + " " +
+              std::to_string(s.stretchH));
+    std::printf("screen %d: resize to %dx%d\n", ScreenIndexOf(s) + 1, s.stretchW, s.stretchH);
+}
+
 // Stop moving where it is (a command took over).
 void EndDrag(Screen &s) {
     if (s.drag != Drag::None) std::printf("screen %d: %s ended\n", ScreenIndexOf(s) + 1, DragName(s.drag));
@@ -1606,6 +1666,7 @@ void EndDrag(Screen &s) {
     // (a floating window's last resize may be answered after the release: its corner stays kept a while)
     if (s.drag == Drag::Resize) s.keepUntil = g_tick + 45;
     else s.keepX = -1, s.keepY = 1;
+    if (s.drag == Drag::Resize && s.floating) SendStretch(s);
     s.drag = Drag::None;
     s.dragDevice = kNone;
     s.dragFacing = false;
@@ -1755,19 +1816,16 @@ void UpdateGuides() {
 }
 
 // A floating window's resize: the corner goes where the laser (or a hand's pinch) is, at hx,
-// hy on the panel, in both directions, and the window gets that many pixels at the same
-// density (ft-floatd resizes it, and the new crop comes back as "float", with the top left
-// corner kept where it is).
-// From any corner (sx, sy: +1 right, top): the opposite one stays put (keepX, keepY: SetFloat moves
-// the panel so).
-void ResizeFloat(Screen &s, int index, double hx, double hy, double grabX, double grabY, int sx = 1, int sy = -1) {
+// hy on the panel, in both directions. Every frame the panel stretches to that many pixels at
+// the same density; the window gets them when the drag ends (EndDrag: SendStretch).
+// From any corner (sx, sy: +1 right, top): the opposite one stays put (keepX, keepY).
+void ResizeFloat(Screen &s, double hx, double hy, double grabX, double grabY, int sx = 1, int sy = -1) {
     s.keepX = -sx, s.keepY = -sy;
-    if (s.mpp <= 0 || g_tick - s.resizeSent < 4) return;  // about 20 a second
+    if (s.mpp <= 0 || s.cropW <= 0) return;
     const int w = std::max(320, int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp)));
     const int h = std::max(200, int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp)));
-    if (w == s.resizeW && h == s.resizeH) return;
-    s.resizeW = w, s.resizeH = h, s.resizeSent = g_tick;
-    SendFloat("resize " + std::to_string(index + 1) + " " + std::to_string(w) + " " + std::to_string(h));
+    if (w == (s.stretchW > 0 ? s.stretchW : s.cropW) && h == (s.stretchW > 0 ? s.stretchH : s.cropH)) return;
+    Stretch(s, w, h);
 }
 
 // A screen (or remote display) resized from the handle's corner to cu, cv (m from its centre, on its
@@ -1814,7 +1872,7 @@ void UpdateDrag(Screen &s, int index) {
     double hx, hy;
     Mat l, p;
     if (!LaserPose(s.dragDevice, &l) || !ScreenPose(s, &p) || !RayOnSurface(s, p, l, &hx, &hy)) return;
-    if (s.floating) return ResizeFloat(s, index, hx, hy, s.grabX, s.grabY, s.cornerX, s.cornerY);
+    if (s.floating) return ResizeFloat(s, hx, hy, s.grabX, s.grabY, s.cornerX, s.cornerY);
     ResizeScreen(s, hx - s.grabX, hy - s.grabY);
 }
 
@@ -1886,36 +1944,50 @@ void DropFloatPanel(Screen &s) {
     std::fill(std::begin(s.hover), std::end(s.hover), false);
 }
 
+constexpr int64_t kHoldSettleMs = 60;   // a held panel waits this long after a "float" for the window's new frame
+
 void SetFloat(Screen &s, double mpp, int x, int y, int w, int h, int title) {
     if (!EnsureFloatPanel(s)) return;
+    const int64_t now = NowMs();
+    if (now < s.holdUntilMs) {
+        // held: this crop goes up with the buffer it's for (ft_vr_screen_present, ReleaseHold)
+        s.heldFloat = true, s.heldMpp = mpp, s.heldX = x, s.heldY = y, s.heldW = w, s.heldH = h, s.heldTitle = title;
+        s.holdUntilMs = std::min(s.holdCapMs, now + kHoldSettleMs);
+        return;
+    }
     const bool first = !s.floatOn || s.cropW <= 0;
     const double oldW = s.metres, oldH = s.heightMetres();
     s.floatOn = true;
     s.mpp = mpp;
     s.cropX = x, s.cropY = y, s.cropW = w, s.cropH = h, s.titleH = title;
-    s.metres = w * mpp;
+    if (s.drag != Drag::Resize) s.stretchW = s.stretchH = 0;   // the stretch's answer (or a drag's still going)
+    s.metres = (s.stretchW > 0 ? s.stretchW : w) * mpp;
     vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+    ApplyTexelAspect(s);
     ApplyCurve(s);
     ApplyCrop(s);
-    // the corner keepX, keepY (the top left, or the one opposite a corner being dragged) stays put
-    const bool keep = s.drag == Drag::Resize || g_tick < s.keepUntil;
-    const int kx = keep ? s.keepX : -1, ky = keep ? s.keepY : 1;
-    const double dx = -kx * (s.metres - oldW) / 2, dy = -ky * (s.heightMetres() - oldH) / 2;
-    if (!first && (std::fabs(dx) > 1e-6 || std::fabs(dy) > 1e-6)) {
-        if (s.pinned != kNone) Pin(s, s.pinned, Mul(s.pinRel, Translation(dx, dy, 0)));
-        else SetAbsolute(s, Mul(s.pose, Translation(dx, dy, 0)));
-    } else {
-        PlaceChrome(s);
-    }
+    if (first) PlaceChrome(s);
+    else KeepCorner(s, oldW, oldH);
+}
+
+// The hold is over: the crop that waited goes up (with the buffer the compositor gives now, if any).
+void ReleaseHold(Screen &s) {
+    s.holdUntilMs = s.holdCapMs = 0;
+    if (!s.heldFloat) return;
+    s.heldFloat = false;
+    SetFloat(s, s.heldMpp, s.heldX, s.heldY, s.heldW, s.heldH, s.heldTitle);
 }
 
 void Unfloat(Screen &s) {
+    s.stretchW = s.stretchH = 0;   // (a resize going on goes nowhere)
     if (s.drag != Drag::None) EndDrag(s);
     for (auto &[k, sub] : s.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);
     s.subs.clear();
     s.floatOn = s.minimized = s.titleCarry = false;
     s.cropW = s.cropH = 0;
     s.resizeW = s.resizeH = 0;
+    s.stretchW = s.stretchH = 0;
+    s.holdUntilMs = s.holdCapMs = 0, s.heldFloat = false;
     DropFloatPanel(s);
 }
 
@@ -3475,7 +3547,10 @@ void EndFarStretch(const char *why) {
     if (it != g_screens.end()) {
         Screen &s = it->second;
         std::printf("screen %d: far stretch ended (%s), %.2f m wide (was %.2f)\n", g_far.panel + 1, why, s.metres, g_far.w0);
-        if (!s.floating) {
+        if (s.floating) {
+            s.keepX = 0, s.keepY = 0;
+            SendStretch(s);
+        } else {
             FitCurve(s);
             if (!s.remote) ArrangeDesktopSoon();
         }
@@ -3565,13 +3640,12 @@ void UpdateFarStretch(int64_t t) {
     if (now < 0) return;
     g_far.sep += 0.5 * (now - g_far.sep);   // (one camera's view jumps a centimetre or two)
     const double scale = g_far.sep / g_far.sep0;
-    if (s.floating) {
-        if (g_far.px0 <= 0 || s.mpp <= 0 || g_tick - s.resizeSent < 4) return;   // about 20 a second
+    if (s.floating) {   // stretched until the fists let go (EndFarStretch: SendStretch)
+        if (g_far.px0 <= 0 || s.mpp <= 0) return;
         const int w = std::max(320, int(std::lround(g_far.px0 * scale))), h = std::max(200, int(std::lround(g_far.py0 * scale)));
-        if (w == s.resizeW && h == s.resizeH) return;
-        s.resizeW = w, s.resizeH = h, s.resizeSent = g_tick;
+        if (w == s.stretchW && h == s.stretchH) return;
         s.keepX = 0, s.keepY = 0, s.keepUntil = g_tick + 45;   // (round its centre)
-        SendFloat("resize " + std::to_string(g_far.panel + 1) + " " + std::to_string(w) + " " + std::to_string(h));
+        Stretch(s, w, h);
         return;
     }
     const double w = std::clamp(g_far.w0 * scale, kMinWidth, 12.0);
@@ -4470,7 +4544,10 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 if (s.drag == Drag::None || s.dragDevice != holder) break;
                 if (g_handInput.grabPanel(1 - e.side) == e.panel) {   // two hands to one
                     s.dragDevice = kHandHolder[1 - e.side];
-                    if (s.drag == Drag::Resize) s.drag = Drag::Move;
+                    if (s.drag == Drag::Resize) {
+                        if (s.floating) SendStretch(s);
+                        s.drag = Drag::Move;
+                    }
                     ApplyAlpha(s);
                 } else {
                     FinishDrag(s, e.panel);
@@ -4491,7 +4568,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         if (s.drag == Drag::None || !IsHandHolder(s.dragDevice)) continue;   // a laser took it, or it was let go
         if (c.kind == handinput::Carry::Resize) {
             if (s.floating) {
-                ResizeFloat(s, c.panel, c.hx, c.hy, c.grabX, c.grabY, c.sx, c.sy);
+                ResizeFloat(s, c.hx, c.hy, c.grabX, c.grabY, c.sx, c.sy);
             } else if (c.width > 0) {   // the width, and the centre so the opposite corner stays put
                 s.metres = std::clamp(c.width, kMinWidth, 12.0);
                 vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
@@ -5040,6 +5117,12 @@ void ft_vr_screen_destroy(int index) {
     g_screens.erase(it);
 }
 
+bool ft_vr_screen_held(int index) {
+    if (!g_vr) return false;
+    const auto it = g_screens.find(index);
+    return it != g_screens.end() && it->second.floating && NowMs() < it->second.holdUntilMs;
+}
+
 bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b) {
     if (!g_vr) return false;
     auto sit = g_screens.find(index);
@@ -5078,6 +5161,7 @@ bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b)
         PlaceChrome(s);  // the height changed
         std::printf("screen %d: %dx%d\n", index + 1, s.width, s.height);
     }
+    if (s.heldFloat) ReleaseHold(s);   // the crop that waited for this buffer
     s.key = key, s.buf = *b, s.plain = it->second, ++s.frames;
     // While cutting, the next tick draws the new buffer with the cutouts (never floating).
     if (!s.cutting) SetScreenTexture(s, it->second);
@@ -5296,6 +5380,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             }
         }
         if (s.drag != Drag::None) UpdateDrag(s, index);
+        else if (s.stretchW > 0 && g_far.panel != index && g_tick > s.stretchUntil) {
+            s.keepUntil = g_tick + 1;   // no answer to its resize: its own size again, the same corner kept
+            Stretch(s, 0, 0);
+        }
+        if (s.heldFloat && NowMs() >= s.holdUntilMs) ReleaseHold(s);   // (no new buffer came)
     }
     // A release on the catcher, or the pointer helper's word that left came up (see "up").
     vr::VREvent_t ev;
@@ -5772,6 +5861,19 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
         if (!(w > 1e-5 && w < 0.01) || w0 < 1 || h0 < 1) return (void)std::snprintf(reply, size, "error bad float");
         SetFloat(*s, w, x0, y0, w0, h0, std::max(0, t0));
+        std::snprintf(reply, size, "ok");
+    } else if (int ms; std::sscanf(cmd, "hold %d %d", &n, &ms) == 2) {
+        // ft-floatd changes a floating window (its scale, its size): its panel keeps its picture for up to
+        // ms (0: no longer), until the window's new crop comes and a frame after it (kHoldSettleMs).
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        if (ms < 0 || ms > 2000) return (void)std::snprintf(reply, size, "error bad hold");
+        if (ms == 0) {
+            ReleaseHold(*s);
+        } else {
+            s->holdCapMs = NowMs() + ms;
+            s->holdUntilMs = std::max(s->holdUntilMs, s->holdCapMs);
+        }
         std::snprintf(reply, size, "ok");
     } else if (std::sscanf(cmd, "unfloat %d", &n) == 1) {
         Screen *s = Find(n);

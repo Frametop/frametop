@@ -91,6 +91,7 @@ PULL_OUT = 0.3           # a floated window starts this far in front of its scre
 DEFAULT_MPP = 1.6 / 1920  # metres per pixel when ft-screens can't say (no SteamVR)
 PLACES_PATH = os.path.expanduser("~/.config/frametop-float.json")  # each app's last floating place
 LAUNCH_SECONDS = 30      # a launched app's window must show up within this
+HOLD_MS = 700            # at most this long, a panel keeps its picture while its window changes ("hold")
 IN_FRONT = 2.0           # at most this far in front of you, for an app with no remembered place
 DEBUG = os.environ.get("FT_FLOAT_DEBUG") == "1"  # log every event from the script
 # The SteamVR dashboard's Launch a program list (float/ft-dashroute): these stay SteamVR's, since
@@ -372,6 +373,7 @@ class Float:
         self.move_from = None     # frame when a title-bar move started (put back after)
         self.resizing = False     # KWin's resize by the window's edge is going on (see follow)
         self.subs = {}            # popup or dialog id -> number on the panel
+        self.steps = 0            # Meta+scroll notches not applied yet (scale_soon)
         self.app = ""             # its desktop file name (for its remembered place)
 
 
@@ -393,6 +395,7 @@ class Daemon:
         self.margin = args.margin
         self.slots = [Slot(k, args.screens) for k in range(args.slots)]
         self.floats = {}         # window id -> Float
+        self.scaling = False     # scale_soon's idle call is due
         self.windows = {}        # window id -> last info from the script
         self.gone = set()        # ids of windows that closed (KWin's ids aren't reused)
         self.pending = []        # commands for the script
@@ -740,6 +743,28 @@ class Daemon:
         x, y = round((fr["x"] - out["x"]) * s), round((fr["y"] - out["y"]) * s)
         self.set_panel(f, (x, y, w, h), title=0 if full else round((cl["y"] - fr["y"]) * s))
 
+    def scale_soon(self, f, steps):
+        """Meta+scroll: notches that come in while a scale change is under way (kscreen-doctor takes a
+        while) add up, and go in one change once the socket is read dry, so the scale keeps up with the
+        wheel instead of stepping through each notch behind it."""
+        f.steps += steps
+        if not self.scaling:
+            self.scaling = True
+            GLib.idle_add(self.scale_now)
+
+    def scale_now(self):
+        self.scaling = False
+        for f in list(self.floats.values()):
+            steps, f.steps = f.steps, 0
+            if steps:
+                self.rescale(f, steps)
+        return False
+
+    def hold(self, slot):
+        """The panel keeps its picture while KWin changes the window, and shows the window again once it
+        has its new crop (ft-screens' "hold"): no frames of it half done, at the old size or scale."""
+        self.screens.ask(f"hold {slot.index} {HOLD_MS}")
+
     def rescale(self, f, steps):
         """Meta+scroll: the window's content bigger or smaller, at the same size in pixels, so its
         panel stays the same size (KWin's output scale, in steps of 10%)."""
@@ -756,6 +781,7 @@ class Daemon:
         slot, m = f.slot, self.margin
         log(f"{f.id[:9]} scale {f.scale:g} -> {s:g}")
         f.scale = s
+        self.hold(slot)
         # The output's size in pixels must suit the new scale before KWin draws at it (see whole).
         k = whole(slot.kscale, s)
         if slot.size[0] % k or slot.size[1] % k:
@@ -1255,9 +1281,10 @@ class Daemon:
             elif cmd == "close":
                 self.command(cmd="close", id=f.id)
             elif cmd == "scale" and len(rest) == 2:
-                self.rescale(f, int(rest[1]))
+                self.scale_soon(f, int(rest[1]))
             elif cmd == "resize" and len(rest) == 3 and f.frame:
                 w, h = max(320, int(rest[1])), max(200, int(rest[2]))
+                self.hold(f.slot)
                 self.command(cmd="geometry", id=f.id, x=f.frame["x"], y=f.frame["y"], w=w / f.scale, h=h / f.scale)
             return "ok"
         if cmd in ("float", "dock", "close") and rest:

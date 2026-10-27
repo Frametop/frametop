@@ -71,6 +71,8 @@ void ft_vr_float_output(int index, bool on);
 // Show a client buffer (identified by `key`) on the screen's panel. False if SteamVR
 // can't import it.
 bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *buf);
+// The panel keeps its picture for now ("hold", while ft-floatd changes its window): new buffers wait.
+bool ft_vr_screen_held(int index);
 // A buffer is going away: drop its import.
 void ft_vr_forget(const void *key);
 // Poll panel input and SteamVR events.

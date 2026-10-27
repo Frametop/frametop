@@ -99,6 +99,7 @@ struct screen {
     int index;
     struct wlr_xdg_toplevel *toplevel;
     struct wlr_buffer *held;      // on the panel now; unlocked when the next one arrives
+    struct wlr_buffer *pending;   // the newest one while the panel is held (ft_vr_screen_held), locked
     struct wlr_buffer *latest;    // this frame's output-layer DMA-BUF, locked until the toplevel commits
     struct wlr_surface *latest_surface;
     int64_t latest_area;
@@ -328,6 +329,8 @@ static void send_presented(struct wlr_surface *surface, uint32_t refresh, uint64
     wlr_presentation_feedback_destroy(feedback);
 }
 
+static void present(struct screen *sc, struct wlr_buffer *buffer);
+
 static void screen_commit(struct wl_listener *l, void *data) {
     struct screen *sc = wl_container_of(l, sc, commit);
     struct wlr_xdg_surface *xdg = sc->toplevel->base;
@@ -370,6 +373,18 @@ static void screen_commit(struct wl_listener *l, void *data) {
         wlr_buffer_unlock(buffer); // the lock taken when this frame's layer committed
         return;
     }
+    if (ft_vr_screen_held(sc->index)) {
+        // ft-floatd is changing this window: the panel keeps the picture it has, and the newest
+        // buffer waits (with this frame's lock) for the tick that ends the hold.
+        if (sc->pending) wlr_buffer_unlock(sc->pending);
+        sc->pending = buffer;
+        return;
+    }
+    present(sc, buffer);
+}
+
+// Put a buffer (locked once, for us to let go of) on the screen's panel.
+static void present(struct screen *sc, struct wlr_buffer *buffer) {
     struct wlr_dmabuf_attributes a;
     if (!wlr_buffer_get_dmabuf(buffer, &a)) {
         wlr_buffer_unlock(buffer);
@@ -400,6 +415,7 @@ static void screen_destroy(struct wl_listener *l, void *data) {
     struct screen *sc = wl_container_of(l, sc, destroy);
     wlr_log(WLR_INFO, "screen %d closed", sc->index + 1);
     if (sc->held) wlr_buffer_unlock(sc->held);
+    if (sc->pending) wlr_buffer_unlock(sc->pending);
     if (sc->latest) wlr_buffer_unlock(sc->latest);
     ft_vr_screen_destroy(sc->index);
     if (sc->server->pointer_focus == sc) {
@@ -709,6 +725,14 @@ static int tick(int fd, uint32_t mask, void *data) {
     uint64_t expirations;
     const ssize_t got = read(fd, &expirations, sizeof expirations);  // clears it; how many doesn't matter
     (void)got;
+    for (int i = 0; i < MAX_SCREENS; ++i) {  // a hold ended: the newest buffer goes up
+        struct screen *sc = s->screens[i];
+        if (!sc || !sc->pending || ft_vr_screen_held(i)) continue;
+        struct wlr_buffer *buffer = sc->pending;
+        sc->pending = NULL;
+        if (buffer == sc->held) wlr_buffer_unlock(buffer);
+        else present(sc, buffer);
+    }
     ft_vr_poll(handle_vr_event, s);
     ft_remote_tick();
     if (s->relay_buttons.held && !relay_can_press(s))

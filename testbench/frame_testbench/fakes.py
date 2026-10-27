@@ -9,8 +9,8 @@ for the trackers whose output Frametop reads:
   2 s (gaze/ft-gaze.cpp), so everything from ft-gaze on runs as with real eyes. It never
   touches the real files.
 - Hands: it touches $XDG_RUNTIME_DIR/frametop-testbench/hands twice a second, which parks ft-hands
-  (hands/track/main.cpp), and publishes the hands and gestures files ft-hands would, 30 times a
-  second, in their layouts (hands/include/fh_hands.h, fh_gestures.h).
+  (hands/track/main.cpp), and once it says it parked publishes the hands and gestures files
+  ft-hands would, 30 times a second, in their layouts (hands/include/fh_hands.h, fh_gestures.h).
 
 Commands come one line at a time on a user-only socket, like the input proxy's, and every reply
 is one JSON line. Faked state stays until released. Releasing everything ends the process, and
@@ -209,7 +209,9 @@ class Eyes:
         for k in range(2):
             v = SEEN_VAR if seen[k] else LOST_VAR
             var += [v, v / 2, v]
-        mean = pose.normalize([0.0] + [a + b for a, b in zip(set1[0], set1[1])])[1:]
+        both = [a + b for a, b in zip(set1[0], set1[1])]
+        # (Eyes looking straight apart have no mean: the left one's will do.)
+        mean = pose.normalize([0.0] + both)[1:] if any(abs(v) > 1e-6 for v in both) else set1[0]
         # The raw measurements move with each new frame of a seen eye and freeze while it's lost.
         for k in range(2):
             if seen[k]:
@@ -310,6 +312,27 @@ class Gesture:
                            self.end_ns, self.distance, self.strength, *self.point, *self.begin_point)
 
 
+def ft_hands_parked(hands_dir):
+    """ft-hands writes "0" to hands-want every second while parked (hands/track/main.cpp)."""
+    path = os.path.join(hands_dir, 'hands-want')
+    try:
+        with open(path) as f:
+            return f.read(8).strip() == '0' and time.time() - os.fstat(f.fileno()).st_mtime < 2.5
+    except OSError:
+        return False
+
+
+def ft_hands_running():
+    for pid in filter(str.isdigit, os.listdir('/proc')):
+        try:
+            with open(f'/proc/{pid}/comm') as f:
+                if f.read().strip() == 'ft-hands':
+                    return True
+        except OSError:
+            pass
+    return False
+
+
 class Hands:
     """Both hands, published as ft-hands would while it's parked."""
 
@@ -328,6 +351,10 @@ class Hands:
         self.slots = None
         self.replay = None   # (Playback, HandsDump, path) while playing a recording
         self.rebase = None   # per gesture slot: what to add to the recording's counters
+        # Only the real files can have ft-hands writing them too (tests use their own folder).
+        self.real = os.path.realpath(hands_dir) == os.path.realpath(f'/run/user/{os.getuid()}/frametop-hands')
+        self.checked, self.clear = -1.0, False
+        self.waiting = None   # why nothing is published yet, for status
 
     def touch(self):
         """Keep ft-hands parked: the marker is fresh for 3 s (hands/track/main.cpp)."""
@@ -339,7 +366,17 @@ class Hands:
         self.touched = time.monotonic()
 
     def ready(self):
-        return time.monotonic() - self.started >= HANDS_SETTLE
+        """ft-hands has let go of its files: it said it parked (it writes "0" to hands-want every
+        second while it is), or it isn't running. It doesn't park while it records, and a signal
+        can wake it, so this is asked before every write, not once."""
+        now = time.monotonic()
+        if now - self.started < HANDS_SETTLE:
+            return False
+        if now - self.checked >= 0.25:
+            self.checked = now
+            self.clear = ft_hands_parked(self.hands_dir) or not (self.real and ft_hands_running())
+            self.waiting = None if self.clear else "ft-hands is running and hasn't parked (recording?)"
+        return self.clear
 
     def open_files(self):
         """After ft-hands parked: take its files over, keeping the gesture counters it left."""
@@ -364,6 +401,8 @@ class Hands:
         dump = HandsDump(path)
         self.stop_replay()
         self.poses.clear()
+        if self.slots:   # a scripted pinch or grip down ends (lost) before the recording's begin
+            self.write_gestures({}, mono_ns())
         self.replay = (Playback([dump.times], loop), dump, path)
         self.rebase = None
 
@@ -502,14 +541,16 @@ class Hands:
 
 DUMP_MAGIC = b'FHDUMP02'
 GAZE_FORMAT = {'format': 'frame-testbench-gaze', 'version': 1}
-MAX_GAZE_BYTES = 64 << 20
+# A recording loads in the loop that keeps the fakes fresh: these load well under ft-gaze's 2 s.
+MAX_GAZE_BYTES = 40 << 20
+MAX_DUMP_BYTES = 256 << 20
 
 
 def open_recording(path, limit):
     """A recording the user owns, by an absolute path, without following a link."""
     if not os.path.isabs(path):
         raise ValueError('a recording is given by its absolute path')
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)   # a FIFO can't hang it
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_size > limit:
         os.close(fd)
@@ -517,9 +558,14 @@ def open_recording(path, limit):
     return os.fdopen(fd, 'rb')
 
 
-def finite_list(value, count):
+def finite_list(value, count, unseen=False):
+    """count numbers; with unseen, null stands for NaN (a tracker's value for an eye it can't
+    see, which JSON can't hold)."""
+    if unseen and isinstance(value, list):
+        value = [math.nan if v is None else v for v in value]
     if (not isinstance(value, list) or len(value) != count
-            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in value)):
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                       and (math.isfinite(v) or unseen and math.isnan(v)) for v in value)):
         raise ValueError(f'expected {count} finite numbers')
     return [float(v) for v in value]
 
@@ -537,11 +583,11 @@ def load_gaze(path):
             t = finite_list([line['t']], 1)[0]
             if 'mmap' in line:
                 m = line['mmap']
-                mmap_frames.append((t, {name: finite_list(m[name], count) for name, _, count in MMAP_FIELDS}))
+                mmap_frames.append((t, {name: finite_list(m[name], count, True) for name, _, count in MMAP_FIELDS}))
             elif 'own' in line:
                 o = line['own']
-                own = {name: finite_list(o[name], count) for name, _, count in OWN_FIELDS}
-                own['yaw'], own['pitch'] = finite_list([o['yaw'], o['pitch']], 2)
+                own = {name: finite_list(o[name], count, True) for name, _, count in OWN_FIELDS}
+                own['yaw'], own['pitch'] = finite_list([o['yaw'], o['pitch']], 2, True)
                 if not isinstance(o['flags'], int) or not 0 <= o['flags'] < 1 << 32:
                     raise ValueError
                 own['flags'] = o['flags']
@@ -559,7 +605,7 @@ class HandsDump:
     """hands.fhdump (ft-handreplay --publish-dump's format), read a set at a time."""
 
     def __init__(self, path):
-        self.f = open_recording(path, 1 << 34)
+        self.f = open_recording(path, MAX_DUMP_BYTES)
         header = self.f.read(16)
         if len(header) != 16 or header[:8] != DUMP_MAGIC or struct.unpack_from('<II', header, 8) != (
                 HANDS_SIZE, GESTURES_SIZE):
@@ -594,6 +640,16 @@ class HandsDump:
 
 # --- the server ------------------------------------------------------------------------------
 
+def alive(fake):
+    """Write the fake's next sample; False when it's done, or can't go on (a damaged recording,
+    a file it can't write), which ends that fake alone."""
+    try:
+        return fake.write()
+    except (ValueError, OSError) as error:
+        print(f'frame-testbench fakes: stopped {type(fake).__name__.lower()}: {error}', file=sys.stderr)
+        return False
+
+
 def finite(values):
     out = [float(v) for v in values]
     if not all(math.isfinite(v) for v in out):
@@ -613,7 +669,9 @@ class Fakes:
         reply = {'ok': ok, 'pid': os.getpid(),
                  'gaze': self.eyes.status() if self.eyes else None,
                  'hands': self.hands.status() if self.hands else None,
-                 'hands_publishing': bool(self.hands and self.hands.hands_fd is not None)}
+                 'hands_publishing': bool(self.hands and self.hands.hands_fd is not None and self.hands.clear)}
+        if self.hands and self.hands.waiting:
+            reply['hands_waiting'] = self.hands.waiting
         if error:
             reply['error'] = error
         return reply
@@ -705,12 +763,12 @@ class Fakes:
         # A recording plays at its own times, so it's looked at more often than a scripted fake
         # is written; nothing is written between its samples.
         if self.eyes and now >= self.next_eyes:
-            if not self.eyes.write():
+            if not alive(self.eyes):
                 self.eyes.close()
                 self.eyes = None
             self.next_eyes = max(self.next_eyes + (1 / 250 if self.eyes and self.eyes.replay else 1 / 90), now)
         if self.hands and now >= self.next_hands:
-            if not self.hands.write():
+            if not alive(self.hands):
                 self.hands.close()
                 self.hands = None
             self.next_hands = max(self.next_hands + (1 / 250 if self.hands and self.hands.replay else 1 / 30), now)

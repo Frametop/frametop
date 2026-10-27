@@ -1,6 +1,7 @@
 """Recording the trackers' output (frame_testbench.record) and playing it back through the fake
 trackers: a scripted fake stands in for the real trackers being recorded. No SteamVR or cameras."""
 import json
+import math
 import os
 from pathlib import Path
 import struct
@@ -132,6 +133,23 @@ class GazeReplayTests(Base):
                 self.assertIsNone(reply['gaze'])
         self.assertFalse((self.dir / 'fake/eye-server.mmap').exists())
         self.assertFalse(player.command(f'replay-gaze {cases["empty"]} twice')['ok'])
+        os.mkfifo(self.dir / 'fifo')   # refused at once, not waited on
+        self.assertFalse(player.command(f'replay-gaze {self.dir / "fifo"} once')['ok'])
+
+    def test_an_unseen_eye_records_as_null_and_plays_back_as_nan(self):
+        own = {'yaw': float('nan'), 'pitch': 2.0, 'flags': 2, 'eyes': [float('nan'), float('nan'), 3.0, 2.0],
+               'slip': [0.0] * 4}
+        line = record.unseen_as_null(own)
+        self.assertEqual((line['yaw'], line['eyes'][:2], line['flags']), (None, [None, None], 2))
+        path = self.dir / 'gaze.jsonl'
+        path.write_text(json.dumps(fakes.GAZE_FORMAT) + '\n' + json.dumps({'t': 0, 'own': line}, allow_nan=False) + '\n')
+        player = self.player()
+        self.assertTrue(player.command(f'replay-gaze {path} loop')['ok'])
+        self.run_for(player, 0.05)
+        data = (self.dir / 'fake/frametop-eyes-gaze').read_bytes()
+        yaw, pitch = struct.unpack_from('<ff', data, 16)
+        self.assertTrue(math.isnan(yaw))
+        self.assertEqual(pitch, 2.0)
 
 
 def hands_set(t_ns, pinch_right, seq=2):
@@ -249,6 +267,36 @@ class HandsReplayTests(Base):
         self.assertTrue(close(eyes[0][0], fakes.direction(1, 0)))   # held while waiting
         second = next(t for d, t in eyes if close(d, fakes.direction(2, 0)))
         self.assertLess(abs(second - pinches[1][1]), 0.05)   # in step with the hands
+
+    def test_a_scripted_pinch_down_ends_before_a_replay_so_counters_never_go_back(self):
+        player = self.player()
+        self.assertTrue(player.command('hand right 0.1 -0.2 -0.35 1 0 0 0 pinch')['ok'])
+        player.tick(time.monotonic())
+        begins, ends = self.gestures()[1][2:]
+        self.assertEqual(begins, ends + 1)
+        base = 4_000_000_000_000
+        path = self.dump([hands_set(base, (0, 0)), hands_set(base + 50_000_000, (0, 0))])
+        self.assertTrue(player.command(f'replay-hands {path} once')['ok'])
+        seen = []
+        end = time.monotonic() + 1
+        while player.active() and time.monotonic() < end:
+            player.tick(time.monotonic())
+            seen.append(self.gestures()[1][2:])
+            time.sleep(0.002)
+        self.assertTrue(all(b >= begins and e >= ends for b, e in seen), seen)
+        self.assertEqual(seen[0], (begins, begins))   # the scripted pinch ended, nothing began
+
+    def test_a_damaged_set_stops_the_hands_alone(self):
+        base = 6_000_000_000_000
+        bad = bytearray(hands_set(base + 50_000_000, (0, 0)))
+        bad[:8] = b'XXXXXXXX'
+        path = self.dump([hands_set(base, (0, 0)), bytes(bad)])
+        player = self.player()
+        self.assertTrue(player.command('gaze 0 0 0 0')['ok'])
+        self.assertTrue(player.command(f'replay-hands {path} loop')['ok'])
+        self.run_for(player, 0.3)
+        self.assertIsNone(player.status()['hands'])
+        self.assertIsNotNone(player.status()['gaze'])
 
     def test_scripted_commands_and_a_replay_take_turns(self):
         base = 2_000_000_000_000

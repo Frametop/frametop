@@ -32,8 +32,9 @@ takes commands on `$XDG_RUNTIME_DIR/frame-testbench-fakes.sock`, a user-only soc
   ft-gaze reads a stand-in instead of the real `/dev/shm` file while it was written in the last
   2 s, and goes back to the real one by itself when it stops. The real files are never written.
 - **Hands**: it touches `$XDG_RUNTIME_DIR/frametop-testbench/hands` twice a second, which parks
-  ft-hands (no tracking, ft-camd stops copying frames) while it's under 3 s old. 0.6 s later it
-  starts publishing `/run/user/UID/frametop-hands/hands` and `gestures` 30 times a second, in
+  ft-hands (no tracking, ft-camd stops copying frames) while it's under 3 s old. Once ft-hands
+  says it parked (its `hands-want` reads 0), or isn't running, and at least 0.6 s on, it starts
+  publishing `/run/user/UID/frametop-hands/hands` and `gestures` 30 times a second, in
   their layouts (`hands/include/fh_hands.h`, `fh_gestures.h`). The gesture counters carry on from
   where ft-hands left them, and a gesture ft-hands left down ends as lost, so nothing reads as a
   click at the handover.
@@ -110,5 +111,6 @@ stops all of it. At the end of a single run the fake ends as if released.
   faked. Neither is anything that asks ft-eyes directly, such as our tracker's calibration
   captures.
 - Hands reach Frametop only: OpenXR and OpenVR skeletal input in games isn't faked.
-- ft-hands has to be running for the park to matter; without it the fake publishes all the same.
+- ft-hands doesn't park while it records (Hand Recorder): the fake hands wait, and `status`
+  says why under `hands_waiting`. Without ft-hands running they're published all the same.
 - What these can't show (how a real look or pinch feels, tracking quality) needs a headset test.

@@ -299,6 +299,36 @@ class ReaderTests(Scratch):
         self.assertFalse((self.fake_dir / 'hands').exists())
         self.assertFalse(self.fakes.active())
 
+    def test_nothing_is_published_while_a_running_ft_hands_hasnt_parked(self):
+        self.ok('hand left 0 0 -0.3 1 0 0 0 open')
+        self.fakes.hands.real = True   # as if these were the real files
+        with mock.patch.object(fakes, 'ft_hands_running', return_value=True):
+            self.tick(2)
+            self.assertFalse((self.hands_dir / 'hands').exists())
+            self.assertIn('hands_waiting', self.fakes.status())
+            want = self.hands_dir / 'hands-want'
+            want.write_text('0\n')
+            os.utime(want, (time.time() - 5,) * 2)   # one it left long ago doesn't count
+            self.fakes.hands.checked = -1
+            self.tick()
+            self.assertFalse((self.hands_dir / 'hands').exists())
+            want.write_text('0\n')
+            self.fakes.hands.checked = -1
+            self.tick()
+            self.assertTrue(self.fakes.status()['hands_publishing'])
+            want.unlink()   # it woke up (it records, or a signal): ours stop at once
+            self.fakes.hands.checked = -1
+            self.tick()
+            seq = (self.hands_dir / 'hands').read_bytes()[16:24]
+            self.tick(3)
+            self.assertEqual((self.hands_dir / 'hands').read_bytes()[16:24], seq)
+            self.assertFalse(self.fakes.status()['hands_publishing'])
+
+    def test_eyes_looking_straight_apart_still_write(self):
+        self.ok('gaze 90 0 -90 0')
+        self.tick(2)
+        self.assertTrue(self.fakes.eyes)
+
     def test_nothing_is_published_until_ft_hands_parked(self):
         with mock.patch.object(fakes, 'HANDS_SETTLE', 30):
             self.ok('hand left 0 0 -0.3 1 0 0 0 open')

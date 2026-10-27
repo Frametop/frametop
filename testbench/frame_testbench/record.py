@@ -6,7 +6,7 @@ Only what the trackers publish is recorded, never a camera image, and only by re
   sample. The first line says what it is ({"format": "frame-testbench-gaze", "version": 1});
   each after it has "t" (seconds since the start) and "mmap" (left1, right1, fix1, left2,
   right2, var1, var2, open, meas, as ft-gaze names them) or "own" (yaw, pitch, flags, eyes,
-  slip).
+  slip). null is NaN, which our tracker writes for an eye it can't see.
 - hands.fhdump: ft-hands' hands and gestures files after each new set, in ft-handreplay
   --publish-dump's format: "FHDUMP02", the two files' sizes (u32 each), then per set both
   files' bytes and an int64 time (ns, CLOCK_MONOTONIC). So a dump made offline from a camera
@@ -16,6 +16,7 @@ Gaze is how someone's eyes moved: recordings stay on this machine, in the testbe
 artifacts/ folder, and never go into the repo or anywhere else.
 """
 import json
+import math
 import mmap
 import os
 import shutil
@@ -109,6 +110,12 @@ def seqlock_copy(m, size):
     return None
 
 
+def unseen_as_null(values):
+    """NaN (an eye the tracker can't see) as null: JSON has no NaN. fakes.load_gaze reads it back."""
+    clean = lambda v: None if isinstance(v, float) and not math.isfinite(v) else v
+    return {k: [clean(x) for x in v] if isinstance(v, list) else clean(v) for k, v in values.items()}
+
+
 def private_file(path):
     return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600), 'wb')
 
@@ -163,7 +170,7 @@ def record(directory, seconds, gaze=True, hands=True):
                     first = last[name] is None
                     last[name] = got[0]
                     if not first:   # the one there when we started is old
-                        line = {'t': round(elapsed, 6), name: got[1]}
+                        line = {'t': round(elapsed, 6), name: unseen_as_null(got[1])}
                         gaze_out.write(json.dumps(line, allow_nan=False).encode() + b'\n')
                         counts[name] += 1
             if hands_m:

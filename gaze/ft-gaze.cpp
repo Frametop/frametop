@@ -670,6 +670,13 @@ int main(int argc, char **argv) {
     const std::string fakeEyes = TestbenchPath("eye-server.mmap");
     std::string eyesPath = Fresh(fakeEyes) ? fakeEyes : kEyeServer;
     bool haveMmap = eyes.Open(eyesPath.c_str());
+    // The stand-in's file: the testbench takes it away and makes a new one when the fake stops and
+    // starts again, maybe within one check, so it's known by its inode too.
+    auto inode = [](const std::string &path) {
+        struct stat st {};
+        return stat(path.c_str(), &st) == 0 ? st.st_ino : ino_t(0);
+    };
+    ino_t eyesIno = eyesPath == fakeEyes ? inode(fakeEyes) : 0;
     std::fprintf(stderr, "ft-gaze: eye-server.mmap %s\n", haveMmap ? "open" : "not available");
 
     OwnFile ownFile;
@@ -720,10 +727,11 @@ int main(int argc, char **argv) {
         if (now >= nextFakeCheck) {
             nextFakeCheck = now + 0.5;
             const std::string path = Fresh(fakeEyes) ? fakeEyes : kEyeServer;
-            if (path != eyesPath) {
+            const ino_t ino = path == fakeEyes ? inode(fakeEyes) : 0;
+            if (path != eyesPath || ino != eyesIno) {
                 eyes.Close();
                 eyes = EyeFile{};
-                eyesPath = path;
+                eyesPath = path, eyesIno = ino;
                 haveMmap = eyes.Open(eyesPath.c_str());
                 lastCounterSeen = eyes.Counter();
                 nextLayoutCheck = missSince = 0;

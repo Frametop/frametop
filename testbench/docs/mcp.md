@@ -93,13 +93,20 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | `controller_input_status` | None | `inputs`, independent SteamVR action readback |
 | `compositor` | `mode`: `awake` or `auto` | `compositor MODE` |
 | `capture` | None | `capture` with a server-owned output/fetch directory |
-| `release_all` | None | `release` |
+| `gaze_look` | `yaw`, `pitch` (-90..90); optional `right_eye` `[yaw, pitch]` | `gaze look YAW PITCH [--right YAW PITCH]` |
+| `gaze_eyes` | `left`, `right`: `open`, `closed`, or `lost` | `gaze eyes LEFT RIGHT` |
+| `gaze_release` | None | `gaze release` |
+| `hand_set` | `side`, `position`; optional `rotation`, `shape` (`open`, `point`, `pinch`, `fist`) | `hand SIDE set` |
+| `hand_release` | `side`: `left`, `right`, or `all` | `hand SIDE release` |
+| `release_all` | None | `release`, which also stops the fake trackers |
 
 `side` is `left` or `right`. Position and translation are three-element XYZ
 arrays in meters. Rotation is `[yaw, pitch, roll]` in degrees. All numbers must
 be finite JSON numbers, not strings or booleans. Default translation and rotation
 are `[0, 0, 0]`. Space is `standing` by default, or `raw`. Moves require a prior
 pose set for that device and follow the existing CLI's coordinate conventions.
+Hand positions are in the head frame, not standing space; see
+[fake eye and hand trackers](fake-trackers.md).
 
 ### Controller inputs
 

@@ -62,6 +62,11 @@
 // The mmap samples are in head space, 17 ms or so old when they appear, so each is turned
 // into the room with the head pose at its own timestamp, from a short pose history.
 //
+// The testbench (testbench/, a development tool that never ships) can stand in for both eye
+// trackers: it writes files in eye-server.mmap's and frametop-eyes-gaze's layouts to
+// $XDG_RUNTIME_DIR/frametop-testbench/, and while one was written in the last 2 s it's read
+// instead of the real one (Fresh). One a crashed testbench left behind stops counting by itself.
+//
 // Screens come from ft-screens (@ft_screens: "screens", "remotes" for other machines'
 // displays, "get N"), refreshed 4 times a second in the background. A curved screen is a cylinder toward its front (see OnSurface
 // in screens/vr.cpp).
@@ -103,6 +108,22 @@ double NowRaw() {
     return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
+// The testbench's stand-in for a tracker's file (see the top), and whether it was written in the
+// last 2 s.
+std::string TestbenchPath(const char *name) {
+    const char *run = std::getenv("XDG_RUNTIME_DIR");
+    return (run && *run ? std::string(run) : "/run/user/" + std::to_string(getuid())) + "/frametop-testbench/" + name;
+}
+bool Fresh(const std::string &path) {
+    struct stat st {};
+    timespec now;
+    if (stat(path.c_str(), &st) != 0 || clock_gettime(CLOCK_REALTIME, &now) != 0) return false;
+    const double age = double(now.tv_sec - st.st_mtim.tv_sec) + (now.tv_nsec - st.st_mtim.tv_nsec) * 1e-9;
+    return age > -2.0 && age < 2.0;
+}
+constexpr const char *kEyeServer = "/dev/shm/eye-server.mmap";
+constexpr const char *kOwnGaze = "/dev/shm/frametop-eyes-gaze";
+
 // --- eye-server.mmap (packed, unaligned: read with memcpy) ---
 // SteamOS 0.4 (SteamVR 2.18.2; first on the 0.4.3 beta, the same on 0.4.5, the release)
 // moved every field from the timestamp on by 5 bytes (measured 2026-10-04 with the ftdiag
@@ -134,8 +155,8 @@ struct EyeFile {
     const uint8_t *p = nullptr;
     size_t size = 0;
     size_t At(size_t base) const { return base + shift; }
-    bool Open() {
-        const int fd = open("/dev/shm/eye-server.mmap", O_RDONLY | O_CLOEXEC);
+    bool Open(const char *path = kEyeServer) {
+        const int fd = open(path, O_RDONLY | O_CLOEXEC);
         if (fd < 0) return false;
         struct stat st {};
         if (fstat(fd, &st) != 0 || size_t(st.st_size) < kNeed) {
@@ -148,6 +169,10 @@ struct EyeFile {
         p = static_cast<const uint8_t *>(m);
         size = st.st_size;
         return true;
+    }
+    void Close() {
+        if (p) munmap(const_cast<uint8_t *>(p), size);
+        p = nullptr, size = 0;
     }
     // The sample counter, or 0 without the mapping: the one read the loop makes whether or
     // not the file was there (Get, V and ReadSample need it).
@@ -183,7 +208,8 @@ struct EyeFile {
     // SteamVR's tracker warming up, or a layout we don't know), so the mmap stays unused;
     // try again later. One detection per run is enough: the layout can't change under a
     // running ft-gaze, since SteamVR starts the eye server that writes the file, and the
-    // gaze service stops and starts with SteamVR.
+    // gaze service stops and starts with SteamVR. (The testbench's stand-in coming or going
+    // starts it over on a new EyeFile.)
     enum Detection { kWaiting, kFound, kNone };
     static constexpr double kConfirm = 0.5;
     static constexpr size_t kLayouts = sizeof kShifts / sizeof kShifts[0];
@@ -256,7 +282,8 @@ struct OwnSample {
 
 class OwnFile {
 public:
-    // Reopened when it appears or is replaced, since ft-eyes may start after us.
+    // Reopened when it appears or is replaced, since ft-eyes may start after us, and when the
+    // testbench's stand-in comes or goes.
     bool Read(OwnSample &o) {
         const double now = NowRaw();
         if (!p_ || now - checked_ > 2.0) Reopen(now);
@@ -285,11 +312,14 @@ private:
     static constexpr size_t kSize = 128;
     void Reopen(double now) {
         checked_ = now;
+        const std::string fake = TestbenchPath("frametop-eyes-gaze");
+        const std::string path = Fresh(fake) ? fake : kOwnGaze;
+        if (path != path_) Close(), path_ = path;
         struct stat st {};
-        if (stat("/dev/shm/frametop-eyes-gaze", &st) != 0) return Close();
+        if (stat(path_.c_str(), &st) != 0) return Close();
         if (p_ && st.st_ino == ino_) return;
         Close();
-        const int fd = open("/dev/shm/frametop-eyes-gaze", O_RDONLY | O_CLOEXEC);
+        const int fd = open(path_.c_str(), O_RDONLY | O_CLOEXEC);
         if (fd < 0) return;
         if (fstat(fd, &st) == 0 && size_t(st.st_size) >= kSize) {
             void *m = mmap(nullptr, kSize, PROT_READ, MAP_SHARED, fd, 0);
@@ -304,6 +334,7 @@ private:
     const uint8_t *p_ = nullptr;
     ino_t ino_ = 0;
     double checked_ = -1e9;
+    std::string path_ = kOwnGaze;
 };
 
 // --- Screens from ft-screens ---
@@ -635,7 +666,9 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "ft-gaze: action manifest %s: error %d\n", manifest.c_str(), int(me));
 
     EyeFile eyes;
-    bool haveMmap = eyes.Open();
+    const std::string fakeEyes = TestbenchPath("eye-server.mmap");
+    std::string eyesPath = Fresh(fakeEyes) ? fakeEyes : kEyeServer;
+    bool haveMmap = eyes.Open(eyesPath.c_str());
     std::fprintf(stderr, "ft-gaze: eye-server.mmap %s\n", haveMmap ? "open" : "not available");
 
     OwnFile ownFile;
@@ -666,7 +699,7 @@ int main(int argc, char **argv) {
     uint32_t lastCounterSeen = eyes.Counter();
     // SteamVR's eye tracker creates the mmap a second or two after SteamVR starts, so it can
     // be missing when we start: look for it again every 2 s until it's there.
-    double nextOpen = NowRaw() + 2.0;
+    double nextOpen = NowRaw() + 2.0, nextFakeCheck = 0;
 
     while (true) {
         const double now = NowRaw();
@@ -682,9 +715,23 @@ int main(int argc, char **argv) {
         sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &hp, 1);
         if (hp.bPoseIsValid) history.Add(now, hp.mDeviceToAbsoluteTracking);
 
+        // The testbench's stand-in came or went: start over on the other file, layout and all.
+        if (now >= nextFakeCheck) {
+            nextFakeCheck = now + 0.5;
+            const std::string path = Fresh(fakeEyes) ? fakeEyes : kEyeServer;
+            if (path != eyesPath) {
+                eyes.Close();
+                eyes = EyeFile{};
+                eyesPath = path;
+                haveMmap = eyes.Open(eyesPath.c_str());
+                lastCounterSeen = eyes.Counter();
+                nextLayoutCheck = missSince = 0;
+                std::fprintf(stderr, "ft-gaze: reading %s\n", path == fakeEyes ? "the testbench's fake eye tracker" : "SteamVR's eye tracker");
+            }
+        }
         if (!haveMmap && now >= nextOpen) {
             nextOpen = now + 2.0;
-            if ((haveMmap = eyes.Open())) {
+            if ((haveMmap = eyes.Open(eyesPath.c_str()))) {
                 std::fprintf(stderr, "ft-gaze: eye-server.mmap open\n");
                 lastCounterSeen = eyes.Counter();
             }

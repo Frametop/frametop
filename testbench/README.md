@@ -10,9 +10,10 @@ Headset and controller pose tools for closed-loop development on Steam Frame. A 
 - The real HMD's own buttons (its other boolean inputs, listed in `status`).
 - The real HMD's translation and rotation, including valid synthetic tracking while physical tracking is unavailable.
 - Independent left/right synthetic controller translation and rotation, without requiring powered physical controllers.
+- Fake eye tracking and hand tracking at Frametop's boundary: gaze directions and eye states for ft-gaze, and posed hands with pinches and grips in place of ft-hands. See [fake eye and hand trackers](docs/fake-trackers.md).
 - SteamVR stereo screenshots, with runtime pose/frame metadata and optional downloads to the agent machine.
 
-Input overrides stay active across CLI calls. `release` restores physical input. There is no per-screenshot activation/rollback cycle. Do not wear the headset while another person or agent is driving its pose.
+Input overrides and fake trackers stay active across CLI calls. `release` restores physical input and stops the fake trackers. There is no per-screenshot activation/rollback cycle. Do not wear the headset while another person or agent is driving its pose.
 
 The input adapter wraps the existing `cv` driver at public OpenVR interface boundaries. It forwards display components, unrelated devices, and unrelated inputs. It does not add a second HMD. This interception is experimental, not a Valve-supported extension mechanism.
 
@@ -137,10 +138,10 @@ This leaves the stock runtime and its driver files untouched. The proxy starts w
 
 `build/frame-observe` provides `status`, `capture ABS_NEW_DIRECTORY`, `setting true|false`, and `debug DEVICE_INDEX REQUEST`. It uses Background OpenVR initialization and emits JSON on stdout; SDK chatter goes to stderr. `OPENVR_API_LIBRARY` selects another runtime library. `FRAME_OBSERVE_TIMEOUT_SECONDS` bounds a command from 1 to 120 seconds, default 20.
 
-`FRAME_TESTBENCH_OBSERVER` selects a different observer executable. `FRAME_TESTBENCH_SOCKET` selects the local input socket, normally `/run/user/<uid>/frame-testbench.sock`. Input control uses a user-only UNIX socket. There is no listening network service.
+`FRAME_TESTBENCH_OBSERVER` selects a different observer executable. `FRAME_TESTBENCH_SOCKET` selects the local input socket, normally `/run/user/<uid>/frame-testbench.sock`. `FRAME_TESTBENCH_FAKES_SOCKET` selects the fake trackers' socket, normally `$XDG_RUNTIME_DIR/frame-testbench-fakes.sock`. Input control uses a user-only UNIX socket. There is no listening network service.
 
 ## Verification
 
-`just test-testbench` (part of `just test`, so `./ft dev test` and CI run it) builds and exercises the public SDK boundaries with fake runtimes, checks pose mathematics and the CLI, and tests input forwarding and loader selection without starting SteamVR. The image has no MCP SDK, so the MCP tests skip there. `install.sh install` runs them in `testbench/.venv` against the pinned packages, exercising the actual stdio MCP protocol. These tests do not substitute for the live headset checks in the [original HMD validation](docs/validation.md), [controller/MCP validation](docs/controller-mcp-validation.md), and [button/analog/touch validation](docs/input-validation.md).
+`just test-testbench` (part of `just test`, so `./ft dev test` and CI run it) builds and exercises the public SDK boundaries with fake runtimes, checks pose mathematics and the CLI, and tests input forwarding and loader selection without starting SteamVR. It reads the fake trackers' files back through `hands/include`'s structs and ft-gaze's own reader (built around `gaze/ft-gaze.cpp`; skipped without an OpenVR library to link). The image has no MCP SDK, so the MCP tests skip there. `install.sh install` runs them in `testbench/.venv` against the pinned packages, exercising the actual stdio MCP protocol. These tests do not substitute for the live headset checks in the [original HMD validation](docs/validation.md), [controller/MCP validation](docs/controller-mcp-validation.md), and [button/analog/touch validation](docs/input-validation.md).
 
 The testbench is MIT licensed, copyright Donn Green ([LICENSE](LICENSE)). The OpenVR headers it builds against come from `scripts/openvr.sh` and keep Valve's license.

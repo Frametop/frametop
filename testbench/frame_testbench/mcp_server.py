@@ -32,6 +32,9 @@ Boolean = Annotated[bool, Field(strict=True)]
 UnitInput = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=0, le=1)]
 AxisInput = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=-1, le=1)]
 HmdButton = Annotated[str, Field(strict=True, max_length=128, pattern=f'^{controller_inputs.HMD_BUTTON_PATH}$')]
+GazeAngle = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=-90, le=90)]
+EyeState = Literal['open', 'closed', 'lost']
+HandShape = Literal['open', 'point', 'pinch', 'fist']
 
 
 @dataclass(frozen=True)
@@ -254,8 +257,49 @@ def create_server(config: Config, *, runner=run_cli):
                 capture_result, data, directory, bool(config.host), abandon_on_cancel=False)
 
     @server.tool()
+    async def gaze_look(yaw: GazeAngle, pitch: GazeAngle,
+                        right_eye: tuple[GazeAngle, GazeAngle] | None = None) -> CallToolResult:
+        """Fake eye tracking: the eyes look this way, head-relative degrees (yaw +left, pitch +up).
+
+        ft-gaze reads the fake instead of SteamVR's and Frametop's own tracker until gaze_release.
+        right_eye: the right eye's own (yaw, pitch); yaw and pitch are then the left eye's.
+        SteamVR's gaze action isn't faked.
+        """
+        right = ['--right', *map(number, right_eye)] if right_eye else []
+        return await execute(['gaze', 'look', number(yaw), number(pitch), *right])
+
+    @server.tool()
+    async def gaze_eyes(left: EyeState, right: EyeState) -> CallToolResult:
+        """Set each faked eye open, closed or lost (the tracker can't see it). Requires gaze_look first."""
+        return await execute(['gaze', 'eyes', left, right])
+
+    @server.tool()
+    async def gaze_release() -> CallToolResult:
+        """Stop faking eye tracking; ft-gaze reads the real trackers again within 2 s."""
+        return await execute(['gaze', 'release'])
+
+    @server.tool()
+    async def hand_set(side: Side, position: Vector, rotation: Vector = (0, 0, 0),
+                       shape: HandShape = 'open') -> CallToolResult:
+        """Fake a hand: wrist XYZ in meters in the head frame (+X right, +Y up, -Z forward),
+        yaw/pitch/roll in degrees. No rotation: fingers forward, palm down.
+
+        ft-hands parks while any hand is faked and these are published instead, to the hand
+        cutouts and the pointer. pinch holds a pinch down, fist a grip: change the shape to
+        click. Persists until hand_release.
+        """
+        return await execute(['hand', side, 'set', '--position', *map(number, position),
+                              '--rotation', *map(number, rotation), '--shape', shape])
+
+    @server.tool()
+    async def hand_release(side: Literal['left', 'right', 'all']) -> CallToolResult:
+        """Stop faking a hand, or both; ft-hands tracks again once none is faked."""
+        return await execute(['hand', side, 'release'])
+
+    @server.tool()
     async def release_all() -> CallToolResult:
-        """Clear controller inputs and release all pose, worn and HMD button overrides. Does not change compositor policy."""
+        """Clear controller inputs, release all pose, worn and HMD button overrides, and stop the
+        fake eye and hand trackers. Does not change compositor policy."""
         return await execute(['release'])
 
     return server

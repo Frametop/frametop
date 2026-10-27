@@ -34,7 +34,8 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             'controller_pose_set', 'controller_pose_move', 'controller_pose_reset',
             'controller_button', 'controller_trigger', 'controller_grip', 'controller_thumbstick',
             'controller_touch', 'controller_inputs_reset', 'controller_input_status',
-            'compositor', 'capture', 'release_all'})
+            'compositor', 'capture', 'release_all',
+            'gaze_look', 'gaze_eyes', 'gaze_release', 'hand_set', 'hand_release'})
         for tool in tools:
             self.assertFalse(tool.inputSchema.get('additionalProperties', True))
             self.assertFalse({'host', 'socket', 'command', 'output', 'remote_root'} &
@@ -71,6 +72,29 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 reply = await self.server.call_tool(name, args)
                 self.assertFalse(reply.isError, reply)
                 self.assertEqual(self.calls[-1], expected)
+
+    async def test_fake_tracker_argv_parses_in_the_cli(self):
+        from frame_testbench import cli
+        cases = [
+            ('gaze_look', dict(yaw=10, pitch=-5), ['gaze', 'look', '10', '-5']),
+            ('gaze_look', dict(yaw=-1e-8, pitch=0, right_eye=[3.5, -90]),
+             ['gaze', 'look', '-0.00000001', '0', '--right', '3.5', '-90']),
+            ('gaze_eyes', dict(left='closed', right='lost'), ['gaze', 'eyes', 'closed', 'lost']),
+            ('gaze_release', {}, ['gaze', 'release']),
+            ('hand_set', dict(side='right', position=[0.1, -0.2, -0.35]),
+             ['hand', 'right', 'set', '--position', *map(self.module.number, (0.1, -0.2, -0.35)),
+              '--rotation', '0', '0', '0',
+              '--shape', 'open']),
+            ('hand_set', dict(side='left', position=[0, 0, -0.3], rotation=[0, 0, 90], shape='pinch'),
+             ['hand', 'left', 'set', '--position', '0', '0', self.module.number(-0.3), '--rotation', '0', '0', '90',
+              '--shape', 'pinch']),
+            ('hand_release', dict(side='all'), ['hand', 'all', 'release'])]
+        for name, args, expected in cases:
+            with self.subTest(name=name, args=args):
+                reply = await self.server.call_tool(name, args)
+                self.assertFalse(reply.isError, reply)
+                self.assertEqual(self.calls[-1], expected)
+                cli.parser().parse_args(expected)
 
     async def test_controller_input_schema_and_validation_before_backend(self):
         tools = {t.name: t for t in await self.server.list_tools()}
@@ -146,6 +170,15 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             ('hmd_pose_move', {'space': 'seated'}),
             ('status', {'host': 'elsewhere'}), ('release_all', {'socket': '/arbitrary'}),
             ('install', {}), ('uninstall', {}), ('arbitrary', {'command': 'id'}),
+            ('gaze_look', {'yaw': 91, 'pitch': 0}), ('gaze_look', {'yaw': 0, 'pitch': -90.5}),
+            ('gaze_look', {'yaw': float('nan'), 'pitch': 0}), ('gaze_look', {'yaw': '1', 'pitch': 0}),
+            ('gaze_look', {'yaw': 0, 'pitch': 0, 'right_eye': [1]}),
+            ('gaze_look', {'yaw': 0, 'pitch': 0, 'right_eye': [1, 100]}),
+            ('gaze_eyes', {'left': 'open', 'right': 'shut'}), ('gaze_eyes', {'left': 'open'}),
+            ('hand_set', {'side': 'all', 'position': [0, 0, 0]}),
+            ('hand_set', {'side': 'left', 'position': [0, 0, 0], 'shape': 'claw'}),
+            ('hand_set', {'side': 'left', 'position': [0, float('inf'), 0]}),
+            ('hand_set', {'side': 'left'}), ('hand_release', {'side': 'both'}),
         ]
         for name in ('hmd_pose_set', 'controller_pose_set', 'hmd_pose_move', 'controller_pose_move'):
             for value in (float('nan'), float('inf'), -float('inf')):

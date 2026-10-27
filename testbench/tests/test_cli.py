@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,6 +46,10 @@ class CliTests(unittest.TestCase):
                     self.controllers[bits[1]]['pose_override'] = False
                 return {'ok': True, 'pose_override': self.on, 'pose': self.current,
                         'controllers': self.controllers}
+            fake_reply = None
+            def fakes(self, text, start=False):
+                self.commands.append(('fakes', text, start))
+                return self.fake_reply if self.fake_reply is None else dict(self.fake_reply)
         return Fake()
 
     def test_controller_input_commands_are_single_atomic_batches(self):
@@ -144,6 +149,52 @@ class CliTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             cli.parser().parse_args(['hmd-button', '/input/system/click', 'yes'])
         self.assertEqual(len(bench.commands), sent)
+
+    def test_fake_trackers(self):
+        cli, bench = self.module(), self.bench()
+        bench.fake_reply = {'ok': True}
+        for command, expected in [
+                (['gaze', 'look', '10', '-5'], ('gaze 10 -5 10 -5', True)),
+                (['gaze', 'look', '1', '2', '--right', '-3', '4.5'], ('gaze 1 2 -3 4.5', True)),
+                (['gaze', 'eyes', 'closed', 'lost'], ('eyes closed lost', False)),
+                (['gaze', 'release'], ('gaze-release', False)),
+                (['hand', 'right', 'set', '--position', '0.1', '-0.2', '-0.35', '--shape', 'pinch'],
+                 ('hand right 0.10000000000000001 -0.20000000000000001 -0.34999999999999998 1 0 0 0 pinch', True)),
+                (['hand', 'all', 'release'], ('hand-release all', False))]:
+            with self.subTest(command=command):
+                cli.dispatch(cli.parser().parse_args(command), bench)
+                self.assertEqual(bench.commands[-1], ('fakes', *expected))
+        cli.dispatch(cli.parser().parse_args(['hand', 'left', 'set', '--position', '0', '0', '-0.3',
+                                              '--rotation', '90', '0', '0']), bench)
+        q = [float(v) for v in bench.commands[-1][1].split()[5:9]]
+        for a, b in zip(q, [math.cos(math.pi / 4), 0, math.sin(math.pi / 4), 0]):
+            self.assertAlmostEqual(a, b)
+        sent = len(bench.commands)
+        with self.assertRaises(ValueError):
+            cli.dispatch(cli.parser().parse_args(['hand', 'all', 'set', '--position', '0', '0', '0']), bench)
+        for bad in (['gaze', 'eyes', 'open', 'blink'], ['hand', 'right', 'set', '--position', '0', '0', '0', '--shape', 'claw'],
+                    ['hand', 'both', 'release'], ['gaze', 'look', '1']):
+            with self.subTest(bad=bad), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                cli.parser().parse_args(bad)
+        self.assertEqual(len(bench.commands), sent)
+        # Not running: eyes needs a gaze first; releases succeed with nothing to release.
+        bench.fake_reply = None
+        with self.assertRaises(ValueError):
+            cli.dispatch(cli.parser().parse_args(['gaze', 'eyes', 'open', 'open']), bench)
+        self.assertEqual(cli.dispatch(cli.parser().parse_args(['gaze', 'release']), bench), {'ok': True, 'gaze': None})
+        self.assertEqual(cli.dispatch(cli.parser().parse_args(['hand', 'left', 'release']), bench),
+                         {'ok': True, 'hands': None})
+
+    def test_release_and_status_include_the_fake_trackers(self):
+        cli, bench = self.module(), self.bench()
+        result = cli.dispatch(cli.parser().parse_args(['release']), bench)
+        self.assertEqual(bench.commands[-2:], [('fakes', 'release', False), ('control', 'release')])
+        self.assertEqual(result['fakes'], {'running': False})
+        bench.fake_reply = {'ok': True, 'gaze': None, 'hands': None}
+        result = cli.dispatch(cli.parser().parse_args(['status']), bench)
+        self.assertEqual(result['fakes'], {'ok': True, 'gaze': None, 'hands': None, 'running': True})
+        bench.fake_reply = None
+        self.assertEqual(cli.dispatch(cli.parser().parse_args(['status']), bench)['fakes'], {'running': False})
 
     def test_absolute_standing_pose_is_converted_to_raw(self):
         cli, bench = self.module(), self.bench()

@@ -12,6 +12,9 @@
 // hands, and a gesture down ends, as lost. It writes "0" to run_dir/hands-want every second, so
 // ft-camd stops copying the mono cameras' frames meanwhile (it copies again 3 s after the last
 // write). Unparked, it tracks again from a palm search (about 200 ms). Not while recording.
+// The testbench (testbench/, a development tool that never ships) parks it the same way while it
+// publishes fake hands: through $XDG_RUNTIME_DIR/frametop-testbench/hands, which it touches every
+// second. One older than 3 s doesn't count, so a crashed testbench lets go by itself.
 //
 // --no-gestures: hands for the cutouts only. No pinch or grip detection, so nothing reaches
 // the pointer and a closing hand doesn't raise the rate; the gestures file is removed.
@@ -816,6 +819,16 @@ int main(int argc, char **argv) {
 
     // Parking (see "Parked" at the top): run_dir/park says so; ft-camd hears it through hands-want.
     const std::string park_file = run_dir() + "/park", hands_want_file = run_dir() + "/hands-want";
+    const char *xdg_run = std::getenv("XDG_RUNTIME_DIR");
+    const std::string testbench_file = (xdg_run && *xdg_run ? std::string(xdg_run) : "/run/user/" + std::to_string(getuid())) +
+                                       "/frametop-testbench/hands";
+    auto testbench_fresh = [&] {
+        struct stat st;
+        timespec now;
+        if (stat(testbench_file.c_str(), &st) != 0 || clock_gettime(CLOCK_REALTIME, &now) != 0) return false;
+        const double age = double(now.tv_sec - st.st_mtim.tv_sec) + (now.tv_nsec - st.st_mtim.tv_nsec) * 1e-9;
+        return age > -3.0 && age < 3.0;
+    };
     const bool can_park = track && publish;
     bool parked = false;
     uint64_t t_park = 0, t_hands_want = 0;
@@ -877,11 +890,13 @@ int main(int argc, char **argv) {
         if (can_park && mono_ns() - t_park > 250'000'000) {
             t_park = mono_ns();
             struct stat pst;
-            const bool want = !rec && !g_record && stat(park_file.c_str(), &pst) == 0;
+            const bool by_testbench = testbench_fresh();
+            const bool want = !rec && !g_record && (stat(park_file.c_str(), &pst) == 0 || by_testbench);
             if (want != parked) {
                 parked = want;
-                std::printf("%s\n", parked ? "parked: no tracking until run_dir/park goes (models stay loaded)"
-                                           : "unparked: tracking again");
+                std::printf("%s\n", !parked       ? "unparked: tracking again"
+                                    : by_testbench ? "parked: the testbench publishes fake hands (models stay loaded)"
+                                                   : "parked: no tracking until run_dir/park goes (models stay loaded)");
                 std::fflush(stdout);
                 if (parked) {
                     // the hands are gone for every reader, and a gesture down ends, as lost

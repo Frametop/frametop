@@ -6,10 +6,12 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+import time
 import uuid
-from . import controller_inputs, install, pose, transport
+from . import controller_inputs, fakes, handshape, install, pose, transport
 
 ROOT = Path(__file__).resolve().parents[1]
+FAKES_UNIT = 'frame-testbench-fakes'
 
 
 class Bench:
@@ -19,6 +21,26 @@ class Bench:
 
     def control(self, command):
         return transport.request(self.socket, command)
+
+    def fakes(self, command, start=False):
+        """A command to the fake trackers (frame_testbench.fakes), or None when they aren't
+        running. start: run them first, as a transient user unit, if they aren't."""
+        try:
+            return transport.request(fakes.SOCKET, command)
+        except (FileNotFoundError, ConnectionRefusedError):
+            if not start:
+                return None
+        subprocess.run(['systemd-run', '--user', '--quiet', '--collect', '--unit=' + FAKES_UNIT,
+                        '--working-directory=' + str(ROOT), '--setenv=PYTHONPATH=' + str(ROOT),
+                        sys.executable, '-m', 'frame_testbench.fakes'], check=True, timeout=20)
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                return transport.request(fakes.SOCKET, command)
+            except (FileNotFoundError, ConnectionRefusedError):
+                if time.monotonic() > deadline:
+                    raise RuntimeError(f'the fake trackers did not start: journalctl --user -u {FAKES_UNIT}') from None
+                time.sleep(0.05)
 
     def native(self, *arguments):
         binary = os.environ.get('FRAME_TESTBENCH_OBSERVER', str(ROOT / 'build/frame-observe'))
@@ -115,7 +137,27 @@ def parser():
         if name != 'touch':
             inputs.add_argument('--touch', choices=('on', 'off'))
     poses.add_parser('inputs-reset', help='neutralize inputs, retaining the controller pose')
-    commands.add_parser('release', help='restore physical HMD pose/proximity and disconnect synthetic controllers')
+    gaze = commands.add_parser('gaze', help='fake eye tracking: ft-gaze reads it instead of both trackers')
+    gazes = gaze.add_subparsers(dest='gaze_command', required=True)
+    look = gazes.add_parser('look', help='both eyes look this way: head-relative degrees, yaw +left, pitch +up')
+    look.add_argument('yaw', type=float)
+    look.add_argument('pitch', type=float)
+    look.add_argument('--right', type=float, nargs=2, metavar=('YAW', 'PITCH'),
+                      help='the right eye apart; YAW PITCH are then the left eye')
+    eyes = gazes.add_parser('eyes', help='each eye open, closed or lost (not seen); needs gaze look first')
+    eyes.add_argument('left', choices=fakes.EYE_STATES)
+    eyes.add_argument('right', choices=fakes.EYE_STATES)
+    gazes.add_parser('release', help='the real eye trackers again, within 2 s')
+    hand = commands.add_parser('hand', help='fake hands: ft-hands parks and these are published instead')
+    hand.add_argument('side', choices=('left', 'right', 'all'), help='all: release only')
+    hands = hand.add_subparsers(dest='hand_command', required=True)
+    put = hands.add_parser('set', help='the wrist in the head frame; no rotation = fingers forward, palm down')
+    put.add_argument('--position', type=float, nargs=3, required=True, metavar=('X', 'Y', 'Z'))
+    put.add_argument('--rotation', type=float, nargs=3, default=[0, 0, 0], metavar=('YAW', 'PITCH', 'ROLL'))
+    put.add_argument('--shape', choices=handshape.SHAPES, default='open',
+                     help='pinch holds a pinch down, fist a grip')
+    hands.add_parser('release', help='ft-hands tracks again once no hand is faked')
+    commands.add_parser('release', help='restore physical HMD pose/proximity, disconnect synthetic controllers, stop fake trackers')
     capture = commands.add_parser('capture', help='fresh compositor stereo PNGs and metadata')
     capture.add_argument('--output', help='new output directory, on headset when using --host')
     capture.add_argument('--fetch', help='with --host, download PNGs into this new local directory')
@@ -138,7 +180,31 @@ def dispatch(args, bench):
             state['available'] = True
         except (OSError, RuntimeError) as error:
             state = {'available': False, 'error': str(error)}
-        return {'ok': True, 'runtime': runtime, 'input': state}
+        try:
+            faked = bench.fakes('status') or {'running': False}
+            faked.setdefault('running', True)
+        except (OSError, RuntimeError) as error:
+            faked = {'running': False, 'error': str(error)}
+        return {'ok': True, 'runtime': runtime, 'input': state, 'fakes': faked}
+    if args.command == 'gaze':
+        if args.gaze_command == 'look':
+            look = [args.yaw, args.pitch] + (args.right or [args.yaw, args.pitch])
+            return bench.fakes('gaze ' + ' '.join(format(v, '.17g') for v in look), start=True)
+        if args.gaze_command == 'eyes':
+            reply = bench.fakes(f'eyes {args.left} {args.right}')
+            if reply is None:
+                raise ValueError('gaze eyes requires gaze look first')
+            return reply
+        return bench.fakes('gaze-release') or {'ok': True, 'gaze': None}
+    if args.command == 'hand':
+        if args.hand_command == 'set':
+            if args.side == 'all':
+                raise ValueError('hand set takes left or right')
+            quaternion = pose.from_euler(args.position, args.rotation)['quaternion']
+            values = list(args.position) + quaternion
+            return bench.fakes(f'hand {args.side} ' + ' '.join(format(v, '.17g') for v in values) + ' ' + args.shape,
+                               start=True)
+        return bench.fakes('hand-release ' + args.side) or {'ok': True, 'hands': None}
     if args.command == 'compositor':
         return bench.native('setting', 'false' if args.mode == 'awake' else 'true')
     if args.command == 'worn':
@@ -148,7 +214,11 @@ def dispatch(args, bench):
             return bench.control('hmd-button-release ' + args.path)
         return bench.control(f"hmd-button {args.path} {'1' if args.state == 'on' else '0'}")
     if args.command == 'release':
-        return bench.control('release')
+        # The fake trackers first: they don't need SteamVR, so they go even when it's down.
+        faked = bench.fakes('release')
+        result = bench.control('release')
+        result['fakes'] = {'running': False} if faked is None else faked
+        return result
     if args.command in ('pose', 'controller'):
         controller = args.command == 'controller'
         target = 'controller ' + args.side if controller else 'pose'

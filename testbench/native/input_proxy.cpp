@@ -8,6 +8,12 @@
 using namespace vr;
 extern "C" __attribute__((visibility("default"))) void *HmdDriverFactory(const char *, int *);
 namespace frame {
+// driver_cv asks for IVRDriverInput_005 since SteamVR 2.17, and no public SDK has it.
+// vrserver's own _004 adapter passes methods 0-9 to its _005 implementation unchanged, and
+// converts only the VREyeTrackingData_t that UpdateEyeTrackingComponent points to, which
+// grew. Input passes that pointer on without reading it, so it serves _005 as it is.
+constexpr const char *kDriverInput005 = "IVRDriverInput_005";
+
 class Device final : public ITrackedDeviceServerDriver {
     ITrackedDeviceServerDriver *real_;
     IVRProperties *properties_;
@@ -86,13 +92,14 @@ class Context final : public IVRDriverContext {
 public:
     IVRDriverContext *real = nullptr;
     Host host;
-    Input input;
-    explicit Context(InputState &s) : host(s), input(s) {}
+    Input input, input005;
+    explicit Context(InputState &s) : host(s), input(s), input005(s) {}
     void *GetGenericInterface(const char *name, EVRInitError *error = nullptr) override {
         void *result = real->GetGenericInterface(name, error);
         if (!result || !name) return result;
         if (!strcmp(name, IVRServerDriverHost_Version) && result == host.real) return &host;
         if (!strcmp(name, IVRDriverInput_Version) && result == input.real) return &input;
+        if (!strcmp(name, kDriverInput005) && result == input005.real) return &input005;
         return result;
     }
     DriverHandle_t GetDriverHandle() override { return real->GetDriverHandle(); }
@@ -151,6 +158,10 @@ public:
         context_.real = context;
         context_.host.real = static_cast<IVRServerDriverHost *>(context->GetGenericInterface(IVRServerDriverHost_Version));
         context_.input.real = static_cast<IVRDriverInput *>(context->GetGenericInterface(IVRDriverInput_Version));
+        // Both versions reach the same components, so the state keeps updating through _004.
+        EVRInitError error = VRInitError_None;
+        auto *input005 = context->GetGenericInterface(kDriverInput005, &error);
+        context_.input005.real = error == VRInitError_None ? static_cast<IVRDriverInput *>(input005) : nullptr;
         context_.host.properties = static_cast<IVRProperties *>(context->GetGenericInterface(IVRProperties_Version));
         state_.reset(context_.host.real, context_.input.real);
         auto result = real->Init(&context_);

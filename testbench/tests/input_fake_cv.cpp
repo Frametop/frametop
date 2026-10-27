@@ -1,5 +1,6 @@
 #include "openvr_driver.h"
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 using namespace vr;
 namespace {
@@ -74,7 +75,8 @@ public:
     EVRInitError Init(IVRDriverContext *context) override {
         ctx = context;
         host = static_cast<IVRServerDriverHost *>(ctx->GetGenericInterface(IVRServerDriverHost_Version));
-        input = static_cast<IVRDriverInput *>(ctx->GetGenericInterface(IVRDriverInput_Version));
+        const char *version = std::getenv("FAKE_INPUT_VERSION");
+        input = static_cast<IVRDriverInput *>(ctx->GetGenericInterface(version ? version : IVRDriverInput_Version));
         assert(host && input);
         assert(host->TrackedDeviceAdded("cv-real-hmd", TrackedDeviceClass_HMD, &hmd));
         assert(host->TrackedDeviceAdded("cv-controller", TrackedDeviceClass_Controller, &controller));

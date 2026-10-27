@@ -546,6 +546,20 @@ class InputProxyTests(unittest.TestCase):
         self.rpc("worn 0")
         self.assertFalse(self.runtime("metrics")["worn"])
 
+    def test_input_005_captures_proximity_and_forwards_to_the_005_interface(self):
+        self.restart_runtime(FAKE_INPUT_VERSION="IVRDriverInput_005")
+        self.assertTrue(self.rpc("status")["proximity_ready"])
+        self.assertTrue(self.rpc("worn 1")["ok"])
+        self.runtime("physical")
+        time.sleep(0.05)
+        r = self.runtime("metrics")
+        self.assertTrue(r["worn"])
+        self.assertFalse(r["other_worn"])
+        # cv's own creates and updates go to _005; the worn ticks still arrive.
+        self.assertGreaterEqual(r["input005_calls"], 4)
+        self.assertGreater(r["worn_count"], 3)
+        self.assertTrue(self.runtime("forward")["all_forwarded"])
+
     def test_malformed_commands_do_not_mutate_state(self):
         s = self.rpc("pose 1 2 3 1 0 0 0")
         for cmd in ["", "blah", "status extra", "release extra", "worn 2", "worn -1", "worn 1 extra",

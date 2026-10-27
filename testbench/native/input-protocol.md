@@ -104,7 +104,10 @@ HMD buttons are the cv HMD's other boolean components: every one created in its
 exact property container except /proximity. hmd-button holds a path at the requested
 value, and its physical updates are cached but suppressed while it's held. A path the
 HMD registered more than once overrides all of its handles. hmd-button-release
-publishes the cached physical value (false if none came) and clears the request.
+publishes the cached physical value (false if none came) and clears the request. If
+SteamVR refuses that update, the reply is ok:false and the button stays held for a
+retry. A held button reaches SteamVR as one long press, and the HMD going away
+releases it first.
 
 release clears HMD pose, worn, HMD button, and both synthetic controller overrides.
 pose-release and worn-release clear only their named HMD channel.

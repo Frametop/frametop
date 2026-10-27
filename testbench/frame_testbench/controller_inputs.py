@@ -6,6 +6,8 @@ HANDED = {
     'left': ('view', 'dpad_up', 'dpad_right', 'dpad_down', 'dpad_left'),
     'right': ('menu', 'a', 'b', 'x', 'y'),
 }
+# One of the HMD's own buttons, such as /input/system/click. status lists them.
+HMD_BUTTON_PATH = r'/input(/[a-z0-9_]+)+'
 
 
 def validate_control(side, control, *, touch=False):

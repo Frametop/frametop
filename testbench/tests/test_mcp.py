@@ -133,6 +133,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             ('hmd_button', {'button': 'system', 'state': 'on'}),
             ('hmd_button', {'button': '/input/system/click\nrelease', 'state': 'on'}),
             ('hmd_button', {'button': '/input/system/click 1', 'state': 'on'}),
+            ('hmd_button', {'button': '/input/system/click\n', 'state': 'on'}),
             ('hmd_button', {'button': '/input/' + 'a' * 128, 'state': 'on'}),
             ('hmd_button', {'button': ['/input/system/click'], 'state': 'on'}),
             ('hmd_button', {'state': 'on'}),

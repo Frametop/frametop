@@ -10,8 +10,6 @@ import uuid
 from . import controller_inputs, install, pose, transport
 
 ROOT = Path(__file__).resolve().parents[1]
-# An HMD input component, such as /input/system/click. status lists the HMD's own.
-HMD_BUTTON_PATH = r'/input(/[a-z0-9_]+)+'
 
 
 class Bench:
@@ -67,7 +65,7 @@ def fetch_capture(host, result, output):
 
 
 def hmd_button_path(text):
-    if not re.fullmatch(HMD_BUTTON_PATH, text):
+    if not re.fullmatch(controller_inputs.HMD_BUTTON_PATH, text):
         raise argparse.ArgumentTypeError(f'{text!r} is not an /input/... component path')
     return text
 

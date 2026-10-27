@@ -42,7 +42,7 @@ class InputState {
     void publish_locked();
     bool controller_input_release_locked(unsigned hand);
     bool controller_release_locked(unsigned hand, bool force = false);
-    void button_release_locked(const std::string &path);
+    bool button_release_locked(const std::string &path);
     std::string status_locked(bool ok, const char *error);
 public:
     void reset(vr::IVRServerDriverHost *, vr::IVRDriverInput *);

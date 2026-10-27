@@ -60,7 +60,7 @@ Installation copies the native libraries to a content-addressed directory under 
 ./frame-testbench compositor auto
 ```
 
-`pose reset` releases only pose. `worn physical` releases only proximity. `hmd-button PATH on|off|physical` presses, releases or restores one HMD button, such as `/input/system/click`; `status` lists them under `input.hmd_buttons`. Worn state and pose are independent. `compositor awake` sets `power.pauseCompositorOnStandby=false`; `compositor auto` sets it to true. That setting persists, and `release` deliberately does not change it. HMD standby and whole-machine suspend are separate.
+`pose reset` releases only pose. `worn physical` releases only proximity. `hmd-button PATH on|off|physical` presses, releases or restores one HMD button, such as `/input/system/click`; `status` lists them under `input.hmd_buttons`. A held button is one long press to SteamVR until it's released. Worn state and pose are independent. `compositor awake` sets `power.pauseCompositorOnStandby=false`; `compositor auto` sets it to true. That setting persists, and `release` deliberately does not change it. HMD standby and whole-machine suspend are separate.
 
 Coordinates are right-handed: +X right, +Y up, forward -Z. Positive yaw turns left, positive pitch looks up, positive roll rotates around +Z. Euler composition is Y * X * Z. Relative moves use the chosen world's axes, not head-local axes. `--space raw` is available on `pose set` and `pose move`; the default Standing space uses the runtime's actual raw-to-standing transform, not an assumed floor offset. A relative move requires an active absolute pose first.
 

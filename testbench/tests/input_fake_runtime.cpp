@@ -112,7 +112,10 @@ void controller_metrics() {
 }
 double other_x = 0;
 bool worn = false, other_worn = true;
-int button = -1;  // the HMD's /input/button/click as the runtime last saw it
+// The HMD's buttons as the runtime last saw them: /input/button/click's two handles and
+// /input/quiet/click. -1 until one arrives.
+int button = -1, button2 = -1, quiet = -1;
+unsigned button_failures = 0;  // the next N updates to an HMD button fail
 unsigned pose_count = 0, worn_count = 0, host_mask = 0, input_mask = 0;
 void *other_interface;
 class Host : public IVRServerDriverHost {
@@ -163,7 +166,7 @@ public:
 } host;
 // Served as both IVRDriverInput_004 and _005, two objects over the same components like
 // vrserver's. input005_calls counts cv's creates and eye updates that reach the _005 one.
-int prox_count = 0;
+int prox_count = 0, button_handles = 0;
 std::atomic<int> input005_calls{0};
 class Input : public IVRDriverInput {
     const bool latest_;
@@ -174,14 +177,21 @@ public:
         if (c == 120 || c == 121) return create_input(c, n, h, true, VRScalarType_Absolute, VRScalarUnits_NormalizedOneSided);
         if (c == 107 && !strcmp(n,"/proximity")) *h = ++prox_count + 500;
         else if (c == 109 && !strcmp(n,"/proximity")) *h = 503;
-        else { assert(c == 107 && !strcmp(n,"/input/button/click")); *h = 504; }
+        else if (c == 107 && !strcmp(n,"/input/button/click")) *h = button_handles++ ? 506 : 504;
+        else if (c == 107 && !strcmp(n,"/input/quiet/click")) *h = 507;
+        else { assert(c == 109 && !strcmp(n,"/input/other/click")); *h = 508; }
         return VRInputError_None;
     }
     EVRInputError UpdateBooleanComponent(VRInputComponentHandle_t h, bool v, double t) override {
         if (h > 1000) return update_input(h, v, true, t);
-        assert(h >= 501 && h <= 504); assert(t == -0.125 || t == 0);
+        assert(h >= 501 && h <= 508 && h != 505); assert(t == -0.125 || t == 0);
         std::lock_guard<std::mutex> lock(mu);
-        if (h == 501 || h == 502) { worn = v; ++worn_count; } else if (h == 504) { button = v; } else { other_worn = v; }
+        if (h >= 504 && h != 508 && button_failures) { --button_failures; return VRInputError_InvalidParam; }
+        if (h == 501 || h == 502) { worn = v; ++worn_count; }
+        else if (h == 504) button = v;
+        else if (h == 506) button2 = v;
+        else if (h == 507) quiet = v;
+        else if (h == 503) other_worn = v;
         return VRInputError_None;
     }
     EVRInputError CreateScalarComponent(PropertyContainerHandle_t c, const char *n, VRInputComponentHandle_t *h, EVRScalarType t, EVRScalarUnits u) override { if (c == 120 || c == 121) return create_input(c, n, h, false, t, u); assert(c == 109 && !strcmp(n,"scalar") && t == VRScalarType_Absolute && u == VRScalarUnits_NormalizedOneSided); *h = 601; input_mask |= 1; return VRInputError_None; }
@@ -231,7 +241,7 @@ void metrics() {
     std::lock_guard<std::mutex> lock(mu);
     bool raw = latest.qWorldFromDriverRotation.w == 1 && latest.qDriverFromHeadRotation.w == 1 && latest.poseTimeOffset == 0;
     for (int k = 0; k < 3; ++k) raw = raw && latest.vecWorldFromDriverTranslation[k] == 0 && latest.vecDriverFromHeadTranslation[k] == 0 && latest.vecVelocity[k] == 0 && latest.vecAngularVelocity[k] == 0 && latest.vecAcceleration[k] == 0 && latest.vecAngularAcceleration[k] == 0;
-    std::cout << "{\"hmd_pose\":[" << latest.vecPosition[0] << ',' << latest.vecPosition[1] << ',' << latest.vecPosition[2] << ',' << latest.qRotation.w << ',' << latest.qRotation.x << ',' << latest.qRotation.y << ',' << latest.qRotation.z << "],\"raw_transform\":" << raw << ",\"valid\":" << (latest.poseIsValid && latest.deviceIsConnected && latest.result == TrackingResult_Running_OK) << ",\"other_x\":" << other_x << ",\"pose_count\":" << pose_count << ",\"worn_count\":" << worn_count << ",\"worn\":" << worn << ",\"other_worn\":" << other_worn << ",\"input005_calls\":" << input005_calls.load() << ",\"button\":" << button << "}" << std::endl;
+    std::cout << "{\"hmd_pose\":[" << latest.vecPosition[0] << ',' << latest.vecPosition[1] << ',' << latest.vecPosition[2] << ',' << latest.qRotation.w << ',' << latest.qRotation.x << ',' << latest.qRotation.y << ',' << latest.qRotation.z << "],\"raw_transform\":" << raw << ",\"valid\":" << (latest.poseIsValid && latest.deviceIsConnected && latest.result == TrackingResult_Running_OK) << ",\"other_x\":" << other_x << ",\"pose_count\":" << pose_count << ",\"worn_count\":" << worn_count << ",\"worn\":" << worn << ",\"other_worn\":" << other_worn << ",\"input005_calls\":" << input005_calls.load() << ",\"button\":" << button << ",\"button2\":" << button2 << ",\"quiet\":" << quiet << "}" << std::endl;
 }
 }
 int main(int argc, char **) {
@@ -273,6 +283,7 @@ int main(int argc, char **) {
         if (cmd == "quit") break;
         if (cmd == "physical") { physical(); metrics(); }
         else if (cmd == "button-down" || cmd == "button-up") { press(cmd == "button-down"); metrics(); }
+        else if (cmd == "fail-button") { { std::lock_guard<std::mutex> lock(mu); button_failures = 1; } metrics(); }
         else if (cmd == "deactivate") { hmd->Deactivate(); std::cout << "{\"deactivated\":" << ((lifecycle() & 2) != 0) << "}" << std::endl; }
         else if (cmd == "metrics") metrics();
         else if (cmd == "controllers") controller_metrics();

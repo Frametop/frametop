@@ -19,7 +19,6 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import Field
 
 from . import controller_inputs, transport
-from .cli import HMD_BUTTON_PATH
 
 Number = Annotated[float, Field(strict=True, allow_inf_nan=False)]
 Vector = tuple[Number, Number, Number]
@@ -32,7 +31,7 @@ TouchControl = Literal[Button, 'thumbrest']
 Boolean = Annotated[bool, Field(strict=True)]
 UnitInput = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=0, le=1)]
 AxisInput = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=-1, le=1)]
-HmdButton = Annotated[str, Field(strict=True, max_length=128, pattern=f'^{HMD_BUTTON_PATH}$')]
+HmdButton = Annotated[str, Field(strict=True, max_length=128, pattern=f'^{controller_inputs.HMD_BUTTON_PATH}$')]
 
 
 @dataclass(frozen=True)

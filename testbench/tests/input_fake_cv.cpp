@@ -7,7 +7,7 @@ namespace {
 IVRDriverContext *ctx;
 IVRServerDriverHost *host;
 IVRDriverInput *input;
-VRInputComponentHandle_t prox, prox2, other, button;
+VRInputComponentHandle_t prox, prox2, other, button, button2, quiet, other_button;
 unsigned lifecycle = 0;
 int component, factory_other;
 class Device : public ITrackedDeviceServerDriver {
@@ -22,7 +22,10 @@ public:
         assert(container == 107);
         assert(input->CreateBooleanComponent(container, "/proximity", &prox) == VRInputError_None);
         assert(input->CreateBooleanComponent(container, "/proximity", &prox2) == VRInputError_None);
+        // Two handles for one button, and one cv never reports.
         assert(input->CreateBooleanComponent(container, "/input/button/click", &button) == VRInputError_None);
+        assert(input->CreateBooleanComponent(container, "/input/button/click", &button2) == VRInputError_None);
+        assert(input->CreateBooleanComponent(container, "/input/quiet/click", &quiet) == VRInputError_None);
         return VRInitError_None;
     }
     void Deactivate() override { lifecycle |= 2; }
@@ -81,6 +84,7 @@ public:
         assert(host->TrackedDeviceAdded("cv-real-hmd", TrackedDeviceClass_HMD, &hmd));
         assert(host->TrackedDeviceAdded("cv-controller", TrackedDeviceClass_Controller, &controller));
         assert(input->CreateBooleanComponent(109, "/proximity", &other) == VRInputError_None);
+        assert(input->CreateBooleanComponent(109, "/input/other/click", &other_button) == VRInputError_None);
         return VRInitError_None;
     }
     void Cleanup() override { lifecycle |= 16; }
@@ -96,6 +100,7 @@ extern "C" void *HmdDriverFactory(const char *name, int *error) {
     if (error) *error = 123;
     return &factory_other;
 }
+extern "C" void FrameFakeButton(bool down);
 extern "C" void FrameFakePhysical() {
     DriverPose_t p{};
     p.vecPosition[0] = 42;
@@ -110,9 +115,12 @@ extern "C" void FrameFakePhysical() {
     assert(input->UpdateBooleanComponent(prox, false, -0.125) == VRInputError_None);
     assert(input->UpdateBooleanComponent(prox2, false, -0.125) == VRInputError_None);
     assert(input->UpdateBooleanComponent(other, false, -0.125) == VRInputError_None);
-    assert(input->UpdateBooleanComponent(button, false, -0.125) == VRInputError_None);
+    FrameFakeButton(false);
 }
-extern "C" void FrameFakeButton(bool down) { assert(input->UpdateBooleanComponent(button, down, -0.125) == VRInputError_None); }
+extern "C" void FrameFakeButton(bool down) {
+    assert(input->UpdateBooleanComponent(button, down, -0.125) == VRInputError_None);
+    assert(input->UpdateBooleanComponent(button2, down, -0.125) == VRInputError_None);
+}
 extern "C" void *FrameFakeController() { return &controller; }
 extern "C" void *FrameFakeComponent() { return &component; }
 extern "C" void *FrameFakeOther() { return &factory_other; }

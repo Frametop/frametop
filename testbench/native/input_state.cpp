@@ -45,6 +45,7 @@ void InputState::activate(uint32_t i, PropertyContainerHandle_t c) {
 void InputState::deactivate(uint32_t i) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (index_ != i) return;
+    button_release_locked({});
     index_ = k_unTrackedDeviceIndexInvalid; container_ = 0; proximity_.clear(); buttons_.clear(); physical_.reset(); ++sequence_;
 }
 void InputState::controller_activate(unsigned hand, uint32_t index, ControllerInputs inputs) {
@@ -157,14 +158,18 @@ bool InputState::controller_release_locked(unsigned hand, bool force) {
     }
     return ok;
 }
-// An empty path releases every button. A button cv never reported is restored as up.
-void InputState::button_release_locked(const std::string &path) {
+// An empty path releases every button. A button cv never reported is restored as up. One
+// SteamVR refused stays held, so a retry can release it.
+bool InputState::button_release_locked(const std::string &path) {
+    bool ok = true;
     for (auto &entry : buttons_) {
         auto &b = entry.second;
         if (!b.requested || (!path.empty() && b.path != path)) continue;
-        if (input_) input_->UpdateBooleanComponent(entry.first, b.physical.value_or(false), b.physical ? b.offset : 0);
+        if (input_ && input_->UpdateBooleanComponent(entry.first, b.physical.value_or(false), b.physical ? b.offset : 0) !=
+            VRInputError_None) { ok = false; continue; }
         b.requested.reset();
     }
+    return ok;
 }
 void InputState::publish_locked() {
     for (const auto &c : controllers_) if (host_ && c.index != k_unTrackedDeviceIndexInvalid && c.requested) {
@@ -341,13 +346,13 @@ std::string InputState::command(const std::string &line) {
         if (path == "all") path.clear();
         else if (std::none_of(buttons_.begin(), buttons_.end(), [&](const auto &e) { return e.second.path == path; }))
             return status_locked(false, "the HMD has no such button");
-        button_release_locked(path);
+        publication_ok = button_release_locked(path);
     } else if (operation == "release" || operation == "pose-release" || operation == "worn-release") {
         if (in >> extra) return status_locked(false, "release takes no arguments");
         if (operation == "release") {
             for (unsigned hand = 0; hand < controllers_.size(); ++hand)
                 publication_ok = controller_release_locked(hand) && publication_ok;
-            button_release_locked({});
+            publication_ok = button_release_locked({}) && publication_ok;
         }
         if (operation != "worn-release") {
             if (requested_ && physical_ && host_ && index_ != k_unTrackedDeviceIndexInvalid)
@@ -362,6 +367,6 @@ std::string InputState::command(const std::string &line) {
     } else return status_locked(false, "invalid command");
     ++sequence_;
     publish_locked();
-    return status_locked(publication_ok, publication_ok ? nullptr : "controller input release failed; retry to neutralize remaining inputs");
+    return status_locked(publication_ok, publication_ok ? nullptr : "input release failed; retry to neutralize remaining inputs");
 }
 } // namespace frame

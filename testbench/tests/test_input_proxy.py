@@ -557,9 +557,9 @@ class InputProxyTests(unittest.TestCase):
         self.assertTrue(r["worn"])
         self.assertFalse(r["other_worn"])
         self.assertGreater(r["worn_count"], 3)
-        # cv's four boolean creates and its eye update (whose struct grew in _005) reach
+        # cv's seven boolean creates and its eye update (whose struct grew in _005) reach
         # _005; the state's own updates go through _004 to the same components.
-        self.assertEqual(r["input005_calls"], 5)
+        self.assertEqual(r["input005_calls"], 8)
 
     def test_runtime_without_input_005_still_serves_004(self):
         self.restart_runtime(FAKE_NO_INPUT_005="1")
@@ -570,25 +570,63 @@ class InputProxyTests(unittest.TestCase):
 
     def test_hmd_buttons_are_listed_overridden_and_released(self):
         s = self.rpc("status")
-        self.assertEqual(s["hmd_buttons"], {"/input/button/click": {"physical": False, "override": None}})
+        # One entry per path, and only the HMD's own: not /proximity, not another device's.
+        self.assertEqual(s["hmd_buttons"], {"/input/button/click": {"physical": False, "override": None},
+                                            "/input/quiet/click": {"physical": None, "override": None}})
         self.assertEqual(self.runtime("button-down")["button"], 1)
         s = self.rpc("hmd-button /input/button/click 0")
         self.assertTrue(s["ok"])
         self.assertEqual(s["hmd_buttons"]["/input/button/click"], {"physical": True, "override": False})
-        self.assertEqual(self.runtime("metrics")["button"], 0)
-        # cv's own presses wait behind the override; worn and pose are untouched.
-        self.assertEqual(self.runtime("button-down")["button"], 0)
-        self.assertIsNone(s["worn_override"])
+        m = self.runtime("metrics")
+        self.assertEqual((m["button"], m["button2"]), (0, 0))
+        # cv's own presses wait behind the override on every handle.
+        m = self.runtime("button-down")
+        self.assertEqual((m["button"], m["button2"]), (0, 0))
         self.rpc("hmd-button /input/button/click 1")
-        self.assertEqual(self.runtime("button-up")["button"], 1)
+        m = self.runtime("button-up")
+        self.assertEqual((m["button"], m["button2"]), (1, 1))
         s = self.rpc("hmd-button-release /input/button/click")
         self.assertEqual(s["hmd_buttons"]["/input/button/click"], {"physical": False, "override": None})
-        self.assertEqual(self.runtime("metrics")["button"], 0)
+        m = self.runtime("metrics")
+        self.assertEqual((m["button"], m["button2"]), (0, 0))
         self.assertEqual(self.runtime("button-down")["button"], 1)
+        # A button cv never reported is released as up.
+        self.rpc("hmd-button /input/quiet/click 1")
+        self.assertEqual(self.runtime("metrics")["quiet"], 1)
+        s = self.rpc("hmd-button-release /input/quiet/click")
+        self.assertEqual(s["hmd_buttons"]["/input/quiet/click"], {"physical": None, "override": None})
+        self.assertEqual(self.runtime("metrics")["quiet"], 0)
+        # Only release and hmd-button-release let go of a button.
+        self.rpc("hmd-button /input/button/click 0")
+        self.rpc("hmd-button /input/quiet/click 1")
+        self.rpc("pose 1 2 3 1 0 0 0")
+        self.rpc("worn 1")
+        for cmd in ("pose-release", "worn-release", "controller-release all", "controller-input-release all"):
+            with self.subTest(cmd=cmd):
+                s = self.rpc(cmd)
+                self.assertTrue(s["ok"], s)
+                self.assertEqual([b["override"] for b in s["hmd_buttons"].values()], [False, True])
+        s = self.rpc("hmd-button-release all")
+        self.assertEqual([b["override"] for b in s["hmd_buttons"].values()], [None, None])
+        m = self.runtime("metrics")
+        self.assertEqual((m["button"], m["button2"], m["quiet"]), (1, 1, 0))
         self.rpc("hmd-button /input/button/click 0")
         s = self.rpc("release")
         self.assertIsNone(s["hmd_buttons"]["/input/button/click"]["override"])
         self.assertEqual(self.runtime("metrics")["button"], 1)
+
+    def test_a_button_release_steamvr_refuses_stays_held_for_a_retry(self):
+        self.rpc("hmd-button /input/quiet/click 1")
+        self.runtime("fail-button")
+        s = self.rpc("hmd-button-release /input/quiet/click")
+        self.assertFalse(s["ok"])
+        self.assertTrue(s["hmd_buttons"]["/input/quiet/click"]["override"])
+        self.runtime("fail-button")
+        self.assertFalse(self.rpc("release")["ok"])
+        s = self.rpc("release")
+        self.assertTrue(s["ok"], s)
+        self.assertIsNone(s["hmd_buttons"]["/input/quiet/click"]["override"])
+        self.assertEqual(self.runtime("metrics")["quiet"], 0)
 
     def test_hmd_button_commands_reject_bad_input_without_changes(self):
         before = self.rpc("status")
@@ -647,10 +685,15 @@ class InputProxyTests(unittest.TestCase):
     def test_deactivate_stops_ticks_and_clears_readiness(self):
         self.rpc("pose 1 2 3 1 0 0 0")
         self.rpc("worn 1")
+        self.rpc("hmd-button /input/button/click 1")
         self.assertTrue(self.runtime("deactivate")["deactivated"])
         s = self.rpc("status")
         self.assertIsNone(s["hmd_index"])
         self.assertFalse(s["proximity_ready"])
+        # A held button goes back up before the HMD leaves.
+        self.assertEqual(s["hmd_buttons"], {})
+        self.assertEqual(self.runtime("metrics")["button"], 0)
+        self.assertFalse(self.rpc("hmd-button /input/button/click 1")["ok"])
         count = self.runtime("metrics")["pose_count"]
         time.sleep(0.05)
         self.assertEqual(count, self.runtime("metrics")["pose_count"])

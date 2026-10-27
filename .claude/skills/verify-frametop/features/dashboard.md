@@ -21,7 +21,7 @@ Preconditions:
 
 - `T worn on`, `T compositor awake`, head pose facing the panels.
 - The dashboard is closed: `valve.steam.gamepadui.main` isn't in the visible overlays of
-  `V snapshot 1-before --capture`.
+  `V snapshot 1-before`.
 
 - **Connect a controller.** Pick it up. Run `T controller right set --position 0.2 0.9 -0.4`
   (standing space, like the head: at the hip, ahead).
@@ -37,7 +37,7 @@ Preconditions:
   let go of the trigger (`T controller right trigger 1.0 --click on`, 0.15 s,
   `T controller right trigger 0 --click off`), wait 2.5 s, `V snapshot 4-clicked --capture`:
   the capture shows that game's page (proved 2026-10-27: Astroneer's page opened). Press and
-  release `b` to go back to the library.
+  release `b` (`T controller right button b on`, 0.2 s, `off`) to go back to the library.
 - **Close.** Press and release system again, wait 2 s, `V snapshot 5-closed`. Those overlays
   are no longer visible.
 - **Put the controller down.** Run `T controller right reset`.
@@ -48,7 +48,8 @@ Preconditions:
   dashboard (no visible change on 2026-10-27); use a controller's.
 - The overlays take up to 2 s to show or hide: snapshot after the wait, not at once.
 - Leaving the dashboard open hands controller input to Steam: close it before the next feature.
-  `V cleanup` doesn't close it, so close it before cleanup.
+  `V cleanup` doesn't close it, so close it before cleanup. A run that `V guard` stopped leaves
+  it open too: the wearer closes it with a system button.
 - The laser shows only on the controller that opened the dashboard. A controller connected
   while it was already open (after a cleanup, say) gets none: close and reopen it with that
   controller's system button.

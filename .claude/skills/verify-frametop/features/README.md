@@ -1,12 +1,12 @@
 # Frametop verification map
 
 This folder is the maintained source for verifying what a Frametop user sees and does in the
-headset. Read this index, then use the feature's file as the recipe. `V` and `T` are as in
-`../SKILL.md`.
+headset. Read this index, then use the feature's file as the recipe. `V`, `T` and `G` are as
+in `../SKILL.md`.
 
 ## Baseline preconditions
 
-- The Frame runs SteamVR and the Frametop desktop, and `V doctor` exits 0.
+- The Frame runs SteamVR and the Frametop desktop, and `V doctor` exits 0 before launch.
 - Nobody wears the headset (`V doctor` refuses otherwise).
 - The change under test is deployed into the live release (`../SKILL.md`, Launch).
 - `V launch NAME` has made the run's evidence folder.
@@ -23,7 +23,7 @@ headset. Read this index, then use the feature's file as the recipe. `V` and `T`
 - Leave what you changed as you found it: close what you opened, end held gestures, and let
   `V cleanup RUN` restore the rest.
 - Chain each drive step after `V guard` (`V guard && T ...`): it stops the run if someone puts
-  the headset on.
+  the headset on. The recipes leave the prefix out to stay readable; it is still required.
 
 ## Proof and skip reporting
 

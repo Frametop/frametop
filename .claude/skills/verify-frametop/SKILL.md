@@ -24,9 +24,10 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
   `V guard` (`V guard && T pose set ...`): it exits 0 while nobody wears the headset, and
   otherwise cleans up at once and exits 2 (worn) or 1 (sensor unread): stop there. `V snapshot`
   guards too. With the displays lit, the real sensor reads worn for under a second every few
-  seconds while the headset lies still; `V guard` and `V doctor` re-read for about 2 s and count
-  it as worn only if it stays worn or the headset moves (3 cm, 5 degrees). Never work around
-  them: if they stop the run, check the headset is still before launching again.
+  seconds while the headset lies still; on a worn reading `V guard` and `V doctor` read again
+  for a few seconds, and count it as not worn only if two reads in a row say so and the headset
+  hasn't moved (1 cm, 2 degrees). Never work around them: if they stop the run, check the
+  headset is still before launching again.
 - Every run ends with `V cleanup RUN` (the folder `V launch` printed), even after a failure: it
   turns the displays back on, runs `T release` (worn, pose, HMD buttons, controllers, fake eyes
   and hands) and `T compositor auto`, puts gaze mode back as the run found it, and frees the
@@ -55,8 +56,8 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
      SteamVR first or `mv` the new file into place, and ask before restarting SteamVR.
    - Say in the report which live files were swapped and where their backups are.
 2. `V launch NAME`: runs the doctor, refuses on a worn headset, an unhealthy Frame or another
-   run under way (a run is held for 30 minutes from its last snapshot), then makes
-   `testbench/artifacts/verify/<date>-<time>-NAME/` with `doctor.json` and `baseline.json`
+   run under way (a run is held for 30 minutes from its last launch, guard or snapshot), then
+   makes `testbench/artifacts/verify/<date>-<time>-NAME/` with `doctor.json` and `baseline.json`
    (the readbacks below, before anything is driven). It prints the folder. If it refuses on
    overrides left by an earlier run that died, run `V cleanup` (`--force` if its lease still
    runs) and launch again.
@@ -144,13 +145,14 @@ Proof standards:
 every override, sets the compositor back to auto, puts gaze mode back to how the baseline found
 it, writes `RUN/cleanup.json`, frees the run, and reports any override still left (exit 1 if
 so). It refuses a run under way that isn't the one named, unless `--force` (for a run whose
-agent died); with no run held, or a lease that ran out, `V cleanup` needs no RUN and only
-releases (no baseline: displays and gaze mode stay as they are). `T compositor auto` sets
-SteamVR's persistent `pauseCompositorOnStandby` to true even if the user had it false (the
-baseline's `testbench.runtime.settings` shows what it was). It never deletes evidence, and it
-doesn't undo deployed files: put swapped binaries back from their `.pre-<topic>` backups when the user
-shouldn't keep the change. `V doctor` afterwards should exit 0 with "no testbench overrides
-left".
+agent died). A run whose lease ran out needs no RUN and is restored from its own baseline.
+With no run held, `V cleanup` only releases (no baseline: displays and gaze mode stay as they
+are). `T compositor auto` sets SteamVR's persistent `pauseCompositorOnStandby` to true even if
+the user had it false (the baseline's `testbench.runtime.settings` shows what it was). It never
+deletes evidence, and it doesn't undo deployed files: put swapped binaries back from their
+`.pre-<topic>` backups when the user shouldn't keep the change. Nor does it undo settings a
+recipe changed through a service's socket (`V ask ft_screens 'cutouts on'`): the recipe says
+how to put them back. `V doctor` afterwards should exit 0 with "no testbench overrides left".
 
 ## Risky paths
 
@@ -168,5 +170,5 @@ A diff touching these gets the extra reviewer (Codex) in the review panel:
 ## Helpers
 
 - `scripts/verify-frametop`: `doctor`, `launch [NAME]`, `guard`, `snapshot LABEL [--capture]`,
-  `cleanup [RUN] [--force]`, `ask NAME MESSAGE [--listen S]`. `--help` prints the usage. Python 3 standard library only; runs on the SteamOS
-  host.
+  `cleanup [RUN] [--force]`, `ask NAME MESSAGE [--listen S]`. `--help` prints the usage.
+  Python 3 standard library only; runs on the SteamOS host.

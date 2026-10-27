@@ -29,14 +29,15 @@ Preconditions:
   `testbench.fakes.hands_publishing` is `true` (and `hands_waiting` absent: ft-hands has
   parked), and the capture shows the drawn hand there. Move it (`--position .15 -.05 -.4
   --shape point`) and capture again: the hand follows, index out (proved 2026-10-27).
-- **Cutout.** Put the hand between the eyes and a Frametop panel: `T pointer measure KEY` gives
-  its centre in standing space; a remote display at 26 degrees up worked with
+- **Cutout.** First read how the user has it: `V ask ft_screens 'cutouts state'` (`ok off` and
+  `room view off (no game, ...)` by default; `(forced)` means Room View was forced already). Put
+  the hand between the eyes and a Frametop panel: `T pointer measure KEY` gives its centre in
+  standing space; a remote display at 26 degrees up worked with
   `T pose set --position 0 1.1 0 --rotation 0 15 0` and the hand at `0 .082 -.4`. Snapshot with
   `--capture`, then `V ask ft_screens 'cutouts on'` and `V ask ft_screens 'cutouts roomview on'`
   (ft-screens cuts only with Room View on), wait 1.5 s and capture: a round hole through the
-  panel around the hand, the room behind it. Put both back at once: `V ask ft_screens 'cutouts
-  roomview auto'` and `V ask ft_screens 'cutouts off'` (if `cutouts state` said `ok off` and
-  `room view ... (no game, ...)` before; `(forced)` means it was forced already).
+  panel around the hand, the room behind it. Put both back as the state read found them at once
+  (by default `V ask ft_screens 'cutouts roomview auto'` and `V ask ft_screens 'cutouts off'`).
 - **Pinch reaches the pointer.** Run `T hand right set --position .1 -.2 -.35 --shape pinch`,
   wait 0.3 s, then the same with `--shape open`. `journalctl --user -u frametop-pointer --since
   -1min` has `pinch right: ignored (no ray up: ...)`: without gaze mode and the hand's ray down, a
@@ -63,3 +64,6 @@ Preconditions:
 - A floating window (`frametop.float.N`) showed no hole on 2026-10-27; prove cutouts on a screen
   or remote display.
 - A cutout capture shows the room: it never leaves this machine without the user's yes.
+- `V cleanup` doesn't restore the cutout settings: a run that dies or that `V guard` stops
+  between forcing and restoring them leaves cutouts on and Room View forced. Restore them by
+  hand, as the state read found them.

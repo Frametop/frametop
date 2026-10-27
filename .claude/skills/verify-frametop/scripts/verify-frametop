@@ -31,6 +31,7 @@ There is one Frametop: the user's live desktop on this headset. Nothing here sta
 restarts it, SteamVR or a Frametop service. Evidence goes in testbench/artifacts/verify/
 (gitignored); it can show the desktop, so it stays on this machine.
 """
+import fcntl
 import json
 import math
 import os
@@ -55,10 +56,12 @@ RELEASES = Path.home() / '.local/share/frametop/releases'
 DROP_IN = Path.home() / '.config/systemd/user/steamvr.service.d/90-frame-testbench.conf'
 LEASE = 30 * 60
 # With the displays lit, the Frame's proximity sensor reads worn for under a second every few
-# seconds while the headset lies still (20 blips in 90 s, 2026-10-27). A worn reading counts as
-# a blip only if it ends within SETTLE_READS more reads and the headset hasn't moved meanwhile.
-SETTLE_READS, SETTLE_GAP = 5, 0.2
-MOVED_M, MOVED_DEG = 0.03, 5.0
+# seconds while the headset lies still (20 blips of 0.4-0.8 s in 90 s, 2026-10-27; a status read
+# takes about 0.5 s). A worn reading counts as a blip only once STILL_READS reads in a row say
+# not worn and the headset hasn't moved; WORN_READS in a row say worn, and so does anything
+# undecided after SETTLE_READS reads.
+SETTLE_READS, SETTLE_GAP, WORN_READS, STILL_READS = 6, 0.2, 3, 2
+MOVED_M, MOVED_DEG = 0.01, 2.0   # the real pose drifted under 2 cm and 7 degrees in 90 s
 
 
 def bench(*args, timeout=60):
@@ -119,27 +122,32 @@ def git(*args):
 
 def lock_holder():
     try:
-        held = json.loads(LOCK.read_text())
+        text = LOCK.read_text()
         idle = time.time() - LOCK.stat().st_mtime
-    except (OSError, ValueError):
+    except OSError:
         return None
+    try:
+        held = json.loads(text)
+    except ValueError:
+        held = None   # garbled, or a launch between creating it and writing it
     if not isinstance(held, dict) or not isinstance(held.get('run'), str):
-        return {'run': None, 'stale': True}   # not ours to trust: anyone may take it over
+        held = {'run': None}
     held['stale'] = idle > LEASE   # nobody touched the run for a while: it can be taken over
     return held
 
 
 def moved(a, b):
     """Whether the real headset moved between two physical poses (or either is unknown)."""
-    if not all(isinstance(p, dict) and p.get('valid') for p in (a, b)):
-        return True
-    shift = math.dist(a['position'], b['position'])
-    qa, qb = a['quaternion'], b['quaternion']
-    norms = math.hypot(*qa) * math.hypot(*qb)
-    if not norms:
-        return True
-    dot = min(1.0, abs(sum(x * y for x, y in zip(qa, qb))) / norms)
-    return shift > MOVED_M or math.degrees(2 * math.acos(dot)) > MOVED_DEG
+    try:
+        if not (a['valid'] and b['valid']):
+            return True
+        shift = math.dist(a['position'], b['position'])
+        qa, qb = a['quaternion'], b['quaternion']
+        norms = math.hypot(*qa) * math.hypot(*qb)
+        dot = min(1.0, abs(sum(x * y for x, y in zip(qa, qb))) / norms)
+        return shift > MOVED_M or math.degrees(2 * math.acos(dot)) > MOVED_DEG
+    except (TypeError, KeyError, ValueError, ZeroDivisionError):
+        return True   # a missing or non-finite value (the proxy writes null for those)
 
 
 def worn_now():
@@ -148,18 +156,23 @@ def worn_now():
     proxy = status.get('input') or {}
     if proxy.get('physical_worn') is not True:
         return proxy.get('physical_worn'), status
-    first = proxy.get('physical_pose')
+    first, worn_in_row, still_in_row = proxy.get('physical_pose'), 1, 0
     for _ in range(SETTLE_READS):
         time.sleep(SETTLE_GAP)
         status = bench('status', timeout=20)
         proxy = status.get('input') or {}
         worn = proxy.get('physical_worn')
-        if worn is None or moved(first, proxy.get('physical_pose')):
-            return (None if worn is None else True), status   # moved: someone has it
-        if worn is False:
+        if worn is None:
+            return None, status
+        if moved(first, proxy.get('physical_pose')):
+            return True, status   # someone has it
+        worn_in_row, still_in_row = (worn_in_row + 1, 0) if worn else (0, still_in_row + 1)
+        if worn_in_row >= WORN_READS:
+            return True, status
+        if still_in_row >= STILL_READS:
             status['blip'] = True   # for the reader: the sensor blinked, the headset lay still
             return False, status
-    return True, status
+    return True, status   # flapping: count it as worn
 
 
 def doctor():
@@ -173,7 +186,9 @@ def doctor():
     proxy = status.get('input') or {}
     check('headset not worn', worn is False,
           'physically worn: stop, never drive it under someone' if worn else
-          'proximity sensor unread (no testbench proxy?)' if worn is None else 'proximity sensor: off the head')
+          'proximity sensor unread (no testbench proxy?)' if worn is None else
+          'proximity sensor: off the head' + (' (it blinked worn; the headset lay still)'
+                                               if status.get('blip') else ''))
     check('SteamVR running', running('vrserver') and running('vrcompositor'))
     check('testbench proxy', proxy.get('available') and proxy.get('proximity_ready'),
           f'drop-in {"present" if DROP_IN.exists() else "MISSING"}: testbench/install.sh install --restart, '
@@ -227,23 +242,25 @@ def write_json(path, value):
 
 def current_run():
     holder = lock_holder()
-    if not holder:
+    if not holder or not holder['run']:
         sys.exit('verify-frametop: no run: start one with verify-frametop launch')
     return Path(holder['run'])
 
 
 def claim(run):
     """Take the lock, unless another launch got there first."""
-    holder = lock_holder()
-    if holder and holder['stale']:
-        LOCK.unlink(missing_ok=True)
-    try:
-        fd = os.open(LOCK, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        sys.exit(f'verify-frametop: run {(lock_holder() or {}).get("run")} is under way: '
-                 'finish it with cleanup first')
-    with os.fdopen(fd, 'w') as f:
-        json.dump({'run': str(run), 'started': time.time()}, f)
+    with open(RUNTIME / 'verify-frametop.claim', 'w') as gate:
+        fcntl.flock(gate, fcntl.LOCK_EX)   # one launch at a time between reading and taking it
+        holder = lock_holder()
+        if holder and holder['stale']:
+            LOCK.unlink(missing_ok=True)
+        try:
+            fd = os.open(LOCK, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            sys.exit(f'verify-frametop: run {(lock_holder() or {}).get("run")} is under way: '
+                     'finish it with cleanup first')
+        with os.fdopen(fd, 'w') as f:
+            json.dump({'run': str(run), 'started': time.time()}, f)
 
 
 def launch(name):
@@ -261,21 +278,27 @@ def launch(name):
     name = re.sub(r'[^A-Za-z0-9._-]', '-', name or 'run')[:48]
     run = EVIDENCE / f'{datetime.now().strftime("%Y%m%d-%H%M%S")}-{name}'
     claim(run)
-    EVIDENCE.mkdir(parents=True, exist_ok=True, mode=0o700)   # mode only for the last part
-    run.mkdir(mode=0o700)
-    write_json(run / 'doctor.json', report)
-    write_json(run / 'baseline.json', readbacks())
+    try:
+        EVIDENCE.mkdir(parents=True, exist_ok=True, mode=0o700)   # mode only for the last part
+        run.mkdir(mode=0o700)
+        write_json(run / 'doctor.json', report)
+        write_json(run / 'baseline.json', readbacks())
+    except BaseException:
+        LOCK.unlink(missing_ok=True)   # nothing was driven yet: don't hold the headset for nothing
+        raise
     print(json.dumps({'ok': True, 'run': str(run)}, indent=2))
 
 
 def guard():
     """Stop the run at once if someone wears the headset (or nobody can tell)."""
-    worn, _ = worn_now()
+    try:
+        worn, _ = worn_now()
+    except Exception:   # whatever went wrong, it didn't say "not worn"
+        worn = None
     if worn is False:
         if lock_holder():
             LOCK.touch()   # the lease runs on
         return
-    print(json.dumps({'ok': False, 'worn': worn}), flush=True)
     print('verify-frametop: ' + ('the headset is worn' if worn else "the proximity sensor can't be read")
           + ': stopping the run and cleaning up', file=sys.stderr, flush=True)
     cleanup(force=True)
@@ -303,10 +326,10 @@ def snapshot(label, capture):
 
 def cleanup(run=None, force=False):
     holder = lock_holder()
-    if holder and not holder['stale'] and not force \
-            and (run is None or Path(run).resolve() != Path(holder['run']).resolve()):
-        sys.exit(f'verify-frametop: run {holder["run"]} is under way and is not the one named: '
-                 'cleanup RUN with its folder, or --force if it has died')
+    if holder and not holder['stale'] and not force and (
+            run is None or not holder['run'] or Path(run).resolve() != Path(holder['run']).resolve()):
+        sys.exit(f'verify-frametop: run {holder["run"] or "(being launched)"} is under way and is not '
+                 'the one named: cleanup RUN with its folder, or --force if it has died')
     baseline = {}
     if holder and holder['run']:
         try:
@@ -316,7 +339,7 @@ def cleanup(run=None, force=False):
     steps = {}
     # Displays back on first, while the fake wearer still holds off SteamVR's standby: ft-powerd
     # lights the panels on "on" even in standby. Two quick datagrams, then the release.
-    if baseline and (baseline.get('power') or {}).get('displays') != 'off' \
+    if (baseline.get('power') or {}).get('displays') in ('on', 'away') \
             and ask('ft_powerd', 'status').split()[:2] == ['ok', 'off']:
         answer = ask('ft_powerd', 'on')
         steps['power'] = {'ok': answer == 'ok', 'reply': answer}
@@ -327,8 +350,11 @@ def cleanup(run=None, force=False):
         # The helper keeps a gaze on|off until it restarts (the setting is POINTER_GAZE).
         answer = ask('ft_pointer_helper', f'gaze {"on" if gaze_before else "off"}')
         steps['gaze_mode'] = {'ok': answer.startswith('ok'), 'reply': answer}
-    report, _ = doctor()
-    leftovers = next(c for c in report['checks'] if c['name'] == 'no testbench overrides left')
+    try:
+        report, _ = doctor()
+        leftovers = next(c for c in report['checks'] if c['name'] == 'no testbench overrides left')
+    except Exception as e:   # the run is still freed below
+        leftovers = {'ok': False, 'detail': f'unread: {e!r}'}
     LOCK.unlink(missing_ok=True)
     result = {'ok': all(s.get('ok') for s in steps.values()) and leftovers['ok'], 'steps': steps,
               'overrides': leftovers['detail'], 'evidence': holder and holder['run']}
@@ -350,7 +376,7 @@ def main(argv):
         report, code = doctor()
         print(json.dumps(report, indent=2))
         return code
-    if command == 'launch':
+    if command == 'launch' and len(rest) <= 1 and not any(a.startswith('-') for a in rest):
         launch(rest[0] if rest else None)
         return 0
     if command == 'snapshot':
@@ -359,14 +385,18 @@ def main(argv):
             sys.exit('verify-frametop: snapshot LABEL [--capture]')
         snapshot(labels[0], '--capture' in rest)
         return 0
-    if command == 'cleanup' and len([a for a in rest if a != '--force']) <= 1:
-        return cleanup(next((a for a in rest if a != '--force'), None), '--force' in rest)
+    runs = [a for a in rest if a != '--force']
+    if command == 'cleanup' and len(runs) <= 1 and not any(a.startswith('-') for a in runs):
+        return cleanup(runs[0] if runs else None, '--force' in rest)
     if command == 'guard' and not rest:
         guard()
         print(json.dumps({'ok': True, 'worn': False}))
         return 0
     if command == 'ask' and len(rest) in (2, 4) and rest[2:3] in ([], ['--listen']):
-        listen = float(rest[3]) if len(rest) == 4 else 0.0
+        try:
+            listen = float(rest[3]) if len(rest) == 4 else 0.0
+        except ValueError:
+            sys.exit('verify-frametop: ask NAME MESSAGE [--listen SECONDS]')
         print(ask(rest[0], rest[1], listen=listen))
         return 0
     sys.exit(f'verify-frametop: unknown command {" ".join(argv)!r} (see --help)')

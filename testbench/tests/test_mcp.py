@@ -30,7 +30,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_tool_inventory_and_no_transport_or_arbitrary_command_arguments(self):
         tools = await self.server.list_tools()
         self.assertEqual({t.name for t in tools}, {
-            'status', 'worn', 'hmd_pose_set', 'hmd_pose_move', 'hmd_pose_reset',
+            'status', 'worn', 'hmd_button', 'hmd_pose_set', 'hmd_pose_move', 'hmd_pose_reset',
             'controller_pose_set', 'controller_pose_move', 'controller_pose_reset',
             'controller_button', 'controller_trigger', 'controller_grip', 'controller_thumbstick',
             'controller_touch', 'controller_inputs_reset', 'controller_input_status',
@@ -129,6 +129,13 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_arguments_never_reach_backend(self):
         cases = [
             ('worn', {'state': 'yes'}), ('compositor', {'mode': 'off'}),
+            ('hmd_button', {'button': '/input/system/click', 'state': 'yes'}),
+            ('hmd_button', {'button': 'system', 'state': 'on'}),
+            ('hmd_button', {'button': '/input/system/click\nrelease', 'state': 'on'}),
+            ('hmd_button', {'button': '/input/system/click 1', 'state': 'on'}),
+            ('hmd_button', {'button': '/input/' + 'a' * 128, 'state': 'on'}),
+            ('hmd_button', {'button': ['/input/system/click'], 'state': 'on'}),
+            ('hmd_button', {'state': 'on'}),
             ('controller_pose_reset', {'side': 'both'}),
             ('hmd_pose_set', {}), ('hmd_pose_set', {'position': [1, 2]}),
             ('hmd_pose_set', {'position': [1, 2, 3, 4]}),
@@ -318,6 +325,8 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         cases = [
             ('status', {}, ['status']),
             *[('worn', {'state': s}, ['worn', s]) for s in ('on', 'off', 'physical')],
+            *[('hmd_button', {'button': '/input/system/click', 'state': s}, ['hmd-button', '/input/system/click', s])
+              for s in ('on', 'off', 'physical')],
             *[('compositor', {'mode': s}, ['compositor', s]) for s in ('awake', 'auto')],
             ('hmd_pose_set', {'position': [1, 2, -3]},
              ['pose', 'set', '--position', '1', '2', '-3', '--rotation', '0', '0', '0', '--space', 'standing']),

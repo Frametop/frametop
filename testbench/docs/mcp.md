@@ -77,6 +77,7 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | --- | --- | --- |
 | `status` | None | `status` |
 | `worn` | `state`: `on`, `off`, or `physical` | `worn STATE` |
+| `hmd_button` | `button` (an `/input/...` path), `state`: `on`, `off`, or `physical` | `hmd-button PATH STATE` |
 | `hmd_pose_set` | Required `position`; optional `rotation`, `space` | `pose set` |
 | `hmd_pose_move` | Optional `translation`, `rotation`, `space` | `pose move` |
 | `hmd_pose_reset` | None | `pose reset` |
@@ -165,8 +166,8 @@ Examples of tool arguments:
 ```
 
 Input overrides persist until explicitly reset or released. Disconnecting the
-MCP client does not release them. `release_all` restores physical HMD tracking
-and proximity, clears controller inputs and disconnects the synthetic controllers.
+MCP client does not release them. `release_all` restores physical HMD tracking,
+proximity and buttons, clears controller inputs and disconnects the synthetic controllers.
 It leaves the compositor policy unchanged. Physical controller tracking is never overridden. Use
 `compositor` with `{"mode":"auto"}` separately to restore automatic standby.
 Do not apply virtual tracking overrides while someone relies on normal tracking.

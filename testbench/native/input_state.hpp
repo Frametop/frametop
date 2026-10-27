@@ -33,11 +33,16 @@ class InputState {
     struct Proximity { std::optional<bool> physical; double offset = 0; };
     std::map<vr::VRInputComponentHandle_t, Proximity> proximity_;
     std::optional<bool> worn_;
+    // The HMD's other boolean components (its buttons). An override holds back cv's own
+    // updates until it's released, like worn.
+    struct Button { std::string path; std::optional<bool> physical, requested; double offset = 0; };
+    std::map<vr::VRInputComponentHandle_t, Button> buttons_;
     uint64_t sequence_ = 0;
     bool controller_update_locked(Controller &, const std::string &, ControllerInput &, float);
     void publish_locked();
     bool controller_input_release_locked(unsigned hand);
     bool controller_release_locked(unsigned hand, bool force = false);
+    void button_release_locked(const std::string &path);
     std::string status_locked(bool ok, const char *error);
 public:
     void reset(vr::IVRServerDriverHost *, vr::IVRDriverInput *);

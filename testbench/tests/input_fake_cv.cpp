@@ -112,6 +112,7 @@ extern "C" void FrameFakePhysical() {
     assert(input->UpdateBooleanComponent(other, false, -0.125) == VRInputError_None);
     assert(input->UpdateBooleanComponent(button, false, -0.125) == VRInputError_None);
 }
+extern "C" void FrameFakeButton(bool down) { assert(input->UpdateBooleanComponent(button, down, -0.125) == VRInputError_None); }
 extern "C" void *FrameFakeController() { return &controller; }
 extern "C" void *FrameFakeComponent() { return &component; }
 extern "C" void *FrameFakeOther() { return &factory_other; }

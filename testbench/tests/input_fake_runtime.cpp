@@ -112,6 +112,7 @@ void controller_metrics() {
 }
 double other_x = 0;
 bool worn = false, other_worn = true;
+int button = -1;  // the HMD's /input/button/click as the runtime last saw it
 unsigned pose_count = 0, worn_count = 0, host_mask = 0, input_mask = 0;
 void *other_interface;
 class Host : public IVRServerDriverHost {
@@ -180,7 +181,7 @@ public:
         if (h > 1000) return update_input(h, v, true, t);
         assert(h >= 501 && h <= 504); assert(t == -0.125 || t == 0);
         std::lock_guard<std::mutex> lock(mu);
-        if (h == 501 || h == 502) { worn = v; ++worn_count; } else { other_worn = v; }
+        if (h == 501 || h == 502) { worn = v; ++worn_count; } else if (h == 504) { button = v; } else { other_worn = v; }
         return VRInputError_None;
     }
     EVRInputError CreateScalarComponent(PropertyContainerHandle_t c, const char *n, VRInputComponentHandle_t *h, EVRScalarType t, EVRScalarUnits u) override { if (c == 120 || c == 121) return create_input(c, n, h, false, t, u); assert(c == 109 && !strcmp(n,"scalar") && t == VRScalarType_Absolute && u == VRScalarUnits_NormalizedOneSided); *h = 601; input_mask |= 1; return VRInputError_None; }
@@ -230,7 +231,7 @@ void metrics() {
     std::lock_guard<std::mutex> lock(mu);
     bool raw = latest.qWorldFromDriverRotation.w == 1 && latest.qDriverFromHeadRotation.w == 1 && latest.poseTimeOffset == 0;
     for (int k = 0; k < 3; ++k) raw = raw && latest.vecWorldFromDriverTranslation[k] == 0 && latest.vecDriverFromHeadTranslation[k] == 0 && latest.vecVelocity[k] == 0 && latest.vecAngularVelocity[k] == 0 && latest.vecAcceleration[k] == 0 && latest.vecAngularAcceleration[k] == 0;
-    std::cout << "{\"hmd_pose\":[" << latest.vecPosition[0] << ',' << latest.vecPosition[1] << ',' << latest.vecPosition[2] << ',' << latest.qRotation.w << ',' << latest.qRotation.x << ',' << latest.qRotation.y << ',' << latest.qRotation.z << "],\"raw_transform\":" << raw << ",\"valid\":" << (latest.poseIsValid && latest.deviceIsConnected && latest.result == TrackingResult_Running_OK) << ",\"other_x\":" << other_x << ",\"pose_count\":" << pose_count << ",\"worn_count\":" << worn_count << ",\"worn\":" << worn << ",\"other_worn\":" << other_worn << ",\"input005_calls\":" << input005_calls.load() << "}" << std::endl;
+    std::cout << "{\"hmd_pose\":[" << latest.vecPosition[0] << ',' << latest.vecPosition[1] << ',' << latest.vecPosition[2] << ',' << latest.qRotation.w << ',' << latest.qRotation.x << ',' << latest.qRotation.y << ',' << latest.qRotation.z << "],\"raw_transform\":" << raw << ",\"valid\":" << (latest.poseIsValid && latest.deviceIsConnected && latest.result == TrackingResult_Running_OK) << ",\"other_x\":" << other_x << ",\"pose_count\":" << pose_count << ",\"worn_count\":" << worn_count << ",\"worn\":" << worn << ",\"other_worn\":" << other_worn << ",\"input005_calls\":" << input005_calls.load() << ",\"button\":" << button << "}" << std::endl;
 }
 }
 int main(int argc, char **) {
@@ -261,6 +262,7 @@ int main(int argc, char **) {
     auto get_controller = reinterpret_cast<void *(*)()>(dlsym(real,"FrameFakeController"));
     auto get_component = reinterpret_cast<void *(*)()>(dlsym(real,"FrameFakeComponent"));
     auto get_other = reinterpret_cast<void *(*)()>(dlsym(real,"FrameFakeOther"));
+    auto press = reinterpret_cast<void (*)(bool)>(dlsym(real,"FrameFakeButton")); assert(press);
     other_interface = get_other();
     if (provider->Init(&context) != VRInitError_None) return 3;
     physical();
@@ -270,6 +272,7 @@ int main(int argc, char **) {
     while (std::getline(std::cin, cmd)) {
         if (cmd == "quit") break;
         if (cmd == "physical") { physical(); metrics(); }
+        else if (cmd == "button-down" || cmd == "button-up") { press(cmd == "button-down"); metrics(); }
         else if (cmd == "deactivate") { hmd->Deactivate(); std::cout << "{\"deactivated\":" << ((lifecycle() & 2) != 0) << "}" << std::endl; }
         else if (cmd == "metrics") metrics();
         else if (cmd == "controllers") controller_metrics();

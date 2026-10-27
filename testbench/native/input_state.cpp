@@ -1,4 +1,5 @@
 #include "input_state.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -34,17 +35,17 @@ void pose_json(std::ostream &o, const std::optional<DriverPose_t> &p) {
 void InputState::reset(IVRServerDriverHost *h, IVRDriverInput *i) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     host_ = h; input_ = i; index_ = k_unTrackedDeviceIndexInvalid; container_ = 0;
-    physical_.reset(); requested_.reset(); worn_.reset(); proximity_.clear(); sequence_ = 0;
+    physical_.reset(); requested_.reset(); worn_.reset(); proximity_.clear(); buttons_.clear(); sequence_ = 0;
     controllers_ = {};
 }
 void InputState::activate(uint32_t i, PropertyContainerHandle_t c) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    index_ = i; container_ = c; physical_.reset(); proximity_.clear(); ++sequence_;
+    index_ = i; container_ = c; physical_.reset(); proximity_.clear(); buttons_.clear(); ++sequence_;
 }
 void InputState::deactivate(uint32_t i) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (index_ != i) return;
-    index_ = k_unTrackedDeviceIndexInvalid; container_ = 0; proximity_.clear(); physical_.reset(); ++sequence_;
+    index_ = k_unTrackedDeviceIndexInvalid; container_ = 0; proximity_.clear(); buttons_.clear(); physical_.reset(); ++sequence_;
 }
 void InputState::controller_activate(unsigned hand, uint32_t index, ControllerInputs inputs) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -92,9 +93,10 @@ DriverPose_t InputState::controller_pose(unsigned hand) {
 }
 void InputState::component(PropertyContainerHandle_t c, const char *n, VRInputComponentHandle_t h) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (container_ && c == container_ && n && !strcmp(n, "/proximity")) {
-        proximity_.emplace(h, Proximity{}); ++sequence_;
-    }
+    if (!container_ || c != container_ || !n) return;
+    if (!strcmp(n, "/proximity")) proximity_.emplace(h, Proximity{});
+    else buttons_.emplace(h, Button{n, {}, {}, 0});
+    ++sequence_;
 }
 void InputState::physical_pose(uint32_t i, const DriverPose_t &p, uint32_t size) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -110,6 +112,11 @@ EVRInputError InputState::physical_boolean(VRInputComponentHandle_t h, bool valu
     if (it != proximity_.end()) {
         it->second.physical = value; it->second.offset = offset;
         if (worn_) return VRInputError_None;
+    }
+    auto button = buttons_.find(h);
+    if (button != buttons_.end()) {
+        button->second.physical = value; button->second.offset = offset;
+        if (button->second.requested) return VRInputError_None;
     }
     return input_->UpdateBooleanComponent(h, value, offset);
 }
@@ -150,6 +157,15 @@ bool InputState::controller_release_locked(unsigned hand, bool force) {
     }
     return ok;
 }
+// An empty path releases every button. A button cv never reported is restored as up.
+void InputState::button_release_locked(const std::string &path) {
+    for (auto &entry : buttons_) {
+        auto &b = entry.second;
+        if (!b.requested || (!path.empty() && b.path != path)) continue;
+        if (input_) input_->UpdateBooleanComponent(entry.first, b.physical.value_or(false), b.physical ? b.offset : 0);
+        b.requested.reset();
+    }
+}
 void InputState::publish_locked() {
     for (const auto &c : controllers_) if (host_ && c.index != k_unTrackedDeviceIndexInvalid && c.requested) {
         const auto pose = *c.requested;
@@ -158,6 +174,8 @@ void InputState::publish_locked() {
     if (index_ == k_unTrackedDeviceIndexInvalid) return;
     if (requested_ && host_) host_->TrackedDevicePoseUpdated(index_, *requested_, sizeof(DriverPose_t));
     if (worn_ && input_) for (const auto &entry : proximity_) input_->UpdateBooleanComponent(entry.first, *worn_, 0);
+    if (input_) for (const auto &entry : buttons_) if (entry.second.requested)
+        input_->UpdateBooleanComponent(entry.first, *entry.second.requested, 0);
 }
 void InputState::tick() { std::lock_guard<std::recursive_mutex> lock(mutex_); publish_locked(); }
 std::string InputState::status_locked(bool ok, const char *error) {
@@ -175,7 +193,20 @@ std::string InputState::status_locked(bool ok, const char *error) {
     o << ",\"physical_worn\":";
     if (!proximity_.empty() && proximity_.begin()->second.physical) o << *proximity_.begin()->second.physical;
     else o << "null";
-    o << ",\"requested_pose\":";
+    o << ",\"hmd_buttons\":{";
+    std::set<std::string> listed;
+    for (const auto &entry : buttons_) {
+        const auto &b = entry.second;
+        if (!listed.insert(b.path).second) continue;
+        if (listed.size() > 1) o << ',';
+        // Paths come from cv's own component names, never from a caller.
+        o << '\"' << b.path << "\":{\"physical\":";
+        if (b.physical) o << *b.physical; else o << "null";
+        o << ",\"override\":";
+        if (b.requested) o << *b.requested; else o << "null";
+        o << '}';
+    }
+    o << "},\"requested_pose\":";
     if (!requested_) o << "null";
     else {
         const auto &p = *requested_;
@@ -296,10 +327,28 @@ std::string InputState::command(const std::string &line) {
             return status_locked(false, "worn needs 0 or 1");
         if (!input_ || proximity_.empty()) return status_locked(false, "HMD proximity is not ready");
         worn_ = value == "1";
+    } else if (operation == "hmd-button") {
+        std::string path, value;
+        if (!(in >> path >> value) || (value != "0" && value != "1") || (in >> extra))
+            return status_locked(false, "hmd-button needs a path and 0 or 1");
+        if (!input_) return status_locked(false, "HMD buttons are not ready");
+        bool found = false;
+        for (auto &entry : buttons_) if (entry.second.path == path) { entry.second.requested = value == "1"; found = true; }
+        if (!found) return status_locked(false, "the HMD has no such button");
+    } else if (operation == "hmd-button-release") {
+        std::string path;
+        if (!(in >> path) || (in >> extra)) return status_locked(false, "hmd-button-release needs a path or all");
+        if (path == "all") path.clear();
+        else if (std::none_of(buttons_.begin(), buttons_.end(), [&](const auto &e) { return e.second.path == path; }))
+            return status_locked(false, "the HMD has no such button");
+        button_release_locked(path);
     } else if (operation == "release" || operation == "pose-release" || operation == "worn-release") {
         if (in >> extra) return status_locked(false, "release takes no arguments");
-        if (operation == "release") for (unsigned hand = 0; hand < controllers_.size(); ++hand)
-            publication_ok = controller_release_locked(hand) && publication_ok;
+        if (operation == "release") {
+            for (unsigned hand = 0; hand < controllers_.size(); ++hand)
+                publication_ok = controller_release_locked(hand) && publication_ok;
+            button_release_locked({});
+        }
         if (operation != "worn-release") {
             if (requested_ && physical_ && host_ && index_ != k_unTrackedDeviceIndexInvalid)
                 host_->TrackedDevicePoseUpdated(index_, *physical_, sizeof(DriverPose_t));

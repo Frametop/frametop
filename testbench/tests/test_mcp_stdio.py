@@ -70,7 +70,7 @@ else:
                     initialized = await client.initialize()
                     self.assertEqual(initialized.serverInfo.name, 'frame-testbench')
                     tools = await client.list_tools()
-                    self.assertEqual(len(tools.tools), 18)
+                    self.assertEqual(len(tools.tools), 19)
                     inputs = await client.call_tool('controller_input_status', {})
                     self.assertFalse(inputs.isError, inputs)
                     self.assertTrue(inputs.structuredContent['fixture_input_readback'])

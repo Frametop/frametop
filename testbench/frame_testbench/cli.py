@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -9,6 +10,8 @@ import uuid
 from . import controller_inputs, install, pose, transport
 
 ROOT = Path(__file__).resolve().parents[1]
+# An HMD input component, such as /input/system/click. status lists the HMD's own.
+HMD_BUTTON_PATH = r'/input(/[a-z0-9_]+)+'
 
 
 class Bench:
@@ -63,6 +66,12 @@ def fetch_capture(host, result, output):
     return result
 
 
+def hmd_button_path(text):
+    if not re.fullmatch(HMD_BUTTON_PATH, text):
+        raise argparse.ArgumentTypeError(f'{text!r} is not an /input/... component path')
+    return text
+
+
 def parser():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--host', help='SSH host alias; commands execute on the headset')
@@ -75,6 +84,9 @@ def parser():
     compositor.add_argument('mode', choices=('awake', 'auto'))
     worn = commands.add_parser('worn', help='override HMD proximity independently of pose')
     worn.add_argument('state', choices=('on', 'off', 'physical'))
+    button = commands.add_parser('hmd-button', help="override one of the HMD's own buttons; status lists them")
+    button.add_argument('path', type=hmd_button_path, help='component path, such as /input/system/click')
+    button.add_argument('state', choices=('on', 'off', 'physical'))
     hmd = commands.add_parser('pose', help='override the actual HMD pose')
     controller = commands.add_parser('controller', help='drive synthetic controller poses and inputs')
     controller.add_argument('side', choices=('left', 'right'))
@@ -133,6 +145,10 @@ def dispatch(args, bench):
         return bench.native('setting', 'false' if args.mode == 'awake' else 'true')
     if args.command == 'worn':
         return bench.control({'on': 'worn 1', 'off': 'worn 0', 'physical': 'worn-release'}[args.state])
+    if args.command == 'hmd-button':
+        if args.state == 'physical':
+            return bench.control('hmd-button-release ' + args.path)
+        return bench.control(f"hmd-button {args.path} {'1' if args.state == 'on' else '0'}")
     if args.command == 'release':
         return bench.control('release')
     if args.command in ('pose', 'controller'):

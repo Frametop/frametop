@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -125,6 +127,23 @@ class CliTests(unittest.TestCase):
                                   (['worn', 'physical'], 'worn-release'), (['release'], 'release')]:
             cli.dispatch(cli.parser().parse_args(command), bench)
             self.assertEqual(bench.commands[-1], ('control', expected))
+
+    def test_hmd_button(self):
+        cli, bench = self.module(), self.bench()
+        for command, expected in [(['hmd-button', '/input/system/click', 'on'], 'hmd-button /input/system/click 1'),
+                                  (['hmd-button', '/input/power/click', 'off'], 'hmd-button /input/power/click 0'),
+                                  (['hmd-button', '/input/system/click', 'physical'],
+                                   'hmd-button-release /input/system/click')]:
+            cli.dispatch(cli.parser().parse_args(command), bench)
+            self.assertEqual(bench.commands[-1], ('control', expected))
+        sent = len(bench.commands)
+        for path in ('system', '/input', '/input/', '/input/System/click', '/input/a b', '/input/a 1',
+                     '/output/haptic', '/input/a/../b', 'all'):
+            with self.subTest(path=path), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                cli.parser().parse_args(['hmd-button', path, 'on'])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            cli.parser().parse_args(['hmd-button', '/input/system/click', 'yes'])
+        self.assertEqual(len(bench.commands), sent)
 
     def test_absolute_standing_pose_is_converted_to_raw(self):
         cli, bench = self.module(), self.bench()

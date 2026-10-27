@@ -568,6 +568,41 @@ class InputProxyTests(unittest.TestCase):
         self.assertTrue(self.runtime("forward")["all_forwarded"])
         self.assertEqual(self.runtime("metrics")["input005_calls"], 0)
 
+    def test_hmd_buttons_are_listed_overridden_and_released(self):
+        s = self.rpc("status")
+        self.assertEqual(s["hmd_buttons"], {"/input/button/click": {"physical": False, "override": None}})
+        self.assertEqual(self.runtime("button-down")["button"], 1)
+        s = self.rpc("hmd-button /input/button/click 0")
+        self.assertTrue(s["ok"])
+        self.assertEqual(s["hmd_buttons"]["/input/button/click"], {"physical": True, "override": False})
+        self.assertEqual(self.runtime("metrics")["button"], 0)
+        # cv's own presses wait behind the override; worn and pose are untouched.
+        self.assertEqual(self.runtime("button-down")["button"], 0)
+        self.assertIsNone(s["worn_override"])
+        self.rpc("hmd-button /input/button/click 1")
+        self.assertEqual(self.runtime("button-up")["button"], 1)
+        s = self.rpc("hmd-button-release /input/button/click")
+        self.assertEqual(s["hmd_buttons"]["/input/button/click"], {"physical": False, "override": None})
+        self.assertEqual(self.runtime("metrics")["button"], 0)
+        self.assertEqual(self.runtime("button-down")["button"], 1)
+        self.rpc("hmd-button /input/button/click 0")
+        s = self.rpc("release")
+        self.assertIsNone(s["hmd_buttons"]["/input/button/click"]["override"])
+        self.assertEqual(self.runtime("metrics")["button"], 1)
+
+    def test_hmd_button_commands_reject_bad_input_without_changes(self):
+        before = self.rpc("status")
+        for cmd in ("hmd-button", "hmd-button /input/button/click", "hmd-button /input/button/click 2",
+                    "hmd-button /input/button/click 1 extra", "hmd-button /proximity 1",
+                    "hmd-button /input/nope/click 1", "hmd-button-release", "hmd-button-release /input/nope/click",
+                    "hmd-button-release all extra"):
+            with self.subTest(cmd=cmd):
+                s = self.rpc(cmd)
+                self.assertFalse(s["ok"])
+                self.assertEqual(s["sequence"], before["sequence"])
+                self.assertEqual(s["hmd_buttons"], before["hmd_buttons"])
+        self.assertTrue(self.rpc("hmd-button-release all")["ok"])
+
     def test_malformed_commands_do_not_mutate_state(self):
         s = self.rpc("pose 1 2 3 1 0 0 0")
         for cmd in ["", "blah", "status extra", "release extra", "worn 2", "worn -1", "worn 1 extra",

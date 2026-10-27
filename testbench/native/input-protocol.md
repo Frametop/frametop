@@ -82,6 +82,8 @@ worn 1
 release
 pose-release
 worn-release
+hmd-button /input/path 0|1
+hmd-button-release /input/path|all
 ```
 
 Pose coordinates are RAW tracking coordinates in meters. Quaternion order is
@@ -98,7 +100,13 @@ proximity updates are cached but suppressed independently while their respective
 override is enabled. Commands publish immediately; the worker republishes at a
 nominal 90Hz even without physical updates or provider RunFrame calls.
 
-release clears HMD pose, worn, and both synthetic controller overrides.
+HMD buttons are the cv HMD's other boolean components: every one created in its
+exact property container except /proximity. hmd-button holds a path at the requested
+value, and its physical updates are cached but suppressed while it's held. A path the
+HMD registered more than once overrides all of its handles. hmd-button-release
+publishes the cached physical value (false if none came) and clears the request.
+
+release clears HMD pose, worn, HMD button, and both synthetic controller overrides.
 pose-release and worn-release clear only their named HMD channel.
 controller-release neutralizes inputs and disconnects one hand or both with all,
 without releasing HMD channels. controller-input-release neutralizes inputs only,
@@ -231,6 +239,9 @@ Every response, including rejected commands, contains:
 * hmd_container: captured property container, zero when inactive.
 * proximity_ready: boolean, true when a matching /proximity handle is captured.
 * proximity_handles: all captured matching handles.
+* hmd_buttons: object keyed by component path. Each value has physical (null until
+  the driver sends one) and override (null when released, otherwise the requested
+  boolean).
 * controllers: object with left and right keys. Each value contains:
   * device_index: assigned synthetic index, or null before activation/after deactivation.
   * pose_override: boolean, true when this hand has a requested pose.

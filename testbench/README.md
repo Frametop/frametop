@@ -7,6 +7,7 @@ Headset and controller pose tools for closed-loop development on Steam Frame. A 
 ## What it controls
 
 - The real HMD's worn/unworn proximity input.
+- The real HMD's own buttons (its other boolean inputs, listed in `status`).
 - The real HMD's translation and rotation, including valid synthetic tracking while physical tracking is unavailable.
 - Independent left/right synthetic controller translation and rotation, without requiring powered physical controllers.
 - SteamVR stereo screenshots, with runtime pose/frame metadata and optional downloads to the agent machine.
@@ -59,7 +60,7 @@ Installation copies the native libraries to a content-addressed directory under 
 ./frame-testbench compositor auto
 ```
 
-`pose reset` releases only pose. `worn physical` releases only proximity. Worn state and pose are independent. `compositor awake` sets `power.pauseCompositorOnStandby=false`; `compositor auto` sets it to true. That setting persists, and `release` deliberately does not change it. HMD standby and whole-machine suspend are separate.
+`pose reset` releases only pose. `worn physical` releases only proximity. `hmd-button PATH on|off|physical` presses, releases or restores one HMD button, such as `/input/system/click`; `status` lists them under `input.hmd_buttons`. Worn state and pose are independent. `compositor awake` sets `power.pauseCompositorOnStandby=false`; `compositor auto` sets it to true. That setting persists, and `release` deliberately does not change it. HMD standby and whole-machine suspend are separate.
 
 Coordinates are right-handed: +X right, +Y up, forward -Z. Positive yaw turns left, positive pitch looks up, positive roll rotates around +Z. Euler composition is Y * X * Z. Relative moves use the chosen world's axes, not head-local axes. `--space raw` is available on `pose set` and `pose move`; the default Standing space uses the runtime's actual raw-to-standing transform, not an assumed floor offset. A relative move requires an active absolute pose first.
 
@@ -75,7 +76,7 @@ Coordinates are right-handed: +X right, +Y up, forward -Z. Positive yaw turns le
 ./frame-testbench release
 ```
 
-Controller coordinates and rotations use the same conventions as the HMD, including `--space raw`. Setting a pose connects that synthetic controller; resetting disconnects it. Global `release` disconnects both synthetic controllers and releases HMD pose/proximity overrides. HMD `pose reset` and `worn physical` remain selective.
+Controller coordinates and rotations use the same conventions as the HMD, including `--space raw`. Setting a pose connects that synthetic controller; resetting disconnects it. Global `release` disconnects both synthetic controllers and releases HMD pose, proximity and button overrides. HMD `pose reset` and `worn physical` remain selective.
 
 These are additional devices with stable serials `frame_testbench_left` and `frame_testbench_right`, not overrides of your physical controllers. Physical controller inputs pass through unchanged. Keep physical controllers off during synthetic left/right tests to avoid competing role assignments. Check the exact synthetic device indices and downstream poses in `status`.
 

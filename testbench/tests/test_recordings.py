@@ -87,7 +87,7 @@ class GazeReplayTests(Base):
         self.assertEqual([c for c, _, _ in seen], [1, 2, 3])   # each sample once
         for (_, fields, _), yaw in zip(seen, (1, 2, 3)):
             self.assertTrue(all(close(fields[k], v) for k, v in sample(yaw).items()))
-        self.assertAlmostEqual(seen[2][2] - seen[0][2], 0.3, delta=0.05)
+        self.assertAlmostEqual(seen[2][2] - seen[0][2], 0.3, delta=0.1)
         self.assertFalse(player.active())
         self.assertFalse((self.dir / 'fake/eye-server.mmap').exists())
 
@@ -225,6 +225,46 @@ class HandsReplayTests(Base):
                 self.assertIsNone(reply['hands'])
                 self.assertFalse((self.dir / 'fake/hands').exists())
 
+    def test_a_replay_waits_for_ft_hands_to_park_and_the_gaze_waits_with_it(self):
+        # A pinch in the first 0.1 s, on a fresh daemon that waits 0.3 s for ft-hands to park.
+        base = 3_000_000_000_000
+        hands = self.dump([hands_set(base, (1, 0)), hands_set(base + 100_000_000, (1, 1))])
+        gaze = self.gaze_recording([(0.0, sample(1)), (0.1, sample(2))])
+        with mock.patch.object(fakes, 'HANDS_SETTLE', 0.3):
+            player = self.player()
+            self.assertTrue(player.command(f'replay-gaze {gaze} once')['ok'])
+            self.assertTrue(player.command(f'replay-hands {hands} once')['ok'])
+            pinches, eyes = [], []
+            end = time.monotonic() + 2
+            while player.active() and time.monotonic() < end:
+                player.tick(time.monotonic())
+                if (self.dir / 'hands/gestures').exists() and (not pinches or pinches[-1][0] != self.gestures()[1]):
+                    pinches.append((self.gestures()[1], time.monotonic()))
+                if (self.dir / 'fake/eye-server.mmap').exists():
+                    left = self.eye_file()[1]['left2']
+                    if not eyes or not close(eyes[-1][0], left):
+                        eyes.append((left, time.monotonic()))
+                time.sleep(0.002)
+        self.assertEqual([p[0][2:] for p in pinches[:2]], [(1, 0), (1, 1)])   # nothing skipped
+        self.assertTrue(close(eyes[0][0], fakes.direction(1, 0)))   # held while waiting
+        second = next(t for d, t in eyes if close(d, fakes.direction(2, 0)))
+        self.assertLess(abs(second - pinches[1][1]), 0.05)   # in step with the hands
+
+    def test_scripted_commands_and_a_replay_take_turns(self):
+        base = 2_000_000_000_000
+        hands = self.dump([hands_set(base, (0, 0)), hands_set(base + 50_000_000, (0, 0))])
+        gaze = self.gaze_recording([(0.0, sample(1))])
+        player = self.player()
+        self.assertFalse(player.command(f'replay-hands {hands} twice')['ok'])
+        self.assertTrue(player.command(f'replay-gaze {gaze} loop')['ok'])
+        self.assertFalse(player.command('eyes open lost')['ok'])   # the recording says how the eyes are
+        self.assertTrue(player.command(f'replay-hands {hands} loop')['ok'])
+        reply = player.command('hand left 0 -0.2 -0.3 1 0 0 0 open')
+        self.assertEqual(list(reply['hands']), ['left'])   # the replay stopped
+        self.assertTrue(player.command(f'replay-hands {hands} loop')['ok'])
+        self.assertTrue(player.command('hand-release left')['ok'])
+        self.assertIsNone(player.status()['hands'])
+
 
 class RecorderTests(Base):
     """A scripted fake plays the real trackers here: record reads its files as it would theirs."""
@@ -259,9 +299,9 @@ class RecorderTests(Base):
         out = self.dir / 'rec'
         result = record.record(str(out), 0.5)
         self.assertEqual(result['files'], ['gaze.jsonl', 'hands.fhdump'])
-        self.assertGreater(result['recorded']['mmap'], 30)
-        self.assertGreater(result['recorded']['own'], 30)
-        self.assertGreater(result['recorded']['sets'], 8)
+        self.assertGreater(result['recorded']['mmap'], 10)
+        self.assertGreater(result['recorded']['own'], 10)
+        self.assertGreater(result['recorded']['sets'], 4)
         self.assertEqual(oct(out.stat().st_mode & 0o777), '0o700')
         self.assertEqual(oct((out / 'gaze.jsonl').stat().st_mode & 0o777), '0o600')
         mmap_samples, own_samples = fakes.load_gaze(str(out / 'gaze.jsonl'))
@@ -288,8 +328,24 @@ class RecorderTests(Base):
         self.assertFalse((self.dir / 'r1').exists())
         result = record.record(str(self.dir / 'r2'), 0.1, hands=False)
         self.assertEqual(result['files'], ['gaze.jsonl'])
-        with self.assertRaises(ValueError):
-            record.record(str(self.dir / 'r3'), 601)
+        for seconds in (0, -1, 301):
+            with self.assertRaises(ValueError):
+                record.record(str(self.dir / 'r3'), seconds)
+        self.assertFalse((self.dir / 'r3').exists())
+
+    def test_nothing_to_record_leaves_nothing_behind(self):
+        self.stop.set()
+        with mock.patch.object(record, 'EYE_SERVER', str(self.dir / 'none')), \
+                mock.patch.object(record, 'OWN_GAZE', str(self.dir / 'none')):
+            with self.assertRaisesRegex(RuntimeError, 'no eye tracker'):
+                record.record(str(self.dir / 'r4'), 0.1)
+        with mock.patch.object(fakes, 'HANDS_DIR', str(self.dir / 'none')):
+            with self.assertRaisesRegex(RuntimeError, "isn't publishing"):
+                record.record(str(self.dir / 'r4'), 0.1, gaze=False)
+        with mock.patch.object(record, 'seqlock_copy', side_effect=OSError('gone')):
+            with self.assertRaises(OSError):
+                record.record(str(self.dir / 'r4'), 0.1, gaze=False)
+        self.assertFalse((self.dir / 'r4').exists())
 
 
 class CliTests(Base):

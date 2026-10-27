@@ -17,13 +17,13 @@ def request(path, command, timeout=4):
         while b'\n' not in data:
             part = client.recv(4096)
             if not part:
-                raise RuntimeError('input proxy disconnected without a complete reply')
+                raise RuntimeError(f'{path} disconnected without a complete reply')
             data.extend(part)
             if len(data) > 65536:
                 raise RuntimeError('oversized proxy reply')
     value = json.loads(data.split(b'\n', 1)[0])
     if not isinstance(value, dict) or value.get('ok') is not True:
-        raise RuntimeError(f'input proxy refused: {value}')
+        raise RuntimeError(f'refused: {value}')
     return value
 
 

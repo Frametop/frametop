@@ -23,7 +23,7 @@ Real tracker output can be recorded and replayed too (see below).
 
 ## How it works
 
-The first `gaze look` or `hand ... set` starts `python3 -m frame_testbench.fakes` as the transient
+The first `gaze look`, `hand ... set` or `replay` starts `python3 -m frame_testbench.fakes` as the transient
 user unit `frame-testbench-fakes` (`journalctl --user -u frame-testbench-fakes` for its log). It
 takes commands on `$XDG_RUNTIME_DIR/frame-testbench-fakes.sock`, a user-only socket, and writes:
 
@@ -31,7 +31,7 @@ takes commands on `$XDG_RUNTIME_DIR/frame-testbench-fakes.sock`, a user-only soc
   SteamOS 0.4's layout of SteamVR's file, and `frametop-eyes-gaze` in our tracker's (ft-eyes).
   ft-gaze reads a stand-in instead of the real `/dev/shm` file while it was written in the last
   2 s, and goes back to the real one by itself when it stops. The real files are never written.
-- **Hands**: it touches `$XDG_RUNTIME_DIR/frametop-testbench/hands` every second, which parks
+- **Hands**: it touches `$XDG_RUNTIME_DIR/frametop-testbench/hands` twice a second, which parks
   ft-hands (no tracking, ft-camd stops copying frames) while it's under 3 s old. 0.6 s later it
   starts publishing `/run/user/UID/frametop-hands/hands` and `gestures` 30 times a second, in
   their layouts (`hands/include/fh_hands.h`, `fh_gestures.h`). The gesture counters carry on from

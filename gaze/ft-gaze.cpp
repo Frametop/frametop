@@ -284,6 +284,7 @@ class OwnFile {
 public:
     // Reopened when it appears or is replaced, since ft-eyes may start after us, and when the
     // testbench's stand-in comes or goes.
+    const std::string &Path() const { return path_; }
     bool Read(OwnSample &o) {
         const double now = NowRaw();
         if (!p_ || now - checked_ > 2.0) Reopen(now);

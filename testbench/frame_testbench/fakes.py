@@ -8,7 +8,7 @@ for the trackers whose output Frametop reads:
   second. ft-gaze reads a stand-in instead of the real file while it was written in the last
   2 s (gaze/ft-gaze.cpp), so everything from ft-gaze on runs as with real eyes. It never
   touches the real files.
-- Hands: it touches $XDG_RUNTIME_DIR/frametop-testbench/hands every second, which parks ft-hands
+- Hands: it touches $XDG_RUNTIME_DIR/frametop-testbench/hands twice a second, which parks ft-hands
   (hands/track/main.cpp), and publishes the hands and gestures files ft-hands would, 30 times a
   second, in their layouts (hands/include/fh_hands.h, fh_gestures.h).
 
@@ -112,9 +112,13 @@ class Playback:
         last = [times[-1] for times in streams if times]
         # A loop's length: the last sample plus a typical gap, so it doesn't repeat at once.
         self.length = max(last) + 1 / 30
-        self.start = time.monotonic()
-        self.next = [0] * len(streams)
+        self.restart(time.monotonic())
         self.laps = 0
+
+    def restart(self, now):
+        """From the top at now."""
+        self.start = now
+        self.next = [0] * len(self.streams)
 
     def advance(self, now):
         """([the newest due sample's index or None, per stream], done, wrapped)."""
@@ -314,6 +318,7 @@ class Hands:
         os.makedirs(hands_dir, mode=0o700, exist_ok=True)
         self.hands_dir = hands_dir
         self.marker = os.path.join(fake_dir, 'hands')
+        self.touched = 0.0
         self.touch()
         self.started = time.monotonic()
         self.poses = {}   # side -> (position, quaternion, shape)
@@ -325,9 +330,13 @@ class Hands:
         self.rebase = None   # per gesture slot: what to add to the recording's counters
 
     def touch(self):
+        """Keep ft-hands parked: the marker is fresh for 3 s (hands/track/main.cpp)."""
+        if time.monotonic() - self.touched < 0.5:
+            return
         with open(self.marker, 'a'):
             pass
         os.utime(self.marker)
+        self.touched = time.monotonic()
 
     def ready(self):
         return time.monotonic() - self.started >= HANDS_SETTLE
@@ -598,6 +607,7 @@ class Fakes:
         self.eyes = None
         self.hands = None
         self.next_eyes = self.next_hands = 0.0
+        self.together = False   # a gaze replay started with a hands replay waits with it
 
     def status(self, ok=True, error=None):
         reply = {'ok': ok, 'pid': os.getpid(),
@@ -660,6 +670,7 @@ class Fakes:
                             eyes.close()
                     self.eyes = eyes
                     self.next_eyes = 0.0
+                    self.together = bool(self.hands and self.hands.replay and not self.hands.ready())
                 else:
                     hands = self.hands or Hands(self.fake_dir, self.hands_dir)
                     try:
@@ -669,6 +680,9 @@ class Fakes:
                             hands.close()
                     self.hands = hands
                     self.next_hands = 0.0
+                    # `replay NAME` sends the gaze first: it starts over with the hands.
+                    self.together = bool(self.eyes and self.eyes.replay
+                                         and time.monotonic() - self.eyes.replay[0].start < 1)
             elif op == 'release' and not args:
                 self.close()
             else:
@@ -680,6 +694,14 @@ class Fakes:
         return self.status()
 
     def tick(self, now):
+        # A hands recording starts once ft-hands has parked (HANDS_SETTLE), not before, so its
+        # first sets aren't skipped; a gaze recording started with it holds its first sample.
+        if self.hands and self.hands.replay and not self.hands.ready():
+            self.hands.replay[0].restart(now)
+            if self.together and self.eyes and self.eyes.replay:
+                self.eyes.replay[0].restart(now)
+        else:
+            self.together = False
         # A recording plays at its own times, so it's looked at more often than a scripted fake
         # is written; nothing is written between its samples.
         if self.eyes and now >= self.next_eyes:

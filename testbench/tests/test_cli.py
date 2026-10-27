@@ -4,6 +4,7 @@ import json
 import math
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -195,6 +196,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result['fakes'], {'ok': True, 'gaze': None, 'hands': None, 'running': True})
         bench.fake_reply = None
         self.assertEqual(cli.dispatch(cli.parser().parse_args(['status']), bench)['fakes'], {'running': False})
+
+    def test_release_still_releases_the_proxy_when_the_fake_trackers_hang(self):
+        cli, bench = self.module(), self.bench()
+
+        def hung(text, start=False):
+            bench.commands.append(('fakes', text, start))
+            raise TimeoutError('timed out')
+        bench.fakes = hung
+        with mock.patch.object(cli.subprocess, 'run') as run:
+            result = cli.dispatch(cli.parser().parse_args(['release']), bench)
+        run.assert_called_once_with(['systemctl', '--user', 'stop', 'frame-testbench-fakes'], timeout=20)
+        self.assertEqual(bench.commands[-1], ('control', 'release'))
+        self.assertEqual(result['fakes'], {'running': False, 'stopped': 'frame-testbench-fakes', 'error': 'timed out'})
 
     def test_absolute_standing_pose_is_converted_to_raw(self):
         cli, bench = self.module(), self.bench()

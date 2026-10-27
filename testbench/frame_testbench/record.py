@@ -18,6 +18,7 @@ artifacts/ folder, and never go into the repo or anywhere else.
 import json
 import mmap
 import os
+import shutil
 import struct
 import time
 
@@ -114,8 +115,8 @@ def private_file(path):
 
 def record(directory, seconds, gaze=True, hands=True):
     """Record for this long into the new folder `directory`; returns what was recorded."""
-    if not 0 < seconds <= 600:
-        raise ValueError('record between 0 and 600 seconds')
+    if not 0 < seconds <= 300:
+        raise ValueError('record between 0 and 300 seconds')
     if hands and fakes.fresh(os.path.join(fakes.FAKE_DIR, 'hands'), 3):
         raise RuntimeError('the testbench is faking hands: release them before recording')
     if gaze and any(fakes.fresh(os.path.join(fakes.FAKE_DIR, name), 2)
@@ -143,6 +144,7 @@ def record(directory, seconds, gaze=True, hands=True):
     os.makedirs(directory, mode=0o700)
     counts = {}
     gaze_out = hands_out = None
+    done = False
     try:
         if gaze:
             gaze_out = private_file(os.path.join(directory, 'gaze.jsonl'))
@@ -174,9 +176,15 @@ def record(directory, seconds, gaze=True, hands=True):
                         hands_out.write(h[1] + g[1] + struct.pack('<q', fakes.mono_ns()))
                         counts['sets'] += 1
             time.sleep(0.003)
+        done = True
     finally:
         for f in (gaze_out, hands_out):
             if f:
                 f.close()
+        for m in (eyes and eyes.m, own and own.m, hands_m, gestures_m):
+            if m:
+                m.close()
+        if not done:   # a broken recording would only keep its name taken
+            shutil.rmtree(directory, ignore_errors=True)
     return {'ok': True, 'directory': directory, 'seconds': seconds, 'recorded': counts,
             'files': sorted(os.listdir(directory))}

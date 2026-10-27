@@ -110,6 +110,7 @@ host_install() {
 host_uninstall() {
   cd "$root/testbench"
   python3 frame-testbench uninstall >/dev/null
+  systemctl --user stop frame-testbench-fakes.service 2>/dev/null || true   # the fake trackers, if faking
   rm -rf -- "$libs"
   echo "removed SteamVR's preload"
 }

@@ -1,6 +1,8 @@
 // Reads the testbench's fake eye files with ft-gaze's own code (EyeFile, Detect, ReadSample,
 // OwnFile in gaze/ft-gaze.cpp), from $XDG_RUNTIME_DIR/frametop-testbench/ like ft-gaze does,
 // and prints what it got for test_fakes.py, which keeps writing them meanwhile.
+// With "stale": the files as a crashed testbench leaves them (written 5 s ago, by this), and
+// whether ft-gaze then goes back to the real trackers' files.
 #define main ft_gaze_main
 #include "../../gaze/ft-gaze.cpp"
 #undef main
@@ -14,7 +16,28 @@ void Floats(const char *name, const float *v, int n) {
 }
 }  // namespace
 
-int main() {
+int Stale() {
+    const std::string eyes = TestbenchPath("eye-server.mmap"), own = TestbenchPath("frametop-eyes-gaze");
+    OwnFile file;
+    OwnSample o;
+    file.Read(o);
+    std::printf("{\"before\":{\"eyes\":%d,\"own\":%d,\"path\":\"%s\"},", Fresh(eyes), Fresh(own),
+                file.Path().c_str());
+    timespec old[2];
+    clock_gettime(CLOCK_REALTIME, &old[0]);
+    old[0].tv_sec -= 5;
+    old[1] = old[0];
+    utimensat(AT_FDCWD, eyes.c_str(), old, 0);
+    utimensat(AT_FDCWD, own.c_str(), old, 0);
+    usleep(2'100'000);  // OwnFile looks again every 2 s
+    file.Read(o);
+    std::printf("\"after\":{\"eyes\":%d,\"own\":%d,\"path\":\"%s\"}}\n", Fresh(eyes), Fresh(own),
+                file.Path().c_str());
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc > 1 && std::string(argv[1]) == "stale") return Stale();
     const std::string path = TestbenchPath("eye-server.mmap");
     EyeFile eyes;
     const bool fresh = Fresh(path), opened = eyes.Open(path.c_str());

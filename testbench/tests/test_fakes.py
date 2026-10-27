@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import signal
+import socket
 import struct
 import subprocess
 import sys
@@ -314,11 +315,15 @@ class ReaderTests(Scratch):
         self.tick()
         env = dict(os.environ, XDG_RUNTIME_DIR=str(self.dir))
         reader = subprocess.Popen([str(self.eye_reader)], env=env, stdout=subprocess.PIPE, text=True)
-        end = time.monotonic() + 10
-        while reader.poll() is None and time.monotonic() < end:
-            self.tick()
-            time.sleep(1 / 90)
-        out, _ = reader.communicate(timeout=5)
+        try:
+            end = time.monotonic() + 10
+            while reader.poll() is None and time.monotonic() < end:
+                self.tick()
+                time.sleep(1 / 90)
+            out, _ = reader.communicate(timeout=5)
+        finally:
+            reader.kill()
+            reader.wait()
         read = json.loads(out)
         self.assertEqual((read['fresh'], read['opened'], read['found'], read['shift'], read['read']),
                          (1, 1, 1, 5, 1), read)
@@ -332,6 +337,19 @@ class ReaderTests(Scratch):
         self.assertLess(abs(own['age']), 0.1)
         self.assertTrue(close([own['yaw'], own['pitch']], [12, -3]))
         self.assertTrue(close(own['eyes'], [8, -3, 12, -3]))
+
+    def test_ft_gaze_goes_back_to_the_real_files_when_the_fake_stops(self):
+        if self.eye_reader is None:
+            self.skipTest("no OpenVR library to link ft-gaze's reader with")
+        self.ok('gaze 0 0 0 0')
+        self.tick()   # and no more: from here on it's a testbench that crashed
+        env = dict(os.environ, XDG_RUNTIME_DIR=str(self.dir))
+        out = subprocess.run([str(self.eye_reader), 'stale'], env=env, capture_output=True, text=True,
+                             timeout=10, check=True).stdout
+        read = json.loads(out)
+        own = str(self.fake_dir / 'frametop-eyes-gaze')
+        self.assertEqual(read['before'], {'eyes': 1, 'own': 1, 'path': own})
+        self.assertEqual(read['after'], {'eyes': 0, 'own': 0, 'path': '/dev/shm/frametop-eyes-gaze'})
 
 
 class DaemonTests(unittest.TestCase):
@@ -387,11 +405,17 @@ class DaemonTests(unittest.TestCase):
         for bad in ('gaze 1 2 3', 'gaze 1 2 3 nan', 'gaze 1 2 3 inf', 'gaze 100 0 0 0', 'eyes open blink',
                     'eyes open', 'hand middle 0 0 -0.3 1 0 0 0 open', 'hand right 0 0 -3 1 0 0 0 open',
                     'hand right 0 0 -0.3 0 0 0 0 open', 'hand right 0 0 -0.3 1 0 0 0 claw',
-                    'hand right 0 0 -0.3 1 0 0 open', 'hand-release both', 'release now', 'status 1', 'bogus',
-                    'gaze ' + '1' * 2100):
+                    'hand right 0 0 -0.3 1 0 0 open', 'hand-release both', 'release now', 'status 1', 'bogus'):
             with self.subTest(command=bad[:40]):
                 with self.assertRaises((RuntimeError, ValueError)):
                     transport.request(self.socket, bad)
+        # Past the client's own limit, so straight to the socket.
+        with socket.socket(socket.AF_UNIX) as raw:
+            raw.settimeout(4)
+            raw.connect(str(self.socket))
+            raw.sendall(b'gaze ' + b'1' * 2100 + b'\n')
+            reply = json.loads(raw.makefile().readline())
+        self.assertEqual((reply['ok'], reply['error']), (False, 'oversized command'))
         time.sleep(0.1)
         files = sorted(p.name for p in (self.dir / 'frametop-testbench').iterdir())
         self.assertEqual(files, ['eye-server.mmap', 'frametop-eyes-gaze'])

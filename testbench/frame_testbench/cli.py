@@ -168,7 +168,7 @@ def parser():
     hands.add_parser('release', help='ft-hands tracks again once no hand is faked')
     rec = commands.add_parser('record', help="record the real trackers' output (never images) for replay")
     rec.add_argument('name', type=recording_name, help='a new recording, kept in artifacts/recordings/NAME')
-    rec.add_argument('--seconds', type=float, required=True, help='how long, up to 600')
+    rec.add_argument('--seconds', type=float, required=True, help='how long, up to 300')
     rec.add_argument('--only', choices=tuple(RECORDING_FILES), help='just the gaze or just the hands')
     play = commands.add_parser('replay', help='play a recording through the fake trackers')
     play.add_argument('name', type=recording_name)
@@ -252,10 +252,16 @@ def dispatch(args, bench):
             reply = bench.fakes(f"replay-{kind} {path} {'loop' if args.loop else 'once'}", start=True)
         return reply
     if args.command == 'release':
-        # The fake trackers first: they don't need SteamVR, so they go even when it's down.
-        faked = bench.fakes('release')
+        # The fake trackers first: they don't need SteamVR, so they go even when it's down. A
+        # daemon that doesn't answer is stopped (it cleans up on SIGTERM), and the input proxy
+        # is released either way.
+        try:
+            faked = bench.fakes('release') or {'running': False}
+        except (OSError, RuntimeError) as error:
+            subprocess.run(['systemctl', '--user', 'stop', FAKES_UNIT], timeout=20)
+            faked = {'running': False, 'stopped': FAKES_UNIT, 'error': str(error)}
         result = bench.control('release')
-        result['fakes'] = {'running': False} if faked is None else faked
+        result['fakes'] = faked
         return result
     if args.command in ('pose', 'controller'):
         controller = args.command == 'controller'

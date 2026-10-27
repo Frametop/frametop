@@ -58,7 +58,9 @@ def key_code(name):
     name = ALIASES.get(name, name.removeprefix('key_'))
     if name in KEYS:
         return KEYS[name]
-    if name.isdigit() and 0 < int(name) <= CODE_MAX and int(name) not in SYSTEM_KEYS:
+    if name.isdigit() and int(name) in SYSTEM_KEYS:
+        raise ValueError(f'key {name} is a power, sleep, radio or display key: the testbench leaves those alone')
+    if name.isdigit() and 0 < int(name) <= CODE_MAX:
         return int(name)
     raise ValueError(f'unknown key {name!r}: a name such as enter, a, f5, ctrl, or an evdev code')
 

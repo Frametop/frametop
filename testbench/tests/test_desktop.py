@@ -59,6 +59,8 @@ class KeyNameTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(desktop.key_code(name), code)
         self.assertEqual(desktop.combo('ctrl+shift+t'), [29, 42, 20])
+        with self.assertRaisesRegex(ValueError, 'power, sleep'):
+            desktop.key_code('KEY_142')
         for bad in ('enterr', '0x1c', '256', '768', '116', '142', '205', '247', '', 'ctrl+ctrl', 'a+b+c+d+e+f+g',
                     'ctrl+'):
             with self.subTest(bad=bad), self.assertRaises(ValueError):

@@ -21,7 +21,9 @@ headset. Read this index, then use the feature's file as the recipe. `V` and `T`
 - Clicks land on the user's real desktop. Aim at something harmless (empty wallpaper, a panel's
   move bar) and never click inside remote displays, close buttons or dialogs you didn't open.
 - Leave what you changed as you found it: close what you opened, end held gestures, and let
-  `V cleanup` restore the rest.
+  `V cleanup RUN` restore the rest.
+- Chain each drive step after `V guard` (`V guard && T ...`): it stops the run if someone puts
+  the headset on.
 
 ## Proof and skip reporting
 

@@ -19,6 +19,7 @@ ft-hands and publishes posed hands in its place.
 
 Preconditions:
 
+- Hand tracking runs: `V doctor`'s `hand tracking` check is ok.
 - `T worn on`, `T compositor awake`, head pose facing the panels.
 
 - **Pose a hand.** Run `T hand right set --position .1 -.2 -.35 --shape open`, wait 1 s,
@@ -28,7 +29,7 @@ Preconditions:
   wait 0.3 s, then the same with `--shape open`. `journalctl --user -u frametop-pointer --since
   -1min` has `pinch right: ignored (no ray up: ...)`: without gaze mode and the hand's ray down, a
   pinch only wakes the pointer, by design (`POINTER_PINCH_NO_RAY` is off).
-- **Pinch clicks at the gaze.** Turn gaze mode on (`~/.local/share/frametop/releases/current/gaze/ft-gazectl on`), aim the eyes at a harmless
+- **Pinch clicks at the gaze.** Turn gaze mode on (`G on`), aim the eyes at a harmless
   spot (`T gaze look YAW PITCH`, see `gaze-pointer.md`), and pinch as above. The log line reads
   `pinch right: clicked at the gaze on KEY ...`; a capture shows the click's effect.
 - **Grip.** Same with `--shape fist`, then `open`.

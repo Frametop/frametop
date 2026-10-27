@@ -6,7 +6,10 @@ import importlib.util
 import io
 import json
 import os
+import socket
+import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -18,7 +21,8 @@ def load():
     loader = importlib.machinery.SourceFileLoader('verify_frametop', str(HELPER))
     spec = importlib.util.spec_from_loader('verify_frametop', loader)
     module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
+    with mock.patch.object(sys, 'dont_write_bytecode', True):   # no __pycache__ in the skill
+        loader.exec_module(module)
     return module
 
 
@@ -47,23 +51,25 @@ class VerifySkillTests(unittest.TestCase):
             self.sent.append(args)
             return self.replies.get(args, {'ok': True})
         self.asked = []
+        self.answers = {('ft_powerd', 'status'): 'ok on 5 0', ('ft_powerd', 'on'): 'ok',
+                        ('ft_gazed', 'status'): '{"last": [1, 2]}'}
 
-        def ask(name, message, timeout=2.0):
+        def ask(name, message, timeout=2.0, listen=0.0):
             self.asked.append((name, message))
-            return 'ok on' if message.startswith('gaze') else '{"last": [1, 2]}'
+            return 'ok ' + message.split()[1] if message.startswith('gaze') else self.answers[name, message]
+        self.units = dict.fromkeys((*self.v.UNITS, self.v.HANDS), 'active')
+        self.heard = set(self.v.SOCKETS)
+        self.real_ask, self.real_bench = self.v.ask, self.v.bench
         for name, value in (('bench', bench), ('ask', ask), ('LOCK', tmp / 'lock.json'), ('EVIDENCE', tmp / 'verify'),
-                            ('listening', lambda: set(self.v.SOCKETS)), ('running', lambda name: True),
+                            ('listening', lambda: set(self.heard)), ('running', lambda name: True),
+                            ('unit_states', lambda: dict(self.units)), ('git', lambda *args: 'abc1234'),
                             ('RELEASES', tmp / 'releases')):
             patch = mock.patch.object(self.v, name, value)
             patch.start()
             self.addCleanup(patch.stop)
-        units = mock.patch.object(self.v.subprocess, 'run', side_effect=self.systemctl)
-        units.start()
-        self.addCleanup(units.stop)
 
-    def systemctl(self, argv, **_):
-        out = 'active\n' if argv[:3] == ['systemctl', '--user', 'is-active'] else 'experimental\n'
-        return mock.Mock(returncode=0, stdout=out)
+    def check(self, report, name):
+        return next(c for c in report['checks'] if c['name'] == name)
 
     def run_main(self, *argv):
         out = io.StringIO()
@@ -87,9 +93,29 @@ class VerifySkillTests(unittest.TestCase):
             with self.subTest(leftover=leftover):
                 self.assertEqual(self.v.doctor()[1], 1)
 
+    def test_doctor_needs_the_services_but_only_hints_at_hands_and_the_release(self):
+        self.replies[('status',)] = proxy()
+        self.units[self.v.HANDS] = 'inactive'   # opt-in, and no release linked at all
+        report, code = self.v.doctor()
+        self.assertEqual(code, 0)
+        self.assertFalse(self.check(report, 'hand tracking')['ok'])
+        self.assertFalse(self.check(report, 'Frametop release')['ok'])
+        self.units['frametop-pointer'] = 'failed'
+        report, code = self.v.doctor()
+        self.assertEqual(code, 1)
+        self.assertIn('frametop-pointer=failed', self.check(report, 'Frametop services active')['detail'])
+        self.units['frametop-pointer'] = 'active'
+        self.heard.discard('ft_powerd')
+        report, code = self.v.doctor()
+        self.assertEqual(code, 1)
+        self.assertEqual(self.check(report, 'Frametop sockets listening')['detail'], '@ft_powerd')
+
     def test_launch_refuses_a_worn_headset_and_a_run_under_way(self):
         self.replies[('status',)] = proxy(physical_worn=True)
         with self.assertRaisesRegex(SystemExit, 'worn'), contextlib.redirect_stdout(io.StringIO()):
+            self.v.launch('x')
+        self.replies[('status',)] = proxy(physical_worn=None)   # no sample yet: can't tell
+        with self.assertRaisesRegex(SystemExit, 'not ready'), contextlib.redirect_stdout(io.StringIO()):
             self.v.launch('x')
         self.assertFalse(self.v.LOCK.exists())
         self.replies[('status',)] = proxy()
@@ -103,31 +129,57 @@ class VerifySkillTests(unittest.TestCase):
         os.utime(self.v.LOCK, (old, old))   # nobody snapshotted for the whole lease
         self.run_main('launch', 'second')
         self.assertTrue(json.loads(self.v.LOCK.read_text())['run'].endswith('-second'))
+        self.assertEqual(self.v.LOCK.stat().st_mode & 0o777, 0o600)
+
+    def test_launch_loses_to_a_launch_that_claimed_the_run_after_its_check(self):
+        doctor = self.v.doctor
+
+        def racing_doctor():
+            self.v.LOCK.write_text(json.dumps({'run': 'other'}))   # another agent, mid-launch
+            return doctor()
+        with mock.patch.object(self.v, 'doctor', racing_doctor), \
+                self.assertRaisesRegex(SystemExit, 'other is under way'):
+            self.v.launch('late')
+        self.assertFalse(self.v.EVIDENCE.exists())
 
     def test_snapshot_keeps_the_readbacks_and_renews_the_lease(self):
         self.run_main('launch', 'snap')
         old = self.v.LOCK.stat().st_mtime - 100
         os.utime(self.v.LOCK, (old, old))
-        code, out = self.run_main('snapshot', '2 after/pinch')
+        _, out = self.run_main('snapshot', '2 after/pinch')
         folder = Path(json.loads(out)['snapshot'])
         self.assertEqual(folder.name, '2-after-pinch')
         readbacks = json.loads((folder / 'readbacks.json').read_text())
         self.assertEqual(readbacks['gaze'], {'last': [1, 2]})
         self.assertGreater(self.v.LOCK.stat().st_mtime, old + 50)
         self.assertNotIn(('capture', '--output', str(folder / 'capture')), self.sent)
-        self.run_main('snapshot', '3', '--capture')
+        self.run_main('snapshot', '--capture', '3')
         self.assertIn(('capture', '--output', str(folder.parent / '3' / 'capture')), self.sent)
+        with self.assertRaisesRegex(SystemExit, 'new label'):
+            self.run_main('snapshot', '3')
+        for argv in (['--capture'], [], ['a', 'b'], ['--force']):
+            with self.subTest(argv=argv), self.assertRaisesRegex(SystemExit, 'snapshot LABEL'):
+                self.run_main('snapshot', *argv)
+
+    def test_snapshot_needs_a_run_and_unknown_commands_fail(self):
+        with self.assertRaisesRegex(SystemExit, 'no run'):
+            self.run_main('snapshot', '1-before')
+        with self.assertRaisesRegex(SystemExit, 'unknown command'):
+            self.run_main('drive')
+        self.assertEqual(self.run_main('--help')[0], 0)
 
     def test_cleanup_restores_what_the_run_changed_and_keeps_the_evidence(self):
         self.run_main('launch', 'clean')
         run = Path(json.loads(self.v.LOCK.read_text())['run'])
-        self.replies[('power', 'status')] = {'ok': True, 'displays': 'off'}
+        self.answers[('ft_powerd', 'status')] = 'ok off 5 0'
         self.replies[('pointer', 'state')] = {'ok': True, 'gaze_mode': True}
-        code, out = self.run_main('cleanup')
+        self.sent.clear()
+        code, out = self.run_main('cleanup', str(run))
         result = json.loads(out)
         self.assertEqual(code, 0)
-        self.assertEqual(set(result['steps']), {'release', 'compositor', 'power', 'gaze_mode'})
-        self.assertIn(('power', 'on'), self.sent)
+        self.assertEqual(list(result['steps']), ['power', 'release', 'compositor', 'gaze_mode'])
+        self.assertEqual(self.sent[:2], [('release',), ('compositor', 'auto')])
+        self.assertIn(('ft_powerd', 'on'), self.asked)   # before the release lets standby in
         self.assertIn(('ft_pointer_helper', 'gaze off'), self.asked)
         self.assertFalse(self.v.LOCK.exists())
         self.assertTrue((run / 'baseline.json').exists() and (run / 'cleanup.json').exists())
@@ -135,11 +187,70 @@ class VerifySkillTests(unittest.TestCase):
     def test_cleanup_leaves_displays_off_that_were_off_and_reports_leftovers(self):
         self.replies[('power', 'status')] = {'ok': True, 'displays': 'off'}
         self.run_main('launch', 'dark')
+        run = json.loads(self.v.LOCK.read_text())['run']
+        self.answers[('ft_powerd', 'status')] = 'ok off 5 0'
         self.replies[('status',)] = proxy(pose_override=True)   # release didn't take
-        code, out = self.run_main('cleanup')
+        code, out = self.run_main('cleanup', run)
         self.assertEqual(code, 1)
-        self.assertNotIn(('power', 'on'), self.sent)
+        self.assertNotIn(('ft_powerd', 'on'), self.asked)
         self.assertIn('pose_override', json.loads(out)['overrides'])
+
+    def test_cleanup_with_no_run_releases_and_leaves_displays_and_gaze_mode_alone(self):
+        self.answers[('ft_powerd', 'status')] = 'ok off 5 0'   # maybe the user's own choice
+        self.replies[('pointer', 'state')] = {'ok': True, 'gaze_mode': True}
+        code, out = self.run_main('cleanup')
+        result = json.loads(out)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.sent[:2], [('release',), ('compositor', 'auto')])
+        self.assertEqual(set(result['steps']), {'release', 'compositor'})
+        self.assertIn('no baseline', result['note'])
+
+    def test_cleanup_leaves_another_agents_run_alone_unless_forced(self):
+        self.run_main('launch', 'theirs')
+        with self.assertRaisesRegex(SystemExit, 'not the one named'):
+            self.run_main('cleanup')
+        with self.assertRaisesRegex(SystemExit, 'not the one named'):
+            self.run_main('cleanup', str(self.v.EVIDENCE / 'mine'))
+        self.assertNotIn(('release',), self.sent)
+        self.assertEqual(self.run_main('cleanup', '--force')[0], 0)
+        self.assertFalse(self.v.LOCK.exists())
+
+    def test_cleanup_releases_even_with_a_garbled_lock_or_a_missing_testbench(self):
+        self.v.LOCK.write_text('[1, 2]')
+        self.assertEqual(self.run_main('cleanup')[0], 0)
+        self.assertIn(('release',), self.sent)
+        with mock.patch.object(self.v, 'bench', self.real_bench), \
+                mock.patch.object(self.v, 'TESTBENCH', Path(self.tmp.name) / 'nowhere'):
+            self.assertIn('nowhere', self.v.bench('release')['error'])
+
+    def test_guard_stops_the_run_when_someone_puts_the_headset_on(self):
+        for worn, code in ((True, 2), (None, 1)):
+            self.run_main('launch', f'guarded-{code}')
+            self.assertEqual(self.run_main('guard')[0], 0)
+            self.replies[('status',)] = proxy(physical_worn=worn)
+            self.sent.clear()
+            with self.subTest(worn=worn), self.assertRaises(SystemExit) as stop:
+                self.run_main('snapshot', '2-after')
+            self.assertEqual(stop.exception.code, code)
+            self.assertEqual(self.sent[1:3], [('release',), ('compositor', 'auto')])
+            self.assertFalse(self.v.LOCK.exists())
+            self.replies[('status',)] = proxy()
+
+    def test_ask_listens_for_every_reply(self):
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        name = f'verify-frametop-test-{os.getpid()}'
+        server.bind('\0' + name)
+        self.addCleanup(server.close)
+
+        def answer():
+            message, addr = server.recvfrom(100)
+            for reply in (b'watching', b'event 1', b'event 2'):
+                server.sendto(reply, addr)
+        threading.Thread(target=answer, daemon=True).start()
+        with mock.patch.object(self.v, 'ask', self.real_ask):
+            code, out = self.run_main('ask', name, 'watch 1', '--listen', '0.3')
+        self.assertEqual((code, out.split()), (0, ['watching', 'event', '1', 'event', '2']))
+        self.assertTrue(self.real_ask(name + '-nobody', 'status').startswith('error'))
 
 
 if __name__ == '__main__':

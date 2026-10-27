@@ -11,19 +11,23 @@ that one instance through the testbench (`testbench/`, see its README), which fa
 wearing it, and reads the result back through Frametop's own sockets and SteamVR captures.
 
 All commands below run from the repo root, on the Frame. `V` is
-`.claude/skills/verify-frametop/scripts/verify-frametop` and `T` is `testbench/frame-testbench`
+`.claude/skills/verify-frametop/scripts/verify-frametop`, `T` is `testbench/frame-testbench`
 (every `T` command prints one JSON object; the MCP server `frame-testbench` exposes the same
-operations as tools).
+operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/ft-gazectl`
+(gaze mode on or off, as the Input Settings' Gaze page does).
 
 ## Hard rules
 
 - Never drive anything while the headset is on someone's head. `V doctor` exits 2 and `V launch`
   refuses when the proximity sensor says worn (`physical_worn` in `T status`, which reads the
-  real sensor even under a `worn on` override). Check again before each pose or input step of a
-  long run; if it turns worn, stop and run `V cleanup` at once.
-- Every run ends with `V cleanup`, even after a failure: it runs `T release` (worn, pose, HMD
-  buttons, controllers, fake eyes and hands) and `T compositor auto`, turns the displays back on
-  and gaze mode back as the run found them, and frees the run.
+  real sensor even under a `worn on` override). During a run, chain every drive step after
+  `V guard` (`V guard && T pose set ...`): it exits 0 while nobody wears the headset, and
+  otherwise cleans up at once and exits 2 (worn) or 1 (sensor unread): stop there. `V snapshot`
+  guards too.
+- Every run ends with `V cleanup RUN` (the folder `V launch` printed), even after a failure: it
+  turns the displays back on, runs `T release` (worn, pose, HMD buttons, controllers, fake eyes
+  and hands) and `T compositor auto`, puts gaze mode back as the run found it, and frees the
+  run.
 - Don't restart SteamVR, gamescope, KWin or the Frametop desktop to make a check pass without
   telling the user. Restarting SteamVR with the testbench goes only through
   `testbench/install.sh install --restart` (it guards against the crash loop that makes SteamOS
@@ -50,15 +54,18 @@ operations as tools).
 2. `V launch NAME`: runs the doctor, refuses on a worn headset, an unhealthy Frame or another
    run under way (a run is held for 30 minutes from its last snapshot), then makes
    `testbench/artifacts/verify/<date>-<time>-NAME/` with `doctor.json` and `baseline.json`
-   (the readbacks below, before anything is driven). It prints the folder.
+   (the readbacks below, before anything is driven). It prints the folder. If it refuses on
+   overrides left by an earlier run that died, run `V cleanup` (`--force` if its lease still
+   runs) and launch again.
 3. Fake the wearer, for anything that needs the headset awake: `T worn on`, `T compositor awake`,
    and a head pose facing the panels, e.g. `T pose set --position 0 1.1 0 --rotation 0 0 0`
    (standing space, metres; rotation yaw/pitch/roll degrees, yaw 0 faces -z). Use
    `T pointer measure KEY` to find where a panel is, then aim at it. A test of the unworn
    behaviour skips this step.
 
-Ready means `V doctor` exits 0 and `T pointer state` shows `worn: true` and a `head` position
-(after step 3).
+Ready means `V launch` printed the run folder and, after step 3, `T pointer state` shows
+`worn: true` and a `head` position. During a run, `V doctor` lists the run's own overrides as
+left over and exits 1; that is expected until `V cleanup`.
 
 ## Doctor
 
@@ -71,12 +78,18 @@ Ready means `V doctor` exits 0 and `T pointer state` shows `worn: true` and a `h
   with the headset off
 - no testbench override is left over from an earlier run (worn, pose, HMD buttons,
   controllers, fake trackers)
-- Frametop's units (`frametop-desktop`, `-input-relay`, `-pointer`, `-gaze`, `-hands`,
-  `-power`) are active and their sockets (`@frametop_relay`, `@ft_pointer_helper`,
-  `@ft_powerd`, `@ft_gazed`) listen
-- which release is live, against this checkout's commit (informational), and the run under way
+- Frametop's units (`frametop-desktop`, `-input-relay`, `-pointer`, `-gaze`, `-power`) are
+  active and their sockets (`@frametop_relay`, `@ft_pointer_helper`, `@ft_powerd`, `@ft_gazed`)
+  listen
+- for information only: whether hand tracking (`frametop-hands`, opt-in) runs, which the hands
+  recipes need; which release is live against this checkout's commit (a hint: it can't see
+  swapped binaries, and a published release never names a commit); and the run under way
 
 Run it first whenever anything looks off.
+
+`V ask NAME MESSAGE [--listen S]` sends one datagram to a Frametop socket and prints the reply
+(with `--listen`, every reply for S seconds), for the services' own queries:
+`V ask ft_gazed 'wake 90'`, `V ask ft_gazed status`, `V ask frametop_relay devices`.
 
 ## Drive
 
@@ -124,10 +137,15 @@ Proof standards:
 
 ## Cleanup
 
-`V cleanup` releases every override, sets the compositor back to auto, turns the displays back
-on and gaze mode back to how the baseline found them, writes `RUN/cleanup.json`, frees the run,
-and reports any override still left (exit 1 if so). It never deletes evidence, and it doesn't
-undo deployed files: put swapped binaries back from their `.pre-<topic>` backups when the user
+`V cleanup RUN` turns the displays back on (if the baseline had them on or away), releases
+every override, sets the compositor back to auto, puts gaze mode back to how the baseline found
+it, writes `RUN/cleanup.json`, frees the run, and reports any override still left (exit 1 if
+so). It refuses a run under way that isn't the one named, unless `--force` (for a run whose
+agent died); with no run held, or a lease that ran out, `V cleanup` needs no RUN and only
+releases (no baseline: displays and gaze mode stay as they are). `T compositor auto` sets
+SteamVR's persistent `pauseCompositorOnStandby` to true even if the user had it false (the
+baseline's `testbench.runtime.settings` shows what it was). It never deletes evidence, and it
+doesn't undo deployed files: put swapped binaries back from their `.pre-<topic>` backups when the user
 shouldn't keep the change. `V doctor` afterwards should exit 0 with "no testbench overrides
 left".
 
@@ -135,8 +153,8 @@ left".
 
 A diff touching these gets the extra reviewer (Codex) in the review panel:
 
-- the installers and uninstaller: `get.sh`, `install.sh`, every `*/install.sh` and `run.sh
-  install`, `uninstall.sh`, `testbench/install.sh`
+- the installers and uninstaller: `get.sh`, `install.sh`, every `*/install.sh`, the `install`
+  commands of `*/run.sh`, `uninstall.sh`, `testbench/install.sh`
 - host privilege: anything using `sudo`, `setcap` or file capabilities (`hands/run.sh caps`,
   `gaze/tracker/install.sh`, `setup/bluetooth/`)
 - files under `/etc` and system services
@@ -146,6 +164,6 @@ A diff touching these gets the extra reviewer (Codex) in the review panel:
 
 ## Helpers
 
-- `scripts/verify-frametop`: `doctor`, `launch [NAME]`, `snapshot LABEL [--capture]`,
-  `cleanup`. `--help` prints the usage. Python 3 standard library only; runs on the SteamOS
+- `scripts/verify-frametop`: `doctor`, `launch [NAME]`, `guard`, `snapshot LABEL [--capture]`,
+  `cleanup [RUN] [--force]`, `ask NAME MESSAGE [--listen S]`. `--help` prints the usage. Python 3 standard library only; runs on the SteamOS
   host.

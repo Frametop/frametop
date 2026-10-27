@@ -12,14 +12,14 @@ files, so everything from ft-gaze on runs as with real eyes.
 
 ## How to get to it (user POV)
 
-- Turn gaze mode on (Frametop Input Settings, Gaze page, or `~/.local/share/frametop/releases/current/gaze/ft-gazectl on`), look at a panel.
+- Turn gaze mode on (Frametop Input Settings, Gaze page, or `G on`), look at a panel.
 
 ## Driving it with the testbench
 
 Preconditions:
 
 - `T worn on` and a head pose (ft-gaze only sends samples while the head is tracked).
-- The gaze service is awake: send `wake 90` to `@ft_gazed` (it idles while gaze mode is off and
+- The gaze service is awake: `V ask ft_gazed 'wake 90'` (it idles while gaze mode is off and
   nobody wears the headset), or turn gaze mode on.
 
 - **Look.** Run `T gaze look 10 -5`, wait 1 s, `V snapshot 2-look`. In `readbacks.json`,
@@ -27,7 +27,7 @@ Preconditions:
   `gaze.samples` has grown since `1-before`, and `gaze.sample_age_s` is under 1.
 - **Look elsewhere.** Run `T gaze look -8 4`, snapshot: `gaze.last` follows.
 - **Lose an eye.** Run `T gaze eyes open lost`, snapshot: `gaze.eyes_lost` is `[false, true]`.
-- **Gaze mode on (visual).** Run `~/.local/share/frametop/releases/current/gaze/ft-gazectl on` (the helper keeps it until it restarts;
+- **Gaze mode on (visual).** Run `G on` (the pointer helper keeps it until it restarts;
   `V cleanup` puts it back), aim with `T gaze look`, and capture: the cursor sits where the eyes
   look.
 - **Release.** Run `T gaze release`: ft-gaze goes back to the real tracker within 2 s.

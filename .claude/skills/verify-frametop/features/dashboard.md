@@ -22,7 +22,8 @@ Preconditions:
 - The dashboard is closed: `valve.steam.gamepadui.main` isn't in the visible overlays of
   `V snapshot 1-before --capture`.
 
-- **Connect a controller.** Pick it up. Run `T controller right set --position 0.2 -0.3 -0.4`.
+- **Connect a controller.** Pick it up. Run `T controller right set --position 0.2 0.9 -0.4`
+  (standing space, like the head: at the hip, ahead).
   `T status` shows `input.controllers.right.pose_override: true`.
 - **Open.** Press and release system. Run `T controller right button system on`, wait 0.2 s,
   `T controller right button system off`, wait 2 s, `V snapshot 2-open --capture`. The visible

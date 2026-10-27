@@ -34,8 +34,9 @@ Preconditions:
 - **Move.** Run `T mouse move 300 0`, then `V snapshot 2-moved --capture`. The dot is right of
   where it was. `journalctl --user -u frametop-input-relay` shows
   `Frame testbench Mouse (host:testbench:mouse ...): pointer` and `released ...: its host let go`.
-- **Watch the events arrive (optional).** Send `watch 5` to `@frametop_relay` from a datagram
-  socket and run the move: the replies are `{"t": "event", "id": "host:testbench:mouse",
+- **Watch the events arrive (optional).** Run
+  `V ask frametop_relay 'watch 5' --listen 5 & sleep 0.5; T mouse move 300 0; wait`: the replies
+  after `{"t": "watching", ...}` are `{"t": "event", "id": "host:testbench:mouse",
   "role": "pointer", ...}` (moves at most one per 50 ms there).
 - **Click.** With the dot on a harmless spot, run `T mouse click`, then snapshot with
   `--capture`. The capture shows the click's effect (a focused panel, a selection).

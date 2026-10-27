@@ -29,6 +29,7 @@ A Steam Frame is someone's personal headset, and they may be wearing it while yo
 - Write only inside the repo, `/tmp`, and the container unless told otherwise. The installers are the exception: they write the user services, launchers, and the SteamVR driver into the home folder. The Bluetooth fixes and the eye tracker's frame grabber also install root-owned files and system services under `/etc` (`/etc/steamframe`, `/etc/frametop`, `/etc/systemd/system`). When an installer starts writing something new outside the repo, or sets file capabilities, add it to `uninstall.sh` too: users uninstall with that script, not with each installer's `uninstall`.
 - The testbench (`testbench/`) is the one exception: a development tool that never ships, so `uninstall.sh` leaves it alone and `testbench/install.sh uninstall` removes it. Its preload runs inside vrserver. A SteamVR that keeps crashing makes SteamOS repair Steam after three failed sessions and fall back to the other OS slot after four, so its loader leaves the proxy out after a failed session. Restart SteamVR with the testbench only through `testbench/install.sh install|uninstall --restart`, which checks for that, and never drive the pose while someone wears the headset.
 - Never copy `.netrc`, SSH keys, or Steam config off the Frame or into this repo.
+- To prove a change in the headset, use the verification skill in `.claude/skills/verify-frametop/`: it drives the live Frametop through the testbench with nobody wearing the headset, and refuses otherwise.
 
 ## SteamOS updates
 

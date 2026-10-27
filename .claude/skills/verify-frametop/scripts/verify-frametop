@@ -1,0 +1,243 @@
+#!/usr/bin/python3
+"""verify-frametop: launch, check, snapshot and clean up a verification run on the live Frame.
+
+  verify-frametop doctor               read-only: is this Frame worth driving? (exit 0 yes,
+                                       1 not ready, 2 the headset is worn: refuse)
+  verify-frametop launch [NAME]        doctor, then claim the run (one at a time) and make its
+                                       evidence folder with a baseline; prints the folder
+  verify-frametop snapshot LABEL [--capture]
+                                       the run's readbacks now (testbench status, pointer state,
+                                       visible overlays, display power, the gaze service) into
+                                       RUN/LABEL/, and with --capture a compositor capture
+                                       (needs `worn on` and a head pose facing the panels)
+  verify-frametop cleanup              release every testbench override, compositor auto,
+                                       displays back on and gaze mode back as the run found
+                                       them, free the run; the evidence stays
+
+A run is claimed for LEASE seconds from its last launch or snapshot, so two agents don't
+drive the one headset at once; cleanup frees it.
+
+There is one Frametop: the user's live desktop on this headset. Nothing here starts, stops or
+restarts it, SteamVR or a Frametop service. Evidence goes in testbench/artifacts/verify/
+(gitignored); it can show the desktop, so it stays on this machine.
+"""
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[4]
+TESTBENCH = ROOT / 'testbench' / 'frame-testbench'
+EVIDENCE = ROOT / 'testbench' / 'artifacts' / 'verify'
+RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'))
+LOCK = RUNTIME / 'verify-frametop.json'
+UNITS = ('frametop-desktop', 'frametop-input-relay', 'frametop-pointer', 'frametop-gaze',
+         'frametop-hands', 'frametop-power')
+SOCKETS = ('frametop_relay', 'ft_pointer_helper', 'ft_powerd', 'ft_gazed')
+RELEASES = Path.home() / '.local/share/frametop/releases'
+DROP_IN = Path.home() / '.config/systemd/user/steamvr.service.d/90-frame-testbench.conf'
+LEASE = 30 * 60
+
+
+def bench(*args, timeout=60):
+    """A testbench CLI command's JSON reply, or {'ok': False, 'error': ...}."""
+    try:
+        done = subprocess.run([str(TESTBENCH), *args], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'error': f'frame-testbench {" ".join(args)} timed out'}
+    try:
+        return json.loads(done.stdout)
+    except ValueError:
+        return {'ok': False, 'error': (done.stderr or done.stdout).strip()[-300:] or f'exit {done.returncode}'}
+
+
+def ask(name, message, timeout=2.0):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    s.bind('')
+    s.settimeout(timeout)
+    try:
+        s.sendto(message.encode(), '\0' + name)
+        return s.recv(65536).decode(errors='replace')
+    except OSError as error:
+        return f'error {error.__class__.__name__}'
+    finally:
+        s.close()
+
+
+def listening():
+    with open('/proc/net/unix') as f:
+        return {line.split()[-1][1:] for line in f if line.split()[-1].startswith('@')}
+
+
+def running(name):
+    return subprocess.run(['pgrep', '-x', name], capture_output=True).returncode == 0
+
+
+def git(*args):
+    return subprocess.run(['git', '-C', str(ROOT), *args], capture_output=True, text=True).stdout.strip()
+
+
+def lock_holder():
+    try:
+        held = json.loads(LOCK.read_text())
+        idle = time.time() - LOCK.stat().st_mtime
+    except (OSError, ValueError):
+        return None
+    held['stale'] = idle > LEASE   # nobody snapshotted for a while: it can be taken over
+    return held
+
+
+def doctor():
+    checks = []
+
+    def check(name, ok, detail=''):
+        checks.append({'name': name, 'ok': bool(ok), 'detail': detail})
+        return ok
+
+    status = bench('status', timeout=20)
+    proxy = status.get('input') or {}
+    worn = proxy.get('physical_worn')
+    check('headset not worn', worn is False,
+          'physically worn: stop, never drive it under someone' if worn else
+          'proximity sensor unread (no testbench proxy?)' if worn is None else 'proximity sensor: off the head')
+    check('SteamVR running', running('vrserver') and running('vrcompositor'))
+    check('testbench proxy', proxy.get('available') and proxy.get('proximity_ready'),
+          f'drop-in {"present" if DROP_IN.exists() else "MISSING"}: testbench/install.sh install --restart'
+          if not proxy.get('available') else 'ready')
+    overrides = {k: proxy.get(k) for k in ('worn_override', 'pose_override')}
+    overrides['hmd_buttons'] = [b for b, v in (proxy.get('hmd_buttons') or {}).items()
+                                if isinstance(v, dict) and v.get('override') is not None]
+    overrides['controllers'] = [side for side, c in (proxy.get('controllers') or {}).items()
+                                if isinstance(c, dict) and (c.get('pose_override') or any((c.get('inputs') or {}).values()))]
+    overrides['fakes'] = (status.get('fakes') or {}).get('running')
+    clean = overrides['worn_override'] is None and not overrides['pose_override'] and not any(
+        overrides[k] for k in ('hmd_buttons', 'controllers', 'fakes'))
+    check('no testbench overrides left', clean, json.dumps(overrides) if not clean else 'clean')
+    units = {u: subprocess.run(['systemctl', '--user', 'is-active', u], capture_output=True, text=True).stdout.strip()
+             for u in UNITS}
+    check('Frametop services active', all(v == 'active' for v in units.values()),
+          ', '.join(f'{u}={v}' for u, v in units.items() if v != 'active') or 'all active')
+    heard = listening()
+    check('Frametop sockets listening', all(s in heard for s in SOCKETS),
+          ', '.join('@' + s for s in SOCKETS if s not in heard) or 'all listening')
+    release = os.readlink(RELEASES / 'current') if (RELEASES / 'current').is_symlink() else None
+    head = git('rev-parse', '--short=7', 'HEAD')
+    check('Frametop release', release is not None,
+          f'{release}; this checkout is {git("branch", "--show-current") or "detached"} {head}'
+          + ('' if release and head in release else ': deploy the change under test before driving it'))
+    ok = all(c['ok'] for c in checks if c['name'] != 'Frametop release')   # a mismatch is for the reader
+    return {'ok': ok, 'worn': worn, 'run': lock_holder(), 'checks': checks}, (2 if worn else 0 if ok else 1)
+
+
+def readbacks():
+    gaze = ask('ft_gazed', 'status')
+    try:
+        gaze = json.loads(gaze)
+    except ValueError:
+        pass
+    overlays = bench('pointer', 'overlays', timeout=20)
+    if overlays.get('ok'):
+        overlays = {'ok': True, 'visible': [o['key'] for o in overlays['overlays'].get('list', []) if o.get('visible')]}
+    return {'time': datetime.now(timezone.utc).isoformat(timespec='milliseconds'),
+            'testbench': bench('status', timeout=20), 'pointer': bench('pointer', 'state', timeout=20),
+            'overlays': overlays, 'power': bench('power', 'status', timeout=20), 'gaze': gaze}
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, indent=2) + '\n')
+
+
+def current_run():
+    holder = lock_holder()
+    if not holder:
+        sys.exit('verify-frametop: no run: start one with verify-frametop launch')
+    return holder, Path(holder['run'])
+
+
+def launch(name):
+    holder = lock_holder()
+    if holder and not holder['stale']:
+        sys.exit(f'verify-frametop: run {holder["run"]} is under way: finish it with cleanup first')
+    report, code = doctor()
+    if code == 2:
+        print(json.dumps(report, indent=2))
+        sys.exit('verify-frametop: the headset is worn: refusing to drive it')
+    if code:
+        print(json.dumps(report, indent=2))
+        sys.exit('verify-frametop: not ready (see the failed checks)')
+    name = re.sub(r'[^A-Za-z0-9._-]', '-', name or 'run')[:48]
+    run = EVIDENCE / f'{datetime.now().strftime("%Y%m%d-%H%M%S")}-{name}'
+    run.mkdir(parents=True, mode=0o700)
+    LOCK.write_text(json.dumps({'run': str(run), 'started': time.time()}))
+    write_json(run / 'doctor.json', report)
+    write_json(run / 'baseline.json', readbacks())
+    print(json.dumps({'ok': True, 'run': str(run)}, indent=2))
+
+
+def snapshot(label, capture):
+    _, run = current_run()
+    LOCK.touch()   # the lease runs on
+    label = re.sub(r'[^A-Za-z0-9._-]', '-', label)[:64] or 'snapshot'
+    out = run / label
+    out.mkdir(mode=0o700)
+    write_json(out / 'readbacks.json', readbacks())
+    result = {'ok': True, 'snapshot': str(out)}
+    if capture:
+        shot = bench('capture', '--output', str(out / 'capture'), timeout=60)
+        result['capture'] = shot.get('preview') if shot.get('ok') else shot
+    print(json.dumps(result, indent=2))
+
+
+def cleanup():
+    holder = lock_holder()
+    steps = {'release': bench('release', timeout=60), 'compositor': bench('compositor', 'auto', timeout=30)}
+    try:
+        baseline = json.loads((Path(holder['run']) / 'baseline.json').read_text()) if holder else {}
+    except (OSError, ValueError):
+        baseline = {}
+    if bench('power', 'status', timeout=20).get('displays') == 'off' \
+            and (baseline.get('power') or {}).get('displays') != 'off':
+        steps['power'] = bench('power', 'on', timeout=20)
+    gaze_before = (baseline.get('pointer') or {}).get('gaze_mode')
+    if gaze_before is not None and bench('pointer', 'state', timeout=20).get('gaze_mode') != gaze_before:
+        # The helper keeps a gaze on|off until it restarts (the setting is POINTER_GAZE).
+        answer = ask('ft_pointer_helper', f'gaze {"on" if gaze_before else "off"}')
+        steps['gaze_mode'] = {'ok': answer.startswith('ok'), 'reply': answer}
+    report, _ = doctor()
+    leftovers = next(c for c in report['checks'] if c['name'] == 'no testbench overrides left')
+    LOCK.unlink(missing_ok=True)
+    result = {'ok': all(s.get('ok') for s in steps.values()) and leftovers['ok'], 'steps': steps,
+              'overrides': leftovers['detail'], 'evidence': holder and holder['run']}
+    if holder and Path(holder['run']).is_dir():
+        write_json(Path(holder['run']) / 'cleanup.json', result)
+    print(json.dumps(result, indent=2))
+    return 0 if result['ok'] else 1
+
+
+def main(argv):
+    if not argv or argv[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return 0
+    command, rest = argv[0], argv[1:]
+    if command == 'doctor':
+        report, code = doctor()
+        print(json.dumps(report, indent=2))
+        return code
+    if command == 'launch':
+        launch(rest[0] if rest else None)
+        return 0
+    if command == 'snapshot' and rest:
+        snapshot(rest[0], '--capture' in rest[1:])
+        return 0
+    if command == 'cleanup':
+        return cleanup()
+    sys.exit(f'verify-frametop: unknown command {" ".join(argv)!r} (see --help)')
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

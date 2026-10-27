@@ -22,5 +22,6 @@ hands/models/.student-*
 # model versions downloaded from Input Settings (models/catalog.py): each install fetches its own
 hands/models/versions/
 gaze/tracker/models/
-# dev-only: the testbench never ships (testbench/README.md)
+# dev-only: the testbench and the agents' verification skill never ship (testbench/README.md)
 testbench/
+.claude/

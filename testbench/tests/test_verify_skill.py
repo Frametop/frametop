@@ -26,9 +26,13 @@ def load():
     return module
 
 
+STILL = {'position': [0.0, -0.09, 0.12], 'quaternion': [0.41, -0.1, 0.03, 0.9], 'valid': True}
+
+
 def proxy(**changes):
     status = {'ok': True, 'fakes': {'running': False}, 'input': {
         'available': True, 'proximity_ready': True, 'physical_worn': False, 'worn_override': None,
+        'physical_pose': STILL,
         'pose_override': False, 'hmd_buttons': {'/input/system/click': {'physical': None, 'override': None}},
         'controllers': {'left': {'pose_override': False, 'inputs': {'/input/a/click': False}}}}}
     status['input'].update(changes)
@@ -47,8 +51,12 @@ class VerifySkillTests(unittest.TestCase):
                         ('pointer', 'overlays'): {'ok': True, 'overlays': {'list': []}}}
         self.sent = []
 
+        self.statuses = []   # status replies to give before replies[('status',)], in order
+
         def bench(*args, timeout=60):
             self.sent.append(args)
+            if args == ('status',) and self.statuses:
+                return self.statuses.pop(0)
             return self.replies.get(args, {'ok': True})
         self.asked = []
         self.answers = {('ft_powerd', 'status'): 'ok on 5 0', ('ft_powerd', 'on'): 'ok',
@@ -63,7 +71,7 @@ class VerifySkillTests(unittest.TestCase):
         for name, value in (('bench', bench), ('ask', ask), ('LOCK', tmp / 'lock.json'), ('EVIDENCE', tmp / 'verify'),
                             ('listening', lambda: set(self.heard)), ('running', lambda name: True),
                             ('unit_states', lambda: dict(self.units)), ('git', lambda *args: 'abc1234'),
-                            ('RELEASES', tmp / 'releases')):
+                            ('RELEASES', tmp / 'releases'), ('SETTLE_GAP', 0)):
             patch = mock.patch.object(self.v, name, value)
             patch.start()
             self.addCleanup(patch.stop)
@@ -232,9 +240,40 @@ class VerifySkillTests(unittest.TestCase):
             with self.subTest(worn=worn), self.assertRaises(SystemExit) as stop:
                 self.run_main('snapshot', '2-after')
             self.assertEqual(stop.exception.code, code)
-            self.assertEqual(self.sent[1:3], [('release',), ('compositor', 'auto')])
+            released = self.sent.index(('release',))
+            self.assertEqual(self.sent[released:released + 2], [('release',), ('compositor', 'auto')])
+            self.assertEqual(set(self.sent[:released]), {('status',)})   # nothing driven first
             self.assertFalse(self.v.LOCK.exists())
             self.replies[('status',)] = proxy()
+
+    def test_a_sensor_blip_on_a_still_headset_is_not_a_wearer(self):
+        self.run_main('launch', 'blips')
+        turned = dict(STILL, quaternion=[0.41, -0.2, 0.03, 0.88])   # about 11 degrees of yaw
+        cases = (
+            ('blip', [proxy(physical_worn=True), proxy(physical_worn=True), proxy()], 0),
+            ('held', [proxy(physical_worn=True)] * (1 + self.v.SETTLE_READS), 2),
+            ('moved', [proxy(physical_worn=True), proxy(physical_pose=turned)], 2),
+            ('pose unknown', [proxy(physical_worn=True, physical_pose={'valid': False}), proxy()], 2),
+            ('unread', [proxy(physical_worn=True), {'ok': False, 'error': 'gone'}], 1),
+        )
+        for name, statuses, code in cases:
+            with self.subTest(name):
+                if not self.v.LOCK.exists():
+                    self.run_main('launch', name)
+                self.statuses[:] = statuses
+                if code:
+                    with self.assertRaises(SystemExit) as stop:
+                        self.run_main('guard')
+                    self.assertEqual(stop.exception.code, code)
+                    self.assertIn(('release',), self.sent)
+                else:
+                    self.assertEqual(self.run_main('guard')[0], 0)
+                    self.assertTrue(self.v.LOCK.exists())
+                self.statuses.clear()
+                self.sent.clear()
+        self.statuses[:] = [proxy(physical_worn=True), proxy()]
+        report, code = self.v.doctor()
+        self.assertEqual(code, 0)
 
     def test_ask_listens_for_every_reply(self):
         server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)

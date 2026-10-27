@@ -23,7 +23,10 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
   real sensor even under a `worn on` override). During a run, chain every drive step after
   `V guard` (`V guard && T pose set ...`): it exits 0 while nobody wears the headset, and
   otherwise cleans up at once and exits 2 (worn) or 1 (sensor unread): stop there. `V snapshot`
-  guards too.
+  guards too. With the displays lit, the real sensor reads worn for under a second every few
+  seconds while the headset lies still; `V guard` and `V doctor` re-read for about 2 s and count
+  it as worn only if it stays worn or the headset moves (3 cm, 5 degrees). Never work around
+  them: if they stop the run, check the headset is still before launching again.
 - Every run ends with `V cleanup RUN` (the folder `V launch` printed), even after a failure: it
   turns the displays back on, runs `T release` (worn, pose, HMD buttons, controllers, fake eyes
   and hands) and `T compositor auto`, puts gaze mode back as the run found it, and frees the

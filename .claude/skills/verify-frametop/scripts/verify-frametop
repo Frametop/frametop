@@ -32,6 +32,7 @@ restarts it, SteamVR or a Frametop service. Evidence goes in testbench/artifacts
 (gitignored); it can show the desktop, so it stays on this machine.
 """
 import json
+import math
 import os
 import re
 import socket
@@ -53,6 +54,11 @@ SOCKETS = ('frametop_relay', 'ft_pointer_helper', 'ft_powerd', 'ft_gazed')
 RELEASES = Path.home() / '.local/share/frametop/releases'
 DROP_IN = Path.home() / '.config/systemd/user/steamvr.service.d/90-frame-testbench.conf'
 LEASE = 30 * 60
+# With the displays lit, the Frame's proximity sensor reads worn for under a second every few
+# seconds while the headset lies still (20 blips in 90 s, 2026-10-27). A worn reading counts as
+# a blip only if it ends within SETTLE_READS more reads and the headset hasn't moved meanwhile.
+SETTLE_READS, SETTLE_GAP = 5, 0.2
+MOVED_M, MOVED_DEG = 0.03, 5.0
 
 
 def bench(*args, timeout=60):
@@ -123,6 +129,39 @@ def lock_holder():
     return held
 
 
+def moved(a, b):
+    """Whether the real headset moved between two physical poses (or either is unknown)."""
+    if not all(isinstance(p, dict) and p.get('valid') for p in (a, b)):
+        return True
+    shift = math.dist(a['position'], b['position'])
+    qa, qb = a['quaternion'], b['quaternion']
+    norms = math.hypot(*qa) * math.hypot(*qb)
+    if not norms:
+        return True
+    dot = min(1.0, abs(sum(x * y for x, y in zip(qa, qb))) / norms)
+    return shift > MOVED_M or math.degrees(2 * math.acos(dot)) > MOVED_DEG
+
+
+def worn_now():
+    """The proximity sensor's reading (True, False, None unread) past its blips, and the status."""
+    status = bench('status', timeout=20)
+    proxy = status.get('input') or {}
+    if proxy.get('physical_worn') is not True:
+        return proxy.get('physical_worn'), status
+    first = proxy.get('physical_pose')
+    for _ in range(SETTLE_READS):
+        time.sleep(SETTLE_GAP)
+        status = bench('status', timeout=20)
+        proxy = status.get('input') or {}
+        worn = proxy.get('physical_worn')
+        if worn is None or moved(first, proxy.get('physical_pose')):
+            return (None if worn is None else True), status   # moved: someone has it
+        if worn is False:
+            status['blip'] = True   # for the reader: the sensor blinked, the headset lay still
+            return False, status
+    return True, status
+
+
 def doctor():
     checks = []
 
@@ -130,9 +169,8 @@ def doctor():
         checks.append({'name': name, 'ok': bool(ok), 'detail': detail})
         return ok
 
-    status = bench('status', timeout=20)
+    worn, status = worn_now()
     proxy = status.get('input') or {}
-    worn = proxy.get('physical_worn')
     check('headset not worn', worn is False,
           'physically worn: stop, never drive it under someone' if worn else
           'proximity sensor unread (no testbench proxy?)' if worn is None else 'proximity sensor: off the head')
@@ -232,7 +270,7 @@ def launch(name):
 
 def guard():
     """Stop the run at once if someone wears the headset (or nobody can tell)."""
-    worn = (bench('status', timeout=20).get('input') or {}).get('physical_worn')
+    worn, _ = worn_now()
     if worn is False:
         if lock_holder():
             LOCK.touch()   # the lease runs on

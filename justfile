@@ -21,7 +21,7 @@ test-python:
     python3 -c 'import PySide6, numpy, cv2, sherpa_onnx' || { echo "python3 can't import PySide6, numpy, cv2, and sherpa_onnx"; exit 1; }
     status=0
     layout/countdown/deps.sh || status=1
-    for t in layout/countdown/tests/test_*.py models/test/*.py commands/test/*.py input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py recorder/tests/*.py gaze/test/*.py gaze/rec/tests/*.py pack/test/*.py voice/test/*.py frunner/test/*.py tour/test/*.py; do
+    for t in layout/countdown/tests/test_*.py models/test/*.py commands/test/*.py input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py recorder/tests/*.py gaze/test/*.py gaze/rec/tests/*.py pack/test/*.py voice/test/*.py frunner/test/*.py tour/test/*.py float/test/*.py; do
         [ -f "$t" ] || continue
         if python3 "$t" >/dev/null; then echo "$t: ok"; else echo "$t: FAILED"; status=1; fi
     done

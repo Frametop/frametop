@@ -331,6 +331,11 @@ static void send_presented(struct wlr_surface *surface, uint32_t refresh, uint64
 
 static void present(struct screen *sc, struct wlr_buffer *buffer);
 
+static void drop_pending(struct screen *sc) {
+    if (sc->pending) wlr_buffer_unlock(sc->pending);
+    sc->pending = NULL;
+}
+
 static void screen_commit(struct wl_listener *l, void *data) {
     struct screen *sc = wl_container_of(l, sc, commit);
     struct wlr_xdg_surface *xdg = sc->toplevel->base;
@@ -371,6 +376,7 @@ static void screen_commit(struct wl_listener *l, void *data) {
     sc->buffer_width = buffer->width, sc->buffer_height = buffer->height;
     if (buffer == sc->held) {
         wlr_buffer_unlock(buffer); // the lock taken when this frame's layer committed
+        drop_pending(sc);          // (older than this)
         return;
     }
     if (ft_vr_screen_held(sc->index)) {
@@ -380,6 +386,7 @@ static void screen_commit(struct wl_listener *l, void *data) {
         sc->pending = buffer;
         return;
     }
+    drop_pending(sc);  // a hold that ended since the last tick: this one is newer
     present(sc, buffer);
 }
 
@@ -415,7 +422,7 @@ static void screen_destroy(struct wl_listener *l, void *data) {
     struct screen *sc = wl_container_of(l, sc, destroy);
     wlr_log(WLR_INFO, "screen %d closed", sc->index + 1);
     if (sc->held) wlr_buffer_unlock(sc->held);
-    if (sc->pending) wlr_buffer_unlock(sc->pending);
+    drop_pending(sc);
     if (sc->latest) wlr_buffer_unlock(sc->latest);
     ft_vr_screen_destroy(sc->index);
     if (sc->server->pointer_focus == sc) {

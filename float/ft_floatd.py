@@ -25,6 +25,8 @@ command-line side). Replies go to the sender:
   ("float pointer" is the float key: the window under the pointer, else the active one,
   floated or docked; the input relay sends it for float_toggle, and "dock all" for dock_all)
   dock N | close N | resize N W H | scale N STEPS                      (ft-screens, N = its screen)
+            (while a resize or scale changes the window, ft-screens holds its panel's picture:
+            "hold N MS" to it, see hold)
   front N   (ft-screens: a spin brought panel N to the front: make its window, or the top one
             on a screen, KWin's active window)
 
@@ -781,13 +783,13 @@ class Daemon:
         slot, m = f.slot, self.margin
         log(f"{f.id[:9]} scale {f.scale:g} -> {s:g}")
         f.scale = s
-        self.hold(slot)
         # The output's size in pixels must suit the new scale before KWin draws at it (see whole).
         k = whole(slot.kscale, s)
         if slot.size[0] % k or slot.size[1] % k:
             slot.want = None
             self.set_size(slot, slot.size, k)
             self.sized(slot, slot.size)
+        self.hold(slot)  # (after the wait above, so the hold's time goes to KWin's change)
         kscreen(f"output.{slot.output}.scale.{s:g}")
         self.screens.ask(f"scale {slot.index} {s:g}")
         self.rescaled(slot, s)
@@ -1284,7 +1286,8 @@ class Daemon:
                 self.scale_soon(f, int(rest[1]))
             elif cmd == "resize" and len(rest) == 3 and f.frame:
                 w, h = max(320, int(rest[1])), max(200, int(rest[2]))
-                self.hold(f.slot)
+                if (w, h) != (round(f.frame["w"] * f.scale), round(f.frame["h"] * f.scale)):
+                    self.hold(f.slot)  # (no change, no new crop: nothing to hold for)
                 self.command(cmd="geometry", id=f.id, x=f.frame["x"], y=f.frame["y"], w=w / f.scale, h=h / f.scale)
             return "ok"
         if cmd in ("float", "dock", "close") and rest:

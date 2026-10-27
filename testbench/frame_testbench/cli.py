@@ -365,6 +365,9 @@ def main(argv=None):
             i = 0
             while i < len(arguments):
                 item = arguments[i]
+                if item == '--':   # the rest is literal (keyboard type -- TEXT)
+                    forwarded += arguments[i:]
+                    break
                 if item in ('--host', '--remote-root', '--fetch'):
                     i += 2
                     continue

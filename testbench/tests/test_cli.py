@@ -106,6 +106,14 @@ class CliTests(unittest.TestCase):
                     self.assertEqual(cli.main(['--host', 'frame', 'controller', *argv]), 1)
                 run.assert_not_called()
 
+    def test_remote_text_after_the_separator_stays_literal(self):
+        cli = self.module()
+        with mock.patch.object(cli.transport, 'run_json', return_value={'ok': True}) as run, \
+                mock.patch.object(cli.transport, 'remote_argv', side_effect=lambda h, r, a: a), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(['--host', 'frame', 'keyboard', 'type', '--', '--host=x --fetch y']), 0)
+        self.assertEqual(run.call_args.args[0], ['keyboard', 'type', '--', '--host=x --fetch y'])
+
     def test_bool_analog_values_rejected_before_io(self):
         cli, bench = self.module(), self.bench()
         args = cli.parser().parse_args(['controller', 'left', 'trigger', '0'])

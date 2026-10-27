@@ -59,7 +59,8 @@ class KeyNameTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(desktop.key_code(name), code)
         self.assertEqual(desktop.combo('ctrl+shift+t'), [29, 42, 20])
-        for bad in ('enterr', '0x1c', '768', '', 'ctrl+ctrl', 'a+b+c+d+e+f+g', 'ctrl+'):
+        for bad in ('enterr', '0x1c', '256', '768', '116', '142', '205', '247', '', 'ctrl+ctrl', 'a+b+c+d+e+f+g',
+                    'ctrl+'):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 desktop.combo(bad)
 
@@ -100,7 +101,9 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual([m.split()[0] for m in got], ['hostdev', 'hostev', 'hostdev', 'hostev', 'hostbye'])
 
     def test_text_goes_to_the_relay_as_typing(self):
-        self.assertEqual(desktop.type_text('héllo wörld'), {'ok': True, 'typed': 11})
+        start = time.monotonic()
+        self.assertEqual(desktop.type_text('héllo wörld'), {'ok': True, 'queued': 11})
+        self.assertGreaterEqual(time.monotonic() - start, 11 * 4 * desktop.TYPE_STEP)   # enter comes after it
         self.assertEqual(self.wait_for('type'), ['type héllo wörld'])
         for bad in ('', 'two\nlines', 'x' * 2001, 'tab\there'):
             with self.subTest(bad=bad[:10]), self.assertRaises(ValueError):
@@ -123,6 +126,20 @@ class DeviceTests(unittest.TestCase):
         for bad in ((20001, 0, None), (0, 0, 'thumb')):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 desktop.mouse_move(*bad)
+
+    def test_a_button_held_when_a_drag_fails_comes_up_before_the_goodbye(self):
+        sent = []
+        real = desktop.Device.events
+
+        def failing(device, *triples):
+            real(device, *triples)
+            sent.append(triples)
+            if len(sent) == 2:
+                raise OSError('the socket broke')
+        with mock.patch.object(desktop.Device, 'events', failing), self.assertRaisesRegex(OSError, 'broke'):
+            desktop.mouse_move(200, 0, button='right')
+        got = self.wait_for('hostbye')
+        self.assertEqual(events(got[-2]), [(1, 0x111, 0)])
 
     def test_clicks_and_scrolls(self):
         desktop.mouse_click('right', 2)

@@ -37,10 +37,13 @@ The MCP tools are `keyboard_keys`, `keyboard_type`, `mouse_move`, `mouse_click`,
   In pointer mode the mouse moves the 3D mouse's cursor and clicks where it is; keys go where
   typing goes (the desktop panel clicked last, or Steam), and the relay's bindings apply, so
   `meta+space` opens frunner. If the testbench stops mid-command, the relay lets the device go
-  3 s after its last word, its keys and buttons coming up.
+  3 s after its last word, its keys and buttons coming up. Buttons still down when a command
+  fails come up before it lets go of the device.
 - **Text.** `keyboard type` sends the relay's `type`, as Frametop Voice does: the desktop's
   keyboard layout, or a US one when typing goes to Steam. Printable characters only, up to
-  2000 (the testbench's limit; the relay takes more); press `enter` with `keyboard keys`.
+  2000 (the testbench's limit; the relay takes more); press `enter` with `keyboard keys`. The
+  relay types a key at a time, 4 ms a step, so the command waits about as long as that takes
+  (up to 16 ms a character): a key pressed next comes after the text.
 - **Pointer helper** (`@ft_pointer_helper`): `gaze ? headset`, `head`, `overlays` and
   `measure KEY` are read-only questions; `show`, `hide` and `recenter` change only the cursor.
   `pointer state` reports a missing head pose (SteamVR not tracking) as `head.error`.
@@ -59,12 +62,15 @@ Letters, digits (`0`-`9` are the digit keys), `enter`, `esc`, `tab`, `space`, `b
 punctuation by evdev name (`minus`, `comma`, `dot`, `slash`...), the modifiers `ctrl`, `shift`,
 `alt`, `altgr`, `meta` (or `super`, `win`) and their `left`/`right` forms, and `mute`,
 `volumeup`, `volumedown`, `menu`. `KEY_` prefixes are fine. Any other key by its evdev code (10 up
-to 767). A combination joins up to six keys with `+`: held in order, let go in reverse.
+to 255), except the ones that put the headset to sleep, turn it off, cut its Wi-Fi or Bluetooth,
+or change its displays (power, sleep, suspend, rfkill, brightness...): logind and PowerDevil act
+on the relay's virtual keyboard. A combination joins up to six keys with `+`: held in order, let
+go in reverse.
 
 ## Limits
 
 - The relay doesn't answer keys, clicks or text, and the helper doesn't answer `show`, `hide`
-  or `recenter`: their `ok` means sent. Check the result another way (`pointer state`, a
+  or `recenter`: their `ok` means sent (`queued` for text). Check the result another way (`pointer state`, a
   capture).
 
 - Typing goes wherever typing goes, which may not be what's in front of you: click the panel
@@ -73,3 +79,10 @@ to 767). A combination joins up to six keys with `+`: held in order, let go in r
   settings apply.
 - These need Frametop's services running: a command whose service isn't listening fails with
   "@NAME isn't listening".
+- One driver at a time: every testbench command plugs in the same `testbench` devices, so two
+  running at once (two CLIs, or two MCP servers) unplug each other's. One MCP server runs its
+  tools one at a time.
+- Known Frametop gap: in pointer mode the relay doesn't let go of a host mouse's button when it
+  drops the device. If the testbench is killed mid-drag, or the relay stalls past 0.15 s and
+  reads the button's release after the goodbye, the 3D mouse's button stays down until the next
+  click.

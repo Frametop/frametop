@@ -25,7 +25,11 @@ DEVICE_NAME = 'Frame testbench'
 EV_KEY, EV_REL = 1, 2
 REL_X, REL_Y, REL_HWHEEL, REL_WHEEL = 0, 1, 6, 8
 BUTTONS = {'left': 0x110, 'right': 0x111, 'middle': 0x112, 'back': 0x113, 'forward': 0x114}
-KEY_MAX = 0x2ff
+# Numeric codes: a keyboard's (1-255), but not ones that put the headset to sleep, turn it
+# off or cut its radios (logind and PowerDevil act on the relay's virtual keyboard).
+CODE_MAX = 255
+SYSTEM_KEYS = {113, 114, 115, 116, 120, 142, 143, 152, 205, 224, 225, 238, 244, 245, 246, 247}
+TYPE_STEP = 0.004   # input-relay.py: a typed key's press to its release, and on to the next key
 KEYS = {'esc': 1, 'minus': 12, 'equal': 13, 'backspace': 14, 'tab': 15, 'leftbrace': 26,
         'rightbrace': 27, 'enter': 28, 'leftctrl': 29, 'semicolon': 39, 'apostrophe': 40, 'grave': 41,
         'leftshift': 42, 'backslash': 43, 'comma': 51, 'dot': 52, 'slash': 53, 'rightshift': 54,
@@ -48,12 +52,13 @@ POWER_COMMANDS = ('status', 'on', 'off')
 
 def key_code(name):
     """A key's evdev code from its name (enter, a, f5, ctrl, ...) or number. 0-9 are the digit
-    keys, so evdev codes below 10 need their names."""
+    keys, so evdev codes below 10 need their names. Power, sleep, radio and display keys are
+    refused by number."""
     name = name.strip().lower()
     name = ALIASES.get(name, name.removeprefix('key_'))
     if name in KEYS:
         return KEYS[name]
-    if name.isdigit() and 0 < int(name) <= KEY_MAX:
+    if name.isdigit() and 0 < int(name) <= CODE_MAX and int(name) not in SYSTEM_KEYS:
         return int(name)
     raise ValueError(f'unknown key {name!r}: a name such as enter, a, f5, ctrl, or an evdev code')
 
@@ -106,6 +111,7 @@ class Device:
         self.link = Datagrams()
         self.prefix = f'hostev {DEVICE_ID} {kind}'
         self.said = 0.0
+        self.held = set()
 
     def hello(self):
         self.link.send(RELAY, f'hostdev {DEVICE_ID} {self.kind} {DEVICE_NAME}')
@@ -116,10 +122,16 @@ class Device:
         return self
 
     def __exit__(self, *_):
-        # The relay reads a device's events after its control messages: let them through first.
-        time.sleep(0.15)
         try:
+            # Anything still down comes up (an error mid-drag): in pointer mode the relay passes
+            # the mouse's buttons on to the helper and doesn't let go of them when it drops us.
+            if self.held:
+                self.events(*[(EV_KEY, code, 0) for code in sorted(self.held, reverse=True)])
+            # The relay reads a device's events after its control messages: let them through first.
+            time.sleep(0.15)
             self.link.send(RELAY, f'hostbye {DEVICE_ID} {self.kind}')
+        except (RuntimeError, OSError):
+            pass   # the relay went away: it drops the device itself, and the first error stands
         finally:
             self.link.close()
 
@@ -129,6 +141,9 @@ class Device:
             self.hello()
         words = [str(v) for triple in triples for v in triple]
         self.link.send(RELAY, ' '.join([self.prefix, *words, '0 0 0']))
+        for t, code, value in triples:
+            if t == EV_KEY:
+                (self.held.add if value else self.held.discard)(code)
 
 
 def press_keys(combos, gap=0.03):
@@ -149,12 +164,15 @@ def press_keys(combos, gap=0.03):
 
 def type_text(text):
     """Text typed where typing goes, as Frametop Voice types it (the desktop's layout, or a US
-    one for Steam); only printable characters. The relay doesn't answer: ok means sent."""
+    one for Steam); only printable characters. The relay types them a key at a time and doesn't
+    answer, so this waits about as long as that takes (up to four steps a character, with a
+    modifier): a key pressed next, such as enter, comes after the text."""
     if not text or len(text) > TEXT_MAX or not text.isprintable():
         raise ValueError(f'type 1 to {TEXT_MAX} printable characters (no newlines: press enter instead)')
     with Datagrams() as link:
         link.send(RELAY, 'type ' + text)
-    return {'ok': True, 'typed': len(text)}
+    time.sleep(len(text) * 4 * TYPE_STEP + 0.2)
+    return {'ok': True, 'queued': len(text)}
 
 
 def steps(dx, dy, most=40):
@@ -266,7 +284,7 @@ def pointer_state():
 
 def overlays():
     """SteamVR's overlays as the helper lists them: {"t": "overlays", "list": [{key, name, visible}]}."""
-    with Datagrams() as link:
+    with Datagrams(timeout=8) as link:   # the helper asks SteamVR afresh: seconds, at times
         reply = link.ask(POINTER, 'overlays')
     try:
         return {'ok': True, 'overlays': json.loads(reply)}
@@ -277,7 +295,7 @@ def overlays():
 def measure(overlay):
     """A SteamVR overlay's centre, size and axes in the standing universe. The helper finds only
     an overlay in view of the head, so this needs a head pose."""
-    if not overlay or len(overlay) > 127 or any(c.isspace() or not c.isprintable() for c in overlay):
+    if not overlay or len(overlay.encode()) > 127 or any(c.isspace() or not c.isprintable() for c in overlay):
         raise ValueError('an overlay key: up to 127 characters, no spaces')
     with Datagrams() as link:
         v = numbers(ok_words(link.ask(POINTER, 'measure ' + overlay), POINTER), POINTER, 14)

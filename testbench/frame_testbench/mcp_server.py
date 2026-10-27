@@ -328,14 +328,16 @@ def create_server(config: Config, *, runner=run_cli):
         input relay: e.g. ["ctrl+l", "enter"]. Keys go where typing goes (the desktop panel
         clicked last, or Steam), with the relay's key bindings (Meta+Space opens frunner).
         Names: letters, digits, enter, esc, tab, space, backspace, delete, arrows (up, left...),
-        home, end, pageup, f1-f12, ctrl, shift, alt, altgr, meta, or an evdev code.
+        home, end, pageup, f1-f12, ctrl, shift, alt, altgr, meta, or an evdev code from 10 to 255
+        ("1" is the digit key; power, sleep and radio keys are refused).
         """
         return await execute(['keyboard', 'keys', *keys])
 
     @server.tool()
     async def keyboard_type(text: TypedText) -> CallToolResult:
         """Type text where typing goes, as Frametop Voice does (the desktop's keyboard layout, or
-        a US one for Steam). Printable characters only: press enter with keyboard_keys."""
+        a US one for Steam). Printable characters only: press enter with keyboard_keys. Returns once
+        the relay has about finished typing (up to 16 ms a character)."""
         return await execute(['keyboard', 'type', '--', text])
 
     @server.tool()

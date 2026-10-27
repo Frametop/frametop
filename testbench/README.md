@@ -10,7 +10,7 @@ Headset and controller pose tools for closed-loop development on Steam Frame. A 
 - The real HMD's own buttons (its other boolean inputs, listed in `status`).
 - The real HMD's translation and rotation, including valid synthetic tracking while physical tracking is unavailable.
 - Independent left/right synthetic controller translation and rotation, without requiring powered physical controllers.
-- Fake eye tracking and hand tracking at Frametop's boundary: gaze directions and eye states for ft-gaze, and posed hands with pinches and grips in place of ft-hands. See [fake eye and hand trackers](docs/fake-trackers.md).
+- Fake eye tracking and hand tracking at Frametop's boundary: gaze directions and eye states for ft-gaze, and posed hands with pinches and grips in place of ft-hands, or recorded tracker output played back. See [fake eye and hand trackers](docs/fake-trackers.md).
 - SteamVR stereo screenshots, with runtime pose/frame metadata and optional downloads to the agent machine.
 
 Input overrides and fake trackers stay active across CLI calls. `release` restores physical input and stops the fake trackers. There is no per-screenshot activation/rollback cycle. Do not wear the headset while another person or agent is driving its pose.

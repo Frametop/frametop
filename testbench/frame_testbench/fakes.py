@@ -23,6 +23,8 @@ files back out, so the real trackers take over again within a few seconds.
   gaze-release
   hand left|right X Y Z QW QX QY QZ SHAPE           wrist in the head frame (m), SHAPE from handshape.SHAPES
   hand-release left|right|all
+  replay-gaze PATH once|loop                        a recording (frame_testbench.record) in place of the
+  replay-hands PATH once|loop                       scripted fake, by its absolute path; once: released at its end
   release
 """
 import json
@@ -31,6 +33,7 @@ import os
 import select
 import signal
 import socket
+import stat
 import struct
 import sys
 import time
@@ -61,6 +64,14 @@ def direction(yaw, pitch):
     return [-math.sin(y) * math.cos(p), math.sin(p), -math.cos(y) * math.cos(p)]
 
 
+def fresh(path, limit):
+    """Whether the file was written in the last `limit` seconds."""
+    try:
+        return abs(time.time() - os.stat(path).st_mtime) < limit
+    except OSError:
+        return False
+
+
 def open_private(path, size):
     fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     if os.fstat(fd).st_size < size:
@@ -77,8 +88,57 @@ LEFT1, RIGHT1, VAR1, FIX1 = 0x15f + SHIFT, 0x16b + SHIFT, 0x177 + SHIFT, 0x18f +
 LEFT2, RIGHT2, VAR2 = 0x19b + SHIFT, 0x1a7 + SHIFT, 0x1b3 + SHIFT
 OPEN, MEAS = 0x1cb + SHIFT, 0x1d3 + SHIFT
 EYE_FILE_SIZE = 0x200
+SHIFTS = (SHIFT, 0)   # the layouts ft-gaze knows: SteamOS 0.4, 0.3
 SEEN_VAR, LOST_VAR = 0.001, 0.02   # SteamVR's filter variance with an eye seen, and lost
 OWN_SIZE = 128
+# What one eye-server.mmap sample holds (offsets for SteamOS 0.3; 0.4 adds SHIFT from the time on).
+MMAP_FIELDS = (('left1', 0x15f, 3), ('right1', 0x16b, 3), ('fix1', 0x18f, 3), ('left2', 0x19b, 3),
+               ('right2', 0x1a7, 3), ('var1', 0x177, 6), ('var2', 0x1b3, 6), ('open', 0x1cb, 2),
+               ('meas', 0x1d3, 8))
+OWN_FIELDS = (('eyes', 32, 4), ('slip', 48, 4))
+# Samples for a tracker a gaze recording doesn't have: both eyes lost.
+LOST_SAMPLE = {'left1': direction(0, 0), 'right1': direction(0, 0), 'fix1': direction(0, 0),
+               'left2': direction(0, 0), 'right2': direction(0, 0), 'var1': [LOST_VAR] * 6,
+               'var2': [LOST_VAR] * 6, 'open': [0.0, 0.0], 'meas': [0.0] * 8}
+NO_OWN_SAMPLE = {'yaw': 0.0, 'pitch': 0.0, 'flags': 0, 'eyes': [0.0] * 4, 'slip': [0.0] * 4}
+
+
+class Playback:
+    """A recording's clock: which of each stream's samples (times in seconds from the start)
+    is due, once each, looping or not."""
+
+    def __init__(self, streams, loop):
+        self.streams, self.loop = streams, loop
+        last = [times[-1] for times in streams if times]
+        # A loop's length: the last sample plus a typical gap, so it doesn't repeat at once.
+        self.length = max(last) + 1 / 30
+        self.start = time.monotonic()
+        self.next = [0] * len(streams)
+        self.laps = 0
+
+    def advance(self, now):
+        """([the newest due sample's index or None, per stream], done, wrapped)."""
+        wrapped = False
+        if now - self.start >= self.length:
+            if not self.loop:
+                return [None] * len(self.streams), True, False
+            self.start += self.length * ((now - self.start) // self.length)
+            self.next = [0] * len(self.streams)
+            self.laps += 1
+            wrapped = True
+        elapsed = now - self.start
+        due = []
+        for k, times in enumerate(self.streams):
+            i = self.next[k]
+            while i < len(times) and times[i] <= elapsed:
+                i += 1
+            due.append(i - 1 if i > self.next[k] else None)
+            self.next[k] = i
+        return due, False, wrapped
+
+    def status(self, path):
+        return {'path': path, 'loop': self.loop, 'laps': self.laps, 'length': round(self.length, 3),
+                'position': round(min(time.monotonic() - self.start, self.length), 3)}
 
 
 class Eyes:
@@ -94,14 +154,43 @@ class Eyes:
         self.state = ['open', 'open']
         self.held = [direction(0, 0), direction(0, 0)]   # a lost eye's last direction
         self.meas = [0.0] * 8
-        self.n = 0
+        self.n = self.own_n = 0
+        self.replay = None   # (Playback, mmap samples, own samples, path) while playing a recording
+        self.written = 0.0
 
     def status(self):
+        if self.replay:
+            return {'replay': self.replay[0].status(self.replay[3])}
         return {'left': {'yaw': self.look[0], 'pitch': self.look[1], 'state': self.state[0]},
                 'right': {'yaw': self.look[2], 'pitch': self.look[3], 'state': self.state[1]}}
 
+    def play(self, path, loop):
+        mmap_samples, own_samples = load_gaze(path)
+        playback = Playback([[t for t, _ in mmap_samples], [t for t, _ in own_samples]], loop)
+        self.replay = (playback, mmap_samples, own_samples, path)
+
     def write(self):
-        self.n = (self.n + 1) & 0xffffffff
+        """The next sample; False once a recording played to its end."""
+        if not self.replay:
+            self.publish(*self.scripted())
+            return True
+        playback, mmap_samples, own_samples, _ = self.replay
+        (m, o), done, _ = playback.advance(time.monotonic())
+        if done:
+            return False
+        # A tracker the recording doesn't have says it sees no eyes, so ft-gaze doesn't read the
+        # real one beside the recorded other.
+        if m is not None or o is not None:
+            self.publish(mmap_samples[m][1] if m is not None else None if mmap_samples else LOST_SAMPLE,
+                         own_samples[o][1] if o is not None else None if own_samples else NO_OWN_SAMPLE)
+        elif time.monotonic() - self.written > 0.5:   # a pause in the recording: stay fresh
+            for path in (self.eye_path, self.own_path):
+                os.utime(path)
+            self.written = time.monotonic()
+        return True
+
+    def scripted(self):
+        """The two trackers' samples for the scripted look and eye states."""
         dirs = []
         for k in range(2):
             if self.state[k] != 'lost':
@@ -124,38 +213,40 @@ class Eyes:
                 self.meas[2 * k + 1] = dirs[k][1]
                 self.meas[4 + 2 * k] = self.meas[5 + 2 * k] = 2e-5
         openness = [0.9 if s == 'open' else 0.0 for s in self.state]
-        body = bytearray(EYE_FILE_SIZE - TIME)
+        sample = {'left1': set1[0], 'right1': set1[1], 'fix1': mean,   # the fixation point: 1 m out
+                  'left2': dirs[0], 'right2': dirs[1], 'var1': var, 'var2': var, 'open': openness,
+                  'meas': list(self.meas)}
+        n = max(1, sum(seen))
+        own = {'yaw': sum(self.look[2 * k] for k in range(2) if seen[k]) / n,
+               'pitch': sum(self.look[2 * k + 1] for k in range(2) if seen[k]) / n,
+               'flags': (1 if seen[1] else 0) | (2 if seen[0] else 0),
+               'eyes': [self.look[2], self.look[3], self.look[0], self.look[1]], 'slip': [0.0] * 4}
+        return sample, own
 
-        def put(off, fmt, *values):
-            struct.pack_into(fmt, body, off - TIME, *values)
-
+    def publish(self, sample, own):
+        """One sample each to the files that have one (None: that file stays as it is)."""
         t = raw_now() - 0.017   # a real sample is about this old when it appears
-        put(TIME, '<d', t)
-        put(LEFT1, '<3f', *set1[0])
-        put(RIGHT1, '<3f', *set1[1])
-        put(VAR1, '<6f', *var)
-        put(FIX1, '<3f', *mean)   # the fixation point: 1 m out
-        put(LEFT2, '<3f', *dirs[0])
-        put(RIGHT2, '<3f', *dirs[1])
-        put(VAR2, '<6f', *var)
-        put(OPEN, '<2f', *openness)
-        put(MEAS, '<8f', *self.meas)
-        # The eye server has no lock: ft-gaze reads until the counter and time hold still across
-        # a copy. Writing the counter last makes a torn copy show as a counter that moved.
-        os.pwrite(self.eye_fd, bytes(body[8:]), TIME + 8)
-        os.pwrite(self.eye_fd, bytes(body[:8]), TIME)
-        os.pwrite(self.eye_fd, struct.pack('<I', self.n), COUNTER)
-        # Ours (ft-eyes): u32 seq (odd while written), u32 version, f64 t, f32 yaw, pitch, u32
-        # flags (bit 0 right eye seen, 1 left), u32 n, f32 right yaw, pitch, left yaw, pitch, slip.
-        flags = (1 if seen[1] else 0) | (2 if seen[0] else 0)
-        yaw = sum(self.look[2 * k] for k in range(2) if seen[k]) / max(1, sum(seen))
-        pit = sum(self.look[2 * k + 1] for k in range(2) if seen[k]) / max(1, sum(seen))
-        own = struct.pack('<Id2fII4f4f', 1, t + 0.017, yaw, pit, flags, self.n,
-                          self.look[2], self.look[3], self.look[0], self.look[1], 0, 0, 0, 0)
-        seq = 2 * self.n
-        os.pwrite(self.own_fd, struct.pack('<I', seq + 1), 0)
-        os.pwrite(self.own_fd, own, 4)
-        os.pwrite(self.own_fd, struct.pack('<I', seq + 2), 0)
+        self.written = time.monotonic()
+        if sample is not None:
+            self.n = (self.n + 1) & 0xffffffff
+            body = bytearray(EYE_FILE_SIZE - TIME)
+            struct.pack_into('<d', body, 0, t)
+            for name, off, count in MMAP_FIELDS:
+                struct.pack_into(f'<{count}f', body, off + SHIFT - TIME, *sample[name])
+            # The eye server has no lock: ft-gaze reads until the counter and time hold still
+            # across a copy. Writing the counter last makes a torn copy show as a counter that moved.
+            os.pwrite(self.eye_fd, bytes(body[8:]), TIME + 8)
+            os.pwrite(self.eye_fd, bytes(body[:8]), TIME)
+            os.pwrite(self.eye_fd, struct.pack('<I', self.n), COUNTER)
+        if own is not None:
+            # Ours (ft-eyes): u32 seq (odd while written), u32 version, f64 t, f32 yaw, pitch, u32
+            # flags (bit 0 right eye seen, 1 left), u32 n, f32 right yaw, pitch, left yaw, pitch, slip.
+            self.own_n = (self.own_n + 1) & 0x7fffffff
+            body = struct.pack('<Id2fII4f4f', 1, t + 0.017, own['yaw'], own['pitch'], own['flags'], self.own_n,
+                               *own['eyes'], *own['slip'])
+            os.pwrite(self.own_fd, struct.pack('<I', 2 * self.own_n - 1), 0)
+            os.pwrite(self.own_fd, body, 4)
+            os.pwrite(self.own_fd, struct.pack('<I', 2 * self.own_n), 0)
 
     def close(self):
         for fd, path in ((self.eye_fd, self.eye_path), (self.own_fd, self.own_path)):
@@ -182,13 +273,14 @@ SIDES = ('left', 'right')
 class Gesture:
     """One fh_pinch_t slot: begins and ends count every gesture, so readers miss none."""
 
-    def __init__(self, raw):
-        (self.flags, _, self.begins, self.ends, self.begin_ns, self.end_ns, self.distance, self.strength,
-         *rest) = struct.unpack('<4I2Q2f6f', raw)
+    def __init__(self, raw, keep=False):
+        (self.flags, self.hand_id, self.begins, self.ends, self.begin_ns, self.end_ns, self.distance,
+         self.strength, *rest) = struct.unpack('<4I2Q2f6f', raw)
         self.point, self.begin_point = list(rest[:3]), list(rest[3:])
-        self.hand_id = 0
-        if self.begins != self.ends:   # one a previous writer left down is over, as lost
-            self.end(mono_ns(), lost=True)
+        if not keep:
+            self.hand_id = 0
+            if self.begins != self.ends:   # one a previous writer left down is over, as lost
+                self.end(mono_ns(), lost=True)
 
     def update(self, hand_id, down, now, distance, strength, point):
         self.hand_id = hand_id
@@ -229,6 +321,8 @@ class Hands:
         self.hands_seq = self.gestures_seq = 0
         self.thresholds = (0.020, 0.045, 1.2, 1.45)   # ft-hands' defaults (hands/track/pinch.h)
         self.slots = None
+        self.replay = None   # (Playback, HandsDump, path) while playing a recording
+        self.rebase = None   # per gesture slot: what to add to the recording's counters
 
     def touch(self):
         with open(self.marker, 'a'):
@@ -253,18 +347,83 @@ class Hands:
         self.hands_seq = struct.unpack_from('<Q', os.pread(self.hands_fd, 8, 16), 0)[0] // 2 + 1
 
     def status(self):
+        if self.replay:
+            return {'replay': self.replay[0].status(self.replay[2])}
         return {side: {'position': p, 'quaternion': q, 'shape': s} for side, (p, q, s) in self.poses.items()}
 
+    def play(self, path, loop):
+        dump = HandsDump(path)
+        self.stop_replay()
+        self.poses.clear()
+        self.replay = (Playback([dump.times], loop), dump, path)
+        self.rebase = None
+
+    def stop_replay(self):
+        if self.replay:
+            self.replay[1].close()
+        self.replay = None
+
     def write(self):
+        """The next set; False once a recording played to its end."""
         self.touch()
         if not self.ready():
-            return
+            return True
         if self.hands_fd is None:
             self.open_files()
         now = mono_ns()
-        built = {side: handshape.hand(side, *self.poses[side]) for side in SIDES if side in self.poses}
-        self.write_hands(built, now)
-        self.write_gestures(built, now)
+        if not self.replay:
+            built = {side: handshape.hand(side, *self.poses[side]) for side in SIDES if side in self.poses}
+            self.write_hands(built, now)
+            self.write_gestures(built, now)
+            return True
+        playback, dump, _ = self.replay
+        (i,), done, wrapped = playback.advance(time.monotonic())
+        if wrapped or done:
+            # Between laps, and at the end: whatever was down ends, as lost, like a lost hand.
+            self.write_gestures({}, now)
+            self.rebase = None
+        if done:
+            return False
+        if i is not None:
+            self.publish_recorded(*dump.read(i)[:2], now)
+        return True
+
+    def publish_recorded(self, hands, gestures, now):
+        """A recorded set, as now: its times moved to now and its gesture counters carrying on
+        from ours, so readers see new gestures and never a counter going back."""
+        h, g = bytearray(hands), bytearray(gestures)
+        delta = now - struct.unpack_from('<Q', h, 32)[0]   # its publish_ns becomes now
+        shift = lambda buf, off: struct.pack_into('<Q', buf, off, max(0, struct.unpack_from('<Q', buf, off)[0] + delta))
+        shift(h, 24)
+        shift(h, 32)
+        for k in range(2):
+            if struct.unpack_from('<Q', h, HANDS_V1 + k * FIT + 8)[0]:
+                shift(h, HANDS_V1 + k * FIT + 8)
+        self.hands_seq += 1
+        os.pwrite(self.hands_fd, bytes(h[:16]) + struct.pack('<Q', 2 * self.hands_seq - 1), 0)
+        os.pwrite(self.hands_fd, bytes(h[24:]), 24)
+        os.pwrite(self.hands_fd, struct.pack('<Q', 2 * self.hands_seq), 16)
+        shift(g, 24)
+        shift(g, 32)
+        slots = [slot for kind in self.slots for slot in kind]
+        if self.rebase is None:
+            self.rebase = [mine.ends - struct.unpack_from('<I', g, 64 + 64 * k + 12)[0]
+                           for k, mine in enumerate(slots)]
+        for k, mine in enumerate(slots):
+            off = 64 + 64 * k
+            for field in (16, 24):
+                if struct.unpack_from('<Q', g, off + field)[0]:
+                    shift(g, off + field)
+            begins, ends = (v + self.rebase[k] for v in struct.unpack_from('<2I', g, off + 8))
+            struct.pack_into('<2I', g, off + 8, begins & 0xffffffff, ends & 0xffffffff)
+            # Ours from now on, so a release or the next lap ends what's down.
+            mine.__init__(bytes(g[off:off + 64]), keep=True)
+            mine.hand_id = struct.unpack_from('<I', g, off + 4)[0]
+        self.thresholds = struct.unpack_from('<4f', g, 40)
+        self.gestures_seq += 1
+        os.pwrite(self.gestures_fd, bytes(g[:16]) + struct.pack('<Q', 2 * self.gestures_seq - 1), 0)
+        os.pwrite(self.gestures_fd, bytes(g[24:]), 24)
+        os.pwrite(self.gestures_fd, struct.pack('<Q', 2 * self.gestures_seq), 16)
 
     def write_hands(self, built, now):
         hands, caps, fits = bytearray(), [], bytearray()
@@ -317,6 +476,7 @@ class Hands:
 
     def close(self):
         """No hands and every gesture over, as lost; then ft-hands takes the files back."""
+        self.stop_replay()
         if self.hands_fd is not None:
             self.poses.clear()
             self.write_hands({}, mono_ns())
@@ -327,6 +487,100 @@ class Hands:
             os.unlink(self.marker)
         except FileNotFoundError:
             pass
+
+
+# --- recordings (frame_testbench.record makes them) ------------------------------------------
+
+DUMP_MAGIC = b'FHDUMP02'
+GAZE_FORMAT = {'format': 'frame-testbench-gaze', 'version': 1}
+MAX_GAZE_BYTES = 64 << 20
+
+
+def open_recording(path, limit):
+    """A recording the user owns, by an absolute path, without following a link."""
+    if not os.path.isabs(path):
+        raise ValueError('a recording is given by its absolute path')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_size > limit:
+        os.close(fd)
+        raise ValueError(f'{path}: not a recording of yours (a regular file under {limit >> 20} MiB)')
+    return os.fdopen(fd, 'rb')
+
+
+def finite_list(value, count):
+    if (not isinstance(value, list) or len(value) != count
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in value)):
+        raise ValueError(f'expected {count} finite numbers')
+    return [float(v) for v in value]
+
+
+def load_gaze(path):
+    """gaze.jsonl's samples: ([(t, mmap fields)], [(t, own fields)])."""
+    with open_recording(path, MAX_GAZE_BYTES) as f:
+        lines = f.read().splitlines()
+    try:
+        if not lines or json.loads(lines[0]) != GAZE_FORMAT:
+            raise ValueError
+        mmap_frames, own_frames = [], []
+        for raw in lines[1:]:
+            line = json.loads(raw)
+            t = finite_list([line['t']], 1)[0]
+            if 'mmap' in line:
+                m = line['mmap']
+                mmap_frames.append((t, {name: finite_list(m[name], count) for name, _, count in MMAP_FIELDS}))
+            elif 'own' in line:
+                o = line['own']
+                own = {name: finite_list(o[name], count) for name, _, count in OWN_FIELDS}
+                own['yaw'], own['pitch'] = finite_list([o['yaw'], o['pitch']], 2)
+                if not isinstance(o['flags'], int) or not 0 <= o['flags'] < 1 << 32:
+                    raise ValueError
+                own['flags'] = o['flags']
+                own_frames.append((t, own))
+            else:
+                raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise ValueError(f'{path}: not a gaze recording (frame-testbench-gaze version 1)') from None
+    if not mmap_frames and not own_frames:
+        raise ValueError(f'{path}: the recording has no samples')
+    return mmap_frames, own_frames
+
+
+class HandsDump:
+    """hands.fhdump (ft-handreplay --publish-dump's format), read a set at a time."""
+
+    def __init__(self, path):
+        self.f = open_recording(path, 1 << 34)
+        header = self.f.read(16)
+        if len(header) != 16 or header[:8] != DUMP_MAGIC or struct.unpack_from('<II', header, 8) != (
+                HANDS_SIZE, GESTURES_SIZE):
+            self.f.close()
+            raise ValueError(f'{path}: not a hands recording (FHDUMP02 of hands v2 and gestures v3)')
+        self.record = HANDS_SIZE + GESTURES_SIZE + 8
+        size = os.fstat(self.f.fileno()).st_size - 16
+        self.count = size // self.record
+        if not self.count or size % self.record:
+            self.f.close()
+            raise ValueError(f'{path}: the recording has no sets, or a cut-off one')
+        times = []
+        for i in range(self.count):
+            self.f.seek(16 + i * self.record + self.record - 8)
+            times.append(struct.unpack('<q', self.f.read(8))[0])
+        if any(b < a for a, b in zip(times, times[1:])):
+            self.f.close()
+            raise ValueError(f'{path}: its sets go back in time')
+        self.times = [(t - times[0]) / 1e9 for t in times]
+
+    def read(self, i):
+        self.f.seek(16 + i * self.record)
+        data = self.f.read(self.record)
+        hands, gestures = data[:HANDS_SIZE], data[HANDS_SIZE:-8]
+        if hands[:8] != b'FHHANDS1' or gestures[:8] != b'FHGEST01':
+            raise ValueError(f'set {i} of the hands recording is damaged')
+        return hands, gestures, struct.unpack('<q', data[-8:])[0]
+
+    def close(self):
+        self.f.close()
 
 
 # --- the server ------------------------------------------------------------------------------
@@ -368,10 +622,11 @@ class Fakes:
                     raise ValueError('gaze angles must be within 90 degrees of straight ahead')
                 self.eyes = self.eyes or Eyes(self.fake_dir)
                 self.eyes.look = look
+                self.eyes.replay = None
             elif op == 'eyes' and len(args) == 2:
                 if not all(a in EYE_STATES for a in args):
                     raise ValueError('each eye is open, closed or lost')
-                if not self.eyes:
+                if not self.eyes or self.eyes.replay:
                     raise ValueError('set a gaze first')
                 self.eyes.state = list(args)
             elif op == 'gaze-release' and not args:
@@ -385,29 +640,58 @@ class Fakes:
                 if args[8] not in handshape.SHAPES:
                     raise ValueError(f'shape must be one of {", ".join(handshape.SHAPES)}')
                 self.hands = self.hands or Hands(self.fake_dir, self.hands_dir)
+                self.hands.stop_replay()
                 self.hands.poses[args[0]] = (position, quaternion, args[8])
             elif op == 'hand-release' and len(args) == 1 and args[0] in SIDES + ('all',):
                 if self.hands:
+                    self.hands.stop_replay()
                     for side in SIDES if args[0] == 'all' else args:
                         self.hands.poses.pop(side, None)
                     if not self.hands.poses:
                         self.hands.close()
                         self.hands = None
+            elif op in ('replay-gaze', 'replay-hands') and len(args) == 2 and args[1] in ('once', 'loop'):
+                if op == 'replay-gaze':
+                    eyes = self.eyes or Eyes(self.fake_dir)
+                    try:
+                        eyes.play(args[0], args[1] == 'loop')
+                    finally:
+                        if not self.eyes and not eyes.replay:
+                            eyes.close()
+                    self.eyes = eyes
+                    self.next_eyes = 0.0
+                else:
+                    hands = self.hands or Hands(self.fake_dir, self.hands_dir)
+                    try:
+                        hands.play(args[0], args[1] == 'loop')
+                    finally:
+                        if not self.hands and not hands.replay:
+                            hands.close()
+                    self.hands = hands
+                    self.next_hands = 0.0
             elif op == 'release' and not args:
                 self.close()
             else:
                 return self.status(False, f'unknown or malformed command: {op}')
         except ValueError as error:
             return self.status(False, str(error))
+        except OSError as error:
+            return self.status(False, f'{error.filename or "recording"}: {error.strerror}')
         return self.status()
 
     def tick(self, now):
+        # A recording plays at its own times, so it's looked at more often than a scripted fake
+        # is written; nothing is written between its samples.
         if self.eyes and now >= self.next_eyes:
-            self.eyes.write()
-            self.next_eyes = max(self.next_eyes + 1 / 90, now)
+            if not self.eyes.write():
+                self.eyes.close()
+                self.eyes = None
+            self.next_eyes = max(self.next_eyes + (1 / 250 if self.eyes and self.eyes.replay else 1 / 90), now)
         if self.hands and now >= self.next_hands:
-            self.hands.write()
-            self.next_hands = max(self.next_hands + 1 / 30, now)
+            if not self.hands.write():
+                self.hands.close()
+                self.hands = None
+            self.next_hands = max(self.next_hands + (1 / 250 if self.hands and self.hands.replay else 1 / 30), now)
 
     def next_due(self):
         due = [t for t, on in ((self.next_eyes, self.eyes), (self.next_hands, self.hands)) if on]

@@ -2,11 +2,9 @@
 through the real layouts (hands/include's structs, ft-gaze's own reader), the gesture counters'
 handover, and the daemon's commands and exits. No SteamVR, cameras or trackers needed."""
 import json
-import math
 import os
 from pathlib import Path
 import shlex
-import shutil
 import signal
 import struct
 import subprocess

@@ -19,6 +19,8 @@ involved, and no camera images are made or stored.
 ./frame-testbench release                     # also stops the fake trackers
 ```
 
+Real tracker output can be recorded and replayed too (see below).
+
 ## How it works
 
 The first `gaze look` or `hand ... set` starts `python3 -m frame_testbench.fakes` as the transient
@@ -70,6 +72,37 @@ On the way out it publishes no hands and ends any gesture down as lost.
   on top, as with real eyes, so the pointer lands where this user's calibration puts that look.
 - Lost eyes have SteamVR's high variance (0.02, over ft-gazed's `EYE_LOST`), closed ones an
   openness of 0, which ft-gazed reads as a blink.
+
+## Recording and replaying
+
+Real tracker output can be recorded and played back through the same fakes, for a look or a
+pinch that a script can't pose well:
+
+```sh
+./frame-testbench record look-around --seconds 20             # gaze and hands, while worn
+./frame-testbench record pinches --seconds 30 --only hands
+./frame-testbench replay pinches                              # once, then the fake ends
+./frame-testbench replay look-around --loop --only gaze       # until released
+```
+
+Recording only reads: SteamVR's `/dev/shm/eye-server.mmap`, our tracker's
+`/dev/shm/frametop-eyes-gaze`, and ft-hands' `hands` and `gestures` files. It needs someone
+wearing the headset with the gaze in use and ft-hands publishing, and refuses while the
+testbench itself is faking them. It goes in `artifacts/recordings/NAME/`, a new folder only
+this user can read, with:
+
+- `gaze.jsonl`: a header line, then a line per new sample with its time and the fields ft-gaze
+  reads (`mmap`: directions, origins, variances, openness; `own`: yaw, pitch, flags, eyes, slip).
+- `hands.fhdump`: each new set of both files, in `ft-handreplay --publish-dump`'s format, so a
+  dump made offline from a camera recording plays back the same way.
+
+No camera image is recorded. Gaze is still how someone's eyes moved: recordings stay on this
+machine in the ignored `artifacts/` folder, and never go into the repo, a PR, or anywhere else.
+
+Replay keeps the recorded timing. Hands get their times shifted to now and their gesture
+counters carried on from where the last publisher left them, so each recorded pinch is one
+click. A scripted `gaze look` or `hand ... set` stops a replay of that tracker, and `release`
+stops all of it. At the end of a single run the fake ends as if released.
 
 ## Limits
 

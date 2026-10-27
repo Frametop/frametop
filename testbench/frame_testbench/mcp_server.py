@@ -35,6 +35,9 @@ HmdButton = Annotated[str, Field(strict=True, max_length=128, pattern=f'^{contro
 GazeAngle = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=-90, le=90)]
 EyeState = Literal['open', 'closed', 'lost']
 HandShape = Literal['open', 'point', 'pinch', 'fist']
+RecordingName = Annotated[str, Field(strict=True, pattern=r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')]
+RecordSeconds = Annotated[float, Field(strict=True, allow_inf_nan=False, gt=0, le=300)]
+Tracker = Literal['gaze', 'hands']
 
 
 @dataclass(frozen=True)
@@ -295,6 +298,24 @@ def create_server(config: Config, *, runner=run_cli):
     async def hand_release(side: Literal['left', 'right', 'all']) -> CallToolResult:
         """Stop faking a hand, or both; ft-hands tracks again once none is faked."""
         return await execute(['hand', side, 'release'])
+
+    @server.tool()
+    async def tracker_record(name: RecordingName, seconds: RecordSeconds,
+                             only: Tracker | None = None) -> CallToolResult:
+        """Record the real eye and hand trackers' output (directions, joints, gestures; never
+        images) as a new recording NAME, for tracker_replay. Someone has to wear the headset
+        with the gaze or hands in use. Takes `seconds` (up to 300). Recordings stay local.
+        """
+        return await execute(['record', name, '--seconds', number(seconds), *(['--only', only] if only else [])])
+
+    @server.tool()
+    async def tracker_replay(name: RecordingName, loop: Boolean = False,
+                             only: Tracker | None = None) -> CallToolResult:
+        """Play a recording through the fake trackers, at its recorded pace: once (then released)
+        or looping until gaze_release, hand_release or release_all. A gaze_look or hand_set
+        stops that tracker's replay.
+        """
+        return await execute(['replay', name, *(['--loop'] if loop else []), *(['--only', only] if only else [])])
 
     @server.tool()
     async def release_all() -> CallToolResult:

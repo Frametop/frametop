@@ -98,6 +98,8 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | `gaze_release` | None | `gaze release` |
 | `hand_set` | `side`, `position`; optional `rotation`, `shape` (`open`, `point`, `pinch`, `fist`) | `hand SIDE set` |
 | `hand_release` | `side`: `left`, `right`, or `all` | `hand SIDE release` |
+| `tracker_record` | `name`, `seconds` (up to 300); optional `only` (`gaze`, `hands`) | `record NAME --seconds N` |
+| `tracker_replay` | `name`; optional `loop`, `only` | `replay NAME` |
 | `release_all` | None | `release`, which also stops the fake trackers |
 
 `side` is `left` or `right`. Position and translation are three-element XYZ

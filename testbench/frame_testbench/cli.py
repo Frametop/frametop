@@ -8,10 +8,13 @@ import subprocess
 import sys
 import time
 import uuid
-from . import controller_inputs, fakes, handshape, install, pose, transport
+from . import controller_inputs, fakes, handshape, install, pose, record, transport
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKES_UNIT = 'frame-testbench-fakes'
+RECORDINGS = ROOT / 'artifacts' / 'recordings'
+RECORDING_NAME = r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}'
+RECORDING_FILES = {'gaze': 'gaze.jsonl', 'hands': 'hands.fhdump'}
 
 
 class Bench:
@@ -86,6 +89,12 @@ def fetch_capture(host, result, output):
     return result
 
 
+def recording_name(text):
+    if not re.fullmatch(RECORDING_NAME, text):
+        raise argparse.ArgumentTypeError(f'{text!r}: a recording name is letters, digits, ".", "_" and "-"')
+    return text
+
+
 def hmd_button_path(text):
     if not re.fullmatch(controller_inputs.HMD_BUTTON_PATH, text):
         raise argparse.ArgumentTypeError(f'{text!r} is not an /input/... component path')
@@ -157,6 +166,14 @@ def parser():
     put.add_argument('--shape', choices=handshape.SHAPES, default='open',
                      help='pinch holds a pinch down, fist a grip')
     hands.add_parser('release', help='ft-hands tracks again once no hand is faked')
+    rec = commands.add_parser('record', help="record the real trackers' output (never images) for replay")
+    rec.add_argument('name', type=recording_name, help='a new recording, kept in artifacts/recordings/NAME')
+    rec.add_argument('--seconds', type=float, required=True, help='how long, up to 600')
+    rec.add_argument('--only', choices=tuple(RECORDING_FILES), help='just the gaze or just the hands')
+    play = commands.add_parser('replay', help='play a recording through the fake trackers')
+    play.add_argument('name', type=recording_name)
+    play.add_argument('--loop', action='store_true', help='over and over until released (else released at its end)')
+    play.add_argument('--only', choices=tuple(RECORDING_FILES), help='just its gaze or just its hands')
     commands.add_parser('release', help='restore physical HMD pose/proximity, disconnect synthetic controllers, stop fake trackers')
     capture = commands.add_parser('capture', help='fresh compositor stereo PNGs and metadata')
     capture.add_argument('--output', help='new output directory, on headset when using --host')
@@ -213,6 +230,27 @@ def dispatch(args, bench):
         if args.state == 'physical':
             return bench.control('hmd-button-release ' + args.path)
         return bench.control(f"hmd-button {args.path} {'1' if args.state == 'on' else '0'}")
+    if args.command == 'record':
+        directory = RECORDINGS / args.name
+        if directory.exists():
+            raise ValueError(f'recording {args.name} already exists')
+        RECORDINGS.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return record.record(str(directory), args.seconds, gaze=args.only != 'hands', hands=args.only != 'gaze')
+    if args.command == 'replay':
+        directory = RECORDINGS / args.name
+        names = sorted(p.name for p in RECORDINGS.iterdir()) if RECORDINGS.is_dir() else []
+        if not directory.is_dir():
+            raise ValueError(f'no recording {args.name}; recordings: {", ".join(names) or "none"}')
+        files = {kind: directory / name for kind, name in RECORDING_FILES.items()
+                 if (directory / name).is_file() and args.only in (None, kind)}
+        if not files:
+            raise ValueError(f'recording {args.name} has no {args.only or "gaze or hands"}')
+        if any(c.isspace() for c in str(directory)):
+            raise ValueError(f'{directory}: the fake trackers take paths without spaces')
+        reply = None
+        for kind, path in files.items():
+            reply = bench.fakes(f"replay-{kind} {path} {'loop' if args.loop else 'once'}", start=True)
+        return reply
     if args.command == 'release':
         # The fake trackers first: they don't need SteamVR, so they go even when it's down.
         faked = bench.fakes('release')
@@ -275,7 +313,8 @@ def main(argv=None):
                     continue
                 forwarded.append(item)
                 i += 1
-            result = transport.run_json(transport.remote_argv(args.host, args.remote_root, forwarded), timeout=110)
+            timeout = 110 + (args.seconds if args.command == 'record' else 0)
+            result = transport.run_json(transport.remote_argv(args.host, args.remote_root, forwarded), timeout=timeout)
             if args.command == 'capture' and args.fetch:
                 result = fetch_capture(args.host, result, args.fetch)
         else:

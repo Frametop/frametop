@@ -35,7 +35,8 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             'controller_button', 'controller_trigger', 'controller_grip', 'controller_thumbstick',
             'controller_touch', 'controller_inputs_reset', 'controller_input_status',
             'compositor', 'capture', 'release_all',
-            'gaze_look', 'gaze_eyes', 'gaze_release', 'hand_set', 'hand_release'})
+            'gaze_look', 'gaze_eyes', 'gaze_release', 'hand_set', 'hand_release',
+            'tracker_record', 'tracker_replay'})
         for tool in tools:
             self.assertFalse(tool.inputSchema.get('additionalProperties', True))
             self.assertFalse({'host', 'socket', 'command', 'output', 'remote_root'} &
@@ -88,7 +89,13 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             ('hand_set', dict(side='left', position=[0, 0, -0.3], rotation=[0, 0, 90], shape='pinch'),
              ['hand', 'left', 'set', '--position', '0', '0', self.module.number(-0.3), '--rotation', '0', '0', '90',
               '--shape', 'pinch']),
-            ('hand_release', dict(side='all'), ['hand', 'all', 'release'])]
+            ('hand_release', dict(side='all'), ['hand', 'all', 'release']),
+            ('tracker_record', dict(name='look-left.1', seconds=12.5), ['record', 'look-left.1', '--seconds', '12.5']),
+            ('tracker_record', dict(name='pinches', seconds=300, only='hands'),
+             ['record', 'pinches', '--seconds', '300', '--only', 'hands']),
+            ('tracker_replay', dict(name='pinches'), ['replay', 'pinches']),
+            ('tracker_replay', dict(name='pinches', loop=True, only='gaze'),
+             ['replay', 'pinches', '--loop', '--only', 'gaze'])]
         for name, args, expected in cases:
             with self.subTest(name=name, args=args):
                 reply = await self.server.call_tool(name, args)
@@ -179,6 +186,13 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             ('hand_set', {'side': 'left', 'position': [0, 0, 0], 'shape': 'claw'}),
             ('hand_set', {'side': 'left', 'position': [0, float('inf'), 0]}),
             ('hand_set', {'side': 'left'}), ('hand_release', {'side': 'both'}),
+            ('tracker_record', {'name': '../x', 'seconds': 1}), ('tracker_record', {'name': 'a b', 'seconds': 1}),
+            ('tracker_record', {'name': '-x', 'seconds': 1}), ('tracker_record', {'name': 'x' * 65, 'seconds': 1}),
+            ('tracker_record', {'name': 'x', 'seconds': 0}), ('tracker_record', {'name': 'x', 'seconds': 301}),
+            ('tracker_record', {'name': 'x', 'seconds': '5'}), ('tracker_record', {'name': 'x'}),
+            ('tracker_record', {'name': 'x', 'seconds': 1, 'only': 'eyes'}),
+            ('tracker_record', {'name': 'x', 'seconds': 1, 'output': '/tmp/x'}),
+            ('tracker_replay', {'name': 'x', 'loop': 'yes'}), ('tracker_replay', {'name': '/abs/path'}),
         ]
         for name in ('hmd_pose_set', 'controller_pose_set', 'hmd_pose_move', 'controller_pose_move'):
             for value in (float('nan'), float('inf'), -float('inf')):

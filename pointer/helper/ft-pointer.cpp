@@ -394,10 +394,11 @@
 // pinch ended: typing: the hand is on the keyboard"). ft-screens gets "typing
 // <L 0|1> <R 0|1>" on @ft_screens, on a change and every second: no pokes, near grabs or "grab
 // that" by those hands. Changes go to the log ("typing: right hand on the keyboard", "typing: right
-// hand off the keyboard (raised 0.09 m)"). A hand on the keyboard stays there out of the cameras' sight, up
-// to POINTER_TYPING_KEEP (300 s): looking up at a screen and back down doesn't free it. For
-// POINTER_TYPING_MOUSE (10 s) after the mouse was used, a hand that comes down at the desk (the keyboard
-// zone) is held back the same way, keys or not ("typing: right hand at the desk (the mouse in use)").
+// hand off the keyboard (raised 0.09 m)"). A hand on the keyboard stays there out of the cameras'
+// sight, up to POINTER_TYPING_KEEP (300 s): looking up at a screen and back down doesn't free it.
+// For POINTER_TYPING_MOUSE (10 s) after the mouse was used, a hand that comes down at the desk (the
+// keyboard zone) is held back too, keys or not ("typing: right hand at the desk (the mouse in
+// use)"): no ray or pokes until it's lifted, no pinches while the mouse is in use.
 //
 // Gaze pinch (gaze mode with POINTER_HANDS; gazehand.h has the rules and the timings): the eyes aim
 // and the hands click, Vision Pro style. In gaze mode the hand ray stays off unless
@@ -1870,12 +1871,17 @@ int main() {
         return msg;
     };
 
+    // The mouse used (a move, a press, a scroll step): the pointer's last-used-wins, and typing's desk.
+    auto noteMouse = [&] {
+        lastMouse = Clock::now();
+        typist.Mouse(secsOf(lastMouse));
+    };
     // "move <dyaw> <dpitch>" from the relay.
     auto mouseMove = [&](double a, double b) {
         // A move held back (POINTER_GAZE_MOUSE_MOVE=held) only wakes the pointer: it isn't using
         // the mouse, so a drifting mouse doesn't keep the gaze from taking the pointer back.
         const bool heldBack = mouseMoveHeld();
-        if (!heldBack) lastMouse = Clock::now(), typist.Mouse(secsOf(lastMouse));
+        if (!heldBack) noteMouse();
         // Any mouse input wakes the pointer (after a controller took over, or a helper restart).
         if (!active) wake(Clock::now());
         if (heldBack) return;
@@ -2183,7 +2189,17 @@ int main() {
             }
             // (Moves were taken first, above.)
             const bool mouseInput = std::strncmp(buf, "btn", 3) == 0 || std::strncmp(buf, "scroll", 6) == 0;
-            if (mouseInput) lastMouse = Clock::now(), typist.Mouse(secsOf(lastMouse));
+            if (mouseInput) {
+                lastMouse = Clock::now();
+                // typing's desk: a button press or a scroll step, not the relay's own pulses (the laser claim
+                // "btn a", the dashboard's "btn system") or releases
+                char name[16];
+                int v = 0;
+                double sx = 0, sy = 0;
+                if ((std::sscanf(buf, "btn %15s %d", name, &v) == 2 && v == 1 && std::strcmp(name, "a") && std::strcmp(name, "system")) ||
+                    (std::sscanf(buf, "scroll %lf %lf", &sx, &sy) == 2 && (sx != 0 || sy != 0)))
+                    noteMouse();
+            }
             // Mouse input wakes the pointer (after a controller took over, or a helper restart),
             // but a release doesn't (a button up, a scroll back to 0 0): the relay sends those with
             // the pointer off when Frametop pauses for a game (input-relay.py stand_down), and
@@ -2702,7 +2718,7 @@ int main() {
         // or in gaze mode the gaze, GAZE_WAKE_NEAR after the hand left. With a hand's ray driving it, only
         // that hand's claim lets it go (user, 2026-10-19: typing on Full Keyboard with the right hand's
         // laser, the resting left hand's claim released it 49 times in a row and a pinch lost its click).
-        // A hand typing holds back doesn't claim (ft-screens hears so a moment later): a hand lifted off the keys
+        // A hand that typing holds back doesn't claim (ft-screens hears so a moment later): a hand lifted off the keys
         // and put on the mouse touched a panel on the way and released the pointer (2026-10-28, 11 times in an hour).
         const auto claims = [&](int s) { return nearClaim[s] && !typist.Blocked(s, secsOf(tnow)); };
         const bool claimed = raySide >= 0 ? claims(raySide) : claims(0) || claims(1);
@@ -3292,7 +3308,7 @@ int main() {
         }
         // A hand that went onto the keyboard lets go of what it held (a pinch, grip or three-finger scroll,
         // the chord's right button), as lost: no click. Ray holds end above, when typing drops the ray.
-        if (hold.src == Src::Hand && hold.side >= 0 && typist.Parked(hold.side)) {
+        if (hold.src == Src::Hand && hold.side >= 0 && typist.Parked(hold.side) && typist.Why(hold.side, secsOf(tnow))) {
             if (!hold.gaze.On()) {   // gaze pinches and three-finger scrolls say why themselves
                 std::printf("hand %s %s ended: typing: the hand is on the keyboard\n", hold.side ? "right" : "left",
                             hold.grip ? "grip" : "pinch");
@@ -3300,7 +3316,7 @@ int main() {
             }
             endGesture(true, "typing: the hand is on the keyboard");
         }
-        if (chordBtn.On() && chordSide >= 0 && typist.Parked(chordSide)) chordEnds(true, "typing: the hand is on the keyboard");
+        if (chordBtn.On() && chordSide >= 0 && typist.Parked(chordSide) && typist.Why(chordSide, secsOf(tnow))) chordEnds(true, "typing: the hand is on the keyboard");
         if (handOk && (hg.seq != handSeq || handFile.opens != handOpens)) {
             handSeq = hg.seq;
             handPublished = hg.publish_ns;

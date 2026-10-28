@@ -263,6 +263,7 @@ void TestLost() {
     w.hands[1] = Pointing(1);
     w.Run(0.2);
     CHECK(!w.Blocked(1), "lost on the keys, found raised: free");
+    CHECK(w.log.find("right hand off the keyboard (raised") != std::string::npos, "left the keyboard: %s", w.log.c_str());
     // a free hand: forgotten after 3 s, as before
     w.hands[1] = Unseen();
     w.Run(3.2);
@@ -326,6 +327,24 @@ void TestMouseParks() {
     CHECK(u.ty.Parked(1), "mousing unseen, then seen on the mouse: at the desk");
 }
 
+// A gaze pinch from a hand resting low (TestNotThePosture's), after a mouse move: no pinch while the
+// mouse is in use, then pinches again; no ray until it's lifted. Keys make it a hand on the keyboard.
+void TestDeskPinchesAfterTheMouse() {
+    World w;
+    w.ty.Mouse(w.t);
+    w.hands[1] = {true, {0.15, kEye - 0.40, -0.30}, 0.9};
+    w.Run(2);
+    CHECK(w.ty.Parked(1) && w.ty.Why(1, w.t), "low, 2 s after the mouse: no pinch");
+    w.Run(9);
+    CHECK(!w.ty.Why(1, w.t), "the mouse still 11 s: pinches again (%s)", w.ty.Why(1, w.t));
+    CHECK(w.Blocked(1), "...but no ray until it's lifted");
+    w.ty.Key(w.t);
+    w.Run(0.2);
+    CHECK(std::string(w.ty.Why(1, w.t)) == "typing: the hand is on the keyboard", "a key: on the keyboard (%s)", w.ty.Why(1, w.t));
+    w.Run(15);
+    CHECK(w.ty.Why(1, w.t), "on the keyboard, keys long gone: still held back");
+}
+
 // The mouse doesn't park a hand that's pointing or holding a gesture, or one up in the air.
 void TestMouseLeavesPointingAlone() {
     World w;
@@ -333,6 +352,12 @@ void TestMouseLeavesPointingAlone() {
     w.hands[1].busy = true;
     w.Run(2, 0, [&] { w.ty.Mouse(w.t); });
     CHECK(!w.Blocked(1), "the pointing hand while the other mouses: free (%s)", w.ty.Why(1, w.t));
+    // a hand holding a gesture down in the zone
+    World g;
+    g.hands[1] = Keys(1);
+    g.hands[1].busy = true;
+    g.Run(1, 0, [&] { g.ty.Mouse(g.t); });
+    CHECK(!g.ty.Parked(1), "holding a gesture in the zone while the mouse moves: not parked");
     w.hands[1].busy = false;
     w.Run(1, 0, [&] { w.ty.Mouse(w.t); });
     CHECK(!w.Blocked(1), "raised, not in the zone: free");
@@ -447,6 +472,7 @@ int main() {
     TestMouseUser();
     TestLost();
     TestMouseParks();
+    TestDeskPinchesAfterTheMouse();
     TestMouseLeavesPointingAlone();
     TestPointAndEnter();
     TestHoldOntoTheKeys();

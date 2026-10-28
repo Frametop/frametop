@@ -28,7 +28,10 @@
 // that comes down in the zone is on the keyboard too, keys or not ("at the desk"): the hand on the
 // mouse, and the other one resting by the keys. Before, only a key parked the mouse hand, and the
 // mouse kept its ray down for just a second (2026-10-28: 26 rays raised by resting desk hands in an
-// hour, 22 taken back by the mouse). It leaves the same way.
+// hour, 22 taken back by the mouse). It leaves the same way. It has no ray and no pokes until then,
+// but its pinches come back once the mouse has been still for mouse: a gaze pinch from a hand
+// resting low (below) works a while after the mouse, as before. Keys while it's there make it a
+// hand on the keyboard.
 //   The zone: the palm at least below (0.20 m, POINTER_TYPING_BELOW) under the eyes, aheadMin to
 // aheadMax (0.05-0.45 m) ahead of them across the floor (along the head's heading), the palm facing
 // down (palmDown). Typing hands measured 0.29-0.42 m under the eyes and 0.18-0.34 m ahead, palms down
@@ -135,7 +138,7 @@ public:
             log.push_back("typing: both hands in the keyboard posture");
         }
         const bool typing = Keys(t) || posture_;
-        const bool mousing = p_.mouse > 0 && Ever(lastMouse_) && t - lastMouse_ < p_.mouse;
+        const bool mousing = Mousing(t);
         for (int k = 0; k < 2; ++k) {
             Side &s = side_[k];
             const Hand &h = hands[k];
@@ -149,6 +152,10 @@ public:
             const double dt = Ever(s.seen) ? std::clamp(t - s.seen, 0.0, 1.0) : 0;
             s.seen = t;
             if (s.parked) {
+                if (typing && s.desk) {
+                    s.desk = false;
+                    log.push_back(std::string("typing: ") + Name(k) + " hand on the keyboard");
+                }
                 const double rose = h.palm.y - s.restY;
                 const bool up = rose >= p_.raise, turned = h.down < p_.turned;
                 if (up || turned) {
@@ -176,27 +183,33 @@ public:
                 s.parked = true, s.free = false, s.leaveSince = kNever, s.desk = !typing;
                 if (!s.known || std::fabs(h.palm.y - s.restY) >= p_.raise / 2) s.restY = h.palm.y;
                 s.known = true;
-                log.push_back(std::string("typing: ") + Name(k) + (typing ? " hand on the keyboard" : " hand at the desk (the mouse in use)"));
+                log.push_back(std::string("typing: ") + Name(k) +
+                              (typing ? " hand on the keyboard" : " hand at the desk (the mouse in use)"));
             }
         }
     }
 
     // Typing by the keys: within hold of the last one.
     bool Keys(double t) const { return p_.hold > 0 && Ever(lastKey_) && t - lastKey_ < p_.hold; }
+    // The mouse in use: within mouse of its last move, click or scroll.
+    bool Mousing(double t) const { return p_.mouse > 0 && Ever(lastMouse_) && t - lastMouse_ < p_.mouse; }
     bool Posture() const { return posture_; }
     bool Parked(int s) const { return side_[s].parked; }
     bool Free(int s) const { return side_[s].free; }
 
-    // Why side s may not click, poke or point at t, or nullptr: its hand is on the keyboard, or keys
-    // came and it hasn't left the keyboard since.
+    // Why side s may not pinch or grip at t, or nullptr: its hand is on the keyboard (or at the desk
+    // while the mouse is in use), or keys came and it hasn't left the keyboard since.
     const char *Why(int s, double t) const {
         if (p_.hold <= 0 || s < 0 || s > 1) return nullptr;
-        if (side_[s].parked) return side_[s].desk ? "typing: the hand is at the desk (the mouse in use)" : "typing: the hand is on the keyboard";
-        if (side_[s].free) return nullptr;
+        const Side &d = side_[s];
+        if (d.parked && !d.desk) return "typing: the hand is on the keyboard";
+        if (d.parked && Mousing(t)) return "typing: the hand is at the desk (the mouse in use)";
+        if (d.free) return nullptr;
         if (Keys(t) || posture_) return "typing";
         return nullptr;
     }
-    bool Blocked(int s, double t) const { return Why(s, t) != nullptr; }
+    // Whether side s may not point (raise a ray) or poke at t: Why, or its hand is at the desk.
+    bool Blocked(int s, double t) const { return (p_.hold > 0 && s >= 0 && s <= 1 && side_[s].parked) || Why(s, t) != nullptr; }
 
     std::vector<std::string> log;  // changes, since the caller last cleared it
 

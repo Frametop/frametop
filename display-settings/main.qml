@@ -680,7 +680,7 @@ Kirigami.ApplicationWindow {
                         t = fit(ctx, t, Math.min(maxW, box[2] - box[0] - 4))
                         if (!t) return
                         const w = ctx.measureText(t).width + 4, lh = Kirigami.Theme.smallFont.pixelSize + 3
-                        for (let i = 0; i < 4; i++) {
+                        for (let i = 0; i < 7; i++) {
                             const cx = Math.max(box[0] + w / 2, Math.min(box[2] - w / 2, x + dx * i))
                             const cy = Math.max(box[1] + lh / 2, Math.min(box[3] - lh / 2, y + dy * i))
                             if (!labels.some(l => Math.abs(l.x - cx) < (l.w + w) / 2 && Math.abs(l.y - cy) < lh)) {
@@ -691,7 +691,7 @@ Kirigami.ApplicationWindow {
                     }
                     function drawLabels(ctx, labels) {
                         ctx.textBaseline = "middle"
-                        for (const l of labels) {
+                        for (const l of labels.filter(l => l.t)) {
                             const w = ctx.measureText(l.t).width
                             ctx.fillStyle = Qt.rgba(0, 0, 0, 0.35)  // legible over a panel's fill
                             ctx.fillRect(l.x - w / 2 - 2, l.y - Kirigami.Theme.smallFont.pixelSize / 2 - 1, w + 4, Kirigami.Theme.smallFont.pixelSize + 2)
@@ -760,8 +760,9 @@ Kirigami.ApplicationWindow {
                         line(ctx, [h, ray(yaw, 24)]); ctx.stroke()
                         line(ctx, [ray(yaw, 30), ray(yaw + 0.35, 20), ray(yaw - 0.35, 20)]); ctx.closePath(); ctx.fill()
                         ctx.beginPath(); ctx.arc(h[0], h[1], 4.5, 0, 2 * Math.PI); ctx.fill()
-                        // Labels past each panel's middle, away from you.
-                        let labels = []
+                        // Labels past each panel's middle, away from you, and off you (blank ones
+                        // only hold your spot).
+                        let labels = [h, ray(yaw, 30)].map(q => ({ x: q[0], y: q[1], w: 40, t: "" }))
                         const topBox = [0, top, half - 2, top + boxH + 8]
                         for (const p of panels) {
                             const m = P(p.top[Math.floor(p.top.length / 2)])

@@ -121,7 +121,9 @@ inline Want Decide(bool switchOn, bool live, const Answer &worn, const Answer &p
 // The relay's view of the host's devices, from its records: "hostdev" with each hello while
 // engaged (every second), "hostev" for events of a kind it has a device for, "hostbye" when the
 // host lets go. A message the relay didn't get says hostbye, so it lets go of every key it holds
-// rather than miss a key-up; the next hello brings the device back. Not thread-safe.
+// rather than miss a key-up. A hostbye it didn't get either is owed: the kind gets no hostdev
+// (which would keep its held keys alive) until the hostbye has gone, and with no word the relay
+// lets go of it by itself. The next hello brings the device back. Not thread-safe.
 class Relay {
 public:
     using Sender = std::function<bool(const std::string &)>;
@@ -141,13 +143,16 @@ public:
                 if (!engaged_) Bye();
                 break;
             case Record::kHello:
+                PayOwed();
                 if (!engaged_) break;
                 for (uint8_t kind : {kKeyboard, kMouse}) {
+                    if (owed_ & kind) continue;
                     if (r.kinds & kind) {
                         if (send_("hostdev " + id_ + " " + Kind(kind) + " " + (r.text.empty() ? host_ : r.text))) devices_ |= kind;
                         else Bye();
                     } else if (devices_ & kind) {
-                        send_("hostbye " + id_ + " " + Kind(kind)), devices_ &= uint8_t(~kind);
+                        devices_ &= uint8_t(~kind);
+                        if (!send_("hostbye " + id_ + " " + Kind(kind))) owed_ |= kind;
                     }
                 }
                 break;
@@ -164,9 +169,9 @@ public:
     }
 
     void Bye() {
-        for (uint8_t kind : {kKeyboard, kMouse})
-            if (devices_ & kind) send_("hostbye " + id_ + " " + Kind(kind));
+        owed_ |= devices_;
         devices_ = 0;
+        PayOwed();
     }
 
     void Stop() { Bye(), engaged_ = false; }
@@ -174,16 +179,22 @@ public:
     bool engaged() const { return engaged_; }
     const std::string &reason() const { return reason_; }
     uint8_t devices() const { return devices_; }
+    uint8_t owed() const { return owed_; }
     // Event records sent since the last call.
     int TakeEvents() { return std::exchange(events_, 0); }
 
 private:
     static const char *Kind(uint8_t kind) { return kind == kMouse ? "mouse" : "keyboard"; }
 
+    void PayOwed() {
+        for (uint8_t kind : {kKeyboard, kMouse})
+            if ((owed_ & kind) && send_("hostbye " + id_ + " " + Kind(kind))) owed_ &= uint8_t(~kind);
+    }
+
     Sender send_;
     std::string id_, host_, reason_;
     bool engaged_ = false;
-    uint8_t devices_ = 0;
+    uint8_t devices_ = 0, owed_ = 0;
     int events_ = 0;
 };
 

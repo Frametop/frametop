@@ -296,6 +296,9 @@ struct HostInput {
     int lock = -1;
     int64_t checkAt = 0, lockAt = 0, askAt = 0, leaseAt = 0;
     hostinput::Answer worn, paused;
+    // What Tick last wanted. Not kRelease at first is a release's edge: a stream that starts with
+    // the switch off or the headset away sends none.
+    hostinput::Want last = hostinput::Want::kRelease;
     uint32_t seq = 0;
     // With the receive thread.
     std::mutex mu;
@@ -353,20 +356,30 @@ struct HostInput {
     }
 
     // Give the host its keyboard and mouse back now: a release also lifts its escape, a drop
-    // keeps it.
-    void Stop(hostinput::Want how) {
+    // keeps it. A release goes even with no lease on the person's own "give it back" (edge), or
+    // while the host may still be escaped: this process may not have seen the escape.
+    void Stop(hostinput::Want how, bool edge = false) {
         const bool release = how == hostinput::Want::kRelease;
         {
             std::lock_guard<std::mutex> lock(mu);
-            if (!leasing && !(release && escaped)) return;
+            if (!leasing && !(release && (escaped || edge))) return;
             leasing = false;
             relay.Stop();
-            if (release) escaped = false;
         }
         const auto msg = release ? hostinput::Release() : hostinput::Drop();
-        LiSendFrametopHostInputLease(msg.data(), int(msg.size()));
+        if (LiSendFrametopHostInputLease(msg.data(), int(msg.size())) != 0) return;  // escaped stays, tried again
+        if (release) {
+            std::lock_guard<std::mutex> lock(mu);
+            escaped = false;
+        }
         std::printf("hostinput: %s %s's keyboard and mouse\n", release ? "released" : "dropped", host.c_str());
         std::fflush(stdout);
+    }
+
+    void Apply(hostinput::Want want) {
+        const bool edge = want == hostinput::Want::kRelease && last != hostinput::Want::kRelease;
+        last = want;
+        if (want != hostinput::Want::kHold) Stop(want, edge);
     }
 
     void Unlock() {
@@ -378,7 +391,7 @@ struct HostInput {
     void Tick(int64_t now, bool live) {
         if (sock < 0) return;
         if (now >= checkAt) checkAt = now + hostinput::kStaleNs, switchOn = HostFlag(host, "input");
-        if (!switchOn || !live) return Stop(hostinput::Decide(switchOn, live, worn, paused, now)), Unlock();
+        if (!switchOn || !live) return Apply(hostinput::Decide(switchOn, live, worn, paused, now)), Unlock();
         if (!locked && now >= lockAt) {
             lockAt = now + hostinput::kStaleNs;
             if (lock < 0) {
@@ -415,7 +428,8 @@ struct HostInput {
             }
         }
         const hostinput::Want want = hostinput::Decide(switchOn, live, worn, paused, now);
-        if (want != hostinput::Want::kHold) return Stop(want);
+        Apply(want);
+        if (want != hostinput::Want::kHold) return;
         if (now < leaseAt) return;
         leaseAt = now + hostinput::kLeaseEveryNs;
         bool asking;

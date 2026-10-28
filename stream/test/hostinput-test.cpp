@@ -162,6 +162,38 @@ int main() {
     relay.Take(hello);
     assert(relay.devices() == (kKeyboard | kMouse));
     said.clear();
+    // A hostbye that couldn't go either is owed: no hostdev for that kind until it has gone.
+    said.clear();
+    up = false;
+    relay.Take(key);  // hostev fails, then both hostbyes
+    up = true;
+    assert(relay.owed() == (kKeyboard | kMouse) && relay.devices() == 0);
+    relay.Take(hello);  // pays them first, then the devices come back
+    assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostbye oma7 mouse", "hostdev oma7 keyboard oma7",
+                                             "hostdev oma7 mouse oma7"}));
+    assert(relay.owed() == 0);
+    said.clear();
+    // Still owed at the hello: that kind waits.
+    int failures = 0;
+    Relay flaky([&](const std::string &msg) {
+        if (msg.rfind("hostbye oma7 keyboard", 0) == 0 && failures++ < 2) return false;
+        said.push_back(msg);
+        return true;
+    });
+    flaky.Start("oma7", "192.168.1.50");
+    flaky.Take(on), flaky.Take(hello);
+    said.clear();
+    flaky.Stop();  // the keyboard's hostbye fails, the mouse's goes
+    assert((said == std::vector<std::string>{"hostbye oma7 mouse"}));
+    said.clear();
+    flaky.Take(on);
+    flaky.Take(hello);  // and fails again: no keyboard hostdev
+    assert((said == std::vector<std::string>{"hostdev oma7 mouse oma7"}) && flaky.owed() == kKeyboard);
+    said.clear();
+    flaky.Take(hello);
+    assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostdev oma7 keyboard oma7", "hostdev oma7 mouse oma7"}));
+    said.clear();
+
     // Released: hostbye for each, and events stop.
     assert(relay.Take(P(Bytes({kVersion, 2, 0, 'e', 's', 'c', 'a', 'p', 'e'}))) == "released: escape");
     assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostbye oma7 mouse"}));

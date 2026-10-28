@@ -213,13 +213,16 @@ def doctor():
     release = os.readlink(RELEASES / 'current') if (RELEASES / 'current').is_symlink() else None
     head = git('rev-parse', 'HEAD')
     try:   # scripts/fast-install's record of the commit on top of the release
-        fast = json.loads((RELEASES / 'current/.fast-install/state.json').read_text()).get('commit') or ''
+        fast_state = json.loads((RELEASES / 'current/.fast-install/state.json').read_text())
     except (OSError, ValueError):
-        fast = ''
-    live = f'{release}' + (f' + fast-install {fast[:7]}' if fast else '')
+        fast_state = {}
+    # an interrupted fast-install left the tree half way: no commit is installed
+    fast = '' if fast_state.get('installing') else fast_state.get('commit') or ''
+    live = f'{release}' + (f' + fast-install {fast[:7]}' if fast else
+                           ' + an interrupted fast-install' if fast_state.get('installing') else '')
     check('Frametop release', release is not None,
           f'{live}; this checkout is {git("branch", "--show-current") or "detached"} {head[:7]}'
-          + ('' if fast == head or (not fast and release and head[:7] in release)
+          + ('' if fast == head or (not fast_state and release and head[:7] in release)
              else ': scripts/fast-install the change under test before driving it'))
     check('hand tracking', hands == 'active', f'{HANDS} {hands}' + ('' if hands == 'active' else
           ': the hands recipes need it (Frametop Input Settings, or hands/run.sh)'))

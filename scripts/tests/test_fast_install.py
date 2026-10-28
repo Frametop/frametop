@@ -48,7 +48,8 @@ class Paths(unittest.TestCase):
         base = {p: ('100644', 'a') for p in (
             'screens/vr.cpp', 'screens/README.md', 'screens/tests/t.cpp', 'frunner/ft-spotpanel.cpp',
             'frunner/reserve.h', 'frunner/ft_frunner.py', 'scripts/openvr.sh', 'gaze/tracker/grab.c',
-            'hands/include/fh_hands.h', 'keyboard/layouts/us.json', 'voice/build.sh')}
+            'hands/include/fh_hands.h', 'hands/handsmode.py', 'keyboard/layouts/us.json',
+            'keyboard/bridge/native_bridge.py', 'keyboard/docs/x.md', 'voice/build.sh', 'stream/mic.patch')}
 
         def rebuilt(path):
             after = dict(base, **{path: ('100644', 'z')})
@@ -62,7 +63,11 @@ class Paths(unittest.TestCase):
         self.assertEqual(rebuilt('frunner/ft_frunner.py'), set())
         self.assertEqual(rebuilt('gaze/tracker/grab.c'), {'gaze/tracker'})
         self.assertEqual(rebuilt('hands/include/fh_hands.h'), {'hands', 'screens', 'pointer/helper'})
-        self.assertEqual(rebuilt('keyboard/layouts/us.json'), {'keyboard'})
+        self.assertEqual(rebuilt('hands/handsmode.py'), set())       # Python runs as it is
+        self.assertEqual(rebuilt('keyboard/layouts/us.json'), {'keyboard'})   # built in
+        self.assertEqual(rebuilt('keyboard/bridge/native_bridge.py'), {'keyboard'})   # copied by CMake
+        self.assertEqual(rebuilt('keyboard/docs/x.md'), set())
+        self.assertEqual(rebuilt('stream/mic.patch'), {'stream'})
         self.assertEqual(rebuilt('voice/build.sh'), {'voice'})
         openvr = rebuilt('scripts/openvr.sh')
         self.assertTrue({'screens', 'power', 'keyboard'} <= openvr)
@@ -73,7 +78,7 @@ class Paths(unittest.TestCase):
         self.assertIsNone(fi.install_step('scripts/in-box'))
         for path in ('pointer/driver/build/driver_ft_pointer.so', 'install.sh', 'pack/release-box.sh',
                      'gaze/install.sh', 'screens/frametop-handview.service', 'tour/frametop-tour.desktop',
-                     'setup/bluetooth/main.conf', 'gaze/tracker/atomic-update.conf'):
+                     'setup/bluetooth/main.conf', 'gaze/tracker/atomic-update.conf', 'hands/models.pin'):
             self.assertIsNotNone(fi.install_step(path), path)
 
     def test_what_runs(self):
@@ -97,6 +102,12 @@ class Paths(unittest.TestCase):
             desktop = fi.dirs_used(tree, fi.DESKTOP, ['/r/current/session/../input/ft-textinput'], roots)
             self.assertIn('input/ft-textinput', desktop)   # that file only, not all of input/
             self.assertNotIn('input', desktop)
+            self.assertEqual(fi.dirs_used(tree, 'frametop-camd.service', ['/r/0.1/hands/build/ft-camd'], roots),
+                             {'hands/build/ft-camd'})   # not all of hands/
+            # a failed unit has no processes: its ExecStart, as systemctl shows it, still names them
+            shown = '{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /r/0.1/input/input-relay.py ; ignore_errors=no }'
+            self.assertEqual(fi.dirs_used(tree, 'frametop-input-relay.service', shown.split(), roots),
+                             {'input', 'commands'})
 
 
 class Restarts(unittest.TestCase):
@@ -114,26 +125,33 @@ class Restarts(unittest.TestCase):
 
     def restarted(self, changed, worn=False, worn_ok=False, enabled=True):
         with mock.patch.object(fi, 'frame_status', lambda: (worn, 1)):
-            hit, ok = fi.restart(Path('/r'), changed, enabled, worn_ok)
-        return hit, [c[-1] for c in self.calls]
+            done, left, ok = fi.restart(Path('/r'), changed, enabled, worn_ok)
+        self.assertTrue(ok)
+        return done, sorted(left), [c[-1] for c in self.calls]
 
     def test_runtime_files_only(self):
-        self.assertEqual(self.restarted(['screens/README.md', 'screens/vr.cpp', 'input/test/t.py']), ([], []))
+        self.assertEqual(self.restarted(['screens/README.md', 'screens/vr.cpp', 'input/test/t.py']), ([], [], []))
 
     def test_desktop_goes_last(self):
-        hit, calls = self.restarted(['screens/build/ft-screens', 'commands/ft_commands.py'])
-        self.assertEqual(hit, [fi.DESKTOP, 'frametop-input-relay.service', 'frametop-voice.service'])
+        done, left, calls = self.restarted(['screens/build/ft-screens', 'commands/ft_commands.py'])
+        self.assertEqual(done, ['frametop-input-relay.service', 'frametop-voice.service', fi.DESKTOP])
         self.assertEqual(calls, ['frametop-input-relay.service', 'frametop-voice.service', 'restart'])
 
     def test_worn_headset_keeps_the_desktop(self):
-        _, calls = self.restarted(['screens/build/ft-screens'], worn=True)
-        self.assertEqual(calls, [])
-        _, calls = self.restarted(['screens/build/ft-screens'], worn=True, worn_ok=True)
-        self.assertEqual(calls, ['restart'])
+        self.assertEqual(self.restarted(['screens/build/ft-screens'], worn=True), ([], [fi.DESKTOP], []))
+        self.assertEqual(self.restarted(['screens/build/ft-screens'], worn=True, worn_ok=True),
+                         ([fi.DESKTOP], [], ['restart']))
 
     def test_no_restart(self):
-        hit, calls = self.restarted(['input/vrws.py'], enabled=False)
-        self.assertEqual((hit, calls), (['frametop-input-relay.service', 'frametop-voice.service'], []))
+        self.assertEqual(self.restarted(['input/vrws.py'], enabled=False),
+                         ([], ['frametop-input-relay.service', 'frametop-voice.service'], []))
+
+    def test_failed_restart(self):
+        with mock.patch.object(fi.subprocess, 'run', lambda cmd, **kw: mock.Mock(returncode=1)), \
+                mock.patch.object(fi, 'frame_status', lambda: (False, 1)):
+            done, left, ok = fi.restart(Path('/r'), ['input/vrws.py'], True, False)
+        self.assertEqual((done, sorted(left), ok),
+                         ([], ['frametop-input-relay.service', 'frametop-voice.service'], False))
 
 
 class Release(unittest.TestCase):
@@ -141,8 +159,10 @@ class Release(unittest.TestCase):
 
     FILES = {'.dockerignore': '**/build/\ntestbench/\n', 'input/relay.py': 'v1\n', 'input/old.py': 'gone soon\n',
              'docs/a.md': 'same\n', 'testbench/t.py': 'dev\n', 'uv.lock': 'lock1\n',
-             'hands/track/main.cpp': 'track1\n', 'hands/camd/camd.c': 'camd1\n', 'power/powerd.c': 'p1\n'}
-    BUILT = {'hands/build/ft-hands': b'hands1', 'hands/build/ft-camd': b'camd1', 'power/build/ft-powerd': b'p1'}
+             'hands/track/main.cpp': 'track1\n', 'hands/camd/camd.c': 'camd1\n', 'power/powerd.c': 'p1\n',
+             'hands/include/fh_hands.h': 'api1\n', 'screens/vr.cpp': 's1\n', 'gaze/tracker/ft-eyegrab.c': 'g1\n'}
+    BUILT = {'hands/build/ft-hands': b'hands1', 'hands/build/ft-camd': b'camd1', 'power/build/ft-powerd': b'p1',
+             'screens/build/ft-screens': b's1', 'gaze/tracker/build/ft-eyegrab': b'g1'}
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -172,8 +192,7 @@ class Release(unittest.TestCase):
         self.restarts = []
         for p in (mock.patch.object(fi, 'ROOT', self.repo), mock.patch.object(fi, 'RELEASES', releases),
                   mock.patch.object(fi, 'STAGE', self.stage),
-                  mock.patch.object(fi, 'restart', lambda tree, changed, enabled, worn_ok:
-                                    self.restarts.append(sorted(changed)) or ([], True)),
+                  mock.patch.object(fi, 'restart', self.fake_restart),
                   mock.patch.object(fi, 'say', lambda *a: None),
                   mock.patch.object(fi, 'frame_status', lambda: (False, 1)),
                   mock.patch.object(fi, 'stage_checkout', lambda rev, box: None),
@@ -181,6 +200,12 @@ class Release(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         self.outputs = {}
+
+    left = {}   # what fake_restart leaves to restart
+
+    def fake_restart(self, tree, changed, enabled, worn_ok):
+        self.restarts.append(sorted(changed))
+        return [], dict(self.left), True
 
     def fake_build(self, comp, box, cpus):
         self.builds.append(comp)
@@ -334,6 +359,21 @@ class Builds(Release):
         self.assertEqual((self.tree / 'hands/build/ft-hands').read_bytes(), b'hands2')
         self.assertEqual((self.tree / 'hands/build/ft-camd').read_bytes(), b'camd1')   # caps kept
 
+    def test_eyegrab_goes_in_the_tree_with_its_step(self):
+        self.commit({'gaze/tracker/ft-eyegrab.c': 'g2\n'})
+        self.outputs = {'gaze/tracker/build/ft-eyegrab': b'g2'}
+        self.assertEqual(self.install(), 3)
+        self.assertEqual((self.tree / 'gaze/tracker/build/ft-eyegrab').read_bytes(), b'g2')
+        self.assertIn('gaze/tracker/build/ft-eyegrab', fi.load_state(self.tree)['steps'])
+
+    def test_api_change_holds_its_readers_with_hands(self):
+        self.commit({'hands/camd/camd.c': 'camd2\n', 'hands/include/fh_hands.h': 'api2\n'})
+        self.outputs = {'screens/build/ft-screens': b's2', 'hands/build/ft-hands': b'hands2'}
+        self.assertEqual(self.install(dry=True), 3)   # a dry run knows too
+        self.assertEqual(self.install(), 3)
+        self.assertEqual(self.builds, [])
+        self.assertEqual((self.tree / 'screens/build/ft-screens').read_bytes(), b's1')
+
     def test_camd_change_holds_hands_back(self):
         self.commit({'hands/camd/camd.c': 'camd2\n', 'hands/track/main.cpp': 'track2\n'})
         self.outputs = {'hands/build/ft-hands': b'hands2', 'hands/build/ft-camd': b'camd2'}
@@ -342,6 +382,29 @@ class Builds(Release):
         self.assertEqual((self.tree / 'hands/build/ft-camd').read_bytes(), b'camd1')
         self.assertIn('hands/build/ft-camd', fi.load_state(self.tree)['steps'])
         self.assertNotIn('hands', fi.load_state(self.tree)['built'])
+        self.assertNotIn('hands', self.builds)
+
+    def test_rerun_after_an_interrupt_keeps_steps_and_restarts(self):
+        self.commit({'input/frametop-relay.service': '[Service]\n', 'input/zz.py': 'new\n'})
+        real = fi.Live.put
+
+        def crash(live, rel, data, mode):
+            if rel == 'input/zz.py':
+                raise KeyboardInterrupt
+            real(live, rel, data, mode)
+
+        with mock.patch.object(fi.Live, 'put', crash), self.assertRaises(KeyboardInterrupt):
+            self.install()
+        self.assertEqual(self.install(), 3)
+        self.assertIn('input/frametop-relay.service', fi.load_state(self.tree)['steps'])
+        self.assertEqual(self.restarts, [['input/frametop-relay.service', 'input/zz.py']])
+        self.assertNotIn('restart', fi.load_state(self.tree))
+
+    def test_a_restart_left_is_a_step(self):
+        self.commit({'input/relay.py': 'v2\n'})
+        self.left = {fi.DESKTOP: 'desktops.sh restart'}
+        self.assertEqual(self.install(), 3)
+        self.assertIn(f'restart:{fi.DESKTOP}', fi.load_state(self.tree)['steps'])
 
 
 class Arguments(unittest.TestCase):

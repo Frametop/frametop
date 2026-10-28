@@ -52,10 +52,11 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
    puts the changed files and programs in place, restarts the services using them (the desktop
    too, unless the headset is worn: `--worn-ok` once the wearer says yes), and records it all in
    the release's `.fast-install/` (`scripts/fast-install status`; `undo` restores the release).
-   Exit 3 lists steps left that an installer has to do: the `ft_pointer` driver
-   (`pointer/driver/install.sh install`, then a SteamVR restart: ask first), units, menu
-   entries, `/etc` files; `scripts/fast-install done PATH` once one is done. Exit 1 on a change
-   the image carries, a changed ft-camd, or a failed build: those need the full build, or a fix.
+   Exit 3 lists steps left: what an installer has to do (the `ft_pointer` driver:
+   `pointer/driver/install.sh install`, then a SteamVR restart, ask first; units, menu entries,
+   `/etc` files), restarts it left (the desktop while worn), and hand tracking held back by a
+   changed ft-camd (that takes the full build); `scripts/fast-install done PATH` once one is
+   done. Exit 1 on a change the image carries (the full build) or a failed build or restart.
    Don't swap live files by hand. Say in the report which commit is installed.
 2. `V launch NAME`: runs the doctor, refuses on a worn headset, an unhealthy Frame or another
    run under way (a run is held for 30 minutes from its last launch, guard or snapshot), then

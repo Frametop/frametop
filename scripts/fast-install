@@ -24,8 +24,8 @@ release: this never runs the installers, never changes the image, and never rest
 It refuses changes the release's image has to carry (Python packages, the image's packages),
 unless --partial installs the rest anyway. Changes an installer puts in place (units, menu
 entries, the SteamVR driver, files under /etc) are copied into the tree and listed as steps
-left; it exits 3 while any are left. A changed ft-camd holds hand tracking back: a new one
-needs file capabilities, so that takes the full build.
+left, and so are the restarts it left; it exits 3 while any are left. A changed ft-camd holds
+hand tracking back: a new one needs file capabilities, so that takes the full build.
 
 Restarting the desktop ends what's open on it: while the headset is worn it's left alone
 unless --worn-ok (the wearer said yes). --dry-run doesn't build, so it can't tell which
@@ -61,6 +61,8 @@ IMAGE = {'pack/Containerfile', 'pack/pyside-runtime.py', 'uv.lock', 'pyproject.t
          '.python-version', 'setup/dev-container.sh'}
 # Components with a build.sh: the paths outside their folder their build reads, and the
 # outputs that go into the live tree (in COMPONENT/build; the Containerfile keeps the same).
+# Their own folder's build inputs are its sources and build files (BUILD_SUFFIXES,
+# BUILD_NAMES), or, for WHOLE ones, every file but docs and tests.
 OPENVR = 'scripts/openvr.sh'
 HANDS_API = 'hands/include'   # ft-hands' event and gesture structs, which its readers include
 COMPONENTS = {
@@ -79,15 +81,21 @@ COMPONENTS = {
     'hands': ((), ('ft-hands', 'ft-camd')),
     'hands/rec': ((OPENVR,), ('ft-handpanel',)),
 }
+WHOLE = {'keyboard'}   # its CMake build embeds layouts, languages and themes, and copies scripts
+BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl', '.vert', '.frag',
+                  '.patch', '.cmake'}
+BUILD_NAMES = {'build.sh', 'Makefile', 'CMakeLists.txt', 'meson.build', 'Cargo.toml', 'Cargo.lock'}
 # Built programs an installer has to put in place, and the sources they're built from: a
 # rebuild changes their bytes (the build folder's path is in them), so only a source change
-# counts. hold: the component's other programs wait for it too (they share its ring layout).
+# counts. hold: the component's other programs wait for it too (they share its ring layout),
+# and so do the components that read hands/include, when that changed too.
 INSTALLED = {
     'hands/build/ft-camd': (('hands/camd',), True,
                             'hand tracking held back: a new ft-camd needs file capabilities '
                             '(hands/run.sh caps, sudo), so test it with the full build'),
     'gaze/tracker/build/ft-eyegrab': (('gaze/tracker/ft-eyegrab.c',), False,
-                                      'gaze/tracker/install.sh install (sudo: it runs as root from /etc)'),
+                                      'gaze/tracker/install.sh install from the live tree (sudo: it '
+                                      'runs as root, from a copy under /etc)'),
 }
 # Files an installer copies under /etc.
 ETC = {'gaze/tracker/atomic-update.conf'}
@@ -101,13 +109,14 @@ EXTRA_DIRS = {
     'frametop-voice.service': ('input', 'commands'),
     'frametop-gaze.service': ('models',),
 }
-# Restarting the desktop ends what's open on it: other folders its processes run a file from
-# (input/ft-textinput) restart it for that file only, not for the whole folder.
-FILE_LEVEL = {'frametop-desktop.service'}
+# Units restarted for the files their processes run, not those files' folders: the desktop
+# (restarting it ends what's open on it; input/ft-textinput shouldn't restart it for all of
+# input/), and ft-camd (a new ft-hands isn't a new ft-camd).
+FILE_LEVEL = {'frametop-desktop.service', 'frametop-camd.service'}
 DESKTOP = 'frametop-desktop.service'
 NOT_RUN = ('.md',)          # files no program runs or reads
 NOT_RUN_DIRS = {'docs', 'test', 'tests'}
-NATIVE_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S'}
+SOURCES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S'}   # their programs are what runs
 
 
 class Refused(Exception):
@@ -188,23 +197,29 @@ def component_of(path):
     return max(owners, key=len) if owners else None
 
 
+def documentation(path):
+    return path.endswith(NOT_RUN) or bool(NOT_RUN_DIRS & set(path.split('/')[:-1]))
+
+
 def runs(path):
-    """Could a program run or read this file? Not docs, tests, or C and C++ sources (their
-    programs are what runs)."""
-    parts = path.split('/')
-    return not (path.endswith(NOT_RUN) or NOT_RUN_DIRS & set(parts[:-1])
-                or os.path.splitext(path)[1] in NATIVE_SUFFIXES)
+    """Could a program run or read this file? Not docs, tests, or C and C++ sources."""
+    return not (documentation(path) or os.path.splitext(path)[1] in SOURCES)
+
+
+def builds(comp, path):
+    """Is path, in comp's own folder, something its build reads?"""
+    if documentation(path):
+        return False
+    name = path.rsplit('/', 1)[-1]
+    return comp in WHOLE or name in BUILD_NAMES or os.path.splitext(name)[1] in BUILD_SUFFIXES
 
 
 def inputs_hash(comp, entries):
-    """A hash of what a component's build reads at a commit: equal hashes build the same. That's
-    its own folder's files but docs and tests (a keyboard layout or a bridge script is built in
-    too), and the paths it names from elsewhere."""
+    """A hash of what a component's build reads at a commit: equal hashes build the same."""
     named = COMPONENTS[comp][0]
     h = hashlib.sha256()
     for path in sorted(entries):
-        own = component_of(path) == comp and not (path.endswith(NOT_RUN) or NOT_RUN_DIRS & set(path.split('/')[:-1]))
-        if own or under(path, named):
+        if (component_of(path) == comp and builds(comp, path)) or under(path, named):
             h.update(f'{path}\0{entries[path][1]}\n'.encode())
     return h.hexdigest()[:16]
 
@@ -214,6 +229,8 @@ def install_step(path):
     name = path.rsplit('/', 1)[-1]
     if path.startswith('pointer/driver/'):
         return 'pointer/driver/install.sh install from the live tree, then restart SteamVR (ask first)'
+    if path == 'hands/models.pin':
+        return 'the pinned hand models: hands/models.sh fetch from the live tree, or the full build'
     if path.startswith('setup/') or path in ETC:
         return 'its installer (it copies the file under /etc, with sudo), or the full build'
     if path in ('install.sh', 'get.sh', 'uninstall.sh') or path.startswith('pack/'):
@@ -330,18 +347,21 @@ class Live:
 
 
 def unit_dirs(tree):
-    """{unit: folders (or, for FILE_LEVEL units, files) of the live tree its running processes
-    use}, for active Frametop units."""
-    names = subprocess.run(['systemctl', '--user', 'list-units', 'frametop-*', '--state=active',
-                            '--no-legend', '--plain'], capture_output=True, text=True).stdout
+    """{unit: folders (or, for FILE_LEVEL units, files) of the live tree its programs use}, for
+    the Frametop units that run or should (failed ones too: a fix should start them again)."""
+    names = subprocess.run(['systemctl', '--user', 'list-units', 'frametop-*',
+                            '--state=active,activating,failed', '--no-legend', '--plain'],
+                           capture_output=True, text=True).stdout
     roots = (str(tree) + '/', str(RELEASES / 'current') + '/')
     units = {}
     for unit in (line.split()[0] for line in names.splitlines() if line.strip()):
         if not unit.endswith('.service'):
             continue
-        cgroup = subprocess.run(['systemctl', '--user', 'show', '-p', 'ControlGroup', '--value', unit],
-                                capture_output=True, text=True).stdout.strip()
-        args = []
+        shown = subprocess.run(['systemctl', '--user', 'show', '-p', 'ControlGroup', '-p', 'ExecStart', unit],
+                               capture_output=True, text=True).stdout
+        props = dict(line.split('=', 1) for line in shown.splitlines() if '=' in line)
+        cgroup = props.get('ControlGroup', '')
+        args = props.get('ExecStart', '').split()   # a failed unit has no processes to look at
         for procs in Path('/sys/fs/cgroup' + cgroup).rglob('cgroup.procs') if cgroup else ():
             for pid in procs.read_text().split():
                 try:
@@ -359,13 +379,16 @@ def dirs_used(tree, unit, args, roots):
         if not hits:
             continue
         i, root = min(hits)
-        rel = os.path.normpath(arg[i + len(root):])
+        rel = os.path.normpath(arg[i + len(root):].rstrip(';'))
         if rel.startswith(('scripts/', '..')):
             continue   # scripts/in-box starts most of them
+        if unit in FILE_LEVEL and not (tree / rel).is_dir():
+            dirs.add(rel)
+            continue
         parts = rel.split('/')
         if 'build' in parts:
             parts = parts[:parts.index('build')]
-        elif not (tree / rel).is_dir() and unit not in FILE_LEVEL:
+        elif not (tree / rel).is_dir():
             parts = parts[:-1]
         if parts:
             dirs.add('/'.join(parts))
@@ -373,31 +396,31 @@ def dirs_used(tree, unit, args, roots):
 
 
 def restart(tree, changed, enabled, worn_ok):
-    """Restart the active units that run a changed file; the desktop last. Returns the units
-    restarted, or that need it, and whether every restart worked."""
+    """Restart the units that run a changed file; the desktop last. Returns (restarted, left:
+    {unit: how to restart it}, ok: every restart worked)."""
     units = unit_dirs(tree)
     live = [p for p in changed if runs(p)]
     hit = sorted(u for u, dirs in units.items() if any(under(p, dirs) for p in live))
-    if not hit:
-        return hit, True
+    how = {u: f'systemctl --user restart {u}' for u in hit}
+    how[DESKTOP] = f'{tree / "desktops.sh"} restart'
     if not enabled:
-        say('not restarted (--no-restart): ' + ' '.join(hit))
-        return hit, True
-    ok = True
-    for unit in (u for u in hit if u != DESKTOP):
+        return [], {u: how[u] for u in hit}, True
+    done, left, ok = [], {}, True
+    worn = DESKTOP in hit and frame_status()[0]
+    for unit in sorted(hit, key=lambda u: u == DESKTOP):
+        if unit == DESKTOP and worn and not worn_ok:
+            say('the headset is worn: the desktop restarts once the wearer is ready (--worn-ok)')
+            left[unit] = how[unit]
+            continue
         say(f'restarting {unit}')
-        ok &= subprocess.run(['systemctl', '--user', 'restart', unit]).returncode == 0
-    if DESKTOP in hit:
-        worn, _ = frame_status()
-        if worn and not worn_ok:
-            say(f'the headset is worn: the desktop needs a restart for the change. When the wearer is '
-                f'ready: {tree / "desktops.sh"} restart (or run again with --worn-ok)')
+        cmd = [str(tree / 'desktops.sh'), 'restart'] if unit == DESKTOP else how[unit].split()
+        if subprocess.run(cmd, stdin=subprocess.DEVNULL).returncode == 0:
+            done.append(unit)
         else:
-            say('restarting the Frametop desktop (desktops.sh restart)')
-            ok &= subprocess.run([str(tree / 'desktops.sh'), 'restart'], stdin=subprocess.DEVNULL).returncode == 0
-    if not ok:
-        say('a restart failed (above): journalctl --user -u UNIT shows why')
-    return hit, ok
+            ok = False
+            left[unit] = how[unit]
+            say(f'restarting {unit} failed: journalctl --user -u {unit} shows why')
+    return done, left, ok
 
 
 def install(rev, dry, restart_units, worn_ok, partial):
@@ -453,17 +476,30 @@ def install(rev, dry, restart_units, worn_ok, partial):
     for path in image:
         steps[path] = 'the full build (the image carries it)'
 
-    rebuild = [(c, h) for c in COMPONENTS
-               if (h := inputs_hash(c, new)) != (state['built'].get(c) or inputs_hash(c, old))]
+    # Programs an installer has to put in place: only a source change counts. A held component's
+    # programs all wait, and so do the programs that read hands/include, if it changed too.
+    held = {}
+    for rel, (sources, hold, step) in INSTALLED.items():
+        if any(under(p, sources) for p in changed):
+            steps[rel] = step
+            if hold:
+                held[rel.split('/build/')[0]] = step
+    if 'hands' in held and any(under(p, (HANDS_API,)) for p in changed):
+        held.update({c: 'it reads hands/include, so it waits for hand tracking'
+                     for c, (reads, _) in COMPONENTS.items() if HANDS_API in reads})
+    rebuild = [(c, h) for c in COMPONENTS if c not in held
+               and (h := inputs_hash(c, new)) != (state['built'].get(c) or inputs_hash(c, old))]
+    for comp, why in held.items():
+        say(f'  {comp}: not installed ({why})')
     if dry:
         for path in sorted(puts) + removes:
             say(f'  would install {path}' if path in puts else f'  would remove {path}')
         if rebuild:
             say('would rebuild: ' + ', '.join(c for c, _ in rebuild))
         say(f'{len(puts) + len(removes)} file(s) would change; {target[:12]} onto {info.get("VERSION")}')
-        for path, step in sorted(steps.items()):
+        for path, step in sorted({**state['steps'], **steps}.items()):
             say(f'  step left: {path}: {step}')
-        return 3 if steps or state.get('steps') else 0
+        return 3 if steps or state['steps'] else 0
 
     if rebuild:
         stage_checkout(target, info['BOX'])
@@ -471,29 +507,23 @@ def install(rev, dry, restart_units, worn_ok, partial):
         cpus = ','.join(map(str, sorted(os.sched_getaffinity(0))[:cores]))
         for comp, _ in rebuild:
             build(comp, info['BOX'], cpus)
-        for comp, want in list(rebuild):
-            built = {rel: content(f.read_bytes(), f.stat().st_mode) for rel, f in outputs(comp).items()}
-            held = None
-            for rel, (sources, hold, step) in INSTALLED.items():
-                if rel in built:
-                    if any(under(p, sources) for p in changed):
-                        steps[rel] = step
-                        held = held or (step if hold else None)
-                    del built[rel]
-            if held:
-                say(f'  {comp}: not installed ({held})')
-                rebuild.remove((comp, want))   # not installed: the next run looks again
-                continue
-            for rel, (data, perm) in built.items():
+        for comp, _ in rebuild:
+            for rel, f in sorted(outputs(comp).items()):
+                if rel in INSTALLED and rel not in steps:
+                    continue   # rebuilt from the same sources: only the build path in it differs
+                data, perm = content(f.read_bytes(), f.stat().st_mode)
                 if not same(tree / rel, data, perm):
                     puts[rel] = (data, perm)
                     if step := install_step(rel):
                         steps[rel] = step
 
-    # Apply.
+    # Apply. The steps and the files whose services need a restart go in the state first, so
+    # a run after an interrupted one still restarts them and lists them.
     if drift:
         say('note: these live files differed from the release already (swapped by hand?); undo puts '
             'them back as they were: ' + ', '.join(drift))
+    state['steps'].update(steps)
+    state['restart'] = sorted({*state.get('restart', ()), *puts, *removes})
     state['installing'] = target   # until every file is in: status shows an interrupted run
     save_state(tree, state)
     work = Live(tree, state)
@@ -504,13 +534,17 @@ def install(rev, dry, restart_units, worn_ok, partial):
         work.put(path, data, perm)
         say(f'  installed {path}')
     state['built'].update(dict(rebuild))
-    state['steps'].update(steps)
     state.update(commit=target, at=time.strftime('%Y-%m-%dT%H:%M:%S%z'))
     del state['installing']
     save_state(tree, state)
-    hit, ok = restart(tree, [*puts, *removes], restart_units, worn_ok)
+
+    restarted, left, ok = restart(tree, state.pop('restart'), restart_units, worn_ok)
+    for unit in restarted:
+        state['steps'].pop(f'restart:{unit}', None)
+    state['steps'].update({f'restart:{unit}': how for unit, how in left.items()})
+    save_state(tree, state)
     say(f'fast-installed {target[:12]} onto {info.get("VERSION")}: {len(puts) + len(removes)} file(s), '
-        f'{len(rebuild)} rebuilt, {len(hit)} service(s) {"restarted" if restart_units else "to restart"}')
+        f'{len(rebuild)} rebuilt, {len(restarted)} service(s) restarted')
     for path, step in sorted(state['steps'].items()):
         say(f'  step left: {path}: {step}')
     if state['steps']:
@@ -559,12 +593,15 @@ def undo(restart_units, worn_ok):
         elif live.is_file() or live.is_symlink():
             live.unlink()
         say(f'  restored {rel}')
-    _, ok = restart(tree, list(state['files']), restart_units, worn_ok)
+    _, left, ok = restart(tree, list(state['files']), restart_units, worn_ok)
     shutil.rmtree(tree / '.fast-install')
     say(f'back to {info.get("VERSION")} as it was before fast-install ({len(state["files"])} file(s))')
-    if state.get('steps'):
-        say('installer steps done by hand stay as they are: ' + ', '.join(sorted(state['steps'])))
-    return 0 if ok else 1
+    installers = sorted(p for p in state.get('steps', {}) if not p.startswith('restart:'))
+    if installers:
+        say('installer steps done by hand stay as they are: ' + ', '.join(installers))
+    for how in left.values():
+        say(f'  to restart still: {how}')
+    return 1 if not ok else 3 if left else 0
 
 
 def locked(fn, *args):

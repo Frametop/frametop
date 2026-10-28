@@ -65,7 +65,14 @@ hears the result (`typing <L> <R>` on @ft_screens).
   the eyes, 0.05-0.45 m ahead, palm down) while typing is parked, and stays held back through any
   pause until it rises `POINTER_TYPING_RAISE` (0.08 m) above where it typed, or turns its palm up,
   for 0.1 s. Freed, it works at once, keys or not. A hand on the mouse beside the keyboard is parked
-  too once a key comes (its pinches are mouse clicks). Unseen 3 s, it's forgotten.
+  too once a key comes (its pinches are mouse clicks). Out of the cameras' sight it stays parked for
+  up to `POINTER_TYPING_KEEP` (300 s); a free hand unseen 3 s is forgotten.
+- The mouse (2026-10-28): for `POINTER_TYPING_MOUSE` (10 s) after the mouse moved, clicked or
+  scrolled, a hand that comes down in the zone is parked too, keys or not, and leaves the same way.
+  Before, a hand on the mouse with no key for a while was free once the mouse had been still for
+  1 s, and looking up (3 s unseen) forgot a parked one: in an hour of keyboard and mouse use, resting
+  desk hands raised 26 rays that took the pointer from the mouse, and 11 near claims on the way from
+  the keys to the mouse released it. A held-back hand's near claim no longer releases the pointer.
 - The posture: both hands in the zone, level within 8 cm and at most 32 cm apart, for
   `POINTER_TYPING_POSTURE` (0.3 s), is typing before any key, within `POINTER_TYPING_RECENT` (600 s)
   of a key. Without that limit, both hands resting on a desk would hold gaze pinches back.

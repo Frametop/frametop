@@ -394,7 +394,10 @@
 // pinch ended: typing: the hand is on the keyboard"). ft-screens gets "typing
 // <L 0|1> <R 0|1>" on @ft_screens, on a change and every second: no pokes, near grabs or "grab
 // that" by those hands. Changes go to the log ("typing: right hand on the keyboard", "typing: right
-// hand off the keyboard (raised 0.09 m)").
+// hand off the keyboard (raised 0.09 m)"). A hand on the keyboard stays there out of the cameras' sight, up
+// to POINTER_TYPING_KEEP (300 s): looking up at a screen and back down doesn't free it. For
+// POINTER_TYPING_MOUSE (10 s) after the mouse was used, a hand that comes down at the desk (the keyboard
+// zone) is held back the same way, keys or not ("typing: right hand at the desk (the mouse in use)").
 //
 // Gaze pinch (gaze mode with POINTER_HANDS; gazehand.h has the rules and the timings): the eyes aim
 // and the hands click, Vision Pro style. In gaze mode the hand ray stays off unless
@@ -1031,7 +1034,7 @@ int main() {
     bool rightDragPending = false;
     double pinchGain = 0.5, pinchDeadzone = 1.5, gripGain = 1.0, handBelow = 0.35;
     // Typing (see the top): POINTER_PINCH_TYPING, POINTER_TYPING_RAISE, POINTER_TYPING_BELOW,
-    // POINTER_TYPING_POSTURE, POINTER_TYPING_RECENT.
+    // POINTER_TYPING_POSTURE, POINTER_TYPING_RECENT, POINTER_TYPING_KEEP, POINTER_TYPING_MOUSE.
     typing::Params typingParams;
     // The hand ray (see "Hand ray" at the top): POINTER_HAND_RAY, POINTER_RAY_DEADZONE, POINTER_RAY_PUSH,
     // POINTER_RAY_SCROLL, POINTER_RAY_RELEASE, POINTER_RAY_GRACE.
@@ -1106,6 +1109,8 @@ int main() {
         typingParams.below = std::clamp(ConfDouble(conf, "POINTER_TYPING_BELOW", 0.2), 0.0, 1.0);
         typingParams.posture = std::clamp(ConfDouble(conf, "POINTER_TYPING_POSTURE", 0.3), 0.0, 5.0);
         typingParams.recent = std::clamp(ConfDouble(conf, "POINTER_TYPING_RECENT", 600), 0.0, 86400.0);
+        typingParams.keep = std::clamp(ConfDouble(conf, "POINTER_TYPING_KEEP", 300), 0.0, 86400.0);
+        typingParams.mouse = std::clamp(ConfDouble(conf, "POINTER_TYPING_MOUSE", 10), 0.0, 600.0);
         rayOn = ConfDouble(conf, "POINTER_HAND_RAY", 1) != 0;
         rayDeadzone = std::clamp(ConfDouble(conf, "POINTER_RAY_DEADZONE", 2.5), 0.0, 10.0);
         rayPush = ConfDouble(conf, "POINTER_RAY_PUSH", 1) != 0;
@@ -1870,7 +1875,7 @@ int main() {
         // A move held back (POINTER_GAZE_MOUSE_MOVE=held) only wakes the pointer: it isn't using
         // the mouse, so a drifting mouse doesn't keep the gaze from taking the pointer back.
         const bool heldBack = mouseMoveHeld();
-        if (!heldBack) lastMouse = Clock::now();
+        if (!heldBack) lastMouse = Clock::now(), typist.Mouse(secsOf(lastMouse));
         // Any mouse input wakes the pointer (after a controller took over, or a helper restart).
         if (!active) wake(Clock::now());
         if (heldBack) return;
@@ -2178,7 +2183,7 @@ int main() {
             }
             // (Moves were taken first, above.)
             const bool mouseInput = std::strncmp(buf, "btn", 3) == 0 || std::strncmp(buf, "scroll", 6) == 0;
-            if (mouseInput) lastMouse = Clock::now();
+            if (mouseInput) lastMouse = Clock::now(), typist.Mouse(secsOf(lastMouse));
             // Mouse input wakes the pointer (after a controller took over, or a helper restart),
             // but a release doesn't (a button up, a scroll back to 0 0): the relay sends those with
             // the pointer off when Frametop pauses for a game (input-relay.py stand_down), and
@@ -2697,7 +2702,10 @@ int main() {
         // or in gaze mode the gaze, GAZE_WAKE_NEAR after the hand left. With a hand's ray driving it, only
         // that hand's claim lets it go (user, 2026-10-19: typing on Full Keyboard with the right hand's
         // laser, the resting left hand's claim released it 49 times in a row and a pinch lost its click).
-        const bool claimed = raySide >= 0 ? nearClaim[raySide] : nearClaim[0] || nearClaim[1];
+        // A hand typing holds back doesn't claim (ft-screens hears so a moment later): a hand lifted off the keys
+        // and put on the mouse touched a panel on the way and released the pointer (2026-10-28, 11 times in an hour).
+        const auto claims = [&](int s) { return nearClaim[s] && !typist.Blocked(s, secsOf(tnow)); };
+        const bool claimed = raySide >= 0 ? claims(raySide) : claims(0) || claims(1);
         if (active && hold.src == Src::None && !leftHeld && touch.side < 0 && tnow - nearAt < std::chrono::milliseconds(200) &&
             claimed && tnow - lastMouse > std::chrono::seconds(1)) {
             releasePointer("a hand touches a panel");

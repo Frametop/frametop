@@ -231,7 +231,8 @@ void TestMouseUser() {
     CHECK(!w.Blocked(1) && w.Blocked(0), "the mouse hand raised: free; the keyboard hand: not");
 }
 
-// Lost hands: through a short loss it stays on the keyboard; unseen 3 s, forgotten.
+// Lost hands: on the keyboard, it stays there out of sight (looking up at a screen), up to
+// POINTER_TYPING_KEEP; back raised, it's free. A free hand unseen 3 s is forgotten.
 void TestLost() {
     World w;
     w.hands[0] = Keys(0), w.hands[1] = Keys(1);
@@ -241,17 +242,108 @@ void TestLost() {
     w.hands[1] = Keys(1);
     w.Step();
     CHECK(w.ty.Parked(1), "unseen 2 s, back where it typed: still on the keyboard");
+    // the 2026-10-28 complaint: looked up for 16 s, then down at the hands
+    w.hands[0] = Unseen(), w.hands[1] = Unseen();
+    w.Run(16);
+    CHECK(w.ty.Parked(0) && w.ty.Parked(1) && w.Blocked(1), "unseen 16 s: still on the keyboard");
+    CHECK(w.log.find("forgotten") == std::string::npos, "not forgotten: %s", w.log.c_str());
+    w.hands[0] = Keys(0), w.hands[1] = Keys(1);
+    w.Run(1);
+    CHECK(w.ty.Parked(0) && w.ty.Parked(1), "seen again where they typed: on the keyboard");
+    // past POINTER_TYPING_KEEP: forgotten
     w.hands[1] = Unseen();
-    w.Run(3.2);
-    CHECK(!w.ty.Parked(1) && !w.Blocked(1), "unseen 3 s: forgotten");
+    w.Run(301);
+    CHECK(!w.ty.Parked(1) && !w.Blocked(1), "unseen past keep: forgotten");
+    CHECK(w.log.find("right hand forgotten (unseen)") != std::string::npos, "logged: %s", w.log.c_str());
     // back up where it was raised: free
     w.hands[0] = Keys(0), w.hands[1] = Keys(1);
     w.Run(0.5, 0.2);
     w.hands[1] = Unseen();
-    w.Run(1);
+    w.Run(10);
     w.hands[1] = Pointing(1);
     w.Run(0.2);
     CHECK(!w.Blocked(1), "lost on the keys, found raised: free");
+    // a free hand: forgotten after 3 s, as before
+    w.hands[1] = Unseen();
+    w.Run(3.2);
+    CHECK(!w.ty.Free(1), "free and unseen 3 s: forgotten");
+    // keep 0: as forget
+    Params p;
+    p.keep = 0;
+    World v(p);
+    v.hands[0] = Keys(0), v.hands[1] = Keys(1);
+    v.Run(1, 0.2);
+    v.hands[1] = Unseen();
+    v.Run(3.2);
+    CHECK(!v.ty.Parked(1), "POINTER_TYPING_KEEP=0: forgotten after 3 s");
+}
+
+// The mouse in use, no keys for a long time (the 2026-10-28 log): the hand on the mouse is at the
+// desk, so it raises no ray; lifted, it's free; back down, at the desk again; long after the mouse,
+// a hand coming down there is free.
+void TestMouseParks() {
+    World w;
+    w.hands[0] = Keys(0), w.hands[1] = Mouse();
+    w.Run(1);
+    CHECK(!w.ty.Parked(0) && !w.ty.Parked(1), "no keys, no mouse: free");
+    w.Run(3, 0, [&] {
+        w.ty.Mouse(w.t);
+        w.hands[1].palm.x = Mouse().palm.x + 0.05 * std::sin(w.t);
+    });
+    CHECK(w.ty.Parked(1) && w.Blocked(1), "mousing: the mouse hand is at the desk");
+    CHECK(w.ty.Parked(0), "the other hand resting by the keys: at the desk too");
+    CHECK(std::string(w.ty.Why(1, w.t)) == "typing: the hand is at the desk (the mouse in use)", "why: %s", w.ty.Why(1, w.t));
+    CHECK(w.log.find("right hand at the desk (the mouse in use)") != std::string::npos, "logged: %s", w.log.c_str());
+    // the mouse still for a minute: still parked (the leave test, not the mouse's time, frees it)
+    w.Run(60);
+    CHECK(w.ty.Parked(1), "the mouse idle 60 s, the hand on it: still at the desk");
+    // looking up and back down with the hand on the still mouse
+    w.hands[0] = Unseen(), w.hands[1] = Unseen();
+    w.Run(20);
+    w.hands[0] = Keys(0), w.hands[1] = Mouse();
+    w.Run(1);
+    CHECK(w.ty.Parked(1) && w.Blocked(1), "looked up 20 s and back down: still at the desk");
+    // lifted to point: free
+    w.hands[1] = Pointing(1);
+    w.Run(0.3);
+    CHECK(!w.Blocked(1), "the mouse hand raised: free");
+    // back down on the mouse, used: at the desk again
+    w.hands[1] = Mouse();
+    w.Run(0.5, 0, [&] { w.ty.Mouse(w.t); });
+    CHECK(w.ty.Parked(1), "back on the mouse: at the desk");
+    // a hand that comes down long after the mouse was used: free
+    World v;
+    v.ty.Mouse(v.t);
+    v.Run(11);
+    v.hands[1] = Mouse();
+    v.Run(1);
+    CHECK(!v.ty.Parked(1), "the mouse used 11 s before the hand came down: free");
+    // the mouse used while the hands were out of sight: parked when they come into view
+    World u;
+    u.Run(5, 0, [&] { u.ty.Mouse(u.t); });
+    u.hands[1] = Mouse();
+    u.Run(0.2);
+    CHECK(u.ty.Parked(1), "mousing unseen, then seen on the mouse: at the desk");
+}
+
+// The mouse doesn't park a hand that's pointing or holding a gesture, or one up in the air.
+void TestMouseLeavesPointingAlone() {
+    World w;
+    w.hands[0] = Lap(0), w.hands[1] = Pointing(1);
+    w.hands[1].busy = true;
+    w.Run(2, 0, [&] { w.ty.Mouse(w.t); });
+    CHECK(!w.Blocked(1), "the pointing hand while the other mouses: free (%s)", w.ty.Why(1, w.t));
+    w.hands[1].busy = false;
+    w.Run(1, 0, [&] { w.ty.Mouse(w.t); });
+    CHECK(!w.Blocked(1), "raised, not in the zone: free");
+    CHECK(!w.ty.Parked(0), "in the lap (out of the zone): free");
+    // POINTER_TYPING_MOUSE=0: off
+    Params p;
+    p.mouse = 0;
+    World v(p);
+    v.hands[1] = Mouse();
+    v.Run(2, 0, [&] { v.ty.Mouse(v.t); });
+    CHECK(!v.ty.Parked(1), "POINTER_TYPING_MOUSE=0: the mouse parks nothing");
 }
 
 // Pointing with one hand (its ray up) and pressing Enter with the other: the pointing hand isn't held
@@ -354,6 +446,8 @@ int main() {
     TestNotThePosture();
     TestMouseUser();
     TestLost();
+    TestMouseParks();
+    TestMouseLeavesPointingAlone();
     TestPointAndEnter();
     TestHoldOntoTheKeys();
     TestTurned();

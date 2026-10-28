@@ -16,10 +16,19 @@
 // rises raise (0.08 m, POINTER_TYPING_RAISE) above where it typed, or turns (its normal's downward
 // part under turned), for leave (0.1 s). Then it's free at once, keys or not: a pinch right after
 // lifting a hand works. It's on the keyboard again once it's back down in the zone while typing. A
-// hand unseen for forget (3 s) is forgotten. A hand in use out of the zone (its ray up, or holding a
-// gesture: Hand::busy) is free too: pointing with one hand and pressing Enter with the other. A hand
-// on the mouse is on the keyboard too (beside it, palm down, at the same height): its pinches are the
-// mouse's buttons.
+// hand in use out of the zone (its ray up, or holding a gesture: Hand::busy) is free too: pointing
+// with one hand and pressing Enter with the other. A hand on the mouse is on the keyboard too (beside
+// it, palm down, at the same height): its pinches are the mouse's buttons.
+//   Out of sight: a hand on the keyboard stays there while the cameras don't see it, up to keep
+// (300 s, POINTER_TYPING_KEEP): looking up at a screen takes the hands out of view, and one forgotten
+// came back free, raised a ray and took the pointer from the mouse when the head came down (user,
+// 2026-10-28). Seen again, it leaves as above, so one that comes back raised is free at once. A free
+// hand unseen for forget (3 s) is forgotten.
+//   The mouse: for mouse (10 s, POINTER_TYPING_MOUSE) after the mouse moved, clicked or scrolled, a hand
+// that comes down in the zone is on the keyboard too, keys or not ("at the desk"): the hand on the
+// mouse, and the other one resting by the keys. Before, only a key parked the mouse hand, and the
+// mouse kept its ray down for just a second (2026-10-28: 26 rays raised by resting desk hands in an
+// hour, 22 taken back by the mouse). It leaves the same way.
 //   The zone: the palm at least below (0.20 m, POINTER_TYPING_BELOW) under the eyes, aheadMin to
 // aheadMax (0.05-0.45 m) ahead of them across the floor (along the head's heading), the palm facing
 // down (palmDown). Typing hands measured 0.29-0.42 m under the eyes and 0.18-0.34 m ahead, palms down
@@ -60,7 +69,10 @@ struct Params {
     double posture = 0.3;     // POINTER_TYPING_POSTURE: both hands in the posture this long is typing (0: off)
     double gap = 0.32, level = 0.08;  // the posture: palms this close, this level
     double recent = 600;      // POINTER_TYPING_RECENT: the posture only this long after a key (0: always)
-    double forget = 3.0;      // a hand unseen this long is forgotten
+    double forget = 3.0;      // a free hand unseen this long is forgotten
+    double keep = 300;        // POINTER_TYPING_KEEP: one on the keyboard, this long (0: as forget)
+    double mouse = 10;        // POINTER_TYPING_MOUSE: a hand coming down in the zone this long after the mouse
+                              // was used is on the keyboard (0: off)
     double restTau = 0.5;     // where it typed follows the palm this slowly
 };
 
@@ -90,6 +102,8 @@ public:
     // A key on a keyboard at t.
     void Key(double t) { lastKey_ = t; }
     double LastKey() const { return lastKey_; }
+    // The mouse moved, clicked or scrolled at t.
+    void Mouse(double t) { lastMouse_ = t; }
 
     // Each hands frame (t: its capture time).
     void Frame(double t, const Head &head, const Hand hands[2]) {
@@ -121,11 +135,12 @@ public:
             log.push_back("typing: both hands in the keyboard posture");
         }
         const bool typing = Keys(t) || posture_;
+        const bool mousing = p_.mouse > 0 && Ever(lastMouse_) && t - lastMouse_ < p_.mouse;
         for (int k = 0; k < 2; ++k) {
             Side &s = side_[k];
             const Hand &h = hands[k];
             if (!h.seen) {
-                if ((s.parked || s.free) && t - s.seen > p_.forget) {
+                if ((s.parked || s.free) && t - s.seen > (s.parked ? std::max(p_.keep, p_.forget) : p_.forget)) {
                     if (s.parked) log.push_back(std::string("typing: ") + Name(k) + " hand forgotten (unseen)");
                     s = Side{};
                 }
@@ -156,11 +171,12 @@ public:
             const bool down = in[k] && (!s.known || h.palm.y - s.restY < p_.raise / 2);
             // pointing or holding a gesture out of the zone when keys come: not typing (point, then Enter)
             if (h.busy && !in[k] && !s.free) s.free = true;
-            if (typing && down) {
-                s.parked = true, s.free = false, s.leaveSince = kNever;
+            // the mouse in use: a hand that comes down at the desk (not one pointing or holding a gesture)
+            if ((typing || (mousing && !h.busy)) && down) {
+                s.parked = true, s.free = false, s.leaveSince = kNever, s.desk = !typing;
                 if (!s.known || std::fabs(h.palm.y - s.restY) >= p_.raise / 2) s.restY = h.palm.y;
                 s.known = true;
-                log.push_back(std::string("typing: ") + Name(k) + " hand on the keyboard");
+                log.push_back(std::string("typing: ") + Name(k) + (typing ? " hand on the keyboard" : " hand at the desk (the mouse in use)"));
             }
         }
     }
@@ -175,7 +191,7 @@ public:
     // came and it hasn't left the keyboard since.
     const char *Why(int s, double t) const {
         if (p_.hold <= 0 || s < 0 || s > 1) return nullptr;
-        if (side_[s].parked) return "typing: the hand is on the keyboard";
+        if (side_[s].parked) return side_[s].desk ? "typing: the hand is at the desk (the mouse in use)" : "typing: the hand is on the keyboard";
         if (side_[s].free) return nullptr;
         if (Keys(t) || posture_) return "typing";
         return nullptr;
@@ -189,13 +205,14 @@ private:
         bool parked = false;  // on the keyboard
         bool free = false;    // left it since (keys don't hold it back)
         bool known = false;   // restY is where it typed
+        bool desk = false;    // parked by the mouse's use, not by typing
         double restY = 0, seen = kNever, leaveSince = kNever;
     };
     static double Dist(const V3 &a, const V3 &b) { return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)); }
     static const char *Name(int k) { return k ? "right" : "left"; }
     Params p_;
     Side side_[2];
-    double lastKey_ = kNever, postureSince_ = kNever;
+    double lastKey_ = kNever, lastMouse_ = kNever, postureSince_ = kNever;
     bool posture_ = false;
 };
 

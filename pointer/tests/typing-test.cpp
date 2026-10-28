@@ -335,12 +335,14 @@ void TestDeskPinchesAfterTheMouse() {
     w.hands[1] = {true, {0.15, kEye - 0.40, -0.30}, 0.9};
     w.Run(2);
     CHECK(w.ty.Parked(1) && w.ty.Why(1, w.t), "low, 2 s after the mouse: no pinch");
+    CHECK(!w.ty.OnKeyboard(1), "at the desk, not on the keyboard (a gesture it holds carries on)");
     w.Run(9);
     CHECK(!w.ty.Why(1, w.t), "the mouse still 11 s: pinches again (%s)", w.ty.Why(1, w.t));
     CHECK(w.Blocked(1), "...but no ray until it's lifted");
     w.ty.Key(w.t);
     w.Run(0.2);
     CHECK(std::string(w.ty.Why(1, w.t)) == "typing: the hand is on the keyboard", "a key: on the keyboard (%s)", w.ty.Why(1, w.t));
+    CHECK(w.ty.OnKeyboard(1), "a key: on the keyboard");
     w.Run(15);
     CHECK(w.ty.Why(1, w.t), "on the keyboard, keys long gone: still held back");
 }

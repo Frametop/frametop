@@ -195,6 +195,8 @@ public:
     bool Mousing(double t) const { return p_.mouse > 0 && Ever(lastMouse_) && t - lastMouse_ < p_.mouse; }
     bool Posture() const { return posture_; }
     bool Parked(int s) const { return side_[s].parked; }
+    // Parked by typing, not at the desk by the mouse's use.
+    bool OnKeyboard(int s) const { return side_[s].parked && !side_[s].desk; }
     bool Free(int s) const { return side_[s].free; }
 
     // Why side s may not pinch or grip at t, or nullptr: its hand is on the keyboard (or at the desk

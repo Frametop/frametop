@@ -2036,7 +2036,8 @@ int main() {
                 int v;
                 if (std::sscanf(buf, "%15s %15s %d", kind, source, &v) == 3 &&
                     (!std::strcmp(kind, "precision") || !std::strcmp(kind, "gazedrag"))) {
-                    lastMouse = Clock::now();
+                    if (!std::strcmp(source, "mouse") && v) noteMouse();
+                    else lastMouse = Clock::now();
                     if (!active) wake(Clock::now());
                     devicePresses.push_back({source, !std::strcmp(kind, "gazedrag"), v != 0});
                     continue;
@@ -3307,8 +3308,9 @@ int main() {
             if (hold.src == Src::Ray) endRayHold(true, "the ray went (a controller, the mouse, or hand input off)");
         }
         // A hand that went onto the keyboard lets go of what it held (a pinch, grip or three-finger scroll,
-        // the chord's right button), as lost: no click. Ray holds end above, when typing drops the ray.
-        if (hold.src == Src::Hand && hold.side >= 0 && typist.Parked(hold.side) && typist.Why(hold.side, secsOf(tnow))) {
+        // the chord's right button), as lost: no click. Ray holds end above, when typing drops the ray. Not
+        // one at the desk: the mouse, used meanwhile by the other hand, doesn't end it.
+        if (hold.src == Src::Hand && hold.side >= 0 && typist.OnKeyboard(hold.side)) {
             if (!hold.gaze.On()) {   // gaze pinches and three-finger scrolls say why themselves
                 std::printf("hand %s %s ended: typing: the hand is on the keyboard\n", hold.side ? "right" : "left",
                             hold.grip ? "grip" : "pinch");
@@ -3316,7 +3318,7 @@ int main() {
             }
             endGesture(true, "typing: the hand is on the keyboard");
         }
-        if (chordBtn.On() && chordSide >= 0 && typist.Parked(chordSide) && typist.Why(chordSide, secsOf(tnow))) chordEnds(true, "typing: the hand is on the keyboard");
+        if (chordBtn.On() && chordSide >= 0 && typist.OnKeyboard(chordSide)) chordEnds(true, "typing: the hand is on the keyboard");
         if (handOk && (hg.seq != handSeq || handFile.opens != handOpens)) {
             handSeq = hg.seq;
             handPublished = hg.publish_ns;

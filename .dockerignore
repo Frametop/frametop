@@ -26,4 +26,5 @@ gaze/tracker/models/
 testbench/
 .claude/
 # dev-only: fast-install puts commits into an installed release (AGENTS.md)
-scripts/fast-install*
+scripts/fast-install
+scripts/tests/

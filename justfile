@@ -96,7 +96,7 @@ test-fast-install:
     #!/usr/bin/env bash
     set -e
     [ -f scripts/fast-install ] || { echo "scripts/fast-install: not in the image (dev-only), skipped"; exit 0; }
-    python3 scripts/fast-install-test.py
+    python3 scripts/tests/test_fast_install.py
 
 # lint the Python side (ruff from the locked dev group). Report only for now:
 # the codebase has pre-existing findings; making it a gate is its own cleanup.

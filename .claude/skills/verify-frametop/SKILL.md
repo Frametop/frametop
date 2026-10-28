@@ -48,12 +48,14 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
 
 1. Commit the change under test, then install the commit into the live release:
    `scripts/fast-install` (AGENTS.md, "Trying a change on the headset"). The run proves what
-   runs, not what's in the checkout. It copies the changed files, rebuilds changed components in
-   the release's container, restarts the services using them (the desktop too), and records it
-   all in the release's `.fast-install/` (`scripts/fast-install status`; `undo` restores the
-   release). Exit 3 lists steps left that an installer has to do: the `ft_pointer` driver
+   runs, not what's in the checkout. It rebuilds changed components in the release's container,
+   puts the changed files and programs in place, restarts the services using them (the desktop
+   too, unless the headset is worn: `--worn-ok` once the wearer says yes), and records it all in
+   the release's `.fast-install/` (`scripts/fast-install status`; `undo` restores the release).
+   Exit 3 lists steps left that an installer has to do: the `ft_pointer` driver
    (`pointer/driver/install.sh install`, then a SteamVR restart: ask first), units, menu
-   entries, file capabilities. Exit 1 on a change the image carries: that needs the full build.
+   entries, `/etc` files; `scripts/fast-install done PATH` once one is done. Exit 1 on a change
+   the image carries, a changed ft-camd, or a failed build: those need the full build, or a fix.
    Don't swap live files by hand. Say in the report which commit is installed.
 2. `V launch NAME`: runs the doctor, refuses on a worn headset, an unhealthy Frame or another
    run under way (a run is held for 30 minutes from its last launch, guard or snapshot), then
@@ -87,7 +89,8 @@ left over and exits 1; that is expected until `V cleanup`.
   listen
 - for information only: whether hand tracking (`frametop-hands`, opt-in) runs, which the hands
   recipes need; which release is live against this checkout's commit (a hint: it can't see
-  swapped binaries, and a published release never names a commit); and the run under way
+  binaries swapped by hand, and a published release never names a commit), with the commit
+  `scripts/fast-install` put on top; and the run under way
 
 Run it first whenever anything looks off.
 

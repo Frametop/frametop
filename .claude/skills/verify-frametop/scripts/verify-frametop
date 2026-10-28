@@ -219,7 +219,7 @@ def doctor():
     live = f'{release}' + (f' + fast-install {fast[:7]}' if fast else '')
     check('Frametop release', release is not None,
           f'{live}; this checkout is {git("branch", "--show-current") or "detached"} {head[:7]}'
-          + ('' if fast == head or (release and head[:7] in release)
+          + ('' if fast == head or (not fast and release and head[:7] in release)
              else ': scripts/fast-install the change under test before driving it'))
     check('hand tracking', hands == 'active', f'{HANDS} {hands}' + ('' if hands == 'active' else
           ': the hands recipes need it (Frametop Input Settings, or hands/run.sh)'))

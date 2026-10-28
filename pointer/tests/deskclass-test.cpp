@@ -159,10 +159,11 @@ void TestModel() {
     // the file's size is checked before it is read
     const char *path = "/tmp/deskclass-test-big.txt";
     if (FILE *f = std::fopen(path, "w")) {
-        std::string pad(Model::kMaxBytes + 1, '#');
-        std::fwrite(pad.data(), 1, pad.size(), f);
+        std::string big = TinyModel() + "#" + std::string(Model::kMaxBytes, ' ') + "\n";  // valid, but too long
+        CHECK(m.Parse(big), "the same text parses: %s", m.error.c_str());
+        std::fwrite(big.data(), 1, big.size(), f);
         std::fclose(f);
-        CHECK(!m.Load(path) && !m.error.empty(), "an oversize file refused");
+        CHECK(!m.Load(path) && m.error.find("1 MB") != std::string::npos, "an oversize file refused: %s", m.error.c_str());
         std::remove(path);
     }
     CHECK(m.Parse(TinyModel()), "parses again after the failures: %s", m.error.c_str());

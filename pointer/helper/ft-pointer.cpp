@@ -1043,7 +1043,7 @@ int main() {
     // desk model's POINTER_DESK_MODEL and POINTER_DESK_MIN.
     typing::Params typingParams;
     std::string deskModelPath;  // as configured ("": none)
-    time_t deskModelMtime = 0;  // the file's when loaded: a retrained one loads on the next reload
+    std::pair<int64_t, int64_t> deskModelStamp{0, 0};  // the file's mtime (ns) and size when loaded: a retrained one loads on the next reload
     desk::Model deskModel;
     // The hand ray (see "Hand ray" at the top): POINTER_HAND_RAY, POINTER_RAY_DEADZONE, POINTER_RAY_PUSH,
     // POINTER_RAY_SCROLL, POINTER_RAY_RELEASE, POINTER_RAY_GRACE.
@@ -1127,12 +1127,18 @@ int main() {
             const char *home = std::getenv("HOME");
             if (path.rfind("~/", 0) == 0) path = std::string(home ? home : "") + path.substr(1);
             struct stat st;
-            const time_t mtime = !path.empty() && stat(path.c_str(), &st) == 0 ? st.st_mtime : 0;
-            if (path != deskModelPath || mtime != deskModelMtime) {
-                deskModelPath = path, deskModelMtime = mtime;
+            std::pair<int64_t, int64_t> stamp{0, 0};
+            if (!path.empty() && stat(path.c_str(), &st) == 0)
+                stamp = {int64_t(st.st_mtim.tv_sec) * 1000000000 + st.st_mtim.tv_nsec, int64_t(st.st_size)};
+            if (path != deskModelPath || stamp != deskModelStamp) {
+                // a broken rewrite of the same file keeps the model that was working
+                const bool same = path == deskModelPath && deskModel.Loaded();
+                deskModelPath = path, deskModelStamp = stamp;
+                desk::Model m;
                 if (path.empty()) deskModel = desk::Model{};
-                else if (deskModel.Load(path)) std::printf("desk model: %s\n", path.c_str());
-                else std::printf("desk model: %s: %s (off)\n", path.c_str(), deskModel.error.c_str());
+                else if (m.Load(path)) deskModel = std::move(m), std::printf("desk model: %s\n", path.c_str());
+                else if (same) std::printf("desk model: %s: %s (kept the one loaded)\n", path.c_str(), m.error.c_str());
+                else deskModel = desk::Model{}, std::printf("desk model: %s: %s (off)\n", path.c_str(), m.error.c_str());
                 std::fflush(stdout);
             }
         }

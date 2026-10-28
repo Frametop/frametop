@@ -7,9 +7,10 @@ mouse or free, from the features pointer/tools/deskfeat writes, labelled from th
 NAME: a take's files from tools/replay_dumps.sh and deskfeat: NAME.csv (the features) and
 NAME.prompts.jsonl. DIR: every such pair in it. OUT.txt: the model, as deskclass.h's Model reads it (POINTER_DESK_MODEL).
 Before the model on all of them, each session is held out once (a model on the others, scored on its
-takes), so the report says how it does on a person it hasn't seen. A session: the takes named
+takes), so the report says how it does on a session it hasn't seen. A session: the takes named
 SESSION-TAKE with the same SESSION (YYYYMMDD-HHMMSS, as replay_dumps.sh names a hand-recorder take); one
-person each, though one person can have several. The report gives the share put at the desk at 0.5
+person each, though one person can have several (then that person is partly seen), and a take named
+otherwise is a session of its own. The report gives the share put at the desk at 0.5
 and at DESK_MIN (POINTER_DESK_MIN's default: what parks a hand).
 
 Labels (hands/rec/DESIGN.md has the events; the countdowns, redone tries and hands a step doesn't
@@ -272,7 +273,9 @@ NAMES = {(FREE,): "free", (KEYS,): "keys", (MOUSE,): "mouse", DESK: "desk"}
 
 
 def write_model(path, names, net, mean, std):
-    with open(path, "w") as f:
+    """Written beside it and renamed over it: the pointer helper never reads half a model."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
         f.write("deskclass 1\nfeatures %d\nclasses free keys mouse\n" % len(names))
         f.write("# %s\n" % " ".join(names))
         f.write("mean %s\n" % " ".join("%.6g" % v for v in mean))
@@ -282,6 +285,7 @@ def write_model(path, names, net, mean, std):
             for row in W:
                 f.write(" ".join("%.6g" % v for v in row) + "\n")
             f.write(" ".join("%.6g" % v for v in b) + "\n")
+    os.replace(tmp, path)
 
 
 def main():

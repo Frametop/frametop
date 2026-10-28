@@ -154,6 +154,7 @@ public:
             Side &s = side_[k];
             const Hand &h = hands[k];
             if (!h.seen) {
+                s.deskSince = kNever;  // the model's 0.3 s start over when it's seen again
                 if ((s.parked || s.free) && t - s.seen > (s.parked ? std::max(p_.keep, p_.forget) : p_.forget)) {
                     if (s.parked) log.push_back(std::string("typing: ") + Name(k) + " hand forgotten (unseen)");
                     s = Side{};
@@ -239,7 +240,7 @@ private:
         bool parked = false;  // on the keyboard
         bool free = false;    // left it since (keys don't hold it back)
         bool known = false;   // restY is where it typed
-        bool desk = false;    // parked by the mouse's use, not by typing
+        bool desk = false;    // parked at the desk (the mouse's use or the desk model), not by typing
         double restY = 0, seen = kNever, leaveSince = kNever, deskSince = kNever;
     };
     static double Dist(const V3 &a, const V3 &b) { return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)); }

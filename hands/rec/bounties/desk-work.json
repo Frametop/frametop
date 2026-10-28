@@ -7,7 +7,7 @@
  "welcome": {
   "title": "Desk work",
   "seconds": 8,
-  "text": "Sit at your desk with your keyboard and mouse. Work as you normally do: the cameras record your hands, nothing you type or click is saved.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+  "text": "Sit at your desk with your keyboard and mouse. The cameras see your hands and your desk: put away anything private and keep it off your screen. Nothing you type is saved, but typing can be read from the fingers, so type only the sentence asked for.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
  },
  "done": {
   "title": "All done",
@@ -54,7 +54,7 @@
    "prompts": [
     {
      "id": "desk/type",
-     "text": "Type on your keyboard the way you normally do, both hands.|Any text is fine: it isn't saved.",
+     "text": "Type this over and over, the way you normally type, both hands:|the quick brown fox jumps over the lazy dog",
      "seconds": 20,
      "pose": "typing"
     },
@@ -66,7 +66,7 @@
     },
     {
      "id": "desk/switch",
-     "text": "Switch when the picture changes: type with both hands,|or go to the mouse and use it.",
+     "text": "Switch when the picture changes: type the fox sentence with both hands,|or go to the mouse and use it.",
      "cues": [
       "typing",
       "mouse",
@@ -102,7 +102,7 @@
      "id": "look-up",
      "hands": "both",
      "pose": "typing",
-     "text": "Keep typing or using the mouse. When the window lights up, look up at it,|keep your hands working, then look back down at them.",
+     "text": "Keep typing the fox sentence or using the mouse. When the window lights up, look up at it,|keep your hands working, then look back down at them.",
      "windows": [
       {
        "id": "a",

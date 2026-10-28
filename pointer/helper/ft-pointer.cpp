@@ -1043,6 +1043,7 @@ int main() {
     // desk model's POINTER_DESK_MODEL and POINTER_DESK_MIN.
     typing::Params typingParams;
     std::string deskModelPath;  // as configured ("": none)
+    time_t deskModelMtime = 0;  // the file's when loaded: a retrained one loads on the next reload
     desk::Model deskModel;
     // The hand ray (see "Hand ray" at the top): POINTER_HAND_RAY, POINTER_RAY_DEADZONE, POINTER_RAY_PUSH,
     // POINTER_RAY_SCROLL, POINTER_RAY_RELEASE, POINTER_RAY_GRACE.
@@ -1125,8 +1126,10 @@ int main() {
             std::string path = dm == conf.end() ? "" : dm->second;
             const char *home = std::getenv("HOME");
             if (path.rfind("~/", 0) == 0) path = std::string(home ? home : "") + path.substr(1);
-            if (path != deskModelPath) {
-                deskModelPath = path;
+            struct stat st;
+            const time_t mtime = !path.empty() && stat(path.c_str(), &st) == 0 ? st.st_mtime : 0;
+            if (path != deskModelPath || mtime != deskModelMtime) {
+                deskModelPath = path, deskModelMtime = mtime;
                 if (path.empty()) deskModel = desk::Model{};
                 else if (deskModel.Load(path)) std::printf("desk model: %s\n", path.c_str());
                 else std::printf("desk model: %s: %s (off)\n", path.c_str(), deskModel.error.c_str());

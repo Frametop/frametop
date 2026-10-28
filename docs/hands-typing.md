@@ -80,11 +80,14 @@ hears the result (`typing <L> <R>` on @ft_screens).
   0.3 s while it comes down in the zone is parked as for the mouse, keys or not. The hand recorder's
   `desk-work` round records the data: `hands/tools/replay_dumps.sh` replays takes into publish dumps,
   `pointer/tools/deskfeat` turns them into features, and `hands/tools/desk_train.py` labels them from
-  the prompts and trains it. The first model (v1, from the desk-work steps of six people's full
-  sessions and their hand-size and gestures takes, 5.9k hand frames): with each person held out in
-  turn, 99-100% of their hand frames on the keyboard, on the mouse or resting at the desk read as at
-  the desk, and 83-100% of their raised hands as free. It tells the keyboard from the mouse poorly
-  (0-79%), which the pointer doesn't need, and has seen few low free hands.
+  the prompts and trains it. The first model (v2, from the desk-work steps of six people's full
+  sessions and their hand-size and gestures takes: 7 sessions, 5.9k hand frames, 4.6k of them free),
+  each session held out in turn and read at 0.8: 96-100% of the hand frames on the keyboard, on the
+  mouse or resting at the desk (the 4 sessions with any) read as at the desk; of the raised, free
+  hands 0-1% did in six sessions and 6% in one (22% at 0.5; parking also needs the hand down in the
+  zone). It tells the keyboard from the mouse poorly (keys 8-100%, mouse 0-86% by session), which
+  the pointer doesn't need, and has seen few low free hands: the desk-work round's reaches are for
+  that.
 - The posture: both hands in the zone, level within 8 cm and at most 32 cm apart, for
   `POINTER_TYPING_POSTURE` (0.3 s), is typing before any key, within `POINTER_TYPING_RECENT` (600 s)
   of a key. Without that limit, both hands resting on a desk would hold gaze pinches back.

@@ -5,8 +5,9 @@
 # screens' handinput tests). Runs several at once; meant for a compute host through frame-job:
 #   frame-job -- tools/replay_dumps.sh OUT MODELS REC...
 # A recording with calibration.json and device.json beside sets.bin, or two levels up (a hand-recorder
-# session's take), replays with that headset's calibration, as in tools/replay_gaps.sh; a take is
-# named after its session too (SESSION-TAKE).
+# session's take), replays with that headset's calibration, as in tools/replay_gaps.sh. A take (in a
+# session's takes/) is named after its session too (SESSION-TAKE), calibration or not: take names
+# repeat across sessions.
 set -uo pipefail
 out=$1 models=$2
 shift 2
@@ -15,10 +16,10 @@ mkdir -p "$out"
 jobs=${JOBS:-4}
 for rec in "$@"; do
   name=$(basename "$rec")
+  [ "$(basename "$(dirname "$(realpath "$rec")")")" = takes ] && name=$(basename "$(realpath "$rec/../..")")-$name
   devroot=()
   for c in "$rec" "$rec/../.."; do
     if [ -f "$c/calibration.json" ] && [ -f "$c/device.json" ]; then
-      [ "$c" = "$rec" ] || name=$(basename "$(realpath "$c")")-$name
       d=$out/devroot-$name
       mkdir -p "$d/persist"
       cp "$c/calibration.json" "$d/persist/xrservice.json"

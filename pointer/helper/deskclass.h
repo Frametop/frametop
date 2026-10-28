@@ -33,6 +33,8 @@
 #include <string>
 #include <vector>
 
+#include <sys/stat.h>
+
 namespace desk {
 
 struct V3 {
@@ -176,8 +178,14 @@ class Model {
 public:
     enum { kFree, kKeys, kMouse, kClasses };
 
+    static constexpr long kMaxBytes = 1 << 20;     // a model file at most (v1: 25 kB)
+    static constexpr size_t kMaxWeights = 100000;  // weights in all its layers (v1: 1.4k)
+
     // Loads path; false (and error says why) if it isn't a model for these features.
     bool Load(const std::string &path) {
+        struct stat st;
+        if (stat(path.c_str(), &st) != 0) return Fail("can't open " + path);
+        if (!S_ISREG(st.st_mode) || st.st_size > kMaxBytes) return Fail("not a model file (a regular file under 1 MB)");
         std::ifstream in(path);
         if (!in) return Fail("can't open " + path);
         std::stringstream ss;
@@ -202,6 +210,7 @@ public:
             return Fail("not the classes free keys mouse");
         if (!Row(in, "mean", n, mean_) || !Row(in, "std", n, std_)) return Fail("no mean or std");
         int width = n;
+        size_t weights = 0;
         while (in >> word) {
             Layer l;
             std::string act;
@@ -209,6 +218,8 @@ public:
                 (act != "relu" && act != "none"))
                 return Fail("a bad layer");
             l.relu = act == "relu";
+            weights += size_t(l.in) * size_t(l.out);
+            if (weights > kMaxWeights) return Fail("too big");
             l.w.resize(size_t(l.in) * size_t(l.out)), l.b.resize(size_t(l.out));
             for (double &v : l.w)
                 if (!(in >> v) || !std::isfinite(v)) return Fail("a layer's weights end early");

@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 using namespace desk;
@@ -139,6 +140,68 @@ void TestModel() {
     cut.resize(cut.size() - 4);
     CHECK(!m.Parse(cut), "missing biases refused");
     CHECK(!m.Load("/nonexistent/desk.txt") && !m.error.empty(), "no file");
+    for (const char *bad : {"", "deskclass 2\n", "deskclass 1\nfeatures 30\nclasses free mouse keys\n",
+                            "deskclass 1\nfeatures 30\nclasses free keys mouse\nmean x\n"}) {
+        CHECK(!m.Parse(bad) && !m.Loaded() && !m.error.empty(), "refused: %s", bad);
+    }
+    std::string wrongOut = TinyModel();
+    wrongOut.replace(wrongOut.find("layer 2 3"), 9, "layer 2 4");
+    CHECK(!m.Parse(wrongOut), "a last layer not 3 classes refused");
+    std::string gap = TinyModel();
+    gap.replace(gap.find("layer 2 3"), 9, "layer 5 3");
+    CHECK(!m.Parse(gap), "layers that don't chain refused");
+    std::string huge = "deskclass 1\nfeatures 30\nclasses free keys mouse\nmean";
+    for (int i = 0; i < N; ++i) huge += " 0";
+    huge += "\nstd";
+    for (int i = 0; i < N; ++i) huge += " 1";
+    huge += "\nlayer 30 4000 relu\n";  // 120k weights
+    CHECK(!m.Parse(huge) && m.error.find("too big") != std::string::npos, "too big refused: %s", m.error.c_str());
+    // the file's size is checked before it is read
+    const char *path = "/tmp/deskclass-test-big.txt";
+    if (FILE *f = std::fopen(path, "w")) {
+        std::string pad(Model::kMaxBytes + 1, '#');
+        std::fwrite(pad.data(), 1, pad.size(), f);
+        std::fclose(f);
+        CHECK(!m.Load(path) && !m.error.empty(), "an oversize file refused");
+        std::remove(path);
+    }
+    CHECK(m.Parse(TinyModel()), "parses again after the failures: %s", m.error.c_str());
+}
+
+// Three layers: the hidden layers chain.
+void TestDeepModel() {
+    std::string s = "deskclass 1\nfeatures " + std::to_string(N) + "\nclasses free keys mouse\nmean";
+    for (int i = 0; i < N; ++i) s += " 0";
+    s += "\nstd";
+    for (int i = 0; i < N; ++i) s += " 1";
+    s += "\nlayer " + std::to_string(N) + " 1 relu\n";
+    for (int i = 0; i < N; ++i) s += i == 1 ? " -10" : " 0";
+    s += "\n0\nlayer 1 1 relu\n1\n0\nlayer 1 3 none\n0\n1\n0\n0 0 0\n";
+    Model m;
+    CHECK(m.Parse(s), "three layers: %s", m.error.c_str());
+    double f[N] = {};
+    f[1] = -0.5;
+    double p[Model::kClasses];
+    m.Probs(f, p);
+    CHECK(std::fabs(p[1] - std::exp(5.0) / (std::exp(5.0) + 2)) < 1e-9, "low hand: logits 0 5 0 through both hidden layers (%g)", p[1]);
+    f[1] = 0.5;
+    m.Probs(f, p);
+    CHECK(std::fabs(p[0] - 1.0 / 3) < 1e-9, "relu cuts it: even (%g)", p[0]);
+}
+
+// Time going back (a new recording, a restarted clock): the history starts over.
+void TestClockBack() {
+    Features f;
+    double out[2][N];
+    bool ok[2];
+    for (int k = 0; k <= 30; ++k) {
+        Hand hands[2] = {Hand{}, Flat({0.1 + 0.05 * std::sin(k * 0.4), kEye - 0.35, -0.3}, 1)};
+        f.Frame(5 + k / 30.0, Ahead(), hands, out, ok);
+    }
+    CHECK(out[1][Find("speed")] > 0.1, "moving");
+    Hand still[2] = {Hand{}, Flat({0.3, kEye - 0.35, -0.3}, 1)};
+    f.Frame(1.0, Ahead(), still, out, ok);
+    CHECK(out[1][Find("speed")] == 0 && out[1][Find("wander_x")] == 0, "history kept after time went back");
 }
 
 }  // namespace
@@ -149,6 +212,8 @@ int main() {
     TestHeading();
     TestHistory();
     TestModel();
+    TestDeepModel();
+    TestClockBack();
     if (failures) std::printf("%d failures\n", failures);
     else std::printf("deskclass: all passed\n");
     return failures ? 1 : 0;

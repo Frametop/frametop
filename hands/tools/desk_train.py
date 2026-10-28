@@ -6,8 +6,11 @@ mouse or free, from the features pointer/tools/deskfeat writes, labelled from th
 
 NAME: a take's files from tools/replay_dumps.sh and deskfeat: NAME.csv (the features) and
 NAME.prompts.jsonl. DIR: every such pair in it. OUT.txt: the model, as deskclass.h's Model reads it (POINTER_DESK_MODEL).
-Before the model on all of them, each take is held out once (a model on the others, scored on it),
-so the report says how it does on a take it hasn't seen.
+Before the model on all of them, each session is held out once (a model on the others, scored on its
+takes), so the report says how it does on a person it hasn't seen. A session: the takes named
+SESSION-TAKE with the same SESSION (YYYYMMDD-HHMMSS, as replay_dumps.sh names a hand-recorder take); one
+person each, though one person can have several. The report gives the share put at the desk at 0.5
+and at DESK_MIN (POINTER_DESK_MIN's default: what parks a hand).
 
 Labels (hands/rec/DESIGN.md has the events; the countdowns, redone tries and hands a step doesn't
 name get none):
@@ -20,23 +23,28 @@ name get none):
 - a full session's desk-work section (script.json): "typing" keys, "mouse" as above, "switch" at the
   desk; a step without a pose (the demos) none.
 - anything else: the hands a step names (left, right or both) free while its prompt or a lit act
-  holds; a hand-size step both.
-The first CUE_SKIP s after each change of prompt get none: the hands are still moving there.
+  holds (a step without hands, or an intro: none).
+The first CUE_SKIP s after each change of prompt get none: the hands are still moving there. A hand
+labelled at the desk (keys, mouse or either) that is higher than DESK_Y below the eyes gets none: it
+has left the desk (to the face, a cup) whatever the step says.
 """
 import argparse
 import json
 import math
 import os
+import re
 import sys
 
 import numpy as np
 
 FREE, KEYS, MOUSE = 0, 1, 2
-ALL = (FREE, KEYS, MOUSE)
 DESK = (KEYS, MOUSE)
 CUE_SKIP = 0.8
 REACT = 0.6
 SETTLE = 1.2
+DESK_Y = -0.2
+DESK_MIN = 0.8
+SESSION = re.compile(r"^(\d{8}-\d{6})-")
 
 
 def load_csv(path):
@@ -81,6 +89,7 @@ def label(head, rows, prompts):
     """Per row, the classes its label allows (a tuple), or None."""
     col = {n: i for i, n in enumerate(head)}
     t, side = rows[:, col["t"]], rows[:, col["side"]].astype(int)
+    low = rows[:, col["palm_y"]] <= DESK_Y
     labels = [None] * len(rows)
     spans = intervals(prompts)
 
@@ -96,7 +105,10 @@ def label(head, rows, prompts):
     def put(a, b, s, allowed):
         if b <= a:
             return
-        for i in np.nonzero((t >= a) & (t < b) & (side == s))[0]:
+        sel = (t >= a) & (t < b) & (side == s)
+        if allowed != (FREE,):
+            sel &= low
+        for i in np.nonzero(sel)[0]:
             labels[i] = allowed
 
     for a, b, e in spans:
@@ -130,8 +142,8 @@ def label(head, rows, prompts):
         if act and act.get("gesture") == "rest":
             continue
         named = {"left": (0,), "right": (1,), "both": (0, 1)}.get(hands, ())
-        if sec == "hand-size":
-            named = (0, 1)
+        if pid.endswith("/intro"):
+            continue
         if e.get("position") == "down":
             continue  # low hands on a non-desk step: no telling
         for s in named:
@@ -182,24 +194,42 @@ class MLP:
                 p_ -= lr * (m[i] / (1 - 0.9 ** step)) / (np.sqrt(v[i] / (1 - 0.999 ** step)) + 1e-8)
 
 
+def session(name):
+    """A take's session (its group when held out): SESSION of SESSION-TAKE, else the take."""
+    base = os.path.basename(name)
+    m = SESSION.match(base)
+    return m.group(1) if m else base
+
+
 def dataset(names):
+    """The labelled rows of all the takes: (feature names, x, the allowed classes as a mask, each
+    row's session, each row's label). The features: the CSV's columns after t, side and id, not a
+    model's p_* (deskfeat --model); every take must have the same."""
     xs, masks, groups, kinds = [], [], [], []
-    head = None
-    for gi, name in enumerate(names):
+    feats = None
+    for name in names:
         head, rows = load_csv(name + ".csv")
+        cols = [i for i, n in enumerate(head) if n not in ("t", "side", "id") and not n.startswith("p_")]
+        these = [head[i] for i in cols]
+        if feats is None:
+            feats = these
+        elif these != feats:
+            sys.exit("%s: other features than the first take's" % name)
         labels = label(head, rows, name + ".prompts.jsonl")
         keep = [i for i, l in enumerate(labels) if l is not None]
         if not keep:
             print("%s: no labelled rows" % os.path.basename(name), file=sys.stderr)
             continue
-        xs.append(rows[keep, 3:])
+        xs.append(rows[np.ix_(keep, cols)])
         mk = np.zeros((len(keep), 3))
         for j, i in enumerate(keep):
             mk[j, list(labels[i])] = 1
         masks.append(mk)
-        groups += [gi] * len(keep)
+        groups += [session(name)] * len(keep)
         kinds += [labels[i] for i in keep]
-    return head[3:], np.vstack(xs), np.vstack(masks), np.array(groups), kinds
+    if not xs:
+        sys.exit("no labelled rows in any take")
+    return feats, np.vstack(xs), np.vstack(masks), np.array(groups), kinds
 
 
 def weights(kinds):
@@ -220,8 +250,8 @@ def fit(x, mask, kinds, hidden, epochs, seed):
 
 def score(net, mean, std, x, kinds):
     """Per kind of label: how many rows, the share the model gets right (free: P(desk) under 0.5;
-    at the desk: over 0.5; keys and mouse: that class the likeliest) and the share it puts at the
-    desk (P(desk) 0.5 or more: what parks a hand)."""
+    at the desk: over 0.5; keys and mouse: that class the likeliest) and the shares it puts at the
+    desk (P(desk) 0.5 or more, and DESK_MIN or more: what parks a hand)."""
     p = net.probs((x - mean) / std)
     desk = p[:, KEYS] + p[:, MOUSE]
     out = {}
@@ -233,7 +263,8 @@ def score(net, mean, std, x, kinds):
             ok = desk[sel] >= 0.5
         else:
             ok = p[sel].argmax(axis=1) == k[0]
-        out[k] = (int(sel.sum()), float(ok.mean()), float((desk[sel] >= 0.5).mean()))
+        out[k] = (int(sel.sum()), float(ok.mean()), float((desk[sel] >= 0.5).mean()),
+                  float((desk[sel] >= DESK_MIN).mean()))
     return out
 
 
@@ -269,23 +300,21 @@ def main():
                             if f.endswith(".csv") and os.path.exists(os.path.join(n, f[:-4] + ".prompts.jsonl")))
         else:
             takes.append(n)
-    a.names = takes
     names, x, mask, groups, kinds = dataset(takes)
     print("%d labelled hand frames: %s" % (len(kinds), ", ".join(
         "%s %d" % (NAMES[k], sum(1 for kk in kinds if kk == k)) for k in sorted(set(kinds)))))
-    print("held out, one take at a time:")
+    print("held out, one session at a time (right; at the desk at 0.5 / %.1f):" % DESK_MIN)
     for g in sorted(set(groups)):
         tr, te = groups != g, groups == g
         if not tr.any():
             continue
         net, mean, std = fit(x[tr], mask[tr], [k for k, s in zip(kinds, tr) if s], hidden, a.epochs, a.seed)
         res = score(net, mean, std, x[te], [k for k, s in zip(kinds, te) if s])
-        print("  %-36s %s" % (os.path.basename(a.names[g]),
-                              "  ".join("%s %d %.0f%% (desk %.0f%%)" % (NAMES[k], n, 100 * r, 100 * d)
-                                        for k, (n, r, d) in res.items())))
+        print("  %-16s %s" % (g, "  ".join("%s %d %.0f%% (%.0f/%.0f%%)" % (NAMES[k], n, 100 * r, 100 * d, 100 * d8)
+                                            for k, (n, r, d, d8) in res.items())))
     net, mean, std = fit(x, mask, kinds, hidden, a.epochs, a.seed)
     res = score(net, mean, std, x, kinds)
-    print("all (trained on): " + "  ".join("%s %.0f%%" % (NAMES[k], 100 * r) for k, (n, r, d) in res.items()))
+    print("all (trained on): " + "  ".join("%s %.0f%%" % (NAMES[k], 100 * r) for k, (n, r, d, d8) in res.items()))
     write_model(a.out, names, net, mean, std)
     print("wrote", a.out)
 

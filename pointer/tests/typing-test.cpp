@@ -415,6 +415,45 @@ void TestDeskModelParks() {
     n.hands[1] = Keys(1);
     n.Run(2);
     CHECK(!n.ty.Parked(1), "no model (-1): not parked without keys or the mouse");
+    // exactly the threshold parks
+    World e;
+    e.hands[1] = Mouse(), e.hands[1].desk = 0.8;
+    e.Run(0.4);
+    CHECK(e.ty.Parked(1), "P 0.8: parked");
+    // a hand lost for a frame starts its 0.3 s over
+    World g;
+    g.hands[1] = Mouse(), g.hands[1].desk = 0.95;
+    g.Run(0.2);
+    Hand seen = g.hands[1];
+    g.hands[1] = Unseen();
+    g.Step();
+    g.hands[1] = seen;
+    g.Run(0.2);
+    CHECK(!g.ty.Parked(1), "0.2 s after a lost frame: not yet");
+    g.Run(0.15);
+    CHECK(g.ty.Parked(1), "0.35 s after it: parked");
+    // a hand that leaves the zone for a frame starts over too
+    World z;
+    z.hands[1] = Mouse(), z.hands[1].desk = 0.95;
+    z.Run(0.2);
+    z.hands[1].palm.y += 0.3;
+    z.Step();
+    z.hands[1].palm.y -= 0.3;
+    z.Run(0.2);
+    CHECK(!z.ty.Parked(1), "0.2 s after leaving the zone: not yet");
+    // lifted, then put down again (no mouse in use): the model parks it again
+    World r;
+    r.hands[1] = Mouse(), r.hands[1].desk = 0.95;
+    r.Run(0.4);
+    r.hands[1].palm.y += 0.12, r.hands[1].desk = 0.1;
+    r.Run(0.3);
+    CHECK(!r.ty.Parked(1), "lifted: not parked");
+    r.hands[1].palm.y -= 0.12, r.hands[1].desk = 0.95;
+    r.Run(0.4);
+    CHECK(r.ty.Parked(1), "back at the desk: parked again");
+    size_t times = 0;
+    for (size_t at = r.log.find("(the desk model"); at != std::string::npos; at = r.log.find("(the desk model", at + 1)) ++times;
+    CHECK(times == 2, "parked by the model twice: %s", r.log.c_str());
 }
 
 // Pointing with one hand (its ray up) and pressing Enter with the other: the pointing hand isn't held

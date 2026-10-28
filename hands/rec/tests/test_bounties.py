@@ -51,10 +51,10 @@ class ShippedTest(unittest.TestCase):
         board = bounties.load(session.BOARD_PATH)
         self.assertIsNotNone(board, "bounties.json doesn't validate")
         ids = [b["id"] for b in board["bounties"]]
-        self.assertEqual(ids, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands", "pokes", "middle-taps", "index-taps",
-                               "hand-gestures", "daylight-taps", "pinches", "card-grabs"])
+        self.assertEqual(ids, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands", "desk-work", "pokes",
+                               "middle-taps", "index-taps", "hand-gestures", "daylight-taps", "pinches", "card-grabs"])
         live = [b["id"] for b in board["bounties"] if b["priority"] != "retired"]
-        self.assertEqual(live, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands"])
+        self.assertEqual(live, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands", "desk-work"])
         for b in board["bounties"]:
             self.assertTrue(session.have_bounty_script(b["script"]), b["script"])
 
@@ -64,6 +64,8 @@ class ShippedTest(unittest.TestCase):
         every act's gesture and lit part valid (build_plan raises otherwise)."""
         board = bounties.load(session.BOARD_PATH)
         for b in board["bounties"]:
+            if b["script"] == "desk-work":   # its own shape: test_desk_work
+                continue
             script = session.load_script(session.bounty_script(b["script"]))
             self.assertEqual(script.get("record_hz"), 30, b["id"])
             plan, skipped = session.build_plan(script, {}, seed=1)
@@ -87,6 +89,28 @@ class ShippedTest(unittest.TestCase):
                     "near-misses": "nogo", "three-finger": "tri", "fists": "fist"}[b["script"]]
             self.assertIn(want, gestures)
             self.assertIn("nogo", gestures, "%s: no near misses" % b["id"])
+
+    def test_desk_work(self):
+        """The desk round (2026-10-28, for the keyboard and mouse classifier): hand size, plain steps at the
+        desk (typing, the mouse, switching on cue, resting), then a scene: looking up and back down, reaching
+        up from the desk with each hand (near misses too) and pinching without lifting. Its labels come from
+        the steps' poses and cues, and it passes the board's check as a fetched round would."""
+        script = session.load_script(session.bounty_script("desk-work"))
+        self.assertEqual(session.check_round("desk-work", json.loads(json.dumps(script))), script)
+        plan, skipped = session.build_plan(script, {}, seed=1)
+        self.assertEqual(skipped, [])
+        self.assertEqual([s["kind"] for s in plan], ["prompts", "prompts", "scene"])
+        desk = {p["id"]: p for p in plan[1]["prompts"]}
+        self.assertEqual(desk["desk/type"]["pose"], "typing")
+        self.assertEqual(desk["desk/mouse"]["pose"], "mouse")
+        self.assertEqual(desk["desk/switch"]["cues"], ["typing", "mouse"] * 3)
+        self.assertTrue(all(p["position"] == "down" for p in desk.values()))
+        acts = {p["id"]: p["scene"]["acts"] for p in plan[2]["prompts"]}
+        self.assertTrue(any(a["lit"] != "none" for a in acts["desk-scene/look-up"]))
+        for side in ("right", "left"):
+            gestures = {a["gesture"] for a in acts["desk-scene/reach-" + side]}
+            self.assertLessEqual({"tap", "poke", "nogo", "rest"}, gestures, side)
+        self.assertLessEqual(session.plan_seconds(script, plan, worst=True), 5 * 60)
 
     def test_pokes_and_gestures(self):
         """The rounds made from the 2026-10-15 testing sessions: pokes on windows within reach (low ones

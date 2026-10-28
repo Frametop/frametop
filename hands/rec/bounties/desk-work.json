@@ -1,0 +1,286 @@
+{
+ "version": 1,
+ "name": "desk-work",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Desk work",
+  "seconds": 8,
+  "text": "Sit at your desk with your keyboard and mouse. Work as you normally do: the cameras record your hands, nothing you type or click is saved.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "desk",
+   "title": "Keyboard and mouse",
+   "intro": "Now your desk. Look down at your hands while you work, as you would without the headset.",
+   "defaults": {
+    "hands": "both",
+    "position": "down"
+   },
+   "prompts": [
+    {
+     "id": "desk/type",
+     "text": "Type on your keyboard the way you normally do, both hands.|Any text is fine: it isn't saved.",
+     "seconds": 20,
+     "pose": "typing"
+    },
+    {
+     "id": "desk/mouse",
+     "text": "Use your mouse with the hand you normally use: move it, click, scroll.|Leave the other hand where it would rest.",
+     "seconds": 20,
+     "pose": "mouse"
+    },
+    {
+     "id": "desk/switch",
+     "text": "Switch when the picture changes: type with both hands,|or go to the mouse and use it.",
+     "cues": [
+      "typing",
+      "mouse",
+      "typing",
+      "mouse",
+      "typing",
+      "mouse"
+     ],
+     "cue_s": 4
+    },
+    {
+     "id": "desk/rest",
+     "text": "Rest both hands on the desk or the keyboard without typing,|as when you stop to read.",
+     "seconds": 16,
+     "pose": "flat",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "hands just above the keys",
+       "text": "Now hold both hands just above the keys,|about to type, not touching."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "desk-scene",
+   "title": "Look up, reach out",
+   "kind": "scene",
+   "intro": "Windows will appear in front of you, as on a desk. Keep working with the keyboard and mouse, and do what each one asks: they don't move or click, the cameras record your hands.",
+   "prompts": [
+    {
+     "id": "look-up",
+     "hands": "both",
+     "pose": "typing",
+     "text": "Keep typing or using the mouse. When the window lights up, look up at it,|keep your hands working, then look back down at them.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        0.05,
+        -0.7
+       ],
+       "size": [
+        0.6,
+        0.36
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": [
+      {
+       "s": 5,
+       "gesture": "rest",
+       "say": "Eyes on your hands, keep working"
+      },
+      {
+       "s": 4,
+       "gesture": "rest",
+       "lit": "bar",
+       "say": "Look up at the lit window, hands still working"
+      },
+      {
+       "s": 5,
+       "gesture": "rest",
+       "say": "Eyes on your hands, keep working"
+      },
+      {
+       "s": 4,
+       "gesture": "rest",
+       "lit": "bar",
+       "say": "Look up at the lit window, hands still working"
+      },
+      {
+       "s": 5,
+       "gesture": "rest",
+       "say": "Eyes on your hands, keep working"
+      },
+      {
+       "s": 4,
+       "gesture": "rest",
+       "lit": "bar",
+       "say": "Look up at the lit window, hands still working"
+      },
+      {
+       "s": 5,
+       "gesture": "rest",
+       "say": "Eyes on your hands, keep working"
+      },
+      {
+       "s": 4,
+       "gesture": "rest",
+       "lit": "bar",
+       "say": "Look up at the lit window, hands still working"
+      },
+      {
+       "s": 5,
+       "gesture": "rest",
+       "say": "Eyes on your hands, keep working"
+      },
+      {
+       "s": 4,
+       "gesture": "rest",
+       "lit": "bar",
+       "say": "Look up at the lit window, hands still working"
+      }
+     ]
+    },
+    {
+     "id": "reach-right",
+     "hands": "right",
+     "text": "Right hand on the mouse (or the keyboard). Reach up and do what the lit button asks,|then put the hand straight back.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.12,
+        -0.12,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 5,
+      "lit_s": 2.5,
+      "count": 8,
+      "mix": {
+       "tap": 2,
+       "poke": 2,
+       "nogo": 1
+      },
+      "says": {
+       "tap": "Tap it, then back to the mouse",
+       "poke": "Poke it, then back to the mouse",
+       "nogo": "Reach, stop 1 cm short, then back"
+      }
+     }
+    },
+    {
+     "id": "reach-left",
+     "hands": "left",
+     "text": "Left hand on the keyboard. Reach up and do what the lit button asks,|then put the hand straight back.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.12,
+        -0.12,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 5,
+      "lit_s": 2.5,
+      "count": 6,
+      "mix": {
+       "tap": 2,
+       "poke": 2,
+       "nogo": 1
+      },
+      "says": {
+       "tap": "Tap it, then back to the keys",
+       "poke": "Poke it, then back to the keys",
+       "nogo": "Reach, stop 1 cm short, then back"
+      }
+     }
+    },
+    {
+     "id": "pinch-look",
+     "hands": "any",
+     "text": "Hands stay at the desk. Look at the lit button and pinch with the hand on the mouse or keyboard,|without lifting it, then carry on working.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        0.0,
+        -0.65
+       ],
+       "size": [
+        0.5,
+        0.3
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 4,
+      "lit_s": 2,
+      "count": 6,
+      "mix": {
+       "tap": 1
+      },
+      "says": {
+       "tap": "Look at it, pinch from the desk"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

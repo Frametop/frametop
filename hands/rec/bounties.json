@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "updated": "2026-10-23",
+ "updated": "2026-10-28",
  "bounties": [
   {
    "id": "close-up",
@@ -41,6 +41,14 @@
    "minutes": 4,
    "priority": "high",
    "script": "sideways-hands"
+  },
+  {
+   "id": "desk-work",
+   "title": "Desk work",
+   "blurb": "Type, use the mouse and switch between them at your own desk, look up at a window and back down, and reach up from the mouse to tap. This teaches Frametop when your hands are on the keyboard and mouse, so a resting hand stops taking the pointer from the mouse.",
+   "minutes": 5,
+   "priority": "high",
+   "script": "desk-work"
   },
   {
    "id": "pokes",

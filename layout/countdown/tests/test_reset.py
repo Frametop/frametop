@@ -14,6 +14,7 @@ def load_layout_module():
     spec = importlib.util.spec_from_file_location("countdown_review_layout", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module.ANCHOR_PATH = "/dev/null/anchor.json"  # a harness that doesn't stub save_anchor writes nothing real
     return module
 
 

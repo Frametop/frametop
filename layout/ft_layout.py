@@ -483,9 +483,21 @@ def stored_anchor():
     try:
         with open(ANCHOR_PATH) as f:
             a = json.load(f)
-        return tuple(float(v) for v in a["eye"][:3]), float(a["heading"])
-    except (OSError, ValueError, TypeError, KeyError, IndexError):
+        eye = tuple(float(v) for v in a["eye"])
+        return (eye, float(a["heading"])) if len(eye) == 3 else None
+    except (OSError, ValueError, TypeError, KeyError):
         return None
+
+
+def clear_anchor():
+    """At desktop start: the screens start over, so where they were arranged from is unknown
+    until they're arranged again (the preview works it out from screen 1 meanwhile)."""
+    try:
+        os.remove(ANCHOR_PATH)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        log(f"couldn't forget where the screens were arranged from: {e}")
 
 
 def _wrap(deg):
@@ -557,6 +569,7 @@ def read_room(ask, layout, windows=()):
             room["panels"].append({"kind": "screen", "label": str(i + 1), "number": i + 1, "pose": g,
                                    "hidden": bool(screen_entry(layout, i).get("hidden"))})
     by_number = {n: (host, d) for n, host, d in remote_displays(layout)}
+    # Each one ft-screens shows, live or not: one connecting or lost still has its panel there.
     reply = ask("remotes") or ""
     for item in reply.split()[2:] if reply.startswith("ok") else []:
         try:
@@ -588,9 +601,10 @@ def preview(layout, room=None):
                 "planned": [preview_panel(p, eye) for p in planned_panels(layout, count, remote_displays(layout))]}
     anchor = stored_anchor()
     if anchor is None:
-        first = next((p["pose"] for p in room["panels"] if p.get("number") == 1), None)
-        anchor = inferred_anchor(layout, first) if first else None
-    anchor = anchor or room["head"] or ((0.0, 0.0, 0.0), 0.0)
+        first = next((p["pose"] for p in room["panels"] if p["kind"] == "screen" and p["number"] == 1), None)
+        anchor = (inferred_anchor(layout, first) if first else None) or room["head"]
+    if anchor is None:
+        return preview(layout)  # nothing to place the room by (screen 1 on a hand, the headset off)
     if room["head"]:
         eye = to_anchor(room["head"][0], anchor)
         yaw = _wrap(room["head"][1] - anchor[1])
@@ -1909,6 +1923,7 @@ def main(argv):
             start_desktop(argv[2])
         elif cmd == "start":
             # Desktop start (the session script): the profile it starts with, or the arrangement.
+            clear_anchor()
             layout = load_layout()
             name = start_profile(layout)
             if not name:

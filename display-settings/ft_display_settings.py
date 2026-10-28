@@ -74,7 +74,7 @@ NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tm
 AUTOSTART_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-autostart.service")
 # Frametop's own apps a profile can keep (ft-floatd's recordable), by their names.
 FRAMETOP_APPS = {"ft-display-settings": "Frametop Display Settings", "ft-input-settings": "Frametop Input Settings",
-                 "ft-remote-displays": "Frametop Remote Displays", "ft-remote-settings": "Frametop Remote Access"}
+                 "ft-remote-displays": "Frametop Remote Displays"}  # ft-floatd's PROFILE_APPS
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
 
@@ -308,7 +308,7 @@ class Backend(QObject):
         layout = ft_layout.load_layout()
         if ft_layout.backend() != "screens":
             # Before any panel was measured: the width SteamVR floats a panel at, and the aspect.
-            if layout.get("panel_size") == list(ft_layout.DEFAULT_PANEL):
+            if "panel_size" not in layout or layout["panel_size"] == list(ft_layout.DEFAULT_PANEL):
                 c = self._conf()
                 layout["panel_size"] = [ft_layout.DEFAULT_PANEL[0], ft_layout.DEFAULT_PANEL[0] * c["height"] / c["width"]]
             return ft_layout.preview(layout)
@@ -337,38 +337,45 @@ class Backend(QObject):
         windows = self._windows if time.monotonic() - self._windows_at < 3 else None
 
         def work():
+            room, listed = None, windows
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
             try:
                 sock.bind("")
-                sock.settimeout(0.5)
 
-                def ask(text, to=FT_SCREENS):
+                def ask(text, to=FT_SCREENS, timeout=0.5):
                     try:
+                        # A reply that came after an earlier question gave up isn't this one's.
+                        sock.setblocking(False)
+                        while True:
+                            sock.recv(1 << 16)
+                    except BlockingIOError:
+                        pass
+                    except OSError:
+                        return None
+                    try:
+                        sock.settimeout(timeout)
                         sock.sendto(text.encode(), to)
                         return sock.recv(1 << 16).decode()
                     except OSError:
                         return None
-                listed = windows
                 if listed is None:
-                    sock.settimeout(4)
-                    reply = ask("spotlist", ft_layout.FLOAT) or ""
-                    sock.settimeout(0.5)
+                    reply = ask("spotlist", ft_layout.FLOAT, 4) or ""
                     try:
                         listed = [(int(e["panel"]), e.get("title") or e.get("app") or "window")
                                   for e in json.loads(reply[3:]) if e.get("floating") and e.get("panel")
                                   and not e.get("minimized")] if reply.startswith("ok ") else []
-                    except (ValueError, TypeError, KeyError):
+                    except (ValueError, TypeError, KeyError, AttributeError):
                         listed = []
+                room = ft_layout.read_room(ask, layout, listed)
+            except (ValueError, TypeError, KeyError, IndexError, OSError):
+                room = None  # a reply it can't read: no live preview this time, the next read tries again
+            finally:
+                sock.close()
                 try:
-                    room = ft_layout.read_room(ask, layout, listed)
-                except (ValueError, TypeError, KeyError, IndexError):
-                    room = None  # a reply it can't read: no live preview this time, the next read tries again
-                try:
+                    # Always, so _room_busy clears whatever went wrong.
                     self._roomRead.emit(room, listed if windows is None else None)
                 except RuntimeError:
                     pass  # the window closed meanwhile
-            finally:
-                sock.close()
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -376,8 +383,9 @@ class Backend(QObject):
         self._room_busy = False
         if windows is not None:
             self._windows, self._windows_at = windows, time.monotonic()
-        self._room = room
-        self.previewChanged.emit()
+        if room != self._room:  # nothing moved: no repaint
+            self._room = room
+            self.previewChanged.emit()
 
     @Property(str, notify=busyChanged)
     def busy(self):

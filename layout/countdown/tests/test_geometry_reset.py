@@ -47,7 +47,7 @@ class Harness:
                 "remote": {"remote-one": {"pos": [2, 1, -3], "face": [10, 20], "roll": 3}}}}
         self.m.load_layout = self.load_layout
         self.m.kwin_follow = lambda: self.events.append(("kwin_follow",))
-        self.m.save_anchor = lambda eye, heading: self.events.append(("anchor",))
+        self.m.save_anchor = lambda eye, heading: self.events.append(("anchor", tuple(eye), heading))
         self.m.backend = lambda: "screens"
         self.m.screens_socket = self.socket
         self.m.log = lambda *args: self.events.append(("log", " ".join(map(str, args))))

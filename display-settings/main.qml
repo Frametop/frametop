@@ -669,12 +669,14 @@ Kirigami.ApplicationWindow {
                         while (n > 1 && ctx.measureText(t.slice(0, n - 1) + "…").width > w) n--
                         return n > 1 ? t.slice(0, n - 1) + "…" : ""
                     }
-                    // Labels, centred on (x, y) inside box [x0, y0, x1, y1]: one where a screen's
-                    // number already is joins it ("1·3": screens stacked in rows); one that would
-                    // cover another tries the spots along (dx, dy), then stays out.
-                    function label(ctx, labels, box, t, maxW, x, y, dx, dy) {
-                        const near = labels.find(l => l.screen && /^\d+$/.test(t) && Math.abs(l.x - x) < 14 && Math.abs(l.y - y) < 10)
-                        if (near) { near.t += "·" + t; return }
+                    // Labels, centred on (x, y) inside box [x0, y0, x1, y1]: a screen's where
+                    // another screen's already is joins it ("1·3": screens stacked in rows); one
+                    // that would cover another tries the spots along (dx, dy), then stays out.
+                    function label(ctx, labels, box, p, maxW, x, y, dx, dy) {
+                        const screen = p.kind === "screen"
+                        const near = screen && labels.find(l => l.screen && Math.abs(l.x - x) < 14 && Math.abs(l.y - y) < 10)
+                        if (near) { near.t += "·" + p.label; return }
+                        let t = p.label
                         t = fit(ctx, t, Math.min(maxW, box[2] - box[0] - 4))
                         if (!t) return
                         const w = ctx.measureText(t).width + 4, lh = Kirigami.Theme.smallFont.pixelSize + 3
@@ -682,7 +684,7 @@ Kirigami.ApplicationWindow {
                             const cx = Math.max(box[0] + w / 2, Math.min(box[2] - w / 2, x + dx * i))
                             const cy = Math.max(box[1] + lh / 2, Math.min(box[3] - lh / 2, y + dy * i))
                             if (!labels.some(l => Math.abs(l.x - cx) < (l.w + w) / 2 && Math.abs(l.y - cy) < lh)) {
-                                labels.push({ x: cx, y: cy, w: w, t: t, screen: /^\d+$/.test(t) })
+                                labels.push({ x: cx, y: cy, w: w, t: t, screen: screen })
                                 return
                             }
                         }
@@ -724,7 +726,7 @@ Kirigami.ApplicationWindow {
                         const xs = [head.x], zs = [head.z]
                         for (const p of panels.concat(ghosts)) for (const q of p.top) { xs.push(q[0]); zs.push(q[1]) }
                         const xmin = Math.min(...xs), xmax = Math.max(...xs), zmin = Math.min(...zs), zmax = Math.max(...zs)
-                        const k = Math.min((half - 48) / Math.max(xmax - xmin, 1), (boxH - 44) / Math.max(zmax - zmin, 1))
+                        const k = Math.max(1, Math.min((half - 48) / Math.max(xmax - xmin, 1), (boxH - 44) / Math.max(zmax - zmin, 1)))
                         const cx = 4 + half / 2 - (xmax + xmin) / 2 * k
                         const cz = top + 8 + boxH / 2 - (zmax + zmin) / 2 * k
                         const P = q => [cx + q[0] * k, cz + q[1] * k]
@@ -765,7 +767,7 @@ Kirigami.ApplicationWindow {
                             const m = P(p.top[Math.floor(p.top.length / 2)])
                             const d = Math.hypot(m[0] - h[0], m[1] - h[1]) || 1
                             const ux = (m[0] - h[0]) / d, uy = (m[1] - h[1]) / d
-                            label(ctx, labels, topBox, p.label, half * 0.45, m[0] + ux * 12, m[1] + uy * 12, ux * 14, uy * 14)
+                            label(ctx, labels, topBox, p, half * 0.45, m[0] + ux * 12, m[1] + uy * 12, ux * 14, uy * 14)
                         }
                         drawLabels(ctx, labels)
                         ctx.restore()
@@ -775,7 +777,7 @@ Kirigami.ApplicationWindow {
                         const ys = [head.yaw], ps = [0]
                         for (const p of panels.concat(ghosts)) for (const q of p.view) { ys.push(q[0]); ps.push(q[1]) }
                         const ymin = Math.min(...ys), ymax = Math.max(...ys), pmin = Math.min(...ps), pmax = Math.max(...ps)
-                        const fk = Math.min((half - 24) / Math.max(ymax - ymin, 60), (boxH - 16) / Math.max(pmax - pmin, 40))
+                        const fk = Math.max(0.1, Math.min((half - 24) / Math.max(ymax - ymin, 60), (boxH - 16) / Math.max(pmax - pmin, 40)))
                         const ox = half + 8 + (half - 16) / 2 + (ymax + ymin) / 2 * fk
                         const oy = top + 8 + boxH / 2 + (pmax + pmin) / 2 * fk
                         const V = q => [ox - q[0] * fk, oy - q[1] * fk]
@@ -827,8 +829,8 @@ Kirigami.ApplicationWindow {
                         ctx.globalAlpha = 1
                         // Inside the panel when it's wide enough, else under it.
                         for (const [p, x, y, w, bottom] of spots) {
-                            if (w >= 40) label(ctx, labels, viewBox, p.label, w - 6, x, y, 0, 13)
-                            else label(ctx, labels, viewBox, p.label, half * 0.3, x, bottom + 9, 0, 13)
+                            if (w >= 40) label(ctx, labels, viewBox, p, w - 6, x, y, 0, 13)
+                            else label(ctx, labels, viewBox, p, half * 0.3, x, bottom + 9, 0, 13)
                         }
                         drawLabels(ctx, labels)
                         ctx.fillStyle = text

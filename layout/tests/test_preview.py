@@ -74,9 +74,12 @@ class Preview(unittest.TestCase):
         self.assertFalse(view["live"])
         self.assertFalse(view["head"]["tracked"])
         (screen,) = view["planned"]
-        mid = screen["view"]
-        self.assertTrue(all(60 < yaw < 160 for yaw, _ in mid), mid)  # to the left, past the side
-        self.assertLess(screen["top"][len(screen["top"]) // 2][0], -1.5)
+        outline = screen["view"]
+        self.assertTrue(all(60 < yaw < 160 for yaw, _ in outline), outline)  # to the left, past the side
+        middle = screen["top"][len(screen["top"]) // 2]
+        self.assertTrue(close(middle, (-2.0294, 0.8345)), middle)  # its centre, from above
+        yaw, pitch = self.m.yaw_pitch((-2.0294, -0.0314, 0.8345))
+        self.assertAlmostEqual(yaw, 112.35, places=1)
 
     def test_a_panel_behind_you_stays_in_one_piece(self):
         p = {"center": (0.0, 0.0, 2.0), "axes": self.m.panel_axes((180.0, 0.0), 0.0), "curve": 0.0,
@@ -136,15 +139,103 @@ class Preview(unittest.TestCase):
         self.assertAlmostEqual(heading, anchor[1], places=2)
 
     def test_with_the_headset_asleep_you_are_where_it_was_arranged_from(self):
+        anchor = ((2.0, 1.5, -1.0), 60.0)
         layout = self.layout()
-        self.m.save_anchor((0.0, 1.5, 0.0), 0.0)
-        screen = self.world(((0.0, 1.5, 0.0), 0.0), (0.0, 0.0, -2.0), (0.0, 0.0))
+        self.m.save_anchor(*anchor)
+        screen = self.world(anchor, (0.0, 0.0, -2.0), (0.0, 0.0))
         replies = {"screens": "ok 1 1:1920x1080:1", "head": "error no head pose (headset off?)",
                    "remotes": "ok 0", "get 1": self.get_reply(*screen, 2.0, 1.125)}
         view = self.m.preview(layout, self.m.read_room(replies.get, layout))
         self.assertTrue(view["live"])
         self.assertFalse(view["head"]["tracked"])
         self.assertTrue(close((view["head"]["x"], view["head"]["z"], view["head"]["yaw"]), (0.0, 0.0, 0.0)))
+        top = view["panels"][0]["top"]
+        self.assertTrue(close(top[len(top) // 2], (0.0, -2.0)), top)  # 2 m ahead of where it was arranged from
+
+    def test_without_a_saved_anchor_the_room_is_drawn_from_screen_1(self):
+        anchor = ((-0.3, 1.2, 0.4), -35.0)
+        layout = self.layout(mode="custom")
+        layout["screens"][0].update(pos=[0.5, 0.1, -1.8], face=[-15.0, 3.0], roll=0.0)
+        screen = self.world(anchor, (0.5, 0.1, -1.8), (-15.0, 3.0))
+        head = self.m.turn_yaw((0.0, 0.0, 0.5), anchor[1])  # half a metre behind where it was arranged from
+        head = tuple(a + b for a, b in zip(anchor[0], head))
+        replies = {"screens": "ok 1 1:1920x1080:1", "head": "ok %.4f %.4f %.4f %.2f" % (*head, anchor[1] + 10),
+                   "remotes": "ok 0", "get 1": self.get_reply(*screen, 2.0, 1.125)}
+        view = self.m.preview(layout, self.m.read_room(replies.get, layout))
+        self.assertTrue(close((view["head"]["x"], view["head"]["z"]), (0.0, 0.5)), view["head"])
+        self.assertAlmostEqual(view["head"]["yaw"], 10.0, places=1)
+        self.assertTrue(all(close(a, b) for a, b in zip(view["panels"][0]["top"], view["planned"][0]["top"])))
+
+    def test_with_nothing_to_place_the_room_by_the_layout_alone_is_drawn(self):
+        layout = self.layout()
+        pinned = self.get_reply(*self.world(((0, 0, 0), 0), (0.0, 0.0, -2.0), (0.0, 0.0)), 2.0, 1.125).replace(" none", " left")
+        replies = {"screens": "ok 1 1:1920x1080:1", "head": "error no head pose (headset off?)",
+                   "remotes": "ok 0", "get 1": pinned + " 1 0 0 0 0 1 0 0 0 0 1 -0.3"}
+        view = self.m.preview(layout, self.m.read_room(replies.get, layout))
+        self.assertFalse(view["live"])
+        self.assertFalse(self.m.preview(layout, {"head": None, "panels": []})["live"])
+
+    def test_a_moved_screen_is_away_from_where_the_layout_puts_it(self):
+        anchor = ((0.0, 1.6, 0.0), 0.0)
+        layout = self.layout()
+        self.m.save_anchor(*anchor)
+        moved = self.world(anchor, (1.0, 0.0, -2.0), (0.0, 0.0))  # a metre to the right of its place
+        replies = {"screens": "ok 1 1:1920x1080:1", "head": "ok 0 1.6 0 0", "remotes": "ok 0",
+                   "get 1": self.get_reply(*moved, 2.0, 1.125)}
+        view = self.m.preview(layout, self.m.read_room(replies.get, layout))
+        live, planned = view["panels"][0]["top"], view["planned"][0]["top"]
+        self.assertTrue(close(live[len(live) // 2], (1.0, -2.0)), live)
+        self.assertTrue(close(planned[len(planned) // 2], (0.0, -2.0)), planned)
+
+    def test_a_panel_that_does_not_answer_leaves_the_rest(self):
+        anchor = ((0.0, 1.6, 0.0), 0.0)
+        layout = self.layout()
+        screen = self.world(anchor, (0.0, 0.0, -2.0), (0.0, 0.0))
+        replies = {"screens": "ok 1 1:1920x1080:1", "head": "ok 0 1.6 0 0",
+                   "remotes": "ok 2 105:frametop-oma7-edp-2:lost:2560x1600 106:frametop-oma7-dp-2:live:5120x1440",
+                   "get 1": self.get_reply(*screen, 2.0, 1.125), "get 105": "error no screen 105",
+                   "get 106": self.get_reply(*screen, 5.0, 1.4)}
+        room = self.m.read_room(replies.get, layout, [(2, "gone")])
+        self.assertEqual([(p["kind"], p["number"]) for p in room["panels"]], [("screen", 1), ("remote", 106)])
+        self.assertTrue(self.m.preview(layout, room)["live"])
+
+    def test_capturing_the_screens_keeps_where_they_were_captured_from(self):
+        anchor = ((0.5, 1.6, -0.2), 25.0)
+        layout = self.layout()
+        self.m.save_layout(layout)
+        screen = self.world(anchor, (0.0, 0.2, -1.5), (0.0, 0.0))
+        replies = {"head": "ok %.4f %.4f %.4f %.2f" % (*anchor[0], anchor[1]), "get 1": self.get_reply(*screen, 2.0, 1.125)}
+        self.m.screens_socket = lambda: type("Sock", (), {"ask": staticmethod(replies.get)})()
+        self.m.capture_screens()
+        self.assertEqual(self.m.stored_anchor(), anchor)
+        self.assertTrue(close(self.m.load_layout()["screens"][0]["pos"], (0.0, 0.2, -1.5)))
+
+    def test_desktop_start_forgets_where_the_screens_were_arranged_from(self):
+        self.m.save_anchor((1.0, 1.6, 0.0), 30.0)
+        self.m.load_layout = lambda: {**self.layout(), "mode": "preset"}  # no start profile: "apply" next
+        calls = []
+        real_main = self.m.main
+        self.m.main = lambda argv: calls.append(argv) if argv[1] == "apply" else real_main(argv)
+        real_main(["ft-layout", "start"])
+        self.assertIsNone(self.m.stored_anchor())
+        self.assertEqual(calls, [["ft-layout", "apply"]])
+
+    def test_a_broken_anchor_file_is_no_anchor(self):
+        path = pathlib.Path(self.m.ANCHOR_PATH)
+        path.parent.mkdir(parents=True)
+        for text in ("{", '{"eye": [1], "heading": 0}', '{"eye": "abc", "heading": 0}', "[]"):
+            path.write_text(text)
+            self.assertIsNone(self.m.stored_anchor(), text)
+
+    def test_an_anchor_that_cannot_be_saved_only_logs(self):
+        logged = []
+        self.m.log = logged.append
+        blocker = pathlib.Path(self.tmp.name) / "file"
+        blocker.write_text("")
+        self.m.ANCHOR_PATH = str(blocker / "anchor.json")  # under a file: no folder can be made
+        self.m.save_anchor((0.0, 0.0, 0.0), 0.0)
+        self.assertEqual(len(logged), 1, logged)
+        self.assertIsNone(self.m.stored_anchor())
 
     def test_no_compositor_no_room(self):
         self.assertIsNone(self.m.read_room(lambda text: None, self.layout()))

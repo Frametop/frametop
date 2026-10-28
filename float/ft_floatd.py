@@ -237,11 +237,19 @@ def pid_chain(pid):
 SKIP_APPS = ("org.kde.plasmashell", "org.kde.krunner", "org.kde.ksplashqml", "org.kde.polkit-kde-authentication-agent-1")
 
 
+# Frametop's settings apps, which a profile keeps like any app (user, 2026-10-28: a profile
+# saved with Display Settings and Remote Displays open kept no windows). Its other windows
+# (recorders, the tour, its own panels) stay out.
+PROFILE_APPS = ("ft-display-settings", "ft-input-settings", "ft-remote-displays", "ft-remote-settings")
+
+
 def recordable(ev):
     """An app's top-level window, the kind a profile keeps."""
     if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
         return False
     app, cls = ev.get("app", ""), ev.get("cls", "")
+    if app in PROFILE_APPS or cls in PROFILE_APPS:
+        return True
     return app not in SKIP_APPS and not any(n.startswith(("ft-", "frametop", "ksplash")) for n in (app, cls))
 
 

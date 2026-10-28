@@ -297,8 +297,9 @@ struct HostInput {
     int64_t checkAt = 0, lockAt = 0, askAt = 0, leaseAt = 0;
     hostinput::Answer worn, paused;
     // What Tick last wanted. Not kRelease at first is a release's edge: a stream that starts with
-    // the switch off or the headset away sends none.
+    // the switch off or the headset away sends none. An edge's release is owed until it went.
     hostinput::Want last = hostinput::Want::kRelease;
+    bool releaseOwed = false;
     uint32_t seq = 0;
     // With the receive thread.
     std::mutex mu;
@@ -355,31 +356,38 @@ struct HostInput {
             close(sock), sock = -1;
     }
 
-    // Give the host its keyboard and mouse back now: a release also lifts its escape, a drop
-    // keeps it. A release goes even with no lease on the person's own "give it back" (edge), or
-    // while the host may still be escaped: this process may not have seen the escape.
-    void Stop(hostinput::Want how, bool edge = false) {
-        const bool release = how == hostinput::Want::kRelease;
-        {
-            std::lock_guard<std::mutex> lock(mu);
-            if (!leasing && !(release && (escaped || edge))) return;
-            leasing = false;
-            relay.Stop();
-        }
+    // A release or a drop to the host. A release that went lifts any escape and pays an edge's.
+    bool Send(bool release) {
         const auto msg = release ? hostinput::Release() : hostinput::Drop();
-        if (LiSendFrametopHostInputLease(msg.data(), int(msg.size())) != 0) return;  // escaped stays, tried again
+        if (LiSendFrametopHostInputLease(msg.data(), int(msg.size())) != 0) return false;
         if (release) {
             std::lock_guard<std::mutex> lock(mu);
-            escaped = false;
+            escaped = false, releaseOwed = false;
         }
         std::printf("hostinput: %s %s's keyboard and mouse\n", release ? "released" : "dropped", host.c_str());
         std::fflush(stdout);
+        return true;
+    }
+
+    // Give the host its keyboard and mouse back now: a release also lifts its escape, a drop
+    // keeps it. A release goes even with no lease when an edge's is owed, or while the host may
+    // still be escaped; one that couldn't go is tried again on the next tick.
+    void Stop(hostinput::Want how) {
+        const bool release = how == hostinput::Want::kRelease;
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            if (!leasing && !(release && (escaped || releaseOwed))) return;
+            leasing = false;
+            relay.Stop();
+        }
+        Send(release);
     }
 
     void Apply(hostinput::Want want) {
-        const bool edge = want == hostinput::Want::kRelease && last != hostinput::Want::kRelease;
+        if (want == hostinput::Want::kRelease && last != hostinput::Want::kRelease) releaseOwed = true;
         last = want;
-        if (want != hostinput::Want::kHold) Stop(want, edge);
+        if (want != hostinput::Want::kHold) Stop(want);
+        else if (releaseOwed) Send(true);  // the headset went back on before it could go
     }
 
     void Unlock() {

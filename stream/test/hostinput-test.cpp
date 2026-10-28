@@ -79,6 +79,9 @@ int main() {
     r = P(Bytes({kVersion, 3, 3, 'o', 'm', 'a', '7', '\n'}));
     assert(r.type == Record::kHello && r.kinds == (kKeyboard | kMouse) && r.text == "oma7?");
     assert(P(Bytes({kVersion, 3, 0xff})).kinds == (kKeyboard | kMouse));
+    std::vector<unsigned char> longReason = Bytes({kVersion, 2, 0}), longName = Bytes({kVersion, 3, 1});
+    longReason.insert(longReason.end(), 40, 'a'), longName.insert(longName.end(), 80, 'n');
+    assert(P(longReason).text.size() == kMaxReason && P(longName).text.size() == kMaxName);
     assert(P(Bytes({2, 2, 1})).type == Record::kNone);  // another version
     assert(P(Bytes({kVersion, 9, 1})).type == Record::kNone);
     assert(P(Bytes({kVersion, 2})).type == Record::kNone);
@@ -98,21 +101,20 @@ int main() {
     // When to hold it, and how to give it back.
     const int64_t now = 100'000'000'000;
     const Answer worn{true, now - 1}, away{false, now - 1}, playing{false, now - 1}, paused{true, now - 1};
-    assert(Decide(true, true, true, worn, playing, now) == Want::kHold);
-    assert(Decide(false, true, true, worn, playing, now) == Want::kRelease);   // the switch went off
-    assert(Decide(true, true, true, away, playing, now) == Want::kRelease);    // the headset came off
-    assert(Decide(false, false, false, Answer{}, Answer{}, now) == Want::kRelease);
-    assert(Decide(true, false, true, worn, playing, now) == Want::kDrop);      // the stream isn't live
-    assert(Decide(true, true, false, worn, playing, now) == Want::kDrop);      // another stream holds it
-    assert(Decide(true, true, true, worn, paused, now) == Want::kDrop);        // a VR game
-    assert(Decide(true, false, true, away, playing, now) == Want::kDrop);
+    assert(Decide(true, true, worn, playing, now) == Want::kHold);
+    assert(Decide(false, true, worn, playing, now) == Want::kRelease);   // the switch went off
+    assert(Decide(true, true, away, playing, now) == Want::kRelease);    // the headset came off
+    assert(Decide(false, false, Answer{}, Answer{}, now) == Want::kRelease);
+    assert(Decide(true, false, worn, playing, now) == Want::kDrop);      // the stream isn't live
+    assert(Decide(true, true, worn, paused, now) == Want::kDrop);        // a VR game
+    assert(Decide(true, false, away, playing, now) == Want::kDrop);
     // Answers that stopped coming: not the person's say, so drop.
     const Answer staleWorn{true, now - kStaleNs}, staleAway{false, now - kStaleNs}, stalePlaying{false, now - kStaleNs};
-    assert(Decide(true, true, true, staleWorn, playing, now) == Want::kDrop);
-    assert(Decide(true, true, true, staleAway, playing, now) == Want::kDrop);
-    assert(Decide(true, true, true, worn, stalePlaying, now) == Want::kDrop);
-    assert(Decide(true, true, true, Answer{}, Answer{}, now) == Want::kDrop);
-    assert(Decide(true, true, true, Answer{true, now - kStaleNs + 1}, playing, now) == Want::kHold);
+    assert(Decide(true, true, staleWorn, playing, now) == Want::kDrop);
+    assert(Decide(true, true, staleAway, playing, now) == Want::kDrop);
+    assert(Decide(true, true, worn, stalePlaying, now) == Want::kDrop);
+    assert(Decide(true, true, Answer{}, Answer{}, now) == Want::kDrop);
+    assert(Decide(true, true, Answer{true, now - kStaleNs + 1}, playing, now) == Want::kHold);
 
     // The relay.
     std::vector<std::string> said;
@@ -134,6 +136,12 @@ int main() {
     relay.Take(key), relay.Take(move);
     assert((said == std::vector<std::string>{"hostev oma7 keyboard 1 30 1 0 0 0", "hostev oma7 mouse 2 0 1"}));
     assert(relay.TakeEvents() == 2 && relay.TakeEvents() == 0);
+    up = false;
+    relay.Take(key);  // not sent: not counted
+    up = true;
+    assert(relay.TakeEvents() == 0);
+    relay.Take(hello);
+    said.clear();
     assert(relay.Take(on).empty());  // told every second: logged once
     said.clear();
     // A hello without the mouse takes it away; one with no name uses the host's address.

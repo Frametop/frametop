@@ -110,9 +110,9 @@ inline bool Fresh(const Answer &a, int64_t now) { return a.at && now - a.at < kS
 // off, releases, which lifts the host's escape; anything else drops and keeps it.
 enum class Want { kHold, kDrop, kRelease };
 
-inline Want Decide(bool switchOn, bool live, bool locked, const Answer &worn, const Answer &paused, int64_t now) {
+inline Want Decide(bool switchOn, bool live, const Answer &worn, const Answer &paused, int64_t now) {
     if (!switchOn) return Want::kRelease;
-    if (!live || !locked) return Want::kDrop;
+    if (!live) return Want::kDrop;
     if (Fresh(worn, now) && !worn.yes) return Want::kRelease;
     if (!Fresh(worn, now) || !Fresh(paused, now) || paused.yes) return Want::kDrop;
     return Want::kHold;

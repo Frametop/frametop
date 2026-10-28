@@ -343,9 +343,11 @@ struct HostInput {
         sockaddr_un a{};
         a.sun_family = AF_UNIX;
         const timeval wait{0, 100'000};
-        // An address of our own (autobind), for the replies.
+        const int on = 1;
+        // An address of our own (autobind), for the replies, each with its sender's credentials.
         if (sock >= 0 && (bind(sock, (const sockaddr *)&a, sizeof(sa_family_t)) < 0 ||
-                          setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &wait, sizeof wait) < 0))
+                          setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &wait, sizeof wait) < 0 ||
+                          setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof on) < 0))
             close(sock), sock = -1;
     }
 
@@ -392,10 +394,20 @@ struct HostInput {
         sockaddr_un from, helper, relayAddress;
         const socklen_t helperLength = Address(helper, kHelper), relayLength = Address(relayAddress, kRelay);
         for (;;) {
-            socklen_t fromLength = sizeof from;
-            const ssize_t n = recvfrom(sock, buf, sizeof buf, MSG_DONTWAIT, (sockaddr *)&from, &fromLength);
+            iovec io{buf, sizeof buf};
+            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(ucred))];
+            msghdr m{};
+            m.msg_name = &from, m.msg_namelen = sizeof from, m.msg_iov = &io, m.msg_iovlen = 1;
+            m.msg_control = control, m.msg_controllen = sizeof control;
+            const ssize_t n = recvmsg(sock, &m, MSG_DONTWAIT);
             if (n <= 0) break;
-            // Only the helper's and the relay's answers count.
+            // Only the helper's and the relay's answers count: from their addresses, and this user.
+            const cmsghdr *c = CMSG_FIRSTHDR(&m);
+            if (!c || c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_CREDENTIALS) continue;
+            ucred cred;
+            std::memcpy(&cred, CMSG_DATA(c), sizeof cred);
+            if (cred.uid != getuid()) continue;
+            const socklen_t fromLength = m.msg_namelen;
             const auto is = [&](const sockaddr_un &a, socklen_t length) {
                 return fromLength == length && std::memcmp(&from, &a, length) == 0;
             };

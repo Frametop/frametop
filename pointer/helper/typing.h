@@ -38,6 +38,14 @@
 // 0.84-1.00; deliberate pointing 0.0-0.30 m under the eyes, 0.33-0.46 m ahead. Where it typed: the
 // palm's height, followed with restTau while it stays within raise / 2 of it.
 //
+// The desk model (pointer/helper/deskclass.h, POINTER_DESK_MODEL; off without one): a hand it puts on
+// the keyboard or the mouse (Hand::desk, at least deskMin, 0.8, POINTER_DESK_MIN) for deskFor (0.3 s)
+// while it comes down in the zone is at the desk too, keys and mouse or not: hands put back on the
+// keyboard a while after the last key or mouse move, or seen again after looking up for longer than the
+// mouse's 10 s (user, 2026-10-28: "We do though need to have the model look for keyboard and hand mouse
+// usage"). As with the mouse, no ray or pokes until it leaves, but its pinches work while the mouse is
+// still: a gaze pinch from a hand resting at the desk. Not a hand in use elsewhere (busy).
+//
 // The posture (before the first key): both hands in the zone, level within level (0.08 m) and at most
 // gap (0.32 m) apart, for posture (0.3 s, POINTER_TYPING_POSTURE; 0: keys only), count as typing, so
 // the first keystroke's pinch is held back too. Typing hands were 0.15-0.22 m apart and level within
@@ -76,6 +84,8 @@ struct Params {
     double keep = 300;        // POINTER_TYPING_KEEP: one on the keyboard, this long (0: as forget)
     double mouse = 10;        // POINTER_TYPING_MOUSE: a hand coming down in the zone this long after the mouse
                               // was used is on the keyboard (0: off)
+    double deskMin = 0.8;     // POINTER_DESK_MIN: the desk model's P(keyboard or mouse) that parks a hand
+    double deskFor = 0.3;     // ...held this long
     double restTau = 0.5;     // where it typed follows the palm this slowly
 };
 
@@ -86,6 +96,7 @@ struct Hand {
     V3 palm;
     double down = 0;
     bool busy = false;  // its ray is up or it holds a gesture: in use elsewhere, if it's out of the zone
+    double desk = -1;   // the desk model's P(on the keyboard or the mouse); -1: no model
 };
 
 // The head in that frame: where the eyes are, and where it faces (its -z; only the heading counts).
@@ -178,13 +189,21 @@ public:
             const bool down = in[k] && (!s.known || h.palm.y - s.restY < p_.raise / 2);
             // pointing or holding a gesture out of the zone when keys come: not typing (point, then Enter)
             if (h.busy && !in[k] && !s.free) s.free = true;
+            // the desk model: at the keyboard or the mouse for deskFor, coming down at the desk
+            const bool model = h.desk >= p_.deskMin && down && !h.busy;
+            if (!model) s.deskSince = kNever;
+            else if (!Ever(s.deskSince)) s.deskSince = t;
+            const bool byModel = model && t - s.deskSince >= p_.deskFor - 1e-9;
             // the mouse in use: a hand that comes down at the desk (not one pointing or holding a gesture)
-            if ((typing || (mousing && !h.busy)) && down) {
-                s.parked = true, s.free = false, s.leaveSince = kNever, s.desk = !typing;
+            if ((typing || (mousing && !h.busy) || byModel) && down) {
+                s.parked = true, s.free = false, s.leaveSince = kNever, s.deskSince = kNever, s.desk = !typing;
                 if (!s.known || std::fabs(h.palm.y - s.restY) >= p_.raise / 2) s.restY = h.palm.y;
                 s.known = true;
-                log.push_back(std::string("typing: ") + Name(k) +
-                              (typing ? " hand on the keyboard" : " hand at the desk (the mouse in use)"));
+                char b[96];
+                if (typing) std::snprintf(b, sizeof b, "typing: %s hand on the keyboard", Name(k));
+                else if (mousing && !h.busy) std::snprintf(b, sizeof b, "typing: %s hand at the desk (the mouse in use)", Name(k));
+                else std::snprintf(b, sizeof b, "typing: %s hand at the desk (the desk model, %.2f)", Name(k), h.desk);
+                log.push_back(b);
             }
         }
     }
@@ -221,7 +240,7 @@ private:
         bool free = false;    // left it since (keys don't hold it back)
         bool known = false;   // restY is where it typed
         bool desk = false;    // parked by the mouse's use, not by typing
-        double restY = 0, seen = kNever, leaveSince = kNever;
+        double restY = 0, seen = kNever, leaveSince = kNever, deskSince = kNever;
     };
     static double Dist(const V3 &a, const V3 &b) { return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)); }
     static const char *Name(int k) { return k ? "right" : "left"; }

@@ -73,6 +73,18 @@ hears the result (`typing <L> <R>` on @ft_screens).
   1 s, and looking up (3 s unseen) forgot a parked one: in an hour of keyboard and mouse use, resting
   desk hands raised 26 rays that took the pointer from the mouse, and 11 near claims on the way from
   the keys to the mouse released it. A held-back hand's near claim no longer releases the pointer.
+- The desk model (2026-10-28, `POINTER_DESK_MODEL`, off without one): a small network
+  (`pointer/helper/deskclass.h`) reads each hand's skeleton and the head (where the palm is, which
+  way it faces, the finger curls, how much it slid or the fingertips moved lately, the other hand) and
+  says keyboard, mouse or free. A hand it puts at the keyboard or mouse (`POINTER_DESK_MIN`, 0.8) for
+  0.3 s while it comes down in the zone is parked as for the mouse, keys or not. The hand recorder's
+  `desk-work` round records the data: `hands/tools/replay_dumps.sh` replays takes into publish dumps,
+  `pointer/tools/deskfeat` turns them into features, and `hands/tools/desk_train.py` labels them from
+  the prompts and trains it. The first model (v1, from the desk-work steps of six people's full
+  sessions and their hand-size and gestures takes, 5.9k hand frames): with each person held out in
+  turn, 99-100% of their hand frames on the keyboard, on the mouse or resting at the desk read as at
+  the desk, and 83-100% of their raised hands as free. It tells the keyboard from the mouse poorly
+  (0-79%), which the pointer doesn't need, and has seen few low free hands.
 - The posture: both hands in the zone, level within 8 cm and at most 32 cm apart, for
   `POINTER_TYPING_POSTURE` (0.3 s), is typing before any key, within `POINTER_TYPING_RECENT` (600 s)
   of a key. Without that limit, both hands resting on a desk would hold gaze pinches back.

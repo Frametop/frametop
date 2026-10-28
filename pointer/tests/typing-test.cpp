@@ -373,6 +373,50 @@ void TestMouseLeavesPointingAlone() {
     CHECK(!v.ty.Parked(1), "POINTER_TYPING_MOUSE=0: the mouse parks nothing");
 }
 
+// The desk model: a hand it puts at the keyboard or mouse (P 0.8 or more for 0.3 s) coming down in the
+// zone is at the desk with no key or mouse for minutes: no ray or pokes, but its pinches work (a gaze
+// pinch from a resting hand). Under the threshold, too briefly, out of the zone or busy: not parked.
+// Lifted, it leaves as any parked hand.
+void TestDeskModelParks() {
+    World w;
+    w.hands[0] = Keys(0), w.hands[1] = Mouse();
+    w.hands[0].desk = w.hands[1].desk = 0.95;
+    w.Run(0.2);
+    CHECK(!w.ty.Parked(1), "0.2 s: not yet");
+    w.Run(0.2);
+    CHECK(w.ty.Parked(0) && w.ty.Parked(1), "0.4 s at the desk by the model: parked");
+    CHECK(w.Blocked(1), "no ray or pokes");
+    CHECK(w.ty.Why(1, w.t) == nullptr, "pinches work with the mouse still: %s", w.ty.Why(1, w.t));
+    CHECK(w.log.find("right hand at the desk (the desk model, 0.95)") != std::string::npos, "logged: %s", w.log.c_str());
+    w.ty.Mouse(w.t);
+    CHECK(w.ty.Why(1, w.t) != nullptr, "the mouse in use: pinches held back as for the mouse's own park");
+    w.hands[1].palm.y += 0.12;
+    w.Run(0.3);
+    CHECK(!w.ty.Parked(1) && w.ty.Free(1), "lifted: free");
+    // under the threshold, flickering, out of the zone, or in use: never parked
+    World u;
+    u.hands[1] = Mouse(), u.hands[1].desk = 0.7;
+    u.Run(1);
+    CHECK(!u.ty.Parked(1), "P 0.7 under 0.8: not parked");
+    World f;
+    f.hands[1] = Mouse();
+    int k = 0;
+    f.Run(2, 0, [&] { f.hands[1].desk = (k++ % 6) < 5 ? 0.9 : 0.5; });
+    CHECK(!f.ty.Parked(1), "never 0.3 s running: not parked");
+    World l;
+    l.hands[0] = Lap(0), l.hands[0].desk = 0.99;
+    l.Run(1);
+    CHECK(!l.ty.Parked(0), "the model alone doesn't park a hand out of the zone");
+    World b;
+    b.hands[1] = Keys(1), b.hands[1].desk = 0.99, b.hands[1].busy = true;
+    b.Run(1);
+    CHECK(!b.ty.Parked(1), "a hand holding a gesture: not parked");
+    World n;
+    n.hands[1] = Keys(1);
+    n.Run(2);
+    CHECK(!n.ty.Parked(1), "no model (-1): not parked without keys or the mouse");
+}
+
 // Pointing with one hand (its ray up) and pressing Enter with the other: the pointing hand isn't held
 // back. The same hand idle where it was (not pointing): the key holds it back for 2 s.
 void TestPointAndEnter() {
@@ -476,6 +520,7 @@ int main() {
     TestMouseParks();
     TestDeskPinchesAfterTheMouse();
     TestMouseLeavesPointingAlone();
+    TestDeskModelParks();
     TestPointAndEnter();
     TestHoldOntoTheKeys();
     TestTurned();

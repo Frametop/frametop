@@ -143,6 +143,8 @@ POINTER_TYPING_POSTURE=0.3 # hands: both hands down on the keyboard together thi
 POINTER_TYPING_RECENT=600  # hands: ... only within this many seconds of a key (a keyboard in use; both hands resting on a desk otherwise hold gaze pinches back); 0 = always
 POINTER_TYPING_KEEP=300    # hands: a hand on the keyboard stays there this long while the cameras don't see it (looking up at a screen); 0 = 3 s
 POINTER_TYPING_MOUSE=10    # hands: this many seconds after the mouse was used, a hand that comes down at the desk is held back like one on the keyboard (no ray, no pinches); 0 = off
+#POINTER_DESK_MODEL=~/.local/share/frametop/hands/desk-model.txt  # hands: a trained model (hands/tools/desk_train.py) that tells hands on the keyboard or mouse from free ones: a hand it puts there is held back too, keys or mouse or not (no ray or pokes until lifted); unset = off
+POINTER_DESK_MIN=0.8       # hands: how sure the desk model must be (0.5-1)
 POINTER_HAND_RAY=1         # hands: a bare hand raised and pointing shows a ray that drives the pointer like a controller's laser (pinch = click, middle pinch = right click or scroll); 0 = gaze pinches only
 POINTER_RAY_DEADZONE=2.5   # hand ray: degrees the ray turns during a pinch before the press drags (a click's own wobble stays inside)
 POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out pushes it away and pulling in brings it near

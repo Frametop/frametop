@@ -398,7 +398,10 @@
 // sight, up to POINTER_TYPING_KEEP (300 s): looking up at a screen and back down doesn't free it.
 // For POINTER_TYPING_MOUSE (10 s) after the mouse was used, a hand that comes down at the desk (the
 // keyboard zone) is held back too, keys or not ("typing: right hand at the desk (the mouse in
-// use)"): no ray or pokes until it's lifted, no pinches while the mouse is in use.
+// use)"): no ray or pokes until it's lifted, no pinches while the mouse is in use. With a desk model
+// (POINTER_DESK_MODEL, a file hands/tools/desk_train.py made; deskclass.h), a hand the model puts on
+// the keyboard or the mouse (POINTER_DESK_MIN, 0.8) coming down there is held back the same way, keys
+// and mouse or not ("typing: right hand at the desk (the desk model, 0.93)").
 //
 // Gaze pinch (gaze mode with POINTER_HANDS; gazehand.h has the rules and the timings): the eyes aim
 // and the hands click, Vision Pro style. In gaze mode the hand ray stays off unless
@@ -535,6 +538,7 @@
 #include "../../hands/include/fh_events.h"
 #include "../../hands/include/fh_ray.h"
 #include "calpanel.h"
+#include "deskclass.h"
 #include "gazehand.h"
 #include "handoff.h"
 #include "handsin.h"
@@ -1035,8 +1039,11 @@ int main() {
     bool rightDragPending = false;
     double pinchGain = 0.5, pinchDeadzone = 1.5, gripGain = 1.0, handBelow = 0.35;
     // Typing (see the top): POINTER_PINCH_TYPING, POINTER_TYPING_RAISE, POINTER_TYPING_BELOW,
-    // POINTER_TYPING_POSTURE, POINTER_TYPING_RECENT, POINTER_TYPING_KEEP, POINTER_TYPING_MOUSE.
+    // POINTER_TYPING_POSTURE, POINTER_TYPING_RECENT, POINTER_TYPING_KEEP, POINTER_TYPING_MOUSE, and the
+    // desk model's POINTER_DESK_MODEL and POINTER_DESK_MIN.
     typing::Params typingParams;
+    std::string deskModelPath;  // as configured ("": none)
+    desk::Model deskModel;
     // The hand ray (see "Hand ray" at the top): POINTER_HAND_RAY, POINTER_RAY_DEADZONE, POINTER_RAY_PUSH,
     // POINTER_RAY_SCROLL, POINTER_RAY_RELEASE, POINTER_RAY_GRACE.
     bool rayOn = true, rayPush = true;
@@ -1112,6 +1119,20 @@ int main() {
         typingParams.recent = std::clamp(ConfDouble(conf, "POINTER_TYPING_RECENT", 600), 0.0, 86400.0);
         typingParams.keep = std::clamp(ConfDouble(conf, "POINTER_TYPING_KEEP", 300), 0.0, 86400.0);
         typingParams.mouse = std::clamp(ConfDouble(conf, "POINTER_TYPING_MOUSE", 10), 0.0, 600.0);
+        typingParams.deskMin = std::clamp(ConfDouble(conf, "POINTER_DESK_MIN", 0.8), 0.5, 1.0);
+        {
+            const auto dm = conf.find("POINTER_DESK_MODEL");
+            std::string path = dm == conf.end() ? "" : dm->second;
+            const char *home = std::getenv("HOME");
+            if (path.rfind("~/", 0) == 0) path = std::string(home ? home : "") + path.substr(1);
+            if (path != deskModelPath) {
+                deskModelPath = path;
+                if (path.empty()) deskModel = desk::Model{};
+                else if (deskModel.Load(path)) std::printf("desk model: %s\n", path.c_str());
+                else std::printf("desk model: %s: %s (off)\n", path.c_str(), deskModel.error.c_str());
+                std::fflush(stdout);
+            }
+        }
         rayOn = ConfDouble(conf, "POINTER_HAND_RAY", 1) != 0;
         rayDeadzone = std::clamp(ConfDouble(conf, "POINTER_RAY_DEADZONE", 2.5), 0.0, 10.0);
         rayPush = ConfDouble(conf, "POINTER_RAY_PUSH", 1) != 0;
@@ -1408,6 +1429,7 @@ int main() {
     uint64_t handSeq = 0, handPublished = 0;
     Clock::time_point handUsed{};  // a gesture began then (keeps the pointer, like gaze mode)
     typing::Typing typist;           // the relay's "typing" (a key) and the hands: which hands typing holds back
+    desk::Features deskFeatures;     // the desk model's features, per side, over the hands frames
     std::string typingSent;          // "typing L R" as last sent to ft-screens
     Clock::time_point typingSentAt{};
     std::string raySent;             // "ray L R" as last sent to ft-screens
@@ -2583,6 +2605,25 @@ int main() {
                 const Vec3 hp = Position(typingHead), hf = Rotate(typingHead, Vec3{0, 0, -1});
                 typing::Head th0;
                 th0.pos = {hp.x, hp.y, hp.z}, th0.fwd = {hf.x, hf.y, hf.z};
+                if (deskModel.Loaded()) {
+                    // the same hands (the first of each side) as the model's features, offline and here
+                    desk::Hand dh[2];
+                    auto dv = [](const Vec3 &v) { return desk::V3{v.x, v.y, v.z}; };
+                    for (int s = 0; s < 2; ++s)
+                        for (const hin::RoomHand &c : handsRoom.hands) {
+                            if (c.side != s) continue;
+                            dh[s].seen = true, dh[s].side = s, dh[s].stereo = c.stereo, dh[s].fitted = c.fitted;
+                            for (int i = 0; i < 21; ++i) dh[s].pts[i] = dv(c.pts[i]);
+                            dh[s].normal = dv(c.palmNormal);
+                            break;
+                        }
+                    desk::Head dhead;
+                    dhead.pos = dv(hp), dhead.fwd = dv(hf);
+                    double df[2][desk::Features::kCount];
+                    bool dok[2];
+                    deskFeatures.Frame(double(handsRoom.capture_ns) / 1e9, dhead, dh, df, dok);
+                    for (int s = 0; s < 2; ++s) th[s].desk = dok[s] ? deskModel.Desk(df[s]) : -1;
+                }
                 typist.Frame(double(handsRoom.capture_ns) / 1e9, th0, th);
                 for (const std::string &l : typist.log) std::printf("%s\n", l.c_str());
                 if (!typist.log.empty()) std::fflush(stdout);

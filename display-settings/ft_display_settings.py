@@ -337,40 +337,44 @@ class Backend(QObject):
         windows = self._windows if time.monotonic() - self._windows_at < 3 else None
 
         def work():
-            room, listed = None, windows
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-            try:
-                sock.bind("")
+            room, listed, socks = None, windows, []
 
-                def ask(text, to=FT_SCREENS, timeout=0.5):
-                    try:
-                        # A reply that came after an earlier question gave up isn't this one's.
-                        sock.setblocking(False)
-                        while True:
-                            sock.recv(1 << 16)
-                    except BlockingIOError:
-                        pass
-                    except OSError:
+            def asker(timeout):
+                """ask(text, to) -> reply or None, on a socket of its own. After one question
+                gives up it asks nothing more: its late reply would answer the next one."""
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+                socks.append(sock)
+                sock.bind("")
+                sock.settimeout(timeout)
+                stalled = []
+
+                def ask(text, to=FT_SCREENS):
+                    if stalled:
                         return None
                     try:
-                        sock.settimeout(timeout)
                         sock.sendto(text.encode(), to)
                         return sock.recv(1 << 16).decode()
+                    except TimeoutError:
+                        stalled.append(text)
                     except OSError:
-                        return None
+                        pass
+                    return None
+                return ask
+            try:
                 if listed is None:
-                    reply = ask("spotlist", ft_layout.FLOAT, 4) or ""
+                    reply = asker(4)("spotlist", ft_layout.FLOAT) or ""
                     try:
                         listed = [(int(e["panel"]), e.get("title") or e.get("app") or "window")
                                   for e in json.loads(reply[3:]) if e.get("floating") and e.get("panel")
                                   and not e.get("minimized")] if reply.startswith("ok ") else []
                     except (ValueError, TypeError, KeyError, AttributeError):
                         listed = []
-                room = ft_layout.read_room(ask, layout, listed)
+                room = ft_layout.read_room(asker(0.5), layout, listed)
             except (ValueError, TypeError, KeyError, IndexError, OSError):
                 room = None  # a reply it can't read: no live preview this time, the next read tries again
             finally:
-                sock.close()
+                for sock in socks:
+                    sock.close()
                 try:
                     # Always, so _room_busy clears whatever went wrong.
                     self._roomRead.emit(room, listed if windows is None else None)

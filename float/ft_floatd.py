@@ -238,10 +238,12 @@ SKIP_APPS = ("org.kde.plasmashell", "org.kde.krunner", "org.kde.ksplashqml", "or
 
 
 # Frametop's settings apps, which a profile keeps like any app (user, 2026-10-28: a profile
-# saved with Display Settings and Remote Displays open kept no windows). Its other windows
-# (recorders, the tour, its own panels) stay out. Remote Access needs no entry: its window is
-# org.frametop.RemoteAccess, kept like any app's. Display Settings names these (FRAMETOP_APPS).
-PROFILE_APPS = ("ft-display-settings", "ft-input-settings", "ft-remote-displays")
+# saved with Display Settings and Remote Displays open kept no windows). Display Settings
+# itself stays out: profiles are saved from it, so every one would open it (user, 2026-10-28).
+# So do Frametop's other windows (recorders, the tour, its own panels). Remote Access needs no
+# entry: its window is org.frametop.RemoteAccess, kept like any app's. Display Settings names
+# these (FRAMETOP_APPS).
+PROFILE_APPS = ("ft-input-settings", "ft-remote-displays")
 
 
 def recordable(ev):

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""ft-floatd's window filters, offline: a profile keeps Frametop's settings apps (Display
-Settings, Remote Displays, ...) like any app, and leaves out its other windows; spotlist lists
-them all. D-Bus and GLib are stand-ins, as in scale-test.py.
+"""ft-floatd's window filters, offline: a profile keeps Frametop's settings apps (Input
+Settings, Remote Displays, Remote Access) like any app, and leaves out Display Settings, where
+profiles are saved from, and Frametop's other windows; spotlist lists them all. D-Bus and
+GLib are stand-ins, as in scale-test.py.
 
   float/test/recordable-test.py
 """
@@ -44,10 +45,12 @@ for app in floatd.PROFILE_APPS:
     check(f"a profile keeps {app}", floatd.recordable(window(app)), True)
 check("a profile keeps an app's window", floatd.recordable(window("org.kde.dolphin")), True)
 check("a profile keeps a settings app by its class", floatd.recordable(window("", "ft-remote-displays")), True)
-for app in ("ft-tour", "ft-recorder", "frametop-panel", "org.kde.plasmashell", "org.kde.ksplashqml"):
+check("a profile keeps Remote Access", floatd.recordable(window("org.frametop.RemoteAccess")), True)
+for app in ("ft-display-settings", "ft-tour", "ft-recorder", "frametop-panel", "org.kde.plasmashell", "org.kde.ksplashqml"):
     check(f"a profile leaves out {app}", floatd.recordable(window(app)), False)
 check("a profile leaves out a settings app's dialog",
-      floatd.recordable(window("ft-display-settings", transient=True)), False)
+      floatd.recordable(window("ft-input-settings", transient=True)), False)
 check("spotlist lists the settings apps", floatd.listable(window("ft-input-settings")), True)
+check("spotlist lists Display Settings", floatd.listable(window("ft-display-settings")), True)
 
 sys.exit(1 if failed else 0)

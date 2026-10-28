@@ -73,8 +73,7 @@ DASHBOARD_APPS = ("steamvr", "frametop")  # float/ft-dashroute; frametop.conf's 
 NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tmp is the host's)
 AUTOSTART_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-autostart.service")
 # Frametop's own apps a profile can keep (ft-floatd's recordable), by their names.
-FRAMETOP_APPS = {"ft-display-settings": "Frametop Display Settings", "ft-input-settings": "Frametop Input Settings",
-                 "ft-remote-displays": "Frametop Remote Displays"}  # ft-floatd's PROFILE_APPS
+FRAMETOP_APPS = {"ft-input-settings": "Frametop Input Settings", "ft-remote-displays": "Frametop Remote Displays"}  # ft-floatd's PROFILE_APPS
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
 

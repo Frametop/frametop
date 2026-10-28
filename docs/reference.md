@@ -212,6 +212,7 @@ Other computers' monitors as Frametop screens (ft-screens only), streamed from V
 layout/ft-layout remote list                 # the remote displays and their streams' state
 layout/ft-layout remote connect|disconnect ID...
 layout/ft-layout remote host NAME mic=on|off # send it the Frame's microphone (streams pick it up within 3 s)
+layout/ft-layout remote host NAME input=on|off # use its keyboard and mouse in Frametop while the headset is worn (Linux hosts)
 remote-displays/install.sh                   # its menu entry
 ```
 

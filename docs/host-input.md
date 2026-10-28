@@ -1,6 +1,6 @@
 # Host input: a computer's keyboard and mouse in Frametop (design notes)
 
-Status: planned (2026-10-20), nothing built yet. The spikes below come first.
+Status: Linux hosts built (2026-10-27), with Frametop's Vibepollo build; see "Linux hosts". Windows and the Mac are planned, and the spikes below come first for them. Pausing the streams when the headset comes off isn't built yet: only the keyboard and mouse go back.
 
 The idea: while you wear the headset and a computer's displays stream into Frametop ([remote displays](remote-displays.md)), that computer's own keyboard and mouse work as if they were paired to the Frame. The mouse drives the 3D mouse, and the keys type wherever typing goes in Frametop. Take the headset off and the computer gets its keyboard and mouse back, and its streams stop. Put it back on and the streams come back, and the keyboard and mouse go back to Frametop. It's what a Mac's keyboard and trackpad do for an Apple Vision Pro with Mac Virtual Display.
 
@@ -93,7 +93,20 @@ On the Frame, the ft-stream holding a Mac's input lock connects to its Bridge wi
 
 ## Linux hosts
 
-Later, with the testers who run Linux hosts. Vibepollo's packaged service runs as its own user, and Wayland gives no global input capture; the fork's root session broker could grab the evdev devices (whose codes need no mapping).
+Built first (2026-10-27), for a Hyprland host (oma7). Wayland gives no global input capture, and Vibepollo's packaged service runs as its own user without access to `/dev/input`, so the fork adds a capture service of its own, `vibepollo-host-input` (`packaging/linux/vibepollo-host-input.c` in frametop-vibepollo):
+
+- Socket-activated (`/run/vibepollo/host-input.sock`, group `vibepollo`), serving only the machine host's uid. A dynamic user in the `input` and `vibepollo-uinput` groups, with no capabilities, no network, and only input devices and `/dev/uinput` allowed.
+- While a lease holds it grabs (`EVIOCGRAB`) every keyboard (it has letter keys) and mouse (relative X/Y and a left button), so the desktop sees nothing from them. Never a uinput device (under `/devices/virtual`, which includes Vibepollo's own passthrough devices) or a touch surface (`ABS_MT_*`): a touchpad and a touchscreen stay with the computer. It looks for new devices every second.
+- A device is grabbed only once no key is held on it, so a key that went down on the computer comes up there. Keys and buttons that went to the Frame come up there when the grab ends.
+- Volume, media and brightness keys stay on the computer: it types them again on a uinput device of its own.
+- Escape: both Shifts and Escape on the computer. It refuses leases (`released escape`) until the Frame sends `release`, which it does when the headset comes off or the switch goes off.
+- It lets go 1.5 s after the last lease, when the stream ends (`drop`), when the client loses its mouse or keyboard permission, or when Vibepollo stops.
+
+The fork's host side (`src/frametop_hostin*.cpp`) gives the lease to one client at a time (another gets `released busy`), only on an encrypted control stream and only to a client allowed both mouse and keyboard. Windows and macOS hosts answer `released unsupported`.
+
+The protocol as built: `0x3005` is version 1, then engage (1) with a u32 sequence and a u16 lease in ms, or release (2). `0x3004` is version 1, then one record: events (1: kind, 1 keyboard or 2 mouse, a u16 count, then evdev type u16, code u16, value s32 each, little-endian; a report ends with 0 0 0), state (2: engaged 0 or 1, then the reason), or hello (3: kinds, then the host's name). State and hello come on every change and once a second. Reasons: `lease`, `host`, `escape`, `busy`, `permission`, `service`, `unsupported`.
+
+On the Frame, ft-stream does what "On the Frame" says without ft-screens: the stream holding the host's input lock asks the pointer helper (`gaze ? headset`) and the relay (`pause ?`) every second itself, and a helper or relay that stops answering counts as away or paused. `stream/hostinput.h` has the records, offline-tested by `stream/test/hostinput-test.cpp`. moonlight-common-c gets `LiSendFrametopHostInputLease` and `LiSetFrametopHostInputCallback` from `stream/moonlight-hostin.patch` (channel 0x08 for leases; the callback only sees packets that came encrypted).
 
 ## On the Frame
 

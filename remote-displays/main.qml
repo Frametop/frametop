@@ -465,6 +465,19 @@ Kirigami.ApplicationWindow {
                                                        + "with Frametop's build of Vibepollo."
                                 Controls.ToolTip.visible: hovered
                             }
+                            // Its own keyboard and mouse, lent while the headset is worn. Only
+                            // Frametop's build lends them, so Sunshine hosts don't get the switch.
+                            Controls.Switch {
+                                visible: !hostCard.sunshine
+                                text: "Use this computer's keyboard and mouse"
+                                checked: hostCard.modelData.input
+                                onToggled: backend.setInput(hostCard.modelData.name, checked)
+                                Controls.ToolTip.text: "While you wear the headset and its displays stream, its keyboard and mouse "
+                                                       + "work in Frametop, and stop working on the computer. Take the headset off, "
+                                                       + "or press both Shifts and Escape on it, to give them back. Linux only "
+                                                       + "for now, with Frametop's build of Vibepollo."
+                                Controls.ToolTip.visible: hovered
+                            }
                             Controls.Label {
                                 visible: hostCard.modelData.displays.length === 0
                                 text: "No displays yet."

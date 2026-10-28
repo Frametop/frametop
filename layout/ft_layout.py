@@ -43,6 +43,9 @@ you face (yaw only), like a recenter. It lives in ~/.config/frametop-layout.json
                                                           dongle (only; ft-stream reads both)
               "mic": false,                       send the Frame's microphone to it (needs
                                                           Frametop's Vibepollo on Windows; ft-stream)
+              "input": false,                     use its own keyboard and mouse in Frametop while
+                                                          the headset is worn (needs Frametop's
+                                                          Vibepollo on Linux; ft-stream)
               "displays": [{"id": "desk-pc-oled",         (docs/remote-displays.md), each a panel
                             "client": "frametop-1",       streamed by ft-stream: its paired client,
                             "app": "display:{GUID}",      what it streams (display:DEVICE, monitor:
@@ -104,9 +107,10 @@ Usage (on the Frame host; Frametop Display Settings calls it too):
                                      first, or with --login, with the Web UI login read from stdin
                                      as two lines: a Sunshine instance on PORT) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M ...
-  ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
-                                     how a host's streams reach it (they start over), and whether
-                                     the Frame's microphone goes to it (within 3 s, no restart)
+  ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off input=on|off
+                                     how a host's streams reach it (they start over), whether
+                                     the Frame's microphone goes to it, and whether its keyboard
+                                     and mouse come to Frametop (both within 3 s, no restart)
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
   ft-layout remote remove ID         stops it and unpairs its client (the host stays)
@@ -1050,6 +1054,7 @@ def remote_command(args):
             w, h = d.get("size", [2560, 1440])
             state = "disconnected" if d.get("off") else running.get(n, "off")
             state += f" route {host.get('route', 'auto')}{' mic' if host.get('mic') else ''}"
+            state += " input" if host.get("input") else ""
             print(f"{n} {d['id']} {host.get('name')} {display_target(host, d)} {d['app']} {w}x{h}@{d.get('fps', 60)} "
                   f"{state}{' hidden' if d.get('hidden') else ''}  {d.get('label', '')}")
         return
@@ -1069,9 +1074,11 @@ def remote_command(args):
                 restart = True
             elif k == "mic" and v in ("on", "off"):
                 host["mic"] = v == "on"  # the stream playing its sound looks every 3 s
+            elif k == "input" and v in ("on", "off"):
+                host["input"] = v == "on"  # its streams look every 3 s
             else:
                 raise RuntimeError(f"remote host: {kv!r}? (route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none "
-                                   "mic=on|off)")
+                                   "mic=on|off input=on|off)")
         save_layout(layout)
         if not restart:
             return
@@ -1236,7 +1243,7 @@ def remote_command(args):
         log(f"removed {d['id']}; {said[-1] if said else f'unpair exited {code}'}")
         return
     raise RuntimeError("remote list | monitors ADDRESS | add HOST ADDRESS APP [options] | set ID KEY=VALUE... | "
-                       "host NAME route=...|direct=...|mic=... | connect ID... | disconnect ID... | remove ID")
+                       "host NAME route=...|direct=...|mic=...|input=... | connect ID... | disconnect ID... | remove ID")
 
 
 def apply(wait=0):

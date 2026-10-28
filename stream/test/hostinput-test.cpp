@@ -1,10 +1,12 @@
-// stream/hostinput.h, offline: the host's records, the relay id, the lease and when to hold it.
+// stream/hostinput.h, offline: the host's records, the relay id, the lease, when to hold it, and
+// what the relay is told.
 //   g++ -std=c++17 -Wall -Wextra -Werror -Istream -o /tmp/hostinput-test stream/test/hostinput-test.cpp && /tmp/hostinput-test
 #undef NDEBUG
 #include "hostinput.h"
 
 #include <cassert>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 using namespace ftstream::hostinput;
@@ -46,6 +48,15 @@ int main() {
     assert(P(Events(kKeyboard, {{3, 0, 10}})).type == Record::kNone);   // absolute
     assert(P(Events(kKeyboard, {{4, 4, 30}})).type == Record::kNone);   // a scan code
     assert(P(Events(kMouse, {{2, 16, 1}})).type == Record::kNone);      // past REL_MAX
+    // Each kind carries only its own.
+    assert(P(Events(kKeyboard, {{1, 272, 1}})).type == Record::kNone);  // BTN_LEFT
+    assert(P(Events(kKeyboard, {{1, 279, 1}})).type == Record::kNone);  // BTN_TASK
+    assert(P(Events(kKeyboard, {{2, 0, 1}})).type == Record::kNone);
+    assert(P(Events(kMouse, {{1, 30, 1}})).type == Record::kNone);
+    assert(P(Events(kMouse, {{1, 271, 1}})).type == Record::kNone);
+    assert(P(Events(kMouse, {{1, 280, 1}})).type == Record::kNone);
+    assert(P(Events(kMouse, {{1, 279, 1}, {2, 8, -1}})).type == Record::kEvents);
+    assert(P(Events(kKeyboard, {{1, 271, 1}, {1, 280, 0}})).type == Record::kEvents);
     assert(P(Events(3, {{1, 30, 1}})).type == Record::kNone);           // no such kind
     assert(P(Events(kMouse, {})).type == Record::kNone);
     auto shortened = Events(kMouse, {{2, 0, 1}});
@@ -82,18 +93,79 @@ int main() {
     // The lease.
     assert((Engage(0x01020304) == std::array<unsigned char, 8>{kVersion, 1, 4, 3, 2, 1, 0xdc, 0x05}));
     assert((Release() == std::array<unsigned char, 2>{kVersion, 2}));
+    assert((Drop() == std::array<unsigned char, 2>{kVersion, 3}));
 
-    // When to hold it.
-    Conditions c{true, true, true, true, false};
-    assert(Wanted(c));
-    for (bool Conditions::*off : {&Conditions::switchOn, &Conditions::live, &Conditions::lock, &Conditions::worn}) {
-        Conditions d = c;
-        d.*off = false;
-        assert(!Wanted(d));
-    }
-    c.paused = true;
-    assert(!Wanted(c));
-    assert(!Wanted(Conditions{}));
+    // When to hold it, and how to give it back.
+    const int64_t now = 100'000'000'000;
+    const Answer worn{true, now - 1}, away{false, now - 1}, playing{false, now - 1}, paused{true, now - 1};
+    assert(Decide(true, true, true, worn, playing, now) == Want::kHold);
+    assert(Decide(false, true, true, worn, playing, now) == Want::kRelease);   // the switch went off
+    assert(Decide(true, true, true, away, playing, now) == Want::kRelease);    // the headset came off
+    assert(Decide(false, false, false, Answer{}, Answer{}, now) == Want::kRelease);
+    assert(Decide(true, false, true, worn, playing, now) == Want::kDrop);      // the stream isn't live
+    assert(Decide(true, true, false, worn, playing, now) == Want::kDrop);      // another stream holds it
+    assert(Decide(true, true, true, worn, paused, now) == Want::kDrop);        // a VR game
+    assert(Decide(true, false, true, away, playing, now) == Want::kDrop);
+    // Answers that stopped coming: not the person's say, so drop.
+    const Answer staleWorn{true, now - kStaleNs}, staleAway{false, now - kStaleNs}, stalePlaying{false, now - kStaleNs};
+    assert(Decide(true, true, true, staleWorn, playing, now) == Want::kDrop);
+    assert(Decide(true, true, true, staleAway, playing, now) == Want::kDrop);
+    assert(Decide(true, true, true, worn, stalePlaying, now) == Want::kDrop);
+    assert(Decide(true, true, true, Answer{}, Answer{}, now) == Want::kDrop);
+    assert(Decide(true, true, true, Answer{true, now - kStaleNs + 1}, playing, now) == Want::kHold);
+
+    // The relay.
+    std::vector<std::string> said;
+    bool up = true;
+    Relay relay([&](const std::string &msg) {
+        if (up) said.push_back(msg);
+        return up;
+    });
+    relay.Start("oma7", "192.168.1.50");
+    const Record hello = P(Bytes({kVersion, 3, 3, 'o', 'm', 'a', '7'})), on = P(Bytes({kVersion, 2, 1})),
+                 key = P(Events(kKeyboard, {{1, 30, 1}, {0, 0, 0}})), move = P(Events(kMouse, {{2, 0, 1}}));
+    assert(relay.Take(hello).empty() && said.empty());  // not engaged yet: nothing to say
+    assert(relay.Take(key).empty() && said.empty());
+    assert(relay.Take(on) == "engaged: its keyboard and mouse are here");
+    assert(relay.Take(key).empty() && said.empty());  // before a hello the relay has no device
+    relay.Take(hello);
+    assert((said == std::vector<std::string>{"hostdev oma7 keyboard oma7", "hostdev oma7 mouse oma7"}));
+    said.clear();
+    relay.Take(key), relay.Take(move);
+    assert((said == std::vector<std::string>{"hostev oma7 keyboard 1 30 1 0 0 0", "hostev oma7 mouse 2 0 1"}));
+    assert(relay.TakeEvents() == 2 && relay.TakeEvents() == 0);
+    assert(relay.Take(on).empty());  // told every second: logged once
+    said.clear();
+    // A hello without the mouse takes it away; one with no name uses the host's address.
+    relay.Take(P(Bytes({kVersion, 3, 1})));
+    assert((said == std::vector<std::string>{"hostdev oma7 keyboard 192.168.1.50", "hostbye oma7 mouse"}));
+    said.clear();
+    relay.Take(move);
+    assert(said.empty());
+    // A lost event says hostbye, and the next hello brings the devices back.
+    relay.Take(hello);
+    said.clear();
+    up = false;
+    relay.Take(key);
+    up = true;
+    assert(relay.devices() == 0);
+    relay.Take(key);
+    assert(said.empty());
+    relay.Take(hello);
+    assert(relay.devices() == (kKeyboard | kMouse));
+    said.clear();
+    // Released: hostbye for each, and events stop.
+    assert(relay.Take(P(Bytes({kVersion, 2, 0, 'e', 's', 'c', 'a', 'p', 'e'}))) == "released: escape");
+    assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostbye oma7 mouse"}));
+    assert(relay.reason() == "escape" && !relay.engaged());
+    said.clear();
+    relay.Take(key), relay.Take(hello);
+    assert(said.empty());
+    // Stopping from the Frame's side says hostbye too.
+    relay.Take(on), relay.Take(hello);
+    said.clear();
+    relay.Stop();
+    assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostbye oma7 mouse"}) && !relay.engaged());
 
     std::puts("hostinput-test: ok");
 }

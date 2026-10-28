@@ -54,6 +54,8 @@ test-c:
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"
         "build/tests/$n" >/dev/null && echo "$t: ok"
     done
+    g++ -std=c++17 -Wall -Wextra -Werror -Istream stream/test/hostinput-test.cpp -o build/tests/hostinput-test
+    build/tests/hostinput-test >/dev/null && echo "stream/test/hostinput-test.cpp: ok"
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/rounded-test.cpp \
       -o build/tests/rounded-test
     build/tests/rounded-test && echo "screens/tests/rounded-test.cpp: ok"

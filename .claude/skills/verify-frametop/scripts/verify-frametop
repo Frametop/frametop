@@ -211,10 +211,16 @@ def doctor():
     check('Frametop sockets listening', all(s in heard for s in SOCKETS),
           ', '.join('@' + s for s in SOCKETS if s not in heard) or 'all listening')
     release = os.readlink(RELEASES / 'current') if (RELEASES / 'current').is_symlink() else None
-    head = git('rev-parse', '--short=7', 'HEAD')
+    head = git('rev-parse', 'HEAD')
+    try:   # scripts/fast-install's record of the commit on top of the release
+        fast = json.loads((RELEASES / 'current/.fast-install/state.json').read_text()).get('commit') or ''
+    except (OSError, ValueError):
+        fast = ''
+    live = f'{release}' + (f' + fast-install {fast[:7]}' if fast else '')
     check('Frametop release', release is not None,
-          f'{release}; this checkout is {git("branch", "--show-current") or "detached"} {head}'
-          + ('' if release and head in release else ': deploy the change under test before driving it'))
+          f'{live}; this checkout is {git("branch", "--show-current") or "detached"} {head[:7]}'
+          + ('' if fast == head or (release and head[:7] in release)
+             else ': scripts/fast-install the change under test before driving it'))
     check('hand tracking', hands == 'active', f'{HANDS} {hands}' + ('' if hands == 'active' else
           ': the hands recipes need it (Frametop Input Settings, or hands/run.sh)'))
     # Not the run's to fail: which release is live is a hint, and hand tracking is opt-in.

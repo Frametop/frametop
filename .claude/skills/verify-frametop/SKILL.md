@@ -46,15 +46,15 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
 
 ## Launch
 
-1. Deploy the change under test into the live release, if the change is in Frametop's own
-   components (the run proves what runs, not what's in the checkout). `V doctor` shows the live
-   release (`~/.local/share/frametop/releases/current`) next to this checkout's commit.
-   - A component binary or script: build it (in the `dev` container, see AGENTS.md), copy it
-     next to the live one as `NAME.new`, keep the old one as `NAME.pre-<topic>`, `mv` the new one
-     into place, and restart only its unit (`systemctl --user restart frametop-<unit>.service`).
-   - The `ft_pointer` SteamVR driver: never `cp` over the loaded `.so` (vrserver crashes); stop
-     SteamVR first or `mv` the new file into place, and ask before restarting SteamVR.
-   - Say in the report which live files were swapped and where their backups are.
+1. Commit the change under test, then install the commit into the live release:
+   `scripts/fast-install` (AGENTS.md, "Trying a change on the headset"). The run proves what
+   runs, not what's in the checkout. It copies the changed files, rebuilds changed components in
+   the release's container, restarts the services using them (the desktop too), and records it
+   all in the release's `.fast-install/` (`scripts/fast-install status`; `undo` restores the
+   release). Exit 3 lists steps left that an installer has to do: the `ft_pointer` driver
+   (`pointer/driver/install.sh install`, then a SteamVR restart: ask first), units, menu
+   entries, file capabilities. Exit 1 on a change the image carries: that needs the full build.
+   Don't swap live files by hand. Say in the report which commit is installed.
 2. `V launch NAME`: runs the doctor, refuses on a worn headset, an unhealthy Frame or another
    run under way (a run is held for 30 minutes from its last launch, guard or snapshot), then
    makes `testbench/artifacts/verify/<date>-<time>-NAME/` with `doctor.json` and `baseline.json`
@@ -149,8 +149,8 @@ agent died). A run whose lease ran out needs no RUN and is restored from its own
 With no run held, `V cleanup` only releases (no baseline: displays and gaze mode stay as they
 are). `T compositor auto` sets SteamVR's persistent `pauseCompositorOnStandby` to true even if
 the user had it false (the baseline's `testbench.runtime.settings` shows what it was). It never
-deletes evidence, and it doesn't undo deployed files: put swapped binaries back from their
-`.pre-<topic>` backups when the user shouldn't keep the change. Nor does it undo settings a
+deletes evidence, and it doesn't undo installed commits: `scripts/fast-install undo` does,
+when the user shouldn't keep the change. Nor does it undo settings a
 recipe changed through a service's socket (`V ask ft_screens 'cutouts on'`): the recipe says
 how to put them back. `V doctor` afterwards should exit 0 with "no testbench overrides left".
 

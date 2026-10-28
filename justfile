@@ -8,7 +8,7 @@ default:
     @just --list
 
 # everything, strict (the recipes are the source of truth)
-test: test-python test-c test-bash test-testbench
+test: test-python test-c test-bash test-testbench test-fast-install
 
 # the Python suites as a strict gate: every failure fails the run. The image's
 # python3 has to import the dnf Qt stack and the locked packages together;
@@ -89,6 +89,14 @@ test-testbench:
     set -e
     [ -d testbench ] || { echo "testbench/: not in the image (dev-only), skipped"; exit 0; }
     cd testbench && python3 -m unittest discover -s tests
+
+# scripts/fast-install, a dev-only tool (AGENTS.md): against a made-up repo and release tree.
+# .dockerignore keeps it out of the image too.
+test-fast-install:
+    #!/usr/bin/env bash
+    set -e
+    [ -f scripts/fast-install ] || { echo "scripts/fast-install: not in the image (dev-only), skipped"; exit 0; }
+    python3 scripts/fast-install-test.py
 
 # lint the Python side (ruff from the locked dev group). Report only for now:
 # the codebase has pre-existing findings; making it a gate is its own cleanup.

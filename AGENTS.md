@@ -20,6 +20,15 @@ scripts/frame.sh --host '<cmd>'          # runs on the SteamOS host
 - Container packages the build needs go in the list in `setup/dev-container.sh`, so the container can be rebuilt.
 - Build output goes in `build/` next to the sources. It's gitignored and never synced.
 
+## Trying a change on the headset
+
+Commit it, then put the commit into the live release with `scripts/fast-install`. It copies the files that changed since the release's commit, rebuilds only the components whose native sources changed (in the release's own container, so they link against what the release runs), and restarts the services running the changed files, the Frametop desktop included. Python, QML and scripts take seconds, a rebuilt component a minute or two. `scripts/fast-install status` shows what's on top of the release, `undo` puts the release back as installed, `--dry-run` shows what would change, and `--no-restart` leaves the services alone.
+
+- It installs commits, not the working tree: what runs is a commit you can name.
+- Changes the image carries (`uv.lock`, `pyproject.toml`, `pack/Containerfile`, the container's packages) need the full build; it refuses them unless `--partial`. Changes an installer puts in place (units, menu entries, the SteamVR driver, file capabilities, `/etc`) are copied into the tree and listed as steps left (exit 3): run that installer from the live release, or do the full build.
+- The full build comes before a push: `ft dev build` and `get.sh --zip` locally, or CI for a release. That's also the only way to test the installers.
+- It never restarts SteamVR, and restarting the desktop ends what's open on it: ask before running it while someone uses the headset.
+
 ## The headset may be in use
 
 A Steam Frame is someone's personal headset, and they may be wearing it while you work.

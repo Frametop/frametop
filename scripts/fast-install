@@ -1,0 +1,541 @@
+#!/usr/bin/python3
+"""fast-install: put a commit into the live Frametop release on this Frame, to test it.
+
+  scripts/fast-install [REV] [--dry-run] [--no-restart] [--partial]
+                       install REV (default HEAD) into the live release: copy the files that
+                       changed since the release's commit, rebuild the components whose native
+                       sources changed (in the release's own container), and restart the
+                       services running the changed files
+  scripts/fast-install status
+                       what's fast-installed on top of the live release
+  scripts/fast-install undo [--no-restart]
+                       put back every file fast-install changed: the release as installed
+
+A full build (`ft dev build`, then get.sh --zip; or CI) makes a release. This is the quick way
+to try commits on it while developing: seconds for Python, QML and scripts, a minute or two
+for a rebuilt component. It installs committed code only (git, not the working tree), so what
+runs is a commit you can name. The full build still comes before a push or a release: this
+never runs the installers, never changes the image, and never restarts SteamVR.
+
+It refuses changes the release's image has to carry (Python packages, the image's packages),
+unless --partial installs the rest anyway. Changes an installer puts in place (units, menu
+entries, the SteamVR driver, file capabilities, files under /etc) are copied into the tree
+and listed as steps left to do; it exits 3 when there are any.
+
+Every file it changes is saved first, once, in RELEASE/.fast-install/orig/, and
+RELEASE/.fast-install/state.json says what's installed. A new release replaces all of it.
+Builds run pinned to as many cores as frame-job allows right now (1 while the headset is
+worn): podman's processes leave frame-job's scope, so the pin is what keeps VR smooth.
+
+Host side: Python 3 standard library only.
+"""
+import fcntl
+import fnmatch
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+RELEASES = Path.home() / '.local/share/frametop/releases'
+STAGE = Path.home() / '.cache/frametop-fast/src'   # a shared clone where components build
+DISTROBOX = Path.home() / '.local/bin/distrobox'
+
+# What the release's image carries: a change here needs the full build.
+IMAGE = {'pack/Containerfile', 'pack/pyside-runtime.py', 'uv.lock', 'pyproject.toml',
+         '.python-version', 'setup/dev-container.sh'}
+# Components with a build.sh, the paths their build reads, and the outputs that go into the
+# live tree (relative to COMPONENT/build; Containerfile keeps the same ones).
+OPENVR = 'scripts/openvr.sh'
+COMPONENTS = {
+    'screens': (('screens', 'frunner/ft-spotpanel.cpp', OPENVR),
+                ('ft-screens', 'ft-handtest', 'ft-handview', 'ft-spotpanel')),
+    'layout/countdown': (('layout/countdown', OPENVR), ('ft-reset-timer',)),
+    'pointer/helper': (('pointer/helper', 'pointer/common', OPENVR), ('ft-pointer',)),
+    'pointer/driver': (('pointer/driver', 'pointer/common', OPENVR), ('driver_ft_pointer.so',)),
+    'gaze': (('gaze', 'pointer/common', OPENVR), ('ft-gaze', 'ft-gazepanel')),
+    'gaze/tracker': (('gaze/tracker',), ('ft-eyegrab',)),
+    'keyboard': (('keyboard', OPENVR),
+                 ('frametop/framekeyboard', 'frametop/framekeyboard-native-guard',
+                  'frametop/engines/*', 'frametop/bridge/*', 'frametop/vr/*')),
+    'power': (('power', OPENVR), ('ft-powerd',)),
+    'stream': (('stream', OPENVR), ('ft-stream', 'ft-dectest', 'ft-streamtest')),
+    'voice': (('voice',), ('bin/whisper-server',)),
+    'hands': (('hands',), ('ft-hands', 'ft-camd')),
+    'hands/rec': (('hands/rec', OPENVR), ('ft-handpanel',)),
+}
+NATIVE_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.glsl', '.vert', '.frag',
+                   '.comp', '.rs', '.S', '.cmake', '.patch', '.tmpl'}
+NATIVE_NAMES = {'build.sh', 'Makefile', 'CMakeLists.txt', 'Cargo.toml', 'Cargo.lock', 'meson.build'}
+# Built files an installer has to put in place: never swapped, only reported.
+NO_SWAP = {
+    'hands/build/ft-camd': 'hands/run.sh caps (sudo: a new ft-camd has no file capabilities)',
+    'gaze/tracker/build/ft-eyegrab': 'gaze/tracker/install.sh install (sudo: it runs as root)',
+}
+# Units whose programs read other folders than their own (sys.path inserts, the session's
+# KWin scripts and helpers).
+EXTRA_DIRS = {
+    'frametop-desktop.service': ('session', 'screens', 'float', 'frunner', 'layout', 'decoration',
+                                 'commands', 'steam'),
+    'frametop-input-relay.service': ('commands',),
+    'frametop-dashpatch.service': ('steam',),
+}
+# Restarting the desktop ends what's open on it: other folders its processes run a file from
+# (input/ft-textinput) restart it for that file only, not for the whole folder.
+FILE_LEVEL = {'frametop-desktop.service'}
+
+
+class Refused(Exception):
+    pass
+
+
+def say(*parts):
+    print(*parts, flush=True)
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, check=True, **kw)
+
+
+def git(*args, binary=False, cwd=None):
+    out = subprocess.run(['git', '-C', str(cwd or ROOT), *args], check=True, capture_output=True).stdout
+    return out if binary else out.decode().strip()
+
+
+def live_release():
+    current = RELEASES / 'current'
+    if not current.is_symlink():
+        raise Refused(f'no live release ({current} is not a link to one)')
+    tree = current.resolve()
+    info = dict(line.split('=', 1) for line in (tree / '.frametop-release').read_text().splitlines()
+                if '=' in line)
+    return tree, info
+
+
+def load_state(tree):
+    path = tree / '.fast-install/state.json'
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def save_state(tree, state):
+    path = tree / '.fast-install/state.json'
+    path.parent.mkdir(exist_ok=True)
+    tmp = path.with_suffix('.new')
+    tmp.write_text(json.dumps(state, indent=2) + '\n')
+    os.replace(tmp, path)
+
+
+def ignore_patterns(rev):
+    """The image build context's ignore rules (.dockerignore): those paths aren't in a release."""
+    text = git('show', f'{rev}:.dockerignore')
+    return [p.strip().rstrip('/') for p in text.splitlines() if p.strip() and not p.startswith('#')]
+
+
+def ignored(path, patterns):
+    parts = path.split('/')
+    for pat in patterns:
+        anywhere = pat.startswith('**/')
+        pat = pat[3:] if anywhere else pat
+        starts = range(len(parts)) if anywhere else (0,)
+        if any(fnmatch.fnmatchcase('/'.join(parts[i:j]), pat)
+               for i in starts for j in range(i + 1, len(parts) + 1)):
+            return True
+    return False
+
+
+def tree_entries(rev):
+    """{path: (mode, blob)} for every file at rev."""
+    out = git('ls-tree', '-r', '-z', '--full-tree', rev, binary=True)
+    entries = {}
+    for item in out.split(b'\0'):
+        if item:
+            meta, path = item.split(b'\t', 1)
+            mode, kind, blob = meta.decode().split()
+            if kind == 'blob':
+                entries[path.decode()] = (mode, blob)
+    return entries
+
+
+def component_of(path):
+    """The component whose own folder holds path (the deepest one), or None."""
+    owners = [c for c in COMPONENTS if path.startswith(c + '/')]
+    return max(owners, key=len) if owners else None
+
+
+def is_native(path):
+    name = path.rsplit('/', 1)[-1]
+    return name in NATIVE_NAMES or os.path.splitext(name)[1] in NATIVE_SUFFIXES
+
+
+def inputs_hash(comp, entries):
+    """A hash of a component's native build inputs at a commit: equal hashes build the same."""
+    reads = COMPONENTS[comp][0]
+    h = hashlib.sha256()
+    for path in sorted(entries):
+        # its own folder's native sources, and every file it names from elsewhere
+        named = any(path == r or path.startswith(r + '/') for r in reads[1:])
+        if named or (component_of(path) == comp and is_native(path)):
+            h.update(f'{path}\0{entries[path][1]}\n'.encode())
+    return h.hexdigest()[:16]
+
+
+def install_step(path):
+    """How an installer puts this path in place, or None when copying it into the tree is enough."""
+    name = path.rsplit('/', 1)[-1]
+    if path.startswith('pointer/driver/'):
+        return 'pointer/driver/install.sh install from the live tree, then restart SteamVR (ask first)'
+    if path.startswith('setup/'):
+        return 'its installer under setup/ (sudo), or the full build'
+    if path in ('install.sh', 'get.sh', 'uninstall.sh') or path.startswith('pack/'):
+        return 'the full build and get.sh --zip (installers only run on an install)'
+    if name == 'install.sh' or name.endswith(('.service', '.socket', '.timer', '.path', '.desktop')):
+        here = path.rsplit('/', 1)[0] if '/' in path else '.'
+        return f're-run the installer in {here}/ from the live tree, or the full build'
+    return None
+
+
+def cpu_pin():
+    """The CPUs builds may use: frame-job's current cap, in whole cores, from this process's own."""
+    cap = 1
+    try:
+        status = subprocess.run(['frame-job', '--status'], capture_output=True, text=True,
+                                timeout=30, cwd=ROOT).stdout
+        m = re.search(r'local cap (\d+)%', status)
+        cap = max(1, int(m.group(1)) // 100) if m else 1
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    cpus = sorted(os.sched_getaffinity(0))[:cap]
+    return ','.join(map(str, cpus))
+
+
+def stage_checkout(rev):
+    if not (STAGE / '.git').exists():
+        STAGE.parent.mkdir(parents=True, exist_ok=True)
+        common = Path(git('rev-parse', '--path-format=absolute', '--git-common-dir'))
+        run(['git', 'clone', '--quiet', '--shared', '--no-checkout', str(common), str(STAGE)])
+    # --shared: the clone reads this repo's objects, so any local commit checks out directly.
+    # Ignored files (each component's build/) stay, so builds reuse what they fetched.
+    git('checkout', '--quiet', '--force', '--detach', rev, cwd=STAGE)
+    git('clean', '-ffdq', cwd=STAGE)
+
+
+def build(comp, box, cpus):
+    script = f'{comp}/build.sh'
+    say(f'  building {comp} in {box} (CPUs {cpus})')
+    cmd = f'cd {STAGE} && exec taskset -c {cpus} env FRAME_IN_BOX=1 OPENVR_LIB=/opt/frametop/lib ./{script}'
+    log = STAGE.parent / f'build-{comp.replace("/", "-")}.log'
+    with open(log, 'w') as out:
+        done = subprocess.run(['frame-job', '--local', '--', str(DISTROBOX), 'enter', box, '--',
+                               'bash', '-c', cmd], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT)
+    if done.returncode:
+        tail = log.read_text(errors='replace').splitlines()[-15:]
+        raise Refused(f'{script} failed (log {log}):\n    ' + '\n    '.join(tail))
+
+
+def outputs(comp):
+    """Built files of comp in the stage, by their path in the tree."""
+    found = {}
+    base = STAGE / comp / 'build'
+    for pattern in COMPONENTS[comp][1]:
+        for f in base.glob(pattern):
+            if f.is_file():
+                found[str(f.relative_to(STAGE))] = f
+    return found
+
+
+class Swapper:
+    """Puts files into the live tree: original saved once, new one moved into place."""
+
+    def __init__(self, tree, state, dry):
+        self.tree, self.state, self.dry = tree, state, dry
+        self.changed = []
+
+    def _save(self, rel):
+        files = self.state['files']
+        if rel in files:
+            return
+        live = self.tree / rel
+        if live.exists() or live.is_symlink():
+            keep = self.tree / '.fast-install/orig' / rel
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            if live.is_symlink():
+                keep.unlink(missing_ok=True)
+                keep.symlink_to(os.readlink(live))
+            else:
+                shutil.copy2(live, keep)
+            files[rel] = 'saved'
+        else:
+            files[rel] = 'absent'
+
+    def put(self, rel, data=None, mode=0o644, link=None, source=None):
+        live = self.tree / rel
+        self.changed.append(rel)
+        if self.dry:
+            return
+        self._save(rel)
+        live.parent.mkdir(parents=True, exist_ok=True)
+        tmp = live.with_name(live.name + '.fast-new')
+        tmp.unlink(missing_ok=True)
+        if link is not None:
+            tmp.symlink_to(link)
+        elif source is not None:
+            shutil.copy2(source, tmp)
+        else:
+            tmp.write_bytes(data)
+            tmp.chmod(mode)
+        os.replace(tmp, live)   # a rename: running programs keep the file they opened
+
+    def remove(self, rel):
+        self.changed.append(rel)
+        if not self.dry:
+            self._save(rel)
+            (self.tree / rel).unlink()
+
+
+def same(live, data=None, mode=None, link=None, source=None):
+    if link is not None:
+        return live.is_symlink() and os.readlink(live) == link
+    if live.is_symlink() or not live.is_file():
+        return False
+    if source is not None:
+        data, mode = source.read_bytes(), source.stat().st_mode & 0o777
+    return live.read_bytes() == data and (mode is None or (live.stat().st_mode & 0o111) == (mode & 0o111))
+
+
+def unit_dirs(tree):
+    """{unit: folders of the live tree its running processes use}, for active Frametop units."""
+    names = subprocess.run(['systemctl', '--user', 'list-units', 'frametop-*', '--state=active',
+                            '--no-legend', '--plain'], capture_output=True, text=True).stdout
+    units = {}
+    for unit in (line.split()[0] for line in names.splitlines() if line.strip()):
+        if not unit.endswith('.service'):
+            continue
+        cgroup = subprocess.run(['systemctl', '--user', 'show', '-p', 'ControlGroup', '--value', unit],
+                                capture_output=True, text=True).stdout.strip()
+        dirs = set(EXTRA_DIRS.get(unit, ()))
+        for procs in Path('/sys/fs/cgroup' + cgroup).rglob('cgroup.procs') if cgroup else ():
+            for pid in procs.read_text().split():
+                try:
+                    args = Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace').split('\0')
+                except OSError:
+                    continue
+                for arg in args:
+                    i = arg.find(str(tree) + '/')
+                    if i < 0:
+                        continue
+                    rel = os.path.normpath(arg[i + len(str(tree)) + 1:])
+                    if rel.startswith('scripts/'):
+                        continue   # scripts/in-box starts most of them
+                    parts = rel.split('/')
+                    if 'build' in parts:
+                        parts = parts[:parts.index('build')]
+                    elif not (tree / rel).is_dir() and unit not in FILE_LEVEL:
+                        parts = parts[:-1]
+                    if parts:
+                        dirs.add('/'.join(parts))
+        units[unit] = dirs
+    return units
+
+
+def restart(tree, changed, enabled):
+    units = unit_dirs(tree)
+    def uses(dirs, p):
+        return any(p == d or p.startswith(d + '/') for d in dirs)
+    hit = sorted(u for u, dirs in units.items() if any(uses(dirs, p) for p in changed))
+    loose = sorted(p for p in changed if not any(uses(ds, p) for ds in units.values()))
+    if not hit:
+        say('no running service uses the changed files')
+    elif not enabled:
+        say('not restarted (--no-restart): ' + ' '.join(hit))
+    else:
+        for unit in (u for u in hit if u != 'frametop-desktop.service'):
+            say(f'restarting {unit}')
+            subprocess.run(['systemctl', '--user', 'restart', unit])
+        if 'frametop-desktop.service' in hit:
+            say('restarting the Frametop desktop (desktops.sh restart)')
+            subprocess.run([str(tree / 'desktops.sh'), 'restart'], stdin=subprocess.DEVNULL)
+    return hit, loose
+
+
+def install(rev, dry, restart_units, partial):
+    tree, info = live_release()
+    base = info.get('COMMIT')
+    if not base:
+        raise Refused(f'{tree}/.frametop-release names no COMMIT')
+    target = git('rev-parse', '--verify', f'{rev}^{{commit}}')
+    try:
+        git('cat-file', '-e', f'{base}^{{commit}}')
+    except subprocess.CalledProcessError:
+        raise Refused(f'the release commit {base[:12]} isn\'t in this repo: git fetch, then try again')
+    state = load_state(tree) or {'release': info.get('VERSION'), 'base': base, 'files': {}, 'built': {}}
+    if subprocess.run(['git', '-C', str(ROOT), 'merge-base', '--is-ancestor', base, target]).returncode:
+        say(f'note: {target[:12]} doesn\'t contain the release commit {base[:12]}: '
+            'files go to their content at the target either way')
+    dirty = git('status', '--porcelain', '--untracked-files=no')
+    if dirty:
+        say('note: uncommitted changes in this checkout are not installed (commit them first)')
+
+    patterns = ignore_patterns(target)
+    new, old = tree_entries(target), tree_entries(base)
+    changed = set(git('diff', '--name-only', '--no-renames', base, target).splitlines())
+    candidates = sorted(p for p in changed | set(state['files'])
+                        if not p.startswith('.fast-install/') and not ignored(p, patterns))
+
+    image = sorted(p for p in candidates if p in IMAGE and new.get(p) != old.get(p))
+    if image and not partial:
+        raise Refused('the release\'s image has to change for: ' + ', '.join(image) +
+                      '\n  do the full build (ft dev build, get.sh --zip), or --partial to install the rest anyway')
+
+    swap = Swapper(tree, state, dry)
+    steps = {}
+    for path in candidates:
+        live = tree / path
+        if path not in new:
+            if live.exists() or live.is_symlink():
+                swap.remove(path)
+            continue
+        mode, blob = new[path]
+        if mode == '160000':
+            continue
+        if mode == '120000':
+            link = git('cat-file', 'blob', blob)
+            if not same(live, link=link):
+                swap.put(path, link=link)
+        else:
+            data = git('cat-file', 'blob', blob, binary=True)
+            perm = 0o755 if mode == '100755' else 0o644
+            if not same(live, data, perm):
+                swap.put(path, data, perm)
+        if (step := install_step(path)) and path in swap.changed:
+            steps[path] = step
+    for path in image:
+        steps[path] = 'the full build (the image carries it)'
+
+    rebuild = []
+    for comp in COMPONENTS:
+        want = inputs_hash(comp, new)
+        have = state['built'].get(comp) or inputs_hash(comp, old)
+        if want != have:
+            rebuild.append((comp, want))
+    if rebuild and not dry:
+        stage_checkout(target)
+        cpus = cpu_pin()
+        for comp, want in rebuild:
+            build(comp, info['BOX'], cpus)
+            for rel, f in sorted(outputs(comp).items()):
+                if same(tree / rel, source=f):
+                    continue
+                if rel in NO_SWAP:
+                    steps[rel] = NO_SWAP[rel]
+                    continue
+                swap.put(rel, source=f)
+                if step := install_step(rel):
+                    steps[rel] = step
+            state['built'][comp] = want
+    elif rebuild:
+        say('would rebuild: ' + ', '.join(c for c, _ in rebuild))
+
+    for path in swap.changed:
+        say(f'  {"would install" if dry else "installed"} {path}')
+    if dry:
+        say(f'{len(swap.changed)} file(s) would change; {target[:12]} onto {info.get("VERSION")}')
+        for path, step in sorted(steps.items()):
+            say(f'  step left: {path}: {step}')
+        return 3 if steps else 0
+
+    state.update(commit=target, at=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+                 steps=dict(sorted({**state.get('steps', {}), **steps}.items())))
+    save_state(tree, state)
+    hit, loose = restart(tree, swap.changed, restart_units)
+    say(f'fast-installed {target[:12]} onto {info.get("VERSION")}: {len(swap.changed)} file(s), '
+        f'{len(rebuild)} rebuilt, {len(hit)} service(s) {"restarted" if restart_units else "to restart"}')
+    if loose:
+        say('not used by a running service (programs that start on demand pick them up): '
+            + ', '.join(loose[:12]) + (' ...' if len(loose) > 12 else ''))
+    for path, step in sorted(steps.items()):
+        say(f'  step left: {path}: {step}')
+    return 3 if steps else 0
+
+
+def status():
+    tree, info = live_release()
+    state = load_state(tree)
+    report = {'release': info.get('VERSION'), 'release_commit': info.get('COMMIT'), 'tree': str(tree)}
+    if state:
+        report.update(commit=state.get('commit'), at=state.get('at'), files=len(state['files']),
+                      built=sorted(state['built']), steps_left=state.get('steps', {}))
+    else:
+        report['commit'] = None
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def undo(restart_units):
+    tree, info = live_release()
+    state = load_state(tree)
+    if not state:
+        say('nothing fast-installed on ' + str(info.get('VERSION')))
+        return 0
+    orig = tree / '.fast-install/orig'
+    for rel, how in sorted(state['files'].items()):
+        live = tree / rel
+        if how == 'saved':
+            keep = orig / rel
+            tmp = live.with_name(live.name + '.fast-new')
+            tmp.unlink(missing_ok=True)
+            if keep.is_symlink():
+                tmp.symlink_to(os.readlink(keep))
+            else:
+                shutil.copy2(keep, tmp)
+            live.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(tmp, live)
+        elif live.exists() or live.is_symlink():
+            live.unlink()
+        say(f'  restored {rel}')
+    restart(tree, list(state['files']), restart_units)
+    shutil.rmtree(tree / '.fast-install')
+    say(f'back to {info.get("VERSION")} as installed ({len(state["files"])} file(s))')
+    if state.get('steps'):
+        say('installer steps done by hand since stay as they are: ' + ', '.join(sorted(state['steps'])))
+    return 0
+
+
+def main(argv):
+    flags = {a for a in argv if a.startswith('-')}
+    words = [a for a in argv if not a.startswith('-')]
+    if flags & {'-h', '--help'}:
+        print(__doc__.strip())
+        return 0
+    STAGE.parent.mkdir(parents=True, exist_ok=True)
+    lock = open(STAGE.parent / 'lock', 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print('fast-install: another fast-install runs now', file=sys.stderr)
+        return 1
+    try:
+        if words[:1] == ['status'] and len(words) == 1 and not flags:
+            return status()
+        if words[:1] == ['undo'] and len(words) == 1 and flags <= {'--no-restart'}:
+            return undo('--no-restart' not in flags)
+        if len(words) <= 1 and flags <= {'--dry-run', '--no-restart', '--partial'}:
+            return install(words[0] if words else 'HEAD', '--dry-run' in flags,
+                           '--no-restart' not in flags, '--partial' in flags)
+    except Refused as e:
+        print(f'fast-install: {e}', file=sys.stderr)
+        return 1
+    except subprocess.CalledProcessError as e:
+        err = e.stderr.decode(errors='replace').strip() if isinstance(e.stderr, bytes) else e.stderr
+        print(f'fast-install: {" ".join(map(str, e.cmd))} failed: {err or e.returncode}', file=sys.stderr)
+        return 1
+    print(f'fast-install: unknown arguments {" ".join(argv)!r} (see --help)', file=sys.stderr)
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

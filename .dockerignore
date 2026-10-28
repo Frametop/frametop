@@ -25,3 +25,5 @@ gaze/tracker/models/
 # dev-only: the testbench and the agents' verification skill never ship (testbench/README.md)
 testbench/
 .claude/
+# dev-only: fast-install puts commits into an installed release (AGENTS.md)
+scripts/fast-install*

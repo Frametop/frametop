@@ -296,8 +296,10 @@ struct HostInput {
     int lock = -1;
     int64_t checkAt = 0, lockAt = 0, askAt = 0, leaseAt = 0;
     hostinput::Answer worn, paused;
-    // What Tick last wanted. Not kRelease at first is a release's edge: a stream that starts with
-    // the switch off or the headset away sends none. An edge's release is owed until it went.
+    // What Tick last wanted; a change to kRelease is an edge. A stream starting with the switch off
+    // sends none; one starting with the headset off sends one at the helper's first answer (the
+    // stream isn't live before it). An edge's release is owed until it went, and no engage goes
+    // ahead of it.
     hostinput::Want last = hostinput::Want::kRelease;
     bool releaseOwed = false;
     uint32_t seq = 0;
@@ -437,7 +439,7 @@ struct HostInput {
         }
         const hostinput::Want want = hostinput::Decide(switchOn, live, worn, paused, now);
         Apply(want);
-        if (want != hostinput::Want::kHold) return;
+        if (want != hostinput::Want::kHold || releaseOwed) return;
         if (now < leaseAt) return;
         leaseAt = now + hostinput::kLeaseEveryNs;
         bool asking;

@@ -19,12 +19,17 @@ struct ft_lost_keys {
     unsigned n;
 };
 
-// A release that had no focus to go to. When full, the oldest goes.
+static inline bool ft_is_modifier(uint32_t code);
+
+// A release that had no focus to go to. When full (keys typed with no screen focused come here
+// too), the oldest that isn't a modifier goes: a stuck modifier is what turns clicks into moves.
 static inline void ft_lost_keys_add(struct ft_lost_keys *l, uint32_t code) {
     for (unsigned i = 0; i < l->n; ++i)
         if (l->code[i] == code) return;
     if (l->n == FT_LOST_KEYS_MAX) {
-        for (unsigned i = 1; i < l->n; ++i) l->code[i - 1] = l->code[i];
+        unsigned drop = 0;
+        while (drop < l->n - 1 && ft_is_modifier(l->code[drop])) ++drop;
+        for (unsigned i = drop + 1; i < l->n; ++i) l->code[i - 1] = l->code[i];
         --l->n;
     }
     l->code[l->n++] = code;

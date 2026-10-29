@@ -16,6 +16,11 @@ int main(void) {
     ft_lost_keys_add(&l, KEY_LEFTMETA);
     assert(l.n == FT_LOST_KEYS_MAX && l.code[0] == KEY_2 && l.code[FT_LOST_KEYS_MAX - 1] == KEY_LEFTMETA);
     while (ft_lost_keys_take(&l)) {}
+    // Full, a modifier first: a typed key goes before it.
+    ft_lost_keys_add(&l, KEY_LEFTMETA);
+    for (uint32_t c = KEY_1; c < KEY_1 + FT_LOST_KEYS_MAX; ++c) ft_lost_keys_add(&l, c);
+    assert(l.n == FT_LOST_KEYS_MAX && l.code[0] == KEY_LEFTMETA && l.code[1] == KEY_2);
+    while (ft_lost_keys_take(&l)) {}
 
     // "keys" names the modifiers, Esc and Tab, and only counts the others.
     assert(ft_key_reportable(KEY_LEFTMETA) && ft_key_reportable(KEY_RIGHTALT) && ft_key_reportable(KEY_ESC));

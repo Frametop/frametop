@@ -845,7 +845,6 @@ static void release_all_keys(struct server *s, char *reply, int size) {
     if (focus) {
         wlr_seat_keyboard_notify_clear_focus(s->seat);
         keyboard_enter(s, focus);
-        wlr_seat_keyboard_notify_modifiers(s->seat, &s->keyboard.modifiers);
     }
     wlr_log(WLR_INFO, "release all keys: %zu held here, modifiers 0x%x down, every modifier released%s", held,
             stuck, focus ? "" : " with the next focus");

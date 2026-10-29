@@ -187,7 +187,10 @@ PY
     awk '/^\x27/ { show = $0 !~ /not_visible/ } show' | sed 's/^/  /' | head -n 80
   echo "keyboard, drag and Steam menu lines from ft-screens (last 40):"
   grep -a -E 'keyboard|Steam (in front|out of the way)|: (move|resize|roll)( by| ended| not started)' \
-    /tmp/frametop-screens.log 2>/dev/null | tail -n 40 | sed 's/^/  /'
+    "$HOME/.local/state/frametop/screens.log" 2>/dev/null | tail -n 40 | sed 's/^/  /'
+  echo "tracking: what SteamVR did to standing, and screens that followed a universe change (DEE-206; last 60):"
+  grep -a -h -E '^==== ft-screens started|trackwatch:|^universe ' "$HOME/.local/state/frametop/screens.log.1" \
+    "$HOME/.local/state/frametop/screens.log" 2>/dev/null | tail -n 60 | sed 's/^/  /'
   echo "text fields, from the relay (last 20):"
   journalctl --user -u frametop-input-relay --no-pager -o short 2>/dev/null | grep 'text field' | tail -n 20 | sed 's/^/  /'
 
@@ -197,7 +200,7 @@ PY
   journalctl --user -u frametop-pointer -n 60 --no-pager -o short 2>/dev/null
   section "Power service (last 30 lines)"
   journalctl --user -u frametop-power -n 30 --no-pager -o short 2>/dev/null
-  for f in /tmp/frametop-screens.log "$XDG_RUNTIME_DIR/frametop-layout.log"; do
+  for f in "$HOME/.local/state/frametop/screens.log" "$XDG_RUNTIME_DIR/frametop-layout.log"; do
     section "$f (last 60 lines)"
     tail -n 60 "$f" 2>/dev/null || echo "missing"
   done
@@ -357,7 +360,9 @@ repo=$1 areas=$2 seconds=$3
 has() { [[ ,$areas, == *,$1,* ]]; }
 noise='container (exec|exec_died|init|start|died|attach|cleanup)'
 since=$(date '+%F %T')
-start=$(wc -l < /tmp/frametop-screens.log 2>/dev/null || echo 0)
+screens_log=$HOME/.local/state/frametop/screens.log
+start=$(wc -l < "$screens_log" 2>/dev/null || echo 0)
+start_inode=$(stat -c %i "$screens_log" 2>/dev/null)
 printf '\n===== Watched %s for %s s from %s\n' "${areas//,/, }" "$seconds" "$since"
 if [ -f "$repo/scripts/report-watch.py" ]; then
   python3 -I "$repo/scripts/report-watch.py" "$seconds" "$areas"
@@ -377,7 +382,12 @@ if has system; then
 fi
 if has desktop; then
   printf '\n===== ft-screens log while watching\n'
-  tail -n +"$((start + 1))" /tmp/frametop-screens.log 2>/dev/null | tail -n 300
+  if [ -n "$start_inode" ] && [ "$(stat -c %i "$screens_log" 2>/dev/null)" != "$start_inode" ]; then
+    # rotated while watching (screens/logfile.h): the rest of the old one, then the new one
+    { tail -n +"$((start + 1))" "$screens_log.1"; cat "$screens_log"; } 2>/dev/null | tail -n 300
+  else
+    tail -n +"$((start + 1))" "$screens_log" 2>/dev/null | tail -n 300
+  fi
   log "input relay" frametop-input-relay
   log "pointer helper" frametop-pointer
 fi

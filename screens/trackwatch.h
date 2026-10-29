@@ -9,8 +9,8 @@
 // can differ. Either step may move the panels in the room; the SteamVR dashboard follows the
 // head and doesn't show it.
 //
-// Which step does it isn't known yet, so this only logs, to /tmp/frametop-screens.log with
-// wall-clock times to line up with vrserver.txt:
+// This logs, to ft-screens' log (~/.local/state/frametop/screens.log), with wall-clock times to
+// line up with vrserver.txt; universefix.h moves the screens a temporary universe's end would move:
 //   - the standing and chaperone events (801, 804, 805, 808);
 //   - raw->standing moving (GetRawZeroPoseToStandingAbsoluteTrackingPose), checked on those
 //     events and once a second, with how far it moved and how much of that is height;

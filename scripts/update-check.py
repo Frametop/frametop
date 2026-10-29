@@ -521,6 +521,45 @@ def check_root_files():
             report("ok", label, "installed, and kept through SteamOS updates")
 
 
+CHAPERONE = os.path.join(HOME, ".config/openvr/config/chaperone_info.vrchap")
+
+
+def check_chaperone():
+    """ft-screens tells a temporary universe from a room by SteamVR's saved universes
+    (screens/universefix.h, DEE-206): each has a universeID and a standing translation and yaw,
+    and the one SteamVR makes after losing the room has standing (0, 1.6, 0), yaw 0."""
+    try:
+        with open(CHAPERONE) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return report("skip", "SteamVR's saved universes", "none yet (no room set up)")
+    except (OSError, ValueError) as e:
+        return report("warn", "SteamVR's saved universes", f"{CHAPERONE} unreadable ({e}): screens placed while "
+                      "SteamVR has lost the room jump when it finds it again (DEE-206)")
+    universes = data.get("universes") if isinstance(data, dict) else None
+    if universes == []:
+        return report("skip", "SteamVR's saved universes", "none yet (no room set up)")
+
+    def number(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    def readable(u):
+        if not isinstance(u, dict):
+            return False
+        standing = u.get("standing")
+        translation = standing.get("translation") if isinstance(standing, dict) else None
+        return (str(u.get("universeID", "")).isdigit() and isinstance(translation, list) and len(translation) == 3
+                and all(number(v) for v in translation) and number(standing.get("yaw")))
+
+    ok = isinstance(universes, list) and all(readable(u) for u in universes)
+    if not ok:
+        return report("warn", "SteamVR's saved universes", f"{CHAPERONE} no longer lists each universe's ID and "
+                      "standing as screens/universefix.h reads them (DEE-206)")
+    guessed = sum(1 for u in universes if [round(v, 3) for v in u["standing"]["translation"]] == [0, 1.6, 0]
+                  and abs(u["standing"]["yaw"]) < 1e-4)
+    report("ok", "SteamVR's saved universes", f"{len(universes)}, {guessed} with the guessed floor of a lost room")
+
+
 def check_openvr():
     needs = {}  # interface version: programs built against it
     for path in installed_binaries():
@@ -898,6 +937,7 @@ def main():
     check_versions(versions)
     check_host()
     check_root_files()
+    check_chaperone()
     steamvr_up = run("pgrep", "-x", "vrserver")[0] == 0
     if not steamvr_up:
         report("skip", "SteamVR checks", "SteamVR isn't running")

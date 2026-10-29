@@ -104,18 +104,22 @@ if [ "${1:-}" != --inner ]; then
   # ft-screens runs in Frametop's container (it's built against Fedora's wlroots); KWin and
   # Plasma stay on the host and connect to its socket. in-box starts the container in a scope
   # of its own, not this desktop's, or stopping the desktop would stop the container.
+  # Its log is kept across desktop starts and reboots, and rotated by size (screens/logfile.h);
+  # what comes out before ft-screens opens it (the container starting) is appended there too.
   socket=ft-screens-0
+  screens_log=$HOME/.local/state/frametop/screens.log
+  mkdir -p "${screens_log%/*}"
   read -ra screen_args <<< "$("$here/../layout/ft-layout" screen-args)"
   export FT_SCREEN_COUNT=$(( ${#screen_args[@]} / 2 )) FT_FLOAT_SLOTS=$float_slots
-  "$here/../scripts/in-box" "$here/../screens/build/ft-screens" --socket "$socket" \
-    "${screen_args[@]}" --spares "$float_slots" > /tmp/frametop-screens.log 2>&1 < /dev/null &
+  "$here/../scripts/in-box" "$here/../screens/build/ft-screens" --log "$screens_log" --socket "$socket" \
+    "${screen_args[@]}" --spares "$float_slots" >> "$screens_log" 2>&1 < /dev/null &
   # With HANDS_MODE=frametop, hand tracking and the hand view run while this desktop does
   # (hands/handsmode.py; it does nothing for the other modes).
   handsmode() { python3 "$here/../hands/handsmode.py" desktop "$1" 2>&1 || true; }
   stop_screens() { pkill -x ft-screens 2>/dev/null || true; handsmode down; }
   trap stop_screens EXIT
   for _ in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/$socket" ] && break; sleep 0.2; done
-  [ -S "$XDG_RUNTIME_DIR/$socket" ] || { echo "ft-screens didn't start (see /tmp/frametop-screens.log)" >&2; exit 1; }
+  [ -S "$XDG_RUNTIME_DIR/$socket" ] || { echo "ft-screens didn't start (see $screens_log)" >&2; exit 1; }
   handsmode up
   WAYLAND_DISPLAY=$XDG_RUNTIME_DIR/$socket "$0" --inner
   exit

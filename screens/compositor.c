@@ -76,6 +76,7 @@
 #include "vr.h"
 #include "controller-click.h"
 #include "remote.h"
+#include "logfile.h"
 #include "relay-buttons.h"
 #include "held-keys.h"
 
@@ -127,6 +128,7 @@ struct tracked_buffer {
 };
 
 struct server {
+    const char *log_path;  // --log: the log file, rotated by size (logfile.h)
     struct wl_display *display;
     struct wl_event_loop *loop;
     struct wlr_seat *seat;
@@ -770,6 +772,7 @@ static int tick(int fd, uint32_t mask, void *data) {
     if (s->relay_buttons.held && !relay_can_press(s))
         release_relay_buttons(s, ft_vr_paused() ? "paused" : "its screen hid");
     if (++s->ticks % 9 == 0) keys_update(s);
+    if (s->ticks % 450 == 0) ft_log_check(s->log_path, FT_LOG_CAP, FT_LOG_KEEP);
     if (s->kb_close_at && s->ticks >= s->kb_close_at) {
         s->kb_close_at = 0;
         if (s->kb_screen >= 0) {
@@ -1393,6 +1396,8 @@ int main(int argc, char **argv) {
             socket_name = argv[++i];
         } else if (strcmp(argv[i], "--control") == 0 && i + 1 < argc) {
             control_name = argv[++i];
+        } else if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
+            s.log_path = argv[++i];
         } else if (strcmp(argv[i], "--spares") == 0 && i + 1 < argc) {
             s.spares = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--no-vr") == 0) {
@@ -1418,7 +1423,7 @@ int main(int argc, char **argv) {
             break;
         } else {
             fprintf(stderr,
-                    "usage: %s [--socket NAME] [--control NAME] [--no-vr] [--beside] [--screen WxH@METRES]... "
+                    "usage: %s [--log FILE] [--socket NAME] [--control NAME] [--no-vr] [--beside] [--screen WxH@METRES]... "
                     "[--spares N] [--rates F,V,H] [-- COMMAND ARGS...]\n",
                     argv[0]);
             return 2;
@@ -1427,6 +1432,16 @@ int main(int argc, char **argv) {
     if (s.n_config == 0) s.config[s.n_config++] = (struct config){3440, 1440, 2.4};
 
     setvbuf(stdout, NULL, _IOLBF, 0);  // vr.cpp prints to stdout; keep it in order with the log
+    if (s.log_path) {
+        ft_log_rotate(s.log_path, FT_LOG_CAP, FT_LOG_KEEP);
+        if (ft_log_open(s.log_path) != 0) fprintf(stderr, "can't write the log %s: %m\n", s.log_path), s.log_path = NULL;
+    }
+    {   // one log for many runs: where each starts, in wall-clock time (trackwatch's lines are too)
+        const time_t wall = time(NULL);
+        char when[64];
+        strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S %z", localtime(&wall));
+        printf("==== ft-screens started %s (pid %d)\n", when, (int)getpid());
+    }
     wlr_log_init(WLR_INFO, NULL);
     if (s.vr && !ft_vr_init()) return 1;
     if (s.beside) ft_vr_beside();

@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import shutil
+import socket
 import stat
 import sys
 import tempfile
@@ -17,6 +18,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("rules_migrate", os.path.join(HERE, "..", "rules-migrate.py"))
 rm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rm)
+rm.RELAY = f"\0ft_rules_migrate_test_{os.getpid()}_relay"  # never the live relay's
+relay = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+relay.bind(rm.RELAY)
+relay.settimeout(0.05)
 
 failures = []
 
@@ -57,7 +62,17 @@ def read(path):
 
 
 def marked(state):
-    return rm.read_state(state).get(rm.SCREENS_TOGGLE_KEY, False)
+    return (rm.read_state(state) or {}).get(rm.SCREENS_TOGGLE_KEY, False)
+
+
+def reloads():
+    """How many times the relay was told to read its rules again since the last call."""
+    n = 0
+    while True:
+        try:
+            n += relay.recv(64) == b"reload"
+        except socket.timeout:
+            return n
 
 
 try:
@@ -65,7 +80,7 @@ try:
     rules, state = case("added", CUSTOM)
     os.chmod(rules, 0o600)
     before = read(rules)
-    rm.main(rules, state)
+    check("missing: done", rm.main(rules, state), 0)
     after = read(rules)
     check("missing: added", json.loads(after)["key_bindings"].get("42+125+35"), "screens_toggle")
     check("...first in the list, the others in their order", list(json.loads(after)["key_bindings"]),
@@ -78,8 +93,9 @@ try:
     check("...no temporary file left", sorted(os.listdir(os.path.dirname(rules))),
           ["frametop-input.json", "frametop-input.json.bak-screens-toggle-key", "state"])
     check("...marked as done", marked(state), True)
+    check("...the relay told to reload", reloads(), 1)
     rm.main(rules, state)
-    check("second run: nothing changes", read(rules), after)
+    check("second run: nothing changes", (read(rules), reloads()), (after, 0))
 
     # The user removes it again (Input Settings writes the list without it): it stays removed.
     with open(rules, "w") as f:
@@ -111,7 +127,6 @@ try:
     # Nothing to do: no file, no list of its own (the relay's defaults have it), a file that isn't
     # JSON or isn't laid out as Input Settings writes it. Nothing is written, and it's marked done.
     for name, content in (("no-file", None), ("no-list", {"devices": {}}), ("list-not-a-dict", {"key_bindings": []}),
-                          ("not-json", '{"key_bindings": {"97": "dictate",'),
                           ("not-an-object", "[1, 2]"),
                           ("hand-laid-out", json.dumps(CUSTOM)),  # all on one line
                           ("duplicate-keys", '{\n  "key_bindings": {\n    "97": "dictate",\n    "97": "dictate"\n  }\n}')):
@@ -122,24 +137,56 @@ try:
         check(f"{name}: marked as done", marked(state), True)
 
     # A state file that isn't JSON counts as nothing done.
+    # A file that isn't JSON may be half written (Input Settings doesn't write in one step): it's
+    # left alone and tried again next time.
+    for name, content in (("not-json", '{"key_bindings": {"97": "dictate",'), ("zero-bytes", "")):
+        rules, state = case(name, content)
+        before = read(rules)
+        check(f"{name}: waits for the next install", rm.main(rules, state), 1)
+        check(f"{name}: left as it is, not marked", (read(rules), marked(state)), (before, False))
+
+    # A state file that can't be read: nothing runs, so nothing can run twice.
     rules, state = case("bad-state", CUSTOM)
+    before = read(rules)
     os.makedirs(os.path.dirname(state))
     with open(state, "w") as f:
         f.write("not json")
-    rm.main(rules, state)
-    check("unreadable state: it runs", json.loads(read(rules))["key_bindings"].get("42+125+35"), "screens_toggle")
+    check("unreadable state: nothing runs", (rm.main(rules, state), read(rules)), (1, before))
 
-    # A rules file that can't be replaced (its folder read-only): not marked, so the next
-    # install tries again. Root writes anyway, so not as root.
+    # A rules file made read-only: left as it is, for good.
+    rules, state = case("read-only-file", CUSTOM)
+    os.chmod(rules, 0o444)
+    before = read(rules)
+    rm.main(rules, state)
+    check("read-only file: left as it is, marked", (read(rules), marked(state)), (before, True))
+
+    # An older backup of another version of the file stays; this one gets a dated name.
+    rules, state = case("old-backup", CUSTOM)
+    before = read(rules)
+    with open(rules + ".bak-screens-toggle-key", "wb") as f:
+        f.write(b"older")
+    rm.main(rules, state)
+    backups = sorted(n for n in os.listdir(os.path.dirname(rules)) if ".bak-" in n)
+    check("old backup: kept", read(rules + ".bak-screens-toggle-key"), b"older")
+    check("...this one beside it", (len(backups), read(os.path.join(os.path.dirname(rules), backups[-1]))),
+          (2, before))
+
+    # A rules file that can't be replaced (its folder read-only; the backup from an earlier try
+    # can still be written): not marked, so the next install tries again. Root writes anyway.
     if os.geteuid() != 0:
-        rules, state = case("read-only", CUSTOM)
+        rules, _ = case("read-only", CUSTOM)
+        state = os.path.join(OUT, "read-only-state", "rules-migrations.json")  # outside the read-only folder
         before = read(rules)
+        shutil.copy2(rules, rules + ".bak-screens-toggle-key")
         os.chmod(os.path.dirname(rules), 0o555)
         try:
-            done, message = rm.screens_toggle_key(rules)
+            status = rm.main(rules, state)
         finally:
             os.chmod(os.path.dirname(rules), 0o755)
-        check("can't write: unchanged, not done", (read(rules), done), (before, False))
+        check("can't write: waits for the next install", status, 1)
+        check("...unchanged, not marked, no temporary file", (read(rules), marked(state),
+                                                              sorted(os.listdir(os.path.dirname(rules)))),
+              (before, False, ["frametop-input.json", "frametop-input.json.bak-screens-toggle-key"]))
 
     # A symlinked rules file: the file it points to changes, the link stays.
     rules, state = case("symlink", CUSTOM)
@@ -150,6 +197,10 @@ try:
                                                 json.loads(read(rules))["key_bindings"].get("42+125+35")),
           (True, "screens_toggle"))
 finally:
+    relay.close()
+    for root, dirs, files in os.walk(OUT):
+        for d in dirs:
+            os.chmod(os.path.join(root, d), 0o755)
     shutil.rmtree(OUT, ignore_errors=True)
 
 if failures:

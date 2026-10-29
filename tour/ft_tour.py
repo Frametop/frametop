@@ -213,8 +213,7 @@ def pages(f, keys):
         "id": "keys", "title": "Keyboard shortcuts and macros", "icon": "input-keyboard",
         "intro": "These key combinations work on any keyboard, whatever has focus.",
         "keys": keys,
-        "rows": [["Meta+Shift+R", "Reset Screen Layout"],
-                 ["Meta+Shift+H", "Hide/Show Screens"]],
+        "rows": [["Meta+Shift+R", "Reset Screen Layout"]],
         "note": "Macros: on the Keyboard page of Frametop Input Settings, any key combination, or a modifier "
                 "tapped on its own, can do a Frametop or Steam action, open a profile, or run a command of your "
                 "own. The Buttons and Controllers pages map mouse buttons and controller buttons the same way.",

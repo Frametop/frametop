@@ -30,7 +30,8 @@ look; held, the pointer stops there and your head steers it (it stays put in you
 the release clicks; held still for half a second, it's a real press that your head drags
 ("gazekey left|right 1|0" to the helper; by default Meta+J and Meta+K, DEFAULT_KEY_BINDINGS),
 gaze_quickcal = the gaze service's one-dot check ("quickcal" to @ft_gazed), sens_up, sens_down,
-layout_reset = open the profile in use again, or put the desktop screens back in their layout (ft-layout reset), screens_toggle = hide or show the desktop screens,
+layout_reset = open the profile in use again, or put the desktop screens back in their layout (ft-layout reset), screens_toggle = hide or show the desktop screens
+("toggle" to ft-screens; Meta+Shift+H by default),
 keyboard_toggle = open or close Frametop's keyboard, float_toggle = float the desktop window under the
 pointer (else the active one) in VR, or put it back if it floats, dock_all = put every floating
 window back (both to ft-floatd, @frametop_float), spin_next and spin_prev = turn every panel in the
@@ -61,9 +62,10 @@ modifier bound to dictate_hold is hold to talk instead: dictation starts on its 
 stops on its release, and a key, mouse button or scroll in between makes it a shortcut, which
 cancels that dictation quietly ("cancel keyboard quiet"). A rules
 file without "key_bindings" gets DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left,
-Meta+K: gaze_right, Meta+Shift+F: float_toggle), plus a Right Ctrl tap for dictate once Frametop
-Voice is installed (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. The float,
-profile, Steam menu, pause, dictation, hand tracking and command actions work without pointer mode too. A combination with Meta also sends the desktop an
+Meta+K: gaze_right, Meta+Shift+F: float_toggle, Meta+Shift+H: screens_toggle), plus a Right Ctrl tap
+for dictate once Frametop Voice is installed (VOICE_KEY_BINDINGS); one with its own, even an empty
+one, doesn't. The float, screens, profile, Steam menu, pause, dictation, hand tracking and command
+actions work without pointer mode too. A combination with Meta also sends the desktop an
 F24 press and Meta's release right away: so letting go of Meta doesn't open Plasma's launcher, and
 a gaze click isn't Meta+click (KWin's window move and resize). Another key while Meta is still
 held gives the desktop Meta back. While typing goes to Steam, keyboards aren't grabbed, so Steam
@@ -308,10 +310,11 @@ GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze
 # Meta+Shift+F floats a window, and Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels around
 # you (ft-screens' lazy susan); not Meta+Tab, which is Cmd+Tab on a Mac reached through a remote
 # desktop like RustDesk. Meta+Space opens frunner's search (Plasma's KRunner is Alt+Space), and
-# Meta+H turns hand tracking off or on.
+# Meta+H turns hand tracking off or on. Meta+Shift+H hides or shows the screens: the relay sees it
+# with the screens hidden too, when the keyboards aren't grabbed and the desktop gets no keys.
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "frunner", "125+35": "hands_toggle"}
+                        "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle"}
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
 # file), a rules file without "key_bindings" gets these too: a Right Ctrl tap, Right Ctrl alone,
 # so a Left Ctrl tap (crouch in many games) doesn't start it.
@@ -356,8 +359,9 @@ FLOAT = "\0frametop_float"  # ft-floatd, floating windows in the Frametop deskto
 # Actions for ft-floatd ("float_toggle", "dock_all"): they don't need pointer mode.
 FLOAT_ACTIONS = {"float_toggle": b"float pointer", "dock_all": b"dock all"}
 # Actions for ft-screens: spin_next and spin_prev turn every panel in the room about your head,
-# so the next one to the right or left comes to the front. They don't need pointer mode either.
-SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev"}
+# so the next one to the right or left comes to the front, and screens_toggle hides or shows the
+# screens. They don't need pointer mode either.
+SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev", "screens_toggle": b"toggle"}
 # frunner (frunner/ft-frunner, in the Frametop desktop) opens or closes its search; it's told
 # what pressed it, since one from a mouse or controller opens Frametop's keyboard too. It doesn't
 # need pointer mode, and does nothing while Frametop is paused.
@@ -892,11 +896,6 @@ class Pointer:
                 self.sock.sendto(b"quickcal", GAZED)
             except OSError:
                 pass  # the gaze service isn't running
-        elif name == "screens_toggle":
-            try:
-                self.sock.sendto(b"toggle", SCREENS)
-            except OSError:
-                pass  # ft-screens not running
         elif name == "layout_reset":
             # Runs a few seconds and borrows the pointer; ft-layout refuses a second copy.
             subprocess.Popen([FT_LAYOUT, "reset"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,

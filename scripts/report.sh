@@ -178,6 +178,7 @@ PY
     done
   done
   echo "ft-screens debug: $(ask ft_screens debug)"
+  echo "ft-screens keys (keyboard focus, typing, keys and modifiers down, releases owed to KWin): $(ask ft_screens keys)"
   echo "ft-screens state (mode, manual, wrist, gesture hand and angle, lasers, game, in games): $(ask ft_screens state)"
   echo "ft-screens pause: $(ask ft_screens 'pause state'), concealed: $(ask ft_screens concealed)"
   echo "SteamVR overlays shown now:"

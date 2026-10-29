@@ -71,7 +71,7 @@ HAND_UNITS = ("frametop-hands.service", "frametop-camd.service")
 PARK_PATH = f"/run/user/{os.getuid()}/frametop-hands/park"
 # What still works while paused, besides commands ("command:CMD"): the toggle itself, Steam's menu,
 # and dictation (Frametop Voice types into games too).
-PAUSED_ACTIONS = ("pause_toggle", "steam_menu", "dictate", "dictate_hold")
+PAUSED_ACTIONS = ("pause_toggle", "steam_menu", "dictate", "dictate_hold", "release_keys")
 DEFAULT_GESTURE = {"buttons": ["left/thumbstick", "right/thumbstick"], "presses": 2}
 DESKTOP_MODES = ("hide", "close")
 SOUNDS = {True: "/usr/share/sounds/ocean/stereo/device-removed.oga",

@@ -13,6 +13,8 @@ It writes ~/frametop-keys-report-<time>.txt with:
     nothing you type is in the report.
   - the relay's and pointer helper's log for the same time, and the end of the Frametop
     desktop's log (where typing went)
+  - what ft-screens holds down (its "keys": keyboard focus, keys and modifiers, releases owed
+    to KWin), as the recording starts and as it ends
 Bluetooth addresses and the headset's serial number are masked.
 """
 import glob
@@ -34,6 +36,8 @@ KEYS = {1: "Esc", 15: "Tab", 29: "LeftCtrl", 42: "LeftShift", 54: "RightShift", 
         97: "RightCtrl", 100: "RightAlt", 125: "LeftMeta", 126: "RightMeta",
         0x110: "BTN_LEFT", 0x111: "BTN_RIGHT", 0x112: "BTN_MIDDLE", 0x113: "BTN_SIDE", 0x114: "BTN_EXTRA"}
 VALUES = {0: "up", 1: "down", 2: "repeat"}
+# ft-screens' "keys", asked as the report starts and as it ends: what the desktop holds down.
+KEYS_LINE = "ft-screens keys (keyboard focus, typing, keys and modifiers down, releases owed to KWin): "
 HOME = os.path.expanduser("~")
 ENV = dict(os.environ, XDG_RUNTIME_DIR=f"/run/user/{os.getuid()}",
            DBUS_SESSION_BUS_ADDRESS=f"unix:path=/run/user/{os.getuid()}/bus")
@@ -117,6 +121,7 @@ def main():
         out("Settings: no ~/.config/frametop.conf")
     out("ft-screens state (visibility, manual, wrist, gesture, lasers, game running, in games): "
         + ask(SCREENS, "state"))
+    out(KEYS_LINE + ask(SCREENS, "keys"))
 
     out("\n===== Input devices (programs with the node open)")
     opened = openers()
@@ -185,6 +190,7 @@ def main():
     out("relay reads: from a physical device. relay sends: out of the relay's virtual devices,"
         " to gamescope and SteamVR. Keys typed into the desktop go to ft-screens, not listed here.")
     lines.extend(events or ["(no keys)"])
+    out("\nAt the end, " + KEYS_LINE + ask(SCREENS, "keys"))
 
     since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_wall - 5))
     for unit in ("frametop-input-relay", "frametop-pointer"):

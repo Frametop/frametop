@@ -41,6 +41,9 @@ test-c:
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/relay-buttons-test.c \
       -o build/tests/relay-buttons-test
     build/tests/relay-buttons-test && echo "screens/tests/relay-buttons-test.c: ok"
+    gcc -std=c11 -Wall -Wextra -Werror screens/tests/held-keys-test.c \
+      -o build/tests/held-keys-test
+    build/tests/held-keys-test && echo "screens/tests/held-keys-test.c: ok"
     g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handinput_test.cpp \
       screens/handcut.cpp screens/handinput.cpp screens/palmmenu.cpp screens/grabthat.cpp screens/steampanels.cpp -o build/tests/handinput-test
     build/tests/handinput-test && echo "screens/tests/handinput_test.cpp: ok"

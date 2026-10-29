@@ -79,7 +79,8 @@ VR_BUTTONS = ("left/view", "left/dpad_up", "left/dpad_down", "left/dpad_left", "
 # (its DEFAULT_KEY_BINDINGS and VOICE_KEY_BINDINGS; voice/test checks they match).
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle"}
+                        "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",
+                        "29+42+56+1": "release_keys"}
 VOICE_KEY_BINDINGS = {"97": "dictate"}
 DICTATION_ACTIONS = ("dictate", "dictate_hold")
 # frame-voice's keys, by evdev name: the modifiers (a left one taps either side, a right one only

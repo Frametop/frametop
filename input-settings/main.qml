@@ -815,10 +815,12 @@ Kirigami.ApplicationWindow {
                           + "The combination's last key isn't typed; the modifiers still reach "
                           + "the app. While you're in Steam or a game, they see the keys too. Until you remove or change "
                           + "them, a Meta tap opens the Steam menu (or closes the dashboard) instead of the desktop's "
-                          + "launcher, and Meta+Shift+F floats the desktop window under the pointer in VR, or puts it "
-                          + "back. A command runs with sh as the input relay's service, outside the desktop's session, "
-                          + "with Frametop's ft-layout, ft-float and ft-steam on its path; its output goes to the "
-                          + "relay's log (journalctl --user -u frametop-input-relay)."
+                          + "launcher, Meta+Shift+F floats the desktop window under the pointer in VR, or puts it "
+                          + "back, Meta+Shift+H hides or shows the screens, and Ctrl+Alt+Shift+Esc lets go of every "
+                          + "key, for a modifier stuck on the desktop. A command runs with sh as the input "
+                          + "relay's service, outside the desktop's session, with Frametop's ft-layout, ft-float and "
+                          + "ft-steam on its path; its output goes to the relay's log (journalctl --user -u "
+                          + "frametop-input-relay)."
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }

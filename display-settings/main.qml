@@ -756,10 +756,10 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         model: [
-                            { value: "always", text: "Always", help: "Meta+Shift+H (or a mapped button) hides them. During VR games, see below." },
+                            { value: "always", text: "Always", help: "Meta+Shift+H (or a key or button mapped to it) hides them and shows them again. During VR games, see below." },
                             { value: "dashboard", text: "Only with the SteamVR dashboard open", help: "They come and go with the dashboard. Meta+Shift+H shows them anyway." },
                             { value: "gesture", text: "While I look at my wrist", help: "They show while you look toward the controller below. Meta+Shift+H shows them anyway." },
-                            { value: "toggle", text: "Only when I show them", help: "Hidden until Meta+Shift+H (or a mapped button) shows them." }
+                            { value: "toggle", text: "Only when I show them", help: "Hidden until Meta+Shift+H (or a key or button mapped to it) shows them." }
                         ]
                         delegate: ColumnLayout {
                             required property var modelData

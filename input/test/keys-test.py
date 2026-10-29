@@ -492,6 +492,99 @@ def tests():
     pause("off")
     typed()
     check("frunner works without pointer mode", relay.needs_pointer("frunner"), False)
+
+    # Meta+Shift+H (a default): ft-screens hides or shows the screens. Hidden, they give typing to
+    # Steam and the keyboards aren't grabbed, but the relay still reads them, so a second press
+    # brings the screens back (DEE-217); a repeat isn't one.
+    H = 35
+    logged = len(LOG)
+    to_relay("keyboard desktop")
+    key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 2); key(H, 0); key(SHIFT, 0); key(META, 0)
+    got = typed()
+    check("Meta+Shift+H (default): the screens toggle once", [m for m in got if m == "toggle"], ["toggle"])
+    check("...H isn't typed", [m for m in got if m.startswith(f"key {H} ")], [])
+    to_relay("keyboard steam")
+    key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 0); key(SHIFT, 0); key(META, 0)
+    check("Meta+Shift+H again, typing going to Steam: they toggle back", [m for m in typed() if m == "toggle"],
+          ["toggle"])
+    check("...and the relay did nothing else", [m for m in LOG[logged:] if m.startswith("key combination")],
+          ["key combination 42+125+35: screens_toggle"] * 2)
+    pause("on")
+    key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 0); key(SHIFT, 0); key(META, 0)
+    check("paused: Meta+Shift+H doesn't toggle", [m for m in typed() if m == "toggle"], [])
+    pause("off")
+    typed()
+    check("screens_toggle works without pointer mode", relay.needs_pointer("screens_toggle"), False)
+    use({"42+125+33": "float_toggle"})
+    key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 0); key(SHIFT, 0); key(META, 0)
+    check("a key_bindings list of its own without it: Meta+Shift+H is typed",
+          [m for m in typed() if m == "toggle" or m.startswith(f"key {H} ")], [f"key {H} 1", f"key {H} 0"])
+    use(None)
+
+    # Ctrl+Alt+Shift+Esc (a default): ft-screens lets go of every key, for a modifier stuck in KWin
+    # (DEE-222). The relay reads it with the screens hidden too, with more modifiers held (a stuck
+    # one), and paused; Esc isn't typed, and nothing else happens.
+    ESC = 1
+    to_relay("keyboard desktop")
+    logged = len(LOG)
+    key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 2); key(ESC, 0)
+    key(SHIFT, 0); key(ALT, 0); key(CTRL, 0)
+    got = typed()
+    check("Ctrl+Alt+Shift+Esc (default): ft-screens releases every key, once",
+          [m for m in got if m == "keys release"], ["keys release"])
+    check("...Esc isn't typed", [m for m in got if m.startswith(f"key {ESC} ")], [])
+    check("...the modifiers still are, down and up",
+          [m for m in got if m.startswith(("key 29 ", "key 56 ", "key 42 "))],
+          ["key 29 1", "key 56 1", "key 42 1", "key 42 0", "key 56 0", "key 29 0"])
+    check("...the relay logs it", [m for m in LOG[logged:] if "release" in m],
+          ["release_keys: every key let go", "key combination 29+42+56+1: release_keys"])
+    key(META, 1); key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 0)
+    key(SHIFT, 0); key(ALT, 0); key(CTRL, 0); key(META, 0)
+    got = typed()
+    check("with Meta held as well: it still fires", [m for m in got if m == "keys release"], ["keys release"])
+    check("...and Esc still isn't typed", [m for m in got if m.startswith(f"key {ESC} ")], [])
+    to_relay("keyboard steam")
+    key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 0); key(SHIFT, 0); key(ALT, 0); key(CTRL, 0)
+    check("typing going to Steam (the screens hidden): it fires", [m for m in typed() if m == "keys release"],
+          ["keys release"])
+    pause("on")
+    key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 0); key(SHIFT, 0); key(ALT, 0); key(CTRL, 0)
+    check("paused: it fires", [m for m in typed() if m == "keys release"], ["keys release"])
+    pause("off")
+    typed()
+    to_relay("keyboard desktop")
+    key(CTRL, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 0); key(SHIFT, 0); key(CTRL, 0)
+    got = typed()
+    check("Ctrl+Shift+Esc (fewer modifiers) is typed, not a release",
+          ([m for m in got if m == "keys release"], [m for m in got if m.startswith(f"key {ESC} ")]),
+          ([], [f"key {ESC} 1", f"key {ESC} 0"]))
+    check("release_keys: no pointer mode needed, works paused, a known action",
+          (relay.needs_pointer("release_keys"), relay.works_paused("release_keys"), relay.known_action("release_keys")),
+          (False, True, True))
+    use({"42+125+33": "float_toggle"})
+    key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 0); key(SHIFT, 0); key(ALT, 0); key(CTRL, 0)
+    check("a key_bindings list of its own without it: Ctrl+Alt+Shift+Esc is typed",
+          [m for m in typed() if m == "keys release" or m.startswith(f"key {ESC} ")], [f"key {ESC} 1", f"key {ESC} 0"])
+    use({"29+x+1": "release_keys"})  # a hand-edited combination with a part that isn't a key code
+    key(CTRL, 1); key(ESC, 1); key(ESC, 0); key(CTRL, 0)
+    check("a combination with a part that isn't a key code never matches: Ctrl+Esc is typed",
+          [m for m in typed() if m == "keys release" or m.startswith(f"key {ESC} ")], [f"key {ESC} 1", f"key {ESC} 0"])
+    use(None)
+    key(META, 1); key(SPACE, 1); key(META, 0)
+    HELD[kb_r].discard(SPACE)  # Space gone with its keyboard, its release never read
+    frunner_got(); typed()
+    menus = len(lines(steam_log))
+    key(META, 1); key(META, 0)
+    check("a combination left down keeps Meta taps from working", len(lines(steam_log)), menus)
+    key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 0); key(SHIFT, 0); key(ALT, 0); key(CTRL, 0)
+    key(META, 1); key(META, 0)
+    check("...until Ctrl+Alt+Shift+Esc forgets it", len(lines(steam_log)), menus + 1)
+    typed()
+    use({"29+56+22": "release_keys"})  # Ctrl+Alt+U, one of the user's own
+    key(CTRL, 1); key(ALT, 1); key(META, 1); key(22, 1); key(22, 0); key(META, 0); key(ALT, 0); key(CTRL, 0)
+    check("a binding of the user's own: it fires with Meta held as well",
+          [m for m in typed() if m == "keys release" or m.startswith("key 22 ")], ["keys release"])
+    use(None)
     with tempfile.NamedTemporaryFile("w", suffix=".json") as old:
         json.dump({"buttons": {"mouse": {"275": "spotwatch"}}, "controller_buttons": {"left/view": "spotwatch"},
                    "key_bindings": {"125+57": "spotwatch", "125": "steam_menu"}}, old)

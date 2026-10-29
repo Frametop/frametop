@@ -30,7 +30,8 @@ look; held, the pointer stops there and your head steers it (it stays put in you
 the release clicks; held still for half a second, it's a real press that your head drags
 ("gazekey left|right 1|0" to the helper; by default Meta+J and Meta+K, DEFAULT_KEY_BINDINGS),
 gaze_quickcal = the gaze service's one-dot check ("quickcal" to @ft_gazed), sens_up, sens_down,
-layout_reset = open the profile in use again, or put the desktop screens back in their layout (ft-layout reset), screens_toggle = hide or show the desktop screens,
+layout_reset = open the profile in use again, or put the desktop screens back in their layout (ft-layout reset), screens_toggle = hide or show the desktop screens
+("toggle" to ft-screens; Meta+Shift+H by default),
 keyboard_toggle = open or close Frametop's keyboard, float_toggle = float the desktop window under the
 pointer (else the active one) in VR, or put it back if it floats, dock_all = put every floating
 window back (both to ft-floatd, @frametop_float), spin_next and spin_prev = turn every panel in the
@@ -43,7 +44,9 @@ dictate_hold = dictation while held (Frametop Voice, voice/ft-voiced: "toggle|st
 to @frametop_voice), frunner = open or close frunner's search for apps and remote displays
 ("toggle <source>" to @ft_frunner; Meta+Space by default), hands_toggle = stop hand tracking if
 it runs, else start it, until the next desktop or SteamVR start (hands/handsmode.py toggle; Meta+H
-by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
+by default), release_keys = let go of every key held anywhere: what the desktop, a remote
+display and this relay hold, and every modifier in KWin, known to be held or not ("keys
+release" to ft-screens; Ctrl+Alt+Shift+Esc by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
 transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
 ft-layout, ft-float, ft-steam and ft-voice need no path), key = pass through as a key, none).
@@ -61,9 +64,12 @@ modifier bound to dictate_hold is hold to talk instead: dictation starts on its 
 stops on its release, and a key, mouse button or scroll in between makes it a shortcut, which
 cancels that dictation quietly ("cancel keyboard quiet"). A rules
 file without "key_bindings" gets DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left,
-Meta+K: gaze_right, Meta+Shift+F: float_toggle), plus a Right Ctrl tap for dictate once Frametop
-Voice is installed (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. The float,
-profile, Steam menu, pause, dictation, hand tracking and command actions work without pointer mode too. A combination with Meta also sends the desktop an
+Meta+K: gaze_right, Meta+Shift+F: float_toggle, Meta+Shift+H: screens_toggle, Ctrl+Alt+Shift+Esc:
+release_keys), plus a Right Ctrl tap for dictate once Frametop Voice is installed
+(VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. A combination bound to
+release_keys also fires with more modifiers held than it names, so one stuck here doesn't stop it.
+The float, screens, profile, Steam menu, pause, dictation, hand tracking, release and command
+actions work without pointer mode too. A combination with Meta also sends the desktop an
 F24 press and Meta's release right away: so letting go of Meta doesn't open Plasma's launcher, and
 a gaze click isn't Meta+click (KWin's window move and resize). Another key while Meta is still
 held gives the desktop Meta back. While typing goes to Steam, keyboards aren't grabbed, so Steam
@@ -167,7 +173,7 @@ Frametop can pause for VR games (game_pause.py: by hand, with a controller gestu
 while a game runs). Paused, it stops the services that cost the game CPU and GPU, and the relay
 plays a plain one: the pointer devices feed the virtual mouse and keyboard as without pointer
 mode, typing goes to Steam, and mapped buttons and key combinations do only pause_toggle,
-steam_menu, run:NAME and command:CMD (game_pause.PAUSED_ACTIONS).
+steam_menu, release_keys, run:NAME and command:CMD (game_pause.PAUSED_ACTIONS).
 
 Host devices (docs/host-input.md): a computer whose displays stream into Frametop can lend
 it its own keyboard and mouse. Their events come from that host's ft-stream on the control
@@ -317,7 +323,7 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
            "dock_all", "spin_next", "spin_prev", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
-           "frunner", "hands_toggle", "key", "none")
+           "frunner", "hands_toggle", "release_keys", "key", "none")
 # Gaze mode is a mouse feature: these never come from a controller button (docs/gaze-controllers.md).
 GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right", "gaze_quickcal")
 # Key combinations a rules file without "key_bindings" gets: a Meta tap opens Steam's menu, Meta+J
@@ -325,10 +331,16 @@ GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze
 # Meta+Shift+F floats a window, and Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels around
 # you (ft-screens' lazy susan); not Meta+Tab, which is Cmd+Tab on a Mac reached through a remote
 # desktop like RustDesk. Meta+Space opens frunner's search (Plasma's KRunner is Alt+Space), and
-# Meta+H turns hand tracking off or on.
+# Meta+H turns hand tracking off or on. Meta+Shift+H hides or shows the screens: the relay reads it
+# from the keyboard, so it works with the screens hidden too, when the desktop gets no keys.
+# Ctrl+Alt+Shift+Esc lets go of every key held anywhere (release_keys), for a modifier stuck in
+# KWin (DEE-222: clicks moved windows, as Meta+click does). It has no Meta, the key that sticks,
+# and it's free: KWin's Ctrl+Alt+Esc (kill a window) and Windows' Ctrl+Shift+Esc (Task Manager,
+# on a remote display) need their modifiers exactly, and four keys don't happen by accident.
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "frunner", "125+35": "hands_toggle"}
+                        "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",
+                        "29+42+56+1": "release_keys"}
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
 # file), a rules file without "key_bindings" gets these too: a Right Ctrl tap, Right Ctrl alone,
 # so a Left Ctrl tap (crouch in many games) doesn't start it.
@@ -373,8 +385,9 @@ FLOAT = "\0frametop_float"  # ft-floatd, floating windows in the Frametop deskto
 # Actions for ft-floatd ("float_toggle", "dock_all"): they don't need pointer mode.
 FLOAT_ACTIONS = {"float_toggle": b"float pointer", "dock_all": b"dock all"}
 # Actions for ft-screens: spin_next and spin_prev turn every panel in the room about your head,
-# so the next one to the right or left comes to the front. They don't need pointer mode either.
-SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev"}
+# so the next one to the right or left comes to the front, and screens_toggle hides or shows the
+# screens. They don't need pointer mode either.
+SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev", "screens_toggle": b"toggle"}
 # frunner (frunner/ft-frunner, in the Frametop desktop) opens or closes its search; it's told
 # what pressed it, since one from a mouse or controller opens Frametop's keyboard too. It doesn't
 # need pointer mode, and does nothing while Frametop is paused.
@@ -404,7 +417,7 @@ def known_action(a):
 
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
-            and a not in ("steam_menu", "pause_toggle", "frunner", "hands_toggle")
+            and a not in ("steam_menu", "pause_toggle", "frunner", "hands_toggle", "release_keys")
             and not a.startswith((PROFILE, COMMAND, RUN)))
 
 
@@ -909,11 +922,6 @@ class Pointer:
                 self.sock.sendto(b"quickcal", GAZED)
             except OSError:
                 pass  # the gaze service isn't running
-        elif name == "screens_toggle":
-            try:
-                self.sock.sendto(b"toggle", SCREENS)
-            except OSError:
-                pass  # ft-screens not running
         elif name == "layout_reset":
             # Runs a few seconds and borrows the pointer; ft-layout refuses a second copy.
             subprocess.Popen([FT_LAYOUT, "reset"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -1278,6 +1286,9 @@ def main():
                 subprocess.Popen([FT_STEAM, "menu"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  start_new_session=True)
                 log(action)
+        elif action == "release_keys":
+            if value == 1:
+                release_all_keys()
         elif action == "hands_toggle":
             if value == 1:
                 # systemctl --no-block, and the pause's sounds if it plays them; the outcome goes
@@ -1410,6 +1421,8 @@ def main():
             return value == 2 and code in combos_down
         combo = "+".join(str(c) for c in sorted(held_modifiers) + [code])
         action = state["rules"]["key_bindings"].get(combo)
+        if not known_action(action):
+            combo, action = release_combo(code) or (combo, action)
         if not known_action(action) or action in ("key", "none") or (pause.paused and not works_paused(action)):
             return False
         combos_down[code] = action
@@ -1427,6 +1440,18 @@ def main():
             do_action(action, 1, now, "keyboard")
         log(f"key combination {combo}: {action}")
         return True
+
+    def release_combo(code):
+        """A release_keys combination this key completes with the modifiers held, more of them
+        too (one may be stuck here as well): (combo, "release_keys"), or None."""
+        for combo, action in state["rules"]["key_bindings"].items():
+            if action != "release_keys":
+                continue
+            *mods, last = combo.split("+")
+            if mods and last == str(code) and all(m.isdecimal() for m in mods) \
+                    and {int(m) for m in mods} <= held_modifiers:
+                return combo, action
+        return None
 
     def tap_action(mod, code):
         """A lone modifier's combination and action, (combo, None) when it does nothing now. A
@@ -1666,6 +1691,27 @@ def main():
             held_meta.discard(code)
             meta_hidden.discard(code)
         held_modifiers.intersection_update({MODIFIERS[c] for c in down if c in MODIFIERS})
+
+    def release_all_keys():
+        """release_keys: what this relay holds that no device does comes up, on the desktop and
+        on its own virtual keyboard and mouse, combinations left down are forgotten, and
+        ft-screens lets go of every key, on the desktop screens (every modifier in KWin too) and a
+        remote display (its "keys release")."""
+        reconcile_desktop_keys()
+        down = physically_down()
+        for code in [c for c in combos_down if c not in down]:
+            del combos_down[code]  # its device went with it held: it kept modifier taps from working
+        for node in nodes.values():
+            for code in sorted(node.held - down):
+                (mouse if code >= BTN_MISC else keyboard).emit(EV_KEY, code, 0)
+                node.held.discard(code)
+        mouse.sync()
+        keyboard.sync()
+        try:
+            screens_sock.sendto(b"keys release", SCREENS)
+        except OSError:
+            pass  # the Frametop desktop isn't running
+        log("release_keys: every key let go")
 
     def keys_down(node):
         if node.network:

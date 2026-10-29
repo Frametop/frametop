@@ -7,4 +7,3 @@ Exec=@REPO@/layout/ft-hide-show
 Icon=view-visible
 Categories=Settings;
 Keywords=display;screen;hide;show;steamvr;frametop;
-X-KDE-Shortcuts=Meta+Shift+H

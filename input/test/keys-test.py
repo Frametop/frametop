@@ -488,17 +488,22 @@ def tests():
     typed()
     check("frunner works without pointer mode", relay.needs_pointer("frunner"), False)
 
-    # Meta+Shift+H (a default): ft-screens hides or shows the screens. The relay reads keyboards it
-    # doesn't grab, so a second press brings hidden screens back (DEE-217); a repeat isn't one.
+    # Meta+Shift+H (a default): ft-screens hides or shows the screens. Hidden, they give typing to
+    # Steam and the keyboards aren't grabbed, but the relay still reads them, so a second press
+    # brings the screens back (DEE-217); a repeat isn't one.
     H = 35
     logged = len(LOG)
+    to_relay("keyboard desktop")
     key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 2); key(H, 0); key(SHIFT, 0); key(META, 0)
     got = typed()
     check("Meta+Shift+H (default): the screens toggle once", [m for m in got if m == "toggle"], ["toggle"])
     check("...H isn't typed", [m for m in got if m.startswith(f"key {H} ")], [])
+    to_relay("keyboard steam")
     key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 0); key(SHIFT, 0); key(META, 0)
-    check("Meta+Shift+H again: they toggle back", [m for m in typed() if m == "toggle"], ["toggle"])
-    check("...not hand tracking (Meta+H)", [m for m in LOG[logged:] if "hands_toggle" in m], [])
+    check("Meta+Shift+H again, typing going to Steam: they toggle back", [m for m in typed() if m == "toggle"],
+          ["toggle"])
+    check("...and the relay did nothing else", [m for m in LOG[logged:] if m.startswith("key combination")],
+          ["key combination 42+125+35: screens_toggle"] * 2)
     pause("on")
     key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 0); key(SHIFT, 0); key(META, 0)
     check("paused: Meta+Shift+H doesn't toggle", [m for m in typed() if m == "toggle"], [])

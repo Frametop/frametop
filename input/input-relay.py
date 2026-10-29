@@ -310,8 +310,8 @@ GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze
 # Meta+Shift+F floats a window, and Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels around
 # you (ft-screens' lazy susan); not Meta+Tab, which is Cmd+Tab on a Mac reached through a remote
 # desktop like RustDesk. Meta+Space opens frunner's search (Plasma's KRunner is Alt+Space), and
-# Meta+H turns hand tracking off or on. Meta+Shift+H hides or shows the screens: the relay sees it
-# with the screens hidden too, when the keyboards aren't grabbed and the desktop gets no keys.
+# Meta+H turns hand tracking off or on. Meta+Shift+H hides or shows the screens: the relay reads it
+# from the keyboard, so it works with the screens hidden too, when the desktop gets no keys.
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
                         "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle"}

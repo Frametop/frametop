@@ -49,7 +49,7 @@ int main(void) {
 
     check("no log yet: nothing to rotate", !ft_log_rotate(log, cap, 2));
     fill(log, "", 99);
-    check("exactly at the cap: kept", !ft_log_rotate(log, cap, 2) && size_of(log) == cap);
+    check("exactly at the cap: kept", !ft_log_rotate(log, cap, 2) && size_of(log) == cap && size_of(one) < 0);
     unlink(log);
     fill(log, "first run", 50);
     check("under the cap: kept as it is", !ft_log_rotate(log, cap, 2) && size_of(log) == 51);

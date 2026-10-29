@@ -539,7 +539,9 @@ def check_chaperone():
         return isinstance(v, (int, float)) and not isinstance(v, bool)
 
     def readable(u):
-        standing = u.get("standing") if isinstance(u, dict) else None
+        if not isinstance(u, dict):
+            return False
+        standing = u.get("standing")
         translation = standing.get("translation") if isinstance(standing, dict) else None
         return (str(u.get("universeID", "")).isdigit() and isinstance(translation, list) and len(translation) == 3
                 and all(number(v) for v in translation) and number(standing.get("yaw")))

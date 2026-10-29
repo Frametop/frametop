@@ -939,8 +939,8 @@ void RefreshChrome() {
 }
 
 // Placed, it belongs to `universe` (universefix.h): 0 for the one now, unless it's set again where
-// it was. Moves that carry on from where it was (a resize keeping a corner, a roll, a spin, an
-// animation to where it was headed) pass the universe their poses are in.
+// it was. Moves that carry on from where it was (a resize keeping a corner, a roll) pass its own;
+// a spin or an animation, the universe its poses are in.
 void SetAbsolute(Screen &s, const Mat &pose, uint64_t universe = 0) {
     if (universe) s.universe = universe;
     else if (s.universe == 0 || s.pinned != kNone || std::memcmp(&s.pose, &pose, sizeof pose) != 0)
@@ -2023,6 +2023,7 @@ struct Spin {
     std::map<int, Mat> base;  // index -> its pose before the spin
     int front = -1;           // settled: this panel came to the front (ft_vr_poll reports it)
     int target = -1;          // "spin to": this panel is the one coming to the front
+    uint64_t universe = 0;    // the one it started in: the panels it turns belong to it (universefix.h)
 } g_spin;
 
 // p turned a radians about the vertical axis through (cx, cz); positive turns it to the left.
@@ -2054,7 +2055,7 @@ void UpdateSpin() {
             it = g_spin.base.erase(it);  // grabbed, pinned, or gone: it stays where it is now
             continue;
         }
-        SetAbsolute(s->second, Turned(it->second, a, g_spin.cx, g_spin.cz), s->second.universe);
+        SetAbsolute(s->second, Turned(it->second, a, g_spin.cx, g_spin.cz), g_spin.universe);
         ++it;
     }
     if (done) {
@@ -2114,6 +2115,7 @@ void SpinCommand(const char *arg, char *reply, int size) {
         }
         g_spin.cx = head.m[0][3], g_spin.cz = head.m[2][3];
         g_spin.from = g_spin.to = 0;
+        g_spin.universe = g_universe;
     }
     if (g_spin.base.empty()) return (void)std::snprintf(reply, size, "error nothing to spin");
     double turn;  // degrees, positive to the left
@@ -3084,7 +3086,7 @@ void BringReadable(int i, const Mat &to, bool slot, const char *why) {
         g_front = {};
         g_front.panel = i;
         g_front.home = m != g_grabMoves.end() ? m->second.to : now;
-        g_front.homeUniverse = s.universe;
+        g_front.homeUniverse = m != g_grabMoves.end() ? m->second.universe : s.universe;
         g_front.homeWidth = m != g_grabMoves.end() ? m->second.w1 : s.metres, g_front.homeCurve = s.curve;
         g_spin.front = i;   // typing and the active window go to it (ft_vr_poll: FT_FRONT)
         SendPointer("recenter");
@@ -4242,7 +4244,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 ApplyCurve(s);
                 Mat d;
                 if (s.pinned != kNone && DevicePose(s.pinned, &d)) Pin(s, s.pinned, Mul(Inverse(d), c.pose));
-                else if (s.pinned == kNone) SetAbsolute(s, c.pose);
+                else if (s.pinned == kNone) SetAbsolute(s, c.pose, s.universe);
             }
             continue;
         }
@@ -4871,6 +4873,7 @@ void FollowUniverse(const universefix::Switch &sw) {
         if (move) move->universe = sw.to;
         s.universe = sw.to;
     }
+    if (follows(g_spin.universe)) g_spin.universe = sw.to;   // (the ones it moved left the spin)
     if (g_front.panel >= 0 && follows(g_front.homeUniverse)) {
         if (sw.moved) g_front.home = Mul(j, g_front.home);
         g_front.homeUniverse = sw.to;

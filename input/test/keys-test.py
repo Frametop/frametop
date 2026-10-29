@@ -560,6 +560,21 @@ def tests():
     key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 0); key(SHIFT, 0); key(ALT, 0); key(CTRL, 0)
     check("a key_bindings list of its own without it: Ctrl+Alt+Shift+Esc is typed",
           [m for m in typed() if m == "keys release" or m.startswith(f"key {ESC} ")], [f"key {ESC} 1", f"key {ESC} 0"])
+    use({"29+x+1": "release_keys"})  # a hand-edited combination with a part that isn't a key code
+    key(CTRL, 1); key(ESC, 1); key(ESC, 0); key(CTRL, 0)
+    check("a combination with a part that isn't a key code never matches: Ctrl+Esc is typed",
+          [m for m in typed() if m == "keys release" or m.startswith(f"key {ESC} ")], [f"key {ESC} 1", f"key {ESC} 0"])
+    use(None)
+    key(META, 1); key(SPACE, 1); key(META, 0)
+    HELD[kb_r].discard(SPACE)  # Space gone with its keyboard, its release never read
+    frunner_got(); typed()
+    menus = len(lines(steam_log))
+    key(META, 1); key(META, 0)
+    check("a combination left down keeps Meta taps from working", len(lines(steam_log)), menus)
+    key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(ESC, 1); key(ESC, 0); key(SHIFT, 0); key(ALT, 0); key(CTRL, 0)
+    key(META, 1); key(META, 0)
+    check("...until Ctrl+Alt+Shift+Esc forgets it", len(lines(steam_log)), menus + 1)
+    typed()
     use({"29+56+22": "release_keys"})  # Ctrl+Alt+U, one of the user's own
     key(CTRL, 1); key(ALT, 1); key(META, 1); key(22, 1); key(22, 0); key(META, 0); key(ALT, 0); key(CTRL, 0)
     check("a binding of the user's own: it fires with Meta held as well",

@@ -796,15 +796,18 @@ static void send_key(struct server *s, uint32_t code, int pressed) {
                                  pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED);
 }
 
-// Keyboard focus to a screen (a click, a spin, or the focused screen closing), and the
-// releases that came with no screen focused, so KWin lets go of those keys.
+// Keyboard focus to a screen (a click, a spin, or the focused screen closing), the releases
+// that came with no screen focused, so KWin lets go of those keys (a modifier several times:
+// FT_MODIFIER_RELEASES), and the modifiers held now, so a Meta+click on a screen that didn't
+// have focus is still one.
 static void keyboard_enter(struct server *s, struct wlr_surface *surface) {
     wlr_seat_keyboard_notify_enter(s->seat, surface, NULL, 0, NULL);
-    if (!s->lost_keys.n || s->seat->keyboard_state.focused_surface != surface) return;
+    if (s->seat->keyboard_state.focused_surface != surface) return;
     uint32_t code;
     while ((code = ft_lost_keys_take(&s->lost_keys))) {
         if (key_held(&s->keyboard, code)) continue;  // down again since: its release comes later
-        wlr_seat_keyboard_notify_key(s->seat, now_ms(), code, WL_KEYBOARD_KEY_STATE_RELEASED);
+        for (int n = ft_is_modifier(code) ? FT_MODIFIER_RELEASES : 1; n; --n)
+            wlr_seat_keyboard_notify_key(s->seat, now_ms(), code, WL_KEYBOARD_KEY_STATE_RELEASED);
         wlr_log(WLR_INFO, "key %u released on the desktop (it came up with no screen focused)", code);
     }
     wlr_seat_keyboard_notify_modifiers(s->seat, &s->keyboard.modifiers);
@@ -1041,28 +1044,16 @@ static const char *typing_target(struct server *s) {
            : s->keys_clicked ? "desktop (hidden)" : "steam";
 }
 
-// Keys as "keys" lists them: the evdev codes ft_key_reportable names, then "+<n>" for the
-// others, "-" for none.
-static void key_list(const uint32_t *codes, size_t n, char *out, size_t size) {
-    size_t at = 0, others = 0;
-    snprintf(out, size, "-");
-    for (size_t i = 0; i < n; ++i) {
-        if (!ft_key_reportable(codes[i])) ++others;
-        else if (at < size) at += snprintf(out + at, size - at, "%s%u", at ? "," : "", codes[i]);
-    }
-    if (others && at < size) snprintf(out + at, size - at, "+%zu", others);
-}
-
 // "keys": what ft-screens holds down and where it goes, for reports on stuck keys (DEE-222):
-// "ok focus=<screen>|none typing=<where> keys=<codes> mods=<names>|- lost=<codes>". keys are
+// "ok focus=<screen>|none typing=<where> keys=<codes>|- mods=<names>|- lost=<codes>|-". keys are
 // the keys ft-screens has down (and KWin with them, unless it lost one), mods the modifiers in
 // effect with them (locked ones too: Caps, NumLock), and lost the releases still owed to KWin,
-// sent with the next focus. Only the modifiers, Esc and Tab are named (key_list).
+// sent with the next focus. Only the modifiers, Esc and Tab are named (ft_key_list).
 static void keys_state(struct server *s, char *reply, int size) {
     static const char *const mod_names[] = {"Shift", "Caps", "Ctrl", "Alt", "NumLock", "Mod3", "Meta", "AltGr"};
     char keys[128], mods[96] = "-", lost[160];
-    key_list(s->keyboard.keycodes, s->keyboard.num_keycodes, keys, sizeof keys);
-    key_list(s->lost_keys.code, s->lost_keys.n, lost, sizeof lost);
+    ft_key_list(s->keyboard.keycodes, s->keyboard.num_keycodes, keys, sizeof keys);
+    ft_key_list(s->lost_keys.code, s->lost_keys.n, lost, sizeof lost);
     const uint32_t m = wlr_keyboard_get_modifiers(&s->keyboard);
     for (unsigned i = 0, at = 0; i < 8 && at < sizeof mods; ++i)
         if (m & (1u << i)) at += snprintf(mods + at, sizeof mods - at, "%s%s", at ? "," : "", mod_names[i]);

@@ -1416,7 +1416,7 @@ def main():
             if action != "release_keys":
                 continue
             *mods, last = combo.split("+")
-            if mods and last == str(code) and all(m.isdigit() for m in mods) \
+            if mods and last == str(code) and all(m.isdecimal() for m in mods) \
                     and {int(m) for m in mods} <= held_modifiers:
                 return combo, action
         return None

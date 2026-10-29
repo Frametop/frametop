@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <linux/input-event-codes.h>
 // Key releases KWin hasn't had (DEE-222). wlroots sends a key only to the surface with keyboard
 // focus, and drops it when none has it: after the focused screen closes, until a click or a
@@ -11,15 +12,14 @@
 // those releases here (ft_lost_keys_add) and sends them with the next keyboard focus
 // (ft_lost_keys_take). A release of a key KWin doesn't hold changes nothing there, so one sent
 // twice is harmless; a lost one isn't.
-#define FT_LOST_KEYS_MAX 40  // every key wlroots can hold (32) and every modifier
+#define FT_LOST_KEYS_MAX 40  // every key wlroots holds at once (32), and every modifier
 
 struct ft_lost_keys {
     uint32_t code[FT_LOST_KEYS_MAX];
     unsigned n;
 };
 
-// A release that had no focus to go to. When full (it can't be: see FT_LOST_KEYS_MAX), the
-// oldest goes.
+// A release that had no focus to go to. When full, the oldest goes.
 static inline void ft_lost_keys_add(struct ft_lost_keys *l, uint32_t code) {
     for (unsigned i = 0; i < l->n; ++i)
         if (l->code[i] == code) return;
@@ -44,22 +44,38 @@ static inline uint32_t ft_lost_keys_take(struct ft_lost_keys *l) {
 static const uint32_t ft_modifier_keys[] = {KEY_LEFTCTRL,  KEY_RIGHTCTRL, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
                                             KEY_LEFTALT,   KEY_RIGHTALT,  KEY_LEFTMETA,  KEY_RIGHTMETA};
 
+static inline bool ft_is_modifier(uint32_t code) {
+    for (size_t i = 0; i < sizeof ft_modifier_keys / sizeof *ft_modifier_keys; ++i)
+        if (ft_modifier_keys[i] == code) return true;
+    return false;
+}
+
 // The keys "keys" names (keys_state): the modifiers, Esc and Tab, as scripts/keys-report.py
 // does. The others it only counts: any program on the machine can ask, and a list of the letters
 // held, asked often enough, would spell out what's typed.
 static inline bool ft_key_reportable(uint32_t code) {
-    for (size_t i = 0; i < sizeof ft_modifier_keys / sizeof *ft_modifier_keys; ++i)
-        if (ft_modifier_keys[i] == code) return true;
-    return code == KEY_ESC || code == KEY_TAB;
+    return ft_is_modifier(code) || code == KEY_ESC || code == KEY_TAB;
+}
+
+// Keys as "keys" lists them: the codes ft_key_reportable names, then "+<n>" for the others, "-"
+// for none ("29,15+2"). Cut short if `size` is too small.
+static inline void ft_key_list(const uint32_t *codes, size_t n, char *out, size_t size) {
+    size_t at = 0, others = 0;
+    snprintf(out, size, "-");
+    for (size_t i = 0; i < n; ++i) {
+        if (!ft_key_reportable(codes[i])) ++others;
+        else if (at < size) at += snprintf(out + at, size - at, "%s%u", at ? "," : "", codes[i]);
+    }
+    if (others && at < size) snprintf(out + at, size - at, "+%zu", others);
 }
 
 // How many times "keys release" lets go of each modifier, in ft-screens' state and in KWin. Both
 // count presses through xkbcommon, which counts a second press of a key that's already down:
 // one release then leaves it down for good, and further presses and releases come in pairs, so
-// it stays down until the desktop restarts (DEE-222: a Meta pressed twice like that would make
-// every click Meta+click, a window move, until a reboot, as reported). ft_keyboard_key keeps that from
-// happening now; these releases undo it if it happened anyway. A release of a key that isn't
-// down changes nothing.
+// it stays down until the desktop restarts (DEE-222: a Meta pressed twice like that makes every
+// click Meta+click, a window move). ft_keyboard_key keeps that from happening now; these
+// releases undo it if it happened anyway, with focus or with the next one (keyboard_enter). A
+// release of a key that isn't down changes nothing.
 #define FT_MODIFIER_RELEASES 4
 
 // Where keyboard focus goes when the screen that has it closes (index `closing`): the screen

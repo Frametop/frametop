@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <string.h>
 #include "../held-keys.h"
 int main(void) {
     // Releases with no focus wait for the next one, once each, oldest first.
@@ -20,6 +21,22 @@ int main(void) {
     assert(ft_key_reportable(KEY_LEFTMETA) && ft_key_reportable(KEY_RIGHTALT) && ft_key_reportable(KEY_ESC));
     assert(ft_key_reportable(KEY_TAB) && !ft_key_reportable(KEY_A) && !ft_key_reportable(KEY_1));
     assert(!ft_key_reportable(KEY_ENTER) && !ft_key_reportable(KEY_SPACE));
+    const uint32_t mods[] = {KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
+                             KEY_LEFTALT,  KEY_RIGHTALT,  KEY_LEFTMETA,  KEY_RIGHTMETA};
+    for (size_t i = 0; i < 8; ++i) assert(ft_is_modifier(mods[i]));
+    assert(sizeof ft_modifier_keys / sizeof *ft_modifier_keys == 8 && !ft_is_modifier(KEY_CAPSLOCK));
+    char out[32];
+    ft_key_list(NULL, 0, out, sizeof out);
+    assert(!strcmp(out, "-"));
+    const uint32_t typing[] = {KEY_H, KEY_I, KEY_SPACE};
+    ft_key_list(typing, 3, out, sizeof out);
+    assert(!strcmp(out, "+3"));
+    const uint32_t mixed[] = {KEY_LEFTCTRL, KEY_A, KEY_TAB, KEY_B};
+    ft_key_list(mixed, 4, out, sizeof out);
+    assert(!strcmp(out, "29,15+2"));
+    char small[5];
+    ft_key_list(mixed, 4, small, sizeof small);  // cut short, still a string
+    assert(strlen(small) < sizeof small && !strncmp(small, "29,", 3));
 
     // Focus after the focused screen closes: the pointer's screen, else the first desktop
     // screen, else a spare, else none.

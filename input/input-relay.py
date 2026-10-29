@@ -44,9 +44,9 @@ dictate_hold = dictation while held (Frametop Voice, voice/ft-voiced: "toggle|st
 to @frametop_voice), frunner = open or close frunner's search for apps and remote displays
 ("toggle <source>" to @ft_frunner; Meta+Space by default), hands_toggle = stop hand tracking if
 it runs, else start it, until the next desktop or SteamVR start (hands/handsmode.py toggle; Meta+H
-by default), release_keys = let go of every key held anywhere: what the desktop, a remote display
-and this relay hold, and every modifier in KWin whether it's known to be held or not ("keys release"
-to ft-screens; Ctrl+Alt+Shift+Esc by default, DEE-222), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
+by default), release_keys = let go of every key held anywhere: what the desktop, a remote
+display and this relay hold, and every modifier in KWin, known to be held or not ("keys
+release" to ft-screens; Ctrl+Alt+Shift+Esc by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
 transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
 ft-layout, ft-float, ft-steam and ft-voice need no path), key = pass through as a key, none).
@@ -1416,7 +1416,8 @@ def main():
             if action != "release_keys":
                 continue
             *mods, last = combo.split("+")
-            if mods and last == str(code) and {int(m) for m in mods if m.isdigit()} <= held_modifiers:
+            if mods and last == str(code) and all(m.isdigit() for m in mods) \
+                    and {int(m) for m in mods} <= held_modifiers:
                 return combo, action
         return None
 
@@ -1661,10 +1662,13 @@ def main():
 
     def release_all_keys():
         """release_keys: what this relay holds that no device does comes up, on the desktop and
-        on its own virtual keyboard and mouse, and ft-screens lets go of every key, on the
-        desktop screens (every modifier in KWin too) and a remote display (its "keys release")."""
+        on its own virtual keyboard and mouse, combinations left down are forgotten, and
+        ft-screens lets go of every key, on the desktop screens (every modifier in KWin too) and a
+        remote display (its "keys release")."""
         reconcile_desktop_keys()
         down = physically_down()
+        for code in [c for c in combos_down if c not in down]:
+            del combos_down[code]  # its device went with it held: it kept modifier taps from working
         for node in nodes.values():
             for code in sorted(node.held - down):
                 (mouse if code >= BTN_MISC else keyboard).emit(EV_KEY, code, 0)

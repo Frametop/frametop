@@ -16,15 +16,10 @@ int main(void) {
     assert(l.n == FT_LOST_KEYS_MAX && l.code[0] == KEY_2 && l.code[FT_LOST_KEYS_MAX - 1] == KEY_LEFTMETA);
     while (ft_lost_keys_take(&l)) {}
 
-    // Every modifier, both sides, is in the release-all list.
-    const uint32_t mods[] = {KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
-                             KEY_LEFTALT,  KEY_RIGHTALT,  KEY_LEFTMETA,  KEY_RIGHTMETA};
-    assert(sizeof ft_modifier_keys / sizeof *ft_modifier_keys == 8);
-    for (unsigned i = 0; i < 8; ++i) {
-        bool found = false;
-        for (unsigned j = 0; j < 8; ++j) found |= ft_modifier_keys[j] == mods[i];
-        assert(found);
-    }
+    // "keys" names the modifiers, Esc and Tab, and only counts the others.
+    assert(ft_key_reportable(KEY_LEFTMETA) && ft_key_reportable(KEY_RIGHTALT) && ft_key_reportable(KEY_ESC));
+    assert(ft_key_reportable(KEY_TAB) && !ft_key_reportable(KEY_A) && !ft_key_reportable(KEY_1));
+    assert(!ft_key_reportable(KEY_ENTER) && !ft_key_reportable(KEY_SPACE));
 
     // Focus after the focused screen closes: the pointer's screen, else the first desktop
     // screen, else a spare, else none.

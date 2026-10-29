@@ -586,12 +586,14 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
             }
             wlr_seat_pointer_notify_motion(s->seat, t, x, y);
             if (e->type == FT_BUTTON) {
+                // Keyboard focus first: releases owed to KWin (keyboard_enter) arrive before the
+                // press, so a Meta that was stuck doesn't make it a window move.
+                if (e->pressed) keyboard_enter(s, surface);
                 wlr_seat_pointer_notify_button(s->seat, t, e->button,
                                                e->pressed ? WL_POINTER_BUTTON_STATE_PRESSED
                                                           : WL_POINTER_BUTTON_STATE_RELEASED);
                 if (e->pressed) {
                     spot_dismiss(s, "click");
-                    keyboard_enter(s, surface);
                     s->keys_clicked = true;
                     set_key_remote(s, -1);
                 }
@@ -778,10 +780,10 @@ static bool key_held(const struct wlr_keyboard *kb, uint32_t code) {
 // the next focus instead (keyboard_enter).
 static void send_key(struct server *s, uint32_t code, int pressed) {
     s->typed_ms = now_ms();
-    struct wlr_keyboard_key_event ev = {
-        .time_msec = now_ms(), .keycode = code, .update_state = true,
-        .state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED};
-    wlr_keyboard_notify_key(&s->keyboard, &ev);
+    if (!ft_keyboard_key(&s->keyboard, code, pressed, now_ms())) {
+        wlr_log(WLR_INFO, "key %u pressed again while it's down: ignored", code);
+        return;
+    }
     if (!s->seat->keyboard_state.focused_surface) {
         if (!pressed) {
             ft_lost_keys_add(&s->lost_keys, code);
@@ -790,7 +792,8 @@ static void send_key(struct server *s, uint32_t code, int pressed) {
         return;
     }
     wlr_seat_keyboard_notify_modifiers(s->seat, &s->keyboard.modifiers);
-    wlr_seat_keyboard_notify_key(s->seat, ev.time_msec, code, ev.state);
+    wlr_seat_keyboard_notify_key(s->seat, now_ms(), code,
+                                 pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED);
 }
 
 // Keyboard focus to a screen (a click, a spin, or the focused screen closing), and the
@@ -817,26 +820,33 @@ static void release_keys(struct server *s, const char *why) {
 }
 
 // "keys release" (the input relay's release_keys, Ctrl+Alt+Shift+Esc by default): every key
-// comes up wherever it may be held. The keys ft-screens holds, every modifier in KWin whether
-// ft-screens holds it or not (KWin can hold one ft-screens let go), and a remote screen's
-// keys; then the focused screen gets the keyboard again, which KWin takes as a fresh start.
+// comes up wherever it may be held. The keys ft-screens holds, and a remote screen's; every
+// modifier, FT_MODIFIER_RELEASES times, in ft-screens' state and in KWin, whether ft-screens
+// holds it or not (KWin can hold one ft-screens let go, or count one press twice); then the
+// focused screen gets the keyboard again, which KWin takes as a fresh start.
 static void release_all_keys(struct server *s, char *reply, int size) {
     const size_t held = s->keyboard.num_keycodes;
+    const uint32_t stuck = s->keyboard.modifiers.depressed;
     if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) ft_remote_blur(s->key_remote);
     release_keys(s, "release all keys");
+    ft_keyboard_release_modifiers(&s->keyboard, now_ms());
     struct wlr_surface *focus = s->seat->keyboard_state.focused_surface;
     for (size_t i = 0; i < sizeof ft_modifier_keys / sizeof *ft_modifier_keys; ++i) {
-        if (focus) wlr_seat_keyboard_notify_key(s->seat, now_ms(), ft_modifier_keys[i], WL_KEYBOARD_KEY_STATE_RELEASED);
-        else ft_lost_keys_add(&s->lost_keys, ft_modifier_keys[i]);
+        if (!focus) {
+            ft_lost_keys_add(&s->lost_keys, ft_modifier_keys[i]);
+            continue;
+        }
+        for (int n = 0; n < FT_MODIFIER_RELEASES; ++n)
+            wlr_seat_keyboard_notify_key(s->seat, now_ms(), ft_modifier_keys[i], WL_KEYBOARD_KEY_STATE_RELEASED);
     }
     if (focus) {
         wlr_seat_keyboard_notify_clear_focus(s->seat);
         keyboard_enter(s, focus);
         wlr_seat_keyboard_notify_modifiers(s->seat, &s->keyboard.modifiers);
     }
-    wlr_log(WLR_INFO, "release all keys: %zu held here, every modifier released%s", held,
-            focus ? "" : " with the next focus");
-    snprintf(reply, size, "ok released %zu", held);
+    wlr_log(WLR_INFO, "release all keys: %zu held here, modifiers 0x%x down, every modifier released%s", held,
+            stuck, focus ? "" : " with the next focus");
+    snprintf(reply, size, "ok released %zu, modifiers were 0x%x", held, stuck);
 }
 
 // The input relay's mouse buttons (relay-buttons.h) can be pressed: the pointer is on a
@@ -1024,27 +1034,38 @@ static void panel_key(struct server *s, uint32_t code, bool pressed) {
     if (pressed ? s->seat->keyboard_state.focused_surface != NULL : key_held(&s->keyboard, code))
         send_key(s, code, pressed);
 }
+
 // Where typing goes, for "debug" and "keys".
 static const char *typing_target(struct server *s) {
     return spot_open(s) ? "frunner" : s->key_remote >= 0 ? "remote" : s->keys_desktop ? "desktop"
            : s->keys_clicked ? "desktop (hidden)" : "steam";
 }
 
+// Keys as "keys" lists them: the evdev codes ft_key_reportable names, then "+<n>" for the
+// others, "-" for none.
+static void key_list(const uint32_t *codes, size_t n, char *out, size_t size) {
+    size_t at = 0, others = 0;
+    snprintf(out, size, "-");
+    for (size_t i = 0; i < n; ++i) {
+        if (!ft_key_reportable(codes[i])) ++others;
+        else if (at < size) at += snprintf(out + at, size - at, "%s%u", at ? "," : "", codes[i]);
+    }
+    if (others && at < size) snprintf(out + at, size - at, "+%zu", others);
+}
+
 // "keys": what ft-screens holds down and where it goes, for reports on stuck keys (DEE-222):
-// "ok focus=<screen>|none typing=<where> keys=<codes>|- mods=<names>|- lost=<codes>|-".
-// keys are the evdev codes ft-screens has down (and KWin with them, unless it lost one), mods
-// the modifiers in effect with them (locked ones too: Caps, NumLock), and lost the releases
-// still owed to KWin, sent with the next focus.
+// "ok focus=<screen>|none typing=<where> keys=<codes> mods=<names>|- lost=<codes>". keys are
+// the keys ft-screens has down (and KWin with them, unless it lost one), mods the modifiers in
+// effect with them (locked ones too: Caps, NumLock), and lost the releases still owed to KWin,
+// sent with the next focus. Only the modifiers, Esc and Tab are named (key_list).
 static void keys_state(struct server *s, char *reply, int size) {
     static const char *const mod_names[] = {"Shift", "Caps", "Ctrl", "Alt", "NumLock", "Mod3", "Meta", "AltGr"};
-    char keys[256] = "-", mods[96] = "-", lost[160] = "-";
-    for (size_t i = 0, at = 0; i < s->keyboard.num_keycodes && at < sizeof keys; ++i)
-        at += snprintf(keys + at, sizeof keys - at, "%s%u", i ? "," : "", s->keyboard.keycodes[i]);
+    char keys[128], mods[96] = "-", lost[160];
+    key_list(s->keyboard.keycodes, s->keyboard.num_keycodes, keys, sizeof keys);
+    key_list(s->lost_keys.code, s->lost_keys.n, lost, sizeof lost);
     const uint32_t m = wlr_keyboard_get_modifiers(&s->keyboard);
-    for (unsigned i = 0, at = 0, first = 1; i < 8 && at < sizeof mods; ++i)
-        if (m & (1u << i)) at += snprintf(mods + at, sizeof mods - at, "%s%s", first ? "" : ",", mod_names[i]), first = 0;
-    for (unsigned i = 0, at = 0; i < s->lost_keys.n && at < sizeof lost; ++i)
-        at += snprintf(lost + at, sizeof lost - at, "%s%u", i ? "," : "", s->lost_keys.code[i]);
+    for (unsigned i = 0, at = 0; i < 8 && at < sizeof mods; ++i)
+        if (m & (1u << i)) at += snprintf(mods + at, sizeof mods - at, "%s%s", at ? "," : "", mod_names[i]);
     const int focus = s->seat->keyboard_state.focused_surface ? focused_screen(s) : -1;
     char where[16] = "none";
     if (focus >= 0) snprintf(where, sizeof where, "%d", focus + 1);
@@ -1059,8 +1080,9 @@ static void keys_state(struct server *s, char *reply, int size) {
 // "key <code> <value>", "vrkeyboard show|hide|toggle|close" (our keyboard or Full Keyboard,
 // from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not),
 // "frunner on|off" (frunner's search has the typing; see spot_open), "keys" (what's held:
-// keys_state), "keys release" (every key up: release_all_keys), and "click <overlay key>" (from the pointer helper: a mouse click landed on that panel, "-" for none); the rest
-// is in vr.cpp (ft_vr_command).
+// keys_state), "keys release" (every key up: release_all_keys), and "click <overlay key>"
+// (from the pointer helper: a mouse click landed on that panel, "-" for none); the rest is in
+// vr.cpp (ft_vr_command).
 static int control_readable(int fd, uint32_t mask, void *data) {
     struct server *s = data;
     char buf[512], reply[2048];

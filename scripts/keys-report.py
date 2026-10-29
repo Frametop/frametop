@@ -14,7 +14,8 @@ It writes ~/frametop-keys-report-<time>.txt with:
   - the relay's and pointer helper's log for the same time, and the end of the Frametop
     desktop's log (where typing went)
   - what ft-screens holds down (its "keys": keyboard focus, keys and modifiers, releases owed
-    to KWin), as the recording starts and as it ends
+    to KWin; it names only the modifiers, Esc and Tab, and counts the rest), as the recording
+    starts and as it ends
 Bluetooth addresses and the headset's serial number are masked.
 """
 import glob

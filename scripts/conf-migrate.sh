@@ -13,6 +13,8 @@
 #   live test that day asked for about 3 inches: 0.075.
 #   HANDS_POKE_TRAVEL=0.025: the example's value from the hands-touch branch (2026-10-10). The second
 #   live test that day refused taps that came 1.7-2.0 cm in: 0.017.
+# Then input/rules-migrate.py makes its one-time changes to ~/.config/frametop-input.json: a
+# key_bindings list of your own gets Meta+Shift+H (DEE-217), which was a KWin shortcut before.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
@@ -57,3 +59,5 @@ elif grep -q '^SHARE_KEYS=1' "$f"; then
   echo "settings: SHARE_KEYS=1 does nothing now: nothing sends keys to @frametop_keys (Frametop Voice gets them from the input relay)"
 fi
 EOF
+on_frame "python3 -I input/rules-migrate.py" ||
+  echo "key combinations: the one-time update didn't finish (above); the next install tries again"

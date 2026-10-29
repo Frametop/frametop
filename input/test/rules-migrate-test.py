@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Offline test of input/rules-migrate.py, the one-time changes to the input relay's rules: a
-key_bindings list of its own gets Meta+Shift+H once (DEE-217), and nothing else in the file
-changes. Works on files in a temporary folder, never ~/.config/frametop-input.json.
+key_bindings list of its own gets Meta+Shift+H once (DEE-217) and Ctrl+Alt+Shift+Esc once (DEE-222),
+and nothing else in the file changes. Works on files in a temporary folder, never ~/.config/frametop-input.json.
 
   input/test/rules-migrate-test.py
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -35,6 +37,7 @@ def check(label, got, want):
 
 OUT = tempfile.mkdtemp(prefix="ft-rules-migrate-test-")
 LINE = '    "42+125+35": "screens_toggle",\n'
+RELEASE_LINE = '    "29+42+56+1": "release_keys",\n'
 # As Frametop Input Settings writes it (json.dump, indent 2, no newline at the end).
 CUSTOM = {"key_bindings": {"125+36": "gaze_left", "125+37": "gaze_right", "42+125+33": "float_toggle",
                            "97": "dictate", "125+35": "hands_toggle"},
@@ -61,8 +64,8 @@ def read(path):
         return None
 
 
-def marked(state):
-    return (rm.read_state(state) or {}).get(rm.SCREENS_TOGGLE_KEY, False)
+def marked(state, name=rm.SCREENS_TOGGLE_KEY):
+    return (rm.read_state(state) or {}).get(name, False)
 
 
 def reloads():
@@ -75,7 +78,10 @@ def reloads():
             return n
 
 
+ALL_MIGRATIONS = rm.MIGRATIONS
 try:
+    # Meta+Shift+H alone first (DEE-217): what every change goes through, shown with it.
+    rm.MIGRATIONS = ALL_MIGRATIONS[:1]
     # A list of its own without the combination: it's added once, first, and only that line.
     rules, state = case("added", CUSTOM)
     os.chmod(rules, 0o600)
@@ -196,7 +202,113 @@ try:
     check("symlink: kept, its target updated", (os.path.islink(link),
                                                 json.loads(read(rules))["key_bindings"].get("42+125+35")),
           (True, "screens_toggle"))
+
+    # Ctrl+Alt+Shift+Esc (DEE-222), with every change, as an install runs them.
+    rm.MIGRATIONS = ALL_MIGRATIONS
+    check("both changes run, in order", [name for name, _ in rm.MIGRATIONS], ["screens-toggle-key", "release-keys-key"])
+    # A list that got Meta+Shift+H already (an install of DEE-217): it gets this one, once.
+    with_h = {**CUSTOM, "key_bindings": {"42+125+35": "screens_toggle", **CUSTOM["key_bindings"]}}
+    rules, state = case("release-after-217", with_h)
+    os.makedirs(os.path.dirname(state))
+    with open(state, "w") as f:
+        json.dump({rm.SCREENS_TOGGLE_KEY: True}, f)
+    os.chmod(rules, 0o600)
+    before = read(rules)
+    reloads()
+    check("after DEE-217: done", rm.main(rules, state), 0)
+    after = read(rules)
+    check("...Ctrl+Alt+Shift+Esc added first, the others in their order", list(json.loads(after)["key_bindings"]),
+          ["29+42+56+1", *with_h["key_bindings"]])
+    check("...every other byte as it was", after.decode().replace(RELEASE_LINE, "", 1).encode(), before)
+    check("...backed up under its own name", (read(rules + ".bak-release-keys-key"),
+                                             read(rules + ".bak-screens-toggle-key")), (before, None))
+    check("...mode kept", stat.S_IMODE(os.stat(rules).st_mode), 0o600)
+    check("...both marked, the relay told once", (marked(state), marked(state, rm.RELEASE_KEYS_KEY), reloads()),
+          (True, True, 1))
+    rm.main(rules, state)
+    check("...second run: nothing changes", (read(rules), reloads()), (after, 0))
+    with open(rules, "wb") as f:
+        f.write(before)
+    rm.main(rules, state)
+    check("...removed afterwards: not added again", read(rules), before)
+
+    # A list that had neither (no install since before DEE-217): both, in one run.
+    rules, state = case("release-and-217", CUSTOM, "\n")
+    before = read(rules)
+    check("neither yet: done", rm.main(rules, state), 0)
+    after = read(rules)
+    check("...both added, Ctrl+Alt+Shift+Esc first", list(json.loads(after)["key_bindings"]),
+          ["29+42+56+1", "42+125+35", *CUSTOM["key_bindings"]])
+    check("...every other byte as it was",
+          after.decode().replace(RELEASE_LINE, "", 1).replace(LINE, "", 1).encode(), before)
+    check("...both marked", (marked(state), marked(state, rm.RELEASE_KEYS_KEY)), (True, True))
+    check("...the first backup is the file as it was", read(rules + ".bak-screens-toggle-key"), before)
+    check("...the second, the file with Meta+Shift+H in it",
+          read(rules + ".bak-release-keys-key").decode().replace(LINE, "", 1).encode(), before)
+    check("...the relay told after each", reloads(), 2)
+
+    # The second write fails after the first worked: Meta+Shift+H stays and is marked, and the
+    # next install adds Ctrl+Alt+Shift+Esc.
+    rules, state = case("release-fails", CUSTOM)
+    before = read(rules)
+    real_write = rm.write_atomic
+
+    def full_disk(path, data, mode=0o644):
+        if path == os.path.realpath(rules) and RELEASE_LINE.encode() in data:
+            raise OSError(28, "No space left on device")
+        real_write(path, data, mode)
+    rm.write_atomic = full_disk
+    try:
+        status = rm.main(rules, state)
+    finally:
+        rm.write_atomic = real_write
+    check("second write fails: waits for the next install", status, 1)
+    check("...Meta+Shift+H in and marked, Ctrl+Alt+Shift+Esc neither",
+          ("42+125+35" in json.loads(read(rules))["key_bindings"], "29+42+56+1" in json.loads(read(rules))["key_bindings"],
+           marked(state), marked(state, rm.RELEASE_KEYS_KEY)), (True, False, True, False))
+    check("next install: added", (rm.main(rules, state), list(json.loads(read(rules))["key_bindings"])[:2],
+                                  marked(state, rm.RELEASE_KEYS_KEY)), (0, ["29+42+56+1", "42+125+35"], True))
+    check("...every other byte as it was",
+          read(rules).decode().replace(RELEASE_LINE, "", 1).replace(LINE, "", 1).encode(), before)
+    reloads()
+
+    # A file that isn't JSON: said once, not once for each change, and neither is marked.
+    rules, state = case("release-not-json", '{"key_bindings": {')
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        status = rm.main(rules, state)
+    check("not JSON, both waiting: said once, nothing marked",
+          (status, out.getvalue().count("isn't JSON"), marked(state), marked(state, rm.RELEASE_KEYS_KEY)),
+          (1, 1, False, False))
+
+    # The combination bound already, to release_keys or to something of the user's own: kept.
+    for name, action in (("release-present", "release_keys"), ("release-taken", "command:notify-send hi")):
+        rules, state = case(name, {**with_h, "key_bindings": {**with_h["key_bindings"], "29+42+56+1": action}})
+        before = read(rules)
+        rm.main(rules, state)
+        check(f"Ctrl+Alt+Shift+Esc bound already ({action}): unchanged, no backup, marked",
+              (read(rules), read(rules + ".bak-release-keys-key"), marked(state, rm.RELEASE_KEYS_KEY)),
+              (before, None, True))
+
+    # No list of its own: the relay's defaults have it. Nothing written.
+    rules, state = case("release-defaults", {"devices": {}})
+    before = read(rules)
+    rm.main(rules, state)
+    check("no list of its own: left as it is, marked", (read(rules), marked(state, rm.RELEASE_KEYS_KEY)),
+          (before, True))
+
+    # Laid out by hand: left alone, with a note naming the setting to use.
+    rules, state = case("release-hand-laid-out", json.dumps(with_h))
+    before = read(rules)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rm.main(rules, state)
+    check("laid out by hand: left as it is", read(rules), before)
+    check("...the note says what to add, and where",
+          any("add Ctrl+Alt+Shift+Esc (Release all keys) on its Keyboard page" in line
+              for line in out.getvalue().splitlines()), True)
 finally:
+    rm.MIGRATIONS = ALL_MIGRATIONS
     relay.close()
     for root, dirs, files in os.walk(OUT):
         for d in dirs:

@@ -13,6 +13,10 @@ user removes afterwards stays removed.
   file again. A file that isn't JSON (Input Settings may be halfway through writing it) waits for
   the next install.
 
+  release-keys-key (DEE-222, 2026-10-29): Ctrl+Alt+Shift+Esc lets go of every key, for a modifier
+  stuck in KWin ("29+42+56+1": release_keys, a new default). Added the same way, under its own
+  name, so a list that got Meta+Shift+H already gets this one too.
+
   input/rules-migrate.py [RULES [STATE]]
 Python 3 standard library only: it runs on the SteamOS host.
 """
@@ -29,6 +33,8 @@ STATE = os.path.expanduser("~/.local/state/frametop/input/rules-migrations.json"
 RELAY = "\0frametop_relay"
 SCREENS_TOGGLE_KEY = "screens-toggle-key"
 SCREENS_COMBO, SCREENS_ACTION = "42+125+35", "screens_toggle"
+RELEASE_KEYS_KEY = "release-keys-key"
+RELEASE_COMBO, RELEASE_ACTION = "29+42+56+1", "release_keys"
 
 
 def read_state(path):
@@ -63,18 +69,20 @@ def write_atomic(path, data, mode=0o644):
         raise
 
 
-def screens_toggle_key(path):
-    """Add Meta+Shift+H to a key_bindings list of its own that lacks the combination. (done,
-    message): done False means try again on the next install."""
+def add_binding(path, name, combo, action, keys, what, setting):
+    """Add combo: action to a key_bindings list of its own that lacks the combination, first in
+    the list. keys, what and setting name it in messages ("Meta+Shift+H", "hide or show the
+    screens", "Hide/show desktop screens": its name in Input Settings). (done, message): done
+    False means try again on the next install."""
     path = os.path.realpath(path)  # a symlinked rules file: write where it points
     try:
         with open(path, "rb") as f:
             raw = f.read()
         mode = os.stat(path).st_mode & 0o7777
     except FileNotFoundError:
-        return True, None  # the relay's defaults, Meta+Shift+H included
+        return True, None  # the relay's defaults, the combination included
     except OSError as e:
-        return False, f"key combinations: can't read {path} ({e}); Meta+Shift+H wasn't added"
+        return False, f"key combinations: can't read {path} ({e}); {keys} wasn't added"
     try:
         text = raw.decode("utf-8")
         rules = json.loads(text)
@@ -82,26 +90,25 @@ def screens_toggle_key(path):
         # The relay reads it as no rules (the defaults), but it may be half written: next time.
         return False, f"key combinations: {path} isn't JSON; left as it is"
     bindings = rules.get("key_bindings") if isinstance(rules, dict) else None
-    if not isinstance(bindings, dict) or SCREENS_COMBO in bindings:
+    if not isinstance(bindings, dict) or combo in bindings:
         return True, None  # the defaults, or the combination is the user's already
     laid_out = json.dumps(rules, indent=2)
     if not text.startswith(laid_out) or text[len(laid_out):].strip():
         return True, (f"key combinations: {path} isn't laid out as Frametop Input Settings writes it, so it's "
-                      "left as it is: add Meta+Shift+H (Hide/show desktop screens) on its Keyboard page")
+                      f"left as it is: add {keys} ({setting}) on its Keyboard page")
     if not mode & 0o200:
-        return True, f"key combinations: {path} is read-only, so it's left as it is: Meta+Shift+H wasn't added"
-    rules["key_bindings"] = {SCREENS_COMBO: SCREENS_ACTION, **bindings}
-    backup = path + ".bak-" + SCREENS_TOGGLE_KEY
+        return True, f"key combinations: {path} is read-only, so it's left as it is: {keys} wasn't added"
+    rules["key_bindings"] = {combo: action, **bindings}
+    backup = path + ".bak-" + name
     try:
         if read(backup) not in (None, raw):  # an earlier try's, of another version of the file
             backup += time.strftime("-%Y%m%d-%H%M%S")
         shutil.copy2(path, backup)
         write_atomic(path, (json.dumps(rules, indent=2) + text[len(laid_out):]).encode(), mode)
     except OSError as e:
-        return False, f"key combinations: can't write {path} ({e}); Meta+Shift+H wasn't added"
+        return False, f"key combinations: can't write {path} ({e}); {keys} wasn't added"
     reload_relay()
-    return True, ("key combinations: Meta+Shift+H (hide or show the screens) added to your own list "
-                  f"(before: {backup})")
+    return True, f"key combinations: {keys} ({what}) added to your own list (before: {backup})"
 
 
 def read(path):
@@ -123,7 +130,17 @@ def reload_relay():
         s.close()
 
 
-MIGRATIONS = ((SCREENS_TOGGLE_KEY, screens_toggle_key),)
+def screens_toggle_key(path):
+    return add_binding(path, SCREENS_TOGGLE_KEY, SCREENS_COMBO, SCREENS_ACTION, "Meta+Shift+H",
+                       "hide or show the screens", "Hide/show desktop screens")
+
+
+def release_keys_key(path):
+    return add_binding(path, RELEASE_KEYS_KEY, RELEASE_COMBO, RELEASE_ACTION, "Ctrl+Alt+Shift+Esc",
+                       "let go of every key", "Release all keys")
+
+
+MIGRATIONS = ((SCREENS_TOGGLE_KEY, screens_toggle_key), (RELEASE_KEYS_KEY, release_keys_key))
 
 
 def main(rules=RULES, state_path=STATE):
@@ -132,13 +149,14 @@ def main(rules=RULES, state_path=STATE):
     if state is None:
         print(f"key combinations: can't read {state_path}, so no one-time change runs")
         return 1
-    status = 0
+    status, said = 0, set()
     for name, migrate in MIGRATIONS:
         if state.get(name):
             continue
         done, message = migrate(rules)
-        if message:
+        if message and message not in said:  # a file that isn't JSON is the same news for each
             print(message)
+            said.add(message)
         if not done:
             status = 1
             continue

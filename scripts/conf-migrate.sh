@@ -14,7 +14,8 @@
 #   HANDS_POKE_TRAVEL=0.025: the example's value from the hands-touch branch (2026-10-10). The second
 #   live test that day refused taps that came 1.7-2.0 cm in: 0.017.
 # Then input/rules-migrate.py makes its one-time changes to ~/.config/frametop-input.json: a
-# key_bindings list of your own gets Meta+Shift+H (DEE-217), which was a KWin shortcut before.
+# key_bindings list of your own gets Meta+Shift+H (DEE-217), which was a KWin shortcut before, and
+# Ctrl+Alt+Shift+Esc (DEE-222), which lets go of a stuck modifier.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"

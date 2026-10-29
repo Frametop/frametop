@@ -18,7 +18,7 @@ desktops.sh start | stop | restart | status | log [lines]
 
 To have the desktop start by itself, turn on Start with SteamVR on the Power tab of Frametop Display Settings, or run `desktops.sh autostart on`. Both set `AUTOSTART=1` in `~/.config/frametop.conf`. `frametop-autostart.service`, which `desktops.sh install` adds, runs `session/autostart.sh` each time SteamVR starts. The Frame starts SteamVR when it boots, so the setting covers boot too. The script waits for SteamVR's server and compositor, then runs `desktops.sh start`. The desktop quits when SteamVR does, so a SteamVR restart brings it back. If you close the desktop, it stays closed until SteamVR starts again. Its log: `journalctl --user -u frametop-autostart`.
 
-`session/frametop-session.sh` runs the desktop. It starts ft-screens in the `dev` container (log: `/tmp/frametop-screens.log`), then KWin and Plasma on the host inside it. Only one Frametop desktop runs at a time. Its check doesn't look for Native Desktop, and running both at once is untested. `desktops.sh start` runs it in its own systemd unit, `frametop-desktop`. It keeps its Plasma config in `~/.config/frametop`, separate from the stock desktop's.
+`session/frametop-session.sh` runs the desktop. It starts ft-screens in the `dev` container (log: `~/.local/state/frametop/screens.log`, kept across starts and rotated at 8 MB to `screens.log.1` and `.2`), then KWin and Plasma on the host inside it. Only one Frametop desktop runs at a time. Its check doesn't look for Native Desktop, and running both at once is untested. `desktops.sh start` runs it in its own systemd unit, `frametop-desktop`. It keeps its Plasma config in `~/.config/frametop`, separate from the stock desktop's.
 
 When the VR launcher starts the desktop, it inherits the Steam client's environment. The session script drops the client's runtime from it (`LD_LIBRARY_PATH`, the `STEAM_*` settings, and the Steam overlay's Vulkan layer), so apps in the desktop use the system's libraries, including its video codecs, just as they would after a normal login.
 
@@ -92,7 +92,7 @@ ft-screens listens for datagrams on the abstract socket `@ft_screens` and replie
 ```
 place N x y z yaw pitch roll     width N metres          curve N radius|on|off
 pin N|all left|right|head [matrix]    unpin N|all        size N w h
-get N    screens    head    state    key code value    scale N s    vrkeyboard show|hide|toggle|close    fullkb 0|1
+get N    screens    head    universe    state    key code value    scale N s    vrkeyboard show|hide|toggle|close    fullkb 0|1
 visibility always|dashboard|gesture|toggle    wrist degrees    gesture left|right degrees
 hide | show | toggle    controllers always|outside_games|dashboard    ingames hide|visible    pause on|off|state
 conceal N|all    reveal N|all    concealed    cutouts on|off|state    cutouts predict on|off    cutouts lead ms

@@ -516,6 +516,31 @@ def check_root_files():
             report("ok", label, "installed, and kept through SteamOS updates")
 
 
+CHAPERONE = os.path.join(HOME, ".config/openvr/config/chaperone_info.vrchap")
+
+
+def check_chaperone():
+    """ft-screens tells a temporary universe from a room by SteamVR's saved universes
+    (screens/universefix.h, DEE-206): each has a universeID and a standing translation and yaw,
+    and the one SteamVR makes after losing the room has standing (0, 1.6, 0), yaw 0."""
+    try:
+        with open(CHAPERONE) as f:
+            universes = json.load(f).get("universes")
+    except (OSError, ValueError) as e:
+        return report("warn", "SteamVR's saved universes", f"{CHAPERONE} unreadable ({e}): screens placed while "
+                      "SteamVR has lost the room jump when it finds it again (DEE-206)")
+    ok = isinstance(universes, list) and universes and all(
+        isinstance(u, dict) and str(u.get("universeID", "")).isdigit()
+        and len((u.get("standing") or {}).get("translation") or []) == 3 and "yaw" in (u.get("standing") or {})
+        for u in universes)
+    if not ok:
+        return report("warn", "SteamVR's saved universes", f"{CHAPERONE} no longer lists each universe's ID and "
+                      "standing as screens/universefix.h reads them (DEE-206)")
+    guessed = sum(1 for u in universes if [round(v, 3) for v in u["standing"]["translation"]] == [0, 1.6, 0]
+                  and abs(u["standing"]["yaw"]) < 1e-4)
+    report("ok", "SteamVR's saved universes", f"{len(universes)}, {guessed} with the guessed floor of a lost room")
+
+
 def check_openvr():
     needs = {}  # interface version: programs built against it
     for path in installed_binaries():
@@ -884,6 +909,7 @@ def main():
     check_versions(versions)
     check_host()
     check_root_files()
+    check_chaperone()
     steamvr_up = run("pgrep", "-x", "vrserver")[0] == 0
     if not steamvr_up:
         report("skip", "SteamVR checks", "SteamVR isn't running")

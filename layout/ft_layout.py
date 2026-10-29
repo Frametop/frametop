@@ -573,9 +573,25 @@ def apply_screens(wait=0):
     return results
 
 
+def check_room(sock):
+    """Refuse while SteamVR has lost the room (DEE-206): in a temporary universe, the screens
+    placed in the room aren't where they are from the head, so a layout saved from the head
+    would put them somewhere else."""
+    try:
+        f = sock.ask("universe").split()
+    except NoAnswer:
+        raise
+    except RuntimeError:
+        return  # an older ft-screens
+    if len(f) > 2 and f[2] == "temporary":
+        raise RuntimeError("SteamVR has lost the room for now (a temporary tracking universe), so the "
+                           "arrangement wasn't saved: try again once tracking has found the room")
+
+
 def capture_screens():
     layout = load_layout()
     sock = screens_socket()
+    check_room(sock)
     f = sock.ask("head").split()
     eye, heading = tuple(map(float, f[1:4])), float(f[4])
     screens = []

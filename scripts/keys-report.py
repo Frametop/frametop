@@ -193,7 +193,7 @@ def main():
     started = run("sh", "-c", "ps -o lstart= -p $(pgrep -x ft-screens | head -1) 2>/dev/null")
     out(f"\n===== Frametop desktop log (last 40 lines; times count from its start, {started or 'not running'})")
     try:
-        with open("/tmp/frametop-screens.log", errors="replace") as f:
+        with open(os.path.expanduser("~/.local/state/frametop/screens.log"), errors="replace") as f:
             lines.extend(ln.rstrip() for ln in f.readlines()[-40:])
     except OSError:
         out("missing")

@@ -20,7 +20,7 @@ test-python:
     set -uo pipefail
     python3 -c 'import PySide6, numpy, cv2, sherpa_onnx' || { echo "python3 can't import PySide6, numpy, cv2, and sherpa_onnx"; exit 1; }
     status=0
-    for t in models/test/*.py commands/test/*.py input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py recorder/tests/*.py gaze/test/*.py gaze/rec/tests/*.py pack/test/*.py voice/test/*.py frunner/test/*.py tour/test/*.py; do
+    for t in models/test/*.py commands/test/*.py input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py recorder/tests/*.py gaze/test/*.py gaze/rec/tests/*.py pack/test/*.py voice/test/*.py frunner/test/*.py tour/test/*.py layout/test/*.py; do
         [ -f "$t" ] || continue
         if python3 "$t" >/dev/null; then echo "$t: ok"; else echo "$t: FAILED"; status=1; fi
     done
@@ -59,6 +59,11 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/trackwatch-test.cpp \
       -o build/tests/trackwatch-test
     build/tests/trackwatch-test >/dev/null && echo "screens/tests/trackwatch-test.cpp: ok"
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/universefix-test.cpp \
+      -o build/tests/universefix-test
+    build/tests/universefix-test >/dev/null && echo "screens/tests/universefix-test.cpp: ok"
+    gcc -std=c11 -Wall -Wextra -Werror screens/tests/logfile-test.c -o build/tests/logfile-test
+    build/tests/logfile-test >/dev/null && echo "screens/tests/logfile-test.c: ok"
 
 # shell scripts: syntax-gate everything that ships. No git: the image has
 # none, and a mounted checkout can trip "dubious ownership" — find lists

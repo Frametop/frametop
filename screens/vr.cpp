@@ -116,6 +116,7 @@
 #include "keyboard.h"
 #include "roomview.h"
 #include "trackwatch.h"
+#include "universefix.h"
 #include "steampanels.h"
 #include "../frunner/reserve.h"
 
@@ -384,6 +385,7 @@ struct Screen {
     long resizeSent = 0;          // g_tick of the last resize request (they're throttled)
     int resizeW = 0, resizeH = 0; // ...and its size
     std::map<int, Sub> subs;
+    uint64_t universe = 0;        // the SteamVR universe it was placed in (0: not known yet; universefix.h)
     // Attention (UpdateAttention): what ft_vr_screen_attention answers, and until when (ms)
     // it stays focused or in view after the last reason for it.
     ft_attention attention = FT_FOCUSED;
@@ -448,6 +450,7 @@ int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
 roomview::Detector g_roomView;   // no cutouts with Room View off
 trackwatch::Watch g_track;       // DEE-206: logs what SteamVR does to standing (trackwatch.h)
+uint64_t g_universe = 0;         // the universe now, read every tick (ft_vr_poll; 0 until read)
 
 // The tracking watch's reads: raw->standing, and with `universe` the universe id too.
 void WatchStanding(const char *why, bool universe) {
@@ -455,9 +458,39 @@ void WatchStanding(const char *why, bool universe) {
     trackwatch::Pose p;
     std::memcpy(p.m, m.m, sizeof p.m);
     g_track.Standing(p, why);
-    if (universe)
-        g_track.Universe(vr::VRSystem()->GetUint64TrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd,
-                                                                         vr::Prop_CurrentUniverseId_Uint64));
+    if (universe && g_universe) g_track.Universe(g_universe);
+}
+
+// DEE-206's fix (universefix.h): universe switches, and each universe's kind.
+universefix::Tracker g_universeTrack;
+std::map<uint64_t, universefix::Kind> g_universeKinds;
+
+// A universe's kind, from SteamVR's saved universes (chaperone_info.vrchap), read again until it's
+// known. scripts/update-check.py checks the file still says what this reads.
+universefix::Kind UniverseKind(uint64_t id) {
+    auto &kind = g_universeKinds[id];
+    if (kind != universefix::Kind::Unknown || id == 0) return kind;
+    std::string text;
+    const char *home = std::getenv("HOME");
+    if (FILE *f = std::fopen((std::string(home ? home : "") + "/.config/openvr/config/chaperone_info.vrchap").c_str(), "r")) {
+        char b[4096];
+        for (size_t n; (n = std::fread(b, 1, sizeof b, f)) > 0;) text.append(b, n);
+        std::fclose(f);
+    }
+    kind = universefix::KindFromChaperone(text, id);
+    std::printf("universe %llu: %s\n", (unsigned long long)id, universefix::KindName(kind));
+    return kind;
+}
+
+// The universe now (a cached read, cheap every tick); 0 if SteamVR has none.
+uint64_t ReadUniverse() {
+    const uint64_t u = vr::VRSystem()->GetUint64TrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd,
+                                                                      vr::Prop_CurrentUniverseId_Uint64);
+    if (u != 0 && u != g_universe) {
+        if (g_universe == 0) UniverseKind(u);   // (logged; a change is, once its jump is known)
+        g_universe = u;
+    }
+    return u;
 }
 handinput::HandInput g_handInput;   // near hand input (handinput.h; UpdateHandInput)
 grabthat::Detector g_grabThat;      // "grab that" (grabthat.h; UpdateGrabThat)
@@ -903,6 +936,9 @@ void RefreshChrome() {
 }
 
 void SetAbsolute(Screen &s, const Mat &pose) {
+    // Placed (not set again where it was): it belongs to the universe now.
+    if (s.universe == 0 || s.pinned != kNone || std::memcmp(&s.pose, &pose, sizeof pose) != 0)
+        s.universe = g_universe ? g_universe : ReadUniverse();   // (before the first tick: panels made at start)
     s.pinned = kNone;
     s.pose = pose;
     vr::VROverlay()->SetOverlayTransformAbsolute(s.overlay, vr::TrackingUniverseStanding, &pose);
@@ -2945,6 +2981,7 @@ struct Front {
     int panel = -1;          // the screen in the slot (-1: empty)
     bool released = false;   // a manual control took it: it's yours until the next stroke puts it home
     Mat home{}, to{};        // where it lives, and where it is in the slot
+    uint64_t homeUniverse = 0;   // the universe it was placed in at home (universefix.h)
     double homeWidth = 0, homeCurve = 0;
     double width = 0;        // its width in the slot (as brought, or as resized there)
     int64_t awaySinceMs = -1, lastTickMs = 0;
@@ -3037,6 +3074,7 @@ void BringReadable(int i, const Mat &to, bool slot, const char *why) {
         g_front = {};
         g_front.panel = i;
         g_front.home = m != g_grabMoves.end() ? m->second.to : now;
+        g_front.homeUniverse = s.universe;
         g_front.homeWidth = m != g_grabMoves.end() ? m->second.w1 : s.metres, g_front.homeCurve = s.curve;
         g_spin.front = i;   // typing and the active window go to it (ft_vr_poll: FT_FRONT)
         SendPointer("recenter");
@@ -4653,6 +4691,7 @@ struct Parked {
     vr::TrackedDeviceIndex_t pinned;
     Mat pinRel;
     bool alone;
+    uint64_t universe;   // where the pose was placed (universefix.h)
 };
 std::map<int, Parked> g_parked;
 
@@ -4685,7 +4724,7 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
         ApplyCurve(s);
         Mat d;
         if (k.pinned != kNone && DevicePose(k.pinned, &d)) Pin(s, k.pinned, k.pinRel);
-        else SetAbsolute(s, k.pose);
+        else SetAbsolute(s, k.pose), s.universe = k.universe;
         s.alone = k.alone;
         g_parked.erase(pk);
         UpdateVisibility();
@@ -4718,7 +4757,7 @@ void ft_vr_screen_destroy(int index) {
     if (g_cutterState == 1) g_cutter.DropPanel(index);
     Mat p;
     const Screen &s = it->second;
-    if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone};
+    if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone, s.universe};
     for (auto o : it->second.All())
         if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
     for (auto &[k, sub] : it->second.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);
@@ -4795,6 +4834,51 @@ void ft_vr_forget(const void *key) {
     g_imports.erase(it);
 }
 
+// A universe change (universefix.h): the panels placed in the one left, if it was temporary, move
+// by standing's jump, so they stay where you saw them, and belong to the new one now. The others
+// stay: SteamVR's restore put the room's back where they were in it.
+void FollowUniverse(const universefix::Switch &sw) {
+    const universefix::Kind from = UniverseKind(sw.from), to = UniverseKind(sw.to);
+    const auto follows = [&](uint64_t u) { return universefix::Follows(u, sw, from); };
+    Mat j;
+    std::memcpy(j.m, sw.jump.m, sizeof j.m);
+    std::string moved, kept;
+    for (auto &[i, s] : g_screens) {
+        if (!follows(s.universe)) continue;
+        // pinned: it rides its device; carried: the carry places it
+        if (sw.moved && s.pinned == kNone && s.drag == Drag::None) {
+            const auto m = g_grabMoves.find(i);
+            if (m != g_grabMoves.end())
+                m->second.from = Mul(j, m->second.from), m->second.to = Mul(j, m->second.to),
+                m->second.lastSet = Mul(j, m->second.lastSet);
+            g_spin.base.erase(i);   // (turning round its old axis: it stays where it is now)
+            if (i == g_front.panel) g_front.to = Mul(j, g_front.to);
+            SetAbsolute(s, Mul(j, s.pose));
+            moved += " " + std::to_string(i + 1);
+        } else {
+            kept += " " + std::to_string(i + 1);
+        }
+        s.universe = sw.to;
+    }
+    if (g_front.panel >= 0 && follows(g_front.homeUniverse)) {
+        if (sw.moved) g_front.home = Mul(j, g_front.home);
+        g_front.homeUniverse = sw.to;
+    }
+    for (auto &[i, k] : g_parked) {
+        if (!follows(k.universe)) continue;
+        if (sw.moved && k.pinned == kNone) k.pose = Mul(j, k.pose);
+        k.universe = sw.to;
+    }
+    char jump[128] = "no head pose around it: jump unknown";
+    if (sw.measured)
+        std::snprintf(jump, sizeof jump, sw.moved ? "standing jumped %.3f m (height %+.3f m), turned %+.1f deg" : "standing didn't jump",
+                      sw.metres, sw.height, sw.turnDeg);
+    std::printf("universe %llu (%s) -> %llu (%s): %s; %s%s%s%s\n", (unsigned long long)sw.from, universefix::KindName(from),
+                (unsigned long long)sw.to, universefix::KindName(to), jump,
+                from != universefix::Kind::Temporary ? "panels placed there stay" : moved.empty() ? "no panel moved" : "moved screen(s)",
+                moved.c_str(), kept.empty() ? "" : "; now belong to the new one, not moved:", kept.c_str());
+}
+
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     if (!g_vr) return;
     RefreshPoses();
@@ -4803,6 +4887,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         const auto &hp = g_poses[vr::k_unTrackedDeviceIndex_Hmd];
         std::memcpy(head.m, hp.mDeviceToAbsoluteTracking.m, sizeof head.m);
         g_track.Head(hp.bPoseIsValid, head, g_tick);
+        // The universe every tick, so a switch's jump can be found to the tick.
+        universefix::Switch sw;
+        if (g_universeTrack.Tick(g_tick, ReadUniverse(), hp.bPoseIsValid, head, &sw)) FollowUniverse(sw);
     }
     // the hands, once per tick, for the cutouts and hand input
     {
@@ -5103,6 +5190,7 @@ void ft_vr_keyboard_hide(void) {
 //                     [12 numbers: device->screen, when pinned]"   (pin: none|left|right|head)
 //   screens       -> "ok <count> <index>:<pixels w>x<h>:<metres> ..."
 //   head          -> "ok x y z yaw"
+//   universe      -> "ok <id> room|temporary|unknown"   SteamVR's universe now (universefix.h)
 //   visibility always|dashboard|gesture|toggle
 //   wrist <degrees>           a pinned screen shows while you see its front within this
 //   gesture <left|right> <degrees>   the gesture mode: look within this of that controller
@@ -5243,6 +5331,10 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         for (auto &[i, s] : g_screens)
             if (len < size && kwin(s))
                 len += std::snprintf(reply + len, size - len, " %d:%dx%d:%.3f", i + 1, s.width, s.height, s.metres);
+    } else if (std::strcmp(cmd, "universe") == 0) {
+        // ft-layout doesn't save where the screens are from the head while this says temporary
+        const uint64_t u = ReadUniverse();
+        std::snprintf(reply, size, "ok %llu %s", (unsigned long long)u, universefix::KindName(UniverseKind(u)));
     } else if (std::strncmp(cmd, "head", 4) == 0) {
         Mat m;
         if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &m))

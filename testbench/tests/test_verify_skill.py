@@ -75,7 +75,8 @@ class VerifySkillTests(unittest.TestCase):
         for name, value in (('bench', bench), ('ask', ask), ('LOCK', tmp / 'lock.json'), ('EVIDENCE', tmp / 'verify'),
                             ('listening', lambda: set(self.heard)), ('running', lambda name: True),
                             ('unit_states', lambda: dict(self.units)), ('git', lambda *args: 'abc1234'),
-                            ('RELEASES', tmp / 'releases'), ('SETTLE_GAP', 0)):
+                            ('RELEASES', tmp / 'releases'), ('SETTLE_GAP', 0),
+                            ('RUNTIME', tmp)):   # (the claim file: CI's root has no /run/user/0)
             patch = mock.patch.object(self.v, name, value)
             patch.start()
             self.addCleanup(patch.stop)

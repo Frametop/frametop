@@ -120,6 +120,7 @@ struct Switch {
     bool moved = false;        // ...and standing jumped (else `jump` is the identity)
     Pose jump = Identity();    // old standing -> new standing
     double metres = 0, height = 0, turnDeg = 0;
+    long lag = 0;              // ticks the universe read changed after standing jumped (logged)
 };
 
 // Whether a panel placed in `placedIn` follows a switch: moves by its jump and counts as placed
@@ -131,8 +132,10 @@ inline bool Follows(uint64_t placedIn, const Switch &sw, Kind fromKind) {
 class Tracker {
 public:
     // Ticks either side of the switch whose head steps may hold the jump. The universe is read
-    // after the poses, so the jump can land a tick either side of where the switch shows.
-    int window = 3;
+    // after the poses, so the jump can land a tick either side of where the switch shows, or more
+    // if SteamVR updates the universe property a little after standing (not seen yet: `lag` in
+    // the log shows it).
+    int window = 6;
     // A step this far off the head's motion is a jump; less is the head moving unevenly.
     double minJump = 0.02, minTurnDeg = 1.5;
 
@@ -156,8 +159,6 @@ public:
         return true;
     }
 
-    uint64_t universe() const { return universe_; }
-
 private:
     struct Sample {
         long tick;
@@ -178,6 +179,7 @@ private:
     void Measure(Switch *sw) const {
         struct Step {
             double from[3], to[3], turn, ticks;
+            long at;
         };
         std::vector<Step> steps;
         const Sample *b = nullptr;
@@ -186,7 +188,7 @@ private:
             if (b && c.tick - b->tick <= window) {   // (a longer gap: the head may have moved)
                 Step s;
                 Position(b->head, s.from), Position(c.head, s.to);
-                s.turn = TurnBetween(b->head, c.head), s.ticks = double(c.tick - b->tick);
+                s.turn = TurnBetween(b->head, c.head), s.ticks = double(c.tick - b->tick), s.at = c.tick;
                 steps.push_back(s);
             }
             b = &c;
@@ -215,6 +217,7 @@ private:
             sw->jump = sw->moved ? Jump(turn, from, s.to) : Identity();
             sw->metres = sw->moved ? d : 0, sw->height = sw->moved ? s.to[1] - from[1] : 0;
             sw->turnDeg = sw->moved ? deg : 0;
+            sw->lag = sw->moved ? switchTick_ - s.at : 0;
         }
     }
 };

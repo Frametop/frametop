@@ -361,6 +361,7 @@ noise='container (exec|exec_died|init|start|died|attach|cleanup)'
 since=$(date '+%F %T')
 screens_log=$HOME/.local/state/frametop/screens.log
 start=$(wc -l < "$screens_log" 2>/dev/null || echo 0)
+start_inode=$(stat -c %i "$screens_log" 2>/dev/null)
 printf '\n===== Watched %s for %s s from %s\n' "${areas//,/, }" "$seconds" "$since"
 if [ -f "$repo/scripts/report-watch.py" ]; then
   python3 -I "$repo/scripts/report-watch.py" "$seconds" "$areas"
@@ -380,7 +381,12 @@ if has system; then
 fi
 if has desktop; then
   printf '\n===== ft-screens log while watching\n'
-  tail -n +"$((start + 1))" "$screens_log" 2>/dev/null | tail -n 300
+  if [ -n "$start_inode" ] && [ "$(stat -c %i "$screens_log" 2>/dev/null)" != "$start_inode" ]; then
+    # rotated while watching (screens/logfile.h): the rest of the old one, then the new one
+    { tail -n +"$((start + 1))" "$screens_log.1"; cat "$screens_log"; } 2>/dev/null | tail -n 300
+  else
+    tail -n +"$((start + 1))" "$screens_log" 2>/dev/null | tail -n 300
+  fi
   log "input relay" frametop-input-relay
   log "pointer helper" frametop-pointer
 fi

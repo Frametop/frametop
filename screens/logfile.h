@@ -17,7 +17,7 @@
 #define FT_LOG_CAP (8L * 1024 * 1024)
 #define FT_LOG_KEEP 2
 
-// PATH past `cap` bytes: PATH.(keep-1) -> PATH.keep, ..., PATH -> PATH.1. 1 if it rotated.
+// PATH past `cap` bytes: PATH.(keep-1) -> PATH.keep, ..., PATH -> PATH.1 (keep >= 1). 1 if it rotated.
 static inline int ft_log_rotate(const char *path, long cap, int keep) {
     struct stat st;
     if (stat(path, &st) != 0 || st.st_size <= cap) return 0;
@@ -28,7 +28,7 @@ static inline int ft_log_rotate(const char *path, long cap, int keep) {
         rename(from, to);  // (missing: nothing to move)
     }
     snprintf(to, sizeof to, "%s.1", path);
-    return keep >= 1 ? rename(path, to) == 0 : unlink(path) == 0;
+    return rename(path, to) == 0;
 }
 
 // stdout and stderr to PATH, appended to (what's buffered goes to the old file first). 0 if done.

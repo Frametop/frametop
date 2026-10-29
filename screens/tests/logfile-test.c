@@ -48,6 +48,9 @@ int main(void) {
     const long cap = 100;
 
     check("no log yet: nothing to rotate", !ft_log_rotate(log, cap, 2));
+    fill(log, "", 99);
+    check("exactly at the cap: kept", !ft_log_rotate(log, cap, 2) && size_of(log) == cap);
+    unlink(log);
     fill(log, "first run", 50);
     check("under the cap: kept as it is", !ft_log_rotate(log, cap, 2) && size_of(log) == 51);
     check("stdout goes to it, appended", ft_log_open(log) == 0);

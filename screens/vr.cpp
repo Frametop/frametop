@@ -465,9 +465,11 @@ void WatchStanding(const char *why, bool universe) {
 universefix::Tracker g_universeTrack;
 std::map<uint64_t, universefix::Kind> g_universeKinds;
 
-// A universe's kind, from SteamVR's saved universes (chaperone_info.vrchap), read again until it's
-// known. scripts/update-check.py checks the file still says what this reads.
+// A universe's kind, from SteamVR's saved universes (chaperone_info.vrchap): read when it's first
+// seen, and (ft_vr_poll) again every second or so until it's known, so the one a switch leaves is
+// known by then. scripts/update-check.py checks the file still says what this reads.
 universefix::Kind UniverseKind(uint64_t id) {
+    const bool seen = g_universeKinds.count(id);
     auto &kind = g_universeKinds[id];
     if (kind != universefix::Kind::Unknown || id == 0) return kind;
     std::string text;
@@ -478,7 +480,8 @@ universefix::Kind UniverseKind(uint64_t id) {
         std::fclose(f);
     }
     kind = universefix::KindFromChaperone(text, id);
-    std::printf("universe %llu: %s\n", (unsigned long long)id, universefix::KindName(kind));
+    if (!seen || kind != universefix::Kind::Unknown)
+        std::printf("universe %llu: %s\n", (unsigned long long)id, universefix::KindName(kind));
     return kind;
 }
 
@@ -487,8 +490,8 @@ uint64_t ReadUniverse() {
     const uint64_t u = vr::VRSystem()->GetUint64TrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd,
                                                                       vr::Prop_CurrentUniverseId_Uint64);
     if (u != 0 && u != g_universe) {
-        if (g_universe == 0) UniverseKind(u);   // (logged; a change is, once its jump is known)
         g_universe = u;
+        UniverseKind(u);
     }
     return u;
 }
@@ -935,9 +938,12 @@ void RefreshChrome() {
     }
 }
 
-void SetAbsolute(Screen &s, const Mat &pose) {
-    // Placed (not set again where it was): it belongs to the universe now.
-    if (s.universe == 0 || s.pinned != kNone || std::memcmp(&s.pose, &pose, sizeof pose) != 0)
+// Placed, it belongs to `universe` (universefix.h): 0 for the one now, unless it's set again where
+// it was. Moves that carry on from where it was (a resize keeping a corner, a roll, a spin, an
+// animation to where it was headed) pass the universe their poses are in.
+void SetAbsolute(Screen &s, const Mat &pose, uint64_t universe = 0) {
+    if (universe) s.universe = universe;
+    else if (s.universe == 0 || s.pinned != kNone || std::memcmp(&s.pose, &pose, sizeof pose) != 0)
         s.universe = g_universe ? g_universe : ReadUniverse();   // (before the first tick: panels made at start)
     s.pinned = kNone;
     s.pose = pose;
@@ -1402,7 +1408,7 @@ void ApplyRoll(Screen &s, double rad) {
     const double tilt = std::asin(std::clamp(double(p.m[1][0]), -1.0, 1.0));  // the right edge's slope
     if (std::fabs(tilt) < kRollSnap * M_PI / 180) rad -= tilt;
     if (pinned) Pin(s, s.pinned, Mul(s.rollFrom, RollZ(rad)));
-    else SetAbsolute(s, Mul(base, RollZ(rad)));
+    else SetAbsolute(s, Mul(base, RollZ(rad)), s.universe);
 }
 
 // The laser's angle around the screen's centre, in the frame of its pose at the press.
@@ -1679,7 +1685,7 @@ void ResizeScreen(Screen &s, double cu, double cv) {
     vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
     ApplyCurve(s);
     if (s.pinned != kNone) Pin(s, s.pinned, Mul(s.pinRel, moved));
-    else SetAbsolute(s, Mul(p, moved));
+    else SetAbsolute(s, Mul(p, moved), s.universe);
 }
 
 void UpdateDrag(Screen &s, int index) {
@@ -1798,7 +1804,7 @@ void SetFloat(Screen &s, double mpp, int x, int y, int w, int h, int title) {
     const double dx = -kx * (s.metres - oldW) / 2, dy = -ky * (s.heightMetres() - oldH) / 2;
     if (!first && (std::fabs(dx) > 1e-6 || std::fabs(dy) > 1e-6)) {
         if (s.pinned != kNone) Pin(s, s.pinned, Mul(s.pinRel, Translation(dx, dy, 0)));
-        else SetAbsolute(s, Mul(s.pose, Translation(dx, dy, 0)));
+        else SetAbsolute(s, Mul(s.pose, Translation(dx, dy, 0)), s.universe);
     } else {
         PlaceChrome(s);
     }
@@ -2048,7 +2054,7 @@ void UpdateSpin() {
             it = g_spin.base.erase(it);  // grabbed, pinned, or gone: it stays where it is now
             continue;
         }
-        SetAbsolute(s->second, Turned(it->second, a, g_spin.cx, g_spin.cz));
+        SetAbsolute(s->second, Turned(it->second, a, g_spin.cx, g_spin.cz), s->second.universe);
         ++it;
     }
     if (done) {
@@ -2951,16 +2957,19 @@ struct GrabMove {
     int64_t startMs = 0;
     double ms = 0;          // how long (0: grab that's animMs)
     bool easeOut = false;   // a throw: fast, then slowing (else grab that's smoothstep)
+    uint64_t universe = 0;  // the universe `to` is in (universefix.h; 0: the one now)
 };
 std::map<int, GrabMove> g_grabMoves;   // panels on their way
 double Apart(const Mat &a, const Mat &b) {
     return std::hypot(a.m[0][3] - b.m[0][3], a.m[1][3] - b.m[1][3], a.m[2][3] - b.m[2][3]);
 }
 
-void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms = 0, bool easeOut = false) {
+void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms = 0, bool easeOut = false,
+                   uint64_t universe = 0) {
     Mat p;
     if (!ScreenPose(s, &p)) return;
-    g_grabMoves[index] = {p, to, p, s.metres, s.floating ? s.metres : width, NowMs(), ms, easeOut};
+    g_grabMoves[index] = {p, to, p, s.metres, s.floating ? s.metres : width, NowMs(), ms, easeOut,
+                          universe ? universe : g_universe};
 }
 
 // ---------------------------------------------------------------- the front slot
@@ -3052,7 +3061,8 @@ void FrontHome(const char *why) {
     if (it != g_screens.end()) {
         std::printf("front: screen %d goes home (%s)\n", g_front.panel + 1, why);
         it->second.curve = g_front.homeCurve;
-        StartGrabMove(g_front.panel, it->second, g_front.home, g_front.homeWidth);
+        // (home in the universe it was placed in: one in the room stays the room's)
+        StartGrabMove(g_front.panel, it->second, g_front.home, g_front.homeWidth, 0, false, g_front.homeUniverse);
     }
     g_front = {};
 }
@@ -3232,7 +3242,7 @@ void AnimateGrabMoves() {
             ApplyCurve(s);
         }
         m.lastSet = grabthat::Blend(m.from, m.to, t);
-        SetAbsolute(s, m.lastSet);
+        SetAbsolute(s, m.lastSet, m.universe);
         if (t < 1) {
             ++it;
             continue;
@@ -4844,20 +4854,21 @@ void FollowUniverse(const universefix::Switch &sw) {
     std::memcpy(j.m, sw.jump.m, sizeof j.m);
     std::string moved, kept;
     for (auto &[i, s] : g_screens) {
-        if (!follows(s.universe)) continue;
+        // One on its way is in the universe it's headed to in.
+        const auto m = g_grabMoves.find(i);
+        GrabMove *move = m != g_grabMoves.end() ? &m->second : nullptr;
+        if (!follows(move ? move->universe : s.universe)) continue;
         // pinned: it rides its device; carried: the carry places it
         if (sw.moved && s.pinned == kNone && s.drag == Drag::None) {
-            const auto m = g_grabMoves.find(i);
-            if (m != g_grabMoves.end())
-                m->second.from = Mul(j, m->second.from), m->second.to = Mul(j, m->second.to),
-                m->second.lastSet = Mul(j, m->second.lastSet);
+            if (move) move->from = Mul(j, move->from), move->to = Mul(j, move->to), move->lastSet = Mul(j, move->lastSet);
             g_spin.base.erase(i);   // (turning round its old axis: it stays where it is now)
             if (i == g_front.panel) g_front.to = Mul(j, g_front.to);
-            SetAbsolute(s, Mul(j, s.pose));
+            SetAbsolute(s, Mul(j, s.pose), sw.to);
             moved += " " + std::to_string(i + 1);
         } else {
             kept += " " + std::to_string(i + 1);
         }
+        if (move) move->universe = sw.to;
         s.universe = sw.to;
     }
     if (g_front.panel >= 0 && follows(g_front.homeUniverse)) {
@@ -4871,8 +4882,9 @@ void FollowUniverse(const universefix::Switch &sw) {
     }
     char jump[128] = "no head pose around it: jump unknown";
     if (sw.measured)
-        std::snprintf(jump, sizeof jump, sw.moved ? "standing jumped %.3f m (height %+.3f m), turned %+.1f deg" : "standing didn't jump",
-                      sw.metres, sw.height, sw.turnDeg);
+        std::snprintf(jump, sizeof jump,
+                      sw.moved ? "standing jumped %.3f m (height %+.3f m), turned %+.1f deg, lag %ld tick(s)" : "standing didn't jump",
+                      sw.metres, sw.height, sw.turnDeg, sw.lag);
     std::printf("universe %llu (%s) -> %llu (%s): %s; %s%s%s%s\n", (unsigned long long)sw.from, universefix::KindName(from),
                 (unsigned long long)sw.to, universefix::KindName(to), jump,
                 from != universefix::Kind::Temporary ? "panels placed there stay" : moved.empty() ? "no panel moved" : "moved screen(s)",
@@ -4890,6 +4902,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         // The universe every tick, so a switch's jump can be found to the tick.
         universefix::Switch sw;
         if (g_universeTrack.Tick(g_tick, ReadUniverse(), hp.bPoseIsValid, head, &sw)) FollowUniverse(sw);
+        else if (g_tick % 90 == 0) UniverseKind(g_universe);   // (read again while it's unknown)
     }
     // the hands, once per tick, for the cutouts and hand input
     {

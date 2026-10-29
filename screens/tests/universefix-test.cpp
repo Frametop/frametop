@@ -95,6 +95,13 @@ int main() {
     check("a guessed floor moved by a recenter is a room",
           KindFromChaperone(R"({"universes":[{"standing":{"translation":[0.2,1.6,0],"yaw":0},"universeID":"5"}]})", 5) ==
               Kind::Room);
+    const auto standing = [](const char *t) {
+        return KindFromChaperone(std::string(R"({"universes":[{"universeID":"5","standing":)") + t + "}]}", 5);
+    };
+    check("a floor 5 cm off the guess is a room", standing(R"({"translation":[0,1.55,0],"yaw":0})") == Kind::Room);
+    check("the guess turned a little is a room", standing(R"({"translation":[0,1.6,0],"yaw":0.01})") == Kind::Room);
+    check("the guess as SteamVR writes it (float noise) is temporary",
+          standing(R"({"translation":[0.0000001,1.60000002,-0.0000001],"yaw":0.000001})") == Kind::Temporary);
     check("ids written as numbers count too",
           KindFromChaperone(R"({"universes":[{"universeID":5,"standing":{"translation":[0,1.6,0],"yaw":0}}]})", 5) ==
               Kind::Temporary);
@@ -126,6 +133,24 @@ int main() {
         Tracker u;
         run(u, j, 39, 40, 60, &sw);
         check("...and a tick before", sw.moved && apart(sw.jump, j) < 0.005);
+        Tracker v;
+        run(v, j, 35, 40, 60, &sw);
+        check("...and when the universe shows 5 ticks late, with its lag", sw.moved && apart(sw.jump, j) < 0.005 && sw.lag == 5);
+        Tracker w;
+        run(w, j, 30, 40, 60, &sw);
+        check("a jump well before the switch isn't taken for its own", sw.measured && !sw.moved);
+    }
+    {
+        // the head seen for only 2 steps around it: no motion to take off, the jump still found
+        Tracker t;
+        Switch sw;
+        int n = 0;
+        for (long k = 0; k < 60; ++k) {
+            Pose h = head(0.1, 1.07, -0.2, 10, -20);
+            if (k >= 40) h = Mul(j, h);
+            n += t.Tick(k, k < 40 ? kGuess : kRoom, k >= 39 && k <= 41, h, &sw);
+        }
+        check("under three steps of head: the jump still measured", n == 1 && sw.moved && apart(sw.jump, j) < 0.005);
     }
     {
         Tracker t;
@@ -153,7 +178,8 @@ int main() {
         }
         check("two switches before the first settles: one, from the first to the last",
               n == 1 && sw.from == kRoom && sw.to == kGuess);
-        check("an unread universe (0) isn't a switch", !t.Tick(20, 0, true, h, &sw) && t.universe() == kGuess);
+        check("an unread universe (0) isn't a switch", !t.Tick(20, 0, true, h, &sw) &&
+                                                           [&] { for (long k = 21; k < 40; ++k) if (t.Tick(k, kGuess, true, h, &sw)) return false; return true; }());
     }
 
     // which panels follow

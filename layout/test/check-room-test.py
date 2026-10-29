@@ -60,7 +60,7 @@ except ft_layout.NoAnswer:
 
 # capture asks before it reads anything else
 calls = []
-real = ft_layout.screens_socket
+real = {name: getattr(ft_layout, name) for name in ("screens_socket", "load_layout", "save_layout")}
 ft_layout.screens_socket = lambda: Fake("ok 4396560858472634643 temporary")
 ft_layout.load_layout = lambda: calls.append("load") or {"screens": []}
 ft_layout.save_layout = lambda layout: calls.append("save")
@@ -69,8 +69,10 @@ try:
     check("capture in a temporary universe raises", False)
 except RuntimeError:
     check("capture in a temporary universe raises", True)
+finally:
+    for name, f in real.items():
+        setattr(ft_layout, name, f)
 check("...and saves nothing", "save" not in calls)
-ft_layout.screens_socket = real
 
 print("all passed" if not failed else f"{failed} failed")
 sys.exit(1 if failed else 0)

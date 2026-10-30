@@ -125,7 +125,8 @@ def parser():
                       help='fake the wearer even while a remote display streams from a host that lends '
                            'Frametop its keyboard and mouse: it takes them. Only once the user allows it')
     commands.add_parser('host-input', help='live streams from hosts that lend their keyboard and mouse, '
-                                           'and the fake-worn flag')
+                                           'the fake-worn flag, who holds each host\'s input lock and '
+                                           'ft-stream\'s last hostinput log lines')
     button = commands.add_parser('hmd-button', help="override one of the HMD's own buttons; status lists them")
     button.add_argument('path', type=hmd_button_path, help='component path, such as /input/system/click')
     button.add_argument('state', choices=('on', 'off', 'physical'))
@@ -300,7 +301,7 @@ def dispatch(args, bench):
             hostinput.clear_flag()
             raise
     if args.command == 'host-input':
-        return dict(hostinput.state(), ok=True)
+        return dict(hostinput.state(detail=True), ok=True)
     if args.command == 'hmd-button':
         if args.state == 'physical':
             return bench.control('hmd-button-release ' + args.path)

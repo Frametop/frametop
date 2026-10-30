@@ -1,6 +1,7 @@
 """The host-input guard (frame_testbench.hostinput, and the CLI's worn): a faked wearer must not
 take a streamed host's keyboard and mouse unless the user allows it. No headset needed."""
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -71,6 +72,31 @@ class HostInputTests(Fixture):
         self.assertEqual([s['name'] for s in st['input_streams']], ['oma7'])
         self.assertIn('oma7', hostinput.refusal(st))
 
+    def test_locks_say_which_host_lock_is_held_without_taking_it(self):
+        held, free = self.run / 'frametop-input-192.168.1.61.lock', self.run / 'frametop-input-192.168.1.93.lock'
+        held.touch(), free.touch()
+        with open(held) as f:
+            fcntl.flock(f, fcntl.LOCK_EX)   # as ft-stream holds it: read back from the real /proc/locks
+            found = {lk['host']: lk for lk in hostinput.locks()}
+            self.assertEqual(found['192.168.1.61'], {'host': '192.168.1.61', 'held': True, 'pid': os.getpid()})
+            self.assertEqual(found['192.168.1.93'], {'host': '192.168.1.93', 'held': False, 'pid': None})
+        self.assertFalse(hostinput.locks()[0]['held'])
+        (self.proc / 'locks').write_text('1: FLOCK  ADVISORY  WRITE 7 00:00:1 0 EOF\nnot a lock line\n')
+        self.assertEqual([lk['held'] for lk in hostinput.locks(self.proc)], [False, False])
+        self.assertEqual(hostinput.locks(self.tmp / 'no-proc')[0]['held'], False)
+
+    def test_log_lines_keep_only_the_last_hostinput_lines(self):
+        (self.run / 'frametop-remote-105.log').write_text(
+            'stream: connected\n' + ''.join(f'hostinput: line {i}\n' for i in range(30)) + 'shown: in 30 fps\n')
+        (self.run / 'frametop-remote-106.log').write_text('stream: connected\n')
+        logs = hostinput.log_lines()
+        self.assertEqual([lg['log'] for lg in logs], ['frametop-remote-105.log'])
+        self.assertEqual(logs[0]['lines'], [f'hostinput: line {i}' for i in range(10, 30)])
+        self.assertNotIn('locks', hostinput.state(self.layout, self.proc))
+        detail = hostinput.state(self.layout, self.proc, detail=True)
+        self.assertEqual(detail['logs'], logs)
+        self.assertEqual(detail['locks'], [])
+
     def test_flag_round_trip_and_garbled_flag_is_not_an_allow(self):
         self.assertIsNone(hostinput.read_flag())
         hostinput.set_flag(True, 5.0)
@@ -101,7 +127,7 @@ class WornGuardTests(Fixture):
         super().setUp()
         self.bench = Bench(self.run)
         real = hostinput.state
-        patch = mock.patch.object(hostinput, 'state', lambda: real(self.layout, self.proc))
+        patch = mock.patch.object(hostinput, 'state', lambda detail=False: real(self.layout, self.proc, detail))
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -163,6 +189,7 @@ class WornGuardTests(Fixture):
         self.assertTrue(reply['ok'])
         self.assertEqual(reply['input_streams'][0]['id'], 'frametop-oma7-dp-2')
         self.assertIsNone(reply['fake_worn'])
+        self.assertEqual((reply['locks'], reply['logs']), ([], []))
 
 
 if __name__ == '__main__':

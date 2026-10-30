@@ -141,7 +141,7 @@ class CliTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         for patch in (mock.patch.dict('os.environ', {'XDG_RUNTIME_DIR': tmp.name}),
-                      mock.patch.object(hostinput, 'state', lambda: {
+                      mock.patch.object(hostinput, 'state', lambda detail=False: {
                           'input_hosts': [], 'input_streams': [], 'fake_worn': hostinput.read_flag()})):
             patch.start()
             self.addCleanup(patch.stop)

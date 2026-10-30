@@ -166,6 +166,7 @@ class VerifySkillTests(unittest.TestCase):
         self.assertEqual(folder.name, '2-after-pinch')
         readbacks = json.loads((folder / 'readbacks.json').read_text())
         self.assertEqual(readbacks['gaze'], {'last': [1, 2]})
+        self.assertEqual(readbacks['host_input']['input_hosts'], ['oma7'])   # who could lend input
         self.assertGreater(self.v.LOCK.stat().st_mtime, old + 50)
         self.assertNotIn(('capture', '--output', str(folder / 'capture')), self.sent)
         self.run_main('snapshot', '--capture', '3')

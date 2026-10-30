@@ -81,11 +81,57 @@ def streams(proc='/proc'):
     return found
 
 
-def state(layout=LAYOUT, proc='/proc'):
-    """What a faked wearer would take: the live streams to hosts that lend their input."""
+def locks(proc='/proc'):
+    """Each host's input lock (ft-stream's $XDG_RUNTIME_DIR/frametop-input-HOST.lock):
+    [{host, held, pid}], read from PROC/locks so looking takes nothing."""
+    held = {}
+    try:
+        for line in Path(proc, 'locks').read_text().splitlines():
+            f = line.split()   # 1: FLOCK ADVISORY WRITE PID MAJ:MIN:INODE START END
+            if len(f) >= 6 and f[1] == 'FLOCK' and f[3] == 'WRITE':
+                held[f[5]] = int(f[4])
+    except (OSError, ValueError):
+        pass
+    found = []
+    for path in sorted(runtime_dir().glob('frametop-input-*.lock')):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        key = f'{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}'
+        found.append({'host': path.name[len('frametop-input-'):-len('.lock')], 'held': key in held,
+                      'pid': held.get(key)})
+    return found
+
+
+def log_lines(keep=20):
+    """The last KEEP `hostinput:` lines of each remote display's ft-stream log
+    ($XDG_RUNTIME_DIR/frametop-remote-N.log, which has no timestamps: its mtime says when it last
+    wrote)."""
+    found = []
+    for path in sorted(runtime_dir().glob('frametop-remote-*.log')):
+        try:
+            with open(path, 'rb') as f:
+                f.seek(max(0, f.seek(0, os.SEEK_END) - 65536))
+                tail = f.read().decode(errors='replace').splitlines()
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        lines = [ln for ln in tail if ln.startswith('hostinput: ')][-keep:]
+        if lines:
+            found.append({'log': path.name, 'mtime': round(mtime, 3), 'lines': lines})
+    return found
+
+
+def state(layout=LAYOUT, proc='/proc', detail=False):
+    """What a faked wearer would take: the live streams to hosts that lend their input. With
+    DETAIL, also who holds each host's input lock and what ft-stream logged about leases."""
     hosts = input_hosts(layout)
     live = [dict(s, name=hosts[s['host']]) for s in streams(proc) if s['host'] in hosts]
-    return {'input_hosts': sorted(hosts.values()), 'input_streams': live, 'fake_worn': read_flag()}
+    st = {'input_hosts': sorted(hosts.values()), 'input_streams': live, 'fake_worn': read_flag()}
+    if detail:
+        st.update(locks=locks(proc), logs=log_lines())
+    return st
 
 
 def refusal(st):

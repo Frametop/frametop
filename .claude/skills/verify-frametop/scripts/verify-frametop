@@ -16,8 +16,9 @@
                                        allowed to take them)
   verify-frametop snapshot LABEL [--capture]
                                        guard, then the run's readbacks (testbench status, pointer
-                                       state, visible overlays, display power, the gaze service)
-                                       into RUN/LABEL/, and with --capture a compositor capture
+                                       state, visible overlays, display power, the gaze service,
+                                       host input: streams, input lock holders, ft-stream's
+                                       hostinput log lines) into RUN/LABEL/, and with --capture a compositor capture
                                        (needs `worn on` and a head pose facing the panels)
   verify-frametop cleanup [RUN] [--force]
                                        release every testbench override, compositor auto,
@@ -271,7 +272,8 @@ def readbacks():
         overlays = {'ok': True, 'visible': [o['key'] for o in overlays['overlays'].get('list', []) if o.get('visible')]}
     return {'time': datetime.now(timezone.utc).isoformat(timespec='milliseconds'),
             'testbench': bench('status', timeout=20), 'pointer': bench('pointer', 'state', timeout=20),
-            'overlays': overlays, 'power': bench('power', 'status', timeout=20), 'gaze': gaze}
+            'overlays': overlays, 'power': bench('power', 'status', timeout=20), 'gaze': gaze,
+            'host_input': host_input()}
 
 
 def write_json(path, value):

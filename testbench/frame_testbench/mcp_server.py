@@ -162,7 +162,8 @@ def create_server(config: Config, *, runner=run_cli):
     @server.tool()
     async def host_input() -> CallToolResult:
         """Read which live remote displays stream from hosts that lend their keyboard and mouse,
-        and whether the testbench is faking the wearer (the flag ft-stream checks)."""
+        whether the testbench is faking the wearer (the flag ft-stream checks), which stream holds
+        each host's input lock, and the last `hostinput:` lines of each stream's log."""
         return await execute(['host-input'])
 
     @server.tool()

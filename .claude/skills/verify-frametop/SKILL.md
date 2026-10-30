@@ -137,8 +137,12 @@ Details: `testbench/README.md`, `testbench/docs/controller-inputs.md`,
 
 `V snapshot LABEL [--capture]` writes `RUN/LABEL/readbacks.json`: `T status` (overrides and the
 real sensors), `T pointer state` (head pose, gaze mode, worn), the visible overlays
-(`T pointer overlays`), `T power status`, and the gaze service's status (`@ft_gazed`). With
-`--capture`, also `RUN/LABEL/capture/` (`preview.png`, `stereo.png`, `result.json`): the
+(`T pointer overlays`), `T power status`, the gaze service's status (`@ft_gazed`), and
+`T host-input`: streams from hosts that lend their keyboard and mouse, the fake-worn flag, which
+process holds each host's input lock (`$XDG_RUNTIME_DIR/frametop-input-HOST.lock`, read from
+`/proc/locks`), and the last `hostinput:` lines of each stream's log
+(`$XDG_RUNTIME_DIR/frametop-remote-N.log`, no timestamps; its `mtime` is the last write). The
+host's own log (Vibepollo) isn't read: that needs the host. With `--capture`, also `RUN/LABEL/capture/` (`preview.png`, `stereo.png`, `result.json`): the
 compositor's view, which needs `worn on` and a head pose facing the panels.
 
 Proof standards:

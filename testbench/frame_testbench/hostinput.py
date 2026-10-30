@@ -182,20 +182,47 @@ def guard(layout=LAYOUT, poll=GUARD_POLL, release=None):
             time.sleep(poll)
             if (read_flag() or {}).get('pid') != os.getpid():
                 return 0
-            busy = take_locks(input_hosts(layout), held)
+            try:
+                busy = take_locks(input_hosts(layout), held)
+            except Exception as error:   # a lock it can't take is one it doesn't hold
+                busy = [f'(unreadable: {error})']
             if busy:
                 print('a stream holds the input lock of ' + ' '.join(busy) + ': releasing the wearer', flush=True)
                 break
         if (read_flag() or {}).get('pid') == os.getpid():
-            try:
-                (release or release_wearer)()
-            except OSError:
-                pass   # no input proxy: nothing fakes the wearer
-            clear_flag()
+            drop_wearer(release)
         return 0
     finally:
         for fd in held.values():
             os.close(fd)
+
+
+def drop_wearer(release=None):
+    """Release the faked wearer, then FLAG. If the input proxy is there and won't say it let go,
+    FLAG stays, so the guard unit's ExecStopPost (after_guard) and the next testbench command try
+    again: FLAG gone with the wearer still faked would leave nothing to notice."""
+    for _ in range(3):
+        try:
+            (release or release_wearer)()
+            break
+        except (FileNotFoundError, ConnectionRefusedError):
+            break   # no input proxy: nothing fakes the wearer
+        except Exception:
+            time.sleep(0.2)
+    else:
+        return False
+    clear_flag()
+    return True
+
+
+def after_guard(release=None):
+    """The guard unit's ExecStopPost: however the guard ended (killed, out of memory), a wearer
+    it left faked goes."""
+    flag = read_flag()
+    if flag and flag.get('allow_host_input') is False and not guard_alive(flag):
+        print("the guard has gone: releasing the wearer", flush=True)
+        drop_wearer(release)
+    return 0
 
 
 def release_wearer():
@@ -203,14 +230,19 @@ def release_wearer():
     Bench().control('worn-release')
 
 
-def start_guard(timeout=5.0):
+def start_guard(timeout=5.0, socket=None):
     """Start the guard as its own user unit (an agent's shell may be killed with all it started)
     and wait till it holds the locks and wrote FLAG. Its pid, or raises with why it couldn't."""
     package = Path(__file__).resolve().parent.parent
     subprocess.run(['systemctl', '--user', 'stop', GUARD_UNIT], capture_output=True, timeout=20)
     clear_flag()
+    env = [f'--setenv=XDG_RUNTIME_DIR={runtime_dir()}']
+    socket = socket or os.environ.get('FRAME_TESTBENCH_SOCKET')
+    if socket:
+        env.append(f'--setenv=FRAME_TESTBENCH_SOCKET={socket}')   # the wearer it releases is that proxy's
     done = subprocess.run(['systemd-run', '--user', '--collect', '--quiet', f'--unit={GUARD_UNIT}',
-                           f'--working-directory={package}', f'--setenv=XDG_RUNTIME_DIR={runtime_dir()}',
+                           f'--working-directory={package}', *env,
+                           f'--property=ExecStopPost={sys.executable} -m frame_testbench.hostinput after-guard',
                            sys.executable, '-m', 'frame_testbench.hostinput', 'guard'],
                           capture_output=True, text=True, timeout=20)
     if done.returncode:
@@ -263,3 +295,5 @@ def refusal(st):
 
 if __name__ == '__main__' and sys.argv[1:2] == ['guard']:
     sys.exit(guard(*sys.argv[2:3]))   # a layout path only in tests
+if __name__ == '__main__' and sys.argv[1:2] == ['after-guard']:
+    sys.exit(after_guard())

@@ -16,7 +16,10 @@ class CliTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         for patch in (mock.patch.dict('os.environ', {'XDG_RUNTIME_DIR': tmp.name}),
-                      mock.patch.object(hostinput, 'start_guard', mock.Mock(return_value=1))):
+                      # a guard that took the locks and wrote the flag naming itself
+                      mock.patch.object(hostinput, 'start_guard',
+                                        mock.Mock(side_effect=lambda socket=None: hostinput.set_flag(False, 1.0))),
+                      mock.patch.object(hostinput, 'guard_alive', mock.Mock(return_value=True))):
             patch.start()
             self.addCleanup(patch.stop)
 

@@ -187,6 +187,7 @@ def moved(a, b):
 def worn_now():
     """The proximity sensor's reading (True, False, None unread) past its blips, and the status."""
     status = bench('status', timeout=20)
+    released = status.get('worn_released')   # the testbench dropped a faked wearer whose guard had gone
     proxy = status.get('input') or {}
     if proxy.get('physical_worn') is not True:
         return proxy.get('physical_worn'), status
@@ -205,6 +206,8 @@ def worn_now():
             return True, status
         if still_in_row >= STILL_READS:
             status['blip'] = True   # for the reader: the sensor blinked, the headset lay still
+            if released:
+                status['worn_released'] = released
             return False, status
     return True, status   # flapping: count it as worn
 
@@ -218,7 +221,7 @@ def host_input_check(state):
     """(ok, detail) for the doctor: no stream from a host that lends its keyboard and mouse."""
     if not state.get('ok'):
         return False, f'unread: {state.get("error")}'
-    if state.get('fake_worn') and not state.get('guarded'):
+    if state.get('worn_released') or (state.get('fake_worn') and not state.get('guarded')):
         return False, ("a faked wearer has no guard holding the hosts' input locks: "
                        'verify-frametop cleanup')
     live = state.get('input_streams') or []
@@ -363,12 +366,13 @@ def launch(name, allow_host_input=False):
 def guard():
     """Stop the run at once if someone wears the headset (or nobody can tell)."""
     try:
-        worn, _ = worn_now()
+        worn, status = worn_now()
     except Exception:   # whatever went wrong, it didn't say "not worn"
-        worn = None
+        worn, status = None, {}
     holder = lock_holder()
     if worn is False:
-        state = host_input()
+        # A faked wearer whose guard had gone was dropped by that status read: the run has lost it.
+        state = dict(host_input(), **{k: status[k] for k in ('worn_released',) if k in status})
         if (holder or {}).get('allow_host_input') or host_input_check(state)[0]:
             if holder:
                 LOCK.touch()   # the lease runs on
@@ -536,8 +540,8 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=F
     except Stopped:
         print('verify-frametop: stopped: ending the stream', file=sys.stderr, flush=True)
     finally:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)   # the cleanup runs to its end
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(sig, signal.SIG_IGN)   # the cleanup runs to its end
         if viewer is not None and not ended:
             kill_viewer(out)
             viewer.kill()

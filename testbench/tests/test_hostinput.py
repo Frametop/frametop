@@ -208,6 +208,92 @@ class GuardProcessTests(Fixture):
         self.assertEqual(hostinput.runtime_dir(), self.run)
 
 
+class GuardReleaseTests(Fixture):
+    """What the guard does when it lets go, in this process with a fake input proxy."""
+    def setUp(self):
+        super().setUp()
+        for sig in (signal.SIGTERM, signal.SIGHUP):   # guard() sets its own
+            self.addCleanup(signal.signal, sig, signal.getsignal(sig))
+
+    def guard(self, release):
+        # The start takes every lock; at the first poll a stream holds a newly lent host's.
+        free_then_busy = mock.Mock(side_effect=[[], ['192.168.1.92']])
+        with mock.patch.object(hostinput, 'take_locks', free_then_busy), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            code = hostinput.guard(self.layout, poll=0.01, release=release)
+        return code, out.getvalue()
+
+    def test_a_stream_taking_a_lock_releases_the_wearer_then_the_flag(self):
+        release = mock.Mock(side_effect=lambda: self.assertIsNotNone(hostinput.read_flag()))
+        self.assertEqual(self.guard(release), (0, 'holding: \n'
+                         'a stream holds the input lock of 192.168.1.92: releasing the wearer\n'))
+        release.assert_called_once_with()
+        self.assertIsNone(hostinput.read_flag())
+
+    def test_a_proxy_that_wont_release_keeps_the_flag_for_the_next_try(self):
+        release = mock.Mock(side_effect=RuntimeError('refused'))
+        with mock.patch.object(hostinput.time, 'sleep'):
+            self.assertEqual(self.guard(release)[0], 0)
+        self.assertEqual(release.call_count, 3)
+        self.assertFalse(hostinput.read_flag()['allow_host_input'])   # after_guard and any command see it
+
+    def test_after_guard_releases_only_a_wearer_its_guard_left(self):
+        release = mock.Mock()
+        hostinput.set_flag(True, 1.0)   # allowed: no guard to lose
+        hostinput.after_guard(release)
+        hostinput.set_flag(False, 1.0, pid=os.getpid())
+        with mock.patch.object(hostinput, 'guard_alive', return_value=True):   # a new guard took over
+            hostinput.after_guard(release)
+        release.assert_not_called()
+        with mock.patch.object(hostinput, 'guard_alive', return_value=False), \
+                contextlib.redirect_stdout(io.StringIO()):
+            hostinput.after_guard(release)   # killed: the unit's ExecStopPost
+        release.assert_called_once_with()
+        self.assertIsNone(hostinput.read_flag())
+
+
+class StartGuardTests(Fixture):
+    """start_guard's systemd wiring, with systemd faked."""
+    def systemd(self, run_rc=0, writes_flag=True, active=True):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            if argv[0] == 'systemd-run' and not run_rc and writes_flag:
+                hostinput.set_flag(False, 1.0, pid=4242)
+            rc = run_rc if argv[0] == 'systemd-run' else 0 if 'is-active' not in argv or active else 3
+            return subprocess.CompletedProcess(argv, rc, stdout='journal says why', stderr='bad flag')
+        patches = (mock.patch.object(hostinput.subprocess, 'run', run),
+                   mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': flag.get('pid') == 4242))
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        return calls
+
+    def test_it_runs_the_guard_in_its_own_unit_that_cleans_up_after_it(self):
+        calls = self.systemd()
+        self.assertEqual(hostinput.start_guard(socket='/tmp/tb.sock'), 4242)
+        self.assertEqual(calls[0], ['systemctl', '--user', 'stop', hostinput.GUARD_UNIT])
+        run = calls[1]
+        self.assertEqual(run[:5], ['systemd-run', '--user', '--collect', '--quiet', f'--unit={hostinput.GUARD_UNIT}'])
+        self.assertIn(f'--setenv=XDG_RUNTIME_DIR={self.run}', run)
+        self.assertIn('--setenv=FRAME_TESTBENCH_SOCKET=/tmp/tb.sock', run)
+        self.assertIn(f'--property=ExecStopPost={sys.executable} -m frame_testbench.hostinput after-guard', run)
+        self.assertEqual(run[-4:], [sys.executable, '-m', 'frame_testbench.hostinput', 'guard'])
+        workdir = Path(next(a for a in run if a.startswith('--working-directory=')).split('=', 1)[1])
+        self.assertTrue((workdir / 'frame_testbench' / 'hostinput.py').exists())
+
+    def test_a_unit_that_wont_start_or_dies_first_is_refused_with_why(self):
+        self.systemd(run_rc=1)
+        with self.assertRaisesRegex(RuntimeError, "didn't start: bad flag"):
+            hostinput.start_guard()
+        calls = self.systemd(writes_flag=False, active=False)
+        with self.assertRaisesRegex(RuntimeError, r"couldn't take the input locks \(journal says why\)"):
+            hostinput.start_guard()
+        self.assertEqual(calls[-1], ['systemctl', '--user', 'stop', hostinput.GUARD_UNIT])
+        self.assertIsNone(hostinput.read_flag())
+
+
 class Bench(cli.Bench):
     def __init__(self, run):
         self.commands, self.run = [], run
@@ -228,7 +314,7 @@ class WornGuardTests(Fixture):
         real = hostinput.state
         self.guards = []   # each fake guard: what start_guard would have run, as a live pid
 
-        def start_guard():
+        def start_guard(socket=None):
             self.guards.append(os.getpid())
             hostinput.set_flag(False, 1.0)   # the guard writes the flag naming itself
             return os.getpid()
@@ -279,6 +365,31 @@ class WornGuardTests(Fixture):
         self.bench.control = broken
         with self.assertRaises(OSError):
             self.worn('on')
+        self.assertIsNone(hostinput.read_flag())
+
+    def test_worn_on_undoes_itself_if_the_guard_let_go_as_the_wearer_was_faked(self):
+        def guard_gone(text):
+            Bench.control(self.bench, text)
+            if text == 'worn 1':
+                hostinput.clear_flag()   # the guard saw a stream take a lock, released and left
+                self.alive = False
+            return {'ok': True}
+        self.bench.control = guard_gone
+        with self.assertRaisesRegex(ValueError, 'guard stopped'):
+            self.worn('on')
+        self.assertEqual([c for c, _ in self.bench.commands], ['worn 1', 'worn-release'])
+        self.assertIsNone(hostinput.read_flag())
+
+    def test_a_worn_on_whose_reply_was_lost_releases_the_wearer(self):
+        def lost(text):
+            Bench.control(self.bench, text)
+            if text == 'worn 1':
+                raise TimeoutError('no reply')   # it may have gone through
+            return {'ok': True}
+        self.bench.control = lost
+        with self.assertRaises(TimeoutError):
+            self.worn('on')
+        self.assertEqual([c for c, _ in self.bench.commands], ['worn 1', 'worn-release'])
         self.assertIsNone(hostinput.read_flag())
 
     def test_any_command_drops_a_faked_wearer_whose_guard_has_gone(self):

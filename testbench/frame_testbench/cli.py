@@ -300,14 +300,23 @@ def dispatch(args, bench):
             flag = hostinput.read_flag()
             if not (flag and flag.get('allow_host_input') is False and hostinput.guard_alive(flag)):
                 try:
-                    hostinput.start_guard()
+                    hostinput.start_guard(socket=args.socket)
                 except RuntimeError as error:
                     raise ValueError(f'worn on refused: {error}') from None
         try:
-            return bench.control('worn 1')
+            result = bench.control('worn 1')
         except BaseException:
+            release_quietly(bench)   # it may have gone through before the reply was lost
             hostinput.clear_flag()
             raise
+        flag = hostinput.read_flag()
+        if not args.allow_host_input and not (flag and flag.get('allow_host_input') is False
+                                              and hostinput.guard_alive(flag)):
+            release_quietly(bench)   # the guard let go while the wearer was being faked
+            hostinput.clear_flag()
+            raise ValueError("worn on refused: the host-input guard stopped as the wearer was faked "
+                             "(a stream took a host's input lock?): see frame-testbench host-input")
+        return result
     if args.command == 'host-input':
         return dict(hostinput.state(detail=True), ok=True)
     if args.command == 'hmd-button':
@@ -383,6 +392,13 @@ def dispatch(args, bench):
         subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True, timeout=20)
         return result
     raise ValueError('unsupported command')
+
+
+def release_quietly(bench):
+    try:
+        bench.control('worn-release')
+    except Exception:
+        pass   # no input proxy, or it never faked the wearer
 
 
 def drop_unsafe_worn(bench, args):

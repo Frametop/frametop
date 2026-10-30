@@ -8,9 +8,10 @@ BURSTS is the bursts.txt `verify-frametop stream --mic-bursts` left: the Frame's
 burst was due to play into the source ft-stream recorded. RECORDING is the host's recording (any
 format ffmpeg reads), whose first sample was taken at host wall time --start; without --start,
 that comes from its packets' wall-clock times (ffmpeg -use_wallclock_as_timestamps 1 -t SECONDS
--i ... -copyts writes them; an output -t there ends the recording at once). --offset-ms is the host's clock minus the Frame's. Each burst heard in the recording (a
-rise out of half a second of quiet) is matched to the burst played up to 0.9 s before it: with
-bursts a second apart, a latency over that can't be measured, and shows as missed bursts.
+-i ... -copyts writes them; an output -t there ends the recording at once). --offset-ms is the
+host's clock minus the Frame's. Each burst heard in the recording (a rise out of half a second of
+quiet) is matched to the burst played up to 0.9 s before it: with bursts a second apart, a latency
+over that matches the next burst instead and reads a second short, with the first burst missed.
 Prints JSON: matched and missed bursts and the latency's median, spread and drift over the test.
 Needs ffmpeg and ffprobe.
 """
@@ -45,11 +46,12 @@ def start_time(path):
                          capture_output=True, text=True, check=True).stdout
     best, audio = None, 0.0
     for line in out.split():
+        fields = line.split(',')
         try:
-            pts, duration = (float(x) for x in line.split(',')[:2])
-        except ValueError:
-            continue   # N/A: no times (a WAV)
-        audio += duration
+            audio += float(fields[1])
+            pts = float(fields[0])
+        except (ValueError, IndexError):
+            continue   # N/A: no time (a WAV has none)
         best = pts - audio if best is None else min(best, pts - audio)
     return best or 0
 

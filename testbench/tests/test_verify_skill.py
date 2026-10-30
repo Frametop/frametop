@@ -320,6 +320,17 @@ class VerifySkillTests(unittest.TestCase):
         self.assertIn(('release',), self.sent)
         self.assertFalse(self.v.LOCK.exists())
 
+    def test_guard_stops_a_run_whose_faked_wearer_lost_its_guard(self):
+        self.run_main('launch', 'plain')
+        # The status read found the guard gone and released the wearer, so host-input looks clean.
+        self.replies[('status',)] = dict(proxy(), worn_released='the host-input guard has gone')
+        with self.assertRaises(SystemExit) as stop, contextlib.redirect_stderr(io.StringIO()) as err, \
+                contextlib.redirect_stdout(io.StringIO()):   # cleanup's report
+            self.v.guard()
+        self.assertEqual(stop.exception.code, 3)
+        self.assertIn('no guard', err.getvalue())
+        self.assertFalse(self.v.LOCK.exists())
+
     def stream_fixture(self, result):
         """A layout with dody and oma7, and an in-box that writes RESULT as the fake viewer would,
         noting whether dody's input lock was held while it ran."""

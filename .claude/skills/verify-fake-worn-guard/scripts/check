@@ -15,17 +15,19 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent.parent
 TLC_URL = 'https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar'
 TLC_SHA256 = '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88'
-CONFIGS = ['Clean', 'Kills', 'Hangs']
+CONFIGS = ['Clean', 'Kills', 'Hangs', 'All']
 RULES = ['TypeOK', 'NoHostTakeover', 'FakeIsNoticed']
 # What the code at the sync commit does (SKILL.md, Findings): 'holds', or the finding's name and
 # TLC's shortest path to it (one worker, so the same model gives the same path). A known rule
 # that breaks by another shortest path is a new way to break it, so it differs too.
 # Findings A and C (fixed by release_or_keep_flag) held both Hangs breaks until then.
+# Finding D (fixed by worn on's left-flag refusal) broke All's FakeIsNoticed until then.
 B = 'YouRunWornOn OnCheck OnStartGuard GuardStarts OnWait OnFake GuardKilled StreamStarts StreamTakesLock'
 BASELINE = {
     ('Clean', 'TypeOK'): 'holds', ('Clean', 'NoHostTakeover'): 'holds', ('Clean', 'FakeIsNoticed'): 'holds',
     ('Kills', 'TypeOK'): 'holds', ('Kills', 'NoHostTakeover'): ('B', B), ('Kills', 'FakeIsNoticed'): 'holds',
     ('Hangs', 'TypeOK'): 'holds', ('Hangs', 'NoHostTakeover'): 'holds', ('Hangs', 'FakeIsNoticed'): 'holds',
+    ('All', 'TypeOK'): 'holds', ('All', 'NoHostTakeover'): ('B', B), ('All', 'FakeIsNoticed'): 'holds',
 }
 
 

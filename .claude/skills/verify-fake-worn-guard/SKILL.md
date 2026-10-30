@@ -19,7 +19,7 @@ proxy and a kill signal act. The model checks every order of those steps.
 
 ## Run
 
-From the repo root, on the Frame (each takes about 10 s):
+From the repo root, on the Frame (each takes about 12 s):
 
 ```sh
 frame-job --local -- .claude/skills/verify-fake-worn-guard/scripts/check
@@ -60,7 +60,7 @@ Configs (constants):
 | `Clean` | FALSE | FALSE | every rule holds: the design is right when nothing fails |
 | `Kills` | TRUE | FALSE | `NoHostTakeover` breaks: finding B |
 | `Hangs` | FALSE | TRUE | every rule holds (both broke, by finding A, before the fix) |
-| `All` | TRUE | TRUE | for `/statechart` charts only, not in the check. `NoHostTakeover` breaks by B; `FakeIsNoticed` held only once D was fixed |
+| `All` | TRUE | TRUE | `NoHostTakeover` breaks: finding B, by the same path as in `Kills`. `FakeIsNoticed` holds (it broke, by finding D, before the fix) |
 
 ## Findings
 
@@ -96,9 +96,8 @@ uncovered, is fixed at the sync commit too. B remains.
   one run): a timed-out release leaves a flag, the next `worn on` can't confirm its release
   either, `start_guard` runs `clear_flag()`, and the new guard dies before it takes the lock, so
   `worn on` is refused with the wearer faked and no flag. `worn on` now refuses while such a flag
-  is there (`OnCheck`). `scripts/check` doesn't run `All`, so the unit test
-  `test_worn_on_is_refused_while_an_unconfirmed_release_left_a_flag` guards D, and `/statechart`
-  on `All` shows it if it comes back.
+  is there (`OnCheck`). `scripts/check` guards D in `All`, and the unit test
+  `test_worn_on_is_refused_while_an_unconfirmed_release_left_a_flag` guards it in the code.
 
 ## Model to code
 

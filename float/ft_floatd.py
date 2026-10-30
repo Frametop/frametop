@@ -859,6 +859,25 @@ class Daemon:
         self.command(cmd="place", id=f.id, output=output, x=fr["x"], y=fr["y"], w=fr["w"], h=fr["h"],
                      onAllDesktops=bool(saved.get("onAllDesktops")), maximized=maximized)
 
+    def dock_at(self, f, screen, x, y, gx, gy):
+        """Carried onto a screen and let go there (user, 2026-10-30, DEE-246; ft-screens' "dockat"): docked onto
+        it with the point it was held by (gx, gy: pixels in the window) at x, y (pixels on that screen), at its
+        size in pixels, smaller where the screen is, and all of it on that screen."""
+        name = f"WL-{screen}"
+        rect = output_rects().get(name)
+        if not rect or not 0 <= screen < self.screens_n or not f.frame:
+            log(f"{f.id[:9]} can't dock onto screen {screen + 1}: no such screen")
+            return
+        x0, y0, ow, oh = rect
+        k = output_scales().get(name, 1.0) or 1.0
+        pw, ph = f.normal or (round(f.frame["w"] * f.scale), round(f.frame["h"] * f.scale))
+        w, h = min(pw / k, ow), min(ph / k, oh)
+        fx = min(max(x0 + (x - gx) / k, x0), x0 + ow - w)
+        fy = min(max(y0 + (y - gy) / k, y0), y0 + oh - h)
+        f.move_from = None  # (a title-bar carry's end: not back onto the spare)
+        log(f"{f.id[:9]} carried onto screen {screen + 1}")
+        self.dock(f, frame={"x": round(fx), "y": round(fy), "w": round(w), "h": round(h)}, output=name)
+
     def remember(self, f):
         """Keep where an app's window floated (before its panel goes)."""
         if not f.app or not f.frame:
@@ -1307,6 +1326,12 @@ class Daemon:
                 self.command(cmd="activate", id=f.id)
             else:  # a screen: its output is WL-<N - 1>
                 self.command(cmd="activate-output", output=f"WL-{int(rest[0]) - 1}")
+            return "ok"
+        if cmd == "dockat" and len(rest) == 6 and all(w.lstrip("-").isdigit() for w in rest):
+            f = self.by_panel(int(rest[0]))
+            if not f:
+                return f"error no floating window on screen {rest[0]}"
+            self.dock_at(f, int(rest[1]) - 1, *(int(w) for w in rest[2:]))  # (screen N: output WL-<N - 1>)
             return "ok"
         if cmd in ("dock", "close", "resize", "scale", "density") and rest and rest[0].isdigit():
             f = self.by_panel(int(rest[0]))

@@ -390,6 +390,10 @@ struct Screen {
     double mpp = 0;               // metres per buffer pixel
     bool titleCarry = false;      // carried by its title bar: KWin's pointer stays at carryX, carryY
     double carryX = 0, carryY = 0;
+    // A floating window carried onto a screen (UpdateDockAims): it docks there when let go, held at
+    // dockGX, dockGY (its pixels) put at dockX, dockY (the screen's); -1: nowhere.
+    int dockOn = -1;
+    int dockX = 0, dockY = 0, dockGX = 0, dockGY = 0;
     // A resize by a corner or two fists only stretches the panel, to this many pixels at its density,
     // and the window gets them in one resize when it ends (user, 2026-10-27: "it doesn't actually update
     // the pixels ... until I release so we can have the animation be smooth"). Kept until the answer's
@@ -1712,6 +1716,7 @@ void EndDrag(Screen &s) {
     s.drag = Drag::None;
     s.dragDevice = kNone;
     s.dragFacing = false;
+    s.dockOn = -1;
     s.pinTarget = s.onWrist = kNone;
     LightBar(s, false);
     ApplyAlpha(s);
@@ -1762,13 +1767,20 @@ void UpdateArrange() {
     RunLayout("scale");
 }
 
-// Let go: pin to the armed wrist, as the screen is now.
+// Let go: pin to the armed wrist, as the screen is now (a floating window carried onto a screen: docked there).
 void FinishDrag(Screen &s, int index) {
     const bool moved = s.drag == Drag::Move;
     const vr::TrackedDeviceIndex_t target = s.pinTarget;
+    const int dockOn = s.dockOn;
     EndDrag(s);
     Mat p;
     if (!moved) return;
+    if (s.floating && dockOn >= 0) {
+        std::printf("screen %d: let go on screen %d: docked there at %d,%d\n", index + 1, dockOn + 1, s.dockX, s.dockY);
+        SendFloat("dockat " + std::to_string(index + 1) + " " + std::to_string(dockOn + 1) + " " + std::to_string(s.dockX) + " " +
+                  std::to_string(s.dockY) + " " + std::to_string(s.dockGX) + " " + std::to_string(s.dockGY));
+        return;
+    }
     if (!s.floating && !s.remote) ArrangeDesktopSoon();
     if (target != kNone && ScreenPose(s, &p) && PinAt(s, target, p)) {
         if (target == vr::k_unTrackedDeviceIndex_Hmd) std::printf("screen %d: pinned to the head\n", index + 1);
@@ -4252,10 +4264,68 @@ double HeadDistance(const Mat &p) {
     return Apart(head, p);
 }
 
+// Docking by carrying (user, 2026-10-30, DEE-246: "drag a floating window back onto a screen"): a floating
+// window carried by a laser, the 3D mouse or a hand, brought within FLOAT_DOCK_DISTANCE of a screen it's
+// in front of (or just behind), lights that screen up (the target glow, full), and docks onto it where
+// it's let go (FinishDrag; ft-floatd's "dockat"). In front of: on the carrying laser past where it holds
+// the window, or for a hand (no laser) on the line from the eyes through the window's centre. Frametop's
+// own screens only (a remote display's host isn't KWin's). 0: off.
+double g_floatDockDistance = 0.10;
+int g_dockGlow = -1;   // the screen a carried window would dock onto now
+
+void UpdateDockAims() {
+    g_dockGlow = -1;
+    if (!g_vr) return;
+    for (auto &[i, s] : g_screens) {
+        const int was = s.dockOn;
+        s.dockOn = -1;
+        Mat p, l;
+        if (!s.floating || s.drag != Drag::Move || g_floatDockDistance <= 0 || !s.visible || !ScreenPose(s, &p)) continue;
+        double u = 0, v = 0, held = 0;
+        if (LaserPose(s.dragDevice, &l)) {
+            if (!RayOnSurface(s, p, l, &u, &v, &held)) continue;
+        } else {
+            Mat head;   // a hand: from the eyes, through its centre
+            if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) continue;
+            const double c[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
+            const Mat f = FacingPose(c, head);   // its z toward the eyes: the line out is its -z
+            l = f;
+            for (int k = 0; k < 3; ++k) l.m[k][3] = head.m[k][3];
+            held = Apart(head, p);
+        }
+        int best = -1;
+        double off = g_floatDockDistance, bu = 0, bv = 0;
+        for (auto &[k, o] : g_screens) {
+            Mat q;
+            double ou, ov, t;
+            if (k == i || o.floating || o.remote || !o.visible || o.width <= 0 || o.metres <= 0 || !ScreenPose(o, &q) ||
+                !RayOnSurface(o, q, l, &ou, &ov, &t) || std::fabs(ou) > o.metres / 2 || std::fabs(ov) > o.heightMetres() / 2)
+                continue;
+            if (std::fabs(t - held) <= off) best = k, off = std::fabs(t - held), bu = ou, bv = ov;
+        }
+        if (best < 0) {
+            if (was >= 0) std::printf("screen %d: off screen %d (not docking)\n", i + 1, was + 1);
+            continue;
+        }
+        const Screen &o = g_screens[best];
+        const double H = s.heightMetres(), oH = o.heightMetres();
+        s.dockOn = best;
+        s.dockX = int(std::lround((bu + o.metres / 2) * o.width / o.metres));
+        s.dockY = int(std::lround((oH / 2 - bv) * o.height / std::max(1e-6, oH)));
+        s.dockGX = int(std::lround(std::clamp((u + s.metres / 2) / std::max(1e-6, s.metres), 0.0, 1.0) * s.cropW));
+        s.dockGY = int(std::lround(std::clamp((H / 2 - v) / std::max(1e-6, H), 0.0, 1.0) * s.cropH));
+        g_dockGlow = best;
+        if (was != best) std::printf("screen %d: over screen %d, %.0f cm from it: docks there if let go\n", i + 1, best + 1, off * 100);
+    }
+}
+
 void UpdateTargetGlow() {
     int best = -1;
     double want = 0;
-    if (g_targetGlowOn && g_vr) {
+    UpdateDockAims();
+    if (g_dockGlow >= 0) {
+        best = g_dockGlow, want = 1;   // (the laser's on it, through the window it carries: lit all the same)
+    } else if (g_targetGlowOn && g_vr) {
         // "grab that": the panel it would take now, as far along as the gesture is
         for (int k = 0; k < 2; ++k)
             if (g_grabThatAim[k] >= 0 && g_grabThatProgress[k] > want) best = g_grabThatAim[k], want = g_grabThatProgress[k];
@@ -4269,8 +4339,8 @@ void UpdateTargetGlow() {
     const auto it = best >= 0 ? g_screens.find(best) : g_screens.end();
     if (it == g_screens.end() || !it->second.visible) best = -1, want = 0;
     // not over a panel a laser is on (user, 2026-10-11: no pull highlight while the laser points at it; the
-    // gesture still works there)
-    else if (NowMs() - it->second.laserMs < 400) {
+    // gesture still works there), unless it's where a carried window docks
+    else if (best != g_dockGlow && NowMs() - it->second.laserMs < 400) {
         static int heldBack = -1;
         if (heldBack != best) {
             char name[64] = "?";
@@ -4868,6 +4938,7 @@ bool ft_vr_init(void) {
     }
     g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";
     g_pinLevel = handcut::Setting("SCREEN_PIN_LEVEL", "0") == "1";   // head pins follow turning, not looking up or down   // the lazy susan brings panels (0: the room turns)
+    num("FLOAT_DOCK_DISTANCE", g_floatDockDistance, 0, 1);   // a floating window carried this near a screen docks onto it
     num("SCREEN_SPIN_DISTANCE", g_frontReading, 0.4, 3);   // the front slot's reading distance (m)...
     g_frontReading = std::max(g_frontReading, spotreserve::kDistance + spotreserve::kFrontGap);   // ...behind frunner's spot
     num("SCREEN_SPIN_PPD", g_frontRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need

@@ -121,6 +121,14 @@ int main() {
     assert(Decide(true, true, worn, stalePlaying, false, now) == Want::kDrop);
     assert(Decide(true, true, Answer{}, Answer{}, false, now) == Want::kDrop);
     assert(Decide(true, true, Answer{true, now - kStaleNs + 1}, playing, false, now) == Want::kHold);
+    // An answer counts from when it was given, not when it was read: a "worn" that waited 9 s
+    // unread (the switch was off) is stale, and gives no lease with the headset off since.
+    const int64_t wallNow = 1'800'000'000'000'000'000;
+    assert(GivenAt(now, wallNow, wallNow - 9'000'000'000) == now - 9'000'000'000);
+    assert(Decide(true, true, Answer{true, GivenAt(now, wallNow, wallNow - 9'000'000'000)}, playing, false, now) == Want::kDrop);
+    assert(Decide(true, true, Answer{true, GivenAt(now, wallNow, wallNow - 20'000'000)}, playing, false, now) == Want::kHold);
+    assert(GivenAt(now, wallNow, wallNow) == now);
+    assert(GivenAt(now, wallNow, wallNow + 5'000'000'000) == now);  // the wall clock went back
     // A test that may not take the host's input drops it, but the headset coming off still releases.
     assert(Decide(true, true, worn, playing, true, now) == Want::kDrop);
     assert(Decide(true, true, away, playing, true, now) == Want::kRelease);

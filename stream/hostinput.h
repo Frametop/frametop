@@ -111,6 +111,12 @@ struct Answer {
 
 inline bool Fresh(const Answer &a, int64_t now) { return a.at && now - a.at < kStaleNs; }
 
+// When an answer was given, on NOW's clock: SENT is the wall-clock time the kernel stamped on it
+// as it was sent (SO_TIMESTAMPNS), WALL the wall clock as it's read. An answer that waited unread
+// (the switch off, the lock let go) keeps its age, so it can't pass for fresh later. A wall clock
+// set back in between makes it now.
+inline int64_t GivenAt(int64_t now, int64_t wall, int64_t sent) { return wall > sent ? now - (wall - sent) : now; }
+
 // What the Frame does about the host's input now (docs/host-input.md, "When the host's input goes
 // to Frametop"). Only the person's own "give it back", the switch going off or the headset coming
 // off, releases, which lifts the host's escape; anything else drops and keeps it.

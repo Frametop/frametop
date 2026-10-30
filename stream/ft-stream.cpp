@@ -365,10 +365,12 @@ struct HostInput {
         a.sun_family = AF_UNIX;
         const timeval wait{0, 100'000};
         const int on = 1;
-        // An address of our own (autobind), for the replies, each with its sender's credentials.
+        // An address of our own (autobind), for the replies, each with its sender's credentials
+        // and the time it was sent (hostinput::GivenAt).
         if (sock >= 0 && (bind(sock, (const sockaddr *)&a, sizeof(sa_family_t)) < 0 ||
                           setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &wait, sizeof wait) < 0 ||
-                          setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof on) < 0))
+                          setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof on) < 0 ||
+                          setsockopt(sock, SOL_SOCKET, SO_TIMESTAMPNS, &on, sizeof on) < 0))
             close(sock), sock = -1;
     }
 
@@ -412,30 +414,43 @@ struct HostInput {
         locked = false;
     }
 
-    // The pointer helper's and the relay's answers that came, from this user's processes only.
-    // USE false: drop them unread.
+    // The pointer helper's and the relay's answers that came, from this user's processes only, each
+    // as of when it was given. USE false: drop them unread.
     void TakeAnswers(int64_t now, bool use) {
         char buf[2048];
         for (;;) {
             iovec io{buf, sizeof buf};
-            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(ucred))];
+            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(ucred)) + CMSG_SPACE(sizeof(timespec))];
             msghdr m{};
             m.msg_iov = &io, m.msg_iovlen = 1, m.msg_control = control, m.msg_controllen = sizeof control;
             const ssize_t n = recvmsg(sock, &m, MSG_DONTWAIT);
             if (n <= 0) break;
             // Only this user's answers count. Not by address: the helper answers from an unbound socket.
-            const cmsghdr *c = CMSG_FIRSTHDR(&m);
-            if (!c || c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_CREDENTIALS) continue;
-            ucred cred;
-            std::memcpy(&cred, CMSG_DATA(c), sizeof cred);
-            if (cred.uid != getuid() || !use) continue;
+            // One with no send time has no age to go by.
+            bool mine = false, stamped = false;
+            timespec sent{};
+            for (cmsghdr *c = CMSG_FIRSTHDR(&m); c; c = CMSG_NXTHDR(&m, c)) {
+                if (c->cmsg_level != SOL_SOCKET) continue;
+                if (c->cmsg_type == SCM_CREDENTIALS) {
+                    ucred cred;
+                    std::memcpy(&cred, CMSG_DATA(c), sizeof cred);
+                    mine = cred.uid == getuid();
+                } else if (c->cmsg_type == SCM_TIMESTAMPNS) {
+                    std::memcpy(&sent, CMSG_DATA(c), sizeof sent), stamped = true;
+                }
+            }
+            if (!mine || !stamped || !use) continue;
+            timespec wall;
+            clock_gettime(CLOCK_REALTIME, &wall);
+            const int64_t at = hostinput::GivenAt(now, int64_t(wall.tv_sec) * 1'000'000'000 + wall.tv_nsec,
+                                                  int64_t(sent.tv_sec) * 1'000'000'000 + sent.tv_nsec);
             const std::string reply(buf, size_t(n));
             if (reply.rfind("ok ", 0) == 0) {
-                worn = {reply.find(" worn") != std::string::npos, now};
+                worn = {reply.find(" worn") != std::string::npos, at};
             } else {
                 const nlohmann::json j = nlohmann::json::parse(reply, nullptr, false);
                 if (j.is_object() && j.value("t", "") == "pause" && j.contains("paused") && j["paused"].is_boolean())
-                    paused = {j["paused"].get<bool>(), now};
+                    paused = {j["paused"].get<bool>(), at};
             }
         }
     }

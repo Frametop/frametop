@@ -22,6 +22,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <string>
 #include <utility>
@@ -131,6 +132,60 @@ inline Want Decide(bool switchOn, bool live, const Answer &worn, const Answer &p
     if (test || !Fresh(worn, now) || !Fresh(paused, now) || paused.yes) return Want::kDrop;
     return Want::kHold;
 }
+
+// The host's escape outlives the stream that heard it: the host keeps one escape, for every
+// client, until a release lifts it, and a drop, a session's end and a lease running out keep it.
+// Only a switch off or a headset that came off, as the pointer helper said, sends that release,
+// and the stream that heard the escape may not be there to see either. So the escape is kept in
+// a marker in the session's runtime dir (EscapeMark) until a release goes, the next stream that
+// holds the host's input lock picks it up, and the helper says when the headset last went back on
+// ("gaze ? headset on-at"): an off and on since the escape owes a release. A Wi-Fi drop, a crash,
+// the relay's pause or a helper that doesn't answer change neither, and the escape stands.
+inline std::string EscapeMark(const char *xdg, const std::string &id) {
+    return std::string(xdg && *xdg ? xdg : "/tmp") + "/frametop-escape-" + id;
+}
+
+// When the escape MARK keeps was heard (CLOCK_BOOTTIME ns), or 0: none, or not a marker of ours.
+inline int64_t ReadMark(const std::string &path) {
+    const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return 0;
+    char buf[32];
+    struct stat st;
+    const ssize_t n = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) ? read(fd, buf, sizeof buf - 1) : -1;
+    close(fd);
+    if (n <= 0) return 0;
+    buf[n] = 0;
+    char *end;
+    const long long at = std::strtoll(buf, &end, 10);
+    return end != buf && (*end == 0 || *end == '\n') && at > 0 ? int64_t(at) : 0;
+}
+
+// Keep the escape heard at AT (CLOCK_BOOTTIME ns), or with AT 0 forget it.
+inline void WriteMark(const std::string &path, int64_t at) {
+    if (!at) {
+        unlink(path.c_str());
+        return;
+    }
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) return;
+    const std::string text = std::to_string(at) + "\n";
+    if (write(fd, text.data(), text.size()) < 0) {}
+    close(fd);
+}
+
+// When the headset last went back on after it was off, from the pointer helper's answer to
+// "gaze ? headset on-at" ("ok on worn on-at NS", CLOCK_BOOTTIME), or 0: not since the helper
+// started, or a helper that doesn't say.
+inline int64_t OnAt(const std::string &reply) {
+    const size_t k = reply.find(" on-at ");
+    if (k == std::string::npos) return 0;
+    const long long at = std::strtoll(reply.c_str() + k + 7, nullptr, 10);
+    return at > 0 ? int64_t(at) : 0;
+}
+
+// Whether the escape heard at ESCAPEDAT is owed a release: the headset came off and went back on
+// at ONAT, after it.
+inline bool OffOnSince(int64_t escapedAt, int64_t onAt) { return escapedAt && onAt > escapedAt; }
 
 // Tests that may not take a host's input (docs/host-input.md, "Tests and a faked wearer"): the
 // pointer helper can't tell the testbench's faked wearer from a real head. While the testbench

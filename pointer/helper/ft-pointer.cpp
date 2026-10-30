@@ -487,8 +487,10 @@
 // Commands (datagrams on @ft_pointer_helper): show, hide [toggle|idle|pause] (why: see "Gaze owns
 // the pointer"), recenter, move <dyaw> <dpitch>, follow on|off|toggle (head follow, until the next
 // restart or a change to POINTER_FOLLOW),
-// gaze on|off|toggle|? (gaze mode, likewise with POINTER_GAZE; ? only asks, and "? headset" adds
-// worn|away to the reply), gz ... (the gaze, from ft-gazed),
+// gaze on|off|toggle|? (gaze mode, likewise with POINTER_GAZE; ? only asks, "? headset" adds
+// worn|away to the reply, and "? headset on-at" also "on-at NS": the CLOCK_BOOTTIME time the
+// headset last went back on after it was off, 0 if not since this started, for ft-stream's host
+// input escape), gz ... (the gaze, from ft-gazed),
 // reload (re-read the settings below), debug (toggle a twice-a-second state log),
 // overlays (replies with the overlay list as JSON, see OverlayList),
 // vrbind/vrglobal/vrstatus (Frame controller buttons, see vrbuttons.h),
@@ -590,6 +592,7 @@ static void PinchEvent(int side, int kind, const std::string &what) {
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 namespace {
@@ -1317,6 +1320,7 @@ int main() {
     bool headsetOff = false;  // nobody is wearing the headset (see the main loop)
     Clock::time_point headsetIdleSince{};  // SteamVR has said idle since then (none: it doesn't)
     bool headsetSeen = false;              // its activity level was read once
+    long long headsetOnAt = 0;             // it last went back on then, CLOCK_BOOTTIME ns (0: not since we started)
     // Turned off on purpose (the relay's pointer_toggle, "hide toggle"): gaze mode leaves it off
     // until something wakes it (see "Gaze owns the pointer" at the top).
     bool pointerOff = false;
@@ -1966,8 +1970,14 @@ int main() {
         else if (headsetIdleSince == Clock::time_point{})  // (idle at the start: off already)
             headsetIdleSince = Clock::now() - (headsetSeen ? std::chrono::milliseconds(0) : HEADSET_OFF_AFTER);
         headsetSeen = true;
+        const bool wasOff = headsetOff;
         headsetOff = headsetIdle && (level == vr::k_EDeviceActivityLevel_Standby ||
                                      Clock::now() - headsetIdleSince >= HEADSET_OFF_AFTER);
+        if (wasOff && !headsetOff) {
+            timespec t;
+            clock_gettime(CLOCK_BOOTTIME, &t);
+            headsetOnAt = t.tv_sec * 1'000'000'000LL + t.tv_nsec;
+        }
         if (headsetOff && active) {
             active = false;
             claimPending = claimHeld = false;
@@ -2214,7 +2224,9 @@ int main() {
                 // "gaze ? headset" (the gaze service, which idles while nobody wears the headset)
                 // also says whether someone does.
                 if (std::strstr(arg, "headset"))
-                    reply(gazeOn ? (headsetOff ? "ok on away" : "ok on worn") : (headsetOff ? "ok off away" : "ok off worn"));
+                    reply(std::string(gazeOn ? (headsetOff ? "ok on away" : "ok on worn")
+                                             : (headsetOff ? "ok off away" : "ok off worn")) +
+                          (std::strstr(arg, "on-at") ? " on-at " + std::to_string(headsetOnAt) : ""));
                 else
                     reply(gazeOn ? "ok on" : "ok off");
                 continue;

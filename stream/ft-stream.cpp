@@ -302,6 +302,7 @@ bool AllowsHostInput(const std::string &text) {
 // hostinput::Relay turns them into the relay's host devices.
 struct HostInput {
     std::string host, id;  // the host's address, and its id for the relay and the lock
+    std::string mark;      // where the host's escape is kept until a release lifts it (hostinput::EscapeMark)
     int sock = -1;         // datagrams to the relay and the pointer helper, and their replies
     bool switchOn = false, locked = false, refusedSaid = false;
     int lock = -1;
@@ -312,7 +313,7 @@ struct HostInput {
     // What Tick last wanted; a change to kRelease is an edge. A stream starting with the switch off
     // sends none; one starting with the headset off sends one at the helper's first answer (the
     // stream isn't live before it). An edge's release is owed until it went, and no engage goes
-    // ahead of it.
+    // ahead of it; so is one for an escape the headset came off and went on since (TakeAnswers).
     hostinput::Want last = hostinput::Want::kRelease;
     bool releaseOwed = false;
     uint32_t seq = 0;
@@ -320,9 +321,16 @@ struct HostInput {
     std::mutex mu;
     bool leasing = false;
     bool escaped = false;  // the host said so: a release lifts it even once the lease has stopped
+    int64_t escapedAt = 0; // when it was heard, here or by an earlier stream (CLOCK_BOOTTIME ns)
     hostinput::Relay relay{[this](const std::string &msg) { return Send(kRelay, msg, true); }};
 
     static constexpr const char *kRelay = "frametop_relay", *kHelper = "ft_pointer_helper";
+
+    static int64_t BootNs() {
+        timespec t;
+        clock_gettime(CLOCK_BOOTTIME, &t);
+        return int64_t(t.tv_sec) * 1'000'000'000 + t.tv_nsec;
+    }
 
     static socklen_t Address(sockaddr_un &a, const char *name) {
         a = {};
@@ -346,7 +354,12 @@ struct HostInput {
         const hostinput::Record r = hostinput::Parse(data, length);
         std::lock_guard<std::mutex> lock(mu);
         // Even once the lease stopped: an escape said just after a drop is still lifted by a release.
-        if (r.type == hostinput::Record::kState && (r.engaged || r.text == "escape")) escaped = !r.engaged;
+        // It's kept for the next stream until then: the host keeps it across streams.
+        if (r.type == hostinput::Record::kState && (r.engaged || r.text == "escape")) {
+            if (r.engaged && escaped) hostinput::WriteMark(mark, 0), escapedAt = 0;
+            else if (!r.engaged && !escaped) escapedAt = BootNs(), hostinput::WriteMark(mark, escapedAt);
+            escaped = !r.engaged;
+        }
         if (!leasing) return;
         const std::string said = relay.Take(r);
         if (!said.empty()) std::printf("hostinput: %s\n", said.c_str()), std::fflush(stdout);
@@ -357,8 +370,17 @@ struct HostInput {
         return relay.TakeEvents();
     }
 
+    // An escape an earlier stream heard and no release has lifted yet.
+    void Recall() {
+        const int64_t at = hostinput::ReadMark(mark);
+        std::lock_guard<std::mutex> lock(mu);
+        if (at && (!escaped || at < escapedAt)) escaped = true, escapedAt = at;
+    }
+
     void Open(const std::string &address) {
         host = address, id = hostinput::RelayId(address);
+        mark = hostinput::EscapeMark(std::getenv("XDG_RUNTIME_DIR"), id);
+        Recall();
         testDirs = hostinput::TestDirs(std::getenv("XDG_RUNTIME_DIR"), getuid());
         sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
         sockaddr_un a{};
@@ -380,7 +402,8 @@ struct HostInput {
         if (LiSendFrametopHostInputLease(msg.data(), int(msg.size())) != 0) return false;
         if (release) {
             std::lock_guard<std::mutex> lock(mu);
-            escaped = false, releaseOwed = false;
+            escaped = false, escapedAt = 0, releaseOwed = false;
+            hostinput::WriteMark(mark, 0);
         }
         std::printf("hostinput: %s %s's keyboard and mouse\n", release ? "released" : "dropped", host.c_str());
         std::fflush(stdout);
@@ -447,6 +470,9 @@ struct HostInput {
             const std::string reply(buf, size_t(n));
             if (reply.rfind("ok ", 0) == 0) {
                 worn = {reply.find(" worn") != std::string::npos, at};
+                // The headset came off and went on again since the escape, with no stream to see it.
+                std::lock_guard<std::mutex> lock(mu);
+                if (escaped && hostinput::OffOnSince(escapedAt, hostinput::OnAt(reply))) releaseOwed = true;
             } else {
                 const nlohmann::json j = nlohmann::json::parse(reply, nullptr, false);
                 if (j.is_object() && j.value("t", "") == "pause" && j.contains("paused") && j["paused"].is_boolean())
@@ -467,10 +493,10 @@ struct HostInput {
                 lock = open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
             }
             locked = lock >= 0 && flock(lock, LOCK_EX | LOCK_NB) == 0;
-            if (locked) std::printf("hostinput: this stream holds %s's keyboard and mouse lock\n", host.c_str());
+            if (locked) std::printf("hostinput: this stream holds %s's keyboard and mouse lock\n", host.c_str()), Recall();
         }
         if (!locked) return;
-        if (now >= askAt) askAt = now + 1'000'000'000, Send(kHelper, "gaze ? headset"), Send(kRelay, "pause ?");
+        if (now >= askAt) askAt = now + 1'000'000'000, Send(kHelper, "gaze ? headset on-at"), Send(kRelay, "pause ?");
         TakeAnswers(now, true);
         // Read every tick, so no lease goes out once a test's file is there.
         timespec wall;

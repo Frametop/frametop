@@ -202,6 +202,37 @@ int main() {
     age(flag, 24 * 60 * 60);
     assert(TestForbidding({dir}, wall, allows) == flag);  // the first that stops them
     assert(unlink(flag.c_str()) == 0 && unlink(run.c_str()) == 0);
+
+    // The host's escape, kept for the next stream until a release lifts it.
+    const std::string mark = EscapeMark(dir.c_str(), "abc");
+    assert(mark == dir + "/frametop-escape-abc" && EscapeMark(nullptr, "abc") == "/tmp/frametop-escape-abc");
+    assert(ReadMark(mark) == 0);  // none
+    WriteMark(mark, 5'000'000'000);
+    assert(ReadMark(mark) == 5'000'000'000);
+    struct stat markSt;
+    assert(stat(mark.c_str(), &markSt) == 0 && (markSt.st_mode & 0777) == 0600);
+    WriteMark(mark, 0);
+    assert(ReadMark(mark) == 0 && access(mark.c_str(), F_OK) != 0);
+    WriteMark(mark, 0);  // nothing to forget
+    for (const char *bad : {"", "x", "-5\n", "0\n", "12abc"}) put(mark, bad), assert(ReadMark(mark) == 0);
+    assert(unlink(mark.c_str()) == 0 && symlink("/dev/null", mark.c_str()) == 0 && ReadMark(mark) == 0);  // not followed
+    assert(unlink(mark.c_str()) == 0);
+    // The pointer helper's "on-at": when the headset last went back on.
+    assert(OnAt("ok on worn on-at 7000000000") == 7'000'000'000 && OnAt("ok off away on-at 7000000000") == 7'000'000'000);
+    assert(OnAt("ok on worn on-at 0") == 0 && OnAt("ok on worn") == 0 && OnAt("ok on worn on-at x") == 0);
+    // Heard at 5 s by the stream that held the lock. The headset came off and went on at 7 s with
+    // no stream to see it (a Wi-Fi drop, ft-screens restarting it): only the pointer helper saw it,
+    // and the next stream, which finds the escape in the marker, owes a release.
+    WriteMark(mark, 5'000'000'000);
+    assert(OffOnSince(ReadMark(mark), OnAt("ok on worn on-at 7000000000")));
+    // A Wi-Fi drop with the headset on keeps the escape: it last went on before it.
+    assert(!OffOnSince(ReadMark(mark), OnAt("ok on worn on-at 4000000000")));
+    assert(!OffOnSince(ReadMark(mark), OnAt("ok on worn on-at 5000000000")));
+    // So do a helper that doesn't say, one that restarted since (it doesn't know), and no escape.
+    assert(!OffOnSince(ReadMark(mark), OnAt("ok on worn")) && !OffOnSince(ReadMark(mark), OnAt("ok on worn on-at 0")));
+    assert(!OffOnSince(0, 7'000'000'000));
+    WriteMark(mark, 0);  // a release went
+    assert(!OffOnSince(ReadMark(mark), OnAt("ok on worn on-at 7000000000")));
     assert(rmdir(nested.c_str()) == 0 && rmdir(dir.c_str()) == 0);
 
     // The relay.

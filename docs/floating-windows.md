@@ -3,8 +3,9 @@
 Any desktop app can float in VR in a panel of its own, like SteamVR's floating windows, while it stays part of the Frametop desktop. Drag and drop, the clipboard, and focus keep working between floating windows and the screens.
 
 - **Float a window** with "Float in VR" in its window menu (Alt+F3), the float button left of Close in its title bar, or the float key (Meta+Shift+F by default). Start an app floating with "Launch as Standalone" in its right-click menu in the Application Launcher or the taskbar, with `ft-float launch` or `ft-float run`, or from a profile ([profiles.md](profiles.md)).
-- **Put it back** with the dock button under its panel, the title bar button, the float key, or "Back to Desktop" in the window menu. It returns to the screen, position, and size it came from. The `dock_all` action docks every floating window.
-- **Move it** by its title bar or the bar under its panel, **resize it** by its edges or the corner tab, and **change its scale** with Meta+scroll over it. Each app's last floating place, size, and scale are remembered.
+- **Tear it off** its screen: move it by its title bar and pull the wheel (scroll toward you). It floats and stays on the laser.
+- **Put it back** with the dock button under its panel, the title bar button, the float key, or "Back to Desktop" in the window menu. It returns to the screen, position, and size it came from. Or carry it onto a screen until the screen lights up, and let go: it docks there. The `dock_all` action docks every floating window.
+- **Move it** by its title bar or the bar under its panel (the wheel pushes and pulls it), **resize it** by its edges or the corner tab, **make it bigger or smaller** at the same pixels by scrolling on the corner tab, and **change its scale** with Meta+scroll over it. Each app's last floating place, size, density, and scale are remembered.
 - Files, text, and images drag between any two floating windows, and between floating windows and the screens.
 
 How KWin behaves underneath all this, and what the KWin script does about it, is in [design.md](design.md#floating-windows).
@@ -13,8 +14,6 @@ How KWin behaves underneath all this, and what the KWin script does about it, is
 
 These were decided (see the table) but aren't built:
 
-- Tearing a window off a screen by dragging its title bar into the air, with a ghost of it on the laser (decision 3; see "Tearing a window off a screen").
-- Docking by pushing a floating window flush against a screen, with the landing spot highlighted (decisions 4 and 17).
 - New windows of a floating app placed where that app's windows went last time, or to the parent's right (decision 15).
 - +/- scale buttons on the floating panel's bar (decision 18). Meta+scroll changes the scale.
 - The glow at the edge of your view toward a floating window activated out of sight, and the setting that brings it in front of you instead (decision 19).
@@ -30,8 +29,8 @@ The numbers are cited in the code, so they stay as they are. Struck-out text was
 |---|---|---|
 | 1 | How many windows can float at once | 16 spare outputs by default (also the most), configurable with `FLOAT_SLOTS`; a change needs a desktop restart. A Display Settings control isn't built |
 | 2 | Menus and dropdowns | Each floating output has a margin around the window. The panel shows only the window, and each open popup gets a small overlay of its own, cut from the same buffer |
-| 3 | Tearing off | Not built. Drag the title bar past a screen's edge and let go in the air, with a small dead zone past the edge |
-| 4 | Docking by dragging | Not built. Push the window flush against a screen (within about 10 cm), with the landing spot highlighted, and let go |
+| 3 | Tearing off | ~~Drag the title bar past a screen's edge and let go in the air, with a small dead zone past the edge~~ Replaced (2026-10-30, DEE-246): while KWin moves the window by its title bar on a screen, pull the wheel. The window floats and the laser keeps carrying it; if floating it takes more than a second, it stays floating where it came up |
+| 4 | Docking by dragging | Carry a floating window (any input: lasers, the 3D mouse, a hand) until the point you hold it by is on a shown screen within 10 cm of its surface (`FLOAT_DOCK_DISTANCE`). The screen lights up, and letting go docks the window there, the held point under the laser |
 | 5 | Visibility | Floating windows follow the same rules as the screens: the hide hotkey, the visibility modes, and the games rule |
 | 6 | Windows a floating app opens | They float too |
 | 7 | Launching floating from the headset | ~~One "Frametop Apps" launcher entry with a picker~~ Replaced by 26 and profiles (27) |
@@ -44,7 +43,7 @@ The numbers are cited in the code, so they stay as they are. Struck-out text was
 | 14 | All spares in use | The window stays on the screens, with a notification |
 | 15 | Where a floating app's new windows go | Not built: where that app's windows went last time, otherwise to the parent's right, curving around you. For now, a new window that opens on a floating window's output floats a little in front of it |
 | 16 | Where the code is written | Not kept here: it was about the work, not about Frametop |
-| 17 | Size when docked by dragging | Not built (see 4): the current floating size in pixels, shrunk to fit the screen |
+| 17 | Size when docked by dragging | The current floating size in pixels, shrunk to fit the screen, all of it on the screen |
 | 18 | Bigger text | A scale for each window (KWin's output scale): Meta+scroll over the window. Remembered for each app. +/- buttons on its bar aren't built |
 | 19 | Switching to a window you can't see | It's focused. Not built: a glow at the edge of your view that points to it, and a setting that moves it in front of you |
 | 20 | Full screen | The window fills its own panel. The margin drops to zero while it's full screen, and the panel keeps its size and place |
@@ -55,6 +54,7 @@ The numbers are cited in the code, so they stay as they are. Struck-out text was
 | 25 | A button on every window | A float button left of Close in the title bar, from Frametop's own QML window decoration, made to look like Breeze. It shows a dock icon on floating windows. Apps that draw their own title bar (Chromium, Electron, GTK) use the key |
 | 26 | Launching one app floating | "Launch as Standalone" in the right-click menu of every app in the Application Launcher and the taskbar, from copies of the apps' desktop files that only the Frametop desktop reads. It replaces the Frametop Apps entry (7, 10) |
 | 27 | Profiles | Named layouts become profiles: the screens' places, which screens show, and the apps and their windows, floating or not. See `docs/profiles.md` |
+| 28 | Panel size at the same pixels (2026-10-30, DEE-245) | Scroll on the corner tab: 5% a notch, from half to twice the screen's density. Remembered for each app; the float key and the title bar button float an app at the density it last had |
 
 Also: floating windows get the wrist pin, the head pin, and pass-through (`pointer-ignore`) like screens. Every gesture works with the controllers as well as the 3D mouse. A window launched floating uses the primary screen's density. VNC shows only the primary screen.
 
@@ -100,7 +100,7 @@ Program names stay within 15 characters (`ft-floatd`). Overlay keys are `frameto
 - **Output and margin.** Its output is the window's frame plus a margin on each side (`FLOAT_MARGIN`, default 300 px). KWin keeps a Wayland popup inside its parent's output, so the margin gives menus and dropdowns room past the window's edges. X11 apps place their own menus within the monitor, so the same applies. Enabled spares sit apart from the screens and from each other in KWin's layout, so nothing spills from one to the next. Memory: a 1600 × 1000 window with a 300 px margin is about 14 MB per buffer, 42 MB for three.
 - **What the panel shows.** Only the window's frame: ft-screens crops the output's buffer with `SetOverlayTextureBounds` and maps mouse positions through the crop. Each open popup or dialog gets a small overlay of its own, cut from the same buffer and placed a few millimetres in front of the window, so the main panel never changes size. KWin tells scripts about popups as windows of their own (`windowAdded` with `popupWindow`), so the script reports their rectangles.
 - **Where it appears.** Floated from a screen, the panel starts where the window was on that screen, 30 cm in front of it. Launched floating, it goes where that app last floated, or in front of you, 0.8 to 2 m away.
-- **Size and scale.** The panel's width is the window's pixel width times the source screen's metres per pixel, so text stays the same size in VR. A window launched floating uses the primary screen's density. Each window also has a scale (KWin's output scale), changed with Meta+scroll over the window in steps of 10% and remembered for each app. A bigger scale makes the content bigger at the same panel size. Notches that come while a change is under way add up into the next one, and the panel keeps its picture while KWin changes the scale (ft-screens' `hold`), so it goes from one scale to the next without the frames in between.
+- **Size and scale.** The panel's width is the window's pixel width times the source screen's metres per pixel, so text stays the same size in VR. A window launched floating uses the primary screen's density. Each window also has a scale (KWin's output scale), changed with Meta+scroll over the window in steps of 10% and remembered for each app. A bigger scale makes the content bigger at the same panel size. Notches that come while a change is under way add up into the next one, and the panel keeps its picture while KWin changes the scale (ft-screens' `hold`), so it goes from one scale to the next without the frames in between. Scrolling on the corner tab changes the density instead: the panel gets 5% bigger or smaller a notch with the same pixels (ft-floatd's `density`), from half to twice its screen's density, the tab staying under the laser. That's remembered for each app too.
 - **Window state.** An ordinary window, not maximized, placed inside its output with the margin around it, and set to show on all virtual desktops. It keeps its title bar and border. Apps that draw their own title bar (GTK, Chromium) keep theirs.
 - **Moving.** Press the title bar. KWin starts an interactive move on the press itself, before any motion, so ft-screens stops forwarding pointer motion to KWin as soon as a press lands in a floating window's title bar (from the frame and client rectangles ft-floatd sends it). KWin's pointer stays at the press point and the window moves by nothing. For apps that draw their own title bar, the script reports the move and ft-screens stops then (`carry`); ft-floatd puts back any few pixels the window slipped before that. Meanwhile ft-screens carries the panel with the pressing device, the same way the bar does: it follows rigidly, scroll pushes and pulls, and the 3D mouse's right-drag tilts. When the button comes up, KWin gets the release at the press point. The bar under the panel works too.
 - **Resizing.** The window's own edges (inside the margin, so KWin's resize works as on the desktop) and Frametop's corner tab both change the window's size in pixels at the same density, so the app lays itself out again. KWin ends a resize by the window's edge whenever an output changes, so during one the panel follows the window and the output follows only when the drag ends: the margin is the room to grow until then. The corner tab (and a hand's pinch at a corner, or two fists) only stretches the panel while it goes on, every frame, the opposite corner staying put; when it ends, the window gets that many pixels in one resize, ft-floatd resizes the output to keep the margin, and the panel keeps its stretched picture (`hold`) until the window's new one comes (user, 2026-10-27: "it doesn't actually update the pixels ratio and whatnot until I release so we can have the animation be smooth"). Before, each step resized the window and its output 20 times a second, and every output change made KWin reconfigure. A screen's tab only scales the panel. The minimum is 320 × 200, like screens.
@@ -111,20 +111,22 @@ Program names stay within 15 characters (`ft-floatd`). Overlay keys are `frameto
 - **New windows.** Popups and dialogs of a floating window (`transientFor`) show as small overlays over it. Another window of a floating app that opens on its output floats too, a little in front of it. Any other window that opens on a floating window's output goes to the first screen that shows. When every spare is in use, the window stays on the screens and a notification says so.
 - **On a hidden screen.** A new window that opens on a screen hidden on its own floats instead, where that app last floated or in front of you.
 
-## Tearing a window off a screen (not built)
+## Tearing a window off a screen
 
-The design for decision 3:
+Decision 3, built 2026-10-30 (DEE-246C):
 
-1. Press a desktop window's title bar and drag it. KWin starts a move, and the script tells ft-floatd, which tells ft-screens: `move-start <output> <window> <rect>`.
-2. While the button is held, the laser leaves every Frametop panel by more than a small dead zone (a few centimetres past the edge). Letting go inside the dead zone is an ordinary drop.
-3. ft-screens shows a ghost: an overlay showing the screen's live buffer cropped to the window (`SetOverlayTextureBounds`, no copy). It's at the screen's pixel density and distance, on the laser, facing you, with the point you grabbed under the laser. The ghost takes mouse input, so SteamVR's laser lands on it and the release comes to ft-screens.
-4. Go back onto a screen before letting go, and the ghost disappears. It's an ordinary move again.
-5. Let go on the ghost, and ft-screens releases the button in KWin, which ends the move. It then reports the tear-off to ft-floatd, with the window, the ghost's pose, and the density. ft-floatd enables a spare output and has ft-screens size it to the window plus the margin and put its panel at the ghost's pose. Then it has the script move the window onto that output. The ghost stays until the new panel's first frame at the right size arrives, so nothing blinks.
+1. Press a desktop window's title bar on a screen and move it. KWin starts an interactive move, the script reports it (`screen-move`), and ft-floatd passes it on to ft-screens (`moving <window> 1`, and `0` when the move ends).
+2. Pull the wheel (scroll toward you) during that move. ft-screens releases the button in KWin where the pointer is, which ends the move, and asks ft-floatd to float the window (`tear <window> <x> <y>`, the pointer's place on the screen in its pixels). The button stays held in ft-screens, and its release doesn't go to KWin.
+3. ft-floatd has the script float the window as the float key would, its panel in front of where the window was, and answers `torn <panel> <gx> <gy>`: where in the window the laser held it.
+4. ft-screens moves the panel so that point is on the laser and carries it with the laser that tore it, as by its title bar: the wheel pushes and pulls it, and carried onto a screen it docks there (see "Putting it back"). Letting go leaves it floating.
+5. If the answer takes more than a second, or the button is already up, the window stays floating where it came up.
+
+A hand's pinch doesn't tear: hands have no wheel. Only a real KWin move counts, so a pull while selecting text or dragging a file scrolls as usual.
 
 ## Putting it back
 
 - **Button.** The dock button returns the window to the screen, position, and size it had before it floated. If that screen is hidden now, it goes onto the first screen that shows.
-- **Dragging (not built).** Carry the floating window, by its title bar or its bar, until the spot you're pointing at is on a screen. Then push it flush with the screen, within about 10 cm of its surface: scroll away with the mouse, or move the controller forward. The screen shows where the window will land, and letting go docks it there at its current size in pixels, shrunk to fit if the screen is smaller. A carried panel keeps its distance, so moving a floating window in front of a screen never docks it by accident.
+- **Dragging.** Carry the floating window, by its title bar or its bar, until the point you hold it by is on a shown screen within 10 cm of its surface (`FLOAT_DOCK_DISTANCE`, 0 turns it off): push it there with the wheel, or move the controller or hand forward. The screen lights up, and letting go docks the window there (ft-floatd's `dockat`), the point you held under the laser, at its current size in pixels, shrunk to fit if the screen is smaller and kept on the screen. A carried panel keeps its distance, so moving a floating window in front of a screen never docks it by accident. With a hand, the line runs from your head through the panel.
 - Docking disables the output and hides the panel.
 
 ## Getting at it: the float key and the title bar button

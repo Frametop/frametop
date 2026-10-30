@@ -5399,6 +5399,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     }
                     break;
                 case vr::VREvent_ScrollDiscrete:
+                    // carried by its title bar: the wheel pushes it away or pulls it in, as on the bar
+                    // (user, 2026-10-30, DEE-246); KWin, moving the window, gets none
+                    if (s.titleCarry && s.drag == Drag::Move) return Push(s, ev.data.scroll.ydelta);
                     e.type = FT_SCROLL;
                     e.dx = -ev.data.scroll.xdelta;
                     e.dy = -ev.data.scroll.ydelta;

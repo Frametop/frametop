@@ -412,6 +412,7 @@ class Daemon:
         self.sub_numbers = {}    # popup/dialog id -> (window id, number)
         self.next_sub = 1
         self.launches = []       # Launch: apps we started, waiting for their window
+        self.tear = None         # (window id, x, y): torn off its screen by a pull, held there (ft-screens' "tear")
         self.captures = {}       # token -> (sender, what): "windows" and "spotlist" requests waiting for the script's report
         self.next_token = 1
         self.sock = None         # our socket (set by main), for deferred replies
@@ -482,6 +483,10 @@ class Daemon:
             return
         if wid in self.gone:
             return  # an event that came after the window closed (it would bring it back)
+        if kind == "screen-move":
+            # (not the window's whole state: kept out of self.windows) ft-screens tears it off on a pull
+            self.screens.ask(f"moving {wid} {1 if ev.get('moving') else 0}", quiet=True)
+            return
         if kind == "removed":
             self.gone.add(wid)
             self.windows.pop(wid, None)
@@ -685,6 +690,9 @@ class Daemon:
         wid = ev["id"]
         if wid in self.floats:
             return self.floats[wid]
+        tear = self.tear if self.tear and self.tear[0] == wid else None
+        if tear:
+            self.tear = None
         slot = self.free_slot()
         if slot is None:
             self.command(cmd="mark", id=wid)  # the title bar button set keep-below for nothing
@@ -714,6 +722,11 @@ class Daemon:
             self.pose(f, *place)
         else:
             self.place_panel(f, ev)
+        if tear:
+            # torn off: ft-screens carries it on with the laser that held it, by where it held it (pixels in it)
+            k, out = scales.get(ev["output"], 1.0) or 1.0, ev.get("outputRect") or {"x": 0, "y": 0}
+            gx, gy = round((out["x"] + tear[1] / k - fr["x"]) * s), round((out["y"] + tear[2] / k - fr["y"]) * s)
+            self.screens.ask(f"torn {slot.index} {gx} {gy}", quiet=True)
         kscreen(f"output.{slot.output}.enable", f"output.{slot.output}.scale.{s:g}",
                 f"output.{slot.output}.position.{slot.pos[0]},{slot.pos[1]}")
         self.rescaled(slot, s)
@@ -1326,6 +1339,18 @@ class Daemon:
                 self.command(cmd="activate", id=f.id)
             else:  # a screen: its output is WL-<N - 1>
                 self.command(cmd="activate-output", output=f"WL-{int(rest[0]) - 1}")
+            return "ok"
+        if cmd == "tear" and len(rest) == 3:
+            # ft-screens: a pull on the wheel while this window on a screen is moved by its title bar, held at
+            # x, y (pixels on its screen); KWin's move is over. It floats, and ft-screens carries it on.
+            try:
+                x, y = float(rest[1]), float(rest[2])
+            except ValueError:
+                return "error tear ID X Y"
+            if rest[0] in self.floats or rest[0] not in self.windows:
+                return f"error no window {rest[0]} on the screens"
+            self.tear = (rest[0], x, y)
+            self.command(cmd="request-float", id=rest[0])
             return "ok"
         if cmd == "dockat" and len(rest) == 6 and all(w.lstrip("-").isdigit() for w in rest):
             f = self.by_panel(int(rest[0]))

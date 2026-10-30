@@ -2104,15 +2104,25 @@ struct Press {
     double distance = 1;                      // from the laser's start to the last panel it met
     long upAt = -1;                           // the pointer helper saw left come up: release it at this tick
     int64_t idleSince = -1;                   // the pressing controller has held nothing since (ms, ReleaseStuck)
+    bool torn = false;                        // KWin has had the release: a window torn off its screen (TearOff)
 };
 Press g_press;
+// A window on a screen KWin moves by its title bar (KWin's script: "moving"), for TearOff. One press
+// moves one window: it's forgotten when the press starts and ends.
+struct KwinMove {
+    std::string window;   // KWin's id for the window, or empty
+    int64_t tornAt = -1;  // ms, when it was torn off
+};
+KwinMove g_kwinMove;
+constexpr int64_t kTearMs = 1000;
 vr::VROverlayHandle_t g_catcher = vr::k_ulOverlayHandleInvalid;
 bool g_catcherShown = false;
 
 uint32_t ButtonBit(uint32_t linuxButton) { return 1u << (linuxButton - BTN_LEFT); }
 
 void PressDown(vr::TrackedDeviceIndex_t dev, uint32_t button, int screen, double x, double y) {
-    if (!g_press.buttons) g_press.device = dev, g_press.origin = screen, g_press.remoteOn = screen;
+    if (!g_press.buttons)
+        g_press.device = dev, g_press.origin = screen, g_press.remoteOn = screen, g_press.torn = false, g_kwinMove.window.clear();
     g_press.buttons |= ButtonBit(button);
     g_press.screen = screen, g_press.x = x, g_press.y = y;
 }
@@ -2123,16 +2133,19 @@ void PressDown(vr::TrackedDeviceIndex_t dev, uint32_t button, int screen, double
 void ReleaseAway(uint32_t button, void (*handle)(const struct ft_event *, void *), void *data) {
     if (!(g_press.buttons & ButtonBit(button))) return;
     g_press.buttons &= ~ButtonBit(button);
-    if (!g_press.buttons) g_press.upAt = -1;
+    const bool torn = g_press.torn;
+    if (!g_press.buttons) g_press.upAt = -1, g_press.torn = false, g_kwinMove.window.clear();
     if (g_press.screen < 0) return;
     ft_event e{};
-    e.type = FT_BUTTON;
-    e.screen = g_press.screen;
-    e.button = button;
-    e.pressed = false;
-    e.x = g_press.x, e.y = g_press.y;
-    handle(&e, data);
-    std::printf("caught a release off the screens (button %u)\n", button);
+    if (!torn) {
+        e.type = FT_BUTTON;
+        e.screen = g_press.screen;
+        e.button = button;
+        e.pressed = false;
+        e.x = g_press.x, e.y = g_press.y;
+        handle(&e, data);
+        std::printf("caught a release off the screens (button %u)\n", button);
+    }
     if (g_press.buttons) return;
     e = ft_event{};
     e.type = FT_LEAVE;
@@ -2409,6 +2422,53 @@ uint32_t LinuxButton(uint32_t vrButton) {
 void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handle)(const struct ft_event *, void *),
                    void *data) {
     if (g_press.buttons && dev == g_press.device) ReleaseAway(LinuxButton(vrButton), handle, data);
+}
+
+// Tearing a window off its screen (user, 2026-10-30, DEE-246C): moving it by its title bar on a screen (a
+// real KWin move, which KWin's script reports: "moving"), a pull on the wheel floats it, and the laser
+// carries it on from there. KWin gets the release at the tear, which ends its move; the button stays held
+// here (g_press.torn) and its release goes to KWin no more. ft-floatd floats the window and answers "torn"
+// with where in it the laser held it; if that takes longer than kTearMs, it stays floating where it came up.
+bool TearOff(Screen &s, int index, void (*handle)(const struct ft_event *, void *), void *data) {
+    if (g_kwinMove.window.empty() || s.floating || s.remote || g_press.torn || !(g_press.buttons & ButtonBit(BTN_LEFT)) ||
+        g_press.screen != index || IsHandHolder(g_press.device))
+        return false;
+    ft_event e{};
+    e.type = FT_BUTTON;
+    e.screen = index;
+    e.button = BTN_LEFT;
+    e.pressed = false;
+    e.x = g_press.x, e.y = g_press.y;
+    handle(&e, data);
+    g_press.torn = true;
+    g_kwinMove.tornAt = NowMs();
+    std::printf("screen %d: window %s torn off at %.0f,%.0f\n", index + 1, g_kwinMove.window.c_str(), g_press.x, g_press.y);
+    char x[64];
+    std::snprintf(x, sizeof x, " %.0f %.0f", g_press.x, g_press.y);
+    SendFloat("tear " + g_kwinMove.window + x);
+    g_kwinMove.window.clear();
+    return true;
+}
+
+// ft-floatd floated the torn-off window on panel s: the laser that tore it carries it on, holding it at
+// gx, gy (pixels in the window).
+void CarryTorn(Screen &s, int index, int gx, int gy) {
+    if (!g_press.torn || !(g_press.buttons & ButtonBit(BTN_LEFT)) || g_kwinMove.tornAt < 0 ||
+        NowMs() - g_kwinMove.tornAt > kTearMs) {
+        std::printf("screen %d: torn off, left floating (%s)\n", index + 1,
+                    g_press.torn && (g_press.buttons & ButtonBit(BTN_LEFT)) ? "too late" : "let go");
+        g_kwinMove.tornAt = -1;
+        return;
+    }
+    g_kwinMove.tornAt = -1;
+    Mat p, l;
+    double u, v;
+    if (ScreenPose(s, &p) && LaserPose(g_press.device, &l) && RayOnSurface(s, p, l, &u, &v)) {
+        // the point it was held by, onto the laser
+        const double hu = (gx - s.cropW / 2.0) * s.mpp, hv = s.heightMetres() / 2 - gy * s.mpp;
+        SetAbsolute(s, Mul(p, Translation(u - hu, v - hv, 0)));
+    }
+    StartDrag(s, Drag::Move, g_press.device);
 }
 
 // Where a laser meets a panel's surface, in the panel's u (metres along it from the centre,
@@ -5432,7 +5492,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             auto at = [&] { s.ToBuffer(ev.data.mouse.x, ev.data.mouse.y, &e.x, &e.y); };
             switch (ev.eventType) {
                 case vr::VREvent_MouseMove:
-                    if (s.titleCarry) return;  // KWin's pointer stays where the title bar was pressed
+                    // KWin's pointer stays where the title bar was pressed (or a torn-off window was: KWin's had its release)
+                    if (s.titleCarry || g_press.torn) return;
                     // a hand holds the button, or moved this panel's pointer just now: it's the hand's
                     if ((g_press.buttons && IsHandHolder(g_press.device)) || NowMs() - s.handPointerMs < kHandPointerMs) return;
                     e.type = FT_MOTION;
@@ -5445,6 +5506,12 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 case vr::VREvent_MouseButtonDown:
                 case vr::VREvent_MouseButtonUp:
                     if (ev.eventType == vr::VREvent_MouseButtonUp) EndDragsBy(ev.trackedDeviceIndex);
+                    if (ev.eventType == vr::VREvent_MouseButtonUp && g_press.torn && ev.trackedDeviceIndex == g_press.device) {
+                        // a torn-off window let go: KWin had its release at the tear
+                        g_press.buttons &= ~ButtonBit(LinuxButton(ev.data.mouse.button));
+                        if (!g_press.buttons) g_press.upAt = -1, g_press.torn = false;
+                        return;
+                    }
                     e.type = FT_BUTTON;
                     e.button = LinuxButton(ev.data.mouse.button);
                     e.pressed = ev.eventType == vr::VREvent_MouseButtonDown;
@@ -5467,13 +5534,19 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                         }
                     } else {
                         g_press.buttons &= ~ButtonBit(e.button);
-                        if (!g_press.buttons) g_press.upAt = -1;
+                        if (!g_press.buttons) g_press.upAt = -1, g_kwinMove.window.clear();
                     }
                     break;
                 case vr::VREvent_ScrollDiscrete:
                     // carried by its title bar: the wheel pushes it away or pulls it in, as on the bar
                     // (user, 2026-10-30, DEE-246); KWin, moving the window, gets none
                     if (s.titleCarry && s.drag == Drag::Move) return Push(s, ev.data.scroll.ydelta);
+                    if (g_press.torn) {  // a torn-off window: carried, as by its title bar; not floating yet, none
+                        if (s.drag == Drag::Move) Push(s, ev.data.scroll.ydelta);
+                        return;
+                    }
+                    // a pull on a window KWin moves on its screen tears it off (TearOff)
+                    if (!sub && ev.data.scroll.ydelta < 0 && TearOff(s, index, handle, data)) return;
                     e.type = FT_SCROLL;
                     e.dx = -ev.data.scroll.xdelta;
                     e.dy = -ev.data.scroll.ydelta;
@@ -6128,6 +6201,19 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
         s->minimized = on != 0;
         UpdateVisibility();
+        std::snprintf(reply, size, "ok");
+    } else if (!std::strncmp(cmd, "moving ", 7)) {
+        // KWin's script: a window on a screen started (1) or stopped (0) moving by its title bar (TearOff)
+        char wid[64];
+        int on;
+        if (std::sscanf(cmd, "moving %63s %d", wid, &on) != 2) return (void)std::snprintf(reply, size, "error moving ID 0|1");
+        if (on) g_kwinMove.window = wid;
+        else if (g_kwinMove.window == wid) g_kwinMove.window.clear();
+        std::snprintf(reply, size, "ok");
+    } else if (int gx, gy; std::sscanf(cmd, "torn %d %d %d", &n, &gx, &gy) == 3) {
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        CarryTorn(*s, n - 1, gx, gy);
         std::snprintf(reply, size, "ok");
     } else if (std::sscanf(cmd, "carry %d", &n) == 1) {
         Screen *s = Find(n);

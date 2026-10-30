@@ -189,6 +189,10 @@ HAND_INTERACTIONS = [
     ("HANDS_TRACK_GATE", True, "1", "Feedback", "Steady through tracking glitches",
      "A held screen ignores impossible jumps of the hand and holds still when the hand leaves the cameras' view."),
 ]
+# Where the lazy susan brings a screen (SCREEN_SPIN_DISTANCE, m): the Hands page's slider under
+# "Lazy susan brings screens to you", sent live to ft-screens ("spindistance M"). At least 0.9 m,
+# behind frunner's search; a screen pushed or pulled in the slot keeps its own until the reset button.
+SPIN_DISTANCE_DEFAULT, SPIN_DISTANCE_MIN, SPIN_DISTANCE_MAX, SPIN_DISTANCE_STEP = 1.0, 0.9, 3.0, 0.05
 sys.path.insert(0, os.path.join(REPO, "voice"))
 import voice_commands  # noqa: E402  Frametop Voice's commands and settings (standard library)
 import voice_settings  # noqa: E402
@@ -512,6 +516,7 @@ class Backend(QObject):
     panelsChanged = Signal()
     pauseChanged = Signal()
     handsChanged = Signal()
+    spinChanged = Signal()  # (its own: handsChanged rebuilds the switches every 5 s, mid-drag too)
     voiceChanged = Signal()
     activity = Signal(str)  # device id
     captured = Signal(int, str)  # code, name
@@ -1822,6 +1827,28 @@ class Backend(QObject):
             self._send(f"handsetting {key} {1 if on else 0}", SCREENS)
         self.handsChanged.emit()
         self.message.emit(f"{entry[4]}: {'on' if on else 'off'}", False)
+
+    @Property("QVariantMap", constant=True)
+    def spinDistanceRange(self):
+        return {"min": SPIN_DISTANCE_MIN, "max": SPIN_DISTANCE_MAX, "step": SPIN_DISTANCE_STEP,
+                "default": SPIN_DISTANCE_DEFAULT}
+
+    @Property(float, notify=spinChanged)
+    def spinDistance(self):
+        """SCREEN_SPIN_DISTANCE as ft-screens takes it: never nearer than 0.9 m (frunner's spot), at most 3."""
+        try:
+            v = float(read_conf().get("SCREEN_SPIN_DISTANCE", ""))
+        except ValueError:
+            return SPIN_DISTANCE_DEFAULT
+        return min(max(v, SPIN_DISTANCE_MIN), SPIN_DISTANCE_MAX)
+
+    @Slot(float)
+    def setSpinDistance(self, value):
+        """SCREEN_SPIN_DISTANCE, and to ft-screens now: the next screen the lazy susan brings comes that far."""
+        value = format(round(min(max(value, SPIN_DISTANCE_MIN), SPIN_DISTANCE_MAX), 2), "g")
+        write_conf_value("SCREEN_SPIN_DISTANCE", value)
+        self._send(f"spindistance {value}", SCREENS)
+        self.spinChanged.emit()
 
     @Property("QVariantMap", constant=True)
     def handsMarginRange(self):

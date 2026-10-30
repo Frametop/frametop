@@ -5883,6 +5883,12 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         if (on < 0 || !SetHandSetting(key, on)) return (void)std::snprintf(reply, size, "error handsetting <HANDS_...> 0|1");
         std::printf("hands: %s %s (Input Settings)\n", key, on ? "on" : "off");
         std::snprintf(reply, size, "ok %s %d", key, on);
+    } else if (double m; std::sscanf(cmd, "spindistance %lf", &m) == 1) {
+        // SCREEN_SPIN_DISTANCE now (Input Settings' Hands page, Gestures, writes frametop.conf too): the next
+        // screen brought comes this far out (one pushed or pulled in the slot keeps its own)
+        g_frontReading = std::clamp(m, spotreserve::kDistance + spotreserve::kFrontGap, kFrontFarthest);
+        std::printf("front: screens come %.2f m out (Input Settings)\n", g_frontReading);
+        std::snprintf(reply, size, "ok %.2f", g_frontReading);
     } else if (char sl[16], sr[16]; std::sscanf(cmd, "hands %15s %15s %d", sl, sr, &n) == 3) {
         const bool l = !std::strcmp(sl, "hand"), r = !std::strcmp(sr, "hand"), allowed = n != 0;
         if (l != g_handsWord.hand[0] || r != g_handsWord.hand[1] || allowed != g_handsWord.allowed)

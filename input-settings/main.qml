@@ -1735,6 +1735,8 @@ Kirigami.ApplicationWindow {
             header: DriverWarning {}
             property var st: backend.handsStatus
             readonly property var range: backend.handsMarginRange
+            readonly property var spinRange: backend.spinDistanceRange
+            readonly property int spinAt: backend.handInteractions.findIndex(e => e.key === "SCREEN_SPIN_BRING")
             // What runs, and why it can't: asked on the host, while this page is open.
             Timer {
                 running: true
@@ -1848,11 +1850,50 @@ Kirigami.ApplicationWindow {
                 }
 
                 // Every interaction on Frametop's screens, each on its own (ft_input_settings.HAND_INTERACTIONS);
-                // they apply at once. Direct touch above switches all of them.
+                // they apply at once. Direct touch above switches all of them. The lazy susan's distance
+                // (SCREEN_SPIN_DISTANCE) goes under its switch, so the list is in two.
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand interactions" }
                 Repeater {
-                    model: backend.handInteractions
-                    delegate: Controls.Switch {
+                    model: backend.handInteractions.slice(0, hpage.spinAt + 1)
+                    delegate: interactionSwitch
+                }
+                RowLayout {
+                    enabled: !!backend.handMethods.touch && hpage.spinAt >= 0 && backend.handInteractions[hpage.spinAt].on
+                    Controls.Label { text: "Comes" }
+                    Controls.Slider {
+                        id: spinSlider
+                        from: hpage.spinRange.min
+                        to: hpage.spinRange.max
+                        stepSize: hpage.spinRange.step
+                        snapMode: Controls.Slider.SnapAlways
+                        value: backend.spinDistance
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                        onMoved: backend.setSpinDistance(value)
+                        Controls.ToolTip.visible: hovered
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        Controls.ToolTip.text: "How far in front of you a brought screen comes (at least 0.9 m, behind "
+                            + "frunner's search). One you push or pull there comes back that far next time, until the reset button."
+                    }
+                    Controls.Label {
+                        text: spinSlider.value.toFixed(2) + " m out"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                    }
+                    Controls.ToolButton {
+                        icon.name: "edit-undo"
+                        display: Controls.AbstractButton.IconOnly
+                        text: "Default (" + hpage.spinRange.default + " m)"
+                        Controls.ToolTip.text: text
+                        Controls.ToolTip.visible: hovered
+                        onClicked: { spinSlider.value = hpage.spinRange.default; backend.setSpinDistance(hpage.spinRange.default) }
+                    }
+                }
+                Repeater {
+                    model: backend.handInteractions.slice(hpage.spinAt + 1)
+                    delegate: interactionSwitch
+                }
+                Component {
+                    id: interactionSwitch
+                    Controls.Switch {
                         required property var modelData
                         Kirigami.FormData.label: modelData.group ? modelData.group + ":" : ""
                         text: modelData.label

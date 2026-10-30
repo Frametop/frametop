@@ -9,6 +9,17 @@ from pathlib import Path
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self):
+        # worn and release write and clear the fake-worn flag: a temp runtime dir, never this
+        # machine's (a run under way keeps its flag), and no real guard unit.
+        from frame_testbench import hostinput
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for patch in (mock.patch.dict('os.environ', {'XDG_RUNTIME_DIR': tmp.name}),
+                      mock.patch.object(hostinput, 'start_guard', mock.Mock(return_value=1))):
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def module(self):
         try:
             from frame_testbench import cli
@@ -136,16 +147,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(bench.commands[-1], ('native', ('setting', 'true')))
 
     def no_host_streams(self):
-        """The host-input guard against a temp runtime dir and no streams, not this machine's."""
+        """The host-input guard with no streams, not this machine's."""
         from frame_testbench import hostinput
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        for patch in (mock.patch.dict('os.environ', {'XDG_RUNTIME_DIR': tmp.name}),
-                      mock.patch.object(hostinput, 'state', lambda detail=False: {
-                          'input_hosts': [], 'input_streams': [], 'fake_worn': hostinput.read_flag()})):
-            patch.start()
-            self.addCleanup(patch.stop)
-        return Path(tmp.name)
+        patch = mock.patch.object(hostinput, 'state', lambda detail=False: {
+            'input_hosts': [], 'input_streams': [], 'fake_worn': hostinput.read_flag()})
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def test_worn_and_release(self):
         cli, bench = self.module(), self.bench()

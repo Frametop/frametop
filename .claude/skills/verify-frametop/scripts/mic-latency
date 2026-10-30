@@ -9,7 +9,8 @@ burst was due to play into the source ft-stream recorded. RECORDING is the host'
 format ffmpeg reads), whose first sample was taken at host wall time --start; without --start,
 that comes from its packets' wall-clock times (ffmpeg -use_wallclock_as_timestamps 1 -t SECONDS
 -i ... -copyts writes them; an output -t there ends the recording at once). --offset-ms is the host's clock minus the Frame's. Each burst heard in the recording (a
-rise out of half a second of quiet) is matched to the latest burst played up to 2 s before it.
+rise out of half a second of quiet) is matched to the burst played up to 0.9 s before it: with
+bursts a second apart, a latency over that can't be measured, and shows as missed bursts.
 Prints JSON: matched and missed bursts and the latency's median, spread and drift over the test.
 Needs ffmpeg and ffprobe.
 """
@@ -21,7 +22,7 @@ import subprocess
 import sys
 
 RATE, WINDOW = 48000, 48   # 1 ms envelope windows
-QUIET_S, MAX_LATENCY_S = 0.5, 2.0
+QUIET_S, MAX_LATENCY_S = 0.5, 0.9   # bursts come a second apart: a later one can't be told from the next
 
 
 def decode(path):

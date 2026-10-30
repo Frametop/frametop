@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """verify-frametop: launch, check, snapshot and clean up a verification run on the live Frame.
 
-  verify-frametop doctor               read-only: is this Frame worth driving? (exit 0 yes,
+  verify-frametop doctor               is this Frame worth driving? (exit 0 yes,
                                        1 not ready, 2 the headset is worn: refuse)
   verify-frametop launch [NAME] [--allow-host-input]
                                        doctor, then claim the run (one at a time) and make its
@@ -25,9 +25,10 @@
                                        address; its first display, or CLIENT) for N seconds
                                        (default 20) through the release's ft-stream in the
                                        Frametop container, with a fake viewer in place of
-                                       ft-screens, into RUN/stream-CLIENT-TIME/. It holds the
-                                       host's input lock throughout, so this stream can't lease
-                                       the host's keyboard and mouse, unless --allow-host-input
+                                       ft-screens, into RUN/stream-CLIENT-TIME/. The viewer holds
+                                       the host's input lock as long as it runs, so this stream
+                                       can't lease the host's keyboard and mouse, unless
+                                       --allow-host-input
                                        (only once the user allows it). It connects to the host:
                                        only for a host the user allowed in this session.
                                        --mic-bursts: ft-stream records a pipe source that gets
@@ -47,8 +48,10 @@
                                        reply for that long (`ask frametop_relay 'watch 5' --listen 5`)
 
 A faked wearer (`worn on`) makes ft-stream lease a streamed host's own keyboard and mouse
-(docs/host-input.md): the testbench refuses `worn on` while such a stream is live, and drops it
-when one starts, unless it was given --allow-host-input; launch and guard hold the run to the same.
+(docs/host-input.md): the testbench refuses `worn on` while such a stream is live, and otherwise
+holds every such host's input lock in a guard while the wearer is faked, unless it was given
+--allow-host-input; launch and guard hold the run to the same. Doctor changes nothing, except
+that its `T host-input` releases a faked wearer whose guard has gone.
 
 A run is claimed for LEASE seconds from its last launch, guard or snapshot, so two agents
 don't drive the one headset at once; its cleanup frees it.
@@ -62,6 +65,7 @@ import json
 import math
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -214,13 +218,16 @@ def host_input_check(state):
     """(ok, detail) for the doctor: no stream from a host that lends its keyboard and mouse."""
     if not state.get('ok'):
         return False, f'unread: {state.get("error")}'
+    if state.get('fake_worn') and not state.get('guarded'):
+        return False, ("a faked wearer has no guard holding the hosts' input locks: "
+                       'verify-frametop cleanup')
     live = state.get('input_streams') or []
     if not live:
         return True, 'none' + (f' (lends input: {", ".join(state["input_hosts"])}; not streaming)'
                                if state.get('input_hosts') else '')
     return False, ('a faked wearer would take the keyboard and mouse of '
                    + ', '.join(sorted({s.get("name") or s.get("host") for s in live}))
-                   + ': launch --allow-host-input only once the user allows it')
+                   + ': wait for that stream to end, or launch --allow-host-input once the user allows it')
 
 
 def doctor():
@@ -333,9 +340,8 @@ def launch(name, allow_host_input=False):
     failed = {c['name'] for c in report['checks'] if not c['ok']} - {'Frametop release', 'hand tracking'}
     if 'no host-input streams' in failed and not allow_host_input:
         print(json.dumps(report, indent=2))
-        sys.exit('verify-frametop: a remote display streams from a host that lends Frametop its keyboard '
-                 'and mouse: a faked wearer would take them. Turn its displays off, or launch '
-                 '--allow-host-input once the user allows it')
+        detail = next(c['detail'] for c in report['checks'] if c['name'] == 'no host-input streams')
+        sys.exit(f'verify-frametop: no host-input streams: {detail}')
     if code and failed - {'no host-input streams'}:
         print(json.dumps(report, indent=2))
         sys.exit('verify-frametop: not ready (see the failed checks; overrides left by an earlier '
@@ -396,18 +402,50 @@ def snapshot(label, capture):
     print(json.dumps(result, indent=2))
 
 
-def input_lock(host):
-    """Take HOST's input lock (ft-stream's $XDG_RUNTIME_DIR/frametop-input-HOST.lock, named as
-    stream/hostinput.h's RelayId does), so no stream leases its keyboard and mouse while it's held;
-    the fd, or None if another process holds it."""
+def lock_name(host):
+    """HOST's input lock, ft-stream's $XDG_RUNTIME_DIR/frametop-input-HOST.lock, named as
+    stream/hostinput.h's RelayId does (and frame_testbench/hostinput.py's lock_path)."""
     rid = ''.join(c if c.isalnum() or c in '._-' else '-' for c in host[:64]) or 'host'
-    fd = os.open(RUNTIME / f'frametop-input-{rid}.lock', os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+    return RUNTIME / f'frametop-input-{rid}.lock'
+
+
+def lock_free(host):
+    """Whether nobody holds HOST's input lock (taken and given back at once to see)."""
+    fd = os.open(lock_name(host), os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
     except BlockingIOError:
+        return False
+    finally:
         os.close(fd)
-        return None
-    return fd
+
+
+class Stopped(Exception):
+    pass
+
+
+def stopped(*_):
+    raise Stopped()
+
+
+def kill_viewer(out, wait=5.0):
+    """Kill the fake viewer and its ft-stream: a signal to in-box doesn't reach the container,
+    but it shares our pid namespace. viewer.json names them once the viewer has started."""
+    end = time.monotonic() + wait
+    while True:
+        try:
+            pids = list(json.loads((out / 'viewer.json').read_text()).values())
+            break
+        except (OSError, ValueError):
+            if time.monotonic() > end:
+                return
+            time.sleep(0.1)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 def pipe_source(fifo):
@@ -452,18 +490,17 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=F
     live = [cmd for cmd in proc_cmdlines() if cmd[:2] == ['ft-stream', 'stream'] and client in cmd]
     if live:
         sys.exit(f'verify-frametop: a remote display already streams as {client}: turn it off first')
-    lock = None
-    if not allow_host_input:
-        lock = input_lock(address)
-        if lock is None:
-            sys.exit(f'verify-frametop: another stream holds {entry.get("name")}\'s input lock: '
-                     'turn its displays off first')
+    if not allow_host_input and not lock_free(address):
+        sys.exit(f'verify-frametop: another stream holds {entry.get("name")}\'s input lock: wait for it '
+                 'to end')
     exe = RELEASES / 'current' / 'stream' / 'build' / 'ft-stream'
     width, height = (display.get('size') or [1920, 1080])[:2]
     stamp = datetime.now().strftime('%H%M%S')
     out = next(f for n in range(1, 100) if not (f := run / f'stream-{client}-{stamp}{"" if n == 1 else f"-{n}"}').exists())
     LOCK.touch()   # the lease runs on
-    modules, players = [], []
+    modules, players, viewer, ended = [], [], None, False
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, stopped)
     try:
         out.mkdir(mode=0o700)
         env = []
@@ -472,10 +509,14 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=F
             fifo = RUNTIME / f'{MIC_SOURCE}.fifo'
             modules = [pipe_source(fifo)]
             env = ['env', f'PULSE_SOURCE={MIC_SOURCE}']
-        viewer = subprocess.Popen(
-            [str(RELEASES / 'current' / 'scripts' / 'in-box'), *env, 'python3', str(VIEWER), str(exe), address,
-             client, display.get('app') or 'primary', f'{width}x{height}', '30', '20000', str(seconds), str(out)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=open(out / 'in-box.log', 'wb'))
+        # The viewer holds the input lock itself, so it goes when the stream does, however this
+        # process ends.
+        with open(out / 'in-box.log', 'wb') as log:
+            viewer = subprocess.Popen(
+                [str(RELEASES / 'current' / 'scripts' / 'in-box'), *env, 'python3', str(VIEWER), str(exe), address,
+                 client, display.get('app') or 'primary', f'{width}x{height}', '30', '20000', str(seconds), str(out),
+                 *([] if allow_host_input else [str(lock_name(address))])],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
         if mic_bursts:
             # Bursts only once ft-stream records: until then nothing drains the FIFO, and what
             # waited in it would count as latency.
@@ -489,27 +530,25 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=F
                                                 stdout=pipe)]
         try:
             viewer.wait(seconds + 60)   # the container may need starting; the viewer ends itself
+            ended = True
         except subprocess.TimeoutExpired:
-            # A signal to in-box doesn't reach the container, but it shares our pid namespace.
-            try:
-                pids = json.loads((out / 'viewer.json').read_text()).values()
-            except (OSError, ValueError):
-                pids = []
-            for pid in pids:
-                try:
-                    os.kill(pid, 9)
-                except OSError:
-                    pass
+            pass
+    except Stopped:
+        print('verify-frametop: stopped: ending the stream', file=sys.stderr, flush=True)
+    finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)   # the cleanup runs to its end
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if viewer is not None and not ended:
+            kill_viewer(out)
             viewer.kill()
             viewer.wait()
-    finally:
         for player in players:
             player.terminate()
             player.wait()
         for module in modules:
             subprocess.run(['pactl', 'unload-module', module], capture_output=True)
-        if lock is not None:
-            os.close(lock)
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(sig, signal.SIG_DFL)
     try:
         result = json.loads((out / 'result.json').read_text())
     except (OSError, ValueError):
@@ -517,7 +556,7 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=F
     states = [s for _, s in result.get('states', [])]
     summary = {'ok': any(s.startswith('live') for s in states) and result.get('frames', 0) > 0,
                'host': entry.get('name'), 'client': client, 'app': display.get('app'),
-               'input_lock_held': lock is not None,
+               'input_lock_held': result.get('input_lock') is True,
                'folder': str(out), **result}
     if mic_bursts:
         try:

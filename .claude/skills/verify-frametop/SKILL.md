@@ -31,16 +31,19 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
 - Never take a streamed host's keyboard and mouse. ft-stream leases a host's input while the
   headset is worn (docs/host-input.md), and a faked wearer counts: on 2026-10-30 a run took
   Daenon's laptop mid-sentence. `V launch` refuses while a remote display streams from a host with
-  `"input": true` (doctor's "no host-input streams"; `T host-input` lists them), `T worn on`
-  refuses then too, every `T` command drops a faked wearer once such a stream starts, and
-  `V guard` stops the run with exit 3. Don't work around it: no layout edits, no turning hosts'
-  displays off to get a run through. `V launch NAME --allow-host-input` and
-  `T worn on --allow-host-input` are only for a test the user allowed in this session, in their
-  words; quote them in the report. A step that needs the wearer goes to HEADSET-TESTS.md instead.
+  `"input": true` (doctor's "no host-input streams"; `T host-input` lists them), and so does
+  `T worn on`. Otherwise `T worn on` starts a guard (user unit `frametop-fake-worn-guard`) that
+  holds every such host's input lock while the wearer is faked, so a stream that starts later
+  can't lease either; every `T` command releases a faked wearer whose guard has gone, and
+  `V guard` stops the run with exit 3 when such a stream starts or the guard is gone. Don't work
+  around it: no layout edits, no turning hosts' displays off, no stopping the guard to get a run
+  through. `V launch NAME --allow-host-input` and `T worn on --allow-host-input` are only for a
+  test the user allowed in this session, in their words; quote them in the report. A step that
+  needs the wearer goes to HEADSET-TESTS.md instead.
 - Never connect to a Vibepollo host unless the user allowed that host in this session: a stream
   can change the host's displays and plays its sound here. `V stream HOST` is the only way a run
-  streams, and it holds the host's input lock for the whole stream, so that stream can't lease
-  the host's keyboard and mouse; `--allow-host-input` drops that, under the rule above.
+  streams, and its viewer holds the host's input lock for the whole stream, so that stream can't
+  lease the host's keyboard and mouse; `--allow-host-input` drops that, under the rule above.
 - Every run ends with `V cleanup RUN` (the folder `V launch` printed), even after a failure: it
   turns the displays back on, runs `T release` (worn, pose, HMD buttons, controllers, fake eyes
   and hands) and `T compositor auto`, puts gaze mode back as the run found it, and frees the
@@ -89,7 +92,8 @@ left over and exits 1; that is expected until `V cleanup`.
 
 ## Doctor
 
-`V doctor` is read-only and prints JSON checks; exit 0 drive, 1 not ready, 2 worn (refuse):
+`V doctor` changes nothing (its `T host-input` only releases a faked wearer whose guard has gone)
+and prints JSON checks; exit 0 drive, 1 not ready, 2 worn (refuse):
 
 - the headset isn't worn (proximity sensor, through the testbench proxy)
 - `vrserver` and `vrcompositor` run
@@ -193,7 +197,7 @@ A diff touching these gets the extra reviewer (Codex) in the review panel:
 ## Helpers
 
 - `scripts/verify-frametop`: `doctor`, `launch [NAME] [--allow-host-input]`, `guard`, `snapshot LABEL [--capture]`,
-  `stream HOST [--display CLIENT] [--seconds N] [--allow-host-input]`, `cleanup [RUN] [--force]`,
+  `stream HOST [--display CLIENT] [--seconds N] [--allow-host-input] [--mic-bursts]`, `cleanup [RUN] [--force]`,
   `ask NAME MESSAGE [--listen S]`. `--help` prints the usage. Python 3 standard library only;
   runs on the SteamOS host.
 - `scripts/fake-viewer`: ft-screens' side of one remote display, headless. `V stream` runs it in

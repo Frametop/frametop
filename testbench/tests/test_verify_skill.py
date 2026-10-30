@@ -282,7 +282,7 @@ class VerifySkillTests(unittest.TestCase):
         report, code = self.v.doctor()
         self.assertEqual(code, 1)
         self.assertIn('oma7', self.check(report, 'no host-input streams')['detail'])
-        with self.assertRaisesRegex(SystemExit, 'lends Frametop its keyboard'), \
+        with self.assertRaisesRegex(SystemExit, 'keyboard and mouse of oma7'), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.v.launch('x')
         self.assertFalse(self.v.LOCK.exists())
@@ -293,6 +293,15 @@ class VerifySkillTests(unittest.TestCase):
         self.assertEqual(self.run_main('launch', 'allowed', '--allow-host-input')[0], 0)
         self.assertTrue(json.loads(self.v.LOCK.read_text())['allow_host_input'])
         self.assertEqual(self.run_main('guard')[0], 0)   # allowed: the run goes on
+
+    def test_doctor_fails_a_faked_wearer_without_its_guard(self):
+        self.replies[('host-input',)] = dict(self.OMA7, input_streams=[], guarded=False,
+                                             fake_worn={'pid': 9, 'allow_host_input': False})
+        report, code = self.v.doctor()
+        self.assertEqual(code, 1)
+        self.assertIn('no guard', self.check(report, 'no host-input streams')['detail'])
+        self.replies[('host-input',)]['guarded'] = True
+        self.assertTrue(self.check(self.v.doctor()[0], 'no host-input streams')['ok'])
 
     def test_launch_with_the_allow_still_refuses_anything_else_unready(self):
         self.replies[('host-input',)] = self.OMA7
@@ -323,12 +332,10 @@ class VerifySkillTests(unittest.TestCase):
 
         def popen(argv, **kwargs):
             seen['argv'] = argv
-            probe = self.v.input_lock(argv[4])
-            seen['locked'] = probe is None   # the stream's own lock blocks anyone else
-            if probe is not None:
-                os.close(probe)
-            out = Path(argv[-1])
-            (out / 'result.json').write_text(json.dumps(result))
+            lock = argv[-1] if argv[-1].endswith('.lock') else None   # as the viewer: it takes the lock
+            seen['lock'] = lock
+            out = Path(argv[-2] if lock else argv[-1])
+            (out / 'result.json').write_text(json.dumps(dict(result, input_lock=lock is not None)))
             return mock.Mock(wait=mock.Mock(return_value=0))
         for name, value in (('LAYOUT', layout), ('proc_cmdlines', lambda: self.cmdlines)):
             patch = mock.patch.object(self.v, name, value)
@@ -349,18 +356,40 @@ class VerifySkillTests(unittest.TestCase):
         code, out = self.run_main('stream', 'Deej-5090', '--seconds', '5')
         summary = json.loads(out)
         self.assertEqual((code, summary['ok'], summary['input_lock_held']), (0, True, True))
-        self.assertTrue(seen['locked'])
+        self.assertEqual(seen['lock'], str(self.v.RUNTIME / 'frametop-input-192.168.1.93.lock'))
         self.assertEqual(seen['argv'][1:9], ['python3', str(self.v.VIEWER),
                                              str(self.v.RELEASES / 'current/stream/build/ft-stream'),
                                              '192.168.1.93', 'frametop-deej-5090-oled', 'display:{b7ae}',
                                              '3440x1440', '30'])
         self.assertTrue((Path(summary['folder']) / 'summary.json').exists())
-        probe = self.v.input_lock('192.168.1.93')   # given back afterwards
-        self.assertIsNotNone(probe)
-        os.close(probe)
+        self.assertTrue(self.v.lock_free('192.168.1.93'))   # only probed here: the viewer holds it
         code, out = self.run_main('stream', '192.168.1.93', '--allow-host-input')
-        self.assertFalse(seen['locked'])
+        self.assertIsNone(seen['lock'])
         self.assertFalse(json.loads(out)['input_lock_held'])
+
+    def test_a_stopped_stream_kills_the_viewer_and_unloads_the_source(self):
+        self.stream_fixture({'states': [], 'frames': 0, 'exit': None})
+        self.run_main('launch', 'stop')
+        killed, pactl = [], []
+        # SIGTERM while it waits for the viewer (the poll says it ran: no bursts to start)
+        viewer = mock.Mock(wait=mock.Mock(side_effect=[self.v.Stopped(), 0]), poll=mock.Mock(return_value=0))
+
+        def popen(argv, **kwargs):
+            out = Path(argv[-2])
+            (out / 'viewer.json').write_text(json.dumps({'viewer': 111, 'ft_stream': 112}))
+            return viewer
+
+        def run(argv, **kwargs):
+            pactl.append(argv[1])
+            return mock.Mock(returncode=0, stdout='7\n')
+        with mock.patch.object(self.v.subprocess, 'Popen', popen), mock.patch.object(self.v.subprocess, 'run', run), \
+                mock.patch.object(self.v.os, 'kill', lambda pid, sig: killed.append((pid, sig))), \
+                mock.patch.object(self.v, 'source_running', lambda name: False):
+            self.run_main('stream', 'Deej-5090', '--seconds', '20', '--mic-bursts')
+        self.assertEqual(sorted(killed), [(111, self.v.signal.SIGKILL), (112, self.v.signal.SIGKILL)])
+        viewer.kill.assert_called_once()
+        self.assertEqual(pactl, ['load-module', 'unload-module'])
+        self.assertIs(self.v.signal.getsignal(self.v.signal.SIGTERM), self.v.signal.SIG_DFL)
 
     def test_stream_refuses_what_would_take_a_display_or_a_lock(self):
         self.stream_fixture({'states': [[1.0, 'lost not paired']], 'frames': 0, 'exit': 1})
@@ -376,7 +405,8 @@ class VerifySkillTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'already streams'):
             self.run_main('stream', 'Deej-5090')
         self.cmdlines = []
-        held = self.v.input_lock('192.168.1.93')
+        held = os.open(self.v.lock_name('192.168.1.93'), os.O_RDWR | os.O_CREAT)
+        self.v.fcntl.flock(held, self.v.fcntl.LOCK_EX)   # a live stream's
         try:
             with self.assertRaisesRegex(SystemExit, 'input lock'):
                 self.run_main('stream', 'Deej-5090')

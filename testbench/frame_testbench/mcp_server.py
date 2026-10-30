@@ -155,7 +155,9 @@ def create_server(config: Config, *, runner=run_cli):
 
         on is refused while a remote display streams from a host that lends Frametop its keyboard
         and mouse (host_input lists them): a faked wearer takes them from whoever sits there.
-        There is no override here; the CLI's --allow-host-input is for when the user allows it.
+        Otherwise a guard holds those hosts' input locks while the wearer is faked, so a stream
+        that starts later can't take them either. There is no override here; the CLI's
+        --allow-host-input is for when the user allows it.
         """
         return await execute(['worn', state])
 

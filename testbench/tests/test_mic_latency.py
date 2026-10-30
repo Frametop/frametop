@@ -60,10 +60,11 @@ class MicLatencyTests(unittest.TestCase):
         self.assertAlmostEqual(result['latency_ms']['drift_per_min'], 120, delta=5)
         self.assertNotIn('latency_ms', self.m.report(played, []))
 
-    def test_a_late_burst_goes_with_the_one_played_before_it(self):
-        # 1.2 s late: past the next burst, still matched to its own (the latest before it is taken)
-        pairs = self.m.match([10.0, 11.0], [11.2, 12.2])
-        self.assertEqual(pairs, [(11.0, 11.2)])
+    def test_a_burst_later_than_the_spacing_counts_as_missed(self):
+        # 1.2 s late would pair with the next burst at 0.2 s: past 0.9 s nothing pairs
+        self.assertEqual(self.m.match([10.0, 11.0], [11.2, 12.2]), [(11.0, 11.2)])
+        self.assertEqual(self.m.match([10.0], [10.95]), [])
+        self.assertEqual(self.m.match([10.0, 11.0], [10.3, 11.3]), [(10.0, 10.3), (11.0, 11.3)])
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'needs ffmpeg')
     def test_end_to_end_with_a_host_clock_ahead(self):

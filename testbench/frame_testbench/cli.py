@@ -289,12 +289,20 @@ def dispatch(args, bench):
             result = bench.control('worn 0' if args.state == 'off' else 'worn-release')
             hostinput.clear_flag()
             return result
-        if not args.allow_host_input:
+        if args.allow_host_input:
+            hostinput.set_flag(True, time.time())   # a guard sees it isn't named and lets go
+        else:
             reason = hostinput.refusal(hostinput.state())
             if reason:
                 raise ValueError('worn on refused: ' + reason)
-        # The flag goes first, so no ft-stream sees the wearer before it sees the flag.
-        hostinput.set_flag(args.allow_host_input, time.time())
+            # The guard holds every input host's lock before the wearer is faked, so no stream,
+            # live or started later, can lease.
+            flag = hostinput.read_flag()
+            if not (flag and flag.get('allow_host_input') is False and hostinput.guard_alive(flag)):
+                try:
+                    hostinput.start_guard()
+                except RuntimeError as error:
+                    raise ValueError(f'worn on refused: {error}') from None
         try:
             return bench.control('worn 1')
         except BaseException:
@@ -378,18 +386,19 @@ def dispatch(args, bench):
 
 
 def drop_unsafe_worn(bench, args):
-    """Every command checks first: a wearer faked without --allow-host-input goes as soon as a
-    stream from a host that lends its input is live (ft-screens started one, or restarted them
-    all). Returns why it went, or None."""
+    """Every command checks first: a wearer faked without --allow-host-input goes if its guard
+    has (killed, or the machine slept through it), as nothing holds the input locks any more.
+    Returns why it went, or None."""
     flag = hostinput.read_flag()
-    if flag is None or flag.get('allow_host_input') is True:
+    if flag is None or flag.get('allow_host_input') is True or hostinput.guard_alive(flag):
         return None
     if args.command == 'worn' and args.state == 'on' and args.allow_host_input:
         return None
-    reason = hostinput.refusal(hostinput.state())
-    if not reason:
-        return None
-    bench.control('worn-release')
+    reason = "the host-input guard has gone, so nothing holds the hosts' input locks"
+    try:
+        bench.control('worn-release')
+    except OSError:
+        pass   # no input proxy: nothing fakes the wearer
     hostinput.clear_flag()
     print('frame-testbench: released the faked wearer: ' + reason, file=sys.stderr)
     return reason

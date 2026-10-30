@@ -13,8 +13,11 @@ FLAG says the wearer is faked, for ft-stream and for the commands that follow.
 
 FLAG ($XDG_RUNTIME_DIR/frametop-fake-worn.json) is JSON: {"since": UNIX TIME, "pid": PID,
 "allow_host_input": BOOL}, PID the guard's (the CLI's when allowed: nothing to guard). It's
-written before the wearer is faked and goes when the wearer does (`worn off|physical`,
-`release`); the guard lets go of the locks once FLAG goes or names another process.
+written before the wearer is faked and goes when a testbench command ends the faked wearer
+(`worn off|physical`, `release`, or the next command after the guard has gone); the guard lets go
+of the locks once FLAG goes or names another process. A guard that ends any other way releases
+the wearer but leaves FLAG, so ft-stream, which reads it, sends no lease until a testbench command
+has cleared it.
 """
 import fcntl
 import json
@@ -166,7 +169,8 @@ def guard(layout=LAYOUT, poll=GUARD_POLL, release=None):
     """The guard process: take every input host's lock, then write FLAG naming this process, and
     hold them while FLAG does. A host given "input": true meanwhile has its lock taken too; if a
     stream holds it, or the guard is told to stop while FLAG still names it, the faked wearer goes
-    (RELEASE) and FLAG with it. Exit 0 once FLAG has gone, 3 if a lock was busy from the start."""
+    (RELEASE) but FLAG stays (release_confirmed). Exit 0 once FLAG has gone or the guard has let
+    go, 3 if a lock was busy from the start."""
     held = {}
     stop = []
     signal.signal(signal.SIGTERM, lambda *_: stop.append(1))
@@ -190,26 +194,34 @@ def guard(layout=LAYOUT, poll=GUARD_POLL, release=None):
                 print('a stream holds the input lock of ' + ' '.join(busy) + ': releasing the wearer', flush=True)
                 break
         if (read_flag() or {}).get('pid') == os.getpid():
-            drop_wearer(release)
+            release_confirmed(release)
         return 0
     finally:
         for fd in held.values():
             os.close(fd)
 
 
+def release_confirmed(release=None):
+    """Release the faked wearer, leaving FLAG as it is. Whether the input proxy said it let go (or
+    isn't there). The guard and after_guard stop here: a guard can be stopped after start_guard
+    saw it live and before `worn 1`, which then fakes the wearer, so FLAG stays to keep ft-stream
+    from leasing until a testbench command, which checks the wearer, clears it (drop_wearer)."""
+    for _ in range(3):
+        try:
+            (release or release_wearer)()
+            return True
+        except (FileNotFoundError, ConnectionRefusedError):
+            return True   # no input proxy: nothing fakes the wearer
+        except Exception:
+            time.sleep(0.2)
+    return False
+
+
 def drop_wearer(release=None):
     """Release the faked wearer, then FLAG. If the input proxy is there and won't say it let go,
     FLAG stays, so the guard unit's ExecStopPost (after_guard) and the next testbench command try
     again: FLAG gone with the wearer still faked would leave nothing to notice."""
-    for _ in range(3):
-        try:
-            (release or release_wearer)()
-            break
-        except (FileNotFoundError, ConnectionRefusedError):
-            break   # no input proxy: nothing fakes the wearer
-        except Exception:
-            time.sleep(0.2)
-    else:
+    if not release_confirmed(release):
         return False
     clear_flag()
     return True
@@ -217,11 +229,11 @@ def drop_wearer(release=None):
 
 def after_guard(release=None):
     """The guard unit's ExecStopPost: however the guard ended (killed, out of memory), a wearer
-    it left faked goes."""
+    it left faked goes. FLAG stays for the next testbench command (release_confirmed)."""
     flag = read_flag()
     if flag and flag.get('allow_host_input') is False and not guard_alive(flag):
         print("the guard has gone: releasing the wearer", flush=True)
-        drop_wearer(release)
+        release_confirmed(release)
     return 0
 
 

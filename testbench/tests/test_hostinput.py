@@ -173,12 +173,14 @@ class GuardProcessTests(Fixture):
         finally:
             os.close(held['192.168.1.61'])
 
-    def test_a_stopped_guard_or_a_new_busy_host_takes_the_wearer_and_flag_with_it(self):
+    def test_a_stopped_guard_or_a_new_busy_host_releases_the_wearer_but_leaves_the_flag(self):
         guard = self.start()
         self.wait_flag(guard)
         guard.send_signal(signal.SIGTERM)   # its unit stopped while the wearer is faked
         self.assertEqual(guard.wait(5), 0)
-        self.assertIsNone(hostinput.read_flag())
+        self.assertEqual(hostinput.read_flag()['pid'], guard.pid)   # ft-stream still sends no lease
+        self.assertTrue(self.lock_free())
+        hostinput.clear_flag()   # the next testbench command
         guard = self.start()
         self.wait_flag(guard)
         held = {}
@@ -189,7 +191,7 @@ class GuardProcessTests(Fixture):
             self.layout.write_text(json.dumps(layout))
             self.assertEqual(guard.wait(5), 0)
             self.assertIn('releasing the wearer', guard.stdout.read())
-            self.assertIsNone(hostinput.read_flag())
+            self.assertEqual(hostinput.read_flag()['pid'], guard.pid)
         finally:
             os.close(held['192.168.1.92'])
 
@@ -223,12 +225,12 @@ class GuardReleaseTests(Fixture):
             code = hostinput.guard(self.layout, poll=0.01, release=release)
         return code, out.getvalue()
 
-    def test_a_stream_taking_a_lock_releases_the_wearer_then_the_flag(self):
-        release = mock.Mock(side_effect=lambda: self.assertIsNotNone(hostinput.read_flag()))
+    def test_a_stream_taking_a_lock_releases_the_wearer_but_not_the_flag(self):
+        release = mock.Mock()
         self.assertEqual(self.guard(release), (0, 'holding: \n'
                          'a stream holds the input lock of 192.168.1.92: releasing the wearer\n'))
         release.assert_called_once_with()
-        self.assertIsNone(hostinput.read_flag())
+        self.assertEqual(hostinput.read_flag()['pid'], os.getpid())   # the next command clears it
 
     def test_a_proxy_that_wont_release_keeps_the_flag_for_the_next_try(self):
         release = mock.Mock(side_effect=RuntimeError('refused'))
@@ -249,7 +251,7 @@ class GuardReleaseTests(Fixture):
                 contextlib.redirect_stdout(io.StringIO()):
             hostinput.after_guard(release)   # killed: the unit's ExecStopPost
         release.assert_called_once_with()
-        self.assertIsNone(hostinput.read_flag())
+        self.assertFalse(hostinput.read_flag()['allow_host_input'])   # the next command clears it
 
 
 class StartGuardTests(Fixture):
@@ -371,13 +373,27 @@ class WornGuardTests(Fixture):
         def guard_gone(text):
             Bench.control(self.bench, text)
             if text == 'worn 1':
-                hostinput.clear_flag()   # the guard saw a stream take a lock, released and left
-                self.alive = False
+                self.alive = False   # the guard saw a stream take a lock, released and left
             return {'ok': True}
         self.bench.control = guard_gone
         with self.assertRaisesRegex(ValueError, 'guard stopped'):
             self.worn('on')
         self.assertEqual([c for c, _ in self.bench.commands], ['worn 1', 'worn-release'])
+        self.assertIsNone(hostinput.read_flag())
+
+    def test_a_guard_stopped_before_worn_1_leaves_the_flag_while_the_wearer_is_faked(self):
+        # Finding F of the verify-fake-worn-guard skill: start_guard saw the guard live, then it
+        # was stopped before `worn 1`. It released a wearer not yet faked and left; `worn 1` then
+        # fakes it, and the flag has to be there till the post-check releases it.
+        def stopped_first(text):
+            if text == 'worn 1' and self.alive:
+                self.alive = False
+                hostinput.release_confirmed(lambda: Bench.control(self.bench, 'worn-release'))
+            return Bench.control(self.bench, text)
+        self.bench.control = stopped_first
+        with self.assertRaisesRegex(ValueError, 'guard stopped'):
+            self.worn('on')
+        self.assertEqual(self.bench.commands, [('worn-release', True), ('worn 1', True), ('worn-release', True)])
         self.assertIsNone(hostinput.read_flag())
 
     def test_a_worn_on_whose_reply_was_lost_releases_the_wearer(self):
@@ -417,15 +433,14 @@ class WornGuardTests(Fixture):
         def guard_gone(text):
             Bench.control(self.bench, text)
             if text == 'worn 1':
-                hostinput.clear_flag()   # the guard saw a stream take a lock, released and left
-                self.alive = False
+                self.alive = False   # the guard saw a stream take a lock, released and left
                 return {'ok': True}
             raise TimeoutError('timed out')
         self.bench.control = guard_gone
         with mock.patch.object(hostinput.time, 'sleep'), self.assertRaisesRegex(ValueError, 'guard stopped'):
             self.worn('on')
         self.assertEqual([c for c, _ in self.bench.commands], ['worn 1'] + ['worn-release'] * 3)
-        flag = hostinput.read_flag()   # names this command, no guard: the next one tries again
+        flag = hostinput.read_flag()   # names no live guard: the next one tries again
         self.assertEqual((flag['allow_host_input'], flag['pid']), (False, os.getpid()))
         with contextlib.redirect_stderr(io.StringIO()):
             self.bench.control = lambda text: Bench.control(self.bench, text)

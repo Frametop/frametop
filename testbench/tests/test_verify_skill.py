@@ -383,6 +383,52 @@ class VerifySkillTests(unittest.TestCase):
         finally:
             os.close(held)
 
+    def test_stream_mic_bursts_feed_a_pipe_source_once_ft_stream_records(self):
+        seen = self.stream_fixture({'states': [[2.0, 'live via network']], 'frames': 900, 'exit': 0})
+        self.run_main('launch', 'mic')
+        layout = json.loads(self.v.LAYOUT.read_text())
+        layout['hosts'][0]['mic'] = False
+        self.v.LAYOUT.write_text(json.dumps(layout))
+        with self.assertRaisesRegex(SystemExit, 'mic=on'):
+            self.run_main('stream', 'Deej-5090', '--mic-bursts', '--seconds', '30')
+        layout['hosts'][0]['mic'] = True
+        self.v.LAYOUT.write_text(json.dumps(layout))
+        with self.assertRaisesRegex(SystemExit, '15 or more'):
+            self.run_main('stream', 'Deej-5090', '--mic-bursts', '--seconds', '10')
+        pactl, listed = [], []
+
+        def run(argv, **kwargs):
+            if argv[1:3] == ['list', 'short']:
+                listed.append(1)   # ft-stream starts recording at the third look
+                state = 'RUNNING' if len(listed) >= 3 else 'SUSPENDED'
+                return mock.Mock(returncode=0, stdout=f'1053\tframetop-verify-mic\tPipeWire\ts16le 1ch\t{state}\n')
+            pactl.append(argv[1:3] if argv[1] == 'load-module' else argv[1:])
+            return mock.Mock(returncode=0, stdout='501\n', stderr='')
+        players = []
+        fixture_popen = self.v.subprocess.Popen
+
+        def popen(argv, **kwargs):
+            if argv[0] == str(self.v.BURSTS):
+                players.append((argv, kwargs['stdout'].name))
+                return mock.Mock(wait=mock.Mock(return_value=0))
+            viewer = fixture_popen(argv, **kwargs)
+            viewer.poll = mock.Mock(return_value=None)
+            return viewer
+        with mock.patch.object(self.v.subprocess, 'run', run), mock.patch.object(self.v.subprocess, 'Popen', popen), \
+                mock.patch.object(self.v.time, 'sleep'):
+            code, out = self.run_main('stream', 'Deej-5090', '--mic-bursts', '--seconds', '30')
+        summary = json.loads(out)
+        self.assertEqual(seen['argv'][1:3], ['env', 'PULSE_SOURCE=frametop-verify-mic'])
+        self.assertEqual(len(players), 1)
+        argv, fifo = players[0]
+        self.assertEqual(argv[2:], [summary['mic']['log'], '0.5'])
+        self.assertAlmostEqual(float(argv[1]), 27, delta=1)   # what's left of the stream, less 3 s
+        self.assertEqual(fifo, str(self.v.RUNTIME / 'frametop-verify-mic.fifo'))
+        self.assertEqual(pactl, [['load-module', 'module-pipe-source'], ['unload-module', '501']])
+        self.assertEqual(len(listed), 4)   # three to wait, one to check before starting
+        self.assertEqual((code, summary['ok'], summary['mic']['bursts']), (1, False, 0))   # the fake wrote none
+        self.assertIn('never recorded', summary['mic']['error'])
+
     def test_a_sensor_blip_on_a_still_headset_is_not_a_wearer(self):
         self.run_main('launch', 'blips')
         worn, off = proxy(physical_worn=True), proxy()

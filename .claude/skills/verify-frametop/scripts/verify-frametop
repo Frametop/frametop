@@ -20,7 +20,7 @@
                                        host input: streams, input lock holders, ft-stream's
                                        hostinput log lines) into RUN/LABEL/, and with --capture a compositor capture
                                        (needs `worn on` and a head pose facing the panels)
-  verify-frametop stream HOST [--display CLIENT] [--seconds N] [--allow-host-input]
+  verify-frametop stream HOST [--display CLIENT] [--seconds N] [--allow-host-input] [--mic-bursts]
                                        guard, then one remote display of HOST (a layout name or
                                        address; its first display, or CLIENT) for N seconds
                                        (default 20) through the release's ft-stream in the
@@ -29,7 +29,12 @@
                                        host's input lock throughout, so this stream can't lease
                                        the host's keyboard and mouse, unless --allow-host-input
                                        (only once the user allows it). It connects to the host:
-                                       only for a host the user allowed in this session
+                                       only for a host the user allowed in this session.
+                                       --mic-bursts: ft-stream records a pipe source that gets
+                                       a 1 kHz burst each second once it records (logged to
+                                       bursts.txt); the host needs "mic": true. Record the host's
+                                       virtual microphone meanwhile, then scripts/mic-latency
+                                       gives the latency
   verify-frametop cleanup [RUN] [--force]
                                        release every testbench override, compositor auto,
                                        displays back on and gaze mode back as the run found
@@ -76,6 +81,8 @@ SOCKETS = ('frametop_relay', 'ft_pointer_helper', 'ft_powerd', 'ft_gazed')
 RELEASES = Path.home() / '.local/share/frametop/releases'
 LAYOUT = Path.home() / '.config/frametop-layout.json'
 VIEWER = Path(__file__).resolve().parent / 'fake-viewer'
+BURSTS = Path(__file__).resolve().parent / 'mic-bursts'
+MIC_SOURCE = 'frametop-verify-mic'
 DROP_IN = Path.home() / '.config/systemd/user/steamvr.service.d/90-frame-testbench.conf'
 LEASE = 30 * 60
 # With the displays lit, the Frame's proximity sensor reads worn for under a second every few
@@ -403,7 +410,24 @@ def input_lock(host):
     return fd
 
 
-def stream(host, client=None, seconds=20.0, allow_host_input=False):
+def pipe_source(fifo):
+    """Load MIC_SOURCE, a mono 48 kHz source fed from the FIFO it makes; the module id. Not a null
+    sink's monitor: SteamOS's policy sends a player's stream through its spatializer to the
+    speakers whatever sink it asks for, so the null sink would stay silent."""
+    done = subprocess.run(['pactl', 'load-module', 'module-pipe-source', f'source_name={MIC_SOURCE}',
+                           f'file={fifo}', 'format=s16le', 'rate=48000', 'channels=1'], capture_output=True, text=True)
+    if done.returncode:
+        sys.exit(f'verify-frametop: no source {MIC_SOURCE}: {done.stderr.strip()}')
+    return done.stdout.strip()
+
+
+def source_running(name):
+    done = subprocess.run(['pactl', 'list', 'short', 'sources'], capture_output=True, text=True)
+    return any(line.split('\t')[1:2] == [name] and line.split('\t')[-1] == 'RUNNING'
+               for line in done.stdout.splitlines())
+
+
+def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=False):
     run = current_run()
     guard()
     try:
@@ -418,6 +442,11 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False):
     if not display:
         sys.exit(f'verify-frametop: {entry.get("name")} has no display {client or ""}'.rstrip())
     address, client = entry['address'], display['client']
+    if mic_bursts and entry.get('mic') is not True:
+        sys.exit(f'verify-frametop: {entry.get("name")} doesn\'t get the microphone ("mic": true): for '
+                 f'the test, `ft-layout remote host {entry.get("name")!r} mic=on`, and put it back after')
+    if mic_bursts and seconds < 15:
+        sys.exit('verify-frametop: --mic-bursts needs --seconds 15 or more')
     # Vibepollo ties a display to its client, one stream per client: a second stream with the
     # same --id would take the live panel's display away.
     live = [cmd for cmd in proc_cmdlines() if cmd[:2] == ['ft-stream', 'stream'] and client in cmd]
@@ -434,17 +463,39 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False):
     stamp = datetime.now().strftime('%H%M%S')
     out = next(f for n in range(1, 100) if not (f := run / f'stream-{client}-{stamp}{"" if n == 1 else f"-{n}"}').exists())
     LOCK.touch()   # the lease runs on
+    modules, players = [], []
     try:
         out.mkdir(mode=0o700)
+        env = []
+        if mic_bursts:
+            # ft-stream records its default source, which libpulse takes from PULSE_SOURCE.
+            fifo = RUNTIME / f'{MIC_SOURCE}.fifo'
+            modules = [pipe_source(fifo)]
+            env = ['env', f'PULSE_SOURCE={MIC_SOURCE}']
         viewer = subprocess.Popen(
-            [str(RELEASES / 'current' / 'scripts' / 'in-box'), 'python3', str(VIEWER), str(exe), address, client,
-             display.get('app') or 'primary', f'{width}x{height}', '30', '20000', str(seconds), str(out)],
+            [str(RELEASES / 'current' / 'scripts' / 'in-box'), *env, 'python3', str(VIEWER), str(exe), address,
+             client, display.get('app') or 'primary', f'{width}x{height}', '30', '20000', str(seconds), str(out)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=open(out / 'in-box.log', 'wb'))
+        if mic_bursts:
+            # Bursts only once ft-stream records: until then nothing drains the FIFO, and what
+            # waited in it would count as latency.
+            began = time.monotonic()
+            while viewer.poll() is None and not source_running(MIC_SOURCE) and time.monotonic() - began < seconds - 10:
+                time.sleep(0.2)
+            left = seconds - (time.monotonic() - began) - 3
+            if viewer.poll() is None and source_running(MIC_SOURCE) and left >= 5:
+                with open(fifo, 'wb') as pipe:
+                    players = [subprocess.Popen([str(BURSTS), f'{left:.1f}', str(out / 'bursts.txt'), '0.5'],
+                                                stdout=pipe)]
         try:
             viewer.wait(seconds + 60)   # the container may need starting; the viewer ends itself
         except subprocess.TimeoutExpired:
             # A signal to in-box doesn't reach the container, but it shares our pid namespace.
-            for pid in json.loads((out / 'viewer.json').read_text()).values():
+            try:
+                pids = json.loads((out / 'viewer.json').read_text()).values()
+            except (OSError, ValueError):
+                pids = []
+            for pid in pids:
                 try:
                     os.kill(pid, 9)
                 except OSError:
@@ -452,6 +503,11 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False):
             viewer.kill()
             viewer.wait()
     finally:
+        for player in players:
+            player.terminate()
+            player.wait()
+        for module in modules:
+            subprocess.run(['pactl', 'unload-module', module], capture_output=True)
         if lock is not None:
             os.close(lock)
     try:
@@ -463,6 +519,17 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False):
                'host': entry.get('name'), 'client': client, 'app': display.get('app'),
                'input_lock_held': lock is not None,
                'folder': str(out), **result}
+    if mic_bursts:
+        try:
+            played = len((out / 'bursts.txt').read_text().split())
+            log = (out / 'ft-stream.log').read_text(errors='replace')
+        except OSError:
+            played, log = 0, ''
+        summary['mic'] = {'bursts': played, 'log': str(out / 'bursts.txt'), 'sent': 'mic: sending' in log,
+                          'next': 'mic-latency BURSTS RECORDING --offset-ms MS'}
+        if not played:
+            summary['mic']['error'] = "ft-stream never recorded the bursts' source"
+            summary['ok'] = False
     write_json(out / 'summary.json', summary)
     LOCK.touch()
     print(json.dumps(summary, indent=2))
@@ -547,8 +614,8 @@ def main(argv):
         return 0
     if command == 'stream' and rest and not rest[0].startswith('-'):
         opts = {'--display': None, '--seconds': '20'}
-        words, allow = list(rest[1:]), '--allow-host-input' in rest[1:]
-        words = [w for w in words if w != '--allow-host-input']
+        flags = {'--allow-host-input', '--mic-bursts'}
+        words = [w for w in rest[1:] if w not in flags]
         while len(words) >= 2 and words[0] in opts:
             key = words.pop(0)
             opts[key] = words.pop(0)
@@ -557,8 +624,9 @@ def main(argv):
         except ValueError:
             seconds = 0
         if words or not 0 < seconds <= 3600:
-            sys.exit('verify-frametop: stream HOST [--display CLIENT] [--seconds N] [--allow-host-input]')
-        return stream(rest[0], opts['--display'], seconds, allow)
+            sys.exit('verify-frametop: stream HOST [--display CLIENT] [--seconds N] [--allow-host-input] '
+                     '[--mic-bursts]')
+        return stream(rest[0], opts['--display'], seconds, '--allow-host-input' in rest, '--mic-bursts' in rest)
     runs = [a for a in rest if a != '--force']
     if command == 'cleanup' and len(runs) <= 1 and not any(a.startswith('-') for a in runs):
         return cleanup(runs[0] if runs else None, '--force' in rest)

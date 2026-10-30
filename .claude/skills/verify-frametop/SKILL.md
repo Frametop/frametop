@@ -203,3 +203,21 @@ A diff touching these gets the extra reviewer (Codex) in the review panel:
   (states, frames, frames per second) and `summary.json`; `ok` means it went live and frames
   came. It refuses a display that's already streaming (Vibepollo ties a display to its client,
   so it would take the panel's) and a host whose input lock another stream holds.
+- `scripts/mic-bursts` and `scripts/mic-latency`: the microphone's latency to a host.
+  `V stream HOST --seconds 60 --mic-bursts` (the host needs `"mic": true`: for the test,
+  `ft-layout remote host NAME mic=on`, back after) loads a pipe source, `frametop-verify-mic`, has
+  ft-stream record it (`PULSE_SOURCE`), and once it records feeds it a 1 kHz burst each second,
+  logging when each was due in `bursts.txt`. Not a null sink: SteamOS's policy sends a player
+  through its spatializer to the speakers whatever sink it names, so a null sink's monitor stays
+  silent (and the bursts play out loud). Meanwhile record the host's virtual microphone with
+  wall-clock packet times, starting a few seconds before the stream:
+  - Windows: `ffmpeg -f dshow -audio_buffer_size 20 -use_wallclock_as_timestamps 1 -t 85 -i
+    "audio=Microphone (Steam Streaming Microphone)" -copyts -map 0:a -c:a copy mic.mkv`. The
+    `-t` goes before `-i`: an output `-t` with `-copyts` ends the recording at once.
+  - Linux (Vibepollo's `frametop_mic` source, untested): the same with `-f pulse -i frametop_mic`.
+
+  Then `mic-latency bursts.txt mic.mkv --offset-ms MS`, MS the host's clock minus the Frame's: the
+  lowest round trip of a few dozen `echo %time%` (Windows, 10 ms steps) or `date +%s.%N` over
+  ssh. It prints the bursts matched and missed and the latency's median, spread and drift; the
+  absolute value is only as good as MS (half the round trip). 2026-10-30, dody on the network route: 55 of
+  55 bursts, 234 ms, no spread or drift over a minute (both ends run on sample clocks).

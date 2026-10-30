@@ -1,0 +1,45 @@
+#!/usr/bin/python3
+"""mic-bursts: timed tone bursts for verify-frametop stream --mic-bursts.
+
+  mic-bursts SECONDS LOG [DELAY] > FIFO   (module-pipe-source's, s16le mono 48 kHz)
+
+After DELAY seconds (default 0), writes a 1 kHz burst of 30 ms once a second to stdout as raw
+s16le mono 48 kHz, paced to the wall clock 20 ms ahead, and logs to LOG the wall time (UNIX
+seconds) each burst is due to play: its sample position past the start. mic-latency matches the
+host's recording against LOG, so its latency includes those 20 ms. A pipe on stdout is cut to one
+page (43 ms), so a reader that stalls can't leave much waiting in it.
+"""
+import fcntl
+import math
+import sys
+import time
+
+RATE, LEAD = 48000, 0.02
+seconds, log = float(sys.argv[1]), open(sys.argv[2], 'w', buffering=1)
+time.sleep(float(sys.argv[3]) if len(sys.argv) > 3 else 0)
+length = int(0.03 * RATE)
+burst = [int(0.3 * 32767 * math.sin(2 * math.pi * 1000 * i / RATE)) for i in range(length)]
+out = sys.stdout.buffer
+try:
+    fcntl.fcntl(out.fileno(), fcntl.F_SETPIPE_SZ, 4096)
+except OSError:
+    pass   # not a pipe
+start = time.time() + 0.2
+written = 0
+while written < seconds * RATE:
+    target = int((time.time() - start + LEAD) * RATE)
+    if target <= written:
+        time.sleep(0.005)
+        continue
+    chunk = bytearray()
+    for n in range(written, target):
+        k = n % RATE
+        if k == 0:
+            log.write(f'{start + n / RATE:.4f}\n')
+        chunk += (burst[k] if k < length else 0).to_bytes(2, 'little', signed=True)
+    try:
+        out.write(chunk)
+        out.flush()
+    except BrokenPipeError:
+        break
+    written = target

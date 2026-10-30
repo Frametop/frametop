@@ -1,11 +1,15 @@
-// stream/hostinput.h, offline: the host's records, the relay id, the lease, when to hold it, and
-// what the relay is told.
+// stream/hostinput.h, offline: the host's records, the relay id, the lease, when to hold it, the
+// tests that stop it, and what the relay is told.
 //   g++ -std=c++17 -Wall -Wextra -Werror -Istream -o /tmp/hostinput-test stream/test/hostinput-test.cpp && /tmp/hostinput-test
 #undef NDEBUG
 #include "hostinput.h"
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -101,20 +105,64 @@ int main() {
     // When to hold it, and how to give it back.
     const int64_t now = 100'000'000'000;
     const Answer worn{true, now - 1}, away{false, now - 1}, playing{false, now - 1}, paused{true, now - 1};
-    assert(Decide(true, true, worn, playing, now) == Want::kHold);
-    assert(Decide(false, true, worn, playing, now) == Want::kRelease);   // the switch went off
-    assert(Decide(true, true, away, playing, now) == Want::kRelease);    // the headset came off
-    assert(Decide(false, false, Answer{}, Answer{}, now) == Want::kRelease);
-    assert(Decide(true, false, worn, playing, now) == Want::kDrop);      // the stream isn't live
-    assert(Decide(true, true, worn, paused, now) == Want::kDrop);        // a VR game
-    assert(Decide(true, false, away, playing, now) == Want::kDrop);
+    assert(Decide(true, true, worn, playing, false, now) == Want::kHold);
+    assert(Decide(false, true, worn, playing, false, now) == Want::kRelease);   // the switch went off
+    assert(Decide(true, true, away, playing, false, now) == Want::kRelease);    // the headset came off
+    assert(Decide(false, false, Answer{}, Answer{}, false, now) == Want::kRelease);
+    assert(Decide(true, false, worn, playing, false, now) == Want::kDrop);      // the stream isn't live
+    assert(Decide(true, true, worn, paused, false, now) == Want::kDrop);        // a VR game
+    assert(Decide(true, false, away, playing, false, now) == Want::kDrop);
     // Answers that stopped coming: not the person's say, so drop.
     const Answer staleWorn{true, now - kStaleNs}, staleAway{false, now - kStaleNs}, stalePlaying{false, now - kStaleNs};
-    assert(Decide(true, true, staleWorn, playing, now) == Want::kDrop);
-    assert(Decide(true, true, staleAway, playing, now) == Want::kDrop);
-    assert(Decide(true, true, worn, stalePlaying, now) == Want::kDrop);
-    assert(Decide(true, true, Answer{}, Answer{}, now) == Want::kDrop);
-    assert(Decide(true, true, Answer{true, now - kStaleNs + 1}, playing, now) == Want::kHold);
+    assert(Decide(true, true, staleWorn, playing, false, now) == Want::kDrop);
+    assert(Decide(true, true, staleAway, playing, false, now) == Want::kDrop);
+    assert(Decide(true, true, worn, stalePlaying, false, now) == Want::kDrop);
+    assert(Decide(true, true, Answer{}, Answer{}, false, now) == Want::kDrop);
+    assert(Decide(true, true, Answer{true, now - kStaleNs + 1}, playing, false, now) == Want::kHold);
+    // A test that may not take the host's input drops it, but the headset coming off still releases.
+    assert(Decide(true, true, worn, playing, true, now) == Want::kDrop);
+    assert(Decide(true, true, away, playing, true, now) == Want::kRelease);
+    assert(Decide(false, true, worn, playing, true, now) == Want::kRelease);
+
+    // Where the tests keep their files.
+    assert((TestDirs("/run/user/1000", 1000) == std::vector<std::string>{"/run/user/1000"}));
+    assert((TestDirs("/run/user/1000/frametop", 1000) == std::vector<std::string>{"/run/user/1000/frametop", "/run/user/1000"}));
+    assert((TestDirs(nullptr, 1000) == std::vector<std::string>{"/run/user/1000"}));
+    assert((TestDirs("", 1000) == std::vector<std::string>{"/run/user/1000"}));
+    assert((TestDirs("/tmp/xdg", 1000) == std::vector<std::string>{"/tmp/xdg"}));
+    assert((TestDirs("/run/user/10000", 1000) == std::vector<std::string>{"/run/user/10000"}));
+
+    // Whether they stop the leases. The parser here stands in for ft-stream's JSON one.
+    char tmpl[] = "/tmp/hostinput-test-XXXXXX";
+    const std::string dir = mkdtemp(tmpl), nested = dir + "/frametop";
+    assert(mkdir(nested.c_str(), 0700) == 0);
+    const auto allows = [](const std::string &text) { return text == "allowed"; };
+    const std::string flag = dir + "/frametop-fake-worn.json";
+    const auto put = [](const std::string &path, const std::string &text) {
+        FILE *f = std::fopen(path.c_str(), "w");
+        assert(f && std::fwrite(text.data(), 1, text.size(), f) == text.size() && std::fclose(f) == 0);
+    };
+    assert(TestForbidding({dir}, allows).empty());  // no test
+    put(flag, "allowed");
+    assert(TestForbidding({dir}, allows).empty());
+    put(flag, "not allowed");
+    assert(TestForbidding({dir}, allows) == flag);
+    put(flag, "");  // garbled, or caught mid-write
+    assert(TestForbidding({dir}, allows) == flag);
+    put(flag, std::string(4096, ' '));
+    assert(!Forbids(flag, [](const std::string &) { return true; }));
+    put(flag, std::string(4097, ' '));  // too big to be the testbench's
+    assert(Forbids(flag, [](const std::string &) { return true; }));
+    assert(unlink(flag.c_str()) == 0 && mkdir(flag.c_str(), 0700) == 0);  // not a plain file
+    assert(TestForbidding({dir}, allows) == flag);
+    assert(rmdir(flag.c_str()) == 0 && symlink("/dev/null", flag.c_str()) == 0);  // not followed
+    assert(TestForbidding({dir}, allows) == flag);
+    assert(unlink(flag.c_str()) == 0);
+    // The session's dir counts from a nested desktop.
+    put(flag, "not allowed");
+    assert(TestForbidding({nested}, allows).empty());
+    assert(TestForbidding({nested, dir}, allows) == flag);
+    assert(unlink(flag.c_str()) == 0 && rmdir(nested.c_str()) == 0 && rmdir(dir.c_str()) == 0);
 
     // The relay.
     std::vector<std::string> said;

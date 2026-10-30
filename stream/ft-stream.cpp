@@ -280,6 +280,14 @@ Mic g_mic;
 
 bool HostFlag(const std::string &host, const char *key);
 
+// A test's file (hostinput::TestForbidding) allows a host's input only with "allow_host_input": true.
+bool AllowsHostInput(const std::string &text) {
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (!j.is_object()) return false;
+    const auto allow = j.find("allow_host_input");
+    return allow != j.end() && allow->is_boolean() && allow->get<bool>();
+}
+
 // The host's own keyboard and mouse, lent to Frametop (docs/host-input.md) by a Linux host with
 // Frametop's Vibepollo build. One stream per host holds them: the one holding
 // $XDG_RUNTIME_DIR/frametop-input-HOST.lock. While "input": true is on its layout entry, the
@@ -287,13 +295,18 @@ bool HostFlag(const std::string &host, const char *key);
 // renews a lease every 500 ms (LiSendFrametopHostInputLease, moonlight-hostin.patch). When the
 // switch goes off or the headset comes off it releases, which also lifts the host's escape (both
 // Shifts and Escape there); anything else stopping the lease drops it and keeps the escape
-// (hostinput::Decide). The host answers with records (stream/hostinput.h) on the control stream's
-// receive thread, and hostinput::Relay turns them into the relay's host devices.
+// (hostinput::Decide). So does a test faking the wearer without leave to take the host's input,
+// which it checks for before every lease: the lock alone left a gap, a host given the switch
+// while its stream held the lock leasing until the testbench's guard let the wearer go. The host
+// answers with records (stream/hostinput.h) on the control stream's receive thread, and
+// hostinput::Relay turns them into the relay's host devices.
 struct HostInput {
     std::string host, id;  // the host's address, and its id for the relay and the lock
     int sock = -1;         // datagrams to the relay and the pointer helper, and their replies
     bool switchOn = false, locked = false, refusedSaid = false;
     int lock = -1;
+    std::vector<std::string> testDirs;  // where the tests keep their files
+    std::string testSaid;               // the test file the log last said stops the leases
     int64_t checkAt = 0, lockAt = 0, askAt = 0, leaseAt = 0;
     hostinput::Answer worn, paused;
     // What Tick last wanted; a change to kRelease is an edge. A stream starting with the switch off
@@ -346,6 +359,7 @@ struct HostInput {
 
     void Open(const std::string &address) {
         host = address, id = hostinput::RelayId(address);
+        testDirs = hostinput::TestDirs(std::getenv("XDG_RUNTIME_DIR"), getuid());
         sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
         sockaddr_un a{};
         a.sun_family = AF_UNIX;
@@ -401,7 +415,7 @@ struct HostInput {
     void Tick(int64_t now, bool live) {
         if (sock < 0) return;
         if (now >= checkAt) checkAt = now + hostinput::kStaleNs, switchOn = HostFlag(host, "input");
-        if (!switchOn || !live) return Apply(hostinput::Decide(switchOn, live, worn, paused, now)), Unlock();
+        if (!switchOn || !live) return Apply(hostinput::Decide(switchOn, live, worn, paused, false, now)), Unlock();
         if (!locked && now >= lockAt) {
             lockAt = now + hostinput::kStaleNs;
             if (lock < 0) {
@@ -437,7 +451,15 @@ struct HostInput {
                     paused = {j["paused"].get<bool>(), now};
             }
         }
-        const hostinput::Want want = hostinput::Decide(switchOn, live, worn, paused, now);
+        // Read every tick, so no lease goes out once a test's file is there.
+        const std::string test = hostinput::TestForbidding(testDirs, AllowsHostInput);
+        if (test != testSaid) {
+            if (test.empty()) std::printf("hostinput: no test stops %s's lease now\n", host.c_str());
+            else std::printf("hostinput: no lease for %s's keyboard and mouse while %s says a test may not take them\n",
+                             host.c_str(), test.c_str());
+            testSaid = test;
+        }
+        const hostinput::Want want = hostinput::Decide(switchOn, live, worn, paused, !test.empty(), now);
         Apply(want);
         if (want != hostinput::Want::kHold || releaseOwed) return;
         if (now < leaseAt) return;

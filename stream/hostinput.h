@@ -14,12 +14,18 @@
 // also lifts the host's escape, or drop (version, 3), which gives the input back but keeps one.
 #pragma once
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <array>
 #include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ftstream::hostinput {
 
@@ -110,12 +116,52 @@ inline bool Fresh(const Answer &a, int64_t now) { return a.at && now - a.at < kS
 // off, releases, which lifts the host's escape; anything else drops and keeps it.
 enum class Want { kHold, kDrop, kRelease };
 
-inline Want Decide(bool switchOn, bool live, const Answer &worn, const Answer &paused, int64_t now) {
+// A test that hasn't been allowed the host's input (TestForbidding) drops it: the wearer may be
+// faked, so the headset being worn says nothing about anyone sitting here.
+inline Want Decide(bool switchOn, bool live, const Answer &worn, const Answer &paused, bool test, int64_t now) {
     if (!switchOn) return Want::kRelease;
     if (!live) return Want::kDrop;
     if (Fresh(worn, now) && !worn.yes) return Want::kRelease;
-    if (!Fresh(worn, now) || !Fresh(paused, now) || paused.yes) return Want::kDrop;
+    if (test || !Fresh(worn, now) || !Fresh(paused, now) || paused.yes) return Want::kDrop;
     return Want::kHold;
+}
+
+// Tests that may not take a host's input (docs/host-input.md, "Tests and a faked wearer"): the
+// pointer helper can't tell the testbench's faked wearer from a real head. While the testbench
+// fakes the wearer it keeps this file in the session's runtime dir, and while it's there the leases
+// stop unless it's JSON with "allow_host_input": true.
+constexpr const char *kTestFiles[] = {"frametop-fake-worn.json"};
+
+// Where the tests keep them: $XDG_RUNTIME_DIR, and the session's /run/user/UID too when that is a
+// nested desktop's (/run/user/UID/frametop): the testbench writes to the session's.
+inline std::vector<std::string> TestDirs(const char *xdg, unsigned uid) {
+    const std::string session = "/run/user/" + std::to_string(uid);
+    std::vector<std::string> dirs{xdg && *xdg ? xdg : session};
+    if (dirs[0].rfind(session + "/", 0) == 0) dirs.push_back(session);
+    return dirs;
+}
+
+// Whether the test file at PATH stops the leases (allows: whether its text says
+// "allow_host_input": true). Only a missing file doesn't: one that is garbled, too big, not a
+// plain file or can't be read does.
+inline bool Forbids(const std::string &path, const std::function<bool(const std::string &)> &allows) {
+    const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return errno != ENOENT;
+    struct stat st;
+    char buf[4097];
+    ssize_t n = -1;
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) n = read(fd, buf, sizeof buf);
+    close(fd);
+    return n < 0 || size_t(n) == sizeof buf || !allows(std::string(buf, size_t(n)));
+}
+
+// The first test file in DIRS that stops the leases, or "".
+inline std::string TestForbidding(const std::vector<std::string> &dirs,
+                                  const std::function<bool(const std::string &)> &allows) {
+    for (const std::string &dir : dirs)
+        for (const char *name : kTestFiles)
+            if (const std::string path = dir + "/" + name; Forbids(path, allows)) return path;
+    return "";
 }
 
 // The relay's view of the host's devices, from its records: "hostdev" with each hello while

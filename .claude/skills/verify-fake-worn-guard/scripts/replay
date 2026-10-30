@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Replay the model's findings A, B and C against the real testbench code, offline: a temp
+XDG_RUNTIME_DIR, a fake proxy that acts on `worn 1` but never answers, FRAME_TESTBENCH_SOCKET at
+a path nothing listens on, a layout with one made-up input host. It touches no live proxy,
+stream, lock or flag.
+
+  replay      prints whether each finding still happens in the code; exit 0 when that matches
+              the baseline (A and C fixed, B still happens), 1 when it doesn't (update SKILL.md
+              for a fix, or read the finding that came back)"""
+import argparse, fcntl, json, os, signal, socket, subprocess, sys, tempfile, threading, time
+from pathlib import Path
+from unittest import mock
+
+TESTBENCH = Path(__file__).resolve().parents[4] / 'testbench'
+run = Path(tempfile.mkdtemp(prefix='fake-worn-replay-'))
+os.environ['XDG_RUNTIME_DIR'] = str(run)
+os.environ['FRAME_TESTBENCH_SOCKET'] = str(run / 'no-proxy.sock')
+sys.path.insert(0, str(TESTBENCH))
+from frame_testbench import cli, hostinput   # noqa: E402
+
+HOST = '10.0.0.9'
+layout = run / 'layout.json'
+layout.write_text(json.dumps({'hosts': [{'address': HOST, 'name': 'host', 'input': True}]}))
+
+
+class HungProxy:
+    """Acts on `worn 1`; every reply times out (socket.timeout, as transport.request raises)."""
+    def __init__(self, faked=False):
+        self.faked = faked
+    def control(self, command):
+        if command == 'worn 1':
+            self.faked = True
+        raise socket.timeout('timed out')
+
+
+def lock_free():
+    fd = os.open(hostinput.lock_path(HOST), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def finding_a():
+    """`worn on`: worn 1 acts but times out, its release times out, and the flag goes anyway."""
+    proxy = HungProxy()
+    guard = threading.Thread(target=hostinput.guard, args=(layout, 0.05, lambda: None), daemon=True)
+    alive = lambda flag, proc='/proc': flag.get('pid') == os.getpid() and guard.is_alive()
+    with mock.patch.object(hostinput.signal, 'signal', lambda *a: None), \
+         mock.patch.object(hostinput, 'guard_alive', alive), \
+         mock.patch.object(hostinput, 'state', lambda *a, **k: {'input_streams': []}), \
+         mock.patch.object(hostinput, 'start_guard', lambda **k: guard.start() or time.sleep(0.2)):
+        try:
+            cli.dispatch(argparse.Namespace(command='worn', state='on', allow_host_input=False, socket=None), proxy)
+        except Exception:
+            pass
+        guard.join(1)
+        happens = proxy.faked and hostinput.read_flag() is None and lock_free()
+        hostinput.clear_flag()   # a guard still holding lets go before finding B takes the lock
+        guard.join(1)
+    return happens
+
+
+def finding_b():
+    """SIGKILL of a guard holding the lock: the lock is free before any ExecStopPost runs."""
+    hostinput.clear_flag()
+    g = subprocess.Popen([sys.executable, '-m', 'frame_testbench.hostinput', 'guard', str(layout)],
+                         cwd=TESTBENCH, stdout=subprocess.PIPE, text=True)
+    held = g.stdout.readline().startswith('holding') and not lock_free()
+    g.send_signal(signal.SIGKILL)
+    g.wait()
+    return held and hostinput.read_flag() is not None and lock_free()
+
+
+def finding_c():
+    """drop_unsafe_worn: a dead guard's flag, worn-release times out, the flag goes anyway."""
+    proxy = HungProxy(faked=True)
+    hostinput.set_flag(False, time.time(), pid=999999)
+    with mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': False), \
+         mock.patch('sys.stderr', open(os.devnull, 'w')):
+        cli.drop_unsafe_worn(proxy, argparse.Namespace(command='host-input', state=None, allow_host_input=False))
+    return proxy.faked and hostinput.read_flag() is None
+
+
+BASELINE = {'A': False, 'B': True, 'C': False}   # A and C fixed by cli.release_or_keep_flag
+results = {'A': finding_a(), 'B': finding_b(), 'C': finding_c()}
+for name, happens in results.items():
+    print(f'finding {name}: {"still happens" if happens else "no longer happens"}'
+          + ('' if happens == BASELINE[name] else '  (differs from the baseline)'))
+sys.exit(0 if results == BASELINE else 1)

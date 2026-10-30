@@ -16,7 +16,7 @@ const sw = (v) => (v.switchFile ? "" : ", switch off");
 
 const where = (v) => {
   const g = v.esc ? ESC : v.engaged ? FRAME : HOST;
-  if (v.proc === "none") return [g, `No stream, ${head(v)}${sw(v)}`];
+  if (v.proc === "none") return [g, `No stream, ${head(v)}${sw(v)}${v.esc && v.mark ? ", escape kept for the next stream" : ""}`];
   if (v.proc === "pre") return [g, `Stream connecting, ${head(v)}${sw(v)}`];
   if (!v.switchOn)
     return [g, v.switchFile ? `Switch on, not seen yet, ${head(v)}${waiting(v)}` : `Switch off, ${head(v)}${waiting(v)}`];
@@ -50,8 +50,10 @@ export const step = (action, from, to) => {
     case "ReadSwitch": return to.switchOn ? "ft-stream sees the switch on" : "ft-stream sees the switch off";
     case "TickIdle": return "ft-stream waits for live";
     case "TickLive":
+      if (from.esc && !to.esc) return to.leasing ? "ft-stream releases (the escape lifts), then leases" : "ft-stream releases (the escape lifts)";
       if (to.engaged && !from.engaged) return "ft-stream reads the answer and leases";
       if (to.leasing && !from.leasing) return "ft-stream reads the answer and leases";
+      if (from.leasing && !to.leasing) return "ft-stream reads the answer and stops leasing";
       return from.locked ? "ft-stream asks the helper" : "ft-stream takes the lock and asks the helper";
     default: return action;
   }

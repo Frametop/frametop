@@ -46,7 +46,10 @@ point either harness at the real relay, helper or a Vibepollo host.
 
 To look at a path or redraw a chart, use the pstack `/statechart` skill on the files in `model/`
 (`host-view.mjs` and `remote-view.mjs` hold the reader's labels). The host model has about 3,600
-states, so its chart shows its rules rather than every state.
+states, over the tool's 500, so it draws only the paths to rules that break. To draw the host model
+with every rule holding, use its slice: `HostChart.tla` with `HostChart.cfg` (the switch stays on,
+and the helper counts only offs of 3 s or more, 345 states) and `host-chart-view.mjs`. The remote
+model is drawn with `RemoteStreams.cfg` as is.
 
 ## The models and rules
 

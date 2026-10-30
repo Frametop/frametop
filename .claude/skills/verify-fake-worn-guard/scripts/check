@@ -23,13 +23,14 @@ RULES = ['TypeOK', 'NoHostTakeover', 'FakeIsNoticed']
 # Findings A and C (fixed by release_or_keep_flag) held both Hangs breaks until then.
 # Finding D (fixed by worn on's left-flag refusal) broke All's FakeIsNoticed until then.
 # Finding B (fixed by ft-stream's flag check) and E (by its AfterTest) held Kills' and All's
-# NoHostTakeover until then. F is open: NoF is All without F's window, so B, D and E stay guarded.
-F = 'YouRunWornOn OnCheck OnStartGuard GuardStarts OnWait GuardStopped OnFake StreamStarts StreamTakesLock StreamTick HelperAnswers StreamTick'
+# NoHostTakeover until then, and F (fixed by the guard leaving the flag) after them, by
+# YouRunWornOn OnCheck OnStartGuard GuardStarts OnWait GuardStopped OnFake StreamStarts
+# StreamTakesLock StreamTick HelperAnswers StreamTick. NoF is All without F's window.
 BASELINE = {
     ('Clean', 'TypeOK'): 'holds', ('Clean', 'NoHostTakeover'): 'holds', ('Clean', 'FakeIsNoticed'): 'holds',
-    ('Kills', 'TypeOK'): 'holds', ('Kills', 'NoHostTakeover'): ('F', F), ('Kills', 'FakeIsNoticed'): 'holds',
+    ('Kills', 'TypeOK'): 'holds', ('Kills', 'NoHostTakeover'): 'holds', ('Kills', 'FakeIsNoticed'): 'holds',
     ('Hangs', 'TypeOK'): 'holds', ('Hangs', 'NoHostTakeover'): 'holds', ('Hangs', 'FakeIsNoticed'): 'holds',
-    ('All', 'TypeOK'): 'holds', ('All', 'NoHostTakeover'): ('F', F), ('All', 'FakeIsNoticed'): 'holds',
+    ('All', 'TypeOK'): 'holds', ('All', 'NoHostTakeover'): 'holds', ('All', 'FakeIsNoticed'): 'holds',
     ('NoF', 'TypeOK'): 'holds', ('NoF', 'NoHostTakeover'): 'holds', ('NoF', 'FakeIsNoticed'): 'holds',
 }
 

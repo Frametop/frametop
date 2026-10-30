@@ -137,18 +137,19 @@ GuardLetsGo ==
     /\ guard' = "exited" /\ lock' = "none"
     /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, stream, pc>>
 
-\* drop_wearer: release (3 tries), then clear the flag; a release that never answers keeps it
-DropWearer ==
-    IF proxy = "up"
-      THEN faked' = FALSE /\ flag' = "none"
-      ELSE (\E f \in Released : faked' = f) /\ flag' = flag
+\* release_confirmed: release (3 tries), and leave the flag for the next testbench command
+\* (finding F: the guard may go before `worn 1` fakes the wearer, so ft-stream needs the flag)
+GuardReleases ==
+    /\ \E f \in Released : faked' = f
+    /\ flag' = flag
 
 MayDieNow == GuardCanDieMidFake \/ pc \notin {"on_fake", "on_verify"}
 
-\* SIGTERM: if the flag still names it, drop_wearer while it holds the lock; then close the lock
+\* SIGTERM: if the flag still names it, release the wearer while it holds the lock; then close
+\* the lock
 GuardTerm ==
     /\ guard = "holding"
-    /\ IF flag = "guard" THEN DropWearer ELSE UNCHANGED <<faked, flag>>
+    /\ IF flag = "guard" THEN GuardReleases ELSE UNCHANGED <<faked, flag>>
     /\ guard' = "exited" /\ lock' = "none"
     /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, stream, pc>>
 
@@ -167,10 +168,11 @@ GuardKilled ==
     /\ lock' = IF lock = "guard" THEN "none" ELSE lock
     /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, stream, pc>>
 
-\* ExecStopPost (after_guard): a flag naming no live guard (the dead one, or a command) -> drop_wearer
+\* ExecStopPost (after_guard): a flag naming no live guard (the dead one, or a command) -> release
+\* the wearer, the flag stays
 GuardCleanup ==
     /\ guard = "exited"
-    /\ IF flag # "none" THEN DropWearer ELSE UNCHANGED <<faked, flag>>
+    /\ IF flag # "none" THEN GuardReleases ELSE UNCHANGED <<faked, flag>>
     /\ guard' = "off"
     /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, lock, stream, pc>>
 

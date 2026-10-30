@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Replay the model's findings A to D against the real testbench code, offline: a temp
-XDG_RUNTIME_DIR, a fake proxy that acts on `worn 1` but never answers, FRAME_TESTBENCH_SOCKET at
-a path nothing listens on, a layout with one made-up input host. It touches no live proxy,
-stream, lock or flag.
+"""Replay the model's findings A to F against the real code, offline: a temp XDG_RUNTIME_DIR,
+fake proxies (one acts on `worn 1` but never answers), FRAME_TESTBENCH_SOCKET at a path nothing
+listens on, a layout with one made-up input host. It touches no live proxy, stream, lock or flag.
+E is ft-stream's: it builds a small program against stream/hostinput.h with g++ (CXX) into the
+temp dir and runs ft-stream's two ticks with it.
 
   replay      prints whether each finding still happens in the code; exit 0 when that matches
               the baseline, 1 when it doesn't (update SKILL.md for a fix, or read the finding
-              that came back). A, C and D are fixed in the testbench. B still happens in the
-              testbench, by design: ft-stream closes it by refusing the lease while the flag it
-              leaves is there, which only stream/test/hostinput-test.cpp and the model check
-              (this replays the testbench only), so B's line also says whether that flag is one
+              that came back). A, C, D and F are fixed in the testbench, E in ft-stream. B still
+              happens in the testbench, by design: ft-stream closes it by refusing the lease while
+              the flag it leaves is there, so B's line also says whether that flag is one
               ft-stream refuses."""
 import argparse, fcntl, json, os, signal, socket, subprocess, sys, tempfile, threading, time
 from pathlib import Path
@@ -118,9 +118,87 @@ def finding_d():
     return happens
 
 
+E_TICKS = r"""
+#include "hostinput.h"
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+using namespace ftstream::hostinput;
+// argv: RUNTIME_DIR, then "" for the tick that reads the flag, or the path that tick read
+int main(int, char **argv) {
+    timespec t;
+    clock_gettime(CLOCK_REALTIME, &t);
+    const int64_t wall = int64_t(t.tv_sec) * 1'000'000'000 + t.tv_nsec, now = 100'000'000'000;
+    const auto allows = [](const std::string &text) { return text.find("\"allow_host_input\": true") != std::string::npos; };
+    const std::string test = TestForbidding({argv[1]}, wall, allows);
+    if (!*argv[2]) return std::puts(test.c_str()), 0;
+    const Answer worn = AfterTest(Answer{true, now - 1}, argv[2], test);   // "worn" from the faked wearer
+    std::puts(Decide(true, true, worn, Answer{false, now - 1}, !test.empty(), now) == Want::kHold ? "lease" : "none");
+}
+"""
+
+
+def finding_e():
+    """ft-stream holds the lock while a dead guard's flag is there, and the helper says "worn"
+    (the fake). The next command releases the wearer and clears the flag, and the stream's next
+    tick leases on that answer, still fresh for 3 s."""
+    src, exe = run / 'e-ticks.cpp', run / 'e-ticks'
+    src.write_text(E_TICKS)
+    subprocess.run([os.environ.get('CXX', 'g++'), '-std=c++17', f'-I{TESTBENCH.parent / "stream"}', str(src),
+                    '-o', str(exe)], check=True)
+    hostinput.set_flag(False, time.time(), pid=999999)
+    said = subprocess.run([str(exe), str(run), ''], capture_output=True, text=True, check=True).stdout.strip()
+    proxy = mock.Mock(control=mock.Mock(return_value={'ok': True}))
+    with mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': False), \
+         mock.patch('sys.stderr', open(os.devnull, 'w')):
+        cli.drop_unsafe_worn(proxy, argparse.Namespace(command='status', state=None, allow_host_input=False))
+    tick = subprocess.run([str(exe), str(run), said], capture_output=True, text=True, check=True).stdout.strip()
+    if not said or hostinput.read_flag() is not None:
+        sys.exit('replay: finding E never got its flag read, then cleared')
+    return tick == 'lease'
+
+
+def finding_f():
+    """`worn on`: the guard is stopped (SIGTERM) after start_guard saw it live and before `worn 1`.
+    Its release finds nothing faked yet; `worn 1` then fakes the wearer, and if the guard took its
+    flag along, nothing stops a stream that takes the free lock from leasing till the post-check."""
+    hostinput.clear_flag()
+    guard, window = [], []
+
+    def start_guard(**k):
+        guard.append(subprocess.Popen([sys.executable, '-m', 'frame_testbench.hostinput', 'guard', str(layout)],
+                                      cwd=TESTBENCH, stdout=subprocess.PIPE, text=True))
+        guard[0].stdout.readline()   # holding: it took the lock and wrote the flag
+        return guard[0].pid
+
+    class Proxy:
+        faked = False
+        def control(self, command):
+            if command == 'worn 1':
+                guard[0].send_signal(signal.SIGTERM)   # its unit stopped from outside
+                guard[0].wait()
+                self.faked = True
+                window.append(hostinput.read_flag() is None and lock_free())
+            elif command == 'worn-release':
+                self.faked = False
+            return {'ok': True}
+    with mock.patch.object(hostinput, 'state', lambda *a, **k: {'input_streams': []}), \
+         mock.patch.object(hostinput, 'start_guard', start_guard):
+        try:
+            cli.dispatch(argparse.Namespace(command='worn', state='on', allow_host_input=False, socket=None), Proxy())
+        except ValueError:
+            pass   # the post-check: the guard stopped as the wearer was faked
+    if guard:
+        guard[0].stdout.close()
+    hostinput.clear_flag()
+    if not window:
+        sys.exit('replay: finding F never reached worn 1')
+    return window[0]
+
+
 b_flag_stops_lease = False
-BASELINE = {'A': False, 'B': True, 'C': False, 'D': False}   # A, C, D fixed in cli.py; B in ft-stream
-results = {'A': finding_a(), 'B': finding_b(), 'C': finding_c(), 'D': finding_d()}
+BASELINE = {'A': False, 'B': True, 'C': False, 'D': False, 'E': False, 'F': False}   # B: ft-stream
+results = {'A': finding_a(), 'B': finding_b(), 'C': finding_c(), 'D': finding_d(), 'E': finding_e(), 'F': finding_f()}
 for name, happens in results.items():
     note = ''
     if name == 'B':

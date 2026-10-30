@@ -48,6 +48,10 @@ test-c:
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/held-keys-wlr-test.c \
       $(pkg-config --cflags --libs wlroots-0.20 xkbcommon wayland-server) -o build/tests/held-keys-wlr-test
     build/tests/held-keys-wlr-test && echo "screens/tests/held-keys-wlr-test.c: ok"
+    gcc -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror -DFT_REMOTE_QUIT_MS=600 -Iscreens \
+      screens/tests/remote-test.c screens/remote.c $(pkg-config --cflags --libs wlroots-0.20 wayland-server) \
+      -o build/tests/remote-test
+    build/tests/remote-test >/dev/null 2>&1 && echo "screens/tests/remote-test.c: ok"
     g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handinput_test.cpp \
       screens/handcut.cpp screens/handinput.cpp screens/palmmenu.cpp screens/grabthat.cpp screens/steampanels.cpp -o build/tests/handinput-test
     build/tests/handinput-test && echo "screens/tests/handinput_test.cpp: ok"

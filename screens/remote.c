@@ -17,7 +17,8 @@
 //   remote <N> stop
 //   remotes  -> "ok <count> <N>:<client>:<state>:<W>x<H> ..."   (state: queued, starting,
 //               connecting, live, lost)
-// A host's streams start one after another ("queued" until then): see host_busy.
+// A host's streams start one after another ("queued" until then), and none starts while a
+// stream of the same display or host is still on its way out: see host_busy.
 // A stream that ends starts again, after 2 s, then longer after quick failures (up to 30 s).
 // Its panel keeps the last picture meanwhile. ft-stream logs to
 // $XDG_RUNTIME_DIR/frametop-remote-<N>.log.
@@ -62,7 +63,14 @@ struct remote {
     uint32_t restart_at;   // ms: start it then (0: not waiting to)
     uint32_t started_ms;
     int failures;          // quick ends in a row, for the back-off
+    uint32_t quit_at;      // ms: it was asked to end then (0: it wasn't), for the SIGKILL
 };
+
+// How long an ft-stream asked to end gets before SIGKILL: its way out stops the connection, then
+// releases a Remote Monitor over HTTP (15 s at most, stream/host.cpp).
+#ifndef FT_REMOTE_QUIT_MS
+#define FT_REMOTE_QUIT_MS 20000
+#endif
 
 static struct remote g_remotes[FT_REMOTE_MAX];
 static struct wl_event_loop *g_loop;
@@ -210,6 +218,7 @@ static void log_path(const struct remote *r, char *out, size_t size) {
 
 static bool start_stream(struct remote *r) {
     r->restart_at = 0;
+    r->quit_at = 0;
     r->started_ms = now_ms();
     snprintf(r->state, sizeof r->state, "lost");
     char *exe = g_stream, log[PATH_MAX];
@@ -274,17 +283,28 @@ static bool start_stream(struct remote *r) {
 static void stop_stream(struct remote *r) {
     say(r, "quit");
     disconnect(r);
-    if (r->pid > 0) kill(r->pid, SIGTERM);
+    if (r->pid <= 0) return;
+    kill(r->pid, SIGTERM);
+    if (!r->quit_at) r->quit_at = now_ms() | 1;
 }
+
+// On its way out, not reaped yet: asked to end (its socket closed), or it said it lost the
+// stream. Its exit may still be releasing a Remote Monitor.
+static bool leaving(const struct remote *o) { return o->pid != 0 && (o->fd < 0 || !strncmp(o->state, "lost", 4)); }
 
 // Vibepollo takes one stream operation at a time ("Another stream operation is still
 // running"), and a Remote Monitor appearing while another display's capture starts leaves that
 // one without a picture (2026-10-07: three started at once, two never got a frame). So a host's
-// streams start one after another: the next once the last is live, lost, or 20 s old.
+// streams start one after another: the next once the last is live, lost, or 20 s old. And not
+// while one of the host's, or an old one of this display's, is on its way out: a stop and a
+// start (ft-layout's route change, Connected off and on) had the new stream connecting while
+// the old one released its Remote Monitor, two ft-streams for one display.
 static bool host_busy(const struct remote *r) {
     for (int i = 0; i < FT_REMOTE_MAX; ++i) {
         const struct remote *o = &g_remotes[i];
-        if (o == r || !o->used || o->pid == 0 || strcmp(o->host, r->host) != 0) continue;
+        if (o == r || o->pid == 0) continue;
+        if (leaving(o) && (o->index == r->index || !strcmp(o->host, r->host))) return true;
+        if (!o->used || strcmp(o->host, r->host) != 0) continue;
         const bool starting = !strncmp(o->state, "starting", 8) || !strncmp(o->state, "connecting", 10);
         if (starting && now_ms() - o->started_ms < 20000) return true;
     }
@@ -368,6 +388,13 @@ void ft_remote_tick(void) {
     const uint32_t t = now_ms();
     for (int i = 0; i < FT_REMOTE_MAX; ++i) {
         struct remote *r = &g_remotes[i];
+        if (r->pid > 0 && r->quit_at && (int32_t)(t - r->quit_at) >= FT_REMOTE_QUIT_MS) {
+            // It didn't end: what waits on it (host_busy) would wait for good.
+            wlr_log(WLR_ERROR, "remote %d: ft-stream (pid %d) didn't end in %.1f s, killing it", r->index + 1, r->pid,
+                    FT_REMOTE_QUIT_MS / 1000.0);
+            kill(r->pid, SIGKILL);
+            r->quit_at = 0;
+        }
         if (r->used && r->restart_at && (int32_t)(t - r->restart_at) >= 0 && r->pid == 0 && r->fd < 0 &&
             !host_busy(r) && !start_stream(r))
             schedule_restart(r);
@@ -384,6 +411,7 @@ bool ft_remote_child(pid_t pid, int status) {
         struct remote *r = &g_remotes[i];
         if (r->pid != pid) continue;
         r->pid = 0;
+        r->quit_at = 0;
         if (WIFEXITED(status)) wlr_log(WLR_INFO, "remote %d: ft-stream exited (%d)", r->index + 1, WEXITSTATUS(status));
         else wlr_log(WLR_INFO, "remote %d: ft-stream killed (signal %d)", r->index + 1, WTERMSIG(status));
         disconnect(r);
@@ -479,7 +507,8 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
     log_path(r, log, sizeof log);
     const int f = open(log, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);  // a fresh log
     if (f >= 0) close(f);
-    // ft_remote_tick starts it: when its host is free, and once an old stream's exit is reaped.
+    // ft_remote_tick starts it: when its host is free, and once an old stream's exit is reaped
+    // (its own, or another slot's for this display: host_busy).
     r->restart_at = now_ms() | 1;
     snprintf(r->state, sizeof r->state, "queued");
     return snprintf(reply, size, restored ? "ok restored" : "ok"), true;

@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent.parent
 TLC_URL = 'https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar'
 TLC_SHA256 = '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88'
 MODELS = {
-    'HostInputLease': ['TypeOK', 'AwayGivesBack', 'NoStaleLease', 'OffOnLiftsEscape'],
+    'HostInputLease': ['TypeOK', 'AwayGivesBack', 'NoStaleLease', 'OffOnLiftsEscape', 'EscapeNeedsOff'],
     'RemoteStreams': ['TypeOK', 'OneStreamPerDisplay', 'OneHostOperation', 'StoppedStaysStopped', 'NeverStranded'],
 }
 # What the code at the sync commit does (SKILL.md, Findings): 'holds', or the finding's name and
@@ -24,15 +24,15 @@ MODELS = {
 # that breaks by another shortest path is a new way to break it, so it differs too.
 # H1 broke NoStaleLease by this path until answers counted from when they were given (GivenAt).
 H1 = 'StreamStarts SwitchOff StreamLive TickLive HelperAnswers HeadsetOff ReadSwitch Age SwitchOn ReadSwitch TickLive'
+# H2 broke OffOnLiftsEscape by this path until the escape was kept for the next stream (the
+# marker) and the pointer helper said when the headset last went back on (on-at).
 H2 = ('StreamStarts StreamLive TickLive HelperAnswers HeadsetOff TickLive HostEscape StreamEnds StreamStarts Age HeadsetOn'
       ' StreamLive TickLive HelperAnswers TickLive')
 # R1 broke OneStreamPerDisplay and OneHostOperation by this path until host_busy counted
 # a stream on its way out.
 R1 = 'YouStart TickStarts YouStop YouStart TickStarts'
 # Every rule not listed holds.
-BASELINE = {
-    ('HostInputLease', 'OffOnLiftsEscape'): ('H2', H2),
-}
+BASELINE = {}
 
 
 def tla2tools():

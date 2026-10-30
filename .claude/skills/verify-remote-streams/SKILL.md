@@ -45,7 +45,7 @@ stubbed and `FT_STREAM` pointing at a fake ft-stream that takes 1 s to exit afte
 point either harness at the real relay, helper or a Vibepollo host.
 
 To look at a path or redraw a chart, use the pstack `/statechart` skill on the files in `model/`
-(`host-view.mjs` and `remote-view.mjs` hold the reader's labels). The host model has about 2,000
+(`host-view.mjs` and `remote-view.mjs` hold the reader's labels). The host model has about 3,600
 states, so its chart shows its rules rather than every state.
 
 ## The models and rules
@@ -54,7 +54,8 @@ states, so its chart shows its rules rather than every state.
 exit, plus the person, the switch file, the pointer helper and the host's escape. `MaxInbox = 2`
 answers can wait unread, each marked `old` once 3 s have passed since it was given. Time is
 abstract: `Age` stands for 3 s passing (answers go stale and the switch gets read again) and only
-fires once ft-stream has caught up.
+fires once ft-stream has caught up. `mark` is the escape marker, which outlives the stream, and
+`onAfter` the pointer helper's on-at being after the escape; each answer carries it as `c`.
 
 | Rule | Meaning |
 |---|---|
@@ -62,6 +63,7 @@ fires once ft-stream has caught up.
 | `AwayGivesBack` | Once a live stream holds the lock and has read a fresh "away", nothing is lent. |
 | `NoStaleLease` | Whenever input is lent while nobody wears the headset, the answer it rests on is not older than the headset change. |
 | `OffOnLiftsEscape` | After the host escaped and the person took the headset off long enough and put it back on, ft-stream doesn't lease into a host that is still escaped. |
+| `EscapeNeedsOff` | A release that lifts the escape follows a headset off or a switch off since the host last lent its input: never a Wi-Fi drop, a crash or a quiet helper alone. |
 
 **`model/RemoteStreams.tla`**: one remote display with two ft-stream slots (`Slots = {s1, s2}`)
 and two settings (`Settings = {a, b}`), with `SYMMETRY` on both. A stream is `none`, `starting`,
@@ -79,7 +81,7 @@ it, as `host_busy` does.
 
 ## Findings
 
-All three were confirmed by `replay` at `676c8c7`. H1 and R1 are fixed; H2 is open.
+All three were confirmed by `replay` at `676c8c7`, and all three are fixed.
 
 **H1: a lease could rest on an old "worn" answer** (`NoStaleLease`; fixed in `76121c7`). The
 path was 11 steps: `StreamStarts SwitchOff StreamLive TickLive HelperAnswers HeadsetOff ReadSwitch
@@ -93,14 +95,20 @@ answer turns `old` on `Age`, and `TickLive` takes its freshness from that. Rever
 stamp doesn't bring H1 back in the replay, because the relay's pause answer waited too and blocks
 the lease; reverting both does.
 
-**H2: an escape survives an off-on across two streams** (`OffOnLiftsEscape`, real, open). 15
-steps: `StreamStarts StreamLive TickLive HelperAnswers HeadsetOff TickLive HostEscape StreamEnds
-StreamStarts Age HeadsetOn StreamLive TickLive HelperAnswers TickLive`. The first stream ends with
-`Stop(kDrop)`, which keeps the escape. The next stream starts with the headset off, so its first
-Tick has no answer and sends nothing. Then the headset goes on and it engages. No release ever
-crossed the off-on, so the escape the doc promises to lift is still in force. The Vibepollo fork
-keeps one process-wide escape flag that only a client `release` (or a Vibepollo restart) clears;
-drop, session end and timeout keep it.
+**H2: an escape survived an off-on across two streams** (`OffOnLiftsEscape`; fixed in
+`2c783dd`). The path was 15 steps: `StreamStarts StreamLive TickLive HelperAnswers HeadsetOff
+TickLive HostEscape StreamEnds StreamStarts Age HeadsetOn StreamLive TickLive HelperAnswers
+TickLive`. The first stream ended with `Stop(kDrop)`, which keeps the escape. The next one started
+with the headset off and wasn't live, so it never asked the helper, and it engaged once the headset
+was back on: no release crossed the off-on. The Vibepollo fork keeps one process-wide escape flag
+that only a client `release` (or a Vibepollo restart) clears. Now the stream that hears the escape
+writes `$XDG_RUNTIME_DIR/frametop-escape-ID` (`Got`, `hostinput::EscapeMark`), and a release that
+goes removes it. The next stream picks it up (`Recall`, at `Open` and when it takes the lock) and
+asks `gaze ? headset on-at`. The pointer helper notes when the headset last went back on after an
+off of 1.5 s or more (`headsetOnAt`, CLOCK_BOOTTIME), and an on-at after the escape owes a release
+(`OffOnSince`), which goes before the first engage. The plain `gaze ? headset` reply is unchanged,
+because gazecheck takes only two or three words. `replay` keeps a Wi-Fi drop with the headset on as
+`H2-control`: the escape must stand. `EscapeNeedsOff` checks the same in the model.
 
 **R1: a stop and a start overlapped two ft-streams for one display** (`OneStreamPerDisplay` and
 `OneHostOperation`; fixed in `e15b65f`). The path was 5 steps: `YouStart TickStarts YouStop
@@ -120,15 +128,16 @@ The doc drift found with these (ft-screens neither stops streams on headset off 
 
 | Model action | Code |
 |---|---|
-| `StreamStarts`, `StreamLive`, `StreamEnds` | `stream/ft-stream.cpp` `HostInput::Open`, `Tick(now, live)`, `Stop(kDrop)` on exit |
+| `StreamStarts`, `StreamLive`, `StreamEnds` | `stream/ft-stream.cpp` `HostInput::Open` (`Recall` reads the marker), `Tick(now, live)`, `Stop(kDrop)` on exit |
 | `ReadSwitch` | `Tick`: `checkAt` every `kStaleNs`, `HostFlag(host, "input")`; switch off -> `Apply(kRelease)` then `Unlock` |
 | `TickIdle` | `Tick` with the switch off or not live: `Apply(Decide)`, `Unlock` |
-| `TickLive` | `Tick`: take the flock, ask (`gaze ? headset`), `TakeAnswers` (last one wins, dated by `GivenAt` from the `SO_TIMESTAMPNS` stamp), `Apply(Decide)` |
-| `TickWith` | `Apply`, `Stop`, the `releaseOwed` and `last` edges, `Engage`/`Release`/`Drop` |
+| `TickLive` | `Tick`: take the flock (`Recall`), ask (`gaze ? headset on-at`), `TakeAnswers` (last one wins, dated by `GivenAt` from the `SO_TIMESTAMPNS` stamp; `OffOnSince` owes a release), `Apply(Decide)` |
+| `TickWith` | `Apply`, `Stop`, the `releaseOwed` and `last` edges, `Engage`/`Release`/`Drop`; a release that went removes the marker (`Send`) |
 | `Decide` | `stream/hostinput.h` `Decide` (switch, live, fresh away -> release; not fresh -> drop) |
 | `Age` | 3 s passing: `Fresh` (`kStaleNs`) on the given-at time, waiting answers turn `old`, and the next switch read |
-| `HelperAnswers` | the pointer helper's reply to `gaze ? headset` |
-| `HostEscape` | the host's escape hotkey (`Got` reads the record) |
+| `HelperAnswers` | the pointer helper's reply to `gaze ? headset on-at` |
+| `HeadsetOn` | `pointer/helper/ft-pointer.cpp`: `headsetOff` going false sets `headsetOnAt` (after `HEADSET_OFF_AFTER`, 1.5 s, of idle: an off of 3 s always counts, a shorter one may) |
+| `HostEscape` | the host's escape hotkey (`Got` reads the record and writes the marker) |
 | `YouStart(v)` | `screens/remote.c` `ft_remote_command` `start` (slot pick, same-settings check, `stop_stream` for new settings) |
 | `YouStop` | `ft_remote_command` `stop`: `used = false`, `stop_stream` (SIGTERM, `quit_at`, pid kept) |
 | `TickStarts` | `ft_remote_tick`: `restart_at` due, `pid == 0`, `fd < 0`, `!host_busy` -> `start_stream` |
@@ -140,8 +149,10 @@ The doc drift found with these (ft-screens neither stops streams on headset off 
 
 Left out of the host model: the relay's pause answer (taken as fresh and not paused), the test
 files (the `verify-fake-worn-guard` skill covers them), LiSend failures, two streams to one host and
-the lock handoff between them, the host fork's own code, timing finer than the 3 s `Age`, and the
-500 ms lease cadence.
+the lock handoff between them (`Recall` at the lock is for that), the host fork's own code, timing
+finer than the 3 s `Age`, and the 500 ms lease cadence. A helper restarted since the escape says
+on-at 0 and lifts nothing, and a marker left by a Vibepollo restart costs one release that does
+nothing: neither is modeled.
 
 Left out of the remote model: more than one display or host (`remote-test.c` covers another
 host), the 20 s `host_busy` timeout, the backoff timing (2 s to 30 s), the SIGKILL timing (a hung
@@ -150,7 +161,7 @@ and input routing. Not escalated in the code either: an ft-stream that said `los
 then hangs on the way out isn't killed, since nothing asked it to end. Its Remote Monitor release
 is bounded by curl's 15 s timeout (`stream/host.cpp`), and the display waits until it's reaped.
 
-`replay` only tracks H1, H2 and R1 (and the R1 control). A change that breaks something else, for
+`replay` only tracks H1, H2 and R1 (and their controls). A change that breaks something else, for
 example `Decide` no longer releasing on "away", shows up in `check` once the model follows the code,
 not in `replay`.
 
@@ -173,18 +184,20 @@ not in `replay`.
 
 Covered code:
 - `stream/ft-stream.cpp`: `struct HostInput` (`Open`, `Got`, `Stop`, `Apply`, `Unlock`,
-  `TakeAnswers`, `Tick`), and the exit path's Disconnect Monitor for `monitor`
-- `stream/hostinput.h`: `Decide`, `Fresh`, `GivenAt`, `Engage`, `Release`, `Drop`
+  `TakeAnswers`, `Recall`, `Tick`), and the exit path's Disconnect Monitor for `monitor`
+- `stream/hostinput.h`: `Decide`, `Fresh`, `GivenAt`, `EscapeMark`, `ReadMark`, `WriteMark`, `OnAt`,
+  `OffOnSince`, `Engage`, `Release`, `Drop`
+- `pointer/helper/ft-pointer.cpp`: `headsetOff`, `headsetOnAt`, the `gaze ? headset [on-at]` reply
 - `screens/remote.c`: `start_stream`, `stop_stream`, `leaving`, `host_busy`, `schedule_restart`, `message`,
   `ft_remote_tick`, `ft_remote_child`, `ft_remote_command` (`start`, `stop`)
 - `layout/ft_layout.py`: `start_remote`, `remote_command` (`host NAME route=/direct=`)
 - `docs/host-input.md`: the lease rule, the escape and the headset section
 
-**Sync commit: `8ee0a21`** (experimental, 2026-10-30). The models describe the covered code as of
+**Sync commit: `2c783dd`** (experimental, 2026-10-30). The models describe the covered code as of
 this commit. To see whether they need another look:
 
 ```sh
-git diff 8ee0a21 -- stream/ft-stream.cpp stream/hostinput.h screens/remote.c layout/ft_layout.py docs/host-input.md
+git diff 2c783dd -- stream/ft-stream.cpp stream/hostinput.h pointer/helper/ft-pointer.cpp screens/remote.c layout/ft_layout.py docs/host-input.md
 ```
 
 Move the sync commit forward only after you have read that diff, confirmed that every model action

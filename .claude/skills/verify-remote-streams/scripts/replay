@@ -6,7 +6,7 @@
                     exit 1: a finding changed (fixed, or a control now breaks)
                     exit 2: the harness couldn't build or run
 
-H1 and H2 build ft-stream's real struct HostInput (copied out of stream/ft-stream.cpp, with the
+H1, H2 and the H2 control build ft-stream's real struct HostInput (copied out of stream/ft-stream.cpp, with the
 relay's and the pointer helper's socket names swapped for this run's own) next to a fake helper
 and relay, and record every lease it sends. R1 builds the real screens/remote.c with SteamVR
 stubbed and a fake ft-stream that takes 1 s to exit after SIGTERM. Nothing reaches the live relay,
@@ -17,11 +17,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / 'replay-src'
-# True: the finding happens in the code at the sync commit (SKILL.md, Findings). H1 is fixed
-# (answers count from when they were given): its path must no longer lease. R1 is fixed (host_busy
-# waits for a stream on its way out): a stop and a start must no longer overlap.
-# R1-control is the in-place settings change, which waits for the old stream: it must not overlap.
-BASELINE = {'H1': False, 'H2': True, 'R1': False, 'R1-control': False}
+# True: the finding happens in the code at the sync commit (SKILL.md, Findings). All three are
+# fixed. H1 (answers count from when they were given): its path must no longer lease. H2 (the
+# escape kept for the next stream, the helper's on-at): an off-on with no stream to see it must
+# lift the escape before the next lease. R1 (host_busy waits for a stream on its way out): a stop
+# and a start must no longer overlap. The controls must not happen either: H2-control is a Wi-Fi
+# drop with the headset on, which must keep the escape; R1-control the in-place settings change,
+# which waits for the old stream.
+BASELINE = {'H1': False, 'H2': False, 'H2-control': False, 'R1': False, 'R1-control': False}
 
 
 def cpus():
@@ -66,10 +69,11 @@ def build(work, repo):
 def host(work):
     out = sh(work, './hostin-repro')
     verdicts = re.findall(r'^  => (REPRODUCED|not reproduced)', out.stdout, re.M)
-    if len(verdicts) != 2:
+    if len(verdicts) != 3:
         sys.stderr.write(out.stdout + out.stderr)
-        sys.exit('replay: the HostInput harness did not finish both paths')
-    return {'H1': verdicts[0] == 'REPRODUCED', 'H2': verdicts[1] == 'REPRODUCED'}, out.stdout
+        sys.exit('replay: the HostInput harness did not finish its three paths')
+    return {'H1': verdicts[0] == 'REPRODUCED', 'H2': verdicts[1] == 'REPRODUCED',
+            'H2-control': verdicts[2] == 'REPRODUCED'}, out.stdout
 
 
 def remote(work, mode):

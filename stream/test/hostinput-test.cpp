@@ -125,6 +125,12 @@ int main() {
     assert(Decide(true, true, worn, playing, true, now) == Want::kDrop);
     assert(Decide(true, true, away, playing, true, now) == Want::kRelease);
     assert(Decide(false, true, worn, playing, true, now) == Want::kRelease);
+    // Its file going away: the last answer may be from while it faked the wearer, so none until
+    // the helper answers again.
+    const std::string fakeWorn = "/run/user/1000/frametop-fake-worn.json";
+    assert(Decide(true, true, AfterTest(worn, fakeWorn, ""), playing, false, now) == Want::kDrop);
+    assert(AfterTest(worn, "", "").at == worn.at && AfterTest(worn, fakeWorn, fakeWorn).at == worn.at);
+    assert(Decide(true, true, AfterTest(worn, "", ""), playing, false, now) == Want::kHold);
 
     // Where the tests keep their files.
     assert((TestDirs("/run/user/1000", 1000) == std::vector<std::string>{"/run/user/1000"}));

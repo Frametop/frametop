@@ -175,6 +175,13 @@ inline std::string TestForbidding(const std::vector<std::string> &dirs, int64_t 
     return "";
 }
 
+// The pointer helper's last answer once the test files say TEST, after the last tick found SAID.
+// A test's file going away means none: the answer may be from while that test faked the wearer,
+// and it would hold the lease until the next one. Tick also drops the answers still waiting.
+inline Answer AfterTest(const Answer &worn, const std::string &said, const std::string &test) {
+    return test.empty() && !said.empty() ? Answer{} : worn;
+}
+
 // The relay's view of the host's devices, from its records: "hostdev" with each hello while
 // engaged (every second), "hostev" for events of a kind it has a device for, "hostbye" when the
 // host lets go. A message the relay didn't get says hostbye, so it lets go of every key it holds

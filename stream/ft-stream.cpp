@@ -412,6 +412,34 @@ struct HostInput {
         locked = false;
     }
 
+    // The pointer helper's and the relay's answers that came, from this user's processes only.
+    // USE false: drop them unread.
+    void TakeAnswers(int64_t now, bool use) {
+        char buf[2048];
+        for (;;) {
+            iovec io{buf, sizeof buf};
+            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(ucred))];
+            msghdr m{};
+            m.msg_iov = &io, m.msg_iovlen = 1, m.msg_control = control, m.msg_controllen = sizeof control;
+            const ssize_t n = recvmsg(sock, &m, MSG_DONTWAIT);
+            if (n <= 0) break;
+            // Only this user's answers count. Not by address: the helper answers from an unbound socket.
+            const cmsghdr *c = CMSG_FIRSTHDR(&m);
+            if (!c || c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_CREDENTIALS) continue;
+            ucred cred;
+            std::memcpy(&cred, CMSG_DATA(c), sizeof cred);
+            if (cred.uid != getuid() || !use) continue;
+            const std::string reply(buf, size_t(n));
+            if (reply.rfind("ok ", 0) == 0) {
+                worn = {reply.find(" worn") != std::string::npos, now};
+            } else {
+                const nlohmann::json j = nlohmann::json::parse(reply, nullptr, false);
+                if (j.is_object() && j.value("t", "") == "pause" && j.contains("paused") && j["paused"].is_boolean())
+                    paused = {j["paused"].get<bool>(), now};
+            }
+        }
+    }
+
     void Tick(int64_t now, bool live) {
         if (sock < 0) return;
         if (now >= checkAt) checkAt = now + hostinput::kStaleNs, switchOn = HostFlag(host, "input");
@@ -428,38 +456,20 @@ struct HostInput {
         }
         if (!locked) return;
         if (now >= askAt) askAt = now + 1'000'000'000, Send(kHelper, "gaze ? headset"), Send(kRelay, "pause ?");
-        char buf[2048];
-        for (;;) {
-            iovec io{buf, sizeof buf};
-            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(ucred))];
-            msghdr m{};
-            m.msg_iov = &io, m.msg_iovlen = 1, m.msg_control = control, m.msg_controllen = sizeof control;
-            const ssize_t n = recvmsg(sock, &m, MSG_DONTWAIT);
-            if (n <= 0) break;
-            // Only this user's answers count. Not by address: the helper answers from an unbound socket.
-            const cmsghdr *c = CMSG_FIRSTHDR(&m);
-            if (!c || c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_CREDENTIALS) continue;
-            ucred cred;
-            std::memcpy(&cred, CMSG_DATA(c), sizeof cred);
-            if (cred.uid != getuid()) continue;
-            const std::string reply(buf, size_t(n));
-            if (reply.rfind("ok ", 0) == 0) {
-                worn = {reply.find(" worn") != std::string::npos, now};
-            } else {
-                const nlohmann::json j = nlohmann::json::parse(reply, nullptr, false);
-                if (j.is_object() && j.value("t", "") == "pause" && j.contains("paused") && j["paused"].is_boolean())
-                    paused = {j["paused"].get<bool>(), now};
-            }
-        }
+        TakeAnswers(now, true);
         // Read every tick, so no lease goes out once a test's file is there.
         timespec wall;
         clock_gettime(CLOCK_REALTIME, &wall);
         const std::string test =
             hostinput::TestForbidding(testDirs, int64_t(wall.tv_sec) * 1'000'000'000 + wall.tv_nsec, AllowsHostInput);
         if (test != testSaid) {
-            if (test.empty()) std::printf("hostinput: no test stops %s's lease now\n", host.c_str());
-            else std::printf("hostinput: no lease for %s's keyboard and mouse while %s says a test may not take them\n",
-                             host.c_str(), test.c_str());
+            // The answers so far may be from while that test faked the wearer: ask again.
+            worn = hostinput::AfterTest(worn, testSaid, test);
+            if (test.empty()) {
+                TakeAnswers(now, false), askAt = now;
+                std::printf("hostinput: no test stops %s's lease now\n", host.c_str());
+            } else std::printf("hostinput: no lease for %s's keyboard and mouse while %s says a test may not take them\n",
+                               host.c_str(), test.c_str());
             testSaid = test;
         }
         const hostinput::Want want = hostinput::Decide(switchOn, live, worn, paused, !test.empty(), now);

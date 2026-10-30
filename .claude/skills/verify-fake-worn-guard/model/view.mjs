@@ -1,24 +1,27 @@
 // Reader's words for the fake-worn guard chart (FakeWornGuard.tla). Three groups by what
-// protects the host's keyboard and mouse; each draws as a dashed box.
+// protects the host's keyboard and mouse; each draws as a dashed box. ft-stream's own steps (its
+// tick, the helper's answers) only show where they lease or where the flag stops a lease.
 const alive = (v) => v.flag === "guard" && v.guard === "holding";
 
 const SAFE = "Wearer not faked";
 const GUARDED = "Faked, the guard holds the lock";
-const EXPOSED = "Faked, nothing holds the lock";
+const EXPOSED = "Faked or leased, no guard";
 
 const IDLE = "Idle";
 const CHECKING = "worn on: checking";
 const STARTING = "worn on: starting a guard";
 const READY = "Guard holds the lock, worn 1 next";
-const GONE_READY = "Guard killed, worn 1 next";
+const GONE_READY = "Guard gone, worn 1 next";
 const FLAG_LEFT = "Guard gone, flag left";
 const WAITING = "Guard gone, a stream waits for the lock";
 const NOFLAG_HELD = "No flag, guard still holds the lock";
 const NOFLAG_FREE = "No flag, lock free";
 const NOFLAG_CMD = "No flag, a command running";
-const TAKEN = "A stream holds the lock: host taken";
+const BLOCKED = "Guard gone, a stream holds the lock, the flag stops its lease";
+const TAKEN = "ft-stream leases the host: host taken";
 
 const where = (v) => {
+  if (v.lease) return [EXPOSED, TAKEN];
   if (!v.faked) {
     if (v.pc === "on_check") return [SAFE, CHECKING];
     if (v.pc === "on_stop" || (v.pc === "on_wait" && !alive(v))) return [SAFE, STARTING];
@@ -26,9 +29,9 @@ const where = (v) => {
     if (v.pc === "on_fake") return [SAFE, GONE_READY];
     return [SAFE, IDLE];
   }
-  if (v.stream === "holding") return [EXPOSED, TAKEN];
   if (alive(v)) return [GUARDED];
-  if (v.flag !== "none") return [EXPOSED, v.stream === "live" ? WAITING : FLAG_LEFT];   // a dead guard's or a command's
+  if (v.flag !== "none")   // a dead guard's or a command's
+    return [EXPOSED, v.stream === "holding" ? BLOCKED : v.stream === "live" ? WAITING : FLAG_LEFT];
   if (v.pc !== "idle") return [EXPOSED, NOFLAG_CMD];
   return [EXPOSED, v.lock === "guard" ? NOFLAG_HELD : NOFLAG_FREE];
 };
@@ -39,9 +42,9 @@ const KEEP = new Set([
   [IDLE, CHECKING], [CHECKING, IDLE], [CHECKING, STARTING], [STARTING, IDLE], [STARTING, READY],
   [READY, GUARDED], [READY, NOFLAG_HELD], [READY, GONE_READY], [GONE_READY, FLAG_LEFT], [GONE_READY, NOFLAG_CMD],
   [GUARDED, IDLE], [GUARDED, FLAG_LEFT],
-  [FLAG_LEFT, WAITING], [WAITING, TAKEN], [FLAG_LEFT, IDLE], [FLAG_LEFT, NOFLAG_FREE],
-  [NOFLAG_HELD, NOFLAG_FREE], [NOFLAG_FREE, TAKEN], [NOFLAG_FREE, NOFLAG_CMD],
-  [NOFLAG_CMD, IDLE], [NOFLAG_CMD, GUARDED], [TAKEN, IDLE],
+  [FLAG_LEFT, WAITING], [WAITING, BLOCKED], [BLOCKED, IDLE], [FLAG_LEFT, IDLE], [FLAG_LEFT, NOFLAG_FREE],
+  [NOFLAG_HELD, NOFLAG_FREE], [NOFLAG_FREE, NOFLAG_CMD],
+  [NOFLAG_CMD, IDLE], [NOFLAG_CMD, GUARDED], [NOFLAG_CMD, TAKEN], [TAKEN, IDLE],
 ].map((p) => p.join(" -> ")));
 
 const RELEASED = "the wearer is released";
@@ -50,6 +53,8 @@ const DROPPED = "a release times out, the flag is dropped anyway";
 
 const label = (action, from, to) => {
   const up = from.proxy === "up";
+  if (!from.lease && to.lease) return "no flag, and the helper said worn: ft-stream leases";
+  if (from.lease && !to.lease) return "ft-stream drops the lease";
   if (from.faked && !to.faked) return RELEASED;   // acted, even when its reply timed out
   if (from.faked && to.faked && from.flag !== "none" && to.flag === "none" && action !== "OnFake") return DROPPED;
   switch (action) {
@@ -67,12 +72,15 @@ const label = (action, from, to) => {
     case "OffSend": return up ? RELEASED : "the release times out";
     case "GuardLetsGo": return "the flag went: the guard lets go";
     case "GuardKilled": return "the guard is killed";
+    case "GuardStopped": return "the guard is stopped (SIGTERM)";
     case "GuardCleanup": return up && from.flag !== "none" ? RELEASED : "ExecStopPost runs";
     case "StreamStarts": return "a stream starts";
     case "StreamTakesLock": return "a stream takes the lock";
+    case "StreamTick": return to.saidTest ? "the flag stops ft-stream's lease" : "ft-stream's tick";
+    case "HelperAnswers": return "the helper answers";
     case "ProxyHangs": return "the proxy hangs";   // never changes a chart state, so never drawn
   }
-  return null;   // ProxyRecovers, GuardStopped, StopOldGuard, StreamEnds
+  return null;   // ProxyRecovers, StopOldGuard, StreamEnds
 };
 
 export const title = "frame-testbench fake-worn guard vs a stream to an input host";

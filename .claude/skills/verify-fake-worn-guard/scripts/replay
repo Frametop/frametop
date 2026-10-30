@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Replay the model's findings A, B and C against the real testbench code, offline: a temp
+"""Replay the model's findings A to D against the real testbench code, offline: a temp
 XDG_RUNTIME_DIR, a fake proxy that acts on `worn 1` but never answers, FRAME_TESTBENCH_SOCKET at
 a path nothing listens on, a layout with one made-up input host. It touches no live proxy,
 stream, lock or flag.
 
   replay      prints whether each finding still happens in the code; exit 0 when that matches
-              the baseline (A and C fixed, B still happens), 1 when it doesn't (update SKILL.md
-              for a fix, or read the finding that came back)"""
+              the baseline, 1 when it doesn't (update SKILL.md for a fix, or read the finding
+              that came back). A, C and D are fixed in the testbench. B still happens in the
+              testbench, by design: ft-stream closes it by refusing the lease while the flag it
+              leaves is there, which only stream/test/hostinput-test.cpp and the model check
+              (this replays the testbench only), so B's line also says whether that flag is one
+              ft-stream refuses."""
 import argparse, fcntl, json, os, signal, socket, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 from unittest import mock
@@ -72,7 +76,11 @@ def finding_b():
     held = g.stdout.readline().startswith('holding') and not lock_free()
     g.send_signal(signal.SIGKILL)
     g.wait()
-    return held and hostinput.read_flag() is not None and lock_free()
+    flag = hostinput.read_flag()
+    # ft-stream's rule (AllowsHostInput): only a JSON object with "allow_host_input": true allows
+    global b_flag_stops_lease
+    b_flag_stops_lease = flag is not None and flag.get('allow_host_input') is not True
+    return held and flag is not None and lock_free()
 
 
 def finding_c():
@@ -85,9 +93,41 @@ def finding_c():
     return proxy.faked and hostinput.read_flag() is None
 
 
-BASELINE = {'A': False, 'B': True, 'C': False}   # A and C fixed by cli.release_or_keep_flag
-results = {'A': finding_a(), 'B': finding_b(), 'C': finding_c()}
+def finding_d():
+    """`worn on` over a flag an unconfirmed release left: start_guard clears it, and the new
+    guard dies before it takes the locks, so worn on is refused with the wearer faked."""
+    def guard_dies(**k):
+        started.append(1)
+        hostinput.clear_flag()
+        raise RuntimeError("the host-input guard couldn't take the input locks")
+    proxy = HungProxy(faked=True)
+    hostinput.set_flag(False, time.time(), pid=999999)
+    started = []
+    with mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': False), \
+         mock.patch.object(hostinput, 'state', lambda *a, **k: {'input_streams': []}), \
+         mock.patch.object(hostinput, 'start_guard', guard_dies), \
+         mock.patch('sys.stderr', open(os.devnull, 'w')):
+        try:
+            args = argparse.Namespace(command='worn', state='on', allow_host_input=False, socket=None)
+            cli.drop_unsafe_worn(proxy, args)
+            cli.dispatch(args, proxy)
+        except Exception:
+            pass
+    happens = bool(started) and proxy.faked and hostinput.read_flag() is None
+    hostinput.clear_flag()
+    return happens
+
+
+b_flag_stops_lease = False
+BASELINE = {'A': False, 'B': True, 'C': False, 'D': False}   # A, C, D fixed in cli.py; B in ft-stream
+results = {'A': finding_a(), 'B': finding_b(), 'C': finding_c(), 'D': finding_d()}
 for name, happens in results.items():
+    note = ''
+    if name == 'B':
+        note = ('; the flag it leaves stops ft-stream\'s lease' if b_flag_stops_lease
+                else '; the flag it leaves would NOT stop ft-stream\'s lease')
     print(f'finding {name}: {"still happens" if happens else "no longer happens"}'
+          + (' at the testbench level' if name == 'B' else '') + note
           + ('' if happens == BASELINE[name] else '  (differs from the baseline)'))
-sys.exit(0 if results == BASELINE else 1)
+ok = results == BASELINE and b_flag_stops_lease
+sys.exit(0 if ok else 1)

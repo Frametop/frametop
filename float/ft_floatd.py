@@ -93,6 +93,10 @@ PULL_OUT = 0.3           # a floated window starts this far in front of its scre
 DEFAULT_MPP = 1.6 / 1920  # metres per pixel when ft-screens can't say (no SteamVR)
 PLACES_PATH = os.path.expanduser("~/.config/frametop-float.json")  # each app's last floating place
 LAUNCH_SECONDS = 30      # a launched app's window must show up within this
+# Scroll on a floating window's corner tab (user, 2026-10-30, DEE-245): its panel bigger or smaller at the
+# same pixels, 5% a notch, from half to twice its screen's density (metres per pixel).
+DENSITY_STEP = 1.05
+DENSITY_RANGE = (0.5, 2.0)
 HOLD_MS = 700            # at most this long, a panel keeps its picture while its window changes ("hold")
 IN_FRONT = 2.0           # at most this far in front of you, for an app with no remembered place
 DEBUG = os.environ.get("FT_FLOAT_DEBUG") == "1"  # log every event from the script
@@ -368,6 +372,8 @@ class Float:
         self.scale = 1.0          # its output's scale (pixels per logical unit)
         self.mpp = DEFAULT_MPP    # metres per pixel on its panel
         self.frame = None         # last frame (logical, global)
+        self.crop = None          # its panel's last crop (x, y, w, h) and title bar height, as sent
+        self.title = 0
         self.client = None
         self.full = False         # full screen: no margin
         self.normal = None        # its size in pixels when last not full screen
@@ -646,6 +652,32 @@ class Daemon:
                     return float(metres) / max(1, int(size.split("x")[0]))
         return DEFAULT_MPP
 
+    def density_range(self, output):
+        """The densities a floating window may have, from its screen's (metres per pixel)."""
+        base = self.screen_mpp(output)
+        return base * DENSITY_RANGE[0], base * DENSITY_RANGE[1]
+
+    def app_mpp(self, app, output):
+        """The density an app last floated at (within the range for this screen), else the screen's."""
+        lo, hi = self.density_range(output)
+        known = (self.places.get(app) or {}).get("mpp") if app else None
+        if isinstance(known, (int, float)) and known > 0:
+            return min(max(known, lo), hi)
+        return self.screen_mpp(output)
+
+    def redensity(self, f, steps):
+        """Scroll on the corner tab: the panel bigger (up) or smaller at the same pixels, so the window
+        looks bigger or smaller and keeps its layout; remembered for the app when its panel goes."""
+        if not f.crop or steps == 0 or self.floats.get(f.id) is not f:
+            return
+        lo, hi = self.density_range((f.saved or {}).get("output") or f"WL-{self.primary()}")
+        mpp = min(max(f.mpp * DENSITY_STEP ** steps, lo), hi)
+        if abs(mpp - f.mpp) < 1e-10:
+            return
+        log(f"{f.id[:9]} density {f.mpp * 1000:.4f} -> {mpp * 1000:.4f} mm a pixel")
+        f.mpp = mpp
+        self.set_panel(f, f.crop, f.title)
+
     def float_window(self, ev, place=None, mpp=None, scale=None):
         """Float a window: its panel in front of where it was on its screen, or at place (centre
         and axes in the world), at the density of its screen, or mpp, and at its screen's scale,
@@ -666,7 +698,8 @@ class Daemon:
         scales = output_scales()
         f.scale = scale or scales.get(ev["output"], 1.0)
         slot.kscale = scales.get(slot.output, slot.kscale)
-        f.mpp = mpp or self.screen_mpp(ev["output"])
+        # (the float key and the title bar button too: at the density the app last floated at)
+        f.mpp = mpp or self.app_mpp(f.app, ev["output"])
         fr, s, m = ev["frame"], f.scale, self.margin
         w, h = round(fr["w"] * s), round(fr["h"] * s)
         log(f"{wid[:9]} ({ev.get('cls')}) floats on {slot.output}: {w}x{h} px, scale {s:g}")
@@ -694,6 +727,7 @@ class Daemon:
 
     def set_panel(self, f, crop, title=0):
         x, y, w, h = crop
+        f.crop, f.title = crop, title
         self.screens.ask(f"float {f.slot.index} {f.mpp:.7f} {x} {y} {w} {h} {title}")
 
     def place_panel(self, f, ev):
@@ -1274,7 +1308,7 @@ class Daemon:
             else:  # a screen: its output is WL-<N - 1>
                 self.command(cmd="activate-output", output=f"WL-{int(rest[0]) - 1}")
             return "ok"
-        if cmd in ("dock", "close", "resize", "scale") and rest and rest[0].isdigit():
+        if cmd in ("dock", "close", "resize", "scale", "density") and rest and rest[0].isdigit():
             f = self.by_panel(int(rest[0]))
             if not f:
                 return f"error no floating window on screen {rest[0]}"
@@ -1284,6 +1318,8 @@ class Daemon:
                 self.command(cmd="close", id=f.id)
             elif cmd == "scale" and len(rest) == 2:
                 self.scale_soon(f, int(rest[1]))
+            elif cmd == "density" and len(rest) == 2 and rest[1].lstrip("+-").isdigit():
+                self.redensity(f, int(rest[1]))
             elif cmd == "resize" and len(rest) == 3 and f.frame:
                 w, h = max(320, int(rest[1])), max(200, int(rest[2]))
                 if (w, h) != (round(f.frame["w"] * f.scale), round(f.frame["h"] * f.scale)):

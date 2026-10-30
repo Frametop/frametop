@@ -5075,6 +5075,7 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
     s.rollButton = chrome("roll", "roll", roll, 64, 64);
     vr::VROverlay()->SetOverlayFlag(s.rollButton, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
     s.handle = chrome("resize", "resize", corner, 64, 64);
+    if (s.floating) vr::VROverlay()->SetOverlayFlag(s.handle, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);   // (its density)
     if (s.floating) {
         static const auto dock = DockTexture(64);
         static const auto close = CloseTexture(64);
@@ -5442,7 +5443,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::Move)
                 Push(s, ev.data.scroll.ydelta);
         }
-        // The corner: resize.
+        // The corner: resize. A floating window's: scroll for its density too (user, 2026-10-30, DEE-245): up,
+        // its panel bigger at the same pixels, down, smaller (ft-floatd, 5% a notch); not while it's resized.
         while (vr::VROverlay()->PollNextOverlayEvent(s.handle, &ev, sizeof ev)) {
             hover(3);
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
@@ -5450,6 +5452,10 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
                 EndDragsBy(ev.trackedDeviceIndex);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+            } else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.floating && s.drag == Drag::None &&
+                       ev.data.scroll.ydelta != 0) {
+                s.keepX = s.cornerX, s.keepY = s.cornerY;   // (this corner stays put: the tab stays under the laser)
+                SendFloat("density " + std::to_string(index + 1) + (ev.data.scroll.ydelta > 0 ? " 1" : " -1"));
             }
         }
         // The curve button.

@@ -299,6 +299,12 @@ def dispatch(args, bench):
             # live or started later, can lease.
             flag = hostinput.read_flag()
             if not (flag and flag.get('allow_host_input') is False and hostinput.guard_alive(flag)):
+                if flag and flag.get('allow_host_input') is False:
+                    # drop_unsafe_worn couldn't confirm its release. start_guard would clear this
+                    # flag, and a guard that then fails to start would leave the wearer faked
+                    # with none.
+                    raise ValueError("worn on refused: the input proxy hasn't confirmed releasing the "
+                                     "last faked wearer: run frame-testbench release once it answers")
                 try:
                     hostinput.start_guard(socket=args.socket)
                 except RuntimeError as error:

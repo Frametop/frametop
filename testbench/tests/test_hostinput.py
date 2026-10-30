@@ -443,6 +443,14 @@ class WornGuardTests(Fixture):
         self.assertEqual([c for c, _ in self.bench.commands], ['worn 1'] + ['worn-release'] * 3)
         self.assertFalse(hostinput.read_flag()['allow_host_input'])   # still says it's faked
 
+    def test_worn_on_is_refused_while_an_unconfirmed_release_left_a_flag(self):
+        hostinput.set_flag(False, 1.0, pid=999999)   # drop_unsafe_worn's release timed out
+        self.alive = False
+        with self.assertRaisesRegex(ValueError, "hasn't confirmed releasing"):
+            self.worn('on')   # start_guard would clear the flag, and its guard might not start
+        self.assertEqual((self.guards, self.bench.commands), ([], []))
+        self.assertEqual(hostinput.read_flag()['pid'], 999999)
+
     def test_any_command_drops_a_faked_wearer_whose_guard_has_gone(self):
         self.worn('on')
         args = cli.parser().parse_args(['pointer', 'state'])

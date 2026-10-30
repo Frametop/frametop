@@ -4113,6 +4113,20 @@ void TestSusanPick() {
     CHECK(grabthat::SusanPick({{2, 5}}, 2, 5, true, 8) == -1);    // only the brought one: nothing
 }
 
+void TestSlotLine() {
+    // the eyes at 0 1.6 0; the slot's panel 1 m straight ahead (-z)
+    Mat head = Identity(), slot = Identity(), p = Identity();
+    head.m[1][3] = 1.6;
+    slot.m[1][3] = 1.52, slot.m[2][3] = -1;
+    p = slot, p.m[2][3] = -1.6, p.m[1][3] = 1.6 - 0.08 * 1.6;   // pushed out along the line: 1.6 m
+    CHECK(grabthat::OffLineDeg(head, slot, p) < 0.5);
+    NEAR(grabthat::LevelDistance(head, p), 1.6, 1e-5);
+    NEAR(grabthat::LevelDistance(head, slot), 1.0, 1e-5);
+    p = slot, p.m[0][3] = 0.2;   // carried 20 cm to the right: off the line (11 deg)
+    CHECK(grabthat::OffLineDeg(head, slot, p) > 10);
+    CHECK(grabthat::OffLineDeg(head, slot, head) == 0);   // (at the eyes: no line)
+}
+
 void TestReadableSize() {
     const grabthat::ReadParams k;   // 26 px/deg, at most 100 x 55 deg, at least 40 wide, flat to 60
     // a 1920x1080 window: 74 x 42 deg, curved round you 1 m out
@@ -5564,6 +5578,7 @@ int main(int argc, char **argv) {
     TestTrackGate();
     TestSweep();
     TestSusanPick();
+    TestSlotLine();
     TestReadableSize();
     TestViewDistance();
     TestFistPair();

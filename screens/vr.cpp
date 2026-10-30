@@ -3199,7 +3199,10 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms 
 // there, 1 m ahead (g_frontReading; never nearer than behind frunner's reserved spot), as big as its resolution needs for its text to read
 // (grabthat::ReadableSize), one at a time: the one there goes home first. Turned away from, it goes
 // home, unless you used it a while (g_frontKeepMs of input on it: kept). Resized there, it comes that
-// size next time (g_frontDeg). Its home: where it lived before it came.
+// size next time (g_frontDeg). Pushed or pulled there (nearer or farther along its line from the eyes:
+// a scroll while carrying it, a carry straight out), it comes that far out next time (g_frontDist; user,
+// 2026-10-30, DEE-244: it "always goes back to the default distance, which is closer than the user
+// prefers"). Its home: where it lived before it came.
 //   Manual controls take it (user, 2026-10-11, later: "if the primary slot has a window moved out of it
 // through any gesture, pull, push, or drag with the pinch or laser, the lazy susan should release the
 // display ... give up from manual controls but restore the monitor or window when it is next
@@ -3226,6 +3229,10 @@ double g_frontKeepMs = 3000;                       // SCREEN_FRONT_KEEP_MS: this
 bool g_frontAway = false;
 grabthat::ReadParams g_frontRead;
 std::map<int, double> g_frontDeg;   // a screen resized in the slot: the view it spans (deg wide), next time too
+std::map<int, double> g_frontDist;  // a screen pushed or pulled in the slot: how far out (m, level), next time too
+constexpr double kFrontLineDeg = 6;      // a slot screen moved this near its line from the eyes was pushed or pulled
+constexpr double kFrontStep = 0.05;      // ...if it went at least this much nearer or farther (m)
+constexpr double kFrontFarthest = 3;     // the farthest a screen comes to the slot (as SCREEN_SPIN_DISTANCE's)
 std::map<int, double> g_uiScale;    // KWin's scale for each screen (ft-layout's "scale", via the compositor)
 std::map<int, double> g_uiScaleConf;   // SCREEN_UI_SCALE: a remote display's own UI scale ("104=2 103=1.5")
 int64_t g_keyMs = INT64_MIN / 2;   // the last key typed (ft_vr_key: the front slot's screen has the typing)
@@ -3275,6 +3282,14 @@ grabthat::Readable FrontSize(int i, const Screen &s, double d) {
     grabthat::Readable r = grabthat::ReadableSize(pxW, pxH, d, k);
     if (r.width <= 0 || s.floating) r.width = s.metres, r.curve = s.curve;   // (floating windows keep their size)
     return r;
+}
+
+// How far out screen i comes to the slot: as far as it was pushed or pulled there, else reading
+// distance; never nearer than behind frunner's reserved spot.
+double FrontDistance(int i) {
+    const auto it = g_frontDist.find(i);
+    return std::clamp(it != g_frontDist.end() ? it->second : g_frontReading, spotreserve::kDistance + spotreserve::kFrontGap,
+                      std::max(kFrontFarthest, g_frontReading));
 }
 
 void FrontHome(const char *why) {
@@ -3483,6 +3498,7 @@ void GrabThatReset() {
     }
     if (g_front.panel >= 0) FrontHome("the reset button");
     g_frontDeg.clear();
+    g_frontDist.clear();
     for (auto &[i, s] : g_screens) s.hasBefore = false;
 }
 
@@ -3756,14 +3772,14 @@ void SusanCommand(bool next, char *reply, int size) {
         return (void)std::snprintf(reply, size, "ok 0 (no other panel)");
     }
     if (g_front.released) FrontHome("restored by the next stroke");
-    BringReadable(i, grabthat::InFront(head, g_frontReading, g_frontDrop), true, next ? "the lazy susan, next" : "the lazy susan, back");
+    BringReadable(i, grabthat::InFront(head, FrontDistance(i), g_frontDrop), true, next ? "the lazy susan, next" : "the lazy susan, back");
     std::snprintf(reply, size, "ok screen %d", i + 1);
 }
 // "spin to N" (frunner) while the lazy susan brings: panel N to the front slot, the rest stay put.
 void SusanBring(int i, const Mat &head, char *reply, int size) {
     if (g_front.panel != i) {
         if (g_front.released) FrontHome("restored by spin to");
-        BringReadable(i, grabthat::InFront(head, g_frontReading, g_frontDrop), true, "spin to");
+        BringReadable(i, grabthat::InFront(head, FrontDistance(i), g_frontDrop), true, "spin to");
     }
     std::snprintf(reply, size, "ok screen %d", i + 1);
 }
@@ -4126,7 +4142,8 @@ void UpdatePad() {
 
 // Each tick: the one in the slot goes home when you turn away from it (unless kept: clicks, scrolls, drags or
 // keys on it add up to g_frontKeepMs; a pointer passing over it doesn't, user 2026-10-11: gaze kept every one); moved elsewhere,
-// it leaves the slot and lives there; resized there, that's its size in the slot from now on.
+// it leaves the slot and lives there; resized there, that's its size in the slot from now on; pushed or
+// pulled there (along its line from the eyes), that's how far out it comes from now on.
 void UpdateFront() {
     UpdateCarousel();
     UpdateResetAsk();
@@ -4143,15 +4160,25 @@ void UpdateFront() {
     const int i = g_front.panel;
     if (s.pinned != kNone) return FrontRelease(i, "pinned");
     const bool held = s.drag != Drag::None || g_handInput.heldByHand(i);
-    if (held && Apart(p, g_front.to) > 0.03) return FrontRelease(i, "carried by hand or laser");
-    if (!held && std::fabs(s.metres - g_front.width) > 0.01 * g_front.width && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+    const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
+    const bool onLine = haveHead && grabthat::OffLineDeg(head, g_front.to, p) <= kFrontLineDeg;   // (nearer or farther only)
+    if (held && Apart(p, g_front.to) > 0.03 && !onLine) return FrontRelease(i, "carried by hand or laser");
+    if (!held && std::fabs(s.metres - g_front.width) > 0.01 * g_front.width && haveHead) {
         // resized there (two fists, a corner): that's its size in the slot, here and next time
         const double d = std::max(0.2, Apart(head, p));
         g_frontDeg[i] = (s.curve > 0 ? s.metres / d : 2 * std::atan(s.metres / (2 * d))) * 180 / M_PI;
         std::printf("front: screen %d resized in the slot: %.2f m, %.0f deg wide from now on\n", i + 1, s.metres, g_frontDeg[i]);
         g_front.width = s.metres, g_front.to = p;
     } else if (!held && Apart(p, g_front.to) > 0.05) {
-        return FrontRelease(i, "moved");
+        const double d = haveHead ? grabthat::LevelDistance(head, p) : 0;
+        if (!onLine || std::fabs(d - grabthat::LevelDistance(head, g_front.to)) < kFrontStep) return FrontRelease(i, "moved");
+        // ...and as big in view as it is there now, so it comes back as you left it
+        const double a = std::max(0.2, Apart(head, p));
+        g_frontDist[i] = d;
+        g_frontDeg[i] = (s.curve > 0 ? s.metres / a : 2 * std::atan(s.metres / (2 * a))) * 180 / M_PI;
+        std::printf("front: screen %d pushed or pulled in the slot: %.2f m out, %.0f deg wide from now on (comes %.2f m out)\n", i + 1,
+                    d, g_frontDeg[i], FrontDistance(i));
+        g_front.to = p;
     }
     // used a while: kept (input on it within the last moment counts as use)
     if (!g_front.kept && g_frontKeepMs > 0 && (held || now - s.useMs < 250 || now - g_keyMs < 250)) {

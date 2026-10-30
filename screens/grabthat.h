@@ -271,4 +271,11 @@ struct Bearing {
 };
 int SusanPick(const std::vector<Bearing> &panels, int current, double from, bool next, double aheadDeg);
 
+// The front slot's distance (user, 2026-10-30, DEE-244: the lazy susan "always goes back to the default
+// distance, which is closer than the user prefers"): seen from the eyes, how far apart the directions to
+// a and b are (degrees). A panel moved only nearer or farther stays on its line (near 0).
+double OffLineDeg(const Mat &head, const Mat &a, const Mat &b);
+// How far out p is from the eyes, level (as InFront's distance).
+double LevelDistance(const Mat &head, const Mat &p);
+
 }  // namespace grabthat

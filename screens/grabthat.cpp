@@ -454,4 +454,14 @@ int SusanPick(const std::vector<Bearing> &panels, int current, double from, bool
     return best;
 }
 
+double OffLineDeg(const Mat &head, const Mat &a, const Mat &b) {
+    double u[3], v[3];
+    for (int q = 0; q < 3; ++q) u[q] = a.m[q][3] - head.m[q][3], v[q] = b.m[q][3] - head.m[q][3];
+    const double n = std::sqrt(Dot(u, u) * Dot(v, v));
+    if (n < 1e-9) return 0;
+    return std::acos(std::clamp(Dot(u, v) / n, -1.0, 1.0)) * 180 / M_PI;
+}
+
+double LevelDistance(const Mat &head, const Mat &p) { return std::hypot(p.m[0][3] - head.m[0][3], p.m[2][3] - head.m[2][3]); }
+
 }  // namespace grabthat

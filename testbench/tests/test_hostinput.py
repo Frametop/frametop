@@ -361,7 +361,7 @@ class WornGuardTests(Fixture):
 
     def test_a_failed_worn_on_leaves_no_flag(self):
         def broken(text):
-            raise OSError('no proxy')
+            raise FileNotFoundError('no proxy')
         self.bench.control = broken
         with self.assertRaises(OSError):
             self.worn('on')
@@ -391,6 +391,57 @@ class WornGuardTests(Fixture):
             self.worn('on')
         self.assertEqual([c for c, _ in self.bench.commands], ['worn 1', 'worn-release'])
         self.assertIsNone(hostinput.read_flag())
+
+    def stalled(self, after):
+        """A proxy that acts on each request but whose replies time out from `after` on (finding A
+        and C of the verify-fake-worn-guard skill)."""
+        def control(text):
+            Bench.control(self.bench, text)
+            if text == after or after in [c for c, _ in self.bench.commands[:-1]]:
+                raise TimeoutError('timed out')
+            return {'ok': True}
+        self.bench.control = control
+        sleep = mock.patch.object(hostinput.time, 'sleep')
+        sleep.start()
+        self.addCleanup(sleep.stop)
+
+    def test_a_lost_worn_on_reply_with_a_stalled_release_keeps_the_guards_flag(self):
+        self.stalled('worn 1')
+        with self.assertRaises(TimeoutError):
+            self.worn('on')
+        self.assertEqual([c for c, _ in self.bench.commands], ['worn 1'] + ['worn-release'] * 3)
+        self.assertFalse(hostinput.read_flag()['allow_host_input'])   # the guard keeps the locks
+        self.assertEqual(hostinput.read_flag()['pid'], self.guards[0])
+
+    def test_a_stalled_release_after_the_guard_let_go_leaves_a_flag(self):
+        def guard_gone(text):
+            Bench.control(self.bench, text)
+            if text == 'worn 1':
+                hostinput.clear_flag()   # the guard saw a stream take a lock, released and left
+                self.alive = False
+                return {'ok': True}
+            raise TimeoutError('timed out')
+        self.bench.control = guard_gone
+        with mock.patch.object(hostinput.time, 'sleep'), self.assertRaisesRegex(ValueError, 'guard stopped'):
+            self.worn('on')
+        self.assertEqual([c for c, _ in self.bench.commands], ['worn 1'] + ['worn-release'] * 3)
+        flag = hostinput.read_flag()   # names this command, no guard: the next one tries again
+        self.assertEqual((flag['allow_host_input'], flag['pid']), (False, os.getpid()))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.bench.control = lambda text: Bench.control(self.bench, text)
+            self.assertIn('guard has gone', cli.drop_unsafe_worn(self.bench, cli.parser().parse_args(['status'])))
+        self.assertIsNone(hostinput.read_flag())
+
+    def test_a_stalled_release_of_a_dead_guards_wearer_keeps_the_flag(self):
+        self.worn('on')
+        self.alive = False
+        self.stalled('worn-release')
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            reason = cli.drop_unsafe_worn(self.bench, cli.parser().parse_args(['pointer', 'state']))
+        self.assertIn("didn't confirm the release, so the flag stays", reason)
+        self.assertIn('could not release', err.getvalue())
+        self.assertEqual([c for c, _ in self.bench.commands], ['worn 1'] + ['worn-release'] * 3)
+        self.assertFalse(hostinput.read_flag()['allow_host_input'])   # still says it's faked
 
     def test_any_command_drops_a_faked_wearer_whose_guard_has_gone(self):
         self.worn('on')

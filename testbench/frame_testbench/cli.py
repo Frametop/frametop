@@ -306,14 +306,12 @@ def dispatch(args, bench):
         try:
             result = bench.control('worn 1')
         except BaseException:
-            release_quietly(bench)   # it may have gone through before the reply was lost
-            hostinput.clear_flag()
+            release_or_keep_flag(bench)   # it may have gone through before the reply was lost
             raise
         flag = hostinput.read_flag()
         if not args.allow_host_input and not (flag and flag.get('allow_host_input') is False
                                               and hostinput.guard_alive(flag)):
-            release_quietly(bench)   # the guard let go while the wearer was being faked
-            hostinput.clear_flag()
+            release_or_keep_flag(bench)   # the guard let go while the wearer was being faked
             raise ValueError("worn on refused: the host-input guard stopped as the wearer was faked "
                              "(a stream took a host's input lock?): see frame-testbench host-input")
         return result
@@ -394,11 +392,16 @@ def dispatch(args, bench):
     raise ValueError('unsupported command')
 
 
-def release_quietly(bench):
-    try:
-        bench.control('worn-release')
-    except Exception:
-        pass   # no input proxy, or it never faked the wearer
+def release_or_keep_flag(bench):
+    """Release a wearer that may be faked. The flag goes only once the proxy confirms it (or
+    isn't there), as in hostinput.drop_wearer: a timed-out release may not have gone through.
+    Otherwise a flag stays, written if none is left, so a live guard keeps the locks and the next
+    command finds a dead one and tries again. Whether the release was confirmed."""
+    if hostinput.drop_wearer(lambda: bench.control('worn-release')):
+        return True
+    if hostinput.read_flag() is None:
+        hostinput.set_flag(False, time.time())   # names this command, never a live guard
+    return False
 
 
 def drop_unsafe_worn(bench, args):
@@ -411,11 +414,11 @@ def drop_unsafe_worn(bench, args):
     if args.command == 'worn' and args.state == 'on' and args.allow_host_input:
         return None
     reason = "the host-input guard has gone, so nothing holds the hosts' input locks"
-    try:
-        bench.control('worn-release')
-    except OSError:
-        pass   # no input proxy: nothing fakes the wearer
-    hostinput.clear_flag()
+    if not hostinput.drop_wearer(lambda: bench.control('worn-release')):
+        # A timeout may mean it's still faked: the flag stays, so the next command tries again.
+        reason += "; the input proxy didn't confirm the release, so the flag stays"
+        print('frame-testbench: could not release the faked wearer: ' + reason, file=sys.stderr)
+        return reason
     print('frame-testbench: released the faked wearer: ' + reason, file=sys.stderr)
     return reason
 

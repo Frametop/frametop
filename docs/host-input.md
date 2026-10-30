@@ -53,7 +53,7 @@ The Frame sends leases for a host while all of these hold:
 - The headset is worn (the pointer helper's headset state).
 - Frametop isn't paused for a VR game. A Steam Link VR session from the same PC needs that PC's own keyboard and mouse; a game on the Frame has the Frame's.
 - The host hasn't released it with its escape hotkey since the headset last went on (the Frame keeps leasing; the host answers `released escape`).
-- No test is faking the wearer, unless it was allowed to take a host's input. The pointer helper can't tell the testbench's `worn on` from a real head, so while `$XDG_RUNTIME_DIR/frametop-fake-worn.json` exists without `"allow_host_input": true` (a garbled one counts as not allowed) the Frame drops the lease.
+- No test is faking the wearer or holding a verification run, unless it was allowed to take a host's input. The pointer helper can't tell the testbench's `worn on` from a real head, so the Frame drops the lease while `$XDG_RUNTIME_DIR/frametop-fake-worn.json` exists, or `$XDG_RUNTIME_DIR/verify-frametop.json` (a `verify-frametop launch` run, held while its mtime is at most 30 minutes old) does, without `"allow_host_input": true`. A garbled one counts as not allowed.
 
 ## Headset off and on
 

@@ -295,8 +295,8 @@ bool AllowsHostInput(const std::string &text) {
 // renews a lease every 500 ms (LiSendFrametopHostInputLease, moonlight-hostin.patch). When the
 // switch goes off or the headset comes off it releases, which also lifts the host's escape (both
 // Shifts and Escape there); anything else stopping the lease drops it and keeps the escape
-// (hostinput::Decide). So does a test faking the wearer without leave to take the host's input,
-// which it checks for before every lease: the lock alone left a gap, a host given the switch
+// (hostinput::Decide). So does a test faking the wearer or a verification run under way without
+// leave to take the host's input, which it checks for before every lease: the lock alone left a gap, a host given the switch
 // while its stream held the lock leasing until the testbench's guard let the wearer go. The host
 // answers with records (stream/hostinput.h) on the control stream's receive thread, and
 // hostinput::Relay turns them into the relay's host devices.
@@ -452,7 +452,10 @@ struct HostInput {
             }
         }
         // Read every tick, so no lease goes out once a test's file is there.
-        const std::string test = hostinput::TestForbidding(testDirs, AllowsHostInput);
+        timespec wall;
+        clock_gettime(CLOCK_REALTIME, &wall);
+        const std::string test =
+            hostinput::TestForbidding(testDirs, int64_t(wall.tv_sec) * 1'000'000'000 + wall.tv_nsec, AllowsHostInput);
         if (test != testSaid) {
             if (test.empty()) std::printf("hostinput: no test stops %s's lease now\n", host.c_str());
             else std::printf("hostinput: no lease for %s's keyboard and mouse while %s says a test may not take them\n",

@@ -128,9 +128,16 @@ inline Want Decide(bool switchOn, bool live, const Answer &worn, const Answer &p
 
 // Tests that may not take a host's input (docs/host-input.md, "Tests and a faked wearer"): the
 // pointer helper can't tell the testbench's faked wearer from a real head. While the testbench
-// fakes the wearer it keeps this file in the session's runtime dir, and while it's there the leases
-// stop unless it's JSON with "allow_host_input": true.
-constexpr const char *kTestFiles[] = {"frametop-fake-worn.json"};
+// fakes the wearer it keeps frametop-fake-worn.json in the session's runtime dir, and a
+// verification run (verify-frametop launch) keeps verify-frametop.json there, its lease renewed by
+// touching it. Such a file stops the leases unless it's JSON with "allow_host_input": true: the
+// testbench's for as long as it's there, a run's while its mtime is no more than maxAgeNs old
+// (the run lease's 30 minutes, after which verify-frametop lets another run take it over).
+struct TestFile {
+    const char *name;
+    int64_t maxAgeNs;  // 0: however old
+};
+constexpr TestFile kTestFiles[] = {{"frametop-fake-worn.json", 0}, {"verify-frametop.json", 30 * 60 * 1'000'000'000LL}};
 
 // Where the tests keep them: $XDG_RUNTIME_DIR, and the session's /run/user/UID too when that is a
 // nested desktop's (/run/user/UID/frametop): the testbench writes to the session's.
@@ -141,26 +148,30 @@ inline std::vector<std::string> TestDirs(const char *xdg, unsigned uid) {
     return dirs;
 }
 
-// Whether the test file at PATH stops the leases (allows: whether its text says
-// "allow_host_input": true). Only a missing file doesn't: one that is garbled, too big, not a
-// plain file or can't be read does.
-inline bool Forbids(const std::string &path, const std::function<bool(const std::string &)> &allows) {
+// Whether the test file at PATH stops the leases at wall-clock time NOW, in ns (allows: whether its
+// text says "allow_host_input": true). Only a missing or a stale file doesn't: one that is garbled,
+// too big, not a plain file or can't be read does.
+inline bool Forbids(const std::string &path, int64_t maxAgeNs, int64_t now,
+                    const std::function<bool(const std::string &)> &allows) {
     const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (fd < 0) return errno != ENOENT;
     struct stat st;
     char buf[4097];
     ssize_t n = -1;
-    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) n = read(fd, buf, sizeof buf);
+    const bool plain = fstat(fd, &st) == 0 && S_ISREG(st.st_mode);
+    if (plain) n = read(fd, buf, sizeof buf);
     close(fd);
+    if (plain && maxAgeNs && now - (int64_t(st.st_mtim.tv_sec) * 1'000'000'000 + st.st_mtim.tv_nsec) > maxAgeNs)
+        return false;
     return n < 0 || size_t(n) == sizeof buf || !allows(std::string(buf, size_t(n)));
 }
 
 // The first test file in DIRS that stops the leases, or "".
-inline std::string TestForbidding(const std::vector<std::string> &dirs,
+inline std::string TestForbidding(const std::vector<std::string> &dirs, int64_t now,
                                   const std::function<bool(const std::string &)> &allows) {
     for (const std::string &dir : dirs)
-        for (const char *name : kTestFiles)
-            if (const std::string path = dir + "/" + name; Forbids(path, allows)) return path;
+        for (const TestFile &f : kTestFiles)
+            if (const std::string path = dir + "/" + f.name; Forbids(path, f.maxAgeNs, now, allows)) return path;
     return "";
 }
 

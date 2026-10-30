@@ -4,12 +4,14 @@
 #undef NDEBUG
 #include "hostinput.h"
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -138,31 +140,55 @@ int main() {
     assert(mkdir(nested.c_str(), 0700) == 0);
     const auto allows = [](const std::string &text) { return text == "allowed"; };
     const std::string flag = dir + "/frametop-fake-worn.json";
+    timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    const int64_t wall = int64_t(ts.tv_sec) * 1'000'000'000 + ts.tv_nsec;
     const auto put = [](const std::string &path, const std::string &text) {
         FILE *f = std::fopen(path.c_str(), "w");
         assert(f && std::fwrite(text.data(), 1, text.size(), f) == text.size() && std::fclose(f) == 0);
     };
-    assert(TestForbidding({dir}, allows).empty());  // no test
+    assert(TestForbidding({dir}, wall, allows).empty());  // no test
     put(flag, "allowed");
-    assert(TestForbidding({dir}, allows).empty());
+    assert(TestForbidding({dir}, wall, allows).empty());
     put(flag, "not allowed");
-    assert(TestForbidding({dir}, allows) == flag);
+    assert(TestForbidding({dir}, wall, allows) == flag);
     put(flag, "");  // garbled, or caught mid-write
-    assert(TestForbidding({dir}, allows) == flag);
+    assert(TestForbidding({dir}, wall, allows) == flag);
     put(flag, std::string(4096, ' '));
-    assert(!Forbids(flag, [](const std::string &) { return true; }));
+    assert(!Forbids(flag, 0, wall, [](const std::string &) { return true; }));
     put(flag, std::string(4097, ' '));  // too big to be the testbench's
-    assert(Forbids(flag, [](const std::string &) { return true; }));
+    assert(Forbids(flag, 0, wall, [](const std::string &) { return true; }));
     assert(unlink(flag.c_str()) == 0 && mkdir(flag.c_str(), 0700) == 0);  // not a plain file
-    assert(TestForbidding({dir}, allows) == flag);
+    assert(TestForbidding({dir}, wall, allows) == flag);
     assert(rmdir(flag.c_str()) == 0 && symlink("/dev/null", flag.c_str()) == 0);  // not followed
-    assert(TestForbidding({dir}, allows) == flag);
+    assert(TestForbidding({dir}, wall, allows) == flag);
     assert(unlink(flag.c_str()) == 0);
     // The session's dir counts from a nested desktop.
     put(flag, "not allowed");
-    assert(TestForbidding({nested}, allows).empty());
-    assert(TestForbidding({nested, dir}, allows) == flag);
-    assert(unlink(flag.c_str()) == 0 && rmdir(nested.c_str()) == 0 && rmdir(dir.c_str()) == 0);
+    assert(TestForbidding({nested}, wall, allows).empty());
+    assert(TestForbidding({nested, dir}, wall, allows) == flag);
+    assert(unlink(flag.c_str()) == 0);
+    // A verification run's holds for 30 minutes from when it was last touched; the testbench's for good.
+    const std::string run = dir + "/verify-frametop.json";
+    const auto age = [&](const std::string &path, int64_t seconds) {
+        const timespec t[2] = {{ts.tv_sec - seconds, ts.tv_nsec}, {ts.tv_sec - seconds, ts.tv_nsec}};
+        assert(utimensat(AT_FDCWD, path.c_str(), t, 0) == 0);
+    };
+    put(run, "not allowed");
+    assert(TestForbidding({dir}, wall, allows) == run);
+    age(run, 30 * 60);
+    assert(TestForbidding({dir}, wall, allows) == run);
+    age(run, 30 * 60 + 1);
+    assert(TestForbidding({dir}, wall, allows).empty());
+    put(run, "allowed");
+    assert(TestForbidding({dir}, wall, allows).empty());
+    put(run, "");  // a launch between creating it and writing it
+    assert(TestForbidding({dir}, wall, allows) == run);
+    put(flag, "not allowed");
+    age(flag, 24 * 60 * 60);
+    assert(TestForbidding({dir}, wall, allows) == flag);  // the first that stops them
+    assert(unlink(flag.c_str()) == 0 && unlink(run.c_str()) == 0);
+    assert(rmdir(nested.c_str()) == 0 && rmdir(dir.c_str()) == 0);
 
     // The relay.
     std::vector<std::string> said;

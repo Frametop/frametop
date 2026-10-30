@@ -37,6 +37,10 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
   displays off to get a run through. `V launch NAME --allow-host-input` and
   `T worn on --allow-host-input` are only for a test the user allowed in this session, in their
   words; quote them in the report. A step that needs the wearer goes to HEADSET-TESTS.md instead.
+- Never connect to a Vibepollo host unless the user allowed that host in this session: a stream
+  can change the host's displays and plays its sound here. `V stream HOST` is the only way a run
+  streams, and it holds the host's input lock for the whole stream, so that stream can't lease
+  the host's keyboard and mouse; `--allow-host-input` drops that, under the rule above.
 - Every run ends with `V cleanup RUN` (the folder `V launch` printed), even after a failure: it
   turns the displays back on, runs `T release` (worn, pose, HMD buttons, controllers, fake eyes
   and hands) and `T compositor auto`, puts gaze mode back as the run found it, and frees the
@@ -189,5 +193,13 @@ A diff touching these gets the extra reviewer (Codex) in the review panel:
 ## Helpers
 
 - `scripts/verify-frametop`: `doctor`, `launch [NAME] [--allow-host-input]`, `guard`, `snapshot LABEL [--capture]`,
-  `cleanup [RUN] [--force]`, `ask NAME MESSAGE [--listen S]`. `--help` prints the usage.
-  Python 3 standard library only; runs on the SteamOS host.
+  `stream HOST [--display CLIENT] [--seconds N] [--allow-host-input]`, `cleanup [RUN] [--force]`,
+  `ask NAME MESSAGE [--listen S]`. `--help` prints the usage. Python 3 standard library only;
+  runs on the SteamOS host.
+- `scripts/fake-viewer`: ft-screens' side of one remote display, headless. `V stream` runs it in
+  the Frametop container through the release's `scripts/in-box` (ft-stream's converter needs the
+  container's Mesa: on the host it fails with EGL 0x3009) with the layout display's client, app
+  and size, 30 fps and 20 Mbit/s. `RUN/stream-CLIENT-TIME/` gets `ft-stream.log`, `result.json`
+  (states, frames, frames per second) and `summary.json`; `ok` means it went live and frames
+  came. It refuses a display that's already streaming (Vibepollo ties a display to its client,
+  so it would take the panel's) and a host whose input lock another stream holds.

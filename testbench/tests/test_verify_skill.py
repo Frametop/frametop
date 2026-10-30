@@ -311,6 +311,78 @@ class VerifySkillTests(unittest.TestCase):
         self.assertIn(('release',), self.sent)
         self.assertFalse(self.v.LOCK.exists())
 
+    def stream_fixture(self, result):
+        """A layout with dody and oma7, and an in-box that writes RESULT as the fake viewer would,
+        noting whether dody's input lock was held while it ran."""
+        layout = Path(self.tmp.name) / 'layout.json'
+        layout.write_text(json.dumps({'hosts': [
+            {'name': 'Deej-5090', 'address': '192.168.1.93', 'mic': True, 'displays': [
+                {'client': 'frametop-deej-5090-oled', 'app': 'display:{b7ae}', 'size': [3440, 1440]}]},
+            {'name': 'oma7', 'address': '192.168.1.61', 'input': True, 'displays': []}]}))
+        seen = {}
+
+        def popen(argv, **kwargs):
+            seen['argv'] = argv
+            probe = self.v.input_lock(argv[4])
+            seen['locked'] = probe is None   # the stream's own lock blocks anyone else
+            if probe is not None:
+                os.close(probe)
+            out = Path(argv[-1])
+            (out / 'result.json').write_text(json.dumps(result))
+            return mock.Mock(wait=mock.Mock(return_value=0))
+        for name, value in (('LAYOUT', layout), ('proc_cmdlines', lambda: self.cmdlines)):
+            patch = mock.patch.object(self.v, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+        patch = mock.patch.object(self.v.subprocess, 'Popen', popen)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.cmdlines = []
+        return seen
+
+    def test_stream_holds_the_input_lock_and_keeps_the_viewer_result(self):
+        seen = self.stream_fixture({'states': [[0.4, 'connecting'], [2.0, 'live via network']], 'frames': 500,
+                                    'exit': 0})
+        with self.assertRaisesRegex(SystemExit, 'no run'):
+            self.run_main('stream', 'Deej-5090')
+        self.run_main('launch', 'stream')
+        code, out = self.run_main('stream', 'Deej-5090', '--seconds', '5')
+        summary = json.loads(out)
+        self.assertEqual((code, summary['ok'], summary['input_lock_held']), (0, True, True))
+        self.assertTrue(seen['locked'])
+        self.assertEqual(seen['argv'][1:9], ['python3', str(self.v.VIEWER),
+                                             str(self.v.RELEASES / 'current/stream/build/ft-stream'),
+                                             '192.168.1.93', 'frametop-deej-5090-oled', 'display:{b7ae}',
+                                             '3440x1440', '30'])
+        self.assertTrue((Path(summary['folder']) / 'summary.json').exists())
+        probe = self.v.input_lock('192.168.1.93')   # given back afterwards
+        self.assertIsNotNone(probe)
+        os.close(probe)
+        code, out = self.run_main('stream', '192.168.1.93', '--allow-host-input')
+        self.assertFalse(seen['locked'])
+        self.assertFalse(json.loads(out)['input_lock_held'])
+
+    def test_stream_refuses_what_would_take_a_display_or_a_lock(self):
+        self.stream_fixture({'states': [[1.0, 'lost not paired']], 'frames': 0, 'exit': 1})
+        self.run_main('launch', 'stream')
+        self.assertEqual(self.run_main('stream', 'Deej-5090')[0], 1)   # never live: not ok
+        for argv, error in ((['nowhere'], 'no host'), (['oma7'], 'no display'),
+                            (['Deej-5090', '--display', 'other'], 'no display'),
+                            (['Deej-5090', '--seconds', 'x'], 'stream HOST'),
+                            (['Deej-5090', '--fps', '60'], 'stream HOST')):
+            with self.subTest(argv=argv), self.assertRaisesRegex(SystemExit, error):
+                self.run_main('stream', *argv)
+        self.cmdlines = [['ft-stream', 'stream', '192.168.1.93', '--id', 'frametop-deej-5090-oled']]
+        with self.assertRaisesRegex(SystemExit, 'already streams'):
+            self.run_main('stream', 'Deej-5090')
+        self.cmdlines = []
+        held = self.v.input_lock('192.168.1.93')
+        try:
+            with self.assertRaisesRegex(SystemExit, 'input lock'):
+                self.run_main('stream', 'Deej-5090')
+        finally:
+            os.close(held)
+
     def test_a_sensor_blip_on_a_still_headset_is_not_a_wearer(self):
         self.run_main('launch', 'blips')
         worn, off = proxy(physical_worn=True), proxy()

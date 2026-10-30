@@ -20,6 +20,16 @@
                                        host input: streams, input lock holders, ft-stream's
                                        hostinput log lines) into RUN/LABEL/, and with --capture a compositor capture
                                        (needs `worn on` and a head pose facing the panels)
+  verify-frametop stream HOST [--display CLIENT] [--seconds N] [--allow-host-input]
+                                       guard, then one remote display of HOST (a layout name or
+                                       address; its first display, or CLIENT) for N seconds
+                                       (default 20) through the release's ft-stream in the
+                                       Frametop container, with a fake viewer in place of
+                                       ft-screens, into RUN/stream-CLIENT-TIME/. It holds the
+                                       host's input lock throughout, so this stream can't lease
+                                       the host's keyboard and mouse, unless --allow-host-input
+                                       (only once the user allows it). It connects to the host:
+                                       only for a host the user allowed in this session
   verify-frametop cleanup [RUN] [--force]
                                        release every testbench override, compositor auto,
                                        displays back on and gaze mode back as the run found
@@ -64,6 +74,8 @@ UNITS = ('frametop-desktop', 'frametop-input-relay', 'frametop-pointer', 'framet
 HANDS = 'frametop-hands'   # hand tracking is opt-in: only the hands recipes need it
 SOCKETS = ('frametop_relay', 'ft_pointer_helper', 'ft_powerd', 'ft_gazed')
 RELEASES = Path.home() / '.local/share/frametop/releases'
+LAYOUT = Path.home() / '.config/frametop-layout.json'
+VIEWER = Path(__file__).resolve().parent / 'fake-viewer'
 DROP_IN = Path.home() / '.config/systemd/user/steamvr.service.d/90-frame-testbench.conf'
 LEASE = 30 * 60
 # With the displays lit, the Frame's proximity sensor reads worn for under a second every few
@@ -377,6 +389,100 @@ def snapshot(label, capture):
     print(json.dumps(result, indent=2))
 
 
+def input_lock(host):
+    """Take HOST's input lock (ft-stream's $XDG_RUNTIME_DIR/frametop-input-HOST.lock, named as
+    stream/hostinput.h's RelayId does), so no stream leases its keyboard and mouse while it's held;
+    the fd, or None if another process holds it."""
+    rid = ''.join(c if c.isalnum() or c in '._-' else '-' for c in host[:64]) or 'host'
+    fd = os.open(RUNTIME / f'frametop-input-{rid}.lock', os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    return fd
+
+
+def stream(host, client=None, seconds=20.0, allow_host_input=False):
+    run = current_run()
+    guard()
+    try:
+        hosts = json.loads(LAYOUT.read_text()).get('hosts') or []
+    except (OSError, ValueError, AttributeError) as e:
+        sys.exit(f'verify-frametop: no layout ({e})')
+    entry = next((h for h in hosts if isinstance(h, dict) and host in (h.get('name'), h.get('address'))), None)
+    if not entry or not isinstance(entry.get('address'), str):
+        sys.exit(f'verify-frametop: no host {host!r} in {LAYOUT}')
+    displays = [d for d in entry.get('displays') or [] if isinstance(d, dict) and d.get('client')]
+    display = next((d for d in displays if client in (None, d['client'])), None)
+    if not display:
+        sys.exit(f'verify-frametop: {entry.get("name")} has no display {client or ""}'.rstrip())
+    address, client = entry['address'], display['client']
+    # Vibepollo ties a display to its client, one stream per client: a second stream with the
+    # same --id would take the live panel's display away.
+    live = [cmd for cmd in proc_cmdlines() if cmd[:2] == ['ft-stream', 'stream'] and client in cmd]
+    if live:
+        sys.exit(f'verify-frametop: a remote display already streams as {client}: turn it off first')
+    lock = None
+    if not allow_host_input:
+        lock = input_lock(address)
+        if lock is None:
+            sys.exit(f'verify-frametop: another stream holds {entry.get("name")}\'s input lock: '
+                     'turn its displays off first')
+    exe = RELEASES / 'current' / 'stream' / 'build' / 'ft-stream'
+    width, height = (display.get('size') or [1920, 1080])[:2]
+    stamp = datetime.now().strftime('%H%M%S')
+    out = next(f for n in range(1, 100) if not (f := run / f'stream-{client}-{stamp}{"" if n == 1 else f"-{n}"}').exists())
+    LOCK.touch()   # the lease runs on
+    try:
+        out.mkdir(mode=0o700)
+        viewer = subprocess.Popen(
+            [str(RELEASES / 'current' / 'scripts' / 'in-box'), 'python3', str(VIEWER), str(exe), address, client,
+             display.get('app') or 'primary', f'{width}x{height}', '30', '20000', str(seconds), str(out)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=open(out / 'in-box.log', 'wb'))
+        try:
+            viewer.wait(seconds + 60)   # the container may need starting; the viewer ends itself
+        except subprocess.TimeoutExpired:
+            # A signal to in-box doesn't reach the container, but it shares our pid namespace.
+            for pid in json.loads((out / 'viewer.json').read_text()).values():
+                try:
+                    os.kill(pid, 9)
+                except OSError:
+                    pass
+            viewer.kill()
+            viewer.wait()
+    finally:
+        if lock is not None:
+            os.close(lock)
+    try:
+        result = json.loads((out / 'result.json').read_text())
+    except (OSError, ValueError):
+        result = {'exit': None, 'error': 'the viewer left no result: see in-box.log and ft-stream.log'}
+    states = [s for _, s in result.get('states', [])]
+    summary = {'ok': any(s.startswith('live') for s in states) and result.get('frames', 0) > 0,
+               'host': entry.get('name'), 'client': client, 'app': display.get('app'),
+               'input_lock_held': lock is not None,
+               'folder': str(out), **result}
+    write_json(out / 'summary.json', summary)
+    LOCK.touch()
+    print(json.dumps(summary, indent=2))
+    return 0 if summary['ok'] else 1
+
+
+def proc_cmdlines():
+    """Each process's argv, its first word cut to the program's name."""
+    found = []
+    for entry in os.scandir('/proc'):
+        if entry.name.isdigit():
+            try:
+                argv = [a.decode(errors='replace') for a in Path(entry.path, 'cmdline').read_bytes().split(b'\0') if a]
+            except OSError:
+                continue
+            if argv:
+                found.append([os.path.basename(argv[0]), *argv[1:]])
+    return found
+
+
 def cleanup(run=None, force=False):
     holder = lock_holder()
     if holder and not holder['stale'] and not force and (
@@ -439,6 +545,20 @@ def main(argv):
             sys.exit('verify-frametop: snapshot LABEL [--capture]')
         snapshot(labels[0], '--capture' in rest)
         return 0
+    if command == 'stream' and rest and not rest[0].startswith('-'):
+        opts = {'--display': None, '--seconds': '20'}
+        words, allow = list(rest[1:]), '--allow-host-input' in rest[1:]
+        words = [w for w in words if w != '--allow-host-input']
+        while len(words) >= 2 and words[0] in opts:
+            key = words.pop(0)
+            opts[key] = words.pop(0)
+        try:
+            seconds = float(opts['--seconds'])
+        except ValueError:
+            seconds = 0
+        if words or not 0 < seconds <= 3600:
+            sys.exit('verify-frametop: stream HOST [--display CLIENT] [--seconds N] [--allow-host-input]')
+        return stream(rest[0], opts['--display'], seconds, allow)
     runs = [a for a in rest if a != '--force']
     if command == 'cleanup' and len(runs) <= 1 and not any(a.startswith('-') for a in runs):
         return cleanup(runs[0] if runs else None, '--force' in rest)

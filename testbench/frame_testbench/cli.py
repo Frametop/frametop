@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
-from . import controller_inputs, desktop, fakes, handshape, install, pose, record, transport
+from . import controller_inputs, desktop, fakes, handshape, hostinput, install, pose, record, transport
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKES_UNIT = 'frame-testbench-fakes'
@@ -121,6 +121,11 @@ def parser():
     compositor.add_argument('mode', choices=('awake', 'auto'))
     worn = commands.add_parser('worn', help='override HMD proximity independently of pose')
     worn.add_argument('state', choices=('on', 'off', 'physical'))
+    worn.add_argument('--allow-host-input', action='store_true',
+                      help='fake the wearer even while a remote display streams from a host that lends '
+                           'Frametop its keyboard and mouse: it takes them. Only once the user allows it')
+    commands.add_parser('host-input', help='live streams from hosts that lend their keyboard and mouse, '
+                                           'and the fake-worn flag')
     button = commands.add_parser('hmd-button', help="override one of the HMD's own buttons; status lists them")
     button.add_argument('path', type=hmd_button_path, help='component path, such as /input/system/click')
     button.add_argument('state', choices=('on', 'off', 'physical'))
@@ -279,7 +284,23 @@ def dispatch(args, bench):
     if args.command == 'compositor':
         return bench.native('setting', 'false' if args.mode == 'awake' else 'true')
     if args.command == 'worn':
-        return bench.control({'on': 'worn 1', 'off': 'worn 0', 'physical': 'worn-release'}[args.state])
+        if args.state != 'on':
+            result = bench.control('worn 0' if args.state == 'off' else 'worn-release')
+            hostinput.clear_flag()
+            return result
+        if not args.allow_host_input:
+            reason = hostinput.refusal(hostinput.state())
+            if reason:
+                raise ValueError('worn on refused: ' + reason)
+        # The flag goes first, so no ft-stream sees the wearer before it sees the flag.
+        hostinput.set_flag(args.allow_host_input, time.time())
+        try:
+            return bench.control('worn 1')
+        except BaseException:
+            hostinput.clear_flag()
+            raise
+    if args.command == 'host-input':
+        return dict(hostinput.state(), ok=True)
     if args.command == 'hmd-button':
         if args.state == 'physical':
             return bench.control('hmd-button-release ' + args.path)
@@ -315,6 +336,7 @@ def dispatch(args, bench):
             subprocess.run(['systemctl', '--user', 'stop', FAKES_UNIT], timeout=20)
             faked = {'running': False, 'stopped': FAKES_UNIT, 'error': str(error)}
         result = bench.control('release')
+        hostinput.clear_flag()
         result['fakes'] = faked
         return result
     if args.command in ('pose', 'controller'):
@@ -354,6 +376,24 @@ def dispatch(args, bench):
     raise ValueError('unsupported command')
 
 
+def drop_unsafe_worn(bench, args):
+    """Every command checks first: a wearer faked without --allow-host-input goes as soon as a
+    stream from a host that lends its input is live (ft-screens started one, or restarted them
+    all). Returns why it went, or None."""
+    flag = hostinput.read_flag()
+    if flag is None or flag.get('allow_host_input') is True:
+        return None
+    if args.command == 'worn' and args.state == 'on' and args.allow_host_input:
+        return None
+    reason = hostinput.refusal(hostinput.state())
+    if not reason:
+        return None
+    bench.control('worn-release')
+    hostinput.clear_flag()
+    print('frame-testbench: released the faked wearer: ' + reason, file=sys.stderr)
+    return reason
+
+
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
     args = parser().parse_args(arguments)
@@ -383,7 +423,11 @@ def main(argv=None):
         else:
             if args.command == 'capture' and args.fetch:
                 raise ValueError('--fetch requires --host; use --output for local capture')
-            result = dispatch(args, Bench(args.socket))
+            bench = Bench(args.socket)
+            dropped = drop_unsafe_worn(bench, args)
+            result = dispatch(args, bench)
+            if dropped:
+                result = dict(result, worn_released=dropped)
         print(json.dumps(result, indent=2, allow_nan=False))
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:

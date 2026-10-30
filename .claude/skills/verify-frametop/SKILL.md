@@ -28,6 +28,15 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
   for a few seconds, and count it as not worn only if two reads in a row say so and the headset
   hasn't moved (1 cm, 2 degrees). Never work around them: if they stop the run, check the
   headset is still before launching again.
+- Never take a streamed host's keyboard and mouse. ft-stream leases a host's input while the
+  headset is worn (docs/host-input.md), and a faked wearer counts: on 2026-10-30 a run took
+  Daenon's laptop mid-sentence. `V launch` refuses while a remote display streams from a host with
+  `"input": true` (doctor's "no host-input streams"; `T host-input` lists them), `T worn on`
+  refuses then too, every `T` command drops a faked wearer once such a stream starts, and
+  `V guard` stops the run with exit 3. Don't work around it: no layout edits, no turning hosts'
+  displays off to get a run through. `V launch NAME --allow-host-input` and
+  `T worn on --allow-host-input` are only for a test the user allowed in this session, in their
+  words; quote them in the report. A step that needs the wearer goes to HEADSET-TESTS.md instead.
 - Every run ends with `V cleanup RUN` (the folder `V launch` printed), even after a failure: it
   turns the displays back on, runs `T release` (worn, pose, HMD buttons, controllers, fake eyes
   and hands) and `T compositor auto`, puts gaze mode back as the run found it, and frees the
@@ -85,6 +94,8 @@ left over and exits 1; that is expected until `V cleanup`.
   with the headset off
 - no testbench override is left over from an earlier run (worn, pose, HMD buttons,
   controllers, fake trackers)
+- no remote display streams from a host that lends Frametop its keyboard and mouse (a faked
+  wearer would take them); launch refuses on this one unless `--allow-host-input`
 - Frametop's units (`frametop-desktop`, `-input-relay`, `-pointer`, `-gaze`, `-power`) are
   active and their sockets (`@frametop_relay`, `@ft_pointer_helper`, `@ft_powerd`, `@ft_gazed`)
   listen
@@ -173,6 +184,6 @@ A diff touching these gets the extra reviewer (Codex) in the review panel:
 
 ## Helpers
 
-- `scripts/verify-frametop`: `doctor`, `launch [NAME]`, `guard`, `snapshot LABEL [--capture]`,
+- `scripts/verify-frametop`: `doctor`, `launch [NAME] [--allow-host-input]`, `guard`, `snapshot LABEL [--capture]`,
   `cleanup [RUN] [--force]`, `ask NAME MESSAGE [--listen S]`. `--help` prints the usage.
   Python 3 standard library only; runs on the SteamOS host.

@@ -3,11 +3,17 @@
 
   verify-frametop doctor               read-only: is this Frame worth driving? (exit 0 yes,
                                        1 not ready, 2 the headset is worn: refuse)
-  verify-frametop launch [NAME]        doctor, then claim the run (one at a time) and make its
-                                       evidence folder with a baseline; prints the folder
+  verify-frametop launch [NAME] [--allow-host-input]
+                                       doctor, then claim the run (one at a time) and make its
+                                       evidence folder with a baseline; prints the folder.
+                                       Refuses while a remote display streams from a host that
+                                       lends Frametop its keyboard and mouse, unless
+                                       --allow-host-input (only once the user allows it)
   verify-frametop guard                before each drive step: exit 0 while nobody wears the
-                                       headset; otherwise clean up at once and exit 2 (worn)
-                                       or 1 (the sensor can't be read)
+                                       headset; otherwise clean up at once and exit 2 (worn),
+                                       1 (the sensor can't be read) or 3 (a host that lends its
+                                       keyboard and mouse started streaming, and the run wasn't
+                                       allowed to take them)
   verify-frametop snapshot LABEL [--capture]
                                        guard, then the run's readbacks (testbench status, pointer
                                        state, visible overlays, display power, the gaze service)
@@ -23,6 +29,10 @@
                                        one datagram to a Frametop socket (@NAME), print the
                                        reply (`ask ft_gazed 'wake 90'`), or with --listen every
                                        reply for that long (`ask frametop_relay 'watch 5' --listen 5`)
+
+A faked wearer (`worn on`) makes ft-stream lease a streamed host's own keyboard and mouse
+(docs/host-input.md): the testbench refuses `worn on` while such a stream is live, and drops it
+when one starts, unless it was given --allow-host-input; launch and guard hold the run to the same.
 
 A run is claimed for LEASE seconds from its last launch, guard or snapshot, so two agents
 don't drive the one headset at once; its cleanup frees it.
@@ -175,6 +185,24 @@ def worn_now():
     return True, status   # flapping: count it as worn
 
 
+def host_input():
+    """The testbench's host-input readback: live streams from hosts that lend their input."""
+    return bench('host-input', timeout=20)
+
+
+def host_input_check(state):
+    """(ok, detail) for the doctor: no stream from a host that lends its keyboard and mouse."""
+    if not state.get('ok'):
+        return False, f'unread: {state.get("error")}'
+    live = state.get('input_streams') or []
+    if not live:
+        return True, 'none' + (f' (lends input: {", ".join(state["input_hosts"])}; not streaming)'
+                               if state.get('input_hosts') else '')
+    return False, ('a faked wearer would take the keyboard and mouse of '
+                   + ', '.join(sorted({s.get("name") or s.get("host") for s in live}))
+                   + ': launch --allow-host-input only once the user allows it')
+
+
 def doctor():
     checks = []
 
@@ -208,6 +236,7 @@ def doctor():
     check('Frametop services active', all(v == 'active' for v in units.values()),
           ', '.join(f'{u}={v}' for u, v in units.items() if v != 'active') or 'all active')
     heard = listening()
+    check('no host-input streams', *host_input_check(host_input()))
     check('Frametop sockets listening', all(s in heard for s in SOCKETS),
           ', '.join('@' + s for s in SOCKETS if s not in heard) or 'all listening')
     release = os.readlink(RELEASES / 'current') if (RELEASES / 'current').is_symlink() else None
@@ -256,7 +285,7 @@ def current_run():
     return Path(holder['run'])
 
 
-def claim(run):
+def claim(run, allow_host_input=False):
     """Take the lock, unless another launch got there first."""
     with open(RUNTIME / 'verify-frametop.claim', 'w') as gate:
         fcntl.flock(gate, fcntl.LOCK_EX)   # one launch at a time between reading and taking it
@@ -269,10 +298,10 @@ def claim(run):
             sys.exit(f'verify-frametop: run {(lock_holder() or {}).get("run")} is under way: '
                      'finish it with cleanup first')
         with os.fdopen(fd, 'w') as f:
-            json.dump({'run': str(run), 'started': time.time()}, f)
+            json.dump({'run': str(run), 'started': time.time(), 'allow_host_input': bool(allow_host_input)}, f)
 
 
-def launch(name):
+def launch(name, allow_host_input=False):
     holder = lock_holder()
     if holder and not holder['stale']:
         sys.exit(f'verify-frametop: run {holder["run"]} is under way: finish it with cleanup first')
@@ -280,13 +309,19 @@ def launch(name):
     if code == 2:
         print(json.dumps(report, indent=2))
         sys.exit('verify-frametop: the headset is worn: refusing to drive it')
-    if code:
+    failed = {c['name'] for c in report['checks'] if not c['ok']} - {'Frametop release', 'hand tracking'}
+    if 'no host-input streams' in failed and not allow_host_input:
+        print(json.dumps(report, indent=2))
+        sys.exit('verify-frametop: a remote display streams from a host that lends Frametop its keyboard '
+                 'and mouse: a faked wearer would take them. Turn its displays off, or launch '
+                 '--allow-host-input once the user allows it')
+    if code and failed - {'no host-input streams'}:
         print(json.dumps(report, indent=2))
         sys.exit('verify-frametop: not ready (see the failed checks; overrides left by an earlier '
                  'run: verify-frametop cleanup)')
     name = re.sub(r'[^A-Za-z0-9._-]', '-', name or 'run')[:48]
     run = EVIDENCE / f'{datetime.now().strftime("%Y%m%d-%H%M%S")}-{name}'
-    claim(run)
+    claim(run, allow_host_input)
     try:
         EVIDENCE.mkdir(parents=True, exist_ok=True, mode=0o700)   # mode only for the last part
         run.mkdir(mode=0o700)
@@ -304,10 +339,17 @@ def guard():
         worn, _ = worn_now()
     except Exception:   # whatever went wrong, it didn't say "not worn"
         worn = None
+    holder = lock_holder()
     if worn is False:
-        if lock_holder():
-            LOCK.touch()   # the lease runs on
-        return
+        state = host_input()
+        if (holder or {}).get('allow_host_input') or host_input_check(state)[0]:
+            if holder:
+                LOCK.touch()   # the lease runs on
+            return
+        print('verify-frametop: ' + host_input_check(state)[1] + ': stopping the run and cleaning up',
+              file=sys.stderr, flush=True)
+        cleanup(force=True)
+        sys.exit(3)
     print('verify-frametop: ' + ('the headset is worn' if worn else "the proximity sensor can't be read")
           + ': stopping the run and cleaning up', file=sys.stderr, flush=True)
     cleanup(force=True)
@@ -385,8 +427,9 @@ def main(argv):
         report, code = doctor()
         print(json.dumps(report, indent=2))
         return code
-    if command == 'launch' and len(rest) <= 1 and not any(a.startswith('-') for a in rest):
-        launch(rest[0] if rest else None)
+    names = [a for a in rest if a != '--allow-host-input']
+    if command == 'launch' and len(names) <= 1 and not any(a.startswith('-') for a in names):
+        launch(names[0] if names else None, '--allow-host-input' in rest)
         return 0
     if command == 'snapshot':
         labels = [a for a in rest if a != '--capture']

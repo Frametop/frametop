@@ -151,8 +151,19 @@ def create_server(config: Config, *, runner=run_cli):
 
     @server.tool()
     async def worn(state: Literal['on', 'off', 'physical']) -> CallToolResult:
-        """Override HMD proximity, or restore the physical sensor. Persists until released."""
+        """Override HMD proximity, or restore the physical sensor. Persists until released.
+
+        on is refused while a remote display streams from a host that lends Frametop its keyboard
+        and mouse (host_input lists them): a faked wearer takes them from whoever sits there.
+        There is no override here; the CLI's --allow-host-input is for when the user allows it.
+        """
         return await execute(['worn', state])
+
+    @server.tool()
+    async def host_input() -> CallToolResult:
+        """Read which live remote displays stream from hosts that lend their keyboard and mouse,
+        and whether the testbench is faking the wearer (the flag ft-stream checks)."""
+        return await execute(['host-input'])
 
     @server.tool()
     async def hmd_button(button: HmdButton, state: Literal['on', 'off', 'physical']) -> CallToolResult:

@@ -53,6 +53,15 @@ The Frame sends leases for a host while all of these hold:
 - The headset is worn (the pointer helper's headset state).
 - Frametop isn't paused for a VR game. A Steam Link VR session from the same PC needs that PC's own keyboard and mouse; a game on the Frame has the Frame's.
 - The host hasn't released it with its escape hotkey since the headset last went on.
+- No test is faking the wearer or holding a verification run, unless it was allowed to take a host's input (below).
+
+## Tests and a faked wearer
+
+The pointer helper can't tell the testbench's `worn on` from a real head, so a test that fakes the wearer while a host that lends its input streams takes that computer's keyboard and mouse from whoever sits at it (2026-10-30: oma7, mid-sentence, from a run that never meant to touch it). Leases need the user's say-so for tests:
+
+- `frame-testbench worn on` refuses while such a stream is live, and every testbench command drops a faked wearer once one starts, unless it was given `--allow-host-input` (the CLI only; the MCP `worn` tool has no override). `frame-testbench host-input` (MCP `host_input`) lists the live streams from hosts with `"input": true` and the flag below.
+- `verify-frametop launch` refuses the same way unless `--allow-host-input`, and `verify-frametop guard` stops the run (exit 3) when such a stream starts mid-run.
+- For ft-stream: while the testbench fakes the wearer it keeps `$XDG_RUNTIME_DIR/frametop-fake-worn.json`, `{"since": UNIX TIME, "pid": PID, "allow_host_input": BOOL}`, written before the wearer is faked and removed by `worn off|physical` and `release`. A verification run is `$XDG_RUNTIME_DIR/verify-frametop.json`, `{"run": FOLDER, "started": UNIX TIME, "allow_host_input": BOOL}`, held while its mtime is under 30 minutes old. ft-stream sends no lease while either exists without `"allow_host_input": true` (a garbled one counts as not allowed), and releases a lease it holds when one appears. This last part belongs with ft-stream's host input, which isn't on this branch yet.
 
 ## Headset off and on
 

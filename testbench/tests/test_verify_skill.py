@@ -50,7 +50,9 @@ class VerifySkillTests(unittest.TestCase):
         tmp = Path(self.tmp.name)
         self.replies = {('status',): proxy(), ('pointer', 'state'): {'ok': True, 'gaze_mode': False},
                         ('power', 'status'): {'ok': True, 'displays': 'on'},
-                        ('pointer', 'overlays'): {'ok': True, 'overlays': {'list': []}}}
+                        ('pointer', 'overlays'): {'ok': True, 'overlays': {'list': []}},
+                        ('host-input',): {'ok': True, 'input_hosts': ['oma7'], 'input_streams': [],
+                                          'fake_worn': None}}
         self.sent, self.asked, self.log = [], [], []   # log: both, in the order they happened
         self.statuses = []   # each is the reply to one `status` call, before replies[('status',)]
 
@@ -270,6 +272,43 @@ class VerifySkillTests(unittest.TestCase):
             self.assertEqual(set(self.sent[:released]), {('status',)})   # nothing driven first
             self.assertFalse(self.v.LOCK.exists())
             self.replies[('status',)] = proxy()
+
+    OMA7 = {'ok': True, 'input_hosts': ['oma7'], 'fake_worn': None,
+            'input_streams': [{'pid': 7, 'host': '192.168.1.61', 'id': 'frametop-oma7-dp-2', 'name': 'oma7'}]}
+
+    def test_launch_refuses_while_a_host_that_lends_its_input_streams_unless_allowed(self):
+        self.replies[('host-input',)] = self.OMA7
+        report, code = self.v.doctor()
+        self.assertEqual(code, 1)
+        self.assertIn('oma7', self.check(report, 'no host-input streams')['detail'])
+        with self.assertRaisesRegex(SystemExit, 'lends Frametop its keyboard'), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.v.launch('x')
+        self.assertFalse(self.v.LOCK.exists())
+        self.replies[('host-input',)] = {'ok': False, 'error': 'no testbench'}   # unread: refuse too
+        with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+            self.v.launch('x')
+        self.replies[('host-input',)] = self.OMA7
+        self.assertEqual(self.run_main('launch', 'allowed', '--allow-host-input')[0], 0)
+        self.assertTrue(json.loads(self.v.LOCK.read_text())['allow_host_input'])
+        self.assertEqual(self.run_main('guard')[0], 0)   # allowed: the run goes on
+
+    def test_launch_with_the_allow_still_refuses_anything_else_unready(self):
+        self.replies[('host-input',)] = self.OMA7
+        self.units['frametop-pointer'] = 'failed'
+        with self.assertRaisesRegex(SystemExit, 'not ready'), contextlib.redirect_stdout(io.StringIO()):
+            self.v.launch('x', allow_host_input=True)
+
+    def test_guard_stops_a_run_when_a_host_that_lends_its_input_starts_streaming(self):
+        self.run_main('launch', 'plain')
+        self.assertFalse(json.loads(self.v.LOCK.read_text())['allow_host_input'])
+        self.replies[('host-input',)] = self.OMA7
+        self.sent.clear()
+        with self.assertRaises(SystemExit) as stop:
+            self.run_main('guard')
+        self.assertEqual(stop.exception.code, 3)
+        self.assertIn(('release',), self.sent)
+        self.assertFalse(self.v.LOCK.exists())
 
     def test_a_sensor_blip_on_a_still_headset_is_not_a_wearer(self):
         self.run_main('launch', 'blips')

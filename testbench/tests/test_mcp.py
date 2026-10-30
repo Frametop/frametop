@@ -30,7 +30,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_tool_inventory_and_no_transport_or_arbitrary_command_arguments(self):
         tools = await self.server.list_tools()
         self.assertEqual({t.name for t in tools}, {
-            'status', 'worn', 'hmd_button', 'hmd_pose_set', 'hmd_pose_move', 'hmd_pose_reset',
+            'status', 'worn', 'host_input', 'hmd_button', 'hmd_pose_set', 'hmd_pose_move', 'hmd_pose_reset',
             'controller_pose_set', 'controller_pose_move', 'controller_pose_reset',
             'controller_button', 'controller_trigger', 'controller_grip', 'controller_thumbstick',
             'controller_touch', 'controller_inputs_reset', 'controller_input_status',
@@ -416,6 +416,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
              ['pose', 'move', '--translation', '0.5', '0', '0', '--rotation', '90', '0', '-45', '--space', 'raw']),
             ('hmd_pose_reset', {}, ['pose', 'reset']),
             ('release_all', {}, ['release']),
+            ('host_input', {}, ['host-input']),
         ]
         for side in ('left', 'right'):
             cases.extend([

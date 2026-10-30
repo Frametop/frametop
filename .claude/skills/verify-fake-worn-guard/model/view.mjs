@@ -57,7 +57,8 @@ const label = (action, from, to) => {
     case "YouRunWornOff": return "you run worn off";
     case "YouRunOther": return up ? RELEASED : "the next command's release times out";
     case "OnCheck":
-      return to.pc === "idle" ? "a live stream refuses it" : to.pc === "on_fake" ? "a guard is already up" : "no live guard";
+      return to.pc === "idle" ? (from.stream !== "off" ? "a live stream refuses it" : "an unconfirmed release refuses it")
+        : to.pc === "on_fake" ? "a guard is already up" : "no live guard";
     case "OnStartGuard": return "it starts a guard unit";
     case "OnWait": return to.pc === "on_fake" ? "the guard holds the lock" : "the lock was busy";
     case "GuardStarts": return to.guard === "holding" ? "the guard takes the lock" : "the lock was busy";

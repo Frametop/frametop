@@ -62,11 +62,13 @@ YouRunOther ==     \* any other testbench command: only drop_unsafe_worn matters
     /\ flag' = DropFlag
     /\ UNCHANGED <<proxy, guard, lock, stream, pc>>
 
-\* refusal(state()): a live stream to an input host refuses; a live guard is kept
+\* refusal(state()): a live stream to an input host refuses; a live guard is kept; a flag naming
+\* no live guard (drop_unsafe_worn's release went unconfirmed) refuses, as start_guard clears it
 OnCheck ==
     /\ pc = "on_check"
     /\ pc' = IF stream # "off" THEN "idle"
              ELSE IF GuardAlive THEN "on_fake"
+             ELSE IF flag # "none" THEN "idle"
              ELSE "on_stop"
     /\ UNCHANGED <<faked, proxy, flag, guard, lock, stream>>
 

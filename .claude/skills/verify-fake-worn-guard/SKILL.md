@@ -60,14 +60,15 @@ Configs (constants):
 | `Clean` | FALSE | FALSE | every rule holds: the design is right when nothing fails |
 | `Kills` | TRUE | FALSE | `NoHostTakeover` breaks: finding B |
 | `Hangs` | FALSE | TRUE | every rule holds (both broke, by finding A, before the fix) |
-| `All` | TRUE | TRUE | for `/statechart` charts only, not in the check |
+| `All` | TRUE | TRUE | for `/statechart` charts only, not in the check. `NoHostTakeover` breaks by B; `FakeIsNoticed` held only once D was fixed |
 
 ## Findings
 
 All three were real, replayed against the code by `scripts/replay` at `68d3f83`. A and C are
 fixed at the sync commit: `cli.py` `release_or_keep_flag` and `drop_unsafe_worn` release through
 `hostinput.drop_wearer`, so the flag goes only once the proxy confirms the release (or isn't
-there), and a flag naming the command is written if none is left. B remains.
+there), and a flag naming the command is written if none is left. D, which the fix for C
+uncovered, is fixed at the sync commit too. B remains.
 
 - **A (fixed). `worn on` dropped the flag after a timeout.** The proxy stalls. `worn on` starts the guard,
   which takes the lock. `bench.control('worn 1')` acts but its reply times out.
@@ -90,6 +91,14 @@ there), and a flag naming the command is written if none is left. B remains.
   gets this right: it treats only `FileNotFoundError` and `ConnectionRefusedError` as "no proxy"
   and keeps the flag otherwise, and `drop_unsafe_worn` now uses it. The model's `YouRunOther`
   held C. It was never TLC's shortest path for any rule, so `scripts/replay` checks it.
+- **D (fixed in `0c7eb9e`). `worn on` let `start_guard` clear a flag whose release was
+  unconfirmed.** It surfaced once C kept the flag, and only in `All` (a hang and a guard death in
+  one run): a timed-out release leaves a flag, the next `worn on` can't confirm its release
+  either, `start_guard` runs `clear_flag()`, and the new guard dies before it takes the lock, so
+  `worn on` is refused with the wearer faked and no flag. `worn on` now refuses while such a flag
+  is there (`OnCheck`). `scripts/check` doesn't run `All`, so the unit test
+  `test_worn_on_is_refused_while_an_unconfirmed_release_left_a_flag` guards D, and `/statechart`
+  on `All` shows it if it comes back.
 
 ## Model to code
 
@@ -97,12 +106,12 @@ Each model action is one step of the code. Change the model when the code it nam
 
 | Model action | Code (at the sync commit) |
 | --- | --- |
-| `DropFaked`/`DropFlag` in `YouRunWornOn`, `YouRunWornOff`, `YouRunOther` | `cli.py` `drop_unsafe_worn` (l. 407), through `drop_wearer`, run before every command (`main`, l. 456) |
-| `OnCheck` | `cli.py` `dispatch`, `worn` branch (l. 287): `hostinput.refusal(state())`, then the live-guard test |
+| `DropFaked`/`DropFlag` in `YouRunWornOn`, `YouRunWornOff`, `YouRunOther` | `cli.py` `drop_unsafe_worn` (l. 413), through `drop_wearer`, run before every command (`main`, l. 462) |
+| `OnCheck` | `cli.py` `dispatch`, `worn` branch (l. 287): `hostinput.refusal(state())`, then the live-guard test, then the left-flag refusal (l. 305) |
 | `OnStartGuard`, `StopOldGuard`, `OnWait` | `hostinput.py` `start_guard` (l. 233): `systemctl stop`, `clear_flag`, `systemd-run`, wait for a live guard's flag |
-| `OnFake`, `KeepFlag` | `cli.py` `bench.control('worn 1')` (l. 307) and its `except BaseException`: `release_or_keep_flag` (l. 395) |
-| `OnVerify` | `cli.py` the check after `worn 1` (l. 311): no live guard -> `release_or_keep_flag` |
-| `OffSend` | `cli.py` `worn off|physical` (`control`, then `clear_flag`) and `release` (l. 354) |
+| `OnFake`, `KeepFlag` | `cli.py` `bench.control('worn 1')` (l. 313) and its `except BaseException`: `release_or_keep_flag` (l. 401) |
+| `OnVerify` | `cli.py` the check after `worn 1` (l. 317): no live guard -> `release_or_keep_flag` |
+| `OffSend` | `cli.py` `worn off|physical` (`control`, then `clear_flag`) and `release` (l. 360) |
 | `GuardStarts`, `GuardLetsGo` | `hostinput.py` `guard` (l. 165): `take_locks` (l. 148), then `set_flag`; leaves once the flag stops naming it |
 | `GuardTerm`, `GuardStopped`, `DropWearer` | `guard`'s SIGTERM path and `drop_wearer` (l. 200) |
 | `GuardKilled`, `GuardCleanup` | SIGKILL/OOM, then the unit's `ExecStopPost`: `after_guard` (l. 218), for any unallowed flag naming no live guard |
@@ -151,11 +160,11 @@ Covered code:
 - `testbench/frame_testbench/transport.py`: `request`
 - `docs/host-input.md`: the lease rule and the guard's description
 
-**Sync commit: `37d0fbf`** (experimental, 2026-10-30, the fix for A and C). The model describes the covered code as of
+**Sync commit: `0c7eb9e`** (experimental, 2026-10-30, after the fixes for A, C and D). The model describes the covered code as of
 this commit. To see whether it needs another look:
 
 ```sh
-git diff 37d0fbf -- testbench/frame_testbench/hostinput.py testbench/frame_testbench/cli.py testbench/frame_testbench/transport.py docs/host-input.md
+git diff 0c7eb9e -- testbench/frame_testbench/hostinput.py testbench/frame_testbench/cli.py testbench/frame_testbench/transport.py docs/host-input.md
 ```
 
 Move the sync commit forward only after you have read that diff, confirmed that every model action

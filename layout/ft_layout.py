@@ -43,6 +43,9 @@ you face (yaw only), like a recenter. It lives in ~/.config/frametop-layout.json
                                                           dongle (only; ft-stream reads both)
               "mic": false,                       send the Frame's microphone to it (needs
                                                           Frametop's Vibepollo on Windows; ft-stream)
+              "input": false,                     use its own keyboard and mouse in Frametop while
+                                                          the headset is worn (needs Frametop's
+                                                          Vibepollo on Linux; ft-stream)
               "displays": [{"id": "desk-pc-oled",         (docs/remote-displays.md), each a panel
                             "client": "frametop-1",       streamed by ft-stream: its paired client,
                             "app": "display:{GUID}",      what it streams (display:DEVICE, monitor:
@@ -104,9 +107,10 @@ Usage (on the Frame host; Frametop Display Settings calls it too):
                                      first, or with --login, with the Web UI login read from stdin
                                      as two lines: a Sunshine instance on PORT) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M ...
-  ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
-                                     how a host's streams reach it (they start over), and whether
-                                     the Frame's microphone goes to it (within 3 s, no restart)
+  ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off input=on|off
+                                     how a host's streams reach it (they start over), whether
+                                     the Frame's microphone goes to it, and whether its keyboard
+                                     and mouse come to Frametop (both within 3 s, no restart)
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
   ft-layout remote remove ID         stops it and unpairs its client (the host stays)
@@ -124,6 +128,9 @@ import time
 
 LAYOUT_PATH = os.path.expanduser("~/.config/frametop-layout.json")
 CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
+# Where the screens were last arranged from (save_anchor): state, not a setting, so a reset,
+# which leaves the layout file alone, can keep it current.
+ANCHOR_PATH = os.path.expanduser("~/.local/state/frametop/layout-anchor.json")
 VRCMD = "/opt/steamvr/bin/linuxarm64/vrcmd"
 HELPER = "\0ft_pointer_helper"
 SCREENS = "\0ft_screens"
@@ -419,6 +426,203 @@ def relative_pose(center, x_axis, z_axis, eye, heading):
             "roll": round(roll, 2)}
 
 
+# ---------------------------------------------------------------- preview (Display Settings)
+# Everything in the layout's head frame: where you stood, and the way you faced, when the
+# screens were last arranged (the "anchor", saved then in ANCHOR_PATH). A panel is its centre, its axes (x
+# right, y up, z out of its front) and size; a curved one is a cylinder of radius "curve"
+# round its front, its centre line where the flat one would be (screens/vr.cpp OnSurface).
+
+def panel_axes(face, roll):
+    """A panel's axes from its face (yaw, pitch) and roll, as relative_pose reads them."""
+    z = tuple(-c for c in direction(*face))
+    right = cross((0.0, 1.0, 0.0), z)
+    right = normalize(right) if dot(right, right) > 1e-9 else (1.0, 0.0, 0.0)  # straight up or down
+    up = cross(z, right)
+    r = math.radians(roll)
+    x = tuple(math.cos(r) * a + math.sin(r) * b for a, b in zip(right, up))
+    return x, cross(z, x), z
+
+
+def surface_point(p, u, v):
+    """The point u metres along a panel from its centre (along the arc when curved), v up."""
+    (cx, cy, cz), (x, y, z), r = p["center"], p["axes"], p.get("curve", 0)
+    lx, lz = (r * math.sin(u / r), r - r * math.cos(u / r)) if r > 0 else (u, 0.0)
+    return tuple(c + a * lx + b * v + d * lz for c, a, b, d in zip((cx, cy, cz), x, y, z))
+
+
+def to_anchor(v, anchor, point=True):
+    """A world point (or, with point=False, a direction) in the anchor's head frame."""
+    eye, heading = anchor
+    return turn_yaw(tuple(a - b for a, b in zip(v, eye)) if point else v, -heading)
+
+
+def inferred_anchor(layout, g):
+    """(eye, heading) the screens were arranged from, worked out from screen 1's pose now
+    (parse_get) and where the layout puts it; None if it's pinned to a hand."""
+    if g["hand"] != "none":
+        return None
+    t = plan(layout, screen_count(layout))[0]
+    heading = yaw_pitch(tuple(-c for c in g["z"]))[0] - t["face"][0]
+    return tuple(c - v for c, v in zip(g["center"], turn_yaw(t["pos"], heading))), heading
+
+
+def save_anchor(eye, heading):
+    """Where the screens were arranged from, for Display Settings' preview (which works it
+    out from screen 1 without it, so a failed write only logs)."""
+    try:
+        os.makedirs(os.path.dirname(ANCHOR_PATH), exist_ok=True)
+        tmp = ANCHOR_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"eye": [round(v, 4) for v in eye], "heading": round(heading, 2)}, f)
+        os.replace(tmp, ANCHOR_PATH)
+    except OSError as e:
+        log(f"couldn't save where the screens were arranged from: {e}")
+
+
+def stored_anchor():
+    try:
+        with open(ANCHOR_PATH) as f:
+            a = json.load(f)
+        eye = tuple(float(v) for v in a["eye"])
+        return (eye, float(a["heading"])) if len(eye) == 3 else None
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def clear_anchor():
+    """At desktop start: the screens start over, so where they were arranged from is unknown
+    until they're arranged again (the preview works it out from screen 1 meanwhile)."""
+    try:
+        os.remove(ANCHOR_PATH)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        log(f"couldn't forget where the screens were arranged from: {e}")
+
+
+def _wrap(deg):
+    return (deg + 180.0) % 360.0 - 180.0
+
+
+def preview_panel(p, eye, facing=0.0, steps=12):
+    """p with "top": [x, z] along its middle seen from above, and "view": its outline as
+    [yaw, pitch] seen from eye: within half a turn of facing at its centre, and unwrapped
+    round that, so one behind you stays whole."""
+    w, h = p["width"], p["height"]
+    us = [-w / 2 + w * k / steps for k in range(steps + 1)]
+    top = [surface_point(p, u, 0.0) for u in us]
+    edge = ([(u, -h / 2) for u in us] + [(w / 2, -h / 2 + h * k / 4) for k in range(1, 5)]
+            + [(u, h / 2) for u in reversed(us[:-1])] + [(-w / 2, h / 2 - h * k / 4) for k in range(1, 4)])
+    mid = yaw_pitch(tuple(a - b for a, b in zip(p["center"], eye)))[0]
+    mid = facing + _wrap(mid - facing)
+    view = []
+    for u, v in edge:
+        yaw, pitch = yaw_pitch(tuple(a - b for a, b in zip(surface_point(p, u, v), eye)))
+        view.append([round(mid + _wrap(yaw - mid), 2), round(pitch, 2)])
+    out = {k: v for k, v in p.items() if k not in ("center", "axes")}
+    out["top"] = [[round(q[0], 4), round(q[2], 4)] for q in top]
+    out["view"] = view
+    out["distance"] = round(math.dist(p["center"], eye), 3)
+    return out
+
+
+def planned_panels(layout, count, displays=None):
+    """The screens where the layout puts them (and, given displays, the remote displays that
+    are on), as preview panels in the head frame."""
+    out = []
+    for i, t in enumerate(plan(layout, count)):
+        w, h = screen_size(layout, i)
+        entry = screen_entry(layout, i)
+        out.append({"kind": "screen", "label": str(i + 1), "center": tuple(t["pos"]),
+                    "axes": panel_axes(t["face"], t["roll"]), "width": w, "height": h,
+                    "curve": float(entry.get("curve", 0) or 0), "hidden": bool(entry.get("hidden"))})
+    for (n, host, d), t in zip(displays or [], plan_remotes(layout, count, displays or [])):
+        if t is None or d.get("off"):
+            continue
+        w, h = remote_size(d)
+        out.append({"kind": "remote", "label": remote_label(host, d), "center": tuple(t["pos"]),
+                    "axes": panel_axes(t["face"], t["roll"]), "width": w, "height": h,
+                    "curve": float(d.get("curve", 0) or 0), "hidden": bool(d.get("hidden"))})
+    return out
+
+
+def remote_label(host, d):
+    return " ".join(filter(None, (host.get("name"), d.get("label") or d.get("id"))))
+
+
+def read_room(ask, layout, windows=()):
+    """What ft-screens shows now, through ask(text) -> reply or None: the head and every
+    panel (screens, the floating windows given as [(panel, title)], connected remote
+    displays) in world coordinates. None if ft-screens doesn't answer."""
+    def get(n):
+        reply = ask(f"get {n}")
+        return parse_get(reply) if reply and reply.startswith("ok") else None
+    reply = ask("screens")
+    if not reply or not reply.startswith("ok"):
+        return None
+    head = ask("head")
+    f = head.split() if head and head.startswith("ok") else []
+    room = {"head": (tuple(map(float, f[1:4])), float(f[4])) if len(f) >= 5 else None, "panels": []}
+    for i in range(int(reply.split()[1])):
+        g = get(i + 1)
+        if g:
+            room["panels"].append({"kind": "screen", "label": str(i + 1), "number": i + 1, "pose": g,
+                                   "hidden": bool(screen_entry(layout, i).get("hidden"))})
+    by_number = {n: (host, d) for n, host, d in remote_displays(layout)}
+    # Each one ft-screens shows, live or not: one connecting or lost still has its panel there.
+    reply = ask("remotes") or ""
+    for item in reply.split()[2:] if reply.startswith("ok") else []:
+        try:
+            n = int(item.split(":")[0])
+        except ValueError:
+            continue
+        g = get(n)
+        host, d = by_number.get(n, ({}, {"label": f"remote {n}"}))
+        if g:
+            room["panels"].append({"kind": "remote", "label": remote_label(host, d), "number": n, "pose": g,
+                                   "hidden": bool(d.get("hidden"))})
+    for n, title in windows:
+        g = get(n)
+        if g:
+            room["panels"].append({"kind": "window", "label": title, "number": n, "pose": g, "hidden": False})
+    return room
+
+
+def preview(layout, room=None):
+    """Display Settings' preview: {"live", "head": {"x", "y", "z", "yaw", "tracked"},
+    "panels": [...], "planned": [...]} in the head frame (see preview_panel). Live (room from
+    read_room): the panels where they are now, and the screens where the layout puts them as
+    "planned". Otherwise the layout's screens and remote displays. The head is where you are
+    ("tracked"), or with no head pose, where the screens were arranged from."""
+    count = screen_count(layout)
+    if not room or not room["panels"]:
+        eye = (0.0, 0.0, 0.0)
+        return {"live": False, "head": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "tracked": False}, "panels": [],
+                "planned": [preview_panel(p, eye) for p in planned_panels(layout, count, remote_displays(layout))]}
+    anchor = stored_anchor()
+    if anchor is None:
+        first = next((p["pose"] for p in room["panels"] if p["kind"] == "screen" and p["number"] == 1), None)
+        anchor = (inferred_anchor(layout, first) if first else None) or room["head"]
+    if anchor is None:
+        return preview(layout)  # nothing to place the room by (screen 1 on a hand, the headset off)
+    if room["head"]:
+        eye = to_anchor(room["head"][0], anchor)
+        yaw = _wrap(room["head"][1] - anchor[1])
+    else:
+        eye, yaw = (0.0, 0.0, 0.0), 0.0
+    panels = []
+    for p in room["panels"]:
+        g = p["pose"]
+        panels.append({"kind": p["kind"], "label": p["label"], "hidden": p["hidden"],
+                       "center": to_anchor(g["center"], anchor),
+                       "axes": tuple(to_anchor(g[k], anchor, point=False) for k in ("x", "y", "z")),
+                       "width": g["metres"], "height": g["height"], "curve": g["curve"]})
+    return {"live": True, "head": {"x": round(eye[0], 4), "y": round(eye[1], 4), "z": round(eye[2], 4),
+                                   "yaw": round(yaw, 2), "tracked": bool(room["head"])},
+            "panels": [preview_panel(p, eye, yaw) for p in panels],
+            "planned": [preview_panel(p, eye, yaw) for p in planned_panels(layout, count)]}
+
+
 class NoAnswer(RuntimeError):
     """The other side isn't there or didn't reply (as opposed to replying with an error)."""
 
@@ -573,6 +777,7 @@ def apply_screens(wait=0):
         sock.ask("vrkeyboard close")  # the keyboard, if open, goes too: a reset starts over
     except RuntimeError:
         pass  # an older ft-screens
+    save_anchor(eye, heading)
     log(f"arranged {count} screen(s)")
     return results
 
@@ -630,6 +835,7 @@ def recenter_screens():
             sock.ask("vrkeyboard close")  # the keyboard, if open, goes too, as with a full reset
         except RuntimeError:
             pass  # an older ft-screens
+        save_anchor(eye, heading)
         log(f"recentered {len(results)} panel(s); app windows and streams unchanged")
         return results
     finally:
@@ -672,6 +878,7 @@ def capture_screens():
     layout["mode"] = "custom"
     capture_remotes(sock, layout, eye, heading)
     save_layout(layout)
+    save_anchor(eye, heading)  # what they're relative to now
     return screens
 
 
@@ -1031,12 +1238,10 @@ def remote_anchor(sock, layout):
         f = sock.ask("head").split()
         return tuple(map(float, f[1:4])), float(f[4])
     except RuntimeError:
-        g = parse_get(sock.ask("get 1"))
-        if g["hand"] != "none":
+        anchor = inferred_anchor(layout, parse_get(sock.ask("get 1")))
+        if anchor is None:
             raise RuntimeError("no head pose, and screen 1 is pinned")
-        t = plan(layout, screen_count(layout))[0]
-        heading = yaw_pitch(tuple(-c for c in g["z"]))[0] - t["face"][0]
-        return tuple(c - v for c, v in zip(g["center"], turn_yaw(t["pos"], heading))), heading
+        return anchor
 
 
 def start_remotes_now(layout, only):
@@ -1066,6 +1271,7 @@ def remote_command(args):
             w, h = d.get("size", [2560, 1440])
             state = "disconnected" if d.get("off") else running.get(n, "off")
             state += f" route {host.get('route', 'auto')}{' mic' if host.get('mic') else ''}"
+            state += " input" if host.get("input") else ""
             print(f"{n} {d['id']} {host.get('name')} {display_target(host, d)} {d['app']} {w}x{h}@{d.get('fps', 60)} "
                   f"{state}{' hidden' if d.get('hidden') else ''}  {d.get('label', '')}")
         return
@@ -1085,9 +1291,11 @@ def remote_command(args):
                 restart = True
             elif k == "mic" and v in ("on", "off"):
                 host["mic"] = v == "on"  # the stream playing its sound looks every 3 s
+            elif k == "input" and v in ("on", "off"):
+                host["input"] = v == "on"  # its streams look every 3 s
             else:
                 raise RuntimeError(f"remote host: {kv!r}? (route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none "
-                                   "mic=on|off)")
+                                   "mic=on|off input=on|off)")
         save_layout(layout)
         if not restart:
             return
@@ -1252,7 +1460,7 @@ def remote_command(args):
         log(f"removed {d['id']}; {said[-1] if said else f'unpair exited {code}'}")
         return
     raise RuntimeError("remote list | monitors ADDRESS | add HOST ADDRESS APP [options] | set ID KEY=VALUE... | "
-                       "host NAME route=...|direct=...|mic=... | connect ID... | disconnect ID... | remove ID")
+                       "host NAME route=...|direct=...|mic=...|input=... | connect ID... | disconnect ID... | remove ID")
 
 
 def apply(wait=0):
@@ -1731,6 +1939,7 @@ def main(argv):
             start_desktop(argv[2])
         elif cmd == "start":
             # Desktop start (the session script): the profile it starts with, or the arrangement.
+            clear_anchor()
             layout = load_layout()
             name = start_profile(layout)
             if not name:

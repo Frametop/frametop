@@ -21,7 +21,7 @@ test-python:
     python3 -c 'import PySide6, numpy, cv2, sherpa_onnx' || { echo "python3 can't import PySide6, numpy, cv2, and sherpa_onnx"; exit 1; }
     status=0
     layout/countdown/deps.sh || status=1
-    for t in layout/countdown/tests/test_*.py models/test/*.py commands/test/*.py input-settings/test/*.py input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py recorder/tests/*.py gaze/test/*.py gaze/rec/tests/*.py pack/test/*.py voice/test/*.py frunner/test/*.py tour/test/*.py float/test/*.py layout/test/*.py; do
+    for t in layout/tests/test_*.py layout/countdown/tests/test_*.py models/test/*.py commands/test/*.py input-settings/test/*.py input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py recorder/tests/*.py gaze/test/*.py gaze/rec/tests/*.py pack/test/*.py voice/test/*.py frunner/test/*.py tour/test/*.py float/test/*.py layout/test/*.py; do
         [ -f "$t" ] || continue
         if python3 "$t" >/dev/null; then echo "$t: ok"; else echo "$t: FAILED"; status=1; fi
     done
@@ -60,6 +60,8 @@ test-c:
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"
         "build/tests/$n" >/dev/null && echo "$t: ok"
     done
+    g++ -std=c++17 -Wall -Wextra -Werror -Istream stream/test/hostinput-test.cpp -o build/tests/hostinput-test
+    build/tests/hostinput-test >/dev/null && echo "stream/test/hostinput-test.cpp: ok"
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/rounded-test.cpp \
       -o build/tests/rounded-test
     build/tests/rounded-test && echo "screens/tests/rounded-test.cpp: ok"

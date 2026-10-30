@@ -14,6 +14,7 @@ def load_layout_module():
     spec = importlib.util.spec_from_file_location("countdown_review_layout", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module.ANCHOR_PATH = "/dev/null/anchor.json"  # a harness that doesn't stub save_anchor writes nothing real
     return module
 
 
@@ -22,6 +23,7 @@ class Harness:
         self.m = load_layout_module()
         self.events = []
         self.head = [1.0, 2.0, 3.0, 0.0]
+        self.m.save_anchor = lambda eye, heading: self.events.append(("anchor", tuple(eye), heading))
         self.on_sleep = None
         self.on_head = None
         self.layout = {"mode": "preset", "screens": [{}], "layouts": {}}
@@ -130,6 +132,13 @@ class ResetCountdownReview(unittest.TestCase):
         self.assertEqual(helper[1], (h.m.RESET_TIMER, "--deadline", "106.000000000"))
         self.assertEqual(helper[2], {"timeout": 6, "check": False})
         self.assertFalse(any(e[0] == "sleep" for e in h.events))
+
+    def test_reset_keeps_where_it_was_arranged_from_and_leaves_the_layout_alone(self):
+        # Display Settings' preview draws the room from there.
+        h = Harness(self.lock)
+        h.m.save_layout = lambda layout: self.fail("a reset saved the layout")
+        self.assertEqual(h.run("reset"), 0)
+        self.assertIn(("anchor", (1.0, 2.0, 3.0), 0.0), h.events)
 
     def test_fast_helper_success_still_waits_three_seconds_before_sampling_head(self):
         h = Harness(self.lock)

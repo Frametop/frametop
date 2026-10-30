@@ -50,12 +50,14 @@
 //
 // The host's sound plays here, and with "mic": true on its host in the layout (Frametop Remote
 // Displays: Send my microphone) the Frame's microphone goes back to the host's virtual one; see
-// Audio and Mic.
+// Audio and Mic. With "input": true (Use this computer's keyboard and mouse) the host's own
+// keyboard and mouse come to the input relay while the headset is worn; see HostInput.
 //
 // Runs in the dev container. Build: stream/build.sh.
 #include "spike/iris.h"
 
 #include "host.h"
+#include "hostinput.h"
 
 #include <netdb.h>
 #include <opus/opus.h>
@@ -66,7 +68,9 @@
 #include <sys/file.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 
 #include <atomic>
 #include <cstdarg>
@@ -274,6 +278,220 @@ struct Mic {
 };
 Mic g_mic;
 
+bool HostFlag(const std::string &host, const char *key);
+
+// A test's file (hostinput::TestForbidding) allows a host's input only with "allow_host_input": true.
+bool AllowsHostInput(const std::string &text) {
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (!j.is_object()) return false;
+    const auto allow = j.find("allow_host_input");
+    return allow != j.end() && allow->is_boolean() && allow->get<bool>();
+}
+
+// The host's own keyboard and mouse, lent to Frametop (docs/host-input.md) by a Linux host with
+// Frametop's Vibepollo build. One stream per host holds them: the one holding
+// $XDG_RUNTIME_DIR/frametop-input-HOST.lock. While "input": true is on its layout entry, the
+// stream is live, the pointer helper says the headset is worn and the relay isn't paused, it
+// renews a lease every 500 ms (LiSendFrametopHostInputLease, moonlight-hostin.patch). When the
+// switch goes off or the headset comes off it releases, which also lifts the host's escape (both
+// Shifts and Escape there); anything else stopping the lease drops it and keeps the escape
+// (hostinput::Decide). So does a test faking the wearer or a verification run under way without
+// leave to take the host's input, which it checks for before every lease: the lock alone left a gap, a host given the switch
+// while its stream held the lock leasing until the testbench's guard let the wearer go. The host
+// answers with records (stream/hostinput.h) on the control stream's receive thread, and
+// hostinput::Relay turns them into the relay's host devices.
+struct HostInput {
+    std::string host, id;  // the host's address, and its id for the relay and the lock
+    int sock = -1;         // datagrams to the relay and the pointer helper, and their replies
+    bool switchOn = false, locked = false, refusedSaid = false;
+    int lock = -1;
+    std::vector<std::string> testDirs;  // where the tests keep their files
+    std::string testSaid;               // the test file the log last said stops the leases
+    int64_t checkAt = 0, lockAt = 0, askAt = 0, leaseAt = 0;
+    hostinput::Answer worn, paused;
+    // What Tick last wanted; a change to kRelease is an edge. A stream starting with the switch off
+    // sends none; one starting with the headset off sends one at the helper's first answer (the
+    // stream isn't live before it). An edge's release is owed until it went, and no engage goes
+    // ahead of it.
+    hostinput::Want last = hostinput::Want::kRelease;
+    bool releaseOwed = false;
+    uint32_t seq = 0;
+    // With the receive thread.
+    std::mutex mu;
+    bool leasing = false;
+    bool escaped = false;  // the host said so: a release lifts it even once the lease has stopped
+    hostinput::Relay relay{[this](const std::string &msg) { return Send(kRelay, msg, true); }};
+
+    static constexpr const char *kRelay = "frametop_relay", *kHelper = "ft_pointer_helper";
+
+    static socklen_t Address(sockaddr_un &a, const char *name) {
+        a = {};
+        a.sun_family = AF_UNIX;
+        const size_t n = std::strlen(name);
+        std::memcpy(a.sun_path + 1, name, n);  // abstract
+        return socklen_t(offsetof(sockaddr_un, sun_path) + 1 + n);
+    }
+
+    // To the relay or the pointer helper. The relay's host messages wait for room (up to the
+    // socket's 100 ms send timeout): a lost one could be a key-up.
+    bool Send(const char *to, const std::string &msg, bool wait = false) const {
+        sockaddr_un a;
+        const socklen_t n = Address(a, to);
+        return sendto(sock, msg.data(), msg.size(), (wait ? 0 : MSG_DONTWAIT) | MSG_NOSIGNAL, (const sockaddr *)&a, n) ==
+               ssize_t(msg.size());
+    }
+
+    // A record from the host, on the control stream's receive thread.
+    void Got(const unsigned char *data, int length) {
+        const hostinput::Record r = hostinput::Parse(data, length);
+        std::lock_guard<std::mutex> lock(mu);
+        // Even once the lease stopped: an escape said just after a drop is still lifted by a release.
+        if (r.type == hostinput::Record::kState && (r.engaged || r.text == "escape")) escaped = !r.engaged;
+        if (!leasing) return;
+        const std::string said = relay.Take(r);
+        if (!said.empty()) std::printf("hostinput: %s\n", said.c_str()), std::fflush(stdout);
+    }
+
+    int TakeEvents() {
+        std::lock_guard<std::mutex> lock(mu);
+        return relay.TakeEvents();
+    }
+
+    void Open(const std::string &address) {
+        host = address, id = hostinput::RelayId(address);
+        testDirs = hostinput::TestDirs(std::getenv("XDG_RUNTIME_DIR"), getuid());
+        sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+        sockaddr_un a{};
+        a.sun_family = AF_UNIX;
+        const timeval wait{0, 100'000};
+        const int on = 1;
+        // An address of our own (autobind), for the replies, each with its sender's credentials.
+        if (sock >= 0 && (bind(sock, (const sockaddr *)&a, sizeof(sa_family_t)) < 0 ||
+                          setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &wait, sizeof wait) < 0 ||
+                          setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof on) < 0))
+            close(sock), sock = -1;
+    }
+
+    // A release or a drop to the host. A release that went lifts any escape and pays an edge's.
+    bool Send(bool release) {
+        const auto msg = release ? hostinput::Release() : hostinput::Drop();
+        if (LiSendFrametopHostInputLease(msg.data(), int(msg.size())) != 0) return false;
+        if (release) {
+            std::lock_guard<std::mutex> lock(mu);
+            escaped = false, releaseOwed = false;
+        }
+        std::printf("hostinput: %s %s's keyboard and mouse\n", release ? "released" : "dropped", host.c_str());
+        std::fflush(stdout);
+        return true;
+    }
+
+    // Give the host its keyboard and mouse back now: a release also lifts its escape, a drop
+    // keeps it. A release goes even with no lease when an edge's is owed, or while the host may
+    // still be escaped; one that couldn't go is tried again on the next tick.
+    void Stop(hostinput::Want how) {
+        const bool release = how == hostinput::Want::kRelease;
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            if (!leasing && !(release && (escaped || releaseOwed))) return;
+            leasing = false;
+            relay.Stop();
+        }
+        Send(release);
+    }
+
+    void Apply(hostinput::Want want) {
+        if (want == hostinput::Want::kRelease && last != hostinput::Want::kRelease) releaseOwed = true;
+        last = want;
+        if (want != hostinput::Want::kHold) Stop(want);
+        else if (releaseOwed) Send(true);  // the headset went back on before it could go
+    }
+
+    void Unlock() {
+        if (!locked) return;
+        flock(lock, LOCK_UN);
+        locked = false;
+    }
+
+    void Tick(int64_t now, bool live) {
+        if (sock < 0) return;
+        if (now >= checkAt) checkAt = now + hostinput::kStaleNs, switchOn = HostFlag(host, "input");
+        if (!switchOn || !live) return Apply(hostinput::Decide(switchOn, live, worn, paused, false, now)), Unlock();
+        if (!locked && now >= lockAt) {
+            lockAt = now + hostinput::kStaleNs;
+            if (lock < 0) {
+                const char *dir = std::getenv("XDG_RUNTIME_DIR");
+                const std::string path = std::string(dir && *dir ? dir : "/tmp") + "/frametop-input-" + id + ".lock";
+                lock = open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+            }
+            locked = lock >= 0 && flock(lock, LOCK_EX | LOCK_NB) == 0;
+            if (locked) std::printf("hostinput: this stream holds %s's keyboard and mouse lock\n", host.c_str());
+        }
+        if (!locked) return;
+        if (now >= askAt) askAt = now + 1'000'000'000, Send(kHelper, "gaze ? headset"), Send(kRelay, "pause ?");
+        char buf[2048];
+        for (;;) {
+            iovec io{buf, sizeof buf};
+            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(ucred))];
+            msghdr m{};
+            m.msg_iov = &io, m.msg_iovlen = 1, m.msg_control = control, m.msg_controllen = sizeof control;
+            const ssize_t n = recvmsg(sock, &m, MSG_DONTWAIT);
+            if (n <= 0) break;
+            // Only this user's answers count. Not by address: the helper answers from an unbound socket.
+            const cmsghdr *c = CMSG_FIRSTHDR(&m);
+            if (!c || c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_CREDENTIALS) continue;
+            ucred cred;
+            std::memcpy(&cred, CMSG_DATA(c), sizeof cred);
+            if (cred.uid != getuid()) continue;
+            const std::string reply(buf, size_t(n));
+            if (reply.rfind("ok ", 0) == 0) {
+                worn = {reply.find(" worn") != std::string::npos, now};
+            } else {
+                const nlohmann::json j = nlohmann::json::parse(reply, nullptr, false);
+                if (j.is_object() && j.value("t", "") == "pause" && j.contains("paused") && j["paused"].is_boolean())
+                    paused = {j["paused"].get<bool>(), now};
+            }
+        }
+        // Read every tick, so no lease goes out once a test's file is there.
+        timespec wall;
+        clock_gettime(CLOCK_REALTIME, &wall);
+        const std::string test =
+            hostinput::TestForbidding(testDirs, int64_t(wall.tv_sec) * 1'000'000'000 + wall.tv_nsec, AllowsHostInput);
+        if (test != testSaid) {
+            if (test.empty()) std::printf("hostinput: no test stops %s's lease now\n", host.c_str());
+            else std::printf("hostinput: no lease for %s's keyboard and mouse while %s says a test may not take them\n",
+                             host.c_str(), test.c_str());
+            testSaid = test;
+        }
+        const hostinput::Want want = hostinput::Decide(switchOn, live, worn, paused, !test.empty(), now);
+        Apply(want);
+        if (want != hostinput::Want::kHold || releaseOwed) return;
+        if (now < leaseAt) return;
+        leaseAt = now + hostinput::kLeaseEveryNs;
+        bool asking;
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            asking = !leasing;
+            if (asking) leasing = true, relay.Start(id, host);  // before the host can answer
+        }
+        const auto engage = hostinput::Engage(seq++);
+        if (LiSendFrametopHostInputLease(engage.data(), int(engage.size())) == -1) {
+            // Not an encrypted control stream, or not connected yet: asked again now and then.
+            leaseAt = now + hostinput::kStaleNs;
+            if (!refusedSaid) std::printf("hostinput: not asked: this host's control stream isn't encrypted, or isn't up yet\n");
+            refusedSaid = true;
+            std::lock_guard<std::mutex> lock(mu);
+            leasing = false;
+        } else {
+            if (asking) std::printf("hostinput: asking for %s's keyboard and mouse\n", host.c_str());
+            refusedSaid = false;
+        }
+        std::fflush(stdout);
+    }
+};
+HostInput g_hostin;
+
+void HostInputRecord(const unsigned char *data, int length) { g_hostin.Got(data, length); }
+
 int Submit(PDECODE_UNIT du) {
     const bool idr = du->frameType == FRAME_TYPE_IDR;
     ++g_received, g_bytes += uint64_t(du->fullLength);
@@ -465,13 +683,14 @@ std::string Route(const std::string &host, int port) {
     return host;
 }
 
-// Whether the host's entry in the layout says to send it the Frame's microphone ("mic": true,
-// Frametop Remote Displays' Send my microphone). Read again every few seconds while streaming.
-bool MicWanted(const std::string &host) {
+// Whether the host's entry in the layout has `key` true: "mic" (Frametop Remote Displays' Send my
+// microphone) or "input" (Use this computer's keyboard and mouse). Read again every few seconds
+// while streaming.
+bool HostFlag(const std::string &host, const char *key) {
     const nlohmann::json layout = Layout();
     if (layout.is_null()) return false;
     for (const auto &h : layout["hosts"])
-        if (h.is_object() && h.value("address", "") == host) return h.contains("mic") && h["mic"].is_boolean() && h["mic"].get<bool>();
+        if (h.is_object() && h.value("address", "") == host) return h.contains(key) && h[key].is_boolean() && h[key].get<bool>();
     return false;
 }
 
@@ -569,6 +788,8 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     g_audio.name = "Remote display: " + g_host;
     g_audio.Claim(g_host, MonoNs());
     g_mic.name = "Remote display microphone: " + g_host;
+    g_hostin.Open(g_host);
+    LiSetFrametopHostInputCallback(HostInputRecord);
     if (LiStartConnection(&client.server.serverInfo, &cfg, &cl, &dr, &ar, nullptr, 0, nullptr, 0) != 0)
         return viewer.Send("state lost can't connect"), 1;
     std::printf("stream: connected, %d kbit/s asked\n", bitrate);
@@ -622,7 +843,8 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
         // panel froze, 2026-10-07.)
         if (!open) break;
         g_audio.Claim(g_host, MonoNs());
-        if (MonoNs() >= micCheck) micCheck = MonoNs() + 3'000'000'000, g_mic.Want(g_audio.on && MicWanted(g_host));
+        g_hostin.Tick(MonoNs(), live);
+        if (MonoNs() >= micCheck) micCheck = MonoNs() + 3'000'000'000, g_mic.Want(g_audio.on && HostFlag(g_host, "mic"));
         if (dec.Events()) {
             if (!conv.Setup(dec)) break;
             const int fds[3] = {conv.out[0].fd, conv.out[1].fd, conv.out[2].fd};
@@ -684,13 +906,14 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
             const double secs = (now - lastReport) / 1e9;
             uint32_t rtt = 0, rttVar = 0;
             LiGetEstimatedRttInfo(&rtt, &rttVar);
-            const int micSent = g_mic.sent.exchange(0);
+            const int micSent = g_mic.sent.exchange(0), hostEvents = g_hostin.TakeEvents();
             std::printf("%s: in %.1f fps (%d skipped), shown %.1f fps (%d dropped, %d out of sight), %.1f Mbit/s, rtt %u ms, "
-                        "convert %.1f ms, CPU %.1f%% of a core%s%s\n",
+                        "convert %.1f ms, CPU %.1f%% of a core%s%s%s\n",
                         g_hidden ? "hidden" : "shown", g_received.exchange(0) / secs, g_skipped.exchange(0), shown / secs,
                         dropped, rested, g_bytes.exchange(0) * 8 / secs / 1e6, rtt, shown ? conv.msSum / shown : 0.0,
                         100 * (CpuNs() - cpu0) / 1e9 / secs, g_audio.on ? ", playing its sound" : "",
-                        micSent ? (", mic " + std::to_string(int(micSent / secs + 0.5)) + " packets/s").c_str() : "");
+                        micSent ? (", mic " + std::to_string(int(micSent / secs + 0.5)) + " packets/s").c_str() : "",
+                        hostEvents ? (", host input " + std::to_string(int(hostEvents / secs + 0.5)) + " reports/s").c_str() : "");
             std::fflush(stdout);
             conv.msSum = 0, shown = dropped = rested = 0, lastReport = now, cpu0 = CpuNs();
         }
@@ -698,6 +921,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     const int ended = g_ended;
     g_stop = 1;
     g_mic.Stop();  // no packet after this, before the connection goes
+    g_hostin.Stop(hostinput::Want::kDrop);  // the host's keyboard and mouse go back now, not a lease later
     if (!ended) pad.Off();  // its buttons come up on the host (a lost connection drops it anyway)
     LiStopConnection();
     viewer.Send(ended ? "state lost the host ended the stream" : "state lost");

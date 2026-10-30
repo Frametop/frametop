@@ -241,17 +241,28 @@ def pid_chain(pid):
 SKIP_APPS = ("org.kde.plasmashell", "org.kde.krunner", "org.kde.ksplashqml", "org.kde.polkit-kde-authentication-agent-1")
 
 
+# Frametop's settings apps, which a profile keeps like any app (user, 2026-10-28: a profile
+# saved with Display Settings and Remote Displays open kept no windows). Display Settings
+# itself stays out: profiles are saved from it, so every one would open it (user, 2026-10-28).
+# So do Frametop's other windows (recorders, the tour, its own panels). Remote Access needs no
+# entry: its window is org.frametop.RemoteAccess, kept like any app's. Display Settings names
+# these (FRAMETOP_APPS).
+PROFILE_APPS = ("ft-input-settings", "ft-remote-displays")
+
+
 def recordable(ev):
     """An app's top-level window, the kind a profile keeps."""
     if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
         return False
     app, cls = ev.get("app", ""), ev.get("cls", "")
+    if app in PROFILE_APPS or cls in PROFILE_APPS:
+        return True
     return app not in SKIP_APPS and not any(n.startswith(("ft-", "frametop", "ksplash")) for n in (app, cls))
 
 
 def listable(ev):
-    """An app's top-level window, the kind frunner finds: Frametop's own settings apps too,
-    which profiles leave out (an open Input Settings launched a second copy, 2026-10-13)."""
+    """An app's top-level window, the kind frunner finds: every Frametop window too, which
+    profiles mostly leave out (an open Input Settings launched a second copy, 2026-10-13)."""
     if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
         return False
     return ev.get("app", "") not in SKIP_APPS and not any(n.startswith("ksplash") for n in (ev.get("app", ""), ev.get("cls", "")))

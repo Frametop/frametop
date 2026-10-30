@@ -30,11 +30,13 @@ Settings go to ~/.config/frametop.conf and ~/.config/frametop-layout.json. Anyth
 that touches SteamVR runs layout/ft-layout on the host.
 Launch with display-settings/ft-display-settings (host wrapper).
 """
+import json
 import os
 import shutil
 import socket
 import sys
 import threading
+import time
 
 from PySide6.QtCore import Property, QObject, QProcess, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication, QIcon
@@ -70,6 +72,8 @@ NOTIFY_FORWARD = ("auto", "on", "off")  # session/ft-notifyfwd; frametop.conf's 
 DASHBOARD_APPS = ("steamvr", "frametop")  # float/ft-dashroute; frametop.conf's DASHBOARD_APPS
 NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tmp is the host's)
 AUTOSTART_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-autostart.service")
+# Frametop's own apps a profile can keep (ft-floatd's recordable), by their names.
+FRAMETOP_APPS = {"ft-input-settings": "Frametop Input Settings", "ft-remote-displays": "Frametop Remote Displays"}  # ft-floatd's PROFILE_APPS
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
 
@@ -109,6 +113,8 @@ class Backend(QObject):
     powerChanged = Signal()
     message = Signal(str, bool)  # text, is error
     _steamDone = Signal(object, object, str)  # Steam's sleep settings or None, error or None, what was done
+    previewChanged = Signal()
+    _roomRead = Signal(object, object)  # ft_layout.read_room's room or None, the floating windows [(panel, title)]
 
     def __init__(self):
         super().__init__()
@@ -133,6 +139,14 @@ class Backend(QObject):
         self.poll = QTimer(interval=3000, timeout=self._check_running)
         self.poll.start()
         self._check_running()
+        # The Layout page's preview: the panels and the head now, read while it shows.
+        self._room = None
+        self._windows = []      # the floating windows, from ft-floatd's spotlist
+        self._windows_at = 0.0  # when it was asked
+        self._room_busy = False
+        self._roomRead.connect(self._room_read, Qt.QueuedConnection)
+        self.changed.connect(self.previewChanged)
+        self.roomPoll = QTimer(interval=1000, timeout=self._read_room)
 
     # --- state ---
     def _conf(self):
@@ -287,21 +301,94 @@ class Backend(QObject):
     def layout(self):
         return ft_layout.load_layout()
 
-    @Property("QVariantList", notify=changed)
-    def plan(self):
-        """The arrangement in the head frame, for the preview."""
+    @Property("QVariantMap", notify=previewChanged)
+    def preview(self):
+        """The preview's panels and head (ft_layout.preview), live while the desktop runs."""
         layout = ft_layout.load_layout()
-        c = self._conf()
-        # Before any panel was measured: the width SteamVR floats a panel at, and the aspect.
-        if "panel_size" not in layout or layout["panel_size"] == list(ft_layout.DEFAULT_PANEL):
-            layout["panel_size"] = [ft_layout.DEFAULT_PANEL[0], ft_layout.DEFAULT_PANEL[0] * c["height"] / c["width"]]
-        out = []
-        # ft-screens: the layout's screens; SCREENS in frametop.conf is gamescope's count.
-        for i, t in enumerate(ft_layout.plan(layout, ft_layout.screen_count(layout))):
-            w, h = ft_layout.screen_size(layout, i)
-            out.append({"index": i, "x": t["pos"][0], "y": t["pos"][1], "z": t["pos"][2],
-                        "faceYaw": t["face"][0], "facePitch": t["face"][1], "width": w, "height": h})
-        return out
+        if ft_layout.backend() != "screens":
+            # Before any panel was measured: the width SteamVR floats a panel at, and the aspect.
+            if "panel_size" not in layout or layout["panel_size"] == list(ft_layout.DEFAULT_PANEL):
+                c = self._conf()
+                layout["panel_size"] = [ft_layout.DEFAULT_PANEL[0], ft_layout.DEFAULT_PANEL[0] * c["height"] / c["width"]]
+            return ft_layout.preview(layout)
+        return ft_layout.preview(layout, self._room if self._running else None)
+
+    @Slot(bool)
+    def watchRoom(self, on):
+        """The Layout page shows (or not): read where everything is every second meanwhile."""
+        if on and ft_layout.backend() == "screens":
+            self._windows_at = 0.0
+            self.roomPoll.start()
+            self._read_room()
+        else:
+            try:
+                self.roomPoll.stop()
+            except RuntimeError:
+                pass  # the app is closing: the page goes after the timer
+
+    def _read_room(self):
+        """ft-screens' panels and head off the UI thread (and ft-floatd's windows, which waits
+        for KWin, every few seconds); _room_read gets them."""
+        if self._room_busy or not self._running:
+            return
+        self._room_busy = True
+        layout = ft_layout.load_layout()
+        windows = self._windows if time.monotonic() - self._windows_at < 3 else None
+
+        def work():
+            room, listed, socks = None, windows, []
+
+            def asker(timeout):
+                """ask(text, to) -> reply or None, on a socket of its own. After one question
+                gives up it asks nothing more: its late reply would answer the next one."""
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+                socks.append(sock)
+                sock.bind("")
+                sock.settimeout(timeout)
+                stalled = []
+
+                def ask(text, to=FT_SCREENS):
+                    if stalled:
+                        return None
+                    try:
+                        sock.sendto(text.encode(), to)
+                        return sock.recv(1 << 16).decode()
+                    except TimeoutError:
+                        stalled.append(text)
+                    except OSError:
+                        pass
+                    return None
+                return ask
+            try:
+                if listed is None:
+                    reply = asker(4)("spotlist", ft_layout.FLOAT) or ""
+                    try:
+                        listed = [(int(e["panel"]), e.get("title") or e.get("app") or "window")
+                                  for e in json.loads(reply[3:]) if e.get("floating") and e.get("panel")
+                                  and not e.get("minimized")] if reply.startswith("ok ") else []
+                    except (ValueError, TypeError, KeyError, AttributeError):
+                        listed = []
+                room = ft_layout.read_room(asker(0.5), layout, listed)
+            except (ValueError, TypeError, KeyError, IndexError, OSError):
+                room = None  # a reply it can't read: no live preview this time, the next read tries again
+            finally:
+                for sock in socks:
+                    sock.close()
+                try:
+                    # Always, so _room_busy clears whatever went wrong.
+                    self._roomRead.emit(room, listed if windows is None else None)
+                except RuntimeError:
+                    pass  # the window closed meanwhile
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _room_read(self, room, windows):
+        self._room_busy = False
+        if windows is not None:
+            self._windows, self._windows_at = windows, time.monotonic()
+        if room != self._room:  # nothing moved: no repaint
+            self._room = room
+            self.previewChanged.emit()
 
     @Property(str, notify=busyChanged)
     def busy(self):
@@ -712,10 +799,18 @@ class Backend(QObject):
         out = []
         for e in ft_layout.load_layout().get("profiles", {}).get(name, {}).get("windows", []):
             app = e.get("app") or os.path.basename((e.get("cmd") or ["?"])[0])
-            app = app.rsplit(".", 1)[-1] if "." in app and not e.get("cmd") else app
+            app = FRAMETOP_APPS.get(app) or (app.rsplit(".", 1)[-1] if "." in app and not e.get("cmd") else app)
             where = "floating" if "float" in e else f"screen {e.get('screen', 1)}" + (", maximized" if e.get("maximized") else "")
             out.append({"app": app, "where": where})
         return out
+
+    @Slot(str, result="QVariantList")
+    def profileRemotes(self, name):
+        """The remote displays a profile connects, by name."""
+        layout = ft_layout.load_layout()
+        saved = layout.get("profiles", {}).get(name, {}).get("remote", {})
+        return [ft_layout.remote_label(host, d) + (" (hidden)" if saved[d["id"]].get("hidden") else "")
+                for _, host, d in ft_layout.remote_displays(layout) if d.get("id") in saved]
 
     @Slot(str, result="QVariantList")
     def profileHidden(self, name):

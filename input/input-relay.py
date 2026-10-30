@@ -1791,6 +1791,7 @@ def main():
             return
         nums = words[3:]
         out = bytearray()
+        keys = []
         for i in range(0, len(nums) - 2, 3):
             try:
                 etype, code, value = int(nums[i]), int(nums[i + 1]), int(nums[i + 2])
@@ -1800,12 +1801,17 @@ def main():
                     or (etype == EV_REL and 0 <= code <= REL_MAX)) or not -2**31 <= value < 2**31:
                 continue
             if etype == EV_KEY:
-                (node.down.add if value else node.down.discard)(code)
+                keys.append((code, value))
             out += EVENT.pack(0, 0, etype, code, value)
         try:
             os.write(node.wfd, out)
         except BlockingIOError:
-            log(f"{node.name}: events dropped, the relay is behind")
+            # A key-up may be among them: let go of every key it holds rather than keep one down.
+            # Its next hello brings it back.
+            drop(node, "events dropped, the relay is behind")
+            return
+        for code, value in keys:
+            (node.down.add if value else node.down.discard)(code)
 
     def reply(addr, obj):
         try:

@@ -8,8 +8,8 @@
 # launching, and the moonlight-common-c it pins for the protocol, and its table of Windows key
 # codes. ft-stream plays the host's sound with Opus and PipeWire's PulseAudio server
 # (libpulse-simple), and sends the Frame's microphone back the same way. moonlight-mic.patch adds
-# that to moonlight-common-c (LiSendMicrophoneOpusData); the checkout is made again when it
-# changes.
+# that to moonlight-common-c (LiSendMicrophoneOpusData), and moonlight-hostin.patch the host's
+# keyboard and mouse (docs/host-input.md); the checkout is made again when either changes.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 "$root/scripts/sync.sh" >/dev/null
@@ -18,7 +18,7 @@ exec "$root/scripts/frame.sh" -C stream 'set -e; mkdir -p build/include
 me=f32e415aea6797d261d6b470dcf8bf18727341c2
 src=build/moonlight-embedded
 mlc=$src/third_party/moonlight-common-c
-mark=$me-$(sha256sum moonlight-mic.patch | cut -c1-12)
+mark=$me-$(cat moonlight-mic.patch moonlight-hostin.patch | sha256sum | cut -c1-12)
 if [ ! -f $src/.ft-$mark ]; then
   rm -rf $src build/mlc build/gamestream
   # Only this revision and its pinned submodules are build inputs, not their history.
@@ -28,6 +28,7 @@ if [ ! -f $src/.ft-$mark ]; then
   git -C $src submodule update -q --init --depth 1 third_party/moonlight-common-c
   git -C $mlc submodule update -q --init --depth 1 enet
   git -C $mlc apply "$PWD/moonlight-mic.patch"
+  git -C $mlc apply "$PWD/moonlight-hostin.patch"
   touch $src/.ft-$mark
 fi
 if [ ! -f build/mlc/libmoonlight-common-c.a ]; then

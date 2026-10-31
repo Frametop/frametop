@@ -187,7 +187,7 @@ class ExportRoomTest(unittest.TestCase):
 
     def test_stops_before_full(self):
         """The disk gets down to EXPORT_MIN_FREE as it goes: the export stops and cleans up."""
-        real = recorder.files.free_bytes
+        real = takes.free_bytes
         takes._room_checked[0] = 0.0
 
         def free(path):
@@ -197,7 +197,7 @@ class ExportRoomTest(unittest.TestCase):
                 self.store.export(SESSION, low_priority=False)
         self.assertTrue(str(cm.exception).startswith("The disk got nearly full, so the export stopped"))
         self.assertFalse(os.path.exists(self.partial))
-        self.assertIs(recorder.files.free_bytes, real)
+        self.assertIs(takes.free_bytes, real)
 
 
 class HubLogTest(unittest.TestCase):

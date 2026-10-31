@@ -38,7 +38,9 @@ import struct
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # (it runs on its own too)
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO not in sys.path:   # (it runs on its own too; appended, so it shadows nothing its importers find)
+    sys.path.append(_REPO)
 from recorder import fhformat  # noqa: E402  (ft-camd's ring layout, checked against fhring.h)
 
 LOG_DIR = os.path.expanduser("~/.local/share/Steam/logs")

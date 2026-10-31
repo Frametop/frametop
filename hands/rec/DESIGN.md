@@ -477,7 +477,7 @@ Added 2026-10-28: `desk-work`, the training data for a keyboard and mouse classi
     - An allow-list: `manifest.json`, `calibration.json`, `device.json` and `SHA256SUMS` at the top, and `prompts.jsonl`, `poses.jsonl`, `take.json` and `sets.bin.zst` in `takes/<NN>-<section>/`. Anything else is an error, and so is a symlink.
     - The manifest's schema, keys and types, and that it matches the files.
     - The consent version is present and the contributor confirmed being an adult. The contributor id is a uuid4.
-    - `calibration.json` has nothing that `session.py`'s `strip_calibration` would still remove.
+    - `calibration.json` has nothing that `recorder/privacy.py`'s `strip_calibration` would still remove.
     - `device.json` holds only `cv.cad_from_cal` and `head`, each `plus_x`, `plus_z` and `position` as 3 numbers (plus `cad_from_cal`'s `method`). Without it: a warning.
     - Each `sets.bin.zst` decompresses to its end, so a truncated one fails, and every set's FHSET01 header is sane: camera names, sizes, record length. Set counts and raw bytes match the manifest. Pixels aren't decoded.
     - Every jsonl line parses.

@@ -58,7 +58,7 @@ DISTROBOX = Path.home() / '.local/bin/distrobox'
 
 # What the release's image carries: a change here needs the full build.
 IMAGE = {'pack/Containerfile', 'pack/pyside-runtime.py', 'uv.lock', 'pyproject.toml',
-         '.python-version', 'setup/dev-container.sh'}
+         '.python-version', 'setup/dev-container.sh', 'setup/packages.txt'}
 # Components with a build.sh: the paths outside their folder their build reads, and the
 # outputs that go into the live tree (in COMPONENT/build; the Containerfile keeps the same).
 # Their own folder's build inputs are its sources and build files (BUILD_SUFFIXES,

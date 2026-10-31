@@ -6,7 +6,9 @@
   commit, and pip installs require hashes, apart from the dev container's venvs listed below;
 - scripts/stb.sh keeps a matching download, refuses one that doesn't match and a header it has
   no pin for, and doesn't fetch a good copy again (curl is a made-up one on PATH);
-- the OpenVR header vendored with Full Keyboard is the one scripts/openvr.sh pins.
+- the OpenVR header vendored with Full Keyboard is the one scripts/openvr.sh pins;
+- the dev container and the image read their packages from setup/packages.txt, and the dev
+  container starts from the image's digest-pinned base (the sed lines both use, run here).
 
 No network: the made-up curl copies files from a temp folder.
 
@@ -171,6 +173,53 @@ class OpenVR(unittest.TestCase):
         self.assertTrue(f'openvr/raw/{commit}/' in (REPO / 'pack/Containerfile').read_text(),
                         'pack/Containerfile fetches libopenvr_api.so at another commit')
         self.assertIn('$openvr_commit/headers', text)
+
+
+class Containers(unittest.TestCase):
+    LIST = REPO / 'setup/packages.txt'
+
+    def listed(self, where):
+        out = []
+        for n, line in enumerate(self.LIST.read_text().splitlines(), 1):
+            line = line.split('#', 1)[0].strip()
+            if not line:
+                continue
+            group, sep, names = line.partition(':')
+            self.assertTrue(sep and group in ('both', 'dev', 'image'), f'packages.txt:{n}: {line}')
+            for name in names.split():
+                self.assertRegex(name, r'^[A-Za-z0-9][A-Za-z0-9._+-]*$', f'packages.txt:{n}')
+            if group in ('both', where):
+                out += names.split()
+        return out
+
+    def sed(self, path, where):
+        """Runs the sed line that `path` reads setup/packages.txt with."""
+        text = (REPO / path).read_text()
+        m = re.search(r"sed -nE '(s/#\.\*//; s/\^\(both\|%s\):\(\.\*\)/\\2/p)'" % where, text)
+        self.assertIsNotNone(m, f"{path} doesn't read setup/packages.txt's {where} lines")
+        return subprocess.run(['sed', '-nE', m.group(1), self.LIST], check=True, capture_output=True,
+                              text=True).stdout.split()
+
+    def test_one_list(self):
+        for path, where in (('setup/dev-container.sh', 'dev'), ('pack/Containerfile', 'image')):
+            with self.subTest(path):
+                names = self.sed(path, where)
+                self.assertEqual(names, self.listed(where))
+                self.assertEqual(len(names), len(set(names)), 'a package listed twice')
+        self.assertIn('COPY setup/packages.txt', (REPO / 'pack/Containerfile').read_text())
+
+    def test_one_base_image(self):
+        cf = (REPO / 'pack/Containerfile').read_text()
+        base = re.search(r'^FROM (\S+@sha256:[0-9a-f]{64}) AS runtime-common$', cf, re.M)
+        self.assertIsNotNone(base, 'the image base is pinned by digest')
+        dev = (REPO / 'setup/dev-container.sh').read_text()
+        line = re.search(r'^image=\$\(sed -nE \'([^\']+)\' "\$root/pack/Containerfile"\)$', dev, re.M)
+        self.assertIsNotNone(line)
+        got = subprocess.run(['sed', '-nE', line.group(1), REPO / 'pack/Containerfile'], check=True,
+                             capture_output=True, text=True).stdout.strip()
+        self.assertEqual(got, base.group(1))
+        self.assertIn('--image "$image"', dev)
+        self.assertNotIn('fedora-toolbox:44\n', dev)
 
 
 if __name__ == '__main__':

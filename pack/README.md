@@ -2,9 +2,10 @@
 
 The Frame's runtime is already a container: the dev container (Fedora toolbox
 in distrobox) is where everything builds and runs, and `setup/dev-container.sh`
-is its recipe. The recipe is the weak point — nothing in it is pinned. Rebuild
-the container tomorrow and you get a different Fedora, a different wlroots, a
-different glibc. This directory turns the container from a recipe into an
+is its recipe. It starts from the image's pinned base and installs the same
+package list (`setup/packages.txt`), but dnf still installs whatever Fedora has
+that day: rebuild the container tomorrow and you can get a different wlroots or
+glibc. This directory turns the container from a recipe into an
 **artifact**: an OCI image whose every input is frozen.
 
 ## What the image contains

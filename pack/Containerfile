@@ -4,43 +4,22 @@
 # libraries, its native binaries, and its locked Python environment. A given
 # image tag always behaves the same, on a PC and on the Frame.
 #
-# setup/dev-container.sh stays the source of truth for the package list on the
-# Frame's dev container; the list below freezes the runtime-relevant subset of
-# it plus the toolchain (the binaries are built in this image). Keep the two in
-# sync on purpose: dev-container.sh documents *why* each package is there.
+# The Fedora packages come from setup/packages.txt, one list for this image and
+# the Frame's dev container (setup/dev-container.sh), which also starts from the
+# base digest below: the lines marked "both" and "image" here, with why each one
+# is there.
 FROM registry.fedoraproject.org/fedora-toolbox:44@sha256:034cb7c472038e2d879ddc19568106a1342aa24403f0d641a0f73dda638707ad AS runtime-common
 
-# Toolchain (the binaries are built in here) and the libraries they link.
+# Toolchain (the binaries are built in here) and the libraries they link: the "both" and
+# "image" lines of setup/packages.txt, the list the dev container installs too.
+COPY setup/packages.txt /tmp/packages.txt
 RUN dnf -y install --setopt=install_weak_deps=False \
-      gcc gcc-c++ make pkgconf-pkg-config curl unzip just git cmake ninja-build \
-      pipewire-devel libxkbcommon-devel libinput-devel systemd-devel dbus-devel \
-      libdrm-devel mesa-libgbm-devel wayland-devel vulkan-loader-devel \
-      vulkan-headers plasma-wayland-protocols wlroots-devel pixman-devel \
-      libstdc++-static glibc-static jsoncpp-devel zstd \
-      # remote displays (stream/): moonlight-embedded's libgamestream and
-      # moonlight-common-c, and the host's sound (Opus, PulseAudio)
-      openssl-devel libcurl-devel expat-devel libuuid-devel json-devel \
-      opus-devel pulseaudio-libs-devel \
-      # Frametop Voice (voice/): glslc and the SPIR-V headers for whisper.cpp's
-      # Vulkan backend; ft-voiced records with pw-record and plays its sounds with pw-play
-      glslc spirv-headers-devel pipewire-utils \
-      # Frametop's keyboard (keyboard/, TaiKeid's Full Keyboard): Cairo and Pango
-      # draw it, SDL2 for its preview, and its input methods: Hangul, Pinyin (pyzy),
-      # Japanese (Anthy, loaded at run time)
-      cairo-devel pango-devel json-c-devel sdl2-compat-devel libhangul-devel pyzy-devel \
-      anthy-unicode-devel \
-      # Frametop Input Settings (Kirigami, PySide6) and remote desktop (krdp):
-      # keep the native KDE/Qt stack in matching Fedora packages
-      python3-shiboken6 kf6-kirigami kf6-qqc2-desktop-style \
-      qt6-qtwayland qt6-qtsvg qt6-qtimageformats qt6-qtpdf \
-      # The reset countdown renders offline and in VR with this installed font.
-      google-noto-sans-vf-fonts \
-      breeze-icon-theme plasma-breeze krdp freerdp tigervnc-x11-server xrandr \
+      $(sed -nE 's/#.*//; s/^(both|image):(.*)/\2/p' /tmp/packages.txt) \
     && dnf -y remove 'glibc-langpack-*' \
     && dnf -y install glibc-langpack-en \
     && dnf clean all \
     && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* \
-              /usr/share/wallpapers
+              /usr/share/wallpapers /tmp/packages.txt
 
 # OpenVR's API library for linking, from the SDK commit the build scripts pin
 # (v2.15.6; scripts/openvr.sh fetches the headers). The image has no SteamVR, so the

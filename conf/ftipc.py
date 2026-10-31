@@ -17,9 +17,19 @@ client makes sure a late answer can't be taken for the next one:
 
 Answers are decoded as UTF-8 (bad bytes replaced), up to MAX_REPLY bytes. Standard library only.
 A Client is for one thread at a time.
+
+A Worker asks for a UI: its questions (and any other slow job) run in order on a thread of its
+own, and each answer goes to a callback through `deliver`, which the UI makes run on its thread
+(a Qt signal with a queued connection, GLib.idle_add):
+
+    worker = ftipc.Worker(self._done.emit)        # _done = Signal(object, object) -> f(result)
+    worker.ask("ft_screens", "pin 1 head", then=self._pinned)
+    worker.run(self._poll, then=self._polled)     # self._poll(client) on the worker's thread
 """
 
+import queue
 import socket
+import threading
 
 MAX_REPLY = 1 << 20   # the largest answer read (a longer datagram is cut there)
 NOBODY, TIMEOUT = "nobody", "timeout"
@@ -115,3 +125,39 @@ def exchange(to, text, timeout=1.0, bind=""):
     with Client(timeout, bind) as c:
         reply = c.ask(to, text)
         return reply, c.why
+
+
+class Worker:
+    """Questions and slow jobs, in the order given, on one daemon thread with a Client of its own.
+    deliver(then, result) must hand the call then(result) to the caller's thread."""
+
+    def __init__(self, deliver, timeout=1.0):
+        self.deliver = deliver
+        self.client = Client(timeout)
+        self._jobs = queue.Queue()
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="ftipc")
+        self._thread.start()
+
+    def ask(self, to, text, then=None, timeout=None):
+        """then(answer or None), on the caller's thread."""
+        self.run(lambda c: c.ask(to, text, timeout), then)
+
+    def run(self, job, then=None):
+        """job(client) on the worker's thread; then(what it returned) on the caller's."""
+        self._jobs.put((job, then))
+
+    def pending(self):
+        return self._jobs.unfinished_tasks
+
+    def _loop(self):
+        while True:
+            job, then = self._jobs.get()
+            try:
+                result = job(self.client)
+            except Exception as e:   # a job's bug mustn't stop the ones after it
+                print(f"ftipc: a job failed: {e!r}", flush=True)
+                result = None
+            finally:
+                self._jobs.task_done()
+            if then is not None:
+                self.deliver(then, result)

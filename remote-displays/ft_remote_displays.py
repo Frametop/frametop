@@ -36,8 +36,6 @@ import http.client
 import json
 import os
 import re
-import shutil
-import socket
 import ssl
 import subprocess
 import sys
@@ -54,6 +52,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
 sys.path.insert(0, LAYOUT_DIR)
 import ft_layout  # noqa: E402
+import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
+from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 FT_SCREENS = "\0ft_screens"
@@ -69,21 +69,7 @@ SCOPES = [{"path": "/api/pin", "methods": ["POST"]}, {"path": "/api/clients/list
 # A host's name: a Mac's is often "Name's MacBook" (straight or curly apostrophe). It goes to
 # ft-layout as an argument and into the layout and panel labels, never through a shell.
 NAME_RE = r"[A-Za-z0-9][A-Za-z0-9 ._'’-]{0,39}"
-RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2560, 1080, "ultrawide"),
-               (3440, 1440, "ultrawide"), (5120, 1440, "super ultrawide"), (1920, 1200, "16:10"),
-               (2560, 1600, "16:10"), (1080, 1920, "portrait"), (1440, 2560, "portrait")]
-
-
-def host_command(*cmd):
-    """argv to run a command on the SteamOS host (we live in the dev container).
-
-    distrobox-host-exec reaches the host through the user's real session bus; inside the
-    desktop our DBUS_SESSION_BUS_ADDRESS is the nested session's private one, where it
-    fails (exit 127, silently)."""
-    if not shutil.which("distrobox-host-exec"):
-        return list(cmd)
-    bus = f"unix:path=/run/user/{os.getuid()}/bus"
-    return ["env", f"DBUS_SESSION_BUS_ADDRESS={bus}", "distrobox-host-exec"] + list(cmd)
+RESOLUTIONS = ft_layout.SCREEN_RESOLUTIONS
 
 
 def token_path(address):
@@ -143,12 +129,14 @@ class Backend(QObject):
     signedIn = Signal(str, bool, str)  # a host's name, whether it worked, what went wrong
     _signInDone = Signal(str, str, str, str, str, str, str)  # name, address, dongle, token, pin, kind, error
     _reached = Signal(str, bool)  # a host's address, whether its Web UI answered
+    _ipcDone = Signal(object, object)  # a callback and its answer, from the ftipc worker
 
     def __init__(self):
         super().__init__()
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self._sock.bind("")  # an abstract address ft-screens can reply to
-        self._sock.settimeout(1.0)
+        # ft-screens is asked on a thread of its own, never the UI's
+        self._ipcDone.connect(lambda then, answer: then(answer), Qt.QueuedConnection)
+        self._ipc = ftipc.Worker(self._ipcDone.emit)
+        self._polling = False
         self._running = False
         self._states = {}   # remote screen number -> its stream's state ("lost can't connect")
         self._online = {}   # host address -> True/False (None: not checked yet)
@@ -166,25 +154,36 @@ class Backend(QObject):
         self._ping_hosts()
 
     # --- state ---
-    def _ask(self, text):
-        """Request/reply to ft-screens; None if it isn't running."""
-        try:
-            self._sock.sendto(text.encode(), FT_SCREENS)
-            return self._sock.recv(4096).decode()
-        except OSError:
-            return None
+    def _ask(self, text, then=None):
+        """A question to ft-screens, on the worker; then(answer, or None if it isn't running)."""
+        self._ipc.ask(FT_SCREENS, text, then)
 
     def _check(self):
+        """Reads the streams' states on the worker; _checked gets them here (one read at a time)."""
+        if not self._polling:
+            self._polling = True
+            self._ipc.run(self._read_states, then=self._checked)
+
+    @staticmethod
+    def _read_states(client):
+        """On the worker's thread: (whether the desktop runs, {remote screen: state})."""
         running = os.path.exists(f"/run/user/{os.getuid()}/frametop/wayland-0")
         states = {}
-        reply = self._ask("remotes") if running else None
+        reply = client.ask(FT_SCREENS, "remotes") if running else None
         if reply and reply.startswith("ok"):
             for e in reply.split()[2:]:
                 n, state = int(e.split(":")[0]), e.split(":")[2]
                 if state in ("lost", "live"):  # why ("lost can't connect"), or which way ("live via dongle")
-                    info = self._ask(f"remote {n} info") or ""
+                    info = client.ask(FT_SCREENS, f"remote {n} info") or ""
                     state = info[3:].strip() if info.startswith("ok ") else state
                 states[n] = state
+        return running, states
+
+    def _checked(self, result):
+        self._polling = False
+        if result is None:
+            return
+        running, states = result
         if running != self._running or states != self._states:
             self._running, self._states = running, states
             self.changed.emit()

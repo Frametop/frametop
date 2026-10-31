@@ -32,8 +32,6 @@ Launch with display-settings/ft-display-settings (host wrapper).
 """
 import json
 import os
-import shutil
-import socket
 import sys
 import threading
 import time
@@ -47,6 +45,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
 sys.path.insert(0, LAYOUT_DIR)
 import ft_layout  # noqa: E402  (pure Python: the same geometry ft-layout uses)
+import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
+from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import steam_settings  # noqa: E402
 
@@ -57,11 +57,7 @@ CONF_PATH = ft_layout.CONF_PATH
 # 1920x1080x4-byte buffer: more pixels than 1920x1080 abort it (see the design notes).
 MAX_PIXELS = 1920 * 1080
 RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080), (1728, 1080), (1920, 800), (2224, 928), (2560, 800)]
-# ft-screens has no pixel limit; portrait screens are just tall.
-SCREEN_RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2560, 1080, "ultrawide"),
-                      (3440, 1440, "ultrawide"), (5120, 1440, "super ultrawide"), (1920, 1200, "16:10"),
-                      (2560, 1600, "16:10"), (1080, 1920, "portrait"), (1440, 2560, "portrait"),
-                      (2160, 3840, "portrait 4K")]
+SCREEN_RESOLUTIONS = ft_layout.SCREEN_RESOLUTIONS
 FT_SCREENS = "\0ft_screens"
 REMOTE_DISPLAYS = os.path.join(HERE, "..", "remote-displays", "ft_remote_displays.py")
 FT_POWERD = "\0ft_powerd"
@@ -84,18 +80,6 @@ def write_conf_value(key, value):
     ft_conf.set_value(key, value, CONF_PATH)
 
 
-def host_command(*cmd):
-    """argv to run a command on the SteamOS host (we live in the dev container).
-
-    distrobox-host-exec reaches the host through the user's real session bus; inside the
-    desktop our DBUS_SESSION_BUS_ADDRESS is the nested session's private one, where it
-    fails (exit 127, silently)."""
-    if not shutil.which("distrobox-host-exec"):
-        return list(cmd)
-    bus = f"unix:path=/run/user/{os.getuid()}/bus"
-    return ["env", f"DBUS_SESSION_BUS_ADDRESS={bus}", "distrobox-host-exec"] + list(cmd)
-
-
 class Backend(QObject):
     changed = Signal()
     busyChanged = Signal()
@@ -104,6 +88,7 @@ class Backend(QObject):
     _steamDone = Signal(object, object, str)  # Steam's sleep settings or None, error or None, what was done
     previewChanged = Signal()
     _roomRead = Signal(object, object)  # ft_layout.read_room's room or None, the floating windows [(panel, title)]
+    _ipcDone = Signal(object, object)  # a callback and its answer, from the ftipc worker
 
     def __init__(self):
         super().__init__()
@@ -111,13 +96,11 @@ class Backend(QObject):
         self._proc = None
         self._running = False
         self._running_count = 0
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self._sock.bind("")  # an abstract address ft-screens can reply to
-        self._sock.settimeout(1.0)
+        # ft-screens and ft-powerd are asked on a thread of their own, never the UI's
+        self._ipcDone.connect(lambda then, answer: then(answer), Qt.QueuedConnection)
+        self._ipc = ftipc.Worker(self._ipcDone.emit)
+        self._polling = False
         self._started = {}  # conf values the running desktop started with
-        self._psock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self._psock.bind("")  # for ft-powerd's replies
-        self._psock.settimeout(0.5)
         self._powerd = None  # ft-powerd's status: (state, seconds unused, timeout seconds); None: not running
         self._steam = None  # Steam's sleep settings: {"ac": seconds, "battery": seconds}
         self._steam_error = ""
@@ -155,12 +138,33 @@ class Backend(QObject):
                 "autostart": conf.get("AUTOSTART", "0") == "1"}
 
     def _check_running(self):
+        """Reads the desktop's state on the worker; _polled gets it here (one read at a time)."""
+        if not self._polling:
+            self._polling = True
+            self._ipc.run(self._poll, then=self._polled)
+
+    def _poll(self, client):
+        """On the worker's thread."""
         # The session's own Wayland socket (host processes' environments aren't readable
         # from the container, so ft_layout.nested_env() doesn't work here).
         running = os.path.exists(f"/run/user/{os.getuid()}/frametop/wayland-0")
-        count = self._screens_running() if running and ft_layout.backend() == "screens" else 0
-        pins = self._read_pins(count)
+        count = 0
+        if running and ft_layout.backend() == "screens":
+            reply = client.ask(FT_SCREENS, "screens")
+            count = int(reply.split()[1]) if reply and reply.startswith("ok") else 0
+        pins = []
+        for i in range(count):
+            reply = client.ask(FT_SCREENS, f"get {i + 1}")
+            f = reply.split() if reply and reply.startswith("ok") else []
+            pins.append(f[16] if len(f) > 16 else "none")
         notify_state = self._read_notify_state() if running else ""
+        return running, count, pins, notify_state, self._powerd_status(client)
+
+    def _polled(self, result):
+        self._polling = False
+        if result is None:
+            return
+        running, count, pins, notify_state, powerd = result
         if (running != self._running or count != self._running_count or pins != self._pins
                 or notify_state != self._notify_state):
             if running != self._running or count != self._running_count:
@@ -170,15 +174,7 @@ class Backend(QObject):
             self._pins = pins
             self._notify_state = notify_state
             self.changed.emit()
-        self._check_powerd()
-
-    def _read_pins(self, count):
-        pins = []
-        for i in range(count):
-            reply = self._ask_screens(f"get {i + 1}")
-            f = reply.split() if reply and reply.startswith("ok") else []
-            pins.append(f[16] if len(f) > 16 else "none")
-        return pins
+        self._set_powerd(powerd)
 
     @staticmethod
     def _read_notify_state():
@@ -196,17 +192,9 @@ class Backend(QObject):
                 return "waiting"
         return ""
 
-    def _ask_screens(self, text):
-        """Request/reply to ft-screens; None if it isn't running."""
-        try:
-            self._sock.sendto(text.encode(), FT_SCREENS)
-            return self._sock.recv(4096).decode()
-        except OSError:
-            return None
-
-    def _screens_running(self):
-        reply = self._ask_screens("screens")
-        return int(reply.split()[1]) if reply and reply.startswith("ok") else 0
+    def _ask_screens(self, text, then=None):
+        """A question to ft-screens, on the worker; then(answer, or None if it isn't running)."""
+        self._ipc.ask(FT_SCREENS, text, then)
 
     @Property(bool, notify=changed)
     def desktopRunning(self):
@@ -325,28 +313,18 @@ class Backend(QObject):
         windows = self._windows if time.monotonic() - self._windows_at < 3 else None
 
         def work():
-            room, listed, socks = None, windows, []
+            room, listed, clients = None, windows, []
 
             def asker(timeout):
-                """ask(text, to) -> reply or None, on a socket of its own. After one question
-                gives up it asks nothing more: its late reply would answer the next one."""
-                sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-                socks.append(sock)
-                sock.bind("")
-                sock.settimeout(timeout)
-                stalled = []
+                """ask(text, to) -> reply or None, on a client of its own. After one question
+                times out it asks nothing more (ft-screens is busy: the rest would wait too)."""
+                client = ftipc.Client(timeout)
+                clients.append(client)
 
                 def ask(text, to=FT_SCREENS):
-                    if stalled:
+                    if client.why == ftipc.TIMEOUT:
                         return None
-                    try:
-                        sock.sendto(text.encode(), to)
-                        return sock.recv(1 << 16).decode()
-                    except TimeoutError:
-                        stalled.append(text)
-                    except OSError:
-                        pass
-                    return None
+                    return client.ask(to, text)
                 return ask
             try:
                 if listed is None:
@@ -361,8 +339,8 @@ class Backend(QObject):
             except (ValueError, TypeError, KeyError, IndexError, OSError):
                 room = None  # a reply it can't read: no live preview this time, the next read tries again
             finally:
-                for sock in socks:
-                    sock.close()
+                for client in clients:
+                    client.close()
                 try:
                     # Always, so _room_busy clears whatever went wrong.
                     self._roomRead.emit(room, listed if windows is None else None)
@@ -465,11 +443,13 @@ class Backend(QObject):
         """Curve a screen into a cylinder around you (radius: your distance to it now, from
         ft-screens; the layout's distance if the desktop isn't running)."""
         radius = float(ft_layout.load_layout()["preset"].get("distance", 2.0)) if on else 0.0
+        def curve(reply=None):
+            r = float(reply.split()[1]) if reply and reply.startswith("ok") else radius
+            self._edit_screen(i, lambda s: s.__setitem__("curve", round(r, 3)))
         if self._running and i < self._running_count:
-            reply = self._ask_screens(f"curve {i + 1} {'on' if on else 'off'}")
-            if reply and reply.startswith("ok"):
-                radius = float(reply.split()[1])
-        self._edit_screen(i, lambda s: s.__setitem__("curve", round(radius, 3)))
+            self._ask_screens(f"curve {i + 1} {'on' if on else 'off'}", then=curve)
+        else:
+            curve()
 
     @Slot(int)
     def setPrimary(self, i):
@@ -608,11 +588,12 @@ class Backend(QObject):
         if not self._save(layout):
             return
         self.changed.emit()
-        if self._running:
-            reply = self._ask_screens(f"{'reveal' if shown else 'conceal'} {index + 1}")
+        def applied(reply):
             if not (reply and reply.startswith("ok")):
                 self.message.emit("Saved; the desktop applies it when it next starts "
                                   "(its compositor is older than hiding screens one at a time)", False)
+        if self._running:
+            self._ask_screens(f"{'reveal' if shown else 'conceal'} {index + 1}", then=applied)
 
     # --- level head pins (SCREEN_PIN_LEVEL; ft-screens takes it live, "handsetting") ---
     @Property(bool, notify=changed)
@@ -633,7 +614,12 @@ class Backend(QObject):
         """Pin screen `which` (1-based, or "all") to "left", "right", or "head" as it is
         now, or take it off ("none")."""
         cmd = f"unpin {which}" if where == "none" else f"pin {which} {where}"
-        reply = self._ask_screens(cmd) if self._running else None
+        if self._running:
+            self._ask_screens(cmd, then=lambda reply: self._pinned(which, where, reply))
+        else:
+            self._pinned(which, where, None)
+
+    def _pinned(self, which, where, reply):
         if not (reply and reply.startswith("ok")):
             self.message.emit(f"Couldn't {'unpin' if where == 'none' else 'pin'}: "
                               f"{reply or 'the desktop is not running'}", True)
@@ -644,12 +630,18 @@ class Backend(QObject):
 
     # --- power: ft-powerd and Steam's sleep setting ---
     def _check_powerd(self):
+        self._ipc.run(self._powerd_status, then=self._set_powerd)
+
+    @staticmethod
+    def _powerd_status(client):
+        """On the worker's thread: (state, seconds unused, timeout seconds), or None."""
+        reply = (client.ask(FT_POWERD, "status", timeout=0.5) or "").split()
         try:
-            self._psock.sendto(b"status", FT_POWERD)
-            reply = self._psock.recv(256).decode().split()
-            status = (reply[1], float(reply[2]), float(reply[3])) if reply[:1] == ["ok"] else None
-        except (OSError, IndexError, ValueError):
-            status = None
+            return (reply[1], float(reply[2]), float(reply[3])) if reply[:1] == ["ok"] else None
+        except (IndexError, ValueError):
+            return None
+
+    def _set_powerd(self, status):
         if status != self._powerd:
             self._powerd = status
             self.powerChanged.emit()
@@ -674,11 +666,10 @@ class Backend(QObject):
 
     @Slot()
     def displaysOffNow(self):
-        try:
-            self._psock.sendto(b"off", FT_POWERD)
-            reply = self._psock.recv(256).decode()
-        except OSError:
-            reply = "error the power service isn't running"
+        self._ipc.ask(FT_POWERD, "off", then=self._displays_off, timeout=0.5)
+
+    def _displays_off(self, reply):
+        reply = reply or "error the power service isn't running"
         if not reply.startswith("ok"):
             self.message.emit(f"Couldn't turn the displays off: {reply.split(' ', 1)[-1]}", True)
         self._check_powerd()

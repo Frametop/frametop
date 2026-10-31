@@ -122,6 +122,18 @@ class FtipcTest(unittest.TestCase):
         self.assertEqual(ftipc.ask(self.name, "x", bind=own), "ok")
         self.assertEqual(server.heard, ["x"])
 
+    def test_worker_keeps_order_and_survives_a_failing_job(self):
+        self.serve(lambda t: (0, f"ok {t}".encode()))
+        got, done = [], threading.Event()
+        w = ftipc.Worker(lambda then, result: then(result))
+        w.ask(self.name, "one", then=got.append)
+        w.run(lambda c: 1 / 0, then=got.append)   # its bug: None, and the next job still runs
+        w.ask(self.name, "two", then=got.append)
+        w.run(lambda c: c.why, then=lambda r: (got.append(r), done.set()))
+        self.assertTrue(done.wait(2))
+        self.assertEqual(got, ["ok one", None, "ok two", ""])
+        self.assertEqual(w.pending(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

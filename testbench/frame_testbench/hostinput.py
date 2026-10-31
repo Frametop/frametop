@@ -229,7 +229,9 @@ def drop_wearer(release=None):
 
 def after_guard(release=None):
     """The guard unit's ExecStopPost: however the guard ended (killed, out of memory), a wearer
-    it left faked goes. FLAG stays for the next testbench command (release_confirmed)."""
+    it left faked goes. FLAG stays for the next testbench command (release_confirmed). If the
+    input proxy stalls through every try, its override TTL (input-protocol.md) ends the faked
+    wearer once it runs again, with no command needed (DEE-283)."""
     flag = read_flag()
     if flag and flag.get('allow_host_input') is False and not guard_alive(flag):
         print("the guard has gone: releasing the wearer", flush=True)

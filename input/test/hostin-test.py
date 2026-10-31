@@ -245,9 +245,16 @@ def tests():
     check("the log says why", any("its host went quiet" in line for line in LOG), True)
 
     hello()
+    received(helper)
+    ev("mouse", (relay.EV_KEY, relay.BTN_LEFT, 1))
+    time.sleep(0.1)
+    received(helper)
     to_relay("hostbye testpc mouse")
     check("hostbye: that device goes, the other stays",
           [d["id"] for d in ask("devices")["nodes"]], ["host:testpc:keyboard"])
+    time.sleep(0.1)
+    check("...and the trigger it held mid-drag comes up in the helper (DEE-284)",
+          [m for m in received(helper) if m.startswith("btn trigger")], ["btn trigger 0"])
     to_relay("hostdev ../evil keyboard x")
     to_relay("hostdev testpc tablet x")
     check("a bad id or kind is ignored", [d["id"] for d in ask("devices")["nodes"]], ["host:testpc:keyboard"])

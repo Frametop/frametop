@@ -520,6 +520,49 @@ class InputProxyTests(unittest.TestCase):
         time.sleep(0.1)
         self.assertTrue(self.rpc("status")["pose_override"])
 
+    def restart_with(self, **env):
+        if self.p.poll() is None:
+            self.p.communicate("quit\n", timeout=5)
+        self.assertEqual(self.p.returncode, 0)
+        self.p = subprocess.Popen([str(BUILD / "vrserver")], env=dict(self.env, **env),
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True)
+        self.assertEqual(self.p.stdout.readline().strip(), "ready")
+
+    def test_overrides_end_after_the_ttl_with_no_command_but_status(self):
+        # DEE-281: a run whose agent died leaves no frozen pose or faked proximity behind, and
+        # later agents' status polls don't keep them.
+        self.restart_with(FRAME_TESTBENCH_OVERRIDE_TTL="0.6")
+        self.runtime("physical")
+        s = self.rpc("worn 1")
+        self.assertEqual(s["override_ttl"], 0.6)
+        s = self.rpc("pose 1 2 3 1 0 0 0")
+        self.assertTrue(s["pose_override"])
+        for _ in range(3):
+            time.sleep(0.15)
+            s = self.rpc("status")
+        self.assertTrue(s["pose_override"])
+        self.rpc("worn 1")  # any other command renews them
+        for _ in range(3):
+            time.sleep(0.15)
+            s = self.rpc("status")
+        self.assertTrue(s["pose_override"])
+        self.assertTrue(s["worn_override"])
+        for _ in range(6):
+            time.sleep(0.15)
+            s = self.rpc("status")
+        self.assertFalse(s["pose_override"])
+        self.assertIsNone(s["worn_override"])
+        r = self.runtime("metrics")
+        self.assertFalse(r["worn"])
+        self.assertEqual(r["hmd_pose"][0], 42)
+        _, err = self.p.communicate("quit\n", timeout=5)
+        self.assertIn("no command for 1 s: overrides released", err)
+        self.restart_with()
+
+    def test_the_default_ttl_is_five_minutes(self):
+        self.assertEqual(self.rpc("status")["override_ttl"], 300)
+
     def test_independent_worn_suppression_ticks_and_release_latest_physical(self):
         before = self.rpc("status")
         s = self.rpc("worn 1")

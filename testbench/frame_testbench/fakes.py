@@ -14,7 +14,7 @@ for the trackers whose output Frametop reads:
 
 Commands come one line at a time on a user-only socket, like the input proxy's, and every reply
 is one JSON line. Faked state stays until released. Releasing everything ends the process, and
-so does SIGTERM, an hour without a command, or a hand or gaze file it can't write: each takes its
+so does SIGTERM, an hour without a command but status, or a hand or gaze file it can't write: each takes its
 files back out, so the real trackers take over again within a few seconds.
 
   status
@@ -836,7 +836,10 @@ def serve():
                     except (OSError, UnicodeDecodeError):
                         continue
                     started = True
-                    last_command = time.monotonic()
+                    if line.split()[:1] != ['status']:
+                        # A status poll doesn't restart the hour: a later agent's doctor and guard
+                        # checks would keep a dead run's fakes alive (DEE-282).
+                        last_command = time.monotonic()
                     try:
                         client.sendall(json.dumps(reply).encode() + b'\n')
                     except OSError:

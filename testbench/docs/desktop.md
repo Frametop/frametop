@@ -82,7 +82,6 @@ go in reverse.
 - One driver at a time: every testbench command plugs in the same `testbench` devices, so two
   running at once (two CLIs, or two MCP servers) unplug each other's. One MCP server runs its
   tools one at a time.
-- Known Frametop gap: in pointer mode the relay doesn't let go of a host mouse's button when it
-  drops the device. If the testbench is killed mid-drag, or the relay stalls past 0.15 s and
-  reads the button's release after the goodbye, the 3D mouse's button stays down until the next
-  click.
+- In pointer mode, a host mouse the relay drops lets go of its buttons in the 3D mouse too
+  (DEE-284). A testbench killed mid-drag, or a release the relay reads after the goodbye, ends
+  the drag, unless another mouse holds the same button.

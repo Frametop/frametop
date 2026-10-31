@@ -29,9 +29,9 @@ A Kirigami (QML) app with a Python backend. It runs in the dev container:
     and uploads it as a pull request, in a child process (Cancel ends it). UPLOAD.md explains
     the steps, with the export filled in, and the command to copy for a terminal upload.
 Everything lives under ~/.local/share/frametop/hands/contrib (--base). Nothing is uploaded
-unless the person presses Upload; while CONSENT.md or UPLOAD.md is a draft, Upload stays off
-unless FT_HANDREC_ALLOW_UPLOAD=1 (the maintainer's rehearsal against a test repo, picked with
-FT_HANDREC_DATASET). --hub-dry-run does everything but the network calls.
+unless the person presses Upload; while CONSENT.md or UPLOAD.md is a draft (or missing), Upload
+stays off unless FT_HANDREC_ALLOW_UPLOAD=1 and FT_HANDREC_DATASET names a test repo (the
+maintainer's rehearsal). --hub-dry-run does everything but the network calls.
 One window at a time (recorder/one_window.py): opening it again closes the open one, wherever it
 is, unless that one is busy recording, exporting or uploading. Launch with hands/rec/ft-handrec
 (host wrapper). The standalone Hand Recorder
@@ -254,7 +254,7 @@ class Backend(RecorderBackend):
 
     def _upload_allowed(self):
         """Real uploads under the window's consent may start: its texts aren't drafts, or
-        FT_HANDREC_ALLOW_UPLOAD=1."""
+        FT_HANDREC_ALLOW_UPLOAD=1 with a test dataset (hub.upload_allowed)."""
         return hub.upload_allowed(self._consent_kind)
 
     def _upload_allowed_for(self, session):

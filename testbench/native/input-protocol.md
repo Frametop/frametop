@@ -64,8 +64,12 @@ Cleanup removes only the same inode created by this instance.
 
 Each connection sends one ASCII text command followed by newline and receives one
 JSON line, then closes. Requests are bounded to 1024 bytes. A partial request has
-a two-second connection deadline. This is only a transport timeout: overrides
-have no lease or disconnect timeout. They remain until release or provider restart.
+a two-second connection deadline. That is only a transport timeout. Overrides
+remain until release, provider restart, or 300 seconds with no command other than
+status (FRAME_TESTBENCH_OVERRIDE_TTL in vrserver's environment changes it). Then the
+proxy releases them all, as release does, and logs it. Any other command, accepted
+or not, restarts the time. Status reports override_ttl and override_idle (seconds
+since the last such command), so a run that waits longer can re-send its overrides.
 Up to 32 concurrent clients are serviced without blocking the nominal 90Hz tick.
 
 ## Commands

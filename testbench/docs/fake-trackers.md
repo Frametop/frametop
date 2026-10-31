@@ -60,7 +60,7 @@ seconds when:
 
 - the last fake is released (`gaze release`, `hand all release`, or `release`),
 - the unit gets SIGTERM (`systemctl --user stop frame-testbench-fakes`),
-- no command came for an hour,
+- no command but `status` came for an hour (status polls, such as a later run's doctor, don't keep them),
 - or it crashes: the stand-ins stop being fresh, and ft-gaze and ft-hands go back by themselves.
 
 On the way out it publishes no hands and ends any gesture down as lost.

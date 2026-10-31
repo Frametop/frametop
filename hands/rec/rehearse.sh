@@ -8,7 +8,8 @@
 #   hands/rec/rehearse.sh [--repo ID] [--capture DIR] [--from S] [--prompt-seconds N] [--keep]
 #
 #   --repo ID            upload for real to this dataset, as a pull request. While the texts are
-#                        drafts that also needs FT_HANDREC_ALLOW_UPLOAD=1 in the environment.
+#                        drafts that also needs FT_HANDREC_ALLOW_UPLOAD=1 in the environment, and
+#                        ID must be a test dataset, not the real one.
 #   --capture DIR        the recording to play (default the frame-hands capture
 #                        rec-20260930-103803-lit); --from S: start this far into it (60)
 #   --prompt-seconds N   each test step's length (3): a prompt, a two-cue sweep, no hands. The
@@ -78,8 +79,8 @@ if pgrep -x ft-handpanel >/dev/null; then
   exit 1
 fi
 if [ -n "$repo" ]; then
-  if python3 -c "import sys; sys.path.insert(0, '$here'); import hub; sys.exit(0 if hub.upload_allowed() else 1)"; then :; else
-    echo "rehearse: the texts are drafts: a real upload needs FT_HANDREC_ALLOW_UPLOAD=1 as well as --repo" >&2
+  if FT_HANDREC_DATASET="$repo" python3 -c "import sys; sys.path.insert(0, '$here'); import hub; sys.exit(0 if hub.upload_allowed() else 1)"; then :; else
+    echo "rehearse: the texts are drafts: a real upload needs FT_HANDREC_ALLOW_UPLOAD=1 as well as --repo, to a test dataset" >&2
     exit 1
   fi
   python3 -c "import huggingface_hub" 2>/dev/null || {

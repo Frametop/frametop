@@ -454,8 +454,23 @@ class HubTest(unittest.TestCase):
             self.assertEqual(cm.exception.kind, "closed")
             self.assertFalse(hub.upload_allowed())
         with mock.patch.object(hub, "texts_draft", return_value=True), \
-                mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1"}):
+                mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: "a/test"}):
             self.assertTrue(hub.upload_allowed())
+        # DEE-285: the variable alone, or with the real dataset, never opens it
+        for dataset in ("", hub.HF_DATASET, "not a repo"):
+            with mock.patch.object(hub, "texts_draft", return_value=True), \
+                    mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: dataset}):
+                self.assertFalse(hub.upload_allowed(), dataset)
+        with mock.patch.object(hub, "texts_draft", return_value=True), \
+                mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.TEST_DATASET_ENV: hub.HF_TEST_DATASET}):
+            self.assertFalse(hub.upload_allowed("testing"))
+
+    def test_missing_text_is_a_draft(self):
+        missing = os.path.join(self.tmp, "no-such-text.md")
+        with mock.patch.object(hub, "UPLOAD_PATH", missing):
+            self.assertTrue(hub.texts_draft())
+            with mock.patch.dict(os.environ, {hub.ALLOW_ENV: ""}):
+                self.assertFalse(hub.upload_allowed())
 
     def test_invalid_blocks(self):
         with open(os.path.join(self.store.export_dir(SESSION), "extra.bin"), "w") as f:

@@ -1057,6 +1057,7 @@ class Node:
         self.grabbed = False
         self.remapped = False  # volume keys remapped to their stand-ins
         self.held = set()  # keys and buttons currently down, released if the device vanishes
+        self.actions = {}  # pointer-mode buttons down: code -> the action they pressed (drop)
         self.last_watch = 0.0
 
     def describe(self):
@@ -1779,6 +1780,13 @@ def main():
 
     def drop(node, reason):
         release_held(node)
+        # A pointer-mode button the device held (a drag, a testbench killed mid-drag, or a release
+        # read after the host's "hostbye") comes up in the helper too, unless another device holds
+        # the same action (DEE-284).
+        others = {action for n in nodes.values() if n is not node for action in n.actions.values()}
+        for action in sorted(set(node.actions.values()) - others):
+            do_action(action, 0, time.monotonic())
+        node.actions.clear()
         if volume.held and volume.held[0] == node.fd:
             volume.release()
         os.close(node.fd)
@@ -2234,6 +2242,10 @@ def main():
                     # (DEE-263).
                     went_virtual = value != 1 and code in node.held
                     if not went_virtual and (pointer or action == "pause_toggle") and action not in ("key", "none"):
+                        if value == 1:
+                            node.actions[code] = action
+                        elif value == 0:
+                            node.actions.pop(code, None)
                         do_action(action, value, now)
                         continue
                     if action == "none" and not went_virtual:

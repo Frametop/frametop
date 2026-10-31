@@ -471,6 +471,20 @@ class DaemonTests(unittest.TestCase):
         self.start('gaze 0 0 0 0')
         self.gone()
 
+    def test_status_polls_dont_keep_it(self):
+        # DEE-282: a later agent's doctor and guard checks poll status; a dead run's fakes still end.
+        self.env['FRAME_TESTBENCH_FAKES_IDLE'] = '1.0'
+        self.start('gaze 0 0 0 0')
+        started = time.monotonic()
+        while self.process.poll() is None and time.monotonic() - started < 3:
+            try:
+                transport.request(self.socket, 'status')
+            except (OSError, RuntimeError, ValueError):
+                break   # it went between the poll and the request
+            time.sleep(0.2)
+        self.gone()
+        self.assertLess(time.monotonic() - started, 2.5)
+
     def test_releasing_the_last_fake_ends_it(self):
         self.start('hand left 0 -0.2 -0.35 1 0 0 0 open')
         transport.request(self.socket, 'hand right 0 -0.2 -0.35 1 0 0 0 open')

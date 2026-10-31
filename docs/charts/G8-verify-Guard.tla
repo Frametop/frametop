@@ -4,7 +4,18 @@
 \* proxy coming back) and one liveness rule. People's commands, streams, kills and hangs get none.
 EXTENDS FakeWornGuard
 
-FairSpec == Spec
+\* V3 fix (DEE-283), through V1's: the input proxy's own TTL ends a faked wearer
+\* (testbench/native/input_state.cpp tick). Its clock runs through hangs: only a command that
+\* reaches the proxy renews it, and a release that reaches it ends the fake anyway. So a proxy
+\* that is up again and again acts at a tick past the TTL: strong fairness, at any point of a
+\* command (a command still on its way hasn't renewed it). The skill's model is left as it is;
+\* this step joins its Next here.
+TtlEnds ==
+    /\ proxy = "up" /\ faked
+    /\ faked' = FALSE
+    /\ UNCHANGED <<proxy, flag, guard, lock, stream, pc, asked, seen, saidTest, lease>>
+
+FairSpec == Init /\ [][Next \/ TtlEnds]_vars /\ SF_vars(TtlEnds)
     /\ WF_vars(OnCheck) /\ WF_vars(OnStartGuard) /\ WF_vars(OnWait) /\ WF_vars(OnFake)
     /\ WF_vars(OnVerify) /\ WF_vars(OffSend) /\ WF_vars(StopOldGuard)
     /\ WF_vars(GuardStarts) /\ WF_vars(GuardLetsGo) /\ WF_vars(GuardCleanup) /\ WF_vars(ProxyRecovers)

@@ -14,7 +14,8 @@ prints it, and the window never sees it.
 An upload:
   1. checks the export with validate.py, and stops on errors;
   2. stops if this export (same SHA256SUMS) was uploaded before, unless --again;
-  3. stops while CONSENT.md or UPLOAD.md is a draft, unless FT_HANDREC_ALLOW_UPLOAD=1;
+  3. stops while CONSENT.md or UPLOAD.md is a draft or missing, unless FT_HANDREC_ALLOW_UPLOAD=1
+     and FT_HANDREC_DATASET names a test dataset (a rehearsal);
   4. checks the login (whoami: a read-only token can't open a pull request) and access to the
      dataset (auth_check: a gated dataset's terms must be accepted first);
   5. opens the pull request first (a draft, empty), so its link can be shown while the files go,
@@ -85,13 +86,25 @@ def dataset_url(repo=None):
 
 
 def texts_draft(kind="public"):
-    return is_draft(TESTING_PATH if kind == "testing" else CONSENT_PATH) or is_draft(UPLOAD_PATH)
+    """The kind's texts are drafts, or one is missing: a text that isn't here wasn't reviewed
+    (DEE-285, as the Eye Recorder's texts_ready)."""
+    return any(not os.path.isfile(p) or is_draft(p)
+               for p in (TESTING_PATH if kind == "testing" else CONSENT_PATH, UPLOAD_PATH))
 
 
 def upload_allowed(kind="public"):
     """Real uploads: once the kind's texts aren't drafts, or for the maintainer's rehearsal
-    against a test repo (FT_HANDREC_ALLOW_UPLOAD=1)."""
-    return not texts_draft(kind) or os.environ.get(ALLOW_ENV) == "1"
+    against a test repo: FT_HANDREC_ALLOW_UPLOAD=1 with the kind's dataset set to another one
+    (FT_HANDREC_DATASET, or FT_HANDREC_TEST_DATASET for "testing"). The variable alone never
+    opens the real dataset, as with the Eye Recorder (DEE-285)."""
+    if not texts_draft(kind):
+        return True
+    if os.environ.get(ALLOW_ENV) != "1":
+        return False
+    try:
+        return dataset_id(kind) != (HF_TEST_DATASET if kind == "testing" else HF_DATASET)
+    except HubError:
+        return False
 
 
 def session_kind(store, session):
@@ -286,9 +299,10 @@ def upload(store, session, dry_run=False, again=False, progress=None, log=None):
     if not dry_run and not upload_allowed(kind):
         if kind == "testing":
             raise HubError("closed", "Test uploads aren't open yet: the testing text is a draft waiting for the "
-                                     f"maintainer. (For a rehearsal against a test repo: {ALLOW_ENV}=1.)")
+                                     f"maintainer. (For a rehearsal: {ALLOW_ENV}=1 with {TEST_DATASET_ENV} set "
+                                     "to another test dataset.)")
         raise HubError("closed", "Contributions aren't open yet: the texts are drafts waiting for a legal review. "
-                                 f"(For a rehearsal against a test repo: {ALLOW_ENV}=1.)")
+                                 f"(For a rehearsal: {ALLOW_ENV}=1 with {DATASET_ENV} set to a test dataset.)")
     path_in_repo = f"contributions/{contributor}/{session}"
     message, description = describe(summary, report, sha, report.bytes)
     files = []

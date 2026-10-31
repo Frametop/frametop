@@ -11,13 +11,17 @@
 \* (verify-fake-worn-guard's FakeWornGuard.tla, re-run read-only for G8), the input relay's
 \* testbench devices (one command each, a 3 s timeout: input/input-relay.py HOST_TIMEOUT), two
 \* agents at once (launch's claim takes a flock), SteamVR's standby and the displays' power.
+\* Since the G8 fixes (DEE-281, DEE-282) this is the fixed code: the proxy's overrides end after
+\* OVERRIDE_TTL (300 s) with no command but status (TtlEnds), and a status question no longer
+\* restarts the fakes' idle hour (StatusPoll). FixLease and FixPoll are no longer used; to see
+\* the old breaks, check out f85dff9.
 CONSTANTS
     AgentCanDie,  \* the agent's session ends mid-run: a killed shell, a stalled approval
                   \* prompt, the context running out. Its cleanup never runs.
     StatusPolls,  \* something keeps asking the testbench for status with no run driving: a
                   \* later agent's doctor or launch (T status), an MCP client's status tool
-    FixLease,     \* V1 fix: the proxy's overrides last only while a run renews its lease
-    FixPoll       \* V2 fix: a status question doesn't count as a command for the fakes' idle hour
+    FixLease,     \* unused since the V1 fix (TtlEnds is the code now)
+    FixPoll       \* unused since the V2 fix (StatusPoll restarts nothing now)
 
 VARIABLES
     driver,  \* "agent": a live agent drives the run; "none": nobody does (never started, done, or died)
@@ -80,9 +84,10 @@ LeaseRunsOut ==
     /\ run' = "stale"
     /\ UNCHANGED <<driver, worn, pose, fakes, quiet, wearer>>
 
-\* V1 fix: overrides bound to the lease go when it runs out
-LeaseEnds ==
-    /\ FixLease /\ run = "stale" /\ Overrides
+\* V1 fix (input_state.cpp tick): OVERRIDE_TTL with no command but status ends every override,
+\* whoever drives (an agent that stops for 5 minutes gets them back with its next command)
+TtlEnds ==
+    /\ Overrides
     /\ worn' = "real" /\ pose' = FALSE
     /\ UNCHANGED <<driver, run, fakes, quiet, wearer>>
 
@@ -97,11 +102,11 @@ FakesIdleExit ==
     /\ fakes' = FALSE /\ quiet' = FALSE
     /\ UNCHANGED <<driver, run, worn, pose, wearer>>
 
-\* fakes.py serve 836-837: any accepted command, status too, restarts the hour
+\* fakes.py serve: a status question is answered, and since the V2 fix restarts nothing (it
+\* doesn't renew the proxy's TTL either)
 StatusPoll ==
-    /\ StatusPolls /\ ~FixPoll /\ fakes /\ driver = "none" /\ quiet
-    /\ quiet' = FALSE
-    /\ UNCHANGED <<driver, run, worn, pose, fakes, wearer>>
+    /\ StatusPolls /\ fakes /\ driver = "none" /\ quiet
+    /\ UNCHANGED vars
 
 \* ---- people ----
 
@@ -123,12 +128,12 @@ ByHand ==
 
 Next ==
     \/ Launch \/ Drive \/ Cleanup \/ AgentDies
-    \/ LeaseRunsOut \/ LeaseEnds \/ QuietHour \/ FakesIdleExit \/ StatusPoll
+    \/ LeaseRunsOut \/ TtlEnds \/ QuietHour \/ FakesIdleExit \/ StatusPoll
     \/ WearerOn \/ WearerOff \/ ByHand
 
 \* Fairness for the system only, and for the hard rule "every run ends with V cleanup".
 Spec == Init /\ [][Next]_vars
-        /\ WF_vars(Cleanup) /\ WF_vars(LeaseRunsOut) /\ WF_vars(LeaseEnds)
+        /\ WF_vars(Cleanup) /\ WF_vars(LeaseRunsOut) /\ WF_vars(TtlEnds)
         /\ WF_vars(QuietHour) /\ WF_vars(FakesIdleExit)
 
 \* ---- rules ----

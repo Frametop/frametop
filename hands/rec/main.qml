@@ -2215,7 +2215,7 @@ Kirigami.ApplicationWindow {
                 }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
-                    visible: backend.textsDraft && backend.allowUploadSet && !backend.hubDryRun
+                    visible: backend.textsDraft && backend.allowUploadSet && backend.uploadAllowed && !backend.hubDryRun
                     position: Kirigami.InlineMessage.Position.Header
                     type: Kirigami.MessageType.Warning
                     text: "Rehearsal: FT_HANDREC_ALLOW_UPLOAD=1 allows uploads to " + backend.datasetFor(uploadView.session)

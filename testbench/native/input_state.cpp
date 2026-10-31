@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <sstream>
@@ -34,6 +35,12 @@ void pose_json(std::ostream &o, const std::optional<DriverPose_t> &p) {
 }
 void InputState::reset(IVRServerDriverHost *h, IVRDriverInput *i) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (const char *v = std::getenv("FRAME_TESTBENCH_OVERRIDE_TTL")) {
+        char *end = nullptr;
+        const double ttl = std::strtod(v, &end);
+        if (end != v && !*end && std::isfinite(ttl) && ttl > 0) ttl_ = ttl;
+    }
+    renewed_ = std::chrono::steady_clock::now();
     host_ = h; input_ = i; index_ = k_unTrackedDeviceIndexInvalid; container_ = 0;
     physical_.reset(); requested_.reset(); worn_.reset(); proximity_.clear(); buttons_.clear(); sequence_ = 0;
     controllers_ = {};
@@ -171,6 +178,25 @@ bool InputState::button_release_locked(const std::string &path) {
     }
     return ok;
 }
+bool InputState::overridden_locked() const {
+    if (requested_ || worn_) return true;
+    for (const auto &c : controllers_) if (c.requested) return true;
+    for (const auto &entry : buttons_) if (entry.second.requested) return true;
+    return false;
+}
+// "release": every controller, HMD button, the head pose and worn go back to the hardware's.
+bool InputState::release_all_locked() {
+    bool ok = true;
+    for (unsigned hand = 0; hand < controllers_.size(); ++hand) ok = controller_release_locked(hand) && ok;
+    ok = button_release_locked({}) && ok;
+    if (requested_ && physical_ && host_ && index_ != k_unTrackedDeviceIndexInvalid)
+        host_->TrackedDevicePoseUpdated(index_, *physical_, sizeof(DriverPose_t));
+    requested_.reset();
+    if (worn_ && input_) for (const auto &entry : proximity_) if (entry.second.physical)
+        input_->UpdateBooleanComponent(entry.first, *entry.second.physical, entry.second.offset);
+    worn_.reset();
+    return ok;
+}
 void InputState::publish_locked() {
     for (const auto &c : controllers_) if (host_ && c.index != k_unTrackedDeviceIndexInvalid && c.requested) {
         const auto pose = *c.requested;
@@ -182,10 +208,25 @@ void InputState::publish_locked() {
     if (input_) for (const auto &entry : buttons_) if (entry.second.requested)
         input_->UpdateBooleanComponent(entry.first, *entry.second.requested, 0);
 }
-void InputState::tick() { std::lock_guard<std::recursive_mutex> lock(mutex_); publish_locked(); }
+void InputState::tick() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    if (now - renewed_ > std::chrono::duration<double>(ttl_) && overridden_locked()) {
+        const bool ok = release_all_locked();
+        std::fprintf(stderr, "frame-input: no command for %.0f s: overrides released%s\n", ttl_,
+                     ok ? "" : " (some inputs refused; retrying every second)");
+        // A refused release is retried a second later, not every tick.
+        renewed_ = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                             std::chrono::duration<double>(std::max(0.0, ttl_ - 1)));
+        ++sequence_;
+    }
+    publish_locked();
+}
 std::string InputState::status_locked(bool ok, const char *error) {
     std::ostringstream o; o.imbue(std::locale::classic()); o << std::setprecision(17) << std::boolalpha;
-    o << "{\"ok\":" << ok << ",\"sequence\":" << sequence_ << ",\"hmd_index\":";
+    const double idle = std::chrono::duration<double>(std::chrono::steady_clock::now() - renewed_).count();
+    o << "{\"ok\":" << ok << ",\"sequence\":" << sequence_ << ",\"override_ttl\":" << ttl_
+      << ",\"override_idle\":" << std::floor(idle * 10) / 10 << ",\"hmd_index\":";
     if (index_ == k_unTrackedDeviceIndexInvalid) o << "null"; else o << index_;
     o << ",\"hmd_container\":" << container_ << ",\"proximity_ready\":" << !proximity_.empty()
       << ",\"proximity_handles\":[";
@@ -249,10 +290,11 @@ std::string InputState::command(const std::string &line) {
     std::string operation, extra;
     bool publication_ok = true;
     in >> operation;
-    if (operation == "status") {
+    if (operation == "status") {  // a status poll doesn't renew the overrides (DEE-281)
         if (in >> extra) return status_locked(false, "status takes no arguments");
         return status_locked(true, nullptr);
     }
+    renewed_ = std::chrono::steady_clock::now();  // any other command, even one refused, renews them
     if (operation == "controller-inputs") {
         std::string side, path, token;
         if (!(in >> side) || (side != "left" && side != "right"))
@@ -349,17 +391,13 @@ std::string InputState::command(const std::string &line) {
         publication_ok = button_release_locked(path);
     } else if (operation == "release" || operation == "pose-release" || operation == "worn-release") {
         if (in >> extra) return status_locked(false, "release takes no arguments");
-        if (operation == "release") {
-            for (unsigned hand = 0; hand < controllers_.size(); ++hand)
-                publication_ok = controller_release_locked(hand) && publication_ok;
-            publication_ok = button_release_locked({}) && publication_ok;
-        }
-        if (operation != "worn-release") {
+        if (operation == "release") publication_ok = release_all_locked();
+        if (operation == "pose-release") {
             if (requested_ && physical_ && host_ && index_ != k_unTrackedDeviceIndexInvalid)
                 host_->TrackedDevicePoseUpdated(index_, *physical_, sizeof(DriverPose_t));
             requested_.reset();
         }
-        if (operation != "pose-release") {
+        if (operation == "worn-release") {
             if (worn_ && input_) for (const auto &entry : proximity_) if (entry.second.physical)
                 input_->UpdateBooleanComponent(entry.first, *entry.second.physical, entry.second.offset);
             worn_.reset();

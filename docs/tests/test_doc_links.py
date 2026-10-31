@@ -4,8 +4,9 @@ comment names as `dir/.../file.md` (or, in a doc, as `dir/file.ext` in backticks
 
 A path may be relative to the file's folder or any folder above it (keyboard/ is vendored with its
 own root). Skipped: frame-hands/... (the separate frame-hands project's notes, not this repo),
-paths with a placeholder (*, <, $, ~, {), build outputs (a build/ folder), a line that says the
-file was removed, made-up paths in tests' fixtures, and the series' history in docs/maintainability."""
+paths with a placeholder (*, <, $, ~, {), build outputs (a build/ folder, a .venv), a path followed by
+"removed" (a file a change took out), made-up paths in tests' fixtures, and the series' history in docs/maintainability."""
+import os
 import pathlib
 import re
 import subprocess
@@ -72,13 +73,19 @@ class DocLinks(unittest.TestCase):
         if cls.files is None:
             raise unittest.SkipTest("no git here to list the repo's files")
         cls.tops = {p.split("/")[0] for p in cls.files if "/" in p}
+        # Only what's in the repo counts: a file left on one machine isn't in a clone.
+        cls.known = set(cls.files) | {"/".join(p.split("/")[:i]) for p in cls.files for i in range(1, p.count("/") + 1)}
+
+    def in_repo(self, path):
+        path = pathlib.Path(os.path.normpath(path))
+        return (path == ROOT or ROOT in path.parents) and (path == ROOT or str(path.relative_to(ROOT)) in self.known)
 
     def exists(self, base, target):
-        return any((d / target).exists() for d in (base, *base.parents) if d == ROOT or ROOT in d.parents)
+        return any(self.in_repo(d / target) for d in (base, *base.parents) if d == ROOT or ROOT in d.parents)
 
     def placeholder(self, target):
         return (any(c in target for c in "*<>${}~") or target.startswith(EXTERNAL)
-                or "build" in target.split("/")[:-1])
+                or "build" in target.split("/")[:-1] or ".venv" in target.split("/"))
 
     def test_markdown_links(self):
         bad = []
@@ -89,8 +96,8 @@ class DocLinks(unittest.TestCase):
                     if re.match(r"[a-z][a-z0-9+.-]*:", target) or self.placeholder(target):
                         continue
                     file, _, frag = target.partition("#")
-                    dest = (path.parent / urllib.parse.unquote(file)).resolve() if file else path
-                    if not dest.exists():
+                    dest = pathlib.Path(os.path.normpath(path.parent / urllib.parse.unquote(file))) if file else path
+                    if not self.in_repo(dest):
                         bad.append(f"{rel}:{n}: {target} (no such file)")
                     elif frag and dest.suffix == ".md" and urllib.parse.unquote(frag).lower() not in anchors(dest):
                         bad.append(f"{rel}:{n}: {target} (no such heading)")
@@ -110,13 +117,13 @@ class DocLinks(unittest.TestCase):
                 continue
             lines = prose(text) if rel.endswith(".md") else enumerate(text.splitlines(), 1)
             for n, line in lines:
-                if "removed" in line:
-                    continue
-                refs = set(MD_REF.findall(line))
+                refs = [(m.group(1), m.end()) for m in MD_REF.finditer(line)]
                 if rel.endswith(".md"):
-                    refs |= set(TICKED.findall(line))
-                for target in refs:
+                    refs += [(m.group(1), m.end()) for m in TICKED.finditer(line)]
+                for target, end in refs:
                     if target.split("/")[0] not in self.tops or self.placeholder(target):
+                        continue
+                    if "removed" in line[end:end + 40]:  # "(`screens/keyboard.cpp`, removed in DEE-310)"
                         continue
                     if not self.exists(path.parent, target):
                         bad.append(f"{rel}:{n}: {target}")

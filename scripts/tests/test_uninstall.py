@@ -48,11 +48,17 @@ class Uninstall(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "0")
 
     def test_the_added_paths(self):
+        """Each path DEE-313 added is in the statement that removes it, not only in a comment."""
         text = SCRIPT.read_text()
-        for path in ('"$HOME/.cache/frametop-framedrop"', '"$HOME/.local/state/frametop-trial"',
-                     '"$HOME/.local/share/frametop/gaze/bench"'):
-            self.assertIn(path, text)
-
+        for name, pattern in (
+                ("FrameDrop's cache, with the rebuilt caches",
+                 r'run rm -rf [^\n]*\\\n[^\n#]*"\$HOME/\.cache/frametop-framedrop"'),
+                ("the trial's saved files, with the settings",
+                 r'local settings=\([^)#]*"\$HOME/\.local/state/frametop-trial"\)'),
+                ("the gaze bench's runs, with the recordings",
+                 r'for f in [^;\n#]*"\$HOME/\.local/share/frametop/gaze/bench"; do\s*\[ -e "\$f" \] && recs\+=')):
+            with self.subTest(name):
+                self.assertRegex(text, pattern)
 
 if __name__ == "__main__":
     unittest.main()

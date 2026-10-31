@@ -1,7 +1,7 @@
 // ft-stream: one remote display for ft-screens (docs/remote-displays.md). A Moonlight client
 // (moonlight-common-c, and libgamestream for pairing and launching) for one display of a
 // Vibepollo host, or of a Sunshine instance (one per display, each on its own port: the Mac). It decodes the stream on the Frame's iris decoder and converts each picture
-// into a ring of three RGBA buffers (spike/iris.h), which ft-screens shows as a panel like any
+// into a ring of three RGBA buffers (iris.h), which ft-screens shows as a panel like any
 // screen of the desktop: its controls, layout, profiles, curve, pins and hand cutouts. Each
 // display is its own client with its own certificate (--id), because Vibepollo ties a Remote
 // Monitor to the client that opened it, one stream per client.
@@ -54,7 +54,7 @@
 // keyboard and mouse come to the input relay while the headset is worn; see HostInput.
 //
 // Runs in the dev container. Build: stream/build.sh.
-#include "spike/iris.h"
+#include "iris.h"
 
 #include "../conf/ftsock.h"
 #include "host.h"

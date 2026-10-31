@@ -21,7 +21,7 @@
 // so s1-colours.py can grab the headset view in each state and compare them pixel by pixel.
 // Every 2 s it prints frames fed and decoded, decode time, frames inside the decoder,
 // the conversion's time (until the GPU is done), and this process's CPU use. Build: stream/build.sh; run in the dev container.
-#include "iris.h"
+#include "../iris.h"
 
 namespace {
 

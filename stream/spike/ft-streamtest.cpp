@@ -38,50 +38,27 @@
 // Every 2 s it prints what arrived and what was shown, the bitrate, where the time went (host
 // capture to encode as the host reports it, half the round trip, receiving the frame,
 // decoding, converting), the stream's packet losses and this process's CPU use. Build:
-// stream/build.sh; run in the dev container.
-#include "iris.h"
+// stream/build.sh --spikes; run in the dev container. Pairing, the Web UI API and launching are
+// ft-stream's own (host.cpp).
+#include "../iris.h"
 
-#include <arpa/inet.h>
 #include <sys/eventfd.h>
-#include <sys/stat.h>
-
-#include <curl/curl.h>
 
 #include <atomic>
 #include <cstdarg>
-#include <fstream>
 #include <mutex>
-#include <random>
 #include <set>
 #include <thread>
 
 #include <nlohmann/json.hpp>
 
-extern "C" {
-#include "client.h"
-#include "errors.h"
-#include "http.h"
-void http_cleanup(void);  // in http.c, not in http.h
-}
+#include "../host.h"   // the host side, shared with ft-stream: pairing, the Web UI API, launch
+
+using ftstream::kDisconnectMonitor;
+using ftstream::kFrametopDisplay;
+using ftstream::kRemoteMonitor;
 
 namespace {
-
-constexpr int kRemoteMonitor = 2147483505, kDisconnectMonitor = 2147483502;  // remote_session.h
-// frametop-vibepollo: stream an existing display, named by the launch argument frametopDisplay.
-constexpr int kFrametopDisplay = 2147483521;
-std::string g_display;  // --app display:ID
-std::string g_keyDir;   // this client's key directory, for re-initialising libgamestream
-
-// Percent-encodes a query value (device ids are {GUID}, display names \\.\DISPLAYn).
-std::string UrlEncode(const std::string &v) {
-    std::string out;
-    for (unsigned char c : v) {
-        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') out += char(c);
-        else { char b[4]; std::snprintf(b, sizeof b, "%%%02X", c); out += b; }
-    }
-    return out;
-}
-constexpr const char *kPrimaryApp = "Frametop primary display";
 
 // One frame from moonlight-common-c's decoder thread, waiting for the main loop.
 struct Unit {
@@ -182,190 +159,6 @@ void Terminated(int error) {
 }
 
 void Status(int status) { std::printf("stream: connection %s\n", status == CONN_STATUS_POOR ? "poor" : "okay"); }
-
-std::string KeyDir(const std::string &id) {
-    const char *home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.local/share/frametop-stream/" + id;
-}
-
-std::string ReadUniqueId(const std::string &dir) {
-    char buf[17] = "0123456789ABCDEF";
-    FILE *f = std::fopen((dir + "/uniqueid.dat").c_str(), "rb");
-    if (f) {
-        if (std::fread(buf, 1, 16, f) != 16) std::strcpy(buf, "0123456789ABCDEF");
-        std::fclose(f);
-    }
-    return buf;
-}
-
-// libgamestream gives every client the same id unless uniqueid.dat exists; hosts track
-// pairing by it, so each client gets a random one first.
-void NewUniqueId(const std::string &dir) {
-    const std::string path = dir + "/uniqueid.dat";
-    if (ReadUniqueId(dir) != "0123456789ABCDEF") return;
-    for (size_t at = dir.find('/', 1); ; at = dir.find('/', at + 1)) {
-        mkdir(dir.substr(0, at).c_str(), 0700);
-        if (at == std::string::npos) break;
-    }
-    std::random_device rd;
-    char id[17];
-    std::snprintf(id, sizeof id, "%08X%08X", rd(), rd());
-    FILE *f = std::fopen(path.c_str(), "wb");
-    if (f) std::fwrite(id, 1, 16, f), std::fclose(f);
-}
-
-// The attribute `name` of the response's root element.
-std::string Attribute(const char *xml, size_t len, const char *name) {
-    const std::string s(xml, len), key = std::string(name) + "=\"";
-    const size_t at = s.find(key);
-    if (at == std::string::npos) return "";
-    const size_t end = s.find('"', at + key.size());
-    return s.substr(at + key.size(), end - at - key.size());
-}
-
-// libgamestream keeps one curl handle whose connections stay open (it forbids reuse only
-// on FreeBSD). Vibepollo closes an HTTPS connection with a blocking TLS shutdown on its only
-// HTTPS thread, so a connection left idle here freezes its API for every client until this
-// process exits. So every request is followed by dropping the handle, and with it the
-// connection.
-void DropConnection() {
-    http_cleanup();
-    http_init(g_keyDir.c_str(), 0);
-}
-
-// /launch (or /resume) for appId, as gs_start_app does it, but without its mode check and
-// with the status code kept: Vibepollo answers 503 while a Remote Monitor is being set up.
-int Launch(SERVER_DATA &server, STREAM_CONFIGURATION &cfg, int appId, const std::string &uniqueId, bool resume,
-           std::string *message) {
-    std::random_device rd;
-    for (auto &b : cfg.remoteInputAesKey) b = char(rd());
-    std::memset(cfg.remoteInputAesIv, 0, sizeof cfg.remoteInputAesIv);
-    uint32_t rikeyid = rd();
-    std::memcpy(cfg.remoteInputAesIv, &rikeyid, sizeof rikeyid);
-    char rikey[33];
-    for (int i = 0; i < 16; ++i) std::snprintf(rikey + 2 * i, 3, "%02x", uint8_t(cfg.remoteInputAesKey[i]));
-    char url[4096];
-    std::snprintf(url, sizeof url,
-                  "https://%s:%u/%s?uniqueid=%s&uuid=%08x-0000-4000-8000-%012x&appid=%d&mode=%dx%dx%d&additionalStates=1"
-                  "&sops=0&rikey=%s&rikeyid=%d&localAudioPlayMode=1&surroundAudioInfo=%d&remoteControllersBitmap=0&gcmap=0%s%s",
-                  server.serverInfo.address, server.httpsPort, resume ? "resume" : "launch", uniqueId.c_str(), rd(), rd(),
-                  appId, cfg.width, cfg.height, cfg.fps, rikey, int(htonl(rikeyid)),
-                  SURROUNDAUDIOINFO_FROM_AUDIO_CONFIGURATION(cfg.audioConfiguration), LiGetLaunchUrlQueryParameters(),
-                  appId == kFrametopDisplay ? ("&frametopDisplay=" + UrlEncode(g_display)).c_str() : "");
-    PHTTP_DATA data = http_create_data();
-    if (!data) return -1;
-    int code = -1;
-    if (http_request(url, data) == GS_OK) {
-        const std::string c = Attribute(data->memory, data->size, "status_code");
-        code = c.empty() ? -1 : std::atoi(c.c_str());
-        *message = Attribute(data->memory, data->size, "status_message");
-        char *session = nullptr;
-        if (code == 200 && xml_search(data->memory, data->size, const_cast<char *>("sessionUrl0"), &session) == GS_OK)
-            server.serverInfo.rtspSessionUrl = session;
-    } else {
-        *message = gs_error ? gs_error : "request failed";
-    }
-    http_free_data(data);
-    DropConnection();
-    return code;
-}
-
-// What a Frametop client may do on a Vibepollo host: list apps, view and launch them, and
-// send mouse and keyboard input (crypto::PERM in Vibepollo's crypto.h).
-constexpr uint32_t kPermMouse = 1u << 11, kPermKeyboard = 1u << 12;
-constexpr uint32_t kPermList = 1u << 24, kPermView = 1u << 25, kPermLaunch = 1u << 26;
-constexpr uint32_t kFrametopPerm = kPermList | kPermView | kPermLaunch | kPermMouse | kPermKeyboard;
-
-size_t Append(char *data, size_t size, size_t n, void *out) {
-    static_cast<std::string *>(out)->append(data, size * n);
-    return size * n;
-}
-
-// The host's Web UI API (port 47990), with a scoped token.
-struct WebApi {
-    std::string base, token;
-
-    bool Load(const std::string &host, const std::string &file) {
-        std::ifstream f(file);
-        if (!(f >> token)) return false;
-        base = "https://" + host + ":47990";
-        return true;
-    }
-
-    // The HTTP status (or -1), with the response's JSON in *out.
-    long Call(const char *method, const std::string &path, const nlohmann::json *body, nlohmann::json *out) {
-        CURL *c = curl_easy_init();
-        if (!c) return -1;
-        std::string text;
-        const std::string payload = body ? body->dump() : "";
-        curl_slist *headers = curl_slist_append(nullptr, ("Authorization: Bearer " + token).c_str());
-        if (body) headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(c, CURLOPT_URL, (base + path).c_str());
-        curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, method);
-        curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
-        if (body) curl_easy_setopt(c, CURLOPT_POSTFIELDS, payload.c_str());
-        // The Web UI's certificate is self-signed. ft-stream would pin the one it saw first.
-        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
-        curl_easy_setopt(c, CURLOPT_TIMEOUT, 15L);
-        curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, Append);
-        curl_easy_setopt(c, CURLOPT_WRITEDATA, &text);
-        long code = -1;
-        if (curl_easy_perform(c) == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(c);
-        *out = nlohmann::json::parse(text, nullptr, false);
-        return code;
-    }
-
-    // Paired clients by host id: name and permissions.
-    bool Clients(std::map<std::string, std::pair<std::string, uint32_t>> *clients) {
-        nlohmann::json r;
-        const long code = Call("GET", "/api/clients/list", nullptr, &r);
-        if (code != 200 || !r.is_object() || !r.contains("named_certs"))
-            return std::fprintf(stderr, "web api: clients/list: %ld\n", code), false;
-        for (const auto &c : r["named_certs"]) (*clients)[c.value("uuid", "")] = {c.value("name", ""), c.value("perm", 0u)};
-        return true;
-    }
-
-    // Vibepollo's update replaces the whole record, so every field it takes is given.
-    bool Grant(const std::string &uuid, const std::string &name) {
-        const nlohmann::json body = {{"uuid", uuid},
-                                     {"name", name},
-                                     {"perm", kFrametopPerm},
-                                     {"display_mode", ""},
-                                     {"output_name_override", ""},
-                                     {"virtual_display_mode", ""},
-                                     {"virtual_display_layout", ""},
-                                     {"always_use_virtual_display", false},
-                                     {"enable_legacy_ordering", true},
-                                     {"allow_client_commands", false},
-                                     {"do", nlohmann::json::array()},
-                                     {"undo", nlohmann::json::array()}};
-        nlohmann::json r;
-        const long code = Call("POST", "/api/clients/update", &body, &r);
-        if (code != 200 || !r.is_object() || !r.value("status", false))
-            return std::fprintf(stderr, "web api: clients/update: %ld\n", code), false;
-        return true;
-    }
-};
-
-std::string TokenFile(const std::string &host) { return KeyDir("hosts") + "/" + host + ".token"; }
-
-int FindApp(SERVER_DATA &server, const std::string &want) {
-    if (want == "monitor") return kRemoteMonitor;
-    if (want.rfind("display:", 0) == 0) return g_display = want.substr(8), kFrametopDisplay;
-    if (!want.empty() && std::all_of(want.begin(), want.end(), ::isdigit)) return std::atoi(want.c_str());
-    const std::string name = want == "primary" ? kPrimaryApp : want;
-    PAPP_LIST list = nullptr;
-    const int listed = gs_applist(&server, &list);
-    DropConnection();
-    if (listed != GS_OK) return std::fprintf(stderr, "can't list the host's apps: %s\n", gs_error), 0;
-    for (PAPP_LIST a = list; a; a = a->next)
-        if (name == a->name) return a->id;
-    std::fprintf(stderr, "the host has no app named \"%s\"\n", name.c_str());
-    return 0;
-}
 
 double Ms(int64_t ns) { return ns / 1e6; }
 
@@ -471,8 +264,8 @@ int main(int argc, char **argv) {
         else if (a == "--input-log") inputLog = true;
         else return std::fprintf(stderr, "unknown option %s\n", argv[i]), 2;
     }
-    if (tokenFile.empty()) tokenFile = TokenFile(host);
-    WebApi api;
+    if (tokenFile.empty()) tokenFile = ftstream::TokenFile(host);
+    ftstream::WebApi api;
     const bool haveToken = api.Load(host, tokenFile);
     if (cmd == "monitors") {
         if (!haveToken) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
@@ -486,82 +279,27 @@ int main(int argc, char **argv) {
     // Moonlight's rule of thumb, about 20 Mbit/s for 1080p60, scaled by pixels and fps.
     if (!bitrate) bitrate = int(std::min(150000.0, 20000.0 * width * height * fps / (1920.0 * 1080 * 60)));
 
-    const std::string dir = KeyDir(id);
-    umask(077);  // the client's private key
-    NewUniqueId(dir);
-    SERVER_DATA server{};
-    g_keyDir = dir;
-    if (gs_init(&server, host.data(), 0, dir.c_str(), 0, true) != GS_OK)
-        return std::fprintf(stderr, "can't reach %s: %s\n", host.c_str(), gs_error ? gs_error : "?"), 1;
-    DropConnection();
+    ftstream::Client client;
+    if (!client.Connect(host, id)) return 1;
+    SERVER_DATA &server = client.server;
     std::printf("host %s: %s, %s, %s, current app %d\n", host.c_str(), server.serverInfo.serverInfoAppVersion,
                 server.gpuType ? server.gpuType : "?", server.paired ? "paired" : "not paired", server.currentGame);
 
     if (cmd == "pair") {
         if (server.paired) return std::printf("%s is already paired as %s\n", host.c_str(), id.c_str()), 0;
-        std::random_device rd;
-        char pin[5];
-        std::snprintf(pin, sizeof pin, "%04u", rd() % 10000);
-        if (!haveToken) {
-            std::printf("PIN %s: enter it in the host's Web UI (PIN pairing), with the device name %s\n", pin, id.c_str());
-            std::fflush(stdout);
-            if (gs_pair(&server, pin) != GS_OK) return std::fprintf(stderr, "pairing failed: %s\n", gs_error ? gs_error : "?"), 1;
-            std::printf("paired. Now allow it to launch apps and use the mouse and keyboard in the Web UI (Clients).\n");
-            return 0;
-        }
-        std::map<std::string, std::pair<std::string, uint32_t>> before, after;
-        if (!api.Clients(&before)) return 1;
-        // gs_pair waits for the PIN, so it runs beside the request that gives it.
-        std::atomic<int> result{GS_FAILED};
-        std::atomic<bool> done{false};
-        std::thread pairing([&] { result = gs_pair(&server, pin), done = true; });
-        bool given = false;
-        for (int i = 0; i < 40 && !given && !done; ++i) {
-            usleep(250'000);
-            const nlohmann::json body = {{"pin", pin}, {"name", id}};
-            nlohmann::json r;
-            given = api.Call("POST", "/api/pin", &body, &r) == 200 && r.is_object() && r.value("status", false);
-        }
-        if (!given) {
-            std::fprintf(stderr, "the host took no PIN for this pairing (token scopes?)\n");
-            std::fflush(stderr);
-            std::_Exit(1);  // gs_pair is still waiting
-        }
-        pairing.join();
-        if (result != GS_OK) return std::fprintf(stderr, "pairing failed: %s\n", gs_error ? gs_error : "?"), 1;
-        if (!api.Clients(&after)) return 1;
-        std::string uuid;
-        for (const auto &[u, c] : after)
-            if (!before.count(u) && c.first == id) uuid = u;
-        if (uuid.empty()) return std::fprintf(stderr, "paired, but the host lists no new client named %s\n", id.c_str()), 1;
-        if (!api.Grant(uuid, id)) return 1;
-        std::printf("paired as %s (host id %s), allowed to launch and to use the mouse and keyboard\n", id.c_str(), uuid.c_str());
-        return 0;
+        return client.Pair(haveToken ? &api : nullptr) ? 0 : 1;
     }
     if (cmd == "grant") {
-        std::map<std::string, std::pair<std::string, uint32_t>> clients;
         if (!haveToken) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
-        if (!api.Clients(&clients)) return 1;
-        std::vector<std::string> named;
-        for (const auto &[u, c] : clients)
-            if (c.first == id) named.push_back(u);
-        if (named.size() != 1) return std::fprintf(stderr, "the host has %zu clients named %s\n", named.size(), id.c_str()), 1;
-        if (!api.Grant(named[0], id)) return 1;
-        std::printf("%s may now launch and use the mouse and keyboard (perm was %u)\n", id.c_str(), clients[named[0]].second);
-        return 0;
+        return client.GrantByName(api) ? 0 : 1;
     }
-    if (cmd == "unpair") {
-        const int r = gs_unpair(&server);
-        std::printf("unpair: %s\n", r == GS_OK ? "done" : gs_error ? gs_error : "failed");
-        return r == GS_OK ? 0 : 1;
-    }
+    if (cmd == "unpair") return client.Unpair() ? 0 : 1;
     if (!server.paired) return std::fprintf(stderr, "not paired as %s: run ft-streamtest pair %s --id %s\n", id.c_str(), host.c_str(), id.c_str()), 1;
-    const std::string uniqueId = ReadUniqueId(dir);
 
     if (cmd == "apps") {
         PAPP_LIST list = nullptr;
         const int listed = gs_applist(&server, &list);
-        DropConnection();
+        client.DropConnection();
         if (listed != GS_OK) return std::fprintf(stderr, "can't list apps: %s\n", gs_error), 1;
         for (PAPP_LIST a = list; a; a = a->next) std::printf("%11d  %s\n", a->id, a->name);
         return 0;
@@ -581,13 +319,13 @@ int main(int argc, char **argv) {
     if (cmd == "release" || cmd == "quit") {
         int code;
         if (cmd == "quit") code = gs_quit_app(&server) == GS_OK ? 200 : -1, message = gs_error ? gs_error : "";
-        else code = Launch(server, cfg, kDisconnectMonitor, uniqueId, false, &message);
+        else code = client.Launch(cfg, kDisconnectMonitor, false, &message);
         std::printf("%s: %d %s\n", cmd.c_str(), code, message.c_str());
         return code == 200 || code == 410 ? 0 : 1;
     }
     if (cmd != "stream") return std::fprintf(stderr, "unknown command %s\n", cmd.c_str()), 2;
 
-    const int appId = FindApp(server, app);
+    const int appId = client.FindApp(app);
     if (!appId) return 1;
     signal(SIGINT, Stop);
     signal(SIGTERM, Stop);
@@ -625,7 +363,7 @@ int main(int argc, char **argv) {
     int code = 0;
     const int64_t launchAt = MonoNs();
     for (int tries = 0; tries < 60 && !g_stop; ++tries) {
-        code = Launch(server, cfg, appId, uniqueId, resume, &message);
+        code = client.Launch(cfg, appId, resume, &message);
         if (code != 503) break;
         if (tries == 0) std::printf("launch: %d %s (retrying)\n", code, message.c_str());
         usleep(500'000);
@@ -858,7 +596,7 @@ int main(int argc, char **argv) {
     dec.Close();
     if (!noVr) vr::VR_Shutdown();
     if (!keep && appId != kFrametopDisplay) {  // a display stream holds nothing on the host
-        if (appId == kRemoteMonitor) code = Launch(server, cfg, kDisconnectMonitor, uniqueId, false, &message);
+        if (appId == kRemoteMonitor) code = client.Launch(cfg, kDisconnectMonitor, false, &message);
         else code = gs_quit_app(&server) == GS_OK ? 200 : -1, message = gs_error ? gs_error : "";
         std::printf("%s: %d %s\n", appId == kRemoteMonitor ? "release monitor" : "quit app", code, message.c_str());
     }

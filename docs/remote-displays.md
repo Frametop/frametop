@@ -256,7 +256,7 @@ Spikes on the Frame run through `frame-job --local` as a standalone test overlay
 
 S1 passes, with one change to the plan: a GPU pass between the decoder and SteamVR.
 
-`stream/spike/ft-dectest` (built by `stream/build.sh`) decodes a clip with the V4L2 stateful API and hands each picture to SteamVR with `ImportDmabuf`, as the remote screen type would. Clips: a colour test pattern (`stream/spike/pattern.py`) with a moving box, 10 s at 60 fps, encoded by NVENC HEVC on the test PC (`-preset p1 -tune ull -bf 0`, as Sunshine-style streaming), in BT.709 and BT.601, limited and full range. The in-headset runs used frame-testbench to hold the worn state and a still pose, with nobody wearing the headset.
+`stream/spike/ft-dectest` (built by `stream/build.sh --spikes`) decodes a clip with the V4L2 stateful API and hands each picture to SteamVR with `ImportDmabuf`, as the remote screen type would. Clips: a colour test pattern (`stream/spike/pattern.py`) with a moving box, 10 s at 60 fps, encoded by NVENC HEVC on the test PC (`-preset p1 -tune ull -bf 0`, as Sunshine-style streaming), in BT.709 and BT.601, limited and full range. The in-headset runs used frame-testbench to hold the worn state and a still pose, with nobody wearing the headset.
 
 **Decoding.**
 
@@ -305,7 +305,7 @@ The benchmark is S5 against the same scene on remote displays: total Frame CPU (
 
 ### S3 results so far (2026-10-07)
 
-`stream/spike/ft-streamtest.cpp` is a Moonlight client for one display: moonlight-common-c and libgamestream from moonlight-embedded (pinned in `stream/build.sh`), S1's decoder and GPU pass (`spike/iris.h`), and a SteamVR overlay. It pairs through the host's API token, launches the primary app or a Remote Monitor, and reports every 2 s. Tests ran from the test PC over the LAN, with the headset held by frame-testbench.
+`stream/spike/ft-streamtest.cpp` is a Moonlight client for one display: moonlight-common-c and libgamestream from moonlight-embedded (pinned in `stream/build.sh`), S1's decoder and GPU pass (`stream/iris.h`, which ft-stream uses too), the host side ft-stream uses (`stream/host.cpp`), and a SteamVR overlay. It pairs through the host's API token, launches the primary app or a Remote Monitor, and reports every 2 s. Tests ran from the test PC over the LAN, with the headset held by frame-testbench.
 
 **The primary display (5120x1440 at 60 fps, HEVC, 50 Mbit/s asked).** It works end to end. The picture in the headset is right, colours included. The test PC's primary is an HDR monitor, and Vibepollo sends it as SDR Rec. 709, as asked.
 

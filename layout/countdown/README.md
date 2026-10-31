@@ -26,7 +26,7 @@ uses the current container for release-image builds. The binary is
 does not initialize OpenVR.
 
 The build fetches the SDK pinned in `scripts/openvr.sh`. `deps.sh` fetches the
-STB headers at the same commit as `screens/build.sh`, with SHA-256 checks. The
+STB headers through `scripts/stb.sh`, at the commit and SHA-256s it pins. The
 renderer uses the installed Noto Sans font. There are no vendored binaries or
 headers.
 

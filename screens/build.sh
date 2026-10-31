@@ -8,7 +8,8 @@
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
 # shipped with SteamVR on the Frame predates, so the build uses the public header from
 # Valve's openvr repo (pinned in scripts/openvr.sh).
-# label.cpp draws the panels' labels with stb_truetype (public domain, one header, pinned);
+# label.cpp draws the panels' labels with stb_truetype (public domain, one header, pinned and
+# checked in scripts/stb.sh);
 # ft-handview --snapshot writes PNGs with stb_image_write (the same).
 # ft-handview's hand models are compiled in once (handasset.cpp and .h, from screens/assets/hands by tools/hand-asset.py);
 # its robot hand is built in code (handrobot.cpp).
@@ -17,8 +18,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 "$root/scripts/sync.sh" >/dev/null
 exec "$root/scripts/frame.sh" -C screens 'set -e; mkdir -p build/include
 . ../scripts/openvr.sh
-stb=2c980bb59875b0d32144a71867fbdebb2f77cd20
-[ -f build/include/stb-$stb ] && [ -f build/include/stb_image_write.h ] || { for h in stb_truetype.h stb_image_write.h; do curl -fsSL "https://raw.githubusercontent.com/nothings/stb/$stb/$h" -o build/include/$h || exit 1; done; touch build/include/stb-$stb; }
+. ../scripts/stb.sh
+stb_fetch build/include stb_truetype.h stb_image_write.h
 cc="gcc -std=c11 -O2 -Wall -Wno-unused-parameter $(pkg-config --cflags wlroots-0.20 wayland-server xkbcommon libdrm pixman-1)"
 $cc -c -o build/compositor.o compositor.c
 $cc -c -o build/remote.o remote.c

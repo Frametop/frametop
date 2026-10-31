@@ -72,6 +72,7 @@ class Paths(unittest.TestCase):
         openvr = rebuilt('scripts/openvr.sh')
         self.assertTrue({'screens', 'power', 'keyboard'} <= openvr)
         self.assertFalse({'voice', 'hands', 'gaze/tracker'} & openvr)
+        self.assertEqual(rebuilt('scripts/stb.sh'), {'screens', 'layout/countdown', 'gaze', 'hands/rec'})
 
     def test_install_steps(self):
         self.assertIsNone(fi.install_step('screens/x.py'))

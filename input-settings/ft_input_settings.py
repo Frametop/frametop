@@ -90,6 +90,7 @@ HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
 sys.path.insert(0, os.path.join(REPO, "models"))
 sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands: standard library only)
+import input_commands  # noqa: E402  (the Commands page's logic)
 import catalog as model_catalog  # noqa: E402
 # How the pickers tag each entry: by status, and builtins by what they are.
 MODEL_TAGS = {"recommended": "Recommended", "testing": "Testing", "older": "Older"}
@@ -282,7 +283,7 @@ PROFILE = "profile:"
 COMMAND = "command:"
 # "run:NAME": the relay runs your command NAME (the Commands page; buttons, controllers and key
 # combinations alike).
-RUN = "run:"
+RUN = input_commands.RUN
 # ft-cmd on the host: the relay links it there at its start (ft_commands.refresh), and this app
 # runs in a container, where the checkout's path may not be the host's.
 HOST_FT_CMD = ft_commands.CLI_LINK
@@ -1275,33 +1276,21 @@ class Backend(QObject):
     # --- commands (ft_commands) ---
     @Property("QVariantList", notify=commandsChanged)
     def commands(self):
-        return [dict(c, said=ft_commands.spoken(c["name"])) for c in ft_commands.load()]
+        return input_commands.listed()
 
     @Slot(str, result=str)
     def commandNameProblem(self, name):
-        """Why `name` can't be a new command's name ("" if it can): checked here and on the host,
-        whose PATH an alias would hide things on."""
-        name = name.strip()
-        problem = ft_commands.name_problem(name, {c["name"] for c in ft_commands.load()})
-        if not problem and host("sh", "-c", 'command -v -- "$1"', "sh", name, timeout=5).returncode == 0:
-            problem = f"{name} is a program on the headset; an alias by that name would hide it"
-        return problem
+        """Why `name` can't be a new command's name ("" if it can; input_commands.name_problem)."""
+        return input_commands.name_problem(name, host)
 
     @Slot(str, str, result=bool)
     def addCommand(self, name, run):
-        name, run = name.strip(), run.strip()
-        problem = self.commandNameProblem(name) or ("" if run else "what should it run?")
-        if problem:
-            self.message.emit(problem, True)
-            return False
-        try:
-            ft_commands.add(name, run)
-        except (OSError, ft_commands.CommandsFileError) as e:
-            self.message.emit(f"Couldn't save {name}: {e}", True)
+        saved, text = input_commands.add(name, run, self.commandNameProblem)
+        if not saved:
+            self.message.emit(text, True)
             return False
         self.commandsChanged.emit()
-        self.message.emit(f"{name} saved: say \"run {ft_commands.spoken(name)}\", search it in frunner, "
-                          "or map it to a button", False)
+        self.message.emit(text, False)
         return True
 
     @Slot(str)
@@ -1313,27 +1302,16 @@ class Backend(QObject):
             return
         # Buttons, controller buttons and key combinations that ran it would do nothing now.
         rules = read_json(RULES_PATH)
-        gone = RUN + name
-        dropped = 0
-        for table in [rules.get("controller_buttons", {}), rules.get("key_bindings", {}),
-                      *rules.get("buttons", {}).values()]:
-            if isinstance(table, dict):
-                for k in [k for k, v in table.items() if v == gone]:
-                    del table[k]
-                    dropped += 1
+        dropped = input_commands.drop_bindings(rules, name)
         saved = not dropped or self._save_rules(rules)   # (the command is gone either way)
         self.commandsChanged.emit()
         if saved:
-            self.message.emit(f"{name} removed" + (f", and {dropped} binding{'s' if dropped != 1 else ''} to it"
-                                                    if dropped else ""), False)
+            self.message.emit(input_commands.removed_text(name, dropped), False)
 
     @Slot(str)
     def runCommand(self, name):
-        """Run it now, on the host (ft-cmd, which the relay links into ~/.local/bin)."""
-        ft_cmd = HOST_FT_CMD if os.path.exists(HOST_FT_CMD) else ft_commands.FT_CMD
-        r = host(ft_cmd, "run", name, timeout=15)
-        text = (r.stdout or r.stderr).strip() or f"{name}: started"
-        self.message.emit(text, r.returncode != 0)
+        """Run it now, on the host (input_commands.run_now)."""
+        self.message.emit(*input_commands.run_now(name, host, HOST_FT_CMD))
 
     @Property(bool, notify=shortcutCaptureChanged)
     def capturingShortcut(self):

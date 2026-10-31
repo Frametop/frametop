@@ -25,6 +25,11 @@ import tempfile
 PATH = os.path.expanduser("~/.config/frametop.conf")
 
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+# Names a setting can't have: bash's read-only ones (setting one stops the session, which runs
+# under set -e) and the ones that change how the session's shell runs. Lower-case names are the
+# session script's own variables, so a setting's name is upper-case too.
+RESERVED = frozenset({"BASHOPTS", "BASH_ENV", "BASH_VERSINFO", "CDPATH", "ENV", "EUID", "GLOBIGNORE", "HOME",
+                      "IFS", "OPTIND", "PATH", "PPID", "PS4", "SHELLOPTS", "UID"})
 # What a value can be written as without quotes: nothing bash would expand, split or run
 # (~ is left out: bash expands it at the start and after a ':' in an assignment).
 BARE = re.compile(r"[A-Za-z0-9_.,:/@%+=*?^-]+\Z")
@@ -39,6 +44,17 @@ NUMBER = re.compile(r"[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?\Z")
 
 class ConfError(ValueError):
     pass
+
+
+def name_error(name):
+    """Why name can't be a setting's, or None."""
+    if not NAME.match(name):
+        return "not NAME=value (no spaces around the =)"
+    if not name.isupper() and name.strip("_0123456789"):
+        return "a lower-case name (the session script's own variables): settings are upper-case"
+    if name in RESERVED:
+        return "a name bash keeps for itself (read-only, or how the shell runs)"
+    return None
 
 
 def parse_line(line):
@@ -57,6 +73,8 @@ def parse_line(line):
     name = line[start:i]
     if not NAME.match(name) or i == n or line[i] != "=":
         raise ConfError("not NAME=value (no spaces around the =)")
+    if name_error(name):
+        raise ConfError(name_error(name))
     i += 1
     value = []
     while i < n and line[i] not in " \t":
@@ -194,7 +212,7 @@ def set_value(key, value, path=None):
     last line that sets KEY (even one bash can't read) is the one changed, as it's the one that
     counts; none: added at the end. Written to a temp file next to it and renamed over it, so a
     reader never sees half a file."""
-    if not NAME.match(key):
+    if name_error(key):
         raise ValueError(f"not a setting name: {key!r}")
     text = quote(value)
     path = os.path.realpath(path or PATH)

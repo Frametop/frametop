@@ -20,6 +20,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Names a setting can't have (ft_conf.py's RESERVED): bash's read-only ones, and the ones that
+ * change how the session's shell runs. */
+static const char *const ft_conf_reserved[] = {"BASHOPTS", "BASH_ENV", "BASH_VERSINFO", "CDPATH", "ENV", "EUID",
+                                               "GLOBIGNORE", "HOME", "IFS", "OPTIND", "PATH", "PPID", "PS4",
+                                               "SHELLOPTS", "UID", NULL};
+
 /* One line (len bytes, no newline): 1 = an assignment (name and value copied, NUL-terminated),
  * 0 = blank or a comment, -1 = outside the grammar (*why says why) or too long for the buffers. */
 static inline int ft_conf_parse_line(const char *line, size_t len, char *name, size_t name_n,
@@ -53,6 +59,16 @@ static inline int ft_conf_parse_line(const char *line, size_t len, char *name, s
     }
     memcpy(name, line + start, i - start);
     name[i - start] = 0;
+    for (size_t k = start; k < i; k++)
+        if (line[k] >= 'a' && line[k] <= 'z') {
+            *why = "a lower-case name (the session script's own variables): settings are upper-case";
+            return -1;
+        }
+    for (const char *const *r = ft_conf_reserved; *r; r++)
+        if (!strcmp(name, *r)) {
+            *why = "a name bash keeps for itself (read-only, or how the shell runs)";
+            return -1;
+        }
     i++;
 #define FT_CONF_PUT(c)                       \
     do {                                     \

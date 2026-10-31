@@ -24,11 +24,9 @@ Standard library only.
 import json
 import os
 import re
-import sys
 import urllib.request
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
-import ft_store  # noqa: E402  (JSON files written safely, DEE-300)
+from recorder.common import store_json
 
 SCHEMA = 1
 PRIORITIES = ("high", "normal", "low", "retired")
@@ -104,8 +102,8 @@ def fetch_json(url, token=None, max_bytes=MAX_BYTES, timeout=5.0):
 
 def keep_json(path, value):
     """value written to path whole (a temporary file of its own, flushed to disk and renamed:
-    ft_store, DEE-300)."""
-    ft_store.write_json(os.path.abspath(path), value, indent=1, newline=False, ensure_ascii=False)
+    recorder.common.store_json, DEE-300)."""
+    store_json(os.path.abspath(path), value, indent=1, newline=False, ensure_ascii=False)
 
 
 def fetch(url, cache_path, token=None, timeout=5.0):

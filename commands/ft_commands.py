@@ -126,6 +126,9 @@ def read_strict(path=None):
     return [] if data is None else parse(data)[0]
 
 
+_said = set()
+
+
 def load(path=None, strict=False):
     """The saved commands ([] when there's no file). A file that doesn't read gives the commands
     it could read, said on stderr; strict: CommandsFileError (writers read this way)."""
@@ -134,7 +137,9 @@ def load(path=None, strict=False):
     except CommandsFileError as e:
         if strict:
             raise
-        print(f"frametop commands: {e}", file=sys.stderr)
+        if str(e) not in _said:   # once per process: the relay reads it on every command
+            _said.add(str(e))
+            print(f"frametop commands: {e}", file=sys.stderr)
         try:
             with open(path or COMMANDS_PATH, encoding="utf-8") as f:
                 return parse(json.load(f))[0]

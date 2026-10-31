@@ -255,6 +255,18 @@ def save_layout(layout):
         layout.base = json.loads(json.dumps(layout))
 
 
+def save_on_the_way(layout):
+    """save_layout for what arranging notes down on the way (remote display numbers, the panel
+    size, the profile a start uses): when the file doesn't read or stays locked, that's logged
+    and the arranging goes on; the file stays as it is."""
+    try:
+        save_layout(layout)
+        return True
+    except LayoutFileError as e:
+        log(f"layout not saved: {e}")
+        return False
+
+
 def screen_entry(layout, i):
     screens = layout.get("screens", [])
     return screens[i] if i < len(screens) else {}
@@ -788,7 +800,7 @@ def apply_screens(wait=0):
                 raise
         time.sleep(1)
     start_remotes(sock, layout)
-    save_layout(layout)  # screen numbers given to new remote displays
+    save_on_the_way(layout)  # screen numbers given to new remote displays
     try:
         f = sock.ask("head").split()
     except RuntimeError:
@@ -1014,7 +1026,7 @@ def apply_gamescope(wait=0):
         results.append(reply)
     if size and list(size) != layout.get("panel_size"):
         layout["panel_size"] = [round(size[0], 4), round(size[1], 4)]
-        save_layout(layout)
+        save_on_the_way(layout)
     return results
 
 
@@ -1991,7 +2003,7 @@ def main(argv):
             use_named(layout, name)
             use_hidden(layout, name)
             open_remotes(layout, name)
-            save_layout(layout)
+            save_on_the_way(layout)
             log(f"starting in profile {name!r}")
             wait = float(argv[argv.index("--wait") + 1]) if "--wait" in argv else 60
             with open(LOCK_PATH, "w") as lock:
@@ -2069,7 +2081,7 @@ def main(argv):
                             # Arranged as the profile in use: its remote displays too.
                             profile_remotes(layout, name)
                             open_remotes(layout, name)
-                            save_layout(layout)
+                            save_on_the_way(layout)
                         try:
                             apply(wait)
                         except RuntimeError as e:

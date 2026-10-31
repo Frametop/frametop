@@ -3,14 +3,19 @@ host, small file and text helpers, and the versions a session records.
 
 Standard library only: the recorders run it in the dev container and, standalone, on the host."""
 import glob
+import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
-import ft_store  # noqa: E402  (JSON files written safely, DEE-300)
+try:
+    import ft_store  # (JSON files written safely, DEE-300)
+except ImportError:  # the standalone Hand Recorder ships recorder/ without conf/: store_json's own way
+    ft_store = None
 
 
 def mono_ns():
@@ -53,9 +58,34 @@ def host_path(path):
     return None
 
 
+def store_json(path, data, indent=1, newline=True, **kw):
+    """data into path through a temporary file of its own, flushed to disk and renamed, so a
+    crash never leaves half a file (ft_store.write_json, DEE-300). Without conf/ (the
+    standalone Hand Recorder) the same here: the file's mode kept, a new one 0600."""
+    if ft_store:
+        return ft_store.write_json(path, data, indent=indent, newline=newline, **kw)
+    path = os.path.realpath(path)
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix="." + os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=indent, **kw) + ("\n" if newline else ""))
+            f.flush()
+            os.fsync(f.fileno())
+        if os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_json(path, data):
-    """Write through a temporary file of its own, flushed to disk and renamed (ft_store, DEE-300)."""
-    ft_store.write_json(path, data, indent=1)
+    store_json(path, data, indent=1)
 
 
 def clean_text(s):

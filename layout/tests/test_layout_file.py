@@ -76,6 +76,18 @@ class LayoutFile(unittest.TestCase):
     def test_preset_not_an_object_is_kept(self):
         self.check_kept('{"preset": [1, 2]}')
 
+    def test_arranging_goes_on_over_a_bad_file(self):
+        # what start and apply note down on the way is logged, not raised, and not saved
+        self.write("[]")
+        said = []
+        self.m.log = said.append
+        with contextlib.redirect_stderr(io.StringIO()):
+            layout = self.m.load_layout()
+        layout["panel_size"] = [1.0, 0.5]
+        self.assertFalse(self.m.save_on_the_way(layout))
+        self.assertIn("won't save over it", said[-1])
+        self.assertEqual(pathlib.Path(self.m.LAYOUT_PATH).read_text(), "[]")
+
     def test_fixed_file_saves_again(self):
         self.write("not json")
         with contextlib.redirect_stderr(io.StringIO()):

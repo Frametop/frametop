@@ -265,11 +265,26 @@ class Cli(Home):
         path = os.path.join(self.home, ".config", "frametop-commands.json")
         with open(path, "w") as f:
             f.write('{"commands": [{"name": "keep-me", "run": "true"},]}')
-        for args in (("add", "new-one", "true"), ("remove", "keep-me"), ("list",)):
+        for args in (("add", "new-one", "true"), ("remove", "keep-me")):
             r = self.cli(*args)
             self.assertEqual(r.returncode, 1, args)
             self.assertIn("won't save over it", r.stderr)
         self.assertIn("keep-me", self.read(path))
+
+    def test_a_bad_entry_doesnt_stop_the_others(self):
+        # run, list, stop and log go on with what reads (an alias calls ft-cmd NAME); only
+        # saving is refused
+        os.makedirs(os.path.join(self.home, ".config"))
+        path = os.path.join(self.home, ".config", "frametop-commands.json")
+        text = json.dumps({"commands": [{"name": "keep-me", "run": "true"}, {"name": "keep-me", "run": "false"}]})
+        with open(path, "w") as f:
+            f.write(text)
+        r = self.cli("list")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("keep-me: true", r.stdout)
+        self.assertIn("won't save over it", r.stderr)
+        self.assertEqual(self.cli("add", "new-one", "true").returncode, 1)
+        self.assertEqual(self.read(path), text)
 
 
 if __name__ == "__main__":

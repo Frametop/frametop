@@ -12,6 +12,8 @@ import tempfile
 HOME = tempfile.mkdtemp(prefix="ft-gaze-calibration-store-test-")
 os.environ["HOME"] = HOME  # before gazecal: its STATE follows HOME
 
+import contextlib  # noqa: E402
+import io  # noqa: E402
 import json  # noqa: E402
 import sys  # noqa: E402
 import unittest  # noqa: E402
@@ -55,15 +57,28 @@ class SaveCalibration(unittest.TestCase):
         self.assertEqual(probe["steamvr"], {"samples": 9})
         self.assertEqual(sorted(os.listdir(self.dir)), [".calibration.json.lock", "calibration.json"])
 
-    def test_a_file_that_doesnt_read_is_kept(self):
+    def test_a_file_that_doesnt_read_is_copied_then_replaced(self):
         for text in ('{"steamvr": ', "[]"):
             with self.subTest(text=text):
                 self.path.write_text(text)
-                with self.assertRaisesRegex(ft_store.StoreError, "won't save over it"):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
                     gazecal.save_calibration({"steamvr": Model(1)}, "quadratic", "panel", path=self.path)
-                self.assertEqual(self.path.read_text(), text)
-                self.assertTrue(any((self.dir / n).read_text() == text
-                                    for n in os.listdir(self.dir) if n.startswith("calibration.json.bad-")))
+                self.assertIn("the new calibration replaces it", err.getvalue())
+                self.assertEqual(json.loads(self.path.read_text())["steamvr"], {"samples": 1})
+                self.assertEqual(sum((self.dir / n).read_text() == text
+                                     for n in os.listdir(self.dir) if n.startswith("calibration.json.bad-")), 1)
+
+    def test_no_copy_no_replace(self):
+        self.path.write_text("[]")
+        real = ft_store.backup
+        ft_store.backup = lambda path: None   # (a full disk: no copy can be made)
+        try:
+            with self.assertRaises(ft_store.StoreError):
+                gazecal.save_calibration({"steamvr": Model(1)}, "quadratic", "panel", path=self.path)
+        finally:
+            ft_store.backup = real
+        self.assertEqual(self.path.read_text(), "[]")
 
 
 class PruneBackups(unittest.TestCase):

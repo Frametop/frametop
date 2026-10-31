@@ -26,13 +26,24 @@ def save_calibration(models, model, how, live=None, calibrated_at=None, path=Non
     """calibration.json, in the one schema both writers use (DEE-300): each source's model
     (Correction.to_json), "_meta" {calibrated_at, model, how: "probe" or "panel"} and "_live"
     (the probe's click corrections per source; {} after the panel's calibration, which starts
-    them over). Written under the file's lock, through a temp file of its own. A file there
-    that doesn't read is kept (a copy next to it) and not saved over: ft_store.StoreError."""
+    them over). Written under the file's lock, through a temp file of its own. It replaces the
+    whole file, so one there that doesn't read is copied next to it (calibration.json.bad-TIME)
+    and then replaced, said on stderr; if no copy can be made, it stays: ft_store.StoreError."""
+    path = path or CALIBRATION
     d = {name: m.to_json() for name, m in models.items()}
     d["_meta"] = {"calibrated_at": time.time() if calibrated_at is None else calibrated_at,
                   "model": model, "how": how}
     d["_live"] = live or {}
-    ft_store.update_json(path or CALIBRATION, lambda _: d, None, ft_store.is_object, indent=1, newline=False)
+    with ft_store.locked(path):
+        try:
+            ft_store.load_json_strict(path, None, ft_store.is_object)
+        except ft_store.StoreError:
+            copy = ft_store.backup(path)   # (the copy load_json_strict made, found again)
+            if not copy:
+                raise
+            print(f"gazecal: {path} didn't read; it's kept as {copy}, and the new calibration replaces it",
+                  file=sys.stderr, flush=True)
+        ft_store.write_json(path, d, indent=1, newline=False)
     return d
 
 # --- Small math ---------------------------------------------------------------------

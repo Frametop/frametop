@@ -53,7 +53,17 @@ class WriteJson(unittest.TestCase):
                 finally:
                     os.replace = replace
                 self.assertEqual(self.read(), before)
-                self.assertEqual(os.listdir(self.dir), ["meta.json"])
+                self.assertEqual([n for n in os.listdir(self.dir) if "meta.json" in n], ["meta.json"])
+
+    def test_without_conf_the_same(self):
+        # the standalone Hand Recorder copies recorder/ without conf/
+        real = common.ft_store
+        common.ft_store = None
+        try:
+            self.test_same_bytes_as_before()
+            self.test_failed_write_keeps_the_old_file_and_leaves_no_temp()
+        finally:
+            common.ft_store = real
 
 
 if __name__ == "__main__":

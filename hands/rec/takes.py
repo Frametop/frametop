@@ -44,7 +44,7 @@ import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from recorder import age  # noqa: E402  (a debug session's recordings are encrypted)
 from recorder import contributions  # noqa: E402  (the log of uploads that outlives the sessions)
-from recorder.common import ft_store, tree_version  # noqa: E402
+from recorder.common import store_json, tree_version  # noqa: E402
 import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's panel and pointer decisions)
 from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge_ranges, read_json,  # noqa: E402,F401
                             sha256_file, tree_bytes, tree_stat, write_sums)
@@ -153,8 +153,8 @@ def disk_full(e):
 
 def write_json(path, obj):
     """Write through a temporary file of its own, flushed to disk and renamed, so a crash never
-    leaves half a file (ft_store, DEE-300)."""
-    ft_store.write_json(path, obj, indent=2)
+    leaves half a file (recorder.common.store_json, DEE-300)."""
+    store_json(path, obj, indent=2)
 
 
 def find_zstd():

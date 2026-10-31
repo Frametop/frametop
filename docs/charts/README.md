@@ -381,7 +381,7 @@ Open suspected bugs:
 
 | Id | Ticket | Rule | What happens | Why it's still open |
 | --- | --- | --- | --- | --- |
-| W5 | no ticket yet | NoMixedUnits, CurrentIsLive, PatchLands (minor) | `install.sh` runs 12 steps under `set -e`. A failing step or a power-off leaves the early steps' units in the new release and its container, the later ones in the old release, and `current` on the old one. `fast-install` then patches the old tree. Running the same command again finishes it | Documented, not fixed. A safe fix needs a transactional install (every unit written for the new release first, then one switch), which reworks all 12 steps and can't be checked without running an install. `install.sh` now says "Run the same command again to finish the install" when it stops early, and `pack/README.md` (step 6), `README.md` (Update) and `install-release.sh`'s header say the same |
+| W5 | [DEE-291](https://linear.app/deejanus/issue/DEE-291) | NoMixedUnits, CurrentIsLive, PatchLands (minor) | `install.sh` runs 12 steps under `set -e`. A failing step or a power-off leaves the early steps' units in the new release and its container, the later ones in the old release, and `current` on the old one. `fast-install` then patches the old tree. Running the same command again finishes it | Documented, not fixed. A safe fix needs a transactional install (every unit written for the new release first, then one switch), which reworks all 12 steps and can't be checked without running an install. `install.sh` now says "Run the same command again to finish the install" when it stops early, and `pack/README.md` (step 6), `README.md` (Update) and `install-release.sh`'s header say the same |
 
 Way around it until it is fixed: run the same command again.
 

@@ -2,7 +2,7 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-304.
+starts at DEE-304 (DEE-310 was done out of order, after DEE-308).
 
 ## Where the series is
 
@@ -14,14 +14,15 @@ starts at DEE-304.
 | 3b | DEE-311 | 865b852, b69b905, 2971c8d, af02582 (this note) |
 | 4 | DEE-306 | 3bb0ebf, 688de89, d464ac0, 35d9da4, 576b5d6, fb0077e |
 | 5 | DEE-307 | 84d60b3, 5277de1, cc476bf, 509bdf2, 60c9c3a, 383f0d8, 0cf0d21 |
-| 6 | DEE-308 | d298586, 0fb9407, 5d57eda, then this update |
+| 6 | DEE-308 | d298586, 0fb9407, 5d57eda, 099f7c2 |
+| 7 | DEE-310 | 898e760, d24de60, fe0a217, 6c0f032, 3d5af59, 3ad697c, then this update |
 
 What's left, in order:
 
 1. DEE-304, DEE-305 and DEE-303
 2. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
 
-DEE-310 is skipped. DEE-301's CI and lint work stays local only: no workflow change is pushed.
+DEE-310 is done (step 7). DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
 
@@ -78,7 +79,8 @@ DEE-310 is skipped. DEE-301's CI and lint work stays local only: no workflow cha
 - Local commits only. No push, tag, PR or remote branch change until Daenon says
   "let's push to remote".
 - No `rm` or `git rm` in agent shells (it stalls T3 on an approval prompt). Leave a file that
-  should go and list it below.
+  should go and list it below. DEE-310 had a one-off exception from Daenon: one batched `git rm`
+  of the backup keyboard's tracked files.
 - No install, fast-install, restarts, testbench or recorder runs, and no live config edits,
   during the series. Anything that needs those goes under device checks.
 - Reviews: at most one read-only Opus reviewer, for a significant change, after commit, with no
@@ -224,6 +226,54 @@ Still open:
 - `input_rules.save_rules`' docstring says it "writes nothing" on a bad file, but
   `load_json_strict` writes the `.bad-` copy. Wording only; fix it with the next code change.
 
+### From DEE-310
+
+Daenon's decision (2026-10-31, "We can remove the backup keyboard"): Full Keyboard is the only
+keyboard. It's recorded in `docs/design.md`, along with why its Steam keyboard replacement is on
+by default in Frametop's mode.
+
+- Removed (one `git rm`): `screens/keyboard.cpp`, `screens/keyboard.h`, `screens/rounded.h` and
+  `screens/tests/rounded-test.cpp`. That test checked the old panel's renderer byte for byte, so
+  test-c has 31 programs now, not 32. Removed in code: the FT_KEY and FT_KEYBOARD_CLOSED events,
+  `ft_vr_keyboard_show` and `hide`, `panel_key`, `kb_screen` and `kb_auto`, the panel's laser,
+  aim, drag and step-aside code, `keyboard=` in vr.cpp's debug line, and `kb_screen=` and
+  `kb_auto=` in compositor.c's.
+- The label font code (Noto Sans through stb_truetype) that the lazy susan, the reset question and
+  the pill used is now `screens/label.cpp` (`label::Draw`, `label::Width`), unchanged.
+- While Full Keyboard isn't running (no `fullkb` for 3 s), `vrkeyboard show` and `toggle` log
+  `keyboard not opened (...): Full Keyboard isn't running` and reply `ok no keyboard`.
+- Frametop's code in upstream's `run_vr` is now `FrametopVr` (`keyboard/src/frametop_vr.cpp`),
+  with no OpenVR calls. vr.cpp calls its hooks and fills `FrametopVrAccess` through its
+  runtime-watched wrappers. The diff against upstream's vr.cpp went from 259 changed lines to 102.
+  Tests: `keyboard/tests/frametop_tests.cpp` (`hooks_tests`).
+- FrametopSink resends desktop key releases that the relay didn't take (`owed_`, its socket
+  full) before the next key and at every pump. Presses aren't resent. A relay that restarts has
+  let go of everything and drops keys until the next `kbhello`, so a release owed then is lost
+  there, harmlessly. Tests: `owed_release_tests` (its stand-in relay has no hello gate).
+- Names waiver: `framekeyboard` and `framekeyboard-native-guard` stay as they are. See
+  `keyboard/FRAMETOP.md#names` and the root AGENTS.md.
+- `keyboard/AGENTS.md` now opens by saying the root rules win. FRAMETOP.md lists the upstream
+  parts that Frametop's mode never reaches. `scripts/update-check.py` has hints for libei
+  (gamescope's EIS server; Full Keyboard builds its own libei client in) and
+  deckard-steamvr-session. A deckard-mesa hint was dropped as unverified.
+- Review: one Opus reviewer after 6c0f032 found nothing Critical or Important. Its five Minor
+  findings were fixed in 3d5af59 and 3ad697c (owed release order, the restart wording,
+  reference.md's "crashes", gaze/README.md's pointer, the update-check hints).
+- Tests: the last full `just test` ran on 3ad697c (`/tmp/dee306/a310b.log`, exit 0): the same
+  counts as DEE-308's 5d57eda except test-c, 31 programs (rounded-test removed).
+- DEE-192 (non-US layouts) belongs to Full Keyboard. The old panel was US-only, so nothing it
+  needs was removed.
+
+Still open:
+- `docs/charts/G3-input.mmd` and its SVG still say "Frametop's key panel is up (vrkeyboard show)".
+  The chart needs regenerating, not just a text edit.
+- `docs/hazards.md:21` mentions "Frametop's keyboard's" Shift as history. It was left as it is.
+- Stale `screens/build/keyboard.o` sits in the worktree's build folder (untracked, not deleted).
+- A key press the relay didn't take isn't resent, on purpose: a late press would type.
+- No offline test runs ft-screens' `vrkeyboard` path (it needs a nested compositor, and
+  `--no-vr` next to the live desktop has crashed it before).
+- `pending_*` settings copies in `keyboard/src/app.cpp` follow upstream's pattern. Not changed.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
@@ -246,6 +296,13 @@ Each needs an install and the headset:
   change, tilting a panel while dragging it, placements (calibration sweep, panel placement) and
   a touch on a SteamVR panel. Panel commands from ft-layout, ft-floatd and the helper (place,
   pin, float, pose, sub, hands, steamvr list), and SteamVR panels by hand.
+- After DEE-310 (needs a build and install of ft-screens and Full Keyboard): typing with Full
+  Keyboard on the screens with a laser, a controller tip and a fingertip; opening it from a text
+  field, the keyboard button and frunner; closing it with its X and with a layout reset; the
+  dashboard and Steam-field replacement; with Full Keyboard quit, a text field opens nothing and
+  the log says why; a relay restart with Shift held leaves nothing stuck; a non-US layout
+  (German or Polish) on the desktop and in Steam; the lazy susan's labels, the reset question
+  and the Gamepad pill still have their text. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
 - After DEE-308: in Input Settings, map a button, add a key combination, add a command, run it,
   and remove it (its bindings go too); change a pointer setting; open it with a bad
   `frametop-input.json` (nothing is saved over it).

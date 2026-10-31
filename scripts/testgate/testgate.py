@@ -32,7 +32,8 @@ def run(path, python=sys.executable):
         env = dict(os.environ, FT_TEST_REPORT=report,
                    PYTHONPATH=os.pathsep.join(p for p in (HOOK, os.environ.get("PYTHONPATH")) if p))
         # files, not pipes: a server a test starts and leaves running can hold a pipe open
-        with open(os.path.join(tmp, "out"), "w+") as out, open(os.path.join(tmp, "err"), "w+") as err:
+        with open(os.path.join(tmp, "out"), "w+", errors="replace") as out, \
+                open(os.path.join(tmp, "err"), "w+", errors="replace") as err:
             code = subprocess.call([python, path], stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=env)
             out.seek(0)
             err.seek(0)
@@ -48,7 +49,7 @@ def run(path, python=sys.executable):
         return "skipped", seen["run"], skipped or [lines[-1] if lines else "(no reason given)"], stdout, stderr
     if code != 0:
         return "failed", seen["run"], skipped, stdout, stderr
-    if seen["skipped"] and len(seen["skipped"]) >= seen["run"]:
+    if seen["skipped"] and len(set(seen.get("skipped_tests", []))) >= seen["run"]:
         return "skipped", seen["run"], skipped, stdout, stderr
     return "ok", seen["run"], skipped, stdout, stderr
 

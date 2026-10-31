@@ -73,6 +73,20 @@ class Gate(unittest.TestCase):
         self.assertEqual(testgate.run(path)[:3], ("ok", 2, ["no headset"]))
         self.assertIn("b.py: ok, 1 skipped: no headset", self.gate("b.py")[1])
 
+    def test_skipped_subtests_are_one_tests(self):
+        path = self.case("s.py", """\
+            def test_a(self):
+                for i in range(3):
+                    with self.subTest(i=i):
+                        self.skipTest("no camera")
+            def test_b(self): pass
+            """)
+        self.assertEqual(testgate.run(path)[:3], ("ok", 2, ["no camera"] * 3))
+
+    def test_output_that_isnt_utf8(self):
+        path = self.file("u.py", "import sys\nsys.stdout.buffer.write(b'\\xff\\n')\nraise SystemExit(1)\n")
+        self.assertEqual(testgate.run(path)[0], "failed")
+
     def test_skip_in_setupclass(self):
         path = self.case("c.py", """\
             @classmethod

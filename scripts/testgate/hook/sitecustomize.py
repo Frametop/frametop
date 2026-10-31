@@ -12,7 +12,7 @@ if _report:
     import unittest
 
     _pid = os.getpid()
-    _seen = {"run": 0, "skipped": []}
+    _seen = {"run": 0, "skipped": [], "skipped_tests": []}
     _start, _skip = unittest.TestResult.startTest, unittest.TestResult.addSkip
 
     def _start_test(self, test):
@@ -21,6 +21,7 @@ if _report:
 
     def _add_skip(self, test, reason):
         _seen["skipped"].append(reason)
+        _seen["skipped_tests"].append(getattr(test, "test_case", test).id())   # a subtest's is its test's
         return _skip(self, test, reason)
 
     def _write():

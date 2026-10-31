@@ -125,6 +125,7 @@ test-keyboard:
     #!/usr/bin/env bash
     set -eo pipefail
     openvr=${OPENVR_LIB:-/opt/steamvr/bin/linuxarm64}
+    [ -f "$openvr/libopenvr_api.so" ] || { echo "keyboard ctest: SKIPPED: no libopenvr_api.so in $openvr"; exit 0; }
     out=build/tests/keyboard
     mkdir -p "$out"
     cmake -S keyboard -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \

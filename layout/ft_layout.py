@@ -141,6 +141,7 @@ FLOAT = "\0frametop_float"  # ft-floatd: the apps' windows (profiles)
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
 LAUNCHERS = os.path.expanduser("~/.local/share/applications")  # a profile's launcher entry each
 DEFAULT_PANEL = (1.18, 0.664)  # gamescope: a floating 16:9 dashboard panel, measured on the Frame
 PIXELS_PER_METRE = 800         # ft-screens: a new screen's default size in VR (1920 px: 2.4 m)
@@ -186,9 +187,9 @@ def screen_count(layout=None):
         return 2
 
 
-class LayoutFileError(RuntimeError):
-    """frametop-layout.json is there but doesn't read: it's kept as it is, with a copy next to it,
-    and nothing is saved over it (DEE-296)."""
+# frametop-layout.json is there but doesn't read: it's kept as it is, with a copy next to it, and
+# nothing is saved over it (DEE-296).
+LayoutFileError = ft_store.StoreError
 
 
 class Layout(dict):
@@ -197,45 +198,17 @@ class Layout(dict):
     base = None
 
 
-_warned = set()
-
-
-def _backup(path):
-    """A copy of the unreadable file at PATH.bad-TIME, unless one with the same bytes is there."""
-    try:
-        with open(path, "rb") as f:
-            data = f.read()
-        folder, name = os.path.split(path)
-        for other in sorted(os.listdir(folder or ".")):
-            if other.startswith(name + ".bad-"):
-                with open(os.path.join(folder, other), "rb") as f:
-                    if f.read() == data:
-                        return os.path.join(folder, other)
-        copy = f"{path}.bad-{time.strftime('%Y%m%d-%H%M%S')}"
-        with open(copy, "xb") as f:
-            f.write(data)
-        return copy
-    except OSError:
-        return None
+def _why_not(saved):
+    """Why the saved layout can't be used (or saved over), or None."""
+    if not isinstance(saved, dict):
+        return "it isn't a JSON object"
+    return None if isinstance(saved.get("preset", {}), dict) else '"preset" isn\'t an object'
 
 
 def read_layout_file():
     """The saved layout as it is in the file, None when there's none. LayoutFileError (after a
     copy is kept) when it isn't a JSON object with an object "preset"."""
-    try:
-        with open(LAYOUT_PATH, encoding="utf-8") as f:
-            saved = json.load(f)
-    except FileNotFoundError:
-        return None
-    except (OSError, ValueError) as e:
-        why = f"it doesn't read ({e})"
-    else:
-        if isinstance(saved, dict) and isinstance(saved.get("preset", {}), dict):
-            return saved
-        why = "it isn't a JSON object" if not isinstance(saved, dict) else '"preset" isn\'t an object'
-    copy = _backup(LAYOUT_PATH)
-    raise LayoutFileError(f"{LAYOUT_PATH}: {why}. Fix it or move it away: Frametop won't save over it"
-                          + (f" (a copy: {copy})" if copy else ""))
+    return ft_store.load_json_strict(LAYOUT_PATH, None, _why_not)
 
 
 def _with_defaults(saved):
@@ -251,14 +224,7 @@ def _with_defaults(saved):
 def load_layout():
     """The saved layout over DEFAULTS. A file that doesn't read gives the defaults, said once on
     stderr; saving is refused until it's fixed (save_layout)."""
-    try:
-        saved = read_layout_file()
-    except LayoutFileError as e:
-        if str(e) not in _warned:
-            _warned.add(str(e))
-            print(f"ft-layout: {e}", file=sys.stderr, flush=True)
-        saved = None
-    layout = Layout(_with_defaults(saved))
+    layout = Layout(_with_defaults(ft_store.load_json(LAYOUT_PATH, None, _why_not, who="ft-layout")))
     layout.base = json.loads(json.dumps(layout))
     return layout
 
@@ -271,20 +237,8 @@ def save_layout(layout):
     load_layout() writes only the keys it changed, over the file as it is now (another program's
     changes to other keys stay); any other dict is written whole. A file that doesn't read is
     never written over: LayoutFileError. Written to a temp file of its own, flushed to disk and
-    renamed (ft_conf.write_atomic), so a reader never sees half a file."""
-    folder = os.path.dirname(LAYOUT_PATH)
-    os.makedirs(folder, exist_ok=True)
-    lock_path = os.path.join(folder, "." + os.path.basename(LAYOUT_PATH) + ".lock")
-    with open(lock_path, "a") as lock:
-        deadline = time.monotonic() + 10
-        while True:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() > deadline:
-                    raise LayoutFileError(f"{LAYOUT_PATH}: another program kept it locked for 10 s; not saved")
-                time.sleep(0.02)
+    renamed (ft_store), so a reader never sees half a file."""
+    with ft_store.locked(LAYOUT_PATH):   # .frametop-layout.json.lock; 10 s, then LayoutFileError
         current = read_layout_file()   # LayoutFileError: refused
         base = getattr(layout, "base", None)
         out = dict(layout)
@@ -296,7 +250,7 @@ def save_layout(layout):
                         out[k] = layout[k]
                     else:
                         out.pop(k, None)
-        ft_conf.write_atomic(LAYOUT_PATH, json.dumps(out, indent=2))   # own temp file, fsync, rename
+        ft_store.write_json(LAYOUT_PATH, out, indent=2, newline=False)
     if isinstance(layout, Layout):
         layout.base = json.loads(json.dumps(layout))
 

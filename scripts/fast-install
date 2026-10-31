@@ -107,7 +107,7 @@ EXTRA_DIRS = {
                                  'commands', 'steam'),
     'frametop-input-relay.service': ('commands', 'conf'),
     'frametop-dashpatch.service': ('steam',),
-    'frametop-voice.service': ('input', 'commands'),
+    'frametop-voice.service': ('input', 'commands', 'conf'),
     'frametop-gaze.service': ('models', 'conf'),
     'frametop-camwatch.service': ('conf',),
 }

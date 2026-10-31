@@ -4,6 +4,7 @@ a temporary home. Run: python3 commands/test/test_commands.py"""
 import contextlib
 import io
 import json
+import multiprocessing
 import os
 import shutil
 import subprocess
@@ -19,6 +20,12 @@ sys.path.insert(0, str(HERE.parent))
 import ft_commands as fc  # noqa: E402
 
 FT_CMD = str(HERE.parent / "ft-cmd")
+
+
+def add_many(prefix, n):
+    """In a process of its own (forked: the test's home): add PREFIX0 .. PREFIX(n-1)."""
+    for i in range(n):
+        fc.add(f"{prefix}{i}", "true")
 
 
 class Home(unittest.TestCase):
@@ -101,6 +108,19 @@ class ListFile(Home):
         self.assertEqual(len(copies), 1)   # one copy, however often it's refused
         self.assertEqual(self.read(os.path.join(os.path.dirname(fc.COMMANDS_PATH), copies[0])), bad)
 
+    def test_two_programs_adding_both_land(self):
+        ctx = multiprocessing.get_context("fork")
+        procs = [ctx.Process(target=add_many, args=(prefix, 15)) for prefix in ("a", "b")]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(60)
+            self.assertEqual(p.exitcode, 0)
+        self.assertEqual(sorted(c["name"] for c in fc.load(strict=True)),
+                         sorted(f"{p}{i}" for p in "ab" for i in range(15)))
+        fc.add("a0", "echo again")  # the same name again replaces it
+        self.assertEqual([c["run"] for c in fc.load(strict=True) if c["name"] == "a0"], ["echo again"])
+
     def test_wrong_shape_or_dropped_entries_are_kept(self):
         for text in ('[{"name": "a", "run": "true"}]', '{"commands": {"a": "true"}}',
                      '{"commands": [{"name": "a", "run": "true"}, {"name": "has space", "run": "x"}]}'):
@@ -133,6 +153,40 @@ class Aliases(Home):
         self.assertTrue(fc.remove_bashrc_lines())
         self.assertEqual(self.read(fc.BASHRC), "export A=1\n")
         self.assertFalse(fc.remove_bashrc_lines())
+
+    def test_bashrc_rewrite_is_atomic_and_keeps_the_file(self):
+        real = os.path.join(self.home, "dotfiles-bashrc")
+        before = b"export A=1\r\n# caf\xe9 in latin-1\r\n"
+        with open(real, "wb") as f:
+            f.write(before)
+        os.chmod(real, 0o640)
+        os.symlink(real, fc.BASHRC)
+        replace = os.replace
+        os.replace = lambda *a: (_ for _ in ()).throw(OSError("disk gone"))
+        try:
+            with self.assertRaises(OSError):
+                fc.add_bashrc_lines()
+        finally:
+            os.replace = replace
+        with open(real, "rb") as f:
+            self.assertEqual(f.read(), before)  # a failed write leaves it whole
+        self.assertEqual(sorted(os.listdir(self.home)), [".bashrc", "dotfiles-bashrc"])  # no temp file
+        self.assertTrue(fc.add_bashrc_lines())
+        self.assertTrue(os.path.islink(fc.BASHRC))  # followed, not replaced
+        self.assertEqual(os.stat(real).st_mode & 0o777, 0o640)
+        with open(real, "rb") as f:
+            self.assertTrue(f.read().startswith(before))  # CRLF and odd bytes as they were
+        self.assertTrue(fc.remove_bashrc_lines())
+        with open(real, "rb") as f:
+            self.assertEqual(f.read(), before)
+
+    def test_read_only_bashrc_is_left(self):
+        with open(fc.BASHRC, "w") as f:
+            f.write("export A=1\n")
+        os.chmod(fc.BASHRC, 0o444)
+        with self.assertRaises(PermissionError):
+            fc.add_bashrc_lines()
+        self.assertEqual(self.read(fc.BASHRC), "export A=1\n")
 
     def test_no_bashrc_lines_without_commands(self):
         fc.save([])

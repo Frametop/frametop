@@ -1299,7 +1299,7 @@ class Backend(QObject):
             self.message.emit(problem, True)
             return False
         try:
-            ft_commands.save(ft_commands.load(strict=True) + [{"name": name, "run": run}])
+            ft_commands.add(name, run)
         except (OSError, ft_commands.CommandsFileError) as e:
             self.message.emit(f"Couldn't save {name}: {e}", True)
             return False
@@ -1311,8 +1311,7 @@ class Backend(QObject):
     @Slot(str)
     def removeCommand(self, name):
         try:
-            commands = ft_commands.load(strict=True)
-            ft_commands.save([c for c in commands if c["name"] != name])
+            ft_commands.remove(name)
         except (OSError, ft_commands.CommandsFileError) as e:
             self.message.emit(f"Couldn't remove {name}: {e}", True)
             return

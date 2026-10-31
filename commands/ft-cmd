@@ -58,7 +58,11 @@ def main(argv):
         if problem:
             print(f"ft-cmd add: {problem}", file=sys.stderr)
             return 1
-        ft_commands.save(commands + [{"name": name, "run": run}])
+        try:
+            ft_commands.add(name, run)
+        except (OSError, ft_commands.CommandsFileError) as e:
+            print(f"ft-cmd add: {e}", file=sys.stderr)
+            return 1
         ft_commands.link_cli()
         print(f"{name}: saved. New terminals have it as an alias; this one after: . ~/.config/frametop/aliases.sh")
         return 0
@@ -66,7 +70,11 @@ def main(argv):
         print(f"ft-cmd {verb}: no command called {name}", file=sys.stderr)
         return 1
     if verb == "remove":
-        ft_commands.save([c for c in commands if c["name"] != name])
+        try:
+            ft_commands.remove(name)
+        except (OSError, ft_commands.CommandsFileError) as e:
+            print(f"ft-cmd remove: {e}", file=sys.stderr)
+            return 1
         print(f"{name}: removed")
         return 0
     if verb == "stop":

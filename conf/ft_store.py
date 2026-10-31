@@ -4,6 +4,7 @@
     data = ft_store.load_json(path, {})                  # a file that doesn't read: {}, said once
     data = ft_store.load_json_strict(path, {}, check)    # one that doesn't read: StoreError
     ft_store.write_json(path, data, indent=2)            # temp file, fsync, rename
+    ft_store.write_text(path, text)                      # the same for a text file
     ft_store.update_json(path, fn, {})                   # lock, strict read, fn, write
 
 A file that doesn't read (not JSON, or check(data) says why not) is never written over: the
@@ -107,10 +108,15 @@ def dumps(data, indent=2, newline=True, **kw):
     return json.dumps(data, indent=indent, **kw) + ("\n" if newline else "")
 
 
-def write_json(path, data, indent=2, newline=True, **kw):
-    """data into path through a temp file of its own, flushed to disk and renamed (the file's
+def write_text(path, text):
+    """text into path through a temp file of its own, flushed to disk and renamed (the file's
     mode kept). A symlink is followed, not replaced."""
-    ft_conf.write_atomic(os.path.realpath(path), dumps(data, indent, newline, **kw))
+    ft_conf.write_atomic(os.path.realpath(path), text)
+
+
+def write_json(path, data, indent=2, newline=True, **kw):
+    """data into path as write_text does: json.dumps(indent, **kw), and a newline at the end."""
+    write_text(path, dumps(data, indent, newline, **kw))
 
 
 _held = threading.local()

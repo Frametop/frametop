@@ -27,6 +27,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "conf"))
+import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
+
 COMMANDS_PATH = os.path.expanduser("~/.config/frametop-commands.json")
 ALIASES_PATH = os.path.expanduser("~/.config/frametop/aliases.sh")
 BASHRC = os.path.expanduser("~/.bashrc")
@@ -103,54 +106,24 @@ def parse(data):
     return out, warnings
 
 
-class CommandsFileError(ValueError):
-    """The commands file is there but doesn't read (or has entries that would be dropped): it's
-    kept as it is, with a copy next to it, and nothing is saved over it (DEE-295)."""
+# The commands file is there but doesn't read (or has entries that would be dropped): it's kept
+# as it is, with a copy next to it, and nothing is saved over it (DEE-295).
+CommandsFileError = ft_store.StoreError
 
 
-def _backup(path):
-    """A copy of the unreadable file at PATH.bad-TIME, unless one with the same bytes is there.
-    The copy's name, or None when it couldn't be made."""
-    try:
-        with open(path, "rb") as f:
-            data = f.read()
-        folder, base = os.path.split(path)
-        for name in sorted(os.listdir(folder or ".")):
-            if name.startswith(base + ".bad-"):
-                with open(os.path.join(folder, name), "rb") as f:
-                    if f.read() == data:
-                        return os.path.join(folder, name)
-        copy = f"{path}.bad-{time.strftime('%Y%m%d-%H%M%S')}"
-        with open(copy, "xb") as f:
-            f.write(data)
-        return copy
-    except OSError:
-        return None
+def _why_not(data):
+    """Why data can't be saved back without losing something, or None."""
+    if not isinstance(data, dict) or ("commands" in data and not isinstance(data["commands"], list)):
+        return 'it isn\'t {"commands": [...]}'
+    return "; ".join(parse(data)[1]) or None
 
 
 def read_strict(path=None):
     """The saved commands ([] when there's no file). CommandsFileError when the file doesn't read
     as JSON, isn't {"commands": [...]}, or has an entry parse() would leave out: saving the list
     back would lose what's there."""
-    path = path or COMMANDS_PATH
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return []
-    except (OSError, ValueError) as e:
-        why = f"it doesn't read ({e})"
-    else:
-        commands, warnings = parse(data)
-        if not isinstance(data, dict) or ("commands" in data and not isinstance(data["commands"], list)):
-            why = 'it isn\'t {"commands": [...]}'
-        elif warnings:
-            why = "; ".join(warnings)
-        else:
-            return commands
-    copy = _backup(path)
-    raise CommandsFileError(f"{path}: {why}. Fix it or move it away: Frametop won't save over it"
-                            + (f" (a copy: {copy})" if copy else ""))
+    data = ft_store.load_json_strict(path or COMMANDS_PATH, None, _why_not)
+    return [] if data is None else parse(data)[0]
 
 
 def load(path=None, strict=False):
@@ -173,19 +146,34 @@ def find(name, commands=None):
     return next((c for c in (load() if commands is None else commands) if c["name"] == name), None)
 
 
-def save(commands, path=None, aliases=True):
-    """Write the list (atomically), then the aliases file and ~/.bashrc's lines (aliases=False:
-    the list only)."""
+def update(fn, path=None, aliases=True):
+    """Change the list under its lock: fn gets the saved commands and returns the new list, which
+    is written atomically; then the aliases file and ~/.bashrc's lines (aliases=False: the list
+    only). A file that doesn't read is never saved over: CommandsFileError (DEE-295)."""
     path = path or COMMANDS_PATH
-    read_strict(path)   # never over a file that doesn't read: CommandsFileError (DEE-295)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.tmp{os.getpid()}"
-    with open(tmp, "w") as f:
-        json.dump({"commands": [{"name": c["name"], "run": c["run"]} for c in commands]}, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, path)
+    out = []
+
+    def change(data):
+        out[:] = fn([] if data is None else parse(data)[0])
+        return {"commands": [{"name": c["name"], "run": c["run"]} for c in out]}
+    ft_store.update_json(path, change, None, _why_not)
     if aliases:
-        write_aliases(commands)
+        write_aliases(out)
+    return out
+
+
+def save(commands, path=None, aliases=True):
+    """Write the list as it is (see update)."""
+    return update(lambda _: list(commands), path, aliases)
+
+
+def add(name, run, path=None):
+    """Save NAME (one saved meanwhile by that name is replaced, never doubled)."""
+    return update(lambda cs: [c for c in cs if c["name"] != name] + [{"name": name, "run": run}], path)
+
+
+def remove(name, path=None):
+    return update(lambda cs: [c for c in cs if c["name"] != name], path)
 
 
 def quote(text):
@@ -211,11 +199,7 @@ def write_aliases(commands, path=None, bashrc=None):
     except OSError:
         same = False
     if not same:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = f"{path}.tmp{os.getpid()}"
-        with open(tmp, "w") as f:
-            f.write(text)
-        os.replace(tmp, path)
+        ft_store.write_text(path, text)
     if commands:
         add_bashrc_lines(bashrc)
 
@@ -224,22 +208,30 @@ def add_bashrc_lines(bashrc=None):
     """Append BASHRC_LINES to ~/.bashrc unless it has them. True if it added them."""
     bashrc = bashrc or BASHRC
     try:
-        with open(bashrc) as f:
+        with open(bashrc, encoding="utf-8", errors="surrogateescape", newline="") as f:  # bytes kept
             text = f.read()
     except FileNotFoundError:
         text = ""
     if BASHRC_MARK in text:
         return False
-    with open(bashrc, "a") as f:
-        f.write(("\n" if text and not text.endswith("\n") else "") + "\n" + "\n".join(BASHRC_LINES) + "\n")
+    _write_bashrc(bashrc, text + ("\n" if text and not text.endswith("\n") else "") + "\n"
+                  + "\n".join(BASHRC_LINES) + "\n")
     return True
+
+
+def _write_bashrc(bashrc, text):
+    """~/.bashrc rewritten whole, atomically (temp file, fsync, rename; mode kept, a symlink
+    followed), so a crash never leaves half of it. One we can't write stays as it is."""
+    if os.path.exists(bashrc) and not (os.access(bashrc, os.W_OK) and os.stat(bashrc).st_mode & 0o222):
+        raise PermissionError(f"{bashrc} is read-only: left as it is")
+    ft_store.write_text(bashrc, text)
 
 
 def remove_bashrc_lines(bashrc=None):
     """Take BASHRC_LINES (and the blank line before them) out of ~/.bashrc. True if it did."""
     bashrc = bashrc or BASHRC
     try:
-        with open(bashrc) as f:
+        with open(bashrc, encoding="utf-8", errors="surrogateescape", newline="") as f:  # bytes kept
             lines = f.read().split("\n")
     except FileNotFoundError:
         return False
@@ -256,8 +248,7 @@ def remove_bashrc_lines(bashrc=None):
         out.append(lines[i])
         i += 1
     if changed:
-        with open(bashrc, "w") as f:
-            f.write("\n".join(out))
+        _write_bashrc(bashrc, "\n".join(out))
     return changed
 
 

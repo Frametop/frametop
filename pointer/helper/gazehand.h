@@ -67,6 +67,8 @@
 // pointer's and the hand's in the room.
 #pragma once
 
+#include "../../screens/posemath.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -181,7 +183,7 @@ public:
         }
         const double gain = press ? p_.dragGain : p_.gain;
         const double ny = std::remainder(startY_ + gain * dy, 360.0);
-        const double np = std::clamp(startP_ + gain * dp, -85.0, 85.0);
+        const double np = std::clamp(startP_ + gain * dp, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
         const double step = std::hypot(std::remainder(ny - yaw_, 360.0), np - pitch_);
         if (step <= 0) return false;
         (press ? dragged_ : moved_) += step;

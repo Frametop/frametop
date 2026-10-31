@@ -541,6 +541,7 @@
 #include "../../conf/ft_conf.h"
 #include "../../hands/include/fh_events.h"
 #include "../../hands/include/fh_ray.h"
+#include "../../screens/posemath.h"
 #include "calpanel.h"
 #include "deskclass.h"
 #include "gazehand.h"
@@ -1965,7 +1966,7 @@ int main() {
         yaw += a;
         while (yaw > 180) yaw -= 360;
         while (yaw < -180) yaw += 360;
-        pitch = std::clamp(pitch + b, -85.0, 85.0);
+        pitch = std::clamp(pitch + b, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
     };
 
     std::printf("ft-pointer running: free distance %.2f m, dot %.2f deg\n", freeDistance, cursorDeg);
@@ -2531,7 +2532,7 @@ int main() {
                 anchor = eye;
                 anchored = true;
                 yaw = std::atan2(-g.x, -g.z) * 180 / M_PI;
-                pitch = std::clamp(std::asin(std::clamp(g.y, -1.0, 1.0)) * 180 / M_PI, -85.0, 85.0);
+                pitch = std::clamp(std::asin(std::clamp(g.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
             }
         }
 
@@ -2916,7 +2917,7 @@ int main() {
                 return;
             }
             yaw = std::remainder(hold.startYaw + gain * dy, 360.0);
-            pitch = std::clamp(hold.startPitch + gain * dp, -85.0, 85.0);
+            pitch = std::clamp(hold.startPitch + gain * dp, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
             // How far the nudge went: for a keyboard click, from where the dot was at the press
             // (a head wobbles on the way); otherwise the path, as with the mouse.
             if (!hold.pressed && hold.src == Src::Head)
@@ -3169,7 +3170,7 @@ int main() {
             auto angles = [](const fhray::V3 &d, double &y, double &p) {
                 const Vec3 n = Normalize({d.x, d.y, d.z});
                 y = std::atan2(-n.x, -n.z) * 180 / M_PI;
-                p = std::clamp(std::asin(std::clamp(n.y, -1.0, 1.0)) * 180 / M_PI, -85.0, 85.0);
+                p = std::clamp(std::asin(std::clamp(n.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
             };
             angles(rays[rs].Current().dir, h.refYaw, h.refPitch);
             fhray::Ray lock;
@@ -3303,7 +3304,7 @@ int main() {
             if (locked) {
                 const Vec3 d = Rotate(gazeHead, Direction(gs.hy, gs.hp));
                 yaw = std::atan2(-d.x, -d.z) * 180 / M_PI;
-                pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -85.0, 85.0);
+                pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
                 anchor = eye, anchored = true;
             }
             hold = h;
@@ -3714,7 +3715,7 @@ int main() {
                 const bool tap = tnow - hold.beganAt < std::chrono::duration<double>(rayTap);
                 if (hold.rayKind == 0 && !hold.rayThree) steer(ry, rp, tap ? std::max(rayDeadzone, rayTapDeadzone) : rayDeadzone, 1.0);
             } else {
-                yaw = ry, pitch = std::clamp(rp, -85.0, 85.0);
+                yaw = ry, pitch = std::clamp(rp, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
             }
             if (hold.src == Src::Ray && hold.rayKind == 0 && leftHeld) {
                 if (!hold.pushOn && rayPush && pressKey.empty() && FramePanel(lastHit) && hold.d0 > 0) {
@@ -3746,7 +3747,7 @@ int main() {
         // Head follow (see the top): past the leash (for the delay), ease the reference to the
         // head's facing, and turn the cursor with it. Not in gaze mode: the gaze places it.
         if (follow && !gazeOn && active && anchored && hmd.bPoseIsValid && !rayMode) {
-            const Vec3 head = LimitPitch(Vec3{-hm[0][2], -hm[1][2], -hm[2][2]}, 85);
+            const Vec3 head = LimitPitch(Vec3{-hm[0][2], -hm[1][2], -hm[2][2]}, posemath::kPitchClampDeg);
             if (followReset) {
                 followRef = head, followLag = 0, leashOutSince = {};
                 followReset = following = false;
@@ -3771,13 +3772,13 @@ int main() {
                 leashOutSince = {};  // back inside before the delay: a glance
             }
             followLag = keep;
-            const Vec3 ref = LimitPitch(PullWithin(followRef, head, keep), 85);
+            const Vec3 ref = LimitPitch(PullWithin(followRef, head, keep), posemath::kPitchClampDeg);
             if (!leftHeld && tnow >= dropHoldUntil) {
                 // The cursor keeps its offset from the reference (frames without roll).
                 Vec3 d = FromBasis(AimBasis(ref), ToBasis(AimBasis(followRef), Direction(yaw, pitch)));
                 d = PullWithin(Normalize(d), ref, followReach * M_PI / 180);
                 yaw = std::atan2(-d.x, -d.z) * 180 / M_PI;
-                pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -85.0, 85.0);
+                pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
                 // The ray origin closes in on the eye as the reference does on the facing.
                 anchor = eye + (anchor - eye) * (leash <= 0 ? 0.0 : lag > 1e-6 ? keep / lag : following ? 0.0 : 1.0);
             }

@@ -8,6 +8,10 @@
 
 namespace posemath {
 
+// How far up or down (degrees) a yaw/pitch aim may point: short of straight up or down, where
+// yaw stops meaning anything. The pointer helper's aims and gaze hold use it.
+constexpr double kPitchClampDeg = 85;
+
 template <class M>
 M Identity() {
     M m{};

@@ -89,6 +89,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/universefix-test.cpp \
       -o build/tests/universefix-test
     run screens/tests/universefix-test.cpp build/tests/universefix-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/posemath-test.cpp \
+      -o build/tests/posemath-test
+    run screens/tests/posemath-test.cpp build/tests/posemath-test
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/logfile-test.c -o build/tests/logfile-test
     run screens/tests/logfile-test.c build/tests/logfile-test
     # hands: the skeleton fit needs no model runtime; sides, pinch and flagbuf link ncnn,

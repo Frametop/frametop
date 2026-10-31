@@ -109,6 +109,7 @@ import eyes_model  # noqa: E402
 import eyes_pupil  # noqa: E402
 import fitcoach  # noqa: E402
 import ft_conf  # noqa: E402
+import ft_store  # noqa: E402  (JSON files written safely, DEE-300)
 
 def load_net():
     """The eye net EYES_MODEL picks (FT_EYES_MODEL wins), or None (the pupil finder). models/catalog.py
@@ -417,9 +418,7 @@ class Tracker:
     def save_state(self):
         d = {"calibration": self.cal.info.get("made") if self.cal else None,
              "shift": {e.eye: e.shift.to_json() for e in self.eyes}}
-        tmp = STATE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(d))
-        tmp.replace(STATE)
+        ft_store.write_json(STATE, d, indent=None, newline=False)
 
     def command(self, line):
         w = line.split()
@@ -500,6 +499,7 @@ class Tracker:
                     errs.append(float(np.hypot(*(g - k["truth"]))))
             if CALIBRATION.exists():
                 CALIBRATION.replace(CALIBRATION.with_name(time.strftime("calibration-%Y%m%d-%H%M%S.json")))
+                eyes_model.prune_backups(CALIBRATION.parent)   # the newest 10 earlier ones stay
             cal.save(CALIBRATION)
             self.cal, self.calibrating = cal, False
             for e in self.eyes:

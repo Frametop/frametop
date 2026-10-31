@@ -129,11 +129,12 @@ from pathlib import Path
 
 import fitcoach
 from fitcheck import MIN_REGION, FitCheck, wrap
-from gazecal import DEFAULT_MODEL, EYE_LOST, FUSION, STATE, Fusion, steady_samples
+from gazecal import DEFAULT_MODEL, EYE_LOST, FUSION, STATE, Fusion, save_calibration, steady_samples
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
 PANEL_PROG = REPO / "gaze" / "build" / "ft-gazepanel"
 PANEL = "\0ft_gazepanel"
 POINTER = "\0ft_pointer_helper"
@@ -1262,12 +1263,12 @@ class Checks:
             for name, pts in c["points"].items():
                 if name in svc.models and pts:
                     svc.models[name].fit(pts, mode)
-            d = {name: m.to_json() for name, m in svc.models.items()}
-            d["_meta"] = {"calibrated_at": time.time(), "model": mode, "how": "panel"}
-            d["_live"] = {}
-            tmp = CALIBRATION.with_suffix(".tmp")
-            tmp.write_text(json.dumps(d, indent=1))
-            tmp.replace(CALIBRATION)
+            try:
+                save_calibration(svc.models, mode, "panel", path=CALIBRATION)
+            except (OSError, ft_store.StoreError) as e:   # one that doesn't read stays (DEE-300)
+                log(f"calibration ({c['captured']} of {n} dots): not saved: {e}")
+                self.close()
+                return
             svc.forget_lessons()  # a new calibration: the pointer's lessons start over on top of it
             svc.load_calibration()
             svc.refit()

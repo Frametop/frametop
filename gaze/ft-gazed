@@ -156,6 +156,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "models"))
 import catalog  # noqa: E402  (which eye net EYES_MODEL means: models/catalog.py)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
 import ft_conf  # noqa: E402
+import ft_store  # noqa: E402  (JSON files written safely, DEE-300)
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "gaze" / "build" / "ft-gaze"
@@ -427,11 +428,9 @@ class Service:
         log(", ".join(f"{n} {len(self.lives[n].samples)}" for n in (self.source,) + SIDES) + " lessons")
 
     def save_lessons(self):
-        tmp = LESSONS.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"version": 2, "sources": {n: lv.samples for n, lv in self.lives.items() if lv.samples},
-                                   "misses": {t: w.misses for t, w in self.weights.items()},
-                                   "own_made": self.own_made}))
-        tmp.replace(LESSONS)
+        ft_store.write_json(LESSONS, {"version": 2, "sources": {n: lv.samples for n, lv in self.lives.items() if lv.samples},
+                                      "misses": {t: w.misses for t, w in self.weights.items()},
+                                      "own_made": self.own_made}, indent=None, newline=False)
         self.dirty = False
 
     def forget_lessons(self):

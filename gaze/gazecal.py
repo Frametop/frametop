@@ -11,10 +11,29 @@ import json
 import math
 import os
 import statistics
+import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
+
 STATE = Path.home() / ".local" / "state" / "frametop" / "gaze"
+CALIBRATION = STATE / "calibration.json"
+
+
+def save_calibration(models, model, how, live=None, calibrated_at=None, path=None):
+    """calibration.json, in the one schema both writers use (DEE-300): each source's model
+    (Correction.to_json), "_meta" {calibrated_at, model, how: "probe" or "panel"} and "_live"
+    (the probe's click corrections per source; {} after the panel's calibration, which starts
+    them over). Written under the file's lock, through a temp file of its own. A file there
+    that doesn't read is kept (a copy next to it) and not saved over: ft_store.StoreError."""
+    d = {name: m.to_json() for name, m in models.items()}
+    d["_meta"] = {"calibrated_at": time.time() if calibrated_at is None else calibrated_at,
+                  "model": model, "how": how}
+    d["_live"] = live or {}
+    ft_store.update_json(path or CALIBRATION, lambda _: d, None, ft_store.is_object, indent=1, newline=False)
+    return d
 
 # --- Small math ---------------------------------------------------------------------
 
@@ -866,10 +885,7 @@ class Fusion:
             return None
 
     def save(self, path=FUSION):
-        path = Path(path)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.to_json(), indent=1))
-        tmp.replace(path)
+        ft_store.write_json(path, self.to_json(), indent=1, newline=False)
 
 
 class SteamEyeLog:

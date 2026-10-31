@@ -19,10 +19,17 @@ jump (the headset nudged or put back on), until clicks catch up. On practice2 wi
 practice1's calibration: 1.2 degrees median, against 2.7 with the glints alone (findings.md).
 """
 import json
+import os
+import re
+import sys
 import time
 from collections import deque
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "conf"))
+import ft_store  # noqa: E402  (JSON files written safely, DEE-300; standard library only)
 
 SLIP_WINDOW = 30.0
 SLIP_MIN = 10        # pair sightings needed before trusting a slip estimate
@@ -158,16 +165,32 @@ class Calibration:
     def save(self, path):
         d = {"version": 1, "info": self.info, "spread": {str(e): s for e, s in self.spread.items()},
              "fits": [{"name": n, "eye": e, **q.to_json()} for (n, e), q in self.fits.items()]}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(d, indent=1))
-        tmp.replace(path)
+        ft_store.write_json(path, d, indent=1, newline=False)   # temp file of its own, fsync, rename
 
     @classmethod
     def load(cls, path):
         d = json.loads(path.read_text())
         return cls({(f["name"], f["eye"]): Quad.from_json(f) for f in d["fits"]}, d.get("info"),
                    {int(e): s for e, s in d.get("spread", {}).items()})
+
+
+BACKUP = re.compile(r"calibration-\d{8}-\d{6}\.json\Z")   # not calibration-dots.jsonl
+KEEP_BACKUPS = 10
+
+
+def prune_backups(folder, keep=KEEP_BACKUPS):
+    """Remove all but the newest `keep` earlier calibrations (calibration-YYYYmmdd-HHMMSS.json,
+    which ft-eyes keeps on each new one) from folder. Nothing else there is touched. The names
+    removed."""
+    names = sorted(n for n in os.listdir(folder) if BACKUP.match(n))
+    gone = []
+    for n in names[:max(0, len(names) - keep)]:
+        try:
+            os.unlink(os.path.join(folder, n))
+            gone.append(n)
+        except OSError:
+            pass
+    return gone
 
 
 class Shift:

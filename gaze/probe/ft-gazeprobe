@@ -131,7 +131,8 @@ class OwnTracker:
 # The math, filters, correction models, and SteamVR log reader are shared with ft-gazed.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gazecal import (DEFAULT_MODEL, MODELS, Correction, Fixation, LiveCorrection, OneEuro,  # noqa: E402
-                     SteamEyeLog, cross_validate, deg_from_px, px_from_deg, steady_samples)
+                     SteamEyeLog, cross_validate, deg_from_px, px_from_deg, save_calibration, steady_samples)
+from ft_store import StoreError  # noqa: E402  (gazecal put conf/ on the path)
 from fitcheck import FitCheck  # noqa: E402
 
 
@@ -2399,14 +2400,15 @@ class Probe(Adw.ApplicationWindow):
             pass
 
     def save_calibration(self):
-        path = STATE / "calibration.json"
-        tmp = path.with_suffix(".tmp")
-        d = {n: m.to_json() for n, m in self.models.items()}
-        d["_meta"] = {"calibrated_at": self.calibrated_at,
-                      "model": self.model_mode if hasattr(self, "w_model") else self.saved_model}
-        d["_live"] = {n: lc.samples for n, lc in self.live.items() if lc.samples}
-        tmp.write_text(json.dumps(d, indent=1))
-        tmp.replace(path)
+        """calibration.json (gazecal.save_calibration's schema). One there that doesn't read
+        stays as it is: said in the status line, not saved over (DEE-300)."""
+        try:
+            save_calibration(self.models, self.model_mode if hasattr(self, "w_model") else self.saved_model,
+                             "probe", {n: lc.samples for n, lc in self.live.items() if lc.samples},
+                             self.calibrated_at, STATE / "calibration.json")
+        except (OSError, StoreError) as e:
+            print(f"ft-gazeprobe: calibration not saved: {e}", file=sys.stderr, flush=True)
+            self.on_status(f"calibration not saved: {e}")
 
     def clear_clicks(self):
         """Forget what snap and practice clicks taught; the calibration stays."""

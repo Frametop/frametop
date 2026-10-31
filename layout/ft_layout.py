@@ -509,11 +509,8 @@ def save_anchor(eye, heading):
     """Where the screens were arranged from, for Display Settings' preview (which works it
     out from screen 1 without it, so a failed write only logs)."""
     try:
-        os.makedirs(os.path.dirname(ANCHOR_PATH), exist_ok=True)
-        tmp = ANCHOR_PATH + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump({"eye": [round(v, 4) for v in eye], "heading": round(heading, 2)}, f)
-        os.replace(tmp, ANCHOR_PATH)
+        ft_store.write_json(ANCHOR_PATH, {"eye": [round(v, 4) for v in eye], "heading": round(heading, 2)},
+                            indent=None, newline=False)
     except OSError as e:
         log(f"couldn't save where the screens were arranged from: {e}")
 

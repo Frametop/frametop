@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 
 COMMANDS_PATH = os.path.expanduser("~/.config/frametop-commands.json")
@@ -102,13 +103,70 @@ def parse(data):
     return out, warnings
 
 
-def load(path=None):
-    """The saved commands ([] when there's no file or it doesn't read)."""
+class CommandsFileError(ValueError):
+    """The commands file is there but doesn't read (or has entries that would be dropped): it's
+    kept as it is, with a copy next to it, and nothing is saved over it (DEE-295)."""
+
+
+def _backup(path):
+    """A copy of the unreadable file at PATH.bad-TIME, unless one with the same bytes is there.
+    The copy's name, or None when it couldn't be made."""
     try:
-        with open(path or COMMANDS_PATH) as f:
-            return parse(json.load(f))[0]
-    except (OSError, ValueError):
+        with open(path, "rb") as f:
+            data = f.read()
+        folder, base = os.path.split(path)
+        for name in sorted(os.listdir(folder or ".")):
+            if name.startswith(base + ".bad-"):
+                with open(os.path.join(folder, name), "rb") as f:
+                    if f.read() == data:
+                        return os.path.join(folder, name)
+        copy = f"{path}.bad-{time.strftime('%Y%m%d-%H%M%S')}"
+        with open(copy, "xb") as f:
+            f.write(data)
+        return copy
+    except OSError:
+        return None
+
+
+def read_strict(path=None):
+    """The saved commands ([] when there's no file). CommandsFileError when the file doesn't read
+    as JSON, isn't {"commands": [...]}, or has an entry parse() would leave out: saving the list
+    back would lose what's there."""
+    path = path or COMMANDS_PATH
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
         return []
+    except (OSError, ValueError) as e:
+        why = f"it doesn't read ({e})"
+    else:
+        commands, warnings = parse(data)
+        if not isinstance(data, dict) or ("commands" in data and not isinstance(data["commands"], list)):
+            why = 'it isn\'t {"commands": [...]}'
+        elif warnings:
+            why = "; ".join(warnings)
+        else:
+            return commands
+    copy = _backup(path)
+    raise CommandsFileError(f"{path}: {why}. Fix it or move it away: Frametop won't save over it"
+                            + (f" (a copy: {copy})" if copy else ""))
+
+
+def load(path=None, strict=False):
+    """The saved commands ([] when there's no file). A file that doesn't read gives the commands
+    it could read, said on stderr; strict: CommandsFileError (writers read this way)."""
+    try:
+        return read_strict(path)
+    except CommandsFileError as e:
+        if strict:
+            raise
+        print(f"frametop commands: {e}", file=sys.stderr)
+        try:
+            with open(path or COMMANDS_PATH, encoding="utf-8") as f:
+                return parse(json.load(f))[0]
+        except (OSError, ValueError):
+            return []
 
 
 def find(name, commands=None):
@@ -119,6 +177,7 @@ def save(commands, path=None, aliases=True):
     """Write the list (atomically), then the aliases file and ~/.bashrc's lines (aliases=False:
     the list only)."""
     path = path or COMMANDS_PATH
+    read_strict(path)   # never over a file that doesn't read: CommandsFileError (DEE-295)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.tmp{os.getpid()}"
     with open(tmp, "w") as f:

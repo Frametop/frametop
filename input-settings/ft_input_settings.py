@@ -1298,8 +1298,8 @@ class Backend(QObject):
             self.message.emit(problem, True)
             return False
         try:
-            ft_commands.save(ft_commands.load() + [{"name": name, "run": run}])
-        except OSError as e:
+            ft_commands.save(ft_commands.load(strict=True) + [{"name": name, "run": run}])
+        except (OSError, ft_commands.CommandsFileError) as e:
             self.message.emit(f"Couldn't save {name}: {e}", True)
             return False
         self.commandsChanged.emit()
@@ -1309,10 +1309,10 @@ class Backend(QObject):
 
     @Slot(str)
     def removeCommand(self, name):
-        commands = ft_commands.load()
         try:
+            commands = ft_commands.load(strict=True)
             ft_commands.save([c for c in commands if c["name"] != name])
-        except OSError as e:
+        except (OSError, ft_commands.CommandsFileError) as e:
             self.message.emit(f"Couldn't remove {name}: {e}", True)
             return
         # Buttons, controller buttons and key combinations that ran it would do nothing now.

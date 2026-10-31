@@ -1,6 +1,8 @@
 """Frametop commands (commands/ft_commands.py, ft-cmd): names, the list, the aliases file,
 ~/.bashrc's lines, the CLI link, and running in the background. Standard library only; runs in
 a temporary home. Run: python3 commands/test/test_commands.py"""
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -77,11 +79,35 @@ class ListFile(Home):
         self.assertEqual(fc.load(), [{"name": "a", "run": "echo 'hi'"}])
         self.assertEqual(json.loads(self.read(fc.COMMANDS_PATH)), {"commands": [{"name": "a", "run": "echo 'hi'"}]})
 
-    def test_unreadable_file_is_empty(self):
-        os.makedirs(os.path.dirname(fc.COMMANDS_PATH))
+    def write_list(self, text):
+        os.makedirs(os.path.dirname(fc.COMMANDS_PATH), exist_ok=True)
         with open(fc.COMMANDS_PATH, "w") as f:
-            f.write("{not json")
-        self.assertEqual(fc.load(), [])
+            f.write(text)
+
+    def test_unreadable_file_is_kept(self):
+        """DEE-295: one typo, then one Add, used to save [new] over every command."""
+        bad = '{"commands": [{"name": "a", "run": "true"},]}'   # a trailing comma
+        self.write_list(bad)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(fc.load(), [])   # readers: nothing, said on stderr
+        self.assertIn("doesn't read", err.getvalue())
+        with self.assertRaises(fc.CommandsFileError):
+            fc.load(strict=True)
+        with self.assertRaises(fc.CommandsFileError) as e:
+            fc.save([{"name": "b", "run": "true"}])
+        self.assertIn("won't save over it", str(e.exception))
+        self.assertEqual(self.read(fc.COMMANDS_PATH), bad)   # never overwritten
+        copies = [n for n in os.listdir(os.path.dirname(fc.COMMANDS_PATH)) if ".bad-" in n]
+        self.assertEqual(len(copies), 1)   # one copy, however often it's refused
+        self.assertEqual(self.read(os.path.join(os.path.dirname(fc.COMMANDS_PATH), copies[0])), bad)
+
+    def test_wrong_shape_or_dropped_entries_are_kept(self):
+        for text in ('[{"name": "a", "run": "true"}]', '{"commands": {"a": "true"}}',
+                     '{"commands": [{"name": "a", "run": "true"}, {"name": "has space", "run": "x"}]}'):
+            self.write_list(text)
+            with self.assertRaises(fc.CommandsFileError, msg=text):
+                fc.save([])
+            self.assertEqual(self.read(fc.COMMANDS_PATH), text)
 
 
 class Aliases(Home):
@@ -179,6 +205,17 @@ class Cli(Home):
         self.assertEqual(self.cli("remove", "my-thing").returncode, 1)
         self.assertEqual(self.cli("nothing-here").returncode, 1)
         self.assertEqual(self.cli().returncode, 2)
+
+    def test_refuses_over_a_bad_list(self):
+        os.makedirs(os.path.join(self.home, ".config"))
+        path = os.path.join(self.home, ".config", "frametop-commands.json")
+        with open(path, "w") as f:
+            f.write('{"commands": [{"name": "keep-me", "run": "true"},]}')
+        for args in (("add", "new-one", "true"), ("remove", "keep-me"), ("list",)):
+            r = self.cli(*args)
+            self.assertEqual(r.returncode, 1, args)
+            self.assertIn("won't save over it", r.stderr)
+        self.assertIn("keep-me", self.read(path))
 
 
 if __name__ == "__main__":

@@ -26,7 +26,11 @@ def main(argv):
         print(__doc__.strip())
         return 0 if argv else 2
     verb, args = (argv[0], argv[1:]) if argv[0] in VERBS else ("run", argv)
-    commands = ft_commands.load()
+    try:
+        commands = ft_commands.load(strict=True)
+    except ft_commands.CommandsFileError as e:
+        print(f"ft-cmd: {e}", file=sys.stderr)
+        return 1
     if verb == "list":
         busy = {}
         for _, name in ft_commands.running():

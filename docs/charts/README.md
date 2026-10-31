@@ -58,17 +58,23 @@ Results at `78e93b1`:
 
 States per run: 27,172 (PauseHide) to 34,942 (Joint).
 
-Open suspected bugs:
+Results with the fixes (`93cbf29`): every rule holds in every config, 66 runs. States per run: 1,856 (PauseLossy) to 32,770 (Joint); Presence is unchanged at 162. The model now describes the fixed code. To see the old breaks, check out `f85dff9` and run its copy of the model.
 
-| Id | Ticket | Rule | What happens |
-| --- | --- | --- | --- |
-| L1 | DEE-252 | PointerFreeWhilePaused | A relay restart forgets the 3D pointer the helper still holds, so the pause can't let it go |
-| L2 | DEE-253 | HandsOffWhilePaused | A desktop that starts during a pause starts camd and hands |
-| L3 | DEE-254 | HandsFollowDesktop | A resume job starts camd and hands with SteamVR off |
-| L4 | DEE-255 | GazeOffWhilePaused | `is-active` misses a restarting ft-gazed, and systemd brings it back mid-pause |
-| L5 | DEE-256 | GazeBackAfterResume, ClosedDesktopComesBack | A relay restart before the resume job loses the list of what the pause stopped |
-| L6 | DEE-257 | NoStuckGamePause | A relay restart while the game ends leaves Frametop paused |
-| L7 | DEE-258 | DesktopMatchesPause (PauseLossy) | One lost "pause off" datagram leaves the panels hidden, because ft-screens' pause is sticky |
+With L7's fix, ft-screens out of step with the relay is a transient, like a restarting unit: its next report (`ScreensReport`) corrects it, and `Quiet` waits for that report. So in G1, DesktopMatchesPause no longer catches a lost datagram on its own. G2's liveness rule HiddenComesBack carries that check.
+
+The chart (`G1-lifecycle.mmd`, `.svg`) still draws L1 to L7 red. It is due a redraw.
+
+Fixed bugs:
+
+| Id | Ticket | Rule | What happened | Fix |
+| --- | --- | --- | --- | --- |
+| L1 | DEE-252 | PointerFreeWhilePaused | A relay restart forgot the 3D pointer the helper still held, so the pause couldn't let it go | Fixed in `93cbf29`. `Pointer.stand_down` always sends `hide pause`, and a relay that starts paused stands its pointer down |
+| L2 | DEE-253 | HandsOffWhilePaused | A desktop that started during a pause started camd and hands | Fixed in `93cbf29`. The session runs `ft-pause enforce` after `handsmode up`, and a paused relay stops them again |
+| L3 | DEE-254 | HandsFollowDesktop | A resume job started camd and hands with SteamVR off | Fixed in `93cbf29`. The resume starts units only with SteamVR running, and with HANDS_MODE=frametop, hand tracking only with the desktop running |
+| L4 | DEE-255 | GazeOffWhilePaused | `is-active` missed a restarting ft-gazed, and systemd brought it back mid-pause | Fixed in `93cbf29`. `stop_units` counts `activating` and `reloading` as running |
+| L5 | DEE-256 | GazeBackAfterResume, ClosedDesktopComesBack | A relay restart before the resume job lost the list of what the pause stopped | Fixed in `93cbf29`. A relay that starts unpaused with a leftover list runs the resume |
+| L6 | DEE-257 | NoStuckGamePause | A relay restart while the game ended left Frametop paused | Fixed in `93cbf29`. A relay that starts in a pause that ends with its game takes the game as running, so `vrgame 0` or GAME_STALE ends the pause |
+| L7 | DEE-258 | DesktopMatchesPause (PauseLossy) | One lost `pause off` datagram left the panels hidden, because ft-screens' pause is sticky | Fixed in `93cbf29`. ft-screens adds its pause flag to its `keyboard` report each second, and the relay tells one that is out of step again |
 
 ## G6 Remote displays and host input
 

@@ -19,6 +19,7 @@ from contextlib import redirect_stdout
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import camcheck  # noqa: E402
+from recorder import fhformat  # noqa: E402  (the ring's layout, checked against fhring.h by recorder/tests)
 
 REAL_LOG = os.path.expanduser("~/.local/share/Steam/logs/XRService-2026.10.02/XRService-13-39-32.log")
 
@@ -274,14 +275,16 @@ class RealLog(unittest.TestCase):
         self.assertEqual(out.getvalue().split("\n")[0], "ok")
 
 
-def make_ring(path, mono_names, alive=True, nodes=None):
-    """A ring header as ft-camd writes it (camd/fhring.h), no frames."""
-    cams = [(b"og01a1b", n.encode(), nodes[i] if nodes else 9 + i) for i, n in enumerate(mono_names)]
+def make_ring(path, mono_names, alive=True, nodes=None, flags=None):
+    """A ring header as ft-camd writes it (camd/fhring.h, by recorder/fhformat.py's layout rather
+    than camcheck's own, so the test isn't checking camcheck against itself), no frames."""
+    cams = [(b"og01a1b", n.encode(), nodes[i] if nodes else 9 + i, flags[i] if flags else 0)
+            for i, n in enumerate(mono_names)]
     hb = time.clock_gettime_ns(time.CLOCK_MONOTONIC) if alive else 1
-    data = bytearray(camcheck.RING_HDR.pack(b"FHRING01", 1, 0, len(cams), 0, 0, 4242, 0))
-    struct.pack_into("<Q", data, 40, hb)
-    for sensor, name, node in cams:
-        data += camcheck.RING_CAM.pack(sensor, name, node, 0, 1056, 1024, 1056, 16, 0, 0, 0, 0, 0, 0, 0.0)
+    data = bytearray(fhformat.RING_HDR.pack(fhformat.RING_MAGIC, fhformat.RING_VERSION, 0, len(cams), 0, 0, 4242, 0))
+    struct.pack_into("<Q", data, fhformat.RING_HEARTBEAT_OFF, hb)
+    for sensor, name, node, flag in cams:
+        data += fhformat.RING_CAM.pack(sensor, name, node, 0, 1056, 1024, 1056, 16, 0, 0, 0, 0, 0, flag, 0.0)
     with open(path, "wb") as f:
         f.write(bytes(data))
 
@@ -302,6 +305,12 @@ class Ring(unittest.TestCase):
         r = camcheck.check(log=self.log, proc=False, ring_path=self.ring)
         self.assertEqual(r["status"], "degraded")
         self.assertIn("ft-camd publishes only 2 of 4", r["reason"])
+
+    def test_dark_and_colour_cameras_by_flag_dont_count(self):
+        # a dark twin and a colour camera named like mono ones: their flags say what they are
+        make_ring(self.ring, ["slam_video9", "slam_video13", "upper_a", "upper_b"],
+                  flags=[0, 0, fhformat.CAM_DARK, fhformat.CAM_COLOR])
+        self.assertEqual([c["name"] for c in camcheck.read_ring(self.ring)["mono"]], ["slam_video9", "slam_video13"])
 
     def test_ring_missing_the_side_cameras(self):
         # an ft-camd from before NV12 support, without the colour module: only the upper pair

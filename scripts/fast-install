@@ -109,7 +109,7 @@ EXTRA_DIRS = {
     'frametop-dashpatch.service': ('steam',),
     'frametop-voice.service': ('input', 'commands', 'conf'),
     'frametop-gaze.service': ('models', 'conf'),
-    'frametop-camwatch.service': ('conf',),
+    'frametop-camwatch.service': ('conf', 'recorder'),
 }
 # Units restarted for the files their processes run, not those files' folders: the desktop
 # (restarting it ends what's open on it; input/ft-textinput shouldn't restart it for all of

@@ -32,7 +32,6 @@ import math
 import os
 import re
 import shutil
-import struct
 import subprocess
 import sys
 
@@ -40,6 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 from recorder import age  # noqa: E402  (its shape check needs no cryptography library)
 from recorder.privacy import key_identifies, strip_calibration  # noqa: E402  (standard library only)
+from recorder import fhformat  # noqa: E402  (FHSET01's layout)
 from recorder.checks import (Cancelled, Report, check_sums, is_uuid4, listed, need,  # noqa: E402,F401
                              read_json_file)
 
@@ -65,8 +65,7 @@ TAKE_RE = re.compile(r"^\d{2}-[a-z0-9][a-z0-9-]*$")
 SESSION_RE = re.compile(r"^\d{8}-\d{6}(?:-\d+)?$")
 CAM_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,15}$")
 TAKE_STATUSES = ("complete", "stopped", "skipped")
-HDR = struct.Struct("<8sII")       # fh_set_hdr_t: magic, ncams, bytes (hands/track/record.h)
-CAM = struct.Struct("<16sIIQQ")    # fh_set_cam_t: name, width, height, capture_ns, dqbuf_ns
+HDR, CAM = fhformat.SET_HDR, fhformat.SET_CAM   # FHSET01 (hands/track/record.h)
 MAX_CAMS = 16
 MIN_SIDE, MAX_SIDE = 16, 4096
 # One round is about 10 GB before compression (ft_handrec.ROUND_BYTES), a few GB after it.
@@ -170,7 +169,7 @@ class SetParser:
                 return
             magic, ncams, nbytes = HDR.unpack_from(self.buf, 0)
             where = f"set {self.sets + 1}"
-            if magic != b"FHSET01\0":
+            if magic != fhformat.SET_MAGIC + b"\0":
                 self.problem = f"{where}: not an FHSET01 record"
                 return
             if not 0 < ncams <= MAX_CAMS:

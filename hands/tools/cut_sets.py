@@ -5,9 +5,12 @@ usage: python3 tools/cut_sets.py REC_DIR OUT_DIR [--sets N] (8, spread evenly) |
 """
 import argparse
 import os
-import struct
+import sys
 
-HDR = struct.Struct('<8sII')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from recorder import fhformat  # noqa: E402  (FHSET01, hands/track/record.h)
+
+HDR = fhformat.SET_HDR
 
 
 def offsets(path):
@@ -17,7 +20,7 @@ def offsets(path):
         while off + HDR.size <= size:
             f.seek(off)
             magic, _, nbytes = HDR.unpack(f.read(HDR.size))
-            if magic[:7] != b'FHSET01' or off + nbytes > size:
+            if magic[:7] != fhformat.SET_MAGIC or off + nbytes > size:
                 break
             offs.append((off, nbytes))
             off += nbytes

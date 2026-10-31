@@ -40,8 +40,9 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
+from recorder import fhformat  # noqa: E402  (FHSET01, hands/track/record.h)
 from recorder import age  # noqa: E402  (a debug session's recordings are encrypted)
 from recorder import contributions  # noqa: E402  (the log of uploads that outlives the sessions)
 from recorder.common import store_json, tree_version  # noqa: E402
@@ -51,9 +52,7 @@ from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge
 
 DEFAULT_BASE = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MAGIC = b"FHSET01"
-HDR = struct.Struct("<8sII")       # fh_set_hdr_t: magic, ncams, bytes (the whole record)
-CAM = struct.Struct("<16sIIQQ")    # fh_set_cam_t: name, width, height, capture_ns, dqbuf_ns
+MAGIC, HDR, CAM = fhformat.SET_MAGIC, fhformat.SET_HDR, fhformat.SET_CAM
 MAX_CAMS = 16                      # SetReader's limit
 PART_RE = re.compile(r"^sets(?:-(\d+))?\.bin$")
 LIVE_RE = re.compile(r"^live(?:-(\d+))?\.bin$")    # a debug session's copies of the live tracker's output

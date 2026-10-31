@@ -67,6 +67,7 @@ from recorder.common import (mono_ns, clock_sample, in_container, host_command, 
                              steamvr_version as _steamvr_version)
 from recorder import bounties  # noqa: E402
 from recorder.privacy import strip_calibration  # noqa: E402
+from recorder import fhformat  # noqa: E402  (the camera ring's layout)
 from recorder.units import unit_active, start_unit, stop_unit, pause_units, resume_units, restart_units  # noqa: E402,F401
 from recorder.button import (INPUT_DEVICES, INPUT_EVENT, EV_KEY, EV_REL, REL_X, REL_Y, KEY_SELECT,  # noqa: E402,F401
                              BUTTON_DEVICE, BUTTON_DOUBLE_S, BUTTON_HOLD_S, BUTTON_BOUNCE_S, parse_input_devices,
@@ -173,12 +174,10 @@ def fix_hint(frametop):
 
 
 # ------------------------------------------------------------------------------------------
-# The camera ring (camd/fhring.h; tools/ring.py's layout, struct only)
+# The camera ring (camd/fhring.h, in recorder/fhformat.py; struct only)
 
-RING_HDR = struct.Struct("<8sIIIIQqQ16x")              # 64 bytes
-RING_CAM = struct.Struct("<32s32siIIIIIQQQQQIf24x")      # 160 bytes
-RING_SLOT = struct.Struct("<QQQQQIf16x")                 # 64 bytes, the image follows
-FH_CAM_DARK, FH_CAM_COLOR = 1, 2
+RING_HDR, RING_CAM, RING_SLOT = fhformat.RING_HDR, fhformat.RING_CAM, fhformat.RING_SLOT
+FH_CAM_DARK, FH_CAM_COLOR = fhformat.CAM_DARK, fhformat.CAM_COLOR
 
 
 class Ring:
@@ -189,12 +188,12 @@ class Ring:
         finally:
             os.close(fd)
         magic, version, _, ncams, _, _, self.writer_pid, _ = RING_HDR.unpack_from(self.map, 0)
-        if magic != b"FHRING01" or version != 1:
+        if magic != fhformat.RING_MAGIC or version != fhformat.RING_VERSION:
             self.map.close()
             raise ValueError("%s isn't a camera ring" % path)
         self.cams = []
-        for i in range(min(ncams, 8)):
-            f = RING_CAM.unpack_from(self.map, RING_HDR.size + i * RING_CAM.size)
+        for i in range(min(ncams, fhformat.RING_MAX_CAMS)):
+            f = RING_CAM.unpack_from(self.map, fhformat.ring_cam_offset(i))
             self.cams.append({
                 "index": i, "sensor": f[0].split(b"\0", 1)[0].decode(errors="replace"),
                 "name": f[1].split(b"\0", 1)[0].decode(errors="replace"), "node": f[2],
@@ -205,17 +204,17 @@ class Ring:
         self.map.close()
 
     def alive(self, max_age=1.0):
-        hb = struct.unpack_from("<Q", self.map, 40)[0]
+        hb = struct.unpack_from("<Q", self.map, fhformat.RING_HEARTBEAT_OFF)[0]
         return hb != 0 and (mono_ns() - hb) / 1e9 < max_age
 
     def _cam_field(self, cam, fmt, off):
-        return struct.unpack_from(fmt, self.map, RING_HDR.size + cam["index"] * RING_CAM.size + off)[0]
+        return struct.unpack_from(fmt, self.map, fhformat.ring_cam_offset(cam["index"]) + off)[0]
 
     def latest(self, cam):
-        return self._cam_field(cam, "<Q", 104)
+        return self._cam_field(cam, "<Q", fhformat.RING_CAM_LATEST_OFF)
 
     def dark_mean(self, cam):
-        return self._cam_field(cam, "<f", 132)
+        return self._cam_field(cam, "<f", fhformat.RING_CAM_DARK_MEAN_OFF)
 
     def mono(self):
         """The mono tracking cameras (no dark twins, no colour cameras, also by name for

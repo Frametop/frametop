@@ -669,6 +669,7 @@ void SendTo(int fd, const char *name, const std::string &msg) {
     std::lock_guard<std::mutex> guard(lock);
     auto it = logs.find(name);
     if (it == logs.end()) {
+        if (logs.size() >= 64) logs.clear();   // (some names come from other programs: calpanel's owner)
         it = logs.emplace(name, ft_sock_log{}).first;
         it->second.name = it->first.c_str();
     }

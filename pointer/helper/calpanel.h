@@ -21,8 +21,9 @@
 #include <cstring>
 #include <string>
 
-extern "C" {
 #include "../../conf/ftsock.h"
+
+extern "C" {
 #include "../../hands/include/fh_gestures.h"
 }
 

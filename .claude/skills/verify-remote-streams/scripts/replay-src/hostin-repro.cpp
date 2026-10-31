@@ -14,6 +14,7 @@
 #include <time.h>
 #include <vector>
 #include <nlohmann/json.hpp>
+#include "ftsock.h"
 #include "hostinput.h"
 using namespace ftstream;
 

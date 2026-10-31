@@ -55,7 +55,7 @@ def build(work, repo):
     os.chmod(Path(work, 'fake-ft-stream'), 0o755)
     subprocess.run([sys.executable, '-I', str(Path(work, 'extract.py')), str(repo / 'stream/ft-stream.cpp'),
                     str(Path(work, 'hostin_struct.inc')), tag], check=True)
-    steps = [['g++', '-std=c++17', '-O0', '-Wall', f'-I{repo}/stream', '-o', 'hostin-repro', 'hostin-repro.cpp'],
+    steps = [['g++', '-std=c++17', '-O0', '-Wall', f'-I{repo}/stream', f'-I{repo}/conf', '-o', 'hostin-repro', 'hostin-repro.cpp'],
              ['gcc', '-std=gnu11', '-O0', '-Wall', '-DWLR_USE_UNSTABLE', f'-I{repo}/screens',
               '-I/usr/include/wlroots-0.20', '-I/usr/include/libdrm', '-I/usr/include/pixman-1',
               '-o', 'remote-repro', 'remote-repro.c', f'{repo}/screens/remote.c', '-lwlroots-0.20', '-lwayland-server']]

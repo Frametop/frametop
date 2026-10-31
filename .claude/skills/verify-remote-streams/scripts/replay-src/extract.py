@@ -6,7 +6,7 @@ text = open(src).read()
 start = text.index('struct HostInput {')
 end = text.index('\n};\n', start) + 4
 body = text[start:end]
-old = '*kRelay = "frametop_relay", *kHelper = "ft_pointer_helper"'
+old = '*kRelay = FT_SOCK_RELAY, *kHelper = FT_SOCK_POINTER_HELPER'
 assert body.count(old) == 1, 'socket names moved'
 body = body.replace(old, f'*kRelay = "fttest_relay_{tag}", *kHelper = "fttest_helper_{tag}"')
 open(dst, 'w').write(body)

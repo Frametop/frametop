@@ -1,0 +1,234 @@
+---
+title: "G3 Input and pointer: the input relay, ft-screens' keys, the pointer helper's laser and trigger, keyboards, voice typing, gamepad mode (78e93b1)"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    direction LR
+    lg0: Up, off, or nothing held
+    lg1: Held or driving, as it should be
+    lg2: Between: a hand-off, a grab waiting on keys up, a release owed
+    lg3: Let go of by a pause, a timer or someone else
+    lg4: Suspected open bug: the state that breaks the rule
+    lg5: K1 open, VirtualComesUp: a mouse button pressed while paused or with POINTER=0 goes to the virtual mouse. Resume or POINTER=1 while it is held sends its release to the helper, and the virtual mouse keeps it down (red K1.1-3, TLC, 3 steps)
+    lg6: K2 open, minor, DriverComesUp: POINTER=0 while a pointer-mode button is held drops the Pointer with no stand_down. Its release goes to the virtual mouse, and the laser's trigger stays down (red K2.1-3, TLC, 3 steps)
+    lg7: K3 open, DesktopComesUp: a relay restart while a key is down on the desktop. The release goes past the dead relay, and the new one lets go of modifiers and mouse buttons only. KWin keeps the key down and repeats it (red K3.1-4, TLC, 4 steps, keyboards and host keyboards)
+    lg8: K4 open, OneTriggerHolder and HolderHasTrigger: the mouse's button asks nobody. Pressed during a touch or a ray pinch, it shares the one trigger and one leftHeld, and the first let-go ends both drags (red K4.1-4, TLC, 3 and 4 steps)
+    lg9: K5 open, NoOrphanTrigger: the pointer is let go while a touch holds the trigger (last used wins, headset off, no hand role, the ray going off). Line 2378 forgets the touch with no trigger up, and the next wake connects the controller pressed (red K5.1-5, TLC, 5 steps)
+    lg10: K6 open, VirtualComesUp: the virtual mouse, keyboard and gamepad come back from the fd store with keys down after a relay restart. The new relay's node.held is empty and VirtualPad starts NEUTRAL (red K6.1-4, TLC, 4 steps, gamepad from the code)
+    lg11: K7 open, DriverComesUp: a relay restart while a pointer-mode button is down. The release never reaches the helper, its leftHeld and the driver's trigger stay down until the next click (red K7.1-4, TLC, 4 steps). G1's L1 is the same restart, for the pointer itself
+    lg12: Holds at 78e93b1 (fixed DEE-222 956ed81 drawn green): G3Keys Stay 96 states and Mods 180 (every key comes up without restarts, modifiers with them), G3Laser OneOwnerPerHand (302), NoOrphanTrigger once let-go waits for a touch (Waits, 178). HostInputLease 5 of 5, HostChart 345, RemoteStreams 5 of 5 match the baseline
+    lg13: Escape hatch for K1 K3 (not K2 K5 K6 K7): Ctrl+Alt+Shift+Esc (release_keys) lets go of the desktop, a remote display and node.held. Pressing the stuck key again also clears it
+    lg14: Another group: arrows into it are where G3 touches it, drawn there, not here
+  }
+  class lg0 teal
+  class lg1 blue
+  class lg2 yellow
+  class lg3 orange
+  class lg4 breaks
+  class lg5 bugLegend
+  class lg6 bugLegend
+  class lg7 bugLegend
+  class lg8 bugLegend
+  class lg9 bugLegend
+  class lg10 bugLegend
+  class lg11 bugLegend
+  class lg12 fixed
+  class lg13 legendNote
+  class lg14 xgroup
+  state "Relay: a key from a pass-through keyboard (input-relay.py 2163-2176, apply_roles 1726-1758, G3Keys.tla)" as kr {
+    k0: Up
+    [*] --> k0
+    k1: Down, typing goes to Steam: not grabbed, Steam reads it raw
+    k2: Down, typing goes to the desktop: grabbed, to_screens, screens_down has it
+    k3: Down with the relay gone: its grab went with it, ft-screens never hears (datagrams)
+    k4: Up, a new relay: it lets go of modifiers and mouse buttons only, screens_down is empty
+  }
+  state "ft-screens: where a key goes (screens/compositor.c handle_key 948-978, held-keys.h)" as fs {
+    s0: Nothing down
+    [*] --> s0
+    s1: KWin has it down (the seat's key_held)
+    s2: Released with no screen focused: owed to KWin (lost_keys, 40)
+    s3: A remote display has it (key_remote, ft_remote_key)
+    s4: Frunner's search has it (spot_send)
+    s5: Stuck in KWin: nobody left knows, it repeats
+  }
+  state "Relay: a pointer-role mouse button (input-relay.py 2178-2194, Pointer.action 867-893)" as pb {
+    b0: Up
+    [*] --> b0
+    b1: Down in pointer mode: the helper's btn trigger 1, driver_down
+    b2: Down, paused or POINTER=0: the virtual mouse has it (node.held)
+    b7: Down, stood down: pause_changed's stand_down let the driver go
+    b8: Down, pointer mode back: the virtual mouse still has it
+    b9: Down, POINTER=0: the Pointer dropped with no stand_down
+    b5: Down with the relay gone
+    b3: Up, the virtual mouse still down
+    b4: Up, the helper's leftHeld and the driver's trigger still down
+  }
+  state "Pointer helper: who drives the laser (ft-pointer.cpp, rayowner.h, handoff.h, G3Laser.tla)" as lo {
+    l0: Asleep: the virtual controller hidden, the laser SteamVR's
+    [*] --> l0
+    l1: The mouse drives it, or gaze mode places it
+    l2: A hand ray drives it: one owner, 0.5 s grace, the other hand takes it by a pinch or a raise
+    l3: A touch on a SteamVR panel poses it (ft-screens touch): nothing else poses it
+    l4: That hand's controller has it (handoff: a touch, press or move), its ray left at once
+  }
+  state "The laser's one trigger (driver_ft_pointer.cpp state_.buttons, G3Laser.tla 302 states)" as tr {
+    t0: Up
+    [*] --> t0
+    t1: Down for one holder: a touch, a ray pinch, or the mouse (pressLeft)
+    t2: Two holders on one trigger and one leftHeld
+    t3: Up while a holder still holds it
+    t4: Down, the pointer let go of with the touch holding it
+    t5: Down with no holder: hide keeps it, the next wake connects it pressed
+  }
+  state "Keyboards (ft-textinput, ft-screens' key panel, Full Keyboard)" as kb {
+    y0: No keyboard
+    [*] --> y0
+    y1: A text field has focus: Frametop's key panel is up (vrkeyboard show)
+    y2: Full Keyboard holds a key: kb_held says desktop or Steam
+  }
+  state "Voice typing (voice/ft-voiced, the relay's typing queue 1518-1600)" as vt {
+    v0: Idle
+    [*] --> v0
+    v1: Listening: dictate toggles, dictate_hold while held, works while paused
+    v2: Typing: type TEXT on @frametop_relay, one key at a time, waits while a modifier is held
+  }
+  state "Gamepad mode (input/vrpad.py)" as gp {
+    g0: Off
+    [*] --> g0
+    g1: For a desktop panel: VirtualPad, an Xbox 360 pad on uinput (fd store)
+    g2: For a remote display: pad lines to ft-screens, its ft-stream's Moonlight pad
+    g3: Reused after a relay restart: starts NEUTRAL, buttons left down stay down
+  }
+  state "Other groups" as og {
+    o1: G1 Lifecycle and presence
+    o2: G2 Desktop and panels
+    o4: G4 Gaze
+    o5: G5 Hands
+    o6: G6 Remote displays and host input
+  }
+  kr --> fs: to_screens key code value
+  pb --> tr: btn trigger to the helper
+  lo --> tr: touches and ray pinches press it
+  kb --> fs: Full Keyboard's desktop keys go to_screens
+  vt --> fs: dictation's keys on the desktop
+  k0 --> k1: a press, typing goes to Steam
+  k0 --> k2: (K3.1) a press, typing goes to the desktop
+  k1 --> k0: its release, read raw
+  k2 --> k0: its release: to_screens 0 (reconcile_desktop_keys each second for a lost one)
+  k1 --> k1: typing flips while it is down: the grab waits for keys up
+  k2 --> k3: (K3.2) the relay dies or restarts
+  k3 --> k4: (K3.3 K3.4) it is let go while the relay is down, a new relay starts
+  k4 --> s5: (K3.4) the release that was owed never comes
+  k0 --> o6: G6: a host's keyboard and mouse are network nodes here, leased by ft-stream. TLC Host: K3 and K6 there too
+  s0 --> s1: a press with a screen focused, typing on the desktop
+  s0 --> s3: a press while a remote display has the typing
+  s0 --> s4: a press while Frunner is open
+  s1 --> s0: its release: the desktop's own key goes to the desktop, wherever typing is
+  s1 --> s2: its release with no screen focused
+  s2 --> s0: (fixed DEE-222 956ed81) the next focus sends the owed release (keyboard_enter)
+  s3 --> s0: its release, or a click elsewhere blurs it (ft_remote_blur)
+  s4 --> s0: its release, or Frunner closes
+  s5 --> s0: only the key pressed and let go again, or release_keys
+  s1 --> o2: G2: clicks move the keyboard focus between panels (set_key_remote, spot_dismiss)
+  b0 --> b1: (K2.1 K7.1) a press, pointer mode on
+  b0 --> b2: (K1.1 K6.1) a press while paused or with POINTER=0
+  b1 --> b0: its release: btn trigger 0
+  b2 --> b0: its release on the virtual mouse
+  b1 --> b7: Frametop pauses: stand_down, pointer None
+  b7 --> b0: its release goes to the virtual mouse: nothing to let go
+  b2 --> b8: (K1.2) Frametop resumes, or POINTER=1
+  b8 --> b3: (K1.3) its release goes to do_action: btn trigger 0, and continue
+  b1 --> b9: (K2.2) POINTER=0 (load_config)
+  b9 --> b4: (K2.3) its release goes to the virtual mouse
+  b1 --> b5: (K7.2) the relay dies
+  b2 --> b5: (K6.2) the relay dies
+  b5 --> b4: (K7.3 K7.4) it is let go with no relay, a new relay starts
+  b5 --> b3: (K6.3 K6.4) the same, the virtual mouse from the fd store
+  b3 --> b0: release_keys, an unplug, or its next click through the virtual mouse
+  b4 --> b0: the next click in pointer mode
+  b1 --> o1: G1: pausing runs stand_down (pause_changed)
+  b5 --> o1: G1 L1: the same restart forgets the 3D pointer the helper holds
+  l0 --> l1: mouse input wakes it
+  l0 --> l2: a hand ray wakes it (rayEnter)
+  l1 --> l2: a hand ray takes it
+  l2 --> l2: the other hand takes over (rayowner.h)
+  l2 --> l3: the hand comes near a panel: the owner leaves at once
+  l0 --> l3: a touch wakes it, or claims the laser back
+  l3 --> l0: touch end: the hand left (trigger up if down)
+  l2 --> l4: that hand picks up its controller: its ray goes, the pointer with it
+  l4 --> l0: SteamVR's laser follows the controller
+  l4 --> l2: handoff back: 1.5 s untouched, 3 s still
+  l1 --> l0: a controller moves (last used wins), the headset goes off
+  l1 --> o4: G4: gaze mode places it, gaze pinches hold it back (aimHeld)
+  l2 --> o5: G5: hand rays and near come from hand tracking
+  t0 --> t1: (K4.1 K4.2 K5.1-3) a ray pinch, a touch press once the laser is ours, or a mouse button
+  t1 --> t0: its own release
+  t1 --> t2: (K4.3) a mouse button during a touch or a ray pinch: leftButton asks nobody
+  t2 --> t3: (K4.4) one lets go (the mouse, or the ray's hold ending as lost): btn trigger 0 for both
+  t3 --> t0: the last holder lets go: a second trigger 0
+  t1 --> t4: (K5.4) last used wins, the headset off, no hand role, or a ray going off: releasePointer
+  t4 --> t5: (K5.5) line 2378 resets the touch with no btn trigger 0
+  t5 --> t0: the next touch or click and its release
+  y0 --> y1: ft-textinput: textfield 1, if the keyboard setting allows
+  y1 --> y0: textfield 0, or the panel closes
+  y0 --> y2: a key on Full Keyboard (key code value in the typing queue)
+  y2 --> y0: its release, or kb_gone: each comes up where it went down
+  v0 --> v1: dictate or dictate_hold, a Right Ctrl tap: toggle or start on @frametop_voice
+  v1 --> v0: stop, or cancel (another key while held: a shortcut)
+  v1 --> v2: words heard
+  v2 --> v0: the queue is empty: desktop layout keys to_screens, or US keys on the virtual keyboard
+  g0 --> g1: the Steam menu's pill: gamepad desktop each second
+  g0 --> g2: the pill on a remote display: gamepad remote
+  g1 --> g2: the target changes: it lets go on the old one
+  g1 --> g0: off: a pause, a VR game, 3 s with no word (LEASE), let_go
+  g2 --> g0: off, the same
+  g1 --> g3: (K6) from the code: the relay restarts with a pad button down
+  g3 --> g0: only pressing and letting go of that button again
+  g2 --> o6: G6: the host gets a Moonlight Xbox pad
+  class k0 teal
+  class k1 blue
+  class k2 blue
+  class k3 yellow
+  class k4 breaks
+  class s0 teal
+  class s1 blue
+  class s2 yellow
+  class s3 blue
+  class s4 blue
+  class s5 breaks
+  class b0 teal
+  class b1 blue
+  class b2 blue
+  class b7 orange
+  class b8 yellow
+  class b9 yellow
+  class b5 yellow
+  class b3 breaks
+  class b4 breaks
+  class l0 teal
+  class l1 blue
+  class l2 blue
+  class l3 blue
+  class l4 orange
+  class t0 teal
+  class t1 blue
+  class t2 breaks
+  class t3 breaks
+  class t4 yellow
+  class t5 breaks
+  class y0 teal
+  class y1 blue
+  class y2 blue
+  class v0 teal
+  class v1 blue
+  class v2 blue
+  class g0 teal
+  class g1 blue
+  class g2 blue
+  class g3 breaks
+  class o1 xgroup
+  class o2 xgroup
+  class o4 xgroup
+  class o5 xgroup
+  class o6 xgroup

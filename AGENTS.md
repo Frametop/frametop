@@ -2,6 +2,10 @@
 
 Rules for people and coding agents changing this repo. The README covers what Frametop is and how to install it; `docs/reference.md` covers each component, and `docs/design.md` records how SteamVR on the Frame behaves and why things are built the way they are. Read its notes on SteamVR before changing how the screens, the pointer, or the input relay talk to SteamVR.
 
+## Charts and models
+
+`docs/charts/` holds state charts and TLA+ models of how Frametop's parts start, stop, hand things over and fail. When a question or change touches lifecycle, pausing for VR games, worn or away, remote displays and host input, input and the pointer, gaze, or another charted area, read the matching chart's `.mmd` and model first. [docs/charts/README.md](docs/charts/README.md) says which group covers what, lists the rules each model checks and the open suspected bugs with their tickets, and shows how to re-run a check with `frame-job`.
+
 ## Two ways to run the scripts
 
 Every script works in both modes, and must keep working in both:

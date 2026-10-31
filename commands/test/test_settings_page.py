@@ -96,6 +96,19 @@ class Page(unittest.TestCase):
         self.assertFalse(saved)
         self.assertIn("on the headset", problem)
 
+    def test_add_button_comes_back_after_a_check_that_fails(self):
+        real = self.b.commandNameProblem
+
+        def broken(name):
+            raise RuntimeError("no host")
+        self.b.commandNameProblem = broken
+        try:
+            self.assertEqual(self.added("broken", "true"), [(False, "")])
+            self.assertTrue(self.messages[-1][1])            # said in the message bar
+        finally:
+            self.b.commandNameProblem = real
+        self.assertEqual(self.added("after", "true"), [(True, "")])   # ...and the button works again
+
     def test_remove_drops_its_bindings(self):
         self.b.addCommand("x", "true")
         self.b.addCommand("y", "true")

@@ -7,7 +7,9 @@ client makes sure a late answer can't be taken for the next one:
 
 - Before each question it drops whatever is already waiting on its socket.
 - After a question gets no answer in time, it moves to a new socket: an answer that comes
-  later goes to the old one, which is closed.
+  later goes to the old one, which is closed. That holds for an autobound socket only: one
+  bound to a name (bind=) gets the same name back, so a late answer can still reach the next
+  question if it comes after that question was sent. Long-lived askers should autobind.
 
     c = ftipc.Client()
     reply = c.ask("ft_screens", "remotes", timeout=1.0)   # str, or None
@@ -160,4 +162,7 @@ class Worker:
             finally:
                 self._jobs.task_done()
             if then is not None:
-                self.deliver(then, result)
+                try:
+                    self.deliver(then, result)
+                except Exception as e:   # (its receiver gone, at the app's exit)
+                    print(f"ftipc: couldn't deliver an answer: {e!r}", flush=True)

@@ -134,6 +134,19 @@ class FtipcTest(unittest.TestCase):
         self.assertEqual(got, ["ok one", None, "ok two", ""])
         self.assertEqual(w.pending(), 0)
 
+    def test_worker_survives_a_deliver_that_fails(self):
+        got, done = [], threading.Event()
+
+        def deliver(then, result):
+            if result == "bad":
+                raise RuntimeError("receiver gone")
+            then(result)
+        w = ftipc.Worker(deliver)
+        w.run(lambda c: "bad", then=got.append)
+        w.run(lambda c: "good", then=lambda r: (got.append(r), done.set()))
+        self.assertTrue(done.wait(2))
+        self.assertEqual(got, ["good"])
+
 
 if __name__ == "__main__":
     unittest.main()

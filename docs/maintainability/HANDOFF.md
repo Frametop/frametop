@@ -2,7 +2,7 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-305 (DEE-310 was done out of order, after DEE-308).
+starts at DEE-303 (DEE-310 was done out of order, after DEE-308).
 
 ## Where the series is
 
@@ -16,14 +16,15 @@ starts at DEE-305 (DEE-310 was done out of order, after DEE-308).
 | 5 | DEE-307 | 84d60b3, 5277de1, cc476bf, 509bdf2, 60c9c3a, 383f0d8, 0cf0d21 |
 | 6 | DEE-308 | d298586, 0fb9407, 5d57eda, 099f7c2 |
 | 7 | DEE-310 | 898e760, d24de60, fe0a217, 6c0f032, 3d5af59, 3ad697c, 25dd9f9 (note) |
-| 8 | DEE-304 | cb6d442, 60cc62e, c55e509, ceced31, 6ac87b6, a8a6a7e, 77b59d2, 9da7cd3, 8c72d59, then this update |
+| 8 | DEE-304 | cb6d442, 60cc62e, c55e509, ceced31, 6ac87b6, a8a6a7e, 77b59d2, 9da7cd3, 8c72d59, e1a6a8d (note) |
+| 9 | DEE-305 | a286deb, 8e1b0f7, 6a4d65d, 97006a9, 729588d, fbc84e4, 48786c4, then this update |
 
 What's left, in order:
 
-1. DEE-305 and DEE-303
+1. DEE-303
 2. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
 
-DEE-310 and DEE-304 are done (steps 7 and 8). DEE-301's CI and lint work stays local only: no workflow change is pushed.
+DEE-310, DEE-304 and DEE-305 are done (steps 7 to 9). DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
 
@@ -335,6 +336,58 @@ Still open:
 - The remote-streams replay should be run once (`scripts/replay` in that skill) to confirm its
   baseline.
 
+### From DEE-305
+
+One Python client for the datagram sockets, and no blocking host calls on the settings apps' UI
+threads. No behaviour change except where noted.
+
+- `conf/ftipc.py`: `Client` (`ask`, `send`, `why` = `nobody`, `timeout` or the error), one-shot
+  `ask` and `exchange`, and `Worker` for UIs. The servers don't echo request IDs, so there are
+  none. Instead the client drains its socket before each question and moves to a new socket
+  after a timeout, so a late answer goes to a closed socket. That protection doesn't hold for a
+  client bound to a name (`bind=`): ft-gazectl, gaze-report and ft-gazeprobe keep their old
+  bound names (`ft_gazectl.PID` ...), so they only get the drain, as before. ft_gazed only
+  answers the sender's address, so ft-gazeprobe, the one long-lived one, could autobind to get
+  the full protection. `MAX_REPLY` is
+  1 MiB, replies decode as UTF-8 with bad bytes replaced, and the timeout is per call. Test:
+  `conf/test/ftipc-test.py` (late answer, waiting datagram, 150 KB answer, worker order, a
+  failing job, a failing deliver).
+- Moved to it: ft_layout's `Socket` and `ask_float`, ft_floatd's screens socket, frunner,
+  Display Settings, Remote Displays, ft-gazectl, gazecheck's `ask`, ft-gazeprobe, the bench's
+  recorder socket, gaze-report, keys-report and report-watch. No-answer messages now say why.
+- Display Settings and Remote Displays ask through one `ftipc.Worker` each. Answers come back
+  through a queued Qt signal. The poll is one job, and a new poll isn't queued while one is
+  pending. Input Settings runs the Bluetooth read, Apply fixes (pkexec) and the Add check on
+  threads. Their busy flags clear in a `finally`.
+- `conf/fthost.py`: one `host_command`. Recorder's version won, because it starts host commands
+  in the home folder (`env -C ~`): Display Settings and Remote Displays now do too. Their
+  callers pass absolute paths. `recorder/common.py` keeps its own copy, because the standalone
+  Hand Recorder ships without `conf/`.
+- One resolution list, `ft_layout.SCREEN_RESOLUTIONS` (Display Settings' list). Remote Displays
+  gains "portrait 4K" (2160x3840), the same pixel count as 4K. It already offered portrait
+  sizes.
+
+Copies left alone, on purpose:
+
+- `gaze/bench/gazebench.py`, `gaze/rec/session.py`, `hands/rec/session.py` and gazecheck's
+  panel/service class: one socket gets both events and replies, and the code sorts them. ftipc's
+  drain would drop events.
+- `recorder/one_window.py`: SOCK_STREAM. `tour/ft_tour.py`, `input/rules-migrate.py`: send
+  only. The input-relay and game-pause code: servers, or non-blocking.
+- `voice/voice_settings.py`: reload and devices on one socket. It could move to `ftipc.Client`
+  in a later pass.
+
+Open:
+
+- `scripts/fast-install`: `frametop-desktop.service` doesn't list `conf` in `EXTRA_DIRS`, so a
+  fast-install that changes only `conf/ftipc.py` won't restart ft_floatd or frunner. The unit is
+  file-level, and adding `conf` would restart the desktop for any conf change. Left for a
+  decision. The gap already existed for `ft_conf.py`.
+- Display Settings' curve: the layout edit now runs when ft-screens answers. If a screen were
+  removed in those milliseconds, index `i` could point at another screen.
+- No test drives the Display Settings or Remote Displays worker path (the poll guard, the
+  answers' order).
+
 ## Device checks still to do
 
 Each needs an install and the headset:
@@ -371,6 +424,12 @@ Each needs an install and the headset:
   (float and dock, scale, frunner, relay keys, the dashboard pill, gaze calibration, the panels,
   a stream with host input); the new "to @NAME" log lines; no "no render node" fallback. Listed
   in `~/Desktop/Projects/HEADSET-TESTS.md`.
+- After DEE-305 (Python only, a fast-install): Display Settings' poll, pins, curve, hide and
+  show, power status and Displays off, with the window staying smooth; Remote Displays' stream
+  states and portrait 4K; Input Settings' Bluetooth refresh, Apply fixes with the pkexec prompt
+  (the window keeps repainting) and Add command; ft-layout, floatd and frunner asks; ft-gazectl,
+  gazecheck, gaze-report, ft-gazeprobe and Gaze Bench; restart desktop and the ft-layout runs
+  from both apps. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
 - After DEE-308: in Input Settings, map a button, add a key combination, add a command, run it,
   and remove it (its bindings go too); change a pointer setting; open it with a bad
   `frametop-input.json` (nothing is saved over it).

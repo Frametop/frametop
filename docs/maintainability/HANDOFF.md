@@ -2,7 +2,7 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-306.
+starts at DEE-307.
 
 ## Where the series is
 
@@ -11,14 +11,14 @@ starts at DEE-306.
 | 1 | DEE-299 | b1bd58c |
 | 2 | DEE-300 (with the DEE-295 and DEE-296 fixes) | 1bb43cb, e2b5609, acc4d05, c56aab7, 16dc51b, 364dba1, 7c3abb1, 2bffb10 |
 | 3 | DEE-302, plus DEE-300 follow-ups | 655fa8c, 4c16b1e, c48201a, 63089ef, dd8f7ba, 80954b5 |
-| 3b | DEE-311 | 865b852, b69b905, 2971c8d, then this note |
+| 3b | DEE-311 | 865b852, b69b905, 2971c8d, af02582 (this note) |
+| 4 | DEE-306 | 3bb0ebf, 688de89, d464ac0, 35d9da4, 576b5d6, then this update |
 
 What's left, in order:
 
-1. DEE-306
-2. DEE-307 and DEE-308
-3. DEE-304, DEE-305 and DEE-303
-4. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
+1. DEE-307 and DEE-308
+2. DEE-304, DEE-305 and DEE-303
+3. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
 
 DEE-310 is skipped. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
@@ -146,6 +146,31 @@ Still open:
   - ft-remote-settings and FrameDrop's progress window are GTK 4. Their smoke tests skip in the
     dev image (no PyGObject) and pass on the Frame.
 
+### From DEE-306
+
+`input/input-relay.py`'s `main()` is now a `Relay` class. main() makes the virtual devices and
+the sockets, then calls `recover_from_restart()` and `run()`. The state lives in `PointerLease`,
+`HeldKeys`, `Typing` and `FullKeyboardLink`; the pause's is `game_pause.GamePause`, as before.
+`input/test/restart-test.py` makes a `Relay` with fakes and never runs the loop. Use it as the
+model for new relay unit tests.
+
+- keys-test and hostin-test rename the ft-screens socket by replacing its constructor line in the
+  source text (`screens_sock = socket.socket(...)`, once, in main()). Keep that line as it is, or
+  change those tests with it.
+- Running the relay tests with a RELAY argument that points at a copy outside `input/` fails 4
+  keys-test checks (Frametop's tools are found relative to the relay's path). That holds for an
+  unchanged copy too.
+
+Still open:
+- L5 and L6 recovery stays in `GamePause.load`, not in `recover_from_restart`: it has to run
+  before the rules configure the pause (with automatic pausing off, `configure` ends a pause's tie
+  to its game). Moving it means changing GamePause's construction.
+- `control_command` is still one if-chain of about 170 lines. Splitting it per command is next if
+  the control socket grows.
+- restart-test doesn't cover K7's stop when the helper isn't running, or K3 when ft-screens isn't.
+- After a restart, a plain key the desktop had down stays in this relay's record until the next
+  scan (about 1 s); ft-screens has already let go of it. Pinned in restart-test, not changed.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
@@ -161,3 +186,5 @@ Each needs an install and the headset:
 - `session/test` on the host.
 - The GTK smoke tests (`remote/tests`, `framedrop/tests`) run, rather than skip, in an
   environment with PyGObject.
+- The relay after DEE-306: start it paused and unpaused, restart it with a key and a click held,
+  reload with a bad rules file. Nothing should differ from before.

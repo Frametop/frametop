@@ -1,0 +1,292 @@
+{
+ "about": "frametop.conf grammar vectors (docs/config.md), run by conf/test/conf-test.py against ft_conf.py, ft_conf.h (C and C++) and bash",
+ "ok": [
+  {
+   "line": "KEY=value",
+   "value": "value"
+  },
+  {
+   "line": "  KEY=value",
+   "value": "value"
+  },
+  {
+   "line": "\tKEY=value",
+   "value": "value"
+  },
+  {
+   "line": "KEY=",
+   "value": ""
+  },
+  {
+   "line": "KEY=value   # a comment",
+   "value": "value"
+  },
+  {
+   "line": "KEY=value\t# a comment",
+   "value": "value"
+  },
+  {
+   "line": "KEY=value  ",
+   "value": "value"
+  },
+  {
+   "line": "KEY=a#b",
+   "value": "a#b"
+  },
+  {
+   "line": "KEY=#x",
+   "value": "#x"
+  },
+  {
+   "line": "KEY=\"8\"",
+   "value": "8"
+  },
+  {
+   "line": "KEY='a b'",
+   "value": "a b"
+  },
+  {
+   "line": "KEY=\"a b\"   # c",
+   "value": "a b"
+  },
+  {
+   "line": "KEY='$(touch canary)'",
+   "value": "$(touch canary)"
+  },
+  {
+   "line": "KEY='a;b|c&d<e>f(g)'",
+   "value": "a;b|c&d<e>f(g)"
+  },
+  {
+   "line": "KEY='`id`'",
+   "value": "`id`"
+  },
+  {
+   "line": "KEY='a\\b'",
+   "value": "a\\b"
+  },
+  {
+   "line": "KEY='it'\"'\"'s'",
+   "value": "it's"
+  },
+  {
+   "line": "KEY=\"it's\"",
+   "value": "it's"
+  },
+  {
+   "line": "KEY='a\"b'",
+   "value": "a\"b"
+  },
+  {
+   "line": "KEY=a'b c'd",
+   "value": "ab cd"
+  },
+  {
+   "line": "KEY=\"\"",
+   "value": ""
+  },
+  {
+   "line": "KEY=''",
+   "value": ""
+  },
+  {
+   "line": "KEY=vendor.app*",
+   "value": "vendor.app*"
+  },
+  {
+   "line": "KEY=5,6,7",
+   "value": "5,6,7"
+  },
+  {
+   "line": "KEY=102=2",
+   "value": "102=2"
+  },
+  {
+   "line": "KEY='a,b c,$(x)'",
+   "value": "a,b c,$(x)"
+  },
+  {
+   "line": "KEY=héllo",
+   "value": "héllo"
+  },
+  {
+   "line": "_K1=x",
+   "value": "x"
+  },
+  {
+   "line": "lower_key=x",
+   "value": "x"
+  },
+  {
+   "line": "KEY=a!b",
+   "value": "a!b"
+  },
+  {
+   "line": "KEY={a,b}",
+   "value": "{a,b}"
+  },
+  {
+   "line": "KEY=a*b?[c]",
+   "value": "a*b?[c]"
+  },
+  {
+   "line": "KEY=0.075",
+   "value": "0.075"
+  },
+  {
+   "line": "KEY=-1.5",
+   "value": "-1.5"
+  },
+  {
+   "line": "KEY=\"a b\"'c d'e",
+   "value": "a bc de"
+  },
+  {
+   "line": "KEY='a # b'   # c",
+   "value": "a # b"
+  },
+  {
+   "line": "KEY=1 # ok; KEY=2 x",
+   "value": "1"
+  }
+ ],
+ "bash_differs": [
+  {
+   "line": "KEY=~/x",
+   "value": "~/x"
+  }
+ ],
+ "skip": [
+  "",
+  "   ",
+  "\t",
+  "# comment",
+  "   # KEY=1",
+  "#KEY=1"
+ ],
+ "bad": [
+  "KEY=a, b",
+  "KEY = 0",
+  "KEY =0",
+  "KEY= 0",
+  "KEY=$(touch canary)",
+  "KEY=$HOME",
+  "KEY=`id`",
+  "KEY=a;b",
+  "KEY=a&",
+  "KEY=a|b",
+  "KEY=a>b",
+  "KEY=(a b)",
+  "KEY=a\\ b",
+  "KEY=\"a$b\"",
+  "KEY=\"a\\\"b\"",
+  "KEY=\"a`id`\"",
+  "KEY='unterminated",
+  "KEY=\"unterminated",
+  "export KEY=1",
+  "1KEY=x",
+  "KEY+=x",
+  "KEY",
+  "KEY=a\r",
+  "-KEY=x",
+  "KEY=a b",
+  "KEY=1 x # c",
+  "KEY='a'b c",
+  "KÉY=x",
+  "KEY=a\u0000b"
+ ],
+ "numbers": [
+  {
+   "text": "30",
+   "value": 30
+  },
+  {
+   "text": "0.03",
+   "value": 0.03
+  },
+  {
+   "text": "-1.5",
+   "value": -1.5
+  },
+  {
+   "text": "+2",
+   "value": 2
+  },
+  {
+   "text": ".5",
+   "value": 0.5
+  },
+  {
+   "text": "5.",
+   "value": 5
+  },
+  {
+   "text": "1e3",
+   "value": 1000
+  },
+  {
+   "text": "1E-2",
+   "value": 0.01
+  },
+  {
+   "text": "abc",
+   "value": null
+  },
+  {
+   "text": "0x10",
+   "value": null
+  },
+  {
+   "text": "1_000",
+   "value": null
+  },
+  {
+   "text": "inf",
+   "value": null
+  },
+  {
+   "text": "nan",
+   "value": null
+  },
+  {
+   "text": "1e400",
+   "value": null
+  },
+  {
+   "text": "12abc",
+   "value": null
+  },
+  {
+   "text": " 5",
+   "value": null
+  },
+  {
+   "text": "5 ",
+   "value": null
+  },
+  {
+   "text": "--5",
+   "value": null
+  },
+  {
+   "text": ".",
+   "value": null
+  },
+  {
+   "text": "e5",
+   "value": null
+  },
+  {
+   "text": "1e",
+   "value": null
+  },
+  {
+   "text": "1e+",
+   "value": null
+  },
+  {
+   "text": "+",
+   "value": null
+  }
+ ]
+}

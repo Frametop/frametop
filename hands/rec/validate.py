@@ -8,7 +8,7 @@ checks:
   - an allow-list of files: anything else (or a symlink) is an error;
   - manifest.json: the schema, required keys and types, and that it agrees with the files;
   - the consent version is there, the contributor id is a random uuid4, the contributor is an adult;
-  - calibration.json has nothing session.py's strip_calibration would still remove;
+  - calibration.json has nothing recorder/privacy.py's strip_calibration would still remove;
   - device.json (the rig's pose in the CAD frame) holds only cv.cad_from_cal and head, as
     plus_x, plus_z and position; sessions recorded before it existed get a warning;
   - each sets.bin.zst decompresses to the end (so a truncated one fails) and parses as FHSET01:
@@ -37,10 +37,9 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-from session import _key_identifies, strip_calibration  # noqa: E402  (standard library only, next to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 from recorder import age  # noqa: E402  (its shape check needs no cryptography library)
+from recorder.privacy import key_identifies, strip_calibration  # noqa: E402  (standard library only)
 from recorder.checks import (Cancelled, Report, check_sums, is_uuid4, listed, need,  # noqa: E402,F401
                              read_json_file)
 
@@ -379,7 +378,7 @@ def identifying_keys(o, path):
     if isinstance(o, dict):
         for k, v in o.items():
             p = f"{path}.{k}"
-            out += [p] if _key_identifies(k) else identifying_keys(v, p)
+            out += [p] if key_identifies(k) else identifying_keys(v, p)
     elif isinstance(o, list):
         for i, v in enumerate(o):
             out += identifying_keys(v, f"{path}[{i}]")

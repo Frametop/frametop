@@ -66,6 +66,7 @@ from recorder.common import (mono_ns, clock_sample, in_container, host_command, 
                              write_json, clean_text, tree_version, os_version as _os_version,
                              steamvr_version as _steamvr_version)
 from recorder import bounties  # noqa: E402
+from recorder.privacy import strip_calibration  # noqa: E402
 from recorder.units import unit_active, start_unit, stop_unit, pause_units, resume_units, restart_units  # noqa: E402,F401
 from recorder.button import (INPUT_DEVICES, INPUT_EVENT, EV_KEY, EV_REL, REL_X, REL_Y, KEY_SELECT,  # noqa: E402,F401
                              BUTTON_DEVICE, BUTTON_DOUBLE_S, BUTTON_HOLD_S, BUTTON_BOUNCE_S, parse_input_devices,
@@ -515,62 +516,6 @@ def get_ready(frametop_hands=False, need_live=False, panel_bin=None, on_part=lam
     on_part("panel", "ok", "Ready (it shows when the round starts)")
     out["ok"] = True
     return out
-
-
-# ------------------------------------------------------------------------------------------
-# The factory calibration, without what identifies the unit
-
-ID_TOKENS = {"serial", "sn", "uuid", "guid", "mac", "id", "ids", "identifier"}
-
-
-def _key_identifies(key):
-    k = str(key)
-    if re.search(r"serial|uuid", k, re.I):
-        return True
-    tokens = re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", k)
-    return any(t.lower() in ID_TOKENS for t in tokens)
-
-
-def _value_identifies(value):
-    """A string holding something like a serial number: a run of 8 or more letters and digits
-    with at least 4 digits and a letter (sensor names like og01a1b are shorter)."""
-    if not isinstance(value, str):
-        return False
-    for run in re.findall(r"[A-Za-z0-9]+", value):
-        if len(run) >= 8 and sum(c.isdigit() for c in run) >= 4 and any(c.isalpha() for c in run):
-            return True
-    return False
-
-
-def strip_calibration(xrservice_json_dict):
-    """/persist/xrservice.json without what identifies the unit: keys naming a serial, sn,
-    uuid, mac or id, and string values that look like serial numbers. Returns (cleaned dict,
-    removed key paths such as "cameras[0].serial")."""
-    removed = []
-
-    def walk(o, path):
-        if isinstance(o, dict):
-            out = {}
-            for k, v in o.items():
-                p = "%s.%s" % (path, k) if path else str(k)
-                if _key_identifies(k) or _value_identifies(v):
-                    removed.append(p)
-                    continue
-                out[k] = walk(v, p)
-            return out
-        if isinstance(o, list):
-            out = []
-            for i, v in enumerate(o):
-                p = "%s[%d]" % (path, i)
-                if _value_identifies(v):
-                    removed.append(p)
-                    out.append(None)   # keep the other items' positions
-                    continue
-                out.append(walk(v, p))
-            return out
-        return o
-
-    return walk(xrservice_json_dict, ""), removed
 
 
 # ------------------------------------------------------------------------------------------

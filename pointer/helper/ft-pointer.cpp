@@ -1766,13 +1766,10 @@ int main() {
     };
 
     // --- Panel placement (see "Placement" at the top of the file) ---
-    // Device pose, given in the standing universe, sent to the driver in raw space.
-    auto sendPose = [&](Vec3 originStanding, const Basis &b) {
-        vr::TrackedDevicePose_t s, r;
-        sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &s, 1);
-        sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseRawAndUncalibrated, 0, &r, 1);
-        const auto &S = s.mDeviceToAbsoluteTracking, &R = r.mDeviceToAbsoluteTracking;
-        auto toRaw = [&](Vec3 v) { return Rotate(R, RotateInverse(S, v)); };
+    // Device pose, given in the standing universe, sent to the driver in raw space ("posq"). S and
+    // R are the headset's standing and raw poses, read together: the caller says which reading.
+    auto sendPose = [&](const vr::HmdMatrix34_t &S, const vr::HmdMatrix34_t &R, Vec3 originStanding, const Basis &b) {
+        auto toRaw = [&](Vec3 v) { return Rotate(R, RotateInverse(S, v)); };  // directions: raw <- standing
         const Vec3 o = Position(R) + toRaw(originStanding - Position(S));
         double q[4];
         BasisQuat({toRaw(b.x), toRaw(b.y), toRaw(b.z)}, q);
@@ -1780,6 +1777,13 @@ int main() {
         std::snprintf(msg, sizeof msg, "posq %.5f %.5f %.5f %.6f %.6f %.6f %.6f", o.x, o.y, o.z, q[0], q[1], q[2], q[3]);
         SendTo(out, "ft_pointer", msg);
         posed.valid = false;
+    };
+    // The same, with the headset's poses read now (placements, which run outside the loop's tick).
+    auto sendPoseNow = [&](Vec3 originStanding, const Basis &b) {
+        vr::TrackedDevicePose_t s, r;
+        sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &s, 1);
+        sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseRawAndUncalibrated, 0, &r, 1);
+        sendPose(s.mDeviceToAbsoluteTracking, r.mDeviceToAbsoluteTracking, originStanding, b);
     };
     auto sleepMs = [](int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
     auto headPos = [&] {
@@ -1835,7 +1839,7 @@ int main() {
                     p.width, p.height);
         for (int cm = -5; cm <= 45; ++cm) {
             const Vec3 target = bottom - p.basis.y * (cm / 100.0);
-            sendPose(eye, AimBasis(target - eye));
+            sendPoseNow(eye, AimBasis(target - eye));
             sleepMs(90);
             const bool dot = systemPointer != vr::k_ulOverlayHandleInvalid && overlay->IsOverlayVisible(systemPointer);
             const bool foot = footer != vr::k_ulOverlayHandleInvalid && overlay->IsOverlayVisible(footer);
@@ -1883,7 +1887,7 @@ int main() {
             const Basis d0 = AimBasis(grab - eye);
             const Vec3 o1 = target + turn(eye - p.center);  // device origin at the end
             ++moves;
-            sendPose(eye, d0);
+            sendPoseNow(eye, d0);
             sleepMs(150);  // hover: the window controls come up
             SendTo(out, "ft_pointer", "btn trigger 1");
             sleepMs(150);
@@ -1892,14 +1896,14 @@ int main() {
             for (int i = 1; i <= rsteps; ++i) {
                 const double a = angle * i / rsteps;
                 auto r = [&](Vec3 v) { return RotateAbout(v, axis, a); };
-                sendPose(eye, {r(d0.x), r(d0.y), r(d0.z)});
+                sendPoseNow(eye, {r(d0.x), r(d0.y), r(d0.z)});
                 sleepMs(16);
             }
             // 2. Slide the device slowly: fast moves are accelerated by the dashboard.
             const Basis d1{turn(d0.x), turn(d0.y), turn(d0.z)};
             const int tsteps = std::max(4, int(Length(o1 - eye) / slideSpeed * 60));
             for (int i = 1; i <= tsteps; ++i) {
-                sendPose(eye + (o1 - eye) * (double(i) / tsteps), d1);
+                sendPoseNow(eye + (o1 - eye) * (double(i) / tsteps), d1);
                 sleepMs(16);
             }
             sleepMs(100);
@@ -2397,7 +2401,7 @@ int main() {
             const bool holdPose = tnow < touch.holdUntil;
             if (!holdPose && (tnow - touch.sentAt > std::chrono::milliseconds(100) || Length(touch.origin - touch.sentOrigin) > 0.0002 ||
                               Dot(touch.basis.z, touch.sentBasis.z) < 0.999999 || Dot(touch.basis.x, touch.sentBasis.x) < 0.999999)) {
-                sendPose(touch.origin, touch.basis);
+                sendPoseNow(touch.origin, touch.basis);
                 touch.sentOrigin = touch.origin, touch.sentBasis = touch.basis, touch.sentAt = tnow;
             }
             const bool laserReady = !claimPending && !claimHeld && laserOurs() && tnow - touch.sentAt < std::chrono::seconds(1);
@@ -3841,16 +3845,7 @@ int main() {
             auto turn = [&](Vec3 v) { return RotateAbout(RotateAbout(v, side, pr), up, yr); };
             const Vec3 originStanding = pivot + turn(tiltOrigin - pivot);
             const Basis b{turn(tiltBasis.x), turn(tiltBasis.y), turn(tiltBasis.z)};
-            const auto &S = hmd.mDeviceToAbsoluteTracking, &R = hmdRaw.mDeviceToAbsoluteTracking;
-            auto toRaw = [&](Vec3 v) { return Rotate(R, RotateInverse(S, v)); };  // directions: raw <- standing
-            const Vec3 originRaw = Position(R) + toRaw(originStanding - eye);
-            double q[4];
-            BasisQuat({toRaw(b.x), toRaw(b.y), toRaw(b.z)}, q);
-            char msg[200];
-            std::snprintf(msg, sizeof msg, "posq %.5f %.5f %.5f %.6f %.6f %.6f %.6f", originRaw.x, originRaw.y,
-                          originRaw.z, q[0], q[1], q[2], q[3]);
-            SendTo(out, "ft_pointer", msg);
-            posed.valid = false;
+            sendPose(hmd.mDeviceToAbsoluteTracking, hmdRaw.mDeviceToAbsoluteTracking, originStanding, b);  // this tick's poses
         } else if (active && anchored && hmd.bPoseIsValid) {
             const bool dragging = leftHeld || tnow < dropHoldUntil;
             if (!dragging) tiltYaw = tiltPitch = 0;  // drop finished: back to plain pointing
@@ -4117,15 +4112,7 @@ int main() {
                 auto turn = [&](Vec3 v) { return RotateAbout(RotateAbout(v, side, pr), up, yr); };
                 const Vec3 o = point + turn(originStanding - point);
                 const Basis b{turn(base.x), turn(base.y), turn(base.z)};
-                auto toRaw = [&](Vec3 v) { return Rotate(R, RotateInverse(S, v)); };
-                const Vec3 oRaw = Position(R) + toRaw(o - eye);
-                double q[4];
-                BasisQuat({toRaw(b.x), toRaw(b.y), toRaw(b.z)}, q);
-                char msg[200];
-                std::snprintf(msg, sizeof msg, "posq %.5f %.5f %.5f %.6f %.6f %.6f %.6f", oRaw.x, oRaw.y, oRaw.z, q[0],
-                              q[1], q[2], q[3]);
-                SendTo(out, "ft_pointer", msg);
-                posed.valid = false;
+                sendPose(S, R, o, b);  // this tick's poses, as the plain "pose" below
             } else if (!posed.valid || tnow - posed.at >= std::chrono::milliseconds(100) ||
                        Length(eyeRaw - posed.origin) >= 0.0002 || std::fabs(std::remainder(ayaw - posed.yaw, 360.0)) >= 0.04 ||
                        std::fabs(apitch - posed.pitch) >= 0.04) {

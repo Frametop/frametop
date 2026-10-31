@@ -435,7 +435,8 @@ def read_json(path):
         for table in ("buttons", "controller_buttons", "key_bindings"):
             if table in data:
                 data[table] = renamed_actions(data[table])
-    return data
+        return data
+    return {}   # a top-level list or value: nothing in it to read (DEE-296)
 
 
 def read_conf():

@@ -186,26 +186,119 @@ def screen_count(layout=None):
         return 2
 
 
-def load_layout():
-    layout = json.loads(json.dumps(DEFAULTS))
+class LayoutFileError(RuntimeError):
+    """frametop-layout.json is there but doesn't read: it's kept as it is, with a copy next to it,
+    and nothing is saved over it (DEE-296)."""
+
+
+class Layout(dict):
+    """A layout as load_layout() read it: .base is what it was then, so save_layout() writes only
+    the keys changed since, over whatever another program saved meanwhile."""
+    base = None
+
+
+_warned = set()
+
+
+def _backup(path):
+    """A copy of the unreadable file at PATH.bad-TIME, unless one with the same bytes is there."""
     try:
-        with open(LAYOUT_PATH) as f:
+        with open(path, "rb") as f:
+            data = f.read()
+        folder, name = os.path.split(path)
+        for other in sorted(os.listdir(folder or ".")):
+            if other.startswith(name + ".bad-"):
+                with open(os.path.join(folder, other), "rb") as f:
+                    if f.read() == data:
+                        return os.path.join(folder, other)
+        copy = f"{path}.bad-{time.strftime('%Y%m%d-%H%M%S')}"
+        with open(copy, "xb") as f:
+            f.write(data)
+        return copy
+    except OSError:
+        return None
+
+
+def read_layout_file():
+    """The saved layout as it is in the file, None when there's none. LayoutFileError (after a
+    copy is kept) when it isn't a JSON object with an object "preset"."""
+    try:
+        with open(LAYOUT_PATH, encoding="utf-8") as f:
             saved = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        why = f"it doesn't read ({e})"
+    else:
+        if isinstance(saved, dict) and isinstance(saved.get("preset", {}), dict):
+            return saved
+        why = "it isn't a JSON object" if not isinstance(saved, dict) else '"preset" isn\'t an object'
+    copy = _backup(LAYOUT_PATH)
+    raise LayoutFileError(f"{LAYOUT_PATH}: {why}. Fix it or move it away: Frametop won't save over it"
+                          + (f" (a copy: {copy})" if copy else ""))
+
+
+def _with_defaults(saved):
+    layout = json.loads(json.dumps(DEFAULTS))
+    if saved:
         layout.update({k: v for k, v in saved.items() if k != "preset"})
         layout["preset"].update(saved.get("preset", {}))
-    except (OSError, ValueError):
-        pass
     if backend() == "screens" and not layout.get("screens"):
         layout["screens"] = [{"size": [1920, 1080], "metres": 1920 / PIXELS_PER_METRE}]
     return layout
 
 
+def load_layout():
+    """The saved layout over DEFAULTS. A file that doesn't read gives the defaults, said once on
+    stderr; saving is refused until it's fixed (save_layout)."""
+    try:
+        saved = read_layout_file()
+    except LayoutFileError as e:
+        if str(e) not in _warned:
+            _warned.add(str(e))
+            print(f"ft-layout: {e}", file=sys.stderr, flush=True)
+        saved = None
+    layout = Layout(_with_defaults(saved))
+    layout.base = json.loads(json.dumps(layout))
+    return layout
+
+
+_MISSING = object()
+
+
 def save_layout(layout):
-    os.makedirs(os.path.dirname(LAYOUT_PATH), exist_ok=True)
-    tmp = LAYOUT_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(layout, f, indent=2)
-    os.replace(tmp, LAYOUT_PATH)
+    """Write layout to frametop-layout.json, under a lock so writers take turns: a layout from
+    load_layout() writes only the keys it changed, over the file as it is now (another program's
+    changes to other keys stay); any other dict is written whole. A file that doesn't read is
+    never written over: LayoutFileError. Written to a temp file of its own, flushed to disk and
+    renamed (ft_conf.write_atomic), so a reader never sees half a file."""
+    folder = os.path.dirname(LAYOUT_PATH)
+    os.makedirs(folder, exist_ok=True)
+    lock_path = os.path.join(folder, "." + os.path.basename(LAYOUT_PATH) + ".lock")
+    with open(lock_path, "a") as lock:
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    raise LayoutFileError(f"{LAYOUT_PATH}: another program kept it locked for 10 s; not saved")
+                time.sleep(0.02)
+        current = read_layout_file()   # LayoutFileError: refused
+        base = getattr(layout, "base", None)
+        out = dict(layout)
+        if current is not None and base is not None:
+            out = _with_defaults(current)
+            for k in set(layout) | set(base):
+                if layout.get(k, _MISSING) != base.get(k, _MISSING):
+                    if k in layout:
+                        out[k] = layout[k]
+                    else:
+                        out.pop(k, None)
+        ft_conf.write_atomic(LAYOUT_PATH, json.dumps(out, indent=2))   # own temp file, fsync, rename
+    if isinstance(layout, Layout):
+        layout.base = json.loads(json.dumps(layout))
 
 
 def screen_entry(layout, i):

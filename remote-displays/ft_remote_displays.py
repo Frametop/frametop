@@ -358,7 +358,10 @@ class Backend(QObject):
             host.pop("kind", None)
         if dongle and dongle not in host.get("direct", []):
             host["direct"] = [dongle] + host.get("direct", [])
-        ft_layout.save_layout(layout)
+        try:
+            ft_layout.save_layout(layout)
+        except (OSError, ft_layout.LayoutFileError) as e:   # a layout that doesn't read isn't saved over
+            return self.signedIn.emit(host["name"], False, str(e))
         self.changed.emit()
         threading.Thread(target=self._ping, args=(host,), daemon=True).start()
         self.signedIn.emit(host["name"], True, "")
@@ -378,7 +381,8 @@ class Backend(QObject):
         if host.get("displays"):
             return self.message.emit("Remove its displays first", True)
         layout["hosts"].remove(host)
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         if not any(h.get("address") == host.get("address") for h in layout["hosts"]):
             for path in (token_path(host.get("address", "")), pin_path(host.get("address", ""))):
                 try:
@@ -538,24 +542,35 @@ class Backend(QObject):
         self._run("Changing the stream", "remote", "set", display_id, f"size={width}x{height}", f"fps={fps}",
                   f"bitrate={bitrate}")
 
+    def _save(self, layout):
+        """Save the layout; False, said in the window, when it can't be (a frametop-layout.json
+        that doesn't read is never saved over, DEE-296)."""
+        try:
+            ft_layout.save_layout(layout)
+            return True
+        except (OSError, ft_layout.LayoutFileError) as e:
+            self.message.emit(str(e), True)
+            return False
+
     def _edit(self, display_id, fn):
         layout = ft_layout.load_layout()
         n, _, d = ft_layout.find_display(layout, display_id)
         fn(d)
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return None, d
         self.changed.emit()
         return n, d
 
     @Slot(str, float)
     def setMetres(self, display_id, m):
         n, d = self._edit(display_id, lambda d: d.__setitem__("metres", round(m, 3)))
-        if self._running and not d.get("off"):
+        if n is not None and self._running and not d.get("off"):
             self._ask(f"width {n} {m:.3f}")
 
     @Slot(str, bool)
     def setShown(self, display_id, shown):
         n, d = self._edit(display_id, lambda d: d.pop("hidden", None) if shown else d.__setitem__("hidden", True))
-        if self._running and not d.get("off"):
+        if n is not None and self._running and not d.get("off"):
             self._ask(f"{'reveal' if shown else 'conceal'} {n}")
 
     @Slot(str)

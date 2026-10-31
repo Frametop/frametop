@@ -413,7 +413,8 @@ class Backend(QObject):
         while len(screens) <= i:
             screens.append({})
         screens[i]["scale"] = s
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             self._run("Applying scale", "scale")
@@ -426,7 +427,8 @@ class Backend(QObject):
             screens.append({})
         screens[i]["rotation"] = rotation
         screens[i].pop("roll", None)  # a saved arrangement follows the new rotation
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             self._run("Rotating", "scale")
@@ -438,22 +440,24 @@ class Backend(QObject):
         while len(screens) <= i:
             screens.append({"size": [1920, 1080], "metres": 1920 / ft_layout.PIXELS_PER_METRE})
         fn(screens[i])
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return False
         self.changed.emit()
+        return True
 
     @Slot(int, int, int)
     def setScreenSize(self, i, w, h):
         if not (320 <= w <= 16384 and 200 <= h <= 16384):
             self.message.emit("Width and height: 320 to 16384 pixels", True)
             return
-        self._edit_screen(i, lambda s: s.__setitem__("size", [w, h]))
-        if self._running and i < self._running_count:
+        saved = self._edit_screen(i, lambda s: s.__setitem__("size", [w, h]))
+        if saved and self._running and i < self._running_count:
             self._ask_screens(f"size {i + 1} {w} {h}")
 
     @Slot(int, float)
     def setScreenMetres(self, i, m):
-        self._edit_screen(i, lambda s: s.__setitem__("metres", round(m, 3)))
-        if self._running and i < self._running_count:
+        saved = self._edit_screen(i, lambda s: s.__setitem__("metres", round(m, 3)))
+        if saved and self._running and i < self._running_count:
             self._ask_screens(f"width {i + 1} {m:.3f}")
 
     @Slot(int, bool)
@@ -471,7 +475,8 @@ class Backend(QObject):
     def setPrimary(self, i):
         layout = ft_layout.load_layout()
         layout["primary"] = i + 1
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             self._run("Moving the taskbar", "scale")
@@ -480,7 +485,8 @@ class Backend(QObject):
     def addScreen(self):
         layout = ft_layout.load_layout()
         layout.setdefault("screens", []).append({"size": [1920, 1080], "metres": 1920 / ft_layout.PIXELS_PER_METRE})
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
 
     @Slot(int)
@@ -492,7 +498,8 @@ class Backend(QObject):
         screens.pop(i)
         if layout.get("primary") == i + 1:
             layout.pop("primary")
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
 
     @Slot()
@@ -562,7 +569,8 @@ class Backend(QObject):
         v = ft_layout.visibility(layout)
         v[key] = value
         layout["visibility"] = v
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             if key == "mode":
@@ -597,7 +605,8 @@ class Backend(QObject):
             screens[index].pop("hidden", None)
         else:
             screens[index]["hidden"] = True
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             reply = self._ask_screens(f"{'reveal' if shown else 'conceal'} {index + 1}")
@@ -732,11 +741,23 @@ class Backend(QObject):
         self.message.emit("Restarting the desktop…", False)
 
     # --- layout ---
+    def _save(self, layout):
+        """Save the layout; False, said in the window, when it can't be (a frametop-layout.json
+        that doesn't read is never saved over, DEE-296)."""
+        try:
+            ft_layout.save_layout(layout)
+            return True
+        except (OSError, ft_layout.LayoutFileError) as e:
+            self.message.emit(str(e), True)
+            return False
+
     def _edit_layout(self, fn):
         layout = ft_layout.load_layout()
         fn(layout)
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return False
         self.changed.emit()
+        return True
 
     @Slot(str)
     def setMode(self, mode):

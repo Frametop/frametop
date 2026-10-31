@@ -173,7 +173,7 @@ main() {
     return 1
   fi
   # The same build is there, so it isn't copied again, and fast-installed files would stay in
-  # a folder that names the release's commit (DEE-289). They go back first, by hand.
+  # a folder that names the release's commit. They go back first, by hand.
   if [ -f "$dest/.frametop-release" ] && [ -e "$dest/.fast-install/state.json" ]; then
     echo "$dest has files fast-installed on top of Frametop $version. Put them back first with" >&2
     echo "scripts/fast-install undo in your Frametop checkout (it works on the current release:" >&2
@@ -222,7 +222,7 @@ main() {
     return 0
   fi
   # The release "current" named before this install: install.sh makes this one current when it
-  # finishes (DEE-286), so it's read first.
+  # finishes, so it's read first.
   local prev= d old_image old_box
   [ -L "$base/current" ] && prev=$(readlink "$base/current")
   if [ "$tty" = 1 ]; then

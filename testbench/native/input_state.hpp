@@ -39,7 +39,7 @@ class InputState {
     struct Button { std::string path; std::optional<bool> physical, requested; double offset = 0; };
     std::map<vr::VRInputComponentHandle_t, Button> buttons_;
     uint64_t sequence_ = 0;
-    // Overrides end on their own after ttl_ with no command but status (DEE-281): a run whose
+    // Overrides end on their own after ttl_ with no command but status: a run whose
     // agent died no longer leaves a frozen head pose, a faked proximity or held inputs for the
     // next wearer. FRAME_TESTBENCH_OVERRIDE_TTL (seconds) changes it.
     std::chrono::steady_clock::time_point renewed_ = std::chrono::steady_clock::now();

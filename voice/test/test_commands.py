@@ -157,7 +157,7 @@ class Settings(unittest.TestCase):
 
     def test_a_file_that_doesnt_read_is_kept(self):
         # load() gives the defaults for it; saving those over it would lose the commands and
-        # the advanced settings in it (DEE-300)
+        # the advanced settings in it
         for text in ('{"commands": [', '["HEY COMPUTER"]'):
             with self.subTest(text=text):
                 self.path.write_text(text)

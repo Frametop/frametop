@@ -1,4 +1,4 @@
-// Universe fix (DEE-206): panels placed while SteamVR had lost the room stay where you saw them
+// Universe fix: panels placed while SteamVR had lost the room stay where you saw them
 // when it finds the room again.
 //
 // Every panel sits in SteamVR's standing space. When the Frame loses tracking, vrserver switches

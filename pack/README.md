@@ -96,8 +96,8 @@ A moving tag has no place on a headset: it cannot be reproduced in a bug
 report and cannot be rolled back. A release is a file, its image is pinned by
 ID in `.frametop-release`, and you roll back by running the previous
 release's `install.sh`. (The wrapper's installed mode, which pinned a registry
-digest in `~/.config/frametop/image` and refused `:latest`, was dropped in
-DEE-313: no release used it.)
+digest in `~/.config/frametop/image` and refused `:latest`, was dropped: no
+release used it.)
 
 ## The shared podman store
 
@@ -185,15 +185,14 @@ three ways, all through the same installer:
    from the release's folder. Each release has its own container, so
    installing one doesn't stop the one running.
 5. The release installed before stays; running its `install.sh` goes back to
-   it and makes it `current` again (DEE-286). Older ones are removed, with
+   it and makes it `current` again. Older ones are removed, with
    their containers and images. `uninstall.sh` removes them all.
 6. If the install stops part-way (an error, a power-off, a closed terminal),
    run the same command again: it finishes it. Until then some services may
    run from the new release and some from the old one (G7 W5 in
    `docs/charts/README.md`). `install.sh` says so when it stops early.
 7. A release whose folder has fast-installed files (`scripts/fast-install`)
-   isn't installed over: run `scripts/fast-install undo` in the checkout first
-   (DEE-289).
+   isn't installed over: run `scripts/fast-install undo` in the checkout first.
 
 Every update is a full 1.1 GB download, since the zip holds the whole image
 (user decision, 2026-10-07: one file, no registry).

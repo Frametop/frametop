@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ft_store: the JSON files Frametop keeps its state in, read and written safely (DEE-300).
+"""ft_store: the JSON files Frametop keeps its state in, read and written safely.
 
     data = ft_store.load_json(path, {})                  # a file that doesn't read: {}, said once
     data = ft_store.load_json_strict(path, {}, check)    # one that doesn't read: StoreError

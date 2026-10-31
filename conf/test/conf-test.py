@@ -129,7 +129,7 @@ class Grammar(Base):
             self.assertEqual(run(C, "get", path, "OTHER"), "0\t\n")
 
     def test_hands_near_alike(self):
-        """DEE-297: ft-screens (handcut::Setting is ft_conf::Setting), the pointer helper (ft_conf::Read),
+        """ft-screens (handcut::Setting is ft_conf::Setting), the pointer helper (ft_conf::Read),
         C (ft_conf_setting) and Python read HANDS_NEAR alike however the line writes it; before,
         ft-screens skipped an indented line and the relay kept the quotes."""
         cases = {"HANDS_NEAR=0\n": "0", "  HANDS_NEAR=0\n": "0", 'HANDS_NEAR="0"\n': "0", "HANDS_NEAR = 0\n": None,
@@ -246,7 +246,7 @@ class Writer(Base):
             self.assertEqual(f.read(), "KEY=1\nKEY=3   # wins\n")
 
     def test_replaces_a_line_bash_cant_read(self):
-        """The DEE-293 shape: POINTER_IGNORE written with ", " (bash ran the second item)."""
+        """The ignored-panels shape: POINTER_IGNORE written with ", " (bash ran the second item)."""
         path = self.conf("POINTER_IGNORE=a.b, c.d*   # ignored panels\nHANDS_NEAR = 0\n")
         self.assertFalse(ft_conf.check(path))
         ft_conf.set_value("POINTER_IGNORE", "a.b,c.d*", path)

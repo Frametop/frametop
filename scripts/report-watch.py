@@ -29,7 +29,7 @@ from array import array
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
-import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 
 RUN = Path(f"/run/user/{os.getuid()}")
 lock = threading.Lock()

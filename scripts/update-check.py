@@ -534,7 +534,7 @@ CHAPERONE = os.path.join(HOME, ".config/openvr/config/chaperone_info.vrchap")
 
 def check_chaperone():
     """ft-screens tells a temporary universe from a room by SteamVR's saved universes
-    (screens/universefix.h, DEE-206): each has a universeID and a standing translation and yaw,
+    (screens/universefix.h): each has a universeID and a standing translation and yaw,
     and the one SteamVR makes after losing the room has standing (0, 1.6, 0), yaw 0."""
     try:
         with open(CHAPERONE) as f:
@@ -543,7 +543,7 @@ def check_chaperone():
         return report("skip", "SteamVR's saved universes", "none yet (no room set up)")
     except (OSError, ValueError) as e:
         return report("warn", "SteamVR's saved universes", f"{CHAPERONE} unreadable ({e}): screens placed while "
-                      "SteamVR has lost the room jump when it finds it again (DEE-206)")
+                      "SteamVR has lost the room jump when it finds it again")
     universes = data.get("universes") if isinstance(data, dict) else None
     if universes == []:
         return report("skip", "SteamVR's saved universes", "none yet (no room set up)")
@@ -562,7 +562,7 @@ def check_chaperone():
     ok = isinstance(universes, list) and all(readable(u) for u in universes)
     if not ok:
         return report("warn", "SteamVR's saved universes", f"{CHAPERONE} no longer lists each universe's ID and "
-                      "standing as screens/universefix.h reads them (DEE-206)")
+                      "standing as screens/universefix.h reads them")
     guessed = sum(1 for u in universes if [round(v, 3) for v in u["standing"]["translation"]] == [0, 1.6, 0]
                   and abs(u["standing"]["yaw"]) < 1e-4)
     report("ok", "SteamVR's saved universes", f"{len(universes)}, {guessed} with the guessed floor of a lost room")

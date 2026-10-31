@@ -5,7 +5,7 @@ This is the design rationale for packaging Frametop as a CI-built OCI image.
 contains, the mount matrix, CI); this file explains why it is built this way,
 what it solves, and how it is meant to be used.
 
-**What shipped** (DEE-313): a release is one `Frametop.zip` with the image inside
+**What shipped**: a release is one `Frametop.zip` with the image inside
 (`frametop-image.tar`), which `pack/install-release.sh` checks and loads with
 `podman load`. There is no registry (user decision, 2026-10-07: one file, no
 registry), so the plan below to publish to ghcr.io, pull with `ft update`, and

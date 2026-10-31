@@ -1,4 +1,4 @@
-// Tracking watch (DEE-206): screens that jump, often up, after walking away and coming back.
+// Tracking watch: screens that jump, often up, after walking away and coming back.
 //
 // Every Frametop panel sits in SteamVR's standing space (SetOverlayTransformAbsolute with
 // TrackingUniverseStanding), so it stays put in the room only while standing stays put. When the

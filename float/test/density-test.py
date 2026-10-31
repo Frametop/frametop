@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ft-floatd's density, offline (DEE-245): scroll on a floating window's corner tab ("density N
+"""ft-floatd's density, offline: scroll on a floating window's corner tab ("density N
 STEPS") makes its panel bigger or smaller at the same pixels, 5% a notch, from half to twice its
 screen's density, and sends the same crop again; an app floats again (the float key, the title bar
 button) at the density it last had. D-Bus and GLib are stand-ins; ft-screens is a fake.

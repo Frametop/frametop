@@ -754,7 +754,7 @@ class Backend(QObject):
 
     def _save_rules(self, rules):
         """Write the rules (input_rules.save_rules); False, said in the window, when the file
-        there doesn't read, which is kept, with a copy (DEE-300)."""
+        there doesn't read, which is kept, with a copy."""
         try:
             input_rules.save_rules(rules, RULES_PATH)
         except (OSError, ft_store.StoreError) as e:
@@ -877,7 +877,7 @@ class Backend(QObject):
 
     def _save_ignore(self, entries, text):
         # Comma-separated with no space (a ", " list made bash run the second key as a command
-        # when the session sourced the file, DEE-293); a key with a comma or a line break in it
+        # when the session sourced the file); a key with a comma or a line break in it
         # can't be one item, so it isn't kept.
         write_conf_value(IGNORE_KEY, ft_conf.LIST_SEP.join(
             e for e in entries if not any(c in e for c in ",\n\r\0")))

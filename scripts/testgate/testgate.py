@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Python test files as a strict gate (`just test-python`, DEE-302): runs each file the
+"""The Python test files as a strict gate (`just test-python`): runs each file the
 patterns match with python3, one at a time, and says of each whether it passed, was skipped, or
 failed.
 

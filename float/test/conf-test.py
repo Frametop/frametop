@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ft-floatd's settings from frametop.conf (DEE-297): FLOAT_SLOTS="8", quoted as bash allows, is 8
+"""ft-floatd's settings from frametop.conf: FLOAT_SLOTS="8", quoted as bash allows, is 8
 (it stopped ft-floatd before it looked at --slots), and a value that isn't a number warns and
 gives the default. HOME is a temporary folder; D-Bus and GLib are stand-ins.
 

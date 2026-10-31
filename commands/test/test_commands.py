@@ -92,7 +92,7 @@ class ListFile(Home):
             f.write(text)
 
     def test_unreadable_file_is_kept(self):
-        """DEE-295: one typo, then one Add, used to save [new] over every command."""
+        """One typo, then one Add, used to save [new] over every command."""
         bad = '{"commands": [{"name": "a", "run": "true"},]}'   # a trailing comma
         self.write_list(bad)
         with contextlib.redirect_stderr(io.StringIO()) as err:

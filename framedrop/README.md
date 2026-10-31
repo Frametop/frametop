@@ -62,7 +62,7 @@ framedrop/build.sh --image REF --version V [--commit SHA] [--channel C] [--allow
 framedrop/build.sh [ZIP_URL]                                                        # a test zip
 ```
 
-An `--image` from `ft dev build` is labelled with its commit and whether the tree had changes. `build.sh` refuses one built from uncommitted or untracked changes, from a commit other than `--commit` (default: HEAD), or with no labels, so a release can't hold code its commit doesn't (DEE-288). `--allow-changes` builds it anyway, with a warning.
+An `--image` from `ft dev build` is labelled with its commit and whether the tree had changes. `build.sh` refuses one built from uncommitted or untracked changes, from a commit other than `--commit` (default: HEAD), or with no labels, so a release can't hold code its commit doesn't. `--allow-changes` builds it anyway, with a warning.
 
 This writes `framedrop/build/Frametop.zip` (reproducible), `frametop.framedrop.json` (FrameDrop's manifest with the zip's sha256), and `SHA256SUMS`. A release's zip has the image REF (`podman save`) with its `frametop-release.json` (`pack/release-info.py`) and `install-release.sh`; CI builds it on a tag (`.github/workflows/release.yml`). A test zip has `get.sh` instead. By default, `ZIP_URL` is the release's asset (`releases/download/vV/Frametop.zip`; for a test zip, a `framedrop-installer` release's). Each release carries its manifest, so the button's link can point at the newest stable one: `https://framedropvr.com/install?manifest=https://github.com/Frametop/frametop/releases/latest/download/frametop.framedrop.json` (the exact URL format is FrameDrop's to confirm).
 

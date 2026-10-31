@@ -47,7 +47,7 @@ if [ -n "$image" ]; then
   [ -n "$version" ] || { echo "--image needs --version" >&2; exit 2; }
   commit=${commit:-$(git -C "$repo" rev-parse HEAD)}
   # ft dev build labels the image with the commit it was built from and whether the tree had
-  # changes in (DEE-288). A release names one commit, and fast-install trusts it.
+  # changes in. A release names one commit, and fast-install trusts it.
   built=$(podman image inspect -f '{{index .Labels "org.frametop.commit"}} {{index .Labels "org.frametop.tree"}}' \
             "$image" 2>/dev/null) || built=
   read -r built_commit built_tree _ <<<"$built" || true

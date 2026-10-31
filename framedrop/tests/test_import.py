@@ -1,4 +1,4 @@
-"""FrameDrop's installer progress window imports offline (DEE-311): a smoke test, the component
+"""FrameDrop's installer progress window imports offline: a smoke test, the component
 had none. The rest of framedrop/ is shell (syntax-gated by test-bash) and runs on a devkit or
 the headset.
 

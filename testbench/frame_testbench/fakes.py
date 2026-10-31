@@ -838,7 +838,7 @@ def serve():
                     started = True
                     if line.split()[:1] != ['status']:
                         # A status poll doesn't restart the hour: a later agent's doctor and guard
-                        # checks would keep a dead run's fakes alive (DEE-282).
+                        # checks would keep a dead run's fakes alive.
                         last_command = time.monotonic()
                     try:
                         client.sendall(json.dumps(reply).encode() + b'\n')

@@ -63,7 +63,7 @@ p.stand_down()  # Frametop pauses while it's held
 check("stand_down releases the held button, then hides", since(p, mark), ["btn trigger 0", "hide pause"])
 
 # The release that pausing drops later is already covered: the button is no longer down,
-# so a stray second stand_down sends only "hide" again (it always goes, DEE-252).
+# so a stray second stand_down sends only "hide" again (it always goes).
 mark = len(p.sock.sent)
 p.stand_down()
 check("a second stand_down sends no release, only hide", since(p, mark), ["hide pause"])
@@ -123,7 +123,7 @@ for t in (10.3, 10.4, 42.0):  # off by itself
     p.tick(t)
 mark = len(p.sock.sent)
 p.stand_down()
-# A relay that restarted can't tell whether the helper still holds the pointer (DEE-252).
+# A relay that restarted can't tell whether the helper still holds the pointer.
 check("nothing held and the pointer off: stand_down still hides", since(p, mark), ["hide pause"])
 
 # Gaze holds go to the helper as their own commands, and it ends them when the pointer hides.

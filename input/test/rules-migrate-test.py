@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Offline test of input/rules-migrate.py, the one-time changes to the input relay's rules: a
-key_bindings list of its own gets Meta+Shift+H once (DEE-217) and Ctrl+Alt+Shift+Esc once (DEE-222),
+key_bindings list of its own gets Meta+Shift+H once and Ctrl+Alt+Shift+Esc once,
 and nothing else in the file changes. Works on files in a temporary folder, never ~/.config/frametop-input.json.
 
   input/test/rules-migrate-test.py
@@ -80,7 +80,7 @@ def reloads():
 
 ALL_MIGRATIONS = rm.MIGRATIONS
 try:
-    # Meta+Shift+H alone first (DEE-217): what every change goes through, shown with it.
+    # Meta+Shift+H alone first: what every change goes through, shown with it.
     rm.MIGRATIONS = ALL_MIGRATIONS[:1]
     # A list of its own without the combination: it's added once, first, and only that line.
     rules, state = case("added", CUSTOM)
@@ -203,10 +203,10 @@ try:
                                                 json.loads(read(rules))["key_bindings"].get("42+125+35")),
           (True, "screens_toggle"))
 
-    # Ctrl+Alt+Shift+Esc (DEE-222), with every change, as an install runs them.
+    # Ctrl+Alt+Shift+Esc, with every change, as an install runs them.
     rm.MIGRATIONS = ALL_MIGRATIONS
     check("both changes run, in order", [name for name, _ in rm.MIGRATIONS], ["screens-toggle-key", "release-keys-key"])
-    # A list that got Meta+Shift+H already (an install of DEE-217): it gets this one, once.
+    # A list that got Meta+Shift+H already (an install with the screens-toggle key change): it gets this one, once.
     with_h = {**CUSTOM, "key_bindings": {"42+125+35": "screens_toggle", **CUSTOM["key_bindings"]}}
     rules, state = case("release-after-217", with_h)
     os.makedirs(os.path.dirname(state))
@@ -215,7 +215,7 @@ try:
     os.chmod(rules, 0o600)
     before = read(rules)
     reloads()
-    check("after DEE-217: done", rm.main(rules, state), 0)
+    check("after the screens-toggle change: done", rm.main(rules, state), 0)
     after = read(rules)
     check("...Ctrl+Alt+Shift+Esc added first, the others in their order", list(json.loads(after)["key_bindings"]),
           ["29+42+56+1", *with_h["key_bindings"]])
@@ -232,7 +232,7 @@ try:
     rm.main(rules, state)
     check("...removed afterwards: not added again", read(rules), before)
 
-    # A list that had neither (no install since before DEE-217): both, in one run.
+    # A list that had neither (no install since before the screens-toggle change): both, in one run.
     rules, state = case("release-and-217", CUSTOM, "\n")
     before = read(rules)
     check("neither yet: done", rm.main(rules, state), 0)

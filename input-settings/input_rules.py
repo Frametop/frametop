@@ -33,7 +33,7 @@ def read_json(path):
             if table in data:
                 data[table] = renamed_actions(data[table])
         return data
-    return {}   # a top-level list or value: nothing in it to read (DEE-296)
+    return {}   # a top-level list or value: nothing in it to read
 
 
 def read_conf(path):
@@ -49,7 +49,7 @@ def write_conf_value(key, value, path):
 def save_rules(rules, path):
     """Write the rules (whole, under the file's lock). Raises OSError or ft_store.StoreError, and
     writes nothing, when the file there doesn't read: read_json gave {} for it, and saving that
-    over it would lose everything in it, so it's kept, with a copy (DEE-300)."""
+    over it would lose everything in it, so it's kept, with a copy."""
     with ft_store.locked(path):
         ft_store.load_json_strict(path, {}, ft_store.is_object)
         ft_store.write_json(path, rules, indent=2, newline=False)

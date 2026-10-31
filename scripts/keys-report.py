@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
-import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 
 RELAY = "\0frametop_relay"
 SCREENS = "\0ft_screens"

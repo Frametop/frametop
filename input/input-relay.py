@@ -135,7 +135,7 @@ open when the text field loses focus, until its close button, keyboard_toggle, o
 (ft-layout reset) closes it.
 
 Full Keyboard (keyboard/, TaiKeid's, run with --frametop; keyboard/FRAMETOP.md) is that keyboard.
-While it isn't running, nothing opens (ft-screens' old panel was removed in DEE-310). It says "kbhello OPEN" on the control socket every second, only taken from
+While it isn't running, nothing opens (ft-screens' old panel was removed in the 2026-10-31 cleanup). It says "kbhello OPEN" on the control socket every second, only taken from
 this user, and gets "kb DESKTOP SURFACE" back: whether typing goes to the desktop, and whether
 the screens show with Frametop not paused (it may show over them with the dashboard closed).
 The relay tells ft-screens "fullkb OPEN", and while that's fresh ft-screens passes its
@@ -336,7 +336,7 @@ GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze
 # Meta+H turns hand tracking off or on. Meta+Shift+H hides or shows the screens: the relay reads it
 # from the keyboard, so it works with the screens hidden too, when the desktop gets no keys.
 # Ctrl+Alt+Shift+Esc lets go of every key held anywhere (release_keys), for a modifier stuck in
-# KWin (DEE-222: clicks moved windows, as Meta+click does). It has no Meta, the key that sticks,
+# KWin (clicks moved windows, as Meta+click does). It has no Meta, the key that sticks,
 # and it's free: KWin's Ctrl+Alt+Esc (kill a window) and Windows' Ctrl+Shift+Esc (Task Manager,
 # on a remote display) need their modifiers exactly, and four keys don't happen by accident.
 DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
@@ -511,7 +511,7 @@ class Virtual:
 
     def release_all(self):
         """Every key comes up. A device reused from the fd store may still have down what the
-        relay before this one pressed, and this one's node.held doesn't know it (DEE-268). The
+        relay before this one pressed, and this one's node.held doesn't know it. The
         kernel drops the release of a key that isn't down, so this sends only what was held."""
         for code in self.keys:
             self.emit(EV_KEY, code, 0)
@@ -535,7 +535,7 @@ def read_config(path=os.path.expanduser("~/.config/frametop.conf")):
 def pointer_settings(conf):
     """(pointer mode on, degrees per mouse count, idle s, wake counts) from frametop.conf. A value
     that isn't a number warns and keeps its default: one bad hand-edited line used to stop the
-    relay at start, and systemd gave up restarting it (DEE-297)."""
+    relay at start, and systemd gave up restarting it."""
     return (conf.get("POINTER", "0") == "1",
             ft_conf.number(conf, "POINTER_SENSITIVITY", 0.03),
             ft_conf.number(conf, "POINTER_IDLE", 30.0),
@@ -1012,7 +1012,7 @@ class Pointer:
         (the idle timeout or pointer_toggle with a button held): a helper built before releases
         stopped waking it would wake on one and connect the virtual controller during the game.
         And a relay that restarted doesn't know whether the helper still holds the pointer, so
-        it can't tell from its own state (DEE-252).
+        it can't tell from its own state.
 
         Not covered: gaze mode's held-back press (the helper's aim, before it becomes a real
         press) turns into a click on its release. The helper drops it without a click when it
@@ -1140,7 +1140,7 @@ class PointerLease:
         else:
             if self.conf:
                 # A button held through the change comes up on the helper now; its release
-                # goes to the virtual mouse, which never had it down (DEE-264).
+                # goes to the virtual mouse, which never had it down.
                 self.conf.stand_down("pointer mode off")
             self.conf = None
             log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
@@ -1289,7 +1289,7 @@ class Relay:
     def load_config(self):
         """frametop.conf and the rules, applied all or nothing: read and checked first (the pause's
         settings from the rules too), then put in place. A reload whose rules fail keeps the last
-        ones (it used to leave the rules read and the pause unconfigured, DEE-297); at start, the
+        ones (it used to leave the rules read and the pause unconfigured); at start, the
         default rules go with the conf's settings. A bad conf value warns and keeps its default."""
         conf = read_config()
         pointer_on, sensitivity, idle, wake_counts = pointer_settings(conf)
@@ -1839,7 +1839,7 @@ class Relay:
         self.release_held(node)
         # A pointer-mode button the device held (a drag, a testbench killed mid-drag, or a release
         # read after the host's "hostbye") comes up in the helper too, unless another device holds
-        # the same action (DEE-284).
+        # the same action.
         others = {action for n in self.nodes.values() if n is not node for action in n.actions.values()}
         for action in sorted(set(node.actions.values()) - others):
             self.do_action(action, 0, time.monotonic())
@@ -2143,18 +2143,18 @@ class Relay:
     def recover_from_restart(self):
         """What a relay that starts does for what the one before it left behind, in one place: the
         restart fixes on the relay's side (docs/charts/README.md, G1 and G3). The pause's own
-        (L5, DEE-256: the resume a restart cut short; L6, DEE-257: a pause that ends with its game)
+        (L5: the resume a restart cut short; L6: a pause that ends with its game)
         runs as GamePause reads its state file (game_pause.py, load), which has to come before the
         rules configure the pause."""
         if self.pause.paused and self.lease.conf:
             # L1: restarted while paused, the helper may still hold the pointer the last relay woke,
-            # and this relay's new Pointer doesn't know, so it lets go now (DEE-252).
+            # and this relay's new Pointer doesn't know, so it lets go now.
             self.lease.conf.stand_down()
         self.vr_bind(time.monotonic())  # a helper that's already running keeps its buttons in step
         # K3: a relay that went away with a key down left it down on the desktop, where this one
         # never sent it: modifiers and mouse buttons come up there now (a release of a key that
         # isn't down is nothing), and then ft-screens lets go of every key it holds, on the desktop
-        # screens and a remote display (DEE-265).
+        # screens and a remote display.
         for code in sorted(MODIFIERS):
             self.to_screens(code, 0)
         for code in range(BTN_MOUSE, BTN_TASK + 1):
@@ -2163,12 +2163,12 @@ class Relay:
             self.screens_sock.sendto(b"keys release", SCREENS)
         except OSError:
             pass  # the Frametop desktop isn't running
-        # K6: the same on its virtual keyboard and mouse, kept in the fd store (DEE-268).
+        # K6: the same on its virtual keyboard and mouse, kept in the fd store.
         for dev in (self.mouse, self.keyboard):
             if dev.reused:
                 dev.release_all()
         # K7: and on the pointer driver: a pointer-mode button held as it went never came up there.
-        # The helper ignores the release of a button it doesn't have down (DEE-269).
+        # The helper ignores the release of a button it doesn't have down.
         for driver in sorted(set(Pointer.DRIVER_BUTTONS.values())):
             try:
                 self.screens_sock.sendto(f"btn {driver} 0".encode(), HELPER)
@@ -2316,7 +2316,7 @@ class Relay:
                 action = buttons.get(str(code), DEFAULT_BUTTONS.get(code, "key"))
                 # A button that went down on the virtual devices (paused, POINTER=0, or as a
                 # key) comes up there, even if pointer mode or its binding changed meanwhile
-                # (DEE-263).
+                #.
                 went_virtual = value != 1 and code in node.held
                 if not went_virtual and (pointer or action == "pause_toggle") and action not in ("key", "none"):
                     if value == 1:

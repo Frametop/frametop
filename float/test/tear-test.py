@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ft-floatd's half of tearing a window off its screen, offline (DEE-246C): KWin's "screen-move" goes on to
+"""ft-floatd's half of tearing a window off its screen, offline: KWin's "screen-move" goes on to
 ft-screens as "moving", ft-screens' "tear ID X Y" asks KWin to float the window, and once it floats,
 ft-screens hears "torn PANEL GX GY": where in the window its laser held it. D-Bus and GLib are stand-ins;
 KWin's outputs are made up.

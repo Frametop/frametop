@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ft-floatd's docking by carrying, offline (DEE-246): "dockat PANEL SCREEN X Y GX GY" from ft-screens puts
+"""ft-floatd's docking by carrying, offline: "dockat PANEL SCREEN X Y GX GY" from ft-screens puts
 the window on that screen with the point it was held by at X, Y, at its size in pixels (smaller where the
 screen is), all of it on the screen. D-Bus and GLib are stand-ins; KWin's outputs are made up.
 

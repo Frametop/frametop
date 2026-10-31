@@ -13,7 +13,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
 try:
-    import ft_store  # (JSON files written safely, DEE-300)
+    import ft_store  # (JSON files written safely)
 except ImportError:  # the standalone Hand Recorder ships recorder/ without conf/: store_json's own way
     ft_store = None
 
@@ -60,7 +60,7 @@ def host_path(path):
 
 def store_json(path, data, indent=1, newline=True, **kw):
     """data into path through a temporary file of its own, flushed to disk and renamed, so a
-    crash never leaves half a file (ft_store.write_json, DEE-300). Without conf/ (the
+    crash never leaves half a file (ft_store.write_json). Without conf/ (the
     standalone Hand Recorder) the same here: the file's mode kept, a new one 0600."""
     if ft_store:
         return ft_store.write_json(path, data, indent=indent, newline=newline, **kw)

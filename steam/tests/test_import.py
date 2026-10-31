@@ -1,4 +1,4 @@
-"""ft-steam and steamui import offline (DEE-311): a smoke test, the component had none. Nothing
+"""ft-steam and steamui import offline: a smoke test, the component had none. Nothing
 connects to Steam's UI (CEF on port 8080); that needs Steam running on the Frame.
 
   python3 steam/tests/test_import.py

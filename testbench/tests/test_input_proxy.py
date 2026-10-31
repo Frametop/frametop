@@ -530,7 +530,7 @@ class InputProxyTests(unittest.TestCase):
         self.assertEqual(self.p.stdout.readline().strip(), "ready")
 
     def test_overrides_end_after_the_ttl_with_no_command_but_status(self):
-        # DEE-281: a run whose agent died leaves no frozen pose or faked proximity behind, and
+        # a run whose agent died leaves no frozen pose or faked proximity behind, and
         # later agents' status polls don't keep them.
         self.restart_with(FRAME_TESTBENCH_OVERRIDE_TTL="0.6")
         self.runtime("physical")

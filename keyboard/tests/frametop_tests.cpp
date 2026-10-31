@@ -85,7 +85,7 @@ struct Pointers : PointerSink {
     std::vector<std::string> take() { return std::exchange(calls, {}); }
 };
 
-// Releases the relay didn't take are sent again until they go (DEE-310). The stand-in relay
+// Releases the relay didn't take are sent again until they go. The stand-in relay
 // has no hello gate, so going away and coming back stands for a full socket here.
 void owed_release_tests() {
     const std::string name = "framekeyboard-test-owed-" + std::to_string(getpid());

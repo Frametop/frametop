@@ -134,7 +134,7 @@ static void message(struct remote *r, const char *msg, const int *fds, int nfds)
         if (strncmp(r->state, "live", 4) == 0) r->failures = 0;
         // On its way out by itself: its exit gets FT_REMOTE_QUIT_MS, as a stop's does. One that
         // hung there (the decoder's close, Disconnect Monitor) used to hold every display of its
-        // host for good (DEE-260).
+        // host for good.
         if (strncmp(r->state, "lost", 4) == 0 && r->pid > 0 && !r->quit_at) r->quit_at = now_ms() | 1;
     } else if (sscanf(msg, "buffers %u %u %x %llx %u %u", &w, &h, &format, &modifier, &offset, &stride) == 6 &&
                nfds == 3 && w > 0 && h > 0 && w <= 16384 && h <= 16384) {
@@ -160,7 +160,7 @@ static void message(struct remote *r, const char *msg, const int *fds, int nfds)
 
 // A display the host says isn't there (404: a Remote Monitor or display that went) waits longer
 // between tries than other failures: every 30 s for good filled the logs and took the host's one
-// stream operation each time (DEE-262). Connect it again, and it tries at once.
+// stream operation each time. Connect it again, and it tries at once.
 #define FT_REMOTE_WAIT_MAX_MS 30000
 #define FT_REMOTE_WAIT_404_MS 300000
 

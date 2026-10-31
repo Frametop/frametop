@@ -442,7 +442,7 @@ static void screen_destroy(struct wl_listener *l, void *data) {
     ft_vr_screen_destroy(sc->index);
     if (s->seat->keyboard_state.focused_surface == sc->toplevel->base->surface) {
         // Typing had this screen. wlroots would leave no screen focused, and drop the release
-        // of a key held meanwhile, so KWin kept it down (DEE-222: Meta, and every click moved
+        // of a key held meanwhile, so KWin kept it down (Meta, and every click moved
         // a window). Focus goes to a screen that's left, and the held keys come up there (or
         // with the next focus, if none is left).
         bool alive[MAX_SCREENS];
@@ -678,7 +678,7 @@ static void keys_update(struct server *s) {
     }
     ft_vr_gamepad_target(pill);
     // The fourth word is our pause: a "pause on|off" from the relay that never came (its socket
-    // was full) leaves us out of step until it hears this and says it again (DEE-258).
+    // was full) leaves us out of step until it hears this and says it again.
     const bool paused = ft_vr_paused();
     const uint32_t t = now_ms();
     if (desktop == s->keys_desktop && shown == s->keys_shown && paused == s->keys_paused &&
@@ -974,7 +974,7 @@ static void handle_key(struct server *s, uint32_t code, int value, char *reply, 
 // it's up comes back with its next "fullkb". A hide closes only a keyboard a text field opened,
 // and waits a moment, so moving between text fields doesn't close and reopen it. While Full
 // Keyboard isn't running (no "fullkb" for 3 s), nothing opens: there's no other keyboard
-// (DEE-310; docs/design.md).
+// (docs/design.md).
 // focused_screen: the screen KWin has keyboard focus on, for "debug" and "keys".
 static int focused_screen(struct server *s) {
     struct wlr_surface *focus = s->seat->keyboard_state.focused_surface;
@@ -1025,7 +1025,7 @@ static const char *typing_target(struct server *s) {
            : s->keys_clicked ? "desktop (hidden)" : "steam";
 }
 
-// "keys": what ft-screens holds down and where it goes, for reports on stuck keys (DEE-222):
+// "keys": what ft-screens holds down and where it goes, for reports on stuck keys:
 // "ok focus=<screen>|none typing=<where> keys=<codes>|- mods=<names>|- lost=<codes>|-". keys are
 // the keys ft-screens has down (and KWin with them, unless it lost one), mods the modifiers in
 // effect with them (locked ones too: Caps, NumLock), and lost the releases still owed to KWin,

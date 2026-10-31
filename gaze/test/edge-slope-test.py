@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline test of the calibration's edge (gazecal.Correction, DEE-188): past the range of view
+"""Offline test of the calibration's edge (gazecal.Correction): past the range of view
 its dots covered, the correction goes on in a straight line with the fit's slope at that edge,
 capped at EDGE_SLOPE, where it used to hold still. A made-up tracker that understates how far
 the eyes turn (0.8 of the true angle, as with eyes close to the lenses) is calibrated on a

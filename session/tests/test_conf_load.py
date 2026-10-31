@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""session/frametop-session.sh loading frametop.conf (DEE-293): a conf in the grammar
+"""session/frametop-session.sh loading frametop.conf: a conf in the grammar
 (docs/config.md) is sourced as before; one with a line bash would run (POINTER_IGNORE written with
 ", ", "KEY = value", $(...)) no longer stops the desktop under set -eu: its valid settings load
 and nothing in it runs. The script's own lines from conf= to backend= run here, with HOME a

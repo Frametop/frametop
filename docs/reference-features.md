@@ -1,6 +1,6 @@
 # Reference: power, pausing, voice, gaze, hands and VNC
 
-These sections were split out of [reference.md](reference.md) to keep it readable (DEE-313).
+These sections were split out of [reference.md](reference.md) to keep it readable.
 
 ## Displays off and sleep
 

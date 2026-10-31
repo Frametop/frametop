@@ -908,7 +908,7 @@ class Frunner:
     def release_keys(self):
         """Every key held here comes up, and a repeat stops: ft-screens' "keys release" (the
         relay's release_keys, and a relay that restarted, which can't send the releases its
-        predecessor owed; DEE-265)."""
+        predecessor owed)."""
         for code in sorted(self.held):
             self.xkb.update(code, False)
         self.held.clear()

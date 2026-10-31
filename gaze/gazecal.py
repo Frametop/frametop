@@ -16,14 +16,14 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
-import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
+import ft_store  # noqa: E402  (JSON files read and written safely)
 
 STATE = Path.home() / ".local" / "state" / "frametop" / "gaze"
 CALIBRATION = STATE / "calibration.json"
 
 
 def save_calibration(models, model, how, live=None, calibrated_at=None, path=None):
-    """calibration.json, in the one schema both writers use (DEE-300): each source's model
+    """calibration.json, in the one schema both writers use: each source's model
     (Correction.to_json), "_meta" {calibrated_at, model, how: "probe" or "panel"} and "_live"
     (the probe's click corrections per source; {} after the panel's calibration, which starts
     them over). Written under the file's lock, through a temp file of its own. It replaces the
@@ -244,7 +244,7 @@ class Correction:
     on, so its curve stops at the range of view it has seen, plus a margin. Past that, the
     correction goes on in a straight line, with the slope the fit has at that edge (at most
     EDGE_SLOPE degrees per degree). Holding it still there instead left a tracker that
-    understates how far the eyes turn (as with eyes close to the lenses, DEE-188) falling
+    understates how far the eyes turn (as with eyes close to the lenses) falling
     short, toward the centre, further and further past the ring: fitted on the dots within
     18 degrees and tried on those at 24 (2026-10-23, every source), the straight line was
     2.1 degrees off (median) for SteamVR's gaze where holding still was 3.0, and 3.1 against

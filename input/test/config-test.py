@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline test of the input relay's frametop.conf reading (DEE-297): a POINTER_* value that isn't a
+"""Offline test of the input relay's frametop.conf reading: a POINTER_* value that isn't a
 number warns and keeps its default instead of stopping the relay at start, and HANDS_NEAR reads
 the same here as in handsmode (Input Settings) for every way a line can say 0. ft-screens and the
 pointer helper read through conf/ft_conf.h, checked against the same lines in conf/test/conf-test.py.

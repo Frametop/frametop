@@ -29,7 +29,7 @@ The numbers are cited in the code, so they stay as they are. Struck-out text was
 |---|---|---|
 | 1 | How many windows can float at once | 16 spare outputs by default (also the most), configurable with `FLOAT_SLOTS`; a change needs a desktop restart. A Display Settings control isn't built |
 | 2 | Menus and dropdowns | Each floating output has a margin around the window. The panel shows only the window, and each open popup gets a small overlay of its own, cut from the same buffer |
-| 3 | Tearing off | ~~Drag the title bar past a screen's edge and let go in the air, with a small dead zone past the edge~~ Replaced (2026-10-30, DEE-246): while KWin moves the window by its title bar on a screen, pull the wheel. The window floats and the laser keeps carrying it; if floating it takes more than a second, it stays floating where it came up |
+| 3 | Tearing off | ~~Drag the title bar past a screen's edge and let go in the air, with a small dead zone past the edge~~ Replaced (2026-10-30): while KWin moves the window by its title bar on a screen, pull the wheel. The window floats and the laser keeps carrying it; if floating it takes more than a second, it stays floating where it came up |
 | 4 | Docking by dragging | Carry a floating window (any input: lasers, the 3D mouse, a hand) until the point you hold it by is on a shown screen within 10 cm of its surface (`FLOAT_DOCK_DISTANCE`). The screen lights up, and letting go docks the window there, the held point under the laser |
 | 5 | Visibility | Floating windows follow the same rules as the screens: the hide hotkey, the visibility modes, and the games rule |
 | 6 | Windows a floating app opens | They float too |
@@ -54,7 +54,7 @@ The numbers are cited in the code, so they stay as they are. Struck-out text was
 | 25 | A button on every window | A float button left of Close in the title bar, from Frametop's own QML window decoration, made to look like Breeze. It shows a dock icon on floating windows. Apps that draw their own title bar (Chromium, Electron, GTK) use the key |
 | 26 | Launching one app floating | "Launch as Standalone" in the right-click menu of every app in the Application Launcher and the taskbar, from copies of the apps' desktop files that only the Frametop desktop reads. It replaces the Frametop Apps entry (7, 10) |
 | 27 | Profiles | Named layouts become profiles: the screens' places, which screens show, and the apps and their windows, floating or not. See `docs/profiles.md` |
-| 28 | Panel size at the same pixels (2026-10-30, DEE-245) | Scroll on the corner tab: 5% a notch, from half to twice the screen's density. Remembered for each app; the float key and the title bar button float an app at the density it last had |
+| 28 | Panel size at the same pixels (2026-10-30) | Scroll on the corner tab: 5% a notch, from half to twice the screen's density. Remembered for each app; the float key and the title bar button float an app at the density it last had |
 
 Also: floating windows get the wrist pin, the head pin, and pass-through (`pointer-ignore`) like screens. Every gesture works with the controllers as well as the 3D mouse. A window launched floating uses the primary screen's density. VNC shows only the primary screen.
 
@@ -113,7 +113,7 @@ Program names stay within 15 characters (`ft-floatd`). Overlay keys are `frameto
 
 ## Tearing a window off a screen
 
-Decision 3, built 2026-10-30 (DEE-246C):
+Decision 3, built 2026-10-30:
 
 1. Press a desktop window's title bar on a screen and move it. KWin starts an interactive move, the script reports it (`screen-move`), and ft-floatd passes it on to ft-screens (`moving <window> 1`, and `0` when the move ends).
 2. Pull the wheel (scroll toward you) during that move. ft-screens releases the button in KWin where the pointer is, which ends the move, and asks ft-floatd to float the window (`tear <window> <x> <y>`, the pointer's place on the screen in its pixels). The button stays held in ft-screens, and its release doesn't go to KWin.

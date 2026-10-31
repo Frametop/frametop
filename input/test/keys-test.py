@@ -316,7 +316,7 @@ def tests():
           typed(),
           [f"key {c} 0" for c in sorted(relay.MODIFIERS)] + [f"key {c} 0" for c in range(0x110, 0x118)] + ["keys release"])
 
-    # DEE-268: a virtual device from the fd store lets go of every key it has (the kernel drops
+    # a virtual device from the fd store lets go of every key it has (the kernel drops
     # the ones that aren't down), and so does the gamepad, its sticks centred.
     def written(fd):
         data = os.read(fd, 65536)
@@ -459,7 +459,7 @@ def tests():
     key(relay.BTN_LEFT, 1, ms_w); key(relay.BTN_LEFT, 0, ms_w)
     check("resumed: a click goes to the helper again", clicks(), ["btn trigger 1", "btn trigger 0"])
 
-    # DEE-263: a click pressed while paused went to the virtual mouse, and comes up there after
+    # a click pressed while paused went to the virtual mouse, and comes up there after
     # the resume, not on the helper.
     pause("on")
     clicks()
@@ -469,7 +469,7 @@ def tests():
     key(relay.BTN_LEFT, 0, ms_w)
     check("a click held through the resume comes up on the virtual mouse, not the helper",
           (emitted(), clicks(), typed()), ([("mouse", relay.BTN_LEFT, 1), ("mouse", relay.BTN_LEFT, 0)], [], []))
-    # DEE-264: POINTER=0 with a click held lets go of it on the helper, and its release goes to
+    # POINTER=0 with a click held lets go of it on the helper, and its release goes to
     # the virtual mouse (which never had it down: the kernel drops it).
     key(relay.BTN_LEFT, 1, ms_w)
     check("pointer mode: the click reaches the helper", clicks(), ["btn trigger 1"])
@@ -541,7 +541,7 @@ def tests():
 
     # Meta+Shift+H (a default): ft-screens hides or shows the screens. Hidden, they give typing to
     # Steam and the keyboards aren't grabbed, but the relay still reads them, so a second press
-    # brings the screens back (DEE-217); a repeat isn't one.
+    # brings the screens back; a repeat isn't one.
     H = 35
     logged = len(LOG)
     to_relay("keyboard desktop")
@@ -568,7 +568,7 @@ def tests():
     use(None)
 
     # Ctrl+Alt+Shift+Esc (a default): ft-screens lets go of every key, for a modifier stuck in KWin
-    # (DEE-222). The relay reads it with the screens hidden too, with more modifiers held (a stuck
+    #. The relay reads it with the screens hidden too, with more modifiers held (a stuck
     # one), and paused; Esc isn't typed, and nothing else happens.
     ESC = 1
     to_relay("keyboard desktop")

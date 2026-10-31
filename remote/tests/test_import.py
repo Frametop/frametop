@@ -1,4 +1,4 @@
-"""ft-remote-settings imports offline (DEE-311): a smoke test, the component had none. HOME is
+"""ft-remote-settings imports offline: a smoke test, the component had none. HOME is
 a temp folder; nothing is read from or written to the host.
 
   python3 remote/tests/test_import.py

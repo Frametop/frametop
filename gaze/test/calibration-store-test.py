@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """calibration.json's one writer (gazecal.save_calibration, used by ft-gazeprobe and the panel's
 calibration in gaze/gazecheck.py) and ft-eyes' pruning of its earlier calibrations
-(eyes_model.prune_backups), DEE-300. HOME is a temp folder: no real calibration is read,
+(eyes_model.prune_backups). HOME is a temp folder: no real calibration is read,
 written or removed.
 
   gaze/test/calibration-store-test.py

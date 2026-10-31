@@ -1,4 +1,4 @@
-"""Remote Displays imports offline (DEE-311): a smoke test, the component had none. HOME is a
+"""Remote Displays imports offline: a smoke test, the component had none. HOME is a
 temp folder; no Vibepollo host is reached. Pairing and streaming need a host and the headset
 (the verify-remote-streams skill). Needs PySide6 (the image's python3).
 

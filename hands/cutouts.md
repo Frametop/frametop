@@ -1,6 +1,6 @@
 # Hand cutouts and near input
 
-These sections were split out of [README.md](README.md) to keep it readable (DEE-313).
+These sections were split out of [README.md](README.md) to keep it readable.
 
 ## Hand cutouts and near input
 

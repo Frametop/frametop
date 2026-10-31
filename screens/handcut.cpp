@@ -79,7 +79,7 @@ void Hand::Palm(double out[3]) const {
 // By the conf's grammar (conf/ft_conf.h, docs/config.md), as every other reader: an indented
 // line counts, "NAME = value" doesn't (bash can't read it either), and the last line wins. This
 // read only lines starting "NAME=" before, so HANDS_NEAR could be off for the relay and Input
-// Settings and on here (DEE-297).
+// Settings and on here.
 std::string Setting(const char *name, const char *def) { return ft_conf::Setting(name, def); }
 
 bool ParseShift(const std::string &text, std::vector<Shift> &out) {

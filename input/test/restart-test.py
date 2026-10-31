@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Offline test of what the input relay does when it starts again (DEE-306): Relay.recover_from_restart
-and the pause's state file, one test each for the restart fixes L1, L5 and L6 (G1, DEE-252, 256, 257)
-and K3, K6 and K7 (G3, DEE-265, 268, 269) in docs/charts/README.md. Then the relay's state objects,
-and its reload, which puts the whole config in place or none of it (DEE-297).
+"""Offline test of what the input relay does when it starts again: Relay.recover_from_restart
+and the pause's state file, one test each for the restart fixes L1, L5 and L6 (G1)
+and K3, K6 and K7 (G3) in docs/charts/README.md. Then the relay's state objects,
+and its reload, which puts the whole config in place or none of it.
 
 It makes Relay objects with fake virtual devices, a renamed helper and ft-screens, a temporary pause
 state file and the pause's worker and controller reader stubbed, and never runs the loop: no
@@ -190,7 +190,7 @@ DRIVER = [f"btn {d} 0" for d in sorted(set(relay.Pointer.DRIVER_BUTTONS.values()
 DESKTOP = ([f"key {c} 0" for c in sorted(relay.MODIFIERS)]
            + [f"key {c} 0" for c in range(relay.BTN_MOUSE, relay.BTN_TASK + 1)] + ["keys release"])
 
-# ---------------------------------------------------------------- L1 (DEE-252)
+# ---------------------------------------------------------------- L1
 r = start(PAUSED, {"POINTER": "1"})
 check("L1: restarted while paused, pointer mode on: the pointer isn't in use", (r.pause.paused, r.lease.current, bool(r.lease.conf)),
       (True, None, True))
@@ -205,7 +205,7 @@ r = start(PAUSED, {"POINTER": "0"})
 r.recover_from_restart()
 check("L1: paused with POINTER=0: no pointer to stand down", received(helper), ["vrbind -"] + DRIVER)
 
-# ---------------------------------------------------------------- L5 (DEE-256)
+# ---------------------------------------------------------------- L5
 r = start({"paused": False, "stopped": {"units": ["frametop-gaze.service"], "remote": True, "desktop": None}})
 check("L5: restarted after a resume, before its job ran: the resume runs now",
       (r.pause.paused, r.pause.worker.jobs, r.pause.worker.stopped["units"]), (False, ["resume"], ["frametop-gaze.service"]))
@@ -214,7 +214,7 @@ check("L5: ...a desktop the pause closed comes back", r.pause.worker.jobs, ["res
 r = start({"paused": False, "stopped": {"units": [], "remote": False, "desktop": None}})
 check("L5: ...nothing left over: nothing", r.pause.worker.jobs, [])
 
-# ---------------------------------------------------------------- L6 (DEE-257)
+# ---------------------------------------------------------------- L6
 GAME = {"paused": True, "reason": "game", "since": 1.0, "ends_with_game": True, "stopped": {}}
 r = start(GAME)
 check("L6: restarted during a pause that ends with its game: the game counts as running, the pause holds",
@@ -232,7 +232,7 @@ r = start(GAME, rules={"pause_auto": False})
 check("L6: with automatic pausing off, the rules (applied after the state file) end the tie to the game",
       (r.pause.paused, r.pause.ends_with_game), (True, False))
 
-# ---------------------------------------------------------------- K3 (DEE-265)
+# ---------------------------------------------------------------- K3
 r = start()
 r.held.desktop.update({30, 42})  # A and Shift down on the desktop, as the relay knows it
 r.recover_from_restart()
@@ -242,7 +242,7 @@ check("K3: the desktop lets go of the modifiers and mouse buttons, then of every
 # next scan (reconcile_desktop_keys: no device holds it).
 check("K3: ...a modifier counts as up here at once, a plain key until the next scan", r.held.desktop, {30})
 
-# ---------------------------------------------------------------- K6 (DEE-268)
+# ---------------------------------------------------------------- K6
 r = start(reused=True)
 r.recover_from_restart()
 check("K6: a virtual mouse and keyboard reused from the fd store let go of every key",
@@ -251,7 +251,7 @@ r = start(reused=False)
 r.recover_from_restart()
 check("K6: ...new ones have nothing down", (r.mouse.released, r.keyboard.released), (0, 0))
 
-# ---------------------------------------------------------------- K7 (DEE-269)
+# ---------------------------------------------------------------- K7
 r = start(None, {"POINTER": "1"})
 r.recover_from_restart()
 got = received(helper)
@@ -279,7 +279,7 @@ p.sock = type("Recorder", (), {"sent": [], "sendto": lambda self, data, addr: se
 p.action("left", 1, 10.0)
 p.sock.sent.clear()
 lease.configure(False, 0.03, 30.0, 40, paused=False)
-check("lease: pointer mode off with a click held: the helper lets go (DEE-264)",
+check("lease: pointer mode off with a click held: the helper lets go",
       (lease.conf, lease.current, p.sock.sent), (None, None, ["btn trigger 0", "hide pause"]))
 check("lease: holding: no change while there's no pointer", lease.holding_changed(), False)
 lease.configure(True, 0.03, 30.0, 40, paused=False)
@@ -300,7 +300,7 @@ typing.kb_held = {31: True, 30: False}
 check("typing: Full Keyboard goes: its keys to come are dropped, the ones it held come back to let go",
       (typing.drop_full_keyboard(), list(typing.queue), typing.kb_held), ([(30, False), (31, True)], ["a", ("quiet", "b"), "c"], {}))
 
-# ---------------------------------------------------------------- reload: all or nothing (DEE-297)
+# ---------------------------------------------------------------- reload: all or nothing
 r = start(None, {"POINTER": "1", "POINTER_SENSITIVITY": "0.05"},
           {"pause_sound": False, "controller_buttons": {"right/a": "left"}})
 rules, pointer, settings = r.rules, r.lease.conf, dict(r.pause.settings)

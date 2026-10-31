@@ -238,7 +238,7 @@ function watch(w) {
         mark(w);
     });
     w.keepBelowChanged.connect(() => keepBelowChanged(w));
-    // A window on the screens moved by its title bar (user, 2026-10-30, DEE-246): ft-screens may tear it off
+    // A window on the screens moved by its title bar (user, 2026-10-30): ft-screens may tear it off
     // into a floating window then (a pull on the wheel).
     const onScreens = () => screens > 0 && w.normalWindow && !w.popupWindow && !onSpare();
     w.interactiveMoveResizeStarted.connect(() => {

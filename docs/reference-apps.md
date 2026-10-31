@@ -1,6 +1,6 @@
 # Reference: the settings apps and the desktop's tools
 
-These sections were split out of [reference.md](reference.md) to keep it readable (DEE-313).
+These sections were split out of [reference.md](reference.md) to keep it readable.
 
 ## Frametop Input Settings
 

@@ -968,10 +968,10 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     // ft-stream keeps its host's input and audio locks. ft-screens kills one 20 s after it asked
     // it to end or heard "lost" (screens/remote.c), but not once it's gone itself: a desktop stop
     // leaves its ft-streams behind. So this one ends itself 25 s from here (SIGALRM's default
-    // action) whoever is left (DEE-261).
+    // action) whoever is left.
     alarm(kExitWatchdogS);
     // "lost" before LiStopConnection, not after: a connection the host ended that hangs in it
-    // used to stay "live" in ft-screens, which never killed it (DEE-259).
+    // used to stay "live" in ft-screens, which never killed it.
     viewer.Send(ended ? "state lost the host ended the stream" : "state lost");
     g_mic.Stop();  // no packet after this, before the connection goes
     g_hostin.Stop(hostinput::Want::kDrop);  // the host's keyboard and mouse go back now, not a lease later

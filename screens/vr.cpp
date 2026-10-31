@@ -437,7 +437,7 @@ handcut::Renderer g_cutter;
 int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
 roomview::Detector g_roomView;   // no cutouts with Room View off
-trackwatch::Watch g_track;       // DEE-206: logs what SteamVR does to standing (trackwatch.h)
+trackwatch::Watch g_track;       // logs what SteamVR does to standing (trackwatch.h)
 uint64_t g_universe = 0;         // the universe now, read every tick (ft_vr_poll; 0 until read)
 
 // The tracking watch's reads: raw->standing, and with `universe` the universe id too.
@@ -449,7 +449,7 @@ void WatchStanding(const char *why, bool universe) {
     if (universe && g_universe) g_track.Universe(g_universe);
 }
 
-// DEE-206's fix (universefix.h): universe switches, and each universe's kind.
+// The screen-jump fix (universefix.h): universe switches, and each universe's kind.
 universefix::Tracker g_universeTrack;
 std::map<uint64_t, universefix::Kind> g_universeKinds;
 
@@ -492,7 +492,7 @@ bool g_constructRoomView = true; // camera/enableConstructRoomView
 Mode g_mode = Mode::Always;
 bool g_manual = false;
 // Counts every change of g_manual, last in "state": a gaze calibration that hid the screens
-// shows them at its close only if nothing moved the switch since (DEE-279).
+// shows them at its close only if nothing moved the switch since.
 unsigned g_switchGen = 0;
 double g_wristAngle = 60;    // a pinned screen shows while you see its front within this
 double g_gestureAngle = 20;  // gesture: look within this of the controller
@@ -2364,7 +2364,7 @@ void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handl
     if (g_press.buttons && dev == g_press.device) ReleaseAway(LinuxButton(vrButton), handle, data);
 }
 
-// Tearing a window off its screen (user, 2026-10-30, DEE-246C): moving it by its title bar on a screen (a
+// Tearing a window off its screen (user, 2026-10-30): moving it by its title bar on a screen (a
 // real KWin move, which KWin's script reports: "moving"), a pull on the wheel floats it, and the laser
 // carries it on from there. KWin gets the release at the tear, which ends its move; the button stays held
 // here (g_press.torn) and its release goes to KWin no more. ft-floatd floats the window and answers "torn"
@@ -3212,7 +3212,7 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms 
 // home, unless you used it a while (g_frontKeepMs of input on it: kept). Resized there, it comes that
 // size next time (g_frontDeg). Pushed or pulled there (nearer or farther along its line from the eyes:
 // a scroll while carrying it, a carry straight out), it comes that far out next time (g_frontDist; user,
-// 2026-10-30, DEE-244: it "always goes back to the default distance, which is closer than the user
+// 2026-10-30: it "always goes back to the default distance, which is closer than the user
 // prefers"). Its home: where it lived before it came.
 //   Manual controls take it (user, 2026-10-11, later: "if the primary slot has a window moved out of it
 // through any gesture, pull, push, or drag with the pinch or laser, the lazy susan should release the
@@ -4263,7 +4263,7 @@ double HeadDistance(const Mat &p) {
     return Apart(head, p);
 }
 
-// Docking by carrying (user, 2026-10-30, DEE-246: "drag a floating window back onto a screen"): a floating
+// Docking by carrying (user, 2026-10-30: "drag a floating window back onto a screen"): a floating
 // window carried by a laser, the 3D mouse or a hand, brought within FLOAT_DOCK_DISTANCE of a screen it's
 // in front of (or just behind), lights that screen up (the target glow, full), and docks onto it where
 // it's let go (FinishDrag; ft-floatd's "dockat"). In front of: on the carrying laser past where it holds
@@ -5471,7 +5471,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     break;
                 case vr::VREvent_ScrollDiscrete:
                     // carried by its title bar: the wheel pushes it away or pulls it in, as on the bar
-                    // (user, 2026-10-30, DEE-246); KWin, moving the window, gets none
+                    // (user, 2026-10-30); KWin, moving the window, gets none
                     if (s.titleCarry && s.drag == Drag::Move) return Push(s, ev.data.scroll.ydelta);
                     if (g_press.torn) {  // a torn-off window: carried, as by its title bar; not floating yet, none
                         if (s.drag == Drag::Move) Push(s, ev.data.scroll.ydelta);
@@ -5519,7 +5519,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::Move)
                 Push(s, ev.data.scroll.ydelta);
         }
-        // The corner: resize. A floating window's: scroll for its density too (user, 2026-10-30, DEE-245): up,
+        // The corner: resize. A floating window's: scroll for its density too (user, 2026-10-30): up,
         // its panel bigger at the same pixels, down, smaller (ft-floatd, 5% a notch); not while it's resized.
         while (vr::VROverlay()->PollNextOverlayEvent(s.handle, &ev, sizeof ev)) {
             hover(3);

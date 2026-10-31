@@ -1,6 +1,6 @@
 # Design: the desktop session, power, pausing and updates
 
-These sections were split out of [design.md](design.md) to keep it readable (DEE-313).
+These sections were split out of [design.md](design.md) to keep it readable.
 
 ## The desktop session
 

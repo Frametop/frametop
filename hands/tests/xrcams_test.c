@@ -1,5 +1,5 @@
 /*
- * hands/camd/xrcams.c's camera maps, offline (DEE-311): which role a sensor's name gives
+ * hands/camd/xrcams.c's camera maps, offline: which role a sensor's name gives
  * (role_for_sensor), where the image really sits in plane 0 (xr_camera_stride,
  * xr_camera_layout) for the cameras measured on the Frame, and xr_slugify. Pinned as they
  * behave now; no device, no XRService, nothing opened. xrcams.c is included to reach its

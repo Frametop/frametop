@@ -268,9 +268,9 @@ p.game_state(True, 20)
 check("the next game: parked", parked(), True)
 p.worker.jobs.clear()
 p.set_hands(False)
-check("hand interaction off mid-pause: the worker stops what the pause kept (DEE-275)",
+check("hand interaction off mid-pause: the worker stops what the pause kept",
       (p.worker.keep, p.worker.jobs), ((), ["enforce"]))
-check("...and the park stays, for ft-cutouts' tracker (DEE-276)", parked(), True)
+check("...and the park stays, for ft-cutouts' tracker", parked(), True)
 p.worker.jobs.clear()
 p.set_hands(False)
 check("off again: nothing more to stop", p.worker.jobs, [])
@@ -291,7 +291,7 @@ p.set_hands(True)
 p.game_state(False, 30)
 gp.PARK_PATH = os.path.join(tmp, "not-yet", "frametop-hands", "park")
 p.game_state(True, 40)
-check("a pause before hand tracking ever ran makes its folder and parks (DEE-274)",
+check("a pause before hand tracking ever ran makes its folder and parks",
       (parked(), oct(os.stat(os.path.dirname(gp.PARK_PATH)).st_mode & 0o777)), (True, "0o700"))
 p.toggle("gesture", 1)
 check("...and the resume unparks", parked(), False)
@@ -301,7 +301,7 @@ q.toggle("gesture", 1)
 r = gp.GamePause(lambda *a: None, changes.append, VR)
 check("resumed: the next relay starts running", r.paused, False)
 
-# ---------------------------------------------------------------- relay restarts (DEE-256, DEE-257)
+# ---------------------------------------------------------------- relay restarts
 def restart_with(state):
     with open(gp.STATE_PATH, "w") as f:
         json.dump(state, f)
@@ -333,7 +333,7 @@ check("...no word from the helper at all (SteamVR stopped too): resumed", r.paus
 r = restart_with({"paused": True, "reason": "gesture", "ends_with_game": False, "stopped": {}})
 check("restarted during a pause not tied to a game: no game assumed", (r.paused, r.game), (True, False))
 
-# ---------------------------------------------------------------- desktop starts mid-pause (DEE-253, 258, 280)
+# ---------------------------------------------------------------- desktop starts mid-pause
 p = new()
 told = []
 p.tell_screens = told.append
@@ -356,7 +356,7 @@ n = len(p.worker.jobs)
 p.desktop_started()
 check("running: a desktop start changes nothing", (p.defer_remote(), len(p.worker.jobs)), (False, n))
 
-# ---------------------------------------------------------------- the worker (DEE-254, DEE-255)
+# ---------------------------------------------------------------- the worker
 calls = []
 unit_state = {}
 

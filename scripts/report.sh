@@ -188,7 +188,7 @@ PY
   echo "keyboard, drag and Steam menu lines from ft-screens (last 40):"
   grep -a -E 'keyboard|Steam (in front|out of the way)|: (move|resize|roll)( by| ended| not started)' \
     "$HOME/.local/state/frametop/screens.log" 2>/dev/null | tail -n 40 | sed 's/^/  /'
-  echo "tracking: what SteamVR did to standing, and screens that followed a universe change (DEE-206; last 60):"
+  echo "tracking: what SteamVR did to standing, and screens that followed a universe change (last 60):"
   grep -a -h -E '^==== ft-screens started|trackwatch:|^universe ' "$HOME/.local/state/frametop/screens.log.1" \
     "$HOME/.local/state/frametop/screens.log" 2>/dev/null | tail -n 60 | sed 's/^/  /'
   echo "text fields, from the relay (last 20):"

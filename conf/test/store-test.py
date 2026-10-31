@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """conf/ft_store.py: a file that doesn't read is kept, writers take turns, a crash mid-write
-leaves the old file (DEE-300). Everything happens in a temp folder."""
+leaves the old file. Everything happens in a temp folder."""
 import contextlib
 import io
 import json

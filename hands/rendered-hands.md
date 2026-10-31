@@ -1,6 +1,6 @@
 # Rendered hands and the camera check
 
-These sections were split out of [README.md](README.md) to keep it readable (DEE-313).
+These sections were split out of [README.md](README.md) to keep it readable.
 
 ## Rendered hands
 

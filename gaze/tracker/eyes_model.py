@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "conf"))
-import ft_store  # noqa: E402  (JSON files written safely, DEE-300; standard library only)
+import ft_store  # noqa: E402  (JSON files written safely; standard library only)
 
 SLIP_WINDOW = 30.0
 SLIP_MIN = 10        # pair sightings needed before trusting a slip estimate

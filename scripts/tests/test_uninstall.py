@@ -1,5 +1,5 @@
 """uninstall.sh, offline: its menu-entry glob takes Frametop's ft-* and frametop-* desktop files and
-nothing else, and it knows the paths DEE-313 added. The script is only sourced, under a temp HOME,
+nothing else, and it knows the paths it once missed. The script is only sourced, under a temp HOME,
 so main never runs and nothing outside the temp folder is read or removed."""
 import os
 import pathlib
@@ -48,7 +48,7 @@ class Uninstall(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "0")
 
     def test_the_added_paths(self):
-        """Each path DEE-313 added is in the statement that removes it, not only in a comment."""
+        """Each path it once missed is in the statement that removes it, not only in a comment."""
         text = SCRIPT.read_text()
         for name, pattern in (
                 ("FrameDrop's cache, with the rebuilt caches",

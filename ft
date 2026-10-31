@@ -96,7 +96,7 @@ case "${1:-help}" in
     case "${1:-help}" in
       build)  # The image takes the working tree as it is, changes and untracked files too:
               # its labels say which commit that was, and whether anything had changed, so
-              # framedrop/build.sh can refuse to name a commit it wasn't built from (DEE-288).
+              # framedrop/build.sh can refuse to name a commit it wasn't built from.
               built_commit=unknown built_tree=unknown
               if built_commit=$(git -C "$root" rev-parse HEAD 2>/dev/null) &&
                  changes=$(git -C "$root" status --porcelain --untracked-files=normal 2>/dev/null); then

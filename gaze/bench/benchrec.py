@@ -37,7 +37,7 @@ from collections import deque
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "conf"))
-import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 
 HERE = Path(__file__).resolve().parent
 GAZE = HERE.parent

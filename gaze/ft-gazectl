@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
-import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 
 
 def ask(name, msg, timeout=1.0):

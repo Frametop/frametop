@@ -224,7 +224,7 @@ try:
     check("Backspace", ask("status"), "ok open list fi")
     type_text("x")
     tell(f"key {BACKSPACE} 1")
-    tell("keys release")  # a relay that restarted with Backspace down (DEE-265)
+    tell("keys release")  # a relay that restarted with Backspace down
     time.sleep(0.6)  # past REPEAT_DELAY_MS: a held key would have repeated by now
     check("keys release: a held Backspace comes up, and doesn't repeat", ask("status"), "ok open list fi")
     tell(f"key {BACKSPACE} 0")

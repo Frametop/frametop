@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <linux/input-event-codes.h>
-// Key releases KWin hasn't had (DEE-222). wlroots sends a key only to the surface with keyboard
+// Key releases KWin hasn't had. wlroots sends a key only to the surface with keyboard
 // focus, and drops it when none has it: after the focused screen closes, until a click or a
 // spin gives another one focus. A modifier held across that (Meta) came up in ft-screens' state
 // but stayed down in KWin, so every click was Meta+click, a window move. ft-screens keeps
@@ -77,7 +77,7 @@ static inline void ft_key_list(const uint32_t *codes, size_t n, char *out, size_
 // How many times "keys release" lets go of each modifier, in ft-screens' state and in KWin. Both
 // count presses through xkbcommon, which counts a second press of a key that's already down:
 // one release then leaves it down for good, and further presses and releases come in pairs, so
-// it stays down until the desktop restarts (DEE-222: a Meta pressed twice like that makes every
+// it stays down until the desktop restarts (a Meta pressed twice like that makes every
 // click Meta+click, a window move). ft_keyboard_key keeps that from happening now; these
 // releases undo it if it happened anyway, with focus or with the next one (keyboard_enter). A
 // release of a key that isn't down changes nothing.

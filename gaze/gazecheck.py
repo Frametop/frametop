@@ -134,8 +134,8 @@ from gazecal import DEFAULT_MODEL, EYE_LOST, FUSION, STATE, Fusion, save_calibra
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
-import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
-import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
+import ft_store  # noqa: E402  (JSON files read and written safely)
 PANEL_PROG = REPO / "gaze" / "build" / "ft-gazepanel"
 PANEL = "\0ft_gazepanel"
 POINTER = "\0ft_pointer_helper"
@@ -146,7 +146,7 @@ CALIBRATION = STATE / "calibration.json"
 POINTS = STATE / "points.jsonl"   # the probe's record of calibration dots, for its refine
 CHECK_LOG = STATE / "checks.jsonl"
 # A full calibration hid Frametop's screens and hasn't shown them again: close() takes it away.
-# One left by an ft-gazed that died has the next one show them (DEE-270).
+# One left by an ft-gazed that died has the next one show them.
 SCREENS_HIDDEN = STATE / "screens-hidden"
 
 CHECK_SETTLE = 0.45
@@ -294,7 +294,7 @@ def screens_mode():
     screens, and how many times the switch changed (None from an older ft-screens); None
     without an answer. In a VR game with ingames hide, "always" works as "dashboard"
     (ft-screens' EffectiveMode), whose switch is off. Read as "always", the screens counted as
-    shown, and the show at a calibration's close turned the switch on over the game (DEE-279).
+    shown, and the show at a calibration's close turned the switch on over the game.
     An older ft-screens doesn't say whether a game runs: its mode as is."""
     st = ask(SCREENS, "state", 0.5).split()
     if len(st) < 3 or st[0] != "ok":
@@ -307,7 +307,7 @@ def screens_mode():
 def show_screens(mode, gen):
     """The show after a full calibration's hide, unless something moved the switch since its
     hide (gen: a VR game that started or ended, a settings change, the user's hotkey, a new
-    ft-screens), which then decides (DEE-279). Without the count (an older ft-screens), unless
+    ft-screens), which then decides. Without the count (an older ft-screens), unless
     the mode in effect changed."""
     now = screens_mode()
     if now is not None and gen not in (None, "", "-") and now[2] is not None and now[2] != gen:
@@ -1239,7 +1239,7 @@ class Checks:
                     self.fit_fusion(c["fusion"])
                     # ft-eyes saved it: what's held of its status says so now, not at its next
                     # reply, or need_full would take the stale "no calibration" and open a
-                    # second full calibration at once (DEE-271).
+                    # second full calibration at once.
                     own = svc.own if time.monotonic() - svc.own_at <= 5 else {}
                     svc.own = dict(own, calibration=dict(own.get("calibration") or {}, dots=c["captured"]))
                     svc.own_at = time.monotonic()
@@ -1257,7 +1257,7 @@ class Checks:
                     svc.models[name].fit(pts, mode)
             try:
                 save_calibration(svc.models, mode, "panel", path=CALIBRATION)
-            except (OSError, ft_store.StoreError) as e:   # one that doesn't read stays (DEE-300)
+            except (OSError, ft_store.StoreError) as e:   # one that doesn't read stays
                 log(f"calibration ({c['captured']} of {n} dots): not saved: {e}")
                 self.close()
                 return
@@ -1340,7 +1340,7 @@ class Checks:
         svc = self.svc
         words, _ = self.pending
         # The fit check needs the tracker sending, as start_fit does, not a gaze: our tracker sends
-        # none before its first calibration (DEE-272).
+        # none before its first calibration.
         ready = (time.monotonic() - self.sample_at < 2 if words[0] == "fitcheck" else self.can_run()) \
             and (svc.kind != "own" or self.calibrated() is not None)
         if not ready and svc.waking():
@@ -1429,7 +1429,7 @@ class Checks:
         if not self.eyes_seen(PUTON_GONE if self.puton_holds(c) else EYES_GONE):
             self.close("the headset came off")
             # ...so the eyes coming back are the headset going on (DON_DELAY), even before
-            # AWAY_MIN: that re-arms a full calibration that closed so (DEE-273).
+            # AWAY_MIN: that re-arms a full calibration that closed so.
             self.away, self.back_since = True, None
             return
         if c["done_at"]:

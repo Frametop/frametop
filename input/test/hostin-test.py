@@ -253,7 +253,7 @@ def tests():
     check("hostbye: that device goes, the other stays",
           [d["id"] for d in ask("devices")["nodes"]], ["host:testpc:keyboard"])
     time.sleep(0.1)
-    check("...and the trigger it held mid-drag comes up in the helper (DEE-284)",
+    check("...and the trigger it held mid-drag comes up in the helper",
           [m for m in received(helper) if m.startswith("btn trigger")], ["btn trigger 0"])
     to_relay("hostdev ../evil keyboard x")
     to_relay("hostdev testpc tablet x")

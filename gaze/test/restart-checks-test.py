@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Offline test of the gaze checks' G4 fixes, and G2's P2 (gaze/gazecheck.py, docs/charts/README.md):
 
-  Z1 (DEE-270)  a full calibration marks the screens it hid (SCREENS_HIDDEN); the next gaze
+  Z1  a full calibration marks the screens it hid (SCREENS_HIDDEN); the next gaze
                 service shows them again if the last one died before close()
-  Z2 (DEE-271)  our tracker's calibration saved (calib-fit's "ok") counts at once, so need_full
+  Z2  our tracker's calibration saved (calib-fit's "ok") counts at once, so need_full
                 doesn't open a second full calibration on ft-eyes' stale status
-  Z3 (DEE-272)  a fit check asked for while idle runs once the tracker sends, not once a gaze
+  Z3  a fit check asked for while idle runs once the tracker sends, not once a gaze
                 comes (our tracker sends none before its first calibration)
-  Z4 (DEE-273)  a check closed because the eyes went makes their coming back a don, which
+  Z4  a check closed because the eyes went makes their coming back a don, which
                 re-arms the full calibration
-  P2 (DEE-279)  a full calibration in a VR game, with the always mode and ingames hide, reads the
+  P2  a full calibration in a VR game, with the always mode and ingames hide, reads the
                 mode in effect (dashboard, its switch off), so its close doesn't show the screens;
                 nor does a close, or the next gaze service, after a game started mid-calibration
 

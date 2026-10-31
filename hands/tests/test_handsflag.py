@@ -128,7 +128,7 @@ class FlagTest(unittest.TestCase):
         self.assertEqual(ctl["hmd_poses"], 0)   # no ft-handview answering
 
     def test_bad_seconds(self):
-        # HANDS_FLAG_SECONDS that isn't a number warns and keeps 12 s; it used to raise (DEE-297)
+        # HANDS_FLAG_SECONDS that isn't a number warns and keeps 12 s; it used to raise
         os.environ["FT_HANDS_FLAG_SECONDS"] = "soon"
         self.assertEqual(hf.main([], run_dir=self.run_dir, sock_name=self.view_name, detach=False), 1)
 

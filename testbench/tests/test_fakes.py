@@ -472,7 +472,7 @@ class DaemonTests(unittest.TestCase):
         self.gone()
 
     def test_status_polls_dont_keep_it(self):
-        # DEE-282: a later agent's doctor and guard checks poll status; a dead run's fakes still end.
+        # a later agent's doctor and guard checks poll status; a dead run's fakes still end.
         self.env['FRAME_TESTBENCH_FAKES_IDLE'] = '1.0'
         self.start('gaze 0 0 0 0')
         started = time.monotonic()

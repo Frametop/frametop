@@ -95,7 +95,7 @@ PULL_OUT = 0.3           # a floated window starts this far in front of its scre
 DEFAULT_MPP = 1.6 / 1920  # metres per pixel when ft-screens can't say (no SteamVR)
 PLACES_PATH = os.path.expanduser("~/.config/frametop-float.json")  # each app's last floating place
 LAUNCH_SECONDS = 30      # a launched app's window must show up within this
-# Scroll on a floating window's corner tab (user, 2026-10-30, DEE-245): its panel bigger or smaller at the
+# Scroll on a floating window's corner tab (user, 2026-10-30): its panel bigger or smaller at the
 # same pixels, 5% a notch, from half to twice its screen's density (metres per pixel).
 DENSITY_STEP = 1.05
 DENSITY_RANGE = (0.5, 2.0)
@@ -882,7 +882,7 @@ class Daemon:
                      onAllDesktops=bool(saved.get("onAllDesktops")), maximized=maximized)
 
     def dock_at(self, f, screen, x, y, gx, gy):
-        """Carried onto a screen and let go there (user, 2026-10-30, DEE-246; ft-screens' "dockat"): docked onto
+        """Carried onto a screen and let go there (user, 2026-10-30; ft-screens' "dockat"): docked onto
         it with the point it was held by (gx, gy: pixels in the window) at x, y (pixels on that screen), at its
         size in pixels, smaller where the screen is, and all of it on that screen."""
         name = f"WL-{screen}"
@@ -1461,7 +1461,7 @@ def parse_args(argv=None):
     p.add_argument("--screens", type=int, default=int(os.environ.get("FT_SCREEN_COUNT") or 0))
     # The defaults are worked out before --slots and --margin are looked at, so a bad value in the
     # conf warns and gives the default rather than stopping ft-floatd (FLOAT_SLOTS="8" did: the
-    # quotes stayed on, DEE-297).
+    # quotes stayed on).
     p.add_argument("--slots", type=int, default=ft_conf.number(conf, "FLOAT_SLOTS", 16, int))
     p.add_argument("--margin", type=int, default=ft_conf.number(conf, "FLOAT_MARGIN", 300, int))
     p.add_argument("--control", default="ft_screens")

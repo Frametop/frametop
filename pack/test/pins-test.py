@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline checks of the build's pinned downloads (DEE-309):
+"""Offline checks of the build's pinned downloads:
 
 - every download in a build file (build.sh, deps.sh, Makefile, Containerfile, CMakeLists.txt,
   scripts/openvr.sh, scripts/stb.sh, install.sh, testbench/install.sh) is checked by a sha256 or
@@ -28,7 +28,7 @@ PRUNE = {'.git', '.worktrees', 'build', '.venv', 'node_modules', '__pycache__', 
 BUILD_NAMES = {'build.sh', 'deps.sh', 'Makefile', 'Containerfile', 'CMakeLists.txt'}
 EXTRA = ['scripts/openvr.sh', 'scripts/stb.sh', 'install.sh', 'testbench/install.sh']   # (no testbench/ in the image)
 # pip installs without hashes, on purpose: the dev container's venvs, from exact == pins. The
-# image and releases install the same versions from uv.lock, with its hashes. (Open in DEE-309:
+# image and releases install the same versions from uv.lock, with its hashes. (Still open:
 # hashing these needs every platform's wheel, the 7i's too.)
 UNHASHED_PIP = {('gaze/tracker/build.sh', 'requirements.txt'), ('voice/build.sh', 'requirements.txt')}
 COMMIT = re.compile(r'\b[0-9a-f]{40}\b')

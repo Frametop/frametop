@@ -298,7 +298,7 @@
 // allowed is 1 when hands may work at all: the headset worn, and outside VR games, or in one with
 // the dashboard open or Frametop toggled back on (the relay's "paused 0"; it sends "paused 1|0"
 // on a change and at the helper's start). The relay also hears "vrdash 1|0" (the dashboard open, on a
-// change and every 5 s, so a relay or helper that restarted catches up: DEE-277): it parks hand
+// change and every 5 s, so a relay or helper that restarted catches up): it parks hand
 // tracking while Frametop is paused for a game and unparks it while the dashboard is open
 // (input/game_pause.py).
 // ft-handview (screens/handview.cpp) gets the same "hands" on @ft_handview: it doesn't draw a hand
@@ -1672,7 +1672,7 @@ int main() {
     };
     // The mouse's left press takes the trigger and the laser: a touch (one that holds the trigger,
     // or could press it while the mouse holds) or a ray pinch ends first, so the two never share the
-    // trigger and leftHeld (DEE-266). A touch comes back with ft-screens' next word once the mouse
+    // trigger and leftHeld. A touch comes back with ft-screens' next word once the mouse
     // lets go (a new touch waits while leftHeld).
     auto mouseTakesTrigger = [&] {
         if (touch.side >= 0) {
@@ -1692,7 +1692,7 @@ int main() {
         const bool was = leftDown;
         leftDown = down;
         // A release of a button the mouse doesn't have down: the relay's at its start, for one
-        // held as the relay before it went (DEE-269). What else holds the trigger keeps it.
+        // held as the relay before it went. What else holds the trigger keeps it.
         if (!down && !was) return;
         if (down) {
             if (aimHeld && aimRight && !aimHand) {
@@ -1727,7 +1727,7 @@ int main() {
     auto rightButton = [&](bool down) {
         const bool was = rightDown;
         rightDown = down;
-        // As the left's (DEE-269): taken here while something else holds a button, else passed on.
+        // As the left's: taken here while something else holds a button, else passed on.
         if (!down && !was) return leftHeld;
         if (down) {
             if (aimHeld && !aimHand && !aimRight) {
@@ -2399,7 +2399,7 @@ int main() {
         // tap's release 40 ms after its press). After a release the pose holds kTouchDrop, as the
         // dashboard reads it for a carried panel's drop.
         if (!active && touch.side >= 0) {   // (released: the headset off, a controller took it)
-            // its button comes up too, or the next wake connects the controller pressed (DEE-267)
+            // its button comes up too, or the next wake connects the controller pressed
             if (touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
             touch = Touch{};
         }
@@ -2619,7 +2619,7 @@ int main() {
             // The relay parks hand tracking while Frametop is paused for a game, and unparks it while
             // the dashboard is open: "vrdash 1|0", on a change and every 5 s, in a game or not (a
             // manual pause parks too, and a relay that restarted, or one that heard "1" from a helper
-            // that went, would hold a stale copy until the next change: DEE-277).
+            // that went, would hold a stale copy until the next change).
             if (dashboardUp != dashSent || tnow - dashSentAt > std::chrono::seconds(5)) {
                 dashSent = dashboardUp, dashSentAt = tnow;
                 SendTo(out, FT_SOCK_RELAY, dashboardUp ? "vrdash 1" : "vrdash 0");

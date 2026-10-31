@@ -1,4 +1,4 @@
-"""Frametop Input Settings' Ignored panels (POINTER_IGNORE, DEE-293): two or more ignored panels,
+"""Frametop Input Settings' Ignored panels (POINTER_IGNORE): two or more ignored panels,
 keys with spaces, quotes and $() in them, are written so that bash sources frametop.conf under
 set -eu without running anything, and read back the same by the app and by bash. Before, ", "
 joined them and the session ran the second key as a command (exit 127). HOME is a temporary

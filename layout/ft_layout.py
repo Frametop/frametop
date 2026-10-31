@@ -147,8 +147,8 @@ SCREEN_RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
-import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
-import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
+import ft_store  # noqa: E402  (JSON files read and written safely)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 LAUNCHERS = os.path.expanduser("~/.local/share/applications")  # a profile's launcher entry each
 DEFAULT_PANEL = (1.18, 0.664)  # gamescope: a floating 16:9 dashboard panel, measured on the Frame
 PIXELS_PER_METRE = 800         # ft-screens: a new screen's default size in VR (1920 px: 2.4 m)
@@ -195,7 +195,7 @@ def screen_count(layout=None):
 
 
 # frametop-layout.json is there but doesn't read: it's kept as it is, with a copy next to it, and
-# nothing is saved over it (DEE-296).
+# nothing is saved over it.
 LayoutFileError = ft_store.StoreError
 
 
@@ -812,7 +812,7 @@ def apply_screens(wait=0):
     except RuntimeError:
         # No head pose (the headset off or asleep): the screens aren't placed now, but the
         # visibility mode and the screens hidden on their own still reach ft-screens, which
-        # otherwise keeps its defaults (always, nothing concealed) until a reset (DEE-278).
+        # otherwise keeps its defaults (always, nothing concealed) until a reset.
         send_visibility(sock, layout)
         send_hidden(sock, layout)
         raise
@@ -905,7 +905,7 @@ def recenter_screens():
 
 
 def check_room(sock):
-    """Refuse while SteamVR has lost the room (DEE-206): in a temporary universe, the screens
+    """Refuse while SteamVR has lost the room: in a temporary universe, the screens
     placed in the room aren't where they are from the head, so a layout saved from the head
     would put them somewhere else."""
     try:

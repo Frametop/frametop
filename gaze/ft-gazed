@@ -156,7 +156,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "models"))
 import catalog  # noqa: E402  (which eye net EYES_MODEL means: models/catalog.py)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
 import ft_conf  # noqa: E402
-import ft_store  # noqa: E402  (JSON files written safely, DEE-300)
+import ft_store  # noqa: E402  (JSON files written safely)
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "gaze" / "build" / "ft-gaze"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""testgate (scripts/testgate/testgate.py, DEE-302): a skip is reported as one, never as "ok",
+"""testgate (scripts/testgate/testgate.py): a skip is reported as one, never as "ok",
 and a pattern that matches nothing fails the gate. Made-up test files in a temp folder.
 
   python3 scripts/testgate/tests/test_testgate.py

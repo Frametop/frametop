@@ -109,7 +109,7 @@ import eyes_model  # noqa: E402
 import eyes_pupil  # noqa: E402
 import fitcoach  # noqa: E402
 import ft_conf  # noqa: E402
-import ft_store  # noqa: E402  (JSON files written safely, DEE-300)
+import ft_store  # noqa: E402  (JSON files written safely)
 
 def load_net():
     """The eye net EYES_MODEL picks (FT_EYES_MODEL wins), or None (the pupil finder). models/catalog.py

@@ -1,4 +1,4 @@
-"""Display Settings imports offline (DEE-311): a smoke test, the component had none. HOME is a
+"""Display Settings imports offline: a smoke test, the component had none. HOME is a
 temp folder; nothing is read from or sent to the host, Steam or ft-screens. Its saves go
 through ft_store and ft_conf, whose own tests cover them. Needs PySide6 (the image's python3).
 

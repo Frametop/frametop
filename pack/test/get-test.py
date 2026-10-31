@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline test of get.sh's release download (DEE-309): a downloaded Frametop.zip installs only
+"""Offline test of get.sh's release download: a downloaded Frametop.zip installs only
 when it matches the release's SHA256SUMS. get.sh is sourced without its last line (main), curl is
 a made-up one on PATH that serves files from a temp folder, and the zip's install-release.sh only
 leaves a mark. No network, no install.

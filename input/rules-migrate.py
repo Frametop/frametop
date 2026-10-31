@@ -4,7 +4,7 @@ list of its own, which gets no new defaults (input-relay.py's read_rules). scrip
 runs this on every install and update. Each change runs once: STATE records it, so a binding the
 user removes afterwards stays removed.
 
-  screens-toggle-key (DEE-217, 2026-10-28): Meta+Shift+H hides and shows the screens. It was a KWin
+  screens-toggle-key (2026-10-28): Meta+Shift+H hides and shows the screens. It was a KWin
   shortcut, which a list of its own didn't need to have; now it's the relay's default ("42+125+35":
   screens_toggle). A list without that combination gets it, first in the list, and nothing else in
   the file changes: every other line stays byte for byte, so a file laid out other than as Frametop
@@ -13,7 +13,7 @@ user removes afterwards stays removed.
   file again. A file that isn't JSON (Input Settings may be halfway through writing it) waits for
   the next install.
 
-  release-keys-key (DEE-222, 2026-10-29): Ctrl+Alt+Shift+Esc lets go of every key, for a modifier
+  release-keys-key (2026-10-29): Ctrl+Alt+Shift+Esc lets go of every key, for a modifier
   stuck in KWin ("29+42+56+1": release_keys, a new default). Added the same way, under its own
   name, so a list that got Meta+Shift+H already gets this one too.
 

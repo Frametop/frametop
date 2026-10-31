@@ -99,7 +99,7 @@ class VirtualPad:
             os.set_blocking(self.fd, False)
             log("reusing the gamepad from the fd store")
             # The relay before this one may have left buttons down or sticks over: everything
-            # comes up and centres, as NEUTRAL says (DEE-268).
+            # comes up and centres, as NEUTRAL says.
             out = bytearray()
             for code in KEYS.values():
                 out += EVENT.pack(0, 0, EV_KEY, code, 0)

@@ -68,7 +68,7 @@ sudo_quiet() {
 build() { [ "$FRAME_RELEASE" = 1 ] || "$@"; }
 # A part this install skips (or fails to install) can still have units from another Frametop
 # folder: the release before, or a clone. They'd go on running that folder's programs, and fail
-# once install-release.sh removes it two releases on (DEE-287). They're stopped and removed, and
+# once install-release.sh removes it two releases on. They're stopped and removed, and
 # the message says how to install the part for this folder.
 # drop_other_folder WHAT COMMAND UNIT...
 drop_other_folder() {
@@ -299,7 +299,7 @@ fi
 
 # A release's install.sh is also how you go back to it (pack/README.md), so it makes its own
 # folder "current": fast-install, get.sh and the next install-release.sh go by that link
-# (DEE-286). install-release.sh sets it too, after this.
+#. install-release.sh sets it too, after this.
 if [ "$FRAME_RELEASE" = 1 ] && [ "$FRAME_LOCAL" = 1 ]; then
   version=$(sed -n 's/^VERSION=//p' "$root/.frametop-release")
   here=$(cd "$root" && pwd -P)

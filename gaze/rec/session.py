@@ -815,7 +815,7 @@ class Session:
         path, n = os.path.join(rounds, stem), 1
         while True:
             try:
-                os.mkdir(path, 0o700)   # (eye and hand frames: private, DEE-303)
+                os.mkdir(path, 0o700)   # (eye and hand frames: private)
                 break
             except FileExistsError:
                 n += 1
@@ -1760,5 +1760,5 @@ def main():
 
 
 if __name__ == "__main__":
-    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600 (DEE-303)
+    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600
     sys.exit(main())

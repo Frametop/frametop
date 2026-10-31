@@ -14,7 +14,7 @@ test: test-python test-c test-keyboard test-bash test-testbench test-fast-instal
 # python3 has to import the dnf Qt stack and the locked packages together;
 # without that check the Qt tests would only skip. scripts/testgate/testgate.py
 # runs each file and fails a pattern that matches nothing; a skipped file or
-# test is reported as skipped, with its reason, never as ok (DEE-302).
+# test is reported as skipped, with its reason, never as ok.
 test-python:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -38,7 +38,7 @@ test-python:
 # events (pointer/tests: the helper's hand interaction logic), the hands'
 # skeleton fit, and Full Keyboard's ctest. A test that fails fails the gate,
 # with its output; one that can't build here (no ncnn, no OpenVR header) says
-# SKIPPED and why (DEE-302).
+# SKIPPED and why.
 test-c:
     #!/usr/bin/env bash
     set -eo pipefail
@@ -113,7 +113,7 @@ test-c:
     run hands/tests/shm_test.cpp build/tests/shm-test
     gcc -std=gnu11 -Wall -Wextra -Werror hands/tests/xrcams_test.c -o build/tests/xrcams-test
     run hands/tests/xrcams_test.c build/tests/xrcams-test
-    # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled (DEE-311)
+    # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled
     run "power/ft-powerd.cpp (compiles)" g++ -std=c++17 -fsyntax-only -Wall -Werror -Wno-unused-parameter \
       -Ikeyboard/third_party/openvr power/ft-powerd.cpp
     if [ -f hands/build/ncnn/install/lib/libncnn.a ]; then

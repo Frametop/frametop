@@ -1,5 +1,5 @@
 """The layout planner (ft_layout.plan, _chain) and named layouts (save_named, use_named,
-rename_named, delete_named), DEE-311: pinned as they behave now. Pure math on made-up
+rename_named, delete_named): pinned as they behave now. Pure math on made-up
 layouts; frametop.conf and the layout file are in a temp folder, nothing reaches ft-screens.
 
   python3 layout/tests/test_plan.py

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """conf/ftipc.py: answers, nobody listening, a timeout, and a late answer that must not answer
-the next question (DEE-305). The servers are threads on names of this test's own."""
+the next question. The servers are threads on names of this test's own."""
 import os
 import socket
 import sys

@@ -1,4 +1,4 @@
-"""ft-layout start or apply with no head pose (the headset off or asleep, DEE-278): the screens
+"""ft-layout start or apply with no head pose (the headset off or asleep): the screens
 aren't placed, but the visibility settings and the hidden screens still reach ft-screens."""
 import importlib.util
 import pathlib

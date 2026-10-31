@@ -290,7 +290,7 @@ std::string InputState::command(const std::string &line) {
     std::string operation, extra;
     bool publication_ok = true;
     in >> operation;
-    if (operation == "status") {  // a status poll doesn't renew the overrides (DEE-281)
+    if (operation == "status") {  // a status poll doesn't renew the overrides
         if (in >> extra) return status_locked(false, "status takes no arguments");
         return status_locked(true, nullptr);
     }

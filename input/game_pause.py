@@ -72,7 +72,7 @@ UNITS = ("frametop-gaze.service", "frametop-hands.service", "frametop-camd.servi
 # PARK_PATH exists (and ft-camd stops copying frames for it), and starts again within a palm search
 # (about 200 ms) once it goes. The pointer helper says when the dashboard opens and closes ("vrdash").
 # The park is written whenever Frametop is paused (but HANDS_MODE=always and the dashboard), so it
-# also holds ft-cutouts' tracker, whose transient units aren't in UNITS (DEE-276).
+# also holds ft-cutouts' tracker, whose transient units aren't in UNITS.
 HAND_UNITS = ("frametop-hands.service", "frametop-camd.service")
 PARK_PATH = f"/run/user/{os.getuid()}/frametop-hands/park"
 # What still works while paused, besides commands ("command:CMD"): the toggle itself, Steam's menu,
@@ -502,7 +502,7 @@ def output(cmd, timeout=10):
 def active(unit):
     """The unit runs, or is on its way up. "activating" is also a unit that systemd starts again
     after a crash (Restart=on-failure): `is-active -q` says no to it, so a pause used to leave
-    it, and it came back during the game (DEE-255)."""
+    it, and it came back during the game."""
     return output(["systemctl", "--user", "is-active", unit]).strip() in ("active", "activating", "reloading")
 
 
@@ -582,12 +582,12 @@ class Worker(threading.Thread):
 
     def enforce(self):
         """While paused: SteamVR restarted, and started the gaze service with it, or a desktop
-        started (frametop-session.sh, "pause enforce"), and with it hand tracking (DEE-253)."""
+        started (frametop-session.sh, "pause enforce"), and with it hand tracking."""
         self.stop_units()
 
     def defer_remote(self):
         """While paused: a desktop that starts leaves remote access to the resume ("pause defer
-        remote" from frametop-session.sh), as if the pause had stopped it (DEE-280)."""
+        remote" from frametop-session.sh), as if the pause had stopped it."""
         with self.lock:
             self.stopped["remote"] = True
         self.log("pause: remote desktop waits for the resume")
@@ -597,7 +597,7 @@ class Worker(threading.Thread):
         units = stopped["units"]
         # They need SteamVR: without it they start with it (or with the desktop) next time.
         # frametop-gaze has Requisite=steamvr.service, but camd and hands don't, so they'd start
-        # with SteamVR off (DEE-254).
+        # with SteamVR off.
         if units and not steamvr_running():
             self.log(f"resume: SteamVR isn't running, so {', '.join(units)} start with it next time")
             units = []
@@ -668,7 +668,7 @@ class GamePause:
     def load(self):
         """A relay restarted while paused stays paused (the relay's part is applied by its first
         configure, and its pointer lets go: input-relay.py). One restarted after a resume, before
-        the resume's job started what the pause stopped, starts it now (DEE-256)."""
+        the resume's job started what the pause stopped, starts it now."""
         try:
             with open(STATE_PATH) as f:
                 state = json.load(f)
@@ -689,7 +689,7 @@ class GamePause:
         self.ends_with_game = bool(state.get("ends_with_game"))
         if self.ends_with_game:
             # The game may have ended while the relay was down. Taken as running, the pointer
-            # helper's next "vrgame 0", or GAME_STALE of silence, ends the pause (DEE-257).
+            # helper's next "vrgame 0", or GAME_STALE of silence, ends the pause.
             self.game, self.game_seen = True, time.monotonic()
         self.worker.restore(stopped)
         self.log(f"paused since before this relay started ({self.reason})")
@@ -720,8 +720,8 @@ class GamePause:
     def screens_report(self, paused):
         """From the relay: ft-screens' own pause flag, which it adds to its report every second.
         "pause on|off" is one datagram, dropped when its socket is full, and ft-screens' pause
-        stays until it hears otherwise, so one that's out of step hears the state again
-        (DEE-258). An older ft-screens doesn't say, and isn't told."""
+        stays until it hears otherwise, so one that's out of step hears the state again.
+        An older ft-screens doesn't say, and isn't told."""
         if paused != self.paused:
             self.log(f"ft-screens says it's {'paused' if paused else 'running'}: telling it again")
             self.tell_screens(self.paused)
@@ -764,7 +764,7 @@ class GamePause:
         self.update_park()
         if self.paused and kept and not self.worker.keep:
             # Switched off mid-pause: what the pause kept for parking stops now, as the pause
-            # would have stopped it (DEE-275).
+            # would have stopped it.
             self.worker.submit(self.worker.enforce)
 
     def dashboard_state(self, on):
@@ -777,14 +777,14 @@ class GamePause:
         work there during a game) or HANDS_MODE=always. With hand interaction that's what keeps
         the hand units from the game; without it the pause stops them, and the park holds
         ft-cutouts' tracker, which the pause doesn't stop and whose cutouts show through the
-        screens a pause hides (DEE-276)."""
+        screens a pause hides."""
         want = self.paused and not self.hands_always and not self.dashboard
         if want == self.parked:
             return
         try:
             if want:
                 # Made if hand tracking hasn't run since login, so a tracker that starts during
-                # the pause finds the park (ft-camd and ft-hands make it 0700 the same way: DEE-274).
+                # the pause finds the park (ft-camd and ft-hands make it 0700 the same way).
                 os.makedirs(os.path.dirname(PARK_PATH), mode=0o700, exist_ok=True)
                 with open(PARK_PATH, "w") as f:
                     f.write("parked by the input relay (Frametop paused for a VR game)\n")
@@ -874,13 +874,13 @@ class GamePause:
 
     def desktop_started(self):
         """From frametop-session.sh ("pause enforce"): a desktop started, and hand tracking with it
-        (handsmode up). While paused, it stops again (DEE-253)."""
+        (handsmode up). While paused, it stops again."""
         if self.paused:
             self.worker.submit(self.worker.enforce)
 
     def defer_remote(self):
         """From frametop-session.sh ("pause defer remote"), before it starts remote access: while
-        paused it doesn't, and the resume does (DEE-280). True when paused."""
+        paused it doesn't, and the resume does. True when paused."""
         if self.paused:
             self.worker.submit(self.worker.defer_remote)
         return self.paused

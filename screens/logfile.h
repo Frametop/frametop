@@ -1,7 +1,7 @@
 // ft-screens' log file (--log PATH; the session's is ~/.local/state/frametop/screens.log).
 //
 // It was /tmp/frametop-screens.log: in RAM on the Frame, and emptied at every desktop start, so
-// the lines about a screen jump (DEE-206's trackwatch) were gone after a restart or a reboot. Now
+// the lines about a screen jump (the screen-jump fix's trackwatch) were gone after a restart or a reboot. Now
 // it's kept and appended to, and rotated by size instead: past FT_LOG_CAP bytes it becomes
 // PATH.1 (the one before PATH.2, and so on to FT_LOG_KEEP), so the log takes at most about
 // (FT_LOG_KEEP + 1) x FT_LOG_CAP. Checked at start and every few seconds (ft_log_check).

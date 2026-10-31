@@ -152,7 +152,7 @@ def disk_full(e):
 
 def write_json(path, obj):
     """Write through a temporary file of its own, flushed to disk and renamed, so a crash never
-    leaves half a file (recorder.common.store_json, DEE-300)."""
+    leaves half a file (recorder.common.store_json)."""
     store_json(path, obj, indent=2)
 
 
@@ -953,5 +953,5 @@ def main():
 
 
 if __name__ == "__main__":
-    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600 (DEE-303)
+    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600
     main()

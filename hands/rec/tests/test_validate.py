@@ -456,7 +456,7 @@ class HubTest(unittest.TestCase):
         with mock.patch.object(hub, "texts_draft", return_value=True), \
                 mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: "a/test"}):
             self.assertTrue(hub.upload_allowed())
-        # DEE-285: the variable alone, or with the real dataset, never opens it
+        # the variable alone, or with the real dataset, never opens it
         for dataset in ("", hub.HF_DATASET, "not a repo"):
             with mock.patch.object(hub, "texts_draft", return_value=True), \
                     mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: dataset}):

@@ -123,7 +123,7 @@ class DocLinks(unittest.TestCase):
                 for target, end in refs:
                     if target.split("/")[0] not in self.tops or self.placeholder(target):
                         continue
-                    if "removed" in line[end:end + 40]:  # "(`screens/keyboard.cpp`, removed in DEE-310)"
+                    if "removed" in line[end:end + 40]:  # "(`screens/keyboard.cpp`, removed in a cleanup)"
                         continue
                     if not self.exists(path.parent, target):
                         bad.append(f"{rel}:{n}: {target}")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ft-layout doesn't save the arrangement while SteamVR has lost the room (DEE-206): capture
+"""ft-layout doesn't save the arrangement while SteamVR has lost the room: capture
 asks ft-screens' "universe" first. Against a fake ft-screens socket; no SteamVR.
 
   layout/tests/check-room-test.py

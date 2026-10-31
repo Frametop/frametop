@@ -160,7 +160,7 @@ def model_file():
 def save(data):
     """Write the keys the settings app manages (DEFAULT). Every other key, "commands" and
     "advanced" included, keeps its value from the file, so hand edits survive a save. A file
-    that doesn't read is kept (a .bad- copy) and not saved over: ft_store.StoreError (DEE-300)."""
+    that doesn't read is kept (a .bad- copy) and not saved over: ft_store.StoreError."""
     with ft_store.locked(PATH):
         old = ft_store.load_json_strict(PATH, {}, ft_store.is_object)
         write_json(PATH, {**old, **{k: data[k] for k in DEFAULT if k in data}})

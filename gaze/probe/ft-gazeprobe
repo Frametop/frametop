@@ -118,7 +118,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gazecal import (DEFAULT_MODEL, MODELS, Correction, Fixation, LiveCorrection, OneEuro,  # noqa: E402
                      SteamEyeLog, cross_validate, deg_from_px, px_from_deg, save_calibration, steady_samples)
 from ft_store import StoreError  # noqa: E402  (gazecal put conf/ on the path)
-import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 from fitcheck import FitCheck  # noqa: E402
 
 
@@ -2387,7 +2387,7 @@ class Probe(Adw.ApplicationWindow):
 
     def save_calibration(self):
         """calibration.json (gazecal.save_calibration's schema). One there that doesn't read
-        stays as it is: said in the status line, not saved over (DEE-300)."""
+        stays as it is: said in the status line, not saved over."""
         try:
             save_calibration(self.models, self.model_mode if hasattr(self, "w_model") else self.saved_model,
                              "probe", {n: lc.samples for n, lc in self.live.items() if lc.samples},

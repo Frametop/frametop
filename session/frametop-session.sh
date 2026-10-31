@@ -38,7 +38,7 @@ BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_S
 NOTIFY_FORWARD=auto FIREFOX_TITLEBAR=kwin
 # The file is shell, sourced, but only when every line is in its grammar (docs/config.md). A line
 # outside it (a value with a space or $(...) in it, "KEY = value") is one bash runs as a command:
-# with set -e that stopped the desktop here (exit 127, DEE-293), or ran whatever it named. Then
+# with set -e that stopped the desktop here (exit 127), or ran whatever it named. Then
 # only its valid settings load, quoted by conf/ft_conf.py, and nothing in the file runs.
 # Exit 3 is bad lines; a check that couldn't run (no python3, a Python error) sources the file as before.
 if [ -f "$conf" ]; then
@@ -136,7 +136,7 @@ if [ "${1:-}" != --inner ]; then
   for _ in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/$socket" ] && break; sleep 0.2; done
   [ -S "$XDG_RUNTIME_DIR/$socket" ] || { echo "ft-screens didn't start (see $screens_log)" >&2; exit 1; }
   handsmode up
-  # Paused for a VR game, the relay stops that hand tracking again (DEE-253). In the background:
+  # Paused for a VR game, the relay stops that hand tracking again. In the background:
   # an input relay that doesn't answer mustn't hold up the desktop.
   "$here/../input/ft-pause" enforce >/dev/null 2>&1 &
   WAYLAND_DISPLAY=$XDG_RUNTIME_DIR/$socket "$0" --inner
@@ -263,7 +263,7 @@ export XCURSOR_THEME=${cursor_theme:-breeze_cursors} XCURSOR_SIZE=${cursor_size:
 if [ "$remote" = 1 ]; then
   export KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 KWIN_SCREENSHOT_NO_PERMISSION_CHECKS=1
   touch "$runtime/remote-capable"
-  # Paused for a VR game, the resume starts it instead (DEE-280).
+  # Paused for a VR game, the resume starts it instead.
   if "$here/../input/ft-pause" defer-remote >/dev/null 2>&1; then
     echo "remote desktop: Frametop is paused, it starts with the resume"
   else

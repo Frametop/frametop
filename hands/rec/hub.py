@@ -88,7 +88,7 @@ def dataset_url(repo=None):
 
 def texts_draft(kind="public"):
     """The kind's texts are drafts, or one is missing: a text that isn't here wasn't reviewed
-    (DEE-285, as the Eye Recorder's texts_ready)."""
+    (as the Eye Recorder's texts_ready)."""
     return any(not os.path.isfile(p) or is_draft(p)
                for p in (TESTING_PATH if kind == "testing" else CONSENT_PATH, UPLOAD_PATH))
 
@@ -97,7 +97,7 @@ def upload_allowed(kind="public"):
     """Real uploads: once the kind's texts aren't drafts, or for the maintainer's rehearsal
     against a test repo: FT_HANDREC_ALLOW_UPLOAD=1 with the kind's dataset set to another one
     (FT_HANDREC_DATASET, or FT_HANDREC_TEST_DATASET for "testing"). The variable alone never
-    opens the real dataset, as with the Eye Recorder (DEE-285)."""
+    opens the real dataset, as with the Eye Recorder."""
     if not texts_draft(kind):
         return True
     if os.environ.get(ALLOW_ENV) != "1":
@@ -429,5 +429,5 @@ def main():
 
 
 if __name__ == "__main__":
-    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600 (DEE-303)
+    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600
     sys.exit(main())

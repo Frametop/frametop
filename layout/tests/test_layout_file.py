@@ -1,5 +1,5 @@
 """frametop-layout.json: one that doesn't read is kept, never saved over, and writers take turns
-without losing each other's changes (DEE-296)."""
+without losing each other's changes."""
 import contextlib
 import importlib.util
 import io

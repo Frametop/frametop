@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """The recorders' JSON writers (recorder/common.write_json, recorder/bounties.keep_json,
-hands/rec/takes.write_json) go through ft_store (DEE-300): the same bytes as before, a temp file
+hands/rec/takes.write_json) go through ft_store: the same bytes as before, a temp file
 of its own (no fixed NAME.tmp two writers would share), and the old file kept when the write
 fails.
 

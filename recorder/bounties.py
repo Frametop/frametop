@@ -102,7 +102,7 @@ def fetch_json(url, token=None, max_bytes=MAX_BYTES, timeout=5.0):
 
 def keep_json(path, value):
     """value written to path whole (a temporary file of its own, flushed to disk and renamed:
-    recorder.common.store_json, DEE-300)."""
+    recorder.common.store_json)."""
     store_json(os.path.abspath(path), value, indent=1, newline=False, ensure_ascii=False)
 
 

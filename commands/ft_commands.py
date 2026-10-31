@@ -28,7 +28,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "conf"))
-import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
+import ft_store  # noqa: E402  (JSON files read and written safely)
 
 COMMANDS_PATH = os.path.expanduser("~/.config/frametop-commands.json")
 ALIASES_PATH = os.path.expanduser("~/.config/frametop/aliases.sh")
@@ -107,7 +107,7 @@ def parse(data):
 
 
 # The commands file is there but doesn't read (or has entries that would be dropped): it's kept
-# as it is, with a copy next to it, and nothing is saved over it (DEE-295).
+# as it is, with a copy next to it, and nothing is saved over it.
 CommandsFileError = ft_store.StoreError
 
 
@@ -154,7 +154,7 @@ def find(name, commands=None):
 def update(fn, path=None, aliases=True):
     """Change the list under its lock: fn gets the saved commands and returns the new list, which
     is written atomically; then the aliases file and ~/.bashrc's lines (aliases=False: the list
-    only). A file that doesn't read is never saved over: CommandsFileError (DEE-295)."""
+    only). A file that doesn't read is never saved over: CommandsFileError."""
     path = path or COMMANDS_PATH
     with ft_store.locked(path):   # the aliases too, so they're never an older list's
         out = fn(read_strict(path))

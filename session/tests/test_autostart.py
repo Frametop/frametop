@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for session/autostart.sh's reading of AUTOSTART (DEE-190): off when the key is missing,
+"""Tests for session/autostart.sh's reading of AUTOSTART: off when the key is missing,
 0 or anything but 1, on for 1 with or without a comment, and the last line wins, as when the
 session sources the file. FT_AUTOSTART_DRY stops it before it waits for SteamVR or starts
 anything, and FT_CONF points it at a temporary file, so the real settings aren't read.

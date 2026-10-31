@@ -1,4 +1,4 @@
-// ft-screens' keyboard against real wlroots and xkbcommon (held-keys.h, DEE-222).
+// ft-screens' keyboard against real wlroots and xkbcommon (held-keys.h).
 #define WLR_USE_UNSTABLE
 #include <assert.h>
 #include <wlr/interfaces/wlr_keyboard.h>

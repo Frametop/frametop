@@ -2,7 +2,7 @@
 """Offline test of install-release.sh's install, release after release (docs/charts G7): which
 release is "current", which folders stay, and a reinstall over fast-installed files. podman is a
 shell function that copies a made-up tree, /etc/os-release a made-up one, and each tree's
-install.sh is install.sh's own "current" block (DEE-286). Everything happens in a temp folder:
+install.sh is install.sh's own "current" block. Everything happens in a temp folder:
 no podman, no install, no network.
 
   pack/test/install-release-test.py
@@ -112,22 +112,22 @@ code, out = install("2.0")
 check("the next one is current, and the one before stays", (code, current(), folders()), (0, "2.0", ["1.0", "2.0"]))
 code, out = install("3.0")
 check("two releases on, the oldest goes; the one current before stays, though install.sh "
-      "moved current first (DEE-286)", (code, current(), folders()), (0, "3.0", ["2.0", "3.0"]))
+      "moved current first", (code, current(), folders()), (0, "3.0", ["2.0", "3.0"]))
 
 # Going back: the older release's install.sh makes it current, so fast-install and get.sh follow.
 r = subprocess.run([os.path.join(RELEASES, "2.0", "install.sh")], capture_output=True, text=True, check=False)
-check("running the release before's install.sh makes it current (DEE-286)", (r.returncode, current()), (0, "2.0"))
+check("running the release before's install.sh makes it current", (r.returncode, current()), (0, "2.0"))
 r = subprocess.run(["bash", os.path.join(RELEASES, "current", "install.sh")], capture_output=True, text=True,
                    check=False)
 check("...also through the current link", (r.returncode, current()), (0, "2.0"))
 code, out = install("3.0")
 check("installing 3.0 again makes it current, and 2.0 stays", (code, current(), folders()), (0, "3.0", ["2.0", "3.0"]))
 
-# A reinstall over fast-installed files is refused, and nothing changes (DEE-289).
+# A reinstall over fast-installed files is refused, and nothing changes.
 os.makedirs(os.path.join(RELEASES, "3.0", ".fast-install"))
 Path(RELEASES, "3.0", ".fast-install", "state.json").write_text("{}")
 code, out = install("3.0")
-check("a reinstall over fast-installed files is refused (DEE-289)", (code, "fast-install undo" in out), (1, True))
+check("a reinstall over fast-installed files is refused", (code, "fast-install undo" in out), (1, True))
 check("...and leaves the releases as they were", (current(), folders()), ("3.0", ["2.0", "3.0"]))
 os.rename(os.path.join(RELEASES, "3.0", ".fast-install"), os.path.join(TMP, "undone"))
 code, out = install("3.0")

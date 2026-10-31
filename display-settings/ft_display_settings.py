@@ -734,7 +734,7 @@ class Backend(QObject):
     # --- layout ---
     def _save(self, layout):
         """Save the layout; False, said in the window, when it can't be (a frametop-layout.json
-        that doesn't read is never saved over, DEE-296)."""
+        that doesn't read is never saved over)."""
         try:
             ft_layout.save_layout(layout)
             return True

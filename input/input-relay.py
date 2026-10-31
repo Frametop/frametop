@@ -199,8 +199,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     app can capture one; watchers see them as events with id frame_controller
   vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
-  vrdash 1|0        from the pointer helper: the dashboard is open, so hand tracking parked for a
-                    game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
+  vrdash 1|0        from the pointer helper: the dashboard is open (on a change and every 5 s), so
+                    hand tracking parked for a game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
   gamepad desktop|remote|off   from ft-screens: SteamVR's Gamepad mode is Frametop's, for a desktop
                     panel or a remote display (every second while it is), or it ended (above);
                     ignored from another user

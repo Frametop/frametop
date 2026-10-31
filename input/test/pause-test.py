@@ -100,6 +100,7 @@ class StubWorker:
     def __init__(self, log, save):
         self.jobs = []
         self.busy = False
+        self.keep = ()
 
     def start(self):
         pass
@@ -265,8 +266,14 @@ check("Frametop toggled back on during the game: unparked", parked(), False)
 p.game_state(False, 10)
 p.game_state(True, 20)
 check("the next game: parked", parked(), True)
+p.worker.jobs.clear()
 p.set_hands(False)
-check("hand interaction off: unparked (the worker stops it as before)", (parked(), p.worker.keep), (False, ()))
+check("hand interaction off mid-pause: the worker stops what the pause kept (DEE-275)",
+      (p.worker.keep, p.worker.jobs), ((), ["enforce"]))
+check("...and the park stays, for ft-cutouts' tracker (DEE-276)", parked(), True)
+p.worker.jobs.clear()
+p.set_hands(False)
+check("off again: nothing more to stop", p.worker.jobs, [])
 p.set_hands(True, always=True)
 check("HANDS_MODE=always: the worker leaves hand tracking running", p.worker.keep, gp.HAND_UNITS)
 check("and it isn't parked in the game", parked(), False)
@@ -274,6 +281,21 @@ p.set_hands(False, always=True)
 check("always without hand interaction: still left running", (parked(), p.worker.keep), (False, gp.HAND_UNITS))
 p.set_hands(True)
 check("back to the other modes: parked again", parked(), True)
+p.set_hands(False)
+p.dashboard_state(True)
+check("without hand interaction the dashboard unparks too", parked(), False)
+p.dashboard_state(False)
+p.toggle("gesture", 1)
+check("a resume unparks without hand interaction", parked(), False)
+p.set_hands(True)
+p.game_state(False, 30)
+gp.PARK_PATH = os.path.join(tmp, "not-yet", "frametop-hands", "park")
+p.game_state(True, 40)
+check("a pause before hand tracking ever ran makes its folder and parks (DEE-274)",
+      (parked(), oct(os.stat(os.path.dirname(gp.PARK_PATH)).st_mode & 0o777)), (True, "0o700"))
+p.toggle("gesture", 1)
+check("...and the resume unparks", parked(), False)
+gp.PARK_PATH = os.path.join(tmp, "frametop-hands", "park")
 p.set_hands(False)
 q.toggle("gesture", 1)
 r = gp.GamePause(lambda *a: None, changes.append, VR)

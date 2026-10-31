@@ -298,8 +298,9 @@
 // allowed is 1 when hands may work at all: the headset worn, and outside VR games, or in one with
 // the dashboard open or Frametop toggled back on (the relay's "paused 0"; it sends "paused 1|0"
 // on a change and at the helper's start). The relay also hears "vrdash 1|0" (the dashboard open, on a
-// change and every 5 s in a game): it parks hand tracking while Frametop is paused for a game and
-// unparks it while the dashboard is open (input/game_pause.py).
+// change and every 5 s, so a relay or helper that restarted catches up: DEE-277): it parks hand
+// tracking while Frametop is paused for a game and unparks it while the dashboard is open
+// (input/game_pause.py).
 // ft-handview (screens/handview.cpp) gets the same "hands" on @ft_handview: it doesn't draw a hand
 // holding a controller.
 //
@@ -2620,8 +2621,10 @@ int main() {
                 dashboardUp = overlay->IsDashboardVisible();
             }
             // The relay parks hand tracking while Frametop is paused for a game, and unparks it while
-            // the dashboard is open: "vrdash 1|0", on a change and every 5 s in a game.
-            if (dashboardUp != dashSent || (inGame && tnow - dashSentAt > std::chrono::seconds(5))) {
+            // the dashboard is open: "vrdash 1|0", on a change and every 5 s, in a game or not (a
+            // manual pause parks too, and a relay that restarted, or one that heard "1" from a helper
+            // that went, would hold a stale copy until the next change: DEE-277).
+            if (dashboardUp != dashSent || tnow - dashSentAt > std::chrono::seconds(5)) {
                 dashSent = dashboardUp, dashSentAt = tnow;
                 SendTo(out, "frametop_relay", dashboardUp ? "vrdash 1" : "vrdash 0");
             }

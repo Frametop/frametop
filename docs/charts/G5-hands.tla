@@ -1,5 +1,5 @@
 ---------------------------- MODULE G5Hands ----------------------------
-(* G5 Hands: when hand tracking runs and when it is parked, at 78e93b1.
+(* G5 Hands: when hand tracking runs and when it is parked, at 78e93b1, with the fixes since.
    HANDS_MODE=frametop. The session starts and stops tracking with the desktop
    (hands/handsmode.py plan 289-318, session/frametop-session.sh 117-123). The input
    relay pauses for VR games (input/game_pause.py): without hand interaction it stops
@@ -10,6 +10,14 @@
    (hands/track/main.cpp 890-917), and ft-camd stops copying for it.
    ft-cutouts (hands/ft-cutouts) runs the same two programs as transient units that
    conflict with the tracking units.
+
+   With the G5 fixes (H5-1 to H5-4, DEE-274..277) and G1's L2 (DEE-253), this describes the
+   fixed code. update_park makes the run folder (H5-1). Hand interaction switched off mid-pause
+   stops what the pause kept (H5-2). The park is written whenever Frametop is paused, so it
+   also holds ft-cutouts' tracker (H5-3). The helper says "vrdash" every 5 s, in a game or not
+   (H5-4). A desktop that starts mid-pause has its hand tracking stopped again (L2). The
+   constants L2, FixPark and DashFix no longer switch anything. They stay so the configs that
+   showed each bug still load, and to see those bugs check out f85dff9.
 
    Not here: HANDS_MODE=always and off (always never parks, off never starts by itself),
    the job queue and timing of the pause (G1), SteamVR stopping mid-game (G1), the
@@ -22,9 +30,9 @@ CONSTANTS
   ConfChanges,   \* hand interaction can be switched while Frametop runs (Input Settings)
   CutoutsUsed,   \* ft-cutouts on can be run
   Crashes,       \* the pointer helper and the input relay can die and come back
-  L2,            \* G1's L2 as in the code: a desktop starting mid-pause starts tracking
-  FixPark,       \* the H5-1 fix: update_park makes the folder (or remembers only what it wrote)
-  DashFix        \* the H5-4 fix: the helper says "vrdash" every 5 s, in a game or not
+  L2,            \* was G1's L2 (a desktop starting mid-pause starts tracking). Fixed: unused
+  FixPark,       \* was the H5-1 fix as a switch. Now the code: unused
+  DashFix        \* was the H5-4 fix as a switch. Now the code: unused
 
 VARIABLES
   vr,        \* SteamVR runs
@@ -58,15 +66,12 @@ Init ==
   /\ tracking = FALSE /\ cutouts = FALSE /\ stopped = FALSE
   /\ dir = DirAtStart /\ park = FALSE /\ rParked = FALSE
 
-(* update_park (game_pause.py 714-733): want = paused and hands and not dashboard. Nothing to
-   do when want equals what it last applied. Parking writes the file only if the folder exists
-   (722), but remembers parked either way (733). force: a relay that just started (parked None). *)
+(* update_park: want = paused and not dashboard (H5-3: hand interaction or not). Nothing to
+   do when want equals what it last applied. Parking makes the folder if it's missing (H5-1).
+   force: a relay that just started (parked None). *)
 ParkTo(want, force) ==
   IF ~force /\ want = rParked THEN UNCHANGED <<park, rParked, dir>>
-  ELSE IF want THEN
-      IF dir THEN park' = TRUE /\ rParked' = TRUE /\ dir' = dir
-      ELSE IF FixPark THEN park' = TRUE /\ rParked' = TRUE /\ dir' = TRUE
-      ELSE park' = park /\ rParked' = TRUE /\ dir' = dir
+  ELSE IF want THEN park' = TRUE /\ rParked' = TRUE /\ dir' = TRUE
   ELSE park' = FALSE /\ rParked' = FALSE /\ dir' = dir
 
 (* The worker's stop_units (543-550): the hand units, unless kept for parking. *)
@@ -77,7 +82,7 @@ StopUnits(h) ==
 (* pause() 735-748 with the worker's pause job (552-567), pause_desktop=hide. *)
 Pause(g) ==
   /\ paused' = TRUE /\ byGame' = g
-  /\ ParkTo(rHands /\ ~rDash, FALSE)
+  /\ ParkTo(~rDash, FALSE)
   /\ StopUnits(rHands)
 
 (* resume() 750-761 with the worker's resume job (573-592). Starting what the pause stopped
@@ -100,12 +105,13 @@ SteamVRStops ==
   /\ tracking' = FALSE /\ cutouts' = FALSE
   /\ UNCHANGED <<game, byGame, paused, rDash, conf, rHands, stopped, dir, park, rParked>>
 
-(* handsmode desktop up (plan 307-309): starts tracking whenever SteamVR runs, paused or not
-   (G1's L2). With L2 = FALSE, as if it were fixed: mid-pause without hand interaction it only
-   goes on the stopped list. Starting frametop-camd stops ft-cutouts' units (Conflicts=). *)
+(* handsmode desktop up (plan 307-309): starts tracking whenever SteamVR runs. Mid-pause
+   without hand interaction, "ft-pause enforce" stops it again (G1's L2 fix), drawn as one
+   step: it goes on the stopped list. Starting frametop-camd stops ft-cutouts' units
+   (Conflicts=). *)
 DesktopUp ==
   /\ vr /\ ~desk /\ desk' = TRUE
-  /\ IF paused /\ ~rHands /\ ~L2
+  /\ IF paused /\ ~rHands
        THEN stopped' = TRUE /\ UNCHANGED <<tracking, dir, cutouts>>
        ELSE tracking' = TRUE /\ dir' = TRUE /\ cutouts' = FALSE /\ UNCHANGED stopped
   /\ UNCHANGED <<vr, game, byGame, paused, dash, helper, hSent, rDash, conf, rHands, park, rParked>>
@@ -143,12 +149,12 @@ DashCloses ==
   /\ dash /\ dash' = FALSE
   /\ UNCHANGED <<vr, desk, game, byGame, paused, helper, hSent, rDash, conf, rHands, tracking, cutouts, stopped, dir, park, rParked>>
 
-(* ft-pointer.cpp 2594-2597: "vrdash" on a change of what it last sent, and every 5 s only
-   in a game. The relay's dashboard_state (712) applies it. *)
+(* ft-pointer.cpp: "vrdash" on a change of what it last sent, and every 5 s, in a game or
+   not (H5-4). The relay's dashboard_state applies it. *)
 HelperSaysDash ==
-  /\ helper /\ (dash # hSent \/ game \/ DashFix)
+  /\ helper
   /\ hSent' = dash /\ rDash' = dash
-  /\ ParkTo(paused /\ rHands /\ ~dash, FALSE)
+  /\ ParkTo(paused /\ ~dash, FALSE)
   /\ UNCHANGED <<vr, desk, game, byGame, paused, dash, helper, conf, rHands, tracking, cutouts, stopped>>
 
 HelperDies ==
@@ -167,14 +173,16 @@ HelperStarts ==
    false (613), parked None, set_hands from the config (1191). *)
 RelayRestarts ==
   /\ Crashes /\ rDash' = FALSE /\ rHands' = conf
-  /\ ParkTo(paused /\ conf, TRUE)
+  /\ ParkTo(paused, TRUE)
   /\ UNCHANGED <<vr, desk, game, byGame, paused, dash, helper, hSent, conf, tracking, cutouts, stopped>>
 
-(* Input Settings switches hand interaction; the relay reloads (load_config, set_hands). *)
+(* Input Settings switches hand interaction; the relay reloads (load_config, set_hands).
+   Switched off mid-pause, the worker stops what the pause kept (H5-2). *)
 YouSwitchHands ==
   /\ ConfChanges /\ conf' = ~conf /\ rHands' = ~conf
-  /\ ParkTo(paused /\ ~conf /\ ~rDash, FALSE)
-  /\ UNCHANGED <<vr, desk, game, byGame, paused, dash, helper, hSent, rDash, tracking, cutouts, stopped>>
+  /\ ParkTo(paused /\ ~rDash, FALSE)
+  /\ IF paused /\ rHands /\ conf THEN StopUnits(FALSE) ELSE UNCHANGED <<tracking, stopped>>
+  /\ UNCHANGED <<vr, desk, game, byGame, paused, dash, helper, hSent, rDash, cutouts>>
 
 (* ft-cutouts on: transient units that conflict with the tracking units. *)
 CutoutsOn ==

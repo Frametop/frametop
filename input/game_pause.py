@@ -8,8 +8,9 @@ Paused:
   - Hand tracking stops if it runs (frametop-camd, frametop-hands). With hand interaction on
     (POINTER_HANDS=1) it's parked instead (PARK_PATH: ft-hands stops processing and ft-camd stops
     copying, the models stay loaded), and it unparks while the dashboard is open, so the hands work
-    there during the game. With HANDS_MODE=always it keeps running, unparked: the hands show in
-    the game (hands/handsmode.py).
+    there during the game. Without hand interaction the park still holds ft-cutouts' tracker,
+    which pausing doesn't stop. With HANDS_MODE=always it keeps running, unparked: the hands show
+    in the game (hands/handsmode.py).
   - The desktop, by "pause_desktop": "hide" (the default) hides every screen and floating window
     and slows the desktop down ("pause on" to ft-screens: KWin gets one frame callback a second
     instead of 90, so it and the apps on it hardly draw), and remote desktop stops if it runs
@@ -70,6 +71,8 @@ UNITS = ("frametop-gaze.service", "frametop-hands.service", "frametop-camd.servi
 # the hands are there when the dashboard opens during the game: ft-hands stops processing while
 # PARK_PATH exists (and ft-camd stops copying frames for it), and starts again within a palm search
 # (about 200 ms) once it goes. The pointer helper says when the dashboard opens and closes ("vrdash").
+# The park is written whenever Frametop is paused (but HANDS_MODE=always and the dashboard), so it
+# also holds ft-cutouts' tracker, whose transient units aren't in UNITS (DEE-276).
 HAND_UNITS = ("frametop-hands.service", "frametop-camd.service")
 PARK_PATH = f"/run/user/{os.getuid()}/frametop-hands/park"
 # What still works while paused, besides commands ("command:CMD"): the toggle itself, Steam's menu,
@@ -754,10 +757,15 @@ class GamePause:
         tracking for games instead of stopping it. always (HANDS_MODE=always): neither.
         with_desktop (HANDS_MODE=frametop): a resume starts hand tracking only with the desktop."""
         self.hands, self.hands_always = on, always
+        kept = self.worker.keep
         self.worker.keep = HAND_UNITS if on or always else ()
         self.worker.hands_with_desktop = with_desktop
         self.watch.set_touch_feed(on)
         self.update_park()
+        if self.paused and kept and not self.worker.keep:
+            # Switched off mid-pause: what the pause kept for parking stops now, as the pause
+            # would have stopped it (DEE-275).
+            self.worker.submit(self.worker.enforce)
 
     def dashboard_state(self, on):
         """From the pointer helper: the dashboard opened or closed ("vrdash 1|0")."""
@@ -765,16 +773,21 @@ class GamePause:
         self.update_park()
 
     def update_park(self):
-        """Hand tracking is parked while Frametop is paused with hand interaction on, unless the
-        dashboard is open (hands work there during a game) or HANDS_MODE=always."""
-        want = self.paused and self.hands and not self.hands_always and not self.dashboard
+        """Hand tracking is parked while Frametop is paused, unless the dashboard is open (hands
+        work there during a game) or HANDS_MODE=always. With hand interaction that's what keeps
+        the hand units from the game; without it the pause stops them, and the park holds
+        ft-cutouts' tracker, which the pause doesn't stop and whose cutouts show through the
+        screens a pause hides (DEE-276)."""
+        want = self.paused and not self.hands_always and not self.dashboard
         if want == self.parked:
             return
         try:
             if want:
-                if os.path.isdir(os.path.dirname(PARK_PATH)):  # hand tracking has run: it'll read it
-                    with open(PARK_PATH, "w") as f:
-                        f.write("parked by the input relay (Frametop paused for a VR game)\n")
+                # Made if hand tracking hasn't run since login, so a tracker that starts during
+                # the pause finds the park (ft-camd and ft-hands make it 0700 the same way: DEE-274).
+                os.makedirs(os.path.dirname(PARK_PATH), mode=0o700, exist_ok=True)
+                with open(PARK_PATH, "w") as f:
+                    f.write("parked by the input relay (Frametop paused for a VR game)\n")
             elif os.path.exists(PARK_PATH):
                 os.remove(PARK_PATH)
         except OSError as e:

@@ -27,7 +27,6 @@ import io
 import json
 import os
 import re
-import socket
 import statistics
 import struct
 import subprocess
@@ -35,6 +34,9 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
 
 HOME = Path.home()
 UID = os.getuid()
@@ -86,18 +88,8 @@ def run(*cmd, timeout=10):
 def ask(name, msg, timeout=1.0):
     """A command on an abstract datagram socket. The reply; None when nothing listens; "" when
     nothing answered in time."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
-    s.bind(f"\0ft_gazereport.{os.getpid()}")
-    s.settimeout(timeout)
-    try:
-        s.sendto(msg.encode(), "\0" + name)
-        return s.recv(65536).decode("utf-8", "replace")
-    except (ConnectionRefusedError, FileNotFoundError):
-        return None
-    except socket.timeout:
-        return ""
-    finally:
-        s.close()
+    reply, why = ftipc.exchange(name, msg, timeout, bind=f"ft_gazereport.{os.getpid()}")
+    return reply if reply is not None else None if why == ftipc.NOBODY else ""
 
 
 def ask_json(name, msg, timeout=1.0):

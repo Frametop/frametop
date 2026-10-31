@@ -134,6 +134,7 @@ from gazecal import DEFAULT_MODEL, EYE_LOST, FUSION, STATE, Fusion, save_calibra
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
 import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
 PANEL_PROG = REPO / "gaze" / "build" / "ft-gazepanel"
 PANEL = "\0ft_gazepanel"
@@ -285,16 +286,7 @@ def write_gaze(on, path=CONF):
 
 def ask(addr, command, timeout=1.0):
     """A command to a local datagram socket, and its reply ("" without one)."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
-    try:
-        s.bind("")
-        s.settimeout(timeout)
-        s.sendto(command.encode(), addr)
-        return s.recv(4096).decode("utf-8", "replace")
-    except OSError:
-        return ""
-    finally:
-        s.close()
+    return ftipc.ask(addr, command, timeout) or ""
 
 
 def screens_mode():

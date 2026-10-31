@@ -29,13 +29,15 @@ machines). Nothing here uploads anything.
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import threading
 import time
 from collections import deque
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "conf"))
+import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
 
 HERE = Path(__file__).resolve().parent
 GAZE = HERE.parent
@@ -66,24 +68,12 @@ class Sock:
     """A datagram client for one of the gaze services' abstract sockets (@ft_eyes, @ft_gazed)."""
 
     def __init__(self, name):
-        self.name = "\0" + name
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
-        self.sock.bind("")
+        self.name = name
+        self.client = ftipc.Client()
 
     def ask(self, text, timeout=0.5):
         """Send, and the reply (text) or None."""
-        self.sock.setblocking(False)
-        while True:  # drop late replies to earlier questions
-            try:
-                self.sock.recv(65536)
-            except OSError:
-                break
-        try:
-            self.sock.sendto(text.encode(), self.name)
-            self.sock.settimeout(timeout)
-            return self.sock.recv(1 << 20).decode(errors="replace")
-        except OSError:
-            return None
+        return self.client.ask(self.name, text, timeout)
 
     def json(self, text, timeout=0.5):
         r = self.ask(text, timeout)
@@ -93,7 +83,7 @@ class Sock:
             return None
 
     def close(self):
-        self.sock.close()
+        self.client.close()
 
 
 class GazeStream:

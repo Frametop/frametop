@@ -29,6 +29,10 @@ import struct
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
 
 RELAY = "\0frametop_relay"
 SCREENS = "\0ft_screens"
@@ -53,16 +57,8 @@ def run(*cmd):
 
 
 def ask(address, text, timeout=3.0):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    s.bind("")  # autobind, so the other side can reply
-    s.settimeout(timeout)
-    try:
-        s.sendto(text.encode(), address)
-        return s.recv(65536).decode(errors="replace")
-    except OSError as e:
-        return f"no answer ({e})"
-    finally:
-        s.close()
+    reply, why = ftipc.exchange(address, text, timeout)
+    return reply if reply is not None else f"no answer ({why})"
 
 
 def key_name(code):

@@ -60,7 +60,6 @@ import math
 import os
 import random
 import signal
-import socket
 import statistics
 import subprocess
 import sys
@@ -97,35 +96,21 @@ class OwnTracker:
     whatever the Eye tracker setting says."""
 
     def __init__(self):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self.sock.bind(f"\0ft_gazeprobe.{os.getpid()}")
-        self.sock.settimeout(1.0)
+        self.client = ftipc.Client(timeout=1.0, bind=f"ft_gazeprobe.{os.getpid()}")
 
     def ask(self, command):
         """The reply line, or "fail ..." if the tracker isn't running or doesn't answer."""
-        try:
-            while True:  # drop a late reply to an earlier command
-                self.sock.setblocking(False)
-                self.sock.recv(4096)
-        except (BlockingIOError, OSError):
-            pass
-        self.sock.settimeout(1.0)
-        try:
-            self.sock.sendto(command.encode(), "\0ft_eyes")
-            return self.sock.recv(4096).decode()
-        except (ConnectionRefusedError, FileNotFoundError):
+        reply = self.client.ask("ft_eyes", command)
+        if reply is not None:
+            return reply
+        if self.client.why == ftipc.NOBODY:
             return "fail the Own tracker isn't running yet (the gaze service starts it)"
-        except (socket.timeout, OSError) as e:
-            return f"fail no answer from the Own tracker ({e})"
+        return f"fail no answer from the Own tracker ({self.client.why})"
 
     def lease(self, seconds=30):
         """Ask the gaze service to keep the Own tracker running for `seconds` more. False if
         the gaze service isn't running."""
-        try:
-            self.sock.sendto(f"eyes {seconds}".encode(), "\0ft_gazed")
-            return True
-        except OSError:
-            return False
+        return self.client.send("ft_gazed", f"eyes {seconds}")
 
 
 # The math, filters, correction models, and SteamVR log reader are shared with ft-gazed.
@@ -133,6 +118,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gazecal import (DEFAULT_MODEL, MODELS, Correction, Fixation, LiveCorrection, OneEuro,  # noqa: E402
                      SteamEyeLog, cross_validate, deg_from_px, px_from_deg, save_calibration, steady_samples)
 from ft_store import StoreError  # noqa: E402  (gazecal put conf/ on the path)
+import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
 from fitcheck import FitCheck  # noqa: E402
 
 

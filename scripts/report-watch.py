@@ -28,6 +28,9 @@ import time
 from array import array
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
+
 RUN = Path(f"/run/user/{os.getuid()}")
 lock = threading.Lock()
 
@@ -40,16 +43,7 @@ def say(area, text):
 
 def ask(name, msg, timeout=1.0):
     """A request to one of Frametop's abstract datagram sockets; the reply, or None."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    s.bind("")
-    s.settimeout(timeout)
-    try:
-        s.sendto(msg.encode(), "\0" + name)
-        return s.recv(65536).decode()
-    except OSError:
-        return None
-    finally:
-        s.close()
+    return ftipc.ask(name, msg, timeout)
 
 
 def read(path):

@@ -139,6 +139,8 @@ SCREENS = "\0ft_screens"
 LOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "ft-layout.lock")
 FLOAT = "\0frametop_float"  # ft-floatd: the apps' windows (profiles)
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 LAUNCHERS = os.path.expanduser("~/.local/share/applications")  # a profile's launcher entry each
 DEFAULT_PANEL = (1.18, 0.664)  # gamescope: a floating 16:9 dashboard panel, measured on the Frame
 PIXELS_PER_METRE = 800         # ft-screens: a new screen's default size in VR (1920 px: 2.4 m)
@@ -167,17 +169,7 @@ def log(*args):
 # ---------------------------------------------------------------- config
 
 def read_conf():
-    conf = {}
-    try:
-        with open(CONF_PATH) as f:
-            for line in f:
-                line = line.split("#", 1)[0].strip()
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    conf[k.strip()] = v.strip()
-    except OSError:
-        pass
-    return conf
+    return ft_conf.read(CONF_PATH)
 
 
 def backend():

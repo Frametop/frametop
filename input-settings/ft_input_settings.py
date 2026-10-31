@@ -76,6 +76,8 @@ VRSETTINGS_PATHS = [os.path.expanduser("~/.config/openvr/config/steamvr.vrsettin
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAZE_PROBE = os.path.join(REPO, "gaze", "probe", "ft-gazeprobe")
 # Hand tracking's mode and the cutouts' margin (standard library only, so it imports here too).
+sys.path.insert(0, os.path.join(REPO, "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 sys.path.insert(0, os.path.join(REPO, "hands"))
 import handsmode  # noqa: E402
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
@@ -437,35 +439,13 @@ def read_json(path):
 
 
 def read_conf():
-    conf = {}
-    try:
-        with open(CONF_PATH) as f:
-            for line in f:
-                line = line.split("#", 1)[0].strip()
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    conf[k.strip()] = v.strip()
-    except OSError:
-        pass
-    return conf
+    return ft_conf.read(CONF_PATH)
 
 
 def write_conf_value(key, value):
-    """Set KEY=value in frametop.conf, keeping comments and the rest of the file."""
-    try:
-        with open(CONF_PATH) as f:
-            lines = f.read().splitlines()
-    except OSError:
-        lines = []
-    for i, line in enumerate(lines):
-        if line.split("#", 1)[0].strip().startswith(f"{key}="):
-            comment = line[line.index("#"):] if "#" in line else ""
-            lines[i] = f"{key}={value}" + (f"   {comment}" if comment else "")
-            break
-    else:
-        lines.append(f"{key}={value}")
-    with open(CONF_PATH, "w") as f:
-        f.write("\n".join(lines) + "\n")
+    """Set KEY=value in frametop.conf, keeping comments and the rest of the file (shell-quoted,
+    by a temp file and a rename: ft_conf.set_value)."""
+    ft_conf.set_value(key, value, CONF_PATH)
 
 
 def host(*cmd, timeout=20):
@@ -897,10 +877,14 @@ class Backend(QObject):
     # --- ignored panels ---
     @staticmethod
     def _ignore_list():
-        return [p.strip() for p in read_conf().get(IGNORE_KEY, "").split(",") if p.strip()]
+        return ft_conf.items(read_conf().get(IGNORE_KEY, ""))
 
     def _save_ignore(self, entries, text):
-        write_conf_value(IGNORE_KEY, ", ".join(entries))
+        # Comma-separated with no space (a ", " list made bash run the second key as a command
+        # when the session sourced the file, DEE-293); a key with a comma or a line break in it
+        # can't be one item, so it isn't kept.
+        write_conf_value(IGNORE_KEY, ft_conf.LIST_SEP.join(
+            e for e in entries if not any(c in e for c in ",\n\r\0")))
         # Only the helper reads it; the relay passes "reload" on only in pointer mode.
         self._send("reload", HELPER)
         self.panelsChanged.emit()

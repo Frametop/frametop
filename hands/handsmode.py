@@ -40,6 +40,9 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md: standard library only)
+
 CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
 MODES = ("frametop", "always", "off")
 DEFAULT_MODE = "off"
@@ -60,40 +63,14 @@ SOUNDS = {True: "/usr/share/sounds/ocean/stereo/device-removed.oga",
 
 
 def read_conf(path=CONF_PATH):
-    """KEY=value lines, as the shell that sources the file would mostly see them."""
-    conf = {}
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.split("#", 1)[0].strip()
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    v = v.strip()
-                    if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
-                        v = v[1:-1]
-                    conf[k.strip()] = v
-    except OSError:
-        pass
-    return conf
+    """KEY=value lines, as the shell that sources the file sees them (ft_conf, docs/config.md)."""
+    return ft_conf.read(path)
 
 
 def write_value(key, value, path=CONF_PATH):
-    """Set KEY=value, keeping comments and the rest of the file (as Frametop Input Settings does)."""
-    try:
-        with open(path) as f:
-            lines = f.read().splitlines()
-    except OSError:
-        lines = []
-    for i, line in enumerate(lines):
-        if line.split("#", 1)[0].strip().startswith(f"{key}="):
-            comment = line[line.index("#"):] if "#" in line else ""
-            lines[i] = f"{key}={value}" + (f"   {comment}" if comment else "")
-            break
-    else:
-        lines.append(f"{key}={value}")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write("\n".join(lines) + "\n")
+    """Set KEY=value, keeping comments and the rest of the file (as Frametop Input Settings does:
+    shell-quoted, by a temp file and a rename)."""
+    ft_conf.set_value(key, value, path)
 
 
 def mode_of(conf):

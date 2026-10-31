@@ -132,6 +132,8 @@ from fitcheck import MIN_REGION, FitCheck, wrap
 from gazecal import DEFAULT_MODEL, EYE_LOST, FUSION, STATE, Fusion, steady_samples
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 PANEL_PROG = REPO / "gaze" / "build" / "ft-gazepanel"
 PANEL = "\0ft_gazepanel"
 POINTER = "\0ft_pointer_helper"
@@ -276,21 +278,8 @@ def spread(points):
 
 
 def write_gaze(on, path=CONF):
-    """POINTER_GAZE=1|0 in the config, every other line kept."""
-    try:
-        lines = path.read_text().splitlines()
-    except OSError:
-        lines = []
-    value = f"POINTER_GAZE={1 if on else 0}"
-    for i, line in enumerate(lines):
-        if line.split("#", 1)[0].split("=", 1)[0].strip() == "POINTER_GAZE":
-            lines[i] = value
-            break
-    else:
-        lines.append(value)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text("\n".join(lines) + "\n")
-    tmp.replace(path)
+    """POINTER_GAZE=1|0 in the config, every other line kept (ft_conf.set_value)."""
+    ft_conf.set_value("POINTER_GAZE", "1" if on else "0", str(path))
 
 
 def ask(addr, command, timeout=1.0):

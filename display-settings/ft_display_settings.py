@@ -47,6 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
 sys.path.insert(0, LAYOUT_DIR)
 import ft_layout  # noqa: E402  (pure Python: the same geometry ft-layout uses)
+from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import steam_settings  # noqa: E402
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
@@ -78,21 +79,9 @@ ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait 
 
 
 def write_conf_value(key, value):
-    """Set KEY=value in frametop.conf, keeping comments and the rest of the file."""
-    try:
-        with open(CONF_PATH) as f:
-            lines = f.read().splitlines()
-    except OSError:
-        lines = []
-    for i, line in enumerate(lines):
-        if line.split("#", 1)[0].strip().startswith(f"{key}="):
-            comment = line[line.index("#"):] if "#" in line else ""
-            lines[i] = f"{key}={value}" + (f"   {comment}" if comment else "")
-            break
-    else:
-        lines.append(f"{key}={value}")
-    with open(CONF_PATH, "w") as f:
-        f.write("\n".join(lines) + "\n")
+    """Set KEY=value in frametop.conf, keeping comments and the rest of the file (shell-quoted,
+    by a temp file and a rename: ft_conf.set_value)."""
+    ft_conf.set_value(key, value, CONF_PATH)
 
 
 def host_command(*cmd):

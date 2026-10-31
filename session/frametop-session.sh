@@ -36,8 +36,19 @@ done
 conf=$HOME/.config/frametop.conf
 BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_SLOTS=16 FLOAT_MARGIN=300
 NOTIFY_FORWARD=auto FIREFOX_TITLEBAR=kwin
-# shellcheck disable=SC1090
-[ -f "$conf" ] && . "$conf"
+# The file is shell, sourced, but only when every line is in its grammar (docs/config.md). A line
+# outside it (a value with a space or $(...) in it, "KEY = value") is one bash runs as a command:
+# with set -e that stopped the desktop here (exit 127, DEE-293), or ran whatever it named. Then
+# only its valid settings load, quoted by conf/ft_conf.py, and nothing in the file runs.
+if [ -f "$conf" ]; then
+  if python3 "$here/../conf/ft_conf.py" check "$conf"; then
+    # shellcheck disable=SC1090
+    . "$conf"
+  else
+    echo "frametop: $conf has lines outside its grammar (above, left out); loading the rest" >&2
+    eval "$(python3 "$here/../conf/ft_conf.py" shell "$conf")"
+  fi
+fi
 backend=${FT_BACKEND:-$BACKEND}
 screens=${FT_SCREENS:-$SCREENS}
 width=${FT_WIDTH:-$WIDTH}

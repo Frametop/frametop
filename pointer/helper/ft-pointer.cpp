@@ -538,6 +538,7 @@
 // POINTER_ROLE (right): gaze precision and keyboard clicks, above.
 #include <openvr.h>
 
+#include "../../conf/ft_conf.h"
 #include "../../hands/include/fh_events.h"
 #include "../../hands/include/fh_ray.h"
 #include "calpanel.h"
@@ -600,28 +601,13 @@ namespace {
 
 using namespace md;
 
-std::map<std::string, std::string> ReadConfig() {
-    std::map<std::string, std::string> conf;
-    const char *home = std::getenv("HOME");
-    std::ifstream in(std::string(home ? home : "") + "/.config/frametop.conf");
-    std::string line;
-    while (std::getline(in, line)) {
-        line = line.substr(0, line.find('#'));
-        const auto eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        auto trim = [](std::string s) {
-            s.erase(0, s.find_first_not_of(" \t"));
-            s.erase(s.find_last_not_of(" \t") + 1);
-            return s;
-        };
-        conf[trim(line.substr(0, eq))] = trim(line.substr(eq + 1));
-    }
-    return conf;
-}
+// frametop.conf by its grammar (conf/ft_conf.h, docs/config.md): quotes taken off, a line bash
+// can't read left out with a warning, and a value that isn't a number gives the fallback (atof
+// made it 0, which the clamps then turned into their minimum).
+std::map<std::string, std::string> ReadConfig() { return ft_conf::Read(); }
 
 double ConfDouble(const std::map<std::string, std::string> &c, const char *key, double fallback) {
-    auto it = c.find(key);
-    return it == c.end() ? fallback : std::atof(it->second.c_str());
+    return ft_conf::Double(c, key, fallback);
 }
 
 int AbstractSocket(const char *name, bool bindIt) {

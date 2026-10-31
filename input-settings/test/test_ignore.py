@@ -71,7 +71,9 @@ class Ignored(unittest.TestCase):
 
     def test_an_old_comma_space_line_is_replaced(self):
         """A conf the old writer left (bash can't source it): the next change writes it right."""
-        text = Path(fis.CONF_PATH).read_text().replace("POINTER_IGNORE=   ", "POINTER_IGNORE=a.b, c.d*", 1)
+        old = Path(fis.CONF_PATH).read_text()
+        text = old.replace("POINTER_IGNORE=   ", "POINTER_IGNORE=a.b, c.d*", 1)
+        self.assertNotEqual(text, old)
         Path(fis.CONF_PATH).write_text(text)
         self.assertEqual(self.b._ignore_list(), [])   # left out with a warning, as bash can't read it
         self.b.setPanelIgnored("e.f", True)

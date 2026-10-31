@@ -226,11 +226,18 @@ class Writer(Base):
         for value in ("a\nB=1", "a\r", "a\0"):
             with self.assertRaises(ValueError):
                 ft_conf.set_value("KEY", value, path)
-        for key in ("", "1A", "A B", "A=B", "$(x)"):
+        for key in ("", "1A", "A B", "A=B", "$(x)", "here", "UID", "IFS"):
             with self.assertRaises(ValueError):
                 ft_conf.set_value(key, "1", path)
         with open(path) as f:
             self.assertEqual(f.read(), self.BEFORE)
+
+    def test_crlf_line(self):
+        """A line saved with a CR at its end is outside the grammar; the new one doesn't keep the CR."""
+        path = self.conf("POINTER_IGNORE=a   # note\r\n")
+        ft_conf.set_value("POINTER_IGNORE", "b", path)
+        with open(path, newline="") as f:
+            self.assertEqual(f.read(), "POINTER_IGNORE=b   # note\n")
 
     def test_changes_the_line_that_counts(self):
         path = self.conf("KEY=1\nKEY=2   # wins\n")

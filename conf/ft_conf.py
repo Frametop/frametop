@@ -204,7 +204,8 @@ def _comment(line):
                 return rest[k:] if k >= 0 else ""
         return ""
     m = re.search(r"[ \t]#.*\Z", rest)
-    return m.group(0).lstrip() if m else ""
+    # without a CR or NUL (a file saved with CRLF endings): kept, the new line would be bad again
+    return re.sub(r"[\r\0]", "", m.group(0)).lstrip() if m else ""
 
 
 def set_value(key, value, path=None):

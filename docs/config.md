@@ -2,7 +2,7 @@
 
 `~/.config/frametop.conf` holds Frametop's settings as `NAME=value` lines. `session/frametop.conf.example` lists every key and what it does. This page says how the file is written, so that the session (which sources it with bash) and every other program (which parse it) read the same thing.
 
-One parser per language reads it: `conf/ft_conf.py` for Python and `conf/ft_conf.h` for C and C++. `conf/test/conf-test.py` runs both, and bash, on the same test vectors (`conf/test/vectors.json`). Don't add another parser: import one of these.
+One parser per language reads it: `conf/ft_conf.py` for Python and `conf/ft_conf.h` for C and C++. `conf/test/conf-test.py` runs the Python, C and C++ readers, and bash, on the same test vectors (`conf/test/vectors.json`). Don't add another parser: import one of these.
 
 ## The grammar
 
@@ -22,7 +22,7 @@ The value is literal. It's made of these, side by side with nothing between them
 
 So `'a b'c` is `a bc`, and a `'` inside a value is written `'"'"'` (`'it'"'"'s'` is `it's`). A `#` inside a value is part of it (`a#b`); only a `#` after whitespace starts a comment. The value ends at the first space or tab outside quotes.
 
-Readers don't expand anything: `$HOME`, `$(...)`, backquotes and backslashes are outside the grammar, and `~` stays `~` (bash turns a leading `~` into the home folder; the programs that take a path, such as `HANDS_FLAG_DIR`, do the same).
+Readers don't expand anything: `$HOME`, `$(...)`, backquotes and backslashes are outside the grammar, and `~` stays `~` (bash turns a leading `~` into the home folder; the programs that take a path, such as `HANDS_FLAG_DIR`, do the same). Bash also expands `~user`, and a `~` after a `:`, which no reader does: don't write those. Writers quote any value with a `~`.
 
 The last line of a name counts, as it does for bash.
 

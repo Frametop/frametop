@@ -110,6 +110,10 @@
    "value": "héllo"
   },
   {
+   "line": "KEY=            # the example's empty list",
+   "value": ""
+  },
+  {
    "line": "_K1=x",
    "value": "x"
   },

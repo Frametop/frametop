@@ -350,7 +350,6 @@ private:
     bool Passed(Output &o, int64_t timeoutNs);
     void Draw(Output &o, unsigned tex, int w, int h, const Spots eyes[2], bool partial);
     bool ready_ = false;
-    int drm_ = -1;
     void *gbm_ = nullptr, *dpy_ = nullptr, *ctx_ = nullptr;
     unsigned copyProg_ = 0, cutProg_ = 0, hullProg_ = 0, glowProg_ = 0, markProg_ = 0, vbo_ = 0;
     std::vector<uint64_t> modifiers_;

@@ -81,6 +81,7 @@
 #include "logfile.h"
 #include "relay-buttons.h"
 #include "held-keys.h"
+#include "rendernode.h"
 
 #define MAX_SCREENS 24  // screens and spare outputs
 // A screen counts as playing a video while its last VIDEO_COMMITS commits each redrew at
@@ -1290,7 +1291,7 @@ static void surface_watch_new(struct wl_listener *l, void *data) {
 
 static bool setup_dmabuf(struct server *s) {
     struct stat st;
-    const char *node = "/dev/dri/renderD128";
+    const char *node = FT_RENDER_NODE;
     if (stat(node, &st) != 0) {
         wlr_log(WLR_ERROR, "no %s", node);
         return false;

@@ -1,6 +1,7 @@
 // Hand cutouts, the GPU side (see handcut.h): Renderer draws a panel's client buffer with
 // the hands cut out and the glows on top. And EyePositions, which asks SteamVR.
 #include "handcut.h"
+#include "rendernode.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -212,17 +213,15 @@ Renderer::~Renderer() {
     }
     if (ctx_) eglDestroyContext(EGLDisplay(dpy_), EGLContext(ctx_));
     if (dpy_) eglTerminate(EGLDisplay(dpy_));
-    if (gbm_) gbm_device_destroy(static_cast<gbm_device *>(gbm_));
-    if (drm_ >= 0) close(drm_);
+    if (gbm_) rendernode::Release();
 }
 
 bool Renderer::Init(const std::vector<uint64_t> &modifiers, std::function<void(const Output *)> released) {
     if (ready_) return true;
     modifiers_ = modifiers;
     released_ = std::move(released);
-    drm_ = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
-    if (drm_ < 0) return std::perror("handcut: /dev/dri/renderD128"), false;
-    gbm_ = gbm_create_device(drm_);
+    if (!gbm_) gbm_ = rendernode::Acquire("handcut");
+    if (!gbm_) return false;
     pGetPlatformDisplay = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
     pCreateImage = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(eglGetProcAddress("eglCreateImageKHR"));
     pDestroyImage = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(eglGetProcAddress("eglDestroyImageKHR"));

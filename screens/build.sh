@@ -28,6 +28,7 @@ $cxx -c -o build/label.o label.cpp
 $cxx -c -o build/overlaytex.o overlaytex.cpp
 $cxx -c -o build/handcut.o handcut.cpp
 $cxx -c -o build/handrender.o handrender.cpp
+$cxx -c -o build/rendernode.o rendernode.cpp
 $cxx -c -o build/handinput.o handinput.cpp
 $cxx -c -o build/palmmenu.o palmmenu.cpp
 $cxx -c -o build/grabthat.o grabthat.cpp
@@ -39,10 +40,10 @@ $cxx -c -o build/handasset.o handasset.cpp
 $cxx -c -o build/handrobot.o handrobot.cpp
 $cxx -c -o build/handview.o handview.cpp
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
-g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o $vrlibs
-g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o $vrlibs
+g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
+g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 $cxx -o build/ft-spotpanel ../frunner/ft-spotpanel.cpp $(pkg-config --libs gbm libdrm) $OPENVR_LIBS -lpthread
 strip --strip-unneeded build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel
 echo "built build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel"'

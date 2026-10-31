@@ -8,5 +8,5 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 args=$(printf ' %q' "$@")
 "$root/scripts/frame.sh" -C screens "set -e; mkdir -p build/include; . ../scripts/openvr.sh
 g++ -std=c++17 -O2 -Wall -Wno-missing-field-initializers -Ibuild/include \$(pkg-config --cflags egl glesv2 gbm libdrm) \
-  tests/matte_bench.cpp handcut.cpp handrender.cpp -o build/matte-bench \$(pkg-config --libs egl glesv2 gbm) \$OPENVR_LIBS
+  tests/matte_bench.cpp handcut.cpp handrender.cpp rendernode.cpp -o build/matte-bench \$(pkg-config --libs egl glesv2 gbm) \$OPENVR_LIBS
 build/matte-bench$args"

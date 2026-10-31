@@ -1,6 +1,8 @@
 // See overlaytex.h.
 #include "overlaytex.h"
 
+#include "rendernode.h"
+
 #include <drm_fourcc.h>
 #include <fcntl.h>
 #include <gbm.h>
@@ -23,8 +25,7 @@ struct Image {
 };
 using Key = std::tuple<int, int, uint64_t>;   // w, h, the pixels' hash
 
-int g_drm = -1;
-gbm_device *g_gbm = nullptr;
+gbm_device *g_gbm = nullptr;   // the shared one (rendernode.h)
 int g_state = 0;   // 0: not tried yet, 1: buffers, -1: SetOverlayRaw
 std::map<Key, Image> g_images;
 std::map<vr::VROverlayHandle_t, Key> g_on;   // what each overlay shows
@@ -51,8 +52,7 @@ void Drop(Image &im) {
 
 bool Ready() {
     if (g_state) return g_state > 0;
-    g_drm = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
-    if (g_drm >= 0) g_gbm = gbm_create_device(g_drm);
+    g_gbm = rendernode::Acquire("overlay textures");
     g_state = g_gbm ? 1 : -1;
     if (g_state < 0) std::printf("overlay textures: no render node; using SetOverlayRaw (at most 200 changes)\n");
     return g_state > 0;
@@ -133,9 +133,8 @@ void Forget(vr::VROverlayHandle_t o) { Release(o); }
 void Shutdown() {
     for (auto &[k, im] : g_images) Drop(im);
     g_images.clear(), g_on.clear();
-    if (g_gbm) gbm_device_destroy(g_gbm);
-    if (g_drm >= 0) close(g_drm);
-    g_gbm = nullptr, g_drm = -1, g_state = 0;
+    if (g_gbm) rendernode::Release();
+    g_gbm = nullptr, g_state = 0;
 }
 
 }  // namespace overlaytex

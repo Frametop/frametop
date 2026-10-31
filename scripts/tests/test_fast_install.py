@@ -102,6 +102,7 @@ class Paths(unittest.TestCase):
             desktop = fi.dirs_used(tree, fi.DESKTOP, ['/r/current/session/../input/ft-textinput'], roots)
             self.assertIn('input/ft-textinput', desktop)   # that file only, not all of input/
             self.assertNotIn('input', desktop)
+            self.assertIn('conf', desktop)   # ftipc.py and ft_conf.py: floatd, frunner, the settings apps
             self.assertEqual(fi.dirs_used(tree, 'frametop-camd.service', ['/r/0.1/hands/build/ft-camd'], roots),
                              {'hands/build/ft-camd'})   # not all of hands/
             # a failed unit has no processes: its ExecStart, as systemctl shows it, still names them
@@ -136,6 +137,14 @@ class Restarts(unittest.TestCase):
         done, left, calls = self.restarted(['screens/build/ft-screens', 'commands/ft_commands.py'])
         self.assertEqual(done, ['frametop-input-relay.service', 'frametop-voice.service', fi.DESKTOP])
         self.assertEqual(calls, ['frametop-input-relay.service', 'frametop-voice.service', 'restart'])
+
+    def test_conf_change_restarts_the_desktop(self):
+        with mock.patch.object(fi, 'unit_dirs', lambda tree: {
+                'frametop-input-relay.service': {'input', 'commands', 'conf'},
+                fi.DESKTOP: fi.dirs_used(Path('/r'), fi.DESKTOP, [], ())}):
+            done, left, calls = self.restarted(['conf/ftipc.py'])
+        self.assertEqual(done, ['frametop-input-relay.service', fi.DESKTOP])
+        self.assertEqual(calls, ['frametop-input-relay.service', 'restart'])
 
     def test_worn_headset_keeps_the_desktop(self):
         self.assertEqual(self.restarted(['screens/build/ft-screens'], worn=True), ([], [fi.DESKTOP], []))

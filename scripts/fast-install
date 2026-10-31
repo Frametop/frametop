@@ -104,7 +104,7 @@ ETC = {'gaze/tracker/atomic-update.conf'}
 # KWin scripts and helpers).
 EXTRA_DIRS = {
     'frametop-desktop.service': ('session', 'screens', 'float', 'frunner', 'layout', 'decoration',
-                                 'commands', 'steam'),
+                                 'commands', 'steam', 'conf'),   # conf/: ftipc, ft_conf (DEE-305)
     'frametop-input-relay.service': ('commands', 'conf'),
     'frametop-dashpatch.service': ('steam',),
     'frametop-voice.service': ('input', 'commands', 'conf'),

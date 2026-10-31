@@ -11,10 +11,11 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | The input relay, held keys, bindings, the pointer helper's laser and trigger, keyboards, voice typing, gamepad mode | G3 Input and pointer | `G3-input.mmd`, `G3-input-Keys.tla`, `G3-input-Laser.tla` |
 | Gaze sources, ft-gaze and ft-gazed, calibration and its panel, idle and wake, our own eye tracker | G4 Gaze | `G4-gaze.mmd`, `G4-gaze.tla` |
 | ft-camd, ft-hands, when hand tracking runs and parks, hand or controller per side, near input on panels, the hand ray and pinches | G5 Hands | `G5-hands.mmd`, `G5-hands.tla` |
+| ft-screens' screens and panels and when they show, visibility modes, conceal, ft-layout and profiles, floating windows, the dashboard, remote access over VNC | G2 Desktop and panels | `G2-desktop.mmd`, `G2-desktop.tla` |
 
 `feature-map.md` lists every feature (F1 to F22), its processes, sockets, files and units, and proposes the eight chart groups. It was written at `403c1eb`. Its bug table predates the H1, R1 and H2 fixes (`76121c7`, `e15b65f`, `2c783dd`), and it mentions an overview chart and a `snapshot/` folder that are kept outside the repo.
 
-G2 (desktop and panels), G8 (verification, data and diagnostics) and G7 (build, install and release) are not charted yet.
+G8 (verification, data and diagnostics) and G7 (build, install and release) are not charted yet.
 
 ## Files
 
@@ -196,6 +197,34 @@ Open suspected bugs (tickets for H5-1 to H5-4 are being created):
 
 G1's L3 has its root here: `frametop-camd.service` and `frametop-hands.service` have no `Requisite=steamvr`, which `game_pause.py` 577 assumes. Only `frametop-handview.service` has it.
 
+## G2 Desktop and panels
+
+Covers when one of ft-screens' screens or panels shows (`UpdateVisibility`, `vr.cpp` 1236-1257): the visibility mode and the hide and show switch (`ModeVisible` 1177-1197, `EffectiveMode` 1162-1164), conceal, the pause, and a full gaze calibration's hide. It also covers the desktop's start and stop with `ft-layout start`, ft-layout's apply, reset, profiles and hidden screens, and remote access over VNC (`remote-ctl.sh`, `remote-desktop.sh`, `vnc-bridge.sh`). It shows how often ft-screens draws a screen (`compositor.c` `frame_interval`). Floating windows (ft-floatd and its KWin script) and the dashboard with Steam's panels are drawn by hand.
+
+Model: `G2-desktop.tla` (module `G2Desktop`), one screen. `Visible` is what ft-screens shows. `Wanted` is what the settings and the user ask for: not paused, not concealed, the configured mode with the user's switch, and no calibration running. Configs: `HeadOff` (a desktop that starts with no head pose), `HeadOffFix` (ft-layout sends the settings anyway), `CalInGame` (a full calibration during a VR game), `CalInGameFix` (the calibration hides with a flag of its own), `MidPause` (a desktop that starts mid-pause with remote access on), `MidPauseFix` (the resume starts remote access instead), `Lossy` (the relay's pause datagrams can be lost), `GazedCrash` (ft-gazed dies mid-calibration), `Code` (every fault on), `Fixed` and `FixedAlways` (all three fixes, dashboard and always modes). Each fix config switches off one bug, to show that bug alone breaks the rule.
+
+Results at `78e93b1`:
+
+| Rule | What it says | Result |
+| --- | --- | --- |
+| TypeOK | | Holds in all 11 configs |
+| HiddenComesBack | A screen that is wanted but hidden shows again, or stops being wanted | Breaks in Lossy (G1's L7) and GazedCrash, 4 steps (G4's Z1). Holds in every other config |
+| ShownOnlyWanted | A screen shown against the settings doesn't stay shown | Breaks in HeadOff, 3 steps (P1), CalInGame, 5 steps (P2), Lossy (a lost `pause on`) and Code. Holds in HeadOffFix, CalInGameFix, MidPause, MidPauseFix, GazedCrash, Fixed and FixedAlways |
+| VncOffInPause | Remote access doesn't keep running through a pause | Breaks in MidPause, 4 steps (P3) and Code. Holds in every other config |
+| VncComesBack | Remote access the pause stopped comes back with the resume | Holds in all 11 configs |
+
+States per run: 208 (HeadOffFix) to 3,344 (Code).
+
+Open suspected bugs:
+
+| Id | Ticket | Rule | What happens |
+| --- | --- | --- | --- |
+| P1 | DEE-278 | ShownOnlyWanted | A desktop that starts with no head pose (the headset off or asleep). `apply_screens` asks ft-screens for `head` (`ft_layout.py` 756) before `send_visibility` (758) and `send_hidden` (774). The error is only logged as "not arranged now" by `start` (1955-1958) and `apply --wait` (2031-2038), so ft-screens keeps its defaults (`vr.cpp` 528-548): always, nothing concealed. Concealed screens show, and users of the toggle, gesture or dashboard mode see the screens all the time, until a reset, a settings change or a profile. `use` has a `send_hidden` fallback (2076-2079); `start` and `apply` don't |
+| P2 | DEE-279 | ShownOnlyWanted (minor) | A full gaze calibration during a VR game, with the always mode and ingames hide (the defaults). ft-screens' `state` reports `g_mode` (`vr.cpp` 2606, 6254-6257), not the dashboard mode in effect, so `gazecheck.py` 623 reads the screens as shown and its `hide` (624) changes nothing. The `show` at close (1264-1265) turns the switch on under the dashboard mode (`vr.cpp` 5992-5998), and the screens stay over the game with the dashboard closed until the game ends or the hotkey |
+| P3 | DEE-280 | VncOffInPause (minor) | A desktop that starts mid-pause (`autostart.sh` on a SteamVR restart, or the dashboard's Desktop entry) runs `remote-ctl.sh start` with REMOTE=1 (`frametop-session.sh` 246-249) without a pause check. The relay sends only `pause on` again (`game_pause.py` 675-688), so krdp and Xvnc run through the game, and the resume doesn't know they ran. Same class as G1's L2 |
+
+The Lossy and GazedCrash breaks are G1's L7 and G4's Z1, drawn in those groups. A lost `pause on` also shows the screens through the pause, because the relay sends it again only to a new ft-screens.
+
 ## Running a check
 
 The checks need TLC 1.7.4 and Java. They look for TLC at `~/.cache/frametop-formal/tla2tools-1.7.4.jar` (the verify skills' `scripts/check` put it there), or at `TLA2TOOLS` for G3, G4 and G6. Java comes from `JAVA`, then `PATH`. G1 asks mise for `java@temurin-25`.
@@ -210,7 +239,7 @@ frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G4-
 frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G1-lifecycle-check.py PauseHide
 ```
 
-G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G6 takes `Exit`, `Live` or `PreFix`. G1 takes config names.
+G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G2 takes `Desktop:HeadOff` and so on. G6 takes `Exit`, `Live` or `PreFix`. G1 takes config names.
 
 Each script writes TLC's full output, with every counterexample trace, to `GROUP-traces/` next to the models. Those folders are ignored by git. A rule that breaks prints its shortest path, and the chart's red badges follow that path.
 

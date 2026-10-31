@@ -37,6 +37,9 @@ import socket
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "conf"))
+import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
+
 # Not under $XDG_CONFIG_HOME: Frametop's desktop points it at ~/.config/frametop, and the
 # service and the settings app must read the same file.
 PATH = Path(os.environ.get("FRAMETOP_VOICE_SETTINGS", "~/.config/frametop-voice.json")).expanduser()
@@ -156,17 +159,24 @@ def model_file():
 
 def save(data):
     """Write the keys the settings app manages (DEFAULT). Every other key, "commands" and
-    "advanced" included, keeps its value from the file, so hand edits survive a save."""
-    merged = {**read_json(PATH), **{k: data[k] for k in DEFAULT if k in data}}
-    write_json(PATH, merged)
+    "advanced" included, keeps its value from the file, so hand edits survive a save. A file
+    that doesn't read is kept (a .bad- copy) and not saved over: ft_store.StoreError (DEE-300)."""
+    with ft_store.locked(PATH):
+        old = ft_store.load_json_strict(PATH, {}, ft_store.is_object)
+        write_json(PATH, {**old, **{k: data[k] for k in DEFAULT if k in data}})
+
+
+def save_rules(rules):
+    """The input relay's rules, written whole, as Input Settings writes them: under the file's
+    lock, and never over a file that doesn't read (ft_store.StoreError, a copy kept)."""
+    with ft_store.locked(RULES_PATH):
+        ft_store.load_json_strict(RULES_PATH, {}, ft_store.is_object)
+        write_json(RULES_PATH, rules)
 
 
 def write_json(path, data):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n")
-    tmp.replace(path)
+    """data into path through a temp file of its own (ft_store.write_json)."""
+    ft_store.write_json(path, data)
 
 
 def mtime():
@@ -257,16 +267,25 @@ def carry_over():
         print(f"voice: carried over frame-voice's settings ({FRAME_VOICE_PATH} -> {PATH})")
         for note in notes:
             print(f"voice: {note}")
-        if set_dictation_keys(rules, bindings or {}):
-            write_json(RULES_PATH, rules)
+        if set_dictation_keys(rules, bindings or {}) and carry_rules(rules):
             print(f"voice: dictation keys are frame-voice's: {', '.join(sorted(bindings)) or 'none'}")
         return
     own = rules.get("key_bindings")
     if isinstance(own, dict) and not any(a in DICTATION_ACTIONS for a in own.values()) and "97" not in own:
         # A list of its own doesn't get the relay's defaults, so give dictation its key once.
         own.update(VOICE_KEY_BINDINGS)
-        write_json(RULES_PATH, rules)
-        print("voice: added Right Ctrl tap (dictate) to your key combinations")
+        if carry_rules(rules):
+            print("voice: added Right Ctrl tap (dictate) to your key combinations")
+
+
+def carry_rules(rules):
+    """save_rules for carry_over: a rules file that doesn't read is said, not saved over."""
+    try:
+        save_rules(rules)
+        return True
+    except (OSError, ft_store.StoreError) as e:
+        print(f"voice: {e}", file=sys.stderr)
+        return False
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 """Frametop Voice's command matching, its settings round trip, and carrying over frame-voice's
 settings. Standard library only. Run: python3 voice/test/test_commands.py"""
+import contextlib
+import io
 import json
 import os
 import sys
@@ -152,6 +154,31 @@ class Settings(unittest.TestCase):
         self.assertEqual(saved["advanced"], {"dictation": {"min_seconds": 1.0}})
         self.path.write_text("{}")
         self.assertEqual(self.vs.load()["commands"], [])
+
+    def test_a_file_that_doesnt_read_is_kept(self):
+        # load() gives the defaults for it; saving those over it would lose the commands and
+        # the advanced settings in it (DEE-300)
+        for text in ('{"commands": [', '["HEY COMPUTER"]'):
+            with self.subTest(text=text):
+                self.path.write_text(text)
+                data = self.vs.load()
+                data["sounds"] = True
+                with self.assertRaisesRegex(self.vs.ft_store.StoreError, "won't save over it"):
+                    self.vs.save(data)
+                self.assertEqual(self.path.read_text(), text)
+                self.assertEqual(sum((self.path.parent / n).read_text() == text for n in os.listdir(self.tmp.name)
+                                     if n.startswith("frametop-voice.json.bad-")), 1)
+
+    def test_rules_file_that_doesnt_read_is_kept(self):
+        self.vs.RULES_PATH = Path(self.tmp.name) / "frametop-input.json"
+        self.vs.RULES_PATH.write_text("[]")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertFalse(self.vs.carry_rules({"key_bindings": dict(self.vs.VOICE_KEY_BINDINGS)}))
+        self.assertIn("won't save over it", err.getvalue())
+        self.assertEqual(self.vs.RULES_PATH.read_text(), "[]")
+        self.vs.RULES_PATH.write_text("{}")
+        self.assertTrue(self.vs.carry_rules({"key_bindings": {"97": "dictate"}}))
+        self.assertEqual(json.loads(self.vs.RULES_PATH.read_text()), {"key_bindings": {"97": "dictate"}})
 
     def test_defaults(self):
         data = self.vs.load()

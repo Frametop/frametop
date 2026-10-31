@@ -98,6 +98,9 @@ std::deque<Unit> g_units;
 int g_wake = -1;
 std::atomic<bool> g_hidden{false}, g_waitIdr{false};
 std::atomic<int> g_ended{0};  // connection terminated: error code + 1
+// Seconds the way out may take before ft-stream ends itself (Stream): longer than ft-screens'
+// FT_REMOTE_QUIT_MS (20 s), so while ft-screens runs, its SIGKILL comes first.
+constexpr unsigned kExitWatchdogS = 25;
 // For the log's report: frames received and decoded, bytes, decode time.
 std::atomic<int> g_received{0}, g_skipped{0};
 std::atomic<uint64_t> g_bytes{0};
@@ -971,11 +974,19 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     }
     const int ended = g_ended;
     g_stop = 1;
+    // The way out can hang (LiStopConnection, the decoder's close, the HTTP call), and a hung
+    // ft-stream keeps its host's input and audio locks. ft-screens kills one 20 s after it asked
+    // it to end or heard "lost" (screens/remote.c), but not once it's gone itself: a desktop stop
+    // leaves its ft-streams behind. So this one ends itself 25 s from here (SIGALRM's default
+    // action) whoever is left (DEE-261).
+    alarm(kExitWatchdogS);
+    // "lost" before LiStopConnection, not after: a connection the host ended that hangs in it
+    // used to stay "live" in ft-screens, which never killed it (DEE-259).
+    viewer.Send(ended ? "state lost the host ended the stream" : "state lost");
     g_mic.Stop();  // no packet after this, before the connection goes
     g_hostin.Stop(hostinput::Want::kDrop);  // the host's keyboard and mouse go back now, not a lease later
     if (!ended) pad.Off();  // its buttons come up on the host (a lost connection drops it anyway)
     LiStopConnection();
-    viewer.Send(ended ? "state lost the host ended the stream" : "state lost");
     dec.Close();
     if (appId == kRemoteMonitor) {
         code = client.Launch(cfg, kDisconnectMonitor, false, &message);

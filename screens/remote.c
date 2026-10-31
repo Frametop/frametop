@@ -132,6 +132,10 @@ static void message(struct remote *r, const char *msg, const int *fds, int nfds)
         snprintf(r->state, sizeof r->state, "%.95s", msg + 6);
         wlr_log(WLR_INFO, "remote %d (%s): %s", r->index + 1, r->client, r->state);
         if (strncmp(r->state, "live", 4) == 0) r->failures = 0;
+        // On its way out by itself: its exit gets FT_REMOTE_QUIT_MS, as a stop's does. One that
+        // hung there (the decoder's close, Disconnect Monitor) used to hold every display of its
+        // host for good (DEE-260).
+        if (strncmp(r->state, "lost", 4) == 0 && r->pid > 0 && !r->quit_at) r->quit_at = now_ms() | 1;
     } else if (sscanf(msg, "buffers %u %u %x %llx %u %u", &w, &h, &format, &modifier, &offset, &stride) == 6 &&
                nfds == 3 && w > 0 && h > 0 && w <= 16384 && h <= 16384) {
         forget_ring(r);
@@ -154,12 +158,19 @@ static void message(struct remote *r, const char *msg, const int *fds, int nfds)
     for (int k = 0; k < nfds; ++k) close(fds[k]);
 }
 
+// A display the host says isn't there (404: a Remote Monitor or display that went) waits longer
+// between tries than other failures: every 30 s for good filled the logs and took the host's one
+// stream operation each time (DEE-262). Connect it again, and it tries at once.
+#define FT_REMOTE_WAIT_MAX_MS 30000
+#define FT_REMOTE_WAIT_404_MS 300000
+
 static void schedule_restart(struct remote *r) {
     const uint32_t ran = now_ms() - r->started_ms;
     r->failures = ran < 20000 ? r->failures + 1 : 0;
+    const uint32_t most = strncmp(r->state, "lost 404", 8) == 0 ? FT_REMOTE_WAIT_404_MS : FT_REMOTE_WAIT_MAX_MS;
     uint32_t wait = 2000;
-    for (int k = 1; k < r->failures && wait < 30000; ++k) wait *= 2;
-    if (wait > 30000) wait = 30000;
+    for (int k = 1; k < r->failures && wait < most; ++k) wait *= 2;
+    if (wait > most) wait = most;
     r->restart_at = now_ms() + wait;
     if (!r->restart_at) r->restart_at = 1;
     wlr_log(WLR_INFO, "remote %d: starting it again in %u s", r->index + 1, wait / 1000);
@@ -176,7 +187,8 @@ static int readable(int fd, uint32_t mask, void *data) {
         if (n < 0 && (errno == EAGAIN || errno == EINTR)) break;
         if (n <= 0) {  // ft-stream is gone: its exit (SIGCHLD) sets up the restart
             wlr_log(WLR_INFO, "remote %d: stream closed", r->index + 1);
-            snprintf(r->state, sizeof r->state, "lost");
+            if (strncmp(r->state, "lost", 4) != 0) snprintf(r->state, sizeof r->state, "lost");  // keeps the why
+            if (r->pid > 0 && !r->quit_at) r->quit_at = now_ms() | 1;  // as for "lost" (message)
             disconnect(r);
             return 0;
         }
@@ -414,6 +426,7 @@ bool ft_remote_child(pid_t pid, int status) {
         r->quit_at = 0;
         if (WIFEXITED(status)) wlr_log(WLR_INFO, "remote %d: ft-stream exited (%d)", r->index + 1, WEXITSTATUS(status));
         else wlr_log(WLR_INFO, "remote %d: ft-stream killed (signal %d)", r->index + 1, WTERMSIG(status));
+        if (r->fd >= 0) readable(r->fd, 0, r);  // what it said last ("lost 404 ...") is the back-off's
         disconnect(r);
         if (r->used && !r->restart_at) schedule_restart(r);
         return true;

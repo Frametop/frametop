@@ -13,7 +13,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 JAR = os.environ.get('TLA2TOOLS', str(Path.home() / '.cache/frametop-formal/tla2tools-1.7.4.jar'))
 JAVA = os.environ.get('JAVA', 'java')
-CONFIGS = ['Exit', 'Live', 'PreFix']
+CONFIGS = ['Exit', 'Live', 'PreFix', 'PreR23']
 
 
 def rules(cfg):

@@ -17,6 +17,36 @@ using handcut::Hand;
 
 double Dot(const double a[3], const double b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
+// A least-squares line through samples over time: each of its K values' slope, per second. in(q):
+// the sample is in the fit; val(q, x): its K values into x. Times are seconds from `zero` (ns).
+// False with fewer than minN samples, or with their times' spread (s^2) under minSpread.
+template <int K, class Seq, class In, class Val>
+bool LineSlope(const Seq &samples, int64_t zero, In in, Val val, int minN, double minSpread, double slope[K]) {
+    int n = 0;
+    double mt = 0, mv[K] = {}, x[K];
+    for (const auto &q : samples)
+        if (in(q)) {
+            val(q, x);
+            mt += (q.t - zero) / 1e9;
+            for (int k = 0; k < K; ++k) mv[k] += x[k];
+            ++n;
+        }
+    if (n < minN) return false;
+    mt /= n;
+    for (double &m : mv) m /= n;
+    double tt = 0, tv[K] = {};
+    for (const auto &q : samples)
+        if (in(q)) {
+            val(q, x);
+            const double dt = (q.t - zero) / 1e9 - mt;
+            tt += dt * dt;
+            for (int k = 0; k < K; ++k) tv[k] += dt * (x[k] - mv[k]);
+        }
+    if (tt < minSpread) return false;
+    for (int k = 0; k < K; ++k) slope[k] = tv[k] / tt;
+    return true;
+}
+
 void ToLocal(const Mat &m, const double p[3], double out[3]) {
     const double d[3] = {p[0] - m.m[0][3], p[1] - m.m[1][3], p[2] - m.m[2][3]};
     for (int i = 0; i < 3; ++i) out[i] = m.m[0][i] * d[0] + m.m[1][i] * d[1] + m.m[2][i] * d[2];
@@ -1426,22 +1456,12 @@ bool HandInput::Velocity(int s, int64_t endNs, double ms, fhsmooth::V3 *out) con
     const std::vector<Side::Pt> &tr = side_[s].track;
     if (tr.empty()) return false;
     const int64_t end = endNs ? endNs : tr.back().t, from = end - int64_t(ms * 1e6);
-    double mt = 0;
-    fhsmooth::V3 mp;
-    int n = 0;
-    for (const Side::Pt &q : tr)
-        if (q.t >= from && q.t <= end) mt += (q.t - end) / 1e9, mp = mp + q.p, ++n;
-    if (n < 3) return false;
-    mt /= n, mp = mp * (1.0 / n);
-    double tt = 0;
-    fhsmooth::V3 tp;
-    for (const Side::Pt &q : tr)
-        if (q.t >= from && q.t <= end) {
-            const double dt = (q.t - end) / 1e9 - mt;
-            tt += dt * dt, tp = tp + (q.p - mp) * dt;
-        }
-    if (tt < 1e-6) return false;
-    *out = tp * (1 / tt);
+    double v[3];
+    if (!LineSlope<3>(
+            tr, end, [&](const Side::Pt &q) { return q.t >= from && q.t <= end; },
+            [](const Side::Pt &q, double *x) { x[0] = q.p.x, x[1] = q.p.y, x[2] = q.p.z; }, 3, 1e-6, v))
+        return false;
+    *out = {v[0], v[1], v[2]};
     return true;
 }
 
@@ -2429,21 +2449,12 @@ void HandInput::Push(int s, const Input &in, const std::vector<Panel> &panels) {
             if (wl < 1e-6 || -Dot(way, n) / wl < std::cos(p_.pushAngle * M_PI / 180)) continue;
         }
         // how fast into it now: a line through the palm's depth over the last flickFitMs
-        int n = 0;
-        double mt = 0, md = 0;
-        for (const Side::Sample &q : sd.hist)
-            if (now.t - q.t <= int64_t(p_.flickFitMs * 1e6) + 5'000'000) mt += (q.t - now.t) / 1e9, md += Locate(P, q.palm).d, ++n;
+        const int64_t fit = int64_t(p_.flickFitMs * 1e6) + 5'000'000;
         double vin = 0;
-        if (n >= 2) {
-            mt /= n, md /= n;
-            double tt = 0, td = 0;
-            for (const Side::Sample &q : sd.hist)
-                if (now.t - q.t <= int64_t(p_.flickFitMs * 1e6) + 5'000'000) {
-                    const double x = (q.t - now.t) / 1e9 - mt;
-                    tt += x * x, td += x * (Locate(P, q.palm).d - md);
-                }
-            if (tt > 1e-9) vin = -td / tt;
-        }
+        if (LineSlope<1>(
+                sd.hist, now.t, [&](const Side::Sample &q) { return now.t - q.t <= fit; },
+                [&](const Side::Sample &q, double *x) { x[0] = Locate(P, q.palm).d; }, 2, 1e-9, &vin))
+            vin = -vin;   // (into it: the depth going down)
         // ...or slowly, far into it: pushTravel past the surface, at pushSlow or more since it crossed it
         double crossed = 0;
         for (size_t i = sd.hist.size(); i-- > 0;)
@@ -2482,23 +2493,13 @@ void HandInput::Flick(int s, const Input &in, const std::vector<Panel> &panels, 
     const Side::Sample &now = sd.hist.back();
     if (now.open < p_.flickOpen) return;
     // the palm's velocity over the last flickFitMs (a least-squares line)
-    int n = 0;
-    double mt = 0, mp[3] = {0, 0, 0};
-    for (const Side::Sample &q : sd.hist)   // (a gap in the tracking leaves too few samples here)
-        if (now.t - q.t <= int64_t(p_.flickFitMs * 1e6) + 5'000'000)
-            mt += (q.t - now.t) / 1e9, mp[0] += q.palm[0], mp[1] += q.palm[1], mp[2] += q.palm[2], ++n;
-    if (n < 3) return;
-    mt /= n;
-    for (double &x : mp) x /= n;
-    double tt = 0, v[3] = {0, 0, 0};
-    for (const Side::Sample &q : sd.hist)
-        if (now.t - q.t <= int64_t(p_.flickFitMs * 1e6) + 5'000'000) {
-            const double dt = (q.t - now.t) / 1e9 - mt;
-            tt += dt * dt;
-            for (int i = 0; i < 3; ++i) v[i] += dt * (q.palm[i] - mp[i]);
-        }
-    if (tt < 1e-6) return;
-    for (double &x : v) x /= tt;
+    // (a gap in the tracking leaves too few samples here)
+    const int64_t fit = int64_t(p_.flickFitMs * 1e6) + 5'000'000;
+    double v[3];
+    if (!LineSlope<3>(
+            sd.hist, now.t, [&](const Side::Sample &q) { return now.t - q.t <= fit; },
+            [](const Side::Sample &q, double *x) { x[0] = q.palm[0], x[1] = q.palm[1], x[2] = q.palm[2]; }, 3, 1e-6, v))
+        return;
     const double speed = std::sqrt(Dot(v, v));
     if (speed < p_.flickSpeed) return;
     // where it started: the oldest frame in flickMs with the palm at a panel (just in front of it, over

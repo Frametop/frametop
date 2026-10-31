@@ -21,15 +21,16 @@ starts at DEE-298. The rest of DEE-303 (its open list below) is now its own tick
 | 10 | DEE-303, part 1 | 76ecd9b, d80ef80, a88d458, f4d5db7, 63b363b, 3a8ad3d, f00bd79 (note) |
 | 10b | DEE-305 follow-up (review note #9) | 176eb76 |
 | 11 | DEE-309 | 77d0c35, a33b578, b6809e1, a0216d2, 91e19e3, 25dbde4, 165ed70, c9a4197, a0e2dfe, 972ac35, then this update |
-| 12 | DEE-312 | ed4efd1, c340d33, then this update |
+| 12 | DEE-312 | ed4efd1, c340d33, d2edd33 (note) |
+| 13 | DEE-298 | 3005442, then this update |
 
 What's left, in order:
 
-1. DEE-298, then DEE-313 to DEE-316
+1. DEE-313 to DEE-316
 2. DEE-318
 3. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
 
-DEE-310, DEE-304, DEE-305, DEE-309 and DEE-312 are done (steps 7 to 12). DEE-303 part 1 is done (step
+DEE-310, DEE-304, DEE-305, DEE-309, DEE-312 and DEE-298 are done (steps 7 to 13). DEE-303 part 1 is done (step
 10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
@@ -532,6 +533,26 @@ Open:
 - Unchanged here: recorder folders' default mode (DEE-319) and the calibration backups'
   growth (M2).
 
+### From DEE-298
+
+`ft-layout remote add` checks every option before it pairs, and unpairs if the display then
+isn't saved.
+
+- `--fps` and `--bitrate` must be whole numbers and `--size` must be `WxH`. A bad one is a plain
+  `remote add: ...` error (exit 1) before ft-stream or the host is reached.
+- Saving goes through `remote_add_save`. If it fails (or Ctrl-C) after pairing, `ft-stream
+  unpair` runs for the new client at the same `ADDRESS[:PORT]`. A failed unpair is said, and the
+  first error is still raised.
+- Tests: `layout/tests/test_remote_add.py`, with a fake `run_stream` and no ft-screens.
+
+Open:
+
+- `--fps 0` is still accepted, as `remote set fps=0` is. No range check was added.
+- A failure in `start_remotes_now` after the save doesn't unpair: the display is saved and can
+  be connected later or removed (which unpairs).
+- A `display:` app still asks the host for its monitors before the options' other checks; that
+  call doesn't pair.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
@@ -593,3 +614,6 @@ Each needs an install and the headset:
   --rec`, `--seq` and `--dump` write 0600 files owned by the sudo user, which the lab tools read
   without sudo, and refuse a symlinked path; list mode shows real inodes; with `save_clips` on,
   clips are 0600. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
+- After DEE-298 (Daenon only, against a host he chooses; agents never pair): `ft-layout remote
+  add HOST ADDRESS Desktop --fps 60fps` fails at once and the host lists no new client; a
+  normal add still pairs, saves and connects. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.

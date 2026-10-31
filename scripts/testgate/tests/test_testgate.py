@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""testgate (scripts/testgate/testgate.py, DEE-302): a skip is reported as one, never as "ok",
+and a pattern that matches nothing fails the gate. Made-up test files in a temp folder.
+
+  python3 scripts/testgate/tests/test_testgate.py
+"""
+import contextlib
+import io
+import os
+import sys
+import tempfile
+import textwrap
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import testgate  # noqa: E402
+
+UNITTEST = """\
+import os, unittest
+class T(unittest.TestCase):
+{body}
+unittest.main()
+"""
+
+
+class Gate(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def file(self, name, text):
+        path = os.path.join(self.dir, name)
+        with open(path, "w") as f:
+            f.write(textwrap.dedent(text))
+        return path
+
+    def case(self, name, body):
+        return self.file(name, UNITTEST.format(body=textwrap.indent(textwrap.dedent(body), "    ")))
+
+    def gate(self, *patterns):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = testgate.main([os.path.join(self.dir, p) for p in patterns])
+        return status, out.getvalue()
+
+    def test_passing(self):
+        how, ran, skipped, _, _ = testgate.run(self.case("a.py", "def test_a(self): pass\ndef test_b(self): pass"))
+        self.assertEqual((how, ran, skipped), ("ok", 2, []))
+
+    def test_all_skipped_is_skipped_with_its_reason(self):
+        path = self.file("panel.py", """\
+            import unittest
+            @unittest.skipUnless(False, "the panel isn't built")
+            class T(unittest.TestCase):
+                def test_a(self): pass
+                def test_b(self): pass
+            unittest.main()
+            """)
+        self.assertEqual(testgate.run(path)[:3], ("skipped", 2, ["the panel isn't built"] * 2))
+        status, out = self.gate("panel.py")
+        self.assertEqual(status, 0)
+        self.assertIn("panel.py: SKIPPED: the panel isn't built (x2)", out)
+        self.assertNotIn("panel.py: ok", out)
+
+    def test_some_skipped_says_so(self):
+        path = self.case("b.py", """\
+            def test_a(self): pass
+            def test_b(self): self.skipTest("no headset")
+            """)
+        self.assertEqual(testgate.run(path)[:3], ("ok", 2, ["no headset"]))
+        self.assertIn("b.py: ok, 1 skipped: no headset", self.gate("b.py")[1])
+
+    def test_skip_in_setupclass(self):
+        path = self.case("c.py", """\
+            @classmethod
+            def setUpClass(cls): raise unittest.SkipTest("no PySide6")
+            def test_a(self): pass
+            """)
+        self.assertEqual(testgate.run(path)[:3], ("skipped", 0, ["no PySide6"]))
+
+    def test_failure_fails_and_shows_its_output(self):
+        path = self.case("d.py", "def test_a(self): self.assertEqual(1, 2)")
+        self.assertEqual(testgate.run(path)[0], "failed")
+        status, out = self.gate("d.py")
+        self.assertEqual(status, 1)
+        self.assertIn("d.py: FAILED", out)
+        self.assertIn("AssertionError: 1 != 2", out)
+
+    def test_plain_script_skips(self):
+        whole = self.file("e.py", "import sys\nprint('no device here')\nsys.exit(77)\n")
+        self.assertEqual(testgate.run(whole)[:3], ("skipped", 0, ["no device here"]))
+        part = self.file("f.py", "print('ok  one')\nprint('skip  ft-frunner itself: no PyGObject here')\n")
+        self.assertEqual(testgate.run(part)[:3], ("ok", 0, ["ft-frunner itself: no PyGObject here"]))
+        self.assertEqual(testgate.run(self.file("g.py", "raise SystemExit(1)\n"))[0], "failed")
+
+    def test_a_forked_child_doesnt_report_over_its_parent(self):
+        path = self.case("h.py", """\
+            def test_a(self):
+                pid = os.fork()
+                if pid == 0:
+                    raise SystemExit(0)   # atexit runs here, in the child
+                os.waitpid(pid, 0)
+            """)
+        self.assertEqual(testgate.run(path)[:3], ("ok", 1, []))
+
+    def test_a_child_python_doesnt_report(self):
+        path = self.case("i.py", """\
+            def test_a(self):
+                import subprocess, sys
+                code = "import os, unittest; print(os.environ.get('FT_TEST_REPORT'))"
+                self.assertEqual(subprocess.check_output([sys.executable, "-c", code], text=True), "None\\n")
+            """)
+        self.assertEqual(testgate.run(path)[0], "ok")
+
+    def test_a_pattern_that_matches_nothing_fails(self):
+        self.case("a.py", "def test_a(self): pass")
+        status, out = self.gate("a.py", "gone/*.py")
+        self.assertEqual(status, 1)
+        self.assertIn("gone/*.py: FAILED, matches no file", out)
+        self.assertIn("python files: 1 ok, 0 skipped, 0 failed", out)
+
+
+if __name__ == "__main__":
+    unittest.main()

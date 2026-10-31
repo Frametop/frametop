@@ -12,20 +12,24 @@ test: test-python test-c test-bash test-testbench test-fast-install
 
 # the Python suites as a strict gate: every failure fails the run. The image's
 # python3 has to import the dnf Qt stack and the locked packages together;
-# without that check the Qt tests would only skip. session/test is not here:
-# test_accessibility.py needs the host's AT-SPI and PyGObject, test_notifyfwd.py
-# and test_gtksettings.py the host's dbus-daemon and PyGObject.
+# without that check the Qt tests would only skip. scripts/testgate/testgate.py
+# runs each file and fails a pattern that matches nothing; a skipped file or
+# test is reported as skipped, with its reason, never as ok (DEE-302).
 test-python:
     #!/usr/bin/env bash
     set -uo pipefail
     python3 -c 'import PySide6, numpy, cv2, sherpa_onnx' || { echo "python3 can't import PySide6, numpy, cv2, and sherpa_onnx"; exit 1; }
     status=0
     layout/countdown/deps.sh || status=1
-    for t in conf/test/*.py layout/tests/test_*.py layout/countdown/tests/test_*.py models/test/*.py commands/test/*.py input-settings/test/*.py input/test/*.py hands/tests/test_*.py hands/rec/tests/*.py recorder/tests/*.py gaze/test/*.py gaze/rec/tests/*.py pack/test/*.py voice/test/*.py frunner/test/*.py tour/test/*.py float/test/*.py layout/test/*.py; do
-        [ -f "$t" ] || continue
-        if python3 "$t" >/dev/null; then echo "$t: ok"; else echo "$t: FAILED"; status=1; fi
-    done
+    python3 scripts/testgate/testgate.py 'scripts/testgate/tests/*.py' 'conf/test/*.py' 'layout/tests/test_*.py' \
+        'layout/countdown/tests/test_*.py' 'models/test/*.py' 'commands/test/*.py' 'input-settings/test/*.py' \
+        'input/test/*.py' 'hands/tests/test_*.py' 'hands/rec/tests/*.py' 'recorder/tests/*.py' 'gaze/test/*.py' \
+        'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
+        'tour/test/*.py' 'float/test/*.py' 'layout/test/*.py' || status=1
     pytest -q session/tests || status=1
+    # test_accessibility.py needs the host's AT-SPI and PyGObject, test_notifyfwd.py and
+    # test_gtksettings.py the host's dbus-daemon and PyGObject
+    echo "session/test/*.py: SKIPPED: they need the host's AT-SPI, dbus-daemon and PyGObject (run them on the Frame)"
     exit $status
 
 # the C/C++ unit tests that need no model runtime: header-only logic with
@@ -81,20 +85,33 @@ test-c:
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/logfile-test.c -o build/tests/logfile-test
     build/tests/logfile-test >/dev/null && echo "screens/tests/logfile-test.c: ok"
 
-# shell scripts: syntax-gate everything that ships. No git: the image has
-# none, and a mounted checkout can trip "dubious ownership" — find lists
-# what the repo actually ships. The count guard makes a silently short
-# list fail the gate instead of passing it.
+# shell scripts: syntax-gate everything that ships, the *.sh files and the
+# scripts named by their #! line alone (ft, ft-layout, in-box, ...); a #!/bin/sh
+# script is checked as sh. No git: the image has none, and a mounted checkout
+# can trip "dubious ownership"; find lists what the repo actually ships, without
+# other worktrees (.worktrees/) or build output. The count guard makes a
+# silently short list fail the gate instead of passing it.
 test-bash:
     #!/usr/bin/env bash
-    set -e
-    mapfile -t scripts < <(find . -name '*.sh' -type f \
-        -not -path './.git/*' -not -path '*/build/*' | sort)
-    [ "${#scripts[@]}" -ge 20 ] || { echo "only ${#scripts[@]} scripts found — the list is broken"; exit 1; }
-    status=0
-    for f in "${scripts[@]}" ft; do
-        bash -n "$f" && echo "bash -n $f: ok" || status=1
+    set -uo pipefail
+    prune=(\( -path ./.git -o -path ./.worktrees -o -path '*/build' -o -path '*/.venv' -o -path '*/node_modules' \
+        -o -path '*/__pycache__' \) -prune)
+    mapfile -d '' named < <(find . "${prune[@]}" -o -type f -name '*.sh' -print0)
+    mapfile -d '' shebang < <(find . "${prune[@]}" -o -type f -print0 | xargs -0 grep -lIZ -m1 '^#!' --)
+    declare -A how=()
+    for f in "${named[@]}"; do how[$f]=bash; done
+    for f in "${shebang[@]}"; do
+        case "$(head -n 1 -- "$f")" in
+            '#!'*bash*) how[$f]=bash ;;
+            '#!/bin/sh' | '#!/bin/sh '* | '#!/usr/bin/env sh' | '#!/usr/bin/env sh '*) how[$f]=sh ;;
+        esac
     done
+    [ "${#how[@]}" -ge 40 ] || { echo "only ${#how[@]} scripts found — the list is broken"; exit 1; }
+    status=0
+    while IFS= read -r -d '' f; do
+        "${how[$f]}" -n "$f" && echo "${how[$f]} -n $f: ok" || { echo "${how[$f]} -n $f: FAILED"; status=1; }
+    done < <(printf '%s\0' "${!how[@]}" | sort -z)
+    echo "shell scripts: ${#how[@]} checked"
     exit $status
 
 # the testbench, a dev-only tool: its SteamVR input proxy and observer against fake runtimes,

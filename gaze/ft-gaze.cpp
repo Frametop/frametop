@@ -72,6 +72,7 @@
 // in screens/vr.cpp).
 #include <openvr.h>
 
+#include "../conf/ftsock.h"
 #include "vrmath.h"
 
 #include <algorithm>
@@ -352,11 +353,10 @@ public:
     void Start() {
         thread_ = std::thread([this] {
             const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-            sockaddr_un me{};
-            me.sun_family = AF_UNIX;
+            sockaddr_un me;
             const std::string name = "ft_gaze." + std::to_string(getpid());
-            std::memcpy(me.sun_path + 1, name.data(), name.size());
-            bind(fd, reinterpret_cast<sockaddr *>(&me), offsetof(sockaddr_un, sun_path) + 1 + name.size());
+            if (bind(fd, reinterpret_cast<sockaddr *>(&me), ft_sock_addr(name.c_str(), &me)) != 0)
+                std::perror(("ft-gaze: bind @" + name).c_str());   // (ft-screens' replies would go nowhere)
             timeval tv{0, 200000};
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
             while (running_) {
@@ -382,12 +382,7 @@ public:
 
 private:
     static std::string Ask(int fd, const std::string &cmd) {
-        sockaddr_un to{};
-        to.sun_family = AF_UNIX;
-        const char name[] = "ft_screens";
-        std::memcpy(to.sun_path + 1, name, sizeof name - 1);
-        sendto(fd, cmd.data(), cmd.size(), 0, reinterpret_cast<sockaddr *>(&to),
-               offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1);
+        if (ft_sock_send(fd, FT_SOCK_SCREENS, cmd.data(), cmd.size(), 0)) return "";   // no ft-screens: no answer to wait for
         char buf[1024];
         const ssize_t n = recv(fd, buf, sizeof buf - 1, 0);
         if (n <= 0) return "";

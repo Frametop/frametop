@@ -7,6 +7,8 @@
 // laser back when it has been on no device (gamepad mode) for MS milliseconds.
 // Runs as a background OpenVR client (in the dev container).
 // Usage: lasertest [--snapback] [--reclaim MS] [--seconds N]
+#include "../../conf/ftsock.h"
+
 #include <openvr.h>
 
 #include <sys/socket.h>
@@ -26,12 +28,8 @@ static volatile std::sig_atomic_t g_stop = 0;
 
 static void Send(const char *msg) {
     static int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    sockaddr_un a{};
-    a.sun_family = AF_UNIX;
-    const char name[] = "ft_pointer";  // the driver's abstract socket
-    std::memcpy(a.sun_path + 1, name, sizeof name - 1);
-    sendto(fd, msg, std::strlen(msg), 0, reinterpret_cast<sockaddr *>(&a),
-           socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
+    if (const int err = ft_sock_send(fd, FT_SOCK_POINTER, msg, std::strlen(msg), 0))   // the driver
+        std::fprintf(stderr, "lasertest: to @%s: %s\n", FT_SOCK_POINTER, std::strerror(err));
 }
 
 static std::string Describe(vr::IVRSystem *sys, vr::TrackedDeviceIndex_t i) {

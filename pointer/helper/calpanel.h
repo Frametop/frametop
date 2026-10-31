@@ -22,6 +22,7 @@
 #include <string>
 
 extern "C" {
+#include "../../conf/ftsock.h"
 #include "../../hands/include/fh_gestures.h"
 }
 
@@ -54,7 +55,7 @@ inline bool calPanelClaim(const char *msg, bool &on, std::string &owner) {
     if (std::sscanf(msg, "calpanel %d%n", &v, &used) != 1 || (v != 0 && v != 1)) return false;
     const char *rest = msg + used;
     while (*rest == ' ') ++rest;
-    std::string name = *rest ? rest : "ft_gazed";
+    std::string name = *rest ? rest : FT_SOCK_GAZED;
     if (name.size() > 64) return false;
     for (const char c : name)
         if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) return false;

@@ -29,6 +29,8 @@
 // default, 5 = stylus). A treadmill is hinted from Activate on, shown or not: SteamVR gives it
 // /user/treadmill only when the device is added. Only a hand role switches to OptOut while hidden.
 // A treadmill moves SteamVR's windows by their grab bars only with pointer/dashpatch in.
+#include "../../conf/ftsock.h"
+
 #include <openvr_driver.h>
 
 #include <atomic>
@@ -254,12 +256,8 @@ public:
 private:
     void Listen() {
         sock_ = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-        sockaddr_un addr{};
-        addr.sun_family = AF_UNIX;
-        const char name[] = "ft_pointer";
-        std::memcpy(addr.sun_path + 1, name, sizeof name - 1);  // abstract namespace
-        const socklen_t len = offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1;
-        if (bind(sock_, reinterpret_cast<sockaddr *>(&addr), len) != 0) {
+        sockaddr_un addr;
+        if (bind(sock_, reinterpret_cast<sockaddr *>(&addr), ft_sock_addr(FT_SOCK_POINTER, &addr)) != 0) {
             VRDriverLog()->Log("ft_pointer: cannot bind control socket");
             return;
         }

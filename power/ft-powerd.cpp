@@ -41,6 +41,7 @@
 // never, the default), DISPLAY_MOVE_MM (5), DISPLAY_MOVE_DEG (0.5).
 #include <openvr.h>
 
+#include "../conf/ftsock.h"
 #include "../conf/ft_conf.h"
 
 #include <algorithm>
@@ -217,11 +218,8 @@ int main() {
 
     const int ctl = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     {
-        sockaddr_un addr{};
-        addr.sun_family = AF_UNIX;
-        const char *name = "ft_powerd";
-        std::memcpy(addr.sun_path + 1, name, std::strlen(name));
-        if (bind(ctl, reinterpret_cast<sockaddr *>(&addr), offsetof(sockaddr_un, sun_path) + 1 + std::strlen(name)) != 0) {
+        sockaddr_un addr;
+        if (bind(ctl, reinterpret_cast<sockaddr *>(&addr), ft_sock_addr(FT_SOCK_POWERD, &addr)) != 0) {
             std::perror("bind @ft_powerd (already running?)");
             return 1;
         }

@@ -51,6 +51,7 @@
 //   poses <S>                 the head's poses over the last S seconds (at most 20; kept 30 times a
 //                             second) -> "ok" and a line each: "<CLOCK_MONOTONIC ns> <3x4 row-major,
 //                             standing universe>" (ft-handsctl saves them with a flag)
+#include "../conf/ftsock.h"
 #include "handcut.h"
 #include "handhold.h"
 #include "handmesh.h"
@@ -1150,11 +1151,8 @@ int main(int argc, char **argv) {
 
     const int sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     {
-        sockaddr_un addr{};
-        addr.sun_family = AF_UNIX;
-        const char *name = "ft_handview";
-        std::memcpy(addr.sun_path + 1, name, std::strlen(name));
-        if (bind(sock, reinterpret_cast<sockaddr *>(&addr), socklen_t(offsetof(sockaddr_un, sun_path) + 1 + std::strlen(name))) != 0)
+        sockaddr_un addr;
+        if (bind(sock, reinterpret_cast<sockaddr *>(&addr), ft_sock_addr(FT_SOCK_HANDVIEW, &addr)) != 0)
             return std::perror("bind @ft_handview (already running?)"), 1;
     }
 

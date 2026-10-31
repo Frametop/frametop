@@ -116,6 +116,7 @@
 #include <openvr.h>
 
 #define STB_TRUETYPE_IMPLEMENTATION
+#include "../../../conf/ftsock.h"
 #include "stb_truetype.h"
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -1410,7 +1411,7 @@ bool HandState(const std::string &s) { return s == "seen" || s == "lost" || s ==
 
 int main(int argc, char **argv) {
     bool watchStdin = false, noVr = false;
-    std::string sockName = "ft_handpanel", dumpDir;
+    std::string sockName = FT_SOCK_HANDPANEL, dumpDir;
     double distance = 1.2, upDeg = kUpDeg, widthDeg = kWidthDeg;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--watch-stdin")) watchStdin = true;
@@ -1437,10 +1438,9 @@ int main(int argc, char **argv) {
         }).detach();
 
     int sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::memcpy(addr.sun_path + 1, sockName.data(), std::min(sockName.size(), sizeof addr.sun_path - 2));
-    if (bind(sock, reinterpret_cast<sockaddr *>(&addr), socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sockName.size())) != 0) {
+    sockaddr_un addr;
+    const socklen_t addrLen = ft_sock_addr(sockName.c_str(), &addr);
+    if (!addrLen || bind(sock, reinterpret_cast<sockaddr *>(&addr), addrLen) != 0) {
         std::fprintf(stderr, "ft-handpanel: @%s is taken (another copy running?)\n", sockName.c_str());
         return 1;
     }

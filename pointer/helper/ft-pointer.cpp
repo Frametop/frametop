@@ -539,6 +539,7 @@
 #include <openvr.h>
 
 #include "../../conf/ft_conf.h"
+#include "../../conf/ftsock.h"
 #include "../../hands/include/fh_events.h"
 #include "../../hands/include/fh_ray.h"
 #include "../../screens/posemath.h"
@@ -614,11 +615,9 @@ double ConfDouble(const std::map<std::string, std::string> &c, const char *key, 
 int AbstractSocket(const char *name, bool bindIt) {
     const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (bindIt) {
-        sockaddr_un addr{};
-        addr.sun_family = AF_UNIX;
-        std::memcpy(addr.sun_path + 1, name, std::strlen(name));
-        const socklen_t len = offsetof(sockaddr_un, sun_path) + 1 + std::strlen(name);
-        if (bind(fd, reinterpret_cast<sockaddr *>(&addr), len) != 0) {
+        sockaddr_un addr;
+        const socklen_t len = ft_sock_addr(name, &addr);
+        if (!len || bind(fd, reinterpret_cast<sockaddr *>(&addr), len) != 0) {
             std::perror("bind @ft_pointer_helper (already running?)");
             std::exit(1);
         }
@@ -663,12 +662,17 @@ bool FrameControl(const std::string &key) {
     return false;
 }
 
+// To @name (ftsock.h); a destination is logged when it starts failing, and when it works again.
 void SendTo(int fd, const char *name, const std::string &msg) {
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::memcpy(addr.sun_path + 1, name, std::strlen(name));
-    const socklen_t len = offsetof(sockaddr_un, sun_path) + 1 + std::strlen(name);
-    sendto(fd, msg.data(), msg.size(), 0, reinterpret_cast<sockaddr *>(&addr), len);
+    static std::mutex lock;
+    static std::map<std::string, ft_sock_log> logs;   // (a map's keys stay put: the logs' names)
+    std::lock_guard<std::mutex> guard(lock);
+    auto it = logs.find(name);
+    if (it == logs.end()) {
+        it = logs.emplace(name, ft_sock_log{}).first;
+        it->second.name = it->first.c_str();
+    }
+    ft_sock_send_logged(fd, &it->second, msg.data(), msg.size(), 0);
 }
 
 // JSON string literal (names come from other apps).
@@ -1228,7 +1232,7 @@ int main() {
     // Controller beams keep the user's width; nothing here changes it any more.
     vr::VRSettings()->SetFloat("dashboard", "laserRayWidthScale", laserWidth);
 
-    const int in = AbstractSocket("ft_pointer_helper", true);
+    const int in = AbstractSocket(FT_SOCK_POINTER_HELPER, true);
     const int out = AbstractSocket(nullptr, false);
     // Frame controller buttons (vrbuttons.h). The build puts the binary in pointer/helper/build.
     ControllerButtons controllerButtons;
@@ -1237,7 +1241,7 @@ int main() {
         char real[PATH_MAX];
         controllerButtons.Init(realpath(manifest.c_str(), real) ? real : manifest);
     }
-    SendTo(out, "frametop_relay", "vrhello");  // the relay answers with the mapped buttons
+    SendTo(out, FT_SOCK_RELAY, "vrhello");  // the relay answers with the mapped buttons
     OverlayList overlays;
     overlays.Start();
     std::map<std::string, vr::VROverlayHandle_t> handles;
@@ -1321,8 +1325,8 @@ int main() {
         // Overlay handles and visibility weren't looked at while it was off (see "Idle" at the top).
         lastSlow = lastVisible = t - std::chrono::seconds(10);
         pass.valid = posed.valid = false;
-        SendTo(out, "ft_pointer", "role " + role);  // POINTER_ROLE, before it takes it
-        SendTo(out, "ft_pointer", "show");
+        SendTo(out, FT_SOCK_POINTER, "role " + role);  // POINTER_ROLE, before it takes it
+        SendTo(out, FT_SOCK_POINTER, "show");
         claimPending = true;  // take the laser without clicking, once SteamVR has bound the device
         claimAt = t + std::chrono::milliseconds(300);
     };
@@ -1513,8 +1517,8 @@ int main() {
         claimPending = claimHeld = false;
         cursorDot.Show(false);
         markerDot.Show(false);
-        SendTo(out, "ft_pointer", "btn a 0");
-        SendTo(out, "ft_pointer", "hide");
+        SendTo(out, FT_SOCK_POINTER, "btn a 0");
+        SendTo(out, FT_SOCK_POINTER, "hide");
         rayWoke = false;
         std::printf("%s: pointer released\n", why);
         std::fflush(stdout);
@@ -1589,12 +1593,12 @@ int main() {
     // to calOwner; calOpened: it just came up, so a press in progress ends without a click.
     Clock::time_point calPanelUntil{};
     bool calOpened = false;
-    std::string calOwner = "ft_gazed";
+    std::string calOwner = FT_SOCK_GAZED;
     CalPinch calPinch;
     auto pressLeft = [&] {
         // ft-screens sends the keyboard to the panel clicked last; it sees clicks on
         // its own screens, but only we know when one lands on another panel.
-        SendTo(out, "ft_screens", "click " + (lastHit.empty() ? std::string("-") : lastHit));
+        SendTo(out, FT_SOCK_SCREENS, "click " + (lastHit.empty() ? std::string("-") : lastHit));
         lessonSaid.clear();
         // A click after nudging the gaze-placed pointer: the nudge is a lesson, or past
         // POINTER_GAZE_NUDGE_MAX, a quick check (see the top).
@@ -1608,7 +1612,7 @@ int main() {
                 std::snprintf(msg, sizeof msg, "lesson %.3f %.3f %.3f %.3f", nudgeRawHy, nudgeRawHp, ty, tp);
             else
                 std::snprintf(msg, sizeof msg, "recheck %.0f", off);
-            SendTo(out, "ft_gazed", msg);
+            SendTo(out, FT_SOCK_GAZED, msg);
             lessonSaid = off <= gazeNudgeMax ? "a lesson" : "the quick check";
             if (debug) std::printf("gaze %s (nudged %.2f deg, off %.2f)\n", msg, nudgeMoved, off);
             if (debug) std::fflush(stdout);
@@ -1631,17 +1635,17 @@ int main() {
         pulseAt = Clock::now();
         heldButton = pressRight ? "b" : "trigger";
         pressRight = false;
-        SendTo(out, "ft_pointer", "btn " + heldButton + " 1");
+        SendTo(out, FT_SOCK_POINTER, "btn " + heldButton + " 1");
     };
     auto releaseLeft = [&] {
         leftHeld = false;
         tilting = false;
         // Hold the drag pose (tilt, frozen distance) while SteamVR finishes the drop.
         dropHoldUntil = Clock::now() + std::chrono::milliseconds(500);
-        SendTo(out, "ft_pointer", "btn " + heldButton + " 0");
+        SendTo(out, FT_SOCK_POINTER, "btn " + heldButton + " 0");
         // ft-screens releases a button held on its screens in KWin even when SteamVR hands
         // the release to some other overlay (its catcher usually gets it; this is the backstop).
-        SendTo(out, "ft_screens", "up");
+        SendTo(out, FT_SOCK_SCREENS, "up");
         if (gazeBack) gazeOwns = true, gazeBack = false;
     };
     // The left button, from the relay's "btn trigger", with gaze mode's held-back press (see
@@ -1671,7 +1675,7 @@ int main() {
     // lets go (a new touch waits while leftHeld).
     auto mouseTakesTrigger = [&] {
         if (touch.side >= 0) {
-            if (touch.down) SendTo(out, "ft_pointer", "btn trigger 0");
+            if (touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
             std::printf("touch %s: ended by a mouse click\n", touch.side ? "right" : "left");
             std::fflush(stdout);
             touch = Touch{};
@@ -1776,7 +1780,7 @@ int main() {
         BasisQuat({toRaw(b.x), toRaw(b.y), toRaw(b.z)}, q);
         char msg[200];
         std::snprintf(msg, sizeof msg, "posq %.5f %.5f %.5f %.6f %.6f %.6f %.6f", o.x, o.y, o.z, q[0], q[1], q[2], q[3]);
-        SendTo(out, "ft_pointer", msg);
+        SendTo(out, FT_SOCK_POINTER, msg);
         posed.valid = false;
     };
     // The same, with the headset's poses read now (placements, which run outside the loop's tick).
@@ -1794,18 +1798,18 @@ int main() {
     };
     // Borrow the device and the laser for a placement: connect, claim, laser mode on.
     auto borrow = [&] {
-        SendTo(out, "ft_pointer", "show");
+        SendTo(out, FT_SOCK_POINTER, "show");
         overlay->ShowOverlay(laserMode);
         cursorDot.Show(false);
         markerDot.Show(false);
         sleepMs(active ? 50 : 400);  // a fresh connect needs SteamVR to bind the device
-        SendTo(out, "ft_pointer", "btn a 1");
+        SendTo(out, FT_SOCK_POINTER, "btn a 1");
         sleepMs(60);
-        SendTo(out, "ft_pointer", "btn a 0");
+        SendTo(out, FT_SOCK_POINTER, "btn a 0");
     };
     auto giveBack = [&] {
         if (!active) {
-            SendTo(out, "ft_pointer", "hide");
+            SendTo(out, FT_SOCK_POINTER, "hide");
             overlay->HideOverlay(laserMode);
             laserModeShown = false;
         }
@@ -1890,7 +1894,7 @@ int main() {
             ++moves;
             sendPoseNow(eye, d0);
             sleepMs(150);  // hover: the window controls come up
-            SendTo(out, "ft_pointer", "btn trigger 1");
+            SendTo(out, FT_SOCK_POINTER, "btn trigger 1");
             sleepMs(150);
             // 1. Rotate about the device origin (the eye): the dashboard applies it exactly.
             const int rsteps = std::max(4, int(angle * 180 / M_PI / kPlaceDegPerSec * 60));
@@ -1908,7 +1912,7 @@ int main() {
                 sleepMs(16);
             }
             sleepMs(100);
-            SendTo(out, "ft_pointer", "btn trigger 0");
+            SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
             sleepMs(600);  // the dashboard re-reads the pose up to 150 ms after the release
             err = findPanel(key, p, eye);
             if (!err.empty()) break;
@@ -2001,8 +2005,8 @@ int main() {
             claimPending = claimHeld = false;
             cursorDot.Show(false);
             markerDot.Show(false);
-            SendTo(out, "ft_pointer", "btn a 0");
-            SendTo(out, "ft_pointer", "hide");
+            SendTo(out, FT_SOCK_POINTER, "btn a 0");
+            SendTo(out, FT_SOCK_POINTER, "hide");
             std::printf("headset off: pointer released\n");
             std::fflush(stdout);
         }
@@ -2024,14 +2028,14 @@ int main() {
                 if (awake != gazeAwake) std::fflush(stdout);
                 gazeAwake = awake;
                 gazeAwakeAt = t;
-                SendTo(out, "frametop_relay", awake ? "gazeawake 1" : "gazeawake 0");
+                SendTo(out, FT_SOCK_RELAY, awake ? "gazeawake 1" : "gazeawake 0");
             }
             // The relay pauses Frametop for VR games (input/game_pause.py). Repeated, so a relay
             // that restarts learns it, and silence (SteamVR gone) ends the game there.
             if (inGame != gameSent || t - gameSentAt > std::chrono::seconds(5)) {
                 gameSent = inGame;
                 gameSentAt = t;
-                SendTo(out, "frametop_relay", inGame ? "vrgame 1" : "vrgame 0");
+                SendTo(out, FT_SOCK_RELAY, inGame ? "vrgame 1" : "vrgame 0");
             }
         }
 
@@ -2076,8 +2080,8 @@ int main() {
                     } else if (owner == calOwner) {  // (another's panel closing leaves this one up)
                         calPanelUntil = Clock::time_point{};
                     }
-                    SendTo(out, "frametop_relay", Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");
-                    SendTo(out, "ft_screens", Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");   // no palm menu
+                    SendTo(out, FT_SOCK_RELAY, Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");
+                    SendTo(out, FT_SOCK_SCREENS, Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");   // no palm menu
                     continue;
                 }
             }
@@ -2145,7 +2149,7 @@ int main() {
                     const char *hand = k ? "right" : "left";
                     if (!std::strcmp(verb, "end")) {
                         if (touch.side == k) {
-                            if (touch.down) SendTo(out, "ft_pointer", "btn trigger 0");
+                            if (touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
                             touch.side = -1, touch.down = touch.wantDown = touch.pressPending = false;
                             touch.endAt = t, rayGoneAt = t;   // (a pointer it woke goes POINTER_RAY_RELEASE on)
                             posed.valid = false;
@@ -2159,7 +2163,7 @@ int main() {
                         (touch.side < 0 && (hold.src != Src::None || leftHeld || aimHeld)))
                         continue;
                     if (touch.side != k) {
-                        if (touch.side >= 0 && touch.down) SendTo(out, "ft_pointer", "btn trigger 0");
+                        if (touch.side >= 0 && touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
                         touch = Touch{};
                         touch.side = k;
                         cursorDot.Show(false);
@@ -2365,9 +2369,9 @@ int main() {
                 active = false;
                 cursorDot.Show(false);
                 markerDot.Show(false);
-                SendTo(out, "ft_pointer", "hide");
+                SendTo(out, FT_SOCK_POINTER, "hide");
             } else {
-                SendTo(out, "ft_pointer", buf);  // btn, scroll
+                SendTo(out, FT_SOCK_POINTER, buf);  // btn, scroll
             }
         }
 
@@ -2380,12 +2384,12 @@ int main() {
 
         // Claim pulse (switchlaserhand on the driver's "a" button, no click).
         if (claimPending && tnow >= claimAt) {
-            SendTo(out, "ft_pointer", "btn a 1");
+            SendTo(out, FT_SOCK_POINTER, "btn a 1");
             claimPending = false;
             claimHeld = true;
             claimRelease = tnow + std::chrono::milliseconds(60);
         } else if (claimHeld && tnow >= claimRelease) {
-            SendTo(out, "ft_pointer", "btn a 0");
+            SendTo(out, FT_SOCK_POINTER, "btn a 0");
             claimHeld = false;
         }
 
@@ -2395,7 +2399,7 @@ int main() {
         // dashboard reads it for a carried panel's drop.
         if (!active && touch.side >= 0) {   // (released: the headset off, a controller took it)
             // its button comes up too, or the next wake connects the controller pressed (DEE-267)
-            if (touch.down) SendTo(out, "ft_pointer", "btn trigger 0");
+            if (touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
             touch = Touch{};
         }
         if (active && touch.side >= 0 && touch.posed) {
@@ -2407,11 +2411,11 @@ int main() {
             }
             const bool laserReady = !claimPending && !claimHeld && laserOurs() && tnow - touch.sentAt < std::chrono::seconds(1);
             if (touch.pressPending && laserReady && (!touch.grab || tnow - touch.grabAt >= kTouchHover)) {
-                SendTo(out, "ft_screens", "click " + touch.key);   // (typing goes to Steam on a click on its panels)
-                SendTo(out, "ft_pointer", "btn trigger 1");
+                SendTo(out, FT_SOCK_SCREENS, "click " + touch.key);   // (typing goes to Steam on a click on its panels)
+                SendTo(out, FT_SOCK_POINTER, "btn trigger 1");
                 touch.pressPending = false, touch.down = true, touch.downAt = tnow;
             } else if (touch.down && !touch.wantDown && !touch.pressPending && tnow - touch.downAt >= std::chrono::milliseconds(40)) {
-                SendTo(out, "ft_pointer", "btn trigger 0");
+                SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
                 touch.down = false, touch.holdUntil = tnow + kTouchDrop;
             }
         }
@@ -2431,7 +2435,7 @@ int main() {
                 parts.back() += " " + key;
             }
             for (size_t i = 0; i < parts.size(); ++i)
-                SendTo(out, "ft_screens", "steamvr " + std::to_string(steamListSeq) + " " + std::to_string(i) + " " +
+                SendTo(out, FT_SOCK_SCREENS, "steamvr " + std::to_string(steamListSeq) + " " + std::to_string(i) + " " +
                                               std::to_string(parts.size()) + parts[i]);
             ++steamListSeq;
         }
@@ -2455,8 +2459,8 @@ int main() {
             claimPending = claimHeld = false;
             cursorDot.Show(false);
             markerDot.Show(false);
-            SendTo(out, "ft_pointer", "btn a 0");
-            SendTo(out, "ft_pointer", "hide");
+            SendTo(out, FT_SOCK_POINTER, "btn a 0");
+            SendTo(out, FT_SOCK_POINTER, "hide");
             noWakeUntil = tnow + std::chrono::seconds(2);
             controllerTookAt = tnow;
             std::printf("no hand role (a controller is in use): pointer released\n");
@@ -2487,8 +2491,8 @@ int main() {
                     claimPending = claimHeld = false;
                     cursorDot.Show(false);
                     markerDot.Show(false);
-                    SendTo(out, "ft_pointer", "btn a 0");
-                    SendTo(out, "ft_pointer", "hide");
+                    SendTo(out, FT_SOCK_POINTER, "btn a 0");
+                    SendTo(out, FT_SOCK_POINTER, "hide");
                     controllerTookAt = tnow;
                     std::printf("controller %u moved (%.2f m/s, %.1f rad/s): pointer released\n", i, speed, spin);
                     std::fflush(stdout);
@@ -2617,7 +2621,7 @@ int main() {
             // that went, would hold a stale copy until the next change: DEE-277).
             if (dashboardUp != dashSent || tnow - dashSentAt > std::chrono::seconds(5)) {
                 dashSent = dashboardUp, dashSentAt = tnow;
-                SendTo(out, "frametop_relay", dashboardUp ? "vrdash 1" : "vrdash 0");
+                SendTo(out, FT_SOCK_RELAY, dashboardUp ? "vrdash 1" : "vrdash 0");
             }
             handsAllowed = !headsetOff && (!inGame || dashboardUp || !framePaused);
             const std::string msg = std::string("hands ") + handoff::Name(arbiter.State(0)) + " " +
@@ -2625,8 +2629,8 @@ int main() {
             if (msg != handsSent || tnow - handsSentAt > std::chrono::seconds(1)) {
                 if (msg != handsSent && debug) std::printf("%s\n", msg.c_str());
                 handsSent = msg, handsSentAt = tnow;
-                SendTo(out, "ft_screens", msg);
-                SendTo(out, "ft_handview", msg);   // draws the bare hands with Room View off
+                SendTo(out, FT_SOCK_SCREENS, msg);
+                SendTo(out, FT_SOCK_HANDVIEW, msg);   // draws the bare hands with Room View off
             }
 
             // Typing (see the top): each new hands frame (ft-hands' side call), then which hands it
@@ -2679,14 +2683,14 @@ int main() {
             if (typingMsg != typingSent || tnow - typingSentAt > std::chrono::seconds(1)) {
                 if (typingMsg != typingSent && debug) std::printf("%s\n", typingMsg.c_str());
                 typingSent = typingMsg, typingSentAt = tnow;
-                SendTo(out, "ft_screens", typingMsg);   // no pokes, near grabs or "grab that" by those hands
+                SendTo(out, FT_SOCK_SCREENS, typingMsg);   // no pokes, near grabs or "grab that" by those hands
             }
             // Which hands' rays are up: our laser on a panel is a hand pointing at it only then (else it's
             // the mouse's or the gaze's), for ft-screens' "no grab-that glow under a laser".
             const std::string rayMsg = std::string("ray ") + (rays[0].Shown() ? "1" : "0") + (rays[1].Shown() ? " 1" : " 0");
             if (rayMsg != raySent || tnow - raySentAt > std::chrono::seconds(1)) {
                 raySent = rayMsg, raySentAt = tnow;
-                SendTo(out, "ft_screens", rayMsg);
+                SendTo(out, FT_SOCK_SCREENS, rayMsg);
             }
 
             // Each hand's openness (fhray::FistCurl), for the fist guard on every pinch (gaze or ray).
@@ -2824,7 +2828,7 @@ int main() {
             gazeWokeAt = tnow;
             wake(tnow);
             if (active) {
-                SendTo(out, "frametop_relay", "gazewoke");  // the relay counts the pointer on again
+                SendTo(out, FT_SOCK_RELAY, "gazewoke");  // the relay counts the pointer on again
                 std::printf("gaze took the pointer back\n");
                 std::fflush(stdout);
             }
@@ -2855,7 +2859,7 @@ int main() {
         };
         auto endHold = [&](bool lost) {
             if (hold.gazeScroll) {   // a three-finger scroll: the stick back, no click (gazehand.h)
-                SendTo(out, "ft_pointer", "scroll 0 0");
+                SendTo(out, FT_SOCK_POINTER, "scroll 0 0");
                 aimHeld = aimHand = false;
                 if (gazeOn) gazeOwns = true, nudging = false;
                 std::printf("three-finger pinch %s: scrolled at the gaze on %s (stick up to %.2f, held %.2f s)%s\n",
@@ -2936,8 +2940,8 @@ int main() {
         // The chord's right button (see "Gaze pinch" at the top): to the driver as it changes, and the
         // pinch's log line once it's over.
         auto chordSend = [&](int change) {
-            if (change > 0) SendTo(out, "ft_pointer", "btn b 1"), pulseAt = tnow;
-            else if (change < 0) SendTo(out, "ft_pointer", "btn b 0");
+            if (change > 0) SendTo(out, FT_SOCK_POINTER, "btn b 1"), pulseAt = tnow;
+            else if (change < 0) SendTo(out, FT_SOCK_POINTER, "btn b 0");
         };
         auto chordOver = [&](bool lost, const std::string &why) {
             pinchLog(chordSide, 0, chordBtn.Pressed() ? chordPinch.Says(secsOf(tnow), lost, why, "", "")
@@ -3081,7 +3085,7 @@ int main() {
             calOpened = false;
             if (hold.src == Src::Ray) {
                 pinchLog(hold.side, hold.rayKind, "no click (the gaze calibration panel came up)");
-                rays[hold.raySlot].Hold(false, secsOf(tnow)), SendTo(out, "ft_pointer", "scroll 0 0");
+                rays[hold.raySlot].Hold(false, secsOf(tnow)), SendTo(out, FT_SOCK_POINTER, "scroll 0 0");
             }
             if (hold.src != Src::None) endHold(true);
             if (leftHeld) releaseLeft();
@@ -3228,7 +3232,7 @@ int main() {
             }
             if (kind == 0 && hold.pressed && leftHeld) releaseLeft();
             const bool scrolls = kind == 2 || hold.rayThree;
-            if (scrolls && hold.scrolling) SendTo(out, "ft_pointer", "scroll 0 0");
+            if (scrolls && hold.scrolling) SendTo(out, FT_SOCK_POINTER, "scroll 0 0");
             std::string what;
             if (hold.rayThree) {
                 char b[96];
@@ -3552,7 +3556,7 @@ int main() {
                                 hold.scrollMax = std::max(hold.scrollMax, std::max(std::fabs(sx), std::fabs(sy)));
                                 char msg[64];
                                 std::snprintf(msg, sizeof msg, "scroll %.2f %.2f", sx, sy);
-                                SendTo(out, "ft_pointer", msg);
+                                SendTo(out, FT_SOCK_POINTER, msg);
                             }
                         }
                     } else if (hold.src == Src::Hand && !hold.gaze.On()) {   // (not one the fist just ended)
@@ -3613,7 +3617,7 @@ int main() {
                             hold.scrollMax = std::max(hold.scrollMax, std::max(std::fabs(sx), std::fabs(sy)));
                             char msg[64];
                             std::snprintf(msg, sizeof msg, "scroll %.2f %.2f", sx, sy);
-                            SendTo(out, "ft_pointer", msg);
+                            SendTo(out, FT_SOCK_POINTER, msg);
                         }
                     }
                 }
@@ -4120,7 +4124,7 @@ int main() {
                 // The driver keeps the last pose: only a change goes out (see "Unchanged frames" at the top).
                 char msg[160];
                 std::snprintf(msg, sizeof msg, "pose %.5f %.5f %.5f %.4f %.4f", eyeRaw.x, eyeRaw.y, eyeRaw.z, ayaw, apitch);
-                SendTo(out, "ft_pointer", msg);
+                SendTo(out, FT_SOCK_POINTER, msg);
                 posed = {true, tnow, eyeRaw, ayaw, apitch};
             }
             if (hold.src == Src::Ray) hold.aimSent = true;  // its press can go out next frame (see above)
@@ -4232,7 +4236,7 @@ int main() {
 
         controllerButtons.Poll(
             [&](const char *button, bool down) {
-                SendTo(out, "frametop_relay", std::string("vrbtn ") + button + (down ? " 1" : " 0"));
+                SendTo(out, FT_SOCK_RELAY, std::string("vrbtn ") + button + (down ? " 1" : " 0"));
             },
             inGame);
 

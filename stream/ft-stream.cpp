@@ -56,6 +56,7 @@
 // Runs in the dev container. Build: stream/build.sh.
 #include "spike/iris.h"
 
+#include "../conf/ftsock.h"
 #include "host.h"
 #include "hostinput.h"
 
@@ -327,7 +328,7 @@ struct HostInput {
     int64_t escapedAt = 0; // when it was heard, here or by an earlier stream (CLOCK_BOOTTIME ns)
     hostinput::Relay relay{[this](const std::string &msg) { return Send(kRelay, msg, true); }};
 
-    static constexpr const char *kRelay = "frametop_relay", *kHelper = "ft_pointer_helper";
+    static constexpr const char *kRelay = FT_SOCK_RELAY, *kHelper = FT_SOCK_POINTER_HELPER;
 
     static int64_t BootNs() {
         timespec t;
@@ -335,21 +336,10 @@ struct HostInput {
         return int64_t(t.tv_sec) * 1'000'000'000 + t.tv_nsec;
     }
 
-    static socklen_t Address(sockaddr_un &a, const char *name) {
-        a = {};
-        a.sun_family = AF_UNIX;
-        const size_t n = std::strlen(name);
-        std::memcpy(a.sun_path + 1, name, n);  // abstract
-        return socklen_t(offsetof(sockaddr_un, sun_path) + 1 + n);
-    }
-
     // To the relay or the pointer helper. The relay's host messages wait for room (up to the
     // socket's 100 ms send timeout): a lost one could be a key-up.
     bool Send(const char *to, const std::string &msg, bool wait = false) const {
-        sockaddr_un a;
-        const socklen_t n = Address(a, to);
-        return sendto(sock, msg.data(), msg.size(), (wait ? 0 : MSG_DONTWAIT) | MSG_NOSIGNAL, (const sockaddr *)&a, n) ==
-               ssize_t(msg.size());
+        return ft_sock_send(sock, to, msg.data(), msg.size(), wait ? 0 : MSG_DONTWAIT) == 0;
     }
 
     // A record from the host, on the control stream's receive thread.

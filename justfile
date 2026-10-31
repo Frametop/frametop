@@ -95,6 +95,11 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-psabi hands/tests/skeleton_test.cpp \
       hands/track/skeleton.cpp -o build/tests/skeleton-test
     run hands/tests/skeleton_test.cpp build/tests/skeleton-test
+    gcc -std=gnu11 -Wall -Wextra -Werror hands/tests/xrcams_test.c -o build/tests/xrcams-test
+    run hands/tests/xrcams_test.c build/tests/xrcams-test
+    # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled (DEE-311)
+    run "power/ft-powerd.cpp (compiles)" g++ -std=c++17 -fsyntax-only -Wall -Werror -Wno-unused-parameter \
+      -Ikeyboard/third_party/openvr power/ft-powerd.cpp
     if [ -f hands/build/ncnn/install/lib/libncnn.a ]; then
         make -s -C hands build/sides-test build/pinch-test build/flagbuf-test
         for n in sides pinch flagbuf; do run "hands/tests/${n}_test.cpp" "hands/build/$n-test"; done

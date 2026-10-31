@@ -196,7 +196,7 @@ Fixed bugs:
 
 Design choices in these fixes (Daenon can override each):
 
-- Z1: the marker is a file in the gaze state folder (`~/.local/state/frametop/gaze/screens-hidden`), so it outlives a crash but not a wipe of that folder. A restarted ft-gazed shows the screens even if something else hid them since.
+- Z1: the marker is a file in the gaze state folder (`~/.local/state/frametop/gaze/screens-hidden`), so it outlives a crash but not a wipe of that folder. Since G2's P2 fix (`45685cc`) it holds the mode in effect and ft-screens' switch count after the hide, and a restarted ft-gazed shows the screens only if nothing moved the switch since.
 - Z2: the held status is updated from calib-fit's reply until ft-eyes' next status replaces it. The dots count is the one ft-gazed captured.
 - Z3: the fit check waits only on the tracker sending, not on the gaze being good.
 - Z4: the eyes gone counts as away (the headset taken off), the same as AWAY_MIN would.
@@ -239,7 +239,7 @@ Design choices in these fixes (Daenon can override each):
 - H5-3: the cutouts' tracker is parked, not stopped. Its transient units can't be started again by the resume, so stopping them would leave the cutouts off after the game. The cutouts show through the screens, which a pause hides anyway.
 - H5-2: switching hand interaction off mid-pause stops the hand units then, as a pause with it off would have. Switching it on mid-pause starts nothing until the resume.
 - H5-4: the 5 s resend is the one the game case already used. A relay that holds "dashboard open" from a helper that died keeps it until a new helper speaks, at most 5 s after SteamVR is back.
-- H5-1: if the folder can't be made, the relay logs it and tries again on the next park change, as before.
+- H5-1: if the folder can't be made, the relay logs it and tries again on its next update, which the helper's `vrdash` brings every 5 s.
 
 G1's L3 has its root here: `frametop-camd.service` and `frametop-hands.service` have no `Requisite=steamvr`, which `game_pause.py` 577 assumes. Only `frametop-handview.service` has it.
 
@@ -261,15 +261,27 @@ Results at `78e93b1`:
 
 States per run: 208 (HeadOffFix) to 3,344 (Code).
 
-Open suspected bugs:
+Results with the fixes (`45685cc`): every rule holds in all 11 configs, 55 runs. States per run: 216 (HeadOff, HeadOffFix) to 2,260 (Code, Fixed). The model now describes the fixed code, with G1's L7 fix (`93cbf29`, the relay tells an out-of-step ft-screens again: `RelayRetells`) and G4's Z1 fix (`32456e1`, the next ft-gazed deals with the screens-hidden mark: `GazedBack`). `HeadFix`, `CalFix` and `StartFix` no longer switch anything, so the configs that showed one bug each now check the same code with different settings. `CalFix` was a different fix (a hide flag of its own in ft-screens); the code took the one below, and `calHide` stays false. To see the old breaks, check out `f85dff9` and run its copy of the model.
 
-| Id | Ticket | Rule | What happens |
-| --- | --- | --- | --- |
-| P1 | DEE-278 | ShownOnlyWanted | A desktop that starts with no head pose (the headset off or asleep). `apply_screens` asks ft-screens for `head` (`ft_layout.py` 756) before `send_visibility` (758) and `send_hidden` (774). The error is only logged as "not arranged now" by `start` (1955-1958) and `apply --wait` (2031-2038), so ft-screens keeps its defaults (`vr.cpp` 528-548): always, nothing concealed. Concealed screens show, and users of the toggle, gesture or dashboard mode see the screens all the time, until a reset, a settings change or a profile. `use` has a `send_hidden` fallback (2076-2079); `start` and `apply` don't |
-| P2 | DEE-279 | ShownOnlyWanted (minor) | A full gaze calibration during a VR game, with the always mode and ingames hide (the defaults). ft-screens' `state` reports `g_mode` (`vr.cpp` 2606, 6254-6257), not the dashboard mode in effect, so `gazecheck.py` 623 reads the screens as shown and its `hide` (624) changes nothing. The `show` at close (1264-1265) turns the switch on under the dashboard mode (`vr.cpp` 5992-5998), and the screens stay over the game with the dashboard closed until the game ends or the hotkey |
-| P3 | DEE-280 | VncOffInPause (minor) | A desktop that starts mid-pause (`autostart.sh` on a SteamVR restart, or the dashboard's Desktop entry) runs `remote-ctl.sh start` with REMOTE=1 (`frametop-session.sh` 246-249) without a pause check. The relay sends only `pause on` again (`game_pause.py` 675-688), so krdp and Xvnc run through the game, and the resume doesn't know they ran. Same class as G1's L2 |
+Undoing a fix in a copy of the model brings its break back: P1 breaks ShownOnlyWanted in HeadOff, Fixed and Code (and HiddenComesBack where a calibration runs), P2 breaks ShownOnlyWanted in CalInGame, FixedAlways and GazedCrash, the switch count alone breaks the same configs, and P3 breaks VncOffInPause in MidPause, Fixed, FixedAlways and Code.
 
-The Lossy and GazedCrash breaks are G1's L7 and G4's Z1, drawn in those groups. A lost `pause on` also shows the screens through the pause, because the relay sends it again only to a new ft-screens.
+The first P2 fix (read the mode in effect only) left one path that the model found: a game started, or ft-layout reset the switch, while the calibration ran, and the close's `show` turned the screens on over the game. The switch count closes that path.
+
+The chart (`G2-desktop.mmd`, `.svg`) still draws P1 to P3 red. It is due a redraw.
+
+Fixed bugs:
+
+| Id | Ticket | Rule | What happened | Fix |
+| --- | --- | --- | --- | --- |
+| P1 | DEE-278 | ShownOnlyWanted | A desktop that started with no head pose. `apply_screens` asked ft-screens for `head` before it sent the visibility mode and conceal, and `start` and `apply --wait` only logged the error, so ft-screens kept its defaults (always, nothing concealed) until a reset, a settings change or a profile | Fixed in `45685cc`. With no head pose, `apply_screens` sends the visibility settings and conceal before it gives up placing |
+| P2 | DEE-279 | ShownOnlyWanted (minor) | A full gaze calibration during a VR game, with the always mode and ingames hide. ft-screens' `state` gave `g_mode`, so `gazecheck.py` read the screens as shown, and the `show` at close turned the switch on under the dashboard mode, over the game | Fixed in `45685cc`. gazecheck works out the mode in effect from `state`'s game and ingames fields. ft-screens adds its switch's change count to `state`, and the close (or the next ft-gazed after a crash) shows the screens only if nothing moved the switch since the hide |
+| P3 | DEE-280 | VncOffInPause (minor) | A desktop that started mid-pause started remote access with no pause check, so krdp and Xvnc ran through the game | Fixed with G1 in `93cbf29`. The session asks the relay (`ft-pause defer-remote`) before it starts remote access, and while paused the resume starts it instead |
+
+Design choices in these fixes (Daenon can override each):
+
+- P1: placing still needs a head pose. Only the settings go without one, so the screens keep their last place until a reset.
+- P2: the calibration leaves the screens alone at its close when anything moved the switch during it, including the user's own hotkey. Whatever moved it last decides.
+- P2: `state` gains a tenth field (the switch's change count). Only gazecheck reads `state` by position. `report.sh` and `keys-report.py` print it as is. A new ft-screens starts the count at 0, so a mark left before an ft-screens restart can in rare cases match a new count and show the screens once.
 
 ## G8 Verify, data and diagnostics
 

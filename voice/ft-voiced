@@ -750,8 +750,13 @@ class Voice:
             await self.type_text(text + (" " if self.dcfg["trailing_space"] else ""))
 
     def save_clip(self, samples):
+        # A recording of the user's voice: only they may read it, and a link isn't followed.
         CLIP_DIR.mkdir(parents=True, exist_ok=True)
-        (CLIP_DIR / time.strftime("%Y%m%d-%H%M%S.wav")).write_bytes(to_wav(samples))
+        path = CLIP_DIR / time.strftime("%Y%m%d-%H%M%S.wav")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            os.fchmod(fd, 0o600)
+            f.write(to_wav(samples))
         for old in sorted(CLIP_DIR.glob("*.wav"))[:-self.dcfg["save_clips"]]:
             old.unlink()
 

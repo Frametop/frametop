@@ -10,7 +10,10 @@ import importlib.util
 import json
 import os
 import socket
+import stat
+import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -231,6 +234,43 @@ class Chimes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(v.played, [("begin", "s.wav"), ("end", "s.wav"), ("begin", "t.wav"), ("end", "t.wav")])
         self.assertFalse(v.chime_playing())
         self.assertEqual(v.mic_updates, 1)  # once, after the last tone
+
+
+class Clips(unittest.TestCase):
+    """Saved clips are the user's voice: 0600 whatever the umask, and a link isn't followed."""
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name) / "clips"
+        for patch in (mock.patch.object(fv, "CLIP_DIR", self.dir),
+                      mock.patch.object(fv.time, "strftime", lambda fmt: "20261031-120000.wav")):
+            patch.start()
+            self.addCleanup(patch.stop)
+        old = os.umask(0)
+        self.addCleanup(os.umask, old)
+        self.v = bare_daemon(dcfg={"save_clips": 3})
+        import numpy as np
+        self.samples = np.zeros(1600, dtype=np.float32)
+
+    def test_private(self):
+        self.v.save_clip(self.samples)
+        clip = self.dir / "20261031-120000.wav"
+        self.assertEqual(stat.S_IMODE(clip.stat().st_mode), 0o600)
+        self.assertEqual(clip.read_bytes()[:4], b"RIFF")
+        clip.chmod(0o644)  # one from before this fix, at the same name: rewritten private
+        self.v.save_clip(self.samples)
+        self.assertEqual(stat.S_IMODE(clip.stat().st_mode), 0o600)
+
+    def test_link_refused(self):
+        self.dir.mkdir()
+        target = self.dir.parent / "elsewhere"
+        target.write_bytes(b"keep")
+        target.chmod(0o644)
+        (self.dir / "20261031-120000.wav").symlink_to(target)
+        with self.assertRaises(OSError):
+            self.v.save_clip(self.samples)
+        self.assertEqual(target.read_bytes(), b"keep")
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
 
 
 if __name__ == "__main__":

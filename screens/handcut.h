@@ -157,7 +157,7 @@ struct Gesture {
 // A shift of the matte's hands, as seen from the head, by their distance from it (the
 // cutout probe found Room View's picture of a hand a little off the tracked one, by an
 // amount that depended on the distance). Off (empty) by default: the probe runs so far didn't
-// agree on it (see screens/README.md, "Hand cutouts").
+// agree on it (see hands/cutouts.md).
 struct Shift {
     double dist;            // metres from the head to the palm
     double yawDeg, pitchDeg;  // positive: to the right, up
@@ -177,7 +177,7 @@ struct MatteParams {
     // points 1.8-2.4 degrees (median) off the hand Room View shows with the hand still (p90
     // 4.1-4.5), 2.8-3.1 moving (p90 5.7-6.7); part of that is the video landmark model's own
     // error. A still margin of 1.5 and up to 1.5 more as the hand moves covers the median
-    // spread without making the hand a blob (see screens/README.md).
+    // spread without making the hand a blob (see hands/cutouts.md).
     double marginDeg = 1.5;
     double motionMs = 25;     // ...plus how far the hand moves in this long
     double motionMaxDeg = 1.5;   // ...up to this much more

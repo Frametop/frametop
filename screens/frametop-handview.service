@@ -1,7 +1,7 @@
 # Template: the installer replaces @REPO@ with the repo path on the Frame.
 [Unit]
 Description=Frametop rendered hands: your tracked hands drawn over games, the dashboard and the panels with Room View off
-Documentation=file://@REPO@/screens/README.md
+Documentation=file://@REPO@/hands/rendered-hands.md
 # Needs SteamVR's IPC and ft-hands' shared files; it starts and stops with SteamVR.
 After=steamvr.service frametop-hands.service
 PartOf=steamvr.service

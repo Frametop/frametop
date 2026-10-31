@@ -1,5 +1,7 @@
 # Full Keyboard for Steam Frame development
 
+In Frametop, the root `AGENTS.md` wins wherever it and this file differ (git, pushes, builds, tests, names, where things run), and `FRAMETOP.md` lists what Frametop changed here. The rest of this file is upstream's, kept as it came so subtree pulls merge cleanly; read it for this folder's engineering rules.
+
 Follow any enclosing workspace instructions. This file covers project engineering; keep machine-specific notes, deployment records, and credentials outside this repository. The public project name is Full Keyboard for Steam Frame, the app label is Full Keyboard, and internal identifiers remain framekeyboard.
 
 - Read `README.md`, `docs/plan.md`, and the relevant architecture section before implementation. Mark milestone checkboxes only after their acceptance conditions pass.

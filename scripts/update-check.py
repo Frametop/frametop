@@ -58,7 +58,10 @@ PACKAGES = {
     "deckard-steamvr-rel": "the 3D mouse on the dashboard, on SteamVR Settings, and on a SteamVR "
                            "window's grab bar; picking up a controller; mapped controller buttons; gaze, "
                            "and a gaze calibration with Track Dominant Eye Only on; the reset countdown stays "
-                           "visible while turning, accepts no pointer input, and disappears before reset",
+                           "visible while turning, accepts no pointer input, and disappears before reset; "
+                           "Full Keyboard (keyboard/) opens for a desktop text field over the screens with "
+                           "the dashboard closed, in the dashboard, and in place of Steam's own keyboard in a "
+                           "Steam field, and its lasers, controller tips and fingertips press keys",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
             "after a desktop restart; floating a window; no blur behind the taskbar's menus; "
             "logging out with a Deskflow client connected (6.2.5 crashes there, and the session's "
@@ -68,7 +71,12 @@ PACKAGES = {
                         "Steam session and its buttons work (ft-notifyfwd)",
     "at-spi2-core": "an AT-SPI-aware app appears on the nested desktop's accessibility bus; "
                     "the registry stops and comes back after a desktop restart",
-    "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked",
+    "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked; "
+                 "Full Keyboard types into a Steam field and a game (libei)",
+    "libei": "Full Keyboard types into a Steam field and a game (its libei link to gamescope)",
+    "deckard-steamvr-session": "Full Keyboard starts with SteamVR and its panel draws (frametop-keyboard.service "
+                               "reads its /usr/share/deckard/mesavars.sh)",
+    "deckard-mesa-linux-aarch64": "Full Keyboard's panel draws (Vulkan), and ft-screens' panels show",
     "bluez": "a Bluetooth mouse reconnecting after it sleeps",
     "pipewire": "voice dictation hears you (ft-voiced records with the container's pw-record) and "
                 "its mic isn't silent after a reboot (SteamOS's echo-cancel chain)",

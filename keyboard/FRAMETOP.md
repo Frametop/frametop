@@ -17,6 +17,25 @@ It was imported at 0.8.1, commit `ef915ef75169ac886b7de86d18df2e59150cde2f`, wit
 - `CMakeLists.txt`: the above (`src/frametop.cpp`, `src/frametop_vr.cpp` and `src/touch.cpp` in `keyboard_core`), `frametop-tests`, and `OPENVR_RUNTIME_PATH` can be set, so the build loads SteamVR's own `libopenvr_api` first like Frametop's other programs.
 - Frametop's own files: `build.sh`, `run.sh`, `frametop-keyboard.service`, and this file.
 
+## Names
+
+Its programs keep upstream's names, `framekeyboard` and `framekeyboard-native-guard`, instead of Frametop's `ft-` names (`ft-keyboard`, `ft-kbguard`). This is a waiver from the root AGENTS.md (DEE-310). The names are upstream's in `CMakeLists.txt`, in `bridge/native_bridge.py`, which finds the guard by name, in `src/startup.cpp`, in its packaging scripts, and in their tests, so renaming them would add Frametop changes to several upstream files that every pull would have to merge. Frametop's own files use them too: `frametop-keyboard.service` (`pkill -x framekeyboard`), `uninstall.sh`, `scripts/fast-install` and `pack/Containerfile`, and installed units would have to move along with them. `framekeyboard` fits in 15 characters for `pkill -x`. Nothing finds the guard by process name, so its longer name is truncated harmlessly. Rename them only together with upstream, or with an install step that moves the installed unit.
+
+## Upstream parts Frametop doesn't use
+
+These stay in the tree, unchanged, so subtree pulls stay clean. In `--frametop` mode they're never reached, or never shown:
+
+- The updater: `src/updates.cpp`, `include/framekeyboard/updates.hpp`, `update/update_helper.py`, `docs/updates.md`, and the `updates` and `update-helper` tests. `src/app.cpp` hides its button, and `src/vr.cpp` still includes its header.
+- Start with SteamOS: `src/startup.cpp` and the `startup-unit` test. Frametop's service starts it, and `src/app.cpp` hides the setting.
+- Packaging and release: `scripts/package.sh`, `scripts/install-local.sh`, `tools/check_release_binary.py`, `cmake/steam-frame-aarch64.cmake` (Frametop builds natively in its container), `docs/releasing.md` and the `installer` test.
+- Typing through uinput (`--input uinput`, `UInputSink`): Frametop types through libei and its relay.
+- The desktop preview (`src/preview.cpp`, `scripts/preview.sh`): a development window, not the VR keyboard.
+- `design/index.html`: upstream's approved look, for their own reviews.
+
+Their tests still run in `just test-keyboard`, so a pull that breaks them shows up.
+
+Settings follow upstream's pattern: each one has a `pending_*` copy in `src/app.cpp` that Settings edits, applied in several places. `touch_typing` does the same, so a new Frametop setting needs about five edits there too.
+
 ## How it works with Frametop
 
 Frametop's desktop runs in a nested KWin that gamescope never sees, so keys sent to gamescope can't reach it. The input relay (`input/input-relay.py`) owns typing for the desktop already: it knows where typing goes (the panel clicked last, from ft-screens), and it types Frametop Voice's text there. Full Keyboard talks to it over the relay's abstract datagram socket, `@frametop_relay`:

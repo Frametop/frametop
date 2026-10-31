@@ -1119,72 +1119,100 @@ def probe(path):
         return None
 
 
-def main():
-    can_grab = "--no-grab" not in sys.argv
-    stored = stored_fds()
-    mouse = Virtual(f"{VIRTUAL_PREFIX} mouse", 1,
-                    keys=range(BTN_MISC, 0x118), rels=range(REL_MAX + 1), stored=stored)
-    keyboard = Virtual(f"{VIRTUAL_PREFIX} keyboard", 2,
-                       keys=range(1, BTN_MISC), rels=(), stored=stored)
-    notify("READY=1")
-    if can_grab:  # not under --no-grab: that's the tests (input/test), with the real home
-        try:
-            ft_commands.refresh()  # ft-cmd on the PATH, and the aliases, point at this install
-        except OSError as e:
-            log(f"commands: {e}")
+CREDS = struct.Struct("3i")  # struct ucred: pid, uid, gid, as the kernel adds it to each datagram
 
-    control = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    control.bind("\0frametop_relay")
-    control.setblocking(False)
-    # The kernel adds each sender's user ("type" is taken only from ours: an abstract socket
-    # takes datagrams from anyone).
-    control.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
-    creds = struct.Struct("3i")  # struct ucred: pid, uid, gid
-    watchers = {}  # address -> watch end time
 
-    # desktop_until: typing goes to the Frametop desktop until then (ft-screens says so
-    # every second); typing_applied: the grabs match that as of the last apply_roles().
-    # vr_capture_until: every controller button is taken until then (the settings app capturing one).
-    # pointer: the 3D mouse while it's in use, pointer_conf: the one the config asks for (they
-    # differ while Frametop is paused).
-    # shown_until: ft-screens shows the desktop's screens until then (it says so with "keyboard").
-    # kb_addr, kb_until: Full Keyboard's address, and until when it counts as running (its
-    # hello renews it); kb_said: the "kb DESKTOP SURFACE" it was told last.
-    state = {"pointer": None, "pointer_conf": None, "rules": {},
-             "desktop_until": 0.0, "typing_applied": None, "vr_capture_until": 0.0, "vr_bind_retry": False,
-             "pointer_holding": False, "calpanel_until": 0.0, "shown_until": 0.0,
-             "kb_addr": None, "kb_until": 0.0, "kb_said": None}
+class Relay:
+    """The relay: the devices it reads, the control socket, and what it keeps between events.
+    main() makes the virtual devices and the sockets, and runs it. A test can make one with fakes
+    of its own and call its methods."""
 
-    def pause_changed(paused):
+    def __init__(self, mouse, keyboard, control, screens_sock, can_grab=True, stored=None):
+        self.mouse, self.keyboard = mouse, keyboard  # the virtual mouse and keyboard
+        self.control = control  # @frametop_relay, bound, with SO_PASSCRED
+        self.screens_sock = screens_sock  # unbound: sends to ft-screens, the helper and the rest
+        self.can_grab = can_grab  # not under --no-grab: that's the tests (input/test)
+        self.stored = stored if stored is not None else {}  # systemd's fd store (stored_fds)
+        self.watchers = {}  # address -> watch end time
+
+        # desktop_until: typing goes to the Frametop desktop until then (ft-screens says so
+        # every second); typing_applied: the grabs match that as of the last apply_roles().
+        # vr_capture_until: every controller button is taken until then (the settings app capturing one).
+        # pointer: the 3D mouse while it's in use, pointer_conf: the one the config asks for (they
+        # differ while Frametop is paused).
+        # shown_until: ft-screens shows the desktop's screens until then (it says so with "keyboard").
+        # kb_addr, kb_until: Full Keyboard's address, and until when it counts as running (its
+        # hello renews it); kb_said: the "kb DESKTOP SURFACE" it was told last.
+        self.pointer, self.pointer_conf, self.rules = None, None, {}
+        self.desktop_until, self.typing_applied = 0.0, None
+        self.vr_capture_until, self.vr_bind_retry = 0.0, False
+        self.pointer_holding, self.calpanel_until, self.shown_until = False, 0.0, 0.0
+        self.kb_addr, self.kb_until, self.kb_said = None, 0.0, None
+        self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
+
+        self.tap = None  # the modifier (folded, MODIFIERS) pressed alone, with nothing since: its release is a tap
+        self.last_typing = 0.0  # the helper was last told of a key then (see "typing" at the top)
+        self.held_modifiers = set()  # on any keyboard, folded (MODIFIERS)
+        self.tap_code = None  # the tap's key as it is (a right-hand code isn't folded), see modifier_tap
+        self.talk_code = None  # a modifier bound to dictate_hold, held alone: dictation runs until its release
+        self.talk_hidden = False  # its press kept from the desktop, so the text typed meanwhile isn't a shortcut
+        self.held_meta = set()  # the Meta keys held, as they are (KEY_LEFTMETA, KEY_RIGHTMETA)
+        self.meta_hidden = set()  # held Meta keys the desktop was told came up (a combination; key_binding)
+        self.combos_down = {}  # key code -> the action its combination started (released with it)
+        self.cal_keys = set()  # Enter keys whose press answered the gaze calibration panel (cal_enter)
+        self.screens_down = set()  # keys the desktop was told went down and not yet up (see reconcile_desktop_keys)
+
+        self.nodes = {}  # fd -> Node
+        # Nodes already probed (rejected or open): path -> inode. A device that disconnects and
+        # reconnects between two scans often gets the same event numbers back, so the path alone
+        # would hide it; the re-created node has a new inode.
+        self.seen = {}
+        self.next_scan = 0.0
+        self.volume = Volume()
+        # What's still to type, in order: a character (str) from dictation, ("quiet", character)
+        # from Full Keyboard (its text isn't logged), or ("key", code, value), a key Full Keyboard
+        # pressed or released.
+        self.typing = collections.deque()
+        self.typing_down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
+        self.typing_at = 0.0  # the next press or release goes then
+        self.untyped = []  # characters with no key where typing went, logged when the queue is empty (None: quiet)
+        self.kb_held = {}  # keys Full Keyboard holds down: code -> to the desktop
+        self.desktop_layout = DesktopLayout()
+
+        self.pause = game_pause.GamePause(log, self.pause_changed, VR_BUTTONS)
+        self.gamepad = vrpad.GamepadMode(log, self.pad_send, lambda: vrpad.VirtualPad(log, self.stored, notify),
+                                         lambda on: self.pause.set_pad(on))
+        self.load_config()
+        if self.pause.paused and self.pointer_conf:
+            # Restarted while paused: the helper may still hold the pointer the last relay woke, and
+            # this relay's new Pointer doesn't know, so it lets go now (DEE-252).
+            self.pointer_conf.stand_down()
+
+    def pause_changed(self, paused):
         """Frametop paused or resumed (game_pause.py): the relay's own part."""
-        p = state["pointer_conf"]
+        p = self.pointer_conf
         if paused:
-            gamepad.stop("Frametop paused")
+            self.gamepad.stop("Frametop paused")
             if p:
                 p.stand_down()
-            state["pointer"] = None
-            state["desktop_until"] = 0.0  # typing goes to Steam
+            self.pointer = None
+            self.desktop_until = 0.0  # typing goes to Steam
         else:
-            state["pointer"] = p
-        apply_roles()
-        vr_bind(time.monotonic())
+            self.pointer = p
+        self.apply_roles()
+        self.vr_bind(time.monotonic())
 
-    pause = game_pause.GamePause(log, pause_changed, VR_BUTTONS)
-
-    def pad_send(to, message):
+    def pad_send(self, to, message):
         try:
-            screens_sock.sendto(message.encode(), SCREENS)
+            self.screens_sock.sendto(message.encode(), SCREENS)
         except OSError:
             pass  # not running
 
-    gamepad = vrpad.GamepadMode(log, pad_send, lambda: vrpad.VirtualPad(log, stored, notify),
-                                lambda on: pause.set_pad(on))
-
-    def gamepad_blocked():
+    def gamepad_blocked(self):
         """Why gamepad mode can't be on now, or None."""
-        return "Frametop is paused" if pause.paused else "a VR game runs" if pause.game else None
+        return "Frametop is paused" if self.pause.paused else "a VR game runs" if self.pause.game else None
 
-    def load_config():
+    def load_config(self):
         """frametop.conf and the rules, applied all or nothing: read and checked first (the pause's
         settings from the rules too), then put in place. A reload whose rules fail keeps the last
         ones (it used to leave the rules read and the pause unconfigured, DEE-297); at start, the
@@ -1193,98 +1221,89 @@ def main():
         pointer_on, sensitivity, idle, wake_counts = pointer_settings(conf)
         try:
             rules = read_rules()
-            pause.configure(rules)   # first: it works the rules out before it changes anything
+            self.pause.configure(rules)   # first: it works the rules out before it changes anything
         except Exception as e:  # a reload must not take the relay down
-            if state["rules"]:
+            if self.rules:
                 log(f"config not applied, the last one kept: {e!r}")
                 return
             log(f"rules not applied, the defaults used: {e!r}")
             rules = read_rules("")   # the defaults (no file there)
-            pause.configure(rules)
-        state["rules"] = rules
+            self.pause.configure(rules)
+        self.rules = rules
         if pointer_on:
-            p = state["pointer_conf"] or Pointer(0.03, 30)
+            p = self.pointer_conf or Pointer(0.03, 30)
             p.sensitivity, p.idle, p.wake_counts = sensitivity, idle, wake_counts
-            state["pointer_conf"] = p
+            self.pointer_conf = p
             log(f"pointer mode: {p.sensitivity} deg/count, idle {p.idle} s, wake {p.wake_counts} counts")
         else:
-            if state["pointer_conf"]:
+            if self.pointer_conf:
                 # A button held through the change comes up on the helper now; its release
                 # goes to the virtual mouse, which never had it down (DEE-264).
-                state["pointer_conf"].stand_down("pointer mode off")
-            state["pointer_conf"] = None
+                self.pointer_conf.stand_down("pointer mode off")
+            self.pointer_conf = None
             log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
-        state["pointer"] = None if pause.paused else state["pointer_conf"]
-        gamepad.sound_on = pause.settings["sound"]
+        self.pointer = None if self.pause.paused else self.pointer_conf
+        self.gamepad.sound_on = self.pause.settings["sound"]
         # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
         # HANDS_MODE=always keeps hand tracking running through games.
         # Direct touch alone (HANDS_NEAR=on) needs the same: the helper's handoff runs for it.
-        pause.set_hands(conf.get("POINTER_HANDS", "0") == "1" or conf.get("HANDS_NEAR") == "on",
+        self.pause.set_hands(conf.get("POINTER_HANDS", "0") == "1" or conf.get("HANDS_NEAR") == "on",
                         conf.get("HANDS_MODE") == "always", conf.get("HANDS_MODE") == "frametop")
 
-    load_config()
-    if pause.paused and state["pointer_conf"]:
-        # Restarted while paused: the helper may still hold the pointer the last relay woke, and
-        # this relay's new Pointer doesn't know, so it lets go now (DEE-252).
-        state["pointer_conf"].stand_down()
-    tap = None  # the modifier (folded, MODIFIERS) pressed alone, with nothing since: its release is a tap
-    screens_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
-    last_typing = 0.0  # the helper was last told of a key then (see "typing" at the top)
-
-    def vr_bind(now):
+    def vr_bind(self, now):
         """Tell the pointer helper which controller buttons to take from games."""
-        if now < state["vr_capture_until"]:
+        if now < self.vr_capture_until:
             buttons = "*"
         else:
-            state["vr_capture_until"] = 0.0
-            buttons = " ".join(b for b, a in state["rules"]["controller_buttons"].items()
+            self.vr_capture_until = 0.0
+            buttons = " ".join(b for b, a in self.rules["controller_buttons"].items()
                                if b in VR_BUTTONS and known_action(a) and a not in ("key", "none")
-                               and a not in GAZE_ACTIONS and (not pause.paused or works_paused(a))) or "-"
-            if state["rules"].get("controller_in_games"):
+                               and a not in GAZE_ACTIONS and (not self.pause.paused or works_paused(a))) or "-"
+            if self.rules.get("controller_in_games"):
                 buttons = "+games " + buttons
-        state["vr_bind_retry"] = False
+        self.vr_bind_retry = False
         try:
-            screens_sock.sendto(f"vrbind {buttons}".encode(), HELPER)
+            self.screens_sock.sendto(f"vrbind {buttons}".encode(), HELPER)
         except BlockingIOError:
-            state["vr_bind_retry"] = True  # the helper is behind: again on the next loop
+            self.vr_bind_retry = True  # the helper is behind: again on the next loop
         except OSError:
             pass  # helper not running; it says vrhello when it starts
 
-    def vr_button(button, value, now):
+    def vr_button(self, button, value, now):
         """A Frame controller button from the pointer helper."""
-        for addr, until in list(watchers.items()):
+        for addr, until in list(self.watchers.items()):
             if now > until:
-                del watchers[addr]
+                del self.watchers[addr]
             else:
-                reply(addr, {"t": "event", "id": VR_DEVICE, "path": "", "name": "Steam Frame controllers",
+                self.reply(addr, {"t": "event", "id": VR_DEVICE, "path": "", "name": "Steam Frame controllers",
                              "type": "vr", "code": button, "value": value})
-        action = state["rules"]["controller_buttons"].get(button)
-        if (state["pointer"] or (action and not needs_pointer(action))) and known_action(action) \
+        action = self.rules["controller_buttons"].get(button)
+        if (self.pointer or (action and not needs_pointer(action))) and known_action(action) \
                 and action not in ("key", "none") and action not in GAZE_ACTIONS:
-            do_action(action, value, now, button.split("/")[0])
+            self.do_action(action, value, now, button.split("/")[0])
 
-    def vr_keyboard_mode():
-        mode = state["rules"].get("vr_keyboard")
+    def vr_keyboard_mode(self):
+        mode = self.rules.get("vr_keyboard")
         return mode if mode in VR_KEYBOARD_MODES else "no_keyboard"
 
-    def vr_keyboard(command):
+    def vr_keyboard(self, command):
         """Open or close Frametop's keyboard (ft-screens)."""
         try:
-            screens_sock.sendto(f"vrkeyboard {command}".encode(), SCREENS)
+            self.screens_sock.sendto(f"vrkeyboard {command}".encode(), SCREENS)
         except OSError:
             pass  # ft-screens not running
 
-    def text_field(focused):
+    def text_field(self, focused):
         """A text field on the desktop gained or lost keyboard focus (the input method)."""
-        mode = vr_keyboard_mode()
+        mode = self.vr_keyboard_mode()
         if not focused:
-            if not state["rules"].get("vr_keyboard_persist", True):
-                vr_keyboard("hide")  # ft-screens closes it only if it opened it for a text field
+            if not self.rules.get("vr_keyboard_persist", True):
+                self.vr_keyboard("hide")  # ft-screens closes it only if it opened it for a text field
             return
-        keyboards = sorted({n.name for n in nodes.values()
+        keyboards = sorted({n.name for n in self.nodes.values()
                             if n.candidate and n.is_keyboard and n.role == "passthrough" and not n.uinput})
         if mode == "always" or (mode == "no_keyboard" and not keyboards):
-            vr_keyboard("show")
+            self.vr_keyboard("show")
             why = "asking ft-screens to open Frametop's keyboard"
         elif mode == "no_keyboard":
             why = (f"not opening Frametop's keyboard: a keyboard is connected ({', '.join(keyboards)}), "
@@ -1293,22 +1312,22 @@ def main():
             why = f"not opening Frametop's keyboard (Keyboard setting: {mode})"
         # For bug reports (scripts/report.sh): once per decision, again after 30 s.
         now = time.monotonic()
-        if why != state.get("text_field_said") or now - state.get("text_field_said_at", 0.0) > 30:
+        if why != self.text_field_said or now - self.text_field_said_at > 30:
             log(f"text field focused: {why}")
-            state["text_field_said"], state["text_field_said_at"] = why, now
+            self.text_field_said, self.text_field_said_at = why, now
 
-    def do_action(action, value, now, source="mouse"):
+    def do_action(self, action, value, now, source="mouse"):
         """A mapped mouse or controller button, or key combination (pointer mode only, but
         for the actions needs_pointer() says don't)."""
         if action == "pause_toggle":
             if value == 1:
-                pause.toggle(PAUSE_SOURCES.get(source, source), now)
+                self.pause.toggle(PAUSE_SOURCES.get(source, source), now)
             return
-        if pause.paused and not works_paused(action):
+        if self.pause.paused and not works_paused(action):
             return
         if action == "keyboard_toggle":
-            if value == 1 and vr_keyboard_mode() != "never":
-                vr_keyboard("toggle")
+            if value == 1 and self.vr_keyboard_mode() != "never":
+                self.vr_keyboard("toggle")
         elif action.startswith(PROFILE):
             if value == 1:
                 # Runs a few seconds and borrows the pointer, like layout_reset.
@@ -1323,12 +1342,12 @@ def main():
                 log(action)
         elif action == "release_keys":
             if value == 1:
-                release_all_keys()
+                self.release_all_keys()
         elif action == "hands_toggle":
             if value == 1:
                 # systemctl --no-block, and the pause's sounds if it plays them; the outcome goes
                 # to this service's log.
-                subprocess.Popen(["python3", HANDSMODE, "toggle", *(["--sound"] if pause.settings["sound"] else [])],
+                subprocess.Popen(["python3", HANDSMODE, "toggle", *(["--sound"] if self.pause.settings["sound"] else [])],
                                  stdin=subprocess.DEVNULL, start_new_session=True)
                 log(action)
         elif action.startswith(COMMAND):
@@ -1345,21 +1364,21 @@ def main():
         elif action in FLOAT_ACTIONS:
             if value == 1:
                 try:
-                    screens_sock.sendto(FLOAT_ACTIONS[action], FLOAT)
+                    self.screens_sock.sendto(FLOAT_ACTIONS[action], FLOAT)
                 except OSError:
                     pass  # the Frametop desktop isn't running
                 log(action)
         elif action in SCREENS_ACTIONS:
             if value == 1:
                 try:
-                    screens_sock.sendto(SCREENS_ACTIONS[action], SCREENS)
+                    self.screens_sock.sendto(SCREENS_ACTIONS[action], SCREENS)
                 except OSError:
                     pass  # the Frametop desktop isn't running
                 log(action)
         elif action == "frunner":
             if value == 1:
                 try:
-                    screens_sock.sendto(f"toggle {source}".encode(), FRUNNER)
+                    self.screens_sock.sendto(f"toggle {source}".encode(), FRUNNER)
                 except OSError:
                     log("frunner: not running (the Frametop desktop starts it)")
                 log(action)
@@ -1369,296 +1388,261 @@ def main():
             command = {1: "toggle"}.get(value) if action == "dictate" else {1: "start", 0: "stop"}.get(value)
             if command:
                 try:
-                    screens_sock.sendto(f"{command} {source}".encode(), VOICE)
+                    self.screens_sock.sendto(f"{command} {source}".encode(), VOICE)
                 except OSError:
                     log(f"{action}: Frametop Voice isn't running (frametop-voice.service)")
-        elif state["pointer"]:
-            state["pointer"].action(action, value, now, source)
+        elif self.pointer:
+            self.pointer.action(action, value, now, source)
 
-    held_modifiers = set()  # on any keyboard, folded (MODIFIERS)
-    tap_code = None  # the tap's key as it is (a right-hand code isn't folded), see modifier_tap
-    talk_code = None  # a modifier bound to dictate_hold, held alone: dictation runs until its release
-    talk_hidden = False  # its press kept from the desktop, so the text typed meanwhile isn't a shortcut
-    held_meta = set()  # the Meta keys held, as they are (KEY_LEFTMETA, KEY_RIGHTMETA)
-    meta_hidden = set()  # held Meta keys the desktop was told came up (a combination; key_binding)
-    combos_down = {}  # key code -> the action its combination started (released with it)
-    cal_keys = set()  # Enter keys whose press answered the gaze calibration panel (cal_enter)
-
-    def cal_enter(code, value, now):
+    def cal_enter(self, code, value, now):
         """Enter while the gaze calibration panel is up (see the top): its press goes to the helper
         as "calkey 1", and the press, its repeats and its release aren't typed. True if taken."""
-        if value == 1 and code in (KEY_ENTER, KEY_KPENTER) and now < state["calpanel_until"] \
-                and not held_modifiers and code not in combos_down:
-            cal_keys.add(code)
+        if value == 1 and code in (KEY_ENTER, KEY_KPENTER) and now < self.calpanel_until \
+                and not self.held_modifiers and code not in self.combos_down:
+            self.cal_keys.add(code)
             try:
-                screens_sock.sendto(b"calkey 1", HELPER)
+                self.screens_sock.sendto(b"calkey 1", HELPER)
             except OSError:
                 pass  # helper not running (SteamVR not running)
             log("Enter: the gaze calibration panel's")
             return True
-        if code in cal_keys:
+        if code in self.cal_keys:
             if value == 0:
-                cal_keys.discard(code)
+                self.cal_keys.discard(code)
             return True
         return False
 
-    def key_binding(code, value, now):
+    def key_binding(self, code, value, now):
         """A key from a keyboard: does it complete a key combination ("key_bindings")? True if
         it was taken for one (then it isn't typed)."""
-        nonlocal tap, tap_code, talk_code, talk_hidden
         if code in MODIFIERS:
             mod = MODIFIERS[code]
-            hide = value == 2 and code == talk_code and talk_hidden  # its repeats, as its press
+            hide = value == 2 and code == self.talk_code and self.talk_hidden  # its repeats, as its press
             if value == 1:
-                if talk_code is not None and code != talk_code:
-                    cancel_talk()  # another modifier with it: a shortcut (Ctrl+Shift+T)
-                tap = mod if not held_modifiers and not combos_down else None
-                tap_code = code
-                if tap is not None and talk_code is None and tap_action(mod, code)[1] == "dictate_hold":
+                if self.talk_code is not None and code != self.talk_code:
+                    self.cancel_talk()  # another modifier with it: a shortcut (Ctrl+Shift+T)
+                self.tap = mod if not self.held_modifiers and not self.combos_down else None
+                self.tap_code = code
+                if self.tap is not None and self.talk_code is None and self.tap_action(mod, code)[1] == "dictate_hold":
                     # Hold to talk: dictation starts on the press, not the release. The desktop
                     # doesn't get the press (cancel_talk sends it after all for a shortcut), so
                     # live text is typed there while it's held. Steam and games read the keyboard
                     # themselves: there the text waits for the release (typing_tick).
-                    talk_code, talk_hidden, hide = code, True, True
-                    do_action("dictate_hold", 1, now, "keyboard")
-                    log(f"key combination {tap_action(mod, code)[0]}: dictate_hold (held)")
-            (held_modifiers.add if value else held_modifiers.discard)(mod)
+                    self.talk_code, self.talk_hidden, hide = code, True, True
+                    self.do_action("dictate_hold", 1, now, "keyboard")
+                    log(f"key combination {self.tap_action(mod, code)[0]}: dictate_hold (held)")
+            (self.held_modifiers.add if value else self.held_modifiers.discard)(mod)
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
-                (held_meta.add if value else held_meta.discard)(code)
-                if value == 0 and code in meta_hidden:
-                    meta_hidden.discard(code)
+                (self.held_meta.add if value else self.held_meta.discard)(code)
+                if value == 0 and code in self.meta_hidden:
+                    self.meta_hidden.discard(code)
                     return True  # the desktop already had it come up (below)
-            if value == 0 and code == talk_code:
-                talk_code, tap = None, None
-                hide, talk_hidden = talk_hidden, False
+            if value == 0 and code == self.talk_code:
+                self.talk_code, self.tap = None, None
+                hide, self.talk_hidden = self.talk_hidden, False
                 if not hide:
                     # As with a tap (modifier_tap): a key in between, so a Meta release isn't one.
-                    to_screens(KEY_F24, 1)
-                    to_screens(KEY_F24, 0)
-                do_action("dictate_hold", 0, now, "keyboard")
+                    self.to_screens(KEY_F24, 1)
+                    self.to_screens(KEY_F24, 0)
+                self.do_action("dictate_hold", 0, now, "keyboard")
                 return hide
-            if value == 0 and tap == mod:
-                tap = None
-                modifier_tap(mod, tap_code, now)
+            if value == 0 and self.tap == mod:
+                self.tap = None
+                self.modifier_tap(mod, self.tap_code, now)
             return hide
-        if value == 1 and code not in combos_down and meta_hidden:
+        if value == 1 and code not in self.combos_down and self.meta_hidden:
             # Another key while Meta is still held after a combination: the desktop gets Meta
             # back first, so Meta+that key still works there.
-            for c in sorted(meta_hidden):
-                to_screens(c, 1)
-            meta_hidden.clear()
-        if value == 0 and code in combos_down:
-            action = combos_down.pop(code)
-            if state["pointer"] or not needs_pointer(action):
-                do_action(action, 0, now, "keyboard")
+            for c in sorted(self.meta_hidden):
+                self.to_screens(c, 1)
+            self.meta_hidden.clear()
+        if value == 0 and code in self.combos_down:
+            action = self.combos_down.pop(code)
+            if self.pointer or not needs_pointer(action):
+                self.do_action(action, 0, now, "keyboard")
             return True
-        if value != 1 or not state["rules"]["key_bindings"]:
-            return value == 2 and code in combos_down
-        combo = "+".join(str(c) for c in sorted(held_modifiers) + [code])
-        action = state["rules"]["key_bindings"].get(combo)
+        if value != 1 or not self.rules["key_bindings"]:
+            return value == 2 and code in self.combos_down
+        combo = "+".join(str(c) for c in sorted(self.held_modifiers) + [code])
+        action = self.rules["key_bindings"].get(combo)
         if not known_action(action):
-            combo, action = release_combo(code) or (combo, action)
-        if not known_action(action) or action in ("key", "none") or (pause.paused and not works_paused(action)):
+            combo, action = self.release_combo(code) or (combo, action)
+        if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
             return False
-        combos_down[code] = action
-        if held_meta - meta_hidden:
+        self.combos_down[code] = action
+        if self.held_meta - self.meta_hidden:
             # The desktop saw Meta go down. Another key in between keeps its release from
             # opening Plasma's launcher, and Meta comes up there now: KWin takes Meta with a
             # mouse button for moving or resizing windows, which would swallow a gaze click.
             # Its real release is dropped (above).
-            to_screens(KEY_F24, 1)
-            to_screens(KEY_F24, 0)
-            for c in sorted(held_meta - meta_hidden):
-                to_screens(c, 0)
-            meta_hidden.update(held_meta)
-        if state["pointer"] or not needs_pointer(action):
-            do_action(action, 1, now, "keyboard")
+            self.to_screens(KEY_F24, 1)
+            self.to_screens(KEY_F24, 0)
+            for c in sorted(self.held_meta - self.meta_hidden):
+                self.to_screens(c, 0)
+            self.meta_hidden.update(self.held_meta)
+        if self.pointer or not needs_pointer(action):
+            self.do_action(action, 1, now, "keyboard")
         log(f"key combination {combo}: {action}")
         return True
 
-    def release_combo(code):
+    def release_combo(self, code):
         """A release_keys combination this key completes with the modifiers held, more of them
         too (one may be stuck here as well): (combo, "release_keys"), or None."""
-        for combo, action in state["rules"]["key_bindings"].items():
+        for combo, action in self.rules["key_bindings"].items():
             if action != "release_keys":
                 continue
             *mods, last = combo.split("+")
             if mods and last == str(code) and all(m.isdecimal() for m in mods) \
-                    and {int(m) for m in mods} <= held_modifiers:
+                    and {int(m) for m in mods} <= self.held_modifiers:
                 return combo, action
         return None
 
-    def tap_action(mod, code):
+    def tap_action(self, mod, code):
         """A lone modifier's combination and action, (combo, None) when it does nothing now. A
         right-hand key's own binding ("97": Right Ctrl) comes before the folded one."""
-        bindings = state["rules"]["key_bindings"]
+        bindings = self.rules["key_bindings"]
         combo = str(code) if code != mod and str(code) in bindings else str(mod)
         action = bindings.get(combo)
-        if not known_action(action) or action in ("key", "none") or (pause.paused and not works_paused(action)):
+        if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
             return combo, None
         return combo, action
 
-    def cancel_talk():
+    def cancel_talk(self):
         """A key, mouse button or scroll while a hold-to-talk modifier is held: it was a shortcut
         (Ctrl+C), so the dictation it started is dropped, without its cancel tone."""
-        nonlocal talk_code, talk_hidden
-        if talk_code is not None:
-            if talk_hidden:
-                to_screens(talk_code, 1)  # the desktop gets the modifier before the key it's for
-            talk_code, talk_hidden = None, False
+        if self.talk_code is not None:
+            if self.talk_hidden:
+                self.to_screens(self.talk_code, 1)  # the desktop gets the modifier before the key it's for
+            self.talk_code, self.talk_hidden = None, False
             try:
-                screens_sock.sendto(b"cancel keyboard quiet", VOICE)
+                self.screens_sock.sendto(b"cancel keyboard quiet", VOICE)
             except OSError:
                 pass
             log("dictate_hold: cancelled (another key while held: a shortcut)")
 
-    def modifier_tap(mod, code, now):
+    def modifier_tap(self, mod, code, now):
         """A modifier pressed and released alone: its binding, if it has one ("125": Meta tap)."""
-        combo, action = tap_action(mod, code)
+        combo, action = self.tap_action(mod, code)
         if action is None or action == "dictate_hold":
             return  # nothing, or hold to talk (key_binding), which started on the press
         # The desktop gets a key in between before the release goes there, so the tap isn't one
         # there too: a Meta tap would open Plasma's launcher.
-        to_screens(KEY_F24, 1)
-        to_screens(KEY_F24, 0)
-        if state["pointer"] or not needs_pointer(action):
-            do_action(action, 1, now, "keyboard")
-            do_action(action, 0, now, "keyboard")
+        self.to_screens(KEY_F24, 1)
+        self.to_screens(KEY_F24, 0)
+        if self.pointer or not needs_pointer(action):
+            self.do_action(action, 1, now, "keyboard")
+            self.do_action(action, 0, now, "keyboard")
         log(f"key combination {combo}: {action}")
 
-
-    screens_down = set()  # keys the desktop was told went down and not yet up (see reconcile_desktop_keys)
-
-    def to_screens(code, value, button=False):
+    def to_screens(self, code, value, button=False):
         """A key for the desktop screens (ft-screens decides whether it types): one below
         BTN_MISC, or with button, a mouse button (BTN_MOUSE..BTN_TASK), which ft-screens gives
         the screen the pointer is on. Nothing else (gamepad, joystick, digitizer buttons, keys
         from KEY_OK up), but the release of anything the desktop has down."""
         if value not in (0, 1):
             return
-        if code < BTN_MISC or (button and BTN_MOUSE <= code <= BTN_TASK) or (not value and code in screens_down):
+        if code < BTN_MISC or (button and BTN_MOUSE <= code <= BTN_TASK) or (not value and code in self.screens_down):
             try:
-                screens_sock.sendto(f"key {code} {value}".encode(), SCREENS)
+                self.screens_sock.sendto(f"key {code} {value}".encode(), SCREENS)
             except OSError:
                 return  # ft-screens not running
-            (screens_down.add if value else screens_down.discard)(code)
-    nodes = {}  # fd -> Node
-    # Nodes already probed (rejected or open): path -> inode. A device that disconnects and
-    # reconnects between two scans often gets the same event numbers back, so the path alone
-    # would hide it; the re-created node has a new inode.
-    seen = {}
-    next_scan = 0.0
+            (self.screens_down.add if value else self.screens_down.discard)(code)
 
-    volume = Volume()
-    # What's still to type, in order: a character (str) from dictation, ("quiet", character)
-    # from Full Keyboard (its text isn't logged), or ("key", code, value), a key Full Keyboard
-    # pressed or released.
-    typing = collections.deque()
-    typing_down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
-    typing_at = 0.0  # the next press or release goes then
-    untyped = []  # characters with no key where typing went, logged when the queue is empty (None: quiet)
-    kb_held = {}  # keys Full Keyboard holds down: code -> to the desktop
-    desktop_layout = DesktopLayout()
-
-    def type_text(text, quiet=False):
+    def type_text(self, text, quiet=False):
         """Queue dictation's text (see the top), or with quiet, Full Keyboard's. Which keys type
         it is worked out as it goes, where typing goes then."""
-        desktop_layout.refresh()
+        self.desktop_layout.refresh()
         chars = [c for c in text if c.isprintable()]
-        room = max(0, TYPE_MAX - len(typing))
-        typing.extend((("quiet", c) for c in chars[:room]) if quiet else chars[:room])
+        room = max(0, TYPE_MAX - len(self.typing))
+        self.typing.extend((("quiet", c) for c in chars[:room]) if quiet else chars[:room])
         if not quiet or len(chars) > room:
             log(f"typing {min(len(chars), room)} characters for {'Full Keyboard' if quiet else 'Frametop Voice'}"
                 + (f" ({len(chars) - room} dropped: too many waiting)" if len(chars) > room else ""))
 
-    def report_untyped(desktop):
-        if untyped and not typing:
-            where = f"the desktop's layout ({desktop_layout.name})" if desktop else "a US layout (Steam)"
-            said = "".join(dict.fromkeys(c for c in untyped if c is not None))
-            log(f"typing: {len(untyped)} characters {where} has no key for" + (f": {said}" if said else ""))
-            untyped.clear()
+    def report_untyped(self, desktop):
+        if self.untyped and not self.typing:
+            where = f"the desktop's layout ({self.desktop_layout.name})" if desktop else "a US layout (Steam)"
+            said = "".join(dict.fromkeys(c for c in self.untyped if c is not None))
+            log(f"typing: {len(self.untyped)} characters {where} has no key for" + (f": {said}" if said else ""))
+            self.untyped.clear()
 
-    def type_key(code, value, desktop):
+    def type_key(self, code, value, desktop):
         if desktop:
-            to_screens(code, value)
+            self.to_screens(code, value)
         else:
-            keyboard.emit(EV_KEY, code, value)
-            keyboard.sync()
+            self.keyboard.emit(EV_KEY, code, value)
+            self.keyboard.sync()
 
-    def typing_blocked(now):
+    def typing_blocked(self, now):
         """A modifier is held (the text would be shortcuts), except a hold-to-talk key the
         desktop never got, when typing goes there."""
-        held = held_modifiers
-        if talk_hidden and now < state["desktop_until"]:
-            held = held - {MODIFIERS[talk_code]}
+        held = self.held_modifiers
+        if self.talk_hidden and now < self.desktop_until:
+            held = held - {MODIFIERS[self.talk_code]}
         return bool(held)
 
-    def typing_tick(now):
+    def typing_tick(self, now):
         """Release the character pressed last, or press the next, when it's time. A new one
         waits while a modifier is held."""
-        nonlocal typing_at
-        if now < typing_at:
+        if now < self.typing_at:
             return
-        if typing_down:
-            code, mods, desktop = typing_down.pop()
-            type_key(code, 0, desktop)
+        if self.typing_down:
+            code, mods, desktop = self.typing_down.pop()
+            self.type_key(code, 0, desktop)
             for m in reversed(mods):
-                type_key(m, 0, desktop)
-        elif typing and typing[0][0] == "key":
+                self.type_key(m, 0, desktop)
+        elif self.typing and self.typing[0][0] == "key":
             # Full Keyboard's key, with its modifiers its own: a held one doesn't stop it. It
             # comes up where it went down.
-            _, code, value = typing.popleft()
+            _, code, value = self.typing.popleft()
             if value:
-                if code in kb_held:
+                if code in self.kb_held:
                     return  # down already
-                desktop = kb_held[code] = now < state["desktop_until"]
-            elif code in kb_held:
-                desktop = kb_held.pop(code)
+                desktop = self.kb_held[code] = now < self.desktop_until
+            elif code in self.kb_held:
+                desktop = self.kb_held.pop(code)
             else:
                 return  # not down
-            type_key(code, value, desktop)
-        elif typing and not typing_blocked(now):
-            desktop = now < state["desktop_until"]
-            keys = desktop_layout.keys if desktop else US_KEYS
-            item = typing.popleft()
+            self.type_key(code, value, desktop)
+        elif self.typing and not self.typing_blocked(now):
+            desktop = now < self.desktop_until
+            keys = self.desktop_layout.keys if desktop else US_KEYS
+            item = self.typing.popleft()
             ch = item if isinstance(item, str) else item[1]
             if ch not in keys:
-                untyped.append(ch if isinstance(item, str) else None)
-                report_untyped(desktop)
+                self.untyped.append(ch if isinstance(item, str) else None)
+                self.report_untyped(desktop)
                 return  # the next one right away
             code, mods = keys[ch]
             for m in mods:
-                type_key(m, 1, desktop)
-            type_key(code, 1, desktop)
-            typing_down.append((code, mods, desktop))
-            report_untyped(desktop)
+                self.type_key(m, 1, desktop)
+            self.type_key(code, 1, desktop)
+            self.typing_down.append((code, mods, desktop))
+            self.report_untyped(desktop)
         else:
             return
-        typing_at = now + TYPE_STEP
+        self.typing_at = now + TYPE_STEP
 
-    def typing_timeout(now, default):
-        if typing_down or (typing and (typing[0][0] == "key" or not typing_blocked(now))):
-            return max(0.0, min(default, typing_at - now))
+    def typing_timeout(self, now, default):
+        if self.typing_down or (self.typing and (self.typing[0][0] == "key" or not self.typing_blocked(now))):
+            return max(0.0, min(default, self.typing_at - now))
         return default
 
-    def restore_keymaps():
+    def restore_keymaps(self):
         """Give remapped devices their volume keys back, so they work without the relay."""
-        for node in nodes.values():
+        for node in self.nodes.values():
             if node.remapped:
                 try:
                     remap_volume(node.fd, restore=True)
                 except OSError:
                     pass  # device already gone
 
-    atexit.register(restore_keymaps)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so atexit runs on systemctl stop
-
-    def take_volume(node):
+    def take_volume(self, node):
         """Keep the node's volume keys from gamescope and SteamVR, which read every device.
 
         Returns False for a non-candidate node there's nothing to do with.
         """
-        if not can_grab:
+        if not self.can_grab:
             return node.candidate
         try:
             found = remap_volume(node.fd)
@@ -1683,20 +1667,20 @@ def main():
         log(f"{node.name} ({node.path}): can't take over its volume keys")
         return node.candidate
 
-    def role_of(node):
-        return node_role(state["rules"]["devices"].get(node.id, {}), node, nodes.values())
+    def role_of(self, node):
+        return node_role(self.rules["devices"].get(node.id, {}), node, self.nodes.values())
 
-    def release_held(node):
+    def release_held(self, node):
         for code in node.held:
-            (mouse if code >= BTN_MISC else keyboard).emit(EV_KEY, code, 0)
+            (self.mouse if code >= BTN_MISC else self.keyboard).emit(EV_KEY, code, 0)
         node.held.clear()
-        mouse.sync()
-        keyboard.sync()
+        self.mouse.sync()
+        self.keyboard.sync()
 
-    def physically_down():
+    def physically_down(self):
         """The keys down on every device read here, as the kernel has them (EVIOCGKEY)."""
         down = set()
-        for node in nodes.values():
+        for node in self.nodes.values():
             if node.network:
                 down |= node.down
                 continue
@@ -1708,47 +1692,47 @@ def main():
             down.update(i * 8 + bit for i, b in enumerate(buf) if b for bit in range(8) if b >> bit & 1)
         return down
 
-    def reconcile_desktop_keys():
+    def reconcile_desktop_keys(self):
         """A key the desktop has down that no device holds comes up there, and the key
         combinations forget a Meta or modifier no device holds. A key can be left down when
         its device vanishes with it held (release_held only lets go of it here) or a release
         goes astray: on 2026-10-01, after a calibration, Meta stayed down in KWin, so typing
         opened the overview and clicks on the desktop did other things."""
-        if not screens_down and not held_meta and not held_modifiers:
+        if not self.screens_down and not self.held_meta and not self.held_modifiers:
             return
-        down = physically_down()
-        typed = {k for code, mods, desktop in typing_down if desktop for k in (code, *mods)}  # dictation's, coming up next
-        typed |= {code for code, desktop in kb_held.items() if desktop}  # Full Keyboard's
-        for code in sorted(screens_down - down - typed):
-            to_screens(code, 0)
+        down = self.physically_down()
+        typed = {k for code, mods, desktop in self.typing_down if desktop for k in (code, *mods)}  # dictation's, coming up next
+        typed |= {code for code, desktop in self.kb_held.items() if desktop}  # Full Keyboard's
+        for code in sorted(self.screens_down - down - typed):
+            self.to_screens(code, 0)
             log(f"key {code} released on the desktop: no keyboard holds it")
-        for code in [c for c in held_meta if c not in down]:
-            held_meta.discard(code)
-            meta_hidden.discard(code)
-        held_modifiers.intersection_update({MODIFIERS[c] for c in down if c in MODIFIERS})
+        for code in [c for c in self.held_meta if c not in down]:
+            self.held_meta.discard(code)
+            self.meta_hidden.discard(code)
+        self.held_modifiers.intersection_update({MODIFIERS[c] for c in down if c in MODIFIERS})
 
-    def release_all_keys():
+    def release_all_keys(self):
         """release_keys: what this relay holds that no device does comes up, on the desktop and
         on its own virtual keyboard and mouse, combinations left down are forgotten, and
         ft-screens lets go of every key, on the desktop screens (every modifier in KWin too) and a
         remote display (its "keys release")."""
-        reconcile_desktop_keys()
-        down = physically_down()
-        for code in [c for c in combos_down if c not in down]:
-            del combos_down[code]  # its device went with it held: it kept modifier taps from working
-        for node in nodes.values():
+        self.reconcile_desktop_keys()
+        down = self.physically_down()
+        for code in [c for c in self.combos_down if c not in down]:
+            del self.combos_down[code]  # its device went with it held: it kept modifier taps from working
+        for node in self.nodes.values():
             for code in sorted(node.held - down):
-                (mouse if code >= BTN_MISC else keyboard).emit(EV_KEY, code, 0)
+                (self.mouse if code >= BTN_MISC else self.keyboard).emit(EV_KEY, code, 0)
                 node.held.discard(code)
-        mouse.sync()
-        keyboard.sync()
+        self.mouse.sync()
+        self.keyboard.sync()
         try:
-            screens_sock.sendto(b"keys release", SCREENS)
+            self.screens_sock.sendto(b"keys release", SCREENS)
         except OSError:
             pass  # the Frametop desktop isn't running
         log("release_keys: every key let go")
 
-    def keys_down(node):
+    def keys_down(self, node):
         if node.network:
             return bool(node.down)
         buf = bytearray((KEY_MAX + 8) // 8)
@@ -1758,23 +1742,23 @@ def main():
             return False
         return any(buf)
 
-    def apply_roles():
+    def apply_roles(self):
         """Grab pointer devices, and pass-through keyboards while typing goes to the desktop.
 
         A keyboard with a key down keeps its grab state until it's released, or the key
         would stay held on one side. Returns True if one is still waiting.
         """
-        desktop = time.monotonic() < state["desktop_until"]
+        desktop = time.monotonic() < self.desktop_until
         waiting = False
-        for node in nodes.values():
+        for node in self.nodes.values():
             if not node.candidate:
                 continue  # volume keys only, taken over when found
-            role = role_of(node)
-            want_grab = can_grab and (role == "pointer"
+            role = self.role_of(node)
+            want_grab = self.can_grab and (role == "pointer"
                                       or (role == "passthrough" and node.is_keyboard and desktop))
             if node.network:
                 want_grab = node.grabbed = False  # nothing else reads it
-            if want_grab != node.grabbed and role == "passthrough" and keys_down(node):
+            if want_grab != node.grabbed and role == "passthrough" and self.keys_down(node):
                 waiting = True
             elif want_grab != node.grabbed:
                 try:
@@ -1783,39 +1767,39 @@ def main():
                 except OSError as e:
                     log(f"{'grab' if want_grab else 'ungrab'} failed for {node.name}: {e}")
                 if not node.grabbed:
-                    release_held(node)
+                    self.release_held(node)
             if role != node.role:
                 log(f"{node.name} ({node.path}, {node.id}): {role}{', grabbed' if node.grabbed else ''}")
                 node.role = role
-        if not waiting and desktop != state["typing_applied"]:
-            state["typing_applied"] = desktop
+        if not waiting and desktop != self.typing_applied:
+            self.typing_applied = desktop
             log(f"typing goes to {'the desktop (keyboards grabbed)' if desktop else 'Steam'}")
         return waiting
 
-    def drop(node, reason):
-        release_held(node)
+    def drop(self, node, reason):
+        self.release_held(node)
         # A pointer-mode button the device held (a drag, a testbench killed mid-drag, or a release
         # read after the host's "hostbye") comes up in the helper too, unless another device holds
         # the same action (DEE-284).
-        others = {action for n in nodes.values() if n is not node for action in n.actions.values()}
+        others = {action for n in self.nodes.values() if n is not node for action in n.actions.values()}
         for action in sorted(set(node.actions.values()) - others):
-            do_action(action, 0, time.monotonic())
+            self.do_action(action, 0, time.monotonic())
         node.actions.clear()
-        if volume.held and volume.held[0] == node.fd:
-            volume.release()
+        if self.volume.held and self.volume.held[0] == node.fd:
+            self.volume.release()
         os.close(node.fd)
         if node.wfd is not None:
             os.close(node.wfd)
-        del nodes[node.fd]
-        seen.pop(node.path, None)
+        del self.nodes[node.fd]
+        self.seen.pop(node.path, None)
         log(f"released {node.name} ({node.path}): {reason}")
 
-    def host_message(cmd, words, now):
+    def host_message(self, cmd, words, now):
         path = f"host:{words[1]}:{words[2]}"
-        node = next((n for n in nodes.values() if n.path == path), None)
+        node = next((n for n in self.nodes.values() if n.path == path), None)
         if cmd == "hostbye":
             if node:
-                drop(node, "its host let go")
+                self.drop(node, "its host let go")
             return
         if node is None:
             if cmd != "hostdev":
@@ -1826,8 +1810,8 @@ def main():
             node = Node(path, r, f"{label} {'Mouse' if mouse_kind else 'Keyboard'}", BUS_NETWORK, 0, 0, path,
                         mouse_kind, not mouse_kind, network=True)
             node.wfd = w
-            nodes[r] = node
-            apply_roles()
+            self.nodes[r] = node
+            self.apply_roles()
         node.until = now + HOST_TIMEOUT
         if cmd != "hostev":
             return
@@ -1850,56 +1834,56 @@ def main():
         except BlockingIOError:
             # A key-up may be among them: let go of every key it holds rather than keep one down.
             # Its next hello brings it back.
-            drop(node, "events dropped, the relay is behind")
+            self.drop(node, "events dropped, the relay is behind")
             return
         for code, value in keys:
             (node.down.add if value else node.down.discard)(code)
 
-    def reply(addr, obj):
+    def reply(self, addr, obj):
         try:
-            control.sendto(json.dumps(obj).encode(), addr)
+            self.control.sendto(json.dumps(obj).encode(), addr)
         except OSError:
-            watchers.pop(addr, None)
+            self.watchers.pop(addr, None)
 
-    def kb_tell(now, message=None):
+    def kb_tell(self, now, message=None):
         """Tell Full Keyboard message, or with none, "kb DESKTOP SURFACE" if that changed: typing
         goes to the desktop 0|1, and the screens show with Frametop not paused 0|1 (it may show
         over them with the dashboard closed). From the control socket: it takes word from
         @frametop_relay only."""
-        addr = state["kb_addr"]
+        addr = self.kb_addr
         if addr is None:
             return
         if message is None:
-            message = (f"kb {int(now < state['desktop_until'])}"
-                       f" {int(now < state['shown_until'] and not pause.paused)}")
-            if message == state["kb_said"]:
+            message = (f"kb {int(now < self.desktop_until)}"
+                       f" {int(now < self.shown_until and not self.pause.paused)}")
+            if message == self.kb_said:
                 return
-            state["kb_said"] = message
+            self.kb_said = message
         try:
-            control.sendto(message.encode(), addr)
+            self.control.sendto(message.encode(), addr)
         except OSError:
             pass  # gone: its hellos stop, and kb_gone follows
 
-    def kb_gone(why):
+    def kb_gone(self, why):
         """Full Keyboard stopped or restarted: its keys still to come are dropped, and the keys
         it holds come up where they went down."""
-        state["kb_addr"], state["kb_said"] = None, None
-        kept = [item for item in typing if isinstance(item, str) or item[0] != "key"]
-        typing.clear()
-        typing.extend(kept)
-        for code, desktop in sorted(kb_held.items()):
-            type_key(code, 0, desktop)
-        kb_held.clear()
+        self.kb_addr, self.kb_said = None, None
+        kept = [item for item in self.typing if isinstance(item, str) or item[0] != "key"]
+        self.typing.clear()
+        self.typing.extend(kept)
+        for code, desktop in sorted(self.kb_held.items()):
+            self.type_key(code, 0, desktop)
+        self.kb_held.clear()
         log(f"Full Keyboard {why}")
 
-    def handle_control(now):
+    def handle_control(self, now):
         while True:
             try:
-                data, anc, _, addr = control.recvmsg(65536, socket.CMSG_SPACE(creds.size))
+                data, anc, _, addr = self.control.recvmsg(65536, socket.CMSG_SPACE(CREDS.size))
             except BlockingIOError:
-                kb_tell(now)  # what changed reaches Full Keyboard at once
+                self.kb_tell(now)  # what changed reaches Full Keyboard at once
                 return
-            pid, uid = next((creds.unpack(d[:creds.size])[:2] for level, kind, d in anc
+            pid, uid = next((CREDS.unpack(d[:CREDS.size])[:2] for level, kind, d in anc
                              if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), (None, None))
             words = data.decode(errors="replace").split()
             cmd = words[0] if words else ""
@@ -1911,29 +1895,29 @@ def main():
                     # From ft-screens (unbound, no reply): where typing goes, repeated every second.
                     # "keyboard desktop|steam 1|0 1|0": the third word, whether the screens show;
                     # the fourth, whether it's paused (an older ft-screens leaves it out).
-                    desktop = len(words) > 1 and words[1] == "desktop" and not pause.paused
-                    state["desktop_until"] = now + 3.0 if desktop else 0.0
-                    state["shown_until"] = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
+                    desktop = len(words) > 1 and words[1] == "desktop" and not self.pause.paused
+                    self.desktop_until = now + 3.0 if desktop else 0.0
+                    self.shown_until = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
                     if uid == os.getuid():
-                        pause.screens_seen(pid)  # a desktop started while paused hides too
+                        self.pause.screens_seen(pid)  # a desktop started while paused hides too
                         if len(words) > 3 and words[3] in ("0", "1"):
-                            pause.screens_report(words[3] == "1")
+                            self.pause.screens_report(words[3] == "1")
                     continue
                 if cmd == "vrbtn" and len(words) == 3 and words[1] in VR_BUTTONS and words[2] in ("0", "1"):
-                    vr_button(words[1], int(words[2]), now)
+                    self.vr_button(words[1], int(words[2]), now)
                     continue
                 if cmd == "vrhello":
-                    vr_bind(now)
-                    pause.helper_started()
+                    self.vr_bind(now)
+                    self.pause.helper_started()
                     continue
                 if cmd == "vrgame" and len(words) == 2:
                     if words[1] == "1":
-                        gamepad.stop("a VR game started")
-                    pause.game_state(words[1] == "1", now)
+                        self.gamepad.stop("a VR game started")
+                    self.pause.game_state(words[1] == "1", now)
                     continue
                 if cmd == "vrdash" and len(words) == 2:
-                    pause.dashboard_state(words[1] == "1")
-                    gamepad.dashboard_state(words[1] == "1")
+                    self.pause.dashboard_state(words[1] == "1")
+                    self.gamepad.dashboard_state(words[1] == "1")
                     continue
                 if cmd == "gamepad" and len(words) == 2 and words[1] in ("desktop", "remote", "off"):
                     # From ft-screens (no reply): SteamVR's Gamepad mode is Frametop's or ended. It
@@ -1941,7 +1925,7 @@ def main():
                     if uid != os.getuid():
                         log(f"gamepad from another user ({uid}): ignored")
                     else:
-                        gamepad.screens_word(None if words[1] == "off" else words[1], now, gamepad_blocked())
+                        self.gamepad.screens_word(None if words[1] == "off" else words[1], now, self.gamepad_blocked())
                     continue
                 if cmd == "vrpad" and len(words) == 8:
                     # From the controller reader in gamepad mode. It presses buttons, so only from
@@ -1949,17 +1933,17 @@ def main():
                     if uid != os.getuid():
                         log(f"vrpad from another user ({uid}): ignored")
                     elif (pad_state := vrpad.parse(words[1:])) is not None:
-                        gamepad.reader_state(pad_state, now)
+                        self.gamepad.reader_state(pad_state, now)
                     continue
                 if cmd == "pause" and len(words) >= 2 and words[1] in ("on", "off", "toggle", "?"):
                     # From input/ft-pause, the settings app, or the gesture reader (unbound, no reply).
                     reason = words[2] if len(words) > 2 else "command"
                     if words[1] == "toggle":
-                        pause.toggle(reason, now)
+                        self.pause.toggle(reason, now)
                     elif words[1] != "?":
-                        pause.set(words[1] == "on", reason, now)
+                        self.pause.set(words[1] == "on", reason, now)
                     if addr:
-                        reply(addr, pause.status())
+                        self.reply(addr, self.pause.status())
                     continue
                 if cmd == "pause" and words[1:] in (["enforce"], ["defer", "remote"]):
                     # From frametop-session.sh (input/ft-pause enforce|defer-remote) as a desktop
@@ -1968,14 +1952,14 @@ def main():
                     if uid != os.getuid():
                         log(f"pause {words[1]} from another user ({uid}): ignored")
                     elif words[1] == "enforce":
-                        pause.desktop_started()
+                        self.pause.desktop_started()
                     else:
-                        pause.defer_remote()
+                        self.pause.defer_remote()
                     if addr:
-                        reply(addr, pause.status())
+                        self.reply(addr, self.pause.status())
                     continue
                 if cmd == "textfield" and len(words) == 2:
-                    text_field(words[1] == "1")
+                    self.text_field(words[1] == "1")
                     continue
                 if cmd in ("hostdev", "hostev", "hostbye"):
                     # A host's keyboard or mouse, from its ft-stream (see "Host devices"). Keys and
@@ -1983,12 +1967,12 @@ def main():
                     if uid != os.getuid():
                         log(f"{cmd} from another user ({uid}): ignored")
                     elif len(words) >= 3 and HOST_ID.fullmatch(words[1]) and words[2] in ("mouse", "keyboard"):
-                        host_message(cmd, words, now)
+                        self.host_message(cmd, words, now)
                     continue
                 if cmd == "type":
                     # From Frametop Voice (unbound, no reply). It types keys, so only from this user.
                     if uid == os.getuid():
-                        type_text(data[len(b"type "):].decode(errors="replace"))
+                        self.type_text(data[len(b"type "):].decode(errors="replace"))
                     else:
                         log(f"type from another user ({uid}): ignored")
                     continue
@@ -1999,15 +1983,15 @@ def main():
                     # hears it's there ("fullkb OPEN"), so it opens Full Keyboard, not its own.
                     if uid != os.getuid() or not addr:
                         continue
-                    if addr != state["kb_addr"]:
-                        if state["kb_addr"] is not None:
-                            kb_gone("restarted")
+                    if addr != self.kb_addr:
+                        if self.kb_addr is not None:
+                            self.kb_gone("restarted")
                         log("Full Keyboard connected")
-                    state["kb_addr"], state["kb_until"], state["kb_said"] = addr, now + 3.0, None
-                    kb_tell(now)
+                    self.kb_addr, self.kb_until, self.kb_said = addr, now + 3.0, None
+                    self.kb_tell(now)
                     opened = "1" if len(words) > 1 and words[1] == "1" else "0"
                     try:
-                        screens_sock.sendto(f"fullkb {opened}".encode(), SCREENS)
+                        self.screens_sock.sendto(f"fullkb {opened}".encode(), SCREENS)
                     except OSError:
                         pass  # ft-screens not running
                     continue
@@ -2016,19 +2000,19 @@ def main():
                     # 0|1" (a key's press or release) and "kbtext TEXT" (what its input methods
                     # composed). Only from the Full Keyboard that said hello. In order with what's
                     # still to type, where typing goes then.
-                    if uid != os.getuid() or addr is None or addr != state["kb_addr"]:
+                    if uid != os.getuid() or addr is None or addr != self.kb_addr:
                         continue
                     if cmd == "kbtext":
-                        type_text(data[len(b"kbtext "):].decode(errors="replace"), quiet=True)
+                        self.type_text(data[len(b"kbtext "):].decode(errors="replace"), quiet=True)
                     elif (len(words) == 3 and words[1].isdigit() and 0 < int(words[1]) < BTN_MISC
-                          and words[2] in ("0", "1") and len(typing) < TYPE_MAX):
-                        typing.append(("key", int(words[1]), int(words[2])))
+                          and words[2] in ("0", "1") and len(self.typing) < TYPE_MAX):
+                        self.typing.append(("key", int(words[1]), int(words[2])))
                     continue
                 if cmd == "kbpanel" and len(words) == 2 and words[1] in ("show", "hide"):
                     # From ft-screens (unbound): open or close Full Keyboard, which it does for the
                     # "vrkeyboard" commands while Full Keyboard is there.
                     if uid == os.getuid():
-                        kb_tell(now, f"kb {words[1]}")
+                        self.kb_tell(now, f"kb {words[1]}")
                     continue
                 if cmd == "kbpoke":
                     # From ft-screens (unbound): a fingertip on Full Keyboard's panel, "kbpoke
@@ -2036,20 +2020,20 @@ def main():
                     # universe), passed on as "kb poke ...". It presses keys, so only from this user.
                     if (uid == os.getuid() and len(words) in (3, 6) and words[1] in ("left", "right")
                             and words[2] in KB_POKES and all(KB_COORD.fullmatch(w) for w in words[3:])):
-                        kb_tell(now, "kb poke " + " ".join(words[1:]))
+                        self.kb_tell(now, "kb poke " + " ".join(words[1:]))
                     continue
                 if cmd == "calpanel" and len(words) == 2:
                     # From the pointer helper (see the top). Only from this user: it takes Enter.
                     if uid == os.getuid():
-                        state["calpanel_until"] = now + 3.0 if words[1] == "1" else 0.0
+                        self.calpanel_until = now + 3.0 if words[1] == "1" else 0.0
                     continue
                 if cmd == "gazeawake" and len(words) == 2:
-                    if state["pointer"]:
-                        state["pointer"].gaze_awake_until = now + 12.0 if words[1] == "1" else 0.0
+                    if self.pointer:
+                        self.pointer.gaze_awake_until = now + 12.0 if words[1] == "1" else 0.0
                     continue
                 if cmd == "gazewoke":
                     # The gaze took the pointer back (gaze mode owns it): it's on, as a wake leaves it.
-                    p = state["pointer"]
+                    p = self.pointer
                     if p and not p.active:
                         p.active, p.last_used = True, now
                         log("pointer on (gaze)")
@@ -2057,234 +2041,264 @@ def main():
                 if not addr:
                     continue  # unbound sender, nowhere to reply
                 if cmd == "devices":
-                    reply(addr, {"t": "devices", "pointer_mode": state["pointer_conf"] is not None,
-                                 "paused": pause.paused,
+                    self.reply(addr, {"t": "devices", "pointer_mode": self.pointer_conf is not None,
+                                 "paused": self.pause.paused,
                                  "actions": ACTIONS,
-                                 "nodes": [n.describe() for n in nodes.values() if n.candidate]})
+                                 "nodes": [n.describe() for n in self.nodes.values() if n.candidate]})
                 elif cmd == "watch":
                     seconds = float(words[1]) if len(words) > 1 else 30
-                    watchers[addr] = now + min(seconds, 600)
-                    reply(addr, {"t": "watching", "seconds": seconds})
+                    self.watchers[addr] = now + min(seconds, 600)
+                    self.reply(addr, {"t": "watching", "seconds": seconds})
                 elif cmd == "reload":
-                    load_config()
-                    apply_roles()
-                    if state["pointer"]:
-                        state["pointer"].send("reload")
-                    vr_bind(now)
-                    reply(addr, {"t": "reloaded"})
+                    self.load_config()
+                    self.apply_roles()
+                    if self.pointer:
+                        self.pointer.send("reload")
+                    self.vr_bind(now)
+                    self.reply(addr, {"t": "reloaded"})
                 elif cmd == "vrcapture":
                     seconds = float(words[1]) if len(words) > 1 else 30
-                    state["vr_capture_until"] = now + min(seconds, 120) if seconds > 0 else 0.0
-                    vr_bind(now)
-                    reply(addr, {"t": "vrcapture", "seconds": seconds})
+                    self.vr_capture_until = now + min(seconds, 120) if seconds > 0 else 0.0
+                    self.vr_bind(now)
+                    self.reply(addr, {"t": "vrcapture", "seconds": seconds})
                 else:
-                    reply(addr, {"t": "error", "error": f"unknown command {cmd!r}"})
+                    self.reply(addr, {"t": "error", "error": f"unknown command {cmd!r}"})
             except Exception as e:
                 log(f"bad control datagram {data!r}: {e!r}")
 
-    def broadcast(node, etype, code, value, now):
-        if not watchers or not node.candidate:
+    def broadcast(self, node, etype, code, value, now):
+        if not self.watchers or not node.candidate:
             return
         if etype == EV_REL and now - node.last_watch < 0.05:
             return  # motion: enough for an activity light
         node.last_watch = now
         msg = {"t": "event", "id": node.id, "path": node.path, "name": node.name, "role": node.role,
                "type": EV_NAMES.get(etype, str(etype)), "code": code, "value": value}
-        for addr, until in list(watchers.items()):
+        for addr, until in list(self.watchers.items()):
             if now > until:
-                del watchers[addr]
+                del self.watchers[addr]
             else:
-                reply(addr, msg)
+                self.reply(addr, msg)
 
-    vr_bind(time.monotonic())  # a helper that's already running keeps its buttons in step
-    waiting = False  # a keyboard's grab waits for its keys to come up
-    # A relay that went away with a key down left it down on the desktop, where this one
-    # never sent it: modifiers and mouse buttons come up there now (a release of a key that
-    # isn't down is nothing), and then ft-screens lets go of every key it holds, on the desktop
-    # screens and a remote display (DEE-265).
-    for code in sorted(MODIFIERS):
-        to_screens(code, 0)
-    for code in range(BTN_MOUSE, BTN_TASK + 1):
-        to_screens(code, 0, button=True)
-    try:
-        screens_sock.sendto(b"keys release", SCREENS)
-    except OSError:
-        pass  # the Frametop desktop isn't running
-    # ...and the same on its virtual keyboard and mouse, kept in the fd store (DEE-268)...
-    for dev in (mouse, keyboard):
-        if dev.reused:
-            dev.release_all()
-    # ...and on the pointer driver: a pointer-mode button held as it went never came up there.
-    # The helper ignores the release of a button it doesn't have down (DEE-269).
-    for driver in sorted(set(Pointer.DRIVER_BUTTONS.values())):
+    def run(self):
+        """The startup releases, then the loop: devices, the control socket and the timers."""
+        self.vr_bind(time.monotonic())  # a helper that's already running keeps its buttons in step
+        waiting = False  # a keyboard's grab waits for its keys to come up
+        # A relay that went away with a key down left it down on the desktop, where this one
+        # never sent it: modifiers and mouse buttons come up there now (a release of a key that
+        # isn't down is nothing), and then ft-screens lets go of every key it holds, on the desktop
+        # screens and a remote display (DEE-265).
+        for code in sorted(MODIFIERS):
+            self.to_screens(code, 0)
+        for code in range(BTN_MOUSE, BTN_TASK + 1):
+            self.to_screens(code, 0, button=True)
         try:
-            screens_sock.sendto(f"btn {driver} 0".encode(), HELPER)
+            self.screens_sock.sendto(b"keys release", SCREENS)
         except OSError:
-            break  # helper not running (SteamVR not running)
-    while True:
-        now = time.monotonic()
-        pointer = state["pointer"]
-        if now >= next_scan:
-            next_scan = now + 1.0
-            for node in [n for n in nodes.values() if n.network and now > n.until]:
-                drop(node, "its host went quiet")
-            reconcile_desktop_keys()
-            current = {}
-            for name in os.listdir("/dev/input"):
-                if name.startswith("event"):
-                    try:
-                        current[f"/dev/input/{name}"] = os.stat(f"/dev/input/{name}").st_ino
-                    except OSError:
-                        pass
-            for path in [p for p in seen if p not in current]:
-                del seen[path]
-            added = False
-            for path, ino in sorted(current.items()):
-                if seen.get(path) == ino:
-                    continue
-                # New here: a new device, or one that came back in the same place.
-                for old in [n for n in nodes.values() if n.path == path]:
-                    drop(old, "replaced by a new device node")
-                # A new node is root's alone until udev gives it to the input group, a moment
-                # after it appears. Opened in that gap, it would fail and never be tried
-                # again: leave it for the next scan instead.
-                if not os.access(path, os.R_OK):
-                    continue
-                seen[path] = ino
-                node = probe(path)
-                if node and node.volume_keys and not take_volume(node):
-                    os.close(node.fd)
-                    node = None
-                if node:
-                    nodes[node.fd] = node
-                    added = True
-            if added:
-                apply_roles()
-
-        # The 3D mouse connecting or letting go moves a hand role, so the pause gesture's reader
-        # looks the controllers up again (game_pause.py).
-        holding = bool(state["pointer_conf"] and state["pointer_conf"].active)
-        if holding != state["pointer_holding"]:
-            state["pointer_holding"] = holding
-            pause.controllers_changed()
-        ready, _, _ = select.select(list(nodes) + [control], [], [],
-                                    typing_timeout(now, min(volume.timeout(now, pointer.timeout() if pointer else 0.5),
-                                                            pause.timeout(now), gamepad.timeout(now))))
-        now = time.monotonic()
-        if pointer:
-            pointer.tick(now)
-        elif state["pointer_conf"]:
-            state["pointer_conf"].drain()  # paused: what waited still goes, in order
-        if state["vr_bind_retry"]:
-            vr_bind(now)
-        volume.tick(now)
-        typing_tick(now)
-        if state["kb_addr"] is not None and now >= state["kb_until"]:
-            kb_gone("stopped (no word for 3 seconds)")
-        kb_tell(now)
-        pause.tick(now)
-        gamepad.tick(now)
-        if state["vr_capture_until"] and now >= state["vr_capture_until"]:
-            vr_bind(now)  # capture over: back to the mapped buttons
-        if (now < state["desktop_until"]) != state["typing_applied"] or waiting:
-            waiting = apply_roles()
-        for fd in ready:
-            pointer = state["pointer"]  # (a pause or resume in this batch changes it)
-            if fd is control:
-                handle_control(now)
-                continue
-            node = nodes.get(fd)
-            if node is None:
-                continue  # dropped earlier in this batch (a host's "hostbye")
+            pass  # the Frametop desktop isn't running
+        # ...and the same on its virtual keyboard and mouse, kept in the fd store (DEE-268)...
+        for dev in (self.mouse, self.keyboard):
+            if dev.reused:
+                dev.release_all()
+        # ...and on the pointer driver: a pointer-mode button held as it went never came up there.
+        # The helper ignores the release of a button it doesn't have down (DEE-269).
+        for driver in sorted(set(Pointer.DRIVER_BUTTONS.values())):
             try:
-                data = os.read(fd, EVENT.size * 64)
-            except OSError as e:
-                if e.errno == errno.EAGAIN:
-                    continue
-                drop(node, os.strerror(e.errno))
-                continue
-            if not data:
-                drop(node, "closed")
-                continue
-            buttons = state["rules"]["buttons"].get(node.id, {})
-            for off in range(0, len(data) - EVENT.size + 1, EVENT.size):
-                _, _, etype, code, value = EVENT.unpack_from(data, off)
-                if etype in (EV_KEY, EV_REL):
-                    broadcast(node, etype, VOLUME_ORIGINAL.get(code, code) if node.remapped else code,
-                              value, now)
-                if (etype == EV_KEY and value == 1 and code not in MODIFIERS) or (etype == EV_REL and code in SCROLLS):
-                    tap = None  # a key, button or scroll in between: a modifier's release isn't a tap
-                    cancel_talk()
-                if etype == EV_KEY and ((node.remapped and code in VOLUME_ORIGINAL)
-                                        or (node.grabbed and code in VOLUME_STANDIN)):
-                    volume.key(fd, code, value, now)
-                    continue
-                if node.role == "volume":
-                    # A keyboard's media keys (its Consumer Control node) go to the desktop like a
-                    # pass-through keyboard's, and nowhere else: the node isn't grabbed, so gamescope
-                    # and SteamVR have them already. Not platform buttons: the headset's click button
-                    # is KEY_SELECT on gpio-keys (BUS_HOST). Nor a volume key a remap missed.
-                    if etype == EV_KEY and node.bus in (BUS_USB, BUS_BLUETOOTH) and code not in VOLUME_CODES:
-                        to_screens(code, value)
-                    continue
-                if node.role != "pointer":
-                    # Observed only, unless typing goes to the desktop. Key combinations work on
-                    # any pass-through keyboard.
-                    if node.role == "passthrough" and etype == EV_KEY and cal_enter(code, value, now):
+                self.screens_sock.sendto(f"btn {driver} 0".encode(), HELPER)
+            except OSError:
+                break  # helper not running (SteamVR not running)
+        while True:
+            now = time.monotonic()
+            pointer = self.pointer
+            if now >= self.next_scan:
+                self.next_scan = now + 1.0
+                for node in [n for n in self.nodes.values() if n.network and now > n.until]:
+                    self.drop(node, "its host went quiet")
+                self.reconcile_desktop_keys()
+                current = {}
+                for name in os.listdir("/dev/input"):
+                    if name.startswith("event"):
+                        try:
+                            current[f"/dev/input/{name}"] = os.stat(f"/dev/input/{name}").st_ino
+                        except OSError:
+                            pass
+                for path in [p for p in self.seen if p not in current]:
+                    del self.seen[path]
+                added = False
+                for path, ino in sorted(current.items()):
+                    if self.seen.get(path) == ino:
                         continue
-                    if node.role == "passthrough" and etype == EV_KEY and code < BTN_MISC and key_binding(code, value, now):
+                    # New here: a new device, or one that came back in the same place.
+                    for old in [n for n in self.nodes.values() if n.path == path]:
+                        self.drop(old, "replaced by a new device node")
+                    # A new node is root's alone until udev gives it to the input group, a moment
+                    # after it appears. Opened in that gap, it would fail and never be tried
+                    # again: leave it for the next scan instead.
+                    if not os.access(path, os.R_OK):
                         continue
-                    if node.role == "passthrough" and etype == EV_KEY:
-                        if value == 1 and code < BTN_MISC and now - last_typing >= 0.25:
-                            last_typing = now
-                            try:
-                                screens_sock.sendto(b"typing", HELPER)
-                            except OSError:
-                                pass  # helper not running (SteamVR not running)
-                        to_screens(code, value)
-                        if node.network and code < BTN_MISC and (code in node.held or
-                                                                 (value == 1 and now >= state["desktop_until"])):
-                            # Nothing else reads a host's keyboard: Steam gets it from here.
-                            keyboard.emit(etype, code, value)
-                            keyboard.sync()
-                            (node.held.add if value else node.held.discard)(code)
+                    self.seen[path] = ino
+                    node = probe(path)
+                    if node and node.volume_keys and not self.take_volume(node):
+                        os.close(node.fd)
+                        node = None
+                    if node:
+                        self.nodes[node.fd] = node
+                        added = True
+                if added:
+                    self.apply_roles()
+
+            # The 3D mouse connecting or letting go moves a hand role, so the pause gesture's reader
+            # looks the controllers up again (game_pause.py).
+            holding = bool(self.pointer_conf and self.pointer_conf.active)
+            if holding != self.pointer_holding:
+                self.pointer_holding = holding
+                self.pause.controllers_changed()
+            ready, _, _ = select.select(list(self.nodes) + [self.control], [], [],
+                                        self.typing_timeout(now, min(self.volume.timeout(now, pointer.timeout() if pointer else 0.5),
+                                                                self.pause.timeout(now), self.gamepad.timeout(now))))
+            now = time.monotonic()
+            if pointer:
+                pointer.tick(now)
+            elif self.pointer_conf:
+                self.pointer_conf.drain()  # paused: what waited still goes, in order
+            if self.vr_bind_retry:
+                self.vr_bind(now)
+            self.volume.tick(now)
+            self.typing_tick(now)
+            if self.kb_addr is not None and now >= self.kb_until:
+                self.kb_gone("stopped (no word for 3 seconds)")
+            self.kb_tell(now)
+            self.pause.tick(now)
+            self.gamepad.tick(now)
+            if self.vr_capture_until and now >= self.vr_capture_until:
+                self.vr_bind(now)  # capture over: back to the mapped buttons
+            if (now < self.desktop_until) != self.typing_applied or waiting:
+                waiting = self.apply_roles()
+            for fd in ready:
+                pointer = self.pointer  # (a pause or resume in this batch changes it)
+                if fd is self.control:
+                    self.handle_control(now)
                     continue
-                if etype == EV_KEY:
-                    action = buttons.get(str(code), DEFAULT_BUTTONS.get(code, "key"))
-                    # A button that went down on the virtual devices (paused, POINTER=0, or as a
-                    # key) comes up there, even if pointer mode or its binding changed meanwhile
-                    # (DEE-263).
-                    went_virtual = value != 1 and code in node.held
-                    if not went_virtual and (pointer or action == "pause_toggle") and action not in ("key", "none"):
-                        if value == 1:
-                            node.actions[code] = action
-                        elif value == 0:
-                            node.actions.pop(code, None)
-                        do_action(action, value, now)
+                node = self.nodes.get(fd)
+                if node is None:
+                    continue  # dropped earlier in this batch (a host's "hostbye")
+                try:
+                    data = os.read(fd, EVENT.size * 64)
+                except OSError as e:
+                    if e.errno == errno.EAGAIN:
                         continue
-                    if action == "none" and not went_virtual:
+                    self.drop(node, os.strerror(e.errno))
+                    continue
+                if not data:
+                    self.drop(node, "closed")
+                    continue
+                buttons = self.rules["buttons"].get(node.id, {})
+                for off in range(0, len(data) - EVENT.size + 1, EVENT.size):
+                    _, _, etype, code, value = EVENT.unpack_from(data, off)
+                    if etype in (EV_KEY, EV_REL):
+                        self.broadcast(node, etype, VOLUME_ORIGINAL.get(code, code) if node.remapped else code,
+                                  value, now)
+                    if (etype == EV_KEY and value == 1 and code not in MODIFIERS) or (etype == EV_REL and code in SCROLLS):
+                        self.tap = None  # a key, button or scroll in between: a modifier's release isn't a tap
+                        self.cancel_talk()
+                    if etype == EV_KEY and ((node.remapped and code in VOLUME_ORIGINAL)
+                                            or (node.grabbed and code in VOLUME_STANDIN)):
+                        self.volume.key(fd, code, value, now)
                         continue
-                    target = mouse if code >= BTN_MISC else keyboard
-                    target.emit(etype, code, value)
-                    # A mouse button goes to the desktop only when pointer mode passes it through
-                    # as a key (a side button for Back there). The rest, like every click with
-                    # POINTER=0 or paused, reach the desktop through a laser, if at all. (A
-                    # key-mapped button still goes to the virtual mouse too.)
-                    to_screens(code, value, button=bool(pointer) and not went_virtual)
-                    if value:
-                        node.held.add(code)
-                    else:
-                        node.held.discard(code)
-                elif etype == EV_REL:
-                    if pointer:
-                        pointer.motion(code, value, now)
-                    else:
-                        mouse.emit(etype, code, value)
-                elif etype == EV_SYN and code == SYN_REPORT:
-                    if pointer:
-                        pointer.flush(now)
-                    mouse.sync()
-                    keyboard.sync()
+                    if node.role == "volume":
+                        # A keyboard's media keys (its Consumer Control node) go to the desktop like a
+                        # pass-through keyboard's, and nowhere else: the node isn't grabbed, so gamescope
+                        # and SteamVR have them already. Not platform buttons: the headset's click button
+                        # is KEY_SELECT on gpio-keys (BUS_HOST). Nor a volume key a remap missed.
+                        if etype == EV_KEY and node.bus in (BUS_USB, BUS_BLUETOOTH) and code not in VOLUME_CODES:
+                            self.to_screens(code, value)
+                        continue
+                    if node.role != "pointer":
+                        # Observed only, unless typing goes to the desktop. Key combinations work on
+                        # any pass-through keyboard.
+                        if node.role == "passthrough" and etype == EV_KEY and self.cal_enter(code, value, now):
+                            continue
+                        if node.role == "passthrough" and etype == EV_KEY and code < BTN_MISC and self.key_binding(code, value, now):
+                            continue
+                        if node.role == "passthrough" and etype == EV_KEY:
+                            if value == 1 and code < BTN_MISC and now - self.last_typing >= 0.25:
+                                self.last_typing = now
+                                try:
+                                    self.screens_sock.sendto(b"typing", HELPER)
+                                except OSError:
+                                    pass  # helper not running (SteamVR not running)
+                            self.to_screens(code, value)
+                            if node.network and code < BTN_MISC and (code in node.held or
+                                                                     (value == 1 and now >= self.desktop_until)):
+                                # Nothing else reads a host's keyboard: Steam gets it from here.
+                                self.keyboard.emit(etype, code, value)
+                                self.keyboard.sync()
+                                (node.held.add if value else node.held.discard)(code)
+                        continue
+                    if etype == EV_KEY:
+                        action = buttons.get(str(code), DEFAULT_BUTTONS.get(code, "key"))
+                        # A button that went down on the virtual devices (paused, POINTER=0, or as a
+                        # key) comes up there, even if pointer mode or its binding changed meanwhile
+                        # (DEE-263).
+                        went_virtual = value != 1 and code in node.held
+                        if not went_virtual and (pointer or action == "pause_toggle") and action not in ("key", "none"):
+                            if value == 1:
+                                node.actions[code] = action
+                            elif value == 0:
+                                node.actions.pop(code, None)
+                            self.do_action(action, value, now)
+                            continue
+                        if action == "none" and not went_virtual:
+                            continue
+                        target = self.mouse if code >= BTN_MISC else self.keyboard
+                        target.emit(etype, code, value)
+                        # A mouse button goes to the desktop only when pointer mode passes it through
+                        # as a key (a side button for Back there). The rest, like every click with
+                        # POINTER=0 or paused, reach the desktop through a laser, if at all. (A
+                        # key-mapped button still goes to the virtual mouse too.)
+                        self.to_screens(code, value, button=bool(pointer) and not went_virtual)
+                        if value:
+                            node.held.add(code)
+                        else:
+                            node.held.discard(code)
+                    elif etype == EV_REL:
+                        if pointer:
+                            pointer.motion(code, value, now)
+                        else:
+                            self.mouse.emit(etype, code, value)
+                    elif etype == EV_SYN and code == SYN_REPORT:
+                        if pointer:
+                            pointer.flush(now)
+                        self.mouse.sync()
+                        self.keyboard.sync()
+
+
+def main():
+    can_grab = "--no-grab" not in sys.argv
+    stored = stored_fds()
+    mouse = Virtual(f"{VIRTUAL_PREFIX} mouse", 1,
+                    keys=range(BTN_MISC, 0x118), rels=range(REL_MAX + 1), stored=stored)
+    keyboard = Virtual(f"{VIRTUAL_PREFIX} keyboard", 2,
+                       keys=range(1, BTN_MISC), rels=(), stored=stored)
+    notify("READY=1")
+    if can_grab:  # not under --no-grab: that's the tests (input/test), with the real home
+        try:
+            ft_commands.refresh()  # ft-cmd on the PATH, and the aliases, point at this install
+        except OSError as e:
+            log(f"commands: {e}")
+
+    control = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    control.bind("\0frametop_relay")
+    control.setblocking(False)
+    # The kernel adds each sender's user ("type" is taken only from ours: an abstract socket
+    # takes datagrams from anyone).
+    control.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+    screens_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
+
+    relay = Relay(mouse, keyboard, control, screens_sock, can_grab, stored)
+    atexit.register(relay.restore_keymaps)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so atexit runs on systemctl stop
+    relay.run()
 
 
 if __name__ == "__main__":

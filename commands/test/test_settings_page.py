@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -71,6 +72,29 @@ class Page(unittest.TestCase):
         self.assertIn("on the headset", self.b.commandNameProblem("taken-on-host"))
         self.assertFalse(self.b.addCommand("b", "   "))
         self.assertEqual([c["name"] for c in self.b.commands], ["a"])
+
+    def added(self, name, run):
+        """startAddCommand, then its commandAdded (it runs on a thread of its own)."""
+        got = []
+        self.b.commandAdded.connect(lambda saved, problem: got.append((saved, problem)))
+        try:
+            self.b.startAddCommand(name, run)
+            for _ in range(200):
+                self.app.processEvents()
+                if got:
+                    break
+                time.sleep(0.01)
+        finally:
+            self.b.commandAdded.disconnect()
+        return got
+
+    def test_add_button_checks_once_off_the_ui_thread(self):
+        self.assertEqual(self.added("from-button", "true"), [(True, "")])
+        self.assertEqual([c["name"] for c in self.b.commands], ["from-button"])
+        self.assertEqual(sum(1 for c in ran if c[:2] == ("sh", "-c")), 1)   # one host check per Add
+        saved, problem = self.added("taken-on-host", "true")[0]
+        self.assertFalse(saved)
+        self.assertIn("on the headset", problem)
 
     def test_remove_drops_its_bindings(self):
         self.b.addCommand("x", "true")

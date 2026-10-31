@@ -1928,6 +1928,19 @@ Kirigami.ApplicationWindow {
             title: "Commands"
             header: DriverWarning {}
             property string problem: ""
+            property bool adding: false
+
+            Connections {
+                target: backend
+                function onCommandAdded(saved, problem) {
+                    cpage.adding = false
+                    cpage.problem = problem
+                    if (saved) {
+                        commandName.text = ""
+                        commandRun.text = ""
+                    }
+                }
+            }
 
             Kirigami.FormLayout {
                 Repeater {
@@ -1985,13 +1998,11 @@ Kirigami.ApplicationWindow {
                     id: addButton
                     text: "Add"
                     icon.name: "list-add"
-                    enabled: commandName.text.trim() !== "" && commandRun.text.trim() !== ""
+                    enabled: !cpage.adding && commandName.text.trim() !== "" && commandRun.text.trim() !== ""
                     onClicked: {
-                        cpage.problem = backend.commandNameProblem(commandName.text)
-                        if (cpage.problem === "" && backend.addCommand(commandName.text, commandRun.text)) {
-                            commandName.text = ""
-                            commandRun.text = ""
-                        }
+                        cpage.problem = ""
+                        cpage.adding = true
+                        backend.startAddCommand(commandName.text, commandRun.text)
                     }
                 }
                 Controls.Label {

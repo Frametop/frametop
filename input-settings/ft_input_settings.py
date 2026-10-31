@@ -59,7 +59,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import Property, QObject, QProcess, QSocketNotifier, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QProcess, QSocketNotifier, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -484,6 +484,8 @@ class Backend(QObject):
     shortcutCaptureChanged = Signal()
     modelsChanged = Signal()
     commandsChanged = Signal()
+    commandAdded = Signal(bool, str)  # startAddCommand's: saved, why not ("" when saved)
+    _bluetoothRead = Signal(object)  # refreshBluetooth's devices, from its thread
     message = Signal(str, bool)  # text, is error
 
     def __init__(self):
@@ -493,6 +495,9 @@ class Backend(QObject):
         self._pointer_mode = False
         self._capture_id = ""
         self._bluetooth = []
+        self._bluetooth_busy = False   # a read or the fixes running (bluetoothctl, pkexec: not on the UI thread)
+        self._bluetoothRead.connect(self._bluetooth_read, Qt.QueuedConnection)
+        self._adding = False
         self._relay_ok = False
         self._capture_vr = False
         self._capture_combo = ""  # the action a key combination is being captured for
@@ -1293,6 +1298,23 @@ class Backend(QObject):
         self.message.emit(text, False)
         return True
 
+    @Slot(str, str)
+    def startAddCommand(self, name, run):
+        """The Add button's: the name check (on the host too) and the save, once, off the UI
+        thread; commandAdded tells the page."""
+        if self._adding:
+            return
+        self._adding = True
+
+        def job():
+            saved, text = input_commands.add(name, run, self.commandNameProblem)
+            self._adding = False
+            if saved:
+                self.commandsChanged.emit()
+                self.message.emit(text, False)
+            self.commandAdded.emit(saved, "" if saved else text)
+        threading.Thread(target=job, daemon=True).start()
+
     @Slot(str)
     def removeCommand(self, name):
         try:
@@ -2010,6 +2032,19 @@ class Backend(QObject):
 
     @Slot()
     def refreshBluetooth(self):
+        """Reads the paired devices (bluetoothctl on the host, up to 20 s each) off the UI thread."""
+        if self._bluetooth_busy:
+            return
+        self._bluetooth_busy = True
+        threading.Thread(target=lambda: self._bluetoothRead.emit(self._read_bluetooth()), daemon=True).start()
+
+    def _bluetooth_read(self, devices):
+        self._bluetooth_busy = False
+        self._bluetooth = devices
+        self.bluetoothChanged.emit()
+
+    @staticmethod
+    def _read_bluetooth():
         devices = []
         listing = host("bluetoothctl", "devices", "Paired")
         for line in listing.stdout.splitlines():
@@ -2021,8 +2056,7 @@ class Backend(QObject):
             devices.append({"address": parts[1], "name": parts[2],
                             "connected": "Connected: yes" in info,
                             "battery": int(battery.group(1)) if battery else -1})
-        self._bluetooth = devices
-        self.bluetoothChanged.emit()
+        return devices
 
     @Slot()
     def applyBluetoothFixes(self):
@@ -2034,12 +2068,19 @@ class Backend(QObject):
             else:
                 self.message.emit("Bluetooth fixes aren't installed (setup/bluetooth/install.sh)", True)
             return
-        result = host("pkexec", "/etc/steamframe/bt-fixups.sh")
-        if result.returncode == 0:
-            self.message.emit("Bluetooth fixes applied: " + " ".join(result.stdout.split())[:120], False)
-        else:
-            self.message.emit("Couldn't apply the Bluetooth fixes: " + (result.stderr.strip() or "cancelled")[:160], True)
-        self.refreshBluetooth()
+        if self._bluetooth_busy:
+            return
+        self._bluetooth_busy = True
+
+        def job():
+            # pkexec waits for its password prompt: up to host()'s 20 s
+            result = host("pkexec", "/etc/steamframe/bt-fixups.sh")
+            if result.returncode == 0:
+                self.message.emit("Bluetooth fixes applied: " + " ".join(result.stdout.split())[:120], False)
+            else:
+                self.message.emit("Couldn't apply the Bluetooth fixes: " + (result.stderr.strip() or "cancelled")[:160], True)
+            self._bluetoothRead.emit(self._read_bluetooth())
+        threading.Thread(target=job, daemon=True).start()
 
 
 def main():

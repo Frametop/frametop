@@ -874,14 +874,16 @@ static void release_keys(struct server *s, const char *why) {
     }
 }
 
-// "keys release" (the input relay's release_keys, Ctrl+Alt+Shift+Esc by default): every key
-// comes up wherever it may be held. The keys ft-screens holds, and a remote screen's; every
-// modifier, FT_MODIFIER_RELEASES times, in ft-screens' state and in KWin, whether ft-screens
-// holds it or not (KWin can hold one ft-screens let go, or count one press twice); then the
-// focused screen gets the keyboard again, which KWin takes as a fresh start.
+// "keys release" (the input relay's release_keys, Ctrl+Alt+Shift+Esc by default, and a relay
+// that starts): every key comes up wherever it may be held. Frunner's (its search repeats a
+// held key), the keys ft-screens holds, and a remote screen's; every modifier,
+// FT_MODIFIER_RELEASES times, in ft-screens' state and in KWin, whether ft-screens holds it or
+// not (KWin can hold one ft-screens let go, or count one press twice); then the focused screen
+// gets the keyboard again, which KWin takes as a fresh start.
 static void release_all_keys(struct server *s, char *reply, int size) {
     const size_t held = s->keyboard.num_keycodes;
     const uint32_t stuck = s->keyboard.modifiers.depressed;
+    if (spot_open(s)) spot_send(s, "keys release");
     if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) ft_remote_blur(s->key_remote);
     release_keys(s, "release all keys");
     ft_keyboard_release_modifiers(&s->keyboard, now_ms());

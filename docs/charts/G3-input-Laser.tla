@@ -1,5 +1,6 @@
 ---------------------------- MODULE G3Laser ----------------------------
-(* G3 "one owner per hand's laser", read from Frametop at 78e93b1 (pointer/helper/ft-pointer.cpp,
+(* G3 "one owner per hand's laser", read from Frametop at 78e93b1 with the K4 and K5 fixes
+   (DEE-266, DEE-267) since (pointer/helper/ft-pointer.cpp,
    rayowner.h, handoff.h, pointer/driver_ft_pointer.cpp). Frametop has one laser, the pointer
    driver's virtual controller, with one trigger. Each hand can drive it three ways: its controller
    (SteamVR's own laser then), its hand ray (rayowner.h: one owner, the other hand takes over), or a
@@ -115,16 +116,19 @@ TouchPress ==
 TouchUp ==
   /\ tDown /\ tDown' = FALSE /\ drv' = FALSE
   /\ UNCHANGED <<ctl, near, ray, touch, rayHold, mouseHolds, leftHeld, active>>
-\* the main loop, line 2378: "if (!active && touch.side >= 0) touch = Touch{};" (no "btn trigger 0")
+\* the main loop: a touch goes when the pointer does, with "btn trigger 0" if it was down (K5)
 TouchForgotten ==
-  /\ ~active /\ touch # None /\ touch' = None /\ tDown' = FALSE
-  /\ UNCHANGED <<ctl, near, ray, rayHold, mouseHolds, leftHeld, active, drv>>
+  /\ ~active /\ touch # None /\ touch' = None /\ tDown' = FALSE /\ drv' = (drv /\ ~tDown)
+  /\ UNCHANGED <<ctl, near, ray, rayHold, mouseHolds, leftHeld, active>>
 
 \* the relay's "btn trigger 1|0" (a mouse button in pointer mode): it wakes the pointer, and
-\* leftButton presses (pressLeft) and releases (releaseLeft) with nothing else asked
+\* leftButton presses (pressLeft) and releases (releaseLeft). The press ends a touch ("btn trigger 0"
+\* first if it was down) and a ray pinch (releaseLeft, its hold cancelled with no click) before it
+\* presses (mouseTakesTrigger, K4)
 MousePress ==
   /\ ~mouseHolds /\ mouseHolds' = TRUE /\ leftHeld' = TRUE /\ drv' = TRUE /\ active' = TRUE
-  /\ UNCHANGED <<ctl, near, ray, touch, tDown, rayHold>>
+  /\ touch' = None /\ tDown' = FALSE /\ rayHold' = FALSE
+  /\ UNCHANGED <<ctl, near, ray>>
 MouseRelease ==
   /\ mouseHolds /\ mouseHolds' = FALSE /\ leftHeld' = FALSE /\ drv' = IF leftHeld THEN FALSE ELSE drv
   /\ UNCHANGED <<ctl, near, ray, touch, tDown, rayHold, active>>

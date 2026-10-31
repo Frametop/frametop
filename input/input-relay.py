@@ -475,10 +475,13 @@ class Virtual:
 
     def __init__(self, name, product, keys, rels, stored):
         self.dirty = False
+        self.keys = keys
+        self.reused = False
         store_name = f"vdev{product}"
         if store_name in stored:
             self.fd = stored[store_name]
             os.set_blocking(self.fd, False)
+            self.reused = True
             log(f"reusing {name} from the fd store")
             return
         self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
@@ -503,6 +506,14 @@ class Virtual:
         if self.dirty:
             os.write(self.fd, EVENT.pack(0, 0, EV_SYN, SYN_REPORT, 0))
             self.dirty = False
+
+    def release_all(self):
+        """Every key comes up. A device reused from the fd store may still have down what the
+        relay before this one pressed, and this one's node.held doesn't know it (DEE-268). The
+        kernel drops the release of a key that isn't down, so this sends only what was held."""
+        for code in self.keys:
+            self.emit(EV_KEY, code, 0)
+        self.sync()
 
 
 def bits(fd, ev, count):
@@ -986,8 +997,9 @@ class Pointer:
             wait = max(0.0, min(wait, self.move_at + self.MOVE_EVERY - time.monotonic()))
         return wait
 
-    def stand_down(self):
-        """Frametop is pausing: a pulse under way ends now, and the pointer lets go.
+    def stand_down(self, why="paused"):
+        """Frametop is pausing (or POINTER=0 drops this pointer: why): a pulse under way ends
+        now, and the pointer lets go.
 
         A click held into the pause (driver_down) comes up here, since pausing drops its
         release; otherwise the driver keeps the button down and the virtual controller
@@ -1021,7 +1033,7 @@ class Pointer:
         self.send("hide pause")
         if self.active:
             self.active = False
-            log("pointer off (paused)")
+            log(f"pointer off ({why})")
 
 
 class Node:
@@ -1180,6 +1192,10 @@ def main():
             state["pointer_conf"] = p
             log(f"pointer mode: {p.sensitivity} deg/count, idle {p.idle} s, wake {p.wake_counts} counts")
         else:
+            if state["pointer_conf"]:
+                # A button held through the change comes up on the helper now; its release
+                # goes to the virtual mouse, which never had it down (DEE-264).
+                state["pointer_conf"].stand_down("pointer mode off")
             state["pointer_conf"] = None
             log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
         state["pointer"] = None if pause.paused else state["pointer_conf"]
@@ -2062,11 +2078,27 @@ def main():
     waiting = False  # a keyboard's grab waits for its keys to come up
     # A relay that went away with a key down left it down on the desktop, where this one
     # never sent it: modifiers and mouse buttons come up there now (a release of a key that
-    # isn't down is nothing).
+    # isn't down is nothing), and then ft-screens lets go of every key it holds, on the desktop
+    # screens and a remote display (DEE-265).
     for code in sorted(MODIFIERS):
         to_screens(code, 0)
     for code in range(BTN_MOUSE, BTN_TASK + 1):
         to_screens(code, 0, button=True)
+    try:
+        screens_sock.sendto(b"keys release", SCREENS)
+    except OSError:
+        pass  # the Frametop desktop isn't running
+    # ...and the same on its virtual keyboard and mouse, kept in the fd store (DEE-268)...
+    for dev in (mouse, keyboard):
+        if dev.reused:
+            dev.release_all()
+    # ...and on the pointer driver: a pointer-mode button held as it went never came up there.
+    # The helper ignores the release of a button it doesn't have down (DEE-269).
+    for driver in sorted(set(Pointer.DRIVER_BUTTONS.values())):
+        try:
+            screens_sock.sendto(f"btn {driver} 0".encode(), HELPER)
+        except OSError:
+            break  # helper not running (SteamVR not running)
     while True:
         now = time.monotonic()
         pointer = state["pointer"]
@@ -2197,10 +2229,14 @@ def main():
                     continue
                 if etype == EV_KEY:
                     action = buttons.get(str(code), DEFAULT_BUTTONS.get(code, "key"))
-                    if (pointer or action == "pause_toggle") and action not in ("key", "none"):
+                    # A button that went down on the virtual devices (paused, POINTER=0, or as a
+                    # key) comes up there, even if pointer mode or its binding changed meanwhile
+                    # (DEE-263).
+                    went_virtual = value != 1 and code in node.held
+                    if not went_virtual and (pointer or action == "pause_toggle") and action not in ("key", "none"):
                         do_action(action, value, now)
                         continue
-                    if action == "none":
+                    if action == "none" and not went_virtual:
                         continue
                     target = mouse if code >= BTN_MISC else keyboard
                     target.emit(etype, code, value)
@@ -2208,7 +2244,7 @@ def main():
                     # as a key (a side button for Back there). The rest, like every click with
                     # POINTER=0 or paused, reach the desktop through a laser, if at all. (A
                     # key-mapped button still goes to the virtual mouse too.)
-                    to_screens(code, value, button=bool(pointer))
+                    to_screens(code, value, button=bool(pointer) and not went_virtual)
                     if value:
                         node.held.add(code)
                     else:

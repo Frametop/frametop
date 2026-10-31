@@ -81,6 +81,8 @@ class NoDevice:
     def __init__(self, name, *args, **kwargs):
         self.name = name.split()[-1]
 
+    reused = False  # made new, not from the fd store
+
     def emit(self, etype, code, value):
         EMITTED.append((self.name, code, value))
 

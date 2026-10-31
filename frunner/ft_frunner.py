@@ -30,6 +30,7 @@ Datagrams on @ft_frunner (--socket NAME); a sender with an address gets "ok ..."
   key <code> <value>                   ft-screens: typing, while the search has it
   dismiss <why>                        ft-screens: something else took the typing (a click
                                        elsewhere, a pause)
+  keys release                         ft-screens: every key comes up (its own "keys release")
   hover N | click N | menu N | back | scroll +1|-1 | outside      ft-spotpanel: the lasers and
                                        the 3D mouse on the panel (N: a row shown)
 
@@ -909,6 +910,15 @@ class Frunner:
         self.press(code)
         return True
 
+    def release_keys(self):
+        """Every key held here comes up, and a repeat stops: ft-screens' "keys release" (the
+        relay's release_keys, and a relay that restarted, which can't send the releases its
+        predecessor owed; DEE-265)."""
+        for code in sorted(self.held):
+            self.xkb.update(code, False)
+        self.held.clear()
+        self.stop_repeat()
+
     def stop_repeat(self):
         if self.repeat:
             GLib.source_remove(self.repeat[1])
@@ -970,6 +980,9 @@ class Frunner:
             return "ok"
         if cmd == "dismiss":
             self.close(" ".join(rest) or "dismissed", tell=False)
+            return None
+        if cmd == "keys" and rest == ["release"]:
+            self.release_keys()
             return None
         if cmd == "status":
             return f"ok {'open' if self.is_open else 'closed'} {self.mode} {self.query}"

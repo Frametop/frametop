@@ -94,6 +94,8 @@ class NoDevice:
     def __init__(self, name, *args, **kwargs):
         self.name = name.split()[-1]  # mouse or keyboard
 
+    reused = False  # made new, not from the fd store
+
     def emit(self, etype, code, value):
         EMITTED.append((self.name, code, value))
 
@@ -101,6 +103,7 @@ class NoDevice:
         pass
 
 
+RealVirtual = relay.Virtual
 relay.Virtual = NoDevice
 relay.Volume.key = lambda self, fd, code, value, now: VOLUME.append((code, value))
 LOG = []  # the relay's own log
@@ -184,7 +187,7 @@ def probe(path):
 
 relay.probe = probe
 
-# A connected pair holds all 16 startup releases even when the kernel limits unconnected
+# A connected pair holds all 17 startup messages even when the kernel limits unconnected
 # datagram queues to 10 messages. The relay still uses real sendto(), including other peers.
 relay._test_screens_sender, screens = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
 relay._test_screens_sender.setblocking(False)
@@ -309,8 +312,28 @@ F24 = ["key 194 1", "key 194 0"]
 
 def tests():
     time.sleep(1.5)  # the relay's first device scan
-    check("a relay that starts releases the modifiers and mouse buttons on the desktop", typed(),
-          [f"key {c} 0" for c in sorted(relay.MODIFIERS)] + [f"key {c} 0" for c in range(0x110, 0x118)])
+    check("a relay that starts releases the modifiers and mouse buttons on the desktop, then every key there",
+          typed(),
+          [f"key {c} 0" for c in sorted(relay.MODIFIERS)] + [f"key {c} 0" for c in range(0x110, 0x118)] + ["keys release"])
+
+    # DEE-268: a virtual device from the fd store lets go of every key it has (the kernel drops
+    # the ones that aren't down), and so does the gamepad, its sticks centred.
+    def written(fd):
+        data = os.read(fd, 65536)
+        return [EVENT.unpack_from(data, i)[2:] for i in range(0, len(data), EVENT.size)]
+    r, w = os.pipe()
+    v = RealVirtual.__new__(RealVirtual)
+    v.fd, v.keys, v.dirty = w, range(1, 4), False
+    v.release_all()
+    check("a reused virtual device lets go of every key, then syncs", written(r),
+          [(relay.EV_KEY, 1, 0), (relay.EV_KEY, 2, 0), (relay.EV_KEY, 3, 0), (0, 0, 0)])
+    vrpad = relay.vrpad
+    vrpad.VirtualPad(lambda m: None, {vrpad.STORE_NAME: w}, lambda *a: None)
+    check("a reused gamepad lets go of its buttons and centres its sticks", written(r),
+          [(vrpad.EV_KEY, c, 0) for c in vrpad.KEYS.values()] + [(vrpad.EV_ABS, a[0], 0) for a in vrpad.AXES]
+          + [(0, 0, 0)])
+    os.close(r)
+    os.close(w)
     key(META, 1); key(META, 0)
     check("Meta tap (default): Steam menu", lines(steam_log), ["menu"])
     check("Meta tap: the desktop gets F24 before Meta's release", typed(), ["key 125 1"] + F24 + ["key 125 0"])
@@ -435,6 +458,29 @@ def tests():
     pause("off")
     key(relay.BTN_LEFT, 1, ms_w); key(relay.BTN_LEFT, 0, ms_w)
     check("resumed: a click goes to the helper again", clicks(), ["btn trigger 1", "btn trigger 0"])
+
+    # DEE-263: a click pressed while paused went to the virtual mouse, and comes up there after
+    # the resume, not on the helper.
+    pause("on")
+    clicks()
+    emitted()
+    key(relay.BTN_LEFT, 1, ms_w)
+    pause("off")
+    key(relay.BTN_LEFT, 0, ms_w)
+    check("a click held through the resume comes up on the virtual mouse, not the helper",
+          (emitted(), clicks(), typed()), ([("mouse", relay.BTN_LEFT, 1), ("mouse", relay.BTN_LEFT, 0)], [], []))
+    # DEE-264: POINTER=0 with a click held lets go of it on the helper, and its release goes to
+    # the virtual mouse (which never had it down: the kernel drops it).
+    key(relay.BTN_LEFT, 1, ms_w)
+    check("pointer mode: the click reaches the helper", clicks(), ["btn trigger 1"])
+    conf["POINTER"] = "0"
+    use({})
+    check("POINTER=0 with the left button held: it comes up on the helper, then the pointer hides", clicks(),
+          ["btn trigger 0", "hide pause"])
+    key(relay.BTN_LEFT, 0, ms_w)
+    check("...and its release goes to the virtual mouse only", (clicks(), emitted()), ([], [("mouse", relay.BTN_LEFT, 0)]))
+    conf["POINTER"] = "1"
+    use({})
 
     # Pointer mode: a click is the helper's alone. A side button mapped to "key" (Back on the
     # desktop) goes to the desktop too, and its release still does after a pause starts; paused,

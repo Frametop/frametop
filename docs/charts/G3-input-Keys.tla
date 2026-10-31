@@ -1,5 +1,6 @@
 ---------------------------- MODULE G3Keys ----------------------------
-(* G3 "held keys come up where they went down" (the DEE-222 class), read from Frametop at 78e93b1.
+(* G3 "held keys come up where they went down" (the DEE-222 class), read from Frametop at 78e93b1,
+   with the K1-K7 fixes (DEE-263..269) since. Line numbers are 78e93b1's.
    One key or button on one device, followed from the hand to every place that can hold it down:
      seat       ft-screens' own keyboard state (key_held), which routes a release  compositor.c 817-845
      kwin       KWin, ft-screens' client, has it down                             compositor.c 826-861
@@ -87,6 +88,8 @@ Release ==
      ELSE IF Keyboard THEN
        /\ screensDown' = FALSE /\ ScreensRelease /\ UNCHANGED <<drv, drvDown>>
        /\ IF Kind = "host" /\ nodeHeld THEN vdev' = FALSE /\ nodeHeld' = FALSE ELSE UNCHANGED <<vdev, nodeHeld>>
+     ELSE IF nodeHeld THEN  \* it went down on the virtual mouse: it comes up there (went_virtual, K1)
+       /\ vdev' = FALSE /\ nodeHeld' = FALSE /\ UNCHANGED <<screensDown, drv, drvDown>> /\ ScreensSame
      ELSE IF Active THEN  \* do_action(.., 0): "btn trigger 0", and the relay's loop goes on (continue)
        /\ drv' = FALSE /\ drvDown' = FALSE /\ UNCHANGED <<screensDown, vdev, nodeHeld>> /\ ScreensSame
      ELSE
@@ -151,11 +154,13 @@ Resume ==
   /\ Toggles /\ Kind = "button" /\ paused /\ paused' = FALSE
   /\ UNCHANGED <<phys, relayUp, grabbed, typing, screensDown, seat, kwin, lost, focus, remote, remoteHeld, frunner,
                  frunnerHeld, vdev, nodeHeld, drv, drvDown, pointerOn>>
-\* load_config with POINTER=0 drops pointer_conf (no stand_down); POINTER=1 makes a new Pointer
+\* load_config with POINTER=0 stands the pointer down (K2: its driver buttons come up) and drops
+\* pointer_conf; POINTER=1 makes a new Pointer
 PointerOff ==
   /\ Toggles /\ Kind = "button" /\ pointerOn /\ pointerOn' = FALSE
+  /\ drv' = FALSE /\ drvDown' = FALSE
   /\ UNCHANGED <<phys, relayUp, grabbed, typing, screensDown, seat, kwin, lost, focus, remote, remoteHeld, frunner,
-                 frunnerHeld, vdev, nodeHeld, drv, drvDown, paused>>
+                 frunnerHeld, vdev, nodeHeld, paused>>
 PointerOn ==
   /\ Toggles /\ Kind = "button" /\ ~pointerOn /\ pointerOn' = TRUE /\ drvDown' = FALSE
   /\ UNCHANGED <<phys, relayUp, grabbed, typing, screensDown, seat, kwin, lost, focus, remote, remoteHeld, frunner,
@@ -167,14 +172,23 @@ RelayDies ==
   /\ Restarts /\ relayUp /\ relayUp' = FALSE /\ grabbed' = FALSE
   /\ screensDown' = FALSE /\ nodeHeld' = FALSE /\ drvDown' = FALSE
   /\ UNCHANGED <<phys, typing, seat, kwin, lost, focus, remote, remoteHeld, frunner, frunnerHeld, vdev, drv, paused, pointerOn>>
-\* a new relay: modifiers (and mouse buttons, on ft-screens' screens) come up on the desktop.
-\* A pointer device is grabbed at once; a pass-through keyboard waits for ApplyRoles.
+\* ft-screens' "keys release" (release_all_keys): Frunner lets go of its keys ("keys release" there),
+\* the remote is blurred, the seat's keys come up (in KWin, or owed with no focus), and with a focus
+\* the keyboard enters again, which hands KWin what was owed
+ScreensLetGo ==
+  /\ seat' = FALSE /\ remoteHeld' = FALSE /\ frunnerHeld' = FALSE
+  /\ IF focus THEN kwin' = FALSE /\ lost' = FALSE ELSE kwin' = kwin /\ lost' = (lost \/ seat)
+\* a new relay: modifiers and mouse buttons come up on the desktop, then every key there ("keys
+\* release", K3); its virtual keyboard and mouse, reused from the fd store, let go of every key (K6),
+\* and the helper of every driver button (K7: "btn trigger 0" and the rest, which a helper with the
+\* mouse's button down passes on). A pointer device is grabbed at once; a pass-through keyboard
+\* waits for ApplyRoles.
 RelayStarts ==
   /\ Restarts /\ ~relayUp /\ relayUp' = TRUE
   /\ grabbed' = (Kind = "button")
-  /\ IF Kind = "mod" THEN ScreensRelease ELSE ScreensSame
-  /\ UNCHANGED <<phys, typing, screensDown, focus, remote, frunner, frunnerHeld, vdev, nodeHeld, drv, drvDown,
-                 paused, pointerOn>>
+  /\ ScreensLetGo
+  /\ vdev' = FALSE /\ drv' = FALSE
+  /\ UNCHANGED <<phys, typing, screensDown, focus, remote, frunner, nodeHeld, drvDown, paused, pointerOn>>
 
 Next == Press \/ Release \/ Reconcile \/ TypingFlip \/ ApplyRoles \/ FocusLeave \/ FocusEnter \/ RemoteOn
         \/ RemoteOff \/ FrunnerOpen \/ FrunnerClose \/ Pause \/ Resume \/ PointerOff \/ PointerOn

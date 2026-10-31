@@ -1677,13 +1677,36 @@ int main() {
         if (debug) std::printf("mouse drag dropped\n");
         if (debug) std::fflush(stdout);
     };
+    // The mouse's left press takes the trigger and the laser: a touch (one that holds the trigger,
+    // or could press it while the mouse holds) or a ray pinch ends first, so the two never share the
+    // trigger and leftHeld (DEE-266). A touch comes back with ft-screens' next word once the mouse
+    // lets go (a new touch waits while leftHeld).
+    auto mouseTakesTrigger = [&] {
+        if (touch.side >= 0) {
+            if (touch.down) SendTo(out, "ft_pointer", "btn trigger 0");
+            std::printf("touch %s: ended by a mouse click\n", touch.side ? "right" : "left");
+            std::fflush(stdout);
+            touch = Touch{};
+            touch.endAt = Clock::now();
+        }
+        if (hold.src == Src::Ray) {
+            if (hold.pressed && leftHeld) releaseLeft();
+            hold.pressed = hold.pendingPress = hold.released = false;
+            rayHoldCancel = true;  // the main loop ends it, as lost (endRayHold), with no click
+        }
+    };
     auto leftButton = [&](bool down) {
+        const bool was = leftDown;
         leftDown = down;
+        // A release of a button the mouse doesn't have down: the relay's at its start, for one
+        // held as the relay before it went (DEE-269). What else holds the trigger keeps it.
+        if (!down && !was) return;
         if (down) {
             if (aimHeld && aimRight && !aimHand) {
                 ignoreLeftUp = true;  // the right's press is held back: the left does nothing
                 return;
             }
+            mouseTakesTrigger();
             if (canAim()) {
                 aimStart(false);
                 return;
@@ -1709,7 +1732,10 @@ int main() {
     };
     // The right button (see the top); false: not taken here (a tilt, or passed on as it is).
     auto rightButton = [&](bool down) {
+        const bool was = rightDown;
         rightDown = down;
+        // As the left's (DEE-269): taken here while something else holds a button, else passed on.
+        if (!down && !was) return leftHeld;
         if (down) {
             if (aimHeld && !aimHand && !aimRight) {
                 // During the left's held-back press: press the left where the pointer is now (the
@@ -2375,7 +2401,11 @@ int main() {
         // asked once the laser is ours (a press that came before the claim landed goes out after it, and a
         // tap's release 40 ms after its press). After a release the pose holds kTouchDrop, as the
         // dashboard reads it for a carried panel's drop.
-        if (!active && touch.side >= 0) touch = Touch{};   // (released: the headset off, a controller took it)
+        if (!active && touch.side >= 0) {   // (released: the headset off, a controller took it)
+            // its button comes up too, or the next wake connects the controller pressed (DEE-267)
+            if (touch.down) SendTo(out, "ft_pointer", "btn trigger 0");
+            touch = Touch{};
+        }
         if (active && touch.side >= 0 && touch.posed) {
             const bool holdPose = tnow < touch.holdUntil;
             if (!holdPose && (tnow - touch.sentAt > std::chrono::milliseconds(100) || Length(touch.origin - touch.sentOrigin) > 0.0002 ||

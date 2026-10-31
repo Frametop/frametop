@@ -98,6 +98,18 @@ class VirtualPad:
             self.fd = stored[STORE_NAME]
             os.set_blocking(self.fd, False)
             log("reusing the gamepad from the fd store")
+            # The relay before this one may have left buttons down or sticks over: everything
+            # comes up and centres, as NEUTRAL says (DEE-268).
+            out = bytearray()
+            for code in KEYS.values():
+                out += EVENT.pack(0, 0, EV_KEY, code, 0)
+            for code, *_ in AXES:
+                out += EVENT.pack(0, 0, EV_ABS, code, 0)
+            out += EVENT.pack(0, 0, EV_SYN, SYN_REPORT, 0)
+            try:
+                os.write(self.fd, out)
+            except BlockingIOError:
+                pass
             return
         self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
         fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_KEY)

@@ -1186,18 +1186,21 @@ def main():
 
     def load_config():
         """frametop.conf and the rules, applied all or nothing: read and checked first (the pause's
-        settings from the rules too), then put in place. A reload that fails keeps the last ones
-        (it used to leave the rules read and the pause unconfigured, DEE-297)."""
+        settings from the rules too), then put in place. A reload whose rules fail keeps the last
+        ones (it used to leave the rules read and the pause unconfigured, DEE-297); at start, the
+        default rules go with the conf's settings. A bad conf value warns and keeps its default."""
+        conf = read_config()
+        pointer_on, sensitivity, idle, wake_counts = pointer_settings(conf)
         try:
-            conf = read_config()
             rules = read_rules()
-            pointer_on, sensitivity, idle, wake_counts = pointer_settings(conf)
             pause.configure(rules)   # first: it works the rules out before it changes anything
         except Exception as e:  # a reload must not take the relay down
-            log(f"config not applied, the last one kept: {e!r}")
-            if not state["rules"]:
-                state["rules"] = read_rules("")   # at start: the defaults (no file there)
-            return
+            if state["rules"]:
+                log(f"config not applied, the last one kept: {e!r}")
+                return
+            log(f"rules not applied, the defaults used: {e!r}")
+            rules = read_rules("")   # the defaults (no file there)
+            pause.configure(rules)
         state["rules"] = rules
         if pointer_on:
             p = state["pointer_conf"] or Pointer(0.03, 30)

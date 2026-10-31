@@ -2,8 +2,7 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at the rest of DEE-303 (its open list below), then DEE-309 (DEE-310 was done out of
-order, after DEE-308).
+starts at DEE-312. The rest of DEE-303 (its open list below) is now its own ticket, DEE-319.
 
 ## Where the series is
 
@@ -19,14 +18,17 @@ order, after DEE-308).
 | 7 | DEE-310 | 898e760, d24de60, fe0a217, 6c0f032, 3d5af59, 3ad697c, 25dd9f9 (note) |
 | 8 | DEE-304 | cb6d442, 60cc62e, c55e509, ceced31, 6ac87b6, a8a6a7e, 77b59d2, 9da7cd3, 8c72d59, e1a6a8d (note) |
 | 9 | DEE-305 | a286deb, 8e1b0f7, 6a4d65d, 97006a9, 729588d, fbc84e4, 48786c4, cd11d96 (note) |
-| 10 | DEE-303, part 1 | 76ecd9b, d80ef80, a88d458, f4d5db7, 63b363b, 3a8ad3d, then this update |
+| 10 | DEE-303, part 1 | 76ecd9b, d80ef80, a88d458, f4d5db7, 63b363b, 3a8ad3d, f00bd79 (note) |
+| 10b | DEE-305 follow-up (review note #9) | 176eb76 |
+| 11 | DEE-309 | 77d0c35, a33b578, b6809e1, a0216d2, 91e19e3, 25dbde4, 165ed70, c9a4197, a0e2dfe, 972ac35, then this update |
 
 What's left, in order:
 
-1. The rest of DEE-303: one hub CLI, one control-loop base, shared QML pages
-2. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
+1. DEE-312, DEE-298, then DEE-313 to DEE-316
+2. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
 
-DEE-310, DEE-304 and DEE-305 are done (steps 7 to 9), and DEE-303 is half done (step 10). DEE-301's CI and lint work stays local only: no workflow change is pushed.
+DEE-310, DEE-304, DEE-305 and DEE-309 are done (steps 7 to 11). DEE-303 part 1 is done (step
+10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
 
@@ -381,10 +383,9 @@ Copies left alone, on purpose:
 
 Open:
 
-- `scripts/fast-install`: `frametop-desktop.service` doesn't list `conf` in `EXTRA_DIRS`, so a
-  fast-install that changes only `conf/ftipc.py` won't restart ft_floatd or frunner. The unit is
-  file-level, and adding `conf` would restart the desktop for any conf change. Left for a
-  decision. The gap already existed for `ft_conf.py`.
+- Fixed in 176eb76: fast-install now restarts the desktop for `conf/` changes (last, and kept
+  back while the headset is worn), so a change to `conf/ftipc.py` alone reaches ft_floatd,
+  frunner and the settings apps.
 - Display Settings' curve: the layout edit now runs when ft-screens answers. If a screen were
   removed in those milliseconds, index `i` could point at another screen.
 - No test drives the Display Settings or Remote Displays worker path (the poll guard, the
@@ -428,7 +429,7 @@ Judgment calls:
 - voicelog.py keeps its one-line `mono_ns`: hands/tools/voice_flags.py imports it with only
   hands/rec on the path.
 
-Open (the rest of DEE-303):
+Open (the rest of DEE-303, now DEE-319):
 
 - One hub CLI: gaze/rec/hub.py and hands/rec/hub.py's command-line part (hands 293-417 at
   c13d168).
@@ -440,6 +441,68 @@ Open (the rest of DEE-303):
 - No test of the hand session's 0700 folders: gaze has `test_round_folders_are_private`.
 - The standalone Hand Recorder repo copies files from here: recorder/privacy.py and fhformat.py
   are new in `recorder/`, which it ships whole. Check its copy list at its next sync.
+
+### From DEE-309
+
+Every build download is pinned by a full commit and checked by sha256, with one list of packages
+and one base image for both build containers.
+
+- ncnn is in `uv.lock`'s tracker group (`ncnn==1.0.20260526`). A uv override with a never-true
+  marker drops ncnn's `opencv-python`, which would clash with `opencv-python-headless`. The
+  image's import check and release.yml's smoke test import ncnn. In-box,
+  `gaze/tracker/build.sh` falls back to a hashed `pip install --no-deps --require-hashes` of the
+  locked cp314 aarch64 wheel (for an older image without ncnn), and stops if ncnn still doesn't
+  import.
+- `scripts/stb.sh`: one stb fetcher at commit 2c980bb5, with a sha256 per header (`stb_fetch DIR
+  HEADER...`). screens, gaze, hands/rec and layout/countdown use it, and fast-install rebuilds
+  those four when it changes.
+- hands/Makefile fetches ncnn's source as the release's full-source zip, checked against
+  GitHub's listed digest, in place of a git clone.
+- `scripts/openvr.sh` and the Containerfile fetch the OpenVR SDK by commit 09240643. Full
+  Keyboard builds against `scripts/openvr.sh`'s header (`OPENVR_INCLUDE_DIR`, default
+  `third_party/openvr`, byte-identical to the pin).
+- install.sh fetches distrobox 1.8.2.5 by its commit, 40c3cd72.
+- get.sh checks a downloaded Frametop.zip against the `SHA256SUMS` beside it, and drops a zip
+  that doesn't match. Every release with a zip since v0.2.2 publishes one. Test:
+  `pack/test/get-test.py` (fake curl).
+- stream/build.sh builds ft-stream only. `--spikes` adds ft-streamtest and the other spike, and
+  ft-streamtest now uses `host.cpp`'s `ftstream::Client` and `WebApi` instead of its own copy.
+  The iris header moved to `stream/iris.h`.
+- `setup/packages.txt` holds both containers' Fedora packages (`both:`, `dev:`, `image:`).
+  setup/dev-container.sh takes its base image from the Containerfile's `FROM ...@sha256` line.
+- testbench/requirements-mcp.txt lists every wheel's sha256, and testbench/install.sh installs
+  with `--require-hashes`. It stays outside `uv.lock` because its certifi and pycparser differ
+  from the lock's.
+- Test: `pack/test/pins-test.py` scans the build files for a curl without a sha256, a git clone,
+  a git fetch without a full commit, pip without `--require-hashes`, and CMake downloads. It
+  also tests stb.sh with a fake curl, and checks the OpenVR pins and the package list.
+
+Open:
+
+- `stream/spike/iris.h` is no longer used (`stream/iris.h` replaced it). It should go.
+- Not hashed: the dev container's `requirements.txt` venvs (gaze/tracker, voice) and
+  `gaze/tracker/.frame-job`'s SETUP on the 7i. Hashing them means every platform's wheels.
+  pins-test doesn't scan `.frame-job` files.
+- Pinned by git commit only, no sha256: whisper.cpp and moonlight. dnf packages float within the
+  pinned base digest. The base tag has moved on (08f9a0...), and the registry still serves the
+  pinned 034cb7...
+- get.sh doesn't check a local `--zip` file. A `--zip` URL with a query string can't find its
+  SHA256SUMS. When the `latest` Location lookup fails, the zip and the sums are each fetched
+  through `latest/download`, so a release published between the two shows as a mismatch.
+  get-test covers neither the stable channel's lookup nor the API channel (its fake curl ignores
+  `-I`).
+- The gaze/tracker in-box fallback pins only the cp314 wheel, so an image with another Python
+  now stops instead of warning. In the dev container, `pip install -r requirements.txt` still
+  pulls ncnn's dependencies, `opencv-python` included.
+- The tracker group now installs ncnn's dependencies (requests, tqdm, portalocker) into the
+  image. They're hash-locked, but before this ncnn went in with `--no-deps`.
+- pins-test is a heuristic: a "sha256" anywhere in the next 8 lines counts, `curl "$url"` with
+  no flag first isn't matched, and files outside its list (hands/models.sh, voice/models.sh,
+  framedrop/devkit.sh, pack/install-release.sh) aren't scanned. Those are pinned today.
+- `keyboard/CMakeLists.txt`'s comment names `pack/test/test_pins.py`. The file is
+  `pack/test/pins-test.py`.
+- A failed distrobox fetch leaves `~/dev/src/distrobox.part.PID` behind, and a failed stb
+  download leaves `NAME.part`. Both are harmless.
 
 ## Device checks still to do
 
@@ -491,3 +554,10 @@ Each needs an install and the headset:
 - After DEE-308: in Input Settings, map a button, add a key combination, add a command, run it,
   and remove it (its bindings go too); change a pointer setting; open it with a bad
   `frametop-input.json` (nothing is saved over it).
+- After DEE-309 (needs an image build, which wasn't done): the image builds with
+  `setup/packages.txt`, ncnn from `uv.lock`, ncnn's source zip and OpenVR by commit, and
+  release.yml's smoke test passes; `setup/dev-container.sh` makes a container from the pinned
+  digest; `get.sh --release` with a real release; a fast-install of gaze/tracker on an older
+  image (the hashed ncnn fallback); Full Keyboard builds with the new include dir;
+  `testbench/install.sh` with hashes; `stream/build.sh --spikes`; ft-streamtest against a host.
+  Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.

@@ -2,7 +2,7 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-307.
+starts at DEE-308.
 
 ## Where the series is
 
@@ -12,11 +12,12 @@ starts at DEE-307.
 | 2 | DEE-300 (with the DEE-295 and DEE-296 fixes) | 1bb43cb, e2b5609, acc4d05, c56aab7, 16dc51b, 364dba1, 7c3abb1, 2bffb10 |
 | 3 | DEE-302, plus DEE-300 follow-ups | 655fa8c, 4c16b1e, c48201a, 63089ef, dd8f7ba, 80954b5 |
 | 3b | DEE-311 | 865b852, b69b905, 2971c8d, af02582 (this note) |
-| 4 | DEE-306 | 3bb0ebf, 688de89, d464ac0, 35d9da4, 576b5d6, then this update |
+| 4 | DEE-306 | 3bb0ebf, 688de89, d464ac0, 35d9da4, 576b5d6, fb0077e |
+| 5 | DEE-307 | 84d60b3, 5277de1, cc476bf, 509bdf2, 60c9c3a, 383f0d8, then this update |
 
 What's left, in order:
 
-1. DEE-307 and DEE-308
+1. DEE-308
 2. DEE-304, DEE-305 and DEE-303
 3. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
 
@@ -126,9 +127,8 @@ Covered by tests:
 - a compile check for ft-powerd
 
 Still open:
-- `ft_vr_command` and the pose math (`PanelPose`, `Mul`, `Inverse`) in `screens/vr.cpp` sit in
-  an anonymous namespace and use OpenVR types and globals. Testing them needs them moved into
-  a header, the way `levelpin.h` and `universefix.h` were. That isn't a tests-only change.
+- (Done in DEE-307: `ft_vr_command`'s parser and the pose math are in `screens/vrcmd.h` and
+  `screens/posemath.h`, with tests.)
 - ft-hands' camera map (`cameras_from_xrservice_log`, `camera_for_pipe` in
   `hands/track/main.cpp`) is in the same position. That file links ncnn.
 - The hand panel (`hands/rec/panel/ft-handpanel.cpp`) wasn't examined.
@@ -171,6 +171,32 @@ Still open:
 - After a restart, a plain key the desktop had down stays in this relay's record until the next
   scan (about 1 s); ft-screens has already let go of it. Pinned in restart-test, not changed.
 
+### From DEE-307
+
+- The pose math is in `screens/posemath.h` (templates over any type with `float m[3][4]`),
+  tested by `screens/tests/posemath-test.cpp`.
+- `ft_vr_command`'s 46 conditions are in `vrcmd::Parse` (`screens/vrcmd.h`), in the same order
+  with the same scans. ft_vr_command binds its old variable names as references into the
+  parsed `Cmd`, at the same scopes, so the branch bodies didn't change. A new command needs a
+  verb in vrcmd.h, a condition in `Parse` at the right place in the order, and a case in
+  `screens/tests/vrcmd-test.cpp`.
+- ft-pointer has one `sendPose(S, R, origin, basis)`. The caller passes the headset's standing
+  and raw poses: placements use `sendPoseNow` (read at prediction 0), the loop passes this
+  tick's `hmd` and `hmdRaw` (prediction 0.011).
+- The ft_pointer driver no longer takes move, recenter, aim, gaze or distance. Nothing sent them:
+  the helper handles the relay's move, recenter and gaze itself. It follows the head until the
+  helper's first pose, then holds the helper's pose.
+
+Still open:
+- vr.cpp's other globals (about 80, over 1,000 uses). Only the SteamVR panel list is grouped
+  (`SteamList g_steam`). The rest sit next to the types they use, so one struct for all of them
+  means moving those types first. Group them one feature at a time, the way `g_spin` and
+  `g_steam` are.
+- The scans inside ft_vr_command's branch bodies (cutouts, spin, the screens list, hide/show
+  arguments) stay in vr.cpp, untested.
+- ft-pointer's `sendPose` has no offline test: `vrmath.h` includes OpenVR. Testing it needs an
+  OpenVR-free split of vrmath.h.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
@@ -188,3 +214,8 @@ Each needs an install and the headset:
   environment with PyGObject.
 - The relay after DEE-306: start it paused and unpaused, restart it with a key and a click held,
   reload with a bad rules file. Nothing should differ from before.
+- After DEE-307 (needs a build and install of ft-screens, ft-pointer and the ft_pointer driver):
+  the pointer before its first move (it follows the head), pointing, show and hide, a hand role
+  change, tilting a panel while dragging it, placements (calibration sweep, panel placement) and
+  a touch on a SteamVR panel. Panel commands from ft-layout, ft-floatd and the helper (place,
+  pin, float, pose, sub, hands, steamvr list), and SteamVR panels by hand.

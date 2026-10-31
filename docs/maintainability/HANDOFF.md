@@ -22,15 +22,16 @@ starts at DEE-298. The rest of DEE-303 (its open list below) is now its own tick
 | 10b | DEE-305 follow-up (review note #9) | 176eb76 |
 | 11 | DEE-309 | 77d0c35, a33b578, b6809e1, a0216d2, 91e19e3, 25dbde4, 165ed70, c9a4197, a0e2dfe, 972ac35, then this update |
 | 12 | DEE-312 | ed4efd1, c340d33, d2edd33 (note) |
-| 13 | DEE-298 | 3005442, then this update |
+| 13 | DEE-298 | 3005442, a3d58c8 (note) |
+| 14 | DEE-313 | 5b9c10b, 237d493, a1f3d6c, 26c16e3, 278c53e, 4146400, 4a456cb, 2bff435, then this update |
 
 What's left, in order:
 
-1. DEE-313 to DEE-316
+1. DEE-314 to DEE-316
 2. DEE-318
 3. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
 
-DEE-310, DEE-304, DEE-305, DEE-309, DEE-312 and DEE-298 are done (steps 7 to 13). DEE-303 part 1 is done (step
+DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298 and DEE-313 are done (steps 7 to 14). DEE-303 part 1 is done (step
 10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
@@ -57,6 +58,9 @@ DEE-310, DEE-304, DEE-305, DEE-309, DEE-312 and DEE-298 are done (steps 7 to 13)
 
 ### Tests
 
+- `docs/tests/test_doc_links.py` (in test-python) fails on a doc link to a missing file or
+  heading, or a repo path a doc or comment names that git doesn't track. `frame-hands/notes/...`
+  (the separate frame-hands project), build outputs and `docs/maintainability/` are skipped.
 - `just test` runs, in order: test-python, test-c, test-keyboard, test-bash, test-testbench and
   test-fast-install. It stops at the first recipe that fails (see the open items).
 - Run it on the Frame like this, and only one full run at a time:
@@ -553,9 +557,41 @@ Open:
 - A `display:` app still asks the host for its monitors before the options' other checks; that
   call doesn't pair.
 
+### From DEE-313
+
+Dead code out, docs matched to the code, and uninstall.sh's gaps closed.
+
+- Removed: `ft`'s installed mode and `ft update` (`ref_file`, `published_file`, `published`,
+  `reject_latest`, `default_published`, `update`, `repo_mode`, `need_repo`); `ft` now needs a
+  checkout. `pauseGestureText` and `setGazeTracker` in `input-settings/ft_input_settings.py`.
+- Kept, as the ticket allowed: ft-gazed's "source" path (the fallback before per-eye
+  calibration, and `--source`); ft-eyegrab's `--rec`, `--seq` and `--dump` (tested by
+  `gaze/tracker/tests/eyegrab-files-test.c`, used by `gaze/tracker/lab`); `stream/host.h:4`
+  is right (`stream/spike/ft-streamtest.cpp` includes it).
+- uninstall.sh: `desktop_entries DIR` takes `DIR/ft-*.desktop` and `DIR/frametop-*.desktop`;
+  `~/.cache/frametop-framedrop` goes with the caches, `~/.local/state/frametop-trial` with the
+  settings, `~/.local/share/frametop/gaze/bench` with the recordings. Sourced, it only defines
+  its functions (`scripts/tests/test_uninstall.py`).
+- Splits (headings left behind with a link): hands/README.md -> hands/tracking.md,
+  hands/cutouts.md, hands/rendered-hands.md; docs/reference.md -> docs/reference-apps.md,
+  docs/reference-features.md; docs/design.md -> docs/design-input.md, docs/design-session.md.
+  gaze/README.md's lines over 1,500 characters wrapped.
+
+Open:
+
+- No doc is over 50 KB now, but hands/README.md (48 KB) and hands/cutouts.md (39 KB, one
+  section) are close.
+- The link check reads inline links and paths only, not reference-style `[x]: path` links
+  (the docs don't use them yet).
+- `ft` outside a checkout now stops with a message; `ft clean` outside one went with it.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
+
+- After DEE-313: `uninstall.sh --dry-run` on the headset lists only Frametop's menu entries
+  and names the three added paths; Input Settings' Gaze page and pause gesture after a
+  fast-install. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`. Agents never run uninstall.sh.
 
 - Display Settings and Remote Displays show their error message when a file doesn't read.
 - Start and apply with a bad layout file: arranging still works and the file is kept.

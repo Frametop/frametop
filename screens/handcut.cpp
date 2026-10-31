@@ -4,11 +4,6 @@
 
 #include "../conf/ft_conf.h"
 
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -24,19 +19,12 @@ namespace {
 // The hands file ft-hands publishes (hands/include/fh_hands.h).
 constexpr uint32_t kMaxHands = FH_HANDS_MAX_HANDS, kMaxCapsules = FH_HANDS_MAX_CAPSULES;
 constexpr int64_t kStaleNs = 300'000'000;      // hands older than this are gone
-constexpr int64_t kReopenNs = 3'000'000'000;   // a file this stale is opened again (ft-hands may have made a new one)
 constexpr int64_t kHistoryNs = 1'000'000'000;
 constexpr double kNear = 0.12;   // metres: nothing closer to an eye than this is cut
 constexpr double kMaxSpeed = 2.5;     // m/s: faster is a tracking jump, not a hand
 constexpr double kStillSpeed = 0.05;  // m/s: below this, a hand's velocity is noise
 constexpr double kMaxAhead = 0.12;    // s: never predict further than this
 constexpr double kPalmLen = 0.0815;   // wrist to middle knuckle of the skeleton's average hand
-
-int64_t MonoNs() {
-    timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return int64_t(ts.tv_sec) * 1'000'000'000 + ts.tv_nsec;
-}
 
 void Apply(const Mat &m, const float p[3], float out[3]) {
     float r[3];
@@ -147,91 +135,24 @@ double MatteParams::Margin(double dist, double speed) const {
 
 // ------------------------------------------------------------------------------- hands
 
-Hands::~Hands() {
-    if (map_) munmap(const_cast<void *>(map_), mapLen_);
-    if (gmap_) munmap(const_cast<void *>(gmap_), gmapLen_);
-    if (fd_ >= 0) close(fd_);
-    if (gfd_ >= 0) close(gfd_);
-}
-
-namespace {
-
-// Maps up to `want` bytes of a file in the hands folder, if it's ours and at least `least` long.
-const void *MapFile(const char *name, size_t least, size_t want, int *fd, size_t *len) {
-    const std::string path = "/run/user/" + std::to_string(getuid()) + "/frametop-hands/" + name;
-    *fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    if (*fd < 0) return nullptr;
-    struct stat st;
-    if (fstat(*fd, &st) < 0 || st.st_uid != getuid() || size_t(st.st_size) < least) {
-        close(*fd), *fd = -1;
-        return nullptr;
-    }
-    *len = std::min(size_t(st.st_size), want);
-    void *m = mmap(nullptr, *len, PROT_READ, MAP_SHARED, *fd, 0);
-    if (m == MAP_FAILED) {
-        close(*fd), *fd = -1;
-        return nullptr;
-    }
-    return m;
-}
-
-// A copy of a seqlocked file (both files start with magic, version, size, seq). False if it
-// was being written, or hasn't changed since `last`.
-bool CopySeq(const void *map, size_t len, uint64_t *last, void *out) {
-    const auto *seq = reinterpret_cast<const uint64_t *>(static_cast<const char *>(map) + 16);
-    const uint64_t s1 = __atomic_load_n(seq, __ATOMIC_ACQUIRE);
-    if ((s1 & 1) || s1 == *last) return false;
-    std::memcpy(out, map, len);
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    if (__atomic_load_n(seq, __ATOMIC_RELAXED) != s1) return false;
-    *last = s1;
-    return true;
-}
-
-}  // namespace
+Hands::~Hands() = default;
 
 bool Hands::ReadFiles() {
-    const int64_t now = MonoNs();
     bool got = false;
-    // a long-stale file: ft-hands may have stopped and made a new one since
-    if (map_ && now - publishNs_ > kReopenNs && now - lastOpenTry_ > kReopenNs) {
-        munmap(const_cast<void *>(map_), mapLen_), close(fd_);
-        map_ = nullptr, fd_ = -1, seq_ = 0;
-    }
-    if (!map_ && now - lastOpenTry_ >= 1'000'000'000) {
-        lastOpenTry_ = now;
-        map_ = MapFile("hands", sizeof(fh_hands_t), sizeof(fh_hands_v2_t), &fd_, &mapLen_);
-    }
+    // A new frame: a new sequence number, or a new file (fh_shm.hpp).
     static fh_hands_v2_t copy;
-    if (map_ && CopySeq(map_, mapLen_, &seq_, &copy)) {
-        if (std::memcmp(copy.v1.magic, FH_HANDS_MAGIC, 8) == 0) {
-            if (mapLen_ < sizeof copy) std::memset(reinterpret_cast<char *>(&copy) + mapLen_, 0, sizeof copy - mapLen_);
-            const bool v2 = copy.v1.version >= 2 && mapLen_ >= sizeof copy && copy.v1.size >= sizeof copy;
-            // A version 2 file grown under a version 1 mapping: map it again next time.
-            if (copy.v1.version >= 2 && mapLen_ < sizeof copy) {
-                munmap(const_cast<void *>(map_), mapLen_), close(fd_);
-                map_ = nullptr, fd_ = -1, seq_ = 0, lastOpenTry_ = 0;
-            }
-            version_ = int(copy.v1.version);
-            Ingest(copy.v1, v2 ? copy.fits : nullptr, nullptr);
-            got = true;
-        }
+    if (file_.Read(&copy, sizeof copy, offsetof(fh_hands_t, seq)) && (copy.v1.seq != seq_ || file_.opens != opens_)) {
+        seq_ = copy.v1.seq, opens_ = file_.opens;
+        const bool v2 = copy.v1.version >= 2 && file_.Size() >= sizeof copy && copy.v1.size >= sizeof copy;
+        version_ = int(copy.v1.version);
+        Ingest(copy.v1, v2 ? copy.fits : nullptr, nullptr);
+        got = true;
     }
-    // the gestures file, written right after each hands update
-    if (gmap_ && now - publishNs_ > kReopenNs && now - lastGOpenTry_ > kReopenNs) {
-        munmap(const_cast<void *>(gmap_), gmapLen_), close(gfd_);
-        gmap_ = nullptr, gfd_ = -1, gseq_ = 0;
-    }
-    if (!gmap_ && now - lastGOpenTry_ >= 1'000'000'000) {
-        lastGOpenTry_ = now;
-        // version 2 (the grips) or later; a later one's extra slots are left out
-        gmap_ = MapFile("gestures", offsetof(fh_gestures_t, grip) + sizeof(fh_pinch_t) * 2, sizeof(fh_gestures_t), &gfd_,
-                        &gmapLen_);
-    }
+    // the gestures file, written right after each hands update: version 2 (the grips) or later
     static fh_gestures_t g;
-    if (gmap_ && CopySeq(gmap_, gmapLen_, &gseq_, &g) && std::memcmp(g.magic, FH_GESTURES_MAGIC, 8) == 0 && g.version >= 2) {
-        if (gmapLen_ < sizeof g) std::memset(reinterpret_cast<char *>(&g) + gmapLen_, 0, sizeof g - gmapLen_);
-        Ingest(copy.v1, nullptr, &g);
+    if (gfile_.Read(&g, sizeof g, offsetof(fh_gestures_t, seq)) && (g.seq != gseq_ || gfile_.opens != gopens_)) {
+        gseq_ = g.seq, gopens_ = gfile_.opens;
+        if (g.version >= 2) Ingest(copy.v1, nullptr, &g);
     }
     return got;
 }

@@ -101,6 +101,8 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-psabi hands/tests/skeleton_test.cpp \
       hands/track/skeleton.cpp -o build/tests/skeleton-test
     run hands/tests/skeleton_test.cpp build/tests/skeleton-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror hands/tests/shm_test.cpp -o build/tests/shm-test
+    run hands/tests/shm_test.cpp build/tests/shm-test
     gcc -std=gnu11 -Wall -Wextra -Werror hands/tests/xrcams_test.c -o build/tests/xrcams-test
     run hands/tests/xrcams_test.c build/tests/xrcams-test
     # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled (DEE-311)

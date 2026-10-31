@@ -29,6 +29,7 @@
 
 #include "../hands/include/fh_gestures.h"
 #include "../hands/include/fh_hands.h"
+#include "../hands/include/fh_shm.hpp"
 
 #if __has_include(<openvr.h>)
 #include <openvr.h>
@@ -42,6 +43,7 @@ struct HmdMatrix34_t {
 #endif
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -255,13 +257,14 @@ private:
     std::vector<Shift> shift_;
     bool predict_ = true, fresh_ = false;
     int64_t leadNs_ = 36'000'000;   // 25 ms to the displays, plus the tick a cutout buffer waits for its fence
-    int fd_ = -1, gfd_ = -1;
-    const void *map_ = nullptr, *gmap_ = nullptr;
-    size_t mapLen_ = 0, gmapLen_ = 0;
+    // the hands file (version 1 or later) and the gestures file (with the grips: version 2)
+    fh::ShmFile file_{"hands", FH_HANDS_MAGIC, sizeof(fh_hands_t)};
+    fh::ShmFile gfile_{"gestures", FH_GESTURES_MAGIC, offsetof(fh_gestures_t, grip) + sizeof(fh_pinch_t) * 2};
     uint64_t seq_ = 0, gseq_ = 0, frames_ = 0;
+    int opens_ = 0, gopens_ = 0;
     int version_ = 0;
     Mat captureHead_{};
-    int64_t captureNs_ = 0, publishNs_ = 0, lastOpenTry_ = 0, lastGOpenTry_ = 0, nowNs_ = 0;
+    int64_t captureNs_ = 0, publishNs_ = 0, nowNs_ = 0;
 };
 
 // The matte for these hands (Hands::shown()), seen from a head at headPos.

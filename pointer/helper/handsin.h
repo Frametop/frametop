@@ -12,6 +12,7 @@ extern "C" {
 #include "../../hands/include/fh_gestures.h"
 #include "../../hands/include/fh_hands.h"
 }
+#include "../../hands/include/fh_shm.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -30,62 +31,8 @@ namespace hin {
 
 using md::Vec3;
 
-// A file ft-hands rewrites in place under a sequence lock (read seq, copy, read seq again; use the
-// copy only if both are the same even number), mapped read-only. It's opened, and checked to be
-// the same file, at most once a second.
-class ShmFile {
-public:
-    ShmFile(const char *name, const char *magic, size_t minSize) : name_(name), magic_(magic), min_(minSize) {}
-    ~ShmFile() { Close(); }
-    ShmFile(const ShmFile &) = delete;
-    ShmFile &operator=(const ShmFile &) = delete;
-    // Copies up to `size` bytes into out (zero past the file's end). seqOffset: where the file's
-    // 64-bit sequence number is.
-    bool Read(void *out, size_t size, size_t seqOffset) {
-        const auto now = std::chrono::steady_clock::now();
-        if (now - checked_ > std::chrono::seconds(1)) {
-            checked_ = now;
-            const std::string path = "/run/user/" + std::to_string(getuid()) + "/frametop-hands/" + name_;
-            struct stat st;
-            if (stat(path.c_str(), &st) != 0 || size_t(st.st_size) != len_ || st.st_ino != ino_) {
-                Close();
-                const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-                if (fd >= 0 && fstat(fd, &st) == 0 && size_t(st.st_size) >= min_) {
-                    void *m = mmap(nullptr, size_t(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
-                    if (m != MAP_FAILED) map_ = m, len_ = size_t(st.st_size), ino_ = st.st_ino, ++opens;
-                }
-                if (fd >= 0) close(fd);
-            }
-        }
-        if (!map_ || std::memcmp(map_, magic_, 8) != 0) return false;
-        const auto *seqp = reinterpret_cast<const volatile uint64_t *>(static_cast<const char *>(map_) + seqOffset);
-        const size_t n = std::min(len_, size);
-        for (int tries = 0; tries < 3; ++tries) {
-            const uint64_t seq = __atomic_load_n(seqp, __ATOMIC_ACQUIRE);
-            if (seq & 1) continue;
-            std::memset(out, 0, size);
-            std::memcpy(out, map_, n);
-            __atomic_thread_fence(__ATOMIC_ACQUIRE);
-            if (__atomic_load_n(seqp, __ATOMIC_RELAXED) != seq) continue;
-            return true;
-        }
-        return false;
-    }
-    size_t Size() const { return len_; }
-    int opens = 0;  // a new file: counters start over
-
-private:
-    void Close() {
-        if (map_) munmap(map_, len_);
-        map_ = nullptr, len_ = 0, ino_ = 0;
-    }
-    const char *name_, *magic_;
-    size_t min_;
-    void *map_ = nullptr;
-    size_t len_ = 0;
-    ino_t ino_ = 0;
-    std::chrono::steady_clock::time_point checked_{};
-};
+// The hands and gestures files (hands/include/fh_shm.hpp: mapped read-only, rechecked each second).
+using fh::ShmFile;
 
 // Hand gestures (fh_gestures.h). Version 1 files have pinches only; their grips read as zero.
 // Before version 3, the middle pinches read as zero.

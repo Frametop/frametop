@@ -2845,12 +2845,15 @@ struct SteamPanel {
     steampanels::Fit fit;
     int64_t fitMs = INT64_MIN / 2;
 };
-std::vector<SteamPanel> g_steamPanels;
-std::map<std::string, int> g_steamIndex;   // a key keeps its index
-std::vector<std::string> g_steamParts;     // the list as it comes, part by part
-long g_steamSeq = -1;
-int g_steamPart = 0;
-int64_t g_steamListMs = INT64_MIN / 2, g_steamLookMs = INT64_MIN / 2;
+// The helper's list of SteamVR's panels, and where it is in reading the next one.
+struct SteamList {
+    std::vector<SteamPanel> panels;
+    std::map<std::string, int> index;   // a key keeps its index
+    std::vector<std::string> parts;     // the list as it comes, part by part
+    long seq = -1;
+    int part = 0;
+    int64_t listMs = INT64_MIN / 2, lookMs = INT64_MIN / 2;
+} g_steam;
 
 // What each hand is doing with the laser on a SteamVR panel.
 struct SteamTouch {
@@ -2865,7 +2868,7 @@ struct SteamTouch {
 } g_steamTouch[2];
 
 const SteamPanel *FindSteam(int index) {
-    for (const SteamPanel &sp : g_steamPanels)
+    for (const SteamPanel &sp : g_steam.panels)
         if (sp.index == index) return &sp;
     return nullptr;
 }
@@ -2875,29 +2878,29 @@ void SteamListPart(const char *cmd) {
     long seq;
     int part, parts, at = 0;
     if (std::sscanf(cmd, "steamvr %ld %d %d%n", &seq, &part, &parts, &at) < 3 || parts < 1) return;
-    if (part == 0) g_steamParts.clear(), g_steamSeq = seq, g_steamPart = 0;
-    if (seq != g_steamSeq || part != g_steamPart) return;   // (a part lost: the next list, a few seconds on)
-    ++g_steamPart;
+    if (part == 0) g_steam.parts.clear(), g_steam.seq = seq, g_steam.part = 0;
+    if (seq != g_steam.seq || part != g_steam.part) return;   // (a part lost: the next list, a few seconds on)
+    ++g_steam.part;
     std::istringstream words(cmd + at);
     for (std::string k; words >> k;)
-        if (k.rfind("frametop.", 0) != 0) g_steamParts.push_back(k);
+        if (k.rfind("frametop.", 0) != 0) g_steam.parts.push_back(k);
     if (part != parts - 1) return;
-    g_steamListMs = NowMs();
+    g_steam.listMs = NowMs();
     std::vector<SteamPanel> next;
-    for (const std::string &k : g_steamParts) {
+    for (const std::string &k : g_steam.parts) {
         SteamPanel sp;
-        for (const SteamPanel &o : g_steamPanels)
+        for (const SteamPanel &o : g_steam.panels)
             if (o.key == k) sp = o;
         if (sp.key.empty()) {
             sp.key = k;
-            auto it = g_steamIndex.find(k);
-            if (it == g_steamIndex.end()) it = g_steamIndex.emplace(k, kSteamIndex + int(g_steamIndex.size())).first;
+            auto it = g_steam.index.find(k);
+            if (it == g_steam.index.end()) it = g_steam.index.emplace(k, kSteamIndex + int(g_steam.index.size())).first;
             sp.index = it->second;
         }
         next.push_back(sp);
     }
-    g_steamPanels.swap(next);
-    g_steamLookMs = INT64_MIN / 2;   // look them up now
+    g_steam.panels.swap(next);
+    g_steam.lookMs = INT64_MIN / 2;   // look them up now
 }
 
 // For each new hands frame: the panels near the hands, fitted to the rays' hits. Their handles and
@@ -2905,28 +2908,28 @@ void SteamListPart(const char *cmd) {
 void ScanSteamPanels(const handinput::Input &in) {
     static uint64_t lastFrame = 0;
     const int64_t now = NowMs();
-    if (now - g_steamListMs > 60000) g_steamPanels.clear();   // (the helper's list stopped: it's gone)
-    if (g_hands.frame() == lastFrame || !in.haveHead || g_steamPanels.empty()) return;
+    if (now - g_steam.listMs > 60000) g_steam.panels.clear();   // (the helper's list stopped: it's gone)
+    if (g_hands.frame() == lastFrame || !in.haveHead || g_steam.panels.empty()) return;
     lastFrame = g_hands.frame();
-    if (now - g_steamLookMs >= 250) {
-        g_steamLookMs = now;
-        for (SteamPanel &sp : g_steamPanels) {
+    if (now - g_steam.lookMs >= 250) {
+        g_steam.lookMs = now;
+        for (SteamPanel &sp : g_steam.panels) {
             if (sp.h == vr::k_ulOverlayHandleInvalid || !sp.visible)   // (Steam makes some of them again now and then)
                 if (vr::VROverlay()->FindOverlay(sp.key.c_str(), &sp.h) != vr::VROverlayError_None) sp.h = vr::k_ulOverlayHandleInvalid;
             sp.visible = sp.h != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->IsOverlayVisible(sp.h);
         }
     }
     bool any = false;
-    for (const SteamPanel &sp : g_steamPanels) any = any || sp.visible;
+    for (const SteamPanel &sp : g_steam.panels) any = any || sp.visible;
     if (!any) return;
     const double eye[3] = {in.head.m[0][3], in.head.m[1][3], in.head.m[2][3]};
-    std::vector<std::vector<steampanels::Sample>> hits(g_steamPanels.size());
+    std::vector<std::vector<steampanels::Sample>> hits(g_steam.panels.size());
     for (const handcut::Hand &h : g_hands.seen()) {
         if (!in.allowed[h.right ? 1 : 0]) continue;
         const double tip[3] = {h.p[8][0], h.p[8][1], h.p[8][2]};
         for (const auto &d : steampanels::Cone(eye, tip, kSteamCone, kSteamRays))
-            for (size_t i = 0; i < g_steamPanels.size(); ++i) {
-                const SteamPanel &sp = g_steamPanels[i];
+            for (size_t i = 0; i < g_steam.panels.size(); ++i) {
+                const SteamPanel &sp = g_steam.panels[i];
                 if (!sp.visible) continue;
                 vr::VROverlayIntersectionParams_t params{};
                 params.vSource = {float(eye[0]), float(eye[1]), float(eye[2])};
@@ -2942,21 +2945,21 @@ void ScanSteamPanels(const handinput::Input &in) {
                 hits[i].push_back(q);
             }
     }
-    for (size_t i = 0; i < g_steamPanels.size(); ++i) {
+    for (size_t i = 0; i < g_steam.panels.size(); ++i) {
         steampanels::Fit f = steampanels::FitPanel(hits[i]);
         if (!f.ok) continue;
         // its front toward the eyes (a texture upside down fits facing away: turned about x, it's the same panel)
         const double to[3] = {eye[0] - f.pose.m[0][3], eye[1] - f.pose.m[1][3], eye[2] - f.pose.m[2][3]};
         if (to[0] * f.pose.m[0][2] + to[1] * f.pose.m[1][2] + to[2] * f.pose.m[2][2] < 0)
             for (int k = 0; k < 3; ++k) f.pose.m[k][1] = -f.pose.m[k][1], f.pose.m[k][2] = -f.pose.m[k][2];
-        g_steamPanels[i].fit = f, g_steamPanels[i].fitMs = now;
+        g_steam.panels[i].fit = f, g_steam.panels[i].fitMs = now;
     }
 }
 
 // SteamVR's panels for near input this tick: those the rays found lately, and those a hand is at.
 void SteamInputPanels(std::vector<handinput::Panel> &panels) {
     const int64_t now = NowMs();
-    for (const SteamPanel &sp : g_steamPanels) {
+    for (const SteamPanel &sp : g_steam.panels) {
         if (!sp.visible || !sp.fit.ok) continue;
         const bool at = g_handInput.nearPanel(0) == sp.index || g_handInput.nearPanel(1) == sp.index ||
                         g_steamTouch[0].panel == sp.index || g_steamTouch[1].panel == sp.index;

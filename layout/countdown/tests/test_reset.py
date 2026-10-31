@@ -77,8 +77,7 @@ class Harness:
 
     def socket(self):
         self.events.append(("socket",))
-        return types.SimpleNamespace(ask=self.ask, sock=types.SimpleNamespace(
-            close=lambda: self.events.append(("socket_close",))))
+        return types.SimpleNamespace(ask=self.ask, close=lambda: self.events.append(("socket_close",)))
 
     def ask(self, command):
         self.events.append(("ask", command))

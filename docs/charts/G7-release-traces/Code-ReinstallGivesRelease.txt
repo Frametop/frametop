@@ -1,0 +1,155 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 57 and seed 5159209804391740404 with 1 worker on 4 cores with 3481MB heap and 64MB offheap memory [pid: 1584676] (Linux 6.18.0-ge66bc2ca6f8c aarch64, Eclipse Adoptium 25.0.5 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/g7-release-h1a3hu7s/G7Release.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module G7Release
+Starting... (2026-10-30 23:25:32)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-30 23:25:33.
+Error: Invariant ReinstallGivesRelease is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ unit = [core |-> 0, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<FALSE, FALSE, FALSE>>
+/\ want = {}
+/\ target = 0
+/\ last = "none"
+/\ current = 0
+/\ phase = "idle"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 0
+
+State 2: <InstallRelease line 80, col 5 to line 95, col 52 of module G7Release>
+/\ unit = [core |-> 0, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {"core"}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core"}
+/\ target = 1
+/\ last = "none"
+/\ current = 0
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 3: <Step line 107, col 5 to line 112, col 37 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core"}
+/\ target = 1
+/\ last = "none"
+/\ current = 0
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 4: <Finish line 135, col 5 to line 148, col 79 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core"}
+/\ target = 1
+/\ last = "new"
+/\ current = 1
+/\ phase = "idle"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 5: <FastInstall line 153, col 5 to line 158, col 35 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core"}
+/\ target = 1
+/\ last = "patch"
+/\ current = 1
+/\ phase = "idle"
+/\ content = <<"patched", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 6: <InstallRelease line 80, col 5 to line 95, col 52 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = TRUE
+/\ todo = {"core"}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core"}
+/\ target = 1
+/\ last = "patch"
+/\ current = 1
+/\ phase = "run"
+/\ content = <<"patched", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 7: <Step line 107, col 5 to line 112, col 37 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = TRUE
+/\ todo = {}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core"}
+/\ target = 1
+/\ last = "patch"
+/\ current = 1
+/\ phase = "run"
+/\ content = <<"patched", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 8: <Finish line 135, col 5 to line 148, col 79 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = TRUE
+/\ todo = {}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core"}
+/\ target = 1
+/\ last = "reinstall"
+/\ current = 1
+/\ phase = "idle"
+/\ content = <<"patched", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+1000 states generated, 599 distinct states found, 339 states left on queue.
+The depth of the complete state graph search is 8.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 12 and the 95th percentile is 9).
+Finished in 00s at (2026-10-30 23:25:33)

@@ -1,0 +1,257 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 124 and seed -8132477265244870439 with 1 worker on 4 cores with 3481MB heap and 64MB offheap memory [pid: 1598350] (Linux 6.18.0-ge66bc2ca6f8c aarch64, Eclipse Adoptium 25.0.5 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/g7-release-h1a3hu7s/G7Release.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module G7Release
+Starting... (2026-10-30 23:26:50)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-30 23:26:50.
+Error: Invariant PatchLands is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ unit = [core |-> 0, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<FALSE, FALSE, FALSE>>
+/\ want = {}
+/\ target = 0
+/\ last = "none"
+/\ current = 0
+/\ phase = "idle"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 0
+
+State 2: <InstallRelease line 80, col 5 to line 95, col 52 of module G7Release>
+/\ unit = [core |-> 0, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {"core", "hands"}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "none"
+/\ current = 0
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 3: <Step line 107, col 5 to line 112, col 37 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 0]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {"hands"}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "none"
+/\ current = 0
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 4: <Step line 107, col 5 to line 112, col 37 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 1]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "none"
+/\ current = 0
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 5: <Finish line 135, col 5 to line 148, col 79 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 1]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<TRUE, FALSE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "new"
+/\ current = 1
+/\ phase = "idle"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 1
+
+State 6: <InstallRelease line 80, col 5 to line 95, col 52 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 1]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {"core", "hands"}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 2
+/\ last = "new"
+/\ current = 1
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 2
+
+State 7: <Step line 107, col 5 to line 112, col 37 of module G7Release>
+/\ unit = [core |-> 2, hands |-> 1]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {"hands"}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 2
+/\ last = "new"
+/\ current = 1
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 2
+
+State 8: <Step line 107, col 5 to line 112, col 37 of module G7Release>
+/\ unit = [core |-> 2, hands |-> 2]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 2
+/\ last = "new"
+/\ current = 1
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 2
+
+State 9: <Finish line 135, col 5 to line 148, col 79 of module G7Release>
+/\ unit = [core |-> 2, hands |-> 2]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = FALSE
+/\ todo = {}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 2
+/\ last = "new"
+/\ current = 2
+/\ phase = "idle"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "release"
+/\ lost = FALSE
+/\ made = 2
+
+State 10: <InstallTree line 99, col 5 to line 103, col 82 of module G7Release>
+/\ unit = [core |-> 2, hands |-> 2]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = TRUE
+/\ todo = {"core", "hands"}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "new"
+/\ current = 2
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "tree"
+/\ lost = FALSE
+/\ made = 2
+
+State 11: <Step line 107, col 5 to line 112, col 37 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 2]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = TRUE
+/\ todo = {"hands"}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "new"
+/\ current = 2
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "tree"
+/\ lost = FALSE
+/\ made = 2
+
+State 12: <Step line 107, col 5 to line 112, col 37 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 1]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = TRUE
+/\ todo = {}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "new"
+/\ current = 2
+/\ phase = "run"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "tree"
+/\ lost = FALSE
+/\ made = 2
+
+State 13: <Finish line 135, col 5 to line 148, col 79 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 1]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = TRUE
+/\ todo = {}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "tree"
+/\ current = 2
+/\ phase = "idle"
+/\ content = <<"image", "image", "image">>
+/\ down = FALSE
+/\ kind = "tree"
+/\ lost = FALSE
+/\ made = 2
+
+State 14: <FastInstall line 153, col 5 to line 158, col 35 of module G7Release>
+/\ unit = [core |-> 1, hands |-> 1]
+/\ dirty = <<FALSE, FALSE, FALSE>>
+/\ wasThere = TRUE
+/\ todo = {}
+/\ folder = <<TRUE, TRUE, FALSE>>
+/\ want = {"core", "hands"}
+/\ target = 1
+/\ last = "patch"
+/\ current = 2
+/\ phase = "idle"
+/\ content = <<"image", "patched", "image">>
+/\ down = FALSE
+/\ kind = "tree"
+/\ lost = TRUE
+/\ made = 2
+
+135 states generated, 117 distinct states found, 33 states left on queue.
+The depth of the complete state graph search is 14.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 5 and the 95th percentile is 5).
+Finished in 00s at (2026-10-30 23:26:50)

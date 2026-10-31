@@ -13,10 +13,11 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | ft-camd, ft-hands, when hand tracking runs and parks, hand or controller per side, near input on panels, the hand ray and pinches | G5 Hands | `G5-hands.mmd`, `G5-hands.tla` |
 | ft-screens' screens and panels and when they show, visibility modes, conceal, ft-layout and profiles, floating windows, the dashboard, remote access over VNC | G2 Desktop and panels | `G2-desktop.mmd`, `G2-desktop.tla` |
 | The testbench, its input proxy and fake trackers, the verify skills and their lease, the fake-worn guard, the Hand and Eye Recorders and their upload, report.sh, doctor.sh, the logs, the tour | G8 Verify, data and diagnostics | `G8-verify.mmd`, `G8-verify.tla`, `G8-verify-Guard.tla` |
+| The dev box and builds, `ft dev build`, `pack/Containerfile`, CI, `framedrop/build.sh` and the zip, FrameDrop, `get.sh`, `install-release.sh`, `install.sh`, `fast-install`, the models, `uninstall.sh` | G7 Build and release | `G7-release.mmd`, `G7-release.tla` |
 
 `feature-map.md` lists every feature (F1 to F22), its processes, sockets, files and units, and proposes the eight chart groups. It was written at `403c1eb`. Its bug table predates the H1, R1 and H2 fixes (`76121c7`, `e15b65f`, `2c783dd`), and it mentions an overview chart and a `snapshot/` folder that are kept outside the repo.
 
-G7 (build, install and release) is not charted yet.
+All eight groups are charted.
 
 ## Files
 
@@ -261,9 +262,46 @@ Open suspected bugs:
 
 Fixed before `78e93b1`, drawn green: the fake-worn guard's A to F (`37d0fbf`, ft-stream `bd606ce` in merge `81a5c82`, `0c7eb9e`, `38d6257`, `1f485fe`), which the skill's model checks.
 
+## G7 Build and release
+
+Covers how a build is made and how a release reaches the Frame. On the build side: the dev box (`setup/dev-container.sh`, a Fedora 44 toolbox in distrobox), a source install's `install.sh` in a clone, `ft dev build` and `ft dev test` (the image from `pack/Containerfile`, with its pinned base, `uv.lock`, OpenVR and `.dockerignore`), CI (`.github/workflows/release.yml` on a `v*` tag or a manual run, with its version rule and smoke test), and `framedrop/build.sh` with `pack/release-info.py` (the OCI archive, `frametop-release.json`, `Frametop.zip` and its manifest). On the install side: the ways in (`get.sh` and its channels, FrameDrop's installer and askpass socket, the zip by hand, or from source), `pack/install-release.sh` (the SteamOS table, the image load and sha256 check, the atomic copy into `releases/VERSION`, `current` and the clean-up), `install.sh`'s 12 steps under `set -e`, `scripts/fast-install` and its undo, the models (the pinned hand student, `ft-models` with the hands and eyes catalogs, `voice/models.sh`), and upkeep (`update-check.py`, `conf-migrate.sh`, `uninstall.sh`). Arrows into G1, G3, G4, G5 and G8 show where an install's units and models reach those groups. The flow is drawn by hand. The `.mmd` names the files and lines.
+
+Model: `G7-release.tla` (module `G7Release`). It follows what an install leaves behind, release after release (N = 3): each release's folder and container, the release each unit points into (core for the units always installed, hands for an optional part), the `current` link, a stopped `install.sh`, and `fast-install` patches. Configs: `Code` (every fault on), `CIOnly` (CI releases and full installs only, no `fast-install`), `Skips` (a later install skips the optional part), `Rollback` (an older release's `install.sh` run to go back, with `fast-install`), `Interrupt` (one `install.sh` stops mid-way, with `fast-install`), `Local` (local builds), `Reinstall` (the same release installed again after a `fast-install`), `Fixed` (all four fixes, no interruption) and `FixedInterrupt` (all four fixes with an interruption).
+
+Results at `78e93b1`:
+
+| Rule | What it says | Result |
+| --- | --- | --- |
+| TypeOK | | Holds in all 9 configs |
+| UnitsHaveFolder | Every unit points into a release folder and container that are still there | Breaks in Skips, 10 steps (W2) and Code. Holds in every other config |
+| NoMixedUnits | Outside a running install, every unit points into one release | Breaks in Skips, 7 steps (W2), Interrupt, 7 steps (W5), FixedInterrupt and Code |
+| CurrentIsLive | Outside a running install, `current` names the release the units run | Breaks in Rollback, 12 steps (W1), Interrupt, 3 steps (W5), FixedInterrupt and Code |
+| PatchLands | `fast-install` never reports success for a tree nothing runs | Breaks in Rollback, 13 steps (W1), Interrupt, 8 steps (W5), FixedInterrupt and Code |
+| ReleaseMatchesCommit | Every release's image was built from the commit its release JSON names | Breaks in Local, 1 step (W3) and Code. Holds in CIOnly and Fixed |
+| ReinstallGivesRelease | Installing a release again gives that release as it was built | Breaks in Reinstall, 9 steps (W4), Rollback, Interrupt and Code |
+| InstallSettles | A stopped install is finished by running the same command again | Holds in all 9 configs |
+
+CIOnly (116 states) and Fixed (1,844) hold every rule. States per run: 116 (CIOnly) to 155,405 (Code). FixedInterrupt shows that none of the W1 to W4 fixes helps W5: only running the command again settles it.
+
+Also checked in the code and drawn as holding: the copy out of the image is atomic (`VERSION.new`, then `mv`), a damaged image file stops before anything is written (exit 3), another image under a version already installed is refused, and every model file is pinned to a commit and a sha256.
+
+Open suspected bugs:
+
+| Id | Ticket | Rule | What happens |
+| --- | --- | --- | --- |
+| W1 | DEE-286 | CurrentIsLive, PatchLands | Only `install-release.sh` moves `releases/current`, after `install.sh` (`pack/install-release.sh` 222-224). Going back by running the older release's `install.sh`, as `pack/README.md` 202 and `install-release.sh` 18-19 say, moves the units and leaves `current` on the newer release. `fast-install` then patches `current`'s tree (`scripts/fast-install` 135-142), finds no unit in it (`unit_dirs` 355) or restarts units that run the other tree, and reports "fast-installed X onto VERSION". The next install keeps the wrong release as the one before (224-236), and `get.sh` reads the channel from it (`get.sh` 169-172) |
+| W2 | DEE-287 | UnitsHaveFolder, NoMixedUnits | A part that a later install skips (voice or hands unticked, `--no-voice`, `--no-hands`, or `--yes` with no quiet sudo, which is FrameDrop with no password, `install.sh` 153-154) keeps its units in the old release's folder and container. They point at `@REPO@` (`hands/frametop-hands.service` 16-19, `hands/frametop-camd.service` 19, `voice/frametop-voice.service` 12, `voice/frametop-voice-whisper.service` 14) and at that tree's BOX (`scripts/in-box`). Two releases on, `install-release.sh` 225-236 removes the folder and the container, and those services fail. Only the recorders' menu entries are renewed (`install.sh` 174-176, 234-237) |
+| W3 | DEE-288 | ReleaseMatchesCommit (local builds only) | `ft dev build` builds the image from the working tree (`ft` 188), with uncommitted and untracked files in. `.dockerignore` leaves out a fixed list, not `work/` or other untracked files. `framedrop/build.sh` 42 takes `--commit` from HEAD at pack time, and `fast-install` diffs from that COMMIT (428-447) and trusts it for its rebuilds (490-491). A `0.3.0-local.SHA` version is passed by hand. CI is clean: a fresh checkout and `GITHUB_SHA` |
+| W4 | DEE-289 | ReinstallGivesRelease | Installing the same release again (the same IMAGE_ID) skips the copy when `.frametop-release` is there (`pack/install-release.sh` 169-172, 193), so fast-installed files and `.fast-install/` stay. The tree names the release's COMMIT and runs other commits. `fast-install undo` is the only way back |
+| W5 | no ticket yet | NoMixedUnits, CurrentIsLive (minor) | `install.sh` runs 12 steps under `set -e`. A failing step or a power-off leaves the early steps' units in the new release and its container, the later ones in the old release, and `current` on the old one. `fast-install` then patches the old tree. Running the same command again finishes it: no copy, every step again |
+
+Ways around them until they are fixed: for W1, run the newest release's `install-release.sh` again. For W2, install the skipped part again after each update (`hands/run.sh install`). For W3, pack from a clean checkout, or use CI. For W4, run `fast-install undo` before installing again. For W5, run the same command again.
+
+`G7-release-traces/` holds TLC's output for every break at `78e93b1`. It is committed, unlike the other groups' trace folders, so the W paths can be read without Java. The step counts above come from those traces. The chart's W2 and W4 legend boxes say 9 and 8 steps. They are one short, and the next redraw corrects them.
+
 ## Running a check
 
-The checks need TLC 1.7.4 and Java. They look for TLC at `~/.cache/frametop-formal/tla2tools-1.7.4.jar` (the verify skills' `scripts/check` put it there), or at `TLA2TOOLS` for G3, G4 and G6. Java comes from `JAVA`, then `PATH`. G1 asks mise for `java@temurin-25`.
+The checks need TLC 1.7.4 and Java. They look for TLC at `~/.cache/frametop-formal/tla2tools-1.7.4.jar` (the verify skills' `scripts/check` put it there), or at `TLA2TOOLS` for every group but G1. Java comes from `JAVA`, then `PATH`. G1 asks mise for `java@temurin-25`.
 
 A check keeps a core busy for seconds to minutes, so run it through `frame-job` on the Frame, at the lowest priority:
 
@@ -275,8 +313,8 @@ frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G4-
 frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G1-lifecycle-check.py PauseHide
 ```
 
-G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G2 takes `Desktop:HeadOff` and so on. G8 takes `Verify`, `Guard`, `Verify:Overrides`, `Guard:LiveNoF` and so on, and reads the guard model from the verify-fake-worn-guard skill. G6 takes `Exit`, `Live` or `PreFix`. G1 takes config names.
+G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G2 takes `Desktop:HeadOff` and so on. G8 takes `Verify`, `Guard`, `Verify:Overrides`, `Guard:LiveNoF` and so on, and reads the guard model from the verify-fake-worn-guard skill. G6 takes `Exit`, `Live` or `PreFix`. G1 and G7 take config names, such as `Rollback`.
 
-Each script writes TLC's full output, with every counterexample trace, to `GROUP-traces/` next to the models. Those folders are ignored by git. A rule that breaks prints its shortest path, and the chart's red badges follow that path.
+Each script writes TLC's full output, with every counterexample trace, to `GROUP-traces/` next to the models. Those folders are ignored by git, except `G7-release-traces/`. A rule that breaks prints its shortest path, and the chart's red badges follow that path.
 
 When code in a group's area changes, re-run its check. A rule that changes from breaks to holds means a bug was fixed: move its badge to green with the commit. A rule that changes from holds to breaks is a regression, or the model needs the new behaviour.

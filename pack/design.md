@@ -127,8 +127,8 @@ the runtime options below.)
 ./ft ft-screens    # run a program
 ```
 
-Repo mode defaults to the locally built `frametop:local` and mounts the
-checkout at `/src/frametop`.
+`ft` defaults to the locally built `frametop:local` and mounts the checkout
+at `/src/frametop`.
 
 **User (Frame):** a release zip, installed by `get.sh --release` or FrameDrop
 (pack/README.md). No repo on the device, no build. The plan here was an

@@ -83,8 +83,8 @@ ft dev test         # the Python test suites inside the image
 ft clean            # remove frametop's leftovers only (see the store section)
 ```
 
-`FT_IMAGE` overrides the image reference (repo mode defaults to the locally
-built `frametop:local`). The wrapper runs from a checkout only: releases
+`FT_IMAGE` overrides the image reference (the default is the locally built
+`frametop:local`). The wrapper runs from a checkout only: releases
 don't install it. Containers
 run through the wrapper are named `frametop-<program>-<pid>`. Runs get no
 access to the host beyond the repo mount: how Frametop's programs run on the

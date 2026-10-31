@@ -10,10 +10,11 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | Remote displays, ft-stream, remote.c slots, the host-input lease, the fake-worn guard, the relay's network devices | G6 Remote displays and host input | `G6-remote.mmd`, `G6-remote.tla`, then the verify skills' models (below) |
 | The input relay, held keys, bindings, the pointer helper's laser and trigger, keyboards, voice typing, gamepad mode | G3 Input and pointer | `G3-input.mmd`, `G3-input-Keys.tla`, `G3-input-Laser.tla` |
 | Gaze sources, ft-gaze and ft-gazed, calibration and its panel, idle and wake, our own eye tracker | G4 Gaze | `G4-gaze.mmd`, `G4-gaze.tla` |
+| ft-camd, ft-hands, when hand tracking runs and parks, hand or controller per side, near input on panels, the hand ray and pinches | G5 Hands | `G5-hands.mmd`, `G5-hands.tla` |
 
 `feature-map.md` lists every feature (F1 to F22), its processes, sockets, files and units, and proposes the eight chart groups. It was written at `403c1eb`. Its bug table predates the H1, R1 and H2 fixes (`76121c7`, `e15b65f`, `2c783dd`), and it mentions an overview chart and a `snapshot/` folder that are kept outside the repo.
 
-G5 (hands), G2 (desktop and panels), G8 (verification, data and diagnostics) and G7 (build, install and release) are not charted yet.
+G2 (desktop and panels), G8 (verification, data and diagnostics) and G7 (build, install and release) are not charted yet.
 
 ## Files
 
@@ -157,14 +158,43 @@ Results at `78e93b1`:
 | CalibrationComes | An uncalibrated tracker gets its calibration | Breaks in Code and Steam, 11 steps (Z4). Holds in NoBlip. Breaks in PreBlind (the 2026-10-05 deadlock, fixed by `d39fbb9`) and NewLayout (a known limit) |
 | TrackerWakes | A woken tracker sends | Holds, except where ft-gazed crashes forever |
 
-Open suspected bugs (tickets for Z1 to Z4 are being created):
+Open suspected bugs:
+
+| Id | Ticket | Rule | What happens |
+| --- | --- | --- | --- |
+| Z1 | DEE-270 | ScreensComeBack | ft-gazed dies during a full calibration. Nothing calls `close()`, ft-screens' hide has no lease, and the new ft-gazed never knew, so the screens stay hidden |
+| Z2 | DEE-271 | FullOnlyWhenNeeded | Our tracker's first calibration saves while ft-gazed still holds ft-eyes' old status. With `full_armed` still set, a second full calibration opens at once |
+| Z3 | DEE-272 | From the code (minor) | Check headset fit asked for while idle waits for a corrected gaze, which our tracker can't send before its first calibration, so it opens only after WAKE_SETTLE (15 s) |
+| Z4 | DEE-273 | CalibrationComes | No eyes for EYES_GONE (2 s) closes the full calibration, but away needs AWAY_MIN (3 s). Eyes back in that second are no don, so nothing re-arms it |
+
+## G5 Hands
+
+Covers ft-camd and ft-hands (how they start, restart and stop), when hand tracking runs and when the pause parks it, the input relay's park state and the helper's dashboard word, the hand or controller role on each side (`handoff.h`), near input on ft-screens' panels, and the hand ray and pinches. The pipeline from XRService's cameras to the readers of `/run/user/UID/frametop-hands` is drawn by hand.
+
+Model: `G5-hands.tla` (module `G5Hands`). Configs: `Steady` (hand interaction on, the run folder there), `FreshBoot` (a pause before hand tracking ever ran), `FreshBootFix` (the same with the park remembered only once written), `SwitchOff` (hand interaction switched off mid-pause), `Cutouts` (ft-cutouts without hand interaction), `Restarts` (the helper and the relay can restart), `RestartsFix` and `DashFix` (the dashboard word resent after a restart), `NoHands` and `NoHandsL2` (hand interaction off, with G1's L2), `Code` (every fault on). Each fix config switches off one bug, to show that bug alone breaks the rule.
+
+Results at `78e93b1`:
+
+| Rule | What it says | Result |
+| --- | --- | --- |
+| TypeOK | | Holds in all 11 configs |
+| TrackerIdleInPause | While paused with the dashboard closed, a running hand tracker soon stops or parks | Breaks in FreshBoot, 3 steps (H5-1), SwitchOff, 4 steps (H5-2), Cutouts, 4 steps (H5-3), Steady and Restarts (H5-4), NoHandsL2 (G1's L2) and Code. Holds in FreshBootFix, DashFix, RestartsFix and NoHands |
+| ParkLifts | A park on a running tracker lifts once the pause ends or the dashboard opens | Breaks in Restarts, 6 steps (H5-4) and Code. Holds in every config without relay restarts |
+
+States per run: 64 (Steady, DashFix) to 1,741 (Code).
+
+Also checked in the code and drawn as holding: the helper ends a held pinch as lost when ft-hands is quiet for 2.5 s (`ft-pointer.cpp` 3649-3672), a park ends gestures as lost (`track/main.cpp` 890-917), and ft-screens never holds a near-input grab through a controller (`vr.cpp` 2724-2779).
+
+Open suspected bugs (tickets for H5-1 to H5-4 are being created):
 
 | Id | Rule | What happens |
 | --- | --- | --- |
-| Z1 | ScreensComeBack | ft-gazed dies during a full calibration. Nothing calls `close()`, ft-screens' hide has no lease, and the new ft-gazed never knew, so the screens stay hidden |
-| Z2 | FullOnlyWhenNeeded | Our tracker's first calibration saves while ft-gazed still holds ft-eyes' old status. With `full_armed` still set, a second full calibration opens at once |
-| Z3 | From the code (minor) | Check headset fit asked for while idle waits for a corrected gaze, which our tracker can't send before its first calibration, so it opens only after WAKE_SETTLE (15 s) |
-| Z4 | CalibrationComes | No eyes for EYES_GONE (2 s) closes the full calibration, but away needs AWAY_MIN (3 s). Eyes back in that second are no don, so nothing re-arms it |
+| H5-1 | TrackerIdleInPause | A pause before hand tracking ever ran since login. `/run/user/UID/frametop-hands` is missing, so `update_park` writes no park file (`game_pause.py` 722) but still sets `parked` (733). Tracking that starts later in the pause, from a desktop opened mid-pause, runs unparked through the game, and nothing calls `update_park` again until the dashboard opens or a resume |
+| H5-2 | TrackerIdleInPause (minor) | Hand interaction switched off mid-pause. `set_hands` (701-707) empties `keep` and unparks, but nothing stops the units the pause kept. `pause-test.py` 262-263 expects the worker to stop them |
+| H5-3 | TrackerIdleInPause (minor) | ft-cutouts' transient units aren't in the pause's `UNITS`, and without hand interaction nothing parks them, so the cutouts' tracker runs through VR games |
+| H5-4 | TrackerIdleInPause, ParkLifts (minor) | The helper sends `vrdash` only on a change, or every 5 s in a game. A helper that goes away with the dashboard open (a SteamVR restart or a crash) leaves the relay's copy open, and a new relay thinks it is closed. Outside a game, a manual pause stays unparked, or parks under an open dashboard |
+
+G1's L3 has its root here: `frametop-camd.service` and `frametop-hands.service` have no `Requisite=steamvr`, which `game_pause.py` 577 assumes. Only `frametop-handview.service` has it.
 
 ## Running a check
 
@@ -180,7 +210,7 @@ frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G4-
 frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G1-lifecycle-check.py PauseHide
 ```
 
-G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G6 takes `Exit`, `Live` or `PreFix`. G1 takes config names.
+G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G6 takes `Exit`, `Live` or `PreFix`. G1 takes config names.
 
 Each script writes TLC's full output, with every counterexample trace, to `GROUP-traces/` next to the models. Those folders are ignored by git. A rule that breaks prints its shortest path, and the chart's red badges follow that path.
 

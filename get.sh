@@ -21,7 +21,8 @@
 #   --clone-only    get or update the repo (or unpack the release), but don't run install.sh
 #   --release       install a release from GitHub instead of cloning the repo
 #   --version V     with --release: that release (tag vV), not the newest
-#   --zip FILE|URL  with --release: this Frametop.zip instead of GitHub's newest
+#   --zip FILE|URL  with --release: this Frametop.zip instead of GitHub's newest (a URL needs
+#                   the release's SHA256SUMS beside it, as GitHub's releases have)
 #   --any-steamos   with --release: install even on a SteamOS build the release breaks on
 #   --yes, --no-voice, --no-hands, --no-eye-tracker, --no-bluetooth, --bluetooth   passed to install.sh (--yes also
 #                   answers this script's questions: the version already there, or stable)
@@ -61,6 +62,23 @@ sys.exit(1)'
   fi
 }
 
+# check_sums SUMS_URL FILE: FILE has to match the Frametop.zip line of the release's
+# SHA256SUMS (CI publishes one with every zip). A zip that doesn't is removed, so the next run
+# downloads it again.
+check_sums() {
+  local sums want
+  sums=$(curl -fsSL --proto '=https' "$1") ||
+    { echo "couldn't fetch the release's checksums ($1): run this again" >&2; return 1; }
+  want=$(printf '%s\n' "$sums" | awk '$2 == "Frametop.zip" || $2 == "*Frametop.zip" { print $1; exit }')
+  [[ $want =~ ^[0-9a-f]{64}$ ]] || { echo "the release's SHA256SUMS ($1) doesn't list Frametop.zip" >&2; return 1; }
+  if [ "$(sha256sum "$2" | cut -d' ' -f1)" != "$want" ]; then
+    rm -f "$2"
+    echo "the download doesn't match the release's SHA256SUMS: run this again to download it again" >&2
+    return 1
+  fi
+  echo "Checked Frametop.zip against the release's SHA256SUMS"
+}
+
 # install_release CHANNEL VERSION ZIP DIR CLONE_ONLY ANY_STEAMOS -- INSTALL_ARGS...
 install_release() {
   local channel=$1 version=$2 zip=$3 dir=$4 clone_only=$5 any=$6 cache=$HOME/.cache/frametop/release
@@ -91,7 +109,8 @@ install_release() {
         curl -fL --proto '=https' -C - -o "$file.part" "$url" ||
           { echo "the download didn't finish: run this again to resume it" >&2; return 1; }
         mv "$file.part" "$file"
-      fi ;;
+      fi
+      check_sums "${url%/*}/SHA256SUMS" "$file" || return ;;
     *://*) echo "the zip has to come over https: $zip" >&2; return 1 ;;
     *) file=$zip; [ -f "$file" ] || { echo "no file $file" >&2; return 1; } ;;
   esac

@@ -87,6 +87,7 @@ HANDS_FIST_REACH=0.11      # ... a fist counts as at a panel with its palm or kn
 HANDS_JOIN_REACH=0.15      # Frametop panels: while one hand holds a panel, the other's pinch or fist anywhere on it, within this far (m) in front (12 cm behind), joins as the second anchor: move, scale and turn it with both | 0 = the second hand has to find a grab zone like the first
 HANDS_BUTTON_REACH=0.015   # Frametop panels: a panel's round buttons (curve, reset, dock, close) take a fingertip or a pinch this far (m) each way from their centre at least; the nearest control wins
 HANDS_PINCH_BUTTONS=1      # ... and a pinch on one presses it | 0 = a pinch there takes the bar (moves the panel)
+HANDS_BUTTON_SIZE=0.024    # Frametop panels: with a hand at a panel its round buttons are drawn at least this wide (m, up to 0.08); 0 = their usual size
 HANDS_EDGE_GLOW=1          # Frametop panels: a soft white glow round the corner a pinch would resize from (an L), along the edge it would move the panel by, or round a button, brighter as the fingers come; brightest while resizing | 0 = the resize handle follows the hand instead
 HANDS_STRETCH_TURN=1       # Frametop panels: two hands holding one panel turn it on every axis with the line between them, and roll it with their wrists | 0 = about the vertical only
 HANDS_TRACK_GATE=1         # Frametop panels: a held panel ignores tracking no hand makes (a jump faster than 4 m/s or 100 m/s^2, a hand frame flipping), is smoothed harder on one camera's or edge-of-view frames, and holds still when the hand leaves the view at the side | 0 = takes every frame (the 12 cm jump rule only)
@@ -150,6 +151,7 @@ POINTER_HAND_RAY=1         # hands: a bare hand raised and pointing shows a ray 
 POINTER_RAY_DEADZONE=2.5   # hand ray: degrees the ray turns during a pinch before the press drags (a click's own wobble stays inside)
 POINTER_RAY_PUSH=1         # hand ray: while carrying a panel, reaching out pushes it away and pulling in brings it near
 POINTER_RAY_SCROLL=1       # hand ray: scroll speed for a held middle or three-finger pinch moved up or down (-1 turns the direction round; 0 = no ray scrolling, a three-finger pinch is then a pinch)
+POINTER_RAY_THREE_WAIT=110 # hand ray: a pinch made with the middle tip already within 5 cm of the thumb waits this many ms (up to 400) for the middle to join, so a three-finger scroll doesn't click first; 0 = clicks at once
 POINTER_RAY_RELEASE=2      # hand ray: seconds after the ray goes before the pointer it woke lets go of the laser
 POINTER_RAY_GRACE=0.5      # hand ray: seconds a hand keeps the laser after its ray drops (the other hand's ray takes it after this, or at once by pinching or raising)
 POINTER_RAY_BEAM=0         # hand ray: 0 = only its dot shows (the beam starts just short of it; SteamVR's beam width is one setting for every laser, read only when SteamVR starts) | 1 = the whole beam from the hand

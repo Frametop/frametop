@@ -27,7 +27,7 @@ frame-job --local -- .claude/skills/verify-fake-worn-guard/scripts/check
 .claude/skills/verify-fake-worn-guard/scripts/replay
 ```
 
-- `scripts/check` runs TLC 1.7.4 on `model/FakeWornGuard.tla`, once per config and rule, and
+- `scripts/check` runs TLC 1.7.4 on `docs/charts/fake-worn-guard/FakeWornGuard.tla`, once per config and rule, and
   compares each result and each shortest counterexample with the baseline in the script. Exit 0:
   matches. Exit 1: something differs. Exit 2: TLC couldn't run. TLC comes from `TLA2TOOLS` or is
   downloaded once into `~/.cache/frametop-formal` and checked against its SHA-256. Java comes from
@@ -41,8 +41,8 @@ frame-job --local -- .claude/skills/verify-fake-worn-guard/scripts/check
   doesn't allow host input, which stops ft-stream's lease.
 
 Read every result, and draw the chart, with the pstack `/statechart` skill. Give it
-`model/FakeWornGuard.tla` with `model/Kills.cfg` (264 states: it draws F's window, the guard gone
-before `worn 1`) or `model/NoF.cfg` (480 states: the proxy hangs), and `model/view.mjs` as its
+`docs/charts/fake-worn-guard/FakeWornGuard.tla` with `docs/charts/fake-worn-guard/Kills.cfg` (264 states: it draws F's window, the guard gone
+before `worn 1`) or `docs/charts/fake-worn-guard/NoF.cfg` (480 states: the proxy hangs), and `docs/charts/fake-worn-guard/view.mjs` as its
 view. `All` (632 states) is over its 500-state chart budget, so it would draw only bug paths. It
 turns each violation into the shortest path in plain words. Rendered charts are in `work/` if
 that folder is still there (not committed): `fake-worn-guard.png` (Kills, no bug paths),

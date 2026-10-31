@@ -11,7 +11,7 @@ temp dir.
           overrides and fake trackers, and whether they end once nobody drives the run.
           Configs G8-verify-NAME.cfg
   Guard   G8-verify-Guard.tla (module G8Guard): verify-fake-worn-guard's FakeWornGuard.tla,
-          used as it is from .claude/skills/verify-fake-worn-guard/model, with fairness for the
+          used as it is from docs/charts/fake-worn-guard, with fairness for the
           system's own steps and the rule that the guard always restores the real wearer.
           Configs G8-verify-Guard-NAME.cfg
 
@@ -24,7 +24,7 @@ JAR = os.environ.get('TLA2TOOLS', str(Path.home() / '.cache/frametop-formal/tla2
 JAVA = os.environ.get('JAVA', 'java')
 MODELS = {'Verify': 'G8Verify', 'Guard': 'G8Guard'}
 PREFIX = {'Verify': 'G8-verify-', 'Guard': 'G8-verify-Guard-'}
-GUARD = HERE.parents[1] / '.claude/skills/verify-fake-worn-guard/model/FakeWornGuard.tla'
+GUARD = HERE / 'fake-worn-guard/FakeWornGuard.tla'
 
 
 def configs(model):

@@ -17,6 +17,8 @@ from unittest import mock
 
 SKILL = Path(__file__).resolve().parents[2] / '.claude/skills/verify-frametop'
 HELPER = SKILL / 'scripts/verify-frametop'
+if not HELPER.exists():  # the maintainer's skill: a checkout without .claude/ skips this
+    raise unittest.SkipTest('no .claude/skills/verify-frametop here')
 
 
 def load():

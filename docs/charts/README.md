@@ -82,10 +82,10 @@ Covers the Remote Displays app and ft-layout, remote.c's stream slots in ft-scre
 
 Model: `G6-remote.tla` (module `G6RemoteExit`): how an ft-stream ends and whether something always reaps it. Configs: `Exit` (the code), `Live` (liveness of asked and stuck ends), `PreFix` (before `e15b65f` added the SIGKILL), `PreR23` (the code at `78e93b1`, before the R2 and R3 fixes). Since those fixes the model tracks `clock` (`quit_at` is set: a SIGKILL is coming) apart from `quit` (the socket is closed), and HungGetsKilled and HungLostGetsKilled read `clock`.
 
-The rest of G6 is checked by the models in the verify skills, which matched their baselines at `78e93b1`:
+The rest of G6 is checked by two more models here, which matched their baselines at `78e93b1`. The verify skills (`verify-remote-streams`, `verify-fake-worn-guard`) run their checks:
 
-- `.claude/skills/verify-remote-streams/`: `HostInputLease.tla` (3,561 states), `HostChart.tla` (345), `RemoteStreams.tla` (164).
-- `.claude/skills/verify-fake-worn-guard/`: `FakeWornGuard.tla` (264 to 632 states).
+- [remote-streams/](remote-streams/): `HostInputLease.tla` (3,561 states), `HostChart.tla` (345), `RemoteStreams.tla` (164).
+- [fake-worn-guard/](fake-worn-guard/): `FakeWornGuard.tla` (264 to 632 states).
 
 Results at `78e93b1`:
 
@@ -290,7 +290,7 @@ Covers where each testbench fake enters the real pipeline, and how long it lasts
 Models:
 
 - `G8-verify.tla` (module `G8Verify`): one verify run, its lease, the proxy's overrides, the fake trackers, an agent that can die mid-run, status polls from later agents, and a wearer. Configs: `Code` (the code as it is), `NoDeath` (the agent always lives to clean up), `Overrides` (only the overrides' bug), `OverridesFix` (overrides bound to the lease), `Polls` (only the idle hour's bug) and `Fixed` (both fixes).
-- `G8-verify-Guard.tla` (module `G8Guard`): extends verify-fake-worn-guard's `FakeWornGuard.tla`, read from `.claude/skills/verify-fake-worn-guard/model/` without changes. It adds fairness for the system's own steps and the rule `GuardRestoresReal`. Configs: `LiveClean` (no faults), `LiveHangs` (the proxy can stall), `LiveKills` (the guard can die), `LiveNoF` (stalls and deaths, but not mid-fake) and `LiveAll` (every fault). The skill's own configs and rules still hold at `78e93b1`: Clean 88, Hangs 188, Kills 264, NoF 480 and All 632 states.
+- `G8-verify-Guard.tla` (module `G8Guard`): extends verify-fake-worn-guard's `FakeWornGuard.tla`, read from `fake-worn-guard/` without changes. It adds fairness for the system's own steps and the rule `GuardRestoresReal`. Configs: `LiveClean` (no faults), `LiveHangs` (the proxy can stall), `LiveKills` (the guard can die), `LiveNoF` (stalls and deaths, but not mid-fake) and `LiveAll` (every fault). The skill's own configs and rules still hold at `78e93b1`: Clean 88, Hangs 188, Kills 264, NoF 480 and All 632 states.
 
 Results at `78e93b1`:
 

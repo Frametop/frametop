@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Model-check the testbench's fake-worn guard (model/FakeWornGuard.tla) with TLC, one run per
+"""Model-check the testbench's fake-worn guard (docs/charts/fake-worn-guard/FakeWornGuard.tla) with TLC, one run per
 config and invariant, and compare with the recorded baseline (BASELINE below).
 
   check [--model DIR]     exit 0: every result matches the baseline
@@ -13,6 +13,7 @@ import hashlib, os, re, shutil, subprocess, sys, tempfile, urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
+MODEL = HERE.parents[2] / 'docs/charts/fake-worn-guard'  # the models live with the other charts
 TLC_URL = 'https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar'
 TLC_SHA256 = '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88'
 CONFIGS = ['Clean', 'Kills', 'Hangs', 'All', 'NoF']
@@ -80,7 +81,7 @@ def run(jar, jvm, model, config, rule, work):
 
 
 def main():
-    model = Path(sys.argv[sys.argv.index('--model') + 1]) if '--model' in sys.argv else HERE / 'model'
+    model = Path(sys.argv[sys.argv.index('--model') + 1]) if '--model' in sys.argv else MODEL
     jar, jvm = tla2tools(), java()
     differs = 0
     with tempfile.TemporaryDirectory(prefix='fake-worn-check-') as work:

@@ -30,7 +30,7 @@ frame-job --local -- python3 scripts/replay /path/to/other/checkout
 ```
 
 - `check` exits 0 when every result matches the baseline, 1 when one differs, and 2 when TLC can't
-  run. `--model DIR` checks another copy of `model/`.
+  run. `--model DIR` checks another copy of `docs/charts/remote-streams/`.
 - `replay` exits 0 when every finding behaves as recorded, 1 when one changed, and 2 when the
   harness can't build. It needs the `dev` podman container (g++, nlohmann-json, wlroots-0.20,
   wayland-server). `VERBOSE=1` prints each step and what was sent. `KEEP=1` keeps the build
@@ -44,7 +44,7 @@ kernel's send stamp. The remote.c harness runs the real file with SteamVR
 stubbed and `FT_STREAM` pointing at a fake ft-stream that takes 1 s to exit after SIGTERM. Never
 point either harness at the real relay, helper or a Vibepollo host.
 
-To look at a path or redraw a chart, use the pstack `/statechart` skill on the files in `model/`
+To look at a path or redraw a chart, use the pstack `/statechart` skill on the files in `docs/charts/remote-streams/`
 (`host-view.mjs` and `remote-view.mjs` hold the reader's labels). The host model has about 3,600
 states, over the tool's 500, so it draws only the paths to rules that break. To draw the host model
 with every rule holding, use its slice: `HostChart.tla` with `HostChart.cfg` (the switch stays on,
@@ -53,7 +53,7 @@ model is drawn with `RemoteStreams.cfg` as is.
 
 ## The models and rules
 
-**`model/HostInputLease.tla`**: one stream to one input host, from ft-stream's start to its
+**`docs/charts/remote-streams/HostInputLease.tla`**: one stream to one input host, from ft-stream's start to its
 exit, plus the person, the switch file, the pointer helper and the host's escape. `MaxInbox = 2`
 answers can wait unread, each marked `old` once 3 s have passed since it was given. Time is
 abstract: `Age` stands for 3 s passing (answers go stale and the switch gets read again) and only
@@ -68,7 +68,7 @@ fires once ft-stream has caught up. `mark` is the escape marker, which outlives 
 | `OffOnLiftsEscape` | After the host escaped and the person took the headset off long enough and put it back on, ft-stream doesn't lease into a host that is still escaped. |
 | `EscapeNeedsOff` | A release that lifts the escape follows a headset off or a switch off since the host last lent its input: never a Wi-Fi drop, a crash or a quiet helper alone. |
 
-**`model/RemoteStreams.tla`**: one remote display with two ft-stream slots (`Slots = {s1, s2}`)
+**`docs/charts/remote-streams/RemoteStreams.tla`**: one remote display with two ft-stream slots (`Slots = {s1, s2}`)
 and two settings (`Settings = {a, b}`), with `SYMMETRY` on both. A stream is `none`, `starting`,
 `live`, `releasing` (after SIGTERM, running Disconnect Monitor) or `exited` (not reaped yet).
 `Leaving(o)` is a slot whose process is still there after a stop or its own end; `HostBusy` counts

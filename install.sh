@@ -104,8 +104,15 @@ elif [ "$FRAME_RELEASE" = 1 ]; then
   on_frame 'cd pack/build/distrobox && ./install --prefix ~/.local'
 else
   on_frame 'set -e; mkdir -p ~/dev/src
-# A tested release, so upstream changes cannot break new installs.
-[ -d ~/dev/src/distrobox ] || git clone --depth 1 --branch 1.8.2.5 https://github.com/89luca89/distrobox.git ~/dev/src/distrobox
+# A tested release, so upstream changes cannot break new installs: 1.8.2.5, by its commit (the
+# one pack/Containerfile fetches).
+if [ ! -d ~/dev/src/distrobox ]; then
+  d=~/dev/src/distrobox.part.$$
+  git init -q $d
+  git -C $d fetch -q --depth 1 https://github.com/89luca89/distrobox.git 40c3cd724faa434aeb0a23e28776665b92de68bd
+  git -C $d checkout -q FETCH_HEAD
+  mv $d ~/dev/src/distrobox
+fi
 cd ~/dev/src/distrobox && ./install --prefix ~/.local'
 fi
 

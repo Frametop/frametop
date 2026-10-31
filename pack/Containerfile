@@ -146,7 +146,7 @@ RUN hands/rec/build.sh \
 # A release installs from this image (pack/install-release.sh): it copies
 # /src/frametop, built, to the Frame for its host side (services, the driver,
 # the desktop's scripts), and its install.sh installs this distrobox (1.8.2.5,
-# as a source install clones it, here by commit) to run the image as the
+# by the commit a source install fetches too) to run the image as the
 # container those programs start in (scripts/in-box).
 RUN git init -q pack/build/distrobox \
  && cd pack/build/distrobox \

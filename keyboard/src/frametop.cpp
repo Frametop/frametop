@@ -188,6 +188,8 @@ void FrametopSink::send(int code, int value) {
     if (value == 2) {
         return; // The receiving desktop and gamescope repeat held keys themselves.
     }
+    // What's owed goes first, so a late Shift release doesn't land after the next key.
+    send_owed();
     if (value == 0) {
         const auto held = held_.find(code);
         const bool desktop = held != held_.end() ? held->second : link_.desktop();

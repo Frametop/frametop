@@ -68,10 +68,11 @@ class FrametopLink {
 // Desktop typing goes to the relay (which types it on the desktop's seat, in the desktop's
 // layout); everything else goes to `steam` (gamescope). A held key is released where it
 // was pressed, whichever way typing goes by then. A release the relay didn't take (its socket
-// full, or the relay restarting) is owed and sent again at each pump until it goes, so a key
-// never stays down on the desktop (DEE-310; cf. DEE-265). A new press of an owed key on the
-// desktop drops what's owed: the desktop ignores a press of a key it holds, and its release
-// covers both.
+// full) is owed and sent again, before the next key and at each pump, until it goes, so a key
+// never stays down on the desktop (DEE-310; cf. DEE-265). A relay that restarts has let go of
+// everything and takes keys only after our next hello, so what's owed then is dropped there,
+// harmlessly. A new press of an owed key on the desktop drops what's owed: the desktop ignores
+// a press of a key it holds, and its release covers both.
 class FrametopSink : public KeySink {
   public:
     FrametopSink(FrametopLink& link, KeySink& steam) : link_(link), steam_(steam) {}

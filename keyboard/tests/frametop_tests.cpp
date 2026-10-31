@@ -85,7 +85,8 @@ struct Pointers : PointerSink {
     std::vector<std::string> take() { return std::exchange(calls, {}); }
 };
 
-// Releases the relay didn't take are sent again until they go (DEE-310).
+// Releases the relay didn't take are sent again until they go (DEE-310). The stand-in relay
+// has no hello gate, so going away and coming back stands for a full socket here.
 void owed_release_tests() {
     const std::string name = "framekeyboard-test-owed-" + std::to_string(getpid());
     double now = 100;
@@ -125,9 +126,22 @@ void owed_release_tests() {
     sink.send(KEY_B, 1);
     require(sink.owed().empty(), "a new press on the desktop: nothing owed");
     sink.send(KEY_B, 0);
-    require(relay->take() == std::vector<std::string>{"kbkey 48 1", "kbkey 48 0"}, "B down and up");
+    require(relay->take() == std::vector<std::string>{"kbkey 48 0", "kbkey 48 1", "kbkey 48 0"},
+            "the owed B release, then B down and up");
 
-    // A press that goes to Steam keeps the desktop's owed release.
+    // What's owed goes before the next key: Shift comes up before A goes down.
+    sink.send(KEY_LEFTSHIFT, 1);
+    relay->take();
+    relay.reset();
+    sink.send(KEY_LEFTSHIFT, 0);
+    relay.emplace(name);
+    relay->peer = peer, relay->peer_length = peer_length;
+    sink.send(KEY_A, 1);
+    sink.send(KEY_A, 0);
+    require(relay->take() == std::vector<std::string>{"kbkey 42 0", "kbkey 30 1", "kbkey 30 0"},
+            "Shift up first, then A");
+
+    // A press that goes to Steam sends the desktop's owed release first too.
     sink.send(KEY_C, 1);
     relay->take();
     relay.reset();
@@ -137,12 +151,11 @@ void owed_release_tests() {
     relay->say("kb 0 1");
     link.poll(); // (not a pump: the release stays owed)
     require(!link.desktop(), "typing goes to Steam");
+    require(sink.owed() == std::set<int>{KEY_C}, "the desktop's C release is owed");
     sink.send(KEY_C, 1);
     require(steam.keys.back() == std::pair{KEY_C, 1}, "C down in Steam");
-    require(sink.owed() == std::set<int>{KEY_C}, "the desktop's C release is still owed");
-    sink.pump();
     require(relay->take() == std::vector<std::string>{"kbkey 46 0"} && sink.owed().empty(),
-            "...and goes at the next pump");
+            "...after the desktop's C release");
     sink.send(KEY_C, 0);
     require(steam.keys.back() == std::pair{KEY_C, 0}, "Steam's C comes up in Steam");
 }

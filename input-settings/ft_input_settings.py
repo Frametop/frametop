@@ -79,6 +79,10 @@ GAZE_PROBE = os.path.join(REPO, "gaze", "probe", "ft-gazeprobe")
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
+# This folder's own modules (pack/pyside-runtime.py loads this file by its path).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import input_rules  # noqa: E402  (the rules file and frametop.conf)
+from input_rules import read_json  # noqa: E402  (renames old actions as it reads)
 sys.path.insert(0, os.path.join(REPO, "hands"))
 import handsmode  # noqa: E402
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
@@ -414,40 +418,13 @@ def code_names():
     return names
 
 
-# Actions renamed since a release (the relay's RENAMED_ACTIONS): a rules file saved before shows
-# and saves them under their new names.
-RENAMED_ACTIONS = {"spotwatch": "frunner"}
-
-
-def renamed_actions(table):
-    if not isinstance(table, dict):
-        return table
-    return {k: renamed_actions(v) if isinstance(v, dict) else RENAMED_ACTIONS.get(v, v) if isinstance(v, str) else v
-            for k, v in table.items()}
-
-
-def read_json(path):
-    try:
-        with open(path) as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    if isinstance(data, dict):
-        for table in ("buttons", "controller_buttons", "key_bindings"):
-            if table in data:
-                data[table] = renamed_actions(data[table])
-        return data
-    return {}   # a top-level list or value: nothing in it to read (DEE-296)
-
-
 def read_conf():
-    return ft_conf.read(CONF_PATH)
+    return input_rules.read_conf(CONF_PATH)
 
 
 def write_conf_value(key, value):
-    """Set KEY=value in frametop.conf, keeping comments and the rest of the file (shell-quoted,
-    by a temp file and a rename: ft_conf.set_value)."""
-    ft_conf.set_value(key, value, CONF_PATH)
+    """Set KEY=value in frametop.conf (input_rules.write_conf_value)."""
+    input_rules.write_conf_value(key, value, CONF_PATH)
 
 
 def host(*cmd, timeout=20):
@@ -770,13 +747,10 @@ class Backend(QObject):
                     entry["name"] = d["name"]
 
     def _save_rules(self, rules):
-        """Write the rules (whole, under the file's lock); False, said in the window, when the
-        file there doesn't read: read_json gave {} for it, and saving that over it would lose
-        everything in it, so it's kept, with a copy (DEE-300)."""
+        """Write the rules (input_rules.save_rules); False, said in the window, when the file
+        there doesn't read, which is kept, with a copy (DEE-300)."""
         try:
-            with ft_store.locked(RULES_PATH):
-                ft_store.load_json_strict(RULES_PATH, {}, ft_store.is_object)
-                ft_store.write_json(RULES_PATH, rules, indent=2, newline=False)
+            input_rules.save_rules(rules, RULES_PATH)
         except (OSError, ft_store.StoreError) as e:
             self.message.emit(f"Not saved: {e}", True)
             return False

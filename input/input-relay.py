@@ -250,6 +250,8 @@ import vrpad
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "commands"))
 import ft_commands  # noqa: E402  (your commands, "run:NAME")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 
 # Linux input constants (include/uapi/linux/input-event-codes.h, input.h, uinput.h).
 EV_SYN, EV_KEY, EV_REL, EV_MSC = 0x00, 0x01, 0x02, 0x04
@@ -526,18 +528,18 @@ def bits(fd, ev, count):
 
 
 def read_config(path=os.path.expanduser("~/.config/frametop.conf")):
-    """KEY=VALUE lines, # comments allowed. Missing file means defaults."""
-    conf = {}
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.split("#", 1)[0].strip()
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    conf[key.strip()] = value.strip()
-    except OSError:
-        pass
-    return conf
+    """KEY=VALUE lines by the conf's grammar (ft_conf, docs/config.md). Missing file means defaults."""
+    return ft_conf.read(path)
+
+
+def pointer_settings(conf):
+    """(pointer mode on, degrees per mouse count, idle s, wake counts) from frametop.conf. A value
+    that isn't a number warns and keeps its default: one bad hand-edited line used to stop the
+    relay at start, and systemd gave up restarting it (DEE-297)."""
+    return (conf.get("POINTER", "0") == "1",
+            ft_conf.number(conf, "POINTER_SENSITIVITY", 0.03),
+            ft_conf.number(conf, "POINTER_IDLE", 30.0),
+            ft_conf.number(conf, "POINTER_WAKE_COUNTS", 40, int))
 
 
 def kxkbrc_layout(path=KXKBRC):
@@ -1183,13 +1185,23 @@ def main():
         return "Frametop is paused" if pause.paused else "a VR game runs" if pause.game else None
 
     def load_config():
-        conf = read_config()
-        state["rules"] = read_rules()
-        if conf.get("POINTER", "0") == "1":
+        """frametop.conf and the rules, applied all or nothing: read and checked first (the pause's
+        settings from the rules too), then put in place. A reload that fails keeps the last ones
+        (it used to leave the rules read and the pause unconfigured, DEE-297)."""
+        try:
+            conf = read_config()
+            rules = read_rules()
+            pointer_on, sensitivity, idle, wake_counts = pointer_settings(conf)
+            pause.configure(rules)   # first: it works the rules out before it changes anything
+        except Exception as e:  # a reload must not take the relay down
+            log(f"config not applied, the last one kept: {e!r}")
+            if not state["rules"]:
+                state["rules"] = read_rules("")   # at start: the defaults (no file there)
+            return
+        state["rules"] = rules
+        if pointer_on:
             p = state["pointer_conf"] or Pointer(0.03, 30)
-            p.sensitivity = float(conf.get("POINTER_SENSITIVITY", "0.03"))
-            p.idle = float(conf.get("POINTER_IDLE", "30"))
-            p.wake_counts = int(conf.get("POINTER_WAKE_COUNTS", "40"))
+            p.sensitivity, p.idle, p.wake_counts = sensitivity, idle, wake_counts
             state["pointer_conf"] = p
             log(f"pointer mode: {p.sensitivity} deg/count, idle {p.idle} s, wake {p.wake_counts} counts")
         else:
@@ -1200,7 +1212,6 @@ def main():
             state["pointer_conf"] = None
             log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
         state["pointer"] = None if pause.paused else state["pointer_conf"]
-        pause.configure(state["rules"])
         gamepad.sound_on = pause.settings["sound"]
         # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
         # HANDS_MODE=always keeps hand tracking running through games.

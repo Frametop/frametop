@@ -128,6 +128,29 @@ class Grammar(Base):
             self.assertEqual(run(C, "get", path, "KEY"), "1\t32\n")
             self.assertEqual(run(C, "get", path, "OTHER"), "0\t\n")
 
+    def test_hands_near_alike(self):
+        """DEE-297: ft-screens (handcut::Setting is ft_conf::Setting), the pointer helper (ft_conf::Read),
+        C (ft_conf_setting) and Python read HANDS_NEAR alike however the line writes it; before,
+        ft-screens skipped an indented line and the relay kept the quotes."""
+        cases = {"HANDS_NEAR=0\n": "0", "  HANDS_NEAR=0\n": "0", 'HANDS_NEAR="0"\n': "0", "HANDS_NEAR = 0\n": None,
+                 "HANDS_NEAR=0   # off\n": "0", "HANDS_NEAR=0\nHANDS_NEAR=force\n": "force"}
+        for n, (text, want) in enumerate(cases.items()):
+            home = os.path.join(self.dir, f"home{n}")
+            os.makedirs(os.path.join(home, ".config"))
+            path = os.path.join(home, ".config", "frametop.conf")
+            with open(path, "w") as f:
+                f.write(text)
+            self.assertEqual(ft_conf.read(path, warn=None).get("HANDS_NEAR"), want, repr(text))
+            if not C:
+                continue
+            env = {k: v for k, v in os.environ.items() if k != "FT_HANDS_NEAR"}
+            env["HOME"] = home
+            self.assertEqual(unhex(run(CPP, "setting", "HANDS_NEAR", "1", env=env).strip()), want or "1", repr(text))
+            self.assertEqual(run(C, "setting", "HANDS_NEAR", env=env), f"{int(want is not None)}\t{(want or '').encode().hex()}\n")
+            env["FT_HANDS_NEAR"] = "on"   # the environment wins
+            self.assertEqual(unhex(run(CPP, "setting", "HANDS_NEAR", "1", env=env).strip()), "on")
+            self.assertEqual(run(C, "setting", "HANDS_NEAR", env=env), "1\t" + b"on".hex() + "\n")
+
     def test_numbers(self):
         for v in V["numbers"]:
             got = ft_conf.number({"K": v["text"]}, "K", None, warn=None)

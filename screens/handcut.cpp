@@ -2,6 +2,8 @@
 // where the eyes see it on a panel. No GPU or SteamVR calls here (handrender.cpp has those).
 #include "handcut.h"
 
+#include "../conf/ft_conf.h"
+
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -13,7 +15,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <sstream>
 #include <string>
 
@@ -87,28 +88,11 @@ void Hand::Palm(double out[3]) const {
 
 // ---------------------------------------------------------------------------- settings
 
-std::string Setting(const char *name, const char *def) {
-    const std::string env = std::string("FT_") + name;
-    if (const char *v = std::getenv(env.c_str())) return v;
-    const char *home = std::getenv("HOME");
-    if (home) {
-        std::ifstream f(std::string(home) + "/.config/frametop.conf");
-        std::string line, found;
-        bool have = false;
-        const std::string key = std::string(name) + "=";
-        while (std::getline(f, line)) {
-            if (line.rfind(key, 0) != 0) continue;
-            std::string v = line.substr(key.size());
-            const size_t hash = v.find('#');
-            if (hash != std::string::npos) v.resize(hash);
-            while (!v.empty() && std::isspace(static_cast<unsigned char>(v.back()))) v.pop_back();
-            if (v.size() >= 2 && (v[0] == '"' || v[0] == '\'') && v.back() == v[0]) v = v.substr(1, v.size() - 2);
-            found = v, have = true;   // the last one counts, as when the shell reads it
-        }
-        if (have) return found;
-    }
-    return def;
-}
+// By the conf's grammar (conf/ft_conf.h, docs/config.md), as every other reader: an indented
+// line counts, "NAME = value" doesn't (bash can't read it either), and the last line wins. This
+// read only lines starting "NAME=" before, so HANDS_NEAR could be off for the relay and Input
+// Settings and on here (DEE-297).
+std::string Setting(const char *name, const char *def) { return ft_conf::Setting(name, def); }
 
 bool ParseShift(const std::string &text, std::vector<Shift> &out) {
     std::vector<Shift> s;

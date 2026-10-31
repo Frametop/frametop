@@ -125,6 +125,7 @@
 #include "universefix.h"
 #include "steampanels.h"
 #include "../frunner/reserve.h"
+#include "../conf/ft_conf.h"
 
 #include <drm_fourcc.h>
 #include <openvr.h>
@@ -4905,9 +4906,12 @@ bool ft_vr_init(void) {
     // by the body (typing) doesn't poke
     auto num = [](const char *name, double &v, double lo, double hi) {
         const std::string t = handcut::Setting(name, "");
-        char *end;
-        const double x = t.empty() ? 0 : std::strtod(t.c_str(), &end);
-        if (!t.empty() && end != t.c_str() && !*end && x >= lo && x <= hi) v = x;
+        double x;
+        if (t.empty()) return;
+        if (ft_conf_number(t.c_str(), &x) && x >= lo && x <= hi)
+            v = x;
+        else   // kept at its default, said (the conf's rule for a bad value, docs/config.md)
+            std::fprintf(stderr, "frametop.conf: %s=%s isn't a number from %g to %g; using %g\n", name, t.c_str(), lo, hi, v);
     };
     handinput::Params &k = g_handInput.params();
     num("HANDS_NEAR_REACH", k.nearFront, 0.03, 0.6);   // within it a hand touches: no ray, pokes, its pinches are ours

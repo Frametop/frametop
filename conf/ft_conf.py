@@ -96,7 +96,7 @@ def warn(text):
     """One line on stderr, once per process for the same text (some readers re-read often)."""
     if text not in _said:
         _said.add(text)
-        print("frametop.conf: " + text, file=sys.stderr, flush=True)
+        print(text, file=sys.stderr, flush=True)
 
 
 def parse(text, warn=warn, where="frametop.conf"):
@@ -142,7 +142,7 @@ def number(conf, key, default, cast=float, warn=warn):
         return int(x) if cast is int else cast(x)
     except ValueError:
         if warn:
-            warn(f"{key}={v!r} isn't a number; using {default}")
+            warn(f"frametop.conf: {key}={v!r} isn't a number; using {default}")
         return default
 
 
@@ -257,7 +257,7 @@ def check(path):
         print(f"frametop.conf: {e}", file=sys.stderr)
         return False
     for b in bad:
-        print("frametop.conf: " + b, file=sys.stderr)
+        print(b, file=sys.stderr)
     return not bad
 
 

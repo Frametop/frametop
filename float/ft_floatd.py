@@ -78,6 +78,7 @@ from gi.repository import Gio, GLib
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "layout"))
 import ft_layout  # noqa: E402  (config and layout)
+from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_apps  # noqa: E402  (Launch as Standalone)
 
 SERVICE = IFACE = "org.frametop.Float"
@@ -1457,19 +1458,27 @@ def watch_apps(daemon):
             daemon.app_monitors.append(m)
 
 
-def main():
+def parse_args(argv=None):
     conf = ft_layout.read_conf()
     p = argparse.ArgumentParser(description="Floating windows for the Frametop desktop")
     p.add_argument("--screens", type=int, default=int(os.environ.get("FT_SCREEN_COUNT") or 0))
-    p.add_argument("--slots", type=int, default=int(conf.get("FLOAT_SLOTS") or 16))
-    p.add_argument("--margin", type=int, default=int(conf.get("FLOAT_MARGIN") or 300))
+    # The defaults are worked out before --slots and --margin are looked at, so a bad value in the
+    # conf warns and gives the default rather than stopping ft-floatd (FLOAT_SLOTS="8" did: the
+    # quotes stayed on, DEE-297).
+    p.add_argument("--slots", type=int, default=ft_conf.number(conf, "FLOAT_SLOTS", 16, int))
+    p.add_argument("--margin", type=int, default=ft_conf.number(conf, "FLOAT_MARGIN", 300, int))
     p.add_argument("--control", default="ft_screens")
     p.add_argument("--socket", default="frametop_float")
-    args = p.parse_args()
+    args = p.parse_args(argv)
     if args.screens <= 0:
         args.screens = ft_layout.screen_count()
     args.slots = max(0, min(16, args.slots))
     args.margin = max(0, min(1000, args.margin))
+    return args
+
+
+def main():
+    args = parse_args()
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()

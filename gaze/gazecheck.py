@@ -23,7 +23,8 @@ directions: look at each one.
           whenever gaze mode is on without a calibration for the tracker in use and someone's
           in the headset, and on "calibrate". One that closes unfinished (ignored, too few
           dots) opens again only once the headset comes off and on, or gaze mode off and on.
-          Frametop's screens hide while it runs. Quitting it while there's still no
+          Frametop's screens hide while it runs (SCREENS_HIDDEN marks it, so an ft-gazed that
+          died meanwhile has the next one show them again). Quitting it while there's still no
           calibration turns gaze mode off (POINTER_GAZE=0); turning it on again reopens it.
           Why gaze mode can't work yet goes in the status ("problem"), for Input Settings.
 
@@ -140,6 +141,9 @@ CONF = Path.home() / ".config" / "frametop.conf"
 CALIBRATION = STATE / "calibration.json"
 POINTS = STATE / "points.jsonl"   # the probe's record of calibration dots, for its refine
 CHECK_LOG = STATE / "checks.jsonl"
+# A full calibration hid Frametop's screens and hasn't shown them again: close() takes it away.
+# One left by an ft-gazed that died has the next one show them (DEE-270).
+SCREENS_HIDDEN = STATE / "screens-hidden"
 
 CHECK_SETTLE = 0.45
 CHECK_WINDOW = 0.6
@@ -336,6 +340,13 @@ class Checks:
         self.slip_since = None   # a slip past MOVED_DEG since then
         self.note_until = None   # the slip note shows until then
         self.note_next = 0.0     # and not again before
+        if SCREENS_HIDDEN.exists():
+            # An ft-gazed before this one died during a full calibration, with the screens
+            # hidden: nothing else shows them (ft-screens' hide has no lease). One that isn't
+            # running shows them anyway when it starts.
+            reply = ask(SCREENS, "show", 0.5)
+            log(f"a calibration the last gaze service ran hid Frametop's screens: shown again ({reply or 'no reply'})")
+            SCREENS_HIDDEN.unlink(missing_ok=True)
 
     @property
     def active(self):
@@ -621,6 +632,12 @@ class Checks:
             st = ask(SCREENS, "state", 0.5).split()
             if len(st) >= 3 and st[0] == "ok":
                 self.screens_shown = (st[2] == "0") if st[1] == "always" else (st[2] == "1")
+                if self.screens_shown:
+                    try:
+                        SCREENS_HIDDEN.parent.mkdir(parents=True, exist_ok=True)
+                        SCREENS_HIDDEN.touch()
+                    except OSError as e:
+                        log(f"can't mark the screens hidden ({e}): a crash now would leave them hidden")
                 ask(SCREENS, "hide", 0.5)
         self.to_helper("calpanel 1")
         off = off_panel(kind, own)
@@ -1202,6 +1219,12 @@ class Checks:
                 log(f"calibration ({c['captured']} of {n} dots): our tracker says {reply or 'nothing'}")
                 if reply.startswith("ok"):
                     self.fit_fusion(c["fusion"])
+                    # ft-eyes saved it: what's held of its status says so now, not at its next
+                    # reply, or need_full would take the stale "no calibration" and open a
+                    # second full calibration at once (DEE-271).
+                    own = svc.own if time.monotonic() - svc.own_at <= 5 else {}
+                    svc.own = dict(own, calibration=dict(own.get("calibration") or {}, dots=c["captured"]))
+                    svc.own_at = time.monotonic()
                 self.close()
 
             self.to_panel("text Saving the calibration")
@@ -1263,6 +1286,7 @@ class Checks:
         self.to_helper("calpanel 0")
         if self.check["kind"] == "full" and self.screens_shown:
             ask(SCREENS, "show", 0.5)
+            SCREENS_HIDDEN.unlink(missing_ok=True)
         self.screens_shown = None
         self.check = None
 
@@ -1295,7 +1319,9 @@ class Checks:
         said whether it's calibrated), or WAKE_SETTLE after waking, when its error is the real one."""
         svc = self.svc
         words, _ = self.pending
-        ready = (time.monotonic() - svc.last_sample < 2 if words[0] == "fitcheck" else self.can_run()) \
+        # The fit check needs the tracker sending, as start_fit does, not a gaze: our tracker sends
+        # none before its first calibration (DEE-272).
+        ready = (time.monotonic() - self.sample_at < 2 if words[0] == "fitcheck" else self.can_run()) \
             and (svc.kind != "own" or self.calibrated() is not None)
         if not ready and svc.waking():
             return
@@ -1382,6 +1408,9 @@ class Checks:
             return
         if not self.eyes_seen(PUTON_GONE if self.puton_holds(c) else EYES_GONE):
             self.close("the headset came off")
+            # ...so the eyes coming back are the headset going on (DON_DELAY), even before
+            # AWAY_MIN: that re-arms a full calibration that closed so (DEE-273).
+            self.away, self.back_since = True, None
             return
         if c["done_at"]:
             return

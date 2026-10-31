@@ -1,7 +1,8 @@
 ---------------------------- MODULE G4Gaze ----------------------------
 (***************************************************************************)
 (* G4 Gaze: the gaze service's lifecycle at 78e93b1 (gaze/ft-gazed, its    *)
-(* checks in gaze/gazecheck.py, our tracker gaze/tracker/ft-eyes).          *)
+(* checks in gaze/gazecheck.py, our tracker gaze/tracker/ft-eyes), with    *)
+(* the Z1, Z2 and Z4 fixes (DEE-270, DEE-271, DEE-273) since.               *)
 (*                                                                         *)
 (* ft-gazed runs ft-gaze (the eye tracker's samples) and, with our tracker, *)
 (* ft-eyes, only while the gaze is in use (awake): gaze mode on with the     *)
@@ -23,7 +24,8 @@
 (* ft-gazed knows our tracker's calibration only from ft-eyes' status       *)
 (* reply (said), asked every second and stale after 5 s ("none" there).     *)
 (* A full calibration hides Frametop's screens (ft-screens "hide", a plain  *)
-(* toggle) and shows them again in close(), if they were shown.             *)
+(* toggle) and shows them again in close(), if they were shown. Since Z1's  *)
+(* fix, saved is also a file (SCREENS_HIDDEN), so it outlives a crash.      *)
 (***************************************************************************)
 EXTENDS Naturals
 
@@ -35,7 +37,8 @@ CONSTANTS
     Crashes,      \* ft-gazed can die (Restart=on-failure brings it back 3 s later)
     Cooperative,  \* the user takes every dot and never quits or ignores a check
     Blips,        \* the eyes can come back between EYES_GONE (2 s) and AWAY_MIN (3 s)
-    FitSays,      \* what-if: calib-fit's answer updates what ft-gazed knows (said) before need_full
+    FitSays,      \* calib-fit's answer updates what ft-gazed knows (said) before need_full. Was a
+                  \* what-if; since Z2's fix the code does it whatever this says
     Asks          \* the user can use Calibrate (Input Settings, ft-gazectl calibrate)
 
 VARIABLES
@@ -179,27 +182,30 @@ RunPending ==
     /\ IF check = "none" /\ Opens THEN OpenFull ELSE UNCHANGED <<check, hidden, saved>>
     /\ UNCHANGED <<svc, gazeOn, worn, vOn, vWorn, awake, settled, feed, eyesP, cal, said, armed, away, extra>>
 \* tick: no eyes for EYES_GONE closes a check ("the headset came off"); not while ft-eyes fits.
-\* Without Blips the headset stays off past AWAY_MIN whenever a check closed so (away).
+\* Since Z4's fix that counts as away at once, so eyes back before AWAY_MIN are a don too (Blips
+\* no longer matters).
 EyesGone ==
     /\ check \in {"quick", "full"} /\ ~EyesSeen /\ Close
-    /\ away' = (away \/ ~Blips)
+    /\ away' = TRUE
     /\ UNCHANGED <<svc, gazeOn, worn, vOn, vWorn, awake, settled, feed, eyesP, cal, said, armed, pending, extra>>
-\* calib-fit's answer (or its deadline): fitted() closes. ft-eyes saved it if it was running.
-\* Without FitSays ft-gazed still holds ft-eyes' last status, from before the fit.
+\* calib-fit's answer (or its deadline): fitted() closes. ft-eyes saved it if it was running, and
+\* its "ok" sets what ft-gazed holds of its status (Z2's fix).
 FitDone ==
     /\ check = "fitting" /\ cal' = (cal \/ eyesP) /\ Close
-    /\ said' = IF FitSays /\ eyesP THEN "cal" ELSE said
+    /\ said' = IF eyesP THEN "cal" ELSE said
     /\ UNCHANGED <<svc, gazeOn, worn, vOn, vWorn, awake, settled, feed, eyesP, armed, pending, away, extra>>
 \* ft-gazed dies (an exception, a kill): its children quit with their stdin, nothing calls close().
 Crash ==
     /\ Crashes /\ svc = "up" /\ svc' = "down"
     /\ feed' = FALSE /\ eyesP' = FALSE /\ awake' = FALSE /\ check' = "none" /\ pending' = FALSE
     /\ UNCHANGED <<gazeOn, worn, vOn, vWorn, settled, cal, said, armed, away, hidden, saved, extra>>
-\* systemd starts it again: a new Service and Checks, nothing remembered.
+\* systemd starts it again: a new Service and Checks, nothing remembered but SCREENS_HIDDEN:
+\* the screens a dead calibration hid are shown again (Z1's fix).
 Restart ==
     /\ svc = "down" /\ svc' = "up"
     /\ vOn' = "?" /\ vWorn' = FALSE /\ said' = "none" /\ armed' = TRUE /\ away' = TRUE /\ saved' = FALSE
-    /\ UNCHANGED <<gazeOn, worn, awake, settled, feed, eyesP, cal, check, pending, hidden, extra>>
+    /\ hidden' = (hidden /\ ~saved)
+    /\ UNCHANGED <<gazeOn, worn, awake, settled, feed, eyesP, cal, check, pending, extra>>
 
 System == Poll \/ Wake \/ Idle \/ Settle \/ FeedStarts \/ EyesStart \/ Status \/ GoneAway \/ Don
           \/ ArmWhenCal \/ NeedFull \/ RunPending \/ EyesGone \/ FitDone \/ Crash \/ Restart
@@ -224,8 +230,9 @@ TypeOK ==
 IdleStops == ~awake => (~feed /\ ~eyesP)
 \* A check never runs on a stopped tracker: a check keeps the service awake.
 CheckKeepsAwake == check # "none" => awake
-\* No calibration open: Frametop's screens are not hidden by one.
-ScreensComeBack == check = "none" => ~hidden
+\* No calibration open: Frametop's screens are not hidden by one. While ft-gazed is down (systemd
+\* brings it back 3 s on) they may still be: its next start shows them (Z1).
+ScreensComeBack == (svc = "up" /\ check = "none") => ~hidden
 \* A full calibration opens by itself only for a tracker that has none.
 FullOnlyWhenNeeded == ~extra
 

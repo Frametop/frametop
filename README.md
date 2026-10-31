@@ -277,11 +277,22 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `stream/` | ft-stream, one per remote display: receives and decodes its stream for ft-screens. |
 | `host/` | The host kits for remote displays: Windows, macOS and Linux. |
 | `setup/` | The build container and the Bluetooth fixes. See [setup/README.md](setup/README.md). |
+| `commands/` | Frametop commands: your own shell commands, saved under a name and run in the background (`ft-cmd`). |
+| `frunner/` | frunner, the search for apps, remote displays and your commands (Meta+Space). See [docs/frunner.md](docs/frunner.md). |
+| `tour/` | Frametop Tour, the walk through what Frametop does, and the recenter help. |
+| `steam/` | ft-steam: Steam's menu and checks, through Steam's own UI. |
+| `models/` | The hand and eye model versions you pick from, and their catalog. See [models/README.md](models/README.md). |
+| `recorder/` | What the hand and eye recorders share: encryption, uploads, the bounty board, privacy checks. |
+| `conf/` | The shared readers and writers of Frametop's config and stored files (`ft_conf`, `ft_store`) and its socket helpers. See [docs/config.md](docs/config.md). |
+| `pack/` | The OCI image and the release zip (see Packaging below). |
+| `framedrop/` | Installing a release with FrameDrop (proof of concept). See [framedrop/README.md](framedrop/README.md). |
+| `testbench/` | Frame Testbench, the development tool that fakes the headset, controllers and gaze for tests. See [testbench/README.md](testbench/README.md). |
+| `docs/` | The reference, the design notes, and the charts of how the parts fit (`docs/charts`). |
 | `scripts/` | Helpers the installers use. They run commands locally on the Frame, or over SSH from a PC. |
 
 ## Packaging
 
-`pack/` builds Frametop as an OCI image: the toolchain, the native binaries, and the locked Python environment (via [uv](https://docs.astral.sh/uv/)), built and tested by GitHub Actions. It is the groundwork for installing Frametop without building anything on the headset. No installer uses it yet. For development, `./ft dev build` builds the image and `./ft dev test` runs the tests inside it. [pack/design.md](pack/design.md) explains why an image and what is still open, and [pack/README.md](pack/README.md) documents the image itself.
+`pack/` builds Frametop as an OCI image: the toolchain, the native binaries, and the locked Python environment (via [uv](https://docs.astral.sh/uv/)), built and tested by GitHub Actions. Releases ship it: `Frametop.zip` holds the image, and `get.sh --release` or FrameDrop installs it without building anything on the headset. For development, `./ft dev build` builds the image and `./ft dev test` runs the tests inside it. [pack/design.md](pack/design.md) explains why an image and what is still open, and [pack/README.md](pack/README.md) documents the image itself.
 
 ## Developing from a PC
 

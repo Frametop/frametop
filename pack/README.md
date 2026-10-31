@@ -77,7 +77,6 @@ the integration points live in one place:
 
 ```
 ft dev build        # build the image from this repo (docker or podman)
-ft update           # pull the published (versioned) image, pin its digest
 ft dev shell        # interactive shell, repo at /src/frametop
 ft ft-screens ...   # run any program from /opt/frametop
 ft dev test         # the Python test suites inside the image
@@ -85,8 +84,8 @@ ft clean            # remove frametop's leftovers only (see the store section)
 ```
 
 `FT_IMAGE` overrides the image reference (repo mode defaults to the locally
-built `frametop:local`). Development commands live behind `ft dev` so an
-installed copy — which has no repo to build from — refuses them. Containers
+built `frametop:local`). The wrapper runs from a checkout only: releases
+don't install it. Containers
 run through the wrapper are named `frametop-<program>-<pid>`. Runs get no
 access to the host beyond the repo mount: how Frametop's programs run on the
 Frame is still open (see [design.md](design.md)).
@@ -94,26 +93,11 @@ Frame is still open (see [design.md](design.md)).
 ### No :latest on a headset
 
 A moving tag has no place on a headset: it cannot be reproduced in a bug
-report and cannot be rolled back. The wrapper enforces this for what gets
-**deployed** — installed mode refuses to run without a pinned reference, and
-both the update source and the pinned reference are rejected if they say
-`:latest`. Local development can use any tag it likes (`FT_IMAGE` is never
-second-guessed in repo mode).
-
-How pinning works:
-
-- `install.sh` (next slice) writes a **version tag** to
-  `~/.config/frametop/published` — the only place updates come from.
-- `ft update` pulls that reference and then writes the **digest**
-  (`repo@sha256:...`) to `~/.config/frametop/image`. Every later run, and
-  every bug report, names exactly that image.
-- Rollback is editing one file: put the previous digest back into
-  `~/.config/frametop/image`. The old image is still in the local store
-  (remove it with `ft clean` when you are done with it).
-
-Releases (below) don't use these: a release is a file, its image is pinned
-by ID in `.frametop-release`, and you roll back by running the previous
-release's `install.sh`.
+report and cannot be rolled back. A release is a file, its image is pinned by
+ID in `.frametop-release`, and you roll back by running the previous
+release's `install.sh`. (The wrapper's installed mode, which pinned a registry
+digest in `~/.config/frametop/image` and refused `:latest`, was dropped in
+DEE-313: no release used it.)
 
 ## The shared podman store
 
@@ -133,9 +117,9 @@ follow, and both are enforced or documented rather than hoped for:
 
 ## Network path for pulls
 
-`ft update` (and install) contact the registry over the Frame's normal
+Downloading a release (`get.sh --release`) goes over the Frame's normal
 Wi-Fi client interface (`wlan0`), not the 6 GHz streaming link to the PC
-dongle. The image is roughly 1–1.5 GB compressed — pulls ride the home
+dongle. The image is roughly 1–1.5 GB compressed — downloads ride the home
 network, so a weak Wi-Fi link is the bottleneck, not the streaming antenna.
 
 ## Storage
@@ -212,9 +196,7 @@ three ways, all through the same installer:
    (DEE-289).
 
 Every update is a full 1.1 GB download, since the zip holds the whole image
-(user decision, 2026-10-07: one file, no registry). The `ft` wrapper's
-installed mode (`ft update`, `~/.config/frametop/published` and `image`) pulls
-from a registry, so releases don't use it.
+(user decision, 2026-10-07: one file, no registry).
 
 ## CI
 

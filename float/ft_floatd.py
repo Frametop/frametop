@@ -37,7 +37,7 @@ layout, within Xwayland's 32767-pixel limit at scales up to 1.6.
 
 Usage: ft-floatd [--screens N] [--slots N] [--margin PX] [--control NAME] [--socket NAME]
 Defaults: FT_SCREEN_COUNT (from the session) or the layout's count, FLOAT_SLOTS and
-FLOAT_MARGIN from ~/.config/frametop.conf (8 and 300), @ft_screens, @frametop_float.
+FLOAT_MARGIN from ~/.config/frametop.conf (16 and 300), @ft_screens, @frametop_float.
 
 Launching floating: "launch" starts a desktop file's app (Gio), "run" a command. The next
 normal window from that process (or a child), or of that desktop file (desktop_name: by its app

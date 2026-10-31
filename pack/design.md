@@ -5,6 +5,13 @@ This is the design rationale for packaging Frametop as a CI-built OCI image.
 contains, the mount matrix, CI); this file explains why it is built this way,
 what it solves, and how it is meant to be used.
 
+**What shipped** (DEE-313): a release is one `Frametop.zip` with the image inside
+(`frametop-image.tar`), which `pack/install-release.sh` checks and loads with
+`podman load`. There is no registry (user decision, 2026-10-07: one file, no
+registry), so the plan below to publish to ghcr.io, pull with `ft update`, and
+install the `ft` wrapper on the headset was dropped. `ft` runs from a checkout
+only, for development. The sections below say where the plan changed.
+
 ## The problem today
 
 Frametop on the Frame is three worlds that today get assembled *on the user's
@@ -49,29 +56,29 @@ compiled, Python dependencies are fetched. That design has structural costs:
 ```
 CI (GitHub Actions, native arm64)         Frame / PC
 ┌──────────────────────────────┐         ┌─────────────────────────────┐
-│ pack/Containerfile           │  push → │ ghcr.io/<org>/frametop      │
-│  · toolbox base, digest-pinned│        │        ↓ podman pull        │
-│  · uv sync --frozen (lockfile)│        │ ~/.local/bin/ft             │
-│  · OpenVR tag, stb pinned     │        │  · runs programs            │
-│  · six binaries compiled      │        │  · owns the mounts          │
-│  · smoke-tested in CI         │        │  · ft update = pull         │
+│ pack/Containerfile           │  zip →  │ Frametop.zip (image inside) │
+│  · toolbox base, digest-pinned│        │        ↓ podman load        │
+│  · uv sync --frozen (lockfile)│        │ pack/install-release.sh     │
+│  · OpenVR tag, stb pinned     │        │  · checks the image's sha256│
+│  · six binaries compiled      │        │  · sets up the runtime      │
+│  · smoke-tested in CI         │        │  · update = a new zip       │
 └──────────────────────────────┘         └─────────────────────────────┘
 ```
 
-The `ft` wrapper holds the image-reference resolution (pinning, updates,
-cleanup) and the development commands. How the programs themselves run from
-the image on the Frame is still open: see "The runtime on the Frame" below.
+The `ft` wrapper holds the development commands and cleanup, in a checkout.
+How the programs themselves run from the image on the Frame is still open: see
+"The runtime on the Frame" below.
 
 ## What it solves, point by point
 
 | Today | With the image |
 | --- | --- |
-| Install = build on the device | `podman pull`. Minutes, no compilers, no dnf |
+| Install = build on the device | `podman load` from the zip. Minutes, no compilers, no dnf |
 | Every environment drifts | Every user runs the *exact* CI environment |
 | SteamOS updates rot the on-device build | No on-device build left; what an update can still break is the host boundary — revalidated once in CI instead of per headset |
 | Users need a developer ecosystem | Users need podman (SteamOS ships it) and the host payload |
 | "Works on my headset" | A bug report names an image tag; the developer reproduces it in `ft dev shell` within minutes |
-| Shipping fixes | `ft update`. The user never compiles anything |
+| Shipping fixes | A new release zip. The user never compiles anything |
 
 And the subtler win: **decoupled failure domains.** When Frametop breaks on a
 device, it is now either (a) the image — in which case it breaks identically
@@ -123,17 +130,10 @@ the runtime options below.)
 Repo mode defaults to the locally built `frametop:local` and mounts the
 checkout at `/src/frametop`.
 
-**User (Frame, once the install path exists):**
-
-```
-ft update          # pull the published image, pin its digest
-```
-
-No repo on the device, no build. The image reference resolves `FT_IMAGE` →
-`~/.config/frametop/image` (written by the installer, so installs pin what was
-installed) → the published image. Development commands live behind `ft dev`
-and are refused in installed mode — a user should not reach the build world by
-accident, and an installed wrapper has no checkout to build from anyway.
+**User (Frame):** a release zip, installed by `get.sh --release` or FrameDrop
+(pack/README.md). No repo on the device, no build. The plan here was an
+installed `ft` with `ft update` pulling a digest-pinned image from a registry;
+releases ship the image in the zip instead, and `ft` is development only.
 
 **Container naming.** Containers run through the wrapper are named
 `frametop-<program>-<pid>`: `podman ps` names the program, two runs of one
@@ -208,9 +208,9 @@ Rootless storage lands in `~/.local/share/containers`, shared with Valve's
 
 ## What `install.sh` does in this world
 
-1. `podman pull` the image by digest, write the reference to
-   `~/.config/frametop/image`
-2. copy the wrapper to `~/.local/bin/ft` (already installed-mode capable)
+1. check the zip's `frametop-image.tar` against its sha256 and `podman load` it
+   (the plan was a `podman pull` by digest from a registry)
+2. (dropped: copying the wrapper to `~/.local/bin/ft`)
 3. set up the runtime (a distrobox from the image, or Quadlet units) and
    install the units, pointing at `/opt/frametop`
 4. the host payload from the same release: SteamVR driver registration
@@ -224,14 +224,11 @@ the device. The image and the host payload come from one tagged commit.
 
 ## Open decisions
 
-1. **Tagging**: decided — `:latest` is refused by the wrapper (see
-   pack/README.md, "Never :latest"). Releases cut version tags; `ft update`
-   pins the digest of whatever version tag `install.sh` recorded. What
-   remains open is only the cadence: a tag per release vs. per CI build.
-2. **Registry home**: `ghcr.io/deejanuz/frametop`, published from `main` and
-   `v*` tags only.
-3. **Pull without auth**: depends on package visibility; install.sh can pin
-   the reference either way.
+1. **Tagging**: decided. Releases cut `v*` tags; each zip names the commit
+   its image was built from (pack/README.md).
+2. **Registry home**: dropped. There is no registry: the image ships in the
+   zip (user decision, 2026-10-07).
+3. **Pull without auth**: moot without a registry; the zip is a release asset.
 4. **Settings apps**: currently dnf-provided (PySide6/Kirigami) and run via
    the image. Whether the GUIs migrate toward Flatpak/host packages later is left
    open deliberately.

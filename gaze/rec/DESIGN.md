@@ -12,7 +12,7 @@ The data is for training a better eye tracker than `gaze/tracker/` (ft-eyes, a c
 |---|---|
 | Who reads the recordings | Maintainers only. The eye cameras see the iris, which identifies a person. Trained models can be public; the images never are. |
 | How | Encrypted frames in a gated dataset, `DeeJanuz/frametop-eyes` (below, "Privacy"). |
-| Keys | Two maintainer keys, both recipients of every upload: key 1 on the maintainer's training machine (the 7i), key 2 kept offline in the maintainer's password manager. |
+| Keys | Three maintainer keys, all recipients of every upload: key 1 on the maintainer's training machine (the 7i), key 2 kept offline in the maintainer's password manager, key 3 on dody (the GPU training machine, which decrypts pull requests itself). |
 | Packaging | Backend here in `gaze/rec/`, then a standalone repo with Frametop as a submodule, as the hand recorder does. |
 | Sessions | Short rounds picked from a bounty board (below, "Bounty board"), not one long session. Each round starts with a fit check and 9 dots. |
 | Bounty list | `bounties.json` in the dataset repo, fetched by the app (a copy ships for offline use). The board shows your own done marks and a maintainer-set priority tag per bounty, not community counts. |
@@ -26,7 +26,7 @@ The data is for training a better eye tracker than `gaze/tracker/` (ft-eyes, a c
 ## Privacy
 
 A private Hugging Face repo can't take contributions: people outside the org can't see it, so they can't open a pull request, and org membership would let every member read every contribution. So the dataset is gated like `DeeJanuz/frametop-hands`, and the export encrypts what identifies a person before upload:
-- Every frame chunk is encrypted with [age](https://age-encryption.org) (pyrage, which has aarch64 wheels: `pyrage-1.4.0-cp310-abi3-manylinux_2_17_aarch64`) to the recipients in `recipients.txt`: the maintainers' public keys: key 1 on the 7i, key 2 offline. The private keys never go in a repo.
+- Every frame chunk is encrypted with [age](https://age-encryption.org) (`recorder/age.py`, written on the `cryptography` library that SteamOS's Python has) to the recipients in `recipients.txt`: the maintainers' public keys: key 1 on the 7i, key 2 offline, key 3 on dody. The private keys never go in a repo.
 - The health answers go in `health.json.age`, encrypted the same way.
 - Labels, timings, fit readings, the IPD and the rest of session.json stay readable, so `validate.py` and a review can check a pull request before anyone decrypts it.
 - Contributors open pull requests from their own accounts, so `hub.py` and the review tools carry over from hands.
@@ -169,7 +169,7 @@ Uploads: `gaze/rec/hub.py` sends nothing to the real dataset until `CONSENT.md` 
 4. `fitcoach.py` with readings from a capture, and the fit card on the existing fit panel.
 5. ft-gazepanel `rec` mode, `path`, `distance`, target logging.
 6. `session.py`, the nine-dot opener and the first rounds, run with `--dry-run`, then on a replay. The bounty board and `bounties.json`.
-7. Review, export with encryption (two recipients), `validate.py`, `hub.py` against a test dataset.
+7. Review, export with encryption (three recipients), `validate.py`, `hub.py` against a test dataset.
 8. The window, then the standalone repo.
 9. The put-on check in the gaze service. Built 2026-10-14 behind `GAZE_FIT_WATCH=1`: the quick check holds its dot while the coach reads the fit against the saved one (the fit check and the recorder's fitment save a good fit), and the slip note is a strip the gaze panel draws (`show note`) from ft-eyes' `jump_px`. Thresholds are the coach's 5 degrees, not 1.5 mm yet; tuned from the headset tests.
 

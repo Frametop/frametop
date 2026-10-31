@@ -50,7 +50,7 @@ stateDiagram-v2
     p2: Input proxy: wraps driver_cv.so, adds frame_testbench_left and right, control socket RUN/frame-testbench.sock (0600, peer uid checked)
     p3: Overrides held: worn on or off (proximity), head pose, HMD buttons, synthetic controllers, no timeout
   }
-  state "Fake 2: the fake trackers (frame-testbench-fakes, fakes.py, docs/fake-trackers.md)" as fk {
+  state "Fake 2: the fake trackers (frame-testbench-fakes, fakes.py, testbench/docs/fake-trackers.md)" as fk {
     k0: Not running
     [*] --> k0
     k1: Running: RUN/frame-testbench-fakes.sock, stand-ins RUN/frametop-testbench/eye-server.mmap and frametop-eyes-gaze at 90 Hz, never the real /dev/shm files
@@ -61,7 +61,7 @@ stateDiagram-v2
     k6: Kept alive: nobody drives, status reads keep restarting the idle hour
     k7: record NAME: reads the real eye files and ft-hands' files (no images) into artifacts/recordings (0700), refuses while faking them
   }
-  state "Fake 3: Frametop's own sockets (desktop.py, docs/desktop.md)" as dk {
+  state "Fake 3: Frametop's own sockets (desktop.py, testbench/docs/desktop.md)" as dk {
     d0: Relay @frametop_relay: a testbench keyboard or mouse for one command (hostdev, hostev, hostbye), gone 3 s after its last word
     [*] --> d0
     d1: Pointer helper @ft_pointer_helper: state, overlays, measure, show, hide, recenter

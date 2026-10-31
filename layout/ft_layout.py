@@ -37,7 +37,7 @@ you face (yaw only), like a recenter. It lives in ~/.config/frametop-layout.json
                 "pos": [x, y, z], "face": [yaw, pitch], "roll": 0,   custom layout
                 "rotation": "normal" | "left" | "right"}, ...],      gamescope only
    "panel_size": [w, h],              gamescope: last measured panel size
-   "hosts": [{"name": "desk-pc", "address": "192.168.1.20", ft-screens: other machines' displays
+   "hosts": [{"name": "desk-pc", "address": "192.0.2.20", ft-screens: other machines' displays
               "direct": ["10.35.78.20"],          its Steam Link dongle on the Frame's hotspot
               "route": "auto",                    auto (the dongle when it answers) | network |
                                                           dongle (only; ft-stream reads both)

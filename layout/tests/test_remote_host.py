@@ -29,7 +29,7 @@ class RemoteHost(unittest.TestCase):
             raise self.m.NoAnswer("ft-screens isn't running")
 
         self.m.screens_socket = no_screens
-        self.m.save_layout({"hosts": [{"name": "oma7", "address": "192.168.1.30", "route": "auto",
+        self.m.save_layout({"hosts": [{"name": "oma7", "address": "192.0.2.30", "route": "auto",
                                        "displays": [{"id": "oma7-dp-2", "client": "frametop-1", "app": "Desktop"}]}]})
 
     def tearDown(self):

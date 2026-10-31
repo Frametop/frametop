@@ -275,7 +275,7 @@ class VerifySkillTests(unittest.TestCase):
             self.replies[('status',)] = proxy()
 
     OMA7 = {'ok': True, 'input_hosts': ['oma7'], 'fake_worn': None,
-            'input_streams': [{'pid': 7, 'host': '192.168.1.61', 'id': 'frametop-oma7-dp-2', 'name': 'oma7'}]}
+            'input_streams': [{'pid': 7, 'host': '192.0.2.61', 'id': 'frametop-oma7-dp-2', 'name': 'oma7'}]}
 
     def test_launch_refuses_while_a_host_that_lends_its_input_streams_unless_allowed(self):
         self.replies[('host-input',)] = self.OMA7
@@ -336,9 +336,9 @@ class VerifySkillTests(unittest.TestCase):
         noting whether dody's input lock was held while it ran."""
         layout = Path(self.tmp.name) / 'layout.json'
         layout.write_text(json.dumps({'hosts': [
-            {'name': 'Deej-5090', 'address': '192.168.1.93', 'mic': True, 'displays': [
+            {'name': 'Deej-5090', 'address': '192.0.2.93', 'mic': True, 'displays': [
                 {'client': 'frametop-deej-5090-oled', 'app': 'display:{b7ae}', 'size': [3440, 1440]}]},
-            {'name': 'oma7', 'address': '192.168.1.61', 'input': True, 'displays': []}]}))
+            {'name': 'oma7', 'address': '192.0.2.61', 'input': True, 'displays': []}]}))
         seen = {}
 
         def popen(argv, **kwargs):
@@ -367,14 +367,14 @@ class VerifySkillTests(unittest.TestCase):
         code, out = self.run_main('stream', 'Deej-5090', '--seconds', '5')
         summary = json.loads(out)
         self.assertEqual((code, summary['ok'], summary['input_lock_held']), (0, True, True))
-        self.assertEqual(seen['lock'], str(self.v.RUNTIME / 'frametop-input-192.168.1.93.lock'))
+        self.assertEqual(seen['lock'], str(self.v.RUNTIME / 'frametop-input-192.0.2.93.lock'))
         self.assertEqual(seen['argv'][1:9], ['python3', str(self.v.VIEWER),
                                              str(self.v.RELEASES / 'current/stream/build/ft-stream'),
-                                             '192.168.1.93', 'frametop-deej-5090-oled', 'display:{b7ae}',
+                                             '192.0.2.93', 'frametop-deej-5090-oled', 'display:{b7ae}',
                                              '3440x1440', '30'])
         self.assertTrue((Path(summary['folder']) / 'summary.json').exists())
-        self.assertTrue(self.v.lock_free('192.168.1.93'))   # only probed here: the viewer holds it
-        code, out = self.run_main('stream', '192.168.1.93', '--allow-host-input')
+        self.assertTrue(self.v.lock_free('192.0.2.93'))   # only probed here: the viewer holds it
+        code, out = self.run_main('stream', '192.0.2.93', '--allow-host-input')
         self.assertIsNone(seen['lock'])
         self.assertFalse(json.loads(out)['input_lock_held'])
 
@@ -412,11 +412,11 @@ class VerifySkillTests(unittest.TestCase):
                             (['Deej-5090', '--fps', '60'], 'stream HOST')):
             with self.subTest(argv=argv), self.assertRaisesRegex(SystemExit, error):
                 self.run_main('stream', *argv)
-        self.cmdlines = [['ft-stream', 'stream', '192.168.1.93', '--id', 'frametop-deej-5090-oled']]
+        self.cmdlines = [['ft-stream', 'stream', '192.0.2.93', '--id', 'frametop-deej-5090-oled']]
         with self.assertRaisesRegex(SystemExit, 'already streams'):
             self.run_main('stream', 'Deej-5090')
         self.cmdlines = []
-        held = os.open(self.v.lock_name('192.168.1.93'), os.O_RDWR | os.O_CREAT)
+        held = os.open(self.v.lock_name('192.0.2.93'), os.O_RDWR | os.O_CREAT)
         self.v.fcntl.flock(held, self.v.fcntl.LOCK_EX)   # a live stream's
         try:
             with self.assertRaisesRegex(SystemExit, 'input lock'):

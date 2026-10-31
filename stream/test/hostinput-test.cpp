@@ -94,7 +94,7 @@ int main() {
     assert(Parse(nullptr, 3).type == Record::kNone);
 
     // The relay id.
-    assert(RelayId("192.168.1.50") == "192.168.1.50");
+    assert(RelayId("192.0.2.50") == "192.0.2.50");
     assert(RelayId("fe80::1%wlan0") == "fe80--1-wlan0");
     assert(RelayId("") == "host");
     assert(RelayId(std::string(80, 'a')).size() == 64);
@@ -242,7 +242,7 @@ int main() {
         if (up) said.push_back(msg);
         return up;
     });
-    relay.Start("oma7", "192.168.1.50");
+    relay.Start("oma7", "192.0.2.50");
     const Record hello = P(Bytes({kVersion, 3, 3, 'o', 'm', 'a', '7'})), on = P(Bytes({kVersion, 2, 1})),
                  key = P(Events(kKeyboard, {{1, 30, 1}, {0, 0, 0}})), move = P(Events(kMouse, {{2, 0, 1}}));
     assert(relay.Take(hello).empty() && said.empty());  // not engaged yet: nothing to say
@@ -265,7 +265,7 @@ int main() {
     said.clear();
     // A hello without the mouse takes it away; one with no name uses the host's address.
     relay.Take(P(Bytes({kVersion, 3, 1})));
-    assert((said == std::vector<std::string>{"hostdev oma7 keyboard 192.168.1.50", "hostbye oma7 mouse"}));
+    assert((said == std::vector<std::string>{"hostdev oma7 keyboard 192.0.2.50", "hostbye oma7 mouse"}));
     said.clear();
     relay.Take(move);
     assert(said.empty());
@@ -299,7 +299,7 @@ int main() {
         said.push_back(msg);
         return true;
     });
-    flaky.Start("oma7", "192.168.1.50");
+    flaky.Start("oma7", "192.0.2.50");
     flaky.Take(on), flaky.Take(hello);
     said.clear();
     flaky.Stop();  // the keyboard's hostbye fails, the mouse's goes

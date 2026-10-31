@@ -17,9 +17,9 @@ from unittest import mock
 from frame_testbench import cli, hostinput
 
 LAYOUT = {'hosts': [
-    {'name': 'oma7', 'address': '192.168.1.61', 'input': True, 'displays': []},
-    {'name': 'Deej-5090', 'address': '192.168.1.93', 'mic': True, 'displays': []},
-    {'name': "Daenon's Pro14", 'address': '192.168.1.92', 'input': False, 'displays': []},
+    {'name': 'oma7', 'address': '192.0.2.61', 'input': True, 'displays': []},
+    {'name': 'Deej-5090', 'address': '192.0.2.93', 'mic': True, 'displays': []},
+    {'name': "Daenon's Pro14", 'address': '192.0.2.92', 'input': False, 'displays': []},
     {'name': 'broken'}, 'not a host']}
 
 
@@ -49,41 +49,41 @@ class Fixture(unittest.TestCase):
 
 class HostInputTests(Fixture):
     def test_streams_finds_ft_stream_and_strips_a_port(self):
-        self.stream(11, '192.168.1.61', 'frametop-oma7-edp-2')
-        self.stream(12, '192.168.1.92:48089', 'frametop-mac-oled')
-        self.process(13, '/usr/bin/python3', 'ft-stream', 'stream', '192.168.1.61')
-        self.process(14, 'ft-stream', 'pair', '192.168.1.61', '--id', 'x')
+        self.stream(11, '192.0.2.61', 'frametop-oma7-edp-2')
+        self.stream(12, '192.0.2.92:48089', 'frametop-mac-oled')
+        self.process(13, '/usr/bin/python3', 'ft-stream', 'stream', '192.0.2.61')
+        self.process(14, 'ft-stream', 'pair', '192.0.2.61', '--id', 'x')
         (self.proc / 'self').mkdir()
         (self.proc / '15').mkdir()   # gone before its cmdline was read
         found = sorted(hostinput.streams(self.proc), key=lambda s: s['pid'])
-        self.assertEqual(found, [{'pid': 11, 'host': '192.168.1.61', 'id': 'frametop-oma7-edp-2'},
-                                 {'pid': 12, 'host': '192.168.1.92', 'id': 'frametop-mac-oled'}])
+        self.assertEqual(found, [{'pid': 11, 'host': '192.0.2.61', 'id': 'frametop-oma7-edp-2'},
+                                 {'pid': 12, 'host': '192.0.2.92', 'id': 'frametop-mac-oled'}])
 
     def test_only_hosts_with_input_true_count(self):
-        self.assertEqual(hostinput.input_hosts(self.layout), {'192.168.1.61': 'oma7'})
+        self.assertEqual(hostinput.input_hosts(self.layout), {'192.0.2.61': 'oma7'})
         self.assertEqual(hostinput.input_hosts(self.tmp / 'missing.json'), {})
         self.layout.write_text('{not json')
         self.assertEqual(hostinput.input_hosts(self.layout), {})
 
     def test_refusal_names_the_host_only_while_its_stream_is_live(self):
-        self.stream(11, '192.168.1.92')   # input off
-        self.stream(12, '192.168.1.93')   # no input key
+        self.stream(11, '192.0.2.92')   # input off
+        self.stream(12, '192.0.2.93')   # no input key
         st = hostinput.state(self.layout, self.proc)
         self.assertEqual(st['input_hosts'], ['oma7'])
         self.assertIsNone(hostinput.refusal(st))
-        self.stream(13, '192.168.1.61')
+        self.stream(13, '192.0.2.61')
         st = hostinput.state(self.layout, self.proc)
         self.assertEqual([s['name'] for s in st['input_streams']], ['oma7'])
         self.assertIn('oma7', hostinput.refusal(st))
 
     def test_locks_say_which_host_lock_is_held_without_taking_it(self):
-        held, free = self.run / 'frametop-input-192.168.1.61.lock', self.run / 'frametop-input-192.168.1.93.lock'
+        held, free = self.run / 'frametop-input-192.0.2.61.lock', self.run / 'frametop-input-192.0.2.93.lock'
         held.touch(), free.touch()
         with open(held) as f:
             fcntl.flock(f, fcntl.LOCK_EX)   # as ft-stream holds it: read back from the real /proc/locks
             found = {lk['host']: lk for lk in hostinput.locks()}
-            self.assertEqual(found['192.168.1.61'], {'host': '192.168.1.61', 'held': True, 'pid': os.getpid()})
-            self.assertEqual(found['192.168.1.93'], {'host': '192.168.1.93', 'held': False, 'pid': None})
+            self.assertEqual(found['192.0.2.61'], {'host': '192.0.2.61', 'held': True, 'pid': os.getpid()})
+            self.assertEqual(found['192.0.2.93'], {'host': '192.0.2.93', 'held': False, 'pid': None})
         self.assertFalse(hostinput.locks()[0]['held'])
         (self.proc / 'locks').write_text('1: FLOCK  ADVISORY  WRITE 7 00:00:1 0 EOF\nnot a lock line\n')
         self.assertEqual([lk['held'] for lk in hostinput.locks(self.proc)], [False, False])
@@ -138,7 +138,7 @@ class GuardProcessTests(Fixture):
             time.sleep(0.02)
         self.fail('the guard wrote no flag')
 
-    def lock_free(self, host='192.168.1.61'):
+    def lock_free(self, host='192.0.2.61'):
         held = {}
         busy = hostinput.take_locks([host], held)
         for fd in held.values():
@@ -150,7 +150,7 @@ class GuardProcessTests(Fixture):
         self.wait_flag(guard)
         self.assertFalse(hostinput.read_flag()['allow_host_input'])
         self.assertFalse(self.lock_free())   # no stream can lease oma7 now
-        self.assertTrue(self.lock_free('192.168.1.92'))   # input off: not its business
+        self.assertTrue(self.lock_free('192.0.2.92'))   # input off: not its business
         hostinput.clear_flag()   # worn off, physical or release
         self.assertEqual(guard.wait(5), 0)
         self.assertTrue(self.lock_free())
@@ -164,14 +164,14 @@ class GuardProcessTests(Fixture):
 
     def test_a_busy_lock_means_no_guard_and_no_flag(self):
         held = {}
-        hostinput.take_locks(['192.168.1.61'], held)   # a live stream holds it
+        hostinput.take_locks(['192.0.2.61'], held)   # a live stream holds it
         try:
             guard = self.start()
             self.assertEqual(guard.wait(10), 3)
-            self.assertIn('busy: 192.168.1.61', guard.stdout.read())
+            self.assertIn('busy: 192.0.2.61', guard.stdout.read())
             self.assertIsNone(hostinput.read_flag())
         finally:
-            os.close(held['192.168.1.61'])
+            os.close(held['192.0.2.61'])
 
     def test_a_stopped_guard_or_a_new_busy_host_releases_the_wearer_but_leaves_the_flag(self):
         guard = self.start()
@@ -184,7 +184,7 @@ class GuardProcessTests(Fixture):
         guard = self.start()
         self.wait_flag(guard)
         held = {}
-        hostinput.take_locks(['192.168.1.92'], held)   # its stream holds the lock...
+        hostinput.take_locks(['192.0.2.92'], held)   # its stream holds the lock...
         try:
             layout = json.loads(self.layout.read_text())
             layout['hosts'][2]['input'] = True   # ...when it starts lending its input
@@ -193,7 +193,7 @@ class GuardProcessTests(Fixture):
             self.assertIn('releasing the wearer', guard.stdout.read())
             self.assertEqual(hostinput.read_flag()['pid'], guard.pid)
         finally:
-            os.close(held['192.168.1.92'])
+            os.close(held['192.0.2.92'])
 
     def test_guard_alive_knows_a_guard_by_its_command_line(self):
         self.process(31, sys.executable, '-m', 'frame_testbench.hostinput', 'guard')
@@ -219,7 +219,7 @@ class GuardReleaseTests(Fixture):
 
     def guard(self, release):
         # The start takes every lock; at the first poll a stream holds a newly lent host's.
-        free_then_busy = mock.Mock(side_effect=[[], ['192.168.1.92']])
+        free_then_busy = mock.Mock(side_effect=[[], ['192.0.2.92']])
         with mock.patch.object(hostinput, 'take_locks', free_then_busy), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
             code = hostinput.guard(self.layout, poll=0.01, release=release)
@@ -228,7 +228,7 @@ class GuardReleaseTests(Fixture):
     def test_a_stream_taking_a_lock_releases_the_wearer_but_not_the_flag(self):
         release = mock.Mock()
         self.assertEqual(self.guard(release), (0, 'holding: \n'
-                         'a stream holds the input lock of 192.168.1.92: releasing the wearer\n'))
+                         'a stream holds the input lock of 192.0.2.92: releasing the wearer\n'))
         release.assert_called_once_with()
         self.assertEqual(hostinput.read_flag()['pid'], os.getpid())   # the next command clears it
 
@@ -346,7 +346,7 @@ class WornGuardTests(Fixture):
         self.assertIsNone(hostinput.read_flag())
 
     def test_worn_on_is_refused_while_a_host_that_lends_input_streams(self):
-        self.stream(21, '192.168.1.61')
+        self.stream(21, '192.0.2.61')
         with self.assertRaisesRegex(ValueError, 'oma7.*--allow-host-input'):
             self.worn('on')
         self.assertEqual((self.bench.commands, self.guards), ([], []))
@@ -469,7 +469,7 @@ class WornGuardTests(Fixture):
     def test_any_command_drops_a_faked_wearer_whose_guard_has_gone(self):
         self.worn('on')
         args = cli.parser().parse_args(['pointer', 'state'])
-        self.stream(22, '192.168.1.61')   # its lock is the guard's: it can't lease
+        self.stream(22, '192.0.2.61')   # its lock is the guard's: it can't lease
         self.assertIsNone(cli.drop_unsafe_worn(self.bench, args))
         self.alive = False
         with contextlib.redirect_stderr(io.StringIO()) as err:
@@ -497,14 +497,14 @@ class WornGuardTests(Fixture):
         self.assertIn('guard has gone', json.loads(out.getvalue())['worn_released'])
 
     def test_an_allowed_wearer_stays(self):
-        self.stream(22, '192.168.1.61')
+        self.stream(22, '192.0.2.61')
         self.worn('on', '--allow-host-input')
         self.alive = False
         self.assertIsNone(cli.drop_unsafe_worn(self.bench, cli.parser().parse_args(['status'])))
         self.assertEqual(self.bench.commands, [('worn 1', True)])
 
     def test_host_input_command_reports_streams_and_flag(self):
-        self.stream(23, '192.168.1.61', 'frametop-oma7-dp-2')
+        self.stream(23, '192.0.2.61', 'frametop-oma7-dp-2')
         reply = cli.dispatch(cli.parser().parse_args(['host-input']), self.bench)
         self.assertTrue(reply['ok'])
         self.assertEqual(reply['input_streams'][0]['id'], 'frametop-oma7-dp-2')

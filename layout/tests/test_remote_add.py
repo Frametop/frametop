@@ -45,7 +45,7 @@ class RemoteAdd(unittest.TestCase):
     def add(self, *opts):
         out = io.StringIO()
         with redirect_stdout(out):
-            self.m.remote_command(["add", "oma7", "192.168.1.30", "Desktop", *opts])
+            self.m.remote_command(["add", "oma7", "192.0.2.30", "Desktop", *opts])
         return out.getvalue()
 
     def hosts(self):
@@ -75,7 +75,7 @@ class RemoteAdd(unittest.TestCase):
         with self.assertRaises(self.m.LayoutFileError):
             self.add("--fps", "60")
         self.assertEqual([c[0] for c in self.calls], ["pair", "unpair"])
-        self.assertEqual(self.calls[1], ("unpair", "192.168.1.30", "--id", "frametop-oma7-desktop"))
+        self.assertEqual(self.calls[1], ("unpair", "192.0.2.30", "--id", "frametop-oma7-desktop"))
         self.assertEqual(self.hosts(), [])
 
     def test_a_failed_unpair_is_said(self):
@@ -87,9 +87,9 @@ class RemoteAdd(unittest.TestCase):
         self.m.save_layout = full_disk
         out = io.StringIO()
         with redirect_stdout(out), self.assertRaisesRegex(OSError, "disk full"):
-            self.m.remote_command(["add", "oma7", "192.168.1.30", "Desktop", "--port", "48000"])
-        self.assertEqual(self.calls[1][:2], ("unpair", "192.168.1.30:48000"))
-        self.assertIn("unpairing frametop-oma7-desktop from 192.168.1.30 failed too: no host", out.getvalue())
+            self.m.remote_command(["add", "oma7", "192.0.2.30", "Desktop", "--port", "48000"])
+        self.assertEqual(self.calls[1][:2], ("unpair", "192.0.2.30:48000"))
+        self.assertIn("unpairing frametop-oma7-desktop from 192.0.2.30 failed too: no host", out.getvalue())
 
 
 if __name__ == "__main__":

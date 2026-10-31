@@ -168,7 +168,7 @@ class VoiceFlagsTest(unittest.TestCase):
     def test_loopback_only(self):
         for url in ("http://127.0.0.1:8178", "http://localhost:8178", "http://[::1]:8178"):
             self.assertTrue(self.vf.loopback(url), url)
-        for url in ("http://192.168.1.5:8178", "https://127.0.0.1:8178", "http://example.com", "127.0.0.1:8178"):
+        for url in ("http://192.0.2.5:8178", "https://127.0.0.1:8178", "http://example.com", "127.0.0.1:8178"):
             self.assertFalse(self.vf.loopback(url), url)
 
     def test_bursts(self):

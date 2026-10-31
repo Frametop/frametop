@@ -77,6 +77,13 @@ find_repo() {
   echo "${p:-$HOME/frametop}"
 }
 
+# Frametop's menu entries in DIR, one a line: every ft-*.desktop and frametop-*.desktop (the apps,
+# the recorders, the gaze bench, and one frametop-profile-* per layout profile), and nothing else.
+desktop_entries() {
+  local f
+  for f in "$1"/ft-*.desktop "$1"/frametop-*.desktop; do printf '%s\n' "$f"; done
+}
+
 # Frametop's programs that are running now (step 1 leaves them running until the restart).
 running() {
   local n out=()
@@ -118,12 +125,7 @@ main() {
   [ -f "$override" ] && grep -q 'Frametop' "$override" || override=
   [ -f "$native_copy" ] || native_copy=
   units=("$HOME"/.config/systemd/user/frametop-*.service)
-  for f in ft-input-settings ft-display-settings ft-tour ft-recenter-help ft-remote-displays ft-layout-reset ft-screens-toggle ft-remote-settings ft-gazeprobe; do
-    [ -e "$apps/$f.desktop" ] && entries+=("$apps/$f.desktop")
-  done
-  [ -e "$apps/frametop-handrec.desktop" ] && entries+=("$apps/frametop-handrec.desktop")
-  [ -e "$apps/frametop-eyerec.desktop" ] && entries+=("$apps/frametop-eyerec.desktop")
-  entries+=("$apps"/frametop-profile-*.desktop)  # one per layout profile (layout/ft_layout.py)
+  mapfile -t entries < <(desktop_entries "$apps")
   [ -L "$handsctl" ] || handsctl=
   [ -L "$cmd_link" ] || cmd_link=
   grep -qF "$bashrc_mark" "$HOME/.bashrc" 2>/dev/null && bashrc_lines=1
@@ -258,10 +260,11 @@ main() {
 
   # Rebuilt by the desktop at each start, so nothing to keep.
   run rm -rf "$HOME/.local/share/frametop/apps" "$HOME/.local/share/kwin/decorations/kwin4_decoration_qml_frametop" \
-    "$HOME/.cache/frametop"
+    "$HOME/.cache/frametop" "$HOME/.cache/frametop-framedrop"
 
   local settings=("$HOME"/.config/frametop.conf* "$HOME"/.config/frametop-*.json* "$HOME/.config/frametop-remote"
-                  "$HOME/.config/frametop-keyboard" "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream")
+                  "$HOME/.config/frametop-keyboard" "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream"
+                  "$HOME/.local/state/frametop-trial")
   local kept=()
   for f in "${settings[@]}"; do [ -e "$f" ] && kept+=("$f"); done
   if [ ${#kept[@]} -gt 0 ]; then
@@ -280,12 +283,14 @@ main() {
   fi
 
   local recs=()
-  for f in "$HOME/.local/share/frametop/eyes" "$HOME/.local/share/frametop/hands"; do [ -e "$f" ] && recs+=("$f"); done
+  for f in "$HOME/.local/share/frametop/eyes" "$HOME/.local/share/frametop/hands" "$HOME/.local/share/frametop/gaze/bench"; do
+    [ -e "$f" ] && recs+=("$f")
+  done
   if [ ${#recs[@]} -gt 0 ]; then
-    ask "Delete your eye and hand recordings in ~/.local/share/frametop ($(size "${recs[@]}"))?" n &&
+    ask "Delete your eye and hand recordings and gaze bench runs in ~/.local/share/frametop ($(size "${recs[@]}"))?" n &&
       run rm -rf "${recs[@]}"
   fi
-  [ "$dry" = 1 ] || rmdir "$HOME/.local/share/frametop" 2>/dev/null || true
+  [ "$dry" = 1 ] || rmdir "$HOME/.local/share/frametop/gaze" "$HOME/.local/share/frametop" 2>/dev/null || true
 
   if command -v podman >/dev/null && podman container exists dev 2>/dev/null; then
     echo "The build container (dev) holds Frametop's compilers and libraries, 1-2 GB. If you put"
@@ -303,4 +308,6 @@ main() {
 }
 
 dir=
+# Sourced (scripts/tests/test_uninstall.py), it only defines the functions: return works only then.
+(return 0 2>/dev/null) && return 0
 main "$@"

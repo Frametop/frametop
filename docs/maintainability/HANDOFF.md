@@ -2,7 +2,7 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-312. The rest of DEE-303 (its open list below) is now its own ticket, DEE-319.
+starts at DEE-298. The rest of DEE-303 (its open list below) is now its own ticket, DEE-319.
 
 ## Where the series is
 
@@ -21,13 +21,15 @@ starts at DEE-312. The rest of DEE-303 (its open list below) is now its own tick
 | 10 | DEE-303, part 1 | 76ecd9b, d80ef80, a88d458, f4d5db7, 63b363b, 3a8ad3d, f00bd79 (note) |
 | 10b | DEE-305 follow-up (review note #9) | 176eb76 |
 | 11 | DEE-309 | 77d0c35, a33b578, b6809e1, a0216d2, 91e19e3, 25dbde4, 165ed70, c9a4197, a0e2dfe, 972ac35, then this update |
+| 12 | DEE-312 | ed4efd1, c340d33, then this update |
 
 What's left, in order:
 
-1. DEE-312, DEE-298, then DEE-313 to DEE-316
-2. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
+1. DEE-298, then DEE-313 to DEE-316
+2. DEE-318
+3. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
 
-DEE-310, DEE-304, DEE-305 and DEE-309 are done (steps 7 to 11). DEE-303 part 1 is done (step
+DEE-310, DEE-304, DEE-305, DEE-309 and DEE-312 are done (steps 7 to 12). DEE-303 part 1 is done (step
 10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
@@ -504,6 +506,32 @@ Open:
 - A failed distrobox fetch leaves `~/dev/src/distrobox.part.PID` behind, and a failed stb
   download leaves `NAME.part`. Both are harmless.
 
+### From DEE-312
+
+Eye frames and voice clips are written 0600, and a link at their path isn't followed.
+
+- ft-eyegrab's lab modes (`--rec`, `--seq`, `--dump`) open their files through
+  `create_private`: `O_NOFOLLOW`, mode 0600 whatever the umask, and a file with a second name
+  (a hard link) is refused. An old file at the path is emptied and made 0600. They run with
+  sudo, so the file goes to `SUDO_UID:SUDO_GID` (root owned it before) and lab tools read a
+  recording without root. `--share` already made its file 0600 with `O_NOFOLLOW`.
+- The buffer list's `struct stat` is zeroed and a failed fstat is reported, so `ino` is never
+  stack garbage.
+- ft-voiced's `save_clip` opens with `O_NOFOLLOW` and 0600 and sets 0600 on an existing clip.
+- Tests: `gaze/tracker/tests/eyegrab-files-test.c` in test-c (builds ft-eyegrab.c with
+  `FT_EYEGRAB_NO_MAIN`), and `Clips` in `voice/test/test_daemon.py`. Both run with the umask
+  at 0 and check that a link's target is left alone.
+
+Open:
+
+- The clips folder is still made with the umask's mode (usually 0755), so its file names (the
+  dictation times) show. The eyegrab output folder is whatever the user made.
+- A refused clip raises in the dictation path, as any failed clip write did before, so that
+  dictation fails. Logging and going on would be kinder.
+- Old clips saved before this fix stay 0644 until pruned (the newest `save_clips` are kept).
+- Unchanged here: recorder folders' default mode (DEE-319) and the calibration backups'
+  growth (M2).
+
 ## Device checks still to do
 
 Each needs an install and the headset:
@@ -561,3 +589,7 @@ Each needs an install and the headset:
   image (the hashed ncnn fallback); Full Keyboard builds with the new include dir;
   `testbench/install.sh` with hashes; `stream/build.sh --spikes`; ft-streamtest against a host.
   Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
+- After DEE-312 (needs a build of ft-eyegrab and a fast-install of voice/): `sudo ft-eyegrab
+  --rec`, `--seq` and `--dump` write 0600 files owned by the sudo user, which the lab tools read
+  without sudo, and refuse a symlinked path; list mode shows real inodes; with `save_clips` on,
+  clips are 0600. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.

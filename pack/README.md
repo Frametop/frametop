@@ -34,8 +34,8 @@ The native binaries (`ft-screens`, `ft-pointer`, the `ft_pointer` driver,
 `build.sh` scripts, run inside the image with `FRAME_IN_BOX=1`, so there is
 one build recipe for the image and the Frame. They stay in their `build/`
 folders under `/src/frametop` and are copied to `/opt/frametop`. Hand
-tracking's `ft-camd` and `ft-hands` (with ncnn, built from the tag
-`hands/Makefile` pins) stay in `hands/build/`, where their units and
+tracking's `ft-camd` and `ft-hands` (with ncnn, built from the source
+`hands/Makefile` pins by sha256) stay in `hands/build/`, where their units and
 `ft-camd`'s file capabilities point.
 
 Component builds strip non-runtime symbols before the binaries are copied into

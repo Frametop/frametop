@@ -307,6 +307,34 @@ def ask(addr, command, timeout=1.0):
         s.close()
 
 
+def screens_mode():
+    """From ft-screens' "state": its visibility mode in effect, whether its switch shows the
+    screens, and how many times the switch changed (None from an older ft-screens); None
+    without an answer. In a VR game with ingames hide, "always" works as "dashboard"
+    (ft-screens' EffectiveMode), whose switch is off. Read as "always", the screens counted as
+    shown, and the show at a calibration's close turned the switch on over the game (DEE-279).
+    An older ft-screens doesn't say whether a game runs: its mode as is."""
+    st = ask(SCREENS, "state", 0.5).split()
+    if len(st) < 3 or st[0] != "ok":
+        return None
+    mode = "dashboard" if st[1] == "always" and st[7:9] == ["1", "hide"] else st[1]
+    gen = st[9] if len(st) > 9 else None
+    return mode, (st[2] == "0") if mode == "always" else (st[2] == "1"), gen
+
+
+def show_screens(mode, gen):
+    """The show after a full calibration's hide, unless something moved the switch since its
+    hide (gen: a VR game that started or ended, a settings change, the user's hotkey, a new
+    ft-screens), which then decides (DEE-279). Without the count (an older ft-screens), unless
+    the mode in effect changed."""
+    now = screens_mode()
+    if now is not None and gen not in (None, "", "-") and now[2] is not None and now[2] != gen:
+        return "left as they are (their switch moved since the calibration hid them)"
+    if now is not None and mode and now[0] != mode:
+        return f"left as they are (the mode in effect went from {mode} to {now[0]})"
+    return ask(SCREENS, "show", 0.5) or "no reply"
+
+
 class Checks:
     def __init__(self, svc, sel):
         self.svc = svc
@@ -333,6 +361,8 @@ class Checks:
         self.panel_proc = None
         self.panel_restart_at = 0.0
         self.screens_shown = None
+        self.screens_mode = None  # ft-screens' visibility mode in effect when a full calibration hid them
+        self.screens_gen = None   # and its switch's change count after the hide
         self.last_progress = 0.0
         self.asking = None       # (socket, deadline, done): a command to ft-eyes waiting for its reply
         self.watch = (None, False)  # (frametop.conf's mtime, GAZE_FIT_WATCH on)
@@ -344,13 +374,28 @@ class Checks:
             # An ft-gazed before this one died during a full calibration, with the screens
             # hidden: nothing else shows them (ft-screens' hide has no lease). One that isn't
             # running shows them anyway when it starts.
-            reply = ask(SCREENS, "show", 0.5)
-            log(f"a calibration the last gaze service ran hid Frametop's screens: shown again ({reply or 'no reply'})")
+            try:
+                mode, gen = (SCREENS_HIDDEN.read_text().split() + ["", ""])[:2]
+            except OSError:
+                mode, gen = "", ""
+            log(f"a calibration the last gaze service ran hid Frametop's screens: {show_screens(mode, gen)}")
             SCREENS_HIDDEN.unlink(missing_ok=True)
 
     @property
     def active(self):
         return self.check is not None
+
+    def mark_hidden(self, gen):
+        """SCREENS_HIDDEN, for a full calibration that hides shown screens: their mode in effect,
+        and their switch's change count after the hide ("-" before it, or from an older
+        ft-screens)."""
+        if not self.screens_shown:
+            return
+        try:
+            SCREENS_HIDDEN.parent.mkdir(parents=True, exist_ok=True)
+            SCREENS_HIDDEN.write_text(f"{self.screens_mode} {gen}\n")
+        except OSError as e:
+            log(f"can't mark the screens hidden ({e}): a crash now would leave them hidden")
 
     # --- The panel process ---
 
@@ -629,16 +674,14 @@ class Checks:
         if kind == "quick" and reason == PUTON_REASON:
             self.start_puton(now)
         if kind == "full":
-            st = ask(SCREENS, "state", 0.5).split()
-            if len(st) >= 3 and st[0] == "ok":
-                self.screens_shown = (st[2] == "0") if st[1] == "always" else (st[2] == "1")
-                if self.screens_shown:
-                    try:
-                        SCREENS_HIDDEN.parent.mkdir(parents=True, exist_ok=True)
-                        SCREENS_HIDDEN.touch()
-                    except OSError as e:
-                        log(f"can't mark the screens hidden ({e}): a crash now would leave them hidden")
+            st = screens_mode()
+            if st is not None:
+                self.screens_mode, self.screens_shown, _ = st
+                self.mark_hidden("-")  # before the hide, so a crash can't leave them hidden unmarked
                 ask(SCREENS, "hide", 0.5)
+                after = screens_mode()
+                self.screens_gen = after[2] if after else None
+                self.mark_hidden(self.screens_gen or "-")
         self.to_helper("calpanel 1")
         off = off_panel(kind, own)
         if off:
@@ -1285,7 +1328,9 @@ class Checks:
         self.to_panel("hide")
         self.to_helper("calpanel 0")
         if self.check["kind"] == "full" and self.screens_shown:
-            ask(SCREENS, "show", 0.5)
+            reply = show_screens(self.screens_mode, self.screens_gen)
+            if not reply.startswith("ok"):
+                log(f"Frametop's screens after the calibration: {reply}")
             SCREENS_HIDDEN.unlink(missing_ok=True)
         self.screens_shown = None
         self.check = None

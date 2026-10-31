@@ -753,7 +753,15 @@ def apply_screens(wait=0):
         time.sleep(1)
     start_remotes(sock, layout)
     save_layout(layout)  # screen numbers given to new remote displays
-    f = sock.ask("head").split()
+    try:
+        f = sock.ask("head").split()
+    except RuntimeError:
+        # No head pose (the headset off or asleep): the screens aren't placed now, but the
+        # visibility mode and the screens hidden on their own still reach ft-screens, which
+        # otherwise keeps its defaults (always, nothing concealed) until a reset (DEE-278).
+        send_visibility(sock, layout)
+        send_hidden(sock, layout)
+        raise
     eye, heading = tuple(map(float, f[1:4])), float(f[4])
     send_visibility(sock, layout)
     results = []

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline test of the gaze checks' G4 fixes (gaze/gazecheck.py, docs/charts/README.md G4):
+"""Offline test of the gaze checks' G4 fixes, and G2's P2 (gaze/gazecheck.py, docs/charts/README.md):
 
   Z1 (DEE-270)  a full calibration marks the screens it hid (SCREENS_HIDDEN); the next gaze
                 service shows them again if the last one died before close()
@@ -9,6 +9,9 @@
                 comes (our tracker sends none before its first calibration)
   Z4 (DEE-273)  a check closed because the eyes went makes their coming back a don, which
                 re-arms the full calibration
+  P2 (DEE-279)  a full calibration in a VR game, with the always mode and ingames hide, reads the
+                mode in effect (dashboard, its switch off), so its close doesn't show the screens;
+                nor does a close, or the next gaze service, after a game started mid-calibration
 
 Drives Checks with a fake service and a fake ft-screens socket: nothing reaches the live gaze
 service, ft-screens, the pointer helper, ft-eyes, or SteamVR. HOME is a temp folder (the marker
@@ -51,8 +54,10 @@ def check(label, got, want):
         failures.append(label)
 
 
-# The fake ft-screens: "state" says shown (always mode, not hidden), the rest "ok".
+# The fake ft-screens: "state" says shown (always mode, not hidden, no game), the rest "ok".
 screens_got = []
+screens_state = ["ok always 0 45 left 30 both 0 hide"]
+switch = [None]  # ft-screens' switch change count, in "state" when set (an older one has none)
 screens = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 screens.bind(gazecheck.SCREENS)
 
@@ -63,7 +68,10 @@ def serve():
         text = data.decode()
         screens_got.append(text)
         if addr:
-            screens.sendto(b"ok always 0" if text == "state" else b"ok", addr)
+            if switch[0] is not None and text in ("hide", "show", "toggle"):
+                switch[0] += 1
+            state = screens_state[0] + ("" if switch[0] is None else f" {switch[0]}")
+            screens.sendto(state.encode() if text == "state" else b"ok", addr)
 
 
 threading.Thread(target=serve, daemon=True).start()
@@ -185,6 +193,86 @@ checks.slip_watch = lambda now: None
 checks.periodic()
 check("eyes back for DON_DELAY: the don re-arms the full calibration", (checks.away, checks.full_armed), (False, True))
 took()
+
+# P2: in a VR game with ingames hide, "always" is in effect "dashboard", its switch off: the screens
+# are hidden already, and the close leaves them so.
+screens_state[0] = "ok always 0 45 left 30 both 1 hide"
+svc = new_svc()
+checks = gazecheck.Checks(svc, selectors.DefaultSelector())
+checks.panel_proc = object()
+checks.can_run = lambda: True
+check("a full calibration in a game opens", checks.start("full", "test"), "ok")
+check("...counts the screens hidden (the mode in effect is dashboard)", checks.screens_shown, False)
+took()
+checks.close("test")
+check("...and its close doesn't show them over the game", took(), [])
+screens_state[0] = "ok always 0 45 left 30 both 1 visible"
+checks = gazecheck.Checks(new_svc(), selectors.DefaultSelector())
+checks.panel_proc = object()
+checks.can_run = lambda: True
+checks.start("full", "test")
+check("with ingames visible the screens show in the game: hidden, then shown again",
+      (took(), checks.close("test"), took()), (["hide"], None, ["show"]))
+screens_state[0] = "ok always 0"
+checks = gazecheck.Checks(new_svc(), selectors.DefaultSelector())
+checks.panel_proc = object()
+checks.can_run = lambda: True
+checks.start("full", "test")
+check("an older ft-screens (no game field): read as before", checks.screens_shown, True)
+checks.close("test")
+took()
+screens_state[0] = "ok always 0 45 left 30 both 0 hide"
+checks = gazecheck.Checks(new_svc(), selectors.DefaultSelector())
+checks.panel_proc = object()
+checks.can_run = lambda: True
+checks.start("full", "test")
+check("a calibration outside games marks the mode it hid in", gazecheck.SCREENS_HIDDEN.read_text(), "always -\n")
+screens_state[0] = "ok always 0 45 left 30 both 1 hide"  # a game starts: ft-screens resets the switch
+took()
+checks.close("test")
+check("a game started mid-calibration: the close leaves the screens out of it", took(), [])
+screens_state[0] = "ok always 0 45 left 30 both 0 hide"
+checks = gazecheck.Checks(new_svc(), selectors.DefaultSelector())
+checks.panel_proc = object()
+checks.can_run = lambda: True
+checks.start("full", "test")
+took()
+screens_state[0] = "ok always 0 45 left 30 both 1 hide"  # a game starts, and this gaze service dies
+gazecheck.Checks(new_svc(), selectors.DefaultSelector())
+check("...and the next gaze service leaves them out of it too", took(), [])
+check("...with the mark gone", gazecheck.SCREENS_HIDDEN.exists(), False)
+
+# With the switch's change count (a current ft-screens): the close shows only if nothing moved
+# the switch since the hide.
+switch[0] = 5
+screens_state[0] = "ok always 0 45 left 30 both 0 hide"
+
+
+def calibration():
+    c = gazecheck.Checks(new_svc(), selectors.DefaultSelector())
+    c.panel_proc = object()
+    c.can_run = lambda: True
+    c.start("full", "test")
+    took()
+    return c
+
+
+checks = calibration()
+check("the mark holds the mode and the count after the hide", gazecheck.SCREENS_HIDDEN.read_text(), "always 6\n")
+checks.close("test")
+check("nothing moved the switch: the close shows them", took(), ["show"])
+checks = calibration()
+switch[0] += 1  # a settings change (ft-layout's "visibility") resets the switch
+checks.close("test")
+check("a settings change during the calibration: the close leaves them to it", took(), [])
+checks = calibration()
+switch[0] += 1  # the same while this gaze service is gone
+gazecheck.Checks(new_svc(), selectors.DefaultSelector())
+check("...and so does the next gaze service", (took(), gazecheck.SCREENS_HIDDEN.exists()), ([], False))
+checks = calibration()
+gazecheck.Checks(new_svc(), selectors.DefaultSelector())
+check("nothing moved it: the next gaze service shows them", took(), ["show"])
+switch[0] = None
 finally_ok = not failures
 print("all passed" if finally_ok else "FAILED: " + ", ".join(failures), flush=True)
 shutil.rmtree(HOME, ignore_errors=True)

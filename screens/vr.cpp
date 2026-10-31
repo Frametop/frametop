@@ -527,6 +527,9 @@ bool g_constructRoomView = true; // camera/enableConstructRoomView
 // the screens, in the others it shows them anyway.
 Mode g_mode = Mode::Always;
 bool g_manual = false;
+// Counts every change of g_manual, last in "state": a gaze calibration that hid the screens
+// shows them at its close only if nothing moved the switch since (DEE-279).
+unsigned g_switchGen = 0;
 double g_wristAngle = 60;    // a pinned screen shows while you see its front within this
 double g_gestureAngle = 20;  // gesture: look within this of the controller
 std::string g_gestureHand = "left";
@@ -1171,6 +1174,7 @@ void UpdateGame() {
     if (running == g_gameRunning) return;
     g_gameRunning = running;
     g_manual = false;
+    ++g_switchGen;
     std::printf("%s\n", running ? "a VR game started" : "the VR game ended");
 }
 
@@ -5818,7 +5822,7 @@ void ft_vr_keyboard_hide(void) {
 //                             hasn't delivered that release to one of our overlays within
 //                             ~100 ms (it landed on something else), KWin gets it anyway
 //   state         -> "ok <mode> <manual 0|1> <wrist deg> <gesture hand> <gesture deg>
-//                     <controllers> <game running 0|1> <ingames>"
+//                     <controllers> <game running 0|1> <ingames> <switch changes>"
 //   spin next|prev|<degrees>  turn every panel in the room about your head (see the lazy
 //                             susan) -> "ok <degrees turned>"
 //   spin to <N>               ...the short way, so panel N comes to straight ahead and gets
@@ -5966,6 +5970,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         else if (m == "toggle") g_mode = Mode::Toggle;
         else return (void)std::snprintf(reply, size, "error modes: always dashboard gesture toggle");
         g_manual = false;
+        ++g_switchGen;
         std::snprintf(reply, size, "ok %s", ModeName());
     } else if (std::sscanf(cmd, "wrist %lf", &w) == 1) {
         g_wristAngle = std::clamp(w, 10.0, 180.0);
@@ -5994,6 +5999,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         const bool shownNow = always ? !g_manual : g_manual;
         const bool want = cmd[0] == 's' ? true : cmd[0] == 'h' ? false : !shownNow;
         g_manual = always ? !want : want;
+        ++g_switchGen;
         UpdateVisibility();
         std::snprintf(reply, size, "ok %s", want ? "shown" : "hidden");
     } else if (std::sscanf(cmd, "pause %15s", word) == 1) {
@@ -6012,6 +6018,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         else if (!std::strcmp(word, "visible")) g_inGames = InGames::Visible;
         else return (void)std::snprintf(reply, size, "error modes: hide visible");
         g_manual = false;
+        ++g_switchGen;
         UpdateVisibility();
         std::snprintf(reply, size, "ok %s", word);
     } else if (unsigned pad = 0, app = 0, mine = 0; std::sscanf(cmd, "steamvrmode %u %u %u", &pad, &app, &mine) == 3) {
@@ -6252,9 +6259,9 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
                       DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_catcherShown ? 1 : 0,
                       drags.empty() ? "-" : drags.c_str());
     } else if (std::strncmp(cmd, "state", 5) == 0) {
-        std::snprintf(reply, size, "ok %s %d %.0f %s %.0f %s %d %s", ModeName(), g_manual ? 1 : 0, g_wristAngle,
+        std::snprintf(reply, size, "ok %s %d %.0f %s %.0f %s %d %s %u", ModeName(), g_manual ? 1 : 0, g_wristAngle,
                       g_gestureHand.c_str(), g_gestureAngle, LasersName(), g_gameRunning ? 1 : 0,
-                      g_inGames == InGames::Hide ? "hide" : "visible");
+                      g_inGames == InGames::Hide ? "hide" : "visible", g_switchGen);
     } else {
         std::snprintf(reply, size, "error unknown command");
     }

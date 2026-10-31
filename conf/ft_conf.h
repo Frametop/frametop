@@ -21,10 +21,10 @@
 #include <string.h>
 
 /* Names a setting can't have (ft_conf.py's RESERVED): bash's read-only ones, and the ones that
- * change how the session's shell runs. */
-static const char *const ft_conf_reserved[] = {"BASHOPTS", "BASH_ENV", "BASH_VERSINFO", "CDPATH", "ENV", "EUID",
-                                               "GLOBIGNORE", "HOME", "IFS", "OPTIND", "PATH", "PPID", "PS4",
-                                               "SHELLOPTS", "UID", NULL};
+ * change how the session's shell runs; every BASH_* name too. */
+static const char *const ft_conf_reserved[] = {"BASHOPTS", "CDPATH", "ENV", "EUID", "EXECIGNORE", "FUNCNEST",
+                                               "GLOBIGNORE", "HOME", "IFS", "OPTIND", "PATH", "POSIXLY_CORRECT",
+                                               "PPID", "PS4", "SHELLOPTS", "TMOUT", "UID", NULL};
 
 /* One line (len bytes, no newline): 1 = an assignment (name and value copied, NUL-terminated),
  * 0 = blank or a comment, -1 = outside the grammar (*why says why) or too long for the buffers. */
@@ -65,7 +65,7 @@ static inline int ft_conf_parse_line(const char *line, size_t len, char *name, s
             return -1;
         }
     for (const char *const *r = ft_conf_reserved; *r; r++)
-        if (!strcmp(name, *r)) {
+        if (!strcmp(name, *r) || !strncmp(name, "BASH_", 5)) {
             *why = "a name bash keeps for itself (read-only, or how the shell runs)";
             return -1;
         }

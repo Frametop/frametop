@@ -202,7 +202,10 @@
   "IFS=x",
   "PATH=/tmp",
   "BASH_ENV=/tmp/x",
-  "SHELLOPTS=x"
+  "SHELLOPTS=x",
+  "EXECIGNORE=*",
+  "FUNCNEST=1",
+  "BASH_COMPAT=4"
  ],
  "numbers": [
   {

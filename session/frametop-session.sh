@@ -40,11 +40,11 @@ NOTIFY_FORWARD=auto FIREFOX_TITLEBAR=kwin
 # outside it (a value with a space or $(...) in it, "KEY = value") is one bash runs as a command:
 # with set -e that stopped the desktop here (exit 127, DEE-293), or ran whatever it named. Then
 # only its valid settings load, quoted by conf/ft_conf.py, and nothing in the file runs.
-# A check that couldn't run (no python3, exit 2 or 127) sources the file as before.
+# Exit 3 is bad lines; a check that couldn't run (no python3, a Python error) sources the file as before.
 if [ -f "$conf" ]; then
   checked=0
   python3 "$here/../conf/ft_conf.py" check "$conf" || checked=$?
-  if [ "$checked" = 1 ]; then
+  if [ "$checked" = 3 ]; then
     echo "frametop: $conf has lines outside its grammar (above, left out); loading the rest" >&2
     eval "$(python3 "$here/../conf/ft_conf.py" shell "$conf")"
   else

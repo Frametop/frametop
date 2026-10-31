@@ -12,7 +12,7 @@ A line is one of:
 - a comment: `#` as its first character after any spaces;
 - a setting: `NAME=value`, then optionally spaces or tabs and a `# comment`.
 
-`NAME` is upper-case letters, digits and `_`, not starting with a digit. Lower-case names are the session script's own variables, and a few upper-case ones are bash's (`UID`, `EUID`, `PPID`, `SHELLOPTS`, `BASHOPTS` and `BASH_VERSINFO` are read-only, so setting one stopped the session; `IFS`, `PATH`, `HOME`, `CDPATH`, `ENV`, `BASH_ENV`, `GLOBIGNORE`, `OPTIND` and `PS4` change how its shell runs): a line setting one of them is outside the grammar. Spaces may come before the name, but none around the `=`: `HANDS_NEAR = 0` isn't a setting (bash would run a program called `HANDS_NEAR`).
+`NAME` is upper-case letters, digits and `_`, not starting with a digit. Lower-case names are the session script's own variables, and a few upper-case ones are bash's (`UID`, `EUID`, `PPID`, `SHELLOPTS`, `BASHOPTS` and `BASH_VERSINFO` are read-only, so setting one stopped the session; `IFS`, `PATH`, `HOME`, `CDPATH`, `ENV`, `EXECIGNORE`, `FUNCNEST`, `GLOBIGNORE`, `OPTIND`, `POSIXLY_CORRECT`, `PS4`, `TMOUT` and every `BASH_*` name change how its shell runs): a line setting one of them is outside the grammar. Spaces may come before the name, but none around the `=`: `HANDS_NEAR = 0` isn't a setting (bash would run a program called `HANDS_NEAR`).
 
 The value is literal. It's made of these, side by side with nothing between them:
 
@@ -33,7 +33,7 @@ Lines are separated by newlines. A carriage return or NUL anywhere in a line put
 Bash would read it differently from the parsers, or run part of it as a command. So:
 
 - every parser leaves it out and warns on stderr (the program's log) with the line number and why; the name keeps an earlier line's value, or the program's default;
-- the session (`session/frametop-session.sh`) checks the file with `conf/ft_conf.py check` before sourcing it. When a line is outside the grammar it doesn't source the file: it loads the valid settings from `ft_conf.py shell` instead, which writes each one quoted, so nothing in the file runs. When the check itself can't run (no `python3`), the session sources the file as it always did.
+- the session (`session/frametop-session.sh`) checks the file with `conf/ft_conf.py check` before sourcing it. When a line is outside the grammar it doesn't source the file: it loads the valid settings from `ft_conf.py shell` instead, which writes each one quoted, so nothing in the file runs. `check` exits 3 for bad lines; when the check itself can't run (no `python3`, a Python error), the session sources the file as it always did.
 
 ## Values
 

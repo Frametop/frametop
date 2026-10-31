@@ -286,7 +286,7 @@ class Shell(Base):
         path = self.conf("A=1\nB='x y'\nC=a, b\nD=$(touch canary)\nE = 0\nF=~/f\n")
         out = subprocess.run([sys.executable, os.path.join(ROOT, "conf", "ft_conf.py"), "check", path],
                              capture_output=True, text=True, check=False)
-        self.assertEqual(out.returncode, 1)
+        self.assertEqual(out.returncode, 3)
         self.assertEqual(out.stderr.count("left out"), 3)
         out = subprocess.run([sys.executable, os.path.join(ROOT, "conf", "ft_conf.py"), "shell", path],
                              capture_output=True, text=True, check=True)

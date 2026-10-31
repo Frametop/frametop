@@ -12,7 +12,8 @@ differently or run as a command: readers warn and leave it out, so the key keeps
     ft_conf.number(conf, "POINTER_IDLE", 30.0)  # a bad value warns and gives the default
     ft_conf.set_value("POINTER_IGNORE", "a,b")  # shell-quoted, written to a temp file and renamed
 
-Run as a program: `check FILE` (exit 1 when a line is bad, each said on stderr) and `shell FILE`
+Run as a program: `check FILE` (exit 3 when a line is bad, each said on stderr; 1 is Python's own
+failure) and `shell FILE`
 (the valid settings as KEY=value lines bash can source safely: the session's fallback).
 Standard library only: ft-eyes runs it in the eye tracker's own venv.
 """
@@ -28,8 +29,9 @@ NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 # Names a setting can't have: bash's read-only ones (setting one stops the session, which runs
 # under set -e) and the ones that change how the session's shell runs. Lower-case names are the
 # session script's own variables, so a setting's name is upper-case too.
-RESERVED = frozenset({"BASHOPTS", "BASH_ENV", "BASH_VERSINFO", "CDPATH", "ENV", "EUID", "GLOBIGNORE", "HOME",
-                      "IFS", "OPTIND", "PATH", "PPID", "PS4", "SHELLOPTS", "UID"})
+# Every BASH_* name is the shell's too.
+RESERVED = frozenset({"BASHOPTS", "CDPATH", "ENV", "EUID", "EXECIGNORE", "FUNCNEST", "GLOBIGNORE", "HOME", "IFS",
+                      "OPTIND", "PATH", "POSIXLY_CORRECT", "PPID", "PS4", "SHELLOPTS", "TMOUT", "UID"})
 # What a value can be written as without quotes: nothing bash would expand, split or run
 # (~ is left out: bash expands it at the start and after a ':' in an assignment).
 BARE = re.compile(r"[A-Za-z0-9_.,:/@%+=*?^-]+\Z")
@@ -52,7 +54,7 @@ def name_error(name):
         return "not NAME=value (no spaces around the =)"
     if not name.isupper() and name.strip("_0123456789"):
         return "a lower-case name (the session script's own variables): settings are upper-case"
-    if name in RESERVED:
+    if name in RESERVED or name.startswith("BASH_"):
         return "a name bash keeps for itself (read-only, or how the shell runs)"
     return None
 
@@ -280,9 +282,12 @@ def check(path):
     return not bad
 
 
+BAD_LINES = 3   # check's exit for a file with bad lines (1 is any Python error)
+
+
 def main(argv):
     if len(argv) == 3 and argv[1] == "check":
-        return 0 if check(argv[2]) else 1
+        return 0 if check(argv[2]) else BAD_LINES
     if len(argv) == 3 and argv[1] == "shell":
         sys.stdout.write(shell(argv[2]))
         return 0

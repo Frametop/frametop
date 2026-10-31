@@ -65,11 +65,17 @@ class ConfLoad(unittest.TestCase):
         self.assertIn("here left out", err)
 
     def test_check_that_cant_run_sources(self):
-        # no conf/ft_conf.py next to the script: the file is sourced as before, said once
-        with tempfile.TemporaryDirectory() as tree:
-            code, vals, err, _ = load("SCREENS=3\nFLOAT_SLOTS='8'\n", os.path.join(tree, "session"))
-        self.assertEqual((code, vals["SCREENS"], vals["FLOAT_SLOTS"]), (0, "3", "8"), err)
-        self.assertIn("couldn't check", err)
+        # no conf/ft_conf.py next to the script (exit 2), or one that fails (a Python error, exit 1):
+        # the file is sourced as before, said once
+        for broken in (None, "raise RuntimeError('a bug')\n"):
+            with tempfile.TemporaryDirectory() as tree:
+                if broken:
+                    os.makedirs(os.path.join(tree, "conf"))
+                    with open(os.path.join(tree, "conf", "ft_conf.py"), "w") as f:
+                        f.write(broken)
+                code, vals, err, _ = load("SCREENS=3\nFLOAT_SLOTS='8'\n", os.path.join(tree, "session"))
+            self.assertEqual((code, vals["SCREENS"], vals["FLOAT_SLOTS"]), (0, "3", "8"), err)
+            self.assertIn("couldn't check", err)
 
     def test_missing_conf(self):
         with tempfile.TemporaryDirectory() as home:

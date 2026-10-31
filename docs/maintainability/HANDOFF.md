@@ -2,7 +2,8 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-303 (DEE-310 was done out of order, after DEE-308).
+starts at the rest of DEE-303 (its open list below), then DEE-309 (DEE-310 was done out of
+order, after DEE-308).
 
 ## Where the series is
 
@@ -17,14 +18,15 @@ starts at DEE-303 (DEE-310 was done out of order, after DEE-308).
 | 6 | DEE-308 | d298586, 0fb9407, 5d57eda, 099f7c2 |
 | 7 | DEE-310 | 898e760, d24de60, fe0a217, 6c0f032, 3d5af59, 3ad697c, 25dd9f9 (note) |
 | 8 | DEE-304 | cb6d442, 60cc62e, c55e509, ceced31, 6ac87b6, a8a6a7e, 77b59d2, 9da7cd3, 8c72d59, e1a6a8d (note) |
-| 9 | DEE-305 | a286deb, 8e1b0f7, 6a4d65d, 97006a9, 729588d, fbc84e4, 48786c4, then this update |
+| 9 | DEE-305 | a286deb, 8e1b0f7, 6a4d65d, 97006a9, 729588d, fbc84e4, 48786c4, cd11d96 (note) |
+| 10 | DEE-303, part 1 | 76ecd9b, d80ef80, a88d458, f4d5db7, 63b363b, 3a8ad3d, then this update |
 
 What's left, in order:
 
-1. DEE-303
+1. The rest of DEE-303: one hub CLI, one control-loop base, shared QML pages
 2. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
 
-DEE-310, DEE-304 and DEE-305 are done (steps 7 to 9). DEE-301's CI and lint work stays local only: no workflow change is pushed.
+DEE-310, DEE-304 and DEE-305 are done (steps 7 to 9), and DEE-303 is half done (step 10). DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
 
@@ -388,6 +390,57 @@ Open:
 - No test drives the Display Settings or Remote Displays worker path (the poll guard, the
   answers' order).
 
+### From DEE-303 (part 1)
+
+The recorders' shared code, part 1. No behaviour change except the private folders and
+tools/ring.py's new fields.
+
+- One `sha256_file` (`recorder/files.py`, with a progress step) and one `now_iso`
+  (`recorder/contributions.py`).
+- `recorder/privacy.py`: `key_identifies`, `value_identifies`, `strip_calibration`, moved out of
+  hands/rec/session.py. hands/rec/validate.py imports it instead of the session runner. Test:
+  `recorder/tests/test_privacy.py`.
+- Private recordings: the 9 recorder entry points (both windows, both session.py, takes.py and
+  hub.py, and gaze eyerec.py) set umask 077 under `__main__`. Session and round folders, their
+  `takes/` and eyerec's camera folders are made 0700 explicitly. Recordings made earlier keep
+  their modes. The window has made the base folder 0700 since 2026-10-02.
+- `recorder/fhformat.py`: ft-camd's ring and FHSET01. Readers: hands/rec session, takes,
+  validate and sides; hands/camcheck.py; tools/ring.py, show_set.py and cut_sets.py. Test:
+  `recorder/tests/test_fhformat.py` builds a C++ program against fhring.h and record.h and checks
+  every size, offset and constant. It skips without a C++ compiler. tools/ring.py now reads
+  `flags` (`cam.dark`, `cam.color`) and `dark_mean()`. Test: `hands/tests/test_ring.py`.
+  test_camcheck builds its ring from fhformat, so it no longer checks camcheck against itself.
+  fast-install's camwatch entry now lists `recorder`.
+- The re-export shims are gone: hands/rec/session.py, both takes.py and ft_handrec.py import
+  only what they use. The window, hubs and tests import `recorder.button`, `recorder.units`,
+  `recorder.common` and `recorder.files` themselves.
+
+Judgment calls:
+
+- fhformat lives in `recorder/`, not `hands/`. The standalone Hand Recorder ships `recorder/`
+  whole, and every hands/rec reader already imports it. camcheck, sides and the three tools
+  append the repo root to `sys.path` if it's missing (append: it shadows nothing).
+- The `sys.path` inserts stay. hands/rec and gaze/rec import their siblings by bare name
+  (`session`, `takes`, `hub`, `validate`, the same names in both folders), and the programs run as
+  scripts from the tree. Removing the inserts means making the two folders packages and changing
+  every launcher, rehearse.sh, the tests and the standalone recorder's copy. That's a ticket of
+  its own.
+- voicelog.py keeps its one-line `mono_ns`: hands/tools/voice_flags.py imports it with only
+  hands/rec on the path.
+
+Open (the rest of DEE-303):
+
+- One hub CLI: gaze/rec/hub.py and hands/rec/hub.py's command-line part (hands 293-417 at
+  c13d168).
+- One control-loop base for pause, redo and stop (hands session.py ~1799-1875 and 2226-2311, gaze
+  743-809 and 1007-1085 at c13d168).
+- Shared QML pages in `recorder/qml/` for both windows, and test_qml_backend over both.
+  `RecorderBackend` (recorder/window.py) is still about 860 lines.
+- The `sys.path` inserts (above).
+- No test of the hand session's 0700 folders: gaze has `test_round_folders_are_private`.
+- The standalone Hand Recorder repo copies files from here: recorder/privacy.py and fhformat.py
+  are new in `recorder/`, which it ships whole. Check its copy list at its next sync.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
@@ -424,6 +477,11 @@ Each needs an install and the headset:
   (float and dock, scale, frunner, relay keys, the dashboard pill, gaze calibration, the panels,
   a stream with host input); the new "to @NAME" log lines; no "no render node" fallback. Listed
   in `~/Desktop/Projects/HEADSET-TESTS.md`.
+- After DEE-303 part 1 (Python only, a fast-install): a Hand Recorder round with the light
+  check, the camera check, a take, Review, Export and validate; the new session folder 0700
+  and its files 0600; an Eye Recorder round (round, takes and cam folders 0700); a debug export's
+  calibration.json validates; ft-camwatch and `python3 hands/camcheck.py`; both upload pages.
+  Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
 - After DEE-305 (Python only, a fast-install): Display Settings' poll, pins, curve, hide and
   show, power status and Displays off, with the window staying smooth; Remote Displays' stream
   states and portrait 4K; Input Settings' Bluetooth refresh, Apply fixes with the pkexec prompt

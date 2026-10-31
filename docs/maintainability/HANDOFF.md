@@ -2,7 +2,7 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-308.
+starts at DEE-304.
 
 ## Where the series is
 
@@ -13,13 +13,13 @@ starts at DEE-308.
 | 3 | DEE-302, plus DEE-300 follow-ups | 655fa8c, 4c16b1e, c48201a, 63089ef, dd8f7ba, 80954b5 |
 | 3b | DEE-311 | 865b852, b69b905, 2971c8d, af02582 (this note) |
 | 4 | DEE-306 | 3bb0ebf, 688de89, d464ac0, 35d9da4, 576b5d6, fb0077e |
-| 5 | DEE-307 | 84d60b3, 5277de1, cc476bf, 509bdf2, 60c9c3a, 383f0d8, then this update |
+| 5 | DEE-307 | 84d60b3, 5277de1, cc476bf, 509bdf2, 60c9c3a, 383f0d8, 0cf0d21 |
+| 6 | DEE-308 | d298586, 0fb9407, 5d57eda, then this update |
 
 What's left, in order:
 
-1. DEE-308
-2. DEE-304, DEE-305 and DEE-303
-3. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
+1. DEE-304, DEE-305 and DEE-303
+2. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
 
 DEE-310 is skipped. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
@@ -197,6 +197,33 @@ Still open:
 - ft-pointer's `sendPose` has no offline test: `vrmath.h` includes OpenVR. Testing it needs an
   OpenVR-free split of vrmath.h.
 
+### From DEE-308
+
+`docs/maintainability/python-split-plan.md` names the cohesive pieces of the five large Python
+classes (Input Settings' Backend, the gaze probe and service, the hand recorder's Session and the
+voice daemon). Each time one of those files is touched, move at least one piece out, as plain
+Python with unit tests, and keep a thin method in the class.
+
+- Backend's file I/O is in `input-settings/input_rules.py` (`read_json`, `read_conf`,
+  `write_conf_value`, `save_rules`). The Commands page's logic is in
+  `input-settings/input_commands.py`. Both have no Qt and take paths and the host runner as
+  arguments. ft_input_settings keeps `read_json`, `read_conf`, `write_conf_value`, `host`,
+  `RULES_PATH` and `CONF_PATH` under their names and passes them at call time, so tests can
+  still patch them there. Tests: `input-settings/test/test_input_rules.py`,
+  `test_input_commands.py`.
+- ft_input_settings puts its own folder on `sys.path`, because `pack/pyside-runtime.py` loads
+  it by its path.
+
+Still open:
+- The rest of Backend (relay socket and polling, devices and maps, key combinations,
+  controllers and pause, gaze, voice, hands and models, panels, Bluetooth) and the other four
+  classes, per the plan.
+- `from input_rules import read_json` makes a second name: a test that patches
+  `input_rules.read_json` doesn't reach Backend, which calls `ft_input_settings.read_json`.
+  Patch it on ft_input_settings.
+- `input_rules.save_rules`' docstring says it "writes nothing" on a bad file, but
+  `load_json_strict` writes the `.bad-` copy. Wording only; fix it with the next code change.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
@@ -219,3 +246,6 @@ Each needs an install and the headset:
   change, tilting a panel while dragging it, placements (calibration sweep, panel placement) and
   a touch on a SteamVR panel. Panel commands from ft-layout, ft-floatd and the helper (place,
   pin, float, pose, sub, hands, steamvr list), and SteamVR panels by hand.
+- After DEE-308: in Input Settings, map a button, add a key combination, add a command, run it,
+  and remove it (its bindings go too); change a pointer setting; open it with a bad
+  `frametop-input.json` (nothing is saved over it).

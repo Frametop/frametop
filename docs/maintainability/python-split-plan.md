@@ -6,7 +6,8 @@ of the pieces below moves into its own module, with unit tests and no behaviour 
 moved piece is plain Python where it can be (no Qt, GTK or sockets), and the class keeps a thin
 method that calls it, so QML, D-Bus and socket callers don't change.
 
-Sizes are from 2026-10-31 (lines in the class).
+Sizes are from 2026-10-31, before DEE-308 (lines in the class). After DEE-308's first split,
+Backend is about 1,577 lines.
 
 ## Input Settings `Backend` (`input-settings/ft_input_settings.py`, 1,603 lines)
 

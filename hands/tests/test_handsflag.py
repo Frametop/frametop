@@ -69,7 +69,7 @@ class FlagTest(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="handsflag-test-")
         self.run_dir = os.path.join(self.tmp, "run")
         self.env = {k: os.environ.get(k) for k in ("FT_HANDS_FLAG_DIR", "FT_HANDS_FLAG_VIEW", "FT_HANDS_FLAG_TONE",
-                                                   "FT_HANDS_FLAG_FLASH", "FRAME_VOICE_WAKE_UNIX")}
+                                                   "FT_HANDS_FLAG_FLASH", "FRAME_VOICE_WAKE_UNIX", "FT_HANDS_FLAG_SECONDS")}
         os.environ.update(FT_HANDS_FLAG_DIR=os.path.join(self.tmp, "flags"), FT_HANDS_FLAG_VIEW="0", FT_HANDS_FLAG_TONE="0",
                           FT_HANDS_FLAG_FLASH="1")
         self.view_name = "ft_handview_test_%d" % os.getpid()
@@ -126,6 +126,11 @@ class FlagTest(unittest.TestCase):
         self.assertFalse(ctl["taken"])
         self.assertNotIn("flash", ctl)
         self.assertEqual(ctl["hmd_poses"], 0)   # no ft-handview answering
+
+    def test_bad_seconds(self):
+        # HANDS_FLAG_SECONDS that isn't a number warns and keeps 12 s; it used to raise (DEE-297)
+        os.environ["FT_HANDS_FLAG_SECONDS"] = "soon"
+        self.assertEqual(hf.main([], run_dir=self.run_dir, sock_name=self.view_name, detach=False), 1)
 
     def test_folders_dont_collide(self):
         base = os.path.join(self.tmp, "b")

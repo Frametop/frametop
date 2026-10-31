@@ -157,6 +157,20 @@ const char *camera_for_pipe(int node) {
 // A setting from ~/.config/frametop.conf (docs/config.md), or FT_<key> from the environment; "" if unset.
 std::string setting(const std::string &key) { return ft_conf::Setting(key.c_str(), ""); }
 
+// A number setting into v: unset leaves it, and a value that isn't a number (atof's 0 before)
+// warns and leaves it too (docs/config.md). True when it was set.
+bool setting_number(const std::string &key, double &v) {
+    const std::string t = setting(key);
+    double x;
+    if (t.empty()) return false;
+    if (!ft_conf_number(t.c_str(), &x)) {
+        std::fprintf(stderr, "frametop.conf: %s=%s isn't a number; using %g\n", key.c_str(), t.c_str(), v);
+        return false;
+    }
+    v = x;
+    return true;
+}
+
 std::vector<int> parse_cpus(const char *p) {
     std::vector<int> out;
     while (*p) {
@@ -264,15 +278,15 @@ int main(int argc, char **argv) {
     if (color_left.empty()) color_left = "color_video0";
     if (color_crop.empty()) color_crop = "subtract";
     Lighting light;
-    if (const std::string v = setting("HANDS_BRIGHT_ON"); !v.empty()) light.on = std::atof(v.c_str());
-    if (const std::string v = setting("HANDS_BRIGHT_OFF"); !v.empty()) light.off = std::atof(v.c_str());
+    setting_number("HANDS_BRIGHT_ON", light.on);
+    setting_number("HANDS_BRIGHT_OFF", light.off);
     // How crops are equalized. CLAHE helps the palm search find hands (about 10% more in the
     // dim recording), but makes the landmarks jitter, so they get plain crops.
     Contrast palm_contrast, hand_contrast{Contrast::None};
     double keep_presence = 0.5;   // landmark presence a tracked view needs to stay
     bool misread_guard = setting("HANDS_MISREAD_GUARD") == "1";
     double reacquire = 1.5;
-    if (const std::string v = setting("HANDS_REACQUIRE"); !v.empty()) reacquire = std::atof(v.c_str());
+    setting_number("HANDS_REACQUIRE", reacquire);
     bool pair_sides = setting("HANDS_PAIR_SIDES") != "0";
     double hold = 0.6;   // s a lost, established hand is kept and retried before it's forgotten
     // the skeleton fit (track/skeleton.h): published as fh_hands version 2, and as version 1's
@@ -280,12 +294,12 @@ int main(int argc, char **argv) {
     bool skeleton = setting("HANDS_SKELETON") != "0";
     PinchParams pinch_params;
     pinch_params.dip = setting("HANDS_PINCH_DIP") == "1";
-    if (const std::string v = setting("HANDS_PINCH_FIST_CURL"); !v.empty()) pinch_params.fist_curl = std::atof(v.c_str());
+    setting_number("HANDS_PINCH_FIST_CURL", pinch_params.fist_curl);
     // How easily a pinch lets go (user, 2026-10-11, gaze + hands: "taps and pinches release way too easily
     // even when I haven't actually released them": ends came at 4-6 cm, and grips took pinches 130 ms in):
     // HANDS_PINCH_END (m), HANDS_PINCH_DRAG_OPEN (m), HANDS_PINCH_DRAG_OPEN_S, HANDS_GRIP_TAKEOVER_S.
     auto num = [&](const char *key, double &v, double lo, double hi) {
-        if (const std::string t = setting(key); !t.empty()) v = std::clamp(std::atof(t.c_str()), lo, hi);
+        if (setting_number(key, v)) v = std::clamp(v, lo, hi);
     };
     num("HANDS_PINCH_END", pinch_params.end_m, 0.025, 0.08);
     num("HANDS_PINCH_DRAG_OPEN", pinch_params.drag_open_m, 0.03, 0.12);
@@ -297,10 +311,10 @@ int main(int argc, char **argv) {
     // the flag buffer (see the top)
     bool flag_on = setting("HANDS_FLAG_BUFFER") != "0";
     FlagConfig flag_cfg;
-    if (const std::string v = setting("HANDS_FLAG_SECONDS"); !v.empty()) flag_cfg.before_s = std::clamp(std::atof(v.c_str()), 1.0, 60.0);
-    if (const std::string v = setting("HANDS_FLAG_CROP"); !v.empty()) flag_cfg.crop_px = std::clamp(std::atoi(v.c_str()), 64, 512);
-    if (const std::string v = setting("HANDS_FLAG_MB"); !v.empty())
-        flag_cfg.max_bytes = size_t(std::clamp(std::atof(v.c_str()), 8.0, 1024.0) * 1048576);
+    if (setting_number("HANDS_FLAG_SECONDS", flag_cfg.before_s)) flag_cfg.before_s = std::clamp(flag_cfg.before_s, 1.0, 60.0);
+    if (double crop = flag_cfg.crop_px; setting_number("HANDS_FLAG_CROP", crop)) flag_cfg.crop_px = int(std::clamp(crop, 64.0, 512.0));
+    if (double mb = double(flag_cfg.max_bytes) / 1048576; setting_number("HANDS_FLAG_MB", mb))
+        flag_cfg.max_bytes = size_t(std::clamp(mb, 8.0, 1024.0) * 1048576);
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         const bool more = i + 1 < argc;

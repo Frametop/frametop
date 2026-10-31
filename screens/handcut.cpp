@@ -125,9 +125,8 @@ std::string ReadMatteSettings(MatteParams &p) {
     auto num = [&](const char *name, double &v, double lo, double hi) {
         const std::string s = Setting(name, "");
         if (s.empty()) return;
-        char *end;
-        const double x = std::strtod(s.c_str(), &end);
-        if (end != s.c_str() && !*end && x >= lo && x <= hi) v = x, log += std::string(name) + "=" + s + " ";
+        double x;
+        if (ft_conf_number(s.c_str(), &x) && x >= lo && x <= hi) v = x, log += std::string(name) + "=" + s + " ";
         else log += std::string(name) + "=" + s + " (ignored) ";
     };
     const std::string m = Setting("HANDS_MATTE", "");

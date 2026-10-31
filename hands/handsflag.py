@@ -26,6 +26,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import handsmode  # noqa: E402
+import ft_conf  # noqa: E402  (conf/, on the path through handsmode)
 
 RUN_DIR = "/run/user/%d/frametop-hands" % os.getuid()
 DEFAULT_DIR = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "frametop/hands/flags")
@@ -188,7 +189,8 @@ def main(argv, run_dir=RUN_DIR, sock_name=VIEW_SOCKET, detach=True):
               file=sys.stderr)
     sys.stdout.flush()
     grab = setting("HANDS_FLAG_VIEW", "1", conf) != "0"
-    seconds = float(setting("HANDS_FLAG_SECONDS", "12", conf) or 12) + AFTER_S
+    key = "HANDS_FLAG_SECONDS"
+    seconds = ft_conf.number({key: setting(key, "", conf)}, key, 12.0) + AFTER_S   # a bad one warns: 12
     if detach and os.fork() > 0:
         return 0 if taken else 1
     if detach:

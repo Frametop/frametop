@@ -4898,7 +4898,10 @@ bool ft_vr_init(void) {
     const std::string matte = handcut::ReadMatteSettings(g_matte);
     g_hands.SetShift(g_matte.shift);
     const std::string lead = handcut::Setting("HANDS_MATTE_LEAD", "");
-    if (!lead.empty()) g_hands.SetPrediction(true, std::atof(lead.c_str()));
+    if (double x; !lead.empty()) {
+        if (ft_conf_number(lead.c_str(), &x)) g_hands.SetPrediction(true, x);
+        else std::fprintf(stderr, "frametop.conf: HANDS_MATTE_LEAD=%s isn't a number; no prediction\n", lead.c_str());
+    }
     roomview::Force rv;
     if (roomview::ParseForce(handcut::Setting("HANDS_ROOMVIEW", "auto"), &rv)) g_roomView.SetForce(rv);
     g_roomView.SetLog(true);

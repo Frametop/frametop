@@ -5819,12 +5819,12 @@ void ft_vr_keyboard_hide(void) {
 void ft_vr_command(const char *cmd, char *reply, int size) {
     if (!g_vr) return (void)std::snprintf(reply, size, "error no SteamVR (--no-vr)");
     RefreshPoses();
-    vrcmd::Cmd c;  // the command's verb and arguments (vrcmd.h), under their old names below
-    const vrcmd::Verb verb = vrcmd::Parse(cmd, c);
-    int &n = c.n;
-    double &x = c.x, &y = c.y, &z = c.z, &yaw = c.yaw, &pitch = c.pitch, &roll = c.roll, &w = c.w;
-    char(&word)[16] = c.word, (&hand)[16] = c.hand;
-    float(&r)[12] = c.r;
+    vrcmd::Cmd parsed;  // the command's verb and arguments (vrcmd.h), under their old names below
+    const vrcmd::Verb verb = vrcmd::Parse(cmd, parsed);
+    int &n = parsed.n;
+    double &x = parsed.x, &y = parsed.y, &z = parsed.z, &yaw = parsed.yaw, &pitch = parsed.pitch, &roll = parsed.roll, &w = parsed.w;
+    char(&word)[16] = parsed.word, (&hand)[16] = parsed.hand;
+    float(&r)[12] = parsed.r;
     auto each = [&](const char *which, auto fn) -> bool {  // "all" or a screen number
         if (std::strcmp(which, "all") == 0) {
             for (auto &[i, s] : g_screens)
@@ -5859,7 +5859,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         ApplyCurve(*s);
         PlaceChrome(*s);
         std::snprintf(reply, size, "ok");
-    } else if (const int got = c.got; verb == vrcmd::Pin) {
+    } else if (const int got = parsed.got; verb == vrcmd::Pin) {
         if (std::strcmp(hand, "left") && std::strcmp(hand, "right") && std::strcmp(hand, "head"))
             return (void)std::snprintf(reply, size, "error pin to left, right, or head");
         const vr::TrackedDeviceIndex_t dev = HandDevice(hand);
@@ -5977,7 +5977,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         ++g_switchGen;
         UpdateVisibility();
         std::snprintf(reply, size, "ok %s", word);
-    } else if (unsigned &pad = c.pad, &app = c.app, &mine = c.mine; verb == vrcmd::SteamvrMode) {
+    } else if (unsigned &pad = parsed.pad, &app = parsed.app, &mine = parsed.mine; verb == vrcmd::SteamvrMode) {
         if (bool(pad) != g_steamvr.gamepad || app != g_steamvr.theater || bool(mine) != g_steamvr.mine)
             std::printf("SteamVR: %s, %s\n",
                         pad ? mine ? "gamepad mode, ours (gamepad pill)" : "gamepad mode (panels leave the laser alone)" : "laser mode",
@@ -5993,19 +5993,19 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         else return (void)std::snprintf(reply, size, "error modes: always outside_games dashboard");
         UpdateLasers();
         std::snprintf(reply, size, "ok %s", LasersName());
-    } else if (char(&key)[48] = c.key; verb == vrcmd::HandSetting) {
+    } else if (char(&key)[48] = parsed.key; verb == vrcmd::HandSetting) {
         // one hand interaction on or off now (Frametop Input Settings' Hands page writes frametop.conf too)
         const int on = !std::strcmp(word, "1") || !std::strcmp(word, "on") ? 1 : !std::strcmp(word, "0") || !std::strcmp(word, "off") ? 0 : -1;
         if (on < 0 || !SetHandSetting(key, on)) return (void)std::snprintf(reply, size, "error handsetting <HANDS_...> 0|1");
         std::printf("hands: %s %s (Input Settings)\n", key, on ? "on" : "off");
         std::snprintf(reply, size, "ok %s %d", key, on);
-    } else if (double &m = c.m; verb == vrcmd::SpinDistance) {
+    } else if (double &m = parsed.m; verb == vrcmd::SpinDistance) {
         // SCREEN_SPIN_DISTANCE now (Input Settings' Hands page, Gestures, writes frametop.conf too): the next
         // screen brought comes this far out (one pushed or pulled in the slot keeps its own)
         g_frontReading = std::clamp(m, spotreserve::kDistance + spotreserve::kFrontGap, kFrontFarthest);
         std::printf("front: screens come %.2f m out (Input Settings)\n", g_frontReading);
         std::snprintf(reply, size, "ok %.2f", g_frontReading);
-    } else if (char(&sl)[16] = c.sl, (&sr)[16] = c.sr; verb == vrcmd::Hands) {
+    } else if (char(&sl)[16] = parsed.sl, (&sr)[16] = parsed.sr; verb == vrcmd::Hands) {
         const bool l = !std::strcmp(sl, "hand"), r = !std::strcmp(sr, "hand"), allowed = n != 0;
         if (l != g_handsWord.hand[0] || r != g_handsWord.hand[1] || allowed != g_handsWord.allowed)
             std::printf("hands from the pointer helper: left %s, right %s, %s\n", sl, sr, allowed ? "allowed" : "not allowed");
@@ -6017,15 +6017,15 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
     } else if (verb == vrcmd::SteamvrList) {   // the helper's overlay list (see "SteamVR's panels by hand")
         SteamListPart(cmd);
         std::snprintf(reply, size, "ok");
-    } else if (int &tl = c.tl, &tr = c.tr; verb == vrcmd::Typing) {
+    } else if (int &tl = parsed.tl, &tr = parsed.tr; verb == vrcmd::Typing) {
         g_typingWord.side[0] = tl != 0, g_typingWord.side[1] = tr != 0, g_typingWord.atMs = NowMs();
         std::snprintf(reply, size, "ok");
-    } else if (int &calOn = c.calOn; verb == vrcmd::CalPanel) {
+    } else if (int &calOn = parsed.calOn; verb == vrcmd::CalPanel) {
         if ((calOn != 0) != CalPanelUp())
             std::printf("gaze calibration panel %s: the palm menu %s\n", calOn ? "up" : "gone", calOn ? "waits" : "is back");
         g_calPanelMs = calOn ? NowMs() : INT64_MIN / 2;
         std::snprintf(reply, size, "ok");
-    } else if (int &rl = c.rl, &rr = c.rr; verb == vrcmd::Ray) {
+    } else if (int &rl = parsed.rl, &rr = parsed.rr; verb == vrcmd::Ray) {
         g_rayWord.side[0] = rl != 0, g_rayWord.side[1] = rr != 0, g_rayWord.atMs = NowMs();
         std::snprintf(reply, size, "ok");
     } else if (verb == vrcmd::HandInput) {
@@ -6117,13 +6117,13 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
                       handcut::ShapeName(g_matte.shape), g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
                       g_matte.shift.empty() ? "off" : "on", g_roomView.on() ? "on" : "off", g_roomView.why(),
                       g_roomView.on() ? "" : ": no cutouts");
-    } else if (int &x0 = c.x0, &y0 = c.y0, &w0 = c.w0, &h0 = c.h0, &t0 = c.t0; verb == vrcmd::Float) {
+    } else if (int &x0 = parsed.x0, &y0 = parsed.y0, &w0 = parsed.w0, &h0 = parsed.h0, &t0 = parsed.t0; verb == vrcmd::Float) {
         Screen *s = Find(n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
         if (!(w > 1e-5 && w < 0.01) || w0 < 1 || h0 < 1) return (void)std::snprintf(reply, size, "error bad float");
         SetFloat(*s, w, x0, y0, w0, h0, std::max(0, t0));
         std::snprintf(reply, size, "ok");
-    } else if (int &ms = c.ms; verb == vrcmd::Hold) {
+    } else if (int &ms = parsed.ms; verb == vrcmd::Hold) {
         // ft-floatd changes a floating window (its scale, its size): its panel keeps its picture for up to
         // ms (0: no longer), until the window's new crop comes and a frame after it (kHoldSettleMs).
         Screen *s = Find(n);
@@ -6151,13 +6151,13 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         g_spin.base.erase(n - 1);
         SetAbsolute(*s, m);
         std::snprintf(reply, size, "ok");
-    } else if (int &k0 = c.k0; verb == vrcmd::Sub) {
+    } else if (int &k0 = parsed.k0; verb == vrcmd::Sub) {
         Screen *s = Find(n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
         if (std::strstr(cmd, " off")) w0 = h0 = 0;
         SetSub(*s, n - 1, k0, x0, y0, w0, h0);
         std::snprintf(reply, size, "ok");
-    } else if (int &on = c.on; verb == vrcmd::Minimized) {
+    } else if (int &on = parsed.on; verb == vrcmd::Minimized) {
         Screen *s = Find(n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
         s->minimized = on != 0;
@@ -6171,7 +6171,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         if (on) g_kwinMove.window = wid;
         else if (g_kwinMove.window == wid) g_kwinMove.window.clear();
         std::snprintf(reply, size, "ok");
-    } else if (int &gx = c.gx, &gy = c.gy; verb == vrcmd::Torn) {
+    } else if (int &gx = parsed.gx, &gy = parsed.gy; verb == vrcmd::Torn) {
         Screen *s = Find(n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
         CarryTorn(*s, n - 1, gx, gy);

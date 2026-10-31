@@ -92,6 +92,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/posemath-test.cpp \
       -o build/tests/posemath-test
     run screens/tests/posemath-test.cpp build/tests/posemath-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/vrcmd-test.cpp \
+      -o build/tests/vrcmd-test
+    run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/logfile-test.c -o build/tests/logfile-test
     run screens/tests/logfile-test.c build/tests/logfile-test
     # hands: the skeleton fit needs no model runtime; sides, pinch and flagbuf link ncnn,

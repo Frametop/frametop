@@ -136,6 +136,14 @@ class Store(unittest.TestCase):
             with self.assertRaisesRegex(ft_store.StoreError, "already being saved"):
                 ft_store.update_json(self.path, lambda d: d, {})
 
+    def test_a_new_file_follows_the_umask(self):
+        old = os.umask(0o077)
+        try:
+            ft_store.write_json(self.path, {})
+        finally:
+            os.umask(old)
+        self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o600)
+
     def test_format_mode_and_symlink(self):
         target = os.path.join(self.dir, "real.json")
         ft_store.write_json(target, {"a": "é"}, indent=1, newline=False, ensure_ascii=False)

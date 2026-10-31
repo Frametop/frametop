@@ -108,10 +108,22 @@ def dumps(data, indent=2, newline=True, **kw):
     return json.dumps(data, indent=indent, **kw) + ("\n" if newline else "")
 
 
+def _umask():
+    """The process's umask, read without changing it (os.umask() would, for every thread)."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("Umask:"):
+                    return int(line.split()[1], 8)
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0o022
+
+
 def write_text(path, text):
     """text into path through a temp file of its own, flushed to disk and renamed (the file's
-    mode kept). A symlink is followed, not replaced."""
-    ft_conf.write_atomic(os.path.realpath(path), text)
+    mode kept; a new one gets what open() would give it). A symlink is followed, not replaced."""
+    ft_conf.write_atomic(os.path.realpath(path), text, 0o666 & ~_umask())
 
 
 def write_json(path, data, indent=2, newline=True, **kw):

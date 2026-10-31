@@ -3,11 +3,14 @@ host, small file and text helpers, and the versions a session records.
 
 Standard library only: the recorders run it in the dev container and, standalone, on the host."""
 import glob
-import json
 import os
 import shutil
 import subprocess
+import sys
 import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
+import ft_store  # noqa: E402  (JSON files written safely, DEE-300)
 
 
 def mono_ns():
@@ -51,11 +54,8 @@ def host_path(path):
 
 
 def write_json(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=1)
-        f.write("\n")
-    os.replace(tmp, path)
+    """Write through a temporary file of its own, flushed to disk and renamed (ft_store, DEE-300)."""
+    ft_store.write_json(path, data, indent=1)
 
 
 def clean_text(s):

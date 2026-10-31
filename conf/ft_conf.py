@@ -238,9 +238,9 @@ def set_value(key, value, path=None):
     write_atomic(path, "\n".join(lines) + "\n")
 
 
-def write_atomic(path, text):
+def write_atomic(path, text, new_mode=0o644):
     """text into path by a temp file in the same folder, fsynced and renamed over it; the old
-    file's mode is kept (a new one gets 0644)."""
+    file's mode is kept (a new one gets new_mode)."""
     folder = os.path.dirname(path) or "."
     os.makedirs(folder, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix="." + os.path.basename(path) + ".", suffix=".tmp")
@@ -252,7 +252,7 @@ def write_atomic(path, text):
         try:
             mode = os.stat(path).st_mode & 0o7777
         except FileNotFoundError:
-            mode = 0o644
+            mode = new_mode
         os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:

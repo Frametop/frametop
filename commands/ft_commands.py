@@ -151,14 +151,11 @@ def update(fn, path=None, aliases=True):
     is written atomically; then the aliases file and ~/.bashrc's lines (aliases=False: the list
     only). A file that doesn't read is never saved over: CommandsFileError (DEE-295)."""
     path = path or COMMANDS_PATH
-    out = []
-
-    def change(data):
-        out[:] = fn([] if data is None else parse(data)[0])
-        return {"commands": [{"name": c["name"], "run": c["run"]} for c in out]}
-    ft_store.update_json(path, change, None, _why_not)
-    if aliases:
-        write_aliases(out)
+    with ft_store.locked(path):   # the aliases too, so they're never an older list's
+        out = fn(read_strict(path))
+        ft_store.write_json(path, {"commands": [{"name": c["name"], "run": c["run"]} for c in out]})
+        if aliases:
+            write_aliases(out)
     return out
 
 

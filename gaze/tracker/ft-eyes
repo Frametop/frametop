@@ -104,9 +104,11 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "conf"))
 import eyes_model  # noqa: E402
 import eyes_pupil  # noqa: E402
 import fitcoach  # noqa: E402
+import ft_conf  # noqa: E402
 
 def load_net():
     """The eye net EYES_MODEL picks (FT_EYES_MODEL wins), or None (the pupil finder). models/catalog.py
@@ -141,14 +143,7 @@ def size_guard_rule():
     rule, both (the default), long or off. Read at start."""
     v = os.environ.get("FT_EYES_SIZE_GUARD")
     if v is None:
-        v = ""
-        try:
-            for line in (Path.home() / ".config" / "frametop.conf").read_text().splitlines():
-                k, _, val = line.split("#", 1)[0].partition("=")
-                if k.strip() == "EYES_SIZE_GUARD":
-                    v = val.strip().strip("\"'")
-        except OSError:
-            pass
+        v = ft_conf.read().get("EYES_SIZE_GUARD", "")
     v = v.strip().lower()
     return v if v in eyes_pupil.GUARD_RULES else "both"
 

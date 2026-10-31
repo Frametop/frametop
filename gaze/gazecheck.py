@@ -609,14 +609,7 @@ class Checks:
         except OSError:
             m = None
         if m != self.watch[0]:
-            on = False
-            try:
-                for line in CONF.read_text().splitlines():
-                    k, _, v = line.split("#", 1)[0].partition("=")
-                    if k.strip() == "GAZE_FIT_WATCH":
-                        on = v.strip() == "1"
-            except OSError:
-                pass
+            on = ft_conf.read(str(CONF)).get("GAZE_FIT_WATCH") == "1"
             if on != self.watch[1]:
                 log(f"fit watch {'on' if on else 'off'}")
             self.watch = (m, on)

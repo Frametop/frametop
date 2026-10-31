@@ -55,6 +55,8 @@ sys.path.insert(0, HERE)
 import sides  # noqa: E402  (hands/rec/sides.py: which side camera is which)
 import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone recorder's build info)
 sys.path.insert(0, REPO)
+sys.path.insert(0, os.path.join(REPO, "conf"))
+import ft_conf  # noqa: E402  (conf/ft_conf.py: frametop.conf's grammar)
 import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
 import voicelog  # noqa: E402  (hands/rec/voicelog.py: a debug session's microphone, if ticked)
 import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's copy of what the panels and pointer did)
@@ -1492,17 +1494,9 @@ def live_settings(conf_path=None):
     """The HANDS_* and POINTER_* lines of ~/.config/frametop.conf, comments dropped; a value
     naming a path keeps only its last part (a path says whose home it is)."""
     out = {}
-    try:
-        with open(conf_path or CONF_PATH) as f:
-            lines = f.read().splitlines()
-    except OSError:
-        return out
-    for line in lines:
-        key, eq, value = line.partition("=")
-        key = key.strip()
-        if not eq or not LIVE_KEYS.match(key):
+    for key, value in ft_conf.read(conf_path or CONF_PATH).items():
+        if not LIVE_KEYS.match(key):
             continue
-        value = value.split("#", 1)[0].strip().strip("\"'")
         if "/" in value:
             value = os.path.basename(value.rstrip("/"))
         out[key] = value

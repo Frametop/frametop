@@ -88,7 +88,8 @@ check("everything installed and on, no floating windows",
 
 conf = os.path.join(tmp, "frametop.conf")
 with open(conf, "w") as fh:
-    fh.write("# a comment\nPOINTER_GAZE=1   # gaze\nDASHBOARD_APPS = frametop\n")
+    fh.write("# a comment\nPOINTER_GAZE=1   # gaze\nDASHBOARD_APPS=frametop\nPOINTER_HANDS = 1\n")
+# docs/config.md: spaces around the = are outside the grammar (bash runs a program), so it's left out
 check("read_conf", ft_tour.read_conf(conf), {"POINTER_GAZE": "1", "DASHBOARD_APPS": "frametop"})
 
 # ---------------------------------------------------------------- the key table

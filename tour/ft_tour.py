@@ -23,6 +23,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "input-settings"))
+sys.path.insert(0, os.path.join(REPO, "conf"))
+import ft_conf  # noqa: E402
 
 # The flag. Not under XDG_STATE_HOME: the desktop sets that to its own folder.
 DONE_PATH = os.path.expanduser("~/.local/state/frametop/tour.json")
@@ -66,17 +68,7 @@ def reset(path=None):
 # ---------------------------------------------------------------- what's here
 
 def read_conf(path=CONF_PATH):
-    conf = {}
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.split("#", 1)[0].strip()
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    conf[k.strip()] = v.strip()
-    except OSError:
-        pass
-    return conf
+    return ft_conf.read(path)
 
 
 def features(units=UNITS, conf=None):

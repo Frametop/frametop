@@ -38,12 +38,15 @@ import json
 import os
 import re
 import shutil
+import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "conf"))
+import ft_conf  # noqa: E402
 GITHUB = "Frametop/frametop"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "frametop" / "models"
 CATALOG_VERSION = 1           # the catalog layout this code reads
@@ -195,17 +198,7 @@ def channel(tree=REPO):
 
 
 def read_conf(path=None):
-    path = Path(path) if path else Path.home() / ".config" / "frametop.conf"
-    conf = {}
-    try:
-        for line in path.read_text().splitlines():
-            line = line.split("#", 1)[0].strip()
-            if "=" in line:
-                k, v = line.split("=", 1)
-                conf[k.strip()] = v.strip().strip("\"'")
-    except OSError:
-        pass
-    return conf
+    return ft_conf.read(str(path) if path else None)
 
 
 def bundled(kind, tree=REPO):

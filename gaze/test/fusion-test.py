@@ -100,7 +100,8 @@ check("a broken file: None", Fusion.load(path), None)
 conf = Path(HOME) / ".config" / "frametop.conf"
 conf.parent.mkdir(parents=True, exist_ok=True)
 check("no frametop.conf: off", gazed.read_fusion(), False)
-for text, want in (("GAZE_FUSION=on\n", True), ("GAZE_FUSION = ON  # yes\n", True), ("GAZE_FUSION=off\n", False),
+for text, want in (("GAZE_FUSION=on\n", True), ("GAZE_FUSION=ON  # yes\n", True), ("GAZE_FUSION=off\n", False),
+                   ("GAZE_FUSION = on\n", False),   # spaces around the =: outside the grammar, left out
                    ("GAZE_FUSION=yes\n", False), ("# GAZE_FUSION=on\n", False), ("GAZE_TRACKER=own\n", False)):
     conf.write_text(text)
     check(f"frametop.conf {text.strip()!r}", gazed.read_fusion(), want)

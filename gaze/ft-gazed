@@ -154,6 +154,8 @@ from gazecheck import Checks  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "models"))
 import catalog  # noqa: E402  (which eye net EYES_MODEL means: models/catalog.py)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ft_conf  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "gaze" / "build" / "ft-gaze"
@@ -220,36 +222,18 @@ def own_installed():
 def read_settings():
     """(tracker, GAZE_TRACKER, eye bias, nudge max) from frametop.conf, defaults for anything
     missing or unknown. The tracker is "steam" or "own": auto picks ours when it's installed."""
-    conf = {}
-    try:
-        for line in CONF.read_text().splitlines():
-            line = line.split("#", 1)[0].strip()
-            if "=" in line:
-                k, v = line.split("=", 1)
-                conf[k.strip()] = v.strip().lower()
-    except OSError:
-        pass
-    setting = conf.get("GAZE_TRACKER", "auto")
+    conf = ft_conf.read(str(CONF))
+    setting = conf.get("GAZE_TRACKER", "auto").lower()
     setting = setting if setting in TRACKER_SETTINGS else "auto"
     tracker = setting if setting != "auto" else "own" if own_installed() else "steam"
-    bias = conf.get("GAZE_EYE", "auto")
-    try:
-        nudge = min(max(float(conf.get("POINTER_GAZE_NUDGE_MAX", NUDGE_MAX)), 1.0), 110.0)  # the helper's range
-    except ValueError:
-        nudge = NUDGE_MAX
+    bias = conf.get("GAZE_EYE", "auto").lower()
+    nudge = min(max(ft_conf.number(conf, "POINTER_GAZE_NUDGE_MAX", NUDGE_MAX), 1.0), 110.0)  # the helper's range
     return tracker, setting, bias if bias in BIASES else "auto", nudge
 
 
 def read_fusion():
     """GAZE_FUSION from frametop.conf: True for on (off, the default, for anything else)."""
-    try:
-        for line in CONF.read_text().splitlines():
-            k, _, v = line.split("#", 1)[0].partition("=")
-            if k.strip() == "GAZE_FUSION":
-                return v.strip().lower() == "on"
-    except OSError:
-        pass
-    return False
+    return ft_conf.read(str(CONF)).get("GAZE_FUSION", "").lower() == "on"
 
 
 def mtime(path):

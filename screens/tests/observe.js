@@ -1,4 +1,4 @@
-// A KWin script for experiments (screens/test/headless.sh script ...): prints what happens
+// A KWin script for experiments (screens/tests/headless.sh script ...): prints what happens
 // to windows, for checking the script API floating windows rely on.
 function desc(w) {
     const g = w.frameGeometry;

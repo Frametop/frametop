@@ -21,11 +21,11 @@ test-python:
     python3 -c 'import PySide6, numpy, cv2, sherpa_onnx' || { echo "python3 can't import PySide6, numpy, cv2, and sherpa_onnx"; exit 1; }
     status=0
     layout/countdown/deps.sh || status=1
-    python3 scripts/testgate/testgate.py 'scripts/testgate/tests/*.py' 'conf/test/*.py' 'layout/tests/test_*.py' \
+    python3 scripts/testgate/testgate.py 'scripts/testgate/tests/*.py' 'conf/test/*.py' 'layout/tests/*.py' \
         'layout/countdown/tests/test_*.py' 'models/test/*.py' 'commands/test/*.py' 'input-settings/test/*.py' \
         'input/test/*.py' 'hands/tests/test_*.py' 'hands/rec/tests/*.py' 'recorder/tests/*.py' 'gaze/test/*.py' \
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
-        'tour/test/*.py' 'float/test/*.py' 'layout/test/*.py' || status=1
+        'tour/test/*.py' 'float/test/*.py' || status=1
     pytest -q session/tests || status=1
     # test_accessibility.py needs the host's AT-SPI and PyGObject, test_notifyfwd.py and
     # test_gtksettings.py the host's dbus-daemon and PyGObject
@@ -74,8 +74,6 @@ test-c:
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"
         run "$t" "build/tests/$n"
     done
-    g++ -std=c++17 -O2 -Wall -Wextra -Werror pointer/test/calpanel-test.cpp -o build/tests/calpanel-test
-    run pointer/test/calpanel-test.cpp build/tests/calpanel-test
     g++ -std=c++17 -Wall -Wextra -Werror -Istream stream/test/hostinput-test.cpp -o build/tests/hostinput-test
     run stream/test/hostinput-test.cpp build/tests/hostinput-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/rounded-test.cpp \

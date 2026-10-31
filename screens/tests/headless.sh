@@ -28,10 +28,10 @@ if [ "$FRAME_LOCAL" != 1 ]; then
   if [ "${1:-}" = shot ]; then
     mkdir -p "$REPO_ROOT/captures"
     out=$REPO_ROOT/captures/ft-test-${2:-WL-0}-$(date +%H%M%S).jpg
-    on_frame "screens/test/headless.sh $(printf '%q ' "$@")" > "$out"
+    on_frame "screens/tests/headless.sh $(printf '%q ' "$@")" > "$out"
     echo "$out"
   else
-    on_frame "screens/test/headless.sh $(printf '%q ' "$@")"
+    on_frame "screens/tests/headless.sh $(printf '%q ' "$@")"
   fi
   exit
 fi

@@ -93,12 +93,16 @@ else()
         get_filename_component(OPENVR_RUNTIME_PATH "${OPENVR_LIBRARY}" DIRECTORY)
     endif()
 endif()
+# OpenVR's header: Frametop's build passes the one scripts/openvr.sh pins (keyboard/build.sh).
+# The vendored copy is the same file (pack/test/test_pins.py checks it), for builds without
+# that script, such as the offline ctest (justfile test-keyboard).
+set(OPENVR_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openvr" CACHE PATH "Folder holding openvr.h")
 add_library(overlay_texture third_party/overlay_texture/vk_texture.cpp)
-target_include_directories(overlay_texture PUBLIC third_party/overlay_texture third_party/openvr)
+target_include_directories(overlay_texture PUBLIC third_party/overlay_texture "${OPENVR_INCLUDE_DIR}")
 target_link_libraries(overlay_texture PUBLIC PkgConfig::VULKAN "${OPENVR_LIBRARY}")
 add_executable(framekeyboard src/main.cpp src/preview.cpp src/vr.cpp)
 add_executable(framekeyboard-native-guard src/native_restore_guard.cpp)
-target_include_directories(framekeyboard-native-guard PRIVATE third_party/openvr)
+target_include_directories(framekeyboard-native-guard PRIVATE "${OPENVR_INCLUDE_DIR}")
 target_link_libraries(framekeyboard-native-guard PRIVATE PkgConfig::NATIVE "${OPENVR_LIBRARY}")
 set_target_properties(framekeyboard-native-guard PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "${OPENVR_RUNTIME_PATH}")
 add_dependencies(framekeyboard framekeyboard-native-guard)

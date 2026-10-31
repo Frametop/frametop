@@ -42,12 +42,12 @@ RUN dnf -y install --setopt=install_weak_deps=False \
     && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* \
               /usr/share/wallpapers
 
-# OpenVR's API library for linking, from the SDK tag the build scripts pin
-# (scripts/openvr.sh fetches the headers). The image has no SteamVR, so the
+# OpenVR's API library for linking, from the SDK commit the build scripts pin
+# (v2.15.6; scripts/openvr.sh fetches the headers). The image has no SteamVR, so the
 # binaries link this copy; their rpath names SteamVR's folder first, so on the
 # Frame they load SteamVR's own libopenvr_api, as the on-device builds do.
 RUN install -d /opt/frametop/bin /opt/frametop/lib \
- && curl -fsSL https://github.com/ValveSoftware/openvr/raw/v2.15.6/bin/linuxarm64/libopenvr_api.so \
+ && curl -fsSL https://github.com/ValveSoftware/openvr/raw/0924064316de3effbcd1acf1e309182a2deb1c05/bin/linuxarm64/libopenvr_api.so \
       -o /opt/frametop/lib/libopenvr_api.so \
  && echo "cc3671d24dd23fb61494e8a8327cf4fe7f638a60508ff7225984a03f2f5947e9  /opt/frametop/lib/libopenvr_api.so" | sha256sum -c
 

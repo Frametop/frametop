@@ -66,6 +66,22 @@ sudo_quiet() {
 }
 # A release never builds (FRAME_RELEASE, scripts/_env.sh): its programs come in its image.
 build() { [ "$FRAME_RELEASE" = 1 ] || "$@"; }
+# A part this install skips (or fails to install) can still have units from another Frametop
+# folder: the release before, or a clone. They'd go on running that folder's programs, and fail
+# once install-release.sh removes it two releases on (DEE-287). They're stopped and removed, and
+# the message says how to install the part for this folder.
+# drop_other_folder WHAT COMMAND UNIT...
+drop_other_folder() {
+  local what=$1 how=$2 found
+  shift 2
+  found=$(on_frame "for u in $*; do f=~/.config/systemd/user/\$u; [ -f \$f ] && ! grep -qF -- $(printf %q "$FRAME_REPO/") \$f && echo \$u; done") || found=
+  [ -n "$found" ] || return 0
+  on_frame "systemctl --user disable --now $(echo $found) 2>/dev/null; for u in $(echo $found); do rm -f ~/.config/systemd/user/\$u; done; systemctl --user daemon-reload" || true
+  echo "$what from another Frametop folder: stopped and removed, so it doesn't run a release that goes later. Install it for this one with: $how"
+}
+# If a step fails, set -e stops here with the steps before it done and the rest still from the
+# install before: run the same command again, which does every step again.
+trap 'rc=$?; [ "$rc" = 0 ] || echo "install.sh stopped before it finished (exit $rc). Run the same command again to finish the install." >&2' EXIT
 
 if [ "$FRAME_RELEASE" = 1 ]; then
   echo "Installing Frametop $(sed -n 's/^VERSION=//p' "$root/.frametop-release") on this Steam Frame from $FRAME_REPO"
@@ -134,27 +150,34 @@ echo "the launcher's Desktop entry now opens the multi-screen desktop; 3D mouse 
 "$root/scripts/conf-migrate.sh"
 
 step "8/12 voice dictation (optional: speak, and it's typed where you type; nothing leaves the headset)"
+voice_units="frametop-voice.service frametop-voice-whisper.service"
 if [ "$voice" = 0 ]; then
   echo "skipped (--no-voice). Install later with: voice/run.sh install"
+  drop_other_folder "voice dictation" "voice/run.sh install" $voice_units
 elif ask "Install voice dictation? A Right Ctrl tap or holding the left d-pad down starts it; it downloads about 320 MB of speech models." y; then
   build "$root/voice/build.sh"
-  "$root/voice/run.sh" install ||
+  if ! "$root/voice/run.sh" install; then
     echo "voice dictation: not installed (above). Try again later with: voice/run.sh install"
+    drop_other_folder "voice dictation" "voice/run.sh install" $voice_units
+  fi
 else
   echo "skipped. Install later with: voice/run.sh install"
+  drop_other_folder "voice dictation" "voice/run.sh install" $voice_units
 fi
 
 # Hand tracking needs sudo once per build of ft-camd, its camera broker (file capabilities to
 # borrow XRService's camera buffers). Installed, it runs with the Frametop desktop
 # (HANDS_MODE=frametop), unless the settings already pick always.
 step "9/12 hand tracking (optional, experimental: your hands work the screens; it uses a lot of the headset's CPU)"
+hand_units="frametop-camd.service frametop-hands.service frametop-handview.service"
+hands_done=0
 if [ "$hands" = 0 ]; then
   echo "skipped (--no-hands). Install later with: hands/run.sh install"
 elif [ "$assume_yes" = 1 ] && ! sudo_quiet; then
   echo "skipped: it needs your password (sudo), and --yes doesn't ask. Install it later with: hands/run.sh install"
 elif ask "Install hand tracking? Poke, pinch and grab the screens with your hands. It runs while the Frametop desktop does (change that on the Hands page of Frametop Input Settings), and its camera broker needs your password (sudo)." y; then
   if "$root/hands/run.sh" install; then
-    hands_caps=1
+    hands_caps=1 hands_done=1
     mode=$(on_frame "sed -n 's/^HANDS_MODE=\([a-z]*\).*/\1/p' ~/.config/frametop.conf | tail -1") || mode=
     if [ "$mode" = always ]; then
       echo "hand tracking runs whenever SteamVR does (HANDS_MODE=always, kept from your settings)"
@@ -170,6 +193,12 @@ elif ask "Install hand tracking? Poke, pinch and grab the screens with your hand
   fi
 else
   echo "skipped. Install later with: hands/run.sh install"
+fi
+if [ "$hands_done" = 0 ]; then
+  drop_other_folder "hand tracking" "hands/run.sh install" $hand_units
+  # its ft-handsctl link too, as hands/run.sh uninstall does
+  on_frame "l=~/.local/bin/ft-handsctl; [ -e ~/.config/systemd/user/frametop-hands.service ] || [ ! -L \$l ] ||
+case \$(readlink \$l) in $(printf %q "$FRAME_REPO")/*) ;; *) rm -f \$l ;; esac" || true
 fi
 # The Hand Recorder (hands/rec): a release brings it built, so it's only ft-camd's capabilities
 # (set already if hand tracking just installed) and the menu entry. An entry from the release
@@ -259,6 +288,18 @@ elif [ "$bluetooth" = 2 ] || { [ "$bluetooth" = 1 ] && ask "Install the Bluetoot
   "$root/setup/bluetooth/install.sh" install
 else
   echo "skipped. Install later with: setup/bluetooth/install.sh install"
+fi
+
+# A release's install.sh is also how you go back to it (pack/README.md), so it makes its own
+# folder "current": fast-install, get.sh and the next install-release.sh go by that link
+# (DEE-286). install-release.sh sets it too, after this.
+if [ "$FRAME_RELEASE" = 1 ] && [ "$FRAME_LOCAL" = 1 ]; then
+  version=$(sed -n 's/^VERSION=//p' "$root/.frametop-release")
+  here=$(cd "$root" && pwd -P)
+  if [ -n "$version" ] && [ "${here##*/}" = "$version" ]; then
+    ln -sfn "$version" "${here%/*}/current"
+    echo "Frametop $version is the current release (${here%/*}/current)"
+  fi
 fi
 
 step "Done"

@@ -15,8 +15,10 @@
 # 2. It checks the image file's sha256, and loads it into podman as localhost/frametop:VERSION.
 # 3. It copies the release's files out of the image to ~/.local/share/frametop/releases/VERSION
 #    and runs their install.sh, which makes the release's container and builds nothing.
-# 4. The release installed before stays: running its install.sh goes back to it. Older ones
-#    are removed, with their containers and images.
+# 4. The release installed before stays: running its install.sh goes back to it, and makes it
+#    current again. Older ones are removed, with their containers and images.
+# If it stops part-way (an error, a power-off), run the same command again: it finishes it.
+# A release whose folder has fast-installed files is refused until scripts/fast-install undo.
 #
 # Usage: install-release.sh [--yes] [--any-steamos] [--unpack-only] [--dir DIR]
 #                           [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
@@ -170,6 +172,14 @@ main() {
     echo "$dest holds another build of Frametop $version. Move it away, then run this again." >&2
     return 1
   fi
+  # The same build is there, so it isn't copied again, and fast-installed files would stay in
+  # a folder that names the release's commit (DEE-289). They go back first, by hand.
+  if [ -f "$dest/.frametop-release" ] && [ -e "$dest/.fast-install/state.json" ]; then
+    echo "$dest has files fast-installed on top of Frametop $version. Put them back first with" >&2
+    echo "scripts/fast-install undo in your Frametop checkout (it works on the current release:" >&2
+    echo "if another release is current, run $dest/install.sh first), then run this again." >&2
+    return 1
+  fi
 
   printf '\n\033[1m== 0/12 loading Frametop %s (a minute or two)\033[0m\n' "$version"
   if [ "$(podman image inspect -f '{{.Id}}' "$image" 2>/dev/null)" = "$id" ]; then
@@ -211,6 +221,10 @@ main() {
     echo "Install with: $dest/install.sh"
     return 0
   fi
+  # The release "current" named before this install: install.sh makes this one current when it
+  # finishes (DEE-286), so it's read first.
+  local prev= d old_image old_box
+  [ -L "$base/current" ] && prev=$(readlink "$base/current")
   if [ "$tty" = 1 ]; then
     "$dest/install.sh" ${pass[@]+"${pass[@]}"} </dev/tty
   else
@@ -219,8 +233,6 @@ main() {
 
   # This release is now "current"; the one before stays, to go back to. Older ones go, with
   # their containers and images (only Frametop's: frametop-... and localhost/frametop:...).
-  local prev= d old_image old_box
-  [ -L "$base/current" ] && prev=$(readlink "$base/current")
   ln -sfn "$version" "$base/current"
   for d in "$base"/*/; do
     d=${d%/}

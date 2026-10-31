@@ -228,6 +228,8 @@ curl -fsSL https://frametop.github.io/frametop/get.sh | bash
 
 Or by hand: `cd ~/frametop && git pull && ./install.sh`.
 
+If an install or update stops part-way (an error, the headset powering off), run the same command again: it finishes it.
+
 ## Uninstall
 
 In a terminal on the headset, run:

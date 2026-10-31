@@ -25,7 +25,8 @@
 #   ft clean            [both]    remove frametop's leftover containers and
 #                                 unused frametop images (see below)
 # Development commands live behind "ft dev" (they need a repo checkout):
-#   ft dev build        [repo]    build the image from the repo
+#   ft dev build        [repo]    build the image from the repo (labelled with its
+#                                 commit and whether the tree had changes)
 #   ft dev shell        [repo]    interactive shell in the image
 #   ft dev test         [repo]    run the Python test suites inside the image
 #
@@ -185,7 +186,18 @@ case "${1:-help}" in
     image=${FT_IMAGE:-frametop:local}   # dev always works against the local build
     case "${1:-help}" in
       build)  need_repo build
-              exec "$engine" build -f "$root/pack/Containerfile" -t "$image" "$root" ;;
+              # The image takes the working tree as it is, changes and untracked files too:
+              # its labels say which commit that was, and whether anything had changed, so
+              # framedrop/build.sh can refuse to name a commit it wasn't built from (DEE-288).
+              built_commit=unknown built_tree=unknown
+              if built_commit=$(git -C "$root" rev-parse HEAD 2>/dev/null) &&
+                 changes=$(git -C "$root" status --porcelain --untracked-files=normal 2>/dev/null); then
+                built_tree=$([ -z "$changes" ] && echo clean || echo changed)
+              else
+                built_commit=unknown
+              fi
+              exec "$engine" build -f "$root/pack/Containerfile" --label "org.frametop.commit=$built_commit" \
+                --label "org.frametop.tree=$built_tree" -t "$image" "$root" ;;
       shell)  need_repo shell
               exec "$engine" run --rm -it ${mounts[@]+"${mounts[@]}"} --workdir /src/frametop "$image" bash ;;
       test)   need_repo test; run_in_image just test ;;

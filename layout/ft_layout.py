@@ -1320,6 +1320,20 @@ def start_remotes_now(layout, only):
         log(f"not placed now: {e}")
 
 
+def remote_add_save(layout, host_name, address, port, d):
+    """remote add's new display d, saved under its host (added when it's new)."""
+    host = next((h for h in layout.setdefault("hosts", []) if h.get("name") == host_name), None)
+    if host is None:
+        host = {"name": host_name, "address": address, "displays": []}
+        layout["hosts"].append(host)
+    host["address"] = address
+    if port:
+        d["port"] = port
+    host["displays"].append(d)
+    remote_displays(layout)  # gives it a screen number
+    save_layout(layout)
+
+
 def remote_command(args):
     """ft-layout remote list|monitors|add|set|connect|disconnect|remove (see the usage)."""
     what = args[0] if args else ""
@@ -1431,6 +1445,13 @@ def remote_command(args):
         if port and not (port.isdigit() and 1024 < int(port) < 65535):
             raise RuntimeError("remote add: --port is a port number")
         port = int(port) if port else 0
+        # Every option is checked here, before pairing: a bad one leaves no client on the host.
+        for k in ("--fps", "--bitrate"):
+            if k in opts and not opts[k].isdigit():
+                raise RuntimeError(f"remote add: {k} is a whole number, not {opts[k]!r}")
+        fps, bitrate = int(opts.get("--fps", 60)), int(opts.get("--bitrate", 0))
+        if "--size" in opts and not re.fullmatch(r"\d+x\d+", opts["--size"].lower()):
+            raise RuntimeError(f"remote add: --size is WxH, not {opts['--size']!r}")
         layout = load_layout()
         displays = remote_displays(layout)
         if len(displays) >= REMOTE_MAX:
@@ -1465,18 +1486,18 @@ def remote_command(args):
         if code:
             raise RuntimeError(f"pairing {client} with {address} failed: {(err or out).strip()}")
         log(out.strip().splitlines()[-1] if out.strip() else f"paired {client}")
-        host = next((h for h in layout.setdefault("hosts", []) if h.get("name") == host_name), None)
-        if host is None:
-            host = {"name": host_name, "address": address, "displays": []}
-            layout["hosts"].append(host)
-        host["address"] = address
-        host["displays"].append({"id": display_id, "client": client, "app": app, "label": label, "size": size,
-                                 "fps": int(opts.get("--fps", 60)), "bitrate": int(opts.get("--bitrate", 0)),
-                                 "metres": round(max(1.0, size[0] / REMOTE_PIXELS_PER_METRE), 3)})
-        if port:
-            host["displays"][-1]["port"] = port
-        remote_displays(layout)  # gives it a screen number
-        save_layout(layout)
+        try:
+            remote_add_save(layout, host_name, address, port, {
+                "id": display_id, "client": client, "app": app, "label": label, "size": size, "fps": fps,
+                "bitrate": bitrate, "metres": round(max(1.0, size[0] / REMOTE_PIXELS_PER_METRE), 3)})
+        except BaseException:
+            # Nothing saved: the client just paired would be left on the host with no display.
+            code, out, err = run_stream("unpair", target, "--id", client, timeout=30)
+            if code:
+                log(f"unpairing {client} from {address} failed too: {(err or out).strip()}")
+            else:
+                log(f"unpaired {client}: the display wasn't saved")
+            raise
         print(display_id)
         start_remotes_now(layout, {display_id})
         return

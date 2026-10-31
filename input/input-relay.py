@@ -1119,6 +1119,106 @@ def probe(path):
         return None
 
 
+class PointerLease:
+    """The 3D mouse's hold on the pointer helper. conf: the Pointer frametop.conf asks for (None
+    with POINTER=0). current: the one in use, conf but None while Frametop is paused. holding:
+    conf had the pointer on as last seen; the pause gesture's reader looks the controllers up
+    again when that changes, since the 3D mouse's virtual controller takes a hand role."""
+
+    def __init__(self):
+        self.conf = None
+        self.current = None
+        self.holding = False
+
+    def configure(self, on, sensitivity, idle, wake_counts, paused):
+        """frametop.conf's pointer settings (pointer_settings), put in place."""
+        if on:
+            p = self.conf or Pointer(0.03, 30)
+            p.sensitivity, p.idle, p.wake_counts = sensitivity, idle, wake_counts
+            self.conf = p
+            log(f"pointer mode: {p.sensitivity} deg/count, idle {p.idle} s, wake {p.wake_counts} counts")
+        else:
+            if self.conf:
+                # A button held through the change comes up on the helper now; its release
+                # goes to the virtual mouse, which never had it down (DEE-264).
+                self.conf.stand_down("pointer mode off")
+            self.conf = None
+            log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
+        self.current = None if paused else self.conf
+
+    def pause(self, paused):
+        """Frametop paused, and the pointer stands down so the helper lets go, or resumed."""
+        if paused:
+            if self.conf:
+                self.conf.stand_down()
+            self.current = None
+        else:
+            self.current = self.conf
+
+    def holding_changed(self):
+        """Whether holding changed since the last call."""
+        holding = bool(self.conf and self.conf.active)
+        if holding == self.holding:
+            return False
+        self.holding = holding
+        return True
+
+
+class HeldKeys:
+    """What the keyboards hold, as the key combinations, the modifier taps and the desktop know it."""
+
+    def __init__(self):
+        self.modifiers = set()  # on any keyboard, folded (MODIFIERS)
+        self.tap = None  # the modifier (folded) pressed alone, with nothing since: its release is a tap
+        self.tap_code = None  # the tap's key as it is (a right-hand code isn't folded), see modifier_tap
+        self.talk_code = None  # a modifier bound to dictate_hold, held alone: dictation runs until its release
+        self.talk_hidden = False  # its press kept from the desktop, so the text typed meanwhile isn't a shortcut
+        self.meta = set()  # the Meta keys held, as they are (KEY_LEFTMETA, KEY_RIGHTMETA)
+        self.meta_hidden = set()  # held Meta keys the desktop was told came up (a combination; key_binding)
+        self.combos = {}  # key code -> the action its combination started (released with it)
+        self.cal = set()  # Enter keys whose press answered the gaze calibration panel (cal_enter)
+        self.desktop = set()  # keys the desktop was told went down and not yet up (to_screens)
+
+    def forget_up(self, down):
+        """The Meta keys and modifiers no device holds are forgotten (down: the keys the devices hold)."""
+        for code in [c for c in self.meta if c not in down]:
+            self.meta.discard(code)
+            self.meta_hidden.discard(code)
+        self.modifiers.intersection_update({MODIFIERS[c] for c in down if c in MODIFIERS})
+
+
+class Typing:
+    """What the relay still types, and what it has typed down."""
+
+    def __init__(self):
+        # In order: a character (str) from dictation, ("quiet", character) from Full Keyboard
+        # (its text isn't logged), or ("key", code, value), a key Full Keyboard pressed or released.
+        self.queue = collections.deque()
+        self.down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
+        self.at = 0.0  # the next press or release goes then
+        self.untyped = []  # characters with no key where typing went, logged when the queue is empty (None: quiet)
+        self.kb_held = {}  # keys Full Keyboard holds down: code -> to the desktop
+
+    def drop_full_keyboard(self):
+        """Full Keyboard went: its keys still to come are dropped. Returns the keys it held, as
+        (code, to the desktop), for the caller to let go of."""
+        kept = [item for item in self.queue if isinstance(item, str) or item[0] != "key"]
+        self.queue.clear()
+        self.queue.extend(kept)
+        held = sorted(self.kb_held.items())
+        self.kb_held.clear()
+        return held
+
+
+class FullKeyboardLink:
+    """Full Keyboard (keyboard/, --frametop), as the control socket knows it."""
+
+    def __init__(self):
+        self.addr = None  # its address
+        self.until = 0.0  # it counts as running until then (its hello renews it)
+        self.said = None  # the "kb DESKTOP SURFACE" it was told last
+
+
 CREDS = struct.Struct("3i")  # struct ucred: pid, uid, gid, as the kernel adds it to each datagram
 
 
@@ -1138,29 +1238,17 @@ class Relay:
         # desktop_until: typing goes to the Frametop desktop until then (ft-screens says so
         # every second); typing_applied: the grabs match that as of the last apply_roles().
         # vr_capture_until: every controller button is taken until then (the settings app capturing one).
-        # pointer: the 3D mouse while it's in use, pointer_conf: the one the config asks for (they
-        # differ while Frametop is paused).
         # shown_until: ft-screens shows the desktop's screens until then (it says so with "keyboard").
-        # kb_addr, kb_until: Full Keyboard's address, and until when it counts as running (its
-        # hello renews it); kb_said: the "kb DESKTOP SURFACE" it was told last.
-        self.pointer, self.pointer_conf, self.rules = None, None, {}
+        self.rules = {}
         self.desktop_until, self.typing_applied = 0.0, None
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
-        self.pointer_holding, self.calpanel_until, self.shown_until = False, 0.0, 0.0
-        self.kb_addr, self.kb_until, self.kb_said = None, 0.0, None
+        self.calpanel_until, self.shown_until = 0.0, 0.0
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
-
-        self.tap = None  # the modifier (folded, MODIFIERS) pressed alone, with nothing since: its release is a tap
         self.last_typing = 0.0  # the helper was last told of a key then (see "typing" at the top)
-        self.held_modifiers = set()  # on any keyboard, folded (MODIFIERS)
-        self.tap_code = None  # the tap's key as it is (a right-hand code isn't folded), see modifier_tap
-        self.talk_code = None  # a modifier bound to dictate_hold, held alone: dictation runs until its release
-        self.talk_hidden = False  # its press kept from the desktop, so the text typed meanwhile isn't a shortcut
-        self.held_meta = set()  # the Meta keys held, as they are (KEY_LEFTMETA, KEY_RIGHTMETA)
-        self.meta_hidden = set()  # held Meta keys the desktop was told came up (a combination; key_binding)
-        self.combos_down = {}  # key code -> the action its combination started (released with it)
-        self.cal_keys = set()  # Enter keys whose press answered the gaze calibration panel (cal_enter)
-        self.screens_down = set()  # keys the desktop was told went down and not yet up (see reconcile_desktop_keys)
+        self.lease = PointerLease()
+        self.held = HeldKeys()
+        self.typing = Typing()
+        self.kb = FullKeyboardLink()
 
         self.nodes = {}  # fd -> Node
         # Nodes already probed (rejected or open): path -> inode. A device that disconnects and
@@ -1169,36 +1257,25 @@ class Relay:
         self.seen = {}
         self.next_scan = 0.0
         self.volume = Volume()
-        # What's still to type, in order: a character (str) from dictation, ("quiet", character)
-        # from Full Keyboard (its text isn't logged), or ("key", code, value), a key Full Keyboard
-        # pressed or released.
-        self.typing = collections.deque()
-        self.typing_down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
-        self.typing_at = 0.0  # the next press or release goes then
-        self.untyped = []  # characters with no key where typing went, logged when the queue is empty (None: quiet)
-        self.kb_held = {}  # keys Full Keyboard holds down: code -> to the desktop
         self.desktop_layout = DesktopLayout()
 
         self.pause = game_pause.GamePause(log, self.pause_changed, VR_BUTTONS)
         self.gamepad = vrpad.GamepadMode(log, self.pad_send, lambda: vrpad.VirtualPad(log, self.stored, notify),
                                          lambda on: self.pause.set_pad(on))
         self.load_config()
-        if self.pause.paused and self.pointer_conf:
+        if self.pause.paused and self.lease.conf:
             # Restarted while paused: the helper may still hold the pointer the last relay woke, and
             # this relay's new Pointer doesn't know, so it lets go now (DEE-252).
-            self.pointer_conf.stand_down()
+            self.lease.conf.stand_down()
 
     def pause_changed(self, paused):
         """Frametop paused or resumed (game_pause.py): the relay's own part."""
-        p = self.pointer_conf
         if paused:
             self.gamepad.stop("Frametop paused")
-            if p:
-                p.stand_down()
-            self.pointer = None
+            self.lease.pause(True)
             self.desktop_until = 0.0  # typing goes to Steam
         else:
-            self.pointer = p
+            self.lease.pause(False)
         self.apply_roles()
         self.vr_bind(time.monotonic())
 
@@ -1230,19 +1307,7 @@ class Relay:
             rules = read_rules("")   # the defaults (no file there)
             self.pause.configure(rules)
         self.rules = rules
-        if pointer_on:
-            p = self.pointer_conf or Pointer(0.03, 30)
-            p.sensitivity, p.idle, p.wake_counts = sensitivity, idle, wake_counts
-            self.pointer_conf = p
-            log(f"pointer mode: {p.sensitivity} deg/count, idle {p.idle} s, wake {p.wake_counts} counts")
-        else:
-            if self.pointer_conf:
-                # A button held through the change comes up on the helper now; its release
-                # goes to the virtual mouse, which never had it down (DEE-264).
-                self.pointer_conf.stand_down("pointer mode off")
-            self.pointer_conf = None
-            log("pointer mode off: pointer devices feed the virtual mouse and keyboard")
-        self.pointer = None if self.pause.paused else self.pointer_conf
+        self.lease.configure(pointer_on, sensitivity, idle, wake_counts, self.pause.paused)
         self.gamepad.sound_on = self.pause.settings["sound"]
         # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
         # HANDS_MODE=always keeps hand tracking running through games.
@@ -1278,7 +1343,7 @@ class Relay:
                 self.reply(addr, {"t": "event", "id": VR_DEVICE, "path": "", "name": "Steam Frame controllers",
                              "type": "vr", "code": button, "value": value})
         action = self.rules["controller_buttons"].get(button)
-        if (self.pointer or (action and not needs_pointer(action))) and known_action(action) \
+        if (self.lease.current or (action and not needs_pointer(action))) and known_action(action) \
                 and action not in ("key", "none") and action not in GAZE_ACTIONS:
             self.do_action(action, value, now, button.split("/")[0])
 
@@ -1391,24 +1456,24 @@ class Relay:
                     self.screens_sock.sendto(f"{command} {source}".encode(), VOICE)
                 except OSError:
                     log(f"{action}: Frametop Voice isn't running (frametop-voice.service)")
-        elif self.pointer:
-            self.pointer.action(action, value, now, source)
+        elif self.lease.current:
+            self.lease.current.action(action, value, now, source)
 
     def cal_enter(self, code, value, now):
         """Enter while the gaze calibration panel is up (see the top): its press goes to the helper
         as "calkey 1", and the press, its repeats and its release aren't typed. True if taken."""
         if value == 1 and code in (KEY_ENTER, KEY_KPENTER) and now < self.calpanel_until \
-                and not self.held_modifiers and code not in self.combos_down:
-            self.cal_keys.add(code)
+                and not self.held.modifiers and code not in self.held.combos:
+            self.held.cal.add(code)
             try:
                 self.screens_sock.sendto(b"calkey 1", HELPER)
             except OSError:
                 pass  # helper not running (SteamVR not running)
             log("Enter: the gaze calibration panel's")
             return True
-        if code in self.cal_keys:
+        if code in self.held.cal:
             if value == 0:
-                self.cal_keys.discard(code)
+                self.held.cal.discard(code)
             return True
         return False
 
@@ -1417,70 +1482,70 @@ class Relay:
         it was taken for one (then it isn't typed)."""
         if code in MODIFIERS:
             mod = MODIFIERS[code]
-            hide = value == 2 and code == self.talk_code and self.talk_hidden  # its repeats, as its press
+            hide = value == 2 and code == self.held.talk_code and self.held.talk_hidden  # its repeats, as its press
             if value == 1:
-                if self.talk_code is not None and code != self.talk_code:
+                if self.held.talk_code is not None and code != self.held.talk_code:
                     self.cancel_talk()  # another modifier with it: a shortcut (Ctrl+Shift+T)
-                self.tap = mod if not self.held_modifiers and not self.combos_down else None
-                self.tap_code = code
-                if self.tap is not None and self.talk_code is None and self.tap_action(mod, code)[1] == "dictate_hold":
+                self.held.tap = mod if not self.held.modifiers and not self.held.combos else None
+                self.held.tap_code = code
+                if self.held.tap is not None and self.held.talk_code is None and self.tap_action(mod, code)[1] == "dictate_hold":
                     # Hold to talk: dictation starts on the press, not the release. The desktop
                     # doesn't get the press (cancel_talk sends it after all for a shortcut), so
                     # live text is typed there while it's held. Steam and games read the keyboard
                     # themselves: there the text waits for the release (typing_tick).
-                    self.talk_code, self.talk_hidden, hide = code, True, True
+                    self.held.talk_code, self.held.talk_hidden, hide = code, True, True
                     self.do_action("dictate_hold", 1, now, "keyboard")
                     log(f"key combination {self.tap_action(mod, code)[0]}: dictate_hold (held)")
-            (self.held_modifiers.add if value else self.held_modifiers.discard)(mod)
+            (self.held.modifiers.add if value else self.held.modifiers.discard)(mod)
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
-                (self.held_meta.add if value else self.held_meta.discard)(code)
-                if value == 0 and code in self.meta_hidden:
-                    self.meta_hidden.discard(code)
+                (self.held.meta.add if value else self.held.meta.discard)(code)
+                if value == 0 and code in self.held.meta_hidden:
+                    self.held.meta_hidden.discard(code)
                     return True  # the desktop already had it come up (below)
-            if value == 0 and code == self.talk_code:
-                self.talk_code, self.tap = None, None
-                hide, self.talk_hidden = self.talk_hidden, False
+            if value == 0 and code == self.held.talk_code:
+                self.held.talk_code, self.held.tap = None, None
+                hide, self.held.talk_hidden = self.held.talk_hidden, False
                 if not hide:
                     # As with a tap (modifier_tap): a key in between, so a Meta release isn't one.
                     self.to_screens(KEY_F24, 1)
                     self.to_screens(KEY_F24, 0)
                 self.do_action("dictate_hold", 0, now, "keyboard")
                 return hide
-            if value == 0 and self.tap == mod:
-                self.tap = None
-                self.modifier_tap(mod, self.tap_code, now)
+            if value == 0 and self.held.tap == mod:
+                self.held.tap = None
+                self.modifier_tap(mod, self.held.tap_code, now)
             return hide
-        if value == 1 and code not in self.combos_down and self.meta_hidden:
+        if value == 1 and code not in self.held.combos and self.held.meta_hidden:
             # Another key while Meta is still held after a combination: the desktop gets Meta
             # back first, so Meta+that key still works there.
-            for c in sorted(self.meta_hidden):
+            for c in sorted(self.held.meta_hidden):
                 self.to_screens(c, 1)
-            self.meta_hidden.clear()
-        if value == 0 and code in self.combos_down:
-            action = self.combos_down.pop(code)
-            if self.pointer or not needs_pointer(action):
+            self.held.meta_hidden.clear()
+        if value == 0 and code in self.held.combos:
+            action = self.held.combos.pop(code)
+            if self.lease.current or not needs_pointer(action):
                 self.do_action(action, 0, now, "keyboard")
             return True
         if value != 1 or not self.rules["key_bindings"]:
-            return value == 2 and code in self.combos_down
-        combo = "+".join(str(c) for c in sorted(self.held_modifiers) + [code])
+            return value == 2 and code in self.held.combos
+        combo = "+".join(str(c) for c in sorted(self.held.modifiers) + [code])
         action = self.rules["key_bindings"].get(combo)
         if not known_action(action):
             combo, action = self.release_combo(code) or (combo, action)
         if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
             return False
-        self.combos_down[code] = action
-        if self.held_meta - self.meta_hidden:
+        self.held.combos[code] = action
+        if self.held.meta - self.held.meta_hidden:
             # The desktop saw Meta go down. Another key in between keeps its release from
             # opening Plasma's launcher, and Meta comes up there now: KWin takes Meta with a
             # mouse button for moving or resizing windows, which would swallow a gaze click.
             # Its real release is dropped (above).
             self.to_screens(KEY_F24, 1)
             self.to_screens(KEY_F24, 0)
-            for c in sorted(self.held_meta - self.meta_hidden):
+            for c in sorted(self.held.meta - self.held.meta_hidden):
                 self.to_screens(c, 0)
-            self.meta_hidden.update(self.held_meta)
-        if self.pointer or not needs_pointer(action):
+            self.held.meta_hidden.update(self.held.meta)
+        if self.lease.current or not needs_pointer(action):
             self.do_action(action, 1, now, "keyboard")
         log(f"key combination {combo}: {action}")
         return True
@@ -1493,7 +1558,7 @@ class Relay:
                 continue
             *mods, last = combo.split("+")
             if mods and last == str(code) and all(m.isdecimal() for m in mods) \
-                    and {int(m) for m in mods} <= self.held_modifiers:
+                    and {int(m) for m in mods} <= self.held.modifiers:
                 return combo, action
         return None
 
@@ -1510,10 +1575,10 @@ class Relay:
     def cancel_talk(self):
         """A key, mouse button or scroll while a hold-to-talk modifier is held: it was a shortcut
         (Ctrl+C), so the dictation it started is dropped, without its cancel tone."""
-        if self.talk_code is not None:
-            if self.talk_hidden:
-                self.to_screens(self.talk_code, 1)  # the desktop gets the modifier before the key it's for
-            self.talk_code, self.talk_hidden = None, False
+        if self.held.talk_code is not None:
+            if self.held.talk_hidden:
+                self.to_screens(self.held.talk_code, 1)  # the desktop gets the modifier before the key it's for
+            self.held.talk_code, self.held.talk_hidden = None, False
             try:
                 self.screens_sock.sendto(b"cancel keyboard quiet", VOICE)
             except OSError:
@@ -1529,7 +1594,7 @@ class Relay:
         # there too: a Meta tap would open Plasma's launcher.
         self.to_screens(KEY_F24, 1)
         self.to_screens(KEY_F24, 0)
-        if self.pointer or not needs_pointer(action):
+        if self.lease.current or not needs_pointer(action):
             self.do_action(action, 1, now, "keyboard")
             self.do_action(action, 0, now, "keyboard")
         log(f"key combination {combo}: {action}")
@@ -1541,30 +1606,30 @@ class Relay:
         from KEY_OK up), but the release of anything the desktop has down."""
         if value not in (0, 1):
             return
-        if code < BTN_MISC or (button and BTN_MOUSE <= code <= BTN_TASK) or (not value and code in self.screens_down):
+        if code < BTN_MISC or (button and BTN_MOUSE <= code <= BTN_TASK) or (not value and code in self.held.desktop):
             try:
                 self.screens_sock.sendto(f"key {code} {value}".encode(), SCREENS)
             except OSError:
                 return  # ft-screens not running
-            (self.screens_down.add if value else self.screens_down.discard)(code)
+            (self.held.desktop.add if value else self.held.desktop.discard)(code)
 
     def type_text(self, text, quiet=False):
         """Queue dictation's text (see the top), or with quiet, Full Keyboard's. Which keys type
         it is worked out as it goes, where typing goes then."""
         self.desktop_layout.refresh()
         chars = [c for c in text if c.isprintable()]
-        room = max(0, TYPE_MAX - len(self.typing))
-        self.typing.extend((("quiet", c) for c in chars[:room]) if quiet else chars[:room])
+        room = max(0, TYPE_MAX - len(self.typing.queue))
+        self.typing.queue.extend((("quiet", c) for c in chars[:room]) if quiet else chars[:room])
         if not quiet or len(chars) > room:
             log(f"typing {min(len(chars), room)} characters for {'Full Keyboard' if quiet else 'Frametop Voice'}"
                 + (f" ({len(chars) - room} dropped: too many waiting)" if len(chars) > room else ""))
 
     def report_untyped(self, desktop):
-        if self.untyped and not self.typing:
+        if self.typing.untyped and not self.typing.queue:
             where = f"the desktop's layout ({self.desktop_layout.name})" if desktop else "a US layout (Steam)"
-            said = "".join(dict.fromkeys(c for c in self.untyped if c is not None))
-            log(f"typing: {len(self.untyped)} characters {where} has no key for" + (f": {said}" if said else ""))
-            self.untyped.clear()
+            said = "".join(dict.fromkeys(c for c in self.typing.untyped if c is not None))
+            log(f"typing: {len(self.typing.untyped)} characters {where} has no key for" + (f": {said}" if said else ""))
+            self.typing.untyped.clear()
 
     def type_key(self, code, value, desktop):
         if desktop:
@@ -1576,56 +1641,56 @@ class Relay:
     def typing_blocked(self, now):
         """A modifier is held (the text would be shortcuts), except a hold-to-talk key the
         desktop never got, when typing goes there."""
-        held = self.held_modifiers
-        if self.talk_hidden and now < self.desktop_until:
-            held = held - {MODIFIERS[self.talk_code]}
+        held = self.held.modifiers
+        if self.held.talk_hidden and now < self.desktop_until:
+            held = held - {MODIFIERS[self.held.talk_code]}
         return bool(held)
 
     def typing_tick(self, now):
         """Release the character pressed last, or press the next, when it's time. A new one
         waits while a modifier is held."""
-        if now < self.typing_at:
+        if now < self.typing.at:
             return
-        if self.typing_down:
-            code, mods, desktop = self.typing_down.pop()
+        if self.typing.down:
+            code, mods, desktop = self.typing.down.pop()
             self.type_key(code, 0, desktop)
             for m in reversed(mods):
                 self.type_key(m, 0, desktop)
-        elif self.typing and self.typing[0][0] == "key":
+        elif self.typing.queue and self.typing.queue[0][0] == "key":
             # Full Keyboard's key, with its modifiers its own: a held one doesn't stop it. It
             # comes up where it went down.
-            _, code, value = self.typing.popleft()
+            _, code, value = self.typing.queue.popleft()
             if value:
-                if code in self.kb_held:
+                if code in self.typing.kb_held:
                     return  # down already
-                desktop = self.kb_held[code] = now < self.desktop_until
-            elif code in self.kb_held:
-                desktop = self.kb_held.pop(code)
+                desktop = self.typing.kb_held[code] = now < self.desktop_until
+            elif code in self.typing.kb_held:
+                desktop = self.typing.kb_held.pop(code)
             else:
                 return  # not down
             self.type_key(code, value, desktop)
-        elif self.typing and not self.typing_blocked(now):
+        elif self.typing.queue and not self.typing_blocked(now):
             desktop = now < self.desktop_until
             keys = self.desktop_layout.keys if desktop else US_KEYS
-            item = self.typing.popleft()
+            item = self.typing.queue.popleft()
             ch = item if isinstance(item, str) else item[1]
             if ch not in keys:
-                self.untyped.append(ch if isinstance(item, str) else None)
+                self.typing.untyped.append(ch if isinstance(item, str) else None)
                 self.report_untyped(desktop)
                 return  # the next one right away
             code, mods = keys[ch]
             for m in mods:
                 self.type_key(m, 1, desktop)
             self.type_key(code, 1, desktop)
-            self.typing_down.append((code, mods, desktop))
+            self.typing.down.append((code, mods, desktop))
             self.report_untyped(desktop)
         else:
             return
-        self.typing_at = now + TYPE_STEP
+        self.typing.at = now + TYPE_STEP
 
     def typing_timeout(self, now, default):
-        if self.typing_down or (self.typing and (self.typing[0][0] == "key" or not self.typing_blocked(now))):
-            return max(0.0, min(default, self.typing_at - now))
+        if self.typing.down or (self.typing.queue and (self.typing.queue[0][0] == "key" or not self.typing_blocked(now))):
+            return max(0.0, min(default, self.typing.at - now))
         return default
 
     def restore_keymaps(self):
@@ -1698,18 +1763,15 @@ class Relay:
         its device vanishes with it held (release_held only lets go of it here) or a release
         goes astray: on 2026-10-01, after a calibration, Meta stayed down in KWin, so typing
         opened the overview and clicks on the desktop did other things."""
-        if not self.screens_down and not self.held_meta and not self.held_modifiers:
+        if not self.held.desktop and not self.held.meta and not self.held.modifiers:
             return
         down = self.physically_down()
-        typed = {k for code, mods, desktop in self.typing_down if desktop for k in (code, *mods)}  # dictation's, coming up next
-        typed |= {code for code, desktop in self.kb_held.items() if desktop}  # Full Keyboard's
-        for code in sorted(self.screens_down - down - typed):
+        typed = {k for code, mods, desktop in self.typing.down if desktop for k in (code, *mods)}  # dictation's, coming up next
+        typed |= {code for code, desktop in self.typing.kb_held.items() if desktop}  # Full Keyboard's
+        for code in sorted(self.held.desktop - down - typed):
             self.to_screens(code, 0)
             log(f"key {code} released on the desktop: no keyboard holds it")
-        for code in [c for c in self.held_meta if c not in down]:
-            self.held_meta.discard(code)
-            self.meta_hidden.discard(code)
-        self.held_modifiers.intersection_update({MODIFIERS[c] for c in down if c in MODIFIERS})
+        self.held.forget_up(down)
 
     def release_all_keys(self):
         """release_keys: what this relay holds that no device does comes up, on the desktop and
@@ -1718,8 +1780,8 @@ class Relay:
         remote display (its "keys release")."""
         self.reconcile_desktop_keys()
         down = self.physically_down()
-        for code in [c for c in self.combos_down if c not in down]:
-            del self.combos_down[code]  # its device went with it held: it kept modifier taps from working
+        for code in [c for c in self.held.combos if c not in down]:
+            del self.held.combos[code]  # its device went with it held: it kept modifier taps from working
         for node in self.nodes.values():
             for code in sorted(node.held - down):
                 (self.mouse if code >= BTN_MISC else self.keyboard).emit(EV_KEY, code, 0)
@@ -1850,15 +1912,15 @@ class Relay:
         goes to the desktop 0|1, and the screens show with Frametop not paused 0|1 (it may show
         over them with the dashboard closed). From the control socket: it takes word from
         @frametop_relay only."""
-        addr = self.kb_addr
+        addr = self.kb.addr
         if addr is None:
             return
         if message is None:
             message = (f"kb {int(now < self.desktop_until)}"
                        f" {int(now < self.shown_until and not self.pause.paused)}")
-            if message == self.kb_said:
+            if message == self.kb.said:
                 return
-            self.kb_said = message
+            self.kb.said = message
         try:
             self.control.sendto(message.encode(), addr)
         except OSError:
@@ -1867,13 +1929,9 @@ class Relay:
     def kb_gone(self, why):
         """Full Keyboard stopped or restarted: its keys still to come are dropped, and the keys
         it holds come up where they went down."""
-        self.kb_addr, self.kb_said = None, None
-        kept = [item for item in self.typing if isinstance(item, str) or item[0] != "key"]
-        self.typing.clear()
-        self.typing.extend(kept)
-        for code, desktop in sorted(self.kb_held.items()):
+        self.kb.addr, self.kb.said = None, None
+        for code, desktop in self.typing.drop_full_keyboard():
             self.type_key(code, 0, desktop)
-        self.kb_held.clear()
         log(f"Full Keyboard {why}")
 
     def handle_control(self, now):
@@ -1983,11 +2041,11 @@ class Relay:
                     # hears it's there ("fullkb OPEN"), so it opens Full Keyboard, not its own.
                     if uid != os.getuid() or not addr:
                         continue
-                    if addr != self.kb_addr:
-                        if self.kb_addr is not None:
+                    if addr != self.kb.addr:
+                        if self.kb.addr is not None:
                             self.kb_gone("restarted")
                         log("Full Keyboard connected")
-                    self.kb_addr, self.kb_until, self.kb_said = addr, now + 3.0, None
+                    self.kb.addr, self.kb.until, self.kb.said = addr, now + 3.0, None
                     self.kb_tell(now)
                     opened = "1" if len(words) > 1 and words[1] == "1" else "0"
                     try:
@@ -2000,13 +2058,13 @@ class Relay:
                     # 0|1" (a key's press or release) and "kbtext TEXT" (what its input methods
                     # composed). Only from the Full Keyboard that said hello. In order with what's
                     # still to type, where typing goes then.
-                    if uid != os.getuid() or addr is None or addr != self.kb_addr:
+                    if uid != os.getuid() or addr is None or addr != self.kb.addr:
                         continue
                     if cmd == "kbtext":
                         self.type_text(data[len(b"kbtext "):].decode(errors="replace"), quiet=True)
                     elif (len(words) == 3 and words[1].isdigit() and 0 < int(words[1]) < BTN_MISC
-                          and words[2] in ("0", "1") and len(self.typing) < TYPE_MAX):
-                        self.typing.append(("key", int(words[1]), int(words[2])))
+                          and words[2] in ("0", "1") and len(self.typing.queue) < TYPE_MAX):
+                        self.typing.queue.append(("key", int(words[1]), int(words[2])))
                     continue
                 if cmd == "kbpanel" and len(words) == 2 and words[1] in ("show", "hide"):
                     # From ft-screens (unbound): open or close Full Keyboard, which it does for the
@@ -2028,12 +2086,12 @@ class Relay:
                         self.calpanel_until = now + 3.0 if words[1] == "1" else 0.0
                     continue
                 if cmd == "gazeawake" and len(words) == 2:
-                    if self.pointer:
-                        self.pointer.gaze_awake_until = now + 12.0 if words[1] == "1" else 0.0
+                    if self.lease.current:
+                        self.lease.current.gaze_awake_until = now + 12.0 if words[1] == "1" else 0.0
                     continue
                 if cmd == "gazewoke":
                     # The gaze took the pointer back (gaze mode owns it): it's on, as a wake leaves it.
-                    p = self.pointer
+                    p = self.lease.current
                     if p and not p.active:
                         p.active, p.last_used = True, now
                         log("pointer on (gaze)")
@@ -2041,7 +2099,7 @@ class Relay:
                 if not addr:
                     continue  # unbound sender, nowhere to reply
                 if cmd == "devices":
-                    self.reply(addr, {"t": "devices", "pointer_mode": self.pointer_conf is not None,
+                    self.reply(addr, {"t": "devices", "pointer_mode": self.lease.conf is not None,
                                  "paused": self.pause.paused,
                                  "actions": ACTIONS,
                                  "nodes": [n.describe() for n in self.nodes.values() if n.candidate]})
@@ -2052,8 +2110,8 @@ class Relay:
                 elif cmd == "reload":
                     self.load_config()
                     self.apply_roles()
-                    if self.pointer:
-                        self.pointer.send("reload")
+                    if self.lease.current:
+                        self.lease.current.send("reload")
                     self.vr_bind(now)
                     self.reply(addr, {"t": "reloaded"})
                 elif cmd == "vrcapture":
@@ -2109,7 +2167,7 @@ class Relay:
                 break  # helper not running (SteamVR not running)
         while True:
             now = time.monotonic()
-            pointer = self.pointer
+            pointer = self.lease.current
             if now >= self.next_scan:
                 self.next_scan = now + 1.0
                 for node in [n for n in self.nodes.values() if n.network and now > n.until]:
@@ -2149,9 +2207,7 @@ class Relay:
 
             # The 3D mouse connecting or letting go moves a hand role, so the pause gesture's reader
             # looks the controllers up again (game_pause.py).
-            holding = bool(self.pointer_conf and self.pointer_conf.active)
-            if holding != self.pointer_holding:
-                self.pointer_holding = holding
+            if self.lease.holding_changed():
                 self.pause.controllers_changed()
             ready, _, _ = select.select(list(self.nodes) + [self.control], [], [],
                                         self.typing_timeout(now, min(self.volume.timeout(now, pointer.timeout() if pointer else 0.5),
@@ -2159,13 +2215,13 @@ class Relay:
             now = time.monotonic()
             if pointer:
                 pointer.tick(now)
-            elif self.pointer_conf:
-                self.pointer_conf.drain()  # paused: what waited still goes, in order
+            elif self.lease.conf:
+                self.lease.conf.drain()  # paused: what waited still goes, in order
             if self.vr_bind_retry:
                 self.vr_bind(now)
             self.volume.tick(now)
             self.typing_tick(now)
-            if self.kb_addr is not None and now >= self.kb_until:
+            if self.kb.addr is not None and now >= self.kb.until:
                 self.kb_gone("stopped (no word for 3 seconds)")
             self.kb_tell(now)
             self.pause.tick(now)
@@ -2175,7 +2231,7 @@ class Relay:
             if (now < self.desktop_until) != self.typing_applied or waiting:
                 waiting = self.apply_roles()
             for fd in ready:
-                pointer = self.pointer  # (a pause or resume in this batch changes it)
+                pointer = self.lease.current  # (a pause or resume in this batch changes it)
                 if fd is self.control:
                     self.handle_control(now)
                     continue
@@ -2199,7 +2255,7 @@ class Relay:
                         self.broadcast(node, etype, VOLUME_ORIGINAL.get(code, code) if node.remapped else code,
                                   value, now)
                     if (etype == EV_KEY and value == 1 and code not in MODIFIERS) or (etype == EV_REL and code in SCROLLS):
-                        self.tap = None  # a key, button or scroll in between: a modifier's release isn't a tap
+                        self.held.tap = None  # a key, button or scroll in between: a modifier's release isn't a tap
                         self.cancel_talk()
                     if etype == EV_KEY and ((node.remapped and code in VOLUME_ORIGINAL)
                                             or (node.grabbed and code in VOLUME_STANDIN)):

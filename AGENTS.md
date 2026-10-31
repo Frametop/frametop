@@ -55,6 +55,7 @@ A SteamOS update replaces SteamVR, KWin, and gamescope with the rest of the OS i
 - **Pin every input.** Base images by digest, Python via `uv.lock` (commit the lock, never a bare `uv pip install`), downloads by tag or commit and sha256, CI actions by commit SHA.
 - **One build recipe.** The image runs the components' own `build.sh` scripts (`FRAME_IN_BOX=1`), and the OpenVR SDK they build against is pinned in `scripts/openvr.sh`. Change a build there, not in the Containerfile, and keep the Containerfile buildable on arm64, the only architecture the Frame has.
 - **Keep the tests green in the image.** `./ft dev test` runs `just test` inside it, and CI runs the same recipes. A new offline test that needs no headset goes in the `justfile` too.
+- **`frame-job` is the maintainer's job runner, not part of Frametop.** Docs and lab tools show commands through it (it sends heavy jobs to another machine or caps them on the Frame). Without it, run the command after `--` directly. A `.frame-job` file is one machine's settings and is gitignored; `gaze/tracker/.frame-job.example` shows one.
 - **Docs name files that exist.** `docs/tests/test_doc_links.py` (in `just test`) checks that every relative link in a doc, and every repo path a doc or a comment names, exists. `frame-hands/notes/...` is the separate frame-hands project's research notes, not this repo, so it's skipped. A doc past about 50 KB gets split into files beside it, leaving its headings with a link to where each went.
 
 ## Names

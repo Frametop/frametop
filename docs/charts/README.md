@@ -397,7 +397,7 @@ Design choices in these fixes (Daenon can override each):
 
 The checks need TLC 1.7.4 and Java. They look for TLC at `~/.cache/frametop-formal/tla2tools-1.7.4.jar` (the verify skills' `scripts/check` put it there), or at `TLA2TOOLS` for every group but G1. Java comes from `JAVA`, then `PATH`. G1 asks mise for `java@temurin-25`.
 
-A check keeps a core busy for seconds to minutes, so run it through `frame-job` on the Frame, at the lowest priority:
+A check keeps a core busy for seconds to minutes, so run it through `frame-job` on the Frame, at the lowest priority. Without `frame-job` (anywhere but the maintainer's machines), run the same command without the `frame-job --local --` part:
 
 ```
 cd docs/charts

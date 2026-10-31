@@ -27,6 +27,8 @@ tracker = [
     "huggingface_hub>=0.34",
     # the eye recorder's export encrypts with age (recorder/age.py), written on cryptography
     "cryptography>=42",
+    # the eye net (gaze/tracker/eyes_net.py); gaze/tracker/requirements.txt has the same version
+    "ncnn==1.0.20260526",
 ]
 # Frametop Voice (voice/ft-voiced): Moonshine, the wake word spotter and Silero VAD run
 # through sherpa-onnx; sentencepiece spells out wake phrases (voice/requirements.txt has the
@@ -42,3 +44,6 @@ voice = [
 
 [tool.uv]
 package = false
+# ncnn's wheel asks for opencv-python, the GUI build of the cv2 that opencv-python-headless
+# already provides; the two can't share one environment, and `import ncnn` doesn't use it.
+override-dependencies = ["opencv-python; sys_platform == 'never'"]

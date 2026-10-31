@@ -60,7 +60,7 @@ RUN install -d /opt/frametop/bin /opt/frametop/lib \
 # runtime stage at the end, where the builder's export lands. Rebuilt only when
 # the lockfile changes, so source edits below reuse this layer.
 # uv sync --frozen --group tracker --group voice: the default dev group (pytest/ruff
-# for CI's in-image tests) plus the tracker stack and Frametop Voice's (sherpa-onnx);
+# for CI's in-image tests) plus the tracker stack (with the eye net's ncnn) and Frametop Voice's (sherpa-onnx);
 # the types group (mypy) stays out.
 # --no-cache keeps uv's download cache out of the image.
 # uv is a pinned, checked build tool, not a runtime dependency. Extract it,
@@ -75,7 +75,7 @@ RUN uvdir=$(mktemp -d) \
  && tar -xzf "$uvdir/uv.tar.gz" --strip-components=1 -C "$uvdir" uv-aarch64-unknown-linux-gnu/uv \
  && "$uvdir/uv" venv --system-site-packages /opt/frametop/venv \
  && cd /src/frametop && "$uvdir/uv" sync --frozen --group tracker --group voice --no-cache \
- && /opt/frametop/venv/bin/python -c 'import numpy, cv2, sherpa_onnx, sentencepiece, huggingface_hub, cryptography' \
+ && /opt/frametop/venv/bin/python -c 'import numpy, cv2, ncnn, sherpa_onnx, sentencepiece, huggingface_hub, cryptography' \
  && rm -rf "$uvdir"
 
 # Preserve separate base/environment layers for cached builds and rollback.

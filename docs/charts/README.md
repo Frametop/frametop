@@ -12,10 +12,11 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | Gaze sources, ft-gaze and ft-gazed, calibration and its panel, idle and wake, our own eye tracker | G4 Gaze | `G4-gaze.mmd`, `G4-gaze.tla` |
 | ft-camd, ft-hands, when hand tracking runs and parks, hand or controller per side, near input on panels, the hand ray and pinches | G5 Hands | `G5-hands.mmd`, `G5-hands.tla` |
 | ft-screens' screens and panels and when they show, visibility modes, conceal, ft-layout and profiles, floating windows, the dashboard, remote access over VNC | G2 Desktop and panels | `G2-desktop.mmd`, `G2-desktop.tla` |
+| The testbench, its input proxy and fake trackers, the verify skills and their lease, the fake-worn guard, the Hand and Eye Recorders and their upload, report.sh, doctor.sh, the logs, the tour | G8 Verify, data and diagnostics | `G8-verify.mmd`, `G8-verify.tla`, `G8-verify-Guard.tla` |
 
 `feature-map.md` lists every feature (F1 to F22), its processes, sockets, files and units, and proposes the eight chart groups. It was written at `403c1eb`. Its bug table predates the H1, R1 and H2 fixes (`76121c7`, `e15b65f`, `2c783dd`), and it mentions an overview chart and a `snapshot/` folder that are kept outside the repo.
 
-G8 (verification, data and diagnostics) and G7 (build, install and release) are not charted yet.
+G7 (build, install and release) is not charted yet.
 
 ## Files
 
@@ -24,7 +25,7 @@ Each group has:
 - `GROUP.mmd`: the chart's source, a Mermaid state diagram. Every state and arrow names its code.
 - `GROUP.svg`: the chart, full size.
 - `GROUP-small.png`: a 1200 px wide preview.
-- `GROUP.tla` (G3 has two models): the model.
+- `GROUP.tla` (G3 and G8 have two models): the model.
 - `GROUP-*.cfg`: one TLC config per scenario: the code as it is, the code before a fix, or the code with one fault switched off.
 - `GROUP-check.py`: runs TLC on every config and rule and prints what holds and what breaks, with each break's shortest path.
 
@@ -225,6 +226,41 @@ Open suspected bugs:
 
 The Lossy and GazedCrash breaks are G1's L7 and G4's Z1, drawn in those groups. A lost `pause on` also shows the screens through the pause, because the relay sends it again only to a new ft-screens.
 
+## G8 Verify, data and diagnostics
+
+Covers where each testbench fake enters the real pipeline, and how long it lasts. Fake 1 is the input proxy inside vrserver: the `90-frame-testbench.conf` drop-in preloads `interpose.cpp`, which wraps `driver_cv.so` and takes worn, head pose, HMD button and synthetic controller overrides on `RUN/frame-testbench.sock`. Fake 2 is the fake trackers (`frame-testbench-fakes`, `fakes.py`): stand-in eye files for ft-gaze, and a marker that parks ft-hands while fake hands are published. Fake 3 is Frametop's own sockets (the relay's testbench devices, the pointer helper, ft-powerd). Fake 4 is the fake-worn guard (`frametop-fake-worn-guard`, `hostinput.py`). The chart also draws the verify run's lease and cleanup (`verify-frametop` launch, guard, snapshot, cleanup), the MCP server, the Hand and Eye Recorders with their export and Hugging Face upload, `report.sh`, `doctor.sh`, the logs and the tour. Arrows into G1, G3, G4, G5 and G6 show where each fake feeds those groups.
+
+Models:
+
+- `G8-verify.tla` (module `G8Verify`): one verify run, its lease, the proxy's overrides, the fake trackers, an agent that can die mid-run, status polls from later agents, and a wearer. Configs: `Code` (the code as it is), `NoDeath` (the agent always lives to clean up), `Overrides` (only the overrides' bug), `OverridesFix` (overrides bound to the lease), `Polls` (only the idle hour's bug) and `Fixed` (both fixes).
+- `G8-verify-Guard.tla` (module `G8Guard`): extends verify-fake-worn-guard's `FakeWornGuard.tla`, read from `.claude/skills/verify-fake-worn-guard/model/` without changes. It adds fairness for the system's own steps and the rule `GuardRestoresReal`. Configs: `LiveClean` (no faults), `LiveHangs` (the proxy can stall), `LiveKills` (the guard can die), `LiveNoF` (stalls and deaths, but not mid-fake) and `LiveAll` (every fault). The skill's own configs and rules still hold at `78e93b1`: Clean 88, Hangs 188, Kills 264, NoF 480 and All 632 states.
+
+Results at `78e93b1`:
+
+| Rule | What it says | Result |
+| --- | --- | --- |
+| TypeOK | | Holds in all 11 configs |
+| LaunchClean | A run starts on a clean headset (launch's doctor) | Holds in all 6 Verify configs |
+| NoDriveOnWearer | Drive steps happen only with nobody in the headset (`verify-frametop guard`) | Holds in all 6 Verify configs |
+| OverridesEnd | The proxy's overrides end once nobody drives the run | Breaks in Code and Overrides, 5 to 6 steps then a loop (V1). Holds in NoDeath, OverridesFix, Polls and Fixed |
+| FakesEnd | The fake trackers end once nobody drives the run | Breaks in Code and Polls, 6 to 9 steps then a loop (V2). Holds in NoDeath, Overrides, OverridesFix and Fixed |
+| WearerGetsReal | Someone who puts the headset on gets their own head, proximity and trackers back | Breaks in Code, Overrides and Polls (V1, V2). Holds in NoDeath, OverridesFix and Fixed |
+| GuardRestoresReal | Once the wearer is faked with no live guard and no command running, the fake ends with no command needed | Breaks in LiveNoF and LiveAll (V3). Holds in LiveClean, LiveHangs and LiveKills |
+
+States per run: 26 (NoDeath) to 98 for Verify, 88 (LiveClean) to 632 (LiveAll) for Guard.
+
+Open suspected bugs:
+
+| Id | Ticket | Rule | What happens |
+| --- | --- | --- | --- |
+| V1 | DEE-281 | OverridesEnd, WearerGetsReal | The input proxy's overrides (worn on or off, head pose, HMD buttons, synthetic controllers) have no time limit, and a real wearer doesn't end them (`testbench/native/input_state.cpp` 112-116). Only `frame-testbench release`, `verify-frametop cleanup` or a SteamVR restart do (`testbench/frame_testbench/cli.py` 351-363). A run whose agent dies (a killed shell, a stalled approval prompt, the context running out) keeps them, and its guard keeps every input host's lock. The lease only marks the run stale (`verify-frametop` 91, 169). Someone who puts the headset on later gets a frozen head pose, or standby under worn off |
+| V2 | DEE-282 | FakesEnd, WearerGetsReal | The fake trackers end after an hour with no command (`fakes.py` 47, 815), but any command restarts the hour, status too (836-837). `frame-testbench status` sends one, so every `verify-frametop doctor`, `verify-frametop guard` and MCP status call does. A later agent's doctor checks keep a dead run's fake eyes and parked hands alive, and without them the fakes still last up to an hour |
+| V3 | DEE-283 | GuardRestoresReal (minor) | A guard that dies while the input proxy stalls. `after_guard` tries the release 3 times 0.2 s apart, then gives up (`hostinput.py` 209-217, 230-237). The faked wearer stays until the next `frame-testbench` command. NoHostTakeover still holds, because the flag keeps ft-stream from taking a lease |
+| V4 | DEE-284 | not modelled (minor, G3 side) | In pointer mode the relay's drop of the testbench mouse lets go of its buttons only on the virtual mouse (`release_held`, `input/input-relay.py` 1654-1659). A testbench killed mid-drag, or a release read after `hostbye`, leaves the 3D mouse's button down until the next click. Written up in `testbench/docs/desktop.md` under Limits. Same class as G3's K7 |
+| V5 | DEE-285 | not modelled (minor, moot at `78e93b1`) | The hand upload's draft gate opens on `FT_HANDREC_ALLOW_UPLOAD=1` alone (`hands/rec/hub.py` 91-94), while the eye upload's opens only for another dataset (`gaze/rec/hub.py` 60-62). `is_draft` counts a missing text as final (`recorder/hub.py` 47-52). All five consent texts are final today |
+
+Fixed before `78e93b1`, drawn green: the fake-worn guard's A to F (`37d0fbf`, ft-stream `bd606ce` in merge `81a5c82`, `0c7eb9e`, `38d6257`, `1f485fe`), which the skill's model checks.
+
 ## Running a check
 
 The checks need TLC 1.7.4 and Java. They look for TLC at `~/.cache/frametop-formal/tla2tools-1.7.4.jar` (the verify skills' `scripts/check` put it there), or at `TLA2TOOLS` for G3, G4 and G6. Java comes from `JAVA`, then `PATH`. G1 asks mise for `java@temurin-25`.
@@ -239,7 +275,7 @@ frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G4-
 frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G1-lifecycle-check.py PauseHide
 ```
 
-G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G2 takes `Desktop:HeadOff` and so on. G6 takes `Exit`, `Live` or `PreFix`. G1 takes config names.
+G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G2 takes `Desktop:HeadOff` and so on. G8 takes `Verify`, `Guard`, `Verify:Overrides`, `Guard:LiveNoF` and so on, and reads the guard model from the verify-fake-worn-guard skill. G6 takes `Exit`, `Live` or `PreFix`. G1 takes config names.
 
 Each script writes TLC's full output, with every counterexample trace, to `GROUP-traces/` next to the models. Those folders are ignored by git. A rule that breaks prints its shortest path, and the chart's red badges follow that path.
 

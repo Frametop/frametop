@@ -73,10 +73,10 @@ PACKAGES = {
                     "the registry stops and comes back after a desktop restart",
     "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked; "
                  "Full Keyboard types into a Steam field and a game (libei)",
-    "libei": "Full Keyboard types into a Steam field and a game (its libei link to gamescope)",
+    "libei": "Full Keyboard types into a Steam field and a game (its own libei client, built in, "
+             "talks to gamescope's EIS server from this package)",
     "deckard-steamvr-session": "Full Keyboard starts with SteamVR and its panel draws (frametop-keyboard.service "
                                "reads its /usr/share/deckard/mesavars.sh)",
-    "deckard-mesa-linux-aarch64": "Full Keyboard's panel draws (Vulkan), and ft-screens' panels show",
     "bluez": "a Bluetooth mouse reconnecting after it sleeps",
     "pipewire": "voice dictation hears you (ft-voiced records with the container's pw-record) and "
                 "its mic isn't silent after a reboot (SteamOS's echo-cancel chain)",

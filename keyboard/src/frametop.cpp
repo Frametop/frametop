@@ -168,8 +168,20 @@ void FrametopLink::poll() {
 FrametopSink::~FrametopSink() {
     for (const auto& [code, desktop] : held_) {
         if (desktop) {
-            link_.send("kbkey " + std::to_string(code) + " 0");
+            owed_.insert(code);
         }
+    }
+    // A last try: a relay that stops after us releases what it held anyway.
+    send_owed();
+}
+void FrametopSink::release_on_desktop(int code) {
+    if (!link_.send("kbkey " + std::to_string(code) + " 0")) {
+        owed_.insert(code);
+    }
+}
+void FrametopSink::send_owed() {
+    for (auto code = owed_.begin(); code != owed_.end();) {
+        code = link_.send("kbkey " + std::to_string(*code) + " 0") ? owed_.erase(code) : std::next(code);
     }
 }
 void FrametopSink::send(int code, int value) {
@@ -183,7 +195,7 @@ void FrametopSink::send(int code, int value) {
             held_.erase(held);
         }
         if (desktop) {
-            link_.send("kbkey " + std::to_string(code) + " 0");
+            release_on_desktop(code);
         } else {
             steam_.send(code, 0);
         }
@@ -194,6 +206,9 @@ void FrametopSink::send(int code, int value) {
         return;
     }
     if (desktop) {
+        owed_.erase(code); // this press's release covers the owed one
+    }
+    if (desktop) {
         link_.send("kbkey " + std::to_string(code) + " 1");
     } else {
         steam_.send(code, 1);
@@ -201,6 +216,7 @@ void FrametopSink::send(int code, int value) {
 }
 bool FrametopSink::pump() {
     link_.poll();
+    send_owed();
     const bool steam = steam_.pump();
     return link_.desktop() || steam;
 }

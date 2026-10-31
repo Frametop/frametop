@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <linux/input-event-codes.h>
 #include <stdexcept>
 #include <sys/socket.h>
@@ -83,6 +84,68 @@ struct Pointers : PointerSink {
     }
     std::vector<std::string> take() { return std::exchange(calls, {}); }
 };
+
+// Releases the relay didn't take are sent again until they go (DEE-310).
+void owed_release_tests() {
+    const std::string name = "framekeyboard-test-owed-" + std::to_string(getpid());
+    double now = 100;
+    std::optional<Relay> relay(std::in_place, name);
+    FrametopLink link(name, [&] { return now; });
+    Steam steam;
+    FrametopSink sink(link, steam);
+    link.poll();
+    relay->take();
+    relay->say("kb 1 1");
+    sink.pump();
+    sink.send(KEY_A, 1);
+    require(relay->take() == std::vector<std::string>{"kbkey 30 1"}, "A down on the desktop");
+
+    // The relay goes away with A down: the release is owed, and kept while it's away.
+    relay.reset();
+    sink.send(KEY_A, 0);
+    require(sink.owed() == std::set<int>{KEY_A}, "A's release is owed");
+    sink.pump();
+    require(sink.owed() == std::set<int>{KEY_A}, "...and kept while the relay is away");
+    relay.emplace(name);
+    sink.pump();
+    require(relay->take() == std::vector<std::string>{"kbkey 30 0"} && sink.owed().empty(),
+            "the relay is back: A's release goes, once");
+    sink.pump();
+    require(relay->take().empty(), "nothing owed, nothing sent");
+
+    // A press of an owed key on the desktop drops what's owed: its own release covers it.
+    sink.send(KEY_B, 1);
+    relay->take();
+    const auto peer = relay->peer;
+    const auto peer_length = relay->peer_length;
+    relay.reset();
+    sink.send(KEY_B, 0);
+    relay.emplace(name);
+    relay->peer = peer, relay->peer_length = peer_length;
+    sink.send(KEY_B, 1);
+    require(sink.owed().empty(), "a new press on the desktop: nothing owed");
+    sink.send(KEY_B, 0);
+    require(relay->take() == std::vector<std::string>{"kbkey 48 1", "kbkey 48 0"}, "B down and up");
+
+    // A press that goes to Steam keeps the desktop's owed release.
+    sink.send(KEY_C, 1);
+    relay->take();
+    relay.reset();
+    sink.send(KEY_C, 0);
+    relay.emplace(name);
+    relay->peer = peer, relay->peer_length = peer_length;
+    relay->say("kb 0 1");
+    link.poll(); // (not a pump: the release stays owed)
+    require(!link.desktop(), "typing goes to Steam");
+    sink.send(KEY_C, 1);
+    require(steam.keys.back() == std::pair{KEY_C, 1}, "C down in Steam");
+    require(sink.owed() == std::set<int>{KEY_C}, "the desktop's C release is still owed");
+    sink.pump();
+    require(relay->take() == std::vector<std::string>{"kbkey 46 0"} && sink.owed().empty(),
+            "...and goes at the next pump");
+    sink.send(KEY_C, 0);
+    require(steam.keys.back() == std::pair{KEY_C, 0}, "Steam's C comes up in Steam");
+}
 
 // FrametopVr: when the panel may show, what Frametop's requests do, fingertips, and the tips'
 // reads, without SteamVR.
@@ -308,6 +371,7 @@ int main() {
             link.poll();
             require(!link.fresh(), "impostor ignored");
         }
+        owed_release_tests();
         hooks_tests();
         std::cout << "frametop: ok\n";
         return 0;

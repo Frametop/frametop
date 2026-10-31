@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -66,7 +67,11 @@ class FrametopLink {
 
 // Desktop typing goes to the relay (which types it on the desktop's seat, in the desktop's
 // layout); everything else goes to `steam` (gamescope). A held key is released where it
-// was pressed, whichever way typing goes by then.
+// was pressed, whichever way typing goes by then. A release the relay didn't take (its socket
+// full, or the relay restarting) is owed and sent again at each pump until it goes, so a key
+// never stays down on the desktop (DEE-310; cf. DEE-265). A new press of an owed key on the
+// desktop drops what's owed: the desktop ignores a press of a key it holds, and its release
+// covers both.
 class FrametopSink : public KeySink {
   public:
     FrametopSink(FrametopLink& link, KeySink& steam) : link_(link), steam_(steam) {}
@@ -80,6 +85,8 @@ class FrametopSink : public KeySink {
     bool text_pending() const override { return steam_.text_pending(); }
     void cancel_text() override { steam_.cancel_text(); }
     bool output_blocked() const override { return !link_.desktop() && steam_.output_blocked(); }
+    // Releases still owed to the desktop (tests).
+    const std::set<int>& owed() const { return owed_; }
     int shortcut_code(xkb_keysym_t symbol, int fallback) override {
         // The desktop types keys by their place, like a real keyboard on it.
         return link_.desktop() ? fallback : steam_.shortcut_code(symbol, fallback);
@@ -91,6 +98,9 @@ class FrametopSink : public KeySink {
   private:
     FrametopLink& link_;
     KeySink& steam_;
+    void release_on_desktop(int code);
+    void send_owed();
     std::map<int, bool> held_; // code -> pressed on the desktop
+    std::set<int> owed_;       // releases the relay didn't take yet
 };
 } // namespace framekeyboard

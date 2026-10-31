@@ -277,4 +277,5 @@ def main():
 
 
 if __name__ == "__main__":
+    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600 (DEE-303)
     sys.exit(main())

@@ -810,17 +810,17 @@ class Session:
 
     def _make_dir(self):
         rounds = os.path.join(self.base_dir, "rounds")
-        os.makedirs(rounds, exist_ok=True)
+        os.makedirs(rounds, mode=0o700, exist_ok=True)
         stem = "%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), self.bounty["id"])
         path, n = os.path.join(rounds, stem), 1
         while True:
             try:
-                os.mkdir(path)
+                os.mkdir(path, 0o700)   # (eye and hand frames: private, DEE-303)
                 break
             except FileExistsError:
                 n += 1
                 path = os.path.join(rounds, "%s-%d" % (stem, n))
-        os.mkdir(os.path.join(path, "takes"))
+        os.mkdir(os.path.join(path, "takes"), 0o700)
         self.session_dir = path
         if self.seed is None:
             self.seed = session_seed(os.path.basename(path))
@@ -1760,4 +1760,5 @@ def main():
 
 
 if __name__ == "__main__":
+    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600 (DEE-303)
     sys.exit(main())

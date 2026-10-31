@@ -227,6 +227,16 @@ class DryRunTest(unittest.TestCase):
         with open(os.path.join(s.session_dir, "takes", take, "prompts.jsonl")) as f:
             return [json.loads(line) for line in f]
 
+    def test_round_folders_are_private(self):
+        # even under a umask that would let others read them (the window sets 077 too)
+        old = os.umask(0o022)
+        try:
+            s, _, _ = self.run_round("depth")
+        finally:
+            os.umask(old)
+        for d in (os.path.dirname(s.session_dir), s.session_dir, os.path.join(s.session_dir, "takes")):
+            self.assertEqual(os.stat(d).st_mode & 0o777, 0o700, d)
+
     def test_round_and_profile(self):
         s, states, profile = self.run_round("depth")
         self.assertEqual(s.state, "done")

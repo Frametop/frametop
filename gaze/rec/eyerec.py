@@ -104,7 +104,7 @@ class Writer:
         self._bytes = 0
         self._busy = 0.0                           # s spent compressing and writing
         for c in CAMERAS:
-            os.makedirs(os.path.join(take_dir, "cam%d" % c), exist_ok=True)
+            os.makedirs(os.path.join(take_dir, "cam%d" % c), mode=0o700, exist_ok=True)
         self._index = open(os.path.join(take_dir, "index.tsv"), "a")
         if self._index.tell() == 0:
             self._index.write(INDEX_HEADER)
@@ -323,4 +323,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600 (DEE-303)
     main(sys.argv[1:])

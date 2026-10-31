@@ -96,6 +96,10 @@ test-c:
     run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/logfile-test.c -o build/tests/logfile-test
     run screens/tests/logfile-test.c build/tests/logfile-test
+    gcc -std=gnu11 -Wall -Wextra -Werror conf/test/ftsock-test.c -o build/tests/ftsock-test
+    run conf/test/ftsock-test.c build/tests/ftsock-test
+    g++ -std=c++17 -Wall -Wextra -Werror -x c++ conf/test/ftsock-test.c -o build/tests/ftsock-test-cxx
+    run "conf/test/ftsock-test.c (as C++)" build/tests/ftsock-test-cxx
     # hands: the skeleton fit needs no model runtime; sides, pinch and flagbuf link ncnn,
     # which only hands/build.sh builds (minutes, and a download), so they run where it's built
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-psabi hands/tests/skeleton_test.cpp \

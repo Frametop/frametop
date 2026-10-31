@@ -122,6 +122,7 @@
 #include "roomview.h"
 #include "levelpin.h"
 #include "posemath.h"
+#include "../conf/ftsock.h"
 #include "vrcmd.h"
 #include "trackwatch.h"
 #include "universefix.h"
@@ -1432,15 +1433,17 @@ void UpdateControls() {
 // socket, so its replies go nowhere.
 bool g_beside = false;  // a second ft-screens next to the desktop (ft_vr_beside)
 
+// One datagram to @name from an unbound socket of its own; a failing destination is logged
+// when it starts failing (ftsock.h).
+void SendFrom(int fd, ft_sock_log &to, const std::string &msg) {
+    ft_sock_send_logged(fd, &to, msg.data(), msg.size(), MSG_DONTWAIT);
+}
+
 void SendFloat(const std::string &msg) {
     if (g_beside) return;
     static const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    const char name[] = "frametop_float";
-    std::memcpy(addr.sun_path + 1, name, sizeof name - 1);
-    sendto(fd, msg.data(), msg.size(), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&addr),
-           socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
+    static ft_sock_log to{FT_SOCK_FLOAT, 0, 0, 0};
+    SendFrom(fd, to, msg);
     if (msg.rfind("resize ", 0) != 0)  // an edge drag sends many resizes a second
         std::printf("to ft-floatd: %s\n", msg.c_str());
 }
@@ -1448,34 +1451,22 @@ void SendFloat(const std::string &msg) {
 // To ft-dashpatch (@ft_dashpatch), from an unbound socket: the gamepad pill's click.
 void SendDashpatch(const std::string &msg) {
     static const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    const char name[] = "ft_dashpatch";
-    std::memcpy(addr.sun_path + 1, name, sizeof name - 1);
-    sendto(fd, msg.data(), msg.size(), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&addr),
-           socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
+    static ft_sock_log to{FT_SOCK_DASHPATCH, 0, 0, 0};
+    SendFrom(fd, to, msg);
 }
 
 // To the pointer helper (@ft_pointer_helper), from an unbound socket.
 void SendPointer(const std::string &msg) {
     static const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    const char name[] = "ft_pointer_helper";
-    std::memcpy(addr.sun_path + 1, name, sizeof name - 1);
-    sendto(fd, msg.data(), msg.size(), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&addr),
-           socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
+    static ft_sock_log to{FT_SOCK_POINTER_HELPER, 0, 0, 0};
+    SendFrom(fd, to, msg);
 }
 
 // To the input relay (@frametop_relay), from an unbound socket: hand pokes on Full Keyboard.
 void SendRelay(const std::string &msg) {
     static const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    const char name[] = "frametop_relay";
-    std::memcpy(addr.sun_path + 1, name, sizeof name - 1);
-    sendto(fd, msg.data(), msg.size(), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&addr),
-           socklen_t(offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1));
+    static ft_sock_log to{FT_SOCK_RELAY, 0, 0, 0};
+    SendFrom(fd, to, msg);
 }
 
 // A new panel: the pointer helper reads SteamVR's list of panels only every 20 s, so it's told

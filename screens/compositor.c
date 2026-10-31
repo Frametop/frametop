@@ -33,6 +33,8 @@
 //   COMMAND     run with WAYLAND_DISPLAY set to our socket (e.g. the Frametop session)
 // Runs in the dev container (wlroots 0.20); KWin connects from the host.
 #define _GNU_SOURCE
+#include "../conf/ftsock.h"
+
 #include <drm_fourcc.h>
 #include <linux/input-event-codes.h>
 #include <signal.h>
@@ -193,23 +195,29 @@ static bool spot_open(const struct server *s) {
     return s->spot_until && (int32_t)(s->spot_until - now_ms()) > 0;
 }
 
+// From the control socket (@ft_screens), so replies come back there; a failing destination is
+// logged when it starts failing (ftsock.h).
+static void sock_send(struct server *s, struct ft_sock_log *to, const char *msg) {
+    ft_sock_send_logged(s->relay_fd, to, msg, strlen(msg), MSG_DONTWAIT);
+}
+
 // To ft-frunner's socket (@ft_frunner): "key <code> <value>" while it has the typing, and
 // "dismiss <why>" when something else takes it (a click elsewhere, a pause).
 static void spot_send(struct server *s, const char *msg) {
-    struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    const char name[] = "ft_frunner";
-    memcpy(addr.sun_path + 1, name, sizeof name - 1);
-    sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
-           offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+    static struct ft_sock_log to = {FT_SOCK_FRUNNER, 0, 0, 0};
+    sock_send(s, &to, msg);
 }
 
 // To the input relay's control socket (@frametop_relay).
 static void relay_send(struct server *s, const char *msg) {
-    struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    const char name[] = "frametop_relay";
-    memcpy(addr.sun_path + 1, name, sizeof name - 1);
-    sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
-           offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+    static struct ft_sock_log to = {FT_SOCK_RELAY, 0, 0, 0};
+    sock_send(s, &to, msg);
+}
+
+// To ft-floatd (@frametop_float).
+static void float_send(struct server *s, const char *msg) {
+    static struct ft_sock_log to = {FT_SOCK_FLOAT, 0, 0, 0};
+    sock_send(s, &to, msg);
 }
 
 static bool fullkb(const struct server *s) {
@@ -566,11 +574,7 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
         if (s->beside) return;
         char msg[32];
         snprintf(msg, sizeof msg, "front %d", e->screen + 1);
-        struct sockaddr_un addr = {.sun_family = AF_UNIX};
-        const char name[] = "frametop_float";
-        memcpy(addr.sun_path + 1, name, sizeof name - 1);
-        sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
-               offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+        float_send(s, msg);
         return;
     }
     const uint32_t t = now_ms();
@@ -617,11 +621,7 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
                 // Meta+scroll on a floating window: its scale, bigger or smaller (ft-floatd).
                 char msg[48];
                 snprintf(msg, sizeof msg, "scale %d %d", sc->index + 1, e->dy < 0 ? 1 : -1);
-                struct sockaddr_un addr = {.sun_family = AF_UNIX};
-                const char name[] = "frametop_float";
-                memcpy(addr.sun_path + 1, name, sizeof name - 1);
-                sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
-                       offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+                float_send(s, msg);
                 break;
             }
             if (e->dy != 0)
@@ -1231,15 +1231,14 @@ static int control_readable(int fd, uint32_t mask, void *data) {
 
 static int open_control_socket(const char *name) {
     int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    const size_t len = strlen(name);
-    if (len == 0 || len >= sizeof addr.sun_path - 1) {
+    struct sockaddr_un addr;
+    const socklen_t len = ft_sock_addr(name, &addr);
+    if (!len) {
         wlr_log(WLR_ERROR, "bad control socket name");
         close(fd);
         return -1;
     }
-    memcpy(addr.sun_path + 1, name, len);
-    if (bind(fd, (struct sockaddr *)&addr, offsetof(struct sockaddr_un, sun_path) + 1 + len) != 0) {
+    if (bind(fd, (struct sockaddr *)&addr, len) != 0) {
         wlr_log(WLR_ERROR, "can't bind @%s (another ft-screens running?)", name);
         close(fd);
         return -1;
@@ -1322,7 +1321,7 @@ int main(int argc, char **argv) {
     s.rate[FT_FOCUSED] = 0, s.rate[FT_IN_VIEW] = 15, s.rate[FT_HIDDEN] = 1;
     s.period_ns = 1000000000LL / 90;
     s.phase_ms = 1;
-    const char *socket_name = "ft-screens-0", *control_name = "ft_screens";
+    const char *socket_name = "ft-screens-0", *control_name = FT_SOCK_SCREENS;
     char **command = NULL;
     s.vr = true;
     for (int i = 1; i < argc; ++i) {

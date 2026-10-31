@@ -80,6 +80,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "layout"))
 import ft_layout  # noqa: E402  (config and layout)
 from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_apps  # noqa: E402  (Launch as Standalone)
+import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
 
 SERVICE = IFACE = "org.frametop.Float"
 PATH = "/Float"
@@ -140,17 +141,13 @@ class Screens:
     """ft-screens' control socket."""
 
     def __init__(self, name):
-        self.address = "\0" + name
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self.sock.bind("")
+        self.address = name
+        self.client = ftipc.Client(timeout=2.0)
 
     def ask(self, text, quiet=False):
-        self.sock.settimeout(2.0)
-        try:
-            self.sock.sendto(text.encode(), self.address)
-            reply = self.sock.recv(8192).decode()
-        except OSError as e:
-            reply = f"error no answer ({e})"
+        reply = self.client.ask(self.address, text)
+        if reply is None:
+            reply = f"error no answer ({self.client.why})"
         if not reply.startswith("ok") and not quiet:
             log(f"ft-screens: {text}: {reply}")
         return reply

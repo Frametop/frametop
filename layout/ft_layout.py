@@ -138,10 +138,17 @@ SCREENS = "\0ft_screens"
 # directory, not /tmp, where another user could put a link there first.
 LOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "ft-layout.lock")
 FLOAT = "\0frametop_float"  # ft-floatd: the apps' windows (profiles)
+# The sizes Display Settings offers for a screen and Remote Displays for a stream: (w, h, what).
+# ft-screens has no pixel limit; portrait screens are just tall.
+SCREEN_RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2560, 1080, "ultrawide"),
+                      (3440, 1440, "ultrawide"), (5120, 1440, "super ultrawide"), (1920, 1200, "16:10"),
+                      (2560, 1600, "16:10"), (1080, 1920, "portrait"), (1440, 2560, "portrait"),
+                      (2160, 3840, "portrait 4K")]
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (JSON files read and written safely, DEE-300)
+import ftipc  # noqa: E402  (questions to the datagram sockets, DEE-305)
 LAUNCHERS = os.path.expanduser("~/.local/share/applications")  # a profile's launcher entry each
 DEFAULT_PANEL = (1.18, 0.664)  # gamescope: a floating 16:9 dashboard panel, measured on the Frame
 PIXELS_PER_METRE = 800         # ft-screens: a new screen's default size in VR (1920 px: 2.4 m)
@@ -680,19 +687,18 @@ class Socket:
 
     def __init__(self, address, what):
         self.address, self.what = address, what
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self.sock.bind("")  # autobind: an abstract address the other side can reply to
+        self.client = ftipc.Client()
 
     def ask(self, text, timeout=10.0):
-        self.sock.settimeout(timeout)
-        try:
-            self.sock.sendto(text.encode(), self.address)
-            reply = self.sock.recv(8192).decode()
-        except (OSError, socket.timeout) as e:
-            raise NoAnswer(f"{self.what} didn't answer ({e})")
+        reply = self.client.ask(self.address, text, timeout)
+        if reply is None:
+            raise NoAnswer(f"{self.what} didn't answer ({self.client.why})")
         if not reply.startswith("ok"):
             raise RuntimeError(reply)
         return reply
+
+    def close(self):
+        self.client.close()
 
 
 # ---------------------------------------------------------------- ft-screens
@@ -895,7 +901,7 @@ def recenter_screens():
         log(f"recentered {len(results)} panel(s); app windows and streams unchanged")
         return results
     finally:
-        sock.sock.close()
+        sock.close()
 
 
 def check_room(sock):
@@ -1623,16 +1629,7 @@ def delete_named(layout, name):
 
 def ask_float(text, timeout=6.0):
     """ft-floatd (floating windows, in the desktop's session); None if it isn't running."""
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    sock.bind("")
-    sock.settimeout(timeout)
-    try:
-        sock.sendto(text.encode(), FLOAT)
-        return sock.recv(1 << 20).decode()
-    except OSError:
-        return None
-    finally:
-        sock.close()
+    return ftipc.ask(FLOAT, text, timeout)
 
 
 def capture_profile(layout, name):

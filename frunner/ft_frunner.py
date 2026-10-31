@@ -64,6 +64,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "layout"))
 sys.path.insert(0, HERE)
 import ft_layout  # noqa: E402  (the layout: remote displays)
+import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
 sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands)
 import spotsearch  # noqa: E402
@@ -318,8 +319,7 @@ class Frunner:
         self.sock.bind("\0" + args.socket)
         self.sock.setblocking(False)
         self.fire = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)  # unbound: nobody answers it
-        self.asker = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self.asker.bind("")
+        self.asker = ftipc.Client()
         self.float_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)  # ft-floatd's slow answers
         self.float_sock.bind("")
         self.float_sock.setblocking(False)
@@ -363,12 +363,7 @@ class Frunner:
 
     def ask(self, name, text, timeout=1.0):
         """A question to ft-screens or ft-spotpanel; None without an answer."""
-        self.asker.settimeout(timeout)
-        try:
-            self.asker.sendto(text.encode(), "\0" + name)
-            return self.asker.recv(65536).decode(errors="replace")
-        except OSError:
-            return None
+        return self.asker.ask(name, text, timeout)
 
     def screens(self, text, timeout=1.0):
         reply = self.ask(self.args.screens, text, timeout)

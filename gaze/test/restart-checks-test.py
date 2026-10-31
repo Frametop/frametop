@@ -22,16 +22,16 @@ import tempfile
 HOME = tempfile.mkdtemp(prefix="ft-gaze-restart-checks-test-")
 os.environ["HOME"] = HOME  # before gazecal: its STATE follows HOME
 
-import selectors  # noqa: E402
-import shutil  # noqa: E402
-import socket  # noqa: E402
-import sys  # noqa: E402
-import threading  # noqa: E402
-import time  # noqa: E402
-import types  # noqa: E402
+import selectors
+import shutil
+import socket
+import sys
+import threading
+import time
+import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-import gazecheck  # noqa: E402
+import gazecheck
 
 tag = f"ft_gaze_restart_checks_test_{os.getpid()}"
 gazecheck.PANEL = f"\0{tag}_panel"

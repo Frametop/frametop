@@ -1,5 +1,6 @@
 ---- MODULE G1Lifecycle ----
-\* Frametop G1, lifecycle and presence, as the code at frametop 78e93b1 (experimental) does it.
+\* Frametop G1, lifecycle and presence, as the code at frametop 78e93b1 (experimental) does it,
+\* with the L1-L7 fixes (DEE-252..258) since: see "Fixed" in docs/charts/README.md.
 \* Read-only model: it describes the code and changes nothing. The copy kept for the reader is
 \* ~/frametop-charts/charts/G1-lifecycle.tla; TLC needs the file named after the module, so the
 \* runs use this copy, G1Lifecycle.tla.
@@ -93,13 +94,14 @@ Init ==
 
 \* ---- The relay's pause() and resume() (game_pause.py GamePause), in one step each ----
 \* pause(): ends_with_game = game and pause_auto; tell_screens(True); the relay's part
-\* (pause_changed: gamepad.stop, Pointer.stand_down's "hide pause" when it was active, pointer None);
+\* (pause_changed: gamepad.stop, Pointer.stand_down's "hide pause", which goes every time since L1's
+\* fix, pointer None);
 \* the worker's "pause" job; save().
 DoPause(g) ==
     /\ paused' = TRUE /\ ends' = g /\ due' = FALSE
     /\ spaused' = IF desk = "up" THEN TRUE ELSE spaused
     /\ pad' = FALSE
-    /\ ptr' = IF ractive THEN FALSE ELSE ptr
+    /\ ptr' = FALSE
     /\ ractive' = FALSE /\ mouse' = FALSE
     /\ jobs' = Append(jobs, "pause")
     /\ file' = FileOf(TRUE, g, stU, stD)
@@ -254,22 +256,28 @@ RelayDies ==
     /\ UNCHANGED <<svrVars, file, desk, spaused, lost, ptr, wornVars>>
 
 \* It starts (Restart=on-failure, 1 s): load() takes the state file; paused, it queues "enforce".
-\* load_config(): the pointer only when not paused. A new Pointer starts inactive; the game
-\* starts unknown (False) and resume_at unset.
+\* Not paused but with a list of what a pause stopped (a resume whose job didn't run), it queues
+\* "resume" (L5's fix). load_config(): the pointer only when not paused, and a paused relay's
+\* pointer stands down, so the helper lets go (L1's fix). A new Pointer starts inactive; resume_at
+\* is unset; the game is taken as running when the pause ends with it (L6's fix), else unknown.
 RelayStarts ==
     /\ relay = "down" /\ relay' = "up"
-    /\ paused' = file.paused /\ ends' = (file.paused /\ file.ends)
-    /\ stU' = IF file.paused THEN file.units ELSE {}
-    /\ stD' = IF file.paused THEN file.desk ELSE "none"
-    /\ jobs' = IF file.paused THEN <<"enforce">> ELSE <<>>
+    /\ LET leftover == ~file.paused /\ (file.units # {} \/ file.desk = "closed")
+       IN /\ paused' = file.paused /\ ends' = (file.paused /\ file.ends)
+          /\ rgame' = (file.paused /\ file.ends)
+          /\ stU' = IF file.paused \/ leftover THEN file.units ELSE {}
+          /\ stD' = IF file.paused \/ leftover THEN file.desk ELSE "none"
+          /\ jobs' = IF file.paused THEN <<"enforce">> ELSE IF leftover THEN <<"resume">> ELSE <<>>
     /\ mouse' = ~file.paused
-    /\ UNCHANGED <<svrVars, rgame, due, ractive, pad, ptr, file, desk, spaused, told, lost, wornVars>>
+    /\ ptr' = IF file.paused THEN FALSE ELSE ptr
+    /\ UNCHANGED <<svrVars, due, ractive, pad, file, desk, spaused, told, lost, wornVars>>
 
 \* ---- The pause worker, one job at a time, then save() ----
 \* "pause": close the desktop (pause_desktop close, ft-screens running: desktops.sh stop) or mark
-\* it hidden; then stop_units(): every unit that is active now stops and goes on the list.
+\* it hidden; then stop_units(): every unit that is active, or activating (a restart systemd has
+\* queued: L4's fix), stops and goes on the list.
 StopUnits(g0, h0) ==
-    LET sg == g0 = "up"
+    LET sg == g0 \in {"up", "restarting"}
         sh == h0 = "up" /\ HandsWithDesk
     IN /\ gaze' = IF sg THEN "down" ELSE g0
        /\ hands' = IF sh THEN "down" ELSE h0
@@ -298,13 +306,14 @@ WorkerEnforces ==
     /\ UNCHANGED <<svr, helper, game, relay, paused, ends, rgame, due, mouse, ractive, ptr, pad,
                    stD, desk, spaused, told, lost, wornVars>>
 
-\* "resume": systemctl --user start the listed units. frametop-gaze has Requisite=steamvr.service,
-\* so it fails without SteamVR; frametop-camd and frametop-hands have no Requisite, so they start
-\* anyway. A closed desktop starts again (desktops.sh start; without SteamVR ft-screens can't).
+\* "resume": systemctl --user start the listed units, only with SteamVR running (L3's fix: camd and
+\* hands have no Requisite=steamvr.service), and with HANDS_MODE=frametop, hand tracking only with
+\* the desktop running (a closed desktop starts it itself). A closed desktop starts again
+\* (desktops.sh start; without SteamVR ft-screens can't).
 WorkerResumes ==
     /\ relay = "up" /\ jobs # <<>> /\ Head(jobs) = "resume" /\ jobs' = Tail(jobs)
     /\ gaze' = IF "gaze" \in stU /\ svr = "up" /\ gaze = "down" THEN "up" ELSE gaze
-    /\ hands' = IF "hands" \in stU THEN "up" ELSE hands
+    /\ hands' = IF "hands" \in stU /\ svr = "up" /\ desk = "up" THEN "up" ELSE hands
     /\ desk' = IF stD = "closed" /\ svr = "up" /\ desk = "down" THEN "starting" ELSE desk
     /\ stU' = {} /\ stD' = "none"
     /\ file' = FileOf(paused, ends, {}, "none")
@@ -312,12 +321,15 @@ WorkerResumes ==
                    spaused, told, lost, wornVars>>
 
 \* ---- The desktop ----
-\* ft-screens is listening: a new one starts unpaused; the session says "handsmode up".
+\* ft-screens is listening: a new one starts unpaused; the session says "handsmode up", then
+\* "ft-pause enforce" (L2's fix): a paused relay queues "enforce", which stops that hand tracking.
 DesktopUp ==
     /\ desk = "starting" /\ svr = "up"
     /\ desk' = "up" /\ spaused' = FALSE /\ told' = FALSE /\ lost' = FALSE
     /\ hands' = IF HandsWithDesk THEN "up" ELSE hands
-    /\ UNCHANGED <<svr, helper, gaze, game, relay, rgame, stU, stD, pauseVars, wornVars>>
+    /\ jobs' = IF relay = "up" /\ paused THEN Append(jobs, "enforce") ELSE jobs
+    /\ UNCHANGED <<svr, helper, gaze, game, relay, rgame, stU, stD, paused, ends, due, pad, ptr,
+                   ractive, mouse, file, wornVars>>
 
 \* ft-screens says "keyboard ..." each second; the relay sees a new pid (screens_seen) and, paused,
 \* tells it "pause on".
@@ -325,6 +337,16 @@ RelaySeesScreens ==
     /\ relay = "up" /\ desk = "up" /\ ~told
     /\ told' = TRUE /\ spaused' = (spaused \/ paused)
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, lost, paused, ends, due, pad, ptr,
+                   ractive, mouse, jobs, file, wornVars>>
+
+\* ft-screens' report each second now says whether it's paused; one out of step with the relay is
+\* told again (screens_report, L7's fix). A lost correction is followed by the next report, so the
+\* model takes the one that gets through.
+ScreensBehind == relay = "up" /\ desk = "up" /\ told /\ spaused # paused
+ScreensReport ==
+    /\ ScreensBehind
+    /\ spaused' = paused
+    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, paused, ends, due, pad, ptr,
                    ractive, mouse, jobs, file, wornVars>>
 
 \* ---- Presence: the headset and the displays ----
@@ -394,7 +416,7 @@ Next ==
     \/ YouMoveMouse \/ MouseIdles \/ YouMoveController \/ YouStartGamepad \/ YouEndGamepad
     \/ SteamVRStarts \/ SteamVRStops \/ HelperHello \/ HelperSaysGame \/ GameGoesStale
     \/ ResumeDelayPasses \/ GazeDies \/ GazeRestarts \/ RelayDies \/ RelayStarts
-    \/ WorkerPauses \/ WorkerEnforces \/ WorkerResumes \/ DesktopUp \/ RelaySeesScreens
+    \/ WorkerPauses \/ WorkerEnforces \/ WorkerResumes \/ DesktopUp \/ RelaySeesScreens \/ ScreensReport
     \/ YouTakeHeadsetOff \/ YouPutHeadsetOn \/ TimePasses \/ PowerdTimesOut \/ YouUseIt
     \/ PowerdDies \/ PowerdRestarts
 
@@ -412,11 +434,12 @@ TypeOK ==
     /\ \A i \in 1..Len(jobs) : jobs[i] \in {"pause", "resume", "enforce"}
 
 \* Nothing is on its way: the relay runs with an empty queue, the helper said hello, the desktop
-\* isn't starting and the relay has seen it, no resume is due, and the relay's game agrees with
-\* the helper's (or a gone helper's game went stale).
+\* isn't starting and the relay has seen it, no resume is due, ft-screens' next report isn't
+\* about to correct it (ScreensReport), and the relay's game agrees with the helper's (or a gone
+\* helper's game went stale).
 Quiet ==
     /\ relay = "up" /\ jobs = <<>> /\ helper # "starting" /\ gaze # "restarting"
-    /\ desk # "starting" /\ (desk = "up" => told) /\ ~due
+    /\ desk # "starting" /\ (desk = "up" => told) /\ ~due /\ ~ScreensBehind
     /\ (helper = "up" => rgame = game) /\ (helper # "up" => ~rgame)
 
 \* Paused, the relay neither feeds the 3D mouse nor runs gamepad mode.

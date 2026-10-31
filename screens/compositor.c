@@ -161,6 +161,7 @@ struct server {
     bool keys_clicked;    // the last click was on a screen
     bool keys_desktop;    // ...and the screens are showing: typing goes to the desktop
     bool keys_shown;      // the relay was told the screens show (see keys_update)
+    bool keys_paused;     // ...and that we're paused ("pause on" from it)
     int key_remote;       // the last click was on this remote screen (index): typing goes to it; -1 not
     // Frunner's search (frunner/ft-frunner) has the typing while it's open: "frunner on",
     // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
@@ -690,14 +691,20 @@ static void keys_update(struct server *s) {
                 pill = i;
     }
     ft_vr_gamepad_target(pill);
+    // The fourth word is our pause: a "pause on|off" from the relay that never came (its socket
+    // was full) leaves us out of step until it hears this and says it again (DEE-258).
+    const bool paused = ft_vr_paused();
     const uint32_t t = now_ms();
-    if (desktop == s->keys_desktop && shown == s->keys_shown && t - s->relay_sent < 1000) return;
+    if (desktop == s->keys_desktop && shown == s->keys_shown && paused == s->keys_paused &&
+        t - s->relay_sent < 1000)
+        return;
     if (desktop != s->keys_desktop) wlr_log(WLR_INFO, "typing goes to %s", desktop ? "the desktop" : "Steam");
     s->keys_desktop = desktop;
     s->keys_shown = shown;
+    s->keys_paused = paused;
     s->relay_sent = t;
     char msg[32];
-    snprintf(msg, sizeof msg, "keyboard %s %d", desktop ? "desktop" : "steam", shown ? 1 : 0);
+    snprintf(msg, sizeof msg, "keyboard %s %d %d", desktop ? "desktop" : "steam", shown ? 1 : 0, paused ? 1 : 0);
     relay_send(s, msg);
 }
 

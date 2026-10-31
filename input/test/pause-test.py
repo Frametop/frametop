@@ -6,10 +6,12 @@ renamed, so nothing reaches the live Frametop, SteamVR, or the running relay.
 
   input/test/pause-test.py
 """
+import json
 import os
 import sys
 import shutil
 import tempfile
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import game_pause as gp  # noqa: E402
@@ -120,6 +122,9 @@ class StubWorker:
     def enforce(self):
         pass
 
+    def defer_remote(self):
+        pass
+
 
 class StubWatch:
     connected = False
@@ -146,6 +151,7 @@ gp.SCREENS = f"\0ft_pause_test_{os.getpid()}_screens"
 gp.HELPER = f"\0ft_pause_test_{os.getpid()}_helper"  # "paused 1|0" mustn't reach the live pointer helper
 os.makedirs(os.path.join(tmp, "frametop-hands"))
 gp.PARK_PATH = os.path.join(tmp, "frametop-hands", "park")
+RealWorker = gp.Worker
 gp.Worker, gp.ControllerWatch = StubWorker, StubWatch
 changes = []
 
@@ -272,6 +278,120 @@ p.set_hands(False)
 q.toggle("gesture", 1)
 r = gp.GamePause(lambda *a: None, changes.append, VR)
 check("resumed: the next relay starts running", r.paused, False)
+
+# ---------------------------------------------------------------- relay restarts (DEE-256, DEE-257)
+def restart_with(state):
+    with open(gp.STATE_PATH, "w") as f:
+        json.dump(state, f)
+    return gp.GamePause(lambda *a: None, changes.append, VR)
+
+
+r = restart_with({"paused": False, "stopped": {"units": ["frametop-gaze.service"], "remote": True, "desktop": None}})
+check("restarted after a resume, before its job ran: the next relay resumes what the pause stopped",
+      (r.paused, r.worker.jobs, r.worker.restored["units"]), (False, ["resume"], ["frametop-gaze.service"]))
+r = restart_with({"paused": False, "stopped": {"units": [], "remote": False, "desktop": "closed"}})
+check("...a closed desktop too", r.worker.jobs, ["resume"])
+r = restart_with({"paused": False, "stopped": {"units": [], "remote": False, "desktop": "hidden"}})
+check("...but nothing to start: nothing", r.worker.jobs, [])
+r = restart_with({"paused": False, "stopped": "junk"})
+check("...a broken list: nothing", (r.paused, r.worker.jobs), (False, []))
+
+r = restart_with({"paused": True, "reason": "game", "ends_with_game": True, "stopped": {}})
+check("restarted during a pause that ends with its game: the game counts as running",
+      (r.paused, r.game, r.worker.jobs), (True, True, ["enforce"]))
+now = time.monotonic()
+r.game_state(False, now)
+r.tick(now + gp.RESUME_DELAY + 0.1)
+check("...the helper says it ended: resumed", r.paused, False)
+r = restart_with({"paused": True, "reason": "game", "ends_with_game": True, "stopped": {}})
+now = time.monotonic()
+r.tick(now + gp.GAME_STALE + 0.1)
+r.tick(now + gp.GAME_STALE + gp.RESUME_DELAY + 0.2)
+check("...no word from the helper at all (SteamVR stopped too): resumed", r.paused, False)
+r = restart_with({"paused": True, "reason": "gesture", "ends_with_game": False, "stopped": {}})
+check("restarted during a pause not tied to a game: no game assumed", (r.paused, r.game), (True, False))
+
+# ---------------------------------------------------------------- desktop starts mid-pause (DEE-253, 258, 280)
+p = new()
+told = []
+p.tell_screens = told.append
+p.screens_report(False)
+check("running, ft-screens running: nothing said", told, [])
+p.toggle("gesture", 0)
+told.clear()
+p.screens_report(True)
+check("paused, ft-screens paused: nothing said", told, [])
+p.screens_report(False)
+check("paused, ft-screens missed it: told again", told, [True])
+p.desktop_started()
+check("a desktop starts mid-pause: hand tracking stops again", p.worker.jobs[-1], "enforce")
+check("remote access waits for the resume", (p.defer_remote(), p.worker.jobs[-1]), (True, "defer_remote"))
+p.toggle("gesture", 1)
+told.clear()
+p.screens_report(True)
+check("resumed, ft-screens missed it: told again", told, [False])
+n = len(p.worker.jobs)
+p.desktop_started()
+check("running: a desktop start changes nothing", (p.defer_remote(), len(p.worker.jobs)), (False, n))
+
+# ---------------------------------------------------------------- the worker (DEE-254, DEE-255)
+calls = []
+unit_state = {}
+
+
+def fake_output(cmd, timeout=10):
+    if cmd[:3] == ["systemctl", "--user", "is-active"]:
+        return unit_state.get(cmd[3], "inactive") + "\n"
+    return ""
+
+
+def fake_run(cmd, timeout=30):
+    calls.append(cmd)
+    if cmd[:3] == ["pgrep", "-x", "ft-screens"]:
+        return 0 if desktop_up else 1
+    return 0
+
+
+gp.output, gp.run = fake_output, fake_run
+desktop_up = True
+w = RealWorker(lambda *a: None, lambda: None)
+unit_state = {"frametop-gaze.service": "activating", "frametop-hands.service": "active", "steamvr.service": "active"}
+calls.clear()
+w.stop_units()
+check("a gaze service systemd is restarting counts as running: it stops", calls[0],
+      ["systemctl", "--user", "stop", "frametop-gaze.service", "frametop-hands.service"])
+check("failed and inactive units don't", (gp.active("x.service"), gp.active("frametop-camd.service")), (False, False))
+
+w.restore({"units": ["frametop-gaze.service", "frametop-hands.service"]})
+unit_state = {}
+calls.clear()
+w.resume()
+check("resumed with SteamVR off: nothing starts", [c for c in calls if c[:3] == ["systemctl", "--user", "start"]], [])
+check("...and the list is cleared", w.snapshot()["units"], [])
+
+w.restore({"units": ["frametop-gaze.service", "frametop-hands.service"]})
+unit_state = {"steamvr.service": "active"}
+w.hands_with_desktop, desktop_up = True, False
+calls.clear()
+w.resume()
+check("HANDS_MODE=frametop, no desktop: only gaze starts",
+      [c for c in calls if c[:3] == ["systemctl", "--user", "start"]],
+      [["systemctl", "--user", "start", "frametop-gaze.service"]])
+w.restore({"units": ["frametop-gaze.service", "frametop-hands.service"]})
+desktop_up = True
+calls.clear()
+w.resume()
+check("...with the desktop: both", [c for c in calls if c[:3] == ["systemctl", "--user", "start"]],
+      [["systemctl", "--user", "start", "frametop-gaze.service", "frametop-hands.service"]])
+w.restore({"units": ["frametop-hands.service"]})
+w.hands_with_desktop, desktop_up = False, False
+calls.clear()
+w.resume()
+check("hand tracking started by hand (not HANDS_MODE=frametop): back without a desktop too",
+      [c for c in calls if c[:3] == ["systemctl", "--user", "start"]],
+      [["systemctl", "--user", "start", "frametop-hands.service"]])
+w.defer_remote()
+check("a deferred remote desktop is on the list", w.snapshot()["remote"], True)
 
 p = new({"pause_gesture": None})
 check("pause_gesture null: the reader gets none", p.watch.spec, None)

@@ -3,6 +3,10 @@
 
   ft-pause on|off|toggle   pause or resume (input/game_pause.py has what pausing stops)
   ft-pause status          the pause state, as JSON (the default)
+  ft-pause enforce         while paused, stop again what pausing stops (frametop-session.sh, once
+                           a desktop started hand tracking)
+  ft-pause defer-remote    while paused, leave remote access to the resume; exits 0 when paused,
+                           1 when not or with no relay (frametop-session.sh, before it starts it)
 
 The input relay does it (frametop-input-relay.service). So do the pause_toggle action, the
 controller gesture (by default both thumbsticks clicked together twice), and, with auto pause on,
@@ -35,6 +39,10 @@ def main():
     if cmd in ("on", "off", "toggle"):
         r = ask(f"pause {cmd} command")
         print("Frametop paused" if r.get("paused") else "Frametop running")
+    elif cmd == "enforce":
+        ask("pause enforce")
+    elif cmd == "defer-remote":
+        sys.exit(0 if ask("pause defer remote").get("paused") else 1)
     elif cmd == "status":
         print(json.dumps(ask("pause ?"), indent=1))
     else:

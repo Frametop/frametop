@@ -994,10 +994,11 @@ class Pointer:
         reconnects with it pressed on resume. Gaze holds (gazekey, gazedrag, precision) aren't
         tracked here: the helper ends them itself when the pointer hides.
 
-        The releases go before "hide", and "hide" follows them even when the pointer was off
-        already (the idle timeout or pointer_toggle with a button held): a helper built before
-        releases stopped waking it would wake on one and connect the virtual controller
-        during the game.
+        The releases go before "hide", and "hide" goes even when the pointer was off already
+        (the idle timeout or pointer_toggle with a button held): a helper built before releases
+        stopped waking it would wake on one and connect the virtual controller during the game.
+        And a relay that restarted doesn't know whether the helper still holds the pointer, so
+        it can't tell from its own state (DEE-252).
 
         Not covered: gaze mode's held-back press (the helper's aim, before it becomes a real
         press) turns into a click on its release. The helper drops it without a click when it
@@ -1017,8 +1018,7 @@ class Pointer:
         self.system_at = self.system_release = self.claim_at = self.claim_release = self.scroll_until = None
         self.dx = self.dy = self.pending = 0
         self.gaze_awake_until = 0.0
-        if self.active or releases:
-            self.send("hide pause")
+        self.send("hide pause")
         if self.active:
             self.active = False
             log("pointer off (paused)")
@@ -1189,9 +1189,13 @@ def main():
         # HANDS_MODE=always keeps hand tracking running through games.
         # Direct touch alone (HANDS_NEAR=on) needs the same: the helper's handoff runs for it.
         pause.set_hands(conf.get("POINTER_HANDS", "0") == "1" or conf.get("HANDS_NEAR") == "on",
-                        conf.get("HANDS_MODE") == "always")
+                        conf.get("HANDS_MODE") == "always", conf.get("HANDS_MODE") == "frametop")
 
     load_config()
+    if pause.paused and state["pointer_conf"]:
+        # Restarted while paused: the helper may still hold the pointer the last relay woke, and
+        # this relay's new Pointer doesn't know, so it lets go now (DEE-252).
+        state["pointer_conf"].stand_down()
     tap = None  # the modifier (folded, MODIFIERS) pressed alone, with nothing since: its release is a tap
     screens_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
     last_typing = 0.0  # the helper was last told of a key then (see "typing" at the top)
@@ -1867,12 +1871,15 @@ def main():
             try:
                 if cmd == "keyboard":
                     # From ft-screens (unbound, no reply): where typing goes, repeated every second.
-                    # "keyboard desktop|steam 1|0": the third word, whether the screens show.
+                    # "keyboard desktop|steam 1|0 1|0": the third word, whether the screens show;
+                    # the fourth, whether it's paused (an older ft-screens leaves it out).
                     desktop = len(words) > 1 and words[1] == "desktop" and not pause.paused
                     state["desktop_until"] = now + 3.0 if desktop else 0.0
                     state["shown_until"] = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
                     if uid == os.getuid():
                         pause.screens_seen(pid)  # a desktop started while paused hides too
+                        if len(words) > 3 and words[3] in ("0", "1"):
+                            pause.screens_report(words[3] == "1")
                     continue
                 if cmd == "vrbtn" and len(words) == 3 and words[1] in VR_BUTTONS and words[2] in ("0", "1"):
                     vr_button(words[1], int(words[2]), now)
@@ -1913,6 +1920,19 @@ def main():
                         pause.toggle(reason, now)
                     elif words[1] != "?":
                         pause.set(words[1] == "on", reason, now)
+                    if addr:
+                        reply(addr, pause.status())
+                    continue
+                if cmd == "pause" and words[1:] in (["enforce"], ["defer", "remote"]):
+                    # From frametop-session.sh (input/ft-pause enforce|defer-remote) as a desktop
+                    # starts: while paused, its hand tracking stops again, and remote access waits
+                    # for the resume. Both stop things, so only from this user.
+                    if uid != os.getuid():
+                        log(f"pause {words[1]} from another user ({uid}): ignored")
+                    elif words[1] == "enforce":
+                        pause.desktop_started()
+                    else:
+                        pause.defer_remote()
                     if addr:
                         reply(addr, pause.status())
                     continue

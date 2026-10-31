@@ -121,6 +121,9 @@ if [ "${1:-}" != --inner ]; then
   for _ in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/$socket" ] && break; sleep 0.2; done
   [ -S "$XDG_RUNTIME_DIR/$socket" ] || { echo "ft-screens didn't start (see $screens_log)" >&2; exit 1; }
   handsmode up
+  # Paused for a VR game, the relay stops that hand tracking again (DEE-253). In the background:
+  # an input relay that doesn't answer mustn't hold up the desktop.
+  "$here/../input/ft-pause" enforce >/dev/null 2>&1 &
   WAYLAND_DISPLAY=$XDG_RUNTIME_DIR/$socket "$0" --inner
   exit
 fi
@@ -245,7 +248,12 @@ export XCURSOR_THEME=${cursor_theme:-breeze_cursors} XCURSOR_SIZE=${cursor_size:
 if [ "$remote" = 1 ]; then
   export KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 KWIN_SCREENSHOT_NO_PERMISSION_CHECKS=1
   touch "$runtime/remote-capable"
-  "$here/remote-ctl.sh" start
+  # Paused for a VR game, the resume starts it instead (DEE-280).
+  if "$here/../input/ft-pause" defer-remote >/dev/null 2>&1; then
+    echo "remote desktop: Frametop is paused, it starts with the resume"
+  else
+    "$here/remote-ctl.sh" start
+  fi
 fi
 
 # AT-SPI: start the registry inside Plasma's autostart, after KWin has published the

@@ -38,6 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REC = os.path.dirname(HERE)
 sys.path.insert(0, REC)
 import takes  # noqa: E402  (hands/rec/takes.py)
+import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 
 GIFSICLE = os.environ.get("HANDDEMO_GIFSICLE") or shutil.which("gifsicle") or os.path.expanduser(
     "~/.cache/gifwork/gifsicle-src/src/gifsicle")
@@ -168,7 +169,7 @@ def find_window(session, section, demo, hands):
 
 def clip_sets(take, t0, t1):
     ti = takes.TakeIndex(take)
-    deleted = takes.read_json(os.path.join(take, "take.json")).get("deleted") or []
+    deleted = recorder.files.read_json(os.path.join(take, "take.json")).get("deleted") or []
     keep = [i for i in range(len(ti)) if t0 <= ti.time_ns(i) <= (t1 or 1 << 62)
             and not any(a <= ti.time_ns(i) <= b for a, b in deleted)]
     return ti, keep
@@ -241,7 +242,7 @@ def main():
         cal = json.load(f)
     cams = {n: Fisheye(cal, n) for n in SIDES}
     os.makedirs(a.out, exist_ok=True)
-    views = takes.read_json(os.path.join(a.out, "views.json")) or {}
+    views = recorder.files.read_json(os.path.join(a.out, "views.json")) or {}
     for v in a.view:
         part, _, vals = v.partition("=")
         views[part] = [float(x) for x in vals.split(",")]

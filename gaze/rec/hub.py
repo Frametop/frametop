@@ -36,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 import takes  # noqa: E402  (next to this file)
+import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 from recorder import bounties  # noqa: E402
 from recorder import hub as rhub  # noqa: E402
 from recorder.common import write_json  # noqa: E402
@@ -80,7 +81,7 @@ def describe(summary, report, sha, nbytes):
              f"- Health answers: {'included, encrypted' if s.get('health') else 'none'}",
              f"- Consent version: {s.get('consent_version')}",
              f"- Tool: {s.get('tool')}",
-             f"- Size: {takes.human_bytes(nbytes)}",
+             f"- Size: {recorder.files.human_bytes(nbytes)}",
              f"- SHA256 of SHA256SUMS: {sha}", "",
              "Checked with gaze/rec/validate.py: no errors" + (f", {len(report.warnings)} warnings:"
                                                                 if report.warnings else ".")]
@@ -170,10 +171,10 @@ def upload(store, rnd, dry_run=False, again=False, progress=None, log=None):
 
     if dry_run:
         say(f"dry run: would check the login (whoami) and access to {repo} (auth_check)")
-        say(f"dry run: would upload_folder {len(files)} files, {takes.human_bytes(report.bytes)}, "
+        say(f"dry run: would upload_folder {len(files)} files, {recorder.files.human_bytes(report.bytes)}, "
             f"from {export} to datasets/{repo}/{path_in_repo}, as a pull request")
         for rel in sorted(files):
-            say(f"  {rel}  {takes.human_bytes(os.path.getsize(os.path.join(export, rel)))}")
+            say(f"  {rel}  {recorder.files.human_bytes(os.path.getsize(os.path.join(export, rel)))}")
         say(f"dry run: commit message: {message}")
         say("dry run: commit description:\n" + description.rstrip())
         record = {"repo": repo, "pr_url": "", "uploaded": now_iso(), "export_sha": sha, "status": "done"}
@@ -182,7 +183,7 @@ def upload(store, rnd, dry_run=False, again=False, progress=None, log=None):
         return dict(plan, dry_run=True, pr_url="", record=record)
 
     pr, who, record = rhub.push(_hf(), repo, export, path_in_repo, message, description, meta_path(store, rnd), sha,
-                                len(files), report.bytes, tell, write_json, takes.human_bytes)
+                                len(files), report.bytes, tell, write_json, recorder.files.human_bytes)
     tell("done", "Uploaded", 1.0)
     return dict(plan, dry_run=False, pr_url=record["pr_url"], pr_num=pr.num, user=who.get("name", ""), record=record)
 

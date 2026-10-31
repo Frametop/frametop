@@ -17,6 +17,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import takes  # noqa: E402
+import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 import hub  # noqa: E402
 from recorder import contributions  # noqa: E402
 from test_validate import make_session, SESSION  # noqa: E402
@@ -90,7 +91,7 @@ class FreeTest(unittest.TestCase):
         record = {"repo": "DeeJanuz/frametop-hands", "pr_url": PR, "pr_num": 12, "uploaded": iso(time.time() + 5),
                   "export_sha": "x", "status": "done"}
         record.update(kw)
-        meta = takes.read_json(self.meta_path)
+        meta = recorder.files.read_json(self.meta_path)
         meta.setdefault("uploads", []).append(record)
         meta["bounty"] = {"id": "index-taps", "title": "Index taps"}
         st = os.stat(self.meta_path)
@@ -186,7 +187,7 @@ class ExportRoomTest(unittest.TestCase):
 
     def test_stops_before_full(self):
         """The disk gets down to EXPORT_MIN_FREE as it goes: the export stops and cleans up."""
-        real = takes.free_bytes
+        real = recorder.files.free_bytes
         takes._room_checked[0] = 0.0
 
         def free(path):
@@ -196,7 +197,7 @@ class ExportRoomTest(unittest.TestCase):
                 self.store.export(SESSION, low_priority=False)
         self.assertTrue(str(cm.exception).startswith("The disk got nearly full, so the export stopped"))
         self.assertFalse(os.path.exists(self.partial))
-        self.assertIs(takes.free_bytes, real)
+        self.assertIs(recorder.files.free_bytes, real)
 
 
 class HubLogTest(unittest.TestCase):
@@ -249,7 +250,7 @@ class BackendTest(unittest.TestCase):
         make_session(self.base)
         self.store = takes.Store(self.base)
         meta_path = os.path.join(self.store.session_dir(SESSION), "session.json")
-        meta = takes.read_json(meta_path)
+        meta = recorder.files.read_json(meta_path)
         meta["debug"] = {"use": "testing"}
         meta["status"] = "done"
         meta["uploads"] = [{"repo": "DeeJanuz/frametop-hands-test", "pr_url": PR, "pr_num": 3, "status": "done",

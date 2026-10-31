@@ -55,6 +55,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import takes  # noqa: E402  (next to this file)
+import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 from recorder import bounties  # noqa: E402
 from recorder import contributions  # noqa: E402
@@ -109,7 +110,7 @@ def upload_allowed(kind="public"):
 
 def session_kind(store, session):
     """The consent a session was recorded under (takes.consent_kind of its session.json)."""
-    return takes.consent_kind(takes.read_json(meta_path(store, session)))
+    return takes.consent_kind(recorder.files.read_json(meta_path(store, session)))
 
 
 # ---------------------------------------------------------------- records in session.json
@@ -158,7 +159,7 @@ def describe(summary, report, sha, nbytes):
                  f"- Lighting: {s.get('lighting') or 'not given'}",
                  f"- Consent: testing, version {consent_line(s)}",
                  f"- Tool: {s.get('tool')}",
-                 f"- Size: {takes.human_bytes(nbytes)}",
+                 f"- Size: {recorder.files.human_bytes(nbytes)}",
                  f"- SHA256 of SHA256SUMS: {sha}", "",
                  "Checked with hands/rec/validate.py: no errors" + (f", {len(report.warnings)} warnings:"
                                                                      if report.warnings else ".")]
@@ -180,7 +181,7 @@ def describe(summary, report, sha, nbytes):
              f"- Controllers: {s.get('controllers') or 'not given'}",
              f"- Consent version: {consent_line(s)}",
              f"- Tool: {s.get('tool')}",
-             f"- Size: {takes.human_bytes(nbytes)}",
+             f"- Size: {recorder.files.human_bytes(nbytes)}",
              f"- SHA256 of SHA256SUMS: {sha}", "",
              "Checked with hands/rec/validate.py: no errors" + (f", {len(report.warnings)} warnings:"
                                                                  if report.warnings else ".")]
@@ -314,10 +315,10 @@ def upload(store, session, dry_run=False, again=False, progress=None, log=None):
 
     if dry_run:
         say(f"dry run: would check the login (whoami) and access to {repo} (auth_check)")
-        say(f"dry run: would upload_folder {len(files)} files, {takes.human_bytes(report.bytes)}, "
+        say(f"dry run: would upload_folder {len(files)} files, {recorder.files.human_bytes(report.bytes)}, "
             f"from {export} to datasets/{repo}/{path_in_repo}, as a pull request")
         for rel in sorted(files):
-            say(f"  {rel}  {takes.human_bytes(os.path.getsize(os.path.join(export, rel)))}")
+            say(f"  {rel}  {recorder.files.human_bytes(os.path.getsize(os.path.join(export, rel)))}")
         say(f"dry run: commit message: {message}")
         say("dry run: commit description:\n" + description.rstrip())
         record = {"repo": repo, "pr_url": "", "uploaded": now_iso(), "export_sha": sha, "status": "done"}
@@ -326,9 +327,9 @@ def upload(store, session, dry_run=False, again=False, progress=None, log=None):
         return dict(plan, dry_run=True, pr_url="", record=record)
 
     pr, who, record = rhub.push(_hf(), repo, export, path_in_repo, message, description, meta_path(store, session), sha,
-                                len(files), report.bytes, tell, takes.write_json, takes.human_bytes)
+                                len(files), report.bytes, tell, takes.write_json, recorder.files.human_bytes)
     try:   # the log is for the contributor's own record: a failure to write it doesn't undo the upload
-        contributions.add(store.base, [contributions.entry(session, takes.read_json(meta_path(store, session)), record,
+        contributions.add(store.base, [contributions.entry(session, recorder.files.read_json(meta_path(store, session)), record,
                                                            report.bytes, summary.get("minutes"))])
     except OSError as e:
         say(f"couldn't add the upload to {contributions.FILE}: {e}")

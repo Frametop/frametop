@@ -19,6 +19,8 @@ REC = os.path.dirname(HERE)
 sys.path.insert(0, REC)
 sys.path.insert(0, HERE)   # test_validate, also under python -I
 import session  # noqa: E402
+import recorder.common  # noqa: E402
+import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 import livelog  # noqa: E402
 import voicelog  # noqa: E402
 import eventlog  # noqa: E402
@@ -37,7 +39,7 @@ class FakeTracker:
 
     def _write(self, name, seq):
         magic, version, size = self.files[name]
-        head = struct.pack("<8sIIQQQ", magic, version, size, seq, seq * 1000, session.mono_ns())
+        head = struct.pack("<8sIIQQQ", magic, version, size, seq, seq * 1000, recorder.common.mono_ns())
         with open(os.path.join(self.d, name), "r+b" if os.path.exists(os.path.join(self.d, name)) else "wb") as f:
             f.write(head + bytes([seq // 2 % 256]) * (size - len(head)))
 
@@ -432,13 +434,13 @@ class DebugExportTest(unittest.TestCase):
         self.base = os.path.join(self.tmp, "base")
         make_session(self.base)
         # recorded under the testing consent (TESTING.md), with the window's own profile keys
-        profile = takes.read_json(os.path.join(self.base, "profile.json"))
+        profile = recorder.files.read_json(os.path.join(self.base, "profile.json"))
         profile["testing_consent"] = dict(profile.pop("consent"), version="2026-10-14", region_ok=True)
         profile["bounties"] = {"index-taps": {"done": 1}}
         takes.write_json(os.path.join(self.base, "profile.json"), profile)
         sdir = os.path.join(self.base, "sessions", SESSION)
         self.session_json = os.path.join(sdir, "session.json")
-        sj = takes.read_json(self.session_json)
+        sj = recorder.files.read_json(self.session_json)
         sj["debug"] = {"use": "testing", "max_s": 180, "settings": {"POINTER_ROLE": "right"}, "frametop": "", "models": {}}
         sj["consent"] = {"kind": "testing", "version": "2026-10-14"}
         takes.write_json(self.session_json, sj)
@@ -495,7 +497,7 @@ class DebugExportTest(unittest.TestCase):
     def write_voice(self):
         """voice.bin and voice-2.bin around the deleted range: a chunk before it, one ending in it,
         one inside, one starting in it, one after; the second file also cut off mid-write."""
-        a, b = self.takes.read_json(os.path.join(self.tdir, "take.json"))["deleted"][0]
+        a, b = recorder.files.read_json(os.path.join(self.tdir, "take.json"))["deleted"][0]
         ms = 1_000_000
         chunk = bytes(range(64)) * 50   # 3200 bytes: 100 ms at 16 kHz
         ends = [(a - 500 * ms, a + 50 * ms, (a + b) // 2), (min(b, a + 50 * ms) + 120 * ms, b + 500 * ms)]
@@ -545,7 +547,7 @@ class DebugExportTest(unittest.TestCase):
 
     def test_events(self):
         """The events parts as one file, those in the deleted range left out, only ever encrypted."""
-        a, b = self.takes.read_json(os.path.join(self.tdir, "take.json"))["deleted"][0]
+        a, b = recorder.files.read_json(os.path.join(self.tdir, "take.json"))["deleted"][0]
         for name, times in (("events.jsonl", (a - 1, (a + b) // 2)), ("events-2.jsonl", (b + 1,))):
             with open(os.path.join(self.tdir, name), "w") as f:
                 for t in times:
@@ -565,11 +567,11 @@ class DebugExportTest(unittest.TestCase):
                                  capture_output=True, check=True).stdout
         self.assertEqual([json.loads(line)["t"] for line in raw.splitlines()], [a - 1, b + 1])
         # a public export has none
-        sj = self.takes.read_json(self.session_json)
+        sj = recorder.files.read_json(self.session_json)
         del sj["debug"]
         sj["consent"] = {"kind": "public", "version": "2026-10-02"}
         self.takes.write_json(self.session_json, sj)
-        profile = self.takes.read_json(os.path.join(self.base, "profile.json"))
+        profile = recorder.files.read_json(os.path.join(self.base, "profile.json"))
         profile["consent"] = dict(profile["testing_consent"], version="2026-10-02")
         self.takes.write_json(os.path.join(self.base, "profile.json"), profile)
         export = self.store.export(self.sid, low_priority=False)
@@ -577,7 +579,7 @@ class DebugExportTest(unittest.TestCase):
 
     def test_bounty_round(self):
         """A bounty's round in the test phase (no debug): encrypted the same way, no live log."""
-        sj = self.takes.read_json(self.session_json)
+        sj = recorder.files.read_json(self.session_json)
         del sj["debug"]
         sj["bounty"] = {"id": "index-taps", "title": "Index taps", "board_updated": "2026-10-14"}
         self.takes.write_json(self.session_json, sj)
@@ -594,11 +596,11 @@ class DebugExportTest(unittest.TestCase):
 
     def test_public(self):
         """A full session (public consent): nothing encrypted, the window's profile keys left out."""
-        sj = self.takes.read_json(self.session_json)
+        sj = recorder.files.read_json(self.session_json)
         del sj["debug"]
         sj["consent"] = {"kind": "public", "version": "2026-10-02"}
         self.takes.write_json(self.session_json, sj)
-        profile = self.takes.read_json(os.path.join(self.base, "profile.json"))
+        profile = recorder.files.read_json(os.path.join(self.base, "profile.json"))
         profile["consent"] = dict(profile["testing_consent"], version="2026-10-02")
         self.takes.write_json(os.path.join(self.base, "profile.json"), profile)
         export = self.store.export(self.sid, low_priority=False)
@@ -613,11 +615,11 @@ class DebugExportTest(unittest.TestCase):
     def test_public_no_voice(self):
         """Voice is only ever exported encrypted: a public export leaves it out."""
         self.write_voice()
-        sj = self.takes.read_json(self.session_json)
+        sj = recorder.files.read_json(self.session_json)
         del sj["debug"]
         sj["consent"] = {"kind": "public", "version": "2026-10-02"}
         self.takes.write_json(self.session_json, sj)
-        profile = self.takes.read_json(os.path.join(self.base, "profile.json"))
+        profile = recorder.files.read_json(os.path.join(self.base, "profile.json"))
         profile["consent"] = dict(profile["testing_consent"], version="2026-10-02")
         self.takes.write_json(os.path.join(self.base, "profile.json"), profile)
         export = self.store.export(self.sid, low_priority=False)

@@ -55,6 +55,7 @@ from recorder import bounties  # noqa: E402
 from recorder.common import host_command, write_json  # noqa: E402
 from recorder.files import human_bytes, read_json  # noqa: E402
 from recorder.window import RecorderBackend  # noqa: E402
+from recorder.units import resume_units  # noqa: E402
 
 HUB_PATH = os.path.join(HERE, "hub.py")
 EYE_RATE = os.path.join(GAZE, "eye-rate.py")
@@ -804,7 +805,7 @@ def main():
     app.aboutToQuit.connect(backend.shutdown)
     mod = None if a.dry_run else backend._runner()
     if mod:   # Frametop's gaze service, if a round that was killed left it paused
-        backend._thread(lambda: mod.resume_units(os.path.join(mod.run_dir(), mod.PAUSED_UNITS_FILE)))
+        backend._thread(lambda: resume_units(os.path.join(mod.run_dir(), mod.PAUSED_UNITS_FILE)))
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("startPage", a.page)
     engine.load(QUrl.fromLocalFile(os.path.abspath(a.qml)))

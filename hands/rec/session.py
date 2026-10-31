@@ -60,19 +60,16 @@ import ft_conf  # noqa: E402  (conf/ft_conf.py: frametop.conf's grammar)
 import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
 import voicelog  # noqa: E402  (hands/rec/voicelog.py: a debug session's microphone, if ticked)
 import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's copy of what the panels and pointer did)
-# What the recorders share (recorder/), under the names this module always had: the window,
-# the standalone recorder's spike and the tests use them from here.
-from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402,F401
+# What the recorders share (recorder/): the window and the tests import it from there.
+from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402
                              write_json, clean_text, tree_version, os_version as _os_version,
                              steamvr_version as _steamvr_version)
 from recorder import bounties  # noqa: E402
 from recorder.privacy import strip_calibration  # noqa: E402
 from recorder import fhformat  # noqa: E402  (the camera ring's layout)
-from recorder.units import unit_active, start_unit, stop_unit, pause_units, resume_units, restart_units  # noqa: E402,F401
-from recorder.button import (INPUT_DEVICES, INPUT_EVENT, EV_KEY, EV_REL, REL_X, REL_Y, KEY_SELECT,  # noqa: E402,F401
-                             BUTTON_DEVICE, BUTTON_DOUBLE_S, BUTTON_HOLD_S, BUTTON_BOUNCE_S, parse_input_devices,
-                             find_button, real_mouse, read_input_devices, mouse_connected, button_events,
-                             ButtonGestures, ButtonReader)
+from recorder.units import unit_active, start_unit, stop_unit, pause_units, resume_units, restart_units  # noqa: E402
+from recorder.button import (INPUT_DEVICES, BUTTON_DEVICE, BUTTON_DOUBLE_S, BUTTON_HOLD_S,  # noqa: E402
+                             BUTTON_BOUNCE_S, find_button, read_input_devices, mouse_connected, ButtonReader)
 FT_HANDS = os.path.join(HANDS, "build", "ft-hands")
 FT_CAMD = os.path.join(HANDS, "build", "ft-camd")
 PANEL_BIN = os.path.join(HERE, "build", "ft-handpanel")

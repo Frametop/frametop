@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import eyerec  # noqa: E402
 import takes  # noqa: E402
+import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 from recorder import age  # noqa: E402
 
 try:
@@ -208,7 +209,7 @@ class TakesTest(unittest.TestCase):
             self.assertEqual(sum(1 for line in f if line.startswith("1\t")), 10)
 
     def test_cancel(self):
-        with self.assertRaises(takes.Cancelled):
+        with self.assertRaises(recorder.files.Cancelled):
             self.store.export(RID, recipients=[self.rec], cancel=lambda: True)
         self.assertFalse(os.path.exists(self.store.export_dir(RID) + ".partial"))
         self.assertFalse(os.path.exists(self.store.export_dir(RID)))

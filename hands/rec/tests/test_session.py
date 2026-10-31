@@ -20,7 +20,8 @@ sys.path.insert(0, os.path.dirname(HERE))
 import session  # noqa: E402
 import takes  # noqa: E402
 import validate  # noqa: E402
-import recorder.units  # noqa: E402  (pause_units is there now; session.py re-exports it)
+import recorder.button  # noqa: E402
+import recorder.units  # noqa: E402
 from test_validate import fhset, make_session, SESSION  # noqa: E402
 
 SCRIPT = {
@@ -627,46 +628,46 @@ B: MSC=10
 
 
 def event(etype, code, value, t=1.000002):
-    return session.INPUT_EVENT.pack(int(t), round(t % 1 * 1e6), etype, code, value)
+    return recorder.button.INPUT_EVENT.pack(int(t), round(t % 1 * 1e6), etype, code, value)
 
 
 def taps(*times):
     """Presses, each 50 ms down, at these times (the kernel's clock), as one write."""
-    return b"".join(event(session.EV_KEY, session.KEY_SELECT, 1, t) + event(0, 0, 0, t)
-                    + event(session.EV_KEY, session.KEY_SELECT, 0, t + 0.05) + event(0, 0, 0, t + 0.05)
+    return b"".join(event(recorder.button.EV_KEY, recorder.button.KEY_SELECT, 1, t) + event(0, 0, 0, t)
+                    + event(recorder.button.EV_KEY, recorder.button.KEY_SELECT, 0, t + 0.05) + event(0, 0, 0, t + 0.05)
                     for t in times)
 
 
-PRESS = event(session.EV_KEY, session.KEY_SELECT, 1) + event(0, 0, 0)
-RELEASE = event(session.EV_KEY, session.KEY_SELECT, 0) + event(0, 0, 0)
+PRESS = event(recorder.button.EV_KEY, recorder.button.KEY_SELECT, 1) + event(0, 0, 0)
+RELEASE = event(recorder.button.EV_KEY, recorder.button.KEY_SELECT, 0) + event(0, 0, 0)
 
 
 class InputTest(unittest.TestCase):
     def test_devices(self):
-        devs = session.parse_input_devices(DEVICES)
+        devs = recorder.button.parse_input_devices(DEVICES)
         self.assertEqual([d["name"] for d in devs], ["gpio-keys", "frametop virtual mouse", "frame-voice keyboard",
                                                      "Z3 Keyboard"])
-        self.assertEqual(session.find_button(devs), "/dev/input/event3")
-        self.assertFalse(any(session.real_mouse(d) for d in devs))   # the virtual mouse, keyboards with wheels
+        self.assertEqual(recorder.button.find_button(devs), "/dev/input/event3")
+        self.assertFalse(any(recorder.button.real_mouse(d) for d in devs))   # the virtual mouse, keyboards with wheels
         for extra, name in ((BT_MOUSE, "Z3 Mouse"), (USB_MOUSE, "Logitech USB Optical Mouse")):
-            mice = [d["name"] for d in session.parse_input_devices(DEVICES + extra) if session.real_mouse(d)]
+            mice = [d["name"] for d in recorder.button.parse_input_devices(DEVICES + extra) if recorder.button.real_mouse(d)]
             self.assertEqual(mice, [name])
         # another gpio-keys without KEY_SELECT isn't the button
-        self.assertIsNone(session.find_button(session.parse_input_devices(DEVICES.replace("200000000", "0"))))
+        self.assertIsNone(recorder.button.find_button(recorder.button.parse_input_devices(DEVICES.replace("200000000", "0"))))
 
     def test_events(self):
-        data = (PRESS + event(session.EV_KEY, session.KEY_SELECT, 2) * 3   # autorepeat: left out
-                + RELEASE + event(session.EV_KEY, 115, 1) + PRESS)        # another key
-        self.assertEqual(session.button_events(data), ([(True, 1.000002), (False, 1.000002), (True, 1.000002)], b""))
-        out, rest = session.button_events(PRESS + PRESS[:10])
+        data = (PRESS + event(recorder.button.EV_KEY, recorder.button.KEY_SELECT, 2) * 3   # autorepeat: left out
+                + RELEASE + event(recorder.button.EV_KEY, 115, 1) + PRESS)        # another key
+        self.assertEqual(recorder.button.button_events(data), ([(True, 1.000002), (False, 1.000002), (True, 1.000002)], b""))
+        out, rest = recorder.button.button_events(PRESS + PRESS[:10])
         self.assertEqual((out, rest), ([(True, 1.000002)], PRESS[:10]))   # half an event waits for the rest
-        self.assertEqual(session.button_events(rest + PRESS[10:])[0], [(True, 1.000002)])
-        self.assertEqual([t for _, t in session.button_events(taps(5.25))[0]], [5.25, 5.3])
+        self.assertEqual(recorder.button.button_events(rest + PRESS[10:])[0], [(True, 1.000002)])
+        self.assertEqual([t for _, t in recorder.button.button_events(taps(5.25))[0]], [5.25, 5.3])
 
     def test_gestures(self):
         def run(steps, **kw):
             """steps: (time, "down" | "up" | "tick"). The gestures, with the time each came."""
-            g, out = session.ButtonGestures(double_s=0.4, hold_s=1.5, bounce_s=0.05, **kw), []
+            g, out = recorder.button.ButtonGestures(double_s=0.4, hold_s=1.5, bounce_s=0.05, **kw), []
             for t, what in steps:
                 out += [(t, x) for x in getattr(g, what)(t)]
             return out
@@ -699,7 +700,7 @@ class InputTest(unittest.TestCase):
             fifo = os.path.join(tmp, "button")
             os.mkfifo(fifo)
             got = []
-            reader = session.ButtonReader(fifo, got.append, double_s=0.15, hold_s=0.5).start()
+            reader = recorder.button.ButtonReader(fifo, got.append, double_s=0.15, hold_s=0.5).start()
             with open(fifo, "wb", buffering=0) as w:
                 w.write(PRESS + RELEASE)                 # a press
                 time.sleep(0.3)
@@ -728,7 +729,7 @@ class InputTest(unittest.TestCase):
 
     def test_missing_device(self):
         logs = []
-        reader = session.ButtonReader("/nonexistent/event99", lambda: None, log=logs.append).start()
+        reader = recorder.button.ButtonReader("/nonexistent/event99", lambda: None, log=logs.append).start()
         time.sleep(0.1)
         reader.stop()
         self.assertFalse(reader.ok)
@@ -1088,21 +1089,21 @@ class QuietHandsTest(SessionBase):
         active = {"frametop-handview.service": True, "frametop-pointer.service": False}
         with mock.patch.object(recorder.units, "unit_active", lambda u: active[u]), \
                 mock.patch.object(recorder.units, "stop_unit", lambda u: self.calls.append(["stop", u])):
-            paused = session.pause_units(session.QUIET_UNITS, self.path)
+            paused = recorder.units.pause_units(session.QUIET_UNITS, self.path)
         self.assertEqual(paused, ["frametop-handview.service"])
         self.assertEqual(self.calls, [["stop", "frametop-handview.service"]])
         with open(self.path) as f:
             self.assertEqual(json.load(f), paused)
         with self.systemctl():
-            self.assertEqual(session.resume_units(self.path), paused)
+            self.assertEqual(recorder.units.resume_units(self.path), paused)
         self.assertEqual(self.calls[1:], [["start", "frametop-handview.service"]])
         self.assertFalse(os.path.exists(self.path))
 
     def test_nothing_running_nothing_paused(self):
         with mock.patch.object(recorder.units, "unit_active", lambda u: False):
-            self.assertEqual(session.pause_units(session.QUIET_UNITS, self.path), [])
+            self.assertEqual(recorder.units.pause_units(session.QUIET_UNITS, self.path), [])
         self.assertFalse(os.path.exists(self.path))
-        self.assertEqual(session.resume_units(self.path), [])
+        self.assertEqual(recorder.units.resume_units(self.path), [])
 
     def test_a_session_starts_what_a_killed_one_left_paused(self):
         os.makedirs(os.path.dirname(self.path))

@@ -58,12 +58,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import hub  # noqa: E402
 import takes  # noqa: E402  (next to this file)
+import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 # The window's shared part (recorder/window.py): consent, export, login, upload, keeping awake.
 from recorder import bounties, one_window  # noqa: E402
 from recorder.common import host_command  # noqa: E402
-from recorder.window import (RecorderBackend, consent_version as _consent_version, gigabytes,  # noqa: E402,F401
-                             headset_worn, process_running, read_text)
+from recorder.units import resume_units  # noqa: E402
+from recorder.window import RecorderBackend, consent_version as _consent_version, gigabytes  # noqa: E402
 
 # The dataset contributions go to (hub.py; FT_HANDREC_DATASET overrides it, for tests).
 HF_DATASET = hub.HF_DATASET
@@ -338,7 +339,7 @@ class Backend(RecorderBackend):
         mod = self._runner()
         if not mod:
             return ""
-        chosen = takes.read_json(os.path.join(self.store.base, "settings.json")).get("guidance")
+        chosen = recorder.files.read_json(os.path.join(self.store.base, "settings.json")).get("guidance")
         return chosen if chosen in dict(mod.GUIDANCE) else mod.default_guidance(
             self._session_options.get("recorded_demos_dir"))
 
@@ -348,7 +349,7 @@ class Backend(RecorderBackend):
         if not mod or value not in dict(mod.GUIDANCE) or value == self.guidance:
             return
         path = os.path.join(self.store.base, "settings.json")
-        settings = takes.read_json(path)
+        settings = recorder.files.read_json(path)
         settings["guidance"] = value
         takes.write_json(path, settings)
         self.guidanceChanged.emit()
@@ -586,7 +587,7 @@ class Backend(RecorderBackend):
         def run():
             result = None
             try:
-                r = subprocess.run(mod.host_command("systemctl", "--user", "restart", "--no-block",
+                r = subprocess.run(host_command("systemctl", "--user", "restart", "--no-block",
                                                     "steamvr.service"), capture_output=True, text=True, timeout=60)
                 if r.returncode != 0:
                     raise RuntimeError((r.stderr or r.stdout).strip() or "exit %d" % r.returncode)
@@ -632,7 +633,7 @@ class Backend(RecorderBackend):
         """A full session (not a quick round, not a dry run) went to the end: the window then
         suggests a quick round, in another light."""
         for s in self.store.sessions():
-            meta = takes.read_json(os.path.join(self.store.session_dir(s["id"]), "session.json"))
+            meta = recorder.files.read_json(os.path.join(self.store.session_dir(s["id"]), "session.json"))
             if (meta.get("status") == "done" and not meta.get("quick") and not meta.get("bounty")
                     and not meta.get("dry_run")):
                 return True
@@ -812,14 +813,14 @@ class Backend(RecorderBackend):
         for s in self.store.sessions():
             s["label"] = session_label(s["id"]) + (f" · {s['bounty']}" if s["bounty"] else
                                                    " · testing session" if s.get("debug") else "")
-            s["sizeText"] = takes.human_bytes(s["bytes"])
-            s["exportText"] = takes.human_bytes(s["export_bytes"]) if s["exported"] else ""
+            s["sizeText"] = recorder.files.human_bytes(s["bytes"])
+            s["exportText"] = recorder.files.human_bytes(s["export_bytes"]) if s["exported"] else ""
             s["lightingText"] = LIGHTING_TEXT.get(s["lighting"], "")
             s["active"] = self.sessionActive and s["id"] == self._session_id
             s["statusText"] = {"recording": "" if s["active"] else "interrupted", "error": "ended with an error",
                                "stopped": "stopped early"}.get(s["status"], "")
             s["freeable"] = s["freeable"] and not s["active"]
-            s["freeText"] = takes.human_bytes(s["bytes"] + s["export_bytes"])
+            s["freeText"] = recorder.files.human_bytes(s["bytes"] + s["export_bytes"])
             s["uploadText"] = ("uploaded" if s["freeable"] else "uploaded, changed since") if s["uploaded"] else ""
             out.append(s)
         return out
@@ -832,7 +833,7 @@ class Backend(RecorderBackend):
             return []
         for t in rows:
             t["durationText"] = f"{int(t['duration_s'] // 60)}:{int(t['duration_s'] % 60):02d}"
-            t["sizeText"] = takes.human_bytes(t["bytes"])
+            t["sizeText"] = recorder.files.human_bytes(t["bytes"])
             t.pop("ranges")
         return rows
 
@@ -917,7 +918,7 @@ class Backend(RecorderBackend):
     def freeableText(self):
         """What deleting them all frees, "" when nothing can go."""
         rows = self._freeable()
-        return takes.human_bytes(sum(f["bytes"] for f in rows)) if rows else ""
+        return recorder.files.human_bytes(sum(f["bytes"] for f in rows)) if rows else ""
 
     @Property(str, constant=True)
     def roundNeedText(self):
@@ -959,7 +960,7 @@ class Backend(RecorderBackend):
         if failed:
             self.message.emit("Couldn't delete it: " + failed[0], True)
         else:
-            self.message.emit(f"Deleted the local copy of {session_label(session)}: {takes.human_bytes(freed)} freed. "
+            self.message.emit(f"Deleted the local copy of {session_label(session)}: {recorder.files.human_bytes(freed)} freed. "
                               "Your record of the upload stays.", False)
         self.refreshSessions()
 
@@ -973,10 +974,10 @@ class Backend(RecorderBackend):
         freed, failed = self._free(sids)
         done = len(sids) - len(failed)
         if failed:
-            self.message.emit(f"Deleted {done} of {len(sids)} rounds ({takes.human_bytes(freed)} freed). "
+            self.message.emit(f"Deleted {done} of {len(sids)} rounds ({recorder.files.human_bytes(freed)} freed). "
                               "Couldn't delete " + "; ".join(failed), True)
         else:
-            self.message.emit(f"Deleted {done} uploaded round{'s' if done != 1 else ''}: {takes.human_bytes(freed)} "
+            self.message.emit(f"Deleted {done} uploaded round{'s' if done != 1 else ''}: {recorder.files.human_bytes(freed)} "
                               "freed. Your record of the uploads stays.", False)
         self.refreshSessions()
 
@@ -1086,7 +1087,7 @@ def main():
     app.aboutToQuit.connect(backend.shutdown)
     mod = None if a.dry_run else backend._runner()
     if mod:   # Frametop's drawn hands and hand pointer, if a session that was killed left them paused
-        backend._thread(lambda: mod.resume_units(os.path.join(mod.run_dir(), mod.PAUSED_UNITS_FILE)))
+        backend._thread(lambda: resume_units(os.path.join(mod.run_dir(), mod.PAUSED_UNITS_FILE)))
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("startPage", a.page)
     engine.load(QUrl.fromLocalFile(os.path.abspath(a.qml)))

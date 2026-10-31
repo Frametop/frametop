@@ -71,6 +71,30 @@ static double now(void) {
     return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
+// A lab mode's output file (--rec, --seq, --dump): eye images, so only its owner may read it.
+// The modes run with sudo, so the file goes to the sudo user, whose lab tools read it. A link
+// isn't followed and a file with other names (a hard link) isn't written: root writes where
+// the user said, and that must not reach another file. NULL with errno set when it can't.
+static FILE *create_private(const char *path, const char *how) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0) return NULL;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1) {
+        close(fd);
+        errno = EPERM;
+        return NULL;
+    }
+    const char *uid = getenv("SUDO_UID"), *gid = getenv("SUDO_GID");
+    if (geteuid() == 0 && uid && gid && fchown(fd, (uid_t)atoi(uid), (gid_t)atoi(gid)) != 0) perror("fchown");
+    if (fchmod(fd, 0600) != 0 || ftruncate(fd, 0) != 0) {
+        close(fd);
+        return NULL;
+    }
+    FILE *f = fdopen(fd, how);
+    if (!f) close(fd);
+    return f;
+}
+
 static int find_tracker(void) {
     DIR *d = opendir("/proc");
     struct dirent *e;
@@ -117,8 +141,8 @@ static int open_bufs(int pid) {
             fprintf(stderr, "pidfd_getfd %d: %s\n", xfd, strerror(errno));
             continue;
         }
-        struct stat st;
-        fstat(fd, &st);
+        struct stat st = {0};
+        if (fstat(fd, &st) != 0) perror("fstat");
         off_t size = lseek(fd, 0, SEEK_END);
         void *p = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
         if (p == MAP_FAILED) {
@@ -394,9 +418,9 @@ static int rec(double seconds, const char *dir, int pid) {
     // Ctrl-C or SIGTERM ends it early and keeps what was recorded.
     char path[512];
     snprintf(path, sizeof path, "%s/frames.raw", dir);
-    ring.f = fopen(path, "wb");
+    ring.f = create_private(path, "wb");
     snprintf(path, sizeof path, "%s/index.txt", dir);
-    ring.ix = fopen(path, "w");
+    ring.ix = create_private(path, "w");
     ring.frames = malloc((size_t)RING * EYE_W * EYE_H);
     if (!ring.f || !ring.ix || !ring.frames) {
         perror(dir);
@@ -563,7 +587,7 @@ static int dump(int b, size_t off, size_t len, const char *file) {
         fprintf(stderr, "out of range\n");
         return 1;
     }
-    FILE *f = fopen(file, "wb");
+    FILE *f = create_private(file, "wb");
     if (!f) {
         perror(file);
         return 1;
@@ -581,7 +605,7 @@ static int seq(int b, size_t off, size_t len, int frames, const char *dir) {
     }
     char path[512];
     snprintf(path, sizeof path, "%s/times.txt", dir);
-    FILE *times = fopen(path, "w");
+    FILE *times = create_private(path, "w");
     if (!times) {
         perror(path);
         return 1;
@@ -598,7 +622,7 @@ static int seq(int b, size_t off, size_t len, int frames, const char *dir) {
             double t = now();
             memcpy(copy, bufs[b].p + off, len);
             snprintf(path, sizeof path, "%s/%04d.raw", dir, got);
-            FILE *f = fopen(path, "wb");
+            FILE *f = create_private(path, "wb");
             if (f) fwrite(copy, 1, len, f), fclose(f);
             fprintf(times, "%d %.6f\n", got, t);
             got++;
@@ -616,6 +640,7 @@ static void usage(void) {
                     "                   --seq I OFF LEN FRAMES DIR | --rec SECONDS DIR]\n");
 }
 
+#ifndef FT_EYEGRAB_NO_MAIN
 int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "--share") == 0) {
         const char *uid = getenv("SUDO_UID"), *gid = getenv("SUDO_GID");
@@ -660,3 +685,4 @@ int main(int argc, char **argv) {
     }
     return 0;
 }
+#endif

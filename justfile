@@ -79,6 +79,9 @@ test-c:
     done
     g++ -std=c++17 -Wall -Wextra -Werror -Istream stream/test/hostinput-test.cpp -o build/tests/hostinput-test
     run stream/test/hostinput-test.cpp build/tests/hostinput-test
+    gcc -std=gnu11 -Wall -Wextra -Wno-unused-function -Werror -pthread gaze/tracker/tests/eyegrab-files-test.c \
+      -o build/tests/eyegrab-files-test
+    run gaze/tracker/tests/eyegrab-files-test.c build/tests/eyegrab-files-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/trackwatch-test.cpp \
       -o build/tests/trackwatch-test
     run screens/tests/trackwatch-test.cpp build/tests/trackwatch-test

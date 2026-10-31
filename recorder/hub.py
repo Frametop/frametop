@@ -5,11 +5,12 @@ hands/rec/hub.py and gaze/rec/hub.py each add their dataset, their checks and th
 
 huggingface_hub is imported only when it's needed (_hf), so the recorders' windows can import
 this. Nothing here prints or keeps a token: huggingface_hub saves and reads its own."""
-import datetime
 import hashlib
 import json
 import os
 import re
+
+from recorder.contributions import now_iso  # noqa: F401  (hub.now_iso, as before)
 
 REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 TOKENS_URL = "https://huggingface.co/settings/tokens"
@@ -50,10 +51,6 @@ def is_draft(path):
             return "DRAFT" in f.readline()
     except OSError:
         return False
-
-
-def now_iso():
-    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def export_sha(export_dir):

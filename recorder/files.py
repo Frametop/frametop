@@ -37,13 +37,16 @@ def merge_ranges(ranges):
     return out
 
 
-def sha256_file(path, cancelled=lambda: False):
+def sha256_file(path, cancelled=lambda: False, step=None):
+    """The file's SHA256 (hex), read in CHUNKs; step(bytes) after each one, if given."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         while chunk := f.read(CHUNK):
             if cancelled():
                 raise Cancelled()
             h.update(chunk)
+            if step:
+                step(len(chunk))
     return h.hexdigest()
 
 

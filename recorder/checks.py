@@ -3,16 +3,14 @@ and the manifest's typed lookups and contributor checks. hands/rec/validate.py a
 gaze/rec/validate.py both use these.
 
 Standard library only; runs on Linux and Windows (the maintainer's PC), Python 3.12 or later."""
-import hashlib
 import os
 import json
 import re
 import uuid
 
-from recorder.files import Cancelled  # noqa: F401  (validate.Cancelled, as before)
+from recorder.files import Cancelled, sha256_file  # noqa: F401  (validate.Cancelled, as before)
 
 SUM_RE = re.compile(r"^([0-9a-f]{64})  (\S.*)$")
-CHUNK = 1 << 20
 MAX_LISTED = 10   # removed paths and the like: list this many, then "and N more"
 
 
@@ -53,18 +51,6 @@ def is_uuid4(s):
     return u.version == 4 and str(u) == s
 
 
-def sha256_file(path, step=None, cancelled=lambda: False):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(CHUNK):
-            if cancelled():
-                raise Cancelled()
-            h.update(chunk)
-            if step:
-                step(len(chunk))
-    return h.hexdigest()
-
-
 def check_sums(root, files, report, step, cancelled):
     """SHA256SUMS at root: every file in files listed (but itself), each matching, none missing."""
     path = os.path.join(root, "SHA256SUMS")
@@ -95,7 +81,7 @@ def check_sums(root, files, report, step, cancelled):
         report.error(f"not in SHA256SUMS: {listed(unlisted)}")
     bad = []
     for rel in sorted(set(sums) & present):
-        if sha256_file(os.path.join(root, rel), step, cancelled) != sums[rel]:
+        if sha256_file(os.path.join(root, rel), cancelled, step) != sums[rel]:
             bad.append(rel)
     if bad:
         report.error(f"checksum mismatch: {listed(bad)}")

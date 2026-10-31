@@ -10,7 +10,7 @@ your existing SSH configuration determine access.
 `testbench/install.sh install` builds the native parts on the Frame and makes
 `testbench/.venv` where it runs, on the Frame or on a PC that drives the Frame
 over SSH. The venv uses that machine's python3 and holds the MCP SDK and its
-dependencies, as wheels at the versions pinned in `requirements-mcp.txt` (the
+dependencies, as wheels at the versions and sha256s pinned in `requirements-mcp.txt` (the
 ordinary CLI has no Python dependencies). It gets no package install: a `.pth`
 file puts the checkout on its path, so the CLI's checkout-relative `build/` and
 `resources/` paths keep working. The installer then runs the MCP tests in it.

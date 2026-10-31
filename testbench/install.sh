@@ -24,7 +24,7 @@ tracker=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/steamvr-short-session-tracker
 usage() { echo "usage: $0 install|uninstall [--restart]" >&2; exit 2; }
 
 # The MCP server runs where its client runs: on the Frame, or on a PC that drives the Frame
-# with --host. --no-deps and --only-binary keep the venv to the pinned wheels. A .pth file
+# with --host. --no-deps, --only-binary and --require-hashes keep the venv to the pinned wheels. A .pth file
 # puts this checkout on the venv's path (the server's CLI subprocesses import
 # frame_testbench) with no package build. A venv from another Python (after a SteamOS
 # update) is made again.
@@ -32,7 +32,7 @@ mcp_venv() {
   cd "$root/testbench"
   [ "$(.venv/bin/python -c 'import pip, sys; print(sys.version)' 2>/dev/null)" = "$(python3 -c 'import sys; print(sys.version)')" ] ||
     python3 -m venv --clear .venv
-  .venv/bin/python -m pip install -q --disable-pip-version-check --no-deps --only-binary=:all: -r requirements-mcp.txt
+  .venv/bin/python -m pip install -q --disable-pip-version-check --no-deps --only-binary=:all: --require-hashes -r requirements-mcp.txt
   .venv/bin/python -m pip check -q >/dev/null
   echo "$PWD" >"$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/frame_testbench.pth"
   .venv/bin/python -m unittest discover -q -s tests -p 'test_mcp*.py'

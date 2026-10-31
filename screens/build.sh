@@ -10,7 +10,7 @@
 # Valve's openvr repo (pinned in scripts/openvr.sh).
 # label.cpp draws the panels' labels with stb_truetype (public domain, one header, pinned);
 # ft-handview --snapshot writes PNGs with stb_image_write (the same).
-# ft-handview's hand models are compiled in (handasset.h, from screens/assets/hands by tools/hand-asset.py);
+# ft-handview's hand models are compiled in once (handasset.cpp and .h, from screens/assets/hands by tools/hand-asset.py);
 # its robot hand is built in code (handrobot.cpp).
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -35,13 +35,14 @@ $cxx -c -o build/steampanels.o steampanels.cpp
 $cxx -c -o build/handtest.o handtest.cpp
 $cxx -c -o build/handmesh.o handmesh.cpp
 $cxx -c -o build/handskin.o handskin.cpp
+$cxx -c -o build/handasset.o handasset.cpp
 $cxx -c -o build/handrobot.o handrobot.cpp
 $cxx -c -o build/handview.o handview.cpp
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
 g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o $vrlibs
-g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handrobot.o build/handcut.o build/handrender.o $vrlibs
+g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o $vrlibs
 $cxx -o build/ft-spotpanel ../frunner/ft-spotpanel.cpp $(pkg-config --libs gbm libdrm) $OPENVR_LIBS -lpthread
 strip --strip-unneeded build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel
 echo "built build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel"'

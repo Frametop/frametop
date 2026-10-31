@@ -69,7 +69,7 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/handshape-test.cpp -o build/tests/handshape-test
     run screens/tests/handshape-test.cpp build/tests/handshape-test
     g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handview_test.cpp \
-      screens/handmesh.cpp screens/handskin.cpp screens/handrobot.cpp screens/handcut.cpp -o build/tests/handview-test
+      screens/handmesh.cpp screens/handskin.cpp screens/handasset.cpp screens/handrobot.cpp screens/handcut.cpp -o build/tests/handview-test
     run screens/tests/handview_test.cpp build/tests/handview-test
     run "screens/tools/hand-asset.py --check" python3 -I screens/tools/hand-asset.py --check
     for t in pointer/tests/*-test.cpp; do

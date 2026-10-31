@@ -1,6 +1,8 @@
-// FrametopLink and FrametopSink against a private stand-in relay (an abstract name of this
-// test's own), so nothing reaches Frametop's relay or a desktop.
+// FrametopLink, FrametopSink and run_vr's Frametop hooks (FrametopVr) against a private
+// stand-in relay (an abstract name of this test's own), so nothing reaches Frametop's relay or
+// a desktop, and with SteamVR's reads faked.
 #include "framekeyboard/frametop.hpp"
+#include "framekeyboard/frametop_vr.hpp"
 #include <cstddef>
 #include <cstring>
 #include <iostream>
@@ -68,6 +70,140 @@ struct Relay {
                 "stand-in relay send");
     }
 };
+// What the hooks pressed, as "move 272", "down 272", "up 272", "cancel 272".
+struct Pointers : PointerSink {
+    std::vector<std::string> calls;
+    bool move(unsigned pointer, double, double) override { return said("move", pointer); }
+    bool down(unsigned pointer, double, double, double) override { return said("down", pointer); }
+    bool up(unsigned pointer, double, double) override { return said("up", pointer); }
+    void cancel_pointer(unsigned pointer) override { said("cancel", pointer); }
+    bool said(const char* what, unsigned pointer) {
+        calls.push_back(std::string(what) + " " + std::to_string(pointer));
+        return true;
+    }
+    std::vector<std::string> take() { return std::exchange(calls, {}); }
+};
+
+// FrametopVr: when the panel may show, what Frametop's requests do, fingertips, and the tips'
+// reads, without SteamVR.
+void hooks_tests() {
+    const std::string name = "framekeyboard-test-hooks-" + std::to_string(getpid());
+    double now = 100;
+    Relay relay(name);
+    FrametopLink link(name, [&] { return now; });
+    Pointers pointers;
+    int tip_reads = 0;
+    unsigned right = FrametopVrAccess::no_device;
+    FrametopVrAccess access{
+        .hand_device = [&](std::size_t hand) { return hand == 1 ? right : FrametopVrAccess::no_device; },
+        .tip_component = [&](unsigned, bool) -> std::optional<Transform> {
+            ++tip_reads;
+            return {};
+        },
+        .pose = [](unsigned) -> std::optional<Transform> { return {}; },
+    };
+    PanelPlacement displayed;
+    displayed.set_transform({{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}});
+    KeyHaptics feedback;
+    const auto bounds = [] { return Rect{0, 0, 100, 100}; };
+    const auto no_grip = [](unsigned) { return false; };
+
+    // Without Frametop: upstream's behaviour, the dashboard alone.
+    {
+        FrametopVr plain(nullptr, pointers, access);
+        require(!plain.lasers(), "plain: no lasers outside the dashboard");
+        require(plain.begin_frame(false, false) == false && plain.begin_frame(true, false) == true,
+                "plain: relaunch passes through");
+        require(plain.surface(true, false) && !plain.surface(false, true), "plain: the dashboard alone");
+        require(!plain.hand_pokes(true, displayed, now), "plain: no fingertips");
+    }
+
+    FrametopVr hooks(&link, pointers, access);
+    require(hooks.lasers(), "Frametop: lasers");
+    require(!hooks.begin_frame(false, false), "no request, no relaunch");
+    relay.take();
+    require(hooks.surface(true, true) && !hooks.surface(false, false), "no word: the dashboard with a Steam field");
+
+    // Frametop's desktop shows, and a text field asks for the keyboard: it opens over it.
+    relay.say("kb 1 1");
+    relay.say("kb show");
+    require(hooks.begin_frame(false, false), "show: placed anew");
+    require(hooks.surface(false, false), "show: up over the desktop");
+    hooks.shown(true);
+    link.poll();
+    require(relay.take() == std::vector<std::string>{"kbhello 1"}, "Frametop hears it's up");
+    relay.say("kb show");
+    require(!hooks.begin_frame(false, true), "show while up: not moved");
+    relay.say("kb toggle");
+    hooks.begin_frame(false, true);
+    require(!hooks.surface(false, false), "toggle while up: closed");
+    require(hooks.surface(false, true), "...but a Steam field still has it");
+    relay.say("kb toggle");
+    require(hooks.begin_frame(false, false) && hooks.surface(false, false), "toggle while closed: opens");
+    hooks.dismissed();
+    require(!hooks.surface(false, false), "its X closes it");
+    require(hooks.begin_frame(true, false) && hooks.surface(false, false), "a recenter opens it for Frametop");
+    relay.say("kb hide");
+    hooks.begin_frame(false, true);
+    require(!hooks.surface(false, false), "hide");
+    relay.say("kb 1 0");
+    relay.say("kb show");
+    hooks.begin_frame(false, false);
+    require(!hooks.surface(false, false) && hooks.surface(true, false),
+            "asked for while the desktop is hidden: only with the dashboard");
+    relay.say("kb 1 1");
+    hooks.begin_frame(false, false);
+
+    // Fingertips: a press, then nothing more for hand_silence: it comes up.
+    const auto right_pointer = std::to_string(FrametopVr::hand_pointer + 1);
+    relay.say("kb poke right press 0 0 0");
+    link.poll();
+    require(hooks.hand_pokes(true, displayed, now), "fingertips with Frametop");
+    require(pointers.take() == std::vector<std::string>{"down " + right_pointer}, "a press goes down");
+    now += 1;
+    relay.say("kb 1 1");
+    link.poll();
+    hooks.hand_pokes(true, displayed, now);
+    require(pointers.take().empty(), "held while it's heard from within the silence");
+    now += FrametopVr::hand_silence + .1;
+    relay.say("kb 1 1"); // still fresh: it's the press that went quiet
+    link.poll();
+    hooks.hand_pokes(true, displayed, now);
+    require(pointers.take() == std::vector<std::string>{"cancel " + right_pointer},
+            "silence: the press is let go");
+    relay.say("kb poke right press 0 0 0");
+    relay.say("kb poke right press 0 0 0");
+    relay.say("kb poke right up");
+    link.poll();
+    hooks.hand_pokes(true, displayed, now);
+    require(pointers.take() == std::vector<std::string>{"down " + right_pointer, "up " + right_pointer,
+                                                        "down " + right_pointer, "up " + right_pointer},
+            "a second press lets the first up");
+    relay.say("kb poke right hover 0 0 0");
+    link.poll();
+    hooks.hand_pokes(false, displayed, now);
+    require(pointers.take() == std::vector<std::string>{"cancel " + right_pointer},
+            "the panel moving: a hover isn't taken, and the hand lets go");
+    relay.say("kb poke right press 0 0 0");
+    relay.say("kb poke right end");
+    link.poll();
+    hooks.hand_pokes(true, displayed, now);
+    require(pointers.take() == std::vector<std::string>{"down " + right_pointer, "cancel " + right_pointer},
+            "an end cancels");
+
+    // The tips: nothing to do while off and none is near; a new controller gives no tip that
+    // frame; a missing tip component is tried again at most once a second.
+    require(!hooks.touch(false, displayed, bounds, no_grip, feedback, now), "touch off: nothing");
+    right = 7;
+    require(hooks.touch(true, displayed, bounds, no_grip, feedback, now), "touch on");
+    require(tip_reads == 0, "a new controller: no read that frame");
+    hooks.touch(true, displayed, bounds, no_grip, feedback, now);
+    hooks.touch(true, displayed, bounds, no_grip, feedback, now + .5);
+    require(tip_reads == 1, "a missing tip: read once");
+    hooks.touch(true, displayed, bounds, no_grip, feedback, now + 1.5);
+    require(tip_reads == 2, "...and again after a second");
+    require(pointers.take().empty() && !hooks.tips_near(), "no tip, no presses");
+}
 } // namespace
 
 int main() {
@@ -172,6 +308,7 @@ int main() {
             link.poll();
             require(!link.fresh(), "impostor ignored");
         }
+        hooks_tests();
         std::cout << "frametop: ok\n";
         return 0;
     } catch (const std::exception& error) {

@@ -1,9 +1,8 @@
 #include "framekeyboard/app.hpp"
-#include "framekeyboard/frametop.hpp"
+#include "framekeyboard/frametop_vr.hpp"
 #include "framekeyboard/grip.hpp"
 #include "framekeyboard/native_replacement.hpp"
 #include "framekeyboard/placement_store.hpp"
-#include "framekeyboard/touch.hpp"
 #include "framekeyboard/updates.hpp"
 #include "framekeyboard/vr_haptics.hpp"
 #include "framekeyboard/vr_lifecycle.hpp"
@@ -346,45 +345,14 @@ class LaserDrag {
     std::optional<Transform> trigger_neutral_;
     TriggerReleaseGuard trigger_release_;
 };
-// Touch typing's tips: each Frame controller's "tip" component, the nose of its body (within
-// 4 mm along its aim in the render model), read once per device. Lasers' cursor indices are
-// small; the tips' pointers sit past them.
-constexpr unsigned touch_pointer = 0x100;
-// Fingertips, from ft-screens through the relay (FrametopLink's "kb poke"): theirs past the tips'.
-constexpr unsigned hand_pointer = 0x110;
-// A press heard nothing of this long (ft-screens stopped) is let go.
-constexpr double hand_silence = 3;
-constexpr double tip_reach = .005; // the poke point, just past the nose's surface
-// How often a tip near the keyboard is read between frames (frames are 60 Hz).
-constexpr auto touch_step = std::chrono::microseconds(4000);
-class ControllerTips {
-  public:
-    // Hand 0 left, 1 right: its tip in the room, if it's a tracked Frame controller.
-    std::optional<std::array<double, 3>> read(std::size_t hand, double now) {
-        const auto role =
-            hand == 0 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand;
-        const auto device = vr_system()->GetTrackedDeviceIndexForControllerRole(role);
-        if (device != devices_[hand]) {
-            // A new device: none this frame, so a press on the old one ends.
-            devices_[hand] = device;
-            tips_[hand].reset();
-            tried_[hand] = -1e9;
-            return {};
-        }
-        if (!tips_[hand] && now - tried_[hand] > 1) {
-            tried_[hand] = now;
-            tips_[hand] = component(device, hand == 0);
-        }
-        const auto pose = tips_[hand] ? read_pointer_pose(device) : std::nullopt;
-        if (!pose) {
-            return {};
-        }
-        return tip_point(*pose, *tips_[hand], tip_reach);
-    }
-    vr::TrackedDeviceIndex_t device(std::size_t hand) const { return devices_[hand]; }
-
-  private:
-    static std::optional<Transform> component(vr::TrackedDeviceIndex_t device, bool left) {
+// What Frametop's hooks read (frametop_vr.hpp), through the runtime-watched wrappers.
+FrametopVrAccess frametop_vr_access() {
+    FrametopVrAccess access;
+    access.hand_device = [](std::size_t hand) -> unsigned {
+        return vr_system()->GetTrackedDeviceIndexForControllerRole(
+            hand == 0 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand);
+    };
+    access.tip_component = [](unsigned device, bool left) -> std::optional<Transform> {
         if (device >= vr::k_unMaxTrackedDeviceCount || !vr_system()->IsTrackedDeviceConnected(device)) {
             return {};
         }
@@ -403,12 +371,12 @@ class ControllerTips {
             return {};
         }
         return from_vr(tip.mTrackingToComponentLocal);
-    }
-    std::array<vr::TrackedDeviceIndex_t, 2> devices_{
-        {vr::k_unTrackedDeviceIndexInvalid, vr::k_unTrackedDeviceIndexInvalid}};
-    std::array<std::optional<Transform>, 2> tips_{};
-    std::array<double, 2> tried_{{-1e9, -1e9}};
-};
+    };
+    access.pose = [](unsigned device) { return read_pointer_pose(device); };
+    return access;
+}
+// How often a tip near the keyboard is read between frames (frames are 60 Hz).
+constexpr auto touch_step = std::chrono::microseconds(4000);
 class VrPanel {
   public:
     ~VrPanel() {
@@ -427,8 +395,7 @@ class VrPanel {
         texture_.destroy();
         vulkan_.destroy();
     }
-    // `lasers`: controllers get lasers for the panel with the dashboard closed too, as for
-    // Frametop's screens (Frametop shows it over its desktop).
+    // `lasers`: controllers get lasers with the dashboard closed too (FrametopVr::lasers).
     void connect(bool lasers = false) {
         vr::EVRInitError error = vr::VRInitError_None;
         // Connect only once: a background connect/disconnect followed immediately
@@ -573,7 +540,9 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
     RuntimeBinding runtime_binding(replacement);
     app.set_interaction_active(false);
     VrPanel panel;
-    panel.connect(frametop != nullptr);
+    AppPointers pointers(app);
+    FrametopVr hooks(frametop, pointers, frametop_vr_access());
+    panel.connect(hooks.lasers());
     std::atomic<double> replacement_progress{monotonic_seconds()};
     std::atomic<bool> replacement_watched{false}, replacement_stalled{false};
     replacement.prepare_watchdog();
@@ -598,19 +567,6 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
     }
     haptics.connect(manifest);
     KeyHaptics feedback;
-    ControllerTips tips;
-    std::array<TouchPoke, 2> pokes;
-    struct HandTouch {
-        bool active{}, pressed{};
-        double x{}, y{}, heard{};
-    };
-    std::array<HandTouch, 2> hands;
-    auto end_hand = [&](std::size_t hand) {
-        if (hands[hand].active) {
-            app.cancel_pointer(hand_pointer + static_cast<unsigned>(hand));
-        }
-        hands[hand] = {};
-    };
     GrabInput grip_input;
     if (!grip_input.connect() && app.use_drag_to_move()) {
         app.report_status("Native grip unavailable; use Recenter to recover the keyboard.");
@@ -649,12 +605,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
     bool recenter_pending = !saved, transform_dirty = false;
     std::uint64_t placement_universe = 0;
     PanelPlacement placement, displayed;
-    if (frametop) {
-        // Frametop: where its own keyboard opened (screens/vr.cpp), 0.70 m ahead and 0.35 m under
-        // the eyes, facing them (26.6 degrees). A hand's laser aimed 65 cm down lowers the hand
-        // past where Frametop puts the laser away.
-        placement.set_head_spot(.70, .35, 26.6);
-    }
+    hooks.place(placement);
     if (saved) {
         // Size survives tracking-space changes, including a reset event before
         // the first valid head pose. Restore the world pose only after checking its universe.
@@ -734,21 +685,13 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
         panel.submit(app.renderer, app.view());
         std::cout << "Full Keyboard started in background.\n" << std::flush;
     }
-    // With Frametop, its desktop counts as the dashboard does: the panel can show over the
-    // screens with the dashboard closed. It shows only while Frametop asked for it (a desktop
-    // text field, a mapped button, a launch) and it wasn't closed since, or a Steam field has
-    // it. Without Frametop, the dashboard alone, as before.
-    bool frametop_open = false;
+    // The dashboard, or with Frametop its desktop too (FrametopVr::surface).
     auto surface = [&] {
-        const bool dashboard = vr_overlay()->IsDashboardVisible();
-        if (!frametop) {
-            return dashboard;
-        }
-        return (dashboard || frametop->surface()) && (frametop_open || replacement.state().open);
+        return hooks.surface(vr_overlay()->IsDashboardVisible(), replacement.state().open);
     };
     auto dismiss_panel = [&] {
         if (app.take_dismissal()) {
-            frametop_open = false;
+            hooks.dismissed();
             lifecycle.dismiss();
         }
     };
@@ -767,23 +710,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
         app.set_replacement_available(native.available, replacement.unavailable_reason());
         app.set_native_session(native.open);
         const bool replace = app.replace_native_keyboard();
-        bool relaunch = instance.poll_recenter();
-        if (frametop) {
-            frametop->poll();
-            auto request = frametop->take_request();
-            if (request == FrametopLink::Request::Toggle) {
-                request = frametop_open && lifecycle.visible() ? FrametopLink::Request::Hide
-                                                               : FrametopLink::Request::Show;
-            }
-            if (request == FrametopLink::Request::Show) {
-                // A text field that gets focus again while it's up doesn't move it.
-                relaunch |= !(frametop_open && lifecycle.visible());
-                frametop_open = true;
-            } else if (request == FrametopLink::Request::Hide) {
-                frametop_open = false;
-            }
-            frametop_open |= relaunch;
-        }
+        const bool relaunch = hooks.begin_frame(instance.poll_recenter(), lifecycle.visible());
         lifecycle.begin_frame({.replacement_enabled = replace,
                                .native = native,
                                .routed_remote = replacement.remote(),
@@ -792,9 +719,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                                .now = now});
         const bool dashboard_visible = surface();
         lifecycle.dashboard_visibility(dashboard_visible);
-        if (frametop) {
-            frametop->set_open(frametop_open && lifecycle.visible());
-        }
+        hooks.shown(lifecycle.visible());
         // Hidden panels cannot be grabbed. Do not query both render models in
         // standby; require a released grip sample again when the panel returns.
         if (!lifecycle.visible()) {
@@ -999,110 +924,30 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                 }
             }
         }
-        // Touch typing: each controller's tip presses the key it touches. Not while the
-        // keyboard moves, nor for a hand that grips it. Each frame, and every few ms between
-        // frames while a tip is near (below), so a quick tap isn't missed between two frames.
+        // Touch typing and fingertips (FrametopVr): not while the keyboard moves, nor for a hand
+        // that grips it. Each frame, and every few ms between frames while a tip is near (below),
+        // so a quick tap isn't missed between two frames.
         const bool touching =
             app.touch_typing() && lifecycle.visible() && displayed.ready() && !drag.active();
         std::optional<Rect> case_bounds;
         auto touch_tick = [&](double at) {
-            if (!touching && !pokes[0].near() && !pokes[1].near()) {
-                return;
-            }
-            if (!case_bounds) {
-                case_bounds = panel_case_bounds(app.view());
-            }
-            for (std::size_t hand = 0; hand < pokes.size(); ++hand) {
-                std::optional<PanelPoint> point;
-                const auto tip = touching ? tips.read(hand, at) : std::nullopt;
-                const auto device = tips.device(hand);
-                const bool gripping = std::any_of(grips.begin(), grips.end(), [&](const auto& grip) {
+            const auto bounds = [&] {
+                if (!case_bounds) {
+                    case_bounds = panel_case_bounds(app.view());
+                }
+                return *case_bounds;
+            };
+            const auto gripping = [&](unsigned device) {
+                return std::any_of(grips.begin(), grips.end(), [&](const auto& grip) {
                     return grip.active && grip.held && grip.device == device;
                 });
-                if (tip && !gripping) {
-                    point = locate_on_panel(displayed.transform(), displayed.width(), *tip);
-                }
-                const auto pointer = touch_pointer + static_cast<unsigned>(hand);
-                const auto touch = pokes[hand].update(point, *case_bounds, at);
-                switch (touch.kind) {
-                case TouchEvent::Kind::Hover:
-                    if (app.move(pointer, touch.x, touch.y)) {
-                        feedback.hover(device);
-                    }
-                    break;
-                case TouchEvent::Kind::Move:
-                    app.move(pointer, touch.x, touch.y);
-                    break;
-                case TouchEvent::Kind::Down:
-                    if (app.down(pointer, touch.x, touch.y, at)) {
-                        feedback.press(pointer, device);
-                    }
-                    break;
-                case TouchEvent::Kind::Up:
-                    if (app.up(pointer, touch.x, touch.y)) {
-                        feedback.release(pointer);
-                    }
-                    break;
-                case TouchEvent::Kind::Leave:
-                case TouchEvent::Kind::Cancel:
-                    app.cancel_pointer(pointer);
-                    feedback.cancel_pointer(pointer);
-                    break;
-                case TouchEvent::Kind::None:
-                    break;
-                }
+            };
+            if (hooks.touch(touching, displayed, bounds, gripping, feedback, at)) {
+                dismiss_panel();
             }
-            dismiss_panel();
         };
         touch_tick(now);
-        // A fingertip on the panel: ft-screens' hand input says when it hovers and presses, as on
-        // Frametop's screens, so no laser shows for it. Its point lands where it is on the panel
-        // as shown now. No haptics: there's no controller.
-        if (frametop) {
-            const bool takes =
-                lifecycle.visible() && displayed.ready() && !drag.active() && frametop->fresh();
-            for (const auto& poke : frametop->take_pokes()) {
-                auto& touch = hands[poke.hand];
-                const auto pointer = hand_pointer + static_cast<unsigned>(poke.hand);
-                if (!takes || poke.verb == HandPoke::Verb::End) {
-                    end_hand(poke.hand);
-                    continue;
-                }
-                if (poke.point) {
-                    const auto at =
-                        locate_on_panel(displayed.transform(), displayed.width(), *poke.point);
-                    touch.x = at.x, touch.y = at.y;
-                }
-                touch.active = true, touch.heard = now;
-                switch (poke.verb) {
-                case HandPoke::Verb::Hover:
-                case HandPoke::Verb::Move:
-                    app.move(pointer, touch.x, touch.y);
-                    break;
-                case HandPoke::Verb::Press:
-                    if (touch.pressed) {
-                        app.up(pointer, touch.x, touch.y);
-                    }
-                    // (false for a button, which still wants its up)
-                    app.down(pointer, touch.x, touch.y, now);
-                    touch.pressed = true;
-                    break;
-                case HandPoke::Verb::Up:
-                    if (touch.pressed) {
-                        app.up(pointer, touch.x, touch.y);
-                    }
-                    touch.pressed = false;
-                    break;
-                case HandPoke::Verb::End:
-                    break;
-                }
-            }
-            for (std::size_t hand = 0; hand < hands.size(); ++hand) {
-                if (hands[hand].active &&
-                    (!takes || (hands[hand].pressed && now - hands[hand].heard > hand_silence))) {
-                    end_hand(hand);
-                }
-            }
+        if (hooks.hand_pokes(lifecycle.visible() && displayed.ready() && !drag.active(), displayed, now)) {
             dismiss_panel();
         }
         for (const auto& [device, kind] : feedback.take(now)) {
@@ -1257,7 +1102,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
         const auto period = std::chrono::microseconds(lifecycle.visible() ? 16667 : 250000);
         if (lifecycle.visible()) {
             // A tip near the keyboard: read it every touch_step until the next frame.
-            while (pokes[0].near() || pokes[1].near()) {
+            while (hooks.tips_near()) {
                 const auto next = std::chrono::steady_clock::now() + touch_step;
                 if (next >= frame_started + period) {
                     break;

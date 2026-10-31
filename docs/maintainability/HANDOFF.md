@@ -2,7 +2,7 @@
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
 is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-304 (DEE-310 was done out of order, after DEE-308).
+starts at DEE-305 (DEE-310 was done out of order, after DEE-308).
 
 ## Where the series is
 
@@ -15,14 +15,15 @@ starts at DEE-304 (DEE-310 was done out of order, after DEE-308).
 | 4 | DEE-306 | 3bb0ebf, 688de89, d464ac0, 35d9da4, 576b5d6, fb0077e |
 | 5 | DEE-307 | 84d60b3, 5277de1, cc476bf, 509bdf2, 60c9c3a, 383f0d8, 0cf0d21 |
 | 6 | DEE-308 | d298586, 0fb9407, 5d57eda, 099f7c2 |
-| 7 | DEE-310 | 898e760, d24de60, fe0a217, 6c0f032, 3d5af59, 3ad697c, then this update |
+| 7 | DEE-310 | 898e760, d24de60, fe0a217, 6c0f032, 3d5af59, 3ad697c, 25dd9f9 (note) |
+| 8 | DEE-304 | cb6d442, 60cc62e, c55e509, ceced31, 6ac87b6, a8a6a7e, 77b59d2, 9da7cd3, 8c72d59, then this update |
 
 What's left, in order:
 
-1. DEE-304, DEE-305 and DEE-303
+1. DEE-305 and DEE-303
 2. DEE-309, DEE-312, DEE-298, then DEE-313 to DEE-316
 
-DEE-310 is done (step 7). DEE-301's CI and lint work stays local only: no workflow change is pushed.
+DEE-310 and DEE-304 are done (steps 7 and 8). DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
 
@@ -234,7 +235,8 @@ by default in Frametop's mode.
 
 - Removed (one `git rm`): `screens/keyboard.cpp`, `screens/keyboard.h`, `screens/rounded.h` and
   `screens/tests/rounded-test.cpp`. That test checked the old panel's renderer byte for byte, so
-  test-c has 31 programs now, not 32. Removed in code: the FT_KEY and FT_KEYBOARD_CLOSED events,
+  test-c has 31 `: ok` lines now, not 32 (29 programs, `hand-asset.py --check` and the
+  ft-powerd compile check). Removed in code: the FT_KEY and FT_KEYBOARD_CLOSED events,
   `ft_vr_keyboard_show` and `hide`, `panel_key`, `kb_screen` and `kb_auto`, the panel's laser,
   aim, drag and step-aside code, `keyboard=` in vr.cpp's debug line, and `kb_screen=` and
   `kb_auto=` in compositor.c's.
@@ -260,7 +262,7 @@ by default in Frametop's mode.
   findings were fixed in 3d5af59 and 3ad697c (owed release order, the restart wording,
   reference.md's "crashes", gaze/README.md's pointer, the update-check hints).
 - Tests: the last full `just test` ran on 3ad697c (`/tmp/dee306/a310b.log`, exit 0): the same
-  counts as DEE-308's 5d57eda except test-c, 31 programs (rounded-test removed).
+  counts as DEE-308's 5d57eda except test-c, 31 `: ok` lines (rounded-test removed).
 - DEE-192 (non-US layouts) belongs to Full Keyboard. The old panel was US-only, so nothing it
   needs was removed.
 
@@ -273,6 +275,65 @@ Still open:
 - No offline test runs ft-screens' `vrkeyboard` path (it needs a nested compositor, and
   `--no-vr` next to the live desktop has crashed it before).
 - `pending_*` settings copies in `keyboard/src/app.cpp` follow upstream's pattern. Not changed.
+
+### From DEE-304
+
+Shared headers for code that had been copied between programs. No behaviour change except
+where noted.
+
+- `screens/handshape.h`: the 21 MediaPipe joints by name, `FingerExtension`, `Openness` (four
+  fingers), `Curl3` and `PalmNormal`, for handinput.cpp, palmmenu.cpp and grabthat.cpp. Test:
+  `screens/tests/handshape-test.cpp`.
+- Openness: the two copies were different measures, not drift. handinput's averaged four
+  fingers; the palm menu's averaged three (middle, ring, little), which is `Curl3`. The palm menu
+  keeps its three-finger measure on purpose, since its thresholds were tuned on it, and
+  handshape.h says so.
+- `posemath::kPitchClampDeg` (85) replaces the literal in ft-pointer.cpp (7 clamps, 2
+  `LimitPitch`) and gazehand.h. The driver's copy went with DEE-307.
+- `hand-asset.py` now writes `handasset.h` (declarations) and `handasset.cpp` (the data, compiled
+  once). `--check` covers both. The data is byte-identical.
+- `hands/include/fh_shm.hpp` is the one reader for ft-hands' `hands` and `gestures` files, used by
+  the pointer helper (`handsin.h`) and ft-screens (`handcut.cpp`). It looks the file up again at
+  most once a second and maps it again when it's gone, replaced, or a new size. handcut's old
+  3-second stale reopen isn't needed, because ft-hands rewrites the same file. The helper now
+  also checks the file's owner. Test: `hands/tests/shm_test.cpp`.
+- `conf/ftsock.h` (C and C++): every C/C++ socket name, `ft_sock_addr`, `ft_sock_send` (0 or an
+  errno, always MSG_NOSIGNAL) and `ft_sock_send_logged`, which logs a destination when it starts
+  failing (at most once every 10 s) and when it works again. Used by compositor.c, vr.cpp, the
+  pointer helper, driver and probe, ft-gaze and its panel, the hand recorder's panel, frunner's
+  panel, ft-handview, ft-powerd and ft-stream. New log lines: "to @NAME: ERROR" and "to @NAME:
+  works again". ft-gaze's question to ft-screens returns at once when the send fails. Test:
+  `conf/test/ftsock-test.c`, built as C and as C++.
+- handinput.cpp's three least-squares velocity fits (throw and rewind, push speed, flick) call one
+  `LineSlope`. handinput-test's replay output is byte-identical. The push's fit now accepts a time
+  spread of exactly 1e-9 s^2, which it used to reject.
+- `screens/rendernode.h`: ft-screens opens the render node once. overlaytex and the cutouts'
+  Renderer share one refcounted GBM device on the VR thread. compositor.c takes the node's path
+  from it.
+- The remote-streams verify replay (`.claude/skills/verify-remote-streams/scripts/replay-src`)
+  follows ft-stream's new socket names and includes ftsock.h. Only its harness was compiled here;
+  the replay itself wasn't run.
+- Review: one Opus reviewer after 9da7cd3. It found one Important issue (the replay's extractor
+  no longer matched) and four Minor ones. Fixed in 8c72d59: the replay, ftsock.h's include in
+  calpanel.h moved outside `extern "C"`, and the helper's send-log map capped at 64 names.
+  Accepted as they are: the new log lines, and the push fit's boundary.
+- Tests: the last full `just test` ran on 8c72d59 (`/tmp/dee306/a304b.log`, exit 0).
+  test-c has 35 `: ok` lines, up from 31: handshape-test, shm_test, and ftsock-test built as C
+  and as C++. Everything else matches DEE-310's 3ad697c run (python files 97 ok, 2 skipped).
+
+Still open:
+- `overlaypanel.h` and `gpuctx.h` were not written. ft-spotpanel, ft-gazepanel, ft-handpanel and
+  ft-reset-timer still each set up their own overlay, DMA-BUF and EGL code, and handview.cpp's GPU
+  setup still duplicates handrender.cpp's. This is the biggest part left. It needs device checks
+  of every panel, so it's better as its own ticket.
+- ft-handview (its own GPU setup) and ft-handtest still open the render node themselves. That
+  covers ft-screens only.
+- handinput.cpp still uses many joint literals (`p[8]`, `p[4]`) besides the ones handshape.h
+  replaced. It could switch to the named joints.
+- The keyboard fork's FrametopLink keeps its own socket-address code, to keep the fork isolated.
+  The Python programs still name their sockets themselves.
+- The remote-streams replay should be run once (`scripts/replay` in that skill) to confirm its
+  baseline.
 
 ## Device checks still to do
 
@@ -303,6 +364,13 @@ Each needs an install and the headset:
   the log says why; a relay restart with Shift held leaves nothing stuck; a non-US layout
   (German or Polish) on the desktop and in Steam; the lazy susan's labels, the reset question
   and the Gamepad pill still have their text. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
+- After DEE-304 (needs a build and install of ft-screens, ft-handview, the pointer helper and
+  driver, ft-gaze and its panel, the recorder's and frunner's panels, ft-powerd and ft-stream):
+  presses, grabs, throws, flicks, pushes, the palm menu and "grab that"; the pointer's pitch
+  limit; cutouts and gestures after an ft-hands restart; ft-handview's models; every socket path
+  (float and dock, scale, frunner, relay keys, the dashboard pill, gaze calibration, the panels,
+  a stream with host input); the new "to @NAME" log lines; no "no render node" fallback. Listed
+  in `~/Desktop/Projects/HEADSET-TESTS.md`.
 - After DEE-308: in Input Settings, map a button, add a key combination, add a command, run it,
   and remove it (its bindings go too); change a pointer setting; open it with a bad
   `frametop-input.json` (nothing is saved over it).

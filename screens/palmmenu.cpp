@@ -1,6 +1,8 @@
 // The palm menu (see palmmenu.h).
 #include "palmmenu.h"
 
+#include "handshape.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -12,29 +14,17 @@ using handcut::Hand;
 
 double Dot(const double a[3], const double b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
-double Dist3(const float a[3], const float b[3]) {
-    const double d[3] = {double(a[0]) - b[0], double(a[1]) - b[1], double(a[2]) - b[2]};
-    return std::sqrt(Dot(d, d));
-}
+using handshape::Dist3;
 
 double Deg(double cosine) { return std::acos(std::clamp(cosine, -1.0, 1.0)) * 180 / M_PI; }
 
-// How open the hand is: the middle, ring and little fingers' tip-to-wrist over knuckle-to-wrist.
-double Openness(const Hand &h) {
-    double sum = 0;
-    for (int mcp : {9, 13, 17}) sum += Dist3(h.p[mcp + 3], h.p[0]) / std::max(1e-6, Dist3(h.p[mcp], h.p[0]));
-    return sum / 3;
-}
+// How open the hand is: the middle, ring and little fingers' extension, without the index
+// (handshape::Curl3, not handinput's four-finger Openness: see handshape.h).
+double Openness(const Hand &h) { return handshape::Curl3(h); }
 
 }  // namespace
 
-void PalmNormal(const Hand &h, double out[3]) {
-    const double a[3] = {double(h.p[5][0]) - h.p[0][0], double(h.p[5][1]) - h.p[0][1], double(h.p[5][2]) - h.p[0][2]};
-    const double b[3] = {double(h.p[17][0]) - h.p[0][0], double(h.p[17][1]) - h.p[0][1], double(h.p[17][2]) - h.p[0][2]};
-    double n[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
-    const double l = std::sqrt(Dot(n, n)) * (h.right ? 1 : -1);
-    for (int i = 0; i < 3; ++i) out[i] = l != 0 ? n[i] / l : 0;
-}
+void PalmNormal(const Hand &h, double out[3]) { handshape::PalmNormal(h, out); }
 
 bool PalmUp(const Hand &h, const Mat &head, const Params &k, bool was, Pose *pose) {
     double n[3], palm[3];
@@ -68,7 +58,7 @@ const Hand *PalmMenu::HandFor(int side, const std::vector<Hand> &hands) const {
 
 bool PalmMenu::Plain(const Hand *h) const {
     if (!h) return false;
-    const double mid = Dist3(h->p[12], h->p[0]) / std::max(1e-6, Dist3(h->p[9], h->p[0]));
+    const double mid = handshape::FingerExtension(*h, handshape::kMiddleMcp);
     return Dist3(h->p[4], h->p[12]) >= p_.plainMiddle && mid >= p_.plainExtended && h->speed() < p_.pinchStill;
 }
 

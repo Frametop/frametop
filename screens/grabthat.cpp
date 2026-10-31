@@ -1,6 +1,7 @@
 // "Grab that": an open hand held out to a window, then a fist pulled back (see grabthat.h).
 #include "grabthat.h"
 
+#include "handshape.h"
 #include "palmmenu.h"
 
 #include <algorithm>
@@ -14,14 +15,7 @@ using handcut::Hand;
 
 double Dot(const double a[3], const double b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
-double Dist3(const float a[3], const float b[3]) {
-    const double d[3] = {double(a[0]) - b[0], double(a[1]) - b[1], double(a[2]) - b[2]};
-    return std::sqrt(Dot(d, d));
-}
-
-// A finger's extension: its tip's distance from the wrist over its knuckle's (`mcp`: 5 index,
-// 9 middle, 13 ring, 17 little), as handinput's.
-double Extension(const Hand &h, int mcp) { return Dist3(h.p[mcp + 3], h.p[0]) / std::max(1e-6, Dist3(h.p[mcp], h.p[0])); }
+using handshape::Dist3;
 
 void Forward(const Mat &head, double out[3]) { out[0] = -head.m[0][2], out[1] = -head.m[1][2], out[2] = -head.m[2][2]; }
 
@@ -77,9 +71,7 @@ void FromQuat(const Quat &q, Mat *m) {
 
 Features Measure(const Hand &h, const Mat &head) {
     Features f;
-    double e[4];
-    for (int k = 0; k < 4; ++k) e[k] = Extension(h, 5 + 4 * k);
-    f.open = (e[0] + e[1] + e[2] + e[3]) / 4, f.curl3 = (e[1] + e[2] + e[3]) / 3;
+    f.open = handshape::Openness(h), f.curl3 = handshape::Curl3(h);
     double fw[3], n[3];
     Forward(head, fw);
     palmmenu::PalmNormal(h, n);

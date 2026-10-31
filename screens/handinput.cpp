@@ -1,6 +1,8 @@
 // Near hand input on Frametop's panels (see handinput.h).
 #include "handinput.h"
 
+#include "handshape.h"
+
 #include <cstdlib>
 #include <algorithm>
 #include <cmath>
@@ -22,34 +24,15 @@ void ToLocal(const Mat &m, const double p[3], double out[3]) {
 
 void Copy3(const float in[3], double out[3]) { out[0] = in[0], out[1] = in[1], out[2] = in[2]; }
 
-double Dist3(const float a[3], const float b[3]) {
-    const double d[3] = {double(a[0]) - b[0], double(a[1]) - b[1], double(a[2]) - b[2]};
-    return std::sqrt(Dot(d, d));
-}
-
-// A finger is straight: its tip much farther from the wrist than its knuckle (`mcp`: 5 index,
-// 9 middle, 13 ring, 17 little).
-double FingerExtension(const Hand &h, int mcp) {
-    return Dist3(h.p[mcp + 3], h.p[0]) / std::max(1e-6, Dist3(h.p[mcp], h.p[0]));
-}
-double Extension(const Hand &h) { return FingerExtension(h, 5); }
-// How open a hand is: its four fingers' mean extension (as FingerExtension; a fist about 1, a pointing
-// hand about 1.3, an open one 1.7-1.9).
-double Openness(const Hand &h) {
-    double sum = 0;
-    for (int mcp : {5, 9, 13, 17}) sum += FingerExtension(h, mcp);
-    return sum / 4;
-}
-// ...the middle, ring and little fingers' (a pointing hand's are curled, an open one's straight)
-double Curl3(const Hand &h) { return (FingerExtension(h, 9) + FingerExtension(h, 13) + FingerExtension(h, 17)) / 3; }
-// The palm's normal, out of the palm (palmmenu's PalmNormal: the left hand's turned round).
-void PalmOut(const Hand &h, double out[3]) {
-    const double a[3] = {double(h.p[5][0]) - h.p[0][0], double(h.p[5][1]) - h.p[0][1], double(h.p[5][2]) - h.p[0][2]};
-    const double b[3] = {double(h.p[17][0]) - h.p[0][0], double(h.p[17][1]) - h.p[0][1], double(h.p[17][2]) - h.p[0][2]};
-    const double n[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
-    const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) * (h.right ? 1 : -1);
-    for (int i = 0; i < 3; ++i) out[i] = l != 0 ? n[i] / l : 0;
-}
+// The hand's shape (handshape.h): FingerExtension, Openness (four fingers), Curl3 (three).
+using handshape::Curl3;
+using handshape::Dist3;
+using handshape::FingerExtension;
+using handshape::Openness;
+// The index finger's extension.
+double Extension(const Hand &h) { return FingerExtension(h, handshape::kIndexMcp); }
+// The palm's normal, out of the palm.
+void PalmOut(const Hand &h, double out[3]) { handshape::PalmNormal(h, out); }
 
 // The angle (degrees) between the index finger (its knuckle to its tip: the last bone alone is 2 cm
 // long, and a few mm of tracking noise on its ends turned it 15-20 degrees) and the way into the

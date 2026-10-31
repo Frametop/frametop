@@ -66,6 +66,8 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handinput_test.cpp \
       screens/handcut.cpp screens/handinput.cpp screens/palmmenu.cpp screens/grabthat.cpp screens/steampanels.cpp -o build/tests/handinput-test
     run screens/tests/handinput_test.cpp build/tests/handinput-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/handshape-test.cpp -o build/tests/handshape-test
+    run screens/tests/handshape-test.cpp build/tests/handshape-test
     g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handview_test.cpp \
       screens/handmesh.cpp screens/handskin.cpp screens/handrobot.cpp screens/handcut.cpp -o build/tests/handview-test
     run screens/tests/handview_test.cpp build/tests/handview-test

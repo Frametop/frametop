@@ -96,7 +96,7 @@ class Paths(unittest.TestCase):
                                           ['/r/0.1/scripts/in-box', '/r/0.1/pointer/helper/build/ft-pointer'],
                                           roots), {'pointer/helper'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-gaze.service', ['python3', '/r/0.1/gaze/ft-gazed'],
-                                          roots), {'gaze', 'models'})
+                                          roots), {'gaze', 'models', 'conf'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-keyboard.service', ['--data-dir', '/r/0.1/keyboard'],
                                           roots), {'keyboard'})
             desktop = fi.dirs_used(tree, fi.DESKTOP, ['/r/current/session/../input/ft-textinput'], roots)
@@ -107,7 +107,7 @@ class Paths(unittest.TestCase):
             # a failed unit has no processes: its ExecStart, as systemctl shows it, still names them
             shown = '{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /r/0.1/input/input-relay.py ; ignore_errors=no }'
             self.assertEqual(fi.dirs_used(tree, 'frametop-input-relay.service', shown.split(), roots),
-                             {'input', 'commands'})
+                             {'input', 'commands', 'conf'})
 
 
 class Restarts(unittest.TestCase):

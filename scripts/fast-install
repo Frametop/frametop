@@ -105,10 +105,11 @@ ETC = {'gaze/tracker/atomic-update.conf'}
 EXTRA_DIRS = {
     'frametop-desktop.service': ('session', 'screens', 'float', 'frunner', 'layout', 'decoration',
                                  'commands', 'steam'),
-    'frametop-input-relay.service': ('commands',),
+    'frametop-input-relay.service': ('commands', 'conf'),
     'frametop-dashpatch.service': ('steam',),
     'frametop-voice.service': ('input', 'commands'),
-    'frametop-gaze.service': ('models',),
+    'frametop-gaze.service': ('models', 'conf'),
+    'frametop-camwatch.service': ('conf',),
 }
 # Units restarted for the files their processes run, not those files' folders: the desktop
 # (restarting it ends what's open on it; input/ft-textinput shouldn't restart it for all of

@@ -16,12 +16,12 @@ LDFLAGS  ?=
 
 CAMD  = camd/camd.c camd/tp.c camd/xrcams.c
 TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp
-HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h
+HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h ../conf/ft_conf.h
 
 all: build/ft-camd build/ft-hands
 tools: build/ft-handreplay build/ft-ringplay
 
-build/ft-camd: $(CAMD) camd/tp.h camd/xrcams.h camd/fhring.h
+build/ft-camd: $(CAMD) camd/tp.h camd/xrcams.h camd/fhring.h ../conf/ft_conf.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -static -o $@ $(CAMD) -lm
 

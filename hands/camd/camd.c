@@ -25,6 +25,7 @@
 
 #define _GNU_SOURCE
 
+#include "../../conf/ft_conf.h"
 #include "fhring.h"
 #include "tp.h"
 #include "xrcams.h"
@@ -1055,45 +1056,10 @@ static void hands_want(void)
     }
 }
 
-/* A setting from ~/.config/frametop.conf, or FT_<key> from the environment; "" if unset. */
+/* A setting from ~/.config/frametop.conf (docs/config.md), or FT_<key> from the environment; "" if unset. */
 static void setting(const char *key, char *out, size_t n)
 {
-    char env[64], path[512], line[512];
-    const char *home = getenv("HOME");
-
-    snprintf(env, sizeof(env), "FT_%s", key);
-    out[0] = 0;
-
-    if (getenv(env)) {
-        snprintf(out, n, "%s", getenv(env));
-        return;
-    }
-
-    snprintf(path, sizeof(path), "%s/.config/frametop.conf", home ? home : "");
-    FILE *f = fopen(path, "r");
-
-    if (!f)
-        return;
-
-    size_t klen = strlen(key);
-
-    while (fgets(line, sizeof(line), f)) {
-        char *p = line;
-        while (*p == ' ' || *p == '\t')
-            p++;
-        if (strncmp(p, key, klen) || (p[klen] != '=' && p[klen] != ' '))
-            continue;
-        p = strchr(p, '=');
-        if (!p)
-            continue;
-        p++;
-        while (*p == ' ' || *p == '"' || *p == '\'')
-            p++;
-        size_t len = strcspn(p, " \t\"'#\n");
-        snprintf(out, n, "%.*s", (int)len, p);
-    }
-
-    fclose(f);
+    ft_conf_setting(key, out, n);
 }
 
 /* Created once privileges are gone, as the user, in a folder only the user can write. */

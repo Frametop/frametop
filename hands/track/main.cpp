@@ -61,6 +61,7 @@
 // px, a side), and `ft-handsctl flag [note]` writes them and the next 2 s to a folder for frame-hands'
 // offline tools. The request is run_dir/flag (key=value lines: dir, note, said_unix, flag_unix),
 // checked 4 times a second and removed when taken; the folder's manifest.json is written last.
+#include "../../conf/ft_conf.h"
 #include "flagbuf.h"
 #include "io.h"
 #include "pinch.h"
@@ -153,24 +154,8 @@ const char *camera_for_pipe(int node) {
     return nullptr;
 }
 
-// A setting from ~/.config/frametop.conf, or FT_<key> from the environment; "" if unset.
-std::string setting(const std::string &key) {
-    if (const char *v = std::getenv(("FT_" + key).c_str())) return v;
-    const char *home = std::getenv("HOME");
-    std::ifstream in(std::string(home ? home : "") + "/.config/frametop.conf");
-    std::string line, value;
-    auto trim = [](std::string s) {
-        s.erase(0, s.find_first_not_of(" \t\"'"));
-        s.erase(s.find_last_not_of(" \t\"'") + 1);
-        return s;
-    };
-    while (std::getline(in, line)) {
-        line = line.substr(0, line.find('#'));
-        const auto eq = line.find('=');
-        if (eq != std::string::npos && trim(line.substr(0, eq)) == key) value = trim(line.substr(eq + 1));
-    }
-    return value;
-}
+// A setting from ~/.config/frametop.conf (docs/config.md), or FT_<key> from the environment; "" if unset.
+std::string setting(const std::string &key) { return ft_conf::Setting(key.c_str(), ""); }
 
 std::vector<int> parse_cpus(const char *p) {
     std::vector<int> out;

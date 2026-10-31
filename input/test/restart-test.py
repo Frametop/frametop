@@ -122,6 +122,7 @@ OUT = tempfile.mkdtemp(prefix="ft-restart-test-")
 gp.STATE_PATH = os.path.join(OUT, "pause.json")
 gp.SCREENS, gp.HELPER = relay.SCREENS, relay.HELPER
 gp.PARK_PATH = os.path.join(OUT, "frametop-hands", "park")
+gp.SOUNDS = {True: os.path.join(OUT, "no-pause.oga"), False: os.path.join(OUT, "no-resume.oga")}  # no pw-play
 gp.Worker, gp.ControllerWatch = StubWorker, StubWatch
 LOG = []
 relay.log = lambda *args: LOG.append(" ".join(map(str, args)))
@@ -233,10 +234,13 @@ check("L6: with automatic pausing off, the rules (applied after the state file) 
 
 # ---------------------------------------------------------------- K3 (DEE-265)
 r = start()
+r.held.desktop.update({30, 42})  # A and Shift down on the desktop, as the relay knows it
 r.recover_from_restart()
 check("K3: the desktop lets go of the modifiers and mouse buttons, then of every key (keys release)",
       received(screens), DESKTOP)
-check("K3: ...and nothing is left down on the desktop's side here", r.held.desktop, set())
+# A plain key goes up through ft-screens' "keys release"; this relay's record of it clears at the
+# next scan (reconcile_desktop_keys: no device holds it).
+check("K3: ...a modifier counts as up here at once, a plain key until the next scan", r.held.desktop, {30})
 
 # ---------------------------------------------------------------- K6 (DEE-268)
 r = start(reused=True)
@@ -252,10 +256,10 @@ r = start(None, {"POINTER": "1"})
 r.recover_from_restart()
 got = received(helper)
 check("K7: the helper gets a release for every driver button, after the button map",
-      got[got.index("vrbind -"):], ["vrbind -"] + DRIVER)
+      got[got.index("vrbind -"):] if "vrbind -" in got else got, ["vrbind -"] + DRIVER)
 r = start(None, {"POINTER": "0"})
 r.recover_from_restart()
-check("K7: ...with pointer mode off too", received(helper)[1:], DRIVER)
+check("K7: ...with pointer mode off too", received(helper), ["vrbind -"] + DRIVER)
 
 # ---------------------------------------------------------------- the state objects
 lease = relay.PointerLease()

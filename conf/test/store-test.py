@@ -60,8 +60,16 @@ class Store(unittest.TestCase):
         self.assertEqual(ft_store.update_json(self.path, lambda d: d.update(b=2), {}), {"b": 2})
         self.assertEqual(json.loads(self.read()), {"b": 2})
 
+    def test_empty_file_is_the_default(self):
+        for text in ("", "\n  \n"):
+            with self.subTest(text=text):
+                self.write(text)
+                self.assertEqual(ft_store.load_json_strict(self.path, {"a": 1}, ft_store.is_object), {"a": 1})
+                self.assertEqual(ft_store.update_json(self.path, lambda d: d.update(b=2), {}), {"b": 2})
+                self.assertEqual(self.copies(), [])
+
     def test_bad_file_is_kept_with_one_copy(self):
-        for text in ('{"a": 1,}', "", "[1, 2]"):
+        for text in ('{"a": 1,}', "{", "[1, 2]"):
             with self.subTest(text=text):
                 self.write(text)
                 for _ in range(3):

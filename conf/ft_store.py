@@ -73,11 +73,15 @@ def is_object(data):
 
 
 def load_json_strict(path, default=None, check=None):
-    """The file's data; default when there's none. StoreError (a copy kept) when it isn't JSON
-    or check(data) gives a reason."""
+    """The file's data; default when there's none, or the file is empty (nothing in it to lose:
+    what a crash in an older, non-atomic writer leaves). StoreError (a copy kept) when it isn't
+    JSON or check(data) gives a reason."""
     try:
         with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+            text = f.read()
+        if not text.strip():
+            return default
+        data = json.loads(text)
     except FileNotFoundError:
         return default
     except (OSError, ValueError) as e:

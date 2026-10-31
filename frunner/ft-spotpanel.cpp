@@ -30,7 +30,7 @@
 // but on no row or the pill, which the panel's clear part catches: it closes the search).
 //
 // Pictures go into the next of three shared buffers (linear DMA-BUFs SteamVR imported once),
-// as screens/keyboard.cpp and gaze/panel/ft-gazepanel.cpp do; SetOverlayRaw is the fallback.
+// as gaze/panel/ft-gazepanel.cpp does; SetOverlayRaw is the fallback.
 //
 // Options: --watch-stdin (quit when stdin closes: ft-frunner runs it), --socket NAME,
 // --notify NAME, --distance METRES, --width METRES; --render FILE draws the state on stdin
@@ -78,7 +78,7 @@ constexpr int kMaxRows = (kH - kCardTop - 2 * kPad - 16) / kRowH;  // 7
 constexpr int kIcon = 64;                           // icon files are this square
 std::atomic<bool> g_stop{false};
 
-// ---------------------------------------------------------------- text (as screens/keyboard.cpp)
+// ---------------------------------------------------------------- text (as screens/label.cpp)
 
 stbtt_fontinfo g_font;
 std::vector<unsigned char> g_fontData;
@@ -583,7 +583,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     // Over the screens and their controls (10), so it shows through a panel nearer than it, under
-    // Frametop's keyboard (15), which may open with it, and the 3D mouse's dot (200).
+    // a keyboard that may open with it (15), and the 3D mouse's dot (200).
     ov->SetOverlaySortOrder(h, 14);
     ov->SetOverlayWidthInMeters(h, float(width));
     ov->SetOverlayInputMethod(h, vr::VROverlayInputMethod_Mouse);

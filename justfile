@@ -77,9 +77,6 @@ test-c:
     done
     g++ -std=c++17 -Wall -Wextra -Werror -Istream stream/test/hostinput-test.cpp -o build/tests/hostinput-test
     run stream/test/hostinput-test.cpp build/tests/hostinput-test
-    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/rounded-test.cpp \
-      -o build/tests/rounded-test
-    run screens/tests/rounded-test.cpp build/tests/rounded-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/trackwatch-test.cpp \
       -o build/tests/trackwatch-test
     run screens/tests/trackwatch-test.cpp build/tests/trackwatch-test

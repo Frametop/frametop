@@ -6,8 +6,8 @@ KWin starts it (--inputmethod, from session/frametop-session.sh) and activates i
 whenever the focused app enables text input on a field (text-input v1/v2/v3: Qt, GTK,
 and Firefox apps do; Xwayland apps and most Electron apps don't). This only passes that
 on: "textfield 1" or "textfield 0" to the input relay (@frametop_relay), which opens or
-closes Frametop's keyboard (ft-screens' own key panel), depending on the keyboard setting
-in Frametop Input Settings. Typing on it reaches the app as key presses from ft-screens,
+closes Frametop's keyboard (Full Keyboard, through ft-screens), depending on the keyboard setting
+in Frametop Input Settings. Typing on it reaches the app as key presses on ft-screens' seat,
 not through this input method, so nothing typed passes through here.
 
 Speaks the Wayland wire protocol itself (zwp_input_method_v1 only), so it needs nothing

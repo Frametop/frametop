@@ -118,7 +118,7 @@
 #include "softglow.h"
 #include "overlaytex.h"
 #include "palmmenu.h"
-#include "keyboard.h"
+#include "label.h"
 #include "roomview.h"
 #include "levelpin.h"
 #include "posemath.h"
@@ -1280,7 +1280,6 @@ bool LasersByMode() {
     if (SteamVRGamepad()) return false;
     return g_lasers == Lasers::Always || (g_lasers == Lasers::OutsideGames && !g_gameRunning && !TheaterGame());
 }
-long g_keyboardAimUntil = 0;
 
 void UpdateLasers() {
     const bool byMode = LasersByMode();
@@ -1290,7 +1289,6 @@ void UpdateLasers() {
         s.lasers = want;
         vr::VROverlay()->SetOverlayFlag(s.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, want);
     }
-    if (keyboard::Shown()) keyboard::SetLasers(byMode || g_tick < g_keyboardAimUntil);
 }
 
 // The distance from a laser's line to a point ahead of it, or -1 when it's behind.
@@ -1766,7 +1764,6 @@ void ForgetIfPlacedFar(int i, Screen &s);
 // A button release on any of our panels ends that device's drags (it may be over another
 // screen by then).
 void EndDragsBy(vr::TrackedDeviceIndex_t dev) {
-    keyboard::EndDragBy(dev);
     for (auto &[index, s] : g_screens)
         if (s.drag != Drag::None && s.dragDevice == dev) FinishDrag(s, index), ForgetIfPlacedFar(index, s);
 }
@@ -2502,11 +2499,10 @@ void UpdateRemoteDrag(void (*handle)(const struct ft_event *, void *), void *dat
 // pointing at a panel, its controls, or a floating window's popups keeps that panel's laser
 // on (UpdateLasers) until kAimLinger ticks after it points away, like SteamVR's own floating
 // windows. Leaving takes a wider margin than arriving, and a drag or a held button keeps it
-// on. The keyboard is one overlay, so SteamVR's own intersection test does there.
+// on.
 void UpdateAim() {
     if (SteamVRGamepad()) {  // pointing at a panel leaves the pad in the game (see LasersByMode)
         for (auto &[i, s] : g_screens) s.aimUntil = 0;
-        g_keyboardAimUntil = 0;
         return;
     }
     if (LasersByMode()) return;
@@ -2542,9 +2538,6 @@ void UpdateAim() {
             }
         }
     }
-    if (keyboard::Shown())
-        for (const Mat &l : lasers)
-            if (keyboard::Aimed(l)) g_keyboardAimUntil = g_tick + kAimLinger;
 }
 
 const char *LasersName() {
@@ -3861,7 +3854,7 @@ void ShowCarousel() {
         if (k == (at + 1) % n) t += "  \xe2\x80\xba";                 // the next (a stroke to the left)
         if (k == (at + n - 1) % n && n > 2) t = "\xe2\x80\xb9  " + t;  // the one before
         text[size_t(k)] = t;
-        widths[size_t(k)] = std::max(120, keyboard::LabelWidth(t.c_str(), size) + 2 * padX);
+        widths[size_t(k)] = std::max(120, label::Width(t.c_str(), size) + 2 * padX);
         W += widths[size_t(k)] + gap;
     }
     W = std::min(W, 2048);
@@ -3872,7 +3865,7 @@ void ShowCarousel() {
         const uint8_t bg[4] = {uint8_t(lit ? 240 : 24), uint8_t(lit ? 240 : 24), uint8_t(lit ? 244 : 30), uint8_t(lit ? 235 : 190)};
         const uint8_t fg[3] = {uint8_t(lit ? 20 : 235), uint8_t(lit ? 20 : 235), uint8_t(lit ? 24 : 240)};
         FillRound(px, W, H, x, 6, x + widths[size_t(k)], H - 6, (H - 12) / 2, bg);
-        keyboard::DrawLabel(px.data(), W, H, text[size_t(k)].c_str(), size, x + widths[size_t(k)] / 2, H / 2, lit ? 255 : 210, fg);
+        label::Draw(px.data(), W, H, text[size_t(k)].c_str(), size, x + widths[size_t(k)] / 2, H / 2, lit ? 255 : 210, fg);
         x += widths[size_t(k)] + gap;
     }
     if (g_carousel.overlay == vr::k_ulOverlayHandleInvalid &&
@@ -3951,11 +3944,11 @@ bool PlaceResetAsk(Screen &s) {
 void ShowResetAsk(int panel) {
     const auto it = g_screens.find(panel);
     if (it == g_screens.end()) return;
-    const int H = kResetAskH, W = keyboard::LabelWidth(kResetAskText, 32) + 2 * 40;
+    const int H = kResetAskH, W = label::Width(kResetAskText, 32) + 2 * 40;
     std::vector<uint8_t> px(size_t(W) * H * 4, 0);
     const uint8_t bg[4] = {196, 52, 48, 240}, fg[3] = {255, 255, 255};
     FillRound(px, W, H, 2, 2, W - 2, H - 2, (H - 4) / 2, bg);
-    keyboard::DrawLabel(px.data(), W, H, kResetAskText, 32, W / 2, H / 2, 255, fg);
+    label::Draw(px.data(), W, H, kResetAskText, 32, W / 2, H / 2, 255, fg);
     if (g_resetAsk.overlay == vr::k_ulOverlayHandleInvalid &&
         vr::VROverlay()->CreateOverlay("frametop.resetask", "Frametop: reset the layout?", &g_resetAsk.overlay) != vr::VROverlayError_None)
         return;
@@ -4073,13 +4066,13 @@ void HidePill() {
 }
 
 void DrawPill(bool lit) {
-    const int H = kPillH, W = keyboard::LabelWidth(kPillLabel, kPillText) + 2 * 30;
+    const int H = kPillH, W = label::Width(kPillLabel, kPillText) + 2 * 30;
     std::vector<uint8_t> px(size_t(W) * H * 4, 0);
     // SteamVR's dark pill, white under a laser
     const uint8_t bg[4] = {uint8_t(lit ? 240 : 24), uint8_t(lit ? 240 : 24), uint8_t(lit ? 244 : 30), uint8_t(lit ? 240 : 200)};
     const uint8_t fg[3] = {uint8_t(lit ? 20 : 245), uint8_t(lit ? 20 : 245), uint8_t(lit ? 24 : 250)};
     FillRound(px, W, H, 2, 2, W - 2, H - 2, (H - 4) / 2, bg);
-    keyboard::DrawLabel(px.data(), W, H, kPillLabel, kPillText, W / 2, H / 2, 255, fg);
+    label::Draw(px.data(), W, H, kPillLabel, kPillText, W / 2, H / 2, 255, fg);
     overlaytex::Set(g_pill.overlay, px.data(), W, H);
     const vr::HmdVector2_t scale = {{float(W), float(H)}};
     vr::VROverlay()->SetOverlayMouseScale(g_pill.overlay, &scale);
@@ -4791,13 +4784,10 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
 }
 
 // Steam in front: the dashboard (the Steam menu) is open, or Steam's own keyboard is up
-// (valve.steam.gamepadui.keyboard, for text fields in Steam and the dashboard). Our
-// keyboard steps aside then, and comes back where it was when Steam is out of the way; one
-// asked for meanwhile appears then. Checked every 9 ticks; Steam makes its keyboard's
-// overlay again now and then, so it's looked up each time.
+// (valve.steam.gamepadui.keyboard, for text fields in Steam and the dashboard). Logged when it
+// changes (scripts/report.sh reads the lines), and in the debug line. Checked every 9 ticks;
+// Steam makes its keyboard's overlay again now and then, so it's looked up each time.
 bool g_steamInFront = false;
-bool g_keyboardAside = false;   // ours is waiting for Steam to get out of the way
-Mat g_asidePose = Identity();   // ...and goes here then
 
 bool SteamInFront() {
     vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
@@ -4811,16 +4801,7 @@ void UpdateSteamInFront() {
     const bool front = SteamInFront();
     if (front == g_steamInFront) return;
     g_steamInFront = front;
-    std::printf("Steam %s%s\n", front ? "in front (the Steam menu or Steam's keyboard)" : "out of the way",
-                front && keyboard::Shown() ? ": our keyboard steps aside" : !front && g_keyboardAside ? ": our keyboard comes back" : "");
-    if (front && keyboard::Shown()) {
-        g_asidePose = keyboard::Pose();
-        keyboard::Hide();
-        g_keyboardAside = true;
-    } else if (!front && g_keyboardAside) {
-        g_keyboardAside = false;
-        if (keyboard::Show(g_asidePose)) AnnounceOverlay("frametop.keyboard");
-    }
+    std::printf("Steam %s\n", front ? "in front (the Steam menu or Steam's keyboard)" : "out of the way");
 }
 
 }  // namespace
@@ -5073,7 +5054,6 @@ void ft_vr_shutdown(void) {
     if (g_target.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(g_target.overlay), g_target = TargetGlow{};
     for (HandGuide &hg : g_handGuides)
         if (hg.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(hg.overlay), hg = HandGuide{};
-    keyboard::Destroy();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     for (auto &[k, h] : g_imports) vr::VRIPCResourceManager()->UnrefResource(h);
     overlaytex::Shutdown();
@@ -5660,30 +5640,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     }
     // Once a second (raw->standing) and every 5 seconds (the universe): two cheap reads.
     if (standingEvent || g_tick % 90 == 0) WatchStanding(standingEvent ? "event" : "poll", standingEvent || g_tick % 450 == 0);
-    // Our keyboard: its keys, and its Close key. It goes when the screens do.
-    struct Forward {
-        void (*handle)(const struct ft_event *, void *);
-        void *data;
-    } forward{handle, data};
-    keyboard::Poll(
-        [](const keyboard::Event &k, void *f) {
-            ft_event e{};
-            e.screen = -1;
-            e.type = k.type == keyboard::Event::Key ? FT_KEY : FT_KEYBOARD_CLOSED;
-            e.key = k.code;
-            e.pressed = k.pressed;
-            static_cast<Forward *>(f)->handle(&e, static_cast<Forward *>(f)->data);
-        },
-        &forward);
     if (g_tick % 9 == 0) UpdateSteamInFront();
-    if ((keyboard::Shown() || g_keyboardAside) && !ModeVisible()) {
-        g_keyboardAside = false;
-        keyboard::Hide();
-        ft_event e{};
-        e.type = FT_KEYBOARD_CLOSED;
-        e.screen = -1;
-        handle(&e, data);
-    }
     ++g_tick;
     UpdateSpin();
     UpdateFront();
@@ -5707,43 +5664,6 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdateGuides();
     UpdateCutouts();
     UpdateCatcher();
-}
-
-// Our keyboard (keyboard.cpp) for a screen. It's placed where you'll reach it, not on the
-// screen: kKeyboardAhead in front of you (the way your head faces, level) and
-// kKeyboardBelow under your eyes, turned to face your eyes, and it stays where it opened
-// (or where its grab bar carries it). With Steam in front (UpdateSteamInFront), it waits.
-// Without a head pose (the headset is in standby, say) it doesn't open: anywhere else could
-// be out of sight or reach. The next text field opens it.
-constexpr double kKeyboardAhead = 0.7, kKeyboardBelow = 0.35;
-
-bool ft_vr_keyboard_show(int index) {
-    if (g_screens.find(index) == g_screens.end()) return false;
-    RefreshPoses();
-    Mat head;
-    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
-        std::printf("keyboard: no head pose, not opened\n");
-        return false;
-    }
-    const double fx = -head.m[0][2], fz = -head.m[2][2], n = std::sqrt(fx * fx + fz * fz) + 1e-9;
-    const double at[3] = {head.m[0][3] + fx / n * kKeyboardAhead, head.m[1][3] - kKeyboardBelow,
-                          head.m[2][3] + fz / n * kKeyboardAhead};
-    keyboard::SetLasers(LasersByMode());
-    g_steamInFront = SteamInFront();
-    if (g_steamInFront) {
-        g_asidePose = FacingPose(at, head);
-        g_keyboardAside = true;
-        std::printf("keyboard: waiting for Steam to close\n");
-        return true;
-    }
-    if (!keyboard::Show(FacingPose(at, head))) return false;
-    AnnounceOverlay("frametop.keyboard");
-    return true;
-}
-
-void ft_vr_keyboard_hide(void) {
-    g_keyboardAside = false;
-    keyboard::Hide();
 }
 
 // Control commands (datagrams on @ft_screens, replies to the sender):
@@ -6198,17 +6118,17 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
         g_spin.front = n - 1;
         std::snprintf(reply, size, "ok");
     } else if (verb == vrcmd::Debug) {
-        // One line for scripts/report.sh: what decides whether a laser drags and the keyboard shows.
+        // One line for scripts/report.sh: what decides whether a laser drags.
         std::string drags;
         for (const auto &[index, s] : g_screens)
             if (s.drag != Drag::None)
                 drags += (drags.empty() ? "" : ",") + std::to_string(index + 1) + ":" + DragName(s.drag) + ":" +
                          DeviceLabel(s.dragDevice);
         std::snprintf(reply, size,
-                      "ok dashboard=%d steam_front=%d keyboard=%s mode=%s manual=%d lasers=%s game=%d paused=%d "
+                      "ok dashboard=%d steam_front=%d mode=%s manual=%d lasers=%s game=%d paused=%d "
                       "press=%#x by=%s on=%d catcher=%d drags=%s",
                       vr::VROverlay()->IsDashboardVisible() ? 1 : 0, SteamInFront() ? 1 : 0,
-                      keyboard::Shown() ? "shown" : g_keyboardAside ? "aside" : "hidden", ModeName(), g_manual ? 1 : 0,
+                      ModeName(), g_manual ? 1 : 0,
                       LasersName(), g_gameRunning ? 1 : 0, g_paused ? 1 : 0, g_press.buttons,
                       DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_catcherShown ? 1 : 0,
                       drags.empty() ? "-" : drags.c_str());

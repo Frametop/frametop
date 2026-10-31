@@ -748,7 +748,7 @@ Kirigami.ApplicationWindow {
                 }
                 Controls.Switch {
                     Kirigami.FormData.label: "Keep it open:"
-                    text: "Until you press its Close key or your keyboard button, not only while the text field has focus"
+                    text: "Until you close it (its X) or press your keyboard button, not only while the text field has focus"
                     checked: backend.vrKeyboardPersist
                     enabled: backend.vrKeyboard !== "never"
                     onToggled: backend.setVrKeyboardPersist(checked)
@@ -830,9 +830,9 @@ Kirigami.ApplicationWindow {
                 padding: Kirigami.Units.largeSpacing
                 wrapMode: Text.Wrap
                 opacity: 0.7
-                text: "Frametop's keyboard opens in front of you, below your eyes, and closes with its Close key or a layout reset "
-                      + "(or when the text field loses focus, with Keep it open off). It steps aside while the Steam "
-                      + "menu or Steam's own keyboard is up. Type on it with a laser or the 3D mouse. It types into any "
+                text: "Frametop's keyboard (Full Keyboard) opens in front of you, below your eyes, and closes with its X or a layout reset "
+                      + "(or when the text field loses focus, with Keep it open off). "
+                      + "Type on it with a laser, the 3D mouse, a controller's tip or a fingertip. It types into any "
                       + "app, but only Qt, GTK and Firefox apps say when a text field is selected; for the rest "
                       + "(Chromium, Electron and X11 apps), map Open/close keyboard to a button on the Buttons or "
                       + "Controllers page. Keyboards set to Ignore, and keyboards other programs make, don't "

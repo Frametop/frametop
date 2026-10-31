@@ -18,7 +18,7 @@ struct ft_dmabuf {
 };
 
 // FT_FRONT: a spin (the lazy susan) brought panel `screen` to straight ahead: typing goes there.
-enum ft_event_type { FT_MOTION, FT_BUTTON, FT_SCROLL, FT_LEAVE, FT_QUIT, FT_KEY, FT_KEYBOARD_CLOSED, FT_FRONT };
+enum ft_event_type { FT_MOTION, FT_BUTTON, FT_SCROLL, FT_LEAVE, FT_QUIT, FT_FRONT };
 
 struct ft_event {
     enum ft_event_type type;
@@ -28,7 +28,6 @@ struct ft_event {
     bool pressed;
     bool controller;  // FT_BUTTON: from a hand controller's laser (not the 3D mouse's)
     double dx, dy;    // FT_SCROLL: notches (positive dy: scroll down)
-    uint32_t key;     // FT_KEY: linux KEY_* from our keyboard (pressed: down or up)
 };
 
 bool ft_vr_init(void);
@@ -77,12 +76,6 @@ bool ft_vr_screen_held(int index);
 void ft_vr_forget(const void *key);
 // Poll panel input and SteamVR events.
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data);
-// Our keyboard (keyboard.cpp), for typing on screen `index`: its keys arrive as FT_KEY
-// events, and FT_KEYBOARD_CLOSED when its Close key is pressed or the screens hide. False if
-// it can't be shown or there's no head pose. With the Steam menu or Steam's own keyboard
-// up, it waits and appears when they're gone.
-bool ft_vr_keyboard_show(int index);
-void ft_vr_keyboard_hide(void);
 // Gamepad mode's pill (vr.cpp): over the panel typing goes to, `screen` (-1: Steam, no pill), from
 // compositor.c's keys_update; and the panel SteamVR's Gamepad mode is for while it's ours (-1: none),
 // for the input relay's "pad" (a remote display's).

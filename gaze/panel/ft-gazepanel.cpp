@@ -79,7 +79,7 @@
 //
 // Each picture goes into the next of three shared buffers (linear DMA-BUFs SteamVR imported
 // once, the size of the biggest panel; the texture bounds show the part in use), and the panel
-// switches to it, as screens/keyboard.cpp does. SetOverlayRaw, which uploads a new texture each
+// switches to it, as frunner/ft-spotpanel.cpp does. SetOverlayRaw, which uploads a new texture each
 // time, flickered on every change of the full calibration's 1024x768 picture, and in a live
 // test the headset kept showing an old picture after the panel had drawn new ones (2026-10-01).
 // It's only the fallback. A "show" makes the panel visible once its first picture is in.
@@ -141,7 +141,7 @@ int64_t RawNs() {
     return int64_t(ts.tv_sec) * 1'000'000'000 + ts.tv_nsec;
 }
 
-// ---------------------------------------------------------------- text (as screens/keyboard.cpp)
+// ---------------------------------------------------------------- text (as screens/label.cpp)
 
 stbtt_fontinfo g_font;
 std::vector<unsigned char> g_fontData;

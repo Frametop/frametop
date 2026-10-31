@@ -124,18 +124,18 @@ layout has no key for (a dead key's accent, another script) is dropped, and the 
 A character waits while a modifier is held on a keyboard, which would make it a shortcut
 (Ctrl+letter).
 
-Frametop's keyboard (ft-screens' key panel): the desktop's input method (input/ft-textinput)
+Frametop's keyboard (Full Keyboard, below): the desktop's input method (input/ft-textinput)
 says "textfield 1|0" when a text field on the desktop gains or loses keyboard focus, and
 the relay tells ft-screens to open ("vrkeyboard show") or close ("vrkeyboard hide") the
 keyboard, depending on "vr_keyboard" in the rules file: "always", "no_keyboard" (the
 default: only while no pass-through keyboard is connected; a program's uinput keyboard
 doesn't count), "button" (only the keyboard_toggle action opens it), or "never"
 (keyboard_toggle does nothing either). With "vr_keyboard_persist" (the default), it stays
-open when the text field loses focus, until its Close key, keyboard_toggle, or a layout reset
+open when the text field loses focus, until its close button, keyboard_toggle, or a layout reset
 (ft-layout reset) closes it.
 
-Full Keyboard (keyboard/, TaiKeid's, run with --frametop; keyboard/FRAMETOP.md) takes over from
-it while it runs. It says "kbhello OPEN" on the control socket every second, only taken from
+Full Keyboard (keyboard/, TaiKeid's, run with --frametop; keyboard/FRAMETOP.md) is that keyboard.
+While it isn't running, nothing opens (ft-screens' old panel was removed in DEE-310). It says "kbhello OPEN" on the control socket every second, only taken from
 this user, and gets "kb DESKTOP SURFACE" back: whether typing goes to the desktop, and whether
 the screens show with Frametop not paused (it may show over them with the dashboard closed).
 The relay tells ft-screens "fullkb OPEN", and while that's fresh ft-screens passes its

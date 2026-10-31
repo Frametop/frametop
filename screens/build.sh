@@ -8,7 +8,7 @@
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
 # shipped with SteamVR on the Frame predates, so the build uses the public header from
 # Valve's openvr repo (pinned in scripts/openvr.sh).
-# keyboard.cpp draws its key labels with stb_truetype (public domain, one header, pinned);
+# label.cpp draws the panels' labels with stb_truetype (public domain, one header, pinned);
 # ft-handview --snapshot writes PNGs with stb_image_write (the same).
 # ft-handview's hand models are compiled in (handasset.h, from screens/assets/hands by tools/hand-asset.py);
 # its robot hand is built in code (handrobot.cpp).
@@ -24,7 +24,7 @@ $cc -c -o build/compositor.o compositor.c
 $cc -c -o build/remote.o remote.c
 cxx="g++ -std=c++17 -O2 -Wall -Wno-missing-field-initializers -Ibuild/include $(pkg-config --cflags egl glesv2 gbm libdrm)"
 $cxx -c -o build/vr.o vr.cpp
-$cxx -c -o build/keyboard.o keyboard.cpp
+$cxx -c -o build/label.o label.cpp
 $cxx -c -o build/overlaytex.o overlaytex.cpp
 $cxx -c -o build/handcut.o handcut.cpp
 $cxx -c -o build/handrender.o handrender.cpp
@@ -38,7 +38,7 @@ $cxx -c -o build/handskin.o handskin.cpp
 $cxx -c -o build/handrobot.o handrobot.cpp
 $cxx -c -o build/handview.o handview.cpp
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/keyboard.o build/overlaytex.o build/handcut.o build/handrender.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handrobot.o build/handcut.o build/handrender.o $vrlibs

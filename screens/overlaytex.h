@@ -6,8 +6,8 @@
 // fingertip dot's disc, as big as the corner's glow, and "grab that"'s halo kept the last panel's
 // shape. Measured with a probe: hidden, shown or transparent, destroyed or not, 20 s apart or
 // not, every call keeps its block.
-//   Here each distinct image goes into a linear DMA-BUF SteamVR imports once (as the keyboard's
-// buffers, keyboard.cpp), kept by its content, and the overlay switches to it with
+//   Here each distinct image goes into a linear DMA-BUF SteamVR imports once (as ft-gazepanel's
+// buffers do), kept by its content, and the overlay switches to it with
 // SetOverlayTexture, which has no such limit (600 switches, and 600 imports dropped again, fine).
 // Images no overlay shows are dropped, the least recently used first, past kKeep of them.
 #pragma once

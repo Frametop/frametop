@@ -1160,12 +1160,6 @@ class Backend(QObject):
         together = " together" if len(buttons) == 2 else ""
         return f"{names}{together}, {'twice' if presses == 2 else 'once'}"
 
-    @Property(str, notify=mappingsChanged)
-    def pauseGestureText(self):
-        g = self.pauseGesture
-        buttons = [b for b in (g["first"], g["second"]) if b]
-        return self.gestureText(buttons, g["presses"]) if buttons else "None"
-
     # --- gaze ---
     def _gaze_status(self, status):
         now = time.monotonic()
@@ -1620,11 +1614,6 @@ class Backend(QObject):
         """The eye bias: "auto", "left" or "right" (GAZE_EYE)."""
         v = read_conf().get("GAZE_EYE", "auto")
         return v if v in GAZE_EYES else "auto"
-
-    @Slot(str)
-    def setGazeTracker(self, tracker):
-        if tracker in GAZE_TRACKERS:
-            self._set_gaze("GAZE_TRACKER", tracker, f"Gaze from {GAZE_TRACKERS[tracker]}")
 
     @Slot(str)
     def setGazeEye(self, eye):

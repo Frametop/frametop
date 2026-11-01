@@ -109,6 +109,7 @@ DEBUG = os.environ.get("FT_FLOAT_DEBUG") == "1"  # log every event from the scri
 STEAMVR_ONLY = {"steam", "vrurlhandler", "steamos-nested-desktop", "frametop-session.sh", "ft-layout",
                 "ft-layout-reset", "ft-hide-show"}
 PAUSE_PATH = f"/run/user/{os.getuid()}/frametop-pause.json"  # input/game_pause.py's state
+INPUT_RULES = os.path.expanduser("~/.config/frametop-input.json")  # Input Settings' rules (carry_on_float)
 
 
 def whole(*scales):
@@ -404,6 +405,17 @@ class Slot:
         self.window = None            # Float
 
 
+
+def carry_on_float():
+    """Input Settings' "carry_on_float": a window floated from the desktop starts carried by the
+    3D mouse. Off unless the rules say true (and off if they can't be read)."""
+    try:
+        with open(INPUT_RULES, encoding="utf-8") as f:
+            rules = json.load(f)
+    except (OSError, ValueError):   # (no copy of a broken file: Input Settings says so itself)
+        return False
+    return isinstance(rules, dict) and rules.get("carry_on_float") is True
+
 class Daemon:
     def __init__(self, args):
         self.screens_n = args.screens
@@ -529,11 +541,13 @@ class Daemon:
             self.float_launched(ev, None)
             return
         if kind == "float-request":
-            # From the desktop to floating: the 3D mouse carries it at once (ft-screens' carry_toggle,
-            # once its panel shows; user, 2026-11-01: "auto-engage carry mode when a window transitions
-            # from desktop to floating").
+            # From the desktop to floating: with "carry_on_float" on (Input Settings, off by default:
+            # DEE-328's audit), the 3D mouse carries it at once (ft-screens' carry_toggle, once its panel
+            # shows; user, 2026-11-01: "auto-engage carry mode when a window transitions from desktop to
+            # floating"). Not one torn off its screen: ft-screens carries that on already ("torn").
+            torn = bool(self.tear and self.tear[0] == ev.get("id"))
             floated = self.float_window(ev)
-            if floated:
+            if floated and not torn and carry_on_float():
                 self.screens.ask(f"carry take {floated.slot.index}", quiet=True)
         elif kind == "dock-request":
             if f:

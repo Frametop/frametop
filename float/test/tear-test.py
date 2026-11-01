@@ -7,8 +7,10 @@ KWin's outputs are made up.
   float/test/tear-test.py
 """
 import importlib.util
+import json
 import os
 import sys
+import tempfile
 import types
 from unittest import mock
 
@@ -86,5 +88,34 @@ d.floats.clear(), d.screens.sent.clear()
 slot.window = None
 d.float_window(ev)
 check("floated another way (the float key): no carry", [t for t in d.screens.sent if t.startswith("torn")], [])
+
+# "carry_on_float" (Input Settings, DEE-328): a window floated from the desktop starts carried ("carry
+# take"), only with it on, and never one torn off (ft-screens carries that on as "torn").
+rules = os.path.join(tempfile.mkdtemp(), "frametop-input.json")
+floatd.INPUT_RULES = rules
+check("no rules file: off", floatd.carry_on_float(), False)
+with open(rules, "w") as fh:
+    fh.write("not json")
+check("rules that don't read: off", floatd.carry_on_float(), False)
+with open(rules, "w") as fh:
+    json.dump({"carry_on_float": "yes"}, fh)
+check("not true: off", floatd.carry_on_float(), False)
+
+
+def float_request(on, tear=None):
+    with open(rules, "w") as fh:
+        json.dump({"carry_on_float": on} if on is not None else {}, fh)
+    d.floats.clear(), d.screens.sent.clear()
+    slot.window = None
+    d.tear = tear
+    d.on_event(dict(ev, ev="float-request"))
+    return [t for t in d.screens.sent if t.startswith("carry")]
+
+
+check("float request, the setting not there: no carry", float_request(None), [])
+check("float request, off: no carry", float_request(False), [])
+check("float request, on: carried", float_request(True), ["carry take 4"])
+check("torn off, on: no carry take (torn carries it)", float_request(True, ("w1", 1300, 760)), [])
+check("...it's still carried as torn", [t for t in d.screens.sent if t.startswith("torn")], ["torn 4 500 160"])
 
 sys.exit(1 if failed else 0)

@@ -89,6 +89,17 @@ class RulesFile(unittest.TestCase):
         self.assertTrue(json.loads(self.path.read_text())["meta_tap"])
         self.assertEqual(self.sent, ["reload", "reload"])
 
+    def test_carry_on_float_switch(self):
+        # Off by default (DEE-328's audit); on and off again are saved as carry_on_float.
+        self.path.write_text(json.dumps({"meta_tap": False}))
+        self.assertFalse(self.b.carryOnFloat)
+        self.b.setCarryOnFloat(True)
+        self.assertEqual(json.loads(self.path.read_text()), {"meta_tap": False, "carry_on_float": True})
+        self.assertTrue(self.b.carryOnFloat)
+        self.b.setCarryOnFloat(False)
+        self.assertFalse(json.loads(self.path.read_text())["carry_on_float"])
+        self.assertFalse(self.b.carryOnFloat)
+
     def test_fixed_file_saves_again(self):
         self.path.write_text("not json")
         self.b.setRole("dev1", "pointer", "Mouse")

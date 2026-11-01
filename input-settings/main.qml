@@ -764,6 +764,12 @@ Kirigami.ApplicationWindow {
                     checked: backend.metaTap
                     onToggled: backend.setMetaTap(checked)
                 }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Carry floated windows:"
+                    text: "A window you float from the desktop starts carried by the 3D mouse, as carry_toggle does, until a click or Enter"
+                    checked: backend.carryOnFloat
+                    onToggled: backend.setCarryOnFloat(checked)
+                }
 
                 Repeater {
                     model: backend.keyShortcuts

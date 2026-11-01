@@ -353,7 +353,6 @@ struct Screen {
     int cropX = 0, cropY = 0, cropW = 0, cropH = 0;
     int titleH = 0;
     double mpp = 0;               // metres per buffer pixel
-    double userScale = 1;         // times ft-floatd's density: Alt and the wheel in a carry (CarryScale)
     bool titleCarry = false;      // carried by its title bar: KWin's pointer stays at carryX, carryY
     double carryX = 0, carryY = 0;
     // A floating window carried onto a screen (UpdateDockAims): it docks there when let go, held at
@@ -2094,45 +2093,16 @@ void UpdateDrag(Screen &s, int index) {
     ResizeScreen(s, hx - s.grabX, hy - s.grabY);
 }
 
-// Panel s f times as wide (and high), about its centre: a floating window's density changes
-// (userScale: ft-floatd's next "float" keeps it; its pixels don't change), a screen's width.
-void ScalePanel(Screen &s, double f) {
-    if (s.floating && s.mpp > 0 && s.cropW > 0) {
-        const double px = s.stretchW > 0 ? s.stretchW : s.cropW;
-        f = std::clamp(s.mpp * f * px, kMinWidth, 12.0) / (s.mpp * px);
-        s.userScale *= f, s.mpp *= f;
-        s.metres = px * s.mpp;
-        vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
-        CapCurve(s);
-        ApplyCurve(s);
-        PlaceChrome(s);
-        PlaceSubs(s);
-        return;
-    }
-    SetWidth(s, s.metres * f);
-}
-
-// Alt and the wheel while carrying (user, 2026-11-01: "can we have "alt + scroll" change panel scale in
-// small increments?"): 3% a notch (1% with Ctrl too), about its centre; the point held stays under the
-// ray (carryGrab scales with it).
-void CarryScale(Screen &s, double notches) {
-    const double before = s.metres;
-    ScalePanel(s, std::pow(g_ctrl ? 1.01 : 1.03, notches));
-    const double f = s.metres / std::max(1e-6, before);
-    s.carryGrab.m[0][3] *= float(f), s.carryGrab.m[1][3] *= float(f);
-    std::printf("screen %d: carry_toggle: %.2f m wide (Alt and the wheel)\n", ScreenIndexOf(s) + 1, s.metres);
-}
-
 // Scroll while moving: push the screen away (up) or pull it closer, along the line from
 // the head (not from the carrying device: the 3D mouse's device sits just in front of the
-// bar, below the screen's centre, so that line points mostly up). A quarter as far a notch
-// with Ctrl held. A carry_toggle carry goes along the ray (carryDist), or with Ctrl or Alt held
-// moves its plane or its centre.
+// bar, below the screen's centre, so that line points mostly up).
+// A carry_toggle carry goes along the ray (carryDist), or with Ctrl or Alt held moves its plane or
+// its centre. The same step a notch whatever is held (DEE-328's audit, 2026-11-01: no carry-only
+// Ctrl and Alt wheel bindings; the wheel pushes and pulls as on a title bar, DEE-246).
 void Push(Screen &s, double notches) {
-    if (s.toggleCarry && g_alt) return CarryScale(s, notches);
     Mat d, head;
     if (!DevicePose(s.dragDevice, &d) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
-    const double step = g_ctrl ? 0.02 : 0.08;
+    const double step = 0.08;
     if (s.toggleCarry && s.carryMode == 0) {
         s.carryDist = std::clamp(s.carryDist * (1 + step * notches), 0.3, 10.0);
         return;
@@ -2225,7 +2195,7 @@ void SetFloat(Screen &s, double mpp, int x, int y, int w, int h, int title) {
     const bool first = !s.floatOn || s.cropW <= 0;
     const double oldW = s.metres, oldH = s.heightMetres();
     s.floatOn = true;
-    s.mpp = mpp * s.userScale;
+    s.mpp = mpp;
     s.cropX = x, s.cropY = y, s.cropW = w, s.cropH = h, s.titleH = title;
     if (s.drag != Drag::Resize && !FarStretching(s))   // the stretch's answer (or one's still going)
         s.stretchW = s.stretchH = 0;
@@ -2247,7 +2217,6 @@ void ReleaseHold(Screen &s) {
 }
 
 void Unfloat(Screen &s) {
-    s.userScale = 1;
     s.stretchW = s.stretchH = 0;   // (a resize going on goes nowhere)
     if (s.drag != Drag::None) EndDrag(s);
     for (auto &[k, sub] : s.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);
@@ -5767,7 +5736,8 @@ static void CarrySpaceHold() {
         }
 }
 
-// A window gone from the desktop to floating is carried at once ("carry take N", from ft-floatd; user,
+// A window gone from the desktop to floating is carried at once ("carry take N", from ft-floatd with
+// Input Settings' carry_on_float on, off by default; user,
 // 2026-11-01: "auto-engage carry mode when a window transitions from desktop to floating"), as a tap
 // takes a panel (CarryTake: by its centre, the cursor sent there), once its panel shows, ft-floatd has
 // placed it and no button is held (the release of the title bar's button would end it), within
@@ -5982,7 +5952,6 @@ static void CarrySpace(bool face) {
 // its size when it began (CarryToggle notes them).
 struct CarryUndo {
     Mat pose;
-    double metres;
 };
 static std::map<int, CarryUndo> g_carryUndo;
 
@@ -5990,7 +5959,7 @@ static void NoteCarryUndo() {
     g_carryUndo.clear();
     for (auto &[i, s] : g_screens) {
         Mat p;
-        if (s.visible && s.pinned == kNone && ScreenPose(s, &p)) g_carryUndo[i] = {p, s.metres};
+        if (s.visible && s.pinned == kNone && ScreenPose(s, &p)) g_carryUndo[i] = {p};
     }
 }
 
@@ -6004,7 +5973,6 @@ static void CarryUndoAll() {
         if (it == g_screens.end()) continue;
         Screen &s = it->second;
         if (s.pinned != kNone || s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i)) continue;
-        if (std::fabs(s.metres - u.metres) > 1e-4) ScalePanel(s, u.metres / s.metres);
         SetAbsolute(s, u.pose);
         g_spin.base.erase(i);
         if (!s.floating && !s.remote) screens = true;

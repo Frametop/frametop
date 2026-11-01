@@ -1187,6 +1187,16 @@ class Backend(QObject):
         self.message.emit(text, False)
 
     @Property(bool, notify=mappingsChanged)
+    def carryOnFloat(self):
+        return read_json(RULES_PATH).get("carry_on_float") is True
+
+    @Slot(bool)
+    def setCarryOnFloat(self, on):
+        # ft-floatd reads it at each float, so it needs no reload
+        self._set_rule("carry_on_float", bool(on), "Floated windows: " + (
+            "start carried by the 3D mouse" if on else "stay where they float"))
+
+    @Property(bool, notify=mappingsChanged)
     def pauseAuto(self):
         return read_json(RULES_PATH).get("pause_auto", True) is not False
 

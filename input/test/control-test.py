@@ -250,4 +250,16 @@ for label in sorted(set(want) | set(got)):
     if not ok:
         failures.append(label)
 print(f"{len(got) - len(failures)} of {len(set(want) | set(got))} cases as recorded")
+
+# The sender's pid and uid, from the kernel's credentials in a datagram's ancillary data.
+peer_creds = getattr(relay, "peer_creds", None)
+if peer_creds:
+    for label, anc, want_creds in (
+            ("credentials", [(socket.SOL_SOCKET, socket.SCM_CREDENTIALS, relay.CREDS.pack(41, 1000, 1000))], (41, 1000)),
+            ("no ancillary data", [], (None, None)),
+            ("other ancillary data only", [(socket.SOL_SOCKET, socket.SCM_RIGHTS, b"\0" * 4)], (None, None))):
+        ok = peer_creds(anc) == want_creds
+        print(("ok    " if ok else "FAIL  ") + "peer_creds: " + label, flush=True)
+        if not ok:
+            failures.append("peer_creds: " + label)
 sys.exit(1 if failures else 0)

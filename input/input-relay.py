@@ -1236,6 +1236,38 @@ class FullKeyboardLink:
 CREDS = struct.Struct("3i")  # struct ucred: pid, uid, gid, as the kernel adds it to each datagram
 
 
+def peer_creds(ancillary):
+    """(pid, uid) of a datagram's sender, from its SCM_CREDENTIALS (recvmsg's ancillary data), or
+    (None, None) without them."""
+    return next((CREDS.unpack(d[:CREDS.size])[:2] for level, kind, d in ancillary
+                 if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), (None, None))
+
+
+class Datagram:
+    """One datagram on the control socket, as Relay.control_command's handlers get it."""
+
+    __slots__ = ("cmd", "words", "data", "addr", "pid", "uid", "now")
+
+    def __init__(self, cmd, words, data, addr, pid, uid, now):
+        self.cmd, self.words, self.data, self.addr = cmd, words, data, addr
+        self.pid, self.uid, self.now = pid, uid, now
+
+    @property
+    def mine(self):
+        """From this user: the commands that type, press or stop things take only these."""
+        return self.uid == os.getuid()
+
+
+class Form:
+    """One form of a control command (Relay.CONTROL): its handler, the test a datagram must pass
+    (any, by default), and whether it replies, so only a bound sender's counts."""
+
+    __slots__ = ("handle", "accepts", "replies")
+
+    def __init__(self, handle, accepts=lambda d: True, replies=False):
+        self.handle, self.accepts, self.replies = handle, accepts, replies
+
+
 class Relay:
     """The relay: the devices it reads, the control socket, and what it keeps between events.
     main() makes the virtual devices and the sockets, and runs it. A test can make one with fakes
@@ -2008,8 +2040,7 @@ class Relay:
             except BlockingIOError:
                 self.kb_tell(now)  # what changed reaches Full Keyboard at once
                 return
-            pid, uid = next((CREDS.unpack(d[:CREDS.size])[:2] for level, kind, d in anc
-                             if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), (None, None))
+            pid, uid = peer_creds(anc)
             words = data.decode(errors="replace").split()
             cmd = words[0] if words else ""
             # One malformed datagram must not end the relay: it would drop every grab,
@@ -2022,185 +2053,239 @@ class Relay:
 
     def control_command(self, cmd, words, data, addr, pid, uid, now):
         """One datagram on the control socket: cmd, its first word, of words; data as it came; addr,
-        the sender's address (empty for an unbound one); pid and uid, the sender's, from the kernel."""
-        if cmd == "keyboard":
-            # From ft-screens (unbound, no reply): where typing goes, repeated every second.
-            # "keyboard desktop|steam 1|0 1|0": the third word, whether the screens show;
-            # the fourth, whether it's paused (an older ft-screens leaves it out).
-            desktop = len(words) > 1 and words[1] == "desktop" and not self.pause.paused
-            self.desktop_until = now + 3.0 if desktop else 0.0
-            self.shown_until = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
-            if uid == os.getuid():
-                self.pause.screens_seen(pid)  # a desktop started while paused hides too
-                if len(words) > 3 and words[3] in ("0", "1"):
-                    self.pause.screens_report(words[3] == "1")
-            return
-        if cmd == "vrbtn" and len(words) == 3 and words[1] in VR_BUTTONS and words[2] in ("0", "1"):
-            self.vr_button(words[1], int(words[2]), now)
-            return
-        if cmd == "vrhello":
-            self.vr_bind(now)
-            self.pause.helper_started()
-            return
-        if cmd == "vrgame" and len(words) == 2:
-            if words[1] == "1":
-                self.gamepad.stop("a VR game started")
-            self.pause.game_state(words[1] == "1", now)
-            return
-        if cmd == "vrdash" and len(words) == 2:
-            self.pause.dashboard_state(words[1] == "1")
-            self.gamepad.dashboard_state(words[1] == "1")
-            return
-        if cmd == "gamepad" and len(words) == 2 and words[1] in ("desktop", "remote", "off"):
-            # From ft-screens (no reply): SteamVR's Gamepad mode is Frametop's or ended. It
-            # presses buttons, so only from this user.
-            if uid != os.getuid():
-                log(f"gamepad from another user ({uid}): ignored")
-            else:
-                self.gamepad.screens_word(None if words[1] == "off" else words[1], now, self.gamepad_blocked())
-            return
-        if cmd == "vrpad" and len(words) == 8:
-            # From the controller reader in gamepad mode. It presses buttons, so only from
-            # this user.
-            if uid != os.getuid():
-                log(f"vrpad from another user ({uid}): ignored")
-            elif (pad_state := vrpad.parse(words[1:])) is not None:
-                self.gamepad.reader_state(pad_state, now)
-            return
-        if cmd == "pause" and len(words) >= 2 and words[1] in ("on", "off", "toggle", "?"):
-            # From input/ft-pause, the settings app, or the gesture reader (unbound, no reply).
-            reason = words[2] if len(words) > 2 else "command"
-            if words[1] == "toggle":
-                self.pause.toggle(reason, now)
-            elif words[1] != "?":
-                self.pause.set(words[1] == "on", reason, now)
-            if addr:
-                self.reply(addr, self.pause.status())
-            return
-        if cmd == "pause" and words[1:] in (["enforce"], ["defer", "remote"]):
-            # From frametop-session.sh (input/ft-pause enforce|defer-remote) as a desktop
-            # starts: while paused, its hand tracking stops again, and remote access waits
-            # for the resume. Both stop things, so only from this user.
-            if uid != os.getuid():
-                log(f"pause {words[1]} from another user ({uid}): ignored")
-            elif words[1] == "enforce":
-                self.pause.desktop_started()
-            else:
-                self.pause.defer_remote()
-            if addr:
-                self.reply(addr, self.pause.status())
-            return
-        if cmd == "textfield" and words[1:] in (["1"], ["0"], ["1", "renew"]):
-            # Typed characters go back to the address that said it, so only this user's. A
-            # renewal keeps (or, after a restart here, finds) that address, and nothing else.
-            if uid == os.getuid():
-                self.text_input = addr if words[1] == "1" and addr else None
-                self.text_input_until = now + TEXT_INPUT_LAPSE
-            if words[2:] != ["renew"]:
-                self.text_field(words[1] == "1")
-            return
-        if cmd in ("hostdev", "hostev", "hostbye"):
-            # A host's keyboard or mouse, from its ft-stream (see "Host devices"). Keys and
-            # clicks, so only from this user.
-            if uid != os.getuid():
-                log(f"{cmd} from another user ({uid}): ignored")
-            elif len(words) >= 3 and HOST_ID.fullmatch(words[1]) and words[2] in ("mouse", "keyboard"):
-                self.host_message(cmd, words, now)
-            return
-        if cmd == "type":
-            # From Frametop Voice (unbound, no reply). It types keys, so only from this user.
-            if uid == os.getuid():
-                self.type_text(data[len(b"type "):].decode(errors="replace"))
-            else:
-                log(f"type from another user ({uid}): ignored")
-            return
-        if cmd == "kbhello":
-            # Full Keyboard (keyboard/, --frametop), every second and when it opens or
-            # closes: "kbhello OPEN". Only from this user and a bound address: what it
-            # types goes to the desktop. It gets the word on every hello, and ft-screens
-            # hears it's there ("fullkb OPEN"), so it opens Full Keyboard, not its own.
-            if uid != os.getuid() or not addr:
+        the sender's address (empty for an unbound one); pid and uid, the sender's, from the kernel.
+        CONTROL says which handler takes it: the first of cmd's forms that accepts it. A form that
+        replies takes only a bound sender's (an unbound one has nowhere to reply to, and gets
+        nothing); a datagram no form accepts gets an error, if it can be told."""
+        d = Datagram(cmd, words, data, addr, pid, uid, now)
+        for form in self.CONTROL.get(cmd, ()):
+            if form.accepts(d):
+                if form.replies and not addr:
+                    return
+                form.handle(self, d)
                 return
-            if addr != self.kb.addr:
-                if self.kb.addr is not None:
-                    self.kb_gone("restarted")
-                log("Full Keyboard connected")
-            self.kb.addr, self.kb.until, self.kb.said = addr, now + 3.0, None
-            self.kb_tell(now)
-            opened = "1" if len(words) > 1 and words[1] == "1" else "0"
-            try:
-                self.screens_sock.sendto(f"fullkb {opened}".encode(), SCREENS)
-            except OSError:
-                pass  # ft-screens not running
-            return
-        if cmd in ("kbkey", "kbtext"):
-            # Full Keyboard's typing, while it was told it goes to the desktop: "kbkey CODE
-            # 0|1" (a key's press or release) and "kbtext TEXT" (what its input methods
-            # composed). Only from the Full Keyboard that said hello. In order with what's
-            # still to type, where typing goes then.
-            if uid != os.getuid() or addr is None or addr != self.kb.addr:
-                return
-            if cmd == "kbtext":
-                self.type_text(data[len(b"kbtext "):].decode(errors="replace"), quiet=True)
-            elif (len(words) == 3 and words[1].isdigit() and 0 < int(words[1]) < BTN_MISC
-                  and words[2] in ("0", "1") and len(self.typing.queue) < TYPE_MAX):
-                self.typing.queue.append(("key", int(words[1]), int(words[2])))
-            return
-        if cmd == "kbpanel" and len(words) == 2 and words[1] in ("show", "hide"):
-            # From ft-screens (unbound): open or close Full Keyboard, which it does for the
-            # "vrkeyboard" commands while Full Keyboard is there.
-            if uid == os.getuid():
-                self.kb_tell(now, f"kb {words[1]}")
-            return
-        if cmd == "kbpoke":
-            # From ft-screens (unbound): a fingertip on Full Keyboard's panel, "kbpoke
-            # <left|right> <hover|press|move|up|end> [x y z]" (its point in the standing
-            # universe), passed on as "kb poke ...". It presses keys, so only from this user.
-            if (uid == os.getuid() and len(words) in (3, 6) and words[1] in ("left", "right")
-                    and words[2] in KB_POKES and all(KB_COORD.fullmatch(w) for w in words[3:])):
-                self.kb_tell(now, "kb poke " + " ".join(words[1:]))
-            return
-        if cmd == "calpanel" and len(words) == 2:
-            # From the pointer helper (see the top). Only from this user: it takes Enter.
-            if uid == os.getuid():
-                self.calpanel_until = now + 3.0 if words[1] == "1" else 0.0
-            return
-        if cmd == "gazeawake" and len(words) == 2:
-            if self.lease.current:
-                self.lease.current.gaze_awake_until = now + 12.0 if words[1] == "1" else 0.0
-            return
-        if cmd == "gazewoke":
-            # The gaze took the pointer back (gaze mode owns it): it's on, as a wake leaves it.
-            p = self.lease.current
-            if p and not p.active:
-                p.active, p.last_used = True, now
-                log("pointer on (gaze)")
-            return
-        if not addr:
-            return  # unbound sender, nowhere to reply
-        if cmd == "devices":
-            self.reply(addr, {"t": "devices", "pointer_mode": self.lease.conf is not None,
-                         "paused": self.pause.paused,
-                         "actions": ACTIONS,
-                         "nodes": [n.describe() for n in self.nodes.values() if n.candidate]})
-        elif cmd == "watch":
-            seconds = float(words[1]) if len(words) > 1 else 30
-            self.watchers[addr] = now + min(seconds, 600)
-            self.reply(addr, {"t": "watching", "seconds": seconds})
-        elif cmd == "reload":
-            self.load_config()
-            self.apply_roles()
-            if self.lease.current:
-                self.lease.current.send("reload")
-            self.vr_bind(now)
-            self.reply(addr, {"t": "reloaded"})
-        elif cmd == "vrcapture":
-            seconds = float(words[1]) if len(words) > 1 else 30
-            self.vr_capture_until = now + min(seconds, 120) if seconds > 0 else 0.0
-            self.vr_bind(now)
-            self.reply(addr, {"t": "vrcapture", "seconds": seconds})
-        else:
+        if addr:
             self.reply(addr, {"t": "error", "error": f"unknown command {cmd!r}"})
+
+    # ------------------------------------------------ the control socket's commands (CONTROL)
+
+    def ctl_keyboard(self, d):
+        # From ft-screens (unbound, no reply): where typing goes, repeated every second.
+        # "keyboard desktop|steam 1|0 1|0": the third word, whether the screens show;
+        # the fourth, whether it's paused (an older ft-screens leaves it out).
+        words, now = d.words, d.now
+        desktop = len(words) > 1 and words[1] == "desktop" and not self.pause.paused
+        self.desktop_until = now + 3.0 if desktop else 0.0
+        self.shown_until = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
+        if d.mine:
+            self.pause.screens_seen(d.pid)  # a desktop started while paused hides too
+            if len(words) > 3 and words[3] in ("0", "1"):
+                self.pause.screens_report(words[3] == "1")
+
+    def ctl_vrbtn(self, d):
+        self.vr_button(d.words[1], int(d.words[2]), d.now)
+
+    def ctl_vrhello(self, d):
+        self.vr_bind(d.now)
+        self.pause.helper_started()
+
+    def ctl_vrgame(self, d):
+        if d.words[1] == "1":
+            self.gamepad.stop("a VR game started")
+        self.pause.game_state(d.words[1] == "1", d.now)
+
+    def ctl_vrdash(self, d):
+        self.pause.dashboard_state(d.words[1] == "1")
+        self.gamepad.dashboard_state(d.words[1] == "1")
+
+    def ctl_gamepad(self, d):
+        # From ft-screens (no reply): SteamVR's Gamepad mode is Frametop's or ended. It
+        # presses buttons, so only from this user.
+        if not d.mine:
+            log(f"gamepad from another user ({d.uid}): ignored")
+        else:
+            self.gamepad.screens_word(None if d.words[1] == "off" else d.words[1], d.now, self.gamepad_blocked())
+
+    def ctl_vrpad(self, d):
+        # From the controller reader in gamepad mode. It presses buttons, so only from
+        # this user.
+        if not d.mine:
+            log(f"vrpad from another user ({d.uid}): ignored")
+        elif (pad_state := vrpad.parse(d.words[1:])) is not None:
+            self.gamepad.reader_state(pad_state, d.now)
+
+    def ctl_pause(self, d):
+        # From input/ft-pause, the settings app, or the gesture reader (unbound, no reply).
+        words = d.words
+        reason = words[2] if len(words) > 2 else "command"
+        if words[1] == "toggle":
+            self.pause.toggle(reason, d.now)
+        elif words[1] != "?":
+            self.pause.set(words[1] == "on", reason, d.now)
+        if d.addr:
+            self.reply(d.addr, self.pause.status())
+
+    def ctl_pause_session(self, d):
+        # From frametop-session.sh (input/ft-pause enforce|defer-remote) as a desktop
+        # starts: while paused, its hand tracking stops again, and remote access waits
+        # for the resume. Both stop things, so only from this user.
+        if not d.mine:
+            log(f"pause {d.words[1]} from another user ({d.uid}): ignored")
+        elif d.words[1] == "enforce":
+            self.pause.desktop_started()
+        else:
+            self.pause.defer_remote()
+        if d.addr:
+            self.reply(d.addr, self.pause.status())
+
+    def ctl_textfield(self, d):
+        # Typed characters go back to the address that said it, so only this user's. A
+        # renewal keeps (or, after a restart here, finds) that address, and nothing else.
+        words = d.words
+        if d.mine:
+            self.text_input = d.addr if words[1] == "1" and d.addr else None
+            self.text_input_until = d.now + TEXT_INPUT_LAPSE
+        if words[2:] != ["renew"]:
+            self.text_field(words[1] == "1")
+
+    def ctl_host(self, d):
+        # "hostdev", "hostev" and "hostbye": a host's keyboard or mouse, from its ft-stream (see
+        # "Host devices"). Keys and clicks, so only from this user.
+        words = d.words
+        if not d.mine:
+            log(f"{d.cmd} from another user ({d.uid}): ignored")
+        elif len(words) >= 3 and HOST_ID.fullmatch(words[1]) and words[2] in ("mouse", "keyboard"):
+            self.host_message(d.cmd, words, d.now)
+
+    def ctl_type(self, d):
+        # From Frametop Voice (unbound, no reply). It types keys, so only from this user.
+        if d.mine:
+            self.type_text(d.data[len(b"type "):].decode(errors="replace"))
+        else:
+            log(f"type from another user ({d.uid}): ignored")
+
+    def ctl_kbhello(self, d):
+        # Full Keyboard (keyboard/, --frametop), every second and when it opens or
+        # closes: "kbhello OPEN". Only from this user and a bound address: what it
+        # types goes to the desktop. It gets the word on every hello, and ft-screens
+        # hears it's there ("fullkb OPEN"), so it opens Full Keyboard, not its own.
+        addr, now = d.addr, d.now
+        if not d.mine or not addr:
+            return
+        if addr != self.kb.addr:
+            if self.kb.addr is not None:
+                self.kb_gone("restarted")
+            log("Full Keyboard connected")
+        self.kb.addr, self.kb.until, self.kb.said = addr, now + 3.0, None
+        self.kb_tell(now)
+        opened = "1" if len(d.words) > 1 and d.words[1] == "1" else "0"
+        try:
+            self.screens_sock.sendto(f"fullkb {opened}".encode(), SCREENS)
+        except OSError:
+            pass  # ft-screens not running
+
+    def ctl_kbtyping(self, d):
+        # Full Keyboard's typing, while it was told it goes to the desktop: "kbkey CODE
+        # 0|1" (a key's press or release) and "kbtext TEXT" (what its input methods
+        # composed). Only from the Full Keyboard that said hello. In order with what's
+        # still to type, where typing goes then.
+        words = d.words
+        if not d.mine or d.addr is None or d.addr != self.kb.addr:
+            return
+        if d.cmd == "kbtext":
+            self.type_text(d.data[len(b"kbtext "):].decode(errors="replace"), quiet=True)
+        elif (len(words) == 3 and words[1].isdigit() and 0 < int(words[1]) < BTN_MISC
+              and words[2] in ("0", "1") and len(self.typing.queue) < TYPE_MAX):
+            self.typing.queue.append(("key", int(words[1]), int(words[2])))
+
+    def ctl_kbpanel(self, d):
+        # From ft-screens (unbound): open or close Full Keyboard, which it does for the
+        # "vrkeyboard" commands while Full Keyboard is there.
+        if d.mine:
+            self.kb_tell(d.now, f"kb {d.words[1]}")
+
+    def ctl_kbpoke(self, d):
+        # From ft-screens (unbound): a fingertip on Full Keyboard's panel, "kbpoke
+        # <left|right> <hover|press|move|up|end> [x y z]" (its point in the standing
+        # universe), passed on as "kb poke ...". It presses keys, so only from this user.
+        words = d.words
+        if (d.mine and len(words) in (3, 6) and words[1] in ("left", "right")
+                and words[2] in KB_POKES and all(KB_COORD.fullmatch(w) for w in words[3:])):
+            self.kb_tell(d.now, "kb poke " + " ".join(words[1:]))
+
+    def ctl_calpanel(self, d):
+        # From the pointer helper (see the top). Only from this user: it takes Enter.
+        if d.mine:
+            self.calpanel_until = d.now + 3.0 if d.words[1] == "1" else 0.0
+
+    def ctl_gazeawake(self, d):
+        if self.lease.current:
+            self.lease.current.gaze_awake_until = d.now + 12.0 if d.words[1] == "1" else 0.0
+
+    def ctl_gazewoke(self, d):
+        # The gaze took the pointer back (gaze mode owns it): it's on, as a wake leaves it.
+        p = self.lease.current
+        if p and not p.active:
+            p.active, p.last_used = True, d.now
+            log("pointer on (gaze)")
+
+    def ctl_devices(self, d):
+        self.reply(d.addr, {"t": "devices", "pointer_mode": self.lease.conf is not None,
+                            "paused": self.pause.paused,
+                            "actions": ACTIONS,
+                            "nodes": [n.describe() for n in self.nodes.values() if n.candidate]})
+
+    def ctl_watch(self, d):
+        seconds = float(d.words[1]) if len(d.words) > 1 else 30
+        self.watchers[d.addr] = d.now + min(seconds, 600)
+        self.reply(d.addr, {"t": "watching", "seconds": seconds})
+
+    def ctl_reload(self, d):
+        self.load_config()
+        self.apply_roles()
+        if self.lease.current:
+            self.lease.current.send("reload")
+        self.vr_bind(d.now)
+        self.reply(d.addr, {"t": "reloaded"})
+
+    def ctl_vrcapture(self, d):
+        seconds = float(d.words[1]) if len(d.words) > 1 else 30
+        self.vr_capture_until = d.now + min(seconds, 120) if seconds > 0 else 0.0
+        self.vr_bind(d.now)
+        self.reply(d.addr, {"t": "vrcapture", "seconds": seconds})
+
+    # The control socket's commands: the first word -> its forms, tried in order. A form takes a
+    # datagram its test accepts; one that replies (replies=True) needs a bound sender. A new
+    # command is a ctl_ handler and its line here.
+    CONTROL = {
+        "keyboard": (Form(ctl_keyboard),),
+        "vrbtn": (Form(ctl_vrbtn, lambda d: len(d.words) == 3 and d.words[1] in VR_BUTTONS
+                       and d.words[2] in ("0", "1")),),
+        "vrhello": (Form(ctl_vrhello),),
+        "vrgame": (Form(ctl_vrgame, lambda d: len(d.words) == 2),),
+        "vrdash": (Form(ctl_vrdash, lambda d: len(d.words) == 2),),
+        "gamepad": (Form(ctl_gamepad, lambda d: len(d.words) == 2 and d.words[1] in ("desktop", "remote", "off")),),
+        "vrpad": (Form(ctl_vrpad, lambda d: len(d.words) == 8),),
+        "pause": (Form(ctl_pause, lambda d: len(d.words) >= 2 and d.words[1] in ("on", "off", "toggle", "?")),
+                  Form(ctl_pause_session, lambda d: d.words[1:] in (["enforce"], ["defer", "remote"]))),
+        "textfield": (Form(ctl_textfield, lambda d: d.words[1:] in (["1"], ["0"], ["1", "renew"])),),
+        "hostdev": (Form(ctl_host),),
+        "hostev": (Form(ctl_host),),
+        "hostbye": (Form(ctl_host),),
+        "type": (Form(ctl_type),),
+        "kbhello": (Form(ctl_kbhello),),
+        "kbkey": (Form(ctl_kbtyping),),
+        "kbtext": (Form(ctl_kbtyping),),
+        "kbpanel": (Form(ctl_kbpanel, lambda d: len(d.words) == 2 and d.words[1] in ("show", "hide")),),
+        "kbpoke": (Form(ctl_kbpoke),),
+        "calpanel": (Form(ctl_calpanel, lambda d: len(d.words) == 2),),
+        "gazeawake": (Form(ctl_gazeawake, lambda d: len(d.words) == 2),),
+        "gazewoke": (Form(ctl_gazewoke),),
+        "devices": (Form(ctl_devices, replies=True),),
+        "watch": (Form(ctl_watch, replies=True),),
+        "reload": (Form(ctl_reload, replies=True),),
+        "vrcapture": (Form(ctl_vrcapture, replies=True),),
+    }
 
     def broadcast(self, node, etype, code, value, now):
         if not self.watchers or not node.candidate:

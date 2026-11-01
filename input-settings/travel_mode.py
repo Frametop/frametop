@@ -11,10 +11,12 @@ import re
 
 VRCMD = "/opt/steamvr/bin/linuxarm64/vrcmd"
 KEY = "internal.enableTravelMode"
-MISSING, NOT_RUNNING = 127, 3
+# Exit codes of SCRIPT's own checks, ones sh, the host runner and vrcmd don't use (127 is any
+# missing command or library).
+MISSING, NOT_RUNNING = 90, 91
 # One host call: is vrcmd there, is SteamVR running, then vrcmd with SteamVR's config folder
 # (a terminal in the desktop has the desktop's own) and its libraries, as ft-dashpatch runs it.
-SCRIPT = ('v=$1; shift; [ -x "$v" ] || exit 127; pgrep -x vrserver >/dev/null || exit 3; '
+SCRIPT = ('v=$1; shift; [ -x "$v" ] || exit 90; pgrep -x vrserver >/dev/null || exit 91; '
           'XDG_CONFIG_HOME="$HOME/.config" LD_LIBRARY_PATH="${v%/*}" exec "$v" "$@"')
 
 
@@ -45,16 +47,20 @@ def get(run):
 
 
 def put(run, on):
-    """Turn it on or off. (ok, text): text is the message to show."""
+    """Turn it on or off. (ok, text, got): text is the message to show, got what SteamVR has
+    now (get's, read back; None if unknown)."""
     # 1 or 0: vrcmd reads "true" as 0.
     r = vrcmd(run, "--set-settings-bool", KEY, "1" if on else "0")
     problem = why_not(r.returncode)
     if problem:
-        return False, problem
+        return False, problem, None
+    if r.returncode != 0:
+        said = ((r.stderr or "") + (r.stdout or "")).strip().splitlines()
+        return False, f"vrcmd couldn't set travel mode: {said[-1] if said else f'exit {r.returncode}'}", None
     got, problem = get(run)
     if got is None:
-        return False, problem or "vrcmd ran, but SteamVR's travel mode couldn't be read back"
+        return False, problem or "vrcmd ran, but SteamVR's travel mode couldn't be read back", None
     if got is not on:
-        return False, f"SteamVR kept travel mode {'on' if got else 'off'}"
+        return False, f"SteamVR kept travel mode {'on' if got else 'off'}", got
     return True, ("Travel mode on: SteamVR tracks for a moving vehicle" if on
-                  else "Travel mode off")
+                  else "Travel mode off"), got

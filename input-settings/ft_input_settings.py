@@ -539,6 +539,7 @@ class Backend(QObject):
         self._travel = None  # SteamVR's travel mode: None until read, or when it can't be
         self._travel_note = ""
         self._travel_busy = False  # vrcmd running (on the host: not on the UI thread)
+        self._travel_want = None  # the switch's new state while it's being set, so it doesn't snap back
         self._travelRead.connect(self._travel_read, Qt.QueuedConnection)
         self._adding = False
         self._relay_ok = False
@@ -912,6 +913,8 @@ class Backend(QObject):
     # --- SteamVR travel mode (travel_mode.py) ---
     @Property(bool, notify=travelChanged)
     def travelMode(self):
+        if self._travel_busy and self._travel_want is not None:
+            return self._travel_want
         return self._travel is True
 
     @Property(bool, notify=travelChanged)
@@ -930,22 +933,23 @@ class Backend(QObject):
         """Read SteamVR's travel mode, or set it to ON first (a bool), off the UI thread."""
         if self._travel_busy:
             return
-        self._travel_busy = True
+        self._travel_busy, self._travel_want = True, on
         self.travelChanged.emit()
 
         def job():
             try:
-                if on is not None:
-                    ok, text = travel_mode.put(host, on)
-                    self.message.emit(text, not ok)
-                got, note = travel_mode.get(host)
-                self._travelRead.emit(got, note)
+                if on is None:
+                    self._travelRead.emit(*travel_mode.get(host))
+                    return
+                ok, text, got = travel_mode.put(host, on)
+                self.message.emit(text, not ok)
+                self._travelRead.emit(got, "" if got is not None else text)
             except Exception as e:   # (the switch mustn't stay off)
                 self._travelRead.emit(None, f"Couldn't reach SteamVR's vrcmd: {e}")
         threading.Thread(target=job, daemon=True).start()
 
     def _travel_read(self, got, note):
-        self._travel, self._travel_note, self._travel_busy = got, note, False
+        self._travel, self._travel_note, self._travel_busy, self._travel_want = got, note, False, None
         self.travelChanged.emit()
 
     @Slot()

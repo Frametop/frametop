@@ -1101,13 +1101,20 @@ Kirigami.ApplicationWindow {
                     onToggled: backend.setTravelMode(checked)
                     Component.onCompleted: backend.refreshTravel()
                 }
-                Controls.Label {
+                RowLayout {
                     visible: backend.travelNote !== ""
-                    Layout.fillWidth: true
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
-                    wrapMode: Text.Wrap
-                    opacity: 0.7
-                    text: backend.travelNote
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        text: backend.travelNote
+                    }
+                    Controls.Button {
+                        text: "Check again"
+                        enabled: !backend.travelBusy
+                        onClicked: backend.refreshTravel()  // after starting SteamVR
+                    }
                 }
                 Repeater {
                     model: backend.pointerSettings

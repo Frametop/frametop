@@ -6,6 +6,7 @@ Run: python3 input-settings/test/test_travel_page.py"""
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -62,6 +63,29 @@ class Page(unittest.TestCase):
         self.assertFalse(any("--set-settings-bool" in c for c in RAN))  # opening it changes nothing
         self.assertFalse(b.travelKnown)
         self.assertFalse(b.travelMode)
+        self.assertIn("Start SteamVR", b.travelNote)
+
+    def test_the_switch_keeps_the_new_state_while_setting(self):
+        app = QGuiApplication.instance() or QGuiApplication([])
+        b = fis.Backend()
+        gate = threading.Event()
+        old = fis.host
+
+        def slow_host(*cmd, timeout=20):
+            gate.wait(10)
+            return Down()
+        fis.host = slow_host
+        self.addCleanup(setattr, fis, "host", old)
+        b.setTravelMode(True)
+        self.assertTrue(b.travelBusy)
+        self.assertTrue(b.travelMode)  # not snapped back to off while vrcmd runs
+        gate.set()
+        deadline = time.monotonic() + 10
+        while b.travelBusy and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        self.assertFalse(b.travelBusy)
+        self.assertFalse(b.travelMode)  # SteamVR down: it didn't take
         self.assertIn("Start SteamVR", b.travelNote)
 
 

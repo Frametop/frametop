@@ -128,7 +128,9 @@ German QWERTZ desktop gets "z" from the Z key; Steam and games get a US layout. 
 desktop's layout has no key for (ą on a US layout, a dead key's accent, another script) goes as
 "commit CHARACTER" to the desktop's input method (input/ft-textinput), which commits it to the
 focused text field, while one is focused: that's the address its "textfield 1" came from (this
-user's only), until "textfield 0". TYPE_SWITCH apart from keys either side, since the two ways
+user's only), until "textfield 0", or TEXT_INPUT_LAPSE after its last "textfield 1 renew" (sent
+every few seconds while the field stays focused, so a restarted relay finds it again and a crashed
+ft-textinput's address lapses). TYPE_SWITCH apart from keys either side, since the two ways
 reach the app separately. Without a text field taking text that way (Xwayland and most Electron
 apps), or for Steam, such a character is dropped, and the log says which.
 A character waits while a modifier is held on a keyboard, which would make it a shortcut
@@ -218,7 +220,9 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     ignored from another user
   calpanel 1|0      from the pointer helper: a gaze calibration panel is up (renewed every second,
                     lapses 3 s after the last), so Enter answers it (above)
-  textfield 1|0     from the desktop's input method (above); "commit TEXT" goes back to it
+  textfield 1|0     from the desktop's input method (above); "commit TEXT" goes back to it.
+                    "textfield 1 renew" (every few seconds while focused) keeps its address, and
+                    doesn't open the keyboard again
   pause on|off|toggle [reason]   pause Frametop or resume it (input/ft-pause; the gesture reader)
   pause ?           the pause state, as {"t": "pause", ...}
   type TEXT         from Frametop Voice: type TEXT where typing goes (above); ignored from
@@ -384,6 +388,7 @@ TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to 
 # Between a character typed as keys and one committed through the input method (or back): they
 # reach the app by different ways, so the first gets this long to arrive before the next goes.
 TYPE_SWITCH = 0.05
+TEXT_INPUT_LAPSE = 7.0  # ft-textinput renews its "textfield 1" every 2 s; its address lapses this long after
 KB_POKES = ("hover", "press", "move", "up", "end")  # a fingertip on Full Keyboard (ft-screens' "kbpoke")
 KB_COORD = re.compile(r"-?\d{1,3}(\.\d{1,6})?")
 TYPE_MAX = 20000  # characters waiting to be typed, at most
@@ -1276,8 +1281,8 @@ class Relay:
         self.calpanel_until, self.shown_until = 0.0, 0.0
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
         # ft-textinput's address while a desktop text field is focused (its "textfield 1"), for the
-        # characters the desktop's layout has no key for; None without one.
-        self.text_input = None
+        # characters the desktop's layout has no key for, until text_input_until; None without one.
+        self.text_input, self.text_input_until = None, 0.0
         self.last_typing = 0.0  # the helper was last told of a key then (see "typing" at the top)
         self.lease = PointerLease()
         self.held = HeldKeys()
@@ -1749,7 +1754,7 @@ class Relay:
             ch = item if isinstance(item, str) else item[1]
             # A character the desktop's layout has no key for goes to the focused text field
             # through the input method (ft-textinput), if there is one.
-            commit = ch not in keys and desktop and self.text_input is not None
+            commit = ch not in keys and desktop and self.text_input is not None and now < self.text_input_until
             if commit != self.typing.committing:
                 self.typing.committing = commit
                 self.typing.at = now + TYPE_SWITCH
@@ -2107,11 +2112,14 @@ class Relay:
             if addr:
                 self.reply(addr, self.pause.status())
             return
-        if cmd == "textfield" and len(words) == 2:
-            # Typed characters go back to the address that said it, so only this user's.
+        if cmd == "textfield" and words[1:] in (["1"], ["0"], ["1", "renew"]):
+            # Typed characters go back to the address that said it, so only this user's. A
+            # renewal keeps (or, after a restart here, finds) that address, and nothing else.
             if uid == os.getuid():
                 self.text_input = addr if words[1] == "1" and addr else None
-            self.text_field(words[1] == "1")
+                self.text_input_until = now + TEXT_INPUT_LAPSE
+            if words[2:] != ["renew"]:
+                self.text_field(words[1] == "1")
             return
         if cmd in ("hostdev", "hostev", "hostbye"):
             # A host's keyboard or mouse, from its ft-stream (see "Host devices"). Keys and

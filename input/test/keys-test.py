@@ -952,6 +952,52 @@ def tests():
     check("...and the log says why", [m for m in LOG if m.startswith("typing: ")],
           ["typing: 1 characters the desktop's layout (us), with no text field taking text from the input "
            "method, has no key for: \u0119"])
+
+    def commits(socks, wait=0.3):
+        """What each socket got as "commit ...", after `wait`."""
+        time.sleep(wait)
+        got = []
+        for sock in socks:
+            sock.setblocking(False)
+            mine = []
+            while True:
+                try:
+                    mine.append(sock.recv(256).decode())
+                except BlockingIOError:
+                    break
+            got.append(mine)
+        return got
+
+    # A relay that restarted knows no text field: ft-textinput's renewal finds it again, without a
+    # focus change, and doesn't open the keyboard again. (After "textfield 0" the relay is as a
+    # fresh one.)
+    vr_keyboard["mode"] = "always"
+    use(None)
+    typed()
+    im.sendto(b"textfield 1 renew", f"\0{tag}_relay")
+    time.sleep(0.1)
+    check("renewal: no keyboard opened", [m for m in typed() if m.startswith("vrkeyboard")], [])
+    to_relay("type \u0119")
+    check("...but its address is known again: \u0119 committed", commits([im]), [["commit \u0119"]])
+    # A crashed ft-textinput, started again by KWin, renews from a new address: the relay follows it
+    # and stops sending to the old one.
+    im2 = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    im2.bind("")
+    im2.sendto(b"textfield 1 renew", f"\0{tag}_relay")
+    time.sleep(0.1)
+    to_relay("type \u0142")
+    check("a restarted ft-textinput's new address: \u0142 goes there, not to the old one",
+          commits([im, im2]), [[], ["commit \u0142"]])
+    im2.sendto(b"textfield 0 renew", f"\0{tag}_relay")
+    im2.sendto(b"textfield 1 again", f"\0{tag}_relay")
+    time.sleep(0.1)
+    check("...other textfield words: ignored", [m for m in typed() if m.startswith("vrkeyboard")], [])
+    im2.sendto(b"textfield 0", f"\0{tag}_relay")
+    time.sleep(0.1)
+    vr_keyboard["mode"] = None
+    use(None)
+    typed()
+    im2.close()
     im.close()
 
     # The gaze calibration panel (the helper's "calpanel 1"): Enter takes its dot ("calkey 1" to

@@ -848,13 +848,24 @@ Commit cc9180d.
     context).
   - Review (one Opus reader, 1 Important, 5 Minor). Fixed in 0c1e04e: Full Keyboard keys now
     wait the gap after a commit, and a full ft-textinput queue no longer stops later commits.
-  - Left open:
-    - The relay keeps ft-textinput's address until "textfield 0" or a refused send. If
-      ft-textinput crashes, another process could bind that abstract name and receive typed
-      text until the next focus change.
-    - After a relay restart, nothing is committed until focus changes.
-    - A periodic "textfield 1" renewal, like `calpanel`, would fix both.
-    - Commits go to the context activated last.
+  - Left open after review: commits go to the context activated last.
+  - Renewal (Daenon, 2026-10-31; commits 59fff74, cade24f) closes the review's two other open
+    items: a crashed ft-textinput's stale address, and a relay restart losing the address.
+    - While a field stays focused, ft-textinput sends "textfield 1 renew" every 2 s.
+    - The relay takes a renewal as an address refresh only: it doesn't open Full Keyboard again.
+      A renewal from a new address (an ft-textinput KWin started again) replaces the old one.
+    - The address lapses 7 s (`TEXT_INPUT_LAPSE`) after the last report, so nothing goes to a
+      dead ft-textinput's address. A restarted relay finds the address at the next renewal,
+      without a focus change.
+    - Tests: keys-test (renewal finds the address after the relay forgot it, without opening
+      the keyboard; a new address replaces the old one; other textfield words ignored) and
+      textinput-test (renewals while focused, from the same address, none after). The 7 s lapse
+      itself has no timed test.
+    - Full run at cade24f passed, identical to 0c1e04e (python files 108 ok, 3 skipped; 752
+      unittest tests, 16 skips; same test-c lines; keyboard ctest 22/22; testbench 249, 20
+      skipped; fast-install 28).
+  - Merge check (2026-10-31, read-only): `git merge-tree --write-tree experimental bundle-a`
+    against experimental f1942dd merges cleanly. Only this file changed on both sides.
   - Full run at 0c1e04e passed. It matches 89937af except one more Python file ok, the new
     test (108 ok, 3 skipped). test-c printed the same ok lines.
 

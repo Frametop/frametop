@@ -50,6 +50,13 @@
   "reply": "error no window w9",
   "tear": null
  },
+ "close": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
  "close 3": {
   "calls": [
    [
@@ -112,6 +119,13 @@
   "reply": "error unknown command",
   "tear": null
  },
+ "dashlaunch  ": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
  "dashlaunch steam://rungameid/1  extra": {
   "calls": [
    [
@@ -125,6 +139,13 @@
   "idle_add": [],
   "raised": null,
   "reply": "ok dash",
+  "tear": null
+ },
+ "density": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
   "tear": null
  },
  "density 3": {
@@ -225,6 +246,21 @@
   "reply": "ok",
   "tear": null
  },
+ "dock active x": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-active"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
  "dock all": {
   "calls": [
    [
@@ -245,6 +281,13 @@
   "idle_add": [],
   "raised": null,
   "reply": "ok",
+  "tear": null
+ },
+ "dock all x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window all",
   "tear": null
  },
  "dock w1": {
@@ -274,6 +317,13 @@
   "idle_add": [],
   "raised": null,
   "reply": "error no window w9",
+  "tear": null
+ },
+ "dockat": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
   "tear": null
  },
  "dockat 3 -1 -5 7 0 0": {
@@ -367,6 +417,21 @@
   "reply": "ok",
   "tear": null
  },
+ "float active x": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-active"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
  "float pointer": {
   "calls": [
    [
@@ -380,6 +445,13 @@
   "idle_add": [],
   "raised": null,
   "reply": "ok",
+  "tear": null
+ },
+ "float pointer x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window pointer",
   "tear": null
  },
  "float w1": {
@@ -458,6 +530,13 @@
   "idle_add": [],
   "raised": null,
   "reply": "ok",
+  "tear": null
+ },
+ "front 3 4": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
   "tear": null
  },
  "front x": {
@@ -605,6 +684,13 @@
   "reply": "error unknown command",
   "tear": null
  },
+ "profile  ": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
  "profile Work Desk": {
   "calls": [
    [
@@ -629,6 +715,13 @@
   ],
   "raised": null,
   "reply": "ok",
+  "tear": null
+ },
+ "resize": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
   "tear": null
  },
  "resize 3 100 100": {
@@ -739,6 +832,20 @@
   "reply": "ok",
   "tear": null
  },
+ "resize w1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "resize w1 1000 600": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
  "run": {
   "calls": [],
   "idle_add": [],
@@ -799,6 +906,13 @@
   "reply": "error run takes a JSON list",
   "tear": null
  },
+ "scale": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
  "scale 3": {
   "calls": [],
   "idle_add": [],
@@ -843,6 +957,13 @@
   "idle_add": [],
   "raised": null,
   "reply": "ok captured",
+  "tear": null
+ },
+ "tear": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
   "tear": null
  },
  "tear w1 1": {

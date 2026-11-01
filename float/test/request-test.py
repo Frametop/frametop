@@ -9,7 +9,7 @@ change a request records them again with --record, and the diff of that file sho
 changed. D-Bus and GLib are stand-ins, and the daemon's parts are recorders: no KWin, sockets or
 windows.
 
-  float/test/request-test.py [--record]
+  float/test/request-test.py [--record] [FLOATD]   (default: float/ft_floatd.py next to this folder)
 """
 import importlib.util
 import json
@@ -20,7 +20,10 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 GOLDEN = os.path.join(HERE, "request-golden.json")
-record = "--record" in sys.argv[1:]
+args = sys.argv[1:]
+record = "--record" in args
+paths = [a for a in args if a != "--record"]
+FLOATD = paths[0] if paths else os.path.join(HERE, "..", "ft_floatd.py")
 glib = types.SimpleNamespace(idle_add=mock.MagicMock(), timeout_add=mock.MagicMock(), timeout_add_seconds=mock.MagicMock(),
                              source_remove=mock.MagicMock(), io_add_watch=mock.MagicMock())
 repository = types.SimpleNamespace(GLib=glib, Gio=mock.MagicMock())
@@ -29,7 +32,7 @@ for name, module in {"dbus": mock.MagicMock(), "dbus.mainloop": mock.MagicMock()
                      "gi": types.SimpleNamespace(repository=repository), "gi.repository": repository}.items():
     sys.modules[name] = module
 sys.path.insert(0, os.path.dirname(HERE))  # (ft_apps, next to it)
-spec = importlib.util.spec_from_file_location("ft_floatd", os.path.join(HERE, "..", "ft_floatd.py"))
+spec = importlib.util.spec_from_file_location("ft_floatd", FLOATD)
 floatd = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(floatd)
 
@@ -99,6 +102,8 @@ CASES = [
     "density 3 -2", "density 3 +1", "density 3 x", "density 3", "resize 3 1000 600", "resize 3 800 500",
     "resize 3 100 100", "resize 4 1000 600", "resize 3 1000", "resize 3 a b", "dock w1", "dock w2", "dock w9",
     "float w1", "float w9", "close w1", "close w9", "float w1 extra",
+    "float pointer x", "dock all x", "close", "resize w1", "resize w1 1000 600", "scale", "density", "resize",
+    "float active x", "dock active x", "tear", "dockat", "front 3 4", "profile  ", "dashlaunch  ",
 ]
 
 

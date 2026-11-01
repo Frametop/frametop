@@ -341,6 +341,8 @@ def primary_screen(layout):
 
 # ---------------------------------------------------------------- geometry
 # The pure math (head frame, vectors, the screens' rows) is layout_geometry's, re-exported here.
+# Replacing one of those names here (a test's patch) doesn't reach plan() or preview_panel(),
+# which call layout_geometry's own: patch layout_geometry instead.
 
 def plan(layout, count, panel_size=None):
     """Screen poses in the head frame: [{"pos": (x, y, z), "face": (yaw, pitch), "roll": deg}]."""

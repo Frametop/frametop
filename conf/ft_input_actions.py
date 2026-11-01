@@ -3,8 +3,10 @@
 The input relay (input/input-relay.py) acts on these, and Frametop Input Settings
 (input-settings/) and Frametop Voice's settings (voice/voice_settings.py) edit and show them.
 One copy here, so the three read the same names and defaults. Standard library only, and
-nothing here reads a file: the callers decide which file and when.
+nothing here reads a file: the callers decide which file and when. The two binding tables are
+read-only views: one copy is shared by every importer, so a caller copies before changing one.
 """
+from types import MappingProxyType
 
 # Frame controller buttons the pointer helper can read (pointer/helper/vrbuttons.h).
 VR_BUTTONS = ("left/view", "left/dpad_up", "left/dpad_down", "left/dpad_left", "left/dpad_right", "left/bumper",
@@ -29,19 +31,19 @@ VOICE_ACTIONS = ("dictate", "dictate_hold")
 # KWin (clicks moved windows, as Meta+click does). It has no Meta, the key that sticks,
 # and it's free: KWin's Ctrl+Alt+Esc (kill a window) and Windows' Ctrl+Shift+Esc (Task Manager,
 # on a remote display) need their modifiers exactly, and four keys don't happen by accident.
-DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
+DEFAULT_KEY_BINDINGS = MappingProxyType({"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
                         "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",
-                        "29+42+56+1": "release_keys"}
+                        "29+42+56+1": "release_keys"})
 
 # With Frametop Voice installed (its unit file), a rules file without "key_bindings" gets these
 # too: a Right Ctrl tap, Right Ctrl alone, so a Left Ctrl tap (crouch in many games) doesn't
 # start dictation.
-VOICE_KEY_BINDINGS = {"97": "dictate"}
+VOICE_KEY_BINDINGS = MappingProxyType({"97": "dictate"})
 
 # Actions renamed since a release: rules files saved before still mean them (spotwatch was
 # frunner's name until 2026-10-20).
-RENAMED_ACTIONS = {"spotwatch": "frunner"}
+RENAMED_ACTIONS = MappingProxyType({"spotwatch": "frunner"})
 
 
 def renamed_actions(table):

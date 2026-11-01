@@ -11,7 +11,7 @@ import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
 # Actions renamed since a release (the relay reads them the same way): a rules file saved before
 # shows and saves them under their new names.
-from ft_input_actions import RENAMED_ACTIONS, renamed_actions  # noqa: E402, F401
+from ft_input_actions import renamed_actions  # noqa: E402, F401
 
 
 def read_json(path):

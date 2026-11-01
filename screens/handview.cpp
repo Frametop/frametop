@@ -52,12 +52,14 @@
 //                             second) -> "ok" and a line each: "<CLOCK_MONOTONIC ns> <3x4 row-major,
 //                             standing universe>" (ft-handsctl saves them with a flag)
 #include "../conf/ftsock.h"
+#include "gpuctx.h"
 #include "handcut.h"
 #include "handhold.h"
 #include "handmesh.h"
 #include "handskin.h"
 #include "handasset.h"
 #include "handrobot.h"
+#include "rendernode.h"
 #include "roomview.h"
 
 #include <EGL/egl.h>
@@ -108,13 +110,7 @@ double CpuSeconds() {
 
 // ------------------------------------------------------------------------------------ GPU
 
-PFNEGLGETPLATFORMDISPLAYEXTPROC pGetPlatformDisplay;
-PFNEGLCREATEIMAGEKHRPROC pCreateImage;
-PFNEGLDESTROYIMAGEKHRPROC pDestroyImage;
-PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC pImageTargetRenderbuffer;
-PFNEGLCREATESYNCKHRPROC pCreateSync;
-PFNEGLDESTROYSYNCKHRPROC pDestroySync;
-PFNEGLCLIENTWAITSYNCKHRPROC pClientWaitSync;
+gpuctx::Procs egl;  // looked up by Gpu::Init
 
 // The body: how squarely the surface faces the eye (the second pass's fresnel), the fade toward
 // the forearm, the light from above, and how near a fingertip, into the scratch buffer. Only the
@@ -471,7 +467,7 @@ private:
     void Eyes(const handmesh::Quad &q, const double eyes[2][3], GLuint prog, GLsizei count);
     void Cap(const handmesh::Quad &q, const double eyes[2][3], const Cut &cut);
     void Rim(Output &o, const handmesh::Quad &q, const Style &st, bool robot = false);
-    int drm_ = -1, eye_ = 0;
+    int eye_ = 0;
     gbm_device *gbm_ = nullptr;
     EGLDisplay dpy_ = EGL_NO_DISPLAY;
     EGLContext ctx_ = EGL_NO_CONTEXT;
@@ -484,27 +480,10 @@ bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
     eye_ = eyePx;
     for (uint64_t m : modifiers)
         if (m != DRM_FORMAT_MOD_INVALID) mods_.push_back(m);
-    drm_ = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
-    if (drm_ < 0) return std::perror("handview: /dev/dri/renderD128"), false;
-    gbm_ = gbm_create_device(drm_);
-    pGetPlatformDisplay = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
-    pCreateImage = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(eglGetProcAddress("eglCreateImageKHR"));
-    pDestroyImage = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(eglGetProcAddress("eglDestroyImageKHR"));
-    pImageTargetRenderbuffer = reinterpret_cast<PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC>(
-        eglGetProcAddress("glEGLImageTargetRenderbufferStorageOES"));
-    pCreateSync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(eglGetProcAddress("eglCreateSyncKHR"));
-    pDestroySync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(eglGetProcAddress("eglDestroySyncKHR"));
-    pClientWaitSync = reinterpret_cast<PFNEGLCLIENTWAITSYNCKHRPROC>(eglGetProcAddress("eglClientWaitSyncKHR"));
-    if (!gbm_ || !pGetPlatformDisplay || !pCreateImage || !pDestroyImage || !pImageTargetRenderbuffer || !pCreateSync ||
-        !pDestroySync || !pClientWaitSync)
-        return std::fprintf(stderr, "handview: GBM or EGL extensions missing\n"), false;
-    dpy_ = pGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, gbm_, nullptr);
-    if (dpy_ == EGL_NO_DISPLAY || !eglInitialize(dpy_, nullptr, nullptr)) return std::fprintf(stderr, "handview: no EGL display\n"), false;
-    eglBindAPI(EGL_OPENGL_ES_API);
-    const EGLint attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-    ctx_ = eglCreateContext(dpy_, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, attrs);
-    if (ctx_ == EGL_NO_CONTEXT || !eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx_))
-        return std::fprintf(stderr, "handview: no surfaceless GLES context\n"), false;
+    gbm_ = rendernode::Acquire("handview");
+    if (!gbm_) return false;
+    egl = gpuctx::Load();
+    if (!gpuctx::Open("handview", gbm_, egl, gpuctx::kDestroyImage, &dpy_, &ctx_)) return false;
     body_ = Program(kBodyVs, kBodyFs, {"pos", "nrm", "back"});
     skin_ = Program(kSkinVs, kBodyFs, {"pos", "nrm", "joints", "weights"});
     cap_ = Program(kCapVs, kCapFs, {"pos"});
@@ -606,7 +585,7 @@ bool Gpu::MakeOutput(Output &o, bool vr) {
         at[n++] = kLo[i], at[n++] = EGLint(mod & 0xffffffff), at[n++] = kHi[i], at[n++] = EGLint(mod >> 32);
     }
     at[n++] = EGL_NONE;
-    o.image = pCreateImage(dpy_, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, at);
+    o.image = egl.createImage(dpy_, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, at);
     if (!vr::VRIPCResourceManager()->ImportDmabuf(vr::VRApplication_Overlay, &a, &o.handle)) o.handle = 0;
     for (int fd : fds)
         if (fd >= 0) close(fd);   // the EGL image and SteamVR hold their own references
@@ -615,7 +594,7 @@ bool Gpu::MakeOutput(Output &o, bool vr) {
                FreeOutput(o), false;
     glGenRenderbuffers(1, &o.rb);
     glBindRenderbuffer(GL_RENDERBUFFER, o.rb);
-    pImageTargetRenderbuffer(GL_RENDERBUFFER, o.image);
+    egl.imageTargetRenderbuffer(GL_RENDERBUFFER, o.image);
     glGenFramebuffers(1, &o.fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, o.rb);
@@ -626,11 +605,11 @@ bool Gpu::MakeOutput(Output &o, bool vr) {
 
 void Gpu::FreeOutput(Output &o) {
     if (o.handle) vr::VRIPCResourceManager()->UnrefResource(o.handle);
-    if (o.fence != EGL_NO_SYNC_KHR) pDestroySync(dpy_, o.fence);
+    if (o.fence != EGL_NO_SYNC_KHR) egl.destroySync(dpy_, o.fence);
     if (o.fbo) glDeleteFramebuffers(1, &o.fbo);
     if (o.rb) glDeleteRenderbuffers(1, &o.rb);
     if (o.tex) glDeleteTextures(1, &o.tex);
-    if (o.image != EGL_NO_IMAGE_KHR) pDestroyImage(dpy_, o.image);
+    if (o.image != EGL_NO_IMAGE_KHR) egl.destroyImage(dpy_, o.image);
     if (o.bo) gbm_bo_destroy(o.bo);
     o = Output{};
 }
@@ -805,8 +784,8 @@ void Gpu::Rim(Output &o, const handmesh::Quad &q, const Style &st, bool robot) {
         glUniform4f(glGetUniformLocation(prog, "box"), e * 0.5f + half, 0.5f / eye_, e * 0.5f + 0.5f - half, 1 - 0.5f / eye_);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
-    if (o.fence != EGL_NO_SYNC_KHR) pDestroySync(dpy_, o.fence);
-    o.fence = pCreateSync(dpy_, EGL_SYNC_FENCE_KHR, nullptr);
+    if (o.fence != EGL_NO_SYNC_KHR) egl.destroySync(dpy_, o.fence);
+    o.fence = egl.createSync(dpy_, EGL_SYNC_FENCE_KHR, nullptr);
     glFlush();
     o.quad = q;
 }
@@ -819,17 +798,15 @@ void Gpu::Read(Output &o, std::vector<uint8_t> &rgba) {
 
 bool Gpu::Passed(Output &o) {
     if (o.fence == EGL_NO_SYNC_KHR) return true;
-    if (pClientWaitSync(dpy_, o.fence, 0, 0) == EGL_TIMEOUT_EXPIRED_KHR) return false;
-    pDestroySync(dpy_, o.fence);
+    if (egl.clientWaitSync(dpy_, o.fence, 0, 0) == EGL_TIMEOUT_EXPIRED_KHR) return false;
+    egl.destroySync(dpy_, o.fence);
     o.fence = EGL_NO_SYNC_KHR;
     return true;
 }
 
 void Gpu::Done() {
-    if (ctx_ != EGL_NO_CONTEXT) eglDestroyContext(dpy_, ctx_);
-    if (dpy_ != EGL_NO_DISPLAY) eglTerminate(dpy_);
-    if (gbm_) gbm_device_destroy(gbm_);
-    if (drm_ >= 0) close(drm_);
+    gpuctx::Close(dpy_, ctx_);
+    if (gbm_) rendernode::Release();
 }
 
 // ------------------------------------------------------------------------------- the hands

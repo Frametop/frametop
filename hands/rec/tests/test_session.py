@@ -102,6 +102,19 @@ class SessionTest(SessionBase):
         self.assertIn("panel: where left near", self.panel)
         self.assertIn("panel: rec on", self.panel)
 
+    def test_session_folders_are_private(self):
+        # even under a umask that would let others read them (the window and session.py set 077 too)
+        old = os.umask(0o022)
+        try:
+            s = self.session(next_after=0.0)
+            s.start()
+            s.join(20)
+        finally:
+            os.umask(old)
+        self.assertEqual(s.state, "done")
+        for d in (os.path.dirname(s.session_dir), s.session_dir, os.path.join(s.session_dir, "takes")):
+            self.assertEqual(os.stat(d).st_mode & 0o777, 0o700, d)
+
     def test_guidance(self):
         """The chosen guidance's clip on the panel (a recorded one without the colours' key), and
         the choice in session.json."""

@@ -37,17 +37,22 @@ def have_pygobject():
 
 
 class Imports(unittest.TestCase):
-    def load(self, rel, names=()):
-        """Load the file at rel (from the repo) as a module in a new python3; it must have names."""
+    def load(self, rel, names=(), check=""):
+        """Load the file at rel (from the repo) as a module in a new python3; it must have names,
+        and check (Python, with module and os) must hold."""
         path = os.path.join(REPO, rel)
         name = os.path.basename(rel).replace("-", "_").removesuffix(".py")
         code = LOAD.format(folder=os.path.dirname(path), name=name, path=path, names=list(names))
+        if check:
+            code += f"import os\nassert {check}, {check!r}\n"
         env = dict(os.environ, HOME=tempfile.mkdtemp(prefix="ft-app-imports-test-"), QT_QPA_PLATFORM="offscreen")
         p = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
         self.assertEqual(p.returncode, 0, f"{rel} doesn't load:\n{p.stderr[-2000:]}")
 
     def test_display_settings(self):
-        self.load("display-settings/ft_display_settings.py", ["CONF_PATH", "write_conf_value"])
+        # its settings file under the temporary HOME, not the real one
+        self.load("display-settings/ft_display_settings.py", ["CONF_PATH", "write_conf_value"],
+                  'module.CONF_PATH.startswith(os.environ["HOME"])')
         self.load("display-settings/steam_settings.py")
 
     def test_remote_displays(self):

@@ -243,7 +243,7 @@ def check_install():
     # Builds, each against its sources: a pull that changed one without a rebuild runs old code.
     say("builds:")
     builds = [("gaze/build/ft-gaze", ["gaze/ft-gaze.cpp", "pointer/common"], "gaze/build.sh"),
-              ("gaze/build/ft-gazepanel", ["gaze/panel/ft-gazepanel.cpp"], "gaze/build.sh"),
+              ("gaze/build/ft-gazepanel", ["gaze/panel/ft-gazepanel.cpp", "screens/glyphs.h"], "gaze/build.sh"),
               ("gaze/tracker/build/ft-eyegrab", ["gaze/tracker/ft-eyegrab.c"], "gaze/tracker/build.sh")]
     for built, sources, how in builds:
         t = mtime(repo / built)

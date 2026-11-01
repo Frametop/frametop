@@ -52,6 +52,11 @@ struct Glyph {
 
 class Font {
 public:
+    Font() = default;
+    // Not copied: the font info points into the font's own bytes.
+    Font(const Font &) = delete;
+    Font &operator=(const Font &) = delete;
+
     // Reads the font file at path; false if it can't be read or isn't a font.
     bool Load(const std::string &path) {
         FILE *f = std::fopen(path.c_str(), "rb");

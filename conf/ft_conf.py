@@ -239,13 +239,14 @@ def set_value(key, value, path=None):
 
 
 def write_atomic(path, text, new_mode=0o644):
-    """text into path by a temp file in the same folder, fsynced and renamed over it; the old
-    file's mode is kept (a new one gets new_mode)."""
+    """text (str, or bytes written as they are) into path by a temp file in the same folder,
+    fsynced and renamed over it; the old file's mode is kept (a new one gets new_mode)."""
     folder = os.path.dirname(path) or "."
     os.makedirs(folder, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix="." + os.path.basename(path) + ".", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
+        with (os.fdopen(fd, "wb") if isinstance(text, bytes) else
+              os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="")) as f:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())

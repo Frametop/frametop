@@ -164,6 +164,45 @@ class Store(unittest.TestCase):
         self.assertEqual(json.loads(self.read()), {"b": 1})
         self.assertEqual(stat.S_IMODE(os.stat(target).st_mode), 0o600)
 
+    def test_bytes_are_written_as_they_are(self):
+        data = bytes(range(256)) * 4
+        ft_store.write_bytes(self.path, data)
+        with open(self.path, "rb") as f:
+            self.assertEqual(f.read(), data)
+        self.assertEqual(os.listdir(self.dir), ["state.json"])
+
+    def test_copy_is_whole_with_its_mode_and_times(self):
+        src = os.path.join(self.dir, "src")
+        with open(src, "w") as f:
+            f.write("panels\n")
+        os.chmod(src, 0o640)
+        os.utime(src, (1_700_000_000, 1_700_000_000))
+        ft_store.copy_file(src, self.path)
+        st = os.stat(self.path)
+        self.assertEqual((self.read(), stat.S_IMODE(st.st_mode), st.st_mtime), ("panels\n", 0o640, 1_700_000_000))
+        self.assertEqual(sorted(os.listdir(self.dir)), ["src", "state.json"])
+
+    def test_a_failed_copy_leaves_the_old_file_and_no_temp(self):
+        self.write("old")
+        with self.assertRaises(OSError):
+            ft_store.copy_file(os.path.join(self.dir, "missing"), self.path)
+        self.assertEqual((self.read(), os.listdir(self.dir)), ("old", ["state.json"]))
+
+    def test_temp_files_are_unique(self):
+        """Two writers of one file never share a temp name (a fixed PATH.tmp did: one could
+        rename the other's half-written file into place)."""
+        names = []
+        real = os.replace
+        os.replace = lambda a, b: names.append(os.path.basename(a)) or real(a, b)
+        try:
+            ft_store.write_text(self.path, "a")
+            ft_store.write_bytes(self.path, b"b")
+            ft_store.copy_file(self.path, os.path.join(self.dir, "copy"))
+        finally:
+            os.replace = real
+        self.assertEqual(len(set(names)), 3)
+        self.assertTrue(all(n.startswith(".") and n != "state.json.tmp" for n in names), names)
+
 
 if __name__ == "__main__":
     unittest.main()

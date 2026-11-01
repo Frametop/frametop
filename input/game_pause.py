@@ -53,10 +53,13 @@ import os
 import queue
 import socket
 import subprocess
+import sys
 import threading
 import time
 
-import vrws
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
+import ft_store  # noqa: E402  (files written by a temp file of their own and a rename)
+import vrws  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DESKTOPS = os.path.join(REPO, "desktops.sh")
@@ -658,10 +661,7 @@ class GamePause:
             state = {"paused": self.paused, "reason": self.reason, "since": self.since,
                      "ends_with_game": self.ends_with_game, "stopped": self.worker.snapshot()}
             try:
-                tmp = STATE_PATH + ".tmp"
-                with open(tmp, "w") as f:
-                    json.dump(state, f)
-                os.replace(tmp, STATE_PATH)
+                ft_store.write_json(STATE_PATH, state, indent=None, newline=False)
             except OSError as e:
                 self.log(f"pause: can't save {STATE_PATH}: {e}")
 

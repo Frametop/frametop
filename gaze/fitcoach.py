@@ -43,6 +43,10 @@ import sys
 import threading
 import time
 from collections import deque
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ft_store  # noqa: E402  (files written by a temp file of their own and a rename)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REFERENCE = os.path.join(HERE, "fit-reference.json")
@@ -256,12 +260,7 @@ def save_baseline(baseline, path=None):
 
 
 def _write_json(path, obj):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(obj, f, indent=1)
-        f.write("\n")
-    os.replace(tmp, path)
+    ft_store.write_json(path, obj, indent=1)
 
 
 # ------------------------------------------------------------------------------------------

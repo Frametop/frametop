@@ -8,6 +8,7 @@ import math
 import os
 import random
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -155,6 +156,15 @@ class AssessTest(unittest.TestCase):
 
 
 class BaselineTest(unittest.TestCase):
+    def test_baseline_file(self):
+        """save_baseline writes it as before (indent 1, a newline), by a temp file of its own."""
+        d = tempfile.mkdtemp(prefix="ft-fitcoach-test.")
+        path = os.path.join(d, "gaze", "fit-baseline.json")
+        fitcoach.save_baseline({"a": 1}, path)
+        with open(path) as f:
+            self.assertEqual(f.read(), '{\n "a": 1\n}\n')
+        self.assertEqual(os.listdir(os.path.dirname(path)), ["fit-baseline.json"])
+
     def test_against_the_baseline(self):
         good = summary(right=(4, -3), left=(4, -3))     # this face's good fit isn't the reference's
         base = fitcoach.make_baseline(good, ipd=0.065)

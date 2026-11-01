@@ -65,6 +65,7 @@ sys.path.insert(0, os.path.join(REPO, "layout"))
 sys.path.insert(0, HERE)
 import ft_layout  # noqa: E402  (the layout: remote displays)
 import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
+import ft_store  # noqa: E402  (files written by a temp file of their own and a rename; conf/ too)
 sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands)
 import spotsearch  # noqa: E402
@@ -288,10 +289,7 @@ class Icons:
                 pb.copy_area(0, 0, w, h, canvas, (ICON_PX - w) // 2, (ICON_PX - h) // 2)
                 pixels, stride = canvas.get_pixels(), canvas.get_rowstride()
                 data = b"".join(pixels[y * stride:y * stride + ICON_PX * 4] for y in range(ICON_PX))
-                os.makedirs(ICON_DIR, exist_ok=True)
-                with open(out + ".tmp", "wb") as f:
-                    f.write(data)
-                os.replace(out + ".tmp", out)
+                ft_store.write_bytes(out, data)
             self.raw[src] = out
         except (OSError, GLib.Error) as e:
             log(f"icon {src}: {e}")
@@ -736,10 +734,7 @@ class Frunner:
     def used(self, key):
         spotsearch.use(self.usage, key)
         try:
-            os.makedirs(os.path.dirname(USAGE_PATH), exist_ok=True)
-            with open(USAGE_PATH + ".tmp", "w") as f:
-                json.dump({"usage": self.usage}, f)
-            os.replace(USAGE_PATH + ".tmp", USAGE_PATH)
+            ft_store.write_json(USAGE_PATH, {"usage": self.usage}, indent=None, newline=False)
         except OSError as e:
             log(f"usage: {e}")
 

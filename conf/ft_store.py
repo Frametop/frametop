@@ -5,6 +5,8 @@
     data = ft_store.load_json_strict(path, {}, check)    # one that doesn't read: StoreError
     ft_store.write_json(path, data, indent=2)            # temp file, fsync, rename
     ft_store.write_text(path, text)                      # the same for a text file
+    ft_store.write_bytes(path, data)                     # ... and for bytes
+    ft_store.copy_file(src, dst)                         # a whole copy, or none
     ft_store.update_json(path, fn, {})                   # lock, strict read, fn, write
 
 A file that doesn't read (not JSON, or check(data) says why not) is never written over: the
@@ -22,7 +24,9 @@ import contextlib
 import fcntl
 import json
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import time
 
@@ -128,6 +132,32 @@ def write_text(path, text):
     """text into path through a temp file of its own, flushed to disk and renamed (the file's
     mode kept; a new one gets what open() would give it). A symlink is followed, not replaced."""
     ft_conf.write_atomic(os.path.realpath(path), text, 0o666 & ~_umask())
+
+
+def write_bytes(path, data):
+    """data (bytes) into path as write_text writes text."""
+    write_text(path, bytes(data))
+
+
+def copy_file(src, dst):
+    """src copied to dst whole or not at all (shutil.copy2: its mode and times too): the copy
+    goes to a temp file of its own next to dst, reaches the disk, and only then takes dst's
+    name, so one cut off partway never leaves a short dst, and a dst that's there stays as it
+    was."""
+    dst = os.path.realpath(dst)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dst), prefix="." + os.path.basename(dst) + ".", suffix=".tmp")
+    os.close(fd)
+    try:
+        shutil.copy2(src, tmp)
+        with open(tmp, "rb") as f:
+            os.fsync(f.fileno())
+        os.replace(tmp, dst)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def write_json(path, data, indent=2, newline=True, **kw):

@@ -74,10 +74,12 @@ release_keys), plus a Right Ctrl tap for dictate once Frametop Voice is installe
 (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. A combination bound to
 release_keys also fires with more modifiers held than it names, so one stuck here doesn't stop it.
 The float, screens, profile, Steam menu, pause, dictation, hand tracking, release and command
-actions work without pointer mode too. A combination with Meta also sends the desktop an
-F24 press and Meta's release right away: so letting go of Meta doesn't open Plasma's launcher, and
-a gaze click isn't Meta+click (KWin's window move and resize). Another key while Meta is still
-held gives the desktop Meta back. While typing goes to Steam, keyboards aren't grabbed, so Steam
+actions work without pointer mode too. A combination with Meta also sends the desktop Meta's
+release right away, after an F24 press when Meta is the only key it holds: so letting go of Meta
+doesn't open Plasma's launcher (another held key, the Shift of Meta+Shift+H, already stops that,
+and F24 would reach the app), and a gaze click isn't Meta+click (KWin's window move and resize).
+Another key while Meta is still held gives the desktop Meta back, unless it's a combination
+too (Meta+Shift+H twice: nothing more is sent). While typing goes to Steam, keyboards aren't grabbed, so Steam
 or the game sees a combination's keys too. The controllers aren't input devices here, only SteamVR sees
 them, so the pointer helper reads them with SteamVR input and sends "vrbtn <button> 1|0".
 It only takes the buttons the relay tells it to ("vrbind <button>..." to @ft_pointer_helper,
@@ -1576,33 +1578,33 @@ class Relay:
                 self.held.tap = None
                 self.modifier_tap(mod, self.held.tap_code, now)
             return hide
-        if value == 1 and code not in self.held.combos and self.held.meta_hidden:
-            # Another key while Meta is still held after a combination: the desktop gets Meta
-            # back first, so Meta+that key still works there.
-            for c in sorted(self.held.meta_hidden):
-                self.to_screens(c, 1)
-            self.held.meta_hidden.clear()
         if value == 0 and code in self.held.combos:
             action = self.held.combos.pop(code)
             if self.lease.current or not needs_pointer(action):
                 self.do_action(action, 0, now, "keyboard")
             return True
-        if value != 1 or not self.rules["key_bindings"]:
+        combo, action = self.combo_for(code) if value == 1 else (None, None)
+        if value == 1 and action is None and self.held.meta_hidden:
+            # Another key while Meta is still held after a combination: the desktop gets Meta
+            # back first, so Meta+that key still works there. Not for one that's a combination
+            # too (H again with Meta+Shift held): Meta stays up there, with nothing sent.
+            for c in sorted(self.held.meta_hidden):
+                self.to_screens(c, 1)
+            self.held.meta_hidden.clear()
+        if action is None:
             return value == 2 and code in self.held.combos
-        combo = "+".join(str(c) for c in sorted(self.held.modifiers) + [code])
-        action = self.rules["key_bindings"].get(combo)
-        if not known_action(action):
-            combo, action = self.release_combo(code) or (combo, action)
-        if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
-            return False
         self.held.combos[code] = action
         if self.held.meta - self.held.meta_hidden:
-            # The desktop saw Meta go down. Another key in between keeps its release from
-            # opening Plasma's launcher, and Meta comes up there now: KWin takes Meta with a
-            # mouse button for moving or resizing windows, which would swallow a gaze click.
-            # Its real release is dropped (above).
-            self.to_screens(KEY_F24, 1)
-            self.to_screens(KEY_F24, 0)
+            # The desktop saw Meta go down. Its release mustn't open Plasma's launcher, and Meta
+            # comes up there now: KWin takes Meta with a mouse button for moving or resizing
+            # windows, which would swallow a gaze click. Its real release is dropped (above).
+            # KWin opens the launcher only for Meta pressed and released with no other key down
+            # in between. With another key the desktop holds (Shift of Meta+Shift+H), that's
+            # already so; Meta alone gets an F24 press in between. F24 goes to the focused app,
+            # which may type it, and with Shift held a terminal did (DEE-326).
+            if not any(c < BTN_MISC and c not in self.held.meta for c in self.held.desktop):
+                self.to_screens(KEY_F24, 1)
+                self.to_screens(KEY_F24, 0)
             for c in sorted(self.held.meta - self.held.meta_hidden):
                 self.to_screens(c, 0)
             self.held.meta_hidden.update(self.held.meta)
@@ -1610,6 +1612,19 @@ class Relay:
             self.do_action(action, 1, now, "keyboard")
         log(f"key combination {combo}: {action}")
         return True
+
+    def combo_for(self, code):
+        """The key combination a key's press completes with the modifiers held, and its action:
+        (combo, action), the action None when it does nothing now."""
+        if not self.rules["key_bindings"]:
+            return None, None
+        combo = "+".join(str(c) for c in sorted(self.held.modifiers) + [code])
+        action = self.rules["key_bindings"].get(combo)
+        if not known_action(action):
+            combo, action = self.release_combo(code) or (combo, action)
+        if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
+            return combo, None
+        return combo, action
 
     def release_combo(self, code):
         """A release_keys combination this key completes with the modifiers held, more of them

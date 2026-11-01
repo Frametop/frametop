@@ -637,6 +637,27 @@ def tests():
           ["toggle"])
     check("...and the relay did nothing else", [m for m in LOG[logged:] if m.startswith("key combination")],
           ["key combination 42+125+35: screens_toggle"] * 2)
+    # Meta+Shift held, H twice (DEE-325, DEE-326): the desktop gets Meta and Shift, then Meta's
+    # release, with no F24 (Shift held already keeps Meta's release from opening the launcher,
+    # and a terminal typed Shift+F24), and nothing more for the second H: no Meta down again.
+    typed()
+    to_relay("keyboard desktop")
+    key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 0)
+    check("Meta+Shift+H: Meta up on the desktop, no F24", typed(),
+          ["key 125 1", "key 42 1", "key 125 0", "toggle"])
+    to_relay("keyboard steam")
+    key(H, 1); key(H, 0)
+    check("...H again, Meta+Shift still held: the toggle alone", typed(), ["toggle"])
+    key(H, 1); key(H, 0)
+    check("...and a third time", typed(), ["toggle"])
+    key(SHIFT, 0); key(META, 0)
+    check("...letting go: Shift comes up, Meta's real release is dropped", typed(), ["key 42 0"])
+    to_relay("keyboard desktop")
+    key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 0); key(SHIFT, 0)
+    key(30, 1); key(30, 0); key(META, 0)  # A, no combination
+    check("Meta+Shift+H, Shift let go, then A: Meta back first, and Meta+A typed", typed(),
+          ["key 125 1", "key 42 1", "key 125 0", "toggle", "key 42 0", "key 125 1", "key 30 1", "key 30 0",
+           "key 125 0"])
     pause("on")
     key(META, 1); key(SHIFT, 1); key(H, 1); key(H, 0); key(SHIFT, 0); key(META, 0)
     check("paused: Meta+Shift+H doesn't toggle", [m for m in typed() if m == "toggle"], [])

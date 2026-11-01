@@ -49,6 +49,7 @@ Rules go to ~/.config/frametop-input.json and pointer settings to
 Launch with input-settings/ft-input-settings (host wrapper).
 """
 import fnmatch
+import functools
 import json
 import os
 import re
@@ -284,6 +285,9 @@ COMMAND = "command:"
 # "run:NAME": the relay runs your command NAME (the Commands page; buttons, controllers and key
 # combinations alike).
 RUN = input_commands.RUN
+# "keys:125+32": the relay taps that key combination where typing goes (Meta+D here; evdev codes
+# as in key_bindings). Set in the rules file by hand for now; the relay checks the codes.
+KEYS = "keys:"
 # ft-cmd on the host: the relay links it there at its start (ft_commands.refresh), and this app
 # runs in a container, where the checkout's path may not be the host's.
 HOST_FT_CMD = ft_commands.CLI_LINK
@@ -307,6 +311,8 @@ def action_label(a):
         return f"Run: {a[len(COMMAND):]}"
     if a.startswith(RUN):
         return f"Run command {a[len(RUN):]}"
+    if is_keys(a):
+        return "Press " + keys_name(int(c) for c in a[len(KEYS):].split("+"))
     return ACTION_LABELS.get(a, a)
 
 
@@ -322,14 +328,18 @@ def is_run(a):
     return a.startswith(RUN) and len(a) > len(RUN)
 
 
+def is_keys(a):
+    return a.startswith(KEYS) and re.fullmatch(r"[0-9]+(\+[0-9]+)*", a[len(KEYS):]) is not None
+
+
 def mappable(a):
     """An action a controller button can have."""
-    return a in CONTROLLER_ACTIONS or is_profile(a) or is_run(a)
+    return a in CONTROLLER_ACTIONS or is_profile(a) or is_run(a) or is_keys(a)
 
 
 def shortcut_mappable(a):
     """An action a key combination can have: the gaze ones and commands too."""
-    return a in SHORTCUT_ACTIONS or is_profile(a) or is_command(a) or is_run(a)
+    return a in SHORTCUT_ACTIONS or is_profile(a) or is_command(a) or is_run(a) or is_keys(a)
 # Gaze mode settings (pointer helper), like POINTER_SETTINGS.
 GAZE_SETTINGS = [
     ("POINTER_GAZE_RETAKE", "Look away to hand back", 5, 1, 45, 0.5, "°"),
@@ -400,6 +410,18 @@ IGNORE_KEY = "POINTER_IGNORE"
 def overlay_app(key):
     """The app an overlay key belongs to, by the vendor.app.overlay convention."""
     return ".".join(key.split(".")[:2])
+
+
+@functools.cache
+def key_names():
+    """code_names(), read once."""
+    return code_names()
+
+
+def keys_name(codes):
+    """Key codes as a combination's name: Meta+Shift+F."""
+    names = key_names()
+    return "+".join(MODIFIER_NAMES.get(c) or names.get(c, f"code {c}").removeprefix("KEY_").title() for c in codes)
 
 
 def code_names():
@@ -490,7 +512,7 @@ class Backend(QObject):
 
     def __init__(self):
         super().__init__()
-        self._names = code_names()
+        self._names = key_names()
         self._nodes = []
         self._pointer_mode = False
         self._capture_id = ""
@@ -1259,7 +1281,7 @@ class Backend(QObject):
             return MODIFIER_NAMES[parts[0]] + tap
         if len(parts) == 1 and parts[0] in RIGHT_MODIFIER_NAMES:
             return RIGHT_MODIFIER_NAMES[parts[0]] + tap
-        return "+".join(MODIFIER_NAMES.get(c) or self.codeName(c).removeprefix("KEY_").title() for c in parts)
+        return keys_name(parts)
 
     @Property("QVariantList", notify=mappingsChanged)
     def keyShortcuts(self):

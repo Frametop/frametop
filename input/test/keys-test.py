@@ -109,14 +109,15 @@ relay.Volume.key = lambda self, fd, code, value, now: VOLUME.append((code, value
 LOG = []  # the relay's own log
 relay.log = lambda *args: LOG.append(" ".join(map(str, args)))
 bindings = {"now": None}  # the rules' key_bindings; None: the relay's defaults
-devices = {"roles": {}, "buttons": {}}  # the rules' "devices" roles and per-device "buttons"
+devices = {"roles": {}, "buttons": {}, "controller": {}}  # the rules' roles, per-device "buttons", controller_buttons
 vr_keyboard = {"mode": None}  # the rules' vr_keyboard (Frametop's keyboard); None: the default
 MOUSE_ID = "usb:0003:0004:test mouse"  # the fake mouse's id (Node.id)
 
 
 def read_rules(path=None):
     rules = {"devices": {i: {"role": r} for i, r in devices["roles"].items()},
-             "buttons": {i: dict(b) for i, b in devices["buttons"].items()}, "controller_buttons": {}}
+             "buttons": {i: dict(b) for i, b in devices["buttons"].items()},
+             "controller_buttons": dict(devices["controller"])}
     rules["key_bindings"] = dict(relay.DEFAULT_KEY_BINDINGS if bindings["now"] is None else bindings["now"])
     if vr_keyboard["mode"]:
         rules["vr_keyboard"] = vr_keyboard["mode"]
@@ -553,6 +554,36 @@ def tests():
     key(META, 1, ms_w); key(META, 0, ms_w)
     check("a plain 3D pointer's Meta tap does nothing (it's typed)", (len(lines(steam_log)), emitted()),
           (menus + 3, [("keyboard", META, 1), ("keyboard", META, 0)]))
+    typed()
+
+    # "keys:CODES" taps a key combination where typing goes, from a controller button or a key
+    # combination: all down in order, then up, on the press; the release sends nothing.
+    D = 32
+    check("keys: specs", [relay.keys_codes(a) for a in ("keys:125+32", "keys:", "keys:115", "keys:256",
+                                                        "keys:1+2+3+4+5+6+7", "keys:a", "keys:１", "run:x")],
+          [[125, 32], None, None, None, None, None, None, None])
+    devices["controller"] = {"right/b": "keys:125+32"}
+    use({"29+56+32": "keys:125+32", "29+56+33": "keys:115"})
+    to_relay("keyboard desktop")
+    emitted()
+    to_relay("vrbtn right/b 1")
+    time.sleep(0.1)
+    meta_d = ["key 125 1", "key 32 1", "key 32 0", "key 125 0"]
+    check("keys: on a controller button: Meta+D tapped on the desktop", (typed(), emitted()), (meta_d, []))
+    to_relay("vrbtn right/b 0")
+    time.sleep(0.1)
+    check("...and its release sends nothing more", (typed(), emitted()), ([], []))
+    to_relay("keyboard steam")
+    key(CTRL, 1); key(ALT, 1); key(D, 1); key(D, 0); key(ALT, 0); key(CTRL, 0)
+    check("keys: on a key combination, typing going to Steam: tapped on the virtual keyboard", emitted(),
+          [("keyboard", META, 1), ("keyboard", D, 1), ("keyboard", D, 0), ("keyboard", META, 0)])
+    typed()
+    to_relay("keyboard desktop")
+    key(CTRL, 1); key(ALT, 1); key(F, 1); key(F, 0); key(ALT, 0); key(CTRL, 0)
+    check("a volume key in keys: makes it no action: the combination is typed", typed(),
+          ["key 29 1", "key 56 1", "key 33 1", "key 33 0", "key 56 0", "key 29 0"])
+    to_relay("keyboard steam")
+    devices["controller"] = {}
     typed()
 
     use(None)  # the defaults: Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels (ft-screens)

@@ -51,7 +51,10 @@ display and this relay hold, and every modifier in KWin, known to be held or not
 release" to ft-screens; Ctrl+Alt+Shift+Esc by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
 transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
-ft-layout, ft-float, ft-steam and ft-voice need no path), key = pass through as a key, none).
+ft-layout, ft-float, ft-steam and ft-voice need no path), keys:CODES = tap that key combination
+where typing goes, all its keys down in order, then up, on the press ("keys:125+32" is Meta+D:
+evdev codes as in key_bindings, at most KEYS_MAX; a desktop shortcut from a controller button),
+key = pass through as a key, none).
 
 Frame controller buttons can be mapped too ("controller_buttons": {"right/a": action} in the
 rules file; any action but key and the gaze ones, GAZE_ACTIONS: gaze mode is a mouse feature,
@@ -404,6 +407,20 @@ RENAMED_ACTIONS = {"spotwatch": "frunner"}
 PROFILE = "profile:"  # "profile:NAME": switch to that profile (doesn't need pointer mode either)
 COMMAND = "command:"  # "command:CMD": run CMD (nor does this)
 RUN = "run:"  # "run:NAME": run your command NAME (ft_commands; nor does this)
+KEYS = "keys:"  # "keys:125+32": tap that key combination where typing goes (nor does this)
+KEYS_MAX = 6  # keys in one "keys:" action at most
+
+
+def keys_codes(a):
+    """The key codes a "keys:" action presses, in order (evdev codes below BTN_MISC joined by "+",
+    as in key_bindings), or None if it isn't one. Never a volume key (see the top)."""
+    if not isinstance(a, str) or not a.startswith(KEYS):
+        return None
+    parts = a[len(KEYS):].split("+")
+    if not 0 < len(parts) <= KEYS_MAX or not all(p.isascii() and p.isdecimal() and 0 < int(p) < BTN_MISC
+                                                 and int(p) not in VOLUME_CODES for p in parts):
+        return None
+    return [int(p) for p in parts]
 
 
 def renamed_actions(table):
@@ -415,14 +432,14 @@ def renamed_actions(table):
 
 
 def known_action(a):
-    return a in ACTIONS or (isinstance(a, str) and any(a.startswith(p) and a[len(p):].strip()
-                                                       for p in (PROFILE, COMMAND, RUN)))
+    return a in ACTIONS or keys_codes(a) is not None or (isinstance(a, str) and any(
+        a.startswith(p) and a[len(p):].strip() for p in (PROFILE, COMMAND, RUN)))
 
 
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
             and a not in ("steam_menu", "pause_toggle", "frunner", "hands_toggle", "release_keys")
-            and not a.startswith((PROFILE, COMMAND, RUN)))
+            and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
 
 def works_paused(a):
@@ -1414,6 +1431,9 @@ class Relay:
                 subprocess.Popen(["python3", HANDSMODE, "toggle", *(["--sound"] if self.pause.settings["sound"] else [])],
                                  stdin=subprocess.DEVNULL, start_new_session=True)
                 log(action)
+        elif action.startswith(KEYS):
+            if value == 1:
+                self.tap_keys(keys_codes(action), now)
         elif action.startswith(COMMAND):
             if value == 1:
                 subprocess.Popen(["sh", "-c", action[len(COMMAND):]], stdin=subprocess.DEVNULL,
@@ -1457,6 +1477,18 @@ class Relay:
                     log(f"{action}: Frametop Voice isn't running (frametop-voice.service)")
         elif self.lease.current:
             self.lease.current.action(action, value, now, source)
+
+    def tap_keys(self, codes, now):
+        """A "keys:" action: its keys go down in order and come up in reverse, at once, where typing
+        goes (the desktop's screens, else the virtual keyboard for Steam). Down and up together,
+        so a release that never comes (a controller gone) can't leave a key held."""
+        if not codes:
+            return
+        desktop = now < self.desktop_until
+        for value, order in ((1, codes), (0, codes[::-1])):
+            for code in order:
+                self.type_key(code, value, desktop)
+        log(f"keys {'+'.join(map(str, codes))} to {'the desktop' if desktop else 'Steam'}")
 
     def cal_enter(self, code, value, now):
         """Enter while the gaze calibration panel is up (see the top): its press goes to the helper

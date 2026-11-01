@@ -758,7 +758,11 @@ class Pointer:
     """
 
     DRIVER_BUTTONS = {"left": "trigger", "right": "b", "middle": "x", "back": "joystick"}
-    SCROLL_PULSE = 0.08  # seconds of joystick deflection per wheel notch
+    # SteamVR scrolls a step for each SCROLL_STEP seconds the joystick is fully deflected, about 20
+    # steps a second at most, and adds up the time across short pushes. So each notch buys
+    # SCROLL_STEP of deflection, and notches that come faster wait, up to SCROLL_BACKLOG seconds.
+    SCROLL_STEP = 0.05
+    SCROLL_BACKLOG = 0.5
     CLAIM_PULSE = 0.06  # seconds the claim button (switchlaserhand, no click) is held
     RESUME_PAUSE = 1.5  # mouse idle this long, then moving again, re-claims the laser
     WAKE_WINDOW = 1.0  # seconds in which WAKE_COUNTS of motion must add up
@@ -778,7 +782,8 @@ class Pointer:
         self.last_used = 0.0
         self.dx = self.dy = 0
         self.move_at = 0.0  # motion last went to the helper then
-        self.scroll_until = None
+        self.scroll_until = None  # the joystick push ends then
+        self.scroll_direction = 0
         self.claim_at = None  # when to press the claim button
         self.claim_release = None
         self.system_at = None  # dashboard toggle: when to press the virtual system button
@@ -874,8 +879,7 @@ class Pointer:
         elif code == REL_Y:
             self.dy += value
         elif code == REL_WHEEL and value:
-            self.send(f"scroll 0 {1 if value > 0 else -1}", droppable=True)
-            self.scroll_until = now + self.SCROLL_PULSE
+            self.scroll(value, now)
 
     def action(self, name, value, now, source="mouse"):
         """A mapped button: value 1 press, 0 release, 2 autorepeat (ignored). source: what
@@ -910,8 +914,7 @@ class Pointer:
             return  # the rest act on press
         elif name in ("scroll_up", "scroll_down"):
             self.wake(now)
-            self.send(f"scroll 0 {1 if name == 'scroll_up' else -1}", droppable=True)
-            self.scroll_until = now + self.SCROLL_PULSE
+            self.scroll(1 if name == "scroll_up" else -1, now)
         elif name == "dashboard":
             self.dashboard(now)
         elif name == "recenter":
@@ -943,6 +946,16 @@ class Pointer:
         elif name in ("sens_up", "sens_down"):
             self.sensitivity *= 1.25 if name == "sens_up" else 0.8
             log(f"sensitivity {self.sensitivity:.4f} deg/count")
+
+    def scroll(self, notches, now):
+        """Deflect the joystick for SCROLL_STEP per notch (positive: up). A notch in the same
+        direction adds its time to the push under way; the other direction starts again."""
+        direction = 1 if notches > 0 else -1
+        if self.scroll_until is None or direction != self.scroll_direction:
+            self.send(f"scroll 0 {direction}", droppable=True)
+            self.scroll_direction, self.scroll_until = direction, now
+        self.scroll_until = min(max(self.scroll_until, now) + abs(notches) * self.SCROLL_STEP,
+                                now + self.SCROLL_BACKLOG)
 
     def flush(self, now=None):
         """Send the motion so far. With now (a mouse's SYN_REPORT), only once MOVE_EVERY has passed
@@ -995,6 +1008,8 @@ class Pointer:
     def timeout(self):
         pending = (self.scroll_until, self.claim_at, self.claim_release, self.system_at, self.system_release)
         wait = 0.02 if self.queue or any(t is not None for t in pending) else 0.5
+        if self.scroll_until is not None:  # a push ends on time: its length is the number of steps
+            wait = max(0.0, min(wait, self.scroll_until - time.monotonic()))
         if self.dx or self.dy:  # motion held back by flush
             wait = max(0.0, min(wait, self.move_at + self.MOVE_EVERY - time.monotonic()))
         return wait

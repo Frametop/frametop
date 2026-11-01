@@ -595,18 +595,22 @@ class Backend(QObject):
         if self._running:
             self._ask_screens(f"{'reveal' if shown else 'conceal'} {index + 1}", then=applied)
 
-    # --- level head pins (SCREEN_PIN_LEVEL; ft-screens takes it live, "handsetting") ---
-    @Property(bool, notify=changed)
-    def pinLevel(self):
-        return ft_layout.read_conf().get("SCREEN_PIN_LEVEL", "0") == "1"
+    # --- head pin modes (SCREEN_PIN_LEVEL; ft-screens takes it live, "handsetting") ---
+    # 0 rides on the headset, 1 follows turning and walking but stays level, 2 (DEE-208) follows
+    # walking only: no turning, looking up or down, or crouching.
+    @Property(int, notify=changed)
+    def pinMode(self):
+        v = ft_layout.read_conf().get("SCREEN_PIN_LEVEL", "0")
+        return int(v) if v in ("1", "2") else 0
 
-    @Slot(bool)
-    def setPinLevel(self, on):
-        """Screens on your head follow it turning, not looking up or down. Pins already on the
-        head change over where they are now."""
-        write_conf_value("SCREEN_PIN_LEVEL", "1" if on else "0")
+    @Slot(int)
+    def setPinMode(self, mode):
+        """How screens on your head follow it. Pins already on the head change over where they
+        are now."""
+        mode = mode if mode in (1, 2) else 0
+        write_conf_value("SCREEN_PIN_LEVEL", str(mode))
         if self._running and ft_layout.backend() == "screens":
-            self._ask_screens(f"handsetting SCREEN_PIN_LEVEL {1 if on else 0}")
+            self._ask_screens(f"handsetting SCREEN_PIN_LEVEL {mode}")
         self.changed.emit()
 
     @Slot(str, str)

@@ -300,8 +300,8 @@ struct Screen {
     float alpha = 1;
     vr::TrackedDeviceIndex_t pinned = kNone;  // riding on this controller
     Mat pinRel = Identity();                  // controller -> screen (a level pin: level frame -> screen)
-    bool pinLevel = false;                    // on the head, level (SCREEN_PIN_LEVEL): LevelFrame, not the headset
-    Mat levelAt{};                            // a level pin: the frame it was last placed with (MoveLevelPins)
+    levelpin::Mode pinMode = levelpin::Rigid; // on the head, Level or Walk (SCREEN_PIN_LEVEL): FloorFrame, not the headset
+    Mat levelAt{};                            // a floor pin: the frame it was last placed with (MoveLevelPins)
     Mat pose = Identity();                    // where it is in the room, when not pinned
     Drag drag = Drag::None;
     vr::TrackedDeviceIndex_t dragDevice = kNone;
@@ -768,19 +768,20 @@ void ApplyCurve(const Screen &s) {
 // Level head pins (SCREEN_PIN_LEVEL, levelpin.h; user 2026-10-27: "pin only follows horizontal movement"): a screen
 // pinned to the head follows it turning left and right and walking, but not looking up or down, tilting,
 // or rising and crouching. SteamVR only pins rigidly to a device, so these sit in the room, and
-// MoveLevelPins moves them every tick to LevelFrame times pinRel. The frame is on the floor under the
-// head, turned with it, upright; pinRel holds the screen's height. Outside ft-screens a level pin is
-// still a head pin: "get" reports it relative to the headset, and "pin N head REL" takes it so, so
-// profiles keep working with the setting either way.
-bool g_pinLevel = false;   // SCREEN_PIN_LEVEL: new head pins are level
+// MoveLevelPins moves them every tick to FloorFrame times pinRel. The frame is on the floor under the
+// head, turned with it, upright; pinRel holds the screen's height. Walking head pins (SCREEN_PIN_LEVEL=2,
+// DEE-208) are moved the same way, on a frame with the room's axes: they follow you walking, not turning.
+// Outside ft-screens a floor pin is still a head pin: "get" reports it relative to the headset, and
+// "pin N head REL" takes it so, so profiles keep working with the setting either way.
+levelpin::Mode g_pinMode = levelpin::Rigid;   // SCREEN_PIN_LEVEL: how new head pins follow the head
 long g_levelTick = -1;
-Mat g_level{};
+Mat g_levelHead{};
 bool g_levelOk = false;
 float g_vsyncToPhotons = -1;
 
-// The head's level frame this tick, from the head pose predicted for when the next frame shows (a level
-// pin lags otherwise: SteamVR moves device-pinned overlays with its own prediction).
-bool LevelFrame(Mat *out) {
+// A floor pin's frame this tick (levelpin.h, for `mode`), from the head pose predicted for when the next
+// frame shows (a floor pin lags otherwise: SteamVR moves device-pinned overlays with its own prediction).
+bool FloorFrame(levelpin::Mode mode, Mat *out) {
     if (g_levelTick != g_tick) {
         g_levelTick = g_tick;
         g_levelOk = false;
@@ -792,20 +793,22 @@ bool LevelFrame(Mat *out) {
         const float ahead = float(std::clamp(1 / hz - since + g_vsyncToPhotons, 0.0, 0.05));
         vr::TrackedDevicePose_t hp;
         vr::VRSystem()->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, ahead, &hp, 1);
-        if (hp.bPoseIsValid) g_levelOk = levelpin::Frame(hp.mDeviceToAbsoluteTracking.m, g_level.m);
+        if (hp.bPoseIsValid) g_levelHead = hp.mDeviceToAbsoluteTracking, g_levelOk = true;
     }
-    if (g_levelOk) *out = g_level;
-    return g_levelOk;
+    Mat f;
+    if (!g_levelOk || !levelpin::FloorFrame(mode, g_levelHead.m, f.m)) return false;
+    *out = f;
+    return true;
 }
 
-// What a pinned screen rides on: its device's pose, or for a level pin the level frame.
-bool PinFrame(const Screen &s, Mat *out) { return s.pinLevel ? LevelFrame(out) : DevicePose(s.pinned, out); }
+// What a pinned screen rides on: its device's pose, or for a floor pin its floor frame.
+bool PinFrame(const Screen &s, Mat *out) { return s.pinMode ? FloorFrame(s.pinMode, out) : DevicePose(s.pinned, out); }
 
 // An overlay on a pinned screen at `rel` from what it rides on.
 void SetOnPin(const Screen &s, vr::VROverlayHandle_t o, const Mat &rel) {
-    if (!s.pinLevel) return (void)vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(o, s.pinned, &rel);
+    if (!s.pinMode) return (void)vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(o, s.pinned, &rel);
     Mat f;
-    if (!LevelFrame(&f)) return;
+    if (!FloorFrame(s.pinMode, &f)) return;
     const Mat m = Mul(f, rel);
     vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &m);
 }
@@ -978,13 +981,12 @@ void RefreshChrome() {
     }
 }
 
-// Each tick: level pins follow the head (LevelFrame), the shown ones, when it moved.
+// Each tick: floor pins follow the head (FloorFrame), the shown ones, when their frame moved.
 void MoveLevelPins() {
     Mat f;
-    int asked = 0;
     for (auto &[i, s] : g_screens) {
-        if (!s.pinLevel || !s.visible || s.overlay == vr::k_ulOverlayHandleInvalid) continue;
-        if (!asked++ && !LevelFrame(&f)) return;
+        if (!s.pinMode || !s.visible || s.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        if (!FloorFrame(s.pinMode, &f)) return;
         const auto &a = f.m, &b = s.levelAt.m;
         if (std::fabs(a[0][3] - b[0][3]) < 2e-4 && std::fabs(a[2][3] - b[2][3]) < 2e-4 &&
             std::fabs(a[0][0] - b[0][0]) < 5e-5 && std::fabs(a[2][0] - b[2][0]) < 5e-5)
@@ -1008,46 +1010,48 @@ void SetAbsolute(Screen &s, const Mat &pose, uint64_t universe = 0) {
     else if (s.universe == 0 || s.pinned != kNone || std::memcmp(&s.pose, &pose, sizeof pose) != 0)
         s.universe = g_universe ? g_universe : ReadUniverse();   // (before the first tick: panels made at start)
     s.pinned = kNone;
-    s.pinLevel = false;
+    s.pinMode = levelpin::Rigid;
     s.pose = pose;
     vr::VROverlay()->SetOverlayTransformAbsolute(s.overlay, vr::TrackingUniverseStanding, &pose);
     PlaceChrome(s);
 }
 
-// Pinned at `rel` from what it rides on: the device, or with `level` (the head only) the level frame.
-void PinIn(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel, bool level) {
+// Pinned at `rel` from what it rides on: the device, or with `mode` Level or Walk (the head only) its floor frame.
+void PinIn(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel, levelpin::Mode mode) {
     s.pinned = dev;
     s.pinRel = rel;
-    s.pinLevel = level && dev == vr::k_unTrackedDeviceIndex_Hmd;
-    if (s.pinLevel) LevelFrame(&s.levelAt);
+    s.pinMode = dev == vr::k_unTrackedDeviceIndex_Hmd ? mode : levelpin::Rigid;
+    if (s.pinMode) FloorFrame(s.pinMode, &s.levelAt);
     SetOnPin(s, s.overlay, s.pinRel);
     PlaceChrome(s);
 }
 // Pinned again (moved, resized, rolled) the way it is, or a new pin to a controller.
-void Pin(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel) { PinIn(s, dev, rel, dev == s.pinned && s.pinLevel); }
-// A new pin, with the screen where it is in the room (`p`): to the head, level when SCREEN_PIN_LEVEL says.
+void Pin(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel) {
+    PinIn(s, dev, rel, dev == s.pinned ? s.pinMode : levelpin::Rigid);
+}
+// A new pin, with the screen where it is in the room (`p`): to the head, level or walking when SCREEN_PIN_LEVEL says.
 bool PinAt(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &p) {
-    const bool level = dev == vr::k_unTrackedDeviceIndex_Hmd && g_pinLevel;
+    const levelpin::Mode mode = dev == vr::k_unTrackedDeviceIndex_Hmd ? g_pinMode : levelpin::Rigid;
     Mat f;
-    if (!(level ? LevelFrame(&f) : DevicePose(dev, &f))) return false;
-    PinIn(s, dev, Mul(Inverse(f), p), level);
+    if (!(mode ? FloorFrame(mode, &f) : DevicePose(dev, &f))) return false;
+    PinIn(s, dev, Mul(Inverse(f), p), mode);
     return true;
 }
-// A pin relative to the headset as SteamVR has it, what "get" reports (level pins too).
+// A pin relative to the headset as SteamVR has it, what "get" reports (floor pins too).
 Mat HeadRel(const Screen &s) {
     Mat head, p;
-    if (!s.pinLevel || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) || !ScreenPose(s, &p)) return s.pinRel;
+    if (!s.pinMode || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) || !ScreenPose(s, &p)) return s.pinRel;
     return Mul(Inverse(head), p);
 }
 
 // SCREEN_PIN_LEVEL switched (Display Settings): head pins change over where they are now.
-void SetPinLevel(bool on) {
-    g_pinLevel = on;
+void SetPinMode(levelpin::Mode mode) {
+    g_pinMode = mode;
     for (auto &[i, s] : g_screens) {
         Mat p;
-        if (s.pinned != vr::k_unTrackedDeviceIndex_Hmd || s.pinLevel == on || !ScreenPose(s, &p)) continue;
+        if (s.pinned != vr::k_unTrackedDeviceIndex_Hmd || s.pinMode == mode || !ScreenPose(s, &p)) continue;
         PinAt(s, s.pinned, p);
-        std::printf("screen %d: its head pin is %s now (SCREEN_PIN_LEVEL)\n", i + 1, on ? "level" : "rigid");
+        std::printf("screen %d: its head pin is %s now (SCREEN_PIN_LEVEL)\n", i + 1, levelpin::ModeName(mode));
     }
 }
 
@@ -1742,7 +1746,7 @@ void TogglePinView(Screen &s, int index, const char *by) {
         SetAbsolute(s, p);
         std::printf("screen %d: unpinned from the head, left in the room (the pin button, %s)\n", index + 1, by);
     } else if (PinAt(s, vr::k_unTrackedDeviceIndex_Hmd, p)) {
-        std::printf("screen %d: pinned to the head%s (the pin button, %s)\n", index + 1, s.pinLevel ? ", level" : "", by);
+        std::printf("screen %d: pinned to the head%s%s (the pin button, %s)\n", index + 1, s.pinMode ? ", " : "", s.pinMode ? levelpin::ModeName(s.pinMode) : "", by);
     } else {
         return void(std::printf("screen %d: the pin button: no head pose\n", index + 1));
     }
@@ -4543,7 +4547,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "HANDS_PALM_MENU") g_palm.params().on = on;
     else if (n == "SCREEN_SPIN_BRING") g_susanBring = on;
     else if (n == "SCREEN_FRONT_AWAY") g_frontAway = on;
-    else if (n == "SCREEN_PIN_LEVEL") SetPinLevel(on);
+    else if (n == "SCREEN_PIN_LEVEL") SetPinMode(on ? levelpin::Level : levelpin::Rigid);   // (2, Walk: the command's own case)
     else return false;
     return true;
 }
@@ -4930,7 +4934,7 @@ bool ft_vr_init(void) {
         g_curveMaxArc = deg * M_PI / 180;
     }
     g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";
-    g_pinLevel = handcut::Setting("SCREEN_PIN_LEVEL", "0") == "1";   // head pins follow turning, not looking up or down   // the lazy susan brings panels (0: the room turns)
+    g_pinMode = levelpin::ModeOf(handcut::Setting("SCREEN_PIN_LEVEL", "0").c_str());   // head pins: 1 level, 2 walking   // the lazy susan brings panels (0: the room turns)
     num("FLOAT_DOCK_DISTANCE", g_floatDockDistance, 0, 1);   // a floating window carried this near a screen docks onto it
     num("SCREEN_SPIN_DISTANCE", g_frontReading, 0.4, 3);   // the front slot's reading distance (m)...
     g_frontReading = std::max(g_frontReading, spotreserve::kDistance + spotreserve::kFrontGap);   // ...behind frunner's spot
@@ -5189,7 +5193,7 @@ struct Parked {
     vr::TrackedDeviceIndex_t pinned;
     Mat pinRel;
     bool alone;
-    bool pinLevel;
+    levelpin::Mode pinMode;
     uint64_t universe;   // where the pose was placed (universefix.h)
 };
 std::map<int, Parked> g_parked;
@@ -5222,7 +5226,7 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
         CapCurve(s);
         ApplyCurve(s);
         Mat d;
-        if (k.pinned != kNone && DevicePose(k.pinned, &d)) PinIn(s, k.pinned, k.pinRel, k.pinLevel);
+        if (k.pinned != kNone && DevicePose(k.pinned, &d)) PinIn(s, k.pinned, k.pinRel, k.pinMode);
         else SetAbsolute(s, k.pose), s.universe = k.universe;
         s.alone = k.alone;
         g_parked.erase(pk);
@@ -5256,7 +5260,7 @@ void ft_vr_screen_destroy(int index) {
     if (g_cutterState == 1) g_cutter.DropPanel(index);
     Mat p;
     const Screen &s = it->second;
-    if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone, s.pinLevel, s.universe};
+    if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe};
     for (auto o : it->second.All())
         if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
     for (auto &[k, sub] : it->second.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);
@@ -5975,6 +5979,13 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
     int &rr = parsed.rr;
     switch (verb) {
     case vrcmd::HandSetting: {
+        if (!std::strcmp(key, "SCREEN_PIN_LEVEL") && (!std::strcmp(word, "2") || !std::strcmp(word, "walk"))) {
+            // the third head pin mode (DEE-208): 0 and 1 go the usual way below
+            SetPinMode(levelpin::Walk);
+            std::printf("screens: SCREEN_PIN_LEVEL 2, walking head pins (Display Settings)\n");
+            std::snprintf(reply, size, "ok %s 2", key);
+            return;
+        }
         // one hand interaction on or off now (Frametop Input Settings' Hands page writes frametop.conf too)
         const int on = !std::strcmp(word, "1") || !std::strcmp(word, "on") ? 1 : !std::strcmp(word, "0") || !std::strcmp(word, "off") ? 0 : -1;
         if (on < 0 || !SetHandSetting(key, on)) return (void)std::snprintf(reply, size, "error handsetting <HANDS_...> 0|1");

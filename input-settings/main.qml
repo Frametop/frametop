@@ -1800,8 +1800,15 @@ Kirigami.ApplicationWindow {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Hand cutouts:"
+                    text: "Cut a hole per hand in the panels, so Room View shows your real hands through them"
+                    checked: backend.handsCutouts
+                    onToggled: backend.setHandsCutouts(checked)
+                }
                 RowLayout {
                     Kirigami.FormData.label: "Hand cutout margin:"
+                    enabled: backend.handsCutouts
                     Controls.Label { text: "smaller"; opacity: 0.7 }
                     Controls.Slider {
                         id: marginSlider

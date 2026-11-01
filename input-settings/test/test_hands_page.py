@@ -58,6 +58,19 @@ class Page(unittest.TestCase):
         self.assertEqual(self.sent[-1][0], "spindistance 3")
         self.assertIn("# mine", Path(fis.CONF_PATH).read_text())
 
+    def test_cutouts_switch(self):
+        # Off by default (DEE-221: the drawn hands since 920d16e); the switch writes HANDS_CUTOUTS
+        # and tells ft-screens at once, the rest of the file kept.
+        self.assertFalse(self.b.handsCutouts)
+        self.b.setHandsCutouts(True)
+        self.assertEqual(fis.read_conf()["HANDS_CUTOUTS"], "1")
+        self.assertEqual(self.sent[-1], ("cutouts on", fis.SCREENS))
+        self.assertTrue(self.b.handsCutouts)
+        self.b.setHandsCutouts(False)
+        self.assertEqual(fis.read_conf()["HANDS_CUTOUTS"], "0")
+        self.assertEqual(self.sent[-1], ("cutouts off", fis.SCREENS))
+        self.assertIn("# mine", Path(fis.CONF_PATH).read_text())
+
     def test_page_loads(self):
         errors = []
         engine = QQmlApplicationEngine()

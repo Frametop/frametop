@@ -1936,6 +1936,18 @@ class Backend(QObject):
         return {"min": handsmode.MARGIN_MIN, "max": handsmode.MARGIN_MAX, "step": handsmode.MARGIN_STEP,
                 "default": handsmode.MARGIN_DEFAULT}
 
+    @Property(bool, notify=handsChanged)
+    def handsCutouts(self):
+        return read_conf().get("HANDS_CUTOUTS", "0") == "1"
+
+    @Slot(bool)
+    def setHandsCutouts(self, on):
+        """HANDS_CUTOUTS, and to ft-screens now: a hole per hand in Frametop's panels, so Room View
+        shows the real hands through them (off, the default since 920d16e: only the drawn hands)."""
+        write_conf_value("HANDS_CUTOUTS", "1" if on else "0")
+        self._send("cutouts on" if on else "cutouts off", SCREENS)
+        self.handsChanged.emit()
+
     @Property(float, notify=handsChanged)
     def handsMargin(self):
         return handsmode.margin_of(read_conf())

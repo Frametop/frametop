@@ -189,11 +189,24 @@ class HostSteps(unittest.TestCase):
         self.assertEqual(self.scripts, [])   # Plasma keeps its wallpaper: no magenta
         self.assertIsNone(self.conf())
 
-    def test_on_plasma_fails_screens_stop(self):
-        self.plasma_ok = (False, "no plasmashell")
+    def test_on_plasma_fails_put_back_then_screens_stop(self):
+        # a timeout after Plasma took it, or output that isn't on_script's: undo Plasma first
+        for answer in [(False, "timeout"), (True, "Error: TypeError")]:
+            self.asked.clear(), self.scripts.clear()
+            answers = [answer, (True, "ok")]
+            sw.plasma = lambda js: self.scripts.append(js) or answers.pop(0)
+            self.assertEqual(sw.main(["on"]), 1)
+            self.assertEqual(len(self.scripts), 2)
+            self.assertIn("var before = ", self.scripts[1])   # off_script
+            self.assertEqual(self.asked, ["wallpaper on", "wallpaper off"])
+            self.assertIsNone(self.conf())
+
+    def test_on_plasma_and_put_back_fail_stays_on(self):
+        answers = [(False, "timeout"), (False, "timeout")]
+        sw.plasma = lambda js: answers.pop(0)
         self.assertEqual(sw.main(["on"]), 1)
-        self.assertEqual(self.asked, ["wallpaper on", "wallpaper off"])
-        self.assertIsNone(self.conf())
+        self.assertEqual(self.asked, ["wallpaper on"])   # ft-screens keeps drawing over the key
+        self.assertEqual(self.conf(), "1")               # the switch shows on: off tries again
 
     def test_off_plasma_then_screens(self):
         self.plasma_ok = (True, "ok")

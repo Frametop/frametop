@@ -211,11 +211,19 @@ def turn_on():
     if not reply.startswith("ok"):
         return f"ft-screens didn't take the pictures: {reply or 'no answer (is the desktop running?)'}"
     ok, out = plasma(on_script())
-    if not ok or not remember(out):
-        ask_screens("wallpaper off")
-        return f"Plasma didn't take the key colour: {out}"
-    ft_layout.ft_conf.set_value("STEREO_WALLPAPER", "1", ft_layout.CONF_PATH)
-    return ""
+    if ok and remember(out):
+        ft_layout.ft_conf.set_value("STEREO_WALLPAPER", "1", ft_layout.CONF_PATH)
+        return ""
+    # The script may have keyed some desktops before it failed (or timed out, or printed something
+    # else): put back what's known, then stop ft-screens. If that fails too, ft-screens keeps going
+    # and the switch shows on, so the key colour never shows bare and turning it off tries again.
+    back, why = plasma(off_script(saved()))
+    if not back:
+        ft_layout.ft_conf.set_value("STEREO_WALLPAPER", "1", ft_layout.CONF_PATH)
+        return (f"Plasma didn't take the key colour ({out}), and putting the wallpaper back failed ({why}): "
+                "the stereo wallpaper stays on; turn it off to try again.")
+    ask_screens("wallpaper off")
+    return f"Plasma didn't take the key colour: {out}"
 
 
 def turn_off():

@@ -100,6 +100,8 @@ KWin draws the wallpaper and the windows into one buffer per screen, so Frametop
 
 - `STEREO_WALLPAPER=1` in frametop.conf turns it on when ft-screens starts; Display Settings sets it (`display-settings/stereo_wallpaper.py on|off|reload`, run on the host). ft-screens' `wallpaper on|off` command reads the pictures again or stops.
 - Window edges over the wallpaper can show a thin magenta fringe where a window's anti-aliased corner or a coloured shadow mixes with the key colour: only pure magenta and its darker shades are replaced.
+- Anything that sees the Frametop desktop outside ft-screens sees the magenta: the VNC view (`REMOTE=1`) and screenshots taken in the desktop.
+- If the pictures can't be read when ft-screens starts, or the GPU pass is unavailable, the screens show the bare magenta (ft-screens logs `stereo wallpaper: OFF`). The switch still shows on; turning it off puts the old wallpaper back. Display Settings only keys Plasma once ft-screens says it can draw the pictures, and puts Plasma back if keying it fails partway.
 - Magenta in a window (a picture, a web page) gets the wallpaper too. Floating windows don't show the wallpaper at all, and a screen added later gets Plasma's default wallpaper until Picture per eye is turned off and on again.
 
 ## Remote desktop over VNC

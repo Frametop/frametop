@@ -4931,7 +4931,11 @@ bool ft_vr_init(void) {
     if (handcut::Setting("STEREO_WALLPAPER", "0") == "1") {
         std::string why;
         g_wallpaper = LoadWallpaper(&why);
-        std::printf("stereo wallpaper: %s (%s)\n", g_wallpaper ? "on" : "off", why.c_str());
+        // Plasma keeps the key colour either way: Display Settings' switch stays on, and turning it
+        // off puts the old wallpaper back.
+        std::printf(g_wallpaper ? "stereo wallpaper: on (%s)\n"
+                                : "stereo wallpaper: OFF, the screens show the bare key colour (%s); turn it off in Display Settings\n",
+                    why.c_str());
     }
     g_palm.params().on = handcut::Setting("HANDS_PALM_MENU", "1") != "0";
     std::printf("hands: palm menu %s\n", g_palm.params().on ? "on (palm up, pinch: the Steam menu)" : "off");
@@ -6175,6 +6179,9 @@ static void CutoutsCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
         // on: (re)read the pictures Display Settings wrote; off: the client's pixels as they are
         std::string why = "off";
         if (!std::strcmp(word, "on")) {
+            // Display Settings keys Plasma only on an ok: without the GPU pass the screens would show
+            // the bare key colour.
+            if (!CutterReady()) return (void)std::snprintf(reply, size, "error the GPU pass (hand cutouts' renderer) is unavailable");
             if (!LoadWallpaper(&why)) return (void)std::snprintf(reply, size, "error %s", why.c_str());
             g_wallpaper = true;
         } else if (!std::strcmp(word, "off")) {

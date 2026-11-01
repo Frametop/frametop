@@ -117,6 +117,7 @@
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../../../conf/ftsock.h"
+#include "../../../screens/overlaypanel.h"
 #include "stb_truetype.h"
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -1128,65 +1129,11 @@ void Print(const Panel &p, const Target &t, bool visible, int number) {
 
 // ---------------------------------------------------------------- the buffers (see the top)
 
-struct Buffer {
-    gbm_bo *bo = nullptr;
-    int fd = -1;
-    vr::SharedTextureHandle_t handle = 0;
-    uint64_t whole = 0;  // the whole picture it last had (Buffers::whole), 0: none
-};
+// The ring, its copy and the area update are screens/overlaypanel.h's.
+using overlaypanel::Area;
 
-struct Area {
-    int x, y, w, h;
-};
-
-struct Buffers {
-    int w = 0, h = 0;
-    int drm = -1;
-    gbm_device *gbm = nullptr;
-    Buffer b[3];
-    int next = 0;
-    bool ok = false;
-    uint64_t whole = 0;  // counts the pictures presented whole
-
-    bool Make(int width, int height) {
-        w = width, h = height;
-        drm = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
-        if (drm >= 0) gbm = gbm_create_device(drm);
-        for (Buffer &x : b) {
-            // ABGR8888 is R, G, B, A in memory, like Picture::px.
-            if (gbm) x.bo = gbm_bo_create(gbm, w, h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
-            if (!x.bo || (x.fd = gbm_bo_get_fd(x.bo)) < 0) break;
-            vr::DmabufAttributes_t a{};
-            a.unWidth = w, a.unHeight = h;
-            a.unDepth = a.unMipLevels = a.unArrayLayers = a.unSampleCount = 1;
-            a.unFormat = DRM_FORMAT_ABGR8888;
-            a.ulModifier = DRM_FORMAT_MOD_LINEAR;
-            a.unPlaneCount = 1;
-            a.plane[0].unOffset = gbm_bo_get_offset(x.bo, 0);
-            a.plane[0].unStride = gbm_bo_get_stride(x.bo);
-            a.plane[0].nFd = x.fd;
-            if (!vr::VRIPCResourceManager()->ImportDmabuf(vr::VRApplication_Overlay, &a, &x.handle)) x.handle = 0;
-            if (!x.handle) break;
-        }
-        ok = b[2].handle != 0;
-        if (!ok) {
-            std::fprintf(stderr, "ft-handpanel: no shared buffers; falling back to SetOverlayRaw (it flickers)\n");
-            Drop();
-        }
-        return ok;
-    }
-
-    void Drop() {
-        for (Buffer &x : b) {
-            if (x.handle) vr::VRIPCResourceManager()->UnrefResource(x.handle);
-            if (x.fd >= 0) close(x.fd);
-            if (x.bo) gbm_bo_destroy(x.bo);
-            x = Buffer{};
-        }
-        if (gbm) gbm_device_destroy(gbm);
-        if (drm >= 0) close(drm);
-        gbm = nullptr, drm = -1, ok = false;
-    }
+struct Buffers : overlaypanel::Ring {
+    Buffers() : Ring("ft-handpanel") {}
 
     // A picture to the overlay: into the next buffer, premultiplied (the overlay's flag says
     // so), then the overlay switches to it. The copy runs outside g_vr, so the pose log waits
@@ -1198,38 +1145,15 @@ struct Buffers {
             std::lock_guard<std::mutex> lk(g_vr);
             e = ov->SetOverlayRaw(oh, const_cast<uint8_t *>(p.px.data()), uint32_t(p.w), uint32_t(p.h), 4);
         } else {
-            Buffer &x = b[next];
-            next = (next + 1) % 3;
-            if (!area) ++whole;
-            Area all{0, 0, p.w, p.h}, a = area && x.whole == whole ? *area : all;
-            a.x = std::clamp(a.x, 0, p.w), a.y = std::clamp(a.y, 0, p.h);
-            a.w = std::clamp(a.w, 0, p.w - a.x), a.h = std::clamp(a.h, 0, p.h - a.y);
-            x.whole = whole;
-            uint32_t stride = 0;
-            void *mapping = nullptr;
-            auto *dst = static_cast<uint8_t *>(gbm_bo_map(x.bo, 0, 0, p.w, p.h, GBM_BO_TRANSFER_WRITE, &stride, &mapping));
-            if (!dst) {
-                std::fprintf(stderr, "ft-handpanel: can't map a buffer\n");
-                return;
-            }
-            for (int y = a.y; y < a.y + a.h; ++y) {
-                const uint8_t *src = &p.px[(size_t(y) * p.w + a.x) * 4];
-                uint8_t *row = dst + size_t(y) * stride + size_t(a.x) * 4;
-                for (int i = 0; i < a.w * 4; i += 4) {
-                    const unsigned a = src[i + 3];
-                    row[i] = uint8_t(src[i] * a / 255), row[i + 1] = uint8_t(src[i + 1] * a / 255);
-                    row[i + 2] = uint8_t(src[i + 2] * a / 255), row[i + 3] = uint8_t(a);
-                }
-            }
-            gbm_bo_unmap(x.bo, mapping);
-            const vr::VRTextureBounds_t bounds{0, 0, float(p.w) / w, float(p.h) / h};
-            vr::Texture_t tex = {&x.handle, vr::TextureType_SharedTextureHandle, vr::ColorSpace_Gamma};
+            overlaypanel::Buffer *x = Fill(p.px.data(), p.w, p.h, area);
+            if (!x) return;
+            const vr::VRTextureBounds_t bounds = Bounds(p.w, p.h);
+            vr::Texture_t tex = overlaypanel::Texture(*x);
             std::lock_guard<std::mutex> lk(g_vr);
             ov->SetOverlayTextureBounds(oh, &bounds);
             e = ov->SetOverlayTexture(oh, &tex);
         }
-        if (e != vr::VROverlayError_None)
-            std::fprintf(stderr, "ft-handpanel: the picture didn't go to SteamVR: %s\n", ov->GetOverlayErrorNameFromEnum(e));
+        Check(ov, e);
     }
 };
 

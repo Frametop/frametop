@@ -26,7 +26,7 @@ test-python:
         'input/test/*.py' 'hands/tests/test_*.py' 'hands/rec/tests/*.py' 'recorder/tests/*.py' 'gaze/test/*.py' \
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
         'tour/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'remote-displays/tests/*.py' \
-        'steam/tests/*.py' 'remote/tests/*.py' 'framedrop/tests/*.py' \
+        'steam/tests/*.py' 'remote/tests/*.py' 'framedrop/tests/*.py' 'pointer/tests/*.py' \
         'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'scripts/tests/test_install_lib.py' \
         'scripts/tests/test_conf_readers.py' 'scripts/tests/test_install_interrupt.py' 'docs/tests/*.py' || status=1
     pytest -q session/tests || status=1

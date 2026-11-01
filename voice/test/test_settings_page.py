@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -108,8 +109,11 @@ class Page(unittest.TestCase):
         self.assertEqual(voice_settings.load()["language"], "fr")
 
     def test_model_chosen_after_its_download(self):
+        done = threading.Event()  # the download ends when the test says (it runs on a thread)
+        fis.host = lambda *cmd, timeout=20: (done.wait(5), self.fake_host(*cmd, timeout=timeout))[1]
         self.b.setVoiceModel("large-v3-turbo")
         self.assertEqual(voice_settings.load()["model"], "small.en")  # not until it's there
+        done.set()
         self.wait_fetch()
         self.assertEqual(voice_settings.load()["model"], "large-v3-turbo")
         self.assertIn(("Whisper model: large-v3-turbo, downloaded", False), self.messages)

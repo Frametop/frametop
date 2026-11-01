@@ -43,6 +43,34 @@ struct Cmd {
     int gx = 0, gy = 0;                   // torn
 };
 
+// Which of ft_vr_command's handlers (vr.cpp) runs a verb: one per group of commands.
+enum Group { NoGroup, PanelGroup, ReadoutGroup, VisibilityGroup, HelperWordGroup, HandFeatureGroup, CutoutsGroup, FloatGroup, SpinGroup };
+
+inline Group GroupOf(Verb v) {
+    switch (v) {
+    case Place: case Width: case CurveOnOff: case Curve: case Pin: case Unpin: case Get: case Pose: case Front:
+        return PanelGroup;
+    case Screens: case Universe: case Head: case GamepadPill: case Concealed: case Debug: case State:
+        return ReadoutGroup;
+    case Visibility: case Wrist: case Gesture: case ConcealReveal: case HideShowToggle: case Pause: case InGames:
+    case SteamvrMode: case Controllers:
+        return VisibilityGroup;
+    case HandSetting: case SpinDistance: case Hands: case SteamvrList: case Typing: case CalPanel: case Ray:
+        return HelperWordGroup;
+    case HandInput: case PalmMenu: case GrabThat:
+        return HandFeatureGroup;
+    case Cutouts:
+        return CutoutsGroup;
+    case Float: case Hold: case Unfloat: case Sub: case Minimized: case Moving: case Torn: case Carry: case Up:
+        return FloatGroup;
+    case Spin:
+        return SpinGroup;
+    case Unknown:
+        break;
+    }
+    return NoGroup;
+}
+
 inline Verb Parse(const char *cmd, Cmd &c) {
     float *r = c.r;
     if (std::sscanf(cmd, "place %d %lf %lf %lf %lf %lf %lf", &c.n, &c.x, &c.y, &c.z, &c.yaw, &c.pitch, &c.roll) == 7)

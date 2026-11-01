@@ -5657,6 +5657,590 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdateCatcher();
 }
 
+// fn on screen <which> (a number) or on every screen but the floating windows ("all"): false
+// when there is no such screen.
+extern "C++" {  // (a template: this part of the file is extern "C")
+template <typename Fn>
+static bool EachScreen(const char *which, Fn fn) {
+    if (std::strcmp(which, "all") == 0) {
+        for (auto &[i, s] : g_screens)
+            if (!s.floating) fn(s);
+        return true;
+    }
+    Screen *s = Find(std::atoi(which));
+    if (s) fn(*s);
+    return s != nullptr;
+}
+}
+
+// A panel's place, width, curve and pin, and which one gets typing.
+static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
+    int &n = parsed.n;
+    double &x = parsed.x;
+    double &y = parsed.y;
+    double &z = parsed.z;
+    double &yaw = parsed.yaw;
+    double &pitch = parsed.pitch;
+    double &roll = parsed.roll;
+    double &w = parsed.w;
+    char(&word)[16] = parsed.word;
+    char(&hand)[16] = parsed.hand;
+    float(&r)[12] = parsed.r;
+    const int got = parsed.got;
+    switch (verb) {
+    case vrcmd::Place: {
+        Screen *s = Find(n);
+        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        EndDrag(*s);
+        g_spin.base.erase(n - 1);
+        SetAbsolute(*s, PanelPose(x, y, z, yaw, pitch, roll));
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Width: {
+        Screen *s = Find(n);
+        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        SetWidth(*s, w);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::CurveOnOff: {
+        Screen *s = Find(n);
+        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        if ((s->curve > 0) != (word[1] == 'n')) ToggleCurve(*s);
+        std::snprintf(reply, size, "ok %.3f", s->curve);
+        return;
+    }
+    case vrcmd::Curve: {
+        Screen *s = Find(n);
+        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        s->curve = w > 0 ? std::max(0.5, w) : 0;
+        ApplyCurve(*s);
+        PlaceChrome(*s);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Pin: {
+        if (std::strcmp(hand, "left") && std::strcmp(hand, "right") && std::strcmp(hand, "head"))
+            return (void)std::snprintf(reply, size, "error pin to left, right, or head");
+        const vr::TrackedDeviceIndex_t dev = HandDevice(hand);
+        Mat c;
+        if (dev == vr::k_unTrackedDeviceIndex_Hmd && !DevicePose(dev, &c))
+            return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
+        if (dev == kNone || !DevicePose(dev, &c))
+            return (void)std::snprintf(reply, size, "error no %s controller tracked", hand);
+        Mat rel = Identity();
+        for (int k = 0; k < 12; ++k) rel.m[k / 4][k % 4] = r[k];
+        const bool found = EachScreen(word, [&](Screen &s) {
+            Mat p;
+            EndDrag(s);
+            if (got == 14 && dev == vr::k_unTrackedDeviceIndex_Hmd) PinAt(s, dev, Mul(c, rel));   // level or not
+            else if (got == 14) Pin(s, dev, rel);
+            else if (ScreenPose(s, &p)) PinAt(s, dev, p);
+        });
+        std::snprintf(reply, size, found ? "ok" : "error no such screen");
+        return;
+    }
+    case vrcmd::Unpin: {
+        const bool found = EachScreen(word, [&](Screen &s) {
+            Mat p;
+            if (s.pinned != kNone && ScreenPose(s, &p)) SetAbsolute(s, p);
+        });
+        std::snprintf(reply, size, found ? "ok" : "error no such screen");
+        return;
+    }
+    case vrcmd::Get: {
+        Screen *s = Find(n);
+        Mat m;
+        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        if (!ScreenPose(*s, &m)) return (void)std::snprintf(reply, size, "error screen %d has no pose", n);
+        int len = std::snprintf(reply, size,
+                                "ok %.4f %.4f %.4f  %.5f %.5f %.5f  %.5f %.5f %.5f  %.5f %.5f %.5f  %.4f %.4f %.3f %s",
+                                m.m[0][3], m.m[1][3], m.m[2][3], m.m[0][0], m.m[1][0], m.m[2][0], m.m[0][1], m.m[1][1],
+                                m.m[2][1], m.m[0][2], m.m[1][2], m.m[2][2], s->metres, s->heightMetres(), s->curve,
+                                s->pinned == kNone ? "none" : HandName(s->pinned));
+        if (s->pinned != kNone) {
+            const Mat rel = HeadRel(*s);
+            for (int k = 0; k < 12 && len < size; ++k)
+                len += std::snprintf(reply + len, size - len, " %.5f", rel.m[k / 4][k % 4]);
+        }
+        return;
+    }
+    case vrcmd::Pose: {
+        Screen *s = Find(n);
+        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        Mat m{};
+        for (int k = 0; k < 12; ++k) m.m[k / 4][k % 4] = r[k];
+        EndDrag(*s);
+        g_spin.base.erase(n - 1);
+        SetAbsolute(*s, m);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Front: {
+        // Typing and the active window go to panel N where it is, as after a spin to it (frunner,
+        // for a pinned panel, which doesn't spin).
+        if (!Find(n)) return (void)std::snprintf(reply, size, "error no panel %d", n);
+        g_spin.front = n - 1;
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    default:
+        std::snprintf(reply, size, "error unknown command");
+    }
+}
+
+// What the screens, the head and the switches are now (read only).
+static void ReadoutCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
+    switch (verb) {
+    case vrcmd::Screens: {
+        // KWin's screens only: ft-layout, Display Settings and ft-floatd count KWin's outputs
+        // by it. Remote screens are listed by "remotes" (remote.c).
+        const auto kwin = [](const Screen &s) { return !s.floating && !s.remote; };
+        const size_t count = std::count_if(g_screens.begin(), g_screens.end(), [&](auto &e) { return kwin(e.second); });
+        int len = std::snprintf(reply, size, "ok %zu", count);
+        for (auto &[i, s] : g_screens)
+            if (len < size && kwin(s))
+                len += std::snprintf(reply + len, size - len, " %d:%dx%d:%.3f", i + 1, s.width, s.height, s.metres);
+        return;
+    }
+    case vrcmd::Universe: {
+        // ft-layout doesn't save where the screens are from the head while this says temporary
+        const uint64_t u = ReadUniverse();
+        std::snprintf(reply, size, "ok %llu %s", (unsigned long long)u, universefix::KindName(UniverseKind(u)));
+        return;
+    }
+    case vrcmd::Head: {
+        Mat m;
+        if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &m))
+            return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
+        std::snprintf(reply, size, "ok %.4f %.4f %.4f %.2f", m.m[0][3], m.m[1][3], m.m[2][3],
+                      std::atan2(m.m[0][2], m.m[2][2]) * 180 / M_PI);
+        return;
+    }
+    case vrcmd::GamepadPill: {
+        std::snprintf(reply, size, "ok over %d shown %d pad %d ours %d lasers %d hover %d", g_pill.target + 1, g_pill.shown + 1,
+                      g_pill.pad + 1, PadMine() ? 1 : 0, g_pill.lasers ? 1 : 0, g_pill.hover ? 1 : 0);
+        return;
+    }
+    case vrcmd::Concealed: {
+        int len = std::snprintf(reply, size, "ok");
+        for (auto &[i, s] : g_screens)
+            if (len < size && !s.floating && s.alone) len += std::snprintf(reply + len, size - len, " %d", i + 1);
+        return;
+    }
+    case vrcmd::Debug: {
+        // One line for scripts/report.sh: what decides whether a laser drags.
+        std::string drags;
+        for (const auto &[index, s] : g_screens)
+            if (s.drag != Drag::None)
+                drags += (drags.empty() ? "" : ",") + std::to_string(index + 1) + ":" + DragName(s.drag) + ":" +
+                         DeviceLabel(s.dragDevice);
+        std::snprintf(reply, size,
+                      "ok dashboard=%d steam_front=%d mode=%s manual=%d lasers=%s game=%d paused=%d "
+                      "press=%#x by=%s on=%d catcher=%d drags=%s",
+                      vr::VROverlay()->IsDashboardVisible() ? 1 : 0, SteamInFront() ? 1 : 0,
+                      ModeName(), g_manual ? 1 : 0,
+                      LasersName(), g_gameRunning ? 1 : 0, g_paused ? 1 : 0, g_press.buttons,
+                      DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_catcherShown ? 1 : 0,
+                      drags.empty() ? "-" : drags.c_str());
+        return;
+    }
+    case vrcmd::State: {
+        std::snprintf(reply, size, "ok %s %d %.0f %s %.0f %s %d %s %u", ModeName(), g_manual ? 1 : 0, g_wristAngle,
+                      g_gestureHand.c_str(), g_gestureAngle, LasersName(), g_gameRunning ? 1 : 0,
+                      g_inGames == InGames::Hide ? "hide" : "visible", g_switchGen);
+        return;
+    }
+    default:
+        std::snprintf(reply, size, "error unknown command");
+    }
+}
+
+// When the panels and the lasers show: the modes, hide and show, pause.
+static void VisibilityCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
+    double &w = parsed.w;
+    char(&word)[16] = parsed.word;
+    char(&hand)[16] = parsed.hand;
+    unsigned &pad = parsed.pad;
+    unsigned &app = parsed.app;
+    unsigned &mine = parsed.mine;
+    switch (verb) {
+    case vrcmd::Visibility: {
+        const std::string m = word;
+        if (m == "always") g_mode = Mode::Always;
+        else if (m == "dashboard") g_mode = Mode::Dashboard;
+        else if (m == "gesture") g_mode = Mode::Gesture;
+        else if (m == "toggle") g_mode = Mode::Toggle;
+        else return (void)std::snprintf(reply, size, "error modes: always dashboard gesture toggle");
+        g_manual = false;
+        ++g_switchGen;
+        std::snprintf(reply, size, "ok %s", ModeName());
+        return;
+    }
+    case vrcmd::Wrist: {
+        g_wristAngle = std::clamp(w, 10.0, 180.0);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Gesture: {
+        g_gestureHand = std::strcmp(hand, "right") == 0 ? "right" : "left";
+        g_gestureAngle = std::clamp(w, 5.0, 90.0);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::ConcealReveal: {
+        const bool hide = cmd[0] == 'c';
+        const Screen *one = std::strcmp(word, "all") ? Find(std::atoi(word)) : nullptr;
+        if (std::strcmp(word, "all") && (!one || one->floating))
+            return (void)std::snprintf(reply, size, "error no screen %s", word);
+        EachScreen(word, [&](Screen &s) { s.alone = hide; });
+        UpdateVisibility();
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::HideShowToggle: {
+        const bool always = EffectiveMode() == Mode::Always;
+        const bool shownNow = always ? !g_manual : g_manual;
+        const bool want = cmd[0] == 's' ? true : cmd[0] == 'h' ? false : !shownNow;
+        g_manual = always ? !want : want;
+        ++g_switchGen;
+        UpdateVisibility();
+        std::snprintf(reply, size, "ok %s", want ? "shown" : "hidden");
+        return;
+    }
+    case vrcmd::Pause: {
+        if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) {
+            const bool on = !std::strcmp(word, "on");
+            if (on != g_paused)
+                std::printf("%s\n", on ? "paused for a VR game: everything hidden, KWin slowed down" : "resumed");
+            g_paused = on;
+            UpdateVisibility();
+        } else if (std::strcmp(word, "state") != 0) {
+            return (void)std::snprintf(reply, size, "error pause on|off|state");
+        }
+        std::snprintf(reply, size, "ok %s", g_paused ? "paused" : "running");
+        return;
+    }
+    case vrcmd::InGames: {
+        if (!std::strcmp(word, "hide")) g_inGames = InGames::Hide;
+        else if (!std::strcmp(word, "visible")) g_inGames = InGames::Visible;
+        else return (void)std::snprintf(reply, size, "error modes: hide visible");
+        g_manual = false;
+        ++g_switchGen;
+        UpdateVisibility();
+        std::snprintf(reply, size, "ok %s", word);
+        return;
+    }
+    case vrcmd::SteamvrMode: {
+        if (bool(pad) != g_steamvr.gamepad || app != g_steamvr.theater || bool(mine) != g_steamvr.mine)
+            std::printf("SteamVR: %s, %s\n",
+                        pad ? mine ? "gamepad mode, ours (gamepad pill)" : "gamepad mode (panels leave the laser alone)" : "laser mode",
+                        app ? ("theater game " + std::to_string(app)).c_str() : "no theater game");
+        g_steamvr.gamepad = pad, g_steamvr.theater = app, g_steamvr.mine = mine, g_steamvr.atMs = NowMs();
+        UpdateLasers();
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Controllers: {
+        const std::string m = word;
+        if (m == "always") g_lasers = Lasers::Always;
+        else if (m == "outside_games") g_lasers = Lasers::OutsideGames;
+        else if (m == "dashboard") g_lasers = Lasers::Dashboard;
+        else return (void)std::snprintf(reply, size, "error modes: always outside_games dashboard");
+        UpdateLasers();
+        std::snprintf(reply, size, "ok %s", LasersName());
+        return;
+    }
+    default:
+        std::snprintf(reply, size, "error unknown command");
+    }
+}
+
+// The pointer helper's and Input Settings' words: hands, rays, typing, the calibration panel.
+static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
+    int &n = parsed.n;
+    char(&word)[16] = parsed.word;
+    char(&key)[48] = parsed.key;
+    double &m = parsed.m;
+    char(&sl)[16] = parsed.sl;
+    char(&sr)[16] = parsed.sr;
+    int &tl = parsed.tl;
+    int &tr = parsed.tr;
+    int &calOn = parsed.calOn;
+    int &rl = parsed.rl;
+    int &rr = parsed.rr;
+    switch (verb) {
+    case vrcmd::HandSetting: {
+        // one hand interaction on or off now (Frametop Input Settings' Hands page writes frametop.conf too)
+        const int on = !std::strcmp(word, "1") || !std::strcmp(word, "on") ? 1 : !std::strcmp(word, "0") || !std::strcmp(word, "off") ? 0 : -1;
+        if (on < 0 || !SetHandSetting(key, on)) return (void)std::snprintf(reply, size, "error handsetting <HANDS_...> 0|1");
+        std::printf("hands: %s %s (Input Settings)\n", key, on ? "on" : "off");
+        std::snprintf(reply, size, "ok %s %d", key, on);
+        return;
+    }
+    case vrcmd::SpinDistance: {
+        // SCREEN_SPIN_DISTANCE now (Input Settings' Hands page, Gestures, writes frametop.conf too): the next
+        // screen brought comes this far out (one pushed or pulled in the slot keeps its own)
+        g_frontReading = std::clamp(m, spotreserve::kDistance + spotreserve::kFrontGap, kFrontFarthest);
+        std::printf("front: screens come %.2f m out (Input Settings)\n", g_frontReading);
+        std::snprintf(reply, size, "ok %.2f", g_frontReading);
+        return;
+    }
+    case vrcmd::Hands: {
+        const bool l = !std::strcmp(sl, "hand"), r = !std::strcmp(sr, "hand"), allowed = n != 0;
+        if (l != g_handsWord.hand[0] || r != g_handsWord.hand[1] || allowed != g_handsWord.allowed)
+            std::printf("hands from the pointer helper: left %s, right %s, %s\n", sl, sr, allowed ? "allowed" : "not allowed");
+        g_handsWord.hand[0] = l, g_handsWord.hand[1] = r, g_handsWord.allowed = allowed, g_handsWord.atMs = NowMs();
+        g_handsWord.controller[0] = !std::strcmp(sl, "controller"), g_handsWord.controller[1] = !std::strcmp(sr, "controller");
+        for (int k = 0; k < 2; ++k)
+            if (g_handsWord.hand[k]) g_handsWord.handMs[k] = NowMs();
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::SteamvrList: {   // the helper's overlay list (see "SteamVR's panels by hand")
+        SteamListPart(cmd);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Typing: {
+        g_typingWord.side[0] = tl != 0, g_typingWord.side[1] = tr != 0, g_typingWord.atMs = NowMs();
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::CalPanel: {
+        if ((calOn != 0) != CalPanelUp())
+            std::printf("gaze calibration panel %s: the palm menu %s\n", calOn ? "up" : "gone", calOn ? "waits" : "is back");
+        g_calPanelMs = calOn ? NowMs() : INT64_MIN / 2;
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Ray: {
+        g_rayWord.side[0] = rl != 0, g_rayWord.side[1] = rr != 0, g_rayWord.atMs = NowMs();
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    default:
+        std::snprintf(reply, size, "error unknown command");
+    }
+}
+
+// Near hand input, the palm menu and "grab that": on, off and their counts.
+static void HandFeatureCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
+    char(&word)[16] = parsed.word;
+    switch (verb) {
+    case vrcmd::HandInput: {
+        if (!std::strcmp(word, "on")) g_nearMode = NearMode::Helper;
+        else if (!std::strcmp(word, "off")) g_nearMode = NearMode::Off;
+        else if (!std::strcmp(word, "force")) g_nearMode = NearMode::Force;
+        else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error handinput on|off|force|state");
+        const auto &st = g_handInput.stats;
+        std::snprintf(reply, size,
+                      "ok %s, helper %s (left %s, right %s, %s); %s; %d frames, %d near, %d presses (%d on one frame, %d by "
+                      "pinch), %d controls, %d grabs (%d card, %d fist; %d fists waited, %d were grab that), %d stretches; "
+                      "%d poke attempts, %d refused, %d off the content, %d at the edge; held back: %d one view, %d bent, "
+                      "%d not nearest, %d pinching, %d busy, %d resting, %d typing, %d askew, %d slow, %d flicks, %d open; %d flicks, "
+                      "%d throws, %d pushes; holds: %d coasts, %d back, %d glitches, %d held through, %d ended unseen; gates: %d frames "
+                      "and %d turns dropped, %d moved, %d near the edge, %d one camera; %d fists ft-hands called pinches; %d second "
+                      "hands joined, %d pinches waited to be fists (%d were), %d buttons pinched, %d pokes on a panel the other hand held",
+                      g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
+                      NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
+                      g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
+                      g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.quickPresses, st.pinchClicks,
+                      st.controls, st.grabs, st.cards, st.fists, st.fistsWaited, st.fistsCancelled, st.stretches, st.attempts,
+                      st.refused, st.offContent, st.edgePresses, st.heldNotStereo, st.heldNotExtended, st.heldNotNearest,
+                      st.heldPinching, st.heldBusy, st.heldResting, st.heldTyping, st.heldAskew, st.heldSlow, st.heldFlick, st.heldOpen,
+                      st.flicks, st.throws, st.pushes, st.coasts, st.reacquired, st.glitches, st.heldThrough, st.lostEnds, st.gated,
+                      st.turnsGated, st.moved, st.edgeFrames, st.monoFrames, st.fistPinches, st.joins, st.settles, st.settledFists,
+                      st.buttonPinches, st.heldByOther);
+        return;
+    }
+    case vrcmd::PalmMenu: {
+        if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_palm.params().on = !std::strcmp(word, "on");
+        else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error palmmenu on|off|state");
+        const auto &st = g_palm.stats;
+        std::snprintf(reply, size, "ok %s; %s; %d shown, %d pinches, %d toggles, %d cancelled, %d not a plain pinch",
+                      g_palm.params().on ? "on" : "off", g_palm.Describe().c_str(), st.shows, st.pinches, st.toggles, st.cancels,
+                      st.notPlain);
+        return;
+    }
+    case vrcmd::GrabThat: {
+        if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_grabThat.params().on = !std::strcmp(word, "on");
+        else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error grabthat on|off|state");
+        const auto &st = g_grabThat.stats;
+        std::string came;
+        if (g_front.panel >= 0)
+            came = std::to_string(g_front.panel + 1) + " (front slot" + (g_front.released ? ", released" : g_front.kept ? ", kept" : "") + ")";
+        std::snprintf(reply, size, "ok %s; %s; %d armed, %d closed, %d fired, %d timed out; came: %s",
+                      g_grabThat.params().on ? "on" : "off", g_grabThat.Describe().c_str(), st.arms, st.closings, st.fires,
+                      st.timeouts, came.empty() ? "none" : came.c_str());
+        return;
+    }
+    default:
+        std::snprintf(reply, size, "error unknown command");
+    }
+}
+
+// The hand cutouts: on, off, prediction, the matte and Room View.
+static void CutoutsCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
+    char(&word)[16] = parsed.word;
+    switch (verb) {
+    case vrcmd::Cutouts: {
+        char arg[16] = "";
+        double ms = 0, a = 0, b = 0;
+        if (!std::strcmp(word, "on")) g_cutouts = true;
+        else if (!std::strcmp(word, "off")) g_cutouts = false;
+        else if (!std::strcmp(word, "predict") && std::sscanf(cmd, "cutouts predict %15s", arg) == 1 &&
+                 (!std::strcmp(arg, "on") || !std::strcmp(arg, "off")))
+            g_hands.SetPrediction(!std::strcmp(arg, "on"), g_hands.leadMs());
+        else if (!std::strcmp(word, "lead") && std::sscanf(cmd, "cutouts lead %lf", &ms) == 1)
+            g_hands.SetPrediction(g_hands.predicting(), ms);
+        else if (handcut::MatteShape shape; !std::strcmp(word, "matte") && std::sscanf(cmd, "cutouts matte %15s", arg) == 1 &&
+                 handcut::ParseShape(arg, &shape))
+            g_matte.shape = shape;
+        else if (const int got = std::sscanf(cmd, "cutouts margin %lf %lf %lf", &ms, &a, &b);
+                 !std::strcmp(word, "margin") && got >= 1 && ms >= 0 && ms <= 10) {
+            g_matte.marginDeg = ms;
+            if (got >= 2) g_matte.motionMs = std::clamp(a, 0.0, 200.0);
+            if (got >= 3) g_matte.motionMaxDeg = std::clamp(b, 0.0, 10.0);
+        } else if (!std::strcmp(word, "shift")) {
+            const char *spec = cmd + std::strlen("cutouts shift");
+            while (*spec == ' ') ++spec;
+            if (!std::strcmp(spec, "off")) g_matte.shift.clear();
+            else if (!handcut::ParseShift(spec, g_matte.shift)) return (void)std::snprintf(reply, size, "error shift <dist>:<yaw>,<pitch> ...");
+            g_hands.SetShift(g_matte.shift);
+        } else if (roomview::Force rv; !std::strcmp(word, "roomview") && std::sscanf(cmd, "cutouts roomview %15s", arg) == 1 &&
+                   roomview::ParseForce(arg, &rv)) {
+            g_roomView.SetForce(rv);
+            g_roomView.Update(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(),
+                              g_gameRunning, g_constructRoomView);
+        } else if (std::strcmp(word, "state") != 0)
+            return (void)std::snprintf(reply, size, "error cutouts on|off|state|predict on|off|lead <ms>|matte circle|mesh|capsules|"
+                                                    "margin <deg> [ms [deg]]|shift off|<spec>|roomview auto|on|off");
+        // Composite's counts since the last state, per second.
+        static auto since = Clock::now();
+        const double dt = std::max(1e-3, std::chrono::duration<double>(Clock::now() - since).count());
+        since = Clock::now();
+        const handcut::CutStats c = g_cutter.TakeStats();
+        const int calls = c.draws + c.same + c.busy;
+        std::snprintf(reply, size,
+                      "ok %s %s %.2f ms, predict %s lead %.0f ms; per s: %.1f draws (%.1f partial), %.1f same, %.1f busy, "
+                      "%.1f waits; CPU %.2f ms avg %.2f worst; matte %s margin %.2f deg + %.0f ms (max %.2f), shift %s; "
+                      "room view %s (%s%s)",
+                      g_cutouts ? "on" : "off", g_cutterState > 0 ? "ready" : g_cutterState < 0 ? "unavailable" : "idle",
+                      g_cutter.lastMs(), g_hands.predicting() ? "on" : "off", g_hands.leadMs(), c.draws / dt,
+                      c.partial / dt, c.same / dt, c.busy / dt, c.waits / dt, calls ? c.cpuMs / calls : 0.0, c.worstMs,
+                      handcut::ShapeName(g_matte.shape), g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
+                      g_matte.shift.empty() ? "off" : "on", g_roomView.on() ? "on" : "off", g_roomView.why(),
+                      g_roomView.on() ? "" : ": no cutouts");
+        return;
+    }
+    default:
+        std::snprintf(reply, size, "error unknown command");
+    }
+}
+
+// Floating windows (ft-floatd and KWin's script): their rectangles, poses, popups and carries.
+static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
+    int &n = parsed.n;
+    double &w = parsed.w;
+    int &x0 = parsed.x0;
+    int &y0 = parsed.y0;
+    int &w0 = parsed.w0;
+    int &h0 = parsed.h0;
+    int &t0 = parsed.t0;
+    int &ms = parsed.ms;
+    int &k0 = parsed.k0;
+    int &on = parsed.on;
+    int &gx = parsed.gx;
+    int &gy = parsed.gy;
+    switch (verb) {
+    case vrcmd::Float: {
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        if (!(w > 1e-5 && w < 0.01) || w0 < 1 || h0 < 1) return (void)std::snprintf(reply, size, "error bad float");
+        SetFloat(*s, w, x0, y0, w0, h0, std::max(0, t0));
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Hold: {
+        // ft-floatd changes a floating window (its scale, its size): its panel keeps its picture for up to
+        // ms (0: no longer), until the window's new crop comes and a frame after it (kHoldSettleMs).
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        if (ms < 0 || ms > 2000) return (void)std::snprintf(reply, size, "error bad hold");
+        if (ms == 0) {
+            ReleaseHold(*s);
+        } else {
+            s->holdCapMs = NowMs() + ms;
+            s->holdUntilMs = std::max(s->holdUntilMs, s->holdCapMs);
+        }
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Unfloat: {
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        Unfloat(*s);
+        UpdateVisibility();
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Sub: {
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        if (std::strstr(cmd, " off")) w0 = h0 = 0;
+        SetSub(*s, n - 1, k0, x0, y0, w0, h0);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Minimized: {
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        s->minimized = on != 0;
+        UpdateVisibility();
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Moving: {
+        // KWin's script: a window on a screen started (1) or stopped (0) moving by its title bar (TearOff)
+        char wid[64];
+        int on;
+        if (std::sscanf(cmd, "moving %63s %d", wid, &on) != 2) return (void)std::snprintf(reply, size, "error moving ID 0|1");
+        if (on) g_kwinMove.window = wid;
+        else if (g_kwinMove.window == wid) g_kwinMove.window.clear();
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Torn: {
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        CarryTorn(*s, n - 1, gx, gy);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Carry: {
+        Screen *s = Find(n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
+        if (!(g_press.buttons & ButtonBit(BTN_LEFT)) || g_press.screen != n - 1 || s->drag != Drag::None)
+            return (void)std::snprintf(reply, size, "error not pressed there");
+        s->titleCarry = true, s->carryX = g_press.x, s->carryY = g_press.y;
+        StartDrag(*s, Drag::Move, g_press.device);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    case vrcmd::Up: {
+        if ((g_press.buttons & ButtonBit(BTN_LEFT)) && g_press.device != kNone && !IsHandController(g_press.device) &&
+            !IsHandHolder(g_press.device))
+            g_press.upAt = g_tick + 9;
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    default:
+        std::snprintf(reply, size, "error unknown command");
+    }
+}
+
 // Control commands (datagrams on @ft_screens, replies to the sender):
 //   place <screen> <x> <y> <z> <yaw> <pitch> <roll>   centre (standing universe) and facing
 //   width <screen> <metres>
@@ -5730,406 +6314,23 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
 void ft_vr_command(const char *cmd, char *reply, int size) {
     if (!g_vr) return (void)std::snprintf(reply, size, "error no SteamVR (--no-vr)");
     RefreshPoses();
-    vrcmd::Cmd parsed;  // the command's verb and arguments (vrcmd.h), under their old names below
+    vrcmd::Cmd parsed;  // the command's verb and arguments (vrcmd.h)
     const vrcmd::Verb verb = vrcmd::Parse(cmd, parsed);
-    int &n = parsed.n;
-    double &x = parsed.x, &y = parsed.y, &z = parsed.z, &yaw = parsed.yaw, &pitch = parsed.pitch, &roll = parsed.roll, &w = parsed.w;
-    char(&word)[16] = parsed.word, (&hand)[16] = parsed.hand;
-    float(&r)[12] = parsed.r;
-    auto each = [&](const char *which, auto fn) -> bool {  // "all" or a screen number
-        if (std::strcmp(which, "all") == 0) {
-            for (auto &[i, s] : g_screens)
-                if (!s.floating) fn(s);
-            return true;
-        }
-        Screen *s = Find(std::atoi(which));
-        if (s) fn(*s);
-        return s != nullptr;
-    };
-    if (verb == vrcmd::Place) {
-        Screen *s = Find(n);
-        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
-        EndDrag(*s);
-        g_spin.base.erase(n - 1);
-        SetAbsolute(*s, PanelPose(x, y, z, yaw, pitch, roll));
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Width) {
-        Screen *s = Find(n);
-        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
-        SetWidth(*s, w);
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::CurveOnOff) {
-        Screen *s = Find(n);
-        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
-        if ((s->curve > 0) != (word[1] == 'n')) ToggleCurve(*s);
-        std::snprintf(reply, size, "ok %.3f", s->curve);
-    } else if (verb == vrcmd::Curve) {
-        Screen *s = Find(n);
-        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
-        s->curve = w > 0 ? std::max(0.5, w) : 0;
-        ApplyCurve(*s);
-        PlaceChrome(*s);
-        std::snprintf(reply, size, "ok");
-    } else if (const int got = parsed.got; verb == vrcmd::Pin) {
-        if (std::strcmp(hand, "left") && std::strcmp(hand, "right") && std::strcmp(hand, "head"))
-            return (void)std::snprintf(reply, size, "error pin to left, right, or head");
-        const vr::TrackedDeviceIndex_t dev = HandDevice(hand);
-        Mat c;
-        if (dev == vr::k_unTrackedDeviceIndex_Hmd && !DevicePose(dev, &c))
-            return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
-        if (dev == kNone || !DevicePose(dev, &c))
-            return (void)std::snprintf(reply, size, "error no %s controller tracked", hand);
-        Mat rel = Identity();
-        for (int k = 0; k < 12; ++k) rel.m[k / 4][k % 4] = r[k];
-        const bool found = each(word, [&](Screen &s) {
-            Mat p;
-            EndDrag(s);
-            if (got == 14 && dev == vr::k_unTrackedDeviceIndex_Hmd) PinAt(s, dev, Mul(c, rel));   // level or not
-            else if (got == 14) Pin(s, dev, rel);
-            else if (ScreenPose(s, &p)) PinAt(s, dev, p);
-        });
-        std::snprintf(reply, size, found ? "ok" : "error no such screen");
-    } else if (verb == vrcmd::Unpin) {
-        const bool found = each(word, [&](Screen &s) {
-            Mat p;
-            if (s.pinned != kNone && ScreenPose(s, &p)) SetAbsolute(s, p);
-        });
-        std::snprintf(reply, size, found ? "ok" : "error no such screen");
-    } else if (verb == vrcmd::Get) {
-        Screen *s = Find(n);
-        Mat m;
-        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
-        if (!ScreenPose(*s, &m)) return (void)std::snprintf(reply, size, "error screen %d has no pose", n);
-        int len = std::snprintf(reply, size,
-                                "ok %.4f %.4f %.4f  %.5f %.5f %.5f  %.5f %.5f %.5f  %.5f %.5f %.5f  %.4f %.4f %.3f %s",
-                                m.m[0][3], m.m[1][3], m.m[2][3], m.m[0][0], m.m[1][0], m.m[2][0], m.m[0][1], m.m[1][1],
-                                m.m[2][1], m.m[0][2], m.m[1][2], m.m[2][2], s->metres, s->heightMetres(), s->curve,
-                                s->pinned == kNone ? "none" : HandName(s->pinned));
-        if (s->pinned != kNone) {
-            const Mat rel = HeadRel(*s);
-            for (int k = 0; k < 12 && len < size; ++k)
-                len += std::snprintf(reply + len, size - len, " %.5f", rel.m[k / 4][k % 4]);
-        }
-    } else if (verb == vrcmd::Screens) {
-        // KWin's screens only: ft-layout, Display Settings and ft-floatd count KWin's outputs
-        // by it. Remote screens are listed by "remotes" (remote.c).
-        const auto kwin = [](const Screen &s) { return !s.floating && !s.remote; };
-        const size_t count = std::count_if(g_screens.begin(), g_screens.end(), [&](auto &e) { return kwin(e.second); });
-        int len = std::snprintf(reply, size, "ok %zu", count);
-        for (auto &[i, s] : g_screens)
-            if (len < size && kwin(s))
-                len += std::snprintf(reply + len, size - len, " %d:%dx%d:%.3f", i + 1, s.width, s.height, s.metres);
-    } else if (verb == vrcmd::Universe) {
-        // ft-layout doesn't save where the screens are from the head while this says temporary
-        const uint64_t u = ReadUniverse();
-        std::snprintf(reply, size, "ok %llu %s", (unsigned long long)u, universefix::KindName(UniverseKind(u)));
-    } else if (verb == vrcmd::Head) {
-        Mat m;
-        if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &m))
-            return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
-        std::snprintf(reply, size, "ok %.4f %.4f %.4f %.2f", m.m[0][3], m.m[1][3], m.m[2][3],
-                      std::atan2(m.m[0][2], m.m[2][2]) * 180 / M_PI);
-    } else if (verb == vrcmd::Visibility) {
-        const std::string m = word;
-        if (m == "always") g_mode = Mode::Always;
-        else if (m == "dashboard") g_mode = Mode::Dashboard;
-        else if (m == "gesture") g_mode = Mode::Gesture;
-        else if (m == "toggle") g_mode = Mode::Toggle;
-        else return (void)std::snprintf(reply, size, "error modes: always dashboard gesture toggle");
-        g_manual = false;
-        ++g_switchGen;
-        std::snprintf(reply, size, "ok %s", ModeName());
-    } else if (verb == vrcmd::Wrist) {
-        g_wristAngle = std::clamp(w, 10.0, 180.0);
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Gesture) {
-        g_gestureHand = std::strcmp(hand, "right") == 0 ? "right" : "left";
-        g_gestureAngle = std::clamp(w, 5.0, 90.0);
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::GamepadPill) {
-        std::snprintf(reply, size, "ok over %d shown %d pad %d ours %d lasers %d hover %d", g_pill.target + 1, g_pill.shown + 1,
-                      g_pill.pad + 1, PadMine() ? 1 : 0, g_pill.lasers ? 1 : 0, g_pill.hover ? 1 : 0);
-    } else if (verb == vrcmd::Concealed) {
-        int len = std::snprintf(reply, size, "ok");
-        for (auto &[i, s] : g_screens)
-            if (len < size && !s.floating && s.alone) len += std::snprintf(reply + len, size - len, " %d", i + 1);
-    } else if (verb == vrcmd::ConcealReveal) {
-        const bool hide = cmd[0] == 'c';
-        const Screen *one = std::strcmp(word, "all") ? Find(std::atoi(word)) : nullptr;
-        if (std::strcmp(word, "all") && (!one || one->floating))
-            return (void)std::snprintf(reply, size, "error no screen %s", word);
-        each(word, [&](Screen &s) { s.alone = hide; });
-        UpdateVisibility();
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::HideShowToggle) {
-        const bool always = EffectiveMode() == Mode::Always;
-        const bool shownNow = always ? !g_manual : g_manual;
-        const bool want = cmd[0] == 's' ? true : cmd[0] == 'h' ? false : !shownNow;
-        g_manual = always ? !want : want;
-        ++g_switchGen;
-        UpdateVisibility();
-        std::snprintf(reply, size, "ok %s", want ? "shown" : "hidden");
-    } else if (verb == vrcmd::Pause) {
-        if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) {
-            const bool on = !std::strcmp(word, "on");
-            if (on != g_paused)
-                std::printf("%s\n", on ? "paused for a VR game: everything hidden, KWin slowed down" : "resumed");
-            g_paused = on;
-            UpdateVisibility();
-        } else if (std::strcmp(word, "state") != 0) {
-            return (void)std::snprintf(reply, size, "error pause on|off|state");
-        }
-        std::snprintf(reply, size, "ok %s", g_paused ? "paused" : "running");
-    } else if (verb == vrcmd::InGames) {
-        if (!std::strcmp(word, "hide")) g_inGames = InGames::Hide;
-        else if (!std::strcmp(word, "visible")) g_inGames = InGames::Visible;
-        else return (void)std::snprintf(reply, size, "error modes: hide visible");
-        g_manual = false;
-        ++g_switchGen;
-        UpdateVisibility();
-        std::snprintf(reply, size, "ok %s", word);
-    } else if (unsigned &pad = parsed.pad, &app = parsed.app, &mine = parsed.mine; verb == vrcmd::SteamvrMode) {
-        if (bool(pad) != g_steamvr.gamepad || app != g_steamvr.theater || bool(mine) != g_steamvr.mine)
-            std::printf("SteamVR: %s, %s\n",
-                        pad ? mine ? "gamepad mode, ours (gamepad pill)" : "gamepad mode (panels leave the laser alone)" : "laser mode",
-                        app ? ("theater game " + std::to_string(app)).c_str() : "no theater game");
-        g_steamvr.gamepad = pad, g_steamvr.theater = app, g_steamvr.mine = mine, g_steamvr.atMs = NowMs();
-        UpdateLasers();
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Controllers) {
-        const std::string m = word;
-        if (m == "always") g_lasers = Lasers::Always;
-        else if (m == "outside_games") g_lasers = Lasers::OutsideGames;
-        else if (m == "dashboard") g_lasers = Lasers::Dashboard;
-        else return (void)std::snprintf(reply, size, "error modes: always outside_games dashboard");
-        UpdateLasers();
-        std::snprintf(reply, size, "ok %s", LasersName());
-    } else if (char(&key)[48] = parsed.key; verb == vrcmd::HandSetting) {
-        // one hand interaction on or off now (Frametop Input Settings' Hands page writes frametop.conf too)
-        const int on = !std::strcmp(word, "1") || !std::strcmp(word, "on") ? 1 : !std::strcmp(word, "0") || !std::strcmp(word, "off") ? 0 : -1;
-        if (on < 0 || !SetHandSetting(key, on)) return (void)std::snprintf(reply, size, "error handsetting <HANDS_...> 0|1");
-        std::printf("hands: %s %s (Input Settings)\n", key, on ? "on" : "off");
-        std::snprintf(reply, size, "ok %s %d", key, on);
-    } else if (double &m = parsed.m; verb == vrcmd::SpinDistance) {
-        // SCREEN_SPIN_DISTANCE now (Input Settings' Hands page, Gestures, writes frametop.conf too): the next
-        // screen brought comes this far out (one pushed or pulled in the slot keeps its own)
-        g_frontReading = std::clamp(m, spotreserve::kDistance + spotreserve::kFrontGap, kFrontFarthest);
-        std::printf("front: screens come %.2f m out (Input Settings)\n", g_frontReading);
-        std::snprintf(reply, size, "ok %.2f", g_frontReading);
-    } else if (char(&sl)[16] = parsed.sl, (&sr)[16] = parsed.sr; verb == vrcmd::Hands) {
-        const bool l = !std::strcmp(sl, "hand"), r = !std::strcmp(sr, "hand"), allowed = n != 0;
-        if (l != g_handsWord.hand[0] || r != g_handsWord.hand[1] || allowed != g_handsWord.allowed)
-            std::printf("hands from the pointer helper: left %s, right %s, %s\n", sl, sr, allowed ? "allowed" : "not allowed");
-        g_handsWord.hand[0] = l, g_handsWord.hand[1] = r, g_handsWord.allowed = allowed, g_handsWord.atMs = NowMs();
-        g_handsWord.controller[0] = !std::strcmp(sl, "controller"), g_handsWord.controller[1] = !std::strcmp(sr, "controller");
-        for (int k = 0; k < 2; ++k)
-            if (g_handsWord.hand[k]) g_handsWord.handMs[k] = NowMs();
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::SteamvrList) {   // the helper's overlay list (see "SteamVR's panels by hand")
-        SteamListPart(cmd);
-        std::snprintf(reply, size, "ok");
-    } else if (int &tl = parsed.tl, &tr = parsed.tr; verb == vrcmd::Typing) {
-        g_typingWord.side[0] = tl != 0, g_typingWord.side[1] = tr != 0, g_typingWord.atMs = NowMs();
-        std::snprintf(reply, size, "ok");
-    } else if (int &calOn = parsed.calOn; verb == vrcmd::CalPanel) {
-        if ((calOn != 0) != CalPanelUp())
-            std::printf("gaze calibration panel %s: the palm menu %s\n", calOn ? "up" : "gone", calOn ? "waits" : "is back");
-        g_calPanelMs = calOn ? NowMs() : INT64_MIN / 2;
-        std::snprintf(reply, size, "ok");
-    } else if (int &rl = parsed.rl, &rr = parsed.rr; verb == vrcmd::Ray) {
-        g_rayWord.side[0] = rl != 0, g_rayWord.side[1] = rr != 0, g_rayWord.atMs = NowMs();
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::HandInput) {
-        if (!std::strcmp(word, "on")) g_nearMode = NearMode::Helper;
-        else if (!std::strcmp(word, "off")) g_nearMode = NearMode::Off;
-        else if (!std::strcmp(word, "force")) g_nearMode = NearMode::Force;
-        else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error handinput on|off|force|state");
-        const auto &st = g_handInput.stats;
-        std::snprintf(reply, size,
-                      "ok %s, helper %s (left %s, right %s, %s); %s; %d frames, %d near, %d presses (%d on one frame, %d by "
-                      "pinch), %d controls, %d grabs (%d card, %d fist; %d fists waited, %d were grab that), %d stretches; "
-                      "%d poke attempts, %d refused, %d off the content, %d at the edge; held back: %d one view, %d bent, "
-                      "%d not nearest, %d pinching, %d busy, %d resting, %d typing, %d askew, %d slow, %d flicks, %d open; %d flicks, "
-                      "%d throws, %d pushes; holds: %d coasts, %d back, %d glitches, %d held through, %d ended unseen; gates: %d frames "
-                      "and %d turns dropped, %d moved, %d near the edge, %d one camera; %d fists ft-hands called pinches; %d second "
-                      "hands joined, %d pinches waited to be fists (%d were), %d buttons pinched, %d pokes on a panel the other hand held",
-                      g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
-                      NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
-                      g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
-                      g_handInput.Describe().c_str(), st.frames, st.nearFrames, st.presses, st.quickPresses, st.pinchClicks,
-                      st.controls, st.grabs, st.cards, st.fists, st.fistsWaited, st.fistsCancelled, st.stretches, st.attempts,
-                      st.refused, st.offContent, st.edgePresses, st.heldNotStereo, st.heldNotExtended, st.heldNotNearest,
-                      st.heldPinching, st.heldBusy, st.heldResting, st.heldTyping, st.heldAskew, st.heldSlow, st.heldFlick, st.heldOpen,
-                      st.flicks, st.throws, st.pushes, st.coasts, st.reacquired, st.glitches, st.heldThrough, st.lostEnds, st.gated,
-                      st.turnsGated, st.moved, st.edgeFrames, st.monoFrames, st.fistPinches, st.joins, st.settles, st.settledFists,
-                      st.buttonPinches, st.heldByOther);
-    } else if (verb == vrcmd::PalmMenu) {
-        if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_palm.params().on = !std::strcmp(word, "on");
-        else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error palmmenu on|off|state");
-        const auto &st = g_palm.stats;
-        std::snprintf(reply, size, "ok %s; %s; %d shown, %d pinches, %d toggles, %d cancelled, %d not a plain pinch",
-                      g_palm.params().on ? "on" : "off", g_palm.Describe().c_str(), st.shows, st.pinches, st.toggles, st.cancels,
-                      st.notPlain);
-    } else if (verb == vrcmd::GrabThat) {
-        if (!std::strcmp(word, "on") || !std::strcmp(word, "off")) g_grabThat.params().on = !std::strcmp(word, "on");
-        else if (std::strcmp(word, "state") != 0) return (void)std::snprintf(reply, size, "error grabthat on|off|state");
-        const auto &st = g_grabThat.stats;
-        std::string came;
-        if (g_front.panel >= 0)
-            came = std::to_string(g_front.panel + 1) + " (front slot" + (g_front.released ? ", released" : g_front.kept ? ", kept" : "") + ")";
-        std::snprintf(reply, size, "ok %s; %s; %d armed, %d closed, %d fired, %d timed out; came: %s",
-                      g_grabThat.params().on ? "on" : "off", g_grabThat.Describe().c_str(), st.arms, st.closings, st.fires,
-                      st.timeouts, came.empty() ? "none" : came.c_str());
-    } else if (verb == vrcmd::Cutouts) {
-        char arg[16] = "";
-        double ms = 0, a = 0, b = 0;
-        if (!std::strcmp(word, "on")) g_cutouts = true;
-        else if (!std::strcmp(word, "off")) g_cutouts = false;
-        else if (!std::strcmp(word, "predict") && std::sscanf(cmd, "cutouts predict %15s", arg) == 1 &&
-                 (!std::strcmp(arg, "on") || !std::strcmp(arg, "off")))
-            g_hands.SetPrediction(!std::strcmp(arg, "on"), g_hands.leadMs());
-        else if (!std::strcmp(word, "lead") && std::sscanf(cmd, "cutouts lead %lf", &ms) == 1)
-            g_hands.SetPrediction(g_hands.predicting(), ms);
-        else if (handcut::MatteShape shape; !std::strcmp(word, "matte") && std::sscanf(cmd, "cutouts matte %15s", arg) == 1 &&
-                 handcut::ParseShape(arg, &shape))
-            g_matte.shape = shape;
-        else if (const int got = std::sscanf(cmd, "cutouts margin %lf %lf %lf", &ms, &a, &b);
-                 !std::strcmp(word, "margin") && got >= 1 && ms >= 0 && ms <= 10) {
-            g_matte.marginDeg = ms;
-            if (got >= 2) g_matte.motionMs = std::clamp(a, 0.0, 200.0);
-            if (got >= 3) g_matte.motionMaxDeg = std::clamp(b, 0.0, 10.0);
-        } else if (!std::strcmp(word, "shift")) {
-            const char *spec = cmd + std::strlen("cutouts shift");
-            while (*spec == ' ') ++spec;
-            if (!std::strcmp(spec, "off")) g_matte.shift.clear();
-            else if (!handcut::ParseShift(spec, g_matte.shift)) return (void)std::snprintf(reply, size, "error shift <dist>:<yaw>,<pitch> ...");
-            g_hands.SetShift(g_matte.shift);
-        } else if (roomview::Force rv; !std::strcmp(word, "roomview") && std::sscanf(cmd, "cutouts roomview %15s", arg) == 1 &&
-                   roomview::ParseForce(arg, &rv)) {
-            g_roomView.SetForce(rv);
-            g_roomView.Update(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(),
-                              g_gameRunning, g_constructRoomView);
-        } else if (std::strcmp(word, "state") != 0)
-            return (void)std::snprintf(reply, size, "error cutouts on|off|state|predict on|off|lead <ms>|matte circle|mesh|capsules|"
-                                                    "margin <deg> [ms [deg]]|shift off|<spec>|roomview auto|on|off");
-        // Composite's counts since the last state, per second.
-        static auto since = Clock::now();
-        const double dt = std::max(1e-3, std::chrono::duration<double>(Clock::now() - since).count());
-        since = Clock::now();
-        const handcut::CutStats c = g_cutter.TakeStats();
-        const int calls = c.draws + c.same + c.busy;
-        std::snprintf(reply, size,
-                      "ok %s %s %.2f ms, predict %s lead %.0f ms; per s: %.1f draws (%.1f partial), %.1f same, %.1f busy, "
-                      "%.1f waits; CPU %.2f ms avg %.2f worst; matte %s margin %.2f deg + %.0f ms (max %.2f), shift %s; "
-                      "room view %s (%s%s)",
-                      g_cutouts ? "on" : "off", g_cutterState > 0 ? "ready" : g_cutterState < 0 ? "unavailable" : "idle",
-                      g_cutter.lastMs(), g_hands.predicting() ? "on" : "off", g_hands.leadMs(), c.draws / dt,
-                      c.partial / dt, c.same / dt, c.busy / dt, c.waits / dt, calls ? c.cpuMs / calls : 0.0, c.worstMs,
-                      handcut::ShapeName(g_matte.shape), g_matte.marginDeg, g_matte.motionMs, g_matte.motionMaxDeg,
-                      g_matte.shift.empty() ? "off" : "on", g_roomView.on() ? "on" : "off", g_roomView.why(),
-                      g_roomView.on() ? "" : ": no cutouts");
-    } else if (int &x0 = parsed.x0, &y0 = parsed.y0, &w0 = parsed.w0, &h0 = parsed.h0, &t0 = parsed.t0; verb == vrcmd::Float) {
-        Screen *s = Find(n);
-        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
-        if (!(w > 1e-5 && w < 0.01) || w0 < 1 || h0 < 1) return (void)std::snprintf(reply, size, "error bad float");
-        SetFloat(*s, w, x0, y0, w0, h0, std::max(0, t0));
-        std::snprintf(reply, size, "ok");
-    } else if (int &ms = parsed.ms; verb == vrcmd::Hold) {
-        // ft-floatd changes a floating window (its scale, its size): its panel keeps its picture for up to
-        // ms (0: no longer), until the window's new crop comes and a frame after it (kHoldSettleMs).
-        Screen *s = Find(n);
-        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
-        if (ms < 0 || ms > 2000) return (void)std::snprintf(reply, size, "error bad hold");
-        if (ms == 0) {
-            ReleaseHold(*s);
-        } else {
-            s->holdCapMs = NowMs() + ms;
-            s->holdUntilMs = std::max(s->holdUntilMs, s->holdCapMs);
-        }
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Unfloat) {
-        Screen *s = Find(n);
-        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
-        Unfloat(*s);
-        UpdateVisibility();
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Pose) {
-        Screen *s = Find(n);
-        if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
-        Mat m{};
-        for (int k = 0; k < 12; ++k) m.m[k / 4][k % 4] = r[k];
-        EndDrag(*s);
-        g_spin.base.erase(n - 1);
-        SetAbsolute(*s, m);
-        std::snprintf(reply, size, "ok");
-    } else if (int &k0 = parsed.k0; verb == vrcmd::Sub) {
-        Screen *s = Find(n);
-        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
-        if (std::strstr(cmd, " off")) w0 = h0 = 0;
-        SetSub(*s, n - 1, k0, x0, y0, w0, h0);
-        std::snprintf(reply, size, "ok");
-    } else if (int &on = parsed.on; verb == vrcmd::Minimized) {
-        Screen *s = Find(n);
-        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
-        s->minimized = on != 0;
-        UpdateVisibility();
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Moving) {
-        // KWin's script: a window on a screen started (1) or stopped (0) moving by its title bar (TearOff)
-        char wid[64];
-        int on;
-        if (std::sscanf(cmd, "moving %63s %d", wid, &on) != 2) return (void)std::snprintf(reply, size, "error moving ID 0|1");
-        if (on) g_kwinMove.window = wid;
-        else if (g_kwinMove.window == wid) g_kwinMove.window.clear();
-        std::snprintf(reply, size, "ok");
-    } else if (int &gx = parsed.gx, &gy = parsed.gy; verb == vrcmd::Torn) {
-        Screen *s = Find(n);
-        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
-        CarryTorn(*s, n - 1, gx, gy);
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Carry) {
-        Screen *s = Find(n);
-        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
-        if (!(g_press.buttons & ButtonBit(BTN_LEFT)) || g_press.screen != n - 1 || s->drag != Drag::None)
-            return (void)std::snprintf(reply, size, "error not pressed there");
-        s->titleCarry = true, s->carryX = g_press.x, s->carryY = g_press.y;
-        StartDrag(*s, Drag::Move, g_press.device);
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Up) {
-        if ((g_press.buttons & ButtonBit(BTN_LEFT)) && g_press.device != kNone && !IsHandController(g_press.device) &&
-            !IsHandHolder(g_press.device))
-            g_press.upAt = g_tick + 9;
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Spin) {
+    // Each group of commands has its own function (above), and vrcmd::GroupOf says which.
+    switch (vrcmd::GroupOf(verb)) {
+    case vrcmd::PanelGroup: return PanelCommand(verb, parsed, cmd, reply, size);
+    case vrcmd::ReadoutGroup: return ReadoutCommand(verb, parsed, cmd, reply, size);
+    case vrcmd::VisibilityGroup: return VisibilityCommand(verb, parsed, cmd, reply, size);
+    case vrcmd::HelperWordGroup: return HelperWordCommand(verb, parsed, cmd, reply, size);
+    case vrcmd::HandFeatureGroup: return HandFeatureCommand(verb, parsed, cmd, reply, size);
+    case vrcmd::CutoutsGroup: return CutoutsCommand(verb, parsed, cmd, reply, size);
+    case vrcmd::FloatGroup: return FloatCommand(verb, parsed, cmd, reply, size);
+    case vrcmd::SpinGroup:
         SpinCommand(cmd + 5, reply, size);
-    } else if (verb == vrcmd::Front) {
-        // Typing and the active window go to panel N where it is, as after a spin to it (frunner,
-        // for a pinned panel, which doesn't spin).
-        if (!Find(n)) return (void)std::snprintf(reply, size, "error no panel %d", n);
-        g_spin.front = n - 1;
-        std::snprintf(reply, size, "ok");
-    } else if (verb == vrcmd::Debug) {
-        // One line for scripts/report.sh: what decides whether a laser drags.
-        std::string drags;
-        for (const auto &[index, s] : g_screens)
-            if (s.drag != Drag::None)
-                drags += (drags.empty() ? "" : ",") + std::to_string(index + 1) + ":" + DragName(s.drag) + ":" +
-                         DeviceLabel(s.dragDevice);
-        std::snprintf(reply, size,
-                      "ok dashboard=%d steam_front=%d mode=%s manual=%d lasers=%s game=%d paused=%d "
-                      "press=%#x by=%s on=%d catcher=%d drags=%s",
-                      vr::VROverlay()->IsDashboardVisible() ? 1 : 0, SteamInFront() ? 1 : 0,
-                      ModeName(), g_manual ? 1 : 0,
-                      LasersName(), g_gameRunning ? 1 : 0, g_paused ? 1 : 0, g_press.buttons,
-                      DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_catcherShown ? 1 : 0,
-                      drags.empty() ? "-" : drags.c_str());
-    } else if (verb == vrcmd::State) {
-        std::snprintf(reply, size, "ok %s %d %.0f %s %.0f %s %d %s %u", ModeName(), g_manual ? 1 : 0, g_wristAngle,
-                      g_gestureHand.c_str(), g_gestureAngle, LasersName(), g_gameRunning ? 1 : 0,
-                      g_inGames == InGames::Hide ? "hide" : "visible", g_switchGen);
-    } else {
-        std::snprintf(reply, size, "error unknown command");
+        return;
+    case vrcmd::NoGroup: break;
     }
+    std::snprintf(reply, size, "error unknown command");
 }
 
 }  // extern "C"

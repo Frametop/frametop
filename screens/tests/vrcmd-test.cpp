@@ -1,5 +1,6 @@
 // ft_vr_command's parser (screens/vrcmd.h): which command a line is, its arguments, and
-// the order the first match wins in, as ft-screens has always read them.
+// the order the first match wins in, as ft-screens has always read them; and which handler
+// group runs each.
 #include "../vrcmd.h"
 
 #include <cmath>
@@ -96,5 +97,20 @@ int main() {
     check("sub with a word other than off is nothing", V("sub 5 1 on") == Unknown);
     check("universe and up are exact", V("universe ") == Unknown && V("up ") == Unknown && V("debug ") == Unknown);
     check("the pointer's pose (6 numbers) is no panel pose", V("pose 1 2 3 4 5") == Unknown);
+
+    // Which handler runs each verb (ft_vr_command's dispatch): every verb has one, Unknown none.
+    bool grouped = true;
+    for (int v = Place; v <= State; ++v)
+        if (GroupOf(Verb(v)) == NoGroup) grouped = false, std::printf("      verb %d has no group\n", v);
+    check("every verb has a handler group", grouped);
+    check("unknown has none", GroupOf(Unknown) == NoGroup);
+    check("groups: panels, readouts, visibility",
+          GroupOf(Pin) == PanelGroup && GroupOf(Front) == PanelGroup && GroupOf(Get) == PanelGroup &&
+              GroupOf(Screens) == ReadoutGroup && GroupOf(State) == ReadoutGroup && GroupOf(Pause) == VisibilityGroup &&
+              GroupOf(Controllers) == VisibilityGroup);
+    check("groups: helper words, hand features, cutouts, floating, spin",
+          GroupOf(Hands) == HelperWordGroup && GroupOf(SpinDistance) == HelperWordGroup &&
+              GroupOf(GrabThat) == HandFeatureGroup && GroupOf(Cutouts) == CutoutsGroup && GroupOf(Up) == FloatGroup &&
+              GroupOf(Moving) == FloatGroup && GroupOf(Spin) == SpinGroup);
     return failed ? 1 : 0;
 }

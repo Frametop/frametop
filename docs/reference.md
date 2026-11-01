@@ -124,6 +124,7 @@ desktops.sh relay status | log | uninstall
 input/input-relay.py --no-grab   # try it without taking devices from SteamVR
 input/test/keys-test.py          # key combinations, modifier taps, dictation's and Full Keyboard's typing, and what reaches the desktop, against fake devices (safe next to the live relay)
 input/test/roles-test.py         # each node's role, Keyboard + 3D pointer included, offline
+input/test/scroll-test.py        # the wheel through the virtual joystick: a step per notch, fast notches added up and capped, offline
 input/rules-migrate.py           # one-time changes to a key_bindings list of your own (install and update run it)
 input/test/rules-migrate-test.py # those changes, on files in a temporary folder
 steam/ft-steam menu              # what Open Steam menu does; ft-steam check: Steam's UI still has the calls

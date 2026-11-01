@@ -26,14 +26,14 @@ starts at DEE-298. The rest of DEE-303 (its open list below) is now its own tick
 | 14 | DEE-313 | 5b9c10b, 237d493, a1f3d6c, 26c16e3, 278c53e, 4146400, 4a456cb, 2bff435, 2877e21 (note) |
 | 15 | DEE-314 | 09667a7, cdf9291, 2129cc6, f73dad7, bd73091 (note), 2a9898a (review fixes) |
 | 16 | DEE-315 | 0a450b5, 2ca1f2e, 9fb2aa4, f91de1b (note) |
-| 17 | DEE-316 | 3c26536, 2adbbdf, 36f2f8b, 265d025, 8714a6c (review fixes), then this update |
+| 17 | DEE-316 | 3c26536, 2adbbdf, 36f2f8b, 265d025, 8714a6c (review fixes), d99a3cb (note) |
+| 18 | DEE-318 | 89fbbad, 089e5cb, 52e0622, 72f51f9, b1a9a40, e566c5b, 621559b, df415e1, bae1c59 (review fix), then this update |
 
 What's left, in order:
 
-1. DEE-318
-2. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
+1. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
 
-DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314, DEE-315 and DEE-316 are done (steps 7 to 17). DEE-303 part 1 is done (step
+DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314, DEE-315, DEE-316 and DEE-318 are done (steps 7 to 18). DEE-303 part 1 is done (step
 10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
@@ -703,10 +703,53 @@ Open:
   (`git reset --soft`) before anything else, and the GIFs are untracked again (their blobs sit
   unreferenced in `.git` until a gc).
 
+### From DEE-318
+
+Two shared headers in `screens/`, next to DEE-304's:
+
+- `screens/overlaypanel.h`: the standalone panels' three-buffer DMA-BUF ring (`Ring`: Make,
+  Drop, Fill, Bounds, Check; `Texture`), plus the pure `ToCopy`, `Advance` and
+  `CopyPremultiplied`. ft-spotpanel, ft-gazepanel and ft-handpanel derive their `Buffers` from
+  it and keep their own Present: gaze's `g_vr` around Make, Drop and the SteamVR calls; the hand
+  panel's lock around only the two SteamVR calls and its demo-clip area update; texture bounds in
+  both; none of that in ft-spotpanel. Each still opens its own device on the render node (separate
+  processes). The stderr lines are the same.
+- `screens/gpuctx.h`: the EGL and GLES extension lookup (`Procs`, `Load`, `Complete`) and the
+  surfaceless GLES 2 context (`Open`, `Close`) for the hand cutouts' Renderer (handrender.cpp) and
+  ft-handview's Gpu. The `need` bits keep each one's checks: ft-handview requires
+  eglDestroyImageKHR, the Renderer glEGLImageTargetTexture2DOES. ft-handview and ft-handtest's
+  test pattern now take their GBM device from `rendernode::Acquire`; build.sh already linked
+  rendernode.o into both.
+- Small differences, all on failure paths: a context that can't be made current is destroyed
+  in Open (the Renderer used to leave it); ft-handview's failed GBM device gets rendernode's line;
+  ft-handtest checks its device (it used to pass a null one to gbm_bo_create) and shares the
+  Renderer's instead of making a second one.
+- Left alone: ft-screens' `overlaytex.cpp` (images kept by content, a cache, not a ring),
+  `layout/countdown/ft-reset-timer.cpp` (SetOverlayRaw only), `stream/iris.h` (the stream's own
+  EGL), and each program's VR_Init and CreateOverlay (keys, app types and retries differ).
+- Tests in test-c: `screens/tests/overlaypanel-test.cpp` (area clamping, the whole-picture
+  counter over three buffers, the premultiplied copy and row padding) and
+  `screens/tests/gpuctx-test.cpp` (which calls each program needs). All six programs compiled and
+  linked in the dev container (OpenVR's symbols left unresolved: its library is SteamVR's).
+- Review (one Opus reader, nothing Critical or Important, 3 Minor). Fixed in bae1c59: the
+  whole-picture counter moved into the pure `Advance`, with a test. Left: see Open.
+
+Open:
+
+- Possible bug kept (it was ft-handpanel's): Fill marks a buffer as holding the current whole
+  picture before mapping it, so after a failed map that buffer's next area update lands on old
+  pixels. Fix: set `x.whole` only after a good map.
+- Nothing pins which `need` bits each program passes; swapping them would let the Renderer start
+  without glEGLImageTargetTexture2DOES.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
 
+- After DEE-318 (needs a build and install of ft-screens, ft-handtest, ft-handview,
+  ft-spotpanel, ft-gazepanel and ft-handpanel): every overlay panel shows and updates without
+  flicker (frunner, gaze calibration and bench, the Hand Recorder's panels and a demo clip), the
+  hand cutouts and ft-handview draw as before. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
 - After DEE-316: a real install, and a reinstall or upgrade between releases. The units and
   menu entries come out the same as before, under the same names, and the same units are
   enabled. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.

@@ -99,6 +99,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/vrcmd-test.cpp \
       -o build/tests/vrcmd-test
     run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/overlaypanel-test.cpp \
+      -o build/tests/overlaypanel-test
+    run screens/tests/overlaypanel-test.cpp build/tests/overlaypanel-test
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/logfile-test.c -o build/tests/logfile-test
     run screens/tests/logfile-test.c build/tests/logfile-test
     gcc -std=gnu11 -Wall -Wextra -Werror conf/test/ftsock-test.c -o build/tests/ftsock-test

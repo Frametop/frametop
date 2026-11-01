@@ -65,15 +65,16 @@ IMAGE = {'pack/Containerfile', 'pack/pyside-runtime.py', 'uv.lock', 'pyproject.t
 # BUILD_NAMES), or, for WHOLE ones, every file but docs and tests.
 OPENVR = 'scripts/openvr.sh'
 STB = 'scripts/stb.sh'           # the pinned stb headers
+GLYPHS = 'screens/glyphs.h'      # the panels' text (stb_truetype)
 HANDS_API = 'hands/include'   # ft-hands' event and gesture structs, which its readers include
 CONF_H = 'conf/ft_conf.h'      # frametop.conf's C/C++ parser (docs/config.md)
 COMPONENTS = {
     'screens': ((HANDS_API, CONF_H, 'frunner/ft-spotpanel.cpp', 'frunner/reserve.h', OPENVR, STB),
                 ('ft-screens', 'ft-handtest', 'ft-handview', 'ft-spotpanel')),
-    'layout/countdown': ((OPENVR, STB), ('ft-reset-timer',)),
+    'layout/countdown': ((OPENVR, STB, GLYPHS), ('ft-reset-timer',)),
     'pointer/helper': ((HANDS_API, CONF_H, 'pointer/common', OPENVR), ('ft-pointer',)),
     'pointer/driver': (('pointer/common', OPENVR), ('driver_ft_pointer.so',)),
-    'gaze': (('pointer/common', OPENVR, STB), ('ft-gaze', 'ft-gazepanel')),
+    'gaze': (('pointer/common', OPENVR, STB, GLYPHS), ('ft-gaze', 'ft-gazepanel')),
     'gaze/tracker': ((), ('ft-eyegrab',)),
     'keyboard': ((OPENVR,), ('frametop/framekeyboard', 'frametop/framekeyboard-native-guard',
                              'frametop/engines/*', 'frametop/bridge/*', 'frametop/vr/*')),
@@ -81,7 +82,7 @@ COMPONENTS = {
     'stream': ((OPENVR,), ('ft-stream',)),   # the spikes only with build.sh --spikes
     'voice': ((), ('bin/whisper-server',)),
     'hands': ((CONF_H,), ('ft-hands', 'ft-camd')),
-    'hands/rec': ((OPENVR, STB), ('ft-handpanel',)),
+    'hands/rec': ((OPENVR, STB, GLYPHS), ('ft-handpanel',)),
 }
 WHOLE = {'keyboard'}   # its CMake build embeds layouts, languages and themes, and copies scripts
 BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl', '.vert', '.frag',

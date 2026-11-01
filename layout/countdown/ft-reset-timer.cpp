@@ -3,6 +3,7 @@
 #include <openvr.h>
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
+#include "../../screens/glyphs.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
@@ -52,40 +53,21 @@ void Blend(Pixels &p, int x, int y, const std::array<int, 3> &rgb, float alpha) 
 }
 
 class Renderer {
-    std::vector<unsigned char> bytes_;
-    stbtt_fontinfo font_{};
+    glyphs::Font font_;
 
     void Text(Pixels &p, const char *s, int height, int centerY, std::array<int, 3> rgb) {
-        const float scale = stbtt_ScaleForPixelHeight(&font_, float(height));
-        int width = 0, ascent, descent, gap;
-        stbtt_GetFontVMetrics(&font_, &ascent, &descent, &gap);
-        for (const char *c = s; *c; ++c) {
-            int advance, bearing;
-            stbtt_GetCodepointHMetrics(&font_, *c, &advance, &bearing);
-            width += int(std::lround(advance * scale));
-        }
-        int x = (kWidth - width) / 2;
-        const int baseline = centerY + int(std::lround((ascent + descent) * scale / 2));
-        for (const char *c = s; *c; ++c) {
-            int w, h, xoff, yoff, advance, bearing;
-            unsigned char *bitmap = stbtt_GetCodepointBitmap(&font_, 0, scale, *c, &w, &h, &xoff, &yoff);
-            for (int yy = 0; yy < h; ++yy)
-                for (int xx = 0; xx < w; ++xx)
-                    Blend(p, x + xoff + xx, baseline + yoff + yy, rgb, bitmap[yy * w + xx] / 255.f);
-            stbtt_FreeBitmap(bitmap, nullptr);
-            stbtt_GetCodepointHMetrics(&font_, *c, &advance, &bearing);
-            x += int(std::lround(advance * scale));
-        }
+        const auto cps = glyphs::Codepoints(s);
+        const int x = (kWidth - font_.Width(cps, height)) / 2;
+        font_.Draw(cps, height, x, centerY, [&](int px, int py, uint8_t cover) { Blend(p, px, py, rgb, cover / 255.f); });
     }
 
 public:
     explicit Renderer(const std::string &path) {
         std::ifstream f(path, std::ios::binary | std::ios::ate);
         if (!f || f.tellg() <= 0 || f.tellg() > 20 * 1024 * 1024) throw std::runtime_error("cannot read font: " + path);
-        bytes_.resize(static_cast<size_t>(f.tellg()));
+        std::vector<unsigned char> bytes(static_cast<size_t>(f.tellg()));
         f.seekg(0);
-        if (!f.read(reinterpret_cast<char *>(bytes_.data()), std::streamsize(bytes_.size())) ||
-            !stbtt_InitFont(&font_, bytes_.data(), stbtt_GetFontOffsetForIndex(bytes_.data(), 0)))
+        if (!f.read(reinterpret_cast<char *>(bytes.data()), std::streamsize(bytes.size())) || !font_.Init(std::move(bytes)))
             throw std::runtime_error("cannot initialize font: " + path);
     }
 

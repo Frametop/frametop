@@ -100,6 +100,10 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/vrcmd-test.cpp \
       -o build/tests/vrcmd-test
     run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test
+    . scripts/stb.sh && stb_fetch build/include stb_truetype.h   # pinned, fetched once
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror -I. -isystem build/include screens/tests/glyphs-test.cpp \
+      -o build/tests/glyphs-test
+    run screens/tests/glyphs-test.cpp build/tests/glyphs-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/overlaypanel-test.cpp \
       -o build/tests/overlaypanel-test
     run screens/tests/overlaypanel-test.cpp build/tests/overlaypanel-test

@@ -19,8 +19,9 @@ enum Verb {
     Pause, InGames, SteamvrMode, Controllers, HandSetting, SpinDistance, Hands,
     SteamvrList, Typing, CalPanel, Ray, HandInput, PalmMenu, GrabThat, Cutouts,
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, Carry, Up, Spin,
-    Front, Debug, State,
+    Front, Debug, State,  // keep State last: kLastVerb, and the test walks Place..kLastVerb
 };
+constexpr Verb kLastVerb = State;
 
 // Every argument any branch scans, named as in ft_vr_command.
 struct Cmd {
@@ -43,7 +44,8 @@ struct Cmd {
     int gx = 0, gy = 0;                   // torn
 };
 
-// Which of ft_vr_command's handlers (vr.cpp) runs a verb: one per group of commands.
+// Which of ft_vr_command's handlers (vr.cpp) runs a verb: one per group of commands. A verb's case
+// must be in the handler of the group named here, or it answers "error unknown command".
 enum Group { NoGroup, PanelGroup, ReadoutGroup, VisibilityGroup, HelperWordGroup, HandFeatureGroup, CutoutsGroup, FloatGroup, SpinGroup };
 
 inline Group GroupOf(Verb v) {

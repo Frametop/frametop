@@ -100,7 +100,7 @@ int main() {
 
     // Which handler runs each verb (ft_vr_command's dispatch): every verb has one, Unknown none.
     bool grouped = true;
-    for (int v = Place; v <= State; ++v)
+    for (int v = Place; v <= kLastVerb; ++v)
         if (GroupOf(Verb(v)) == NoGroup) grouped = false, std::printf("      verb %d has no group\n", v);
     check("every verb has a handler group", grouped);
     check("unknown has none", GroupOf(Unknown) == NoGroup);

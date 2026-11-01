@@ -71,8 +71,9 @@ int main() {
     last = {true, t0, {0.1, 1.6, -0.5}, 10, -3};
     check("pose: not due for the same pose right away", !PoseDue(last, t0 + milliseconds(99), last.origin, 10, -3));
     check("pose: due again after 100 ms", PoseDue(last, t0 + milliseconds(100), last.origin, 10, -3));
-    check("pose: due after a 0.2 mm move, not 0.1 mm",
-          PoseDue(last, t0, last.origin + Vec3{0.0002, 0, 0}, 10, -3) && !PoseDue(last, t0, last.origin + Vec3{0.0001, 0, 0}, 10, -3));
+    check("pose: due after a 0.21 mm move, not 0.19 mm (the line is 0.2 mm)",
+          PoseDue(last, t0, last.origin + Vec3{0.00021, 0, 0}, 10, -3) &&
+              !PoseDue(last, t0, last.origin + Vec3{0.00019, 0, 0}, 10, -3));
     check("pose: due after 0.05 degrees of yaw or pitch, not 0.03 (the line is 0.04)",
           PoseDue(last, t0, last.origin, 10.05, -3) && PoseDue(last, t0, last.origin, 10, -3.05) &&
               !PoseDue(last, t0, last.origin, 10.03, -3.03));

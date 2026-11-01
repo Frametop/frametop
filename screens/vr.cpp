@@ -5673,6 +5673,9 @@ static bool EachScreen(const char *which, Fn fn) {
 }
 }
 
+// ft_vr_command's handlers, one per group of commands: a verb's case goes in the handler of the
+// group vrcmd::GroupOf (vrcmd.h) names.
+
 // A panel's place, width, curve and pin, and which one gets typing.
 static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
     int &n = parsed.n;

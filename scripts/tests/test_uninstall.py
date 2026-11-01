@@ -48,7 +48,7 @@ class Uninstall(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "0")
 
     def test_the_added_paths(self):
-        """Each path it once missed is in the statement that removes it, not only in a comment."""
+        """Each path uninstall.sh once missed is in the statement that removes it, not only in a comment."""
         text = SCRIPT.read_text()
         for name, pattern in (
                 ("FrameDrop's cache, with the rebuilt caches",

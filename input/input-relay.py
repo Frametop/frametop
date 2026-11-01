@@ -2315,8 +2315,7 @@ class Relay:
             if etype == EV_KEY:
                 action = buttons.get(str(code), DEFAULT_BUTTONS.get(code, "key"))
                 # A button that went down on the virtual devices (paused, POINTER=0, or as a
-                # key) comes up there, even if pointer mode or its binding changed meanwhile
-                #.
+                # key) comes up there, even if pointer mode or its binding changed meanwhile.
                 went_virtual = value != 1 and code in node.held
                 if not went_virtual and (pointer or action == "pause_toggle") and action not in ("key", "none"):
                     if value == 1:

@@ -298,8 +298,8 @@ else
 fi
 
 # A release's install.sh is also how you go back to it (pack/README.md), so it makes its own
-# folder "current": fast-install, get.sh and the next install-release.sh go by that link
-#. install-release.sh sets it too, after this.
+# folder "current": fast-install, get.sh and the next install-release.sh go by that link.
+# install-release.sh sets it too, after this.
 if [ "$FRAME_RELEASE" = 1 ] && [ "$FRAME_LOCAL" = 1 ]; then
   version=$(sed -n 's/^VERSION=//p' "$root/.frametop-release")
   here=$(cd "$root" && pwd -P)

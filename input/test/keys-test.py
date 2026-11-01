@@ -567,8 +567,8 @@ def tests():
           [m for m in typed() if m == "toggle" or m.startswith(f"key {H} ")], [f"key {H} 1", f"key {H} 0"])
     use(None)
 
-    # Ctrl+Alt+Shift+Esc (a default): ft-screens lets go of every key, for a modifier stuck in KWin
-    #. The relay reads it with the screens hidden too, with more modifiers held (a stuck
+    # Ctrl+Alt+Shift+Esc (a default): ft-screens lets go of every key, for a modifier stuck in KWin.
+    # The relay reads it with the screens hidden too, with more modifiers held (a stuck
     # one), and paused; Esc isn't typed, and nothing else happens.
     ESC = 1
     to_relay("keyboard desktop")

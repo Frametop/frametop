@@ -155,7 +155,7 @@ def save(data):
     that doesn't read is kept (a .bad- copy) and not saved over: ft_store.StoreError."""
     with ft_store.locked(PATH):
         old = ft_store.load_json_strict(PATH, {}, ft_store.is_object)
-        write_json(PATH, {**old, **{k: data[k] for k in DEFAULT if k in data}})
+        ft_store.write_json(PATH, {**old, **{k: data[k] for k in DEFAULT if k in data}})
 
 
 def edit_rules(change):
@@ -167,13 +167,8 @@ def edit_rules(change):
         rules = ft_store.load_json_strict(RULES_PATH, {}, ft_store.is_object)
         changed = change(rules)
         if changed:
-            write_json(RULES_PATH, rules)
+            ft_store.write_json(RULES_PATH, rules)
     return changed
-
-
-def write_json(path, data):
-    """data into path through a temp file of its own (ft_store.write_json)."""
-    ft_store.write_json(path, data)
 
 
 def mtime():
@@ -259,7 +254,7 @@ def carry_over():
     """frame-voice's settings, once; or dictation's key in a rules file with keys of its own."""
     if not PATH.exists() and FRAME_VOICE_PATH.exists():
         new, bindings, notes = from_frame_voice(read_json(FRAME_VOICE_PATH))
-        write_json(PATH, new)
+        ft_store.write_json(PATH, new)
         print(f"voice: carried over frame-voice's settings ({FRAME_VOICE_PATH} -> {PATH})")
         for note in notes:
             print(f"voice: {note}")

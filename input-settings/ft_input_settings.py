@@ -450,12 +450,12 @@ def code_names():
 
 
 def read_conf():
-    return input_rules.read_conf(CONF_PATH)
+    return ft_conf.read(CONF_PATH)
 
 
 def write_conf_value(key, value):
-    """Set KEY=value in frametop.conf (input_rules.write_conf_value)."""
-    input_rules.write_conf_value(key, value, CONF_PATH)
+    """Set KEY=value in frametop.conf, keeping comments and the rest (ft_conf.set_value)."""
+    ft_conf.set_value(key, value, CONF_PATH)
 
 
 def host(*cmd, timeout=20):

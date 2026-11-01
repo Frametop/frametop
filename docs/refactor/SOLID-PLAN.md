@@ -48,3 +48,5 @@ Each step is one local commit, with the touched area's tests passing first. A ch
 - No change to a socket message, CLI flag, conf key, unit or installed path. Moved names stay importable from the old module (re-exports), because tests and other components reach them there.
 - A module-level name that tests replace (`relay.SCREENS`, `relay.log`, `relay.read_rules`, ...) stays where it is: moving it would cut the test's patch from the code that reads it.
 - Targeted tests before each commit, ruff clean (`just lint` rules).
+
+Next: [FULL-PLAN.md](FULL-PLAN.md), the plan for the whole codebase (2026-11-01).

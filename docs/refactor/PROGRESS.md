@@ -1,6 +1,6 @@
 # SOLID refactor progress
 
-Plan: [SOLID-PLAN.md](SOLID-PLAN.md). Branch `solid-refactor` in `~/frametop/.worktrees/solid`, from experimental 3ca4e7e.
+Plan: [SOLID-PLAN.md](SOLID-PLAN.md); the whole-codebase plan: [FULL-PLAN.md](FULL-PLAN.md). Branch `solid-refactor` in `~/frametop/.worktrees/solid`, from experimental 3ca4e7e.
 
 | Step | Commit | Tests run | Notes |
 |------|--------|-----------|-------|

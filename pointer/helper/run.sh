@@ -6,15 +6,16 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 frame="$root/scripts/frame.sh"
 unit=frametop-pointer.service
 installed() { "$frame" --host "test -f ~/.config/systemd/user/$unit" 2>/dev/null; }
 case ${1:-status} in
   install)
     "$root/scripts/sync.sh" >/dev/null
-    fill_template "$root/pointer/helper/$unit" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$unit"
+    install_unit "$root/pointer/helper/$unit"
     "$frame" --host "set -e; pkill -x ft-pointer || true
-systemctl --user daemon-reload; systemctl --user enable $unit
+$(enable_units $unit)
 $(start_with_steamvr $unit)" ;;
   uninstall) "$frame" --host "systemctl --user disable --now $unit 2>/dev/null; rm -f ~/.config/systemd/user/$unit; systemctl --user daemon-reload; echo removed" ;;
   start|stop|restart) if installed; then "$frame" --host "systemctl --user $1 $unit; systemctl --user is-active $unit"; exit; fi ;;&

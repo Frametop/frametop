@@ -8,14 +8,15 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 frame="$root/scripts/frame.sh"
 unit=frametop-keyboard.service
 case ${1:-status} in
   install)
     "$root/scripts/sync.sh" >/dev/null
-    fill_template "$root/keyboard/$unit" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$unit"
+    install_unit "$root/keyboard/$unit"
     "$frame" --host "set -e; pkill -x framekeyboard || true
-systemctl --user daemon-reload; systemctl --user enable $unit
+$(enable_units $unit)
 if systemctl --user is-enabled --quiet framekeyboard-autostart.service 2>/dev/null; then
   echo 'note: Full Keyboard is also installed on its own (framekeyboard-autostart.service). Frametop runs its own copy;'
   echo '      turn the standalone one off in its settings (Start with SteamOS), or: systemctl --user disable --now framekeyboard-autostart.service'

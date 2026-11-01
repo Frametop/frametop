@@ -6,6 +6,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 frame="$root/scripts/frame.sh"
 unit=frametop-voice.service
 whisper=frametop-voice-whisper.service
@@ -14,7 +15,7 @@ case ${1:-status} in
     "$root/scripts/sync.sh" >/dev/null
     "$root/voice/models.sh"
     for u in $unit $whisper; do
-      fill_template "$root/voice/$u" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$u"
+      install_unit "$root/voice/$u"
     done
     "$frame" --host "set -e
 python3 voice/voice_settings.py install
@@ -25,8 +26,7 @@ for old in frame-voice-vr-input frame-voice frame-voice-whisper; do
     echo \"voice: turned off the standalone \$old.service (Frametop Voice replaces it; its folder stays)\"
   fi
 done
-systemctl --user daemon-reload
-systemctl --user enable $unit 2>/dev/null
+$(enable_units "$unit 2>/dev/null")
 systemctl --user restart $unit
 for i in \$(seq 30); do [ -S /run/user/\$(id -u)/frametop-voice/control.sock ] && break; sleep 1; done
 echo \"$unit: \$(systemctl --user is-active $unit)\"; journalctl --user -u $unit --no-pager -o cat -n 3" ;;

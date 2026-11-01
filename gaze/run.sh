@@ -6,15 +6,16 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 frame="$root/scripts/frame.sh"
 unit=frametop-gaze.service
 case ${1:-status} in
   install)
     [ "$FRAME_RELEASE" = 1 ] || "$root/gaze/build.sh"
-    fill_template "$root/gaze/$unit" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$unit"
+    install_unit "$root/gaze/$unit"
     on_frame "chmod +x gaze/ft-gazed gaze/ft-gazectl gaze/eye-rate.py"
     on_frame "/usr/bin/python3 gaze/eye-rate.py on" || true
-    "$frame" --host "set -e; systemctl --user daemon-reload; systemctl --user enable $unit
+    "$frame" --host "set -e; $(enable_units $unit)
 $(start_with_steamvr $unit)" ;;
   uninstall)
     "$frame" --host "systemctl --user disable --now $unit 2>/dev/null; rm -f ~/.config/systemd/user/$unit; systemctl --user daemon-reload; echo removed"

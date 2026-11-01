@@ -13,6 +13,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 frame="$root/scripts/frame.sh"
 action=${1:-start}
 screens=${2:-${FT_SCREENS:-}}
@@ -55,8 +56,8 @@ fi
 [ -f ~/.config/frametop.conf ] || cp $session/frametop.conf.example ~/.config/frametop.conf
 echo \"installed ~/$override\"; grep ^Exec= ~/$override; echo; cat ~/.config/frametop.conf"
     # Start with SteamVR: always enabled, and it does nothing unless AUTOSTART=1 (session/autostart.sh).
-    fill_template "$session_src/$autostart_unit" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$autostart_unit"
-    "$frame" --host "systemctl --user daemon-reload; systemctl --user enable --quiet $autostart_unit" ;;
+    install_unit "$session_src/$autostart_unit"
+    "$frame" --host "$(enable_units --quiet $autostart_unit)" ;;
   uninstall)
     # Also what the session puts in place at each start: Launch as Standalone's app copies and
     # the title bar decoration (float/ft_apps.py, decoration/).
@@ -108,9 +109,9 @@ if pgrep -f '[k]rdpserver --plasma' >/dev/null; then echo 'capture (krdp, 127.0.
         "$root/scripts/sync.sh" >/dev/null
         # Enabled, not started: started under a running SteamVR it would grab the
         # mouse away from it. It comes up before SteamVR on the next start.
-        fill_template "$root/input/$unit" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$unit"
+        install_unit "$root/input/$unit"
         "$frame" --host "set -e
-systemctl --user daemon-reload; systemctl --user enable $unit
+$(enable_units $unit)
 echo 'enabled; starts before SteamVR on the next reboot or SteamVR restart'" ;;
       uninstall) "$frame" --host "systemctl --user disable --now $unit 2>/dev/null; systemctl --user clean --what=fdstore $unit 2>/dev/null; rm -f ~/.config/systemd/user/$unit; systemctl --user daemon-reload; echo removed" ;;
       status) "$frame" --host "systemctl --user is-enabled $unit 2>/dev/null; systemctl --user is-active $unit 2>/dev/null

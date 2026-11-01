@@ -13,6 +13,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 frame="$root/scripts/frame.sh"
 units="frametop-camd.service frametop-hands.service frametop-handview.service"
 # ft-handview (the hands drawn with Room View off) is screens/' build (screens/build.sh, which
@@ -62,7 +63,7 @@ case ${1:-status} in
     [ "$FRAME_RELEASE" = 1 ] || "$root/hands/build.sh"
     set_caps
     for u in $units; do
-      fill_template "$root/$(unit_dir $u)/$u" | on_frame "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$u"
+      install_unit "$root/$(unit_dir $u)/$u"
     done
     # Started as HANDS_MODE says (off: not at all; Frametop Input Settings, Hands), or by hand
     # with ft-handsctl on|off (linked into ~/.local/bin).

@@ -34,10 +34,11 @@ def imports(repo):
         importlib.import_module("PySide6." + name)
     for i, name in enumerate(BACKENDS):
         path = repo / name
+        saved = list(sys.path)   # importing a backend can add to sys.path too (recorder/common.py adds conf/)
         sys.path[:0] = [str(path.parent), str(repo)]   # the repo root: the recorders import hands.rec and gaze.rec
         spec = importlib.util.spec_from_file_location(f"_ft_pyside_{i}", path)
         spec.loader.exec_module(importlib.util.module_from_spec(spec))
-        del sys.path[:2]
+        sys.path[:] = saved
 
 
 def check_elf(paths):

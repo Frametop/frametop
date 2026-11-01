@@ -1,0 +1,928 @@
+{
+ "": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error empty",
+  "tear": null
+ },
+ "  ": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error empty",
+  "tear": null
+ },
+ "activate": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "activate w1": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "activate",
+     "id": "w1"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "activate w1 w2": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "activate w9": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window w9",
+  "tear": null
+ },
+ "close 3": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "close",
+     "id": "w2"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "close 4": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "close",
+     "id": "w3"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "close w1": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "close",
+     "id": "w1"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "close w9": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window w9",
+  "tear": null
+ },
+ "dashlaunch": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "dashlaunch steam://rungameid/1  extra": {
+  "calls": [
+   [
+    "dash_launch",
+    [
+     "steam://rungameid/1  extra"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok dash",
+  "tear": null
+ },
+ "density 3": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "density 3 +1": {
+  "calls": [
+   [
+    "redensity",
+    [
+     "<float w2>",
+     1
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "density 3 -2": {
+  "calls": [
+   [
+    "redensity",
+    [
+     "<float w2>",
+     -2
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "density 3 x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dock": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-active"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dock 3": {
+  "calls": [
+   [
+    "dock",
+    [
+     "<float w2>"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dock 9": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no floating window on screen 9",
+  "tear": null
+ },
+ "dock active": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-active"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dock all": {
+  "calls": [
+   [
+    "dock",
+    [
+     "<float w2>"
+    ],
+    {}
+   ],
+   [
+    "dock",
+    [
+     "<float w3>"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dock w1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dock w2": {
+  "calls": [
+   [
+    "dock",
+    [
+     "<float w2>"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dock w9": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window w9",
+  "tear": null
+ },
+ "dockat 3 -1 -5 7 0 0": {
+  "calls": [
+   [
+    "dock_at",
+    [
+     "<float w2>",
+     -2,
+     -5,
+     7,
+     0,
+     0
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dockat 3 1 1 1 1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "dockat 3 1 1000 700 500 20": {
+  "calls": [
+   [
+    "dock_at",
+    [
+     "<float w2>",
+     0,
+     1000,
+     700,
+     500,
+     20
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dockat 3 1 a b 0 0": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "dockat 9 1 0 0 0 0": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no floating window on screen 9",
+  "tear": null
+ },
+ "float": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-active"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "float active": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-active"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "float pointer": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-pointer"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "float w1": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-float",
+     "id": "w1"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "float w1 extra": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-float",
+     "id": "w1"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "float w9": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window w9",
+  "tear": null
+ },
+ "front": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "front 1": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "activate-output",
+     "output": "WL-0"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "front 3": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "activate",
+     "id": "w2"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "front x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "launch": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "launch app.desktop": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": null,
+     "app": "app.desktop",
+     "dock": null
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
+ "launch app.desktop action=a screen=1": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": "a",
+     "app": "app.desktop",
+     "dock": "WL-0"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
+ "launch app.desktop action=new": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": "new",
+     "app": "app.desktop",
+     "dock": null
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
+ "launch app.desktop bogus=1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error launch APP.desktop [action=ACTION] [screen=N]",
+  "tear": null
+ },
+ "launch app.desktop noequals": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error launch APP.desktop [action=ACTION] [screen=N]",
+  "tear": null
+ },
+ "launch app.desktop screen=0": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no screen 0",
+  "tear": null
+ },
+ "launch app.desktop screen=2": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": null,
+     "app": "app.desktop",
+     "dock": "WL-1"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
+ "launch app.desktop screen=3": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no screen 3",
+  "tear": null
+ },
+ "launch app.desktop screen=x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no screen x",
+  "tear": null
+ },
+ "list": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok FT-0:w2 FT-1:-",
+  "tear": null
+ },
+ "list extra": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok FT-0:w2 FT-1:-",
+  "tear": null
+ },
+ "nonsense": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "profile": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "profile Work Desk": {
+  "calls": [
+   [
+    "open_profile",
+    [
+     "Work Desk"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok profile",
+  "tear": null
+ },
+ "quit": {
+  "calls": [],
+  "idle_add": [
+   [
+    "loop.quit"
+   ]
+  ],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "resize 3 100 100": {
+  "calls": [
+   [
+    "hold",
+    [
+     {
+      "index": 3
+     }
+    ],
+    {}
+   ],
+   [
+    "command",
+    [],
+    {
+     "cmd": "geometry",
+     "h": 160.0,
+     "id": "w2",
+     "w": 256.0,
+     "x": 10,
+     "y": 20
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "resize 3 1000": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "resize 3 1000 600": {
+  "calls": [
+   [
+    "hold",
+    [
+     {
+      "index": 3
+     }
+    ],
+    {}
+   ],
+   [
+    "command",
+    [],
+    {
+     "cmd": "geometry",
+     "h": 480.0,
+     "id": "w2",
+     "w": 800.0,
+     "x": 10,
+     "y": 20
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "resize 3 800 500": {
+  "calls": [
+   [
+    "hold",
+    [
+     {
+      "index": 3
+     }
+    ],
+    {}
+   ],
+   [
+    "command",
+    [],
+    {
+     "cmd": "geometry",
+     "h": 400.0,
+     "id": "w2",
+     "w": 640.0,
+     "x": 10,
+     "y": 20
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "resize 3 a b": {
+  "calls": [],
+  "idle_add": [],
+  "raised": "ValueError",
+  "reply": null,
+  "tear": null
+ },
+ "resize 4 1000 600": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "run": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "run \"x\"": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error run takes a JSON list",
+  "tear": null
+ },
+ "run [\"firefox\", \"--new-window\"]": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "argv": [
+      "firefox",
+      "--new-window"
+     ]
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
+ "run [1]": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error run takes a JSON list",
+  "tear": null
+ },
+ "run []": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error run takes a JSON list",
+  "tear": null
+ },
+ "run not json": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error run takes a JSON list",
+  "tear": null
+ },
+ "run {}": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error run takes a JSON list",
+  "tear": null
+ },
+ "scale 3": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "scale 3 2": {
+  "calls": [
+   [
+    "scale_soon",
+    [
+     "<float w2>",
+     2
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "scale 3 x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": "ValueError",
+  "reply": null,
+  "tear": null
+ },
+ "spotlist": {
+  "calls": [
+   [
+    "capture",
+    [
+     "SENDER",
+     "spotlist"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok captured",
+  "tear": null
+ },
+ "tear w1 1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error unknown command",
+  "tear": null
+ },
+ "tear w1 1300 760": {
+  "calls": [
+   [
+    "command",
+    [],
+    {
+     "cmd": "request-float",
+     "id": "w1"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": [
+   "w1",
+   1300.0,
+   760.0
+  ]
+ },
+ "tear w1 x 1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error tear ID X Y",
+  "tear": null
+ },
+ "tear w2 1 1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window w2 on the screens",
+  "tear": null
+ },
+ "tear w9 1 1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window w9 on the screens",
+  "tear": null
+ },
+ "windows": {
+  "calls": [
+   [
+    "capture",
+    [
+     "SENDER",
+     "windows"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok captured",
+  "tear": null
+ },
+ "windows extra": {
+  "calls": [
+   [
+    "capture",
+    [
+     "SENDER",
+     "windows"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok captured",
+  "tear": null
+ }
+}

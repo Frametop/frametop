@@ -1,5 +1,6 @@
 // Hand cutouts, the GPU side (see handcut.h): Renderer draws a panel's client buffer with
 // the hands cut out and the glows on top. And EyePositions, which asks SteamVR.
+#include "gpuctx.h"
 #include "handcut.h"
 #include "rendernode.h"
 
@@ -37,14 +38,7 @@ void EyePositions(const Mat &head, double out[2][3]) {
 
 namespace {
 
-PFNEGLGETPLATFORMDISPLAYEXTPROC pGetPlatformDisplay;
-PFNEGLCREATEIMAGEKHRPROC pCreateImage;
-PFNEGLDESTROYIMAGEKHRPROC pDestroyImage;
-PFNGLEGLIMAGETARGETTEXTURE2DOESPROC pImageTargetTexture;
-PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC pImageTargetRenderbuffer;
-PFNEGLCREATESYNCKHRPROC pCreateSync;
-PFNEGLDESTROYSYNCKHRPROC pDestroySync;
-PFNEGLCLIENTWAITSYNCKHRPROC pClientWaitSync;
+gpuctx::Procs egl;  // looked up by Renderer::Init
 
 const char *kVertex = R"(
 attribute vec2 pos;          // the unit square
@@ -199,7 +193,7 @@ EGLImageKHR ImageFor(EGLDisplay dpy, const ft_dmabuf &b) {
         }
     }
     a[n++] = EGL_NONE;
-    return pCreateImage(dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, a);
+    return egl.createImage(dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, a);
 }
 
 }  // namespace
@@ -209,10 +203,9 @@ Renderer::~Renderer() {
         for (Output &o : r.out) FreeOutput(o);
     for (auto &[k, im] : imported_) {
         glDeleteTextures(1, &im.tex);
-        pDestroyImage(EGLDisplay(dpy_), EGLImageKHR(im.image));
+        egl.destroyImage(EGLDisplay(dpy_), EGLImageKHR(im.image));
     }
-    if (ctx_) eglDestroyContext(EGLDisplay(dpy_), EGLContext(ctx_));
-    if (dpy_) eglTerminate(EGLDisplay(dpy_));
+    gpuctx::Close(EGLDisplay(dpy_), EGLContext(ctx_));
     if (gbm_) rendernode::Release();
 }
 
@@ -222,29 +215,12 @@ bool Renderer::Init(const std::vector<uint64_t> &modifiers, std::function<void(c
     released_ = std::move(released);
     if (!gbm_) gbm_ = rendernode::Acquire("handcut");
     if (!gbm_) return false;
-    pGetPlatformDisplay = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
-    pCreateImage = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(eglGetProcAddress("eglCreateImageKHR"));
-    pDestroyImage = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(eglGetProcAddress("eglDestroyImageKHR"));
-    pImageTargetTexture = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(eglGetProcAddress("glEGLImageTargetTexture2DOES"));
-    pImageTargetRenderbuffer = reinterpret_cast<PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC>(
-        eglGetProcAddress("glEGLImageTargetRenderbufferStorageOES"));
-    pCreateSync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(eglGetProcAddress("eglCreateSyncKHR"));
-    pDestroySync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(eglGetProcAddress("eglDestroySyncKHR"));
-    pClientWaitSync = reinterpret_cast<PFNEGLCLIENTWAITSYNCKHRPROC>(eglGetProcAddress("eglClientWaitSyncKHR"));
-    if (!gbm_ || !pGetPlatformDisplay || !pCreateImage || !pImageTargetTexture || !pImageTargetRenderbuffer ||
-        !pCreateSync || !pDestroySync || !pClientWaitSync) {
-        std::fprintf(stderr, "handcut: GBM or EGL extensions missing\n");
-        return false;
-    }
-    EGLDisplay dpy = pGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, gbm_, nullptr);
-    if (dpy == EGL_NO_DISPLAY || !eglInitialize(dpy, nullptr, nullptr)) return std::fprintf(stderr, "handcut: no EGL display\n"), false;
-    dpy_ = dpy;
-    eglBindAPI(EGL_OPENGL_ES_API);
-    const EGLint attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-    EGLContext ctx = eglCreateContext(dpy, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, attrs);
-    if (ctx == EGL_NO_CONTEXT || !eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx))
-        return std::fprintf(stderr, "handcut: no surfaceless GLES context\n"), false;
-    ctx_ = ctx;
+    egl = gpuctx::Load();
+    EGLDisplay dpy = EGL_NO_DISPLAY;
+    EGLContext ctx = EGL_NO_CONTEXT;
+    const bool up = gpuctx::Open("handcut", static_cast<gbm_device *>(gbm_), egl, gpuctx::kImageTargetTexture, &dpy, &ctx);
+    dpy_ = dpy, ctx_ = ctx;
+    if (!up) return false;
     copyProg_ = Program(kCopy);
     cutProg_ = Program(kCut);
     hullProg_ = Program(kHull, kVertexPx);
@@ -275,7 +251,7 @@ unsigned Renderer::Texture(const void *key, const ft_dmabuf &src) {
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    pImageTargetTexture(GL_TEXTURE_EXTERNAL_OES, image);
+    egl.imageTargetTexture(GL_TEXTURE_EXTERNAL_OES, image);
     imported_[key] = {image, tex};
     return tex;
 }
@@ -284,7 +260,7 @@ void Renderer::Forget(const void *key) {
     auto it = imported_.find(key);
     if (it == imported_.end()) return;
     glDeleteTextures(1, &it->second.tex);
-    pDestroyImage(EGLDisplay(dpy_), EGLImageKHR(it->second.image));
+    egl.destroyImage(EGLDisplay(dpy_), EGLImageKHR(it->second.image));
     imported_.erase(it);
     for (auto &[k, r] : rings_)   // a new buffer at the same address isn't this one
         for (Output &o : r.out)
@@ -316,7 +292,7 @@ bool Renderer::MakeOutput(Output &o, int w, int h) {
     o.image = image;
     glGenRenderbuffers(1, &o.rb);
     glBindRenderbuffer(GL_RENDERBUFFER, o.rb);
-    pImageTargetRenderbuffer(GL_RENDERBUFFER, image);
+    egl.imageTargetRenderbuffer(GL_RENDERBUFFER, image);
     glGenFramebuffers(1, &o.fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, o.rb);
@@ -327,10 +303,10 @@ bool Renderer::MakeOutput(Output &o, int w, int h) {
 
 void Renderer::FreeOutput(Output &o) {
     if (o.bo && released_) released_(&o);
-    if (o.fence) pDestroySync(EGLDisplay(dpy_), EGLSyncKHR(o.fence));
+    if (o.fence) egl.destroySync(EGLDisplay(dpy_), EGLSyncKHR(o.fence));
     if (o.fbo) glDeleteFramebuffers(1, &o.fbo);
     if (o.rb) glDeleteRenderbuffers(1, &o.rb);
-    if (o.image) pDestroyImage(EGLDisplay(dpy_), EGLImageKHR(o.image));
+    if (o.image) egl.destroyImage(EGLDisplay(dpy_), EGLImageKHR(o.image));
     for (int i = 0; i < o.buf.n_planes && i < 4; ++i)
         if (o.buf.fd[i] >= 0) close(o.buf.fd[i]);
     if (o.bo) gbm_bo_destroy(static_cast<gbm_bo *>(o.bo));
@@ -411,9 +387,9 @@ int64_t SteadyNs() {
 
 bool Renderer::Passed(Output &o, int64_t timeoutNs) {
     if (!o.fence) return true;
-    const EGLint r = pClientWaitSync(EGLDisplay(dpy_), EGLSyncKHR(o.fence), 0, EGLTimeKHR(timeoutNs));
+    const EGLint r = egl.clientWaitSync(EGLDisplay(dpy_), EGLSyncKHR(o.fence), 0, EGLTimeKHR(timeoutNs));
     if (r == EGL_TIMEOUT_EXPIRED_KHR) return false;
-    pDestroySync(EGLDisplay(dpy_), EGLSyncKHR(o.fence));   // passed, or failed: don't wait on it again
+    egl.destroySync(EGLDisplay(dpy_), EGLSyncKHR(o.fence));   // passed, or failed: don't wait on it again
     o.fence = nullptr;
     return true;
 }
@@ -540,7 +516,7 @@ const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, c
         if (!tex) return nullptr;
         const bool partial = o.drawn && o.key == key && o.serial == serial;
         Draw(o, tex, w, h, eyes, partial);
-        o.fence = pCreateSync(EGLDisplay(dpy_), EGL_SYNC_FENCE_KHR, nullptr);
+        o.fence = egl.createSync(EGLDisplay(dpy_), EGL_SYNC_FENCE_KHR, nullptr);
         glFlush();
         if (!o.fence) glFinish();   // no fence: wait here, as before
         o.key = key, o.serial = serial, o.drawn = true;
@@ -603,7 +579,7 @@ const Output *Renderer::Marks(int panel, int w, int h, const std::vector<Mark> e
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             }
         }
-        o.fence = pCreateSync(EGLDisplay(dpy_), EGL_SYNC_FENCE_KHR, nullptr);
+        o.fence = egl.createSync(EGLDisplay(dpy_), EGL_SYNC_FENCE_KHR, nullptr);
         glFlush();
         if (!o.fence) glFinish();
         o.key = nullptr, o.drawn = false;   // holds no client frame

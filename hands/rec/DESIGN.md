@@ -35,6 +35,8 @@ Its tarball keeps this tree's layout (`hands/build/`, `hands/rec/`, `hands/model
 - session.json's `tool` and the manifest's are `ft-handrec <describe> (frametop-hand-recorder <version>)`.
 - The repair hints say to run its install command again.
 
+Its file list lives in that repo (`package.sh`), not here. Since DEE-319 (2026-10-31) the tarball also needs `hands/rec/__init__.py`, and all of `recorder/` (its `qml/` folder with the shared pages, `controls.py`, `privacy.py`, `fhformat.py`, `qmlcheck.py` for the window tests). `hands/rec` is a package, so its launcher runs `python3 -m hands.rec.ft_handrec` with the tree's top on `PYTHONPATH`, as `hands/rec/ft-handrec` does, not `ft_handrec.py` by path.
+
 The recordings go to the same `~/.local/share/frametop/hands/contrib`, so either recorder shows both's sessions.
 
 Its window has a **Getting ready** page between the consent and Before you start (`Backend.getReady`, `session.get_ready`). It checks that SteamVR runs, then starts what isn't running yet: the cameras, hand tracking and the headset panel, in that order. With Frametop's hand tracking installed (`frametopHands`) that means Frametop's own `frametop-hands` (which brings `frametop-camd`); a testing session needs that one. Otherwise it starts the recorder's units (`frametop-handrec-camd`, `frametop-handrec-hands`). The first part that can't start stops it with a message and Try again. What it started stops when the window closes; the panel stays up hidden until then, and the session reuses it.

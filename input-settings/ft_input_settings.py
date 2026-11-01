@@ -1350,12 +1350,14 @@ class Backend(QObject):
             self.message.emit(f"Couldn't remove {name}: {e}", True)
             return
         # Buttons, controller buttons and key combinations that ran it would do nothing now.
-        dropped = []
-
-        def change(rules):
-            dropped[:] = input_commands.drop_bindings(rules, name)
-            return None if dropped else input_rules.UNCHANGED
-        saved = self._edit_rules(change) is not NOT_SAVED   # (the command is gone either way)
+        # Nothing ran it (the file as it reads now, leniently): the file isn't touched.
+        dropped = input_commands.drop_bindings(read_json(RULES_PATH), name)
+        if dropped:
+            def change(rules):
+                return input_commands.drop_bindings(rules, name) or input_rules.UNCHANGED
+            dropped = self._edit_rules(change)
+        saved = dropped is not NOT_SAVED   # (the command is gone either way)
+        dropped = dropped if isinstance(dropped, int) else 0
         self.commandsChanged.emit()
         if saved:
             self.message.emit(input_commands.removed_text(name, dropped), False)

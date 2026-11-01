@@ -643,22 +643,26 @@ def check_services(sockets, desktop_up):
 
 
 def frametop_repos():
-    """The Frametop checkouts to look in: this script's, then the usual ones (run from stdin
-    over SSH there's no __file__)."""
+    """The Frametop trees to look in: this script's, then the usual checkouts and the installed
+    release (run from stdin over SSH there's no __file__)."""
     repos = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))] if "__file__" in globals() else []
-    return repos + [os.path.join(HOME, "frametop"), os.path.join(HOME, "dev/frametop")]
+    return repos + [os.path.join(HOME, "frametop"), os.path.join(HOME, "dev/frametop"),
+                    os.path.join(HOME, ".local/share/frametop/releases/current")]
 
 
 def frametop_conf():
-    """~/.config/frametop.conf as Frametop reads it (conf/ft_conf.py, from the first checkout
-    that has it): {name: value}; None when there's no checkout here to read it with."""
+    """~/.config/frametop.conf as Frametop reads it (conf/ft_conf.py, from the first tree that
+    has one that loads): {name: value}; None when there's none here to read it with."""
     for repo in frametop_repos():
         path = os.path.join(repo, "conf", "ft_conf.py")
         if os.path.isfile(path):
-            spec = importlib.util.spec_from_file_location("ft_conf", path)
-            ft_conf = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(ft_conf)
-            return ft_conf.read(os.path.join(HOME, ".config/frametop.conf"))
+            try:
+                spec = importlib.util.spec_from_file_location("ft_conf", path)
+                ft_conf = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(ft_conf)
+                return ft_conf.read(os.path.join(HOME, ".config/frametop.conf"))
+            except Exception:  # an old or broken copy: try the next tree
+                continue
     return None
 
 
@@ -688,7 +692,11 @@ def check_dashboard_apps():
     """float/ft-dashroute (DASHBOARD_APPS=frametop): the dashboard's Launch a program list floats
     apps only while Steam's UI calls SteamClient.Apps.LaunchNonSteamApp when one is picked, which
     dash-route.js wraps. A Steam client update can change that, not just a SteamOS one."""
-    if (frametop_conf() or {}).get("DASHBOARD_APPS") != "frametop":
+    conf = frametop_conf()
+    if conf is None:
+        report("skip", "dashboard apps", "no Frametop tree here to read frametop.conf with (conf/ft_conf.py)")
+        return
+    if conf.get("DASHBOARD_APPS") != "frametop":
         return
     label = "dashboard apps"
     found = False

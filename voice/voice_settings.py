@@ -290,7 +290,10 @@ def give_dictation_its_key(rules):
 
 def carry_rules(change):
     """edit_rules for carry_over: True when change changed the rules and they were saved; a
-    rules file that doesn't read is said, not saved over."""
+    rules file that doesn't read is said, not saved over. When change finds nothing to do in
+    the file as it reads now (leniently: {} for one that doesn't read), the file isn't touched."""
+    if not change(read_json(RULES_PATH)):
+        return False
     try:
         return bool(edit_rules(change))
     except (OSError, ft_store.StoreError) as e:

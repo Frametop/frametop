@@ -41,8 +41,22 @@ class ConfReaders(unittest.TestCase):
     def test_update_check_without_a_checkout_skips(self):
         uc = self.load("update-check.py")
         self.conf.write_text(CONF)
-        with mock.patch.dict(uc["frametop_conf"].__globals__, frametop_repos=lambda: [self.home.name]):
+        said = []
+        with mock.patch.dict(uc["frametop_conf"].__globals__, frametop_repos=lambda: [self.home.name],
+                             report=lambda *a: said.append(a)):
             self.assertIsNone(uc["frametop_conf"]())
+            uc["check_dashboard_apps"]()
+        self.assertEqual([a[:2] for a in said], [("skip", "dashboard apps")])   # said, not silent
+
+    def test_update_check_skips_a_copy_that_does_not_load(self):
+        uc = self.load("update-check.py")
+        self.conf.write_text(CONF)
+        broken = pathlib.Path(self.home.name) / "old" / "conf"
+        broken.mkdir(parents=True)
+        (broken / "ft_conf.py").write_text("raise ImportError('an old copy')\n")
+        with mock.patch.dict(uc["frametop_conf"].__globals__,
+                             frametop_repos=lambda: [str(broken.parent), str(ROOT)]):
+            self.assertEqual(uc["frametop_conf"]()["DASHBOARD_APPS"], "frametop")
 
     def test_gaze_report_reads_the_gaze_lines(self):
         self.conf.write_text(CONF)

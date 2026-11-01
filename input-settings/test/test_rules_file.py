@@ -117,6 +117,18 @@ class RulesFile(unittest.TestCase):
         self.assertEqual(self.said, [("Removed 2 bindings; defaults restored", False), ("Forgot Mouse", False)])
         self.assertEqual(json.loads(self.path.read_text()), {"devices": {}, "buttons": {}})
 
+    def test_removing_a_command_nothing_ran_leaves_the_file(self):
+        """Nothing to drop: the rules file isn't locked or read strictly, so one that doesn't
+        read doesn't stop the "removed" message."""
+        self.path.write_text("not json")
+        real, fis.ft_commands.remove = fis.ft_commands.remove, lambda name: None
+        try:
+            self.b.removeCommand("x")
+        finally:
+            fis.ft_commands.remove = real
+        self.assertEqual(self.said, [("x removed", False)])
+        self.assertEqual(sorted(os.listdir(self.tmp)), ["frametop-input.json"])
+
     def test_dictation_without_keys_writes_nothing(self):
         self.path.write_text('{"key_bindings": {"125": "screens_toggle"}}')
         self.b.setDictationKeyMode("dictate_hold")

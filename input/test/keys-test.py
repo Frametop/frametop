@@ -526,16 +526,33 @@ def tests():
     key(META, 1, ms_w); key(J, 1, ms_w); key(J, 0, ms_w); key(META, 0, ms_w)
     check("combo: Meta+J isn't typed, and Meta comes up on the desktop and the virtual keyboard",
           (typed(), emitted()), (["key 125 1"] + F24 + ["key 125 0"], [("keyboard", META, 1), ("keyboard", META, 0)]))
+    conf["POINTER"] = "1"  # as a combo device is used: its mouse node drives the 3D pointer
+    use(None)
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("combo, pointer mode: a Meta tap opens Steam's menu", len(lines(steam_log)), menus + 2)
+    check("...and Meta reaches the desktop and the virtual keyboard", (typed(), emitted()),
+          (["key 125 1"] + F24 + ["key 125 0"], [("keyboard", META, 1), ("keyboard", META, 0)]))
+    conf["POINTER"] = "0"
+    key(META, 1, ms_w); key(J, 1, ms_w)
+    devices["buttons"] = {MOUSE_ID: {str(J): "none"}}
+    use(None)  # J mapped while Meta+J is held
+    key(J, 0, ms_w); key(META, 0, ms_w)
+    emitted()
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("combo: a key mapped while held in a combination still lets the next Meta tap work",
+          len(lines(steam_log)), menus + 3)
+    typed(), emitted()
     devices["buttons"] = {MOUSE_ID: {str(META): "none"}}
     use(None)
     key(META, 1, ms_w); key(META, 0, ms_w)
-    check("combo: a key its button map has keeps its map (none: no tap)", len(lines(steam_log)), menus + 1)
+    check("combo: a key its button map has keeps its map (none: no tap, nothing sent)",
+          (len(lines(steam_log)), typed(), emitted()), (menus + 3, [], []))
     devices["roles"], devices["buttons"] = {}, {}
     use(None)
     emitted()
     key(META, 1, ms_w); key(META, 0, ms_w)
     check("a plain 3D pointer's Meta tap does nothing (it's typed)", (len(lines(steam_log)), emitted()),
-          (menus + 1, [("keyboard", META, 1), ("keyboard", META, 0)]))
+          (menus + 3, [("keyboard", META, 1), ("keyboard", META, 0)]))
     typed()
 
     use(None)  # the defaults: Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels (ft-screens)

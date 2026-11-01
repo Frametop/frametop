@@ -2314,11 +2314,12 @@ class Relay:
                         self.keyboard.sync()
                         (node.held.add if value else node.held.discard)(code)
                 continue
-            if etype == EV_KEY and code < BTN_MISC and str(code) not in buttons \
+            if etype == EV_KEY and code < BTN_MISC and (str(code) not in buttons or code in self.held.combos) \
                     and self.rules["devices"].get(node.id, {}).get("role") == "combo" \
                     and self.key_binding(code, value, now):
                 # A Keyboard + 3D pointer device that sends its keys on its mouse node (one node
-                # for both): key combinations work on it as on a pass-through keyboard.
+                # for both): key combinations work on it as on a pass-through keyboard. A key held in
+                # one still comes up here if the button map took it meanwhile.
                 if value == 0 and code in node.held:
                     node.held.discard(code)  # it went down on the virtual keyboard too (Meta of Meta+J)
                     self.keyboard.emit(etype, code, value)

@@ -27,7 +27,7 @@ test-python:
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
         'tour/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'remote-displays/tests/*.py' \
         'steam/tests/*.py' 'remote/tests/*.py' 'framedrop/tests/*.py' \
-        'scripts/tests/test_uninstall.py' 'docs/tests/*.py' || status=1
+        'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'docs/tests/*.py' || status=1
     pytest -q session/tests || status=1
     # test_accessibility.py needs the host's AT-SPI and PyGObject, test_notifyfwd.py and
     # test_gtksettings.py the host's dbus-daemon and PyGObject

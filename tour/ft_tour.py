@@ -25,6 +25,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "input-settings"))
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ft_conf  # noqa: E402
+import ft_store  # noqa: E402
 
 # The flag. Not under XDG_STATE_HOME: the desktop sets that to its own folder.
 DONE_PATH = os.path.expanduser("~/.local/state/frametop/tour.json")
@@ -51,11 +52,8 @@ def is_done(path=None):
 def mark_done(path=None, how="finished"):
     path = path or DONE_PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump({"version": TOUR_VERSION, "how": how, "when": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
-        f.write("\n")
-    os.replace(tmp, path)
+    ft_store.write_json(path, {"version": TOUR_VERSION, "how": how, "when": time.strftime("%Y-%m-%d %H:%M:%S")},
+                        indent=None)
 
 
 def reset(path=None):

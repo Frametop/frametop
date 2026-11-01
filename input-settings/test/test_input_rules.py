@@ -12,6 +12,7 @@ os.environ["HOME"] = tempfile.mkdtemp()
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import input_rules  # noqa: E402
 import ft_store  # noqa: E402  (input_rules put conf/ on the path)
+import ft_conf  # noqa: E402
 
 
 class ReadJson(unittest.TestCase):
@@ -44,20 +45,25 @@ class ReadJson(unittest.TestCase):
         self.assertEqual(self.read('{"key_bindings": ["spotwatch"]}')["key_bindings"], ["spotwatch"])
 
 
-class SaveRules(unittest.TestCase):
+class WholeRules(unittest.TestCase):
+    """edit_rules writing the whole rules, as the Input Settings pages do."""
+
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
         self.path = self.dir / "frametop-input.json"
 
+    def save(self, rules):
+        input_rules.edit_rules(str(self.path), lambda r: (r.clear(), r.update(rules)))
+
     def test_writes_the_whole_rules_indented(self):
         rules = {"devices": {"a": {"role": "pointer"}}, "pause_auto": False}
-        input_rules.save_rules(rules, str(self.path))
+        self.save(rules)
         self.assertEqual(self.path.read_text(), json.dumps(rules, indent=2))
         self.assertEqual(input_rules.read_json(str(self.path)), rules)
 
     def test_an_empty_file_is_saved_over(self):
         self.path.write_text("  \n")
-        input_rules.save_rules({"a": 1}, str(self.path))
+        self.save({"a": 1})
         self.assertEqual(json.loads(self.path.read_text()), {"a": 1})
 
     def test_a_file_that_does_not_read_is_kept_with_a_copy(self):
@@ -65,7 +71,7 @@ class SaveRules(unittest.TestCase):
             with self.subTest(bad=bad):
                 self.path.write_text(bad)
                 with self.assertRaises(ft_store.StoreError):
-                    input_rules.save_rules({"a": 1}, str(self.path))
+                    self.save({"a": 1})
                 self.assertEqual(self.path.read_text(), bad)
                 copies = [p for p in self.dir.iterdir() if p.name.startswith("frametop-input.json.bad-")]
                 self.assertTrue(copies)
@@ -124,10 +130,10 @@ class Conf(unittest.TestCase):
     def test_write_keeps_comments_and_reads_back(self):
         path = Path(tempfile.mkdtemp()) / "frametop.conf"
         path.write_text("# mine\nPOINTER_FOLLOW=on\n")
-        input_rules.write_conf_value("POINTER_DISTANCE", "1.5", str(path))
-        input_rules.write_conf_value("POINTER_FOLLOW", "off", str(path))
+        ft_conf.set_value("POINTER_DISTANCE", "1.5", str(path))
+        ft_conf.set_value("POINTER_FOLLOW", "off", str(path))
         self.assertIn("# mine", path.read_text())
-        conf = input_rules.read_conf(str(path))
+        conf = ft_conf.read(str(path))
         self.assertEqual((conf["POINTER_FOLLOW"], conf["POINTER_DISTANCE"]), ("off", "1.5"))
 
 

@@ -47,6 +47,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "conf"))
 import ft_conf  # noqa: E402
+import ft_store  # noqa: E402  (the cache written safely: one refresh can't cut into another's)
 GITHUB = "Frametop/frametop"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "frametop" / "models"
 CATALOG_VERSION = 1           # the catalog layout this code reads
@@ -243,9 +244,8 @@ def refresh(kind, tree=REPO, timeout=15):
     except (ValueError, CatalogError) as e:
         return False, f"GitHub's catalog isn't valid for this Frametop ({e}); keeping this one"
     CACHE.mkdir(parents=True, exist_ok=True)
-    tmp = CACHE / f".{kind}.json.tmp"
-    tmp.write_text(json.dumps({"branch": ch, "fetched": time.time(), "catalog": cat}))
-    os.replace(tmp, CACHE / f"{kind}.json")
+    ft_store.write_json(CACHE / f"{kind}.json", {"branch": ch, "fetched": time.time(), "catalog": cat},
+                        indent=None, newline=False)
     return True, f"up to date with {ch}"
 
 

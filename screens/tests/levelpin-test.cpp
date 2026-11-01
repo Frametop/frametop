@@ -1,5 +1,5 @@
 // A head pin's floor frames (screens/levelpin.h): Level, the head's turn and floor position, nothing
-// else; Walk (DEE-208), the floor position only; and the SCREEN_PIN_LEVEL values.
+// else; Walk, the floor position only; and the SCREEN_PIN_LEVEL values.
 #include "../levelpin.h"
 
 #include <cmath>

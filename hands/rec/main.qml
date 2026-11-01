@@ -343,82 +343,21 @@ Kirigami.ApplicationWindow {
     // ---------------------------------------------------------------- Welcome
     Component {
         id: welcomePage
-        Kirigami.ScrollablePage {
-            title: "Welcome"
-            header: DraftBanner { text: root.draftText }
+        WelcomePage {
+            draftText: root.draftText
+            changedSinceAgreed: backend.consentAccepted !== ""
+            accept: (adult, region, agree) => backend.acceptConsent(adult, region, agree, handed.currentValue)
+            next: () => root.show(root.roundPicked ? checklistPage : bountiesPage)
 
-            ColumnLayout {
-                spacing: Kirigami.Units.largeSpacing
-
-                MarkdownText {
-                    Layout.fillWidth: true
-                    markdown: backend.consentText
-                }
-
-                Kirigami.Separator { Layout.fillWidth: true }
-
-                Kirigami.InlineMessage {
-                    Layout.fillWidth: true
-                    visible: !backend.needsConsent
-                    type: Kirigami.MessageType.Positive
-                    text: "You agreed to this text (" + backend.consentAccepted + "). Your contributor id is "
-                          + backend.contributor + ": keep it if you might want to withdraw later."
-                }
-                Controls.Button {
-                    visible: !backend.needsConsent
-                    text: "Copy contributor id"
-                    icon.name: "edit-copy"
-                    onClicked: backend.copy(backend.contributor)
-                }
-                Kirigami.InlineMessage {
-                    Layout.fillWidth: true
-                    visible: backend.needsConsent && backend.consentAccepted !== ""
-                    type: Kirigami.MessageType.Information
-                    text: "This text changed since you last agreed to it. Please read it again; your contributor id stays the same."
-                }
-
-                Controls.CheckBox {
-                    id: adult
-                    visible: backend.needsConsent
-                    text: "I'm 18 or older"
-                }
-                Controls.CheckBox {
-                    id: region
-                    visible: backend.needsConsent
-                    text: "I don't live in Illinois, Texas or Washington (USA)"
-                }
-                Controls.CheckBox {
-                    id: agree
-                    visible: backend.needsConsent
-                    text: "I agree to the text above"
-                }
-                RowLayout {
-                    visible: backend.needsConsent
-                    Controls.Label { text: "Handedness (optional):" }
-                    Controls.ComboBox {
-                        id: handed
-                        model: backend.handednessChoices
-                        textRole: "text"
-                        valueRole: "value"
-                        Component.onCompleted: currentIndex = Math.max(0, indexOfValue(backend.handedness))
-                    }
-                }
-                Controls.Button {
-                    visible: backend.needsConsent
-                    enabled: adult.checked && region.checked && agree.checked
-                    text: "Agree and continue"
-                    icon.name: "go-next"
-                    onClicked: {
-                        backend.acceptConsent(adult.checked, region.checked, agree.checked, handed.currentValue)
-                        if (!backend.needsConsent)
-                            root.show(root.roundPicked ? checklistPage : bountiesPage)
-                    }
-                }
-                Controls.Button {
-                    visible: !backend.needsConsent
-                    text: "Continue"
-                    icon.name: "go-next"
-                    onClicked: root.show(root.roundPicked ? checklistPage : bountiesPage)
+            RowLayout {
+                visible: backend.needsConsent
+                Controls.Label { text: "Handedness (optional):" }
+                Controls.ComboBox {
+                    id: handed
+                    model: backend.handednessChoices
+                    textRole: "text"
+                    valueRole: "value"
+                    Component.onCompleted: currentIndex = Math.max(0, indexOfValue(backend.handedness))
                 }
             }
         }

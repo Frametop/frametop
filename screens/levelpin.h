@@ -2,7 +2,7 @@
 // upright, turned with the head. The turn is the head's forward laid flat: looking up or down only
 // shortens it, and tilting the head doesn't change it. Looking nearly straight up or down, where
 // forward has no direction left, a little of the head's right vector (turned to forward) takes
-// over smoothly, so the frame never jumps. Mode 2, Walk (DEE-208: "a ball that follows you around
+// over smoothly, so the frame never jumps. Mode 2, Walk ("a ball that follows you around
 // and you're in the middle of it but it does not rotate, just move"): on the floor under the head,
 // with the room's axes, so a pinned screen follows you walking but not turning, looking or crouching.
 // Header only, no OpenVR, so its test runs anywhere.

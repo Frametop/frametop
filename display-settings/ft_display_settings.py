@@ -596,7 +596,7 @@ class Backend(QObject):
             self._ask_screens(f"{'reveal' if shown else 'conceal'} {index + 1}", then=applied)
 
     # --- head pin modes (SCREEN_PIN_LEVEL; ft-screens takes it live, "handsetting") ---
-    # 0 rides on the headset, 1 follows turning and walking but stays level, 2 (DEE-208) follows
+    # 0 rides on the headset, 1 follows turning and walking but stays level, 2 (Walk) follows
     # walking only: no turning, looking up or down, or crouching.
     @Property(int, notify=changed)
     def pinMode(self):

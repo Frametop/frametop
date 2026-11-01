@@ -7,19 +7,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
-import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
-
-# Actions renamed since a release (the relay's RENAMED_ACTIONS): a rules file saved before shows
-# and saves them under their new names.
-RENAMED_ACTIONS = {"spotwatch": "frunner"}
-
-
-def renamed_actions(table):
-    if not isinstance(table, dict):
-        return table
-    return {k: renamed_actions(v) if isinstance(v, dict) else RENAMED_ACTIONS.get(v, v) if isinstance(v, str) else v
-            for k, v in table.items()}
+# Actions renamed since a release (the relay reads them the same way): a rules file saved before
+# shows and saves them under their new names.
+from ft_input_actions import renamed_actions  # noqa: E402, F401
 
 
 def read_json(path):
@@ -41,25 +32,6 @@ def _renamed(rules):
     return rules
 
 
-def read_conf(path):
-    return ft_conf.read(path)
-
-
-def write_conf_value(key, value, path):
-    """Set KEY=value in frametop.conf, keeping comments and the rest of the file (shell-quoted,
-    by a temp file and a rename: ft_conf.set_value)."""
-    ft_conf.set_value(key, value, path)
-
-
-def save_rules(rules, path):
-    """Write the rules (whole, under the file's lock). Raises OSError or ft_store.StoreError, and
-    writes nothing, when the file there doesn't read: read_json gave {} for it, and saving that
-    over it would lose everything in it, so it's kept, with a copy."""
-    with ft_store.locked(path):
-        ft_store.load_json_strict(path, {}, ft_store.is_object)
-        ft_store.write_json(path, rules, indent=2, newline=False)
-
-
 UNCHANGED = object()   # what an edit_rules change returns to leave the file as it is
 
 
@@ -67,8 +39,8 @@ def edit_rules(path, change):
     """Read the rules, change(rules) them in place and write them back, all under the file's
     lock, so an edit another program saves between the read and the write isn't lost. The rules
     are read as read_json reads them (renamed actions under their new names), but strictly: a
-    file that doesn't read raises ft_store.StoreError and is kept, with a copy, as save_rules
-    does. Returns what change returned; when that is UNCHANGED nothing is written."""
+    file that doesn't read raises ft_store.StoreError and is kept, with a copy: saving over it
+    would lose it. Returns what change returned; when that is UNCHANGED nothing is written."""
     with ft_store.locked(path):
         rules = _renamed(ft_store.load_json_strict(path, {}, ft_store.is_object))
         result = change(rules)

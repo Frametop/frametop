@@ -81,6 +81,9 @@ GAZE_PROBE = os.path.join(REPO, "gaze", "probe", "ft-gazeprobe")
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
+# GAZE_ACTIONS: gaze mode is a mouse and keyboard feature (docs/gaze-controllers.md).
+# DEFAULT_KEY_BINDINGS: what a rules file without "key_bindings" gets, as the relay reads it.
+from ft_input_actions import DEFAULT_KEY_BINDINGS, GAZE_ACTIONS  # noqa: E402  (the rules file's vocabulary)
 # This folder's own modules (pack/pyside-runtime.py loads this file by its path).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import input_rules  # noqa: E402  (the rules file and frametop.conf)
@@ -271,8 +274,6 @@ PAUSE_DESKTOP_MODES = {"hide": "Hide it and slow it down (windows stay open)",
                        "close": "Close it (windows close; it starts again when you resume)"}
 PAUSE_REASONS = {"game": "a VR game started", "gesture": "controller gesture", "command": "ft-pause",
                  "settings": "from here"}
-# Gaze mode is a mouse and keyboard feature (docs/gaze-controllers.md; the relay's GAZE_ACTIONS).
-GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right", "gaze_quickcal")
 # Dictation's controller buttons are on the Voice page: read from SteamVR's web socket, they stay
 # the games' too (a Controllers mapping would take them).
 VOICE_ACTIONS = voice_settings.DICTATION_ACTIONS
@@ -373,14 +374,6 @@ MODIFIER_CODES = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126
 MODIFIER_NAMES = {29: "Ctrl", 42: "Shift", 56: "Alt", 125: "Meta"}
 # A tap of a right-hand modifier is bound by its own code: that key alone (the relay's modifier_tap).
 RIGHT_MODIFIER_NAMES = {97: "Right Ctrl", 54: "Right Shift", 100: "Right Alt", 126: "Right Meta"}
-# What a rules file without "key_bindings" gets (the relay's DEFAULT_KEY_BINDINGS): a Meta tap
-# opens Steam's menu, Meta+J and Meta+K click at the gaze, Meta+Shift+F floats a window,
-# Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels, Meta+Space opens frunner, Meta+H turns hand
-# tracking off or on, Meta+Shift+H hides or shows the screens, Ctrl+Alt+Shift+Esc releases every key.
-DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
-                        "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",
-                        "29+42+56+1": "release_keys"}
 
 
 def voice_installed():
@@ -457,12 +450,12 @@ def code_names():
 
 
 def read_conf():
-    return input_rules.read_conf(CONF_PATH)
+    return ft_conf.read(CONF_PATH)
 
 
 def write_conf_value(key, value):
-    """Set KEY=value in frametop.conf (input_rules.write_conf_value)."""
-    input_rules.write_conf_value(key, value, CONF_PATH)
+    """Set KEY=value in frametop.conf, keeping comments and the rest (ft_conf.set_value)."""
+    ft_conf.set_value(key, value, CONF_PATH)
 
 
 def host(*cmd, timeout=20):

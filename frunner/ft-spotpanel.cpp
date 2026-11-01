@@ -43,6 +43,7 @@
 #include "../conf/ftsock.h"
 #include "../screens/overlaypanel.h"
 #include "stb_truetype.h"
+#include "../screens/glyphs.h"
 #include "reserve.h"
 
 #include <drm_fourcc.h>
@@ -80,67 +81,18 @@ constexpr int kMaxRows = (kH - kCardTop - 2 * kPad - 16) / kRowH;  // 7
 constexpr int kIcon = 64;                           // icon files are this square
 std::atomic<bool> g_stop{false};
 
-// ---------------------------------------------------------------- text (as screens/label.cpp)
+// ---------------------------------------------------------------- text (screens/glyphs.h)
 
-stbtt_fontinfo g_font;
-std::vector<unsigned char> g_fontData;
-bool g_fontOk = false;
-struct Glyph {
-    std::vector<unsigned char> bitmap;
-    int w = 0, h = 0, xoff = 0, yoff = 0, advance = 0;
-};
-std::map<std::pair<uint32_t, int>, Glyph> g_glyphs;
+glyphs::Font g_font;
 
 void LoadFont() {
-    std::string path;
-    if (FILE *p = popen("fc-match -f '%{file}' 'Noto Sans' 2>/dev/null", "r")) {
-        char buf[512];
-        if (std::fgets(buf, sizeof buf, p)) path = buf;
-        pclose(p);
-    }
-    if (path.empty()) path = "/usr/share/fonts/google-noto-vf/NotoSans[wght].ttf";
-    if (FILE *f = std::fopen(path.c_str(), "rb")) {
-        std::fseek(f, 0, SEEK_END);
-        g_fontData.resize(size_t(std::ftell(f)));
-        std::fseek(f, 0, SEEK_SET);
-        g_fontOk = std::fread(g_fontData.data(), 1, g_fontData.size(), f) == g_fontData.size() &&
-                   stbtt_InitFont(&g_font, g_fontData.data(), stbtt_GetFontOffsetForIndex(g_fontData.data(), 0));
-        std::fclose(f);
-    }
-    if (!g_fontOk) std::fprintf(stderr, "ft-spotpanel: no font (%s); no text\n", path.c_str());
+    const std::string path = glyphs::NotoSans();
+    if (!g_font.Load(path)) std::fprintf(stderr, "ft-spotpanel: no font (%s); no text\n", path.c_str());
 }
 
-const Glyph &GetGlyph(uint32_t cp, int size) {
-    auto [it, fresh] = g_glyphs.try_emplace({cp, size});
-    Glyph &g = it->second;
-    if (fresh) {
-        const float scale = stbtt_ScaleForPixelHeight(&g_font, float(size));
-        unsigned char *b = stbtt_GetCodepointBitmap(&g_font, 0, scale, int(cp), &g.w, &g.h, &g.xoff, &g.yoff);
-        if (b) g.bitmap.assign(b, b + size_t(g.w) * g.h), stbtt_FreeBitmap(b, nullptr);
-        int adv, lsb;
-        stbtt_GetCodepointHMetrics(&g_font, int(cp), &adv, &lsb);
-        g.advance = int(std::lround(adv * scale));
-    }
-    return g;
-}
+using glyphs::Codepoints;
 
-std::vector<uint32_t> Codepoints(const std::string &s) {
-    std::vector<uint32_t> out;
-    for (const unsigned char *p = (const unsigned char *)s.c_str(); *p;) {
-        uint32_t c = *p++;
-        int more = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
-        if (more) c &= 0x3Fu >> more;
-        for (; more && (*p & 0xC0) == 0x80; --more) c = c << 6 | (*p++ & 0x3F);
-        out.push_back(c);
-    }
-    return out;
-}
-
-int Width(const std::vector<uint32_t> &cps, int size) {
-    int w = 0;
-    for (uint32_t cp : cps) w += GetGlyph(cp, size).advance;
-    return w;
-}
+int Width(const std::vector<uint32_t> &cps, int size) { return g_font.Width(cps, size); }
 
 // ---------------------------------------------------------------- the picture
 
@@ -210,29 +162,18 @@ void Glass(Canvas &c, double x0, double y0, double x1, double y1, double r) {
 
 // Text from x (left), centred on cy, cut with an ellipsis at maxW. Returns its right edge.
 int Text(Canvas &c, const std::string &s, int size, int x, int cy, Color k, double a = 1, int maxW = 1 << 20) {
-    if (!g_fontOk || s.empty()) return x;
+    if (!g_font.ok() || s.empty()) return x;
     auto cps = Codepoints(s);
     if (Width(cps, size) > maxW) {
-        const int ell = GetGlyph(0x2026, size).advance;
+        const int ell = g_font.Get(0x2026, size).advance;
         while (!cps.empty() && Width(cps, size) + ell > maxW) cps.pop_back();
         while (!cps.empty() && cps.back() == ' ') cps.pop_back();
         cps.push_back(0x2026);
     }
-    int ascent, descent, gap;
-    stbtt_GetFontVMetrics(&g_font, &ascent, &descent, &gap);
-    const float scale = stbtt_ScaleForPixelHeight(&g_font, float(size));
-    const int baseline = cy + int(std::lround((ascent + descent) * scale / 2));
-    for (uint32_t cp : cps) {
-        const Glyph &gl = GetGlyph(cp, size);
-        for (int gy = 0; gy < gl.h; ++gy)
-            for (int gx = 0; gx < gl.w; ++gx)
-                Blend(c, x + gl.xoff + gx, baseline + gl.yoff + gy, k, a * gl.bitmap[size_t(gy) * gl.w + gx] / 255.0);
-        x += gl.advance;
-    }
-    return x;
+    return g_font.Draw(cps, size, x, cy, [&](int px, int py, uint8_t cover) { Blend(c, px, py, k, a * cover / 255.0); });
 }
 
-int TextWidth(const std::string &s, int size) { return g_fontOk ? Width(Codepoints(s), size) : 0; }
+int TextWidth(const std::string &s, int size) { return g_font.ok() ? Width(Codepoints(s), size) : 0; }
 
 // The search glass in the pill: a ring and a handle.
 void Magnifier(Canvas &c, double cx, double cy, Color k) {

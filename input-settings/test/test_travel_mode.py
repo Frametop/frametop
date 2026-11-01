@@ -1,4 +1,4 @@
-"""travel_mode: Input Settings' switch for SteamVR's travel mode (DEE-220), without Qt or SteamVR.
+"""travel_mode: Input Settings' switch for SteamVR's travel mode, without Qt or SteamVR.
 
 The host runner runs travel_mode's real shell script here, with a stub vrcmd in a temp folder
 (VRCMD points at it) and a stub pgrep on PATH, so the real vrcmd never runs. The stub keeps

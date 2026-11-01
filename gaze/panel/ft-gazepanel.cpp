@@ -95,6 +95,7 @@
 #include "../../conf/ftsock.h"
 #include "../../screens/overlaypanel.h"
 #include "stb_truetype.h"
+#include "../../screens/glyphs.h"
 
 #include <drm_fourcc.h>
 #include <fcntl.h>
@@ -113,7 +114,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -143,69 +143,20 @@ int64_t RawNs() {
     return int64_t(ts.tv_sec) * 1'000'000'000 + ts.tv_nsec;
 }
 
-// ---------------------------------------------------------------- text (as screens/label.cpp)
-
-stbtt_fontinfo g_font;
-std::vector<unsigned char> g_fontData;
-bool g_fontOk = false;
 constexpr int kMaxW = kFullW, kMaxH = kFullH;  // the buffers' size: the biggest panel
-struct Glyph {
-    std::vector<unsigned char> bitmap;
-    int w = 0, h = 0, xoff = 0, yoff = 0, advance = 0;
-};
-std::map<std::pair<uint32_t, int>, Glyph> g_glyphs;
+
+// ---------------------------------------------------------------- text (screens/glyphs.h)
+
+glyphs::Font g_font;
 
 void LoadFont() {
-    std::string path;
-    if (FILE *p = popen("fc-match -f '%{file}' 'Noto Sans' 2>/dev/null", "r")) {
-        char buf[512];
-        if (std::fgets(buf, sizeof buf, p)) path = buf;
-        pclose(p);
-    }
-    if (path.empty()) path = "/usr/share/fonts/google-noto-vf/NotoSans[wght].ttf";
-    if (FILE *f = std::fopen(path.c_str(), "rb")) {
-        std::fseek(f, 0, SEEK_END);
-        g_fontData.resize(size_t(std::ftell(f)));
-        std::fseek(f, 0, SEEK_SET);
-        g_fontOk = std::fread(g_fontData.data(), 1, g_fontData.size(), f) == g_fontData.size() &&
-                   stbtt_InitFont(&g_font, g_fontData.data(), stbtt_GetFontOffsetForIndex(g_fontData.data(), 0));
-        std::fclose(f);
-    }
-    if (!g_fontOk) std::fprintf(stderr, "ft-gazepanel: no font (%s); no text\n", path.c_str());
+    const std::string path = glyphs::NotoSans();
+    if (!g_font.Load(path)) std::fprintf(stderr, "ft-gazepanel: no font (%s); no text\n", path.c_str());
 }
 
-const Glyph &GetGlyph(uint32_t cp, int size) {
-    auto [it, fresh] = g_glyphs.try_emplace({cp, size});
-    Glyph &g = it->second;
-    if (fresh) {
-        const float scale = stbtt_ScaleForPixelHeight(&g_font, float(size));
-        unsigned char *b = stbtt_GetCodepointBitmap(&g_font, 0, scale, int(cp), &g.w, &g.h, &g.xoff, &g.yoff);
-        if (b) g.bitmap.assign(b, b + size_t(g.w) * g.h), stbtt_FreeBitmap(b, nullptr);
-        int adv, lsb;
-        stbtt_GetCodepointHMetrics(&g_font, int(cp), &adv, &lsb);
-        g.advance = int(std::lround(adv * scale));
-    }
-    return g;
-}
+using glyphs::Codepoints;
 
-std::vector<uint32_t> Codepoints(const std::string &s) {
-    std::vector<uint32_t> out;
-    for (const unsigned char *p = (const unsigned char *)s.c_str(); *p;) {
-        uint32_t c = *p++;
-        int more = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
-        if (more) c &= 0x3Fu >> more;
-        for (; more && (*p & 0xC0) == 0x80; --more) c = c << 6 | (*p++ & 0x3F);
-        out.push_back(c);
-    }
-    return out;
-}
-
-int TextWidth(const std::string &s, int size) {
-    if (!g_fontOk) return 0;
-    int width = 0;
-    for (uint32_t cp : Codepoints(s)) width += GetGlyph(cp, size).advance;
-    return width;
-}
+int TextWidth(const std::string &s, int size) { return g_font.ok() ? g_font.Width(Codepoints(s), size) : 0; }
 
 // s as lines no wider than width (the hand panel's): "|" starts a new line, and lines break
 // between words.
@@ -295,22 +246,11 @@ void Rect(Panel &p, int x0, int y0, int x1, int y1, double r, double g, double b
 
 // Text centred on (x, cy), or starting at x (left).
 void Text(Panel &p, const std::string &s, int size, int x, int cy, double r, double g, double b, bool left = false) {
-    if (!g_fontOk || s.empty()) return;
+    if (!g_font.ok() || s.empty()) return;
     const auto cps = Codepoints(s);
-    int width = 0;
-    for (uint32_t cp : cps) width += GetGlyph(cp, size).advance;
-    int ascent, descent, gap;
-    stbtt_GetFontVMetrics(&g_font, &ascent, &descent, &gap);
-    const float scale = stbtt_ScaleForPixelHeight(&g_font, float(size));
+    const int width = g_font.Width(cps, size);
     if (!left) x -= width / 2;
-    const int baseline = cy + int(std::lround((ascent + descent) * scale / 2));
-    for (uint32_t cp : cps) {
-        const Glyph &gl = GetGlyph(cp, size);
-        for (int gy = 0; gy < gl.h; ++gy)
-            for (int gx = 0; gx < gl.w; ++gx)
-                Blend(p, x + gl.xoff + gx, baseline + gl.yoff + gy, r, g, b, gl.bitmap[size_t(gy) * gl.w + gx] / 255.0);
-        x += gl.advance;
-    }
+    g_font.Draw(cps, size, x, cy, [&](int px, int py, uint8_t cover) { Blend(p, px, py, r, g, b, cover / 255.0); });
 }
 
 void Text(Panel &p, const std::string &s, int size, int x, int cy, double lum, bool left = false) {

@@ -1,4 +1,4 @@
-"""Frametop Input Settings' Pointer page with the travel mode switch (DEE-220): the page loads
+"""Frametop Input Settings' Pointer page with the travel mode switch: the page loads
 without QML warnings, reads SteamVR's setting when it opens, and the switch stays off and
 greyed with a note when SteamVR isn't running. The host runner is a fake (SteamVR down), so
 vrcmd never runs. Needs PySide6 and Kirigami (the image's python3).

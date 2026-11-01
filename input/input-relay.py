@@ -262,17 +262,47 @@ import sys
 import time
 
 import game_pause
+from ft_evdev import (  # the Linux input ABI (input.h, uinput.h)
+    EV_KEY,
+    EV_REL,
+    EV_SYN,
+    EVENT,
+    EVIOCGID,
+    EVIOCGKEY,
+    EVIOCGKEYCODE_V2,
+    EVIOCGRAB,
+    EVIOCSKEYCODE_V2,
+    INPUT_KEYMAP_BY_INDEX,
+    KEY_MAX,
+    KEYMAP_ENTRY,
+    SYN_REPORT,
+    UI_DEV_CREATE,
+    UI_DEV_SETUP,
+    UI_SET_EVBIT,
+    UI_SET_KEYBIT,
+    UI_SET_RELBIT,
+    eviocgbit,
+    eviocgname,
+    eviocguniq,
+)
 import vrpad
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "commands"))
 import ft_commands  # noqa: E402  (your commands, "run:NAME")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabulary)
+    DEFAULT_KEY_BINDINGS,
+    GAZE_ACTIONS,
+    VOICE_ACTIONS,
+    VOICE_KEY_BINDINGS,
+    VR_BUTTONS,
+    renamed_actions,
+)
 
-# Linux input constants (include/uapi/linux/input-event-codes.h, input.h, uinput.h).
-EV_SYN, EV_KEY, EV_REL, EV_MSC = 0x00, 0x01, 0x02, 0x04
-SYN_REPORT = 0
-BTN_MISC, KEY_MAX = 0x100, 0x2FF
+# Linux input constants (include/uapi/linux/input-event-codes.h, input.h, uinput.h). The event
+# record and the ioctl numbers are ft_evdev's (shared with vrpad.py); the codes are here.
+BTN_MISC = 0x100
 KEY_A = 30
 REL_X, REL_Y, REL_WHEEL, REL_MAX = 0x00, 0x01, 0x08, 0x0F
 SCROLLS = {0x06, REL_WHEEL, 0x0B, 0x0C}  # REL_HWHEEL, REL_WHEEL and their _HI_RES
@@ -291,48 +321,7 @@ BUS_NETWORK = 0x1000  # ours, past the kernel's: a host's keyboard or mouse (see
 HOST_TIMEOUT = 3.0  # a host device with no word for this long goes away
 HOST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
-# struct input_event on 64-bit: struct timeval (2 x long), u16 type, u16 code, s32 value.
-EVENT = struct.Struct("llHHi")
-
-
-def _ioc(direction, nr, size, kind):
-    return (direction << 30) | (size << 16) | (ord(kind) << 8) | nr
-
-
-def _iow(kind, nr, size):
-    return _ioc(1, nr, size, kind)
-
-
-def _ior(kind, nr, size):
-    return _ioc(2, nr, size, kind)
-
-
-UI_DEV_CREATE = _ioc(0, 1, 0, "U")
-UI_DEV_DESTROY = _ioc(0, 2, 0, "U")
-UI_DEV_SETUP = _iow("U", 3, 92)  # struct uinput_setup: input_id (4 x u16), name[80], u32
-UI_SET_EVBIT = _iow("U", 100, 4)
-UI_SET_KEYBIT = _iow("U", 101, 4)
-UI_SET_RELBIT = _iow("U", 102, 4)
-EVIOCGRAB = _iow("E", 0x90, 4)
-EVIOCGKEY = _ior("E", 0x18, (KEY_MAX + 8) // 8)
-EVIOCGID = _ior("E", 0x02, 8)
-KEYMAP_ENTRY = struct.Struct("BBHI32s")  # struct input_keymap_entry: flags, len, index, keycode, scancode
-INPUT_KEYMAP_BY_INDEX = 1
-EVIOCGKEYCODE_V2 = _ior("E", 0x04, KEYMAP_ENTRY.size)
-EVIOCSKEYCODE_V2 = _iow("E", 0x04, KEYMAP_ENTRY.size)
 EV_NAMES = {EV_KEY: "key", EV_REL: "rel"}
-
-
-def eviocgbit(ev, length):
-    return _ior("E", 0x20 + ev, length)
-
-
-def eviocgname(length):
-    return _ior("E", 0x06, length)
-
-
-def eviocguniq(length):
-    return _ior("E", 0x08, length)
 
 
 VIRTUAL_PREFIX = "frametop virtual"
@@ -342,30 +331,13 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
            "dock_all", "spin_next", "spin_prev", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
            "frunner", "hands_toggle", "release_keys", "key", "none")
-# Gaze mode is a mouse feature: these never come from a controller button (docs/gaze-controllers.md).
-GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right", "gaze_quickcal")
-# Key combinations a rules file without "key_bindings" gets: a Meta tap opens Steam's menu, Meta+J
-# and Meta+K click at the gaze (free on the Frametop desktop, and apps don't use Meta),
-# Meta+Shift+F floats a window, and Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels around
-# you (ft-screens' lazy susan); not Meta+Tab, which is Cmd+Tab on a Mac reached through a remote
-# desktop like RustDesk. Meta+Space opens frunner's search (Plasma's KRunner is Alt+Space), and
-# Meta+H turns hand tracking off or on. Meta+Shift+H hides or shows the screens: the relay reads it
-# from the keyboard, so it works with the screens hidden too, when the desktop gets no keys.
-# Ctrl+Alt+Shift+Esc lets go of every key held anywhere (release_keys), for a modifier stuck in
-# KWin (clicks moved windows, as Meta+click does). It has no Meta, the key that sticks,
-# and it's free: KWin's Ctrl+Alt+Esc (kill a window) and Windows' Ctrl+Shift+Esc (Task Manager,
-# on a remote display) need their modifiers exactly, and four keys don't happen by accident.
-DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
-                        "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",
-                        "29+42+56+1": "release_keys"}
+# GAZE_ACTIONS (mouse and keyboard only) and DEFAULT_KEY_BINDINGS, the key combinations a rules
+# file without "key_bindings" gets, are ft_input_actions'.
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
 # file), a rules file without "key_bindings" gets these too: a Right Ctrl tap, Right Ctrl alone,
 # so a Left Ctrl tap (crouch in many games) doesn't start it.
 VOICE = "\0frametop_voice"
-VOICE_ACTIONS = ("dictate", "dictate_hold")
 VOICE_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-voice.service")
-VOICE_KEY_BINDINGS = {"97": "dictate"}
 KEY_F24 = 194  # sent to the desktop with a Meta combination (see the top)
 # Key combinations ("key_bindings"): modifiers, each side's code folded into the left one's.
 MODIFIERS = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125}
@@ -396,10 +368,7 @@ KB_COORD = re.compile(r"-?\d{1,3}(\.\d{1,6})?")
 TYPE_MAX = 20000  # characters waiting to be typed, at most
 VR_KEYBOARD_MODES = ("always", "no_keyboard", "button", "never")  # when Frametop's keyboard opens
 HELPER = "\0ft_pointer_helper"
-# Frame controller buttons the pointer helper can read (pointer/helper/vrbuttons.h).
-VR_BUTTONS = ("left/view", "left/dpad_up", "left/dpad_down", "left/dpad_left", "left/dpad_right", "left/bumper",
-              "left/trigger", "left/grip", "left/thumbstick", "right/menu", "right/a", "right/b", "right/x", "right/y",
-              "right/bumper", "right/trigger", "right/grip", "right/thumbstick")
+# VR_BUTTONS, the Frame controller buttons the pointer helper can read, is ft_input_actions'.
 VR_DEVICE = "frame_controller"  # the id controller buttons have in watch events
 SCREENS = "\0ft_screens"
 GAZED = "\0ft_gazed"
@@ -414,9 +383,7 @@ SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev", "screen
 # what pressed it, since one from a mouse or controller opens Frametop's keyboard too. It doesn't
 # need pointer mode, and does nothing while Frametop is paused.
 FRUNNER = "\0ft_frunner"
-# Actions renamed since a release: rules files saved before still mean them (spotwatch was
-# frunner's name until 2026-10-20).
-RENAMED_ACTIONS = {"spotwatch": "frunner"}
+# renamed_actions(): old action names rules files may still use, under their new ones (ft_input_actions).
 # hands_toggle: hand tracking off if it runs, else on (HANDSMODE toggle, which says which in this
 # service's log). It doesn't need pointer mode either.
 PROFILE = "profile:"  # "profile:NAME": switch to that profile (doesn't need pointer mode either)
@@ -439,14 +406,6 @@ def keys_codes(a):
                                                  and int(p) not in KEYS_REFUSED for p in parts):
         return None
     return [int(p) for p in parts]
-
-
-def renamed_actions(table):
-    """A rules table ({id: action}, or {id: {code: action}}) with renamed actions under their new names."""
-    if not isinstance(table, dict):
-        return table
-    return {k: renamed_actions(v) if isinstance(v, dict) else RENAMED_ACTIONS.get(v, v) if isinstance(v, str) else v
-            for k, v in table.items()}
 
 
 def known_action(a):
@@ -1260,6 +1219,13 @@ class FullKeyboardLink:
 CREDS = struct.Struct("3i")  # struct ucred: pid, uid, gid, as the kernel adds it to each datagram
 
 
+def peer_creds(ancillary):
+    """(pid, uid) of a datagram's sender, from its SCM_CREDENTIALS (recvmsg's ancillary data), or
+    (None, None) without them."""
+    return next((CREDS.unpack(d[:CREDS.size])[:2] for level, kind, d in ancillary
+                 if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), (None, None))
+
+
 class Relay:
     """The relay: the devices it reads, the control socket, and what it keeps between events.
     main() makes the virtual devices and the sockets, and runs it. A test can make one with fakes
@@ -2045,8 +2011,7 @@ class Relay:
             except BlockingIOError:
                 self.kb_tell(now)  # what changed reaches Full Keyboard at once
                 return
-            pid, uid = next((CREDS.unpack(d[:CREDS.size])[:2] for level, kind, d in anc
-                             if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), (None, None))
+            pid, uid = peer_creds(anc)
             words = data.decode(errors="replace").split()
             cmd = words[0] if words else ""
             # One malformed datagram must not end the relay: it would drop every grab,

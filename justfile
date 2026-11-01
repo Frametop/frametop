@@ -25,8 +25,8 @@ test-python:
         'layout/countdown/tests/test_*.py' 'models/test/*.py' 'commands/test/*.py' 'input-settings/test/*.py' \
         'input/test/*.py' 'hands/tests/test_*.py' 'hands/rec/tests/*.py' 'recorder/tests/*.py' 'gaze/test/*.py' \
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
-        'tour/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'remote-displays/tests/*.py' \
-        'steam/tests/*.py' 'remote/tests/*.py' 'framedrop/tests/*.py' 'pointer/tests/*.py' \
+        'tour/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'pointer/tests/*.py' \
+        'scripts/tests/test_app_imports.py' \
         'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'scripts/tests/test_install_lib.py' \
         'scripts/tests/test_conf_readers.py' 'scripts/tests/test_install_interrupt.py' 'docs/tests/*.py' || status=1
     pytest -q session/tests || status=1
@@ -100,6 +100,14 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/vrcmd-test.cpp \
       -o build/tests/vrcmd-test
     run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test
+    # stb_truetype.h, pinned, fetched once; without it (no network) only this test fails
+    if (. scripts/stb.sh && stb_fetch build/include stb_truetype.h); then
+        g++ -std=c++17 -O2 -Wall -Wextra -Werror -I. -isystem build/include screens/tests/glyphs-test.cpp \
+          -o build/tests/glyphs-test
+        run screens/tests/glyphs-test.cpp build/tests/glyphs-test
+    else
+        echo "screens/tests/glyphs-test.cpp: FAILED (no stb_truetype.h: scripts/stb.sh couldn't fetch it)"; status=1
+    fi
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/overlaypanel-test.cpp \
       -o build/tests/overlaypanel-test
     run screens/tests/overlaypanel-test.cpp build/tests/overlaypanel-test

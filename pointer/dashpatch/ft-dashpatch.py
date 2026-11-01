@@ -49,14 +49,15 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent / "steam"))
 from steamui import _WebSocket  # noqa: E402  (Frametop's small CDP client)
+sys.path.insert(0, str(HERE.parent.parent / "conf"))
+import ft_vrsettings  # noqa: E402  (SteamVR's settings: vrcmd's output and the file)
 
 HOME = Path.home()
 SECTION = "VRWebHelper"
 PORT = 8089
 PATCH = HERE / "treadmill-move.js"
 STEAMVR_BIN = "/opt/steamvr/bin/linuxarm64"
-STEAMVR_SETTINGS = (HOME / ".config/openvr/config/steamvr.vrsettings",
-                    HOME / ".steam/steam/config/steamvr.vrsettings")
+STEAMVR_SETTINGS = ft_vrsettings.FILES
 # There when this turned the debugger on, so `off` leaves a debugger someone else turned on alone.
 MARK = HOME / ".local/state/frametop/pointer/dashboard-debugger"
 # A terminal in the desktop has the desktop's own config folder; vrcmd needs SteamVR's.
@@ -72,18 +73,17 @@ def vrcmd(*args):
 
 
 def settings_file():
-    return next((p for p in STEAMVR_SETTINGS if p.exists()), STEAMVR_SETTINGS[0])
+    return ft_vrsettings.settings_file(STEAMVR_SETTINGS)
 
 
 def get():
     """(DebuggerEnabled, DebuggerPort): a bool or None, an int or None."""
     if steamvr_up():
-        on = re.search(rf"^{SECTION}\.DebuggerEnabled=(\w+)", vrcmd("--settings-bool", f"{SECTION}.DebuggerEnabled"), re.M)
-        port = re.search(rf"^{SECTION}\.DebuggerPort=(-?\d+)", vrcmd("--settings-int", f"{SECTION}.DebuggerPort"), re.M)
-        return (on.group(1) in ("true", "1") if on else None), (int(port.group(1)) if port else None)
-    try:
-        s = json.loads(settings_file().read_text()).get(SECTION, {})
-    except (OSError, ValueError, AttributeError):
+        on = ft_vrsettings.vrcmd_bool(vrcmd("--settings-bool", f"{SECTION}.DebuggerEnabled"), SECTION, "DebuggerEnabled")
+        port = ft_vrsettings.vrcmd_int(vrcmd("--settings-int", f"{SECTION}.DebuggerPort"), SECTION, "DebuggerPort")
+        return on, port
+    s = ft_vrsettings.read_section(settings_file(), SECTION)
+    if s is None:
         return None, None
     on, port = s.get("DebuggerEnabled"), s.get("DebuggerPort")
     return (on if isinstance(on, bool) else None), (port if isinstance(port, int) else None)
@@ -91,29 +91,13 @@ def get():
 
 def put(on):
     if steamvr_up():
-        # 1 or 0: vrcmd reads "true" as 0.
-        vrcmd("--set-settings-bool", f"{SECTION}.DebuggerEnabled", "1" if on else "0")
+        vrcmd("--set-settings-bool", f"{SECTION}.DebuggerEnabled", ft_vrsettings.bool_arg(on))
         if on:
             vrcmd("--set-settings-int", f"{SECTION}.DebuggerPort", str(PORT))
         got_on, got_port = get()
         return got_on is on and (not on or got_port == PORT)
-    path = settings_file()
-    try:
-        d = json.loads(path.read_text())
-    except FileNotFoundError:
-        d = {}
-    except (OSError, ValueError) as e:
-        print(f"can't read {path}: {e}", file=sys.stderr)
-        return False
-    s = d.setdefault(SECTION, {})
-    s["DebuggerEnabled"] = on
-    if on:
-        s["DebuggerPort"] = PORT
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".frametop-tmp")
-    tmp.write_text(json.dumps(d, indent=3) + "\n")
-    tmp.replace(path)
-    return True
+    return ft_vrsettings.write_values(settings_file(), SECTION,
+                                      {"DebuggerEnabled": on, **({"DebuggerPort": PORT} if on else {})})
 
 
 def dashboard():

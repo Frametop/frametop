@@ -18,19 +18,20 @@ SteamVR's settings have no switch for it.
 With SteamVR running it goes through vrcmd, since SteamVR keeps its settings in memory and
 writes over the file; without it, it edits SteamVR's settings file.
 """
-import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "conf"))
+import ft_vrsettings  # noqa: E402  (SteamVR's settings: vrcmd's output and the file)
+
 HOME = Path.home()
 SECTION, KEY = "steamvr", "gazeDepEyeToHeadEnable"
 STEAMVR_BIN = "/opt/steamvr/bin/linuxarm64"
 # The first that exists is SteamVR's (as gaze/gazecal.py reads them).
-STEAMVR_SETTINGS = (HOME / ".config/openvr/config/steamvr.vrsettings",
-                    HOME / ".steam/steam/config/steamvr.vrsettings")
+STEAMVR_SETTINGS = ft_vrsettings.FILES
 # There when this turned the setting on (it was off), so `off` leaves a setting someone chose alone.
 MARK = HOME / ".local/state/frametop/gaze/steamvr-eye-rate"
 EYE_LOG = HOME / ".local/share/Steam/logs/eyetracking.txt"
@@ -49,7 +50,7 @@ def vrcmd(*args):
 
 
 def settings_file():
-    return next((p for p in STEAMVR_SETTINGS if p.exists()), STEAMVR_SETTINGS[0])
+    return ft_vrsettings.settings_file(STEAMVR_SETTINGS)
 
 
 def get():
@@ -57,34 +58,17 @@ def get():
     (then the driver's default, off)."""
     if steamvr_up():
         # vrcmd prints "steamvr.gazeDepEyeToHeadEnable=true"
-        m = re.search(rf"^{SECTION}\.{KEY}=(\w+)", vrcmd("--settings-bool", f"{SECTION}.{KEY}"), re.M)
-        return None if not m else m.group(1) in ("true", "1")
-    try:
-        value = json.loads(settings_file().read_text()).get(SECTION, {}).get(KEY)
-    except (OSError, ValueError, AttributeError):
-        return None
+        return ft_vrsettings.vrcmd_bool(vrcmd("--settings-bool", f"{SECTION}.{KEY}"), SECTION, KEY)
+    s = ft_vrsettings.read_section(settings_file(), SECTION)
+    value = s.get(KEY) if isinstance(s, dict) else None
     return value if isinstance(value, bool) else None
 
 
 def put(on):
     if steamvr_up():
-        # 1 or 0: vrcmd reads "true" as 0.
-        vrcmd("--set-settings-bool", f"{SECTION}.{KEY}", "1" if on else "0")
+        vrcmd("--set-settings-bool", f"{SECTION}.{KEY}", ft_vrsettings.bool_arg(on))
         return get() is on
-    path = settings_file()
-    try:
-        d = json.loads(path.read_text())
-    except FileNotFoundError:
-        d = {}
-    except (OSError, ValueError) as e:
-        print(f"can't read {path}: {e}", file=sys.stderr)
-        return False
-    d.setdefault(SECTION, {})[KEY] = on
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".frametop-tmp")
-    tmp.write_text(json.dumps(d, indent=3) + "\n")
-    tmp.replace(path)
-    return True
+    return ft_vrsettings.write_values(settings_file(), SECTION, {KEY: on})
 
 
 def camera_rate():

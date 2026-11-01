@@ -1554,6 +1554,7 @@ Kirigami.ApplicationWindow {
             sendingAfterExport: root.sendAfterExport
             busyTime: "a few minutes"
             cancelExport: () => { root.sendAfterExport = false; backend.cancelExport() }
+            freeAll: () => root.askFreeAll()
             freeableCount: backend.freeableCount
             freeableText: backend.freeableText
             aboutText: "Export leaves out the ranges you deleted, compresses the rest and adds a manifest and "

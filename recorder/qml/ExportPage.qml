@@ -21,8 +21,9 @@ Kirigami.ScrollablePage {
     property string busyTime
     property bool busyFirst: false
     property var cancelExport: () => backend.cancelExport()
-    // After a failed export, offer to delete the uploaded rounds that free this much
-    // (recorder.askFreeAll). The Eye Recorder leaves it at none.
+    // After a failed export, offer to delete the uploaded rounds that free this much, by asking
+    // with freeAll (the Hand Recorder's askFreeAll). The Eye Recorder gives none.
+    property var freeAll: null
     property int freeableCount: 0
     property string freeableText: ""
     property string aboutText
@@ -207,7 +208,8 @@ Kirigami.ScrollablePage {
         Kirigami.InlineMessage {
             Layout.maximumWidth: Kirigami.Units.gridUnit * 26
             Layout.fillWidth: true
-            visible: !backend.exporting && backend.exportText.indexOf("Failed") === 0 && exportView.freeableCount > 0
+            visible: exportView.freeAll !== null && !backend.exporting && backend.exportText.indexOf("Failed") === 0
+                     && exportView.freeableCount > 0
             type: Kirigami.MessageType.Information
             text: exportView.recorder.plural(exportView.freeableCount, "uploaded round") + " can be deleted to free "
                   + exportView.freeableText + ". Your record of each upload stays."
@@ -215,7 +217,7 @@ Kirigami.ScrollablePage {
                 Kirigami.Action {
                     text: "Delete uploaded rounds"
                     icon.name: "edit-delete"
-                    onTriggered: exportView.recorder.askFreeAll()
+                    onTriggered: exportView.freeAll()
                 }
             ]
         }

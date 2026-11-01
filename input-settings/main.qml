@@ -1093,6 +1093,22 @@ Kirigami.ApplicationWindow {
                           + "follow settings below are a starting point, and polishing how it feels is left open "
                           + "for anyone who wants to take it further."
                 }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Travel mode:"
+                    text: "SteamVR tracks for a moving car, train or plane (SteamVR's own setting, off by default)"
+                    checked: backend.travelMode
+                    enabled: backend.travelKnown && !backend.travelBusy
+                    onToggled: backend.setTravelMode(checked)
+                    Component.onCompleted: backend.refreshTravel()
+                }
+                Controls.Label {
+                    visible: backend.travelNote !== ""
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    text: backend.travelNote
+                }
                 Repeater {
                     model: backend.pointerSettings
                     delegate: RowLayout {

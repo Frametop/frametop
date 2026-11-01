@@ -92,6 +92,16 @@ Your hands show over the screens: where a tracked hand is between an eye and a s
 
 Details, options, and the recording and replay tools are in [hands/README.md](../hands/README.md).
 
+## Stereo wallpaper (experimental)
+
+A picture per eye behind the windows on the docked screens, so a stereo photo has depth. Frametop Display Settings' Screens page has it under Stereo wallpaper: pick one side-by-side picture (the left eye's half on the left) or a left and a right picture, then turn on Picture per eye (the desktop has to be running). The pictures are scaled down to 2560 pixels and cover each screen, cut evenly off the long sides.
+
+KWin draws the wallpaper and the windows into one buffer per screen, so Frametop can't swap the wallpaper out underneath. Turning it on sets Plasma's wallpaper on every desktop to solid magenta (255, 0, 255), and ft-screens draws each eye's picture wherever a screen has that colour, through the hand cutouts' GPU pass (about 0.13 ms of GPU time per eye for each new frame of a 3440x1440 screen, by the remote displays' measure, `docs/remote-displays.md`). If that pass can't start (ft-screens' log says `hand cutouts unavailable`), the screens show plain magenta: turn Picture per eye off. Magenta darkened by a window's shadow gets the picture darkened the same, so shadows fall on it. Turning it off puts back each desktop's old wallpaper (kept in `~/.local/share/frametop/wallpaper/plasma-before.json`, next to the pictures, `left.ppm` and `right.ppm`).
+
+- `STEREO_WALLPAPER=1` in frametop.conf turns it on when ft-screens starts; Display Settings sets it (`display-settings/stereo_wallpaper.py on|off|reload`, run on the host). ft-screens' `wallpaper on|off` command reads the pictures again or stops.
+- Window edges over the wallpaper can show a thin magenta fringe where a window's anti-aliased corner or a coloured shadow mixes with the key colour: only pure magenta and its darker shades are replaced.
+- Magenta in a window (a picture, a web page) gets the wallpaper too. Floating windows don't show the wallpaper at all, and a screen added later gets Plasma's default wallpaper until Picture per eye is turned off and on again.
+
 ## Remote desktop over VNC
 
 With `REMOTE=1` in the config (`desktops.sh remote on`), the desktop's primary screen (the one with the taskbar) is also served over VNC, at that screen's resolution, for RealVNC Viewer or macOS Screen Sharing. `desktops.sh remote info` prints the address and password.

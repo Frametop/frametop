@@ -70,6 +70,25 @@ uniform samplerExternalOES tex;
 varying vec2 uv;
 void main() { gl_FragColor = vec4(texture2D(tex, uv).rgb, 1.0); })";
 
+// The same with a stereo wallpaper (DEE-317): where the client has the key colour, this eye's
+// picture, darkened where a window's shadow darkened the key. The sums are wallimage::Key's
+// (wallimage.h), which screens/tests/wallimage-test.cpp checks.
+const char *kKeyed = R"(
+#extension GL_OES_EGL_image_external : require
+precision highp float;
+uniform samplerExternalOES tex;
+uniform sampler2D wall;
+uniform vec2 cover;      // the picture's part that covers the screen, about its centre
+varying vec2 uv;
+void main() {
+    vec3 c = texture2D(tex, uv).rgb;
+    float s = max(c.r, c.b);
+    float off = max(abs(c.r - c.b), c.g);
+    float k = (1.0 - smoothstep(0.03, 0.08, off)) * smoothstep(0.30, 0.45, s);
+    vec3 w = texture2D(wall, 0.5 + (uv - 0.5) * cover).rgb * s;
+    gl_FragColor = vec4(mix(c, w, k), 1.0);
+})";
+
 // Coverage of one tapered capsule; blended to take that much alpha away.
 const char *kCut = R"(
 precision highp float;
@@ -205,6 +224,7 @@ Renderer::~Renderer() {
         glDeleteTextures(1, &im.tex);
         egl.destroyImage(EGLDisplay(dpy_), EGLImageKHR(im.image));
     }
+    if (wallTex_[0]) glDeleteTextures(2, wallTex_);
     gpuctx::Close(EGLDisplay(dpy_), EGLContext(ctx_));
     if (gbm_) rendernode::Release();
 }
@@ -226,7 +246,8 @@ bool Renderer::Init(const std::vector<uint64_t> &modifiers, std::function<void(c
     hullProg_ = Program(kHull, kVertexPx);
     glowProg_ = Program(kGlow);
     markProg_ = Program(kMark);
-    if (!copyProg_ || !cutProg_ || !hullProg_ || !glowProg_ || !markProg_) return false;
+    keyedProg_ = Program(kKeyed);
+    if (!copyProg_ || !cutProg_ || !hullProg_ || !glowProg_ || !markProg_ || !keyedProg_) return false;
     const float quad[] = {0, 0, 1, 0, 0, 1, 1, 1};
     glGenBuffers(1, &vbo_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -415,12 +436,22 @@ void Renderer::Draw(Output &o, unsigned tex, int w, int h, const Spots eyes[2], 
         }
         glViewport(e * w, 0, w, h);
         glDisable(GL_BLEND);
-        glUseProgram(copyProg_);
+        const GLuint prog = wallW_ > 0 ? keyedProg_ : copyProg_;
+        glUseProgram(prog);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
-        glUniform1i(glGetUniformLocation(copyProg_, "tex"), 0);
-        glUniform4f(glGetUniformLocation(copyProg_, "rect"), 0, 0, float(w), float(h));
-        glUniform2f(glGetUniformLocation(copyProg_, "size"), float(w), float(h));
+        glUniform1i(glGetUniformLocation(prog, "tex"), 0);
+        glUniform4f(glGetUniformLocation(prog, "rect"), 0, 0, float(w), float(h));
+        glUniform2f(glGetUniformLocation(prog, "size"), float(w), float(h));
+        if (wallW_ > 0) {
+            // cover: the picture fills the screen, its overhang cut off evenly on both sides
+            const float screen = float(w) / float(h), pic = float(wallW_) / float(wallH_);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, wallTex_[e]);
+            glUniform1i(glGetUniformLocation(prog, "wall"), 1);
+            glUniform2f(glGetUniformLocation(prog, "cover"), screen > pic ? 1.0f : screen / pic, screen > pic ? pic / screen : 1.0f);
+            glActiveTexture(GL_TEXTURE0);
+        }
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         // take alpha away where the hand is; the colour stays (straight alpha)
         glEnable(GL_BLEND);
@@ -486,6 +517,7 @@ void Renderer::Draw(Output &o, unsigned tex, int w, int h, const Spots eyes[2], 
 const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, const ft_dmabuf &src,
                                   const Spots eyes[2]) {
     if (!ready_) return nullptr;
+    if (wallDirty_) UploadWallpaper();
     const int64_t t0 = SteadyNs();
     const int w = src.width, h = src.height;
     Ring &ring = rings_[panel];
@@ -503,7 +535,7 @@ const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, c
 
     const int newest = ring.drawing >= 0 ? ring.drawing : ring.shown;
     const Output *n = newest >= 0 ? &ring.out[newest] : nullptr;
-    if (n && n->key == key && n->serial == serial && SameSpots(n->spots, eyes)) {
+    if (n && n->key == key && n->serial == serial && n->wall == wallVersion_ && SameSpots(n->spots, eyes)) {
         ++stats_.same;
     } else if (ring.drawing >= 0) {
         ++stats_.busy;   // drawn on a later tick, from what's current then
@@ -514,12 +546,12 @@ const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, c
         if (!o.bo && !MakeOutput(o, 2 * w, h)) return nullptr;
         const GLuint tex = Texture(key, src);
         if (!tex) return nullptr;
-        const bool partial = o.drawn && o.key == key && o.serial == serial;
+        const bool partial = o.drawn && o.key == key && o.serial == serial && o.wall == wallVersion_;
         Draw(o, tex, w, h, eyes, partial);
         o.fence = egl.createSync(EGLDisplay(dpy_), EGL_SYNC_FENCE_KHR, nullptr);
         glFlush();
         if (!o.fence) glFinish();   // no fence: wait here, as before
-        o.key = key, o.serial = serial, o.drawn = true;
+        o.key = key, o.serial = serial, o.drawn = true, o.wall = wallVersion_;
         for (int e = 0; e < 2; ++e) o.spots[e] = eyes[e];
         ring.drawing = i;
         ++stats_.draws, stats_.partial += partial;
@@ -532,6 +564,38 @@ const Output *Renderer::Composite(int panel, const void *key, uint64_t serial, c
     lastMs_ = (SteadyNs() - t0) / 1e6;
     stats_.cpuMs += lastMs_, stats_.worstMs = std::max(stats_.worstMs, lastMs_);
     return ring.shown >= 0 ? &ring.out[ring.shown] : nullptr;
+}
+
+void Renderer::SetWallpaper(int w, int h, std::vector<uint8_t> left, std::vector<uint8_t> right) {
+    const size_t n = size_t(std::max(w, 0)) * size_t(std::max(h, 0)) * 3;
+    const bool ok = w > 0 && h > 0 && left.size() == n && right.size() == n;
+    pendingW_ = ok ? w : 0, pendingH_ = ok ? h : 0;
+    pending_[0] = ok ? std::move(left) : std::vector<uint8_t>();
+    pending_[1] = ok ? std::move(right) : std::vector<uint8_t>();
+    wallDirty_ = true;
+}
+
+void Renderer::UploadWallpaper() {
+    wallDirty_ = false;
+    ++wallVersion_;   // every panel's buffers are out of date: drawn whole again
+    if (!pendingW_) {
+        if (wallTex_[0]) glDeleteTextures(2, wallTex_), wallTex_[0] = wallTex_[1] = 0;
+        wallW_ = wallH_ = 0;
+        return;
+    }
+    if (!wallTex_[0]) glGenTextures(2, wallTex_);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    for (int e = 0; e < 2; ++e) {
+        glBindTexture(GL_TEXTURE_2D, wallTex_[e]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, pendingW_, pendingH_, 0, GL_RGB, GL_UNSIGNED_BYTE, pending_[e].data());
+        pending_[e] = std::vector<uint8_t>();
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    wallW_ = pendingW_, wallH_ = pendingH_;
 }
 
 double Renderer::Finish() {

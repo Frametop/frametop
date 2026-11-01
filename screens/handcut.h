@@ -294,6 +294,7 @@ struct Output {
     uint64_t serial = 0;
     bool drawn = false;
     Spots spots[2];
+    uint64_t wall = 0;            // the stereo wallpaper it was drawn with (Renderer's wallVersion_)
 };
 
 // A dot for ft-handtest --probe: centre and radius in pixels of the eye's half, colour.
@@ -333,6 +334,12 @@ public:
     // ft-handtest --probe: a transparent w x h buffer per eye (side by side) with only the
     // dots in it, drawn every call, fenced as Composite's. Returns the newest finished one.
     const Output *Marks(int panel, int w, int h, const std::vector<Mark> eyes[2]);
+    // A stereo wallpaper (wallimage.h, DEE-317): a picture per eye, RGB, top row first, w x h,
+    // fitted to cover each screen and put where the client buffer has the key colour (or the
+    // key colour darkened by a window's shadow). Empty pictures: none, the client's pixels as
+    // they are. Kept here and uploaded by the next Composite, which then draws every panel
+    // whole again.
+    void SetWallpaper(int w, int h, std::vector<uint8_t> left, std::vector<uint8_t> right);
     // A client buffer is going away.
     void Forget(const void *key);
     // A panel is gone: drop its outputs.
@@ -349,9 +356,16 @@ private:
     void FreeOutput(Output &o);
     bool Passed(Output &o, int64_t timeoutNs);
     void Draw(Output &o, unsigned tex, int w, int h, const Spots eyes[2], bool partial);
+    void UploadWallpaper();
     bool ready_ = false;
     void *gbm_ = nullptr, *dpy_ = nullptr, *ctx_ = nullptr;
     unsigned copyProg_ = 0, cutProg_ = 0, hullProg_ = 0, glowProg_ = 0, markProg_ = 0, vbo_ = 0;
+    unsigned keyedProg_ = 0, wallTex_[2] = {0, 0};
+    int wallW_ = 0, wallH_ = 0;                      // the uploaded wallpaper's size; 0: none
+    int pendingW_ = 0, pendingH_ = 0;
+    std::vector<uint8_t> pending_[2];                // SetWallpaper's, until the next Composite
+    bool wallDirty_ = false;
+    uint64_t wallVersion_ = 0;                       // counts uploads (and removals)
     std::vector<uint64_t> modifiers_;
     std::function<void(const Output *)> released_;
     struct Imported { void *image; unsigned tex; };

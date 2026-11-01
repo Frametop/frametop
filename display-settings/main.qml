@@ -1,6 +1,7 @@
 // Frametop Display Settings (Kirigami). Backend: ft_display_settings.py ("backend").
 import QtQuick
 import QtQuick.Controls as Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
@@ -406,6 +407,64 @@ Kirigami.ApplicationWindow {
                                 text: "looks like " + modelData.effective
                                 opacity: 0.7
                             }
+                        }
+                    }
+
+                    // DEE-317: Plasma's wallpaper becomes a key colour and ft-screens puts a picture
+                    // per eye there (stereo_wallpaper.py). Docked screens only.
+                    Kirigami.Separator {
+                        visible: spage.md
+                        Kirigami.FormData.isSection: true
+                        Kirigami.FormData.label: "Stereo wallpaper"
+                    }
+                    Controls.Switch {
+                        id: stereoSwitch
+                        visible: spage.md
+                        Kirigami.FormData.label: "Picture per eye:"
+                        text: checked ? "On" : "Off"
+                        checked: backend.stereoWallpaper
+                        enabled: backend.desktopRunning && backend.busy === "" && (checked || backend.stereoWallpaperReady)
+                        onToggled: {
+                            backend.setStereoWallpaper(checked)
+                            checked = Qt.binding(() => backend.stereoWallpaper)
+                        }
+                    }
+                    RowLayout {
+                        id: picsRow
+                        visible: spage.md
+                        Kirigami.FormData.label: "Pictures:"
+                        property string leftUrl: ""
+                        Controls.Button {
+                            text: "Side-by-side picture…"
+                            enabled: backend.busy === ""
+                            onClicked: sbsDialog.open()
+                        }
+                        Controls.Button {
+                            text: "Left and right…"
+                            enabled: backend.busy === ""
+                            onClicked: leftDialog.open()
+                        }
+                        Controls.Label {
+                            text: backend.stereoWallpaperReady ? "picked" : "none yet"
+                            opacity: 0.7
+                        }
+                        FileDialog {
+                            id: sbsDialog
+                            title: "A side-by-side picture: the left eye's half on the left"
+                            nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp)"]
+                            onAccepted: backend.chooseStereoWallpaper(selectedFile.toString(), "")
+                        }
+                        FileDialog {
+                            id: leftDialog
+                            title: "The left eye's picture"
+                            nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp)"]
+                            onAccepted: { picsRow.leftUrl = selectedFile.toString(); rightDialog.open() }
+                        }
+                        FileDialog {
+                            id: rightDialog
+                            title: "The right eye's picture"
+                            nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp)"]
+                            onAccepted: backend.chooseStereoWallpaper(picsRow.leftUrl, selectedFile.toString())
                         }
                     }
                 }

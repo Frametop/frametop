@@ -17,7 +17,7 @@ enum Verb {
     Place, Width, CurveOnOff, Curve, Pin, Unpin, Get, Screens, Universe, Head,
     Visibility, Wrist, Gesture, GamepadPill, Concealed, ConcealReveal, HideShowToggle,
     Pause, InGames, SteamvrMode, Controllers, HandSetting, SpinDistance, Hands,
-    SteamvrList, Typing, CalPanel, Ray, HandInput, PalmMenu, GrabThat, Cutouts,
+    SteamvrList, Typing, CalPanel, Ray, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, Carry, Up, Spin,
     Front, Debug, State,  // keep State last: kLastVerb, and the test walks Place..kLastVerb
 };
@@ -61,7 +61,7 @@ inline Group GroupOf(Verb v) {
         return HelperWordGroup;
     case HandInput: case PalmMenu: case GrabThat:
         return HandFeatureGroup;
-    case Cutouts:
+    case Cutouts: case Wallpaper:
         return CutoutsGroup;
     case Float: case Hold: case Unfloat: case Sub: case Minimized: case Moving: case Torn: case Carry: case Up:
         return FloatGroup;
@@ -113,6 +113,7 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "palmmenu %15s", c.word) == 1) return PalmMenu;
     if (std::sscanf(cmd, "grabthat %15s", c.word) == 1) return GrabThat;
     if (std::sscanf(cmd, "cutouts %15s", c.word) == 1) return Cutouts;
+    if (std::sscanf(cmd, "wallpaper %15s", c.word) == 1) return Wallpaper;
     if (std::sscanf(cmd, "float %d %lf %d %d %d %d %d", &c.n, &c.w, &c.x0, &c.y0, &c.w0, &c.h0, &c.t0) == 7) return Float;
     if (std::sscanf(cmd, "hold %d %d", &c.n, &c.ms) == 2) return Hold;
     if (std::sscanf(cmd, "unfloat %d", &c.n) == 1) return Unfloat;

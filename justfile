@@ -100,6 +100,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/vrcmd-test.cpp \
       -o build/tests/vrcmd-test
     run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/wallimage-test.cpp \
+      -o build/tests/wallimage-test
+    run screens/tests/wallimage-test.cpp build/tests/wallimage-test
     # stb_truetype.h, pinned, fetched once; without it (no network) only this test fails
     if (. scripts/stb.sh && stb_fetch build/include stb_truetype.h); then
         g++ -std=c++17 -O2 -Wall -Wextra -Werror -I. -isystem build/include screens/tests/glyphs-test.cpp \

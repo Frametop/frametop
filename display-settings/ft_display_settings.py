@@ -49,6 +49,7 @@ import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the pa
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import steam_settings  # noqa: E402
+import stereo_wallpaper  # noqa: E402  (DEE-317: the pictures here, the rest on the host)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 DESKTOPS = os.path.join(HERE, "..", "desktops.sh")
@@ -632,6 +633,49 @@ class Backend(QObject):
             self.message.emit(f"All screens ride {place} now. Save as profile… (Layout & profiles) keeps it.", False)
         self._check_running()
 
+    # --- stereo wallpaper (DEE-317, stereo_wallpaper.py) ---
+    @Property(bool, notify=changed)
+    def stereoWallpaper(self):
+        return ft_layout.read_conf().get("STEREO_WALLPAPER", "0") == "1"
+
+    @Property(bool, notify=changed)
+    def stereoWallpaperReady(self):
+        """Both eyes' pictures are there."""
+        return stereo_wallpaper.ready()
+
+    @Slot(str, str)
+    def chooseStereoWallpaper(self, left, right):
+        """Pictures from the file dialog (file:// URLs or paths): a left and a right, or `left`
+        alone as one side-by-side picture (right empty). With the stereo wallpaper on, the
+        screens show the new ones at once."""
+        def local(u):
+            return QUrl(u).toLocalFile() if u.startswith("file:") else u
+        err = stereo_wallpaper.prepare(local(left), local(right) or None)
+        if err:
+            self.message.emit(err, True)
+            return
+        self.changed.emit()
+        if self.stereoWallpaper and self._running:
+            self._run("New stereo wallpaper", argv=self._wallpaper_argv("reload"))
+        else:
+            self.message.emit("Stereo wallpaper pictures ready.", False)
+
+    @Slot(bool)
+    def setStereoWallpaper(self, on):
+        """Plasma's wallpaper becomes the key colour and ft-screens draws the pictures in it, or
+        both go back. Needs the desktop running (Plasma is scripted live)."""
+        if on and not stereo_wallpaper.ready():
+            self.message.emit("Pick the pictures first.", True)
+            return
+        if not self._running:
+            self.message.emit("Start the Frametop desktop first: the wallpaper is set in it.", True)
+            return
+        self._run("Stereo wallpaper " + ("on" if on else "off"), argv=self._wallpaper_argv("on" if on else "off"))
+
+    @staticmethod
+    def _wallpaper_argv(verb):
+        return host_command("python3", os.path.abspath(stereo_wallpaper.__file__), verb)
+
     # --- power: ft-powerd and Steam's sleep setting ---
     def _check_powerd(self):
         self._ipc.run(self._powerd_status, then=self._set_powerd)
@@ -875,7 +919,8 @@ class Backend(QObject):
             self.message.emit("Couldn't start Frametop Remote Displays", True)
 
     # --- ft-layout on the host ---
-    def _run(self, label, *args):
+    def _run(self, label, *args, argv=None):
+        """ft-layout with args on the host (or argv instead), one at a time."""
         if self._proc is not None:
             self.message.emit(f"Still busy: {self._busy}", True)
             return
@@ -883,7 +928,7 @@ class Backend(QObject):
         self.busyChanged.emit()
         proc = QProcess(self)
         proc.setProcessChannelMode(QProcess.MergedChannels)
-        argv = host_command(os.path.abspath(FT_LAYOUT), *args)
+        argv = argv or host_command(os.path.abspath(FT_LAYOUT), *args)
         proc.finished.connect(lambda code, _status: self._done(proc, label, code))
         self._proc = proc
         proc.start(argv[0], argv[1:])

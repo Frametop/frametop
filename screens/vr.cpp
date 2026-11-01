@@ -113,6 +113,7 @@
 #include "../hands/include/fh_events.h"
 
 #include "handcut.h"
+#include "wallimage.h"
 #include "grabthat.h"
 #include "handinput.h"
 #include "softglow.h"
@@ -435,6 +436,21 @@ handcut::Matte g_matteNow;      // this tick's
 bool g_handsNow = false;        // g_hands has fresh hands this tick
 handcut::Renderer g_cutter;
 int g_cutterState = 0;          // 0 not tried, 1 ready, -1 unavailable
+// Stereo wallpapers (DEE-317, wallimage.h): STEREO_WALLPAPER=1 or `wallpaper on`. Every docked
+// screen then goes through g_cutter, which puts a picture per eye where the key colour is.
+bool g_wallpaper = false;
+
+// Loads wallimage::Dir()'s left.ppm and right.ppm into g_cutter. False (and why) when they
+// can't be read or differ in size; the wallpaper stays as it was then.
+bool LoadWallpaper(std::string *why) {
+    wallimage::Image l, r;
+    const std::string dir = wallimage::Dir();
+    if (!wallimage::LoadPpm(dir + "/left.ppm", &l, why) || !wallimage::LoadPpm(dir + "/right.ppm", &r, why)) return false;
+    if (l.w != r.w || l.h != r.h) return *why = "left.ppm and right.ppm differ in size", false;
+    *why = std::to_string(l.w) + "x" + std::to_string(l.h);
+    g_cutter.SetWallpaper(l.w, l.h, std::move(l.rgb), std::move(r.rgb));
+    return true;
+}
 std::map<const void *, vr::SharedTextureHandle_t> g_cutImports;
 roomview::Detector g_roomView;   // no cutouts with Room View off
 trackwatch::Watch g_track;       // logs what SteamVR does to standing (trackwatch.h)
@@ -2635,11 +2651,12 @@ void UpdateCutouts() {
         handcut::Spots spots[2];
         Mat p;
         bool cut = false;
-        if (g_cutouts && haveHead && s.visible && !s.floating && s.key && s.width > 0 && ScreenPose(s, &p)) {
+        if ((g_wallpaper || (g_cutouts && haveHead)) && s.visible && !s.floating && s.key && s.width > 0 && ScreenPose(s, &p)) {
+            cut = g_wallpaper;   // a picture per eye, hands or not
             if (hands)
-                cut = handcut::Project({p, s.metres, s.heightMetres(), s.curve, s.width, s.height}, g_matteNow, eyes, spots);
+                cut = handcut::Project({p, s.metres, s.heightMetres(), s.curve, s.width, s.height}, g_matteNow, eyes, spots) || cut;
             const auto g = glows.find(i);
-            if (g != glows.end() && !g->second.empty()) {
+            if (g_cutouts && haveHead && g != glows.end() && !g->second.empty()) {
                 spots[0].glows = spots[1].glows = g->second;   // on the surface: the same texture point for both eyes
                 cut = true;
             }
@@ -4911,6 +4928,11 @@ bool ft_vr_init(void) {
     // (user, 2026-10-09: the drawn hands instead of the bubble); `cutouts on` brings them back.
     g_cutouts = handcut::Setting("HANDS_CUTOUTS", "0") == "1";
     std::printf("hands: cutouts %s\n", g_cutouts ? "on (HANDS_CUTOUTS=1)" : "off (the drawn hands show them; HANDS_CUTOUTS=1 cuts holes too)");
+    if (handcut::Setting("STEREO_WALLPAPER", "0") == "1") {
+        std::string why;
+        g_wallpaper = LoadWallpaper(&why);
+        std::printf("stereo wallpaper: %s (%s)\n", g_wallpaper ? "on" : "off", why.c_str());
+    }
     g_palm.params().on = handcut::Setting("HANDS_PALM_MENU", "1") != "0";
     std::printf("hands: palm menu %s\n", g_palm.params().on ? "on (palm up, pinch: the Steam menu)" : "off");
     grabthat::Params &gt = g_grabThat.params();
@@ -6149,6 +6171,21 @@ static void CutoutsCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
                       g_roomView.on() ? "" : ": no cutouts");
         return;
     }
+    case vrcmd::Wallpaper: {
+        // on: (re)read the pictures Display Settings wrote; off: the client's pixels as they are
+        std::string why = "off";
+        if (!std::strcmp(word, "on")) {
+            if (!LoadWallpaper(&why)) return (void)std::snprintf(reply, size, "error %s", why.c_str());
+            g_wallpaper = true;
+        } else if (!std::strcmp(word, "off")) {
+            g_cutter.SetWallpaper(0, 0, {}, {});
+            g_wallpaper = false;
+        } else {
+            return (void)std::snprintf(reply, size, "error wallpaper on|off");
+        }
+        std::snprintf(reply, size, "ok wallpaper %s", why.c_str());
+        return;
+    }
     default:
         std::snprintf(reply, size, "error unknown command");
     }
@@ -6295,6 +6332,8 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //                             typing -> "ok <degrees>", "error pinned", "error not in the room"
 //   front <N>                 panel N gets typing and its window becomes KWin's active one,
 //                             where it is (as when a spin brings it to the front)
+//   wallpaper on|off          stereo wallpaper (wallimage.h): on reads Display Settings' left.ppm and
+//                             right.ppm again -> "ok wallpaper <w>x<h>", "error <why>"; off -> "ok wallpaper off"
 //   cutouts on|off|state      hand cutouts (see handcut.h) -> "ok <on|off> <ready|idle|unavailable>
 //                             <last composite ms> ms, predict <on|off> lead <ms> ms; ...; room view <on|off> (<why>)"
 //   cutouts roomview auto|on|off   cut only with Room View on: detected (roomview.h), or forced

@@ -35,7 +35,7 @@ int main() {
         {"handsetting HANDS_PALM_MENU 1", HandSetting}, {"spindistance 1.2", SpinDistance},
         {"hands hand controller 1", Hands}, {"steamvr 12 dashboard", SteamvrList}, {"typing 1 0", Typing},
         {"calpanel 1", CalPanel}, {"ray 0 1", Ray}, {"handinput force", HandInput}, {"palmmenu state", PalmMenu},
-        {"grabthat off", GrabThat}, {"cutouts matte mesh", Cutouts}, {"float 5 0.0008 0 0 1280 800 30", Float},
+        {"grabthat off", GrabThat}, {"cutouts matte mesh", Cutouts}, {"wallpaper on", Wallpaper}, {"float 5 0.0008 0 0 1280 800 30", Float},
         {"hold 5 250", Hold}, {"unfloat 5", Unfloat}, {"pose 5 1 0 0 0 0 1 0 1.6 0 0 1 -1", Pose},
         {"sub 5 1 10 20 300 200", Sub}, {"sub 5 1 off", Sub}, {"minimized 5 1", Minimized},
         {"moving 5 1", Moving}, {"torn 5 100 200", Torn}, {"carry 5", Carry}, {"up", Up}, {"spin 30", Spin},

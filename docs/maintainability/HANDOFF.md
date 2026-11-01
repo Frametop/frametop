@@ -778,3 +778,79 @@ Each needs an install and the headset:
 - After DEE-298 (Daenon only, against a host he chooses; agents never pair): `ft-layout remote
   add HOST ADDRESS Desktop --fps 60fps` fails at once and the host lists no new client; a
   normal add still pairs, saves and connects. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
+
+## Bundle A (branch bundle-a)
+
+Branch `bundle-a` in `~/frametop/.worktrees/bundle-a`, from experimental bae1c59 (2026-10-31).
+Local only: nothing pushed, installed or fast-installed. Tickets DEE-205, DEE-192, DEE-204.
+
+Tests: baseline is the cleanup thread's full run at bae1c59 (python files 108 ok, 2 skipped;
+751 unittest tests, 7 skips; test-c 38 ok; keyboard ctest 22/22; testbench 249, 20 skipped;
+fast-install 28). The final full run at 89937af passed: python files 107 ok, 3 skipped; 752
+unittest tests, 16 skips; test-c 34 ok; keyboard ctest 22/22; testbench 249, 20 skipped;
+fast-install 28. Every difference comes from the fresh worktree, which has no ncnn/hands or
+gaze build, ft-handpanel, gaze panel, or untracked demo clips. In the experimental checkout
+those tests run: sides, pinch, flagbuf and mmap-layout in test-c, and hands/rec test_session and
+gaze/rec test_panel in Python. The run also printed `shellcheck scripts/install-lib.sh: ok`,
+so ShellCheck is in the dev container now.
+
+### From DEE-205
+
+Commits 230ba01, d79b851 (review fix).
+
+- The Meta tap (`steam_menu`, a default) already opened and closed the Steam menu, and the
+  Keyboard + 3D pointer role (`combo`) already existed. The gap: a keyboard that sends its
+  keys and its mouse-key layer on one input node gets that node as a pointer node, and
+  key combinations only ran on pass-through nodes. Now keys (below BTN_MISC) on a combo
+  device's mouse node go through `key_binding` first, unless the device's button map has the
+  key. A key held in a combination still releases through it. Plain 3D pointers (the Z3) are
+  unchanged. Docs: the relay's header, `docs/reference-apps.md` Devices.
+- Tests: `input/test/keys-test.py` (tap, Meta+J, pointer mode, a key mapped while held, a
+  mapped key, a plain pointer).
+- Review (one Opus reader, no Critical or Important). Fixed in d79b851: a key mapped while
+  held in a combination stayed in `held.combos` and blocked later taps; more test cases.
+  Left: unplugging during a combination leaves `held.combos` set until release_keys. This is
+  older than this branch and pass-through keyboards have it too.
+
+### From DEE-192
+
+Commit cc9180d.
+
+- Full Keyboard already loads profiles as data (`keyboard/languages/*.json`, bundled, or
+  `~/.config/frametop-keyboard/languages/` without a rebuild). Added `pl-pl` (Polish
+  programmer's: US places, letters on AltGr). `keyboard/docs/languages.md` and FRAMETOP.md's
+  change list name it. `keyboard/tests/language_tests.cpp` checks all nine AltGr letters and
+  their capitals.
+- Open: on the desktop, Full Keyboard's text goes through the desktop's layout (kxkbrc), so ą
+  types only if the Frametop desktop's layout has it (Polish). On a US desktop the relay drops
+  it and logs that. Fixing this needs the relay to type characters the layout lacks (a
+  per-character keymap through ft-screens, or a text path in the input method): a design call.
+
+### From DEE-204
+
+Commits 0c4c414, 89937af (review fixes).
+
+- Frametop's own Meta actions could already go on controller buttons. New: the opt-in action
+  `keys:CODES` (evdev codes joined by `+`, as in `key_bindings`) for controller buttons, mouse
+  buttons (pointer mode) and key combinations. On the press it taps the combination where
+  typing goes: the desktop through ft-screens, or the virtual keyboard for Steam. Modifiers
+  the desktop holds come up around the tap. It allows up to 6 keys and refuses volume, power,
+  sleep, wake and suspend keys. It doesn't work while paused. It's set by hand in
+  `frametop-input.json`, for example `"controller_buttons": {"right/b": "keys:125+32"}`
+  (Meta+D). Input Settings keeps it and shows it as "Press Meta+D". Docs:
+  `docs/reference-apps.md` Controllers.
+- Tests: keys-test's `keys:` block (specs, controller button on the desktop, key combination to
+  Steam and on the desktop with held modifiers, a refused key); `input-settings/test/
+  test_rules_file.py` (save, label, limits, dropdown entry).
+- Review (one Opus reader, 2 Important, 4 Minor). Fixed in 89937af: held desktop modifiers
+  around the tap; Input Settings' check matches the relay's; dropdowns list mapped `keys:`
+  actions (a row was blank); power keys refused; the mouse-button caveat is in the docs. Left: a
+  tap can land while dictation or Full Keyboard holds a modifier for a character (rare, and
+  nothing stays stuck). With typing on Steam, Steam still sees physically held modifiers.
+- Open, for Daenon: a capture UI for `keys:` on the Controllers page, context-sensitive
+  shortcuts, and a radial menu (DEE-172) weren't built.
+
+### Device checks for Bundle A
+
+Listed in `~/Desktop/Projects/HEADSET-TESTS.md` under "Bundle A". Each needs a fast-install
+of input/, input-settings/ and keyboard/ (a Full Keyboard build).

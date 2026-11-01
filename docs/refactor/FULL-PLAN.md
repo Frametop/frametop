@@ -219,3 +219,14 @@ has to change it.
 7. vr.cpp split: schedule it after DEE-208 and DEE-322 with about a day's screens freeze, or
    leave it to on-touch refactoring? Recommended: on touch.
 8. Headset test budget: about 20 minutes for the hybrid now; OK?
+
+## 7. Status (2026-11-01)
+
+Daenon chose the hybrid, with decisions 1-8 answered (1: drop the tables, merge after cleanup
+3; 3: write CI, don't push; 6: no recorder format change; 7: vr.cpp on touch; 8: headset time
+OK, kept small). Done on `solid-refactor`, not yet merged: phase 0's drop, phase 1 (H's zero-test
+failure and timeouts were already in the gate), phase 2's Welcome page only, phase 3. Each step,
+its checks and the deviations are in [PROGRESS.md](PROGRESS.md), steps 12-20. Phase 3's
+compensation turned out fully offline: the panels' text is byte-identical before and after, so
+its headset look isn't needed.
+

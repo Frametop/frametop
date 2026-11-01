@@ -5122,6 +5122,54 @@ void TestSoftGlow() {
         CHECK(alpha(px, w, m - 1, m - 1) > 0.2);              // round the corners too
         NEAR(softglow::Width(0.45), 0.0099, 1e-4), NEAR(softglow::Width(0.1), 0.008, 1e-9), NEAR(softglow::Width(5), 0.05, 1e-9);
     }
+    {   // a carried panel's border: clear over the panel and its air gap, the aqua line, its glow gone at the edge
+        const int w = 512, m = 16, h = 260;
+        const double gap = 6, line = 2, glow = 8;
+        const auto px = softglow::CarryTexture(w, h, m, gap, line, glow);
+        dump("carry", px, w, h);
+        double inside = 0;
+        for (int y = m; y < h - m; ++y)
+            for (int x = m; x < w - m; ++x) inside = std::max(inside, alpha(px, w, x, y));
+        CHECK(inside == 0);                                                   // nothing over the content
+        CHECK(alpha(px, w, w / 2, m - 1) < 0.02 && alpha(px, w, w / 2, m - 3) < 0.02);   // the air gap
+        CHECK(alpha(px, w, w / 2, m - 7) > 0.85 && alpha(px, w, m - 7, h / 2) > 0.85);   // the line, top and left
+        CHECK(px[(size_t(m - 7) * w + w / 2) * 4 + 1] > 200 && px[(size_t(m - 7) * w + w / 2) * 4] < 80);   // aqua
+        CHECK(alpha(px, w, w / 2, 0) < 0.02);                                // the glow gone at the texture's edge
+        const auto fu = softglow::CarryTexture(w, h, m, gap, line, glow, softglow::kFuchsia);   // carry-all's others
+        CHECK(fu[(size_t(m - 7) * w + w / 2) * 4] > 200 && fu[(size_t(m - 7) * w + w / 2) * 4 + 1] < 80);
+    }
+    {   // the carry's grids: clear over the panel, lines next to it, gone past the margin
+        const int w = 256, h = 192;
+        const double pw = 160, ph = 96, margin = 40;
+        std::vector<uint8_t> px;
+        softglow::PlaneGrid(px, w, h, pw, ph, margin, 0.5, 0.5, 16, 2);
+        double over = 0, past = 0, near = 0;
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                const double ox = std::fabs(x + 0.5 - w / 2.0) - pw / 2, oy = std::fabs(y + 0.5 - h / 2.0) - ph / 2;
+                const double a = alpha(px, w, x, y);
+                if (ox < -1 && oy < -1) over = std::max(over, a);
+                if (std::max(ox, oy) > margin + 1) past = std::max(past, a);
+                if (ox > 0 && ox < 6 && oy < 0) near = std::max(near, a);
+            }
+        CHECK(over == 0 && past == 0 && near > 0.12);
+        // a line where the plane's x is a multiple of 16 (x0 + x), none halfway between
+        CHECK(alpha(px, w, 47, 60) > 0.12 && alpha(px, w, 39, 60) < 0.02);
+        // the sphere's, a panel 2 m ahead (-z), 1 cm a pixel: a meridian straight ahead (yaw 0), none 2 degrees off
+        const double o[3] = {-1.28, 0.96, -2}, ax[3] = {0.01, 0, 0}, ay[3] = {0, -0.01, 0};
+        softglow::SphereGrid(px, w, h, pw, ph, margin, o, ax, ay, 0.01, 4 * M_PI / 180, 2);
+        const int off = int(std::lround(2 * std::tan(2 * M_PI / 180) / 0.01));
+        CHECK(alpha(px, w, 128, 44) > 0.08 && alpha(px, w, 128 + off, 44) < 0.02);
+        CHECK(alpha(px, w, 128, 96) == 0);   // (the panel's middle)
+    }
+    {   // a ring: bright at its pulse (+x), nearly clear opposite, clear off the ring
+        const int n = 128;
+        const auto px = softglow::RingTexture(n, 4, {255, 70, 70});
+        CHECK(alpha(px, n, n - 4, n / 2 + 1) > 0.5 && alpha(px, n, 3, n / 2) < 0.1 && alpha(px, n, n / 2, n / 2) == 0);
+        CHECK(alpha(px, n, n - 4, n / 2 - 3) < 0.1);   // just ahead of it: clear (the tail runs back, clockwise)
+        CHECK(alpha(px, n, 116, 94) > 0.2);            // 30 degrees back along it: the tail
+        CHECK(alpha(px, n, n / 2, 3) < 0.1 && alpha(px, n, n / 2, n - 4) < 0.1);   // top, bottom: nearly clear
+    }
     {   // a hand's guide at the top right corner: an L outside it, clear inside, fading along the edges
         Guide g;
         g.kind = Guide::Corner, g.sx = 1, g.sy = 1;

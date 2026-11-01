@@ -29,6 +29,11 @@ int g_state = 0;   // 0: not tried yet, 1: buffers, -1: SetOverlayRaw
 std::map<Key, Image> g_images;
 std::map<vr::VROverlayHandle_t, Key> g_on;   // what each overlay shows
 uint64_t g_clock = 0;
+struct Streamed {
+    Image im[2];
+    int w = 0, h = 0, next = 0;
+};
+std::map<vr::VROverlayHandle_t, Streamed> g_streams;
 
 uint64_t Hash(const uint8_t *px, size_t n) {   // FNV-1a, 8 bytes at a time
     uint64_t h = 1469598103934665603ull;
@@ -128,11 +133,48 @@ vr::EVROverlayError Set(vr::VROverlayHandle_t o, const uint8_t *px, int w, int h
     return err;
 }
 
-void Forget(vr::VROverlayHandle_t o) { Release(o); }
+bool Stream(vr::VROverlayHandle_t o, const uint8_t *px, int w, int h) {
+    if (o == vr::k_ulOverlayHandleInvalid || !Ready()) return false;
+    Release(o);   // (an image Set put on it)
+    Streamed &st = g_streams[o];
+    if (st.w != w || st.h != h) {
+        for (Image &im : st.im) Drop(im);
+        st.w = st.h = 0;
+        for (Image &im : st.im)
+            if (!Make(im, px, w, h)) {
+                for (Image &i : st.im) Drop(i);
+                g_streams.erase(o);
+                return false;
+            }
+        st.w = w, st.h = h, st.next = 0;
+    } else {
+        Image &im = st.im[st.next];
+        uint32_t stride = 0;
+        void *mapping = nullptr;
+        auto *dst = static_cast<uint8_t *>(gbm_bo_map(im.bo, 0, 0, uint32_t(w), uint32_t(h), GBM_BO_TRANSFER_WRITE, &stride, &mapping));
+        if (!dst) return false;
+        for (int y = 0; y < h; ++y) std::memcpy(dst + size_t(y) * stride, px + size_t(y) * w * 4, size_t(w) * 4);
+        gbm_bo_unmap(im.bo, mapping);
+    }
+    vr::Texture_t tex = {&st.im[st.next].handle, vr::TextureType_SharedTextureHandle, vr::ColorSpace_Gamma};
+    st.next ^= 1;
+    return vr::VROverlay()->SetOverlayTexture(o, &tex) == vr::VROverlayError_None;
+}
+
+void Forget(vr::VROverlayHandle_t o) {
+    Release(o);
+    const auto st = g_streams.find(o);
+    if (st == g_streams.end()) return;
+    for (Image &im : st->second.im) Drop(im);
+    g_streams.erase(st);
+}
 
 void Shutdown() {
     for (auto &[k, im] : g_images) Drop(im);
     g_images.clear(), g_on.clear();
+    for (auto &[o, st] : g_streams)
+        for (Image &im : st.im) Drop(im);
+    g_streams.clear();
     if (g_gbm) gbm_device_destroy(g_gbm);
     if (g_drm >= 0) close(g_drm);
     g_gbm = nullptr, g_drm = -1, g_state = 0;

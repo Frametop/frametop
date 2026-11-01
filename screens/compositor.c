@@ -952,8 +952,9 @@ static void release_seat_buttons(struct server *s, const char *why) {
 // Steam would otherwise modify every key typed after it). Mouse buttons go where the
 // pointer is instead (relay_button), and codes that are neither go nowhere.
 static void handle_key(struct server *s, uint32_t code, int value, char *reply, int size) {
-    if (value) ft_vr_key();
+    ft_vr_key(code, value);
     if (value == 2) return (void)snprintf(reply, size, "ok repeat ignored");  // KWin repeats itself
+    if (ft_vr_carry_key(code, value)) return (void)snprintf(reply, size, "ok the carry's");
     const enum ft_relay_key kind = ft_relay_key_kind(code);
     if (kind == FT_RELAY_BUTTON) {
         relay_button(s, code, value != 0, reply, size);
@@ -1182,7 +1183,8 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             // The 3D mouse's wheel, from the input relay while we said its laser is on a panel
             // (keys_update): notches, positive up. No reply. Scrolled as SteamVR's would be.
             const int screen = ft_vr_mouse_screen();
-            if (screen >= 0 && value) {
+            // (during a carry it's the carried panel's, whatever panel the laser is on: ft_vr_carry_wheel)
+            if (value && !ft_vr_carry_wheel(value) && screen >= 0) {
                 struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dy = -value};
                 handle_vr_event(&e, s);
             }

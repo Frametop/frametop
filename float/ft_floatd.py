@@ -511,7 +511,12 @@ class Daemon:
             self.float_launched(ev, None)
             return
         if kind == "float-request":
-            self.float_window(ev)
+            # From the desktop to floating: the 3D mouse carries it at once (ft-screens' carry_toggle,
+            # once its panel shows; user, 2026-11-01: "auto-engage carry mode when a window transitions
+            # from desktop to floating").
+            floated = self.float_window(ev)
+            if floated:
+                self.screens.ask(f"carry take {floated.slot.index}", quiet=True)
         elif kind == "dock-request":
             if f:
                 self.dock(f)

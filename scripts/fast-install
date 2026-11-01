@@ -62,27 +62,28 @@ IMAGE = {'pack/Containerfile', 'pack/pyside-runtime.py', 'uv.lock', 'pyproject.t
 # Components with a build.sh: the paths outside their folder their build reads, and the
 # outputs that go into the live tree (in COMPONENT/build; the Containerfile keeps the same).
 # Their own folder's build inputs are its sources and build files (BUILD_SUFFIXES,
-# BUILD_NAMES), or, for WHOLE ones, every file but docs and tests.
+# BUILD_NAMES), or, for WHOLE ones, every file but docs and tests. Headers outside the folder
+# that those sources #include "..." count too, found from the include lines (include_graph), so
+# they aren't listed here: only what an include line doesn't name (scripts, -I folders, a source
+# built from elsewhere) is.
 OPENVR = 'scripts/openvr.sh'
 STB = 'scripts/stb.sh'           # the pinned stb headers
-GLYPHS = 'screens/glyphs.h'      # the panels' text (stb_truetype)
 HANDS_API = 'hands/include'   # ft-hands' event and gesture structs, which its readers include
-CONF_H = 'conf/ft_conf.h'      # frametop.conf's C/C++ parser (docs/config.md)
 COMPONENTS = {
-    'screens': ((HANDS_API, CONF_H, 'frunner/ft-spotpanel.cpp', 'frunner/reserve.h', OPENVR, STB),
+    'screens': ((HANDS_API, 'frunner/ft-spotpanel.cpp', 'frunner/reserve.h', OPENVR, STB),
                 ('ft-screens', 'ft-handtest', 'ft-handview', 'ft-spotpanel')),
-    'layout/countdown': ((OPENVR, STB, GLYPHS), ('ft-reset-timer',)),
-    'pointer/helper': ((HANDS_API, CONF_H, 'pointer/common', OPENVR), ('ft-pointer',)),
+    'layout/countdown': ((OPENVR, STB), ('ft-reset-timer',)),
+    'pointer/helper': ((HANDS_API, 'pointer/common', OPENVR), ('ft-pointer',)),
     'pointer/driver': (('pointer/common', OPENVR), ('driver_ft_pointer.so',)),
-    'gaze': (('pointer/common', OPENVR, STB, GLYPHS), ('ft-gaze', 'ft-gazepanel')),
+    'gaze': (('pointer/common', OPENVR, STB), ('ft-gaze', 'ft-gazepanel')),
     'gaze/tracker': ((), ('ft-eyegrab',)),
     'keyboard': ((OPENVR,), ('frametop/framekeyboard', 'frametop/framekeyboard-native-guard',
                              'frametop/engines/*', 'frametop/bridge/*', 'frametop/vr/*')),
-    'power': ((CONF_H, OPENVR), ('ft-powerd',)),
+    'power': ((OPENVR,), ('ft-powerd',)),
     'stream': ((OPENVR,), ('ft-stream',)),   # the spikes only with build.sh --spikes
     'voice': ((), ('bin/whisper-server',)),
-    'hands': ((CONF_H,), ('ft-hands', 'ft-camd')),
-    'hands/rec': ((OPENVR, STB, GLYPHS), ('ft-handpanel',)),
+    'hands': ((), ('ft-hands', 'ft-camd')),
+    'hands/rec': ((OPENVR, STB), ('ft-handpanel',)),
 }
 WHOLE = {'keyboard'}   # its CMake build embeds layouts, languages and themes, and copies scripts
 BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl', '.vert', '.frag',
@@ -121,6 +122,7 @@ DESKTOP = 'frametop-desktop.service'
 NOT_RUN = ('.md',)          # files no program runs or reads
 NOT_RUN_DIRS = {'docs', 'test', 'tests'}
 SOURCES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S'}   # their programs are what runs
+INCLUDE = re.compile(rb'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
 
 
 class Refused(Exception):
@@ -218,12 +220,56 @@ def builds(comp, path):
     return comp in WHOLE or name in BUILD_NAMES or os.path.splitext(name)[1] in BUILD_SUFFIXES
 
 
-def inputs_hash(comp, entries):
-    """A hash of what a component's build reads at a commit: equal hashes build the same."""
+def read_blobs(blobs):
+    """{blob: its bytes}, through one git cat-file --batch."""
+    blobs = sorted(set(blobs))
+    out = subprocess.run(['git', '-C', str(ROOT), 'cat-file', '--batch'], check=True, capture_output=True,
+                         input=''.join(b + '\n' for b in blobs).encode()).stdout
+    data, i = {}, 0
+    for b in blobs:
+        j = out.index(b'\n', i)
+        size = int(out[i:j].split()[2])
+        data[b] = out[j + 1:j + 1 + size]
+        i = j + 1 + size + 1
+    return data
+
+
+def include_graph(entries, read=read_blobs):
+    """{path: the files its #include "..." lines name} for every C and C++ file at a commit. A
+    name is taken from the including file's folder, as the compiler looks first; one that isn't a
+    file there (an -I path, a header the build fetches) is left out, so a component lists those
+    in COMPONENTS."""
+    sources = [p for p in entries if os.path.splitext(p)[1] in SOURCES and not documentation(p)]
+    data = read([entries[p][1] for p in sources])
+    graph = {}
+    for p in sources:
+        names = (os.path.normpath(os.path.join(os.path.dirname(p), n.decode()))
+                 for n in INCLUDE.findall(data[entries[p][1]]))
+        graph[p] = [q for q in names if q in entries]
+    return graph
+
+
+def outside_includes(comp, entries, graph):
+    """The files outside comp's folder that its build includes, directly or through other headers."""
+    todo = [p for p in entries if p in graph and ((component_of(p) == comp and builds(comp, p))
+                                                 or under(p, COMPONENTS[comp][0]))]
+    seen = set(todo)
+    while todo:
+        for q in graph[todo.pop()]:
+            if q not in seen:
+                seen.add(q)
+                todo.append(q)
+    return {p for p in seen if component_of(p) != comp}
+
+
+def inputs_hash(comp, entries, graph):
+    """A hash of what a component's build reads at a commit: equal hashes build the same. graph is
+    include_graph(entries)."""
     named = COMPONENTS[comp][0]
+    included = outside_includes(comp, entries, graph)
     h = hashlib.sha256()
     for path in sorted(entries):
-        if (component_of(path) == comp and builds(comp, path)) or under(path, named):
+        if (component_of(path) == comp and builds(comp, path)) or under(path, named) or path in included:
             h.update(f'{path}\0{entries[path][1]}\n'.encode())
     return h.hexdigest()[:16]
 
@@ -448,6 +494,7 @@ def install(rev, dry, restart_units, worn_ok, partial):
     # Plan: every change, built programs included, before the live tree changes at all.
     patterns = parse_ignore(git('show', f'{target}:.dockerignore'))
     new, old = tree_entries(target), tree_entries(base)
+    new_graph, old_graph = include_graph(new), include_graph(old)
     changed = set(git('diff', '-z', '--name-only', '--no-renames', base, target).split('\0')) - {''}
     candidates = sorted(p for p in changed | set(state['files']) if not ignored(p, patterns))
 
@@ -492,7 +539,7 @@ def install(rev, dry, restart_units, worn_ok, partial):
         held.update({c: 'it reads hands/include, so it waits for hand tracking'
                      for c, (reads, _) in COMPONENTS.items() if HANDS_API in reads})
     rebuild = [(c, h) for c in COMPONENTS if c not in held
-               and (h := inputs_hash(c, new)) != (state['built'].get(c) or inputs_hash(c, old))]
+               and (h := inputs_hash(c, new, new_graph)) != (state['built'].get(c) or inputs_hash(c, old, old_graph))]
     for comp, why in held.items():
         say(f'  {comp}: not installed ({why})')
     if dry:

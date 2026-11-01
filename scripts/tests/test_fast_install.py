@@ -45,15 +45,20 @@ class Paths(unittest.TestCase):
         self.assertIsNone(fi.component_of('frunner/ft-spotpanel.cpp'))
 
     def test_what_a_build_reads(self):
-        base = {p: ('100644', 'a') for p in (
+        base = {p: ('100644', p) for p in (
             'screens/vr.cpp', 'screens/README.md', 'screens/tests/t.cpp', 'frunner/ft-spotpanel.cpp',
             'frunner/reserve.h', 'frunner/ft_frunner.py', 'scripts/openvr.sh', 'gaze/tracker/grab.c',
             'hands/include/fh_hands.h', 'hands/handsmode.py', 'keyboard/layouts/us.json',
-            'keyboard/bridge/native_bridge.py', 'keyboard/docs/x.md', 'voice/build.sh', 'stream/mic.patch')}
+            'keyboard/bridge/native_bridge.py', 'keyboard/docs/x.md', 'voice/build.sh', 'stream/mic.patch',
+            'screens/glyphs.h', 'layout/countdown/ft-reset-timer.cpp')}
+        includes = {'layout/countdown/ft-reset-timer.cpp': b'#include "../../screens/glyphs.h"\n'}
 
         def rebuilt(path):
             after = dict(base, **{path: ('100644', 'z')})
-            return {c for c in fi.COMPONENTS if fi.inputs_hash(c, base) != fi.inputs_hash(c, after)}
+            hashes = [{c: fi.inputs_hash(c, t, fi.include_graph(t, read)) for c in fi.COMPONENTS}
+                      for t in (base, after)
+                      for read in [lambda blobs, t=t: {t[p][1]: includes.get(p, b'') for p in t}]]
+            return {c for c in fi.COMPONENTS if hashes[0][c] != hashes[1][c]}
 
         self.assertEqual(rebuilt('screens/vr.cpp'), {'screens'})
         self.assertEqual(rebuilt('screens/README.md'), set())
@@ -73,7 +78,43 @@ class Paths(unittest.TestCase):
         self.assertTrue({'screens', 'power', 'keyboard'} <= openvr)
         self.assertFalse({'voice', 'hands', 'gaze/tracker'} & openvr)
         self.assertEqual(rebuilt('scripts/stb.sh'), {'screens', 'layout/countdown', 'gaze', 'hands/rec'})
-        self.assertEqual(rebuilt('screens/glyphs.h'), {'screens', 'layout/countdown', 'gaze', 'hands/rec'})
+        self.assertEqual(rebuilt('screens/glyphs.h'), {'screens', 'layout/countdown'})   # its include line
+
+    def test_included_headers_are_build_inputs(self):
+        # DEE-329: a header another component's sources include, found from the include lines.
+        files = {'gaze/panel/ft-gazepanel.cpp': b'#include "../../conf/ftsock.h"\n  # include "../../screens/overlaypanel.h"\n'
+                                               b'#include <stdio.h>\n#include "glyphs.h"\n// #include "../../x/y.h"\n',
+                 'screens/overlaypanel.h': b'#include "rendernode.h"\n', 'screens/rendernode.h': b'',
+                 'conf/ftsock.h': b'', 'screens/vr.cpp': b'#include "overlaypanel.h"\n',
+                 'gaze/tests/t.cpp': b'#include "../../screens/label.h"\n', 'screens/label.h': b'',
+                 'x/y.h': b''}
+        tree = {p: ('100644', p) for p in files}
+        graph = fi.include_graph(tree, lambda blobs: {b: files[b] for b in blobs})
+        self.assertEqual(fi.outside_includes('gaze', tree, graph),   # through overlaypanel.h too
+                         {'conf/ftsock.h', 'screens/overlaypanel.h', 'screens/rendernode.h'})
+        self.assertEqual(fi.outside_includes('screens', tree, graph), set())   # its own folder
+        after = dict(tree, **{'screens/rendernode.h': ('100644', 'new')})
+        graph2 = fi.include_graph(after, lambda blobs: {b: files.get(b, b'') for b in blobs})
+        self.assertNotEqual(fi.inputs_hash('gaze', tree, graph), fi.inputs_hash('gaze', after, graph2))
+
+    def test_the_panels_shared_headers_at_head(self):
+        # The real tree (its files, not git: the dev box's git refuses this checkout): the gaze and
+        # hands panels read screens/ and conf/ headers (DEE-329).
+        root = SCRIPTS.parent
+        tree = {}
+        for folder, dirs, names in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in ('.git', 'build', 'work', 'node_modules')]
+            for name in names:
+                if os.path.splitext(name)[1] in fi.SOURCES:
+                    path = os.path.relpath(os.path.join(folder, name), root)
+                    tree[path] = ('100644', path)
+        graph = fi.include_graph(tree, lambda blobs: {b: (root / b).read_bytes() for b in blobs})
+        for comp in ('gaze', 'hands/rec'):
+            self.assertLessEqual({'screens/overlaypanel.h', 'conf/ftsock.h', 'screens/glyphs.h'},
+                                 fi.outside_includes(comp, tree, graph), comp)
+        self.assertIn('conf/ftsock.h', fi.outside_includes('stream', tree, graph))
+        self.assertIn('conf/ft_conf.h', fi.outside_includes('power', tree, graph))
+        self.assertIn('screens/glyphs.h', fi.outside_includes('layout/countdown', tree, graph))
 
     def test_install_steps(self):
         self.assertIsNone(fi.install_step('screens/x.py'))

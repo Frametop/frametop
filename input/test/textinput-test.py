@@ -87,9 +87,21 @@ check("commit from another address: nothing", quiet(), None)
 relay.sendto(b"type x", ft_addr)
 check("anything but commit from the relay: nothing", quiet(), None)
 
+relay.settimeout(ti.RENEW + 1)
+check("still focused: textfield 1 renew to the relay, from the same address", relay.recvfrom(64),
+      (b"textfield 1 renew", ft_addr))
+relay.settimeout(1.0)
+
 event(ti.INPUT_METHOD, 1, struct.pack("=I", CONTEXT))  # deactivate
 check("the text field lost focus: the context is destroyed", request(), (CONTEXT, 0, b""))
 check("...and textfield 0 to the relay", relay.recv(64), b"textfield 0")
+relay.settimeout(ti.RENEW + 0.5)
+try:
+    renewed = relay.recv(64)
+except socket.timeout:
+    renewed = None
+check("...and no renewals after", renewed, None)
+relay.settimeout(1.0)
 relay.sendto(b"commit y", ft_addr)
 check("commit with no text field focused: nothing", quiet(), None)
 

@@ -13,7 +13,9 @@ or dictation: the relay sends it here as "commit TEXT", and this commits it to t
 field (zwp_input_method_context_v1.commit_string). Only those characters pass through here,
 and they aren't logged. "commit" is taken only from the relay's own name (@frametop_relay) and
 from this user, on an unnamed (autobound) socket the relay learns from our "textfield" reports,
-so no other process can claim a name and receive typing. In apps without text input (Xwayland,
+so no other process can claim a name and receive typing. While a field stays focused, "textfield
+1 renew" goes every RENEW seconds: a restarted relay learns the address again without a focus
+change, and if this process dies, the relay stops using its address a few seconds later. In apps without text input (Xwayland,
 most Electron apps) no field activates this, and the relay drops such characters as before.
 
 Speaks the Wayland wire protocol itself (zwp_input_method_v1 only), so it needs nothing
@@ -24,10 +26,12 @@ import select
 import socket
 import struct
 import sys
+import time
 
 RELAY = "\0frametop_relay"
 DISPLAY, REGISTRY, INPUT_METHOD = 1, 2, 3  # our object ids
 CREDS = struct.Struct("=iII")  # SCM_CREDENTIALS: pid, uid, gid
+RENEW = 2.0  # seconds between "textfield 1 renew" reports while a text field is focused
 
 
 def string(text):
@@ -54,9 +58,11 @@ def main():
     def request(obj, opcode, payload=b""):
         conn.sendall(struct.pack("=II", obj, (8 + len(payload)) << 16 | opcode) + payload)
 
-    def report(on):
+    def report(on, renew=False):
+        nonlocal reported
+        reported = time.monotonic()
         try:
-            relay.sendto(f"textfield {int(on)}".encode(), RELAY)
+            relay.sendto(f"textfield {int(on)}{' renew' if renew else ''}".encode(), RELAY)
         except OSError:
             pass  # the relay isn't running
 
@@ -80,9 +86,16 @@ def main():
     request(DISPLAY, 1, struct.pack("=I", REGISTRY))  # wl_display.get_registry
     contexts = {}  # KWin makes one per activation: context id -> its latest commit_state serial
     buf = b""
+    reported = 0.0
     while True:
+        wait = max(0.0, reported + RENEW - time.monotonic()) if contexts else None
+        ready = select.select([conn, relay], [], [], wait)[0]
+        if contexts and time.monotonic() >= reported + RENEW:
+            report(True, renew=True)
+        if not ready:
+            continue
         # KWin's events go first, so a commit uses the serial of a commit_state that came before it.
-        if conn not in select.select([conn, relay], [], [])[0]:
+        if conn not in ready:
             from_relay()
             continue
         data = conn.recv(65536)

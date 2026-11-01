@@ -11,6 +11,7 @@
 // Needs hand tracking running (hands/run.sh; ft-hands publishes /run/user/UID/frametop-hands/hands).
 // Build: screens/build.sh (build/ft-handtest), run in the dev container.
 #include "handcut.h"
+#include "rendernode.h"
 
 #include <drm_fourcc.h>
 #include <fcntl.h>
@@ -57,8 +58,7 @@ vr::SharedTextureHandle_t Import(const ft_dmabuf &b) {
 }
 
 // The stand-in "client" buffer: a light grey grid, linear so the CPU can draw it.
-bool TestPattern(int drm, int w, int h, gbm_bo **out, ft_dmabuf *b) {
-    gbm_device *gbm = gbm_create_device(drm);
+bool TestPattern(gbm_device *gbm, int w, int h, gbm_bo **out, ft_dmabuf *b) {
     gbm_bo *bo = gbm_bo_create(gbm, w, h, GBM_FORMAT_ABGR8888, GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING);
     if (!bo) return false;
     uint32_t stride = 0;
@@ -247,10 +247,10 @@ int main(int argc, char **argv) {
         return 1;
 
     const int W = 1600, H = 900;
-    const int drm = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
+    gbm_device *gbm = rendernode::Acquire("handtest");  // the Renderer's device (never released: it lasts the run)
     gbm_bo *bo = nullptr;
     ft_dmabuf client;
-    if (drm < 0 || !TestPattern(drm, W, H, &bo, &client)) return std::fprintf(stderr, "can't make the test pattern\n"), 1;
+    if (!gbm || !TestPattern(gbm, W, H, &bo, &client)) return std::fprintf(stderr, "can't make the test pattern\n"), 1;
     const vr::SharedTextureHandle_t plain = Import(client);
     if (!plain) return std::fprintf(stderr, "SteamVR can't import the test pattern\n"), 1;
 

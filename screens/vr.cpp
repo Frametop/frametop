@@ -5583,6 +5583,9 @@ bool ft_vr_init(void) {
 }
 
 void ft_vr_shutdown(void) {
+    // the pointer helper's carry modes end with us (they'd freeze its cursor or keep the laser)
+    if (g_carryTurnOn) SendPointer("carry turn off"), g_carryTurnOn = false;
+    if (g_carryFollow.on) SendPointer("follow carry off");
     if (!g_vr) return;
     // The panels go first, their textures cleared, and the imports only after SteamVR has had
     // a moment to take them down (see the shutdown in compositor.c).
@@ -5903,8 +5906,11 @@ static void CarryToggle(char *reply, int size) {
     double u, v, dist, eye[3], dir[3];
     const bool on = it != g_screens.end() && it->second.visible && ScreenPose(it->second, &p) && CarryRay(g_mouseDevice, eye, dir) &&
                     RayOnSurface(it->second, p, RayMat(eye, dir), &u, &v, &dist);
+    if (g_press.buttons || g_press.torn)   // (a title-bar or torn carry, or a drag, by a held button)
+        return (void)std::snprintf(reply, size, "error a button is held");
     if (on && (it->second.drag != Drag::None || it->second.titleCarry || g_handInput.heldByHand(it->first)))
         return (void)std::snprintf(reply, size, "error the panel is held");
+    if (on && it->second.pinned != kNone) return (void)std::snprintf(reply, size, "error the panel is pinned");
     const int i = on ? it->first : GazePanel();
     if (i < 0) return (void)std::snprintf(reply, size, "error no panel to carry");
     NoteCarryUndo();
@@ -6004,6 +6010,7 @@ static bool CarryClick(const vr::VREvent_t &ev) {
             g_carryClicks |= bit;
             return CarryLetGo("a click");
         }
+    g_carryClicks &= ~bit;   // (a carry's release that went elsewhere: this press's release is its own)
     return false;
 }
 
@@ -6021,6 +6028,9 @@ int ft_vr_mouse_screen(void) {
     if (!g_vr || g_paused || g_mouseScreen < 0) return -1;
     const auto it = g_screens.find(g_mouseScreen);
     if (it == g_screens.end() || !it->second.visible || it->second.drag != Drag::None || it->second.titleCarry) return -1;
+    // A press held, a torn-off window, or KWin moving one by its title bar: the wheel goes through SteamVR
+    // (VREvent_ScrollDiscrete), where it pushes, pulls or tears off (DEE-246), not straight to the window.
+    if (g_press.buttons || g_press.torn || !g_kwinMove.window.empty()) return -1;
     return g_mouseScreen;
 }
 
@@ -6502,6 +6512,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         // The controls light up under a laser.
         auto hover = [&](int k) {
             if (CarryScroll(ev)) ev.eventType = vr::VREvent_None;   // (the carried panel's, not this control's)
+            // a click during a carry ends it and goes nowhere else, a control included
+            if ((ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_MouseButtonUp) && CarryClick(ev))
+                ev.eventType = vr::VREvent_None;
             const bool on = ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_FocusEnter;
             if (on) {
                 s.inputMs = NowMs();
@@ -6614,7 +6627,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
     while (g_catcher != vr::k_ulOverlayHandleInvalid &&
            vr::VROverlay()->PollNextOverlayEvent(g_catcher, &ev, sizeof ev))
-        if (ev.eventType == vr::VREvent_MouseButtonUp)
+        if (ev.eventType == vr::VREvent_MouseButtonUp && !CarryClick(ev))
             ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
     PollPill(handle, data);
@@ -6924,6 +6937,11 @@ static void VisibilityCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
             const bool on = !std::strcmp(word, "on");
             if (on != g_paused)
                 std::printf("%s\n", on ? "paused for a VR game: everything hidden, KWin slowed down" : "resumed");
+            if (on && !g_paused) {   // a carry doesn't go on through a game (the helper would keep the laser)
+                CarryLetGo("paused");
+                CarryFollowEnd();
+                if (g_carryTurnOn) SendPointer("carry turn off"), g_carryTurnOn = false;
+            }
             g_paused = on;
             UpdateVisibility();
         } else if (std::strcmp(word, "state") != 0) {
@@ -7265,7 +7283,8 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         return;
     case vrcmd::CarryTurn:
         // (the pointer helper, while Alt turns a carried panel: no reply)
-        g_carryTurnYaw += parsed.da, g_carryTurnPitch += parsed.db;
+        if (!std::isfinite(parsed.da) || !std::isfinite(parsed.db)) return (void)std::snprintf(reply, size, "error carryturn A B");
+        g_carryTurnYaw += std::clamp(parsed.da, -20.0, 20.0), g_carryTurnPitch += std::clamp(parsed.db, -20.0, 20.0);
         std::snprintf(reply, size, "ok");
         return;
     case vrcmd::Carry: {

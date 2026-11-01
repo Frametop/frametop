@@ -2884,7 +2884,8 @@ void Pointer::ButtonCommand(const char *buf) {
         const bool on = std::strncmp(buf + 13, "on", 2) == 0;
         if (on && !carryFollow) followReset = true;
         double at[3];
-        if (on && !carryFollow && std::sscanf(buf + 13, "on %lf %lf %lf", &at[0], &at[1], &at[2]) == 3)
+        if (on && !carryFollow && std::sscanf(buf + 13, "on %lf %lf %lf", &at[0], &at[1], &at[2]) == 3 &&
+            std::isfinite(at[0]) && std::isfinite(at[1]) && std::isfinite(at[2]))
             carryAimPending = true, carryAim = Vec3{at[0], at[1], at[2]};
         if (!on) carryAimPending = false;
         carryFollow = on;
@@ -2894,7 +2895,7 @@ void Pointer::ButtonCommand(const char *buf) {
     } else if (double at[3]; std::sscanf(buf, "aimat %lf %lf %lf", &at[0], &at[1], &at[2]) == 3) {
         // ft-screens (carry_toggle's Tab): the cursor points from the ray's origin at that point
         // (standing universe).
-        if (anchored) {
+        if (anchored && std::isfinite(at[0]) && std::isfinite(at[1]) && std::isfinite(at[2])) {
             const Vec3 d = Normalize(Vec3{at[0], at[1], at[2]} - anchor);
             yaw = std::atan2(-d.x, -d.z) * 180 / M_PI;
             pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);

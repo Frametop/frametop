@@ -878,3 +878,122 @@ Each needs an install and the headset:
 - After DEE-298 (Daenon only, against a host he chooses; agents never pair): `ft-layout remote
   add HOST ADDRESS Desktop --fps 60fps` fails at once and the host lists no new client; a
   normal add still pairs, saves and connects. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
+
+## Bundle A (branch bundle-a)
+
+Branch `bundle-a` in `~/frametop/.worktrees/bundle-a`, from experimental bae1c59 (2026-10-31).
+Local only: nothing pushed, installed or fast-installed. Tickets DEE-205, DEE-192, DEE-204.
+
+Tests: baseline is the cleanup thread's full run at bae1c59 (python files 108 ok, 2 skipped;
+751 unittest tests, 7 skips; test-c 38 ok; keyboard ctest 22/22; testbench 249, 20 skipped;
+fast-install 28). The final full run at 89937af passed: python files 107 ok, 3 skipped; 752
+unittest tests, 16 skips; test-c 34 ok; keyboard ctest 22/22; testbench 249, 20 skipped;
+fast-install 28. Every difference comes from the fresh worktree, which has no ncnn/hands or
+gaze build, ft-handpanel, gaze panel, or untracked demo clips. In the experimental checkout
+those tests run: sides, pinch, flagbuf and mmap-layout in test-c, and hands/rec test_session and
+gaze/rec test_panel in Python. The run also printed `shellcheck scripts/install-lib.sh: ok`,
+so ShellCheck is in the dev container now.
+
+### From DEE-205
+
+Commits 230ba01, d79b851 (review fix).
+
+- The Meta tap (`steam_menu`, a default) already opened and closed the Steam menu, and the
+  Keyboard + 3D pointer role (`combo`) already existed. The gap: a keyboard that sends its
+  keys and its mouse-key layer on one input node gets that node as a pointer node, and
+  key combinations only ran on pass-through nodes. Now keys (below BTN_MISC) on a combo
+  device's mouse node go through `key_binding` first, unless the device's button map has the
+  key. A key held in a combination still releases through it. Plain 3D pointers (the Z3) are
+  unchanged. Docs: the relay's header, `docs/reference-apps.md` Devices.
+- Tests: `input/test/keys-test.py` (tap, Meta+J, pointer mode, a key mapped while held, a
+  mapped key, a plain pointer).
+- Review (one Opus reader, no Critical or Important). Fixed in d79b851: a key mapped while
+  held in a combination stayed in `held.combos` and blocked later taps; more test cases.
+  Left: unplugging during a combination leaves `held.combos` set until release_keys. This is
+  older than this branch and pass-through keyboards have it too.
+
+### From DEE-192
+
+Commit cc9180d.
+
+- Full Keyboard already loads profiles as data (`keyboard/languages/*.json`, bundled, or
+  `~/.config/frametop-keyboard/languages/` without a rebuild). Added `pl-pl` (Polish
+  programmer's: US places, letters on AltGr). `keyboard/docs/languages.md` and FRAMETOP.md's
+  change list name it. `keyboard/tests/language_tests.cpp` checks all nine AltGr letters and
+  their capitals.
+- Open: on the desktop, Full Keyboard's text goes through the desktop's layout (kxkbrc), so ą
+  types only if the Frametop desktop's layout has it (Polish). On a US desktop the relay drops
+  it and logs that. Fixing this needs the relay to type characters the layout lacks (a
+  per-character keymap through ft-screens, or a text path in the input method): a design call.
+- Follow-up (Daenon chose the input-method path, 2026-10-31). The per-character keymap can't
+  work: KWin 6.2.5 doesn't load keymaps from its host. Commits 0508f4b, 7298a42, 0c1e04e (review
+  fixes).
+  - Typing to the desktop now sends a character the desktop's layout has no key for to
+    ft-textinput as "commit TEXT". ft-textinput commits it to the focused text field with
+    `commit_string`. Characters the layout has still go as keys, so US English is unchanged.
+    With no input-method text field focused, the character is dropped and logged as before.
+    The log line now says so.
+  - Trust: the relay sends only to the address that said "textfield 1" with the same uid.
+    ft-textinput listens on an autobound name and takes commits only from `@frametop_relay`
+    with the same uid. ft-textinput's docstring now says it types these characters.
+  - Order: a character typed as keys and one committed take different routes to KWin. A 50 ms
+    gap (`TYPE_SWITCH`) comes between a switch from one route to the other, and that includes
+    Full Keyboard keys after a commit. ft-textinput handles KWin's events before the relay's,
+    so a commit never uses a stale serial.
+  - Works in apps that take input-method text (Qt, GTK, Firefox). It doesn't work in XWayland
+    or Electron apps: those still drop the character.
+  - Tests: keys-test (routing, the Steam and no-text-field fallbacks, the sender's name, the
+    gap before a Full Keyboard key) and the new `input/test/textinput-test.py` (ft-textinput
+    against a fake KWin: commit_string with its serial, other senders ignored, nothing with no
+    context).
+  - Review (one Opus reader, 1 Important, 5 Minor). Fixed in 0c1e04e: Full Keyboard keys now
+    wait the gap after a commit, and a full ft-textinput queue no longer stops later commits.
+  - Left open after review: commits go to the context activated last.
+  - Renewal (Daenon, 2026-10-31; commits 59fff74, cade24f) closes the review's two other open
+    items: a crashed ft-textinput's stale address, and a relay restart losing the address.
+    - While a field stays focused, ft-textinput sends "textfield 1 renew" every 2 s.
+    - The relay takes a renewal as an address refresh only: it doesn't open Full Keyboard again.
+      A renewal from a new address (an ft-textinput KWin started again) replaces the old one.
+    - The address lapses 7 s (`TEXT_INPUT_LAPSE`) after the last report, so nothing goes to a
+      dead ft-textinput's address. A restarted relay finds the address at the next renewal,
+      without a focus change.
+    - Tests: keys-test (renewal finds the address after the relay forgot it, without opening
+      the keyboard; a new address replaces the old one; other textfield words ignored) and
+      textinput-test (renewals while focused, from the same address, none after). The 7 s lapse
+      itself has no timed test.
+    - Full run at cade24f passed, identical to 0c1e04e (python files 108 ok, 3 skipped; 752
+      unittest tests, 16 skips; same test-c lines; keyboard ctest 22/22; testbench 249, 20
+      skipped; fast-install 28).
+  - Merge check (2026-10-31, read-only): `git merge-tree --write-tree experimental bundle-a`
+    against experimental f1942dd merges cleanly. Only this file changed on both sides.
+  - Full run at 0c1e04e passed. It matches 89937af except one more Python file ok, the new
+    test (108 ok, 3 skipped). test-c printed the same ok lines.
+
+### From DEE-204
+
+Commits 0c4c414, 89937af (review fixes).
+
+- Frametop's own Meta actions could already go on controller buttons. New: the opt-in action
+  `keys:CODES` (evdev codes joined by `+`, as in `key_bindings`) for controller buttons, mouse
+  buttons (pointer mode) and key combinations. On the press it taps the combination where
+  typing goes: the desktop through ft-screens, or the virtual keyboard for Steam. Modifiers
+  the desktop holds come up around the tap. It allows up to 6 keys and refuses volume, power,
+  sleep, wake and suspend keys. It doesn't work while paused. It's set by hand in
+  `frametop-input.json`, for example `"controller_buttons": {"right/b": "keys:125+32"}`
+  (Meta+D). Input Settings keeps it and shows it as "Press Meta+D". Docs:
+  `docs/reference-apps.md` Controllers.
+- Tests: keys-test's `keys:` block (specs, controller button on the desktop, key combination to
+  Steam and on the desktop with held modifiers, a refused key); `input-settings/test/
+  test_rules_file.py` (save, label, limits, dropdown entry).
+- Review (one Opus reader, 2 Important, 4 Minor). Fixed in 89937af: held desktop modifiers
+  around the tap; Input Settings' check matches the relay's; dropdowns list mapped `keys:`
+  actions (a row was blank); power keys refused; the mouse-button caveat is in the docs. Left: a
+  tap can land while dictation or Full Keyboard holds a modifier for a character (rare, and
+  nothing stays stuck). With typing on Steam, Steam still sees physically held modifiers.
+- Open, for Daenon: a capture UI for `keys:` on the Controllers page, context-sensitive
+  shortcuts, and a radial menu (DEE-172) weren't built.
+
+### Device checks for Bundle A
+
+Listed in `~/Desktop/Projects/HEADSET-TESTS.md` under "Bundle A". Each needs a fast-install
+of input/, input-settings/ and keyboard/ (a Full Keyboard build).

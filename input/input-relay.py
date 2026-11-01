@@ -16,7 +16,9 @@ keyboard node for its extra buttons), except with "combo". Roles, from
   passthrough  keys go to the desktop; grabbed only while typing goes there, otherwise only observed,
                for the key combinations below (default for keyboards)
   combo        a keyboard with a touchpad (its touchpad is a mouse node): mouse nodes are pointer,
-               keyboard nodes passthrough, as if they were two devices. Never a default: the
+               keyboard nodes passthrough, as if they were two devices. Keys that come on a mouse node
+               (a keyboard with a mouse-key layer on one node) still make key combinations, unless the
+               device's button map has that key. Never a default: the
                Z3's keyboard node has to stay with its mouse, and nothing on the nodes tells the two apart
   ignore       not grabbed, only observed for identification in the settings app
 Buttons and keys of pointer devices go through a per-device map to actions
@@ -49,7 +51,10 @@ display and this relay hold, and every modifier in KWin, known to be held or not
 release" to ft-screens; Ctrl+Alt+Shift+Esc by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
 transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
-ft-layout, ft-float, ft-steam and ft-voice need no path), key = pass through as a key, none).
+ft-layout, ft-float, ft-steam and ft-voice need no path), keys:CODES = tap that key combination
+where typing goes, all its keys down in order, then up, on the press ("keys:125+32" is Meta+D:
+evdev codes as in key_bindings, at most KEYS_MAX; a desktop shortcut from a controller button),
+key = pass through as a key, none).
 
 Frame controller buttons can be mapped too ("controller_buttons": {"right/a": action} in the
 rules file; any action but key and the gaze ones, GAZE_ACTIONS: gaze mode is a mouse feature,
@@ -120,7 +125,14 @@ desktop, else on the virtual keyboard, which SteamVR passes on to Steam and game
 desktop each character is the keys that type it on the desktop's keyboard layout (Plasma's
 kxkbrc in Frametop's desktop config, worked out with libxkbcommon), Shift and AltGr included, so a
 German QWERTZ desktop gets "z" from the Z key; Steam and games get a US layout. A character the
-layout has no key for (a dead key's accent, another script) is dropped, and the log says which.
+desktop's layout has no key for (ą on a US layout, a dead key's accent, another script) goes as
+"commit CHARACTER" to the desktop's input method (input/ft-textinput), which commits it to the
+focused text field, while one is focused: that's the address its "textfield 1" came from (this
+user's only), until "textfield 0", or TEXT_INPUT_LAPSE after its last "textfield 1 renew" (sent
+every few seconds while the field stays focused, so a restarted relay finds it again and a crashed
+ft-textinput's address lapses). TYPE_SWITCH apart from keys either side, since the two ways
+reach the app separately. Without a text field taking text that way (Xwayland and most Electron
+apps), or for Steam, such a character is dropped, and the log says which.
 A character waits while a modifier is held on a keyboard, which would make it a shortcut
 (Ctrl+letter).
 
@@ -208,7 +220,9 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     ignored from another user
   calpanel 1|0      from the pointer helper: a gaze calibration panel is up (renewed every second,
                     lapses 3 s after the last), so Enter answers it (above)
-  textfield 1|0     from the desktop's input method (above)
+  textfield 1|0     from the desktop's input method (above); "commit TEXT" goes back to it.
+                    "textfield 1 renew" (every few seconds while focused) keeps its address, and
+                    doesn't open the keyboard again
   pause on|off|toggle [reason]   pause Frametop or resume it (input/ft-pause; the gesture reader)
   pause ?           the pause state, as {"t": "pause", ...}
   type TEXT         from Frametop Voice: type TEXT where typing goes (above); ignored from
@@ -371,6 +385,10 @@ KXKBRC = os.path.expanduser("~/.config/frametop/kxkbrc")
 LAYOUT_CODES = (*range(2, 54), 57, 86)
 LAYOUT_MODS = ((), (KEY_LEFTSHIFT,), (KEY_RIGHTALT,), (KEY_LEFTSHIFT, KEY_RIGHTALT))
 TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to the next key
+# Between a character typed as keys and one committed through the input method (or back): they
+# reach the app by different ways, so the first gets this long to arrive before the next goes.
+TYPE_SWITCH = 0.05
+TEXT_INPUT_LAPSE = 7.0  # ft-textinput renews its "textfield 1" every 2 s; its address lapses this long after
 KB_POKES = ("hover", "press", "move", "up", "end")  # a fingertip on Full Keyboard (ft-screens' "kbpoke")
 KB_COORD = re.compile(r"-?\d{1,3}(\.\d{1,6})?")
 TYPE_MAX = 20000  # characters waiting to be typed, at most
@@ -402,6 +420,23 @@ RENAMED_ACTIONS = {"spotwatch": "frunner"}
 PROFILE = "profile:"  # "profile:NAME": switch to that profile (doesn't need pointer mode either)
 COMMAND = "command:"  # "command:CMD": run CMD (nor does this)
 RUN = "run:"  # "run:NAME": run your command NAME (ft_commands; nor does this)
+KEYS = "keys:"  # "keys:125+32": tap that key combination where typing goes (nor does this)
+KEYS_MAX = 6  # keys in one "keys:" action at most
+# Never in a "keys:" action: the volume keys (see the top) and power, sleep, wake and suspend,
+# which logind may act on from the virtual keyboard. Input Settings' is_keys has the same list.
+KEYS_REFUSED = {KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP, 116, 142, 143, 205}
+
+
+def keys_codes(a):
+    """The key codes a "keys:" action presses, in order (evdev codes below BTN_MISC joined by "+",
+    as in key_bindings), or None if it isn't one or has a key from KEYS_REFUSED."""
+    if not isinstance(a, str) or not a.startswith(KEYS):
+        return None
+    parts = a[len(KEYS):].split("+")
+    if not 0 < len(parts) <= KEYS_MAX or not all(p.isascii() and p.isdecimal() and 0 < int(p) < BTN_MISC
+                                                 and int(p) not in KEYS_REFUSED for p in parts):
+        return None
+    return [int(p) for p in parts]
 
 
 def renamed_actions(table):
@@ -413,14 +448,14 @@ def renamed_actions(table):
 
 
 def known_action(a):
-    return a in ACTIONS or (isinstance(a, str) and any(a.startswith(p) and a[len(p):].strip()
-                                                       for p in (PROFILE, COMMAND, RUN)))
+    return a in ACTIONS or keys_codes(a) is not None or (isinstance(a, str) and any(
+        a.startswith(p) and a[len(p):].strip() for p in (PROFILE, COMMAND, RUN)))
 
 
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
             and a not in ("steam_menu", "pause_toggle", "frunner", "hands_toggle", "release_keys")
-            and not a.startswith((PROFILE, COMMAND, RUN)))
+            and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
 
 def works_paused(a):
@@ -1197,6 +1232,7 @@ class Typing:
         self.down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
         self.at = 0.0  # the next press or release goes then
         self.untyped = []  # characters with no key where typing went, logged when the queue is empty (None: quiet)
+        self.committing = False  # the last character went through the input method, not as keys
         self.kb_held = {}  # keys Full Keyboard holds down: code -> to the desktop
 
     def drop_full_keyboard(self):
@@ -1244,6 +1280,9 @@ class Relay:
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
         self.calpanel_until, self.shown_until = 0.0, 0.0
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
+        # ft-textinput's address while a desktop text field is focused (its "textfield 1"), for the
+        # characters the desktop's layout has no key for, until text_input_until; None without one.
+        self.text_input, self.text_input_until = None, 0.0
         self.last_typing = 0.0  # the helper was last told of a key then (see "typing" at the top)
         self.lease = PointerLease()
         self.held = HeldKeys()
@@ -1412,6 +1451,9 @@ class Relay:
                 subprocess.Popen(["python3", HANDSMODE, "toggle", *(["--sound"] if self.pause.settings["sound"] else [])],
                                  stdin=subprocess.DEVNULL, start_new_session=True)
                 log(action)
+        elif action.startswith(KEYS):
+            if value == 1:
+                self.tap_keys(keys_codes(action), now)
         elif action.startswith(COMMAND):
             if value == 1:
                 subprocess.Popen(["sh", "-c", action[len(COMMAND):]], stdin=subprocess.DEVNULL,
@@ -1455,6 +1497,28 @@ class Relay:
                     log(f"{action}: Frametop Voice isn't running (frametop-voice.service)")
         elif self.lease.current:
             self.lease.current.action(action, value, now, source)
+
+    def tap_keys(self, codes, now):
+        """A "keys:" action: its keys go down in order and come up in reverse, at once, where typing
+        goes (the desktop's screens, else the virtual keyboard for Steam). Down and up together,
+        so a release that never comes (a controller gone) can't leave a key held. Modifiers the
+        desktop holds (the key combination that did this) come up there first and go down again
+        after, and one the action has too is left as it is, so the desktop gets the action's keys
+        alone. Steam reads the keyboards itself, so there it sees the held ones too."""
+        if not codes:
+            return
+        desktop = now < self.desktop_until
+        held = sorted(c for c in self.held.desktop if c in MODIFIERS) if desktop else []
+        lift = [c for c in held if c not in codes]
+        for code in lift:
+            self.to_screens(code, 0)
+        for value, order in ((1, codes), (0, codes[::-1])):
+            for code in order:
+                if code not in held:
+                    self.type_key(code, value, desktop)
+        for code in lift:
+            self.to_screens(code, 1)
+        log(f"keys {'+'.join(map(str, codes))} to {'the desktop' if desktop else 'Steam'}")
 
     def cal_enter(self, code, value, now):
         """Enter while the gaze calibration panel is up (see the top): its press goes to the helper
@@ -1621,9 +1685,22 @@ class Relay:
             log(f"typing {min(len(chars), room)} characters for {'Full Keyboard' if quiet else 'Frametop Voice'}"
                 + (f" ({len(chars) - room} dropped: too many waiting)" if len(chars) > room else ""))
 
+    def commit_text(self, text):
+        """Send text to ft-textinput, which commits it to the focused text field. False if it
+        didn't go. If ft-textinput is gone, there's no text field to send to until it says again;
+        if it's only behind (its queue full), the next character tries again."""
+        try:
+            self.control.sendto(f"commit {text}".encode(), self.text_input)
+            return True
+        except OSError as e:
+            if e.errno in (errno.ECONNREFUSED, errno.ENOENT):
+                self.text_input = None
+            return False
+
     def report_untyped(self, desktop):
         if self.typing.untyped and not self.typing.queue:
-            where = f"the desktop's layout ({self.desktop_layout.name})" if desktop else "a US layout (Steam)"
+            where = (f"the desktop's layout ({self.desktop_layout.name}), with no text field taking text from "
+                     "the input method," if desktop else "a US layout (Steam)")
             said = "".join(dict.fromkeys(c for c in self.typing.untyped if c is not None))
             log(f"typing: {len(self.typing.untyped)} characters {where} has no key for" + (f": {said}" if said else ""))
             self.typing.untyped.clear()
@@ -1655,7 +1732,11 @@ class Relay:
                 self.type_key(m, 0, desktop)
         elif self.typing.queue and self.typing.queue[0][0] == "key":
             # Full Keyboard's key, with its modifiers its own: a held one doesn't stop it. It
-            # comes up where it went down.
+            # comes up where it went down, and goes as keys, so after a commit it waits too.
+            if self.typing.committing:
+                self.typing.committing = False
+                self.typing.at = now + TYPE_SWITCH
+                return
             _, code, value = self.typing.queue.popleft()
             if value:
                 if code in self.typing.kb_held:
@@ -1669,8 +1750,19 @@ class Relay:
         elif self.typing.queue and not self.typing_blocked(now):
             desktop = now < self.desktop_until
             keys = self.desktop_layout.keys if desktop else US_KEYS
-            item = self.typing.queue.popleft()
+            item = self.typing.queue[0]
             ch = item if isinstance(item, str) else item[1]
+            # A character the desktop's layout has no key for goes to the focused text field
+            # through the input method (ft-textinput), if there is one.
+            commit = ch not in keys and desktop and self.text_input is not None and now < self.text_input_until
+            if commit != self.typing.committing:
+                self.typing.committing = commit
+                self.typing.at = now + TYPE_SWITCH
+                return
+            self.typing.queue.popleft()
+            if commit and self.commit_text(ch):
+                self.typing.at = now + TYPE_STEP
+                return
             if ch not in keys:
                 self.typing.untyped.append(ch if isinstance(item, str) else None)
                 self.report_untyped(desktop)
@@ -2020,8 +2112,14 @@ class Relay:
             if addr:
                 self.reply(addr, self.pause.status())
             return
-        if cmd == "textfield" and len(words) == 2:
-            self.text_field(words[1] == "1")
+        if cmd == "textfield" and words[1:] in (["1"], ["0"], ["1", "renew"]):
+            # Typed characters go back to the address that said it, so only this user's. A
+            # renewal keeps (or, after a restart here, finds) that address, and nothing else.
+            if uid == os.getuid():
+                self.text_input = addr if words[1] == "1" and addr else None
+                self.text_input_until = now + TEXT_INPUT_LAPSE
+            if words[2:] != ["renew"]:
+                self.text_field(words[1] == "1")
             return
         if cmd in ("hostdev", "hostev", "hostbye"):
             # A host's keyboard or mouse, from its ft-stream (see "Host devices"). Keys and
@@ -2311,6 +2409,16 @@ class Relay:
                         self.keyboard.emit(etype, code, value)
                         self.keyboard.sync()
                         (node.held.add if value else node.held.discard)(code)
+                continue
+            if etype == EV_KEY and code < BTN_MISC and (str(code) not in buttons or code in self.held.combos) \
+                    and self.rules["devices"].get(node.id, {}).get("role") == "combo" \
+                    and self.key_binding(code, value, now):
+                # A Keyboard + 3D pointer device that sends its keys on its mouse node (one node
+                # for both): key combinations work on it as on a pass-through keyboard. A key held in
+                # one still comes up here if the button map took it meanwhile.
+                if value == 0 and code in node.held:
+                    node.held.discard(code)  # it went down on the virtual keyboard too (Meta of Meta+J)
+                    self.keyboard.emit(etype, code, value)
                 continue
             if etype == EV_KEY:
                 action = buttons.get(str(code), DEFAULT_BUTTONS.get(code, "key"))

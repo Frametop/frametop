@@ -16,6 +16,7 @@ import fcntl
 import importlib.util
 import json
 import os
+import select
 import shutil
 import socket
 import struct
@@ -109,14 +110,15 @@ relay.Volume.key = lambda self, fd, code, value, now: VOLUME.append((code, value
 LOG = []  # the relay's own log
 relay.log = lambda *args: LOG.append(" ".join(map(str, args)))
 bindings = {"now": None}  # the rules' key_bindings; None: the relay's defaults
-devices = {"roles": {}, "buttons": {}}  # the rules' "devices" roles and per-device "buttons"
+devices = {"roles": {}, "buttons": {}, "controller": {}}  # the rules' roles, per-device "buttons", controller_buttons
 vr_keyboard = {"mode": None}  # the rules' vr_keyboard (Frametop's keyboard); None: the default
 MOUSE_ID = "usb:0003:0004:test mouse"  # the fake mouse's id (Node.id)
 
 
 def read_rules(path=None):
     rules = {"devices": {i: {"role": r} for i, r in devices["roles"].items()},
-             "buttons": {i: dict(b) for i, b in devices["buttons"].items()}, "controller_buttons": {}}
+             "buttons": {i: dict(b) for i, b in devices["buttons"].items()},
+             "controller_buttons": dict(devices["controller"])}
     rules["key_bindings"] = dict(relay.DEFAULT_KEY_BINDINGS if bindings["now"] is None else bindings["now"])
     if vr_keyboard["mode"]:
         rules["vr_keyboard"] = vr_keyboard["mode"]
@@ -512,6 +514,86 @@ def tests():
     devices["roles"], devices["buttons"] = {}, {}
     conf["POINTER"] = "0"
 
+    # Keyboard + 3D pointer ("combo") with its keys on its mouse node (one node for both, as a
+    # keyboard with a mouse-key layer can be): key combinations work there. A plain 3D pointer's
+    # keys and a key its button map has are left as they were.
+    devices["roles"] = {MOUSE_ID: "combo"}
+    use(None)
+    emitted()
+    menus = len(lines(steam_log))
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("combo, keys on its mouse node: a Meta tap opens Steam's menu", len(lines(steam_log)), menus + 1)
+    check("...and Meta still reaches the desktop, F24 first, and the virtual keyboard", (typed(), emitted()),
+          (["key 125 1"] + F24 + ["key 125 0"], [("keyboard", META, 1), ("keyboard", META, 0)]))
+    key(META, 1, ms_w); key(J, 1, ms_w); key(J, 0, ms_w); key(META, 0, ms_w)
+    check("combo: Meta+J isn't typed, and Meta comes up on the desktop and the virtual keyboard",
+          (typed(), emitted()), (["key 125 1"] + F24 + ["key 125 0"], [("keyboard", META, 1), ("keyboard", META, 0)]))
+    conf["POINTER"] = "1"  # as a combo device is used: its mouse node drives the 3D pointer
+    use(None)
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("combo, pointer mode: a Meta tap opens Steam's menu", len(lines(steam_log)), menus + 2)
+    check("...and Meta reaches the desktop and the virtual keyboard", (typed(), emitted()),
+          (["key 125 1"] + F24 + ["key 125 0"], [("keyboard", META, 1), ("keyboard", META, 0)]))
+    conf["POINTER"] = "0"
+    key(META, 1, ms_w); key(J, 1, ms_w)
+    devices["buttons"] = {MOUSE_ID: {str(J): "none"}}
+    use(None)  # J mapped while Meta+J is held
+    key(J, 0, ms_w); key(META, 0, ms_w)
+    emitted()
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("combo: a key mapped while held in a combination still lets the next Meta tap work",
+          len(lines(steam_log)), menus + 3)
+    typed(), emitted()
+    devices["buttons"] = {MOUSE_ID: {str(META): "none"}}
+    use(None)
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("combo: a key its button map has keeps its map (none: no tap, nothing sent)",
+          (len(lines(steam_log)), typed(), emitted()), (menus + 3, [], []))
+    devices["roles"], devices["buttons"] = {}, {}
+    use(None)
+    emitted()
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("a plain 3D pointer's Meta tap does nothing (it's typed)", (len(lines(steam_log)), emitted()),
+          (menus + 3, [("keyboard", META, 1), ("keyboard", META, 0)]))
+    typed()
+
+    # "keys:CODES" taps a key combination where typing goes, from a controller button or a key
+    # combination: all down in order, then up, on the press; the release sends nothing.
+    D = 32
+    check("keys: specs", [relay.keys_codes(a) for a in ("keys:125+32", "keys:", "keys:115", "keys:256",
+                                                        "keys:1+2+3+4+5+6+7", "keys:a", "keys:１", "run:x", "keys:116")],
+          [[125, 32], None, None, None, None, None, None, None, None])
+    devices["controller"] = {"right/b": "keys:125+32"}
+    use({"29+56+32": "keys:125+32", "29+56+33": "keys:115", "29+56+20": "keys:29+20"})
+    to_relay("keyboard desktop")
+    emitted()
+    to_relay("vrbtn right/b 1")
+    time.sleep(0.1)
+    meta_d = ["key 125 1", "key 32 1", "key 32 0", "key 125 0"]
+    check("keys: on a controller button: Meta+D tapped on the desktop", (typed(), emitted()), (meta_d, []))
+    to_relay("vrbtn right/b 0")
+    time.sleep(0.1)
+    check("...and its release sends nothing more", (typed(), emitted()), ([], []))
+    to_relay("keyboard steam")
+    key(CTRL, 1); key(ALT, 1); key(D, 1); key(D, 0); key(ALT, 0); key(CTRL, 0)
+    check("keys: on a key combination, typing going to Steam: tapped on the virtual keyboard", emitted(),
+          [("keyboard", META, 1), ("keyboard", D, 1), ("keyboard", D, 0), ("keyboard", META, 0)])
+    typed()
+    to_relay("keyboard desktop")
+    key(CTRL, 1); key(ALT, 1); key(D, 1); key(D, 0); key(ALT, 0); key(CTRL, 0)
+    check("keys: on a key combination on the desktop: its held modifiers come up around the tap", typed(),
+          ["key 29 1", "key 56 1", "key 29 0", "key 56 0"] + meta_d + ["key 29 1", "key 56 1", "key 56 0", "key 29 0"])
+    T = 20
+    key(CTRL, 1); key(ALT, 1); key(T, 1); key(T, 0); key(ALT, 0); key(CTRL, 0)
+    check("...one the action has too stays down: Ctrl+T, Ctrl held throughout", typed(),
+          ["key 29 1", "key 56 1", "key 56 0", "key 20 1", "key 20 0", "key 56 1", "key 56 0", "key 29 0"])
+    key(CTRL, 1); key(ALT, 1); key(F, 1); key(F, 0); key(ALT, 0); key(CTRL, 0)
+    check("a volume key in keys: makes it no action: the combination is typed", typed(),
+          ["key 29 1", "key 56 1", "key 33 1", "key 33 0", "key 56 0", "key 29 0"])
+    to_relay("keyboard steam")
+    devices["controller"] = {}
+    typed()
+
     use(None)  # the defaults: Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels (ft-screens)
     key(META, 1); key(ALT, 1); key(TAB, 1); key(TAB, 0); key(ALT, 0); key(META, 0)
     got = typed()
@@ -716,6 +798,7 @@ def tests():
     time.sleep(0.3)
     check("type: to the desktop while typing goes there", typed(), [f"key {c} {v}" for c, v in keys_for("Ok.")])
     check("...and not to the virtual keyboard", emitted(), [])
+
     use({"97": "dictate_hold"})
     dictation()
     key(RCTRL, 1)
@@ -770,7 +853,8 @@ def tests():
         check("...a character it has no key for (a dead key's accent) is dropped", typed(),
               [f"key {c} {v}" for c, v in keys_for("ab", de)])
         check("...and the log says which", [m for m in LOG if m.startswith("typing: 1 characters")][-1:],
-              ["typing: 1 characters the desktop's layout (de) has no key for: \u00e9"])
+              ["typing: 1 characters the desktop's layout (de), with no text field taking text from the input "
+               "method, has no key for: \u00e9"])
         to_relay("keyboard steam")
         to_relay("type way")
         time.sleep(0.3)
@@ -825,6 +909,96 @@ def tests():
           (text_field(), said()), ([], ["text field focused: not opening Frametop's keyboard (Keyboard setting: never)"]))
     vr_keyboard["mode"] = None
     use(None)
+
+    # A character the desktop's layout (US here) has no key for goes to ft-textinput, the input
+    # method, as "commit CHARACTER" while a text field is focused, between the keys around it.
+    to_relay("keyboard desktop")
+    im = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    im.bind("")  # autobound, as ft-textinput's
+    im.sendto(b"textfield 1", f"\0{tag}_relay")
+    time.sleep(0.1)
+    typed()
+    to_relay("type a\u0105b")
+    got, end = [], time.monotonic() + 0.5
+    while time.monotonic() < end:  # both ways, in the order they arrive
+        for sock in select.select([screens, im], [], [], 0.05)[0]:
+            data, addr = sock.recvfrom(256)
+            got.append(data.decode())
+            if sock is im:
+                check("...commit comes from the relay's own name", addr, f"\0{tag}_relay".encode())
+    check("type a\u0105b on a US desktop: a and b as keys, \u0105 committed between them",
+          [m for m in got if not m.startswith("vrkeyboard")],
+          [f"key {c} {v}" for c, v in keys_for("a")] + ["commit \u0105"] + [f"key {c} {v}" for c, v in keys_for("b")])
+    to_relay("keyboard steam")
+    to_relay("type \u0105")
+    time.sleep(0.3)
+    im.settimeout(0.1)
+    try:
+        sent = im.recv(256)
+    except socket.timeout:
+        sent = None
+    check("...typing going to Steam: dropped, not committed", (sent, emitted()), (None, []))
+    to_relay("keyboard desktop")
+    im.sendto(b"textfield 0", f"\0{tag}_relay")
+    time.sleep(0.1)
+    LOG.clear()
+    to_relay("type \u0119")
+    time.sleep(0.3)
+    try:
+        sent = im.recv(256)
+    except socket.timeout:
+        sent = None
+    check("no text field focused: dropped, not committed", (sent, typed()), (None, []))
+    check("...and the log says why", [m for m in LOG if m.startswith("typing: ")],
+          ["typing: 1 characters the desktop's layout (us), with no text field taking text from the input "
+           "method, has no key for: \u0119"])
+
+    def commits(socks, wait=0.3):
+        """What each socket got as "commit ...", after `wait`."""
+        time.sleep(wait)
+        got = []
+        for sock in socks:
+            sock.setblocking(False)
+            mine = []
+            while True:
+                try:
+                    mine.append(sock.recv(256).decode())
+                except BlockingIOError:
+                    break
+            got.append(mine)
+        return got
+
+    # A relay that restarted knows no text field: ft-textinput's renewal finds it again, without a
+    # focus change, and doesn't open the keyboard again. (After "textfield 0" the relay is as a
+    # fresh one.)
+    vr_keyboard["mode"] = "always"
+    use(None)
+    typed()
+    im.sendto(b"textfield 1 renew", f"\0{tag}_relay")
+    time.sleep(0.1)
+    check("renewal: no keyboard opened", [m for m in typed() if m.startswith("vrkeyboard")], [])
+    to_relay("type \u0119")
+    check("...but its address is known again: \u0119 committed", commits([im]), [["commit \u0119"]])
+    # A crashed ft-textinput, started again by KWin, renews from a new address: the relay follows it
+    # and stops sending to the old one.
+    im2 = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    im2.bind("")
+    im2.sendto(b"textfield 1 renew", f"\0{tag}_relay")
+    time.sleep(0.1)
+    to_relay("type \u0142")
+    check("a restarted ft-textinput's new address: \u0142 goes there, not to the old one",
+          commits([im, im2]), [[], ["commit \u0142"]])
+    im2.sendto(b"textfield 0 renew", f"\0{tag}_relay")
+    im2.sendto(b"textfield 1 again", f"\0{tag}_relay")
+    time.sleep(0.1)
+    check("...other textfield words: ignored", [m for m in typed() if m.startswith("vrkeyboard")], [])
+    im2.sendto(b"textfield 0", f"\0{tag}_relay")
+    time.sleep(0.1)
+    vr_keyboard["mode"] = None
+    use(None)
+    typed()
+    im2.close()
+    im.close()
 
     # The gaze calibration panel (the helper's "calpanel 1"): Enter takes its dot ("calkey 1" to
     # the helper) and isn't typed, its press, repeats and release; with a modifier held, or once
@@ -911,7 +1085,8 @@ def tests():
     check("its text through the desktop's layout, then its key, in order", typed(),
           [f"key {c} {v}" for c, v in keys_for("ab")] + ["key 28 1", "key 28 0"])
     check("...what the layout can't type isn't logged by name",
-          [m for m in LOG if m.startswith("typing")], ["typing: 1 characters the desktop's layout (us) has no key for"])
+          [m for m in LOG if m.startswith("typing")], ["typing: 1 characters the desktop's layout (us), with no text field taking text from the input method, "
+           "has no key for"])
     from_kb(f"kbkey {SHIFT} 1")
     to_relay("keyboard steam 1")
     time.sleep(0.1)
@@ -928,6 +1103,26 @@ def tests():
     from_kb("kbtext x", other)
     check("keys and text from another address are ignored", (typed(), emitted()), ([], []))
     other.close()
+    # Its key right after a committed character waits the switch gap: the two go by different
+    # ways, so Enter mustn't overtake the text it ends.
+    im = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    im.bind("")
+    im.sendto(b"textfield 1", f"\0{tag}_relay")
+    time.sleep(0.1)
+    typed()
+    for text in ("kbtext \u0105", f"kbkey {ENTER} 1", f"kbkey {ENTER} 0"):
+        kb.sendto(text.encode(), f"\0{tag}_relay")
+    got, end = [], time.monotonic() + 0.5
+    while time.monotonic() < end:
+        for sock in select.select([screens, im], [], [], 0.05)[0]:
+            got.append((sock.recv(256).decode(), time.monotonic()))
+    got = [(m, t) for m, t in got if not m.startswith(("vrkeyboard", "fullkb"))]
+    check("Full Keyboard: \u0105 committed, then Enter as keys",
+          [m for m, _ in got], ["commit \u0105", "key 28 1", "key 28 0"])
+    check("...Enter the switch gap after the commit",
+          len(got) == 3 and got[1][1] - got[0][1] >= relay.TYPE_SWITCH * 0.8, True)
+    im.sendto(b"textfield 0", f"\0{tag}_relay")
+    im.close()
     heard()
     to_relay("kbpanel show")
     check("ft-screens' kbpanel show: Full Keyboard opens", heard(), ["kb show"])

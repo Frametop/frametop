@@ -14,6 +14,7 @@ does not automatically select Russian. Updating the app preserves your selection
 | French | `fr-fr` | International full-size | French AZERTY, France |
 | Spanish | `es-es` | International full-size | Spanish, Spain |
 | Italian | `it-it` | International full-size | Italian XKB |
+| Polish | `pl-pl` | US full-size | Polish programmer's XKB (letters with AltGr) |
 | Portuguese, Brazil | `pt-br` | Brazilian ABNT2 full-size | Brazilian XKB, including extra slash and keypad separator |
 | Russian | `ru-ru` | US full-size | Russian ЙЦУКЕН |
 | Ukrainian | `uk-ua` | US full-size | Ukrainian ЙЦУКЕН |

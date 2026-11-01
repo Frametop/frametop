@@ -86,5 +86,19 @@ class RulesFile(unittest.TestCase):
         self.assertEqual(json.loads(self.path.read_text())["devices"]["dev1"]["role"], "pointer")
 
 
+    def test_keys_action_on_a_controller_button(self):
+        # "keys:CODES" (the relay taps that combination): saved and named, a bad one isn't saved.
+        self.b.setControllerMapping("right/b", "keys:125+32")
+        self.b.setControllerMapping("right/a", "keys:125+d")
+        self.assertEqual(json.loads(self.path.read_text())["controller_buttons"], {"right/b": "keys:125+32"})
+        self.assertEqual([m["actionLabel"] for m in self.b.controllerMappings], ["Press Meta+D"])
+        self.assertEqual(fis.action_label("keys:29+42+1"), "Press Ctrl+Shift+Esc")
+        self.assertTrue(fis.shortcut_mappable("keys:125+32"))
+        for bad in ("keys:", "keys:+32", "keys:115", "keys:116", "keys:0", "keys:256", "keys:1+2+3+4+5+6+7"):
+            self.assertFalse(fis.mappable(bad), bad)
+        # The Controllers page's dropdown has it, so its row shows the mapping.
+        self.assertIn({"value": "keys:125+32", "text": "Press Meta+D"}, self.b.controllerActions)
+
+
 if __name__ == "__main__":
     unittest.main()

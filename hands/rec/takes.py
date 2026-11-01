@@ -23,6 +23,7 @@ take's "sides". `takes.py sides SESSION` shows the decision; --set swapped|named
 hand (e.g. from tools/check_sides.py on a session no live tracker decided).
 
 usage: takes.py [--base DIR] list | takes SESSION | export SESSION | sides SESSION [--set swapped|named]
+From the tree's top (hands/rec is a package): PYTHONPATH=. python3 -m hands.rec.takes ...
 """
 import argparse
 import datetime

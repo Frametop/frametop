@@ -22,6 +22,7 @@ Standard library only without --identity (zstd and the cryptography library with
 
 usage: validate.py DIR [--json] [--identity KEYFILE]
        exit status 0: no errors, 1: errors, 2: not an export
+From the tree's top (gaze/rec is a package): PYTHONPATH=. python3 -m gaze.rec.validate DIR
 """
 import argparse
 import json

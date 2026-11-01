@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Recorded-guidance demo GIFs from a hand recorder session: the side cameras' own frames.
 
-  frame-job --local -- PYTHON hands/rec/demo/camgifs.py SESSION_DIR [--out DIR] [--part ID]
+  PYTHONPATH=. frame-job --local -- PYTHON -m hands.rec.demo.camgifs SESSION_DIR [--out DIR] [--part ID]
                        [--sheets] [--view ID=PITCH,HFOV[,YAW]] [--lossy N]
 
 PYTHON needs NumPy (frame-hands' .venv/bin/python has it). SESSION_DIR is a recorder session

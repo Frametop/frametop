@@ -25,6 +25,7 @@ checks:
 It runs on Linux and Windows, with Python 3.12 or later. It reports errors (don't upload or accept this) and warnings (look at it).
 
 usage: validate.py DIR [--json]      exit status 0: no errors, 1: errors, 2: not an export
+From the tree's top (hands/rec is a package): PYTHONPATH=. python3 -m hands.rec.validate DIR
 """
 import argparse
 import json

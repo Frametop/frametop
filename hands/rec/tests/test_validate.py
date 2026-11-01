@@ -292,7 +292,7 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(os.system(f"{sys.executable} -m hands.rec.validate {self.export} --json >/dev/null"), 0)
         d = self.copy()
         os.remove(os.path.join(d, "manifest.json"))
-        self.assertNotEqual(os.system(f"{sys.executable} -m hands.rec.validate {d} >/dev/null"), 0)
+        self.assertEqual(os.waitstatus_to_exitcode(os.system(f"{sys.executable} -m hands.rec.validate {d} >/dev/null 2>&1")), 1)
 
 
 class ExportJsonlTest(unittest.TestCase):

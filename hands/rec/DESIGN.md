@@ -35,7 +35,7 @@ Its tarball keeps this tree's layout (`hands/build/`, `hands/rec/`, `hands/model
 - session.json's `tool` and the manifest's are `ft-handrec <describe> (frametop-hand-recorder <version>)`.
 - The repair hints say to run its install command again.
 
-Its file list lives in that repo (`package.sh`), not here. Since DEE-319 (2026-10-31) the tarball also needs `hands/rec/__init__.py`, and all of `recorder/` (its `qml/` folder with the shared pages, `controls.py`, `privacy.py`, `fhformat.py`, `qmlcheck.py` for the window tests). `hands/rec` is a package, so its launcher runs `python3 -m hands.rec.ft_handrec` with the tree's top on `PYTHONPATH`, as `hands/rec/ft-handrec` does, not `ft_handrec.py` by path.
+Its file list lives in that repo (`package.sh`), not here. Since DEE-319 (2026-10-31) the tarball also needs `hands/rec/__init__.py`, and all of `recorder/` (its `qml/` folder with the shared pages, `controls.py`, `privacy.py`, `fhformat.py`, `qmlcheck.py` for the window tests). `hands/rec` is a package, so its launcher runs `python3 -m hands.rec.ft_handrec` with the tree's top on `PYTHONPATH`, as `hands/rec/ft-handrec` does (`python3 -P -m`), not `ft_handrec.py` by path. Its CI runs the window tests the same way, `python3 -m hands.rec.tests.test_qml_backend` with `PYTHONPATH` set, and `validate.py` runs as `python3 -m hands.rec.validate`.
 
 The recordings go to the same `~/.local/share/frametop/hands/contrib`, so either recorder shows both's sessions.
 

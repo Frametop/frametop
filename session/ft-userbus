@@ -1,0 +1,14 @@
+#!/bin/sh
+# systemd's user tools inside the Frametop desktop (DEE-327). The desktop runs with its own
+# XDG_RUNTIME_DIR ($XDG_RUNTIME_DIR/frametop) and D-Bus (dbus-run-session), which its apps
+# need: KWin's Wayland socket, the portals and Plasma's services are there. The user's
+# systemd isn't, so `systemctl --user` in a terminal here couldn't connect.
+#
+# frametop-session.sh links systemctl and systemd-run to this script in the desktop's
+# own bin folder, first on its PATH. Run under one of those names, it runs /usr/bin's with the
+# user's real runtime folder and session bus, as a login shell has them. Only these tools get
+# them: the shell and the apps it starts keep the desktop's. FT_USERBUS_BIN is for the tests.
+uid=$(id -u)
+export XDG_RUNTIME_DIR=/run/user/"$uid"
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$uid"/bus
+exec "${FT_USERBUS_BIN:-/usr/bin}/${0##*/}" "$@"

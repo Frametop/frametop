@@ -37,5 +37,5 @@ Plan: [SOLID-PLAN.md](SOLID-PLAN.md); the whole-codebase plan: [FULL-PLAN.md](FU
 ## For Daenon
 
 - Pushing `.github/workflows/check.yml` (step 17) waits for your OK.
-- The standalone Hand Recorder (`frametop-hand-recorder/scripts/build.sh`) must copy `screens/` and `conf/` too (or build ft-handpanel from the submodule in place) before its next submodule bump: experimental's DEE-318 needs it already, and this branch adds `screens/glyphs.h`.
+- The standalone Hand Recorder's build: fixed in that repo as local commit 33cfa1e on its experimental branch (unpushed, approved 2026-11-01). It copies the Frametop headers hands/ includes, reads stb's pin from its new place, and adds unzip; built against both its pinned submodule and this branch.
 - Found, not fixed: fast-install's COMPONENTS list misses `screens/overlaypanel.h` and `conf/ftsock.h` for gaze and hands/rec, so a change to either alone doesn't rebuild those panels.

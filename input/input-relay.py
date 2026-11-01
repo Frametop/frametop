@@ -108,8 +108,9 @@ Back) goes there too, and ft-screens gives it the screen the pointer is on, not 
 typing goes to (it releases the button itself when the pointer leaves the screens, they
 hide, or Frametop pauses). Other buttons and keys from KEY_OK up don't go there.
 Typing goes to the panel clicked last, and ft-screens says which ("keyboard
-desktop|steam SHOWN" on the control socket, every second; SHOWN 1|0, whether the screens
-show). While it's the desktop,
+desktop|steam SHOWN WHEEL" on the control socket, every second; SHOWN 1|0, whether the screens
+show; WHEEL 1|0, whether the 3D mouse's laser is on a panel, so its wheel goes to ft-screens as
+"wheel N" and not through SteamVR's joystick). While it's the desktop,
 pass-through keyboards are grabbed, so gamescope, which reads every keyboard itself,
 doesn't type them into its focused app too. Without word from ft-screens for 3 seconds
 they're released.
@@ -771,6 +772,9 @@ class Pointer:
         self.move_at = 0.0  # motion last went to the helper then
         self.scroll_until = None  # the joystick push ends then
         self.scroll_direction = 0
+        # Scrolls notches on the panel the laser is on and says True, or says False: the joystick
+        # then. main sets it (ft-screens' "keyboard", its 4th word).
+        self.wheel_to = lambda notches: False
         self.claim_at = None  # when to press the claim button
         self.claim_release = None
         self.system_at = None  # dashboard toggle: when to press the virtual system button
@@ -935,8 +939,11 @@ class Pointer:
             log(f"sensitivity {self.sensitivity:.4f} deg/count")
 
     def scroll(self, notches, now):
-        """Deflect the joystick for SCROLL_STEP per notch (positive: up). A notch in the same
+        """Scroll by notches (positive: up). On a Frametop panel, ft-screens takes them directly
+        (wheel_to). Elsewhere, deflect the joystick for SCROLL_STEP per notch: a notch in the same
         direction adds its time to the push under way; the other direction starts again."""
+        if self.wheel_to(notches):
+            return
         direction = 1 if notches > 0 else -1
         if self.scroll_until is None or direction != self.scroll_direction:
             self.send(f"scroll 0 {direction}", droppable=True)
@@ -1148,11 +1155,12 @@ def main():
     # pointer: the 3D mouse while it's in use, pointer_conf: the one the config asks for (they
     # differ while Frametop is paused).
     # shown_until: ft-screens shows the desktop's screens until then (it says so with "keyboard").
+    # wheel_until: the 3D mouse's wheel goes to ft-screens until then (the same, its 4th word).
     # kb_addr, kb_until: Full Keyboard's address, and until when it counts as running (its
     # hello renews it); kb_said: the "kb DESKTOP SURFACE" it was told last.
     state = {"pointer": None, "pointer_conf": None, "rules": {},
              "desktop_until": 0.0, "typing_applied": None, "vr_capture_until": 0.0, "vr_bind_retry": False,
-             "pointer_holding": False, "calpanel_until": 0.0, "shown_until": 0.0,
+             "pointer_holding": False, "calpanel_until": 0.0, "shown_until": 0.0, "wheel_until": 0.0,
              "kb_addr": None, "kb_until": 0.0, "kb_said": None}
 
     def pause_changed(paused):
@@ -1184,11 +1192,23 @@ def main():
         """Why gamepad mode can't be on now, or None."""
         return "Frametop is paused" if pause.paused else "a VR game runs" if pause.game else None
 
+    def wheel_to(notches):
+        """The 3D mouse's wheel to ft-screens, while its laser is on a panel (Pointer.scroll):
+        every notch, at any speed, where SteamVR's joystick scrolls 20 steps a second at most."""
+        if time.monotonic() >= state["wheel_until"]:
+            return False
+        try:
+            screens_sock.sendto(f"wheel {notches}".encode(), SCREENS)
+        except OSError:
+            return False  # ft-screens not running, or behind: the joystick then
+        return True
+
     def load_config():
         conf = read_config()
         state["rules"] = read_rules()
         if conf.get("POINTER", "0") == "1":
             p = state["pointer_conf"] or Pointer(0.03, 30)
+            p.wheel_to = wheel_to
             p.sensitivity = float(conf.get("POINTER_SENSITIVITY", "0.03"))
             p.idle = float(conf.get("POINTER_IDLE", "30"))
             p.wake_counts = int(conf.get("POINTER_WAKE_COUNTS", "40"))
@@ -1876,10 +1896,12 @@ def main():
             try:
                 if cmd == "keyboard":
                     # From ft-screens (unbound, no reply): where typing goes, repeated every second.
-                    # "keyboard desktop|steam 1|0": the third word, whether the screens show.
+                    # "keyboard desktop|steam 1|0 1|0": the third word, whether the screens show.
                     desktop = len(words) > 1 and words[1] == "desktop" and not pause.paused
                     state["desktop_until"] = now + 3.0 if desktop else 0.0
                     state["shown_until"] = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
+                    # 4th word: the 3D mouse's laser is on a panel, and ft-screens takes its wheel.
+                    state["wheel_until"] = now + 3.0 if len(words) > 3 and words[3] == "1" else 0.0
                     if uid == os.getuid():
                         pause.screens_seen(pid)  # a desktop started while paused hides too
                     continue

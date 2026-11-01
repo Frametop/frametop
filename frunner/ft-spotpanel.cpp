@@ -41,6 +41,7 @@
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../conf/ftsock.h"
+#include "../screens/overlaypanel.h"
 #include "stb_truetype.h"
 #include "reserve.h"
 
@@ -396,88 +397,25 @@ int HitTest(const State &s, double x, double y) {
     return i;
 }
 
-// ---------------------------------------------------------------- the buffers (as ft-gazepanel)
+// ---------------------------------------------------------------- the buffers
 
-struct Buffer {
-    gbm_bo *bo = nullptr;
-    int fd = -1;
-    vr::SharedTextureHandle_t handle = 0;
-};
+// The ring and its copy are screens/overlaypanel.h's.
+struct Buffers : overlaypanel::Ring {
+    Buffers() : Ring("ft-spotpanel") {}
 
-struct Buffers {
-    int drm = -1;
-    gbm_device *gbm = nullptr;
-    Buffer b[3];
-    int next = 0;
-    bool ok = false;
-
-    bool Make() {
-        drm = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
-        if (drm >= 0) gbm = gbm_create_device(drm);
-        for (Buffer &x : b) {
-            if (gbm) x.bo = gbm_bo_create(gbm, kW, kH, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
-            if (!x.bo || (x.fd = gbm_bo_get_fd(x.bo)) < 0) break;
-            vr::DmabufAttributes_t a{};
-            a.unWidth = kW, a.unHeight = kH;
-            a.unDepth = a.unMipLevels = a.unArrayLayers = a.unSampleCount = 1;
-            a.unFormat = DRM_FORMAT_ABGR8888;
-            a.ulModifier = DRM_FORMAT_MOD_LINEAR;
-            a.unPlaneCount = 1;
-            a.plane[0].unOffset = gbm_bo_get_offset(x.bo, 0);
-            a.plane[0].unStride = gbm_bo_get_stride(x.bo);
-            a.plane[0].nFd = x.fd;
-            if (!vr::VRIPCResourceManager()->ImportDmabuf(vr::VRApplication_Overlay, &a, &x.handle)) x.handle = 0;
-            if (!x.handle) break;
-        }
-        ok = b[2].handle != 0;
-        if (!ok) {
-            std::fprintf(stderr, "ft-spotpanel: no shared buffers; falling back to SetOverlayRaw (it flickers)\n");
-            Drop();
-        }
-        return ok;
-    }
-
-    void Drop() {
-        for (Buffer &x : b) {
-            if (x.handle) vr::VRIPCResourceManager()->UnrefResource(x.handle);
-            if (x.fd >= 0) close(x.fd);
-            if (x.bo) gbm_bo_destroy(x.bo);
-            x = Buffer{};
-        }
-        if (gbm) gbm_device_destroy(gbm);
-        if (drm >= 0) close(drm);
-        gbm = nullptr, drm = -1, ok = false;
-    }
+    bool Make() { return Ring::Make(kW, kH); }
 
     void Present(vr::IVROverlay *ov, vr::VROverlayHandle_t h, const Canvas &c) {
         vr::EVROverlayError e;
         if (!ok) {
             e = ov->SetOverlayRaw(h, const_cast<uint8_t *>(c.px.data()), uint32_t(kW), uint32_t(kH), 4);
         } else {
-            Buffer &x = b[next];
-            next = (next + 1) % 3;
-            uint32_t stride = 0;
-            void *mapping = nullptr;
-            auto *dst = static_cast<uint8_t *>(gbm_bo_map(x.bo, 0, 0, kW, kH, GBM_BO_TRANSFER_WRITE, &stride, &mapping));
-            if (!dst) {
-                std::fprintf(stderr, "ft-spotpanel: can't map a buffer\n");
-                return;
-            }
-            for (int y = 0; y < kH; ++y) {
-                const uint8_t *src = &c.px[size_t(y) * kW * 4];
-                uint8_t *row = dst + size_t(y) * stride;
-                for (int i = 0; i < kW * 4; i += 4) {
-                    const unsigned a = src[i + 3];
-                    row[i] = uint8_t(src[i] * a / 255), row[i + 1] = uint8_t(src[i + 1] * a / 255);
-                    row[i + 2] = uint8_t(src[i + 2] * a / 255), row[i + 3] = uint8_t(a);
-                }
-            }
-            gbm_bo_unmap(x.bo, mapping);
-            vr::Texture_t tex = {&x.handle, vr::TextureType_SharedTextureHandle, vr::ColorSpace_Gamma};
+            overlaypanel::Buffer *x = Fill(c.px.data(), kW, kH);
+            if (!x) return;
+            vr::Texture_t tex = overlaypanel::Texture(*x);
             e = ov->SetOverlayTexture(h, &tex);
         }
-        if (e != vr::VROverlayError_None)
-            std::fprintf(stderr, "ft-spotpanel: the picture didn't go to SteamVR: %s\n", ov->GetOverlayErrorNameFromEnum(e));
+        Check(ov, e);
     }
 };
 

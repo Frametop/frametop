@@ -364,7 +364,7 @@ Undoing a fix in a copy of the model brings its break back: with a tree's `insta
 
 `pack/test/install-release-test.py` checks W1 and W4 in `install-release.sh` offline, and that the release `current` named before is still kept now that `install.sh` moves the link first. It fails on the old `install-release.sh`. W2 needs a Frame, so it has no offline test. W3 was checked with a stub podman: a clean tree at HEAD packs, a changed tree, another commit or an image with no labels is refused, and `--allow-changes` warns and packs. CI builds with `./ft dev build` from a clean checkout and passes `--commit "$GITHUB_SHA"`, so its images pass.
 
-`G7-release-traces/` still holds TLC's output for every break at `78e93b1`, the old code. These results were run from a copy of the model, so the folder stays that record. Running the check here rewrites its W5 traces with the fixed model's. The chart's W2 and W4 legend boxes say 9 and 8 steps, one short.
+The step counts above are TLC's for every break at `78e93b1`, the old code, run from a copy of the model. Running the check here writes the fixed model's traces to `G7-release-traces/`, which git ignores like the other groups' folders. The chart's W2 and W4 legend boxes say 9 and 8 steps, one short.
 
 The chart (`G7-release.mmd`, `.svg`) still draws W1 to W4 red. It is due a redraw.
 
@@ -409,6 +409,6 @@ frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G1-
 
 G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G2 takes `Desktop:HeadOff` and so on. G8 takes `Verify`, `Guard`, `Verify:Overrides`, `Guard:LiveNoF` and so on, and reads the guard model from the verify-fake-worn-guard skill. G6 takes `Exit`, `Live` or `PreFix`. G1 and G7 take config names, such as `Rollback`.
 
-Each script writes TLC's full output, with every counterexample trace, to `GROUP-traces/` next to the models. Those folders are ignored by git, except `G7-release-traces/`. A rule that breaks prints its shortest path, and the chart's red badges follow that path.
+Each script writes TLC's full output, with every counterexample trace, to `GROUP-traces/` next to the models. Those folders are ignored by git. A rule that breaks prints its shortest path, and the chart's red badges follow that path.
 
 When code in a group's area changes, re-run its check. A rule that changes from breaks to holds means a bug was fixed: move its badge to green with the commit. A rule that changes from holds to breaks is a regression, or the model needs the new behaviour.

@@ -1,7 +1,7 @@
 // The Frame side of a remote display (docs/remote-displays.md): the iris hardware decoder
 // (V4L2 stateful API, /dev/video-dec0) exporting its pictures as dmabufs, and the GPU pass that
 // turns them into RGBA for SteamVR. Header-only, for ft-stream and the spikes (spike/), each one
-// translation unit. It began in the spikes (S1); stream/spike/iris.h is the old copy, unused.
+// translation unit. It began in the spikes (S1).
 #pragma once
 
 #include <EGL/egl.h>

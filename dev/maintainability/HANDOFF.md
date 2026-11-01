@@ -61,7 +61,7 @@ DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314, DEE-315,
 
 - `docs/tests/test_doc_links.py` (in test-python) fails on a doc link to a missing file or
   heading, or a repo path a doc or comment names that git doesn't track. `frame-hands/notes/...`
-  (the separate frame-hands project), build outputs and `docs/maintainability/` are skipped.
+  (the separate frame-hands project), build outputs and `dev/maintainability/` are skipped.
 - `just test` runs, in order: test-python, test-c, test-keyboard, test-bash, test-testbench and
   test-fast-install. It stops at the first recipe that fails (see the open items).
 - Run it on the Frame like this, and only one full run at a time:
@@ -112,16 +112,17 @@ DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314, DEE-315,
   replace it.
 - frametop-hand-recorder's `package.sh` could copy `conf/` so it shares ft_store, instead of
   keeping its own writer.
-- fitcoach and game_pause still write through fixed `.tmp` names.
-- In Input Settings and the voice settings, the lock covers the write, not the read before it.
-  Moving all 17 callers to `update_json` needs restructuring.
+- Done (DEE-320): fitcoach and game_pause wrote through fixed `.tmp` names.
+- Done (DEE-320): in Input Settings and the voice settings, the lock covered the write, not the
+  read before it.
 
 ### From DEE-302
 
 - `session/test` (needs the host's AT-SPI, dbus-daemon and PyGObject, skipped in the container)
   and `session/tests` (pytest) are two folders for one component.
-- A test file with TestCase classes but no `unittest.main()` runs no tests and still passes.
-- No test has a timeout. A hung test hangs the gate.
+- Done (DEE-321): a test file with TestCase classes but no `unittest.main()` ran no tests and passed.
+- Partly done (DEE-321): testgate files time out (900 s, `FT_TEST_TIMEOUT`). pytest, test-c, the
+  keyboard tests and the bash recipes still have none.
 - The settings tests write PNGs to fixed paths in /tmp.
 - `conf/test/conf-test.py` has `if C:` blocks that skip silently when the C writer isn't built.
 - `just test` stops at the first failing recipe, so later recipes don't report.
@@ -210,12 +211,12 @@ Still open:
   `g_steam` are.
 - The scans inside ft_vr_command's branch bodies (cutouts, spin, the screens list, hide/show
   arguments) stay in vr.cpp, untested.
-- ft-pointer's `sendPose` has no offline test: `vrmath.h` includes OpenVR. Testing it needs an
-  OpenVR-free split of vrmath.h.
+- Done (DEE-322): ft-pointer's `sendPose` had no offline test. `pointer/common/vec3.h` is the
+  OpenVR-free half of vrmath.h, and `pointer/helper/devpose.h` is tested.
 
 ### From DEE-308
 
-`docs/maintainability/python-split-plan.md` names the cohesive pieces of the five large Python
+`dev/maintainability/python-split-plan.md` names the cohesive pieces of the five large Python
 classes (Input Settings' Backend, the gaze probe and service, the hand recorder's Session and the
 voice daemon). Each time one of those files is touched, move at least one piece out, as plain
 Python with unit tests, and keep a thin method in the class.
@@ -487,7 +488,7 @@ and one base image for both build containers.
 
 Open:
 
-- `stream/spike/iris.h` is no longer used (`stream/iris.h` replaced it). It should go.
+- Done (DEE-324): `stream/spike/iris.h` was no longer used (`stream/iris.h` replaced it).
 - Not hashed: the dev container's `requirements.txt` venvs (gaze/tracker, voice) and
   `gaze/tracker/.frame-job`'s SETUP on the 7i. Hashing them means every platform's wheels.
   pins-test doesn't scan `.frame-job` files.
@@ -794,6 +795,33 @@ Open:
 - `ft_handrec.VALIDATE_PATH` is unused.
 - 41391e5's message has a muddled last sentence: the failing case now asserts exit status 1
   exactly instead of any nonzero status.
+
+## DEE-320 to DEE-324 (the re-audit of f7409a3)
+
+Daenon's run of 2026-10-31, from the read-only re-audit. Local commits on `experimental`.
+
+- DEE-320 file safety: 661f751, ec2c442, 7b49027, c4cc1ee, 8c03ccc. Rules edits in Input Settings
+  and the voice settings read and write under one lock (`input_rules.edit_rules`,
+  `voice_settings.edit_rules`); game_pause, frunner, fitcoach and fix-panels write through ft_store;
+  gaze-report and update-check read frametop.conf with ft_conf.
+- DEE-321 test gate: 6c03707, 272745e, 9cd69fa, d752bc8. Ruff (`[tool.ruff.lint]` in
+  pyproject.toml) fails `just test`; testgate fails a file that defines tests and runs none, and
+  times a file out after 900 s, ending its whole process group.
+- DEE-323 recorder pages: 2e0fc2d, ac87c36. Takes, Viewer and Export are shared in `recorder/qml/`.
+- DEE-322 splits: 1657c7d, 8678c49, 3474f4b. `ft_vr_command` dispatches to one handler per group
+  (`vrcmd::GroupOf`); ft-pointer's tilt and pose lines are in devpose.h.
+- DEE-324 cleanup: this folder moved out of `docs/`, `stream/spike/iris.h` and the G7 traces
+  untracked, ticket numbers cut from comments.
+
+Open:
+
+- ft-pointer's `main()` is still about 3,270 lines. Splitting it means the Pointer struct design
+  of the old `refactor/pointer-main` branch (left out of experimental): Daenon's call whether to
+  redo it, port it, or stop at the tested pieces.
+- `input/rules-migrate.py` still writes the rules file without the lock.
+- A held rules lock can keep Input Settings' window waiting up to 10 s (the GUI thread).
+- Releases now lint: `./ft dev test` runs `just test`, which runs ruff first.
+- Untracking `gaze/tracker/.frame-job` and `screens/handasset.cpp` waits on Daenon.
 
 ## Device checks still to do
 

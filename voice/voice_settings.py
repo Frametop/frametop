@@ -39,6 +39,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "conf"))
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
+# The input relay's key combinations without a list of their own, with Frametop Voice installed,
+# and the Frame controller buttons (pointer/helper/vrbuttons.h): the rules file's shared vocabulary.
+from ft_input_actions import DEFAULT_KEY_BINDINGS, VOICE_KEY_BINDINGS, VR_BUTTONS  # noqa: E402
 
 # Not under $XDG_CONFIG_HOME: Frametop's desktop points it at ~/.config/frametop, and the
 # service and the settings app must read the same file.
@@ -74,17 +77,6 @@ LANGUAGES = {"en": "English", "auto": "Detect it", "de": "Deutsch", "fr": "Fran\
              "uk": "\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430",
              "ja": "\u65e5\u672c\u8a9e", "zh": "\u4e2d\u6587", "ko": "\ud55c\uad6d\uc5b4"}
 OPTIONS = ("live_typing", "sounds", "wake_word")
-# Frame controller buttons (the input relay's VR_BUTTONS; pointer/helper/vrbuttons.h).
-VR_BUTTONS = ("left/view", "left/dpad_up", "left/dpad_down", "left/dpad_left", "left/dpad_right", "left/bumper",
-              "left/trigger", "left/grip", "left/thumbstick", "right/menu", "right/a", "right/b", "right/x", "right/y",
-              "right/bumper", "right/trigger", "right/grip", "right/thumbstick")
-# The input relay's key combinations without a list of their own, with Frametop Voice installed
-# (its DEFAULT_KEY_BINDINGS and VOICE_KEY_BINDINGS; voice/test checks they match).
-DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
-                        "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
-                        "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",
-                        "29+42+56+1": "release_keys"}
-VOICE_KEY_BINDINGS = {"97": "dictate"}
 DICTATION_ACTIONS = ("dictate", "dictate_hold")
 # frame-voice's keys, by evdev name: the modifiers (a left one taps either side, a right one only
 # itself, as the relay reads them) and the keys a push-to-talk key usually is.

@@ -266,15 +266,11 @@ class Settings(unittest.TestCase):
         self.assertEqual(fetched, {n: f for n, (f, _, _) in self.vs.WHISPER_MODELS.items() if n != "small.en"})
         self.assertIn(self.vs.WHISPER_MODELS["small.en"][0], src)  # fetched with the others
 
-    def test_defaults_match_the_relay(self):
-        relay = Path(__file__).resolve().parents[2] / "input" / "input-relay.py"
-        src = relay.read_text()
+    def test_defaults_are_the_relays(self):
+        """The relay and this page read one copy of these (conf/ft_input_actions.py)."""
+        import ft_input_actions
         for name in ("DEFAULT_KEY_BINDINGS", "VOICE_KEY_BINDINGS", "VR_BUTTONS"):
-            ns = {}
-            start = src.index(f"\n{name} = ") + 1
-            end = src.index("\n", src.index("}" if name != "VR_BUTTONS" else ")", start))
-            exec(src[start:end], ns)
-            self.assertEqual(ns[name], getattr(self.vs, name), name)
+            self.assertIs(getattr(self.vs, name), getattr(ft_input_actions, name), name)
 
 
 if __name__ == "__main__":

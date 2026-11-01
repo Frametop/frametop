@@ -9,17 +9,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
-
-# Actions renamed since a release (the relay's RENAMED_ACTIONS): a rules file saved before shows
-# and saves them under their new names.
-RENAMED_ACTIONS = {"spotwatch": "frunner"}
-
-
-def renamed_actions(table):
-    if not isinstance(table, dict):
-        return table
-    return {k: renamed_actions(v) if isinstance(v, dict) else RENAMED_ACTIONS.get(v, v) if isinstance(v, str) else v
-            for k, v in table.items()}
+# Actions renamed since a release (the relay reads them the same way): a rules file saved before
+# shows and saves them under their new names.
+from ft_input_actions import RENAMED_ACTIONS, renamed_actions  # noqa: E402, F401
 
 
 def read_json(path):

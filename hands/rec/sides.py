@@ -23,12 +23,8 @@ Standard library only (the window, validate.py on Windows, the maintainer's tool
 """
 import json
 import os
-import sys
 import time
 
-_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _REPO not in sys.path:   # (imported on its own too: the maintainer's tools)
-    sys.path.append(_REPO)
 from recorder import fhformat  # noqa: E402  (FHSET01, hands/track/record.h)
 
 HDR, CAM = fhformat.SET_HDR, fhformat.SET_CAM

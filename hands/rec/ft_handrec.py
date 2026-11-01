@@ -55,14 +55,12 @@ from PySide6.QtQuickControls2 import QQuickStyle
 import shiboken6
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import hub  # noqa: E402
-import takes  # noqa: E402  (next to this file)
+from hands.rec import hub  # noqa: E402
+from hands.rec import takes  # noqa: E402  (next to this file)
 import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
-sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 # The window's shared part (recorder/window.py): consent, export, login, upload, keeping awake.
 from recorder import bounties, one_window  # noqa: E402
-from recorder.common import host_command  # noqa: E402
+from recorder.common import host_command, tree_env  # noqa: E402
 from recorder.units import resume_units  # noqa: E402
 from recorder.window import RecorderBackend, consent_version as _consent_version, gigabytes  # noqa: E402
 
@@ -71,7 +69,7 @@ HF_DATASET = hub.HF_DATASET
 CONSENT_PATH = hub.CONSENT_PATH
 UPLOAD_PATH = hub.UPLOAD_PATH
 TESTING_PATH = hub.TESTING_PATH
-HUB_PATH = os.path.join(HERE, "hub.py")
+HUB_MODULE = "hands.rec.hub"
 VALIDATE_PATH = os.path.join(HERE, "validate.py")
 AWAKE_UNIT = "frametop-handrec-awake.service"
 SCRIPT_PATH = os.path.join(HERE, "script.json")
@@ -194,7 +192,7 @@ class Backend(RecorderBackend):
     APP = "Frametop Hand Recorder"
     AWAKE_UNIT = AWAKE_UNIT
     AWAKE_WHY = "Exporting or uploading hand recordings"
-    HUB_PATH = HUB_PATH
+    HUB_MODULE = HUB_MODULE
     CONSENT_PATH = CONSENT_PATH
     CONSENT_PATHS = {"testing": TESTING_PATH}   # the bounties' test phase (DESIGN.md "Testing")
     CONSENT_KIND = "testing" if takes.TEST_PHASE else "public"
@@ -286,7 +284,7 @@ class Backend(RecorderBackend):
     def _runner(self):
         if self._session_mod is None and not self._session_error:
             try:
-                import session as mod
+                from hands.rec import session as mod
                 self._session_mod = mod
             except Exception as e:  # missing, or broken: say so, the rest of the app still works
                 self._session_error = f"The session runner (hands/rec/session.py) can't be loaded: {e}"
@@ -421,7 +419,7 @@ class Backend(RecorderBackend):
 
         def run():
             try:
-                r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=tree_env())
                 lines = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
                 result = lines[-1] if lines else {"error": {"text": (r.stderr.strip().splitlines() or ["hub.py failed"])[-1]}}
             except (OSError, ValueError, subprocess.TimeoutExpired) as e:

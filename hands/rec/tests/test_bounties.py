@@ -3,20 +3,18 @@
 scripts, the scene steps' acts (buttons and moves), and a dry-run round: its act and scene
 events in prompts.jsonl, session.json's bounty and sets a second, and the done mark.
 
-  python3 hands/rec/tests/test_bounties.py
+  python3 -m hands.rec.tests.test_bounties
 """
 import json
 import os
 import random
 import shutil
-import sys
 import tempfile
 import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import session  # noqa: E402
+from hands.rec import session  # noqa: E402
 from recorder import bounties  # noqa: E402
 
 WIN = {"id": "a", "at": [0, -0.15, -1.0], "size": [0.6, 0.4], "look": "grid:3x3"}
@@ -196,7 +194,7 @@ class ShippedTest(unittest.TestCase):
     def test_fetched_rounds(self):
         """hub.py board keeps the rounds the board names that the recorder doesn't ship (checked),
         refuses bad ones, drops ones no longer wanted, and a shipped round wins over a fetched one."""
-        import hub
+        from hands.rec import hub
         base = tempfile.mkdtemp(prefix="handrec-rounds-")
         self.addCleanup(shutil.rmtree, base)
         with open(session.bounty_script("pokes")) as f:

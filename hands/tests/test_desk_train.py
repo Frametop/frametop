@@ -19,9 +19,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HANDS = os.path.dirname(HERE)
 ROOT = os.path.dirname(HANDS)
 sys.path.insert(0, os.path.join(HANDS, "tools"))
-sys.path.insert(0, os.path.join(HANDS, "rec"))
 import desk_train as dt  # noqa: E402
-import session  # noqa: E402
+from hands.rec import session  # noqa: E402  (the repo root is on the path: testgate)
 
 FEATURES = ["palm_x", "palm_y", "palm_z", "wander_x", "wander_z", "speed"]
 S = 1e9

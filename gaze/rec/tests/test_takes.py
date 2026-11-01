@@ -4,19 +4,17 @@ random frames (never real eye images): listing, deleted ranges across the two cl
 chunks, logs and checksums, and unpacking it with a key. Needs zstd (Python 3.14's, as eyerec.py)
 and the cryptography library: the dev container has both.
 
-  python3 gaze/rec/tests/test_takes.py
+  python3 -m gaze.rec.tests.test_takes
 """
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, ".."))
-import eyerec  # noqa: E402
-import takes  # noqa: E402
+from gaze.rec import eyerec  # noqa: E402
+from gaze.rec import takes  # noqa: E402
 import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 from recorder import age  # noqa: E402
 

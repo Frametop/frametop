@@ -33,9 +33,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
-import takes  # noqa: E402  (next to this file)
+from gaze.rec import takes  # noqa: E402  (next to this file)
 import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 from recorder import bounties  # noqa: E402
 from recorder import hub as rhub  # noqa: E402
@@ -134,7 +132,7 @@ def upload(store, rnd, dry_run=False, again=False, progress=None, log=None):
     """Upload exports/<round> (the steps in this file's docstring). Returns the result; raises HubError."""
     tell = progress or (lambda phase, text, fraction=None, **extra: None)
     say = log or (lambda text: None)
-    import validate
+    from gaze.rec import validate
     repo = dataset_id()
     try:
         export = store.export_dir(rnd)

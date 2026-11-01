@@ -2,15 +2,13 @@
 """sounds.py: the beeps' WAV files, and a player that never stops a round."""
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 import wave
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, ".."))
-import sounds  # noqa: E402
+from gaze.rec import sounds  # noqa: E402
 
 
 class SoundsTest(unittest.TestCase):

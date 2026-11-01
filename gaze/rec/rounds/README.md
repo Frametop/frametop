@@ -105,7 +105,7 @@ Training reads the cue words in `prompts.jsonl` (`frame-eyes/train/data/ingest.p
 - **Shut eyes:** 2 s or more closed, then 2 s or more open before anything else, so the eyes settle back
   on the dot.
 - **Blinks on a beep:** uneven gaps, 1.2 to 2 s, so the beep can't be predicted.
-- **Length:** about 4 to 6 minutes recorded. Check with `python3 gaze/rec/session.py <script> --plan`, and
+- **Length:** about 4 to 6 minutes recorded. Check with `python3 -m gaze.rec.session <script> --plan`, and
   put that, rounded, in the board's `minutes`.
 
 ## Where things can go
@@ -138,10 +138,10 @@ Training reads the cue words in `prompts.jsonl` (`frame-eyes/train/data/ingest.p
 
 ## Before it ships
 
-1. `python3 gaze/rec/session.py <script> --plan`: the steps and their length.
+1. `python3 -m gaze.rec.session <script> --plan`: the steps and their length.
 2. The tests, in the dev container: `cd gaze/rec && for t in tests/test_*.py; do python3 $t; done`.
    `test_shipped_rounds_load` loads every script; update its count.
-3. A dry run: `python3 gaze/rec/session.py <script> --dry-run --speed 20 --next-after 0.1`.
+3. A dry run: `python3 -m gaze.rec.session <script> --dry-run --speed 20 --next-after 0.1`.
 4. A replay end to end: `frame-eyes/tools/eyerec-dryrun <bounty>` (record, export, validate), and the
    export through `eyes_hub.py check` and `ingest.py` on dody. Delete those rounds afterwards: their
    labels are wrong.

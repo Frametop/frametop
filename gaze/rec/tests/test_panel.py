@@ -3,7 +3,7 @@
 a made-up 90 Hz vsync): its commands, and targets.jsonl, the ground truth of where the dot was
 when. Needs the built panel (gaze/build.sh); skipped without it.
 
-  python3 gaze/rec/tests/test_panel.py
+  python3 -m gaze.rec.tests.test_panel
 """
 import json
 import math

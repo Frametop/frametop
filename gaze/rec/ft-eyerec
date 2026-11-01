@@ -9,6 +9,7 @@
 # dbus-run-session). The session's Wayland socket and bus go to the app itself.
 # Options go to ft_eyerec.py: --base DIR, --page NAME, and --dry-run (--hub-dry-run, --ignore-eyes) for testing.
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+tree=$(cd "$here/../.." && pwd)  # the repo root: the recorder is the package gaze.rec
 wl=${WAYLAND_DISPLAY:-wayland-0}
 case $wl in /*) ;; *) wl="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$wl" ;; esac
 session_bus=${DBUS_SESSION_BUS_ADDRESS:-}
@@ -21,4 +22,4 @@ exec "$here/../../scripts/in-box" env PATH="/opt/frametop/venv/bin:/opt/frametop
   WAYLAND_DISPLAY="$wl" DISPLAY="${DISPLAY:-}" \
   XAUTHORITY="${XAUTHORITY:-}" DBUS_SESSION_BUS_ADDRESS="$session_bus" \
   QT_QPA_PLATFORM="wayland;xcb" \
-  python3 "$here/ft_eyerec.py" "$@"
+  PYTHONPATH="$tree${PYTHONPATH:+:$PYTHONPATH}" python3 -m gaze.rec.ft_eyerec "$@"

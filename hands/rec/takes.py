@@ -39,14 +39,12 @@ import tempfile
 import threading
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
+from hands.rec import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
 from recorder import fhformat  # noqa: E402  (FHSET01, hands/track/record.h)
 from recorder import age  # noqa: E402  (a debug session's recordings are encrypted)
 from recorder import contributions  # noqa: E402  (the log of uploads that outlives the sessions)
 from recorder.common import store_json, tree_version  # noqa: E402
-import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's panel and pointer decisions)
+from hands.rec import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's panel and pointer decisions)
 from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge_ranges, read_json,  # noqa: E402
                             tree_bytes, tree_stat, write_sums)
 

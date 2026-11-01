@@ -31,7 +31,6 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 from recorder import age  # noqa: E402
 from recorder.checks import (Cancelled, Report, check_sums, is_uuid4, listed, need,  # noqa: E402,F401
                              read_json_file)
@@ -203,8 +202,7 @@ def check_take(root, tid, entry, sizes, recipients, identity, report, step, canc
 
 
 def decrypted_problem(path, identity, nframes):
-    sys.path.insert(0, HERE)
-    import eyerec   # zstd, as the recorder has it
+    from gaze.rec import eyerec   # zstd, as the recorder has it
     try:
         with open(path, "rb") as f:
             data = eyerec.decompress(age.decrypt_bytes(f.read(), identity))

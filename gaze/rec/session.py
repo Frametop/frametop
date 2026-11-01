@@ -51,10 +51,10 @@ Degrees are head-relative, yaw +left, pitch +up; every dot must fit the panel (l
 Plain Python, standard library only (zstd as eyerec.py finds it). From the command line, for
 testing (in the dev container, which has Python 3.14's zstd):
 
-  python3 gaze/rec/session.py --board                         the bounties, and which are done
-  python3 gaze/rec/session.py edges --plan                    a round's steps and their length
-  python3 gaze/rec/session.py edges --dry-run --speed 20 --next-after 0.1
-  python3 gaze/rec/session.py edges --cams /dev/shm/frametop-eyes-cams-replay --panel-no-vr \\
+  python3 -m gaze.rec.session --board                         the bounties, and which are done
+  python3 -m gaze.rec.session edges --plan                    a round's steps and their length
+  python3 -m gaze.rec.session edges --dry-run --speed 20 --next-after 0.1
+  python3 -m gaze.rec.session edges --cams /dev/shm/frametop-eyes-cams-replay --panel-no-vr \\
       --no-steamvr-gaze --no-headset-button --next-after 1      a replay (lab/ft-eyes-replay)
 
 All _ns times are CLOCK_MONOTONIC nanoseconds (prompts.jsonl, take.json, as hands); the eye
@@ -79,12 +79,9 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAZE = os.path.dirname(HERE)
 REPO = os.path.dirname(GAZE)
-sys.path.insert(0, REPO)
-sys.path.insert(0, GAZE)
-sys.path.insert(0, HERE)
-import eyerec  # noqa: E402  (gaze/rec/eyerec.py: the frame writer)
-import fitcoach  # noqa: E402  (gaze/fitcoach.py)
-import sounds  # noqa: E402  (gaze/rec/sounds.py: the beeps)
+from gaze.rec import eyerec  # noqa: E402  (gaze/rec/eyerec.py: the frame writer)
+from gaze import fitcoach  # noqa: E402  (gaze/fitcoach.py)
+from gaze.rec import sounds  # noqa: E402  (gaze/rec/sounds.py: the beeps)
 from recorder import bounties  # noqa: E402
 from recorder.button import BUTTON_DEVICE, ButtonReader, find_button, mouse_connected, read_input_devices  # noqa: E402
 from recorder.common import (clean_text, clock_sample, in_container, mono_ns, os_version,  # noqa: E402

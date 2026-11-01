@@ -2,26 +2,24 @@
 """Tests for the side cameras' naming in recordings (sides.py) and its readers: takes.py's
 review and export, validate.py, and session.py's live decision and recording parts.
 
-  python3 hands/rec/tests/test_sides.py
+  python3 -m hands.rec.tests.test_sides
 """
 import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import session  # noqa: E402
-import sides  # noqa: E402
-import takes  # noqa: E402
+from hands.rec import session  # noqa: E402
+from hands.rec import sides  # noqa: E402
+from hands.rec import takes  # noqa: E402
 import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
-import validate  # noqa: E402
-from test_validate import fhset, make_session, SESSION  # noqa: E402
+from hands.rec import validate  # noqa: E402
+from hands.rec.tests.test_validate import fhset, make_session, SESSION  # noqa: E402
 
 
 def names(record):

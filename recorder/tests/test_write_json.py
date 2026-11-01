@@ -13,9 +13,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "hands", "rec"))
 from recorder import bounties, common  # noqa: E402
-import takes  # noqa: E402
+from hands.rec import takes  # noqa: E402
 
 DATA = {"take": 3, "name": "café", "ranges": [[1, 2]]}
 

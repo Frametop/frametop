@@ -3,17 +3,15 @@
 units and panel faked: the parts go in order, a missing one starts (Frametop's hand tracking
 when it's installed, else the recorder's own units), and the first that can't start stops it.
 
-  python3 hands/rec/tests/test_ready.py
+  python3 -m hands.rec.tests.test_ready
 """
 import os
-import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
 
-import session  # noqa: E402
+from hands.rec import session  # noqa: E402
 
 
 class FakeHost:

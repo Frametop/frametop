@@ -22,7 +22,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QPalette
 
 from recorder import hub as rhub
 from recorder import units
-from recorder.common import write_json
+from recorder.common import tree_env, write_json
 from recorder.files import Cancelled, free_bytes, human_bytes, tree_bytes
 
 # The headset counts as worn while vrcompositor runs and a display panel is lit: SteamVR turns
@@ -96,7 +96,7 @@ class RecorderBackend(QObject):
     APP = "Frametop recorder"           # systemd-inhibit's --who, and the units' descriptions
     AWAKE_UNIT = ""                     # the host unit that keeps the Frame awake
     AWAKE_WHY = "Exporting or uploading recordings"
-    HUB_PATH = ""                       # the recorder's hub.py
+    HUB_MODULE = ""                     # the recorder's hub, by package (hands.rec.hub)
     CONSENT_PATH = ""
     UPLOAD_PATH = ""
     ACTIVE_STATES = ()                  # the session states in which it records or waits
@@ -682,7 +682,7 @@ class RecorderBackend(QObject):
         return os.environ.get(self.hub.ALLOW_ENV) == "1"
 
     def _hub_argv(self, *args):
-        return [sys.executable, self.HUB_PATH, "--base", self.store.base, *args]
+        return [sys.executable, "-m", self.HUB_MODULE, "--base", self.store.base, *args]
 
     # The login: hub.py whoami in a child process (it asks huggingface.co)
     @Property("QVariantMap", notify=loginChanged)
@@ -702,7 +702,7 @@ class RecorderBackend(QObject):
 
         def run():
             try:
-                r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=tree_env())
                 result = _last_json(r.stdout) or {"error": {"kind": "hub", "text": (r.stderr.strip().splitlines()
                                                                                      or ["hub.py failed"])[-1]}}
             except (OSError, subprocess.TimeoutExpired) as e:
@@ -772,7 +772,7 @@ class RecorderBackend(QObject):
             return
         try:
             proc = subprocess.Popen(self._hub_argv("login", "--json"), stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, env=tree_env())
         except OSError as e:
             self._on_login({"error": {"kind": "hub", "text": f"Couldn't start the login: {e}"}})
             return
@@ -851,7 +851,7 @@ class RecorderBackend(QObject):
             argv.append("--again")
         try:
             proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, bufsize=1)
+                                    text=True, bufsize=1, env=tree_env())
         except OSError as e:
             self.message.emit(f"Couldn't start the upload: {e}", True)
             return False

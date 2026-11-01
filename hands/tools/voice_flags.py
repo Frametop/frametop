@@ -33,9 +33,9 @@ import uuid
 import wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "rec"))
-import eventlog  # noqa: E402
-import voicelog  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+from hands.rec import eventlog  # noqa: E402
+from hands.rec import voicelog  # noqa: E402
 
 SERVER = "http://127.0.0.1:8178"
 GAP_S = 1.0       # a pause shorter than this stays in the burst

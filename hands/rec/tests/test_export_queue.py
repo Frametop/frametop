@@ -4,19 +4,17 @@ exported, after any upload before it (recorder/window.py queueExport, 2026-10-17
 queue exports, and trigger an auto upload when the export is finished"). Needs PySide6 (the dev
 container); skipped without it.
 
-  python3 hands/rec/tests/test_export_queue.py
+  python3 -m hands.rec.tests.test_export_queue
 """
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import takes  # noqa: E402
-from test_validate import make_session  # noqa: E402
+from hands.rec import takes  # noqa: E402
+from hands.rec.tests.test_validate import make_session  # noqa: E402
 
 A, B, C = "20261003-184200", "20261003-190000", "20261003-193000"
 
@@ -24,7 +22,7 @@ A, B, C = "20261003-184200", "20261003-190000", "20261003-193000"
 class ExportQueueTest(unittest.TestCase):
     def setUp(self):
         try:
-            import ft_handrec
+            from hands.rec import ft_handrec
             from recorder import window
         except ImportError as e:
             self.skipTest(f"no PySide6: {e}")

@@ -53,10 +53,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import takes  # noqa: E402  (next to this file)
+from hands.rec import takes  # noqa: E402  (next to this file)
 import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
-sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 from recorder import bounties  # noqa: E402
 from recorder import contributions  # noqa: E402
 from recorder import hub as rhub  # noqa: E402
@@ -204,7 +202,7 @@ def fetch_rounds(board, base, repo, token, fetch=bounties.fetch_json):
     bounties/<script>.json into base/board-rounds/ (session.bounty_script finds them), each kept
     only if session.check_round passes it; the ones no longer wanted are deleted. Returns
     {"rounds": [names kept], "rounds_failed": {name: why}}."""
-    import session   # noqa: E402  (here: only the board needs it)
+    from hands.rec import session   # noqa: E402  (here: only the board needs it)
     out_dir = session.fetched_rounds_dir(base)
     wanted = sorted({b["script"] for b in board["bounties"] if b["priority"] != "retired"
                      and not os.path.exists(session.bounty_script(b["script"], session.BOUNTIES_DIR))})
@@ -275,7 +273,7 @@ def upload(store, session, dry_run=False, again=False, progress=None, log=None):
     fraction or None); log(text) for the dry run's account. Returns the result; raises HubError."""
     tell = progress or (lambda phase, text, fraction=None, **extra: None)
     say = log or (lambda text: None)
-    import validate
+    from hands.rec import validate
     try:
         export = store.export_dir(session)
     except ValueError as e:

@@ -2,13 +2,12 @@
 """Debug sessions (DESIGN.md, "Debug sessions"): livelog.py's copies of the live tracker's
 files, and debug.json's free step in a dry run (marks, finishing early, session.json's record).
 
-  python3 hands/rec/tests/test_debug.py
+  python3 -m hands.rec.tests.test_debug
 """
 import json
 import os
 import shutil
 import struct
-import sys
 import tempfile
 import threading
 import time
@@ -16,14 +15,12 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REC = os.path.dirname(HERE)
-sys.path.insert(0, REC)
-sys.path.insert(0, HERE)   # test_validate, also under python -I
-import session  # noqa: E402
+from hands.rec import session  # noqa: E402
 import recorder.common  # noqa: E402
 import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
-import livelog  # noqa: E402
-import voicelog  # noqa: E402
-import eventlog  # noqa: E402
+from hands.rec import livelog  # noqa: E402
+from hands.rec import voicelog  # noqa: E402
+from hands.rec import eventlog  # noqa: E402
 
 
 class FakeTracker:
@@ -160,9 +157,7 @@ class VoiceFlagsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp)
-        sys.path.insert(0, os.path.join(os.path.dirname(REC), "tools"))
-        self.addCleanup(sys.path.remove, sys.path[0])
-        import voice_flags
+        from hands.tools import voice_flags
         self.vf = voice_flags
 
     def test_loopback_only(self):
@@ -411,10 +406,10 @@ class DebugExportTest(unittest.TestCase):
     live.bin (deleted ranges left out), and validate.py's checks of it."""
 
     def setUp(self):
-        import takes
-        import validate
+        from hands.rec import takes
+        from hands.rec import validate
         from recorder import age
-        from test_validate import SESSION, make_session
+        from hands.rec.tests.test_validate import SESSION, make_session
         try:
             self.identity, recipient = age.keygen()
         except RuntimeError as e:
@@ -540,7 +535,7 @@ class DebugExportTest(unittest.TestCase):
         m["takes"][0]["voice"]["file"] = "takes/01-hand-size/voice.bin.zst"
         m["session"].pop("debug")
         self.takes.write_json(os.path.join(export, "manifest.json"), m)
-        from test_validate import write_sums
+        from hands.rec.tests.test_validate import write_sums
         write_sums(export)
         r = self.validate.validate(export)
         self.assertTrue(any("voice recording" in e for e in r.errors), r.errors)
@@ -628,7 +623,7 @@ class DebugExportTest(unittest.TestCase):
 
     def test_checks(self):
         export = self.store.export(self.sid, low_priority=False)
-        from test_validate import write_sums
+        from hands.rec.tests.test_validate import write_sums
         # an unencrypted recording in a debug export
         shutil.copyfile(os.path.join(export, "takes/02-no-hands/sets.bin.zst.age"),
                         os.path.join(export, "takes/02-no-hands/sets.bin.zst"))

@@ -3,22 +3,20 @@
 lot, and for the disk-full messages: zstd's own words instead of "Broken pipe", no hang, nothing
 left behind (2026-10-15).
 
-  python3 hands/rec/tests/test_export_pipes.py     (anywhere with zstd)
+  python3 -m hands.rec.tests.test_export_pipes     (anywhere with zstd)
 """
 import os
 import shutil
 import stat
-import sys
 import tempfile
 import threading
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import takes  # noqa: E402
+from hands.rec import takes  # noqa: E402
 from recorder import age  # noqa: E402
-from test_validate import make_session, SESSION  # noqa: E402
+from hands.rec.tests.test_validate import make_session, SESSION  # noqa: E402
 
 RECIPIENTS = os.path.join(os.path.dirname(HERE), "test-recipients.txt")
 

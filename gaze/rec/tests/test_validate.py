@@ -3,24 +3,21 @@
 round of random frames (test_takes.make_round): a good one, with and without a key, and broken
 ones. Needs zstd and the cryptography library: the dev container has both.
 
-  python3 gaze/rec/tests/test_validate.py
+  python3 -m gaze.rec.tests.test_validate
 """
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, ".."))
-import takes  # noqa: E402
-import validate  # noqa: E402
+from gaze.rec import takes  # noqa: E402
+from gaze.rec import validate  # noqa: E402
 from recorder import age  # noqa: E402
 from recorder.files import write_sums  # noqa: E402
-from test_takes import HAVE, RID, TID, make_round  # noqa: E402
+from gaze.rec.tests.test_takes import HAVE, RID, TID, make_round  # noqa: E402
 
 
 @unittest.skipUnless(HAVE, "needs zstd and the cryptography library (the dev container)")

@@ -3,12 +3,11 @@
 timeline in prompts.jsonl, R (redo), the timed flow (--auto), the pose pictures' display rule,
 the length estimates, and a take recorded in many parts through review, export and validate.
 
-  python3 hands/rec/tests/test_session.py
+  python3 -m hands.rec.tests.test_session
 """
 import json
 import os
 import shutil
-import sys
 import tempfile
 import struct
 import time
@@ -16,13 +15,12 @@ import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import session  # noqa: E402
-import takes  # noqa: E402
-import validate  # noqa: E402
+from hands.rec import session  # noqa: E402
+from hands.rec import takes  # noqa: E402
+from hands.rec import validate  # noqa: E402
 import recorder.button  # noqa: E402
 import recorder.units  # noqa: E402
-from test_validate import fhset, make_session, SESSION  # noqa: E402
+from hands.rec.tests.test_validate import fhset, make_session, SESSION  # noqa: E402
 
 SCRIPT = {
     "version": 1, "intro_s": 1, "between_s": 1,

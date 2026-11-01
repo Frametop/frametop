@@ -34,10 +34,10 @@ def imports(repo):
         importlib.import_module("PySide6." + name)
     for i, name in enumerate(BACKENDS):
         path = repo / name
-        sys.path.insert(0, str(path.parent))
+        sys.path[:0] = [str(path.parent), str(repo)]   # the repo root: the recorders import hands.rec and gaze.rec
         spec = importlib.util.spec_from_file_location(f"_ft_pyside_{i}", path)
         spec.loader.exec_module(importlib.util.module_from_spec(spec))
-        sys.path.pop(0)
+        del sys.path[:2]
 
 
 def check_elf(paths):

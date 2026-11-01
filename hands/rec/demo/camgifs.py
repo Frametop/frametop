@@ -29,15 +29,13 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REC = os.path.dirname(HERE)
-sys.path.insert(0, REC)
-import takes  # noqa: E402  (hands/rec/takes.py)
+from hands.rec import takes  # noqa: E402  (hands/rec/takes.py)
 import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
 
 GIFSICLE = os.environ.get("HANDDEMO_GIFSICLE") or shutil.which("gifsicle") or os.path.expanduser(

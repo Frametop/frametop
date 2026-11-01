@@ -40,14 +40,11 @@ import json
 import os
 import re
 import shutil
-import sys
 import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-sys.path.insert(0, REPO)
-sys.path.insert(0, HERE)
-import eyerec  # noqa: E402  (gaze/rec/eyerec.py: the chunks' format)
+from gaze.rec import eyerec  # noqa: E402  (gaze/rec/eyerec.py: the chunks' format)
 from recorder import age  # noqa: E402
 from recorder.common import tree_version, write_json  # noqa: E402
 from recorder.files import (Cancelled, human_bytes, in_ranges, merge_ranges, read_json, sha256_file,  # noqa: E402

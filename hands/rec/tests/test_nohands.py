@@ -3,20 +3,17 @@
 with the upper cameras off, and the early no-hands stop in the hand-size section's first step
 (dry runs with a made-up hands file; no processes, no real cameras).
 
-  python3 hands/rec/tests/test_nohands.py
+  python3 -m hands.rec.tests.test_nohands
 """
 import json
 import os
-import sys
 import threading
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-sys.path.insert(0, HERE)
-import session  # noqa: E402
-import camcheck  # noqa: E402  (session.py put hands/ on the path)
-from test_session import SessionBase  # noqa: E402
+from hands.rec import session  # noqa: E402
+from hands import camcheck  # noqa: E402  (session.py put hands/ on the path)
+from hands.rec.tests.test_session import SessionBase  # noqa: E402
 
 SCRIPT = {
     "version": 1, "intro_s": 1, "between_s": 1,

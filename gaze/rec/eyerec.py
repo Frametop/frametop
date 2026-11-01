@@ -22,8 +22,8 @@ Plain Python, standard library: zstd is Python 3.14's compression.zstd (the dev 
 zstandard, or the zstd command (SteamOS's host Python 3.12 has neither module).
 
 From the command line, for testing (FT_EYES_CAMS points it at a replay, lab/ft-eyes-replay):
-  python3 gaze/rec/eyerec.py DIR [SECONDS]
-  python3 gaze/rec/eyerec.py --read DIR      the frames' count and times, decompressed
+  python3 -m gaze.rec.eyerec DIR [SECONDS]
+  python3 -m gaze.rec.eyerec --read DIR      the frames' count and times, decompressed
 """
 import os
 import queue
@@ -35,8 +35,7 @@ import time
 from collections import deque
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tracker"))
-import eyes_share  # noqa: E402  (gaze/tracker/eyes_share.py)
+from gaze.tracker import eyes_share  # noqa: E402  (gaze/tracker/eyes_share.py)
 
 W, H = eyes_share.W, eyes_share.H
 FRAME = W * H

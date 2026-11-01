@@ -2,22 +2,20 @@
 """The eye recorder's session runner (gaze/rec/session.py) without the headset: the round
 scripts' checks, the plans, the control sockets' answers, and whole rounds in a dry run.
 
-  python3 gaze/rec/tests/test_session.py
+  python3 -m gaze.rec.tests.test_session
 """
 import glob
 import json
 import os
 import shutil
 import socket
-import sys
 import tempfile
 import threading
 import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, ".."))
-import session  # noqa: E402
+from gaze.rec import session  # noqa: E402
 
 
 def write_round(tmp, steps, **extra):

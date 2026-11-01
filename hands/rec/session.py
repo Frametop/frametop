@@ -11,11 +11,11 @@ gives feedback ("I can't see your left hand").
 Plain Python, standard library only: ft_handrec.py imports it, and it runs from the command line
 for testing (in the dev container):
 
-  python3 hands/rec/session.py --dry-run --speed 20 --next-after 0.2   # no processes: prints the panel commands
-  python3 hands/rec/session.py --ring /tmp/ring --base /tmp/hr        # ft-ringplay's frames, no headset needed
-  python3 hands/rec/session.py --board                                # the bounty board, and which are done
-  python3 hands/rec/session.py --bounty index-taps --dry-run --speed 20 --next-after 0.2   # a bounty's round
-  python3 hands/rec/session.py --debug        # a debug session: Frametop's hand tracking used as usual, recorded
+  python3 -m hands.rec.session --dry-run --speed 20 --next-after 0.2   # no processes: prints the panel commands
+  python3 -m hands.rec.session --ring /tmp/ring --base /tmp/hr        # ft-ringplay's frames, no headset needed
+  python3 -m hands.rec.session --board                                # the bounty board, and which are done
+  python3 -m hands.rec.session --bounty index-taps --dry-run --speed 20 --next-after 0.2   # a bounty's round
+  python3 -m hands.rec.session --debug        # a debug session: Frametop's hand tracking used as usual, recorded
 
 Before anything starts it runs the camera check (hands/camcheck.py) and won't start while the
 upper cameras are off (--ignore-cameras overrides it). If the hand-size section's first step sees
@@ -49,17 +49,13 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 HANDS = os.path.join(REPO, "hands")
-sys.path.insert(0, HANDS)
-import camcheck  # noqa: E402  (hands/camcheck.py: are all four mono cameras running?)
-sys.path.insert(0, HERE)
-import sides  # noqa: E402  (hands/rec/sides.py: which side camera is which)
-import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone recorder's build info)
-sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "conf"))
-import ft_conf  # noqa: E402  (conf/ft_conf.py: frametop.conf's grammar)
-import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
-import voicelog  # noqa: E402  (hands/rec/voicelog.py: a debug session's microphone, if ticked)
-import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's copy of what the panels and pointer did)
+from hands import camcheck  # noqa: E402  (hands/camcheck.py: are all four mono cameras running?)
+from hands.rec import sides  # noqa: E402  (hands/rec/sides.py: which side camera is which)
+from hands.rec import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone recorder's build info)
+from conf import ft_conf  # noqa: E402  (conf/ft_conf.py: frametop.conf's grammar)
+from hands.rec import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
+from hands.rec import voicelog  # noqa: E402  (hands/rec/voicelog.py: a debug session's microphone, if ticked)
+from hands.rec import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's copy of what the panels and pointer did)
 # What the recorders share (recorder/): the window and the tests import it from there.
 from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402
                              write_json, clean_text, tree_version, os_version as _os_version,

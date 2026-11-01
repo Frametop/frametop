@@ -5,23 +5,21 @@ QML only as "is not a function" when its button is pressed (2026-10-03: Export d
 Needs PySide6 (the dev container); skipped without it. FT_HANDREC_QML=PATH checks another
 window against the same backend (the standalone Hand Recorder's, in its CI).
 
-  python3 hands/rec/tests/test_qml_backend.py
+  python3 -m hands.rec.tests.test_qml_backend
 """
 import os
 import re
-import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REC = os.path.dirname(HERE)
-sys.path.insert(0, REC)
 QML = os.environ.get("FT_HANDREC_QML") or os.path.join(REC, "main.qml")
 
 
 class QmlBackendTest(unittest.TestCase):
     def setUp(self):
         try:
-            import ft_handrec
+            from hands.rec import ft_handrec
         except ImportError as e:
             self.skipTest(f"no PySide6: {e}")
         meta = self.meta = ft_handrec.Backend.staticMetaObject
@@ -95,8 +93,8 @@ class GuidanceTest(unittest.TestCase):
         import shutil
         import tempfile
         try:
-            import ft_handrec
-            import takes
+            from hands.rec import ft_handrec
+            from hands.rec import takes
         except ImportError as e:
             self.skipTest(f"no PySide6: {e}")
         tmp = tempfile.mkdtemp()
@@ -125,8 +123,8 @@ class TestingSessionTest(unittest.TestCase):
         import shutil
         import tempfile
         try:
-            import ft_handrec
-            import takes
+            from hands.rec import ft_handrec
+            from hands.rec import takes
         except ImportError as e:
             self.skipTest(f"no PySide6: {e}")
         tmp = tempfile.mkdtemp()

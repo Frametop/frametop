@@ -3,20 +3,18 @@
 (recorder/window.py exportSession and startUpload, 2026-10-17: an upload was refused while
 any other session exported). Needs PySide6 (the dev container); skipped without it.
 
-  python3 hands/rec/tests/test_upload_during_export.py
+  python3 -m hands.rec.tests.test_upload_during_export
 """
 import os
 import shutil
-import sys
 import tempfile
 import threading
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import takes  # noqa: E402
-from test_validate import make_session  # noqa: E402
+from hands.rec import takes  # noqa: E402
+from hands.rec.tests.test_validate import make_session  # noqa: E402
 
 A, B = "20261003-184200", "20261003-190000"
 
@@ -24,7 +22,7 @@ A, B = "20261003-184200", "20261003-190000"
 class UploadDuringExportTest(unittest.TestCase):
     def setUp(self):
         try:
-            import ft_handrec
+            from hands.rec import ft_handrec
             from recorder import window
         except ImportError as e:
             self.skipTest(f"no PySide6: {e}")

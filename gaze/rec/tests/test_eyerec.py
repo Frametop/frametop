@@ -3,13 +3,12 @@
 ft-eyegrab's (gaze/tracker/eyes_share.py). No eye images: each frame is one byte value
 repeated, from its camera and number, so the round trip can be checked.
 
-  python3 gaze/rec/tests/test_eyerec.py
+  python3 -m gaze.rec.tests.test_eyerec
 """
 import mmap
 import os
 import shutil
 import struct
-import sys
 import tempfile
 import threading
 import time
@@ -17,8 +16,7 @@ import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import eyerec  # noqa: E402
+from gaze.rec import eyerec  # noqa: E402
 
 W, H, SLOTS = eyerec.W, eyerec.H, 8
 ESIZE = 64 + W * H

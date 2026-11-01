@@ -36,7 +36,6 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 from recorder import age  # noqa: E402  (its shape check needs no cryptography library)
 from recorder.privacy import key_identifies, strip_calibration  # noqa: E402  (standard library only)
 from recorder import fhformat  # noqa: E402  (FHSET01's layout)

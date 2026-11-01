@@ -5,23 +5,21 @@ QML only as "is not a function" when its button is pressed (the hand recorder's 
 Needs PySide6 (the dev container); skipped without it. FT_EYEREC_QML=PATH checks another
 window against the same backend (the standalone Eye Recorder's, in its CI).
 
-  python3 gaze/rec/tests/test_qml_backend.py
+  python3 -m gaze.rec.tests.test_qml_backend
 """
 import os
 import re
-import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REC = os.path.dirname(HERE)
-sys.path.insert(0, REC)
 QML = os.environ.get("FT_EYEREC_QML") or os.path.join(REC, "main.qml")
 
 
 class QmlBackendTest(unittest.TestCase):
     def setUp(self):
         try:
-            import ft_eyerec
+            from gaze.rec import ft_eyerec
         except ImportError as e:
             self.skipTest(f"no PySide6: {e}")
         meta = self.meta = ft_eyerec.Backend.staticMetaObject

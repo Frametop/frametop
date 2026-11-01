@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for validate.py and hub.py (no network): a good export, and broken ones.
 
-  python3 hands/rec/tests/test_validate.py     (in the dev container, or anywhere with zstd)
+  python3 -m hands.rec.tests.test_validate     (in the dev container, or anywhere with zstd)
 """
 import hashlib
 import json
@@ -15,11 +15,10 @@ import uuid
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import hub  # noqa: E402
-import session  # noqa: E402
-import takes  # noqa: E402
-import validate  # noqa: E402
+from hands.rec import hub  # noqa: E402
+from hands.rec import session  # noqa: E402
+from hands.rec import takes  # noqa: E402
+from hands.rec import validate  # noqa: E402
 
 SESSION = "20261002-101500"
 DEVICE = {"cv": {"cad_from_cal": {"method": "FrontAndUpperCamPositions", "plus_x": [0.63, -0.77, 0.02],
@@ -290,10 +289,10 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual([e for e in r.errors if "go back" not in e], [])
 
     def test_cli(self):
-        self.assertEqual(os.system(f"{sys.executable} {validate.__file__} {self.export} --json >/dev/null"), 0)
+        self.assertEqual(os.system(f"{sys.executable} -m hands.rec.validate {self.export} --json >/dev/null"), 0)
         d = self.copy()
         os.remove(os.path.join(d, "manifest.json"))
-        self.assertNotEqual(os.system(f"{sys.executable} {validate.__file__} {d} >/dev/null"), 0)
+        self.assertNotEqual(os.system(f"{sys.executable} -m hands.rec.validate {d} >/dev/null"), 0)
 
 
 class ExportJsonlTest(unittest.TestCase):

@@ -45,19 +45,17 @@ import shiboken6
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAZE = os.path.dirname(HERE)
 REPO = os.path.dirname(GAZE)
-sys.path.insert(0, HERE)
-sys.path.insert(0, REPO)
-import eyerec  # noqa: E402  (next to this file; it imports gaze/tracker/eyes_share.py)
-import eyes_share  # noqa: E402
-import hub  # noqa: E402
-import takes  # noqa: E402
+from gaze.rec import eyerec  # noqa: E402  (next to this file; it imports gaze/tracker/eyes_share.py)
+from gaze.tracker import eyes_share  # noqa: E402
+from gaze.rec import hub  # noqa: E402
+from gaze.rec import takes  # noqa: E402
 from recorder import bounties  # noqa: E402
-from recorder.common import host_command, write_json  # noqa: E402
+from recorder.common import host_command, tree_env, write_json  # noqa: E402
 from recorder.files import human_bytes, read_json  # noqa: E402
 from recorder.window import RecorderBackend  # noqa: E402
 from recorder.units import resume_units  # noqa: E402
 
-HUB_PATH = os.path.join(HERE, "hub.py")
+HUB_MODULE = "gaze.rec.hub"
 EYE_RATE = os.path.join(GAZE, "eye-rate.py")
 AWAKE_UNIT = "frametop-eyerec-awake.service"
 # A round of about 5 recorded minutes is about 6 GB (1.2 GB a minute: DESIGN.md, "Size"), and
@@ -277,7 +275,7 @@ class Backend(RecorderBackend):
     APP = "Frametop Eye Recorder"
     AWAKE_UNIT = AWAKE_UNIT
     AWAKE_WHY = "Exporting or uploading eye recordings"
-    HUB_PATH = HUB_PATH
+    HUB_MODULE = HUB_MODULE
     CONSENT_PATH = hub.CONSENT_PATH
     UPLOAD_PATH = hub.UPLOAD_PATH
     ACTIVE_STATES = ACTIVE_STATES
@@ -316,7 +314,7 @@ class Backend(RecorderBackend):
     def _runner(self):
         if self._session_mod is None and not self._session_error:
             try:
-                import session as mod
+                from gaze.rec import session as mod
                 self._session_mod = mod
             except Exception as e:  # missing, or broken: say so, the rest of the app still works
                 self._session_error = f"The session runner (gaze/rec/session.py) can't be loaded: {e}"
@@ -395,7 +393,7 @@ class Backend(RecorderBackend):
 
         def run():
             try:
-                r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=tree_env())
                 lines = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
                 result = lines[-1] if lines else {"error": {"text": (r.stderr.strip().splitlines() or ["hub.py failed"])[-1]}}
             except (OSError, ValueError, subprocess.TimeoutExpired) as e:

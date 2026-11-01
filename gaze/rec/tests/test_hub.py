@@ -3,23 +3,20 @@
 keeps the real dataset closed until the texts are reviewed, upload records, and the pull request
 flow against a fake Hub. The round is test_takes.make_round's random frames.
 
-  python3 gaze/rec/tests/test_hub.py
+  python3 -m gaze.rec.tests.test_hub
 """
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 import uuid
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, ".."))
-import hub  # noqa: E402
-import takes  # noqa: E402
-from test_takes import HAVE, RID, make_round  # noqa: E402
+from gaze.rec import hub  # noqa: E402
+from gaze.rec import takes  # noqa: E402
+from gaze.rec.tests.test_takes import HAVE, RID, make_round  # noqa: E402
 
 
 class Pr:

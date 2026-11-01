@@ -21,6 +21,9 @@ import sys
 import tempfile
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hook")
+# The repo root, on each test's PYTHONPATH: hands/rec and gaze/rec are packages (hands.rec, gaze.rec), and
+# their tests import by package.
+TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SKIP = 77
 
 
@@ -30,7 +33,7 @@ def run(path, python=sys.executable):
     with tempfile.TemporaryDirectory(prefix="ft-testgate-") as tmp:
         report = os.path.join(tmp, "report.json")
         env = dict(os.environ, FT_TEST_REPORT=report,
-                   PYTHONPATH=os.pathsep.join(p for p in (HOOK, os.environ.get("PYTHONPATH")) if p))
+                   PYTHONPATH=os.pathsep.join(p for p in (HOOK, TREE, os.environ.get("PYTHONPATH")) if p))
         # files, not pipes: a server a test starts and leaves running can hold a pipe open
         with open(os.path.join(tmp, "out"), "w+", errors="replace") as out, \
                 open(os.path.join(tmp, "err"), "w+", errors="replace") as err:

@@ -3,24 +3,22 @@
 outlives deleted sessions, Store.free_session and its refusals, the export's tighter space check
 and its stop before the disk fills, and hub.py adding each finished upload to the log.
 
-  python3 hands/rec/tests/test_free_space.py     (anywhere with zstd)
+  python3 -m hands.rec.tests.test_free_space     (anywhere with zstd)
 """
 import datetime
 import os
 import shutil
-import sys
 import tempfile
 import time
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import takes  # noqa: E402
+from hands.rec import takes  # noqa: E402
 import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
-import hub  # noqa: E402
+from hands.rec import hub  # noqa: E402
 from recorder import contributions  # noqa: E402
-from test_validate import make_session, SESSION  # noqa: E402
+from hands.rec.tests.test_validate import make_session, SESSION  # noqa: E402
 
 PR = "https://huggingface.co/datasets/DeeJanuz/frametop-hands/discussions/12"
 
@@ -242,7 +240,7 @@ class BackendTest(unittest.TestCase):
 
     def setUp(self):
         try:
-            import ft_handrec
+            from hands.rec import ft_handrec
         except ImportError as e:
             self.skipTest(f"no PySide6: {e}")
         self.ft = ft_handrec

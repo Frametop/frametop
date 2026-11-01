@@ -17,6 +17,17 @@ try:
 except ImportError:  # the standalone Hand Recorder ships recorder/ without conf/: store_json's own way
     ft_store = None
 
+# The tree's root: hands/rec and gaze/rec are packages under it (hands.rec, gaze.rec).
+TREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def tree_env(env=None):
+    """env (default os.environ) with the tree first on PYTHONPATH, for a child that runs a recorder
+    program by package (python3 -m hands.rec.hub ...)."""
+    env = dict(os.environ if env is None else env)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (TREE, env.get("PYTHONPATH")) if p)
+    return env
+
 
 def mono_ns():
     return time.clock_gettime_ns(time.CLOCK_MONOTONIC)

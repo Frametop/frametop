@@ -279,9 +279,9 @@ class Run:
         self.arm_finds()
         if self.images:
             try:
-                if str(GAZE / "rec") not in sys.path:
-                    sys.path.insert(0, str(GAZE / "rec"))
-                import eyerec
+                if str(GAZE.parent) not in sys.path:   # the repo root: the eye recorder is gaze.rec
+                    sys.path.insert(0, str(GAZE.parent))
+                from gaze.rec import eyerec
                 self.writer = eyerec.Writer(str(self.dir / "images"), log=self.log).start()
                 self.writer.record(True)
             except Exception as e:  # no zstd, no share: record the rest

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Offline test of ft-textinput, Frametop's input method: what it tells the relay, and the
-characters it commits for the relay (DEE-192).
+characters it commits for the relay.
 
 Runs its main() against a fake KWin (one end of a socketpair as WAYLAND_SOCKET) and a fake relay
 on a renamed abstract socket. Nothing reaches the live desktop, KWin or the running relay.

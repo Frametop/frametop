@@ -23,15 +23,16 @@ starts at DEE-298. The rest of DEE-303 (its open list below) is now its own tick
 | 11 | DEE-309 | 77d0c35, a33b578, b6809e1, a0216d2, 91e19e3, 25dbde4, 165ed70, c9a4197, a0e2dfe, 972ac35, then this update |
 | 12 | DEE-312 | ed4efd1, c340d33, d2edd33 (note) |
 | 13 | DEE-298 | 3005442, a3d58c8 (note) |
-| 14 | DEE-313 | 5b9c10b, 237d493, a1f3d6c, 26c16e3, 278c53e, 4146400, 4a456cb, 2bff435, then this update |
+| 14 | DEE-313 | 5b9c10b, 237d493, a1f3d6c, 26c16e3, 278c53e, 4146400, 4a456cb, 2bff435, 2877e21 (note) |
+| 15 | DEE-314 | 09667a7, cdf9291, 2129cc6, f73dad7, then this update |
 
 What's left, in order:
 
-1. DEE-314 to DEE-316
+1. DEE-315 and DEE-316
 2. DEE-318
 3. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
 
-DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298 and DEE-313 are done (steps 7 to 14). DEE-303 part 1 is done (step
+DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313 and DEE-314 are done (steps 7 to 15). DEE-303 part 1 is done (step
 10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
@@ -584,6 +585,30 @@ Open:
 - The link check reads inline links and paths only, not reference-style `[x]: path` links
   (the docs don't use them yet).
 - `ft` outside a checkout now stops with a message; `ft clean` outside one went with it.
+
+### From DEE-314
+
+Personal setup out of the product.
+
+- Tests and ft_layout's example use 192.0.2.x (documentation range) for addresses; Remote
+  Displays' Address hint keeps 192.168.1.20 (a generic example, not a real machine).
+- `.frame-job` is gitignored; `gaze/tracker/.frame-job.example` keeps the settings; AGENTS.md
+  and docs/charts/README.md say to run the command after `--` without frame-job.
+- TLA+ models: `docs/charts/fake-worn-guard/` and `docs/charts/remote-streams/` (moved from the
+  two skills' `model/`); the skills' `scripts/check` read them there. `test_verify_skill.py`
+  skips without `.claude/`.
+- DEE refs: gone from product code, docs and tests. Kept as the record: this folder, the
+  findings tables in `docs/charts/`, and `.claude/`.
+
+Open:
+
+- Daenon: `git rm --cached gaze/tracker/.frame-job` to stop tracking it (agents can't run it).
+- No reviewer ran for DEE-314 (context budget); worth one read of f73dad7's 129-file sweep.
+- testbench/ recommendation: keep it in the repo for now. It's dev-only (not in the image,
+  `.dockerignore`), its tests run in `just test`, and the verify skills and AGENTS.md use it in
+  place. Splitting it means get.sh, which full-clones, stops carrying it: a separate repo (or a
+  submodule the dev setup fetches), `test-testbench` fetching it or skipping, and the skills
+  pointing at its new path. Daenon decides.
 
 ## Device checks still to do
 

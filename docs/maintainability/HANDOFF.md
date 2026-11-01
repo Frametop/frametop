@@ -1,8 +1,8 @@
 # Maintainability series: handoff
 
 State on 2026-10-31, branch `experimental` in `~/frametop/.worktrees/experimental`. All of this
-is local: nothing in the series has been pushed, installed or fast-installed. The next thread
-starts at DEE-298. The rest of DEE-303 (its open list below) is now its own ticket, DEE-319.
+is local: nothing in the series has been pushed, installed or fast-installed. The rest of
+DEE-303 became DEE-319 (step 19), which is done. No ticket of the DEE-292 series is left queued.
 
 ## Where the series is
 
@@ -27,14 +27,13 @@ starts at DEE-298. The rest of DEE-303 (its open list below) is now its own tick
 | 15 | DEE-314 | 09667a7, cdf9291, 2129cc6, f73dad7, bd73091 (note), 2a9898a (review fixes) |
 | 16 | DEE-315 | 0a450b5, 2ca1f2e, 9fb2aa4, f91de1b (note) |
 | 17 | DEE-316 | 3c26536, 2adbbdf, 36f2f8b, 265d025, 8714a6c (review fixes), d99a3cb (note) |
-| 18 | DEE-318 | 89fbbad, 089e5cb, 52e0622, 72f51f9, b1a9a40, e566c5b, 621559b, df415e1, bae1c59 (review fix), then this update |
+| 18 | DEE-318 | 89fbbad, 089e5cb, 52e0622, 72f51f9, b1a9a40, e566c5b, 621559b, df415e1, bae1c59 (review fix), 848e556 (note) |
+| 19 | DEE-319 | c102462, 71fae6d, 431fea1, eb1c53d, ca8b510, f84aaeb, 5bd08c9, then review fixes f1942dd, 41391e5, a5a7dd5, afca878, then this update |
 
-What's left, in order:
+Nothing is left queued in the series. The open items below are follow-ups, not tickets.
 
-1. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
-
-DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314, DEE-315, DEE-316 and DEE-318 are done (steps 7 to 18). DEE-303 part 1 is done (step
-10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
+DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314, DEE-315, DEE-316, DEE-318 and DEE-319 are done (steps 7 to 19). DEE-303 part 1 is done (step
+10), and its remainder was DEE-319 (step 19). DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
 
@@ -438,7 +437,7 @@ Judgment calls:
 - voicelog.py keeps its one-line `mono_ns`: hands/tools/voice_flags.py imports it with only
   hands/rec on the path.
 
-Open (the rest of DEE-303, now DEE-319):
+Open (the rest of DEE-303): done in DEE-319, except the Takes, Viewer and Export pages (see DEE-319 below):
 
 - One hub CLI: gaze/rec/hub.py and hands/rec/hub.py's command-line part (hands 293-417 at
   c13d168).
@@ -695,8 +694,8 @@ One installer helper: `scripts/install-lib.sh`, sourced after `scripts/_env.sh`.
 
 Open:
 
-- Daenon: run `setup/dev-container.sh` once (or `dnf install ShellCheck` in the dev container)
-  so test-bash's shellcheck step runs. It has never run: ShellCheck wasn't available offline.
+- Settled: `setup/dev-container.sh` ran once on 2026-10-31 at 7:45 PM MT. ShellCheck 0.11.0 is
+  installed in the dev container, and test-bash's shellcheck step runs and passes.
 - `setup/packages.txt` is in fast-install's image set, so a fast-install over 265d025 is refused
   unless it's given `--partial`. The dev line doesn't change the image.
 - During this ticket, a commit briefly took in the untracked `hands/rec/demos/`. It was undone
@@ -742,10 +741,68 @@ Open:
 - Nothing pins which `need` bits each program passes; swapping them would let the Renderer start
   without glEGLImageTargetTexture2DOES.
 
+### From DEE-319
+
+Done (the rest of DEE-303):
+
+- hands/rec and gaze/rec are packages (`hands.rec`, `gaze.rec`), with no `sys.path` inserts left
+  in them. Their programs run as `python3 -P -m hands.rec.X` with the tree's top on `PYTHONPATH`:
+  the launchers (`hands/rec/ft-handrec`, `gaze/rec/ft-eyerec`), `rehearse.sh`, and the window's
+  hub children (`recorder.common.tree_env()`). testgate puts the tree's top on every test's
+  `PYTHONPATH`. `-P` keeps the current folder, which may be another checkout, off the path.
+- One hub command line: `recorder.hub.cli()`. The two hubs differed only in the description, the
+  upload argument (session or round) and its help text, all three now parameters.
+  `recorder/tests/test_hub_cli.py` pins it, with stubbed hub functions.
+- One control loop: `recorder.controls.Controls` (start, next_step, pause, resume, redo, skip, stop,
+  join, state, `_controls`, `_pause`, `_unpause`, and `_Skip`, `_Stop`, `_Redo`). Each session keeps
+  its differences as hooks: the thread name, the resume hints, how the recording stops and starts,
+  the hand session's feedback timers, the eye session's "Nothing to go back to from here", and the
+  hand session's debug-only `redo()`. `button_gesture` stays per session, since the two really
+  differ. `recorder/tests/test_controls.py` pins the loop.
+- Shared QML in `recorder/qml/`: the Upload page, MarkdownText and DraftBanner. Each window sets
+  its differences as properties (`itemNoun`, `recorderName`, the dataset functions, the rehearsal
+  text, `reviewText`, `offerFree`, `loginTextWhileWaiting`) and its own `draftText`.
+  `recorder/qmlcheck.py` compiles a window's QML offscreen with a temp HOME, and both
+  test_qml_backend files check the shared pages against their backend and compile them.
+- A test of the hand session's 0700 folders (`test_session_folders_are_private`).
+- Review fixes: `one_window` recognises a recorder started with `-m` (the stuck-window takeover
+  had stopped working); `-P` on every `-m` and `-c` run; the command lines' usage lines say
+  `python3 -m`; `pack/pyside-runtime.py` restores `sys.path`.
+
+Open:
+
+- The Takes, Viewer and Export pages are still one copy per window (diffs of 75, 200 and 300
+  lines with small differences). The Upload page shows the pattern for moving them.
+- Daenon: the dataset review on dody (and anyone else) runs `validate.py` as
+  `PYTHONPATH=<tree> python3 -m hands.rec.validate DIR` (or `gaze.rec.validate`) now. Run by
+  path, it stops with "No module named 'recorder'".
+- The standalone Hand Recorder (frametop-hand-recorder, not touched here): its copy list is its
+  own `package.sh`, so this repo has none. At its next sync it needs `hands/rec/__init__.py` and
+  all of `recorder/` (`qml/`, `controls.py`, `privacy.py`, `fhformat.py`, `qmlcheck.py`), a
+  launcher that runs `python3 -P -m hands.rec.ft_handrec` with `PYTHONPATH`, and CI that runs the
+  tests as modules. Listed in hands/rec/DESIGN.md.
+- Kept as it was, maybe an oversight: the eye window shows the login text while the login code
+  waits; the hand window hides it. The hand window's "Delete local copy" text says "This round".
+- `--help` under `-m` now names the program `python3 -m hands.rec.hub` (Python 3.14's argparse)
+  instead of `hub.py`. The window reads only the JSON lines.
+- `PYTHONPATH` with the tree now reaches every child of the window and of rehearse.sh. Nothing at
+  the tree's top shadows the standard library.
+- `gaze/fitcoach.py` still imports a bare `eyes_share`, and `conf/ft_store.py` a bare `ft_conf`,
+  so each exists as two module copies (`gaze.tracker.eyes_share` too). Both hold no state.
+- Take folders inside `takes/` are made without a mode and rely on the programs' umask 077, as
+  before.
+- `ft_handrec.VALIDATE_PATH` is unused.
+- 41391e5's message has a muddled last sentence: the failing case now asserts exit status 1
+  exactly instead of any nonzero status.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
 
+- After DEE-319 (no reinstall: the menu entries call the launchers, whose Exec lines didn't
+  change): the Hand Recorder and the Eye Recorder open from their menu entries, a round runs end
+  to end with pause, resume, redo and stop from the headset button, and both Upload pages show
+  their own texts. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
 - After DEE-318 (needs a build and install of ft-screens, ft-handtest, ft-handview,
   ft-spotpanel, ft-gazepanel and ft-handpanel): every overlay panel shows and updates without
   flicker (frunner, gaze calibration and bench, the Hand Recorder's panels and a demo clip), the

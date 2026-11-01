@@ -1,5 +1,6 @@
 #include "framekeyboard/app.hpp"
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <linux/input-event-codes.h>
@@ -433,6 +434,19 @@ int main(int argc, char** argv) {
             require(map.legend(k, {}, false, false) == test.normal, "native language legend");
             require(map.legend(k, {KEY_LEFTSHIFT}, false, false) == test.shifted,
                     "native shifted legend");
+        }
+        // Polish (programmer's, the usual one in Poland): US places, its letters on AltGr.
+        validate_selection(profiles, {"en-us-full", "pl-pl", "graphite"});
+        LanguageMap polish(profiles.languages.at("pl-pl"));
+        const auto& us = profiles.layouts.at("en-us-full");
+        require(polish.legend(key(us, "KeyA"), {}, false, false) == "a", "Polish plain letter");
+        for (const auto& [code, letter, capital] :
+             std::vector<std::array<const char*, 3>>{{"KeyA", "ą", "Ą"}, {"KeyC", "ć", "Ć"}, {"KeyE", "ę", "Ę"},
+                                                     {"KeyL", "ł", "Ł"}, {"KeyN", "ń", "Ń"}, {"KeyO", "ó", "Ó"},
+                                                     {"KeyS", "ś", "Ś"}, {"KeyX", "ź", "Ź"}, {"KeyZ", "ż", "Ż"}}) {
+            require(polish.legend(key(us, code), {KEY_RIGHTALT}, false, false) == letter, "Polish AltGr letter");
+            require(polish.legend(key(us, code), {KEY_RIGHTALT, KEY_LEFTSHIFT}, false, false) == capital,
+                    "Polish AltGr capital");
         }
         LanguageMap brazil(profiles.languages.at("pt-br"));
         require(brazil.legend(key(profiles.layouts.at("br-abnt2-full"), "IntlRo"), {}, false, false) ==

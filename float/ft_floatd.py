@@ -406,6 +406,33 @@ class Slot:
         self.window = None            # Float
 
 
+class Request:
+    """One request on ft-floatd's socket, as Daemon.request's handlers get it: its command, the
+    words after it, the whole text, and the D-Bus sender (for the answers that come later)."""
+
+    __slots__ = ("cmd", "rest", "text", "sender")
+
+    def __init__(self, cmd, rest, text, sender):
+        self.cmd, self.rest, self.text, self.sender = cmd, rest, text, sender
+
+
+# Tests of the words after a request's command (Daemon.REQUESTS).
+def _any(rest):
+    return True
+
+
+def _some(rest):
+    return bool(rest)
+
+
+def _active(rest):  # nothing, or "active": the window KWin has active
+    return not rest or rest[0] == "active"
+
+
+def _panel(rest):  # a floating window by its panel number
+    return bool(rest) and rest[0].isdigit()
+
+
 class Daemon:
     def __init__(self, args):
         self.screens_n = args.screens
@@ -1295,109 +1322,167 @@ class Daemon:
         return None
 
     def request(self, text, sender=None):
+        """One request on the socket: its answer. REQUESTS says which handler takes it: the
+        first of its command's forms whose test accepts the words after the command."""
         words = text.split()
         if not words:
             return "error empty"
         cmd, rest = words[0], words[1:]
-        if cmd == "launch" and rest:
-            opts = dict(w.split("=", 1) for w in rest[1:] if "=" in w)
-            if len(opts) != len(rest) - 1 or set(opts) - {"action", "screen"}:
-                return "error launch APP.desktop [action=ACTION] [screen=N]"
-            screen = opts.get("screen")
-            if screen is not None and not (screen.isdigit() and 1 <= int(screen) <= self.screens_n):
-                return f"error no screen {screen}"
-            return self.launch(app=rest[0], action=opts.get("action"),
-                               dock=f"WL-{int(screen) - 1}" if screen else None)[0]
-        if cmd == "run" and rest:
-            try:
-                argv = json.loads(text.split(None, 1)[1])
-            except ValueError:
-                return "error run takes a JSON list"
-            if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
-                return "error run takes a JSON list"
-            return self.launch(argv=argv)[0]
-        if cmd == "dashlaunch" and rest:
-            return self.dash_launch(text.split(None, 1)[1])
-        if cmd in ("windows", "spotlist"):
-            return self.capture(sender, cmd)
-        if cmd == "activate" and len(rest) == 1:
-            if rest[0] not in self.windows:
-                return f"error no window {rest[0]}"
-            self.command(cmd="activate", id=rest[0])
-            return "ok"
-        if cmd == "profile" and rest:
-            return self.open_profile(text.split(None, 1)[1])
-        if cmd == "list":
-            return "ok " + " ".join(f"{s.output}:{s.window.id if s.window else '-'}" for s in self.slots)
-        if cmd == "quit":
-            GLib.idle_add(self.loop.quit)
-            return "ok"
-        if cmd in ("float", "dock") and (not rest or rest[0] == "active"):
-            self.command(cmd="request-active")
-            return "ok"
-        if cmd == "float" and rest == ["pointer"]:
-            self.command(cmd="request-pointer")
-            return "ok"
-        if cmd == "dock" and rest == ["all"]:
-            for f in list(self.floats.values()):
-                self.dock(f)
-            return "ok"
-        if cmd == "front" and len(rest) == 1 and rest[0].isdigit():
-            f = self.by_panel(int(rest[0]))
-            if f:
-                self.command(cmd="activate", id=f.id)
-            else:  # a screen: its output is WL-<N - 1>
-                self.command(cmd="activate-output", output=f"WL-{int(rest[0]) - 1}")
-            return "ok"
-        if cmd == "tear" and len(rest) == 3:
-            # ft-screens: a pull on the wheel while this window on a screen is moved by its title bar, held at
-            # x, y (pixels on its screen); KWin's move is over. It floats, and ft-screens carries it on.
-            try:
-                x, y = float(rest[1]), float(rest[2])
-            except ValueError:
-                return "error tear ID X Y"
-            if rest[0] in self.floats or rest[0] not in self.windows:
-                return f"error no window {rest[0]} on the screens"
-            self.tear = (rest[0], x, y)
-            self.command(cmd="request-float", id=rest[0])
-            return "ok"
-        if cmd == "dockat" and len(rest) == 6 and all(w.lstrip("-").isdigit() for w in rest):
-            f = self.by_panel(int(rest[0]))
-            if not f:
-                return f"error no floating window on screen {rest[0]}"
-            self.dock_at(f, int(rest[1]) - 1, *(int(w) for w in rest[2:]))  # (screen N: output WL-<N - 1>)
-            return "ok"
-        if cmd in ("dock", "close", "resize", "scale", "density") and rest and rest[0].isdigit():
-            f = self.by_panel(int(rest[0]))
-            if not f:
-                return f"error no floating window on screen {rest[0]}"
-            if cmd == "dock":
-                self.dock(f)
-            elif cmd == "close":
-                self.command(cmd="close", id=f.id)
-            elif cmd == "scale" and len(rest) == 2:
-                self.scale_soon(f, int(rest[1]))
-            elif cmd == "density" and len(rest) == 2 and rest[1].lstrip("+-").isdigit():
-                self.redensity(f, int(rest[1]))
-            elif cmd == "resize" and len(rest) == 3 and f.frame:
-                w, h = max(320, int(rest[1])), max(200, int(rest[2]))
-                if (w, h) != (round(f.frame["w"] * f.scale), round(f.frame["h"] * f.scale)):
-                    self.hold(f.slot)  # (no change, no new crop: nothing to hold for)
-                self.command(cmd="geometry", id=f.id, x=f.frame["x"], y=f.frame["y"], w=w / f.scale, h=h / f.scale)
-            return "ok"
-        if cmd in ("float", "dock", "close") and rest:
-            ev = self.windows.get(rest[0])
-            if not ev:
-                return f"error no window {rest[0]}"
-            if cmd == "float":
-                # The script's word for where it is now: a window on a screen isn't followed here.
-                self.command(cmd="request-float", id=rest[0])
-            elif cmd == "dock" and rest[0] in self.floats:
-                self.dock(self.floats[rest[0]])
-            elif cmd == "close":
-                self.command(cmd="close", id=rest[0])
-            return "ok"
+        for accepts, handle in self.REQUESTS.get(cmd, ()):
+            if accepts(rest):
+                return handle(self, Request(cmd, rest, text, sender))
         return "error unknown command"
+
+    # ------------------------------------------------ the socket's requests (REQUESTS)
+
+    def req_launch(self, r):
+        rest = r.rest
+        opts = dict(w.split("=", 1) for w in rest[1:] if "=" in w)
+        if len(opts) != len(rest) - 1 or set(opts) - {"action", "screen"}:
+            return "error launch APP.desktop [action=ACTION] [screen=N]"
+        screen = opts.get("screen")
+        if screen is not None and not (screen.isdigit() and 1 <= int(screen) <= self.screens_n):
+            return f"error no screen {screen}"
+        return self.launch(app=rest[0], action=opts.get("action"),
+                           dock=f"WL-{int(screen) - 1}" if screen else None)[0]
+
+    def req_run(self, r):
+        try:
+            argv = json.loads(r.text.split(None, 1)[1])
+        except ValueError:
+            return "error run takes a JSON list"
+        if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+            return "error run takes a JSON list"
+        return self.launch(argv=argv)[0]
+
+    def req_dashlaunch(self, r):
+        return self.dash_launch(r.text.split(None, 1)[1])
+
+    def req_capture(self, r):
+        # "windows" and "spotlist"
+        return self.capture(r.sender, r.cmd)
+
+    def req_activate(self, r):
+        if r.rest[0] not in self.windows:
+            return f"error no window {r.rest[0]}"
+        self.command(cmd="activate", id=r.rest[0])
+        return "ok"
+
+    def req_profile(self, r):
+        return self.open_profile(r.text.split(None, 1)[1])
+
+    def req_list(self, r):
+        return "ok " + " ".join(f"{s.output}:{s.window.id if s.window else '-'}" for s in self.slots)
+
+    def req_quit(self, r):
+        GLib.idle_add(self.loop.quit)
+        return "ok"
+
+    def req_active(self, r):
+        # "float" or "dock", alone or with "active": the window KWin has active
+        self.command(cmd="request-active")
+        return "ok"
+
+    def req_float_pointer(self, r):
+        self.command(cmd="request-pointer")
+        return "ok"
+
+    def req_dock_all(self, r):
+        for f in list(self.floats.values()):
+            self.dock(f)
+        return "ok"
+
+    def req_front(self, r):
+        n = int(r.rest[0])
+        f = self.by_panel(n)
+        if f:
+            self.command(cmd="activate", id=f.id)
+        else:  # a screen: its output is WL-<N - 1>
+            self.command(cmd="activate-output", output=f"WL-{n - 1}")
+        return "ok"
+
+    def req_tear(self, r):
+        # ft-screens: a pull on the wheel while this window on a screen is moved by its title bar, held at
+        # x, y (pixels on its screen); KWin's move is over. It floats, and ft-screens carries it on.
+        rest = r.rest
+        try:
+            x, y = float(rest[1]), float(rest[2])
+        except ValueError:
+            return "error tear ID X Y"
+        if rest[0] in self.floats or rest[0] not in self.windows:
+            return f"error no window {rest[0]} on the screens"
+        self.tear = (rest[0], x, y)
+        self.command(cmd="request-float", id=rest[0])
+        return "ok"
+
+    def req_dockat(self, r):
+        rest = r.rest
+        f = self.by_panel(int(rest[0]))
+        if not f:
+            return f"error no floating window on screen {rest[0]}"
+        self.dock_at(f, int(rest[1]) - 1, *(int(w) for w in rest[2:]))  # (screen N: output WL-<N - 1>)
+        return "ok"
+
+    def req_panel(self, r):
+        # "dock", "close", "resize", "scale" and "density" for the floating window on panel N
+        cmd, rest = r.cmd, r.rest
+        f = self.by_panel(int(rest[0]))
+        if not f:
+            return f"error no floating window on screen {rest[0]}"
+        if cmd == "dock":
+            self.dock(f)
+        elif cmd == "close":
+            self.command(cmd="close", id=f.id)
+        elif cmd == "scale" and len(rest) == 2:
+            self.scale_soon(f, int(rest[1]))
+        elif cmd == "density" and len(rest) == 2 and rest[1].lstrip("+-").isdigit():
+            self.redensity(f, int(rest[1]))
+        elif cmd == "resize" and len(rest) == 3 and f.frame:
+            w, h = max(320, int(rest[1])), max(200, int(rest[2]))
+            if (w, h) != (round(f.frame["w"] * f.scale), round(f.frame["h"] * f.scale)):
+                self.hold(f.slot)  # (no change, no new crop: nothing to hold for)
+            self.command(cmd="geometry", id=f.id, x=f.frame["x"], y=f.frame["y"], w=w / f.scale, h=h / f.scale)
+        return "ok"
+
+    def req_window(self, r):
+        # "float", "dock" and "close" for a window by its id
+        cmd, wid = r.cmd, r.rest[0]
+        ev = self.windows.get(wid)
+        if not ev:
+            return f"error no window {wid}"
+        if cmd == "float":
+            # The script's word for where it is now: a window on a screen isn't followed here.
+            self.command(cmd="request-float", id=wid)
+        elif cmd == "dock" and wid in self.floats:
+            self.dock(self.floats[wid])
+        elif cmd == "close":
+            self.command(cmd="close", id=wid)
+        return "ok"
+
+    # The socket's requests: the command -> its forms, (test of the words after it, handler),
+    # tried in order; none taking it is "error unknown command". A new request is a req_
+    # handler and its line here.
+    REQUESTS = {
+        "launch": ((_some, req_launch),),
+        "run": ((_some, req_run),),
+        "dashlaunch": ((_some, req_dashlaunch),),
+        "windows": ((_any, req_capture),),
+        "spotlist": ((_any, req_capture),),
+        "activate": ((lambda rest: len(rest) == 1, req_activate),),
+        "profile": ((_some, req_profile),),
+        "list": ((_any, req_list),),
+        "quit": ((_any, req_quit),),
+        "float": ((_active, req_active), (lambda rest: rest == ["pointer"], req_float_pointer), (_some, req_window)),
+        "dock": ((_active, req_active), (lambda rest: rest == ["all"], req_dock_all), (_panel, req_panel),
+                 (_some, req_window)),
+        "front": ((lambda rest: len(rest) == 1 and rest[0].isdigit(), req_front),),
+        "tear": ((lambda rest: len(rest) == 3, req_tear),),
+        "dockat": ((lambda rest: len(rest) == 6 and all(w.lstrip("-").isdigit() for w in rest), req_dockat),),
+        "close": ((_panel, req_panel), (_some, req_window)),
+        "resize": ((_panel, req_panel),),
+        "scale": ((_panel, req_panel),),
+        "density": ((_panel, req_panel),),
+    }
 
     def notify(self, text):
         log(text)

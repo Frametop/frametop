@@ -409,16 +409,19 @@ COMMAND = "command:"  # "command:CMD": run CMD (nor does this)
 RUN = "run:"  # "run:NAME": run your command NAME (ft_commands; nor does this)
 KEYS = "keys:"  # "keys:125+32": tap that key combination where typing goes (nor does this)
 KEYS_MAX = 6  # keys in one "keys:" action at most
+# Never in a "keys:" action: the volume keys (see the top) and power, sleep, wake and suspend,
+# which logind may act on from the virtual keyboard. Input Settings' is_keys has the same list.
+KEYS_REFUSED = {KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP, 116, 142, 143, 205}
 
 
 def keys_codes(a):
     """The key codes a "keys:" action presses, in order (evdev codes below BTN_MISC joined by "+",
-    as in key_bindings), or None if it isn't one. Never a volume key (see the top)."""
+    as in key_bindings), or None if it isn't one or has a key from KEYS_REFUSED."""
     if not isinstance(a, str) or not a.startswith(KEYS):
         return None
     parts = a[len(KEYS):].split("+")
     if not 0 < len(parts) <= KEYS_MAX or not all(p.isascii() and p.isdecimal() and 0 < int(p) < BTN_MISC
-                                                 and int(p) not in VOLUME_CODES for p in parts):
+                                                 and int(p) not in KEYS_REFUSED for p in parts):
         return None
     return [int(p) for p in parts]
 
@@ -1481,13 +1484,23 @@ class Relay:
     def tap_keys(self, codes, now):
         """A "keys:" action: its keys go down in order and come up in reverse, at once, where typing
         goes (the desktop's screens, else the virtual keyboard for Steam). Down and up together,
-        so a release that never comes (a controller gone) can't leave a key held."""
+        so a release that never comes (a controller gone) can't leave a key held. Modifiers the
+        desktop holds (the key combination that did this) come up there first and go down again
+        after, and one the action has too is left as it is, so the desktop gets the action's keys
+        alone. Steam reads the keyboards itself, so there it sees the held ones too."""
         if not codes:
             return
         desktop = now < self.desktop_until
+        held = sorted(c for c in self.held.desktop if c in MODIFIERS) if desktop else []
+        lift = [c for c in held if c not in codes]
+        for code in lift:
+            self.to_screens(code, 0)
         for value, order in ((1, codes), (0, codes[::-1])):
             for code in order:
-                self.type_key(code, value, desktop)
+                if code not in held:
+                    self.type_key(code, value, desktop)
+        for code in lift:
+            self.to_screens(code, 1)
         log(f"keys {'+'.join(map(str, codes))} to {'the desktop' if desktop else 'Steam'}")
 
     def cal_enter(self, code, value, now):

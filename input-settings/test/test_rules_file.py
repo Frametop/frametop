@@ -94,7 +94,10 @@ class RulesFile(unittest.TestCase):
         self.assertEqual([m["actionLabel"] for m in self.b.controllerMappings], ["Press Meta+D"])
         self.assertEqual(fis.action_label("keys:29+42+1"), "Press Ctrl+Shift+Esc")
         self.assertTrue(fis.shortcut_mappable("keys:125+32"))
-        self.assertFalse(fis.mappable("keys:") or fis.mappable("keys:+32"))
+        for bad in ("keys:", "keys:+32", "keys:115", "keys:116", "keys:0", "keys:256", "keys:1+2+3+4+5+6+7"):
+            self.assertFalse(fis.mappable(bad), bad)
+        # The Controllers page's dropdown has it, so its row shows the mapping.
+        self.assertIn({"value": "keys:125+32", "text": "Press Meta+D"}, self.b.controllerActions)
 
 
 if __name__ == "__main__":

@@ -286,8 +286,11 @@ COMMAND = "command:"
 # combinations alike).
 RUN = input_commands.RUN
 # "keys:125+32": the relay taps that key combination where typing goes (Meta+D here; evdev codes
-# as in key_bindings). Set in the rules file by hand for now; the relay checks the codes.
+# as in key_bindings). Set in the rules file by hand for now. The relay's limits (keys_codes): up
+# to 6 keys below 256, none of its KEYS_REFUSED (volume, power, sleep, wake, suspend).
 KEYS = "keys:"
+KEYS_MAX = 6
+KEYS_REFUSED = {113, 114, 115, 116, 142, 143, 205}
 # ft-cmd on the host: the relay links it there at its start (ft_commands.refresh), and this app
 # runs in a container, where the checkout's path may not be the host's.
 HOST_FT_CMD = ft_commands.CLI_LINK
@@ -329,7 +332,16 @@ def is_run(a):
 
 
 def is_keys(a):
-    return a.startswith(KEYS) and re.fullmatch(r"[0-9]+(\+[0-9]+)*", a[len(KEYS):]) is not None
+    """A "keys:" action the relay takes."""
+    parts = a[len(KEYS):].split("+") if a.startswith(KEYS) else []
+    return 0 < len(parts) <= KEYS_MAX and all(p.isascii() and p.isdecimal() and 0 < int(p) < 256
+                                              and int(p) not in KEYS_REFUSED for p in parts)
+
+
+def mapped_keys(rules):
+    """The "keys:" actions the rules have, for the pages' action lists (they're set by hand)."""
+    tables = [rules.get("controller_buttons"), rules.get("key_bindings")] + list((rules.get("buttons") or {}).values())
+    return sorted({a for t in tables if isinstance(t, dict) for a in t.values() if isinstance(a, str) and is_keys(a)})
 
 
 def mappable(a):
@@ -796,7 +808,8 @@ class Backend(QObject):
     @Property("QVariantList", notify=commandsChanged)
     def actions(self):
         return [{"value": k, "text": v} for k, v in ACTION_LABELS.items() if k not in KEYBOARD_ONLY] + \
-            [{"value": a, "text": action_label(a)} for a in profile_actions() + run_actions()]
+            [{"value": a, "text": action_label(a)} for a in profile_actions() + run_actions()
+             + mapped_keys(read_json(RULES_PATH))]
 
     @Slot(str, result="QVariantList")
     def mappings(self, device_id):
@@ -1005,7 +1018,8 @@ class Backend(QObject):
     # --- controllers ---
     @Property("QVariantList", constant=True)
     def controllerActions(self):
-        return [{"value": a, "text": action_label(a)} for a in CONTROLLER_ACTIONS + profile_actions() + run_actions()]
+        return [{"value": a, "text": action_label(a)} for a in CONTROLLER_ACTIONS + profile_actions() + run_actions()
+                + mapped_keys(read_json(RULES_PATH))]
 
     @Property("QVariantList", constant=True)
     def controllerButtons(self):

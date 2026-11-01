@@ -560,10 +560,10 @@ def tests():
     # combination: all down in order, then up, on the press; the release sends nothing.
     D = 32
     check("keys: specs", [relay.keys_codes(a) for a in ("keys:125+32", "keys:", "keys:115", "keys:256",
-                                                        "keys:1+2+3+4+5+6+7", "keys:a", "keys:１", "run:x")],
-          [[125, 32], None, None, None, None, None, None, None])
+                                                        "keys:1+2+3+4+5+6+7", "keys:a", "keys:１", "run:x", "keys:116")],
+          [[125, 32], None, None, None, None, None, None, None, None])
     devices["controller"] = {"right/b": "keys:125+32"}
-    use({"29+56+32": "keys:125+32", "29+56+33": "keys:115"})
+    use({"29+56+32": "keys:125+32", "29+56+33": "keys:115", "29+56+20": "keys:29+20"})
     to_relay("keyboard desktop")
     emitted()
     to_relay("vrbtn right/b 1")
@@ -579,6 +579,13 @@ def tests():
           [("keyboard", META, 1), ("keyboard", D, 1), ("keyboard", D, 0), ("keyboard", META, 0)])
     typed()
     to_relay("keyboard desktop")
+    key(CTRL, 1); key(ALT, 1); key(D, 1); key(D, 0); key(ALT, 0); key(CTRL, 0)
+    check("keys: on a key combination on the desktop: its held modifiers come up around the tap", typed(),
+          ["key 29 1", "key 56 1", "key 29 0", "key 56 0"] + meta_d + ["key 29 1", "key 56 1", "key 56 0", "key 29 0"])
+    T = 20
+    key(CTRL, 1); key(ALT, 1); key(T, 1); key(T, 0); key(ALT, 0); key(CTRL, 0)
+    check("...one the action has too stays down: Ctrl+T, Ctrl held throughout", typed(),
+          ["key 29 1", "key 56 1", "key 56 0", "key 20 1", "key 20 0", "key 56 1", "key 56 0", "key 29 0"])
     key(CTRL, 1); key(ALT, 1); key(F, 1); key(F, 0); key(ALT, 0); key(CTRL, 0)
     check("a volume key in keys: makes it no action: the combination is typed", typed(),
           ["key 29 1", "key 56 1", "key 33 1", "key 33 0", "key 56 0", "key 29 0"])

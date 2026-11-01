@@ -1121,9 +1121,14 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             // (keys_update): notches, positive up. No reply. Scrolled as SteamVR's would be.
             const int screen = ft_vr_mouse_screen();
             // (during a carry it's the carried panel's, whatever panel the laser is on: ft_vr_carry_wheel)
-            if (value && !ft_vr_carry_wheel(value) && screen >= 0) {
-                struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dy = -value};
-                handle_vr_event(&e, s);
+            if (value && !ft_vr_carry_wheel(value)) {
+                if (screen >= 0) {
+                    struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dy = -value};
+                    handle_vr_event(&e, s);
+                } else {
+                    // a press just started, before the relay heard (keys_update, every ~100 ms): not lost
+                    ft_vr_held_wheel(value, handle_vr_event, s);
+                }
             }
             len = sizeof from;
             continue;

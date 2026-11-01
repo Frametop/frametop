@@ -5655,6 +5655,7 @@ vr::TrackedDeviceIndex_t g_mouseDevice = kNone;  // the 3D mouse's device, from 
 // the wheel pushes it, Push. The click doesn't reach the desktop. Another tap meanwhile turns carry-all
 // on or off (CarryFollow).
 static uint32_t g_carryClicks = 0;  // VRMouseButton bits whose release a carry's click keeps too
+static vr::TrackedDeviceIndex_t g_carryClickDev = kNone;  // the device that clicked them
 
 static bool CarryLetGo(const char *by) {
     for (auto &[i, s] : g_screens)
@@ -6003,14 +6004,16 @@ static bool CarryScroll(const vr::VREvent_t &ev) {
 // or its release, which the desktop doesn't get either.
 static bool CarryClick(const vr::VREvent_t &ev) {
     const uint32_t bit = ev.data.mouse.button;
-    if (ev.eventType == vr::VREvent_MouseButtonUp && (g_carryClicks & bit)) return g_carryClicks &= ~bit, true;
+    const bool same = ev.trackedDeviceIndex == g_carryClickDev;   // another device's button is its own
+    if (ev.eventType == vr::VREvent_MouseButtonUp && same && (g_carryClicks & bit)) return g_carryClicks &= ~bit, true;
     if (ev.eventType != vr::VREvent_MouseButtonDown) return false;
     for (auto &[i, s] : g_screens)
         if (s.toggleCarry && s.dragDevice == ev.trackedDeviceIndex) {
+            if (!same) g_carryClicks = 0, g_carryClickDev = ev.trackedDeviceIndex;
             g_carryClicks |= bit;
             return CarryLetGo("a click");
         }
-    g_carryClicks &= ~bit;   // (a carry's release that went elsewhere: this press's release is its own)
+    if (same) g_carryClicks &= ~bit;   // (a carry's release that went elsewhere: this press's release is its own)
     return false;
 }
 
@@ -6032,6 +6035,26 @@ int ft_vr_mouse_screen(void) {
     // (VREvent_ScrollDiscrete), where it pushes, pulls or tears off (DEE-246), not straight to the window.
     if (g_press.buttons || g_press.torn || !g_kwinMove.window.empty()) return -1;
     return g_mouseScreen;
+}
+
+// The same as panelEvent's VREvent_ScrollDiscrete (CarryScroll aside: ft_vr_carry_wheel came first).
+bool ft_vr_held_wheel(int notches, void (*handle)(const struct ft_event *, void *), void *data) {
+    if (!g_vr || g_paused || !notches || g_mouseScreen < 0) return false;
+    if (!g_press.buttons && !g_press.torn && g_kwinMove.window.empty()) return false;
+    const auto it = g_screens.find(g_mouseScreen);
+    if (it == g_screens.end() || !it->second.visible) return false;
+    Screen &s = it->second;
+    if (s.titleCarry && s.drag == Drag::Move) return Push(s, notches), true;
+    if (g_press.torn) {
+        if (s.drag == Drag::Move) Push(s, notches);
+        return true;
+    }
+    if (s.drag != Drag::None) return false;
+    if (notches < 0 && TearOff(s, it->first, handle, data)) return true;
+    struct ft_event e = {};
+    e.type = FT_SCROLL, e.screen = it->first, e.dy = -notches;
+    handle(&e, data);
+    return true;
 }
 
 bool ft_vr_screen_visible(int index) {
@@ -6940,6 +6963,7 @@ static void VisibilityCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
             if (on && !g_paused) {   // a carry doesn't go on through a game (the helper would keep the laser)
                 CarryLetGo("paused");
                 CarryFollowEnd();
+                g_carryPending.panel = -1;   // a "carry take" from just before doesn't start after the game
                 if (g_carryTurnOn) SendPointer("carry turn off"), g_carryTurnOn = false;
             }
             g_paused = on;

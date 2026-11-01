@@ -512,6 +512,32 @@ def tests():
     devices["roles"], devices["buttons"] = {}, {}
     conf["POINTER"] = "0"
 
+    # Keyboard + 3D pointer ("combo") with its keys on its mouse node (one node for both, as a
+    # keyboard with a mouse-key layer can be): key combinations work there. A plain 3D pointer's
+    # keys and a key its button map has are left as they were.
+    devices["roles"] = {MOUSE_ID: "combo"}
+    use(None)
+    emitted()
+    menus = len(lines(steam_log))
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("combo, keys on its mouse node: a Meta tap opens Steam's menu", len(lines(steam_log)), menus + 1)
+    check("...and Meta still reaches the desktop, F24 first, and the virtual keyboard", (typed(), emitted()),
+          (["key 125 1"] + F24 + ["key 125 0"], [("keyboard", META, 1), ("keyboard", META, 0)]))
+    key(META, 1, ms_w); key(J, 1, ms_w); key(J, 0, ms_w); key(META, 0, ms_w)
+    check("combo: Meta+J isn't typed, and Meta comes up on the desktop and the virtual keyboard",
+          (typed(), emitted()), (["key 125 1"] + F24 + ["key 125 0"], [("keyboard", META, 1), ("keyboard", META, 0)]))
+    devices["buttons"] = {MOUSE_ID: {str(META): "none"}}
+    use(None)
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("combo: a key its button map has keeps its map (none: no tap)", len(lines(steam_log)), menus + 1)
+    devices["roles"], devices["buttons"] = {}, {}
+    use(None)
+    emitted()
+    key(META, 1, ms_w); key(META, 0, ms_w)
+    check("a plain 3D pointer's Meta tap does nothing (it's typed)", (len(lines(steam_log)), emitted()),
+          (menus + 1, [("keyboard", META, 1), ("keyboard", META, 0)]))
+    typed()
+
     use(None)  # the defaults: Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels (ft-screens)
     key(META, 1); key(ALT, 1); key(TAB, 1); key(TAB, 0); key(ALT, 0); key(META, 0)
     got = typed()

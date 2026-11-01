@@ -16,7 +16,9 @@ keyboard node for its extra buttons), except with "combo". Roles, from
   passthrough  keys go to the desktop; grabbed only while typing goes there, otherwise only observed,
                for the key combinations below (default for keyboards)
   combo        a keyboard with a touchpad (its touchpad is a mouse node): mouse nodes are pointer,
-               keyboard nodes passthrough, as if they were two devices. Never a default: the
+               keyboard nodes passthrough, as if they were two devices. Keys that come on a mouse node
+               (a keyboard with a mouse-key layer on one node) still make key combinations, unless the
+               device's button map has that key. Never a default: the
                Z3's keyboard node has to stay with its mouse, and nothing on the nodes tells the two apart
   ignore       not grabbed, only observed for identification in the settings app
 Buttons and keys of pointer devices go through a per-device map to actions
@@ -2311,6 +2313,15 @@ class Relay:
                         self.keyboard.emit(etype, code, value)
                         self.keyboard.sync()
                         (node.held.add if value else node.held.discard)(code)
+                continue
+            if etype == EV_KEY and code < BTN_MISC and str(code) not in buttons \
+                    and self.rules["devices"].get(node.id, {}).get("role") == "combo" \
+                    and self.key_binding(code, value, now):
+                # A Keyboard + 3D pointer device that sends its keys on its mouse node (one node
+                # for both): key combinations work on it as on a pass-through keyboard.
+                if value == 0 and code in node.held:
+                    node.held.discard(code)  # it went down on the virtual keyboard too (Meta of Meta+J)
+                    self.keyboard.emit(etype, code, value)
                 continue
             if etype == EV_KEY:
                 action = buttons.get(str(code), DEFAULT_BUTTONS.get(code, "key"))

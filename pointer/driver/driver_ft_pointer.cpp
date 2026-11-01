@@ -68,6 +68,9 @@ struct State {
 
     float yaw = 0.f, pitch = 0.f;  // degrees
     bool buttons[6] = {};
+    // A press the frame didn't send yet. A short tap's release can come before the next frame, and
+    // SteamVR never sees a press that went up between two frames: the frame sends it, the next one the release.
+    bool pressed[6] = {};
     int32_t role = 0;  // "role": the hint while connected; 0 = the configured one
     float distance = 1.5f;
     float scrollX = 0.f, scrollY = 0.f;
@@ -183,7 +186,10 @@ public:
             snapshot.visible = state_->visible;
             snapshot.yaw = state_->yaw;
             snapshot.pitch = state_->pitch;
-            std::memcpy(snapshot.buttons, state_->buttons, sizeof snapshot.buttons);
+            for (int i = 0; i < 6; ++i) {
+                snapshot.buttons[i] = state_->buttons[i] || state_->pressed[i];
+                state_->pressed[i] = false;
+            }
             snapshot.scrollX = state_->scrollX;
             snapshot.scrollY = state_->scrollY;
             snapshot.role = state_->role;
@@ -407,6 +413,7 @@ private:
             break;
         case kBtn:
             state_.buttons[button] = v != 0;
+            if (v) state_.pressed[button] = true;
             break;
         case kDistance:
             state_.distance = std::fmax(0.3f, std::fmin(10.f, f[0]));

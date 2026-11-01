@@ -825,6 +825,38 @@ Commit cc9180d.
   types only if the Frametop desktop's layout has it (Polish). On a US desktop the relay drops
   it and logs that. Fixing this needs the relay to type characters the layout lacks (a
   per-character keymap through ft-screens, or a text path in the input method): a design call.
+- Follow-up (Daenon chose the input-method path, 2026-10-31). The per-character keymap can't
+  work: KWin 6.2.5 doesn't load keymaps from its host. Commits 0508f4b, 7298a42, 0c1e04e (review
+  fixes).
+  - Typing to the desktop now sends a character the desktop's layout has no key for to
+    ft-textinput as "commit TEXT". ft-textinput commits it to the focused text field with
+    `commit_string`. Characters the layout has still go as keys, so US English is unchanged.
+    With no input-method text field focused, the character is dropped and logged as before.
+    The log line now says so.
+  - Trust: the relay sends only to the address that said "textfield 1" with the same uid.
+    ft-textinput listens on an autobound name and takes commits only from `@frametop_relay`
+    with the same uid. ft-textinput's docstring now says it types these characters.
+  - Order: a character typed as keys and one committed take different routes to KWin. A 50 ms
+    gap (`TYPE_SWITCH`) comes between a switch from one route to the other, and that includes
+    Full Keyboard keys after a commit. ft-textinput handles KWin's events before the relay's,
+    so a commit never uses a stale serial.
+  - Works in apps that take input-method text (Qt, GTK, Firefox). It doesn't work in XWayland
+    or Electron apps: those still drop the character.
+  - Tests: keys-test (routing, the Steam and no-text-field fallbacks, the sender's name, the
+    gap before a Full Keyboard key) and the new `input/test/textinput-test.py` (ft-textinput
+    against a fake KWin: commit_string with its serial, other senders ignored, nothing with no
+    context).
+  - Review (one Opus reader, 1 Important, 5 Minor). Fixed in 0c1e04e: Full Keyboard keys now
+    wait the gap after a commit, and a full ft-textinput queue no longer stops later commits.
+  - Left open:
+    - The relay keeps ft-textinput's address until "textfield 0" or a refused send. If
+      ft-textinput crashes, another process could bind that abstract name and receive typed
+      text until the next focus change.
+    - After a relay restart, nothing is committed until focus changes.
+    - A periodic "textfield 1" renewal, like `calpanel`, would fix both.
+    - Commits go to the context activated last.
+  - Full run at 0c1e04e passed. It matches 89937af except one more Python file ok, the new
+    test (108 ok, 3 skipped). test-c printed the same ok lines.
 
 ### From DEE-204
 

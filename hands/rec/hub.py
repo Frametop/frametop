@@ -47,7 +47,6 @@ with {"phase": "opened", "pr_url"} once the pull request exists, then {"done": {
 {"error": {"kind", "text", "link", "errors"}}. login says {"phase": "code", "url", "code",
 "expires_in"} once it has the link, then {"done": {"name", "role"}}. Exit status 0: done.
 """
-import argparse
 import json
 import os
 import sys
@@ -338,92 +337,8 @@ def upload(store, session, dry_run=False, again=False, progress=None, log=None):
 # ---------------------------------------------------------------- the command line
 
 def main():
-    ap = argparse.ArgumentParser(description="Upload a hand recorder export to the hand dataset on Hugging Face.")
-    ap.add_argument("--base", default=takes.DEFAULT_BASE)
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    w = sub.add_parser("whoami", help="show the saved Hugging Face login")
-    w.add_argument("--json", action="store_true")
-    li = sub.add_parser("login", help="log in to Hugging Face in the browser")
-    li.add_argument("--json", action="store_true")
-    b = sub.add_parser("board", help="fetch the dataset's bounty board")
-    b.add_argument("--json", action="store_true")
-    u = sub.add_parser("upload", help="upload exports/SESSION as a pull request")
-    u.add_argument("session")
-    u.add_argument("--dry-run", action="store_true", help="no network: say what would be uploaded")
-    u.add_argument("--again", action="store_true", help="upload even if this export was uploaded before")
-    u.add_argument("--json", action="store_true", help="JSON lines, for the window")
-    a = ap.parse_args()
-
-    def emit(obj):
-        print(json.dumps(obj), flush=True)
-
-    try:
-        if a.cmd == "whoami":
-            who = whoami()
-            if a.json:
-                emit({"done": who})
-            else:
-                print(f"logged in as {who['name']} (token role: {who['role'] or 'unknown'})")
-            return 0
-        if a.cmd == "board":
-            got = fetch_board(os.path.abspath(os.path.expanduser(a.base)))
-            if a.json:
-                emit({"done": got})
-            else:
-                print(f"bounty board of {got['updated']}: {got['bounties']} bounties")
-            return 0
-        if a.cmd == "login":
-            def code(phase, text, **extra):
-                if a.json:
-                    emit(dict(extra, phase=phase, text=text))
-                else:
-                    print(f"Open {extra['url']} and approve the code {extra['code']}. Waiting...", flush=True)
-            who = login(code)
-            if a.json:
-                emit({"done": who})
-            else:
-                print(f"logged in as {who['name']}")
-            return 0
-        if a.json:
-            def progress(phase, text, fraction=None, **extra):
-                emit(dict(extra, phase=phase, text=text, fraction=fraction))
-
-            def log(text):
-                emit({"log": text})
-        else:
-            last = {}
-
-            def progress(phase, text, fraction=None, **extra):
-                if extra.get("pr_url"):
-                    print(f"pull request: {extra['pr_url']}", flush=True)
-                line = text if fraction is None else f"{fraction * 100:5.1f}% {text}"
-                if (phase, text) != last.get("key") or fraction in (0.0, 1.0):
-                    print(line, file=sys.stderr, flush=True)
-                last["key"] = (phase, text)
-
-            def log(text):
-                print(text, flush=True)
-        if hasattr(os, "setpriority"):
-            try:
-                os.setpriority(os.PRIO_PROCESS, 0, 19)   # validation reads and hashes everything: stay out of VR's way
-            except OSError:
-                pass
-        result = upload(takes.Store(a.base), a.session, dry_run=a.dry_run, again=a.again, progress=progress, log=log)
-        if a.json:
-            emit({"done": result})
-        elif result["dry_run"]:
-            print(f"dry run done: {result['files']} files would go to datasets/{result['repo']}/{result['path_in_repo']}")
-        else:
-            print(f"uploaded: {result['pr_url']}")
-        return 0
-    except HubError as e:
-        if a.json:
-            emit({"error": e.as_dict()})
-        else:
-            print(f"error ({e.kind}): {e.text}", file=sys.stderr)
-            for line in e.errors:
-                print(f"  {line}", file=sys.stderr)
-        return 1
+    return rhub.cli("Upload a hand recorder export to the hand dataset on Hugging Face.", "session", takes.DEFAULT_BASE, takes.Store,
+                    whoami=whoami, login=login, fetch_board=fetch_board, upload=upload)
 
 
 if __name__ == "__main__":

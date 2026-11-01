@@ -87,7 +87,7 @@ Conventions. `@name` = abstract unix datagram socket. `RUN` = `/run/user/UID` (t
 - **Does:** Full Keyboard for Steam Frame (TaiKeid, vendored MIT, `keyboard/`) replaces Steam's keyboard, touch typing, layouts/IMEs; ft-screens' own key panel is the fallback; opens on text-field focus.
 - **Processes:** `framekeyboard --frametop` (box); `input/ft-textinput` (KWin IM).
 - **IPC:** framekeyboard <-> `@frametop_relay` (`keyboard/include/framekeyboard/frametop.hpp`: typing and `vrkeyboard` show/hide relayed from ft-screens); `textfield` -> relay -> `@ft_screens vrkeyboard`.
-- **Config:** `vr_keyboard`, `vr_keyboard_persist` (frametop-input.json), `~/.config/frametop-keyboard`, `~/.config/frametop/kxkbrc` (desktop layout for typing). **Unit:** `frametop-keyboard.service`.
+- **Config:** `vr_keyboard`, `vr_keyboard_persist`, `meta_tap` (frametop-input.json), `~/.config/frametop-keyboard`, `~/.config/frametop/kxkbrc` (desktop layout for typing). **Unit:** `frametop-keyboard.service`.
 
 ### F13. Voice dictation and wake words
 - **Does:** on-device dictation (Moonshine on CPU; whisper.cpp on GPU for wake words/other languages), types where typing goes; voice commands ("run NAME", "flag that").

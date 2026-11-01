@@ -1055,6 +1055,16 @@ class Backend(QObject):
             return
         self.message.emit("Keyboard: " + ("stays open until you hide it" if on else "closes with the text field"), False)
 
+    # --- key combinations ---
+    @Property(bool, notify=mappingsChanged)
+    def metaTap(self):
+        return bool(read_json(RULES_PATH).get("meta_tap", True))
+
+    @Slot(bool)
+    def setMetaTap(self, on):
+        self._set_rule("meta_tap", bool(on),
+                       "Meta tap: " + ("does its key combination" if on else "off (Meta alone goes to the desktop as it is)"))
+
     @Slot(str)
     def setVrKeyboard(self, mode):
         if mode not in VR_KEYBOARD_MODES:

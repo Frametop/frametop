@@ -112,6 +112,7 @@ relay.log = lambda *args: LOG.append(" ".join(map(str, args)))
 bindings = {"now": None}  # the rules' key_bindings; None: the relay's defaults
 devices = {"roles": {}, "buttons": {}, "controller": {}}  # the rules' roles, per-device "buttons", controller_buttons
 vr_keyboard = {"mode": None}  # the rules' vr_keyboard (Frametop's keyboard); None: the default
+meta_tap = {"on": None}  # the rules' meta_tap (Meta taps do their binding); None: not in the file
 MOUSE_ID = "usb:0003:0004:test mouse"  # the fake mouse's id (Node.id)
 
 
@@ -122,6 +123,8 @@ def read_rules(path=None):
     rules["key_bindings"] = dict(relay.DEFAULT_KEY_BINDINGS if bindings["now"] is None else bindings["now"])
     if vr_keyboard["mode"]:
         rules["vr_keyboard"] = vr_keyboard["mode"]
+    if meta_tap["on"] is not None:
+        rules["meta_tap"] = meta_tap["on"]
     return rules
 
 
@@ -360,6 +363,43 @@ def tests():
     check("Meta+J (default gaze click): no tap", lines(steam_log), ["menu", "menu"])
     check("Meta+J: F24, Meta up early, its real release dropped", typed(), ["key 125 1"] + F24 + ["key 125 0"])
 
+    # A Meta tap fires on the release only, and only with nothing else going down or up meanwhile.
+    menus = len(lines(steam_log))
+    key(META, 1)
+    check("Meta pressed and still held: no Steam menu yet", len(lines(steam_log)), menus)
+    key(META, 0)
+    check("...its release, with nothing in between: the Steam menu", len(lines(steam_log)), menus + 1)
+    typed()
+    key(A, 1); key(META, 1); key(A, 0); key(META, 0)
+    check("a key down before Meta, let go while it's held: no tap", len(lines(steam_log)), menus + 1)
+    key(relay.BTN_LEFT, 1, ms_w); key(META, 1); key(relay.BTN_LEFT, 0, ms_w); key(META, 0)
+    check("a mouse button down before Meta, let go while it's held: no tap", len(lines(steam_log)), menus + 1)
+    key(A, 1); key(META, 1); key(A, 2); key(META, 0); key(A, 0)
+    check("a key held from before Meta, repeating while it's held: no tap", len(lines(steam_log)), menus + 1)
+    for _ in range(3):
+        key(META, 1); key(META, 0)
+    check("three Meta taps in a row: three Steam menus (a cancelled hold doesn't stop the next)",
+          len(lines(steam_log)), menus + 4)
+    typed()
+
+    # "meta_tap": false (Input Settings) turns the tap's binding off, either side; combinations stay.
+    meta_tap["on"] = False
+    use(None)
+    key(META, 1); key(META, 0); key(RMETA, 1); key(RMETA, 0)
+    check("meta_tap off: Meta taps open nothing", len(lines(steam_log)), menus + 4)
+    check("meta_tap off: Meta reaches the desktop as an unbound one (no F24)", typed(),
+          ["key 125 1", "key 125 0", "key 126 1", "key 126 0"])
+    LOG.clear()
+    key(META, 1); key(SHIFT, 1); key(35, 1); key(35, 0); key(SHIFT, 0); key(META, 0)  # H
+    check("meta_tap off: Meta+Shift+H still toggles the screens",
+          [m for m in LOG if m.startswith("key combination")], ["key combination 42+125+35: screens_toggle"])
+    typed()
+    meta_tap["on"] = True
+    use(None)
+    key(META, 1); key(META, 0)
+    check("meta_tap back on: a Meta tap opens the Steam menu again", len(lines(steam_log)), menus + 5)
+    typed()
+
     # Mouse buttons reach the desktop only when pointer mode passes them through as keys.
     emitted()
     key(relay.BTN_LEFT, 1, ms_w); key(relay.BTN_LEFT, 0, ms_w); key(relay.BTN_SIDE, 1, ms_w); key(relay.BTN_SIDE, 0, ms_w)
@@ -396,7 +436,7 @@ def tests():
     check("Ctrl+Shift+F runs its command", lines(cmd_log), ["combo"])
     check("the combination's last key isn't typed", [k for k in typed() if k.startswith("key 33 ")], [])
     key(META, 1); key(META, 0)
-    check("Meta tap bound to none: nothing", lines(steam_log), ["menu", "menu"])
+    check("Meta tap bound to none: nothing", len(lines(steam_log)), menus + 5)
     check("Meta tap bound to none: no F24", typed(), ["key 125 1", "key 125 0"])
 
     use({"29": f"command:command -v ft-steam ft-layout ft-float ft-voice | wc -l >> {cmd_log}"})

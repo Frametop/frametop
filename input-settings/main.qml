@@ -758,6 +758,12 @@ Kirigami.ApplicationWindow {
                     text: kpage.keyboards.length ? kpage.keyboards.map(d => d.name).join(", ") : "none"
                 }
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Key combinations" }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Meta tap:"
+                    text: "Meta pressed and let go on its own does its combination below (Meta + other keys always work)"
+                    checked: backend.metaTap
+                    onToggled: backend.setMetaTap(checked)
+                }
 
                 Repeater {
                     model: backend.keyShortcuts

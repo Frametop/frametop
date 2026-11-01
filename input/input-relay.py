@@ -62,8 +62,10 @@ docs/gaze-controllers.md). So can key combinations on any keyboard ("key_binding
 {"29+56+34": action}, evdev codes joined by "+", modifiers first and left-hand codes for
 either side, here Ctrl+Alt+G): the combination does the action, and its last key isn't typed.
 A modifier on its own ("125": Meta) is a tap: pressed with no other modifier held, and released
-with no other key, mouse button, or scroll in between; the desktop gets an F24 press before its
-release, so Plasma's launcher doesn't open on a Meta tap that's bound. A tap's left-hand code is
+with no other key or mouse button going down or up, and no scroll, in between. It fires on the
+release, never on the press. The desktop gets an F24 press before the release, so Plasma's
+launcher doesn't open on a Meta tap that's bound. "meta_tap": false in the rules turns a Meta
+tap's binding off (either side's; the default is on): Meta comes and goes as an unbound one does. A tap's left-hand code is
 either side's; a right-hand code ("97": Right Ctrl) is that key's alone, and comes first. A lone
 modifier bound to dictate_hold is hold to talk instead: dictation starts on its press (alone) and
 stops on its release, and a key, mouse button or scroll in between makes it a shortcut, which
@@ -647,7 +649,7 @@ def default_key_bindings():
 def read_rules(path=RULES_PATH):
     """{"devices": {id: {"role", "name"}}, "buttons": {id: {"<code>": action}},
     "controller_buttons": {"<hand>/<button>": action}, "controller_in_games": bool,
-    "key_bindings": {"<code>+<code>...": action},
+    "key_bindings": {"<code>+<code>...": action}, "meta_tap": bool,
     "vr_keyboard": one of VR_KEYBOARD_MODES, "vr_keyboard_persist": bool}."""
     try:
         with open(path) as f:
@@ -1610,6 +1612,8 @@ class Relay:
         bindings = self.rules["key_bindings"]
         combo = str(code) if code != mod and str(code) in bindings else str(mod)
         action = bindings.get(combo)
+        if mod == KEY_LEFTMETA and not self.rules.get("meta_tap", True):
+            return combo, None  # Meta taps turned off (Input Settings): Meta as an unbound one
         if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
             return combo, None
         return combo, action
@@ -2353,8 +2357,11 @@ class Relay:
             if etype in (EV_KEY, EV_REL):
                 self.broadcast(node, etype, VOLUME_ORIGINAL.get(code, code) if node.remapped else code,
                           value, now)
+            if (etype == EV_KEY and code not in MODIFIERS) or (etype == EV_REL and code in SCROLLS):
+                # A key or button going down or up (or repeating), or a scroll, in between: the
+                # modifier's release isn't a tap. A key down before the modifier counts on its release.
+                self.held.tap = None
             if (etype == EV_KEY and value == 1 and code not in MODIFIERS) or (etype == EV_REL and code in SCROLLS):
-                self.held.tap = None  # a key, button or scroll in between: a modifier's release isn't a tap
                 self.cancel_talk()
             if etype == EV_KEY and ((node.remapped and code in VOLUME_ORIGINAL)
                                     or (node.grabbed and code in VOLUME_STANDIN)):

@@ -78,6 +78,17 @@ class RulesFile(unittest.TestCase):
         self.assertEqual(json.loads(self.path.read_text()), {"pause_auto": False})
         self.assertEqual(self.said, [("Pause: off", False)])
 
+    def test_meta_tap_switch(self):
+        # On by default; off and on again are saved as meta_tap, the rest of the file kept.
+        self.path.write_text(json.dumps({"key_bindings": {"125": "steam_menu"}}))
+        self.assertTrue(self.b.metaTap)
+        self.b.setMetaTap(False)
+        self.assertEqual(json.loads(self.path.read_text()), {"key_bindings": {"125": "steam_menu"}, "meta_tap": False})
+        self.assertFalse(self.b.metaTap)
+        self.b.setMetaTap(True)
+        self.assertTrue(json.loads(self.path.read_text())["meta_tap"])
+        self.assertEqual(self.sent, ["reload", "reload"])
+
     def test_fixed_file_saves_again(self):
         self.path.write_text("not json")
         self.b.setRole("dev1", "pointer", "Mouse")

@@ -4,7 +4,6 @@ the installers'), into a temp HOME or the FT_TEST_UNIT_DIR / FT_TEST_APPS_DIR fo
 enable_units is the host command they ran. It doesn't run the installers themselves. systemctl,
 update-desktop-database, ssh and sudo are stubs that log and change nothing; the library is
 only sourced, with FRAME_LOCAL=1, so nothing reaches the network or the real home."""
-import os
 import pathlib
 import re
 import subprocess

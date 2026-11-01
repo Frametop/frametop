@@ -16,7 +16,7 @@ import tempfile
 HERE = os.path.dirname(os.path.realpath(__file__))
 TOUR = os.path.dirname(HERE)
 sys.path.insert(0, TOUR)
-import ft_tour
+import ft_tour  # noqa: E402
 
 failed = 0
 

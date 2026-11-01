@@ -615,7 +615,7 @@ def check_services(sockets, desktop_up):
         paused = pause["stopped"]["units"] if pause.get("paused") else []
     except (OSError, ValueError, KeyError, TypeError):
         paused = []
-    for unit, socket in UNITS.items():
+    for unit, sock in UNITS.items():
         if systemctl("is-enabled", unit) != "enabled":
             continue
         state = systemctl("is-active", unit)
@@ -623,8 +623,8 @@ def check_services(sockets, desktop_up):
             report("skip", unit, "stopped while Frametop is paused for a VR game (input/ft-pause off resumes it)")
         elif state != "active":
             report("FAIL", unit, f"{state}; see journalctl --user -u {unit}")
-        elif socket and socket not in sockets:
-            report("FAIL", unit, f"runs, but hasn't opened {socket}")
+        elif sock and sock not in sockets:
+            report("FAIL", unit, f"runs, but hasn't opened {sock}")
         else:
             report("ok", unit, "running")
     if "@ft_pointer" in sockets:

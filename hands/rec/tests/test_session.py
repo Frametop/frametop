@@ -191,7 +191,7 @@ class SessionTest(SessionBase):
         self.wait_for(s, lambda st: st["state"] == "paused", "paused")
         s.next_step()   # ignored while paused
         s.resume()
-        st = self.waiting(s, "ready", "Fist.")
+        self.waiting(s, "ready", "Fist.")
         s.stop(wait=10)
         self.assertEqual(s.state, "stopped")
         # nothing recorded: no take

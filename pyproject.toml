@@ -47,3 +47,15 @@ package = false
 # ncnn's wheel asks for opencv-python, the GUI build of the cv2 that opencv-python-headless
 # already provides; the two can't share one environment, and `import ncnn` doesn't use it.
 override-dependencies = ["opencv-python; sys_platform == 'never'"]
+
+# The lint gate (`just lint`, part of `just test`): ruff's classic rule set, named here so a newer
+# ruff with a wider default set doesn't change what fails. Errors (E4, E7, E9) and pyflakes (F).
+# Left out on purpose, as the code's own style: one-line statements (E701, E702; the table-style
+# tests and tools use them), named lambdas (E731), several imports on one line (E401) and the
+# names l/I/O (E741).
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E401", "E701", "E702", "E731", "E741"]

@@ -3,7 +3,6 @@ older git that refuses the filter gets a plain one-branch clone, and an update f
 branch it wants by name (a one-branch clone fetches nothing else). git is a stub on PATH that
 logs its arguments, and HOME is a temp folder; the script is only sourced, so main never runs
 and nothing reaches the network."""
-import os
 import pathlib
 import subprocess
 import tempfile

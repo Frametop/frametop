@@ -28,7 +28,6 @@ Causes, one per gap, by where most of the missing time went:
 import argparse
 import collections
 import re
-import sys
 
 
 def parse(path):

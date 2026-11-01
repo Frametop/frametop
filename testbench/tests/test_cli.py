@@ -1,6 +1,5 @@
 import contextlib
 import io
-import json
 import math
 import tempfile
 import unittest

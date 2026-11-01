@@ -14,7 +14,6 @@ os.environ["HOME"] = HOME  # before gazecal: its STATE, and frametop.conf, follo
 
 import importlib.machinery  # noqa: E402
 import importlib.util  # noqa: E402
-import math  # noqa: E402
 import shutil  # noqa: E402
 import sys  # noqa: E402
 from collections import deque  # noqa: E402

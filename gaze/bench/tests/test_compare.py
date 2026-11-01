@@ -8,7 +8,6 @@ numpy and OpenCV (the tracker's Python):
   scripts/in-box /opt/frametop/venv/bin/python gaze/bench/tests/test_compare.py
 """
 import json
-import math
 import shutil
 import sys
 import tempfile

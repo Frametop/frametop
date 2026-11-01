@@ -84,6 +84,7 @@ import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import input_rules  # noqa: E402  (the rules file and frametop.conf)
 from input_rules import read_json  # noqa: E402  (renames old actions as it reads)
+NOT_SAVED = object()   # what Backend._edit_rules returns when the rules weren't saved
 sys.path.insert(0, os.path.join(REPO, "hands"))
 import handsmode  # noqa: E402
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
@@ -755,26 +756,24 @@ class Backend(QObject):
 
     @Slot(str, str, str)
     def setRole(self, device_id, role, name):
-        rules = read_json(RULES_PATH)
-        rules.setdefault("devices", {})[device_id] = {"role": role, "name": name}
-        if not self._save_rules(rules):
+        def change(rules):
+            rules.setdefault("devices", {})[device_id] = {"role": role, "name": name}
+        if self._edit_rules(change) is NOT_SAVED:
             return
         self.message.emit(f"{name}: {ROLE_LABELS.get(role, role)}", False)
 
     @Slot(str)
     def resetRole(self, device_id):
-        rules = read_json(RULES_PATH)
-        rules.get("devices", {}).get(device_id, {}).pop("role", None)
-        if not self._save_rules(rules):
-            return
+        self._edit_rules(lambda rules: rules.get("devices", {}).get(device_id, {}).pop("role", None))
 
     @Slot(str)
     def forgetDevice(self, device_id):
         """Drop everything saved for a device: role, name, and bindings."""
-        rules = read_json(RULES_PATH)
-        name = rules.get("devices", {}).pop(device_id, {}).get("name", device_id)
-        rules.get("buttons", {}).pop(device_id, None)
-        if not self._save_rules(rules):
+        def change(rules):
+            rules.get("buttons", {}).pop(device_id, None)
+            return rules.get("devices", {}).pop(device_id, {}).get("name", device_id)
+        name = self._edit_rules(change)
+        if name is NOT_SAVED:
             return
         self.message.emit(f"Forgot {name}", False)
 
@@ -786,19 +785,22 @@ class Backend(QObject):
                 if d["id"] == device_id:
                     entry["name"] = d["name"]
 
-    def _save_rules(self, rules):
-        """Write the rules (input_rules.save_rules); False, said in the window, when the file
-        there doesn't read, which is kept, with a copy."""
+    def _edit_rules(self, change):
+        """Change the rules file: input_rules.edit_rules, which reads, calls change(rules) and
+        writes under the file's lock. Returns what change returned (input_rules.UNCHANGED: not
+        written), or NOT_SAVED, said in the window, when the file there doesn't read (it's kept,
+        with a copy) or another program keeps it locked."""
         try:
-            input_rules.save_rules(rules, RULES_PATH)
+            result = input_rules.edit_rules(RULES_PATH, change)
         except (OSError, ft_store.StoreError) as e:
             self.message.emit(f"Not saved: {e}", True)
-            return False
-        self._send("reload")
-        QTimer.singleShot(300, self._refresh)
-        self.mappingsChanged.emit()
-        self.devicesChanged.emit()
-        return True
+            return NOT_SAVED
+        if result is not input_rules.UNCHANGED:
+            self._send("reload")
+            QTimer.singleShot(300, self._refresh)
+            self.mappingsChanged.emit()
+            self.devicesChanged.emit()
+        return result
 
     # --- buttons ---
     @Slot(int, result=str)
@@ -839,19 +841,18 @@ class Backend(QObject):
 
     @Slot(str, int, str)
     def setMapping(self, device_id, code, action):
-        rules = read_json(RULES_PATH)
-        rules.setdefault("buttons", {}).setdefault(device_id, {})[str(code)] = action
-        self._remember_name(rules, device_id)
-        if not self._save_rules(rules):
+        def change(rules):
+            rules.setdefault("buttons", {}).setdefault(device_id, {})[str(code)] = action
+            self._remember_name(rules, device_id)
+        if self._edit_rules(change) is NOT_SAVED:
             return
         self.message.emit(f"{self.codeName(code)} → {action_label(action)}", False)
 
     @Slot(str, int)
     def removeMapping(self, device_id, code):
         """Drop a custom binding: built-in buttons go back to their default, others pass through."""
-        rules = read_json(RULES_PATH)
-        rules.get("buttons", {}).get(device_id, {}).pop(str(code), None)
-        if not self._save_rules(rules):
+        if self._edit_rules(lambda rules: rules.get("buttons", {}).get(device_id, {}).pop(str(code), None)) \
+                is NOT_SAVED:
             return
         default = DEFAULT_BUTTONS.get(code)
         self.message.emit(f"{self.codeName(code)}: " + (f"back to {ACTION_LABELS[default]}" if default
@@ -864,9 +865,8 @@ class Backend(QObject):
 
     @Slot(str)
     def clearMappings(self, device_id):
-        rules = read_json(RULES_PATH)
-        removed = len(rules.get("buttons", {}).pop(device_id, {}) or {})
-        if not self._save_rules(rules):
+        removed = self._edit_rules(lambda rules: len(rules.get("buttons", {}).pop(device_id, {}) or {}))
+        if removed is NOT_SAVED:
             return
         self.message.emit(f"Removed {removed} binding{'s' if removed != 1 else ''}; defaults restored", False)
 
@@ -999,9 +999,7 @@ class Backend(QObject):
 
     @Slot(bool)
     def setVrKeyboardPersist(self, on):
-        rules = read_json(RULES_PATH)
-        rules["vr_keyboard_persist"] = bool(on)
-        if not self._save_rules(rules):
+        if self._edit_rules(lambda rules: rules.update(vr_keyboard_persist=bool(on))) is NOT_SAVED:
             return
         self.message.emit("Keyboard: " + ("stays open until you hide it" if on else "closes with the text field"), False)
 
@@ -1009,9 +1007,7 @@ class Backend(QObject):
     def setVrKeyboard(self, mode):
         if mode not in VR_KEYBOARD_MODES:
             return
-        rules = read_json(RULES_PATH)
-        rules["vr_keyboard"] = mode
-        if not self._save_rules(rules):
+        if self._edit_rules(lambda rules: rules.update(vr_keyboard=mode)) is NOT_SAVED:
             return
         self.message.emit(f"Keyboard: {VR_KEYBOARD_MODES[mode].lower()}", False)
 
@@ -1046,9 +1042,7 @@ class Backend(QObject):
 
     @Slot(bool)
     def setControllerInGames(self, on):
-        rules = read_json(RULES_PATH)
-        rules["controller_in_games"] = bool(on)
-        if not self._save_rules(rules):
+        if self._edit_rules(lambda rules: rules.update(controller_in_games=bool(on))) is NOT_SAVED:
             return
         self.message.emit("Mapped controller buttons: " + ("taken in games too" if on else "left to games"), False)
 
@@ -1056,25 +1050,21 @@ class Backend(QObject):
     def setControllerMapping(self, button, action):
         if button not in CONTROLLER_BUTTONS or not mappable(action):
             return
-        rules = read_json(RULES_PATH)
-        rules.setdefault("controller_buttons", {})[button] = action
-        if not self._save_rules(rules):
+        if self._edit_rules(lambda rules: rules.setdefault("controller_buttons", {}).update({button: action})) \
+                is NOT_SAVED:
             return
         self.message.emit(f"{CONTROLLER_BUTTONS[button]} → {action_label(action)}", False)
 
     @Slot(str)
     def removeControllerMapping(self, button):
-        rules = read_json(RULES_PATH)
-        rules.get("controller_buttons", {}).pop(button, None)
-        if not self._save_rules(rules):
+        if self._edit_rules(lambda rules: rules.get("controller_buttons", {}).pop(button, None)) is NOT_SAVED:
             return
         self.message.emit(f"{CONTROLLER_BUTTONS.get(button, button)}: back to games", False)
 
     @Slot()
     def clearControllerMappings(self):
-        rules = read_json(RULES_PATH)
-        removed = len(rules.pop("controller_buttons", {}) or {})
-        if not self._save_rules(rules):
+        removed = self._edit_rules(lambda rules: len(rules.pop("controller_buttons", {}) or {}))
+        if removed is NOT_SAVED:
             return
         self.message.emit(f"Removed {removed} controller binding{'s' if removed != 1 else ''}", False)
 
@@ -1129,9 +1119,7 @@ class Backend(QObject):
             self.message.emit("The input relay isn't running (frametop-input-relay.service)", True)
 
     def _set_rule(self, key, value, text):
-        rules = read_json(RULES_PATH)
-        rules[key] = value
-        if not self._save_rules(rules):
+        if self._edit_rules(lambda rules: rules.update({key: value})) is NOT_SAVED:
             return
         self.message.emit(text, False)
 
@@ -1362,9 +1350,12 @@ class Backend(QObject):
             self.message.emit(f"Couldn't remove {name}: {e}", True)
             return
         # Buttons, controller buttons and key combinations that ran it would do nothing now.
-        rules = read_json(RULES_PATH)
-        dropped = input_commands.drop_bindings(rules, name)
-        saved = not dropped or self._save_rules(rules)   # (the command is gone either way)
+        dropped = []
+
+        def change(rules):
+            dropped[:] = input_commands.drop_bindings(rules, name)
+            return None if dropped else input_rules.UNCHANGED
+        saved = self._edit_rules(change) is not NOT_SAVED   # (the command is gone either way)
         self.commandsChanged.emit()
         if saved:
             self.message.emit(input_commands.removed_text(name, dropped), False)
@@ -1400,18 +1391,17 @@ class Backend(QObject):
         self.shortcutCaptureChanged.emit()
 
     def _save_shortcut(self, combo, action):
-        rules = read_json(RULES_PATH)
-        rules["key_bindings"] = dict(key_bindings(rules), **{combo: action})
-        if not self._save_rules(rules):
+        if self._edit_rules(lambda rules: rules.update(key_bindings=dict(key_bindings(rules), **{combo: action}))) \
+                is NOT_SAVED:
             return
         self.message.emit(f"{self.comboName(combo)} → {action_label(action)}", False)
 
     @Slot(str)
     def removeShortcut(self, combo):
-        rules = read_json(RULES_PATH)
-        rules["key_bindings"] = key_bindings(rules)
-        rules["key_bindings"].pop(combo, None)
-        if not self._save_rules(rules):
+        def change(rules):
+            rules["key_bindings"] = key_bindings(rules)
+            rules["key_bindings"].pop(combo, None)
+        if self._edit_rules(change) is NOT_SAVED:
             return
         self.message.emit(f"{self.comboName(combo)} removed", False)
 
@@ -1537,13 +1527,16 @@ class Backend(QObject):
         """Every dictation key toggles (dictate) or is held to talk (dictate_hold)."""
         if action not in VOICE_ACTIONS:
             return
-        rules = read_json(RULES_PATH)
-        bound = key_bindings(rules)
-        if not any(a in VOICE_ACTIONS for a in bound.values()):
+        def change(rules):
+            bound = key_bindings(rules)
+            if not any(a in VOICE_ACTIONS for a in bound.values()):
+                return input_rules.UNCHANGED
+            rules["key_bindings"] = {c: action if a in VOICE_ACTIONS else a for c, a in bound.items()}
+        result = self._edit_rules(change)
+        if result is input_rules.UNCHANGED:
             self.message.emit("Dictation has no keys: add one on the Keyboard page", True)
             return
-        rules["key_bindings"] = {c: action if a in VOICE_ACTIONS else a for c, a in bound.items()}
-        if not self._save_rules(rules):
+        if result is NOT_SAVED:
             return
         self.message.emit("Dictation keys: " + ("hold to talk" if action == "dictate_hold"
                                                  else "tap to start, tap again to stop"), False)

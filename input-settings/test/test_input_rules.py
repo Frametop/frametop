@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -69,6 +70,54 @@ class SaveRules(unittest.TestCase):
                 copies = [p for p in self.dir.iterdir() if p.name.startswith("frametop-input.json.bad-")]
                 self.assertTrue(copies)
                 self.assertIn(bad, [p.read_text() for p in copies])
+
+
+class EditRules(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.path = self.dir / "frametop-input.json"
+
+    def test_changes_the_file_and_returns_what_change_returned(self):
+        self.path.write_text(json.dumps({"buttons": {"dev": {"275": "spotwatch"}}, "pause_auto": True}))
+
+        def change(rules):
+            self.assertEqual(rules["buttons"], {"dev": {"275": "frunner"}})  # read as read_json reads it
+            rules["pause_auto"] = False
+            return "done"
+        self.assertEqual(input_rules.edit_rules(str(self.path), change), "done")
+        self.assertEqual(self.path.read_text(),
+                         json.dumps({"buttons": {"dev": {"275": "frunner"}}, "pause_auto": False}, indent=2))
+
+    def test_unchanged_writes_nothing(self):
+        self.assertIs(input_rules.edit_rules(str(self.path), lambda rules: input_rules.UNCHANGED),
+                      input_rules.UNCHANGED)
+        self.assertFalse(self.path.exists())
+
+    def test_an_edit_saved_meanwhile_is_kept(self):
+        """Another program's edit waits for the lock, so it lands after this one, not under it."""
+        self.path.write_text("{}")
+        reading, other_done = threading.Event(), []
+
+        def slow(rules):
+            reading.set()
+            other.join(0.3)          # the other edit can't run while this one holds the lock
+            other_done.append(not other.is_alive())
+            rules["a"] = 1
+
+        other = threading.Thread(target=lambda: (reading.wait(5),
+                                                 input_rules.edit_rules(str(self.path), lambda r: r.update(b=2))))
+        other.start()
+        input_rules.edit_rules(str(self.path), slow)
+        other.join(5)
+        self.assertEqual(other_done, [False])
+        self.assertEqual(json.loads(self.path.read_text()), {"a": 1, "b": 2})
+
+    def test_a_file_that_does_not_read_is_kept(self):
+        self.path.write_text("{not json")
+        called = []
+        with self.assertRaises(ft_store.StoreError):
+            input_rules.edit_rules(str(self.path), called.append)
+        self.assertEqual((self.path.read_text(), called), ("{not json", []))
 
 
 class Conf(unittest.TestCase):

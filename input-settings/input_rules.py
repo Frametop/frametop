@@ -29,11 +29,16 @@ def read_json(path):
     except (OSError, ValueError):
         return {}
     if isinstance(data, dict):
-        for table in ("buttons", "controller_buttons", "key_bindings"):
-            if table in data:
-                data[table] = renamed_actions(data[table])
-        return data
+        return _renamed(data)
     return {}   # a top-level list or value: nothing in it to read
+
+
+def _renamed(rules):
+    """rules with the renamed actions in their tables under their new names."""
+    for table in ("buttons", "controller_buttons", "key_bindings"):
+        if table in rules:
+            rules[table] = renamed_actions(rules[table])
+    return rules
 
 
 def read_conf(path):
@@ -53,3 +58,20 @@ def save_rules(rules, path):
     with ft_store.locked(path):
         ft_store.load_json_strict(path, {}, ft_store.is_object)
         ft_store.write_json(path, rules, indent=2, newline=False)
+
+
+UNCHANGED = object()   # what an edit_rules change returns to leave the file as it is
+
+
+def edit_rules(path, change):
+    """Read the rules, change(rules) them in place and write them back, all under the file's
+    lock, so an edit another program saves between the read and the write isn't lost. The rules
+    are read as read_json reads them (renamed actions under their new names), but strictly: a
+    file that doesn't read raises ft_store.StoreError and is kept, with a copy, as save_rules
+    does. Returns what change returned; when that is UNCHANGED nothing is written."""
+    with ft_store.locked(path):
+        rules = _renamed(ft_store.load_json_strict(path, {}, ft_store.is_object))
+        result = change(rules)
+        if result is not UNCHANGED:
+            ft_store.write_json(path, rules, indent=2, newline=False)
+    return result

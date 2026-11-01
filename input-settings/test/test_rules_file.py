@@ -99,6 +99,31 @@ class RulesFile(unittest.TestCase):
         # The Controllers page's dropdown has it, so its row shows the mapping.
         self.assertIn({"value": "keys:125+32", "text": "Press Meta+D"}, self.b.controllerActions)
 
+    def test_each_change_reads_the_file_as_it_is_then(self):
+        """A change saved by another program since the window last read the file is kept: each
+        edit reads, changes and writes under the file's lock (input_rules.edit_rules)."""
+        self.b.setMapping("dev1", 275, "frunner")
+        self.path.write_text(json.dumps({**json.loads(self.path.read_text()), "pause_auto": False}))
+        self.b.setVrKeyboard("no_keyboard")
+        saved = json.loads(self.path.read_text())
+        self.assertEqual((saved["pause_auto"], saved["vr_keyboard"]), (False, "no_keyboard"))
+        self.assertEqual(saved["buttons"], {"dev1": {"275": "frunner"}})
+
+    def test_what_a_change_found_is_said(self):
+        self.path.write_text(json.dumps({"devices": {"dev1": {"name": "Mouse"}},
+                                         "buttons": {"dev1": {"275": "frunner", "276": "none"}}}))
+        self.b.clearMappings("dev1")
+        self.b.forgetDevice("dev1")
+        self.assertEqual(self.said, [("Removed 2 bindings; defaults restored", False), ("Forgot Mouse", False)])
+        self.assertEqual(json.loads(self.path.read_text()), {"devices": {}, "buttons": {}})
+
+    def test_dictation_without_keys_writes_nothing(self):
+        self.path.write_text('{"key_bindings": {"125": "screens_toggle"}}')
+        self.b.setDictationKeyMode("dictate_hold")
+        self.assertEqual(self.path.read_text(), '{"key_bindings": {"125": "screens_toggle"}}')
+        self.assertEqual(self.said, [("Dictation has no keys: add one on the Keyboard page", True)])
+        self.assertEqual(self.sent, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -228,7 +228,7 @@ curl -fsSL https://frametop.github.io/frametop/get.sh | bash
 
 Or by hand: `cd ~/frametop && git pull && ./install.sh`.
 
-If an install or update stops part-way (an error, the headset powering off), run the same command again: it finishes it.
+If an install or update stops part-way (an error, Ctrl-C, a closed terminal, the headset powering off), run the same command again: it finishes it. Until then some services may run from the new version and some from the old one; `install.sh` says so when it stops early.
 
 ## Uninstall
 

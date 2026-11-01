@@ -80,8 +80,15 @@ drop_other_folder() {
   echo "$what from another Frametop folder: stopped and removed, so it doesn't run a release that goes later. Install it for this one with: $how"
 }
 # If a step fails, set -e stops here with the steps before it done and the rest still from the
-# install before: run the same command again, which does every step again.
+# install before: run the same command again, which does every step again. A signal (Ctrl-C, a
+# closed terminal, FrameDrop stopping it) would end bash without the EXIT trap, so each one
+# exits instead, and the trap says so too.
+# interrupted-install trap: begin
 trap 'rc=$?; [ "$rc" = 0 ] || echo "install.sh stopped before it finished (exit $rc). Run the same command again to finish the install." >&2' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+# interrupted-install trap: end
 
 if [ "$FRAME_RELEASE" = 1 ]; then
   echo "Installing Frametop $(sed -n 's/^VERSION=//p' "$root/.frametop-release") on this Steam Frame from $FRAME_REPO"
@@ -319,6 +326,8 @@ Recommended: in Frametop Display Settings > Power, choose when the displays turn
 while the headset isn't used (for a stand or mount that covers its proximity sensor), and
 turn on Stay awake while plugged in, so Steam doesn't put the headset to sleep while it
 charges. The displays still turn off when you take the headset off.
+
+If an install or update is ever interrupted, run the same command again: it finishes it.
 EOF
 if ask "Restart SteamVR now?" n; then
   on_frame 'systemctl --user restart steamvr.service'

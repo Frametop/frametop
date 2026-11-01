@@ -349,9 +349,43 @@ struct Viewer {
 struct Keys {
     char modifiers = 0;
     std::set<unsigned> held;
+    // Meta held back (a Win press waits for the next key) and Metas whose combination was Frametop's:
+    // the input relay passes Meta's press on at once, and when it then makes a key combination of
+    // Frametop's own (Meta+A: carry_toggle), it keeps the key and sends F24 before Meta's release, so
+    // the desktop doesn't take it for a Meta tap. Here F24 after a held-back Meta drops the three (user,
+    // 2026-11-01: "the key combo is reaching vibepollo remote desktops": dropped F24 left a Win tap,
+    // which opened Start; sent as VK_F24, Win+F24 darkened the host's desktop). Any other key sends
+    // Meta first; Meta's release alone sends the tap.
+    std::set<unsigned> metaWaiting, metaTaken;
+
+    // F13 to F23 too, past the table's end (VK_F13..VK_F23).
+    static unsigned Vk(unsigned code) {
+        if (code >= KEY_F13 && code <= KEY_F23) return 0x7C + (code - KEY_F13);
+        return code < sizeof keyCodes / sizeof keyCodes[0] ? keyCodes[code] : 0;
+    }
 
     void Send(unsigned code, bool down) {
-        if (code >= sizeof keyCodes / sizeof keyCodes[0] || !keyCodes[code]) return;
+        const bool meta = code == KEY_LEFTMETA || code == KEY_RIGHTMETA;
+        if (meta && down) return void(metaWaiting.insert(code));
+        if (meta && !down) {
+            if (metaTaken.erase(code)) return;
+            if (metaWaiting.erase(code)) Put(code, true);   // (alone: a tap)
+            return Put(code, false);
+        }
+        if (code == KEY_F24 && (!metaWaiting.empty() || !metaTaken.empty())) {
+            metaTaken.insert(metaWaiting.begin(), metaWaiting.end());
+            metaWaiting.clear();
+            return;
+        }
+        if (down)
+            for (const unsigned m : metaWaiting) Put(m, true);
+        if (down) metaWaiting.clear();
+        Put(code, down);
+    }
+
+    void Put(unsigned code, bool down) {
+        const unsigned vk = Vk(code);
+        if (!vk) return;
         if (down) held.insert(code);
         else if (!held.erase(code)) return;  // never went down here
         char m = 0;
@@ -362,11 +396,12 @@ struct Keys {
             case KEY_LEFTMETA: case KEY_RIGHTMETA: m = MODIFIER_META; break;
         }
         if (m) modifiers = down ? char(modifiers | m) : char(modifiers & ~m);
-        LiSendKeyboardEvent(short(0x80 << 8 | keyCodes[code]), down ? KEY_ACTION_DOWN : KEY_ACTION_UP, modifiers);
+        LiSendKeyboardEvent(short(0x80 << 8 | vk), down ? KEY_ACTION_DOWN : KEY_ACTION_UP, modifiers);
     }
 
     void Blur() {
-        while (!held.empty()) Send(*held.begin(), false);
+        metaWaiting.clear(), metaTaken.clear();
+        while (!held.empty()) Put(*held.begin(), false);
     }
 };
 

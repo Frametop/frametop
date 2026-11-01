@@ -8,6 +8,7 @@
 # toolchains (dev: also clang, meson and Rust, for local experiments)
 both: gcc gcc-c++ cmake ninja-build make pkgconf-pkg-config git
 dev: clang clang-devel meson cargo rust
+dev: ShellCheck  # test-bash checks the installers' shared helper (scripts/install-lib.sh) with it
 image: curl unzip just
 # libraries for Frametop's native pieces
 both: pipewire-devel libxkbcommon-devel libinput-devel systemd-devel dbus-devel libdrm-devel

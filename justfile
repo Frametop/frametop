@@ -27,7 +27,7 @@ test-python:
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
         'tour/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'remote-displays/tests/*.py' \
         'steam/tests/*.py' 'remote/tests/*.py' 'framedrop/tests/*.py' \
-        'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'docs/tests/*.py' || status=1
+        'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'scripts/tests/test_install_lib.py' 'docs/tests/*.py' || status=1
     pytest -q session/tests || status=1
     # test_accessibility.py needs the host's AT-SPI and PyGObject, test_notifyfwd.py and
     # test_gtksettings.py the host's dbus-daemon and PyGObject
@@ -200,6 +200,14 @@ test-bash:
         "${how[$f]}" -n "$f" && echo "${how[$f]} -n $f: ok" || { echo "${how[$f]} -n $f: FAILED"; status=1; }
     done < <(printf '%s\0' "${!how[@]}" | sort -z)
     echo "shell scripts: ${#how[@]} checked"
+    # The installers' shared helper, the one script so far that shellcheck must pass (warnings
+    # and errors): it's sourced by every installer.
+    if command -v shellcheck >/dev/null; then
+        shellcheck -S warning scripts/install-lib.sh && echo "shellcheck scripts/install-lib.sh: ok" ||
+            { echo "shellcheck scripts/install-lib.sh: FAILED"; status=1; }
+    else
+        echo "skip  shellcheck: not installed (setup/packages.txt's dev line; setup/dev-container.sh adds it)"
+    fi
     exit $status
 
 # the testbench, a dev-only tool: its SteamVR input proxy and observer against fake runtimes,

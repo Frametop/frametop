@@ -6,6 +6,8 @@
 #
 # It asks which version to install, clones the repo into ~/frametop (or updates the clone
 # that's there), and runs its install.sh. Run it again to update, or to switch versions.
+# The clone has that one branch, and fetches older files' contents only when they're needed
+# (a switch fetches the new branch; for all of them: git remote set-branches origin '*').
 # Its third and fourth choices, or --release, install a release instead: Frametop built, in one file. It downloads the
 # release's Frametop.zip from GitHub (about 1.1 GB: the newest stable release, or with
 # --experimental the newest of any), unpacks it in ~/.cache/frametop/release, and runs its
@@ -131,6 +133,22 @@ install_release() {
   [ "$clone_only" = 1 ] || rm -rf "$cache"
 }
 
+# A new clone of one branch: only that branch's history, and its files' contents only as checked
+# out (later ones arrive as they're needed). An older git that doesn't know --filter fails before
+# making the folder, so that's tried again as a whole clone of the branch.
+clone_repo() {  # clone_repo REPO BRANCH DIR
+  git clone --single-branch --filter=blob:none --branch "$2" "$1" "$3" && return 0
+  [ -e "$3" ] && return 1
+  echo "Trying again without --filter, in case this git doesn't take it" >&2
+  git clone --single-branch --branch "$2" "$1" "$3"
+}
+
+# Fetch BRANCH by name: a clone of one branch (above) doesn't fetch the others, so switching to
+# another needs it, and the clone's later updates get it too.
+fetch_branch() {  # fetch_branch DIR BRANCH
+  git -C "$1" fetch --quiet origin "+refs/heads/$2:refs/remotes/origin/$2"
+}
+
 # Everything happens in main, called on the last line, so a download cut short runs nothing.
 main() {
   local repo=https://github.com/Frametop/frametop.git dir= branch= clone_only=0
@@ -230,14 +248,14 @@ main() {
 
   if [ ! -e "$dir" ]; then
     echo "Cloning Frametop ($branch) into $dir"
-    git clone --branch "$branch" "$repo" "$dir"
+    clone_repo "$repo" "$branch" "$dir"
   else
     if ! git -C "$dir" diff --quiet || ! git -C "$dir" diff --cached --quiet; then
       echo "$dir has changes of its own. Commit or stash them first (git -C $dir status)." >&2
       return 1
     fi
     echo "Updating $dir to the latest $branch"
-    git -C "$dir" fetch --quiet origin
+    fetch_branch "$dir" "$branch"
     if [ "$current" != "$branch" ]; then
       if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
         git -C "$dir" switch --quiet "$branch"
@@ -262,4 +280,6 @@ main() {
   fi
 }
 
+# Sourced (the tests, scripts/tests/test_get.py): only the functions, nothing runs.
+(return 0 2>/dev/null) && return 0
 main "$@"

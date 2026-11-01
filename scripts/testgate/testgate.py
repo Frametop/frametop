@@ -9,6 +9,10 @@ failed.
   reasons; one with some skipped says how many, and why. Exit status 77 is how a test file
   that isn't unittest says it skipped itself (its last stdout line is the reason), and a
   "skip  REASON" line on its stdout is a part it skipped.
+- A file that defines unittest tests but runs none (no unittest.main()) fails: it would pass
+  having tested nothing.
+- A file gets TIMEOUT seconds (FT_TEST_TIMEOUT overrides); one still running then is killed,
+  with whatever it started (its own session), and fails, so a hung test can't hang the gate.
 - A failing file's output is shown; a passing one's isn't.
 
   scripts/testgate/testgate.py 'conf/test/*.py' 'layout/tests/test_*.py' ...
@@ -16,6 +20,7 @@ failed.
 import glob
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -25,11 +30,20 @@ HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hook")
 # their tests import by package.
 TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SKIP = 77
+TIMEOUT = 900   # seconds a file gets: room for a slow file, an end for a hung one
 
 
-def run(path, python=sys.executable):
+def timeout():
+    try:
+        return float(os.environ.get("FT_TEST_TIMEOUT") or TIMEOUT)
+    except ValueError:
+        return TIMEOUT
+
+
+def run(path, python=sys.executable, limit=None):
     """Run one test file: (status, how many tests ran, the skip reasons, its stdout, its stderr).
     status is "ok", "skipped" or "failed"."""
+    limit = limit or timeout()
     with tempfile.TemporaryDirectory(prefix="ft-testgate-") as tmp:
         report = os.path.join(tmp, "report.json")
         env = dict(os.environ, FT_TEST_REPORT=report,
@@ -37,7 +51,17 @@ def run(path, python=sys.executable):
         # files, not pipes: a server a test starts and leaves running can hold a pipe open
         with open(os.path.join(tmp, "out"), "w+", errors="replace") as out, \
                 open(os.path.join(tmp, "err"), "w+", errors="replace") as err:
-            code = subprocess.call([python, path], stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=env)
+            p = subprocess.Popen([python, path], stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=env,
+                                 start_new_session=True)
+            try:
+                code = p.wait(timeout=limit)
+            except subprocess.TimeoutExpired:
+                code = None
+            try:   # what it started and left running goes too
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            p.wait()
             out.seek(0)
             err.seek(0)
             stdout, stderr = out.read(), err.read()
@@ -48,12 +72,17 @@ def run(path, python=sys.executable):
     lines = stdout.splitlines()
     skipped = seen["skipped"] + [line.split(None, 1)[1] for line in lines
                                  if line.startswith("skip ") and len(line.split(None, 1)) > 1]
+    if code is None:
+        return "failed", seen["run"], skipped, stdout, stderr + f"\ntestgate: still running after {limit:g} s, killed\n"
     if code == SKIP:
         return "skipped", seen["run"], skipped or [lines[-1] if lines else "(no reason given)"], stdout, stderr
     if code != 0:
         return "failed", seen["run"], skipped, stdout, stderr
     if seen["skipped"] and len(set(seen.get("skipped_tests", []))) >= seen["run"]:
         return "skipped", seen["run"], skipped, stdout, stderr
+    if seen.get("defined") and not seen["run"] and not seen["skipped"]:
+        return "failed", 0, skipped, stdout, stderr + (f"\ntestgate: defines {seen['defined']} unittest test(s) "
+                                                       "but ran none (no unittest.main()?)\n")
     return "ok", seen["run"], skipped, stdout, stderr
 
 

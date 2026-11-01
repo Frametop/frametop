@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """testgate (scripts/testgate/testgate.py): a skip is reported as one, never as "ok",
-and a pattern that matches nothing fails the gate. Made-up test files in a temp folder.
+a pattern that matches nothing fails the gate, so do a file whose tests never run and one that
+hangs. Made-up test files in a temp folder.
 
   python3 scripts/testgate/tests/test_testgate.py
 """
@@ -10,7 +11,9 @@ import os
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import testgate  # noqa: E402
@@ -128,6 +131,40 @@ class Gate(unittest.TestCase):
                 self.assertEqual(subprocess.check_output([sys.executable, "-c", code], text=True), "None\\n")
             """)
         self.assertEqual(testgate.run(path)[0], "ok")
+
+    def test_tests_defined_but_never_run_fail(self):
+        path = self.file("j.py", """\
+            import unittest
+            class T(unittest.TestCase):
+                def test_a(self): pass
+                def test_b(self): pass
+            """)   # no unittest.main(): it would pass having run nothing
+        how, ran, _, _, stderr = testgate.run(path)
+        self.assertEqual((how, ran), ("failed", 0))
+        self.assertIn("defines 2 unittest test(s) but ran none", stderr)
+        # A plain script with no TestCase still runs as before.
+        self.assertEqual(testgate.run(self.file("k.py", "print('all passed')\n"))[:2], ("ok", 0))
+
+    def test_a_hung_file_is_killed_with_what_it_started(self):
+        marker = os.path.join(self.dir, "child-alive")
+        path = self.file("l.py", f"""\
+            import subprocess, sys, time
+            # a child that would outlive the test, then the test hangs
+            subprocess.Popen([sys.executable, "-c",
+                              "import time; time.sleep(3); open({marker!r}, 'w').close()"])
+            time.sleep(60)
+            """)
+        how, _, _, _, stderr = testgate.run(path, limit=1)
+        self.assertEqual(how, "failed")
+        self.assertIn("still running after 1 s, killed", stderr)
+        time.sleep(3.5)
+        self.assertFalse(os.path.exists(marker))   # the child went with it
+
+    def test_the_timeout_can_be_set(self):
+        with unittest.mock.patch.dict(os.environ, FT_TEST_TIMEOUT="5"):
+            self.assertEqual(testgate.timeout(), 5)
+        with unittest.mock.patch.dict(os.environ, FT_TEST_TIMEOUT="soon"):
+            self.assertEqual(testgate.timeout(), testgate.TIMEOUT)
 
     def test_a_pattern_that_matches_nothing_fails(self):
         self.case("a.py", "def test_a(self): pass")

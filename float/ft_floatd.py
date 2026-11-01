@@ -79,6 +79,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "layout"))
 import ft_layout  # noqa: E402  (config and layout)
 from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+import ft_store  # noqa: E402  (conf/, on the path from ft_layout)
 import ft_apps  # noqa: E402  (Launch as Standalone)
 import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
 
@@ -194,10 +195,7 @@ def load_places():
 
 
 def save_places(places):
-    tmp = PLACES_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(places, f, indent=1)
-    os.replace(tmp, PLACES_PATH)
+    ft_store.write_json(PLACES_PATH, places, indent=1, newline=False)
 
 
 def to_local(ref, g):

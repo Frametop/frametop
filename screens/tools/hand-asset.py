@@ -12,8 +12,8 @@ glTF code: the data is compiled in, once, in handasset.cpp; screens/handasset.h,
 here, declares it.
 
 The build makes handasset.cpp itself (--cpp PATH writes only it, to PATH: screens/build.sh puts
-it in build/), so only the header is source. A screens/handasset.cpp in the tree (it was
-tracked) is still rewritten and checked while it's there. --check only says whether the header
+it in build/), so only the header is source. A screens/handasset.cpp left in the tree (it was
+tracked until 2026-10-31) is still rewritten and checked while it's there. --check only says whether the header
 and that copy are up to date (exit 1 if not).
 
 A model's joints: the bind pose comes from the skin's inverse bind matrices (node transforms

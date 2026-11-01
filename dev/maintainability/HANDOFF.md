@@ -604,7 +604,7 @@ Personal setup out of the product.
 
 Open:
 
-- Daenon: `git rm --cached gaze/tracker/.frame-job` to stop tracking it (agents can't run it).
+- Resolved 2026-10-31 (DEE-324): `gaze/tracker/.frame-job` untracked.
 - The review ran with DEE-315 (one Opus reader, 12 findings, none in behaviour). Fixed in
   2a9898a: broken comment lines in input-relay.py, install.sh and keys-test.py; logfile.h's
   trackwatch wording; gaze/README.md naming the tracked `.frame-job` (the doc check would fail
@@ -821,7 +821,8 @@ Open:
 - `input/rules-migrate.py` still writes the rules file without the lock.
 - A held rules lock can keep Input Settings' window waiting up to 10 s (the GUI thread).
 - Releases now lint: `./ft dev test` runs `just test`, which runs ruff first.
-- Untracking `gaze/tracker/.frame-job` and `screens/handasset.cpp` waits on Daenon.
+- Resolved (Daenon approved): `gaze/tracker/.frame-job` and `screens/handasset.cpp` are untracked
+  and ignored; both stay on disk, and the build and tests make handasset.cpp in build/.
 
 ## Device checks still to do
 

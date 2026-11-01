@@ -125,7 +125,12 @@ desktop, else on the virtual keyboard, which SteamVR passes on to Steam and game
 desktop each character is the keys that type it on the desktop's keyboard layout (Plasma's
 kxkbrc in Frametop's desktop config, worked out with libxkbcommon), Shift and AltGr included, so a
 German QWERTZ desktop gets "z" from the Z key; Steam and games get a US layout. A character the
-layout has no key for (a dead key's accent, another script) is dropped, and the log says which.
+desktop's layout has no key for (ą on a US layout, a dead key's accent, another script) goes as
+"commit CHARACTER" to the desktop's input method (input/ft-textinput), which commits it to the
+focused text field, while one is focused: that's the address its "textfield 1" came from (this
+user's only), until "textfield 0". TYPE_SWITCH apart from keys either side, since the two ways
+reach the app separately. Without a text field taking text that way (Xwayland and most Electron
+apps), or for Steam, such a character is dropped, and the log says which.
 A character waits while a modifier is held on a keyboard, which would make it a shortcut
 (Ctrl+letter).
 
@@ -213,7 +218,7 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     ignored from another user
   calpanel 1|0      from the pointer helper: a gaze calibration panel is up (renewed every second,
                     lapses 3 s after the last), so Enter answers it (above)
-  textfield 1|0     from the desktop's input method (above)
+  textfield 1|0     from the desktop's input method (above); "commit TEXT" goes back to it
   pause on|off|toggle [reason]   pause Frametop or resume it (input/ft-pause; the gesture reader)
   pause ?           the pause state, as {"t": "pause", ...}
   type TEXT         from Frametop Voice: type TEXT where typing goes (above); ignored from
@@ -376,6 +381,9 @@ KXKBRC = os.path.expanduser("~/.config/frametop/kxkbrc")
 LAYOUT_CODES = (*range(2, 54), 57, 86)
 LAYOUT_MODS = ((), (KEY_LEFTSHIFT,), (KEY_RIGHTALT,), (KEY_LEFTSHIFT, KEY_RIGHTALT))
 TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to the next key
+# Between a character typed as keys and one committed through the input method (or back): they
+# reach the app by different ways, so the first gets this long to arrive before the next goes.
+TYPE_SWITCH = 0.05
 KB_POKES = ("hover", "press", "move", "up", "end")  # a fingertip on Full Keyboard (ft-screens' "kbpoke")
 KB_COORD = re.compile(r"-?\d{1,3}(\.\d{1,6})?")
 TYPE_MAX = 20000  # characters waiting to be typed, at most
@@ -1219,6 +1227,7 @@ class Typing:
         self.down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
         self.at = 0.0  # the next press or release goes then
         self.untyped = []  # characters with no key where typing went, logged when the queue is empty (None: quiet)
+        self.committing = False  # the last character went through the input method, not as keys
         self.kb_held = {}  # keys Full Keyboard holds down: code -> to the desktop
 
     def drop_full_keyboard(self):
@@ -1266,6 +1275,9 @@ class Relay:
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
         self.calpanel_until, self.shown_until = 0.0, 0.0
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
+        # ft-textinput's address while a desktop text field is focused (its "textfield 1"), for the
+        # characters the desktop's layout has no key for; None without one.
+        self.text_input = None
         self.last_typing = 0.0  # the helper was last told of a key then (see "typing" at the top)
         self.lease = PointerLease()
         self.held = HeldKeys()
@@ -1668,9 +1680,20 @@ class Relay:
             log(f"typing {min(len(chars), room)} characters for {'Full Keyboard' if quiet else 'Frametop Voice'}"
                 + (f" ({len(chars) - room} dropped: too many waiting)" if len(chars) > room else ""))
 
+    def commit_text(self, text):
+        """Send text to ft-textinput, which commits it to the focused text field. False if it
+        didn't go (ft-textinput gone): then there's no text field to send to until it says again."""
+        try:
+            self.control.sendto(f"commit {text}".encode(), self.text_input)
+            return True
+        except OSError:
+            self.text_input = None
+            return False
+
     def report_untyped(self, desktop):
         if self.typing.untyped and not self.typing.queue:
-            where = f"the desktop's layout ({self.desktop_layout.name})" if desktop else "a US layout (Steam)"
+            where = (f"the desktop's layout ({self.desktop_layout.name}), with no text field taking text from "
+                     "the input method," if desktop else "a US layout (Steam)")
             said = "".join(dict.fromkeys(c for c in self.typing.untyped if c is not None))
             log(f"typing: {len(self.typing.untyped)} characters {where} has no key for" + (f": {said}" if said else ""))
             self.typing.untyped.clear()
@@ -1716,8 +1739,19 @@ class Relay:
         elif self.typing.queue and not self.typing_blocked(now):
             desktop = now < self.desktop_until
             keys = self.desktop_layout.keys if desktop else US_KEYS
-            item = self.typing.queue.popleft()
+            item = self.typing.queue[0]
             ch = item if isinstance(item, str) else item[1]
+            # A character the desktop's layout has no key for goes to the focused text field
+            # through the input method (ft-textinput), if there is one.
+            commit = ch not in keys and desktop and self.text_input is not None
+            if commit != self.typing.committing:
+                self.typing.committing = commit
+                self.typing.at = now + TYPE_SWITCH
+                return
+            self.typing.queue.popleft()
+            if commit and self.commit_text(ch):
+                self.typing.at = now + TYPE_STEP
+                return
             if ch not in keys:
                 self.typing.untyped.append(ch if isinstance(item, str) else None)
                 self.report_untyped(desktop)
@@ -2068,6 +2102,9 @@ class Relay:
                 self.reply(addr, self.pause.status())
             return
         if cmd == "textfield" and len(words) == 2:
+            # Typed characters go back to the address that said it, so only this user's.
+            if uid == os.getuid():
+                self.text_input = addr if words[1] == "1" and addr else None
             self.text_field(words[1] == "1")
             return
         if cmd in ("hostdev", "hostev", "hostbye"):

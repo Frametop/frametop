@@ -166,12 +166,17 @@ def save(data):
         write_json(PATH, {**old, **{k: data[k] for k in DEFAULT if k in data}})
 
 
-def save_rules(rules):
-    """The input relay's rules, written whole, as Input Settings writes them: under the file's
-    lock, and never over a file that doesn't read (ft_store.StoreError, a copy kept)."""
+def edit_rules(change):
+    """Change the input relay's rules as Input Settings does: read, change(rules) and written
+    back under the file's lock, so an edit saved in between isn't lost, and never over a file
+    that doesn't read (ft_store.StoreError, a copy kept). Written only when change returns
+    true; returns what it returned."""
     with ft_store.locked(RULES_PATH):
-        ft_store.load_json_strict(RULES_PATH, {}, ft_store.is_object)
-        write_json(RULES_PATH, rules)
+        rules = ft_store.load_json_strict(RULES_PATH, {}, ft_store.is_object)
+        changed = change(rules)
+        if changed:
+            write_json(RULES_PATH, rules)
+    return changed
 
 
 def write_json(path, data):
@@ -260,29 +265,34 @@ def relay_actions():
 
 def carry_over():
     """frame-voice's settings, once; or dictation's key in a rules file with keys of its own."""
-    rules = read_json(RULES_PATH)
     if not PATH.exists() and FRAME_VOICE_PATH.exists():
         new, bindings, notes = from_frame_voice(read_json(FRAME_VOICE_PATH))
         write_json(PATH, new)
         print(f"voice: carried over frame-voice's settings ({FRAME_VOICE_PATH} -> {PATH})")
         for note in notes:
             print(f"voice: {note}")
-        if set_dictation_keys(rules, bindings or {}) and carry_rules(rules):
+        if carry_rules(lambda rules: set_dictation_keys(rules, bindings or {})):
             print(f"voice: dictation keys are frame-voice's: {', '.join(sorted(bindings)) or 'none'}")
         return
+    if carry_rules(give_dictation_its_key):
+        print("voice: added Right Ctrl tap (dictate) to your key combinations")
+
+
+def give_dictation_its_key(rules):
+    """Right Ctrl tap (dictate) added to a rules file's key combinations of its own (they don't
+    get the relay's defaults), once: True when it was."""
     own = rules.get("key_bindings")
     if isinstance(own, dict) and not any(a in DICTATION_ACTIONS for a in own.values()) and "97" not in own:
-        # A list of its own doesn't get the relay's defaults, so give dictation its key once.
         own.update(VOICE_KEY_BINDINGS)
-        if carry_rules(rules):
-            print("voice: added Right Ctrl tap (dictate) to your key combinations")
-
-
-def carry_rules(rules):
-    """save_rules for carry_over: a rules file that doesn't read is said, not saved over."""
-    try:
-        save_rules(rules)
         return True
+    return False
+
+
+def carry_rules(change):
+    """edit_rules for carry_over: True when change changed the rules and they were saved; a
+    rules file that doesn't read is said, not saved over."""
+    try:
+        return bool(edit_rules(change))
     except (OSError, ft_store.StoreError) as e:
         print(f"voice: {e}", file=sys.stderr)
         return False

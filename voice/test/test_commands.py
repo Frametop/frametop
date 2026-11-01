@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import voice_commands as vc  # noqa: E402
@@ -173,12 +174,29 @@ class Settings(unittest.TestCase):
         self.vs.RULES_PATH = Path(self.tmp.name) / "frametop-input.json"
         self.vs.RULES_PATH.write_text("[]")
         with contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertFalse(self.vs.carry_rules({"key_bindings": dict(self.vs.VOICE_KEY_BINDINGS)}))
+            self.assertFalse(self.vs.carry_rules(lambda rules: rules.update(key_bindings={"97": "dictate"}) or True))
         self.assertIn("won't save over it", err.getvalue())
         self.assertEqual(self.vs.RULES_PATH.read_text(), "[]")
         self.vs.RULES_PATH.write_text("{}")
-        self.assertTrue(self.vs.carry_rules({"key_bindings": {"97": "dictate"}}))
+        self.assertTrue(self.vs.carry_rules(lambda rules: rules.update(key_bindings={"97": "dictate"}) or True))
         self.assertEqual(json.loads(self.vs.RULES_PATH.read_text()), {"key_bindings": {"97": "dictate"}})
+
+    def test_carry_over_reads_the_rules_under_their_lock(self):
+        """The rules are read inside the lock, so an edit saved just before is kept, and a
+        change that finds nothing to do writes nothing."""
+        self.vs.RULES_PATH = Path(self.tmp.name) / "frametop-input.json"
+        self.vs.FRAME_VOICE_PATH = Path(self.tmp.name) / "no-frame-voice.json"
+        self.vs.RULES_PATH.write_text('{"key_bindings": {"125": "steam_menu"}, "pause_auto": false}')
+        seen = []
+        real = self.vs.ft_store.load_json_strict
+        with mock.patch.object(self.vs.ft_store, "load_json_strict",
+                               lambda *a: seen.append(self.vs.ft_store._held.paths.copy()) or real(*a)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.vs.carry_over()
+            self.vs.carry_over()   # dictation has its key now: nothing to write
+        self.assertEqual(seen, [{os.path.realpath(self.vs.RULES_PATH)}] * 2)
+        self.assertEqual(json.loads(self.vs.RULES_PATH.read_text()),
+                         {"key_bindings": {"125": "steam_menu", **self.vs.VOICE_KEY_BINDINGS}, "pause_auto": False})
 
     def test_defaults(self):
         data = self.vs.load()

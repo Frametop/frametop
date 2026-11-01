@@ -21,4 +21,4 @@ exec "$here/../../scripts/in-box" env PATH="/opt/frametop/venv/bin:/opt/frametop
   WAYLAND_DISPLAY="$wl" DISPLAY="${DISPLAY:-}" \
   XAUTHORITY="${XAUTHORITY:-}" DBUS_SESSION_BUS_ADDRESS="$session_bus" \
   QT_QPA_PLATFORM="wayland;xcb" \
-  PYTHONPATH="$tree${PYTHONPATH:+:$PYTHONPATH}" python3 -m hands.rec.ft_handrec "$@"
+  PYTHONPATH="$tree${PYTHONPATH:+:$PYTHONPATH}" python3 -P -m hands.rec.ft_handrec "$@"

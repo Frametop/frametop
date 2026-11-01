@@ -682,7 +682,7 @@ class RecorderBackend(QObject):
         return os.environ.get(self.hub.ALLOW_ENV) == "1"
 
     def _hub_argv(self, *args):
-        return [sys.executable, "-m", self.HUB_MODULE, "--base", self.store.base, *args]
+        return [sys.executable, "-P", "-m", self.HUB_MODULE, "--base", self.store.base, *args]
 
     # The login: hub.py whoami in a child process (it asks huggingface.co)
     @Property("QVariantMap", notify=loginChanged)

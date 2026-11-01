@@ -96,7 +96,7 @@ TEXT = ["POINTER_GAZE_DOT", "HANDS_NEAR", "POINTER_DESK_MODEL", "POINTER_GAZE_MO
 
 SECTIONS = ["HeadsetOff", "GazeAwake", "RelayCommands", "ReadFrame", "ClaimAndTouch", "OverlaysAndRole",
             "LastUsedWins", "RecenterAndGaze", "Handoff", "NearClaims", "DeviceAndKeyPresses", "ReadHands",
-            "Gestures", "RayDrive", "HeadFollow", "SlowWorkAndPose", "HeldPresses", "Events", "Idle"]
+            "Gestures", "RayDrive", "HeadFollow", "RefreshOverlays", "PosePointer", "HeldPresses", "Events", "Idle"]
 # Frame field -> the section that sets it each tick.
 SETS = {"all": "ReadFrame", "hmdRaw": "ReadFrame", "tnow": "ReadFrame", "eye": "ReadFrame",
         "hg": "ReadHands", "handOk": "ReadHands", "rayMode": "RayDrive"}
@@ -115,14 +115,24 @@ def settings():
             for k, d, lo, hi, on in pat.findall(SRC)]
 
 
-def helpers_reading(field):
-    """The Pointer member functions that read fr.<field>, directly or through another one."""
+def helpers():
+    """Pointer's member functions other than Tick and its sections: name -> body. The in-class
+    ones (Tick's old lambdas) and the steps defined after the struct (a section's parts)."""
     struct = body("struct Pointer {")
     funcs = {}
     for m in re.finditer(r"^    auto (\w+)\(.*$", struct, re.M):
         end = struct.find("\n    }", m.start())
         one = m.group(0).rstrip().endswith("}")
         funcs[m.group(1)] = m.group(0) if one else struct[m.start():end]
+    for m in re.finditer(r"^[\w:<>]+ Pointer::(\w+)\(.*\{$", SRC, re.M):
+        if m.group(1) not in SECTIONS and m.group(1) != "Tick":
+            funcs[m.group(1)] = SRC[m.start():SRC.index("\n}", m.start())]
+    return funcs
+
+
+def helpers_reading(field):
+    """The Pointer member functions that read fr.<field>, directly or through another one."""
+    funcs = helpers()
     reads = {n for n, b in funcs.items() if re.search(rf"\bfr\.{field}\b", b)}
     while True:
         more = {n for n, b in funcs.items() if n not in reads and any(re.search(rf"(?<![\w.]){r}\(", b) for r in reads)}
@@ -169,7 +179,15 @@ class PointerShape(unittest.TestCase):
                 self.assertNotRegex(text, rf"\bfr\.{field}\b", f"{s} reads fr.{field}")
                 for h in readers:
                     self.assertNotRegex(text, rf"(?<![\w.]){h}\(", f"{s} calls {h}, which reads fr.{field}")
-        self.assertEqual(len(re.findall(r"\bfr\.\w+ =[^=]", body("struct Pointer {"))), 0)  # helpers only read
+        for name, text in helpers().items():  # helpers and steps only read it
+            self.assertNotRegex(text, r"\bfr\.\w+(\[[^\]]*\])? =[^=]|Read\(fr\.", name)
+
+    def test_the_steps_are_found(self):
+        steps = helpers()
+        for name in ("HandFrame", "GestureEdges", "SteerHolds", "AimAndPose", "FindTarget", "PlaceDots"):
+            self.assertIn(name, steps)
+        self.assertIn("AimAndPose", helpers_reading("rayMode"))
+        self.assertIn("HandFrame", helpers_reading("hg"))
 
 
 if __name__ == "__main__":

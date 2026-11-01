@@ -24,15 +24,16 @@ starts at DEE-298. The rest of DEE-303 (its open list below) is now its own tick
 | 12 | DEE-312 | ed4efd1, c340d33, d2edd33 (note) |
 | 13 | DEE-298 | 3005442, a3d58c8 (note) |
 | 14 | DEE-313 | 5b9c10b, 237d493, a1f3d6c, 26c16e3, 278c53e, 4146400, 4a456cb, 2bff435, 2877e21 (note) |
-| 15 | DEE-314 | 09667a7, cdf9291, 2129cc6, f73dad7, then this update |
+| 15 | DEE-314 | 09667a7, cdf9291, 2129cc6, f73dad7, bd73091 (note), 2a9898a (review fixes) |
+| 16 | DEE-315 | 0a450b5, 2ca1f2e, 9fb2aa4, then this update |
 
 What's left, in order:
 
-1. DEE-315 and DEE-316
+1. DEE-316
 2. DEE-318
 3. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
 
-DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313 and DEE-314 are done (steps 7 to 15). DEE-303 part 1 is done (step
+DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314 and DEE-315 are done (steps 7 to 16). DEE-303 part 1 is done (step
 10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
@@ -592,28 +593,82 @@ Personal setup out of the product.
 
 - Tests and ft_layout's example use 192.0.2.x (documentation range) for addresses; Remote
   Displays' Address hint keeps 192.168.1.20 (a generic example, not a real machine).
-- `.frame-job` is gitignored; `gaze/tracker/.frame-job.example` keeps the settings; AGENTS.md
+- `.gitignore` lists `.frame-job` (no effect on `gaze/tracker/.frame-job` until it's untracked);
+  `gaze/tracker/.frame-job.example` keeps the settings; AGENTS.md
   and docs/charts/README.md say to run the command after `--` without frame-job.
 - TLA+ models: `docs/charts/fake-worn-guard/` and `docs/charts/remote-streams/` (moved from the
   two skills' `model/`); the skills' `scripts/check` read them there. `test_verify_skill.py`
   skips without `.claude/`.
-- DEE refs: gone from product code, docs and tests. Kept as the record: this folder, the
-  findings tables in `docs/charts/`, and `.claude/`.
+- DEE refs: gone from product code, docs and tests. Kept as the record: this folder,
+  `docs/charts/` (the findings tables, and a few ids in the models and charts), and `.claude/`.
 
 Open:
 
 - Daenon: `git rm --cached gaze/tracker/.frame-job` to stop tracking it (agents can't run it).
-- No reviewer ran for DEE-314 (context budget); worth one read of f73dad7's 129-file sweep.
+- The review ran with DEE-315 (one Opus reader, 12 findings, none in behaviour). Fixed in
+  2a9898a: broken comment lines in input-relay.py, install.sh and keys-test.py; logfile.h's
+  trackwatch wording; gaze/README.md naming the tracked `.frame-job` (the doc check would fail
+  once it's untracked); AGENTS.md's "gitignored"; three small wordings. Left: long lines in
+  input-relay.py's docstring and rules-migrate-test.py (no limit enforced); personal host
+  names in testbench tests (`Deej-5090`, `oma7`; only addresses were in scope); the Address hint
+  above.
 - testbench/ recommendation: keep it in the repo for now. It's dev-only (not in the image,
   `.dockerignore`), its tests run in `just test`, and the verify skills and AGENTS.md use it in
   place. Splitting it means get.sh, which full-clones, stops carrying it: a separate repo (or a
   submodule the dev setup fetches), `test-testbench` fetching it or skipping, and the skills
   pointing at its new path. Daenon decides.
 
+### From DEE-315
+
+Stop the repo growing. Rewriting history is out of scope.
+
+- The hand models' data (`screens/handasset.cpp`, about 1 MB; the ticket's `handasset.h` before
+  DEE-304 split it) is made by the build: `screens/build.sh` and test-c run
+  `screens/tools/hand-asset.py --cpp build/.../handasset.cpp` and compile that. The 1 KB header
+  stays as source, checked by `--check`, which also checks the tracked `.cpp` while it's there.
+  `.gitignore` lists the `.cpp` (no effect while tracked).
+- `get.sh` clones with `--single-branch --filter=blob:none`, tries again without `--filter`
+  when git refuses it (and never over a folder a failed clone left), and an update fetches the
+  wanted branch by name, so switching versions still works. `scripts/tests/test_get.py` tests it
+  with a stub git (7 tests, in test-python). The script gained uninstall.sh's source guard.
+
+LFS or release assets, for the tour clips (`tour/clips/*.webp`, 5.8 MB, one commit) and the
+charts' SVG and PNG (1.5 MB, 16 files, 7 commits). Recommendation: release assets, and only
+when they next change. Not LFS.
+
+- With the filtered clone, a new install downloads only the current files, so the old copies
+  cost nothing to users now. What's left is the remote's own growth, which comes from re-cutting
+  clips or re-rendering charts. Moving them is only worth it then.
+- LFS needs git-lfs on every clone (SteamOS doesn't ship it, so get.sh, the dev container and
+  CI's checkout (`lfs: true`, for the image's `COPY .`) would all need it), and GitHub's LFS
+  storage and bandwidth quota on Frametop/frametop. Every install would spend that bandwidth.
+- Release assets: a pinned file on a release (or the Hugging Face models repo), fetched with a
+  sha256 check the way `hands/models.sh` fetches the hand student. Clips: `tour/install.sh` (or
+  install.sh) fetches them into `tour/clips/`, the image build does the same, and the clips'
+  README keeps the recipe. Charts: the docs link the release's SVGs, or keep only the `.mmd`
+  (GitHub draws Mermaid in Markdown) and drop the PNG previews.
+- What stays in the repo either way: the `.mmd`, `.tla` and `.cfg` sources, the clips' README,
+  `screens/assets/hands/*.glb` (the build's input now), and anything the install reads that has
+  no pinned download.
+- Not done: the build can't re-render the charts. There's no renderer in the repo (they were
+  drawn outside it), and mermaid-cli would add Node and a headless Chromium to the dev container.
+- About as big, for later: `hands/models/ncnn/*` (5.9 MB, one commit) and
+  `hands/rec/poses/contact-sheet.png` (two versions in the history, 1.9 MB).
+
+Open:
+
+- Daenon: `git rm --cached screens/handasset.cpp` (then delete the local copy, or `git rm` it
+  outright) once this lands. Nothing reads it after 0a450b5.
+- Daenon: the LFS or release-assets call above. Nothing on the remote changed.
+
 ## Device checks still to do
 
 Each needs an install and the headset:
 
+- After DEE-315: a full build (`screens/build.sh`, and the image's) makes ft-handview with the
+  generated `build/handasset.cpp`, and the hands look as before. `get.sh` for real: a new
+  `--experimental --clone-only --dir` clone, then a switch to `--stable` in it. Agents never
+  run get.sh.
 - After DEE-313: `uninstall.sh --dry-run` on the headset lists only Frametop's menu entries
   and names the three added paths; Input Settings' Gaze page and pause gesture after a
   fast-install. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`. Agents never run uninstall.sh.

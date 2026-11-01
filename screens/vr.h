@@ -81,6 +81,10 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data);
 // for the input relay's "pad" (a remote display's).
 void ft_vr_gamepad_target(int screen);
 int ft_vr_gamepad_screen(void);
+// The panel the 3D mouse's laser is on, when its wheel can scroll there directly (the input
+// relay's "wheel", not SteamVR's joystick scrolling): it shows, nothing's paused, and nothing
+// drags it. -1 when not.
+int ft_vr_mouse_screen(void);
 // A command from the control socket (@ft_screens); writes the reply (see vr.cpp).
 void ft_vr_command(const char *command, char *reply, int reply_size);
 

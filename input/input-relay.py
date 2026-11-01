@@ -119,8 +119,9 @@ Back) goes there too, and ft-screens gives it the screen the pointer is on, not 
 typing goes to (it releases the button itself when the pointer leaves the screens, they
 hide, or Frametop pauses). Other buttons and keys from KEY_OK up don't go there.
 Typing goes to the panel clicked last, and ft-screens says which ("keyboard
-desktop|steam SHOWN" on the control socket, every second; SHOWN 1|0, whether the screens
-show). While it's the desktop,
+desktop|steam SHOWN PAUSED WHEEL" on the control socket, every second; SHOWN 1|0, whether the
+screens show; PAUSED 1|0, its pause; WHEEL 1|0, whether the 3D mouse's laser is on a panel, so
+its wheel goes to ft-screens as "wheel N" and not through SteamVR's joystick). While it's the desktop,
 pass-through keyboards are grabbed, so gamescope, which reads every keyboard itself,
 doesn't type them into its focused app too. Without word from ft-screens for 3 seconds
 they're released.
@@ -784,6 +785,9 @@ class Pointer:
         self.move_at = 0.0  # motion last went to the helper then
         self.scroll_until = None  # the joystick push ends then
         self.scroll_direction = 0
+        # Scrolls notches on the panel the laser is on and says True, or says False: the joystick
+        # then. PointerLease sets it (ft-screens' "keyboard", its fifth word).
+        self.wheel_to = lambda notches: False
         self.claim_at = None  # when to press the claim button
         self.claim_release = None
         self.system_at = None  # dashboard toggle: when to press the virtual system button
@@ -948,8 +952,11 @@ class Pointer:
             log(f"sensitivity {self.sensitivity:.4f} deg/count")
 
     def scroll(self, notches, now):
-        """Deflect the joystick for SCROLL_STEP per notch (positive: up). A notch in the same
+        """Scroll by notches (positive: up). On a Frametop panel, ft-screens takes them directly
+        (wheel_to). Elsewhere, deflect the joystick for SCROLL_STEP per notch: a notch in the same
         direction adds its time to the push under way; the other direction starts again."""
+        if self.wheel_to(notches):
+            return
         direction = 1 if notches > 0 else -1
         if self.scroll_until is None or direction != self.scroll_direction:
             self.send(f"scroll 0 {direction}", droppable=True)
@@ -1144,11 +1151,14 @@ class PointerLease:
         self.conf = None
         self.current = None
         self.holding = False
+        # Each Pointer's wheel_to (Pointer.scroll): the relay's, which sends notches to ft-screens.
+        self.wheel_to = lambda notches: False
 
     def configure(self, on, sensitivity, idle, wake_counts, paused):
         """frametop.conf's pointer settings (pointer_settings), put in place."""
         if on:
             p = self.conf or Pointer(0.03, 30)
+            p.wheel_to = self.wheel_to
             p.sensitivity, p.idle, p.wake_counts = sensitivity, idle, wake_counts
             self.conf = p
             log(f"pointer mode: {p.sensitivity} deg/count, idle {p.idle} s, wake {p.wake_counts} counts")
@@ -1262,16 +1272,18 @@ class Relay:
         # every second); typing_applied: the grabs match that as of the last apply_roles().
         # vr_capture_until: every controller button is taken until then (the settings app capturing one).
         # shown_until: ft-screens shows the desktop's screens until then (it says so with "keyboard").
+        # wheel_until: the 3D mouse's wheel goes to ft-screens until then (the same, its fifth word).
         self.rules = {}
         self.desktop_until, self.typing_applied = 0.0, None
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
-        self.calpanel_until, self.shown_until = 0.0, 0.0
+        self.calpanel_until, self.shown_until, self.wheel_until = 0.0, 0.0, 0.0
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
         # ft-textinput's address while a desktop text field is focused (its "textfield 1"), for the
         # characters the desktop's layout has no key for, until text_input_until; None without one.
         self.text_input, self.text_input_until = None, 0.0
         self.last_typing = 0.0  # the helper was last told of a key then (see "typing" at the top)
         self.lease = PointerLease()
+        self.lease.wheel_to = self.wheel_to
         self.held = HeldKeys()
         self.typing = Typing()
         self.kb = FullKeyboardLink()
@@ -1380,6 +1392,17 @@ class Relay:
             self.screens_sock.sendto(f"vrkeyboard {command}".encode(), SCREENS)
         except OSError:
             pass  # ft-screens not running
+
+    def wheel_to(self, notches):
+        """The 3D mouse's wheel to ft-screens, while its laser is on a panel (Pointer.scroll):
+        every notch, at any speed, where SteamVR's joystick scrolls 20 steps a second at most."""
+        if time.monotonic() >= self.wheel_until:
+            return False
+        try:
+            self.screens_sock.sendto(f"wheel {notches}".encode(), SCREENS)
+        except OSError:
+            return False  # ft-screens not running, or behind: the joystick then
+        return True
 
     def text_field(self, focused):
         """A text field on the desktop gained or lost keyboard focus (the input method)."""
@@ -2052,11 +2075,13 @@ class Relay:
         the sender's address (empty for an unbound one); pid and uid, the sender's, from the kernel."""
         if cmd == "keyboard":
             # From ft-screens (unbound, no reply): where typing goes, repeated every second.
-            # "keyboard desktop|steam 1|0 1|0": the third word, whether the screens show;
-            # the fourth, whether it's paused (an older ft-screens leaves it out).
+            # "keyboard desktop|steam 1|0 1|0 1|0": the third word, whether the screens show;
+            # the fourth, whether it's paused, the fifth whether the 3D mouse's laser is on a panel
+            # so ft-screens takes its wheel (an older ft-screens leaves them out).
             desktop = len(words) > 1 and words[1] == "desktop" and not self.pause.paused
             self.desktop_until = now + 3.0 if desktop else 0.0
             self.shown_until = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
+            self.wheel_until = now + 3.0 if len(words) > 4 and words[4] == "1" else 0.0
             if uid == os.getuid():
                 self.pause.screens_seen(pid)  # a desktop started while paused hides too
                 if len(words) > 3 and words[3] in ("0", "1"):

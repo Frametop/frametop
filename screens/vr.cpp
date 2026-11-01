@@ -5108,6 +5108,17 @@ void ft_vr_gamepad_target(int screen) {
 
 int ft_vr_gamepad_screen(void) { return g_vr ? g_pill.pad : -1; }
 
+// The panel ft_pointer's laser went on last (its content or a popup), -1 after it left. Set in
+// ft_vr_poll from the panels' events.
+int g_mouseScreen = -1;
+
+int ft_vr_mouse_screen(void) {
+    if (!g_vr || g_paused || g_mouseScreen < 0) return -1;
+    const auto it = g_screens.find(g_mouseScreen);
+    if (it == g_screens.end() || !it->second.visible || it->second.drag != Drag::None || it->second.titleCarry) return -1;
+    return g_mouseScreen;
+}
+
 bool ft_vr_screen_visible(int index) {
     const auto it = g_screens.find(index);
     return !g_vr || (it != g_screens.end() && it->second.visible);
@@ -5447,6 +5458,14 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             if (ev.eventType != vr::VREvent_FocusLeave) {
                 s.inputMs = NowMs();
                 if (FromLaser(ev)) s.laserMs = NowMs(), s.laserDevice = ev.trackedDeviceIndex;
+            }
+            // Where the 3D mouse's wheel goes (ft_vr_mouse_screen). Another controller's laser
+            // leaving doesn't take it away; a leave from no device does.
+            const int ours = OurPointer(ev.trackedDeviceIndex);
+            if (ev.eventType == vr::VREvent_FocusLeave) {
+                if (ours >= 0 && g_mouseScreen == index) g_mouseScreen = -1;
+            } else if (ours > 0) {
+                g_mouseScreen = index;
             }
             if (ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_ScrollDiscrete ||
                 ev.eventType == vr::VREvent_ScrollSmooth || g_press.buttons)

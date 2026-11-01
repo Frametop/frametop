@@ -165,6 +165,7 @@ struct server {
     bool keys_desktop;    // ...and the screens are showing: typing goes to the desktop
     bool keys_shown;      // the relay was told the screens show (see keys_update)
     bool keys_paused;     // ...and that we're paused ("pause on" from it)
+    bool keys_wheel;      // ...and that the 3D mouse's wheel comes here (see keys_update)
     int key_remote;       // the last click was on this remote screen (index): typing goes to it; -1 not
     // Frunner's search (frunner/ft-frunner) has the typing while it's open: "frunner on",
     // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
@@ -681,16 +682,20 @@ static void keys_update(struct server *s) {
     // was full) leaves us out of step until it hears this and says it again.
     const bool paused = ft_vr_paused();
     const uint32_t t = now_ms();
-    if (desktop == s->keys_desktop && shown == s->keys_shown && paused == s->keys_paused &&
+    // The fifth word: the 3D mouse's laser is on a panel, so its wheel comes here ("wheel").
+    const bool wheel = ft_vr_mouse_screen() >= 0;
+    if (desktop == s->keys_desktop && shown == s->keys_shown && paused == s->keys_paused && wheel == s->keys_wheel &&
         t - s->relay_sent < 1000)
         return;
     if (desktop != s->keys_desktop) wlr_log(WLR_INFO, "typing goes to %s", desktop ? "the desktop" : "Steam");
     s->keys_desktop = desktop;
     s->keys_shown = shown;
     s->keys_paused = paused;
+    s->keys_wheel = wheel;
     s->relay_sent = t;
-    char msg[32];
-    snprintf(msg, sizeof msg, "keyboard %s %d %d", desktop ? "desktop" : "steam", shown ? 1 : 0, paused ? 1 : 0);
+    char msg[40];
+    snprintf(msg, sizeof msg, "keyboard %s %d %d %d", desktop ? "desktop" : "steam", shown ? 1 : 0, paused ? 1 : 0,
+             wheel ? 1 : 0);
     relay_send(s, msg);
 }
 
@@ -1108,6 +1113,16 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             // Gamepad mode is for gets it (vr.cpp, "the gamepad pill"). ft-stream drops a blurred pad.
             const int pad = ft_vr_gamepad_screen();
             if (pad >= 0 && ft_remote_is(pad)) ft_remote_pad(pad, buf);
+            len = sizeof from;
+            continue;
+        } else if (sscanf(buf, "wheel %d", &value) == 1) {
+            // The 3D mouse's wheel, from the input relay while we said its laser is on a panel
+            // (keys_update): notches, positive up. No reply. Scrolled as SteamVR's would be.
+            const int screen = ft_vr_mouse_screen();
+            if (screen >= 0 && value) {
+                struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dy = -value};
+                handle_vr_event(&e, s);
+            }
             len = sizeof from;
             continue;
         } else if (sscanf(buf, "key %u %d", &code, &value) == 2) {

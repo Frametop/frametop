@@ -14,6 +14,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 entry='~/.local/share/applications/frametop-eyerec.desktop'
 
 case ${1:-install} in
@@ -28,8 +29,7 @@ case ${1:-install} in
       "$root/gaze/tracker/build.sh"
       echo "== 3/3 the menu entry"
     fi
-    fill_template "$root/gaze/rec/ft-eyerec.desktop" |
-      on_frame "mkdir -p ~/.local/share/applications && cat > $entry"
+    install_menu_entry "$root/gaze/rec/ft-eyerec.desktop" frametop-eyerec.desktop
     echo
     echo "Installed. On Frametop's desktop, open \"Frametop Eye Recorder\" from the app menu."
     echo "Recordings go to ~/.local/share/frametop/eyes/contrib."

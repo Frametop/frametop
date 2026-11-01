@@ -15,6 +15,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 entry='~/.local/share/applications/frametop-handrec.desktop'
 
 case ${1:-install} in
@@ -32,8 +33,7 @@ case ${1:-install} in
     fi
     "$root/hands/run.sh" caps
     "$root/scripts/conf-migrate.sh"   # HANDS_SWAP_SIDES=0, the old default, becomes auto
-    fill_template "$root/hands/rec/ft-handrec.desktop" |
-      on_frame "mkdir -p ~/.local/share/applications && cat > $entry"
+    install_menu_entry "$root/hands/rec/ft-handrec.desktop" frametop-handrec.desktop
     echo
     echo "Installed. On Frametop's desktop, open \"Frametop Hand Recorder\" from the app menu."
     echo "Recordings go to ~/.local/share/frametop/hands/contrib."

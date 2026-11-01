@@ -9,13 +9,14 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
+. "$root/scripts/install-lib.sh"
 "$root/scripts/sync.sh" >/dev/null
 apps=.local/share/applications
 shortcuts=.config/frametop/kglobalshortcutsrc
 case ${1:-install} in
   install)
     for f in ft-display-settings ft-layout-reset ft-screens-toggle; do
-      fill_template "$root/display-settings/$f.desktop" | on_frame "mkdir -p ~/$apps && cat > ~/$apps/$f.desktop"
+      install_menu_entry "$root/display-settings/$f.desktop"
     done
     on_frame "chmod +x display-settings/ft-display-settings layout/ft-layout layout/ft_layout.py
 mkdir -p ~/.config/frametop

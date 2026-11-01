@@ -1209,6 +1209,8 @@ struct Pointer {
     DotOverlay cursorDot, markerDot;  // the setters for `cursor` and `marker` (see "Unchanged frames" at the top)
     int in = -1;
     int out = -1;
+    sockaddr_un sender{};  // the relay command being handled came from here (reply)
+    socklen_t senderLen = 0;
     // Frame controller buttons (vrbuttons.h). The build puts the binary in pointer/helper/build.
     ControllerButtons controllerButtons;
     OverlayList overlays;
@@ -1455,7 +1457,6 @@ struct Pointer {
                 else if (m.Load(path)) deskModel = std::move(m), std::printf("desk model: %s\n", path.c_str());
                 else if (same) std::printf("desk model: %s: %s (kept the one loaded)\n", path.c_str(), m.error.c_str());
                 else deskModel = desk::Model{}, std::printf("desk model: %s: %s (off)\n", path.c_str(), m.error.c_str());
-                std::fflush(stdout);
             }
         }
         rayOn = ConfDouble(conf, "POINTER_HAND_RAY", 1) != 0;
@@ -1530,7 +1531,6 @@ struct Pointer {
         SendTo(out, FT_SOCK_POINTER, "hide");
         rayWoke = false;
         std::printf("%s: pointer released\n", why);
-        std::fflush(stdout);
     }
     // The laser's owner is a real controller whose side pressed a button within 2 s: a ray that just
     // appeared leaves it alone (see "Hand ray" at the top).
@@ -1586,7 +1586,6 @@ struct Pointer {
             if (c.to >= 0) rayEnter(c.to);
             else rayLeave(c.off);
         }
-        if (!rayOwner.log.empty() || !rayOwner.changes.empty()) std::fflush(stdout);
         rayOwner.log.clear(), rayOwner.changes.clear();
     }
     auto pressLeft() {
@@ -1609,7 +1608,6 @@ struct Pointer {
             SendTo(out, FT_SOCK_GAZED, msg);
             lessonSaid = off <= gazeNudgeMax ? "a lesson" : "the quick check";
             if (debug) std::printf("gaze %s (nudged %.2f deg, off %.2f)\n", msg, nudgeMoved, off);
-            if (debug) std::fflush(stdout);
         }
         nudging = confirmLesson = false;
         // A click on nothing: maybe on an overlay that came up since the list was read.
@@ -1661,7 +1659,6 @@ struct Pointer {
         chordDrag = false;
         if (leftHeld) releaseLeft();
         if (debug) std::printf("mouse drag dropped\n");
-        if (debug) std::fflush(stdout);
     }
     // The mouse's left press takes the trigger and the laser: a touch (one that holds the trigger,
     // or could press it while the mouse holds) or a ray pinch ends first, so the two never share the
@@ -1671,7 +1668,6 @@ struct Pointer {
         if (touch.side >= 0) {
             if (touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
             std::printf("touch %s: ended by a mouse click\n", touch.side ? "right" : "left");
-            std::fflush(stdout);
             touch = Touch{};
             touch.endAt = Clock::now();
         }
@@ -1730,7 +1726,6 @@ struct Pointer {
                 chordDrag = gazeBack = true;
                 pressLeft();
                 if (debug) std::printf("mouse drag began (right during left)\n");
-                if (debug) std::fflush(stdout);
                 return true;
             }
             if (canAim() && !leftHeld) {
@@ -1819,7 +1814,6 @@ struct Pointer {
         const std::string err = findPanel(key, p, eye);
         if (!err.empty()) {
             std::printf("grabprobe: %s\n", err.c_str());
-            std::fflush(stdout);
             return;
         }
         borrow();
@@ -1846,7 +1840,6 @@ struct Pointer {
             }
             std::printf("\n");
         }
-        std::fflush(stdout);
         giveBack();
     }
     // Carry a floating panel so its centre lands on `target` with frame `bt` (see
@@ -1909,7 +1902,6 @@ struct Pointer {
         std::snprintf(msg, sizeof msg, "ok %s off by %.1f cm, %.1f deg after %d move%s", key, cm, deg, moves,
                       moves == 1 ? "" : "s");
         std::printf("place: %s\n", msg);
-        std::fflush(stdout);
         return msg;
     }
     // The mouse used (a move, a press, a scroll step): the pointer's last-used-wins, and typing's desk.
@@ -1973,31 +1965,27 @@ struct Pointer {
     }
     // A gaze pinch ended (see "Gaze pinch" at the top): its log line now, or a click's once it goes out.
     auto gazePinchEnds(bool lost) {
-        const auto tnow = fr.tnow;
         if (!lost && !hold.pressed && aimHeld) {
             gazeClick = hold.gaze, gazeClickSide = hold.side;
-            if (!hold.gaze.Right()) tapArm = {hold.side, secsOf(tnow)};   // the right-drag's first tap (gazehand.h)
+            if (!hold.gaze.Right()) tapArm = {hold.side, secsOf(fr.tnow)};   // the right-drag's first tap (gazehand.h)
         } else {
             const std::string why = gazeEndWhy.empty() ? "the gaze calibration panel came up" : gazeEndWhy;
-            const std::string says = hold.gaze.Says(secsOf(tnow), lost, why, "", hold.gaze.ByChord() ? lessonSaid : "");
+            const std::string says = hold.gaze.Says(secsOf(fr.tnow), lost, why, "", hold.gaze.ByChord() ? lessonSaid : "");
             std::printf("%s %s: %s\n", hold.gaze.Right() && !hold.gaze.ByTap() ? "middle pinch" : "pinch", hold.side ? "right" : "left",
                         says.c_str());
             PinchEvent(hold.side, hold.gaze.Right() && !hold.gaze.ByTap() ? 2 : 0, says);
-            std::fflush(stdout);
         }
         gazeEndWhy.clear();
     }
     auto endHold(bool lost) {
-        const auto tnow = fr.tnow;
         if (hold.gazeScroll) {   // a three-finger scroll: the stick back, no click (gazehand.h)
             SendTo(out, FT_SOCK_POINTER, "scroll 0 0");
             aimHeld = aimHand = false;
             if (gazeOn) gazeOwns = true, nudging = false;
             std::printf("three-finger pinch %s: scrolled at the gaze on %s (stick up to %.2f, held %.2f s)%s\n",
                         hold.side ? "right" : "left", lastHit.empty() ? "nothing" : lastHit.c_str(), hold.scrollMax,
-                        secsOf(tnow) - hold.gaze.Began(),
+                        secsOf(fr.tnow) - hold.gaze.Began(),
                         !lost ? "" : gazeEndWhy.empty() ? ": the hand was lost" : (": " + gazeEndWhy).c_str());
-            std::fflush(stdout);
             gazeEndWhy.clear();
             hold = {};
             return;
@@ -2020,13 +2008,11 @@ struct Pointer {
                                           : hold.src == Src::Head ? (hold.right ? "key right" : "key left")
                                           : hold.grip ? "gaze drag" : "gaze precision",
                         lost ? "lost" : "released", hold.pressed ? "" : lost ? " (no click)" : " (click)");
-        if (debug) std::fflush(stdout);
         hold = {};
     }
     // The press, once a hold's source is set: a real press (dragging until the release), or
     // held back like gaze mode's mouse press (see the top): the click comes on the release.
     auto startHold(bool press) {
-        const auto tnow = fr.tnow;
         hold.startYaw = hold.lastYaw = yaw, hold.startPitch = hold.lastPitch = pitch;
         hold.pressed = press;
         if (press) {
@@ -2034,17 +2020,16 @@ struct Pointer {
             pressLeft();
         } else {
             gazeOwns = false;
-            nudging = gazeOn && haveHead && tnow - gz.at < std::chrono::milliseconds(200);
+            nudging = gazeOn && haveHead && fr.tnow - gz.at < std::chrono::milliseconds(200);
             nudgeRawHy = gz.rhy, nudgeRawHp = gz.rhp, nudgeHead = lastHead;
-            nudgeAt = aimSince = tnow, nudgeMoved = 0;
+            nudgeAt = aimSince = fr.tnow, nudgeMoved = 0;
             aimHeld = aimHand = true;
-            pulseAt = tnow;
+            pulseAt = fr.tnow;
         }
     }
     // The hold's source moved to (hy, hp): past the dead zone, the pointer follows at the gain,
     // from where it was when it got past.
     auto steer(double hy, double hp, double deadzone, double gain) {
-        const auto tnow = fr.tnow;
         const double dy = std::remainder(hy - hold.refYaw, 360.0), dp = hp - hold.refPitch;
         if (!hold.engaged) {
             if (std::hypot(dy, dp) <= deadzone) return;
@@ -2062,24 +2047,21 @@ struct Pointer {
         else if (!hold.pressed)
             nudgeMoved += std::hypot(std::remainder(yaw - hold.lastYaw, 360.0), pitch - hold.lastPitch);
         hold.lastYaw = yaw, hold.lastPitch = pitch;
-        lastMove = tnow;  // the dot shows while it moves (gaze mode)
+        lastMove = fr.tnow;  // the dot shows while it moves (gaze mode)
     }
     // One line per pinch (index or middle) in the log: what it did (clicked where), or why not.
     auto pinchLog(int side, int kind, const std::string &what) {
         std::printf("%s %s: %s\n", kind == 2 ? "middle pinch" : "pinch", side ? "right" : "left", what.c_str());
-        std::fflush(stdout);
         PinchEvent(side, kind, what);
     }
     // The chord's right button (see "Gaze pinch" at the top): to the driver as it changes, and the
     // pinch's log line once it's over.
     auto chordSend(int change) {
-        const auto tnow = fr.tnow;
-        if (change > 0) SendTo(out, FT_SOCK_POINTER, "btn b 1"), pulseAt = tnow;
+        if (change > 0) SendTo(out, FT_SOCK_POINTER, "btn b 1"), pulseAt = fr.tnow;
         else if (change < 0) SendTo(out, FT_SOCK_POINTER, "btn b 0");
     }
     auto chordOver(bool lost, const std::string &why) {
-        const auto tnow = fr.tnow;
-        pinchLog(chordSide, 0, chordBtn.Pressed() ? chordPinch.Says(secsOf(tnow), lost, why, "", "")
+        pinchLog(chordSide, 0, chordBtn.Pressed() ? chordPinch.Says(secsOf(fr.tnow), lost, why, "", "")
                                                  : "no right button: " + why);
         chordBtn.Reset();
         chordPinch = {};
@@ -2094,8 +2076,7 @@ struct Pointer {
     auto chordHolding(int s, int kind) { return chordBtn.On() && chordSide == s && kind == 0; }
     // A pinch held with no ray up (see "Hands" at the top); its log line says so.
     auto beginHold(int side, bool grip, const fh_pinch_t &g) {
-        const auto tnow = fr.tnow;
-        handUsed = tnow;
+        handUsed = fr.tnow;
         if (hold.src != Src::None) {
             // A grip takes over a pinch on the way to it (closing the hand passes through
             // one); otherwise one hold at a time.
@@ -2112,7 +2093,7 @@ struct Pointer {
             return;
         }
         if (!active) {
-            wake(tnow);  // the first gesture only wakes the pointer, like the first mouse move
+            wake(fr.tnow);  // the first gesture only wakes the pointer, like the first mouse move
             if (!grip) pinchLog(side, 0, "no ray up: it woke the pointer, no click");
             return;
         }
@@ -2137,7 +2118,6 @@ struct Pointer {
             pinchLog(side, 0, gazeOn ? "no ray up: held back at the gaze, clicks where the pointer is at the release"
                                      : "no ray up: a press where the pointer is, on " + (lastHit.empty() ? std::string("nothing") : lastHit));
         if (debug) std::printf("hand %s %s began\n", side ? "right" : "left", grip ? "grip" : "pinch");
-        if (debug) std::fflush(stdout);
     }
     // A ray hold (see "Hand ray" at the top): the pinch's press goes out once the laser claim
     // has landed; a middle pinch is a right click (a tap) or scrolling (held and moved).
@@ -2165,10 +2145,7 @@ struct Pointer {
     // the pinching hand). The aim is locked where the ray pointed just before the fingers began to
     // close (rayowner.h), and the dead zone counts from the ray now.
     auto beginRayHold(int side, int rs, int kind, const fh_pinch_t &g) {
-        const auto tnow = fr.tnow;
-        const fh_gestures_t &hg = fr.hg;
-        const bool handOk = fr.handOk;
-        handUsed = tnow;
+        handUsed = fr.tnow;
         if (hold.src != Src::None || leftHeld || aimHeld || clickPress || clickRelease || chordBtn.On()) {
             pinchLog(side, kind, "ignored (a press is already held)");
             return;
@@ -2179,7 +2156,7 @@ struct Pointer {
         ownerChanges(true);       // a pinch by the other hand takes the ray (rayEnter)
         Hold h;
         h.src = Src::Ray, h.side = side, h.raySlot = rs, h.rayKind = kind, h.pressed = false;
-        h.took = took, h.beganAt = tnow;
+        h.took = took, h.beganAt = fr.tnow;
         auto angles = [](const fhray::V3 &d, double &y, double &p) {
             const Vec3 n = Normalize({d.x, d.y, d.z});
             y = std::atan2(-n.x, -n.z) * 180 / M_PI;
@@ -2187,7 +2164,7 @@ struct Pointer {
         };
         angles(rays[rs].Current().dir, h.refYaw, h.refPitch);
         fhray::Ray lock;
-        if (rayAims[rs].Lock(double(g.begin_ns) / 1e9, handOk && hg.end_m > 0 ? hg.end_m : 0.035, lock, h.lockAge,
+        if (rayAims[rs].Lock(double(g.begin_ns) / 1e9, fr.handOk && fr.hg.end_m > 0 ? fr.hg.end_m : 0.035, lock, h.lockAge,
                              kind == 2 ? 1 : 0))
             angles(lock.dir, yaw, pitch);
         else
@@ -2197,28 +2174,26 @@ struct Pointer {
         // the laser: a pinch always claims it (if it isn't ours), and the press waits 30 ms for it
         rayInactive = false;
         const bool ours_ = laserOurs();
-        if (!ours_ && !claimPending && !claimHeld) claimPending = true, claimAt = tnow;
+        if (!ours_ && !claimPending && !claimHeld) claimPending = true, claimAt = fr.tnow;
         h.rayThree = rayScroll != 0 && threeFingers(side);   // a scroll, not a click (user, 2026-10-15)
         h.pendingPress = kind == 0 && !h.rayThree;
-        h.pressAt = tnow + std::chrono::milliseconds(ours_ ? 0 : 30 + (claimHeld ? 0 : 8));
+        h.pressAt = fr.tnow + std::chrono::milliseconds(ours_ ? 0 : 30 + (claimHeld ? 0 : 8));
         // The middle tip already near the thumb (within 5 cm): the press waits up to rayThreeWait for
         // it to join (a three-finger scroll, below). The thumb meets the index a tracker frame or two
         // (55 ms each) before the middle, and the press used to go out first: a click and a drag
         // instead of a scroll (user, 2026-10-19, 4 of 10 tries). The aim is locked, so the click
         // still lands where it pointed; a pinch with the middle away clicks at once.
         if (h.pendingPress && rayScroll != 0 && rayThreeWait > 0 && sideGap[side][1] >= 0 && sideGap[side][1] < 0.05)
-            h.pressAt = std::max(h.pressAt, tnow + std::chrono::microseconds(int64_t(rayThreeWait * 1e6)));
+            h.pressAt = std::max(h.pressAt, fr.tnow + std::chrono::microseconds(int64_t(rayThreeWait * 1e6)));
         hold = h;
-        rays[rs].Hold(true, secsOf(tnow));
+        rays[rs].Hold(true, secsOf(fr.tnow));
         if (debug)
             std::printf("ray %s %s began\n", rs ? "right" : "left", h.rayThree ? "three-finger pinch" : kind ? "middle pinch" : "pinch");
-        if (debug) std::fflush(stdout);
     }
     // What a ray pinch did, for its log line.
     auto rayPinchSays(const char *what) {
-        const auto tnow = fr.tnow;
         char b[256];
-        const double held = std::chrono::duration<double>(tnow - hold.beganAt).count();
+        const double held = std::chrono::duration<double>(fr.tnow - hold.beganAt).count();
         char aim[48] = "aim now";
         if (hold.lockAge >= 0) std::snprintf(aim, sizeof aim, "aim %.0f ms before", hold.lockAge * 1000);
         std::snprintf(b, sizeof b, "%s (%s ray%s, %s, held %.2f s)", what, hold.raySlot ? "right" : "left",
@@ -2227,10 +2202,9 @@ struct Pointer {
     }
     auto hitName(const std::string &k) { return k.empty() ? std::string("nothing") : k; }
     auto finishRayHold() {
-        const auto tnow = fr.tnow;
         const int rs = hold.raySlot;
         hold = {};
-        if (rs >= 0) rays[rs].Hold(false, secsOf(tnow));
+        if (rs >= 0) rays[rs].Hold(false, secsOf(fr.tnow));
     }
     // A ray pinch ended (lost: by losing the hand, a grip, or the ray; why says which).
     auto endRayHold(bool lost, const char *why) {
@@ -2264,7 +2238,7 @@ struct Pointer {
         const int r = raySlots.SideOf(g.hand_id);
         return r >= 0 ? r : s;
     }
-    auto canRay(int rs) { const auto tnow = fr.tnow; return rays[rs].CanShowForPinch(secsOf(tnow), rayGrace); }
+    auto canRay(int rs) { return rays[rs].CanShowForPinch(secsOf(fr.tnow), rayGrace); }
     // The chord (see "Gaze pinch" at the top): an index pinch by the other hand during a gaze pinch.
     auto chordable(int side, int kind) {
         return gazeChord && kind != 1 && hold.src == Src::Hand &&
@@ -2274,31 +2248,27 @@ struct Pointer {
     // held back becomes a real press (at the end of this frame, after its pose), and the right goes
     // down 30 ms after it.
     auto beginChord(int side, const fh_pinch_t &g, const Vec3 &origin) {
-        const auto tnow = fr.tnow;
         double hy, hp;
         if (!handAngles(g.begin_point, g.begin_ns, origin, hy, hp)) return;
         gazehand::Params gp;
         gp.dragGain = gripGain;
         chordSide = side, chordOrigin = origin, chordSteers = false;
-        chordPinch.BeginChord(gp, secsOf(tnow), yaw, pitch, hy, hp);
-        chordLeft = hold.gaze.Chord(secsOf(tnow));
-        chordBtn.Begin(secsOf(tnow), chordLeft);
+        chordPinch.BeginChord(gp, secsOf(fr.tnow), yaw, pitch, hy, hp);
+        chordLeft = hold.gaze.Chord(secsOf(fr.tnow));
+        chordBtn.Begin(secsOf(fr.tnow), chordLeft);
         if (debug) std::printf("hand %s pinch began: the chord's right button\n", side ? "right" : "left");
-        if (debug) std::fflush(stdout);
     }
     // A gaze pinch (see "Gaze pinch" at the top): kind 0 a pinch, 2 a middle pinch (the right button).
     // The press is held back at the gaze locked from just before the fingers began to close; the
     // other hand's index pinch during one is the chord's (beginChord).
     auto beginGazePinch(int side, int kind, const fh_pinch_t &g) {
-        const auto tnow = fr.tnow;
-        const Vec3 eye = fr.eye;
-        handUsed = tnow;
+        handUsed = fr.tnow;
         const bool chord = chordable(side, kind);
         gazehand::Situation sit;
         sit.busy = !chord && (hold.src != Src::None || leftHeld || aimHeld || clickPress || clickRelease || chordBtn.On());
         sit.active = active;  // (typing was checked before, for the chord's pinch too: typing.h, not gazehand's key guard)
         if (const char *why = gazehand::Refused(sit)) {
-            if (!sit.busy && !active) wake(tnow);  // the first gesture only wakes the pointer
+            if (!sit.busy && !active) wake(fr.tnow);  // the first gesture only wakes the pointer
             pinchLog(side, kind, why);
             return;
         }
@@ -2323,29 +2293,27 @@ struct Pointer {
             const Vec3 d = Rotate(gazeHead, Direction(gs.hy, gs.hp));
             yaw = std::atan2(-d.x, -d.z) * 180 / M_PI;
             pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
-            anchor = eye, anchored = true;
+            anchor = fr.eye, anchored = true;
         }
         hold = h;
         startHold(false);
         // the lesson's look is the locked one (ft-gazed finds it in what it sent)
         if (locked) nudging = true, nudgeRawHy = gs.rhy, nudgeRawHp = gs.rhp, nudgeHead = gazeHead;
-        hold.gaze.Begin(gp, secsOf(tnow), yaw, pitch, h.refYaw, h.refPitch, kind == 2, locked ? lockAge : -1);
+        hold.gaze.Begin(gp, secsOf(fr.tnow), yaw, pitch, h.refYaw, h.refPitch, kind == 2, locked ? lockAge : -1);
         if (gazeScroll != 0 && sideGap[side][0] >= 0 && sideGap[side][0] < gazeScrollGap && sideGap[side][1] >= 0 &&
             sideGap[side][1] < gazeScrollGap) {
             hold.gazeScroll = true;   // the thumb on both tips: a scroll (gazehand.h)
             hold.scrollRight = Normalize(Rotate(head, Vec3{1, 0, 0}));
             if (!rayRoom(g.begin_point, g.begin_ns, hold.beginPoint)) hold.gazeScroll = false;
-        } else if (kind == 0 && tapArm.Arms(side, secsOf(tnow), gazeRightDrag)) {
+        } else if (kind == 0 && tapArm.Arms(side, secsOf(fr.tnow), gazeRightDrag)) {
             hold.rightDrag = true;   // the other hand tapped just before: the right button, now (gazehand.h)
-            hold.gaze.PressNow(secsOf(tnow), secsOf(tnow) - tapArm.t);
+            hold.gaze.PressNow(secsOf(fr.tnow), secsOf(fr.tnow) - tapArm.t);
             rightDragPending = true;
             tapArm = {};
         }
         if (debug) std::printf("hand %s %s began at the gaze\n", side ? "right" : "left", kind ? "middle pinch" : "pinch");
-        if (debug) std::fflush(stdout);
     }
     auto startGesture(int s, int kind, const fh_pinch_t &g, bool ray) {
-        const auto tnow = fr.tnow;
         const int rs = rayFor(s, g);
         // (and still: a ray that went for good while ft-screens was asked isn't; a grip needs it up)
         ray = ray && (kind == 1 ? rays[rs].Shown() : canRay(rs));
@@ -2355,22 +2323,22 @@ struct Pointer {
             std::snprintf(why, sizeof why, "ignored (a closing hand: open %.2f, a fist under %.2f)", sideCurl[s],
                           rayParams.fistCurl);
             pinchLog(s, kind, why);
-        } else if (kind != 1 && pinchMaxSpeed > 0 && tnow - sideFastAt[s] < std::chrono::milliseconds(250)) {
+        } else if (kind != 1 && pinchMaxSpeed > 0 && fr.tnow - sideFastAt[s] < std::chrono::milliseconds(250)) {
             pinchLog(s, kind, "ignored (the hand was moving fast: a stroke or a wave, not a pinch)");
         } else if (gazeOn && gazeTwoHand && kind != 1 && hold.src == Src::Hand && hold.side != s && hold.gaze.On() &&
                    !hold.pressed && aimHeld && !hold.gazeScroll && !hold.rightDrag) {
             // the two-hand press: the held pinch presses where the pointer is (its nudge), and drags
             // as Meta+K with Meta+J held: the left button where the dot is now; the drag lasts while either
             // hand's pinch is held, and the one still pinching drags
-            handUsed = tnow;
-            hold.gaze.Chord(secsOf(tnow), false);   // (the left button alone: not "with the right button")
+            handUsed = fr.tnow;
+            hold.gaze.Chord(secsOf(fr.tnow), false);   // (the left button alone: not "with the right button")
             handPressPending = 1;
             hold.second = s, hold.secondKind = kind;
             pinchLog(s, kind, "the left button down where the other hand's pinch aims: a drag while either pinch holds");
         } else if (gazeOn && gazeTwoHand && kind != 1 && hold.src == Src::Hand && hold.side != s && hold.gaze.On() &&
                    hold.pressed && hold.second < 0 && !hold.gazeScroll) {
             // the other hand's pinch during a drag: it joins it (the drag lasts while either pinch holds)
-            handUsed = tnow;
+            handUsed = fr.tnow;
             hold.second = s, hold.secondKind = kind;
             pinchLog(s, kind, "joined the other hand's drag: it lasts while either pinch holds");
         } else if (chordable(s, kind)) {
@@ -2389,8 +2357,8 @@ struct Pointer {
             else if (debug) std::printf("hand %s grip ignored (the ray is up)\n", s ? "right" : "left");
         } else if (!pinchNoRay) {
             // no laser up: no press (POINTER_PINCH_NO_RAY); the first one wakes the pointer
-            handUsed = tnow;
-            if (!active) wake(tnow);
+            handUsed = fr.tnow;
+            if (!active) wake(fr.tnow);
             if (kind == 0) pinchLog(s, kind, "ignored (no ray up: bring the thumb to the index or middle tip to raise the laser)");
         } else {
             beginHold(s, kind == 1, g);
@@ -2409,39 +2377,26 @@ struct Pointer {
         }
     }
 
-    // Tick()'s sections, in their order.
-    void HeadsetOff();
-    void GazeAwake();
-    void RelayCommands();
-    void ReadFrame();
-    void ClaimAndTouch();
-    void OverlaysAndRole();
-    void LastUsedWins();
-    void RecenterAndGaze();
-    void Handoff();
-    void NearClaims();
-    void DeviceAndKeyPresses();
-    void ReadHands();
-    void Gestures();
-    void EndCancelledHolds();
-    void HandFrame();
-    void GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool screensNear);
-    void SteerHolds();
-    void StartPendingBegins();
-    void RayPress();
-    void EndStaleHolds();
-    void RayDrive();
-    void HeadFollow();
-    void RefreshOverlays();
-    void PosePointer();
-    void AimAndPose();
-    Hit nearest(Vec3 from, Vec3 d);
-    void FindTarget(bool dragging, const Vec3 &dir, Pass &t);
-    bool OnVrSettingsPage(const Vec3 &sight);
-    void PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet);
-    void HeldPresses();
+    // Tick()'s sections (in Tick, in their order), then the steps of RelayCommands (true: the command was
+    // the step's), Handoff, Gestures and PosePointer.
+    void HeadsetOff(), GazeAwake(), RelayCommands(), ReadFrame(), ClaimAndTouch(), OverlaysAndRole(), LastUsedWins(),
+        RecenterAndGaze(), Handoff(), NearClaims(), DeviceAndKeyPresses(), ReadHands(), Gestures(), RayDrive(),
+        HeadFollow(), RefreshOverlays(), PosePointer(), HeldPresses(), Idle();
     bool Events();
-    void Idle();
+    bool PointerInput(const char *buf), HandCommand(const char *buf), TouchCommand(const char *buf),
+        SettingCommand(const char *buf), PanelCommand(const char *buf);
+    void NoteMouseInput(const char *buf), ButtonCommand(const char *buf), reply(const std::string &msg);
+    std::vector<handoff::Controller> Controllers();
+    bool ArbitrateHands(), FingerAtOverlay(const hin::RoomHand &hand), mayPoint(int s, const bool typingSide[2]);
+    void TypingHands(bool newHands, bool live), DeskHands(const Vec3 &hp, const Vec3 &hf, typing::Hand th[2]),
+        SendTypingAndRays(const bool typingSide[2]), HandRays(bool newHands, bool live, const bool typingSide[2]),
+        PickRayOwner(const bool typingSide[2]);
+    void EndCancelledHolds(), HandFrame(), SteerHolds(), StartPendingBegins(), RayPress(), EndStaleHolds(),
+        GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool screensNear);
+    void AimAndPose(), FindTarget(bool dragging, const Vec3 &dir, Pass &t),
+        PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet);
+    Hit nearest(Vec3 from, Vec3 d);
+    bool OnVrSettingsPage(const Vec3 &sight);
 };
 
 // Setup, once: the settings, SteamVR, the overlays and sockets.
@@ -2496,7 +2451,6 @@ void Pointer::Init() {
     overlay->FindOverlay("system.pointer", &systemPointer);
     followAt = std::chrono::steady_clock::now();  // its last update, for the easing
     std::printf("ft-pointer running: free distance %.2f m, dot %.2f deg\n", freeDistance, cursorDeg);
-    std::fflush(stdout);
 }
 
 // One pass of the main loop; false when SteamVR quits.
@@ -2556,375 +2510,374 @@ void Pointer::HeadsetOff() {
         SendTo(out, FT_SOCK_POINTER, "btn a 0");
         SendTo(out, FT_SOCK_POINTER, "hide");
         std::printf("headset off: pointer released\n");
-        std::fflush(stdout);
     }
 }
 
 void Pointer::GazeAwake() {
     // Outside games, gaze mode keeps the pointer (see the top); the relay needs to know.
-    {
-        const auto t = Clock::now();
-        if (t - inGameAt > std::chrono::milliseconds(500)) {
-            inGameAt = t;
-            inGame = vr::VRApplications()->GetCurrentSceneProcessId() != 0;
-        }
-        // Hand gestures in the last two minutes keep it the same way.
-        const bool handsRecent = handsOn && handUsed != Clock::time_point{} && t - handUsed < std::chrono::minutes(2);
-        const bool awake = (gazeOn || handsRecent) && !inGame && !headsetOff;
-        if (awake != gazeAwake || t - gazeAwakeAt > std::chrono::seconds(5)) {
-            if (awake != gazeAwake)
-                std::printf("%s keeps the pointer: %s\n", gazeOn ? "gaze" : "hand use",
-                            awake ? "yes" : "no (off, in a game, or headset off)");
-            if (awake != gazeAwake) std::fflush(stdout);
-            gazeAwake = awake;
-            gazeAwakeAt = t;
-            SendTo(out, FT_SOCK_RELAY, awake ? "gazeawake 1" : "gazeawake 0");
-        }
-        // The relay pauses Frametop for VR games (input/game_pause.py). Repeated, so a relay
-        // that restarts learns it, and silence (SteamVR gone) ends the game there.
-        if (inGame != gameSent || t - gameSentAt > std::chrono::seconds(5)) {
-            gameSent = inGame;
-            gameSentAt = t;
-            SendTo(out, FT_SOCK_RELAY, inGame ? "vrgame 1" : "vrgame 0");
-        }
+    const auto t = Clock::now();
+    if (t - inGameAt > std::chrono::milliseconds(500)) {
+        inGameAt = t;
+        inGame = vr::VRApplications()->GetCurrentSceneProcessId() != 0;
+    }
+    // Hand gestures in the last two minutes keep it the same way.
+    const bool handsRecent = handsOn && handUsed != Clock::time_point{} && t - handUsed < std::chrono::minutes(2);
+    const bool awake = (gazeOn || handsRecent) && !inGame && !headsetOff;
+    if (awake != gazeAwake || t - gazeAwakeAt > std::chrono::seconds(5)) {
+        if (awake != gazeAwake)
+            std::printf("%s keeps the pointer: %s\n", gazeOn ? "gaze" : "hand use",
+                        awake ? "yes" : "no (off, in a game, or headset off)");
+        gazeAwake = awake;
+        gazeAwakeAt = t;
+        SendTo(out, FT_SOCK_RELAY, awake ? "gazeawake 1" : "gazeawake 0");
+    }
+    // The relay pauses Frametop for VR games (input/game_pause.py). Repeated, so a relay
+    // that restarts learns it, and silence (SteamVR gone) ends the game there.
+    if (inGame != gameSent || t - gameSentAt > std::chrono::seconds(5)) {
+        gameSent = inGame;
+        gameSentAt = t;
+        SendTo(out, FT_SOCK_RELAY, inGame ? "vrgame 1" : "vrgame 0");
     }
 }
 
 void Pointer::RelayCommands() {
-    // Commands from the relay.
+    // Commands from the relay, one datagram each.
     char buf[256];
     ssize_t n;
-    sockaddr_un from{};
-    socklen_t fromLen = sizeof from;
-    while ((n = recvfrom(in, buf, sizeof buf - 1, 0, reinterpret_cast<sockaddr *>(&from), &fromLen)) > 0) {
+    while ((n = recvfrom(in, buf, sizeof buf - 1, 0, reinterpret_cast<sockaddr *>(&sender), &(senderLen = sizeof sender))) > 0) {
         buf[n] = 0;
-        // Reply to the sender (the layout tool binds an abstract address to get answers).
-        const sockaddr_un sender = from;
-        const socklen_t senderLen = fromLen;
-        fromLen = sizeof from;
-        auto reply = [&](const std::string &msg) {
-            if (senderLen > offsetof(sockaddr_un, sun_path))
-                sendto(out, msg.data(), msg.size(), 0, reinterpret_cast<const sockaddr *>(&sender), senderLen);
-        };
-        // Mouse moves first, the most frequent command.
-        double mx, my;
-        if (std::strncmp(buf, "move ", 5) == 0 && std::sscanf(buf + 5, "%lf %lf", &mx, &my) == 2) {
-            mouseMove(mx, my);
-            continue;
+        if (PointerInput(buf) || HandCommand(buf) || TouchCommand(buf) || SettingCommand(buf)) continue;
+        NoteMouseInput(buf);
+        if (!PanelCommand(buf)) ButtonCommand(buf);
+    }
+}
+
+// Replies go to the command's sender (the layout tool binds an abstract address to get answers).
+void Pointer::reply(const std::string &msg) {
+    if (senderLen > offsetof(sockaddr_un, sun_path))
+        sendto(out, msg.data(), msg.size(), 0, reinterpret_cast<const sockaddr *>(&sender), senderLen);
+}
+
+bool Pointer::PointerInput(const char *buf) {
+    // Mouse moves first, the most frequent command.
+    double mx, my;
+    if (std::strncmp(buf, "move ", 5) == 0 && std::sscanf(buf + 5, "%lf %lf", &mx, &my) == 2) {
+        mouseMove(mx, my);
+        return true;
+    }
+    // The gaze, from ft-gazed: not mouse input. In gaze mode a fresh one takes the pointer back
+    // in the main loop (see "Gaze owns the pointer" at the top).
+    double g[4];
+    if (std::sscanf(buf, "gz %lf %lf %lf %lf", &g[0], &g[1], &g[2], &g[3]) == 4) {
+        gz = {g[0], g[1], g[2], g[3], Clock::now()};
+        gazeHist.Add({secsOf(gz.at), g[0], g[1], g[2], g[3]});  // for a gaze pinch's lock
+        return true;
+    }
+    // The gaze calibration panel (see the top): presses answer it instead of clicking.
+    bool on;
+    std::string owner;
+    if (calPanelClaim(buf, on, owner)) {
+        const bool was = Clock::now() < calPanelUntil;
+        if (on) {
+            calPanelUntil = Clock::now() + std::chrono::seconds(3), calOwner = owner;
+            if (!was) calOpened = true, calPinch.Start();
+        } else if (owner == calOwner) {  // (another's panel closing leaves this one up)
+            calPanelUntil = Clock::time_point{};
         }
-        // The gaze, from ft-gazed: not mouse input. In gaze mode a fresh one takes the pointer back
-        // in the main loop (see "Gaze owns the pointer" at the top).
-        double g[4];
-        if (std::sscanf(buf, "gz %lf %lf %lf %lf", &g[0], &g[1], &g[2], &g[3]) == 4) {
-            gz = {g[0], g[1], g[2], g[3], Clock::now()};
-            gazeHist.Add({secsOf(gz.at), g[0], g[1], g[2], g[3]});  // for a gaze pinch's lock
-            continue;
+        SendTo(out, FT_SOCK_RELAY, Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");
+        SendTo(out, FT_SOCK_SCREENS, Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");   // no palm menu
+        return true;
+    }
+    if (Clock::now() < calPanelUntil) {
+        const CalPanelAnswer answer = calPanelAnswer(buf);
+        if (answer == CalPanelAnswer::Accept || answer == CalPanelAnswer::Quit) {
+            SendTo(out, calOwner.c_str(), answer == CalPanelAnswer::Accept ? "calaccept" : "calquit");
+            return true;
         }
-        // The gaze calibration panel (see the top): presses answer it instead of clicking.
-        {
-            bool on;
-            std::string owner;
-            if (calPanelClaim(buf, on, owner)) {
-                const bool was = Clock::now() < calPanelUntil;
-                if (on) {
-                    calPanelUntil = Clock::now() + std::chrono::seconds(3), calOwner = owner;
-                    if (!was) calOpened = true, calPinch.Start();
-                } else if (owner == calOwner) {  // (another's panel closing leaves this one up)
-                    calPanelUntil = Clock::time_point{};
-                }
-                SendTo(out, FT_SOCK_RELAY, Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");
-                SendTo(out, FT_SOCK_SCREENS, Clock::now() < calPanelUntil ? "calpanel 1" : "calpanel 0");   // no palm menu
-                continue;
+        if (answer == CalPanelAnswer::Ignore)
+            return true;  // their releases, and the other buttons: nothing to click now
+    }
+    char kind[16], source[16];
+    int v;
+    if (std::sscanf(buf, "%15s %15s %d", kind, source, &v) == 3 &&
+        (!std::strcmp(kind, "precision") || !std::strcmp(kind, "gazedrag"))) {
+        if (!std::strcmp(source, "mouse") && v) noteMouse();
+        else lastMouse = Clock::now();
+        if (!active) wake(Clock::now());
+        devicePresses.push_back({source, !std::strcmp(kind, "gazedrag"), v != 0});
+        return true;
+    }
+    if (std::sscanf(buf, "gazekey %15s %d", source, &v) == 2 &&
+        (!std::strcmp(source, "left") || !std::strcmp(source, "right"))) {
+        lastMouse = Clock::now();
+        if (!active) wake(Clock::now());
+        keyPresses.push_back({!std::strcmp(source, "right"), v != 0});
+        return true;
+    }
+    return false;
+}
+
+// Hand interaction (see "Handoff" at the top): who holds a controller, from the relay.
+bool Pointer::HandCommand(const char *buf) {
+    char side[16], what[16];
+    int v = 0;
+    const int got = std::sscanf(buf, "ctl %15s %15s %d", side, what, &v);
+    if (got >= 2) {
+        const double t = secsOf(Clock::now());
+        const int k = !std::strcmp(side, "left") ? 0 : !std::strcmp(side, "right") ? 1 : -1;
+        if (!std::strcmp(side, "ws")) arbiter.Socket(std::atoi(what) != 0, t);
+        else if (!std::strcmp(what, "touch") && got == 3) arbiter.Touch(k, v != 0, t);
+        else if (!std::strcmp(what, "press")) arbiter.Press(k, t);
+        else if (!std::strcmp(what, "gone")) arbiter.Gone(k, t);
+        return true;
+    }
+    if (std::sscanf(buf, "paused %d", &v) == 1) {
+        framePaused = v != 0;
+        return true;
+    }
+    unsigned long long ns;
+    int l, r;
+    if (std::sscanf(buf, "near %llu %d %d", &ns, &l, &r) == 3) {
+        nearNs = ns, nearSide[0] = l != 0, nearSide[1] = r != 0, nearAt = Clock::now();
+        nearClaim[0] = l == 1, nearClaim[1] = r == 1;   // 2: the ray hides, the gestures stay ours
+        return true;
+    }
+    return false;
+}
+
+// ft-screens' touch on a SteamVR panel (see "Touch" at the top)
+bool Pointer::TouchCommand(const char *buf) {
+    char tside[8], verb[8], tkey[128] = "";
+    double tp[7];
+    const int tgot = std::sscanf(buf, "touch %7s %7s %lf %lf %lf %lf %lf %lf %lf %127s", tside, verb, &tp[0], &tp[1],
+                                 &tp[2], &tp[3], &tp[4], &tp[5], &tp[6], tkey);
+    if (tgot >= 2) {
+        const auto t = Clock::now();
+        const int k = !std::strcmp(tside, "right") ? 1 : 0;
+        const char *hand = k ? "right" : "left";
+        if (!std::strcmp(verb, "end")) {
+            if (touch.side == k) {
+                if (touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
+                touch.side = -1, touch.down = touch.wantDown = touch.pressPending = false;
+                touch.endAt = t, rayGoneAt = t;   // (a pointer it woke goes POINTER_RAY_RELEASE on)
+                posed.valid = false;
+                std::printf("touch %s: off SteamVR's panels\n", hand);
             }
+            return true;
         }
-        if (Clock::now() < calPanelUntil) {
-            const CalPanelAnswer answer = calPanelAnswer(buf);
-            if (answer == CalPanelAnswer::Accept || answer == CalPanelAnswer::Quit) {
-                SendTo(out, calOwner.c_str(), answer == CalPanelAnswer::Accept ? "calaccept" : "calquit");
-                continue;
-            }
-            if (answer == CalPanelAnswer::Ignore)
-                continue;  // their releases, and the other buttons: nothing to click now
-        }
-        {
-            char kind[16], source[16];
-            int v;
-            if (std::sscanf(buf, "%15s %15s %d", kind, source, &v) == 3 &&
-                (!std::strcmp(kind, "precision") || !std::strcmp(kind, "gazedrag"))) {
-                if (!std::strcmp(source, "mouse") && v) noteMouse();
-                else lastMouse = Clock::now();
-                if (!active) wake(Clock::now());
-                devicePresses.push_back({source, !std::strcmp(kind, "gazedrag"), v != 0});
-                continue;
-            }
-            if (std::sscanf(buf, "gazekey %15s %d", source, &v) == 2 &&
-                (!std::strcmp(source, "left") || !std::strcmp(source, "right"))) {
-                lastMouse = Clock::now();
-                if (!active) wake(Clock::now());
-                keyPresses.push_back({!std::strcmp(source, "right"), v != 0});
-                continue;
-            }
-        }
-        // Hand interaction (see "Handoff" at the top): who holds a controller, from the relay.
-        {
-            char side[16], what[16];
-            int v = 0;
-            const int got = std::sscanf(buf, "ctl %15s %15s %d", side, what, &v);
-            if (got >= 2) {
-                const double t = secsOf(Clock::now());
-                const int k = !std::strcmp(side, "left") ? 0 : !std::strcmp(side, "right") ? 1 : -1;
-                if (!std::strcmp(side, "ws")) arbiter.Socket(std::atoi(what) != 0, t);
-                else if (!std::strcmp(what, "touch") && got == 3) arbiter.Touch(k, v != 0, t);
-                else if (!std::strcmp(what, "press")) arbiter.Press(k, t);
-                else if (!std::strcmp(what, "gone")) arbiter.Gone(k, t);
-                continue;
-            }
-            if (std::sscanf(buf, "paused %d", &v) == 1) {
-                framePaused = v != 0;
-                continue;
-            }
-            unsigned long long ns;
-            int l, r;
-            if (std::sscanf(buf, "near %llu %d %d", &ns, &l, &r) == 3) {
-                nearNs = ns, nearSide[0] = l != 0, nearSide[1] = r != 0, nearAt = Clock::now();
-                nearClaim[0] = l == 1, nearClaim[1] = r == 1;   // 2: the ray hides, the gestures stay ours
-                continue;
-            }
-            // ft-screens' touch on a SteamVR panel (see "Touch" at the top)
-            char tside[8], verb[8], tkey[128] = "";
-            double tp[7];
-            const int tgot = std::sscanf(buf, "touch %7s %7s %lf %lf %lf %lf %lf %lf %lf %127s", tside, verb, &tp[0], &tp[1],
-                                         &tp[2], &tp[3], &tp[4], &tp[5], &tp[6], tkey);
-            if (tgot >= 2) {
-                const auto t = Clock::now();
-                const int k = !std::strcmp(tside, "right") ? 1 : 0;
-                const char *hand = k ? "right" : "left";
-                if (!std::strcmp(verb, "end")) {
-                    if (touch.side == k) {
-                        if (touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
-                        touch.side = -1, touch.down = touch.wantDown = touch.pressPending = false;
-                        touch.endAt = t, rayGoneAt = t;   // (a pointer it woke goes POINTER_RAY_RELEASE on)
-                        posed.valid = false;
-                        std::printf("touch %s: off SteamVR's panels\n", hand);
-                        std::fflush(stdout);
-                    }
-                    continue;
-                }
-                // the other hand holds the laser down, or the mouse, a ray or the gaze does: not now
-                if ((touch.side >= 0 && touch.side != k && (touch.down || touch.wantDown || touch.pressPending)) ||
-                    (touch.side < 0 && (hold.src != Src::None || leftHeld || aimHeld)))
-                    continue;
-                if (touch.side != k) {
-                    if (touch.side >= 0 && touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
-                    touch = Touch{};
-                    touch.side = k;
-                    cursorDot.Show(false);
-                    markerDot.Show(false);
-                    std::printf("touch %s: on SteamVR's panels\n", hand);
-                    std::fflush(stdout);
-                }
-                handUsed = t;
-                if (!active) {
-                    wake(t);   // role, show, and the claim 300 ms on
-                    rayWoke = active;
-                } else if (!laserOurs() && !claimPending && !claimHeld) {
-                    claimPending = true, claimAt = t;
-                }
-                if (tgot >= 9) {
-                    // the quaternion (w x y z) to the frame
-                    const double n = std::sqrt(tp[3] * tp[3] + tp[4] * tp[4] + tp[5] * tp[5] + tp[6] * tp[6]);
-                    if (n > 1e-6) {
-                        const double w = tp[3] / n, x = tp[4] / n, y = tp[5] / n, z = tp[6] / n;
-                        touch.basis = {{1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)},
-                                       {2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)},
-                                       {2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)}};
-                        touch.origin = {tp[0], tp[1], tp[2]};
-                        touch.posed = true;
-                    }
-                }
-                if (!std::strcmp(verb, "press")) {
-                    touch.wantDown = touch.pressPending = true, touch.grab = false;
-                    touch.key = tgot >= 10 ? tkey : "-";
-                } else if (!std::strcmp(verb, "grab")) {
-                    touch.wantDown = touch.pressPending = touch.grab = true, touch.grabAt = t;
-                    touch.key = "-";
-                } else if (!std::strcmp(verb, "up") || !std::strcmp(verb, "hover")) {
-                    touch.wantDown = false;
-                }
-                continue;
-            }
-        }
-        if (std::strcmp(buf, "typing") == 0) {  // not mouse input: it never wakes the pointer
-            typist.Key(secsOf(Clock::now()));
-            lastKeyAt = Clock::now();
-            continue;
-        }
-        if (std::strncmp(buf, "vrbind", 6) == 0) {
-            std::printf("controller buttons: %s\n", controllerButtons.Bind(buf + 6).c_str());
-            std::fflush(stdout);
-            continue;
-        }
-        if (std::strncmp(buf, "vrglobal", 8) == 0) {
-            const char *arg = buf + 8;
-            while (*arg == ' ') ++arg;
-            ControllerButtons::SetGlobal(std::strncmp(arg, "off", 3) != 0);
-            reply(controllerButtons.Status());
-            continue;
-        }
-        if (std::strncmp(buf, "vrstatus", 8) == 0) {
-            reply(controllerButtons.Status());
-            continue;
-        }
-        if (std::strncmp(buf, "overlay ", 8) == 0 && std::strncmp(buf + 8, "frametop.", 9) == 0) {
-            overlays.Add(buf + 8);
-            continue;
-        }
-        if (std::strncmp(buf, "overlays", 8) == 0) {
-            overlays.Request(sender, senderLen);  // answered from the list's thread
-            continue;
-        }
-        if (std::strncmp(buf, "gaze", 4) == 0) {
-            const char *arg = buf + 4;
-            while (*arg == ' ') ++arg;
-            if (*arg != '?') {  // "gaze ?" only asks
-                gazeOn = std::strncmp(arg, "on", 2) == 0    ? true
-                         : std::strncmp(arg, "off", 3) == 0 ? false
-                                                            : !gazeOn;
-                gazeOwns = true, nudging = false;
-                if (gazeOn) pointerOff = false;  // turning gaze mode on asks for the pointer
-                std::printf("gaze mode %s\n", gazeOn ? "on" : "off");
-                std::fflush(stdout);
-            }
-            // "gaze ? headset" (the gaze service, which idles while nobody wears the headset)
-            // also says whether someone does.
-            if (std::strstr(arg, "headset"))
-                reply(std::string(gazeOn ? (headsetOff ? "ok on away" : "ok on worn")
-                                         : (headsetOff ? "ok off away" : "ok off worn")) +
-                      (std::strstr(arg, "on-at") ? " on-at " + std::to_string(headsetOnAt) : ""));
-            else
-                reply(gazeOn ? "ok on" : "ok off");
-            continue;
-        }
-        // (Moves were taken first, above.)
-        const bool mouseInput = std::strncmp(buf, "btn", 3) == 0 || std::strncmp(buf, "scroll", 6) == 0;
-        if (mouseInput) {
-            lastMouse = Clock::now();
-            // typing's desk: a button press or a scroll step, not the relay's own pulses (the laser claim
-            // "btn a", the dashboard's "btn system") or releases
-            char name[16];
-            int v = 0;
-            double sx = 0, sy = 0;
-            if ((std::sscanf(buf, "btn %15s %d", name, &v) == 2 && v == 1 && std::strcmp(name, "a") && std::strcmp(name, "system")) ||
-                (std::sscanf(buf, "scroll %lf %lf", &sx, &sy) == 2 && (sx != 0 || sy != 0)))
-                noteMouse();
-        }
-        // Mouse input wakes the pointer (after a controller took over, or a helper restart),
-        // but a release doesn't (a button up, a scroll back to 0 0): the relay sends those with
-        // the pointer off when Frametop pauses for a game (input-relay.py stand_down), and
-        // waking would connect the virtual controller during the game. The release is still
-        // handled below (it ends its press, or goes to the driver), so no button stays down.
-        {
-            char name[16];
-            int v = 1;
-            double sx = 1, sy = 1;
-            const bool release = (std::sscanf(buf, "btn %15s %d", name, &v) == 2 && v == 0) ||
-                                 (std::sscanf(buf, "scroll %lf %lf", &sx, &sy) == 2 && sx == 0 && sy == 0);
-            if (!active && mouseInput && !release) wake(Clock::now());
-        }
-        char key[128];
-        double px, py, pz, pyaw, ppitch, proll = 0, pgrab = -1;
-        if (std::sscanf(buf, "grabprobe %127s", key) == 1) {
-            grabProbe(key);
-            continue;
-        }
-        if (std::sscanf(buf, "place %127s %lf %lf %lf %lf %lf %lf %lf", key, &px, &py, &pz, &pyaw, &ppitch, &proll,
-                        &pgrab) >= 6) {
-            reply(place(key, {px, py, pz}, PanelBasis(pyaw, ppitch, proll), pgrab >= 0 ? pgrab : grabOffset));
-            continue;
-        }
-        if (std::sscanf(buf, "measure %127s", key) == 1) {
-            Panel p;
-            Vec3 eye;
-            const std::string err = findPanel(key, p, eye);
-            char msg[400] = "";
-            if (err.empty())
-                std::snprintf(msg, sizeof msg, "ok %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
-                              p.center.x, p.center.y, p.center.z, p.width, p.height, p.basis.x.x, p.basis.x.y,
-                              p.basis.x.z, p.basis.y.x, p.basis.y.y, p.basis.y.z, p.basis.z.x, p.basis.z.y,
-                              p.basis.z.z);
-            reply(err.empty() ? msg : "error " + err);
-            continue;
-        }
-        if (std::strncmp(buf, "head", 4) == 0) {
-            vr::TrackedDevicePose_t h;
-            sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &h, 1);
-            const Vec3 e = Position(h.mDeviceToAbsoluteTracking);
-            const Vec3 f = Rotate(h.mDeviceToAbsoluteTracking, {0, 0, -1});
-            char msg[200];
-            std::snprintf(msg, sizeof msg, "ok %.4f %.4f %.4f %.2f %.2f", e.x, e.y, e.z,
-                          std::atan2(-f.x, -f.z) * 180 / M_PI, std::asin(std::clamp(f.y, -1.0, 1.0)) * 180 / M_PI);
-            reply(h.bPoseIsValid ? msg : "error no head pose (headset off?)");
-            continue;
-        }
-        if (std::strncmp(buf, "debug", 5) == 0) {
-            debug = !debug;
-            std::printf("debug %s\n", debug ? "on" : "off");
-            std::fflush(stdout);
-            continue;
-        }
-        if (std::strncmp(buf, "btn trigger 1", 13) == 0) {
-            leftButton(true);
-            continue;
-        } else if (std::strncmp(buf, "btn trigger 0", 13) == 0) {
-            leftButton(false);
-            continue;
-        } else if (std::strncmp(buf, "btn b 1", 7) == 0 && rightButton(true)) {
-            continue;
-        } else if (std::strncmp(buf, "btn b 0", 7) == 0 && rightButton(false)) {
-            continue;
-        } else if (std::strncmp(buf, "btn b 1", 7) == 0 && leftHeld) {
-            tilting = tiltStart = swallowedRight = true;  // right press while dragging: tilt, no right-click
-            continue;
-        } else if (std::strncmp(buf, "btn b 0", 7) == 0 && swallowedRight) {
-            tilting = swallowedRight = false;
-            continue;
-        }
-        if (std::strncmp(buf, "recenter", 8) == 0) {
-            recenter = true;
-        } else if (std::strncmp(buf, "reload", 6) == 0) {
-            loadConfig();
-            lastSlow = Clock::now() - std::chrono::seconds(10);  // apply POINTER_IGNORE now
-            pass.valid = false;
-            std::printf("reloaded: free distance %.2f m, dot %.2f deg, origin %.2f, head follow %s, leash %.0f deg, "
-                        "controller pickup %.1fx, %zu ignored\n",
-                        freeDistance, cursorDeg, originFraction, follow ? "on" : "off", leashDeg, pickupScale,
-                        ignore.size());
-            std::fflush(stdout);
-        } else if (std::strncmp(buf, "follow", 6) == 0) {
-            const char *arg = buf + 6;
-            while (*arg == ' ') ++arg;
-            const bool was = follow;
-            follow = std::strncmp(arg, "on", 2) == 0 ? true : std::strncmp(arg, "off", 3) == 0 ? false : !follow;
-            if (follow && !was) followReset = true;
-            std::printf("head follow %s (leash %.0f deg)\n", follow ? "on" : "off", leashDeg);
-            std::fflush(stdout);
-        } else if (std::strncmp(buf, "show", 4) == 0) {
-            if (!active) wake(Clock::now());
-        } else if (std::strncmp(buf, "hide", 4) == 0) {
-            // "hide toggle": turned off on purpose, so gaze mode leaves it off (see the top);
-            // "hide idle" and "hide pause" (and a plain "hide") don't keep it from the gaze.
-            if (!std::strcmp(buf, "hide toggle") && !pointerOff) {
-                pointerOff = true;
-                if (gazeOn) std::printf("pointer turned off: the gaze leaves it off until you wake it\n");
-                if (gazeOn) std::fflush(stdout);
-            }
-            active = false;
+        // the other hand holds the laser down, or the mouse, a ray or the gaze does: not now
+        if ((touch.side >= 0 && touch.side != k && (touch.down || touch.wantDown || touch.pressPending)) ||
+            (touch.side < 0 && (hold.src != Src::None || leftHeld || aimHeld)))
+            return true;
+        if (touch.side != k) {
+            if (touch.side >= 0 && touch.down) SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
+            touch = Touch{};
+            touch.side = k;
             cursorDot.Show(false);
             markerDot.Show(false);
-            SendTo(out, FT_SOCK_POINTER, "hide");
-        } else {
-            SendTo(out, FT_SOCK_POINTER, buf);  // btn, scroll
+            std::printf("touch %s: on SteamVR's panels\n", hand);
         }
+        handUsed = t;
+        if (!active) {
+            wake(t);   // role, show, and the claim 300 ms on
+            rayWoke = active;
+        } else if (!laserOurs() && !claimPending && !claimHeld) {
+            claimPending = true, claimAt = t;
+        }
+        if (tgot >= 9) {
+            // the quaternion (w x y z) to the frame
+            const double n = std::sqrt(tp[3] * tp[3] + tp[4] * tp[4] + tp[5] * tp[5] + tp[6] * tp[6]);
+            if (n > 1e-6) {
+                const double w = tp[3] / n, x = tp[4] / n, y = tp[5] / n, z = tp[6] / n;
+                touch.basis = {{1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)},
+                               {2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)},
+                               {2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)}};
+                touch.origin = {tp[0], tp[1], tp[2]};
+                touch.posed = true;
+            }
+        }
+        if (!std::strcmp(verb, "press")) {
+            touch.wantDown = touch.pressPending = true, touch.grab = false;
+            touch.key = tgot >= 10 ? tkey : "-";
+        } else if (!std::strcmp(verb, "grab")) {
+            touch.wantDown = touch.pressPending = touch.grab = true, touch.grabAt = t;
+            touch.key = "-";
+        } else if (!std::strcmp(verb, "up") || !std::strcmp(verb, "hover")) {
+            touch.wantDown = false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool Pointer::SettingCommand(const char *buf) {
+    if (std::strcmp(buf, "typing") == 0) {  // not mouse input: it never wakes the pointer
+        typist.Key(secsOf(Clock::now()));
+        lastKeyAt = Clock::now();
+        return true;
+    }
+    if (std::strncmp(buf, "vrbind", 6) == 0) {
+        std::printf("controller buttons: %s\n", controllerButtons.Bind(buf + 6).c_str());
+        return true;
+    }
+    if (std::strncmp(buf, "vrglobal", 8) == 0) {
+        const char *arg = buf + 8;
+        while (*arg == ' ') ++arg;
+        ControllerButtons::SetGlobal(std::strncmp(arg, "off", 3) != 0);
+        reply(controllerButtons.Status());
+        return true;
+    }
+    if (std::strncmp(buf, "vrstatus", 8) == 0) {
+        reply(controllerButtons.Status());
+        return true;
+    }
+    if (std::strncmp(buf, "overlay ", 8) == 0 && std::strncmp(buf + 8, "frametop.", 9) == 0) {
+        overlays.Add(buf + 8);
+        return true;
+    }
+    if (std::strncmp(buf, "overlays", 8) == 0) {
+        overlays.Request(sender, senderLen);  // answered from the list's thread
+        return true;
+    }
+    if (std::strncmp(buf, "gaze", 4) == 0) {
+        const char *arg = buf + 4;
+        while (*arg == ' ') ++arg;
+        if (*arg != '?') {  // "gaze ?" only asks
+            gazeOn = std::strncmp(arg, "on", 2) == 0    ? true
+                     : std::strncmp(arg, "off", 3) == 0 ? false
+                                                        : !gazeOn;
+            gazeOwns = true, nudging = false;
+            if (gazeOn) pointerOff = false;  // turning gaze mode on asks for the pointer
+            std::printf("gaze mode %s\n", gazeOn ? "on" : "off");
+        }
+        // "gaze ? headset" (the gaze service, which idles while nobody wears the headset)
+        // also says whether someone does.
+        if (std::strstr(arg, "headset"))
+            reply(std::string(gazeOn ? (headsetOff ? "ok on away" : "ok on worn")
+                                     : (headsetOff ? "ok off away" : "ok off worn")) +
+                  (std::strstr(arg, "on-at") ? " on-at " + std::to_string(headsetOnAt) : ""));
+        else
+            reply(gazeOn ? "ok on" : "ok off");
+        return true;
+    }
+    return false;
+}
+
+void Pointer::NoteMouseInput(const char *buf) {
+    const bool mouseInput = std::strncmp(buf, "btn", 3) == 0 || std::strncmp(buf, "scroll", 6) == 0;
+    if (mouseInput) {
+        lastMouse = Clock::now();
+        // typing's desk: a button press or a scroll step, not the relay's own pulses (the laser claim
+        // "btn a", the dashboard's "btn system") or releases
+        char name[16];
+        int v = 0;
+        double sx = 0, sy = 0;
+        if ((std::sscanf(buf, "btn %15s %d", name, &v) == 2 && v == 1 && std::strcmp(name, "a") && std::strcmp(name, "system")) ||
+            (std::sscanf(buf, "scroll %lf %lf", &sx, &sy) == 2 && (sx != 0 || sy != 0)))
+            noteMouse();
+    }
+    // Mouse input wakes the pointer (after a controller took over, or a helper restart),
+    // but a release doesn't (a button up, a scroll back to 0 0): the relay sends those with
+    // the pointer off when Frametop pauses for a game (input-relay.py stand_down), and
+    // waking would connect the virtual controller during the game. The release is still
+    // handled below (it ends its press, or goes to the driver), so no button stays down.
+    char name[16];
+    int v = 1;
+    double sx = 1, sy = 1;
+    const bool release = (std::sscanf(buf, "btn %15s %d", name, &v) == 2 && v == 0) ||
+                         (std::sscanf(buf, "scroll %lf %lf", &sx, &sy) == 2 && sx == 0 && sy == 0);
+    if (!active && mouseInput && !release) wake(Clock::now());
+}
+
+bool Pointer::PanelCommand(const char *buf) {
+    char key[128];
+    double px, py, pz, pyaw, ppitch, proll = 0, pgrab = -1;
+    if (std::sscanf(buf, "grabprobe %127s", key) == 1) {
+        grabProbe(key);
+        return true;
+    }
+    if (std::sscanf(buf, "place %127s %lf %lf %lf %lf %lf %lf %lf", key, &px, &py, &pz, &pyaw, &ppitch, &proll,
+                    &pgrab) >= 6) {
+        reply(place(key, {px, py, pz}, PanelBasis(pyaw, ppitch, proll), pgrab >= 0 ? pgrab : grabOffset));
+        return true;
+    }
+    if (std::sscanf(buf, "measure %127s", key) == 1) {
+        Panel p;
+        Vec3 eye;
+        const std::string err = findPanel(key, p, eye);
+        char msg[400] = "";
+        if (err.empty())
+            std::snprintf(msg, sizeof msg, "ok %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
+                          p.center.x, p.center.y, p.center.z, p.width, p.height, p.basis.x.x, p.basis.x.y,
+                          p.basis.x.z, p.basis.y.x, p.basis.y.y, p.basis.y.z, p.basis.z.x, p.basis.z.y,
+                          p.basis.z.z);
+        reply(err.empty() ? msg : "error " + err);
+        return true;
+    }
+    if (std::strncmp(buf, "head", 4) == 0) {
+        vr::TrackedDevicePose_t h;
+        sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &h, 1);
+        const Vec3 e = Position(h.mDeviceToAbsoluteTracking);
+        const Vec3 f = Rotate(h.mDeviceToAbsoluteTracking, {0, 0, -1});
+        char msg[200];
+        std::snprintf(msg, sizeof msg, "ok %.4f %.4f %.4f %.2f %.2f", e.x, e.y, e.z,
+                      std::atan2(-f.x, -f.z) * 180 / M_PI, std::asin(std::clamp(f.y, -1.0, 1.0)) * 180 / M_PI);
+        reply(h.bPoseIsValid ? msg : "error no head pose (headset off?)");
+        return true;
+    }
+    if (std::strncmp(buf, "debug", 5) == 0) {
+        debug = !debug;
+        std::printf("debug %s\n", debug ? "on" : "off");
+        return true;
+    }
+    return false;
+}
+
+void Pointer::ButtonCommand(const char *buf) {
+    if (std::strncmp(buf, "btn trigger 1", 13) == 0) {
+        leftButton(true);
+    } else if (std::strncmp(buf, "btn trigger 0", 13) == 0) {
+        leftButton(false);
+    } else if (std::strncmp(buf, "btn b 1", 7) == 0 && rightButton(true)) {
+        return;
+    } else if (std::strncmp(buf, "btn b 0", 7) == 0 && rightButton(false)) {
+        return;
+    } else if (std::strncmp(buf, "btn b 1", 7) == 0 && leftHeld) {
+        tilting = tiltStart = swallowedRight = true;  // right press while dragging: tilt, no right-click
+    } else if (std::strncmp(buf, "btn b 0", 7) == 0 && swallowedRight) {
+        tilting = swallowedRight = false;
+    } else if (std::strncmp(buf, "recenter", 8) == 0) {
+        recenter = true;
+    } else if (std::strncmp(buf, "reload", 6) == 0) {
+        loadConfig();
+        lastSlow = Clock::now() - std::chrono::seconds(10);  // apply POINTER_IGNORE now
+        pass.valid = false;
+        std::printf("reloaded: free distance %.2f m, dot %.2f deg, origin %.2f, head follow %s, leash %.0f deg, "
+                    "controller pickup %.1fx, %zu ignored\n",
+                    freeDistance, cursorDeg, originFraction, follow ? "on" : "off", leashDeg, pickupScale,
+                    ignore.size());
+    } else if (std::strncmp(buf, "follow", 6) == 0) {
+        const char *arg = buf + 6;
+        while (*arg == ' ') ++arg;
+        const bool was = follow;
+        follow = std::strncmp(arg, "on", 2) == 0 ? true : std::strncmp(arg, "off", 3) == 0 ? false : !follow;
+        if (follow && !was) followReset = true;
+        std::printf("head follow %s (leash %.0f deg)\n", follow ? "on" : "off", leashDeg);
+    } else if (std::strncmp(buf, "show", 4) == 0) {
+        if (!active) wake(Clock::now());
+    } else if (std::strncmp(buf, "hide", 4) == 0) {
+        // "hide toggle": turned off on purpose, so gaze mode leaves it off (see the top);
+        // "hide idle" and "hide pause" (and a plain "hide") don't keep it from the gaze.
+        if (!std::strcmp(buf, "hide toggle") && !pointerOff) {
+            pointerOff = true;
+            if (gazeOn) std::printf("pointer turned off: the gaze leaves it off until you wake it\n");
+        }
+        active = false;
+        cursorDot.Show(false);
+        markerDot.Show(false);
+        SendTo(out, FT_SOCK_POINTER, "hide");
+    } else {
+        SendTo(out, FT_SOCK_POINTER, buf);  // btn, scroll
     }
 }
 
@@ -2937,14 +2890,13 @@ void Pointer::ReadFrame() {
 }
 
 void Pointer::ClaimAndTouch() {
-    const auto tnow = fr.tnow;
     // Claim pulse (switchlaserhand on the driver's "a" button, no click).
-    if (claimPending && tnow >= claimAt) {
+    if (claimPending && fr.tnow >= claimAt) {
         SendTo(out, FT_SOCK_POINTER, "btn a 1");
         claimPending = false;
         claimHeld = true;
-        claimRelease = tnow + std::chrono::milliseconds(60);
-    } else if (claimHeld && tnow >= claimRelease) {
+        claimRelease = fr.tnow + std::chrono::milliseconds(60);
+    } else if (claimHeld && fr.tnow >= claimRelease) {
         SendTo(out, FT_SOCK_POINTER, "btn a 0");
         claimHeld = false;
     }
@@ -2959,32 +2911,31 @@ void Pointer::ClaimAndTouch() {
         touch = Touch{};
     }
     if (active && touch.side >= 0 && touch.posed) {
-        const bool holdPose = tnow < touch.holdUntil;
-        if (!holdPose && (tnow - touch.sentAt > std::chrono::milliseconds(100) || Length(touch.origin - touch.sentOrigin) > 0.0002 ||
+        const bool holdPose = fr.tnow < touch.holdUntil;
+        if (!holdPose && (fr.tnow - touch.sentAt > std::chrono::milliseconds(100) || Length(touch.origin - touch.sentOrigin) > 0.0002 ||
                           Dot(touch.basis.z, touch.sentBasis.z) < 0.999999 || Dot(touch.basis.x, touch.sentBasis.x) < 0.999999)) {
             sendPoseNow(touch.origin, touch.basis);
-            touch.sentOrigin = touch.origin, touch.sentBasis = touch.basis, touch.sentAt = tnow;
+            touch.sentOrigin = touch.origin, touch.sentBasis = touch.basis, touch.sentAt = fr.tnow;
         }
-        const bool laserReady = !claimPending && !claimHeld && laserOurs() && tnow - touch.sentAt < std::chrono::seconds(1);
-        if (touch.pressPending && laserReady && (!touch.grab || tnow - touch.grabAt >= kTouchHover)) {
+        const bool laserReady = !claimPending && !claimHeld && laserOurs() && fr.tnow - touch.sentAt < std::chrono::seconds(1);
+        if (touch.pressPending && laserReady && (!touch.grab || fr.tnow - touch.grabAt >= kTouchHover)) {
             SendTo(out, FT_SOCK_SCREENS, "click " + touch.key);   // (typing goes to Steam on a click on its panels)
             SendTo(out, FT_SOCK_POINTER, "btn trigger 1");
-            touch.pressPending = false, touch.down = true, touch.downAt = tnow;
-        } else if (touch.down && !touch.wantDown && !touch.pressPending && tnow - touch.downAt >= std::chrono::milliseconds(40)) {
+            touch.pressPending = false, touch.down = true, touch.downAt = fr.tnow;
+        } else if (touch.down && !touch.wantDown && !touch.pressPending && fr.tnow - touch.downAt >= std::chrono::milliseconds(40)) {
             SendTo(out, FT_SOCK_POINTER, "btn trigger 0");
-            touch.down = false, touch.holdUntil = tnow + kTouchDrop;
+            touch.down = false, touch.holdUntil = fr.tnow + kTouchDrop;
         }
     }
 }
 
 void Pointer::OverlaysAndRole() {
-    const auto tnow = fr.tnow;
     // The overlay list is only needed while the pointer is awake (see OverlayList), and while hands
     // may touch SteamVR's panels: ft-screens finds them by it (see "Touch" at the top).
     overlays.SetPaused(headsetOff || (!active && !(handsOn && handsAllowed)));
     if (handsOn && handsAllowed && !headsetOff &&
-        (overlays.Generation() != steamListGen || tnow - steamListAt > std::chrono::seconds(5))) {
-        steamListGen = overlays.Generation(), steamListAt = tnow;
+        (overlays.Generation() != steamListGen || fr.tnow - steamListAt > std::chrono::seconds(5))) {
+        steamListGen = overlays.Generation(), steamListAt = fr.tnow;
         // "steamvr <seq> <part> <parts> key...", each part within ft-screens' 512-byte datagrams; not
         // ours, not ignored, nor keys with spaces (the reader splits on them)
         std::vector<std::string> parts(1);
@@ -3005,12 +2956,11 @@ void Pointer::OverlaysAndRole() {
         if (active) overlay->ShowOverlay(laserMode);
         else overlay->HideOverlay(laserMode);
         if (debug) std::printf("laser mode %s\n", active ? "forced on" : "released");
-        if (debug) std::fflush(stdout);
     }
 
     // Didn't get the hand role (a held controller keeps it): release, back off. Not as a treadmill,
     // which has no controller role at all (see POINTER_ROLE at the top): its hint says so.
-    if (active && tnow - wokeAt > std::chrono::seconds(1) && ours != vr::k_unTrackedDeviceIndexInvalid &&
+    if (active && fr.tnow - wokeAt > std::chrono::seconds(1) && ours != vr::k_unTrackedDeviceIndexInvalid &&
         sys->GetControllerRoleForTrackedDeviceIndex(ours) == vr::TrackedControllerRole_Invalid &&
         sys->GetInt32TrackedDeviceProperty(ours, vr::Prop_ControllerRoleHint_Int32) !=
             vr::TrackedControllerRole_Treadmill) {
@@ -3020,45 +2970,41 @@ void Pointer::OverlaysAndRole() {
         markerDot.Show(false);
         SendTo(out, FT_SOCK_POINTER, "btn a 0");
         SendTo(out, FT_SOCK_POINTER, "hide");
-        noWakeUntil = tnow + std::chrono::seconds(2);
-        controllerTookAt = tnow;
+        noWakeUntil = fr.tnow + std::chrono::seconds(2);
+        controllerTookAt = fr.tnow;
         std::printf("no hand role (a controller is in use): pointer released\n");
-        std::fflush(stdout);
     }
 }
 
 void Pointer::LastUsedWins() {
-    const auto tnow = fr.tnow;
-    const auto &all = fr.all;
     // Last used wins: a real controller being moved releases the pointer (see the top),
     // in gaze mode too. Not while a bare hand's ray drives it: that ray goes only when its own
     // side turns controller (see "Handoff" at the top), so a controller in the other hand
     // doesn't take it.
-    if (active && hold.src == Src::None && raySide < 0 && tnow - lastMouse > std::chrono::milliseconds(500)) {
+    if (active && hold.src == Src::None && raySide < 0 && fr.tnow - lastMouse > std::chrono::milliseconds(500)) {
         for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
-            if (i == ours || !all[i].bPoseIsValid || all[i].eTrackingResult != vr::TrackingResult_Running_OK ||
+            if (i == ours || !fr.all[i].bPoseIsValid || fr.all[i].eTrackingResult != vr::TrackingResult_Running_OK ||
                 sys->GetTrackedDeviceClass(i) != vr::TrackedDeviceClass_Controller) {
                 movingSince[i] = {};
                 continue;
             }
-            const auto &v = all[i].vVelocity.v, &w = all[i].vAngularVelocity.v;
+            const auto &v = fr.all[i].vVelocity.v, &w = fr.all[i].vAngularVelocity.v;
             const double speed = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
             const double spin = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
             if (speed <= 0.35 * pickupScale && spin <= 2.0 * pickupScale) {
                 movingSince[i] = {};
                 continue;
             }
-            if (movingSince[i] == Clock::time_point{}) movingSince[i] = tnow;
-            if (tnow - movingSince[i] >= std::chrono::milliseconds(100)) {
+            if (movingSince[i] == Clock::time_point{}) movingSince[i] = fr.tnow;
+            if (fr.tnow - movingSince[i] >= std::chrono::milliseconds(100)) {
                 active = false;
                 claimPending = claimHeld = false;
                 cursorDot.Show(false);
                 markerDot.Show(false);
                 SendTo(out, FT_SOCK_POINTER, "btn a 0");
                 SendTo(out, FT_SOCK_POINTER, "hide");
-                controllerTookAt = tnow;
+                controllerTookAt = fr.tnow;
                 std::printf("controller %u moved (%.2f m/s, %.1f rad/s): pointer released\n", i, speed, spin);
-                std::fflush(stdout);
                 break;
             }
         }
@@ -3068,13 +3014,11 @@ void Pointer::LastUsedWins() {
 }
 
 void Pointer::RecenterAndGaze() {
-    const auto tnow = fr.tnow;
     const vr::TrackedDevicePose_t &hmd = fr.all[0];
     const auto &hm = fr.all[0].mDeviceToAbsoluteTracking.m;
-    const Vec3 eye = fr.eye;
 
     if (recenter && hmd.bPoseIsValid) {
-        anchor = eye;
+        anchor = fr.eye;
         const Vec3 f{-hm[0][2], -hm[1][2], -hm[2][2]};
         yaw = std::atan2(-f.x, -f.z) * 180 / M_PI;
         pitch = std::asin(std::clamp(f.y, -1.0, 1.0)) * 180 / M_PI;
@@ -3087,21 +3031,21 @@ void Pointer::RecenterAndGaze() {
     // well away from it. Not while a press holds the pointer, and only on fresh gaze.
     if (hmd.bPoseIsValid) lastHead = hmd.mDeviceToAbsoluteTracking, haveHead = true;
     if (gazeOn && active && hmd.bPoseIsValid && !tilting && !leftHeld && !aimHeld && !clickPress && !clickRelease &&
-        tnow >= dropHoldUntil && raySide < 0 && !chordBtn.On() &&
-        tnow - gz.at < std::chrono::milliseconds(150)) {
+        fr.tnow >= dropHoldUntil && raySide < 0 && !chordBtn.On() &&
+        fr.tnow - gz.at < std::chrono::milliseconds(150)) {
         const Vec3 g = Rotate(hmd.mDeviceToAbsoluteTracking, Direction(gz.hy, gz.hp));
         if (!gazeOwns && havePoint) {
-            const double off = std::acos(std::clamp(Dot(g, Normalize(lastPoint - eye)), -1.0, 1.0)) * 180 / M_PI;
-            if (off > gazeRetake && tnow - lastMouse > std::chrono::milliseconds(300)) {
-                if (retakeSince == Clock::time_point{}) retakeSince = tnow;
-                if (tnow - retakeSince >= std::chrono::milliseconds(120)) gazeOwns = true, nudging = false;
+            const double off = std::acos(std::clamp(Dot(g, Normalize(lastPoint - fr.eye)), -1.0, 1.0)) * 180 / M_PI;
+            if (off > gazeRetake && fr.tnow - lastMouse > std::chrono::milliseconds(300)) {
+                if (retakeSince == Clock::time_point{}) retakeSince = fr.tnow;
+                if (fr.tnow - retakeSince >= std::chrono::milliseconds(120)) gazeOwns = true, nudging = false;
             } else {
                 retakeSince = {};
             }
         }
         if (gazeOwns) {
             retakeSince = {};
-            anchor = eye;
+            anchor = fr.eye;
             anchored = true;
             yaw = std::atan2(-g.x, -g.z) * 180 / M_PI;
             pitch = std::clamp(std::asin(std::clamp(g.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
@@ -3110,273 +3054,300 @@ void Pointer::RecenterAndGaze() {
 }
 
 void Pointer::Handoff() {
-    const auto tnow = fr.tnow;
-    const auto &all = fr.all;
-    // Hands (see the top): pinches and grips from ft-hands, and the handoff for ft-screens' direct touch.
-    if (handsTrack) {
-        vr::TrackedDevicePose_t h0;
-        sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &h0, 1);
-        if (h0.bPoseIsValid) poses.Add(tnow, h0.mDeviceToAbsoluteTracking);
-    }
     // Handoff (see the top): per side, a controller in use or the bare hand.
-    if (handsTrack) {
-        const bool newHands = handsRoom.Update(poses);
-        if (tnow - devicesAt > std::chrono::seconds(1)) {
-            devicesAt = tnow;
-            for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
-                DeviceInfo &d = devices[i];
-                d.controller = sys->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_Controller;
-                if (!d.controller) continue;
-                char type[64] = "";
-                sys->GetStringTrackedDeviceProperty(i, vr::Prop_ControllerType_String, type, sizeof type);
-                d.ours = std::strcmp(type, "ft_pointer") == 0;
-                d.hint = sys->GetInt32TrackedDeviceProperty(i, vr::Prop_ControllerRoleHint_Int32);
-                d.charging = sys->GetBoolTrackedDeviceProperty(i, vr::Prop_DeviceIsCharging_Bool);
-            }
+    if (!handsTrack) {
+        if (raySide >= 0 || rayOwner.Side() >= 0) {
+            rayOwner.Drop("hand input off");
+            ownerChanges(false);
+            rayLeave(false);
         }
-        std::vector<handoff::Controller> ctls;
+        return;
+    }
+    // Hands (see the top): pinches and grips from ft-hands, and the handoff for ft-screens' direct touch.
+    vr::TrackedDevicePose_t h0;
+    sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &h0, 1);
+    if (h0.bPoseIsValid) poses.Add(fr.tnow, h0.mDeviceToAbsoluteTracking);
+    const bool newHands = handsRoom.Update(poses);
+    const bool live = ArbitrateHands();
+    TypingHands(newHands, live);
+    const bool typingSide[2] = {typist.Blocked(0, secsOf(fr.tnow)), typist.Blocked(1, secsOf(fr.tnow))};
+    SendTypingAndRays(typingSide);
+    // Each hand's openness (fhray::FistCurl), for the fist guard on every pinch (gaze or ray).
+    if (newHands) {
+        sideCurl[0] = sideCurl[1] = -1;
+        sideGap[0][0] = sideGap[0][1] = sideGap[1][0] = sideGap[1][1] = -1;
+        for (const hin::RoomHand &c : handsRoom.hands)
+            if (sideCurl[c.side] < 0) {
+                sideCurl[c.side] = fhray::FistCurl(c.pts, [](Vec3 v) { return Length(v); });
+                sideGap[c.side][0] = c.pinchD[0] >= 0 ? c.pinchD[0] : Length(c.pts[4] - c.pts[8]);
+                sideGap[c.side][1] = c.pinchD[1] >= 0 ? c.pinchD[1] : Length(c.pts[4] - c.pts[12]);
+                if (c.velValid) sideSpeed[c.side] = 0.6 * sideSpeed[c.side] + 0.4 * Length(c.vel);
+                if (pinchMaxSpeed > 0 && sideSpeed[c.side] > pinchMaxSpeed) sideFastAt[c.side] = fr.tnow;
+            }
+    }
+    HandRays(newHands, live, typingSide);
+    PickRayOwner(typingSide);
+}
+
+// The controllers in use for the handoff: SteamVR's (not ours), their side, tracking and motion.
+std::vector<handoff::Controller> Pointer::Controllers() {
+    if (fr.tnow - devicesAt > std::chrono::seconds(1)) {
+        devicesAt = fr.tnow;
         for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
-            const DeviceInfo &d = devices[i];
-            if (!d.controller || d.ours || i == ours) continue;
-            const auto role = sys->GetControllerRoleForTrackedDeviceIndex(i);
-            // its hand role; one our device holds (POINTER_ROLE=left|right) leaves it with its hint
-            const int r = role == vr::TrackedControllerRole_LeftHand || role == vr::TrackedControllerRole_RightHand
-                              ? int(role) : d.hint;
-            handoff::Controller c;
-            c.id = i;
-            c.side = r == vr::TrackedControllerRole_LeftHand ? 0 : r == vr::TrackedControllerRole_RightHand ? 1 : -1;
-            c.connected = all[i].bDeviceIsConnected;
-            c.charging = d.charging;
-            c.tracked = all[i].bPoseIsValid && all[i].eTrackingResult == vr::TrackingResult_Running_OK;
-            c.lost = !all[i].bPoseIsValid || all[i].eTrackingResult == vr::TrackingResult_Running_OutOfRange;
-            const Vec3 p = Position(all[i].mDeviceToAbsoluteTracking);
-            c.pos = {p.x, p.y, p.z};
-            c.vel = {all[i].vVelocity.v[0], all[i].vVelocity.v[1], all[i].vVelocity.v[2]};
-            const auto &w = all[i].vAngularVelocity.v;
-            c.spin = std::sqrt(double(w[0]) * w[0] + double(w[1]) * w[1] + double(w[2]) * w[2]);
-            ctls.push_back(c);
+            DeviceInfo &d = devices[i];
+            d.controller = sys->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_Controller;
+            if (!d.controller) continue;
+            char type[64] = "";
+            sys->GetStringTrackedDeviceProperty(i, vr::Prop_ControllerType_String, type, sizeof type);
+            d.ours = std::strcmp(type, "ft_pointer") == 0;
+            d.hint = sys->GetInt32TrackedDeviceProperty(i, vr::Prop_ControllerRoleHint_Int32);
+            d.charging = sys->GetBoolTrackedDeviceProperty(i, vr::Prop_DeviceIsCharging_Bool);
         }
-        const uint64_t ns =
-            uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(tnow.time_since_epoch()).count());
-        const bool live = handsRoom.Live(ns);
-        if (live != handsLiveSeen) {
-            handsLiveSeen = live;
-            if (live) std::printf("hand tracking: publishing\n");
-            else std::printf("hand tracking: nothing new for %.1f s: sides off\n",
-                             handsRoom.publish_ns ? double(hin::AgeNs(ns, handsRoom.publish_ns)) / 1e9 : 0.0);
-            std::fflush(stdout);
-        }
-        std::vector<handoff::Hand> seen;
-        if (live)
-            for (const hin::RoomHand &h : handsRoom.hands) {
-                handoff::Hand b;
-                b.side = h.side, b.pos = {h.palm.x, h.palm.y, h.palm.z};
-                b.vel = {h.vel.x, h.vel.y, h.vel.z}, b.velValid = h.velValid;
-                seen.push_back(b);
-            }
-        arbiter.Update(secsOf(tnow), ctls, seen, live);
-        for (const std::string &line : arbiter.log) {
-            std::printf("%s\n", line.c_str());
-            if (!line.rfind("handoff left:", 0) || !line.rfind("handoff right:", 0))
-                fh_event_text("pointer", "handoff", "info", line[8] == 'r', 0, line.c_str());
-        }
-        if (!arbiter.log.empty()) std::fflush(stdout);
-        arbiter.log.clear();
-        // In a VR game, only with the dashboard open or Frametop toggled back on (not paused).
-        if (tnow - dashboardAt > std::chrono::milliseconds(100)) {
-            dashboardAt = tnow;
-            dashboardUp = overlay->IsDashboardVisible();
-        }
-        // The relay parks hand tracking while Frametop is paused for a game, and unparks it while
-        // the dashboard is open: "vrdash 1|0", on a change and every 5 s, in a game or not (a
-        // manual pause parks too, and a relay that restarted, or one that heard "1" from a helper
-        // that went, would hold a stale copy until the next change).
-        if (dashboardUp != dashSent || tnow - dashSentAt > std::chrono::seconds(5)) {
-            dashSent = dashboardUp, dashSentAt = tnow;
-            SendTo(out, FT_SOCK_RELAY, dashboardUp ? "vrdash 1" : "vrdash 0");
-        }
-        handsAllowed = !headsetOff && (!inGame || dashboardUp || !framePaused);
-        const std::string msg = std::string("hands ") + handoff::Name(arbiter.State(0)) + " " +
-                                handoff::Name(arbiter.State(1)) + (handsAllowed ? " 1" : " 0");
-        if (msg != handsSent || tnow - handsSentAt > std::chrono::seconds(1)) {
-            if (msg != handsSent && debug) std::printf("%s\n", msg.c_str());
-            handsSent = msg, handsSentAt = tnow;
-            SendTo(out, FT_SOCK_SCREENS, msg);
-            SendTo(out, FT_SOCK_HANDVIEW, msg);   // draws the bare hands with Room View off
-        }
+    }
+    std::vector<handoff::Controller> ctls;
+    for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
+        const DeviceInfo &d = devices[i];
+        if (!d.controller || d.ours || i == ours) continue;
+        const auto role = sys->GetControllerRoleForTrackedDeviceIndex(i);
+        // its hand role; one our device holds (POINTER_ROLE=left|right) leaves it with its hint
+        const int r = role == vr::TrackedControllerRole_LeftHand || role == vr::TrackedControllerRole_RightHand
+                          ? int(role) : d.hint;
+        handoff::Controller c;
+        c.id = i;
+        c.side = r == vr::TrackedControllerRole_LeftHand ? 0 : r == vr::TrackedControllerRole_RightHand ? 1 : -1;
+        c.connected = fr.all[i].bDeviceIsConnected;
+        c.charging = d.charging;
+        c.tracked = fr.all[i].bPoseIsValid && fr.all[i].eTrackingResult == vr::TrackingResult_Running_OK;
+        c.lost = !fr.all[i].bPoseIsValid || fr.all[i].eTrackingResult == vr::TrackingResult_Running_OutOfRange;
+        const Vec3 p = Position(fr.all[i].mDeviceToAbsoluteTracking);
+        c.pos = {p.x, p.y, p.z};
+        c.vel = {fr.all[i].vVelocity.v[0], fr.all[i].vVelocity.v[1], fr.all[i].vVelocity.v[2]};
+        const auto &w = fr.all[i].vAngularVelocity.v;
+        c.spin = std::sqrt(double(w[0]) * w[0] + double(w[1]) * w[1] + double(w[2]) * w[2]);
+        ctls.push_back(c);
+    }
+    return ctls;
+}
 
-        // Typing (see the top): each new hands frame (ft-hands' side call), then which hands it
-        // holds back now, for the ray below, the gestures, and ft-screens.
-        typist.SetParams(typingParams);
-        vr::HmdMatrix34_t typingHead;
-        if (newHands && live && poses.At(handsRoom.capture_ns, typingHead)) {
-            typing::Hand th[2];
-            for (int s = 0; s < 2; ++s)
-                for (const hin::RoomHand &c : handsRoom.hands) {
-                    if (c.side != s) continue;
-                    th[s].seen = true;
-                    th[s].palm = {c.palm.x, c.palm.y, c.palm.z};
-                    th[s].down = -c.palmNormal.y;
-                    // its ray up, or a gesture held (the chord's pinch too): in use (pointing, then Enter
-                    // with the other hand)
-                    th[s].busy = rays[s].Shown() || (hold.side == s && (hold.src == Src::Hand || hold.src == Src::Ray)) ||
-                                 (chordBtn.On() && chordSide == s);
-                    break;
-                }
-            const Vec3 hp = Position(typingHead), hf = Rotate(typingHead, Vec3{0, 0, -1});
-            typing::Head th0;
-            th0.pos = {hp.x, hp.y, hp.z}, th0.fwd = {hf.x, hf.y, hf.z};
-            if (deskModel.Loaded()) {
-                // the same hands (the first of each side) as the model's features, offline and here
-                desk::Hand dh[2];
-                auto dv = [](const Vec3 &v) { return desk::V3{v.x, v.y, v.z}; };
-                for (int s = 0; s < 2; ++s)
-                    for (const hin::RoomHand &c : handsRoom.hands) {
-                        if (c.side != s) continue;
-                        dh[s].seen = true, dh[s].side = s, dh[s].stereo = c.stereo, dh[s].fitted = c.fitted;
-                        for (int i = 0; i < 21; ++i) dh[s].pts[i] = dv(c.pts[i]);
-                        dh[s].normal = dv(c.palmNormal);
-                        break;
-                    }
-                desk::Head dhead;
-                dhead.pos = dv(hp), dhead.fwd = dv(hf);
-                double df[2][desk::Features::kCount];
-                bool dok[2];
-                deskFeatures.Frame(double(handsRoom.capture_ns) / 1e9, dhead, dh, df, dok);
-                for (int s = 0; s < 2; ++s) th[s].desk = dok[s] ? deskModel.Desk(df[s]) : -1;
-            }
-            typist.Frame(double(handsRoom.capture_ns) / 1e9, th0, th);
-            for (const std::string &l : typist.log) std::printf("%s\n", l.c_str());
-            if (!typist.log.empty()) std::fflush(stdout);
-            typist.log.clear();
+// Who has each side, the hands or a controller (handoff.h), told to ft-screens and the hand view. True while ft-hands publishes.
+bool Pointer::ArbitrateHands() {
+    const std::vector<handoff::Controller> ctls = Controllers();
+    const uint64_t ns =
+        uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(fr.tnow.time_since_epoch()).count());
+    const bool live = handsRoom.Live(ns);
+    if (live != handsLiveSeen) {
+        handsLiveSeen = live;
+        if (live) std::printf("hand tracking: publishing\n");
+        else std::printf("hand tracking: nothing new for %.1f s: sides off\n",
+                         handsRoom.publish_ns ? double(hin::AgeNs(ns, handsRoom.publish_ns)) / 1e9 : 0.0);
+    }
+    std::vector<handoff::Hand> seen;
+    if (live)
+        for (const hin::RoomHand &h : handsRoom.hands) {
+            handoff::Hand b;
+            b.side = h.side, b.pos = {h.palm.x, h.palm.y, h.palm.z};
+            b.vel = {h.vel.x, h.vel.y, h.vel.z}, b.velValid = h.velValid;
+            seen.push_back(b);
         }
-        const bool typingSide[2] = {typist.Blocked(0, secsOf(tnow)), typist.Blocked(1, secsOf(tnow))};
-        const std::string typingMsg = std::string("typing ") + (typingSide[0] ? "1" : "0") + (typingSide[1] ? " 1" : " 0");
-        if (typingMsg != typingSent || tnow - typingSentAt > std::chrono::seconds(1)) {
-            if (typingMsg != typingSent && debug) std::printf("%s\n", typingMsg.c_str());
-            typingSent = typingMsg, typingSentAt = tnow;
-            SendTo(out, FT_SOCK_SCREENS, typingMsg);   // no pokes, near grabs or "grab that" by those hands
-        }
-        // Which hands' rays are up: our laser on a panel is a hand pointing at it only then (else it's
-        // the mouse's or the gaze's), for ft-screens' "no grab-that glow under a laser".
-        const std::string rayMsg = std::string("ray ") + (rays[0].Shown() ? "1" : "0") + (rays[1].Shown() ? " 1" : " 0");
-        if (rayMsg != raySent || tnow - raySentAt > std::chrono::seconds(1)) {
-            raySent = rayMsg, raySentAt = tnow;
-            SendTo(out, FT_SOCK_SCREENS, rayMsg);
-        }
+    arbiter.Update(secsOf(fr.tnow), ctls, seen, live);
+    for (const std::string &line : arbiter.log) {
+        std::printf("%s\n", line.c_str());
+        if (!line.rfind("handoff left:", 0) || !line.rfind("handoff right:", 0))
+            fh_event_text("pointer", "handoff", "info", line[8] == 'r', 0, line.c_str());
+    }
+    arbiter.log.clear();
+    // In a VR game, only with the dashboard open or Frametop toggled back on (not paused).
+    if (fr.tnow - dashboardAt > std::chrono::milliseconds(100)) {
+        dashboardAt = fr.tnow;
+        dashboardUp = overlay->IsDashboardVisible();
+    }
+    // The relay parks hand tracking while Frametop is paused for a game, and unparks it while
+    // the dashboard is open: "vrdash 1|0", on a change and every 5 s, in a game or not (a
+    // manual pause parks too, and a relay that restarted, or one that heard "1" from a helper
+    // that went, would hold a stale copy until the next change).
+    if (dashboardUp != dashSent || fr.tnow - dashSentAt > std::chrono::seconds(5)) {
+        dashSent = dashboardUp, dashSentAt = fr.tnow;
+        SendTo(out, FT_SOCK_RELAY, dashboardUp ? "vrdash 1" : "vrdash 0");
+    }
+    handsAllowed = !headsetOff && (!inGame || dashboardUp || !framePaused);
+    const std::string msg = std::string("hands ") + handoff::Name(arbiter.State(0)) + " " +
+                            handoff::Name(arbiter.State(1)) + (handsAllowed ? " 1" : " 0");
+    if (msg != handsSent || fr.tnow - handsSentAt > std::chrono::seconds(1)) {
+        if (msg != handsSent && debug) std::printf("%s\n", msg.c_str());
+        handsSent = msg, handsSentAt = fr.tnow;
+        SendTo(out, FT_SOCK_SCREENS, msg);
+        SendTo(out, FT_SOCK_HANDVIEW, msg);   // draws the bare hands with Room View off
+    }
+    return live;
+}
 
-        // Each hand's openness (fhray::FistCurl), for the fist guard on every pinch (gaze or ray).
-        if (newHands) {
-            sideCurl[0] = sideCurl[1] = -1;
-            sideGap[0][0] = sideGap[0][1] = sideGap[1][0] = sideGap[1][1] = -1;
-            for (const hin::RoomHand &c : handsRoom.hands)
-                if (sideCurl[c.side] < 0) {
-                    sideCurl[c.side] = fhray::FistCurl(c.pts, [](Vec3 v) { return Length(v); });
-                    sideGap[c.side][0] = c.pinchD[0] >= 0 ? c.pinchD[0] : Length(c.pts[4] - c.pts[8]);
-                    sideGap[c.side][1] = c.pinchD[1] >= 0 ? c.pinchD[1] : Length(c.pts[4] - c.pts[12]);
-                    if (c.velValid) sideSpeed[c.side] = 0.6 * sideSpeed[c.side] + 0.4 * Length(c.vel);
-                    if (pinchMaxSpeed > 0 && sideSpeed[c.side] > pinchMaxSpeed) sideFastAt[c.side] = tnow;
-                }
-        }
-        // The hand ray (see "Hand ray" at the top): each side's hand, when a new frame came.
-        const bool mouseIdle = tnow - lastMouse >= std::chrono::seconds(1);
-        auto mayPoint = [&](int s) {
-            return handsOn && gazehand::RayAllowed(rayOn, gazeOn, gazeHandRay) && handsAllowed && mouseIdle &&
-                   arbiter.State(s) == handoff::Owner::Hand && !typingSide[s];
-        };
-        if (rayParamsNew) {
-            rayParamsNew = false;
-            for (fhray::HandRay &r : rays) r.SetParams(rayParams);
-        }
-        vr::HmdMatrix34_t capHead;
-        if (newHands && live && rayOn && handsOn && poses.At(handsRoom.capture_ns, capHead)) {
-            const double tc = double(handsRoom.capture_ns) / 1e9;
-            const Vec3 hp = Position(capHead), hf = Rotate(capHead, Vec3{0, 0, -1});
-            fhray::V3 wrists[FH_HANDS_MAX_HANDS];  // the torso faces between the head and the hands
-            int nw = 0;
-            for (const hin::RoomHand &c : handsRoom.hands)
-                if (nw < FH_HANDS_MAX_HANDS) wrists[nw++] = {c.pts[0].x, c.pts[0].y, c.pts[0].z};
-            body.Update(tc, {hp.x, hp.y, hp.z}, {hf.x, hf.y, hf.z}, wrists, nw);
-            // the hand each side's ray follows: ft-hands' side call, held through a brief flip (rayowner.h)
-            std::vector<rayown::SeenHand> seenHands;
-            for (const hin::RoomHand &c : handsRoom.hands) seenHands.push_back({c.id, c.side});
-            int pick[2];
-            raySlots.Update(tc, seenHands, pick);
-            for (int s = 0; s < 2; ++s) {
-                if (pick[s] < 0) continue;
-                const hin::RoomHand *h = &handsRoom.hands[size_t(pick[s])];
-                auto fv = [](Vec3 v) { return fhray::V3{v.x, v.y, v.z}; };
-                fhray::HandFrame f;
-                f.t = tc, f.stereo = h->stereo;
-                f.knuckle = fv(h->knuckle), f.wrist = fv(h->pts[0]), f.palmNormal = fv(h->palmNormal);
-                f.middle = fv(h->pts[9]), f.ring = fv(h->pts[13]), f.little = fv(h->pts[17]), f.palm = true;
-                f.elbow = fv(h->elbow), f.elbowConf = h->elbowConf;
-                f.grip = gripDown[s];
-                f.gap = h->pinchD[0] >= 0 ? h->pinchD[0] : Length(h->pts[4] - h->pts[8]);
-                f.gap2 = h->pinchD[1] >= 0 ? h->pinchD[1] : Length(h->pts[4] - h->pts[12]);
-                f.curl = fhray::FistCurl(h->pts, [](Vec3 v) { return Length(v); });
-                // near: ft-screens says so (a fresh report), or the fingertip is at an overlay: a cast
-                // from 20 cm behind the index tip along the finger meets one within 25 cm (the tip
-                // within 5 cm of it). Only while the ray could show, so it costs nothing otherwise.
-                f.near = tnow - nearAt < std::chrono::milliseconds(200) && nearSide[s];
-                if (!f.near && active && mayPoint(s) && (rays[s].Shown() || rays[s].LastTests().show)) {
-                    const Vec3 tip = h->pts[8], fd = Normalize(h->pts[8] - h->pts[7]), from = tip - fd * 0.2;
-                    for (const auto &[key, handle] : handles) {
-                        if (!visible[key] || sceneGraph[key]) continue;
-                        vr::VROverlayIntersectionParams_t params{};
-                        params.vSource = {float(from.x), float(from.y), float(from.z)};
-                        params.vDirection = {float(fd.x), float(fd.y), float(fd.z)};
-                        params.eOrigin = vr::TrackingUniverseStanding;
-                        vr::VROverlayIntersectionResults_t r{};
-                        if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance < 0.25f) {
-                            f.near = true;
-                            break;
-                        }
-                    }
-                }
-                rays[s].Frame(body, f, mayPoint(s), secsOf(tnow));
-                rayAims[s].Add(tc, rays[s].Current(), rays[s].Shown(), h->pinchD[0], h->pinchD[1]);
+    // Typing (see the top): each new hands frame (ft-hands' side call), then which hands it
+void Pointer::TypingHands(bool newHands, bool live) {
+    // holds back now, for the ray below, the gestures, and ft-screens.
+    typist.SetParams(typingParams);
+    vr::HmdMatrix34_t typingHead;
+    if (newHands && live && poses.At(handsRoom.capture_ns, typingHead)) {
+        typing::Hand th[2];
+        for (int s = 0; s < 2; ++s)
+            for (const hin::RoomHand &c : handsRoom.hands) {
+                if (c.side != s) continue;
+                th[s].seen = true;
+                th[s].palm = {c.palm.x, c.palm.y, c.palm.z};
+                th[s].down = -c.palmNormal.y;
+                // its ray up, or a gesture held (the chord's pinch too): in use (pointing, then Enter
+                // with the other hand)
+                th[s].busy = rays[s].Shown() || (hold.side == s && (hold.src == Src::Hand || hold.src == Src::Ray)) ||
+                             (chordBtn.On() && chordSide == s);
+                break;
             }
+        const Vec3 hp = Position(typingHead), hf = Rotate(typingHead, Vec3{0, 0, -1});
+        typing::Head th0;
+        th0.pos = {hp.x, hp.y, hp.z}, th0.fwd = {hf.x, hf.y, hf.z};
+        if (deskModel.Loaded()) DeskHands(hp, hf, th);
+        typist.Frame(double(handsRoom.capture_ns) / 1e9, th0, th);
+        for (const std::string &l : typist.log) std::printf("%s\n", l.c_str());
+        typist.log.clear();
+    }
+}
+
+// Desk typing's model (desk.h): which hands rest on a desk, from the same hands as offline.
+void Pointer::DeskHands(const Vec3 &hp, const Vec3 &hf, typing::Hand th[2]) {
+    desk::Hand dh[2];
+    auto dv = [](const Vec3 &v) { return desk::V3{v.x, v.y, v.z}; };
+    for (int s = 0; s < 2; ++s)
+        for (const hin::RoomHand &c : handsRoom.hands) {
+            if (c.side != s) continue;
+            dh[s].seen = true, dh[s].side = s, dh[s].stereo = c.stereo, dh[s].fitted = c.fitted;
+            for (int i = 0; i < 21; ++i) dh[s].pts[i] = dv(c.pts[i]);
+            dh[s].normal = dv(c.palmNormal);
+            break;
         }
+    desk::Head dhead;
+    dhead.pos = dv(hp), dhead.fwd = dv(hf);
+    double df[2][desk::Features::kCount];
+    bool dok[2];
+    deskFeatures.Frame(double(handsRoom.capture_ns) / 1e9, dhead, dh, df, dok);
+    for (int s = 0; s < 2; ++s) th[s].desk = dok[s] ? deskModel.Desk(df[s]) : -1;
+}
+
+// Which hands typing holds back and which rays are up, to ft-screens on a change or every second.
+void Pointer::SendTypingAndRays(const bool typingSide[2]) {
+    const std::string typingMsg = std::string("typing ") + (typingSide[0] ? "1" : "0") + (typingSide[1] ? " 1" : " 0");
+    if (typingMsg != typingSent || fr.tnow - typingSentAt > std::chrono::seconds(1)) {
+        if (typingMsg != typingSent && debug) std::printf("%s\n", typingMsg.c_str());
+        typingSent = typingMsg, typingSentAt = fr.tnow;
+        SendTo(out, FT_SOCK_SCREENS, typingMsg);   // no pokes, near grabs or "grab that" by those hands
+    }
+    // Which hands' rays are up: our laser on a panel is a hand pointing at it only then (else it's
+    // the mouse's or the gaze's), for ft-screens' "no grab-that glow under a laser".
+    const std::string rayMsg = std::string("ray ") + (rays[0].Shown() ? "1" : "0") + (rays[1].Shown() ? " 1" : " 0");
+    if (rayMsg != raySent || fr.tnow - raySentAt > std::chrono::seconds(1)) {
+        raySent = rayMsg, raySentAt = fr.tnow;
+        SendTo(out, FT_SOCK_SCREENS, rayMsg);
+    }
+}
+
+    // The hand ray (see "Hand ray" at the top): each side's hand, when a new frame came.
+void Pointer::HandRays(bool newHands, bool live, const bool typingSide[2]) {
+    if (rayParamsNew) {
+        rayParamsNew = false;
+        for (fhray::HandRay &r : rays) r.SetParams(rayParams);
+    }
+    vr::HmdMatrix34_t capHead;
+    if (newHands && live && rayOn && handsOn && poses.At(handsRoom.capture_ns, capHead)) {
+        const double tc = double(handsRoom.capture_ns) / 1e9;
+        const Vec3 hp = Position(capHead), hf = Rotate(capHead, Vec3{0, 0, -1});
+        fhray::V3 wrists[FH_HANDS_MAX_HANDS];  // the torso faces between the head and the hands
+        int nw = 0;
+        for (const hin::RoomHand &c : handsRoom.hands)
+            if (nw < FH_HANDS_MAX_HANDS) wrists[nw++] = {c.pts[0].x, c.pts[0].y, c.pts[0].z};
+        body.Update(tc, {hp.x, hp.y, hp.z}, {hf.x, hf.y, hf.z}, wrists, nw);
+        // the hand each side's ray follows: ft-hands' side call, held through a brief flip (rayowner.h)
+        std::vector<rayown::SeenHand> seenHands;
+        for (const hin::RoomHand &c : handsRoom.hands) seenHands.push_back({c.id, c.side});
+        int pick[2];
+        raySlots.Update(tc, seenHands, pick);
         for (int s = 0; s < 2; ++s) {
-            rays[s].Tick(secsOf(tnow), mayPoint(s));
-            if (rays[s].event.empty()) continue;
-            if (rays[s].event.rfind("hide ", 0) == 0) rayHid[s] = rays[s].event.substr(5);
-            if (debug) {
-                const fhray::Tests &ts = rays[s].LastTests();
-                std::printf("ray %s %s (below %.2f m, ahead %.2f m, palm %.2f, pitch %.0f, yaw off %.0f)\n",
-                            s ? "right" : "left", rays[s].event.c_str(), ts.below, ts.ahead, ts.palm, ts.pitch, ts.yawOff);
-                std::fflush(stdout);
-            }
-            rays[s].event.clear();
+            if (pick[s] < 0) continue;
+            const hin::RoomHand *h = &handsRoom.hands[size_t(pick[s])];
+            auto fv = [](Vec3 v) { return fhray::V3{v.x, v.y, v.z}; };
+            fhray::HandFrame f;
+            f.t = tc, f.stereo = h->stereo;
+            f.knuckle = fv(h->knuckle), f.wrist = fv(h->pts[0]), f.palmNormal = fv(h->palmNormal);
+            f.middle = fv(h->pts[9]), f.ring = fv(h->pts[13]), f.little = fv(h->pts[17]), f.palm = true;
+            f.elbow = fv(h->elbow), f.elbowConf = h->elbowConf;
+            f.grip = gripDown[s];
+            f.gap = h->pinchD[0] >= 0 ? h->pinchD[0] : Length(h->pts[4] - h->pts[8]);
+            f.gap2 = h->pinchD[1] >= 0 ? h->pinchD[1] : Length(h->pts[4] - h->pts[12]);
+            f.curl = fhray::FistCurl(h->pts, [](Vec3 v) { return Length(v); });
+            // near: ft-screens says so (a fresh report), or the fingertip is at an overlay: a cast
+            // from 20 cm behind the index tip along the finger meets one within 25 cm (the tip
+            // within 5 cm of it). Only while the ray could show, so it costs nothing otherwise.
+            f.near = fr.tnow - nearAt < std::chrono::milliseconds(200) && nearSide[s];
+            if (!f.near && active && mayPoint(s, typingSide) && (rays[s].Shown() || rays[s].LastTests().show))
+                f.near = FingerAtOverlay(*h);
+            rays[s].Frame(body, f, mayPoint(s, typingSide), secsOf(fr.tnow));
+            rayAims[s].Add(tc, rays[s].Current(), rays[s].Shown(), h->pinchD[0], h->pinchD[1]);
         }
-        // Which ray drives the pointer: the owner keeps it through a grace after its ray goes down
-        // (rayowner.h); one whose side may not point (a controller in use, a VR game) leaves at once.
-        rayown::Params op;
-        op.grace = rayGrace;
-        rayOwner.SetParams(op);
-        // typing: the owner lets the pointer go to the mouse or the gaze, not to the controllers (an "off")
-        if (rayOwner.Side() >= 0 && typingSide[rayOwner.Side()]) rayOwner.Drop("typing");
-        const bool shown[2] = {rays[0].Shown(), rays[1].Shown()}, may[2] = {mayPoint(0), mayPoint(1)};
-        rayOwner.Update(secsOf(tnow), shown, may, rayHid);
-        ownerChanges(true);
-        if (raySide >= 0 && !active && !headsetOff) {  // a wake that was held off (just released): again
-            wake(tnow);
-            rayWoke = active;
+    }
+    for (int s = 0; s < 2; ++s) {
+        rays[s].Tick(secsOf(fr.tnow), mayPoint(s, typingSide));
+        if (rays[s].event.empty()) continue;
+        if (rays[s].event.rfind("hide ", 0) == 0) rayHid[s] = rays[s].event.substr(5);
+        if (debug) {
+            const fhray::Tests &ts = rays[s].LastTests();
+            std::printf("ray %s %s (below %.2f m, ahead %.2f m, palm %.2f, pitch %.0f, yaw off %.0f)\n",
+                        s ? "right" : "left", rays[s].event.c_str(), ts.below, ts.ahead, ts.palm, ts.pitch, ts.yawOff);
         }
-    } else if (raySide >= 0 || rayOwner.Side() >= 0) {
-        rayOwner.Drop("hand input off");
-        ownerChanges(false);
-        rayLeave(false);
+        rays[s].event.clear();
+    }
+}
+
+// The index fingertip is at an overlay: a cast from 20 cm behind it along the finger meets one within 25 cm.
+bool Pointer::FingerAtOverlay(const hin::RoomHand &hand) {
+    const Vec3 tip = hand.pts[8], fd = Normalize(hand.pts[8] - hand.pts[7]), from = tip - fd * 0.2;
+    for (const auto &[key, handle] : handles) {
+        if (!visible[key] || sceneGraph[key]) continue;
+        vr::VROverlayIntersectionParams_t params{};
+        params.vSource = {float(from.x), float(from.y), float(from.z)};
+        params.vDirection = {float(fd.x), float(fd.y), float(fd.z)};
+        params.eOrigin = vr::TrackingUniverseStanding;
+        vr::VROverlayIntersectionResults_t r{};
+        if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance < 0.25f)
+            return true;
+    }
+    return false;
+}
+
+// Side s's hand ray may point: hands on and allowed, the side the hand's, not typing, the mouse idle 1 s.
+bool Pointer::mayPoint(int s, const bool typingSide[2]) {
+    const bool mouseIdle = fr.tnow - lastMouse >= std::chrono::seconds(1);
+        return handsOn && gazehand::RayAllowed(rayOn, gazeOn, gazeHandRay) && handsAllowed && mouseIdle &&
+               arbiter.State(s) == handoff::Owner::Hand && !typingSide[s];
+}
+
+void Pointer::PickRayOwner(const bool typingSide[2]) {
+    // Which ray drives the pointer: the owner keeps it through a grace after its ray goes down
+    // (rayowner.h); one whose side may not point (a controller in use, a VR game) leaves at once.
+    rayown::Params op;
+    op.grace = rayGrace;
+    rayOwner.SetParams(op);
+    // typing: the owner lets the pointer go to the mouse or the gaze, not to the controllers (an "off")
+    if (rayOwner.Side() >= 0 && typingSide[rayOwner.Side()]) rayOwner.Drop("typing");
+    const bool shown[2] = {rays[0].Shown(), rays[1].Shown()}, may[2] = {mayPoint(0, typingSide), mayPoint(1, typingSide)};
+    rayOwner.Update(secsOf(fr.tnow), shown, may, rayHid);
+    ownerChanges(true);
+    if (raySide >= 0 && !active && !headsetOff) {  // a wake that was held off (just released): again
+        wake(fr.tnow);
+        rayWoke = active;
     }
 }
 
 void Pointer::NearClaims() {
-    const auto tnow = fr.tnow;
     // The ray woke the pointer and has been gone a while (no mouse, no gaze meanwhile): release it.
     if (active && rayWoke && raySide < 0 && touch.side < 0 && hold.src == Src::None && !leftHeld && !gazeOn &&
-        tnow - rayGoneAt > std::chrono::duration<double>(rayRelease) &&
-        tnow - lastMouse > std::chrono::duration<double>(rayRelease)) {
+        fr.tnow - rayGoneAt > std::chrono::duration<double>(rayRelease) &&
+        fr.tnow - lastMouse > std::chrono::duration<double>(rayRelease)) {
         releasePointer("hand ray gone");
     }
     // A hand at a panel (ft-screens' near claim: it pokes and taps there): no laser at all (user,
@@ -3387,32 +3358,30 @@ void Pointer::NearClaims() {
     // laser, the resting left hand's claim released it 49 times in a row and a pinch lost its click).
     // A hand that typing holds back doesn't claim (ft-screens hears so a moment later): a hand lifted off the keys
     // and put on the mouse touched a panel on the way and released the pointer (2026-10-28, 11 times in an hour).
-    const auto claims = [&](int s) { return nearClaim[s] && !typist.Blocked(s, secsOf(tnow)); };
+    const auto claims = [&](int s) { return nearClaim[s] && !typist.Blocked(s, secsOf(fr.tnow)); };
     const bool claimed = raySide >= 0 ? claims(raySide) : claims(0) || claims(1);
-    if (active && hold.src == Src::None && !leftHeld && touch.side < 0 && tnow - nearAt < std::chrono::milliseconds(200) &&
-        claimed && tnow - lastMouse > std::chrono::seconds(1)) {
+    if (active && hold.src == Src::None && !leftHeld && touch.side < 0 && fr.tnow - nearAt < std::chrono::milliseconds(200) &&
+        claimed && fr.tnow - lastMouse > std::chrono::seconds(1)) {
         releasePointer("a hand touches a panel");
     }
-    if (tnow - nearAt < std::chrono::milliseconds(200) && (nearClaim[0] || nearClaim[1])) nearBusyAt = tnow;
+    if (fr.tnow - nearAt < std::chrono::milliseconds(200) && (nearClaim[0] || nearClaim[1])) nearBusyAt = fr.tnow;
     // Gaze owns the pointer (see the top): whatever let it go, a fresh gaze takes it back once
     // nothing else should have it.
     if (!active && gazeOn && !pointerOff && !inGame && !framePaused && !headsetOff &&
-        tnow - gz.at < GAZE_WAKE_FRESH && tnow - nearBusyAt > GAZE_WAKE_NEAR && touch.side < 0 &&
-        tnow - gazeWokeAt > GAZE_WAKE_EVERY && !controllerBusy(tnow) &&
+        fr.tnow - gz.at < GAZE_WAKE_FRESH && fr.tnow - nearBusyAt > GAZE_WAKE_NEAR && touch.side < 0 &&
+        fr.tnow - gazeWokeAt > GAZE_WAKE_EVERY && !controllerBusy(fr.tnow) &&
         (handsTrack ? !arbiter.IsController(0) && !arbiter.IsController(1)
-                    : tnow - controllerTookAt > GAZE_WAKE_CONTROLLER)) {
-        gazeWokeAt = tnow;
-        wake(tnow);
+                    : fr.tnow - controllerTookAt > GAZE_WAKE_CONTROLLER)) {
+        gazeWokeAt = fr.tnow;
+        wake(fr.tnow);
         if (active) {
             SendTo(out, FT_SOCK_RELAY, "gazewoke");  // the relay counts the pointer on again
             std::printf("gaze took the pointer back\n");
-            std::fflush(stdout);
         }
     }
 }
 
 void Pointer::DeviceAndKeyPresses() {
-    const auto tnow = fr.tnow;
     const auto &hm = fr.all[0].mDeviceToAbsoluteTracking.m;
     // Gaze precision and gaze drag buttons (see the top): the mouse steers.
     for (const DevicePress &p : devicePresses) {
@@ -3427,7 +3396,6 @@ void Pointer::DeviceAndKeyPresses() {
         hold = h;
         startHold(p.drag);
         if (debug) std::printf("hold gaze %s began (%s)\n", p.drag ? "drag" : "precision", p.source.c_str());
-        if (debug) std::fflush(stdout);
     }
     devicePresses.clear();
     // Keyboard clicks (see the top): held back at the gaze, steered by the head.
@@ -3445,12 +3413,11 @@ void Pointer::DeviceAndKeyPresses() {
                 keyTilting = tilting = false;
                 hold.engaged = false;
                 if (debug) std::printf("hold key left: tilt ended\n");
-                if (debug) std::fflush(stdout);
             }
             // The keys holding it: a gaze_left then gaze_right drag, either; otherwise its own.
             const bool held = hold.keyDrag ? keyLeftDown || keyRightDown : hold.right ? keyRightDown : keyLeftDown;
             if (hold.src == Src::Head && !held) {
-                if (!hold.pressed && aimHeld && tnow - aimSince < std::chrono::duration<double>(keyTap)) {
+                if (!hold.pressed && aimHeld && fr.tnow - aimSince < std::chrono::duration<double>(keyTap)) {
                     // A quick tap: a click where the dot was at the press, and the gaze was right.
                     yaw = hold.pressYaw, pitch = hold.pressPitch;
                     nudgeMoved = 0;
@@ -3466,7 +3433,6 @@ void Pointer::DeviceAndKeyPresses() {
             tilting = tiltStart = keyTilting = true;
             headAngles(keyTiltYaw, keyTiltPitch);
             if (debug) std::printf("hold key left: tilt began\n");
-            if (debug) std::fflush(stdout);
             continue;
         }
         if (k.right && hold.src == Src::Head && !hold.right && !hold.pressed && aimHeld) {
@@ -3479,7 +3445,6 @@ void Pointer::DeviceAndKeyPresses() {
             pressRight = false;
             pressLeft();
             if (debug) std::printf("hold key left: pressed (right key)\n");
-            if (debug) std::fflush(stdout);
             continue;
         }
         if (hold.src != Src::None || leftHeld || aimHeld || clickPress || clickRelease) continue;
@@ -3489,14 +3454,13 @@ void Pointer::DeviceAndKeyPresses() {
         hold = h;
         startHold(false);
         if (debug) std::printf("hold key %s began\n", k.right ? "right" : "left");
-        if (debug) std::fflush(stdout);
     }
     keyPresses.clear();
     if (calOpened) {  // the calibration panel came up: a press in progress ends, no click
         calOpened = false;
         if (hold.src == Src::Ray) {
             pinchLog(hold.side, hold.rayKind, "no click (the gaze calibration panel came up)");
-            rays[hold.raySlot].Hold(false, secsOf(tnow)), SendTo(out, FT_SOCK_POINTER, "scroll 0 0");
+            rays[hold.raySlot].Hold(false, secsOf(fr.tnow)), SendTo(out, FT_SOCK_POINTER, "scroll 0 0");
         }
         if (hold.src != Src::None) endHold(true);
         if (leftHeld) releaseLeft();
@@ -3517,18 +3481,16 @@ void Pointer::DeviceAndKeyPresses() {
 }
 
 void Pointer::ReadHands() {
-    const auto tnow = fr.tnow;
     fr.handOk = handsOn && handFile.Read(fr.hg);
-    const bool handOk = fr.handOk;
-    if (handOk) handOkAt = tnow;
+    if (fr.handOk) handOkAt = fr.tnow;
     // The gaze calibration panel (see the top): an index pinch's begin takes the dot, with or
     // without POINTER_HANDS, as long as a pinch could click now (not over a VR game, not by a
     // hand typing holds back or one at a controller). Every gesture is the panel's meanwhile
     // (below), so nothing else starts.
-    if (tnow < calPanelUntil) {
+    if (fr.tnow < calPanelUntil) {
         fh_gestures_t cg;
-        bool calHands = handOk;
-        if (handOk) cg = fr.hg;
+        bool calHands = fr.handOk;
+        if (fr.handOk) cg = fr.hg;
         else if (!handsOn) calHands = handFile.Read(cg);
         const int s = calHands ? calPinch.Began(cg, handFile.opens) : -1;
         if (s >= 0) {
@@ -3536,7 +3498,7 @@ void Pointer::ReadHands() {
             vr::HmdMatrix34_t head;
             // (handsAllowed and the arbiter keep up only with hand interaction on)
             if (!(handsTrack ? handsAllowed : !headsetOff && !inGame)) why = "hands not allowed: a VR game, or the headset off";
-            else if (const char *t = typist.Why(s, secsOf(tnow))) why = t;
+            else if (const char *t = typist.Why(s, secsOf(fr.tnow))) why = t;
             else if (arbiter.IsController(s)) why = "at a controller";
             else if (poses.At(cg.pinch[s].begin_ns, head)) {
                 const Vec3 at = hin::ToRoom(head, cg.pinch[s].begin_point);
@@ -3569,7 +3531,6 @@ void Pointer::EndCancelledHolds() {
         if (!hold.gaze.On()) {   // gaze pinches and three-finger scrolls say why themselves
             std::printf("hand %s %s ended: typing: the hand is on the keyboard\n", hold.side ? "right" : "left",
                         hold.grip ? "grip" : "pinch");
-            std::fflush(stdout);
         }
         endGesture(true, "typing: the hand is on the keyboard");
     }
@@ -3578,12 +3539,11 @@ void Pointer::EndCancelledHolds() {
 
 // A new frame from ft-hands: its begins and ends, then the held gestures follow the hands.
 void Pointer::HandFrame() {
-    const fh_gestures_t &hg = fr.hg;
-    handSeq = hg.seq;
-    handPublished = hg.publish_ns;
+    handSeq = fr.hg.seq;
+    handPublished = fr.hg.publish_ns;
     // [pinch, grip, middle pinch][side]
-    const fh_pinch_t *slots[3] = {hg.pinch, hg.grip, hg.pinch2};
-    for (int s = 0; s < 2; ++s) gripDown[s] = hg.grip[s].flags & FH_PINCH_DOWN;
+    const fh_pinch_t *slots[3] = {fr.hg.pinch, fr.hg.grip, fr.hg.pinch2};
+    for (int s = 0; s < 2; ++s) gripDown[s] = fr.hg.grip[s].flags & FH_PINCH_DOWN;
     // A new file, or a tracker whose counters went back: start counting from here.
     bool rebase = !handBaseline || handFile.opens != handOpens;
     for (int k = 0; k < 3; ++k)
@@ -3618,7 +3578,6 @@ void Pointer::HandFrame() {
 
 // Each begin and end since the last frame, per kind and side.
 void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool screensNear) {
-    const auto tnow = fr.tnow;
     for (int k : {1, 0, 2})  // grips first: one takes over a pinch
         for (int s = 0; s < 2; ++s) {
             const fh_pinch_t &g = slots[k][s];
@@ -3648,7 +3607,7 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
             for (PendingBegin &p : pendingBegins)
                 if (p.side == s && p.kind == k && ended) p.ended = true, p.lost = lost;
             if (!began) continue;
-            if (tnow < calPanelUntil) continue;   // the gaze calibration panel's (above): no gesture
+            if (fr.tnow < calPanelUntil) continue;   // the gaze calibration panel's (above): no gesture
             if (k != 1 && hold.side == s && ((hold.src == Src::Ray && hold.rayThree) || hold.gazeScroll)) {
                 hold.threeLoose = false;   // its other finger, or the same one back: the hold follows it
                 if (hold.src == Src::Ray) hold.rayKind = k;
@@ -3660,7 +3619,7 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
                 continue;
             }
             // Not by a hand typing holds back (see "Typing" at the top).
-            if (const char *why = typist.Why(s, secsOf(tnow))) {
+            if (const char *why = typist.Why(s, secsOf(fr.tnow))) {
                 if (k != 1) pinchLog(s, k, std::string("ignored (") + why + ")");
                 else if (debug) std::printf("hand %s grip ignored: %s\n", s ? "right" : "left", why);
                 continue;
@@ -3680,7 +3639,7 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
             // pinching hand's ray is up, or may come up for it (fh_ray.h's ShowForPinch).
             const bool ray = canRay(rayFor(s, g));
             if (screensNear && nearNs < g.begin_ns) {
-                PendingBegin p{s, k, g, ray, tnow + std::chrono::milliseconds(60)};
+                PendingBegin p{s, k, g, ray, fr.tnow + std::chrono::milliseconds(60)};
                 p.ended = !(g.flags & FH_PINCH_DOWN), p.lost = lost;
                 pendingBegins.push_back(p);
                 continue;
@@ -3692,7 +3651,7 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
             // A hand just in front of a panel (its ray hidden there) without the gaze: nothing to aim
             // with, so no press at the mouse's pointer and no wake (user, 2026-10-11: the laser came
             // back at odd moments, a pinch by a panel woke the pointer).
-            if (screensNear && nearSide[s] && tnow - nearAt < std::chrono::milliseconds(200) && !ray && !gazeOn) {
+            if (screensNear && nearSide[s] && fr.tnow - nearAt < std::chrono::milliseconds(200) && !ray && !gazeOn) {
                 if (k != 1) pinchLog(s, k, "ignored (the hand is at a panel: no laser there)");
                 continue;
             }
@@ -3704,14 +3663,12 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
 }
 
 void Pointer::SteerHolds() {
-    const auto tnow = fr.tnow;
-    const fh_gestures_t &hg = fr.hg;
     // The held gesture's hand moves the pointer: past the dead zone (a tap's jitter,
     // the pinch point shifting as the fingers close), then at the gain, from there.
     if (hold.src == Src::Hand) {
-        const fh_pinch_t &g = hold.grip ? hg.grip[hold.side] : hold.right ? hg.pinch2[hold.side] : hg.pinch[hold.side];
+        const fh_pinch_t &g = hold.grip ? fr.hg.grip[hold.side] : hold.right ? fr.hg.pinch2[hold.side] : fr.hg.pinch[hold.side];
         double hy, hp;
-        if ((g.flags & FH_PINCH_TRACKED) && handAngles(g.point, hg.capture_ns, hold.origin, hy, hp)) {
+        if ((g.flags & FH_PINCH_TRACKED) && handAngles(g.point, fr.hg.capture_ns, hold.origin, hy, hp)) {
             // the hand closing into a fist while a gaze pinch is held back: no click (ft-hands' grip may
             // no longer take a pinch past its first 0.1 s, HANDS_GRIP_TAKEOVER_S)
             if (hold.gaze.On() && !hold.pressed && aimHeld && !hold.gazeScroll && rayParams.fistCurl > 0 &&
@@ -3720,15 +3677,15 @@ void Pointer::SteerHolds() {
             }
             // the other finger joining a gaze pinch just begun (still held back): a three-finger scroll
             if (hold.gaze.On() && !hold.gazeScroll && !hold.pressed && aimHeld && gazeScroll != 0 &&
-                secsOf(tnow) - hold.gaze.Began() < 0.4 && hold.gaze.Moved() < 0.2 && sideGap[hold.side][0] >= 0 &&
+                secsOf(fr.tnow) - hold.gaze.Began() < 0.4 && hold.gaze.Moved() < 0.2 && sideGap[hold.side][0] >= 0 &&
                 sideGap[hold.side][0] < gazeScrollGap && sideGap[hold.side][1] >= 0 && sideGap[hold.side][1] < gazeScrollGap) {
                 vr::HmdMatrix34_t hh;
-                if (rayRoom(g.point, hg.capture_ns, hold.beginPoint) && poses.At(hg.capture_ns, hh))
+                if (rayRoom(g.point, fr.hg.capture_ns, hold.beginPoint) && poses.At(fr.hg.capture_ns, hh))
                     hold.gazeScroll = true, hold.scrollRight = Normalize(Rotate(hh, Vec3{1, 0, 0}));
             }
             if (hold.gazeScroll) {
                 Vec3 now;
-                if (rayRoom(g.point, hg.capture_ns, now)) {
+                if (rayRoom(g.point, fr.hg.capture_ns, now)) {
                     const Vec3 d = now - hold.beginPoint;
                     const double sx = gazehand::ScrollAxis(Dot(d, hold.scrollRight), gazeScroll);
                     const double sy = gazehand::ScrollAxis(d.y, gazeScroll);
@@ -3745,21 +3702,21 @@ void Pointer::SteerHolds() {
             } else if (hold.gaze.Hand(hy, hp)) {  // a gaze pinch: nudged, or dragged once pressed
                 yaw = hold.gaze.Yaw(), pitch = hold.gaze.Pitch();
                 if (!hold.pressed) nudgeMoved = hold.gaze.Moved();
-                lastMove = tnow;
+                lastMove = fr.tnow;
             }
         }
     }
     // The chord's hand (see "Gaze pinch" at the top): followed while the left's pinch drags; once
     // that has let go, it drags from where the pointer is.
     if (chordBtn.On()) {
-        const fh_pinch_t &g = hg.pinch[chordSide];
+        const fh_pinch_t &g = fr.hg.pinch[chordSide];
         double hy, hp;
-        if ((g.flags & FH_PINCH_TRACKED) && handAngles(g.point, hg.capture_ns, chordOrigin, hy, hp)) {
+        if ((g.flags & FH_PINCH_TRACKED) && handAngles(g.point, fr.hg.capture_ns, chordOrigin, hy, hp)) {
             if (hold.src != Src::None) {
                 chordPinch.Track(hy, hp), chordSteers = false;
             } else {
                 if (!chordSteers) chordPinch.Take(yaw, pitch), chordSteers = true;
-                if (chordPinch.Hand(hy, hp)) yaw = chordPinch.Yaw(), pitch = chordPinch.Pitch(), lastMove = tnow;
+                if (chordPinch.Hand(hy, hp)) yaw = chordPinch.Yaw(), pitch = chordPinch.Pitch(), lastMove = fr.tnow;
             }
         }
     }
@@ -3767,9 +3724,9 @@ void Pointer::SteerHolds() {
     // scroll, not a tap already over): a three-finger scroll from here.
     if (hold.src == Src::Ray && !hold.rayThree && !hold.pressed && !hold.scrolling && !hold.released &&
         (hold.rayKind == 2 || hold.pendingPress) && rayScroll != 0 &&
-        tnow - hold.beganAt < std::chrono::milliseconds(400) && threeFingers(hold.side)) {
-        const fh_pinch_t &g = hold.rayKind == 2 ? hg.pinch2[hold.side] : hg.pinch[hold.side];
-        if ((g.flags & FH_PINCH_TRACKED) && rayRoom(g.point, hg.capture_ns, hold.beginPoint)) {
+        fr.tnow - hold.beganAt < std::chrono::milliseconds(400) && threeFingers(hold.side)) {
+        const fh_pinch_t &g = hold.rayKind == 2 ? fr.hg.pinch2[hold.side] : fr.hg.pinch[hold.side];
+        if ((g.flags & FH_PINCH_TRACKED) && rayRoom(g.point, fr.hg.capture_ns, hold.beginPoint)) {
             hold.rayThree = true, hold.pendingPress = false;
             if (debug) std::printf("ray %s: the other finger joined, a three-finger pinch\n", hold.raySlot ? "right" : "left");
         }
@@ -3779,13 +3736,13 @@ void Pointer::SteerHolds() {
     // A middle pinch's first rayTap (0.3 s) is a tap's: it scrolls only past 1.5 cm then, so a
     // right click that wobbles still clicks (2026-10-15: two of the user's turned into scrolls).
     if (hold.src == Src::Ray && (hold.rayKind == 2 || hold.rayThree)) {
-        const fh_pinch_t &g = hold.rayKind == 2 ? hg.pinch2[hold.side] : hg.pinch[hold.side];
+        const fh_pinch_t &g = hold.rayKind == 2 ? fr.hg.pinch2[hold.side] : fr.hg.pinch[hold.side];
         Vec3 now;
-        if ((g.flags & FH_PINCH_TRACKED) && rayRoom(g.point, hg.capture_ns, now)) {
+        if ((g.flags & FH_PINCH_TRACKED) && rayRoom(g.point, fr.hg.capture_ns, now)) {
             const Vec3 d = now - hold.beginPoint;
             const Vec3 right = Normalize(Cross(rayDir, {0, 1, 0}));
             const double dx = Dot(d, right), dy = d.y;
-            const bool tap = !hold.rayThree && tnow - hold.beganAt < std::chrono::duration<double>(rayTap);
+            const bool tap = !hold.rayThree && fr.tnow - hold.beganAt < std::chrono::duration<double>(rayTap);
             if (!hold.scrolling && std::hypot(dx, dy) > (tap ? 0.015 : 0.005)) hold.scrolling = true;
             if (hold.scrolling) {
                 auto axis = [&](double v) {
@@ -3806,18 +3763,17 @@ void Pointer::SteerHolds() {
 }
 
 void Pointer::StartPendingBegins() {
-    const auto tnow = fr.tnow;
     // Gestures waiting for ft-screens' near report: decided once it's in (or 60 ms on).
     for (size_t i = 0; i < pendingBegins.size();) {
         PendingBegin &p = pendingBegins[i];
         const bool reported = nearNs >= p.g.begin_ns;
-        if (!reported && tnow < p.deadline) {
+        if (!reported && fr.tnow < p.deadline) {
             ++i;
             continue;
         }
         const PendingBegin q = p;
         pendingBegins.erase(pendingBegins.begin() + long(i));
-        if (tnow < calPanelUntil) continue;   // the gaze calibration panel came up meanwhile
+        if (fr.tnow < calPanelUntil) continue;   // the gaze calibration panel came up meanwhile
         if (reported && nearClaim[q.side]) {
             if (q.kind != 1) pinchLog(q.side, q.kind, "left to ft-screens (the hand is near its panel)");
             else if (debug) std::printf("hand %s grip left to ft-screens (near)\n", q.side ? "right" : "left");
@@ -3834,13 +3790,12 @@ void Pointer::StartPendingBegins() {
 }
 
 void Pointer::RayPress() {
-    const auto tnow = fr.tnow;
     // A ray pinch's press, once the claim has had its 30 ms and a pose along the locked aim has gone
     // out (so the press lands there, and lastHit is what it hits).
     // (and once a pointer the ray just woke has been bound: the wake's claim comes 300 ms on)
     // A pinch that already ended (a tap, or a middle tap: the right button) clicks: released 40 ms on.
-    if (hold.src == Src::Ray && hold.pendingPress && hold.aimSent && tnow >= hold.pressAt && active &&
-        tnow - wokeAt > std::chrono::milliseconds(350)) {
+    if (hold.src == Src::Ray && hold.pendingPress && hold.aimSent && fr.tnow >= hold.pressAt && active &&
+        fr.tnow - wokeAt > std::chrono::milliseconds(350)) {
         hold.pendingPress = false;
         hold.pressed = true;
         gazeBack = false;
@@ -3848,7 +3803,7 @@ void Pointer::RayPress() {
         pressLeft();
         hold.pressHit = lastHit;
         if (hold.released) {
-            hold.releaseAt = tnow + std::chrono::milliseconds(40);
+            hold.releaseAt = fr.tnow + std::chrono::milliseconds(40);
         } else {
             // push and pull: on a carry (a press on no panel's content: a grab bar, a scene-graph
             // control, an edge, one of ft-screens' controls); a panel that starts to move turns it on below
@@ -3856,7 +3811,7 @@ void Pointer::RayPress() {
             hold.pushOn = rayPush && (lastHit.empty() || pass.onEdge || pass.scene || (lastHit.rfind("frametop.", 0) == 0 && !FramePanel(lastHit)));
         }
     }
-    if (hold.src == Src::Ray && hold.released && hold.pressed && tnow >= hold.releaseAt) {
+    if (hold.src == Src::Ray && hold.released && hold.pressed && fr.tnow >= hold.releaseAt) {
         if (leftHeld) releaseLeft();
         pinchLog(hold.side, hold.rayKind,
                  rayPinchSays(((hold.rayKind == 2 ? "right click on " : "clicked on ") + hitName(hold.pressHit)).c_str()));
@@ -3865,12 +3820,11 @@ void Pointer::RayPress() {
 }
 
 void Pointer::EndStaleHolds() {
-    const auto tnow = fr.tnow;
     // ft-hands stopped (or hung) with a gesture held: it's over, as lost. Not on one read that failed:
     // the file is rewritten under a sequence lock, and a writer caught mid-write (ft-hands preempted
     // under a CPU cap) fails a read; that ended drags mid-way (2026-10-09 headset test).
     const uint64_t nowNs =
-        uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(tnow.time_since_epoch()).count());
+        uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(fr.tnow.time_since_epoch()).count());
     if (hold.src == Src::Hand || hold.src == Src::Ray || chordBtn.On()) {
         // (patient: 4 s while nothing is pressed, 2.5 s while it is; user 2026-10-11, held gaze pinches ended
         // here 1.5 s in while ft-hands still held them: the log line says what the file looked like)
@@ -3884,7 +3838,7 @@ void Pointer::EndStaleHolds() {
                           staleNs / 1e9, (unsigned long long)handSeq, pubAge / 1e9,
                           fr.handOk ? (double(nowNs) - double(fr.hg.capture_ns)) / 1e9 : -1.0);
         const char *why = !active ? "the pointer went"
-                        : handsOn && tnow - handOkAt > std::chrono::milliseconds(500) ? "the gestures file can't be read"
+                        : handsOn && fr.tnow - handOkAt > std::chrono::milliseconds(500) ? "the gestures file can't be read"
                         : !handsOn ? "hand input turned off"
                         : pubAge > staleNs ? stale
                         : nullptr;
@@ -3895,7 +3849,6 @@ void Pointer::EndStaleHolds() {
 }
 
 void Pointer::RayDrive() {
-    const auto tnow = fr.tnow;
     // The driving ray (see "Hand ray" at the top): the pointer's origin and direction. During a ray
     // pinch the direction holds still until the ray has turned rayDeadzone, then follows (steer);
     // a middle or three-finger pinch holds it. Push and pull move the origin along the ray while a carry is held.
@@ -3904,14 +3857,14 @@ void Pointer::RayDrive() {
     const bool rayDrives = active && raySide >= 0 && rays[raySide].Shown();
     fr.rayMode = active && raySide >= 0;
     if (rayDrives) {
-        const fhray::Ray r = rays[raySide].At(secsOf(tnow));  // between tracker frames too (fh_smooth.h)
+        const fhray::Ray r = rays[raySide].At(secsOf(fr.tnow));  // between tracker frames too (fh_smooth.h)
         rayOrigin = {r.origin.x, r.origin.y, r.origin.z};
         rayDir = Normalize({r.dir.x, r.dir.y, r.dir.z});
         const double ry = std::atan2(-rayDir.x, -rayDir.z) * 180 / M_PI;
         const double rp = std::asin(std::clamp(rayDir.y, -1.0, 1.0)) * 180 / M_PI;
         if (hold.src == Src::Ray && hold.raySlot == raySide) {
             // a tap's dead zone first: a quick pinch whose hand turned a little still clicks
-            const bool tap = tnow - hold.beganAt < std::chrono::duration<double>(rayTap);
+            const bool tap = fr.tnow - hold.beganAt < std::chrono::duration<double>(rayTap);
             if (hold.rayKind == 0 && !hold.rayThree) steer(ry, rp, tap ? std::max(rayDeadzone, rayTapDeadzone) : rayDeadzone, 1.0);
         } else {
             yaw = ry, pitch = std::clamp(rp, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
@@ -3928,26 +3881,24 @@ void Pointer::RayDrive() {
                 const double dist = std::clamp(hold.d0 * std::pow((hold.h0 + dh) / hold.h0, 3), 0.3, 10.0);
                 pushOffset = dist - hold.d0;
             }
-        } else if (tnow >= dropHoldUntil) {
+        } else if (fr.tnow >= dropHoldUntil) {
             pushOffset = 0;  // held through the drop (SteamVR reads the pose again after the release)
         }
         anchor = rayOrigin + Direction(yaw, pitch) * pushOffset;
         anchored = true, recenter = false;
-        handUsed = tnow;
+        handUsed = fr.tnow;
         // a controller's trigger took the laser: our dot hides until a pinch claims it back
-        if (!rayInactive && !claimPending && !claimHeld && tnow - wokeAt > std::chrono::milliseconds(500)) {
+        if (!rayInactive && !claimPending && !claimHeld && fr.tnow - wokeAt > std::chrono::milliseconds(500)) {
             const vr::TrackedDeviceIndex_t p = overlay->GetPrimaryDashboardDevice();
             if (p != ours && p < vr::k_unMaxTrackedDeviceCount && devices[p].controller && !devices[p].ours)
                 rayInactive = true;
         }
     }
-    if (aimHeld || leftHeld || clickPress || clickRelease || chordBtn.On()) lastHeld = tnow;
+    if (aimHeld || leftHeld || clickPress || clickRelease || chordBtn.On()) lastHeld = fr.tnow;
 }
 
 void Pointer::HeadFollow() {
-    const auto tnow = fr.tnow;
     const auto &hm = fr.all[0].mDeviceToAbsoluteTracking.m;
-    const Vec3 eye = fr.eye;
     // Head follow (see the top): past the leash (for the delay), ease the reference to the
     // head's facing, and turn the cursor with it. Not in gaze mode: the gaze places it.
     if (follow && !gazeOn && active && anchored && fr.all[0].bPoseIsValid && !fr.rayMode) {
@@ -3956,7 +3907,7 @@ void Pointer::HeadFollow() {
             followRef = head, followLag = 0, leashOutSince = {};
             followReset = following = false;
         }
-        const double dt = std::min(0.1, std::chrono::duration<double>(tnow - followAt).count());
+        const double dt = std::min(0.1, std::chrono::duration<double>(fr.tnow - followAt).count());
         const double leash = leashDeg * M_PI / 180;
         const double lag = std::acos(std::clamp(Dot(followRef, head), -1.0, 1.0));
         double keep = lag;  // how far the reference stays behind the head after this frame
@@ -3969,26 +3920,26 @@ void Pointer::HeadFollow() {
             keep = std::min(keep, std::max(leash, followLag));
             if (keep < 0.05 * M_PI / 180) keep = 0, following = false;  // landed on the facing
         } else if (lag > leash) {
-            if (leashOutSince == decltype(leashOutSince){}) leashOutSince = tnow;
-            if (std::chrono::duration<double>(tnow - leashOutSince).count() >= leashDelay)
+            if (leashOutSince == decltype(leashOutSince){}) leashOutSince = fr.tnow;
+            if (std::chrono::duration<double>(fr.tnow - leashOutSince).count() >= leashDelay)
                 following = true, leashOutSince = {};
         } else {
             leashOutSince = {};  // back inside before the delay: a glance
         }
         followLag = keep;
         const Vec3 ref = LimitPitch(PullWithin(followRef, head, keep), posemath::kPitchClampDeg);
-        if (!leftHeld && tnow >= dropHoldUntil) {
+        if (!leftHeld && fr.tnow >= dropHoldUntil) {
             // The cursor keeps its offset from the reference (frames without roll).
             Vec3 d = FromBasis(AimBasis(ref), ToBasis(AimBasis(followRef), Direction(yaw, pitch)));
             d = PullWithin(Normalize(d), ref, followReach * M_PI / 180);
             yaw = std::atan2(-d.x, -d.z) * 180 / M_PI;
             pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
             // The ray origin closes in on the eye as the reference does on the facing.
-            anchor = eye + (anchor - eye) * (leash <= 0 ? 0.0 : lag > 1e-6 ? keep / lag : following ? 0.0 : 1.0);
+            anchor = fr.eye + (anchor - fr.eye) * (leash <= 0 ? 0.0 : lag > 1e-6 ? keep / lag : following ? 0.0 : 1.0);
         }
         followRef = ref;
     }
-    followAt = tnow;
+    followAt = fr.tnow;
 }
 
 void Pointer::RefreshOverlays() {
@@ -4059,86 +4010,74 @@ void Pointer::PosePointer() {
 }
 
 void Pointer::AimAndPose() {
-    const auto tnow = fr.tnow;
-    const Vec3 eye = fr.eye;
-    const bool rayMode = fr.rayMode;
-    const bool dragging = leftHeld || tnow < dropHoldUntil;
+    const bool dragging = leftHeld || fr.tnow < dropHoldUntil;
     if (!dragging) tiltYaw = tiltPitch = 0;  // drop finished: back to plain pointing
     const Vec3 dir = Direction(yaw, pitch);
-    const bool typingQuiet = gazeOn && typingHide > 0 && tnow - lastKeyAt < std::chrono::duration<double>(typingHide) &&
+    const bool typingQuiet = gazeOn && typingHide > 0 && fr.tnow - lastKeyAt < std::chrono::duration<double>(typingHide) &&
                              hold.src == Src::None && !leftHeld && !aimHeld;
     // Unchanged frames (see the top): the last pass still holds.
-    const bool reuse = !dragging && pass.valid && tnow - pass.at < std::chrono::milliseconds(100) &&
+    const bool reuse = !dragging && pass.valid && fr.tnow - pass.at < std::chrono::milliseconds(100) &&
                        pass.gen == visibleGen && std::fabs(yaw - pass.yaw) < 1e-6 &&
                        std::fabs(pitch - pass.pitch) < 1e-6 && Length(anchor - pass.anchor) < 0.001 &&
-                       Length(eye - pass.eye) < 0.005;
+                       Length(fr.eye - pass.eye) < 0.005;
     Pass t = pass;
     if (!reuse) FindTarget(dragging, dir, t);
-    const double best = t.best, distance = t.distance;
-    const std::string bestKey = t.key;
-    const bool bestScene = t.scene, onEdge = t.onEdge, occluded = t.occluded;
-    const Vec3 point = t.point;
-    const bool onScene = !dragging && ((bestScene && best < 1e8) || onEdge);
-    const bool onPanel = dragging || (best < 1e8 && !onScene);
-    const Vec3 sight = Normalize(point - eye);
-    if (rayMode) onVrSettings = false;  // the beam starts at the hand: SteamVR finds the page itself
-    if (!dragging && !reuse && !rayMode) onVrSettings = OnVrSettingsPage(sight);
-    if (!reuse) {
-        pass = {!dragging, tnow, visibleGen, yaw, pitch, anchor, eye,
-                best, distance, bestKey, bestScene, onEdge, occluded, point};
-    }
+    const bool onScene = !dragging && ((t.scene && t.best < 1e8) || t.onEdge);
+    const bool onPanel = dragging || (t.best < 1e8 && !onScene);
+    const Vec3 sight = Normalize(t.point - fr.eye);
+    if (fr.rayMode) onVrSettings = false;  // the beam starts at the hand: SteamVR finds the page itself
+    if (!dragging && !reuse && !fr.rayMode) onVrSettings = OnVrSettingsPage(sight);
+    if (!reuse) pass = {!dragging, fr.tnow, visibleGen, yaw, pitch, anchor, fr.eye,
+                        t.best, t.distance, t.key, t.scene, t.onEdge, t.occluded, t.point};
     if (onVrSettings != catcherHidesHit) {
         overlay->SetOverlayFlag(cursor, vr::VROverlayFlags_HideLaserIntersection, onVrSettings);
         catcherHidesHit = onVrSettings;
     }
-
-    PlaceDots(dir, point, sight, onPanel, onScene, typingQuiet);
-
+    PlaceDots(dir, t.point, sight, onPanel, onScene, typingQuiet);
     // Controller ray: from the eye, aimed at the cursor point, converted from the
     // standing universe to raw tracking space via the HMD's pose in both.
     // A hand's ray: from its origin along its direction (push and pull already in the anchor).
-    const Vec3 aimStanding = rayMode ? dir : Normalize(point - eye);
+    const Vec3 aimStanding = fr.rayMode ? dir : Normalize(t.point - fr.eye);
     const auto &S = fr.all[0].mDeviceToAbsoluteTracking, &R = fr.hmdRaw.mDeviceToAbsoluteTracking;
     const Vec3 aim = Rotate(R, RotateInverse(S, aimStanding));  // raw <- head <- standing
     // Origin partway along the line of sight to the cursor (smaller hit dot).
-    const double toPoint = std::sqrt(Dot(point - eye, point - eye));
+    const double toPoint = std::sqrt(Dot(t.point - fr.eye, t.point - fr.eye));
     double originDist = std::max(0.0, std::min(toPoint * originFraction, toPoint - originMargin));
     if (onVrSettings) originDist = std::min(originDist, SETTINGS_ORIGIN);  // SteamVR finds the page
-    if (typingQuiet && !rayMode) originDist = std::max(0.0, toPoint - 0.003);   // no beam, no hit dot while typing
+    if (typingQuiet && !fr.rayMode) originDist = std::max(0.0, toPoint - 0.003);   // no beam, no hit dot while typing
     // a hand's ray, dot only (POINTER_RAY_BEAM=0, user 2026-10-11): it starts most of the way to the point,
     // as the eye's does, so the beam is a few centimetres and only the dot shows; held still from a
     // press to the end of its drop hold, so a carried panel (it follows the device rigidly) doesn't move
-    if (rayMode && !rayBeam && !leftHeld && tnow >= dropHoldUntil) {
-        const double d = Length(point - anchor);
+    if (fr.rayMode && !rayBeam && !leftHeld && fr.tnow >= dropHoldUntil) {
+        const double d = Length(t.point - anchor);
         rayBeamOffset = std::max(0.0, std::min(d * originFraction, d - originMargin));
-    } else if (rayMode && rayBeam) {
+    } else if (fr.rayMode && rayBeam) {
         rayBeamOffset = 0;
     }
-    const Vec3 originStanding = rayMode ? anchor + dir * rayBeamOffset : eye + Normalize(point - eye) * originDist;
-    const Vec3 eyeRaw = Position(R) + Rotate(R, RotateInverse(S, originStanding - eye));
-    lastPoint = point, lastOrigin = originStanding, lastAim = aimStanding;  // tilt starts from here
+    const Vec3 originStanding = fr.rayMode ? anchor + dir * rayBeamOffset : fr.eye + Normalize(t.point - fr.eye) * originDist;
+    const Vec3 eyeRaw = Position(R) + Rotate(R, RotateInverse(S, originStanding - fr.eye));
+    lastPoint = t.point, lastOrigin = originStanding, lastAim = aimStanding;  // tilt starts from here
     havePoint = true;
-    if (debug && tnow - lastDebug > std::chrono::milliseconds(500)) {
-        lastDebug = tnow;
+    if (debug && fr.tnow - lastDebug > std::chrono::milliseconds(500)) {
+        lastDebug = fr.tnow;
         if (systemPointer == vr::k_ulOverlayHandleInvalid) overlay->FindOverlay("system.pointer", &systemPointer);
         std::printf("dbg %s hit=%s dist=%.2f eye->point=%.2f origin=%.2f vrsettings=%d yaw=%.1f pitch=%.1f gaze=%s steamvr_dot=%d primary=%u\n",
-                    dragging ? "DRAG" : occluded ? "INFRONT" : onEdge ? "EDGE" : onScene ? "SCENE" : (best < 1e8 ? "PANEL" : "FREE"), lastHit.empty() ? "-" : lastHit.c_str(),
-                    distance, toPoint, originDist, onVrSettings, yaw, pitch,
-                    !gazeOn ? "off" : tnow - gz.at > std::chrono::milliseconds(150) ? "stale" : gazeOwns ? "owns" : "mouse",
+                    dragging ? "DRAG" : t.occluded ? "INFRONT" : t.onEdge ? "EDGE" : onScene ? "SCENE" : (t.best < 1e8 ? "PANEL" : "FREE"), lastHit.empty() ? "-" : lastHit.c_str(),
+                    t.distance, toPoint, originDist, onVrSettings, yaw, pitch,
+                    !gazeOn ? "off" : fr.tnow - gz.at > std::chrono::milliseconds(150) ? "stale" : gazeOwns ? "owns" : "mouse",
                     systemPointer != vr::k_ulOverlayHandleInvalid && overlay->IsOverlayVisible(systemPointer),
                     overlay->GetPrimaryDashboardDevice());
-        std::fflush(stdout);
     }
     const double ayaw = std::atan2(-aim.x, -aim.z) * 180 / M_PI;
     const double apitch = std::asin(std::clamp(aim.y, -1.0, 1.0)) * 180 / M_PI;
     if (dragging && (tiltYaw != 0 || tiltPitch != 0)) {
         // Keep this drag's tilt applied, about the current cursor point.
-        const DevicePose tilted = TiltAbout(point, originStanding, AimBasis(aimStanding), tiltYaw, tiltPitch);
+        const DevicePose tilted = TiltAbout(t.point, originStanding, AimBasis(aimStanding), tiltYaw, tiltPitch);
         sendPose(S, R, tilted.origin, tilted.basis);  // this tick's poses, as the plain "pose" below
-    } else if (PoseDue(posed, tnow, eyeRaw, ayaw, apitch)) {
+    } else if (PoseDue(posed, fr.tnow, eyeRaw, ayaw, apitch)) {
         // The driver keeps the last pose: only a change goes out (see "Unchanged frames" at the top).
         SendTo(out, FT_SOCK_POINTER, PoseLine(eyeRaw, ayaw, apitch));
-        posed = {true, tnow, eyeRaw, ayaw, apitch};
+        posed = {true, fr.tnow, eyeRaw, ayaw, apitch};
     }
     if (hold.src == Src::Ray) hold.aimSent = true;  // its press can go out next frame (see above)
 }
@@ -4179,21 +4118,16 @@ Hit Pointer::nearest(Vec3 from, Vec3 d) {
 
 // What the ray at dir lands on (not reused from the last pass): the panel, an edge, or free space.
 void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
-    const Vec3 eye = fr.eye;
-    double &best = t.best, &distance = t.distance;
-    std::string &bestKey = t.key;
-    bool &bestScene = t.scene, &onEdge = t.onEdge, &occluded = t.occluded;
-    Vec3 &point = t.point;
     Hit first;
     if (!dragging) first = nearest(anchor, dir);
-    best = first.along;
-    bestKey = first.key;
-    bestScene = first.scene;
+    t.best = first.along;
+    t.key = first.key;
+    t.scene = first.scene;
     Vec3 bestPoint = first.point, bestNormal = first.normal;
-    onEdge = false;
-    if (!dragging && best < 1e8 && !bestScene) {
-        edgeKey = bestKey, edgePoint = bestPoint, edgeNormal = Normalize(bestNormal), edgeLast = bestPoint;
-    } else if (!dragging && best >= 1e8 && !edgeKey.empty() && visible.count(edgeKey) &&
+    t.onEdge = false;
+    if (!dragging && t.best < 1e8 && !t.scene) {
+        edgeKey = t.key, edgePoint = bestPoint, edgeNormal = Normalize(bestNormal), edgeLast = bestPoint;
+    } else if (!dragging && t.best >= 1e8 && !edgeKey.empty() && visible.count(edgeKey) &&
                visible.at(edgeKey)) {
         // Just off a panel: stay on its plane (see "Panel edges" at the top).
         const double denom = Dot(dir, edgeNormal);
@@ -4201,9 +4135,9 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
             const double along = Dot(edgePoint - anchor, edgeNormal) / denom;
             const Vec3 at = anchor + dir * along;
             if (along > 0.05 && std::sqrt(Dot(at - edgeLast, at - edgeLast)) <= edgeReach) {
-                best = along;
-                bestKey = edgeKey;
-                onEdge = true;
+                t.best = along;
+                t.key = edgeKey;
+                t.onEdge = true;
             }
         }
     }
@@ -4238,29 +4172,29 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
     }
     // While dragging: keep the press-time distance and show the non-interactive marker.
     // On a scene-graph plane or a panel's edge: the laser-catching dot goes 5 cm behind it.
-    distance = dragging ? dragDistance : (best < 1e8 ? best : freeDistance);
-    point = anchor + dir * distance;
-    occluded = false;
+    t.distance = dragging ? dragDistance : (t.best < 1e8 ? t.best : freeDistance);
+    t.point = anchor + dir * t.distance;
+    t.occluded = false;
     if (!dragging) {
         // The cursor lands on what you see under it: the ray above starts at the anchor,
         // not the eye, so after leaning it can pick a panel that something nearer
         // covers from where you are now (panels close together in view, at different
         // depths). Anything in front of the point on the eye's line of sight wins.
         // Not for a hand's ray: like a controller's, it lands where it points.
-        const double toPoint = std::sqrt(Dot(point - eye, point - eye));
-        const Hit front = fr.rayMode ? Hit{} : nearest(eye, Normalize(point - eye));
+        const double toPoint = std::sqrt(Dot(t.point - fr.eye, t.point - fr.eye));
+        const Hit front = fr.rayMode ? Hit{} : nearest(fr.eye, Normalize(t.point - fr.eye));
         if (front.along < toPoint - 0.02) {
-            occluded = true;
-            bestKey = front.key, bestScene = front.scene;
-            point = front.point;
+            t.occluded = true;
+            t.key = front.key, t.scene = front.scene;
+            t.point = front.point;
             if (!front.scene)
                 edgeKey = front.key, edgePoint = front.point, edgeNormal = Normalize(front.normal),
                 edgeLast = front.point;
-            distance = std::sqrt(Dot(point - anchor, point - anchor));
-            best = distance;
-            onEdge = false;
+            t.distance = std::sqrt(Dot(t.point - anchor, t.point - anchor));
+            t.best = t.distance;
+            t.onEdge = false;
         }
-        lastDistance = distance, lastHit = bestKey;
+        lastDistance = t.distance, lastHit = t.key;
     }
 }
 
@@ -4284,20 +4218,18 @@ bool Pointer::OnVrSettingsPage(const Vec3 &sight) {
 
 // Our dots: the marker on a panel, the laser-catching dot in free space.
 void Pointer::PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet) {
-    const auto tnow = fr.tnow;
-    const Vec3 eye = fr.eye;
-    auto secs = [&](Clock::time_point t) { return std::chrono::duration<double>(tnow - t).count(); };
+    auto secs = [&](Clock::time_point t) { return std::chrono::duration<double>(fr.tnow - t).count(); };
     if (fr.rayMode) {
         // A hand's ray (see "Hand ray" at the top): the beam shows, as a controller's does, and
         // our dot only where it meets a panel. No laser-catching dot in free space: the beam just
         // ends. None while a controller has taken the laser (rayInactive).
-        if (rayInactive || (!onPanel && !onScene) || tnow < calPanelUntil) {
+        if (rayInactive || (!onPanel && !onScene) || fr.tnow < calPanelUntil) {
             markerDot.Show(false);
         } else {
-            const Vec3 at = onPanel ? point + Normalize(eye - point) * 0.005 : point;
-            const double dist = std::sqrt(Dot(at - eye, at - eye));
+            const Vec3 at = onPanel ? point + Normalize(fr.eye - point) * 0.005 : point;
+            const double dist = std::sqrt(Dot(at - fr.eye, at - fr.eye));
             markerDot.Alpha(1);
-            markerDot.Place(at, eye, float(2 * dist * std::tan(cursorDeg * M_PI / 360)));
+            markerDot.Place(at, fr.eye, float(2 * dist * std::tan(cursorDeg * M_PI / 360)));
             markerDot.Show(true);
         }
         cursorDot.Show(false);
@@ -4305,24 +4237,24 @@ void Pointer::PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, b
         // The dot close in front of the page, which is nearer than any guess of ours;
         // the laser-catching dot far behind everything, invisible, so it never covers
         // the page, with SteamVR's hit dot hidden on it.
-        const Vec3 near = eye + sight * SETTINGS_DOT, far = eye + sight * SETTINGS_CATCHER;
+        const Vec3 near = fr.eye + sight * SETTINGS_DOT, far = fr.eye + sight * SETTINGS_CATCHER;
         double alpha = 1;
         if (gazeOn && !gazeDotAlways) {
             alpha = std::clamp(1 - std::min(secs(lastMove) - gazeShow, secs(lastHeld)) / 0.25, 0.0, 1.0);
         }
-        if (tnow < calPanelUntil || typingQuiet) alpha = 0;
+        if (fr.tnow < calPanelUntil || typingQuiet) alpha = 0;
         markerDot.Alpha(float(alpha));
-        markerDot.Place(near, eye, float(2 * SETTINGS_DOT * std::tan(cursorDeg * M_PI / 360)));
+        markerDot.Place(near, fr.eye, float(2 * SETTINGS_DOT * std::tan(cursorDeg * M_PI / 360)));
         cursorDot.Alpha(0);
-        cursorDot.Place(far, eye, float(2 * SETTINGS_CATCHER * std::tan(cursorDeg * M_PI / 360)));
+        cursorDot.Place(far, fr.eye, float(2 * SETTINGS_CATCHER * std::tan(cursorDeg * M_PI / 360)));
         markerDot.Show(true);
         cursorDot.Show(true);
     } else {
         // On a panel: the non-interactive marker, pulled 5 mm toward the eye so it
         // draws on top. In free space: the interactive dot the laser lands on.
         DotOverlay &show = onPanel ? markerDot : cursorDot, &hide = onPanel ? cursorDot : markerDot;
-        const Vec3 at = onPanel ? point + Normalize(eye - point) * 0.005 : onScene ? point + dir * 0.05 : point;
-        const double dist = std::sqrt(Dot(at - eye, at - eye));
+        const Vec3 at = onPanel ? point + Normalize(fr.eye - point) * 0.005 : onScene ? point + dir * 0.05 : point;
+        const double dist = std::sqrt(Dot(at - fr.eye, at - fr.eye));
         // Gaze mode: a pulse for each click, and with POINTER_GAZE_DOT=moving, shown only
         // while something moves it or a press holds it (see the top); transparent
         // otherwise, the laser still lands on it.
@@ -4335,17 +4267,16 @@ void Pointer::PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, b
                 alpha = std::max(alpha, std::clamp((0.6 - pulse) / 0.3, 0.0, 1.0));
             }
         }
-        if (tnow < calPanelUntil) alpha = 0;  // the calibration panel is up (see the top)
+        if (fr.tnow < calPanelUntil) alpha = 0;  // the calibration panel is up (see the top)
         if (typingQuiet) alpha = 0;           // typing (see lastKeyAt)
         show.Alpha(float(alpha));
-        show.Place(at, eye, float(2 * dist * std::tan(scale * cursorDeg * M_PI / 360)));
+        show.Place(at, fr.eye, float(2 * dist * std::tan(scale * cursorDeg * M_PI / 360)));
         show.Show(true);
         hide.Show(false);
     }
 }
 
 void Pointer::HeldPresses() {
-    const auto tnow = fr.tnow;
     const auto &hm = fr.all[0].mDeviceToAbsoluteTracking.m;
     // A held-back press (see the top): held still long enough, it's a real press (a drag);
     // released, it's a click where the pointer is now (this frame's pose has gone out).
@@ -4354,7 +4285,7 @@ void Pointer::HeldPresses() {
     // A "hide" read a loop after the release is too late: the click has gone out by then
     // (input-relay.py stand_down).
     if (!active) aimHeld = aimRight = clickPress = pressRight = aimHand = confirmLesson = false;
-    if (aimHeld && !aimHand && nudgeMoved < 0.2 && tnow - aimSince >= std::chrono::duration<double>(gazeHold)) {
+    if (aimHeld && !aimHand && nudgeMoved < 0.2 && fr.tnow - aimSince >= std::chrono::duration<double>(gazeHold)) {
         aimHeld = false;
         gazeBack = true;
         pressRight = aimRight;  // the right button's: a real right press (see the top)
@@ -4364,7 +4295,7 @@ void Pointer::HeldPresses() {
     // A keyboard click held still for POINTER_GAZE_HOLD: a real press, then the head drags
     // (from where it is now).
     if (aimHeld && aimHand && hold.promote && !hold.engaged &&
-        tnow - aimSince >= std::chrono::duration<double>(gazeHold)) {
+        fr.tnow - aimSince >= std::chrono::duration<double>(gazeHold)) {
         aimHeld = aimHand = false;
         hold.pressed = hold.grip = true;
         if (fr.all[0].bPoseIsValid) {
@@ -4376,7 +4307,6 @@ void Pointer::HeldPresses() {
         pressRight = hold.right;
         pressLeft();
         if (debug) std::printf("hold key %s: pressed (held still)\n", hold.right ? "right" : "left");
-        if (debug) std::fflush(stdout);
     }
     // The chord (see "Gaze pinch" at the top): a left still held back is pressed now, where the pointer
     // is (this frame's pose has gone out); the right button goes down when due and up with its pinch.
@@ -4417,7 +4347,7 @@ void Pointer::HeldPresses() {
         }
     }
     if (chordBtn.On()) {
-        const int change = chordBtn.Tick(secsOf(tnow));
+        const int change = chordBtn.Tick(secsOf(fr.tnow));
         if (change > 0) chordPinch.pressHit = lastHit;
         chordSend(change);
         if (chordBtn.Finished()) chordOver(false, "");
@@ -4425,7 +4355,7 @@ void Pointer::HeldPresses() {
     // A gaze pinch held still for POINTER_GAZE_HOLD: a real press at the locked gaze, then the hand
     // drags (see "Gaze pinch" at the top).
     // (on a screen's resize handle or grab bar: sooner, POINTER_GAZE_CONTROL_HOLD)
-    if (hold.src == Src::Hand && hold.gaze.On() && aimHeld && !hold.gazeScroll && hold.gaze.Promote(secsOf(tnow), FrameControl(lastHit))) {
+    if (hold.src == Src::Hand && hold.gaze.On() && aimHeld && !hold.gazeScroll && hold.gaze.Promote(secsOf(fr.tnow), FrameControl(lastHit))) {
         aimHeld = aimHand = false;
         hold.pressed = true;
         gazeBack = gazeOn;
@@ -4437,17 +4367,16 @@ void Pointer::HeldPresses() {
         clickPress = false;
         pressLeft();
         clickRelease = true;
-        clickReleaseAt = tnow + std::chrono::milliseconds(40);
-    } else if (clickRelease && tnow >= clickReleaseAt) {
+        clickReleaseAt = fr.tnow + std::chrono::milliseconds(40);
+    } else if (clickRelease && fr.tnow >= clickReleaseAt) {
         clickRelease = false;
         releaseLeft();
     }
     // A gaze pinch's click went out (or was dropped with the pointer): its log line.
     if (gazeClick.On() && !clickPress) {
-        const std::string says = gazeClick.Says(secsOf(tnow), !clickRelease, "the pointer went", lastHit, lessonSaid);
+        const std::string says = gazeClick.Says(secsOf(fr.tnow), !clickRelease, "the pointer went", lastHit, lessonSaid);
         std::printf("%s %s: %s\n", gazeClick.Right() ? "middle pinch" : "pinch", gazeClickSide ? "right" : "left", says.c_str());
         PinchEvent(gazeClickSide, gazeClick.Right() ? 2 : 0, says);
-        std::fflush(stdout);
         gazeClick = {};
     }
 }
@@ -4492,6 +4421,7 @@ void Pointer::Idle() {
 }
 
 int main() {
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);  // the log goes out line by line, no fflush needed
     Pointer p;
     p.Init();
     while (p.Tick()) {

@@ -160,6 +160,8 @@ class PointerShape(unittest.TestCase):
     def test_main_is_init_then_tick(self):
         main = body("int main() {")
         self.assertRegex(main, r"Pointer p;\s*p\.Init\(\);\s*while \(p\.Tick\(\)\) \{\s*\}\s*return 0;")
+        # The log is line-buffered from the start, so no print needs an fflush to reach it.
+        self.assertRegex(main, r"^int main\(\) \{\s*std::setvbuf\(stdout, nullptr, _IOLBF, 0\);")
 
     def test_tick_runs_the_sections_in_order(self):
         tick = body("bool Pointer::Tick() {")
@@ -191,7 +193,10 @@ class PointerShape(unittest.TestCase):
 
     def test_the_steps_are_found(self):
         steps = helpers()
-        for name in ("EndCancelledHolds", "HandFrame", "GestureEdges", "SteerHolds", "StartPendingBegins",
+        for name in ("PointerInput", "HandCommand", "TouchCommand", "SettingCommand", "NoteMouseInput",
+                     "PanelCommand", "ButtonCommand", "reply", "Controllers", "ArbitrateHands", "TypingHands",
+                     "DeskHands", "SendTypingAndRays", "HandRays", "FingerAtOverlay", "mayPoint", "PickRayOwner",
+                     "EndCancelledHolds", "HandFrame", "GestureEdges", "SteerHolds", "StartPendingBegins",
                      "RayPress", "EndStaleHolds", "AimAndPose", "nearest", "FindTarget", "OnVrSettingsPage",
                      "PlaceDots"):
             self.assertIn(name, steps)

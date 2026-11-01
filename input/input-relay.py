@@ -260,6 +260,29 @@ import sys
 import time
 
 import game_pause
+from ft_evdev import (  # the Linux input ABI (input.h, uinput.h)
+    EV_KEY,
+    EV_REL,
+    EV_SYN,
+    EVENT,
+    EVIOCGID,
+    EVIOCGKEY,
+    EVIOCGKEYCODE_V2,
+    EVIOCGRAB,
+    EVIOCSKEYCODE_V2,
+    INPUT_KEYMAP_BY_INDEX,
+    KEY_MAX,
+    KEYMAP_ENTRY,
+    SYN_REPORT,
+    UI_DEV_CREATE,
+    UI_DEV_SETUP,
+    UI_SET_EVBIT,
+    UI_SET_KEYBIT,
+    UI_SET_RELBIT,
+    eviocgbit,
+    eviocgname,
+    eviocguniq,
+)
 import vrpad
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "commands"))
@@ -275,10 +298,9 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     renamed_actions,
 )
 
-# Linux input constants (include/uapi/linux/input-event-codes.h, input.h, uinput.h).
-EV_SYN, EV_KEY, EV_REL, EV_MSC = 0x00, 0x01, 0x02, 0x04
-SYN_REPORT = 0
-BTN_MISC, KEY_MAX = 0x100, 0x2FF
+# Linux input constants (include/uapi/linux/input-event-codes.h, input.h, uinput.h). The event
+# record and the ioctl numbers are ft_evdev's (shared with vrpad.py); the codes are here.
+BTN_MISC = 0x100
 KEY_A = 30
 REL_X, REL_Y, REL_WHEEL, REL_MAX = 0x00, 0x01, 0x08, 0x0F
 SCROLLS = {0x06, REL_WHEEL, 0x0B, 0x0C}  # REL_HWHEEL, REL_WHEEL and their _HI_RES
@@ -297,48 +319,7 @@ BUS_NETWORK = 0x1000  # ours, past the kernel's: a host's keyboard or mouse (see
 HOST_TIMEOUT = 3.0  # a host device with no word for this long goes away
 HOST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
-# struct input_event on 64-bit: struct timeval (2 x long), u16 type, u16 code, s32 value.
-EVENT = struct.Struct("llHHi")
-
-
-def _ioc(direction, nr, size, kind):
-    return (direction << 30) | (size << 16) | (ord(kind) << 8) | nr
-
-
-def _iow(kind, nr, size):
-    return _ioc(1, nr, size, kind)
-
-
-def _ior(kind, nr, size):
-    return _ioc(2, nr, size, kind)
-
-
-UI_DEV_CREATE = _ioc(0, 1, 0, "U")
-UI_DEV_DESTROY = _ioc(0, 2, 0, "U")
-UI_DEV_SETUP = _iow("U", 3, 92)  # struct uinput_setup: input_id (4 x u16), name[80], u32
-UI_SET_EVBIT = _iow("U", 100, 4)
-UI_SET_KEYBIT = _iow("U", 101, 4)
-UI_SET_RELBIT = _iow("U", 102, 4)
-EVIOCGRAB = _iow("E", 0x90, 4)
-EVIOCGKEY = _ior("E", 0x18, (KEY_MAX + 8) // 8)
-EVIOCGID = _ior("E", 0x02, 8)
-KEYMAP_ENTRY = struct.Struct("BBHI32s")  # struct input_keymap_entry: flags, len, index, keycode, scancode
-INPUT_KEYMAP_BY_INDEX = 1
-EVIOCGKEYCODE_V2 = _ior("E", 0x04, KEYMAP_ENTRY.size)
-EVIOCSKEYCODE_V2 = _iow("E", 0x04, KEYMAP_ENTRY.size)
 EV_NAMES = {EV_KEY: "key", EV_REL: "rel"}
-
-
-def eviocgbit(ev, length):
-    return _ior("E", 0x20 + ev, length)
-
-
-def eviocgname(length):
-    return _ior("E", 0x06, length)
-
-
-def eviocguniq(length):
-    return _ior("E", 0x08, length)
 
 
 VIRTUAL_PREFIX = "frametop virtual"

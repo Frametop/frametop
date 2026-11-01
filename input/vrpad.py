@@ -39,9 +39,21 @@ PAD_START, PAD_BACK, PAD_LS, PAD_RS = 0x0010, 0x0020, 0x0040, 0x0080
 PAD_LB, PAD_RB, PAD_A, PAD_B, PAD_X, PAD_Y = 0x0100, 0x0200, 0x1000, 0x2000, 0x4000, 0x8000
 PAD_ALL = 0xF3FF
 
-# Linux input constants (input-event-codes.h, uinput.h).
-EV_SYN, EV_KEY, EV_ABS = 0x00, 0x01, 0x03
-SYN_REPORT = 0
+# Linux input constants (input-event-codes.h, uinput.h): the event record, the event types and
+# the uinput ioctls are ft_evdev's (shared with the relay); the pad's codes are here.
+from ft_evdev import (  # noqa: E402
+    EV_ABS,
+    EV_KEY,
+    EV_SYN,
+    EVENT,
+    SYN_REPORT,
+    UI_ABS_SETUP,
+    UI_DEV_CREATE,
+    UI_DEV_SETUP,
+    UI_SET_ABSBIT,
+    UI_SET_EVBIT,
+    UI_SET_KEYBIT,
+)
 BTN_A, BTN_B, BTN_X, BTN_Y, BTN_TL, BTN_TR = 0x130, 0x131, 0x133, 0x134, 0x136, 0x137
 BTN_SELECT, BTN_START, BTN_THUMBL, BTN_THUMBR = 0x13A, 0x13B, 0x13D, 0x13E
 ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_HAT0X, ABS_HAT0Y = 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x11
@@ -52,19 +64,6 @@ KEYS = {PAD_A: BTN_A, PAD_B: BTN_B, PAD_X: BTN_X, PAD_Y: BTN_Y, PAD_LB: BTN_TL, 
 AXES = ((ABS_X, -32768, 32767, 16, 128), (ABS_Y, -32768, 32767, 16, 128), (ABS_RX, -32768, 32767, 16, 128),
         (ABS_RY, -32768, 32767, 16, 128), (ABS_Z, 0, 255, 0, 0), (ABS_RZ, 0, 255, 0, 0),
         (ABS_HAT0X, -1, 1, 0, 0), (ABS_HAT0Y, -1, 1, 0, 0))
-EVENT = struct.Struct("llHHi")
-
-
-def _iow(nr, size):
-    return (1 << 30) | (size << 16) | (ord("U") << 8) | nr
-
-
-UI_DEV_CREATE = 0x5501
-UI_DEV_SETUP = _iow(3, 92)
-UI_ABS_SETUP = _iow(4, 28)  # struct uinput_abs_setup: u16 code, struct input_absinfo (6 x s32)
-UI_SET_EVBIT = _iow(100, 4)
-UI_SET_KEYBIT = _iow(101, 4)
-UI_SET_ABSBIT = _iow(103, 4)
 ABS_SETUP = struct.Struct("H2x6i")
 STORE_NAME = "vpad"  # in systemd's fd store, so a relay restart keeps the same pad
 

@@ -41,6 +41,15 @@ inline Area ToCopy(const Area *area, bool fresh, int pw, int ph) {
     return a;
 }
 
+// The part of a picture to copy into a buffer, and both counters after: whole counts the whole
+// pictures (one without an area), had is the one the buffer last got.
+inline Area Advance(uint64_t &whole, uint64_t &had, const Area *area, int pw, int ph) {
+    if (!area) ++whole;
+    const Area a = ToCopy(area, had == whole, pw, ph);
+    had = whole;
+    return a;
+}
+
 // Area a of px (pw wide, RGBA, straight alpha) into dst (stride bytes a row, the same place),
 // premultiplied.
 inline void CopyPremultiplied(uint8_t *dst, uint32_t stride, const uint8_t *px, int pw, Area a) {
@@ -126,9 +135,7 @@ struct Ring {
     Buffer *Fill(const uint8_t *px, int pw, int ph, const Area *area = nullptr) {
         Buffer &x = b[next];
         next = (next + 1) % 3;
-        if (!area) ++whole;
-        const Area a = ToCopy(area, x.whole == whole, pw, ph);
-        x.whole = whole;
+        const Area a = Advance(whole, x.whole, area, pw, ph);
         uint32_t stride = 0;
         void *mapping = nullptr;
         auto *dst = static_cast<uint8_t *>(gbm_bo_map(x.bo, 0, 0, pw, ph, GBM_BO_TRANSFER_WRITE, &stride, &mapping));

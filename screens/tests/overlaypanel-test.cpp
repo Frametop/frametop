@@ -29,6 +29,21 @@ int main() {
           same(ToCopy(&before, true, 10, 8), 0, 0, 4, 4));
     check("an area outside the picture is empty", same(ToCopy(&outside, true, 10, 8), 10, 8, 0, 0));
 
+    // Three buffers in turn: a whole picture, then areas. A buffer gets only the area while it has
+    // the whole picture the area changed from.
+    uint64_t whole = 0, had[3] = {};
+    const Area small{1, 1, 2, 2};
+    const bool w0 = same(overlaypanel::Advance(whole, had[0], nullptr, 10, 8), 0, 0, 10, 8);
+    const bool a1 = same(overlaypanel::Advance(whole, had[1], &small, 10, 8), 0, 0, 10, 8);
+    const bool a2 = same(overlaypanel::Advance(whole, had[2], &small, 10, 8), 0, 0, 10, 8);
+    const bool a0 = same(overlaypanel::Advance(whole, had[0], &small, 10, 8), 1, 1, 2, 2);
+    const bool a1b = same(overlaypanel::Advance(whole, had[1], &small, 10, 8), 1, 1, 2, 2);
+    check("an area goes whole into a buffer without the picture, then only the area", w0 && a1 && a2 && a0 && a1b);
+    const bool w1 = same(overlaypanel::Advance(whole, had[2], nullptr, 10, 8), 0, 0, 10, 8);
+    const bool a0b = same(overlaypanel::Advance(whole, had[0], &small, 10, 8), 0, 0, 10, 8);
+    const bool a2b = same(overlaypanel::Advance(whole, had[2], &small, 10, 8), 1, 1, 2, 2);
+    check("a new whole picture: the others get it whole again", w1 && a0b && a2b);
+
     // 3 x 2 pixels into a buffer 16 bytes a row (4 bytes of padding).
     const int pw = 3, ph = 2;
     const uint32_t stride = 16;

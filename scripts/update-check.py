@@ -18,6 +18,7 @@ stops, or restarts anything.
 """
 import base64
 import glob
+import importlib.util
 import json
 import mmap
 import os
@@ -641,12 +642,30 @@ def check_services(sockets, desktop_up):
         report("FAIL", "XRService", "not running, so hand tracking has no cameras")
 
 
+def frametop_repos():
+    """The Frametop checkouts to look in: this script's, then the usual ones (run from stdin
+    over SSH there's no __file__)."""
+    repos = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))] if "__file__" in globals() else []
+    return repos + [os.path.join(HOME, "frametop"), os.path.join(HOME, "dev/frametop")]
+
+
+def frametop_conf():
+    """~/.config/frametop.conf as Frametop reads it (conf/ft_conf.py, from the first checkout
+    that has it): {name: value}; None when there's no checkout here to read it with."""
+    for repo in frametop_repos():
+        path = os.path.join(repo, "conf", "ft_conf.py")
+        if os.path.isfile(path):
+            spec = importlib.util.spec_from_file_location("ft_conf", path)
+            ft_conf = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(ft_conf)
+            return ft_conf.read(os.path.join(HOME, ".config/frametop.conf"))
+    return None
+
+
 def check_steam_ui():
     """Steam's UI calls the Steam menu shortcut uses (steam/ft-steam). They're Steam client
     internals, so a Steam update can change them too, not just a SteamOS one."""
-    # Run from stdin (over SSH) there's no __file__: try the usual checkouts.
-    repos = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))] if "__file__" in globals() else []
-    repos += [os.path.join(HOME, "frametop"), os.path.join(HOME, "dev/frametop")]
+    repos = frametop_repos()
     tool = next((t for t in (os.path.join(r, "steam/ft-steam") for r in repos) if os.path.exists(t)), None)
     if not tool:
         report("skip", "Steam menu shortcut", "steam/ft-steam isn't in a checkout here")
@@ -669,13 +688,7 @@ def check_dashboard_apps():
     """float/ft-dashroute (DASHBOARD_APPS=frametop): the dashboard's Launch a program list floats
     apps only while Steam's UI calls SteamClient.Apps.LaunchNonSteamApp when one is picked, which
     dash-route.js wraps. A Steam client update can change that, not just a SteamOS one."""
-    conf = os.path.join(HOME, ".config/frametop.conf")
-    try:
-        with open(conf) as f:
-            on = any(line.split("#", 1)[0].strip() == "DASHBOARD_APPS=frametop" for line in f)
-    except OSError:
-        on = False
-    if not on:
+    if (frametop_conf() or {}).get("DASHBOARD_APPS") != "frametop":
         return
     label = "dashboard apps"
     found = False
@@ -697,9 +710,8 @@ def check_dashboard_apps():
     if run("pgrep", "-x", "ft-screens")[0] != 0:
         report("ok", label, "Steam's UI still launches through SteamClient.Apps.LaunchNonSteamApp (desktop not running)")
         return
-    repos = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))] if "__file__" in globals() else []
-    repos += [os.path.join(HOME, "frametop"), os.path.join(HOME, "dev/frametop")]
-    tool = next((t for t in (os.path.join(r, "float/ft-dashroute") for r in repos) if os.path.exists(t)), None)
+    tool = next((t for t in (os.path.join(r, "float/ft-dashroute") for r in frametop_repos()) if os.path.exists(t)),
+                None)
     try:
         out = subprocess.run(["python3", "-I", tool, "status"], capture_output=True, text=True, timeout=15).stdout if tool else ""
         state = json.loads(out.rsplit("wrapper: ", 1)[1]) if "wrapper: {" in out else None

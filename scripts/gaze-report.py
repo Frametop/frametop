@@ -36,6 +36,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 
 HOME = Path.home()
@@ -292,15 +293,7 @@ def check_install():
 
 def gaze_settings(repo):
     """frametop.conf's gaze lines (set or default), and which tracker that makes."""
-    conf = {}
-    try:
-        for line in CONF.read_text().splitlines():
-            line = line.split("#", 1)[0].strip()
-            if "=" in line:
-                k, v = line.split("=", 1)
-                conf[k.strip()] = v.strip()
-    except OSError:
-        pass
+    conf = ft_conf.read(str(CONF))
     setting = conf.get("GAZE_TRACKER", "auto").lower()
     venv = os.path.lexists(repo / "gaze/tracker/build/venv/bin/python") if repo else False
     installed = EYEGRAB_BIN.exists() and EYEGRAB_UNIT.exists() and venv

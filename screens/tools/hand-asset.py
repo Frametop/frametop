@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """The rendered hands' models (ft-handview, screens/handskin.h) from their glTF files.
 
-    screens/tools/hand-asset.py [--check]
+    screens/tools/hand-asset.py [--check | --cpp PATH]
 
 Reads each model's left and right hand (MODELS below, under screens/assets/hands; see the
-README there and each model's own) and writes screens/handasset.cpp: per hand the vertices
+README there and each model's own) and writes handasset.cpp: per hand the vertices
 (positions in 0.01 mm steps, normals in 1/127 steps), each vertex's four joints and weights
 (out of 255), the triangles, and the 25 WebXR hand joints' positions in the bind pose (WebXR's
 order). Each model's skeleton is mapped onto WebXR's joints by name; the program needs no
 glTF code: the data is compiled in, once, in handasset.cpp; screens/handasset.h, also written
-here, declares it. --check only says whether both files are up to date (exit 1 if not).
+here, declares it.
+
+The build makes handasset.cpp itself (--cpp PATH writes only it, to PATH: screens/build.sh puts
+it in build/), so only the header is source. A screens/handasset.cpp in the tree (it was
+tracked) is still rewritten and checked while it's there. --check only says whether the header
+and that copy are up to date (exit 1 if not).
 
 A model's joints: the bind pose comes from the skin's inverse bind matrices (node transforms
 aren't used, as glTF skinning ignores the mesh node's), so the vertices and joints share one
@@ -326,8 +331,14 @@ def source():
 
 
 def main():
-    files = ((OUT_H, header()), (OUT_CPP, source()))
-    if "--check" in sys.argv[1:]:
+    args = sys.argv[1:]
+    if args[:1] == ["--cpp"] and len(args) == 2:
+        with open(args[1], "w") as f:
+            f.write(source())
+        print(f"wrote {args[1]}")
+        return 0
+    files = [(OUT_H, header())] + [(OUT_CPP, source())] * os.path.exists(OUT_CPP)
+    if "--check" in args:
         stale = 0
         for path, text in files:
             same = os.path.exists(path) and open(path).read() == text

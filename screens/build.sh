@@ -11,7 +11,8 @@
 # label.cpp draws the panels' labels with stb_truetype (public domain, one header, pinned and
 # checked in scripts/stb.sh);
 # ft-handview --snapshot writes PNGs with stb_image_write (the same).
-# ft-handview's hand models are compiled in once (handasset.cpp and .h, from screens/assets/hands by tools/hand-asset.py);
+# ft-handview's hand models are compiled in once: tools/hand-asset.py makes build/handasset.cpp from
+# screens/assets/hands each build (handasset.h, which declares it, is in the tree);
 # its robot hand is built in code (handrobot.cpp).
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -37,7 +38,8 @@ $cxx -c -o build/steampanels.o steampanels.cpp
 $cxx -c -o build/handtest.o handtest.cpp
 $cxx -c -o build/handmesh.o handmesh.cpp
 $cxx -c -o build/handskin.o handskin.cpp
-$cxx -c -o build/handasset.o handasset.cpp
+python3 -I tools/hand-asset.py --cpp build/handasset.cpp >/dev/null
+$cxx -I. -c -o build/handasset.o build/handasset.cpp
 $cxx -c -o build/handrobot.o handrobot.cpp
 $cxx -c -o build/handview.o handview.cpp
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"

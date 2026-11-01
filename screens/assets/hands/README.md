@@ -10,7 +10,7 @@ ft-handview draws your hands with one of these (`HANDS_VIEW_MODEL` in `~/.config
 | `godot` | [godot/](godot/README.md) | Godot XR Tools' hands, by DigitalN8m4r3 (Miodrag Sejic) | CC0 1.0 | 1764, 3052 |
 | `mrtk2` | [mrtk2/](mrtk2/README.md) | MRTK2's rigged hand | MIT, (c) Microsoft Corporation | 1334, 2664 |
 
-`screens/tools/hand-asset.py` maps each one's skeleton onto WebXR's 25 hand joints (the names it takes are in its MODELS) and turns them all into `screens/handasset.cpp` (with `screens/handasset.h` declaring it), which ft-handview compiles in once (`screens/handskin.h` poses them). Run it again after changing these files. `screens/tools/hand-glb-clean.py` rewrote the converted ones (each README says how).
+`screens/tools/hand-asset.py` maps each one's skeleton onto WebXR's 25 hand joints (the names it takes are in its MODELS) and turns them all into `handasset.cpp` (with `screens/handasset.h` declaring it), which ft-handview compiles in once (`screens/handskin.h` poses them). `screens/build.sh` makes the data file in `screens/build/` each build; run the script again after changing these files, for the header. `screens/tools/hand-glb-clean.py` rewrote the converted ones (each README says how).
 
 `HANDS_VIEW_MODEL=robot` isn't here: it's built in code from the tracked skeleton (`screens/handrobot.cpp`).
 

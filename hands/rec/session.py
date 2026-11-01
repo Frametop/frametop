@@ -61,6 +61,7 @@ from recorder.common import (mono_ns, clock_sample, in_container, host_command, 
                              write_json, clean_text, tree_version, os_version as _os_version,
                              steamvr_version as _steamvr_version)
 from recorder import bounties  # noqa: E402
+from recorder.controls import Controls, _Redo, _Skip, _Stop  # noqa: E402
 from recorder.privacy import strip_calibration  # noqa: E402
 from recorder import fhformat  # noqa: E402  (the camera ring's layout)
 from recorder.units import unit_active, start_unit, stop_unit, pause_units, resume_units, restart_units  # noqa: E402
@@ -1393,19 +1394,7 @@ def plan_summary(script, plan, auto=False):
 # ------------------------------------------------------------------------------------------
 # The session
 
-class _Skip(Exception):
-    pass
-
-
-class _Stop(Exception):
-    pass
-
-
 class _Fail(Exception):
-    pass
-
-
-class _Redo(Exception):
     pass
 
 
@@ -1529,7 +1518,7 @@ def camera_text(result):
             "headset if that doesn't fix it." % result.get("reason", ""))
 
 
-class Session:
+class Session(Controls):
     """One recording session. start() runs it in its own thread; next_step(), pause(), resume(),
     redo(), skip() and stop() steer it from any thread. on_status(dict) is called from the
     session thread whenever something changes (the keys of _status).
@@ -1543,6 +1532,8 @@ class Session:
     if it fails (not in a dry run, nor with ring). hands_reader (a test hook): an object whose
     read() stands in for the hands file, read in a dry run too. quick: the quick round (a few
     sections, about 3 min). seed: the sweeps' shuffle (default: from the session's id)."""
+    THREAD_NAME = "handrec-session"
+    RESUME_HINT, RESUME_HINT_BUTTON = RESUME_HINT, RESUME_HINT_BUTTON
 
     def __init__(self, base_dir, profile, checklist, lighting_choice, script_path, *, ring=None,
                  start_processes=True, dry_run=False, speed=1.0, on_status=None, hands_dir=None, panel_bin=None,
@@ -1653,17 +1644,6 @@ class Session:
         self._sides_read = 0.0     # when the side camera decision was last read
 
     # --- controls (any thread)
-    def start(self):
-        if self._thread:
-            raise RuntimeError("the session has started already")
-        self._thread = threading.Thread(target=self._run, name="handrec-session", daemon=True)
-        self._thread.start()
-
-    def _set(self, key, value):
-        with self._lock:
-            self._want[key] = value
-        self._wake.set()
-
     def button_gesture(self, gesture):
         """The headset's button (ButtonGestures). A press: Next while a step waits, pause during
         a countdown or hold (and auto mode's timed screens), resume while paused. A double press:
@@ -1708,10 +1688,6 @@ class Session:
             return
         self._log("headset button (%s)" % ("resume" if paused else "next" if self._waiting else "pause"))
 
-    def next_step(self):
-        """Step mode: start the step that's waiting (its countdown)."""
-        self._set("next", True)
-
     def mark(self):
         """A debug session: something went wrong just now (a "mark" event in the take)."""
         with self._lock:
@@ -1728,30 +1704,6 @@ class Session:
         if self.debug:
             return
         self._set("redo", True)
-
-    def pause(self):
-        self._set("pause", True)
-
-    def resume(self):
-        self._set("pause", False)
-
-    def skip(self):
-        self._set("skip", True)
-
-    def stop(self, wait=20.0):
-        """Stop. The take in progress is kept as far as it got. Blocks until the session has
-        written its files (up to wait seconds), unless called from the session thread."""
-        self._set("stop", True)
-        if self._thread and threading.current_thread() is not self._thread and wait:
-            self._thread.join(wait)
-
-    def join(self, timeout=None):
-        if self._thread:
-            self._thread.join(timeout)
-
-    @property
-    def state(self):
-        return self._status["state"]
 
     # --- status and logging
     def _emit(self, force=True, **changes):
@@ -2151,69 +2103,15 @@ class Session:
         self.profile = profile
 
     # --- the timing loop
-    def _controls(self):
-        """Handle a pause (blocking until resumed), skip, stop and redo (only where _redo_ok:
-        else it's dropped). True if a pause happened."""
-        with self._lock:
-            want = dict(self._want)
-            self._want["skip"] = self._want["redo"] = False
-        if want["stop"]:
-            raise _Stop()
-        if want["skip"]:
-            raise _Skip()
-        if want["redo"] and self._redo_ok:
-            raise _Redo()
-        if not want["pause"]:
-            return False
-        self._pause()
-        outcome = None
-        while outcome is None:
-            self._wake.wait(0.2)
-            self._wake.clear()
-            with self._lock:
-                want = dict(self._want)
-                self._want["skip"] = self._want["redo"] = False
-                redo = want["redo"] and self._redo_ok
-                if want["skip"] or redo:
-                    self._want["pause"] = False
-            if want["stop"]:
-                outcome = _Stop
-            elif want["skip"]:
-                outcome = _Skip
-            elif redo:
-                outcome = _Redo
-            elif not want["pause"]:
-                outcome = True
-        self._unpause(record=outcome is True)
-        if outcome is not True:
-            raise outcome()
-        return True
+    # recorder/controls.py's hooks (its _controls() is the loop's pause, skip, stop and redo)
+    def _recording_off(self):
+        self._stop_recording()
 
-    def _pause(self):
-        self._paused = True
-        self._state_before = self._status["state"]
-        self._paused_recording = self._recording
-        if self._recording:
-            self._stop_recording()
-            self._event("pause")
-        hint = RESUME_HINT_BUTTON if self._button_ok() else RESUME_HINT
-        self._panel.cmd("paused on")
-        self._panel.set("note", "note " + hint)
-        self._emit(state="paused", note=hint)
-        self._log("paused")
+    def _recording_on(self):
+        self._start_recording()
 
-    def _unpause(self, record=True):
-        self._paused = False
-        self._panel.cmd("paused off")
-        self._panel.set("note", "note ")
-        self._fb.clear()
-        with self._lock:
-            self._want["next"] = False   # a Next pressed while paused doesn't count
-        if self._take and self._paused_recording and record:
-            self._event("resume")
-            self._start_recording()
-        self._emit(state=self._state_before, note="")
-        self._log("resumed")
+    def _unpaused(self):
+        self._fb.clear()   # feedback timers start over
 
     def _wait(self, seconds, tick=None, countdown=True):
         """Let `seconds` (script time) pass, handling the controls and feedback. tick(dt) runs

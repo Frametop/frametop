@@ -86,17 +86,27 @@ class TakeTest(unittest.TestCase):
         self.assertIsNone(one_window._bind(n))   # still its
 
     def test_stuck_window_gets_sigterm(self):
-        """A process named like the recorder that listens and never answers: SIGTERM ends it."""
+        """A process named like the recorder that listens and never answers: SIGTERM ends it. The
+        recorder runs by path (the standalone one) or as a module (python3 -m hands.rec.ft_handrec)."""
+        for by_module in (False, True):
+            with self.subTest(by_module=by_module):
+                self.stuck_window(by_module)
+
+    def stuck_window(self, by_module):
         n = name()
         with tempfile.TemporaryDirectory() as tmp:
-            script = os.path.join(tmp, "ft_handrec.py")
+            os.makedirs(os.path.join(tmp, "pkg", "rec"))
+            for init in ("pkg", os.path.join("pkg", "rec")):
+                open(os.path.join(tmp, init, "__init__.py"), "w").close()
+            script = os.path.join(tmp, "pkg", "rec", "ft_handrec.py")
             with open(script, "w") as f:
                 f.write("import socket, time\n"
                         "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
                         "s.bind('\\0%s'); s.listen(4)\n"
                         "print('up', flush=True)\n"
                         "time.sleep(60)\n" % n)
-            p = subprocess.Popen([sys.executable, script], stdout=subprocess.PIPE)
+            argv = [sys.executable, "-m", "pkg.rec.ft_handrec"] if by_module else [sys.executable, script]
+            p = subprocess.Popen(argv, stdout=subprocess.PIPE, cwd=tmp)
             try:
                 self.assertEqual(p.stdout.readline().strip(), b"up")
                 one_window.ask.__defaults__ = (0.5,)

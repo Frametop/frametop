@@ -85,11 +85,15 @@ def ask(name, command, timeout=ASK_S):
 
 
 def _is_recorder(pid, script):
+    """pid runs script (ft_handrec.py): by path, or as a module (python3 -m hands.rec.ft_handrec)."""
     try:
         with open("/proc/%d/cmdline" % pid, "rb") as f:
-            return any(os.path.basename(a.decode(errors="replace")) == script for a in f.read().split(b"\0"))
+            args = [a.decode(errors="replace") for a in f.read().split(b"\0")]
     except OSError:
         return False
+    module = os.path.splitext(script)[0]
+    return any(os.path.basename(a) == script for a in args) or \
+        any(a == "-m" and b.rsplit(".", 1)[-1] == module for a, b in zip(args, args[1:]))
 
 
 def take(name, script, log=lambda line: None, wait=TAKE_S):

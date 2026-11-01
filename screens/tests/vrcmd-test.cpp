@@ -38,7 +38,8 @@ int main() {
         {"grabthat off", GrabThat}, {"cutouts matte mesh", Cutouts}, {"wallpaper on", Wallpaper}, {"float 5 0.0008 0 0 1280 800 30", Float},
         {"hold 5 250", Hold}, {"unfloat 5", Unfloat}, {"pose 5 1 0 0 0 0 1 0 1.6 0 0 1 -1", Pose},
         {"sub 5 1 10 20 300 200", Sub}, {"sub 5 1 off", Sub}, {"minimized 5 1", Minimized},
-        {"moving 5 1", Moving}, {"torn 5 100 200", Torn}, {"carry 5", Carry}, {"up", Up}, {"spin 30", Spin},
+        {"moving 5 1", Moving}, {"torn 5 100 200", Torn}, {"carry toggle", CarryToggle}, {"carry take 5", CarryTake},
+        {"carryturn 1.5 -2", CarryTurn}, {"carry 5", Carry}, {"up", Up}, {"spin 30", Spin},
         {"front 2", Front}, {"debug", Debug}, {"state", State},
     };
     bool all = true;

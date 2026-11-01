@@ -23,6 +23,10 @@ constexpr int kKeep = 64;
 // w x h pixels, RGBA, straight alpha (as SetOverlayRaw took them), onto overlay o. Falls back to
 // SetOverlayRaw if the buffers can't be made.
 vr::EVROverlayError Set(vr::VROverlayHandle_t o, const uint8_t *px, int w, int h);
+// For an image that changes every frame (the carry's grids, vr.cpp: UpdateCarryAids): two buffers kept
+// for the overlay, imported once (again if the size changes), drawn into in turn, so a frame's image
+// isn't a new import, nor drops the others' kept ones. False if they can't be made.
+bool Stream(vr::VROverlayHandle_t o, const uint8_t *px, int w, int h);
 // The overlay is going (before DestroyOverlay): its image may be dropped.
 void Forget(vr::VROverlayHandle_t o);
 // Every image dropped (at shutdown, after the overlays are gone).

@@ -487,7 +487,10 @@
 //
 // Commands (datagrams on @ft_pointer_helper): show, hide [toggle|idle|pause] (why: see "Gaze owns
 // the pointer"), recenter, move <dyaw> <dpitch>, follow on|off|toggle (head follow, until the next
-// restart or a change to POINTER_FOLLOW),
+// restart or a change to POINTER_FOLLOW), follow carry on [x y z]|off (ft-screens: head-locked, no leash, the cursor kept on x y z, while
+// carry_toggle carries a panel; the setting above comes back after), carry turn on|off (ft-screens: Alt
+// held during that carry: mouse moves go to it as "carryturn <dyaw> <dpitch>", not to the cursor), aimat <x> <y> <z> (ft-screens: the
+// cursor points at that point, standing universe),
 // gaze on|off|toggle|? (gaze mode, likewise with POINTER_GAZE; ? only asks, "? headset" adds
 // worn|away to the reply, and "? headset on-at" also "on-at NS": the CLOCK_BOOTTIME time the
 // headset last went back on after it was off, 0 if not since this started, for ft-stream's host
@@ -1114,6 +1117,10 @@ struct Pointer {
     // Head follow (see the top). followConf is POINTER_FOLLOW as last read: a reload only
     // overrides a "follow" command when the setting itself changed.
     bool follow = false, followConf = false, followReset = true;
+    bool carryFollow = false;  // "follow carry on": head-locked while ft-screens' carry_toggle carries a panel
+    bool carryAimPending = false;  // ... "on x y z": the cursor kept on that point as the origin goes to the eye
+    Vec3 carryAim{};
+    bool carryTurn = false;    // "carry turn on": the mouse turns the carried panel (Alt held), the cursor stays
     // Gaze mode (see the top); gazeConf is POINTER_GAZE as last read, like followConf.
     bool gazeOn = false, gazeConf = false;
     double gazeRetake = 5, gazeNudgeMax = 55, gazeHold = 0.5, gazeShow = 1, gazeControlHold = 0.12;
@@ -1933,6 +1940,14 @@ struct Pointer {
             tiltPitch = std::clamp(tiltPitch + b, -80.0, 80.0);
             return;
         }
+        if (carryTurn) {
+            // ft-screens turns the panel it carries by the move; the cursor stays on it (user, 2026-11-01:
+            // turning it far moved the cursor far away from the window)
+            char msg[64];
+            std::snprintf(msg, sizeof msg, "carryturn %.4f %.4f", a, b);
+            SendTo(out, FT_SOCK_SCREENS, msg);
+            return;
+        }
         lastMove = Clock::now();  // the dot shows while the mouse moves it (gaze mode)
         if (gazeOn && gazeOwns) {
             // The mouse takes the pointer from the gaze, from where the gaze left it.
@@ -2522,10 +2537,13 @@ void Pointer::GazeAwake() {
     }
     // Hand gestures in the last two minutes keep it the same way.
     const bool handsRecent = handsOn && handUsed != Clock::time_point{} && t - handUsed < std::chrono::minutes(2);
-    const bool awake = (gazeOn || handsRecent) && !inGame && !headsetOff;
+    // So does ft-screens' carry-all ("follow carry on"; user, 2026-11-01: the relay's idle release
+    // ended a carry while the head, not the mouse, moved it: "disable it during carry-all, as it can
+    // be disruptive to long-range carrying"), in a game too.
+    const bool awake = (((gazeOn || handsRecent) && !inGame) || carryFollow) && !headsetOff;
     if (awake != gazeAwake || t - gazeAwakeAt > std::chrono::seconds(5)) {
         if (awake != gazeAwake)
-            std::printf("%s keeps the pointer: %s\n", gazeOn ? "gaze" : "hand use",
+            std::printf("%s keeps the pointer: %s\n", carryFollow ? "carry-all" : gazeOn ? "gaze" : "hand use",
                         awake ? "yes" : "no (off, in a game, or headset off)");
         gazeAwake = awake;
         gazeAwakeAt = t;
@@ -2856,6 +2874,31 @@ void Pointer::ButtonCommand(const char *buf) {
                     "controller pickup %.1fx, %zu ignored\n",
                     freeDistance, cursorDeg, originFraction, follow ? "on" : "off", leashDeg, pickupScale,
                     ignore.size());
+    } else if (std::strncmp(buf, "follow carry ", 13) == 0) {
+        // ft-screens' carry_toggle: the cursor follows the head with no leash while a panel is
+        // carried (the panels follow it there too), then head follow is as it was.
+        // "on x y z" (the carried panel's held point): the cursor stays on it as the ray's origin
+        // goes to the eye (user, 2026-11-01: "when switching to carry-all, the carried panel almost
+        // always shifts": the origin went to the eye with the same yaw and pitch, so the cursor
+        // jumped, and the panel with it).
+        const bool on = std::strncmp(buf + 13, "on", 2) == 0;
+        if (on && !carryFollow) followReset = true;
+        double at[3];
+        if (on && !carryFollow && std::sscanf(buf + 13, "on %lf %lf %lf", &at[0], &at[1], &at[2]) == 3)
+            carryAimPending = true, carryAim = Vec3{at[0], at[1], at[2]};
+        if (!on) carryAimPending = false;
+        carryFollow = on;
+        std::printf("head follow for a carry %s\n", on ? "on" : "off");
+    } else if (std::strncmp(buf, "carry turn ", 11) == 0) {
+        carryTurn = std::strncmp(buf + 11, "on", 2) == 0;
+    } else if (double at[3]; std::sscanf(buf, "aimat %lf %lf %lf", &at[0], &at[1], &at[2]) == 3) {
+        // ft-screens (carry_toggle's Tab): the cursor points from the ray's origin at that point
+        // (standing universe).
+        if (anchored) {
+            const Vec3 d = Normalize(Vec3{at[0], at[1], at[2]} - anchor);
+            yaw = std::atan2(-d.x, -d.z) * 180 / M_PI;
+            pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
+        }
     } else if (std::strncmp(buf, "follow", 6) == 0) {
         const char *arg = buf + 6;
         while (*arg == ' ') ++arg;
@@ -3901,14 +3944,14 @@ void Pointer::HeadFollow() {
     const auto &hm = fr.all[0].mDeviceToAbsoluteTracking.m;
     // Head follow (see the top): past the leash (for the delay), ease the reference to the
     // head's facing, and turn the cursor with it. Not in gaze mode: the gaze places it.
-    if (follow && !gazeOn && active && anchored && fr.all[0].bPoseIsValid && !fr.rayMode) {
+    if ((follow || carryFollow) && !gazeOn && active && anchored && fr.all[0].bPoseIsValid && !fr.rayMode) {
         const Vec3 head = LimitPitch(Vec3{-hm[0][2], -hm[1][2], -hm[2][2]}, posemath::kPitchClampDeg);
         if (followReset) {
             followRef = head, followLag = 0, leashOutSince = {};
             followReset = following = false;
         }
         const double dt = std::min(0.1, std::chrono::duration<double>(fr.tnow - followAt).count());
-        const double leash = leashDeg * M_PI / 180;
+        const double leash = carryFollow ? 0.0 : leashDeg * M_PI / 180;
         const double lag = std::acos(std::clamp(Dot(followRef, head), -1.0, 1.0));
         double keep = lag;  // how far the reference stays behind the head after this frame
         if (leash <= 0) {
@@ -3936,6 +3979,12 @@ void Pointer::HeadFollow() {
             pitch = std::clamp(std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
             // The ray origin closes in on the eye as the reference does on the facing.
             anchor = fr.eye + (anchor - fr.eye) * (leash <= 0 ? 0.0 : lag > 1e-6 ? keep / lag : following ? 0.0 : 1.0);
+            if (carryAimPending) {   // ("follow carry on x y z": still on that point from the new origin)
+                const Vec3 a = Normalize(carryAim - anchor);
+                yaw = std::atan2(-a.x, -a.z) * 180 / M_PI;
+                pitch = std::clamp(std::asin(std::clamp(a.y, -1.0, 1.0)) * 180 / M_PI, -posemath::kPitchClampDeg, posemath::kPitchClampDeg);
+                carryAimPending = false;
+            }
         }
         followRef = ref;
     }

@@ -18,7 +18,8 @@ enum Verb {
     Visibility, Wrist, Gesture, GamepadPill, Concealed, ConcealReveal, HideShowToggle,
     Pause, InGames, SteamvrMode, Controllers, HandSetting, SpinDistance, Hands,
     SteamvrList, Typing, CalPanel, Ray, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
-    Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, Carry, Up, Spin,
+    Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, CarryToggle, CarryTake, CarryTurn, Carry, Up,
+    Spin,
     Front, Debug, State,  // keep State last: kLastVerb, and the test walks Place..kLastVerb
 };
 constexpr Verb kLastVerb = State;
@@ -42,6 +43,7 @@ struct Cmd {
     int k0 = 0;                           // sub
     int on = 0;                           // minimized
     int gx = 0, gy = 0;                   // torn
+    double da = 0, db = 0;                // carryturn
 };
 
 // Which of ft_vr_command's handlers (vr.cpp) runs a verb: one per group of commands. A verb's case
@@ -63,7 +65,8 @@ inline Group GroupOf(Verb v) {
         return HandFeatureGroup;
     case Cutouts: case Wallpaper:
         return CutoutsGroup;
-    case Float: case Hold: case Unfloat: case Sub: case Minimized: case Moving: case Torn: case Carry: case Up:
+    case Float: case Hold: case Unfloat: case Sub: case Minimized: case Moving: case Torn: case CarryToggle:
+    case CarryTake: case CarryTurn: case Carry: case Up:
         return FloatGroup;
     case Spin:
         return SpinGroup;
@@ -126,6 +129,9 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "minimized %d %d", &c.n, &c.on) == 2) return Minimized;
     if (!std::strncmp(cmd, "moving ", 7)) return Moving;
     if (std::sscanf(cmd, "torn %d %d %d", &c.n, &c.gx, &c.gy) == 3) return Torn;
+    if (std::strcmp(cmd, "carry toggle") == 0) return CarryToggle;
+    if (std::sscanf(cmd, "carry take %d", &c.n) == 1) return CarryTake;
+    if (std::sscanf(cmd, "carryturn %lf %lf", &c.da, &c.db) == 2) return CarryTurn;
     if (std::sscanf(cmd, "carry %d", &c.n) == 1) return Carry;
     if (std::strcmp(cmd, "up") == 0) return Up;
     if (!std::strncmp(cmd, "spin ", 5)) return Spin;

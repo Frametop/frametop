@@ -104,6 +104,7 @@ lets go.
 
 In gaze mode outside games, the helper keeps the pointer ("gazeawake 1", repeated every 5
 seconds; "gazeawake 0" or silence ends it): the pointer isn't released when the mouse is idle.
+It says the same during ft-screens' carry-all, in games too (the head carries the panels then).
 When something else let the pointer go, the gaze takes it back and the helper says "gazewoke"
 (the pointer is on again here too). The hides here say why: "hide toggle" (pointer_toggle: the
 gaze leaves it off until something wakes it), "hide idle", "hide pause".
@@ -334,7 +335,7 @@ RULES_PATH = os.path.expanduser("~/.config/frametop-input.json")
 ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashboard", "recenter",
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
-           "dock_all", "spin_next", "spin_prev", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
+           "dock_all", "spin_next", "spin_prev", "carry_toggle", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
            "frunner", "hands_toggle", "release_keys", "key", "none")
 # GAZE_ACTIONS (mouse and keyboard only) and DEFAULT_KEY_BINDINGS, the key combinations a rules
 # file without "key_bindings" gets, are ft_input_actions'.
@@ -382,8 +383,11 @@ FLOAT = "\0frametop_float"  # ft-floatd, floating windows in the Frametop deskto
 FLOAT_ACTIONS = {"float_toggle": b"float pointer", "dock_all": b"dock all"}
 # Actions for ft-screens: spin_next and spin_prev turn every panel in the room about your head,
 # so the next one to the right or left comes to the front, and screens_toggle hides or shows the
-# screens. They don't need pointer mode either.
-SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev", "screens_toggle": b"toggle"}
+# screens. carry_toggle carries the panel under the 3D mouse (off any panel: the one nearest your gaze)
+# with its ray until a click or Enter (Esc puts it back); another press meanwhile turns carry-all on or off (Meta+A is the
+# Arteck HB305 touchpad's four-finger tap). They don't need pointer mode either.
+SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev", "screens_toggle": b"toggle",
+                   "carry_toggle": b"carry toggle"}
 # frunner (frunner/ft-frunner, in the Frametop desktop) opens or closes its search; it's told
 # what pressed it, since one from a mouse or controller opens Frametop's keyboard too. It doesn't
 # need pointer mode, and does nothing while Frametop is paused.

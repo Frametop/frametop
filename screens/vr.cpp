@@ -353,12 +353,23 @@ struct Screen {
     int cropX = 0, cropY = 0, cropW = 0, cropH = 0;
     int titleH = 0;
     double mpp = 0;               // metres per buffer pixel
+    double userScale = 1;         // times ft-floatd's density: Alt and the wheel in a carry (CarryScale)
     bool titleCarry = false;      // carried by its title bar: KWin's pointer stays at carryX, carryY
     double carryX = 0, carryY = 0;
     // A floating window carried onto a screen (UpdateDockAims): it docks there when let go, held at
     // dockGX, dockGY (its pixels) put at dockX, dockY (the screen's); -1: nowhere.
     int dockOn = -1;
     int dockX = 0, dockY = 0, dockGX = 0, dockGY = 0;
+    // Carried by "carry toggle" (CarryToggle, UpdateToggleCarry): the 3D mouse's ray holds carryGrab (a
+    // point on it, panel-local) carryDist from the eye, facing the head, turned by carryTurn. carryMode 1
+    // (Ctrl held): it moves in carryPlane's plane; 2 (Alt held): it turns about its centre, at carryAt.
+    bool toggleCarry = false;
+    int carryMode = 0;
+    double carryDist = 0, carryAt[3] = {};
+    double carryEye[3] = {};      // the sphere's centre (no modifier): the eyes when the carry or this mode began
+    int carryAims = 0;            // "aimat"s sent while it waits for the cursor (carryWaitUntil)
+    Mat carryGrab{}, carryTurn{}, carryPlane{};
+    int64_t carryWaitUntil = 0;   // Tab brought it: it waits (till then) for the cursor to come to its centre
     // A resize by a corner or two fists only stretches the panel, to this many pixels at its density,
     // and the window gets them in one resize when it ends (user, 2026-10-27: "it doesn't actually update
     // the pixels ... until I release so we can have the animation be smooth"). Kept until the answer's
@@ -1676,7 +1687,8 @@ void EndDrag(Screen &s) {
     if (s.drag == Drag::Resize && s.floating) SendStretch(s);
     s.drag = Drag::None;
     s.dragDevice = kNone;
-    s.dragFacing = false;
+    s.dragFacing = s.toggleCarry = false;
+    s.carryMode = 0;
     s.dockOn = -1;
     s.pinTarget = s.onWrist = kNone;
     LightBar(s, false);
@@ -1859,9 +1871,201 @@ void ResizeScreen(Screen &s, double cu, double cv) {
     else SetAbsolute(s, Mul(p, moved), s.universe);
 }
 
+bool g_ctrl = false, g_alt = false;  // Ctrl, Alt held on a keyboard (ft_vr_key), for a carry
+
+// Where the 3D mouse points, from the eye: the pointer helper starts its laser on the line from the
+// eye to the cursor, 0.15 m short of the cursor (POINTER_ORIGIN_MARGIN), so the laser's start isn't a
+// pivot (2026-10-31: a carry measured from it ran away on the first scroll); at the eye (the driver's
+// own aim), the laser's direction. A hand ray: the laser itself.
+bool CarryRay(vr::TrackedDeviceIndex_t dev, double eye[3], double dir[3]) {
+    Mat l, head;
+    if (!LaserPose(dev, &l) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
+    double v[3];
+    for (int k = 0; k < 3; ++k) eye[k] = HandRay(dev) ? l.m[k][3] : head.m[k][3], v[k] = l.m[k][3] - eye[k];
+    const double n = std::sqrt(Dot3(v, v));
+    for (int k = 0; k < 3; ++k) dir[k] = n > 0.05 ? v[k] / n : -l.m[k][2];
+    return true;
+}
+// A laser pose for RayOnSurface along that ray (it reads only the position and the z axis).
+Mat RayMat(const double eye[3], const double dir[3]) {
+    Mat m = Identity();
+    for (int k = 0; k < 3; ++k) m.m[k][2] = float(-dir[k]), m.m[k][3] = float(eye[k]);
+    return m;
+}
+// The carried panel facing the head with its grab point at `at`, turned by carryTurn.
+Mat ToggleCarryPose(const Screen &s, const double at[3], const Mat &head) {
+    Mat p = Mul(FacingPose(at, head), s.carryTurn);
+    const Mat g = Mul(p, s.carryGrab);
+    for (int k = 0; k < 3; ++k) p.m[k][3] += float(at[k] - g.m[k][3]);
+    return p;
+}
+// The carry goes on from the panel where it is now (Ctrl or Alt pressed or let go): the grab point is
+// where the ray meets it now (or its plane, off its edge), and carryTurn keeps it turned as it is.
+void Regrab(Screen &s, const double eye[3], const double dir[3], const Mat &head) {
+    Mat p;
+    if (!ScreenPose(s, &p)) return;
+    double u, v, t;
+    const double n[3] = {p.m[0][2], p.m[1][2], p.m[2][2]}, w[3] = {p.m[0][3] - eye[0], p.m[1][3] - eye[1], p.m[2][3] - eye[2]};
+    if (RayOnSurface(s, p, RayMat(eye, dir), &u, &v, &t)) {
+        s.carryGrab = OnSurface(s, u, v, 0), s.carryDist = t;
+    } else if (std::fabs(Dot3(dir, n)) > 0.05 && (t = Dot3(w, n) / Dot3(dir, n)) > 0.3) {
+        const Mat inv = Inverse(p);
+        double local[3];
+        for (int i = 0; i < 3; ++i)
+            local[i] = inv.m[i][3] + inv.m[i][0] * (eye[0] + dir[0] * t) + inv.m[i][1] * (eye[1] + dir[1] * t) + inv.m[i][2] * (eye[2] + dir[2] * t);
+        s.carryGrab = Translation(local[0], local[1], 0), s.carryDist = t;
+    }
+    const Mat g = Mul(p, s.carryGrab);
+    const double at[3] = {g.m[0][3], g.m[1][3], g.m[2][3]};
+    s.carryTurn = Mul(Inverse(FacingPose(at, head)), p);
+    for (int k = 0; k < 3; ++k) s.carryTurn.m[k][3] = 0;
+    // (off the panel and its plane: the old grab point, carried at its distance now)
+    s.carryDist = std::clamp(std::sqrt((at[0] - eye[0]) * (at[0] - eye[0]) + (at[1] - eye[1]) * (at[1] - eye[1]) +
+                                       (at[2] - eye[2]) * (at[2] - eye[2])), 0.05, 50.0);   // (as it is: not moved)
+    for (int k = 0; k < 3; ++k) s.carryEye[k] = eye[k];
+}
+
+// The pointer helper's mouse moves while Alt turns a carried panel ("carryturn <dyaw> <dpitch>", degrees,
+// +yaw left, +pitch up): the cursor stays where it is, the panel turns by them (UpdateToggleCarry).
+double g_carryTurnYaw = 0, g_carryTurnPitch = 0;
+bool g_carryTurnOn = false;   // the helper told "carry turn on" (off again when the carry ends, UpdateCarryAids)
+
+// A carry_toggle carry (CarryToggle; user, 2026-10-31): the grab point stays on the 3D mouse's ray,
+// carryDist from carryEye (where the eyes were), and the panel turns to face the head there, as a hand ray's carry does. With
+// Ctrl held it moves in its own plane as it was when Ctrl went down, not turning; with Alt held it stays
+// where it is, as it is in the room (carryPlane), and the mouse turns it about its centre (right: its
+// right edge goes away; up: its top), the cursor held still meanwhile (the helper's "carry turn").
+void UpdateToggleCarry(Screen &s) {
+    Mat head;
+    double eye[3], dir[3];
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) || !CarryRay(s.dragDevice, eye, dir)) return;
+    if (s.carryWaitUntil) {
+        // Taken by its centre (CarryTake): still till the cursor points there (the helper's "aimat", sent
+        // again every 0.4 s, three times at most), then held where the ray is on it. It doesn't move
+        // before the ray is on it (user, 2026-11-01: "sometimes, carry init changes the target panel's
+        // XYZ. this should not happen": after 0.3 s it was held wherever the ray was, off it too, and
+        // jumped onto the ray).
+        Mat p;
+        if (!ScreenPose(s, &p)) return;
+        double to[3] = {p.m[0][3] - eye[0], p.m[1][3] - eye[1], p.m[2][3] - eye[2]};
+        const double n = std::sqrt(Dot3(to, to)) + 1e-9;
+        for (double &v : to) v /= n;
+        if (Dot3(to, dir) < std::cos(3 * M_PI / 180)) {
+            if (NowMs() < s.carryWaitUntil) return;
+            if (s.carryAims < 3) {
+                char msg[96];
+                std::snprintf(msg, sizeof msg, "aimat %.4f %.4f %.4f", p.m[0][3], p.m[1][3], p.m[2][3]);
+                SendPointer(msg);
+                ++s.carryAims, s.carryWaitUntil = NowMs() + 400;
+                return;
+            }
+            double u, v, t;
+            if (!RayOnSurface(s, p, RayMat(eye, dir), &u, &v, &t)) return;   // (the cursor didn't come: when the mouse brings it)
+        }
+        s.carryWaitUntil = 0;
+        Regrab(s, eye, dir, head);
+    }
+    const int mode = g_ctrl ? 1 : g_alt ? 2 : 0;
+    if (mode != s.carryMode) {
+        Regrab(s, eye, dir, head);
+        Mat p;
+        if ((mode == 1 || mode == 2) && ScreenPose(s, &p)) s.carryPlane = p;
+        if (mode == 2 && ScreenPose(s, &p)) {
+            for (int k = 0; k < 3; ++k) s.carryAt[k] = p.m[k][3];
+            s.carryTurn = Mul(Inverse(FacingPose(s.carryAt, head)), p);
+            for (int k = 0; k < 3; ++k) s.carryTurn.m[k][3] = 0;
+        }
+        if ((mode == 2) != g_carryTurnOn) SendPointer(mode == 2 ? "carry turn on" : "carry turn off"), g_carryTurnOn = mode == 2;
+        g_carryTurnYaw = g_carryTurnPitch = 0;
+        std::printf("screen %d: carry_toggle: %s\n", ScreenIndexOf(s) + 1,
+                    mode == 1 ? "Ctrl: in its plane" : mode == 2 ? "Alt: turning" : "facing you");
+        s.carryMode = mode;
+    }
+    Mat p;
+    if (mode == 1) {
+        const Mat g = Mul(s.carryPlane, s.carryGrab);
+        const double n[3] = {s.carryPlane.m[0][2], s.carryPlane.m[1][2], s.carryPlane.m[2][2]};
+        const double w[3] = {g.m[0][3] - eye[0], g.m[1][3] - eye[1], g.m[2][3] - eye[2]}, den = Dot3(dir, n);
+        if (std::fabs(den) < 0.05) return;  // the ray along the plane: it stays
+        const double t = Dot3(w, n) / den;
+        if (t < 0.3 || t > 10) return;
+        p = s.carryPlane;
+        for (int k = 0; k < 3; ++k) p.m[k][3] += float(eye[k] + dir[k] * t - g.m[k][3]);
+        s.carryDist = t;
+    } else if (mode == 2) {
+        // the mouse's turn since the last tick, twice over, in the facing frame
+        const double b = -2 * g_carryTurnYaw * M_PI / 180, a = -2 * g_carryTurnPitch * M_PI / 180;
+        g_carryTurnYaw = g_carryTurnPitch = 0;
+        Mat ry = Identity(), rx = Identity();
+        ry.m[0][0] = ry.m[2][2] = float(std::cos(b)), ry.m[0][2] = float(std::sin(b)), ry.m[2][0] = float(-std::sin(b));
+        rx.m[1][1] = rx.m[2][2] = float(std::cos(a)), rx.m[1][2] = float(-std::sin(a)), rx.m[2][1] = float(std::sin(a));
+        // (about the axes of the view from the head, but kept as it is in the room meanwhile: user,
+        // 2026-11-01: "when holding alt, the carried window constantly changes its rotation relative to
+        // the user's head. it should only do this during default (sphere) movement")
+        Mat F = FacingPose(s.carryAt, head);
+        for (int k = 0; k < 3; ++k) F.m[k][3] = 0;
+        Mat r = s.carryPlane;
+        for (int k = 0; k < 3; ++k) r.m[k][3] = 0;
+        r = Mul(Mul(Mul(F, Mul(ry, rx)), Inverse(F)), r);
+        s.carryPlane = r;
+        p = r;
+        for (int k = 0; k < 3; ++k) p.m[k][3] = float(s.carryAt[k]);
+        const Mat facing = FacingPose(s.carryAt, head);
+        s.carryTurn = Mul(Inverse(facing), p);
+        for (int k = 0; k < 3; ++k) s.carryTurn.m[k][3] = 0;
+    } else {
+        // where the ray meets the sphere round carryEye (where the eyes were), not round the eyes now: the
+        // head moving doesn't move it, only the cursor does (user, 2026-11-01: "it would be ideal if its
+        // position stayed and only updated via cursor movement"). Off it (the head out past it): the
+        // ray's nearest point to its centre.
+        const double w[3] = {eye[0] - s.carryEye[0], eye[1] - s.carryEye[1], eye[2] - s.carryEye[2]};
+        const double b = Dot3(w, dir), disc = b * b - (Dot3(w, w) - s.carryDist * s.carryDist);
+        const double t = std::max(0.05, disc >= 0 ? -b + std::sqrt(disc) : -b);
+        double at[3];
+        for (int k = 0; k < 3; ++k) at[k] = eye[k] + dir[k] * t;
+        p = ToggleCarryPose(s, at, head);
+    }
+    SetAbsolute(s, p);
+    Mat d;
+    if (DevicePose(s.dragDevice, &d)) CheckWristAim(s, d, p);
+}
+
+// Pose p with its roll undone, so its bottom edge is level, about the point pivotLocal (in it), facing
+// the same way. False facing straight up or down (no level to find).
+bool LevelledPose(const Mat &p, const Mat &pivotLocal, Mat *out) {
+    const double z[3] = {p.m[0][2], p.m[1][2], p.m[2][2]};
+    double x[3] = {z[2], 0, -z[0]};  // up x z
+    const double xl = std::sqrt(x[0] * x[0] + x[2] * x[2]);
+    if (xl < 1e-3) return false;
+    x[0] /= xl, x[2] /= xl;
+    const double y[3] = {z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
+    const Mat pivot = Mul(p, pivotLocal);
+    Mat l{};
+    for (int i = 0; i < 3; ++i) l.m[i][0] = float(x[i]), l.m[i][1] = float(y[i]), l.m[i][2] = float(z[i]);
+    const Mat moved = Mul(l, pivotLocal);
+    for (int i = 0; i < 3; ++i) l.m[i][3] = pivot.m[i][3] - moved.m[i][3];
+    *out = l;
+    return true;
+}
+
+// The carried panel put at pose l (Space: levelled or facing the head, CarrySpace), the carry kept on
+// from there: Ctrl's plane and Alt's turn are l's, and the point held is where the ray is on it now.
+void CarrySet(Screen &s, const Mat &l) {
+    Mat head;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
+    SetAbsolute(s, l);
+    if (s.carryMode == 1 || s.carryMode == 2) s.carryPlane = l;
+    double eye[3], dir[3];
+    if (s.carryMode != 2 && CarryRay(s.dragDevice, eye, dir)) return Regrab(s, eye, dir, head);
+    const double at[3] = {l.m[0][3], l.m[1][3], l.m[2][3]};
+    s.carryTurn = Mul(Inverse(FacingPose(at, head)), l);
+    for (int k = 0; k < 3; ++k) s.carryTurn.m[k][3] = 0;
+}
+
 void UpdateDrag(Screen &s, int index) {
     Mat d;
     if (!DevicePose(s.dragDevice, &d)) return;
+    if (s.toggleCarry) return UpdateToggleCarry(s);
     if (s.drag == Drag::Move) {
         Mat p = Mul(d, s.dragRel), head;
         if (s.dragFacing && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
@@ -1890,16 +2094,63 @@ void UpdateDrag(Screen &s, int index) {
     ResizeScreen(s, hx - s.grabX, hy - s.grabY);
 }
 
+// Panel s f times as wide (and high), about its centre: a floating window's density changes
+// (userScale: ft-floatd's next "float" keeps it; its pixels don't change), a screen's width.
+void ScalePanel(Screen &s, double f) {
+    if (s.floating && s.mpp > 0 && s.cropW > 0) {
+        const double px = s.stretchW > 0 ? s.stretchW : s.cropW;
+        f = std::clamp(s.mpp * f * px, kMinWidth, 12.0) / (s.mpp * px);
+        s.userScale *= f, s.mpp *= f;
+        s.metres = px * s.mpp;
+        vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+        CapCurve(s);
+        ApplyCurve(s);
+        PlaceChrome(s);
+        PlaceSubs(s);
+        return;
+    }
+    SetWidth(s, s.metres * f);
+}
+
+// Alt and the wheel while carrying (user, 2026-11-01: "can we have "alt + scroll" change panel scale in
+// small increments?"): 3% a notch (1% with Ctrl too), about its centre; the point held stays under the
+// ray (carryGrab scales with it).
+void CarryScale(Screen &s, double notches) {
+    const double before = s.metres;
+    ScalePanel(s, std::pow(g_ctrl ? 1.01 : 1.03, notches));
+    const double f = s.metres / std::max(1e-6, before);
+    s.carryGrab.m[0][3] *= float(f), s.carryGrab.m[1][3] *= float(f);
+    std::printf("screen %d: carry_toggle: %.2f m wide (Alt and the wheel)\n", ScreenIndexOf(s) + 1, s.metres);
+}
+
 // Scroll while moving: push the screen away (up) or pull it closer, along the line from
 // the head (not from the carrying device: the 3D mouse's device sits just in front of the
-// bar, below the screen's centre, so that line points mostly up).
+// bar, below the screen's centre, so that line points mostly up). A quarter as far a notch
+// with Ctrl held. A carry_toggle carry goes along the ray (carryDist), or with Ctrl or Alt held
+// moves its plane or its centre.
 void Push(Screen &s, double notches) {
+    if (s.toggleCarry && g_alt) return CarryScale(s, notches);
     Mat d, head;
     if (!DevicePose(s.dragDevice, &d) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
-    Mat p = Mul(d, s.dragRel);
+    const double step = g_ctrl ? 0.02 : 0.08;
+    if (s.toggleCarry && s.carryMode == 0) {
+        s.carryDist = std::clamp(s.carryDist * (1 + step * notches), 0.3, 10.0);
+        return;
+    }
+    Mat p = s.carryMode == 1 ? Mul(s.carryPlane, s.carryGrab) : Mul(d, s.dragRel);
+    if (s.carryMode == 2)
+        for (int k = 0; k < 3; ++k) p.m[k][3] = float(s.carryAt[k]);
     const double to[3] = {p.m[0][3] - head.m[0][3], p.m[1][3] - head.m[1][3], p.m[2][3] - head.m[2][3]};
     const double len = std::sqrt(Dot3(to, to));
-    const double next = std::clamp(len * (1 + 0.08 * notches), 0.3, 10.0);
+    const double next = std::clamp(len * (1 + step * notches), 0.3, 10.0);
+    if (s.toggleCarry) {   // Ctrl: its plane moves; Alt: its centre
+        for (int k = 0; k < 3; ++k) {
+            const double move = to[k] / (len + 1e-9) * (next - len);
+            if (s.carryMode == 1) s.carryPlane.m[k][3] += float(move);
+            else s.carryAt[k] += move;
+        }
+        return;
+    }
     for (int k = 0; k < 3; ++k) p.m[k][3] = float(head.m[k][3] + to[k] / (len + 1e-9) * next);
     s.dragRel = Mul(Inverse(d), p);
 }
@@ -1974,7 +2225,7 @@ void SetFloat(Screen &s, double mpp, int x, int y, int w, int h, int title) {
     const bool first = !s.floatOn || s.cropW <= 0;
     const double oldW = s.metres, oldH = s.heightMetres();
     s.floatOn = true;
-    s.mpp = mpp;
+    s.mpp = mpp * s.userScale;
     s.cropX = x, s.cropY = y, s.cropW = w, s.cropH = h, s.titleH = title;
     if (s.drag != Drag::Resize && !FarStretching(s))   // the stretch's answer (or one's still going)
         s.stretchW = s.stretchH = 0;
@@ -1996,6 +2247,7 @@ void ReleaseHold(Screen &s) {
 }
 
 void Unfloat(Screen &s) {
+    s.userScale = 1;
     s.stretchW = s.stretchH = 0;   // (a resize going on goes nowhere)
     if (s.drag != Drag::None) EndDrag(s);
     for (auto &[k, sub] : s.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);
@@ -4415,6 +4667,315 @@ void UpdateTargetGlow() {
     if (!g_target.shown) vr::VROverlay()->ShowOverlay(g_target.overlay), g_target.shown = true;
 }
 
+// carry_toggle's carry-all (user, 2026-11-01: "while in carry mode, all floating screens, windows, and
+// the cursor's origin all follow the user's head"; then "default to only moving the carried window ...
+// have additional four-finger taps toggle carry-all mode"): the other panels in the room (not pinned) keep their
+// place in a frame at the eyes facing the way the head does, without its roll, as the pointer helper's
+// head follow does with no leash ("follow carry on"), which carries the cursor and so the carried panel;
+// Ctrl's plane and Alt's centre move with the frame too. Panels held otherwise meanwhile stay where they
+// are taken (their place in the frame from there). It ends with the carry, or the next tap.
+struct CarryFollow {
+    bool on = false;
+    Mat frame{};                  // the frame last tick
+    std::map<int, Mat> rel;       // panel -> its pose in the frame
+    bool lockOnly = false;        // Space held: only the carried panel (and the cursor) follow (CarrySpaceHold)
+} g_carryFollow;
+
+// The border on the panel the 3D mouse carries (carry_toggle; user, 2026-11-01: "a glowing aqua border
+// with a small air gap between it and the window ... pulse an outward-expanding translucent version of
+// the border every 5 seconds"): softglow::CarryTexture, and from the pick-up on, every kCarryPulseMs,
+// a copy of it that grows kCarryPulseGrow (times the panel's distance) out each side over kCarryPulseRise
+// and fades. Let go (or Tab to another), it pulses once more and fades out over kCarryFadeMs ("rather
+// than having it abruptly disappear"). In carry-all the others the head carries have the same border in
+// fuchsia, not pulsing ("give the unfocused windows a fuchsia border that doesn't pulse"). Each fades in
+// and out over kCarryFadeMs (a fuchsia one is gone at once when it's the one carried now). A slot each, made as it's
+// needed and destroyed when it has faded (SteamVR allows 128 overlays in all): a border overlay
+// ("frametop.guide.carry.N": the pointer helper's cursor and rays pass through guides) and, for the
+// aqua one, its pulse's ("...carry.pulse.N"), sized and curved to the panel, in its plane, as the
+// target glow's.
+constexpr int64_t kCarryPulseMs = 5000, kCarryPulseRise = 1400, kCarryFadeMs = 500;
+constexpr double kCarryPulseGrow = 0.05;
+struct CarryGlow {
+    vr::VROverlayHandle_t border = vr::k_ulOverlayHandleInvalid, pulse = vr::k_ulOverlayHandleInvalid;
+    int panel = -1;
+    bool other = false;                  // fuchsia: one carry-all moves, not the carried one
+    int64_t startMs = 0, letGoMs = -1;   // picked up, let go (-1: still on)
+    int texW = 0, texH = 0;
+    double texDist = 0;           // the distance its sizes are for (again when it moves 15% nearer or farther)
+    double gap = 0, line = 0, glow = 0;
+    bool shown = false, pulseShown = false;
+};
+std::vector<CarryGlow> g_carryGlow;
+int g_carryGlowMade = 0;   // (for the overlays' keys)
+
+void DestroyCarryGlow(CarryGlow &g) {
+    for (auto o : {g.border, g.pulse})
+        if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
+    g.border = g.pulse = vr::k_ulOverlayHandleInvalid;
+}
+
+// False when the slot is done with (gone, or faded out).
+bool UpdateCarryGlowSlot(CarryGlow &g) {
+    const auto it = g_screens.find(g.panel);
+    Mat p;
+    if (it == g_screens.end() || !it->second.visible || !ScreenPose(it->second, &p)) return false;
+    const Screen &c = it->second;
+    const int64_t now = NowMs();
+    const int64_t fadeFor = g.other ? kCarryFadeMs : std::max(kCarryFadeMs, kCarryPulseRise);
+    if (g.letGoMs >= 0 && now - g.letGoMs >= fadeFor) return false;
+    if (g.border == vr::k_ulOverlayHandleInvalid) {
+        const std::string n = std::to_string(++g_carryGlowMade);
+        if (vr::VROverlay()->CreateOverlay(("frametop.guide.carry." + n).c_str(), "Frametop: carried panel", &g.border) != vr::VROverlayError_None)
+            return g.border = vr::k_ulOverlayHandleInvalid, false;
+        vr::VROverlay()->SetOverlaySortOrder(g.border, 1);   // (as the target glow)
+        if (!g.other) {
+            if (vr::VROverlay()->CreateOverlay(("frametop.guide.carry.pulse." + n).c_str(), "Frametop: carried panel's pulse", &g.pulse) !=
+                vr::VROverlayError_None)
+                g.pulse = vr::k_ulOverlayHandleInvalid;
+            else
+                vr::VROverlay()->SetOverlaySortOrder(g.pulse, 1);
+        }
+    }
+    // 1024 across, the line drawn with its edges anti-aliased (softglow::CarryTexture; user, 2026-11-01:
+    // "the existing border looks quite aliased"; it was 512 with hard edges)
+    constexpr int kW = 1024;
+    const double dist = HeadDistance(p), W = c.metres, H = c.heightMetres();
+    if (g.texDist <= 0 || std::fabs(dist / g.texDist - 1) > 0.15) {
+        g.texDist = dist, g.texW = 0;
+        g.gap = std::clamp(0.008 * dist, 0.004, 0.03), g.line = std::clamp(0.003 * dist, 0.002, 0.012), g.glow = softglow::Width(dist);
+    }
+    const double ppm = kW / (W + 2 * (g.gap + g.line + g.glow));   // texture pixels a metre
+    const int m = std::clamp(int(std::lround((g.gap + g.line + g.glow) * ppm)), 3, 240);
+    const int h = std::clamp(int(std::lround(H * ppm)) + 2 * m, 2 * m + 4, 2048);
+    if (kW != g.texW || h != g.texH) {
+        const std::vector<uint8_t> px = softglow::CarryTexture(kW, h, m, g.gap * ppm, std::max(1.5, g.line * ppm), g.glow * ppm,
+                                                               g.other ? softglow::kFuchsia : softglow::kAqua);
+        overlaytex::Set(g.border, px.data(), kW, h);
+        if (g.pulse != vr::k_ulOverlayHandleInvalid) overlaytex::Set(g.pulse, px.data(), kW, h);
+        g.texW = kW, g.texH = h;
+    }
+    auto place = [&](vr::VROverlayHandle_t o, double width) {
+        vr::VROverlay()->SetOverlayWidthInMeters(o, float(width));
+        vr::VROverlay()->SetOverlayCurvature(o, c.curve > 0 ? float(std::clamp(width / (2 * M_PI * c.curve), 0.0, 1.0)) : 0.f);
+        vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &p);
+    };
+    const double width = W * kW / double(kW - 2 * m);
+    place(g.border, width);
+    double fade = g.letGoMs < 0 ? 1 : std::max(0.0, 1 - double(now - g.letGoMs) / kCarryFadeMs);
+    fade = std::min(fade, double(now - g.startMs) / kCarryFadeMs);   // (fading in too: user, 2026-11-01)
+    vr::VROverlay()->SetOverlayAlpha(g.border, float(std::clamp(fade, 0.0, 1.0)));
+    if (!g.shown) vr::VROverlay()->ShowOverlay(g.border), g.shown = true;
+    if (g.pulse == vr::k_ulOverlayHandleInvalid) return true;
+    // the pulse: every kCarryPulseMs from the pick-up; let go, one from then
+    const int64_t phase = g.letGoMs < 0 ? (now - g.startMs) % kCarryPulseMs : now - g.letGoMs;
+    if (phase >= kCarryPulseRise) {
+        if (g.pulseShown) vr::VROverlay()->HideOverlay(g.pulse), g.pulseShown = false;
+        return true;
+    }
+    const double e = double(phase) / kCarryPulseRise, out = 1 - (1 - e) * (1 - e);   // ease out
+    place(g.pulse, width + 2 * kCarryPulseGrow * dist * out);
+    vr::VROverlay()->SetOverlayAlpha(g.pulse, float(0.5 * (1 - e) * (1 - e)));
+    if (!g.pulseShown) vr::VROverlay()->ShowOverlay(g.pulse), g.pulseShown = true;
+    return true;
+}
+
+bool CarryAllHas(int panel) { return g_carryFollow.on && g_carryFollow.rel.count(panel); }   // (carry-all moves it)
+
+void UpdateCarryGlow() {
+    const int64_t now = NowMs();
+    auto want = [](int i, const Screen &s, bool other) { return s.visible && (other ? !s.toggleCarry && CarryAllHas(i) : s.toggleCarry); };
+    // a slot on that shouldn't be any more lets go (fuchsia on the panel carried now: gone at once)
+    for (CarryGlow &g : g_carryGlow) {
+        const auto it = g_screens.find(g.panel);
+        if (g.letGoMs >= 0 || (it != g_screens.end() && want(g.panel, it->second, g.other))) continue;
+        g.letGoMs = now;
+        if (g.other && it != g_screens.end() && it->second.toggleCarry) g.letGoMs = now - kCarryFadeMs;
+    }
+    // a panel that should have one and hasn't, gets one
+    for (const auto &[i, s] : g_screens)
+        for (const bool other : {false, true}) {
+            if (!want(i, s, other)) continue;
+            bool has = false;
+            for (const CarryGlow &g : g_carryGlow) has |= g.panel == i && g.other == other && g.letGoMs < 0;
+            if (has) continue;
+            CarryGlow g;
+            g.panel = i, g.other = other, g.startMs = now;
+            g_carryGlow.push_back(g);
+        }
+    for (auto it = g_carryGlow.begin(); it != g_carryGlow.end();)
+        if (UpdateCarryGlowSlot(*it)) ++it;
+        else DestroyCarryGlow(*it), it = g_carryGlow.erase(it);
+}
+
+// The carry's movement aids (user, 2026-11-01), round the carried panel by its mode:
+//  - no modifier, "translucent spherical grid behind the carried panel, indicating the spherical
+//    movement": the sphere round the eyes it moves on, its meridians and parallels every kSphereStep,
+//    fixed in the room (softglow::SphereGrid);
+//  - Ctrl, "a flat, planar grid": its plane, lines every kPlaneStep (times its distance when Ctrl went
+//    down), fixed in the plane (softglow::PlaneGrid);
+//  - Alt, "a trio of axial rings around the window ... the same diameter ... mostly invisible, but has a
+//    translucent pulse of energy that is constantly sweeping along its circumference ... (red, green,
+//    blue)": rings round its x, y and z axes, a little wider than its diagonal, each turned in its plane
+//    so its pulse (softglow::RingTexture) sweeps round, at its own pace.
+// Each grid "fades to zero within some short distance of the panel's edge" (margin, kAidMargin times
+// its distance) and is clear over the panel: overlays have no depth, so the panel can't hide one behind
+// it. A grid is drawn again each frame it moves (into overlaytex::Stream's buffers), kGridPpm pixels a
+// metre (user, 2026-11-01: "the new grids look low-res/chunkily aliased": it was 256 across, about 130 a
+// metre), at most kGridMaxW across; the rings' textures don't change. A ring seen from behind is turned
+// over (its texture mirrored, so it looks the same; user: "the rotation rings' colors are only visible
+// on one side of their overlays"). The overlays ("frametop.guide.carry.grid", "...ring.N") are made as
+// a carry needs them and destroyed when it ends.
+constexpr double kSphereStep = 4 * M_PI / 180, kPlaneStep = 0.07, kAidMargin = 0.12;
+constexpr int kGridPpm = 420, kGridMaxW = 1024, kRingPx = 512;
+constexpr double kRingPeriod[3] = {2.6, 3.1, 3.7};   // seconds a sweep (x, y, z)
+struct CarryAids {
+    vr::VROverlayHandle_t grid = vr::k_ulOverlayHandleInvalid, ring[3] = {vr::k_ulOverlayHandleInvalid, vr::k_ulOverlayHandleInvalid,
+                                                                          vr::k_ulOverlayHandleInvalid};
+    bool gridShown = false, ringShown = false, ringTex = false, flipped[3] = {};
+    std::vector<double> drawn;   // what the grid's last frame was drawn for
+    int mode = -1, panel = -1;
+    int64_t startMs = 0, endMs = -1;   // this mode's start; the carry's end (-1: still on)
+    double planeStep = kPlaneStep;
+    std::vector<uint8_t> px;
+} g_carryAids;
+
+void DestroyCarryAids() {
+    CarryAids &a = g_carryAids;
+    for (auto o : {a.grid, a.ring[0], a.ring[1], a.ring[2]})
+        if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
+    a = CarryAids{};
+}
+
+void UpdateCarryAids() {
+    CarryAids &a = g_carryAids;
+    Screen *c = nullptr;
+    int ci = -1;
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry) c = &s, ci = i;
+    if (!c && g_carryTurnOn) SendPointer("carry turn off"), g_carryTurnOn = false;   // (the carry ended with Alt down)
+    // fading in as a carry (or a mode) begins, out as it ends, over kCarryFadeMs as the borders do (user,
+    // 2026-11-01: "animate the grid when disabling carry mode ... animate the borders AND the grid when
+    // enabling carry mode"); ended, on the panel let go, in its last mode
+    const int64_t now = NowMs();
+    if (c) {
+        if (ci != a.panel || c->carryMode != a.mode || a.endMs >= 0) a.startMs = now;
+        a.endMs = -1;
+    } else if (a.panel >= 0 && a.endMs < 0) {
+        a.endMs = now;
+    }
+    if (!c) {
+        const auto it = g_screens.find(a.panel);
+        if (it != g_screens.end() && a.endMs >= 0 && now - a.endMs < kCarryFadeMs) c = &it->second, ci = a.panel;
+    }
+    Mat p, head;
+    if (!c || !c->visible || !ScreenPose(*c, &p) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+        if (a.grid != vr::k_ulOverlayHandleInvalid || a.ring[0] != vr::k_ulOverlayHandleInvalid || a.panel >= 0) DestroyCarryAids();
+        return;
+    }
+    const double eye[3] = {c->carryEye[0], c->carryEye[1], c->carryEye[2]};   // (the sphere's centre)
+    const double dist = HeadDistance(p), W = c->metres, H = c->heightMetres();
+    if (a.endMs < 0 && (c->carryMode != a.mode || ci != a.panel)) {
+        a.mode = c->carryMode, a.panel = ci;
+        a.planeStep = kPlaneStep * std::clamp(dist, 0.5, 4.0);
+    }
+    const double fade = std::clamp(double(now - a.startMs) / kCarryFadeMs, 0.0, 1.0) *
+                        (a.endMs < 0 ? 1 : std::clamp(1 - double(now - a.endMs) / kCarryFadeMs, 0.0, 1.0));
+    auto make = [](vr::VROverlayHandle_t &o, const char *key, const char *name) {
+        if (o != vr::k_ulOverlayHandleInvalid) return true;
+        if (vr::VROverlay()->CreateOverlay(key, name, &o) != vr::VROverlayError_None) return o = vr::k_ulOverlayHandleInvalid, false;
+        vr::VROverlay()->SetOverlaySortOrder(o, 1);
+        return true;
+    };
+    // the grids
+    if (a.mode == 2) {
+        if (a.gridShown) vr::VROverlay()->HideOverlay(a.grid), a.gridShown = false;
+    } else if (make(a.grid, "frametop.guide.carry.grid", "Frametop: carry's grid")) {
+        const double margin = std::clamp(kAidMargin * dist, 0.08, 0.5), Wq = W + 2 * margin, Hq = H + 2 * margin;
+        const int gw = std::clamp(int(std::lround(Wq * kGridPpm)), 256, kGridMaxW);
+        const double mpp = Wq / gw;
+        const int gh = std::clamp(int(std::lround(Hq / mpp)), 8, kGridMaxW);
+        const double line = std::max(1.6, 0.002 * dist / mpp);
+        const Mat q = Mul(p, Translation(0, 0, -0.005));   // (just behind it)
+        const Mat l = Mul(Inverse(c->carryPlane), p);
+        // fuchsia while the head carries it (Space held, carry-all; user, 2026-11-01: "change the grid color to
+        // fuchsia while the carried panel is headlocked ... backport the fuchsia grid color to carry-all mode")
+        const softglow::Rgb rgb = g_carryFollow.on ? softglow::kFuchsia : softglow::kGridRgb;
+        std::vector<double> key = {double(a.mode), double(gw), double(gh), W, H, double(rgb.r)};
+        for (int i = 0; i < 3; ++i)
+            for (int k = 0; k < 4; ++k) key.push_back(a.mode == 1 ? l.m[i][k] : q.m[i][k] - (k == 3 ? eye[i] : 0));
+        bool same = key.size() == a.drawn.size();
+        for (size_t i = 0; same && i < key.size(); ++i) same = std::fabs(key[i] - a.drawn[i]) < 1e-5;
+        if (!same && a.mode == 1) {
+            // (l: its centre in the plane)
+            const double step = a.planeStep / mpp;
+            softglow::PlaneGrid(a.px, gw, gh, W / mpp, H / mpp, margin / mpp, (l.m[0][3] - Wq / 2) / mpp + 0.5,
+                                (l.m[1][3] + Hq / 2) / mpp - 0.5, step, line, rgb);
+        } else if (!same) {
+            double o[3], ax[3], ay[3];
+            for (int k = 0; k < 3; ++k) {
+                ax[k] = q.m[k][0] * mpp, ay[k] = -q.m[k][1] * mpp;
+                o[k] = q.m[k][3] - eye[k] + q.m[k][0] * (-Wq / 2 + mpp / 2) + q.m[k][1] * (Hq / 2 - mpp / 2);
+            }
+            softglow::SphereGrid(a.px, gw, gh, W / mpp, H / mpp, margin / mpp, o, ax, ay, mpp, kSphereStep, line, rgb);
+        }
+        if (!same && !overlaytex::Stream(a.grid, a.px.data(), gw, gh)) overlaytex::Set(a.grid, a.px.data(), gw, gh);
+        a.drawn = key;
+        vr::VROverlay()->SetOverlayWidthInMeters(a.grid, float(Wq));
+        vr::VROverlay()->SetOverlayCurvature(a.grid, c->curve > 0 ? float(std::clamp(Wq / (2 * M_PI * c->curve), 0.0, 1.0)) : 0.f);
+        vr::VROverlay()->SetOverlayTransformAbsolute(a.grid, vr::TrackingUniverseStanding, &q);
+        vr::VROverlay()->SetOverlayAlpha(a.grid, float(fade));
+        if (!a.gridShown) vr::VROverlay()->ShowOverlay(a.grid), a.gridShown = true;
+    }
+    // the rings
+    if (a.mode != 2) {
+        if (a.ringShown)
+            for (auto o : a.ring) vr::VROverlay()->HideOverlay(o);
+        a.ringShown = false;
+        return;
+    }
+    static const char *const kKeys[3] = {"frametop.guide.carry.ring.x", "frametop.guide.carry.ring.y", "frametop.guide.carry.ring.z"};
+    static const softglow::Rgb kRgb[3] = {{255, 70, 70}, {70, 255, 110}, {80, 150, 255}};
+    for (int k = 0; k < 3; ++k)
+        if (!make(a.ring[k], kKeys[k], "Frametop: carry's ring")) return;
+    if (!a.ringTex) {
+        for (int k = 0; k < 3; ++k) {
+            const std::vector<uint8_t> px = softglow::RingTexture(kRingPx, 4, kRgb[k]);
+            overlaytex::Set(a.ring[k], px.data(), kRingPx, kRingPx);
+        }
+        a.ringTex = true;
+    }
+    const double D = std::hypot(W, H) * 1.08 + 0.04;
+    const double t = NowMs() / 1000.0;
+    Mat toPlane[3] = {Identity(), Identity(), Identity()};   // the ring's plane in the panel: x's is y-z, y's is z-x, z's is its own
+    toPlane[0].m[0][0] = toPlane[0].m[2][2] = 0, toPlane[0].m[0][2] = -1, toPlane[0].m[2][0] = 1;   // (a quarter turn about y)
+    toPlane[1].m[1][1] = toPlane[1].m[2][2] = 0, toPlane[1].m[1][2] = 1, toPlane[1].m[2][1] = -1;   // (a quarter turn about x)
+    for (int k = 0; k < 3; ++k) {
+        const double th = 2 * M_PI * std::fmod(t / kRingPeriod[k] + k / 3.0, 1.0);
+        Mat spin = Identity();
+        spin.m[0][0] = spin.m[1][1] = float(std::cos(th)), spin.m[0][1] = float(-std::sin(th)), spin.m[1][0] = float(std::sin(th));
+        Mat r = Mul(Mul(p, toPlane[k]), spin);
+        // seen from behind: turned over about its x axis (through the pulse), its texture mirrored top
+        // to bottom, so it looks the same from the front
+        const double toHead[3] = {head.m[0][3] - r.m[0][3], head.m[1][3] - r.m[1][3], head.m[2][3] - r.m[2][3]};
+        const bool flip = toHead[0] * r.m[0][2] + toHead[1] * r.m[1][2] + toHead[2] * r.m[2][2] < 0;
+        if (flip) {
+            Mat over = Identity();
+            over.m[1][1] = over.m[2][2] = -1;
+            r = Mul(r, over);
+        }
+        if (flip != a.flipped[k] || !a.ringShown) {
+            const vr::VRTextureBounds_t b = {0, flip ? 1.f : 0.f, 1, flip ? 0.f : 1.f};
+            vr::VROverlay()->SetOverlayTextureBounds(a.ring[k], &b);
+            a.flipped[k] = flip;
+        }
+        vr::VROverlay()->SetOverlayWidthInMeters(a.ring[k], float(D));
+        vr::VROverlay()->SetOverlayAlpha(a.ring[k], float(fade));
+        vr::VROverlay()->SetOverlayTransformAbsolute(a.ring[k], vr::TrackingUniverseStanding, &r);
+        if (!a.ringShown) vr::VROverlay()->ShowOverlay(a.ring[k]);
+    }
+    a.ringShown = true;
+}
+
 // Each hand's soft glow at a panel (handinput's guide(), Params::edgeGlow; user, after the fourth live
 // test: "for resizing, I'd like the indicators to be almost like a cutout of the soft glow we had for
 // highlighting, just around the edges and corners when you're within the interaction zone"): the same
@@ -5073,6 +5634,9 @@ void ft_vr_shutdown(void) {
     for (GuidePart &r : g_palmRing)
         if (r.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(r.overlay), r = GuidePart{};
     if (g_target.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(g_target.overlay), g_target = TargetGlow{};
+    for (CarryGlow &g : g_carryGlow) DestroyCarryGlow(g);
+    g_carryGlow.clear();
+    DestroyCarryAids();
     for (HandGuide &hg : g_handGuides)
         if (hg.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(hg.overlay), hg = HandGuide{};
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -5111,6 +5675,379 @@ int ft_vr_gamepad_screen(void) { return g_vr ? g_pill.pad : -1; }
 // The panel ft_pointer's laser went on last (its content or a popup), -1 after it left. Set in
 // ft_vr_poll from the panels' events.
 int g_mouseScreen = -1;
+vr::TrackedDeviceIndex_t g_mouseDevice = kNone;  // the 3D mouse's device, from its last event there
+
+// carry_toggle (the input relay's "carry toggle", Meta+A: the touchpad's four-finger tap; user,
+// 2026-10-31): the panel under the 3D mouse (none: the one nearest straight ahead of the eyes) is
+// carried by its ray until a click or Enter (Esc or Backspace: put back, CarryUndoAll), UpdateToggleCarry;
+// the wheel pushes it, Push. The click doesn't reach the desktop. Another tap meanwhile turns carry-all
+// on or off (CarryFollow).
+static uint32_t g_carryClicks = 0;  // VRMouseButton bits whose release a carry's click keeps too
+
+static bool CarryLetGo(const char *by) {
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry) {
+            std::printf("screen %d: carry_toggle: let go (%s)\n", i + 1, by);
+            FinishDrag(s, i), ForgetIfPlacedFar(i, s);
+            return true;
+        }
+    return false;
+}
+
+
+static bool FollowFrame(Mat *out) {
+    Mat head;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
+    const double ahead[3] = {head.m[0][3] - head.m[0][2], head.m[1][3] - head.m[1][2], head.m[2][3] - head.m[2][2]};
+    *out = FacingPose(ahead, head);
+    for (int k = 0; k < 3; ++k) out->m[k][3] = head.m[k][3];
+    return true;
+}
+
+// others: carry-all (the other panels too), or Space held's head lock (the carried panel only); carry-all
+// over a head lock takes the others in.
+static void CarryFollowStart(int carried, bool others = true) {
+    CarryFollow &f = g_carryFollow;
+    if (f.on && (!f.lockOnly || !others)) return;
+    if (!f.on) {
+        if (!FollowFrame(&f.frame)) return;
+        f.on = true, f.rel.clear();
+        // with the point held, so the cursor stays on it as its origin goes to the eye
+        const auto c = g_screens.find(carried);
+        Mat p;
+        char msg[96] = "follow carry on";
+        if (c != g_screens.end() && ScreenPose(c->second, &p)) {
+            const Mat g = Mul(p, c->second.carryMode == 2 ? Identity() : c->second.carryGrab);
+            std::snprintf(msg, sizeof msg, "follow carry on %.4f %.4f %.4f", g.m[0][3], g.m[1][3], g.m[2][3]);
+        }
+        SendPointer(msg);
+    }
+    f.lockOnly = !others;
+    if (!others) return (void)std::printf("carry_toggle: head lock on (Space held)\n");
+    const Mat inv = Inverse(f.frame);
+    for (auto &[i, s] : g_screens) {
+        Mat p;
+        if (i == carried || !s.visible || s.pinned != kNone || !ScreenPose(s, &p)) continue;
+        f.rel[i] = Mul(inv, p);
+        g_spin.base.erase(i);
+    }
+    std::printf("carry_toggle: carry-all on: %zu other panels follow the head\n", f.rel.size());
+}
+
+static void CarryFollowEnd() {
+    CarryFollow &f = g_carryFollow;
+    if (!f.on) return;
+    bool screens = false;
+    for (const auto &[i, rel] : f.rel) {
+        g_spin.base.erase(i);
+        const auto it = g_screens.find(i);
+        if (it != g_screens.end() && !it->second.floating && !it->second.remote) screens = true;
+    }
+    if (screens) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are
+    f.on = f.lockOnly = false, f.rel.clear();
+    SendPointer("follow carry off");
+    std::printf("carry_toggle: carry-all off: the panels stay in the room\n");
+}
+
+
+// Space held past kSpaceHoldMs while carrying (user, 2026-11-01: "hold spacebar to headlock the carried
+// panel (same as carry-all mode but single-panel). release spacebar to drop the headlock"): the carried
+// panel and the cursor follow the head, as in carry-all, till Space comes up (ft_vr_carry_key). A
+// shorter press is Space's tap (CarrySpace, on the release).
+constexpr int64_t kSpaceHoldMs = 300;
+static int64_t g_spaceDownMs = -1;   // Space down during a carry since (-1: up)
+static bool g_spaceLock = false;     // ... and it has locked the panel to the head
+static void CarrySpaceHold() {
+    if (g_spaceDownMs < 0 || g_spaceLock || NowMs() - g_spaceDownMs < kSpaceHoldMs) return;
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry) {
+            g_spaceLock = true;
+            if (!g_carryFollow.on) CarryFollowStart(i, false);
+            return;
+        }
+}
+
+// A window gone from the desktop to floating is carried at once ("carry take N", from ft-floatd; user,
+// 2026-11-01: "auto-engage carry mode when a window transitions from desktop to floating"), as a tap
+// takes a panel (CarryTake: by its centre, the cursor sent there), once its panel shows, ft-floatd has
+// placed it and no button is held (the release of the title bar's button would end it), within
+// kCarryPendingMs; not if a carry is on, or anything holds it.
+static bool CarryTake(Screen &s, int i, vr::TrackedDeviceIndex_t dev);
+static void NoteCarryUndo();
+constexpr int64_t kCarryPendingMs = 3000, kCarryPendingSettleMs = 250;
+struct {
+    int panel = -1;
+    int64_t until = 0;
+} g_carryPending;
+static void CarryPendingTake() {
+    if (g_carryPending.panel < 0) return;
+    const int64_t now = NowMs();
+    if (now > g_carryPending.until) return void(g_carryPending.panel = -1);
+    const auto it = g_screens.find(g_carryPending.panel);
+    if (it == g_screens.end()) return void(g_carryPending.panel = -1);
+    Screen &s = it->second;
+    Mat p;
+    if (now < g_carryPending.until - kCarryPendingMs + kCarryPendingSettleMs || !s.visible || !s.floatOn || g_press.buttons ||
+        g_mouseDevice == kNone || !ScreenPose(s, &p))
+        return;
+    g_carryPending.panel = -1;
+    for (const auto &[i, o] : g_screens)
+        if (o.toggleCarry) return;
+    if (s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(it->first)) return;
+    NoteCarryUndo();
+    if (CarryTake(s, it->first, g_mouseDevice)) std::printf("screen %d: carry_toggle: carried (floated just now)\n", it->first + 1);
+}
+
+static void UpdateCarryFollow() {
+    CarrySpaceHold();
+    CarryPendingTake();
+    CarryFollow &f = g_carryFollow;
+    if (!f.on) return;
+    Screen *c = nullptr;
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry) c = &s;
+    if (!c) return CarryFollowEnd();
+    Mat F;
+    if (!FollowFrame(&F)) return;
+    const Mat delta = Mul(F, Inverse(f.frame)), inv = Inverse(F);
+    f.frame = F;
+    for (auto it = f.rel.begin(); it != f.rel.end();) {
+        const auto sit = g_screens.find(it->first);
+        if (sit == g_screens.end() || sit->second.pinned != kNone) {
+            it = f.rel.erase(it);
+            continue;
+        }
+        Screen &o = sit->second;
+        Mat p;
+        if (o.drag != Drag::None || g_handInput.heldByHand(it->first)) {
+            if (ScreenPose(o, &p)) it->second = Mul(inv, p);
+        } else {
+            SetAbsolute(o, Mul(F, it->second));
+        }
+        ++it;
+    }
+    if (c->carryMode == 1 || c->carryMode == 2) c->carryPlane = Mul(delta, c->carryPlane);
+    {
+        const Mat e = Mul(delta, Translation(c->carryEye[0], c->carryEye[1], c->carryEye[2]));
+        for (int k = 0; k < 3; ++k) c->carryEye[k] = e.m[k][3];
+    }
+    if (c->carryMode == 2) {
+        const Mat at = Mul(delta, Translation(c->carryAt[0], c->carryAt[1], c->carryAt[2]));
+        for (int k = 0; k < 3; ++k) c->carryAt[k] = at.m[k][3];
+    }
+}
+
+// The 3D mouse's carry takes panel s (index i) by its centre, as it is, and the cursor goes there
+// (the helper's "aimat"; UpdateToggleCarry waits for it): Tab's next one, or a tap's off any panel.
+static bool CarryTake(Screen &s, int i, vr::TrackedDeviceIndex_t dev) {
+    Mat p, head;
+    double eye[3], dir[3];
+    if (!ScreenPose(s, &p) || !CarryRay(dev, eye, dir)) return false;
+    StartDrag(s, Drag::Move, dev);
+    if (s.drag != Drag::Move) return false;
+    const double at[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
+    s.toggleCarry = true, s.carryMode = g_ctrl ? 1 : g_alt ? 2 : 0, s.carryWaitUntil = NowMs() + 400, s.carryAims = 0;
+    s.carryDist = std::sqrt((at[0] - eye[0]) * (at[0] - eye[0]) + (at[1] - eye[1]) * (at[1] - eye[1]) + (at[2] - eye[2]) * (at[2] - eye[2]));
+    s.carryGrab = Identity(), s.carryPlane = p;
+    for (int k = 0; k < 3; ++k) s.carryAt[k] = at[k], s.carryEye[k] = eye[k];
+    s.carryTurn = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? Mul(Inverse(FacingPose(at, head)), p) : Identity();
+    for (int k = 0; k < 3; ++k) s.carryTurn.m[k][3] = 0;
+    g_carryFollow.rel.erase(i);
+    char msg[96];
+    std::snprintf(msg, sizeof msg, "aimat %.4f %.4f %.4f", at[0], at[1], at[2]);
+    SendPointer(msg);
+    return true;
+}
+
+// Tab, Shift+Tab while carrying (user, 2026-11-01): the carry goes to the next panel on the right (left)
+// round the head, of those in the room (not pinned; in carry-all, in view), and the cursor to its centre;
+// in carry-all the one let go follows the head with the others.
+constexpr double kTabViewDeg = 50;
+static void CarryCycle(int step) {
+    int ci = -1;
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry) ci = i;
+    Mat F;
+    if (ci < 0 || !FollowFrame(&F)) return;
+    const Mat inv = Inverse(F);
+    std::vector<std::pair<double, int>> order;   // (angle right of straight ahead, panel)
+    for (auto &[i, s] : g_screens) {
+        Mat p;
+        if (!s.visible || s.pinned != kNone || !ScreenPose(s, &p)) continue;
+        if (i != ci && (s.drag != Drag::None || g_handInput.heldByHand(i))) continue;
+        const Mat l = Mul(inv, p);
+        // carry-all: only those in view (user, 2026-11-01: "only panels you can see"), their centres
+        // within kTabViewDeg of straight ahead
+        if (i != ci && g_carryFollow.on &&
+            -l.m[2][3] < std::cos(kTabViewDeg * M_PI / 180) * std::sqrt(l.m[0][3] * l.m[0][3] + l.m[1][3] * l.m[1][3] + l.m[2][3] * l.m[2][3]))
+            continue;
+        order.push_back({std::atan2(l.m[0][3], -l.m[2][3]), i});
+    }
+    std::sort(order.begin(), order.end());
+    const int n = int(order.size());
+    int pos = 0;
+    while (pos < n && order[pos].second != ci) ++pos;
+    if (pos == n || n < 2) return;
+    const int next = order[((pos + step) % n + n) % n].second;
+    Screen &old = g_screens[ci], &s = g_screens[next];
+    const vr::TrackedDeviceIndex_t dev = old.dragDevice;
+    std::printf("screen %d: carry_toggle: %s to screen %d\n", ci + 1, step > 0 ? "Tab" : "Shift+Tab", next + 1);
+    FinishDrag(old, ci), ForgetIfPlacedFar(ci, old);
+    Mat p;
+    if (g_carryFollow.on && ScreenPose(old, &p)) g_carryFollow.rel[ci] = Mul(inv, p);
+    CarryTake(s, next, dev);
+}
+
+// Off any panel, a tap carries the one nearest straight ahead of the eyes (user, 2026-11-01: "a
+// four-finger tap with the cursor in no panel carries the panel closest to the user's centered gaze
+// vector, and moves the cursor to its center"): of those in the room (not pinned) not held.
+static int GazePanel() {
+    Mat head;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return -1;
+    const double fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]};
+    int best = -1;
+    double bestCos = -2;
+    for (auto &[i, s] : g_screens) {
+        Mat p;
+        if (!s.visible || s.pinned != kNone || s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i) || !ScreenPose(s, &p)) continue;
+        double to[3] = {p.m[0][3] - head.m[0][3], p.m[1][3] - head.m[1][3], p.m[2][3] - head.m[2][3]};
+        const double n = std::sqrt(Dot3(to, to)) + 1e-9, cs = Dot3(to, fwd) / n;
+        if (cs > bestCos) bestCos = cs, best = i;
+    }
+    return best;
+}
+
+static void CarryToggle(char *reply, int size) {
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry) {
+            if (g_carryFollow.on && !g_carryFollow.lockOnly) CarryFollowEnd();
+            else CarryFollowStart(i);
+            return (void)std::snprintf(reply, size, "ok carry-all %s", g_carryFollow.on ? "on" : "off");
+        }
+    if (!g_vr || g_paused || g_mouseDevice == kNone) return (void)std::snprintf(reply, size, "error no 3D mouse yet");
+    // the panel under the 3D mouse, else the one nearest the gaze; either way by its centre, the cursor
+    // sent there (user, 2026-11-01: "update carry init so it always relocates the cursor to the center
+    // of the panel")
+    const auto it = g_screens.find(g_mouseScreen);
+    Mat p;
+    double u, v, dist, eye[3], dir[3];
+    const bool on = it != g_screens.end() && it->second.visible && ScreenPose(it->second, &p) && CarryRay(g_mouseDevice, eye, dir) &&
+                    RayOnSurface(it->second, p, RayMat(eye, dir), &u, &v, &dist);
+    if (on && (it->second.drag != Drag::None || it->second.titleCarry || g_handInput.heldByHand(it->first)))
+        return (void)std::snprintf(reply, size, "error the panel is held");
+    const int i = on ? it->first : GazePanel();
+    if (i < 0) return (void)std::snprintf(reply, size, "error no panel to carry");
+    NoteCarryUndo();
+    if (!CarryTake(g_screens[i], i, g_mouseDevice)) return (void)std::snprintf(reply, size, "error no pose");
+    std::printf("screen %d: carry_toggle: carried (%s)\n", i + 1, on ? "under the 3D mouse" : "nearest the gaze");
+    std::snprintf(reply, size, "ok carrying %d", i + 1);
+}
+
+// Space while carrying (user, 2026-11-01: "carrying one: levels from center. double-spacebar also
+// changes angle to face the user's head. carrying all: both behave the same as for carrying one, but
+// just applied to all panels"): the carried panel, and in carry-all the others it moves, each levelled
+// about its centre (its bottom edge parallel to the floor), or with `face` (Space twice within
+// kDoubleSpaceMs) also turned there to face the head.
+constexpr int64_t kDoubleSpaceMs = 400;
+static void CarrySpace(bool face) {
+    Mat head, F;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
+    const bool frame = g_carryFollow.on && FollowFrame(&F);
+    const Mat inv = frame ? Inverse(F) : Identity();
+    int n = 0;
+    bool screens = false;
+    for (auto &[i, s] : g_screens) {
+        Mat p, l;
+        if (!s.visible || !ScreenPose(s, &p) || !(s.toggleCarry || CarryAllHas(i))) continue;
+        if (!s.toggleCarry && (s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i))) continue;
+        const double at[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
+        if (face) l = FacingPose(at, head);
+        else if (!LevelledPose(p, Identity(), &l)) continue;
+        ++n;
+        if (s.toggleCarry) {
+            CarrySet(s, l);
+            continue;
+        }
+        SetAbsolute(s, l);
+        g_spin.base.erase(i);
+        if (frame) g_carryFollow.rel[i] = Mul(inv, l);
+        if (!s.floating && !s.remote) screens = true;
+    }
+    if (screens) ArrangeDesktopSoon();
+    std::printf("carry_toggle: %d panel(s) %s (Space%s)\n", n, face ? "facing you" : "levelled", face ? " twice" : "");
+}
+
+// Backspace or Esc while carrying (user, 2026-11-01: "agree with "backspace to undo""): the carry ends, and
+// every panel it moved (the carried ones, Tab's, carry-all's, Space's) goes back to where it was and
+// its size when it began (CarryToggle notes them).
+struct CarryUndo {
+    Mat pose;
+    double metres;
+};
+static std::map<int, CarryUndo> g_carryUndo;
+
+static void NoteCarryUndo() {
+    g_carryUndo.clear();
+    for (auto &[i, s] : g_screens) {
+        Mat p;
+        if (s.visible && s.pinned == kNone && ScreenPose(s, &p)) g_carryUndo[i] = {p, s.metres};
+    }
+}
+
+static bool CarryLetGo(const char *by);
+static void CarryUndoAll() {
+    CarryLetGo("Backspace: back as it was");
+    CarryFollowEnd();
+    bool screens = false;
+    for (const auto &[i, u] : g_carryUndo) {
+        const auto it = g_screens.find(i);
+        if (it == g_screens.end()) continue;
+        Screen &s = it->second;
+        if (s.pinned != kNone || s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i)) continue;
+        if (std::fabs(s.metres - u.metres) > 1e-4) ScalePanel(s, u.metres / s.metres);
+        SetAbsolute(s, u.pose);
+        g_spin.base.erase(i);
+        if (!s.floating && !s.remote) screens = true;
+    }
+    if (screens) ArrangeDesktopSoon();
+    g_carryUndo.clear();
+}
+
+
+// The wheel of the device that carries a carry_toggle carry pushes it (Push), whatever panel or control
+// its ray is on (user, 2026-11-01: "if the carried panel ends up behind another panel, scroll events no
+// longer reach it ... the interruption happens when the panel in front blocks the pointer"): true if it
+// did.
+static bool CarryScroll(const vr::VREvent_t &ev) {
+    if (ev.eventType != vr::VREvent_ScrollDiscrete) return false;
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry && s.dragDevice == ev.trackedDeviceIndex) return Push(s, ev.data.scroll.ydelta), true;
+    return false;
+}
+
+// A press by the carrying device lets go of a carry_toggle carry: true if this event was that press,
+// or its release, which the desktop doesn't get either.
+static bool CarryClick(const vr::VREvent_t &ev) {
+    const uint32_t bit = ev.data.mouse.button;
+    if (ev.eventType == vr::VREvent_MouseButtonUp && (g_carryClicks & bit)) return g_carryClicks &= ~bit, true;
+    if (ev.eventType != vr::VREvent_MouseButtonDown) return false;
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry && s.dragDevice == ev.trackedDeviceIndex) {
+            g_carryClicks |= bit;
+            return CarryLetGo("a click");
+        }
+    return false;
+}
+
+// The input relay's wheel (compositor.c's "wheel", sent while the 3D mouse's laser is on a panel that
+// isn't moving): during a carry it pushes the carried panel (CarryScroll), not that panel's window
+// (user, 2026-11-01: "scrolling with a panel in front still doesn't work"). True if it did.
+bool ft_vr_carry_wheel(int notches) {
+    if (!g_vr) return false;
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry) return Push(s, notches), true;
+    return false;
+}
 
 int ft_vr_mouse_screen(void) {
     if (!g_vr || g_paused || g_mouseScreen < 0) return -1;
@@ -5289,7 +6226,51 @@ void ft_vr_float_output(int index, bool on) {
 }
 
 void ft_vr_screen_scale(int index, double scale) { g_uiScale[index] = scale; }
-void ft_vr_key(void) { g_keyMs = NowMs(); }
+static bool g_shift = false;
+
+void ft_vr_key(uint32_t code, int value) {
+    if (value) g_keyMs = NowMs();
+    static bool ctrl[2], alt[2], shift[2];  // left, right
+    if (code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL) ctrl[code == KEY_RIGHTCTRL] = value != 0, g_ctrl = ctrl[0] || ctrl[1];
+    if (code == KEY_LEFTALT || code == KEY_RIGHTALT) alt[code == KEY_RIGHTALT] = value != 0, g_alt = alt[0] || alt[1];
+    if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) shift[code == KEY_RIGHTSHIFT] = value != 0, g_shift = shift[0] || shift[1];
+}
+
+bool ft_vr_carry_key(uint32_t code, int value) {
+    static std::set<uint32_t> kept;  // presses the desktop didn't get: their releases don't go either
+    const bool mod = code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL || code == KEY_LEFTALT || code == KEY_RIGHTALT ||
+                     code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT;
+    if (!mod && code != KEY_TAB && code != KEY_SPACE && code != KEY_ESC && code != KEY_BACKSPACE && code != KEY_ENTER && code != KEY_KPENTER)
+        return false;
+    if (value == 0 && code == KEY_SPACE && g_spaceDownMs >= 0) {
+        // up: a head lock's end, or a tap (twice within kDoubleSpaceMs: facing too)
+        static int64_t lastTap = -kDoubleSpaceMs;
+        const int64_t now = NowMs();
+        bool carrying = false;
+        for (auto &[i, s] : g_screens) carrying |= s.toggleCarry;
+        if (g_spaceLock) {
+            if (g_carryFollow.on && g_carryFollow.lockOnly) CarryFollowEnd();
+        } else if (carrying && now - lastTap < kDoubleSpaceMs) {
+            CarrySpace(true), lastTap = -kDoubleSpaceMs;
+        } else if (carrying) {
+            CarrySpace(false), lastTap = now;
+        }
+        g_spaceDownMs = -1, g_spaceLock = false;
+    }
+    if (value == 0) return kept.erase(code) > 0;
+    if (kept.count(code)) return true;
+    Screen *c = nullptr;
+    for (auto &[i, s] : g_screens)
+        if (s.toggleCarry) c = &s;
+    if (!c) return false;
+    kept.insert(code);
+    if (code == KEY_TAB) CarryCycle(g_shift ? -1 : 1);
+    // (user, 2026-11-01: "let's have enter behave just like single click, and esc behave just like backspace")
+    if (code == KEY_ENTER || code == KEY_KPENTER) CarryLetGo("Enter");
+    if (code == KEY_ESC || code == KEY_BACKSPACE) CarryUndoAll();
+    if (code == KEY_SPACE) g_spaceDownMs = NowMs();   // (its tap or hold: on the release, CarrySpaceHold)
+    return true;
+}
 
 void ft_vr_screen_destroy(int index) {
     auto it = g_screens.find(index);
@@ -5443,6 +6424,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         else if (g_tick % 90 == 0) UniverseKind(g_universe);   // (read again while it's unknown)
     }
     MoveLevelPins();
+    UpdateCarryFollow();   // (before the carried panel's own move, below)
     // the hands, once per tick, for the cutouts and hand input
     {
         Mat head;
@@ -5465,7 +6447,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             if (ev.eventType == vr::VREvent_FocusLeave) {
                 if (ours >= 0 && g_mouseScreen == index) g_mouseScreen = -1;
             } else if (ours > 0) {
-                g_mouseScreen = index;
+                g_mouseScreen = index, g_mouseDevice = ev.trackedDeviceIndex;
             }
             if (ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_ScrollDiscrete ||
                 ev.eventType == vr::VREvent_ScrollSmooth || g_press.buttons)
@@ -5475,6 +6457,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 case vr::VREvent_MouseMove:
                     // KWin's pointer stays where the title bar was pressed (or a torn-off window was: KWin's had its release)
                     if (s.titleCarry || g_press.torn) return;
+                    if (s.toggleCarry) return;  // nor does a carry_toggle carry move it
                     // a hand holds the button, or moved this panel's pointer just now: it's the hand's
                     if ((g_press.buttons && IsHandHolder(g_press.device)) || NowMs() - s.handPointerMs < kHandPointerMs) return;
                     e.type = FT_MOTION;
@@ -5486,6 +6469,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     break;
                 case vr::VREvent_MouseButtonDown:
                 case vr::VREvent_MouseButtonUp:
+                    if (CarryClick(ev)) return;
                     if (ev.eventType == vr::VREvent_MouseButtonUp) EndDragsBy(ev.trackedDeviceIndex);
                     if (ev.eventType == vr::VREvent_MouseButtonUp && g_press.torn && ev.trackedDeviceIndex == g_press.device) {
                         // a torn-off window let go: KWin had its release at the tear
@@ -5519,6 +6503,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     }
                     break;
                 case vr::VREvent_ScrollDiscrete:
+                    if (CarryScroll(ev)) return;  // a carry_toggle carry
                     // carried by its title bar: the wheel pushes it away or pulls it in, as on the bar
                     // (user, 2026-10-30); KWin, moving the window, gets none
                     if (s.titleCarry && s.drag == Drag::Move) return Push(s, ev.data.scroll.ydelta);
@@ -5548,6 +6533,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             while (vr::VROverlay()->PollNextOverlayEvent(sub.overlay, &ev, sizeof ev)) panelEvent(ev, true);
         // The controls light up under a laser.
         auto hover = [&](int k) {
+            if (CarryScroll(ev)) ev.eventType = vr::VREvent_None;   // (the carried panel's, not this control's)
             const bool on = ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_FocusEnter;
             if (on) {
                 s.inputMs = NowMs();
@@ -5559,6 +6545,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         // The bar: move (and push/pull with the wheel while moving).
         while (vr::VROverlay()->PollNextOverlayEvent(s.bar, &ev, sizeof ev)) {
             hover(0);
+            if ((ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_MouseButtonUp) && CarryClick(ev))
+                continue;
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
                 StartDrag(s, Drag::Move, ev.trackedDeviceIndex);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
@@ -5702,6 +6690,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdatePad();
     UpdateControls();
     UpdateGuides();
+    UpdateCarryGlow();
+    UpdateCarryAids();
     UpdateCutouts();
     UpdateCatcher();
 }
@@ -6296,6 +7286,20 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         std::snprintf(reply, size, "ok");
         return;
     }
+    case vrcmd::CarryToggle:
+        CarryToggle(reply, size);
+        return;
+    case vrcmd::CarryTake:
+        // ft-floatd: a window went from the desktop to floating on panel n
+        if (!Find(n)) return (void)std::snprintf(reply, size, "error no panel %d", n);
+        g_carryPending = {n - 1, NowMs() + kCarryPendingMs};
+        std::snprintf(reply, size, "ok");
+        return;
+    case vrcmd::CarryTurn:
+        // (the pointer helper, while Alt turns a carried panel: no reply)
+        g_carryTurnYaw += parsed.da, g_carryTurnPitch += parsed.db;
+        std::snprintf(reply, size, "ok");
+        return;
     case vrcmd::Carry: {
         Screen *s = Find(n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);

@@ -53,8 +53,14 @@ void ft_vr_screen_create(int index, double metres, int count);
 void ft_vr_screen_destroy(int index);
 // KWin's scale for a screen (its logical pixels: buffer pixels / scale; the lazy susan sizes by them).
 void ft_vr_screen_scale(int index, double scale);
-// A key went to the desktop (the front slot's screen counts it as use).
-void ft_vr_key(void);
+// A key from the input relay (evdev code, 1 press, 0 release, 2 repeat): a press counts as use of the
+// front slot's screen, and Ctrl held makes a carry move finely.
+void ft_vr_key(uint32_t code, int value);
+// Ctrl or Alt pressed while the 3D mouse carries a panel (carry_toggle): true for its press, repeats and
+// release, which go to the carry, not the desktop.
+bool ft_vr_carry_key(uint32_t code, int value);
+// The 3D mouse's wheel (notches, + up) during a carry_toggle carry: it pushes the carried panel. False if none.
+bool ft_vr_carry_wheel(int notches);
 // A remote screen's panel (remote.c): another machine's display, streamed by ft-stream. It
 // has a screen's controls and takes the same commands; its frames come through
 // ft_vr_screen_present, and its input arrives as events for its index. *restored: it's back

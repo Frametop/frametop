@@ -653,6 +653,8 @@ def tests():
     pause("off")
     check("spinning works without pointer mode", (relay.needs_pointer("spin_next"), relay.needs_pointer("spin_prev")),
           (False, False))
+    check("carry_toggle goes to ft-screens", (relay.needs_pointer("carry_toggle"), relay.SCREENS_ACTIONS["carry_toggle"]),
+          (False, b"carry toggle"))
 
     # Meta+Space (a default): frunner's search opens or closes, told it came from a keyboard.
     SPACE = 57

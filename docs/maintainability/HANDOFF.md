@@ -25,15 +25,15 @@ starts at DEE-298. The rest of DEE-303 (its open list below) is now its own tick
 | 13 | DEE-298 | 3005442, a3d58c8 (note) |
 | 14 | DEE-313 | 5b9c10b, 237d493, a1f3d6c, 26c16e3, 278c53e, 4146400, 4a456cb, 2bff435, 2877e21 (note) |
 | 15 | DEE-314 | 09667a7, cdf9291, 2129cc6, f73dad7, bd73091 (note), 2a9898a (review fixes) |
-| 16 | DEE-315 | 0a450b5, 2ca1f2e, 9fb2aa4, then this update |
+| 16 | DEE-315 | 0a450b5, 2ca1f2e, 9fb2aa4, f91de1b (note) |
+| 17 | DEE-316 | 3c26536, 2adbbdf, 36f2f8b, 265d025, 8714a6c (review fixes), then this update |
 
 What's left, in order:
 
-1. DEE-316
-2. DEE-318
-3. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
+1. DEE-318
+2. DEE-319: the rest of DEE-303 (one hub CLI, one control-loop base, shared QML pages)
 
-DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314 and DEE-315 are done (steps 7 to 16). DEE-303 part 1 is done (step
+DEE-310, DEE-304, DEE-305, DEE-309, DEE-312, DEE-298, DEE-313, DEE-314, DEE-315 and DEE-316 are done (steps 7 to 17). DEE-303 part 1 is done (step
 10), and its remainder moved to DEE-319. DEE-301's CI and lint work stays local only: no workflow change is pushed.
 
 ## Conventions the series set
@@ -661,10 +661,55 @@ Open:
   outright) once this lands. Nothing reads it after 0a450b5.
 - Daenon: the LFS or release-assets call above. Nothing on the remote changed.
 
+### From DEE-316
+
+One installer helper: `scripts/install-lib.sh`, sourced after `scripts/_env.sh`.
+
+- `install_unit TEMPLATE [NAME]` and `install_menu_entry TEMPLATE [NAME]` write the filled
+  template to `~/.config/systemd/user` or `~/.local/share/applications` on the Frame.
+  `enable_units UNIT...` prints the reload-and-enable command for the installer's own host step.
+  `FT_TEST_UNIT_DIR` and `FT_TEST_APPS_DIR` move the folders, for tests only.
+- Migrated: the unit installers power, pointer/helper, keyboard, pointer/dashpatch, gaze, voice,
+  hands and desktops.sh (autostart, relay); the menu entries gaze/bench, gaze/rec, gaze/probe,
+  display-settings, tour, input-settings, remote-displays, hands/rec and remote.
+- Kept as they were: each script's steps before and after the reload, voice's `2>/dev/null` on
+  enable, autostart's `--quiet`, and hands reloading without enabling (HANDS_MODE decides). The
+  bench and the recorders install under `frametop-*` names from `ft-*` templates.
+- Left alone: `gaze/tracker/install.sh` and `setup/bluetooth/install.sh` (root system units
+  through sudo, with their own edits), desktops.sh's session entry (`@SESSION@`, the Native
+  Desktop copy), and `keyboard/scripts/install-local.sh` (the vendored keyboard's installer).
+  None of the copies looked like a bug.
+- `scripts/tests/test_install_lib.py` (in test-python) installs all 12 units and 12 entries into
+  a temp HOME and a prefix, with stub systemctl, ssh and sudo. A capture of the old copies'
+  output at f91de1b matched byte for byte. It doesn't run the installers themselves.
+- test-bash runs `shellcheck -S warning scripts/install-lib.sh` when ShellCheck is there, and
+  prints a skip line otherwise. `setup/packages.txt` has a `dev: ShellCheck` line. The release
+  image doesn't get it, so CI's run skips it.
+- Review (one Opus reader, 8 findings, none Critical or Important). Fixed in 8714a6c: the
+  overrides renamed to `FT_TEST_*` (an exported `FT_` setting could have moved a real
+  install's units); the recorders' entry named once for install and uninstall; the test's
+  docstring and the AGENTS.md bullet say what it proves; the shellcheck step's comment; no
+  trailing comment on the shellcheck directives. Left: voice passes `"$unit 2>/dev/null"` through
+  enable_units, which keeps its text the same; two ssh round trips for input-settings and an
+  `mkdir` per tour entry, which cost only time.
+
+Open:
+
+- Daenon: run `setup/dev-container.sh` once (or `dnf install ShellCheck` in the dev container)
+  so test-bash's shellcheck step runs. It has never run: ShellCheck wasn't available offline.
+- `setup/packages.txt` is in fast-install's image set, so a fast-install over 265d025 is refused
+  unless it's given `--partial`. The dev line doesn't change the image.
+- During this ticket, a commit briefly took in the untracked `hands/rec/demos/`. It was undone
+  (`git reset --soft`) before anything else, and the GIFs are untracked again (their blobs sit
+  unreferenced in `.git` until a gc).
+
 ## Device checks still to do
 
 Each needs an install and the headset:
 
+- After DEE-316: a real install, and a reinstall or upgrade between releases. The units and
+  menu entries come out the same as before, under the same names, and the same units are
+  enabled. Listed in `~/Desktop/Projects/HEADSET-TESTS.md`.
 - After DEE-315: a full build (`screens/build.sh`, and the image's) makes ft-handview with the
   generated `build/handasset.cpp`, and the hands look as before. `get.sh` for real: a new
   `--experimental --clone-only --dir` clone, then a switch to `--stable` in it. Agents never

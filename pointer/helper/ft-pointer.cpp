@@ -3181,9 +3181,9 @@ bool Pointer::ArbitrateHands() {
     return live;
 }
 
-    // Typing (see the top): each new hands frame (ft-hands' side call), then which hands it
+// Typing (see the top): each new hands frame (ft-hands' side call), then which hands it
+// holds back now, for the ray below, the gestures, and ft-screens.
 void Pointer::TypingHands(bool newHands, bool live) {
-    // holds back now, for the ray below, the gestures, and ft-screens.
     typist.SetParams(typingParams);
     vr::HmdMatrix34_t typingHead;
     if (newHands && live && poses.At(handsRoom.capture_ns, typingHead)) {
@@ -3247,7 +3247,7 @@ void Pointer::SendTypingAndRays(const bool typingSide[2]) {
     }
 }
 
-    // The hand ray (see "Hand ray" at the top): each side's hand, when a new frame came.
+// The hand ray (see "Hand ray" at the top): each side's hand, when a new frame came.
 void Pointer::HandRays(bool newHands, bool live, const bool typingSide[2]) {
     if (rayParamsNew) {
         rayParamsNew = false;
@@ -3322,8 +3322,8 @@ bool Pointer::FingerAtOverlay(const hin::RoomHand &hand) {
 // Side s's hand ray may point: hands on and allowed, the side the hand's, not typing, the mouse idle 1 s.
 bool Pointer::mayPoint(int s, const bool typingSide[2]) {
     const bool mouseIdle = fr.tnow - lastMouse >= std::chrono::seconds(1);
-        return handsOn && gazehand::RayAllowed(rayOn, gazeOn, gazeHandRay) && handsAllowed && mouseIdle &&
-               arbiter.State(s) == handoff::Owner::Hand && !typingSide[s];
+    return handsOn && gazehand::RayAllowed(rayOn, gazeOn, gazeHandRay) && handsAllowed && mouseIdle &&
+           arbiter.State(s) == handoff::Owner::Hand && !typingSide[s];
 }
 
 void Pointer::PickRayOwner(const bool typingSide[2]) {

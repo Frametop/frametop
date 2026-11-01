@@ -64,8 +64,10 @@ either side, here Ctrl+Alt+G): the combination does the action, and its last key
 A modifier on its own ("125": Meta) is a tap: pressed with no other modifier held, and released
 with no other key or mouse button going down or up, and no scroll, in between. It fires on the
 release, never on the press. The desktop gets an F24 press before the release, so Plasma's
-launcher doesn't open on a Meta tap that's bound. "meta_tap": false in the rules turns a Meta
-tap's binding off (either side's; the default is on): Meta comes and goes as an unbound one does. A tap's left-hand code is
+launcher doesn't open on a Meta tap that's bound. A key or button already down when the
+modifier goes down keeps it from being one too (a drag sends nothing meanwhile), except for
+hold to talk. "meta_tap": false in the rules turns a Meta tap's binding off, whatever it is
+(either side's; the default is on): Meta comes and goes as an unbound one does. A tap's left-hand code is
 either side's; a right-hand code ("97": Right Ctrl) is that key's alone, and comes first. A lone
 modifier bound to dictate_hold is hold to talk instead: dictation starts on its press (alone) and
 stops on its release, and a key, mouse button or scroll in between makes it a shortcut, which
@@ -1527,6 +1529,10 @@ class Relay:
                     self.held.talk_code, self.held.talk_hidden, hide = code, True, True
                     self.do_action("dictate_hold", 1, now, "keyboard")
                     log(f"key combination {self.tap_action(mod, code)[0]}: dictate_hold (held)")
+                elif self.held.tap is not None and any(c not in MODIFIERS for c in self.physically_down()):
+                    # A key or button already down (a drag, a game's W) and held right through
+                    # sends nothing meanwhile (mice don't repeat): it isn't a tap either.
+                    self.held.tap = None
             (self.held.modifiers.add if value else self.held.modifiers.discard)(mod)
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
                 (self.held.meta.add if value else self.held.meta.discard)(code)

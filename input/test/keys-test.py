@@ -376,6 +376,12 @@ def tests():
     check("a mouse button down before Meta, let go while it's held: no tap", len(lines(steam_log)), menus + 1)
     key(A, 1); key(META, 1); key(A, 2); key(META, 0); key(A, 0)
     check("a key held from before Meta, repeating while it's held: no tap", len(lines(steam_log)), menus + 1)
+    key(relay.BTN_LEFT, 1, ms_w); key(META, 1); key(META, 0)
+    check("a mouse button held right through Meta's hold (a drag): no tap", len(lines(steam_log)), menus + 1)
+    key(relay.BTN_LEFT, 0, ms_w)
+    key(A, 1); key(META, 1); key(META, 0)
+    check("a key held right through Meta's hold, no repeats: no tap", len(lines(steam_log)), menus + 1)
+    key(A, 0)
     for _ in range(3):
         key(META, 1); key(META, 0)
     check("three Meta taps in a row: three Steam menus (a cancelled hold doesn't stop the next)",

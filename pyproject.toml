@@ -54,6 +54,8 @@ override-dependencies = ["opencv-python; sys_platform == 'never'"]
 # tests and tools use them), named lambdas (E731), several imports on one line (E401) and the
 # names l/I/O (E741).
 [tool.ruff]
+# requires-python's floor (3.12), not the image's 3.14: the host-side scripts run on the
+# Frame's system Python, so syntax newer than 3.12 fails the lint.
 target-version = "py312"
 
 [tool.ruff.lint]

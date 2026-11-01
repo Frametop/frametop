@@ -8,7 +8,7 @@ default:
     @just --list
 
 # everything, strict (the recipes are the source of truth)
-test: test-python test-c test-keyboard test-bash test-testbench test-fast-install lint
+test: lint test-python test-c test-keyboard test-bash test-testbench test-fast-install
 
 # the Python suites as a strict gate: every failure fails the run. The image's
 # python3 has to import the dnf Qt stack and the locked packages together;
@@ -237,7 +237,8 @@ test-fast-install:
     python3 scripts/tests/test_fast_install.py
 
 # lint the Python side (ruff from the locked dev group, the rules in pyproject.toml's
-# [tool.ruff]): a finding fails it, and `just test`, which runs it last.
+# [tool.ruff]): a finding fails it, and `just test`, which runs it first (a second, not minutes).
+# It lints the tree as it is here, untracked .py files too, so a scratch script can fail it.
 lint:
     ruff check --no-cache .
 

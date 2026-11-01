@@ -165,6 +165,26 @@ class Gate(unittest.TestCase):
             self.assertEqual(testgate.timeout(), 5)
         with unittest.mock.patch.dict(os.environ, FT_TEST_TIMEOUT="soon"):
             self.assertEqual(testgate.timeout(), testgate.TIMEOUT)
+        with unittest.mock.patch.dict(os.environ, FT_TEST_TIMEOUT="0"):
+            self.assertIsNone(testgate.timeout())   # no limit
+        self.assertEqual(testgate.run(self.file("m.py", "print('all passed')\n"), limit=None)[0], "ok")
+
+    def test_a_server_left_running_gets_sigterm(self):
+        """A passing file's leftover is ended, and asked first: it gets SIGTERM and can clean up."""
+        marker = os.path.join(self.dir, "cleaned-up")
+        path = self.file("n.py", f"""\
+            import subprocess, sys
+            subprocess.Popen([sys.executable, "-c",
+                              "import signal, sys, time\\n"
+                              "signal.signal(signal.SIGTERM, lambda *a: (open({marker!r}, 'w').close(), sys.exit(0)))\\n"
+                              "print('up', flush=True)\\n"
+                              "time.sleep(60)"], stdout=subprocess.PIPE).stdout.readline()
+            print("all passed")
+            """)
+        start = time.monotonic()
+        self.assertEqual(testgate.run(path)[0], "ok")
+        self.assertTrue(os.path.exists(marker))
+        self.assertLess(time.monotonic() - start, 20)
 
     def test_a_pattern_that_matches_nothing_fails(self):
         self.case("a.py", "def test_a(self): pass")

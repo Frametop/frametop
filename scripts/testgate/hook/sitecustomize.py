@@ -2,7 +2,9 @@
 it runs, count the unittest tests that ran and the skips with their reasons, and write them to
 the file FT_TEST_REPORT names when the test process ends, with how many tests the file
 itself defines (unittest's loader on __main__), so testgate can tell a file that defines tests
-but never runs them (no unittest.main()). Without FT_TEST_REPORT it does
+but never runs them (no unittest.main()). Not counted: a file that leaves by os._exit (no
+report at all) and tests run in a child process (which has no FT_TEST_REPORT). A file that
+skips itself before unittest.main() exits 77, as testgate's docstring says. Without FT_TEST_REPORT it does
 nothing, and it takes the variable out of the environment, so a Python a test starts doesn't
 report over its parent's."""
 import os

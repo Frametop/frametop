@@ -11,8 +11,11 @@ failed.
   "skip  REASON" line on its stdout is a part it skipped.
 - A file that defines unittest tests but runs none (no unittest.main()) fails: it would pass
   having tested nothing.
-- A file gets TIMEOUT seconds (FT_TEST_TIMEOUT overrides); one still running then is killed,
-  with whatever it started (its own session), and fails, so a hung test can't hang the gate.
+- A file gets TIMEOUT seconds (FT_TEST_TIMEOUT overrides; 0 is no limit); one still running
+  then is killed and fails, so a hung test can't hang the gate. Each file runs in a session of
+  its own, and what is left in its process group when it ends (or testgate is stopped) is
+  ended too: SIGTERM, then SIGKILL a second later. A program a test starts in a session of its
+  own (setsid) isn't in that group and isn't ended.
 - A failing file's output is shown; a passing one's isn't.
 
   scripts/testgate/testgate.py 'conf/test/*.py' 'layout/tests/test_*.py' ...
@@ -24,6 +27,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hook")
 # The repo root, on each test's PYTHONPATH: hands/rec and gaze/rec are packages (hands.rec, gaze.rec), and
@@ -34,16 +38,62 @@ TIMEOUT = 900   # seconds a file gets: room for a slow file, an end for a hung o
 
 
 def timeout():
+    """TIMEOUT, or FT_TEST_TIMEOUT's seconds; None (no limit) for 0 or less."""
     try:
-        return float(os.environ.get("FT_TEST_TIMEOUT") or TIMEOUT)
+        limit = float(os.environ.get("FT_TEST_TIMEOUT") or TIMEOUT)
     except ValueError:
         return TIMEOUT
+    return limit if limit > 0 else None
+
+
+def _exited(pid, limit):
+    """Wait up to limit seconds (None: no limit) for pid to exit, without reaping it, so its
+    process group id stays its own while the group is ended. True when it exited."""
+    deadline = None if limit is None else time.monotonic() + limit
+    while True:
+        r = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG)
+        if r is not None and r.si_pid == pid:
+            return True
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def _members(pgid):
+    """The live processes in process group pgid (the zombie leader not counted)."""
+    out = []
+    for name in os.listdir("/proc"):
+        if name.isdigit():
+            try:
+                with open(f"/proc/{name}/stat") as f:
+                    fields = f.read().rsplit(")", 1)[1].split()
+            except (OSError, IndexError):
+                continue
+            if fields[0] != "Z" and int(fields[2]) == pgid:
+                out.append(int(name))
+    return out
+
+
+def _end_group(pgid):
+    """SIGTERM what's left in the group, and SIGKILL what's still there a second later."""
+    if not _members(pgid):
+        return
+    for sig, grace in ((signal.SIGTERM, 1.0), (signal.SIGKILL, 0)):
+        try:
+            os.killpg(pgid, sig)
+        except OSError:
+            return
+        deadline = time.monotonic() + grace
+        while _members(pgid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not _members(pgid):
+            return
 
 
 def run(path, python=sys.executable, limit=None):
     """Run one test file: (status, how many tests ran, the skip reasons, its stdout, its stderr).
     status is "ok", "skipped" or "failed"."""
-    limit = limit or timeout()
+    limit = limit if limit is not None else timeout()
     with tempfile.TemporaryDirectory(prefix="ft-testgate-") as tmp:
         report = os.path.join(tmp, "report.json")
         env = dict(os.environ, FT_TEST_REPORT=report,
@@ -54,14 +104,16 @@ def run(path, python=sys.executable, limit=None):
             p = subprocess.Popen([python, path], stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=env,
                                  start_new_session=True)
             try:
-                code = p.wait(timeout=limit)
-            except subprocess.TimeoutExpired:
-                code = None
-            try:   # what it started and left running goes too
-                os.killpg(p.pid, signal.SIGKILL)
-            except OSError:
-                pass
-            p.wait()
+                timed_out = not _exited(p.pid, limit)
+                if timed_out:
+                    os.killpg(p.pid, signal.SIGKILL)
+                _end_group(p.pid)   # what it started and left running goes too
+            except BaseException:   # testgate stopped (Ctrl-C, SIGTERM): the file goes with it
+                _end_group(p.pid)
+                p.kill()
+                p.wait()
+                raise
+            code = None if timed_out else p.wait()
             out.seek(0)
             err.seek(0)
             stdout, stderr = out.read(), err.read()
@@ -132,6 +184,7 @@ def main(patterns):
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))   # so the file running ends too
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     sys.exit(main(sys.argv[1:]))

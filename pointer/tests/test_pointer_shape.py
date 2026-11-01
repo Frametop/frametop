@@ -115,6 +115,13 @@ def settings():
             for k, d, lo, hi, on in pat.findall(SRC)]
 
 
+def writes(field):
+    """A write to fr.<field> or into it: =, op=, ++/--, Read(fr.<field>), swap."""
+    f = rf"fr\.{field}\b"
+    return (rf"\b{f}(?:\.\w+|\[[^\]]*\])*\s*(?:[-+*/|&^]|<<|>>)?=[^=]|(?:\+\+|--){f}|{f}[\w.\[\]]*(?:\+\+|--)"
+            rf"|Read\({f}|swap\([^;]*\b{f}")
+
+
 def helpers():
     """Pointer's member functions other than Tick and its sections: name -> body. The in-class
     ones (Tick's old lambdas) and the steps defined after the struct (a section's parts)."""
@@ -124,7 +131,7 @@ def helpers():
         end = struct.find("\n    }", m.start())
         one = m.group(0).rstrip().endswith("}")
         funcs[m.group(1)] = m.group(0) if one else struct[m.start():end]
-    for m in re.finditer(r"^[\w:<>]+ Pointer::(\w+)\(.*\{$", SRC, re.M):
+    for m in re.finditer(r"^[A-Za-z_][^(\n]*?\bPointer::(\w+)\(.*\{$", SRC, re.M):
         if m.group(1) not in SECTIONS and m.group(1) != "Tick":
             funcs[m.group(1)] = SRC[m.start():SRC.index("\n}", m.start())]
     return funcs
@@ -167,7 +174,7 @@ class PointerShape(unittest.TestCase):
         self.assertEqual(fields, set(SETS))
         for field, setter in SETS.items():
             writers = [s for s in SECTIONS
-                       if re.search(rf"fr\.{field}\b(\[[^\]]*\])? =[^=]|TrackingPose\([^;]*\bfr\.{field}\b|Read\(fr\.{field}\)",
+                       if re.search(writes(field) + rf"|TrackingPose\([^;]*\bfr\.{field}\b",
                                     body(f"Pointer::{s}() {{"))]
             self.assertEqual(writers, [setter], field)
             first = re.search(rf"\bfr\.{field}\b.*", body(f"Pointer::{setter}() {{")).group(0)
@@ -180,11 +187,13 @@ class PointerShape(unittest.TestCase):
                 for h in readers:
                     self.assertNotRegex(text, rf"(?<![\w.]){h}\(", f"{s} calls {h}, which reads fr.{field}")
         for name, text in helpers().items():  # helpers and steps only read it
-            self.assertNotRegex(text, r"\bfr\.\w+(\[[^\]]*\])? =[^=]|Read\(fr\.", name)
+            self.assertNotRegex(text, writes(r"\w+"), name)
 
     def test_the_steps_are_found(self):
         steps = helpers()
-        for name in ("HandFrame", "GestureEdges", "SteerHolds", "AimAndPose", "FindTarget", "PlaceDots"):
+        for name in ("EndCancelledHolds", "HandFrame", "GestureEdges", "SteerHolds", "StartPendingBegins",
+                     "RayPress", "EndStaleHolds", "AimAndPose", "nearest", "FindTarget", "OnVrSettingsPage",
+                     "PlaceDots"):
             self.assertIn(name, steps)
         self.assertIn("AimAndPose", helpers_reading("rayMode"))
         self.assertIn("HandFrame", helpers_reading("hg"))

@@ -545,6 +545,7 @@
 #include "../../screens/posemath.h"
 #include "calpanel.h"
 #include "deskclass.h"
+#include "devpose.h"
 #include "gazehand.h"
 #include "handoff.h"
 #include "handsin.h"
@@ -1271,12 +1272,7 @@ int main() {
         bool scene = false, onEdge = false, occluded = false;
         Vec3 point;
     } pass;
-    struct Posed {
-        bool valid = false;
-        Clock::time_point at{};
-        Vec3 origin;
-        double yaw = 0, pitch = 0;
-    } posed;
+    PoseSent posed;  // the last plain "pose" (devpose.h)
     Clock::time_point lastMouse{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
     // Gaze owns the pointer (see the top): a controller last let it go then; a hand was last at a
     // panel then (ft-screens' near claim); the gaze last took it back then.
@@ -1775,13 +1771,7 @@ int main() {
     // Device pose, given in the standing universe, sent to the driver in raw space ("posq"). S and
     // R are the headset's standing and raw poses, read together: the caller says which reading.
     auto sendPose = [&](const vr::HmdMatrix34_t &S, const vr::HmdMatrix34_t &R, Vec3 originStanding, const Basis &b) {
-        auto toRaw = [&](Vec3 v) { return Rotate(R, RotateInverse(S, v)); };  // directions: raw <- standing
-        const Vec3 o = Position(R) + toRaw(originStanding - Position(S));
-        double q[4];
-        BasisQuat({toRaw(b.x), toRaw(b.y), toRaw(b.z)}, q);
-        char msg[200];
-        std::snprintf(msg, sizeof msg, "posq %.5f %.5f %.5f %.6f %.6f %.6f %.6f", o.x, o.y, o.z, q[0], q[1], q[2], q[3]);
-        SendTo(out, FT_SOCK_POINTER, msg);
+        SendTo(out, FT_SOCK_POINTER, PosqLine(S, R, originStanding, b));
         posed.valid = false;
     };
     // The same, with the headset's poses read now (placements, which run outside the loop's tick).
@@ -3846,12 +3836,8 @@ int main() {
                 cursorDot.Show(false);
                 markerDot.Show(false);
             }
-            const double yr = tiltYaw * M_PI / 180, pr = tiltPitch * M_PI / 180;
-            const Vec3 up{0, 1, 0}, side = tiltBasis.x;
-            auto turn = [&](Vec3 v) { return RotateAbout(RotateAbout(v, side, pr), up, yr); };
-            const Vec3 originStanding = pivot + turn(tiltOrigin - pivot);
-            const Basis b{turn(tiltBasis.x), turn(tiltBasis.y), turn(tiltBasis.z)};
-            sendPose(hmd.mDeviceToAbsoluteTracking, hmdRaw.mDeviceToAbsoluteTracking, originStanding, b);  // this tick's poses
+            const DevicePose tilted = TiltAbout(pivot, tiltOrigin, tiltBasis, tiltYaw, tiltPitch);
+            sendPose(hmd.mDeviceToAbsoluteTracking, hmdRaw.mDeviceToAbsoluteTracking, tilted.origin, tilted.basis);  // this tick's poses
         } else if (active && anchored && hmd.bPoseIsValid) {
             const bool dragging = leftHeld || tnow < dropHoldUntil;
             if (!dragging) tiltYaw = tiltPitch = 0;  // drop finished: back to plain pointing
@@ -4112,20 +4098,11 @@ int main() {
             const double apitch = std::asin(std::clamp(aim.y, -1.0, 1.0)) * 180 / M_PI;
             if (dragging && (tiltYaw != 0 || tiltPitch != 0)) {
                 // Keep this drag's tilt applied, about the current cursor point.
-                const double yr = tiltYaw * M_PI / 180, pr = tiltPitch * M_PI / 180;
-                const Basis base = AimBasis(aimStanding);
-                const Vec3 up{0, 1, 0}, side = base.x;
-                auto turn = [&](Vec3 v) { return RotateAbout(RotateAbout(v, side, pr), up, yr); };
-                const Vec3 o = point + turn(originStanding - point);
-                const Basis b{turn(base.x), turn(base.y), turn(base.z)};
-                sendPose(S, R, o, b);  // this tick's poses, as the plain "pose" below
-            } else if (!posed.valid || tnow - posed.at >= std::chrono::milliseconds(100) ||
-                       Length(eyeRaw - posed.origin) >= 0.0002 || std::fabs(std::remainder(ayaw - posed.yaw, 360.0)) >= 0.04 ||
-                       std::fabs(apitch - posed.pitch) >= 0.04) {
+                const DevicePose tilted = TiltAbout(point, originStanding, AimBasis(aimStanding), tiltYaw, tiltPitch);
+                sendPose(S, R, tilted.origin, tilted.basis);  // this tick's poses, as the plain "pose" below
+            } else if (PoseDue(posed, tnow, eyeRaw, ayaw, apitch)) {
                 // The driver keeps the last pose: only a change goes out (see "Unchanged frames" at the top).
-                char msg[160];
-                std::snprintf(msg, sizeof msg, "pose %.5f %.5f %.5f %.4f %.4f", eyeRaw.x, eyeRaw.y, eyeRaw.z, ayaw, apitch);
-                SendTo(out, FT_SOCK_POINTER, msg);
+                SendTo(out, FT_SOCK_POINTER, PoseLine(eyeRaw, ayaw, apitch));
                 posed = {true, tnow, eyeRaw, ayaw, apitch};
             }
             if (hold.src == Src::Ray) hold.aimSent = true;  // its press can go out next frame (see above)

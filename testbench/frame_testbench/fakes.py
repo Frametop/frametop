@@ -59,7 +59,7 @@ def mono_ns():
 
 
 def direction(yaw, pitch):
-    """md::Direction (pointer/common/vrmath.h): head-relative degrees to a unit vector."""
+    """md::Direction (pointer/common/vec3.h): head-relative degrees to a unit vector."""
     y, p = math.radians(yaw), math.radians(pitch)
     return [-math.sin(y) * math.cos(p), math.sin(p), -math.cos(y) * math.cos(p)]
 

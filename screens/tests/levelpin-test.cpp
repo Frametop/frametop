@@ -1,8 +1,10 @@
-// A level head pin's frame (screens/levelpin.h): the head's turn and floor position, nothing else.
+// A head pin's floor frames (screens/levelpin.h): Level, the head's turn and floor position, nothing
+// else; Walk (DEE-208), the floor position only; and the SCREEN_PIN_LEVEL values.
 #include "../levelpin.h"
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 static int failed = 0;
 static void check(const char *what, bool ok) {
@@ -38,6 +40,29 @@ static bool is(const float f[3][4], double yaw, float x, float z, double tol = 1
            near(f[0][0] * f[0][0] + f[2][0] * f[2][0], 1);
 }
 
+// Rigid 3x4 poses: a times b, and a's inverse (rotation transposed).
+static void mul(const float a[3][4], const float b[3][4], float o[3][4]) {
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            double v = c == 3 ? a[r][3] : 0;
+            for (int k = 0; k < 3; ++k) v += a[r][k] * b[k][c];
+            o[r][c] = float(v);
+        }
+    }
+}
+static void inv(const float a[3][4], float o[3][4]) {
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) o[r][c] = a[c][r];
+        o[r][3] = -(a[0][r] * a[0][3] + a[1][r] * a[1][3] + a[2][r] * a[2][3]);
+    }
+}
+static bool same(const float a[3][4], const float b[3][4]) {
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c)
+            if (!near(a[r][c], b[r][c])) return false;
+    return true;
+}
+
 int main() {
     const double d = M_PI / 180;
     float h[3][4], f[3][4];
@@ -62,5 +87,42 @@ int main() {
           std::fabs(std::remainder(std::atan2(-a[2][0], a[0][0]) - std::atan2(-b[2][0], b[0][0]), 2 * M_PI)) < 10 * d);
     head(h, 170 * d, 0, 0, 1, 1.6f, 1);
     check("facing behind the origin", levelpin::Frame(h, f) && is(f, 170 * d, 1, 1));
+    // Walk: the room's axes under the head, whatever it does.
+    head(h, 30 * d, 50 * d, 20 * d, 0.5f, 1.2f, -0.2f);
+    check("walk: no turn, look or tilt, on the floor under the head",
+          levelpin::FloorFrame(levelpin::Walk, h, f) && is(f, 0, 0.5f, -0.2f));
+    head(h, 170 * d, -80 * d, 0, -1, 0.7f, 2);
+    check("walk: turned round and crouched, still the room's axes",
+          levelpin::WalkFrame(h, f) && is(f, 0, -1, 2));
+    {
+        // A screen pinned with Walk keeps its height and facing and moves with the head's floor position.
+        float h0[3][4], h1[3][4], f0[3][4], f1[3][4], fi[3][4], rel[3][4], got[3][4];
+        head(h0, 0, 0, 0, 0, 1.6f, 0);
+        float screen[3][4];
+        head(screen, 20 * d, 10 * d, 0, 0.3f, 1.5f, -1.2f);   // in front, a little right, turned and tipped
+        levelpin::WalkFrame(h0, f0);
+        inv(f0, fi);
+        mul(fi, screen, rel);
+        head(h1, 90 * d, -30 * d, 15 * d, 1.0f, 1.1f, 2.0f);   // walked 1 m right, 2 m back, turned, crouched
+        levelpin::WalkFrame(h1, f1);
+        mul(f1, rel, got);
+        float want[3][4];
+        std::memcpy(want, screen, sizeof want);
+        want[0][3] += 1.0f, want[2][3] += 2.0f;
+        check("walk pin: moved with the walk, same height and facing after turning and crouching", same(got, want));
+        // The same with Level turns it with the head.
+        levelpin::Frame(h0, f0);
+        inv(f0, fi);
+        mul(fi, screen, rel);
+        levelpin::Frame(h1, f1);
+        mul(f1, rel, got);
+        check("level pin: turned with the head (not the same as walk)", !same(got, want) && near(got[1][3], screen[1][3]));
+    }
+    check("rigid has no floor frame", !levelpin::FloorFrame(levelpin::Rigid, h, f));
+    check("SCREEN_PIN_LEVEL values: 0 rigid, 1 level, 2 walk, junk rigid",
+          levelpin::ModeOf("0") == levelpin::Rigid && levelpin::ModeOf("1") == levelpin::Level &&
+              levelpin::ModeOf("2") == levelpin::Walk && levelpin::ModeOf("on") == levelpin::Level &&
+              levelpin::ModeOf("3") == levelpin::Rigid && levelpin::ModeOf("") == levelpin::Rigid &&
+              levelpin::ModeOf(nullptr) == levelpin::Rigid);
     return failed ? 1 : 0;
 }

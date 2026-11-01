@@ -85,7 +85,7 @@ Restarting the desktop (Restart desktop in Frametop Display Settings) closes its
 | Click, right-click, scroll | Acts on the panel under the dot |
 | Pick up a controller | The controller gets its laser back; move the mouse to take over again |
 
-You can map the mouse's extra buttons to actions such as Toggle SteamVR dashboard, Recenter pointer, or Head follow on/off on the Buttons page of Frametop Input Settings, and the Frame controllers' buttons on its Controllers page. Pointer speed, dot size, and the rest are on its Pointer page and take effect immediately. If a panel you only look at, such as a performance overlay that follows your view, keeps catching the dot, tick it (or its whole app) on the Ignored panels page, and the pointer passes through it. Head follow, which is experimental and off by default, makes the pointer come along when you turn your head: it stays put until your head turns past the leash angle, then glides back to its place in your view, and a leash of 0 keeps it fixed in your view. It's only lightly tested and not polished; tuning its settings, or improving how it feels, is open to anyone who wants to take it further.
+You can map the mouse's extra buttons to actions such as Toggle SteamVR dashboard, Recenter pointer, or Head follow on/off on the Buttons page of Frametop Input Settings, and the Frame controllers' buttons on its Controllers page. Pointer speed, dot size, and the rest are on its Pointer page and take effect immediately, with a switch for SteamVR's travel mode (tracking in a moving car, train or plane; off by default). If a panel you only look at, such as a performance overlay that follows your view, keeps catching the dot, tick it (or its whole app) on the Ignored panels page, and the pointer passes through it. Head follow, which is experimental and off by default, makes the pointer come along when you turn your head: it stays put until your head turns past the leash angle, then glides back to its place in your view, and a leash of 0 keeps it fixed in your view. It's only lightly tested and not polished; tuning its settings, or improving how it feels, is open to anyone who wants to take it further.
 
 ### Floating windows
 
@@ -228,7 +228,7 @@ curl -fsSL https://frametop.github.io/frametop/get.sh | bash
 
 Or by hand: `cd ~/frametop && git pull && ./install.sh`.
 
-If an install or update stops part-way (an error, the headset powering off), run the same command again: it finishes it.
+If an install or update stops part-way (an error, Ctrl-C, a closed terminal, the headset powering off), run the same command again: it finishes it. Until then some services may run from the new version and some from the old one; `install.sh` says so when it stops early.
 
 ## Uninstall
 

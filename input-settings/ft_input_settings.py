@@ -17,7 +17,8 @@ to the input relay over its control socket (@frametop_relay):
     ~/.config/frametop-commands.json), run in the background from a button, a controller
     button or a key combination ("run:NAME"), frunner, Frametop Voice ("run NAME"), or a
     terminal, where each name is an alias too (~/.config/frametop/aliases.sh, from ~/.bashrc).
-  - Pointer: speed, dot size, distance and the rest, applied live.
+  - Pointer: speed, dot size, distance and the rest, applied live, and SteamVR's travel mode
+    (travel_mode.py: vrcmd on the host, while SteamVR runs).
   - Ignored panels: SteamVR overlays the pointer passes through (POINTER_IGNORE), by app or
     one by one. The helper lists them (@ft_pointer_helper "overlays").
   - Game optimization: pausing Frametop while a VR game runs, so it leaves the CPU and GPU to the game
@@ -96,6 +97,7 @@ sys.path.insert(0, os.path.join(REPO, "models"))
 sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands: standard library only)
 import input_commands  # noqa: E402  (the Commands page's logic)
+import travel_mode  # noqa: E402  (SteamVR's travel mode, through vrcmd)
 import catalog as model_catalog  # noqa: E402
 # How the pickers tag each entry: by status, and builtins by what they are.
 MODEL_TAGS = {"recommended": "Recommended", "testing": "Testing", "older": "Older"}
@@ -514,6 +516,8 @@ class Backend(QObject):
     commandsChanged = Signal()
     commandAdded = Signal(bool, str)  # startAddCommand's: saved, why not ("" when saved)
     _bluetoothRead = Signal(object)  # refreshBluetooth's devices, from its thread
+    travelChanged = Signal()
+    _travelRead = Signal(object, str)  # travel mode: on, off or None (unknown), and why it's unknown
     message = Signal(str, bool)  # text, is error
 
     def __init__(self):
@@ -525,6 +529,11 @@ class Backend(QObject):
         self._bluetooth = []
         self._bluetooth_busy = False   # a read or the fixes running (bluetoothctl, pkexec: not on the UI thread)
         self._bluetoothRead.connect(self._bluetooth_read, Qt.QueuedConnection)
+        self._travel = None  # SteamVR's travel mode: None until read, or when it can't be
+        self._travel_note = ""
+        self._travel_busy = False  # vrcmd running (on the host: not on the UI thread)
+        self._travel_want = None  # the switch's new state while it's being set, so it doesn't snap back
+        self._travelRead.connect(self._travel_read, Qt.QueuedConnection)
         self._adding = False
         self._relay_ok = False
         self._capture_vr = False
@@ -893,6 +902,56 @@ class Backend(QObject):
         write_conf_value("POINTER_FOLLOW", "1" if on else "0")
         self.reload_timer.start()
         self.pointerChanged.emit()
+
+    # --- SteamVR travel mode (travel_mode.py) ---
+    @Property(bool, notify=travelChanged)
+    def travelMode(self):
+        if self._travel_busy and self._travel_want is not None:
+            return self._travel_want
+        return self._travel is True
+
+    @Property(bool, notify=travelChanged)
+    def travelKnown(self):
+        return self._travel is not None
+
+    @Property(bool, notify=travelChanged)
+    def travelBusy(self):
+        return self._travel_busy
+
+    @Property(str, notify=travelChanged)
+    def travelNote(self):
+        return self._travel_note
+
+    def _travel_job(self, on=None):
+        """Read SteamVR's travel mode, or set it to ON first (a bool), off the UI thread."""
+        if self._travel_busy:
+            return
+        self._travel_busy, self._travel_want = True, on
+        self.travelChanged.emit()
+
+        def job():
+            try:
+                if on is None:
+                    self._travelRead.emit(*travel_mode.get(host))
+                    return
+                ok, text, got = travel_mode.put(host, on)
+                self.message.emit(text, not ok)
+                self._travelRead.emit(got, "" if got is not None else text)
+            except Exception as e:   # (the switch mustn't stay off)
+                self._travelRead.emit(None, f"Couldn't reach SteamVR's vrcmd: {e}")
+        threading.Thread(target=job, daemon=True).start()
+
+    def _travel_read(self, got, note):
+        self._travel, self._travel_note, self._travel_busy, self._travel_want = got, note, False, None
+        self.travelChanged.emit()
+
+    @Slot()
+    def refreshTravel(self):
+        self._travel_job()
+
+    @Slot(bool)
+    def setTravelMode(self, on):
+        self._travel_job(bool(on))
 
     @Slot(result=bool)
     def recenter(self):

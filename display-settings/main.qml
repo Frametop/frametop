@@ -1072,18 +1072,28 @@ Kirigami.ApplicationWindow {
                             }
                         }
                     }
-                    Controls.Switch {
+                    Controls.ComboBox {
+                        id: pinModeBox
                         Kirigami.FormData.label: "Head pins:"
-                        text: "Pin only follows horizontal movement"
-                        checked: backend.pinLevel
-                        onToggled: {
-                            backend.setPinLevel(checked)
-                            checked = Qt.binding(() => backend.pinLevel)
+                        // SCREEN_PIN_LEVEL: 0, 1, 2 (the row is the value)
+                        model: [
+                            "Ride on the headset",
+                            "Pin only follows horizontal movement",
+                            "Pin follows walking only, not turning"
+                        ]
+                        currentIndex: backend.pinMode
+                        onActivated: {
+                            backend.setPinMode(currentIndex)
+                            currentIndex = Qt.binding(() => backend.pinMode)
                         }
                     }
                     Controls.Label {
-                        text: "A screen on your head turns and walks with you but stays level: looking up or down, "
-                              + "tilting your head, or crouching leaves it where it is."
+                        text: ["A screen on your head rides on the headset: it moves with every turn, look and tilt.",
+                               "A screen on your head turns and walks with you but stays level: looking up or down, "
+                               + "tilting your head, or crouching leaves it where it is.",
+                               "A screen on your head moves with you as you walk but doesn't turn: like a ball round "
+                               + "you, it keeps its height and faces the same way in the room, so turn your head to see "
+                               + "the ones beside or behind you."][Math.max(0, Math.min(2, backend.pinMode))]
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 26

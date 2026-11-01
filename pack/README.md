@@ -199,7 +199,8 @@ Every update is a full 1.1 GB download, since the zip holds the whole image
 
 ## CI
 
-`.github/workflows/check.yml` runs the test gate on every push and pull request, on
+`.github/workflows/check.yml` runs the test gate when started by hand (manual only, no push or
+pull request trigger), on
 GitHub's free arm64 runner (`ubuntu-24.04-arm`): it builds the image (`ft dev build`) and runs
 `ft dev test` in it, read-only, with no secrets. It builds or publishes nothing.
 

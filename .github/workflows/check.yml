@@ -1,17 +1,15 @@
-# The test gate on every push and pull request, on GitHub's own arm64 runner (free for public
-# repositories; the Frame is aarch64): the image from pack/Containerfile, then `./ft dev test`
-# inside it, the same gate release.yml runs before it builds a release. Nothing is built or
-# published: release.yml (Depot, on v* tags) still makes the releases.
+# The test gate, run by hand (Actions > check > Run workflow), on GitHub's own arm64 runner
+# (free for public repositories; the Frame is aarch64): the image from pack/Containerfile, then
+# `./ft dev test` inside it, the same gate release.yml runs before it builds a release. Nothing is
+# built or published: release.yml (Depot, on v* tags) still makes the releases.
 #
-# Read-only: no secrets, no write permission, so a fork's pull request runs it safely. A newer
-# push to the same branch cancels the run before it. Actions are pinned to commit SHAs (the
-# version in the comment).
+# Manual only (Daenon, 2026-11-01): no push or pull request starts it. Read-only: no secrets, no
+# write permission. A newer run on the same branch cancels the one before it. Actions are pinned
+# to commit SHAs (the version in the comment).
 name: check
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -1057,6 +1057,26 @@ def tests():
     from_kb("kbtext x", other)
     check("keys and text from another address are ignored", (typed(), emitted()), ([], []))
     other.close()
+    # Its key right after a committed character waits the switch gap: the two go by different
+    # ways, so Enter mustn't overtake the text it ends.
+    im = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    im.bind("")
+    im.sendto(b"textfield 1", f"\0{tag}_relay")
+    time.sleep(0.1)
+    typed()
+    for text in ("kbtext \u0105", f"kbkey {ENTER} 1", f"kbkey {ENTER} 0"):
+        kb.sendto(text.encode(), f"\0{tag}_relay")
+    got, end = [], time.monotonic() + 0.5
+    while time.monotonic() < end:
+        for sock in select.select([screens, im], [], [], 0.05)[0]:
+            got.append((sock.recv(256).decode(), time.monotonic()))
+    got = [(m, t) for m, t in got if not m.startswith(("vrkeyboard", "fullkb"))]
+    check("Full Keyboard: \u0105 committed, then Enter as keys",
+          [m for m, _ in got], ["commit \u0105", "key 28 1", "key 28 0"])
+    check("...Enter the switch gap after the commit",
+          len(got) == 3 and got[1][1] - got[0][1] >= relay.TYPE_SWITCH * 0.8, True)
+    im.sendto(b"textfield 0", f"\0{tag}_relay")
+    im.close()
     heard()
     to_relay("kbpanel show")
     check("ft-screens' kbpanel show: Full Keyboard opens", heard(), ["kb show"])

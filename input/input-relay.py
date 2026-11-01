@@ -1682,12 +1682,14 @@ class Relay:
 
     def commit_text(self, text):
         """Send text to ft-textinput, which commits it to the focused text field. False if it
-        didn't go (ft-textinput gone): then there's no text field to send to until it says again."""
+        didn't go. If ft-textinput is gone, there's no text field to send to until it says again;
+        if it's only behind (its queue full), the next character tries again."""
         try:
             self.control.sendto(f"commit {text}".encode(), self.text_input)
             return True
-        except OSError:
-            self.text_input = None
+        except OSError as e:
+            if e.errno in (errno.ECONNREFUSED, errno.ENOENT):
+                self.text_input = None
             return False
 
     def report_untyped(self, desktop):
@@ -1725,7 +1727,11 @@ class Relay:
                 self.type_key(m, 0, desktop)
         elif self.typing.queue and self.typing.queue[0][0] == "key":
             # Full Keyboard's key, with its modifiers its own: a held one doesn't stop it. It
-            # comes up where it went down.
+            # comes up where it went down, and goes as keys, so after a commit it waits too.
+            if self.typing.committing:
+                self.typing.committing = False
+                self.typing.at = now + TYPE_SWITCH
+                return
             _, code, value = self.typing.queue.popleft()
             if value:
                 if code in self.typing.kb_held:

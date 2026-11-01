@@ -981,8 +981,6 @@ constexpr double kPlaceDegPerSec = 60;      // tested: 40 deg/s is applied exact
 
 using Clock = std::chrono::steady_clock;
 
-using Clock = std::chrono::steady_clock;
-
 struct Pass {
     bool valid = false;
     Clock::time_point at{};
@@ -995,7 +993,6 @@ struct Pass {
     Vec3 point;
 };
 
-// head past the leash since (delay)
 // Gaze mode (see the top).
 struct Gaze {
     double hy = 0, hp = 0, rhy = 0, rhp = 0;  // corrected, and raw
@@ -1061,7 +1058,6 @@ struct DeviceInfo {
     int hint = 0;
 };
 
-  // when the last ray went
 // ft-screens' touches on SteamVR's panels (see "Touch" at the top): the laser goes where it says.
 struct Touch {
     int side = -1;                  // the hand whose touch has the laser (-1: none)
@@ -1078,7 +1074,6 @@ struct Touch {
     Basis sentBasis{};
 };
 
-// the driving ray this frame (standing universe)
 // Gestures that began while ft-screens may still claim them (see "near" at the top).
 struct PendingBegin {
     int side, kind;
@@ -1088,7 +1083,6 @@ struct PendingBegin {
     bool ended = false, lost = false;
 };
 
-// ft-pointer's state: main()'s locals before DEE-322, so its parts can be functions (see the top).
 // One tick's readings (Pointer::fr): the poses, read once a tick (ReadFrame), and ft-hands'
 // gestures (ReadHands). Each tick sets them before they're read.
 struct Frame {
@@ -1101,6 +1095,7 @@ struct Frame {
     bool rayMode = false;  // a hand's ray has the pointer (RayDrive)
 };
 
+// ft-pointer's state: main()'s locals before DEE-322, so its parts can be functions (see the top).
 struct Pointer {
     double freeDistance = 1.5, cursorDeg = 0.4, originFraction = 0.95, originMargin = 0.15, sceneRadius = 0.5,
            edgeReach = 0.3, grabOffset = 0.075,
@@ -1111,10 +1106,8 @@ struct Pointer {
     // Gaze mode (see the top); gazeConf is POINTER_GAZE as last read, like followConf.
     bool gazeOn = false, gazeConf = false;
     double gazeRetake = 5, gazeNudgeMax = 55, gazeHold = 0.5, gazeShow = 1, gazeControlHold = 0.12;
-    bool gazeDotAlways = true;
-  // POINTER_GAZE_DOT (see the top)
-    double headDeadzone = 0.5, keyTap = 0.25;
-  // POINTER_HEAD_DEADZONE, POINTER_KEY_TAP (keyboard clicks, see the top)
+    bool gazeDotAlways = true;  // POINTER_GAZE_DOT (see the top)
+    double headDeadzone = 0.5, keyTap = 0.25;  // POINTER_HEAD_DEADZONE, POINTER_KEY_TAP (keyboard clicks, see the top)
     // Hands (see the top): POINTER_HANDS, POINTER_PINCH_GAIN, POINTER_PINCH_DEADZONE, POINTER_GRIP_GAIN.
     bool handsOn = false;
     // POINTER_GAZE_PINCH: in gaze mode, a hand with no ray up clicks at the gaze (see "Gaze pinch").
@@ -1135,19 +1128,15 @@ struct Pointer {
     // and the laser starts at the point (SteamVR's hit dot shrinks to nothing); the next look after it shows it.
     std::chrono::steady_clock::time_point lastKeyAt{};
     double typingHide = 1.5;
-    double rayBeamOffset = 0;
-   // how far along the ray the beam starts now (m)
-    double sideCurl[2] = {-1, -1};
-   // each side's hand (ft-hands' call), newest frame: fhray::FistCurl
-    double sideGap[2][2] = {{-1, -1}, {-1, -1}};
-   // ...its thumb to the index and middle tips (m)
+    double rayBeamOffset = 0;  // how far along the ray the beam starts now (m)
+    double sideCurl[2] = {-1, -1};  // each side's hand (ft-hands' call), newest frame: fhray::FistCurl
+    double sideGap[2][2] = {{-1, -1}, {-1, -1}};  // ...its thumb to the index and middle tips (m)
     // Gaze pinches (gazehand.h): the right-drag (an index pinch within POINTER_GAZE_RIGHT_DRAG s of the other
     // hand's index tap; 0 off), the three-finger scroll (POINTER_GAZE_SCROLL gain, 0 off; POINTER_GAZE_SCROLL_GAP
     // m), the chord (POINTER_GAZE_CHORD, off since the right-drag).
     bool gazeChord = false;
     double gazeRightDrag = 0, gazeScroll = 1.0, gazeScrollGap = 0.035;
-    double rayThreeWait = 0.11;
-   // POINTER_RAY_THREE_WAIT: a ray pinch's press waits this long for the middle (s)
+    double rayThreeWait = 0.11;  // POINTER_RAY_THREE_WAIT: a ray pinch's press waits this long for the middle (s)
     // The two-hand press (user, 2026-10-11: "tap nudge into the right spot, and then tap with the other hand to
     // drag"): while one hand's gaze pinch is held back (aiming or nudged), the other hand's index tap presses the
     // left button where the pointer is, a middle tap the right; the first hand drags until it lets go
@@ -1158,8 +1147,7 @@ struct Pointer {
     // POINTER_PINCH_MAX_SPEED (0.6 m/s) within the last 0.25 s (sideFastAt).
     double pinchMaxSpeed = 1.0;
     std::chrono::steady_clock::time_point sideFastAt[2]{};
-    double sideSpeed[2] = {0, 0};
-   // each hand's palm speed, smoothed (frame-to-frame speed alone is noisy: at 0.6
+    double sideSpeed[2] = {0, 0};  // each hand's palm speed, smoothed (frame-to-frame speed alone is noisy: at 0.6
                                     // m/s it refused dozens of still pinches, 2026-10-11 18:02-18:04)
     gazehand::TapArm tapArm;
     bool rightDragPending = false;
@@ -1168,10 +1156,8 @@ struct Pointer {
     // POINTER_TYPING_POSTURE, POINTER_TYPING_RECENT, POINTER_TYPING_KEEP, POINTER_TYPING_MOUSE, and the
     // desk model's POINTER_DESK_MODEL and POINTER_DESK_MIN.
     typing::Params typingParams;
-    std::string deskModelPath;
-  // as configured ("": none)
-    std::pair<int64_t, int64_t> deskModelStamp{0, 0};
-  // the file's mtime (ns) and size when loaded: a retrained one loads on the next reload
+    std::string deskModelPath;  // as configured ("": none)
+    std::pair<int64_t, int64_t> deskModelStamp{0, 0};  // the file's mtime (ns) and size when loaded: a retrained one loads on the next reload
     desk::Model deskModel;
     // The hand ray (see "Hand ray" at the top): POINTER_HAND_RAY, POINTER_RAY_DEADZONE, POINTER_RAY_PUSH,
     // POINTER_RAY_SCROLL, POINTER_RAY_RELEASE, POINTER_RAY_GRACE.
@@ -1191,12 +1177,10 @@ struct Pointer {
     // Gaze precision (see the top): POINTER_GAZE_MOUSE (precision: the mouse's left button
     // holds back its press in gaze mode; direct: it clicks at once), POINTER_ROLE.
     bool gazeMousePrecision = true;
-    bool gazeMouseHeld = true;
-  // POINTER_GAZE_MOUSE_MOVE (see the top)
+    bool gazeMouseHeld = true;  // POINTER_GAZE_MOUSE_MOVE (see the top)
     std::string role = "treadmill";
-    double pickupScale = 1;
-  // POINTER_CONTROLLER_PICKUP: scales the controller-moved limits
-    std::vector<std::string> ignore;
+    double pickupScale = 1;  // POINTER_CONTROLLER_PICKUP: scales the controller-moved limits
+    std::vector<std::string> ignore;  // POINTER_IGNORE (see ParseIgnore)
     float laserWidth = 0;
     vr::EVRInitError err = vr::VRInitError_None;
     vr::IVRSystem *sys = nullptr;
@@ -1211,22 +1195,18 @@ struct Pointer {
     std::vector<uint8_t> clear;
     vr::HmdMatrix34_t below{};
     bool laserModeShown = false;
-    DotOverlay cursorDot, markerDot;
+    DotOverlay cursorDot, markerDot;  // the setters for `cursor` and `marker` (see "Unchanged frames" at the top)
     int in = -1;
     int out = -1;
     // Frame controller buttons (vrbuttons.h). The build puts the binary in pointer/helper/build.
     ControllerButtons controllerButtons;
-  // the relay answers with the mapped buttons
     OverlayList overlays;
     std::map<std::string, vr::VROverlayHandle_t> handles;
-    std::map<std::string, bool> sceneGraph;
-  // no texture: plane test instead of ComputeOverlayIntersection
-    std::map<std::string, bool> visible;
-     // refreshed every 50 ms
+    std::map<std::string, bool> sceneGraph;  // no texture: plane test instead of ComputeOverlayIntersection
+    std::map<std::string, bool> visible;  // refreshed every 50 ms
     Clock::time_point lastVisible{};
     Clock::time_point lastSlow{};
-    unsigned listGeneration = 0;
-  // the overlay list the handles were looked up from
+    unsigned listGeneration = 0;  // the overlay list the handles were looked up from
     // The plane of the last panel the cursor was on, and the last point on it (panel edges).
     Vec3 edgePoint, edgeNormal, edgeLast;
     std::string edgeKey;
@@ -1235,8 +1215,7 @@ struct Pointer {
     // handles change; pass is the last collision pass, posed the last plain pose sent.
     unsigned visibleGen = 0;
     Pass pass;
-    PoseSent posed;
-  // the last plain "pose" (devpose.h)
+    PoseSent posed;  // the last plain "pose" (devpose.h)
     Clock::time_point lastMouse{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
     // Gaze owns the pointer (see the top): a controller last let it go then; a hand was last at a
     // panel then (ft-screens' near claim); the gaze last took it back then.
@@ -1256,14 +1235,10 @@ struct Pointer {
     bool keyLeftDown = false, keyRightDown = false, keyTilting = false;
     double keyTiltYaw = 0, keyTiltPitch = 0;
     double tiltYaw = 0, tiltPitch = 0;
-    double dragDistance = 0, lastDistance = 1.5;
-  // drag lock: distance from the anchor at the press
-    bool onVrSettings = false;
-       // the cursor is on the SteamVR Settings page (kept while dragging)
-    bool catcherHidesHit = false;
-    // the laser-catching dot hides SteamVR's hit dot (Settings page)
-    Clock::time_point dropHoldUntil{};
-  // after a left release: keep the drag pose this long
+    double dragDistance = 0, lastDistance = 1.5;  // drag lock: distance from the anchor at the press
+    bool onVrSettings = false;  // the cursor is on the SteamVR Settings page (kept while dragging)
+    bool catcherHidesHit = false;  // the laser-catching dot hides SteamVR's hit dot (Settings page)
+    Clock::time_point dropHoldUntil{};  // after a left release: keep the drag pose this long
     bool debug = false;
     std::string lastHit;
     // The ft-screens panel the left button was pressed on, and where it was then (see the top).
@@ -1273,33 +1248,23 @@ struct Pointer {
     vr::VROverlayHandle_t systemPointer = vr::k_ulOverlayHandleInvalid;
     Vec3 pivot, tiltOrigin, lastPoint, lastOrigin, lastAim{0, 0, -1};
     Basis tiltBasis{};
-    bool headsetOff = false;
-  // nobody is wearing the headset (see the main loop)
-    Clock::time_point headsetIdleSince{};
-  // SteamVR has said idle since then (none: it doesn't)
-    bool headsetSeen = false;
-              // its activity level was read once
-    long long headsetOnAt = 0;
-             // it last went back on then, CLOCK_BOOTTIME ns (0: not since we started)
+    bool headsetOff = false;  // nobody is wearing the headset (see the main loop)
+    Clock::time_point headsetIdleSince{};  // SteamVR has said idle since then (none: it doesn't)
+    bool headsetSeen = false;  // its activity level was read once
+    long long headsetOnAt = 0;  // it last went back on then, CLOCK_BOOTTIME ns (0: not since we started)
     // Turned off on purpose (the relay's pointer_toggle, "hide toggle"): gaze mode leaves it off
     // until something wakes it (see "Gaze owns the pointer" at the top).
     bool pointerOff = false;
     Vec3 anchor;
     double yaw = 0, pitch = 0;
-    Vec3 followRef{0, 0, -1};
-  // head follow's reference direction (see the top)
+    Vec3 followRef{0, 0, -1};  // head follow's reference direction (see the top)
     Clock::time_point followAt{};
-  // its last update, for the easing
-    bool following = false;
-                           // past the leash: easing toward the head
-    double followLag = 0;
-                             // radians the reference trails the head
-    std::chrono::steady_clock::time_point leashOutSince{};
+    bool following = false;  // past the leash: easing toward the head
+    double followLag = 0;  // radians the reference trails the head
+    std::chrono::steady_clock::time_point leashOutSince{};  // head past the leash since (delay)
     Gaze gz;
-    bool gazeOwns = true;
-  // the pointer follows the gaze; false: the mouse has it
-    bool nudging = false;
-  // the mouse took it from the gaze: the next click may be a lesson
+    bool gazeOwns = true;  // the pointer follows the gaze; false: the mouse has it
+    bool nudging = false;  // the mouse took it from the gaze: the next click may be a lesson
     double nudgeRawHy = 0, nudgeRawHp = 0, nudgeMoved = 0;
     vr::HmdMatrix34_t nudgeHead{}, lastHead{};
     bool haveHead = false, havePoint = false;
@@ -1309,8 +1274,7 @@ struct Pointer {
     // the gaze the pointer again when the press or click is over.
     vr::TrackedDeviceIndex_t ours = vr::k_unTrackedDeviceIndexInvalid;
     bool aimHeld = false, clickPress = false, clickRelease = false, gazeBack = false;
-    bool aimHand = false;
-  // the held-back press is a hold's (below): it never turns into a real press
+    bool aimHand = false;  // the held-back press is a hold's (below): it never turns into a real press
     Clock::time_point aimSince{}, clickReleaseAt{};
     // Holds (see "Gaze precision" and "Hands" at the top): a pinch or grip, or a gaze
     // precision or gaze drag button, held now. What steers the pointer meanwhile (a hand, or
@@ -1337,56 +1301,40 @@ struct Pointer {
     std::string gazeEndWhy, lessonSaid;
     std::vector<DevicePress> devicePresses;
     std::vector<KeyPress> keyPresses;
-    uint32_t seenBegins[3][2] = {}, seenEnds[3][2] = {};
-  // [pinch, grip, middle pinch][side], as last read
+    uint32_t seenBegins[3][2] = {}, seenEnds[3][2] = {};  // [pinch, grip, middle pinch][side], as last read
     bool handBaseline = false;
     int handOpens = 0;
     uint64_t handSeq = 0, handPublished = 0;
-    Clock::time_point handUsed{};
-  // a gesture began then (keeps the pointer, like gaze mode)
-    typing::Typing typist;
-           // the relay's "typing" (a key) and the hands: which hands typing holds back
-    desk::Features deskFeatures;
-     // the desk model's features, per side, over the hands frames
-    std::string typingSent;
-          // "typing L R" as last sent to ft-screens
+    Clock::time_point handUsed{};  // a gesture began then (keeps the pointer, like gaze mode)
+    typing::Typing typist;  // the relay's "typing" (a key) and the hands: which hands typing holds back
+    desk::Features deskFeatures;  // the desk model's features, per side, over the hands frames
+    std::string typingSent;  // "typing L R" as last sent to ft-screens
     Clock::time_point typingSentAt{};
-    std::string raySent;
-             // "ray L R" as last sent to ft-screens
+    std::string raySent;  // "ray L R" as last sent to ft-screens
     Clock::time_point raySentAt{};
     // Hand interaction (see "Handoff" at the top): the hands in the room, the arbiter, and what
     // it last told ft-screens.
-    int raySide = -1;
-  // the bare hand whose ray drives the pointer (see "Hand ray"), -1: none
+    int raySide = -1;  // the bare hand whose ray drives the pointer (see "Hand ray"), -1: none
     hin::HandsInRoom handsRoom;
-    bool handsLiveSeen = false;
-         // Live() at the last pass: its changes go to the log
+    bool handsLiveSeen = false;  // Live() at the last pass: its changes go to the log
     handoff::Handoff arbiter;
-    bool framePaused = false;
-           // the relay's "paused 1|0": Frametop paused (for a VR game)
-    bool dashboardUp = false;
-           // IsDashboardVisible, read at most every 100 ms
-    bool dashSent = false;
-              // "vrdash" as last sent to the relay
+    bool framePaused = false;  // the relay's "paused 1|0": Frametop paused (for a VR game)
+    bool dashboardUp = false;  // IsDashboardVisible, read at most every 100 ms
+    bool dashSent = false;  // "vrdash" as last sent to the relay
     Clock::time_point dashSentAt{};
     Clock::time_point dashboardAt{};
-    std::string handsSent;
-              // "hands L R allowed" as last sent to ft-screens
+    std::string handsSent;  // "hands L R allowed" as last sent to ft-screens
     Clock::time_point handsSentAt{};
-    bool handsAllowed = false;
-          // hand interaction allowed now (see "Handoff" at the top)
-    unsigned steamListGen = ~0u;
-        // the overlay list as last sent to ft-screens ("steamvr ...", see "Touch")
+    bool handsAllowed = false;  // hand interaction allowed now (see "Handoff" at the top)
+    unsigned steamListGen = ~0u;  // the overlay list as last sent to ft-screens ("steamvr ...", see "Touch")
     long steamListSeq = 0;
     Clock::time_point steamListAt{};
     DeviceInfo devices[vr::k_unMaxTrackedDeviceCount];
     Clock::time_point devicesAt{};
     // ft-screens' near reports ("near <capture_ns> <L> <R>"): the last one, and when it came.
     uint64_t nearNs = 0;
-    bool nearSide[2] = {false, false};
-    // near (1 or 2): the hand's ray hides
-    bool nearClaim[2] = {false, false};
-   // ...and (1) its pinches and grips go to ft-screens
+    bool nearSide[2] = {false, false};  // near (1 or 2): the hand's ray hides
+    bool nearClaim[2] = {false, false};  // ...and (1) its pinches and grips go to ft-screens
     Clock::time_point nearAt{};
     // The hand ray (see "Hand ray" at the top): the body model, each side's ray, which one drives the
     // pointer, and what happened to the laser.
@@ -1398,21 +1346,16 @@ struct Pointer {
     rayown::Slots raySlots;
     rayown::AimHistory rayAims[2];
     std::string rayHid[2];
-    bool rayInactive = false;
-           // a controller took the laser: our dot hides until a pinch claims
-    bool rayWoke = false;
-               // the ray woke the pointer (it goes again when the ray has gone a while)
-    Clock::time_point rayGoneAt{};
+    bool rayInactive = false;  // a controller took the laser: our dot hides until a pinch claims
+    bool rayWoke = false;  // the ray woke the pointer (it goes again when the ray has gone a while)
+    Clock::time_point rayGoneAt{};  // when the last ray went
     Touch touch;
-    double pushOffset = 0;
-              // push and pull: the origin moved this far along the ray (m)
-    Vec3 rayOrigin, rayDir{0, 0, -1};
+    double pushOffset = 0;  // push and pull: the origin moved this far along the ray (m)
+    Vec3 rayOrigin, rayDir{0, 0, -1};  // the driving ray this frame (standing universe)
     std::vector<PendingBegin> pendingBegins;
-    bool gripDown[2] = {false, false};
-          // a grip is down on that side (the gestures file, last read)
-    bool rayHoldCancel = false;
-                 // the driving ray went mid-hold: the hold ends, as lost
-    Clock::time_point handOkAt{};
+    bool gripDown[2] = {false, false};  // a grip is down on that side (the gestures file, last read)
+    bool rayHoldCancel = false;  // the driving ray went mid-hold: the hold ends, as lost
+    Clock::time_point handOkAt{};  // the gestures file last read whole
     // Gaze mode outside games, and its dot (see the top): lastMove/lastHeld/pulseAt.
     bool inGame = false, gazeAwake = false, gameSent = false;
     Clock::time_point inGameAt{}, gazeAwakeAt{}, gameSentAt{};
@@ -1421,8 +1364,7 @@ struct Pointer {
     // instead (gaze_right), heldButton: the one pressed.
     bool pressRight = false;
     std::string heldButton = "trigger";
-    bool confirmLesson = false;
-  // a keyboard click's quick tap: a lesson with no correction (see the top)
+    bool confirmLesson = false;  // a keyboard click's quick tap: a lesson with no correction (see the top)
     // The gaze calibration panel is up until then ("calpanel 1"; see the top), and its answers go
     // to calOwner; calOpened: it just came up, so a press in progress ends without a click.
     Clock::time_point calPanelUntil{};
@@ -1430,7 +1372,6 @@ struct Pointer {
     std::string calOwner = FT_SOCK_GAZED;
     CalPinch calPinch;
 
-  // POINTER_IGNORE (see ParseIgnore)
     auto loadConfig() {
         const auto conf = ReadConfig();
         freeDistance = std::clamp(ConfDouble(conf, "POINTER_DISTANCE", 1.5), 0.3, 10.0);
@@ -1568,7 +1509,6 @@ struct Pointer {
         claimAt = t + std::chrono::milliseconds(300);
     }
     auto secsOf(Clock::time_point t) { return std::chrono::duration<double>(t.time_since_epoch()).count(); }
-               // the gestures file last read whole
     // Let go of the virtual controller (its role and laser), as the other releases in the main loop do.
     auto releasePointer(const char *why) {
         active = false;
@@ -2499,8 +2439,7 @@ void Pointer::Init() {
     overlay->CreateOverlay("frametop.pointer.cursor", "Frametop pointer", &cursor);
     tex = DotTexture(texSize);
     overlay->SetOverlayRaw(cursor, tex.data(), texSize, texSize, 4);
-    overlay->SetOverlayInputMethod(cursor, vr::VROverlayInputMethod_Mouse);
-  // the laser can land on it
+    overlay->SetOverlayInputMethod(cursor, vr::VROverlayInputMethod_Mouse);  // the laser can land on it
     overlay->SetOverlaySortOrder(cursor, 200);
     overlay->CreateOverlay("frametop.pointer.marker", "Frametop pointer marker", &marker);
     overlay->SetOverlayRaw(marker, tex.data(), texSize, texSize, 4);
@@ -2510,13 +2449,11 @@ void Pointer::Init() {
     clear.assign(4 * 4 * 4, 0);
     overlay->SetOverlayRaw(laserMode, clear.data(), 4, 4, 4);
     overlay->SetOverlayWidthInMeters(laserMode, 0.001f);
-    overlay->SetOverlayInputMethod(laserMode, vr::VROverlayInputMethod_Mouse);
-  // the flag needs an input method
+    overlay->SetOverlayInputMethod(laserMode, vr::VROverlayInputMethod_Mouse);  // the flag needs an input method
     overlay->SetOverlayFlag(laserMode, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
     below.m[0][0] = below.m[1][1] = below.m[2][2] = 1;
     below.m[1][3] = -50;
     overlay->SetOverlayTransformTrackedDeviceRelative(laserMode, vr::k_unTrackedDeviceIndex_Hmd, &below);
-  // the setters for `cursor` and `marker` (see "Unchanged frames" at the top)
     cursorDot.h = cursor, markerDot.h = marker;
     // Controller beams keep the user's width; nothing here changes it any more.
     vr::VRSettings()->SetFloat("dashboard", "laserRayWidthScale", laserWidth);
@@ -2527,7 +2464,7 @@ void Pointer::Init() {
         char real[PATH_MAX];
         controllerButtons.Init(realpath(manifest.c_str(), real) ? real : manifest);
     }
-    SendTo(out, FT_SOCK_RELAY, "vrhello");
+    SendTo(out, FT_SOCK_RELAY, "vrhello");  // the relay answers with the mapped buttons
     overlays.Start();
     lastVisible = std::chrono::steady_clock::now();
     lastSlow = std::chrono::steady_clock::now() - std::chrono::seconds(10);
@@ -3557,9 +3494,9 @@ void Pointer::DeviceAndKeyPresses() {
 
 void Pointer::ReadHands() {
     const auto tnow = fr.tnow;
+    fr.handOk = handsOn && handFile.Read(fr.hg);
     const fh_gestures_t &hg = fr.hg;
     const bool handOk = fr.handOk;
-    fr.handOk = handsOn && handFile.Read(fr.hg);
     if (handOk) handOkAt = tnow;
     // The gaze calibration panel (see the top): an index pinch's begin takes the dot, with or
     // without POINTER_HANDS, as long as a pinch could click now (not over a VR game, not by a

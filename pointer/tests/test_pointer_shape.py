@@ -87,6 +87,13 @@ SETTINGS = [
     ("POINTER_LASER_WIDTH", 0.8, None),
 ]
 
+# Settings whose clamped value is then divided (milliseconds, percent).
+SCALED = {"POINTER_RAY_THREE_WAIT": 1000, "POINTER_RAY_READY": 100, "POINTER_RAY_READY_HIDE": 100,
+          "POINTER_RAY_RAISED": 100, "POINTER_RAY_FORWARD": 100}
+# Settings read as text (conf.find), in their order.
+TEXT = ["POINTER_GAZE_DOT", "HANDS_NEAR", "POINTER_DESK_MODEL", "POINTER_GAZE_MOUSE", "POINTER_GAZE_MOUSE_MOVE",
+        "POINTER_ROLE", "POINTER_IGNORE"]
+
 SECTIONS = ["HeadsetOff", "GazeAwake", "RelayCommands", "ReadFrame", "ClaimAndTouch", "OverlaysAndRole",
             "LastUsedWins", "RecenterAndGaze", "Handoff", "NearClaims", "DeviceAndKeyPresses", "ReadHands",
             "Gestures", "RayDrive", "HeadFollow", "SlowWorkAndPose", "HeldPresses", "Events", "Idle"]
@@ -108,11 +115,30 @@ def settings():
             for k, d, lo, hi, on in pat.findall(SRC)]
 
 
+def helpers_reading(field):
+    """The Pointer member functions that read fr.<field>, directly or through another one."""
+    struct = body("struct Pointer {")
+    funcs = {}
+    for m in re.finditer(r"^    auto (\w+)\(.*$", struct, re.M):
+        end = struct.find("\n    }", m.start())
+        one = m.group(0).rstrip().endswith("}")
+        funcs[m.group(1)] = m.group(0) if one else struct[m.start():end]
+    reads = {n for n, b in funcs.items() if re.search(rf"\bfr\.{field}\b", b)}
+    while True:
+        more = {n for n, b in funcs.items() if n not in reads and any(re.search(rf"(?<![\w.]){r}\(", b) for r in reads)}
+        if not more:
+            return reads
+        reads |= more
+
+
 class PointerShape(unittest.TestCase):
     def test_settings_keep_their_defaults_and_ranges(self):
         want = [(k, float(d), r if r in (None, "on") else (float(r[0]), float(r[1])))
                 for k, d, r in SETTINGS]
         self.assertEqual(settings(), want)
+        scaled = re.findall(r'"(\w+)", [-\d.]+\), [-\d.]+, [-\d.]+\) / (\d+)', SRC)
+        self.assertEqual({k: int(n) for k, n in scaled}, SCALED)
+        self.assertEqual(re.findall(r'conf\.find\("(\w+)"\)', SRC), TEXT)
 
     def test_main_is_init_then_tick(self):
         main = body("int main() {")
@@ -134,8 +160,15 @@ class PointerShape(unittest.TestCase):
                        if re.search(rf"fr\.{field}\b(\[[^\]]*\])? =[^=]|TrackingPose\([^;]*\bfr\.{field}\b|Read\(fr\.{field}\)",
                                     body(f"Pointer::{s}() {{"))]
             self.assertEqual(writers, [setter], field)
+            first = re.search(rf"\bfr\.{field}\b.*", body(f"Pointer::{setter}() {{")).group(0)
+            self.assertNotRegex(first, rf"^fr\.{field}\b\s*;|[^=]=\s*fr\.{field}\b",
+                                f"{setter} reads fr.{field} before it sets it")
+            readers = helpers_reading(field)
             for s in SECTIONS[:SECTIONS.index(setter)]:
-                self.assertNotRegex(body(f"Pointer::{s}() {{"), rf"\bfr\.{field}\b", f"{s} reads fr.{field}")
+                text = body(f"Pointer::{s}() {{")
+                self.assertNotRegex(text, rf"\bfr\.{field}\b", f"{s} reads fr.{field}")
+                for h in readers:
+                    self.assertNotRegex(text, rf"(?<![\w.]){h}\(", f"{s} calls {h}, which reads fr.{field}")
         self.assertEqual(len(re.findall(r"\bfr\.\w+ =[^=]", body("struct Pointer {"))), 0)  # helpers only read
 
 

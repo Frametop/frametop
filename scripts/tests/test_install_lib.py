@@ -1,6 +1,7 @@
-"""scripts/install-lib.sh, offline: every unit and menu entry the installers put on the Frame comes
-out as the old copies wrote it (the template with @REPO@ filled), into a temp HOME or the
-FT_UNIT_DIR / FT_APPS_DIR folders, and enable_units is the host command they ran. systemctl,
+"""scripts/install-lib.sh, offline: the helper writes each unit and menu entry the installers name
+as the old copies did (the template with @REPO@ filled, under the names listed here, which are
+the installers'), into a temp HOME or the FT_TEST_UNIT_DIR / FT_TEST_APPS_DIR folders, and
+enable_units is the host command they ran. It doesn't run the installers themselves. systemctl,
 update-desktop-database, ssh and sudo are stubs that log and change nothing; the library is
 only sourced, with FRAME_LOCAL=1, so nothing reaches the network or the real home."""
 import os
@@ -88,7 +89,7 @@ class InstallLib(unittest.TestCase):
 
     def test_into_a_prefix(self):
         units, apps = self.root / "prefix/units", self.root / "prefix/apps"
-        self.install_all(FT_UNIT_DIR=str(units), FT_APPS_DIR=str(apps))
+        self.install_all(FT_TEST_UNIT_DIR=str(units), FT_TEST_APPS_DIR=str(apps))
         self.check(units, apps)
         self.assertEqual(list(self.home.iterdir()), [])
 

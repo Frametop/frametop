@@ -201,7 +201,8 @@ test-bash:
     done < <(printf '%s\0' "${!how[@]}" | sort -z)
     echo "shell scripts: ${#how[@]} checked"
     # The installers' shared helper, the one script so far that shellcheck must pass (warnings
-    # and errors): it's sourced by every installer.
+    # and errors): it's sourced by every installer. A check for the dev container: the release
+    # image (CI's ./ft dev test) has no ShellCheck, so it skips there.
     if command -v shellcheck >/dev/null; then
         shellcheck -S warning scripts/install-lib.sh && echo "shellcheck scripts/install-lib.sh: ok" ||
             { echo "shellcheck scripts/install-lib.sh: FAILED"; status=1; }

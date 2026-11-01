@@ -9,11 +9,12 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 . "$root/scripts/_env.sh"
 . "$root/scripts/install-lib.sh"
-entry='~/.local/share/applications/frametop-gazebench.desktop'
+name=frametop-gazebench.desktop
+entry='~/.local/share/applications/'$name  # kept unexpanded: the Frame's ~
 
 case ${1:-install} in
   install)
-    install_menu_entry "$root/gaze/bench/ft-gazebench.desktop" frametop-gazebench.desktop
+    install_menu_entry "$root/gaze/bench/ft-gazebench.desktop" "$name"
     echo "Installed. On Frametop's desktop, open \"Frametop Gaze Bench\" from the app menu."
     echo "Runs go to ~/.local/share/frametop/gaze/bench."
     ;;

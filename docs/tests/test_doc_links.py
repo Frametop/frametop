@@ -5,7 +5,7 @@ comment names as `dir/.../file.md` (or, in a doc, as `dir/file.ext` in backticks
 A path may be relative to the file's folder or any folder above it (keyboard/ is vendored with its
 own root). Skipped: frame-hands/... (the separate frame-hands project's notes, not this repo),
 paths with a placeholder (*, <, $, ~, {), build outputs (a build/ folder, a .venv), a path followed by
-"removed" (a file a change took out), made-up paths in tests' fixtures, and the series' history in dev/maintainability."""
+"removed" (a file a change took out), and made-up paths in tests' fixtures."""
 import os
 import pathlib
 import re
@@ -107,7 +107,7 @@ class DocLinks(unittest.TestCase):
         bad = []
         for rel in self.files:
             path = ROOT / rel
-            if {"test", "tests"} & set(rel.split("/")[:-1]) or rel.startswith("dev/maintainability/"):
+            if {"test", "tests"} & set(rel.split("/")[:-1]):
                 continue
             if path.suffix in {".png", ".webp", ".gif", ".jpg", ".npz", ".bin", ".onnx", ".zip"}:
                 continue

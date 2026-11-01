@@ -1,4 +1,4 @@
-"""Display Settings' head pin mode (SCREEN_PIN_LEVEL 0, 1 or 2; 2 is DEE-208's walking pin): read
+"""Display Settings' head pin mode (SCREEN_PIN_LEVEL 0, 1 or 2; 2 is the walking pin): read
 from frametop.conf, written there, and sent to ft-screens live. HOME is a temp folder and the ask
 to ft-screens is recorded, not sent. Needs PySide6 (the image's python3).
 

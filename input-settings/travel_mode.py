@@ -1,5 +1,5 @@
 """SteamVR's travel mode (internal.enableTravelMode): tracking that holds up in a moving car,
-train or plane. SteamVR has it but no switch for it, so Input Settings has one (DEE-220).
+train or plane. SteamVR has it but no switch for it, so Input Settings has one.
 
 It goes through SteamVR's vrcmd on the host, and only while SteamVR runs: SteamVR keeps its
 settings in memory and writes over its settings file, so the file isn't touched. Off is

@@ -769,8 +769,8 @@ void ApplyCurve(const Screen &s) {
 // pinned to the head follows it turning left and right and walking, but not looking up or down, tilting,
 // or rising and crouching. SteamVR only pins rigidly to a device, so these sit in the room, and
 // MoveLevelPins moves them every tick to FloorFrame times pinRel. The frame is on the floor under the
-// head, turned with it, upright; pinRel holds the screen's height. Walking head pins (SCREEN_PIN_LEVEL=2,
-// DEE-208) are moved the same way, on a frame with the room's axes: they follow you walking, not turning.
+// head, turned with it, upright; pinRel holds the screen's height. Walking head pins (SCREEN_PIN_LEVEL=2)
+// are moved the same way, on a frame with the room's axes: they follow you walking, not turning.
 // Outside ft-screens a floor pin is still a head pin: "get" reports it relative to the headset, and
 // "pin N head REL" takes it so, so profiles keep working with the setting either way.
 levelpin::Mode g_pinMode = levelpin::Rigid;   // SCREEN_PIN_LEVEL: how new head pins follow the head
@@ -5980,7 +5980,7 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
     switch (verb) {
     case vrcmd::HandSetting: {
         if (!std::strcmp(key, "SCREEN_PIN_LEVEL") && (!std::strcmp(word, "2") || !std::strcmp(word, "walk"))) {
-            // the third head pin mode (DEE-208): 0 and 1 go the usual way below
+            // the third head pin mode (Walk): 0 and 1 go the usual way below
             SetPinMode(levelpin::Walk);
             std::printf("screens: SCREEN_PIN_LEVEL 2, walking head pins (Display Settings)\n");
             std::snprintf(reply, size, "ok %s 2", key);

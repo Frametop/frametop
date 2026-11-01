@@ -1,4 +1,4 @@
-"""install.sh, offline: an install that stops part-way says to run the same command again (DEE-291).
+"""install.sh, offline: an install that stops part-way says to run the same command again.
 
 It doesn't run install.sh. It takes the block between install.sh's "interrupted-install trap"
 markers and runs it in a stand-in script under the same set -euo pipefail, which then fails,

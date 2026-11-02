@@ -17,6 +17,7 @@ class Ring {
 public:
     bool open(const char *path, std::string &err);
     bool alive() const;                      // the writer's heartbeat is fresh
+    int64_t writer_pid() const { return hdr_->writer_pid; }
     int cameras() const { return int(hdr_->ncams); }
     const fh_ring_cam_t &camera(int i) const { return hdr_->cams[i]; }
     uint64_t latest(int i) const;
@@ -36,13 +37,14 @@ class Publisher {
 public:
     bool open(std::string &err);
     // Writes into `mem` instead of the hands file (ft-handreplay --publish-dump).
-    void use(fh_hands_v2_t *mem);
+    void use(fh_hands_v3_t *mem);
     void write(const std::vector<const Hand *> &hands, uint64_t capture_ns);
     // Fills one hand's version 2 record (also for ft-handreplay's checks).
     static void fill_fit(const Hand &h, uint64_t capture_ns, fh_hand_fit_t &o);
 
 private:
-    fh_hands_v2_t *file_ = nullptr;
+    void stamp();   // magic, version, size and producer (again after another producer's turn)
+    fh_hands_v3_t *file_ = nullptr;
     fh_hands_t *out_ = nullptr;
     uint64_t seq_ = 0;
 };

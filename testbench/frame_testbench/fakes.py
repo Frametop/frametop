@@ -383,7 +383,7 @@ class Hands:
         self.hands_fd = open_private(os.path.join(self.hands_dir, 'hands'), HANDS_SIZE)
         self.gestures_fd = open_private(os.path.join(self.hands_dir, 'gestures'), GESTURES_SIZE)
         old = os.pread(self.gestures_fd, GESTURES_SIZE, 0)
-        ours = old[:8] == b'FHGEST01' and struct.unpack_from('<I', old, 8)[0] == 3
+        ours = old[:8] == b'FHGEST01' and struct.unpack_from('<I', old, 8)[0] >= 3
         self.gestures_seq = struct.unpack_from('<Q', old, 16)[0] // 2 + 1 if ours else 1
         if ours:
             self.thresholds = struct.unpack_from('<4f', old, 40)

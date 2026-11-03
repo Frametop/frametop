@@ -544,6 +544,7 @@ GAZE_FORMAT = {'format': 'frame-testbench-gaze', 'version': 1}
 # A recording loads in the loop that keeps the fakes fresh: these load well under ft-gaze's 2 s.
 MAX_GAZE_BYTES = 40 << 20
 MAX_DUMP_BYTES = 256 << 20
+MAX_FILE_BYTES = 64 << 10   # a dumped hands or gestures file (hands v3 is 4832 bytes)
 
 
 def open_recording(path, limit):
@@ -602,16 +603,21 @@ def load_gaze(path):
 
 
 class HandsDump:
-    """hands.fhdump (ft-handreplay --publish-dump's format), read a set at a time."""
+    """hands.fhdump (ft-handreplay --publish-dump's format), read a set at a time. The files only
+    grow at the end (hands/include/fh_hands.md, fh_gestures.md), so a dump of later versions
+    (hands v3, 4832 bytes; gestures v4, 512) plays too: each set is cut to the hands v2 and
+    gestures v3 the testbench writes, and stamped as those."""
 
     def __init__(self, path):
         self.f = open_recording(path, MAX_DUMP_BYTES)
         header = self.f.read(16)
-        if len(header) != 16 or header[:8] != DUMP_MAGIC or struct.unpack_from('<II', header, 8) != (
-                HANDS_SIZE, GESTURES_SIZE):
+        sizes = struct.unpack_from('<II', header, 8) if len(header) == 16 else (0, 0)
+        if header[:8] != DUMP_MAGIC or not (HANDS_SIZE <= sizes[0] <= MAX_FILE_BYTES and
+                                            GESTURES_SIZE <= sizes[1] <= MAX_FILE_BYTES):
             self.f.close()
-            raise ValueError(f'{path}: not a hands recording (FHDUMP02 of hands v2 and gestures v3)')
-        self.record = HANDS_SIZE + GESTURES_SIZE + 8
+            raise ValueError(f'{path}: not a hands recording (FHDUMP02 of hands v2 and gestures v3 or later)')
+        self.sizes = sizes
+        self.record = sizes[0] + sizes[1] + 8
         size = os.fstat(self.f.fileno()).st_size - 16
         self.count = size // self.record
         if not self.count or size % self.record:
@@ -629,10 +635,14 @@ class HandsDump:
     def read(self, i):
         self.f.seek(16 + i * self.record)
         data = self.f.read(self.record)
-        hands, gestures = data[:HANDS_SIZE], data[HANDS_SIZE:-8]
-        if hands[:8] != b'FHHANDS1' or gestures[:8] != b'FHGEST01':
+        hs = self.sizes[0]
+        hands, gestures = bytearray(data[:HANDS_SIZE]), bytearray(data[hs:hs + GESTURES_SIZE])
+        if len(data) != self.record or hands[:8] != b'FHHANDS1' or gestures[:8] != b'FHGEST01':
             raise ValueError(f'set {i} of the hands recording is damaged')
-        return hands, gestures, struct.unpack('<q', data[-8:])[0]
+        # as the testbench's own: hands v2, gestures v3 (a later version's tail is cut off)
+        struct.pack_into('<II', hands, 8, min(struct.unpack_from('<I', hands, 8)[0], 2), HANDS_SIZE)
+        struct.pack_into('<II', gestures, 8, min(struct.unpack_from('<I', gestures, 8)[0], 3), GESTURES_SIZE)
+        return bytes(hands), bytes(gestures), struct.unpack('<q', data[-8:])[0]
 
     def close(self):
         self.f.close()

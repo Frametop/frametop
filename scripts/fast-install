@@ -91,7 +91,7 @@ BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl
 BUILD_NAMES = {'build.sh', 'Makefile', 'CMakeLists.txt', 'meson.build', 'Cargo.toml', 'Cargo.lock'}
 # Built programs an installer has to put in place, and the sources they're built from: a
 # rebuild changes their bytes (the build folder's path is in them), so only a source change
-# counts. hold: the component's other programs wait for it too (they share its ring layout),
+# counts: a file there the build reads (builds()), not a doc like hands/camd/fhring.md. hold: the component's other programs wait for it too (they share its ring layout),
 # and so do the components that read hands/include, when that changed too.
 INSTALLED = {
     'hands/build/ft-camd': (('hands/camd',), True,
@@ -531,7 +531,7 @@ def install(rev, dry, restart_units, worn_ok, partial):
     # programs all wait, and so do the programs that read hands/include, if it changed too.
     held = {}
     for rel, (sources, hold, step) in INSTALLED.items():
-        if any(under(p, sources) for p in changed):
+        if any(under(p, sources) and builds(component_of(p), p) for p in changed):
             steps[rel] = step
             if hold:
                 held[rel.split('/build/')[0]] = step

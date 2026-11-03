@@ -87,8 +87,8 @@ ft-hands is the producer Frametop runs, but the file is not tied to it. Another 
 
 Only one program writes at a time. To take over from ft-hands:
 
-1. touch `/run/user/UID/frametop-hands/held` at least once a second for as long as it publishes, with its name as the file's content (for people reading the folder). ft-hands parks while the file is less than 3 s old: it stops tracking, writes no hands, and ends any gesture down, as lost. A producer that dies lets go by itself 3 s later.
-2. wait about 0.6 s after the first touch, so ft-hands' last publish is over (it looks every 0.25 s, then finishes the frame it is on).
+1. touch `/run/user/UID/frametop-hands/held` at least once a second for as long as it publishes, with its name as the file's content (for people reading the folder). ft-hands parks while the file is less than 3 s old: it stops tracking, writes no hands, and ends any gesture down, as lost. A producer that dies lets go by itself 3 s later. The one exception is a recording (`ft-hands --record`, or SIGUSR1 for a take): it never parks while it records, for `held` or anything else, so the take keeps every frame. It parks for `held` once the recording ends, after `--record-for` seconds at most (120 by default).
+2. wait about 0.6 s after the first touch, so ft-hands' last publish is over (it looks every 0.25 s, then finishes the frame it is on). Then check that `seq` has stopped moving. If it still moves, ft-hands is recording and still publishes: keep touching `held` and wait until it stops.
 3. open the existing file and write in place: map it, carry `seq` on from its value, and write the full version 3 structure. Never unlink, replace or truncate it; readers keep their mapping.
 4. on exit, stop touching `held` (removing it is fine). ft-hands tracks again within a few frames of the file going stale and restamps the header as its own.
 

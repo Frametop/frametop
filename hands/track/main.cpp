@@ -16,8 +16,8 @@
 // publishes fake hands: through $XDG_RUNTIME_DIR/frametop-testbench/hands, which it touches every
 // second. One older than 3 s doesn't count, so a crashed testbench lets go by itself.
 // Another hand tracker takes the files over the same way, through run_dir/held, which it touches
-// every second while it publishes (include/fh_hands.md, "Producers"). ft-hands parks then but
-// leaves hands-want alone, so ft-camd keeps copying frames for it.
+// every second while it publishes (include/fh_hands.md, "Producers"). ft-hands parks then (not
+// while recording, as above) but leaves hands-want alone, so ft-camd keeps copying frames for it.
 //
 // Calibration: run_dir/calib (include/fh_calib.h) holds the cameras it tracks with, each with the
 // ring camera its images come from, for other readers of the ring. Written at start and whenever

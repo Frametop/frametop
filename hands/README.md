@@ -68,7 +68,7 @@ Files, all in `/run/user/UID/frametop-hands/` (private to the user; not `/run/us
 | `calib` | ft-hands, at start and when it exchanges the side cameras | `include/fh_calib.h` (spec: `include/fh_calib.md`): each ring camera's intrinsics, distortion and place on the head | other readers of the ring |
 | `hands` | ft-hands, or another producer (`held`) | `include/fh_hands.h` (version 3: version 1, a skeleton per hand, then the producer and the head pose; spec: `include/fh_hands.md`) | ft-screens (`screens/handcut.cpp`, version 1's part), the hand recorder (`rec/session.py`) |
 | `gestures` | ft-hands, or another producer (`held`) | `include/fh_gestures.h` (spec: `include/fh_gestures.md`) | the pointer helper (`pointer/helper/ft-pointer.cpp`), `tools/watch_gestures.py` |
-| `held` | another hand tracker, touched every second while it publishes the hands | its name | ft-hands, which parks while it is under 3 s old (`include/fh_hands.md`, "Producers") |
+| `held` | another hand tracker, touched every second while it publishes the hands | its name | ft-hands, which parks while it is under 3 s old, except while it records (`include/fh_hands.md`, "Producers") |
 | `flag` | `ft-handsctl flag` (`handsflag.py`) | key=value lines: `dir`, `note`, `flag_unix`, `said_unix` | ft-hands, which removes it when it takes it |
 
 The source keeps the `fh_` names and magic strings of frame-hands, the project it started as, so recordings made with it still work.

@@ -52,7 +52,7 @@ The producer and head pose (`fh_hands_src_t`, 128 bytes):
 | --- | --- | --- | --- |
 | 0 | 16 | `producer` | the writing program's name, NUL-padded, at most 15 characters: `ft-hands` |
 | 16 | 4 | `head_flags` | `FH_HEAD_VALID` (1): the next three fields hold a pose |
-| 20 | 4 | `head_space` | OpenVR's `ETrackingUniverseOrigin`: 1 standing, 2 raw; 0 none |
+| 20 | 4 | `head_space` | 1 standing, 2 raw (the same values as OpenVR's `ETrackingUniverseOrigin`); 0 no pose (not OpenVR's 0, `TrackingUniverseSeated`, which a producer doesn't use) |
 | 24 | 8 | `head_ns` | `CLOCK_MONOTONIC` time of that pose: `capture_ns`, or the nearest the producer had |
 | 32 | 12 | `head_p[3]` | m |
 | 44 | 16 | `head_q[4]` | x, y, z, w |

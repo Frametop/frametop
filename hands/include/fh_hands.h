@@ -133,8 +133,9 @@ enum {
     FH_HEAD_VALID = 1u << 0,    /* head_p, head_q and head_ns hold a pose                      */
 };
 
-enum {                          /* head_space: OpenVR's ETrackingUniverseOrigin, 0 for none    */
-    FH_SPACE_NONE     = 0,
+enum {                          /* head_space: 1 and 2 are OpenVR's ETrackingUniverseOrigin     */
+    FH_SPACE_NONE     = 0,      /* no pose. Not OpenVR's 0 (TrackingUniverseSeated), which a
+                                   producer doesn't use                                        */
     FH_SPACE_STANDING = 1,      /* TrackingUniverseStanding                                    */
     FH_SPACE_RAW      = 2,      /* TrackingUniverseRawAndUncalibrated                          */
 };

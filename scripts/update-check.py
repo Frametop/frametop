@@ -732,6 +732,41 @@ def check_dashboard_apps():
                "the dashboard open as SteamVR windows: see /tmp/frametop-dashroute.log")
 
 
+def check_launch_list():
+    """The Frametop menu (menu/ft_menu.py): Frametop's entries leave SteamVR's Launch a program list
+    because Steam's scan of the menu entries skips one whose NotShowIn names gamescope, the desktop
+    it runs in. A Steam client update can change that, not just a SteamOS one."""
+    label = "Launch a program list"
+    apps = os.path.join(HOME, ".local/share/applications")
+    if not os.path.exists(os.path.join(apps, "ft-menu.desktop")):
+        return
+    tree = next((r for r in frametop_repos() if os.path.exists(os.path.join(r, "menu/ft_menu.py"))), None)
+    if not tree:
+        report("skip", label, "menu/ft_menu.py isn't in a checkout here")
+        return
+    sys.path[:0] = [os.path.join(tree, "menu"), os.path.join(tree, "steam")]
+    try:
+        import ft_menu
+        import steamui
+        hidden = {(ft_menu.read_entry(p) or {}).get("Name") for p in (os.path.join(apps, f) for f in os.listdir(apps))
+                  if p.endswith(".desktop") and "gamescope" in (ft_menu.read_entry(p) or {}).get("NotShowIn", "").split(";")}
+        listed = set(json.loads(steamui.evaluate(
+            "SteamClient.Apps.ScanForInstalledNonSteamApps(true).then(a => JSON.stringify(a.map(x => x.strAppName)))")))
+    except Exception as e:  # Steam not up, its UI changed, or the tree's modules
+        report("skip", label, f"couldn't read Steam's list ({e})")
+        return
+    finally:
+        del sys.path[:2]
+    back = sorted(n for n in hidden & listed if n)
+    if back:
+        report("warn", label, f"Steam lists {', '.join(back)} again: it no longer skips NotShowIn=gamescope "
+               "entries, so they're there next to the Frametop menu (menu/ft_menu.py)")
+    elif "Frametop" not in listed:
+        report("warn", label, "the Frametop menu isn't in it: open Launch a program once, or restart Steam")
+    else:
+        report("ok", label, f"Frametop's {len(hidden)} entries are in the Frametop menu, not the list")
+
+
 def check_vr_socket():
     """vrserver's web socket, which the pause gesture reads the controllers from (input/vrws.py,
     input/game_pause.py). It's undocumented: SteamVR's controller binding page uses it."""
@@ -977,6 +1012,7 @@ def main():
         check_services(sockets, desktop_up)
         check_steam_ui()
         check_dashboard_apps()
+        check_launch_list()
         check_vr_socket()
         check_eye_tracker()
         check_eye_rate()

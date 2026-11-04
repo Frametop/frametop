@@ -6,4 +6,7 @@ Comment=Connect to computers running Vibepollo and show their monitors as Framet
 Exec=@REPO@/remote-displays/ft-remote-displays
 Icon=network-workgroup
 Categories=Settings;HardwareSettings;Network;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=settings
 Keywords=remote;display;monitor;moonlight;vibepollo;sunshine;stream;pc;frametop;

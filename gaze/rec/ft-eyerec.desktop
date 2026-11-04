@@ -6,4 +6,7 @@ Comment=Fit the headset, then record, review and export eye recordings for Frame
 Exec=@REPO@/gaze/rec/ft-eyerec
 Icon=camera-video
 Categories=Utility;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=tools
 Keywords=eyes;eye tracking;gaze;dataset;record;frametop;

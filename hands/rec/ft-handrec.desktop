@@ -6,4 +6,7 @@ Comment=Record your hands for Frametop's hand tracking: bounty rounds and full s
 Exec=@REPO@/hands/rec/ft-handrec
 Icon=camera-video
 Categories=Utility;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=tools
 Keywords=hands;hand tracking;dataset;record;frametop;

@@ -105,9 +105,10 @@ IN_FRONT = 2.0           # at most this far in front of you, for an app with no 
 DEBUG = os.environ.get("FT_FLOAT_DEBUG") == "1"  # log every event from the script
 # The SteamVR dashboard's Launch a program list (float/ft-dashroute): these stay SteamVR's, since
 # they aren't apps with a window for the desktop: Steam, SteamVR, the desktops themselves, and
-# Frametop's layout commands (a profile's entry, Reset Screen Layout, Hide/Show Screens).
+# Frametop's layout commands (a profile's entry, Reset Screen Layout, Hide/Show Screens), and
+# the Frametop menu, which hands what it opens back here itself (menu/ft_menu.py).
 STEAMVR_ONLY = {"steam", "vrurlhandler", "steamos-nested-desktop", "frametop-session.sh", "ft-layout",
-                "ft-layout-reset", "ft-hide-show"}
+                "ft-layout-reset", "ft-hide-show", "ft-menu"}
 PAUSE_PATH = f"/run/user/{os.getuid()}/frametop-pause.json"  # input/game_pause.py's state
 INPUT_RULES = os.path.expanduser("~/.config/frametop-input.json")  # Input Settings' rules (carry_on_float)
 

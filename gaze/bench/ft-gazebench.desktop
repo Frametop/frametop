@@ -6,4 +6,7 @@ Comment=Look at dots in hard places on a panel in the headset and press its butt
 Exec=@REPO@/gaze/bench/ft-gazebench
 Icon=view-visible
 Categories=Utility;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=tools
 Keywords=eyes;eye tracking;gaze;test;bench;frametop;

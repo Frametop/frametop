@@ -6,5 +6,8 @@ Comment=Float the screens and arrange them in the layout from Frametop Display S
 Exec=@REPO@/layout/ft-layout-reset
 Icon=view-restore
 Categories=Settings;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=screens
 Keywords=display;screen;layout;arrange;reset;steamvr;frametop;
 X-KDE-Shortcuts=Meta+Shift+R

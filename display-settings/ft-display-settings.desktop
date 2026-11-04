@@ -6,4 +6,7 @@ Comment=Number of screens, resolution, scale, and where they float around you
 Exec=@REPO@/display-settings/ft-display-settings
 Icon=video-display
 Categories=Settings;HardwareSettings;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=settings
 Keywords=display;screen;monitor;resolution;layout;arrange;steamvr;frametop;

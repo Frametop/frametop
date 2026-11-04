@@ -6,4 +6,7 @@ Comment=For developing Frametop's gaze tracking. Day to day, the calibration and
 Exec=@REPO@/gaze/probe/ft-gazeprobe
 Icon=view-visible
 Categories=Development;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=tools
 Keywords=eye;gaze;tracking;calibration;pointer;steamvr;frametop;

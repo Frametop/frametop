@@ -158,6 +158,7 @@ build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKei
 "$root/tour/install.sh"
 "$root/remote-displays/install.sh"
 "$root/remote/install.sh"
+"$root/menu/install.sh"  # the Frametop menu: one entry for these in Launch a program
 "$root/keyboard/run.sh" install
 on_frame "sed -i 's/^POINTER=0/POINTER=1/' ~/.config/frametop.conf; grep -q '^POINTER=' ~/.config/frametop.conf || echo 'POINTER=1' >> ~/.config/frametop.conf"
 echo "the launcher's Desktop entry now opens the multi-screen desktop; 3D mouse on (POINTER=1 in ~/.config/frametop.conf)"

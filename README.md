@@ -39,9 +39,9 @@ You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or th
 
    The installer sets up distrobox in your home folder (the system files aren't touched), a Fedora build container, and everything else. The first run downloads 1–2 GB. It asks along the way whether to install each optional part: voice dictation (yes by default; it downloads about 320 MB of speech models), hand tracking (experimental, yes by default), in a release the [Hand Recorder](https://frametop.github.io/frametop/hand-recorder) (yes by default; it records your hands for Frametop's open hand dataset), gaze mode (experimental, yes by default), our own eye tracker for it (yes by default), in a release the Eye Recorder (yes by default, with our eye tracker; it records your eyes for Frametop's eye tracking dataset), and the Bluetooth fixes, then whether to restart SteamVR. The stable version asks only about gaze mode, the eye tracker, and the Bluetooth fixes. Hand tracking, the Hand Recorder, the eye tracker, and the Bluetooth fixes need your `sudo` password; if you've never set one, run `passwd` first, or skip them for now. SteamVR has to restart once at the end, which closes everything open in VR, including the terminal. Rebooting the headset works too.
 
-After the restart, Launch a program → Desktop opens the multi-screen desktop, with its screens arranged around where you're facing. Frametop Display Settings and Frametop Input Settings are in the desktop's application menu, under Settings. SteamOS's own single-screen desktop is still there, as Native Desktop in the same list.
+After the restart, Launch a program → Desktop opens the multi-screen desktop, with its screens arranged around where you're facing. Frametop Display Settings and Frametop Input Settings are in the desktop's application menu, under Settings. In Launch a program, Frametop's apps and commands are in one entry, Frametop, with submenus (Settings, Screens, Profiles, Help, Recorders and tools) and Update Frametop. SteamOS's own single-screen desktop is still there, as Native Desktop in the same list.
 
-The first time the desktop starts, Frametop Tour opens: a page at a time on the screens and the 3D mouse, floating windows, frunner, the keyboard shortcuts, eye tracking, hand tracking (up close and from a distance), pins, profiles, pausing for VR games, and what each page of Frametop's settings is for. Most pages start with short looping videos from a headset, and have buttons to try each thing or open its settings. A page list jumps to any topic, so it doubles as a reference. Closing it, skipping it, or finishing it keeps it from opening again. It's in the application menu, in frunner, in SteamVR's Launch a program list, and in Frametop Input Settings' menu for whenever you want it again, and `tour/ft-tour --reset` has it open at the desktop's next start.
+The first time the desktop starts, Frametop Tour opens: a page at a time on the screens and the 3D mouse, floating windows, frunner, the keyboard shortcuts, eye tracking, hand tracking (up close and from a distance), pins, profiles, pausing for VR games, and what each page of Frametop's settings is for. Most pages start with short looping videos from a headset, and have buttons to try each thing or open its settings. A page list jumps to any topic, so it doubles as a reference. Closing it, skipping it, or finishing it keeps it from opening again. It's in the application menu, in frunner, under Frametop → Help in SteamVR's Launch a program list, and in Frametop Input Settings' menu for whenever you want it again, and `tour/ft-tour --reset` has it open at the desktop's next start.
 
 If you work in the desktop for long stretches, or leave the headset on a stand, open Frametop Display Settings → Power. Turn on Stay awake while plugged in: by default Steam puts the Frame to sleep after an hour without input, even while it charges. And choose when the displays turn off while the headset isn't used. SteamVR turns them off a few seconds after you take the headset off, but a stand or mount that covers the proximity sensor inside it makes the headset seem worn, and its displays stay on all night.
 
@@ -227,7 +227,7 @@ Run the same command again. It updates `~/frametop` to the latest of the version
 curl -fsSL https://frametop.github.io/frametop/get.sh | bash
 ```
 
-Or by hand: `cd ~/frametop && git pull && ./install.sh`.
+Or by hand: `cd ~/frametop && git pull && ./install.sh`. Launch a program → Frametop → Update Frametop opens Konsole and runs the same command for you (with `--release` for a release).
 
 If an install or update stops part-way (an error, Ctrl-C, a closed terminal, the headset powering off), run the same command again: it finishes it. Until then some services may run from the new version and some from the old one; `install.sh` says so when it stops early.
 
@@ -273,6 +273,7 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `gaze/` | Gaze mode (experimental): the gaze service, its calibration panel, our own eye tracker, and the gaze probe. See [gaze/README.md](gaze/README.md). |
 | `hands/` | Hand tracking (experimental): the camera broker and the tracker. See [hands/README.md](hands/README.md). |
 | `display-settings/`, `input-settings/` | The two settings apps (Kirigami, Python). |
+| `menu/` | The Frametop menu: one Launch a program entry for Frametop's apps and commands, and Update Frametop. |
 | `remote/` | Frametop Remote Access, the app that turns remote desktop over VNC on and off. |
 | `remote-displays/` | Frametop Remote Displays, the app that adds other computers' monitors as screens. |
 | `stream/` | ft-stream, one per remote display: receives and decodes its stream for ft-screens. |

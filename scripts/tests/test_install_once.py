@@ -11,6 +11,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import termios
@@ -34,15 +35,27 @@ fi
 [ "$rel" = gaze/tracker/install.sh ] && touch "$FAKE_STATE/eyegrab"
 exit 0
 """
+# sudo with its timestamp (a file): -v asks and keeps it, -n works only with it (or NOPASSWD),
+# -k forgets it, and a plain sudo COMMAND without it logs SUDO-ASKED: a prompt mid-install.
+# FAKE_SUDO: ok (the password is right), deny (it isn't), nopasswd (sudoers needs none).
 SUDO = r"""#!/bin/bash
+ts=$FAKE_STATE/sudo-ts mode=${FAKE_SUDO:-ok}
 printf 'SUDO %s\n' "$*" >>"$FAKE_LOG"
-case "${FAKE_SUDO:-ok}:$1" in
-  deny:-v) exit 1 ;;     # sudo -v -p ...: the password was wrong three times
-  cold:-n|deny:-n) exit 1 ;;   # nothing cached
+case "$1" in
+  -k) rm -f "$ts"; exit 0 ;;
+  -A) exit 0 ;;
+  -n) [ "$mode" = nopasswd ] || [ -e "$ts" ]; exit ;;
+  -v) [ "$mode" = deny ] && exit 1; touch "$ts"; exit 0 ;;
 esac
+if [ "$mode" != nopasswd ] && [ ! -e "$ts" ]; then
+  printf 'SUDO-ASKED %s\n' "$*" >>"$FAKE_LOG"
+  [ "$mode" = deny ] && exit 1
+  touch "$ts"
+fi
 exit 0
 """
 SYSTEMCTL = r"""#!/bin/bash
+case "$*" in *restart*steamvr*) printf 'SYSTEMCTL %s\n' "$*" >>"$FAKE_LOG" ;; esac
 case "$*" in *is-enabled*frametop-eyegrab*) [ -e "$FAKE_STATE/eyegrab" ]; exit ;; esac
 exit 0
 """
@@ -89,7 +102,7 @@ class InstallOnce(unittest.TestCase):
     def release(self):
         (self.root / ".frametop-release").write_text("VERSION=0.0.0-test\nCOMMIT=0\n")
 
-    def run_install(self, answers="", args=(), tty=True, **env):
+    def run_install(self, answers="", args=(), tty=True, during=None, **env):
         e = {"HOME": str(self.home), "PATH": f"{self.bin}:/usr/bin:/bin", "FRAME_LOCAL": "1",
              "FAKE_ROOT": str(self.root), "FAKE_LOG": str(self.log), "FAKE_STATE": str(self.state),
              "FAKE_FAIL": "", "FRAMETOP_SUDO_REFRESH": "50", "LANG": "C.UTF-8"}
@@ -108,6 +121,8 @@ class InstallOnce(unittest.TestCase):
             # One line per answer; then end-of-file, so a question nobody planned for takes its
             # default rather than waiting (the prompt count catches it).
             os.write(master, "".join(a + "\n" for a in answers).encode() + b"\x04" * 4)
+            if during:
+                during(p)
             out, _ = p.communicate(timeout=60)
             return p.returncode, out
         finally:
@@ -117,6 +132,13 @@ class InstallOnce(unittest.TestCase):
 
     def entries(self):
         return self.log.read_text().splitlines()
+
+    def cached(self):
+        (self.state / "sudo-ts").write_text("")
+
+    def asked(self):
+        """Every password prompt: sudo_once's, and any a step's sudo would show."""
+        return [l for l in self.entries() if l.startswith("SUDO -v -p") or l.startswith("SUDO-ASKED")]
 
     def sudo_calls(self):
         return [line[5:] for line in self.entries() if line.startswith("SUDO ")]
@@ -141,11 +163,9 @@ class InstallOnce(unittest.TestCase):
             self.assertIn(part, out)
         self.assertNotIn("the Hand Recorder: file capabilities", out)   # hand tracking sets them
         calls = self.sudo_calls()
-        asks = [c for c in calls if c.startswith("-v -p")]
-        self.assertEqual(len(asks), 1, calls)
-        self.assertEqual(calls[0], asks[0], "the password comes before any other sudo")
+        self.assertEqual(len(self.asked()), 1, self.entries())   # once, and no step asks again
         log = self.entries()
-        self.assertLess(log.index("SUDO " + asks[0]), next(i for i, l in enumerate(log) if l.startswith("STEP ")))
+        self.assertLess(log.index(self.asked()[0]), next(i for i, l in enumerate(log) if l.startswith("STEP ")))
         self.assertEqual(calls[-1], "-k", "sudo forgets the password at the end")
         # the installers' own sudo runs (frame_sudo: plain sudo, with the terminal)
         self.assertEqual(calls.count("bash -c true"), 4, calls)  # hands, recorder, tracker, Bluetooth
@@ -168,7 +188,7 @@ class InstallOnce(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(len(PROMPT.findall(out)), 6, out)   # voice, hands, gaze, tracker, Bluetooth, restart
         self.assertIn("hand tracking: file capabilities", out)   # a clone's build clears them
-        self.assertEqual(sum(c.startswith("-v -p") for c in self.sudo_calls()), 1)
+        self.assertEqual(len(self.asked()), 1, self.entries())
 
     def test_a_refused_password_skips_those_parts(self):
         self.release()
@@ -181,7 +201,7 @@ class InstallOnce(unittest.TestCase):
         self.assertIn("skipped: sudo didn't take the password. Install it later with: hands/run.sh install", out)
         self.assertIn("our eye tracker, which isn't installed", out)   # the Eye Recorder waits for it
         self.assertIn("voice/run.sh", steps)
-        self.assertNotIn("-k", self.sudo_calls())   # nothing was kept
+        self.assertEqual(len(self.asked()), 1, self.entries())   # no step asks again
 
     def test_a_refused_password_can_stop_the_install(self):
         self.release()
@@ -195,7 +215,7 @@ class InstallOnce(unittest.TestCase):
         code, out = self.run_install(["y", "y", "y", "y", "y", "y", "y", "n", "y"], FAKE_PASSWD="NP")
         self.assertEqual(code, 0, out)
         self.assertIn("Your user has no password", out)
-        self.assertEqual(self.sudo_calls(), [])
+        self.assertEqual(self.asked(), [])
         for rel in PRIVILEGED:
             self.assertNotIn(rel, self.steps())
 
@@ -220,20 +240,21 @@ class InstallOnce(unittest.TestCase):
 
     def test_yes_never_asks_for_the_password(self):
         self.release()
-        code, out = self.run_install(args=["--yes"], FAKE_SUDO="cold")
+        code, out = self.run_install(args=["--yes"])   # nothing cached
         self.assertEqual(code, 0, out)
         self.assertEqual(PROMPT.findall(out), [])
-        self.assertNotIn("-v -p", " ".join(self.sudo_calls()))
+        self.assertEqual(self.asked(), [])
         for rel in ("hands/run.sh", "gaze/tracker/install.sh", "hands/rec/install.sh"):
             self.assertNotIn(rel, self.steps())
         self.assertIn("--yes doesn't ask", out)
 
     def test_yes_keeps_a_password_sudo_has(self):
         self.release()
+        self.cached()
         code, out = self.run_install(args=["--yes"])
         self.assertEqual(code, 0, out)
         calls = self.sudo_calls()
-        self.assertNotIn("-v -p", " ".join(calls))
+        self.assertEqual(self.asked(), [])
         self.assertIn("-n -v", calls)
         self.assertEqual(calls[-1], "-k")
         self.assertIn("hands/run.sh", self.steps())
@@ -257,10 +278,48 @@ class InstallOnce(unittest.TestCase):
         self.assertIn("GAZE_TRACKER=auto", self.conf.read_text())
 
     def test_restart_is_asked_first_and_done_last(self):
-        code, out = self.run_install(["n", "n", "n", "n", "y"])
+        code, out = self.run_install(["n", "n", "n", "y", "y"])   # ..., Bluetooth, restart
         self.assertEqual(code, 0, out)
         self.assertIn("Restarting SteamVR, as you picked at the start.", out)
         self.assertGreater(out.index("Restarting SteamVR"), out.index("STEP "))
+        log = self.entries()
+        restart = next(i for i, l in enumerate(log) if l.startswith("SYSTEMCTL"))
+        self.assertIn("SUDO -k", log[:restart], "sudo forgets the password before the restart")
+
+    def test_hand_tracking_that_needs_no_sudo_stays_when_sudo_refuses(self):
+        self.release()
+        # hands, no recorder, gaze, tracker, no Eye Recorder, Bluetooth, no restart; go on without
+        code, out = self.run_install(["n", "y", "n", "y", "y", "n", "y", "n", "y"], FAKE_SUDO="deny", FAKE_CAPS="1")
+        self.assertEqual(code, 0, out)
+        steps = self.steps()
+        self.assertIn("hands/run.sh", steps)
+        self.assertNotIn("gaze/tracker/install.sh", steps)
+        self.assertNotIn("setup/bluetooth/install.sh", steps)
+
+    def test_nopasswd_needs_no_password_on_the_user(self):
+        self.release()
+        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "y", "n"], FAKE_SUDO="nopasswd", FAKE_PASSWD="NP")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("Your user has no password", out)
+        self.assertEqual(self.asked(), [])
+        for rel in PRIVILEGED:
+            self.assertIn(rel, self.steps())
+
+    def test_a_signal_still_ends_the_keep_alive(self):
+        def stop_at_hands(p):
+            deadline = time.monotonic() + 30
+            while "STEP hands/run.sh install" not in self.log.read_text():
+                self.assertLess(time.monotonic(), deadline, "hands/run.sh never ran")
+                time.sleep(0.05)
+            p.send_signal(signal.SIGTERM)
+        code, out = self.run_install(["n", "y", "n", "n", "n"], during=stop_at_hands,
+                                     FRAMETOP_SUDO_REFRESH="1", FAKE_STEP_SLEEP="2.5")
+        self.assertEqual(code, 143, out)
+        self.assertIn("Run the same command again", out)
+        calls = self.sudo_calls()
+        self.assertEqual(calls[-1], "-k", calls)
+        time.sleep(2.5)
+        self.assertEqual(self.sudo_calls(), calls, "the keep-alive outlived the install")
 
 
 if __name__ == "__main__":

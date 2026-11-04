@@ -97,12 +97,16 @@ password_set() {
 
 # sudo_once: ask for the password once, after every question, for all the parts that need it,
 # so nothing waits for you later and you can take the headset off. sudo keeps it (its timestamp,
-# for this terminal) while a keep-alive refreshes it every FRAMETOP_SUDO_REFRESH seconds; the
-# keep-alive ends with this script (the EXIT trap), and sudo -k then forgets it. The installers
-# still run their own sudo (frame_sudo in scripts/_env.sh), which then doesn't ask, so each one
-# also works on its own. Only on the Frame, with a terminal and without SUDO_ASKPASS: FrameDrop's
-# window answers sudo itself (framedrop/installer), and from a PC each sudo has its own ssh -t.
-keepalive=
+# for this terminal's session) while a keep-alive refreshes it every FRAMETOP_SUDO_REFRESH
+# seconds; end_sudo, from the EXIT trap or before the SteamVR restart, ends the keep-alive and has
+# sudo forget it. The installers still run their own sudo (frame_sudo in scripts/_env.sh), which
+# then doesn't ask, so each one also works on its own. Only on the Frame, with a terminal and
+# without SUDO_ASKPASS: FrameDrop's window answers sudo itself (framedrop/installer), and from a
+# PC each sudo has its own ssh -t.
+# While it's kept, any program of yours in this terminal's session can use sudo without a
+# password: the installers and build scripts here (the container's builds run in podman's own
+# session, so they can't).
+keepalive='' sudo_used=0
 sudo_once() {
   if [ "$FRAME_LOCAL" = 0 ]; then
     [ "$assume_yes" = 1 ] || echo "From a PC each one asks for it over SSH, unless it's in the repo's .env (README)."
@@ -110,32 +114,51 @@ sudo_once() {
   fi
   [ -z "${SUDO_ASKPASS:-}" ] || return 0
   { : </dev/tty; } 2>/dev/null || return 0
-  if [ "$assume_yes" = 1 ]; then
-    sudo -n -v 2>/dev/null || return 0   # --yes never asks: only keep a password sudo has now
+  sudo_used=1   # from here end_sudo has sudo forget it, also if a signal comes before the keep-alive
+  if sudo -n -v 2>/dev/null; then
+    :   # sudo has it already, or this user needs none (NOPASSWD)
+  elif [ "$assume_yes" = 1 ]; then
+    return 0   # --yes asks nothing here (frame_sudo still asks if sudo needs it at a step)
   elif ! password_set; then
     echo "Your user has no password, so sudo can't run. Set one in a terminal with passwd, then run this again to add them."
-    ask "Go on without them now?" y || exit 1
+    ask "Go on without them now?" y || { echo "Nothing was installed. Set a password with passwd, then run this again."; exit 1; }
     drop_sudo_parts "your user has no password (passwd sets one)"
     return 0
   else
     echo "It's asked once, now. sudo keeps it until the install ends, then forgets it."
     if ! sudo -v -p "Your password (sudo): "; then
-      ask "sudo didn't take the password. Go on without them?" y || exit 1
+      ask "sudo didn't take the password. Go on without them?" y ||
+        { echo "Nothing was installed. Run this again with the right password (passwd changes it)."; exit 1; }
       drop_sudo_parts "sudo didn't take the password"
       return 0
     fi
   fi
-  local parent=$$ every=${FRAMETOP_SUDO_REFRESH:-50}
+  local parent=$$ every=${FRAMETOP_SUDO_REFRESH:-30}
   ( while sleep "$every"; do kill -0 "$parent" 2>/dev/null && sudo -n -v 2>/dev/null || exit 0; done ) \
     </dev/null >/dev/null 2>&1 &
   keepalive=$!
   sudo -n true 2>/dev/null ||
     echo "This sudo doesn't keep a password between commands (timestamp_timeout 0), so each part asks for it again."
 }
+# end_sudo: stop the keep-alive (frozen first, so it starts no sudo while its children go) and have
+# sudo forget the password. Safe to run twice.
+end_sudo() {
+  [ "$sudo_used" = 1 ] || return 0
+  if [ -n "$keepalive" ]; then
+    kill -STOP "$keepalive" 2>/dev/null || true
+    pkill -P "$keepalive" 2>/dev/null || true
+    kill -KILL "$keepalive" 2>/dev/null || true
+    keepalive=
+  fi
+  sudo -k 2>/dev/null || true
+  sudo_used=0
+}
+# Does hand tracking need sudo? A release whose ft-camd has its capabilities already doesn't.
+hands_need_sudo() { [ "$FRAME_RELEASE" = 0 ] || ! camd_has_caps; }
 # drop_sudo_parts WHY: skip every picked part that needs sudo, saying why at its step.
 drop_sudo_parts() {
   local why=$1
-  if [ "$do_hands" = 1 ]; then
+  if [ "$do_hands" = 1 ] && hands_need_sudo; then
     do_hands=0 hands_skip="skipped: $why. Install it later with: hands/run.sh install"
   fi
   if [ "$rec_hands" != 0 ] && ! camd_has_caps; then   # hand tracking was going to set them
@@ -154,9 +177,9 @@ drop_sudo_parts() {
 # closed terminal, FrameDrop stopping it) would end bash without the EXIT trap, so each one
 # exits instead, and the trap says so too.
 # interrupted-install trap: begin
-# It also ends the sudo keep-alive (sudo_once, below) and has sudo forget the password.
+# It also ends the sudo keep-alive and has sudo forget the password (end_sudo, above).
 trap 'rc=$?
-if [ -n "${keepalive:-}" ]; then kill "$keepalive" 2>/dev/null || true; sudo -k 2>/dev/null || true; fi
+! declare -F end_sudo >/dev/null || end_sudo
 [ "$rc" = 0 ] || echo "install.sh stopped before it finished (exit $rc). Run the same command again to finish the install." >&2' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -278,7 +301,7 @@ fi
 
 # The picked parts that need sudo, then the password, once.
 sudo_parts=()
-if [ "$do_hands" = 1 ] && { [ "$FRAME_RELEASE" = 0 ] || ! camd_has_caps; }; then
+if [ "$do_hands" = 1 ] && hands_need_sudo; then
   sudo_parts+=("hand tracking: file capabilities for its camera broker (setcap)")
 fi
 if [ "$rec_hands" != 0 ] && [ "$do_hands" = 0 ] && ! camd_has_caps; then
@@ -484,6 +507,6 @@ EOF
 if [ "$do_restart" = 1 ]; then
   echo "Restarting SteamVR, as you picked at the start."
   # sudo forgets the password first: the restart can close this terminal.
-  if [ -n "$keepalive" ]; then kill "$keepalive" 2>/dev/null || true; sudo -k 2>/dev/null || true; keepalive=; fi
+  end_sudo
   on_frame 'systemctl --user restart steamvr.service'
 fi

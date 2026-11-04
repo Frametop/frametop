@@ -182,6 +182,9 @@ main() {
   fi
 
   printf '\n\033[1m== 0/12 loading Frametop %s (a minute or two)\033[0m\n' "$version"
+  if [ "$tty" = 1 ] && [ "$unpack_only" = 0 ] && [ "$yes" = 0 ]; then
+    echo "Then it asks what to install, all at once, and your password once if a part needs it."
+  fi
   if [ "$(podman image inspect -f '{{.Id}}' "$image" 2>/dev/null)" = "$id" ]; then
     echo "already loaded"
   else

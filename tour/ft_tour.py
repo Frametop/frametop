@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Frametop Tour: a walk through what Frametop does, the first time the desktop starts, and
-whenever it's opened again (the app menu, frunner, SteamVR's Launch a program list, the Tour
+whenever it's opened again (the app menu, frunner, Frametop -> Help in SteamVR's Launch a program list, the Tour
 entry in Frametop Input Settings, or tour/ft-tour).
 
 A Kirigami (QML) app with a Python backend, like Frametop Input Settings, in Frametop's
@@ -142,7 +142,7 @@ def pages(f, keys):
                  ["The buttons", "Try it now, or open its settings"],
                  ["The page list at the bottom", "Jumps to any page, so the tour is also a reference to come back to"]],
         "note": "You can take the tour again any time: Frametop Tour is in the app menu, in frunner (Meta+Space), "
-                "in SteamVR's Launch a program list, and in Frametop Input Settings.",
+                "under Frametop → Help in SteamVR's Launch a program list, and in Frametop Input Settings.",
         "actions": [], "clips": []}, {
         "id": "screens", "title": "Screens and the 3D mouse", "icon": "video-display",
         "intro": "Each screen is a panel in the room. The mouse moves a dot around you that snaps onto whatever "
@@ -447,7 +447,7 @@ def pages(f, keys):
         more["actions"].insert(0, {"id": "input:voice", "text": "Voice", "icon": "audio-input-microphone"})
     out.append(more)
     out.append({"id": "done", "title": "That's the tour", "icon": "checkmark",
-                "intro": "Frametop Tour stays in the app menu, frunner, and SteamVR's Launch a program list, for "
+                "intro": "Frametop Tour stays in the app menu, frunner, and SteamVR's Launch a program list (Frametop → Help), for "
                          "when you want it again. The page list at the bottom jumps straight to any topic.",
                 "rows": ["If you get stuck",
                          ["A screen is lost or in the way", "Meta+Shift+R, or the reset button under any screen"],

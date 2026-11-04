@@ -4,6 +4,7 @@ what's picked, the update command, and what the installer writes and removes. kd
 konsole and ft-floatd are stand-ins; nothing reaches the network or the real home."""
 import configparser
 import os
+import shlex
 import pathlib
 import subprocess
 import sys
@@ -75,6 +76,7 @@ class Templates(unittest.TestCase):
         k = keys(REPO / "menu/ft-menu.desktop")
         self.assertEqual(k["Name"], "Frametop")
         self.assertEqual(k["Exec"], "@REPO@/menu/ft-menu")
+        self.assertEqual(k["TryExec"], k["Exec"], "gone when an older version is installed over it")
         for key in ("NotShowIn", "OnlyShowIn", "NoDisplay", "Hidden", "X-Frametop-Menu"):
             self.assertNotIn(key, k)
 
@@ -146,6 +148,16 @@ class Menu(unittest.TestCase):
         self.assertEqual([p for p, _ in shown], ["Frametop", "Help", "Frametop"])
         self.assertEqual((did, opened, updated), ("update", [], [1]))
 
+    def test_a_failed_launch_says_so(self):
+        errors = []
+
+        def launch(path):
+            raise TypeError("constructor returned NULL")
+        answers = iter(["group:help", "app:0"])
+        did = ft_menu.menu(choose=lambda p, i: next(answers), launch=launch, error=errors.append)
+        self.assertEqual(did, "failed ft-tour.desktop")
+        self.assertEqual(errors, ["Couldn't open Tour: constructor returned NULL"])
+
     def test_cancel(self):
         self.assertEqual(self.run_menu([None])[0], "closed")
         self.assertEqual(self.run_menu(["group:tools", None])[0], "closed")
@@ -165,6 +177,9 @@ class Menu(unittest.TestCase):
                          ["--title", "Frametop", "--menu", "Frametop", "group:help", "Help ›", "update", "Update…"])
         with mock.patch.dict(os.environ, {"PATH": path, "KD_ANSWER": ""}):
             self.assertIsNone(ft_menu.choose("Frametop", [("update", "Update…")]))
+        with mock.patch.dict(os.environ, {"PATH": path, "KD_ANSWER": "app:0"}):
+            ft_menu.choose("Profiles", [("app:0", "-work")])
+        self.assertEqual(log.read_text().splitlines()[-2:], ["app:0", " -work"], "not an option")
 
     def test_listing(self):
         text = ft_menu.listing()
@@ -194,7 +209,7 @@ class Launch(unittest.TestCase):
 
     def test_from_steam_floatd_takes_it(self):
         did, asked, started = self.go("gamescope", "ok")
-        self.assertEqual(asked, [f'env FT_TOUR_PAGE=recenter "{REPO}/tour/ft-tour"'])
+        self.assertEqual([shlex.split(a) for a in asked], [["env", "FT_TOUR_PAGE=recenter", f"{REPO}/tour/ft-tour"]])
         self.assertEqual((did, started), ("floated", []))
 
     def test_from_steam_floatd_declines(self):
@@ -207,8 +222,22 @@ class Launch(unittest.TestCase):
 
     def test_field_codes_dropped(self):
         p = self.apps / "x.desktop"
-        p.write_text("[Desktop Entry]\nType=Application\nName=X\nExec=/a/b --open %U\n")
-        self.assertEqual(ft_menu.commandline(str(p)), "/a/b --open")
+        p.write_text("[Desktop Entry]\nType=Application\nName=X\nExec=/a/b --open %U 50%%\n")
+        self.assertEqual(shlex.split(ft_menu.commandline(str(p))), ["/a/b", "--open", "50%"])
+
+    def test_a_profiles_quoting_undone(self):
+        """layout/ft_layout.py's launcher Exec: quoted for Exec, then escaped for the key file.
+        ft-floatd's shlex.split of what's sent is the command with the name as one word."""
+        sys.path.insert(0, str(REPO / "layout"))
+        import ft_layout
+        name = 'My "work" $HOME `x` \\ s'
+        folder = pathlib.Path(self.tmp.name) / "launchers"
+        with mock.patch.object(ft_layout, "LAUNCHERS", str(folder)), \
+                mock.patch.object(ft_layout, "layout_names", lambda layout: [name]):
+            ft_layout.write_launchers({})
+        entry = folder / ft_layout.launcher_name(name)
+        self.assertEqual(shlex.split(ft_menu.commandline(str(entry))),
+                         [os.path.join(ft_layout.REPO, "layout", "ft-layout"), "open", name])
 
 
 class Update(unittest.TestCase):
@@ -229,11 +258,22 @@ class Update(unittest.TestCase):
     def cmd(self, tree):
         return ft_menu.update_command(tree, home=str(self.home))
 
+    def tree_git(self, rel):
+        t = self.tree(rel)
+        (pathlib.Path(t) / ".git").mkdir()
+        return t
+
     def test_clone(self):
-        self.assertEqual(self.cmd(self.tree("frametop")), "curl -fsSL https://frametop.github.io/frametop/get.sh | bash")
+        self.assertEqual(self.cmd(self.tree_git("frametop")), "curl -fsSL https://frametop.github.io/frametop/get.sh | bash")
+
+    def test_synced_from_a_pc(self):
+        t = self.tree("dev/frametop")
+        self.assertIsNone(self.cmd(t))
+        with mock.patch.object(ft_menu, "update_command", lambda tree=None, home=None: None):
+            self.assertIn("synced from a PC", ft_menu.update_argv(t)[-1])
 
     def test_clone_elsewhere(self):
-        t = self.tree("my stuff/frametop")
+        t = self.tree_git("my stuff/frametop")
         self.assertEqual(self.cmd(t), f"curl -fsSL https://frametop.github.io/frametop/get.sh | bash -s -- --dir '{t}'")
 
     def test_release(self):
@@ -246,7 +286,7 @@ class Update(unittest.TestCase):
                          f"curl -fsSL https://frametop.github.io/frametop/get.sh | bash -s -- --release --dir {self.home}/rel")
 
     def test_konsole(self):
-        argv = ft_menu.update_argv(self.tree("frametop"))
+        argv = ft_menu.update_argv(self.tree_git("frametop"))
         self.assertEqual(argv[:5], ["konsole", "-p", "tabtitle=Update Frametop", "-e", "bash"])
         self.assertTrue(argv[-1].startswith("set -o pipefail; "), argv[-1])
         self.assertIn(f"{ft_menu.update_command(self.home / 'frametop')}; status=$?;", argv[-1])
@@ -304,6 +344,43 @@ class Installer(unittest.TestCase):
 
     def test_usage(self):
         self.assertEqual(self.run_it("bogus").returncode, 2)
+
+
+class UpdateCheck(unittest.TestCase):
+    """scripts/update-check.py's check_launch_list, with Steam's list made up."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.apps = pathlib.Path(self.tmp.name) / ".local/share/applications"
+        src = (REPO / "scripts/update-check.py").read_text().split("\nif __name__ ==")[0]
+        self.uc = {"__file__": str(REPO / "scripts/update-check.py"), "__name__": "update_check"}
+        exec(compile(src, "update-check.py", "exec"), self.uc)
+        self.uc["HOME"] = self.tmp.name
+        self.reports = []
+        self.uc["report"] = lambda state, label, detail="": self.reports.append((state, detail))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def check(self, listed):
+        fake = mock.Mock()
+        fake.evaluate.return_value = __import__("json").dumps(listed)
+        with mock.patch.dict(sys.modules, {"steamui": fake}):
+            self.uc["check_launch_list"]()
+        return self.reports[-1] if self.reports else None
+
+    def test_not_installed_says_nothing(self):
+        self.assertIsNone(self.check(["Frametop"]))
+
+    def test_states(self):
+        install_into(self.apps, ["menu/ft-menu.desktop", "tour/ft-tour.desktop"])
+        (self.apps / "other.desktop").write_text("[Desktop Entry]\nType=Application\nName=Other\nExec=x\n"
+                                                 "NotShowIn=gamescope;\n")
+        self.assertEqual(self.check(["Frametop", "Konsole", "Other"]),
+                         ("ok", "1 of Frametop's entries are in the Frametop menu, not in the list"))
+        self.assertEqual(self.check(["Frametop", "Frametop Tour"])[0], "warn")
+        self.assertIn("Frametop Tour again", self.reports[-1][1])
+        self.assertIn("isn't in it", self.check(["Konsole"])[1])
 
 
 class Cli(unittest.TestCase):

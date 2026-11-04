@@ -93,10 +93,13 @@ def entries(folder=None):
 def update_command(tree=REPO, home=None):
     """The update command (README.md, Update) for the tree this menu runs from: a release
     (.frametop-release) updates with get.sh --release, a clone with get.sh, each with --dir
-    when it isn't in the default place."""
+    when it isn't in the default place. None for a copy synced from a PC (scripts/sync.sh: no
+    .git), which is updated there."""
     home = home or os.path.expanduser("~")
     tree = os.path.realpath(tree)
     args = []
+    if not os.path.isfile(os.path.join(tree, ".frametop-release")) and not os.path.exists(os.path.join(tree, ".git")):
+        return None
     if os.path.isfile(os.path.join(tree, ".frametop-release")):
         args.append("--release")
         releases = os.path.dirname(tree)
@@ -111,6 +114,8 @@ def update_command(tree=REPO, home=None):
 def update_argv(tree=REPO):
     """Konsole running the update command, staying open until Enter so its last lines can be read."""
     cmd = update_command(tree)
+    if cmd is None:
+        cmd = "echo 'This copy of Frametop is synced from a PC (scripts/sync.sh): update it there.'"
     # pipefail: a download that fails is the command's failure, not an empty script that passes.
     script = (f"set -o pipefail; echo {shlex.quote('Updating Frametop: ' + cmd)}; echo; "
               f"{cmd}; status=$?; echo; "
@@ -118,10 +123,42 @@ def update_argv(tree=REPO):
     return ["konsole", "-p", "tabtitle=Update Frametop", "-e", "bash", "-c", script]
 
 
+def exec_words(line):
+    """An Exec value's words, quoting as the desktop entry spec has it: in double quotes a
+    backslash escapes ", `, $ and itself. ValueError for an unclosed quote."""
+    words, word, quoted, started, i = [], [], False, False, 0
+    while i < len(line):
+        c = line[i]
+        if quoted and c == "\\" and line[i + 1:i + 2] in ('"', "`", "$", "\\"):
+            word.append(line[i + 1])
+            i += 1
+        elif c == '"':
+            quoted, started = not quoted, True
+        elif c in " \t" and not quoted:
+            if word or started:
+                words.append("".join(word))
+            word, started = [], False
+        else:
+            word.append(c)
+        i += 1
+    if quoted:
+        raise ValueError("unclosed quote")
+    if word or started:
+        words.append("".join(word))
+    return words
+
+
 def commandline(path):
-    """The entry's Exec line without its field codes, as Steam hands a launch to ft-floatd."""
-    e = read_entry(path) or {}
-    return re.sub(r"\s*%[a-zA-Z]", "", e.get("Exec", "")).strip()
+    """The entry's command without its field codes, one quoted word an argument, as Steam hands
+    a launch to ft-floatd (which splits it with shlex): the key file's escapes undone, then the
+    Exec line's quoting (a profile's name is escaped in both, layout/ft_layout.py)."""
+    line = re.sub(r"\\(.)", lambda m: {"s": " ", "n": "\n", "t": "\t", "r": "\r"}.get(m.group(1), m.group(1)),
+                  (read_entry(path) or {}).get("Exec", ""))
+    try:
+        words = exec_words(line)
+    except ValueError:
+        return ""
+    return shlex.join(w.replace("%%", "%") for w in words if not re.fullmatch(r"%[a-zA-Z]", w))
 
 
 def ask_floatd(cmdline):
@@ -167,12 +204,18 @@ def start_detached(argv):
 
 
 def choose(prompt, items):
-    """kdialog's list: the tag picked, or None (Cancel, or the window closed)."""
+    """kdialog's list: the tag picked, or None (Cancel, or the window closed). A label that
+    starts with "-" (a profile's name) gets a space first, so kdialog doesn't take it as an option."""
     argv = ["kdialog", "--title", TITLE, "--menu", prompt]
     for tag, text in items:
-        argv += [tag, text]
+        argv += [tag, " " + text if text.startswith("-") else text]
     r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
+def show_error(text):
+    subprocess.run(["kdialog", "--title", TITLE, "--error", text], stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL)
 
 
 def top_items(groups):
@@ -180,7 +223,7 @@ def top_items(groups):
     return items + [("update", "Update Frametop…")]
 
 
-def menu(choose=choose, launch=launch, update=None):
+def menu(choose=choose, launch=launch, update=None, error=show_error):
     """The menus, until something is opened or the menu is closed. Returns what it did."""
     groups = entries()
     titles = dict(GROUPS)
@@ -198,7 +241,11 @@ def menu(choose=choose, launch=launch, update=None):
         if tag is None:
             return "closed"
         if tag in paths:
-            launch(paths[tag])
+            try:
+                launch(paths[tag])
+            except Exception as e:  # its file went since the menu read it, or Gio couldn't start it
+                error(f"Couldn't open {dict(items)[tag]}: {e}")
+                return "failed " + os.path.basename(paths[tag])
             return "opened " + os.path.basename(paths[tag])
 
 
@@ -209,7 +256,7 @@ def listing():
         if groups.get(g):
             lines.append(text)
             lines += [f"  {name}  ({os.path.basename(path)})" for name, path in groups[g]]
-    lines.append("Update Frametop: " + update_command())
+    lines.append("Update Frametop: " + (update_command() or "none here: this copy is synced from a PC"))
     return "\n".join(lines)
 
 
@@ -221,7 +268,9 @@ def main(args):
     elif args == ["list"]:
         print(listing())
     elif args == ["update-command"]:
-        print(update_command())
+        cmd = update_command()
+        print(cmd or "none: this copy is synced from a PC (scripts/sync.sh); update it there")
+        sys.exit(0 if cmd else 1)
     else:
         sys.exit("usage: ft-menu [update|list|update-command]")
 

@@ -749,7 +749,8 @@ def check_launch_list():
         import ft_menu
         import steamui
         hidden = {(ft_menu.read_entry(p) or {}).get("Name") for p in (os.path.join(apps, f) for f in os.listdir(apps))
-                  if p.endswith(".desktop") and "gamescope" in (ft_menu.read_entry(p) or {}).get("NotShowIn", "").split(";")}
+                  if p.endswith(".desktop") and (ft_menu.read_entry(p) or {}).get("X-Frametop-Menu")
+                  and "gamescope" in (ft_menu.read_entry(p) or {}).get("NotShowIn", "").split(";")}
         listed = set(json.loads(steamui.evaluate(
             "SteamClient.Apps.ScanForInstalledNonSteamApps(true).then(a => JSON.stringify(a.map(x => x.strAppName)))")))
     except Exception as e:  # Steam not up, its UI changed, or the tree's modules
@@ -764,7 +765,7 @@ def check_launch_list():
     elif "Frametop" not in listed:
         report("warn", label, "the Frametop menu isn't in it: open Launch a program once, or restart Steam")
     else:
-        report("ok", label, f"Frametop's {len(hidden)} entries are in the Frametop menu, not the list")
+        report("ok", label, f"{len(hidden)} of Frametop's entries are in the Frametop menu, not in the list")
 
 
 def check_vr_socket():

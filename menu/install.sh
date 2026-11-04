@@ -22,6 +22,7 @@ case ${1:-install} in
 done"
     echo "installed: the Frametop menu (Launch a program -> Frametop)" ;;
   uninstall)
-    on_frame "rm -f $FT_APPS_DIR/ft-menu.desktop; echo removed" ;;
+    on_frame "rm -f $FT_APPS_DIR/ft-menu.desktop; echo removed"
+    echo "Frametop's apps stay out of Launch a program: uninstall.sh removes them with the rest." ;;
   *) echo "usage: $0 [install|uninstall]" >&2; exit 2 ;;
 esac

@@ -4,6 +4,8 @@ Name=Frametop
 GenericName=Frametop's settings, tools and updates
 Comment=Frametop's settings, screens, profiles, help, recorders, and Update Frametop, in one menu
 Exec=@REPO@/menu/ft-menu
+# Steam's list and Plasma leave the entry out when it's gone (an older version installed over this one).
+TryExec=@REPO@/menu/ft-menu
 Icon=preferences-system
 Categories=Settings;
 Keywords=frametop;menu;settings;update;upgrade;steamvr;

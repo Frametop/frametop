@@ -1,8 +1,9 @@
-// ft-screens' pose math (screens/posemath.h): rigid poses, PanelPose and FacingPose.
+// ft-screens' pose math (screens/posemath.h): rigid poses, PanelPose, RollZ, LevelRoll and FacingPose.
 #include "../posemath.h"
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 static int failed = 0;
 static void check(const char *what, bool ok) {
@@ -60,6 +61,24 @@ int main() {
     // Straight up (pitch 90) has no horizontal front: right falls back to zero length, not NaN.
     p = PanelPose<M>(0, 0, 0, 0, 90, 0);
     check("PanelPose: pitch 90 gives no NaN", !std::isnan(p.m[0][0]) && !std::isnan(p.m[1][1]));
+
+    // LevelRoll (DEE-337): the roll that takes a tilted screen level where it is, its front kept.
+    bool allLevel = true;
+    for (double yaw : {-150.0, 0.0, 20.0, 95.0})
+        for (double pitch : {-40.0, 0.0, 30.0})
+            for (double roll : {-170.0, -30.0, -1.5, 0.0, 2.0, 30.0, 170.0}) {
+                const M tilted = PanelPose<M>(1, 2, 3, yaw, pitch, roll);
+                double rad;
+                allLevel &= LevelRoll(tilted, &rad) && near(rad, -roll * M_PI / 180, 1e-4) &&
+                            same(Mul(tilted, RollZ<M>(rad)), PanelPose<M>(1, 2, 3, yaw, pitch, 0), 1e-4);
+            }
+    check("LevelRoll: undoes the roll for every yaw, pitch and roll tried, centre and front kept", allLevel);
+    double rad = 1;
+    check("LevelRoll: a level screen turns 0", LevelRoll(PanelPose<M>(0, 1, -1, 10, 5, 0), &rad) && near(rad, 0));
+    M up = Identity<M>();   // facing straight up: x right, y toward -z, z up
+    up.m[1][1] = 0, up.m[2][1] = -1, up.m[1][2] = 1, up.m[2][2] = 0;
+    check("LevelRoll: facing straight up has no level", rigid(up) && !LevelRoll(up, &rad));
+    check("RollZ: a quarter turn takes right to up", near(RollZ<M>(M_PI / 2).m[1][0], 1) && rigid(RollZ<M>(0.3)));
 
     // FacingPose: its z points at the head, upright (x level).
     M head = Translation<M>(0, 1.6, 0);

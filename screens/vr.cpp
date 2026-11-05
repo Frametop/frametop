@@ -8,7 +8,9 @@
 //   - a curve button next to the bar: bends the screen into a cylinder around you (its
 //     radius: your distance to it when pressed), or flat again.
 //   - a roll button next to that: drag it sideways like a knob to roll the screen about
-//     its centre (it snaps level within kRollSnap), or scroll on it for kRollStep steps.
+//     its centre (it snaps level within kRollSnap), or scroll on it for kRollStep steps. Click it
+//     (press and let go without turning it past kRollTap) and the screen goes level where it is, its
+//     tilt back to 0 (DEE-337, LevelScreen); a hand's poke on it does the same.
 //   - a resize handle on a corner: drag it to resize from that corner, the opposite one staying
 //     put (a screen's height follows its resolution; a floating window gets the pixels). It sits
 //     on the bottom right and goes to whichever corner a laser, the gaze or a hand comes near
@@ -260,6 +262,7 @@ constexpr double kMinWidth = 0.15;
 constexpr double kFade = 10;         // degrees over which a pinned screen fades out
 constexpr double kRollSnap = 2.5;    // degrees from level where rolling snaps level
 constexpr double kRollStep = 5;      // degrees per scroll notch on the roll button
+constexpr double kRollTap = 3;       // degrees: a press on the roll button turned less than this is a click (levels it)
 constexpr float kChromeIdle = 0.55f; // the controls' opacity without a laser on them
 constexpr long kControlsLinger = 35; // ticks (~0.4 s) the controls stay after a laser leaves
 constexpr long kAimLinger = 25;      // ticks (~0.3 s) a panel keeps the laser on after the aim leaves it
@@ -320,6 +323,7 @@ struct Screen {
     long keepUntil = 0;                       // ...after a resize from another corner ends, until this tick (late answers)
     Mat rollFrom = Identity();                // roll: the pose at the press (pinRel when pinned)
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
+    double rollTurned = 0;                    // roll: the most the laser has gone round since (rad; under kRollTap: a click)
     bool hover[8] = {};                       // a laser is on the bar, curve, roll, resize, dock, close, reset, pin control
     unsigned handHover = 0;                   // ...a hand's pinch point is near them (bit k: control k)
     bool lasers = true;                       // MakeOverlaysInteractiveIfVisible is set
@@ -1521,12 +1525,7 @@ bool RayOnPlane(const Mat &p, const Mat &d, double *x, double *y) {
 }
 
 // Roll: a rotation about the screen's own front axis (counterclockwise as you see it).
-Mat RollZ(double rad) {
-    Mat m = Identity();
-    m.m[0][0] = m.m[1][1] = float(std::cos(rad));
-    m.m[1][0] = float(std::sin(rad)), m.m[0][1] = float(-std::sin(rad));
-    return m;
-}
+Mat RollZ(double rad) { return posemath::RollZ<Mat>(rad); }
 
 // Roll the screen to `rad` from its pose at the press, snapping level within kRollSnap.
 void ApplyRoll(Screen &s, double rad) {
@@ -1539,6 +1538,20 @@ void ApplyRoll(Screen &s, double rad) {
     if (std::fabs(tilt) < kRollSnap * M_PI / 180) rad -= tilt;
     if (pinned) Pin(s, s.pinned, Mul(s.rollFrom, RollZ(rad)));
     else SetAbsolute(s, Mul(base, RollZ(rad)), s.universe);
+}
+
+// A click on the roll button (or a hand's poke): the screen level where it is, its tilt back to 0 about its
+// centre, facing the same way (DEE-337: carried with a controller, it can end up a degree or two off).
+// Pinned, it stays pinned, level in the room as it is now.
+void LevelScreen(Screen &s, int index, const char *by) {
+    Mat p;
+    double rad;
+    if (!ScreenPose(s, &p)) return;
+    if (!posemath::LevelRoll(p, &rad))
+        return void(std::printf("screen %d: the roll button (%s): facing straight up or down, no level to find\n", index + 1, by));
+    s.rollFrom = s.pinned != kNone ? s.pinRel : p;
+    ApplyRoll(s, rad);
+    std::printf("screen %d: levelled, %.1f deg of tilt taken off (the roll button, %s)\n", index + 1, -rad * 180 / M_PI, by);
 }
 
 // The laser's angle around the screen's centre, in the frame of its pose at the press.
@@ -1619,6 +1632,7 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     }
     if (mode == Drag::Roll) {
         s.rollFrom = s.pinned != kNone ? s.pinRel : p;
+        s.rollTurned = 0;
         Mat l;
         if (!LaserPose(dev, &l) || !RollLaserAngle(s, l, &s.rollAngle)) s.drag = Drag::None, s.dragDevice = kNone;
     }
@@ -1744,7 +1758,11 @@ void FinishDrag(Screen &s, int index) {
     const bool moved = s.drag == Drag::Move;
     const vr::TrackedDeviceIndex_t target = s.pinTarget;
     const int dockOn = s.dockOn;
+    // the roll button let go without turning it: a click, which levels the screen
+    const bool rollClick = s.drag == Drag::Roll && s.rollTurned < kRollTap * M_PI / 180;
+    const std::string by = rollClick ? DeviceLabel(s.dragDevice) : std::string();
     EndDrag(s);
+    if (rollClick) LevelScreen(s, index, by.c_str());
     Mat p;
     if (!moved) return;
     if (s.floating && dockOn >= 0) {
@@ -2080,7 +2098,9 @@ void UpdateDrag(Screen &s, int index) {
         double a;
         Mat l;
         if (!LaserPose(s.dragDevice, &l) || !RollLaserAngle(s, l, &a)) return;
-        ApplyRoll(s, std::remainder(a - s.rollAngle, 2 * M_PI));
+        const double turn = std::remainder(a - s.rollAngle, 2 * M_PI);
+        s.rollTurned = std::max(s.rollTurned, std::fabs(turn));
+        ApplyRoll(s, turn);
         return;
     }
     // Resize: the corner follows the ray along the screen's diagonal (so it shrinks and
@@ -5208,6 +5228,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                     ResetTapped(e.panel, e.side);   // (a hand: it asks first)
                 } else if (e.control == handinput::Control::Pin) {
                     TogglePinView(s, e.panel, e.side ? "the right hand" : "the left hand");
+                } else if (e.control == handinput::Control::Roll) {
+                    LevelScreen(s, e.panel, e.side ? "the right hand" : "the left hand");
                 } else if (e.control == handinput::Control::Dock || e.control == handinput::Control::Close) {
                     SendFloat((e.control == handinput::Control::Dock ? "dock " : "close ") + std::to_string(e.panel + 1));
                 }

@@ -61,7 +61,7 @@
 //             against the head's up.
 // --publish-dump FILE: what ft-hands would have published after each processed set, for
 //             Frametop's offline tests (screens/tests): a header (FHDUMP02, then the sizes of
-//             fh_hands_v2_t and fh_gestures_t as two uint32), then per set the hands file's and
+//             fh_hands_v3_t and fh_gestures_t as two uint32), then per set the hands file's and
 //             the gestures file's bytes and the set's dequeue time (int64, CLOCK_MONOTONIC: the
 //             clock of a hand-recorder take's poses.jsonl; capture_ns is the cameras' clock).
 //             publish_ns is the set's time plus the step's busy time.
@@ -416,7 +416,7 @@ int main(int argc, char **argv) {
     // --publish-dump: the files ft-hands would write, in memory, appended per set
     FILE *pubf = publish_dump.empty() ? nullptr : std::fopen(publish_dump.c_str(), "wb");
     if (!publish_dump.empty() && !pubf) return std::fprintf(stderr, "%s: can't write it\n", publish_dump.c_str()), 1;
-    static fh_hands_v2_t pub_hands;
+    static fh_hands_v3_t pub_hands;
     static fh_gestures_t pub_gestures;
     Publisher pub;
     GesturePublisher pub_g;

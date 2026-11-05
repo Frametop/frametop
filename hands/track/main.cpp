@@ -15,6 +15,13 @@
 // The testbench (testbench/, a development tool that never ships) parks it the same way while it
 // publishes fake hands: through $XDG_RUNTIME_DIR/frametop-testbench/hands, which it touches every
 // second. One older than 3 s doesn't count, so a crashed testbench lets go by itself.
+// Another hand tracker takes the files over the same way, through run_dir/held, which it touches
+// every second while it publishes (include/fh_hands.md, "Producers"). ft-hands parks then but
+// leaves hands-want alone, so ft-camd keeps copying frames for it.
+//
+// Calibration: run_dir/calib (include/fh_calib.h) holds the cameras it tracks with, each with the
+// ring camera its images come from, for other readers of the ring. Written at start and whenever
+// the side cameras are exchanged.
 //
 // --no-gestures: hands for the cutouts only. No pinch or grip detection, so nothing reaches
 // the pointer and a closing hand doesn't raise the rate; the gestures file is removed.
@@ -62,6 +69,7 @@
 // offline tools. The request is run_dir/flag (key=value lines: dir, note, said_unix, flag_unix),
 // checked 4 times a second and removed when taken; the folder's manifest.json is written last.
 #include "../../conf/ft_conf.h"
+#include "calibfile.h"
 #include "flagbuf.h"
 #include "io.h"
 #include "pinch.h"
@@ -578,6 +586,22 @@ int main(int argc, char **argv) {
         fixed = Cams::Mono;
     }
     const bool switching = automatic && !color.empty();
+    CalibPublisher calib_pub;
+    bool calib_on = false;
+    if (publish) {
+        std::string e;
+        calib_on = calib_pub.open(run_dir(), e);
+        if (!calib_on) std::fprintf(stderr, "calibration file not written: %s\n", e.c_str());
+    }
+    auto write_calib = [&] {
+        if (!calib_on) return;
+        std::vector<CalibCam> cc;
+        for (const auto *m : {&index, &color})
+            for (const auto &[name, i] : *m)
+                if (const auto it = used.find(name); it != used.end()) cc.push_back({name, i, ring.camera(i).node, it->second});
+        calib_pub.write(cc, ring.writer_pid(), mono_ns());
+    };
+    write_calib();
     Cams mode = switching || color.empty() ? Cams::Mono : fixed;
     std::printf("cameras (by %s):", named_by);
     for (auto &[name, i] : index) std::printf(" %s=video%d", name.c_str(), ring.camera(i).node);
@@ -747,6 +771,7 @@ int main(int argc, char **argv) {
         } else if (side_round == 0 || backwards) {
             if (backwards) {
                 exchange_sides();
+                write_calib();
                 names_swapped = !names_swapped;
                 tracker.exchange("slam_left", "slam_right");
                 if (rec) rec_names.push_back({rec->added(), names_swapped});
@@ -821,15 +846,16 @@ int main(int argc, char **argv) {
     const char *xdg_run = std::getenv("XDG_RUNTIME_DIR");
     const std::string testbench_file = (xdg_run && *xdg_run ? std::string(xdg_run) : "/run/user/" + std::to_string(getuid())) +
                                        "/frametop-testbench/hands";
-    auto testbench_fresh = [&] {
+    const std::string held_file = run_dir() + "/held";   // another producer's turn (see the top)
+    auto fresh = [](const std::string &path) {
         struct stat st;
         timespec now;
-        if (stat(testbench_file.c_str(), &st) != 0 || clock_gettime(CLOCK_REALTIME, &now) != 0) return false;
+        if (stat(path.c_str(), &st) != 0 || clock_gettime(CLOCK_REALTIME, &now) != 0) return false;
         const double age = double(now.tv_sec - st.st_mtim.tv_sec) + (now.tv_nsec - st.st_mtim.tv_nsec) * 1e-9;
         return age > -3.0 && age < 3.0;
     };
     const bool can_park = track && publish;
-    bool parked = false;
+    bool parked = false, lent = false;   // lent: parked for another producer, which reads the ring
     uint64_t t_park = 0, t_hands_want = 0;
     int exit_code = 0;
     // A flag request (see the top): taken, and answered with a folder.
@@ -889,12 +915,15 @@ int main(int argc, char **argv) {
         if (can_park && mono_ns() - t_park > 250'000'000) {
             t_park = mono_ns();
             struct stat pst;
-            const bool by_testbench = testbench_fresh();
-            const bool want = !rec && !g_record && (stat(park_file.c_str(), &pst) == 0 || by_testbench);
+            const bool by_testbench = fresh(testbench_file), by_park = stat(park_file.c_str(), &pst) == 0;
+            const bool by_other = !by_testbench && !by_park && fresh(held_file);
+            const bool want = !rec && !g_record && (by_park || by_testbench || by_other);
+            lent = want && by_other;
             if (want != parked) {
                 parked = want;
                 std::printf("%s\n", !parked       ? "unparked: tracking again"
                                     : by_testbench ? "parked: the testbench publishes fake hands (models stay loaded)"
+                                    : by_other     ? "parked: another producer publishes the hands (run_dir/held; models stay loaded)"
                                                    : "parked: no tracking until run_dir/park goes (models stay loaded)");
                 std::fflush(stdout);
                 if (parked) {
@@ -914,7 +943,7 @@ int main(int argc, char **argv) {
             }
         }
         if (parked) {
-            if (mono_ns() - t_hands_want > 1'000'000'000ull) {  // fresh, so ft-camd keeps idling
+            if (!lent && mono_ns() - t_hands_want > 1'000'000'000ull) {  // fresh, so ft-camd keeps idling
                 t_hands_want = mono_ns();
                 write_file(hands_want_file, "0\n");
             }

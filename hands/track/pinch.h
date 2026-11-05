@@ -219,6 +219,7 @@ public:
     void write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns, const Pinch *middle = nullptr);
 
 private:
+    void stamp();   // magic, version, size and producer
     fh_gestures_t *out_ = nullptr;
     uint64_t seq_ = 0;
     // the counters last written, per gesture (0 pinch, 1 grip, 2 middle pinch) and side

@@ -11,15 +11,19 @@
  * Version 2 appends a skeleton per hand (fh_hand_fit_t) after version 1's fh_hands_t, which is
  * unchanged: a version 1 reader that maps sizeof(fh_hands_t) and checks the magic keeps
  * working. Readers of the skeleton check version >= 2 and the file's size >= sizeof(fh_hands_v2_t).
+ * Version 3 appends who wrote the file and the head's pose at capture time (fh_hands_src_t)
+ * after version 2's, which is unchanged. The whole format, for other producers and readers:
+ * include/fh_hands.md.
  */
 
 #pragma once
 
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define FH_HANDS_MAGIC        "FHHANDS1"
-#define FH_HANDS_VERSION      2
+#define FH_HANDS_VERSION      3
 #define FH_HANDS_MAX_HANDS    2
 #define FH_HANDS_MAX_CAPSULES 64
 
@@ -112,10 +116,45 @@ typedef struct {
 } fh_hand_fit_t;                /* 1024 bytes */
 
 typedef struct {
-    fh_hands_t    v1;           /* version 1, unchanged; v1.version is 2                       */
+    fh_hands_t    v1;           /* version 1, unchanged; v1.version is 2 or later              */
     fh_hand_fit_t fits[FH_HANDS_MAX_HANDS];   /* fits[k] goes with v1.hands[k]; zero when
                                                  k >= nhands or the hand has no skeleton       */
 } fh_hands_v2_t;
+
+/* ---- version 3: the producer, and the head's pose at capture time ----
+ *
+ * For readers that don't run OpenVR themselves (an OpenXR layer, a recorder, a tracker on
+ * another machine) and so can't look the head up at capture_ns. head_q and head_p are the head
+ * frame (the one pts and the skeleton are in) in head_space: a point x in the head frame is at
+ * rotate(head_q, x) + head_p there. A producer that has no pose (ft-hands has none) leaves
+ * FH_HEAD_VALID clear, and the reader looks the head up at capture_ns itself, as ft-screens does. */
+
+enum {
+    FH_HEAD_VALID = 1u << 0,    /* head_p, head_q and head_ns hold a pose                      */
+};
+
+enum {                          /* head_space: OpenVR's ETrackingUniverseOrigin, 0 for none    */
+    FH_SPACE_NONE     = 0,
+    FH_SPACE_STANDING = 1,      /* TrackingUniverseStanding                                    */
+    FH_SPACE_RAW      = 2,      /* TrackingUniverseRawAndUncalibrated                          */
+};
+
+typedef struct {
+    char     producer[16];      /* the program that wrote the file, NUL-padded: "ft-hands"     */
+    uint32_t head_flags;        /* FH_HEAD_*                                                   */
+    uint32_t head_space;        /* FH_SPACE_*                                                  */
+    uint64_t head_ns;           /* CLOCK_MONOTONIC time of the pose: capture_ns, or the nearest
+                                   the producer had                                            */
+    float    head_p[3];         /* m                                                           */
+    float    head_q[4];         /* x, y, z, w                                                  */
+    uint8_t  reserved[68];
+} fh_hands_src_t;               /* 128 bytes */
+
+typedef struct {
+    fh_hands_t     v1;          /* version 1, unchanged; v1.version is 3                       */
+    fh_hand_fit_t  fits[FH_HANDS_MAX_HANDS];   /* version 2, unchanged                         */
+    fh_hands_src_t src;
+} fh_hands_v3_t;
 
 static_assert(sizeof(fh_hand_t) == 272, "fh_hand_t layout");
 static_assert(sizeof(fh_joint_t) == 32, "fh_joint_t layout");
@@ -123,3 +162,6 @@ static_assert(sizeof(fh_hand_fit_t) == 1024, "fh_hand_fit_t layout");
 static_assert(sizeof(fh_capsule_t) == 32, "fh_capsule_t layout");
 static_assert(sizeof(fh_hands_t) == 64 + 2 * 272 + 64 * 32, "fh_hands_t layout");
 static_assert(sizeof(fh_hands_v2_t) == sizeof(fh_hands_t) + 2 * 1024, "fh_hands_v2_t layout");
+static_assert(sizeof(fh_hands_src_t) == 128, "fh_hands_src_t layout");
+static_assert(sizeof(fh_hands_v3_t) == sizeof(fh_hands_v2_t) + 128 && offsetof(fh_hands_v3_t, src) == sizeof(fh_hands_v2_t),
+              "fh_hands_v3_t layout");

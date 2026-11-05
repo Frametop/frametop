@@ -34,8 +34,9 @@
  * helper's hand ray turns it into a right click (a tap) or scrolling (held and moved).
  *
  * Version 1 had only the pinches (192 bytes); version 2 adds the grips after them, version 3
- * the middle pinches after those. A reader of an older version maps and copies the size it
- * knows: the file only grows at the end.
+ * the middle pinches after those, version 4 the producer's name after those. A reader of an
+ * older version maps and copies the size it knows: the file only grows at the end. The whole
+ * format, for other producers and readers: include/fh_gestures.md.
  */
 
 #pragma once
@@ -44,7 +45,7 @@
 #include <stdint.h>
 
 #define FH_GESTURES_MAGIC   "FHGEST01"
-#define FH_GESTURES_VERSION 3
+#define FH_GESTURES_VERSION 4
 
 enum {
     FH_PINCH_TRACKED = 1u << 0, /* the hand was tracked in this frame              */
@@ -84,7 +85,10 @@ typedef struct {
     fh_pinch_t        pinch[2];     /* [0] left hand, [1] right hand                    */
     fh_pinch_t        grip[2];      /* version 2                                        */
     fh_pinch_t        pinch2[2];    /* version 3: thumb to middle fingertip             */
+    char              producer[16]; /* version 4: the program that wrote the file,      */
+                                    /* NUL-padded, as in the hands file: "ft-hands"     */
+    uint8_t           reserved2[48];
 } fh_gestures_t;
 
 static_assert(sizeof(fh_pinch_t) == 64, "fh_pinch_t layout");
-static_assert(sizeof(fh_gestures_t) == 64 + 6 * 64, "fh_gestures_t layout");
+static_assert(sizeof(fh_gestures_t) == 64 + 6 * 64 + 64, "fh_gestures_t layout");

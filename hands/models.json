@@ -1,0 +1,126 @@
+{
+ "catalog": 1,
+ "kind": "hands",
+ "latest": "v20a",
+ "default": "latest",
+ "baseline": "stock",
+ "metrics": [
+  {"key": "replay_bright", "label": "Hands tracked, bright room (90 s replay)", "unit": "", "better": "higher",
+   "note": "The maintainer's recordings replayed through ft-hands with its default settings."},
+  {"key": "replay_dim", "label": "Hands tracked, dim room (120 s replay)", "unit": "", "better": "higher"},
+  {"key": "replay_lit", "label": "Hands tracked, lit room (120 s replay)", "unit": "", "better": "higher"},
+  {"key": "found", "label": "Hand found in ft-hands' crops (held-out people)", "unit": "%", "better": "higher",
+   "note": "Contributors the model never trained on (Frametop Hands #4, #7, #8)."},
+  {"key": "landmark_px", "label": "Finger point error, median (held-out people)", "unit": "px", "better": "lower"},
+  {"key": "within5", "label": "Points within 5% of hand size (held-out people)", "unit": "%", "better": "higher"},
+  {"key": "shape_mm", "label": "3D hand shape error, median (held-out people)", "unit": "mm", "better": "lower"},
+  {"key": "side_ok", "label": "Left or right hand told correctly (held-out people)", "unit": "%", "better": "higher"},
+  {"key": "pinch_closed", "label": "Thumb-index pinch read closed (held-out people)", "unit": "%", "better": "higher",
+   "note": "Of the held-out views where the thumb and index tips touch, the share the model reads as touching."}
+ ],
+ "models": [
+  {
+   "name": "v20a",
+   "title": "Frametop v20a",
+   "kind": "custom",
+   "status": "recommended",
+   "date": "2026-10-22",
+   "summary": "Eight more bounty rounds: pinches close fully and middle-finger taps reach the thumb far more often.",
+   "notes": "v19b's training data without Frametop Hands contribution #17, plus contributions #19 to #26 (bounty rounds: taps, card grabs, pinches, hand gestures, middle-finger taps, pokes and a full session), taught from their prompts the same way as v19b. The palm detector is v13b-p1's, unchanged. Same networks as stock, so the same CPU cost.\n\nWhat to expect against v19b: on prompted acts held back from training, a held thumb-index pinch reads closed 91% of the time (v19b 50%) and a thumb-middle tap reaches the thumb 81% (v19b 14%). The few millimetres v19b added between the thumb and index tips are gone, so a light pinch no longer needs a firmer squeeze. Pokes and resting hands on the poke round read as touching less often. Finger points, hand shape and the replays are as before or slightly better.\n\nKnown weak spots: on some of the new rounds a resting hand reads as touching more often than with v19b (up to about 40 points on small sets; a control model moves those rows by up to 25 points, so part of it is noise). The new rounds are one person's.",
+   "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 962, "replay_dim": 1229, "replay_lit": 1433, "found": 98.7, "landmark_px": 3.7,
+             "within5": 95.0, "shape_mm": 7.9, "side_ok": 96.7, "pinch_closed": 72.2},
+   "format": 1,
+   "rev": "03d7695fecb80f6cf8f3aa9321de130b5efd08b3",
+   "files": {
+    "NOTICE": "4d99bb37c00664a1b0ea07170bab1916460bc0a44ff817e3ccd32babbcfbaf11",
+    "hand.ncnn.bin": "b7c3d1be232725a5a143e2648858ec5aec9596c7b83c6a3c508479b04057e00c",
+    "hand.ncnn.param": "54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd",
+    "palm.ncnn.bin": "9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909",
+    "palm.ncnn.param": "c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "3393752d047bc3dd4e23fca47e3c29e4ae37c13be8dae1dae3412be55f4085f0"
+   }
+  },
+  {
+   "name": "v19b",
+   "title": "Frametop v19b",
+   "kind": "custom",
+   "status": "older",
+   "date": "2026-10-19",
+   "summary": "Taught by the bounty rounds' prompts: held pinches and middle-finger touches read closed far more often.",
+   "notes": "v13b-p1's landmark model trained further on v16b's data plus Frametop Hands contributions #15 (pokes), #16 (middle-finger taps) and #17 (card grabs). New: where a bounty round's prompt asked for a fingertip touch, training pulls those tips together, and where it asked for a resting hand, it keeps them apart. The palm detector is v13b-p1's, unchanged. Same networks as stock, so the same CPU cost.\n\nWhat to expect against v16b: on prompted acts held back from training, a held thumb-index pinch reads closed 58% of the time (v16b 21%) and a held thumb-middle touch 100% (v16b 33%). The replays track the same hands, and finger points and hand shape are as close as before. The held-out pinch number below is lower (69% against 80%) because it counts touches by the teacher model's labels, which miss many real touches; v16b followed them more closely.\n\nKnown weak spots: it reads the thumb and index tips a few millimetres further apart than v16b, so a light pinch may need a firmer squeeze, and a resting hand reads as touching a little more often for some people.",
+   "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 961, "replay_dim": 1225, "replay_lit": 1434, "found": 98.6, "landmark_px": 3.8,
+             "within5": 94.9, "shape_mm": 8.0, "side_ok": 96.7, "pinch_closed": 69.0},
+   "format": 1,
+   "rev": "52d3a657abcf0cef7db48f90c5fefb281ff4b5b7",
+   "files": {
+    "NOTICE": "96fc8914e0220e51222362d141e0495e3425081d9898c21899b63e68df358ca6",
+    "hand.ncnn.bin": "010f96a9316d0d935f2baf4951770130402bddc126b0066b4d8b3ba2754fdc9a",
+    "hand.ncnn.param": "54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd",
+    "palm.ncnn.bin": "9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909",
+    "palm.ncnn.param": "c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "3393752d047bc3dd4e23fca47e3c29e4ae37c13be8dae1dae3412be55f4085f0"
+   }
+  },
+  {
+   "name": "v16b",
+   "title": "Frametop v16b",
+   "kind": "custom",
+   "status": "older",
+   "date": "2026-10-16",
+   "summary": "v13b-p1 plus the pinch and tap bounty rounds: pinches and taps read closed more often.",
+   "notes": "v13b-p1's landmark model trained further with Frametop Hands contributions #12 (index taps), #13 (pinches) and #14. The palm detector is v13b-p1's, unchanged. Same networks as stock, so the same CPU cost.\n\nWhat to expect against v13b-p1: a thumb touching the index finger is read as touching more often (80% of held-out touches against 71%), so pinches and taps register more reliably. Finger points and hand shape are as close as before, and the replays track the same hands.\n\nKnown weak spots: a thumb touching the middle finger is still often read as a near miss, and empty views are taken for a hand slightly more often than with v13b-p1 (0.37% against 0.22% of empty crops).",
+   "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 960, "replay_dim": 1225, "replay_lit": 1434, "found": 98.7, "landmark_px": 3.8,
+             "within5": 94.7, "shape_mm": 8.1, "side_ok": 96.6, "pinch_closed": 80.0},
+   "format": 1,
+   "rev": "d96e56599b0af18fc05af2a0a4489985914b754a",
+   "files": {
+    "NOTICE": "0d31ad8d108fc01e9fc4c5612eb5a9b16d90f9a971e6677cafe4969c2388fc06",
+    "hand.ncnn.bin": "c602ad2344bd1676a628fc8ab4fca2f53574b9f12bc97c705f47762d23f5f941",
+    "hand.ncnn.param": "54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd",
+    "palm.ncnn.bin": "9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909",
+    "palm.ncnn.param": "c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "322fc0b146d301865592958ba4dd512bf249836816b578f0919a2f671f3f014c"
+   }
+  },
+  {
+   "name": "v13b-p1",
+   "title": "Frametop v13b-p1",
+   "kind": "custom",
+   "status": "older",
+   "date": "2026-10-14",
+   "summary": "Retrained on the Steam Frame's own cameras: about twice as many hands found in bright rooms as stock, and steadier fingers.",
+   "notes": "MediaPipe's palm detector and hand landmark model, retrained on the Frametop Hands dataset (contributions #3 to #7), the maintainer's recordings and flagged tracking failures. Same networks as stock, so the same CPU cost.\n\nWhat to expect against stock: hands are found far more often, most of all in bright rooms (twice as many tracked in the bright replay, 1.3 to 1.8 times in dim and lit ones), the finger points sit about a quarter closer, and the 3D hand shape is about 40% closer.\n\nKnown weak spot: a thumb touching the middle finger is often read as a near miss, so middle-finger pinches (right click) can need a firmer touch.",
+   "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 960, "replay_dim": 1224, "replay_lit": 1433, "found": 98.7, "landmark_px": 3.8,
+             "within5": 94.6, "shape_mm": 8.3, "side_ok": 96.5, "pinch_closed": 71.3},
+   "format": 1,
+   "rev": "41afd78fbd4527456fc4cbd840ffc9f39fdc939a",
+   "files": {
+    "NOTICE": "0e6b4fa8ea37665cb699abc36fcf1ee0ffaa63a78dfee788be6613dea6607f84",
+    "hand.ncnn.bin": "d6a6f00d845fb9ee490276d84b1e978da884361c372614546ed2b1b4d2f5c449",
+    "hand.ncnn.param": "54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd",
+    "palm.ncnn.bin": "9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909",
+    "palm.ncnn.param": "c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "29c6c5460e47412a9a37b22d6a7c8a9ed266a872bbcce93d3867f9e56cfe0ca1"
+   }
+  },
+  {
+   "name": "stock",
+   "title": "MediaPipe (stock, off the shelf)",
+   "kind": "stock",
+   "status": "builtin",
+   "summary": "Google's original palm and hand models, unchanged. Comes with Frametop.",
+   "notes": "Trained on colour photos from ordinary lenses. The Frame's tracking cameras are infrared, monochrome and fisheye, so these lose hands often, most of all in bright rooms. Useful to compare, or to go back to if a retrained version tracks worse for you.",
+   "cost": "Two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 442, "replay_dim": 912, "replay_lit": 782, "found": 94.8, "landmark_px": 5.2,
+             "within5": 88.5, "shape_mm": 14.3, "side_ok": 93.8, "pinch_closed": 7.8}
+  }
+ ]
+}

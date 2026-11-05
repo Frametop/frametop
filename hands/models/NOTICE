@@ -10,3 +10,7 @@ Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
 Changes made here: converted to ncnn with pnnx, with the palm detector's channel pads
 rewritten as ncnn Padding layers, and quantized to 8 bits (the *-int8.ncnn.* files) with
 ncnn's tools.
+
+hands/models.sh fetches fine-tuned versions of the same two models into student/ (not in this
+repository): their weights are licensed CC BY-NC 4.0, not Apache-2.0 or MIT; see student/LICENSE and
+student/README.md once fetched, or https://huggingface.co/DeeJanuz/frametop-hands-models.

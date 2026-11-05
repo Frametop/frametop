@@ -1,6 +1,6 @@
-# Remote displays (exploration)
+# Remote displays: design notes
 
-Status: exploration. Spike S1 is done; nothing in Frametop has changed yet. Branch `remote-displays`, written 2026-10-06.
+These are the notes from building remote displays, from the first exploration (2026-10-06) on: what the Frame's hardware gives us, the spikes, and the decisions. To set a computer up, see [Remote displays in the README](../README.md#remote-displays) and the host kits: [Windows](../host/windows/README.md), [macOS](../host/macos/README.md), [Linux](../host/linux/README.md). How the pieces work now is in [reference.md](reference.md#frametop-remote-displays).
 
 The idea: show desktops streamed from other machines as Frametop panels that behave like the native screens. They get placement, curve, pinning, layouts, lasers, gaze, and attention-based frame rates. The target is up to 5 remote displays from 2 hosts, with no more headset overhead than 5 native screens.
 
@@ -33,7 +33,7 @@ Five 1440p displays fit at full rate with room left. Five 4K displays only fit a
 
 ### The planned setup
 
-Two hosts that share the same two desk monitors: a Mac (14-inch MacBook Pro) with those two plus its built-in display, and the test PC (Windows, RTX 5090) with the two. Windows and Linux hosts run Vibepollo, which streams real displays and creates virtual ones on demand. The Mac runs Sunshine and is limited to one display for now (see "Host side"). At 60 fps:
+Two hosts that share the same two desk monitors: a Mac (14-inch MacBook Pro) with those two plus its built-in display, and the test PC (Windows, RTX 5090) with the two. Windows and Linux hosts run Vibepollo, which streams real displays and creates virtual ones on demand. The Mac runs Sunshine, which began with one display; it now runs one instance per display (see "Host side"). At 60 fps:
 
 | Display | Share of the decoder |
 |---|---|
@@ -175,7 +175,7 @@ The requirement: each host streams its real displays, and virtual displays it cr
 |---|---|---|
 | Windows | Vibepollo | 1 main session (real or virtual) + up to 4 virtual Remote Monitors |
 | Linux (Arch, CachyOS; beta) | Vibepollo | The same, with at most 4 virtual displays at once |
-| macOS | Sunshine | 1, the Mac's main display, for now |
+| macOS | Sunshine | Every real display, one Sunshine instance each (`host/macos`); no virtual displays |
 
 ### Windows and Linux: Vibepollo
 
@@ -210,19 +210,15 @@ The config folder is admin-only, so the change is a script for the user to run (
 
 **Risk.** Vibepollo is new, moves fast, and has one maintainer, and its README says about 99% of its code is AI-generated. Frametop depends only on its Moonlight-protocol behaviour and the Remote Monitor app ids, so on Windows Apollo (virtual displays through the SudoVDA driver) or plain Sunshine (real displays) stay as fallbacks.
 
-### macOS: Sunshine, one display for now
+### macOS: Sunshine, one instance per display
 
-Vibepollo has no macOS build. Sunshine (v2026.914, labelled experimental on macOS) is the only Moonlight-protocol host for the Mac, so the Mac streams one display: its main display, from one Sunshine instance. The reasons:
+Vibepollo has no macOS build. Sunshine (labelled experimental on macOS) is the only Moonlight-protocol host for the Mac. One Sunshine streams one display, so the Mac runs one instance per real display, each with its own config file, ports (`port` 47989 + 100·N) and `output_name` (the display's CGDirectDisplayID). `host/macos/frametop-host-setup.sh` sets them up (see "The Mac" below). Sunshine can't create virtual displays on macOS, and no PR is open for it.
 
-- Since v2026.906, absolute mouse input only reaches the main display (Sunshine #5733). Any other display would show but couldn't be clicked.
-- Nobody reports running several Sunshine instances on one Mac yet.
-- Sunshine can't create virtual displays on macOS.
+- Absolute mouse input reached only the main display from v2026.906 (Sunshine #5733). libvirtualhid #145 and Sunshine #5739 fixed it on 2026-10-09, first in the pre-release v2026.1010.141104, which the host setup pins until a release has it.
+- Capture is at backing pixel size, so the built-in display streams at 3024x1964. Closing the lid removes the built-in display, so a stream of it ends. Sunshine now keeps a display awake while it captures it (#5509 was the stall when one slept).
+- Sound comes from a Core Audio tap (macOS 14+), so nothing like BlackHole is needed. Every instance carries it; ft-stream's per-address lock plays one.
 
-The main display is the one with the menu bar (System Settings → Displays). Capture is at backing pixel size, so the built-in display streams at 3024x1964. Closing the lid removes the built-in display, so a stream of it ends. Capture stalls if the display sleeps mid-stream (#5509).
-
-One display can still reach the encoder's limit. Sunshine forces VideoToolbox's low-latency mode, which roughly halves throughput (#5814); an M4 Pro managed 0.36-0.46 Gpix/s in that mode. The super ultrawide at 60 fps is 0.44 Gpix/s, so full-motion video on it may need a lower fps or a smaller stream. The other two displays need 0.30 and 0.36 Gpix/s.
-
-**What would lift the limit.** The mouse fix is libvirtualhid PR #145 ("target configured mouse viewport", open), which Sunshine's draft PR #5739 pulls in. Once it ships, spike S4 tries one Sunshine instance per display (own config file, `port` about 100 apart, `output_name`) and BetterDisplay virtual displays switched on by `global_prep_cmd`. Open PR #5817 (ScreenCaptureKit + OBS's VideoToolbox encoder) may raise the encoder limit. Helping #145 along upstream is the one Mac contribution worth making.
+Full-motion video can still reach the encoder's limit. Sunshine forces VideoToolbox's low-latency mode, which roughly halves throughput (#5814); an M4 Pro managed 0.36-0.46 Gpix/s in that mode. The super ultrawide at 60 fps is 0.44 Gpix/s; the test Mac is an M3 Max, with two encode engines. Open PR #5817 (ScreenCaptureKit + OBS's VideoToolbox encoder) may raise the limit. Its capture (AVFoundation) also sends 30-55 fps of a still desktop, not `minimum_fps_target`'s 1 fps, at a low bitrate (1-6 Mbit/s).
 
 ### What stock hosts cost us
 
@@ -232,8 +228,8 @@ One display can still reach the encoder's limit. Sunshine forces VideoToolbox's 
 | One stream per display | Five ft-stream processes, connections, and client pairings on the Frame | Measure the CPU (S3) |
 | One real display per Vibepollo install | A second real display needs a second host instance | Use virtual displays; S3 tries a second instance on Windows |
 | Cursor drawn into the video | Lags the laser by a round trip; each mouse move over a still page becomes a video frame | Accept |
-| Mac: one display | Sunshine's mouse reaches only the main display, and there are no virtual displays | Upstream fix in progress, then S4 |
-| Mac encoder | Full-motion video on the super ultrawide at 60 fps is at the limit | Lower fps or size for that stream |
+| Mac: an instance per display | Each display pairs on its own, with the Web UI login (no tokens); no virtual displays | Remote Displays pairs all the picked displays from one sign-in |
+| Mac encoder | Full-motion video on the super ultrawide at 60 fps is at the limit; a still desktop still streams 30-55 fps | Lower fps or size for that stream; ScreenCaptureKit (#5817) upstream |
 
 What Frametop maintains: ft-stream (pairing, decoder, keyframe sampling, input mapping, Remote Monitor launch and resume; the protocol itself is moonlight-common-c's), the remote screen type in ft-screens, the layout and settings changes, and host setup notes or scripts.
 
@@ -260,7 +256,7 @@ Spikes on the Frame run through `frame-job --local` as a standalone test overlay
 
 S1 passes, with one change to the plan: a GPU pass between the decoder and SteamVR.
 
-`stream/spike/ft-dectest` (built by `stream/build.sh`) decodes a clip with the V4L2 stateful API and hands each picture to SteamVR with `ImportDmabuf`, as the remote screen type would. Clips: a colour test pattern (`stream/spike/pattern.py`) with a moving box, 10 s at 60 fps, encoded by NVENC HEVC on the test PC (`-preset p1 -tune ull -bf 0`, as Sunshine-style streaming), in BT.709 and BT.601, limited and full range. The in-headset runs used frame-testbench to hold the worn state and a still pose, with nobody wearing the headset.
+`stream/spike/ft-dectest` (built by `stream/build.sh --spikes`) decodes a clip with the V4L2 stateful API and hands each picture to SteamVR with `ImportDmabuf`, as the remote screen type would. Clips: a colour test pattern (`stream/spike/pattern.py`) with a moving box, 10 s at 60 fps, encoded by NVENC HEVC on the test PC (`-preset p1 -tune ull -bf 0`, as Sunshine-style streaming), in BT.709 and BT.601, limited and full range. The in-headset runs used frame-testbench to hold the worn state and a still pose, with nobody wearing the headset.
 
 **Decoding.**
 
@@ -309,7 +305,7 @@ The benchmark is S5 against the same scene on remote displays: total Frame CPU (
 
 ### S3 results so far (2026-10-07)
 
-`stream/spike/ft-streamtest.cpp` is a Moonlight client for one display: moonlight-common-c and libgamestream from moonlight-embedded (pinned in `stream/build.sh`), S1's decoder and GPU pass (`spike/iris.h`), and a SteamVR overlay. It pairs through the host's API token, launches the primary app or a Remote Monitor, and reports every 2 s. Tests ran from the test PC over the LAN, with the headset held by frame-testbench.
+`stream/spike/ft-streamtest.cpp` is a Moonlight client for one display: moonlight-common-c and libgamestream from moonlight-embedded (pinned in `stream/build.sh`), S1's decoder and GPU pass (`stream/iris.h`, which ft-stream uses too), the host side ft-stream uses (`stream/host.cpp`), and a SteamVR overlay. It pairs through the host's API token, launches the primary app or a Remote Monitor, and reports every 2 s. Tests ran from the test PC over the LAN, with the headset held by frame-testbench.
 
 **The primary display (5120x1440 at 60 fps, HEVC, 50 Mbit/s asked).** It works end to end. The picture in the headset is right, colours included. The test PC's primary is an HDR monitor, and Vibepollo sends it as SDR Rec. 709, as asked.
 
@@ -380,7 +376,7 @@ Windows' "Remember window locations based on monitor connection" moves windows o
 
 The user decided remote displays are Frametop displays, with the same controls as the desktop's screens and their places saved in profiles. The spike's standalone overlays are replaced.
 
-**What's built (branch `remote-displays`, uncommitted):**
+**What's built:**
 - `stream/ft-stream.cpp` is the per-display helper. It pairs, launches and decodes, and converts into a ring of three RGBA buffers. It hands their dmabufs to ft-screens once, then says which buffer holds each new picture. The protocol is in its header comment: frames one way, then release, attention, pointer, keys and blur the other way. `stream/host.cpp` holds the pairing and launch code ft-streamtest had.
 - `screens/remote.c` starts one ft-stream per remote screen with a socket pair, restarts a stream that ends (2 s, then backing off to 30 s), shows its frames through `ft_vr_screen_present`, and sends it the panel's input and attention. Commands: `remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [label]` (`ok restored` when its panel is back where it was, below), `remote <N> stop`, `remote <N> info` (the stream's whole state, such as `lost can't connect`) and `remotes`. Remote screens are numbered from 101, so every other command (`place`, `width`, `curve`, `pin`, `get`, `conceal`) works on them as it is. `screens` leaves them out, because ft-layout, Display Settings and ft-floatd count KWin's outputs with it.
 - `vr.cpp` gives a remote screen a screen's panel (`frametop.remote.N`) with its controls. A press on a remote screen dragged onto another one is routed there (`UpdateRemoteDrag`). SteamVR keeps sending the moves to the panel the press began on, as if its surface went on past its edges. So every tick the pressing laser is hit-tested against all the remote screens, and the nearest one it meets takes the moves. On the panel the press began on, SteamVR's own moves count only while that panel is the nearest. Before this (2026-10-07), that panel's carried-on surface passed in front of or behind the other panel, and its moves pulled the host's pointer back: drags across worked only some of the time. The release comes up where the host's pointer is, through the stream the press went down on (Vibepollo takes a release only from the client that pressed).
@@ -404,7 +400,7 @@ The user decided remote displays are Frametop displays, with the same controls a
   - A profile keeps the displays connected when it's saved, like the apps open then: their places and hidden state by id (`profiles[NAME]["remote"]`). Opening it (`use`, `open`, desktop start), or arranging (`apply`, Reset Screen Layout) while it's the profile in use, connects each of them whose host answers on Vibepollo's Web UI port, at its address or its dongle's as its route allows, and puts it back where it was saved. A host that doesn't answer is skipped, and its displays stay disconnected. Displays the profile doesn't have stay as they are: a profile connects, but never disconnects (user decision, 2026-10-08).
   - `hide`/`show N` take their numbers.
   - `ft-layout remote list|monitors|add|set|connect|disconnect|remove`: `add` pairs the display's client with the host's token, and `remove` unpairs it (the host stays). `disconnect` sets the display's `off` flag and stops its stream; apply, profiles and desktop start skip it until `connect`.
-- ft-screens starts a host's streams one after another. Three started at once made Vibepollo refuse some ("Another stream operation is still running"), and the captures that started while the Remote Monitor appeared got no picture.
+- ft-screens starts a host's streams one after another. Three started at once made Vibepollo refuse some ("Another stream operation is still running"), and the captures that started while the Remote Monitor appeared got no picture. Nor does it start one while a stream of the same display or host is still on its way out (releasing its Remote Monitor before it exits): a display stopped and started again at once, as a route change does, had two ft-streams. One that hasn't ended 20 s after SIGTERM gets SIGKILL.
 - Frametop Remote Displays (`remote-displays/`) is the app for them. It was a Display Settings tab at first; the user wanted an app of its own for the connections. Display Settings' Screens page has a button that opens it.
   - Add a host with its token (written to `~/.local/share/frametop-stream/hosts/ADDRESS.token`, mode 0600). Whether it answers on its Web UI port (47990) is checked every 15 s.
   - Add a display: one of the host's monitors from its API, or a virtual one.
@@ -451,15 +447,42 @@ The user decided remote displays are Frametop displays, with the same controls a
 - After Vibepollo restarted, a stream checked the dongle in 300 ms, too soon, and went over the network; ft-stream now gives it a second.
 
 **Frametop's build released (2026-10-09):**
-- Release [`frametop-2.0.0-1`](https://github.com/Frametop/frametop-vibepollo/releases/tag/frametop-2.0.0-1) of Frametop/frametop-vibepollo has `sunshine.exe` and the Arch package (`pacman -U`), each with its `.sha256`. The fork's CI (`frametop-build.yml`, Depot's runners) builds them from the tag and publishes them; a `frametop-*` tag is what makes a release. The tag is the source.
+- Release [`frametop-2.0.0-2`](https://github.com/Frametop/frametop-vibepollo/releases/tag/frametop-2.0.0-2) of Frametop/frametop-vibepollo (2026-10-14; `frametop-2.0.0-1` was the first) has `sunshine.exe` and the Arch package (`pacman -U`), each with its `.sha256`. The fork's CI (`frametop-build.yml`, Depot's runners) builds them from the tag and publishes them; a `frametop-*` tag is what makes a release. The tag is the source.
 - The host setup's `$BuildUrl` points at that `sunshine.exe`, so a PC needs only `host/windows`. It replaces the original, the hand-built `2f032252`, and the first CI build (`a84b6cfc`).
 - New in it: a Frametop display stream that asks for SDR turns the display's HDR off while it captures it, and back on when the stream ends (with `dd_hdr_option` automatic, Vibepollo's default). The test PC's HDR monitor looked washed out in SDR: Vibepollo's conversion clips at 80 nits while Windows draws SDR content at its SDR white level (240 nits there), and scaling for that left the colours heavily oversaturated. Displays it turned off are listed in `config\frametop_display_hdr.json` until they're back on, so the next start turns them back on after a crash or a forced stop. On the test PC's dev build: HDR off 0.4 s after the stream started, 8-bit capture, back on at the end, off again on a reconnect.
 - Tested on the test PC: with the first CI build installed and only `host/windows` in a folder, `-Check` downloaded the release and matched its SHA-256, and the run backed up, swapped and restarted Vibepollo; the Web UI answered.
+
+**The monitor follows the stream's resolution (frametop-vibepollo, 2026-10-10):**
+- Before, a Frametop display stream captured the monitor at its own resolution and Vibepollo fit that picture into the stream's size, so a stream smaller than the monitor, or of another shape, never showed its desktop pixel for pixel.
+- Now the stream switches the monitor to the stream's width and height, at the monitor's own refresh rate, before capture starts, and puts it back when the stream ends, the way `dd_resolution_option` automatic (Vibepollo's default) matches a main session's display to the client. With it set to manual or disabled, nothing changes. A monitor without that mode gets its closest mode with the same shape, and the stream scales that; one with no mode of that shape keeps its own and is scaled as before.
+- The change is temporary: Windows' saved display settings stay as they were, so a reboot undoes it too. Windows may move the other monitors to keep them touching one that changed size, so every monitor's place is noted before the first change and put back after the last, in one change that either fully applies or doesn't.
+- Two streams of the same monitor share the first one's mode. HDR (above) goes off after the mode changes and back on before it's put back.
+- Monitors it changed are listed in `config\frametop_display_mode.json` (each one's own mode and the one it set, and the places) until they're back, so the next start puts them back after a crash or a forced stop. One someone has changed since keeps theirs.
+- In Frametop nothing changes: ft-stream already asks for the size set in Remote Displays, and changing it starts the stream over, which switches the monitor again. The note under a monitor's stream settings says what happens.
+
+**The Mac: one Sunshine instance per display (2026-10-10, branch `mac-host`):**
+- `host/macos/frametop-host-setup.sh` (or `Setup Frametop host.command`): installs the pinned Sunshine pre-release (SHA-256 checked, notarized by LizardByte), lists the displays (`displays.js`, JavaScript for Automation, no compiler), and writes an instance per display in `~/Library/Application Support/Frametop/sunshine/instance-N`, the main display's first, each started at login by the LaunchAgent `frametop.sunshine.N`. Its settings: `port`, `sunshine_name` "COMPUTER: DISPLAY (WxH)", its own state and apps files, `minimum_fps_target = 1`, and the menu bar icon on the first only. The rest of each `sunshine.conf` (Web UI changes) is kept on a rerun. `--check`, `--undo` (removes the LaunchAgents; settings, pairings and Sunshine stay), `--set-login`, `--skip-login`.
+- Turning them off and on (2026-10-12): Frametop Streams, a menu bar icon, lists the displays with a check by each one that's on. A click turns one on or off, Turn All On and Turn All Off do every one, and the icon dims while they're all off. It's `Frametop Streams.applescript`, a stay-open AppleScriptObjC app (`NSStatusItem`, so no compiler) that the setup compiles into `~/Applications`, marks `LSUIElement` (no Dock icon), signs again ad hoc after that change, and starts at login with the LaunchAgent `frametop.streams`. Quit from its menu, it stays quit until the next login. It runs `ft-sunshine off|on|status [--tsv] [N...]`, in the background for a change, with the output in `~/Library/Logs/Frametop/streams.log`. `ft-sunshine` is installed next to `ft-sunshine-instance` and linked into `~/.local/bin` when there is one. Off disables each instance's LaunchAgent (`launchctl disable`) and stops it, so it stays off through logins. On enables it and starts it, or starts one quit from Sunshine's own menu bar icon, which launchd leaves stopped after a clean exit. Rerunning the setup turns them all on. The Frame's streams of the Mac keep trying while it's off and reconnect after on. Tested with throwaway LaunchAgents serving fake instances, through the menu (UI scripting) and `ft-sunshine`: on, on again (the running one kept its pid), off, on after off, one display, a stopped one, unknown numbers, a display that isn't connected, and the app started by its LaunchAgent and quit from its menu. On the M3 Max: the setup from the kit zip, unpacked with a download's quarantine (the installed scripts keep it, and run anyway: launchd and the app run them through bash and sh), which turned the three on; then Turn All Off, Turn All On and Turn All Off again from the menu, each done within 3 s.
+- The kit as a release (2026-10-12): [`macos-host-1`](https://github.com/Frametop/frametop/releases/tag/macos-host-1) of Frametop/frametop has `frametop-macos-host-1.zip`, `host/macos` of 188f107 in a `frametop-macos-host` folder (`zip -qr -X`), and its `.sha256`. Its notes are `host/macos/README.md` without the title, plus the files. It isn't marked Latest and has no `Frametop.zip`, so get.sh skips it: stable takes `releases/latest`, experimental the newest release with a `Frametop.zip`. Its tag doesn't start with `v`, so `release.yml` doesn't build it. A new kit is a new release, `macos-host-N`, with the zip renamed to match.
+- An instance is tied to its monitor by vendor, model and serial, not to a display id: `ft-sunshine-instance` looks the id up at every start and passes `output_name=ID`. While the monitor is unplugged it doesn't start Sunshine, which would fall back to the main display, and launchd tries again.
+- One certificate for all the instances, so Remote Displays pins one key per Mac; one Web UI login file for all, kept from an earlier Sunshine install if there was one. An earlier Homebrew Sunshine's LaunchAgent (the same ports) is turned off, and back on with `--undo`.
+- Screen Recording and Accessibility are granted by hand, once for all the instances: macOS lists them as Sunshine (the LaunchAgent runs a bash script that execs it; `AssociatedBundleIdentifiers` makes Login Items say Sunshine too). Sunshine started from a terminal gets that terminal's grants instead.
+- Without Accessibility (Post Event access) the pointer still moves, since libvirtualhid also warps it (`CGWarpMouseCursorPosition`, no permission needed), but clicks, scrolling and keys go only through `CGEventPost`, which macOS drops without a word: every Frame input method moved the pointer and clicked nothing, while the Mac's own trackpad worked. Sunshine notes at each start whether it had each permission (`defaults read dev.lizardbyte.app.Sunshine inputPostEventPermissionState`, 2 = granted, 1 = asked and not granted) and asks only once, so a grant macOS lost track of, or one given to an older Homebrew Sunshine (a separate app to macOS), stays broken with nothing asking again. The setup reports both permissions at the end and with `--check`. After the first instance's restart, if Accessibility is still missing, it offers to clear Sunshine's records (`tccutil reset Accessibility` and `PostEvent` for its bundle id, and that note) and restart the instance so macOS asks again, which fixed the test Mac (2026-10-10).
+- Frametop side: a display has a `port` when its instance isn't on 47989, and ft-stream takes `HOST:PORT`, so ft-screens passes it through as it is. The token, pin and audio lock stay per address. Given HOST alone, ft-stream takes its display's port from the layout, by its client: an ft-layout from before ports (an older release's Reset Screen Layout and profile launchers) restarted the Mac's streams at HOST, the instance on 47989, where they froze unpaired and their pointer went to the main display. `host_answers` checks the displays' ports. Remote Displays tries `/api/token` at sign-in; a bare 400 "Bad Request" (upstream Sunshine's answer to a path it doesn't have, before any login check) or a 404 means plain Sunshine, and the login is checked on `/api/clients/list`. It's kept in memory only, passed on stdin to `ft-layout remote add --port P --login` and on to `ft-stream pair --login` for each display picked, then forgotten. Upstream Sunshine (v2026.1010) lists a waiting pairing request with an id (`GET /api/pin`); ft-stream approves its own (libgamestream's device name "roth", from its own address) with `POST /api/pin {pairing_id, pin, name}`. The login is checked first: a wrong password's request, left waiting, blocked the next try. There are no permissions to grant. Add computer merges the instances' mDNS entries ("Mac (2)") into one computer, and Add displays lists the instances from their serverinfo on ports 47989 + 100·N.
+- Tested on the M3 Max (macOS 26.6.2: built-in 3024x1964, MPG491CX OLED 5120x1440, LC34G55T 3440x1440): the setup with `--check`, a first run and a rerun; the three instances answer from the Frame. With throwaway test instances (their own login, removed after): pairing with a wrong password then the right one; `ft-layout remote add --port --login` into a scratch layout; streams through a stand-in for ft-screens, the three at once (no losses; 35, 52 and 36 fps of still desktops, 3-9% of a Frame core each, about 6% CPU for Sunshine on the Mac for the OLED); the host's sound; a pointer move to two corners of the LC34G55T, not the main display, landing within a pixel of where it should. Not tested: the Remote Displays app itself, the live desktop, drags across the Mac's displays (separate processes; the release goes through the stream the press went down on), full-motion video's encode rate, replugging a monitor.
 
 **Tested in the live desktop (frame-testbench, the 3D mouse through `@ft_pointer_helper`, 2026-10-07):**
 - An Explorer window carried by its title bar from the Remote Monitor to the OLED stayed there, and carried back, stayed there too. The log showed one change of screen each way.
 - Disconnect, connect: the panel came back where it was, at its width. Connect in a new run with the headset off: placed from screen 1's anchor.
 - Windows rescales a window that moves between displays with different scaling, so the point you held moves on the window. A second drag from the same spot can land on the address bar instead of the title bar. That's Windows, not the routing.
+
+**The Frame's microphone on the host (2026-10-18):**
+- Send my microphone on a host's card (`"mic": true` in its layout entry, `ft-layout remote host NAME mic=on|off`, off by default) sends the Frame's microphone to it. The stream that plays the host's sound (the audio lock's holder) records PipeWire's default source, which on the Frame runs through echo cancelling, so a host gets it once however many displays stream. It reads the setting every 3 s, so switching needs no restart. Its 10 s report adds `mic N packets/s`.
+- Moonlight has no microphone. `stream/moonlight-mic.patch` adds `LiSendMicrophoneOpusData` to moonlight-common-c: packet type 0x3003 with `[sequence (2 bytes, big-endian), channel 1, flags 0]` then the Opus packet, the layout of Vibepollo's draft PR #169. It refuses (-1) when the control stream isn't encrypted, so the microphone never goes in the clear. Mono, 48 kHz, 20 ms packets, 64 kbit/s, Opus VOIP with in-band FEC.
+- ENet's throttle drops unreliable packets whenever round trips wobble. Over Wi-Fi beside three video streams it dropped 27% of them. The microphone now goes reliable, on ENet channel 0x07 of its own (moonlight-common-c uses 0x00-0x06, and 0x10 up for controllers), so a resent packet holds up only the microphone. Loss went to 0.
+- The host side is in our fork (`frametop/mic`, `src/frametop_mic*.cpp`). It takes the packets only on an encrypted control stream from a client allowed keyboard input, one client at a time (another waits and tries every 2 s). It decodes them on the control thread, hides up to 5 lost packets in a row (the last from FEC) and starts over after longer gaps, and plays them on a thread of its own. On Windows that's WASAPI into "Speakers (Steam Streaming Microphone)", which apps record as "Microphone (Steam Streaming Microphone)". The driver comes with Steam; the build installs `SteamStreamingMicrophone.inf` once if it's missing and puts the default devices back after. That capture endpoint adds +30 dB at Windows' default level (its range goes to +30), 32 times too loud, so the build plays that much quieter and follows the level when it changes.
+- On Linux the fork makes a "Frametop Microphone" source (`module-pipe-source`), but only when Sunshine runs as the desktop user. Vibepollo's packaged Linux service runs as its own user and reaches the desktop's sound only through its root session broker (`pactl`, `parec`), which has no operation for this. There it logs that once and does nothing. A broker operation would fix it, once a Linux host can test it.
+- Tested on the test PC with a 440 Hz test tone from the Frame instead of the microphone: every packet arrived encrypted, and a recorder on "Microphone (Steam Streaming Microphone)" heard the level sent (RMS 0.345 sent, 0.345 recorded), with no gaps. The Linux source was tested here on PipeWire. Not tested yet: a real voice in a real app, by ear, in the headset.
 
 **Still to do:**
 - A headset test of all of it in the live desktop:
@@ -474,13 +497,12 @@ The user decided remote displays are Frametop displays, with the same controls a
 - Find the dongle again if its address changes (the hotspot's DHCP), and a host whose own address changes (the token and pin files are named by it).
 - "Approve on the PC" instead of the password (our Vibepollo fork), later if wanted.
 - A per-display mouse mode (relative, for games).
+- The host's own keyboard and mouse driving Frametop while the headset is worn: [host-input.md](host-input.md).
 - A picture for a stream that's connecting or lost.
-- The installer doesn't build ft-stream yet (`stream/build.sh`), and `uninstall.sh` leaves `~/.local/share/frametop-stream` (the client keys and host tokens).
-- For the test, the pointer and gaze services run this branch's builds through drop-ins (`~/.config/systemd/user/frametop-{pointer,gaze}.service.d/remote-displays-worktree.conf`; `gaze/tracker/build` here links to the installed tracker's). Remove them when this is merged and installed.
 
 ## Open questions
 
 - Which of the test PC's two desk monitors is the real one (the main session)?
-- The Mac's chip (Max chips have two video encode engines) and BetterDisplay Pro matter only once the Mac goes past one display.
+- Mac virtual displays: BetterDisplay switched on by `global_prep_cmd`, or a small helper on the private `CGVirtualDisplay` API. Not needed for v1.
 - Audio: none, the focused display's host, or a fixed one?
 - Remote displays outside the desktop: should they also show over games, where the decoder is shared with Steam Link VR?

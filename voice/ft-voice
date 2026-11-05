@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""ft-voice: control Frametop Voice (ft-voiced, frametop-voice.service).
+
+  ft-voice toggle|start|stop|cancel   dictation
+  ft-voice status                     what it's doing, as JSON
+  ft-voice type TEXT                  type TEXT where typing goes (through the input relay)
+  ft-voice wake [on|off|toggle]       the wake word until the service restarts (no argument: as if heard)
+  ft-voice reload                     read the settings again
+  ft-voice events                     follow what it does, one JSON object a line
+"""
+import os
+import socket
+import sys
+from pathlib import Path
+
+# Not $XDG_RUNTIME_DIR: Frametop's desktop points it at its own directory.
+path = Path(f"/run/user/{os.getuid()}") / "frametop-voice/control.sock"
+if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+    sys.exit(__doc__)
+sock = socket.socket(socket.AF_UNIX)
+try:
+    sock.connect(str(path))
+except OSError as err:
+    sys.exit(f"Frametop Voice isn't running ({path}: {err}); start it with: systemctl --user start frametop-voice")
+sock.sendall((" ".join(sys.argv[1:]) + "\n").encode())
+f = sock.makefile()
+if sys.argv[1] == "events":
+    for line in f:
+        print(line, end="", flush=True)
+else:
+    print(f.readline(), end="")

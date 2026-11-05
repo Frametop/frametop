@@ -26,9 +26,11 @@ through kwriteconfig6.
 import argparse
 import os
 import re
-import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "conf"))
+import ft_store  # noqa: E402  (files written whole or not at all)
 
 EDGES = {3: "top", 4: "bottom", 5: "left", 6: "right"}  # Plasma::Types::Location
 SYSTRAY = "org.kde.plasma.private.systemtray"
@@ -100,21 +102,10 @@ def default_screens():
 
 
 def backup(path, dst):
-    """Copy path to dst whole or not at all. The copy goes to dst.tmp, reaches the disk, and
-    only then takes dst's name, so a copy cut off partway (a full disk, a crash, the battery)
-    never leaves a short dst behind, and a dst that's there already stays as it was."""
-    tmp = dst + ".tmp"
-    try:
-        shutil.copy2(path, tmp)
-        with open(tmp, "rb") as f:
-            os.fsync(f.fileno())
-        os.replace(tmp, dst)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    """Copy path to dst whole or not at all (ft_store.copy_file: a temp file of its own, on the
+    disk before it takes dst's name), so a copy cut off partway (a full disk, a crash, the
+    battery) never leaves a short dst behind, and a dst that's there already stays as it was."""
+    ft_store.copy_file(path, dst)
 
 
 def main(argv):

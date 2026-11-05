@@ -6,6 +6,16 @@
 //            [--no-publish] [--no-gestures] [--record DIR] [--sides auto|0|1] [--cams auto|mono|color|all] ...
 //            (--help lists them all)
 //
+// Parked (hand interaction in VR games): while run_dir/park exists (/run/user/UID/frametop-hands/park;
+// the input relay makes it when Frametop pauses for a game and removes it when the dashboard opens or
+// Frametop resumes), ft-hands processes no frames: the models stay loaded, the hands file says no
+// hands, and a gesture down ends, as lost. It writes "0" to run_dir/hands-want every second, so
+// ft-camd stops copying the mono cameras' frames meanwhile (it copies again 3 s after the last
+// write). Unparked, it tracks again from a palm search (about 200 ms). Not while recording.
+// The testbench (testbench/, a development tool that never ships) parks it the same way while it
+// publishes fake hands: through $XDG_RUNTIME_DIR/frametop-testbench/hands, which it touches every
+// second. One older than 3 s doesn't count, so a crashed testbench lets go by itself.
+//
 // --no-gestures: hands for the cutouts only. No pinch or grip detection, so nothing reaches
 // the pointer and a closing hand doesn't raise the rate; the gestures file is removed.
 //
@@ -38,8 +48,21 @@
 // HANDS_CAMERAS, HANDS_BRIGHT, HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT (which
 // colour camera is passthrough_left: color_video0 or color_video3), HANDS_COLOR_CROP
 // (subtract or none: tools/check_color.py tells both), HANDS_MISREAD_GUARD (0 or 1: the
-// tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODELS (as
-// --models: a folder with palm.ncnn.* and hand.ncnn.*, e.g. fine-tuned ones).
+// tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODEL (latest,
+// stock, or a version's name: models/catalog.py), HANDS_MODELS (as --models: a folder with palm.ncnn.*
+// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_REACQUIRE (seconds
+// the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
+// hands are one left and one right, Tracker::set_pair_sides), HANDS_PINCH_DIP (0 or 1: pinches also
+// begin on a sharp dip of the thumb-index distance, PinchParams::dip), HANDS_PINCH_FIST_CURL (1.2; 0 off:
+// no pinch begins while the index and middle are curled under this, PinchParams::fist_curl).
+//
+// Flags (track/flagbuf.h; HANDS_FLAG_BUFFER, default 1): ft-hands keeps the last HANDS_FLAG_SECONDS
+// (12) of hand crops and its output in RAM (at most HANDS_FLAG_MB, 80, of crops HANDS_FLAG_CROP, 224
+// px, a side), and `ft-handsctl flag [note]` writes them and the next 2 s to a folder for frame-hands'
+// offline tools. The request is run_dir/flag (key=value lines: dir, note, said_unix, flag_unix),
+// checked 4 times a second and removed when taken; the folder's manifest.json is written last.
+#include "../../conf/ft_conf.h"
+#include "flagbuf.h"
 #include "io.h"
 #include "pinch.h"
 #include "record.h"
@@ -51,6 +74,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <ctime>
 #include <memory>
@@ -130,23 +154,21 @@ const char *camera_for_pipe(int node) {
     return nullptr;
 }
 
-// A setting from ~/.config/frametop.conf, or FT_<key> from the environment; "" if unset.
-std::string setting(const std::string &key) {
-    if (const char *v = std::getenv(("FT_" + key).c_str())) return v;
-    const char *home = std::getenv("HOME");
-    std::ifstream in(std::string(home ? home : "") + "/.config/frametop.conf");
-    std::string line, value;
-    auto trim = [](std::string s) {
-        s.erase(0, s.find_first_not_of(" \t\"'"));
-        s.erase(s.find_last_not_of(" \t\"'") + 1);
-        return s;
-    };
-    while (std::getline(in, line)) {
-        line = line.substr(0, line.find('#'));
-        const auto eq = line.find('=');
-        if (eq != std::string::npos && trim(line.substr(0, eq)) == key) value = trim(line.substr(eq + 1));
+// A setting from ~/.config/frametop.conf (docs/config.md), or FT_<key> from the environment; "" if unset.
+std::string setting(const std::string &key) { return ft_conf::Setting(key.c_str(), ""); }
+
+// A number setting into v: unset leaves it, and a value that isn't a number (atof's 0 before)
+// warns and leaves it too (docs/config.md). True when it was set.
+bool setting_number(const std::string &key, double &v) {
+    const std::string t = setting(key);
+    double x;
+    if (t.empty()) return false;
+    if (!ft_conf_number(t.c_str(), &x)) {
+        std::fprintf(stderr, "frametop.conf: %s=%s isn't a number; using %g\n", key.c_str(), t.c_str(), v);
+        return false;
     }
-    return value;
+    v = x;
+    return true;
 }
 
 std::vector<int> parse_cpus(const char *p) {
@@ -232,7 +254,10 @@ int main(int argc, char **argv) {
     double seconds = 0, status = 5;
     int threads = 3, niceness = 5;
     bool int8 = false, publish = true, track = true, gestures_on = true;
-    std::string models = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/ncnn";
+    // The models: HANDS_MODELS or --models, else the fine-tuned ones hands/models.sh fetched
+    // (models/student, chosen below once --int8 is known: they have no 8-bit files), else the stock ones.
+    const std::string model_root = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/";
+    std::string models;
     std::string record, ring_path = "/run/user/" + std::to_string(getuid()) + "/" FH_RING_NAME;
     // SteamOS starts user processes on CPUs 0-4 and keeps 5-7 (two A720s and the X4) for
     // SteamVR's compositor, whose threads there run at real-time priority, so they always
@@ -253,17 +278,43 @@ int main(int argc, char **argv) {
     if (color_left.empty()) color_left = "color_video0";
     if (color_crop.empty()) color_crop = "subtract";
     Lighting light;
-    if (const std::string v = setting("HANDS_BRIGHT_ON"); !v.empty()) light.on = std::atof(v.c_str());
-    if (const std::string v = setting("HANDS_BRIGHT_OFF"); !v.empty()) light.off = std::atof(v.c_str());
+    setting_number("HANDS_BRIGHT_ON", light.on);
+    setting_number("HANDS_BRIGHT_OFF", light.off);
     // How crops are equalized. CLAHE helps the palm search find hands (about 10% more in the
     // dim recording), but makes the landmarks jitter, so they get plain crops.
     Contrast palm_contrast, hand_contrast{Contrast::None};
     double keep_presence = 0.5;   // landmark presence a tracked view needs to stay
     bool misread_guard = setting("HANDS_MISREAD_GUARD") == "1";
+    double reacquire = 1.5;
+    setting_number("HANDS_REACQUIRE", reacquire);
+    bool pair_sides = setting("HANDS_PAIR_SIDES") != "0";
+    double hold = 0.6;   // s a lost, established hand is kept and retried before it's forgotten
+    // the skeleton fit (track/skeleton.h): published as fh_hands version 2, and as version 1's
+    // points and capsules; 0 publishes the One Euro filtered landmarks as before, and no skeleton
+    bool skeleton = setting("HANDS_SKELETON") != "0";
     PinchParams pinch_params;
+    pinch_params.dip = setting("HANDS_PINCH_DIP") == "1";
+    setting_number("HANDS_PINCH_FIST_CURL", pinch_params.fist_curl);
+    // How easily a pinch lets go (user, 2026-10-11, gaze + hands: "taps and pinches release way too easily
+    // even when I haven't actually released them": ends came at 4-6 cm, and grips took pinches 130 ms in):
+    // HANDS_PINCH_END (m), HANDS_PINCH_DRAG_OPEN (m), HANDS_PINCH_DRAG_OPEN_S, HANDS_GRIP_TAKEOVER_S.
+    auto num = [&](const char *key, double &v, double lo, double hi) {
+        if (setting_number(key, v)) v = std::clamp(v, lo, hi);
+    };
+    num("HANDS_PINCH_END", pinch_params.end_m, 0.025, 0.08);
+    num("HANDS_PINCH_DRAG_OPEN", pinch_params.drag_open_m, 0.03, 0.12);
+    num("HANDS_PINCH_DRAG_OPEN_S", pinch_params.drag_open_s, 0.0, 1.0);
+    num("HANDS_GRIP_TAKEOVER_S", pinch_params.grip_takeover_s, 0.0, 1.0);
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)
+    // the flag buffer (see the top)
+    bool flag_on = setting("HANDS_FLAG_BUFFER") != "0";
+    FlagConfig flag_cfg;
+    if (setting_number("HANDS_FLAG_SECONDS", flag_cfg.before_s)) flag_cfg.before_s = std::clamp(flag_cfg.before_s, 1.0, 60.0);
+    if (double crop = flag_cfg.crop_px; setting_number("HANDS_FLAG_CROP", crop)) flag_cfg.crop_px = int(std::clamp(crop, 64.0, 512.0));
+    if (double mb = double(flag_cfg.max_bytes) / 1048576; setting_number("HANDS_FLAG_MB", mb))
+        flag_cfg.max_bytes = size_t(std::clamp(mb, 8.0, 1024.0) * 1048576);
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         const bool more = i + 1 < argc;
@@ -279,6 +330,8 @@ int main(int argc, char **argv) {
         else if (a == "--pinch-end" && more) pinch_params.end_m = std::atof(argv[++i]);
         else if (a == "--pinch-triangulated") pinch_params.triangulated = true;
         else if (a == "--pinch-palm-down" && more) pinch_params.palm_down_max = std::atof(argv[++i]);
+        else if (a == "--pinch-dip" && more) pinch_params.dip = std::atoi(argv[++i]) != 0;
+        else if (a == "--pinch-fist-curl" && more) pinch_params.fist_curl = std::atof(argv[++i]);
         else if (a == "--grip-begin" && more) grip_params.begin = std::atof(argv[++i]);
         else if (a == "--grip-end" && more) grip_params.end = std::atof(argv[++i]);
         else if (a == "--gesture-log") gesture_log = true;
@@ -291,6 +344,11 @@ int main(int argc, char **argv) {
         else if (a == "--record-hz" && more) record_hz = std::max(0.0, std::atof(argv[++i]));
         else if (a == "--keep-presence" && more) keep_presence = std::atof(argv[++i]);
         else if (a == "--misread-guard" && more) misread_guard = std::string(argv[++i]) == "1";
+        else if (a == "--reacquire" && more) reacquire = std::atof(argv[++i]);
+        else if (a == "--pair-sides" && more) pair_sides = std::string(argv[++i]) == "1";
+        else if (a == "--hold" && more) hold = std::atof(argv[++i]);
+        else if (a == "--skeleton" && more) skeleton = std::string(argv[++i]) != "0";
+        else if (a == "--flag-buffer" && more) flag_on = std::string(argv[++i]) != "0";
         else if (a == "--cams" && more) cams_arg = argv[++i];
         else if (a == "--bright" && more) bright_arg = argv[++i];
         else if (a == "--bright-on" && more) light.on = std::atof(argv[++i]);
@@ -312,9 +370,15 @@ int main(int argc, char **argv) {
                         "          as --swap-sides; 0: as ft-camd names them)\n"
                         "          [--keep-presence P] (0.5) [--ring PATH] (ft-camd's, or ft-ringplay's)\n"
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
+                        "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
+                        "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
+                        "          [--flag-buffer 0|1] (1: keep the last seconds for `ft-handsctl flag`; HANDS_FLAG_BUFFER)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
-                        "          [--pinch-begin M] (0.020) [--pinch-end M] (0.035) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
+                        "          [--pinch-begin M] (0.020) [--pinch-end M] (0.045) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
+                        "          [--pinch-dip 0|1] (0; 1: also on a sharp dip, see PinchParams::dip; HANDS_PINCH_DIP)\n"
+                        "          [--pinch-fist-curl R] (1.2; 0: off: no pinch begins on a fist, see PinchParams::fist_curl;\n"
+                        "          HANDS_PINCH_FIST_CURL)\n"
                         "          [--grip-begin R] (1.2) [--grip-end R] (1.45) [--gesture-log]\n"
                         "          [--contrast MODE|PALM/HAND] (clahe[:CLIP], none, stretch; default clahe:2/none)\n"
                         "Recording saves every frame set (at most N a second with --record-hz) for S seconds (120) to DIR/sets.bin,\n"
@@ -324,7 +388,8 @@ int main(int argc, char **argv) {
                         "camera's newest dark frame, as <name>_dk; with --with-color, the color cameras' as color_video<N>.\n"
                         "auto picks the cameras by the light (see the top of track/main.cpp).\n"
                         "Settings in ~/.config/frametop.conf: HANDS_SWAP_SIDES=auto|0|1, HANDS_CPUS=5,6,7, HANDS_CAMERAS, HANDS_BRIGHT,\n"
-                        "HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT, HANDS_COLOR_CROP, HANDS_MISREAD_GUARD=0|1, HANDS_MODELS=DIR\n"
+                        "HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT, HANDS_COLOR_CROP, HANDS_MISREAD_GUARD=0|1, HANDS_MODELS=DIR,\n"
+                        "HANDS_PINCH_DIP=0|1, HANDS_PINCH_FIST_CURL, HANDS_FLAG_BUFFER=0|1, HANDS_FLAG_SECONDS, HANDS_FLAG_CROP, HANDS_FLAG_MB\n"
                         "(FT_<name> overrides).\n",
                         argv[0]);
             return a == "--help" ? 0 : 1;
@@ -349,7 +414,17 @@ int main(int argc, char **argv) {
     Nets nets;
     Publisher pub;
     GesturePublisher gestures;
+    // The middle pinch (thumb to middle fingertip, fh_gestures v3): the same thresholds, and the two
+    // exclude each other: each begins only with the thumb nearer its own fingertip (the middle one
+    // by 1 cm), and not while the other is down on that hand. A middle pinch also wants the index
+    // extended and the hand tracked 5 frames (see PinchParams).
+    PinchParams middle_params = pinch_params;
+    middle_params.finger = 12, middle_params.other_finger = 8, middle_params.other_margin = 0.01;
+    middle_params.extended_finger = 8, middle_params.min_frames = 5;
+    middle_params.dip = false;   // the dip rule is tuned on the index pinch only
+    pinch_params.other_finger = 12;
     Pinch pinch(pinch_params);
+    Pinch middle(middle_params);
     Grip grip(grip_params);
     std::unique_ptr<Recorder> rec;
     uint64_t rec_start = 0, rec_next_ns = 0;   // rec_next_ns: --record-hz's next set, capture clock
@@ -385,6 +460,29 @@ int main(int argc, char **argv) {
         std::fflush(stdout);
         return true;
     };
+    // HANDS_MODEL (Input Settings' Hands page, models/catalog.py): latest (models/student, which
+    // hands/models.sh keeps current), stock (models/ncnn), or a downloaded version (models/versions/NAME).
+    // None of the fine-tuned ones has 8-bit files, so --int8 always takes the stock ones.
+    auto has_models = [](const std::string &dir) {
+        return access((dir + "/hand.ncnn.param").c_str(), R_OK) == 0 && access((dir + "/palm.ncnn.param").c_str(), R_OK) == 0;
+    };
+    if (models.empty()) {
+        const std::string pick = setting("HANDS_MODEL");
+        const bool name_ok = !pick.empty() && pick.size() <= 64 && std::isalnum((unsigned char)pick[0]) &&
+                             pick.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-") ==
+                                 std::string::npos;
+        if (pick == "stock" || pick == "off" || pick == "none") {
+            models = model_root + "ncnn";
+        } else if (name_ok && pick != "latest") {
+            if (!int8 && has_models(model_root + "versions/" + pick)) models = model_root + "versions/" + pick;
+            else if (!int8)
+                std::fprintf(stderr, "HANDS_MODEL=%s isn't downloaded (Frametop Input Settings > Hands, or "
+                             "models/ft-models fetch hands %s): using the latest\n", pick.c_str(), pick.c_str());
+        } else if (!pick.empty() && pick != "latest") {
+            std::fprintf(stderr, "HANDS_MODEL=%s isn't a model name: using the latest\n", pick.c_str());
+        }
+        if (models.empty()) models = model_root + (!int8 && has_models(model_root + "student") ? "student" : "ncnn");
+    }
     if (!load_calibration(calib, err) || !ring.open(ring_path.c_str(), err) || !nets.load(models, int8, err) ||
         (publish && (!pub.open(err) || (gestures_on && !gestures.open(pinch, grip, err)))) ||
         (!record.empty() && !start_recording(record, err))) {
@@ -498,7 +596,95 @@ int main(int argc, char **argv) {
     Tracker tracker(used, nets, pool);
     tracker.set_keep_presence(keep_presence);
     tracker.set_misread_guard(misread_guard);
+    tracker.set_reacquire(reacquire, 2, true);
+    tracker.set_pair_sides(pair_sides);
+    tracker.set_hold(reacquire > 0 ? hold : 0.3);
+    tracker.set_skeleton(skeleton);
     std::map<std::string, std::vector<uint8_t>> pixels;
+    // A mono set is the side pair's newer frames (all the mono cameras' without both sides) with
+    // the upper pair's from the same moment. XRService keeps the uppers in step with the sides,
+    // but after a colour module hot plug they may stay out of step ("Set upper camera driver not
+    // in-sync", 2026-10-17: 40 fps against the sides' 30, no dark frames, for good). Waiting for
+    // all four to meet then left 6-7 sets a second; out of step, sets hold the side pair alone
+    // (until the uppers keep meeting them again).
+    std::vector<std::string> lead, follow;
+    for (auto &[name, i] : index)
+        (!have_sides || name == "slam_left" || name == "slam_right" ? lead : follow).push_back(name);
+    bool follow_in_step = true;
+    double follow_rate = 1;      // how often the uppers met a set lately (a moving average)
+    uint64_t prev_t0 = 0, prev_t1 = 0;
+    // a camera's frame from within 3 ms of the set's frames (taken t0 to t1), newer than after, or 0
+    auto follow_frame = [&](int i, uint64_t t0, uint64_t t1, uint64_t after) -> uint64_t {
+        uint64_t n = ring.latest(i);
+        for (int k = 0; k < 4 && n > after; ++k, --n) {
+            fh_ring_slot_t m;
+            if (!ring.meta(i, n, &m)) continue;
+            if (m.capture_ns + 3'000'000 < t1) break;   // older than the set: earlier ones are too
+            if (m.capture_ns <= t0 + 3'000'000) return n;
+        }
+        return 0;
+    };
+    // Did camera i take a frame within 3 ms of t0 to t1? 1 yes, 0 no, -1 can't tell: the ring
+    // (4 frames) no longer reaches back that far, as when a step took long.
+    auto met_set = [&](int i, uint64_t t0, uint64_t t1) -> int {
+        const uint64_t latest = ring.latest(i);
+        for (uint64_t n = latest; n > 0 && latest - n < 4; --n) {
+            fh_ring_slot_t m;
+            if (!ring.meta(i, n, &m)) return -1;
+            if (m.capture_ns + 3'000'000 < t1) return 0;
+            if (m.capture_ns <= t0 + 3'000'000) return 1;
+        }
+        return -1;
+    };
+    // A set used or passed by: did the uppers meet the one before it? (theirs have come by now)
+    auto note_step = [&](uint64_t t0, uint64_t t1) {
+        int met = 1;
+        if (!follow.empty() && prev_t1)
+            for (const std::string &name : follow) met = std::min(met, met_set(index[name], prev_t0, prev_t1));
+        if (!follow.empty() && prev_t1 && met >= 0) {
+            follow_rate += 0.1 * (met - follow_rate);
+            if (follow_in_step && follow_rate < 0.5) {
+                follow_in_step = false;
+                for (const std::string &name : follow) tracker.drop_camera(name);
+                std::printf("upper cameras out of step with the side ones (XRService's \"upper camera driver not in-sync\", "
+                            "after a colour module hot plug): tracking with the side pair alone. Taking the headset off "
+                            "and putting it back on may bring them back.\n");
+                std::fflush(stdout);
+            } else if (!follow_in_step && follow_rate > 0.95) {
+                follow_in_step = true;
+                std::printf("upper cameras in step with the side ones again: tracking with all four\n");
+                std::fflush(stdout);
+            }
+        }
+        prev_t0 = t0, prev_t1 = t1;
+    };
+    // The flag buffer (see the top), and its request file.
+    std::unique_ptr<FlagBuffer> flags;
+    const std::string flag_file = run_dir() + "/flag";
+    if (flag_on && track) {
+        flags = std::make_unique<FlagBuffer>(flag_cfg);
+        char cfg[1024];
+        std::string cpu_list;
+        for (int c : cpus) cpu_list += (cpu_list.empty() ? "" : ",") + std::to_string(c);
+        std::snprintf(cfg, sizeof cfg,
+                      "{\"models\": %s, \"int8\": %s, \"threads\": %d, \"cpus\": \"%s\", \"cams\": \"%s\", \"bright\": \"%s\", "
+                      "\"keep_presence\": %.2f, \"misread_guard\": %s, \"reacquire\": %.2f, \"pair_sides\": %s, \"hold\": %.2f, "
+                      "\"skeleton\": %s, \"gestures\": %s, \"pinch_begin\": %.3f, \"pinch_end\": %.3f, \"pinch_dip\": %s, "
+                      "\"pinch_fist_curl\": %.2f, \"grip_begin\": %.2f, "
+                      "\"grip_end\": %.2f, \"sides\": \"%s\", \"flag_seconds\": %.1f, \"flag_crop\": %d, \"flag_mb\": %.0f}",
+                      json_string(models).c_str(), int8 ? "true" : "false", threads, cpu_list.c_str(), cams_arg.c_str(),
+                      bright_arg.c_str(), keep_presence, misread_guard ? "true" : "false", reacquire, pair_sides ? "true" : "false",
+                      hold, skeleton ? "true" : "false", gestures_on ? "true" : "false", pinch_params.begin_m, pinch_params.end_m,
+                      pinch_params.dip ? "true" : "false", pinch_params.fist_curl, grip_params.begin, grip_params.end,
+                      sides_mode.c_str(), flag_cfg.before_s, flag_cfg.crop_px,
+                      flag_cfg.max_bytes / 1048576.0);
+        flags->set_static(cameras_json(used), cfg);
+    }
+    struct stat flag_st;   // a request left from before this run is stale
+    if (stat(flag_file.c_str(), &flag_st) == 0 && std::time(nullptr) - flag_st.st_mtime > 10) unlink(flag_file.c_str());
+    uint64_t t_flag_check = 0;
+    size_t flags_told = 0;
+    std::string flag_error_told;
     std::map<std::string, uint64_t> lit_seen;   // per colour camera: the frame last counted for the light
     const uint64_t start = mono_ns();
     uint64_t t_status = start, next_ns = 0, t_want = 0, t_glog = 0;
@@ -510,6 +696,12 @@ int main(int argc, char **argv) {
     // to place the colour frames, whose capture clock is their own (see the top).
     double mono_delay_ns = -1;
     const std::string want_file = run_dir() + "/color-fps";
+    // A reader that needs the full rate writes it to want-hz and keeps the file fresh: ft-screens,
+    // while a hand is near one of its panels (a poke's latency at 15 Hz doubles). Older than 1 s
+    // (by its mtime), it lapses. Checked 5 times a second.
+    const std::string want_hz_file = run_dir() + "/want-hz";
+    double want_hz = 0;
+    uint64_t t_want_hz = 0;
     // The side cameras' naming, for the hand recorder and other tools (hands/rec/session.py
     // reads it): written by a tracking, publishing ft-hands at the start, on every change and
     // every 2 s, and removed when it exits. swapped: ft-camd's naming is backwards (null: not
@@ -624,12 +816,110 @@ int main(int argc, char **argv) {
         return n ? sum / n : -1;
     };
 
+    // Parking (see "Parked" at the top): run_dir/park says so; ft-camd hears it through hands-want.
+    const std::string park_file = run_dir() + "/park", hands_want_file = run_dir() + "/hands-want";
+    const char *xdg_run = std::getenv("XDG_RUNTIME_DIR");
+    const std::string testbench_file = (xdg_run && *xdg_run ? std::string(xdg_run) : "/run/user/" + std::to_string(getuid())) +
+                                       "/frametop-testbench/hands";
+    auto testbench_fresh = [&] {
+        struct stat st;
+        timespec now;
+        if (stat(testbench_file.c_str(), &st) != 0 || clock_gettime(CLOCK_REALTIME, &now) != 0) return false;
+        const double age = double(now.tv_sec - st.st_mtim.tv_sec) + (now.tv_nsec - st.st_mtim.tv_nsec) * 1e-9;
+        return age > -3.0 && age < 3.0;
+    };
+    const bool can_park = track && publish;
+    bool parked = false;
+    uint64_t t_park = 0, t_hands_want = 0;
     int exit_code = 0;
+    // A flag request (see the top): taken, and answered with a folder.
+    auto take_flag = [&] {
+        std::ifstream f(flag_file);
+        if (!f) return;
+        std::map<std::string, std::string> kv;
+        std::string line;
+        while (std::getline(f, line))
+            if (const auto eq = line.find('='); eq != std::string::npos) kv[line.substr(0, eq)] = line.substr(eq + 1);
+        unlink(flag_file.c_str());
+        const std::string dir = kv["dir"];
+        if (dir.empty() || dir[0] != '/') return (void)std::printf("flag: no folder in the request\n");
+        auto num = [&](const char *k) { return kv[k].empty() ? std::string("null") : std::to_string(std::atof(kv[k].c_str())); };
+        char light_json[160];
+        std::snprintf(light_json, sizeof light_json, "{\"cams\": \"%s\", \"level\": %.1f, \"ambient_ir\": %.1f}", cams_name(mode),
+                      light.level, ambient());
+        FlagRequest req;
+        req.dir = dir;
+        req.fields = "\"source\": \"ft-hands\", \"flag_unix\": " + num("flag_unix") + ", \"note\": " + json_string(kv["note"], true) +
+                     ", \"said_unix\": " + num("said_unix") + ", \"models\": " + json_string(models) +
+                     ", \"sides\": {\"names_swapped\": " + json_bool(names_swapped) + ", \"swapped\": " + json_bool(truth) +
+                     "}, \"light\": " + light_json + ", \"parked\": " + (parked ? "true" : "false");
+        if (!flags) {   // no buffer: the folder says why
+            mkdir(dir.c_str(), 0700);
+            write_file(dir + "/manifest.json", "{\"version\": 1, " + req.fields +
+                                                   ", \"error\": \"no flag buffer (HANDS_FLAG_BUFFER=0, or not tracking)\"}\n");
+            std::printf("flag: %s (no buffer: HANDS_FLAG_BUFFER=0)\n", dir.c_str());
+        } else if (flags->flag(req, int64_t(mono_ns()) + raw_minus_mono_ns(), kv["note"])) {
+            std::printf("flag: %s%s%s, written in %.0f s\n", dir.c_str(), kv["note"].empty() ? "" : ": ", kv["note"].c_str(),
+                        flags->config().after_s);
+        } else {
+            std::printf("flag: one is already being taken%s\n", kv["note"].empty() ? "" : " (its note added)");
+        }
+        std::fflush(stdout);
+    };
     while (!g_stop && (seconds <= 0 || (mono_ns() - start) / 1e9 < seconds)) {
+        if (mono_ns() - t_flag_check > 250'000'000) {
+            t_flag_check = mono_ns();
+            if (stat(flag_file.c_str(), &flag_st) == 0 && flag_st.st_uid == getuid()) take_flag();
+            if (flags) {
+                flags->tick(int64_t(mono_ns()) + raw_minus_mono_ns());
+                const FlagBuffer::Stats fs = flags->stats();
+                if (fs.flags != flags_told || fs.last_error != flag_error_told) {
+                    if (fs.flags != flags_told) std::printf("flag written: %s\n", fs.last_dir.c_str());
+                    if (!fs.last_error.empty() && fs.last_error != flag_error_told) std::printf("flag failed: %s\n", fs.last_error.c_str());
+                    flags_told = fs.flags, flag_error_told = fs.last_error;
+                    std::fflush(stdout);
+                }
+            }
+        }
         if (!ring.alive()) {
             std::fprintf(stderr, "ft-camd stopped\n");
             exit_code = 2;
             break;
+        }
+        if (can_park && mono_ns() - t_park > 250'000'000) {
+            t_park = mono_ns();
+            struct stat pst;
+            const bool by_testbench = testbench_fresh();
+            const bool want = !rec && !g_record && (stat(park_file.c_str(), &pst) == 0 || by_testbench);
+            if (want != parked) {
+                parked = want;
+                std::printf("%s\n", !parked       ? "unparked: tracking again"
+                                    : by_testbench ? "parked: the testbench publishes fake hands (models stay loaded)"
+                                                   : "parked: no tracking until run_dir/park goes (models stay loaded)");
+                std::fflush(stdout);
+                if (parked) {
+                    // the hands are gone for every reader, and a gesture down ends, as lost
+                    pub.write({}, mono_ns());
+                    if (gestures_on) {
+                        pinch.release(int64_t(mono_ns()));
+                        middle.release(int64_t(mono_ns()));
+                        grip.release(int64_t(mono_ns()));
+                        gestures.write(pinch, grip, mono_ns(), &middle);
+                    }
+                    t_hands_want = 0;
+                } else {
+                    unlink(hands_want_file.c_str());
+                    next_ns = 0;
+                }
+            }
+        }
+        if (parked) {
+            if (mono_ns() - t_hands_want > 1'000'000'000ull) {  // fresh, so ft-camd keeps idling
+                t_hands_want = mono_ns();
+                write_file(hands_want_file, "0\n");
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
         }
         const uint64_t now0 = mono_ns();
         const int64_t raw_off = raw_minus_mono_ns();
@@ -656,43 +946,72 @@ int main(int argc, char **argv) {
             }
         }
 
+        if (now0 - t_want_hz > 200'000'000) {
+            t_want_hz = now0, want_hz = 0;
+            struct stat st;
+            timespec rt;
+            clock_gettime(CLOCK_REALTIME, &rt);
+            if (stat(want_hz_file.c_str(), &st) == 0 && st.st_uid == getuid() &&
+                (rt.tv_sec - st.st_mtim.tv_sec) * 1e9 + (rt.tv_nsec - st.st_mtim.tv_nsec) < 1e9)
+                if (FILE *f = std::fopen(want_hz_file.c_str(), "r")) {
+                    if (std::fscanf(f, "%lf", &want_hz) != 1 || !(want_hz > 0)) want_hz = 0;
+                    want_hz = std::min(want_hz, 30.0);
+                    std::fclose(f);
+                }
+        }
         const bool use_mono = mode != Cams::Color, use_color = mode != Cams::Mono;
         const bool mono_driven = use_mono || rec || g_record || !track;
         std::map<std::string, Image> images;
         uint64_t tmin = UINT64_MAX, dq = 0;
 
         if (mono_driven) {
-            // a new frame set: every mono camera has a newer frame, taken at the same moment
+            // a new frame set: the side pair has newer frames, taken at the same moment (see lead)
             std::map<std::string, uint64_t> latest;
             bool ready = true;
-            for (auto &[name, i] : index) {
-                latest[name] = ring.latest(i);
+            for (const std::string &name : lead) {
+                latest[name] = ring.latest(index[name]);
                 ready = ready && latest[name] > last[name];
             }
             if (!ready) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
-            // not needed at the current rate, and not recorded: skip it without copying images
-            if (track && !rec && !g_record) {
-                uint64_t t0 = UINT64_MAX, t1 = 0;
-                bool ok = true;
-                for (auto &[name, i] : index) {
-                    fh_ring_slot_t meta;
-                    ok = ok && ring.meta(i, latest[name], &meta);
-                    if (ok) t0 = std::min(t0, meta.capture_ns), t1 = std::max(t1, meta.capture_ns);
-                }
-                if (ok && t1 - t0 <= 3'000'000 && t0 < next_ns) {
-                    for (auto &[name, i] : index) last[name] = latest[name];
-                    continue;
-                }
+            uint64_t t0 = UINT64_MAX, t1 = 0, lead_dq = 0;
+            bool met = true;
+            for (const std::string &name : lead) {
+                fh_ring_slot_t meta;
+                met = met && ring.meta(index[name], latest[name], &meta);
+                if (met) t0 = std::min(t0, meta.capture_ns), t1 = std::max(t1, meta.capture_ns), lead_dq = std::max(lead_dq, meta.dqbuf_ns);
             }
+            if (!met || t1 - t0 > 3'000'000) {   // one is a frame ahead: wait for the other
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            // the uppers' frames from the same moment: in step, theirs may be a few ms behind
+            std::map<std::string, uint64_t> with;
+            if (follow_in_step)
+                for (const std::string &name : follow)
+                    if (const uint64_t n = follow_frame(index[name], t0, t1, last[name])) with[name] = n;
+            if (follow_in_step && with.size() < follow.size() && mono_ns() < lead_dq + 8'000'000) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            const bool full = with.size() == follow.size();
+            // not needed at the current rate, and not recorded: skip it without copying images
+            if (track && !rec && !g_record && t0 < next_ns) {
+                note_step(t0, t1);
+                for (const std::string &name : lead) last[name] = latest[name];
+                for (auto &[name, n] : with) last[name] = n;
+                continue;
+            }
+            for (auto &[name, n] : with) latest[name] = n;
             std::vector<SetFrame> frames;
             uint64_t tmax = 0;
             bool ok = true;
-            for (auto &[name, i] : index) {
+            for (auto &[name, n] : latest) {
+                const int i = index[name];
                 fh_ring_slot_t meta;
-                ok = ok && ring.read(i, latest[name], pixels[name], &meta);
+                ok = ok && ring.read(i, n, pixels[name], &meta);
                 if (!ok) break;
                 const auto &c = ring.camera(i);
                 images[name] = {pixels[name].data(), int(c.width), int(c.height), int(c.width)};
@@ -705,7 +1024,8 @@ int main(int argc, char **argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
-            for (auto &[name, i] : index) last[name] = latest[name];
+            note_step(t0, t1);
+            for (auto &[name, n] : latest) last[name] = n;
             if (g_record && !rec) {
                 g_record = 0;
                 char name[64];
@@ -725,7 +1045,7 @@ int main(int argc, char **argv) {
                     std::printf("recording done: %zu sets, %zu dropped\n", n, d);
                     std::fflush(stdout);
                     if (!track) break;
-                } else if (due) {
+                } else if (due && full) {   // a set without the uppers isn't recorded
                     for (auto &[name, i] : dark) {   // the newest dark and color frames, as they are
                         fh_ring_slot_t meta;
                         const uint64_t n = ring.latest(i);
@@ -788,8 +1108,12 @@ int main(int argc, char **argv) {
         }
         if (mono_ns() - t_sides > 2'000'000'000ull) write_sides();
         if (gestures_on) {
-            grip.update(hands, views, int64_t(capture));
-            pinch.update(hands, views, int64_t(capture), grip.gripping());
+            // no grip begins on a hand holding a pinch (a drag: PinchParams::grip_takeover_s)
+            std::vector<int> holding = pinch.holding(int64_t(capture)), held2 = middle.holding(int64_t(capture));
+            holding.insert(holding.end(), held2.begin(), held2.end());
+            grip.update(hands, views, int64_t(capture), holding);
+            pinch.update(hands, views, int64_t(capture), grip.gripping(), middle.down());
+            middle.update(hands, views, int64_t(capture), grip.gripping(), pinch.down());
         }
         if (gestures_on && gesture_log && capture - t_glog >= 100'000'000) {
             t_glog = capture;
@@ -800,16 +1124,25 @@ int main(int argc, char **argv) {
                                 pinch.side(k).flags & FH_PINCH_DOWN ? " PINCH" : grip.side(k).flags & FH_PINCH_DOWN ? " GRIP" : "");
         }
         // a gesture down or closing gets the full rate, even while the palm holds still
-        next_ns = tmin + uint64_t((std::min(tracker.interval(), pinch.engaged() || grip.engaged() ? 1 / 30.0 : 1.0) -
+        // and so does a reader that asks for it (want-hz)
+        next_ns = tmin + uint64_t((std::min({tracker.interval(),
+                                             pinch.engaged() || middle.engaged() || grip.engaged() ? 1 / 30.0 : 1.0,
+                                             want_hz > 0 ? 1 / want_hz : 1.0}) -
                                    0.005) * 1e9);
         if (publish) pub.write(hands, capture);
-        if (publish && gestures_on) gestures.write(pinch, grip, capture);
+        if (publish && gestures_on) gestures.write(pinch, grip, capture, &middle);
+        if (flags)
+            flags->add(int64_t(tmin), int64_t(capture), -1, images, views,
+                       output_json(hands, gestures_on ? &pinch : nullptr, gestures_on ? &middle : nullptr, gestures_on ? &grip : nullptr));
         for (const Pinch::Event &e : grip.events)
             std::printf("grip  %s %-5s curl %.2f at %+.3f %+.3f %+.3f\n", e.side ? "right" : "left ", e.what, e.distance,
                         e.point[0], e.point[1], e.point[2]);
         for (const Pinch::Event &e : pinch.events)
             std::printf("pinch %s %-5s d %.3f m at %+.3f %+.3f %+.3f\n", e.side ? "right" : "left ", e.what, e.distance,
                         e.point[0], e.point[1], e.point[2]);
+        for (const Pinch::Event &e : middle.events)
+            std::printf("middle pinch %s %-5s d %.3f m at %+.3f %+.3f %+.3f\n", e.side ? "right" : "left ", e.what,
+                        e.distance, e.point[0], e.point[1], e.point[2]);
         lat.push_back((mono_ns() - dq) / 1e6);
         hands_sum += double(hands.size());
         bool on_left = false, on_right = false;   // by where the wrist is, not the model's label
@@ -825,11 +1158,14 @@ int main(int argc, char **argv) {
             const Stats &s = tracker.stats;
             std::sort(lat.begin(), lat.end());
             std::printf("%5.1fs %4.1f sets/s  hands %.2f views %zu  palm %3d calls %4.1f ms/batch  hand %3d calls %4.1f ms/batch  "
-                        "step %4.1f ms  latency %4.1f ms  resid %.1f mm  CPU %3.0f%%\n",
+                        "step %4.1f ms  latency %4.1f ms  resid %.1f mm  fit %.0f us  CPU %3.0f%%\n",
                         (now - start) / 1e9, s.sets / dt, s.sets ? hands_sum / s.sets : 0, tracker.views(), s.palm_calls,
                         s.palm_batches ? s.palm_ms / s.palm_batches : 0, s.hand_calls,
                         s.hand_batches ? s.hand_ms / s.hand_batches : 0, s.sets ? s.step_ms / s.sets : 0,
-                        lat.empty() ? 0 : lat[lat.size() / 2], resid_n ? resid_sum / resid_n : 0, 100 * (cpu1 - cpu0) / dt);
+                        lat.empty() ? 0 : lat[lat.size() / 2], resid_n ? resid_sum / resid_n : 0,
+                        tracker.skeleton().fits ? tracker.skeleton().us_total / tracker.skeleton().fits : 0.0,
+                        100 * (cpu1 - cpu0) / dt);
+            tracker.skeleton().fits = 0, tracker.skeleton().us_total = 0;
             if (!color.empty())
                 std::printf("        cameras %s%s: colour frames at %.1f (bright at %.0f, dim under %.0f), ambient IR %.1f, "
                             "%d steps with colour, colour placed %.1f ms after capture\n",
@@ -842,13 +1178,23 @@ int main(int argc, char **argv) {
                             s.handoff_miss, s.dups, s.splits, s.created, s.merged, s.forgotten,
                             !rec ? "" : ("  recorded " + std::to_string(rec->written()) + " dropped " +
                                          std::to_string(rec->dropped())).c_str());
+            if (!follow.empty() && !follow_in_step)
+                std::printf("        upper cameras out of step with the side ones (met %.0f%% of sets lately): side pair alone\n",
+                            100 * follow_rate);
+            if (flags) {
+                const FlagBuffer::Stats fs = flags->stats();
+                std::printf("        flag buffer: %zu sets, %zu crops (%zu ghosts) in %.1f MB, %.0f us a crop, %zu dropped, %zu flags written%s%s\n",
+                            fs.sets, fs.crops, fs.ghosts, flags->bytes() / 1048576.0, fs.crop_calls ? fs.crop_us / fs.crop_calls : 0.0,
+                            fs.dropped, fs.flags, fs.last_error.empty() ? "" : "; last error: ", fs.last_error.c_str());
+            }
             if (checking)
                 std::printf("        side cameras: %s, %s\n", side_round ? "checking the decision" : "deciding",
                             side_check.summary().c_str());
             if (gestures_on) {
-                std::printf("        pinches: left %u right %u (held back, palm down: %d %d)  grips: left %u right %u",
+                std::printf("        pinches: left %u right %u (held back, palm down: %d %d)  middle pinches: left %u right %u  "
+                            "grips: left %u right %u",
                             pinch.side(0).begins, pinch.side(1).begins, pinch.held_back[0], pinch.held_back[1],
-                            grip.side(0).begins, grip.side(1).begins);
+                            middle.side(0).begins, middle.side(1).begins, grip.side(0).begins, grip.side(1).begins);
                 for (int k = 0; k < 2; ++k)
                     if (pinch.side(k).flags & FH_PINCH_TRACKED)
                         std::printf("  %s %s d %.3f curl %.2f", k ? "right" : "left",
@@ -869,14 +1215,40 @@ int main(int argc, char **argv) {
             color_steps = 0;
         }
     }
+    if (flags) flags->finish(), flags->wait();
     if (!color.empty()) unlink(want_file.c_str());
+    if (parked) unlink(hands_want_file.c_str());
     if (write_sides_file) unlink(sides_file.c_str());
     write_rec_sides();
     if (publish) pub.write({}, mono_ns());
     if (publish && gestures_on) {
         pinch.release(int64_t(mono_ns()));   // a drag in progress ends, as lost
+        middle.release(int64_t(mono_ns()));
         grip.release(int64_t(mono_ns()));
-        gestures.write(pinch, grip, mono_ns());
+        gestures.write(pinch, grip, mono_ns(), &middle);
+    }
+    // ft-camd stopped: a new one comes when XRService moves the cameras (a colour module hot plug)
+    // or restarts. Wait for it here and start again on its cameras, rather than exit and wait out
+    // the unit's RestartSec as well. Its ring is a new file (camd.c unlinks the old one).
+    if (exit_code == 2 && publish && track && !g_stop) {
+        rec.reset();   // writes out what's queued
+        Ring next;
+        ino_t next_ino = ring_st.st_ino;
+        for (const uint64_t t = mono_ns(); !g_stop && mono_ns() - t < 15'000'000'000ull;
+             std::this_thread::sleep_for(std::chrono::milliseconds(100))) {
+            struct stat st;
+            std::string e;
+            if (next_ino == ring_st.st_ino && stat(ring_path.c_str(), &st) == 0 && st.st_ino != ring_st.st_ino &&
+                next.open(ring_path.c_str(), e))
+                next_ino = st.st_ino;
+            if (next_ino != ring_st.st_ino && next.alive()) {
+                std::printf("ft-camd is back: starting again on its cameras\n");
+                std::fflush(stdout);
+                execv("/proc/self/exe", argv);
+                std::perror("execv /proc/self/exe");
+                break;
+            }
+        }
     }
     return exit_code;
 }

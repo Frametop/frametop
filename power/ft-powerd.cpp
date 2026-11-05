@@ -41,6 +41,9 @@
 // never, the default), DISPLAY_MOVE_MM (5), DISPLAY_MOVE_DEG (0.5).
 #include <openvr.h>
 
+#include "../conf/ftsock.h"
+#include "../conf/ft_conf.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
@@ -78,27 +81,10 @@ std::string Home() {
 std::string ConfPath() { return Home() + "/.config/frametop.conf"; }
 std::string SavedPath() { return Home() + "/.cache/frametop/powerd-brightness"; }
 
-std::map<std::string, std::string> ReadConfig() {
-    std::map<std::string, std::string> conf;
-    std::ifstream in(ConfPath());
-    std::string line;
-    while (std::getline(in, line)) {
-        line = line.substr(0, line.find('#'));
-        const auto eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        auto trim = [](std::string s) {
-            s.erase(0, s.find_first_not_of(" \t"));
-            s.erase(s.find_last_not_of(" \t") + 1);
-            return s;
-        };
-        conf[trim(line.substr(0, eq))] = trim(line.substr(eq + 1));
-    }
-    return conf;
-}
+std::map<std::string, std::string> ReadConfig() { return ft_conf::Read(ConfPath()); }
 
 double ConfDouble(const std::map<std::string, std::string> &c, const char *key, double fallback) {
-    auto it = c.find(key);
-    return it == c.end() || it->second.empty() ? fallback : std::atof(it->second.c_str());
+    return ft_conf::Double(c, key, fallback);
 }
 
 int ReadInt(const std::string &path, int fallback) {
@@ -232,11 +218,8 @@ int main() {
 
     const int ctl = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     {
-        sockaddr_un addr{};
-        addr.sun_family = AF_UNIX;
-        const char *name = "ft_powerd";
-        std::memcpy(addr.sun_path + 1, name, std::strlen(name));
-        if (bind(ctl, reinterpret_cast<sockaddr *>(&addr), offsetof(sockaddr_un, sun_path) + 1 + std::strlen(name)) != 0) {
+        sockaddr_un addr;
+        if (bind(ctl, reinterpret_cast<sockaddr *>(&addr), ft_sock_addr(FT_SOCK_POWERD, &addr)) != 0) {
             std::perror("bind @ft_powerd (already running?)");
             return 1;
         }

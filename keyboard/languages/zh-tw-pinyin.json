@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "zh-tw-pinyin",
+  "name": "中文 — 繁體拼音",
+  "locale": "zh-TW",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "us",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans CJK TC",
+    "Noto Sans",
+    "sans-serif"
+  ],
+  "input_method": "chinese-pinyin-traditional"
+}

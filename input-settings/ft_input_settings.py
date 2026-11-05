@@ -4,7 +4,8 @@
 A Kirigami (QML) app with a Python backend. It runs in the dev container and talks
 to the input relay over its control socket (@frametop_relay):
   - Devices: every USB/Bluetooth mouse and keyboard, a live activity light to
-    identify them, and a role for each (3D pointer, pass through, ignore).
+    identify them, and a role for each (3D pointer, pass through, keyboard + 3D pointer for a
+    keyboard with a touchpad, ignore).
   - Buttons: press a button or key on a pointer device, then pick an action.
   - Controllers: the same for the Frame controllers' buttons, minus the gaze actions (gaze
     mode is a mouse feature). They're read by the pointer helper through SteamVR input
@@ -12,15 +13,33 @@ to the input relay over its control socket (@frametop_relay):
   - Keyboard: when Frametop's keyboard opens, and key combinations for any action, a command
     of your own too ("command:CMD"), or a modifier tapped alone (a Meta tap opens Steam's menu
     and Meta+Shift+F floats a window, unless the rules have their own list).
-  - Pointer: speed, dot size, distance and the rest, applied live.
+  - Commands: shell commands of your own under a name (commands/ft_commands.py,
+    ~/.config/frametop-commands.json), run in the background from a button, a controller
+    button or a key combination ("run:NAME"), frunner, Frametop Voice ("run NAME"), or a
+    terminal, where each name is an alias too (~/.config/frametop/aliases.sh, from ~/.bashrc).
+  - Pointer: speed, dot size, distance and the rest, applied live, and SteamVR's travel mode
+    (travel_mode.py: vrcmd on the host, while SteamVR runs).
   - Ignored panels: SteamVR overlays the pointer passes through (POINTER_IGNORE), by app or
     one by one. The helper lists them (@ft_pointer_helper "overlays").
   - Game optimization: pausing Frametop while a VR game runs, so it leaves the CPU and GPU to the game
     (input/game_pause.py, in the relay: "pause on|off|?"): pause now, pause by itself during VR
     games, the controller gesture that pauses and resumes, what happens to the desktop, a sound.
+  - Voice: Frametop Voice's dictation (voice/ft-voiced): on or off, its keys (key combinations
+    with the dictation actions), controller buttons, typing, sounds, and the wake word. Settings
+    go to ~/.config/frametop-voice.json (voice/voice_settings.py); ft-voiced reads them again
+    within 2 s, and answers "status" on its control socket.
   - Gaze: the pointer's gaze mode (@ft_pointer_helper "gaze") and the gaze service
-    (gaze/ft-gazed, @ft_gazed: status, forget, reload), with its eye tracker (SteamVR's or
-    our own) and eye bias (GAZE_TRACKER, GAZE_EYE in frametop.conf).
+    (gaze/ft-gazed, @ft_gazed: status, forget, reload), with its eye tracker and eye bias
+    (GAZE_TRACKER, GAZE_EYE in frametop.conf). The tracker is picked from a catalog (models/catalog.py,
+    gaze/tracker/models.json): SteamVR's, our classic one, or one of our eye nets (EYES_MODEL: latest,
+    which follows new versions, or a version), each with notes and benchmarks, downloaded on use.
+  - Hands: when hand tracking runs (HANDS_MODE: with the Frametop desktop, always with SteamVR,
+    or off; hands/handsmode.py on the host starts and stops its services), the hand cutouts'
+    margin (HANDS_MATTE_MARGIN, sent live to ft-screens: "cutouts margin DEG"), and three hand
+    inputs, each on its own (handsmode.METHODS): clicks at the gaze (POINTER_HANDS,
+    POINTER_GAZE_PINCH), the hand ray with gaze off (POINTER_HAND_RAY), and direct touch on
+    Frametop's panels (HANDS_NEAR, sent live to ft-screens: "handinput on|off"), and the hand
+    models (HANDS_MODEL, from hands/models.json: latest, a version, or stock MediaPipe), the same way.
   - Bluetooth: paired devices, and re-applying the Bluetooth LE fixes after pairing.
   - A warning on every page when SteamVR won't load the ft_pointer driver (blocked after a
     crash, disabled, or SteamVR in safe mode) or hasn't loaded it (@ft_pointer doesn't answer
@@ -31,6 +50,7 @@ Rules go to ~/.config/frametop-input.json and pointer settings to
 Launch with input-settings/ft-input-settings (host wrapper).
 """
 import fnmatch
+import functools
 import json
 import os
 import re
@@ -38,9 +58,10 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
-from PySide6.QtCore import Property, QObject, QSocketNotifier, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QProcess, QSocketNotifier, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -56,6 +77,143 @@ VRSETTINGS_PATHS = [os.path.expanduser("~/.config/openvr/config/steamvr.vrsettin
                     os.path.expanduser("~/.steam/steam/config/steamvr.vrsettings")]
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAZE_PROBE = os.path.join(REPO, "gaze", "probe", "ft-gazeprobe")
+# Hand tracking's mode and the cutouts' margin (standard library only, so it imports here too).
+sys.path.insert(0, os.path.join(REPO, "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
+# GAZE_ACTIONS: gaze mode is a mouse and keyboard feature (docs/gaze-controllers.md).
+# DEFAULT_KEY_BINDINGS: what a rules file without "key_bindings" gets, as the relay reads it.
+from ft_input_actions import DEFAULT_KEY_BINDINGS, GAZE_ACTIONS  # noqa: E402  (the rules file's vocabulary)
+# This folder's own modules (pack/pyside-runtime.py loads this file by its path).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import input_rules  # noqa: E402  (the rules file and frametop.conf)
+from input_rules import read_json  # noqa: E402  (renames old actions as it reads)
+NOT_SAVED = object()   # what Backend._edit_rules returns when the rules weren't saved
+sys.path.insert(0, os.path.join(REPO, "hands"))
+import handsmode  # noqa: E402
+HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
+# The hand and eye model catalogs: versions, notes, benchmarks, downloads (standard library only).
+sys.path.insert(0, os.path.join(REPO, "models"))
+sys.path.insert(0, os.path.join(REPO, "commands"))
+import ft_commands  # noqa: E402  (your commands: standard library only)
+import input_commands  # noqa: E402  (the Commands page's logic)
+import travel_mode  # noqa: E402  (SteamVR's travel mode, through vrcmd)
+import catalog as model_catalog  # noqa: E402
+# How the pickers tag each entry: by status, and builtins by what they are.
+MODEL_TAGS = {"recommended": "Recommended", "testing": "Testing", "older": "Older"}
+MODEL_KIND_TAGS = {"stock": "Off the shelf", "valve": "Valve", "classic": "Built in", "custom": "Frametop"}
+SCREENS = "\0ft_screens"
+HANDS_MODES = {"frametop": "With Frametop: while the Frametop desktop runs",
+               "always": "Always: whenever SteamVR runs, in games and the SteamVR dashboard too",
+               "off": "Off"}
+# The Hands page's input switches, each on its own (handsmode.METHODS): POINTER_HANDS with
+# POINTER_GAZE_PINCH or POINTER_HAND_RAY for the pointer, HANDS_NEAR for ft-screens.
+HAND_METHODS = {"gaze_clicks": "Hand clicks in gaze mode", "ray": "Hand ray with gaze off",
+                "touch": "Direct touch"}
+# Every hand interaction on Frametop's panels, each switched on and off on its own (Hands page): the
+# frametop.conf key ft-screens reads at start, sent live too ("handsetting KEY 0|1"), its default, the
+# value written for on, and the page's group, label and tooltip.
+HAND_INTERACTIONS = [
+    # (key, default on, value written for on, group, label, tooltip)
+    ("HANDS_TOUCH_DOT", True, "1", "Tapping", "Fingertip dot",
+     "A soft white dot on the screen where a tap would land, frozen as the fingertip comes close."),
+    ("HANDS_TAP_LOCK", True, "1", "Tapping", "Lock the aim on the way in",
+     "The tap lands where the dot froze 1.5 cm out, not where the fingertip's jitter takes it."),
+    ("HANDS_MOTION_PRESS", True, "1", "Tapping", "Taps that stop just short",
+     "A quick tap that stops or bounces back just before the surface still clicks."),
+    ("HANDS_LOCK_PUSH", True, "0.01", "Tapping", "Push through to tap",
+     "Pushing the finger 1 cm through the screen taps at the frozen dot, however slowly."),
+    ("HANDS_PINCH_CLICK", True, "1", "Tapping", "Pinch on a screen clicks",
+     "Up close, a pinch on a screen's content clicks there, and drags while held."),
+    ("HANDS_TWO_FINGER_SCROLL", True, "1", "Tapping", "Two-finger scroll",
+     "Index and middle finger together on a screen: swipe to scroll, lift without moving to click."),
+    ("HANDS_PINCH_BUTTONS", True, "1", "Tapping", "Pinch the bar's buttons",
+     "A pinch at a round button under a screen (curve, reset, pin, dock, close) presses it."),
+    ("HANDS_GRAB_ROTATE", True, "1", "Moving screens", "Turn with the wrist",
+     "A screen held by its bar or edge turns as the wrist turns."),
+    ("HANDS_CARD_PINCH", True, "1", "Moving screens", "Card grab",
+     "Index and middle finger (or all fingertips) pinching an edge hold the screen like a card."),
+    ("HANDS_FIST_GRAB", True, "1", "Moving screens", "Fists",
+     "A fist at a screen holds it; two fists resize it."),
+    ("HANDS_FIST_PAIR", True, "1", "Moving screens", "Two fists near a screen resize it",
+     "Two closed hands anywhere near one screen start a resize, without a grip at the screen first."),
+    ("HANDS_FIST_RESIZE_ONLY", True, "1", "Moving screens", "Fists only resize",
+     "Fists don't move or turn screens (the tracking's too rough for placing): one holds still, two resize."),
+    ("HANDS_STRETCH_TURN", True, "1", "Moving screens", "Two hands turn a screen",
+     "Holding a screen with both hands turns it on every axis with them."),
+    ("HANDS_RELEASE_FREEZE", True, "1", "Moving screens", "Let go without a nudge",
+     "A held screen stops following as the fingers start to open, so letting go doesn't move it."),
+    ("HANDS_GRAB_THAT", True, "1", "Gestures", "Grab that",
+     "Reach toward a far screen with an open hand, then pull back into a fist: it comes to arm's reach."),
+    ("HANDS_PUSH", True, "1", "Gestures", "Push away",
+     "An open palm pushed into a near screen sends it 3 m out."),
+    ("HANDS_FLICK", True, "1", "Gestures", "Flick away",
+     "A quick outward flick of an open hand at a screen sends it 3 m out."),
+    ("HANDS_THROW", True, "1", "Gestures", "Throw",
+     "Letting go of a held screen while moving it fast throws it 3 m out along the throw."),
+    ("HANDS_SWEEP", True, "1", "Gestures", "Sweep for the lazy susan",
+     "An open hand on its edge, palm leading, swept 25 cm sideways, quickly: the next screen on that side "
+     "(Meta+Alt+Tab too). The return stroke does nothing: the other hand palms the other way."),
+    ("SCREEN_FRONT_AWAY", False, "1", "Gestures", "A brought screen goes home when you look away",
+     "Off: it stays in front of you until you move it yourself or the next stroke sends it home."),
+    ("HANDS_SWEEP_BACK", False, "1", "Gestures", "Lazy susan on the return stroke too",
+     "A stroke with the back of the hand leading counts too (one hand going back and forth)."),
+    ("SCREEN_SPIN_BRING", True, "1", "Gestures", "Lazy susan brings screens to you",
+     "The next screen comes 1 m in front of you, big enough to read, and takes the typing; the next stroke sends "
+     "it home. Grab that pulls it to arm's reach; a push steps it back. Off: the screens turn around you instead."),
+    ("HANDS_PALM_MENU", True, "1", "Gestures", "Palm menu",
+     "Palm toward your face, away from screens, and a plain pinch: the Steam menu."),
+    ("HANDS_TARGET_GLOW", True, "1", "Feedback", "Grab that's glow",
+     "A faint white glow round the screen \"grab that\" would take."),
+    ("HANDS_EDGE_GLOW", True, "1", "Feedback", "Resize and edge glows",
+     "A glow at the corner or edge a pinch there would resize or move."),
+    ("POINTER_GAZE_TWO_HAND", True, "1", "Gaze + hands", "Two-hand drag (like Meta+J, then Meta+K)",
+     "With gaze on: hold a pinch on one hand (nudge it into place), then pinch with the other: the left button "
+     "goes down where the dot is; the drag lasts while either pinch is held, and the hand still pinching drags."),
+    ("POINTER_GAZE_RIGHT_DRAG", False, "1", "Gaze + hands", "Right-drag: tap one hand, then pinch the other",
+     "With gaze on: an index tap on one hand, then an index pinch on the other within a second, holds the right "
+     "button where you look; that hand drags until you let go."),
+    ("POINTER_TYPING_HIDE", True, "1.5", "Gaze + hands", "Hide the gaze pointer while typing",
+     "The gaze dot and its laser hide for 1.5 s after each key."),
+    ("POINTER_PINCH_MAX_SPEED", True, "1.0", "Gaze + hands", "No clicks from moving hands",
+     "A pinch that begins while the hand moves fast (a lazy susan stroke, a wave) doesn't click."),
+    ("POINTER_GAZE_SCROLL", True, "1", "Gaze + hands", "Three-finger pinch scrolls",
+     "With gaze on: thumb on both the index and middle fingertips, then move the hand up, down or across: it "
+     "scrolls where you looked."),
+    ("POINTER_GAZE_CHORD", False, "1", "Gaze + hands", "Hold both buttons (chord)",
+     "With gaze on: while one hand's pinch is held, the other hand's pinch holds the right button too "
+     "(replaced by the right-drag)."),
+    ("POINTER_RAY_BEAM", False, "1", "Laser", "Show the hand laser's beam",
+     "Off: a hand's laser shows only its dot. On: the whole beam from the hand."),
+    ("POINTER_RAY_READY", True, "6", "Laser", "Laser only when about to pinch",
+     "A hand's laser shows once its thumb and index are within 6 cm, and goes when they open past 10 cm. "
+     "Off: whenever the hand is raised and pointing."),
+    ("POINTER_RAY_RAISED", False, "30", "Laser", "No laser for a low hand",
+     "A hand's laser shows only with the knuckles within 30 cm under your eyes, and goes past 40 cm. "
+     "Off: a low hand points too. Hands typing on a keyboard never do."),
+    ("POINTER_RAY_FORWARD", False, "25", "Laser", "No laser for a hand near the body",
+     "A hand's laser shows only with the knuckles at least 25 cm in front of your eyes, and goes under 20 cm. "
+     "Off: a hand lowered toward you keeps its laser. Hands typing on a keyboard never have one."),
+    ("POINTER_RAY_FIST_CURL", True, "1.1", "Laser", "No laser or clicks in a fist",
+     "Closing the hand drops its laser, and a pinch made while the hand closes into a fist doesn't click."),
+    ("POINTER_PINCH_NO_RAY", False, "1", "Laser", "Pinch with no laser clicks at the pointer",
+     "With no laser up, a pinch or a fist presses where the pointer is and drags it (an air mouse). "
+     "Off: a pinch with no laser does nothing."),
+    ("HANDS_PUSH_GLOW", False, "1", "Feedback", "Push hint glow",
+     "A dim glow on a near screen an open palm faces (a push or flick would send it away)."),
+    ("HANDS_TRACK_GATE", True, "1", "Feedback", "Steady through tracking glitches",
+     "A held screen ignores impossible jumps of the hand and holds still when the hand leaves the cameras' view."),
+]
+# Where the lazy susan brings a screen (SCREEN_SPIN_DISTANCE, m): the Hands page's slider under
+# "Lazy susan brings screens to you", sent live to ft-screens ("spindistance M"). At least 0.9 m,
+# behind frunner's search; a screen pushed or pulled in the slot keeps its own until the reset button.
+SPIN_DISTANCE_DEFAULT, SPIN_DISTANCE_MIN, SPIN_DISTANCE_MAX, SPIN_DISTANCE_STEP = 1.0, 0.9, 3.0, 0.05
+sys.path.insert(0, os.path.join(REPO, "voice"))
+import voice_commands  # noqa: E402  Frametop Voice's commands and settings (standard library)
+import voice_settings  # noqa: E402
+
+VOICE_UNIT = "frametop-voice.service"
+VOICE_SOCKET = f"/run/user/{os.getuid()}/frametop-voice/control.sock"  # ft-voiced's, owner-only
 BTN_MISC = 0x100
 # Header names that mark the start of a range, not a real key (BTN_MOUSE == BTN_LEFT).
 RANGE_ALIASES = {"BTN_MISC", "BTN_MOUSE", "BTN_JOYSTICK", "BTN_GAMEPAD", "BTN_DIGI", "BTN_WHEEL",
@@ -77,8 +235,14 @@ ACTION_LABELS = {
     "screens_toggle": "Hide/show desktop screens", "keyboard_toggle": "Open/close keyboard",
     "float_toggle": "Float window in VR / put it back", "dock_all": "Put all floating windows back",
     "pause_toggle": "Pause/resume Frametop (for VR games)",
+    "dictate": "Dictation: start or stop",
+    "dictate_hold": "Dictation: while held",
     "spin_next": "Spin the panels: next one on the right to the front",
     "spin_prev": "Spin the panels: next one on the left to the front",
+    "carry_toggle": "Carry the panel under the pointer / carry all",
+    "frunner": "Frunner: search apps and remote displays",
+    "hands_toggle": "Hand tracking on/off",
+    "release_keys": "Release all keys (a stuck modifier)",
     "key": "Pass through as key",
     "none": "Do nothing",
 }
@@ -90,7 +254,10 @@ VR_KEYBOARD_MODES = {
     "button": "Only with a mapped mouse or controller button",
     "never": "Never",
 }
-ROLE_LABELS = {"pointer": "3D pointer", "passthrough": "Pass through", "ignore": "Ignore"}
+# "combo" splits a device by node (the relay's node_role): a keyboard's touchpad is the pointer, its
+# keys pass through. The Devices page offers it only for devices with a mouse and a keyboard node.
+ROLE_LABELS = {"pointer": "3D pointer", "passthrough": "Pass through", "combo": "Keyboard + 3D pointer",
+               "ignore": "Ignore"}
 # Frame controller buttons the pointer helper can read (pointer/helper/vrbuttons.h). The
 # system button stays SteamVR's.
 CONTROLLER_BUTTONS = {
@@ -108,9 +275,10 @@ PAUSE_DESKTOP_MODES = {"hide": "Hide it and slow it down (windows stay open)",
                        "close": "Close it (windows close; it starts again when you resume)"}
 PAUSE_REASONS = {"game": "a VR game started", "gesture": "controller gesture", "command": "ft-pause",
                  "settings": "from here"}
-# Gaze mode is a mouse and keyboard feature (docs/gaze-controllers.md; the relay's GAZE_ACTIONS).
-GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right", "gaze_quickcal")
-CONTROLLER_ACTIONS = [a for a in ACTION_LABELS if a not in ("key", "none") + GAZE_ACTIONS]
+# Dictation's controller buttons are on the Voice page: read from SteamVR's web socket, they stay
+# the games' too (a Controllers mapping would take them).
+VOICE_ACTIONS = voice_settings.DICTATION_ACTIONS
+CONTROLLER_ACTIONS = [a for a in ACTION_LABELS if a not in ("key", "none") + GAZE_ACTIONS + VOICE_ACTIONS]
 # Key combinations take any action but key and none; the keyboard clicks only work there.
 SHORTCUT_ACTIONS = [a for a in ACTION_LABELS if a not in ("key", "none")]
 KEYBOARD_ONLY = ("gaze_left", "gaze_right")
@@ -119,6 +287,23 @@ LAYOUT_PATH = os.path.expanduser("~/.config/frametop-layout.json")
 PROFILE = "profile:"
 # "command:CMD": the relay runs CMD with sh -c (key combinations only, here).
 COMMAND = "command:"
+# "run:NAME": the relay runs your command NAME (the Commands page; buttons, controllers and key
+# combinations alike).
+RUN = input_commands.RUN
+# "keys:125+32": the relay taps that key combination where typing goes (Meta+D here; evdev codes
+# as in key_bindings). Set in the rules file by hand for now. The relay's limits (keys_codes): up
+# to 6 keys below 256, none of its KEYS_REFUSED (volume, power, sleep, wake, suspend).
+KEYS = "keys:"
+KEYS_MAX = 6
+KEYS_REFUSED = {113, 114, 115, 116, 142, 143, 205}
+# ft-cmd on the host: the relay links it there at its start (ft_commands.refresh), and this app
+# runs in a container, where the checkout's path may not be the host's.
+HOST_FT_CMD = ft_commands.CLI_LINK
+
+
+def run_actions():
+    """One action per saved command."""
+    return [RUN + c["name"] for c in ft_commands.load()]
 
 
 def profile_actions():
@@ -132,6 +317,10 @@ def action_label(a):
         return f"Open profile {a[len(PROFILE):]}"
     if a.startswith(COMMAND):
         return f"Run: {a[len(COMMAND):]}"
+    if a.startswith(RUN):
+        return f"Run command {a[len(RUN):]}"
+    if is_keys(a):
+        return "Press " + keys_name(int(c) for c in a[len(KEYS):].split("+"))
     return ACTION_LABELS.get(a, a)
 
 
@@ -143,20 +332,40 @@ def is_command(a):
     return a.startswith(COMMAND) and bool(a[len(COMMAND):].strip())
 
 
+def is_run(a):
+    return a.startswith(RUN) and len(a) > len(RUN)
+
+
+def is_keys(a):
+    """A "keys:" action the relay takes."""
+    parts = a[len(KEYS):].split("+") if a.startswith(KEYS) else []
+    return 0 < len(parts) <= KEYS_MAX and all(p.isascii() and p.isdecimal() and 0 < int(p) < 256
+                                              and int(p) not in KEYS_REFUSED for p in parts)
+
+
+def mapped_keys(rules):
+    """The "keys:" actions the rules have, for the pages' action lists (they're set by hand)."""
+    tables = [rules.get("controller_buttons"), rules.get("key_bindings")] + list((rules.get("buttons") or {}).values())
+    return sorted({a for t in tables if isinstance(t, dict) for a in t.values() if isinstance(a, str) and is_keys(a)})
+
+
 def mappable(a):
     """An action a controller button can have."""
-    return a in CONTROLLER_ACTIONS or is_profile(a)
+    return a in CONTROLLER_ACTIONS or is_profile(a) or is_run(a) or is_keys(a)
 
 
 def shortcut_mappable(a):
     """An action a key combination can have: the gaze ones and commands too."""
-    return a in SHORTCUT_ACTIONS or is_profile(a) or is_command(a)
+    return a in SHORTCUT_ACTIONS or is_profile(a) or is_command(a) or is_run(a) or is_keys(a)
 # Gaze mode settings (pointer helper), like POINTER_SETTINGS.
 GAZE_SETTINGS = [
     ("POINTER_GAZE_RETAKE", "Look away to hand back", 5, 1, 45, 0.5, "°"),
     ("POINTER_GAZE_NUDGE_MAX", "Largest correction to learn", 55, 1, 110, 1, "°"),
     ("POINTER_GAZE_HOLD", "Hold still to drag", 0.5, 0.1, 2.0, 0.05, "s"),
     ("POINTER_GAZE_SHOW", "Dot shows after moving", 1.0, 0.0, 5.0, 0.1, "s"),
+    # with hand tracking (POINTER_HANDS): how far a held pinch moves before it nudges, and how fast
+    ("POINTER_GAZE_PINCH_DEADZONE", "Pinch nudge starts after", 4.0, 1.0, 10.0, 0.5, "°"),
+    ("POINTER_GAZE_PINCH_GAIN", "Pinch nudge speed", 0.3, 0.1, 1.0, 0.05, "×"),
 ]
 # In gaze mode, what the mouse's left button does (POINTER_GAZE_MOUSE).
 GAZE_MOUSE = {"precision": "Gaze precision: hold to steer with the mouse, release to click",
@@ -164,18 +373,21 @@ GAZE_MOUSE = {"precision": "Gaze precision: hold to steer with the mouse, releas
 # Key combinations ("key_bindings" in the rules): modifiers, either side folded into the left code.
 MODIFIER_CODES = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125}
 MODIFIER_NAMES = {29: "Ctrl", 42: "Shift", 56: "Alt", 125: "Meta"}
-# What a rules file without "key_bindings" gets (the relay's DEFAULT_KEY_BINDINGS): a Meta tap
-# opens Steam's menu, Meta+J and Meta+K click at the gaze, Meta+Shift+F floats a window,
-# Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels.
-DEFAULT_KEY_BINDINGS = {"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
-                        "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev"}
+# A tap of a right-hand modifier is bound by its own code: that key alone (the relay's modifier_tap).
+RIGHT_MODIFIER_NAMES = {97: "Right Ctrl", 54: "Right Shift", 100: "Right Alt", 126: "Right Meta"}
+
+
+def voice_installed():
+    return os.path.exists(os.path.expanduser(f"~/.config/systemd/user/{VOICE_UNIT}"))
 
 
 def key_bindings(rules):
     """The rules' key combinations, or the defaults if it has none of its own (an empty list
-    counts as its own)."""
+    counts as its own): with Frametop Voice installed, a Right Ctrl tap dictates too."""
     bound = rules.get("key_bindings")
-    return dict(bound) if isinstance(bound, dict) else dict(DEFAULT_KEY_BINDINGS)
+    if isinstance(bound, dict):
+        return dict(bound)
+    return {**DEFAULT_KEY_BINDINGS, **(voice_settings.VOICE_KEY_BINDINGS if voice_installed() else {})}
 # The gaze service's settings (gaze/ft-gazed): whose eye tracking, and the eye bias. GAZE_TRACKER
 # can also be auto (the default): ours when it's installed, else SteamVR's.
 GAZE_TRACKERS = {"steam": "SteamVR's eye tracker", "own": "our own eye tracker"}
@@ -209,6 +421,18 @@ def overlay_app(key):
     return ".".join(key.split(".")[:2])
 
 
+@functools.cache
+def key_names():
+    """code_names(), read once."""
+    return code_names()
+
+
+def keys_name(codes):
+    """Key codes as a combination's name: Meta+Shift+F."""
+    names = key_names()
+    return "+".join(MODIFIER_NAMES.get(c) or names.get(c, f"code {c}").removeprefix("KEY_").title() for c in codes)
+
+
 def code_names():
     """evdev key/button code -> name, from the kernel header (first name wins, BTN_ for buttons)."""
     names = {}
@@ -226,51 +450,25 @@ def code_names():
     return names
 
 
-def read_json(path):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
-
-
 def read_conf():
-    conf = {}
-    try:
-        with open(CONF_PATH) as f:
-            for line in f:
-                line = line.split("#", 1)[0].strip()
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    conf[k.strip()] = v.strip()
-    except OSError:
-        pass
-    return conf
+    return ft_conf.read(CONF_PATH)
 
 
 def write_conf_value(key, value):
-    """Set KEY=value in frametop.conf, keeping comments and the rest of the file."""
-    try:
-        with open(CONF_PATH) as f:
-            lines = f.read().splitlines()
-    except OSError:
-        lines = []
-    for i, line in enumerate(lines):
-        if line.split("#", 1)[0].strip().startswith(f"{key}="):
-            comment = line[line.index("#"):] if "#" in line else ""
-            lines[i] = f"{key}={value}" + (f"   {comment}" if comment else "")
-            break
-    else:
-        lines.append(f"{key}={value}")
-    with open(CONF_PATH, "w") as f:
-        f.write("\n".join(lines) + "\n")
+    """Set KEY=value in frametop.conf, keeping comments and the rest (ft_conf.set_value)."""
+    ft_conf.set_value(key, value, CONF_PATH)
 
 
-def host(*cmd):
-    """Run a command on the SteamOS host (we live in the dev container)."""
+def host(*cmd, timeout=20):
+    """Run a command on the SteamOS host (we live in the dev container), on the host's user
+    bus. The app itself has the bus of the session it was opened from (ft-input-settings),
+    in the Frametop desktop a private one from dbus-run-session; distrobox-host-exec run on
+    that one leaves `systemctl --user` on the host without its user manager ("Failed to
+    connect to user scope bus via local transport")."""
     runner = ["distrobox-host-exec"] if shutil.which("distrobox-host-exec") else []
+    env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=f"unix:path=/run/user/{os.getuid()}/bus")
     try:
-        return subprocess.run(runner + list(cmd), capture_output=True, text=True, timeout=20)
+        return subprocess.run(runner + list(cmd), capture_output=True, text=True, timeout=timeout, env=env)
     except (OSError, subprocess.TimeoutExpired) as e:
         return subprocess.CompletedProcess(cmd, 1, "", str(e))
 
@@ -308,24 +506,45 @@ class Backend(QObject):
     driverChanged = Signal()
     panelsChanged = Signal()
     pauseChanged = Signal()
+    handsChanged = Signal()
+    spinChanged = Signal()  # (its own: handsChanged rebuilds the switches every 5 s, mid-drag too)
+    voiceChanged = Signal()
     activity = Signal(str)  # device id
     captured = Signal(int, str)  # code, name
     capturedController = Signal(str, str)  # button, label
     shortcutCaptureChanged = Signal()
+    modelsChanged = Signal()
+    commandsChanged = Signal()
+    commandAdded = Signal(bool, str)  # startAddCommand's: saved, why not ("" when saved)
+    _bluetoothRead = Signal(object)  # refreshBluetooth's devices, from its thread
+    travelChanged = Signal()
+    _travelRead = Signal(object, str)  # travel mode: on, off or None (unknown), and why it's unknown
     message = Signal(str, bool)  # text, is error
 
     def __init__(self):
         super().__init__()
-        self._names = code_names()
+        self._names = key_names()
         self._nodes = []
         self._pointer_mode = False
         self._capture_id = ""
         self._bluetooth = []
+        self._bluetooth_busy = False   # a read or the fixes running (bluetoothctl, pkexec: not on the UI thread)
+        self._bluetoothRead.connect(self._bluetooth_read, Qt.QueuedConnection)
+        self._travel = None  # SteamVR's travel mode: None until read, or when it can't be
+        self._travel_note = ""
+        self._travel_busy = False  # vrcmd running (on the host: not on the UI thread)
+        self._travel_want = None  # the switch's new state while it's being set, so it doesn't snap back
+        self._travelRead.connect(self._travel_read, Qt.QueuedConnection)
+        self._adding = False
         self._relay_ok = False
         self._capture_vr = False
         self._capture_combo = ""  # the action a key combination is being captured for
         self._combo_mods = set()
         self._combo_tap = None  # a modifier pressed alone, nothing since: released, it's a tap
+        self._combo_tap_code = None  # that modifier's key as it is (Right Ctrl: 97)
+        self._voice = {}  # ft-voiced's status, {} when it isn't running
+        self._voice_enabled = False  # its service starts at login (systemctl, refreshVoice)
+        self._model_fetching = ""  # the whisper model voice/models.sh is downloading
         self._vr = {}  # the helper's vrstatus, {} when it doesn't answer
         self._vr_at = 0.0
         self._gaze = {}  # ft-gazed's status, {} when it isn't running
@@ -337,6 +556,11 @@ class Backend(QObject):
         self._panels = None  # SteamVR's overlays, from the helper; None until it answers
         self._pause = {}  # the relay's pause state ("pause ?"), {} when it doesn't answer
         self._pause_at = 0.0
+        self._hands = {}  # handsmode.py's status, {} until it answers
+        self._hands_lock = threading.Lock()  # one handsmode.py at a time
+        self._hands_refreshing = False
+        self._model_busy = {"hands": "", "eyes": ""}  # what a model download is doing, per kind
+        self._model_views = {}
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         self.sock.bind("")  # autobind an abstract address the relay can reply to
         self.sock.setblocking(False)
@@ -386,6 +610,10 @@ class Backend(QObject):
         if self._pause and now - self._pause_at > 5:
             self._pause = {}
             self.pauseChanged.emit()
+        voice = self._voice_status() if voice_installed() else {}
+        if voice != self._voice:
+            self._voice = voice
+            self.voiceChanged.emit()
 
     def _check_driver(self):
         block = driver_block()
@@ -455,17 +683,22 @@ class Backend(QObject):
                     mod = MODIFIER_CODES[code]
                     if value == 1:
                         self._combo_tap = None if self._combo_mods else mod
+                        self._combo_tap_code = code
                     (self._combo_mods.add if value else self._combo_mods.discard)(mod)
                     if value == 0 and self._combo_tap == mod:
-                        self._end_shortcut_capture(str(mod))  # the relay's modifier tap
+                        # The relay's modifier tap: a right-hand key by its own code, that key alone.
+                        tapped = self._combo_tap_code
+                        self._end_shortcut_capture(str(tapped if tapped in RIGHT_MODIFIER_NAMES else mod))
                 elif value == 1 and code < BTN_MISC:
                     self._end_shortcut_capture("+".join(str(c) for c in sorted(self._combo_mods) + [code]))
                 elif value == 1:
                     self._combo_tap = None  # a mouse button: no tap
             elif t == "event":
                 self.activity.emit(msg["id"])
+                # Not a Keyboard + 3D pointer device's keys: its keyboard node passes through, so
+                # its button map never sees them.
                 if (self._capture_id and msg["id"] == self._capture_id and msg["type"] == "key"
-                        and msg["value"] == 1):
+                        and msg["value"] == 1 and msg.get("role") != "passthrough"):
                     code = int(msg["code"])
                     self._capture_id = ""
                     self.captured.emit(code, self.codeName(code))
@@ -505,6 +738,8 @@ class Backend(QObject):
                 d["name"] = n["name"].replace(" Mouse", "")  # the Z3's nodes are "Z3 Mouse"/"Z3 Keyboard"
         for d in grouped.values():
             d["connected"] = True
+            if rules.get(d["id"], {}).get("role") == "combo":
+                d["role"] = "combo"  # its nodes say pointer and passthrough
         for device_id in set(rules) | {i for i, b in bindings.items() if b}:
             if device_id in grouped:
                 continue
@@ -524,24 +759,25 @@ class Backend(QObject):
 
     @Slot(str, str, str)
     def setRole(self, device_id, role, name):
-        rules = read_json(RULES_PATH)
-        rules.setdefault("devices", {})[device_id] = {"role": role, "name": name}
-        self._save_rules(rules)
+        def change(rules):
+            rules.setdefault("devices", {})[device_id] = {"role": role, "name": name}
+        if self._edit_rules(change) is NOT_SAVED:
+            return
         self.message.emit(f"{name}: {ROLE_LABELS.get(role, role)}", False)
 
     @Slot(str)
     def resetRole(self, device_id):
-        rules = read_json(RULES_PATH)
-        rules.get("devices", {}).get(device_id, {}).pop("role", None)
-        self._save_rules(rules)
+        self._edit_rules(lambda rules: rules.get("devices", {}).get(device_id, {}).pop("role", None))
 
     @Slot(str)
     def forgetDevice(self, device_id):
         """Drop everything saved for a device: role, name, and bindings."""
-        rules = read_json(RULES_PATH)
-        name = rules.get("devices", {}).pop(device_id, {}).get("name", device_id)
-        rules.get("buttons", {}).pop(device_id, None)
-        self._save_rules(rules)
+        def change(rules):
+            rules.get("buttons", {}).pop(device_id, None)
+            return rules.get("devices", {}).pop(device_id, {}).get("name", device_id)
+        name = self._edit_rules(change)
+        if name is NOT_SAVED:
+            return
         self.message.emit(f"Forgot {name}", False)
 
     def _remember_name(self, rules, device_id):
@@ -552,24 +788,33 @@ class Backend(QObject):
                 if d["id"] == device_id:
                     entry["name"] = d["name"]
 
-    def _save_rules(self, rules):
-        os.makedirs(os.path.dirname(RULES_PATH), exist_ok=True)
-        with open(RULES_PATH, "w") as f:
-            json.dump(rules, f, indent=2)
-        self._send("reload")
-        QTimer.singleShot(300, self._refresh)
-        self.mappingsChanged.emit()
-        self.devicesChanged.emit()
+    def _edit_rules(self, change):
+        """Change the rules file: input_rules.edit_rules, which reads, calls change(rules) and
+        writes under the file's lock. Returns what change returned (input_rules.UNCHANGED: not
+        written), or NOT_SAVED, said in the window, when the file there doesn't read (it's kept,
+        with a copy) or another program keeps it locked."""
+        try:
+            result = input_rules.edit_rules(RULES_PATH, change)
+        except (OSError, ft_store.StoreError) as e:
+            self.message.emit(f"Not saved: {e}", True)
+            return NOT_SAVED
+        if result is not input_rules.UNCHANGED:
+            self._send("reload")
+            QTimer.singleShot(300, self._refresh)
+            self.mappingsChanged.emit()
+            self.devicesChanged.emit()
+        return result
 
     # --- buttons ---
     @Slot(int, result=str)
     def codeName(self, code):
         return self._names.get(code, f"code {code}")
 
-    @Property("QVariantList", constant=True)
+    @Property("QVariantList", notify=commandsChanged)
     def actions(self):
         return [{"value": k, "text": v} for k, v in ACTION_LABELS.items() if k not in KEYBOARD_ONLY] + \
-            [{"value": a, "text": action_label(a)} for a in profile_actions()]
+            [{"value": a, "text": action_label(a)} for a in profile_actions() + run_actions()
+             + mapped_keys(read_json(RULES_PATH))]
 
     @Slot(str, result="QVariantList")
     def mappings(self, device_id):
@@ -599,18 +844,19 @@ class Backend(QObject):
 
     @Slot(str, int, str)
     def setMapping(self, device_id, code, action):
-        rules = read_json(RULES_PATH)
-        rules.setdefault("buttons", {}).setdefault(device_id, {})[str(code)] = action
-        self._remember_name(rules, device_id)
-        self._save_rules(rules)
+        def change(rules):
+            rules.setdefault("buttons", {}).setdefault(device_id, {})[str(code)] = action
+            self._remember_name(rules, device_id)
+        if self._edit_rules(change) is NOT_SAVED:
+            return
         self.message.emit(f"{self.codeName(code)} → {action_label(action)}", False)
 
     @Slot(str, int)
     def removeMapping(self, device_id, code):
         """Drop a custom binding: built-in buttons go back to their default, others pass through."""
-        rules = read_json(RULES_PATH)
-        rules.get("buttons", {}).get(device_id, {}).pop(str(code), None)
-        self._save_rules(rules)
+        if self._edit_rules(lambda rules: rules.get("buttons", {}).get(device_id, {}).pop(str(code), None)) \
+                is NOT_SAVED:
+            return
         default = DEFAULT_BUTTONS.get(code)
         self.message.emit(f"{self.codeName(code)}: " + (f"back to {ACTION_LABELS[default]}" if default
                                                          else "binding removed"), False)
@@ -622,9 +868,9 @@ class Backend(QObject):
 
     @Slot(str)
     def clearMappings(self, device_id):
-        rules = read_json(RULES_PATH)
-        removed = len(rules.get("buttons", {}).pop(device_id, {}) or {})
-        self._save_rules(rules)
+        removed = self._edit_rules(lambda rules: len(rules.get("buttons", {}).pop(device_id, {}) or {}))
+        if removed is NOT_SAVED:
+            return
         self.message.emit(f"Removed {removed} binding{'s' if removed != 1 else ''}; defaults restored", False)
 
     # --- pointer settings ---
@@ -658,6 +904,56 @@ class Backend(QObject):
         self.reload_timer.start()
         self.pointerChanged.emit()
 
+    # --- SteamVR travel mode (travel_mode.py) ---
+    @Property(bool, notify=travelChanged)
+    def travelMode(self):
+        if self._travel_busy and self._travel_want is not None:
+            return self._travel_want
+        return self._travel is True
+
+    @Property(bool, notify=travelChanged)
+    def travelKnown(self):
+        return self._travel is not None
+
+    @Property(bool, notify=travelChanged)
+    def travelBusy(self):
+        return self._travel_busy
+
+    @Property(str, notify=travelChanged)
+    def travelNote(self):
+        return self._travel_note
+
+    def _travel_job(self, on=None):
+        """Read SteamVR's travel mode, or set it to ON first (a bool), off the UI thread."""
+        if self._travel_busy:
+            return
+        self._travel_busy, self._travel_want = True, on
+        self.travelChanged.emit()
+
+        def job():
+            try:
+                if on is None:
+                    self._travelRead.emit(*travel_mode.get(host))
+                    return
+                ok, text, got = travel_mode.put(host, on)
+                self.message.emit(text, not ok)
+                self._travelRead.emit(got, "" if got is not None else text)
+            except Exception as e:   # (the switch mustn't stay off)
+                self._travelRead.emit(None, f"Couldn't reach SteamVR's vrcmd: {e}")
+        threading.Thread(target=job, daemon=True).start()
+
+    def _travel_read(self, got, note):
+        self._travel, self._travel_note, self._travel_busy, self._travel_want = got, note, False, None
+        self.travelChanged.emit()
+
+    @Slot()
+    def refreshTravel(self):
+        self._travel_job()
+
+    @Slot(bool)
+    def setTravelMode(self, on):
+        self._travel_job(bool(on))
+
     @Slot(result=bool)
     def recenter(self):
         return self._send("recenter", HELPER)
@@ -665,10 +961,14 @@ class Backend(QObject):
     # --- ignored panels ---
     @staticmethod
     def _ignore_list():
-        return [p.strip() for p in read_conf().get(IGNORE_KEY, "").split(",") if p.strip()]
+        return ft_conf.items(read_conf().get(IGNORE_KEY, ""))
 
     def _save_ignore(self, entries, text):
-        write_conf_value(IGNORE_KEY, ", ".join(entries))
+        # Comma-separated with no space (a ", " list made bash run the second key as a command
+        # when the session sourced the file); a key with a comma or a line break in it
+        # can't be one item, so it isn't kept.
+        write_conf_value(IGNORE_KEY, ft_conf.LIST_SEP.join(
+            e for e in entries if not any(c in e for c in ",\n\r\0")))
         # Only the helper reads it; the relay passes "reload" on only in pointer mode.
         self._send("reload", HELPER)
         self.panelsChanged.emit()
@@ -752,24 +1052,33 @@ class Backend(QObject):
 
     @Slot(bool)
     def setVrKeyboardPersist(self, on):
-        rules = read_json(RULES_PATH)
-        rules["vr_keyboard_persist"] = bool(on)
-        self._save_rules(rules)
+        if self._edit_rules(lambda rules: rules.update(vr_keyboard_persist=bool(on))) is NOT_SAVED:
+            return
         self.message.emit("Keyboard: " + ("stays open until you hide it" if on else "closes with the text field"), False)
+
+    # --- key combinations ---
+    @Property(bool, notify=mappingsChanged)
+    def metaTap(self):
+        return bool(read_json(RULES_PATH).get("meta_tap", True))
+
+    @Slot(bool)
+    def setMetaTap(self, on):
+        self._set_rule("meta_tap", bool(on),
+                       "Meta tap: " + ("does its key combination" if on else "off (Meta alone goes to the desktop as it is)"))
 
     @Slot(str)
     def setVrKeyboard(self, mode):
         if mode not in VR_KEYBOARD_MODES:
             return
-        rules = read_json(RULES_PATH)
-        rules["vr_keyboard"] = mode
-        self._save_rules(rules)
+        if self._edit_rules(lambda rules: rules.update(vr_keyboard=mode)) is NOT_SAVED:
+            return
         self.message.emit(f"Keyboard: {VR_KEYBOARD_MODES[mode].lower()}", False)
 
     # --- controllers ---
     @Property("QVariantList", constant=True)
     def controllerActions(self):
-        return [{"value": a, "text": action_label(a)} for a in CONTROLLER_ACTIONS + profile_actions()]
+        return [{"value": a, "text": action_label(a)} for a in CONTROLLER_ACTIONS + profile_actions() + run_actions()
+                + mapped_keys(read_json(RULES_PATH))]
 
     @Property("QVariantList", constant=True)
     def controllerButtons(self):
@@ -796,32 +1105,30 @@ class Backend(QObject):
 
     @Slot(bool)
     def setControllerInGames(self, on):
-        rules = read_json(RULES_PATH)
-        rules["controller_in_games"] = bool(on)
-        self._save_rules(rules)
+        if self._edit_rules(lambda rules: rules.update(controller_in_games=bool(on))) is NOT_SAVED:
+            return
         self.message.emit("Mapped controller buttons: " + ("taken in games too" if on else "left to games"), False)
 
     @Slot(str, str)
     def setControllerMapping(self, button, action):
         if button not in CONTROLLER_BUTTONS or not mappable(action):
             return
-        rules = read_json(RULES_PATH)
-        rules.setdefault("controller_buttons", {})[button] = action
-        self._save_rules(rules)
+        if self._edit_rules(lambda rules: rules.setdefault("controller_buttons", {}).update({button: action})) \
+                is NOT_SAVED:
+            return
         self.message.emit(f"{CONTROLLER_BUTTONS[button]} → {action_label(action)}", False)
 
     @Slot(str)
     def removeControllerMapping(self, button):
-        rules = read_json(RULES_PATH)
-        rules.get("controller_buttons", {}).pop(button, None)
-        self._save_rules(rules)
+        if self._edit_rules(lambda rules: rules.get("controller_buttons", {}).pop(button, None)) is NOT_SAVED:
+            return
         self.message.emit(f"{CONTROLLER_BUTTONS.get(button, button)}: back to games", False)
 
     @Slot()
     def clearControllerMappings(self):
-        rules = read_json(RULES_PATH)
-        removed = len(rules.pop("controller_buttons", {}) or {})
-        self._save_rules(rules)
+        removed = self._edit_rules(lambda rules: len(rules.pop("controller_buttons", {}) or {}))
+        if removed is NOT_SAVED:
+            return
         self.message.emit(f"Removed {removed} controller binding{'s' if removed != 1 else ''}", False)
 
     @Slot()
@@ -875,10 +1182,19 @@ class Backend(QObject):
             self.message.emit("The input relay isn't running (frametop-input-relay.service)", True)
 
     def _set_rule(self, key, value, text):
-        rules = read_json(RULES_PATH)
-        rules[key] = value
-        self._save_rules(rules)
+        if self._edit_rules(lambda rules: rules.update({key: value})) is NOT_SAVED:
+            return
         self.message.emit(text, False)
+
+    @Property(bool, notify=mappingsChanged)
+    def carryOnFloat(self):
+        return read_json(RULES_PATH).get("carry_on_float") is True
+
+    @Slot(bool)
+    def setCarryOnFloat(self, on):
+        # ft-floatd reads it at each float, so it needs no reload
+        self._set_rule("carry_on_float", bool(on), "Floated windows: " + (
+            "start carried by the 3D mouse" if on else "stay where they float"))
 
     @Property(bool, notify=mappingsChanged)
     def pauseAuto(self):
@@ -940,12 +1256,6 @@ class Backend(QObject):
         names = " and ".join(CONTROLLER_BUTTONS[b] for b in buttons)
         together = " together" if len(buttons) == 2 else ""
         return f"{names}{together}, {'twice' if presses == 2 else 'once'}"
-
-    @Property(str, notify=mappingsChanged)
-    def pauseGestureText(self):
-        g = self.pauseGesture
-        buttons = [b for b in (g["first"], g["second"]) if b]
-        return self.gestureText(buttons, g["presses"]) if buttons else "None"
 
     # --- gaze ---
     def _gaze_status(self, status):
@@ -1037,22 +1347,98 @@ class Backend(QObject):
         self.message.emit("Gaze dot: " + ("always shown" if on else "shown only while the mouse moves it"), False)
 
     # --- key combinations ("key_bindings") ---
-    def comboName(self, combo):
+    def comboName(self, combo, action=None):
+        """A combination's name. A lone modifier is a tap, or held with dictate_hold (the relay
+        starts dictation on its press and stops it on the release)."""
         parts = [int(c) for c in combo.split("+") if c.isdigit()]
+        tap = "" if action == "dictate_hold" else " tap"
         if len(parts) == 1 and parts[0] in MODIFIER_NAMES:
-            return MODIFIER_NAMES[parts[0]] + " tap"
-        return "+".join(MODIFIER_NAMES.get(c) or self.codeName(c).removeprefix("KEY_").title() for c in parts)
+            return MODIFIER_NAMES[parts[0]] + tap
+        if len(parts) == 1 and parts[0] in RIGHT_MODIFIER_NAMES:
+            return RIGHT_MODIFIER_NAMES[parts[0]] + tap
+        return keys_name(parts)
 
     @Property("QVariantList", notify=mappingsChanged)
     def keyShortcuts(self):
         bound = key_bindings(read_json(RULES_PATH))
-        return [{"combo": c, "label": self.comboName(c), "action": a, "actionLabel": action_label(a)}
+        return [{"combo": c, "label": self.comboName(c, a), "action": a, "actionLabel": action_label(a)}
                 for c, a in sorted(bound.items())]
 
-    @Property("QVariantList", constant=True)
+    @Property("QVariantList", notify=commandsChanged)
     def shortcutActions(self):
-        return [{"value": a, "text": action_label(a)} for a in SHORTCUT_ACTIONS + profile_actions()] + \
+        return [{"value": a, "text": action_label(a)} for a in SHORTCUT_ACTIONS + profile_actions() + run_actions()] + \
             [{"value": COMMAND, "text": "Run a command…"}]
+
+    # --- commands (ft_commands) ---
+    @Property("QVariantList", notify=commandsChanged)
+    def commands(self):
+        return input_commands.listed()
+
+    @Slot(str, result=str)
+    def commandNameProblem(self, name):
+        """Why `name` can't be a new command's name ("" if it can; input_commands.name_problem)."""
+        return input_commands.name_problem(name, host)
+
+    @Slot(str, str, result=bool)
+    def addCommand(self, name, run):
+        saved, text = input_commands.add(name, run, self.commandNameProblem)
+        if not saved:
+            self.message.emit(text, True)
+            return False
+        self.commandsChanged.emit()
+        self.message.emit(text, False)
+        return True
+
+    @Slot(str, str)
+    def startAddCommand(self, name, run):
+        """The Add button's: the name check (on the host too) and the save, once, off the UI
+        thread; commandAdded tells the page."""
+        if self._adding:
+            return
+        self._adding = True
+
+        def job():
+            # As addCommand's page did: a name problem goes under the field, a save error to
+            # the message bar.
+            saved, problem = False, ""
+            try:
+                problem = self.commandNameProblem(name)
+                if not problem:
+                    saved, text = input_commands.add(name, run, lambda _name: "")
+                    self.message.emit(text, not saved)
+                    if saved:
+                        self.commandsChanged.emit()
+            except Exception as e:   # (the button mustn't stay off)
+                self.message.emit(f"Couldn't save {name}: {e}", True)
+            finally:
+                self._adding = False
+                self.commandAdded.emit(saved, problem)
+        threading.Thread(target=job, daemon=True).start()
+
+    @Slot(str)
+    def removeCommand(self, name):
+        try:
+            ft_commands.remove(name)
+        except (OSError, ft_commands.CommandsFileError) as e:
+            self.message.emit(f"Couldn't remove {name}: {e}", True)
+            return
+        # Buttons, controller buttons and key combinations that ran it would do nothing now.
+        # Nothing ran it (the file as it reads now, leniently): the file isn't touched.
+        dropped = input_commands.drop_bindings(read_json(RULES_PATH), name)
+        if dropped:
+            def change(rules):
+                return input_commands.drop_bindings(rules, name) or input_rules.UNCHANGED
+            dropped = self._edit_rules(change)
+        saved = dropped is not NOT_SAVED   # (the command is gone either way)
+        dropped = dropped if isinstance(dropped, int) else 0
+        self.commandsChanged.emit()
+        if saved:
+            self.message.emit(input_commands.removed_text(name, dropped), False)
+
+    @Slot(str)
+    def runCommand(self, name):
+        """Run it now, on the host (input_commands.run_now)."""
+        self.message.emit(*input_commands.run_now(name, host, HOST_FT_CMD))
 
     @Property(bool, notify=shortcutCaptureChanged)
     def capturingShortcut(self):
@@ -1080,18 +1466,230 @@ class Backend(QObject):
         self.shortcutCaptureChanged.emit()
 
     def _save_shortcut(self, combo, action):
-        rules = read_json(RULES_PATH)
-        rules["key_bindings"] = dict(key_bindings(rules), **{combo: action})
-        self._save_rules(rules)
+        if self._edit_rules(lambda rules: rules.update(key_bindings=dict(key_bindings(rules), **{combo: action}))) \
+                is NOT_SAVED:
+            return
         self.message.emit(f"{self.comboName(combo)} → {action_label(action)}", False)
 
     @Slot(str)
     def removeShortcut(self, combo):
-        rules = read_json(RULES_PATH)
-        rules["key_bindings"] = key_bindings(rules)
-        rules["key_bindings"].pop(combo, None)
-        self._save_rules(rules)
+        def change(rules):
+            rules["key_bindings"] = key_bindings(rules)
+            rules["key_bindings"].pop(combo, None)
+        if self._edit_rules(change) is NOT_SAVED:
+            return
         self.message.emit(f"{self.comboName(combo)} removed", False)
+
+    # --- voice dictation (Frametop Voice) ---
+    def _voice_status(self):
+        """ft-voiced's "status" ({} when it isn't running)."""
+        try:
+            with socket.socket(socket.AF_UNIX) as s:
+                s.settimeout(0.3)
+                s.connect(VOICE_SOCKET)
+                s.sendall(b"status\n")
+                return json.loads(s.makefile().readline())
+        except (OSError, ValueError):
+            return {}
+
+    @Slot()
+    def refreshVoice(self):
+        """Whether the service starts at login: asked of the host's systemd, so only when the
+        Voice page opens and after a change, not every 2 s."""
+        self._voice_enabled = host("systemctl", "--user", "is-enabled", VOICE_UNIT).stdout.strip() == "enabled"
+        self.voiceChanged.emit()
+
+    @Property(bool, notify=voiceChanged)
+    def voiceInstalled(self):
+        return voice_installed()
+
+    @Property(bool, notify=voiceChanged)
+    def voiceEnabled(self):
+        return self._voice_enabled
+
+    @Property("QVariantMap", notify=voiceChanged)
+    def voiceStatus(self):
+        v = self._voice
+        return {"running": bool(v), "dictating": bool(v.get("dictating")), "wake": bool(v.get("wake_enabled")),
+                "mic": bool(v.get("mic_open"))}
+
+    @Slot(bool)
+    def setVoiceOn(self, on):
+        result = host("systemctl", "--user", "enable" if on else "disable", "--now", VOICE_UNIT)
+        if result.returncode == 0:
+            self.message.emit("Voice dictation " + ("on" if on else "off, and it won't start at login"), False)
+        else:
+            self.message.emit("Couldn't turn voice dictation " + ("on: " if on else "off: ")
+                              + (result.stderr.strip() or "systemctl failed")[:160], True)
+        self.refreshVoice()
+
+    @Property("QVariantMap", notify=voiceChanged)
+    def voiceSettings(self):
+        s = voice_settings.load()
+        return {k: s[k] for k in voice_settings.DEFAULT}
+
+    def _set_voice(self, key, value, text):
+        s = voice_settings.load()
+        s[key] = value
+        try:
+            voice_settings.save(s)
+        except (OSError, ft_store.StoreError) as e:
+            self.message.emit(f"Not saved: {e}", True)
+        else:
+            self.message.emit(text, False)
+        self.voiceChanged.emit()
+
+    @Slot(str, bool)
+    def setVoiceOption(self, key, on):
+        texts = {"live_typing": ("Typing as you talk", "Typing when you stop talking"),
+                 "sounds": ("A tone when dictation starts and stops", "No dictation sounds"),
+                 "wake_word": ("Listening for the wake word", "Wake word off")}
+        if key in texts:
+            self._set_voice(key, bool(on), texts[key][0 if on else 1])
+
+    @Property("QVariantList", constant=True)
+    def voiceModes(self):
+        return [{"value": "hold", "text": "Hold to talk"},
+                {"value": "toggle", "text": "Press to start, press again to stop"}]
+
+    @Slot(str)
+    def setVoiceControllerMode(self, mode):
+        if mode in voice_settings.MODES:
+            self._set_voice("controller_mode", mode, "Controller: " + ("hold to talk" if mode == "hold"
+                                                                     else "press to start and stop"))
+
+    @Property("QVariantList", notify=voiceChanged)
+    def voiceButtons(self):
+        return [{"button": b, "label": CONTROLLER_BUTTONS.get(b, b)} for b in voice_settings.load()["controller"]]
+
+    @Slot(str)
+    def addVoiceButton(self, button):
+        buttons = voice_settings.load()["controller"]
+        if button in CONTROLLER_BUTTONS and button not in buttons:
+            self._set_voice("controller", buttons + [button], f"Dictation: {CONTROLLER_BUTTONS[button]}")
+
+    @Slot(str)
+    def removeVoiceButton(self, button):
+        buttons = voice_settings.load()["controller"]
+        if button in buttons:
+            self._set_voice("controller", [b for b in buttons if b != button],
+                            f"{CONTROLLER_BUTTONS.get(button, button)}: no longer dictation")
+
+    @Slot(str)
+    def setWakePhrases(self, text):
+        phrases = list(dict.fromkeys(p for p in (voice_settings.clean_phrase(t) for t in re.split(r"[,\n]", text)) if p))
+        if phrases and phrases != voice_settings.load()["wake_phrases"]:
+            self._set_voice("wake_phrases", phrases, "Wake word: " + ", ".join(p.title() for p in phrases))
+
+    @Property("QVariantList", notify=mappingsChanged)
+    def dictationKeys(self):
+        return [{"combo": c, "label": self.comboName(c, a), "actionLabel": action_label(a)}
+                for c, a in sorted(key_bindings(read_json(RULES_PATH)).items()) if a in VOICE_ACTIONS]
+
+    @Property("QVariantList", constant=True)
+    def dictationKeyModes(self):
+        return [{"value": "dictate", "text": "Tap to start, tap again to stop"},
+                {"value": "dictate_hold", "text": "Hold to talk"}]
+
+    @Property(str, notify=mappingsChanged)
+    def dictationKeyMode(self):
+        """dictate or dictate_hold when all of dictation's keys do the same, else ""."""
+        modes = {a for a in key_bindings(read_json(RULES_PATH)).values() if a in VOICE_ACTIONS}
+        return modes.pop() if len(modes) == 1 else ""
+
+    @Slot(str)
+    def setDictationKeyMode(self, action):
+        """Every dictation key toggles (dictate) or is held to talk (dictate_hold)."""
+        if action not in VOICE_ACTIONS:
+            return
+        def change(rules):
+            bound = key_bindings(rules)
+            if not any(a in VOICE_ACTIONS for a in bound.values()):
+                return input_rules.UNCHANGED
+            rules["key_bindings"] = {c: action if a in VOICE_ACTIONS else a for c, a in bound.items()}
+        result = self._edit_rules(change)
+        if result is input_rules.UNCHANGED:
+            self.message.emit("Dictation has no keys: add one on the Keyboard page", True)
+            return
+        if result is NOT_SAVED:
+            return
+        self.message.emit("Dictation keys: " + ("hold to talk" if action == "dictate_hold"
+                                                 else "tap to start, tap again to stop"), False)
+
+    @Property("QVariantList", constant=True)
+    def voiceLanguages(self):
+        return [{"value": k, "text": v} for k, v in voice_settings.LANGUAGES.items()]
+
+    @Slot(str)
+    def setVoiceLanguage(self, language):
+        if language in voice_settings.LANGUAGES:
+            s = voice_settings.load()
+            s["language"] = language
+            want = voice_settings.model_for(s)
+            self._set_voice("language", language, "Dictation language: " + voice_settings.LANGUAGES[language]
+                            + ("" if want == s["model"] else f" (with whisper {want})"))
+            if not voice_settings.model_installed(want):
+                self._fetch_model(want)
+
+    @Property("QVariantList", notify=voiceChanged)
+    def voiceModels(self):
+        """Whisper models for the Voice page: English-only ones only while the language is English."""
+        english = voice_settings.load()["language"] == "en"
+        return [{"value": name, "installed": voice_settings.model_installed(name),
+                 "text": f"{name} ({mb} MB{', English only' if langs == 'en' else ''}"
+                         f"{'' if voice_settings.model_installed(name) else ', downloads when chosen'})"}
+                for name, (_, mb, langs) in voice_settings.WHISPER_MODELS.items() if english or langs != "en"]
+
+    @Property(str, notify=voiceChanged)
+    def voiceModel(self):
+        """The model ft-voiced uses (voice_settings.model_for)."""
+        return voice_settings.model_for(voice_settings.load())
+
+    @Property(str, notify=voiceChanged)
+    def voiceModelFetching(self):
+        return self._model_fetching
+
+    @Slot(str)
+    def setVoiceModel(self, name):
+        if name not in voice_settings.WHISPER_MODELS or self._model_fetching:
+            return
+        if voice_settings.model_installed(name):
+            self._set_voice("model", name, f"Whisper model: {name}")
+        else:
+            self._fetch_model(name, then_choose=True)
+
+    def _fetch_model(self, name, then_choose=False):
+        """voice/models.sh model NAME, on the host in the background (up to 574 MB); then the
+        model is chosen. ft-voiced restarts the whisper service when its model changes."""
+        if self._model_fetching:
+            return
+        self._model_fetching = name
+        self.voiceChanged.emit()
+        self.message.emit(f"Downloading whisper {name} ({voice_settings.WHISPER_MODELS[name][1]} MB)…", False)
+
+        def job():
+            result = host(os.path.join(REPO, "voice", "models.sh"), "model", name, timeout=3600)
+            if result.returncode != 0 or not voice_settings.model_installed(name):
+                err = (result.stderr.strip() or result.stdout.strip() or "no answer").splitlines()
+                self.message.emit(f"Couldn't download whisper {name}: " + (err[-1] if err else "")[:160], True)
+            elif then_choose:
+                s = voice_settings.load()
+                s["model"] = name
+                try:
+                    voice_settings.save(s)
+                    self.message.emit(f"Whisper model: {name}, downloaded", False)
+                except (OSError, ft_store.StoreError) as e:
+                    self.message.emit(f"Whisper {name} downloaded, not chosen: {e}", True)
+            else:
+                self.message.emit(f"Whisper {name} downloaded", False)
+            self._model_fetching = ""  # last: the page waits for this
+            self.voiceChanged.emit()
+        threading.Thread(target=job, daemon=True).start()
+
+    @Property("QVariantList", notify=voiceChanged)
+    def voiceCommands(self):
+        commands, _ = voice_commands.parse(voice_settings.load()["commands"])
+        return [{"say": " / ".join(p for p, _ in c.phrases), "run": " ".join(c.run)} for c in commands]
 
     @Property(str, notify=gazeChanged)
     def gazeTracker(self):
@@ -1120,11 +1718,6 @@ class Backend(QObject):
         """The eye bias: "auto", "left" or "right" (GAZE_EYE)."""
         v = read_conf().get("GAZE_EYE", "auto")
         return v if v in GAZE_EYES else "auto"
-
-    @Slot(str)
-    def setGazeTracker(self, tracker):
-        if tracker in GAZE_TRACKERS:
-            self._set_gaze("GAZE_TRACKER", tracker, f"Gaze from {GAZE_TRACKERS[tracker]}")
 
     @Slot(str)
     def setGazeEye(self, eye):
@@ -1182,6 +1775,21 @@ class Backend(QObject):
         """The full calibration in the panel fixed to the headset (gaze/gazecheck.py)."""
         self._gaze_check("calibrate", "Calibration: look at each dot in the headset; right click or Meta+K stops")
 
+    @Slot()
+    def openTour(self):
+        """Frametop Tour (tour/ft_tour.py), in this container as it runs."""
+        ok, _pid = QProcess.startDetached(sys.executable, [os.path.join(REPO, "tour", "ft_tour.py")])
+        if not ok:
+            self.message.emit("Couldn't start Frametop Tour", True)
+
+    @Slot()
+    def openControlsGuide(self):
+        """Open the reference page without changing the running settings app's environment."""
+        ok, _pid = QProcess.startDetached("env", ["FT_TOUR_PAGE=recenter", sys.executable,
+                                                  os.path.join(REPO, "tour", "ft_tour.py")])
+        if not ok:
+            self.message.emit("Couldn't start the controls guide", True)
+
     def _gaze_check(self, command, done):
         if self._send(command, GAZED):
             self._check_asked = time.monotonic()
@@ -1211,6 +1819,326 @@ class Backend(QObject):
         except OSError as e:
             self.message.emit(f"Couldn't open the gaze probe: {e}", True)
 
+    # --- hands ---
+    @Property("QVariantList", constant=True)
+    def handsModes(self):
+        return [{"value": k, "text": v} for k, v in HANDS_MODES.items()]
+
+    @Property(str, notify=handsChanged)
+    def handsMode(self):
+        return handsmode.mode_of(read_conf())
+
+    @Property("QVariantMap", notify=handsChanged)
+    def handsStatus(self):
+        """handsmode.py's status: "summary", "problem" (why it can't run, or ""), and the rest."""
+        return self._hands
+
+    def _hands_run(self, *args):
+        """handsmode.py on the host (systemctl, getcap and the cameras are there), off the UI
+        thread: distrobox-host-exec takes a moment. Then its status."""
+        with self._hands_lock:
+            result = host("python3", HANDSMODE, *args) if args else None
+            st = host("python3", HANDSMODE, "status", "--json")
+            try:
+                self._hands = json.loads(st.stdout)
+            except ValueError:
+                self._hands = {"summary": "", "problem": "Couldn't ask the host about hand tracking: "
+                               + (st.stderr.strip() or st.stdout.strip() or "no answer")[:160]}
+            self._hands_refreshing = False
+        self.handsChanged.emit()
+        return result
+
+    @Slot()
+    def refreshHands(self):
+        if not self._hands_refreshing:
+            self._hands_refreshing = True
+            threading.Thread(target=self._hands_run, daemon=True).start()
+
+    @Slot(str)
+    def setHandsMode(self, mode):
+        """Written here so the page follows at once; handsmode.py set writes the same and applies it
+        (starts and stops the services), and the input relay rereads it (games keep the hands with
+        HANDS_MODE=always)."""
+        if mode not in HANDS_MODES:
+            return
+        write_conf_value("HANDS_MODE", mode)
+        self.handsChanged.emit()
+        self.reload_timer.start()
+
+        def job():
+            result = self._hands_run("set", mode)
+            if result.returncode != 0:
+                self.message.emit("Couldn't apply it: " + (result.stderr.strip() or "no answer")[:160], True)
+            else:
+                self.message.emit("Hand tracking: " + HANDS_MODES[mode].split(":")[0], False)
+        threading.Thread(target=job, daemon=True).start()
+
+    @Property("QVariantMap", notify=handsChanged)
+    def handMethods(self):
+        """{method: on} for the Hands page's input switches (handsmode.methods_of)."""
+        return handsmode.methods_of(read_conf())
+
+    @Slot(str, bool)
+    def setHandMethod(self, method, on):
+        """One hand input on or off, the other two left as they are (handsmode.method_writes). The
+        helper and the relay reread frametop.conf; ft-screens hears direct touch now."""
+        if method not in HAND_METHODS:
+            return
+        writes = handsmode.method_writes(read_conf(), method, on)
+        for key, value in writes.items():
+            write_conf_value(key, value)
+        if "HANDS_NEAR" in writes:
+            self._send("handinput " + ("off" if writes["HANDS_NEAR"] == "0" else "on"), SCREENS)
+        self.reload_timer.start()
+        self.handsChanged.emit()
+        self.message.emit(f"{HAND_METHODS[method]}: {'on' if on else 'off'}", False)
+
+    @Property("QVariantList", notify=handsChanged)
+    def handInteractions(self):
+        """The Hands page's interaction switches, in order: key, label, tip, group (the first of each
+        group carries it, for the section's label), on."""
+        conf, out, last = read_conf(), [], None
+        for key, default, _, group, label, tip in HAND_INTERACTIONS:
+            raw = conf.get(key, "").strip()
+            on = default if raw == "" else raw not in ("0", "0.0", "off", "no")
+            out.append({"key": key, "label": label, "tip": tip, "group": group if group != last else "", "on": on})
+            last = group
+        return out
+
+    @Slot(str, bool)
+    def setHandInteraction(self, key, on):
+        """One interaction on or off: frametop.conf (ft-screens reads it at start) and ft-screens now
+        (the pointer helper's POINTER_ ones: it reloads its settings)."""
+        entry = next((e for e in HAND_INTERACTIONS if e[0] == key), None)
+        if entry is None:
+            return
+        write_conf_value(key, entry[2] if on else "0")
+        if key.startswith("POINTER_"):   # the pointer helper's: it re-reads frametop.conf
+            self._send("reload", HELPER)
+        else:
+            self._send(f"handsetting {key} {1 if on else 0}", SCREENS)
+        self.handsChanged.emit()
+        self.message.emit(f"{entry[4]}: {'on' if on else 'off'}", False)
+
+    @Property("QVariantMap", constant=True)
+    def spinDistanceRange(self):
+        return {"min": SPIN_DISTANCE_MIN, "max": SPIN_DISTANCE_MAX, "step": SPIN_DISTANCE_STEP,
+                "default": SPIN_DISTANCE_DEFAULT}
+
+    @Property(float, notify=spinChanged)
+    def spinDistance(self):
+        """SCREEN_SPIN_DISTANCE as ft-screens takes it: never nearer than 0.9 m (frunner's spot), at most 3."""
+        try:
+            v = float(read_conf().get("SCREEN_SPIN_DISTANCE", ""))
+        except ValueError:
+            return SPIN_DISTANCE_DEFAULT
+        return min(max(v, SPIN_DISTANCE_MIN), SPIN_DISTANCE_MAX)
+
+    @Slot(float)
+    def setSpinDistance(self, value):
+        """SCREEN_SPIN_DISTANCE, and to ft-screens now: the next screen the lazy susan brings comes that far."""
+        value = format(round(min(max(value, SPIN_DISTANCE_MIN), SPIN_DISTANCE_MAX), 2), "g")
+        write_conf_value("SCREEN_SPIN_DISTANCE", value)
+        self._send(f"spindistance {value}", SCREENS)
+        self.spinChanged.emit()
+
+    @Property("QVariantMap", constant=True)
+    def handsMarginRange(self):
+        return {"min": handsmode.MARGIN_MIN, "max": handsmode.MARGIN_MAX, "step": handsmode.MARGIN_STEP,
+                "default": handsmode.MARGIN_DEFAULT}
+
+    @Property(bool, notify=handsChanged)
+    def handsCutouts(self):
+        return read_conf().get("HANDS_CUTOUTS", "0") == "1"
+
+    @Slot(bool)
+    def setHandsCutouts(self, on):
+        """HANDS_CUTOUTS, and to ft-screens now: a hole per hand in Frametop's panels, so Room View
+        shows the real hands through them (off, the default since 920d16e: only the drawn hands)."""
+        write_conf_value("HANDS_CUTOUTS", "1" if on else "0")
+        self._send("cutouts on" if on else "cutouts off", SCREENS)
+        self.handsChanged.emit()
+
+    @Property(float, notify=handsChanged)
+    def handsMargin(self):
+        return handsmode.margin_of(read_conf())
+
+    @Slot(float)
+    def setHandsMargin(self, value):
+        """HANDS_MATTE_MARGIN, and to ft-screens now (only the still margin: its motion part stays).
+        Without the desktop running it takes it when it starts."""
+        value = format(round(min(max(value, 0.0), 10.0), 2), "g")
+        write_conf_value("HANDS_MATTE_MARGIN", value)
+        self._send(f"cutouts margin {value}", SCREENS)
+        self.handsChanged.emit()
+
+    # --- models (hands and eyes: models/catalog.py) ---
+    def _model_view(self, kind):
+        """The picker's view of a kind: the catalog's entries as options, a "latest" one first (it
+        follows new versions), which one the settings pick ("choice") and which version runs ("running")."""
+        try:
+            v = model_catalog.view(kind)
+        except (OSError, ValueError, model_catalog.CatalogError) as e:
+            return {"error": f"The {kind} model list didn't load: {e}", "options": [], "metrics": []}
+        conf = read_conf()
+        by = {m["name"]: m for m in v["models"]}
+        choice = v["setting"]
+        note = ""
+        if kind == "eyes" and self.gazeTracker == "steam":
+            choice = "steamvr"
+        elif "/" in choice:
+            note = f"EYES_MODEL is a folder of your own ({choice}); pick one here to replace it."
+            choice = ""
+        if kind == "hands" and (os.environ.get("FT_HANDS_MODELS") or conf.get("HANDS_MODELS")):
+            note = ("HANDS_MODELS in frametop.conf names a folder of its own, and ft-hands uses that instead "
+                    "of what's picked here. Remove it to use this choice.")
+        running = v["latest"] if choice == "latest" else choice
+        if kind == "hands" and choice == "latest":
+            # hands/models.sh keeps latest in hands/models/student, on its own pin.
+            here = ""
+            try:
+                with open(os.path.join(REPO, "hands", "models", "student", "PIN")) as f:
+                    here = next((ln.split()[1] for ln in f if ln.startswith("model ")), "")
+            except (OSError, IndexError):
+                pass
+            running = here or "stock"
+            if not here:
+                note = note or (f"This install has no fine-tuned models yet, so stock runs: {v['latest']} comes "
+                                "when hand tracking next starts online (hands/models.sh).")
+            elif here != v["latest"]:
+                note = note or f"This install still has {here}: {v['latest']} comes when hand tracking next starts."
+        elif kind == "eyes" and choice == "latest":
+            running = v["resolved"]["name"] or "classic"
+            if not v["resolved"]["folder"]:
+                note = note or f"{v['latest']} isn't downloaded yet: the classic tracker runs until it is."
+        # One row a version. The latest version's row is "latest": picking it follows updates. Set by
+        # name in frametop.conf, it shows on that row as pinned (not following) until picked here.
+        pinned = choice == v["latest"]
+        if pinned:
+            choice = "latest"
+            setting = "HANDS_MODEL" if kind == "hands" else "EYES_MODEL"
+            note = note or (f"{setting} in frametop.conf names {v['latest']}, so it stays on {v['latest']} when a "
+                            "newer version comes. Use this to follow updates.")
+        opts = []
+        for m in v["models"]:
+            tag = MODEL_TAGS.get(m["status"]) or MODEL_KIND_TAGS.get(m["kind"], "")
+            if m["name"] == v["latest"]:
+                opts.append(dict(m, name="latest", target=m["name"], follows=True,
+                                 tag=(tag + "  ·  " if tag else "") + "Latest",
+                                 installed=True if kind == "hands" else m["installed"]))
+            else:
+                opts.append(dict(m, target=m["name"], follows=False, tag=tag))
+        for o in opts:
+            o["bench"] = {k: (None if val is None else float(val)) for k, val in o["bench"].items()}
+        checked = time.strftime("%H:%M", time.localtime(v["checked"])) if v["checked"] else ""
+        return {"options": opts, "metrics": v["metrics"], "byName": by, "latest": v["latest"],
+                "baseline": v["baseline"], "choice": choice, "pinned": pinned, "running": running, "note": note,
+                "source": v["source"], "checked": checked, "error": ""}
+
+    def _models_update(self):
+        self._model_views = {k: self._model_view(k) for k in ("hands", "eyes")}
+        self.modelsChanged.emit()
+
+    @Property("QVariantMap", notify=modelsChanged)
+    def handModels(self):
+        if "hands" not in self._model_views:   # (no signal from inside a getter: a binding loop)
+            self._model_views["hands"] = self._model_view("hands")
+        return self._model_views["hands"]
+
+    @Property("QVariantMap", notify=modelsChanged)
+    def eyeModels(self):
+        if "eyes" not in self._model_views:   # (no signal from inside a getter: a binding loop)
+            self._model_views["eyes"] = self._model_view("eyes")
+        return self._model_views["eyes"]
+
+    @Property("QVariantMap", notify=modelsChanged)
+    def modelBusy(self):
+        return self._model_busy
+
+    def _model_job(self, kind, work):
+        """Run a download (or a catalog check) off the UI thread, one per kind at a time."""
+        if self._model_busy[kind]:
+            return
+
+        def job():
+            try:
+                work()
+            except (OSError, ValueError, model_catalog.CatalogError) as e:
+                self.message.emit(str(e), True)
+            finally:
+                self._model_busy[kind] = ""
+                self._models_update()
+        self._model_busy[kind] = "working…"
+        self.modelsChanged.emit()
+        threading.Thread(target=job, daemon=True).start()
+
+    def _busy(self, kind, text):
+        self._model_busy[kind] = text
+        self.modelsChanged.emit()
+
+    @Slot()
+    def reloadModels(self):
+        """Read the catalogs and the downloads again (the pages call it when they open)."""
+        self._models_update()
+
+    @Slot(str)
+    def refreshModels(self, kind):
+        """The kind's catalog from GitHub (this install's branch): new versions and notes."""
+        if kind not in model_catalog.SPECS:
+            return
+
+        def work():
+            self._busy(kind, "checking for new versions…")
+            ok, msg = model_catalog.refresh(kind)
+            self.message.emit(("Hand" if kind == "hands" else "Eye") + " models: " + msg, not ok)
+        self._model_job(kind, work)
+
+    @Slot(str, str)
+    def useModel(self, kind, name):
+        """Pick a model: download it first if it needs that, then write the setting and apply it.
+        hands: HANDS_MODEL (latest, stock or a version), and hand tracking restarts to load it.
+        eyes: steamvr is GAZE_TRACKER=steam; anything else is our tracker (GAZE_TRACKER=own) with
+        EYES_MODEL (classic, latest or a version), which the gaze service applies (it restarts ft-eyes)."""
+        if kind not in model_catalog.SPECS or not (name == "latest" or model_catalog.NAME.fullmatch(name)):
+            return
+        view = self._model_views.get(kind) or self._model_view(kind)
+        target = view["latest"] if name == "latest" else name
+        e = view["byName"].get(target)
+        if e is None:
+            return
+
+        def work():
+            if not e["builtin"] and not (kind == "hands" and name == "latest"):
+                if not e["usable"]:
+                    raise model_catalog.CatalogError(f"{target} needs a newer Frametop")
+                if not e["installed"]:
+                    model_catalog.fetch(kind, target, progress=lambda t: self._busy(kind, t + "…"))
+            if kind == "hands":
+                write_conf_value("HANDS_MODEL", name)
+                r = host("systemctl", "--user", "try-restart", "frametop-hands.service")
+                running = r.returncode == 0 and host("systemctl", "--user", "is-active", "--quiet",
+                                                     "frametop-hands.service").returncode == 0
+                self.message.emit(f"Hand model: {e['title']}" + (", hand tracking restarted" if running
+                                                                  else " (used when hand tracking starts)"), False)
+                self.handsChanged.emit()
+            elif name == "steamvr":
+                self._set_gaze("GAZE_TRACKER", "steam", "Eye tracker: SteamVR's")
+            else:
+                write_conf_value("EYES_MODEL", name)
+                self._set_gaze("GAZE_TRACKER", "own", f"Eye tracker: {e['title']}"
+                               + ("" if e["builtin"] else " (calibrate it once: each net keeps its own calibration)"))
+        self._model_job(kind, work)
+
+    @Slot(str, str)
+    def removeModel(self, kind, name):
+        """Delete a downloaded version (not the one in use)."""
+        view = self._model_views.get(kind) or self._model_view(kind)
+        if kind not in model_catalog.SPECS or name in (view["running"], view["choice"]):
+            return
+        if model_catalog.remove(kind, name):
+            self.message.emit(f"Removed the download of {name}", False)
+        self._models_update()
+
     # --- bluetooth ---
     @Property("QVariantList", notify=bluetoothChanged)
     def bluetooth(self):
@@ -1218,6 +2146,36 @@ class Backend(QObject):
 
     @Slot()
     def refreshBluetooth(self):
+        """Reads the paired devices (bluetoothctl on the host, up to 20 s each) off the UI thread."""
+        if self._bluetooth_busy:
+            return
+        self._bluetooth_busy = True
+        threading.Thread(target=self._bluetooth_job, daemon=True).start()
+
+    def _bluetooth_job(self, fixes=False):
+        """Off the UI thread: the fixes (pkexec waits for its password prompt: up to host()'s
+        20 s) if asked, then the devices; _bluetooth_read always follows, so busy ends."""
+        devices = self._bluetooth
+        try:
+            if fixes:
+                result = host("pkexec", "/etc/steamframe/bt-fixups.sh")
+                if result.returncode == 0:
+                    self.message.emit("Bluetooth fixes applied: " + " ".join(result.stdout.split())[:120], False)
+                else:
+                    self.message.emit("Couldn't apply the Bluetooth fixes: " + (result.stderr.strip() or "cancelled")[:160], True)
+            devices = self._read_bluetooth()
+        except Exception as e:
+            self.message.emit(f"Couldn't read Bluetooth: {e}", True)
+        finally:
+            self._bluetoothRead.emit(devices)
+
+    def _bluetooth_read(self, devices):
+        self._bluetooth_busy = False
+        self._bluetooth = devices
+        self.bluetoothChanged.emit()
+
+    @staticmethod
+    def _read_bluetooth():
         devices = []
         listing = host("bluetoothctl", "devices", "Paired")
         for line in listing.stdout.splitlines():
@@ -1229,8 +2187,7 @@ class Backend(QObject):
             devices.append({"address": parts[1], "name": parts[2],
                             "connected": "Connected: yes" in info,
                             "battery": int(battery.group(1)) if battery else -1})
-        self._bluetooth = devices
-        self.bluetoothChanged.emit()
+        return devices
 
     @Slot()
     def applyBluetoothFixes(self):
@@ -1242,12 +2199,11 @@ class Backend(QObject):
             else:
                 self.message.emit("Bluetooth fixes aren't installed (setup/bluetooth/install.sh)", True)
             return
-        result = host("pkexec", "/etc/steamframe/bt-fixups.sh")
-        if result.returncode == 0:
-            self.message.emit("Bluetooth fixes applied: " + " ".join(result.stdout.split())[:120], False)
-        else:
-            self.message.emit("Couldn't apply the Bluetooth fixes: " + (result.stderr.strip() or "cancelled")[:160], True)
-        self.refreshBluetooth()
+        if self._bluetooth_busy:
+            self.message.emit("Still reading the Bluetooth devices: try again in a moment", False)
+            return
+        self._bluetooth_busy = True
+        threading.Thread(target=self._bluetooth_job, args=(True,), daemon=True).start()
 
 
 def main():

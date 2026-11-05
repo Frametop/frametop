@@ -4,8 +4,10 @@ Frametop is a desktop for the Steam Frame that runs on the headset itself, with 
 
 - **Screens that are real monitors.** Each KDE Plasma screen has its own resolution and shape: an ultrawide in front, portrait screens beside it. Move, resize, curve, and roll them, or pin one to your wrist or your head. They come back to your layout when the desktop starts.
 - **Windows that float on their own.** Take any app window off the screens into a panel of its own with Meta+Shift+F, its title bar button, or Launch as Standalone. It stays part of the desktop, so drag and drop and the clipboard still work between floating windows and the screens.
+- **Your other computers' monitors.** Stream a Windows PC's or a Mac's monitors, or a virtual monitor at any size, as screens of their own, with the same controls. See [Remote displays](#remote-displays).
 - **Profiles.** Save where your screens are, which ones show, and which apps are open where. Switch to a profile from Display Settings, a key, or its launcher entry, or start the desktop in one.
 - **One mouse for all of SteamVR.** A Bluetooth mouse drives a small dot anchored in the room. It works the screens, the dashboard, Steam, and overlays, and hands the laser back when you pick up a controller.
+- **Your hands (experimental).** Hand tracking from the headset's own cameras: poke a screen to click, pinch and grab screens to move, resize, and throw them, and see your hands over the screens.
 - **Look and click (experimental).** In gaze mode the pointer goes where you look. Meta+J and Meta+K, or the mouse buttons, click and fine-tune, and each correction teaches the tracker. Calibration runs in the headset.
 - **Made for long sessions.** The displays turn off when the headset isn't used, even on a stand that makes it seem worn. It stays awake on the charger, and you can reach the desktop remotely over VNC.
 
@@ -33,11 +35,13 @@ You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or th
 
    It asks which version you want: stable (the `main` branch, tested releases) or experimental (the `experimental` branch, the newest features, less tested). Then it clones the repo into `~/frametop` and runs `install.sh`. To choose without the question, add `-s -- --stable` or `-s -- --experimental` after `bash`. By hand, the same is `git clone https://github.com/Frametop/frametop.git ~/frametop`, then `cd ~/frametop` and `./install.sh` (add `--branch experimental` to the clone for experimental).
 
-   The third and fourth choices, stable release and experimental release, download Frametop already built (`Frametop.zip`, about 1.1 GB, from the [releases](https://github.com/Frametop/frametop/releases)) and install it without compiling anything. `-s -- --release` picks the stable release without the question, and `-s -- --release --experimental` the experimental one.
+   The third and fourth choices, stable release and experimental release, download Frametop already built (`Frametop.zip`, about 1.2 GB, from the [releases](https://github.com/Frametop/frametop/releases)) and install it without compiling anything. `-s -- --release` picks the stable release without the question, and `-s -- --release --experimental` the experimental one.
 
-   The installer sets up distrobox in your home folder (the system files aren't touched), a Fedora build container, and everything else. The first run downloads 1–2 GB. It asks along the way whether to install each optional part: voice dictation (yes by default; it downloads about 320 MB of speech models), hand tracking (experimental, yes by default), in a release the [Hand Recorder](https://frametop.github.io/frametop/hand-recorder) (yes by default; it records your hands for Frametop's open hand dataset), gaze mode (experimental, yes by default), our own eye tracker for it (yes by default), and the Bluetooth fixes, then whether to restart SteamVR. The stable version asks only about gaze mode, the eye tracker, and the Bluetooth fixes. Hand tracking, the Hand Recorder, the eye tracker, and the Bluetooth fixes need your `sudo` password; if you've never set one, run `passwd` first, or skip them for now. SteamVR has to restart once at the end, which closes everything open in VR, including the terminal. Rebooting the headset works too.
+   The installer sets up distrobox in your home folder (the system files aren't touched), a Fedora build container, and everything else. The first run downloads 1–2 GB. It asks along the way whether to install each optional part: voice dictation (yes by default; it downloads about 320 MB of speech models), hand tracking (experimental, yes by default), in a release the [Hand Recorder](https://frametop.github.io/frametop/hand-recorder) (yes by default; it records your hands for Frametop's open hand dataset), gaze mode (experimental, yes by default), our own eye tracker for it (yes by default), in a release the Eye Recorder (yes by default, with our eye tracker; it records your eyes for Frametop's eye tracking dataset), and the Bluetooth fixes, then whether to restart SteamVR. The stable version asks only about gaze mode, the eye tracker, and the Bluetooth fixes. Hand tracking, the Hand Recorder, the eye tracker, and the Bluetooth fixes need your `sudo` password; if you've never set one, run `passwd` first, or skip them for now. SteamVR has to restart once at the end, which closes everything open in VR, including the terminal. Rebooting the headset works too.
 
-After the restart, Launch a program → Desktop opens the multi-screen desktop, with its screens arranged around where you're facing. Frametop Display Settings and Frametop Input Settings are in the desktop's application menu, under Settings. SteamOS's own single-screen desktop is still there, as Native Desktop in the same list.
+After the restart, Launch a program → Desktop opens the multi-screen desktop, with its screens arranged around where you're facing. Frametop Display Settings and Frametop Input Settings are in the desktop's application menu, under Settings. In Launch a program, Frametop's apps and commands are in one entry, Frametop, with submenus (Settings, Screens, Profiles, Help, Recorders and tools) and Update Frametop. SteamOS's own single-screen desktop is still there, as Native Desktop in the same list.
+
+The first time the desktop starts, Frametop Tour opens: a page at a time on the screens and the 3D mouse, floating windows, frunner, the keyboard shortcuts, eye tracking, hand tracking (up close and from a distance), pins, profiles, pausing for VR games, and what each page of Frametop's settings is for. Most pages start with short looping videos from a headset, and have buttons to try each thing or open its settings. A page list jumps to any topic, so it doubles as a reference. Closing it, skipping it, or finishing it keeps it from opening again. It's in the application menu, in frunner, under Frametop → Help in SteamVR's Launch a program list, and in Frametop Input Settings' menu for whenever you want it again, and `tour/ft-tour --reset` has it open at the desktop's next start.
 
 If you work in the desktop for long stretches, or leave the headset on a stand, open Frametop Display Settings → Power. Turn on Stay awake while plugged in: by default Steam puts the Frame to sleep after an hour without input, even while it charges. And choose when the displays turn off while the headset isn't used. SteamVR turns them off a few seconds after you take the headset off, but a stand or mount that covers the proximity sensor inside it makes the headset seem worn, and its displays stay on all night.
 
@@ -53,19 +57,24 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 
 | Do this | To get this |
 | --- | --- |
-| Point near the bottom of a screen | Its controls fade in: the bar, the curve and roll buttons, and the resize tab on the corner |
+| Point near the bottom of a screen | Its controls fade in: the bar, the curve and roll buttons, and, near a corner, a soft glow round it: press there and drag to resize |
 | Drag the bar under a screen | Moves the screen; scroll while dragging to push it away or pull it closer. With the mouse, hold right while dragging to tilt it |
 | Drag the tab on a screen's bottom right corner | Resizes the screen |
 | Click the curve button (next to the bar) | Curves the screen around you, or flattens it |
 | Drag the roll button sideways, or scroll on it | Rolls the screen; it snaps level near straight |
 | While carrying a screen, sweep its laser across your other controller's ring, then let go | Pins it to that wrist, at its size and distance, as you hold it when you let go; it shows while you see its front. Grab its bar to adjust it (it stays pinned); sweep across the ring again to take it off |
 | Set a screen to On your head (Frametop Display Settings, Visibility & pins) | Pins it to your head where it is, like a HUD. Grab its bar to move it; it stays on your head |
-| Meta+Shift+R in the desktop | Puts the screens back in their layout (also in the menu as Reset Screen Layout, and mappable to a mouse button) |
+| Meta+Shift+R in the desktop | Shows a three-second countdown, then puts the screens back in their layout around you, leaving app windows, fullscreen and streams as they are (also Reset Screen Layout in the menu, and mappable to a button). Screens on a wrist stay there. To bring back a profile's apps too, open the profile: its name in frunner, or Open profile in Display Settings |
+| Carry the panel under the pointer (map it in Frametop Input Settings: a key combination such as Meta+A, or a button) | The panel under the 3D mouse (with the pointer on no panel, the panel nearest the middle of your view) moves with the pointer, facing you, until you click or press Enter; the pointer goes to its centre first. An aqua border with a small gap round it shows it's carried, and pulses outward every 5 seconds; let go, it pulses once more and fades. The click doesn't reach the window. Press it again to turn carry-all on or off: the other panels in the room and the pointer follow your head, each with a fuchsia border. A faint grid round the carried panel shows how it moves: a sphere round where your head was when the carry began (moving your head doesn't move the panel; only the pointer does); with Ctrl held, a flat plane, as it moves sideways in its own plane without turning; with Alt held, red, green and blue rings round its three axes, as it turns where it is, keeping its angle in the room (the pointer stays put; it keeps that turn as you carry it on). Space levels it about its centre, so its bottom edge is parallel to the floor; press Space twice to also turn it to face you. In carry-all, Space does the same to every panel that follows your head. Hold Space to lock the carried panel to your head (it and the pointer follow your head, as in carry-all, but alone) until you let Space go. While your head carries it (Space held, or carry-all), the grid is fuchsia. Tab and Shift+Tab carry the next panel on your right or left instead, with the pointer at its centre (in carry-all, only the panels in view). Scroll to push it away or pull it closer, even with another panel in front of it. Esc or Backspace ends the carry and puts every panel it moved back where it was. Ctrl, Alt, Shift, Tab, Space, Enter, Esc and Backspace pressed while carrying don't reach the window either. With Carry floated windows on (Frametop Input Settings, Keyboard; off by default), a window you float from the desktop (its title bar's button, or the float shortcut) is carried at once, the same way. Floating windows and remote displays carry too; SteamVR's and Steam's own panels don't |
 | Meta+Alt+Tab, or Meta+Alt+Shift+Tab | Spins every screen and floating window around you together, like a lazy susan, so the next one on your right (or left) glides to straight ahead, with the pointer and typing going to it. Their arrangement stays the same: the room turns instead of you. Tap again to keep going; Meta+Shift+R puts the screens back. Pinned screens stay where they are |
-| Meta+Shift+H in the desktop | Hides or shows all screens (also in the menu as Hide/Show Screens, and mappable). The Visibility & pins tab of Frametop Display Settings can instead show them only with the dashboard open, or while you look at your wrist |
+| Meta+Space, on any keyboard | Opens frunner, a search pill in front of you: type an app's, a profile's or a remote display's name and press Enter. A running app's window spins to the front, an app that isn't running opens floating, a profile opens with its screens and apps, and a remote display connects and spins to the front. Shift+Enter (or a right click) has more: a private window, a new window, docked on this screen, or one of its windows. Esc closes it. It finds your commands too. See [docs/frunner.md](docs/frunner.md) |
+| Add a command (Frametop Input Settings, Commands) | Saves a shell command of yours under a name, such as `stop-framecorder` for `killall framecorder`. Run it in the background from a controller button, a mouse button, a key combination, frunner, your voice ("run stop framecorder"), or a terminal, where the name is an alias. See [docs/commands.md](docs/commands.md) |
+| Meta+H, on any keyboard | Turns hand tracking off, or back on. It stays that way until the desktop or SteamVR starts again; your Hands setting in Frametop Input Settings is left as it is. Change the combination, or put it on a mouse or controller button, in Frametop Input Settings (Hand tracking on/off) |
+| Meta+Shift+H, on any keyboard | Hides or shows all screens (also in the menu as Hide/Show Screens). Change the combination, or put it on a mouse or controller button, in Frametop Input Settings (Hide/show desktop screens). If you have a key combination list of your own, installing or updating adds Meta+Shift+H to it once, unless you use that combination for something else; remove it there and it stays removed. The Visibility & pins tab of Frametop Display Settings can instead show them only with the dashboard open, or while you look at your wrist |
+| Ctrl+Alt+Shift+Esc, on any keyboard | Lets go of every key the desktop holds, for when a key seems stuck: clicks move windows (a stuck Meta) or every key types something odd. It works with the screens hidden and while Frametop is paused. Change it, or put it on a mouse or controller button, in Frametop Input Settings (Release all keys). If you have a key combination list of your own, installing or updating adds Ctrl+Alt+Shift+Esc to it once, unless you use that combination for something else; remove it there and it stays removed |
 | Tap Meta, on any keyboard | Opens the Steam menu in the SteamVR dashboard, or closes the dashboard, wherever you are. The desktop's launcher is still on the taskbar and Alt+F1. Change it in Frametop Input Settings (Keyboard page), where any key combination or modifier tap can do a Frametop or Steam action, open a profile, or run a command of your own |
 | Switch a screen to Hidden (Frametop Display Settings, Visibility & pins → Screens shown) | Hides just that screen until you switch it back, whatever the other visibility settings say; new windows that would open on it float instead |
-| Play a VR game | Frametop pauses so the game gets the headset to itself (see [Pause for VR games](#pause-for-vr-games)): the screens hide and your controllers stay in the game. Click both thumbsticks together twice to bring Frametop back. With the automatic pause off, the screens still hide, and the SteamVR dashboard or Meta+Shift+H shows them; to keep them visible over games, change During VR games on the Visibility & pins tab |
+| Play a VR game | Frametop pauses so the game gets the headset to itself (see [Pause for VR games](#pause-for-vr-games)): the screens hide and your controllers stay in the game. Click both thumbsticks together twice to bring Frametop back (with one controller, click its thumbstick twice). With the automatic pause off, the screens still hide, and the SteamVR dashboard or Meta+Shift+H shows them; to keep them visible over games, change During VR games on the Visibility & pins tab |
 
 Restarting the desktop (Restart desktop in Frametop Display Settings) closes its windows, but background work you started in it, such as servers, tmux sessions, or builds, keeps running.
 
@@ -77,7 +86,7 @@ Restarting the desktop (Restart desktop in Frametop Display Settings) closes its
 | Click, right-click, scroll | Acts on the panel under the dot |
 | Pick up a controller | The controller gets its laser back; move the mouse to take over again |
 
-You can map the mouse's extra buttons to actions such as Toggle SteamVR dashboard, Recenter pointer, or Head follow on/off on the Buttons page of Frametop Input Settings, and the Frame controllers' buttons on its Controllers page. Pointer speed, dot size, and the rest are on its Pointer page and take effect immediately. If a panel you only look at, such as a performance overlay that follows your view, keeps catching the dot, tick it (or its whole app) on the Ignored panels page, and the pointer passes through it. Head follow, which is experimental and off by default, makes the pointer come along when you turn your head: it stays put until your head turns past the leash angle, then glides back to its place in your view, and a leash of 0 keeps it fixed in your view. It's only lightly tested and not polished; tuning its settings, or improving how it feels, is open to anyone who wants to take it further.
+You can map the mouse's extra buttons to actions such as Toggle SteamVR dashboard, Recenter pointer, or Head follow on/off on the Buttons page of Frametop Input Settings, and the Frame controllers' buttons on its Controllers page. Pointer speed, dot size, and the rest are on its Pointer page and take effect immediately, with a switch for SteamVR's travel mode (tracking in a moving car, train or plane; off by default). If a panel you only look at, such as a performance overlay that follows your view, keeps catching the dot, tick it (or its whole app) on the Ignored panels page, and the pointer passes through it. Head follow, which is experimental and off by default, makes the pointer come along when you turn your head: it stays put until your head turns past the leash angle, then glides back to its place in your view, and a leash of 0 keeps it fixed in your view. It's only lightly tested and not polished; tuning its settings, or improving how it feels, is open to anyone who wants to take it further.
 
 ### Floating windows
 
@@ -89,6 +98,7 @@ Any desktop window can float in VR as a panel of its own. It stays a window of t
 | Click the float button, left of Close in a window's title bar | The same. Float in VR is also in every window's menu (Alt+F3). Apps that draw their own title bar, like Chromium and Electron apps, don't have the button: use Meta+Shift+F |
 | Right-click an app in the Application Launcher (or the taskbar) and pick Launch as Standalone | Starts the app with its window floating, where that app last floated, or in front of you the first time. From a terminal: `float/ft-float launch org.kde.dolphin`, or `float/ft-float run <command>` |
 | Meta+scroll over a floating window | Scales it up or down |
+| Set Apps from the SteamVR dashboard to Open as Frametop floating windows (Frametop Display Settings, Visibility & pins), then pick an app in the dashboard's Launch a program list | The app opens in the Frametop desktop, floating, instead of as a SteamVR window. When the desktop isn't running, Frametop is paused, or all floating windows are in use, it opens as a SteamVR window as before |
 
 ### Profiles
 
@@ -100,13 +110,29 @@ A profile is a named setup: where the screens are, with their sizes and pins, wh
 | Pick a profile under Arrangement and press Open profile | Switches to it: the screens move, open windows of its apps go to their places, and the apps that aren't open start. Nothing closes |
 | Pick a profile under Start in profile, or run its entry (Frametop: NAME) from SteamVR's Launch a program list | The desktop starts in that profile, or switches to it if it's running. A profile can also go on a key combination, mouse button, or controller button in Frametop Input Settings |
 
+### Remote displays
+
+Remote displays bring another computer's monitors into Frametop. Each one is a panel with a screen's controls: move it, resize it, curve it, pin it, and save it in a profile. The mouse, the keyboard and the lasers work on it, and its sound plays on the Frame. The computer streams with Sunshine's protocol, and the Frame decodes the streams in hardware.
+
+Each computer needs a host kit once:
+
+| Computer | What it streams | Set up with |
+| --- | --- | --- |
+| Windows PC | Its monitors, and virtual monitors at any size | Vibepollo with Frametop's build: [host/windows/README.md](host/windows/README.md) |
+| Mac with Apple silicon | Its monitors | Sunshine, one instance per monitor, and Frametop Streams in the menu bar to turn them on and off: [host/macos/README.md](host/macos/README.md) |
+| Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Vibepollo with Frametop's build, not tested yet: [host/linux/README.md](host/linux/README.md) |
+
+Then, on the Frame, open Frametop Remote Displays (in the app menu, or Remote displays in Display Settings), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
+
+A monitor you stream switches to the stream's resolution while it streams (Windows), so pick a size the monitor has, or one with the same shape. A computer that's asleep can't be reached. [docs/reference.md](docs/reference.md#frametop-remote-displays) has the details.
+
 ### Pause for VR games
 
 Frametop pauses while a VR game runs, so the game gets the headset's CPU and GPU, and comes back a few seconds after the game ends. Paused, the screens hide and the desktop nearly stops drawing, but its windows stay open. Gaze mode's eye tracking stops, and so do remote desktop and hand tracking if they run. The mouse works as a plain mouse in SteamVR.
 
 | Do this | To get this |
 | --- | --- |
-| Click both thumbsticks together, twice | Pauses Frametop, or brings it back, in a game or not. You hear a short sound. The game sees the clicks too |
+| Click both thumbsticks together, twice | Pauses Frametop, or brings it back, in a game or not. You hear a short sound. The game sees the clicks too. With only one controller connected, click its thumbstick twice |
 | Start a VR game | Frametop pauses, and comes back 5 seconds after the game ends. Bring it back during the game, and it stays on until that game ends |
 | Map Pause/resume Frametop to a mouse button, key combination, or controller button | The same, from that button (Frametop Input Settings) |
 
@@ -125,6 +151,22 @@ In gaze mode the pointer goes where you look, and the mouse or the keyboard does
 | Put the headset on | A quick check: look at the dot for a moment, and the pointer lines up again |
 
 By default the mouse only corrects: while the gaze has the pointer, moving the mouse does nothing until you hold a button. Each correction before a click teaches the tracker where it was off. A correction past the learning limit (55 degrees by default, about half of what you can see) starts a quick check instead. Calibrate, on the Gaze page, runs a full calibration in a panel in front of you: look at each dot and click. Check headset fit shows how well the eye tracker sees your eyes. [gaze/README.md](gaze/README.md) has the details.
+
+### Hand tracking (experimental)
+
+Hand tracking uses the headset's own cameras, with no controllers. The installer offers it (or run `hands/run.sh install` later; it needs `sudo` once, to let its camera broker read the cameras). Installed, it runs while the Frametop desktop does, and parks while Frametop is paused for a VR game. It uses a lot of the headset's CPU.
+
+| Do this | To get this |
+| --- | --- |
+| Poke a screen with your index finger | A click there |
+| Pinch a screen's bar, edge, or corner, and move | Moves or resizes the screen |
+| Hold a screen like a card (an edge between index and middle finger, or all fingertips) | Carries it; turn your wrist to turn it. Flick it away, or let go fast to throw it |
+| Close both hands into fists near a screen | Resizes it (fists don't move screens) |
+| Hold both hands on a screen and pull them apart | Stretches it |
+| Hold an open hand out to a far screen, then make a fist and pull it back ("grab that") | Brings it to arm's reach |
+| Turn a hand palm up toward your face, look at it, and pinch the ring that shows | Opens the Steam menu |
+
+The Hands page of Frametop Input Settings sets when it runs (with Frametop, always with SteamVR, or off) and switches each hand interaction on or off, live. `ft-handsctl status` shows how it's doing. [hands/README.md](hands/README.md) has the details.
 
 ### Leave the headset on a stand and reach it remotely
 
@@ -163,9 +205,19 @@ cd ~/frametop && scripts/report.sh
 
 From a release, start in `~/.local/share/frametop/releases/current` instead of `~/frametop`.
 
-This writes `frametop-report-<date>.txt` with version numbers, service states, settings, Frametop's keyboard and the Steam menu, and recent logs. Bluetooth addresses and the headset's serial number are masked.
+This writes `frametop-report-<date>.txt` with version numbers, settings, service states, CPU, memory and heat, and the state and recent logs of every part: the desktop (Frametop's keyboard, the Steam menu, the screens), gaze, hand tracking (its models, cameras, and how often it sees each hand), and voice (its models, the microphone, and whether whisper-server transcribes). It takes up to half a minute, because it starts the gaze service for a moment to see whether the eye tracker sends. Bluetooth addresses and the headset's serial number are masked, and what you said to Frametop Voice is left out.
 
-If the problem is something you can make happen, like a window that won't drag or a keyboard that doesn't open, run `scripts/report.sh --watch` instead. After the usual report it records for 60 seconds (`--watch 120` for longer) while you make it happen in the headset. It notes when the Steam menu opens and closes, which laser drags what, where typing goes, and when Frametop's keyboard opens or why it doesn't. It takes up to half a minute, because it also checks gaze mode: it starts the gaze service for a moment to see whether the eye tracker sends. If gaze or its calibration doesn't work, run it while you wear the headset. `scripts/gaze-report.py` prints only the gaze part, with what looks wrong first. Then [open an issue](https://github.com/Frametop/frametop/issues), describe what you did, what you expected, and what happened, and attach the file. Quick questions can go to [Discord](https://discord.gg/W3X9f7z3Bc) instead.
+To report on one part only, name it: `--system`, `--desktop`, `--gaze`, `--hands` or `--voice` (several are fine, for example `scripts/report.sh --hands --voice`).
+
+If the problem is something you can make happen, like a window that won't drag, a pinch that doesn't register, or dictation that types nothing, add `--watch`. After the report it records for 60 seconds (`--watch 120` for longer) while you make it happen in the headset, and keeps the logs from that time:
+
+- desktop: when the Steam menu opens and closes, which laser drags what, where typing goes, and when Frametop's keyboard opens or why it doesn't
+- gaze: which eye tracker the gaze service uses, and whether its samples come in
+- hands: each second, how many frames hand tracking made, how often it saw each hand, and how close the fingertips came
+- voice: what Frametop Voice did (the number of words, not the words) and the microphone's level each second (no sound is kept)
+- system: every 5 seconds, the CPU's load, clocks and heat, and the busiest programs
+
+If gaze or its calibration doesn't work, run the report while you wear the headset. `scripts/gaze-report.py` prints only the gaze part, with what looks wrong first. Then [open an issue](https://github.com/Frametop/frametop/issues), describe what you did, what you expected, and what happened, and attach the file. Quick questions can go to [Discord](https://discord.gg/W3X9f7z3Bc) instead.
 
 ## Update
 
@@ -175,7 +227,9 @@ Run the same command again. It updates `~/frametop` to the latest of the version
 curl -fsSL https://frametop.github.io/frametop/get.sh | bash
 ```
 
-Or by hand: `cd ~/frametop && git pull && ./install.sh`.
+Or by hand: `cd ~/frametop && git pull && ./install.sh`. Launch a program → Frametop → Update Frametop opens Konsole and runs the same command for you (with `--release` for a release).
+
+If an install or update stops part-way (an error, Ctrl-C, a closed terminal, the headset powering off), run the same command again: it finishes it. Until then some services may run from the new version and some from the old one; `install.sh` says so when it stops early.
 
 ## Uninstall
 
@@ -194,7 +248,7 @@ To see what it would do without changing anything, add `-s -- --dry-run` after `
 
 Don't delete `~/frametop` by hand before you uninstall and restart: the desktop and the input relay run from it, and without it Launch a program → Desktop no longer opens anything. If you've already deleted it, the command above still works, since it doesn't need the repo.
 
-Unless you ask for them to go, your settings stay: `~/.config/frametop.conf`, `frametop-input.json` (button maps and key combinations), `frametop-layout.json` (the layout and profiles), `frametop-float.json`, and `frametop-remote/` in `~/.config`, the gaze calibration in `~/.local/state/frametop`, and the desktop's own Plasma setup in `~/.config/frametop`. A later install picks them up again.
+Unless you ask for them to go, your settings stay: `~/.config/frametop.conf`, `frametop-input.json` (button maps and key combinations), `frametop-layout.json` (the layout and profiles), `frametop-float.json`, and `frametop-remote/` in `~/.config`, the gaze calibration and where the screens were last arranged from in `~/.local/state/frametop`, and the desktop's own Plasma setup in `~/.config/frametop`. A later install picks them up again.
 
 ## How it works
 
@@ -212,18 +266,35 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `float/` | Floating windows: ft-floatd and the KWin script that float a desktop window in VR. |
 | `decoration/` | The desktop's window decoration: Breeze's look plus the float button. |
 | `input/` | The input relay (Bluetooth mice and keyboards, button maps). |
+| `keyboard/` | Frametop's keyboard: Full Keyboard for Steam Frame by TaiKeid, on the screens and in place of Steam's keyboard. See [keyboard/FRAMETOP.md](keyboard/FRAMETOP.md). |
 | `pointer/` | The 3D mouse: SteamVR driver, helper service, and a probe tool. |
 | `power/` | ft-powerd: turns the displays off while the headset isn't used. |
+| `voice/` | Frametop Voice: dictation and wake words, recognised on the headset; the input relay types the text. See [voice/README.md](voice/README.md). |
 | `gaze/` | Gaze mode (experimental): the gaze service, its calibration panel, our own eye tracker, and the gaze probe. See [gaze/README.md](gaze/README.md). |
-| `hands/` | Hand tracking (experimental, deferred: the installer doesn't offer it). See [hands/README.md](hands/README.md). |
+| `hands/` | Hand tracking (experimental): the camera broker and the tracker. See [hands/README.md](hands/README.md). |
 | `display-settings/`, `input-settings/` | The two settings apps (Kirigami, Python). |
+| `menu/` | The Frametop menu: one Launch a program entry for Frametop's apps and commands, and Update Frametop. |
 | `remote/` | Frametop Remote Access, the app that turns remote desktop over VNC on and off. |
+| `remote-displays/` | Frametop Remote Displays, the app that adds other computers' monitors as screens. |
+| `stream/` | ft-stream, one per remote display: receives and decodes its stream for ft-screens. |
+| `host/` | The host kits for remote displays: Windows, macOS and Linux. |
 | `setup/` | The build container and the Bluetooth fixes. See [setup/README.md](setup/README.md). |
+| `commands/` | Frametop commands: your own shell commands, saved under a name and run in the background (`ft-cmd`). |
+| `frunner/` | frunner, the search for apps, remote displays and your commands (Meta+Space). See [docs/frunner.md](docs/frunner.md). |
+| `tour/` | Frametop Tour, the walk through what Frametop does, and the recenter help. |
+| `steam/` | ft-steam: Steam's menu and checks, through Steam's own UI. |
+| `models/` | The hand and eye model versions you pick from, and their catalog. See [models/README.md](models/README.md). |
+| `recorder/` | What the hand and eye recorders share: encryption, uploads, the bounty board, privacy checks. |
+| `conf/` | The shared readers and writers of Frametop's config and stored files (`ft_conf`, `ft_store`) and its socket helpers. See [docs/config.md](docs/config.md). |
+| `pack/` | The OCI image and the release zip (see Packaging below). |
+| `framedrop/` | Installing a release with FrameDrop (proof of concept). See [framedrop/README.md](framedrop/README.md). |
+| `testbench/` | Frame Testbench, the development tool that fakes the headset, controllers and gaze for tests. See [testbench/README.md](testbench/README.md). |
+| `docs/` | The reference, the design notes, and the charts of how the parts fit (`docs/charts`). |
 | `scripts/` | Helpers the installers use. They run commands locally on the Frame, or over SSH from a PC. |
 
 ## Packaging
 
-`pack/` builds Frametop as an OCI image: the toolchain, the native binaries, and the locked Python environment (via [uv](https://docs.astral.sh/uv/)), built and tested by GitHub Actions. It is the groundwork for installing Frametop without building anything on the headset. No installer uses it yet. For development, `./ft dev build` builds the image and `./ft dev test` runs the tests inside it. [pack/design.md](pack/design.md) explains why an image and what is still open, and [pack/README.md](pack/README.md) documents the image itself.
+`pack/` builds Frametop as an OCI image: the toolchain, the native binaries, and the locked Python environment (via [uv](https://docs.astral.sh/uv/)), built and tested by GitHub Actions. Releases ship it: `Frametop.zip` holds the image, and `get.sh --release` or FrameDrop installs it without building anything on the headset. For development, `./ft dev build` builds the image and `./ft dev test` runs the tests inside it. [pack/design.md](pack/design.md) explains why an image and what is still open, and [pack/README.md](pack/README.md) documents the image itself.
 
 ## Developing from a PC
 
@@ -258,8 +329,19 @@ scripts/frame.sh --host '<cmd>'    # run on the SteamOS host
 
 The sync only goes one way. It makes the Frame's copy match your checkout, deleting files there that you've removed, and skips `.git`, `build/`, `.env`, and anything gitignored. Edit on the PC only, since the next sync overwrites changes made in `~/dev/frametop` on the Frame.
 
-Programs built in the `dev` container link against its glibc, which is newer than the host's, so they run inside the container. The SteamVR driver is the exception and is built to run on the host (see `pointer/driver/build.sh`). [AGENTS.md](AGENTS.md) has the working rules, including what not to restart while someone is using the headset.
+Programs built in the `dev` container link against its glibc, which is newer than the host's, so they run inside the container. The SteamVR driver and the testbench are the exceptions and are built to run on the host (see `pointer/driver/build.sh`). [AGENTS.md](AGENTS.md) has the working rules, including what not to restart while someone is using the headset.
+
+[testbench/](testbench/README.md) fakes the headset's pose and worn state, adds synthetic controllers, and takes SteamVR screenshots, through a CLI and an MCP server, so a change can be tried without wearing the headset. It's a development tool and never ships with Frametop.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). `testbench/` is MIT too, copyright Donn Green: see [testbench/LICENSE](testbench/LICENSE).
+
+Frametop's keyboard is [Full Keyboard for Steam Frame](https://github.com/TaiKeid/steam-frame-full-keyboard) by TaiKeid and contributors (MIT, Copyright (c) 2026 TaiKeid and contributors), in `keyboard/` with Frametop's changes. [keyboard/FRAMETOP.md](keyboard/FRAMETOP.md) lists what Frametop changed, and [keyboard/third_party/README.md](keyboard/third_party/README.md) the parts it includes.
+
+The rendered hands' 3D models in `screens/assets/hands` (see its [README](screens/assets/hands/README.md); each folder has its licence) are from:
+
+- the W3C Immersive Web Working Group's WebXR Input Profiles, `generic-hand` (MIT, Copyright (c) 2019 Amazon), the default;
+- Babylon.js's hand meshes by Patrick Ryan, https://github.com/BabylonJS/Assets (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/), unchanged;
+- the Mixed Reality Toolkit: MRTK3's OpenXR hand (BSD-3-Clause, Copyright (c) 2025, Mixed Reality Toolkit Contributors) and MRTK2's rigged hand (MIT, Copyright (c) Microsoft Corporation), converted to glTF;
+- Godot XR Tools' hands by DigitalN8m4r3 (Miodrag Sejic), CC0 1.0.

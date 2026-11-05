@@ -2,25 +2,24 @@
 """Tests for the side cameras' naming in recordings (sides.py) and its readers: takes.py's
 review and export, validate.py, and session.py's live decision and recording parts.
 
-  python3 hands/rec/tests/test_sides.py
+  python3 -m hands.rec.tests.test_sides
 """
 import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import session  # noqa: E402
-import sides  # noqa: E402
-import takes  # noqa: E402
-import validate  # noqa: E402
-from test_validate import fhset, make_session, SESSION  # noqa: E402
+from hands.rec import session  # noqa: E402
+from hands.rec import sides  # noqa: E402
+from hands.rec import takes  # noqa: E402
+import recorder.files  # noqa: E402  (Cancelled, read_json, human_bytes, free_bytes)
+from hands.rec import validate  # noqa: E402
+from hands.rec.tests.test_validate import fhset, make_session, SESSION  # noqa: E402
 
 
 def names(record):
@@ -125,14 +124,14 @@ class TakesTest(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="handrec-sides-test-")
         make_session(self.tmp)
         self.sdir = os.path.join(self.tmp, "sessions", SESSION)
-        meta = takes.read_json(os.path.join(self.sdir, "session.json"))
+        meta = recorder.files.read_json(os.path.join(self.sdir, "session.json"))
         meta["sides"] = {"swapped": True, "decided_by": "auto", "state": "confirmed"}
         takes.write_json(os.path.join(self.sdir, "session.json"), meta)
         self.tdir = os.path.join(self.sdir, "takes", "01-hand-size")
         with open(os.path.join(self.tdir, "sets-2.bin"), "wb") as f:   # after the decision: --sides 1
             for i in range(5):
                 f.write(sides.rename_record(fhset(9 * 10 ** 12 + i * 10 ** 8, i)))
-        tj = takes.read_json(os.path.join(self.tdir, "take.json"))
+        tj = recorder.files.read_json(os.path.join(self.tdir, "take.json"))
         tj["parts"] = {"sets.bin": {"names_swapped": False}, "sets-2.bin": {"names_swapped": True}}
         takes.write_json(os.path.join(self.tdir, "take.json"), tj)
         self.store = takes.Store(self.tmp)
@@ -159,11 +158,11 @@ class TakesTest(unittest.TestCase):
         r = validate.validate(path)
         self.assertEqual(r.errors, [])
         self.assertEqual(r.warnings, [])
-        m = takes.read_json(os.path.join(path, "manifest.json"))
+        m = recorder.files.read_json(os.path.join(path, "manifest.json"))
         t = m["takes"][0]
         self.assertEqual(t["sides"], {"names_swapped": True, "renamed_sets": 30})
         self.assertEqual(m["session"]["sides"]["swapped"], True)
-        self.assertEqual(takes.read_json(os.path.join(path, "takes", t["id"], "take.json"))["parts"],
+        self.assertEqual(recorder.files.read_json(os.path.join(path, "takes", t["id"], "take.json"))["parts"],
                          {"sets.bin": {"names_swapped": True}})
         # every exported set: right names (the rule applied again changes nothing)
         data = subprocess.run([takes.find_zstd(), "-dc", os.path.join(path, t["file"])],
@@ -178,7 +177,7 @@ class TakesTest(unittest.TestCase):
     def test_validate_catches_wrong_names(self):
         path = self.store.export(SESSION, low_priority=False)
         mpath = os.path.join(path, "manifest.json")
-        m = takes.read_json(mpath)
+        m = recorder.files.read_json(mpath)
         m["takes"][0]["sides"]["names_swapped"] = False
         takes.write_json(mpath, m)
         report = validate.Report(path)
@@ -186,14 +185,14 @@ class TakesTest(unittest.TestCase):
         self.assertTrue(any("aren't named right" in e for e in report.errors), report.errors)
 
     def test_undecided_warns(self):
-        meta = takes.read_json(os.path.join(self.sdir, "session.json"))
+        meta = recorder.files.read_json(os.path.join(self.sdir, "session.json"))
         meta["sides"] = {"swapped": None}
         takes.write_json(os.path.join(self.sdir, "session.json"), meta)
         path = self.store.export(SESSION, low_priority=False)
         r = validate.validate(path)
         self.assertEqual(r.errors, [])
         self.assertTrue(any("wasn't decided" in w for w in r.warnings), r.warnings)
-        m = takes.read_json(os.path.join(path, "manifest.json"))
+        m = recorder.files.read_json(os.path.join(path, "manifest.json"))
         self.assertIsNone(m["takes"][0]["sides"]["names_swapped"])   # the parts differ
         self.assertEqual(m["takes"][0]["sides"]["renamed_sets"], 0)
 
@@ -247,7 +246,7 @@ class SessionSidesTest(unittest.TestCase):
         s._read_sides(force=True)
         self.assertFalse(s._sides_swapped())
         self.assertTrue(s._session_json["sides"]["reversed_from"]["swapped"])
-        self.assertFalse(takes.read_json(os.path.join(self.tmp, "session.json"))["sides"]["swapped"])
+        self.assertFalse(recorder.files.read_json(os.path.join(self.tmp, "session.json"))["sides"]["swapped"])
 
     def test_read_sides_forced(self):
         """PR #4 on the dataset: HANDS_SWAP_SIDES=0 from the old example config, and the hands

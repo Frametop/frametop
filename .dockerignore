@@ -16,3 +16,15 @@
 **/.env.*
 frametop-report-*.txt
 .frame-job.d/
+# the fine-tuned hand models: the image fetches its own pinned copy (hands/models.sh)
+hands/models/student/
+hands/models/.student-*
+# model versions downloaded from Input Settings (models/catalog.py): each install fetches its own
+hands/models/versions/
+gaze/tracker/models/
+# dev-only: the testbench and the agents' verification skill never ship (testbench/README.md)
+testbench/
+.claude/
+# dev-only: fast-install puts commits into an installed release (AGENTS.md)
+scripts/fast-install
+scripts/tests/

@@ -3,7 +3,10 @@
 # FrameDrop (into ~/devkit-game/Frametop), by hand, or by get.sh --release. Next to this script
 # are frametop-image.tar (Frametop, built, as a container image) and frametop-release.json (its
 # version, commit, the image file's sha256 and the image's ID, and the SteamOS table). Nothing
-# builds on the headset, and nothing else is downloaded.
+# builds on the headset, and nothing else is downloaded, but voice dictation's speech models
+# (about 320 MB, fixed URLs checked by sha256: voice/models.sh) if you install it. Hand tracking
+# and the Hand Recorder come built too: their installs only set their camera broker's file
+# capabilities (sudo), and the recorder's adds its menu entry.
 #
 # 1. It checks this SteamOS build against the SteamOS table: Frametop's newest from GitHub
 #    (pack/steamos.json on main) when it can get it, else the one in the release. Tested: on.
@@ -12,11 +15,15 @@
 # 2. It checks the image file's sha256, and loads it into podman as localhost/frametop:VERSION.
 # 3. It copies the release's files out of the image to ~/.local/share/frametop/releases/VERSION
 #    and runs their install.sh, which makes the release's container and builds nothing.
-# 4. The release installed before stays: running its install.sh goes back to it. Older ones
-#    are removed, with their containers and images.
+# 4. The release installed before stays: running its install.sh goes back to it, and makes it
+#    current again. Older ones are removed, with their containers and images.
+# If it stops part-way (an error, a power-off), run the same command again: it finishes it.
+# A release whose folder has fast-installed files is refused until scripts/fast-install undo.
 #
 # Usage: install-release.sh [--yes] [--any-steamos] [--unpack-only] [--dir DIR]
-#                           [--no-eye-tracker] [--no-bluetooth | --bluetooth]
+#                           [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
+#                           [--no-eye-recorder]
+#                           [--no-bluetooth | --bluetooth]
 #   --unpack-only  stop after step 2 and the copy: don't run install.sh
 #   --dir DIR      where the releases go (default ~/.local/share/frametop/releases)
 # The rest go to install.sh. FRAMETOP_STEAMOS_TABLE names another table to fetch (a URL), or
@@ -109,8 +116,8 @@ main() {
       --any-steamos) any=1 ;;
       --unpack-only) unpack_only=1 ;;
       --dir) base=${2:?--dir needs a folder}; shift ;;
-      --no-eye-tracker|--no-bluetooth|--bluetooth) pass+=("$1") ;;
-      -h|--help) sed -n '2,23p' "$0"; return 0 ;;
+      --no-voice|--no-hands|--no-hand-recorder|--no-eye-tracker|--no-eye-recorder|--no-bluetooth|--bluetooth) pass+=("$1") ;;
+      -h|--help) sed -n '2,27p' "$0"; return 0 ;;
       *) echo "unknown option: $1" >&2; return 2 ;;
     esac
     shift
@@ -165,8 +172,16 @@ main() {
     echo "$dest holds another build of Frametop $version. Move it away, then run this again." >&2
     return 1
   fi
+  # The same build is there, so it isn't copied again, and fast-installed files would stay in
+  # a folder that names the release's commit. They go back first, by hand.
+  if [ -f "$dest/.frametop-release" ] && [ -e "$dest/.fast-install/state.json" ]; then
+    echo "$dest has files fast-installed on top of Frametop $version. Put them back first with" >&2
+    echo "scripts/fast-install undo in your Frametop checkout (it works on the current release:" >&2
+    echo "if another release is current, run $dest/install.sh first), then run this again." >&2
+    return 1
+  fi
 
-  printf '\n\033[1m== 0/10 loading Frametop %s (a minute or two)\033[0m\n' "$version"
+  printf '\n\033[1m== 0/12 loading Frametop %s (a minute or two)\033[0m\n' "$version"
   if [ "$(podman image inspect -f '{{.Id}}' "$image" 2>/dev/null)" = "$id" ]; then
     echo "already loaded"
   else
@@ -206,6 +221,10 @@ main() {
     echo "Install with: $dest/install.sh"
     return 0
   fi
+  # The release "current" named before this install: install.sh makes this one current when it
+  # finishes, so it's read first.
+  local prev= d old_image old_box
+  [ -L "$base/current" ] && prev=$(readlink "$base/current")
   if [ "$tty" = 1 ]; then
     "$dest/install.sh" ${pass[@]+"${pass[@]}"} </dev/tty
   else
@@ -214,8 +233,6 @@ main() {
 
   # This release is now "current"; the one before stays, to go back to. Older ones go, with
   # their containers and images (only Frametop's: frametop-... and localhost/frametop:...).
-  local prev= d old_image old_box
-  [ -L "$base/current" ] && prev=$(readlink "$base/current")
   ln -sfn "$version" "$base/current"
   for d in "$base"/*/; do
     d=${d%/}

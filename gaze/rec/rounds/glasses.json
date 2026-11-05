@@ -1,0 +1,69 @@
+{
+ "schema": 1,
+ "id": "glasses",
+ "title": "Glasses",
+ "intro": "With your glasses or inserts on. Wear them as you usually do in the headset.",
+ "steps": [
+  {
+   "id": "grid",
+   "kind": "dots",
+   "text": "Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    5,
+    5,
+    24,
+    18
+   ],
+   "hold": 1.2,
+   "shuffle": true
+  },
+  {
+   "id": "edges",
+   "kind": "dots",
+   "text": "Look at each dot until its ring fills. Keep your head still.|Some are far out: turn your eyes, not your head.",
+   "dots": [
+    [
+     30,
+     0
+    ],
+    [
+     -30,
+     0
+    ],
+    [
+     0,
+     23
+    ],
+    [
+     0,
+     -23
+    ],
+    [
+     30,
+     20
+    ],
+    [
+     -30,
+     20
+    ],
+    [
+     30,
+     -20
+    ],
+    [
+     -30,
+     -20
+    ]
+   ],
+   "hold": 1.2,
+   "shuffle": true
+  },
+  {
+   "id": "follow",
+   "kind": "path",
+   "text": "Follow the dot with your eyes.",
+   "path": "eight 0 0 22 14 6",
+   "seconds": 12
+  }
+ ]
+}

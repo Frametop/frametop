@@ -1,0 +1,411 @@
+import contextlib
+import io
+import math
+import tempfile
+import unittest
+from unittest import mock
+from pathlib import Path
+
+
+class CliTests(unittest.TestCase):
+    def setUp(self):
+        # worn and release write and clear the fake-worn flag: a temp runtime dir, never this
+        # machine's (a run under way keeps its flag), and no real guard unit.
+        from frame_testbench import hostinput
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for patch in (mock.patch.dict('os.environ', {'XDG_RUNTIME_DIR': tmp.name}),
+                      # a guard that took the locks and wrote the flag naming itself
+                      mock.patch.object(hostinput, 'start_guard',
+                                        mock.Mock(side_effect=lambda socket=None: hostinput.set_flag(False, 1.0))),
+                      mock.patch.object(hostinput, 'guard_alive', mock.Mock(return_value=True))):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def module(self):
+        try:
+            from frame_testbench import cli
+        except ImportError:
+            self.fail('CLI missing')
+        return cli
+
+    def bench(self):
+        cli = self.module()
+        from frame_testbench import pose
+        class Fake(cli.Bench):
+            def __init__(self):
+                self.commands = []
+                self.current = pose.from_euler([0, 0, 0], [0, 0, 0])
+                self.on = False
+                self.controllers = {side: {'device_index': index, 'pose_override': False,
+                                          'pose': pose.from_euler([0, 0, 0], [0, 0, 0]),
+                                          'synthetic': True}
+                                    for side, index in [('left', 4), ('right', 7)]}
+                self.transform = [[1, 0, 0, 0], [0, 1, 0, 1.6], [0, 0, 1, 0]]
+            def native(self, *args):
+                self.commands.append(('native', args))
+                return {'transforms': {'raw_to_standing': self.transform}}
+            def control(self, text):
+                self.commands.append(('control', text))
+                bits = text.split()
+                if bits[0] == 'pose':
+                    values = list(map(float, bits[1:]))
+                    self.current = {'position': values[:3], 'quaternion': values[3:]}
+                    self.on = True
+                if bits[0] == 'controller-pose':
+                    values = list(map(float, bits[2:]))
+                    self.controllers[bits[1]].update(pose_override=True,
+                        pose={'position': values[:3], 'quaternion': values[3:]})
+                if bits[0] == 'controller-release':
+                    self.controllers[bits[1]]['pose_override'] = False
+                return {'ok': True, 'pose_override': self.on, 'pose': self.current,
+                        'controllers': self.controllers}
+            fake_reply = None
+            def fakes(self, text, start=False):
+                self.commands.append(('fakes', text, start))
+                return self.fake_reply if self.fake_reply is None else dict(self.fake_reply)
+        return Fake()
+
+    def test_controller_input_commands_are_single_atomic_batches(self):
+        cli = self.module()
+        common = ['system', 'bumper', 'trigger', 'grip', 'thumbstick']
+        for side, names in [('left', ['view', 'dpad_up', 'dpad_right', 'dpad_down', 'dpad_left']),
+                            ('right', ['menu', 'a', 'b', 'x', 'y'])]:
+            cases = [
+                (['button', name, 'on', '--touch', 'off'],
+                 f'/input/{name}/click 1 /input/{name}/touch 0') for name in common + names]
+            cases += [(['touch', name, 'on'], f'/input/{name}/touch 1')
+                      for name in common + names + ['thumbrest']]
+            cases += [
+                (['button', 'system', 'off'], '/input/system/click 0'),
+                (['trigger', '0.5'], '/input/trigger/value 0.5'),
+                (['grip', '1', '--click', 'off', '--touch', 'on'],
+                 '/input/grip/value 1 /input/grip/click 0 /input/grip/touch 1'),
+                (['trigger', '0', '--click', 'on'], '/input/trigger/value 0 /input/trigger/click 1'),
+                (['thumbstick', '-1', '1', '--touch', 'off', '--click', 'on'],
+                 '/input/thumbstick/x -1 /input/thumbstick/y 1 /input/thumbstick/click 1 /input/thumbstick/touch 0'),
+                (['thumbstick', '0', '0'], '/input/thumbstick/x 0 /input/thumbstick/y 0'),
+            ]
+            for argv, expected in cases:
+                with self.subTest(side=side, argv=argv):
+                    bench = self.bench()
+                    cli.dispatch(cli.parser().parse_args(['controller', side, *argv]), bench)
+                    self.assertEqual(bench.commands, [('control', f'controller-inputs {side} {expected}')])
+            bench = self.bench()
+            cli.dispatch(cli.parser().parse_args(['controller', side, 'inputs-reset']), bench)
+            self.assertEqual(bench.commands, [('control', 'controller-input-release ' + side)])
+
+    def test_invalid_input_batches_fail_before_local_or_remote_io(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        cli = self.module()
+        cases = [
+            ['left', 'button', name, 'on'] for name in ['a', 'b', 'x', 'y', 'menu', 'thumbrest', 'unknown']]
+        cases += [['right', 'touch', name, 'off'] for name in
+                  ['view', 'dpad_up', 'dpad_right', 'dpad_down', 'dpad_left', 'unknown']]
+        cases += [[side, op, value] for side in ['left', 'right']
+                  for op in ['trigger', 'grip'] for value in ['nan', 'inf', '-0.01', '1.01']]
+        cases += [['left', 'thumbstick', x, y] for x, y in
+                  [('nan', '0'), ('0', 'inf'), ('-1.01', '0'), ('0', '1.01')]]
+        for argv in cases:
+            with self.subTest(argv=argv):
+                bench = self.bench()
+                args = cli.parser().parse_args(['controller', *argv])
+                with self.assertRaises(ValueError):
+                    cli.dispatch(args, bench)
+                self.assertEqual(bench.commands, [])
+                with patch.object(cli.transport, 'run_json') as run, contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(cli.main(['--host', 'frame', 'controller', *argv]), 1)
+                run.assert_not_called()
+
+    def test_remote_text_after_the_separator_stays_literal(self):
+        cli = self.module()
+        with mock.patch.object(cli.transport, 'run_json', return_value={'ok': True}) as run, \
+                mock.patch.object(cli.transport, 'remote_argv', side_effect=lambda h, r, a: a), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(['--host', 'frame', 'keyboard', 'type', '--', '--host=x --fetch y']), 0)
+        self.assertEqual(run.call_args.args[0], ['keyboard', 'type', '--', '--host=x --fetch y'])
+
+    def test_bool_analog_values_rejected_before_io(self):
+        cli, bench = self.module(), self.bench()
+        args = cli.parser().parse_args(['controller', 'left', 'trigger', '0'])
+        args.value = True
+        with self.assertRaises(ValueError):
+            cli.dispatch(args, bench)
+        self.assertEqual(bench.commands, [])
+
+    def test_inputs_reads_observer_without_control_socket(self):
+        cli, bench = self.module(), self.bench()
+        result = cli.dispatch(cli.parser().parse_args(['inputs']), bench)
+        self.assertEqual(bench.commands, [('native', ('inputs', str(cli.ROOT / 'resources/input-actions.json')))])
+        self.assertIn('transforms', result)
+
+    def test_compositor_mode(self):
+        cli, bench = self.module(), self.bench()
+        cli.dispatch(cli.parser().parse_args(['compositor', 'awake']), bench)
+        self.assertEqual(bench.commands[-1], ('native', ('setting', 'false')))
+        cli.dispatch(cli.parser().parse_args(['compositor', 'auto']), bench)
+        self.assertEqual(bench.commands[-1], ('native', ('setting', 'true')))
+
+    def no_host_streams(self):
+        """The host-input guard with no streams, not this machine's."""
+        from frame_testbench import hostinput
+        patch = mock.patch.object(hostinput, 'state', lambda detail=False: {
+            'input_hosts': [], 'input_streams': [], 'fake_worn': hostinput.read_flag()})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_worn_and_release(self):
+        cli, bench = self.module(), self.bench()
+        self.no_host_streams()
+        for command, expected in [(['worn', 'on'], 'worn 1'), (['worn', 'off'], 'worn 0'),
+                                  (['worn', 'physical'], 'worn-release'), (['release'], 'release')]:
+            cli.dispatch(cli.parser().parse_args(command), bench)
+            self.assertEqual(bench.commands[-1], ('control', expected))
+
+    def test_hmd_button(self):
+        cli, bench = self.module(), self.bench()
+        for command, expected in [(['hmd-button', '/input/system/click', 'on'], 'hmd-button /input/system/click 1'),
+                                  (['hmd-button', '/input/power/click', 'off'], 'hmd-button /input/power/click 0'),
+                                  (['hmd-button', '/input/system/click', 'physical'],
+                                   'hmd-button-release /input/system/click')]:
+            cli.dispatch(cli.parser().parse_args(command), bench)
+            self.assertEqual(bench.commands[-1], ('control', expected))
+        sent = len(bench.commands)
+        for path in ('system', '/input', '/input/', '/input/System/click', '/input/a b', '/input/a 1',
+                     '/output/haptic', '/input/a/../b', 'all'):
+            with self.subTest(path=path), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                cli.parser().parse_args(['hmd-button', path, 'on'])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            cli.parser().parse_args(['hmd-button', '/input/system/click', 'yes'])
+        self.assertEqual(len(bench.commands), sent)
+
+    def test_fake_trackers(self):
+        cli, bench = self.module(), self.bench()
+        bench.fake_reply = {'ok': True}
+        for command, expected in [
+                (['gaze', 'look', '10', '-5'], ('gaze 10 -5 10 -5', True)),
+                (['gaze', 'look', '1', '2', '--right', '-3', '4.5'], ('gaze 1 2 -3 4.5', True)),
+                (['gaze', 'eyes', 'closed', 'lost'], ('eyes closed lost', False)),
+                (['gaze', 'release'], ('gaze-release', False)),
+                (['hand', 'right', 'set', '--position', '0.1', '-0.2', '-0.35', '--shape', 'pinch'],
+                 ('hand right 0.10000000000000001 -0.20000000000000001 -0.34999999999999998 1 0 0 0 pinch', True)),
+                (['hand', 'all', 'release'], ('hand-release all', False))]:
+            with self.subTest(command=command):
+                cli.dispatch(cli.parser().parse_args(command), bench)
+                self.assertEqual(bench.commands[-1], ('fakes', *expected))
+        cli.dispatch(cli.parser().parse_args(['hand', 'left', 'set', '--position', '0', '0', '-0.3',
+                                              '--rotation', '90', '0', '0']), bench)
+        q = [float(v) for v in bench.commands[-1][1].split()[5:9]]
+        for a, b in zip(q, [math.cos(math.pi / 4), 0, math.sin(math.pi / 4), 0]):
+            self.assertAlmostEqual(a, b)
+        sent = len(bench.commands)
+        with self.assertRaises(ValueError):
+            cli.dispatch(cli.parser().parse_args(['hand', 'all', 'set', '--position', '0', '0', '0']), bench)
+        for bad in (['gaze', 'eyes', 'open', 'blink'], ['hand', 'right', 'set', '--position', '0', '0', '0', '--shape', 'claw'],
+                    ['hand', 'both', 'release'], ['gaze', 'look', '1']):
+            with self.subTest(bad=bad), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                cli.parser().parse_args(bad)
+        self.assertEqual(len(bench.commands), sent)
+        # Not running: eyes needs a gaze first; releases succeed with nothing to release.
+        bench.fake_reply = None
+        with self.assertRaises(ValueError):
+            cli.dispatch(cli.parser().parse_args(['gaze', 'eyes', 'open', 'open']), bench)
+        self.assertEqual(cli.dispatch(cli.parser().parse_args(['gaze', 'release']), bench), {'ok': True, 'gaze': None})
+        self.assertEqual(cli.dispatch(cli.parser().parse_args(['hand', 'left', 'release']), bench),
+                         {'ok': True, 'hands': None})
+
+    def test_release_and_status_include_the_fake_trackers(self):
+        cli, bench = self.module(), self.bench()
+        result = cli.dispatch(cli.parser().parse_args(['release']), bench)
+        self.assertEqual(bench.commands[-2:], [('fakes', 'release', False), ('control', 'release')])
+        self.assertEqual(result['fakes'], {'running': False})
+        bench.fake_reply = {'ok': True, 'gaze': None, 'hands': None}
+        result = cli.dispatch(cli.parser().parse_args(['status']), bench)
+        self.assertEqual(result['fakes'], {'ok': True, 'gaze': None, 'hands': None, 'running': True})
+        bench.fake_reply = None
+        self.assertEqual(cli.dispatch(cli.parser().parse_args(['status']), bench)['fakes'], {'running': False})
+
+    def test_release_still_releases_the_proxy_when_the_fake_trackers_hang(self):
+        cli, bench = self.module(), self.bench()
+
+        def hung(text, start=False):
+            bench.commands.append(('fakes', text, start))
+            raise TimeoutError('timed out')
+        bench.fakes = hung
+        with mock.patch.object(cli.subprocess, 'run') as run:
+            result = cli.dispatch(cli.parser().parse_args(['release']), bench)
+        run.assert_called_once_with(['systemctl', '--user', 'stop', 'frame-testbench-fakes'], timeout=20)
+        self.assertEqual(bench.commands[-1], ('control', 'release'))
+        self.assertEqual(result['fakes'], {'running': False, 'stopped': 'frame-testbench-fakes', 'error': 'timed out'})
+
+    def test_absolute_standing_pose_is_converted_to_raw(self):
+        cli, bench = self.module(), self.bench()
+        result = cli.dispatch(cli.parser().parse_args(['pose', 'set', '--position', '1', '1.8', '-2',
+                                                      '--rotation', '90', '0', '0']), bench)
+        for a, b in zip(result['pose']['position'], [1, .2, -2]):
+            self.assertAlmostEqual(a, b)
+        self.assertTrue(result['pose_override'])
+
+    def test_move_world_space_and_reset(self):
+        cli, bench = self.module(), self.bench()
+        args = cli.parser().parse_args(['pose', 'move', '--translation', '.25', '0', '0'])
+        with self.assertRaisesRegex(ValueError, 'set'):
+            cli.dispatch(args, bench)
+        cli.dispatch(cli.parser().parse_args(['pose', 'set', '--position', '0', '1.6', '0']), bench)
+        result = cli.dispatch(args, bench)
+        self.assertEqual(result['pose']['position'], [.25, 0, 0])
+        cli.dispatch(cli.parser().parse_args(['pose', 'reset']), bench)
+        self.assertEqual(bench.commands[-1], ('control', 'pose-release'))
+
+    def test_invalid_pose_never_calls_backend(self):
+        cli, bench = self.module(), self.bench()
+        args = cli.parser().parse_args(['pose', 'set', '--position', 'nan', '0', '0'])
+        with self.assertRaises(ValueError):
+            cli.dispatch(args, bench)
+        self.assertEqual(bench.commands, [])
+
+    def test_controller_set_raw_targets_only_selected_side(self):
+        from frame_testbench import pose
+        for side, other in [('left', 'right'), ('right', 'left')]:
+            with self.subTest(side=side):
+                cli, bench = self.module(), self.bench()
+                result = cli.dispatch(cli.parser().parse_args([
+                    'controller', side, 'set', '--position', '1', '2', '-3',
+                    '--rotation', '90', '30', '15', '--space', 'raw']), bench)
+                expected = pose.from_euler([1, 2, -3], [90, 30, 15])
+                self.assertEqual(result['controllers'][side]['pose'], expected)
+                self.assertTrue(result['controllers'][side]['pose_override'])
+                self.assertFalse(result['controllers'][other]['pose_override'])
+                self.assertFalse(result['pose_override'])
+                self.assertEqual(len(bench.commands), 1)
+                self.assertTrue(bench.commands[0][1].startswith('controller-pose ' + side + ' '))
+
+    def test_controller_set_standing_uses_runtime_rotation_and_translation(self):
+        cli, bench = self.module(), self.bench()
+        # Raw -> standing is yaw +90 degrees and translation [10, 2, 20].
+        bench.transform = [[0, 0, 1, 10], [0, 1, 0, 2], [-1, 0, 0, 20]]
+        result = cli.dispatch(cli.parser().parse_args([
+            'controller', 'left', 'set', '--position', '11', '3', '18',
+            '--rotation', '90', '0', '0']), bench)
+        actual = result['controllers']['left']['pose']
+        for a, b in zip(actual['position'] + actual['quaternion'], [2, 1, 1, 1, 0, 0, 0]):
+            self.assertAlmostEqual(a, b)
+        self.assertEqual(bench.commands[0], ('native', ('status',)))
+
+    def test_controller_move_requires_selected_side_override(self):
+        for space in ('raw', 'standing'):
+            with self.subTest(space=space):
+                cli, bench = self.module(), self.bench()
+                bench.on = True
+                bench.controllers['left']['pose_override'] = True
+                args = cli.parser().parse_args(['controller', 'right', 'move', '--space', space])
+                with self.assertRaisesRegex(ValueError, 'controller right.*set'):
+                    cli.dispatch(args, bench)
+                self.assertEqual(bench.commands, [('control', 'status')])
+
+    def test_controller_move_uses_world_axes_in_selected_space(self):
+        from frame_testbench import pose
+        for space in ('raw', 'standing'):
+            with self.subTest(space=space):
+                cli, bench = self.module(), self.bench()
+                bench.transform = [[0, 0, 1, 10], [0, 1, 0, 2], [-1, 0, 0, 20]]
+                cli.dispatch(cli.parser().parse_args([
+                    'controller', 'right', 'set', '--position', '1', '2', '3',
+                    '--rotation', '0', '90', '0', '--space', 'raw']), bench)
+                bench.commands.clear()
+                result = cli.dispatch(cli.parser().parse_args([
+                    'controller', 'right', 'move', '--translation', '1', '0', '0',
+                    '--rotation', '0', '0', '90', '--space', space]), bench)
+                actual = result['controllers']['right']['pose']
+                # Standing +X is raw +Z. Rotation is pre-multiplied in world space.
+                expected_position = [2, 2, 3] if space == 'raw' else [1, 2, 4]
+                for a, b in zip(actual['position'], expected_position):
+                    self.assertAlmostEqual(a, b)
+                delta = pose.from_euler([0, 0, 0], [0, 0, 90] if space == 'raw' else [0, -90, 0])
+                expected_q = pose.multiply(delta['quaternion'], pose.from_euler([0, 0, 0], [0, 90, 0])['quaternion'])
+                for a, b in zip(actual['quaternion'], expected_q):
+                    self.assertAlmostEqual(a, b)
+                self.assertEqual(bench.commands[0], ('control', 'status'))
+                self.assertEqual(sum(kind == 'native' for kind, _ in bench.commands), int(space == 'standing'))
+                self.assertFalse(result['controllers']['left']['pose_override'])
+                self.assertFalse(result['pose_override'])
+
+    def test_controller_reset_sends_only_selected_release(self):
+        for side in ('left', 'right'):
+            with self.subTest(side=side):
+                cli, bench = self.module(), self.bench()
+                cli.dispatch(cli.parser().parse_args(['controller', side, 'reset']), bench)
+                self.assertEqual(bench.commands, [('control', 'controller-release ' + side)])
+
+    def test_invalid_controller_numbers_never_call_backend(self):
+        for command, option in [('set', '--position'), ('set', '--rotation'),
+                                ('move', '--translation'), ('move', '--rotation')]:
+            for value in ('nan', 'inf', '-inf'):
+                with self.subTest(command=command, option=option, value=value):
+                    cli, bench = self.module(), self.bench()
+                    args = ['controller', 'left', command]
+                    if command == 'set' and option != '--position':
+                        args += ['--position', '0', '0', '0']
+                    # argparse recognizes negative numeric literals, but not -inf.
+                    args += [option, value if value != '-inf' else '-' + '9' * 400, '0', '0']
+                    parsed = cli.parser().parse_args(args)
+                    with self.assertRaises(ValueError):
+                        cli.dispatch(parsed, bench)
+                    self.assertEqual(bench.commands, [])
+
+    def test_capture_native_owns_directory_creation(self):
+        cli = self.module()
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'fresh'
+            bench = cli.Bench()
+            def native(*args):
+                if args[0] == 'status':
+                    return {'compositor': {'frame_index': 1}, 'hmd': {'poses': {}}}
+                self.assertEqual(args[0], 'capture')
+                directory = Path(args[1])
+                self.assertFalse(directory.exists())
+                directory.mkdir()
+                for name in ('preview.png', 'stereo.png'):
+                    (directory / name).write_bytes(b'fixture')
+                return {'ok': True}
+            with patch.object(bench, 'native', side_effect=native):
+                result = bench.capture(str(out))
+            self.assertEqual(result['files']['stereo.png'], str(out / 'stereo.png'))
+            self.assertIn('runtime_before', result)
+            self.assertIn('runtime_after', result)
+
+    def test_remote_capture_fetch_writes_local_artifacts(self):
+        cli = self.module()
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'capture'
+            reply = {'ok': True, 'output': '/remote/artifacts/capture-123',
+                     'files': {'stereo.png': '/remote/artifacts/capture-123/stereo.png',
+                               'preview.png': '/remote/artifacts/capture-123/preview.png'}}
+            calls = []
+            def copy(argv, **kwargs):
+                calls.append(argv)
+                Path(argv[-1]).write_bytes(b'\x89PNG\r\n\x1a\nfixture')
+            with patch.object(cli.subprocess, 'run', side_effect=copy):
+                result = cli.fetch_capture('frame', reply, out)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(Path(result['local_files']['stereo.png']).parent, out)
+            self.assertTrue((out / 'result.json').is_file())
+            with self.assertRaises(FileExistsError):
+                cli.fetch_capture('frame', reply, out)
+
+    def test_status_without_proxy_still_observes(self):
+        cli, bench = self.module(), self.bench()
+        def refused(text):
+            raise FileNotFoundError('not installed')
+        bench.control = refused
+        result = cli.dispatch(cli.parser().parse_args(['status']), bench)
+        self.assertIn('raw_to_standing', result['runtime']['transforms'])
+        self.assertFalse(result['input']['available'])
+
+
+if __name__ == '__main__':
+    unittest.main()

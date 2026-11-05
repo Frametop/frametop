@@ -1,0 +1,19 @@
+{
+  "controller_type": "frame_controller",
+  "description": "FrameKeyboard controller-specific haptic output only",
+  "name": "FrameKeyboard haptics",
+  "bindings": {
+    "/actions/feedback": {
+      "haptics": [
+        {
+          "output": "/actions/feedback/out/key",
+          "path": "/user/hand/left/output/haptic"
+        },
+        {
+          "output": "/actions/feedback/out/key",
+          "path": "/user/hand/right/output/haptic"
+        }
+      ]
+    }
+  }
+}

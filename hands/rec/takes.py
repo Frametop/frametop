@@ -4,6 +4,7 @@
 Standard library only (no Qt, no NumPy), so the window and the command line share it.
 The layout is hands/rec/DESIGN.md's "Files":
   BASE/profile.json
+  BASE/contributions.json  (finished uploads, kept after their sessions go: recorder/contributions.py)
   BASE/sessions/<YYYYMMDD-HHMMSS>/session.json, calibration.json
   BASE/sessions/<id>/takes/<NN>-<section>/sets.bin (sets-2.bin, ... after pauses),
                                           prompts.jsonl, poses.jsonl, take.json
@@ -22,9 +23,11 @@ take's "sides". `takes.py sides SESSION` shows the decision; --set swapped|named
 hand (e.g. from tools/check_sides.py on a session no live tracker decided).
 
 usage: takes.py [--base DIR] list | takes SESSION | export SESSION | sides SESSION [--set swapped|named]
+From the tree's top (hands/rec is a package): PYTHONPATH=. python3 -m hands.rec.takes ...
 """
 import argparse
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -33,46 +36,123 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
+from hands.rec import sides  # noqa: E402  (hands/rec/sides.py, next to this file)
+from recorder import fhformat  # noqa: E402  (FHSET01, hands/track/record.h)
+from recorder import age  # noqa: E402  (a debug session's recordings are encrypted)
+from recorder import contributions  # noqa: E402  (the log of uploads that outlives the sessions)
+from recorder.common import store_json, tree_version  # noqa: E402
+from hands.rec import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's panel and pointer decisions)
+from recorder.files import (Cancelled, free_bytes, human_bytes, in_ranges, merge_ranges, read_json,  # noqa: E402
+                            tree_bytes, tree_stat, write_sums)
 
 DEFAULT_BASE = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MAGIC = b"FHSET01"
-HDR = struct.Struct("<8sII")       # fh_set_hdr_t: magic, ncams, bytes (the whole record)
-CAM = struct.Struct("<16sIIQQ")    # fh_set_cam_t: name, width, height, capture_ns, dqbuf_ns
+MAGIC, HDR, CAM = fhformat.SET_MAGIC, fhformat.SET_HDR, fhformat.SET_CAM
 MAX_CAMS = 16                      # SetReader's limit
 PART_RE = re.compile(r"^sets(?:-(\d+))?\.bin$")
+LIVE_RE = re.compile(r"^live(?:-(\d+))?\.bin$")    # a debug session's copies of the live tracker's output
+LIVE_HDR = struct.Struct("<8sII")                   # livelog.py: magic, version, 0
+LIVE_REC = struct.Struct("<B3xIQQ")                 # source, length, read_ns, seq
+VOICE_RE = re.compile(r"^voice(?:-(\d+))?\.bin$")  # a debug session's microphone, if ticked
+VOICE_HDR = struct.Struct("<8sII")                  # voicelog.py: magic, version, sample rate
+VOICE_REC = struct.Struct("<QI")                    # read_ns, bytes of s16le samples
+EVENTS_RE = re.compile(r"^events(?:-(\d+))?\.jsonl$")  # a debug session's panel and pointer decisions
+TEST_RECIPIENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-recipients.txt")
+# The bounties' test phase (DESIGN.md "Testing"): while it's on, bounty rounds are recorded under
+# TESTING.md's consent (profile.json "testing_consent") like debug sessions, and their exports are
+# encrypted for the test dataset. It ended 2026-10-14: bounty rounds go under CONSENT.md to the public
+# dataset, like full sessions and quick rounds; only debug (testing) sessions stay under TESTING.md.
+TEST_PHASE = False
+CONSENT_KEYS = {"public": "consent", "testing": "testing_consent"}   # profile.json's record of each
+
+
+def round_consent_kind(bounty=False, debug=False):
+    """Which consent a new session is recorded under: "testing" for a debug session, and for a
+    bounty's round in the test phase; else "public"."""
+    return "testing" if debug or (bounty and TEST_PHASE) else "public"
+
+
+def consent_kind(meta):
+    """The consent a session was recorded under (session.json "consent", session.py): "testing"
+    or "public" (sessions from before it was recorded, and full sessions)."""
+    kind = (meta.get("consent") or {}).get("kind") if isinstance(meta.get("consent"), dict) else None
+    return "testing" if kind == "testing" or meta.get("debug") else "public"
 SESSION_RE = re.compile(r"^\d{8}-\d{6}(?:-\d+)?$")   # session.py adds -2, -3 to a second one in a second
 EXPORT_SCHEMA = 1
 # zstd as DESIGN.md has it: level 10, two threads, at the lowest CPU priority (CPU work while
 # someone is in VR makes the headset stutter).
 ZSTD_ARGS = ["-10", "-T2", "-q", "-c"]
 ZSTD_PATHS = ("/usr/bin/zstd", "/usr/local/bin/zstd", "/run/host/usr/bin/zstd")
-CHUNK = 1 << 20
+# An export is about three quarters of the recording's size (2026-10-17, the Frame's five
+# exports: 0.72 to 0.76). Export starts only with room for EXPORT_RATIO_NEED of it plus
+# EXPORT_RESERVE, and stops when the disk gets down to EXPORT_MIN_FREE: a full home disk breaks
+# more than the export (SteamVR, Steam and the desktop write there too). Until 2026-10-17 it
+# started with half free and ran until zstd failed on a full disk.
+EXPORT_RATIO = 0.75
+EXPORT_RATIO_NEED = 0.8
+EXPORT_RESERVE = 2 * 1000 ** 3
+EXPORT_MIN_FREE = 1.5e9       # as session.py's MIN_FREE for recording
+ROOM_CHECK_S = 1.0
 
 
-class Cancelled(Exception):
-    pass
+class ZstdStopped(RuntimeError):
+    """zstd ended before the export was through with it. Writing into its pipe then fails with a
+    broken pipe, which says nothing: this carries what zstd said (a full disk, mostly)."""
 
 
-def read_json(path, default=None):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {} if default is None else default
+class DiskFull(RuntimeError):
+    """Not enough free space for the export, before it started or as it went."""
+
+
+class NearlyFull(OSError):
+    """The export stopped itself: the disk got down to EXPORT_MIN_FREE."""
+
+    def __init__(self, free):
+        super().__init__(errno.ENOSPC, f"only {human_bytes(free)} left on the disk")
+
+
+def export_need(kept):
+    """The free space an export of kept bytes of recording needs to start."""
+    return int(kept * EXPORT_RATIO_NEED + EXPORT_RESERVE)
+
+
+_room_checked = [0.0]   # when check_room last looked (monotonic s)
+
+
+def check_room(path):
+    """Raise NearlyFull when the disk holding path is down to EXPORT_MIN_FREE. Looks at most once
+    every ROOM_CHECK_S (a statvfs per set would cost more than it saves)."""
+    now = time.monotonic()
+    if now - _room_checked[0] < ROOM_CHECK_S:
+        return
+    _room_checked[0] = now
+    free = free_bytes(path)
+    if 0 < free < EXPORT_MIN_FREE:
+        raise NearlyFull(free)
+
+
+def disk_full(e):
+    """True if e (an export's error) or what it came from is a full disk or a quota."""
+    seen = set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, OSError) and e.errno in (errno.ENOSPC, errno.EDQUOT, errno.EFBIG):
+            return True
+        if isinstance(e, ZstdStopped) and any(s in str(e).lower() for s in ("no space left", "quota exceeded",
+                                                                           "file too large")):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
 
 
 def write_json(path, obj):
-    """Write through a temporary file, so a crash never leaves half a file."""
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(obj, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, path)
+    """Write through a temporary file of its own, flushed to disk and renamed, so a crash never
+    leaves half a file (recorder.common.store_json)."""
+    store_json(path, obj, indent=2)
 
 
 def find_zstd():
@@ -97,51 +177,14 @@ def standalone(path=None):
 
 
 def tool_version():
-    """ft-handrec plus the checkout's git describe, for session.json and the manifest. The
-    standalone Hand Recorder has no checkout: the describe it was built from, and its version."""
+    """ft-handrec plus the tree's version (a checkout's git describe, a release's version and
+    commit), for session.json and the manifest. The standalone Hand Recorder has neither: the
+    describe it was built from, and its version."""
     info = standalone()
     if info:
         return "ft-handrec %s (%s %s)" % (info.get("frametop") or "unknown", info.get("name") or "standalone",
                                           info.get("version") or "unknown")
-    try:
-        out = subprocess.run(["git", "-C", REPO, "describe", "--always", "--dirty", "--tags"],
-                             capture_output=True, text=True, timeout=5)
-        described = out.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        described = ""
-    return "ft-handrec " + (described or "unknown")
-
-
-def free_bytes(path):
-    """Free space on the file system that holds path (or its nearest existing parent)."""
-    while path and not os.path.exists(path):
-        path = os.path.dirname(path)
-    try:
-        return shutil.disk_usage(path or "/").free
-    except OSError:
-        return 0
-
-
-def tree_stat(path):
-    """(bytes, newest mtime) of the files under path."""
-    total, newest = 0, 0.0
-    for root, _, files in os.walk(path):
-        for name in files:
-            try:
-                st = os.lstat(os.path.join(root, name))
-            except OSError:
-                continue
-            total += st.st_size
-            newest = max(newest, st.st_mtime)
-    return total, newest
-
-
-def tree_bytes(path):
-    return tree_stat(path)[0]
-
-
-def in_ranges(t, ranges):
-    return any(a <= t <= b for a, b in ranges)
+    return "ft-handrec " + (tree_version(REPO) or "unknown")
 
 
 def export_jsonl(src, dst, ranges, keep_controllers):
@@ -178,15 +221,105 @@ def export_jsonl(src, dst, ranges, keep_controllers):
             out.write(json.dumps(obj, separators=(", ", ": ")) + "\n")
 
 
-def merge_ranges(ranges):
-    """Sorted, with overlapping or touching ranges joined."""
-    out = []
-    for a, b in sorted((min(a, b), max(a, b)) for a, b in ranges):
-        if out and a <= out[-1][1] + 1:
-            out[-1][1] = max(out[-1][1], b)
-        else:
-            out.append([a, b])
-    return out
+def live_parts(take_dir, pattern=LIVE_RE):
+    """A debug take's live.bin, live-2.bin, ... in order (pattern=VOICE_RE: voice.bin, ...)."""
+    try:
+        names = os.listdir(take_dir)
+    except OSError:
+        return []
+    found = [(int(m.group(1) or 1), name) for name in names for m in [pattern.match(name)] if m]
+    return [os.path.join(take_dir, name) for _, name in sorted(found)]
+
+
+def export_live(take_dir, ranges, zstd, dest, recipients=None):
+    """A debug take's live parts as one live.bin (livelog.py's format), records in deleted ranges
+    left out, through zstd into dest, encrypted to recipients if given. None without live
+    parts; else {"records": {"hands": n, "gestures": n}, "raw_bytes": n}."""
+    parts = live_parts(take_dir)
+    if not parts:
+        return None
+    out = bytearray(LIVE_HDR.pack(b"FHLIVE01", 1, 0))
+    counts = {"hands": 0, "gestures": 0}
+    for path in parts:
+        with open(path, "rb") as f:
+            data = f.read()
+        if len(data) < LIVE_HDR.size or data[:8] != b"FHLIVE01":
+            continue
+        off = LIVE_HDR.size
+        while off + LIVE_REC.size <= len(data):
+            src, n, read_ns, _ = LIVE_REC.unpack_from(data, off)
+            end = off + LIVE_REC.size + n
+            if end > len(data) or src > 1:
+                break   # cut off: the session ended mid-write
+            if not in_ranges(read_ns, ranges):
+                out += data[off:end]
+                counts["hands" if src == 0 else "gestures"] += 1
+            off = end
+    r = subprocess.run(["nice", "-n", "19", zstd] + ZSTD_ARGS, input=bytes(out), capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError("zstd failed: %s" % (r.stderr.decode(errors="replace").strip() or r.returncode))
+    payload = age.encrypt_bytes(r.stdout, recipients) if recipients else r.stdout
+    with open(dest, "wb") as f:
+        f.write(payload)
+    return {"records": counts, "raw_bytes": len(out)}
+
+
+def export_voice(take_dir, ranges, zstd, dest, recipients):
+    """A debug take's voice parts as one voice.bin (voicelog.py's format), chunks touching a
+    deleted range left out, through zstd into dest, always encrypted (no recipients: nothing
+    written, None). None without voice parts; else {"chunks": n, "seconds": s, "raw_bytes": n}."""
+    parts = live_parts(take_dir, VOICE_RE)
+    if not parts or not recipients:
+        return None
+    out, rate, chunks, samples = bytearray(), None, 0, 0
+    for path in parts:
+        with open(path, "rb") as f:
+            data = f.read()
+        if len(data) < VOICE_HDR.size or data[:8] != b"FHVOIC01":
+            continue
+        _, _, part_rate = VOICE_HDR.unpack_from(data, 0)
+        if rate is None:
+            rate = part_rate
+            out += VOICE_HDR.pack(b"FHVOIC01", 1, rate)
+        elif part_rate != rate:
+            continue
+        off = VOICE_HDR.size
+        while off + VOICE_REC.size <= len(data):
+            read_ns, n = VOICE_REC.unpack_from(data, off)
+            end = off + VOICE_REC.size + n
+            if end > len(data):
+                break   # cut off: the session ended mid-write
+            first_ns = read_ns - n // 2 * 1_000_000_000 // max(1, rate)
+            if not any(a <= read_ns and first_ns <= b for a, b in ranges):
+                out += data[off:end]
+                chunks += 1
+                samples += n // 2
+            off = end
+    if rate is None:
+        return None
+    r = subprocess.run(["nice", "-n", "19", zstd] + ZSTD_ARGS, input=bytes(out), capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError("zstd failed: %s" % (r.stderr.decode(errors="replace").strip() or r.returncode))
+    with open(dest, "wb") as f:
+        f.write(age.encrypt_bytes(r.stdout, recipients))
+    return {"chunks": chunks, "seconds": round(samples / rate, 2), "raw_bytes": len(out)}
+
+
+def export_events(take_dir, ranges, zstd, dest, recipients):
+    """A debug take's events parts (eventlog.py) as one events.jsonl, events in deleted ranges left
+    out, through zstd into dest, always encrypted (no recipients: nothing written, None). None
+    without events parts; else {"events": n, "by": {kind: {outcome: n}}, "raw_bytes": n}."""
+    parts = live_parts(take_dir, EVENTS_RE)
+    if not parts or not recipients:
+        return None
+    events = [e for path in parts for e in eventlog.read_lines(path) if not in_ranges(e["t"], ranges)]
+    out = "".join(json.dumps(e, separators=(", ", ": ")) + "\n" for e in events).encode()
+    r = subprocess.run(["nice", "-n", "19", zstd] + ZSTD_ARGS, input=out, capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError("zstd failed: %s" % (r.stderr.decode(errors="replace").strip() or r.returncode))
+    with open(dest, "wb") as f:
+        f.write(age.encrypt_bytes(r.stdout, recipients))
+    return {"events": len(events), "by": eventlog.summary(events), "raw_bytes": len(out)}
 
 
 # ---------------------------------------------------------------- one take's recording
@@ -332,6 +465,41 @@ def take_index(take_dir):
     return index
 
 
+def export_sha(export_dir):
+    """The export's identity, as hub.py records it: the SHA256 of its SHA256SUMS ("" if none)."""
+    try:
+        with open(os.path.join(export_dir, "SHA256SUMS"), "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _epoch(iso):
+    try:
+        return datetime.datetime.fromisoformat(iso).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def upload_state(meta, changed, export_dir):
+    """A session's uploads, from its session.json (meta) and its files' newest change (changed,
+    tree_stat's): {"uploaded": a finished upload exists, "pr_url": the last one's, "freeable":
+    deleting the local copy loses nothing that wasn't uploaded}. That's when the recordings haven't
+    changed since the last finished upload, or (an upload without a readable time) the export
+    there now is the one uploaded."""
+    done = contributions.done_uploads(meta)
+    if not done:
+        return {"uploaded": False, "pr_url": "", "freeable": False}
+    last = done[-1]
+    when = _epoch(last.get("uploaded", ""))
+    if when is not None:
+        freeable = changed <= when
+    else:
+        sha = export_sha(export_dir)
+        freeable = bool(sha) and any(u.get("export_sha") == sha for u in done)
+    return {"uploaded": True, "pr_url": last.get("pr_url", ""), "freeable": freeable}
+
+
 # ---------------------------------------------------------------- the store
 
 class Store:
@@ -362,7 +530,8 @@ class Store:
     # --- listing
     def sessions(self):
         """Newest first: [{id, started, takes, bytes, lighting, status, dry_run, contributor, exported,
-        export_stale (changed since), export_bytes}]."""
+        export_stale (changed since), export_bytes, uploaded, pr_url, freeable}] (upload_state's
+        last three)."""
         out = []
         try:
             names = os.listdir(self.sessions_dir)
@@ -380,8 +549,11 @@ class Store:
                         "bytes": size, "contributor": meta.get("contributor", ""),
                         "lighting": (meta.get("lighting") or {}).get("chosen", ""),
                         "status": meta.get("status", ""), "dry_run": bool(meta.get("dry_run")),
+                        "bounty": ((meta.get("bounty") or {}).get("title") or "") if isinstance(meta.get("bounty"), dict) else "",
+                        "debug": bool(meta.get("debug")), "testing": consent_kind(meta) == "testing",
                         "exported": bool(exported), "export_stale": bool(exported) and changed > exported,
-                        "export_bytes": tree_bytes(self.export_dir(sid)) if exported else 0})
+                        "export_bytes": tree_bytes(self.export_dir(sid)) if exported else 0,
+                        **upload_state(meta, changed, self.export_dir(sid))})
         return sorted(out, key=lambda s: s["id"], reverse=True)
 
     def take_ids(self, session):
@@ -456,6 +628,53 @@ class Store:
         if os.path.isdir(path):
             shutil.rmtree(path)
 
+    # --- freeing space: uploaded sessions go, their record stays (recorder/contributions.py)
+    def log_uploads(self, session=None):
+        """Copy finished uploads from session.json into the contributions log: one session's, or
+        every session's (uploads older recorders recorded only there). Returns how many were new."""
+        items = []
+        for sid in [session] if session else [s for s in os.listdir(self.sessions_dir)
+                                              if SESSION_RE.match(s)] if os.path.isdir(self.sessions_dir) else []:
+            meta = read_json(os.path.join(self.session_dir(sid), "session.json"))
+            export = self.export_dir(sid)
+            size = tree_bytes(export) if os.path.isdir(export) else 0
+            items += [contributions.entry(sid, meta, u, size if u.get("export_sha") == export_sha(export) else 0)
+                      for u in contributions.done_uploads(meta)]
+        return contributions.add(self.base, items) if items else 0
+
+    def free_session(self, session):
+        """Delete an uploaded session's recordings and export, keeping its uploads in the
+        contributions log. Refuses (ValueError) a session that isn't uploaded as it is now.
+        Returns the bytes freed."""
+        path = self.session_dir(session)
+        meta = read_json(os.path.join(path, "session.json"))
+        if not meta:
+            raise ValueError(f"no session {session}")
+        _, changed = tree_stat(path)
+        state = upload_state(meta, changed, self.export_dir(session))
+        if not state["freeable"]:
+            raise ValueError("This session isn't uploaded as it is now: upload it first, or delete it")
+        freed = tree_bytes(path) + (tree_bytes(self.export_dir(session)) if os.path.isdir(self.export_dir(session)) else 0)
+        self.log_uploads(session)   # the record first: if it can't be written, nothing is deleted
+        if session not in contributions.sessions(self.base):
+            raise OSError(f"couldn't keep the record of {session} in {contributions.FILE}")
+        self.delete_session(session)
+        contributions.mark_deleted(self.base, session)
+        return freed
+
+    def freeable(self):
+        """The sessions free_session would take: [{id, bytes (recordings + export)}], newest first."""
+        return [{"id": s["id"], "bytes": s["bytes"] + s["export_bytes"]} for s in self.sessions()
+                if s["freeable"] and s["status"] != "recording"]
+
+    def contributions(self):
+        """The contributions log, newest first, each with "local": its session is still here."""
+        out = []
+        for c in reversed(contributions.load(self.base)):
+            local = bool(SESSION_RE.match(c["session"])) and os.path.isdir(os.path.join(self.sessions_dir, c["session"]))
+            out.append(dict(c, local=local))
+        return out
+
     # --- export
     def sides(self, session, swapped=None):
         """session.json's side camera decision (sides.py) plus each take's parts; with swapped
@@ -504,17 +723,40 @@ class Store:
         work = final + ".partial"
         if os.path.isdir(work):
             shutil.rmtree(work)
+        kept = self.kept_bytes(session)
+        free = free_bytes(self.exports_dir)   # 0: couldn't tell, so no check
+        if 0 < free < export_need(kept):
+            raise DiskFull(self.space_text(session, kept, "Not enough free space to export this session"))
         os.makedirs(work)
         try:
             self._export(session, src, work, zstd, report, cancelled, keep_notes)
             if os.path.isdir(final):
                 shutil.rmtree(final)
             os.replace(work, final)
-        except BaseException:
+        except BaseException as e:
             shutil.rmtree(work, ignore_errors=True)
+            if isinstance(e, NearlyFull):
+                raise DiskFull(self.space_text(session, kept, "The disk got nearly full, so the export "
+                                                              "stopped and removed its half")) from e
+            if isinstance(e, Exception) and not isinstance(e, DiskFull) and disk_full(e):
+                raise DiskFull(self.space_text(session, kept, "The disk filled up while exporting")) from e
             raise
         report(1.0, "Done")
         return final
+
+    def kept_bytes(self, session):
+        """About how much of the session's recording an export keeps (deleted ranges left out)."""
+        return int(sum(t["bytes"] * (t["sets"] - t["deleted_sets"]) / max(1, t["sets"]) for t in self.takes(session)))
+
+    def space_text(self, session, kept, first):
+        """The disk-full message: what's free, about what the export needs, and what to do."""
+        text = (f"{first}: {human_bytes(free_bytes(self.exports_dir))} free, and the export needs about "
+                f"{human_bytes(export_need(kept))} to start. Free some space and export again. Rounds that "
+                "are already uploaded can be deleted on the Review page, and your record of them stays.")
+        old = tree_bytes(self.export_dir(session)) if os.path.isdir(self.export_dir(session)) else 0
+        if old:
+            text += f" Its old export ({human_bytes(old)}) stays until the new one is done: deleting it frees that too."
+        return text
 
     def _export(self, session, src, work, zstd, report, cancelled, keep_notes):
         profile = self.profile()
@@ -525,6 +767,10 @@ class Store:
         done = 0
         take_entries = []
         keep_controllers = (meta.get("checklist") or {}).get("controllers") == "straps"
+        # A test-phase session's recordings go to the test dataset encrypted (DESIGN.md "Testing")
+        kind = consent_kind(meta)
+        recipients = age.read_recipients(TEST_RECIPIENTS) if kind == "testing" else None
+        encrypted = []
         for t in takes:
             if cancelled():
                 raise Cancelled()
@@ -552,84 +798,124 @@ class Store:
                      "duration_s": round(t["duration_s"], 2), "file": None,
                      "sides": {"names_swapped": names_swapped, "renamed_sets": index.renamed_sets(keep)}}
             done += index.bytes() - sum(index.sets[i][2] for i in keep)   # deleted sets count as done
+            suffix = ".age" if recipients else ""
             if keep:
-                entry["file"] = "takes/%s/sets.bin.zst" % t["id"]
+                entry["file"] = "takes/%s/sets.bin.zst%s" % (t["id"], suffix)
 
                 def step(nbytes, title=t["title"]):
                     nonlocal done
                     done += nbytes
-                    report(min(done / total, 0.99), f"Compressing {title}")
-                entry["raw_bytes"] = self._compress(index, keep, zstd, os.path.join(out, "sets.bin.zst"),
-                                                    step, cancelled)
+                    report(min(done / total, 0.99), f"{'Compressing and encrypting' if recipients else 'Compressing'} {title}")
+                entry["raw_bytes"] = self._compress(index, keep, zstd, os.path.join(work, entry["file"]),
+                                                    step, cancelled, recipients)
+                if recipients:
+                    encrypted.append(entry["file"])
+            live = export_live(tdir, ranges, zstd, os.path.join(out, "live.bin.zst" + suffix), recipients)
+            if live is not None:
+                entry["live"] = dict(live, file="takes/%s/live.bin.zst%s" % (t["id"], suffix))
+                if recipients:
+                    encrypted.append(entry["live"]["file"])
+            voice = export_voice(tdir, ranges, zstd, os.path.join(out, "voice.bin.zst.age"), recipients)
+            if voice is not None:
+                entry["voice"] = dict(voice, file="takes/%s/voice.bin.zst.age" % t["id"])
+                encrypted.append(entry["voice"]["file"])
+            events = export_events(tdir, ranges, zstd, os.path.join(out, "events.jsonl.zst.age"), recipients)
+            if events is not None:
+                entry["events"] = dict(events, file="takes/%s/events.jsonl.zst.age" % t["id"])
+                encrypted.append(entry["events"]["file"])
             take_entries.append(entry)
         if cancelled():
             raise Cancelled()
         for name in ("calibration.json", "device.json"):
             if os.path.isfile(os.path.join(src, name)):
                 shutil.copyfile(os.path.join(src, name), os.path.join(work, name))
-        shown_profile = json.loads(json.dumps(profile))
+        # the profile as the dataset sees it: the consent this session was recorded under, not the
+        # window's own keys (the bounties done) nor the other consent's record
+        shown_profile = json.loads(json.dumps({k: profile[k] for k in ("schema", "contributor", CONSENT_KEYS[kind],
+                                                                       "optional") if k in profile}))
         if not keep_notes and isinstance(shown_profile.get("optional"), dict):
             shown_profile["optional"].pop("notes", None)
         manifest = {"schema": EXPORT_SCHEMA, "tool": tool_version(),
                     "exported": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
                     "session_id": session, "contributor": profile.get("contributor", meta.get("contributor", "")),
-                    "consent_version": (profile.get("consent") or {}).get("version", ""),
+                    "consent_kind": kind,
+                    "consent_version": (profile.get(CONSENT_KEYS[kind]) or {}).get("version", ""),
                     "profile": shown_profile, "session": meta, "takes": take_entries}
+        if recipients:
+            manifest["encryption"] = {"scheme": "age-v1-x25519", "recipients": recipients, "files": encrypted}
         write_json(os.path.join(work, "manifest.json"), manifest)
         report(0.995, "Writing checksums")
-        sums = []
-        for root, _, files in os.walk(work):
-            for name in files:
-                path = os.path.join(root, name)
-                sums.append((os.path.relpath(path, work), sha256_file(path, cancelled)))
-        with open(os.path.join(work, "SHA256SUMS"), "w") as f:
-            for rel, digest in sorted(sums):
-                f.write(f"{digest}  {rel}\n")
+        write_sums(work, cancelled)
 
     @staticmethod
-    def _compress(index, keep, zstd, dest, step, cancelled):
-        """Stream the kept sets through zstd into dest. Returns the uncompressed size."""
+    def _compress(index, keep, zstd, dest, step, cancelled, recipients=None):
+        """Stream the kept sets through zstd into dest, encrypted to recipients if given (age,
+        as zstd writes). Returns the uncompressed size.
+        Pipes (2026-10-15): zstd's messages go to a temporary file, as a pipe read only at the end
+        could fill and stop zstd and this thread both. zstd ending early (a full disk, a signal)
+        makes the next write into its pipe a broken pipe: ZstdStopped with what zstd said instead.
+        The sealer drains what it can't encrypt a piece at a time, not into memory all at once."""
         raw = 0
-        with open(dest, "wb") as out:
-            proc = subprocess.Popen(["nice", "-n", "19", zstd] + ZSTD_ARGS, stdin=subprocess.PIPE, stdout=out,
-                                    stderr=subprocess.PIPE)
+        with open(dest, "wb") as out, tempfile.TemporaryFile(prefix="handrec-zstd-") as errors:
+            proc = subprocess.Popen(["nice", "-n", "19", zstd] + ZSTD_ARGS, stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE if recipients else out, stderr=errors)
+            sealer, sealed = None, {}
+            if recipients:
+                def seal():
+                    try:
+                        age.encrypt_stream(proc.stdout, out, recipients)
+                    except BaseException as e:   # reported below, after zstd
+                        sealed["error"] = e
+                        try:   # keep zstd from blocking on a full pipe
+                            while proc.stdout.read(1 << 20):
+                                pass
+                        except (OSError, ValueError):
+                            pass
+                sealer = threading.Thread(target=seal, name="handrec-seal", daemon=True)
+                sealer.start()
+
+            def stopped():
+                try:
+                    code = proc.wait(30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    code = proc.wait()
+                errors.seek(0)
+                said = errors.read()[-4000:].decode(errors="replace").strip()
+                return ZstdStopped(f"zstd stopped: {said}" if said else f"zstd stopped (exit status {code})")
             try:
-                for i in keep:
-                    if cancelled():
-                        raise Cancelled()
-                    record = index.read_raw(i)
-                    proc.stdin.write(record)
-                    raw += len(record)
-                    step(len(record))
-                proc.stdin.close()
-                err = proc.stderr.read().decode(errors="replace").strip()
+                try:
+                    for i in keep:
+                        if cancelled():
+                            raise Cancelled()
+                        check_room(dest)
+                        record = index.read_raw(i)
+                        proc.stdin.write(record)
+                        raw += len(record)
+                        step(len(record))
+                    proc.stdin.close()
+                except BrokenPipeError:
+                    raise stopped() from None
                 if proc.wait() != 0:
-                    raise RuntimeError(f"zstd failed: {err or proc.returncode}")
+                    raise stopped()
+                if sealer:
+                    sealer.join()
+                    if "error" in sealed:
+                        raise RuntimeError(f"encrypting failed: {sealed['error']}") from sealed["error"]
             except BaseException:
                 proc.kill()
                 proc.wait()
+                if sealer:
+                    sealer.join()   # zstd has gone, so its output ends and the sealer with it
                 raise
             finally:
-                proc.stderr.close()
+                for pipe in (proc.stdin, proc.stdout):
+                    try:
+                        if pipe:
+                            pipe.close()   # a write cut short leaves bytes that won't flush
+                    except OSError:
+                        pass
         return raw
-
-
-def sha256_file(path, cancelled=lambda: False):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(CHUNK):
-            if cancelled():
-                raise Cancelled()
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def human_bytes(n):
-    for unit in ("B", "KB", "MB", "GB"):
-        if n < 1000 or unit == "GB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1000
-    return f"{n:.1f} TB"
 
 
 def main():
@@ -656,10 +942,15 @@ def main():
     elif a.cmd == "sides":
         print(json.dumps(store.sides(a.session, None if a.set is None else a.set == "swapped"), indent=1))
     else:
-        path = store.export(a.session, progress=lambda f, text: print(f"\r{f * 100:5.1f}% {text:40.40}", end="",
-                                                                       flush=True))
+        def show(f, text):
+            try:
+                print(f"\r{f * 100:5.1f}% {text:40.40}", end="", flush=True)
+            except BrokenPipeError:   # whatever read the output went (| head, a closed terminal): export on
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        path = store.export(a.session, progress=show)
         print(f"\n{path}  {human_bytes(tree_bytes(path))}")
 
 
 if __name__ == "__main__":
+    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600
     main()

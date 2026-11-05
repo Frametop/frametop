@@ -6,5 +6,7 @@ Comment=Hide the screens (and SteamVR's laser) for a VR game; press again to bri
 Exec=@REPO@/layout/ft-hide-show
 Icon=view-visible
 Categories=Settings;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=screens
 Keywords=display;screen;hide;show;steamvr;frametop;
-X-KDE-Shortcuts=Meta+Shift+H

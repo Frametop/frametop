@@ -5,6 +5,9 @@ Documentation=file://@REPO@/hands/README.md
 # It borrows XRService's camera buffers, so it comes and goes with SteamVR.
 After=steamvr.service
 PartOf=steamvr.service
+# Room for the quick restarts below, while XRService is away (8 starts in 30 s at most).
+StartLimitIntervalSec=30
+StartLimitBurst=12
 
 [Service]
 # On the host: the dev container can't reach XRService. Its file capabilities (set by
@@ -15,7 +18,12 @@ PartOf=steamvr.service
 # Add --with-color to try the colour cameras (ft-hands then picks them by the light).
 ExecStart=@REPO@/hands/build/ft-camd --status 60
 Restart=always
-RestartSec=5
+# 1 s at first, so hand tracking is back soon after a colour module hot plug (it can't restart
+# itself: it has dropped its capabilities), then longer: 1.7, 2.9, 5 s (the count only resets
+# when SteamVR starts it).
+RestartSec=1
+RestartSteps=3
+RestartMaxDelaySec=5
 TimeoutStopSec=5
 
 [Install]

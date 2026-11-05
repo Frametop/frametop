@@ -4,7 +4,7 @@ One-time setup for the Steam Frame itself: the `dev` build container and the Blu
 
 | Script | What it sets up | Needs host `sudo` |
 | --- | --- | --- |
-| `dev-container.sh` | The `dev` build container (Fedora 44 toolbox) with every package the projects need | No |
+| `dev-container.sh` | The `dev` build container (the image's digest-pinned Fedora 44 toolbox) with every package the projects need (`packages.txt`, shared with the image) | No |
 | `bluetooth/install.sh` | Persistent fixes so Bluetooth LE mice and keyboards reconnect | Yes |
 
 ## Build container

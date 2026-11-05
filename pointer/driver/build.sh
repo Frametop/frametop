@@ -10,10 +10,11 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 exec "$root/scripts/frame.sh" -C pointer/driver 'set -e
 mkdir -p build
 . ../../scripts/openvr.sh
-g++ -std=c++17 -O2 -fPIC -shared -fvisibility=hidden -fno-math-errno -Wall -Wno-unused-parameter \
-  -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL \
+g++ -std=c++17 -O2 -ffunction-sections -fdata-sections -fPIC -shared -fvisibility=hidden -fno-math-errno -Wall -Wno-unused-parameter \
+  -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL,--gc-sections \
   $OPENVR_CFLAGS \
   -o build/driver_ft_pointer.so driver_ft_pointer.cpp -lpthread
+strip --strip-unneeded build/driver_ft_pointer.so
 max=$(objdump -T build/driver_ft_pointer.so | grep -oE "GLIBC_[0-9.]+" | sort -uV | tail -1)
 echo "built build/driver_ft_pointer.so, newest glibc symbol: $max"
 [ "$(printf "%s\n" "$max" GLIBC_2.39 | sort -V | tail -1)" = GLIBC_2.39 ] || { echo "needs newer glibc than the host has" >&2; exit 1; }'

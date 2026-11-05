@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from frame_testbench.mcp_server import main
+
+raise SystemExit(main())

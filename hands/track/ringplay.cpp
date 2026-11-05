@@ -3,11 +3,15 @@
 // run after run. For A/B tests of how the tracker runs.
 //
 //   ft-ringplay DIR --ring PATH [--from S] [--to S] [--loop] [--cpus 0,1]
+//               [--upper-skew MS] [--upper-drift MS_PER_S]
 //
 // Frames are stamped as they're published, so the tracker's latency figures stay
 // meaningful. Cameras carry their calibration name and no device node (ft-hands maps
 // them by name), so a recording made with the right names needs no --swap-sides.
 // Dark frames (<name>_dk) are skipped. Needs no root: the ring is an ordinary file.
+// --upper-skew and --upper-drift stamp the upper cameras' frames MS (plus MS_PER_S a second,
+// modulo a 30 fps frame) later than the sides', as after a colour module hot plug that left
+// them out of step (hands/README.md, "Frame sets").
 #include "record.h"
 
 extern "C" {
@@ -20,6 +24,7 @@ extern "C" {
 #include <unistd.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -87,12 +92,13 @@ bool is_dark(const char *name) {
 
 int main(int argc, char **argv) {
     if (argc < 2 || argv[1][0] == '-') {
-        std::fprintf(stderr, "usage: %s DIR --ring PATH [--from S] [--to S] [--loop] [--cpus 0,1]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s DIR --ring PATH [--from S] [--to S] [--loop] [--cpus 0,1] [--upper-skew MS] "
+                             "[--upper-drift MS_PER_S]\n", argv[0]);
         return 1;
     }
     const std::string dir = argv[1];
     std::string ring_path;
-    double from = 0, to = 1e9;
+    double from = 0, to = 1e9, upper_skew_ms = 0, upper_drift_ms = 0;
     bool loop = false;
     std::vector<int> cpus = {0, 1};
     for (int i = 2; i < argc; ++i) {
@@ -102,6 +108,8 @@ int main(int argc, char **argv) {
         else if (a == "--from" && more) from = std::atof(argv[++i]);
         else if (a == "--to" && more) to = std::atof(argv[++i]);
         else if (a == "--loop") loop = true;
+        else if (a == "--upper-skew" && more) upper_skew_ms = std::atof(argv[++i]);
+        else if (a == "--upper-drift" && more) upper_drift_ms = std::atof(argv[++i]);
         else if (a == "--cpus" && more) {
             cpus.clear();
             for (char *p = argv[++i]; *p;) {
@@ -185,6 +193,7 @@ int main(int argc, char **argv) {
     std::fflush(stdout);
 
     uint64_t published = 0, rounds = 0;
+    const uint64_t t_play = clock_ns(CLOCK_MONOTONIC);
     for (;;) {
         // one pass over [from, to]: each set goes out at its recorded offset from the first
         while (have && set_time(cams) - rec0 < from && !g_stop) {
@@ -202,6 +211,7 @@ int main(int argc, char **argv) {
                 nanosleep(&ts, nullptr);
             }
             const uint64_t raw = clock_ns(CLOCK_MONOTONIC_RAW), mono = clock_ns(CLOCK_MONOTONIC);
+            const double skew_ms = std::fmod(upper_skew_ms + upper_drift_ms * (mono - t_play) * 1e-9, 1000.0 / 30);
             for (size_t r = 0; r < pub.size(); ++r) {
                 fh_ring_cam_t &rc = hdr->cams[r];
                 if (px[pub[r]].size() != size_t(rc.width) * rc.height) continue;
@@ -212,6 +222,7 @@ int main(int argc, char **argv) {
                 std::memcpy(reinterpret_cast<uint8_t *>(s + 1), px[pub[r]].data(), px[pub[r]].size());
                 s->frame = n;
                 s->capture_ns = raw;   // taken now, as a live camera's frame would be
+                if (!std::strncmp(rc.name, "upper", 5)) s->capture_ns += uint64_t(std::max(0.0, skew_ms) * 1e6);
                 s->dqbuf_ns = mono;
                 s->publish_ns = mono;
                 __atomic_store_n(&s->seq, 2 * n + 2, __ATOMIC_RELEASE);

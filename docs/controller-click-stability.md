@@ -31,4 +31,4 @@ long presses, cross-monitor dragging and simultaneous mouse use. The existing
 renderer laser remains tracked; this change stabilizes desktop input rather
 than smoothing the visual laser. The default was 8 at first. That's about 0.2° on a 3.4 m wide 3440-pixel screen 2 m away, and clicking took a very still hand, so it's 32 (about 0.9°) since 2026-10-03.
 
-Run `scripts/test-controller-click.sh` for the isolated gesture-state tests.
+`just test-c` runs the isolated gesture-state tests (`screens/tests/controller-click-test.c`).

@@ -1,0 +1,464 @@
+{
+ "version": 1,
+ "name": "fists",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Fists",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "fists",
+   "title": "Fists",
+   "kind": "scene",
+   "intro": "Close your fist on a window, carry it and open your hand to let go: slowly, quickly, with each hand and both, and against pinches and card grabs. Nothing happens when you do: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "close-open-right",
+     "hands": "right",
+     "text": "Right hand. Close your fist on the lit part, hold until it goes out,|then open the hand all the way, fingers spread.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "fist",
+      "every_s": 2.5,
+      "gap_s": 1.2,
+      "moves": [
+       {
+        "grab": "right"
+       },
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "br"
+       },
+       {
+        "grab": "right"
+       }
+      ],
+      "say": "Fist on the lit part, hold, then open the hand all the way",
+      "rest_say": "Open it all the way"
+     }
+    },
+    {
+     "id": "close-open-left",
+     "hands": "left",
+     "text": "Left hand. Fist on the lit part, hold, then open the hand all the way.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.05,
+        -0.2,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "fist",
+      "every_s": 2.5,
+      "gap_s": 1.2,
+      "moves": [
+       {
+        "grab": "left"
+       },
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "bl"
+       },
+       {
+        "grab": "left"
+       }
+      ],
+      "say": "Fist on the lit part, hold, then open the hand all the way",
+      "rest_say": "Open it all the way"
+     }
+    },
+    {
+     "id": "slow",
+     "hands": "right",
+     "text": "Right hand, slowly: take about a second to close the fist on the lit edge,|and about a second to open it again.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "fist",
+      "grab": "right",
+      "every_s": 3.5,
+      "gap_s": 1.5,
+      "count": 3,
+      "moves": [
+       {
+        "grab": "right"
+       },
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "right"
+       }
+      ],
+      "say": "Slowly: close the fist, hold, open slowly",
+      "rest_say": "Open it slowly"
+     }
+    },
+    {
+     "id": "carry-right",
+     "hands": "right",
+     "text": "Right hand. Fist on the lit edge, take the window to the ghost, turning it like the ghost,|then open the hand there to let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "fist",
+      "grab": "right",
+      "every_s": 3.5,
+      "gap_s": 1.2,
+      "count": 3,
+      "moves": [
+       [
+        0.2,
+        0.1,
+        0,
+        25,
+        0,
+        0
+       ],
+       [
+        -0.2,
+        0,
+        0.1
+       ],
+       [
+        0,
+        -0.12,
+        -0.15,
+        0,
+        0,
+        20
+       ]
+      ],
+      "say": "Fist on it, take it to the ghost, open to let go"
+     }
+    },
+    {
+     "id": "carry-left",
+     "hands": "left",
+     "text": "Left hand. Fist on the lit edge, take it to the ghost, open the hand to let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.05,
+        -0.2,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "fist",
+      "grab": "left",
+      "every_s": 3.5,
+      "gap_s": 1.2,
+      "count": 3,
+      "moves": [
+       [
+        -0.2,
+        0.1,
+        0
+       ],
+       [
+        0.15,
+        0,
+        0.1,
+        -25,
+        0,
+        0
+       ],
+       [
+        0,
+        0.1,
+        -0.15
+       ]
+      ],
+      "say": "Fist on it, take it to the ghost, open to let go"
+     }
+    },
+    {
+     "id": "two-fists",
+     "hands": "both",
+     "text": "Both hands, a fist on each lit edge: stretch or turn the window like the ghost,|then open both hands.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "fist",
+      "grab": "left+right",
+      "every_s": 3.5,
+      "gap_s": 1.2,
+      "count": 3,
+      "moves": [
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1.4
+       ],
+       [
+        0,
+        0,
+        0,
+        30,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.75
+       ]
+      ],
+      "say": "Two fists: stretch or turn it like the ghost"
+     }
+    },
+    {
+     "id": "look-alikes",
+     "hands": "right",
+     "text": "Right hand, on the lit edge. Each says how: a fist, a two-finger pinch, a card grab,|an open-hand touch, or orange: curl the fingers halfway and stop, no fist.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "every_s": 2.5,
+      "gap_s": 1.0,
+      "moves": [
+       {
+        "grab": "right",
+        "gesture": "fist"
+       },
+       {
+        "grab": "right",
+        "gesture": "pinch",
+        "say": "Pinch it with two fingers: thumb and index only"
+       },
+       {
+        "grab": "right",
+        "gesture": "fist"
+       },
+       {
+        "grab": "right",
+        "gesture": "card"
+       },
+       {
+        "grab": "right",
+        "gesture": "touch"
+       },
+       {
+        "grab": "right",
+        "gesture": "nogo",
+        "say": "Curl the fingers halfway and stop: no fist"
+       }
+      ]
+     }
+    },
+    {
+     "id": "quick",
+     "hands": "right",
+     "text": "Right hand, quick: snap the fist shut on the lit part and open it again straight away.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "fist",
+      "every_s": 1.6,
+      "gap_s": 0.9,
+      "moves": [
+       {
+        "grab": "right"
+       },
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "right"
+       },
+       {
+        "grab": "br"
+       },
+       {
+        "grab": "right"
+       }
+      ],
+      "say": "Quick: fist, then open",
+      "rest_say": "Open"
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace, either hand or both: grab it with a fist, move it, turn it, open to let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": [
+      {
+       "s": 14,
+       "lit": "left+right",
+       "gesture": "fist",
+       "say": "Your own pace: fist, move it, open to let go"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

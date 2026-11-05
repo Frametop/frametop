@@ -1,0 +1,462 @@
+{
+ "version": 1,
+ "name": "sideways-hands",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Sideways hands",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sideways-hands",
+   "title": "Sideways hands",
+   "kind": "scene",
+   "intro": "Windows at arm's length. Turn your hand on its side, thumb on top, as for a handshake, and pinch, drag and tap them that way. A hand on its edge is the hardest for the cameras to judge for distance. Nothing happens when you do: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "hold-right",
+     "hands": "right",
+     "text": "Right hand on its side, thumb on top, as for a handshake.|Pinch the lit part with the hand still on its side, hold until it goes out, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.12,
+        -0.15,
+        -0.6
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "every_s": 2.5,
+      "gap_s": 1.0,
+      "moves": [
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "br"
+       },
+       {
+        "grab": "left"
+       },
+       {
+        "grab": "tr"
+       }
+      ],
+      "say": "On its side: pinch the lit part and hold"
+     }
+    },
+    {
+     "id": "drag-right",
+     "hands": "right",
+     "text": "Right hand on its side. Pinch the lit bar and take it to the ghost: nearer, farther,|across. Then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.12,
+        -0.15,
+        -0.6
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "bar",
+      "every_s": 3.5,
+      "gap_s": 1.2,
+      "count": 4,
+      "moves": [
+       [
+        0,
+        0,
+        0.2
+       ],
+       [
+        0,
+        0,
+        -0.15
+       ],
+       [
+        -0.25,
+        0,
+        0
+       ],
+       [
+        0,
+        0.12,
+        0.1
+       ]
+      ],
+      "say": "On its side: pinch the bar, take it to the ghost"
+     }
+    },
+    {
+     "id": "hold-left",
+     "hands": "left",
+     "text": "Left hand on its side, thumb on top. Pinch the lit part, hold until it goes out, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.12,
+        -0.15,
+        -0.6
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "every_s": 2.5,
+      "gap_s": 1.0,
+      "moves": [
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "bl"
+       },
+       {
+        "grab": "right"
+       },
+       {
+        "grab": "tl"
+       }
+      ],
+      "say": "On its side: pinch the lit part and hold"
+     }
+    },
+    {
+     "id": "drag-left",
+     "hands": "left",
+     "text": "Left hand on its side. Pinch the lit bar and take it to the ghost, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.12,
+        -0.15,
+        -0.6
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "bar",
+      "every_s": 3.5,
+      "gap_s": 1.2,
+      "count": 3,
+      "moves": [
+       [
+        0,
+        0,
+        0.2
+       ],
+       [
+        0.25,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        -0.15
+       ]
+      ],
+      "say": "On its side: pinch the bar, take it to the ghost"
+     }
+    },
+    {
+     "id": "reach",
+     "hands": "right",
+     "text": "A window at the end of your reach. Arm straight out, hand on its side:|pinch the lit part and hold.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.2,
+        -0.1,
+        -0.72
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "every_s": 2.5,
+      "gap_s": 1.0,
+      "moves": [
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "bl"
+       },
+       {
+        "grab": "tr"
+       }
+      ],
+      "say": "Arm straight, on its side: pinch and hold"
+     }
+    },
+    {
+     "id": "taps-right",
+     "hands": "right",
+     "text": "Right hand on its side, pointing at the lit button: tap thumb to index, as a click.|Keep the hand on its side between taps.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "seconds": 12,
+      "mix": {
+       "tap": 2,
+       "hold": 1
+      }
+     }
+    },
+    {
+     "id": "sweeps",
+     "hands": "right",
+     "text": "Right hand open, on its edge, palm facing left. When the edge lights, sweep the hand|right to left, a quick stroke of about 30 cm, palm leading. Bring it back slowly.",
+     "windows": [
+      {
+       "id": "l",
+       "at": [
+        -0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "c",
+       "at": [
+        0.0,
+        0.0,
+        -1.2
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "r",
+       "at": [
+        0.85,
+        0.0,
+        -0.85
+       ],
+       "size": [
+        0.55,
+        0.35
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "sweep",
+      "win": "c",
+      "grab": "right",
+      "every_s": 2.0,
+      "gap_s": 1.0,
+      "count": 4,
+      "moves": [
+       [
+        -0.85,
+        0,
+        0.35,
+        -45,
+        0,
+        0
+       ]
+      ],
+      "rest_say": "Bring the hand back slowly",
+      "say": "Sweep it left: a quick stroke, palm leading"
+     }
+    },
+    {
+     "id": "look-alikes",
+     "hands": "right",
+     "text": "Right hand on its side. Cyan: pinch it. Orange: bring thumb and index about 1 cm apart|and stop there, no pinch.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.12,
+        -0.15,
+        -0.6
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "every_s": 2.5,
+      "gap_s": 0.8,
+      "moves": [
+       {
+        "grab": "bar",
+        "gesture": "pinch"
+       },
+       {
+        "grab": "bar",
+        "gesture": "nogo"
+       },
+       {
+        "grab": "br",
+        "gesture": "pinch"
+       },
+       {
+        "grab": "tr",
+        "gesture": "nogo"
+       }
+      ]
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace: pinch the lit bar and move the window around, as often as you like.|Turn the hand between flat and on its side while you do.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.0,
+        -0.15,
+        -0.6
+       ],
+       "size": [
+        0.4,
+        0.28
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "bar",
+      "every_s": 4.0,
+      "gap_s": 1.0,
+      "moves": [
+       [
+        0.2,
+        0.1,
+        0
+       ],
+       [
+        -0.2,
+        -0.05,
+        0.15
+       ],
+       [
+        0,
+        0.12,
+        -0.2
+       ]
+      ],
+      "say": "Your own pace: pinch it and move it"
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

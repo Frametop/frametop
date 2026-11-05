@@ -1,0 +1,7 @@
+#!/bin/bash
+# Frametop's menu (menu/ft_menu.py): its apps and commands in submenus, and Update Frametop.
+# It runs on the host's Python, outside the container, so what it opens starts on the host
+# as it would from the app menu or Steam's Launch a program list.
+#   ft-menu [update|list|update-command]
+here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+exec /usr/bin/python3 -I "$here/ft_menu.py" "$@"

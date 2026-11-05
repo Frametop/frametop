@@ -6,9 +6,12 @@ renamed, so nothing reaches the live Frametop, SteamVR, or the running relay.
 
   input/test/pause-test.py
 """
+import json
 import os
 import sys
+import shutil
 import tempfile
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import game_pause as gp  # noqa: E402
@@ -51,7 +54,12 @@ check("sticks 0.5 s apart, twice: nothing", presses(g, both(0, gap=0.5, hold=0.6
 g = gp.Gesture((L, R), 2)
 check("three double presses in a row: once", presses(g, both(0) + both(0.3) + both(0.6)), 1)
 g = gp.Gesture((L, R), 2)
-check("again after a second: twice in all", presses(g, both(0) + both(0.3) + both(2.0) + both(2.3)), 2)
+check("again 2 s later (2026-10-16: resumed, then paused again): ignored",
+      presses(g, both(0) + both(0.3) + both(2.0) + both(2.3)), 1)
+check("...and says how long after the last one", round(g.ignored, 1), 2.0)
+g = gp.Gesture((L, R), 2)
+check("again after the cooldown: twice in all",
+      presses(g, both(0) + both(0.3) + both(gp.GESTURE_COOLDOWN + 0.5) + both(gp.GESTURE_COOLDOWN + 0.8)), 2)
 g = gp.Gesture((L, R), 2)
 check("repeated down states count once",
       presses(g, [(0, L, True), (0.01, L, True), (0.02, R, True), (0.03, R, True), (0.1, L, False), (0.1, R, False)]
@@ -63,6 +71,18 @@ check("one button double-clicked: goes off",
       presses(g, [(0, "right/b", True), (0.1, "right/b", False), (0.3, "right/b", True)]), 1)
 g = gp.Gesture(("right/b",), 2)
 check("other buttons don't count", presses(g, [(0, "right/a", True), (0.2, "right/a", True)]), 0)
+
+check("one controller: its stick alone", gp.one_controller((L, R), {"right"}), (R,))
+check("one controller (left): its stick alone", gp.one_controller((L, R), {"left"}), (L,))
+check("both controllers: the gesture as set", gp.one_controller((L, R), {"left", "right"}), None)
+check("no controllers: nothing", gp.one_controller((L, R), set()), None)
+check("two buttons on one controller: as set", gp.one_controller(("right/a", "right/b"), {"right"}), None)
+check("one button: as set", gp.one_controller(("right/b",), {"right"}), None)
+g = gp.Gesture(gp.one_controller((L, R), {"right"}), 2)
+check("one controller: its stick clicked twice goes off",
+      presses(g, [(0, R, True), (0.1, R, False), (0.3, R, True), (0.4, R, False)]), 1)
+g = gp.Gesture(gp.one_controller((L, R), {"right"}), 2)
+check("one controller: its stick clicked once, nothing", presses(g, [(0, R, True), (0.1, R, False)]), 0)
 
 VR = ("left/thumbstick", "right/thumbstick", "right/b", "right/a")
 check("no pause_gesture: both sticks twice", gp.gesture_of({}, VR), ((L, R), 2))
@@ -80,6 +100,7 @@ class StubWorker:
     def __init__(self, log, save):
         self.jobs = []
         self.busy = False
+        self.keep = ()
 
     def start(self):
         pass
@@ -102,6 +123,9 @@ class StubWorker:
     def enforce(self):
         pass
 
+    def defer_remote(self):
+        pass
+
 
 class StubWatch:
     connected = False
@@ -115,10 +139,20 @@ class StubWatch:
     def set_gesture(self, spec):
         self.spec = spec
 
+    def set_touch_feed(self, on):
+        self.touch = on
+
+    def helper_started(self):
+        pass
+
 
 tmp = tempfile.mkdtemp(prefix="ft-pause-test-")
 gp.STATE_PATH = os.path.join(tmp, "pause.json")
 gp.SCREENS = f"\0ft_pause_test_{os.getpid()}_screens"
+gp.HELPER = f"\0ft_pause_test_{os.getpid()}_helper"  # "paused 1|0" mustn't reach the live pointer helper
+os.makedirs(os.path.join(tmp, "frametop-hands"))
+gp.PARK_PATH = os.path.join(tmp, "frametop-hands", "park")
+RealWorker = gp.Worker
 gp.Worker, gp.ControllerWatch = StubWorker, StubWatch
 changes = []
 
@@ -137,6 +171,9 @@ p = new()
 p.game_state(True, 0)
 check("a game starts: paused", (p.paused, p.reason, p.ends_with_game), (True, "game", True))
 check("the relay heard", changes, [True])
+with open(gp.STATE_PATH) as f:
+    check("the state file: compact JSON, as before", json.loads(f.read())["paused"], True)
+check("...written by a temp file of its own, none left", sorted(n for n in os.listdir(tmp) if "pause" in n), ["pause.json"])
 p.game_state(True, 5)
 p.tick(5)
 check("the helper repeats it: still paused, nothing new", (p.paused, changes), (True, [True]))
@@ -198,9 +235,188 @@ p.toggle("gesture", 0)
 q = gp.GamePause(lambda *a: None, changes.append, VR)
 check("a relay restarted while paused stays paused", (q.paused, q.reason), (True, "gesture"))
 check("and stops the services again", q.worker.jobs, ["enforce"])
+told = []
+q.tell_screens = told.append
+q.screens_seen(4242)
+check("the desktop that reports in first hears the pause (2026-10-16: it showed, the pointer was off)",
+      told, [True])
+q.screens_seen(4242)
+check("...once, not every second", told, [True])
+q.screens_seen(None)
+check("a sender without credentials changes nothing", told, [True])
+q.screens_seen(4343)
+check("a restarted desktop (new pid) hears it again", told, [True, True])
+p.tell_screens = told.append
+told.clear()
+p.toggle("gesture", 1)
+p.screens_seen(5151)
+check("running: a new desktop hears nothing", told, [False])
+
+# ---------------------------------------------------------------- hand tracking parked for games
+parked = lambda: os.path.exists(gp.PARK_PATH)  # noqa: E731
+p = new()
+p.set_hands(True)
+check("hand interaction on: the worker leaves hand tracking running", p.worker.keep, gp.HAND_UNITS)
+check("not paused: not parked", parked(), False)
+p.game_state(True, 0)
+check("a game pauses Frametop: hand tracking parked", parked(), True)
+p.dashboard_state(True)
+check("the dashboard opens: unparked", parked(), False)
+p.dashboard_state(False)
+check("it closes: parked again", parked(), True)
+p.toggle("gesture", 1)
+check("Frametop toggled back on during the game: unparked", parked(), False)
+p.game_state(False, 10)
+p.game_state(True, 20)
+check("the next game: parked", parked(), True)
+p.worker.jobs.clear()
+p.set_hands(False)
+check("hand interaction off mid-pause: the worker stops what the pause kept",
+      (p.worker.keep, p.worker.jobs), ((), ["enforce"]))
+check("...and the park stays, for ft-cutouts' tracker", parked(), True)
+p.worker.jobs.clear()
+p.set_hands(False)
+check("off again: nothing more to stop", p.worker.jobs, [])
+p.set_hands(True, always=True)
+check("HANDS_MODE=always: the worker leaves hand tracking running", p.worker.keep, gp.HAND_UNITS)
+check("and it isn't parked in the game", parked(), False)
+p.set_hands(False, always=True)
+check("always without hand interaction: still left running", (parked(), p.worker.keep), (False, gp.HAND_UNITS))
+p.set_hands(True)
+check("back to the other modes: parked again", parked(), True)
+p.set_hands(False)
+p.dashboard_state(True)
+check("without hand interaction the dashboard unparks too", parked(), False)
+p.dashboard_state(False)
+p.toggle("gesture", 1)
+check("a resume unparks without hand interaction", parked(), False)
+p.set_hands(True)
+p.game_state(False, 30)
+gp.PARK_PATH = os.path.join(tmp, "not-yet", "frametop-hands", "park")
+p.game_state(True, 40)
+check("a pause before hand tracking ever ran makes its folder and parks",
+      (parked(), oct(os.stat(os.path.dirname(gp.PARK_PATH)).st_mode & 0o777)), (True, "0o700"))
+p.toggle("gesture", 1)
+check("...and the resume unparks", parked(), False)
+gp.PARK_PATH = os.path.join(tmp, "frametop-hands", "park")
+p.set_hands(False)
 q.toggle("gesture", 1)
 r = gp.GamePause(lambda *a: None, changes.append, VR)
 check("resumed: the next relay starts running", r.paused, False)
+
+# ---------------------------------------------------------------- relay restarts
+def restart_with(state):
+    with open(gp.STATE_PATH, "w") as f:
+        json.dump(state, f)
+    return gp.GamePause(lambda *a: None, changes.append, VR)
+
+
+r = restart_with({"paused": False, "stopped": {"units": ["frametop-gaze.service"], "remote": True, "desktop": None}})
+check("restarted after a resume, before its job ran: the next relay resumes what the pause stopped",
+      (r.paused, r.worker.jobs, r.worker.restored["units"]), (False, ["resume"], ["frametop-gaze.service"]))
+r = restart_with({"paused": False, "stopped": {"units": [], "remote": False, "desktop": "closed"}})
+check("...a closed desktop too", r.worker.jobs, ["resume"])
+r = restart_with({"paused": False, "stopped": {"units": [], "remote": False, "desktop": "hidden"}})
+check("...but nothing to start: nothing", r.worker.jobs, [])
+r = restart_with({"paused": False, "stopped": "junk"})
+check("...a broken list: nothing", (r.paused, r.worker.jobs), (False, []))
+
+r = restart_with({"paused": True, "reason": "game", "ends_with_game": True, "stopped": {}})
+check("restarted during a pause that ends with its game: the game counts as running",
+      (r.paused, r.game, r.worker.jobs), (True, True, ["enforce"]))
+now = time.monotonic()
+r.game_state(False, now)
+r.tick(now + gp.RESUME_DELAY + 0.1)
+check("...the helper says it ended: resumed", r.paused, False)
+r = restart_with({"paused": True, "reason": "game", "ends_with_game": True, "stopped": {}})
+now = time.monotonic()
+r.tick(now + gp.GAME_STALE + 0.1)
+r.tick(now + gp.GAME_STALE + gp.RESUME_DELAY + 0.2)
+check("...no word from the helper at all (SteamVR stopped too): resumed", r.paused, False)
+r = restart_with({"paused": True, "reason": "gesture", "ends_with_game": False, "stopped": {}})
+check("restarted during a pause not tied to a game: no game assumed", (r.paused, r.game), (True, False))
+
+# ---------------------------------------------------------------- desktop starts mid-pause
+p = new()
+told = []
+p.tell_screens = told.append
+p.screens_report(False)
+check("running, ft-screens running: nothing said", told, [])
+p.toggle("gesture", 0)
+told.clear()
+p.screens_report(True)
+check("paused, ft-screens paused: nothing said", told, [])
+p.screens_report(False)
+check("paused, ft-screens missed it: told again", told, [True])
+p.desktop_started()
+check("a desktop starts mid-pause: hand tracking stops again", p.worker.jobs[-1], "enforce")
+check("remote access waits for the resume", (p.defer_remote(), p.worker.jobs[-1]), (True, "defer_remote"))
+p.toggle("gesture", 1)
+told.clear()
+p.screens_report(True)
+check("resumed, ft-screens missed it: told again", told, [False])
+n = len(p.worker.jobs)
+p.desktop_started()
+check("running: a desktop start changes nothing", (p.defer_remote(), len(p.worker.jobs)), (False, n))
+
+# ---------------------------------------------------------------- the worker
+calls = []
+unit_state = {}
+
+
+def fake_output(cmd, timeout=10):
+    if cmd[:3] == ["systemctl", "--user", "is-active"]:
+        return unit_state.get(cmd[3], "inactive") + "\n"
+    return ""
+
+
+def fake_run(cmd, timeout=30):
+    calls.append(cmd)
+    if cmd[:3] == ["pgrep", "-x", "ft-screens"]:
+        return 0 if desktop_up else 1
+    return 0
+
+
+gp.output, gp.run = fake_output, fake_run
+desktop_up = True
+w = RealWorker(lambda *a: None, lambda: None)
+unit_state = {"frametop-gaze.service": "activating", "frametop-hands.service": "active", "steamvr.service": "active"}
+calls.clear()
+w.stop_units()
+check("a gaze service systemd is restarting counts as running: it stops", calls[0],
+      ["systemctl", "--user", "stop", "frametop-gaze.service", "frametop-hands.service"])
+check("failed and inactive units don't", (gp.active("x.service"), gp.active("frametop-camd.service")), (False, False))
+
+w.restore({"units": ["frametop-gaze.service", "frametop-hands.service"]})
+unit_state = {}
+calls.clear()
+w.resume()
+check("resumed with SteamVR off: nothing starts", [c for c in calls if c[:3] == ["systemctl", "--user", "start"]], [])
+check("...and the list is cleared", w.snapshot()["units"], [])
+
+w.restore({"units": ["frametop-gaze.service", "frametop-hands.service"]})
+unit_state = {"steamvr.service": "active"}
+w.hands_with_desktop, desktop_up = True, False
+calls.clear()
+w.resume()
+check("HANDS_MODE=frametop, no desktop: only gaze starts",
+      [c for c in calls if c[:3] == ["systemctl", "--user", "start"]],
+      [["systemctl", "--user", "start", "frametop-gaze.service"]])
+w.restore({"units": ["frametop-gaze.service", "frametop-hands.service"]})
+desktop_up = True
+calls.clear()
+w.resume()
+check("...with the desktop: both", [c for c in calls if c[:3] == ["systemctl", "--user", "start"]],
+      [["systemctl", "--user", "start", "frametop-gaze.service", "frametop-hands.service"]])
+w.restore({"units": ["frametop-hands.service"]})
+w.hands_with_desktop, desktop_up = False, False
+calls.clear()
+w.resume()
+check("hand tracking started by hand (not HANDS_MODE=frametop): back without a desktop too",
+      [c for c in calls if c[:3] == ["systemctl", "--user", "start"]],
+      [["systemctl", "--user", "start", "frametop-hands.service"]])
+w.defer_remote()
+check("a deferred remote desktop is on the list", w.snapshot()["remote"], True)
 
 p = new({"pause_gesture": None})
 check("pause_gesture null: the reader gets none", p.watch.spec, None)
@@ -208,7 +424,5 @@ check("status", sorted(p.status()), sorted(["t", "paused", "reason", "since", "e
                                             "stopped", "gesture_reader", "auto", "desktop"]))
 
 print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
-for f in os.listdir(tmp):
-    os.remove(os.path.join(tmp, f))
-os.rmdir(tmp)
+shutil.rmtree(tmp)
 sys.exit(1 if failures else 0)

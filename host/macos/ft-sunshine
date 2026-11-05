@@ -1,0 +1,155 @@
+#!/bin/bash
+# Turns this Mac's Frametop displays (its Sunshine instances, one per display) on or off. The
+# setup installs it, and the Frametop Streams menu bar app runs it.
+# Usage: ft-sunshine on|off|status [--tsv] [N...]
+#
+#   on      start the instances, and start them at login again
+#   off     stop them, and leave them stopped at login until "on"
+#   status  each instance's display, port and state (the default). With --tsv, a line per
+#           instance: N, state (on, off, waiting, starting, stopped), display, port, tab-separated
+#
+# Without N it's every instance. Settings and pairings stay as they are. The Frame's streams of
+# the Mac keep trying while it's off and come back by themselves after "on".
+set -u
+
+DATA="$HOME/Library/Application Support/Frametop/sunshine"
+AGENTS="$HOME/Library/LaunchAgents"
+LABEL=frametop.sunshine  # instance N's agent is frametop.sunshine.N
+BASE_PORT=47989
+GUI="gui/$(id -u)"
+
+usage() { sed -n '2,/^set -u/p' "$0" | sed '$d; s/^# \{0,1\}//'; }
+
+cmd=${1:-status}
+[ $# -gt 0 ] && shift
+case $cmd in
+    on|off|status) ;;
+    -h|--help|help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+esac
+tsv=0
+nums=()
+for arg in "$@"; do
+    case $arg in
+        --tsv) tsv=1 ;;
+        *) nums+=("$arg") ;;
+    esac
+done
+set -- ${nums[@]+"${nums[@]}"}
+
+loaded() { launchctl print "$GUI/$LABEL.$1" >/dev/null 2>&1; }
+answers() { curl -s -m 2 -o /dev/null "http://127.0.0.1:$((BASE_PORT + 100 * $1))/serverinfo"; }
+
+state() {
+    if ! loaded "$1"; then
+        echo off
+    elif answers "$1"; then
+        echo on
+    elif [ -e "$DATA/instance-$1/.waiting" ]; then
+        echo waiting
+    elif launchctl print "$GUI/$LABEL.$1" | grep -q 'state = running'; then
+        echo starting
+    else
+        # Quit from Sunshine's menu bar icon: launchd doesn't start it again after a clean exit.
+        echo stopped
+    fi
+}
+
+status() {
+    local n st name port
+    for n in "${instances[@]}"; do
+        st=$(state "$n")
+        name=$(cut -f2 "$DATA/instance-$n/display")
+        port=$((BASE_PORT + 100 * n))
+        if [ $tsv = 1 ]; then
+            printf '%s\t%s\t%s\t%s\n' "$n" "$st" "$name" "$port"
+            continue
+        fi
+        case $st in
+            waiting) st="on, waiting for the display to be connected" ;;
+            stopped) st="stopped (quit from Sunshine's menu bar icon)" ;;
+        esac
+        echo "Instance $n, $name (port $port): $st"
+    done
+}
+
+start() {
+    local i
+    # off disables the agent so it stays off at login; bootstrap fails while it's disabled.
+    launchctl enable "$GUI/$LABEL.$1"
+    if loaded "$1"; then
+        # Loaded but stopped (quit from the menu bar): start it. One that's running is left alone.
+        launchctl kickstart "$GUI/$LABEL.$1" >/dev/null 2>&1
+        return 0
+    fi
+    # bootout returns before the job is gone, and bootstrap fails until it is.
+    for i in 1 2 3 4 5; do
+        launchctl bootstrap "$GUI" "$AGENTS/$LABEL.$1.plist" 2>/dev/null && return 0
+        loaded "$1" && return 0
+        sleep 1
+    done
+    echo "Couldn't start instance $1's LaunchAgent $LABEL.$1." >&2
+    return 1
+}
+
+stop() {
+    launchctl disable "$GUI/$LABEL.$1"
+    launchctl bootout "$GUI/$LABEL.$1" 2>/dev/null || true
+}
+
+# Every instance the setup made, or the ones named.
+instances=()
+if [ $# -gt 0 ]; then
+    for n in "$@"; do
+        if ! [[ $n =~ ^[0-9]+$ ]] || [ ! -e "$DATA/instance-$n/display" ] || [ ! -e "$AGENTS/$LABEL.$n.plist" ]; then
+            echo "There's no instance $n; ft-sunshine status lists them." >&2
+            exit 2
+        fi
+        instances+=("$n")
+    done
+else
+    for d in "$DATA"/instance-*/display; do
+        [ -e "$d" ] || continue
+        n=$(basename "$(dirname "$d")" | sed 's/^instance-//')
+        [ -e "$AGENTS/$LABEL.$n.plist" ] && instances+=("$n")
+    done
+    if [ ${#instances[@]} -eq 0 ]; then
+        echo "No Frametop Sunshine instances here; run frametop-host-setup.sh first." >&2
+        exit 1
+    fi
+    IFS=$'\n' read -r -d '' -a instances < <(printf '%s\n' "${instances[@]}" | sort -n) || true
+fi
+
+failed=0
+case $cmd in
+    on)
+        for n in "${instances[@]}"; do
+            start "$n" || failed=1
+        done
+        # Wait for each to answer (or to wait for its display), so the status means something.
+        for i in $(seq 1 20); do
+            pending=0
+            for n in "${instances[@]}"; do
+                loaded "$n" || continue
+                answers "$n" || [ -e "$DATA/instance-$n/.waiting" ] || pending=1
+            done
+            [ $pending = 0 ] && break
+            sleep 1
+        done
+        ;;
+    off)
+        for n in "${instances[@]}"; do
+            stop "$n"
+        done
+        for i in $(seq 1 10); do
+            pending=0
+            for n in "${instances[@]}"; do
+                loaded "$n" && pending=1
+            done
+            [ $pending = 0 ] && break
+            sleep 0.5
+        done
+        ;;
+esac
+status
+exit $failed

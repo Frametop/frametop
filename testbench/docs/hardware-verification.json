@@ -1,0 +1,49 @@
+{
+  "runtime_version": "2.17.10",
+  "architecture": "aarch64",
+  "hmd_model": "Steam Frame",
+  "driver_sha256": "109d5bcc1873390e033f45f6adf989c960f3d571081e21a46729af45c5c8a7c0",
+  "worn_activity": 1,
+  "unworn_activity": 3,
+  "final_activity": 0,
+  "synthetic_pose_valid_while_physical_invalid": true,
+  "requested_standing_position": [
+    0.25,
+    1.7,
+    -0.15
+  ],
+  "requested_yaw_pitch_roll_degrees": [
+    25,
+    -10,
+    5
+  ],
+  "observed_standing_matrix": [
+    [
+      0.8964629173,
+      -0.152097553,
+      0.416197747,
+      0.25
+    ],
+    [
+      0.0858316496,
+      0.9810602665,
+      0.1736481786,
+      1.700000048
+    ],
+    [
+      -0.4347265363,
+      -0.1199462116,
+      0.8925389647,
+      -0.150000006
+    ]
+  ],
+  "max_matrix_element_error": 4.7999999752690314e-08,
+  "virtual_pose_survived_unworn": true,
+  "released": true,
+  "final_pause_on_standby": true,
+  "capture_dimensions": [
+    1920,
+    1080
+  ],
+  "live_image_files_committed": false
+}

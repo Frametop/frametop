@@ -31,7 +31,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "conf"))
 import camcheck  # noqa: E402
+import ft_conf  # noqa: E402
 
 CONF = os.path.expanduser("~/.config/frametop.conf")
 STATE = os.path.expanduser("~/.local/state/frametop/camwatch.json")
@@ -51,28 +53,12 @@ def log(text):
 
 
 def read_conf(path=CONF):
-    """KEY=VALUE lines of a shell-style file (comments and quotes stripped), over DEFAULTS."""
-    conf = dict(DEFAULTS)
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.split("#", 1)[0].strip()
-                if "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                k, v = k.strip(), v.strip().strip("'\"")
-                if k.replace("_", "").isalnum():
-                    conf[k] = v
-    except OSError:
-        pass
-    return conf
+    """frametop.conf's settings (docs/config.md) over DEFAULTS."""
+    return {**DEFAULTS, **ft_conf.read(path)}
 
 
 def conf_int(conf, key):
-    try:
-        return int(float(conf.get(key, DEFAULTS.get(key, "0"))))
-    except ValueError:
-        return int(DEFAULTS.get(key, "0") or 0)
+    return int(ft_conf.number(conf, key, float(DEFAULTS.get(key, "0") or 0)))
 
 
 # ------------------------------------------------------------------------------------------

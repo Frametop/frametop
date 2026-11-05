@@ -13,6 +13,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 "$root/scripts/sync.sh" >/dev/null
 exec "$root/scripts/frame.sh" -C gaze/tracker 'set -e; mkdir -p build
 gcc -std=gnu11 -O2 -Wall -Wextra -pthread -o build/ft-eyegrab ft-eyegrab.c
+strip --strip-unneeded build/ft-eyegrab
 max=$(objdump -T build/ft-eyegrab | grep -oE "GLIBC_[0-9.]+" | sort -uV | tail -1)
 echo "built build/ft-eyegrab, newest glibc symbol: $max"
 [ "$(printf "%s\n" "$max" GLIBC_2.39 | sort -V | tail -1)" = GLIBC_2.39 ] || { echo "needs newer glibc than the host has" >&2; exit 1; }
@@ -21,6 +22,16 @@ if [ "${FRAME_IN_BOX:-0}" = 1 ] && [ -x /opt/frametop/venv/bin/python ]; then
   python3 -m venv --without-pip build/venv
   /opt/frametop/venv/bin/python -c "import sysconfig; print(sysconfig.get_path(\"purelib\"))" \
     >"$(build/venv/bin/python -c "import sysconfig; print(sysconfig.get_path(\"purelib\"))")/frametop-image.pth"
+  # The eye net (eyes_net.py) needs ncnn, which uv.lock puts in the image. An image from before
+  # that (fast-install on an older release) gets the same locked wheel here, checked by its
+  # sha256 (from uv.lock: the wheel for Python 3.14 on aarch64, as in the image). Without ncnn the
+  # build fails.
+  if ! build/venv/bin/python -c "import ncnn" 2>/dev/null; then
+    echo "$(grep -E "^ncnn==" requirements.txt) --hash=sha256:7f25a67921657f4014f37175bd9829a78cb8f58202e034d14941a255c00c0c15" >build/ncnn-req.txt
+    build/venv/bin/python -m ensurepip >/dev/null
+    build/venv/bin/python -m pip install -q --disable-pip-version-check --no-deps --require-hashes -r build/ncnn-req.txt
+  fi
+  build/venv/bin/python -c "import ncnn" || { echo "build/venv: no ncnn (the eye net needs it)" >&2; exit 1; }
 elif ! cmp -s requirements.txt build/venv/requirements.done; then
   rm -rf build/venv
   python3 -m venv build/venv

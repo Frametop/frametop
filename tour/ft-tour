@@ -1,0 +1,23 @@
+#!/bin/bash
+# Frametop Tour: what Frametop does, a page at a time (ft_tour.py and main.qml, in Frametop's
+# container like Frametop Input Settings: see input-settings/ft-input-settings).
+#   ft-tour              open the tour (FT_TOUR_PAGE=ID opens it on that page)
+#   ft-tour --first-run  open it only if it hasn't been closed, skipped, or finished yet (the
+#                        Frametop desktop's autostart)
+#   ft-tour --reset      open it at the desktop's next start again
+here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+case ${1:-} in
+  --first-run) /usr/bin/python3 -I "$here/ft_tour.py" done && exit 0; shift ;;
+  --reset) exec /usr/bin/python3 -I "$here/ft_tour.py" reset ;;
+  "") ;;
+  *) echo "usage: $0 [--first-run|--reset]" >&2; exit 2 ;;
+esac
+wl=${WAYLAND_DISPLAY:-wayland-0}
+case $wl in /*) ;; *) wl="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$wl" ;; esac
+session_bus=${DBUS_SESSION_BUS_ADDRESS:-}
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+exec "$here/../scripts/in-box" env WAYLAND_DISPLAY="$wl" DISPLAY="${DISPLAY:-}" \
+  XAUTHORITY="${XAUTHORITY:-}" DBUS_SESSION_BUS_ADDRESS="$session_bus" \
+  QT_QPA_PLATFORM="wayland;xcb" FT_TOUR_PAGE="${FT_TOUR_PAGE:-}" \
+  python3 "$here/ft_tour.py"

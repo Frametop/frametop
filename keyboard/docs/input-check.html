@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Full Keyboard input check</title>
+<style>
+  body { max-width: 760px; margin: 32px auto; padding: 0 20px; background: #171b20; color: #edf0f4; font: 18px system-ui; }
+  input, textarea, button { box-sizing: border-box; width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #6c7684; border-radius: 8px; background: #282e36; color: inherit; font: inherit; }
+  textarea { min-height: 100px; }
+  :focus { outline: 3px solid #81bbf7; }
+  li { margin: 10px 0; }
+  output, pre { display: block; padding: 12px; background: #222830; white-space: pre-wrap; }
+</style>
+<h1>Full Keyboard input check</h1>
+<p>Use only the sample text below. This page has no network requests, saved history or clipboard access. The event display shows native controls, not typed characters.</p>
+<ol>
+  <li>Focus the first field with the controller, then type <strong>frame test 123</strong> on Full Keyboard. Check that characters arrive once and focus stays here.</li>
+  <li>Press main Enter, then numpad Enter. Each should increase the submit count once.</li>
+  <li>Use Tab and Shift+Tab to move between fields. Try arrows, Home, End, Backspace, Delete, and numpad navigation with Num Lock off; then numpad digits with Num Lock on.</li>
+  <li>In the first field, use Ctrl+A, Copy, Tab, then Paste. The second field should contain the same sample. This replaces your clipboard with the sample when you press Copy.</li>
+  <li>In the multiline field, Enter should insert a newline. Hold Ctrl with one controller and press an arrow with the other. Tap Alt then A to check the modifier display; this page consumes Alt+A.</li>
+  <li>Switch to another local app while a modifier is latched, then return. Close the dashboard and reopen it. Check that no key or modifier remains stuck.</li>
+</ol>
+<form id="form">
+<label for="first">First field</label><input id="first" autocomplete="off">
+<label for="second">Second field</label><input id="second" autocomplete="off">
+<button type="submit">Submit</button>
+</form>
+<output id="count">Submissions: 0</output>
+<label for="multiline">Multiline field</label><textarea id="multiline" autocomplete="off"></textarea>
+<h2>Native controls</h2><pre id="events">Waiting for a control key.</pre>
+<script>
+  let submissions = 0;
+  const events = [];
+  document.querySelector('#form').addEventListener('submit', event => {
+    event.preventDefault();
+    document.querySelector('#count').textContent = `Submissions: ${++submissions}`;
+  });
+  for (const type of ['keydown', 'keyup']) {
+    document.addEventListener(type, event => {
+      if (event.altKey && event.code === 'KeyA') event.preventDefault();
+      const control = /^(Enter|NumpadEnter|Tab|Backspace|Delete|Home|End|Arrow|Control|Alt|Shift|Meta|NumLock)/.test(event.code);
+      if (!control && !(event.ctrlKey || event.altKey || event.metaKey)) return;
+      const modifiers = [event.ctrlKey && 'Ctrl', event.altKey && 'Alt', event.shiftKey && 'Shift', event.metaKey && 'Super'].filter(Boolean).join('+');
+      events.push(`${type}: ${control ? event.code : 'shortcut'} ${modifiers}`);
+      document.querySelector('#events').textContent = events.slice(-8).join('\n');
+    });
+  }
+</script>
+</html>

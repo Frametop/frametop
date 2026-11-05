@@ -17,6 +17,8 @@ read-only, and follows a controller on vrserver's web socket for a moment. It ne
 stops, or restarts anything.
 """
 import base64
+import glob
+import importlib.util
 import json
 import mmap
 import os
@@ -32,6 +34,7 @@ HOME = os.path.expanduser("~")
 UID = os.getuid()
 KNOWN_GOOD = os.path.join(HOME, ".local/state/frametop/known-good.json")
 STEAMVR_BIN = "/opt/steamvr/bin/linuxarm64"
+DASHBOARD_JS = "/opt/steamvr/resources/webinterface/dashboard"
 LAUNCHER = os.path.join(HOME, ".local/share/applications/deckard-nested-desktop.desktop")
 STOCK_LAUNCHER = "/usr/share/applications/deckard-nested-desktop.desktop"
 NATIVE_LAUNCHER = os.path.join(HOME, ".local/share/applications/native-deckard-nested-desktop.desktop")
@@ -39,11 +42,14 @@ VRPATHS = os.path.join(HOME, ".config/openvr/openvrpaths.vrpath")
 # The Frametop desktop has its own XDG_CONFIG_HOME (session/frametop-session.sh). An install from a
 # terminal there, before pointer/driver/install.sh set SteamVR's, left vrpathreg's registry here.
 STRAY_VRPATHS = os.path.join(HOME, ".config/frametop/openvr/openvrpaths.vrpath")
+TESTBENCH_DROPIN = os.path.join(HOME, ".config/systemd/user/steamvr.service.d/90-frame-testbench.conf")
 BACKLIGHT = "/sys/class/backlight/ae94000.dsi.0/brightness"  # as in power/ft-powerd.cpp
 EYE_MMAP = "/dev/shm/eye-server.mmap"
 # SteamVR's settings, where SteamOS 0.4's Track Dominant Eye Only lives (as gaze/gazecal.py reads it).
 STEAMVR_SETTINGS = (os.path.join(HOME, ".config/openvr/config/steamvr.vrsettings"),
                     os.path.join(HOME, ".steam/steam/config/steamvr.vrsettings"))
+EYE_LOG = os.path.join(HOME, ".local/share/Steam/logs/eyetracking.txt")
+EYE_RATE_MARK = os.path.join(HOME, ".local/state/frametop/gaze/steamvr-eye-rate")  # gaze/eye-rate.py
 VRSERVER = "http://127.0.0.1:27062"  # its web socket: input/vrws.py
 PAUSE_STATE = f"/run/user/{os.getuid()}/frametop-pause.json"  # input/game_pause.py
 HOST_GLIBC = (2, 39)  # the newest the pointer driver may need (pointer/driver/build.sh)
@@ -52,21 +58,55 @@ HOST_GLIBC = (2, 39)  # the newest the pointer driver may need (pointer/driver/b
 PACKAGES = {
     "deckard-steamvr-rel": "the 3D mouse on the dashboard, on SteamVR Settings, and on a SteamVR "
                            "window's grab bar; picking up a controller; mapped controller buttons; gaze, "
-                           "and a gaze calibration with Track Dominant Eye Only on",
+                           "and a gaze calibration with Track Dominant Eye Only on; the reset countdown stays "
+                           "visible while turning, accepts no pointer input, and disappears before reset; "
+                           "Full Keyboard (keyboard/) opens for a desktop text field over the screens with "
+                           "the dashboard closed, in the dashboard, and in place of Steam's own keyboard in a "
+                           "Steam field, and its lasers, controller tips and fingertips press keys",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
-            "after a desktop restart; floating a window; no blur behind the taskbar's menus",
+            "after a desktop restart; floating a window; no blur behind the taskbar's menus; "
+            "logging out with a Deskflow client connected (6.2.5 crashes there, and the session's "
+            "logout watcher ends it: if it no longer crashes, the watcher can go)",
     "plasma-workspace": "the taskbar and panels after a desktop restart; no DiscoverNotifier or "
-                        "ibus-daemon inside the desktop",
+                        "ibus-daemon inside the desktop; a notification in the desktop shows in the "
+                        "Steam session and its buttons work (ft-notifyfwd)",
     "at-spi2-core": "an AT-SPI-aware app appears on the nested desktop's accessibility bus; "
                     "the registry stops and comes back after a desktop restart",
-    "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked",
+    "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked; "
+                 "Full Keyboard types into a Steam field and a game (libei)",
+    "libei": "Full Keyboard types into a Steam field and a game (its own libei client, built in, "
+             "talks to gamescope's EIS server from this package)",
+    "deckard-steamvr-session": "Full Keyboard starts with SteamVR and its panel draws (frametop-keyboard.service "
+                               "reads its /usr/share/deckard/mesavars.sh)",
     "bluez": "a Bluetooth mouse reconnecting after it sleeps",
+    "pipewire": "voice dictation hears you (ft-voiced records with the container's pw-record) and "
+                "its mic isn't silent after a reboot (SteamOS's echo-cancel chain)",
     "steamdeck-kde-presets": "Launch a program -> Native Desktop opens SteamOS's own desktop; starting "
                              "the desktop sends Steam no command line (no ExecCommandLine in "
                              "~/.local/share/Steam/logs/console_log.txt)",
     "holo-cursors": "the desktop keeps its Breeze cursor (over remote access, and with the gamescope backend)",
+    "xdg-desktop-portal": "Firefox or Chromium in the desktop shows minimize, maximize, and close, and dark "
+                          "mode still follows the desktop (ft-gtksettings, the desktop's own portal folder)",
 }
 KERNEL_HINT = "display power (ft-powerd) and hand tracking"
+
+# KWin's nested backend exits when one of these is missing. The warning text is not always
+# the Wayland interface ft-screens has to offer (xdg_shell is xdg_wm_base, wp_presentation_time
+# is wp_presentation). Names absent from both maps are reported, so the next KWin bump shows up.
+KWIN_HOST_PROTOCOLS = {
+    "wl_compositor": "wl_compositor",
+    "wl_subcompositor": "wl_subcompositor",
+    "xdg_shell": "xdg_wm_base",
+    "wp_single_pixel_buffer_manager_v1": "wp_single_pixel_buffer_manager_v1",
+    "wp_viewporter": "wp_viewporter",
+    "wl_seat": "wl_seat",
+    "zwp_pointer_constraints_v1": "zwp_pointer_constraints_v1",
+    "wp_presentation_time": "wp_presentation",
+}
+KWIN_HOST_OPTIONAL = {
+    "xdg_toplevel_icon_manager_v1",
+    "zwp_keyboard_shortcuts_inhibit_manager_v1",
+}
 
 # Frametop's user services, and the control socket each binds once it's up.
 UNITS = {
@@ -76,6 +116,7 @@ UNITS = {
     "frametop-power": "@ft_powerd",
     "frametop-camd": None,
     "frametop-hands": None,
+    "frametop-voice": "@frametop_voice",
 }
 
 # eye-server.mmap offsets, the same as gaze/ft-gaze.cpp's (packed, little-endian), and the
@@ -218,11 +259,64 @@ def check_host():
     else:
         report("warn", "KWin effects", f"no built-in {', '.join(gone)} effect: renamed? The desktop's "
                "kwinrc may no longer turn it off (session/frametop-session.sh)")
+    check_kwin_host_protocols()
+
+    # Frunner (frunner/ft_frunner.py) runs on the host's Python: GdkPixbuf's SVG loader
+    # draws the apps' icons, and libxkbcommon turns keys into text on the desktop's layout.
+    code, out = run("python3", "-c", "import gi; gi.require_version('GdkPixbuf', '2.0'); "
+                    "from gi.repository import GdkPixbuf; "
+                    "print(' '.join(f.get_name() for f in GdkPixbuf.Pixbuf.get_formats()))")
+    if code != 0:
+        report("warn", "frunner", "the host's Python has no GdkPixbuf: frunner can't start")
+    elif "svg" not in out.split():
+        report("warn", "frunner", "GdkPixbuf has no SVG loader: most apps show no icon in frunner")
+    elif not any(os.path.exists(p) for p in ("/usr/lib/libxkbcommon.so.0", "/usr/lib64/libxkbcommon.so.0")):
+        report("warn", "frunner", "no libxkbcommon: frunner types on a US layout")
+    else:
+        report("ok", "frunner", "GdkPixbuf with SVG, and libxkbcommon")
+
+    # ft-notifyfwd uses Plasma's notification watcher API, which no spec covers, and PyGObject.
+    plasma = b""
+    for lib in ("/usr/lib/libnotificationmanager.so.1", "/usr/lib/libnotificationmanager.so"):
+        try:
+            with open(lib, "rb") as f:
+                plasma = f.read()
+            break
+        except OSError:
+            pass
+    missing = [m for m in (b"RegisterWatcher", b"InvokeAction") if m not in plasma]
+    if run("/usr/bin/python3", "-c", "from gi.repository import Gio")[0] != 0:
+        report("warn", "notifications", "no PyGObject (Gio) for /usr/bin/python3: the desktop's "
+               "notifications stay in the desktop (session/ft-notifyfwd)")
+    elif missing:
+        report("warn", "notifications", f"Plasma's notification manager has no {', '.join(m.decode() for m in missing)}: "
+               "the desktop's notifications stay in the desktop (session/ft-notifyfwd)")
+    else:
+        report("ok", "notifications", "Plasma has its notification watcher API (ft-notifyfwd)")
+
+    # ft-gtksettings: the session gives xdg-desktop-portal its own backend folder, with KDE's
+    # portals.conf copied into it (1.18 reads portals.conf only from XDG_DESKTOP_PORTAL_DIR when set).
+    try:
+        with open("/usr/lib/xdg-desktop-portal", "rb") as f:
+            portal = f.read()
+    except OSError:
+        portal = b""
+    if not os.path.exists("/usr/share/xdg-desktop-portal/kde-portals.conf"):
+        report("warn", "title bar buttons", "no kde-portals.conf: the desktop's portal gets a minimal one "
+               "(session/ft-gtksettings)")
+    elif b"XDG_DESKTOP_PORTAL_DIR" not in portal:
+        report("warn", "title bar buttons", "xdg-desktop-portal no longer reads XDG_DESKTOP_PORTAL_DIR: "
+               "Firefox and Chromium show Close alone in the desktop (session/ft-gtksettings)")
+    else:
+        report("ok", "title bar buttons", "the desktop's portal can load ft-gtksettings")
 
     if systemctl("cat", "steamvr.service"):
         report("ok", "steamvr.service", "Frametop's services start and stop with it")
     else:
         report("FAIL", "steamvr.service", "gone or renamed; Frametop's services are ordered on it")
+    if os.path.exists(TESTBENCH_DROPIN):
+        report("warn", "testbench", "its preload runs inside SteamVR: after a SteamVR update, retest it before "
+               "relying on it (testbench/docs/validation.md), or remove it (testbench/install.sh uninstall)")
 
     glibc = os.confstr("CS_GNU_LIBC_VERSION") or ""
     have = tuple(int(x) for x in re.findall(r"\d+", glibc)[:2])
@@ -276,6 +370,91 @@ def check_host():
             report("ok", "backlight", "ft-powerd can turn the displays off")
         else:
             report("FAIL", "backlight", f"{BACKLIGHT} isn't writable, so ft-powerd can't turn the displays off")
+
+
+def host_protocol_names(blob):
+    needle = b" isn't supported by the host compositor"
+    names, start = [], 0
+    while True:
+        i = blob.find(needle, start)
+        if i < 0:
+            break
+        j = i
+        while j > 0 and 32 <= blob[j - 1] < 127:
+            j -= 1
+        name = blob[j:i].decode("ascii", "replace")
+        if name and name not in names:
+            names.append(name)
+        start = i + len(needle)
+    return names
+
+
+def binary_has_token(blob, name):
+    return re.search(rb"(?<![A-Za-z0-9_])" + re.escape(name.encode()) + rb"(?![A-Za-z0-9_])", blob) is not None
+
+
+def ft_screens_binary():
+    session = launcher_session()
+    if session:
+        screens = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(session)),
+                                                "../screens/build/ft-screens"))
+        if os.path.isfile(screens):
+            return screens
+    try:
+        return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "../screens/build/ft-screens"))
+    except NameError:
+        return os.path.join(HOME, "frametop/screens/build/ft-screens")
+
+
+def check_kwin_host_protocols():
+    """KWin 6.6 exits when ft-screens lacks a host protocol. The built binary names the ones it offers."""
+    blob, src, newest = b"", "", ""
+    for path in sorted({os.path.realpath(p) for p in glob.glob("/usr/lib/libkwin.so*")}):
+        newest = max(newest, os.path.basename(path))
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            continue
+        if b"isn't supported by the host compositor" in data and len(data) >= len(blob):
+            blob, src = data, path
+    if not blob:
+        version = tuple(int(n) for n in re.findall(r"\d+", newest.removeprefix("libkwin.so"))[:2])
+        if version and version < (6, 6):
+            report("ok", "KWin host protocols", f"{newest} doesn't check its host compositor's protocols "
+                   "(KWin 6.6 does)")
+        else:
+            report("warn", "KWin host protocols", f"{newest or 'libkwin'} has no host-compositor requirement "
+                   "strings: reworded? ft-screens may lack a protocol this KWin needs")
+        return
+    names = host_protocol_names(blob)
+    required = [KWIN_HOST_PROTOCOLS[n] for n in names if n in KWIN_HOST_PROTOCOLS]
+    unknown = [n for n in names if n not in KWIN_HOST_PROTOCOLS and n not in KWIN_HOST_OPTIONAL]
+    if unknown:
+        report("warn", "KWin host protocols",
+               "new requirement(s) this check doesn't know: " + ", ".join(unknown)
+               + f" (in {os.path.basename(src)}). ft-screens may need them before KWin will start")
+    screens = ft_screens_binary()
+    try:
+        with open(screens, "rb") as f:
+            built = f.read()
+    except OSError:
+        report("FAIL", "KWin host protocols",
+               f"{screens} is not built, so it can't be checked against {os.path.basename(src)}; "
+               "run screens/build.sh")
+        return
+    missing = [iface for iface in required if not binary_has_token(built, iface)]
+    if missing:
+        report("FAIL", "KWin host protocols",
+               "this KWin exits unless the host compositor offers " + ", ".join(missing)
+               + "; rebuild ft-screens (screens/build.sh)")
+    elif required:
+        report("ok", "KWin host protocols",
+               f"ft-screens offers the {len(required)} {os.path.basename(src)} requires to start")
+    elif not unknown:
+        report("warn", "KWin host protocols",
+               f"{os.path.basename(src)} has the warning text but no known interface names")
 
 
 def launcher_keys(path):
@@ -351,6 +530,45 @@ def check_root_files():
             report("ok", label, "installed, and kept through SteamOS updates")
 
 
+CHAPERONE = os.path.join(HOME, ".config/openvr/config/chaperone_info.vrchap")
+
+
+def check_chaperone():
+    """ft-screens tells a temporary universe from a room by SteamVR's saved universes
+    (screens/universefix.h): each has a universeID and a standing translation and yaw,
+    and the one SteamVR makes after losing the room has standing (0, 1.6, 0), yaw 0."""
+    try:
+        with open(CHAPERONE) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return report("skip", "SteamVR's saved universes", "none yet (no room set up)")
+    except (OSError, ValueError) as e:
+        return report("warn", "SteamVR's saved universes", f"{CHAPERONE} unreadable ({e}): screens placed while "
+                      "SteamVR has lost the room jump when it finds it again")
+    universes = data.get("universes") if isinstance(data, dict) else None
+    if universes == []:
+        return report("skip", "SteamVR's saved universes", "none yet (no room set up)")
+
+    def number(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    def readable(u):
+        if not isinstance(u, dict):
+            return False
+        standing = u.get("standing")
+        translation = standing.get("translation") if isinstance(standing, dict) else None
+        return (str(u.get("universeID", "")).isdigit() and isinstance(translation, list) and len(translation) == 3
+                and all(number(v) for v in translation) and number(standing.get("yaw")))
+
+    ok = isinstance(universes, list) and all(readable(u) for u in universes)
+    if not ok:
+        return report("warn", "SteamVR's saved universes", f"{CHAPERONE} no longer lists each universe's ID and "
+                      "standing as screens/universefix.h reads them")
+    guessed = sum(1 for u in universes if [round(v, 3) for v in u["standing"]["translation"]] == [0, 1.6, 0]
+                  and abs(u["standing"]["yaw"]) < 1e-4)
+    report("ok", "SteamVR's saved universes", f"{len(universes)}, {guessed} with the guessed floor of a lost room")
+
+
 def check_openvr():
     needs = {}  # interface version: programs built against it
     for path in installed_binaries():
@@ -397,7 +615,7 @@ def check_services(sockets, desktop_up):
         paused = pause["stopped"]["units"] if pause.get("paused") else []
     except (OSError, ValueError, KeyError, TypeError):
         paused = []
-    for unit, socket in UNITS.items():
+    for unit, sock in UNITS.items():
         if systemctl("is-enabled", unit) != "enabled":
             continue
         state = systemctl("is-active", unit)
@@ -405,8 +623,8 @@ def check_services(sockets, desktop_up):
             report("skip", unit, "stopped while Frametop is paused for a VR game (input/ft-pause off resumes it)")
         elif state != "active":
             report("FAIL", unit, f"{state}; see journalctl --user -u {unit}")
-        elif socket and socket not in sockets:
-            report("FAIL", unit, f"runs, but hasn't opened {socket}")
+        elif sock and sock not in sockets:
+            report("FAIL", unit, f"runs, but hasn't opened {sock}")
         else:
             report("ok", unit, "running")
     if "@ft_pointer" in sockets:
@@ -419,16 +637,39 @@ def check_services(sockets, desktop_up):
         report("ok", "desktop", "ft-screens is running")
     else:
         report("FAIL", "desktop", "ft-screens runs, but hasn't opened @ft_screens")
-    if systemctl("is-enabled", "frametop-camd") == "enabled" and run("pgrep", "-x", "XRService")[0] != 0:
+    # By its command line: XRService renames its main thread (comm "XRServiceLoopTh"), so -x misses it.
+    if systemctl("is-enabled", "frametop-camd") == "enabled" and run("pgrep", "-f", "^(/[^ ]*/)?XRService( |$)")[0] != 0:
         report("FAIL", "XRService", "not running, so hand tracking has no cameras")
+
+
+def frametop_repos():
+    """The Frametop trees to look in: this script's, then the usual checkouts and the installed
+    release (run from stdin over SSH there's no __file__)."""
+    repos = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))] if "__file__" in globals() else []
+    return repos + [os.path.join(HOME, "frametop"), os.path.join(HOME, "dev/frametop"),
+                    os.path.join(HOME, ".local/share/frametop/releases/current")]
+
+
+def frametop_conf():
+    """~/.config/frametop.conf as Frametop reads it (conf/ft_conf.py, from the first tree that
+    has one that loads): {name: value}; None when there's none here to read it with."""
+    for repo in frametop_repos():
+        path = os.path.join(repo, "conf", "ft_conf.py")
+        if os.path.isfile(path):
+            try:
+                spec = importlib.util.spec_from_file_location("ft_conf", path)
+                ft_conf = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(ft_conf)
+                return ft_conf.read(os.path.join(HOME, ".config/frametop.conf"))
+            except Exception:  # an old or broken copy: try the next tree
+                continue
+    return None
 
 
 def check_steam_ui():
     """Steam's UI calls the Steam menu shortcut uses (steam/ft-steam). They're Steam client
     internals, so a Steam update can change them too, not just a SteamOS one."""
-    # Run from stdin (over SSH) there's no __file__: try the usual checkouts.
-    repos = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))] if "__file__" in globals() else []
-    repos += [os.path.join(HOME, "frametop"), os.path.join(HOME, "dev/frametop")]
+    repos = frametop_repos()
     tool = next((t for t in (os.path.join(r, "steam/ft-steam") for r in repos) if os.path.exists(t)), None)
     if not tool:
         report("skip", "Steam menu shortcut", "steam/ft-steam isn't in a checkout here")
@@ -447,6 +688,86 @@ def check_steam_ui():
         report("warn", "Steam menu shortcut", f"{detail}; a Meta tap won't open the Steam menu (steam/ft-steam)")
 
 
+def check_dashboard_apps():
+    """float/ft-dashroute (DASHBOARD_APPS=frametop): the dashboard's Launch a program list floats
+    apps only while Steam's UI calls SteamClient.Apps.LaunchNonSteamApp when one is picked, which
+    dash-route.js wraps. A Steam client update can change that, not just a SteamOS one."""
+    conf = frametop_conf()
+    if conf is None:
+        report("skip", "dashboard apps", "no Frametop tree here to read frametop.conf with (conf/ft_conf.py)")
+        return
+    if conf.get("DASHBOARD_APPS") != "frametop":
+        return
+    label = "dashboard apps"
+    found = False
+    ui = os.path.join(HOME, ".steam/steam/steamui")
+    for name in (os.listdir(ui) if os.path.isdir(ui) else []):
+        if name.endswith(".js"):
+            try:
+                with open(os.path.join(ui, name), errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            if "Apps?.LaunchNonSteamApp(" in text or "Apps.LaunchNonSteamApp(" in text:
+                found = True
+                break
+    if not found:
+        report("FAIL", label, "Steam's UI no longer calls SteamClient.Apps.LaunchNonSteamApp, so apps from the "
+               "dashboard's Launch a program list open as SteamVR windows; float/dash-route.js needs updating")
+        return
+    if run("pgrep", "-x", "ft-screens")[0] != 0:
+        report("ok", label, "Steam's UI still launches through SteamClient.Apps.LaunchNonSteamApp (desktop not running)")
+        return
+    tool = next((t for t in (os.path.join(r, "float/ft-dashroute") for r in frametop_repos()) if os.path.exists(t)),
+                None)
+    try:
+        out = subprocess.run(["python3", "-I", tool, "status"], capture_output=True, text=True, timeout=15).stdout if tool else ""
+        state = json.loads(out.rsplit("wrapper: ", 1)[1]) if "wrapper: {" in out else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        state = None
+    if state and state.get("on") and state.get("age", 1e9) < 10000:
+        report("ok", label, "they float: the wrapper is in Steam's UI (float/ft-dashroute status)")
+    else:
+        report("warn", label, "DASHBOARD_APPS=frametop, but the wrapper isn't working in Steam's UI, so apps from "
+               "the dashboard open as SteamVR windows: see /tmp/frametop-dashroute.log")
+
+
+def check_launch_list():
+    """The Frametop menu (menu/ft_menu.py): Frametop's entries leave SteamVR's Launch a program list
+    because Steam's scan of the menu entries skips one whose NotShowIn names gamescope, the desktop
+    it runs in. A Steam client update can change that, not just a SteamOS one."""
+    label = "Launch a program list"
+    apps = os.path.join(HOME, ".local/share/applications")
+    if not os.path.exists(os.path.join(apps, "ft-menu.desktop")):
+        return
+    tree = next((r for r in frametop_repos() if os.path.exists(os.path.join(r, "menu/ft_menu.py"))), None)
+    if not tree:
+        report("skip", label, "menu/ft_menu.py isn't in a checkout here")
+        return
+    sys.path[:0] = [os.path.join(tree, "menu"), os.path.join(tree, "steam")]
+    try:
+        import ft_menu
+        import steamui
+        hidden = {(ft_menu.read_entry(p) or {}).get("Name") for p in (os.path.join(apps, f) for f in os.listdir(apps))
+                  if p.endswith(".desktop") and (ft_menu.read_entry(p) or {}).get("X-Frametop-Menu")
+                  and "gamescope" in (ft_menu.read_entry(p) or {}).get("NotShowIn", "").split(";")}
+        listed = set(json.loads(steamui.evaluate(
+            "SteamClient.Apps.ScanForInstalledNonSteamApps(true).then(a => JSON.stringify(a.map(x => x.strAppName)))")))
+    except Exception as e:  # Steam not up, its UI changed, or the tree's modules
+        report("skip", label, f"couldn't read Steam's list ({e})")
+        return
+    finally:
+        del sys.path[:2]
+    back = sorted(n for n in hidden & listed if n)
+    if back:
+        report("warn", label, f"Steam lists {', '.join(back)} again: it no longer skips NotShowIn=gamescope "
+               "entries, so they're there next to the Frametop menu (menu/ft_menu.py)")
+    elif "Frametop" not in listed:
+        report("warn", label, "the Frametop menu isn't in it: open Launch a program once, or restart Steam")
+    else:
+        report("ok", label, f"{len(hidden)} of Frametop's entries are in the Frametop menu, not in the list")
+
+
 def check_vr_socket():
     """vrserver's web socket, which the pause gesture reads the controllers from (input/vrws.py,
     input/game_pause.py). It's undocumented: SteamVR's controller binding page uses it."""
@@ -459,8 +780,22 @@ def check_vr_socket():
     except (OSError, ValueError) as e:
         report("FAIL", label, f"/input/getstate.json didn't answer ({e}); the pause gesture can't read the controllers")
         return
+    # The 3D mouse's virtual controller as a treadmill (the driver's default role 4): SteamVR gives it
+    # /user/treadmill, where its compositor binding has its laser entries (docs/design.md, "Treadmill role").
+    for d in devices:
+        if d.get("controller_type") == "ft_pointer":
+            path = d.get("root_path") or "?"
+            if path == "/user/treadmill":
+                report("ok", "pointer device role", "the virtual controller is at /user/treadmill")
+            else:
+                report("warn", "pointer device role", f"the virtual controller is at {path}, not /user/treadmill: "
+                       "an older driver (role 2), or SteamVR moved the treadmill path. Retest the laser with "
+                       "pointer/probe/build/lasertest (frame-hands/notes/hand-interaction.md, probe P1)")
     found = [d for d in devices if d.get("controller_type") == "frame_controller" and d.get("root_path")
              and d.get("side") in ("left", "right")]
+    if found and not all(any(str(c.get("path", "")).endswith("/touch") for c in d.get("components", [])) for d in found):
+        report("warn", "controller touch sensors", "a Frame controller lists no touch component; hand interaction's "
+               "handoff (pointer/helper/handoff.h) falls back to motion alone")
     if not found:
         report("skip", label, "no Frame controller is on, so it wasn't checked")
         return
@@ -569,6 +904,89 @@ def check_eye_tracker():
            "check again after that")
 
 
+def check_eye_rate():
+    """gaze/eye-rate.py: SteamVR runs the eye cameras at 15 fps unless steamvr.gazeDepEyeToHeadEnable
+    is on, and at 15 our tracker can't calibrate. The setting counts from SteamVR's start, and the
+    rate is the last "Set framerate" since the eye tracker's (none: it starts at 90)."""
+    if systemctl("is-enabled", "frametop-gaze") != "enabled":
+        return
+    out = run(f"{STEAMVR_BIN}/vrcmd", "--settings-bool", "steamvr.gazeDepEyeToHeadEnable",
+              env=dict(os.environ, LD_LIBRARY_PATH=STEAMVR_BIN))[1]
+    on = re.search(r"^steamvr\.gazeDepEyeToHeadEnable=(true|1)\b", out, re.M) is not None
+    try:
+        with open(EYE_LOG, errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        lines = []
+    starts = [i for i, line in enumerate(lines) if " startup with PID" in line]
+    rates = re.findall(r"CStereoAdspCams: Set framerate ([\d.]+)", "\n".join(lines[starts[-1]:])) if starts else []
+    rate = float(rates[-1]) if rates else 90.0 if starts else None
+    ours = os.path.exists("/etc/systemd/system/frametop-eyegrab.service")
+    if rate is not None and rate < 90:
+        why = (f"SteamVR runs the eye cameras at {rate:g} fps, so our eye tracker can't calibrate (a dot needs "
+               "15 frames in 0.6 s) and the gaze moves only that often")
+        if on:
+            report("warn", "eye cameras", f"{why}: steamvr.gazeDepEyeToHeadEnable is on, but SteamVR started "
+                   "before that; restart SteamVR")
+        else:
+            report("FAIL" if ours else "warn", "eye cameras", f"{why}: run gaze/eye-rate.py on, then restart SteamVR")
+    elif not on:
+        report("warn", "eye cameras", "steamvr.gazeDepEyeToHeadEnable is off, so SteamVR may run the eye cameras "
+               "at 15 fps from its next start: run gaze/eye-rate.py on")
+    else:
+        report("ok", "eye cameras", (f"{rate:g} fps" if rate else "rate unknown (no eyetracking.txt)") +
+               " (steamvr.gazeDepEyeToHeadEnable on" + (", set by Frametop)" if os.path.exists(EYE_RATE_MARK) else ")"))
+
+
+def check_dashpatch():
+    """pointer/dashpatch: the treadmill moves SteamVR's windows only with the patch in SteamVR's
+    dashboard. It wraps UndockedOverlay.startFloatingWindowMove, found by name, and needs the
+    dashboard's debugger on 127.0.0.1:8089 (from SteamVR's start)."""
+    if systemctl("is-enabled", "frametop-dashpatch") != "enabled":
+        return
+    label = "dashboard patch"
+    # treadmill-move.js wraps the first; ft-dashpatch's SteamVR watch reads the rest (Gamepad mode
+    # and the theater game, for ft-screens), and the gamepad pill's click uses the last line's
+    markers = {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
+               "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
+               "window.FrameStore=", "summonOverlayKey", "unVRInputPID", "m_unPIDForVRInput", "m_unSteamInputAppID",
+               "PushInputFocus", "window.Dashboard=", "hideDashboard"}
+    missing = set(markers)
+    for root, _, files in os.walk(DASHBOARD_JS):
+        for name in files:
+            if name.endswith(".js") and missing:
+                try:
+                    with open(os.path.join(root, name), errors="replace") as f:
+                        text = f.read()
+                    missing = {m for m in missing if m not in text}
+                except OSError:
+                    pass
+    if "startFloatingWindowMove" in missing:
+        report("FAIL", label, "SteamVR's dashboard has no startFloatingWindowMove any more, so the 3D mouse "
+               "(a treadmill) can't move SteamVR's windows; pointer/dashpatch/treadmill-move.js needs updating")
+        return
+    if missing:
+        report("FAIL", label, f"SteamVR's dashboard lacks {', '.join(sorted(missing))}, so ft-dashpatch can't tell "
+               "ft-screens about Gamepad mode or a theater game (pointing at a screen may take the pad from a game), "
+               "or give a panel Gamepad mode (the gamepad pill); STEAMVR_STATE and GAMEPAD_PUSH in "
+               "pointer/dashpatch/ft-dashpatch.py need updating")
+        return
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8089/json", timeout=3) as r:
+            titles = [t.get("title") for t in json.load(r)]
+    except (OSError, ValueError):
+        report("warn", label, "SteamVR's dashboard debugger isn't on 127.0.0.1:8089, so the 3D mouse can't move "
+               "SteamVR's windows: run pointer/dashpatch/ft-dashpatch.py on, then restart SteamVR")
+        return
+    if "systemui" not in titles:
+        report("warn", label, "the dashboard debugger answers but lists no systemui page")
+        return
+    state = systemctl("is-active", "frametop-dashpatch")
+    report("ok" if state == "active" else "warn", label, f"debugger on 127.0.0.1:8089, frametop-dashpatch {state} "
+           "(pointer/dashpatch/run.sh status shows the patch)")
+
+
 def main():
     args = sys.argv[1:]
     if args not in ([], ["--mark-good"]):
@@ -583,6 +1001,7 @@ def main():
     check_versions(versions)
     check_host()
     check_root_files()
+    check_chaperone()
     steamvr_up = run("pgrep", "-x", "vrserver")[0] == 0
     if not steamvr_up:
         report("skip", "SteamVR checks", "SteamVR isn't running")
@@ -593,8 +1012,12 @@ def main():
         check_overlays(desktop_up)
         check_services(sockets, desktop_up)
         check_steam_ui()
+        check_dashboard_apps()
+        check_launch_list()
         check_vr_socket()
         check_eye_tracker()
+        check_eye_rate()
+        check_dashpatch()
 
     if args == ["--mark-good"]:
         if failed:

@@ -1,6 +1,7 @@
 // Frametop Display Settings (Kirigami). Backend: ft_display_settings.py ("backend").
 import QtQuick
 import QtQuick.Controls as Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
@@ -408,6 +409,64 @@ Kirigami.ApplicationWindow {
                             }
                         }
                     }
+
+                    // DEE-317: Plasma's wallpaper becomes a key colour and ft-screens puts a picture
+                    // per eye there (stereo_wallpaper.py). Docked screens only.
+                    Kirigami.Separator {
+                        visible: spage.md
+                        Kirigami.FormData.isSection: true
+                        Kirigami.FormData.label: "Stereo wallpaper"
+                    }
+                    Controls.Switch {
+                        id: stereoSwitch
+                        visible: spage.md
+                        Kirigami.FormData.label: "Picture per eye:"
+                        text: checked ? "On" : "Off"
+                        checked: backend.stereoWallpaper
+                        enabled: backend.desktopRunning && backend.busy === "" && (checked || backend.stereoWallpaperReady)
+                        onToggled: {
+                            backend.setStereoWallpaper(checked)
+                            checked = Qt.binding(() => backend.stereoWallpaper)
+                        }
+                    }
+                    RowLayout {
+                        id: picsRow
+                        visible: spage.md
+                        Kirigami.FormData.label: "Pictures:"
+                        property string leftUrl: ""
+                        Controls.Button {
+                            text: "Side-by-side picture…"
+                            enabled: backend.busy === ""
+                            onClicked: sbsDialog.open()
+                        }
+                        Controls.Button {
+                            text: "Left and right…"
+                            enabled: backend.busy === ""
+                            onClicked: leftDialog.open()
+                        }
+                        Controls.Label {
+                            text: backend.stereoWallpaperReady ? "picked" : "none yet"
+                            opacity: 0.7
+                        }
+                        FileDialog {
+                            id: sbsDialog
+                            title: "A side-by-side picture: the left eye's half on the left"
+                            nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp)"]
+                            onAccepted: backend.chooseStereoWallpaper(selectedFile.toString(), "")
+                        }
+                        FileDialog {
+                            id: leftDialog
+                            title: "The left eye's picture"
+                            nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp)"]
+                            onAccepted: { picsRow.leftUrl = selectedFile.toString(); rightDialog.open() }
+                        }
+                        FileDialog {
+                            id: rightDialog
+                            title: "The right eye's picture"
+                            nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp)"]
+                            onAccepted: backend.chooseStereoWallpaper(picsRow.leftUrl, selectedFile.toString())
+                        }
+                    }
                 }
             }
 
@@ -533,11 +592,13 @@ Kirigami.ApplicationWindow {
                         Kirigami.FormData.label: "Apps:"
                         property var windows: lpage.named ? backend.profileWindows(lpage.layout.active) : []
                         property var hidden: lpage.named ? backend.profileHidden(lpage.layout.active) : []
+                        property var remotes: lpage.named ? backend.profileRemotes(lpage.layout.active) : []
                         Connections {
                             target: backend
                             function onChanged() {
                                 profileApps.windows = lpage.named ? backend.profileWindows(lpage.layout.active) : []
                                 profileApps.hidden = lpage.named ? backend.profileHidden(lpage.layout.active) : []
+                                profileApps.remotes = lpage.named ? backend.profileRemotes(lpage.layout.active) : []
                             }
                         }
                         Controls.Label {
@@ -564,6 +625,12 @@ Kirigami.ApplicationWindow {
                             }
                         }
                         Controls.Label {
+                            visible: profileApps.remotes.length > 0
+                            text: "Remote display" + (profileApps.remotes.length > 1 ? "s: " : ": ") + profileApps.remotes.join(", ")
+                            wrapMode: Text.Wrap
+                            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+                        }
+                        Controls.Label {
                             visible: profileApps.hidden.length > 0
                             text: "Hides screen" + (profileApps.hidden.length > 1 ? "s " : " ") + profileApps.hidden.join(", ")
                             opacity: 0.7
@@ -574,7 +641,7 @@ Kirigami.ApplicationWindow {
                         Kirigami.FormData.label: "Rows:"
                         visible: lpage.layout.mode !== "custom"
                         from: 1
-                        to: Math.max(1, backend.screens)
+                        to: Math.max(1, backend.screenCount)
                         value: lpage.preset.rows || 1
                         onValueModified: backend.setPreset("rows", value)
                     }
@@ -615,104 +682,247 @@ Kirigami.ApplicationWindow {
                         model: [{ text: "None", value: "" }].concat(lpage.names.map(n => ({ text: n, value: n })))
                         textRole: "text"
                         valueRole: "value"
-                        currentIndex: Math.max(0, indexOfValue(backend.defaultProfile))
+                        // From the names, not indexOfValue: that ran before the model was set, so a saved
+                        // default showed as None.
+                        currentIndex: backend.defaultProfile === "" ? 0 : 1 + lpage.names.indexOf(backend.defaultProfile)
                         onActivated: backend.setDefaultProfile(currentValue)
                         Controls.ToolTip.text: "The desktop starts in this profile: its screens, and its apps open. Each profile also has its own entry in SteamVR's Launch a program list"
                         Controls.ToolTip.visible: hovered
                     }
                 }
 
-                // Preview: from above (you at the bottom) and from the front.
+                // Preview (backend.preview): while the desktop runs, every screen, floating window and
+                // remote display where it is now, and you, in the layout's frame (where you stood
+                // when the screens were last arranged); otherwise the layout itself, you where it's
+                // arranged from. From above, and as seen from your eyes.
                 Kirigami.Heading { level: 3; text: "Preview" }
                 Canvas {
                     id: preview
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Kirigami.Units.gridUnit * 13
-                    property var plan: backend.plan
-                    onPlanChanged: requestPaint()
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 17
+                    property var view: backend.preview
+                    onViewChanged: requestPaint()
                     onWidthChanged: requestPaint()
+                    Component.onCompleted: backend.watchRoom(true)
+                    Component.onDestruction: backend.watchRoom(false)
+
+                    function colorOf(kind) {
+                        return kind === "screen" ? Kirigami.Theme.highlightColor
+                             : kind === "remote" ? Kirigami.Theme.positiveTextColor
+                             : Kirigami.Theme.neutralTextColor  // a floating window
+                    }
+                    // A planned screen away from where that screen is now (more than 5 cm at an end
+                    // or the middle, seen from above).
+                    function moved(g, panels) {
+                        const p = panels.find(q => q.kind === "screen" && q.label === g.label)
+                        if (!p) return true
+                        const at = (t, f) => t[Math.round((t.length - 1) * f)]
+                        return [0, 0.5, 1].some(f => Math.hypot(at(p.top, f)[0] - at(g.top, f)[0],
+                                                                at(p.top, f)[1] - at(g.top, f)[1]) > 0.05)
+                    }
+                    // t cut to fit w pixels ("" when not even a letter fits), "Frametop " first.
+                    function fit(ctx, t, w) {
+                        if (ctx.measureText(t).width <= w) return t
+                        if (t.startsWith("Frametop ")) return fit(ctx, t.slice(9), w)
+                        let n = t.length
+                        while (n > 1 && ctx.measureText(t.slice(0, n - 1) + "…").width > w) n--
+                        return n > 1 ? t.slice(0, n - 1) + "…" : ""
+                    }
+                    // Labels, centred on (x, y) inside box [x0, y0, x1, y1]: a screen's where
+                    // another screen's already is joins it ("1·3": screens stacked in rows); one
+                    // that would cover another tries the spots along (dx, dy), then stays out.
+                    function label(ctx, labels, box, p, maxW, x, y, dx, dy) {
+                        const screen = p.kind === "screen"
+                        const near = screen && labels.find(l => l.screen && Math.abs(l.x - x) < 14 && Math.abs(l.y - y) < 10)
+                        if (near) { near.t += "·" + p.label; return }
+                        let t = p.label
+                        t = fit(ctx, t, Math.min(maxW, box[2] - box[0] - 4))
+                        if (!t) return
+                        const w = ctx.measureText(t).width + 4, lh = Kirigami.Theme.smallFont.pixelSize + 3
+                        for (let i = 0; i < 7; i++) {
+                            const cx = Math.max(box[0] + w / 2, Math.min(box[2] - w / 2, x + dx * i))
+                            const cy = Math.max(box[1] + lh / 2, Math.min(box[3] - lh / 2, y + dy * i))
+                            if (!labels.some(l => Math.abs(l.x - cx) < (l.w + w) / 2 && Math.abs(l.y - cy) < lh)) {
+                                labels.push({ x: cx, y: cy, w: w, t: t, screen: screen })
+                                return
+                            }
+                        }
+                    }
+                    function drawLabels(ctx, labels) {
+                        ctx.textBaseline = "middle"
+                        for (const l of labels.filter(l => l.t)) {
+                            const w = ctx.measureText(l.t).width
+                            ctx.fillStyle = Qt.rgba(0, 0, 0, 0.35)  // legible over a panel's fill
+                            ctx.fillRect(l.x - w / 2 - 2, l.y - Kirigami.Theme.smallFont.pixelSize / 2 - 1, w + 4, Kirigami.Theme.smallFont.pixelSize + 2)
+                            ctx.fillStyle = Kirigami.Theme.textColor
+                            ctx.fillText(l.t, l.x - w / 2, l.y)
+                        }
+                        ctx.textBaseline = "alphabetic"
+                    }
+                    function line(ctx, pts) {
+                        ctx.beginPath()
+                        pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))
+                    }
 
                     onPaint: {
                         const ctx = getContext("2d")
                         ctx.reset()
                         const text = Kirigami.Theme.textColor
-                        const accent = Kirigami.Theme.highlightColor
-                        const half = width / 2
+                        const half = width / 2, top = 24, legend = 20, boxH = height - top - legend - 8
                         ctx.font = Kirigami.Theme.smallFont.pixelSize + "px sans-serif"
                         ctx.fillStyle = text
                         ctx.fillText("From above", 4, 12)
-                        ctx.fillText("From the front", half + 8, 12)
-                        if (!plan || plan.length === 0) return
+                        ctx.fillText("From where you are", half + 8, 12)
+                        if (!view || !view.planned) return
+                        const live = view.live, head = view.head, you = head.tracked
+                        const shown = live ? view.panels : view.planned
+                        const ghosts = live ? view.planned.filter(g => moved(g, view.panels)) : []
+                        // Remote displays at the back, floating windows in front.
+                        const order = { remote: 0, screen: 1, window: 2 }
+                        const panels = shown.slice().sort((a, b) => order[a.kind] - order[b.kind])
 
-                        // From above: x right, forward (-z) up; you are the dot at the bottom.
-                        let ends = [[0, 0]]
-                        for (const p of plan) {
-                            const f = p.faceYaw * Math.PI / 180
-                            const rx = Math.cos(f) * p.width / 2, rz = -Math.sin(f) * p.width / 2
-                            ends.push([p.x - rx, p.z - rz], [p.x + rx, p.z + rz])
-                        }
-                        const xs = ends.map(e => e[0]), zs = ends.map(e => e[1])
-                        const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs), 0.5)
-                        const k = Math.min(half - 20, height - 44) / span
-                        const cx = half / 2 - (Math.max(...xs) + Math.min(...xs)) / 2 * k
-                        const cz = height - 12 - Math.max(...zs) * k  // your dot 12 px above the bottom
-                        const P = (x, z) => [cx + x * k, cz + z * k]
-                        ctx.fillStyle = text
-                        ctx.beginPath(); const me = P(0, 0); ctx.arc(me[0], me[1], 4, 0, 2 * Math.PI); ctx.fill()
-                        ctx.lineWidth = 4
+                        // From above: x right, forward up.
+                        const xs = [head.x], zs = [head.z]
+                        for (const p of panels.concat(ghosts)) for (const q of p.top) { xs.push(q[0]); zs.push(q[1]) }
+                        const xmin = Math.min(...xs), xmax = Math.max(...xs), zmin = Math.min(...zs), zmax = Math.max(...zs)
+                        const k = Math.max(1, Math.min((half - 48) / Math.max(xmax - xmin, 1), (boxH - 44) / Math.max(zmax - zmin, 1)))
+                        const cx = 4 + half / 2 - (xmax + xmin) / 2 * k
+                        const cz = top + 8 + boxH / 2 - (zmax + zmin) / 2 * k
+                        const P = q => [cx + q[0] * k, cz + q[1] * k]
+                        ctx.save()
+                        ctx.beginPath(); ctx.rect(0, top, half - 2, boxH + 8); ctx.clip()
                         ctx.lineCap = "round"
-                        // Screens stacked in rows share a spot from above, so they share a label ("1·3"):
-                        // the same direction on a curve, the same x on a flat wall.
-                        const flat = plan.every(p => Math.abs(p.faceYaw - plan[0].faceYaw) < 0.1
-                                                   && Math.abs(p.facePitch - plan[0].facePitch) < 0.1)
-                        const labels = {}
-                        for (const p of plan) {
-                            const f = p.faceYaw * Math.PI / 180
-                            const rx = Math.cos(f) * p.width / 2, rz = -Math.sin(f) * p.width / 2
-                            const a = P(p.x - rx, p.z - rz), b = P(p.x + rx, p.z + rz)
-                            ctx.strokeStyle = accent
-                            ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
-                            const c = P(p.x, p.z), spot = flat ? Math.round(p.x * 50) : Math.round(p.faceYaw * 2)
-                            labels[spot] = labels[spot] || { at: c, names: [] }
-                            labels[spot].names.push(p.index + 1)
+                        ctx.setLineDash([4, 3])
+                        ctx.lineWidth = 1.5
+                        for (const g of ghosts) {
+                            ctx.strokeStyle = colorOf(g.kind)
+                            line(ctx, g.top.map(P)); ctx.stroke()
                         }
-                        ctx.fillStyle = text
-                        for (const spot in labels) {
-                            const l = labels[spot], t = l.names.join("·")
-                            ctx.fillText(t, l.at[0] - ctx.measureText(t).width / 2, l.at[1] - 7)
+                        ctx.setLineDash([])
+                        for (const p of panels) {
+                            ctx.globalAlpha = p.hidden ? 0.35 : 1
+                            ctx.strokeStyle = colorOf(p.kind)
+                            ctx.lineWidth = p.kind === "window" ? 3 : 4
+                            line(ctx, p.top.map(P)); ctx.stroke()
                         }
+                        ctx.globalAlpha = 1
+                        // You: a cone the way you face (about what the Frame shows), and an arrow.
+                        const h = P([head.x, head.z]), yaw = head.yaw * Math.PI / 180
+                        const ray = (a, len) => [h[0] - Math.sin(a) * len, h[1] - Math.cos(a) * len]
+                        const fov = 50 * Math.PI / 180, reach = 44
+                        ctx.fillStyle = Qt.rgba(text.r, text.g, text.b, 0.18)
+                        ctx.beginPath(); ctx.moveTo(h[0], h[1])
+                        ctx.arc(h[0], h[1], reach, -Math.PI / 2 - yaw - fov, -Math.PI / 2 - yaw + fov)
+                        ctx.closePath(); ctx.fill()
+                        ctx.strokeStyle = text; ctx.fillStyle = text
+                        ctx.lineWidth = 2
+                        line(ctx, [h, ray(yaw, 24)]); ctx.stroke()
+                        line(ctx, [ray(yaw, 30), ray(yaw + 0.35, 20), ray(yaw - 0.35, 20)]); ctx.closePath(); ctx.fill()
+                        ctx.beginPath(); ctx.arc(h[0], h[1], 4.5, 0, 2 * Math.PI); ctx.fill()
+                        // Labels past each panel's middle, away from you, and off you (blank ones
+                        // only hold your spot).
+                        let labels = [h, ray(yaw, 30)].map(q => ({ x: q[0], y: q[1], w: 40, t: "" }))
+                        const topBox = [0, top, half - 2, top + boxH + 8]
+                        for (const p of panels) {
+                            const m = P(p.top[Math.floor(p.top.length / 2)])
+                            const d = Math.hypot(m[0] - h[0], m[1] - h[1]) || 1
+                            const ux = (m[0] - h[0]) / d, uy = (m[1] - h[1]) / d
+                            label(ctx, labels, topBox, p, half * 0.45, m[0] + ux * 12, m[1] + uy * 12, ux * 14, uy * 14)
+                        }
+                        drawLabels(ctx, labels)
+                        ctx.restore()
 
-                        // From the front: x right, y up. A flat wall as it is; a curved layout
-                        // unrolled (arc length by yaw and pitch), so the gaps show true.
-                        const front = plan.map(p => {
-                            if (flat) return { x: p.x, y: p.y, w: p.width, h: p.height }
-                            const r = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-                            const arc = m => 2 * r * Math.atan(m / 2 / r)  // what the screen spans on the curve
-                            return { x: -p.faceYaw * Math.PI / 180 * r, y: p.facePitch * Math.PI / 180 * r,
-                                     w: arc(p.width), h: arc(p.height) }
-                        })
-                        const fx = [], fy = []
-                        front.forEach(f => { fx.push(f.x - f.w / 2, f.x + f.w / 2); fy.push(f.y - f.h / 2, f.y + f.h / 2) })
-                        fy.push(0)
-                        const fspan = Math.max(Math.max(...fx) - Math.min(...fx), Math.max(...fy) - Math.min(...fy), 0.5)
-                        const fk = Math.min(half - 20, height - 44) / fspan
-                        const ox = half + half / 2 - (Math.max(...fx) + Math.min(...fx)) / 2 * fk
-                        const oy = 30 + (height - 42) / 2 + (Math.max(...fy) + Math.min(...fy)) / 2 * fk
+                        // From where you are: across by direction (left on the left), up by height,
+                        // in degrees from your eyes, so what's behind you shows at the sides.
+                        const ys = [head.yaw], ps = [0]
+                        for (const p of panels.concat(ghosts)) for (const q of p.view) { ys.push(q[0]); ps.push(q[1]) }
+                        const ymin = Math.min(...ys), ymax = Math.max(...ys), pmin = Math.min(...ps), pmax = Math.max(...ps)
+                        const fk = Math.max(0.1, Math.min((half - 24) / Math.max(ymax - ymin, 60), (boxH - 16) / Math.max(pmax - pmin, 40)))
+                        const ox = half + 8 + (half - 16) / 2 + (ymax + ymin) / 2 * fk
+                        const oy = top + 8 + boxH / 2 + (pmax + pmin) / 2 * fk
+                        const V = q => [ox - q[0] * fk, oy - q[1] * fk]
+                        ctx.save()
+                        ctx.beginPath(); ctx.rect(half + 2, top - 6, half - 2, boxH + 14); ctx.clip()
                         ctx.strokeStyle = Kirigami.Theme.disabledTextColor
                         ctx.lineWidth = 1
                         ctx.setLineDash([4, 4])
                         ctx.beginPath(); ctx.moveTo(half + 8, oy); ctx.lineTo(width - 4, oy); ctx.stroke()  // eye level
+                        const fx = ox - head.yaw * fk
+                        ctx.strokeStyle = text
+                        ctx.beginPath(); ctx.moveTo(fx, top + 14); ctx.lineTo(fx, top + boxH + 4); ctx.stroke()  // the way you face
+                        // Your left, right and behind, where the view reaches them.
+                        const guides = []
+                        ctx.strokeStyle = Kirigami.Theme.disabledTextColor
+                        for (const [a, t] of [[90, "left"], [-90, "right"], [180, "behind"], [-180, "behind"]]) {
+                            const gx = fx - a * fk
+                            if (gx < half + 8 || gx > width - 4) continue
+                            ctx.beginPath(); ctx.moveTo(gx, top + 14); ctx.lineTo(gx, top + boxH + 4); ctx.stroke()
+                            guides.push([gx, t])
+                        }
+                        ctx.setLineDash([4, 3])
+                        ctx.lineWidth = 1.5
+                        for (const g of ghosts) {
+                            ctx.strokeStyle = colorOf(g.kind)
+                            line(ctx, g.view.map(V)); ctx.closePath(); ctx.stroke()
+                        }
                         ctx.setLineDash([])
-                        plan.forEach((p, i) => {
-                            const f = front[i], x = ox + (f.x - f.w / 2) * fk, y = oy - (f.y + f.h / 2) * fk
-                            ctx.fillStyle = Qt.rgba(accent.r, accent.g, accent.b, 0.35)
-                            ctx.fillRect(x, y, f.w * fk, f.h * fk)
-                            ctx.strokeStyle = accent
+                        labels = []
+                        const viewBox = [half + 4, top + 14, width - 2, top + boxH + 8]
+                        // Far ones first, so a near one covers what it's in front of; near ones
+                        // label first, so theirs win a crowded spot.
+                        const far = panels.slice().sort((a, b) => b.distance - a.distance)
+                        const spots = []
+                        for (const p of far) {
+                            const c = colorOf(p.kind)
+                            ctx.globalAlpha = p.hidden ? 0.35 : 1
+                            const pts = p.view.map(V)
+                            line(ctx, pts); ctx.closePath()
+                            ctx.fillStyle = Qt.rgba(c.r, c.g, c.b, 0.3)
+                            ctx.fill()
+                            ctx.strokeStyle = c
                             ctx.lineWidth = 2
-                            ctx.strokeRect(x, y, f.w * fk, f.h * fk)
+                            ctx.stroke()
+                            const px = pts.map(q => q[0]), py = pts.map(q => q[1])
+                            const x0 = Math.min(...px), x1 = Math.max(...px), y1 = Math.max(...py)
+                            spots.unshift([p, (x0 + x1) / 2, (Math.min(...py) + y1) / 2, x1 - x0, y1])
+                        }
+                        ctx.globalAlpha = 1
+                        // Inside the panel when it's wide enough, else under it.
+                        for (const [p, x, y, w, bottom] of spots) {
+                            if (w >= 40) label(ctx, labels, viewBox, p, w - 6, x, y, 0, 13)
+                            else label(ctx, labels, viewBox, p, half * 0.3, x, bottom + 9, 0, 13)
+                        }
+                        drawLabels(ctx, labels)
+                        ctx.fillStyle = text
+                        const facing = you ? "you face" : "ahead"
+                        const fw = ctx.measureText(facing).width
+                        ctx.fillText(facing, Math.max(half + 6, Math.min(width - 4 - fw, fx - fw / 2)), top + 10)
+                        ctx.fillStyle = Kirigami.Theme.disabledTextColor
+                        for (const [gx, t] of guides) {
+                            const tw = ctx.measureText(t).width
+                            ctx.fillText(t, Math.max(half + 6, Math.min(width - 4 - tw, gx - tw / 2)), top + 10)
+                        }
+                        ctx.restore()
+
+                        // Legend.
+                        let x = 4
+                        const y = height - 6
+                        const key = (draw, t) => {
+                            draw(x, y - 4)
                             ctx.fillStyle = text
-                            ctx.fillText(String(p.index + 1), x + f.w * fk / 2 - 3, y + f.h * fk / 2 + 4)
-                        })
+                            ctx.fillText(t, x + 16, y)
+                            x += 16 + ctx.measureText(t).width + 14
+                        }
+                        const swatch = c => (x0, y0) => { ctx.fillStyle = c; ctx.fillRect(x0, y0 - 4, 12, 8) }
+                        key(swatch(colorOf("screen")), "Screens")
+                        if (panels.some(p => p.kind === "window")) key(swatch(colorOf("window")), "Windows")
+                        if (panels.some(p => p.kind === "remote")) key(swatch(colorOf("remote")), "Remote displays")
+                        key((x0, y0) => { ctx.fillStyle = text; ctx.beginPath(); ctx.arc(x0 + 6, y0, 4, 0, 2 * Math.PI); ctx.fill() },
+                            you ? "You" : "You, when it's arranged")
+                        if (ghosts.length) key((x0, y0) => {
+                            ctx.strokeStyle = colorOf("screen"); ctx.lineWidth = 1.5; ctx.setLineDash([4, 3])
+                            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + 12, y0); ctx.stroke(); ctx.setLineDash([])
+                        }, "Where the layout puts them")
                     }
                 }
 
@@ -720,7 +930,9 @@ Kirigami.ApplicationWindow {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "The layout goes around where you're facing when it's applied. Move screens by hand any time "
+                    text: "The preview shows where everything is now, around where the screens were last arranged; a dashed "
+                          + "outline is where the layout puts a screen that's somewhere else now. "
+                          + "The layout goes around where you're facing when it's applied. Move screens by hand any time "
                           + "(grab bar under each screen); to put them back: Meta+Shift+R in the desktop, the Reset "
                           + "Screen Layout menu entry, Arrange now here, or a mouse button mapped to \"Reset desktop "
                           + "screen layout\" in Frametop Input Settings → Buttons."
@@ -756,10 +968,10 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         model: [
-                            { value: "always", text: "Always", help: "Meta+Shift+H (or a mapped button) hides them. During VR games, see below." },
+                            { value: "always", text: "Always", help: "Meta+Shift+H (or a key or button mapped to it) hides them and shows them again. During VR games, see below." },
                             { value: "dashboard", text: "Only with the SteamVR dashboard open", help: "They come and go with the dashboard. Meta+Shift+H shows them anyway." },
                             { value: "gesture", text: "While I look at my wrist", help: "They show while you look toward the controller below. Meta+Shift+H shows them anyway." },
-                            { value: "toggle", text: "Only when I show them", help: "Hidden until Meta+Shift+H (or a mapped button) shows them." }
+                            { value: "toggle", text: "Only when I show them", help: "Hidden until Meta+Shift+H (or a key or button mapped to it) shows them." }
                         ]
                         delegate: ColumnLayout {
                             required property var modelData
@@ -868,15 +1080,21 @@ Kirigami.ApplicationWindow {
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Screens shown" }
 
+                    // Counts as models, here and in Pinned screens: a new list rebuilds the rows, and
+                    // FormLayout puts rebuilt rows after the ones below (a report: pinning a screen
+                    // moved the wrist slider and All screens up between Screen 2 and Screen 3).
                     Repeater {
-                        model: backend.screensShown
+                        model: backend.screensShown.length
                         delegate: Controls.Switch {
-                            required property var modelData
+                            id: shownSwitch
                             required property int index
                             Kirigami.FormData.label: "Screen " + (index + 1) + ":"
-                            text: modelData ? "Shown" : "Hidden"
-                            checked: modelData
-                            onToggled: backend.setScreenShown(index, checked)
+                            text: checked ? "Shown" : "Hidden"
+                            checked: backend.screensShown[index]
+                            onToggled: {
+                                backend.setScreenShown(shownSwitch.index, checked)
+                                checked = Qt.binding(() => backend.screensShown[shownSwitch.index])
+                            }
                         }
                     }
                     Controls.Label {
@@ -890,10 +1108,11 @@ Kirigami.ApplicationWindow {
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Pinned screens" }
 
                     Repeater {
-                        model: backend.pins
+                        model: backend.pins.length
                         delegate: Controls.ComboBox {
-                            required property var modelData
+                            id: pinBox
                             required property int index
+                            readonly property int pinIndex: Math.max(0, ["none", "left", "right", "head"].indexOf(backend.pins[index]))
                             Kirigami.FormData.label: "Screen " + (index + 1) + ":"
                             model: [
                                 { text: "In the room", value: "none" },
@@ -903,9 +1122,40 @@ Kirigami.ApplicationWindow {
                             ]
                             textRole: "text"
                             valueRole: "value"
-                            currentIndex: Math.max(0, ["none", "left", "right", "head"].indexOf(modelData))
-                            onActivated: backend.pin(String(index + 1), currentValue)
+                            currentIndex: pinIndex
+                            // pinBox.index: activated's own argument is also called index (the
+                            // chosen row), so a bare index sent "On your head" to screen 4.
+                            onActivated: {
+                                backend.pin(String(pinBox.index + 1), currentValue)
+                                currentIndex = Qt.binding(() => pinBox.pinIndex)  // what ft-screens has, if the pin failed
+                            }
                         }
+                    }
+                    Controls.ComboBox {
+                        id: pinModeBox
+                        Kirigami.FormData.label: "Head pins:"
+                        // SCREEN_PIN_LEVEL: 0, 1, 2 (the row is the value)
+                        model: [
+                            "Ride on the headset",
+                            "Pin only follows horizontal movement",
+                            "Pin follows walking only, not turning"
+                        ]
+                        currentIndex: backend.pinMode
+                        onActivated: {
+                            backend.setPinMode(currentIndex)
+                            currentIndex = Qt.binding(() => backend.pinMode)
+                        }
+                    }
+                    Controls.Label {
+                        text: ["A screen on your head rides on the headset: it moves with every turn, look and tilt.",
+                               "A screen on your head turns and walks with you but stays level: looking up or down, "
+                               + "tilting your head, or crouching leaves it where it is.",
+                               "A screen on your head moves with you as you walk but doesn't turn: like a ball round "
+                               + "you, it keeps its height and faces the same way in the room, so turn your head to see "
+                               + "the ones beside or behind you."][Math.max(0, Math.min(2, backend.pinMode))]
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     }
                     RowLayout {
                         Kirigami.FormData.label: "Wrist screens show within:"
@@ -957,6 +1207,93 @@ Kirigami.ApplicationWindow {
                           + "is now, like a HUD, and shows whenever the screens do. Grab its bar to move it; it stays on "
                           + "your head where you let go. Choosing a pin above keeps the screen where it is now, so place "
                           + "it first. Save as profile… (Layout) keeps pins."
+                }
+
+                Kirigami.FormLayout {
+                    Layout.fillWidth: true
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Notifications" }
+
+                    Repeater {
+                        model: [
+                            { value: "auto", text: "Show them in the Steam session", help: "The desktop's notifications go to the Steam session's notification server, such as one that shows them in VR, with their buttons. Plasma's own popups stay off meanwhile; its history keeps them. Not to SteamOS's own server, which can't show them on the Frame." },
+                            { value: "on", text: "Always send them to the Steam session", help: "Whatever serves notifications there, SteamOS's own server too, which can't show them on the Frame: they're lost then." },
+                            { value: "off", text: "Keep them in the desktop", help: "Plasma shows them on the desktop's screens." }
+                        ]
+                        delegate: ColumnLayout {
+                            required property var modelData
+                            spacing: 0
+                            // "on" can lose them (SteamOS's server): set in frametop.conf, shown only then
+                            visible: modelData.value !== "on" || backend.notifyForward === "on"
+                            Controls.RadioButton {
+                                text: modelData.text
+                                checked: backend.notifyForward === modelData.value
+                                onToggled: if (checked) backend.setNotifyForward(modelData.value)
+                            }
+                            Controls.Label {
+                                text: modelData.help
+                                opacity: 0.7
+                                font: Kirigami.Theme.smallFont
+                                leftPadding: Kirigami.Units.gridUnit * 1.6
+                                wrapMode: Text.Wrap
+                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                            }
+                        }
+                    }
+                    Controls.Label {
+                        Kirigami.FormData.label: "Now:"
+                        visible: backend.desktopRunning
+                        text: backend.notifyForwardState === "forwarding" ? "In the Steam session"
+                            : backend.notifyForwardState === "waiting" ? "In the desktop: the Steam session has no notification server that can show them"
+                            : "In the desktop"
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
+                    RowLayout {
+                        visible: backend.notifyRestartNeeded
+                        Controls.Label {
+                            text: "Applies when the desktop starts again."
+                            wrapMode: Text.Wrap
+                        }
+                        Controls.Button {
+                            text: "Restart desktop"
+                            icon.name: "system-reboot"
+                            onClicked: restartDialog.open()
+                        }
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Apps from the SteamVR dashboard" }
+
+                    Repeater {
+                        model: [
+                            { value: "steamvr", text: "Open as SteamVR windows", help: "Apps picked in the dashboard's Launch a program list open as SteamVR's own windows, as without Frametop." },
+                            { value: "frametop", text: "Open as Frametop floating windows", help: "They open in the Frametop desktop instead, floating in front of you (where that app last floated), so drag and drop, the clipboard, frunner and profiles work with them. When the desktop isn't running, Frametop is paused, or all floating windows are in use, they open as SteamVR windows. Steam, SteamVR and Frametop's own layout entries always stay SteamVR's." }
+                        ]
+                        delegate: ColumnLayout {
+                            required property var modelData
+                            spacing: 0
+                            Controls.RadioButton {
+                                text: modelData.text
+                                enabled: backend.floatSlots > 0
+                                checked: backend.dashboardApps === modelData.value
+                                onToggled: if (checked) backend.setDashboardApps(modelData.value)
+                            }
+                            Controls.Label {
+                                text: modelData.help
+                                opacity: 0.7
+                                font: Kirigami.Theme.smallFont
+                                leftPadding: Kirigami.Units.gridUnit * 1.6
+                                wrapMode: Text.Wrap
+                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                            }
+                        }
+                    }
+                    Controls.Label {
+                        visible: backend.floatSlots === 0
+                        text: "Floating windows are off (FLOAT_SLOTS=0 in ~/.config/frametop.conf), so these open in SteamVR."
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
                 }
             }
         }
@@ -1033,6 +1370,31 @@ Kirigami.ApplicationWindow {
                                 ? "On, unused for " + (ppage.p.unused < 60 ? Math.floor(ppage.p.unused) + " s"
                                     : Math.floor(ppage.p.unused / 60) + " min " + Math.floor(ppage.p.unused % 60) + " s")
                                 : "On"
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Startup" }
+
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Frametop desktop:"
+                        text: "Start with SteamVR"
+                        checked: backend.autostart
+                        enabled: backend.autostartInstalled || backend.autostart
+                        onToggled: {
+                            backend.setAutostart(checked)
+                            checked = Qt.binding(() => backend.autostart)
+                        }
+                    }
+                    Controls.Label {
+                        text: backend.autostartInstalled
+                              ? "The desktop starts by itself whenever SteamVR starts. The Frame starts SteamVR when it "
+                                + "boots, so this includes boot, and it brings the desktop back after a SteamVR restart. "
+                                + "Closing the desktop keeps it closed until SteamVR starts again."
+                              : "The service that does this (frametop-autostart) isn't installed: run ./install.sh again, "
+                                + "or desktops.sh install."
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     }
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Sleep" }

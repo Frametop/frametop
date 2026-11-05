@@ -1,0 +1,2480 @@
+{
+ "calpanel 0": {
+  "calls": [],
+  "changed": {},
+  "datagram": "calpanel 0",
+  "log": [],
+  "raised": null
+ },
+ "calpanel 1": {
+  "calls": [],
+  "changed": {
+   "calpanel_until": 103.0
+  },
+  "datagram": "calpanel 1",
+  "log": [],
+  "raised": null
+ },
+ "calpanel 1 2, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'calpanel'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "calpanel 1 2",
+  "log": [],
+  "raised": null
+ },
+ "calpanel other": {
+  "calls": [],
+  "changed": {},
+  "datagram": "calpanel 1",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "calpanel, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'calpanel'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "calpanel",
+  "log": [],
+  "raised": null
+ },
+ "devices": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "actions": [
+       "left",
+       "right",
+       "middle",
+       "back",
+       "scroll_up",
+       "scroll_down",
+       "dashboard",
+       "recenter",
+       "pointer_toggle",
+       "follow_toggle",
+       "gaze_toggle",
+       "gaze_precision",
+       "gaze_drag",
+       "gaze_left",
+       "gaze_right",
+       "gaze_quickcal",
+       "sens_up",
+       "sens_down",
+       "layout_reset",
+       "screens_toggle",
+       "keyboard_toggle",
+       "float_toggle",
+       "dock_all",
+       "spin_next",
+       "spin_prev",
+       "carry_toggle",
+       "steam_menu",
+       "pause_toggle",
+       "dictate",
+       "dictate_hold",
+       "frunner",
+       "hands_toggle",
+       "release_keys",
+       "key",
+       "none"
+      ],
+      "nodes": [],
+      "paused": false,
+      "pointer_mode": false,
+      "t": "devices"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "devices",
+  "log": [],
+  "raised": null
+ },
+ "devices 1, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "actions": [
+       "left",
+       "right",
+       "middle",
+       "back",
+       "scroll_up",
+       "scroll_down",
+       "dashboard",
+       "recenter",
+       "pointer_toggle",
+       "follow_toggle",
+       "gaze_toggle",
+       "gaze_precision",
+       "gaze_drag",
+       "gaze_left",
+       "gaze_right",
+       "gaze_quickcal",
+       "sens_up",
+       "sens_down",
+       "layout_reset",
+       "screens_toggle",
+       "keyboard_toggle",
+       "float_toggle",
+       "dock_all",
+       "spin_next",
+       "spin_prev",
+       "carry_toggle",
+       "steam_menu",
+       "pause_toggle",
+       "dictate",
+       "dictate_hold",
+       "frunner",
+       "hands_toggle",
+       "release_keys",
+       "key",
+       "none"
+      ],
+      "nodes": [],
+      "paused": false,
+      "pointer_mode": false,
+      "t": "devices"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "devices 1",
+  "log": [],
+  "raised": null
+ },
+ "devices unbound": {
+  "addr": "",
+  "calls": [],
+  "changed": {},
+  "datagram": "devices",
+  "log": [],
+  "raised": null
+ },
+ "empty": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command ''",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "",
+  "log": [],
+  "raised": null
+ },
+ "gamepad bad": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'gamepad'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad nope",
+  "log": [],
+  "raised": null
+ },
+ "gamepad desktop": {
+  "calls": [
+   [
+    "gamepad.screens_word",
+    [
+     "desktop",
+     100.0,
+     "a VR game runs"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad desktop",
+  "log": [],
+  "raised": null
+ },
+ "gamepad desktop 1, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'gamepad'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad desktop 1",
+  "log": [],
+  "raised": null
+ },
+ "gamepad off": {
+  "calls": [
+   [
+    "gamepad.screens_word",
+    [
+     null,
+     100.0,
+     "a VR game runs"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad off",
+  "log": [],
+  "raised": null
+ },
+ "gamepad remote, other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "gamepad remote",
+  "log": [
+   "gamepad from another user (1): ignored"
+  ],
+  "raised": null,
+  "uid": 1
+ },
+ "gamepad, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'gamepad'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad",
+  "log": [],
+  "raised": null
+ },
+ "gazeawake 0": {
+  "calls": [],
+  "changed": {},
+  "datagram": "gazeawake 0",
+  "log": [],
+  "raised": null
+ },
+ "gazeawake 1": {
+  "calls": [],
+  "changed": {
+   "pointer": [
+    false,
+    0.0,
+    112.0,
+    []
+   ]
+  },
+  "datagram": "gazeawake 1",
+  "log": [],
+  "raised": null
+ },
+ "gazeawake 1 2, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'gazeawake'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gazeawake 1 2",
+  "log": [],
+  "raised": null
+ },
+ "gazeawake no pointer": {
+  "calls": [],
+  "changed": {},
+  "datagram": "gazeawake 1",
+  "log": [],
+  "no_pointer": true,
+  "raised": null
+ },
+ "gazeawake, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'gazeawake'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gazeawake",
+  "log": [],
+  "raised": null
+ },
+ "gazewoke": {
+  "calls": [],
+  "changed": {
+   "pointer": [
+    true,
+    100.0,
+    0.0,
+    []
+   ]
+  },
+  "datagram": "gazewoke",
+  "log": [
+   "pointer on (gaze)"
+  ],
+  "raised": null
+ },
+ "gazewoke 1, arity": {
+  "calls": [],
+  "changed": {
+   "pointer": [
+    true,
+    100.0,
+    0.0,
+    []
+   ]
+  },
+  "datagram": "gazewoke 1",
+  "log": [
+   "pointer on (gaze)"
+  ],
+  "raised": null
+ },
+ "gazewoke no pointer": {
+  "calls": [],
+  "changed": {},
+  "datagram": "gazewoke",
+  "log": [],
+  "no_pointer": true,
+  "raised": null
+ },
+ "hostbye": {
+  "calls": [
+   [
+    "host_message",
+    [
+     "hostbye",
+     [
+      "hostbye",
+      "pc",
+      "mouse"
+     ],
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "hostbye pc mouse",
+  "log": [],
+  "raised": null
+ },
+ "hostbye, arity": {
+  "calls": [],
+  "changed": {},
+  "datagram": "hostbye",
+  "log": [],
+  "raised": null
+ },
+ "hostdev bad id": {
+  "calls": [],
+  "changed": {},
+  "datagram": "hostdev pc/1 mouse",
+  "log": [],
+  "raised": null
+ },
+ "hostdev bad kind": {
+  "calls": [],
+  "changed": {},
+  "datagram": "hostdev pc pad",
+  "log": [],
+  "raised": null
+ },
+ "hostdev ok": {
+  "calls": [
+   [
+    "host_message",
+    [
+     "hostdev",
+     [
+      "hostdev",
+      "pc.1",
+      "mouse",
+      "x"
+     ],
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "hostdev pc.1 mouse x",
+  "log": [],
+  "raised": null
+ },
+ "hostdev other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "hostdev pc mouse",
+  "log": [
+   "hostdev from another user (1): ignored"
+  ],
+  "raised": null,
+  "uid": 1
+ },
+ "hostdev pc, arity": {
+  "calls": [],
+  "changed": {},
+  "datagram": "hostdev pc",
+  "log": [],
+  "raised": null
+ },
+ "hostev keyboard": {
+  "calls": [
+   [
+    "host_message",
+    [
+     "hostev",
+     [
+      "hostev",
+      "pc-2",
+      "keyboard",
+      "1",
+      "30",
+      "1"
+     ],
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "hostev pc-2 keyboard 1 30 1",
+  "log": [],
+  "raised": null
+ },
+ "hostev pc, arity": {
+  "calls": [],
+  "changed": {},
+  "datagram": "hostev pc",
+  "log": [],
+  "raised": null
+ },
+ "kbhello 1 2, arity": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "screens_sock.sendto",
+    [
+     "fullkb 1",
+     "\u0000ft_control_test_screens"
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "kb": [
+    "\u0000ft_control_test_client",
+    103.0,
+    null
+   ]
+  },
+  "datagram": "kbhello 1 2",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbhello closed": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "screens_sock.sendto",
+    [
+     "fullkb 0",
+     "\u0000ft_control_test_screens"
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "kb": [
+    "\u0000ft_control_test_client",
+    103.0,
+    null
+   ]
+  },
+  "datagram": "kbhello 0",
+  "log": [
+   "Full Keyboard connected"
+  ],
+  "raised": null
+ },
+ "kbhello first": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "screens_sock.sendto",
+    [
+     "fullkb 1",
+     "\u0000ft_control_test_screens"
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "kb": [
+    "\u0000ft_control_test_client",
+    103.0,
+    null
+   ]
+  },
+  "datagram": "kbhello 1",
+  "log": [
+   "Full Keyboard connected"
+  ],
+  "raised": null
+ },
+ "kbhello other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbhello 1",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "kbhello restarted": {
+  "calls": [
+   [
+    "kb_gone",
+    [
+     "restarted"
+    ],
+    {}
+   ],
+   [
+    "kb_tell",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "screens_sock.sendto",
+    [
+     "fullkb 0",
+     "\u0000ft_control_test_screens"
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "kb": [
+    "\u0000ft_control_test_client",
+    103.0,
+    null
+   ]
+  },
+  "datagram": "kbhello",
+  "kb_addr": "\u0000old_kb",
+  "log": [
+   "Full Keyboard connected"
+  ],
+  "raised": null
+ },
+ "kbhello same": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "screens_sock.sendto",
+    [
+     "fullkb 1",
+     "\u0000ft_control_test_screens"
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "kb": [
+    "\u0000ft_control_test_client",
+    103.0,
+    null
+   ]
+  },
+  "datagram": "kbhello 1",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbhello unbound": {
+  "addr": "",
+  "calls": [],
+  "changed": {},
+  "datagram": "kbhello 1",
+  "log": [],
+  "raised": null
+ },
+ "kbkey": {
+  "calls": [],
+  "changed": {
+   "typing_queue": [
+    [
+     "key",
+     30,
+     1
+    ]
+   ]
+  },
+  "datagram": "kbkey 30 1",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbkey 30 1 2, arity": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbkey 30 1 2",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbkey 30, arity": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbkey 30",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbkey bad value": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbkey 30 2",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbkey big": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbkey 999 1",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbkey not hello'd": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbkey 30 1",
+  "log": [],
+  "raised": null
+ },
+ "kbpanel bad": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'kbpanel'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbpanel spin",
+  "log": [],
+  "raised": null
+ },
+ "kbpanel hide other": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbpanel hide",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "kbpanel show": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0,
+     "kb show"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbpanel show",
+  "log": [],
+  "raised": null
+ },
+ "kbpanel show 1, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'kbpanel'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbpanel show 1",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbpanel, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'kbpanel'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbpanel",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbpoke bad coord": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbpoke right press 0.1 x 1",
+  "log": [],
+  "raised": null
+ },
+ "kbpoke bad side": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbpoke up hover",
+  "log": [],
+  "raised": null
+ },
+ "kbpoke hover": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0,
+     "kb poke left hover"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbpoke left hover",
+  "log": [],
+  "raised": null
+ },
+ "kbpoke left, arity": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbpoke left",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbpoke other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbpoke left hover",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "kbpoke press xyz": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0,
+     "kb poke right press 0.1 -0.25 1.5"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbpoke right press 0.1 -0.25 1.5",
+  "log": [],
+  "raised": null
+ },
+ "kbpoke right press 0.1 0.2, arity": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbpoke right press 0.1 0.2",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbtext": {
+  "calls": [
+   [
+    "type_text",
+    [
+     "héllo  wörld"
+    ],
+    {
+     "quiet": true
+    }
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbtext héllo  wörld",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "kbtext other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbtext x",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "kbtext, arity": {
+  "calls": [
+   [
+    "type_text",
+    [
+     ""
+    ],
+    {
+     "quiet": true
+    }
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbtext",
+  "kb_addr": "\u0000ft_control_test_client",
+  "log": [],
+  "raised": null
+ },
+ "keyboard": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "keyboard",
+  "log": [],
+  "raised": null
+ },
+ "keyboard desktop": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "desktop_until": 103.0
+  },
+  "datagram": "keyboard desktop",
+  "log": [],
+  "raised": null
+ },
+ "keyboard desktop 1 0": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ],
+   [
+    "pause.screens_report",
+    [
+     false
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "desktop_until": 103.0,
+   "shown_until": 103.0
+  },
+  "datagram": "keyboard desktop 1 0",
+  "log": [],
+  "raised": null
+ },
+ "keyboard desktop 1 0, other user": {
+  "calls": [],
+  "changed": {
+   "desktop_until": 103.0,
+   "shown_until": 103.0
+  },
+  "datagram": "keyboard desktop 1 0",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "keyboard desktop 1 0, paused": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ],
+   [
+    "pause.screens_report",
+    [
+     false
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "shown_until": 103.0
+  },
+  "datagram": "keyboard desktop 1 0",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "keyboard desktop 1 1": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ],
+   [
+    "pause.screens_report",
+    [
+     true
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "desktop_until": 103.0,
+   "shown_until": 103.0
+  },
+  "datagram": "keyboard desktop 1 1",
+  "log": [],
+  "raised": null
+ },
+ "keyboard desktop 1 1, other user": {
+  "calls": [],
+  "changed": {
+   "desktop_until": 103.0,
+   "shown_until": 103.0
+  },
+  "datagram": "keyboard desktop 1 1",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "keyboard desktop 1 1, paused": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ],
+   [
+    "pause.screens_report",
+    [
+     true
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "shown_until": 103.0
+  },
+  "datagram": "keyboard desktop 1 1",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "keyboard desktop, other user": {
+  "calls": [],
+  "changed": {
+   "desktop_until": 103.0
+  },
+  "datagram": "keyboard desktop",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "keyboard desktop, paused": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "keyboard desktop",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "keyboard steam 0": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "keyboard steam 0",
+  "log": [],
+  "raised": null
+ },
+ "keyboard steam 0, other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "keyboard steam 0",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "keyboard steam 0, paused": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "keyboard steam 0",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "keyboard, other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "keyboard",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "keyboard, paused": {
+  "calls": [
+   [
+    "pause.screens_seen",
+    [
+     4242
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "keyboard",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "pause ?": {
+  "calls": [
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause ?",
+  "log": [],
+  "raised": null
+ },
+ "pause ? unbound": {
+  "addr": "",
+  "calls": [],
+  "changed": {},
+  "datagram": "pause ?",
+  "log": [],
+  "raised": null
+ },
+ "pause bad": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'pause'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause sideways",
+  "log": [],
+  "raised": null
+ },
+ "pause bare": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'pause'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause",
+  "log": [],
+  "raised": null
+ },
+ "pause defer remote": {
+  "calls": [
+   [
+    "pause.defer_remote",
+    [],
+    {}
+   ],
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause defer remote",
+  "log": [],
+  "raised": null
+ },
+ "pause enforce": {
+  "calls": [
+   [
+    "pause.desktop_started",
+    [],
+    {}
+   ],
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause enforce",
+  "log": [],
+  "raised": null
+ },
+ "pause enforce unbound": {
+  "addr": "",
+  "calls": [
+   [
+    "pause.desktop_started",
+    [],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause enforce",
+  "log": [],
+  "raised": null
+ },
+ "pause enforce, other user": {
+  "calls": [
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause enforce",
+  "log": [
+   "pause enforce from another user (1): ignored"
+  ],
+  "raised": null,
+  "uid": 1
+ },
+ "pause off gesture": {
+  "calls": [
+   [
+    "pause.set",
+    [
+     false,
+     "gesture",
+     100.0
+    ],
+    {}
+   ],
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause off gesture",
+  "log": [],
+  "raised": null
+ },
+ "pause on": {
+  "calls": [
+   [
+    "pause.set",
+    [
+     true,
+     "command",
+     100.0
+    ],
+    {}
+   ],
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause on",
+  "log": [],
+  "raised": null
+ },
+ "pause on off, arity": {
+  "calls": [
+   [
+    "pause.set",
+    [
+     true,
+     "off",
+     100.0
+    ],
+    {}
+   ],
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause on off",
+  "log": [],
+  "raised": null
+ },
+ "pause on, other user": {
+  "calls": [
+   [
+    "pause.set",
+    [
+     true,
+     "command",
+     100.0
+    ],
+    {}
+   ],
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause on",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "pause toggle": {
+  "calls": [
+   [
+    "pause.toggle",
+    [
+     "command",
+     100.0
+    ],
+    {}
+   ],
+   [
+    "pause.status",
+    [],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "paused": false,
+      "t": "pause"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "pause toggle",
+  "log": [],
+  "raised": null
+ },
+ "reload": {
+  "calls": [
+   [
+    "load_config",
+    [],
+    {}
+   ],
+   [
+    "apply_roles",
+    [],
+    {}
+   ],
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "t": "reloaded"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "reload",
+  "log": [],
+  "raised": null
+ },
+ "reload 1, arity": {
+  "calls": [
+   [
+    "load_config",
+    [],
+    {}
+   ],
+   [
+    "apply_roles",
+    [],
+    {}
+   ],
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "t": "reloaded"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "reload 1",
+  "log": [],
+  "raised": null
+ },
+ "reload no pointer": {
+  "calls": [
+   [
+    "load_config",
+    [],
+    {}
+   ],
+   [
+    "apply_roles",
+    [],
+    {}
+   ],
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "t": "reloaded"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "reload",
+  "log": [],
+  "no_pointer": true,
+  "raised": null
+ },
+ "textfield 0": {
+  "calls": [
+   [
+    "text_field",
+    [
+     false
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "text_input_until": 107.0
+  },
+  "datagram": "textfield 0",
+  "log": [],
+  "raised": null
+ },
+ "textfield 1": {
+  "calls": [
+   [
+    "text_field",
+    [
+     true
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "text_input": "\u0000ft_control_test_client",
+   "text_input_until": 107.0
+  },
+  "datagram": "textfield 1",
+  "log": [],
+  "raised": null
+ },
+ "textfield 1 renew": {
+  "calls": [],
+  "changed": {
+   "text_input": "\u0000ft_control_test_client",
+   "text_input_until": 107.0
+  },
+  "datagram": "textfield 1 renew",
+  "log": [],
+  "raised": null
+ },
+ "textfield 1 renew 2, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'textfield'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "textfield 1 renew 2",
+  "log": [],
+  "raised": null
+ },
+ "textfield 1 unbound": {
+  "addr": "",
+  "calls": [
+   [
+    "text_field",
+    [
+     true
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "text_input_until": 107.0
+  },
+  "datagram": "textfield 1",
+  "log": [],
+  "raised": null
+ },
+ "textfield 1, other user": {
+  "calls": [
+   [
+    "text_field",
+    [
+     true
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "textfield 1",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "textfield bad": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'textfield'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "textfield 2",
+  "log": [],
+  "raised": null
+ },
+ "textfield, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'textfield'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "textfield",
+  "log": [],
+  "raised": null
+ },
+ "type": {
+  "calls": [
+   [
+    "type_text",
+    [
+     "hello there"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "type hello there",
+  "log": [],
+  "raised": null
+ },
+ "type other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "type hi",
+  "log": [
+   "type from another user (1): ignored"
+  ],
+  "raised": null,
+  "uid": 1
+ },
+ "type, arity": {
+  "calls": [
+   [
+    "type_text",
+    [
+     ""
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "type",
+  "log": [],
+  "raised": null
+ },
+ "unknown, bound": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'frobnicate'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "frobnicate 1",
+  "log": [],
+  "raised": null
+ },
+ "unknown, unbound": {
+  "addr": "",
+  "calls": [],
+  "changed": {},
+  "datagram": "frobnicate 1",
+  "log": [],
+  "raised": null
+ },
+ "vrbtn bad button": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrbtn'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrbtn left/nose 1",
+  "log": [],
+  "raised": null
+ },
+ "vrbtn bad value": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrbtn'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrbtn left/view 2",
+  "log": [],
+  "raised": null
+ },
+ "vrbtn left/view 1 2, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrbtn'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrbtn left/view 1 2",
+  "log": [],
+  "raised": null
+ },
+ "vrbtn ok": {
+  "calls": [
+   [
+    "vr_button",
+    [
+     "left/view",
+     1,
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrbtn left/view 1",
+  "log": [],
+  "raised": null
+ },
+ "vrbtn release": {
+  "calls": [
+   [
+    "vr_button",
+    [
+     "right/a",
+     0,
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrbtn right/a 0",
+  "log": [],
+  "raised": null
+ },
+ "vrbtn short": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrbtn'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrbtn left/view",
+  "log": [],
+  "raised": null
+ },
+ "vrcapture": {
+  "calls": [
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "seconds": 30,
+      "t": "vrcapture"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "vr_capture_until": 130.0
+  },
+  "datagram": "vrcapture",
+  "log": [],
+  "raised": null
+ },
+ "vrcapture 0": {
+  "calls": [
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "seconds": 0.0,
+      "t": "vrcapture"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrcapture 0",
+  "log": [],
+  "raised": null
+ },
+ "vrcapture 1 2, arity": {
+  "calls": [
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "seconds": 1.0,
+      "t": "vrcapture"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "vr_capture_until": 101.0
+  },
+  "datagram": "vrcapture 1 2",
+  "log": [],
+  "raised": null
+ },
+ "vrcapture long": {
+  "calls": [
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "seconds": 500.0,
+      "t": "vrcapture"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "vr_capture_until": 220.0
+  },
+  "datagram": "vrcapture 500",
+  "log": [],
+  "raised": null
+ },
+ "vrdash 0": {
+  "calls": [
+   [
+    "pause.dashboard_state",
+    [
+     false
+    ],
+    {}
+   ],
+   [
+    "gamepad.dashboard_state",
+    [
+     false
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrdash 0",
+  "log": [],
+  "raised": null
+ },
+ "vrdash 1": {
+  "calls": [
+   [
+    "pause.dashboard_state",
+    [
+     true
+    ],
+    {}
+   ],
+   [
+    "gamepad.dashboard_state",
+    [
+     true
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrdash 1",
+  "log": [],
+  "raised": null
+ },
+ "vrdash long": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrdash'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrdash 1 2",
+  "log": [],
+  "raised": null
+ },
+ "vrdash, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrdash'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrdash",
+  "log": [],
+  "raised": null
+ },
+ "vrgame 0": {
+  "calls": [
+   [
+    "pause.game_state",
+    [
+     false,
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrgame 0",
+  "log": [],
+  "raised": null
+ },
+ "vrgame 1": {
+  "calls": [
+   [
+    "gamepad.stop",
+    [
+     "a VR game started"
+    ],
+    {}
+   ],
+   [
+    "pause.game_state",
+    [
+     true,
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrgame 1",
+  "log": [],
+  "raised": null
+ },
+ "vrgame 1 2, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrgame'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrgame 1 2",
+  "log": [],
+  "raised": null
+ },
+ "vrgame bare": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrgame'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrgame",
+  "log": [],
+  "raised": null
+ },
+ "vrhello": {
+  "calls": [
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "pause.helper_started",
+    [],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrhello",
+  "log": [],
+  "raised": null
+ },
+ "vrhello 1, arity": {
+  "calls": [
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "pause.helper_started",
+    [],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrhello 1",
+  "log": [],
+  "raised": null
+ },
+ "vrhello unbound": {
+  "addr": "",
+  "calls": [
+   [
+    "vr_bind",
+    [
+     100.0
+    ],
+    {}
+   ],
+   [
+    "pause.helper_started",
+    [],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrhello",
+  "log": [],
+  "raised": null
+ },
+ "vrpad 1 0 0 0 0 0 0 0, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrpad'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrpad 1 0 0 0 0 0 0 0",
+  "log": [],
+  "raised": null
+ },
+ "vrpad junk": {
+  "calls": [],
+  "changed": {},
+  "datagram": "vrpad a b c d e f g",
+  "log": [],
+  "raised": null
+ },
+ "vrpad ok": {
+  "calls": [
+   [
+    "gamepad.reader_state",
+    [
+     [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrpad 1 0 0 0 0 0 0",
+  "log": [],
+  "raised": null
+ },
+ "vrpad other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "vrpad 1 0 0 0 0 0 0",
+  "log": [
+   "vrpad from another user (1): ignored"
+  ],
+  "raised": null,
+  "uid": 1
+ },
+ "vrpad short": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrpad'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrpad 1 0",
+  "log": [],
+  "raised": null
+ },
+ "vrpad, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrpad'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrpad",
+  "log": [],
+  "raised": null
+ },
+ "watch": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "seconds": 30,
+      "t": "watching"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "watchers": {
+    "\u0000ft_control_test_client": 130.0
+   }
+  },
+  "datagram": "watch",
+  "log": [],
+  "raised": null
+ },
+ "watch 5": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "seconds": 5.0,
+      "t": "watching"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "watchers": {
+    "\u0000ft_control_test_client": 105.0
+   }
+  },
+  "datagram": "watch 5",
+  "log": [],
+  "raised": null
+ },
+ "watch 5 6, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "seconds": 5.0,
+      "t": "watching"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "watchers": {
+    "\u0000ft_control_test_client": 105.0
+   }
+  },
+  "datagram": "watch 5 6",
+  "log": [],
+  "raised": null
+ },
+ "watch junk": {
+  "calls": [],
+  "changed": {},
+  "datagram": "watch x",
+  "log": [],
+  "raised": "ValueError"
+ },
+ "watch long": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "seconds": 9999.0,
+      "t": "watching"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {
+   "watchers": {
+    "\u0000ft_control_test_client": 700.0
+   }
+  },
+  "datagram": "watch 9999",
+  "log": [],
+  "raised": null
+ }
+}

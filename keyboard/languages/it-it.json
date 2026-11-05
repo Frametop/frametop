@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "it-it",
+  "name": "Italiano",
+  "locale": "it-IT",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "it",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans",
+    "sans-serif"
+  ],
+  "required_keys": [
+    "IntlBackslash"
+  ]
+}

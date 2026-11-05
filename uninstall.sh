@@ -16,7 +16,7 @@
 #      now keeps running until you restart the headset.
 #   2. After the restart, run it again. It deletes the code (~/frametop, or the releases in
 #      ~/.local/share/frametop/releases with their containers and images) and, if you want, your
-#      settings and the build container.
+#      settings, voice dictation's speech models, and the build container.
 # When nothing of Frametop is running, one run does both.
 #
 # Options (piped, they go after "bash -s --"):
@@ -41,6 +41,10 @@ driver=$HOME/.local/share/frametop/ft_pointer
 releases=$HOME/.local/share/frametop/releases  # pack/install-release.sh
 vrpathreg=/opt/steamvr/bin/linuxarm64/vrpathreg
 handsctl=$HOME/.local/bin/ft-handsctl
+cmd_link=$HOME/.local/bin/ft-cmd  # commands/ft_commands.py: the relay links it, and your commands' aliases call it
+bashrc_mark='# Frametop commands as shell aliases'  # ...and ~/.bashrc's two lines that read those aliases
+eye_rate=$HOME/.local/state/frametop/gaze/steamvr-eye-rate  # gaze/eye-rate.py turned the setting on
+dash_debugger=$HOME/.local/state/frametop/pointer/dashboard-debugger  # pointer/dashpatch/ft-dashpatch.py turned it on
 eyegrab_files=(/etc/systemd/system/frametop-eyegrab.service /etc/frametop/ft-eyegrab
                /etc/atomic-update.conf.d/frametop-eyegrab.conf)
 bt_files=(/etc/systemd/system/steamframe-bt-fixups.service /etc/systemd/system/bluetooth.service.d/steamframe.conf
@@ -73,10 +77,17 @@ find_repo() {
   echo "${p:-$HOME/frametop}"
 }
 
+# Frametop's menu entries in DIR, one a line: every ft-*.desktop and frametop-*.desktop (the apps,
+# the recorders, the gaze bench, and one frametop-profile-* per layout profile), and nothing else.
+desktop_entries() {
+  local f
+  for f in "$1"/ft-*.desktop "$1"/frametop-*.desktop; do printf '%s\n' "$f"; done
+}
+
 # Frametop's programs that are running now (step 1 leaves them running until the restart).
 running() {
   local n out=()
-  for n in ft-screens ft-pointer ft-powerd ft-eyegrab ft-camd ft-hands; do
+  for n in ft-screens ft-pointer ft-powerd ft-eyegrab ft-camd ft-hands ft-voiced whisper-server framekeyboard; do
     pgrep -x "$n" >/dev/null && out+=("$n")
   done
   pgrep -f '[i]nput/input-relay\.py' >/dev/null && out+=("input relay")
@@ -86,7 +97,7 @@ running() {
 }
 
 main() {
-  local units=() entries=() names=() sys=0 repo now f
+  local units=() entries=() names=() sys=0 bashrc_lines=0 repo now f
   while [ $# -gt 0 ]; do
     case $1 in
       --dir) dir=${2:?--dir needs a folder}; shift ;;
@@ -114,16 +125,16 @@ main() {
   [ -f "$override" ] && grep -q 'Frametop' "$override" || override=
   [ -f "$native_copy" ] || native_copy=
   units=("$HOME"/.config/systemd/user/frametop-*.service)
-  for f in ft-input-settings ft-display-settings ft-remote-displays ft-layout-reset ft-screens-toggle ft-remote-settings ft-gazeprobe; do
-    [ -e "$apps/$f.desktop" ] && entries+=("$apps/$f.desktop")
-  done
-  [ -e "$apps/frametop-handrec.desktop" ] && entries+=("$apps/frametop-handrec.desktop")
-  entries+=("$apps"/frametop-profile-*.desktop)  # one per layout profile (layout/ft_layout.py)
+  mapfile -t entries < <(desktop_entries "$apps")
   [ -L "$handsctl" ] || handsctl=
+  [ -L "$cmd_link" ] || cmd_link=
+  grep -qF "$bashrc_mark" "$HOME/.bashrc" 2>/dev/null && bashrc_lines=1
+  [ -f "$eye_rate" ] && [ -f "$repo/gaze/eye-rate.py" ] || eye_rate=
+  [ -f "$dash_debugger" ] && [ -f "$repo/pointer/dashpatch/ft-dashpatch.py" ] || dash_debugger=
   exists "${eyegrab_files[@]}" "${bt_files[@]}" && sys=1
 
   if [ -n "$override" ] || [ -n "$native_copy" ] || [ ${#units[@]} -gt 0 ] || [ ${#entries[@]} -gt 0 ] ||
-     [ -d "$driver" ] || [ -n "$handsctl" ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ]; then
+     [ -d "$driver" ] || [ -n "$handsctl" ] || [ -n "$cmd_link" ] || [ "$bashrc_lines" = 1 ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] || [ -n "$eye_rate" ] || [ -n "$dash_debugger" ]; then
     step "Step 1 of 2: stop Frametop from starting"
     echo "This removes:"
     [ -n "$override" ] && echo "  - the launcher's Desktop entry (Launch a program -> Desktop opens the stock desktop again)"
@@ -132,6 +143,10 @@ main() {
     [ -d "$driver" ] && echo "  - the 3D mouse's SteamVR driver (ft_pointer)"
     [ ${#entries[@]} -gt 0 ] && echo "  - ${#entries[@]} menu entries (Frametop Display Settings, Input Settings, ...)"
     [ -n "$handsctl" ] && echo "  - $handsctl"
+    [ -n "$cmd_link" ] && echo "  - $cmd_link (your commands' aliases stop working)"
+    [ "$bashrc_lines" = 1 ] && echo "  - the two lines in ~/.bashrc that read your commands' aliases"
+    [ -n "$eye_rate" ] && echo "  - gaze mode's SteamVR setting for 90 fps eye cameras (steamvr.gazeDepEyeToHeadEnable)"
+    [ -n "$dash_debugger" ] && echo "  - SteamVR's dashboard debugger, which the 3D mouse's window moves use (VRWebHelper.DebuggerEnabled)"
     [ -n "$camd_caps" ] && echo "  - the hand camera broker's file capabilities (needs your password)"
     exists "${eyegrab_files[@]}" && echo "  - our eye tracker's frame grabber (a system service: needs your password)"
     exists "${bt_files[@]}" && echo "  - the Bluetooth fixes (system files: needs your password)"
@@ -156,6 +171,12 @@ main() {
     fi
     [ ${#entries[@]} -gt 0 ] && run rm -f "${entries[@]}"
     [ -n "$handsctl" ] && run rm -f "$handsctl"
+    [ -n "$cmd_link" ] && run rm -f "$cmd_link"
+    [ "$bashrc_lines" = 1 ] && run sed -i "/^$bashrc_mark/{N;/aliases\.sh\$/d}" "$HOME/.bashrc"
+    [ -n "$eye_rate" ] && { run python3 "$repo/gaze/eye-rate.py" off ||
+      echo "warning: SteamVR's eye camera setting stays on. Turn it off with: python3 $repo/gaze/eye-rate.py off" >&2; }
+    [ -n "$dash_debugger" ] && { run python3 -I "$repo/pointer/dashpatch/ft-dashpatch.py" off ||
+      echo "warning: SteamVR's dashboard debugger stays on. Turn it off with: python3 -I $repo/pointer/dashpatch/ft-dashpatch.py off" >&2; }
     if [ "$sys" = 1 ]; then
       echo "The system files need your password (sudo)."
       # $1 is ft-camd when it has capabilities to remove, else empty; the system files follow.
@@ -239,14 +260,15 @@ main() {
 
   # Rebuilt by the desktop at each start, so nothing to keep.
   run rm -rf "$HOME/.local/share/frametop/apps" "$HOME/.local/share/kwin/decorations/kwin4_decoration_qml_frametop" \
-    "$HOME/.cache/frametop"
+    "$HOME/.cache/frametop" "$HOME/.cache/frametop-framedrop"
 
   local settings=("$HOME"/.config/frametop.conf* "$HOME"/.config/frametop-*.json* "$HOME/.config/frametop-remote"
-                  "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream")
+                  "$HOME/.config/frametop-keyboard" "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream"
+                  "$HOME/.local/state/frametop-trial")
   local kept=()
   for f in "${settings[@]}"; do [ -e "$f" ] && kept+=("$f"); done
   if [ ${#kept[@]} -gt 0 ]; then
-    echo "Your settings: the screen layout and profiles, button maps, gaze calibration, the remote"
+    echo "Your settings: the screen layout and profiles, button maps, the keyboard's, gaze calibration, the remote"
     echo "desktop password, the remote displays' pairings and sign-ins (their computers keep Frametop's"
     echo "clients and token until you remove them in their Web UI), and the Frametop desktop's own Plasma"
     echo "setup (${kept[*]/#$HOME/\~})."
@@ -254,13 +276,21 @@ main() {
       run rm -rf "${kept[@]}"
   fi
 
+  # Frametop Voice's speech models (voice/models.sh): downloaded again by an install.
+  if [ -d "$HOME/.local/share/frametop/voice" ]; then
+    ask "Delete voice dictation's speech models ($(size "$HOME/.local/share/frametop/voice"); an install downloads them again)?" y &&
+      run rm -rf "$HOME/.local/share/frametop/voice"
+  fi
+
   local recs=()
-  for f in "$HOME/.local/share/frametop/eyes" "$HOME/.local/share/frametop/hands"; do [ -e "$f" ] && recs+=("$f"); done
+  for f in "$HOME/.local/share/frametop/eyes" "$HOME/.local/share/frametop/hands" "$HOME/.local/share/frametop/gaze/bench"; do
+    [ -e "$f" ] && recs+=("$f")
+  done
   if [ ${#recs[@]} -gt 0 ]; then
-    ask "Delete your eye and hand recordings in ~/.local/share/frametop ($(size "${recs[@]}"))?" n &&
+    ask "Delete your eye and hand recordings and gaze bench runs in ~/.local/share/frametop ($(size "${recs[@]}"))?" n &&
       run rm -rf "${recs[@]}"
   fi
-  [ "$dry" = 1 ] || rmdir "$HOME/.local/share/frametop" 2>/dev/null || true
+  [ "$dry" = 1 ] || rmdir "$HOME/.local/share/frametop/gaze" "$HOME/.local/share/frametop" 2>/dev/null || true
 
   if command -v podman >/dev/null && podman container exists dev 2>/dev/null; then
     echo "The build container (dev) holds Frametop's compilers and libraries, 1-2 GB. If you put"
@@ -278,4 +308,6 @@ main() {
 }
 
 dir=
+# Sourced (scripts/tests/test_uninstall.py), it only defines the functions: return works only then.
+(return 0 2>/dev/null) && return 0
 main "$@"

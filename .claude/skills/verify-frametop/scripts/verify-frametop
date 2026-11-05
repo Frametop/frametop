@@ -1,0 +1,691 @@
+#!/usr/bin/python3
+"""verify-frametop: launch, check, snapshot and clean up a verification run on the live Frame.
+
+  verify-frametop doctor               is this Frame worth driving? (exit 0 yes,
+                                       1 not ready, 2 the headset is worn: refuse)
+  verify-frametop launch [NAME] [--allow-host-input]
+                                       doctor, then claim the run (one at a time) and make its
+                                       evidence folder with a baseline; prints the folder.
+                                       Refuses while a remote display streams from a host that
+                                       lends Frametop its keyboard and mouse, unless
+                                       --allow-host-input (only once the user allows it)
+  verify-frametop guard                before each drive step: exit 0 while nobody wears the
+                                       headset; otherwise clean up at once and exit 2 (worn),
+                                       1 (the sensor can't be read) or 3 (a host that lends its
+                                       keyboard and mouse started streaming, and the run wasn't
+                                       allowed to take them)
+  verify-frametop snapshot LABEL [--capture]
+                                       guard, then the run's readbacks (testbench status, pointer
+                                       state, visible overlays, display power, the gaze service,
+                                       host input: streams, input lock holders, ft-stream's
+                                       hostinput log lines) into RUN/LABEL/, and with --capture a compositor capture
+                                       (needs `worn on` and a head pose facing the panels)
+  verify-frametop stream HOST [--display CLIENT] [--seconds N] [--allow-host-input] [--mic-bursts]
+                                       guard, then one remote display of HOST (a layout name or
+                                       address; its first display, or CLIENT) for N seconds
+                                       (default 20) through the release's ft-stream in the
+                                       Frametop container, with a fake viewer in place of
+                                       ft-screens, into RUN/stream-CLIENT-TIME/. The viewer holds
+                                       the host's input lock as long as it runs, so this stream
+                                       can't lease the host's keyboard and mouse, unless
+                                       --allow-host-input
+                                       (only once the user allows it). It connects to the host:
+                                       only for a host the user allowed in this session.
+                                       --mic-bursts: ft-stream records a pipe source that gets
+                                       a 1 kHz burst each second once it records (logged to
+                                       bursts.txt); the host needs "mic": true. Record the host's
+                                       virtual microphone meanwhile, then scripts/mic-latency
+                                       gives the latency
+  verify-frametop cleanup [RUN] [--force]
+                                       release every testbench override, compositor auto,
+                                       displays back on and gaze mode back as the run found
+                                       them, free the run; the evidence stays. A run under way
+                                       is only cleaned up by naming it (the folder launch
+                                       printed), or with --force
+  verify-frametop ask NAME MESSAGE [--listen SECONDS]
+                                       one datagram to a Frametop socket (@NAME), print the
+                                       reply (`ask ft_gazed 'wake 90'`), or with --listen every
+                                       reply for that long (`ask frametop_relay 'watch 5' --listen 5`)
+
+A faked wearer (`worn on`) makes ft-stream lease a streamed host's own keyboard and mouse
+(docs/host-input.md): the testbench refuses `worn on` while such a stream is live, and otherwise
+holds every such host's input lock in a guard while the wearer is faked, unless it was given
+--allow-host-input; launch and guard hold the run to the same. Doctor changes nothing, except
+that its `T host-input` releases a faked wearer whose guard has gone.
+
+A run is claimed for LEASE seconds from its last launch, guard or snapshot, so two agents
+don't drive the one headset at once; its cleanup frees it.
+
+There is one Frametop: the user's live desktop on this headset. Nothing here starts, stops or
+restarts it, SteamVR or a Frametop service. Evidence goes in testbench/artifacts/verify/
+(gitignored); it can show the desktop, so it stays on this machine.
+"""
+import fcntl
+import json
+import math
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[4]
+TESTBENCH = ROOT / 'testbench' / 'frame-testbench'
+EVIDENCE = ROOT / 'testbench' / 'artifacts' / 'verify'
+RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'))
+LOCK = RUNTIME / 'verify-frametop.json'
+UNITS = ('frametop-desktop', 'frametop-input-relay', 'frametop-pointer', 'frametop-gaze',
+         'frametop-power')
+HANDS = 'frametop-hands'   # hand tracking is opt-in: only the hands recipes need it
+SOCKETS = ('frametop_relay', 'ft_pointer_helper', 'ft_powerd', 'ft_gazed')
+RELEASES = Path.home() / '.local/share/frametop/releases'
+LAYOUT = Path.home() / '.config/frametop-layout.json'
+VIEWER = Path(__file__).resolve().parent / 'fake-viewer'
+BURSTS = Path(__file__).resolve().parent / 'mic-bursts'
+MIC_SOURCE = 'frametop-verify-mic'
+DROP_IN = Path.home() / '.config/systemd/user/steamvr.service.d/90-frame-testbench.conf'
+LEASE = 30 * 60
+# With the displays lit, the Frame's proximity sensor reads worn for under a second every few
+# seconds while the headset lies still (20 blips of 0.4-0.8 s in 90 s, 2026-10-27; a status read
+# takes about 0.5 s). A worn reading counts as a blip only once STILL_READS reads in a row say
+# not worn and the headset hasn't moved; WORN_READS in a row say worn, and so does anything
+# undecided after SETTLE_READS reads.
+SETTLE_READS, SETTLE_GAP, WORN_READS, STILL_READS = 6, 0.2, 3, 2
+MOVED_M, MOVED_DEG = 0.01, 2.0   # the real pose drifted under 2 cm and 7 degrees in 90 s
+
+
+def bench(*args, timeout=60):
+    """A testbench CLI command's JSON reply, or {'ok': False, 'error': ...}."""
+    try:
+        done = subprocess.run([str(TESTBENCH), *args], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'error': f'frame-testbench {" ".join(args)} timed out'}
+    except OSError as error:
+        return {'ok': False, 'error': f'frame-testbench: {error}'}
+    try:
+        return json.loads(done.stdout)
+    except ValueError:
+        return {'ok': False, 'error': (done.stderr or done.stdout).strip()[-300:] or f'exit {done.returncode}'}
+
+
+def ask(name, message, timeout=2.0, listen=0.0):
+    """The reply to one datagram, or with listen every reply for that many seconds, one a line."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    s.bind('')
+    s.settimeout(timeout)
+    replies = []
+    try:
+        s.sendto(message.encode(), '\0' + name)
+        replies.append(s.recv(65536).decode(errors='replace'))
+        end = time.monotonic() + listen
+        while time.monotonic() < end:
+            s.settimeout(max(end - time.monotonic(), 0.01))
+            try:
+                replies.append(s.recv(65536).decode(errors='replace'))
+            except TimeoutError:
+                break
+    except OSError as error:
+        replies.append(f'error {error.__class__.__name__}')
+    finally:
+        s.close()
+    return '\n'.join(replies)
+
+
+def listening():
+    with open('/proc/net/unix') as f:
+        return {line.split()[-1][1:] for line in f if line.split()[-1].startswith('@')}
+
+
+def running(name):
+    return subprocess.run(['pgrep', '-x', name], capture_output=True).returncode == 0
+
+
+def unit_states():
+    names = (*UNITS, HANDS)
+    states = subprocess.run(['systemctl', '--user', 'is-active', *names], capture_output=True, text=True).stdout.split()
+    return dict(zip(names, states + ['unknown'] * (len(names) - len(states))))
+
+
+def git(*args):
+    return subprocess.run(['git', '-C', str(ROOT), *args], capture_output=True, text=True).stdout.strip()
+
+
+def lock_holder():
+    try:
+        text = LOCK.read_text()
+        idle = time.time() - LOCK.stat().st_mtime
+    except OSError:
+        return None
+    try:
+        held = json.loads(text)
+    except ValueError:
+        held = None   # garbled, or a launch between creating it and writing it
+    if not isinstance(held, dict) or not isinstance(held.get('run'), str):
+        held = {'run': None}
+    held['stale'] = idle > LEASE   # nobody touched the run for a while: it can be taken over
+    return held
+
+
+def moved(a, b):
+    """Whether the real headset moved between two physical poses (or either is unknown)."""
+    try:
+        if not (a['valid'] and b['valid']):
+            return True
+        shift = math.dist(a['position'], b['position'])
+        qa, qb = a['quaternion'], b['quaternion']
+        norms = math.hypot(*qa) * math.hypot(*qb)
+        dot = min(1.0, abs(sum(x * y for x, y in zip(qa, qb))) / norms)
+        return shift > MOVED_M or math.degrees(2 * math.acos(dot)) > MOVED_DEG
+    except (TypeError, KeyError, ValueError, ZeroDivisionError):
+        return True   # a missing or non-finite value (the proxy writes null for those)
+
+
+def worn_now():
+    """The proximity sensor's reading (True, False, None unread) past its blips, and the status."""
+    status = bench('status', timeout=20)
+    released = status.get('worn_released')   # the testbench dropped a faked wearer whose guard had gone
+    proxy = status.get('input') or {}
+    if proxy.get('physical_worn') is not True:
+        return proxy.get('physical_worn'), status
+    first, worn_in_row, still_in_row = proxy.get('physical_pose'), 1, 0
+    for _ in range(SETTLE_READS):
+        time.sleep(SETTLE_GAP)
+        status = bench('status', timeout=20)
+        proxy = status.get('input') or {}
+        worn = proxy.get('physical_worn')
+        if worn is None:
+            return None, status
+        if moved(first, proxy.get('physical_pose')):
+            return True, status   # someone has it
+        worn_in_row, still_in_row = (worn_in_row + 1, 0) if worn else (0, still_in_row + 1)
+        if worn_in_row >= WORN_READS:
+            return True, status
+        if still_in_row >= STILL_READS:
+            status['blip'] = True   # for the reader: the sensor blinked, the headset lay still
+            if released:
+                status['worn_released'] = released
+            return False, status
+    return True, status   # flapping: count it as worn
+
+
+def host_input():
+    """The testbench's host-input readback: live streams from hosts that lend their input."""
+    return bench('host-input', timeout=20)
+
+
+def host_input_check(state):
+    """(ok, detail) for the doctor: no stream from a host that lends its keyboard and mouse."""
+    if not state.get('ok'):
+        return False, f'unread: {state.get("error")}'
+    if state.get('worn_released') or (state.get('fake_worn') and not state.get('guarded')):
+        return False, ("a faked wearer has no guard holding the hosts' input locks: "
+                       'verify-frametop cleanup')
+    live = state.get('input_streams') or []
+    if not live:
+        return True, 'none' + (f' (lends input: {", ".join(state["input_hosts"])}; not streaming)'
+                               if state.get('input_hosts') else '')
+    return False, ('a faked wearer would take the keyboard and mouse of '
+                   + ', '.join(sorted({s.get("name") or s.get("host") for s in live}))
+                   + ': wait for that stream to end, or launch --allow-host-input once the user allows it')
+
+
+def doctor():
+    checks = []
+
+    def check(name, ok, detail=''):
+        checks.append({'name': name, 'ok': bool(ok), 'detail': detail})
+        return ok
+
+    worn, status = worn_now()
+    proxy = status.get('input') or {}
+    check('headset not worn', worn is False,
+          'physically worn: stop, never drive it under someone' if worn else
+          'proximity sensor unread (no testbench proxy?)' if worn is None else
+          'proximity sensor: off the head' + (' (it blinked worn; the headset lay still)'
+                                               if status.get('blip') else ''))
+    check('SteamVR running', running('vrserver') and running('vrcompositor'))
+    check('testbench proxy', proxy.get('available') and proxy.get('proximity_ready'),
+          f'drop-in {"present" if DROP_IN.exists() else "MISSING"}: testbench/install.sh install --restart, '
+          'once the user says nobody wears the headset' if not proxy.get('available') else 'ready')
+    overrides = {k: proxy.get(k) for k in ('worn_override', 'pose_override')}
+    overrides['hmd_buttons'] = [b for b, v in (proxy.get('hmd_buttons') or {}).items()
+                                if isinstance(v, dict) and v.get('override') is not None]
+    overrides['controllers'] = [side for side, c in (proxy.get('controllers') or {}).items()
+                                if isinstance(c, dict) and (c.get('pose_override') or any((c.get('inputs') or {}).values()))]
+    overrides['fakes'] = (status.get('fakes') or {}).get('running')
+    clean = bool(proxy) and overrides['worn_override'] is None and not overrides['pose_override'] and not any(
+        overrides[k] for k in ('hmd_buttons', 'controllers', 'fakes'))
+    check('no testbench overrides left', clean,
+          'unread' if not proxy else json.dumps(overrides) if not clean else 'clean')
+    units = unit_states()
+    hands = units.pop(HANDS)
+    check('Frametop services active', all(v == 'active' for v in units.values()),
+          ', '.join(f'{u}={v}' for u, v in units.items() if v != 'active') or 'all active')
+    heard = listening()
+    check('no host-input streams', *host_input_check(host_input()))
+    check('Frametop sockets listening', all(s in heard for s in SOCKETS),
+          ', '.join('@' + s for s in SOCKETS if s not in heard) or 'all listening')
+    release = os.readlink(RELEASES / 'current') if (RELEASES / 'current').is_symlink() else None
+    head = git('rev-parse', 'HEAD')
+    try:   # scripts/fast-install's record of the commit on top of the release
+        fast_state = json.loads((RELEASES / 'current/.fast-install/state.json').read_text())
+    except (OSError, ValueError):
+        fast_state = {}
+    # an interrupted fast-install left the tree half way: no commit is installed
+    fast = '' if fast_state.get('installing') else fast_state.get('commit') or ''
+    live = f'{release}' + (f' + fast-install {fast[:7]}' if fast else
+                           ' + an interrupted fast-install' if fast_state.get('installing') else '')
+    check('Frametop release', release is not None,
+          f'{live}; this checkout is {git("branch", "--show-current") or "detached"} {head[:7]}'
+          + ('' if fast == head or (not fast_state and release and head[:7] in release)
+             else ': scripts/fast-install the change under test before driving it'))
+    check('hand tracking', hands == 'active', f'{HANDS} {hands}' + ('' if hands == 'active' else
+          ': the hands recipes need it (Frametop Input Settings, or hands/run.sh)'))
+    # Not the run's to fail: which release is live is a hint, and hand tracking is opt-in.
+    ok = all(c['ok'] for c in checks if c['name'] not in ('Frametop release', 'hand tracking'))
+    return {'ok': ok, 'worn': worn, 'run': lock_holder(), 'checks': checks}, (2 if worn else 0 if ok else 1)
+
+
+def readbacks():
+    gaze = ask('ft_gazed', 'status')
+    try:
+        gaze = json.loads(gaze)
+    except ValueError:
+        pass
+    overlays = bench('pointer', 'overlays', timeout=20)
+    if overlays.get('ok'):
+        overlays = {'ok': True, 'visible': [o['key'] for o in overlays['overlays'].get('list', []) if o.get('visible')]}
+    return {'time': datetime.now(timezone.utc).isoformat(timespec='milliseconds'),
+            'testbench': bench('status', timeout=20), 'pointer': bench('pointer', 'state', timeout=20),
+            'overlays': overlays, 'power': bench('power', 'status', timeout=20), 'gaze': gaze,
+            'host_input': host_input()}
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, indent=2) + '\n')
+
+
+def current_run():
+    holder = lock_holder()
+    if not holder or not holder['run']:
+        sys.exit('verify-frametop: no run: start one with verify-frametop launch')
+    return Path(holder['run'])
+
+
+def claim(run, allow_host_input=False):
+    """Take the lock, unless another launch got there first."""
+    with open(RUNTIME / 'verify-frametop.claim', 'w') as gate:
+        fcntl.flock(gate, fcntl.LOCK_EX)   # one launch at a time between reading and taking it
+        holder = lock_holder()
+        if holder and holder['stale']:
+            LOCK.unlink(missing_ok=True)
+        try:
+            fd = os.open(LOCK, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            sys.exit(f'verify-frametop: run {(lock_holder() or {}).get("run")} is under way: '
+                     'finish it with cleanup first')
+        with os.fdopen(fd, 'w') as f:
+            json.dump({'run': str(run), 'started': time.time(), 'allow_host_input': bool(allow_host_input)}, f)
+
+
+def launch(name, allow_host_input=False):
+    holder = lock_holder()
+    if holder and not holder['stale']:
+        sys.exit(f'verify-frametop: run {holder["run"]} is under way: finish it with cleanup first')
+    report, code = doctor()
+    if code == 2:
+        print(json.dumps(report, indent=2))
+        sys.exit('verify-frametop: the headset is worn: refusing to drive it')
+    failed = {c['name'] for c in report['checks'] if not c['ok']} - {'Frametop release', 'hand tracking'}
+    if 'no host-input streams' in failed and not allow_host_input:
+        print(json.dumps(report, indent=2))
+        detail = next(c['detail'] for c in report['checks'] if c['name'] == 'no host-input streams')
+        sys.exit(f'verify-frametop: no host-input streams: {detail}')
+    if code and failed - {'no host-input streams'}:
+        print(json.dumps(report, indent=2))
+        sys.exit('verify-frametop: not ready (see the failed checks; overrides left by an earlier '
+                 'run: verify-frametop cleanup)')
+    name = re.sub(r'[^A-Za-z0-9._-]', '-', name or 'run')[:48]
+    run = EVIDENCE / f'{datetime.now().strftime("%Y%m%d-%H%M%S")}-{name}'
+    claim(run, allow_host_input)
+    try:
+        EVIDENCE.mkdir(parents=True, exist_ok=True, mode=0o700)   # mode only for the last part
+        run.mkdir(mode=0o700)
+        write_json(run / 'doctor.json', report)
+        write_json(run / 'baseline.json', readbacks())
+    except BaseException:
+        LOCK.unlink(missing_ok=True)   # nothing was driven yet: don't hold the headset for nothing
+        raise
+    print(json.dumps({'ok': True, 'run': str(run)}, indent=2))
+
+
+def guard():
+    """Stop the run at once if someone wears the headset (or nobody can tell)."""
+    try:
+        worn, status = worn_now()
+    except Exception:   # whatever went wrong, it didn't say "not worn"
+        worn, status = None, {}
+    holder = lock_holder()
+    if worn is False:
+        # A faked wearer whose guard had gone was dropped by that status read: the run has lost it.
+        state = dict(host_input(), **{k: status[k] for k in ('worn_released',) if k in status})
+        if (holder or {}).get('allow_host_input') or host_input_check(state)[0]:
+            if holder:
+                LOCK.touch()   # the lease runs on
+            return
+        print('verify-frametop: ' + host_input_check(state)[1] + ': stopping the run and cleaning up',
+              file=sys.stderr, flush=True)
+        cleanup(force=True)
+        sys.exit(3)
+    print('verify-frametop: ' + ('the headset is worn' if worn else "the proximity sensor can't be read")
+          + ': stopping the run and cleaning up', file=sys.stderr, flush=True)
+    cleanup(force=True)
+    sys.exit(2 if worn else 1)
+
+
+def snapshot(label, capture):
+    run = current_run()
+    guard()
+    label = re.sub(r'[^A-Za-z0-9._-]', '-', label)[:64] or 'snapshot'
+    out = run / label
+    try:
+        out.mkdir(mode=0o700)
+    except FileExistsError:
+        sys.exit(f'verify-frametop: {out} exists: use a new label')
+    except FileNotFoundError:
+        sys.exit(f'verify-frametop: the run folder {run} is gone: cleanup, then launch again')
+    write_json(out / 'readbacks.json', readbacks())
+    result = {'ok': True, 'snapshot': str(out)}
+    if capture:
+        shot = bench('capture', '--output', str(out / 'capture'), timeout=60)
+        result['capture'] = shot.get('preview') if shot.get('ok') else shot
+    print(json.dumps(result, indent=2))
+
+
+def lock_name(host):
+    """HOST's input lock, ft-stream's $XDG_RUNTIME_DIR/frametop-input-HOST.lock, named as
+    stream/hostinput.h's RelayId does (and frame_testbench/hostinput.py's lock_path)."""
+    rid = ''.join(c if c.isalnum() or c in '._-' else '-' for c in host[:64]) or 'host'
+    return RUNTIME / f'frametop-input-{rid}.lock'
+
+
+def lock_free(host):
+    """Whether nobody holds HOST's input lock (taken and given back at once to see)."""
+    fd = os.open(lock_name(host), os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+    finally:
+        os.close(fd)
+
+
+class Stopped(Exception):
+    pass
+
+
+def stopped(*_):
+    raise Stopped()
+
+
+def kill_viewer(out, wait=5.0):
+    """Kill the fake viewer and its ft-stream: a signal to in-box doesn't reach the container,
+    but it shares our pid namespace. viewer.json names them once the viewer has started."""
+    end = time.monotonic() + wait
+    while True:
+        try:
+            pids = list(json.loads((out / 'viewer.json').read_text()).values())
+            break
+        except (OSError, ValueError):
+            if time.monotonic() > end:
+                return
+            time.sleep(0.1)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def pipe_source(fifo):
+    """Load MIC_SOURCE, a mono 48 kHz source fed from the FIFO it makes; the module id. Not a null
+    sink's monitor: SteamOS's policy sends a player's stream through its spatializer to the
+    speakers whatever sink it asks for, so the null sink would stay silent."""
+    done = subprocess.run(['pactl', 'load-module', 'module-pipe-source', f'source_name={MIC_SOURCE}',
+                           f'file={fifo}', 'format=s16le', 'rate=48000', 'channels=1'], capture_output=True, text=True)
+    if done.returncode:
+        sys.exit(f'verify-frametop: no source {MIC_SOURCE}: {done.stderr.strip()}')
+    return done.stdout.strip()
+
+
+def source_running(name):
+    done = subprocess.run(['pactl', 'list', 'short', 'sources'], capture_output=True, text=True)
+    return any(line.split('\t')[1:2] == [name] and line.split('\t')[-1] == 'RUNNING'
+               for line in done.stdout.splitlines())
+
+
+def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=False):
+    run = current_run()
+    guard()
+    try:
+        hosts = json.loads(LAYOUT.read_text()).get('hosts') or []
+    except (OSError, ValueError, AttributeError) as e:
+        sys.exit(f'verify-frametop: no layout ({e})')
+    entry = next((h for h in hosts if isinstance(h, dict) and host in (h.get('name'), h.get('address'))), None)
+    if not entry or not isinstance(entry.get('address'), str):
+        sys.exit(f'verify-frametop: no host {host!r} in {LAYOUT}')
+    displays = [d for d in entry.get('displays') or [] if isinstance(d, dict) and d.get('client')]
+    display = next((d for d in displays if client in (None, d['client'])), None)
+    if not display:
+        sys.exit(f'verify-frametop: {entry.get("name")} has no display {client or ""}'.rstrip())
+    address, client = entry['address'], display['client']
+    if mic_bursts and entry.get('mic') is not True:
+        sys.exit(f'verify-frametop: {entry.get("name")} doesn\'t get the microphone ("mic": true): for '
+                 f'the test, `ft-layout remote host {entry.get("name")!r} mic=on`, and put it back after')
+    if mic_bursts and seconds < 15:
+        sys.exit('verify-frametop: --mic-bursts needs --seconds 15 or more')
+    # Vibepollo ties a display to its client, one stream per client: a second stream with the
+    # same --id would take the live panel's display away.
+    live = [cmd for cmd in proc_cmdlines() if cmd[:2] == ['ft-stream', 'stream'] and client in cmd]
+    if live:
+        sys.exit(f'verify-frametop: a remote display already streams as {client}: turn it off first')
+    if not allow_host_input and not lock_free(address):
+        sys.exit(f'verify-frametop: another stream holds {entry.get("name")}\'s input lock: wait for it '
+                 'to end')
+    exe = RELEASES / 'current' / 'stream' / 'build' / 'ft-stream'
+    width, height = (display.get('size') or [1920, 1080])[:2]
+    stamp = datetime.now().strftime('%H%M%S')
+    out = next(f for n in range(1, 100) if not (f := run / f'stream-{client}-{stamp}{"" if n == 1 else f"-{n}"}').exists())
+    LOCK.touch()   # the lease runs on
+    modules, players, viewer, ended = [], [], None, False
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, stopped)
+    try:
+        out.mkdir(mode=0o700)
+        env = []
+        if mic_bursts:
+            # ft-stream records its default source, which libpulse takes from PULSE_SOURCE.
+            fifo = RUNTIME / f'{MIC_SOURCE}.fifo'
+            modules = [pipe_source(fifo)]
+            env = ['env', f'PULSE_SOURCE={MIC_SOURCE}']
+        # The viewer holds the input lock itself, so it goes when the stream does, however this
+        # process ends.
+        with open(out / 'in-box.log', 'wb') as log:
+            viewer = subprocess.Popen(
+                [str(RELEASES / 'current' / 'scripts' / 'in-box'), *env, 'python3', str(VIEWER), str(exe), address,
+                 client, display.get('app') or 'primary', f'{width}x{height}', '30', '20000', str(seconds), str(out),
+                 *([] if allow_host_input else [str(lock_name(address))])],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
+        if mic_bursts:
+            # Bursts only once ft-stream records: until then nothing drains the FIFO, and what
+            # waited in it would count as latency.
+            began = time.monotonic()
+            while viewer.poll() is None and not source_running(MIC_SOURCE) and time.monotonic() - began < seconds - 10:
+                time.sleep(0.2)
+            left = seconds - (time.monotonic() - began) - 3
+            if viewer.poll() is None and source_running(MIC_SOURCE) and left >= 5:
+                with open(fifo, 'wb') as pipe:
+                    players = [subprocess.Popen([str(BURSTS), f'{left:.1f}', str(out / 'bursts.txt'), '0.5'],
+                                                stdout=pipe)]
+        try:
+            viewer.wait(seconds + 60)   # the container may need starting; the viewer ends itself
+            ended = True
+        except subprocess.TimeoutExpired:
+            pass
+    except Stopped:
+        print('verify-frametop: stopped: ending the stream', file=sys.stderr, flush=True)
+    finally:
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(sig, signal.SIG_IGN)   # the cleanup runs to its end
+        if viewer is not None and not ended:
+            kill_viewer(out)
+            viewer.kill()
+            viewer.wait()
+        for player in players:
+            player.terminate()
+            player.wait()
+        for module in modules:
+            subprocess.run(['pactl', 'unload-module', module], capture_output=True)
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(sig, signal.SIG_DFL)
+    try:
+        result = json.loads((out / 'result.json').read_text())
+    except (OSError, ValueError):
+        result = {'exit': None, 'error': 'the viewer left no result: see in-box.log and ft-stream.log'}
+    states = [s for _, s in result.get('states', [])]
+    summary = {'ok': any(s.startswith('live') for s in states) and result.get('frames', 0) > 0,
+               'host': entry.get('name'), 'client': client, 'app': display.get('app'),
+               'input_lock_held': result.get('input_lock') is True,
+               'folder': str(out), **result}
+    if mic_bursts:
+        try:
+            played = len((out / 'bursts.txt').read_text().split())
+            log = (out / 'ft-stream.log').read_text(errors='replace')
+        except OSError:
+            played, log = 0, ''
+        summary['mic'] = {'bursts': played, 'log': str(out / 'bursts.txt'), 'sent': 'mic: sending' in log,
+                          'next': 'mic-latency BURSTS RECORDING --offset-ms MS'}
+        if not played:
+            summary['mic']['error'] = "ft-stream never recorded the bursts' source"
+            summary['ok'] = False
+    write_json(out / 'summary.json', summary)
+    LOCK.touch()
+    print(json.dumps(summary, indent=2))
+    return 0 if summary['ok'] else 1
+
+
+def proc_cmdlines():
+    """Each process's argv, its first word cut to the program's name."""
+    found = []
+    for entry in os.scandir('/proc'):
+        if entry.name.isdigit():
+            try:
+                argv = [a.decode(errors='replace') for a in Path(entry.path, 'cmdline').read_bytes().split(b'\0') if a]
+            except OSError:
+                continue
+            if argv:
+                found.append([os.path.basename(argv[0]), *argv[1:]])
+    return found
+
+
+def cleanup(run=None, force=False):
+    holder = lock_holder()
+    if holder and not holder['stale'] and not force and (
+            run is None or not holder['run'] or Path(run).resolve() != Path(holder['run']).resolve()):
+        sys.exit(f'verify-frametop: run {holder["run"] or "(being launched)"} is under way and is not '
+                 'the one named: cleanup RUN with its folder, or --force if it has died')
+    baseline = {}
+    if holder and holder['run']:
+        try:
+            baseline = json.loads((Path(holder['run']) / 'baseline.json').read_text())
+        except (OSError, ValueError):
+            pass
+    steps = {}
+    # Displays back on first, while the fake wearer still holds off SteamVR's standby: ft-powerd
+    # lights the panels on "on" even in standby. Two quick datagrams, then the release.
+    if (baseline.get('power') or {}).get('displays') in ('on', 'away') \
+            and ask('ft_powerd', 'status').split()[:2] == ['ok', 'off']:
+        answer = ask('ft_powerd', 'on')
+        steps['power'] = {'ok': answer == 'ok', 'reply': answer}
+    steps['release'] = bench('release', timeout=60)
+    steps['compositor'] = bench('compositor', 'auto', timeout=30)
+    gaze_before = (baseline.get('pointer') or {}).get('gaze_mode')
+    if gaze_before is not None and bench('pointer', 'state', timeout=20).get('gaze_mode') != gaze_before:
+        # The helper keeps a gaze on|off until it restarts (the setting is POINTER_GAZE).
+        answer = ask('ft_pointer_helper', f'gaze {"on" if gaze_before else "off"}')
+        steps['gaze_mode'] = {'ok': answer.startswith('ok'), 'reply': answer}
+    try:
+        report, _ = doctor()
+        leftovers = next(c for c in report['checks'] if c['name'] == 'no testbench overrides left')
+    except Exception as e:   # the run is still freed below
+        leftovers = {'ok': False, 'detail': f'unread: {e!r}'}
+    LOCK.unlink(missing_ok=True)
+    result = {'ok': all(s.get('ok') for s in steps.values()) and leftovers['ok'], 'steps': steps,
+              'overrides': leftovers['detail'], 'evidence': holder and holder['run']}
+    if not baseline:
+        result['note'] = ('no baseline: displays and gaze mode left as they are (`T power on` if a '
+                          'dead run turned the displays off)')
+    if baseline:
+        write_json(Path(holder['run']) / 'cleanup.json', result)
+    print(json.dumps(result, indent=2))
+    return 0 if result['ok'] else 1
+
+
+def main(argv):
+    if not argv or argv[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return 0
+    command, rest = argv[0], argv[1:]
+    if command == 'doctor':
+        report, code = doctor()
+        print(json.dumps(report, indent=2))
+        return code
+    names = [a for a in rest if a != '--allow-host-input']
+    if command == 'launch' and len(names) <= 1 and not any(a.startswith('-') for a in names):
+        launch(names[0] if names else None, '--allow-host-input' in rest)
+        return 0
+    if command == 'snapshot':
+        labels = [a for a in rest if a != '--capture']
+        if len(labels) != 1 or labels[0].startswith('-'):
+            sys.exit('verify-frametop: snapshot LABEL [--capture]')
+        snapshot(labels[0], '--capture' in rest)
+        return 0
+    if command == 'stream' and rest and not rest[0].startswith('-'):
+        opts = {'--display': None, '--seconds': '20'}
+        flags = {'--allow-host-input', '--mic-bursts'}
+        words = [w for w in rest[1:] if w not in flags]
+        while len(words) >= 2 and words[0] in opts:
+            key = words.pop(0)
+            opts[key] = words.pop(0)
+        try:
+            seconds = float(opts['--seconds'])
+        except ValueError:
+            seconds = 0
+        if words or not 0 < seconds <= 3600:
+            sys.exit('verify-frametop: stream HOST [--display CLIENT] [--seconds N] [--allow-host-input] '
+                     '[--mic-bursts]')
+        return stream(rest[0], opts['--display'], seconds, '--allow-host-input' in rest, '--mic-bursts' in rest)
+    runs = [a for a in rest if a != '--force']
+    if command == 'cleanup' and len(runs) <= 1 and not any(a.startswith('-') for a in runs):
+        return cleanup(runs[0] if runs else None, '--force' in rest)
+    if command == 'guard' and not rest:
+        guard()
+        print(json.dumps({'ok': True, 'worn': False}))
+        return 0
+    if command == 'ask' and len(rest) in (2, 4) and rest[2:3] in ([], ['--listen']):
+        try:
+            listen = float(rest[3]) if len(rest) == 4 else 0.0
+        except ValueError:
+            sys.exit('verify-frametop: ask NAME MESSAGE [--listen SECONDS]')
+        print(ask(rest[0], rest[1], listen=listen))
+        return 0
+    sys.exit(f'verify-frametop: unknown command {" ".join(argv)!r} (see --help)')
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

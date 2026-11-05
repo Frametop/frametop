@@ -1,0 +1,1760 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="ei">
+
+  <copyright>
+    Copyright © 2008-2011 Kristian Høgsberg
+    Copyright © 2010-2011 Intel Corporation
+    Copyright © 2012-2013 Collabora, Ltd.
+    Copyright © 2023 Red Hat, Inc.
+
+    Permission is hereby granted, free of charge, to any person
+    obtaining a copy of this software and associated documentation files
+    (the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge,
+    publish, distribute, sublicense, and/or sell copies of the Software,
+    and to permit persons to whom the Software is furnished to do so,
+    subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the
+    next paragraph) shall be included in all copies or substantial
+    portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+    BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+    ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+  </copyright>
+
+  <!-- The protocol documentation is available at
+       https://libinput.pages.freedesktop.org/libei/index.html -->
+
+  <interface name="ei_handshake" version="1">
+    <description summary="handshake object">
+      This is a special interface to setup the client as seen by the EIS
+      implementation. The object for this interface has the fixed object
+      id 0 and only exists until the connection has been set up, see the
+      ei_handshake.connection event.
+
+      The ei_handshake version is 1 until:
+      - the EIS implementation sends the handshake_version event with
+        a version other than 1, and, in response,
+      - the client sends the handshake_version request with a
+        version equal or lower to the EIS implementation version.
+
+      The EIS implementation must send the handshake_version event immediately
+      once the physical connection has been established.
+
+      Once the ei_connection.connection event has been sent the handshake
+      is destroyed by the EIS implementation.
+    </description>
+
+    <!-- ei_handshake client requests version 1 -->
+
+    <request name="handshake_version" since="1">
+      <description summary="handshake version information from EI client">
+        Informs the EIS implementation that this client supports the given
+        version of the ei_handshake interface. The version number must be less
+        than or equal to the version in the handshake_version event sent by the
+        EIS implementation when the connection was established.
+
+        Immediately after sending this request, the client must assume the negotiated
+        version number for the ei_handshake interface and the EIS implementation
+        may send events and process requests matching that version.
+
+        This request must be sent exactly once and it must be the first request
+        the client sends.
+      </description>
+      <arg name="version" type="uint32" summary="the interface version"/>
+    </request>
+
+    <request name="finish" since="1">
+      <description summary="setup completion request">
+        Informs the EIS implementation that configuration is complete.
+
+        In the future (and possibly after requiring user interaction),
+        the EIS implementation responds by sending the ei_handshake.connection event.
+      </description>
+    </request>
+
+    <enum name="context_type" since="1">
+      <description summary="context types for connections">
+        Context types for connections. The context type for a connection is set
+        once in the ei_handshake.context_type request.
+      </description>
+      <entry name="receiver" value="1" summary="the EI client receives input events from the EIS implementation"/>
+      <entry name="sender" value="2" summary="the EI client sends input events to the EIS implementation"/>
+    </enum>
+
+    <request name="context_type" since="1">
+      <description summary="context type information">
+        Informs the EIS implementation of the type of this context. The context
+        type defines whether the EI client will send input events to the EIS
+        implementation or receive input events from it.
+
+        Depending on the context type, certain requests must not be used and some
+        events must not be sent by the EIS implementation.
+
+        This request is optional, the default client type is context_type.receiver.
+        This request must not be sent more than once and must be sent before
+        ei_handshake.finish.
+      </description>
+      <arg name="context_type" type="uint32" enum="context_type" summary="the connection's context type"/>
+    </request>
+
+    <request name="name" since="1">
+      <description summary="client name">
+        Informs the EIS implementation of the client name. The name is a
+        human-presentable UTF-8 string and should represent the client name as
+        accurately as possible. This name may be presented to the user for
+        identification of this client (e.g. to confirm the client has
+        permissions to connect).
+
+        There is no requirement for the EIS implementation to use this name. For
+        example, where the client is managed through an XDG Desktop Portal an EIS
+        implementation would typically use client identification information sent
+        by the portal instead.
+
+        This request is optional, the default client name is implementation-defined.
+        This request must not be sent more than once and must be sent before
+        ei_handshake.finish.
+      </description>
+      <arg name="name" type="string" summary="the client name"/>
+    </request>
+
+    <request name="interface_version" since="1">
+      <description summary="interface support information">
+        Informs the EIS implementation that the EI client supports the given
+        named interface with the given maximum version number.
+
+        Future objects created by the EIS implementation will
+        use the respective interface version (or any lesser version)
+        as announced by the ei_connection.interface_version event.
+
+        This request must be sent for the "ei_connection" interface,
+        failing to do so will result in the EIS implementation disconnecting
+        the client on ei_handshake.finish.
+
+        This request must not be sent for the "ei_handshake" interface, use
+        the ei_handshake.handshake_version request instead.
+
+        Note that an EIS implementation may consider some interfaces to
+        be required and immediately ei_connection.disconnect a client
+        not supporting those interfaces.
+
+        This request must not be sent more than once per interface and must be
+        sent before ei_handshake.finish.
+      </description>
+      <arg name="name" type="string" summary="the interface name"/>
+      <arg name="version" type="uint32" summary="the interface version"/>
+    </request>
+
+    <!-- ei_handshake events version 1 -->
+    <event name="handshake_version" since="1">
+      <description summary="handshake version information from EIS implementation">
+        Informs the client that the EIS implementation supports the given
+        version of the ei_handshake interface.
+
+        This event is sent exactly once and immediately after connection to the
+        EIS implementation.
+
+        In response, the client must send the ei_handshake.handshake_version request
+        with any version up to including the version provided in this event.
+        See the ei_handshake.handshake_version request for details on what happens next.
+      </description>
+      <arg name="version" type="uint32" summary="the interface version"/>
+    </event>
+
+    <event name="interface_version" since="1">
+      <description summary="interface support event">
+        Informs the client that the EIS implementation supports the given named
+        interface with the given maximum version number.
+
+        The client must not assume those interfaces are supported unless
+        and until those versions have been received.
+
+        This request must not be sent for the "ei_handshake" interface, use
+        the handshake_version event instead.
+
+        This event may be sent by the EIS implementation for any
+        other supported interface (but not necessarily all supported
+        interfaces) before the ei_handshake.connection event.
+      </description>
+      <arg name="name" type="string" summary="the interface name"/>
+      <arg name="version" type="uint32" summary="the interface version"/>
+    </event>
+
+    <event name="connection" type="destructor" since="1">
+      <description summary="provides the core connection object">
+        Provides the client with the connection object that is the top-level
+        object for all future requests and events.
+
+        This event must be sent exactly once after the client sends the
+        ei_handshake.finish request to the EIS implementation.
+
+        The ei_handshake object will be destroyed by the EIS implementation
+        immediately after this event has been sent, the client must not attempt
+        to use it after that point.
+
+        The version sent by the EIS implementation is the version of the `ei_connection`
+        interface as announced by ei_handshake.interface_version, or any
+        lower version.
+
+        The serial number is the start value of the EIS implementation's serial
+        number sequence. Clients must not assume any specific value for this
+        serial number. Any future serial number in any event is monotonically
+        increasing by an unspecified amount.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+      <arg name="connection" type="new_id" interface="ei_connection"
+          summary="the connection object" />
+      <arg name="version" type="uint32" summary="the version of the connection object"/>
+    </event>
+  </interface>
+
+  <interface name="ei_connection" version="1">
+    <description summary="core connection object">
+      The core connection object. This is the top-level object for any communication
+      with the EIS implementation.
+
+      Note that for a client to receive this object, it must announce
+      support for this interface in ei_handshake.interface_version.
+    </description>
+
+    <!-- ei_connection client requests version 1 -->
+
+    <request name="sync" since="1">
+      <description summary="asynchronous roundtrip">
+        Requests the EIS implementation to emit the ei_callback.done event on
+        the returned ei_callback object. Since requests are handled in-order
+        and events are delivered in-order, this can be used as a
+        synchronization point to ensure all previous requests and the resulting
+        events have been handled.
+
+        The object returned by this request will be destroyed by the
+        EIS implementation after the callback is fired and as such the client must not
+        attempt to use it after that point.
+
+        The callback_data in the ei_callback.done event must be zero.
+
+        Note that for a client to use this request it must announce
+        support for the `ei_callback` interface in ei_handshake.interface_version.
+        It is a protocol violation to request sync without having announced the
+        `ei_callback` interface and the EIS implementation must disconnect
+        the client.
+      </description>
+      <arg name="callback" type="new_id" interface="ei_callback"
+           summary="callback object for the sync request"/>
+      <arg name="version" type="uint32" summary="the interface version"/>
+    </request>
+
+    <request name="disconnect" type="destructor" since="1">
+      <description summary="disconnection request">
+        A request to the EIS implementation that this client should be disconnected.
+        This is a courtesy request to allow the EIS implementation to distinguish
+        between a client disconnecting on purpose and one disconnecting through the
+        socket becoming invalid.
+
+        Immediately after sending this request, the client may destroy the
+        ei_connection object and it should close the socket. The EIS implementation
+        will treat the connection as already disconnected on receipt and does not
+        send the ei_connection.disconnect event in response to this request.
+      </description>
+    </request>
+
+    <!-- ei_connection events version 1 -->
+
+    <enum name="disconnect_reason" since="1">
+      <description summary="disconnection reason">
+        A reason why a client was disconnected. This enum is intended to
+        provide information to the client on whether it was disconnected as
+        part of normal operations or as result of an error on either the client
+        or EIS implementation side.
+
+        A nonzero value describes an error, with the generic value "error" (1) reserved
+        as fallback.
+
+        This enum may be extended in the future, clients must be able to handle
+        values that are not in their supported version of this enum.
+      </description>
+      <entry name="disconnected" value="0" summary="client was purposely disconnected"/>
+      <entry name="error" value="1" summary="an error caused the disconnection"/>
+      <entry name="mode" value="2" summary="sender/receiver client sent request for receiver/sender mode"/>
+      <entry name="protocol" value="3" summary="client committed a protocol violation"/>
+      <entry name="value" value="4" summary="client sent an invalid value"/>
+      <entry name="transport" value="5" summary="error on the transport layer"/>
+    </enum>
+
+    <event name="disconnected" type="destructor" since="1">
+      <description summary="disconnection event">
+        This event may be sent by the EIS implementation immediately before
+        the client is disconnected. The last_serial argument is set to the last
+        serial number used in an event by the EIS implementation.
+
+        Where a client is disconnected by EIS on purpose, for example after
+        a user interaction, the reason is disconnect_reason.disconnected (i.e. zero)
+        and the explanation is NULL.
+
+        Where a client is disconnected due to some invalid request or other
+        protocol error, the reason is one of disconnect_reason (i.e. nonzero) and
+        explanation may contain a string explaining why. This string is
+        intended to help debugging only and is not guaranteed to stay constant.
+
+        The ei_connection object will be destroyed by the
+        EIS implementation immediately after this event has been sent, a
+        client must not attempt to use it after that point.
+
+        There is no guarantee this event is sent - the connection may be closed
+        without a disconnection event.
+      </description>
+      <arg name="last_serial" type="uint32" summary="the last serial sent by the EIS implementation"/>
+      <arg name="reason" type="uint32" enum="disconnect_reason" summary="the reason for being disconnected"/>
+      <arg name="explanation" type="string" allow-null="true" summary="an explanation for debugging purposes"/>
+    </event>
+
+    <event name="seat" since="1">
+      <description summary="Seat presence information">
+        Informs the client that a new seat has been added.
+
+        A seat is a set of input devices that logically belong together.
+
+        This event is only sent if the client announced support for the
+        "ei_seat" interface in ei_handshake.interface_version.
+        The interface version is equal or less to the client-supported
+        version in ei_handshake.interface_version for the "ei_seat"
+        interface.
+      </description>
+      <arg name="seat" type="new_id" interface="ei_seat"/>
+      <arg name="version" type="uint32" summary="the interface version"/>
+    </event>
+
+    <event name="invalid_object" since="1">
+      <description summary="Invalid object in request notification">
+        Informs the client that an object ID used in an earlier request was
+        invalid and does not exist.
+
+        This event is sent by the EIS implementation when an object that
+        does not exist as seen by the EIS implementation. The protocol is
+        asynchronous and this may occur e.g. when the EIS implementation
+        destroys an object at the same time as the client requests functionality
+        from that object. For example, an EIS implementation may send
+        ei_device.destroyed and destroy the device's resources (and protocol object)
+        at the same time as the client attempts to ei_device.start_emulating
+        on that object.
+
+        It is the client's responsibility to unwind any state changes done
+        to the object since the last successful message.
+      </description>
+      <arg name="last_serial" type="uint32" summary="the last serial sent by the EIS implementation"/>
+      <arg name="invalid_id" type="uint64" />
+    </event>
+
+    <event name="ping" since="1">
+      <description summary="ping event">
+        The ping event asks the client to emit the 'done' event
+        on the provided ei_pingpong object. Since requests are
+        handled in-order and events are delivered in-order, this can
+        be used as a synchronization point to ensure all previous requests
+        and the resulting events have been handled.
+
+        The object returned by this request must be destroyed by the
+        ei client implementation after the callback is fired and as
+        such the client must not attempt to use it after that point.
+
+        The callback_data in the resulting ei_pingpong.done request is
+        ignored by the EIS implementation.
+
+        Note that for a EIS implementation to use this request the client must
+        announce support for this interface in ei_handshake.interface_version. It is
+        a protocol violation to send this event to a client without the
+        "ei_pingpong" interface.
+      </description>
+      <arg name="ping" type="new_id" interface="ei_pingpong"
+           summary="callback object for the ping request"/>
+      <arg name="version" type="uint32" summary="the version of the callback object"/>
+    </event>
+  </interface>
+
+  <interface name="ei_callback" version="1">
+    <description summary="callback object">
+      Interface for ensuring a roundtrip to the EIS implementation.
+      Clients can handle the 'done' event to get notified when
+      the related request that created the ei_callback object is done.
+    </description>
+
+    <!-- ei_callback events version 1 -->
+
+    <event name="done" type="destructor" since="1">
+      <description summary="done event">
+        Informs the client that the associated request is finished. The EIS
+        implementation must destroy the ei_callback object immediately after
+        sending this event and as such the client must not attempt to
+        use it after that point.
+      </description>
+      <arg name="callback_data" type="uint64" summary="request-specific data for the callback"/>
+    </event>
+  </interface>
+
+  <interface name="ei_pingpong" version="1">
+    <description summary="callback object">
+      Interface for ensuring a roundtrip to the client implementation.
+      This interface is identical to ei_callback but is intended for
+      the EIS implementation to enforce a roundtrip to the client.
+    </description>
+
+    <!-- ei_pingpong client requests version 1 -->
+
+    <request name="done" type="destructor" since="1">
+      <description summary="done event">
+        Informs the EIS implementation when the associated event is finished.
+        The client must destroy the ei_pingpong object immediately after this
+        request and as such the server must not attempt to use it after that
+        point.
+      </description>
+      <arg name="callback_data" type="uint64" summary="request-specific data for the callback"/>
+    </request>
+
+    <!-- ei_pingpong events version 1 -->
+  </interface>
+
+  <interface name="ei_seat" version="2">
+    <description summary="set of input devices that logically belong together">
+      An ei_seat represents a set of input devices that logically belong together. In most
+      cases only one seat is present and all input devices on that seat share the same
+      pointer and keyboard focus.
+
+      A seat has potential capabilities, a client is expected to bind to those capabilities.
+      The EIS implementation then creates logical input devices based on the capabilities the
+      client is interested in.
+
+      Immediately after creation of the ei_seat object, the EIS implementation sends a burst
+      of events with information about this seat. This burst of events is terminated by the
+      ei_seat.done event.
+    </description>
+
+    <!-- ei_seat client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="Seat removal request">
+        Informs the EIS implementation that the client is no longer interested
+        in this seat. The EIS implementation should release any resources
+        associated with this seat and send the ei_seat.destroyed event once
+        finished.
+
+        Note that releasing a seat does not guarantee that another seat becomes
+        available. In other words, in most single-seat cases, releasing the seat
+        means that the connection becomes effectively inert.
+      </description>
+    </request>
+
+    <request name="bind" since="1">
+      <description summary="Seat binding">
+        Binds to the given bitmask of capabilities. Each one of the bit values
+        in the given bitmask must originate from one of the ei_seat.capability
+        events. See its documentation for more examples.
+
+        The EIS implementation should return compatible devices with
+        ei_seat.device events.
+
+        Binding masks that are not supported in the ei_device's interface
+        version is a client bug and may result in disconnection.
+
+        A client may send this request multiple times to adjust the capabilities
+        it is interested in. If previously-bound capabilities are dropped by the
+        client, the EIS implementation may ei_device.remove devices that have
+        these capabilities.
+      </description>
+      <arg name="capabilities" type="uint64" summary="bitmask of the capabilities"/>
+    </request>
+
+    <!-- ei_seat client requests version 2 -->
+
+    <request name="request_device" since="2">
+      <description summary="Request a new device with capabilities">
+        Request a new device from the EIS implementation with the given capability
+        mask. If the EIS implementation creates a new device in response to this
+        request that device is announced via the ei_seat.device event as any other
+        device.
+
+        The capabilities argument is a bitmask of one or more of the
+        masks representing an interface as provided in the ei_seat.capability event.
+        See the ei_seat.capability event documentation for examples.
+
+        The newly created device(s), if any, may not provide all requested capabilities.
+        The EIS implementation may create multiple devices to accommodate all requested
+        capabilities. For example, a client requesting a device with the ei_keyboard and
+        ei_pointer capability may instead see one device with the ei_keyboard and one
+        device with the ei_pointer capability being created.
+
+        If possible, the EIS implementation should create devices immediately in
+        response to this request so a client can utilize ei_connection.sync to
+        help identify those devices. This is a suggestion to help the client and not
+        a requirement.
+
+        Requesting masks that are not supported in the ei_device's interface version
+        is a client bug and may result in disconnection.
+
+        Requesting masks that are not currently bound via the most recent ei_seat.bind
+        is a client bug and may result in disconnection.
+      </description>
+      <arg name="capabilities" type="uint64" summary="bitmask of the capabilities"/>
+    </request>
+
+    <!-- ei_seat events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Seat removal notification">
+        Informs the client that this seat has been removed, and that it should
+        release all associated resources.
+
+        This ei_seat object will be destroyed by the EIS implementation immediately
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="name" since="1">
+      <description summary="Seat name notification">
+        The name of this seat, if any. This event is optional and sent once immediately
+        after object creation.
+
+        It is a protocol violation to send this event after the ei_seat.done event.
+      </description>
+      <arg name="name" type="string" summary="the seat name"/>
+    </event>
+
+    <event name="capability" since="1">
+      <description summary="Seat capability notification">
+        Informs the client that this seat supports devices with the given
+        interface. The interface must be mapped to a bitmask by the EIS
+        implementation. The client may apply the binary OR operation onto these
+        bitmasks in ei_seat.bind. In response, the EIS implementation may then
+        create devices based on those bound capabilities.
+
+        For example, an EIS implementation may advertise support for
+        `ei_pointer` devices at bitmask `0x1`, `ei_keyboard` devices at `0x4`
+        and `ei_touchscreen` devices at `0x8`. A client may then execute the
+        request `ei_seat.bind(0xC)` to bind to keyboard and touchscreen devices
+        but not pointing devices.
+
+        The EIS implementation must not advertise capabilities for interfaces
+        that have not been negotiated in the ei_handshake object.
+
+        The EIS implementation may decide which capabilities a given seat has.
+        After ei_seat.done, the capabilities are constant for the lifetime of
+        the seat but may differ between seats. The masks may be sparse bitwise.
+
+        This event is sent multiple time for each supported interface, finishing
+        with ei_seat.done.
+      </description>
+      <arg name="mask" type="uint64" summary="the mask representing this capability"/>
+      <arg name="interface" type="string" summary="the interface name for this capability"/>
+    </event>
+
+    <event name="done" since="1">
+      <description summary="Seat setup completion notification">
+        Notification that the initial burst of events is complete and
+        the client can set up this seat now.
+
+        It is a protocol violation to send this event more than once.
+      </description>
+    </event>
+
+    <event name="device" since="1">
+      <description summary="Device presence notification">
+        Informs the client that a new device has been added to the seat.
+
+        The EIS implementation must never announce devices that have not been bound to with ei_seat.bind.
+
+        This event is only sent if the client announced support for the
+        `ei_device` interface in ei_handshake.interface_version. The interface
+        version is less than or equal to the client-supported version in
+        ei_handshake.interface_version for the `ei_device` interface.
+      </description>
+      <arg name="device" type="new_id" interface="ei_device" summary="the new device"/>
+      <arg name="version" type="uint32" summary="the interface version"/>
+    </event>
+  </interface>
+
+  <interface name="ei_device" version="3">
+    <description summary="logical input device">
+      An ei_device represents a single logical input device. Like physical input
+      devices an ei_device may have multiple capabilities and may e.g. function
+      as pointer and keyboard.
+
+      Depending on the ei_handshake.context_type, an ei_device can
+      emulate events via client requests or receive events. It is a protocol violation
+      to emulate certain events on a receiver device, or for the EIS implementation
+      to send certain events to the device. See the individual request/event documentation
+      for details.
+    </description>
+
+    <!-- ei_device client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="Device removal request">
+        Notification that the client is no longer interested in this device.
+
+        Note that releasing a device does not guarantee another device becomes available.
+
+        The EIS implementation will release any resources related to this device and
+        send the ei_device.destroyed event once complete.
+      </description>
+    </request>
+
+    <request name="start_emulating" since="1" context-type="sender">
+      <description summary="Device start emulating request">
+        Notify the EIS implementation that the given device is about to start
+        sending events. This should be seen more as a transactional boundary than a
+        time-based boundary. The primary use-cases for this are to allow for setup on
+        the EIS implementation side and/or UI updates to indicate that a device is
+        sending events now and for out-of-band information to sync with a given event
+        sequence.
+
+        There is no actual requirement that events start immediately once emulation
+        starts and there is no requirement that a client calls ei_device.stop_emulating
+        after the most recent events.
+        For example, in a remote desktop use-case the client would call
+        ei_device.start_emulating once the remote desktop session starts (rather than when
+        the device sends events) and ei_device.stop_emulating once the remote desktop
+        session stops.
+
+        The sequence number identifies this transaction between start/stop emulating.
+        It must go up by at least 1 on each call to ei_device.start_emulating.
+        Wraparound must be handled by the EIS implementation but callers must ensure
+        that detection of wraparound is possible.
+
+        It is a protocol violation to request ei_device.start_emulating after
+        ei_device.start_emulating without an intermediate stop_emulating.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+      </description>
+      <arg name="last_serial" type="uint32" summary="the last serial sent by the EIS implementation"/>
+      <arg name="sequence" type="uint32" summary="sequence number to identify this emulation sequence"/>
+    </request>
+
+    <request name="stop_emulating" since="1" context-type="sender">
+      <description summary="Device stop emulating request">
+        Notify the EIS implementation that the given device is no longer sending
+        events. See ei_device.start_emulating for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+
+        It is up to the EIS implementation to reset the device state when a
+        stop_emulating event is received. The recommendation is that the device
+        is set to a neutral state such that all touches, buttons, keys are logically up.
+        A client should send the corresponding events before stop_emulating
+        to avoid any ambiguity on event interpretation.
+      </description>
+      <arg name="last_serial" type="uint32" summary="the last serial sent by the EIS implementation"/>
+    </request>
+
+    <request name="frame" since="1" context-type="sender">
+      <description summary="Device frame request">
+        Generate a frame event to group the current set of events
+        into a logical hardware event. This function must be called after one
+        or more events on any of ei_pointer, ei_pointer_absolute,
+        ei_scroll, ei_button, ei_keyboard or ei_touchscreen has
+        been requested by the EIS implementation.
+
+        The EIS implementation should not process changes to the device state
+        until the ei_device.frame event. For example, pressing and releasing
+        a key within the same frame is a logical noop.
+
+        The given timestamp applies to all events in the current frame.
+        The timestamp must be in microseconds of CLOCK_MONOTONIC.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+      </description>
+      <arg name="last_serial" type="uint32" summary="the last serial sent by the EIS implementation"/>
+      <arg name="timestamp" type="uint64" summary="timestamp in microseconds"/>
+    </request>
+
+    <!-- ei_device client requests version 2 -->
+
+    <!-- space intentionally left blank -->
+
+    <!-- ei_device client requests version 3 -->
+
+    <request name="ready" since="3" context-type="sender">
+      <description summary="Device ready notification">
+        Notification by the client that the device configuration (as seen
+        by the protocol) is complete and the EIS implementation may
+        send ei_device.resumed.
+
+        This allows for future further negotiation of the device behavior and
+        or device properties before the device is finalized by the EIS implementation.
+
+        A client supporting version 3 of the ei_device interface must issue
+        this request in response to the ei_device.done event.
+
+        It is a protocol violation to send this event more than once per device.
+      </description>
+    </request>
+
+    <!-- ei_device events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Device removal notification">
+        This device has been removed and a client should release all
+        associated resources.
+
+        This ei_device object will be destroyed by the EIS implementation immediately
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="name" since="1">
+      <description summary="device name notification">
+        The name of this device, if any. This event is optional and sent once immediately
+        after object creation.
+
+        It is a protocol violation to send this event after the ei_device.done event.
+      </description>
+      <arg name="name" type="string" summary="the device name"/>
+    </event>
+
+    <enum name="device_type" since="1">
+      <description summary="device type">
+        If the device type is ei_device.device_type.virtual, the device is a
+        virtual device representing input as applied on the EIS implementation's
+        screen. A relative virtual device generates input events in logical pixels,
+        an absolute virtual device generates input events in logical pixels on one
+        of the device's regions. Virtual devices do not have a ei_device.dimension but
+        it may have an ei_device.region.
+
+        If the device type is ei_device.device_type.physical, the device is a
+        representation of a physical device as if connected to the EIS
+        implementation's host computer. A relative physical device generates input
+        events in mm, an absolute physical device generates input events in mm
+        within the device's specified physical size. Physical devices do not have
+        regions and no ei_device.region events are sent for such devices.
+      </description>
+      <entry name="virtual" value="1" summary="a virtual device"/>
+      <entry name="physical" value="2" summary="representation of a physical device"/>
+    </enum>
+
+    <event name="device_type" since="1">
+      <description summary="device type notification">
+        The device type, one of virtual or physical.
+
+        Devices of type ei_device.device_type.physical are only supported for
+        clients of type ei_handshake.context_type.receiver.
+
+        This event is sent once immediately after object creation.
+        It is a protocol violation to send this event after the ei_device.done event.
+      </description>
+      <arg name="device_type" type="uint32" enum="device_type" summary="the device type"/>
+    </event>
+
+    <event name="dimensions" since="1">
+      <description summary="device dimensions notification">
+        The device dimensions in mm. This event is optional and sent once immediately
+        after object creation.
+
+        This event is only sent for devices of ei_device.device_type.physical.
+
+        It is a protocol violation to send this event after the ei_device.done event.
+      </description>
+      <arg name="width" type="uint32" summary="the device physical width in mm"/>
+      <arg name="height" type="uint32" summary="the device physical height in mm"/>
+    </event>
+
+    <event name="region" since="1">
+      <description summary="device region notification">
+        Notifies the client of one region. The number of regions is constant for a device
+        and all regions are announced immediately after object creation.
+
+        A region is rectangular and defined by an x/y offset and a width and a height.
+        A region defines the area on an EIS desktop layout that is accessible by
+        this device - this region may not be the full area of the desktop.
+        Input events may only be sent for points within the regions.
+
+        The use of regions is private to the EIS compositor and coordinates may not
+        match the size of the actual desktop. For example, a compositor may set a
+        1920x1080 region to represent a 4K monitor and transparently map input
+        events into the respective true pixels.
+
+        Absolute devices may have different regions, it is up to the client to
+        send events through the correct device to target the right pixel. For
+        example, a dual-head setup may have two absolute devices, the first with
+        a zero offset region spanning the left screen, the second with a nonzero
+        offset spanning the right screen.
+
+        The physical scale denotes a constant multiplication factor that needs to be applied to
+        any relative movement on this region for that movement to match the same
+        *physical* movement on another region.
+
+        It is an EIS implementation bug to advertise the touch and/or absolute pointer capability
+        on a device_type.virtual device without advertising an ei_region for this device.
+
+        This event is optional and sent immediately after object creation. Where a device
+        has multiple regions, this event is sent once for each region.
+        It is a protocol violation to send this event after the ei_device.done event.
+
+        Note: the fourth argument ('hight') was misspelled when the protocol was declared
+        stable but changing the name is an API breaking change.
+      </description>
+      <arg name="offset_x" type="uint32" summary="region x offset in logical pixels"/>
+      <arg name="offset_y" type="uint32" summary="region y offset in logical pixels"/>
+      <arg name="width" type="uint32" summary="region width in logical pixels"/>
+      <!-- note the typo: hight -->
+      <arg name="hight" type="uint32" summary="region height in logical pixels"/>
+      <arg name="scale" type="float" summary="the physical scale for this region"/>
+    </event>
+
+    <event name="interface" since="1">
+      <description summary="device capability notification">
+        Notification that a new device has a sub-interface.
+
+        This event may be sent for the following interfaces:
+        - "ei_pointer"
+        - "ei_pointer_absolute"
+        - "ei_scroll"
+        - "ei_button"
+        - "ei_keyboard"
+        - "ei_touchscreen"
+        - "ei_text"
+        The interface version is equal or less to the client-supported
+        version in ei_handshake.interface_version for the respective interface.
+
+        It is a protocol violation to send a notification for an interface that
+        the client has not bound to with ei_seat.bind.
+
+        This event is optional and sent immediately after object creation
+        and at most once per interface.
+        It is a protocol violation to send this event after the ei_device.done event.
+      </description>
+      <arg name="object" type="new_id" interface_arg="interface_name" />
+      <arg name="interface_name" type="string" summary="the interface name" />
+      <arg name="version" type="uint32" summary="the interface version"/>
+    </event>
+
+    <event name="done" since="1">
+      <description summary="device setup completion notification">
+        Notification that the initial burst of events is complete and
+        the client can set up this device now.
+
+        It is a protocol violation to send this event more than once per device.
+      </description>
+    </event>
+
+    <event name="resumed" since="1">
+      <description summary="device resumed notification">
+        Notification that the device has been resumed by the EIS implementation
+        and (depending on the ei_handshake.context_type) the client may request
+        ei_device.start_emulating or the EIS implementation may
+        ei_device.start_emulating events.
+
+        It is a client bug to request emulation of events on a device that is
+        not resumed. The EIS implementation may silently discard such events.
+
+        A newly advertised device is in the ei_device.paused state.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="paused" since="1">
+      <description summary="device paused notification">
+        Notification that the device has been paused by the EIS implementation
+        and no further events will be accepted on this device until
+        it is resumed again.
+
+        For devices of ei_device_setup.context_type sender, the client thus does
+        not need to request ei_device.stop_emulating and may request
+        ei_device.start_emulating after a subsequent ei_device.resumed.
+
+        For devices of ei_device_setup.context_type receiver and where
+        the EIS implementation did not send a ei_device.stop_emulating
+        prior to this event, the device may send a ei_device.start_emulating
+        event after a subsequent ei_device.resumed event.
+
+        Pausing a device resets the logical state of the device to neutral.
+        This includes:
+        - any buttons or keys logically down are released
+        - any modifiers logically down are released
+        - any touches logically down are released
+
+        It is a client bug to request emulation of events on a device that is
+        not resumed. The EIS implementation may silently discard such events.
+
+        A newly advertised device is in the ei_device.paused state.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="start_emulating" since="1" context-type="receiver">
+      <description summary="Device start emulating event">
+        See the ei_device.start_emulating request for details.
+
+        It is a protocol violation to send this event for a client
+        of an ei_handshake.context_type other than receiver.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+      <arg name="sequence" type="uint32"/>
+    </event>
+
+    <event name="stop_emulating" since="1" context-type="receiver">
+      <description summary="Device stop emulating event">
+        See the ei_device.stop_emulating request for details.
+
+        It is a protocol violation to send this event for a client
+        of an ei_handshake.context_type other than receiver.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="frame" since="1" context-type="receiver">
+      <description summary="Device frame event">
+        See the ei_device.frame request for details.
+
+        It is a protocol violation to send this event for a client
+        of an ei_handshake.context_type other than receiver.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+      <arg name="timestamp" type="uint64" summary="timestamp in microseconds"/>
+    </event>
+
+    <!-- ei_device events version 2 -->
+
+    <event name="region_mapping_id" since="2">
+      <description summary="region id notification">
+        Notifies the client that the region specified in the next ei_device.region
+        event is to be assigned the given mapping_id.
+
+        This ID can be used by the client to identify an external resource that has a
+        relationship with this region.
+        For example the client may receive a data stream with the video
+        data that this region represents. By attaching the same identifier to the data
+        stream and this region the EIS implementation can inform the client
+        that the video data stream and the region represent paired data.
+
+        This event is optional and sent immediately after object creation but before
+        the corresponding ei_device.region event. Where a device has multiple regions,
+        this event may be sent zero or one time for each region.
+        It is a protocol violation to send this event after the ei_device.done event or
+        to send this event without a corresponding following ei_device.region event.
+      </description>
+      <arg name="mapping_id" type="string" summary="region mapping id"/>
+    </event>
+
+  </interface>
+
+  <interface name="ei_pointer" version="1">
+    <description summary="device sub-interface for relative pointer motion">
+      Interface for relative pointer motion requests and events.
+
+      This interface is only provided once per device and where a client
+      requests ei_pointer.release the interface does not get re-initialized. An
+      EIS implementation may adjust the behavior of the device (including removing
+      the device) if the interface is released.
+    </description>
+
+    <!-- ei_pointer client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="pointer sub-interface removal request">
+        Notification that the client is no longer interested in this pointer.
+        The EIS implementation will release any resources related to this pointer and
+        send the ei_pointer.destroyed event once complete.
+      </description>
+    </request>
+
+    <request name="motion_relative" since="1" context-type="sender">
+      <description summary="Relative motion request">
+        Generate a relative motion event on this pointer.
+
+        It is a client bug to send this request more than once
+        within the same ei_device.frame and the EIS implementation
+        may ignore either or all such requests and/or disconnect the client.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+      </description>
+      <arg name="x" type="float" summary="the x movement in logical pixels"/>
+      <arg name="y" type="float" summary="the y movement in logical pixels"/>
+    </request>
+
+    <!-- ei_pointer events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Pointer removal notification">
+        This object has been removed and a client should release all
+        associated resources.
+
+        This object will be destroyed by the EIS implementation immediately
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="motion_relative" since="1" context-type="receiver">
+      <description summary="Relative motion event">
+        See the ei_pointer.motion_relative request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+      </description>
+      <arg name="x" type="float"/>
+      <arg name="y" type="float"/>
+    </event>
+  </interface>
+
+  <interface name="ei_pointer_absolute" version="1">
+    <description summary="device sub-interface for absolute pointer motion">
+      Interface for absolute pointer motion.
+
+      This interface is only provided once per device and where a client
+      requests ei_pointer_absolute.release the interface does not get
+      re-initialized. An EIS implementation may adjust the behavior of the
+      device (including removing the device) if the interface is released.
+    </description>
+
+    <!-- ei_pointer_absolute client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="absolute pointer sub-interface removal request">
+        Notification that the client is no longer interested in this object.
+        The EIS implementation will release any resources related to this object and
+        send the ei_pointer_absolute.destroyed event once complete.
+      </description>
+    </request>
+
+    <request name="motion_absolute" since="1" context-type="sender">
+      <description summary="Absolute motion request">
+        Generate an absolute motion event on this pointer. The x/y
+        coordinates must be within the device's regions or the event
+        is silently discarded.
+
+        It is a client bug to send this request more than once
+        within the same ei_device.frame and the EIS implementation
+        may ignore either or all such requests and/or disconnect the client.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+      </description>
+      <arg name="x" type="float" summary="the x position in logical pixels"/>
+      <arg name="y" type="float" summary="the y position in logical pixels"/>
+    </request>
+
+    <!-- ei_pointer_absolute events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Pointer absolute removal notification">
+        This object has been removed and a client should release all
+        associated resources.
+
+        This object will be destroyed by the EIS implementation immediately
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="motion_absolute" since="1" context-type="receiver">
+      <description summary="Absolute motion event">
+        See the ei_pointer_absolute.motion_absolute request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+      </description>
+      <arg name="x" type="float"/>
+      <arg name="y" type="float"/>
+    </event>
+  </interface>
+
+  <interface name="ei_scroll" version="1">
+    <description summary="scroll object">
+      Interface for scroll requests and events.
+
+      This interface is only provided once per device and where a client
+      requests ei_scroll.release the interface does not get
+      re-initialized. An EIS implementation may adjust the behavior of the
+      device (including removing the device) if the interface is released.
+    </description>
+
+    <!-- ei_scroll client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="Scroll removal request">
+        Notification that the client is no longer interested in this object.
+        The EIS implementation will release any resources related to this object and
+        send the ei_scroll.destroyed event once complete.
+      </description>
+    </request>
+
+    <request name="scroll" since="1" context-type="sender">
+      <description summary="Scroll request">
+        Generate a smooth (pixel-precise) scroll event on this pointer.
+        Clients must not send ei_scroll.scroll_discrete events for the same event,
+        the EIS implementation is responsible for emulation of discrete
+        scroll events.
+
+        It is a client bug to send this request more than once
+        within the same ei_device.frame and the EIS implementation
+        may ignore either or all such requests and/or disconnect the client.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+      </description>
+      <arg name="x" type="float" summary="the x movement in logical pixels"/>
+      <arg name="y" type="float" summary="the y movement in logical pixels"/>
+    </request>
+
+    <request name="scroll_discrete" since="1" context-type="sender">
+      <description summary="Scroll discrete request">
+        Generate a discrete (e.g. wheel) scroll event on this pointer.
+        Clients must not send ei_scroll.scroll events for the same event,
+        the EIS implementation is responsible for emulation of smooth
+        scroll events.
+
+        A discrete scroll event is based logical scroll units (equivalent to one
+        mouse wheel click). The value for one scroll unit is 120, a fraction or
+        multiple thereof represents a fraction or multiple of a wheel click.
+
+        It is a client bug to send this request more than once
+        within the same ei_device.frame and the EIS implementation
+        may ignore either or all such requests and/or disconnect the client.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+      </description>
+      <arg name="x" type="int32" summary="the x movement in fractions or multiples of 120"/>
+      <arg name="y" type="int32" summary="the y movement in fractions or multiples of 120"/>
+    </request>
+
+    <request name="scroll_stop" since="1" context-type="sender">
+      <description summary="Scroll stop request">
+        Generate a scroll stop or cancel event on this pointer.
+
+        A scroll stop event notifies the EIS implementation that the interaction causing a
+        scroll motion previously triggered with ei_scroll.scroll or
+        ei_scroll.scroll_discrete has stopped. For example, if all
+        fingers are lifted off a touchpad, two-finger scrolling has logically
+        stopped. The EIS implementation may use this information to e.g. start kinetic scrolling
+        previously based on the previous finger speed.
+
+        If is_cancel is nonzero, the event represents a cancellation of the
+        current interaction. This indicates that the interaction has stopped to the
+        point where further (server-emulated) scroll events from this device are wrong.
+
+        It is a client bug to send this request more than once
+        within the same ei_device.frame and the EIS implementation
+        may ignore either or all such requests and/or disconnect the client.
+
+        It is a client bug to send this request for an axis that
+        had a nonzero value in either ei_scroll.scroll or ei_scroll.scroll_discrete
+        in the current frame and the EIS implementation
+        may ignore either or all such requests and/or disconnect the client.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+      </description>
+      <arg name="x" type="uint32" summary="nonzero if this axis stopped scrolling"/>
+      <arg name="y" type="uint32" summary="nonzero if this axis stopped scrolling"/>
+      <arg name="is_cancel" type="uint32" summary="nonzero to indicate this is a cancel event"/>
+    </request>
+
+    <!-- ei_scroll events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Scroll removal notification">
+        This object has been removed and a client should release all
+        associated resources.
+
+        This object will be destroyed by the EIS implementation immediately
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="scroll" since="1" context-type="receiver">
+      <description summary="Scroll event">
+        See the ei_scroll.scroll request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+      </description>
+      <arg name="x" type="float"/>
+      <arg name="y" type="float"/>
+    </event>
+
+    <event name="scroll_discrete" since="1" context-type="receiver">
+      <description summary="Discrete scroll event">
+        See the ei_scroll.scroll_discrete request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+      </description>
+      <arg name="x" type="int32"/>
+      <arg name="y" type="int32"/>
+    </event>
+
+    <event name="scroll_stop" since="1" context-type="receiver">
+      <description summary="Scroll stop event">
+
+        See the ei_scroll.scroll_stop request for details.
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+      </description>
+      <arg name="x" type="uint32"/>
+      <arg name="y" type="uint32"/>
+      <arg name="is_cancel" type="uint32"/>
+    </event>
+  </interface>
+
+  <interface name="ei_button" version="1">
+    <description summary="button object">
+      Interface for button requests and events.
+
+      This interface is only provided once per device and where a client
+      requests ei_button.release the interface does not get
+      re-initialized. An EIS implementation may adjust the behavior of the
+      device (including removing the device) if the interface is released.
+    </description>
+
+    <!-- ei_button client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="Button removal request">
+        Notification that the client is no longer interested in this object.
+        The EIS implementation will release any resources related to this object and
+        send the ei_button.destroyed event once complete.
+      </description>
+    </request>
+
+    <enum name="button_state" since="1">
+      <description summary="Button state">
+        The logical state of a button.
+      </description>
+      <entry name="released" value="0" summary="the button is logically up"/>
+      <entry name="press" value="1" summary="the button is logically down"/>
+    </enum>
+
+    <request name="button" since="1" context-type="sender">
+      <description summary="Button state change request">
+        Generate a button event on this pointer.
+
+        The button codes must match the defines in linux/input-event-codes.h.
+
+        It is a client bug to send more than one button request for the same button
+        within the same ei_device.frame and the EIS implementation
+        may ignore either or all button state changes and/or disconnect the client.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+
+        A client should send a ei_button.button release event before
+        ei_device.stop_emulating to avoid any ambiguity on interpretation
+        of button events.
+      </description>
+      <arg name="button" type="uint32" summary="button code"/>
+      <arg name="state" type="uint32" enum="button_state"/>
+    </request>
+
+    <!-- ei_button events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Pointer removal notification">
+        This pointer has been removed and a client should release all
+        associated resources.
+
+        This ei_scroll object will be destroyed by the EIS implementation immediately
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="button" since="1" context-type="receiver">
+      <description summary="Button state change event">
+        See the ei_scroll.button request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+
+        It is an EIS implementation bug to send more than one button request
+        for the same button within the same ei_device.frame.
+      </description>
+      <arg name="button" type="uint32"/>
+      <arg name="state" type="uint32" enum="button_state"/>
+    </event>
+
+  </interface>
+
+  <interface name="ei_keyboard" version="1">
+    <description summary="keyboard object">
+      Interface for keyboard requests and events.
+
+      This interface is only provided once per device and where a client
+      requests ei_keyboard.release the interface does not get re-initialized. An
+      EIS implementation may adjust the behavior of the device (including removing
+      the device) if the interface is released.
+    </description>
+
+    <!-- ei_keyboard client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="keyboard removal request">
+        Notification that the client is no longer interested in this keyboard.
+        The EIS implementation will release any resources related to this keyboard and
+        send the ei_keyboard.destroyed event once complete.
+      </description>
+    </request>
+
+    <enum name="key_state" since="1">
+      <description summary="Key state">
+        The logical state of a key.
+      </description>
+      <entry name="released" value="0" summary="the key is logically up"/>
+      <entry name="press" value="1" summary="the key is logically down"/>
+    </enum>
+
+    <request name="key" since="1" context-type="sender">
+      <description summary="Key state change request">
+        Generate a key event on this keyboard. If the device has an
+        ei_keyboard.keymap, the key code corresponds to that keymap.
+
+        The key codes must match the defines in linux/input-event-codes.h.
+
+        It is a client bug to send more than one key request for the same key
+        within the same ei_device.frame and the EIS implementation
+        may ignore either or all key state changes and/or disconnect the client.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+
+        A client should send a ei_key.key release event before
+        ei_device.stop_emulating to avoid any ambiguity on interpretation
+        of key events.
+      </description>
+      <arg name="key" type="uint32" summary="the key code"/>
+      <arg name="state" type="uint32" enum="key_state" summary="logical state of the key"/>
+    </request>
+
+    <!-- ei_keyboard events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Keyboard removal notification">
+        This keyboard has been removed and a client should release all
+        associated resources.
+
+        This ei_keyboard object will be destroyed by the EIS implementation immediately
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <enum name="keymap_type" since="1">
+      <description summary="the keymap type">
+        The keymap type describes how the keymap in the ei_keyboard.keymap event
+        should be parsed.
+      </description>
+      <entry name="xkb" value="1" summary="a libxkbcommon-compatible XKB keymap" />
+    </enum>
+
+    <event name="keymap" since="1">
+      <description summary="keymap notification">
+        Notification that this device has a keymap. Future key events must be
+        interpreted by the client according to this keymap. For clients
+        of ei_handshake.context_type sender it is the client's
+        responsibility to send the correct ei_keyboard.key keycodes to
+        generate the expected keysym in the EIS implementation.
+
+        The keymap is constant for the lifetime of the device.
+
+        This event provides a file descriptor to the client that can be
+        memory-mapped in read-only mode to provide a keyboard mapping
+        description. The fd must be mapped with MAP_PRIVATE by
+        the recipient, as MAP_SHARED may fail.
+
+        This event is optional and only sent immediately after the ei_keyboard object is created
+        and before the ei_device.done event. It is a protocol violation to send this
+        event after the ei_device.done event.
+      </description>
+      <arg name="keymap_type" type="uint32" enum="keymap_type" summary="the keymap type"/>
+      <arg name="size" type="uint32" summary="the keymap size in bytes"/>
+      <arg name="keymap" type="fd" summary="file descriptor to the keymap"/>
+    </event>
+
+    <event name="key" since="1" context-type="receiver">
+      <description summary="Key state change event">
+        See the ei_keyboard.key request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+
+        It is a protocol violation to send a key down event in the same
+        frame as a key up event for the same key in the same frame.
+      </description>
+      <arg name="key" type="uint32"/>
+      <arg name="state" type="uint32" enum="key_state"/>
+    </event>
+
+    <event name="modifiers" since="1">
+      <description summary="Modifier change event">
+        Notification that the EIS implementation has changed group or modifier
+        states on this device, but not necessarily in response to an
+        ei_keyboard.key event or request. Future ei_keyboard.key requests must
+        take the new group and modifier state into account.
+
+        This event should be sent any time the modifier state or effective group
+        has changed, whether caused by an ei_keyboard.key event in accordance
+        with the keymap, indirectly due to further handling of an
+        ei_keyboard.key event (e.g., because it triggered a keyboard shortcut
+        that then changed the state), or caused by an unrelated an event (e.g.,
+        input from a different keyboard, or a group change triggered by a layout
+        selection widget).
+
+        For receiver clients, modifiers events will always be properly ordered
+        with received key events, so each key event should be interpreted using
+        the most recently-received modifier state. The EIS implementation should
+        send this event immediately following the ei_device.frame event for the
+        key press that caused the change. If the state change impacts multiple
+        keyboards, this event should be sent for all of them.
+
+        For sender clients, the modifiers event is not inherently synchronized
+        with key requests, but the client may send an ei_connection.sync request
+        when synchronization is required. When the corresponding
+        ei_callback.done event is received, all key requests sent prior to the
+        sync request are guaranteed to have been processed, and any
+        directly-resulting modifiers events are guaranteed to have been
+        received. Note, however, that it is still possible for
+        indirectly-triggered state changes, such as via a keyboard shortcut not
+        encoded in the keymap, to be reported after the done event.
+
+        A client must assume that all modifiers are lifted when it
+        receives an ei_device.paused event. The EIS implementation
+        must send this event after ei_device.resumed to notify the client
+        of any nonzero modifier state.
+
+        This event does not require an ei_device.frame and should
+        be processed immediately by the client.
+
+        This event is only sent for devices with an ei_keyboard.keymap.
+
+        Note: A previous version of the documentation instead specified that
+        this event should not be sent in response to ei_keyboard.key events that
+        change the group or modifier state according to the keymap. However,
+        this complicated client implementation and resulted in situations where
+        the client state could get out of sync with the EIS implementation.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+      <arg name="depressed" type="uint32" summary="depressed modifiers"/>
+      <arg name="locked" type="uint32" summary="locked modifiers"/>
+      <arg name="latched" type="uint32" summary="latched modifiers"/>
+      <arg name="group" type="uint32" summary="the keyboard group (layout)"/>
+    </event>
+  </interface>
+
+  <interface name="ei_touchscreen" version="2">
+    <description summary="touchscreen object">
+      Interface for touchscreen requests and events.
+
+      This interface is only provided once per device and where a client
+      requests ei_touchscreen.release the interface does not get re-initialized. An
+      EIS implementation may adjust the behavior of the device (including removing
+      the device) if the interface is released.
+    </description>
+
+    <!-- ei_touchscreen client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="touch removal request">
+        Notification that the client is no longer interested in this touchscreen.
+        The EIS implementation will release any resources related to this touch and
+        send the ei_touchscreen.destroyed event once complete.
+      </description>
+    </request>
+
+    <request name="down" since="1" context-type="sender">
+      <description summary="touch down request">
+        Notifies the EIS implementation about a new touch logically down at the
+        given coordinates. The touchid is a unique id for this touch. Touchids
+        may be re-used after ei_touchscreen.up.
+
+        The x/y coordinates must be within the device's regions or the event and future
+        ei_touchscreen.motion events with the same touchid are silently discarded.
+
+        It is a protocol violation to send a touch down in the same
+        frame as a touch motion or touch up.
+
+        A client should send a ei_touch.up or ei_touch.cancel event before
+        ei_device.stop_emulating to avoid any ambiguity on interpretation of touch
+        events.
+      </description>
+      <arg name="touchid" type="uint32" summary="a unique touch id to identify this touch"/>
+      <arg name="x" type="float" summary="touch x coordinate in logical pixels"/>
+      <arg name="y" type="float" summary="touch y coordinate in logical pixels"/>
+    </request>
+
+    <request name="motion" since="1" context-type="sender">
+      <description summary="touch motion request">
+        Notifies the EIS implementation about an existing touch changing position to
+        the given coordinates. The touchid is the unique id for this touch previously
+        sent with ei_touchscreen.down.
+
+        The x/y coordinates must be within the device's regions or the event is
+        silently discarded.
+
+        It is a protocol violation to send a touch motion in the same
+        frame as a touch down or touch up.
+      </description>
+      <arg name="touchid" type="uint32" summary="a unique touch id to identify this touch"/>
+      <arg name="x" type="float" summary="touch x coordinate in logical pixels"/>
+      <arg name="y" type="float" summary="touch y coordinate in logical pixels"/>
+    </request>
+
+    <request name="up" since="1" context-type="sender">
+      <description summary="touch up request">
+        Notifies the EIS implementation about an existing touch being logically
+        up. The touchid is the unique id for this touch previously
+        sent with ei_touchscreen.down.
+
+        If a touch is cancelled via ei_touchscreen.cancel, the ei_touchscreen.up
+        request must not be sent for this same touch. Likewise, a touch released
+        with ei_touchscreen.up must not be cancelled.
+
+        The touchid may be re-used after this request.
+
+        It is a protocol violation to send a touch up in the same
+        frame as a touch motion or touch down.
+      </description>
+      <arg name="touchid" type="uint32" summary="a unique touch id to identify this touch"/>
+    </request>
+
+    <!-- ei_touchscreen client requests version 2 -->
+
+    <request name="cancel" since="2" context-type="sender">
+      <description summary="touch cancel request">
+        Notifies the EIS implementation about an existing touch being cancelled.
+        This typically means that any effects the touch may have had on the
+        user interface should be reverted or otherwise made inconsequential.
+
+        This request replaces ei_touchscreen.up for the same touch.
+        If a touch is cancelled via ei_touchscreen.cancel, the ei_touchscreen.up
+        request must not be sent for this same touch. Likewise, a touch released
+        with ei_touchscreen.up must not be cancelled.
+
+        The touchid is the unique id for this touch previously
+        sent with ei_touchscreen.down.
+
+        The touchid may be re-used after this request.
+
+        It is a protocol violation to send a touch cancel
+        in the same frame as a touch motion or touch down.
+      </description>
+      <arg name="touchid" type="uint32" summary="a unique touch id to identify this touch"/>
+    </request>
+
+    <!-- ei_touchscreen events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Touchscreen removal notification">
+        This touch has been removed and a client should release all
+        associated resources.
+
+        This ei_touchscreen object will be destroyed by the EIS implementation immediately
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="down" since="1" context-type="receiver">
+      <description summary="touch down event">
+        See the ei_touchscreen.down request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+
+        It is a protocol violation to send a touch down in the same
+        frame as a touch motion or touch up.
+      </description>
+      <arg name="touchid" type="uint32"/>
+      <arg name="x" type="float"/>
+      <arg name="y" type="float"/>
+    </event>
+
+    <event name="motion" since="1" context-type="receiver">
+      <description summary="touch motion event">
+        See the ei_touchscreen.motion request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+
+        It is a protocol violation to send a touch motion in the same
+        frame as a touch down or touch up.
+      </description>
+      <arg name="touchid" type="uint32"/>
+      <arg name="x" type="float"/>
+      <arg name="y" type="float"/>
+    </event>
+
+    <event name="up" since="1" context-type="receiver">
+      <description summary="touch motion event">
+        See the ei_touchscreen.up request for details.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than receiver.
+
+        If a touch is released via ei_touchscreen.up, no ei_touchscreen.cancel
+        event is sent for this same touch. Likewise, a touch released
+        with ei_touchscreen.cancel must not be released via ei_touchscreen.up.
+
+        It is a protocol violation to send a touch up in the same
+        frame as a touch motion or touch down.
+      </description>
+      <arg name="touchid" type="uint32"/>
+    </event>
+
+    <!-- ei_touchscreen events version 2 -->
+
+    <event name="cancel" since="2" context-type="receiver">
+      <description summary="touch cancel event">
+        See the ei_touchscreen.cancel request for details.
+
+        It is a protocol violation to send this event for a client
+        of an ei_handshake.context_type other than receiver.
+
+        If a touch is cancelled via ei_touchscreen.cancel, no ei_touchscreen.up
+        event is sent for this same touch. Likewise, a touch released
+        with ei_touchscreen.up must not be cancelled via ei_touchscreen.cancel.
+
+        It is a protocol violation to send a touch cancel event in the same
+        frame as a touch motion or touch down.
+      </description>
+      <arg name="touchid" type="uint32"/>
+    </event>
+  </interface>
+
+  <interface name="ei_text" version="1">
+    <description summary="text object">
+      Interface for text-based requests and events.
+
+      This interface is only provided once per device and where a client
+      requests ei_text.release the interface does not get re-initialized. An
+      EIS implementation may adjust the behavior of the device (including removing
+      the device) if the interface is released.
+
+      Note that for a client to receive objects of this type, it must announce
+      support for this interface in ei_handshake.interface_version.
+    </description>
+
+    <!-- ei_text client requests version 1 -->
+
+    <request name="release" since="1">
+      <description summary="text removal request">
+        Notification that the client is no longer interested in this text interface object.
+        The EIS implementation will release any resources related to this object and
+        send the ei_text.destroyed event once complete.
+      </description>
+    </request>
+
+    <request name="keysym" since="1" context-type="sender">
+      <description summary="Keysym state change request">
+        Generate an XKB key sym event.
+
+        It is a client bug to send more than one key request for the same keysym
+        within the same ei_device.frame and the EIS implementation
+        may ignore either or all keysym state changes and/or disconnect the client.
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+
+        It is a protocol violation to send this request in the same frame
+        as a ei_keyboard.key.
+      </description>
+      <arg name="keysym" type="uint32" summary="the key sym"/>
+      <arg name="state" type="uint32" enum="ei_keyboard.key_state" summary="logical state of the keysym"/>
+    </request>
+
+    <request name="utf8" since="1" context-type="sender">
+      <description summary="UTF8 text">
+        Generate a UTF-8 compatible text string. Note that sending such a
+        string may not result in any emulated keyboard activity, e.g. an EIS
+        implementation may pass the string directly to the receiver via an
+        input method protocol.
+
+        It is a protocol violation to send this request for a NULL pointer or
+        the empty string.
+        It is a protocol violation to send this request for a string with more
+        than 254 characters (255 bytes including the terminating null byte).
+
+        It is a protocol violation to send this request for a client
+        of an ei_handshake.context_type other than sender.
+
+        It is a protocol violation to send more than one utf8 request in the same
+        frame.
+
+        The order of ei_keyboard.key or ei_text.keysym and ei_text.utf8 if sent
+        within the same frame is undefined.
+      </description>
+      <arg name="text" type="string" allow-null="false" summary="the utf-8 compatible text"/>
+    </request>
+
+    <!-- ei_text events version 1 -->
+
+    <event name="destroyed" type="destructor" since="1">
+      <description summary="Text interface object removal notification">
+        This text interface object has been removed and a client should release all
+        associated resources.
+
+        This ei_text object will be destroyed by the EIS implementation immediately after
+        after this event is sent and as such the client must not attempt to use
+        it after that point.
+      </description>
+      <arg name="serial" type="uint32" summary="this event's serial number"/>
+    </event>
+
+    <event name="keysym" since="1" context-type="receiver">
+      <description summary="Keysym state change event">
+        See the ei_text.keysym request for details.
+
+        It is a protocol violation to send this event for a client
+        of an ei_handshake.context_type other than receiver.
+
+        It is a protocol violation to send a keysym down event in the same
+        frame as a key up event for the same keysym in the same frame.
+
+        It is a protocol violation to send this event in the same frame
+        as a ei_keyboard.key event.
+      </description>
+      <arg name="keysym" type="uint32"/>
+      <arg name="state" type="uint32" enum="ei_keyboard.key_state"/>
+    </event>
+
+    <event name="utf8" since="1" context-type="receiver">
+      <description summary="UTF8 text event">
+        See the ei_text.utf8 request for details.
+
+        It is a protocol violation to send this event for a NULL pointer or
+        the empty string.
+        It is a protocol violation to send this event for a string with more
+        than 254 characters (255 bytes including the terminating null byte).
+
+        It is a protocol violation to send this event for a client
+        of an ei_handshake.context_type other than receiver.
+
+        It is a protocol violation to send more than one utf8 event in the same
+        frame.
+
+        The order of ei_keyboard.key, ei_text.keysym, and ei_text.utf8 if sent
+        within the same frame is undefined.
+      </description>
+      <arg name="text" type="string" allow-null="false" summary="the utf-8 compatible text"/>
+    </event>
+  </interface>
+</protocol>

@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Replay the model's findings A to F against the real code, offline: a temp XDG_RUNTIME_DIR,
+fake proxies (one acts on `worn 1` but never answers), FRAME_TESTBENCH_SOCKET at a path nothing
+listens on, a layout with one made-up input host. It touches no live proxy, stream, lock or flag.
+E is ft-stream's: it builds a small program against stream/hostinput.h with g++ (CXX) into the
+temp dir and runs ft-stream's two ticks with it.
+
+  replay      prints whether each finding still happens in the code; exit 0 when that matches
+              the baseline, 1 when it doesn't (update SKILL.md for a fix, or read the finding
+              that came back). A, C, D and F are fixed in the testbench, E in ft-stream. B still
+              happens in the testbench, by design: ft-stream closes it by refusing the lease while
+              the flag it leaves is there, so B's line also says whether that flag is one
+              ft-stream refuses."""
+import argparse, fcntl, json, os, signal, socket, subprocess, sys, tempfile, threading, time
+from pathlib import Path
+from unittest import mock
+
+TESTBENCH = Path(__file__).resolve().parents[4] / 'testbench'
+run = Path(tempfile.mkdtemp(prefix='fake-worn-replay-'))
+os.environ['XDG_RUNTIME_DIR'] = str(run)
+os.environ['FRAME_TESTBENCH_SOCKET'] = str(run / 'no-proxy.sock')
+sys.path.insert(0, str(TESTBENCH))
+from frame_testbench import cli, hostinput   # noqa: E402
+
+HOST = '10.0.0.9'
+layout = run / 'layout.json'
+layout.write_text(json.dumps({'hosts': [{'address': HOST, 'name': 'host', 'input': True}]}))
+
+
+class HungProxy:
+    """Acts on `worn 1`; every reply times out (socket.timeout, as transport.request raises)."""
+    def __init__(self, faked=False):
+        self.faked = faked
+    def control(self, command):
+        if command == 'worn 1':
+            self.faked = True
+        raise socket.timeout('timed out')
+
+
+def lock_free():
+    fd = os.open(hostinput.lock_path(HOST), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def finding_a():
+    """`worn on`: worn 1 acts but times out, its release times out, and the flag goes anyway."""
+    proxy = HungProxy()
+    guard = threading.Thread(target=hostinput.guard, args=(layout, 0.05, lambda: None), daemon=True)
+    alive = lambda flag, proc='/proc': flag.get('pid') == os.getpid() and guard.is_alive()
+    with mock.patch.object(hostinput.signal, 'signal', lambda *a: None), \
+         mock.patch.object(hostinput, 'guard_alive', alive), \
+         mock.patch.object(hostinput, 'state', lambda *a, **k: {'input_streams': []}), \
+         mock.patch.object(hostinput, 'start_guard', lambda **k: guard.start() or time.sleep(0.2)):
+        try:
+            cli.dispatch(argparse.Namespace(command='worn', state='on', allow_host_input=False, socket=None), proxy)
+        except Exception:
+            pass
+        guard.join(1)
+        happens = proxy.faked and hostinput.read_flag() is None and lock_free()
+        hostinput.clear_flag()   # a guard still holding lets go before finding B takes the lock
+        guard.join(1)
+    return happens
+
+
+def finding_b():
+    """SIGKILL of a guard holding the lock: the lock is free before any ExecStopPost runs."""
+    hostinput.clear_flag()
+    g = subprocess.Popen([sys.executable, '-m', 'frame_testbench.hostinput', 'guard', str(layout)],
+                         cwd=TESTBENCH, stdout=subprocess.PIPE, text=True)
+    held = g.stdout.readline().startswith('holding') and not lock_free()
+    g.send_signal(signal.SIGKILL)
+    g.wait()
+    flag = hostinput.read_flag()
+    # ft-stream's rule (AllowsHostInput): only a JSON object with "allow_host_input": true allows
+    global b_flag_stops_lease
+    b_flag_stops_lease = flag is not None and flag.get('allow_host_input') is not True
+    return held and flag is not None and lock_free()
+
+
+def finding_c():
+    """drop_unsafe_worn: a dead guard's flag, worn-release times out, the flag goes anyway."""
+    proxy = HungProxy(faked=True)
+    hostinput.set_flag(False, time.time(), pid=999999)
+    with mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': False), \
+         mock.patch('sys.stderr', open(os.devnull, 'w')):
+        cli.drop_unsafe_worn(proxy, argparse.Namespace(command='host-input', state=None, allow_host_input=False))
+    return proxy.faked and hostinput.read_flag() is None
+
+
+def finding_d():
+    """`worn on` over a flag an unconfirmed release left: start_guard clears it, and the new
+    guard dies before it takes the locks, so worn on is refused with the wearer faked."""
+    def guard_dies(**k):
+        started.append(1)
+        hostinput.clear_flag()
+        raise RuntimeError("the host-input guard couldn't take the input locks")
+    proxy = HungProxy(faked=True)
+    hostinput.set_flag(False, time.time(), pid=999999)
+    started = []
+    with mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': False), \
+         mock.patch.object(hostinput, 'state', lambda *a, **k: {'input_streams': []}), \
+         mock.patch.object(hostinput, 'start_guard', guard_dies), \
+         mock.patch('sys.stderr', open(os.devnull, 'w')):
+        try:
+            args = argparse.Namespace(command='worn', state='on', allow_host_input=False, socket=None)
+            cli.drop_unsafe_worn(proxy, args)
+            cli.dispatch(args, proxy)
+        except Exception:
+            pass
+    happens = bool(started) and proxy.faked and hostinput.read_flag() is None
+    hostinput.clear_flag()
+    return happens
+
+
+E_TICKS = r"""
+#include "hostinput.h"
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+using namespace ftstream::hostinput;
+// argv: RUNTIME_DIR, then "" for the tick that reads the flag, or the path that tick read
+int main(int, char **argv) {
+    timespec t;
+    clock_gettime(CLOCK_REALTIME, &t);
+    const int64_t wall = int64_t(t.tv_sec) * 1'000'000'000 + t.tv_nsec, now = 100'000'000'000;
+    const auto allows = [](const std::string &text) { return text.find("\"allow_host_input\": true") != std::string::npos; };
+    const std::string test = TestForbidding({argv[1]}, wall, allows);
+    if (!*argv[2]) return std::puts(test.c_str()), 0;
+    const Answer worn = AfterTest(Answer{true, now - 1}, argv[2], test);   // "worn" from the faked wearer
+    std::puts(Decide(true, true, worn, Answer{false, now - 1}, !test.empty(), now) == Want::kHold ? "lease" : "none");
+}
+"""
+
+
+def finding_e():
+    """ft-stream holds the lock while a dead guard's flag is there, and the helper says "worn"
+    (the fake). The next command releases the wearer and clears the flag, and the stream's next
+    tick leases on that answer, still fresh for 3 s."""
+    src, exe = run / 'e-ticks.cpp', run / 'e-ticks'
+    src.write_text(E_TICKS)
+    subprocess.run([os.environ.get('CXX', 'g++'), '-std=c++17', f'-I{TESTBENCH.parent / "stream"}', str(src),
+                    '-o', str(exe)], check=True)
+    hostinput.set_flag(False, time.time(), pid=999999)
+    said = subprocess.run([str(exe), str(run), ''], capture_output=True, text=True, check=True).stdout.strip()
+    proxy = mock.Mock(control=mock.Mock(return_value={'ok': True}))
+    with mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': False), \
+         mock.patch('sys.stderr', open(os.devnull, 'w')):
+        cli.drop_unsafe_worn(proxy, argparse.Namespace(command='status', state=None, allow_host_input=False))
+    tick = subprocess.run([str(exe), str(run), said], capture_output=True, text=True, check=True).stdout.strip()
+    if not said or hostinput.read_flag() is not None:
+        sys.exit('replay: finding E never got its flag read, then cleared')
+    return tick == 'lease'
+
+
+def finding_f():
+    """`worn on`: the guard is stopped (SIGTERM) after start_guard saw it live and before `worn 1`.
+    Its release finds nothing faked yet; `worn 1` then fakes the wearer, and if the guard took its
+    flag along, nothing stops a stream that takes the free lock from leasing till the post-check."""
+    hostinput.clear_flag()
+    guard, window = [], []
+
+    def start_guard(**k):
+        guard.append(subprocess.Popen([sys.executable, '-m', 'frame_testbench.hostinput', 'guard', str(layout)],
+                                      cwd=TESTBENCH, stdout=subprocess.PIPE, text=True))
+        guard[0].stdout.readline()   # holding: it took the lock and wrote the flag
+        return guard[0].pid
+
+    class Proxy:
+        faked = False
+        def control(self, command):
+            if command == 'worn 1':
+                guard[0].send_signal(signal.SIGTERM)   # its unit stopped from outside
+                guard[0].wait()
+                self.faked = True
+                window.append(hostinput.read_flag() is None and lock_free())
+            elif command == 'worn-release':
+                self.faked = False
+            return {'ok': True}
+    with mock.patch.object(hostinput, 'state', lambda *a, **k: {'input_streams': []}), \
+         mock.patch.object(hostinput, 'start_guard', start_guard):
+        try:
+            cli.dispatch(argparse.Namespace(command='worn', state='on', allow_host_input=False, socket=None), Proxy())
+        except ValueError:
+            pass   # the post-check: the guard stopped as the wearer was faked
+    if guard:
+        guard[0].stdout.close()
+    hostinput.clear_flag()
+    if not window:
+        sys.exit('replay: finding F never reached worn 1')
+    return window[0]
+
+
+b_flag_stops_lease = False
+BASELINE = {'A': False, 'B': True, 'C': False, 'D': False, 'E': False, 'F': False}   # B: ft-stream
+results = {'A': finding_a(), 'B': finding_b(), 'C': finding_c(), 'D': finding_d(), 'E': finding_e(), 'F': finding_f()}
+for name, happens in results.items():
+    note = ''
+    if name == 'B':
+        note = ('; the flag it leaves stops ft-stream\'s lease' if b_flag_stops_lease
+                else '; the flag it leaves would NOT stop ft-stream\'s lease')
+    print(f'finding {name}: {"still happens" if happens else "no longer happens"}'
+          + (' at the testbench level' if name == 'B' else '') + note
+          + ('' if happens == BASELINE[name] else '  (differs from the baseline)'))
+ok = results == BASELINE and b_flag_stops_lease
+sys.exit(0 if ok else 1)

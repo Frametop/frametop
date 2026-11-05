@@ -82,14 +82,22 @@ SetReader::~SetReader() {
 
 bool SetReader::open(const std::string &dir, std::string &err) {
     const std::string path = dir + "/sets.bin";
+    dir_ = dir, part_ = 1;
     f_ = std::fopen(path.c_str(), "rb");
     return f_ ? true : (err = path + ": " + std::strerror(errno), false);
 }
 
 bool SetReader::next(std::vector<fh_set_cam_t> &cams, std::vector<std::vector<uint8_t>> &pixels) {
     fh_set_hdr_t h;
-    if (std::fread(&h, sizeof h, 1, f_) != 1 || std::memcmp(h.magic, FH_SET_MAGIC, 8) || h.ncams == 0 || h.ncams > 16)
-        return false;
+    if (std::fread(&h, sizeof h, 1, f_) != 1) {   // the next part, if any
+        if (!std::feof(f_)) return false;
+        FILE *next = std::fopen((dir_ + "/sets-" + std::to_string(part_ + 1) + ".bin").c_str(), "rb");
+        if (!next) return false;
+        std::fclose(f_);
+        f_ = next, ++part_;
+        if (std::fread(&h, sizeof h, 1, f_) != 1) return false;
+    }
+    if (std::memcmp(h.magic, FH_SET_MAGIC, 8) || h.ncams == 0 || h.ncams > 16) return false;
     cams.resize(h.ncams);
     if (std::fread(cams.data(), sizeof(fh_set_cam_t), h.ncams, f_) != h.ncams) return false;
     pixels.resize(h.ncams);

@@ -13,8 +13,12 @@ It writes ~/frametop-keys-report-<time>.txt with:
     nothing you type is in the report.
   - the relay's and pointer helper's log for the same time, and the end of the Frametop
     desktop's log (where typing went)
+  - what ft-screens holds down (its "keys": keyboard focus, keys and modifiers, releases owed
+    to KWin; it names only the modifiers, Esc and Tab, and counts the rest), as the recording
+    starts and as it ends
 Bluetooth addresses and the headset's serial number are masked.
 """
+import collections
 import glob
 import json
 import os
@@ -25,6 +29,10 @@ import struct
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 
 RELAY = "\0frametop_relay"
 SCREENS = "\0ft_screens"
@@ -34,6 +42,8 @@ KEYS = {1: "Esc", 15: "Tab", 29: "LeftCtrl", 42: "LeftShift", 54: "RightShift", 
         97: "RightCtrl", 100: "RightAlt", 125: "LeftMeta", 126: "RightMeta",
         0x110: "BTN_LEFT", 0x111: "BTN_RIGHT", 0x112: "BTN_MIDDLE", 0x113: "BTN_SIDE", 0x114: "BTN_EXTRA"}
 VALUES = {0: "up", 1: "down", 2: "repeat"}
+# ft-screens' "keys", asked as the report starts and as it ends: what the desktop holds down.
+KEYS_LINE = "ft-screens keys (keyboard focus, typing, keys and modifiers down, releases owed to KWin): "
 HOME = os.path.expanduser("~")
 ENV = dict(os.environ, XDG_RUNTIME_DIR=f"/run/user/{os.getuid()}",
            DBUS_SESSION_BUS_ADDRESS=f"unix:path=/run/user/{os.getuid()}/bus")
@@ -47,16 +57,8 @@ def run(*cmd):
 
 
 def ask(address, text, timeout=3.0):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    s.bind("")  # autobind, so the other side can reply
-    s.settimeout(timeout)
-    try:
-        s.sendto(text.encode(), address)
-        return s.recv(65536).decode(errors="replace")
-    except OSError as e:
-        return f"no answer ({e})"
-    finally:
-        s.close()
+    reply, why = ftipc.exchange(address, text, timeout)
+    return reply if reply is not None else f"no answer ({why})"
 
 
 def key_name(code):
@@ -112,11 +114,12 @@ def main():
     try:
         with open(os.path.join(HOME, ".config/frametop.conf")) as f:
             conf = [ln.split("#")[0].strip() for ln in f]
-        out("Settings: " + " ".join(c for c in conf if re.match(r"(POINTER|SHARE_KEYS|BACKEND)=", c)))
+        out("Settings: " + " ".join(c for c in conf if re.match(r"(POINTER|BACKEND)=", c)))
     except OSError:
         out("Settings: no ~/.config/frametop.conf")
     out("ft-screens state (visibility, manual, wrist, gesture, lasers, game running, in games): "
         + ask(SCREENS, "state"))
+    out(KEYS_LINE + ask(SCREENS, "keys"))
 
     out("\n===== Input devices (programs with the node open)")
     opened = openers()
@@ -185,6 +188,7 @@ def main():
     out("relay reads: from a physical device. relay sends: out of the relay's virtual devices,"
         " to gamescope and SteamVR. Keys typed into the desktop go to ft-screens, not listed here.")
     lines.extend(events or ["(no keys)"])
+    out("\nAt the end, " + KEYS_LINE + ask(SCREENS, "keys"))
 
     since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_wall - 5))
     for unit in ("frametop-input-relay", "frametop-pointer"):
@@ -193,8 +197,8 @@ def main():
     started = run("sh", "-c", "ps -o lstart= -p $(pgrep -x ft-screens | head -1) 2>/dev/null")
     out(f"\n===== Frametop desktop log (last 40 lines; times count from its start, {started or 'not running'})")
     try:
-        with open("/tmp/frametop-screens.log", errors="replace") as f:
-            lines.extend(ln.rstrip() for ln in f.readlines()[-40:])
+        with open(os.path.expanduser("~/.local/state/frametop/screens.log"), errors="replace") as f:
+            lines.extend(ln.rstrip() for ln in collections.deque(f, maxlen=40))
     except OSError:
         out("missing")
     text = "\n".join(lines) + "\n"

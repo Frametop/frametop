@@ -6,6 +6,8 @@
 #
 # It asks which version to install, clones the repo into ~/frametop (or updates the clone
 # that's there), and runs its install.sh. Run it again to update, or to switch versions.
+# The clone has that one branch, and fetches older files' contents only when they're needed
+# (a switch fetches the new branch; for all of them: git remote set-branches origin '*').
 # Its third and fourth choices, or --release, install a release instead: Frametop built, in one file. It downloads the
 # release's Frametop.zip from GitHub (about 1.1 GB: the newest stable release, or with
 # --experimental the newest of any), unpacks it in ~/.cache/frametop/release, and runs its
@@ -21,19 +23,20 @@
 #   --clone-only    get or update the repo (or unpack the release), but don't run install.sh
 #   --release       install a release from GitHub instead of cloning the repo
 #   --version V     with --release: that release (tag vV), not the newest
-#   --zip FILE|URL  with --release: this Frametop.zip instead of GitHub's newest
+#   --zip FILE|URL  with --release: this Frametop.zip instead of GitHub's newest (a URL needs
+#                   the release's SHA256SUMS beside it, as GitHub's releases have)
 #   --any-steamos   with --release: install even on a SteamOS build the release breaks on
-#   --yes, --no-eye-tracker, --no-bluetooth, --bluetooth   passed to install.sh (--yes also
+#   --yes, --no-voice, --no-hands, --no-eye-tracker, --no-bluetooth, --bluetooth   passed to install.sh (--yes also
 #                   answers this script's questions: the version already there, or stable)
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
 usage: get.sh [--stable | --experimental | --branch NAME] [--dir DIR] [--clone-only] [--yes]
-              [--no-eye-tracker] [--no-bluetooth | --bluetooth]
+              [--no-voice] [--no-hands] [--no-eye-tracker] [--no-bluetooth | --bluetooth]
        get.sh --release [--stable | --experimental | --version V | --zip FILE|URL]
-              [--any-steamos] [--dir DIR] [--clone-only] [--yes] [--no-eye-tracker]
-              [--no-bluetooth | --bluetooth]
+              [--any-steamos] [--dir DIR] [--clone-only] [--yes] [--no-voice] [--no-hands]
+              [--no-eye-tracker] [--no-bluetooth | --bluetooth]
 piped: curl -fsSL https://frametop.github.io/frametop/get.sh | bash -s -- [options]
 EOF
 }
@@ -59,6 +62,23 @@ for r in json.load(sys.stdin):  # newest first
             sys.exit(0)
 sys.exit(1)'
   fi
+}
+
+# check_sums SUMS_URL FILE: FILE has to match the Frametop.zip line of the release's
+# SHA256SUMS (CI publishes one with every zip). A zip that doesn't is removed, so the next run
+# downloads it again.
+check_sums() {
+  local sums want
+  sums=$(curl -fsSL --proto '=https' "$1") ||
+    { echo "couldn't fetch the release's checksums ($1): run this again" >&2; return 1; }
+  want=$(printf '%s\n' "$sums" | awk '$2 == "Frametop.zip" || $2 == "*Frametop.zip" { print $1; exit }')
+  [[ $want =~ ^[0-9a-f]{64}$ ]] || { echo "the release's SHA256SUMS ($1) doesn't list Frametop.zip" >&2; return 1; }
+  if [ "$(sha256sum "$2" | cut -d' ' -f1)" != "$want" ]; then
+    rm -f "$2"
+    echo "the download doesn't match the release's SHA256SUMS: run this again to download it again" >&2
+    return 1
+  fi
+  echo "Checked Frametop.zip against the release's SHA256SUMS"
 }
 
 # install_release CHANNEL VERSION ZIP DIR CLONE_ONLY ANY_STEAMOS -- INSTALL_ARGS...
@@ -91,7 +111,8 @@ install_release() {
         curl -fL --proto '=https' -C - -o "$file.part" "$url" ||
           { echo "the download didn't finish: run this again to resume it" >&2; return 1; }
         mv "$file.part" "$file"
-      fi ;;
+      fi
+      check_sums "${url%/*}/SHA256SUMS" "$file" || return ;;
     *://*) echo "the zip has to come over https: $zip" >&2; return 1 ;;
     *) file=$zip; [ -f "$file" ] || { echo "no file $file" >&2; return 1; } ;;
   esac
@@ -112,6 +133,22 @@ install_release() {
   [ "$clone_only" = 1 ] || rm -rf "$cache"
 }
 
+# A new clone of one branch: only that branch's history, and its files' contents only as checked
+# out (later ones arrive as they're needed). An older git that doesn't know --filter fails before
+# making the folder, so that's tried again as a whole clone of the branch.
+clone_repo() {  # clone_repo REPO BRANCH DIR
+  git clone --single-branch --filter=blob:none --branch "$2" "$1" "$3" && return 0
+  [ -e "$3" ] && return 1
+  echo "Trying again without --filter, in case this git doesn't take it" >&2
+  git clone --single-branch --branch "$2" "$1" "$3"
+}
+
+# Fetch BRANCH by name: a clone of one branch (above) doesn't fetch the others, so switching to
+# another needs it, and the clone's later updates get it too.
+fetch_branch() {  # fetch_branch DIR BRANCH
+  git -C "$1" fetch --quiet origin "+refs/heads/$2:refs/remotes/origin/$2"
+}
+
 # Everything happens in main, called on the last line, so a download cut short runs nothing.
 main() {
   local repo=https://github.com/Frametop/frametop.git dir= branch= clone_only=0
@@ -129,7 +166,7 @@ main() {
       --version) want=${2:?--version needs a version}; shift ;;
       --any-steamos) any=1 ;;
       --yes) yes=1; pass+=("$1") ;;
-      --no-bluetooth|--bluetooth|--no-eye-tracker) pass+=("$1") ;;
+      --no-bluetooth|--bluetooth|--no-eye-tracker|--no-voice|--no-hands) pass+=("$1") ;;
       -h|--help) usage; return 0 ;;
       *) echo "unknown option: $1" >&2; usage >&2; return 2 ;;
     esac
@@ -211,14 +248,14 @@ main() {
 
   if [ ! -e "$dir" ]; then
     echo "Cloning Frametop ($branch) into $dir"
-    git clone --branch "$branch" "$repo" "$dir"
+    clone_repo "$repo" "$branch" "$dir"
   else
     if ! git -C "$dir" diff --quiet || ! git -C "$dir" diff --cached --quiet; then
       echo "$dir has changes of its own. Commit or stash them first (git -C $dir status)." >&2
       return 1
     fi
     echo "Updating $dir to the latest $branch"
-    git -C "$dir" fetch --quiet origin
+    fetch_branch "$dir" "$branch"
     if [ "$current" != "$branch" ]; then
       if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
         git -C "$dir" switch --quiet "$branch"
@@ -243,4 +280,6 @@ main() {
   fi
 }
 
+# Sourced (the tests, scripts/tests/test_get.py): only the functions, nothing runs.
+(return 0 2>/dev/null) && return 0
 main "$@"

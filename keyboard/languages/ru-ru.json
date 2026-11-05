@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "ru-ru",
+  "name": "Русский",
+  "locale": "ru-RU",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "ru",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans",
+    "sans-serif"
+  ]
+}

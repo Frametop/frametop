@@ -27,7 +27,6 @@ import io
 import json
 import os
 import re
-import socket
 import statistics
 import struct
 import subprocess
@@ -35,6 +34,10 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 
 HOME = Path.home()
 UID = os.getuid()
@@ -86,18 +89,8 @@ def run(*cmd, timeout=10):
 def ask(name, msg, timeout=1.0):
     """A command on an abstract datagram socket. The reply; None when nothing listens; "" when
     nothing answered in time."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
-    s.bind(f"\0ft_gazereport.{os.getpid()}")
-    s.settimeout(timeout)
-    try:
-        s.sendto(msg.encode(), "\0" + name)
-        return s.recv(65536).decode("utf-8", "replace")
-    except (ConnectionRefusedError, FileNotFoundError):
-        return None
-    except socket.timeout:
-        return ""
-    finally:
-        s.close()
+    reply, why = ftipc.exchange(name, msg, timeout, bind=f"ft_gazereport.{os.getpid()}")
+    return reply if reply is not None else None if why == ftipc.NOBODY else ""
 
 
 def ask_json(name, msg, timeout=1.0):
@@ -250,7 +243,7 @@ def check_install():
     # Builds, each against its sources: a pull that changed one without a rebuild runs old code.
     say("builds:")
     builds = [("gaze/build/ft-gaze", ["gaze/ft-gaze.cpp", "pointer/common"], "gaze/build.sh"),
-              ("gaze/build/ft-gazepanel", ["gaze/panel/ft-gazepanel.cpp"], "gaze/build.sh"),
+              ("gaze/build/ft-gazepanel", ["gaze/panel/ft-gazepanel.cpp", "screens/glyphs.h"], "gaze/build.sh"),
               ("gaze/tracker/build/ft-eyegrab", ["gaze/tracker/ft-eyegrab.c"], "gaze/tracker/build.sh")]
     for built, sources, how in builds:
         t = mtime(repo / built)
@@ -267,7 +260,7 @@ def check_install():
     venv = repo / "gaze/tracker/build/venv"
     done = venv / "requirements.done"
     req = repo / "gaze/tracker/requirements.txt"
-    if not (venv / "bin/python").exists():
+    if not os.path.lexists(venv / "bin/python"):  # a link to the container's Python (ft-gazed's venv_built)
         say("  gaze/tracker/build/venv (our tracker's Python): missing")
     else:
         same = done.is_file() and req.is_file() and done.read_bytes() == req.read_bytes()
@@ -300,17 +293,9 @@ def check_install():
 
 def gaze_settings(repo):
     """frametop.conf's gaze lines (set or default), and which tracker that makes."""
-    conf = {}
-    try:
-        for line in CONF.read_text().splitlines():
-            line = line.split("#", 1)[0].strip()
-            if "=" in line:
-                k, v = line.split("=", 1)
-                conf[k.strip()] = v.strip()
-    except OSError:
-        pass
+    conf = ft_conf.read(str(CONF))
     setting = conf.get("GAZE_TRACKER", "auto").lower()
-    venv = (repo / "gaze/tracker/build/venv/bin/python").exists() if repo else False
+    venv = os.path.lexists(repo / "gaze/tracker/build/venv/bin/python") if repo else False
     installed = EYEGRAB_BIN.exists() and EYEGRAB_UNIT.exists() and venv
     tracker = setting if setting in ("own", "steam") else "own" if installed else "steam"
     return conf, setting, installed, tracker
@@ -356,6 +341,18 @@ def check_steam_tracker(worn, repo):
         elif "idle" in result and worn:
             find("The headset is worn, but SteamVR's eye tracker isn't writing eye-server.mmap: "
                  "see eyetracking.txt below (SteamVR restarts it with SteamVR)")
+        # The eye cameras' rate (gaze/eye-rate.py): at 15 fps our tracker can't calibrate.
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                uc.check_eye_rate()
+        except Exception as e:  # an update-check.py from before it
+            buf.write(f"update-check.py's eye camera check failed: {e}\n")
+        result = buf.getvalue().strip()
+        if result:
+            say(f"eye cameras (scripts/update-check.py): {result}")
+        if result.startswith(("FAIL", "warn")):
+            find("SteamVR's eye cameras: " + result.split(":", 1)[-1].strip())
 
     say("", "vrserver.txt, eye tracking (last 10):")
     entries = steam_log(LOGS / "vrserver.txt") or []

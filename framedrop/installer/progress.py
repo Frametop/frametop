@@ -13,7 +13,7 @@ The install runs in a user service of its own (UNIT): Steam ends the title's who
 tree when it's quit, and starts it with a high OOM score. Closing the window doesn't stop the
 install; playing the title again reattaches to it.
 
-Our eye tracker and the Bluetooth fixes need sudo. The window asks for your password on the
+Hand tracking, the Hand Recorder, our eye tracker and the Bluetooth fixes need sudo. The window asks for your password on the
 headset, checks it with sudo, and keeps it in this process's memory until the install ends.
 sudo in the install gets it through askpass (SUDO_ASKPASS), from a socket in a folder only you
 can open, and the window answers only programs in the install's service. It's never written to
@@ -46,7 +46,7 @@ RELEASE = (HERE / "install-release.sh").exists() and (HERE / "frametop-image.tar
 SOCK_DIR = Path(f"/run/user/{os.getuid()}/frametop-install")
 SOCK = SOCK_DIR / "askpass"
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-# get.sh and install.sh mark each step with "== N/10 what it is"
+# get.sh and install.sh mark each step with "== N/M what it is"
 STEP = re.compile(r"^== (\d+)/(\d+) (.*)$")
 DONE_TEXT = ("Frametop is installed. Restart SteamVR once, or reboot the headset, so it loads "
              "Frametop's driver. Then open Launch a program, then Desktop.")
@@ -101,7 +101,7 @@ def in_unit(pid):
         return False
 
 
-def install_command(eye_tracker, bluetooth):
+def install_command(eye_tracker, bluetooth, voice=True, hands=True, hand_recorder=True):
     if RELEASE:
         args = [str(HERE / "install-release.sh"), "--yes"]
         if DRY_RUN:
@@ -110,6 +110,12 @@ def install_command(eye_tracker, bluetooth):
         args = [str(HERE / "get.sh"), "--yes"]
         if DRY_RUN:
             args += ["--clone-only", "--dir", str(STATE / "dry-run")]
+    if not voice:
+        args.append("--no-voice")
+    if not hands:
+        args.append("--no-hands")
+    if RELEASE and not hand_recorder:   # a clone (get.sh) doesn't offer it: hands/rec/install.sh builds it
+        args.append("--no-hand-recorder")
     if not eye_tracker:
         args.append("--no-eye-tracker")
     if bluetooth:
@@ -302,8 +308,16 @@ class Window(Adw.ApplicationWindow):
     def show_choices(self):
         what = f"Frametop {release_version()}" if RELEASE else "Frametop from GitHub"
         self.detail.set_label(f"This installs {what}: the multi-screen desktop, the 3D mouse, gaze "
-                              "mode, and Frametop's settings apps. Two optional parts need your "
-                              "SteamOS password (sudo):")
+                              "mode, and Frametop's settings apps. Optional: voice dictation, and "
+                              "parts that need your SteamOS password (sudo):")
+        self.voice = Gtk.CheckButton(label="Voice dictation: a Right Ctrl tap or holding the left d-pad down, and "
+                                           "what you say is typed (downloads about 320 MB)", active=True)
+        self.hands = Gtk.CheckButton(label="Hand tracking (experimental): poke, pinch and grab the screens with "
+                                           "your hands. It uses a lot of the headset's CPU", active=True)
+        # A release brings it built; a clone builds it with hands/rec/install.sh, so isn't offered it
+        self.recorder = Gtk.CheckButton(label="Hand Recorder: record your hands for Frametop's open hand "
+                                              "dataset, which trains hand tracking (nothing is uploaded "
+                                              "until you press Upload)", active=True, visible=RELEASE)
         self.eye = Gtk.CheckButton(label="Our own eye tracker for gaze mode (more accurate than SteamVR's)",
                                    active=True)
         self.bt = Gtk.CheckButton(label="Bluetooth fixes (LE mice and keyboards, like the Swiftpoint Z3, "
@@ -319,27 +333,28 @@ class Window(Adw.ApplicationWindow):
         self.go.connect("clicked", self.install)
         self.pw.connect("activate", self.install)
         pw_row, keypad = keypad_row(self.pw)
-        self.choices = [self.eye, self.bt, pw_row, keypad, pw_note, self.error, self.go]
+        self.choices = [self.voice, self.hands, self.recorder, self.eye, self.bt, pw_row, keypad, pw_note,
+                        self.error, self.go]
         if not password_set():
-            for c in (self.eye, self.bt):
+            for c in (self.hands, self.recorder, self.eye, self.bt):
                 c.set_active(False)
                 c.set_sensitive(False)
             pw_row.set_visible(False)
             keypad.set_visible(False)
-            pw_note.set_label("Your user has no password, so sudo can't run and these two can't be "
+            pw_note.set_label("Your user has no password, so sudo can't run and these can't be "
                               "installed from here. To set one, run passwd in Konsole; then play "
                               "Frametop again, or install them later from a terminal "
-                              "(gaze/tracker/install.sh, setup/bluetooth/install.sh).")
-        for c in (self.eye, self.bt):
-            c.connect("toggled", lambda *_: pw_row.set_sensitive(self.eye.get_active() or self.bt.get_active()))
+                              "(hands/run.sh install, hands/rec/install.sh, gaze/tracker/install.sh, "
+                              "setup/bluetooth/install.sh).")
+        for c in (self.hands, self.recorder, self.eye, self.bt):
+            c.connect("toggled", lambda *_: pw_row.set_sensitive(self.needs_password()))
         for w in self.choices:
             self.box.append(w)
 
     def install(self, *_):
         if self.checking:
             return
-        needs = self.eye.get_active() or self.bt.get_active()
-        if not needs:
+        if not self.needs_password():
             return self.begin(None)
         text = self.pw.get_text()
         if not text:
@@ -366,12 +381,17 @@ class Window(Adw.ApplicationWindow):
 
         threading.Thread(target=check, daemon=True).start()
 
+    def needs_password(self):
+        return (self.hands.get_active() or (RELEASE and self.recorder.get_active()) or self.eye.get_active()
+                or self.bt.get_active())
+
     def say(self, text):
         self.error.set_label(text)
         self.error.set_visible(True)
 
     def begin(self, pw):
-        args = install_command(self.eye.get_active(), self.bt.get_active())
+        args = install_command(self.eye.get_active(), self.bt.get_active(), self.voice.get_active(),
+                               self.hands.get_active(), self.recorder.get_active())
         if pw is not None:
             try:
                 self.askpass = Askpass(self.ask_again)

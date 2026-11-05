@@ -1,0 +1,81 @@
+{
+ "schema": 1,
+ "id": "face",
+ "title": "Face moves",
+ "intro": "Faces move the headset and the lids. Keep looking at the dot while you make each face. The microphone isn't recorded.",
+ "steps": [
+  {
+   "id": "faces",
+   "kind": "prompt",
+   "text": "Keep looking at the dot and do what it says.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Smile",
+     3
+    ],
+    [
+     "Relax",
+     2
+    ],
+    [
+     "Raise your eyebrows",
+     3
+    ],
+    [
+     "Relax",
+     2
+    ],
+    [
+     "Frown",
+     3
+    ],
+    [
+     "Relax",
+     2
+    ],
+    [
+     "Yawn (or pretend to)",
+     4
+    ],
+    [
+     "Relax",
+     2
+    ],
+    [
+     "Chew",
+     4
+    ],
+    [
+     "Relax",
+     2
+    ]
+   ]
+  },
+  {
+   "id": "talk",
+   "kind": "prompt",
+   "text": "Read this aloud while looking at the dot as much as you can:|\"The quick brown fox jumps over the lazy dog, then naps in the warm afternoon sun.\"",
+   "dot": [
+    0,
+    10
+   ],
+   "seconds": 10
+  },
+  {
+   "id": "faces-dots",
+   "kind": "dots",
+   "text": "Smile and keep smiling. Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    3,
+    3,
+    15,
+    15
+   ],
+   "hold": 1.0
+  }
+ ]
+}

@@ -10,8 +10,11 @@ the dev container:
     1920x1080 worth of pixels, rotation for portrait.)
   - Visibility (ft-screens): when the screens show (always, only with the SteamVR
     dashboard open, while you look at a controller, or only when toggled), the wrist
-    angle within which a pinned screen shows, and pinning each screen to a wrist or
-    your head.
+    angle within which a pinned screen shows, pinning each screen to a wrist or your
+    head, whether the desktop's notifications go to the Steam session
+    (NOTIFY_FORWARD, session/ft-notifyfwd; its state from its log), and whether apps from
+    the SteamVR dashboard's Launch a program list open as floating windows (DASHBOARD_APPS,
+    float/ft-dashroute).
   - Layout: a preset (curved or flat, rows, distance, gap, height) or a named layout
     saved from where the screens are, with a preview; arrange now; save the current
     arrangement under a name; rename and delete; arrange automatically when the
@@ -20,17 +23,18 @@ the dev container:
     Remote Displays (remote-displays/); a button opens it.
   - Power: how long the headset can go unused before ft-powerd turns its displays off
     (DISPLAY_OFF_MIN; the service's state comes from its control socket, @ft_powerd),
-    and whether the Frame stays awake while plugged in, which is Steam's own setting
-    (steam_settings.py; the value from before is kept as STEAM_SLEEP_AC_BEFORE).
+    whether the Frame stays awake while plugged in, which is Steam's own setting
+    (steam_settings.py; the value from before is kept as STEAM_SLEEP_AC_BEFORE), and whether
+    the desktop starts with SteamVR (AUTOSTART, session/autostart.sh).
 Settings go to ~/.config/frametop.conf and ~/.config/frametop-layout.json. Anything
 that touches SteamVR runs layout/ft-layout on the host.
 Launch with display-settings/ft-display-settings (host wrapper).
 """
+import json
 import os
-import shutil
-import socket
 import sys
 import threading
+import time
 
 from PySide6.QtCore import Property, QObject, QProcess, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication, QIcon
@@ -41,7 +45,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
 sys.path.insert(0, LAYOUT_DIR)
 import ft_layout  # noqa: E402  (pure Python: the same geometry ft-layout uses)
+import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
+from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
+from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import steam_settings  # noqa: E402
+import stereo_wallpaper  # noqa: E402  (DEE-317: the pictures here, the rest on the host)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 DESKTOPS = os.path.join(HERE, "..", "desktops.sh")
@@ -50,11 +58,7 @@ CONF_PATH = ft_layout.CONF_PATH
 # 1920x1080x4-byte buffer: more pixels than 1920x1080 abort it (see the design notes).
 MAX_PIXELS = 1920 * 1080
 RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080), (1728, 1080), (1920, 800), (2224, 928), (2560, 800)]
-# ft-screens has no pixel limit; portrait screens are just tall.
-SCREEN_RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2560, 1080, "ultrawide"),
-                      (3440, 1440, "ultrawide"), (5120, 1440, "super ultrawide"), (1920, 1200, "16:10"),
-                      (2560, 1600, "16:10"), (1080, 1920, "portrait"), (1440, 2560, "portrait"),
-                      (2160, 3840, "portrait 4K")]
+SCREEN_RESOLUTIONS = ft_layout.SCREEN_RESOLUTIONS
 FT_SCREENS = "\0ft_screens"
 REMOTE_DISPLAYS = os.path.join(HERE, "..", "remote-displays", "ft_remote_displays.py")
 FT_POWERD = "\0ft_powerd"
@@ -62,37 +66,19 @@ FT_POWERD = "\0ft_powerd"
 # nothing was saved.
 STEAM_SLEEP_AC_DEFAULT = 3600
 SCALES = [0.75, 1.0, 1.25, 4 / 3, 1.5, 1.75, 2.0]
+NOTIFY_FORWARD = ("auto", "on", "off")  # session/ft-notifyfwd; frametop.conf's NOTIFY_FORWARD
+DASHBOARD_APPS = ("steamvr", "frametop")  # float/ft-dashroute; frametop.conf's DASHBOARD_APPS
+NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tmp is the host's)
+AUTOSTART_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-autostart.service")
+# Frametop's own apps a profile can keep (ft-floatd's recordable), by their names.
+FRAMETOP_APPS = {"ft-input-settings": "Frametop Input Settings", "ft-remote-displays": "Frametop Remote Displays"}  # ft-floatd's PROFILE_APPS
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
 
 def write_conf_value(key, value):
-    """Set KEY=value in frametop.conf, keeping comments and the rest of the file."""
-    try:
-        with open(CONF_PATH) as f:
-            lines = f.read().splitlines()
-    except OSError:
-        lines = []
-    for i, line in enumerate(lines):
-        if line.split("#", 1)[0].strip().startswith(f"{key}="):
-            comment = line[line.index("#"):] if "#" in line else ""
-            lines[i] = f"{key}={value}" + (f"   {comment}" if comment else "")
-            break
-    else:
-        lines.append(f"{key}={value}")
-    with open(CONF_PATH, "w") as f:
-        f.write("\n".join(lines) + "\n")
-
-
-def host_command(*cmd):
-    """argv to run a command on the SteamOS host (we live in the dev container).
-
-    distrobox-host-exec reaches the host through the user's real session bus; inside the
-    desktop our DBUS_SESSION_BUS_ADDRESS is the nested session's private one, where it
-    fails (exit 127, silently)."""
-    if not shutil.which("distrobox-host-exec"):
-        return list(cmd)
-    bus = f"unix:path=/run/user/{os.getuid()}/bus"
-    return ["env", f"DBUS_SESSION_BUS_ADDRESS={bus}", "distrobox-host-exec"] + list(cmd)
+    """Set KEY=value in frametop.conf, keeping comments and the rest of the file (shell-quoted,
+    by a temp file and a rename: ft_conf.set_value)."""
+    ft_conf.set_value(key, value, CONF_PATH)
 
 
 class Backend(QObject):
@@ -101,6 +87,9 @@ class Backend(QObject):
     powerChanged = Signal()
     message = Signal(str, bool)  # text, is error
     _steamDone = Signal(object, object, str)  # Steam's sleep settings or None, error or None, what was done
+    previewChanged = Signal()
+    _roomRead = Signal(object, object)  # ft_layout.read_room's room or None, the floating windows [(panel, title)]
+    _ipcDone = Signal(object, object)  # a callback and its answer, from the ftipc worker
 
     def __init__(self):
         super().__init__()
@@ -108,22 +97,29 @@ class Backend(QObject):
         self._proc = None
         self._running = False
         self._running_count = 0
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self._sock.bind("")  # an abstract address ft-screens can reply to
-        self._sock.settimeout(1.0)
+        # ft-screens and ft-powerd are asked on a thread of their own, never the UI's
+        self._ipcDone.connect(lambda then, answer: then(answer), Qt.QueuedConnection)
+        self._ipc = ftipc.Worker(self._ipcDone.emit)
+        self._polling = False
         self._started = {}  # conf values the running desktop started with
-        self._psock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self._psock.bind("")  # for ft-powerd's replies
-        self._psock.settimeout(0.5)
         self._powerd = None  # ft-powerd's status: (state, seconds unused, timeout seconds); None: not running
         self._steam = None  # Steam's sleep settings: {"ac": seconds, "battery": seconds}
         self._steam_error = ""
         self._steam_busy = False
         self._steamDone.connect(self._steam_done, Qt.QueuedConnection)
         self._pins = []     # each running screen's pin: none | left | right | head
+        self._notify_state = ""
         self.poll = QTimer(interval=3000, timeout=self._check_running)
         self.poll.start()
         self._check_running()
+        # The Layout page's preview: the panels and the head now, read while it shows.
+        self._room = None
+        self._windows = []      # the floating windows, from ft-floatd's spotlist
+        self._windows_at = 0.0  # when it was asked
+        self._room_busy = False
+        self._roomRead.connect(self._room_read, Qt.QueuedConnection)
+        self.changed.connect(self.previewChanged)
+        self.roomPoll = QTimer(interval=1000, timeout=self._read_room)
 
     # --- state ---
     def _conf(self):
@@ -133,43 +129,73 @@ class Backend(QObject):
                 return cast(conf.get(key, default))
             except ValueError:
                 return default
-        return {"screens": num("SCREENS", 2, int), "width": num("WIDTH", 1920, int),
-                "height": num("HEIGHT", 1080, int), "physWidth": num("PHYS_WIDTH", 1.6)}
+        notify = conf.get("NOTIFY_FORWARD", "auto")
+        dash = conf.get("DASHBOARD_APPS", "steamvr")
+        floats = num("FLOAT_SLOTS", 16, int)
+        return {"dashboardApps": dash if dash in DASHBOARD_APPS else "steamvr", "floatSlots": floats,
+                "screens": num("SCREENS", 2, int), "width": num("WIDTH", 1920, int),
+                "height": num("HEIGHT", 1080, int), "physWidth": num("PHYS_WIDTH", 1.6),
+                "notifyForward": notify if notify in NOTIFY_FORWARD else "off",
+                "autostart": conf.get("AUTOSTART", "0") == "1"}
 
     def _check_running(self):
+        """Reads the desktop's state on the worker; _polled gets it here (one read at a time)."""
+        if not self._polling:
+            self._polling = True
+            self._ipc.run(self._poll, then=self._polled)
+
+    def _poll(self, client):
+        """On the worker's thread."""
         # The session's own Wayland socket (host processes' environments aren't readable
         # from the container, so ft_layout.nested_env() doesn't work here).
         running = os.path.exists(f"/run/user/{os.getuid()}/frametop/wayland-0")
-        count = self._screens_running() if running and ft_layout.backend() == "screens" else 0
-        pins = self._read_pins(count)
-        if running != self._running or count != self._running_count or pins != self._pins:
+        count = 0
+        if running and ft_layout.backend() == "screens":
+            reply = client.ask(FT_SCREENS, "screens")
+            count = int(reply.split()[1]) if reply and reply.startswith("ok") else 0
+        pins = []
+        for i in range(count):
+            reply = client.ask(FT_SCREENS, f"get {i + 1}")
+            f = reply.split() if reply and reply.startswith("ok") else []
+            pins.append(f[16] if len(f) > 16 else "none")
+        notify_state = self._read_notify_state() if running else ""
+        return running, count, pins, notify_state, self._powerd_status(client)
+
+    def _polled(self, result):
+        self._polling = False
+        if result is None:
+            return
+        running, count, pins, notify_state, powerd = result
+        if (running != self._running or count != self._running_count or pins != self._pins
+                or notify_state != self._notify_state):
             if running != self._running or count != self._running_count:
                 self._started = self._conf() if running else {}
             self._running = running
             self._running_count = count
             self._pins = pins
+            self._notify_state = notify_state
             self.changed.emit()
-        self._check_powerd()
+        self._set_powerd(powerd)
 
-    def _read_pins(self, count):
-        pins = []
-        for i in range(count):
-            reply = self._ask_screens(f"get {i + 1}")
-            f = reply.split() if reply and reply.startswith("ok") else []
-            pins.append(f[16] if len(f) > 16 else "none")
-        return pins
-
-    def _ask_screens(self, text):
-        """Request/reply to ft-screens; None if it isn't running."""
+    @staticmethod
+    def _read_notify_state():
+        """ft-notifyfwd's: forwarding | waiting (no usable server on the user bus) | "" (not running)."""
         try:
-            self._sock.sendto(text.encode(), FT_SCREENS)
-            return self._sock.recv(4096).decode()
+            with open(NOTIFYFWD_LOG) as f:
+                lines = f.read().splitlines()
         except OSError:
-            return None
+            return ""
+        # the last state line: errors it logs in between (a failed Notify) don't change it
+        for line in reversed(lines):
+            if line == "ft-notifyfwd: forwarding":
+                return "forwarding"
+            if line.startswith("ft-notifyfwd: not forwarding"):
+                return "waiting"
+        return ""
 
-    def _screens_running(self):
-        reply = self._ask_screens("screens")
-        return int(reply.split()[1]) if reply and reply.startswith("ok") else 0
+    def _ask_screens(self, text, then=None):
+        """A question to ft-screens, on the worker; then(answer, or None if it isn't running)."""
+        self._ipc.ask(FT_SCREENS, text, then)
 
     @Property(bool, notify=changed)
     def desktopRunning(self):
@@ -197,6 +223,11 @@ class Backend(QObject):
     @Property(int, notify=changed)
     def screens(self):
         return self._conf()["screens"]
+
+    @Property(int, notify=changed)
+    def screenCount(self):
+        """The desktop's screens: the layout's with ft-screens, SCREENS with gamescope."""
+        return ft_layout.screen_count(ft_layout.load_layout())
 
     @Property(int, notify=changed)
     def width(self):
@@ -248,20 +279,84 @@ class Backend(QObject):
     def layout(self):
         return ft_layout.load_layout()
 
-    @Property("QVariantList", notify=changed)
-    def plan(self):
-        """The arrangement in the head frame, for the preview."""
+    @Property("QVariantMap", notify=previewChanged)
+    def preview(self):
+        """The preview's panels and head (ft_layout.preview), live while the desktop runs."""
         layout = ft_layout.load_layout()
-        c = self._conf()
-        # Before any panel was measured: the width SteamVR floats a panel at, and the aspect.
-        if "panel_size" not in layout or layout["panel_size"] == list(ft_layout.DEFAULT_PANEL):
-            layout["panel_size"] = [ft_layout.DEFAULT_PANEL[0], ft_layout.DEFAULT_PANEL[0] * c["height"] / c["width"]]
-        out = []
-        for i, t in enumerate(ft_layout.plan(layout, c["screens"])):
-            w, h = ft_layout.screen_size(layout, i)
-            out.append({"index": i, "x": t["pos"][0], "y": t["pos"][1], "z": t["pos"][2],
-                        "faceYaw": t["face"][0], "facePitch": t["face"][1], "width": w, "height": h})
-        return out
+        if ft_layout.backend() != "screens":
+            # Before any panel was measured: the width SteamVR floats a panel at, and the aspect.
+            if "panel_size" not in layout or layout["panel_size"] == list(ft_layout.DEFAULT_PANEL):
+                c = self._conf()
+                layout["panel_size"] = [ft_layout.DEFAULT_PANEL[0], ft_layout.DEFAULT_PANEL[0] * c["height"] / c["width"]]
+            return ft_layout.preview(layout)
+        return ft_layout.preview(layout, self._room if self._running else None)
+
+    @Slot(bool)
+    def watchRoom(self, on):
+        """The Layout page shows (or not): read where everything is every second meanwhile."""
+        if on and ft_layout.backend() == "screens":
+            self._windows_at = 0.0
+            self.roomPoll.start()
+            self._read_room()
+        else:
+            try:
+                self.roomPoll.stop()
+            except RuntimeError:
+                pass  # the app is closing: the page goes after the timer
+
+    def _read_room(self):
+        """ft-screens' panels and head off the UI thread (and ft-floatd's windows, which waits
+        for KWin, every few seconds); _room_read gets them."""
+        if self._room_busy or not self._running:
+            return
+        self._room_busy = True
+        layout = ft_layout.load_layout()
+        windows = self._windows if time.monotonic() - self._windows_at < 3 else None
+
+        def work():
+            room, listed, clients = None, windows, []
+
+            def asker(timeout):
+                """ask(text, to) -> reply or None, on a client of its own. After one question
+                times out it asks nothing more (ft-screens is busy: the rest would wait too)."""
+                client = ftipc.Client(timeout)
+                clients.append(client)
+
+                def ask(text, to=FT_SCREENS):
+                    if client.why == ftipc.TIMEOUT:
+                        return None
+                    return client.ask(to, text)
+                return ask
+            try:
+                if listed is None:
+                    reply = asker(4)("spotlist", ft_layout.FLOAT) or ""
+                    try:
+                        listed = [(int(e["panel"]), e.get("title") or e.get("app") or "window")
+                                  for e in json.loads(reply[3:]) if e.get("floating") and e.get("panel")
+                                  and not e.get("minimized")] if reply.startswith("ok ") else []
+                    except (ValueError, TypeError, KeyError, AttributeError):
+                        listed = []
+                room = ft_layout.read_room(asker(0.5), layout, listed)
+            except (ValueError, TypeError, KeyError, IndexError, OSError):
+                room = None  # a reply it can't read: no live preview this time, the next read tries again
+            finally:
+                for client in clients:
+                    client.close()
+                try:
+                    # Always, so _room_busy clears whatever went wrong.
+                    self._roomRead.emit(room, listed if windows is None else None)
+                except RuntimeError:
+                    pass  # the window closed meanwhile
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _room_read(self, room, windows):
+        self._room_busy = False
+        if windows is not None:
+            self._windows, self._windows_at = windows, time.monotonic()
+        if room != self._room:  # nothing moved: no repaint
+            self._room = room
+            self.previewChanged.emit()
 
     @Property(str, notify=busyChanged)
     def busy(self):
@@ -297,7 +392,8 @@ class Backend(QObject):
         while len(screens) <= i:
             screens.append({})
         screens[i]["scale"] = s
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             self._run("Applying scale", "scale")
@@ -310,7 +406,8 @@ class Backend(QObject):
             screens.append({})
         screens[i]["rotation"] = rotation
         screens[i].pop("roll", None)  # a saved arrangement follows the new rotation
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             self._run("Rotating", "scale")
@@ -322,22 +419,24 @@ class Backend(QObject):
         while len(screens) <= i:
             screens.append({"size": [1920, 1080], "metres": 1920 / ft_layout.PIXELS_PER_METRE})
         fn(screens[i])
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return False
         self.changed.emit()
+        return True
 
     @Slot(int, int, int)
     def setScreenSize(self, i, w, h):
         if not (320 <= w <= 16384 and 200 <= h <= 16384):
             self.message.emit("Width and height: 320 to 16384 pixels", True)
             return
-        self._edit_screen(i, lambda s: s.__setitem__("size", [w, h]))
-        if self._running and i < self._running_count:
+        saved = self._edit_screen(i, lambda s: s.__setitem__("size", [w, h]))
+        if saved and self._running and i < self._running_count:
             self._ask_screens(f"size {i + 1} {w} {h}")
 
     @Slot(int, float)
     def setScreenMetres(self, i, m):
-        self._edit_screen(i, lambda s: s.__setitem__("metres", round(m, 3)))
-        if self._running and i < self._running_count:
+        saved = self._edit_screen(i, lambda s: s.__setitem__("metres", round(m, 3)))
+        if saved and self._running and i < self._running_count:
             self._ask_screens(f"width {i + 1} {m:.3f}")
 
     @Slot(int, bool)
@@ -345,17 +444,20 @@ class Backend(QObject):
         """Curve a screen into a cylinder around you (radius: your distance to it now, from
         ft-screens; the layout's distance if the desktop isn't running)."""
         radius = float(ft_layout.load_layout()["preset"].get("distance", 2.0)) if on else 0.0
+        def curve(reply=None):
+            r = float(reply.split()[1]) if reply and reply.startswith("ok") else radius
+            self._edit_screen(i, lambda s: s.__setitem__("curve", round(r, 3)))
         if self._running and i < self._running_count:
-            reply = self._ask_screens(f"curve {i + 1} {'on' if on else 'off'}")
-            if reply and reply.startswith("ok"):
-                radius = float(reply.split()[1])
-        self._edit_screen(i, lambda s: s.__setitem__("curve", round(radius, 3)))
+            self._ask_screens(f"curve {i + 1} {'on' if on else 'off'}", then=curve)
+        else:
+            curve()
 
     @Slot(int)
     def setPrimary(self, i):
         layout = ft_layout.load_layout()
         layout["primary"] = i + 1
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             self._run("Moving the taskbar", "scale")
@@ -364,7 +466,8 @@ class Backend(QObject):
     def addScreen(self):
         layout = ft_layout.load_layout()
         layout.setdefault("screens", []).append({"size": [1920, 1080], "metres": 1920 / ft_layout.PIXELS_PER_METRE})
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
 
     @Slot(int)
@@ -376,12 +479,65 @@ class Backend(QObject):
         screens.pop(i)
         if layout.get("primary") == i + 1:
             layout.pop("primary")
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
 
     @Slot()
     def toggleScreens(self):
         self._ask_screens("toggle")
+
+    # --- the desktop's notifications in the Steam session (session/ft-notifyfwd) ---
+    @Property(str, notify=changed)
+    def notifyForward(self):
+        return self._conf()["notifyForward"]
+
+    @Property(str, notify=changed)
+    def notifyForwardState(self):
+        return self._notify_state
+
+    @Property(bool, notify=changed)
+    def notifyRestartNeeded(self):
+        """The session writes ft-notifyfwd's autostart entry when it starts."""
+        return self._running and bool(self._started) and self._started["notifyForward"] != self._conf()["notifyForward"]
+
+    @Slot(str)
+    def setNotifyForward(self, mode):
+        if mode in NOTIFY_FORWARD:
+            write_conf_value("NOTIFY_FORWARD", mode)
+            self.changed.emit()
+
+    # --- Start with SteamVR (session/autostart.sh, frametop-autostart.service) ---
+    @Property(bool, notify=changed)
+    def autostart(self):
+        return self._conf()["autostart"]
+
+    @Property(bool, notify=changed)
+    def autostartInstalled(self):
+        """desktops.sh install writes the unit; the home folder is the same in the container."""
+        return os.path.exists(AUTOSTART_UNIT)
+
+    @Slot(bool)
+    def setAutostart(self, on):
+        """The unit reads AUTOSTART each time SteamVR starts: nothing to enable or restart."""
+        write_conf_value("AUTOSTART", "1" if on else "0")
+        self.changed.emit()
+
+    # --- apps from the SteamVR dashboard's Launch a program list (float/ft-dashroute) ---
+    @Property(str, notify=changed)
+    def dashboardApps(self):
+        return self._conf()["dashboardApps"]
+
+    @Property(int, notify=changed)
+    def floatSlots(self):
+        return max(0, min(16, self._conf()["floatSlots"]))
+
+    @Slot(str)
+    def setDashboardApps(self, mode):
+        """ft-dashroute and ft-floatd read it as they go: no restart."""
+        if mode in DASHBOARD_APPS:
+            write_conf_value("DASHBOARD_APPS", mode)
+            self.changed.emit()
 
     # --- ft-screens: visibility and pinning ---
     @Property("QVariantMap", notify=changed)
@@ -394,7 +550,8 @@ class Backend(QObject):
         v = ft_layout.visibility(layout)
         v[key] = value
         layout["visibility"] = v
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
         if self._running:
             if key == "mode":
@@ -429,20 +586,45 @@ class Backend(QObject):
             screens[index].pop("hidden", None)
         else:
             screens[index]["hidden"] = True
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         self.changed.emit()
-        if self._running:
-            reply = self._ask_screens(f"{'reveal' if shown else 'conceal'} {index + 1}")
+        def applied(reply):
             if not (reply and reply.startswith("ok")):
                 self.message.emit("Saved; the desktop applies it when it next starts "
                                   "(its compositor is older than hiding screens one at a time)", False)
+        if self._running:
+            self._ask_screens(f"{'reveal' if shown else 'conceal'} {index + 1}", then=applied)
+
+    # --- head pin modes (SCREEN_PIN_LEVEL; ft-screens takes it live, "handsetting") ---
+    # 0 rides on the headset, 1 follows turning and walking but stays level, 2 (Walk) follows
+    # walking only: no turning, looking up or down, or crouching.
+    @Property(int, notify=changed)
+    def pinMode(self):
+        v = ft_layout.read_conf().get("SCREEN_PIN_LEVEL", "0")
+        return int(v) if v in ("1", "2") else 0
+
+    @Slot(int)
+    def setPinMode(self, mode):
+        """How screens on your head follow it. Pins already on the head change over where they
+        are now."""
+        mode = mode if mode in (1, 2) else 0
+        write_conf_value("SCREEN_PIN_LEVEL", str(mode))
+        if self._running and ft_layout.backend() == "screens":
+            self._ask_screens(f"handsetting SCREEN_PIN_LEVEL {mode}")
+        self.changed.emit()
 
     @Slot(str, str)
     def pin(self, which, where):
         """Pin screen `which` (1-based, or "all") to "left", "right", or "head" as it is
         now, or take it off ("none")."""
         cmd = f"unpin {which}" if where == "none" else f"pin {which} {where}"
-        reply = self._ask_screens(cmd) if self._running else None
+        if self._running:
+            self._ask_screens(cmd, then=lambda reply: self._pinned(which, where, reply))
+        else:
+            self._pinned(which, where, None)
+
+    def _pinned(self, which, where, reply):
         if not (reply and reply.startswith("ok")):
             self.message.emit(f"Couldn't {'unpin' if where == 'none' else 'pin'}: "
                               f"{reply or 'the desktop is not running'}", True)
@@ -451,14 +633,63 @@ class Backend(QObject):
             self.message.emit(f"All screens ride {place} now. Save as profile… (Layout & profiles) keeps it.", False)
         self._check_running()
 
+    # --- stereo wallpaper (DEE-317, stereo_wallpaper.py) ---
+    @Property(bool, notify=changed)
+    def stereoWallpaper(self):
+        return ft_layout.read_conf().get("STEREO_WALLPAPER", "0") == "1"
+
+    @Property(bool, notify=changed)
+    def stereoWallpaperReady(self):
+        """Both eyes' pictures are there."""
+        return stereo_wallpaper.ready()
+
+    @Slot(str, str)
+    def chooseStereoWallpaper(self, left, right):
+        """Pictures from the file dialog (file:// URLs or paths): a left and a right, or `left`
+        alone as one side-by-side picture (right empty). With the stereo wallpaper on, the
+        screens show the new ones at once."""
+        def local(u):
+            return QUrl(u).toLocalFile() if u.startswith("file:") else u
+        err = stereo_wallpaper.prepare(local(left), local(right) or None)
+        if err:
+            self.message.emit(err, True)
+            return
+        self.changed.emit()
+        if self.stereoWallpaper and self._running:
+            self._run("New stereo wallpaper", argv=self._wallpaper_argv("reload"))
+        else:
+            self.message.emit("Stereo wallpaper pictures ready.", False)
+
+    @Slot(bool)
+    def setStereoWallpaper(self, on):
+        """Plasma's wallpaper becomes the key colour and ft-screens draws the pictures in it, or
+        both go back. Needs the desktop running (Plasma is scripted live)."""
+        if on and not stereo_wallpaper.ready():
+            self.message.emit("Pick the pictures first.", True)
+            return
+        if not self._running:
+            self.message.emit("Start the Frametop desktop first: the wallpaper is set in it.", True)
+            return
+        self._run("Stereo wallpaper " + ("on" if on else "off"), argv=self._wallpaper_argv("on" if on else "off"))
+
+    @staticmethod
+    def _wallpaper_argv(verb):
+        return host_command("python3", os.path.abspath(stereo_wallpaper.__file__), verb)
+
     # --- power: ft-powerd and Steam's sleep setting ---
     def _check_powerd(self):
+        self._ipc.run(self._powerd_status, then=self._set_powerd)
+
+    @staticmethod
+    def _powerd_status(client):
+        """On the worker's thread: (state, seconds unused, timeout seconds), or None."""
+        reply = (client.ask(FT_POWERD, "status", timeout=0.5) or "").split()
         try:
-            self._psock.sendto(b"status", FT_POWERD)
-            reply = self._psock.recv(256).decode().split()
-            status = (reply[1], float(reply[2]), float(reply[3])) if reply[:1] == ["ok"] else None
-        except (OSError, IndexError, ValueError):
-            status = None
+            return (reply[1], float(reply[2]), float(reply[3])) if reply[:1] == ["ok"] else None
+        except (IndexError, ValueError):
+            return None
+
+    def _set_powerd(self, status):
         if status != self._powerd:
             self._powerd = status
             self.powerChanged.emit()
@@ -483,11 +714,10 @@ class Backend(QObject):
 
     @Slot()
     def displaysOffNow(self):
-        try:
-            self._psock.sendto(b"off", FT_POWERD)
-            reply = self._psock.recv(256).decode()
-        except OSError:
-            reply = "error the power service isn't running"
+        self._ipc.ask(FT_POWERD, "off", then=self._displays_off, timeout=0.5)
+
+    def _displays_off(self, reply):
+        reply = reply or "error the power service isn't running"
         if not reply.startswith("ok"):
             self.message.emit(f"Couldn't turn the displays off: {reply.split(' ', 1)[-1]}", True)
         self._check_powerd()
@@ -550,11 +780,23 @@ class Backend(QObject):
         self.message.emit("Restarting the desktop…", False)
 
     # --- layout ---
+    def _save(self, layout):
+        """Save the layout; False, said in the window, when it can't be (a frametop-layout.json
+        that doesn't read is never saved over)."""
+        try:
+            ft_layout.save_layout(layout)
+            return True
+        except (OSError, ft_layout.LayoutFileError) as e:
+            self.message.emit(str(e), True)
+            return False
+
     def _edit_layout(self, fn):
         layout = ft_layout.load_layout()
         fn(layout)
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return False
         self.changed.emit()
+        return True
 
     @Slot(str)
     def setMode(self, mode):
@@ -606,10 +848,18 @@ class Backend(QObject):
         out = []
         for e in ft_layout.load_layout().get("profiles", {}).get(name, {}).get("windows", []):
             app = e.get("app") or os.path.basename((e.get("cmd") or ["?"])[0])
-            app = app.rsplit(".", 1)[-1] if "." in app and not e.get("cmd") else app
+            app = FRAMETOP_APPS.get(app) or (app.rsplit(".", 1)[-1] if "." in app and not e.get("cmd") else app)
             where = "floating" if "float" in e else f"screen {e.get('screen', 1)}" + (", maximized" if e.get("maximized") else "")
             out.append({"app": app, "where": where})
         return out
+
+    @Slot(str, result="QVariantList")
+    def profileRemotes(self, name):
+        """The remote displays a profile connects, by name."""
+        layout = ft_layout.load_layout()
+        saved = layout.get("profiles", {}).get(name, {}).get("remote", {})
+        return [ft_layout.remote_label(host, d) + (" (hidden)" if saved[d["id"]].get("hidden") else "")
+                for _, host, d in ft_layout.remote_displays(layout) if d.get("id") in saved]
 
     @Slot(str, result="QVariantList")
     def profileHidden(self, name):
@@ -669,7 +919,8 @@ class Backend(QObject):
             self.message.emit("Couldn't start Frametop Remote Displays", True)
 
     # --- ft-layout on the host ---
-    def _run(self, label, *args):
+    def _run(self, label, *args, argv=None):
+        """ft-layout with args on the host (or argv instead), one at a time."""
         if self._proc is not None:
             self.message.emit(f"Still busy: {self._busy}", True)
             return
@@ -677,7 +928,7 @@ class Backend(QObject):
         self.busyChanged.emit()
         proc = QProcess(self)
         proc.setProcessChannelMode(QProcess.MergedChannels)
-        argv = host_command(os.path.abspath(FT_LAYOUT), *args)
+        argv = argv or host_command(os.path.abspath(FT_LAYOUT), *args)
         proc.finished.connect(lambda code, _status: self._done(proc, label, code))
         self._proc = proc
         proc.start(argv[0], argv[1:])

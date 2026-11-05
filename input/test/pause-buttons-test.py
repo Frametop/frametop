@@ -60,13 +60,13 @@ p.action("left", 1, 10.0)  # a mouse click (or drag) held: btn trigger 1
 check("press reaches the helper", p.sock.sent, ["show", "recenter", "btn trigger 1"])
 mark = len(p.sock.sent)
 p.stand_down()  # Frametop pauses while it's held
-check("stand_down releases the held button, then hides", since(p, mark), ["btn trigger 0", "hide"])
+check("stand_down releases the held button, then hides", since(p, mark), ["btn trigger 0", "hide pause"])
 
 # The release that pausing drops later is already covered: the button is no longer down,
-# so a stray second stand_down sends nothing.
+# so a stray second stand_down sends only "hide" again (it always goes).
 mark = len(p.sock.sent)
 p.stand_down()
-check("a second stand_down sends nothing more", since(p, mark), [])
+check("a second stand_down sends no release, only hide", since(p, mark), ["hide pause"])
 
 # Two buttons down at once: a left drag tilted with the right button
 p = pointer()
@@ -74,7 +74,7 @@ p.action("left", 1, 10.0)
 p.action("right", 1, 10.5)
 mark = len(p.sock.sent)
 p.stand_down()
-check("both held buttons are released, then it hides", since(p, mark), ["btn b 0", "btn trigger 0", "hide"])
+check("both held buttons are released, then it hides", since(p, mark), ["btn b 0", "btn trigger 0", "hide pause"])
 
 # A mapped controller button and a key combination take the same path as the mouse.
 p = pointer()
@@ -83,7 +83,7 @@ p.action("back", 1, 10.1, "keyboard")  # a key combination mapped to back
 mark = len(p.sock.sent)
 p.stand_down()
 check("controller and key combination clicks are released too", since(p, mark),
-      ["btn joystick 0", "btn x 0", "hide"])
+      ["btn joystick 0", "btn x 0", "hide pause"])
 
 # ---------------------------------------------------------------- the pointer already off
 # A release with no "hide" after it would wake a helper that wakes on any btn, connecting the
@@ -93,18 +93,19 @@ p.idle = 30.0
 p.action("left", 1, 10.0)
 for t in (10.3, 10.4, 41.0):  # the claim pulse, then 30 s with no mouse input
     p.tick(t)
-check("held 30 s with no mouse input: the pointer goes off", (p.active, p.sock.sent[-1]), (False, "hide"))
+check("held 30 s with no mouse input: the pointer goes off", (p.active, p.sock.sent[-1]), (False, "hide idle"))
 mark = len(p.sock.sent)
 p.stand_down()
-check("idle with a button held: the release, then hide", since(p, mark), ["btn trigger 0", "hide"])
+check("idle with a button held: the release, then hide", since(p, mark), ["btn trigger 0", "hide pause"])
 
 p = pointer()
 p.action("left", 1, 10.0)
 p.action("pointer_toggle", 1, 10.5)
+check("pointer_toggle says why it hides (gaze mode leaves it off)", p.sock.sent[-1], "hide toggle")
 mark = len(p.sock.sent)
 p.stand_down()
 check("pointer toggled off with a button held: the release, then hide", since(p, mark),
-      ["btn trigger 0", "hide"])
+      ["btn trigger 0", "hide pause"])
 
 # ---------------------------------------------------------------- the ordinary path
 p = pointer()
@@ -112,7 +113,7 @@ p.action("left", 1, 10.0)
 p.action("left", 0, 11.0)  # released before the pause
 mark = len(p.sock.sent)
 p.stand_down()
-check("a button released before the pause: stand_down only hides", since(p, mark), ["hide"])
+check("a button released before the pause: stand_down only hides", since(p, mark), ["hide pause"])
 
 p = pointer()
 p.idle = 30.0
@@ -122,7 +123,8 @@ for t in (10.3, 10.4, 42.0):  # off by itself
     p.tick(t)
 mark = len(p.sock.sent)
 p.stand_down()
-check("nothing held and the pointer off: stand_down sends nothing", since(p, mark), [])
+# A relay that restarted can't tell whether the helper still holds the pointer.
+check("nothing held and the pointer off: stand_down still hides", since(p, mark), ["hide pause"])
 
 # Gaze holds go to the helper as their own commands, and it ends them when the pointer hides.
 p = pointer()
@@ -130,7 +132,7 @@ p.action("gaze_left", 1, 10.0, "keyboard")  # Meta+J held
 p.action("gaze_drag", 1, 10.1, "mouse")
 mark = len(p.sock.sent)
 p.stand_down()
-check("gaze holds: stand_down sends only hide (the helper ends them)", since(p, mark), ["hide"])
+check("gaze holds: stand_down sends only hide (the helper ends them)", since(p, mark), ["hide pause"])
 
 print()
 if failures:

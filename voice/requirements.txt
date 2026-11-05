@@ -1,0 +1,6 @@
+# ft-voiced (voice/build.sh puts them in build/venv, in the dev container). The image has the same
+# versions from uv.lock (pyproject.toml's voice group).
+numpy==2.5.3
+sentencepiece==0.2.2
+sherpa-onnx==1.13.8
+sherpa-onnx-core==1.13.8

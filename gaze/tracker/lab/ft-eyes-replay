@@ -2,10 +2,12 @@
 """ft-eyes-replay: play a recording into the shared-frame layout, as ft-eyegrab --share
 would, at the recorded pace, to test ft-eyes without the headset.
 
-Usage: lab/py lab/ft-eyes-replay NAME [PATH] [--from S] [--for S]
+Usage: lab/py lab/ft-eyes-replay NAME [PATH] [--from S] [--for S] [--now]
 NAME is a recording (a bare name is in eyes_lab.CAPTURES). PATH defaults to
 /dev/shm/frametop-eyes-cams-replay; run ft-eyes with FT_EYES_CAMS=PATH (and FT_EYES_GAZE=...
-so it doesn't overwrite the live output).
+so it doesn't overwrite the live output). Frames keep the recording's times, unless --now: then
+they're stamped with today's CLOCK_MONOTONIC_RAW as they're written, as ft-eyegrab's are (for
+tools that line them up with something live, such as the eye recorder's dots).
 """
 import mmap
 import os
@@ -42,6 +44,7 @@ def main(argv):
     count = [0, 0]
     t0 = idx[0, 3] + start
     wall0 = time.monotonic()
+    shift = time.clock_gettime(time.CLOCK_MONOTONIC_RAW) - t0 if "--now" in argv else 0.0
     try:
         for i in range(len(frames)):
             t = idx[i, 3]
@@ -58,7 +61,7 @@ def main(argv):
             seq = struct.unpack_from("<Q", mm, off)[0]
             struct.pack_into("<Q", mm, off, seq + 1)
             mm[off + 64:off + 64 + W * H] = frames[i].tobytes()
-            struct.pack_into("<dQII", mm, off + 8, t, n, cam, int(idx[i, 1]))
+            struct.pack_into("<dQII", mm, off + 8, t + shift, n, cam, int(idx[i, 1]))
             struct.pack_into("<Q", mm, off, seq + 2)
             count[cam] = n + 1
             struct.pack_into("<Q", mm, 24 + 8 * cam, n + 1)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for hands/camcheck.py: the real XRService log of 2026-10-02 (a good start at 13:39,
-the VCINT failure after the 17:02 wake) cut at several points, synthetic logs for the other
-cases, and a made-up ft-camd ring. Nothing here touches SteamVR or the cameras.
+"""Tests for hands/camcheck.py: synthetic XRService logs (modelled on real ones from 2026-10-01
+to 2026-10-12), the command line on one written to a file, and a made-up ft-camd ring. Nothing
+here touches SteamVR or the cameras.
 
   python3 hands/tests/test_camcheck.py
 """
@@ -19,8 +19,7 @@ from contextlib import redirect_stdout
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import camcheck  # noqa: E402
-
-REAL_LOG = os.path.expanduser("~/.local/share/Steam/logs/XRService-2026.10.02/XRService-13-39-32.log")
+from recorder import fhformat  # noqa: E402  (the ring's layout, checked against fhring.h by recorder/tests)
 
 
 def L(t, text, level="INFO"):
@@ -197,91 +196,62 @@ class SyntheticLogs(unittest.TestCase):
         self.assertEqual(st.snapshot(), state(START + GOOD_OPEN + CLOSE + RESUME + FAIL).snapshot())
 
 
-@unittest.skipUnless(os.path.exists(REAL_LOG), "the 2026-10-02 XRService log isn't on this machine")
-class RealLog(unittest.TestCase):
-    """The log with both the good 13:39 start and the 17:02 failure, cut in copies in /tmp."""
+class LogFile(unittest.TestCase):
+    """check() and the command line on a synthetic log written to a file."""
 
-    @classmethod
-    def setUpClass(cls):
-        with open(REAL_LOG, errors="replace") as f:
-            cls.lines = f.read().split("\n")
-        cls.tmp = tempfile.mkdtemp(prefix="camcheck-test-")
+    def write(self, lines):
+        fd, path = tempfile.mkstemp(prefix="camcheck-test-", suffix=".log")
+        self.addCleanup(os.remove, path)
+        with os.fdopen(fd, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        return path
 
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.tmp, ignore_errors=True)
-
-    def cut_after(self, needle, nth=1):
-        """The log up to and including the nth line containing needle, as a file in /tmp."""
-        seen = 0
-        for i, line in enumerate(self.lines):
-            if needle in line:
-                seen += 1
-                if seen == nth:
-                    path = os.path.join(self.tmp, "cut-%d.log" % i)
-                    with open(path, "w") as f:
-                        f.write("\n".join(self.lines[:i + 1]) + "\n")
-                    return path
-        self.fail("no line %d with %r" % (nth, needle))
-
-    def check(self, path):
-        return camcheck.check(log=path, proc=False, ring=False)
+    def test_check(self):
+        r = camcheck.check(log=self.write(START + GOOD_OPEN + CLOSE + RESUME + FAIL), proc=False, ring=False)
+        self.assertEqual(r["summary"], camcheck.DEGRADED_VCINT)
+        self.assertTrue(camcheck.is_vcint_failure(r))
+        self.assertTrue(r["failure"].endswith("@11:30:01"))
+        ev = "\n".join(r["evidence"])
+        for want in ("11:30:01 Failed to load VCINT FPGA image", "interleaving support: 0",
+                     "Created 4 tasks (2 tracking, 2 passthrough)", "/dev/video9", "/dev/video13"):
+            self.assertIn(want, ev)
+        self.assertNotIn("/dev/video6", ev)   # the good start isn't this episode's evidence
 
     def test_cut_points(self):
-        cases = [
-            ("Loading FPGA image: VCINT", 1, "unknown", "the cameras are starting"),
-            ("FPGA image VCINT loaded and verified successfully", 1, "unknown", "the cameras are starting"),
-            ("Created 6 tasks (4 tracking, 2 passthrough)", 1, "ok", None),
-            ("TrackingCameraInit: index: 3.", 1, "ok", None),
-            ("Upper cameras are not in sync", 1, "ok", None),         # 15:45: a resync, not a failure
-            ("Closing tracking camera interfaces", 1, "unknown", None),   # 16:41: asleep
-            ("Passthrough connected but FPGA is ERROR/UNKNOWN", 1, "unknown", "the cameras are starting"),
-            ("Failed to load VCINT FPGA image", 1, "degraded", camcheck.VCINT_REASON),
-            ("Created 4 tasks (2 tracking, 2 passthrough)", 1, "degraded", camcheck.VCINT_REASON),
-            ("Streaming resumed (FPGA: PASSTHRU", 1, "degraded", camcheck.VCINT_REASON),
-        ]
-        for needle, nth, status, reason in cases:
-            with self.subTest(cut=needle):
-                r = self.check(self.cut_after(needle, nth))
+        """The same log cut part way: still starting, then a wake that starts a new episode (the
+        old episode's cameras don't count), then the failure."""
+        for lines, status in ((START + GOOD_OPEN[:4], "unknown"), (START + GOOD_OPEN + CLOSE + RESUME, "unknown"),
+                              (START + GOOD_OPEN + CLOSE + RESUME + FAIL[:4], "degraded")):
+            with self.subTest(lines=lines[-1]):
+                r = camcheck.check(log=self.write(lines), proc=False, ring=False)
                 self.assertEqual(r["status"], status, r["summary"])
-                if reason:
-                    self.assertEqual(r["reason"], reason)
-        r = self.check(self.cut_after("Closing tracking camera interfaces"))
-        self.assertIn("closed", r["reason"])
-
-    def test_whole_log(self):
-        r = self.check(REAL_LOG)
-        self.assertEqual(r["summary"], camcheck.DEGRADED_VCINT)
-        ev = "\n".join(r["evidence"])
-        for want in ("17:02:47 Failed to load VCINT FPGA image", "interleaving support: 0",
-                     "Created 4 tasks (2 tracking, 2 passthrough)", "/dev/video9", "/dev/video13",
-                     "Closing tracking camera interfaces"):
-            self.assertIn(want, ev)
-        self.assertNotIn("/dev/video6", ev)   # the 13:39 start isn't this episode's evidence
-        self.assertTrue(r["failure"].endswith("@17:02:47"))
-        self.assertTrue(camcheck.is_vcint_failure(r))
+                if status == "unknown":
+                    self.assertEqual(r["reason"], "the cameras are starting")
 
     def test_cli(self):
         out = io.StringIO()
         with redirect_stdout(out):
-            code = camcheck.main(["--log", REAL_LOG, "--no-proc", "--no-ring", "--json"])
+            code = camcheck.main(["--log", self.write(START + GOOD_OPEN + CLOSE + RESUME + FAIL),
+                                  "--no-proc", "--no-ring", "--json"])
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out.getvalue())["status"], "degraded")
         out = io.StringIO()
         with redirect_stdout(out):
-            code = camcheck.main(["--log", self.cut_after("TrackingCameraInit: index: 3."), "--no-proc", "--no-ring"])
+            code = camcheck.main(["--log", self.write(START + GOOD_OPEN), "--no-proc", "--no-ring"])
         self.assertEqual(code, 0)
         self.assertEqual(out.getvalue().split("\n")[0], "ok")
 
 
-def make_ring(path, mono_names, alive=True, nodes=None):
-    """A ring header as ft-camd writes it (camd/fhring.h), no frames."""
-    cams = [(b"og01a1b", n.encode(), nodes[i] if nodes else 9 + i) for i, n in enumerate(mono_names)]
+def make_ring(path, mono_names, alive=True, nodes=None, flags=None):
+    """A ring header as ft-camd writes it (camd/fhring.h, by recorder/fhformat.py's layout rather
+    than camcheck's own, so the test isn't checking camcheck against itself), no frames."""
+    cams = [(b"og01a1b", n.encode(), nodes[i] if nodes else 9 + i, flags[i] if flags else 0)
+            for i, n in enumerate(mono_names)]
     hb = time.clock_gettime_ns(time.CLOCK_MONOTONIC) if alive else 1
-    data = bytearray(camcheck.RING_HDR.pack(b"FHRING01", 1, 0, len(cams), 0, 0, 4242, 0))
-    struct.pack_into("<Q", data, 40, hb)
-    for sensor, name, node in cams:
-        data += camcheck.RING_CAM.pack(sensor, name, node, 0, 1056, 1024, 1056, 16, 0, 0, 0, 0, 0, 0, 0.0)
+    data = bytearray(fhformat.RING_HDR.pack(fhformat.RING_MAGIC, fhformat.RING_VERSION, 0, len(cams), 0, 0, 4242, 0))
+    struct.pack_into("<Q", data, fhformat.RING_HEARTBEAT_OFF, hb)
+    for sensor, name, node, flag in cams:
+        data += fhformat.RING_CAM.pack(sensor, name, node, 0, 1056, 1024, 1056, 16, 0, 0, 0, 0, 0, flag, 0.0)
     with open(path, "wb") as f:
         f.write(bytes(data))
 
@@ -303,6 +273,12 @@ class Ring(unittest.TestCase):
         self.assertEqual(r["status"], "degraded")
         self.assertIn("ft-camd publishes only 2 of 4", r["reason"])
 
+    def test_dark_and_colour_cameras_by_flag_dont_count(self):
+        # a dark twin and a colour camera named like mono ones: their flags say what they are
+        make_ring(self.ring, ["slam_video9", "slam_video13", "upper_a", "upper_b"],
+                  flags=[0, 0, fhformat.CAM_DARK, fhformat.CAM_COLOR])
+        self.assertEqual([c["name"] for c in camcheck.read_ring(self.ring)["mono"]], ["slam_video9", "slam_video13"])
+
     def test_ring_missing_the_side_cameras(self):
         # an ft-camd from before NV12 support, without the colour module: only the upper pair
         with open(self.log, "w") as f:
@@ -317,10 +293,28 @@ class Ring(unittest.TestCase):
         self.assertEqual(r["map"]["slam_left"]["node"], 0)
 
     def test_four_cameras_in_ring(self):
-        make_ring(self.ring, ["a_video9", "b_video13", "c_video6", "d_video7", "a_video9_dk"])
+        make_ring(self.ring, ["a_video9", "b_video13", "c_video6", "d_video7", "a_video9_dk"], nodes=[9, 13, 6, 7, 9])
         r = camcheck.check(log=self.log, proc=False, ring_path=self.ring)
         self.assertEqual(r["status"], "ok")
         self.assertEqual(len(r["ring"]["mono"]), 4)   # the dark twin doesn't count
+
+    def test_ring_from_before_the_cameras_moved(self):
+        # 2026-10-12: the colour module disconnected at 08:10 and XRService moved the side pair
+        # to video0/3; ft-camd, started the day before, still published video9/13, and a whole
+        # session recorded only the upper pair
+        unplugged = [L("11:00:00", "[buildMediaCtlSetupTasks] ISP enabled for tracking cameras (main VFE available)")] + \
+            [L("11:00:01", "TrackingCameraInit: index: %d. video device: /dev/video%d. v4l subdevice: x" % (i, n))
+             for i, n in enumerate((0, 3, 6, 7))]
+        with open(self.log, "w") as f:
+            f.write("\n".join(START + GOOD_OPEN + unplugged) + "\n")
+        make_ring(self.ring, ["og01a1b_4-0036_video9", "og01a1b_4-0060_video13", "og0ve10_5-0060_video6",
+                              "og0ve10_5-0060_video7"], nodes=[9, 13, 6, 7])
+        r = camcheck.check(log=self.log, proc=False, ring_path=self.ring)
+        self.assertEqual(r["status"], "degraded")
+        self.assertEqual(r["ring_missing"], [0, 3])
+        self.assertIn("ft-camd publishes video9 video13, but XRService runs those cameras on video0 video3",
+                      r["reason"])
+        self.assertTrue(camcheck.is_ring_short(r))
 
     def test_stale_ring_ignored(self):
         make_ring(self.ring, ["slam_video9"], alive=False)

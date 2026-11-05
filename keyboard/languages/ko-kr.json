@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "id": "ko-kr",
+  "name": "한국어 — 두벌식",
+  "locale": "ko-KR",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "us",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans CJK KR",
+    "Noto Sans",
+    "sans-serif"
+  ],
+  "input_method": "korean-2set",
+  "composition_keys": {
+    "KeyQ": "ㅂ",
+    "KeyW": "ㅈ",
+    "KeyE": "ㄷ",
+    "KeyR": "ㄱ",
+    "KeyT": "ㅅ",
+    "KeyY": "ㅛ",
+    "KeyU": "ㅕ",
+    "KeyI": "ㅑ",
+    "KeyO": "ㅐ",
+    "KeyP": "ㅔ",
+    "KeyA": "ㅁ",
+    "KeyS": "ㄴ",
+    "KeyD": "ㅇ",
+    "KeyF": "ㄹ",
+    "KeyG": "ㅎ",
+    "KeyH": "ㅗ",
+    "KeyJ": "ㅓ",
+    "KeyK": "ㅏ",
+    "KeyL": "ㅣ",
+    "KeyZ": "ㅋ",
+    "KeyX": "ㅌ",
+    "KeyC": "ㅊ",
+    "KeyV": "ㅍ",
+    "KeyB": "ㅠ",
+    "KeyN": "ㅜ",
+    "KeyM": "ㅡ"
+  },
+  "composition_shift": {
+    "KeyQ": "ㅃ",
+    "KeyW": "ㅉ",
+    "KeyE": "ㄸ",
+    "KeyR": "ㄲ",
+    "KeyT": "ㅆ",
+    "KeyO": "ㅒ",
+    "KeyP": "ㅖ"
+  }
+}

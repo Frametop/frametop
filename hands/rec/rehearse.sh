@@ -8,7 +8,8 @@
 #   hands/rec/rehearse.sh [--repo ID] [--capture DIR] [--from S] [--prompt-seconds N] [--keep]
 #
 #   --repo ID            upload for real to this dataset, as a pull request. While the texts are
-#                        drafts that also needs FT_HANDREC_ALLOW_UPLOAD=1 in the environment.
+#                        drafts that also needs FT_HANDREC_ALLOW_UPLOAD=1 in the environment, and
+#                        ID must be a test dataset, not the real one.
 #   --capture DIR        the recording to play (default the frame-hands capture
 #                        rec-20260930-103803-lit); --from S: start this far into it (60)
 #   --prompt-seconds N   each test step's length (3): a prompt, a two-cue sweep, no hands. The
@@ -24,6 +25,10 @@
 # it is; otherwise one is started for the rehearsal (it publishes the usual hands file).
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+# The recorder is the package hands.rec under the repo root: its programs run with python3 -P -m
+# (-P: the current folder, which may be another checkout, never comes before this tree).
+tree=$(cd "$here/../.." && pwd)
+export PYTHONPATH="$tree${PYTHONPATH:+:$PYTHONPATH}"
 root=$(cd "$here/../.." && pwd)
 uid=$(id -u)
 
@@ -78,8 +83,8 @@ if pgrep -x ft-handpanel >/dev/null; then
   exit 1
 fi
 if [ -n "$repo" ]; then
-  if python3 -c "import sys; sys.path.insert(0, '$here'); import hub; sys.exit(0 if hub.upload_allowed() else 1)"; then :; else
-    echo "rehearse: the texts are drafts: a real upload needs FT_HANDREC_ALLOW_UPLOAD=1 as well as --repo" >&2
+  if FT_HANDREC_DATASET="$repo" python3 -P -c "import sys; from hands.rec import hub; sys.exit(0 if hub.upload_allowed() else 1)"; then :; else
+    echo "rehearse: the texts are drafts: a real upload needs FT_HANDREC_ALLOW_UPLOAD=1 as well as --repo, to a test dataset" >&2
     exit 1
   fi
   python3 -c "import huggingface_hub" 2>/dev/null || {
@@ -120,17 +125,17 @@ step "1. Playing ${capture##*/} from ${from} s into $ring"
 "$ringplay" "$capture" --ring "$ring" --from "$from" --to "$((from + 30))" --loop >"$logs/ringplay.log" 2>&1 &
 pids+=($!)
 for _ in $(seq 100); do
-  python3 -c "import sys; sys.path.insert(0, '$here'); import session
+  python3 -P -c "import sys; from hands.rec import session
 r = session.Ring('$ring'); sys.exit(0 if r.alive() else 1)" 2>/dev/null && break
   sleep 0.2
 done
-python3 -c "import sys; sys.path.insert(0, '$here'); import session
+python3 -P -c "import sys; from hands.rec import session
 r = session.Ring('$ring'); print('  cameras:', ', '.join('%s %dx%d' % (c['name'], c['width'], c['height']) for c in r.cams))
 sys.exit(0 if r.alive() else 1)" || { echo "rehearse: ft-ringplay doesn't publish: $(tail -3 "$logs/ringplay.log")" >&2; exit 1; }
 
 step "2. Session (test script, panel --no-vr)"
 tracker=existing
-if ! python3 -c "import sys; sys.path.insert(0, '$here'); import session; sys.exit(0 if session.tracker_running() else 1)"; then
+if ! python3 -P -c "import sys; from hands.rec import session; sys.exit(0 if session.tracker_running() else 1)"; then
   "$hands" --ring "$ring" --no-gestures --status 0 >"$logs/tracker.log" 2>&1 &
   pids+=($!)
   tracker=started
@@ -160,26 +165,26 @@ json.dump({"version": 1, "intro_s": 1, "between_s": 1,
           open(out, "w"))
 EOF
 for _ in $(seq 50); do
-  python3 -c "import sys; sys.path.insert(0, '$here'); import session
+  python3 -P -c "import sys; from hands.rec import session
 sys.exit(0 if session.Panel().cmd('ping', reply=True) else 1)" 2>/dev/null && break
   sleep 0.2
 done
-run python3 "$here/session.py" --ring "$ring" --no-start --base "$base" --script "$work/script.json" --lighting room \
+run python3 -P -m hands.rec.session --ring "$ring" --no-start --base "$base" --script "$work/script.json" --lighting room \
   --next-after 0.3 \
   </dev/null > >(indent)
 sid=$(ls "$base/sessions" | tail -1)
 [ -n "$sid" ] || { echo "rehearse: the session left nothing" >&2; exit 1; }
-python3 "$here/takes.py" --base "$base" takes "$sid" | sed 's/^/  /'
+python3 -P -m hands.rec.takes --base "$base" takes "$sid" | sed 's/^/  /'
 echo "  panel pictures: $(grep -c '^--- picture' "$logs/panel.log" || true)"
 
 step "3. Export"
-run python3 "$here/takes.py" --base "$base" export "$sid" >"$logs/export.log"
+run python3 -P -m hands.rec.takes --base "$base" export "$sid" >"$logs/export.log"
 tr '\r' '\n' <"$logs/export.log" | tail -1 | indent
 export_dir=$base/exports/$sid
 
 step "4. Validate"
 valid=1
-run python3 "$here/validate.py" "$export_dir" --json >"$work/validate.json" || valid=0
+run python3 -P -m hands.rec.validate "$export_dir" --json >"$work/validate.json" || valid=0
 python3 -c "import json, sys; v = json.load(open(sys.argv[1]))
 for k in ('errors', 'warnings'):
     for line in v[k]: print('  %s: %s' % (k[:-1], line))
@@ -188,11 +193,11 @@ print('  OK' if v['ok'] else '  %d errors' % len(v['errors']))" "$work/validate.
 
 if [ -n "$repo" ]; then
   step "5. Upload to $repo (for real)"
-  run env FT_HANDREC_DATASET="$repo" python3 "$here/hub.py" --base "$base" upload "$sid" >"$logs/hub.log"
+  run env FT_HANDREC_DATASET="$repo" python3 -P -m hands.rec.hub --base "$base" upload "$sid" >"$logs/hub.log"
   indent <"$logs/hub.log"
 else
   step "5. Upload (dry run: --repo ID uploads for real)"
-  run python3 "$here/hub.py" --base "$base" upload "$sid" --dry-run >"$logs/hub.log"
+  run python3 -P -m hands.rec.hub --base "$base" upload "$sid" --dry-run >"$logs/hub.log"
   indent <"$logs/hub.log"
 fi
 

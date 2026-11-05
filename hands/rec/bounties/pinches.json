@@ -1,0 +1,564 @@
+{
+ "version": 1,
+ "name": "pinches",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Pinches",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "pinches",
+   "title": "Pinches",
+   "kind": "scene",
+   "intro": "A window within reach. When a part lights up, pinch it there: thumb and index together, as if you were taking hold of it. It won't move: move your hand as if it did, then let go.",
+   "prompts": [
+    {
+     "id": "hold-right",
+     "hands": "right",
+     "text": "Right hand. Pinch the lit part where it is, hold until it goes out, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "every_s": 2.5,
+      "gap_s": 1.0,
+      "moves": [
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "br"
+       },
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "tr"
+       }
+      ],
+      "say": "Pinch the lit part and hold"
+     }
+    },
+    {
+     "id": "drag-right",
+     "hands": "right",
+     "text": "Right hand. Pinch the lit bar and take it to the ghost, as if dragging the window, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "bar",
+      "every_s": 3.5,
+      "gap_s": 1.2,
+      "count": 3,
+      "moves": [
+       [
+        0,
+        0.15,
+        0
+       ],
+       [
+        0,
+        -0.12,
+        0
+       ],
+       [
+        -0.2,
+        0,
+        0
+       ],
+       [
+        0.2,
+        0,
+        0
+       ]
+      ],
+      "say": "Pinch the bar, take it to the ghost"
+     }
+    },
+    {
+     "id": "drag-left",
+     "hands": "left",
+     "text": "Left hand. Pinch the bar and take it to the ghost: nearer, farther, up and across.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "bar",
+      "every_s": 3.5,
+      "gap_s": 1.2,
+      "count": 3,
+      "moves": [
+       [
+        0,
+        0,
+        0.15
+       ],
+       [
+        0,
+        0,
+        -0.25
+       ],
+       [
+        -0.15,
+        0.1,
+        0
+       ],
+       [
+        0.15,
+        0.1,
+        0
+       ]
+      ],
+      "say": "Pinch the bar, take it to the ghost"
+     }
+    },
+    {
+     "id": "resize",
+     "hands": "right",
+     "text": "Right hand. Pinch the lit corner and pull it until the window would be the ghost's size.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "every_s": 3.5,
+      "gap_s": 1.0,
+      "moves": [
+       {
+        "grab": "br",
+        "ghost": [
+         0.051000000000000004,
+         -0.036,
+         0,
+         0,
+         0,
+         0,
+         1.3
+        ]
+       },
+       {
+        "grab": "tl",
+        "ghost": [
+         -0.051000000000000004,
+         0.036,
+         0,
+         0,
+         0,
+         0,
+         1.3
+        ]
+       },
+       {
+        "grab": "br",
+        "ghost": [
+         -0.034,
+         0.024,
+         0,
+         0,
+         0,
+         0,
+         0.8
+        ]
+       }
+      ],
+      "say": "Pinch the corner, pull it to the ghost's size"
+     }
+    },
+    {
+     "id": "tilt",
+     "hands": "left",
+     "text": "Left hand. Pinch the bar and turn your wrist to tilt the window like the ghost.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "bar",
+      "every_s": 3.0,
+      "gap_s": 1.0,
+      "count": 3,
+      "moves": [
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        25
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        -25
+       ],
+       [
+        0,
+        0,
+        0,
+        30,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        -25,
+        0
+       ]
+      ],
+      "say": "Pinch the bar, tilt it like the ghost"
+     }
+    },
+    {
+     "id": "stretch",
+     "hands": "both",
+     "text": "Both hands. Pinch the two lit corners at once and stretch or turn the window to the ghost.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "tl+br",
+      "every_s": 3.5,
+      "gap_s": 1.0,
+      "moves": [
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1.35
+       ],
+       [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.75
+       ],
+       {
+        "grab": "bl+tr",
+        "ghost": [
+         0,
+         0,
+         0,
+         30,
+         0,
+         0
+        ]
+       }
+      ],
+      "say": "Pinch both corners, stretch it to the ghost"
+     }
+    },
+    {
+     "id": "hold-and-tap",
+     "hands": "both",
+     "text": "Left hand: pinch the lit bar on the left window and keep holding.|Right hand: tap the buttons on the right one as they light.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.22,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.28,
+        0.2
+       ],
+       "look": "plain"
+      },
+      {
+       "id": "b",
+       "at": [
+        0.3,
+        -0.15,
+        -0.7
+       ],
+       "size": [
+        0.36,
+        0.26
+       ],
+       "look": "grid:2x2"
+      }
+     ],
+     "steady": [
+      {
+       "win": "a",
+       "lit": "bar",
+       "gesture": "pinch",
+       "label": "L"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "windows": [
+       "b"
+      ],
+      "every_s": 1.4,
+      "seconds": 11,
+      "mix": {
+       "tap": 1
+      },
+      "says": {
+       "tap": "Left: hold the pinch. Right: tap the lit button"
+      }
+     }
+    },
+    {
+     "id": "far",
+     "hands": "right",
+     "text": "A window far away. Look at the lit row, pinch with your right hand low by your side, move the hand a few cm, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        0,
+        -2.0
+       ],
+       "size": [
+        1.0,
+        0.7
+       ],
+       "look": "list:6"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.6,
+      "lit_s": 1.9,
+      "seconds": 13,
+      "mix": {
+       "pinch": 1
+      },
+      "says": {
+       "pinch": "Look at it, pinch with the hand low, nudge it, let go"
+      }
+     }
+    },
+    {
+     "id": "look-alikes",
+     "hands": "right",
+     "text": "Right hand, reaching for the lit part. Cyan: pinch it. Orange: stop about 1 cm short, or touch it with an open hand: no pinch.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.2,
+        -0.45
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "every_s": 2.5,
+      "gap_s": 0.8,
+      "moves": [
+       {
+        "grab": "bar",
+        "gesture": "pinch"
+       },
+       {
+        "grab": "bar",
+        "gesture": "nogo"
+       },
+       {
+        "grab": "left",
+        "gesture": "touch"
+       },
+       {
+        "grab": "br",
+        "gesture": "pinch"
+       },
+       {
+        "grab": "tr",
+        "gesture": "nogo"
+       }
+      ]
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace, either hand: pinch the bar and drag the window to each ghost in turn, any way you like.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.2,
+        -0.5
+       ],
+       "size": [
+        0.34,
+        0.24
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "bar",
+      "every_s": 5,
+      "gap_s": 0,
+      "moves": [
+       [
+        0.2,
+        0.1,
+        0
+       ],
+       [
+        -0.2,
+        -0.05,
+        0.1
+       ],
+       [
+        0,
+        0.15,
+        -0.2
+       ]
+      ],
+      "say": "Your own pace: drag it to the ghost"
+     }
+    }
+   ]
+  }
+ ]
+}

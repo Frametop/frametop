@@ -1,0 +1,172 @@
+---
+title: "G4 Gaze: gaze sources, ft-gaze to ft-gazed to the pointer helper, the calibration panel, idle and wake (78e93b1)"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    direction LR
+    lg0: Stopped, off, or nothing open
+    lg1: Running or open, as it should be
+    lg2: Between: waking, fitting, a lease running out
+    lg3: Closed early: ignored, the headset off, quit
+    lg4: Suspected open bug: the state that breaks the rule
+    lg5: Z1 open, ScreensComeBack: ft-gazed dies during a full calibration (an exception in run, a SIGKILL). Nothing calls close(), and ft-screens' "hide" is a plain switch with no lease. The new ft-gazed never knew, so Frametop's screens stay hidden (red Z1.1-4, TLC Crash, 7 steps)
+    lg6: Z2 open, FullOnlyWhenNeeded: our tracker's first calibration saves, and ft-gazed still holds ft-eyes' status from before the fit. If full_armed is still set, the next need_full opens a second full calibration at once. Calibrate never clears it, gaze mode coming on during the calibration sets it. 3a796b5 closed only the don's way in (red Z2.1-4, TLC Code 10 steps, CodeAuto 10, FitSays holds)
+    lg7: Z3 open, minor: Check headset fit asked for while idle waits for a corrected gaze (svc.last_sample). Our tracker before its first calibration never sends one, so it opens only after the whole WAKE_SETTLE, 15 s (red Z3.1-2, from the code)
+    lg8: Z4 open, CalibrationComes: no eyes for EYES_GONE (2 s) close the full calibration, but away needs AWAY_MIN (3 s). Eyes back in that second are no don, so nothing re-arms it and it never opens by itself again (red Z4.1-3, TLC Code 11 steps, Steam too, NoBlip holds)
+    lg9: Holds at 78e93b1: IdleStops, CheckKeepsAwake in all 11 configs, ScreensComeBack without crashes, TrackerWakes without endless crashes. Fixed and drawn green: the 2026-10-05 deadlock (d39fbb9, PreBlind breaks CalibrationComes in 7 steps) and the don re-arming during a calibration (3a796b5, PreGuardAuto breaks FullOnlyWhenNeeded)
+    lg10: Known limit, not a new bug: an eye-server.mmap layout ft-gaze doesn't know (NewLayout) blocks even our tracker's calibration, since its eyes seen come from mmap1. problem() says so in Input Settings
+    lg11: Escape hatches: Z1, the screens hotkey (toggle), a VR game starting or ending, or the visibility setting reset g_manual. Z2, quit the second one (calquit, its calibration is saved). Z4, Calibrate or quickcal on the Gaze page
+    lg12: Another group: arrows into it are where G4 touches it, drawn there, not here
+  }
+  class lg0 teal
+  class lg1 blue
+  class lg2 yellow
+  class lg3 orange
+  class lg4 breaks
+  class lg5 bugLegend
+  class lg6 bugLegend
+  class lg7 bugLegend
+  class lg8 bugLegend
+  class lg9 fixed
+  class lg10 legendNote
+  class lg11 legendNote
+  class lg12 xgroup
+  state "Gaze sources (gaze/ft-gaze.cpp, sources LIST from ft-gazed's wanted_sources)" as gs {
+    q1: mmap1: SteamVR's combined gaze, eye-server.mmap set 1, read-only (EyeFile.Detect: SteamOS 0.3 and 0.4 layouts)
+    q2: left and right: each eye's own reading, set 2
+    q3: own: our tracker, /dev/shm/frametop-eyes-gaze
+    q4: action: SteamVR's gaze action, calls into vrserver, read only while a check runs
+    q5: fusion (GAZE_FUSION=on): SteamVR's two eyes through an affine fitted at our dots, half and half with ours
+  }
+  state "The data path, drawn by hand (ft-gazed's header 1-140, ft-gaze.cpp 740-790)" as dp {
+    d1: ft-eyegrab (root, frametop-eyegrab): copies the eye cameras' frames only while /dev/shm/frametop-eyes-want is fresh
+    d2: ft-eyes (gaze/tracker, in the dev box): pupils to gaze, its own calibration, touches the want file every second
+    d3: ft-gaze: one JSON line per new sample (90 Hz), only with a head pose, only the sources asked for
+    d4: ft-gazed: drops blinks, combines the eyes (EyeWeights, EyeBridge), corrects (calibration.json, lessons), fixation lock (GazeLock, 1 deg)
+    d5: Pointer helper: gz yaw pitch rawyaw rawpitch on @ft_pointer_helper, used only in gaze mode (POINTER_GAZE)
+    d6: Gaze owns the pointer: a fresh gz within 250 ms wakes it (gazewoke), the mouse nudges it
+    d7: A nudge and a click: lesson rawyaw rawpitch trueyaw truepitch back to ft-gazed, recheck past POINTER_GAZE_NUDGE_MAX
+  }
+  state "ft-gazed: idle and wake (ft-gazed 546-584 and 655, G4Gaze.tla)" as iw {
+    i0: Idle: ft-gaze and ft-eyes stopped, the frame grabber idle
+    [*] --> i0
+    i1: Waking: started, WAKE_SETTLE (15 s) for the tracker to send
+    i2: Awake: gaze in use (gaze mode on and worn, a check open or asked for, a wake lease)
+    i3: Down: ft-gazed died, its children quit with their stdin
+  }
+  state "The full calibration (gazecheck.py need_full 499-525, start 600-650, finish 1174-1213, G4Gaze.tla)" as fc {
+    c0: Not calibrated, armed: need_full opens it once per arming
+    [*] --> c0
+    c1: Open in the panel, Frametop's screens hidden (ft-screens hide)
+    c2: Fitting: ft-eyes has the dots (calib-fit, up to 10 s), EYES_GONE paused
+    c3: Saved, closed: ft-gazed still holds ft-eyes' last status (no calibration) for up to a second
+    c4: A second full calibration opens on a calibrated tracker
+    c5: Closed unfinished, not armed: Not calibrated, use Calibrate
+    c6: Calibrated: quick checks when the headset goes on (auto_quick)
+    c7: Screens hidden with no calibration open, nobody left to show them
+    c8: Waiting for a gaze our tracker can't send before it is calibrated
+  }
+  state "The calibration panel (ft-gazepanel, calpanel.h, ft-pointer.cpp 2044-2063, vr.cpp 2745 and 6060)" as cp {
+    p0: Down: clicks go to the desktop
+    [*] --> p0
+    p1: Up: calpanel 1 every second to the helper, a 3 s lease, passed on to the relay and ft-screens (no palm menu)
+    p2: A click while up: trigger, left, Enter, Meta+J, a pinch, a gaze precision or drag press give calaccept. b, right, Meta+K give calquit
+    p3: Lease lapsed: 3 s after the last calpanel 1, the pointer and the palm menu come back
+  }
+  state "Check headset fit, asked for while idle (run_pending 1293-1305, start_fit 636-640)" as ft {
+    f0: Asked for: pending, the tracker wakes
+    f1: Waiting for svc.last_sample, a corrected gaze
+    f2: Open: start_fit needs only sample_at, any sample
+  }
+  state "Other groups" as og {
+    o1: G1 Lifecycle and presence
+    o2: G2 Desktop and panels
+    o3: G3 Input and pointer
+    o5: G5 Hands
+  }
+  q1 --> d3: always: eyes seen, the don, mmap1's unc
+  q2 --> d3: SteamVR's eyes, or the fusion
+  q3 --> d3: with our tracker
+  q4 --> d3: during a check
+  q5 --> d4: GAZE_FUSION=on and fusion.json
+  d1 --> d2: frames in shared memory
+  d2 --> q3: gaze per eye, or nothing before its first calibration
+  d3 --> d4: stdout, one line a sample
+  d4 --> d5: gz, about 90 Hz
+  d5 --> d6: gaze mode on
+  d6 --> d7: you nudge with the mouse and click
+  d7 --> d4: lesson: SteamVR's eyes learn, our tracker gets click T YAW PITCH on @ft_eyes
+  d5 --> o3: G3 K4 K5: gaze holds (aimHeld, gaze pinch, precision) press the same one trigger
+  i0 --> i1: in use again: gaze ? headset says on and worn, a check asked for, a wake lease
+  i1 --> i2: the tracker sends
+  i1 --> i2: WAKE_SETTLE passes anyway
+  i2 --> i0: IDLE_AFTER (30 s) with nothing in use: stop_helper, stop_eyes
+  i2 --> i3: (Z1.2) an exception in run, a SIGKILL, TimeoutStopSec
+  i3 --> i0: Restart=on-failure, 3 s: a new Service and Checks, nothing remembered
+  i2 --> o1: G1 L4: the pause stops frametop-gaze, a restarting one escapes it (is-active) and comes back mid-pause
+  c0 --> c1: (Z1.1) gaze mode on, eyes seen, ft-eyes answers calib-start (blind since d39fbb9)
+  c0 --> c8: (fixed d39fbb9) before it can_run needed a gaze: the 2026-10-05 deadlock
+  c8 --> c0: blind: eyes seen by SteamVR and ft-eyes answering are enough
+  c1 --> c2: (Z2.1) every dot taken: calib-fit to ft-eyes
+  c1 --> c5: (Z4.1 Z4.2) no eyes for EYES_GONE (2 s): the headset came off
+  c1 --> c5: ignored (CLICK_IDLE 120 s) or calquit, gaze mode off if still uncalibrated
+  c1 --> c1: (fixed 3a796b5) the don while it is open no longer re-arms it
+  c1 --> c7: (Z1.3 Z1.4) ft-gazed dies: close() never runs, the new one never sent hide
+  c2 --> c3: (Z2.2) fitted, close(): the screens come back
+  c3 --> c6: the next status reply says calibrated (if one was queued during the fit, at once)
+  c3 --> c4: (Z2.3 Z2.4) need_full first: full_armed still set (Calibrate, gaze mode on during it)
+  c4 --> c6: its dots taken again, or calquit
+  c5 --> c0: the don: AWAY_MIN without eyes, then DON_DELAY with them, no check open
+  c5 --> c5: (Z4.3) eyes back inside AWAY_MIN: no don, nothing re-arms
+  c5 --> c1: Calibrate or quickcal on the Gaze page
+  c6 --> c0: Forget, the other tracker picked: missing one later is news again
+  c7 --> c6: only the screens hotkey, a VR game starting or ending, or the visibility setting
+  c1 --> o2: G2: ft-screens hide and show around it (screens_shown, g_manual)
+  c1 --> p1: start: calpanel 1, show full
+  p0 --> p1: a check or calibration opens
+  p1 --> p2: you click, pinch or press Enter
+  p2 --> p1: calaccept takes the dot, the next one shows
+  p1 --> p0: close(): calpanel 0
+  p1 --> p3: ft-gazed stops renewing it (died, or held up)
+  p3 --> p0: 3 s later
+  p1 --> o3: G3: calOpened ends a hold, leftHeld and aim with no click
+  p2 --> o5: G5: a hand's pinch takes the dot (CalPinch)
+  f0 --> f1: (Z3.1) woken, but our tracker sends no gaze yet
+  f1 --> f2: (Z3.2) only after WAKE_SETTLE, 15 s
+  f0 --> f2: SteamVR's eyes, or ours calibrated: within a second or two
+  class q1 blue
+  class q2 blue
+  class q3 blue
+  class q4 yellow
+  class q5 blue
+  class d1 blue
+  class d2 blue
+  class d3 blue
+  class d4 blue
+  class d5 blue
+  class d6 blue
+  class d7 yellow
+  class i0 teal
+  class i1 yellow
+  class i2 blue
+  class i3 orange
+  class c0 teal
+  class c1 blue
+  class c2 yellow
+  class c3 yellow
+  class c4 breaks
+  class c5 orange
+  class c6 blue
+  class c7 breaks
+  class c8 fixed
+  class p0 teal
+  class p1 blue
+  class p2 blue
+  class p3 yellow
+  class f0 teal
+  class f1 breaks
+  class f2 blue
+  class o1 xgroup
+  class o2 xgroup
+  class o3 xgroup
+  class o5 xgroup

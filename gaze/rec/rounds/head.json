@@ -1,0 +1,68 @@
+{
+ "schema": 1,
+ "id": "head",
+ "title": "Head turning",
+ "intro": "A dot that stays put in the room while you turn your head. Keep your eyes on it.",
+ "steps": [
+  {
+   "id": "turn-sides",
+   "kind": "world",
+   "group": "head",
+   "text": "Keep looking at the dot. Turn your head slowly left and right.",
+   "point": [
+    0,
+    0,
+    -1.5
+   ],
+   "seconds": 15
+  },
+  {
+   "id": "turn-updown",
+   "kind": "world",
+   "group": "head",
+   "text": "Keep looking at the dot. Nod slowly up and down.",
+   "point": [
+    0,
+    0,
+    -1.5
+   ],
+   "seconds": 12
+  },
+  {
+   "id": "tilt",
+   "kind": "world",
+   "group": "head",
+   "text": "Keep looking at the dot. Tilt your head side to side.",
+   "point": [
+    0,
+    0,
+    -1.5
+   ],
+   "seconds": 10
+  },
+  {
+   "id": "shake",
+   "kind": "world",
+   "group": "head",
+   "text": "Keep looking at the dot. Shake your head a little, quickly.",
+   "point": [
+    0,
+    0,
+    -1.5
+   ],
+   "seconds": 8
+  },
+  {
+   "id": "walk",
+   "kind": "world",
+   "group": "head",
+   "text": "If you have room: take a step to each side while looking at the dot.",
+   "point": [
+    0,
+    0,
+    -2.0
+   ],
+   "seconds": 12
+  }
+ ]
+}

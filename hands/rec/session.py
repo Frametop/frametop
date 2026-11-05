@@ -2,17 +2,20 @@
 """The hand recorder's session runner (DESIGN.md: "Processes during a session", "Files", "The
 script", "Feedback while recording", "Controls").
 
-It reads script.json, starts what the session needs (ft-camd and a tracking ft-hands, only if
-they aren't running), and runs the sections in order. Each section is one take: a recording
-ft-hands child process (--record-only, 10 sets a second) plus prompts.jsonl, take.json and the
-panel's poses.jsonl. The headset panel (ft-handpanel) shows the prompts; the live hands file
+It reads script.json (or a bounty's round script), starts what the session needs (ft-camd and
+a tracking ft-hands, only if they aren't running), and runs the sections in order. Each section
+is one take: a recording ft-hands child process (--record-only, 10 sets a second or the
+script's record_hz) plus prompts.jsonl, take.json and the panel's poses.jsonl. The headset panel (ft-handpanel) shows the prompts; the live hands file
 gives feedback ("I can't see your left hand").
 
 Plain Python, standard library only: ft_handrec.py imports it, and it runs from the command line
 for testing (in the dev container):
 
-  python3 hands/rec/session.py --dry-run --speed 20 --next-after 0.2   # no processes: prints the panel commands
-  python3 hands/rec/session.py --ring /tmp/ring --base /tmp/hr        # ft-ringplay's frames, no headset needed
+  python3 -m hands.rec.session --dry-run --speed 20 --next-after 0.2   # no processes: prints the panel commands
+  python3 -m hands.rec.session --ring /tmp/ring --base /tmp/hr        # ft-ringplay's frames, no headset needed
+  python3 -m hands.rec.session --board                                # the bounty board, and which are done
+  python3 -m hands.rec.session --bounty index-taps --dry-run --speed 20 --next-after 0.2   # a bounty's round
+  python3 -m hands.rec.session --debug        # a debug session: Frametop's hand tracking used as usual, recorded
 
 Before anything starts it runs the camera check (hands/camcheck.py) and won't start while the
 upper cameras are off (--ignore-cameras overrides it). If the hand-size section's first step sees
@@ -33,7 +36,6 @@ import mmap
 import os
 import random
 import re
-import select
 import shutil
 import signal
 import socket
@@ -47,25 +49,70 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 HANDS = os.path.join(REPO, "hands")
-sys.path.insert(0, HANDS)
-import camcheck  # noqa: E402  (hands/camcheck.py: are all four mono cameras running?)
-sys.path.insert(0, HERE)
-import sides  # noqa: E402  (hands/rec/sides.py: which side camera is which)
-import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone recorder's build info)
+from hands import camcheck  # noqa: E402  (hands/camcheck.py: are all four mono cameras running?)
+from hands.rec import sides  # noqa: E402  (hands/rec/sides.py: which side camera is which)
+from hands.rec import takes  # noqa: E402  (hands/rec/takes.py: the version, and the standalone recorder's build info)
+from conf import ft_conf  # noqa: E402  (conf/ft_conf.py: frametop.conf's grammar)
+from hands.rec import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
+from hands.rec import voicelog  # noqa: E402  (hands/rec/voicelog.py: a debug session's microphone, if ticked)
+from hands.rec import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's copy of what the panels and pointer did)
+# What the recorders share (recorder/): the window and the tests import it from there.
+from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402
+                             write_json, clean_text, tree_version, os_version as _os_version,
+                             steamvr_version as _steamvr_version)
+from recorder import bounties  # noqa: E402
+from recorder.controls import Controls, _Redo, _Skip, _Stop  # noqa: E402
+from recorder.privacy import strip_calibration  # noqa: E402
+from recorder import fhformat  # noqa: E402  (the camera ring's layout)
+from recorder.units import unit_active, start_unit, stop_unit, pause_units, resume_units, restart_units  # noqa: E402
+from recorder.button import (INPUT_DEVICES, BUTTON_DEVICE, BUTTON_DOUBLE_S, BUTTON_HOLD_S,  # noqa: E402
+                             BUTTON_BOUNCE_S, find_button, read_input_devices, mouse_connected, ButtonReader)
 FT_HANDS = os.path.join(HANDS, "build", "ft-hands")
 FT_CAMD = os.path.join(HANDS, "build", "ft-camd")
 PANEL_BIN = os.path.join(HERE, "build", "ft-handpanel")
+# Runs a program in the container this tree was built for: "dev" in a clone, the release's own in a
+# release (it starts the container first)
+IN_BOX = os.path.join(REPO, "scripts", "in-box")
 SCRIPT_PATH = os.path.join(HERE, "script.json")
+DEBUG_SCRIPT = os.path.join(HERE, "debug.json")         # a debug session: Frametop's own hand tracking, used as usual
+BOARD_PATH = os.path.join(HERE, "bounties.json")      # the bounty board shipped with the recorder
+BOUNTIES_DIR = os.path.join(HERE, "bounties")         # a bounty's round script: bounties/<script>.json
 POSES_DIR = os.path.join(HERE, "poses")   # the pose pictures: poses.json and its PNGs
+DEMOS_DIR = os.path.join(HERE, "demos")   # the demo clips: <id>.gif (DESIGN.md "Demo clips")
+RECORDED_DEMOS_DIR = os.path.join(HERE, "demos-recorded")   # the same parts from real camera frames
+# The demo clips a contributor follows: recorded (a real person's hands, from a session's side
+# cameras: demo/camgifs.py) or skeleton (the drawn hand, its palm light and its back dark).
+GUIDANCE = (("recorded", "Recorded hands"), ("skeleton", "Skeleton hands"))
 BASE_DIR = os.path.expanduser("~/.local/share/frametop/hands/contrib")
 PANEL_SOCKET = "ft_handpanel"
 CAMD_UNIT = "frametop-handrec-camd.service"
+# Frametop's live hand tracking (hands/run.sh, ft-handsctl): an ft-camd the recorder uses as it is
+LIVE_CAMD_UNIT, LIVE_HANDS_UNIT = "frametop-camd.service", "frametop-hands.service"
+# Frametop's drawn hands and hand pointer: off for a session, so no hand overlay is in view and no gesture
+# clicks or opens Steam's menu while the person performs the steps (Session._quiet_hands)
+QUIET_UNITS = ("frametop-handview.service", "frametop-pointer.service")
+PAUSED_UNITS_FILE = "handrec-paused-units"   # in run_dir(): the ones to start again, if a session didn't
+SIDE_CAMERAS = ("slam_left", "slam_right")   # a recording needs these (Session._first_set)
+CAMERAS_BACK_S = 120     # how long a lost recording waits for the cameras (Session._cameras_back)
+STALL_S = 3.0            # a recording with no new set for this long is lost (Session._watch_recording)
+MAX_CAMERA_LOSSES = 3    # then the session stops
+CAMERAS_TITLE = "Waiting for the cameras"
+CAMERAS_TEXT = ("The headset's cameras restarted (SteamVR moves them when the colour camera module is unplugged "
+                "or plugged in), or they stopped. If you took the headset off, put it back on. This step goes "
+                "again once they're back.")
 HANDS_UNIT = "frametop-handrec-hands.service"
+CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
+LIVE_KEYS = re.compile(r"^(HANDS|POINTER)_[A-Z0-9_]+$")   # the settings a debug session records
+MARK_FLASH_S = 1.0       # a debug session's mark: the panel shows "Marked" this long
+DEBUG_NEEDS_HANDS = ("A testing session records Frametop's own hand tracking, and it isn't running. Turn on "
+                     "hand tracking in Frametop (or start the desktop), then try again.")
 # The standalone Hand Recorder (takes.standalone()): its binaries run on the host, so ft-hands
 # starts directly rather than in the dev container, and repairs mean its install command.
 STANDALONE = takes.standalone()
+# A Frametop release (pack/install-release.sh) rather than a clone
+RELEASE = os.path.exists(os.path.join(REPO, ".frametop-release"))
 
-RECORD_HZ = 10
+RECORD_HZ = 10           # sets a second; a script's "record_hz" sets its own (the bounties: 30)
 SIDES_READ_S = 0.5       # how often the tracking ft-hands' side camera decision is read
 TICK_S = 0.05            # the session loop's step (real time)
 FRESH_S = 0.3            # the hands file counts as live if published this recently
@@ -105,77 +152,26 @@ NO_HANDS_RETRY_BUTTON = ("Try again: hold both hands up in front of you, about 4
                          "button. To stop instead: hold the button, or Esc or Stop in the Hand recorder window.")
 
 
-def mono_ns():
-    return time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-
-
-def clock_sample():
-    """[CLOCK_MONOTONIC ns, CLOCK_MONOTONIC_RAW - CLOCK_MONOTONIC ns], as ft-hands' raw_minus_mono_ns().
-    sets.bin's capture_ns is on the RAW clock and everything else on MONOTONIC; the two drift
-    apart with NTP's corrections (0.8 s apart and ~10 ppm on 2026-10-03), so take.json keeps
-    samples to turn capture_ns into MONOTONIC: capture_ns - offset, interpolated by time."""
-    a = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-    r = time.clock_gettime_ns(time.CLOCK_MONOTONIC_RAW)
-    b = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-    mid = (a + b) // 2
-    return [mid, r - mid]
-
-
 def run_dir():
     return "/run/user/%d/frametop-hands" % os.getuid()
 
 
-def in_container():
-    return os.path.exists("/run/.containerenv") or os.path.exists("/.dockerenv")
-
-
-def host_command(*cmd):
-    """argv to run a command on the SteamOS host from the dev container (as in
-    display-settings: distrobox-host-exec needs the user's real session bus). It runs from the
-    home folder: host-spawn starts the command in the caller's folder, and a container-only
-    one such as /run/host/tmp doesn't exist on the host (every command then exits 127)."""
-    exe = shutil.which("distrobox-host-exec")
-    if not in_container() or not exe:
-        return list(cmd)
-    return ["env", "-C", os.path.expanduser("~"), "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%d/bus" % os.getuid(),
-            exe] + list(cmd)
-
-
 def fix_hint(frametop):
-    """How to repair a missing or broken part: Frametop's command, or the standalone install's."""
+    """How to repair a missing or broken part: Frametop's command, or the standalone install's.
+    A Frametop release never builds (its programs come in its image), so a build there means
+    installing the release again."""
     if STANDALONE:
         return STANDALONE.get("reinstall") or "run the Hand Recorder's install command again"
+    if RELEASE and frametop.endswith("build.sh"):
+        return "install this Frametop release again"
     return frametop
 
 
-def host_path(path):
-    """A host file, from the container (/run/host) or the host itself."""
-    for p in ("/run/host" + path, path):
-        if os.path.exists(p):
-            return p
-    return None
-
-
-def write_json(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=1)
-        f.write("\n")
-    os.replace(tmp, path)
-
-
-def clean_text(s):
-    """Text for a panel command: one line; "|" is the panel's line break, so callers use it."""
-    return " ".join(str(s).replace("\r", " ").replace("\n", " ").split())
-
-
 # ------------------------------------------------------------------------------------------
-# The camera ring (camd/fhring.h; tools/ring.py's layout, struct only)
+# The camera ring (camd/fhring.h, in recorder/fhformat.py; struct only)
 
-RING_HDR = struct.Struct("<8sIIIIQqQ16x")              # 64 bytes
-RING_CAM = struct.Struct("<32s32siIIIIIQQQQQIf24x")      # 160 bytes
-RING_SLOT = struct.Struct("<QQQQQIf16x")                 # 64 bytes, the image follows
-FH_CAM_DARK, FH_CAM_COLOR = 1, 2
+RING_HDR, RING_CAM, RING_SLOT = fhformat.RING_HDR, fhformat.RING_CAM, fhformat.RING_SLOT
+FH_CAM_DARK, FH_CAM_COLOR = fhformat.CAM_DARK, fhformat.CAM_COLOR
 
 
 class Ring:
@@ -186,12 +182,12 @@ class Ring:
         finally:
             os.close(fd)
         magic, version, _, ncams, _, _, self.writer_pid, _ = RING_HDR.unpack_from(self.map, 0)
-        if magic != b"FHRING01" or version != 1:
+        if magic != fhformat.RING_MAGIC or version != fhformat.RING_VERSION:
             self.map.close()
             raise ValueError("%s isn't a camera ring" % path)
         self.cams = []
-        for i in range(min(ncams, 8)):
-            f = RING_CAM.unpack_from(self.map, RING_HDR.size + i * RING_CAM.size)
+        for i in range(min(ncams, fhformat.RING_MAX_CAMS)):
+            f = RING_CAM.unpack_from(self.map, fhformat.ring_cam_offset(i))
             self.cams.append({
                 "index": i, "sensor": f[0].split(b"\0", 1)[0].decode(errors="replace"),
                 "name": f[1].split(b"\0", 1)[0].decode(errors="replace"), "node": f[2],
@@ -202,17 +198,17 @@ class Ring:
         self.map.close()
 
     def alive(self, max_age=1.0):
-        hb = struct.unpack_from("<Q", self.map, 40)[0]
+        hb = struct.unpack_from("<Q", self.map, fhformat.RING_HEARTBEAT_OFF)[0]
         return hb != 0 and (mono_ns() - hb) / 1e9 < max_age
 
     def _cam_field(self, cam, fmt, off):
-        return struct.unpack_from(fmt, self.map, RING_HDR.size + cam["index"] * RING_CAM.size + off)[0]
+        return struct.unpack_from(fmt, self.map, fhformat.ring_cam_offset(cam["index"]) + off)[0]
 
     def latest(self, cam):
-        return self._cam_field(cam, "<Q", 104)
+        return self._cam_field(cam, "<Q", fhformat.RING_CAM_LATEST_OFF)
 
     def dark_mean(self, cam):
-        return self._cam_field(cam, "<f", 132)
+        return self._cam_field(cam, "<f", fhformat.RING_CAM_DARK_MEAN_OFF)
 
     def mono(self):
         """The mono tracking cameras (no dark twins, no colour cameras, also by name for
@@ -345,35 +341,6 @@ def lighting_record(choice, ring):
             "measured": measured, "ambient_ir": ambient_ir(ring), "ring": ring or {}}
 
 
-def unit_active(unit):
-    return subprocess.run(host_command("systemctl", "--user", "-q", "is-active", unit),
-                          capture_output=True, timeout=30).returncode == 0
-
-
-def start_unit(unit, what, argv, log=lambda line: None):
-    """Start argv as a transient user unit that stops with SteamVR. True if it started it,
-    False if it was running already; raises RuntimeError if it couldn't."""
-    if unit_active(unit):
-        log("%s is running already" % unit)
-        return False
-    cmd = host_command("systemd-run", "--user", "--quiet", "--collect", "--unit=" + unit,
-                       "--description=Frametop hand recorder: " + what,
-                       "-p", "PartOf=steamvr.service", "-p", "After=steamvr.service",
-                       "-p", "Restart=on-failure", "-p", "RestartSec=3", "-p", "TimeoutStopSec=5", *argv)
-    for attempt in range(3):   # distrobox-host-exec has failed once, silently, and worked again
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if r.returncode == 0 or unit_active(unit):
-            log("started %s" % unit)
-            return True
-        log("starting %s failed (exit %d): %s" % (unit, r.returncode, (r.stderr or r.stdout).strip()))
-        time.sleep(0.5)
-    raise RuntimeError("couldn't start %s (exit %d): %s" % (unit, r.returncode, (r.stderr or r.stdout).strip()))
-
-
-def stop_unit(unit):
-    subprocess.run(host_command("systemctl", "--user", "stop", unit), capture_output=True, timeout=30)
-
-
 def ring_alive(path=None):
     try:
         r = Ring(path or os.path.join(run_dir(), "cam-ring"))
@@ -407,60 +374,141 @@ def start_camd(path=None, log=lambda line: None, stop=lambda: False, timeout=15.
     raise RuntimeError("ft-camd didn't start (is SteamVR running?): journalctl --user -u " + CAMD_UNIT)
 
 
-# ------------------------------------------------------------------------------------------
-# The factory calibration, without what identifies the unit
-
-ID_TOKENS = {"serial", "sn", "uuid", "guid", "mac", "id", "ids", "identifier"}
-
-
-def _key_identifies(key):
-    k = str(key)
-    if re.search(r"serial|uuid", k, re.I):
-        return True
-    tokens = re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", k)
-    return any(t.lower() in ID_TOKENS for t in tokens)
+def openvr_env():
+    """The environment for an OpenVR client (ft-handpanel): Frametop's desktop points
+    XDG_CONFIG_HOME at ~/.config/frametop, where OpenVR finds no openvrpaths.vrpath."""
+    env = dict(os.environ)
+    config = env.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    home = os.path.expanduser("~/.config")
+    if (not os.path.exists(os.path.join(config, "openvr", "openvrpaths.vrpath"))
+            and os.path.exists(os.path.join(home, "openvr", "openvrpaths.vrpath"))):
+        env["XDG_CONFIG_HOME"] = home
+    return env
 
 
-def _value_identifies(value):
-    """A string holding something like a serial number: a run of 8 or more letters and digits
-    with at least 4 digits and a letter (sensor names like og01a1b are shorter)."""
-    if not isinstance(value, str):
-        return False
-    for run in re.findall(r"[A-Za-z0-9]+", value):
-        if len(run) >= 8 and sum(c.isdigit() for c in run) >= 4 and any(c.isalpha() for c in run):
+def start_panel(panel_bin=None, stdout=None, timeout=15.0):
+    """Start ft-handpanel (--watch-stdin: it ends when the returned process's stdin closes) and
+    wait until it answers. Returns the process; raises RuntimeError if it can't."""
+    panel_bin = panel_bin or PANEL_BIN
+    if not os.access(panel_bin, os.X_OK):
+        raise RuntimeError("ft-handpanel isn't built: " + fix_hint("hands/rec/build.sh"))
+    out = stdout if stdout is not None else subprocess.DEVNULL
+    proc = subprocess.Popen([panel_bin, "--watch-stdin"], stdin=subprocess.PIPE, stdout=out, stderr=out,
+                            env=openvr_env())
+    panel = Panel()
+    try:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if panel.cmd("ping", reply=True, timeout=0.2):
+                return proc
+            if proc.poll() is not None:
+                raise RuntimeError("ft-handpanel exited (is SteamVR running?)")
+            time.sleep(0.1)
+    finally:
+        panel.close()
+    proc.kill()
+    raise RuntimeError("ft-handpanel doesn't answer")
+
+
+def steamvr_running():
+    return bool(find_processes("vrserver"))
+
+
+READY_PARTS = (("steamvr", "SteamVR"), ("cameras", "The cameras"), ("hands", "Hand tracking"),
+               ("panel", "The headset panel"))
+READY_WAIT_S = 20.0      # how long get_ready waits for each part it starts
+
+
+def get_ready(frametop_hands=False, need_live=False, panel_bin=None, on_part=lambda key, state, text: None,
+              log=lambda line: None):
+    """Start what a round needs before its checklist, in order: SteamVR (only checked), the
+    cameras (ft-camd), hand tracking (ft-hands) and the headset panel (ft-handpanel). With
+    Frametop's hand tracking installed (frametop_hands) its own units start; otherwise the
+    recorder's. need_live: a testing session, which records Frametop's own tracking.
+    on_part(key, state, text) reports each part ("busy", "ok" or "failed"). Returns
+    {"ok", "error", "units" (the units it started, to stop later), "panel" (the ft-handpanel
+    process it started, or None)}."""
+    out = {"ok": False, "error": "", "units": [], "panel": None}
+
+    def fail(key, text):
+        on_part(key, "failed", text)
+        out["error"] = text
+        return out
+
+    def wait(test):
+        end = time.monotonic() + READY_WAIT_S
+        while time.monotonic() < end:
+            if test():
+                return True
+            time.sleep(0.2)
+        return test()
+
+    def start_live(key):
+        if unit_active(LIVE_HANDS_UNIT):
             return True
-    return False
+        r = subprocess.run(host_command("systemctl", "--user", "start", LIVE_HANDS_UNIT),
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            fail(key, "Frametop's hand tracking didn't start: %s" % (r.stderr or r.stdout).strip())
+            return False
+        out["units"].append(LIVE_HANDS_UNIT)
+        log("started %s" % LIVE_HANDS_UNIT)
+        return True
 
+    on_part("steamvr", "busy", "")
+    if not steamvr_running():
+        return fail("steamvr", "SteamVR isn't running. Put the headset on (or start SteamVR), then try again.")
+    on_part("steamvr", "ok", "Running")
 
-def strip_calibration(xrservice_json_dict):
-    """/persist/xrservice.json without what identifies the unit: keys naming a serial, sn,
-    uuid, mac or id, and string values that look like serial numbers. Returns (cleaned dict,
-    removed key paths such as "cameras[0].serial")."""
-    removed = []
+    if need_live and not frametop_hands:
+        return fail("cameras", DEBUG_NEEDS_HANDS)
+    on_part("cameras", "busy", "")
+    if not ring_alive():
+        if frametop_hands:
+            if not start_live("cameras"):
+                return out
+            if not wait(ring_alive):
+                return fail("cameras", "The cameras didn't start (journalctl --user -u %s)" % LIVE_CAMD_UNIT)
+        else:
+            try:
+                if start_camd(log=log, timeout=READY_WAIT_S):
+                    out["units"].append(CAMD_UNIT)
+            except RuntimeError as e:
+                return fail("cameras", str(e))
+    on_part("cameras", "ok", "Running")
 
-    def walk(o, path):
-        if isinstance(o, dict):
-            out = {}
-            for k, v in o.items():
-                p = "%s.%s" % (path, k) if path else str(k)
-                if _key_identifies(k) or _value_identifies(v):
-                    removed.append(p)
-                    continue
-                out[k] = walk(v, p)
-            return out
-        if isinstance(o, list):
-            out = []
-            for i, v in enumerate(o):
-                p = "%s[%d]" % (path, i)
-                if _value_identifies(v):
-                    removed.append(p)
-                    out.append(None)   # keep the other items' positions
-                    continue
-                out.append(walk(v, p))
-            return out
-        return o
+    on_part("hands", "busy", "")
+    if not tracker_running() or (need_live and not unit_active(LIVE_HANDS_UNIT)):
+        if frametop_hands:
+            if not start_live("hands"):
+                return out
+        else:
+            argv = [FT_HANDS, "--no-gestures", "--status", "0"]
+            if not STANDALONE:   # built in Frametop's container: it runs there
+                argv = [IN_BOX] + argv
+            try:
+                if start_unit(HANDS_UNIT, "hand tracking for feedback", argv, log):
+                    out["units"].append(HANDS_UNIT)
+            except RuntimeError as e:
+                return fail("hands", str(e))
+        if not wait(tracker_running):
+            return fail("hands", "Hand tracking didn't start")
+    on_part("hands", "ok", "Running")
 
-    return walk(xrservice_json_dict, ""), removed
+    on_part("panel", "busy", "")
+    panel = Panel()
+    try:
+        running = bool(panel.cmd("ping", reply=True))
+    finally:
+        panel.close()
+    if not running:
+        try:
+            out["panel"] = start_panel(panel_bin)
+        except RuntimeError as e:
+            return fail("panel", str(e))
+    on_part("panel", "ok", "Ready (it shows when the round starts)")
+    out["ok"] = True
+    return out
 
 
 # ------------------------------------------------------------------------------------------
@@ -493,7 +541,7 @@ class HandsFile:
                 if len(data) < size:
                     return None
                 magic, version, _, seq, _, publish_ns, nhands, _ = HANDS_HDR.unpack_from(data, 0)
-                if magic != b"FHHANDS1" or version != 1:
+                if magic != b"FHHANDS1" or version < 1:   # 2 appends the skeleton; the start is unchanged
                     return None
                 if seq % 2 or os.pread(fd, 8, 16) != data[16:24]:
                     continue
@@ -517,6 +565,20 @@ class HandsFile:
 
 # ------------------------------------------------------------------------------------------
 # The panel (ft-handpanel, @ft_handpanel)
+
+def _lit_cmd(a):
+    """The panel command lighting an act's (or a steady light's) part."""
+    return " ".join(["win", a["win"], "lit", a["lit"], a["colour"]] + ([a["label"]] if a["label"] else []))
+
+
+def _pose_reply(reply):
+    """The 12 numbers of an "ok <3x4 pose>" reply (row-major, the room's standing universe), or None."""
+    tok = (reply or "").split()
+    try:
+        return [round(float(v), 5) for v in tok[1:13]] if tok[:1] == ["ok"] and len(tok) == 13 else None
+    except ValueError:
+        return None
+
 
 class Panel:
     """Commands to ft-handpanel over its datagram socket. Commands that need an answer wait
@@ -625,7 +687,7 @@ class Recorder:
     writes TAKE/sets.bin; part N (after a pause) records into TAKE/.part-N and is moved to
     TAKE/sets-N.bin when it ends (ft-hands never overwrites, and always writes DIR/sets.bin)."""
 
-    def __init__(self, take_dir, part, seconds, ring, log_file, swap=None):
+    def __init__(self, take_dir, part, seconds, ring, log_file, swap=None, hz=RECORD_HZ):
         """swap: the side cameras' decision (sides.py), passed on as --sides 1 or 0; None (not
         known yet) records them as ft-camd names them (--sides auto, whatever the config says)."""
         self.take_dir, self.part = take_dir, part
@@ -633,12 +695,12 @@ class Recorder:
         self.file = "sets.bin" if part == 1 else "sets-%d.bin" % part
         self.names_swapped = bool(swap)
         argv = [FT_HANDS, "--record-only", "--record", self.dir, "--record-for", "%.0f" % max(seconds, 5),
-                "--record-hz", str(RECORD_HZ), "--status", "0",
+                "--record-hz", "%g" % hz, "--status", "0",
                 "--sides", "auto" if swap is None else "1" if swap else "0"]
         if ring:
             argv += ["--ring", ring]
         if not in_container() and not STANDALONE:
-            argv = [os.path.expanduser("~/.local/bin/distrobox"), "enter", "dev", "--"] + argv
+            argv = [IN_BOX] + argv
         self.proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log_file, stderr=log_file)
         self.started_ns = mono_ns()
 
@@ -651,6 +713,30 @@ class Recorder:
             return os.path.getsize(os.path.join(self.dir, "sets.bin")) > 0
         except OSError:
             return False
+
+    def sets_written(self):
+        """How many sets the part has written so far (0 before the first)."""
+        try:
+            path = os.path.join(self.dir, "sets.bin")
+            with open(path, "rb") as f:
+                head = f.read(16)
+            magic, _, size = struct.unpack("<8sII", head)
+            return os.path.getsize(path) // size if magic.rstrip(b"\0") == b"FHSET01" and size else 0
+        except (OSError, struct.error):
+            return 0
+
+    def cameras(self):
+        """The cameras in the first set written (their calibration names), [] before there is one."""
+        try:
+            with open(os.path.join(self.dir, "sets.bin"), "rb") as f:
+                data = f.read(16 + 8 * 40)
+            magic, n, _ = struct.unpack_from("<8sII", data, 0)
+            if magic.rstrip(b"\0") != b"FHSET01" or len(data) < 16 + n * 40:
+                return []
+            return [struct.unpack_from("<16s", data, 16 + i * 40)[0].split(b"\0", 1)[0].decode(errors="replace")
+                    for i in range(n)]
+        except (OSError, struct.error):
+            return []
 
     def stop(self):
         """End it (SIGTERM: ft-hands writes out its queue) and put the part in place. Afterwards
@@ -683,236 +769,6 @@ class Recorder:
         return self.proc.returncode
 
 
-# ------------------------------------------------------------------------------------------
-# The headset's button, and mice (/proc/bus/input/devices, linux/input.h)
-#
-# The Frame's click button on its right side is KEY_SELECT on the "gpio-keys" device. It's read
-# as any other reader does, never grabbed (EVIOCGRAB): Frametop's input relay, ft-powerd, SteamVR
-# and gamescope read the same device, and the relay remaps its volume keys.
-
-INPUT_DEVICES = "/proc/bus/input/devices"
-INPUT_EVENT = struct.Struct("@llHHi")   # struct input_event: a timeval, type, code, value (24 bytes on 64-bit)
-EV_KEY, EV_REL = 0x01, 0x02
-REL_X, REL_Y = 0x00, 0x01
-KEY_SELECT = 353
-BUTTON_DEVICE = "gpio-keys"
-BUTTON_DOUBLE_S = 0.45    # a second press this soon after the first one's release: a double press
-BUTTON_HOLD_S = 1.5       # held down this long: a hold
-BUTTON_BOUNCE_S = 0.03    # a release and press closer than this are one press (gpio-keys debounces too)
-
-
-def parse_input_devices(text):
-    """/proc/bus/input/devices as [{"name", "phys", "sysfs", "bus", "handlers": [...], "bits": {"EV": int, ...}}]."""
-    out, dev = [], None
-    for line in text.splitlines() + [""]:
-        line = line.strip()
-        if not line:
-            if dev:
-                out.append(dev)
-            dev = None
-            continue
-        if dev is None:
-            dev = {"name": "", "phys": "", "sysfs": "", "bus": 0, "handlers": [], "bits": {}}
-        tag, _, rest = line.partition(": ")
-        if tag == "I":
-            m = re.search(r"Bus=([0-9a-fA-F]+)", rest)
-            dev["bus"] = int(m.group(1), 16) if m else 0
-        elif tag == "N":
-            dev["name"] = rest.partition("=")[2].strip('"')
-        elif tag == "P":
-            dev["phys"] = rest.partition("=")[2]
-        elif tag == "S":
-            dev["sysfs"] = rest.partition("=")[2]
-        elif tag == "H":
-            dev["handlers"] = rest.partition("=")[2].split()
-        elif tag == "B":
-            key, _, words = rest.partition("=")
-            value = 0
-            for w in words.split():   # the highest long first
-                try:
-                    value = (value << 64) | int(w, 16)
-                except ValueError:
-                    value = 0
-                    break
-            dev["bits"][key] = value
-    return out
-
-
-def _event_node(dev):
-    for h in dev["handlers"]:
-        if re.fullmatch(r"event\d+", h):
-            return "/dev/input/" + h
-    return None
-
-
-def find_button(devices):
-    """The headset button's event device: "gpio-keys" with KEY_SELECT, or None."""
-    for dev in devices:
-        if dev["name"] == BUTTON_DEVICE and dev["bits"].get("KEY", 0) >> KEY_SELECT & 1:
-            return _event_node(dev)
-    return None
-
-
-def real_mouse(dev):
-    """A pointing device a person holds: relative X and Y, not made in software. uinput devices
-    (Frametop's virtual mouse, frame-voice's keyboard) sit under /devices/virtual/input or on the
-    virtual bus (6); Bluetooth mice come through uhid, also under /devices/virtual, so those count."""
-    bits = dev["bits"]
-    if not (bits.get("EV", 0) >> EV_REL & 1) or (bits.get("REL", 0) & 3) != 3:   # REL_X and REL_Y
-        return False
-    sysfs = dev["sysfs"]
-    if dev["bus"] == 0x06 or "virtual" in dev["name"].lower() or "uinput" in dev["phys"]:
-        return False
-    return not sysfs.startswith("/devices/virtual/") or sysfs.startswith("/devices/virtual/misc/uhid/")
-
-
-def read_input_devices(path=INPUT_DEVICES):
-    try:
-        with open(path) as f:
-            return parse_input_devices(f.read())
-    except OSError:
-        return []
-
-
-def mouse_connected(path=INPUT_DEVICES):
-    return any(real_mouse(d) for d in read_input_devices(path))
-
-
-def button_events(data):
-    """KEY_SELECT downs and ups in a run of input_event structs: [(True for a down or False for
-    an up, the event's time in seconds), ...] (autorepeat, value 2, is left out). Returns (them,
-    the bytes left over after the last whole event)."""
-    out, usable = [], len(data) - len(data) % INPUT_EVENT.size
-    for off in range(0, usable, INPUT_EVENT.size):
-        sec, usec, etype, code, value = INPUT_EVENT.unpack_from(data, off)
-        if etype == EV_KEY and code == KEY_SELECT and value in (0, 1):
-            out.append((value == 1, sec + usec / 1e6))
-    return out, data[usable:]
-
-
-class ButtonGestures:
-    """The headset button's downs and ups, with their times, as gestures:
-      "press": one short press, reported once the double-press time has passed without a second;
-      "double": two presses, the second down within double_s of the first one's release, reported
-        at the second down;
-      "hold": held down for hold_s, reported while still down.
-    A release and a press closer than bounce_s are one press. Each call returns the gestures that
-    are due, in order; tick() is called now and then to report the ones that are due by time."""
-
-    def __init__(self, double_s=BUTTON_DOUBLE_S, hold_s=BUTTON_HOLD_S, bounce_s=BUTTON_BOUNCE_S):
-        self.double_s, self.hold_s, self.bounce_s = double_s, hold_s, bounce_s
-        self.down_at = None    # when the button went down, while it's down
-        self.done = False      # the press that's down was already reported (a double, a hold)
-        self.released = None   # when a short press was let go, until it's reported or doubled
-        self._up = None        # the last release, for the bounce: (time, down_at, done, released before it)
-
-    def down(self, t):
-        if self.down_at is not None:   # a missed release
-            return []
-        if self._up and t - self._up[0] < self.bounce_s:   # a bounce: still the same press
-            _, self.down_at, self.done, self.released = self._up
-            self._up = None
-            return []
-        out = self.tick(t)
-        self.down_at, self.done = t, False
-        if self.released is not None:   # within the double-press time (else tick reported it)
-            self.released, self.done = None, True
-            out.append("double")
-        return out
-
-    def up(self, t):
-        if self.down_at is None:
-            return []
-        out = self.tick(t)
-        self._up = (t, self.down_at, self.done, self.released)
-        if not self.done:
-            self.released = t
-        self.down_at, self.done = None, False
-        return out
-
-    def tick(self, t):
-        if self.down_at is not None and not self.done and t - self.down_at >= self.hold_s:
-            self.done = True
-            return ["hold"]
-        if self.released is not None and t - self.released > self.double_s:
-            self.released = None
-            return ["press"]
-        return []
-
-    def waiting(self):
-        """Something is due by time alone: a hold, or a press that may still become a double."""
-        return (self.down_at is not None and not self.done) or self.released is not None
-
-
-class ButtonReader:
-    """Reads the headset button on a thread and calls on_gesture("press" | "double" | "hold")
-    (ButtonGestures). path: an event device or, for testing, a FIFO carrying input_event
-    structs. It's opened read-only and shared; if it can't be opened (no device, no permission,
-    /dev/input not reachable in a container) it says so in the log and tries again now and then."""
-
-    def __init__(self, path, on_gesture, log=None, double_s=BUTTON_DOUBLE_S, hold_s=BUTTON_HOLD_S,
-                 bounce_s=BUTTON_BOUNCE_S):
-        self.path, self.on_gesture, self.log = path, on_gesture, log or (lambda s: None)
-        self.gestures = ButtonGestures(double_s, hold_s, bounce_s)
-        self.ok = False      # opened at least once
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="handrec-button", daemon=True)
-
-    def start(self):
-        self._thread.start()
-        return self
-
-    def stop(self):
-        self._stop.set()
-        self._thread.join(2)
-
-    def _report(self, gestures):
-        for g in gestures:
-            self.on_gesture(g)
-
-    def _run(self):
-        failed = False
-        while not self._stop.is_set():
-            try:
-                fd = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-            except OSError as e:
-                if not failed:
-                    self.log("headset button: can't open %s (%s): the window's keys still work" % (self.path, e.strerror))
-                failed = True
-                self._stop.wait(5)
-                continue
-            if failed or not self.ok:
-                self.log("headset button: reading %s" % self.path)
-            self.ok, failed = True, False
-            rest = b""
-            try:
-                while not self._stop.is_set():
-                    r, _, _ = select.select([fd], [], [], 0.02 if self.gestures.waiting() else 0.2)
-                    if not r:
-                        self._report(self.gestures.tick(time.monotonic()))
-                        continue
-                    try:
-                        data = os.read(fd, INPUT_EVENT.size * 64)
-                    except BlockingIOError:
-                        continue
-                    if not data:   # a FIFO's writer left: open it again
-                        self._stop.wait(0.2)
-                        break
-                    events, rest = button_events(rest + data)
-                    # The kernel's times (the realtime clock) keep the gaps between events that
-                    # came in one read; the last one is taken as now.
-                    now = time.monotonic()
-                    for is_down, t in events:
-                        at = now - min(max(events[-1][1] - t, 0.0), 2.0)
-                        self._report(self.gestures.down(at) if is_down else self.gestures.up(at))
-            except OSError as e:   # the device went away
-                self.log("headset button: %s: %s" % (self.path, e.strerror))
-                self._stop.wait(2)
-            finally:
-                os.close(fd)
-
-
-# ------------------------------------------------------------------------------------------
 # The pose pictures (poses/poses.json: {"<pose>": {"file": "<name>.png", "two_hands", "caption"}})
 
 def load_poses(poses_dir):
@@ -946,11 +802,47 @@ def pose_view(poses, p):
     return e["path"], mode, e["caption"]
 
 
+def demo_view(demos_dir, p):
+    """A prompt's demo clip: (path, mode), mode "" (as made: a right hand, or both hands) or
+    "mirror" (the prompt's "demo_mirror": a right hand's clip for the left hand). ("", "")
+    when it has none, or its file isn't there."""
+    demo = p.get("demo") or ""
+    path = os.path.join(demos_dir, os.path.basename(demo) + ".gif") if demo else ""
+    if not path or not os.path.isfile(path):
+        return "", ""
+    return path, "mirror" if p.get("demo_mirror") else ""
+
+
+def has_clips(demos_dir):
+    try:
+        return any(n.endswith(".gif") for n in os.listdir(demos_dir))
+    except OSError:
+        return False
+
+
+def default_guidance(recorded_dir=None):
+    """Recorded clips when there are any, else the skeleton ones."""
+    return "recorded" if has_clips(recorded_dir or RECORDED_DEMOS_DIR) else "skeleton"
+
+
+def guided_demo_view(guidance, skeleton_dir, recorded_dir, p):
+    """demo_view in the guidance's folder, else the other one (a part with no clip of that kind):
+    (path, mode, key), key true for a skeleton clip (the panel and window show its colours' key)."""
+    dirs = [(recorded_dir, False), (skeleton_dir, True)]
+    if guidance != "recorded":
+        dirs.reverse()
+    for d, key in dirs:
+        path, mode = demo_view(d, p)
+        if path:
+            return path, mode, key
+    return "", "", False
+
+
 # ------------------------------------------------------------------------------------------
 # The script
 
 HAND_VALUES = ("left", "right", "both", "none", "any", "")
-PROMPT_KEYS = ("text", "seconds", "hands", "pose", "distance", "position", "object", "controller")
+PROMPT_KEYS = ("text", "seconds", "hands", "pose", "distance", "position", "object", "controller", "demo")
 
 
 def _when_ok(cond, ctx):
@@ -979,9 +871,31 @@ def _prompt(section, raw, ctx, subst=None):
     for key in PROMPT_KEYS:
         p.setdefault(key, False if key == "controller" else 0 if key == "seconds" else "")
     p["controllers"] = list(p.get("controllers") or [])
+    p["switch"] = _switch_list(section, p.get("switch"))
     if p["hands"] not in HAND_VALUES:
         raise ValueError("%s: hands %r" % (section["id"], p["hands"]))
     return p
+
+
+def _switch_list(section, raw):
+    """A step's pose changes (DESIGN.md, "Two poses in a step"): "backs toward you" (at half
+    time), or [{"at": share of the step's time, "to": the pose after, "text": the instruction
+    after (optional; a scene's acts keep their own)}] in order."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        raw = [{"at": 0.5, "to": raw}]
+    out, last = [], 0.0
+    for w in raw if isinstance(raw, list) else [raw]:
+        at = w.get("at") if isinstance(w, dict) else None
+        to = w.get("to") if isinstance(w, dict) else None
+        if not isinstance(at, (int, float)) or not last < at < 1 or not isinstance(to, str) or not to.strip():
+            raise ValueError("%s: switch %r: each needs \"at\" (after the one before, under 1) and \"to\"" % (section["id"], w))
+        if isinstance(w, dict) and not isinstance(w.get("text", ""), str):
+            raise ValueError("%s: switch %r: \"text\" is the instruction after" % (section["id"], w))
+        out.append({"at": float(at), "to": to.strip(), "text": w.get("text", "") if isinstance(w, dict) else ""})
+        last = at
+    return out
 
 
 def _set_ids(section, prompts):
@@ -989,7 +903,7 @@ def _set_ids(section, prompts):
     for p in prompts:
         if not p.get("id"):
             parts = [section["id"]] + [re.sub(r"[^a-z0-9]+", "-", str(p[k]).lower()).strip("-")
-                                       for k in ("pose", "hands", "distance", "position", "object") if p[k]]
+                                       for k in ("demo", "pose", "hands", "distance", "position", "object") if p[k]]
             p["id"] = "/".join(parts) if len(parts) > 1 else "%s/%d" % (section["id"], len(seen) + 1)
         n = seen.get(p["id"], 0) + 1
         seen[p["id"]] = n
@@ -1003,6 +917,107 @@ def load_script(path):
     if script.get("version") != 1 or not isinstance(script.get("sections"), list):
         raise ValueError("%s: not a version 1 script" % path)
     return script
+
+
+def fetched_rounds_dir(base_dir=None):
+    """Where hub.py board keeps the round scripts it fetched from the dataset (check_round)."""
+    return os.path.join(base_dir or BASE_DIR, "board-rounds")
+
+
+def bounty_script(script, bounties_dir=None, base_dir=None):
+    """A bounty's round script's path: the one shipped with the recorder, else one fetched from the
+    dataset (hub.py board), else the shipped one's (missing) path."""
+    shipped = os.path.join(bounties_dir or BOUNTIES_DIR, script + ".json")
+    if bounties_dir or os.path.exists(shipped) or not bounties.ID.match(script):
+        return shipped
+    fetched = os.path.join(fetched_rounds_dir(base_dir), script + ".json")
+    return fetched if os.path.exists(fetched) else shipped
+
+
+def have_bounty_script(script, bounties_dir=None, base_dir=None):
+    return bool(bounties.ID.match(script)) and os.path.exists(bounty_script(script, bounties_dir, base_dir))
+
+
+def bounty_script_fetched(path, base_dir=None):
+    """Whether a round script's path is one hub.py board fetched."""
+    return os.path.dirname(os.path.abspath(path)) == os.path.abspath(fetched_rounds_dir(base_dir))
+
+
+# A round script fetched from the dataset (hub.py board) is untrusted, as the board is: check_round
+# keeps it only if it is a bounty round like the shipped ones. Its top level, its sections' kinds and
+# nothing that changes what is recorded or where it goes: no debug (a testing session: live output,
+# voice, the test dataset), objects or controllers asked for, checklist requirements or demo files.
+ROUND_MAX_BYTES = 64 * 1024
+ROUND_KEYS = {"version", "name", "record_hz", "intro_s", "between_s", "welcome", "done", "stopped", "sections",
+              "cue_names"}
+ROUND_KINDS = ("prompts", "scene")
+ROUND_NEVER = ("debug", "objects", "object", "controller", "controllers", "for_each", "demo", "demo_mirror")
+ROUND_MAX_S = 8 * 60        # the plan at its longest (the shipped rounds: 2.5-5 min)
+ROUND_MAX_TEXT = 600        # characters in any one string
+ROUND_MAX_NUMBER = 600.0    # any one number (seconds, metres, degrees)
+
+
+def check_round(name, script):
+    """A fetched round script (dict) for the board's script name: returned as it is if it passes,
+    else ValueError saying why. It must be a version 1 script of that name with a scene section,
+    only the keys and section kinds above, none of ROUND_NEVER set anywhere, an empty "requires",
+    strings and numbers in limits, sets a second 1-30, windows within 3 m and 2 m across, and a
+    plan that builds (known gestures, windows and parts) and lasts at most ROUND_MAX_S."""
+    if not isinstance(script, dict) or script.get("version") != 1 or not isinstance(script.get("sections"), list):
+        raise ValueError("not a version 1 round script")
+    if script.get("name") != name:
+        raise ValueError("its name isn't %s" % name)
+    extra = sorted(set(script) - ROUND_KEYS)
+    if extra:
+        raise ValueError("it has %s" % ", ".join(extra))
+    hz = script.get("record_hz", RECORD_HZ)
+    if not isinstance(hz, (int, float)) or isinstance(hz, bool) or not 1 <= hz <= 30:
+        raise ValueError("record_hz %r" % hz)
+
+    def walk(v, where):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                if k in ROUND_NEVER and x:
+                    raise ValueError("%s: %s" % (where, k))
+                if k == "requires" and x:
+                    raise ValueError("%s: requires %r" % (where, x))
+                walk(x, k)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x, where)
+        elif isinstance(v, str):
+            if len(v) > ROUND_MAX_TEXT:
+                raise ValueError("%s: a text over %d characters" % (where, ROUND_MAX_TEXT))
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            if not math.isfinite(v) or abs(v) > ROUND_MAX_NUMBER:
+                raise ValueError("%s: %r" % (where, v))
+        elif v is not None and not isinstance(v, bool):
+            raise ValueError("%s: %r" % (where, v))
+    walk(script, "script")
+    for sec in script["sections"]:
+        if not isinstance(sec, dict) or sec.get("kind", "prompts") not in ROUND_KINDS:
+            raise ValueError("a section of kind %r" % (sec.get("kind") if isinstance(sec, dict) else sec))
+    try:
+        plan, _ = build_plan(script, {}, seed=1)
+        seconds = plan_seconds(script, plan, worst=True)
+    except (KeyError, TypeError, AttributeError, IndexError) as e:
+        raise ValueError("its plan doesn't build (%s: %s)" % (type(e).__name__, e)) from None
+    scenes = [p for sec in plan if sec["kind"] == "scene" for p in sec["prompts"]]
+    if not scenes:
+        raise ValueError("it has no scene")
+    for p in scenes:
+        for w in p["scene"]["windows"]:
+            if max(abs(float(v)) for v in w["at"]) > 3 or max(float(v) for v in w["size"]) > 2:
+                raise ValueError("%s: window %s is too far or too big" % (p["id"], w["id"]))
+    if seconds > ROUND_MAX_S:
+        raise ValueError("it lasts %d s" % seconds)
+    return script
+
+
+def load_board(base_dir=None):
+    """The board: the shipped one, or the copy fetched from the dataset when it's newer (hub.py board)."""
+    cache = os.path.join(base_dir or BASE_DIR, "board-cache.json")
+    return bounties.newest(bounties.load(BOARD_PATH), bounties.load(cache))
 
 
 def session_seed(session_id):
@@ -1061,6 +1076,188 @@ def _sweep_prompts(s, raw, ctx, rng):
     return out
 
 
+# A scene's gestures (DESIGN.md, "Scenes"): the lit part's colour and label for each, and what
+# the band says while it's lit. A no-go is drawn hollow with a cross.
+# A scene step whose acts switch between the hands (L or R on the button) gives each act at
+# least this long lit, so there's time to see which hand and use it (user, 2026-10-14).
+CHOICE_MIN_S = 2.0
+
+GESTURES = {
+    "tap": ("cyan", "", "Tap: thumb to index fingertip"),
+    "double": ("cyan", "2", "Double tap"),
+    "hold": ("cyan", "hold", "Press and hold: thumb to index, about 1 s"),
+    "middle": ("purple", "", "Middle tap: thumb to middle fingertip"),
+    "middle-hold": ("purple", "hold", "Middle press and hold, about 1 s"),
+    "nogo": ("orange", "", "Don't touch: stop about 1 cm short"),
+    "pinch": ("cyan", "", "Pinch it: thumb and index"),
+    "card": ("cyan", "", "Grab it like a playing card: thumb, index and middle"),
+    "fist": ("green", "", "Grab it with your fist"),
+    "touch": ("orange", "", "Touch it with an open hand: no grab"),
+    # Near touch and whole-hand gestures (2026-10-15: the testing sessions' refused pokes, missed and
+    # false lazy susans, "grab that" taking the wrong screen)
+    "poke": ("cyan", "", "Poke it: index fingertip in, then back out"),
+    "poke-hold": ("cyan", "hold", "Poke it and keep it pressed, about 1 s"),
+    "poke-slide": ("cyan", "slide", "Poke it and slide the fingertip down, as if scrolling"),
+    "sweep": ("cyan", "", "Sweep it aside: open hand on its edge, palm leading"),
+    "pull": ("green", "", "Open hand out to it, then close a fist and pull it to you"),
+    "push": ("cyan", "", "Push it away: open hand, palm flat against it"),
+    # Three-finger pinches (2026-10-23, user: "middle finger + index + thumb taps regularly get missed and
+    # registered as just index finger + thumb taps"; v20a reads a card grab's middle tip 25 mm off the thumb)
+    "tri": ("purple", "3", "Three-finger tap: thumb to index and middle together"),
+    "tri-scroll": ("purple", "3", "Three-finger pinch, then move the hand down as if scrolling"),
+    "rest": ("cyan", "", ""),
+}
+SCENE_LOOKS = re.compile(r"^(plain|grid:[1-6]x[1-6]|list:([1-9]|10))$")
+SCENE_PART = r"(bar|left|right|top|bottom|tl|tr|bl|br|button:\d+|item:\d+)"
+SCENE_PARTS = re.compile(r"^(none|%s(\+%s)*)$" % (SCENE_PART, SCENE_PART))   # "tl+br": a two-hand grab
+
+
+def _cells(look):
+    """How many buttons or rows a window's look has (0: plain)."""
+    m = re.match(r"^grid:(\d)x(\d)$", look)
+    if m:
+        return int(m.group(1)) * int(m.group(2))
+    m = re.match(r"^list:(\d+)$", look)
+    return int(m.group(1)) if m else 0
+
+
+def _act(p, a, windows):
+    """One act of a scene step, filled in: {"s", "win", "lit", "gesture", "colour", "label", "hand",
+    "say", "ghost"}. The colour and label come from the gesture unless the act gives them."""
+    g = a.get("gesture", "tap")
+    if g not in GESTURES:
+        raise ValueError("%s: gesture %r" % (p.get("id") or p.get("text", "")[:30], g))
+    colour, label, say = GESTURES[g]
+    win = a.get("win") or windows[0]["id"]
+    if win not in [w["id"] for w in windows]:
+        raise ValueError("%s: no window %r" % (p.get("text", "")[:30], win))
+    lit = a.get("lit", "none" if g == "rest" else "bar")
+    if not SCENE_PARTS.match(lit):
+        raise ValueError("lit %r" % lit)
+    ghost = a.get("ghost")
+    if ghost is not None:
+        ghost = [float(v) for v in ghost] + [0.0] * (6 - len(ghost))
+        if len(ghost) not in (6, 7):
+            raise ValueError("ghost %r: dx dy dz yaw pitch roll [scale]" % a.get("ghost"))
+    return {"s": float(a.get("s", 2.0)), "win": win, "lit": lit, "gesture": g, "colour": a.get("colour", colour),
+            "label": a.get("label", label), "hand": a.get("hand", ""), "say": a.get("say") or say or p.get("say", ""),
+            "ghost": ghost}
+
+
+def _scene_buttons(p, a, windows, rng):
+    """Paced acts: the windows' buttons (or rows) lit one at a time, every every_s, lit for lit_s
+    with an unlit rest after; the gesture drawn from mix (weights), each in its colour; with
+    hands, each act names the hand to use (L or R on the button)."""
+    every = float(a.get("every_s", 1.5))
+    lit_s = min(every, float(a.get("lit_s", every * 0.7)))
+    hands = list(a.get("hands") or [])
+    if len(set(hands)) > 1 and lit_s < CHOICE_MIN_S:   # a hand to pick: lit long enough, the rest kept
+        every, lit_s = every - lit_s + CHOICE_MIN_S, CHOICE_MIN_S
+    n = int(a.get("count") or max(1, round(float(a.get("seconds", 12)) / every)))
+    wins = [w for w in windows if w["id"] in (a.get("windows") or [w["id"] for w in windows]) and _cells(w["look"])]
+    if not wins:
+        raise ValueError("%s: buttons need a window with a grid or a list" % p.get("text", "")[:30])
+    mix = a.get("mix") or {a.get("gesture", "tap"): 1}
+    names, weights = list(mix), [float(mix[k]) for k in mix]
+    says = a.get("says") or {}
+    out, last = [], None
+    for _ in range(n):
+        w = rng.choice(wins)
+        cells = _cells(w["look"])
+        part = "button" if w["look"].startswith("grid") else "item"
+        k = rng.randrange(cells)
+        if cells > 1:
+            while (w["id"], k) == last:
+                k = rng.randrange(cells)
+        last = (w["id"], k)
+        g = rng.choices(names, weights)[0]
+        act = {"s": lit_s, "win": w["id"], "lit": "%s:%d" % (part, k), "gesture": g}
+        if g in says:
+            act["say"] = says[g]
+        if hands:
+            h = rng.choice(hands)
+            mark = GESTURES[g][1]
+            act.update(hand=h, label=("L" if h == "left" else "R") + ("_" + mark if mark else ""))
+        out.append(_act(p, act, windows))
+        if every - lit_s > 0.05:
+            out.append(_act(p, {"s": every - lit_s, "win": w["id"], "gesture": "rest", "say": out[-1]["say"]}, windows))
+    return out
+
+
+def _scene_moves(p, a, windows, rng):
+    """Grabs: each move lights a part to grab and, with a ghost, shows where to take the window;
+    one every every_s, shuffled unless "shuffle": false, each followed by a let-go rest of gap_s.
+    A move is a ghost ([dx, dy, dz, yaw, pitch, roll, scale], in the window's frame) or
+    {"ghost", "grab", "win", "gesture", "hand", "label", "say", "s"}, each defaulting to the
+    generator's own."""
+    moves = [dict(m) if isinstance(m, dict) else {"ghost": m} for m in a.get("moves") or []]
+    if not moves:
+        raise ValueError("%s: moves needs a list" % p.get("text", "")[:30])
+    if a.get("shuffle", True):
+        rng.shuffle(moves)
+    n = int(a.get("count") or len(moves))
+    out = []
+    for j in range(n):
+        m = moves[j % len(moves)]
+        act = {"s": float(m.get("s", a.get("every_s", 4))), "win": m.get("win", a.get("win")),
+               "lit": m.get("grab", a.get("grab", "bar")), "gesture": m.get("gesture", a.get("gesture", "pinch")),
+               "ghost": m.get("ghost"), "say": m.get("say", a.get("say")), "hand": m.get("hand", a.get("hand", ""))}
+        if "label" in m:
+            act["label"] = m["label"]
+        out.append(_act(p, act, windows))
+        gap = float(a.get("gap_s", 1.0))
+        if gap > 0:
+            out.append(_act(p, {"s": gap, "win": out[-1]["win"], "gesture": "rest", "say": a.get("rest_say", "Let go")},
+                            windows))
+    return out
+
+
+def _scene_step(s, p, rng):
+    """A scene step's windows and acts (DESIGN.md, "Scenes"), into p["scene"]; its seconds are the
+    acts'. "acts" is a list of acts and generators ({"gen": "buttons"|"moves", ...})."""
+    windows = []
+    for w in p.get("windows") or []:
+        look = w.get("look", "plain")
+        if not SCENE_LOOKS.match(look) or len(w.get("at") or []) != 3 or len(w.get("size") or []) != 2:
+            raise ValueError("%s: window %r" % (s["id"], w))
+        windows.append({"id": str(w.get("id", "a")), "at": [float(v) for v in w["at"]],
+                        "size": [float(v) for v in w["size"]], "turn": [float(v) for v in (w.get("turn") or [0, 0])],
+                        "look": look})
+    if not windows or len(windows) > 4 or len({w["id"] for w in windows}) != len(windows):
+        raise ValueError("%s: a scene step needs 1 to 4 windows, each its own id" % s["id"])
+    acts = []
+    spec = p.get("acts") or []
+    for a in [spec] if isinstance(spec, dict) else spec:
+        gen = a.get("gen")
+        if gen == "buttons":
+            acts += _scene_buttons(p, a, windows, rng)
+        elif gen == "moves":
+            acts += _scene_moves(p, a, windows, rng)
+        elif gen:
+            raise ValueError("%s: gen %r" % (s["id"], gen))
+        else:
+            acts.append(_act(p, a, windows))
+    if not acts:
+        raise ValueError("%s: a scene step needs acts" % s["id"])
+    asked = [a for a in acts if a["gesture"] != "rest"]
+    if len({a["hand"] for a in asked if a["hand"] in ("left", "right")}) > 1:
+        short = [a for a in asked if a["s"] < CHOICE_MIN_S - 1e-9]
+        if short:
+            raise ValueError("%s: its acts switch hands, so each needs at least %g s (%g here)"
+                             % (p.get("id") or s["id"], CHOICE_MIN_S, short[0]["s"]))
+    # Lit for the whole step (one hand holds a pinch while the other taps): on windows no act uses.
+    steady = [_act(p, dict(x, s=0), windows) for x in p.get("steady") or []]
+    if {x["win"] for x in steady} & {a["win"] for a in acts}:
+        raise ValueError("%s: a steady light's window is one the acts use" % s["id"])
+    p["scene"] = {"windows": windows, "acts": acts, "steady": steady}
+    p["seconds"] = round(sum(a["s"] for a in acts), 3)
+    for key in ("acts", "windows", "steady"):
+        p.pop(key, None)
+    p.setdefault("say", acts[0]["say"])
+    if not p.get("pose"):
+        p["pose"] = next((a["gesture"] for a in acts if a["gesture"] != "rest"), "")
+
+
 def build_plan(script, checklist, seed=None, quick=False):
     """The sections this session runs, prompts expanded for the checklist, and the ones
     skipped: (plan, skipped) with skipped = [{"section", "reason"}]. seed: the shuffle of the
@@ -1105,7 +1302,16 @@ def build_plan(script, checklist, seed=None, quick=False):
                     p["cues"], p["cue_s"] = list(p["cues"]), cue_s
                     p["seconds"] = cue_s * len(p["cues"])
                     p["pose"] = p["cues"][0]
+        if s["kind"] == "scene":   # a step's own id goes under its section's, as a sweep step's
+            for p in prompts:
+                if p.get("id") and "/" not in p["id"]:
+                    p["id"] = "%s/%s" % (sid, p["id"])
         _set_ids(s, prompts)
+        if s["kind"] == "scene":
+            # The acts' draws, per step: the session's (seed), or the step's own for a plan
+            # without one, so --plan shows the same each time.
+            for p in prompts:
+                _scene_step(s, p, random.Random("%s/%s/%s" % (seed, sid, p["id"])))
         s["prompts"] = prompts
         if s["kind"] == "bar":
             heights = []
@@ -1117,7 +1323,7 @@ def build_plan(script, checklist, seed=None, quick=False):
             s["heights"] = heights
         before = raw.get("before")
         s["before"] = before if before and _when_ok(before.get("when"), ctx) else None
-        if s["kind"] in ("prompts", "sweep") and not prompts:
+        if s["kind"] in ("prompts", "sweep", "scene") and not prompts:
             skipped.append({"section": sid, "reason": "nothing to do"})
             continue
         if s["kind"] == "targets" and not raw.get("targets"):
@@ -1132,6 +1338,9 @@ def plan_record(plan):
     out = {}
     for s in plan:
         steps = [{"id": p["id"], "hands": p["hands"], "cues": p["cues"]} for p in s["prompts"] if p.get("cues")]
+        steps += [{"id": p["id"], "hands": p["hands"],
+                   "acts": [[a["gesture"], a["win"], a["lit"], a["hand"]] for a in p["scene"]["acts"]]}
+                  for p in s["prompts"] if p.get("scene")]
         if steps:
             out[s["id"]] = steps
     return out
@@ -1185,47 +1394,14 @@ def plan_summary(script, plan, auto=False):
 # ------------------------------------------------------------------------------------------
 # The session
 
-class _Skip(Exception):
-    pass
-
-
-class _Stop(Exception):
-    pass
-
-
 class _Fail(Exception):
     pass
 
 
-class _Redo(Exception):
-    pass
-
-
-def _os_version():
-    path = "/run/host/etc/os-release" if in_container() else "/etc/os-release"
-    try:
-        with open(path) as f:
-            for line in f:
-                if line.startswith("VERSION_ID="):
-                    return line.split("=", 1)[1].strip().strip('"')
-    except OSError:
-        pass
-    return ""
-
-
-def _steamvr_version():
-    for db in ("/usr/lib/holo/pacmandb", "/var/lib/pacman"):   # SteamOS keeps it in the image
-        found = sorted(glob.glob(("/run/host" if in_container() else "") + db + "/local/deckard-steamvr-rel-*"))
-        if found:
-            return os.path.basename(found[-1])[len("deckard-steamvr-rel-"):]
-    p = host_path("/opt/steamvr/bin/version.txt")
-    if p:
-        try:
-            with open(p) as f:
-                return "build " + f.read().strip()
-        except OSError:
-            pass
-    return ""
+class _CamerasLost(_Fail):
+    """The recording stopped by itself or has no side cameras: usually ft-camd restarting after
+    XRService moved the cameras (camd.c, SILENT_S). Step mode waits for them and does the step
+    again (Session._cameras_back); anywhere else it fails the session like any _Fail."""
 
 
 _camd_restarted = set()   # ft-camd pids camera_check(repair=True) has restarted: once each
@@ -1240,6 +1416,59 @@ def _unit_pid(unit):
         return 0
 
 
+def live_settings(conf_path=None):
+    """The HANDS_* and POINTER_* lines of ~/.config/frametop.conf, comments dropped; a value
+    naming a path keeps only its last part (a path says whose home it is)."""
+    out = {}
+    for key, value in ft_conf.read(conf_path or CONF_PATH).items():
+        if not LIVE_KEYS.match(key):
+            continue
+        if "/" in value:
+            value = os.path.basename(value.rstrip("/"))
+        out[key] = value
+    return out
+
+
+def live_tracker(unit=LIVE_HANDS_UNIT):
+    """What Frametop's live ft-hands is: {"frametop": its tree's version (common.tree_version), "models":
+    {file: sha256 (16 hex)}} of the models it loads (HANDS_MODELS, else hands/models/student
+    or the stock hands/models/ncnn next to it). Empty fields when it can't be told."""
+    out = {"frametop": "", "models": {}}
+    try:
+        r = subprocess.run(host_command("systemctl", "--user", "show", "-p", "ExecStart", "--value", unit),
+                           capture_output=True, text=True, timeout=30)
+        exe = next((w for w in r.stdout.split() if w.endswith("/ft-hands")), "")
+    except (OSError, subprocess.SubprocessError):
+        exe = ""
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(exe))) if exe else ""
+    if repo:
+        out["frametop"] = tree_version(repo)
+    conf = {}
+    try:
+        with open(CONF_PATH) as f:
+            for line in f:
+                key, eq, value = line.partition("=")
+                if eq and key.strip() == "HANDS_MODELS":
+                    conf["HANDS_MODELS"] = value.split("#", 1)[0].strip().strip("\"'")
+    except OSError:
+        pass
+    dirs = [os.path.expanduser(conf["HANDS_MODELS"])] if conf.get("HANDS_MODELS") else []
+    if repo:
+        dirs += [os.path.join(repo, "hands", "models", d) for d in ("student", "ncnn")]
+    for d in dirs:
+        files = sorted(glob.glob(os.path.join(d, "*.param")) + glob.glob(os.path.join(d, "*.bin")))
+        if files:
+            for path in files:
+                h = hashlib.sha256()
+                with open(path, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                out["models"][os.path.basename(path)] = h.hexdigest()[:16]
+            out["models_dir"] = os.path.basename(d.rstrip("/"))
+            break
+    return out
+
+
 def camera_check(repair=False):
     """camcheck.check() (the XRService log, its open cameras where readable, ft-camd's ring);
     never raises: a failure is "unknown". repair (the window, never during a session): when
@@ -1248,10 +1477,21 @@ def camera_check(repair=False):
     try:
         r = camcheck.check()
         pid = (r.get("ring") or {}).get("writer_pid")
-        if repair and camcheck.is_ring_short(r) and pid not in _camd_restarted and _unit_pid(CAMD_UNIT) == pid:
-            _camd_restarted.add(pid)
-            stop_unit(CAMD_UNIT)
-            start_camd()
+        if repair and camcheck.is_ring_short(r) and pid not in _camd_restarted:
+            if _unit_pid(CAMD_UNIT) == pid:
+                _camd_restarted.add(pid)
+                stop_unit(CAMD_UNIT)
+                start_camd()
+            elif _unit_pid(LIVE_CAMD_UNIT) == pid:
+                # Frametop's live hand tracking: its ft-hands names the cameras when it starts,
+                # so it goes again after ft-camd
+                _camd_restarted.add(pid)
+                restart_units([LIVE_CAMD_UNIT, LIVE_HANDS_UNIT])
+                end = time.monotonic() + 15
+                while not ring_alive() and time.monotonic() < end:
+                    time.sleep(0.2)
+            else:
+                return r
             r = camcheck.check()
             r["evidence"].append("restarted ft-camd (pid %d) because it published only some of the cameras" % pid)
         return r
@@ -1266,15 +1506,19 @@ def camera_text(result):
         return ""
     if camcheck.is_vcint_failure(result):
         return camcheck.USER_TEXT
+    if camcheck.is_ring_short(result) and "moved them" in result.get("reason", ""):
+        return ("SteamVR moved the headset's tracking cameras after the camera broker started (the colour "
+                "camera module was unplugged or plugged in), so the recorder can't read the side cameras. Close "
+                "the Hand Recorder and open it again: it restarts the camera broker.")
     if camcheck.is_ring_short(result):
         return ("The headset's tracking cameras are all running, but the recorder can't read some of them (%s). "
                 "Close the Hand Recorder, %s, and open it again. If that doesn't help, ask in the Frametop "
-                "Discord." % (result.get("reason", ""), fix_hint("run ~/frametop/hands/rec/install.sh again")))
+                "Discord." % (result.get("reason", ""), fix_hint("run %s again" % os.path.join(REPO, "hands", "rec", "install.sh"))))
     return ("Not all of the headset's tracking cameras are running (%s). Restart SteamVR, or restart the "
             "headset if that doesn't fix it." % result.get("reason", ""))
 
 
-class Session:
+class Session(Controls):
     """One recording session. start() runs it in its own thread; next_step(), pause(), resume(),
     redo(), skip() and stop() steer it from any thread. on_status(dict) is called from the
     session thread whenever something changes (the keys of _status).
@@ -1288,11 +1532,14 @@ class Session:
     if it fails (not in a dry run, nor with ring). hands_reader (a test hook): an object whose
     read() stands in for the hands file, read in a dry run too. quick: the quick round (a few
     sections, about 3 min). seed: the sweeps' shuffle (default: from the session's id)."""
+    THREAD_NAME = "handrec-session"
+    RESUME_HINT, RESUME_HINT_BUTTON = RESUME_HINT, RESUME_HINT_BUTTON
 
     def __init__(self, base_dir, profile, checklist, lighting_choice, script_path, *, ring=None,
                  start_processes=True, dry_run=False, speed=1.0, on_status=None, hands_dir=None, panel_bin=None,
                  auto=False, next_after=None, poses_dir=None, button=True, button_device=None,
-                 check_cameras=True, hands_reader=None, quick=False, seed=None):
+                 check_cameras=True, hands_reader=None, quick=False, seed=None, demos_dir=None,
+                 recorded_demos_dir=None, guidance=None, bounty=None):
         self.base_dir = os.path.abspath(os.path.expanduser(base_dir or BASE_DIR))
         self.profile = dict(profile or {})
         self.checklist = dict(checklist or {})
@@ -1313,17 +1560,52 @@ class Session:
         self.seed = seed   # set from the session's id when it starts, unless given
         # the camera check (a test hook: tests swap it); a dry run looks at no real cameras
         self.camera_check_fn = (lambda: None) if dry_run else camera_check
+        self.repair_cameras_fn = (lambda: None) if dry_run else (lambda: camera_check(repair=True))
+        self._camera_losses = 0
+        # Frametop's drawn hands and hand pointer, paused for the session (a test hook: tests empty it)
+        self.quiet_units = () if dry_run or ring else QUIET_UNITS
+        self._rec_watch = None   # (recorder, sets written, when that changed): _watch_recording
         self.input_devices = INPUT_DEVICES   # where mice are looked for (a test hook)
         self._button = None                  # the ButtonReader
         self.print = print   # where dry-run panel commands go (the CLI's stdout)
         self.script = load_script(self.script_path)
+        with open(self.script_path, "rb") as f:
+            self.script_sha = hashlib.sha256(f.read()).hexdigest()
+        # A round fetched from the dataset (hub.py board) is checked again as it starts: the cache
+        # may be from an older recorder's check.
+        self.script_from = "board" if bounty_script_fetched(self.script_path, self.base_dir) else "recorder"
+        if self.script_from == "board":
+            check_round(os.path.splitext(os.path.basename(self.script_path))[0], self.script)
+        # A debug session (debug.json): one long free step with Frametop's own hand tracking on,
+        # its output copied beside the recording (livelog.py); the button marks what went wrong.
+        self.debug = bool(self.script.get("debug"))
+        if self.debug:
+            self.quiet_units = ()
+        self.consent_kind = takes.round_consent_kind(bool(bounty), self.debug)   # DESIGN.md "Testing"
+        self.live_dir = self.hands_dir   # where Frametop's ft-hands publishes (a test hook)
+        self._live_log = None      # the LiveLog of the recording part running
+        self._event_log = None     # ...and the EventLog: what Frametop did with the hands (fh_events.h)
+        # the person's voice beside it, if they ticked "Record my voice" (voicelog.py): what they
+        # say about what went wrong becomes flags later, transcribed on the maintainer's machines
+        # (not in a dry run: a rehearsal records nothing)
+        self.voice = self.debug and bool(self.checklist.get("voice")) and not dry_run
+        self._voice_log = None
+        self._marks = 0            # marks asked for (any thread); _marked: those logged
+        self._marked = 0
+        self.record_hz = max(1.0, min(30.0, float(self.script.get("record_hz", RECORD_HZ))))
+        # the board's entry this round is for (bounties.validate's, plus the board's "updated"), or None
+        self.bounty = dict(bounty) if bounty else None
+        self._scene_on = False     # a scene's windows are up (_place_scene)
         # the plan in the script's order; the session's own shuffle comes with its id (_make_dir)
         self.plan, self.skipped = build_plan(self.script, self.checklist, seed=seed, quick=self.quick)
         self._poses = load_poses(poses_dir or POSES_DIR)
+        self._demos_dir = demos_dir or DEMOS_DIR
+        self._recorded_demos_dir = recorded_demos_dir or RECORDED_DEMOS_DIR
+        self.guidance = guidance if guidance in dict(GUIDANCE) else default_guidance(self._recorded_demos_dir)
         self.session_dir = ""
         self._thread = None
         self._lock = threading.Lock()
-        self._want = {"pause": False, "skip": False, "stop": False, "next": False, "redo": False}
+        self._want = {"pause": False, "skip": False, "stop": False, "next": False, "redo": False, "end": False}
         self._wake = threading.Event()
         # state: starting, intro, ready (a step waits for Next), countdown, running (a hold),
         # between, paused, done, stopped, error. waiting: Next is wanted. big: the countdown's
@@ -1334,8 +1616,9 @@ class Session:
                         "prompt": "", "seconds_left": 0.0, "note": "", "hands": {"left": None, "right": None},
                         "take": None, "error": "", "waiting": False, "countdown": 0, "big": "", "can_redo": False,
                         "image": "", "image_mode": "", "caption": "", "position": "", "distance": "",
-                        "ready_text": READY_TEXT, "button": False, "mouse": True,
-                        "camera": None, "nohands": False, "strip": [], "cue": -1, "quick": self.quick}
+                        "demo": "", "demo_mode": "", "demo_key": False, "demo_run": 0, "ready_text": READY_TEXT, "button": False, "mouse": True,
+                        "camera": None, "nohands": False, "strip": [], "cue": -1, "quick": self.quick,
+                        "debug": self.debug, "marks": 0}
         self._last_emit = 0.0
         self._log_file = None
         self._panel = None
@@ -1361,21 +1644,21 @@ class Session:
         self._sides_read = 0.0     # when the side camera decision was last read
 
     # --- controls (any thread)
-    def start(self):
-        if self._thread:
-            raise RuntimeError("the session has started already")
-        self._thread = threading.Thread(target=self._run, name="handrec-session", daemon=True)
-        self._thread.start()
-
-    def _set(self, key, value):
-        with self._lock:
-            self._want[key] = value
-        self._wake.set()
-
     def button_gesture(self, gesture):
         """The headset's button (ButtonGestures). A press: Next while a step waits, pause during
         a countdown or hold (and auto mode's timed screens), resume while paused. A double press:
-        redo, as R. A hold: stop, as Esc."""
+        redo, as R. A hold: stop, as Esc. In a debug session's free step a press (or a double:
+        someone marking twice quickly) marks the moment and a hold ends the step (the session is
+        done, not stopped); a debug session has no redo, which would throw its recording away."""
+        if self.debug and self._status["state"] == "running" and gesture in ("press", "double", "hold"):
+            if gesture == "hold":
+                self.finish()
+            else:
+                self.mark()
+            self._log("headset button (%s)" % ("finish" if gesture == "hold" else "mark"))
+            return
+        if self.debug and gesture == "double":
+            return
         if gesture == "press":
             self.button_press()
         elif gesture == "double":
@@ -1405,37 +1688,22 @@ class Session:
             return
         self._log("headset button (%s)" % ("resume" if paused else "next" if self._waiting else "pause"))
 
-    def next_step(self):
-        """Step mode: start the step that's waiting (its countdown)."""
-        self._set("next", True)
+    def mark(self):
+        """A debug session: something went wrong just now (a "mark" event in the take)."""
+        with self._lock:
+            self._marks += 1
+        self._wake.set()
+
+    def finish(self):
+        """A debug session: end the free step there; the session is done."""
+        self._set("end", True)
 
     def redo(self):
-        """Record a step again: the one running, or at a step's ready screen the one before."""
+        """Record a step again: the one running, or at a step's ready screen the one before. Not in
+        a debug session: its one step is the whole recording."""
+        if self.debug:
+            return
         self._set("redo", True)
-
-    def pause(self):
-        self._set("pause", True)
-
-    def resume(self):
-        self._set("pause", False)
-
-    def skip(self):
-        self._set("skip", True)
-
-    def stop(self, wait=20.0):
-        """Stop. The take in progress is kept as far as it got. Blocks until the session has
-        written its files (up to wait seconds), unless called from the session thread."""
-        self._set("stop", True)
-        if self._thread and threading.current_thread() is not self._thread and wait:
-            self._thread.join(wait)
-
-    def join(self, timeout=None):
-        if self._thread:
-            self._thread.join(timeout)
-
-    @property
-    def state(self):
-        return self._status["state"]
 
     # --- status and logging
     def _emit(self, force=True, **changes):
@@ -1469,6 +1737,9 @@ class Session:
     # --- the run
     def _run(self):
         try:
+            self._resume_quiet()   # left paused by a session that crashed
+            if self.debug and not self.dry_run:
+                eventlog.stop_writers(self.live_dir)   # ...or asking for events
             if self._preflight():
                 return
             self._make_dir()
@@ -1490,9 +1761,14 @@ class Session:
         """The camera check, before anything is made or started (camcheck.py): with the upper
         cameras off a session records nothing useful. True if it stopped the session (state
         "error", no session folder)."""
+        if self.debug and not (self.dry_run or self.ring) and not unit_active(LIVE_HANDS_UNIT):
+            self._emit(state="error", error=DEBUG_NEEDS_HANDS, prompt=DEBUG_NEEDS_HANDS)
+            return True
         if self.dry_run or self.ring or not self.check_cameras:
             return False
         r = self.camera_check_fn()
+        if camcheck.is_ring_short(r):   # an ft-camd left on moved cameras: nothing records yet, so restart it
+            r = self.repair_cameras_fn() or r
         self._status["camera"] = r
         text = camera_text(r)
         if not text:
@@ -1502,17 +1778,17 @@ class Session:
 
     def _make_dir(self):
         sessions = os.path.join(self.base_dir, "sessions")
-        os.makedirs(sessions, exist_ok=True)
+        os.makedirs(sessions, mode=0o700, exist_ok=True)
         sid = time.strftime("%Y%m%d-%H%M%S")
         path, n = os.path.join(sessions, sid), 1
         while True:
             try:
-                os.mkdir(path)
+                os.mkdir(path, 0o700)   # (eye and hand frames: private)
                 break
             except FileExistsError:
                 n += 1
                 path = os.path.join(sessions, "%s-%d" % (sid, n))
-        os.mkdir(os.path.join(path, "takes"))
+        os.mkdir(os.path.join(path, "takes"), 0o700)
         self.session_dir = path
         if self.seed is None:
             self.seed = session_seed(os.path.basename(path))
@@ -1543,6 +1819,7 @@ class Session:
                     self._start_tracker()
                 else:
                     self._log("no tracking ft-hands found: feedback only if one publishes")
+            self._quiet_hands()
         lighting = ring_lighting(ring_path)
         cams = []
         try:
@@ -1560,11 +1837,18 @@ class Session:
             "checklist": self.checklist,
             "device": {"steamos": _os_version(), "steamvr": _steamvr_version(), "cameras": cams},
             "calibration_removed": removed,
-            "script": {"version": self.script.get("version"), "sections": [s["id"] for s in self.plan],
-                       "skipped": self.skipped},
-            "mode": "auto" if self.auto else "step", "quick": self.quick,
+            "script": {"version": self.script.get("version"), "name": self.script.get("name", ""),
+                       "sections": [s["id"] for s in self.plan],
+                       "skipped": self.skipped, "from": self.script_from, "sha256": self.script_sha},
+            "mode": "auto" if self.auto else "step", "quick": self.quick, "guidance": self.guidance,
             "shuffle": {"seed": self.seed, "sweeps": plan_record(self.plan)},
-            "takes": [], "status": "recording", "sides": {"swapped": None}}
+            "record_hz": self.record_hz,
+            "takes": [], "status": "recording", "sides": {"swapped": None},
+            "consent": {"kind": self.consent_kind,
+                        "version": (self.profile.get(takes.CONSENT_KEYS[self.consent_kind]) or {}).get("version", "")}}
+        if self.bounty:
+            self._session_json["bounty"] = {"id": self.bounty["id"], "title": self.bounty.get("title", ""),
+                                            "board_updated": self.bounty.get("updated")}
         self._read_sides(force=True)
         cam = self._status.get("camera")
         if cam:
@@ -1573,6 +1857,11 @@ class Session:
             # ran the side cameras through the ISP (no colour module): to check the names later
             self._session_json["device"]["camera_map"] = cam.get("map") or {}
             self._session_json["device"]["isp"] = (cam.get("episode") or {}).get("isp")
+        if self.debug:
+            # testing only, never training (the debug dataset's terms); what the live tracker was
+            self._session_json["debug"] = {"use": "testing", "max_s": max(section_seconds(s) for s in self.plan),
+                                           "settings": live_settings(),
+                                           **(live_tracker() if not self.dry_run else {"frametop": "", "models": {}})}
         if self.dry_run:
             self._session_json["dry_run"] = True
         if self.speed != 1:
@@ -1586,7 +1875,7 @@ class Session:
         self._panel.cmd("paused off")
         for key, c in (("note", "note "), ("countdown", "countdown off"), ("hands", "hands off off"),
                        ("bar", "bar off"), ("target", "target off"), ("image", "image off"), ("where", "where off"),
-                       ("big", "big "), ("action", "action "), ("rec", "rec off"), ("strip", "strip off")):
+                       ("demo", "demo off"), ("big", "big "), ("action", "action "), ("rec", "rec off"), ("strip", "strip off"), ("split", "split off")):
             self._panel.set(key, c)
         self._hints(action=False)
 
@@ -1693,11 +1982,8 @@ class Session:
 
     def _start_tracker(self):
         argv = [FT_HANDS, "--no-gestures", "--status", "0"]
-        if not STANDALONE:   # built in the dev container: it runs there
-            up = os.path.join(REPO, "scripts", "container-up.sh")
-            if os.access(up, os.X_OK):
-                subprocess.run(host_command(up), capture_output=True, timeout=120)
-            argv = [os.path.expanduser("~/.local/bin/distrobox"), "enter", "dev", "--"] + argv
+        if not STANDALONE:   # built in Frametop's container: it runs there
+            argv = [IN_BOX] + argv
         if self.ring:
             argv += ["--ring", self.ring]
         self._start_unit(HANDS_UNIT, "hand tracking for feedback", argv)
@@ -1708,6 +1994,16 @@ class Session:
                 self._units.append(unit)
         except RuntimeError as e:
             raise _Fail(str(e))
+
+    def _quiet_hands(self):
+        """Frametop's drawn hands and hand pointer off until the session ends: the hand overlay
+        covers what the person watches, and gestures would click or open Steam's menu."""
+        if self.quiet_units:
+            pause_units(self.quiet_units, os.path.join(self.hands_dir, PAUSED_UNITS_FILE), self._log)
+
+    def _resume_quiet(self):
+        if self.quiet_units:
+            resume_units(os.path.join(self.hands_dir, PAUSED_UNITS_FILE), self._log)
 
     def _stop_units(self):
         for unit in reversed(self._units):
@@ -1722,7 +2018,7 @@ class Session:
         if not os.access(self.panel_bin, os.X_OK):
             raise _Fail("ft-handpanel isn't built: " + fix_hint("hands/rec/build.sh"))
         self._panel_proc = subprocess.Popen([self.panel_bin, "--watch-stdin"], stdin=subprocess.PIPE,
-                                            stdout=self._log_file, stderr=self._log_file)
+                                            stdout=self._log_file, stderr=self._log_file, env=openvr_env())
         end = time.monotonic() + 15
         while time.monotonic() < end:
             if self._panel.cmd("ping", reply=True, timeout=0.2):
@@ -1760,10 +2056,13 @@ class Session:
             if self._stop_note and state == "stopped":
                 self._session_json["stop_reason"] = self._stop_note
             self._save_session()
+            if state == "done" and self.bounty and not self.dry_run:
+                self._mark_done()
         self._log("%s%s" % (state, ": " + error if error else ""))
         if self._stop_note and state == "stopped":
             self._log(self._stop_note)
         self._stop_units()
+        self._resume_quiet()
         if self._button:
             self._button.stop()
             self._button = None
@@ -1776,6 +2075,7 @@ class Session:
                 for key, c in (("big", "big "), ("action", "action "), ("rec", "rec off"), ("keys", "keys "),
                                ("bar", "bar off"), ("target", "target off"), ("strip", "strip off")):
                     self._panel.set(key, c)
+                self._clear_scene()
                 self._screen(state, screen, controls=False)
             except (_Stop, _Skip, _Fail):
                 pass
@@ -1788,72 +2088,30 @@ class Session:
                    prompt=error or (self._stop_note if state == "stopped" else "") or screen.get("text", "").replace("|", "\n"),
                    hands={"left": None, "right": None}, nohands=False,
                    waiting=False, countdown=0, big="", can_redo=False, image="", image_mode="", caption="",
-                   position="", distance="", strip=[], cue=-1)
+                   position="", distance="", strip=[], cue=-1, demo="", demo_mode="", demo_key=False)
+
+    def _mark_done(self):
+        """The bounty counted in profile.json, read again first (the window may have changed it)."""
+        path = os.path.join(self.base_dir, "profile.json")
+        try:
+            with open(path) as f:
+                profile = json.load(f)
+        except (OSError, ValueError):
+            return   # no consent on file: nothing to count it in
+        bounties.mark_done(profile, self.bounty["id"], os.path.basename(self.session_dir))
+        write_json(path, profile)
+        self.profile = profile
 
     # --- the timing loop
-    def _controls(self):
-        """Handle a pause (blocking until resumed), skip, stop and redo (only where _redo_ok:
-        else it's dropped). True if a pause happened."""
-        with self._lock:
-            want = dict(self._want)
-            self._want["skip"] = self._want["redo"] = False
-        if want["stop"]:
-            raise _Stop()
-        if want["skip"]:
-            raise _Skip()
-        if want["redo"] and self._redo_ok:
-            raise _Redo()
-        if not want["pause"]:
-            return False
-        self._pause()
-        outcome = None
-        while outcome is None:
-            self._wake.wait(0.2)
-            self._wake.clear()
-            with self._lock:
-                want = dict(self._want)
-                self._want["skip"] = self._want["redo"] = False
-                redo = want["redo"] and self._redo_ok
-                if want["skip"] or redo:
-                    self._want["pause"] = False
-            if want["stop"]:
-                outcome = _Stop
-            elif want["skip"]:
-                outcome = _Skip
-            elif redo:
-                outcome = _Redo
-            elif not want["pause"]:
-                outcome = True
-        self._unpause(record=outcome is True)
-        if outcome is not True:
-            raise outcome()
-        return True
+    # recorder/controls.py's hooks (its _controls() is the loop's pause, skip, stop and redo)
+    def _recording_off(self):
+        self._stop_recording()
 
-    def _pause(self):
-        self._paused = True
-        self._state_before = self._status["state"]
-        self._paused_recording = self._recording
-        if self._recording:
-            self._stop_recording()
-            self._event("pause")
-        hint = RESUME_HINT_BUTTON if self._button_ok() else RESUME_HINT
-        self._panel.cmd("paused on")
-        self._panel.set("note", "note " + hint)
-        self._emit(state="paused", note=hint)
-        self._log("paused")
+    def _recording_on(self):
+        self._start_recording()
 
-    def _unpause(self, record=True):
-        self._paused = False
-        self._panel.cmd("paused off")
-        self._panel.set("note", "note ")
-        self._fb.clear()
-        with self._lock:
-            self._want["next"] = False   # a Next pressed while paused doesn't count
-        if self._take and self._paused_recording and record:
-            self._event("resume")
-            self._start_recording()
-        self._emit(state=self._state_before, note="")
-        self._log("resumed")
+    def _unpaused(self):
+        self._fb.clear()   # feedback timers start over
 
     def _wait(self, seconds, tick=None, countdown=True):
         """Let `seconds` (script time) pass, handling the controls and feedback. tick(dt) runs
@@ -1888,7 +2146,8 @@ class Session:
         if self._panel_proc and self._panel_proc.poll() is not None:
             raise _Fail("The headset panel closed (did SteamVR quit?)")
         if self._recorder and self._recorder.exited():
-            raise _Fail("The recording stopped by itself: see session.log")
+            raise _CamerasLost("The recording stopped by itself: see session.log")
+        self._watch_recording(now)
         if not self.dry_run and now - fb.get("disk", 0) > 5:
             fb["disk"] = now
             if shutil.disk_usage(self.session_dir).free < MIN_FREE:
@@ -1992,10 +2251,15 @@ class Session:
             self._panel.set("text", "text " + clean_text(text))
 
     def _view(self, p=None):
-        """The prompt's picture and where-to diagram, on the panel and in the status (sent with
-        the next _emit); none without a prompt."""
+        """The prompt's picture or demo clip and where-to diagram, on the panel and in the status
+        (sent with the next _emit); none without a prompt. A demo clip takes the picture's place."""
         p = p or {}
-        path, mode, caption = ("", "", "") if p.get("cues") else pose_view(self._poses, p)
+        demo, demo_mode, demo_key = guided_demo_view(self.guidance, self._demos_dir, self._recorded_demos_dir, p)
+        # a scene's act names its gesture in "pose": the windows show what to do, not a picture
+        path, mode, caption = ("", "", "") if p.get("cues") or p.get("scene") or demo else pose_view(self._poses, p)
+        self._panel.set("demo", "demo %s%s%s" % (demo, " " + demo_mode if demo_mode else "", "" if demo_key else " nokey")
+                        if demo else "demo off")
+        self._status.update(demo=demo, demo_mode=demo_mode, demo_key=demo_key)
         self._strip(p)
         pos, dist = p.get("position") or "", p.get("distance") or ""
         self._panel.set("image", "image %s%s" % (path, " " + mode if mode else "") if path else "image off")
@@ -2131,6 +2395,7 @@ class Session:
             self._status["big"] = ""
             for key, c in (("bar", "bar off"), ("target", "target off"), ("big", "big "), ("action", "action ")):
                 self._panel.set(key, c)
+            self._clear_scene()
 
     def _start_take(self, i, s, record=True):
         n = len(self._session_json["takes"]) + 1
@@ -2158,7 +2423,20 @@ class Session:
             # a safety net only: the session ends the recording itself
             remaining = section_seconds(t["section"], worst=True, auto=self.auto) / self.speed
             self._recorder = Recorder(t["dir"], t["part"], remaining * 1.5 + 60, self.ring, self._log_file,
-                                      swap=self._sides_swapped())
+                                      swap=self._sides_swapped(), hz=self.record_hz)
+        if self.debug:
+            name = "live.bin" if t["part"] == 1 else "live-%d.bin" % t["part"]
+            self._live_log = livelog.LiveLog(self.live_dir, os.path.join(t["dir"], name)).start()
+            self._live_log.name = name
+            name = "events.jsonl" if t["part"] == 1 else "events-%d.jsonl" % t["part"]
+            self._event_log = eventlog.EventLog(self.live_dir, os.path.join(t["dir"], name)).start()
+            self._event_log.name = name
+        if self.voice:
+            name = "voice.bin" if t["part"] == 1 else "voice-%d.bin" % t["part"]
+            self._voice_log = voicelog.VoiceLog(os.path.join(t["dir"], name)).start()
+            self._voice_log.name = name
+            if self._voice_log.error:
+                self._log("voice: %s" % self._voice_log.error)
         self._recording = True
         self._panel.cmd("poses start " + os.path.join(t["dir"], "poses.jsonl"))
         self._panel.set("rec", "rec on")
@@ -2169,6 +2447,28 @@ class Session:
         self._recording = False
         self._panel.set("rec", "rec off")
         self._panel.cmd("poses stop", reply=not self.dry_run, timeout=1.0)
+        if self._live_log:
+            log, self._live_log = self._live_log, None
+            counts = log.stop()
+            self._log("live log %s: %d hands, %d gestures" % (log.name, counts["hands"], counts["gestures"]))
+            if self._take:
+                self._take["json"].setdefault("live", {})[log.name] = counts
+                write_json(os.path.join(self._take["dir"], "take.json"), self._take["json"])
+        if self._event_log:
+            log, self._event_log = self._event_log, None
+            counts = log.stop()
+            self._log("events %s: %d (%s)" % (log.name, counts["events"], eventlog.describe(counts["by"])))
+            if self._take:
+                self._take["json"].setdefault("events", {})[log.name] = counts
+                write_json(os.path.join(self._take["dir"], "take.json"), self._take["json"])
+        if self._voice_log:
+            log, self._voice_log = self._voice_log, None
+            counts = log.stop()
+            self._log("voice %s: %.1f s, peak %.3f%s" % (log.name, counts["seconds"], counts["peak"],
+                                                       ", " + counts["error"] if counts["error"] else ""))
+            if self._take:
+                self._take["json"].setdefault("voice", {})[log.name] = counts
+                write_json(os.path.join(self._take["dir"], "take.json"), self._take["json"])
         if self._recorder:
             rec, self._recorder = self._recorder, None
             code = rec.stop()
@@ -2193,8 +2493,14 @@ class Session:
 
     def _prompt_event(self, p):
         extra = {"controllers": p["controllers"]} if p["controllers"] else {}
+        if p.get("demo"):
+            extra["demo"] = p["demo"]
         if p.get("cue"):   # a sweep's cue: the pose highlighted from now, within the step
             extra.update(cue=True, step=p["step"])
+        if p.get("act"):   # a scene's act: what's lit (and the ghost's pose in the room) from now
+            extra["act"] = p["act"]
+        if p.get("switch") and not p.get("cue"):   # the step's pose changes, each logged as a "switch" when it comes
+            extra["switch"] = p["switch"]
         return self._event("prompt", id=p["id"], text=p["text"], hands=p["hands"], pose=p["pose"],
                            distance=p["distance"], position=p["position"], object=p["object"],
                            controller=bool(p["controller"]), **extra)
@@ -2204,6 +2510,11 @@ class Session:
         self._fb.pop("lost_key", None)
         self._show(s["title"], step, p["text"])
         self._view(p)
+        if state == "running" and self._status["demo"]:
+            # The hold starts: the clip from its start, so it can be followed (the window's too:
+            # demo_run counts the starts).
+            self._panel.cmd("demo restart")
+            self._status["demo_run"] += 1
         t = self._prompt_event(p)
         if self._step_t0 is None:
             self._step_t0 = t
@@ -2214,7 +2525,74 @@ class Session:
         if intro and not p["text"]:
             return
         self._begin_prompt(s, p, step, state="intro" if intro else "running")
-        self._wait(p["seconds"])
+        if self.debug and not intro:
+            self._free(p)
+            return
+        self._wait(p["seconds"], None if intro else self._switches(p))
+
+    def _free(self, p):
+        """A debug session's free step: the panel out of the way while the person uses Frametop
+        as usual, up to the step's seconds. The button's press is a "mark" (the panel flashes
+        "Marked"), its hold (or finish()) ends the step early, with an "end_early" event."""
+        with self._lock:
+            self._want["end"] = False
+            self._marks = self._marked
+        self._panel.cmd("hide")
+        flash = [0.0]
+
+        def tick(dt):
+            with self._lock:
+                marks, end = self._marks, self._want["end"]
+            while self._marked < marks:
+                self._marked += 1
+                self._event("mark", id=p["id"], n=self._marked)
+                self._log("    mark %d" % self._marked)
+                self._panel.set("big", "big Marked")
+                self._panel.cmd("show")
+                flash[0] = MARK_FLASH_S
+                self._emit(marks=self._marked)
+            if flash[0] > 0:
+                flash[0] -= dt / self.speed
+                if flash[0] <= 0:
+                    self._panel.cmd("hide")
+                    self._panel.set("big", "big ")
+            if end:
+                self._event("end_early", id=p["id"])
+                self._log("    finished early")
+            return end
+        try:
+            self._wait(p["seconds"], tick)
+        finally:
+            with self._lock:
+                self._want["end"] = False
+            self._panel.set("big", "big ")
+            self._panel.cmd("show")
+
+    def _switches(self, p, tick=None):
+        """A step's pose changes: the panel's ticks on the time-left bar ("Switch to ..."), and
+        a "switch" event as each one's time comes, so the labels say which pose when. Returns
+        the tick for _wait (tick, if given, runs after)."""
+        sw, seconds = p.get("switch") or [], float(p["seconds"])
+        if not sw or seconds <= 0:
+            self._panel.set("split", "split off")
+            return tick
+        self._panel.set("split", "split " + ";".join("%.3f %s" % (1 - w["at"], clean_text(w["to"]).replace(";", ","))
+                                                     for w in sw))
+        state = {"t": 0.0, "k": 0}
+
+        def both(dt):
+            state["t"] += dt
+            while state["k"] < len(sw) and state["t"] >= sw[state["k"]]["at"] * seconds - 1e-9:
+                w = sw[state["k"]]
+                state["k"] += 1
+                self._event("switch", id=p["id"], to=w["to"], k=state["k"])
+                self._log("    switch to %s" % w["to"])
+                if w["text"] and not p.get("scene"):
+                    self._panel.set("text", "text " + clean_text(w["text"]))
+                    self._status["prompt"] = w["text"].replace("|", "\n")
+                    self._emit()
+            return tick(dt) if tick else False
+        return both
 
     # --- steps: a section's prompts, bar heights and targets
     def _step_list(self, s):
@@ -2237,7 +2615,8 @@ class Session:
                      "controllers": list(defaults.get("controllers") or []),
                      "seconds": lead + h["reps"] * float(s.get("period_s", 6))}
                 out.append({"kind": "bar", "p": p, "h": h, "lead": lead, "ready": True})
-        out += [{"kind": "sweep" if p.get("cues") else "prompt", "p": p, "ready": True} for p in s["prompts"]]
+        out += [{"kind": "scene" if p.get("scene") else "sweep" if p.get("cues") else "prompt", "p": p, "ready": True}
+                for p in s["prompts"]]
         return out
 
     def _steps(self, i, s, label):
@@ -2285,6 +2664,16 @@ class Session:
                     self._hold_end()
                 again.discard(k)
                 k += 1
+            except _CamerasLost as e:
+                if self.auto:
+                    raise
+                from_ns = started if started is not None else self._step_t0
+                self._hold_end()
+                if from_ns is not None:
+                    self._event("redo", id=p["id"], **{"from": from_ns, "to": mono_ns()})
+                self._cameras_back(p, str(e), where)
+                again.add(k)
+                retry = False
             except _Redo:
                 self._redo_ok = False
                 from_ns = started if started is not None else self._step_t0
@@ -2304,6 +2693,55 @@ class Session:
                     self._event("redo", id=pid, **{"from": a, "to": b})
                     self._log("    redo %s" % pid)
                     again.add(k)
+
+    def _watch_recording(self, now):
+        """A recording that has started writing sets but writes no new one for STALL_S is lost
+        (_CamerasLost): the cameras stopped or moved, and the rest of the hold would be empty."""
+        rec = self._recorder
+        if rec is None or self.dry_run or not hasattr(rec, "sets_written"):
+            self._rec_watch = None
+            return
+        n = rec.sets_written()
+        w = self._rec_watch
+        if w is None or w[0] is not rec or n != w[1]:
+            self._rec_watch = (rec, n, now)
+        elif n > 0 and now - w[2] > STALL_S:
+            self._rec_watch = None
+            raise _CamerasLost("The recording got no new frames for %.0f s (after %d sets)" % (now - w[2], n))
+
+    def _cameras_back(self, p, why, where):
+        """A step's recording was lost (_CamerasLost): its try is marked redone. Wait for the
+        camera check to pass, restarting a camera broker left on moved cameras (camera_check's
+        repair), then the step shows again. _Fail if they don't come back, or too often."""
+        self._camera_losses += 1
+        self._log("    %s: %s (%d this session); waiting for the cameras" % (p["id"], why, self._camera_losses))
+        if self._camera_losses > MAX_CAMERA_LOSSES:
+            raise _Fail("The recording kept stopping (%d times): %s" % (self._camera_losses, why))
+        self._prompt = None
+        self._view()
+        self._show(CAMERAS_TITLE, where, CAMERAS_TEXT)
+        for key, c in (("big", "big "), ("countdown", "countdown off"), ("note", "note ")):
+            self._panel.set(key, c)
+        self._emit(state="between", prompt=CAMERAS_TEXT, big="", countdown=0, seconds_left=0.0, can_redo=False)
+        if self.ring:
+            return
+        end, r = time.monotonic() + CAMERAS_BACK_S / self.speed, None
+        while time.monotonic() < end:
+            if self._want["stop"]:
+                raise _Stop()
+            r = self.repair_cameras_fn()
+            if r is None:   # a dry run: nothing to check
+                return
+            if r.get("status") == "ok":
+                self._log("    cameras back: %s" % r.get("summary", "ok"))
+                return
+            self._wake.wait(2.0 / self.speed)
+            self._wake.clear()
+        summary = (r or {}).get("summary", "not run")
+        for line in (r or {}).get("evidence", []):
+            self._log("      " + line)
+        raise _Fail("The recording stopped and the cameras didn't come back (camera check: %s). %s"
+                    % (summary, camera_text(r) or why))
 
     def _no_hands_seen(self, p, w):
         """The no-hands check's verdict on a hold (logged either way): True if the tracker
@@ -2372,8 +2810,10 @@ class Session:
         self._fb.pop("lost_key", None)
         self._show(s["title"], where, p["text"])
         self._view(p)
-        for key, c in (("big", "big "), ("countdown", "countdown off"), ("bar", "bar off"), ("target", "target off")):
+        for key, c in (("big", "big "), ("countdown", "countdown off"), ("bar", "bar off"), ("target", "target off"),
+                       ("split", "split off")):
             self._panel.set(key, c)
+        self._clear_scene()
         self._emit(state="ready", prompt=p["text"].replace("|", "\n"), seconds_left=float(p["seconds"]),
                    can_redo=can_redo, countdown=0, big="")
 
@@ -2388,6 +2828,9 @@ class Session:
         self._step_t0 = t
         self._start_recording()
         tick = None
+        if st["kind"] == "scene":   # the windows go up for the countdown, the panel to its band
+            self._place_scene(p)
+            self._panel.set("text", "text " + clean_text(p.get("say") or ""))
         if st["kind"] == "bar":   # the bar at near, where the sweep starts
             labels = "%s|%s" % (s.get("near_label", "Near"), s.get("far_label", "Far"))
             near, far = float(s.get("near_m", 0.2)), float(s.get("far_m", 0.6))
@@ -2413,13 +2856,23 @@ class Session:
         end = time.monotonic() + FIRST_SET_S
         while not rec.has_data():
             if rec.exited():
-                raise _Fail("The recording stopped by itself: see session.log")
+                raise _CamerasLost("The recording stopped by itself: see session.log")
             if self._want["stop"]:
                 raise _Stop()
             if time.monotonic() > end:
                 self._log("recording part %d: no set yet after the countdown" % rec.part)
                 return
             time.sleep(0.02)
+        # Without the side pair a recording is no use for training (2026-10-12: XRService moved
+        # the side cameras while ft-camd kept publishing the old devices, and ft-hands left them
+        # out of a whole session). Stop at once rather than record the rest of the session.
+        cams = rec.cameras()
+        missing = [c for c in SIDE_CAMERAS if c not in cams]
+        if cams and missing:
+            self._log("recording part %d has only %s" % (rec.part, " ".join(cams)))
+            raise _CamerasLost("The recording is missing the side cameras (%s), so it can't be used. Close the "
+                               "Hand Recorder and open it again: it checks the cameras and restarts the camera "
+                               "broker if it needs to." % " ".join(missing))
 
     def _hold_end(self):
         """Step mode: the step is over. A "wait" event ends its labels and the recording stops
@@ -2427,8 +2880,10 @@ class Session:
         self._event("wait")
         self._stop_recording()
         self._status["big"] = ""
-        for key, c in (("big", "big "), ("countdown", "countdown off"), ("bar", "bar off"), ("target", "target off")):
+        for key, c in (("big", "big "), ("countdown", "countdown off"), ("bar", "bar off"), ("target", "target off"),
+                       ("split", "split off")):
             self._panel.set(key, c)
+        self._clear_scene()
 
     def _run_step(self, s, st, where):
         if st["kind"] != "bar":
@@ -2439,6 +2894,8 @@ class Session:
             self._bar(s, st, where)
         elif st["kind"] == "sweep":
             self._sweep(s, st, where)
+        elif st["kind"] == "scene":
+            self._scene(s, st, where)
         else:
             self._run_prompt(s, st["p"], where)
 
@@ -2473,6 +2930,85 @@ class Session:
             return False
 
         self._wait(p["seconds"], tick)
+
+    def _place_scene(self, p):
+        """A scene step's windows into the room, where the head faces now (levelled), and the
+        panel to its band along the top. A "scene" event logs each window's pose in the room."""
+        self._panel.cmd("win clear")
+        self._panel.set("layout", "layout top")
+        placed = []
+        for w in p["scene"]["windows"]:
+            reply = self._panel.cmd("win %s place %.3f %.3f %.3f %.3f %.3f %.1f %.1f %s" % (
+                w["id"], *w["at"], *w["size"], *w["turn"], w["look"]), reply=True) or ""
+            placed.append(dict(w, room=_pose_reply(reply)))
+        self._scene_on = True
+        self._event("scene", id=p["id"], windows=placed)
+
+    def _clear_scene(self):
+        if self._scene_on:
+            self._scene_on = False
+            self._panel.cmd("win clear")
+            self._event("scene", windows=[])
+        self._panel.set("layout", "layout full")
+
+    def _scene(self, s, st, where):
+        """A scene step: its acts in turn, each lighting a window's part (and showing a ghost
+        where to take it) for its seconds. Each act is a prompt event of its own, with "cue": true,
+        the step's id and "act" (window, part, gesture, hand, the ghost's pose in the room), so the
+        timeline says what was asked where and when; the time-left bar covers the step."""
+        p = st["p"]
+        acts = p["scene"]["acts"]
+        if not self._scene_on:   # auto mode: no countdown put them up
+            self._place_scene(p)
+        for a in p["scene"]["steady"]:
+            self._panel.cmd(_lit_cmd(a))
+            self._event("steady", win=a["win"], lit=a["lit"], gesture=a["gesture"], hand=a["hand"])
+        state = {"t": 0.0, "j": -1, "prev": None}
+        ends = []
+        for a in acts:
+            ends.append((ends[-1] if ends else 0.0) + a["s"])
+
+        def act(j):
+            a, prev = acts[j], state["prev"]
+            if prev and (prev["win"] != a["win"] or a["lit"] == "none"):
+                self._panel.cmd("win %s lit none" % prev["win"])
+            if a["lit"] != "none":
+                self._panel.cmd(_lit_cmd(a))
+            ghost = None
+            if a["ghost"]:
+                ghost = _pose_reply(self._panel.cmd("win %s ghost %s" % (a["win"], " ".join("%g" % v for v in a["ghost"])),
+                                                    reply=True) or "")
+            elif prev and prev["ghost"]:
+                self._panel.cmd("win %s ghost off" % prev["win"])
+            state["prev"] = a
+            info = {k: a[k] for k in ("win", "lit", "gesture", "hand", "label")}
+            if a["ghost"]:
+                info.update(ghost=a["ghost"], ghost_room=ghost)
+            return dict(p, id="%s/%d-%s" % (p["id"], j + 1, a["gesture"]), text=a["say"] or p.get("say", ""),
+                        pose=a["gesture"], cue=True, step=p["id"], act=info, seconds=a["s"])
+
+        def tick(dt):
+            state["t"] += dt
+            j = min(len(acts) - 1, next((k for k, e in enumerate(ends) if state["t"] < e - 1e-9), len(acts) - 1))
+            while state["j"] < j:   # each act in turn, even when a slow tick passed a short one
+                state["j"] += 1
+                ap = act(state["j"])
+                self._prompt = ap
+                self._prompt_event(ap)
+                self._log("    act %s" % ap["id"])
+                if state["j"] == j:
+                    self._panel.set("text", "text " + clean_text(ap["text"]))
+                    self._status["prompt"] = ap["text"]
+                    self._emit()
+            return False
+
+        state["j"] = 0
+        first = act(0)
+        self._begin_prompt(s, dict(first, seconds=p["seconds"]), where)
+        self._panel.set("text", "text " + clean_text(first["text"]))
+        self._wait(p["seconds"], self._switches(p, tick))
+        if self.auto:
+            self._clear_scene()
 
     def _target(self, s, st, where):
         hold_s, timeout_s = float(s.get("hold_s", 1.0)), float(s.get("timeout_s", 8))
@@ -2569,8 +3105,29 @@ class Session:
 # ------------------------------------------------------------------------------------------
 # The command line
 
+def print_board(base):
+    board = load_board(base)
+    profile = {}
+    try:
+        with open(os.path.join(base, "profile.json")) as f:
+            profile = json.load(f)
+    except (OSError, ValueError):
+        pass
+    if not board:
+        print("no bounty board (%s)" % BOARD_PATH)
+        return
+    print("bounty board of %s" % board["updated"])
+    for b in bounties.view(board, profile, profile.get("checklist") or {}, lambda n: have_bounty_script(n, base_dir=base)):
+        print("  %-12s %-7s %4s min  done %d  %-20s %s" % (b["id"], b["priority"], "%g" % b["minutes"] if b["minutes"] else "?",
+                                                           b["done"], b["title"], b["available"]))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run a hand recording session (the hand recorder's session runner).")
+    ap.add_argument("--bounty", metavar="ID", help="a round for this bounty (its id on the board): its own script")
+    ap.add_argument("--board", action="store_true", help="print the bounty board and exit")
+    ap.add_argument("--debug", action="store_true",
+                    help="a debug session (debug.json): use Frametop's hand tracking as usual, its output recorded too")
     ap.add_argument("--dry-run", action="store_true", help="run no processes; print the panel commands")
     ap.add_argument("--speed", type=float, default=1.0, help="run the script this many times faster")
     ap.add_argument("--ring", help="read frames from this ring (ft-ringplay's) instead of ft-camd's")
@@ -2589,6 +3146,10 @@ def main():
     ap.add_argument("--next-after", type=float, metavar="S",
                     help="test: press Next by itself after S seconds of waiting (real time)")
     ap.add_argument("--poses", help="the pose pictures' folder, with poses.json (default hands/rec/poses)")
+    ap.add_argument("--demos", help="the skeleton demo clips' folder, <id>.gif (default hands/rec/demos)")
+    ap.add_argument("--recorded-demos", help="the recorded demo clips' folder (default hands/rec/demos-recorded)")
+    ap.add_argument("--guidance", choices=[k for k, _ in GUIDANCE],
+                    help="the demo clips to follow (default recorded when there are any, else skeleton)")
     ap.add_argument("--no-headset-button", action="store_true",
                     help="don't read the headset's button (gpio-keys KEY_SELECT: a press is Next, pause or resume; "
                          "two are redo; a hold is stop)")
@@ -2611,12 +3172,35 @@ def main():
         import tempfile
         base = tempfile.mkdtemp(prefix="handrec-dry-")
     base = base or BASE_DIR
+    if a.board:
+        print_board(base)
+        return 0
     profile = {}
     try:
         with open(os.path.join(base, "profile.json")) as f:
             profile = json.load(f)
     except (OSError, ValueError):
         pass
+    entry, script = None, a.script
+    if a.debug:
+        if a.bounty or a.quick or script != SCRIPT_PATH:
+            ap.error("--debug runs debug.json: no --bounty, --quick or --script")
+        script = DEBUG_SCRIPT
+    if a.bounty:
+        if a.quick or script != SCRIPT_PATH:
+            ap.error("--bounty runs the bounty's own script: no --quick or --script")
+        board = load_board(base)
+        entry = next((b for b in bounties.view(board, profile, checklist, lambda n: have_bounty_script(n, base_dir=base))
+                      if b["id"] == a.bounty), None)
+        if not entry:
+            print("no bounty %s on the board (--board lists them)" % a.bounty)
+            return 2
+        if entry["available"]:
+            print("%s: %s" % (entry["title"], entry["available"]))
+            return 2
+        entry = dict(entry, updated=board["updated"])
+        script = bounty_script(entry["script"], base_dir=base)
+        print("bounty %s: %s" % (entry["id"], entry["title"]))
 
     t0 = time.monotonic()
     last = {}
@@ -2635,6 +3219,8 @@ def main():
                                                     st["prompt"].replace("\n", " | "))
         if st["image"]:
             line += "  [%s%s]" % (os.path.basename(st["image"]), " " + st["image_mode"] if st["image_mode"] else "")
+        if st["demo"]:
+            line += "  [%s%s]" % (os.path.basename(st["demo"]), " " + st["demo_mode"] if st["demo_mode"] else "")
         if st["waiting"]:
             line += "  (waiting for Next)"
         if st["note"]:
@@ -2643,10 +3229,11 @@ def main():
             line += "  ERROR: %s" % st["error"]
         print(line, flush=True)
 
-    s = Session(base, profile, checklist, a.lighting, a.script, ring=a.ring, start_processes=not a.no_start,
+    s = Session(base, profile, checklist, a.lighting, script, ring=a.ring, start_processes=not a.no_start,
                 dry_run=a.dry_run, speed=a.speed, on_status=on_status, hands_dir=a.hands_dir, panel_bin=a.panel,
                 auto=a.auto, next_after=a.next_after, poses_dir=a.poses, button=not a.no_headset_button,
-                button_device=a.button_device, check_cameras=not a.ignore_cameras, quick=a.quick, seed=a.seed)
+                button_device=a.button_device, check_cameras=not a.ignore_cameras, quick=a.quick, seed=a.seed,
+                demos_dir=a.demos, recorded_demos_dir=a.recorded_demos, guidance=a.guidance, bounty=entry)
     est = plan_seconds(s.script, s.plan, auto=a.auto)
     worst = plan_seconds(s.script, s.plan, worst=True, auto=a.auto)
     print("%d sections%s, %s mode: about %.1f min%s (at most %.1f)%s" % (
@@ -2693,7 +3280,8 @@ def main():
     def keys():
         # From a terminal, or lines piped in (a test); /dev/null ends at once.
         if sys.stdin.isatty():
-            print("keys (then Enter): n or just Enter next, p pause/resume, r redo, s skip section, q stop", flush=True)
+            print("keys (then Enter): n or just Enter next, p pause/resume, r redo, s skip section, q stop"
+                  "; debug: m mark, f finish", flush=True)
         for line in sys.stdin:
             c = line.strip()[:1].lower()
             if c in ("n", ""):
@@ -2706,6 +3294,10 @@ def main():
                 s.skip()
             elif c == "q":
                 s.stop(wait=0)
+            elif c == "m":
+                s.mark()
+            elif c == "f":
+                s.finish()
     if sys.stdin is not None:
         threading.Thread(target=keys, daemon=True).start()
     s.start()
@@ -2716,4 +3308,5 @@ def main():
 
 
 if __name__ == "__main__":
+    os.umask(0o077)   # recordings, exports and logs are private: folders 0700, files 0600
     sys.exit(main())

@@ -11,14 +11,17 @@ The plan this belongs to is `~/Desktop/Projects/frame-hands/notes/hands-plan.md`
 | `hands/rec/panel/ft-handpanel.cpp` (C++, dev container) | The headset panel: a SteamVR overlay fixed to the head that shows the prompts. It also places the "touch the dot" target in the room and logs head and controller poses. Driven over `@ft_handpanel`. |
 | `hands/rec/session.py` (Python, no Qt) | The session runner. It reads `script.json`, starts and stops the recordings, and drives the panel. It reads the live hands file for feedback and writes each take's files. It also runs from the command line (`--dry-run`) for testing. |
 | `hands/rec/script.json` | The guided script: sections, prompts, timings. |
+| `hands/rec/script-v2.json` | The v2 script (`ft-handrec --script script-v2.json`, `session.py --script`): a demo clip per step (below). Being tried; it becomes `script.json` once settled. |
+| `hands/rec/bounties.json`, `hands/rec/bounties/` | The bounty board and each bounty's round script (below, "Bounties"). |
 | `hands/rec/poses/` | The pose pictures, `poses.json` and its PNGs (below). |
+| `hands/rec/demos/` | The demo clips, `<id>.gif`, made from `demo/parts.json` (below). |
 | `hands/rec/takes.py` (Python, no Qt) | Reads sessions and takes from disk: frame sets for review, deleted ranges, export (compress, strip, manifest, checksums). |
 | `hands/rec/ft_handrec.py` + `main.qml` (PySide6 + Kirigami, dev container) | The desktop window: consent, the before-you-start checklist, the session controls, review, export and upload instructions. |
 | `hands/rec/ft-handrec` | The host launcher, like `input-settings/ft-input-settings`. |
 | `hands/rec/build.sh` | Builds `ft-handpanel` into `hands/rec/build/`, like `gaze/build.sh`. |
 | `hands/rec/CONSENT.md`, `hands/rec/UPLOAD.md` | The texts the window shows. |
 | `hands/rec/install.sh` | Installs the recorder on a Frame with Frametop: the dev container's packages, hands/build.sh, the panel, ft-camd's capabilities, and the menu entry (`uninstall` removes the entry). |
-| ft-hands `--record-hz N` (done) | Records at most N frame sets a second. The recorder uses 10. |
+| ft-hands `--record-hz N` (done) | Records at most N frame sets a second. The recorder uses 10, or a script's `record_hz` (the bounties: 30). |
 | `hands/camcheck.py` (shared, standard library) | Are all four mono cameras running? The recorder runs it before a session and when a step sees no hands (below; `hands/README.md`, "Camera check"). |
 
 Every part runs in the dev container, as ft-hands and Input Settings do. The host Python isn't used: it lacks PySide6 and zstd. `setup/dev-container.sh` gains `zstd`.
@@ -32,7 +35,13 @@ Its tarball keeps this tree's layout (`hands/build/`, `hands/rec/`, `hands/model
 - session.json's `tool` and the manifest's are `ft-handrec <describe> (frametop-hand-recorder <version>)`.
 - The repair hints say to run its install command again.
 
+Its file list lives in that repo (`package.sh`), not here. Since 2026-10-31 the tarball also needs `hands/rec/__init__.py`, and all of `recorder/` (its `qml/` folder with the shared pages, `controls.py`, `privacy.py`, `fhformat.py`, `qmlcheck.py` for the window tests). `hands/rec` is a package, so its launcher runs `python3 -m hands.rec.ft_handrec` with the tree's top on `PYTHONPATH`, as `hands/rec/ft-handrec` does (`python3 -P -m`), not `ft_handrec.py` by path. Its CI runs the window tests the same way, `python3 -m hands.rec.tests.test_qml_backend` with `PYTHONPATH` set, and `validate.py` runs as `python3 -m hands.rec.validate`.
+
 The recordings go to the same `~/.local/share/frametop/hands/contrib`, so either recorder shows both's sessions.
+
+Its window has a **Getting ready** page between the consent and Before you start (`Backend.getReady`, `session.get_ready`). It checks that SteamVR runs, then starts what isn't running yet: the cameras, hand tracking and the headset panel, in that order. With Frametop's hand tracking installed (`frametopHands`) that means Frametop's own `frametop-hands` (which brings `frametop-camd`); a testing session needs that one. Otherwise it starts the recorder's units (`frametop-handrec-camd`, `frametop-handrec-hands`). The first part that can't start stops it with a message and Try again. What it started stops when the window closes; the panel stays up hidden until then, and the session reuses it.
+
+From Frametop's desktop, the window inherits that session's `XDG_RUNTIME_DIR` (`/run/user/UID/frametop`) and `XDG_CONFIG_HOME` (`~/.config/frametop`). With those, `systemctl --user` can't reach the user's systemd, and OpenVR finds no `openvrpaths.vrpath`. The launcher (`bin/frametop-hand-recorder`) puts the real ones back. ft-handpanel also gets `openvr_env()` wherever it starts. On a Plasma desktop the window runs on Wayland and 0.85 times Plasma's scale (`FT_HANDREC_SCALE` sets another factor).
 
 ## Processes during a session
 
@@ -50,7 +59,7 @@ Test hooks:
 - `--dry-run` runs no processes and only prints the panel commands, with timing sped up by `--speed X`.
 - `--next-after S` presses Next by itself after S seconds of waiting (real time), so a step-mode session runs unattended. Lines on stdin steer it too: `n` or an empty line is Next, `p` pause or resume, `r` redo, `s` skip the section, `q` stop.
 - `--no-headset-button` leaves the headset's button alone (`ft-handrec --no-headset-button` too). `--button-device PATH` reads it from PATH instead, an event device or a FIFO of `input_event` structs, also in a dry run: a simulated button for tests.
-- `--auto` runs the timed flow; `--poses DIR` takes the pose pictures from DIR; `--plan` prints the sections, their steps and length.
+- `--auto` runs the timed flow; `--poses DIR` takes the pose pictures from DIR, `--demos DIR` the demo clips (`ft-handrec --demos` too); `--plan` prints the sections, their steps and length.
 - `--ignore-cameras` (`ft-handrec --ignore-cameras` too) starts even when the camera check fails. A dry run and `--ring` skip the check by themselves.
 
 ## Files
@@ -58,15 +67,19 @@ Test hooks:
 ```
 ~/.local/share/frametop/hands/contrib/
   profile.json                  consent and contributor id (below)
+  contributions.json            every finished upload, kept when its session is deleted (Review and export, "Freeing space")
   sessions/<YYYYMMDD-HHMMSS>/   (a second session started in the same second gets -2, and so on)
     session.json                the session: checklist answers, lighting, versions, mode, takes
     calibration.json            /persist/xrservice.json with identifying fields removed (below)
     device.json                 the rig's pose in the CAD frame from /persist/device_config.json (below)
     takes/<NN>-<section>/
-      sets.bin                  ft-hands' recording (FHSET01, hands/track/record.h), 10 sets/s: the first part
+      sets.bin                  ft-hands' recording (FHSET01, hands/track/record.h), 10 sets/s (a bounty: 30): the first part
       sets-2.bin, sets-3.bin, ...  the next parts (step mode: one per step; any mode: after a pause)
       prompts.jsonl             what the person was asked to do, when (below)
       poses.jsonl               head and controller poses from ft-handpanel (below)
+      live.bin, live-2.bin, ... a testing session: the live tracker's output per part (below, "Testing sessions")
+      voice.bin, voice-2.bin, ... a testing session with "Record my voice" ticked: the microphone per part (same)
+      events.jsonl, events-2.jsonl, ... a testing session: what the panels and the pointer did with the hands per part (same)
       take.json                 {"section", "title", "started_ns", "ended_ns", "status": "complete"|"stopped"|"skipped",
                                  "deleted": [[from_ns, to_ns], ...], "notes": "",
                                  "parts": {"sets.bin": {"names_swapped": false}, "sets-2.bin": {...}},
@@ -80,8 +93,14 @@ All `_ns` times are CLOCK_MONOTONIC nanoseconds, the clock of `dqbuf_ns` in sets
 
 ```json
 {"schema": 1, "contributor": "<random uuid4>", "consent": {"version": "2026-10-02", "accepted": "<ISO time>", "adult": true},
- "optional": {"handedness": "right|left|both|", "notes": ""}}
+ "testing_consent": {"version": "2026-10-14", "accepted": "<ISO time>", "adult": true},
+ "optional": {"handedness": "right|left|both|", "notes": ""},
+ "bounties": {"<id>": {"rounds": 2, "last": "<session id>"}}}
 ```
+
+`consent` is the agreement to CONSENT.md (the public dataset), `testing_consent` to TESTING.md (the test phase, below); either can be there without the other, and writing one keeps the other.
+
+`bounties`: how often each bounty was done (recorder/bounties.py `mark_done`, when a bounty's round ends `done`); a new consent keeps it.
 
 No name, email, or account. The contributor id is random, so several sessions from one person can be held out together in evaluation. Withdrawal also goes by that id.
 
@@ -94,7 +113,7 @@ No name, email, or account. The contributor id is random, so several sessions fr
  "checklist": {"objects": ["pencil", "phone", "cup", "keyboard", "mouse", "gamepad", "small"], "own_objects": ["..."],
                "controllers": "straps|none", "sleeves": "short|long|", "rings": false, "watch": false, "notes": ""},
  "device": {"steamos": "<VERSION_ID from /etc/os-release>", "steamvr": "<version if known>", "cameras": [{"name", "width", "height"}]},
- "mode": "step|auto", "quick": false, "shuffle": {"seed": 123, "sweeps": {"pose-sweeps": [{"id", "hands", "cues"}]}},
+ "mode": "step|auto", "quick": false, "record_hz": 10, "bounty": {"id": "pinches", "title": "Pinches", "board_updated": "2026-10-14"}, "shuffle": {"seed": 123, "sweeps": {"pose-sweeps": [{"id", "hands", "cues"}]}},
  "takes": ["01-hand-size", "..."],
  "camera": {"status": "ok|unknown|degraded", "reason": "..."}, "stop_reason": "...",
  "sides": {"swapped": true|false|null, "decided_by": "auto|config|option|manual", "state": "decided|confirmed|...",
@@ -105,6 +124,10 @@ No name, email, or account. The contributor id is random, so several sessions fr
 `sides`: whether ft-camd's side camera names were backwards during the session (`swapped`), as the live tracker decided it (above, "Side cameras"); `null` while nobody knows. A part's names are right when its take.json `names_swapped` equals `swapped`. Parts without a `parts` entry were recorded with ft-camd's names. Sessions from before this have no `sides`.
 
 `camera` is the camera check's verdict at the start (no paths or log lines: those go to `session.log`). `stop_reason` is there when a session was stopped at the no-hands screen, with the check's result.
+
+`consent` (`{"kind": "public"|"testing", "version"}`) is the consent the session was recorded under, and `debug` is there for a testing session (below, "Testing sessions"). Sessions before 2026-10-14 have neither: they're public.
+
+`record_hz` is the sets a second recorded; `bounty` is there for a bounty's round (below, "Bounties"). Sessions before the bounties have neither: they were recorded at 10.
 
 A session started before step mode existed has no `mode`: it ran as `auto`. `quick` and `shuffle` (below, "Sweeps" and "Quick round") are missing from sessions before the sweeps.
 
@@ -131,6 +154,7 @@ One JSON object per line:
 {"t": 123, "event": "take", "section": "static-poses", "take": "03-static-poses"}
 {"t": 123, "event": "prompt", "id": "static-poses/fist/left/near", "text": "...", "hands": "left|right|both|none",
  "pose": "fist", "distance": "near|mid|far|", "position": "centre|left|right|up|down|", "object": "", "controller": false}
+{"t": 123, "event": "prompt", "id": "index-taps/2a/left", "...": "...", "demo": "2a"}
 {"t": 123, "event": "target", "id": "touch/3", "head": [x, y, z], "room": [x, y, z], "state": "show|hold|done|timeout"}
 {"t": 123, "event": "bar", "target": 0.0}
 {"t": 123, "event": "feedback", "left": true, "right": false, "palm_m": [0.0, 0.0]}
@@ -141,7 +165,14 @@ One JSON object per line:
 {"t": 123, "event": "redo", "id": "static-poses/fist/left/near", "from": 123, "to": 123}
 {"t": 123, "event": "nohands", "id": "hand-size/flat/both", "reads": 120, "published": 118}
 {"t": 123, "event": "end", "status": "complete|stopped|skipped"}
+{"t": 123, "event": "scene", "id": "pinches/drag-right", "windows": [{"id": "a", "at": [x, y, z], "size": [w, h], "turn": [yaw, pitch], "look": "plain", "room": [12 floats]}]}
+{"t": 123, "event": "steady", "win": "a", "lit": "bar", "gesture": "pinch", "hand": ""}
+{"t": 123, "event": "switch", "id": "hand-size/both", "to": "backs toward you", "k": 1}
+{"t": 123, "event": "prompt", "id": "pinches/drag-right/3-pinch", "text": "...", "pose": "pinch", "cue": true, "step": "pinches/drag-right",
+ "act": {"win": "a", "lit": "bar", "gesture": "pinch", "hand": "", "label": "", "ghost": [dx, dy, dz, yaw, pitch, roll], "ghost_room": [12 floats]}}
 ```
+
+A scene step (below, "Scenes") logs `scene` when its windows go up, with each one's pose in the room (`room`, from the panel; null in a dry run), and `scene` with no windows when they go. Each act is a `prompt` like a sweep's cue, with `act`: the window, the lit part, the gesture asked for (`rest`: let go, nothing lit), the hand when the act names one, and the ghost (in the window's frame, and its pose in the room). `steady` is a light that stays on for the whole step. `switch` is a step's change of pose (below, "Two poses in a step"): the pose asked for from then until the step's end or the next `switch`.
 
 `feedback` is written about twice a second while recording. It's the live tracker's view, kept for later checks; it's not a label.
 
@@ -169,7 +200,7 @@ ft-handpanel writes one line per sample, 250 a second, from `GetDeviceToAbsolute
 
 ## The panel (`ft-handpanel`)
 
-- **Placement.** A SteamVR overlay fixed to the head, like `gaze/panel/ft-gazepanel.cpp`: key `frametop.handpanel`, sort order 250. It sits 1.2 m ahead, centred 12 degrees above straight ahead, so the hands stay clear below it. It's 36 degrees wide, 4:3, 1024x768 pixels, dim and see-through. It's drawn on the CPU with stb_truetype (and stb_image for the pose pictures, PNG only, the same pinned stb commit) into three shared DMA-BUFs SteamVR imports once, as ft-gazepanel does, and is drawn again only when something changes.
+- **Placement.** A SteamVR overlay fixed to the head, like `gaze/panel/ft-gazepanel.cpp`: key `frametop.handpanel`, sort order 250. It sits 1.2 m ahead, centred 12 degrees above straight ahead, so the hands stay clear below it. It's 36 degrees wide, 4:3, 1024x768 pixels, dim and see-through. It's drawn on the CPU with stb_truetype (and stb_image for the pose pictures and demo clips, PNG and GIF, the same pinned stb commit) into three shared DMA-BUFs SteamVR imports once, as ft-gazepanel does, and is drawn again only when something changes.
 - **Layout.** The title and step on top (a red "Rec" by the step while recording), a rule. With a pose picture or a diagram, a 14-degree column on the left holds the picture (or the flipped copy and the picture side by side) and the where-to diagram under it; the text takes the right. The text column holds the instruction, the orange note, the big countdown ("3", "2", "1", then "Hold" or "Go") and the cyan action line ("Ready? Press Space or click Next"), centred together. At the bottom: the near/far bar, the hand chips, the time-left bar and the key hints.
 - **Socket.** Abstract unix datagram `@ft_handpanel` (`--socket NAME`). A sender with an address gets `ok ...` or `error ...`.
 - **Options:** `--watch-stdin` (quit when stdin closes), `--socket NAME`, `--distance M`, `--no-vr`. `--no-vr` makes no SteamVR connection and prints each picture's text to stdout: for testing without a headset.
@@ -184,9 +215,11 @@ Commands (UTF-8; `|` starts a new line in text):
 | `text <text>` | The instruction, large, wrapped to the panel's width, centred. |
 | `note <text>` | An orange line under the instruction: a warning ("I can't see your left hand"). Empty clears it. |
 | `countdown <0..1>` / `countdown off` | A thin bar along the bottom: the share of this prompt's time left. |
+| `split <at> <label>;...` / `split off` | Ticks on that bar where the step changes pose, each at `at` (the share of time left then) with "Switch to <label>" over it, cyan once the bar comes down to it ("Two poses in a step"). |
 | `hands <left> <right>` | Two chips, "Left hand" and "Right hand", each `seen` (green), `lost` (orange) or `off` (hidden). |
 | `bar <target 0..1> <current 0..1 or -1> [near label] [far label]` / `bar off` | The near/far bar for the push out and back: a horizontal track with a target marker and the hand's current position. |
 | `paused on` / `paused off` | A "Paused" overlay over the picture. |
+| `demo <path> [mirror]` / `demo restart` / `demo off` | A demo clip (below) playing in a wider left column (16 degrees), looped, with the key to its colours under it: a light swatch "Light: palm", a dark one "Dark: back of hand". It takes the picture's place, and the text beside it is left-aligned (a list of motions). A new path starts it from its first frame; the same one again leaves it playing (`mirror` only flips it); `restart` starts it again. It stands still while paused. A file that can't be read: `error can't read ...` and no clip. |
 | `image <path> [mirror\|both]` / `image off` | The pose picture, a PNG (below), in the left column. `mirror` flips it (a left hand); `both` draws a flipped copy on its left. A file that can't be read: `error ...` and no picture. |
 | `where <position\|-> <distance\|->` / `where off` | The where-to diagram under the picture: a 3x3 front view with the asked cell lit (`centre`, `left`, `right`, `up`, `down`, and the push sections' `chest`, `desk`, `eye`), and a side view of the head and three marks for `near` ("Close"), `mid` ("Halfway out") and `far` ("Arm out"). `-` leaves that half out. |
 | `action <text>` | The cyan line under the instruction (empty clears it). |
@@ -195,12 +228,17 @@ Commands (UTF-8; `|` starts a new line in text):
 | `rec on` / `rec off` | The red "Rec" by the step line. |
 | `strip <cue> <path>\|<mode>\|<label>;...` / `strip off` | A sweep's row of pose pictures (path `-`: none; mode `-` or `mirror`), each with its label under it; the one at index `cue` (from 0, -1 for none) framed in cyan and bright, the others dim. It sits along the bottom of the space left, the where-to diagram at its right end if there is one, and the text above it; it takes the left column's place. Each picture is loaded once. A file that can't be read: `error can't read ...`, and that item shows an empty frame. |
 | `target <x> <y> <z> [show\|hold <0..1>\|done]` / `target off` | The touch target: a small sphere-like dot about 2 cm across, in its own overlay (`frametop.handpanel.target`). The point is in the head frame (metres, +x right, +y up, -z forward). The first `target` with a new point places it in the room with the current HMD pose, and it stays there. Later commands with the same point change only the state. `hold` draws a filling ring, `done` turns it green. Reply: `ok <room x> <room y> <room z>`. |
+| `layout full` / `layout top` | `top`: only a band along the panel's top (title, step, Rec, the big text, two lines of text, a note and the time-left bar), the rest clear, so a scene's windows can be seen below it. |
+| `win <id> place <x> <y> <z> <w> <h> [<yaw> <pitch>] [<look>]` | A scene's window (below, "Scenes"; at most 4), in its own overlay (`frametop.handpanel.win.<id>`): w x h metres, centred at the point in the head frame made level (the head's forward direction, flattened, +y up), facing the eye, turned by yaw and pitch. It stays where it was put. `look`: `plain` (faint text lines), `grid:CxR` (1-6 each way) or `list:N` (1-10 rows). Reply: `ok <12 floats>`, its pose in the room. |
+| `win <id> lit <part>[+<part>...] [<colour>] [<label>]` | Lights parts: `none`, `bar` (the title bar), `left`, `right`, `top`, `bottom`, `tl`, `tr`, `bl`, `br`, `button:N`, `item:N`. Colours: `cyan` (default), `purple`, `orange` (a button drawn hollow with a cross: don't touch), `green`. The label (`_` for a space) goes beside the first part. |
+| `win <id> ghost <dx> <dy> <dz> <yaw> <pitch> <roll> [<scale>]` / `win <id> ghost off` | A dashed outline of the window, moved, turned and scaled in the window's frame: where to take it. Reply: `ok <12 floats>`. |
+| `win <id> off` / `win clear` | Hides one window and its ghost, or all of them. |
 | `poses start <path>` / `poses stop` | Log poses to the path (appending, `poses.jsonl` format above) from a thread at 250 Hz, until stopped. |
 | `devices` | Reply: `ok hmd <r> left <r or -> right <r or ->`, the current `ETrackingResult` values (`-` for no device in that role). |
 | `head` | Reply: `ok <12 floats>`, the current HMD pose (standing universe). |
 | `ping` | `ok shown` or `ok hidden`. |
 
-It quits on SteamVR's quit event, as ft-gazepanel does. `--no-vr --dump DIR` writes each picture to `DIR/panel.pam`, to check the layout without a headset.
+It quits on SteamVR's quit event, as ft-gazepanel does. `--no-vr --dump DIR` writes each picture to `DIR/panel.pam` (and the windows to `win-<id>.pam`, the ghosts to `ghost-<id>.pam`), to check the layout without a headset.
 
 ## The pose pictures (`poses/`)
 
@@ -214,6 +252,16 @@ It quits on SteamVR's quit event, as ft-gazepanel does. `--no-vr --dump DIR` wri
 | anything, `two_hands` | as drawn |
 
 A pose with no entry, or whose file is missing, shows no picture: the text alone. The session reads `poses.json` when it starts. The window shows the same picture (QML `Image.mirror`), its caption, and the same diagram.
+
+## Demo clips (`demos/`)
+
+The v2 script shows a looping clip for each step instead of a pose picture: generated animation of a stick-figure hand in the colours of Steam Frame passthrough, one GIF per part of `demo/parts.json` (`<id>.gif`, 640x360, 12 frames a second, 6-16 s, under 2 MB). They're made outside the Frame (Blender), so their source isn't here. The palm side of the hand is drawn light (#d5d1fe) and the back dark (#6a62d8); the panel and the window say so under each clip, and the welcome screen too.
+
+- A prompt's `"demo": "<id>"` names its clip; `"demo_mirror": true` flips it (`session.demo_view`): the clips show a right hand, or both hands, so a left-hand step flips a right hand's clip. A missing file shows no clip: the text alone.
+- The clip starts on the step's ready screen and starts again from its first frame when the hold begins (after the 3-2-1), so it can be followed. The status's `demo_run` counts those starts for the window, which plays the same clip (QML `AnimatedImage`).
+- The panel decodes a frame at a time as it plays (stb_image's GIF decoder, stepped as `stbi_load_gif_from_memory` steps it), so a clip costs three frames of memory however long it is. A frame redraws only the clip's rectangle and copies only that to a buffer that already has the rest of the picture: about 450x250 pixels 12 times a second.
+- Two kinds, the contributor's choice on the window's start page ("Guidance", kept in `BASE/settings.json`, written to `session.json` as `"guidance"`): **recorded** clips in `demos-recorded/`, a real person's hands from a recorder session's side cameras (`demo/camgifs.py`: each frame drawn again as a plain picture from between the eyes, 640x360, 10 a second, grey), and **skeleton** clips in `demos/`, the drawn hand. Recorded is the default when there are recorded clips. A part with no clip of the chosen kind shows the other kind. Only a skeleton clip shows the key to its colours (the panel's `demo <path> [mirror] [nokey]`; the status's `demo_key`). Recorded clips show the room around the person who recorded them: check them before they go anywhere public.
+- In `script-v2.json` a one-hand part runs three steps: the left hand alone (the clip flipped), the right alone, then both at once. A part made for two hands runs once. Each step lasts about 1.2 times its clip. `"name": "v2"` goes into `session.json`'s `script`.
 
 ## The script (`script.json`)
 
@@ -245,6 +293,7 @@ A pose with no entry, or whose file is missing, shows no picture: the text alone
   - `bar`: the target marker sweeps near to far and back, `reps` times per height, at `period_s` per sweep. The current marker follows the live palm distance.
 - Each section is one take. Prompts within it are marked in `prompts.jsonl`.
 - `cue_names`: the short labels under the strip's pictures (otherwise the pose id).
+- `name`: the script's name, recorded in `session.json` (`script.name`); `demo`, `demo_mirror`: a prompt's demo clip (above).
 
 ### Sweeps
 
@@ -260,6 +309,34 @@ The second in-headset session (sessions/20261002-202734) took about 16 min and w
 ### Quick round
 
 For more lighting rounds: "Quick round (about 3 min)" on the checklist page, `session.py --quick`. It has the sections marked `quick` (hand size, the pose sweeps without the one-hand ones, touch the dot, no hands), about 2 min recorded in 6 steps. session.json gets `"quick": true`. The checklist page suggests it (and picks it) once a full session has gone to the end (`Backend.hasFullSession`: a session.json with status `done`, not quick, not a dry run).
+
+### Scenes
+
+A section with `"kind": "scene"` (the bounties, below) puts windows in front of the person and asks for real interactions on them: tap the lit button, pinch the lit corner and drag the window to a ghost, grab the edge like a playing card and throw it. The windows don't move or click. The point is the hand doing the whole motion as it would on a real window (the reach, the fingers shaping on the way, the contact, the carry, the let-go), with each try's target and time as weak labels, instead of held poses. The cameras don't see the windows, so the steps put them where the tracker struggles: low, close, at the view's edge, two hands, near misses.
+
+A step:
+
+```json
+{"id": "drag-right", "hands": "right", "text": "Pinch the lit bar and take it to the ghost.",
+ "windows": [{"id": "a", "at": [0.05, -0.2, -0.45], "size": [0.34, 0.24], "turn": [0, 0], "look": "plain|grid:3x3|list:6"}],
+ "steady": [{"win": "b", "lit": "bar", "gesture": "pinch", "label": "L"}],
+ "acts": {"gen": "moves", "gesture": "pinch", "grab": "bar", "every_s": 3.5, "gap_s": 1.2, "count": 3,
+          "moves": [[0, 0.15, 0], {"grab": "br", "ghost": [0.05, -0.04, 0, 0, 0, 0, 1.3], "gesture": "nogo"}]}}
+```
+
+- `windows`: 1 to 4, placed when Next is pressed, where the head faces then (levelled), and left there for the step (the panel's `win ... place`). `at` is in that frame, metres.
+- `acts`: a list of acts, `{"s", "win", "lit", "gesture", "hand", "label", "say", "ghost"}`, or a generator (or a list mixing both):
+  - `"gen": "buttons"`: a lit button or row every `every_s`, lit for `lit_s` with a rest after, never the same one twice running; `count` or `seconds`; `mix` weights the gestures (`{"tap": 2, "double": 1}`); `hands: ["left", "right"]` labels each button L or R; `says` gives a gesture its own line; `windows` limits it to some.
+  - `"gen": "moves"`: each move lights a part to grab (`grab`, `+` for two: `tl+br`) and, with a ghost, shows where to take the window; `every_s` each, then a `gap_s` rest ("Let go"); shuffled unless `"shuffle": false`; `count` repeats or cuts the list. A move is a ghost `[dx, dy, dz, yaw, pitch, roll, scale]` or an object overriding the generator's keys.
+- `steady`: lights that stay on for the whole step, on windows no act uses (hold a pinch on one while the other hand taps).
+- Gestures (`session.GESTURES`), each with its colour, mark and default line: `tap`, `double` ("2"), `hold` ("hold"), `middle` (purple), `middle-hold`, `pinch`, `card` (three fingers, a playing card), `fist` (green), `touch` (open hand, orange), `nogo` (orange, stop about 1 cm short), `poke` (the index fingertip in to the window and back out), `poke-hold` ("hold"), `poke-slide` ("slide": pressed, then slid down as if scrolling), `sweep` (the lazy susan's stroke: an open hand on its edge, palm leading), `pull` (green: "grab that", an open hand held out to it, then a fist pulled back), `push` (an open hand flat on it, pushed away), `rest` (nothing lit).
+- A step whose acts switch between the hands (L and R buttons, or acts naming each hand) gives every act at least `CHOICE_MIN_S` (2 s) lit, so there's time to see which hand and use it (user, 2026-10-14): the buttons generator stretches its lit time to that (keeping the rest after), and a written act shorter than that fails the plan.
+- The step's `seconds` are its acts'. The acts are drawn with `random.Random("<seed>/<section>/<step>")`, so `build_plan` with the session's seed gives them again; session.json's `shuffle.sweeps` lists each scene step's acts as `[gesture, window, part, hand]`.
+- While a scene runs, the panel is in its `layout top` band, which shows the act's line; a scene's acts get no pose picture. The events are above (prompts.jsonl).
+
+### Two poses in a step
+
+A step that asks for one pose and then another (hand size: palms toward you, then the backs) says when to change: `"switch": "backs toward you"` (at half time), or `[{"at": 0.5, "to": "backs toward you", "text": "Both hands about 40 cm out, still|Backs toward you"}]`, each `at` a share of the step's time, after the one before. The time-left bar gets a tick there with "Switch to <to>" over it (the panel's `split`), lit cyan once the bar comes down to it; `text`, if given, replaces the instruction then (not in a scene, whose acts keep their own lines). The step's prompt event lists its `switch`, and a `switch` event (`id`, `to`, `k`, counting from 1) marks each one's time, so labels can tell the two poses apart. Plain steps and scene steps take it; a sweep has its own cues.
 
 ### Step mode (the default) and auto mode
 
@@ -302,6 +379,8 @@ On 2026-10-02 a whole session showed "I can't see your hands": after the headset
 
 - **Before the session.** The window runs `hands/camcheck.py` when the checklist page opens ("Tracking cameras:", with the evidence under Details and Check again), and again when Start is pressed; `session.py` runs it first thing, before it makes the session's folder or starts anything (`Session._preflight`). If it finds the cameras degraded, the session doesn't start. The window says: "The headset's upper cameras and IR light are off. SteamVR couldn't start the colour camera module (it happens sometimes after the headset sleeps). Restart SteamVR, or restart the headset if that doesn't fix it." (another `degraded:` reason gets a sentence naming it), and Start stays off. `unknown` (SteamVR not running, the cameras asleep) doesn't stop it: the session's own start fails clearly then. From the command line, `session.py` prints the check and exits with status 3.
 - **Restart SteamVR.** The message has a Restart SteamVR button. After a confirmation it runs `systemctl --user restart --no-block steamvr.service` on the host (through `distrobox-host-exec`), then checks the cameras every 3 s, for up to 2 minutes, until a new XRService has opened its cameras. The confirmation says what really happens: every VR app closes, and so does the Frametop desktop with all its windows, this one included, and it doesn't come back by itself (`hands/README.md`, "What a SteamVR restart does to Frametop"). So the check after the restart mostly happens when the recorder is opened again; it re-runs when the checklist page opens. `--no-block` lets the restart finish after the window is gone.
+- **Frametop's hands are off during a session.** Frametop's drawn hands (`frametop-handview`) cover what the person watches, and its hand pointer (`frametop-pointer`) turns the steps' pinches and taps into clicks, or opens Steam's menu. When a session starts (after the camera check, before the welcome screen), the ones running are stopped, and listed in `/run/user/UID/frametop-hands/handrec-paused-units` first. They're started again when the session ends in any way. If the recorder is killed meanwhile, the window starts them when it opens again, and so does the next session. The hand tracker itself keeps running: the session's hand notes read it.
+- **Cameras moved or lost.** Unplugging or plugging in the colour camera module makes XRService move the side cameras to other devices (video9/13 and video0/3). On 2026-10-12 an ft-camd started before the move kept publishing the old devices, ft-hands left the side pair out, and a whole session recorded only the upper cameras. Now: the camera check fails when ft-camd's devices aren't the ones XRService runs (`ring_missing`, "it moved them"), and the window's check and the session's preflight restart that ft-camd (the recorder's own unit, or Frametop's live `frametop-camd` and then `frametop-hands`). ft-camd exits by itself when a camera goes silent while the others run (camd.c, `SILENT_S`), and its service starts it on the new devices. In a session, a part whose first set has no `slam_left`/`slam_right`, a recording that exits, or one that writes no set for `STALL_S` (3 s) loses the step (`_CamerasLost`): in step mode its try gets a `redo` event, the panel says "Waiting for the cameras", the session runs the camera check (with its repair) every 2 s for up to `CAMERAS_BACK_S` (120 s), then shows the step's ready screen again. If they don't come back, or after `MAX_CAMERA_LOSSES` (3) losses, the session stops with an error. Auto mode stops at once. Known gap: if a restarted ft-camd binds the side pair the other way round, the session's single `sides` decision (reversed for the later parts) renames the earlier parts wrongly; `hub_review check` tells.
 - **No hands in the first step.** The first step of the hand-size section has both hands up, about 40 cm away. During its hold, the session counts the hands file's reads (about 20 a second). If the tracker published in at least half of at least 10 reads and never saw a hand, the step stops: a `wait` and the recording stops as usual, then a `nohands` event and a `redo` over the try. The session runs the camera check and shows "I can't see your hands" with its result (the camera text above when it's the VCINT failure, else "The camera check found nothing wrong"). The state is `nohands`, waiting: Next (the headset button, Space, Try again) or R starts the same step's countdown at once; Stop (Esc) ends the session with `stop_reason` set; S skips the section. One missed step costs a retry, not the session, and every hold of that step is logged ("hands check ...: a hand in N of M reads"). Without a tracker publishing the session can't tell, logs that, and goes on. Only that one step is checked: later steps have their notes ("I can't see your left hand") as before. Auto mode does the same; its recording pauses meanwhile.
 
 ### Controls
@@ -319,6 +398,63 @@ On 2026-10-02 a whole session showed "I can't see your hands": after the headset
 - **R (redo).** During a step's countdown or hold: that step starts again from its ready screen. At a step's ready screen: the step before it (in this section) goes again. Either way a `redo` event marks the range of the try being redone, so its labels are skipped; the sets stay, to delete in review if wanted.
 - A pause stops the take's recording and starts it again on resume as the next part of the same take (`sets-2.bin`, and so on). takes.py reads all parts in order. A pause while a step waits only shows "Paused"; a Next pressed while paused doesn't count.
 
+## Bounties
+
+Short rounds (about 3 min recorded, 4 with reading) of what the hand tracker needs most, so people can help where it counts without a 15-minute session. As in the eye recorder (gaze/rec/DESIGN.md, "Bounty board"), using the shared `recorder/bounties.py`:
+
+- `bounties.json` is the board: `{"schema": 1, "updated", "bounties": [{"id", "title", "blurb", "minutes", "priority", "script"}]}`. A newer copy fetched from the dataset (`hub.py board`, the window's "Get the newest board", into `BASE/board-cache.json`) can only describe, reorder, reprioritise or retire bounties: each one's steps come from `bounties/<script>.json`, shipped with the recorder, or (since 2026-10-23) fetched with the board from the dataset's own `bounties/<script>.json` when the recorder doesn't ship that name. A shipped script always wins, so a changed round gets a new name. A fetched round is untrusted, as the board is: `session.check_round` keeps it in `BASE/board-rounds/` only if it is a version 1 round of that name with a scene, only the top-level keys a round has, sections of kind prompts or scene, nothing that changes what is recorded or where it goes (no `debug`, which would make it a testing session, no objects, controllers, checklist requirements or demo files), texts and numbers in limits, 1-30 sets a second, windows within 3 m and 2 m across, and a plan that builds (known gestures, windows and parts) and lasts at most 8 minutes. The session checks it again as it starts, and session.json's `script` says `"from": "board"` (or `"recorder"`) and the script's `sha256`. A round that doesn't come or doesn't pass keeps the copy that passed before; one the board no longer lists is deleted. A bounty whose script this recorder has neither way shows "Needs a newer recorder". So a new round needs no recorder release once the recorders out there have this: upload its script beside the board, then the board.
+- A round script is a normal script (above) with `"record_hz": 30`: hand size first (the no-hands check), then one scene section, and at most 30 s of plain steps after it when a gesture needs no window (the palm up). At 30 sets a second a round is about 2.5 min recorded, about 2.1 MB a second exported.
+- The window opens on the Bounties page: the board by priority, then least done first, then in the board's own order (a fetched board ranks bounties of one priority by listing them; before 2026-10-15 the title broke ties), each with Record (Record again once done), "Get the newest board", and below them the full session and the quick round. Picking a round goes to the consent page if this contributor hasn't agreed to the current version, else straight to the checklist; the checklist's Round section shows the pick (or the full/quick choice) with "Pick another…" back to the board, and hides what a bounty doesn't use (objects within reach, controllers, guidance). Its camera check and Start then run the script (`session.py --bounty ID`; `--board` lists them). When the round is done, the Session page's "Export and upload" queues its export to upload by itself once exported (logged in), or else exports it and opens the Upload page for that export once the export finishes (`exportDone`). session.json gets `"bounty"`, the upload's title and description name it, and Review shows its title by the session. A round that ends `done` (not a dry run) counts in profile.json's `bounties`.
+
+The first four (2026-10-14), each on the gestures Frametop uses:
+
+| Bounty | What | Steps |
+|---|---|---|
+| `index-taps` | Thumb to index taps (click), the hand raised and pointing at the button as with Frametop's hand ray (user, 2026-10-14: not gaze-and-tap from the lap) | Each hand, palm away, the arm straight then bent (a switch); two windows left and right, the head ahead then turning; high and low; a big far window; both hands (L/R); double taps and holds, each hand; near misses (orange: stop short); own pace, then the other hand |
+| `middle-taps` | Thumb to middle taps (right click), pointing the same way | The index round's shape with middle taps and middle holds, index and middle mixed on each hand, near misses and a slow fist |
+| `pinches` | Thumb and index pinches | Pinch and hold the bar or a corner; drag to ghosts with each hand (across, nearer, farther); resize from a corner; tilt; two hands on two corners; hold a pinch on one window while tapping another; a far window pinched with the hand low; pinch vs stop short vs open touch; own pace |
+| `card-grabs` | Thumb, index and middle (a playing card) | Hold the right edge (R) and left (L); move and turn it while held; place it on ghosts; push it away; throw it to far ghosts; two hands on both edges; four windows low, high, close and to the side; card vs fist vs touch vs two-finger pinch vs stop short; own pace |
+
+Added 2026-10-15 from the testing sessions (the user's of 2026-10-14 21:05 and 19:32, a tester's of 2026-10-15 16:16) and the flags report of 2026-10-11: pokes were the interaction held back most in real use (in the 21:05 session 10 pressed and 21 were refused: 12 only by the resting-hand, reaching-through or other-hand rules, 6 at least partly by what the tracker read of the finger (bent, another fingertip deeper, one frame past, off the normal), 3 by those rules off the content; three of seven marks were about pokes), "grab that" took the wrong screen, the lazy susan fired with a hand that wasn't flat and missed a meant one, and a tap read as a hold. frame-hands `notes/bounties-2026-10-15.md` has the analysis and the order.
+
+| Bounty | What | Steps |
+|---|---|---|
+| `pokes` | The index fingertip pressed on windows within arm's reach (0.36-0.45 m), as on a touch screen | Each hand, the other fingers tucked in then relaxed (a switch); a low window near the lap; one high and one out to the side; both hands (L/R); pokes, holds and slides, each hand; small buttons (a 6x4 grid, 5 cm across); near misses (orange: stop 1 cm short); own pace, then the other hand |
+| `hand-gestures` | Whole-hand gestures: the lazy susan's sweep, "grab that", push, the fist, the palm up | Sweeps with each hand (palm leading, three windows in an arc, the ghost where it would go); sweeps against look-alikes (curled fingers, the return stroke, a wave); "grab that" on far windows with each hand, then the lit one of four close together; open-hand pushes (L/R); fist grabs turned like the ghost; own pace; then, with no window, each hand palm up toward the face with pinch taps, the fingers drooping halfway |
+
+The board can list one script under two bounties: `daylight-taps` is the index-taps round asked for in a room lit by daylight (the cameras' hardest light), counted on its own.
+
+Replaced 2026-10-23, after v20a (2026-10-22) replayed the four testing sessions end to end (flag windows over all of each, teacher on dody; 848 hand-seconds, 674 failures). The seven rounds above are retired on the board and their scripts kept; the board now asks for five: three aimed at what v20a still gets wrong, and two the user asked for. Close hands (palm under 35 cm from the eyes, about 16 cm in front of the face when it failed) were 7% of the time and failed 3-4x as often (finger layout 5.4x with one camera's view, lost views 14x at the view's edge), matching five of the user's seven marks; the pokes round only reaches 30-35 cm. A hand on its edge at arm's length jumped in depth 3.2x as often (6-21 cm), matching a tester's marks on button and corner accuracy. False pinches (38, the teacher reading thumb and index 35-70 mm apart; 15 in one tester's 97 s with a relaxed hand) match the cue bench, where v20a reads rests closed 27% of the time and near misses 50%, from only six near-miss acts in all the rounds. Missed pinches were mostly the tracker's rules refusing a closed pinch, not the model, so no round asks for them. frame-hands `notes/bounties-2026-10-23.md` has the numbers.
+
+| Bounty | What | Steps |
+|---|---|---|
+| `close-up` | Pokes, taps and pinches on windows a forearm's length away (0.24-0.3 m) | Pokes each hand; a window low in front of the chest; one out to the side; taps and holds close; pinch the bar or a corner (R), drag to ghosts (L); both hands (L/R); pokes against stop-short; own pace |
+| `near-misses` | Taps and pinches that stop 1 cm short, and a relaxed hand aiming, outnumbering the real ones | Taps vs stop-short, each hand; a relaxed hand aiming with no tap (then the other hand); quick taps and doubles; pinches vs stop-short, each hand; middle taps vs stop-short; both hands (L/R); own pace |
+| `three-finger` | Three-finger taps and scrolls (the thumb on the index and middle tips together, the hand ray's scroll), among index and middle taps (user, 2026-10-23: they "regularly get missed and registered as just index finger + thumb taps"; the cue bench reads a card grab's middle tip 24-25 mm from the thumb while the index is at 15 mm) | Three-finger vs index taps, each hand; scrolls on a list (pinch, move down, let go), each hand; index, middle and three-finger mixed, each hand; the hand low as with gaze; both hands (L/R); own pace. Gestures `tri` and `tri-scroll` (purple, marked 3) |
+| `fists` | Fists closing on a window and opening to let go (user, 2026-10-23: "a little janky"; live, ft-hands called a closing fist a pinch, and let-gos jumped back 4-7 cm as the hand opened) | Close and open, each hand; slowly; carry to ghosts, each hand; two fists stretching and turning; fist vs pinch vs card vs open touch vs a half curl; quick; own pace |
+| `sideways-hands` | The hand on its side, thumb on top, at arm's length and past it (0.6-1.2 m) | Pinch and hold, then drag to nearer and farther ghosts, each hand; a window at full reach; taps on a far window; sweeps (three windows in an arc); pinches against stop-short; own pace |
+
+Added 2026-10-28: `desk-work`, the training data for a keyboard and mouse classifier (user, 2026-10-28: desk hands kept taking the pointer from the mouse, most after looking up and back down; "Let's create a classifier and an accompanying bounty for training it"). Its shape differs from the others: about 80 s of plain steps at the desk come before the scene, because typing and the mouse need no window and their pose pictures label them. Nothing typed or clicked is recorded, only the cameras, as in any round (typing rhythm would identify people). Typing can still be read off the fingers in the images, so the round asks for one fixed sentence (the quick brown fox), and its welcome says the desk and the screen are in view. The labels come from the steps: `desk/type` (both hands on the keyboard), `desk/mouse` (one hand on the mouse, the hand that moves more), `desk/switch` (the cues' `typing` and `mouse`), `desk/rest` (resting, then hovering just above the keys after its switch), and the scene's acts (a lit button: the named hand is up and free; the rest after it: back at the desk).
+
+| Bounty | What | Steps |
+|---|---|---|
+| `desk-work` | Hands on the keyboard and the mouse at the person's own desk, and reaching up from them | Typing 20 s; the mouse 20 s; switching on cue (typing, mouse, x3); resting, then hovering above the keys; looking up at a lit window and back down while working; reaching up to tap, poke or stop short, then back, each hand; pinching from the desk without lifting |
+
+## Testing sessions and the test phase
+
+**The test phase** (`takes.TEST_PHASE`, ended 2026-10-14). Since then bounty rounds are recorded under CONSENT.md and go to the public dataset, for training, like the full session and the quick round; only testing (debug) sessions are recorded under `TESTING.md` and go to the test dataset, never for training. While the phase was on, as the bounties were tried out with a few people, their rounds were recorded under a short testing-only consent, `TESTING.md`, instead of CONSENT.md, and went to a separate gated dataset, `DeeJanuz/frametop-hands-test` (`hub.HF_TEST_DATASET`; `FT_HANDREC_TEST_DATASET` overrides it). Nothing in it is used for training or published; moving a recording into the public dataset needs the person's agreement to CONSENT.md. The full session and the quick round stay public. `takes.round_consent_kind(bounty, debug)` says which kind a round uses; the window shows that kind's text on the Welcome page when a round is picked (`setConsentKind`), and gates and labels uploads per session (`uploadAllowedFor`, `datasetFor`). Each kind's text has its own draft gate: TESTING.md's first line says DRAFT until the maintainer approves it.
+
+**Encryption.** A test-phase export is encrypted on the headset to the maintainer's keys in `hands/rec/test-recipients.txt` (age X25519, `recorder/age.py`, as the eye recordings), so people who can see the test dataset can't open each other's recordings. `sets.bin.zst.age` and `live.bin.zst.age` replace the plain files (zstd piped into age while compressing). The manifest says `"consent_kind": "testing"` and `"encryption": {"scheme": "age-v1-x25519", "recipients": [...], "files": [...]}`; what stays readable is the manifest: lengths, lighting, checklist, contributor id. Key 1 is on the maintainer's machine, key 2 offline; both are the only recipients `validate.py` accepts. The manifest's profile holds only the schema, the contributor, that kind's consent record and the optional answers.
+
+**Testing sessions** (`debug.json`, `session.py --debug`, the board's first row "Testing session" when Frametop's hand tracking is installed: `frametop-hands.service` is known to systemd, or `FT_HANDREC_FRAMETOP_HANDS=1`). The person uses Frametop as usual for up to 3 minutes at 30 sets a second while the cameras record, so new versions of the tracker can be replayed on that person's own recording and compared with what the live one did. Frametop's hands and pointer keep running (nothing is paused), and the preflight wants `frametop-hands.service` active.
+
+- One free step: the panel hides while it records. The headset button's press (the window's Mark, M) is a `mark` event, the panel flashing "Marked" for a second; its hold (Finish, F) ends the step early with an `end_early` event, and the session is `done`. Pause and Stop work as usual; Redo and Skip aren't offered.
+- **`live.bin`** (`livelog.py`): every new publish of the live tracker's hands and gestures files (include/fh_hands.h, fh_gestures.h), copied whole under their sequence lock, one file per part. A 16-byte header (`"FHLIVE01"`, u32 version 1, u32 0), then records: u8 source (0 hands, 1 gestures), 3 pad, u32 length, u64 read_ns (CLOCK_MONOTONIC), u64 seq, then the bytes. The files' own `capture_ns` and `publish_ns` are inside. take.json gets `"live": {"hands": n, "gestures": n}`. The tracker publishes only while the headset is in use.
+- **`voice.bin`** (`voicelog.py`), only when the checklist's "Record my voice" is ticked (`"voice": true`; never in a dry run): the default microphone through `pw-record --raw` at 16 kHz mono s16, one file per part, so the person can say what went wrong as it happens. A 16-byte header (`"FHVOIC01"`, u32 version 1, u32 sample rate), then records: u64 read_ns (CLOCK_MONOTONIC, when the chunk was read: its last sample is about then), u32 length, then s16le samples, about 100 ms each. take.json gets `"voice": {"voice.bin": {"seconds", "chunks", "peak", "error"}}`; a peak of 0 is a muted microphone (SteamVR mutes it with the headset off). A microphone that fails is logged and the session goes on. `voicelog.py VOICE.BIN OUT.WAV` makes a WAV with gaps filled and prints its first sample's time, for whisper.cpp on the maintainer's machines: its timestamps plus that time give the moments to flag.
+- session.json `debug`: `{"use": "testing", "max_s", "settings": {HANDS_* and POINTER_* from ~/.config/frametop.conf, paths cut to file names}, "frametop": "<git describe of the running ft-hands' checkout>", "models": {"<file>": "<sha256[:16]>"}, "models_dir"}`.
+- **`events.jsonl`** (`eventlog.py`): what Frametop did with the hands while the part recorded, from ft-screens and the pointer helper (`hands/include/fh_events.h`). While a part records the recorder keeps `events-want` in the run directory; the two append one JSON line per decision to `events.jsonl` there (`t` CLOCK_MONOTONIC ns, `src`, `kind` such as poke, pinch, grab, lazy-susan, click, drag, `outcome` done / refused / missed / passed / lost / end / info, `hand`, `panel`, `text` the log line), and at the part's end the recorder keeps the part's lines and removes the file. take.json gets `"events": {"events.jsonl": {"events", "by": {kind: {outcome: n}}}}`; `eventlog.py EVENTS.JSONL` prints those counts. Targets are overlay names (`frametop.screen.1`), never what a window shows.
+- Export joins the parts into `live.bin.zst.age`, leaving out records read in deleted ranges; the manifest's take entry gets `"live": {"records", "raw_bytes", "file"}`. `validate.py` allows a live file only in a testing session, and requires `debug.use` "testing" and the testing consent. Voice parts join into `voice.bin.zst.age` the same way (a chunk touching a deleted range left out; `"voice": {"chunks", "seconds", "raw_bytes", "file"}`), and only ever encrypted: an export without recipients leaves voice out. Events join into `events.jsonl.zst.age` the same way (`"events": {"events", "by", "raw_bytes", "file"}`), also only encrypted.
+
 ## Review and export (`takes.py`, the window)
 
 - **Review.** Each session lists its takes: title, duration, status, a thumbnail (the first set's `slam_left`). A viewer shows one frame set (all cameras side by side, 8-bit grey) at a time with a slider. It can mark a range and delete it. Deleted ranges go into `take.json`, and export leaves them out; the files keep everything until export. A whole take or session can be deleted (files removed, after a confirmation).
@@ -331,13 +467,19 @@ On 2026-10-02 a whole session showed "I can't see your hands": after the headset
   - `SHA256SUMS`.
 
   Compression runs at nice 19. While it runs with the headset worn, the window notes that VR may stutter a little (exports are done in the headset). Worn is judged the way `frame-job` does: `vrcompositor` runs and a `/sys/class/backlight/*/brightness` reads over 0 (SteamVR turns the panel off 5 s after the headset comes off). CPU work while in VR causes stutter. The proximity sensor is no use here: it read 9-43 with the headset sitting unworn.
+
+  Free space and zstd's pipe (2026-10-15). An export is about three quarters of the recording (2026-10-14's 15 GB sessions made 11 GB exports), so a round that fit can leave too little room for its export. Export refuses to start with less than half the kept recording free, and a disk that fills up as it goes ends it with what's free, about what it needs, and the old export it would replace (that one stays until the new one is done), not with "Broken pipe" (`takes.DiskFull`). zstd's messages go to a temporary file, so a zstd that ends early (a full disk, a signal) leaves its own words as the error (`takes.ZstdStopped`), and one that writes a lot can't stall the export. A testing session's encryption drains zstd a piece at a time when it fails. The window reads hub.py's stderr as it comes for the same reason: read only at the end, retry warnings on a bad network could fill the pipe and stall the upload. `tests/test_export_pipes.py` and `recorder/tests/test_window_pipes.py` cover these.
+
+  Room to export (2026-10-17). A user's middle-taps export kept failing with "Broken pipe" on rc3: the round passed the 16 GB check before recording, then filled the disk while exporting, with earlier rounds still kept. The Frame's five exports measured 0.72 to 0.76 of their recordings. Now a round needs room for its recording and its export before it starts (`ft_handrec.ROUND_BYTES`: 16 GB plus `takes.export_need` of it, about 31 GB), export needs 0.8 of the kept recording plus 2 GB to start (`takes.export_need`), and it stops itself, removing its half, when the disk gets down to 1.5 GB (`takes.check_room`, as the session stops recording at 1.5 GB), so a full home disk never takes SteamVR and Steam down with it. `tests/test_free_space.py` covers these.
+
+  Freeing space (2026-10-17). Nothing is deleted after an upload by itself, and a session's uploads were recorded only in its session.json, so deleting it lost the record. `contributions.json` (`recorder/contributions.py`) now keeps one entry per finished upload: session, bounty, consent kind, dataset, pull request, upload time, export size, and `local_deleted` once its local copy is gone. hub.py adds the entry when an upload finishes, and the window copies in what older recorders recorded only in session.json when it opens. A session is freeable when a finished upload exists and its recordings haven't changed since (an upload without a readable time: when the export there now is the one uploaded); `Store.free_session` writes the log entry first, then deletes the recordings and export, so a log that can't be written deletes nothing. The window offers it per session on Review ("Free up space"), for all of them on Review, on Before you start when there isn't room for a round, on Export after a failed export, and on Upload right after an upload. Review lists "Your uploads" from the log, including the ones deleted here; the board's round counts were already in profile.json, and the testing session's count adds the log's.
 - **Upload.** The Upload page uploads an export from the window, logging in included: no terminal. Below its steps it shows `UPLOAD.md` ("About uploading"), with the export's path, size and contributor id filled in.
   - **`hands/rec/validate.py`** (standard library) checks an export. The window runs it before an upload, and the maintainer runs it on each submission (`validate.py DIR [--json]`, exit status 1 on errors). It checks:
     - `SHA256SUMS`: every file listed and matching.
     - An allow-list: `manifest.json`, `calibration.json`, `device.json` and `SHA256SUMS` at the top, and `prompts.jsonl`, `poses.jsonl`, `take.json` and `sets.bin.zst` in `takes/<NN>-<section>/`. Anything else is an error, and so is a symlink.
     - The manifest's schema, keys and types, and that it matches the files.
     - The consent version is present and the contributor confirmed being an adult. The contributor id is a uuid4.
-    - `calibration.json` has nothing that `session.py`'s `strip_calibration` would still remove.
+    - `calibration.json` has nothing that `recorder/privacy.py`'s `strip_calibration` would still remove.
     - `device.json` holds only `cv.cad_from_cal` and `head`, each `plus_x`, `plus_z` and `position` as 3 numbers (plus `cad_from_cal`'s `method`). Without it: a warning.
     - Each `sets.bin.zst` decompresses to its end, so a truncated one fails, and every set's FHSET01 header is sane: camera names, sizes, record length. Set counts and raw bytes match the manifest. Pixels aren't decoded.
     - Every jsonl line parses.
@@ -353,7 +495,7 @@ On 2026-10-02 a whole session showed "I can't see your hands": after the headset
     An upload goes through these steps: An upload goes through these steps:
     1. Validate, and stop on errors.
     2. Stop if the same export was uploaded before (same `SHA256SUMS`), unless asked again.
-    3. Stop while the texts are drafts, unless `FT_HANDREC_ALLOW_UPLOAD=1`.
+    3. Stop while the texts are drafts or missing, unless `FT_HANDREC_ALLOW_UPLOAD=1` and `FT_HANDREC_DATASET` names a test dataset.
     4. `whoami`: a read-only token is refused.
     5. `auth_check` on the dataset: a gated dataset whose terms aren't accepted gives "accept the dataset's terms first", with the link.
     6. Open the pull request first: `create_pull_request(HF_DATASET, title, description=...)`, an empty draft. Its link goes to the window right away (`{"phase": "opened", "pr_url"}`), which tells the person to plug the headset in and leave it. Record `{"repo", "pr_url", "pr_num", "started", "export_sha", "status": "started"}` in `uploads` in `session.json`. A retry of the same export goes on in that pull request while it's draft or open.
@@ -366,10 +508,12 @@ On 2026-10-02 a whole session showed "I can't see your hands": after the headset
     2. Log in to Hugging Face. The page shows whether someone is logged in (`whoami`). Log in runs `hub.py login`, opens the link in the browser, and shows the code large, with Copy code and Cancel. "Use another account" logs in again. A classic read-only token counts as not logged in.
     3. Upload, with a note to accept the dataset's terms the first time.
 
-    Upload has Cancel, the phase with a progress bar (a share while the export is checked, a sweep while it's sent, as `huggingface_hub` reports no progress), the pull request's link once it's open, with "plug in the headset and leave it plugged in until this says Uploaded", and Uploaded at the end. If this export was uploaded before, the page says so, and uploading it again asks first. A stale export can't be uploaded.
+    Upload has Cancel, the phase with a progress bar (a share while the export is checked, a sweep while it's sent, as `huggingface_hub` reports no progress), the pull request's link once it's open, with "plug in the headset and leave it plugged in until this says Uploaded", and Uploaded at the end. If this export was uploaded before, the page says so, and uploading it again asks first. A stale export can't be uploaded. An export and an upload of different sessions run together (2026-10-17: Upload used to wait for any export); a session's own export and upload wait for each other, since an export replaces its old one when it ends. One export and one upload at a time. `tests/test_upload_during_export.py` covers it.
+
+    Exports queue (2026-10-17, "so they don't have to keep coming back to the headset"): Export, or Export and upload, while another export runs puts it in a queue on the Export page, run in order. Export and upload (logged in, and the dataset takes contributions) uploads it by itself once its export is done: uploads wait their turn too, one at a time, and an export uploaded before (the same SHA256SUMS) isn't sent again. Each waiting export has a "then upload" box and Remove; Cancel stops only the running export (and its upload), and the next one starts. A failed export or upload doesn't hold up the rest. The page's Done list says how each went, with the pull request's link, for whoever comes back to the headset. The queue lives in the window: closing it asks, then cancels them all. A session waiting to export or upload can't be deleted, nor its export. The awake unit's workers now bring it to the reasons current when they run, so an export's end and its upload's start can't leave it stopped (`recorder/tests/test_stay_awake.py`). `tests/test_export_queue.py` covers the queue.
   - **Staying awake:** while an export or an upload runs, the window holds a host unit, `frametop-handrec-awake.service`, running `systemd-inhibit --what=sleep:idle --mode=block ... sleep infinity`, and stops it when the last of them ends (or on quit). It's meant to keep Steam from putting the Frame to sleep with the headset off; whether Steam's sleep honours a logind block inhibitor is still to be checked on the device. Exports and uploads are done in the headset: the export page only notes that VR may stutter a little while it compresses.
-  - **While the texts are drafts**, Upload stays off unless `FT_HANDREC_ALLOW_UPLOAD=1`, so the maintainer can rehearse against a private test repo. `FT_HANDREC_DATASET` overrides `HF_DATASET`. `ft-handrec --hub-dry-run` makes Upload a dry run: no network, so it isn't held back by the drafts.
-  - **Rehearsal: `hands/rec/rehearse.sh [--repo ID]`** runs it all without the headset, in the dev container, in one `frame-job --local` scope when frame-job is installed. `ft-ringplay` plays 30 s of a recording into a ring in `/run/user/UID`. A tracking ft-hands that's already running is used, or one is started on that ring. `ft-handpanel --no-vr` stands in for the panel. `session.py --no-start --next-after 0.3` records a three-section test script (a prompt, a two-cue sweep, no hands) in step mode, three parts of 6 s (countdown and hold), about 360 MB once exported. Then `takes.py` exports, `validate.py` checks, and `hub.py` uploads: a dry run by default, or for real to `--repo ID` with `FT_HANDREC_ALLOW_UPLOAD=1`. It prints a summary, deletes its temporary folders (camera images of a room) and stops everything it started, Ctrl+C included. The `--no-vr` panel logs no poses, so `poses.jsonl` is missing there (a warning).
+  - **While the texts are drafts**, Upload stays off unless `FT_HANDREC_ALLOW_UPLOAD=1` and `FT_HANDREC_DATASET` names another dataset, so the maintainer can rehearse against a private test repo. `FT_HANDREC_DATASET` overrides `HF_DATASET`; the variable alone never opens the real dataset, as with the Eye Recorder. A missing text counts as a draft. `ft-handrec --hub-dry-run` makes Upload a dry run: no network, so it isn't held back by the drafts.
+  - **Rehearsal: `hands/rec/rehearse.sh [--repo ID]`** runs it all without the headset, in the dev container, in one `frame-job --local` scope when frame-job is installed. `ft-ringplay` plays 30 s of a recording into a ring in `/run/user/UID`. A tracking ft-hands that's already running is used, or one is started on that ring. `ft-handpanel --no-vr` stands in for the panel. `session.py --no-start --next-after 0.3` records a three-section test script (a prompt, a two-cue sweep, no hands) in step mode, three parts of 6 s (countdown and hold), about 360 MB once exported. Then `takes.py` exports, `validate.py` checks, and `hub.py` uploads: a dry run by default, or for real to a test dataset `--repo ID` with `FT_HANDREC_ALLOW_UPLOAD=1`. It prints a summary, deletes its temporary folders (camera images of a room) and stops everything it started, Ctrl+C included. The `--no-vr` panel logs no poses, so `poses.jsonl` is missing there (a warning).
 
 ## Licensing and consent (texts in `CONSENT.md`)
 
@@ -379,3 +523,4 @@ On 2026-10-02 a whole session showed "I can't see your hands": after the headset
 - The text explains what's recorded and that nothing uploads automatically, how review works, how to withdraw (by contributor id), and that a withdrawal is purged from the repo's history.
 - The texts need a legal review before the dataset launches. Until then they carry a "draft" banner, and the Upload page says contributions aren't open yet.
 - The dataset repo: `HF_DATASET` in `hub.py`, `DeeJanuz/frametop-hands` (private until launch).
+- Testing sessions have their own short text, `TESTING.md`: testing only, no training, nothing published, encrypted, deleted when no longer needed for testing or on request (above, "Testing sessions and the test phase").

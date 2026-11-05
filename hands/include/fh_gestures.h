@@ -27,7 +27,15 @@
  * room with the HMD pose at its capture time (capture_ns, begin_ns) before subtracting,
  * so turning your head doesn't drag.
  *
- * Version 1 had only the pinches (192 bytes); version 2 adds the grips after them.
+ *   Middle pinch (version 3): the thumb on the middle fingertip instead of the index one, with
+ * the pinch's thresholds and point. distance is thumb tip to middle tip. It begins only while
+ * the thumb is clearly nearer the middle tip than the index tip, and an index pinch and a middle
+ * pinch on one hand exclude each other (whichever began first holds until it ends). The pointer
+ * helper's hand ray turns it into a right click (a tap) or scrolling (held and moved).
+ *
+ * Version 1 had only the pinches (192 bytes); version 2 adds the grips after them, version 3
+ * the middle pinches after those. A reader of an older version maps and copies the size it
+ * knows: the file only grows at the end.
  */
 
 #pragma once
@@ -36,7 +44,7 @@
 #include <stdint.h>
 
 #define FH_GESTURES_MAGIC   "FHGEST01"
-#define FH_GESTURES_VERSION 2
+#define FH_GESTURES_VERSION 3
 
 enum {
     FH_PINCH_TRACKED = 1u << 0, /* the hand was tracked in this frame              */
@@ -75,7 +83,8 @@ typedef struct {
     uint8_t           reserved[8];
     fh_pinch_t        pinch[2];     /* [0] left hand, [1] right hand                    */
     fh_pinch_t        grip[2];      /* version 2                                        */
+    fh_pinch_t        pinch2[2];    /* version 3: thumb to middle fingertip             */
 } fh_gestures_t;
 
 static_assert(sizeof(fh_pinch_t) == 64, "fh_pinch_t layout");
-static_assert(sizeof(fh_gestures_t) == 64 + 4 * 64, "fh_gestures_t layout");
+static_assert(sizeof(fh_gestures_t) == 64 + 6 * 64, "fh_gestures_t layout");

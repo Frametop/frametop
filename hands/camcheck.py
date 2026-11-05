@@ -38,6 +38,11 @@ import struct
 import sys
 import time
 
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO not in sys.path:   # (it runs on its own too; appended, so it shadows nothing its importers find)
+    sys.path.append(_REPO)
+from recorder import fhformat  # noqa: E402  (ft-camd's ring layout, checked against fhring.h)
+
 LOG_DIR = os.path.expanduser("~/.local/share/Steam/logs")
 LOG_LINK = os.path.join(LOG_DIR, "xrservice.txt")
 SIDE_NODES = (9, 13)     # the side pair: slam_right on video9, slam_left on video13 (see camera_map)
@@ -331,34 +336,33 @@ def read_log(path):
 
 
 # ------------------------------------------------------------------------------------------
-# ft-camd's ring (camd/fhring.h; the header only, as session.py's Ring reads it)
+# ft-camd's ring (camd/fhring.h, in recorder/fhformat.py; the header only)
 
-RING_HDR = struct.Struct("<8sIIIIQqQ16x")
-RING_CAM = struct.Struct("<32s32siIIIIIQQQQQIf24x")
-FH_CAM_DARK, FH_CAM_COLOR = 1, 2
+RING_HDR, RING_CAM = fhformat.RING_HDR, fhformat.RING_CAM
+FH_CAM_DARK, FH_CAM_COLOR = fhformat.CAM_DARK, fhformat.CAM_COLOR
 
 
 def default_ring():
-    return "/run/user/%d/frametop-hands/cam-ring" % os.getuid()
+    return fhformat.ring_path()
 
 
 def read_ring(path):
     """{"alive", "writer_pid", "mono": [{"name", "sensor", "node"}]} or None (no ring)."""
     try:
         with open(path, "rb") as f:
-            data = f.read(RING_HDR.size + 8 * RING_CAM.size)
+            data = f.read(fhformat.ring_cam_offset(fhformat.RING_MAX_CAMS))
     except OSError:
         return None
     if len(data) < RING_HDR.size:
         return None
     magic, version, _, ncams, _, _, writer, _ = RING_HDR.unpack_from(data, 0)
-    if magic != b"FHRING01" or version != 1:
+    if magic != fhformat.RING_MAGIC or version != fhformat.RING_VERSION:
         return None
-    hb = struct.unpack_from("<Q", data, 40)[0]
+    hb = struct.unpack_from("<Q", data, fhformat.RING_HEARTBEAT_OFF)[0]
     alive = hb != 0 and (time.clock_gettime_ns(time.CLOCK_MONOTONIC) - hb) / 1e9 < 2.0
     mono = []
-    for i in range(min(ncams, 8)):
-        off = RING_HDR.size + i * RING_CAM.size
+    for i in range(min(ncams, fhformat.RING_MAX_CAMS)):
+        off = fhformat.ring_cam_offset(i)
         if off + RING_CAM.size > len(data):
             break
         f = RING_CAM.unpack_from(data, off)
@@ -430,12 +434,23 @@ def check(log=None, proc=True, ring=True, ring_path=None):
             names = " ".join(c["name"] for c in r["mono"]) or "none"
             evidence.append("ft-camd (pid %d, %s): %d mono cameras: %s" % (
                 r["writer_pid"], "running" if r["alive"] else "stale ring", len(r["mono"]), names))
+            have = {c["node"] for c in r["mono"]}
+            want = state.tracking_nodes() if state else SIDE_NODES + UPPER_NODES
+            missing = [n for n in want if n not in have]
             if r["alive"] and len(r["mono"]) < TRACKING and status == "ok":
-                have = {c["node"] for c in r["mono"]}
-                want = state.tracking_nodes() if state else SIDE_NODES + UPPER_NODES
-                out["ring_missing"] = [n for n in want if n not in have]
+                out["ring_missing"] = missing
                 status, reason = "degraded", ("ft-camd publishes only %d of %d mono cameras, missing %s" % (
-                    len(r["mono"]), TRACKING, " ".join("video%d" % n for n in out["ring_missing"]) or "?"))
+                    len(r["mono"]), TRACKING, " ".join("video%d" % n for n in missing) or "?"))
+            elif r["alive"] and missing and status == "ok":
+                # XRService moved the cameras after ft-camd started (the colour module was
+                # unplugged or plugged in: the side pair goes between video9/13 and video0/3).
+                # ft-camd keeps publishing the old devices, and ft-hands leaves them out.
+                out["ring_missing"] = missing
+                old = sorted(have - set(want))
+                status, reason = "degraded", ("ft-camd publishes %s, but XRService runs those cameras on %s now "
+                                              "(it moved them after ft-camd started)" % (
+                                                  " ".join("video%d" % n for n in old) or "?",
+                                                  " ".join("video%d" % n for n in missing)))
     out.update(status=status, reason=reason, evidence=evidence,
                summary="ok" if status == "ok" else "%s: %s" % (status, reason))
     return out

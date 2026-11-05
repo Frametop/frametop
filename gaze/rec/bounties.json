@@ -1,0 +1,13 @@
+{"schema": 1, "updated": "2026-10-14",
+ "bounties": [
+  {"id": "edges", "title": "View edges", "blurb": "Dots far out to the sides and corners: eyes turned as far as they go.", "minutes": 5, "priority": "high", "script": "edges"},
+  {"id": "blinks", "title": "Blinks and lids", "blurb": "Blinks, winks, squints and half-closed eyes.", "minutes": 5, "priority": "high", "script": "blinks"},
+  {"id": "slips", "title": "Headset slips", "blurb": "Nudge the headset on your face, take it off and on: dots after each.", "minutes": 6, "priority": "high", "script": "slips"},
+  {"id": "glasses", "title": "Glasses", "blurb": "The grid and the edges with glasses or inserts on.", "minutes": 5, "priority": "high", "script": "glasses", "needs": {"glasses": true}},
+  {"id": "jumps", "title": "Jumps and pursuit", "blurb": "A jumping dot, then one gliding on circles, lines and a figure eight.", "minutes": 5, "priority": "normal", "script": "jumps"},
+  {"id": "depth", "title": "Depth", "blurb": "Dots near, mid and far.", "minutes": 4, "priority": "normal", "script": "depth"},
+  {"id": "light", "title": "Light changes", "blurb": "Dark to bright and back: pupils changing size.", "minutes": 5, "priority": "normal", "script": "light"},
+  {"id": "face", "title": "Face moves", "blurb": "Smile, frown, yawn, talk and chew while looking at a dot.", "minutes": 4, "priority": "normal", "script": "face"},
+  {"id": "head", "title": "Head turning", "blurb": "A dot fixed in the room while you turn your head.", "minutes": 4, "priority": "normal", "script": "head"},
+  {"id": "reading", "title": "Reading", "blurb": "Read a few paragraphs and look around freely.", "minutes": 4, "priority": "low", "script": "reading"}
+ ]}

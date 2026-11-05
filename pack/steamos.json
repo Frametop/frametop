@@ -16,6 +16,14 @@
       "steamvr": "2.18.2",
       "frametop": "0.2.2",
       "date": "2026-10-09"
+    },
+    {
+      "build": "20261007.6125817",
+      "version": "0.4.5",
+      "branch": "stable",
+      "steamvr": "2.18.2",
+      "frametop": "0.3.0",
+      "date": "2026-11-04"
     }
   ],
   "broken": []

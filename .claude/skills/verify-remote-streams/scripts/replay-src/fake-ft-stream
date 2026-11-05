@@ -1,0 +1,6 @@
+#!/bin/bash
+# Stands in for ft-stream: logs its start, and on SIGTERM takes 1 s to go (its Disconnect Monitor).
+log=@WORK@/rs-events.log
+echo "$(date +%s.%N) start pid=$$ $*" >> $log
+trap 'echo "$(date +%s.%N) term pid=$$ (releasing its Remote Monitor)" >> $log; sleep 1; echo "$(date +%s.%N) exit pid=$$" >> $log; exit 0' TERM
+while :; do sleep 0.05; done

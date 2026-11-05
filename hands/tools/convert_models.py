@@ -52,7 +52,7 @@ def patch(param_text, pnnx_param_text):
         f = line.split()
         if f[0] == 'Input':
             continue
-        nin, nout = int(f[2]), int(f[3])
+        nin = int(f[2])
         ins = ['in0' if b == blob else b for b in f[4:4 + nin]]
         body[i] = ' '.join(f[:4] + ins + f[4 + nin:])
     return '\n'.join(['7767517', '%d %d' % (nlayers - 1, nblobs - 1)] + body) + '\n'

@@ -1,0 +1,49 @@
+# The Fedora packages of Frametop's two build containers, in one list: the "dev" container on
+# the Frame (setup/dev-container.sh) and the release image (pack/Containerfile). Both start
+# from the same digest-pinned fedora-toolbox:44. Each line is "WHERE: packages  # why", WHERE
+# being both, dev (development and tests only) or image (the image only: Python packages the
+# dev container has from Fedora come from uv.lock there, and the Qt image formats and PDF
+# module the image's PySide6 export needs). pack/test/pins-test.py reads it as they do.
+
+# toolchains (dev: also clang, meson and Rust, for local experiments)
+both: gcc gcc-c++ cmake ninja-build make pkgconf-pkg-config git
+dev: clang clang-devel meson cargo rust
+dev: ShellCheck  # test-bash checks the installers' shared helper (scripts/install-lib.sh) with it
+image: curl unzip just
+# libraries for Frametop's native pieces
+both: pipewire-devel libxkbcommon-devel libinput-devel systemd-devel dbus-devel libdrm-devel
+both: mesa-libgbm-devel wayland-devel vulkan-loader-devel vulkan-headers plasma-wayland-protocols wlroots-devel
+image: pixman-devel
+# ft_pointer SteamVR driver: static C++ runtime (the host has an older glibc)
+both: libstdc++-static
+# hand tracking: ft-hands reads the calibration with jsoncpp; ft-camd runs on the host, linked
+# statically. Its Python tools (hands/tools) need NumPy and OpenCV, which come from uv.lock in
+# the image and aren't here otherwise: Fedora's python3-opencv pulls in over a gigabyte
+both: jsoncpp-devel glibc-static
+# hand recorder (hands/rec): its export compresses recordings with zstd; its Upload page and
+# hub.py upload to Hugging Face with huggingface_hub (the image has it from uv.lock)
+both: zstd
+dev: python3-huggingface-hub
+# eye recorder (gaze/rec): its export encrypts to the dataset's keys with age (recorder/age.py),
+# on Python's cryptography (the image has it from uv.lock)
+dev: python3-cryptography
+# Frametop Input Settings app (Kirigami, PySide6). The image installs PySide6 in its builder
+# stage only and exports the bindings Frametop uses (pack/pyside-runtime.py)
+both: kf6-kirigami kf6-qqc2-desktop-style qt6-qtwayland breeze-icon-theme plasma-breeze
+dev: python3-pyside6
+image: python3-shiboken6 qt6-qtsvg qt6-qtimageformats qt6-qtpdf
+both: google-noto-sans-vf-fonts  # the visible reset countdown uses the installed Noto Sans font
+# Frametop remote desktop (VNC bridge through krdp)
+both: krdp freerdp tigervnc-x11-server xrandr
+# Frametop Voice (voice/): glslc and the SPIR-V headers for whisper.cpp's Vulkan backend;
+# ft-voiced records with pw-record and plays its sounds with pw-play
+both: glslc spirv-headers-devel pipewire-utils
+# Frametop's keyboard (keyboard/, TaiKeid's Full Keyboard): Cairo and Pango draw it, SDL2 for its
+# preview, and its input methods: Hangul, Pinyin (pyzy), Japanese (Anthy, loaded at run time).
+both: cairo-devel pango-devel json-c-devel sdl2-compat-devel libhangul-devel pyzy-devel anthy-unicode-devel
+dev: libX11-devel  # its test probes (FULL_KEYBOARD_TESTS=1 keyboard/build.sh)
+# remote displays (stream/): moonlight-common-c and moonlight-embedded's libgamestream,
+# and the host's sound (Opus, played through PipeWire's PulseAudio server)
+both: openssl-devel libcurl-devel expat-devel libuuid-devel json-devel opus-devel pulseaudio-libs-devel
+# diagnostics and remote UI testing
+dev: wayland-utils xorg-x11-server-Xvfb ImageMagick xdotool

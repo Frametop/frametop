@@ -1,0 +1,19 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop autostart: starts the desktop with SteamVR when AUTOSTART=1 (Frametop Display Settings > Power)
+Documentation=file://@REPO@/docs/reference.md
+# Wanted by SteamVR, which the Frame starts at boot, so this covers boot too. The desktop
+# quits when SteamVR does, and a SteamVR restart runs this again.
+After=steamvr.service frametop-input-relay.service
+PartOf=steamvr.service
+Requisite=steamvr.service
+
+[Service]
+Type=oneshot
+# It reads AUTOSTART each time, so the switch in Display Settings needs no enable or disable.
+ExecStart=@REPO@/session/autostart.sh
+# Waiting for SteamVR (up to 3 minutes), then desktops.sh start (about 15 s).
+TimeoutStartSec=240
+
+[Install]
+WantedBy=steamvr.service

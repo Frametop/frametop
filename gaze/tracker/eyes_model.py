@@ -19,10 +19,17 @@ jump (the headset nudged or put back on), until clicks catch up. On practice2 wi
 practice1's calibration: 1.2 degrees median, against 2.7 with the glints alone (findings.md).
 """
 import json
+import os
+import re
+import sys
 import time
 from collections import deque
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "conf"))
+import ft_store  # noqa: E402  (JSON files written safely; standard library only)
 
 SLIP_WINDOW = 30.0
 SLIP_MIN = 10        # pair sightings needed before trusting a slip estimate
@@ -75,13 +82,26 @@ def pair_mid(pair):
     return ((pair[0][0] + pair[1][0]) / 2, (pair[0][1] + pair[1][1]) / 2)
 
 
+def eye_of(click, eye):
+    """A click's features for one eye, or None: `eye` is a list by eye (the lab tools) or a dict
+    of the eyes seen (ft-eyes' calibration dots, which may hold one)."""
+    e = click["eye"]
+    return e.get(eye) if isinstance(e, dict) else e[eye]
+
+
 class Calibration:
     """The three fits per eye. Build from clicks (ft-eyes-score's features) or load from JSON.
 
     `spread` is each eye's RMS miss (degrees) on the clicks its pupil fit was made from.
     `combine` weights the eyes by its inverse square: on practice2 (one headset position,
     leave-one-out) that gave 0.75 median against 0.84 for the plain average, since one eye
-    is usually much better than the other (left 0.73, right 1.32 there)."""
+    is usually much better than the other (left 0.73, right 1.32 there).
+
+    Each eye is fitted on the clicks it was seen in, so a click may hold one eye only, and an
+    eye seen in under MIN_CLICKS is left out (the calibration then maps the other alone). A
+    second person's eyes (2026-10-17 rounds) each lost the pupil looking 20 degrees outward:
+    with only the clicks that saw both, each eye's fit had none out there and guessed (frame
+    errors 8.1 degrees median, 84 p90, held-out takes); each on its own clicks, 2.3 and 5.0."""
 
     def __init__(self, fits=None, info=None, spread=None):
         self.fits = fits or {}   # (name, eye) -> Quad
@@ -93,20 +113,25 @@ class Calibration:
         truth = lambda cs: np.array([k["truth"] for k in cs])  # noqa: E731
         fits, spread = {}, {}
         for c in (0, 1):
-            cs = [k for k in clicks if k["eye"][c] is not None]
+            cs = [k for k in clicks if eye_of(k, c) is not None]
             if len(cs) < MIN_CLICKS:
                 continue
-            fits["pupil", c] = Quad([k["eye"][c]["pupil"] for k in cs], truth(cs))
-            miss = fits["pupil", c]([k["eye"][c]["pupil"] for k in cs]) - truth(cs)
+            pupils = [eye_of(k, c)["pupil"] for k in cs]
+            fits["pupil", c] = Quad(pupils, truth(cs))
+            miss = fits["pupil", c](pupils) - truth(cs)
             spread[c] = float(np.sqrt(np.mean(np.sum(miss ** 2, axis=1))))
-            fits["where", c] = Quad(truth(cs), [k["eye"][c]["pupil"] for k in cs])
-            gs = [k for k in cs if k["eye"][c]["mid"] is not None]
+            fits["where", c] = Quad(truth(cs), pupils)
+            gs = [k for k in cs if eye_of(k, c)["mid"] is not None]
             if len(gs) >= MIN_CLICKS:
-                fits["glint", c] = Quad([k["eye"][c]["pupil"] - k["eye"][c]["mid"] for k in gs], truth(gs))
+                fits["glint", c] = Quad([eye_of(k, c)["pupil"] - eye_of(k, c)["mid"] for k in gs], truth(gs))
         return cls(fits, info, spread)
 
     def has(self, name, eye):
         return (name, eye) in self.fits
+
+    def eyes(self):
+        """The eyes it maps (0 right, 1 left)."""
+        return [c for c in (0, 1) if self.has("pupil", c)]
 
     def slip(self, eye, rows):
         """Median slip in pixels from pair sightings `rows` (t, px, py, mx, my), or None."""
@@ -140,16 +165,32 @@ class Calibration:
     def save(self, path):
         d = {"version": 1, "info": self.info, "spread": {str(e): s for e, s in self.spread.items()},
              "fits": [{"name": n, "eye": e, **q.to_json()} for (n, e), q in self.fits.items()]}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(d, indent=1))
-        tmp.replace(path)
+        ft_store.write_json(path, d, indent=1, newline=False)   # temp file of its own, fsync, rename
 
     @classmethod
     def load(cls, path):
         d = json.loads(path.read_text())
         return cls({(f["name"], f["eye"]): Quad.from_json(f) for f in d["fits"]}, d.get("info"),
                    {int(e): s for e, s in d.get("spread", {}).items()})
+
+
+BACKUP = re.compile(r"calibration-\d{8}-\d{6}\.json\Z")   # not calibration-dots.jsonl
+KEEP_BACKUPS = 10
+
+
+def prune_backups(folder, keep=KEEP_BACKUPS):
+    """Remove all but the newest `keep` earlier calibrations (calibration-YYYYmmdd-HHMMSS.json,
+    which ft-eyes keeps on each new one) from folder. Nothing else there is touched. The names
+    removed."""
+    names = sorted(n for n in os.listdir(folder) if BACKUP.match(n))
+    gone = []
+    for n in names[:max(0, len(names) - keep)]:
+        try:
+            os.unlink(os.path.join(folder, n))
+            gone.append(n)
+        except OSError:
+            pass
+    return gone
 
 
 class Shift:

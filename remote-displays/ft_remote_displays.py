@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Frametop Remote Displays: other computers' monitors as Frametop screens, streamed with
-Moonlight's protocol from Vibepollo (docs/remote-displays.md).
+Moonlight's protocol from Vibepollo, or from Sunshine on a Mac (docs/remote-displays.md).
 
 A Kirigami (QML) app with a Python backend, like Frametop Display Settings. It runs in
 the dev container:
@@ -11,6 +11,10 @@ the dev container:
     by you, and forgets the password. The Web UI's certificate is self-signed, so the one seen
     then is pinned (ADDRESS.pin, its public key's SHA-256): ft-stream and later sign-ins
     refuse another. Whether each host answers on its Web UI port is checked now and then.
+    Plain Sunshine (a Mac: host/macos runs one instance per display, each on its own port) has
+    no tokens: the login is kept in memory only until the displays picked right after signing
+    in are paired with it (ft-layout remote add --login), then forgotten. Adding more later
+    signs in again.
   - Displays: a host's existing monitor, or a virtual one at any size, each its own stream
     (ft-layout remote add pairs a client for it). Each one connects and disconnects on its
     own, or all of a host's at once; a disconnected one keeps its place and settings.
@@ -25,13 +29,13 @@ host; the streams' state comes from ft-screens (@ft_screens: "remotes", "remote 
 Launch with remote-displays/ft-remote-displays (host wrapper).
 """
 import base64
+import concurrent.futures
 import hashlib
+import html
 import http.client
 import json
 import os
 import re
-import shutil
-import socket
 import ssl
 import subprocess
 import sys
@@ -48,32 +52,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
 sys.path.insert(0, LAYOUT_DIR)
 import ft_layout  # noqa: E402
+import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
+from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 FT_SCREENS = "\0ft_screens"
 TOKEN_DIR = os.path.expanduser("~/.local/share/frametop-stream/hosts")  # each host's API token (ft-stream)
 WEB_UI_PORT = 47990  # Vibepollo's Web UI, where ft-stream pairs and lists monitors
+# A Mac's Sunshine instances, one per display (host/macos): HTTP ports 47989 + 100*N.
+SUNSHINE_PORTS = [47989 + 100 * k for k in range(8)]
 STREAM_RATES = [30, 60, 72, 90, 120]
 # What Frametop's API token may do: pair its displays' clients (submit their PINs), list the
 # clients and set their permissions, and list the host's monitors.
 SCOPES = [{"path": "/api/pin", "methods": ["POST"]}, {"path": "/api/clients/list", "methods": ["GET"]},
           {"path": "/api/clients/update", "methods": ["POST"]}, {"path": "/api/display-devices", "methods": ["GET"]}]
-NAME_RE = r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}"
-RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2560, 1080, "ultrawide"),
-               (3440, 1440, "ultrawide"), (5120, 1440, "super ultrawide"), (1920, 1200, "16:10"),
-               (2560, 1600, "16:10"), (1080, 1920, "portrait"), (1440, 2560, "portrait")]
-
-
-def host_command(*cmd):
-    """argv to run a command on the SteamOS host (we live in the dev container).
-
-    distrobox-host-exec reaches the host through the user's real session bus; inside the
-    desktop our DBUS_SESSION_BUS_ADDRESS is the nested session's private one, where it
-    fails (exit 127, silently)."""
-    if not shutil.which("distrobox-host-exec"):
-        return list(cmd)
-    bus = f"unix:path=/run/user/{os.getuid()}/bus"
-    return ["env", f"DBUS_SESSION_BUS_ADDRESS={bus}", "distrobox-host-exec"] + list(cmd)
+# A host's name: a Mac's is often "Name's MacBook" (straight or curly apostrophe). It goes to
+# ft-layout as an argument and into the layout and panel labels, never through a shell.
+NAME_RE = r"[A-Za-z0-9][A-Za-z0-9 ._'’-]{0,39}"
+RESOLUTIONS = ft_layout.SCREEN_RESOLUTIONS
 
 
 def token_path(address):
@@ -109,7 +105,9 @@ def parse_avahi(text):
         f = line.split(";")
         if len(f) < 9 or f[0] != "=" or f[2] != "IPv4" or f[1].startswith("tailscale"):
             continue
-        name = unescape(f[3])
+        # A Mac's Sunshine instances all announce its name; mDNS numbers the ones after the
+        # first ("Mac (2)"). They're one computer.
+        name = re.sub(r" \(\d+\)$", "", unescape(f[3]))
         h = found.setdefault(name, {"name": name, "address": "", "dongle": ""})
         key = "dongle" if f[1] == "wlanap" else "address"
         h[key] = h[key] or f[7]
@@ -129,20 +127,23 @@ class Backend(QObject):
     dongleFound = Signal(str, str, str)  # a host's name, its dongle's address ("" none), what happened
     hostsFound = Signal("QVariantList")  # computers on the network: [{name, address, dongle, added}]
     signedIn = Signal(str, bool, str)  # a host's name, whether it worked, what went wrong
-    _signInDone = Signal(str, str, str, str, str, str)  # name, address, dongle, token, pin, error
+    _signInDone = Signal(str, str, str, str, str, str, str)  # name, address, dongle, token, pin, kind, error
     _reached = Signal(str, bool)  # a host's address, whether its Web UI answered
+    _ipcDone = Signal(object, object)  # a callback and its answer, from the ftipc worker
 
     def __init__(self):
         super().__init__()
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self._sock.bind("")  # an abstract address ft-screens can reply to
-        self._sock.settimeout(1.0)
+        # ft-screens is asked on a thread of its own, never the UI's
+        self._ipcDone.connect(lambda then, answer: then(answer), Qt.QueuedConnection)
+        self._ipc = ftipc.Worker(self._ipcDone.emit)
+        self._polling = False
         self._running = False
         self._states = {}   # remote screen number -> its stream's state ("lost can't connect")
         self._online = {}   # host address -> True/False (None: not checked yet)
-        self._queue = []    # ft-layout runs waiting their turn: (label, args)
+        self._queue = []    # ft-layout runs waiting their turn: (label, args, stdin)
         self._proc = None
         self._busy = ""
+        self._logins = {}   # Sunshine host address -> "USER\nPASSWORD\n", until its displays are paired
         self._reached.connect(self._host_reached, Qt.QueuedConnection)
         self._signInDone.connect(self._sign_in_done, Qt.QueuedConnection)
         self.poll = QTimer(interval=2000, timeout=self._check)
@@ -153,42 +154,47 @@ class Backend(QObject):
         self._ping_hosts()
 
     # --- state ---
-    def _ask(self, text):
-        """Request/reply to ft-screens; None if it isn't running."""
-        try:
-            self._sock.sendto(text.encode(), FT_SCREENS)
-            return self._sock.recv(4096).decode()
-        except OSError:
-            return None
+    def _ask(self, text, then=None):
+        """A question to ft-screens, on the worker; then(answer, or None if it isn't running)."""
+        self._ipc.ask(FT_SCREENS, text, then)
 
     def _check(self):
+        """Reads the streams' states on the worker; _checked gets them here (one read at a time)."""
+        if not self._polling:
+            self._polling = True
+            self._ipc.run(self._read_states, then=self._checked)
+
+    @staticmethod
+    def _read_states(client):
+        """On the worker's thread: (whether the desktop runs, {remote screen: state})."""
         running = os.path.exists(f"/run/user/{os.getuid()}/frametop/wayland-0")
         states = {}
-        reply = self._ask("remotes") if running else None
+        reply = client.ask(FT_SCREENS, "remotes") if running else None
         if reply and reply.startswith("ok"):
             for e in reply.split()[2:]:
                 n, state = int(e.split(":")[0]), e.split(":")[2]
                 if state in ("lost", "live"):  # why ("lost can't connect"), or which way ("live via dongle")
-                    info = self._ask(f"remote {n} info") or ""
+                    info = client.ask(FT_SCREENS, f"remote {n} info") or ""
                     state = info[3:].strip() if info.startswith("ok ") else state
                 states[n] = state
+        return running, states
+
+    def _checked(self, result):
+        self._polling = False
+        if result is None:
+            return
+        running, states = result
         if running != self._running or states != self._states:
             self._running, self._states = running, states
             self.changed.emit()
 
     def _ping_hosts(self):
         for h in ft_layout.load_layout().get("hosts", []):
-            address = h.get("address", "")
-            if address:
-                threading.Thread(target=self._ping, args=(address,), daemon=True).start()
+            if h.get("address"):
+                threading.Thread(target=self._ping, args=(h,), daemon=True).start()
 
-    def _ping(self, address):
-        try:
-            with socket.create_connection((address, WEB_UI_PORT), timeout=2):
-                ok = True
-        except OSError:
-            ok = False
-        self._reached.emit(address, ok)
+    def _ping(self, host):
+        self._reached.emit(host["address"], ft_layout.host_answers(host, timeout=2))
 
     def _host_reached(self, address, ok):
         if self._online.get(address) != ok:
@@ -229,14 +235,19 @@ class Backend(QObject):
                 else:
                     state = self._states.get(n, "not running")
                 displays.append({"id": d["id"], "number": n, "label": d.get("label") or d["id"], "app": d["app"],
+                                 "key": f"{d['app']}@{d['port']}" if d.get("port") else d["app"],
                                  "virtual": d["app"] == "monitor", "width": int(w), "height": int(hh),
                                  "fps": int(d.get("fps", 60)), "bitrate": int(d.get("bitrate", 0)),
                                  "metres": ft_layout.remote_size(d)[0], "shown": not d.get("hidden"),
                                  "connected": not d.get("off"), "state": state})
             address = h.get("address", "")
-            out.append({"name": h.get("name", ""), "address": address, "hasToken": os.path.exists(token_path(address)),
+            sunshine = h.get("kind") == "sunshine"
+            out.append({"name": h.get("name", ""), "address": address, "kind": h.get("kind", "vibepollo"),
+                        "hasToken": address in self._logins if sunshine else os.path.exists(token_path(address)),
                         "online": self._online.get(address), "route": h.get("route", "auto"),
-                        "direct": ", ".join(h.get("direct", [])), "displays": displays})
+                        "direct": ", ".join(h.get("direct", [])), "mic": bool(h.get("mic")),
+                        "input": bool(h.get("input")),
+                        "displays": displays})
         return out
 
     # --- hosts ---
@@ -259,10 +270,12 @@ class Backend(QObject):
     @Slot(str, str, str, str, str)
     def signIn(self, name, address, dongle, user, password):
         """Asks the host for Frametop's API token with its Web UI login (answer: signedIn).
-        Over its dongle when it has one that answers, so the password skips the router."""
+        Over its dongle when it has one that answers, so the password skips the router. A host
+        without tokens is plain Sunshine: the login is checked, and kept in memory for pairing
+        the displays picked next."""
         name, address, dongle = " ".join(name.split()), address.strip(), dongle.strip()
         if not re.fullmatch(NAME_RE, name):
-            return self.signedIn.emit(name, False, "A host's name needs 1 to 40 letters, digits, spaces, dots or dashes")
+            return self.signedIn.emit(name, False, "A host's name needs 1 to 40 letters, digits, spaces, dots, dashes or apostrophes")
         if not re.fullmatch(r"[A-Za-z0-9.:-]{1,64}", address) or (dongle and not re.fullmatch(r"[0-9.]{7,15}", dongle)):
             return self.signedIn.emit(name, False, "The address is a host name or an IP address")
         layout = ft_layout.load_layout()
@@ -286,44 +299,77 @@ class Backend(QObject):
                     pin = spki_pin(conn.sock.getpeercert(binary_form=True))
                     if known and pin != known:
                         conn.close()
-                        return self._signInDone.emit(name, address, dongle, "", "", "Its certificate isn't the one "
-                                                     "seen when it was added. If Vibepollo was installed again, "
-                                                     "remove the host and add it again.")
-                    basic = base64.b64encode(f"{user}:{password}".encode()).decode()
+                        return self._signInDone.emit(name, address, dongle, "", "", "", "Its certificate isn't the "
+                                                     "one seen when it was added. If Vibepollo or Sunshine was "
+                                                     "installed again, remove the host and add it again.")
+                    basic = {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
                     conn.request("POST", "/api/token", json.dumps({"scopes": SCOPES}),
-                                 {"Authorization": "Basic " + basic, "Content-Type": "application/json"})
+                                 {**basic, "Content-Type": "application/json"})
                     r = conn.getresponse()
                     text = r.read().decode(errors="replace")
+                    # No tokens: plain Sunshine, which answers a POST to a path it doesn't have with a
+                    # bare 400 "Bad Request", before any login check (404 elsewhere). The login works if
+                    # it lists clients.
+                    try:
+                        bare = r.status == 400 and json.loads(text).get("error") == "Bad Request"
+                    except (ValueError, AttributeError):
+                        bare = False
+                    if r.status == 404 or bare:
+                        conn.request("GET", "/api/clients/list", headers=basic)
+                        r = conn.getresponse()
+                        r.read()
+                        conn.close()
+                        if r.status == 401:
+                            return self._signInDone.emit(name, address, dongle, "", "", "", "Wrong user name or password")
+                        if r.status != 200:
+                            return self._signInDone.emit(name, address, dongle, "", "", "",
+                                                         f"It didn't take the login ({r.status})")
+                        self._logins[address] = f"{user}\n{password}\n"
+                        return self._signInDone.emit(name, address, dongle, "", pin, "sunshine", "")
                     conn.close()
                     if r.status == 401:
-                        return self._signInDone.emit(name, address, dongle, "", "", "Wrong user name or password")
+                        return self._signInDone.emit(name, address, dongle, "", "", "", "Wrong user name or password")
                     token = json.loads(text).get("token") if r.status == 200 else None
                     if not token:
-                        return self._signInDone.emit(name, address, dongle, "", "",
+                        return self._signInDone.emit(name, address, dongle, "", "", "",
                                                      f"It didn't make a token ({r.status} {text[:120]})")
-                    return self._signInDone.emit(name, address, dongle, token, pin, "")
+                    return self._signInDone.emit(name, address, dongle, token, pin, "vibepollo", "")
                 except (OSError, ValueError, ssl.SSLError, http.client.HTTPException,
                         subprocess.SubprocessError) as e:
                     error = str(e) or type(e).__name__
-            self._signInDone.emit(name, address, dongle, "", "", f"Couldn't reach it: {error}")
+            self._signInDone.emit(name, address, dongle, "", "", "", f"Couldn't reach it: {error}")
         threading.Thread(target=work, daemon=True).start()
 
-    def _sign_in_done(self, name, address, dongle, token, pin, error):
+    def _sign_in_done(self, name, address, dongle, token, pin, kind, error):
         if error:
             return self.signedIn.emit(name, False, error)
-        write_private(token_path(address), token)
+        if token:
+            write_private(token_path(address), token)
         write_private(pin_path(address), pin)
         layout = ft_layout.load_layout()
         host = next((h for h in layout.setdefault("hosts", []) if h.get("address") == address), None)
         if host is None:
             host = {"name": name, "address": address, "displays": []}
             layout["hosts"].append(host)
+        if kind == "sunshine":
+            host["kind"] = "sunshine"
+        else:
+            host.pop("kind", None)
         if dongle and dongle not in host.get("direct", []):
             host["direct"] = [dongle] + host.get("direct", [])
-        ft_layout.save_layout(layout)
+        try:
+            ft_layout.save_layout(layout)
+        except (OSError, ft_layout.LayoutFileError) as e:   # a layout that doesn't read isn't saved over
+            return self.signedIn.emit(host["name"], False, str(e))
         self.changed.emit()
-        threading.Thread(target=self._ping, args=(address,), daemon=True).start()
+        threading.Thread(target=self._ping, args=(host,), daemon=True).start()
         self.signedIn.emit(host["name"], True, "")
+
+    @Slot(str)
+    def forgetLogin(self, address):
+        """A Sunshine host's login, once its displays are queued for pairing (or none were)."""
+        self._logins.pop(address, None)
+        self.changed.emit()
 
     @Slot(str)
     def removeHost(self, name):
@@ -334,7 +380,8 @@ class Backend(QObject):
         if host.get("displays"):
             return self.message.emit("Remove its displays first", True)
         layout["hosts"].remove(host)
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return
         if not any(h.get("address") == host.get("address") for h in layout["hosts"]):
             for path in (token_path(host.get("address", "")), pin_path(host.get("address", ""))):
                 try:
@@ -356,6 +403,18 @@ class Backend(QObject):
     def setRoute(self, name, route):
         self._run(f"Connecting {name} {dict(auto='either way', network='over the network', dongle='over the dongle')[route]}",
                   "remote", "host", name, f"route={route}")
+
+    @Slot(str, bool)
+    def setMic(self, name, on):
+        """Send the Frame's microphone to the host (its streams pick it up within 3 s)."""
+        self._run(f"{'Sending' if on else 'Not sending'} the microphone to {name}",
+                  "remote", "host", name, f"mic={'on' if on else 'off'}")
+
+    @Slot(str, bool)
+    def setInput(self, name, on):
+        """Use the host's own keyboard and mouse in Frametop (its streams pick it up within 3 s)."""
+        self._run(f"{'Using' if on else 'Not using'} {name}'s keyboard and mouse",
+                  "remote", "host", name, f"input={'on' if on else 'off'}")
 
     @Slot(str, str)
     def setDirect(self, name, text):
@@ -400,11 +459,38 @@ class Backend(QObject):
         threading.Thread(target=work, daemon=True).start()
 
     # --- displays ---
+    @staticmethod
+    def _sunshine_monitors(address):
+        """A Mac's displays: its Sunshine instances, each on its own port, named by the host
+        setup "COMPUTER: DISPLAY (WxH)" (its serverinfo hostname)."""
+        def probe(port):
+            url = f"http://{address}:{port}/serverinfo?uniqueid=0123456789ABCDEF&uuid={uuid.uuid4()}"
+            try:
+                with urllib.request.urlopen(url, timeout=4) as r:
+                    m = re.search(r"<hostname>([^<]*)</hostname>", r.read().decode(errors="replace"))
+            except OSError:
+                return None
+            name = html.unescape(m.group(1)) if m else f"port {port}"
+            size = re.search(r"\s*\((\d+)x(\d+)\)\s*$", name)
+            label = name[:size.start()] if size else name
+            return {"app": "Desktop", "port": port, "key": f"Desktop@{port}",
+                    "name": label.split(": ", 1)[-1] or name,
+                    "width": int(size.group(1)) if size else 2560, "height": int(size.group(2)) if size else 1440,
+                    "primary": port == SUNSHINE_PORTS[0], "active": True, "virtual": False}
+        with concurrent.futures.ThreadPoolExecutor(len(SUNSHINE_PORTS)) as pool:
+            return [m for m in pool.map(probe, SUNSHINE_PORTS) if m]
+
     @Slot(str)
     def listMonitors(self, address):
-        """The host's monitors, from its Web UI API (answer: monitorsReady)."""
+        """The host's monitors, from its Web UI API, or a Mac's Sunshine instances (answer:
+        monitorsReady)."""
+        host = next((h for h in ft_layout.load_layout().get("hosts", []) if h.get("address") == address), {})
+
         def work():
             monitors, error = [], ""
+            if host.get("kind") == "sunshine":
+                monitors = self._sunshine_monitors(address)
+                return self.monitorsReady.emit(address, monitors, "" if monitors else "no Sunshine instance answers")
             try:
                 code, out, err = ft_layout.run_stream("monitors", address, timeout=30)
                 if code:
@@ -414,8 +500,9 @@ class Backend(QObject):
                         info = m.get("info") or {}
                         res = info.get("resolution") or {}
                         virtual = (m.get("edid") or {}).get("manufacturer_id") == "SDD" or \
-                            str(m.get("friendly_name", "")).startswith("frametop")
-                        monitors.append({"app": "display:" + m.get("device_id", ""),
+                            str(m.get("friendly_name", "")).startswith(("frametop", "Vibepollo Private Display"))
+                        monitors.append({"app": "display:" + m.get("device_id", ""), "port": 0,
+                                         "key": "display:" + m.get("device_id", ""),
                                          "name": m.get("friendly_name") or m.get("display_name") or "?",
                                          "width": int(res.get("width", 0)), "height": int(res.get("height", 0)),
                                          "primary": bool(info.get("primary")), "active": bool(info),
@@ -425,16 +512,24 @@ class Backend(QObject):
             self.monitorsReady.emit(address, monitors, error)
         threading.Thread(target=work, daemon=True).start()
 
-    @Slot(str, str, str, int, int, int, int)
-    def addDisplay(self, host, app, label, width, height, fps, bitrate):
-        """Pairs a client for it with the host's token and starts its stream (ft-layout)."""
+    @Slot(str, str, str, int, int, int, int, int)
+    def addDisplay(self, host, app, label, width, height, fps, bitrate, port):
+        """Pairs a client for it with the host's token, or a Sunshine instance's (port) with the
+        login kept since signing in, and starts its stream (ft-layout)."""
         layout = ft_layout.load_layout()
         h = next((x for x in layout.get("hosts", []) if x.get("name") == host), None)
         if h is None:
             return self.message.emit(f"No host called {host}", True)
         label = " ".join(label.split()) or ("Virtual" if app == "monitor" else "Display")
-        self._run(f"Adding {label} from {host}", "remote", "add", host, h["address"], app, "--label", label,
-                  "--size", f"{width}x{height}", "--fps", str(fps), "--bitrate", str(bitrate))
+        args = ["remote", "add", host, h["address"], app, "--label", label, "--size", f"{width}x{height}",
+                "--fps", str(fps), "--bitrate", str(bitrate)]
+        login = None
+        if port:
+            login = self._logins.get(h["address"])
+            if login is None:
+                return self.message.emit(f"Sign in to {host} again to add a display", True)
+            args += ["--port", str(port), "--login"]
+        self._run(f"Adding {label} from {host}", *args, stdin=login)
 
     @Slot(str, bool)
     def setConnected(self, display_id, on):
@@ -446,24 +541,35 @@ class Backend(QObject):
         self._run("Changing the stream", "remote", "set", display_id, f"size={width}x{height}", f"fps={fps}",
                   f"bitrate={bitrate}")
 
+    def _save(self, layout):
+        """Save the layout; False, said in the window, when it can't be (a frametop-layout.json
+        that doesn't read is never saved over)."""
+        try:
+            ft_layout.save_layout(layout)
+            return True
+        except (OSError, ft_layout.LayoutFileError) as e:
+            self.message.emit(str(e), True)
+            return False
+
     def _edit(self, display_id, fn):
         layout = ft_layout.load_layout()
         n, _, d = ft_layout.find_display(layout, display_id)
         fn(d)
-        ft_layout.save_layout(layout)
+        if not self._save(layout):
+            return None, d
         self.changed.emit()
         return n, d
 
     @Slot(str, float)
     def setMetres(self, display_id, m):
         n, d = self._edit(display_id, lambda d: d.__setitem__("metres", round(m, 3)))
-        if self._running and not d.get("off"):
+        if n is not None and self._running and not d.get("off"):
             self._ask(f"width {n} {m:.3f}")
 
     @Slot(str, bool)
     def setShown(self, display_id, shown):
         n, d = self._edit(display_id, lambda d: d.pop("hidden", None) if shown else d.__setitem__("hidden", True))
-        if self._running and not d.get("off"):
+        if n is not None and self._running and not d.get("off"):
             self._ask(f"{'reveal' if shown else 'conceal'} {n}")
 
     @Slot(str)
@@ -471,15 +577,15 @@ class Backend(QObject):
         self._run("Removing the display", "remote", "remove", display_id)
 
     # --- ft-layout on the host, one at a time ---
-    def _run(self, label, *args):
-        self._queue.append((label, args))
+    def _run(self, label, *args, stdin=None):
+        self._queue.append((label, args, stdin))
         if self._proc is None:
             self._next()
 
     def _next(self):
         if not self._queue:
             return
-        label, args = self._queue.pop(0)
+        label, args, stdin = self._queue.pop(0)
         self._busy = label
         self.busyChanged.emit()
         proc = QProcess(self)
@@ -488,6 +594,9 @@ class Backend(QObject):
         proc.finished.connect(lambda code, _status: self._done(proc, label, code))
         self._proc = proc
         proc.start(argv[0], argv[1:])
+        if stdin is not None:  # a Sunshine login for ft-layout remote add --login
+            proc.write(stdin.encode())
+        proc.closeWriteChannel()
 
     def _done(self, proc, label, code):
         out = bytes(proc.readAllStandardOutput()).decode(errors="replace").strip()

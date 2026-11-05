@@ -1,0 +1,39 @@
+# The test gate, run by hand (Actions > check > Run workflow), on GitHub's own arm64 runner
+# (free for public repositories; the Frame is aarch64): the image from pack/Containerfile, then
+# `./ft dev test` inside it, the same gate release.yml runs before it builds a release. Nothing is
+# built or published: release.yml (Depot, on v* tags) still makes the releases.
+#
+# Manual only (Daenon, 2026-11-01): no push or pull request starts it. Read-only: no secrets, no
+# write permission. A newer run on the same branch cancels the one before it. Actions are pinned
+# to commit SHAs (the version in the comment).
+name: check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    env:
+      FT_ENGINE: podman
+      FT_IMAGE: localhost/frametop:check
+    steps:
+      # actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: build the image
+        run: ./ft dev build
+
+      # Python (strict, ruff first), C, keyboard, shell, testbench and fast-install: `just test`.
+      - name: test
+        run: ./ft dev test

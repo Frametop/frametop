@@ -1,0 +1,36 @@
+#!/bin/bash
+# Starts Frametop's Sunshine instance N on its display; its LaunchAgent runs this at login.
+# Usage: ft-sunshine-instance N
+#
+# A display's id can change when it's plugged in again, so this looks it up by the key the setup
+# saved (instance-N/display). Sunshine streams the main display when output_name names no display,
+# so while this one is missing (unplugged, lid closed) Sunshine isn't started; launchd runs this
+# again after it exits.
+set -u
+
+n=${1:?usage: ft-sunshine-instance N}
+here=$(cd "$(dirname "$0")" && pwd)
+data="$here/.."
+inst="$data/instance-$n"
+sunshine=/Applications/Sunshine.app/Contents/MacOS/Sunshine
+
+key=$(cut -f1 "$inst/display" 2>/dev/null)
+if [ -z "$key" ]; then
+    echo "$(date '+%F %T') instance $n: no $inst/display; run frametop-host-setup.sh again" >&2
+    sleep 60
+    exit 78
+fi
+
+id=$(osascript -l JavaScript "$here/displays.js" | awk -F'\t' -v k="$key" '$2 == k { print $1 }')
+if [ -z "$id" ]; then
+    # Logged once, not on every retry.
+    if [ ! -e "$inst/.waiting" ]; then
+        echo "$(date '+%F %T') instance $n: display $key isn't connected; waiting for it" >&2
+        touch "$inst/.waiting"
+    fi
+    sleep 30
+    exit 75
+fi
+rm -f "$inst/.waiting"
+
+exec "$sunshine" "$inst/sunshine.conf" "output_name=$id"

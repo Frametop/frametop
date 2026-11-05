@@ -5,7 +5,12 @@ Paused:
   - The gaze service stops (frametop-gaze: ft-gazed, ft-gaze, our own eye tracker ft-eyes, the
     gaze panel), and with it every read of SteamVR's eye tracking. Our frame grabber, the root
     service ft-eyegrab, goes idle by itself 3 seconds after ft-eyes stops asking for frames.
-  - Hand tracking stops if it runs (frametop-camd, frametop-hands).
+  - Hand tracking stops if it runs (frametop-camd, frametop-hands). With hand interaction on
+    (POINTER_HANDS=1) it's parked instead (PARK_PATH: ft-hands stops processing and ft-camd stops
+    copying, the models stay loaded), and it unparks while the dashboard is open, so the hands work
+    there during the game. Without hand interaction the park still holds ft-cutouts' tracker,
+    which pausing doesn't stop. With HANDS_MODE=always it keeps running, unparked: the hands show
+    in the game (hands/handsmode.py).
   - The desktop, by "pause_desktop": "hide" (the default) hides every screen and floating window
     and slows the desktop down ("pause on" to ft-screens: KWin gets one frame callback a second
     instead of 90, so it and the apps on it hardly draw), and remote desktop stops if it runs
@@ -22,7 +27,10 @@ Toggled by:
     games (the pointer helper only reads those outside games).
   - A controller gesture, by default both thumbsticks clicked together twice ("pause_gesture").
     It's read from vrserver's web socket (vrws.py), which works in games and takes nothing from
-    them, so the game sees the clicks too.
+    them, so the game sees the clicks too. Once it goes off, it's ignored for GESTURE_COOLDOWN:
+    on 2026-10-16 a resume was followed by a pause 2 s later, which left Frametop paused.
+    A gesture on both controllers, with only one of them connected, is that controller's button
+    alone, clicked twice (one_controller).
   - input/ft-pause on|off|toggle|status, which uses the relay's control socket
     ("pause on|off|toggle|?").
   - VR games, with "pause_auto" (on by default): the pointer helper says "vrgame 1|0" as a SteamVR
@@ -35,28 +43,44 @@ Settings in ~/.config/frametop-input.json (Frametop Input Settings, Game optimiz
 (bool), "pause_gesture" ({"buttons": one or two controller buttons, "presses": 1 or 2}, or null
 for none; one button always takes two presses), "pause_desktop" ("hide" or "close"), and
 "pause_sound" (a sound on pause and resume; bool). The state outlives a relay restart in
-STATE_PATH.
+STATE_PATH, and a desktop that starts while paused is told (screens_seen), so it hides too. Its
+session asks the relay to stop the hand tracking it starts ("pause enforce"), and to leave remote
+access to the resume ("pause defer remote"). ft-screens says whether it's paused in its report
+every second, and one out of step is told again (screens_report).
 """
 import json
 import os
 import queue
 import socket
 import subprocess
+import sys
 import threading
 import time
 
-import vrws
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
+import ft_store  # noqa: E402  (files written by a temp file of their own and a rename)
+import vrws  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DESKTOPS = os.path.join(REPO, "desktops.sh")
 REMOTE_CTL = os.path.join(REPO, "session", "remote-ctl.sh")
 RELAY = "\0frametop_relay"
 SCREENS = "\0ft_screens"
+HELPER = "\0ft_pointer_helper"
 STATE_PATH = f"/run/user/{os.getuid()}/frametop-pause.json"
 # User services that pausing stops, if they run.
 UNITS = ("frametop-gaze.service", "frametop-hands.service", "frametop-camd.service")
-# What still works while paused, besides commands ("command:CMD"): the toggle itself, and Steam's menu.
-PAUSED_ACTIONS = ("pause_toggle", "steam_menu")
+# With hand interaction on (POINTER_HANDS=1), pausing parks hand tracking instead of stopping it, so
+# the hands are there when the dashboard opens during the game: ft-hands stops processing while
+# PARK_PATH exists (and ft-camd stops copying frames for it), and starts again within a palm search
+# (about 200 ms) once it goes. The pointer helper says when the dashboard opens and closes ("vrdash").
+# The park is written whenever Frametop is paused (but HANDS_MODE=always and the dashboard), so it
+# also holds ft-cutouts' tracker, whose transient units aren't in UNITS.
+HAND_UNITS = ("frametop-hands.service", "frametop-camd.service")
+PARK_PATH = f"/run/user/{os.getuid()}/frametop-hands/park"
+# What still works while paused, besides commands ("command:CMD"): the toggle itself, Steam's menu,
+# and dictation (Frametop Voice types into games too).
+PAUSED_ACTIONS = ("pause_toggle", "steam_menu", "dictate", "dictate_hold", "release_keys")
 DEFAULT_GESTURE = {"buttons": ["left/thumbstick", "right/thumbstick"], "presses": 2}
 DESKTOP_MODES = ("hide", "close")
 SOUNDS = {True: "/usr/share/sounds/ocean/stereo/device-removed.oga",
@@ -65,6 +89,7 @@ RESUME_DELAY = 5.0  # after a VR game ends: loading the next one can end one sce
 GAME_STALE = 12.0  # the helper repeats "vrgame" every 5 s; silence this long means no game (or no SteamVR)
 CHORD_WINDOW = 0.3  # a two-button gesture's buttons go down within this of each other
 DOUBLE_WINDOW = 0.7  # a double press's second press comes within this of the first
+GESTURE_COOLDOWN = 3.0  # once the gesture goes off, it's ignored this long (a triple press, a repeat)
 LOOKUP_EVERY = 30.0  # the controllers are looked up again this often (and sooner when they may have changed)
 LOOKUP_GAP = 3.0  # but not more often than this for a message from a device it doesn't know
 
@@ -91,6 +116,17 @@ def gesture_of(rules, buttons):
     return chosen, 1 if len(chosen) == 2 and spec.get("presses") == 1 else 2
 
 
+def one_controller(buttons, sides):
+    """A two-button gesture with a button on each controller, while only one of the two is connected
+    (`sides`: the sides there are): that one's button alone, pressed twice, so a single controller
+    can still pause. None otherwise."""
+    by_side = {b.split("/", 1)[0]: b for b in buttons}
+    if len(buttons) != 2 or len(by_side) != 2:
+        return None
+    there = [b for side, b in by_side.items() if side in sides]
+    return (there[0],) if len(there) == 1 else None
+
+
 def settings_of(rules, buttons):
     return {"auto": rules.get("pause_auto", True) is not False,
             "gesture": gesture_of(rules, buttons),
@@ -102,13 +138,14 @@ class Gesture:
     """The pause gesture, from button presses and releases. A press of a two-button gesture is
     both buttons going down within CHORD_WINDOW of each other, so a button held for a while (to
     sprint, say) and the other clicked doesn't count. Two presses within DOUBLE_WINDOW make a
-    double press."""
+    double press. Once it goes off, it's ignored for GESTURE_COOLDOWN."""
 
     def __init__(self, buttons, presses):
         self.buttons, self.presses = tuple(buttons), presses
         self.down = {}  # button -> when it went down
         self.first = None  # when the first press of a double press was
         self.fired = None
+        self.ignored = None  # a gesture the cooldown dropped: how long after the last one (for the log)
 
     def reset(self):
         self.down.clear()
@@ -130,26 +167,177 @@ class Gesture:
             self.first = now
             return False
         self.first = None
-        if self.fired is not None and now - self.fired < 1.0:
-            return False  # a triple press is still one
+        if self.fired is not None and now - self.fired < GESTURE_COOLDOWN:
+            self.ignored = now - self.fired
+            return False
         self.fired = now
         return True
 
 
+class TouchTracker:
+    """Who holds a controller, for the pointer helper's handoff arbiter (pointer/helper/handoff.h):
+    per side, whether any touch sensor of that side's controller is touched, a button of it went
+    down, or it's gone. Fed the web socket's messages; returns the datagrams for the helper, only
+    on a change:
+      ctl <side> touch 0|1   any touch component of that side's controller(s) is true
+      ctl <side> press       a click component went down
+      ctl <side> gone        no controller on that side any more
+      ctl ws 0|1             the web socket is up or down (ControllerWatch sends these)
+    A side can have more than one controller (the testbench's synthetic ones beside a real one):
+    any of them counts. vrserver's first message for a subscription has every component, so the
+    state is known from the start; its clicks aren't presses."""
+
+    def __init__(self):
+        self.sides = {}  # root path -> side
+        self.touch = {}  # root path -> {component: bool}
+        self.clicks = {}  # root path -> {component: bool}
+        self.sent = {}  # side -> the touch value last sent
+
+    def set_sides(self, sides):
+        """The controllers there are now ({root path: side}); "gone" for a side that has none left."""
+        out = []
+        for path in list(self.sides):
+            if path not in sides:
+                self.touch.pop(path, None)
+                self.clicks.pop(path, None)
+        old = set(self.sides.values())
+        self.sides = dict(sides)
+        for side in sorted(old - set(self.sides.values())):
+            self.sent.pop(side, None)
+            out.append(f"ctl {side} gone")
+        for side in sorted(set(self.sides.values())):  # a touched controller of a side went
+            if side in self.sent and self.sent[side] != self.side_touched(side):
+                self.sent[side] = self.side_touched(side)
+                out.append(f"ctl {side} touch {int(self.sent[side])}")
+        return out
+
+    def side_touched(self, side):
+        return any(v for p, comps in self.touch.items() if self.sides.get(p) == side for v in comps.values())
+
+    def feed(self, path, components):
+        side = self.sides.get(path)
+        if side is None:
+            return []
+        out = []
+        first = path not in self.clicks
+        clicks = self.clicks.setdefault(path, {})
+        touch = self.touch.setdefault(path, {})
+        pressed = False
+        for name, value in components.items():
+            if name.endswith("/touch"):
+                touch[name] = bool(value)
+            elif name.endswith("/click"):
+                if value and not clicks.get(name, False) and not first:
+                    pressed = True
+                clicks[name] = bool(value)
+        if pressed:
+            out.append(f"ctl {side} press")
+        now = self.side_touched(side)
+        if self.sent.get(side) != now:
+            self.sent[side] = now
+            out.append(f"ctl {side} touch {int(now)}")
+        return out
+
+    def snapshot(self):
+        """Every side's touch state, as datagrams (for a helper that just started)."""
+        return [f"ctl {side} touch {int(self.side_touched(side))}" for side in sorted(set(self.sides.values()))]
+
+
+# Gamepad mode's pad (vrpad.py) from the raw components: each side's buttons as XInput's bits (the
+# Frame controllers are a split pad: View, the d-pad, a bumper, trigger and stick on the left; Menu,
+# A, B, X, Y, a bumper, trigger and stick on the right; the grips are SteamVR's way out).
+PAD_BUTTONS = {
+    "left": {"/input/view/click": 0x0020, "/input/dpad_up/click": 0x0001, "/input/dpad_down/click": 0x0002,
+             "/input/dpad_left/click": 0x0004, "/input/dpad_right/click": 0x0008,
+             "/input/bumper/click": 0x0100, "/input/thumbstick/click": 0x0040},
+    "right": {"/input/menu/click": 0x0010, "/input/a/click": 0x1000, "/input/b/click": 0x2000,
+              "/input/x/click": 0x4000, "/input/y/click": 0x8000, "/input/bumper/click": 0x0200,
+              "/input/thumbstick/click": 0x0080},
+}
+PAD_REPEAT = 0.25  # the pad's state again this often while nothing changes (vrpad.STALE)
+
+
+def _number(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+class PadReader:
+    """The pad's state from the controllers' raw components: feed() each message's, state() the
+    "vrpad" line's values (buttons, LT, RT, LX, LY, RX, RY). A side with two devices (a leftover
+    virtual one, say) gets the buttons of either, and the farther stick and trigger."""
+
+    def __init__(self):
+        self.devices = {}  # root path -> {component: value}
+
+    def feed(self, device, components):
+        self.devices.setdefault(device, {}).update(components)
+
+    def keep(self, paths):
+        self.devices = {p: c for p, c in self.devices.items() if p in paths}
+
+    def state(self, sides):
+        buttons, pull, stick = 0, {"left": 0, "right": 0}, {"left": (0, 0), "right": (0, 0)}
+        for path, comps in self.devices.items():
+            side = sides.get(path)
+            if side not in PAD_BUTTONS:
+                continue
+            for comp, bit in PAD_BUTTONS[side].items():
+                if comps.get(comp):
+                    buttons |= bit
+            pull[side] = max(pull[side], round(min(1.0, max(0.0, _number(comps.get("/input/trigger/value")))) * 255))
+            xy = tuple(round(min(1.0, max(-1.0, _number(comps.get(f"/input/thumbstick/{a}")))) * 32767) for a in "xy")
+            if abs(xy[0]) + abs(xy[1]) > abs(stick[side][0]) + abs(stick[side][1]):
+                stick[side] = xy
+        return (buttons, pull["left"], pull["right"], *stick["left"], *stick["right"])
+
+
 class ControllerWatch(threading.Thread):
     """Follows the Frame controllers on vrserver's web socket for the pause gesture, and sends
-    the relay "pause toggle gesture" when it's made. Reconnects every 5 seconds while SteamVR
-    is away. With no gesture set, it doesn't connect."""
+    the relay "pause toggle gesture" when it's made. With the touch feed on (hand interaction,
+    POINTER_HANDS=1), it also sends the pointer helper who holds a controller (TouchTracker).
+    In gamepad mode (set_pad) it sends the relay the pad's state ("vrpad B LT RT LX LY RX RY",
+    PadReader) on each change and every PAD_REPEAT. Reconnects every 5 seconds while SteamVR is
+    away. With no gesture set, no touch feed and no gamepad mode, it doesn't connect."""
 
     def __init__(self, log):
         super().__init__(name="pause-gesture", daemon=True)
         self.log = log
         self.lock = threading.Lock()
         self.gesture = None
+        self.touch_feed = False
+        self.pad = False
+        self.tracker = TouchTracker()
+        self.resend = False  # the helper (re)started: send it the touch state again
         self.changed = threading.Event()
         self.connected = False
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         self.lookup_at = None  # look the controllers up again then (see recheck)
+
+    def set_touch_feed(self, on):
+        if on != self.touch_feed:
+            self.touch_feed = on
+            self.log(f"controller touch feed for the pointer helper {'on' if on else 'off'}")
+            if not on:
+                self.to_helper(["ctl ws 0"])
+            self.changed.set()
+
+    def set_pad(self, on):
+        if on != self.pad:
+            self.pad = on
+            self.changed.set()
+
+    def helper_started(self):
+        self.resend = True
+
+    def to_helper(self, msgs):
+        for m in msgs:
+            try:
+                self.sock.sendto(m.encode(), HELPER)
+            except OSError:
+                pass  # the helper isn't running; it says vrhello when it starts
 
     def recheck(self, delay=1.5):
         """The controllers' root paths may change soon: the 3D mouse's virtual controller is taking
@@ -172,9 +360,9 @@ class ControllerWatch(threading.Thread):
 
     def run(self):
         while True:
-            if self.current() is None:
+            if self.current() is None and not self.touch_feed and not self.pad:
                 if self.connected:
-                    self.log("pause gesture: none set, stopped reading the controllers")
+                    self.log("controller reader: no pause gesture, touch feed or gamepad mode, stopped reading the controllers")
                 self.connected = False
                 self.changed.wait()
                 self.changed.clear()
@@ -183,8 +371,10 @@ class ControllerWatch(threading.Thread):
                 self.session()
             except (OSError, ValueError) as e:  # urllib's errors are OSErrors
                 if self.connected:
-                    self.log(f"pause gesture: SteamVR's web socket went away ({e}); retrying")
+                    self.log(f"controller reader: SteamVR's web socket went away ({e}); retrying")
                 self.connected = False
+            if self.touch_feed:
+                self.to_helper(["ctl ws 0"])
             self.changed.wait(5)
             self.changed.clear()
 
@@ -195,10 +385,21 @@ class ControllerWatch(threading.Thread):
             sides = {}  # root path -> side
             next_poll = 0.0
             last_poll = 0.0
+            self.tracker = TouchTracker()
+            touch_was = False
+            alone = None  # the one-controller gesture in use (one_controller), or None
+            reader, pad_sent, pad_at = PadReader(), None, 0.0
             while True:
                 g = self.current()
-                if g is None:
+                touch = self.touch_feed
+                pad = self.pad
+                if g is None and not touch and not pad:
                     return
+                if touch and (not touch_was or self.resend):
+                    # the feed just started, or the helper restarted: where things stand
+                    self.resend = False
+                    self.to_helper(["ctl ws 1"] + self.tracker.snapshot())
+                touch_was = touch
                 now = time.monotonic()
                 lookup_at = self.lookup_at
                 if lookup_at is not None and now >= lookup_at:
@@ -217,19 +418,39 @@ class ControllerWatch(threading.Thread):
                         for path in found.keys() - sides.keys():
                             ws.subscribe(path)
                         sides = found
-                        g.reset()
+                        reader.keep(sides)
+                        if g is not None:
+                            g.reset()
+                        msgs = self.tracker.set_sides(sides)
+                        if touch:
+                            self.to_helper(msgs)
                     if not self.connected:
                         self.connected = True
-                        self.log(f"pause gesture: following {' and '.join(sorted(sides.values())) or 'no'} "
+                        self.log(f"controller reader: following "
+                                 f"{' and '.join(sorted(sides.values())) or 'no'} "
                                  f"controller{'s' if len(sides) != 1 else ''} on SteamVR's web socket")
-                wanted = {b: (b.split("/", 1)[0], f"/input/{b.split('/', 1)[1]}/click") for b in g.buttons}
-                for text in ws.messages(timeout=1.0):
+                single = None if g is None else one_controller(g.buttons, set(sides.values()))
+                if single is None:
+                    if alone is not None and g is not None:
+                        self.log(f"pause gesture: both controllers are there again, back to {' and '.join(g.buttons)}")
+                    alone = None
+                elif alone is None or alone.buttons != single:
+                    alone = Gesture(single, 2)
+                    self.log(f"pause gesture: only one controller, so {single[0]} clicked twice")
+                use = alone or g
+                wanted = {} if use is None else \
+                    {b: (b.split("/", 1)[0], f"/input/{b.split('/', 1)[1]}/click") for b in use.buttons}
+                for text in ws.messages(timeout=PAD_REPEAT if pad else 1.0):
                     device = device_of(text)
                     if device and device not in sides:
                         next_poll = min(next_poll, last_poll + LOOKUP_GAP)  # its root path changed, maybe
                     # About 160 messages a second, nearly all capacitive sensing: parse only the
-                    # few that carry one of the gesture's buttons.
-                    if not any(c in text for _, c in wanted.values()):
+                    # few that carry one of the gesture's buttons, or with the touch feed on, the
+                    # touch and click ones.
+                    feed = touch and device in sides and ("/touch" in text or "/click" in text)
+                    # (in gamepad mode, the sticks' and triggers' values too)
+                    pad_msg = pad and device in sides and ("/click" in text or "/value" in text or "/thumbstick/" in text)
+                    if not feed and not pad_msg and not any(c in text for _, c in wanted.values()):
                         continue
                     try:
                         msg = json.loads(text)
@@ -237,14 +458,29 @@ class ControllerWatch(threading.Thread):
                         continue
                     side = sides.get(msg.get("device"))
                     components = msg.get("components") or {}
+                    if feed:
+                        self.to_helper(self.tracker.feed(msg.get("device"), components))
+                    if pad_msg:
+                        reader.feed(msg.get("device"), components)
                     for button, (s, component) in wanted.items():
                         if s == side and component in components:
-                            if g.feed(button, bool(components[component]), time.monotonic()):
+                            if use.feed(button, bool(components[component]), time.monotonic()):
                                 self.log("pause gesture")
                                 try:
                                     self.sock.sendto(b"pause toggle gesture", RELAY)
                                 except OSError:
                                     pass
+                            elif g.ignored is not None:
+                                self.log(f"pause gesture ignored: {g.ignored:.1f} s after the last one")
+                                g.ignored = None
+                if pad:
+                    st, at = reader.state(sides), time.monotonic()
+                    if st != pad_sent or at - pad_at >= PAD_REPEAT:
+                        pad_sent, pad_at = st, at
+                        try:
+                            self.sock.sendto(("vrpad %x %d %d %d %d %d %d" % st).encode(), RELAY)
+                        except OSError:
+                            pass
         finally:
             ws.close()
 
@@ -267,7 +503,14 @@ def output(cmd, timeout=10):
 
 
 def active(unit):
-    return run(["systemctl", "--user", "-q", "is-active", unit], timeout=10) == 0
+    """The unit runs, or is on its way up. "activating" is also a unit that systemd starts again
+    after a crash (Restart=on-failure): `is-active -q` says no to it, so a pause used to leave
+    it, and it came back during the game."""
+    return output(["systemctl", "--user", "is-active", unit]).strip() in ("active", "activating", "reloading")
+
+
+def steamvr_running():
+    return active("steamvr.service")
 
 
 def desktop_running():
@@ -286,6 +529,8 @@ class Worker(threading.Thread):
         self.lock = threading.Lock()
         self.stopped = {"units": [], "remote": False, "desktop": None}
         self.busy = False
+        self.keep = ()  # units pausing leaves running (hand tracking, parked instead)
+        self.hands_with_desktop = False  # HANDS_MODE=frametop: hand tracking runs only with the desktop
 
     def submit(self, job, *args):
         self.busy = True
@@ -314,7 +559,7 @@ class Worker(threading.Thread):
 
     def stop_units(self):
         """Stop the UNITS that run, adding them to what the resume starts again."""
-        units = [u for u in UNITS if active(u)]
+        units = [u for u in UNITS if u not in self.keep and active(u)]
         if units:
             run(["systemctl", "--user", "stop", *units], timeout=30)
             with self.lock:
@@ -339,14 +584,33 @@ class Worker(threading.Thread):
         self.stop_units()
 
     def enforce(self):
-        """While paused: SteamVR restarted, and started the gaze service with it."""
+        """While paused: SteamVR restarted, and started the gaze service with it, or a desktop
+        started (frametop-session.sh, "pause enforce"), and with it hand tracking."""
         self.stop_units()
+
+    def defer_remote(self):
+        """While paused: a desktop that starts leaves remote access to the resume ("pause defer
+        remote" from frametop-session.sh), as if the pause had stopped it."""
+        with self.lock:
+            self.stopped["remote"] = True
+        self.log("pause: remote desktop waits for the resume")
 
     def resume(self):
         stopped = self.snapshot()
         units = stopped["units"]
+        # They need SteamVR: without it they start with it (or with the desktop) next time.
+        # frametop-gaze has Requisite=steamvr.service, but camd and hands don't, so they'd start
+        # with SteamVR off.
+        if units and not steamvr_running():
+            self.log(f"resume: SteamVR isn't running, so {', '.join(units)} start with it next time")
+            units = []
+        # With HANDS_MODE=frametop, hand tracking runs only with the desktop; a desktop the pause
+        # closed starts it again itself (handsmode up).
+        hands = [u for u in units if u in HAND_UNITS]
+        if hands and self.hands_with_desktop and not desktop_running():
+            self.log(f"resume: the desktop isn't running, so {', '.join(hands)} start with it")
+            units = [u for u in units if u not in hands]
         if units:
-            # They need SteamVR (Requisite=steamvr.service): without it they start with it next time.
             if run(["systemctl", "--user", "start", *units], timeout=30) == 0:
                 self.log(f"resume: started {', '.join(units)}")
             else:
@@ -379,6 +643,11 @@ class GamePause:
         self.game_seen = 0.0  # last "vrgame" from the helper
         self.resume_at = None
         self.settings = settings_of({}, buttons)
+        self.hands = False  # hand interaction is on (set_hands)
+        self.hands_always = False  # HANDS_MODE=always: hand tracking runs through games (set_hands)
+        self.dashboard = False  # the SteamVR dashboard is open (the helper's "vrdash")
+        self.parked = None  # hand tracking parked, as last applied (None: not yet)
+        self.screens_pid = None  # the ft-screens that last said where typing goes (screens_seen)
         self.screens = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
         self.worker = Worker(log, self.save)
         self.watch = ControllerWatch(log)
@@ -392,28 +661,37 @@ class GamePause:
             state = {"paused": self.paused, "reason": self.reason, "since": self.since,
                      "ends_with_game": self.ends_with_game, "stopped": self.worker.snapshot()}
             try:
-                tmp = STATE_PATH + ".tmp"
-                with open(tmp, "w") as f:
-                    json.dump(state, f)
-                os.replace(tmp, STATE_PATH)
+                ft_store.write_json(STATE_PATH, state, indent=None, newline=False)
             except OSError as e:
                 self.log(f"pause: can't save {STATE_PATH}: {e}")
 
     def load(self):
         """A relay restarted while paused stays paused (the relay's part is applied by its first
-        configure)."""
+        configure, and its pointer lets go: input-relay.py). One restarted after a resume, before
+        the resume's job started what the pause stopped, starts it now."""
         try:
             with open(STATE_PATH) as f:
                 state = json.load(f)
         except (OSError, ValueError):
             return
-        if not isinstance(state, dict) or not state.get("paused"):
+        if not isinstance(state, dict):
+            return
+        stopped = state.get("stopped") if isinstance(state.get("stopped"), dict) else {}
+        if not state.get("paused"):
+            if stopped.get("units") or stopped.get("remote") or stopped.get("desktop") == "closed":
+                self.worker.restore(stopped)
+                self.log("resuming what the last pause stopped: the relay restarted before it could")
+                self.worker.submit(self.worker.resume)
             return
         self.paused = True
         self.reason = str(state.get("reason", ""))
         self.since = float(state.get("since", 0) or 0)
         self.ends_with_game = bool(state.get("ends_with_game"))
-        self.worker.restore(state.get("stopped") or {})
+        if self.ends_with_game:
+            # The game may have ended while the relay was down. Taken as running, the pointer
+            # helper's next "vrgame 0", or GAME_STALE of silence, ends the pause.
+            self.game, self.game_seen = True, time.monotonic()
+        self.worker.restore(stopped)
         self.log(f"paused since before this relay started ({self.reason})")
         self.worker.submit(self.worker.enforce)
 
@@ -439,6 +717,87 @@ class GamePause:
         except OSError:
             pass  # the desktop isn't running
 
+    def screens_report(self, paused):
+        """From the relay: ft-screens' own pause flag, which it adds to its report every second.
+        "pause on|off" is one datagram, dropped when its socket is full, and ft-screens' pause
+        stays until it hears otherwise, so one that's out of step hears the state again.
+        An older ft-screens doesn't say, and isn't told."""
+        if paused != self.paused:
+            self.log(f"ft-screens says it's {'paused' if paused else 'running'}: telling it again")
+            self.tell_screens(self.paused)
+
+    def screens_seen(self, pid):
+        """From the relay: ft-screens `pid` said where typing goes, as it does every second. One
+        that started while paused never heard "pause on" and shows its screens, while the relay
+        keeps the 3D mouse off: on 2026-10-16 an update restarted the desktop and the relay, the
+        relay came back paused from STATE_PATH, and the desktop looked on with a dead pointer.
+        So a new ft-screens hears the pause."""
+        if not pid or pid == self.screens_pid:
+            return
+        self.screens_pid = pid
+        if self.paused:
+            self.log(f"telling ft-screens ({pid}) that Frametop is paused")
+            self.tell_screens(True)
+
+    def tell_helper(self):
+        """The pointer helper's hand interaction runs in a VR game only while Frametop isn't paused
+        (toggled back on during the game) or the dashboard is open: "paused 1|0", on a change and
+        when the helper starts."""
+        try:
+            self.screens.sendto(b"paused 1" if self.paused else b"paused 0", HELPER)
+        except OSError:
+            pass  # the helper isn't running; it says vrhello when it starts
+
+    def set_pad(self, on):
+        """Gamepad mode (vrpad.py): read the controllers as a pad, and say it to the relay."""
+        self.watch.set_pad(on)
+
+    def set_hands(self, on, always=False, with_desktop=False):
+        """Hand interaction (POINTER_HANDS=1): feed the helper who holds a controller, and park hand
+        tracking for games instead of stopping it. always (HANDS_MODE=always): neither.
+        with_desktop (HANDS_MODE=frametop): a resume starts hand tracking only with the desktop."""
+        self.hands, self.hands_always = on, always
+        kept = self.worker.keep
+        self.worker.keep = HAND_UNITS if on or always else ()
+        self.worker.hands_with_desktop = with_desktop
+        self.watch.set_touch_feed(on)
+        self.update_park()
+        if self.paused and kept and not self.worker.keep:
+            # Switched off mid-pause: what the pause kept for parking stops now, as the pause
+            # would have stopped it.
+            self.worker.submit(self.worker.enforce)
+
+    def dashboard_state(self, on):
+        """From the pointer helper: the dashboard opened or closed ("vrdash 1|0")."""
+        self.dashboard = on
+        self.update_park()
+
+    def update_park(self):
+        """Hand tracking is parked while Frametop is paused, unless the dashboard is open (hands
+        work there during a game) or HANDS_MODE=always. With hand interaction that's what keeps
+        the hand units from the game; without it the pause stops them, and the park holds
+        ft-cutouts' tracker, which the pause doesn't stop and whose cutouts show through the
+        screens a pause hides."""
+        want = self.paused and not self.hands_always and not self.dashboard
+        if want == self.parked:
+            return
+        try:
+            if want:
+                # Made if hand tracking hasn't run since login, so a tracker that starts during
+                # the pause finds the park (ft-camd and ft-hands make it 0700 the same way).
+                os.makedirs(os.path.dirname(PARK_PATH), mode=0o700, exist_ok=True)
+                with open(PARK_PATH, "w") as f:
+                    f.write("parked by the input relay (Frametop paused for a VR game)\n")
+            elif os.path.exists(PARK_PATH):
+                os.remove(PARK_PATH)
+        except OSError as e:
+            self.log(f"hand tracking: can't {'park' if want else 'unpark'} it: {e}")
+            return
+        if self.parked is not None or want:
+            self.log(f"hand tracking {'parked' if want else 'unparked'}"
+                     f"{' (the dashboard is open)' if not want and self.paused else ''}")
+        self.parked = want
+
     def pause(self, reason, now):
         if self.paused:
             return
@@ -447,7 +806,9 @@ class GamePause:
         self.resume_at = None
         self.log(f"Frametop paused ({reason}{', until the game ends' if self.ends_with_game else ''})")
         self.sound(True)
-        self.tell_screens(True)  # at once, even when the desktop is closing: that takes a while
+        self.tell_screens(True)
+        self.tell_helper()
+        self.update_park()  # at once, even when the desktop is closing: that takes a while
         self.on_change(True)
         self.worker.submit(self.worker.pause, self.settings["desktop"])
         self.save()
@@ -459,6 +820,8 @@ class GamePause:
         self.log(f"Frametop resumed ({reason})")
         self.sound(False)
         self.tell_screens(False)
+        self.tell_helper()
+        self.update_park()
         self.on_change(False)
         self.worker.submit(self.worker.resume)
         self.save()
@@ -504,8 +867,23 @@ class GamePause:
 
     def helper_started(self):
         """The pointer helper (re)started, so SteamVR did too, maybe with the gaze service."""
+        self.tell_helper()
+        self.watch.helper_started()
         if self.paused:
             self.worker.submit(self.worker.enforce)
+
+    def desktop_started(self):
+        """From frametop-session.sh ("pause enforce"): a desktop started, and hand tracking with it
+        (handsmode up). While paused, it stops again."""
+        if self.paused:
+            self.worker.submit(self.worker.enforce)
+
+    def defer_remote(self):
+        """From frametop-session.sh ("pause defer remote"), before it starts remote access: while
+        paused it doesn't, and the resume does. True when paused."""
+        if self.paused:
+            self.worker.submit(self.worker.defer_remote)
+        return self.paused
 
     def status(self):
         return {"t": "pause", "paused": self.paused, "reason": self.reason, "since": self.since,

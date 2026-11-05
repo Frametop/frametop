@@ -1,0 +1,129 @@
+{
+ "schema": 1,
+ "id": "edges",
+ "title": "View edges",
+ "intro": "Dots out at the edges of the panel and in its corners: turn only your eyes to them, as far as is comfortable.",
+ "steps": [
+  {
+   "id": "edges",
+   "kind": "dots",
+   "text": "Look at each dot until its ring fills. Keep your head still.|Some are far out: turn your eyes, not your head.",
+   "dots": [
+    [
+     24,
+     0
+    ],
+    [
+     -24,
+     0
+    ],
+    [
+     30,
+     0
+    ],
+    [
+     -30,
+     0
+    ],
+    [
+     0,
+     18
+    ],
+    [
+     0,
+     -18
+    ],
+    [
+     0,
+     23
+    ],
+    [
+     0,
+     -23
+    ],
+    [
+     30,
+     20
+    ],
+    [
+     -30,
+     20
+    ],
+    [
+     30,
+     -20
+    ],
+    [
+     -30,
+     -20
+    ],
+    [
+     22,
+     16
+    ],
+    [
+     -22,
+     16
+    ],
+    [
+     22,
+     -16
+    ],
+    [
+     -22,
+     -16
+    ]
+   ],
+   "hold": 1.2,
+   "shuffle": true
+  },
+  {
+   "id": "edges-sweep",
+   "kind": "path",
+   "text": "Follow the dot with your eyes as it goes round, far out.",
+   "path": "circle 0 0 22 8",
+   "seconds": 16
+  },
+  {
+   "id": "edges-again",
+   "kind": "dots",
+   "text": "Look at each dot until its ring fills. Keep your head still.",
+   "dots": [
+    [
+     30,
+     0
+    ],
+    [
+     -30,
+     0
+    ],
+    [
+     0,
+     23
+    ],
+    [
+     0,
+     -23
+    ],
+    [
+     30,
+     20
+    ],
+    [
+     -30,
+     20
+    ],
+    [
+     30,
+     -20
+    ],
+    [
+     -30,
+     -20
+    ]
+   ],
+   "hold": 1.2,
+   "shuffle": true
+  }
+ ]
+}

@@ -1,0 +1,212 @@
+---
+title: "G2 Desktop and panels: ft-screens' screens and panels, when they show, ft-layout, floating windows, the dashboard, remote access over VNC (78e93b1, G2Desktop.tla)"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    direction LR
+    lg0: Off, hidden, or not started
+    lg1: Shown, running, or arranged, as it should be
+    lg2: Between: waiting for a pose, a viewer, the resume
+    lg3: Hidden or stopped for a reason: the pause, conceal, the switch, a calibration
+    lg4: Suspected open bug: the state that breaks the rule
+    lg5: P1 open, ShownOnlyWanted: a desktop that starts with no head pose (headset off or asleep). apply_screens asks head before it sends anything (ft_layout.py 756), the caller only logs not arranged now (1955-1958, 2031-2038). No visibility, ingames, wrist, gesture, controllers or conceal reach ft-screens, so it keeps always and nothing concealed. Concealed screens show, toggle and dashboard users see them always, until a reset or a settings change (red P1.1-2, TLC HeadOff, 3 steps, HeadOffFix holds)
+    lg6: P2 open, minor, ShownOnlyWanted: a full gaze calibration during a VR game with always and ingames hide. state gives g_mode (always), not the mode in effect (dashboard), so gazecheck.py 623 reads the screens as shown, and its show at close (1264-1265) turns the switch on under the dashboard mode. The screens stay over the game with the dashboard closed until it ends (red P2.1-2, TLC CalInGame, 5 steps, CalInGameFix holds)
+    lg7: P3 open, minor, VncOffInPause: a desktop that starts mid-pause (autostart.sh on a SteamVR restart, the Desktop entry) runs remote-ctl.sh start with REMOTE=1 (frametop-session.sh 246-249) without a pause check. ft-screens hears pause on again, remote access doesn't stop. Same class as G1 L2 (red P3.1-2, TLC MidPause, 4 steps, MidPauseFix holds)
+    lg8: Holds at 78e93b1: TypeOK in all 11 configs. All four rules in Fixed (932 states), FixedAlways (632), HeadOffFix, CalInGameFix, MidPauseFix. HiddenComesBack holds in the code configs: the switch, conceal and the pause come back while the programs run. VncComesBack holds everywhere
+    lg9: Links, not new bugs: GazedCrash re-finds G4 Z1 (HiddenComesBack, 4 steps: ft-gazed dies mid-calibration, the hide stays). Lossy re-finds G1 L7 both ways: a lost pause off hides, a lost pause on shows through the pause, and only a new ft-screens hears it again. Crash-config liveness breaks count as noise
+    lg10: Escape hatches: P1, Meta+Shift+R, the reset button, a settings change or a profile. P2, the hotkey, or the game ending (UpdateGame resets the switch). P3, Frametop Remote Access off, or pause and resume again
+    lg11: Another group: arrows into it are where G2 touches it, drawn there, not here
+  }
+  class lg0 teal
+  class lg1 blue
+  class lg2 yellow
+  class lg3 orange
+  class lg4 breaks
+  class lg5 bugLegend
+  class lg6 bugLegend
+  class lg7 bugLegend
+  class lg8 fixed
+  class lg9 legendNote
+  class lg10 legendNote
+  class lg11 xgroup
+  state "Desktop start and stop (desktops.sh, frametop-session.sh 89-122, ft-layout start 1940-1968)" as ds {
+    d0: Off: no ft-screens, no nested Plasma
+    [*] --> d0
+    d1: ft-screens up with its defaults: always, ingames hide, switch off, nothing concealed, not paused
+    d2: Arranged: ft-layout placed the screens from the head and sent visibility, wrist, gesture, controllers, ingames, conceal and remote displays
+    d3: Never sent: no head pose at the start, not arranged now, ft-screens keeps its defaults
+    d4: Auto-arrange off: only the settings and the streams go, the screens stay where they were
+  }
+  state "One screen or panel shows when (UpdateVisibility 1236-1257, G2Desktop.tla Visible)" as sv {
+    v0: Hidden: paused, concealed, the mode or the switch says no, a floating panel off or minimized
+    [*] --> v0
+    v1: Shown: not paused, not concealed, the mode says yes or it's being dragged
+    v2: Pinned to a wrist: fades out past the wrist angle (60), pinned to the head: always in view
+    v3: Shown against the settings: concealed but showing, or showing with the dashboard closed
+  }
+  state "The mode and the hide and show switch (ModeVisible 1177-1197, EffectiveMode 1162-1164)" as md {
+    e0: always: shown unless the switch hides them
+    [*] --> e0
+    e1: dashboard: only with the SteamVR dashboard open, or the switch
+    e2: toggle: only with the switch, gesture: looking at the controller, or the switch
+    e3: always in a VR game with ingames hide: acts as dashboard
+  }
+  state "A full gaze calibration hides the screens (gazecheck.py 620-624, 1262-1266)" as cl {
+    c0: No calibration
+    [*] --> c0
+    c1: Calibrating: read state (g_mode and the switch), saved shown, then hide
+    c2: Closed: show again if it read them as shown
+    c3: Shown over the game: the show turned the switch on under the dashboard mode in effect
+  }
+  state "The pause (game_pause.py 552-592, tell_screens 669-688, compositor.c schedule)" as pz {
+    p0: Running
+    [*] --> p0
+    p1: Paused: pause on to ft-screens, everything hidden, relay buttons let go, ticks every 100 ms, remote access stopped if it ran
+    p2: A desktop started mid-pause: the relay sends pause on again (screens_seen), remote access runs
+  }
+  state "ft-layout and the layout (ft_layout.py, layout.json, docs/profiles.md)" as ly {
+    l0: layout.json: preset or custom, each screen's place, size, curve, pin and hidden, the visibility settings, remote displays
+    l1: apply or reset: places every screen around the head, sends the settings, closes the VR keyboard
+    l2: use PROFILE: its screens, hidden ones, remote displays and apps (ft-floatd profile)
+    l3: hide N, show N (set_hidden): saved, and conceal or reveal now
+  }
+  state "Floating windows, drawn by hand (ft_floatd.py, frametop-float.js, docs/floating-windows.md)" as fw {
+    f0: Docked: a window on a desktop screen in KWin
+    f1: Floating: its own spare output WL-n and panel, cropped to the window, placed where it last floated
+    f2: Minimized: the panel hides, the output stays
+    f3: ft-floatd gone: started once by Plasma's autostart (frametop-session.sh 268-277), nothing restarts it
+  }
+  state "The dashboard and Steam's panels (steampanels.cpp, the gamepad pill)" as sp {
+    s0: Dashboard closed
+    [*] --> s0
+    s1: Dashboard open: the dashboard mode shows the screens, near hand input on SteamVR's own panels, the gamepad pill over a screen
+  }
+  state "Remote access over the tailnet (remote-ctl.sh, remote-desktop.sh, vnc-bridge.sh, G2Desktop.tla vnc)" as vn {
+    n0: Off: REMOTE=0, or no remote-capable file (the desktop started without it, exit 3)
+    [*] --> n0
+    n1: Waiting: krdp on 127.0.0.1 3390, Xvnc 20 on the tailnet address, port 5900, an 8-character VNC password
+    n2: A viewer connected: FreeRDP from krdp into Xvnc, watch 15 to ft-screens every 5 s
+    n3: Stopped by the pause: stopped remote, the resume starts it in a scope of its own
+    n4: Running through the pause: the desktop started mid-pause
+    n5: vnc-bridge gone: no tailscale0 address, or no remote-view for 90 s, nothing restarts it
+  }
+  state "How often ft-screens draws a screen (compositor.c frame_interval 704-718)" as fr {
+    r0: Full rate: where you look, a video, typing on it, or a viewer watching (watch N, up to 60 s)
+    r1: Lower for the rest of what you see
+    r2: About once a second: hidden, behind you, or paused
+  }
+  state "Other groups" as og {
+    o1: G1 Lifecycle and presence
+    o3: G3 Input and pointer
+    o4: G4 Gaze
+    o5: G5 Hands
+    o6: G6 Remote displays
+  }
+  d0 --> d1: desktops.sh start: autostart.sh when SteamVR starts, the dashboard's Desktop entry, a resume after a pause that closed it
+  d1 --> d2: ft-layout start --wait 90 with a head pose
+  d1 --> d3: (P1.1) the headset off or asleep: apply_screens asks head first (756) and raises, nothing is sent
+  d3 --> v3: (P1.2) concealed screens show, toggle, gesture and dashboard users see them always
+  d3 --> d2: Meta+Shift+R, the reset button, a settings change
+  d1 --> d4: auto-arrange off: visibility and conceal still go (2007-2019)
+  d2 --> d0: desktops.sh stop, SteamVR stops, ft-screens ends (Plasma ends with it)
+  d1 --> p2: a new ft-screens while paused: pause on again
+  d1 --> o1: G1: when the desktop starts and stops, L2
+  d1 --> o5: G5: handsmode up starts hand tracking
+  v0 --> v1: pause off, reveal, show, the mode says yes (the dashboard opens, a look at the controller)
+  v1 --> v0: pause on, conceal, hide, the dashboard closes, a game in always with ingames hide
+  v1 --> v2: pin to a wrist or the head
+  v2 --> v1: unpin, or a reset
+  v3 --> v0: a reset, or the escape hatches
+  v1 --> r0: shown and looked at
+  v0 --> r2: hidden
+  e0 --> e3: a game starts, UpdateGame resets the switch
+  e3 --> e0: the game ends, the switch reset again
+  e0 --> e1: visibility from ft-layout, the switch reset
+  e1 --> e2: visibility from ft-layout, the switch reset
+  e3 --> v3: (P2.2) the calibration's show sets the switch on: shown with the dashboard closed
+  e0 --> o3: G3: the screens_toggle key sends toggle
+  c0 --> c1: a full calibration starts
+  c1 --> c2: done or cancelled
+  c2 --> c0: the switch back as it was, outside a game
+  c1 --> c3: (P2.1) in a game, always with ingames hide: state says always 0, read as shown, hide changes nothing
+  c3 --> c0: the game ends, or the hotkey
+  c1 --> o4: G4 Z1: ft-gazed dies here, the hide stays
+  p0 --> p1: a VR game (auto pause), pause_toggle
+  p1 --> p0: resume: pause off, remote-ctl.sh start if it stopped it
+  p1 --> o1: G1 L7: a lost pause off, g_paused sticks
+  p1 --> p2: (P3.1) the desktop starts mid-pause: frametop-session.sh 246-249 starts remote access, no pause check
+  p2 --> p0: resume: nothing marked stopped, remote access already running
+  l0 --> l1: Meta+Shift+R, the reset button, Display Settings
+  l0 --> l2: a profile:NAME key, Display Settings
+  l0 --> l3: ft-layout hide N, show N, Display Settings
+  l1 --> e0: visibility resets the switch
+  l2 --> l1: then placed, or only send_hidden with no head pose (2076-2079)
+  l3 --> v0: conceal
+  l2 --> f1: ft-floatd moves or launches the profile's windows
+  l1 --> o6: G6: start_remotes, place_remotes, conceal and reveal for remote displays
+  f0 --> f1: the float key, the title-bar button, Launch as Standalone, a dashboard launch, a tear-off
+  f1 --> f0: dock, carried onto a screen, the window closes
+  f1 --> f2: minimized
+  f2 --> f1: activate (frunner), unminimized
+  f1 --> f3: ft-floatd dies
+  f1 --> o3: G3: front N makes its window KWin's active one, typing focus
+  o5 --> f1: G5: near input carries, stretches, throws and docks panels
+  s0 --> s1: the dashboard opens
+  s1 --> s0: it closes
+  s1 --> e1: the dashboard mode shows the screens with it
+  s1 --> o5: G5: hands work on SteamVR's panels
+  n0 --> n1: the desktop starts with REMOTE=1, or Remote Access on in a capable desktop
+  n1 --> n2: a VNC viewer connects
+  n2 --> n1: the last viewer leaves, FreeRDP stops after 45 s
+  n2 --> r0: watch 15: every screen at full rate
+  n1 --> n3: a pause with running=1 (Xvnc and krdp both up)
+  n3 --> n1: the resume
+  n1 --> n0: the desktop stops (cleanup), Remote Access off
+  n0 --> n4: (P3.2) the desktop starts mid-pause: remote access runs through the game
+  n4 --> n1: the resume, which doesn't know it ran
+  n1 --> n5: no tailnet address or layout
+  n5 --> n1: Remote Access off and on, or a desktop restart
+  class d0 teal
+  class d1 yellow
+  class d2 blue
+  class d3 breaks
+  class d4 blue
+  class v0 orange
+  class v1 blue
+  class v2 blue
+  class v3 breaks
+  class e0 blue
+  class e1 blue
+  class e2 blue
+  class e3 yellow
+  class c0 teal
+  class c1 orange
+  class c2 blue
+  class c3 breaks
+  class p0 blue
+  class p1 orange
+  class p2 breaks
+  class l0 teal
+  class l1 blue
+  class l2 blue
+  class l3 blue
+  class f0 blue
+  class f1 blue
+  class f2 orange
+  class f3 orange
+  class s0 teal
+  class s1 blue
+  class n0 teal
+  class n1 yellow
+  class n2 blue
+  class n3 orange
+  class n4 breaks
+  class n5 orange
+  class r0 blue
+  class r1 yellow
+  class r2 teal
+  class o1 xgroup
+  class o3 xgroup
+  class o4 xgroup
+  class o5 xgroup
+  class o6 xgroup

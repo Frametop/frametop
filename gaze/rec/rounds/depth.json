@@ -1,0 +1,89 @@
+{
+ "schema": 1,
+ "id": "depth",
+ "title": "Depth",
+ "intro": "Dots near and far. The panel moves closer and further away; keep the dot sharp.",
+ "steps": [
+  {
+   "id": "near",
+   "kind": "dots",
+   "text": "The panel is close now. Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    3,
+    3,
+    15,
+    15
+   ],
+   "hold": 1.5,
+   "shuffle": true,
+   "distance": 0.5
+  },
+  {
+   "id": "mid",
+   "kind": "dots",
+   "text": "The panel is at arm's length and a bit. Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    3,
+    3,
+    15,
+    15
+   ],
+   "hold": 1.5,
+   "shuffle": true,
+   "distance": 1.5
+  },
+  {
+   "id": "far",
+   "kind": "dots",
+   "text": "The panel is far now. Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    3,
+    3,
+    15,
+    15
+   ],
+   "hold": 1.5,
+   "shuffle": true,
+   "distance": 5.0
+  },
+  {
+   "id": "near-far",
+   "kind": "prompt",
+   "text": "Keep looking at the dot as it comes near and goes far.",
+   "dot": [
+    0,
+    0
+   ],
+   "cues": [
+    [
+     "Far",
+     2.5
+    ],
+    [
+     "Near",
+     2.5
+    ],
+    [
+     "Far",
+     2.5
+    ],
+    [
+     "Near",
+     2.5
+    ],
+    [
+     "Far",
+     2.5
+    ],
+    [
+     "Near",
+     2.5
+    ]
+   ],
+   "cue_distance": {
+    "Far": 5.0,
+    "Near": 0.5
+   }
+  }
+ ]
+}

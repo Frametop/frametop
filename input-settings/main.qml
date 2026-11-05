@@ -21,10 +21,16 @@ Kirigami.ApplicationWindow {
             Kirigami.Action { text: "Controllers"; icon.name: "input-gamepad"; onTriggered: root.show(controllersPage) },
             Kirigami.Action { text: "Game optimization"; icon.name: "applications-games"; onTriggered: root.show(gamesPage) },
             Kirigami.Action { text: "Keyboard"; icon.name: "input-keyboard-virtual"; onTriggered: root.show(keyboardPage) },
+            Kirigami.Action { text: "Commands"; icon.name: "utilities-terminal"; onTriggered: root.show(commandsPage) },
+            Kirigami.Action { text: "Voice"; icon.name: "audio-input-microphone"; onTriggered: root.show(voicePage) },
             Kirigami.Action { text: "Pointer"; icon.name: "transform-move"; onTriggered: root.show(pointerPage) },
             Kirigami.Action { text: "Ignored panels"; icon.name: "view-hidden"; onTriggered: root.show(ignorePage) },
             Kirigami.Action { text: "Gaze"; icon.name: "view-visible"; onTriggered: root.show(gazePage) },
-            Kirigami.Action { text: "Bluetooth"; icon.name: "preferences-system-bluetooth"; onTriggered: root.show(bluetoothPage) }
+            Kirigami.Action { text: "Hands"; icon.name: "transform-browse"; onTriggered: root.show(handsPage) },
+            Kirigami.Action { text: "Bluetooth"; icon.name: "preferences-system-bluetooth"; onTriggered: root.show(bluetoothPage) },
+            Kirigami.Action { separator: true },
+            Kirigami.Action { text: "Controls guide"; icon.name: "help-contents"; onTriggered: backend.openControlsGuide() },
+            Kirigami.Action { text: "Frametop Tour"; icon.name: "help-about"; onTriggered: backend.openTour() }
         ]
     }
 
@@ -52,14 +58,221 @@ Kirigami.ApplicationWindow {
         })[backend.driverBlock] || ""
     }
 
+    // A model picker (Hands and Gaze pages): the catalog's versions (models/catalog.py) with their notes
+    // and benchmarks, set against the one running (viewing that one: against the baseline, stock or
+    // SteamVR). Choosing a version only shows it; "Use" downloads it if needed and switches to it.
+    // The catalog's texts come from GitHub, so they're shown as plain text.
+    component ModelPicker: ColumnLayout {
+        id: picker
+        property string kind
+        property var view: ({})
+        readonly property string busy: (backend.modelBusy || {})[kind] || ""
+        property string viewed: ""
+        readonly property var options: view.options || []
+        readonly property var opt: options.find(o => o.name === (viewed || view.choice)) || options[0] || ({})
+        readonly property string running: view.running || ""
+        readonly property string otherName: opt.target !== running ? running
+                                            : opt.target !== view.baseline ? (view.baseline || "") : ""
+        readonly property var other: otherName ? ((view.byName || {})[otherName] || null) : null
+        readonly property bool inUse: opt.name === view.choice && !view.pinned
+        spacing: Kirigami.Units.smallSpacing
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+
+        function fmt(v, unit) {
+            if (v === undefined || v === null) return "–"
+            const n = Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 100) / 100
+            return n + (unit === "" || unit === "%" || unit === "°" ? unit : " " + unit)
+        }
+        function better(m, v, o) {
+            if (v === undefined || v === null || o === undefined || o === null || v === o) return 0
+            return (m.better === "lower" ? v < o : v > o) ? 1 : -1
+        }
+
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            visible: !!picker.view.error
+            type: Kirigami.MessageType.Error
+            text: picker.view.error || ""
+        }
+        Repeater {
+            model: picker.options
+            delegate: Controls.RadioButton {
+                required property var modelData
+                text: modelData.title + (modelData.tag ? "  ·  " + modelData.tag : "")
+                      + (modelData.name === picker.view.choice ? (picker.view.pinned ? "  ·  in use, not following updates"
+                                                                                       : "  ·  in use") : "")
+                      + (!modelData.usable ? "  ·  needs a newer Frametop"
+                         : !modelData.installed ? "  ·  not downloaded" : "")
+                font.bold: modelData.name === picker.view.choice
+                checked: picker.opt.name === modelData.name
+                onToggled: if (checked) picker.viewed = modelData.name
+            }
+        }
+        Controls.Label {
+            visible: !!picker.view.note
+            text: picker.view.note || ""
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Kirigami.Theme.neutralTextColor
+            font: Kirigami.Theme.smallFont
+        }
+
+        // The one being looked at: what it is, what to expect, what it costs, and its numbers.
+        Kirigami.Separator { Layout.fillWidth: true; visible: !!picker.opt.name }
+        Controls.Label {
+            text: (picker.opt.title || "") + (picker.opt.date ? " (" + picker.opt.date + ")" : "")
+            textFormat: Text.PlainText
+            font.bold: true
+        }
+        Controls.Label {
+            visible: picker.opt.follows === true
+            text: "The newest version. Picked, it follows updates: when a newer version ships, Frametop moves to it without asking. Any other version stays put when picked."
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        Controls.Label {
+            text: picker.opt.summary || ""
+            visible: text !== ""
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+        }
+        Controls.Label {
+            text: picker.opt.notes || ""
+            visible: text !== ""
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            opacity: 0.85
+        }
+        Controls.Label {
+            text: picker.opt.cost ? "Cost: " + picker.opt.cost : ""
+            visible: text !== ""
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        GridLayout {
+            visible: (picker.view.metrics || []).some(m => picker.opt.bench && picker.opt.bench[m.key] !== undefined)
+            columns: 3
+            columnSpacing: Kirigami.Units.largeSpacing
+            rowSpacing: 2
+            Controls.Label { text: "Benchmark"; font.bold: true; Layout.fillWidth: true }
+            Controls.Label { text: picker.opt.target || ""; textFormat: Text.PlainText; font.bold: true }
+            Controls.Label {
+                text: picker.other ? picker.otherName + (picker.otherName === picker.running ? " (in use)" : "") : ""
+                textFormat: Text.PlainText
+                font.bold: true
+                opacity: 0.7
+            }
+            Repeater {
+                model: picker.view.metrics || []
+                delegate: Controls.Label {
+                    required property var modelData
+                    required property int index
+                    text: modelData.label
+                    textFormat: Text.PlainText
+                    Layout.row: index + 1
+                    Layout.column: 0
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    font: Kirigami.Theme.smallFont
+                    Controls.ToolTip.visible: !!modelData.note && mhover.hovered
+                    Controls.ToolTip.text: modelData.note || ""
+                    HoverHandler { id: mhover }
+                }
+            }
+            Repeater {
+                model: picker.view.metrics || []
+                delegate: Controls.Label {
+                    required property var modelData
+                    required property int index
+                    readonly property var v: (picker.opt.bench || {})[modelData.key]
+                    readonly property int b: picker.other ? picker.better(modelData, v, (picker.other.bench || {})[modelData.key]) : 0
+                    text: picker.fmt(v, modelData.unit)
+                    Layout.row: index + 1
+                    Layout.column: 1
+                    color: b > 0 ? Kirigami.Theme.positiveTextColor : b < 0 ? Kirigami.Theme.negativeTextColor
+                                                                       : Kirigami.Theme.textColor
+                }
+            }
+            Repeater {
+                model: picker.view.metrics || []
+                delegate: Controls.Label {
+                    required property var modelData
+                    required property int index
+                    text: picker.other ? picker.fmt((picker.other.bench || {})[modelData.key], modelData.unit) : ""
+                    Layout.row: index + 1
+                    Layout.column: 2
+                    opacity: 0.7
+                }
+            }
+        }
+        Controls.Label {
+            visible: (picker.view.metrics || []).some(m => picker.opt.bench && picker.opt.bench[m.key] !== undefined)
+            text: "Green: better than " + (picker.otherName || "the other") + ", red: worse. Hover a row for how it was measured."
+            textFormat: Text.PlainText
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        RowLayout {
+            Controls.Button {
+                text: picker.inUse ? "In use"
+                      : !picker.opt.installed ? "Download and use"
+                      : "Use this"
+                icon.name: picker.inUse ? "checkmark" : !picker.opt.installed ? "download" : "dialog-ok-apply"
+                enabled: !picker.inUse && picker.opt.usable !== false && picker.busy === "" && !!picker.opt.name
+                onClicked: backend.useModel(picker.kind, picker.opt.name)
+            }
+            Controls.Button {
+                text: "Remove download"
+                icon.name: "edit-delete"
+                visible: !picker.opt.builtin && !picker.opt.follows && picker.opt.installed === true
+                         && picker.opt.target !== picker.running && picker.opt.name !== picker.view.choice
+                enabled: picker.busy === ""
+                onClicked: backend.removeModel(picker.kind, picker.opt.name)
+            }
+            Controls.Button {
+                text: "Check for new versions"
+                icon.name: "view-refresh"
+                enabled: picker.busy === ""
+                onClicked: backend.refreshModels(picker.kind)
+            }
+            Controls.BusyIndicator {
+                visible: picker.busy !== ""
+                running: visible
+                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                Layout.preferredWidth: Layout.preferredHeight
+            }
+            Controls.Label {
+                visible: picker.busy !== ""
+                text: picker.busy
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+            }
+        }
+        Controls.Label {
+            text: "List from " + (picker.view.source || "this install")
+                  + (picker.view.checked ? ", checked " + picker.view.checked : "")
+            opacity: 0.6
+            font: Kirigami.Theme.smallFont
+        }
+    }
+
     function show(page) {
         pageStack.clear()
         pageStack.push(page)
     }
 
-    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|pointer|ignore|gaze|bluetooth opens the app on that page.
+    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|commands|voice|pointer|ignore|gaze|hands|bluetooth opens the app on that page.
     pageStack.initialPage: ({ buttons: buttonsPage, controllers: controllersPage, games: gamesPage, keyboard: keyboardPage,
-                              pointer: pointerPage, ignore: ignorePage, gaze: gazePage,
+                              commands: commandsPage,
+                              voice: voicePage, pointer: pointerPage, ignore: ignorePage, gaze: gazePage, hands: handsPage,
                               bluetooth: bluetoothPage })[startPage] || devicesPage
 
     Connections {
@@ -163,7 +376,12 @@ Kirigami.ApplicationWindow {
                         }
 
                         Controls.ComboBox {
-                            model: backend.roles
+                            // Keyboard + 3D pointer only where it splits something: a mouse node and a keyboard
+                            // node. A device that isn't connected has no nodes to tell, so it's offered there too.
+                            model: backend.roles.filter(r => r.value !== "combo" || row.modelData.role === "combo"
+                                                        || !row.modelData.connected
+                                                        || (row.modelData.kinds.indexOf("mouse") >= 0
+                                                            && row.modelData.kinds.indexOf("keyboard") >= 0))
                             textRole: "text"
                             valueRole: "value"
                             Component.onCompleted: currentIndex = indexOfValue(row.modelData.role)
@@ -215,7 +433,7 @@ Kirigami.ApplicationWindow {
                 }
             ]
             property string deviceId: pointerDevices.length > 0 ? pointerDevices[Math.max(0, deviceBox.currentIndex)].id : ""
-            property var pointerDevices: backend.devices.filter(d => d.role === "pointer")
+            property var pointerDevices: backend.devices.filter(d => d.role === "pointer" || d.role === "combo")
             property int capturedCode: -1
             property string capturedName: ""
             property bool capturing: false
@@ -280,49 +498,49 @@ Kirigami.ApplicationWindow {
                             onClicked: { backend.setMapping(bpage.deviceId, bpage.capturedCode, newAction.currentValue); bpage.capturedCode = -1 }
                         }
                     }
-                }
 
-                Kirigami.Heading {
-                    visible: bpage.rows.length > 0
-                    level: 3
-                    text: "Current mappings"
-                }
+                    Kirigami.Separator {
+                        visible: bpage.rows.length > 0
+                        Kirigami.FormData.isSection: true
+                        Kirigami.FormData.label: "Current mappings"
+                    }
 
-                Repeater {
-                    model: bpage.rows
-                    delegate: RowLayout {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.largeSpacing
-                        Controls.Label {
-                            text: modelData.name
-                            font.family: "monospace"
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                    Repeater {
+                        model: bpage.rows
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.largeSpacing
+                            Controls.Label {
+                                text: modelData.name
+                                font.family: "monospace"
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                            }
+                            Controls.ComboBox {
+                                model: backend.actions
+                                textRole: "text"
+                                valueRole: "value"
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 13
+                                Component.onCompleted: currentIndex = indexOfValue(modelData.action)
+                                onActivated: backend.setMapping(bpage.deviceId, modelData.code, currentValue)
+                            }
+                            Controls.Label {
+                                text: modelData.custom ? (modelData.isDefault ? "changed" : "custom") : "default"
+                                opacity: 0.6
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                            }
+                            // Remove: your own binding goes away (the button passes through again).
+                            // Reset: a changed built-in binding goes back to its default.
+                            // Unbind: an untouched built-in binding is set to "Do nothing".
+                            Controls.Button {
+                                text: modelData.custom ? (modelData.isDefault ? "Reset" : "Remove") : "Unbind"
+                                icon.name: modelData.custom ? (modelData.isDefault ? "edit-undo" : "edit-delete-remove")
+                                                            : "list-remove"
+                                onClicked: modelData.custom ? backend.removeMapping(bpage.deviceId, modelData.code)
+                                                            : backend.unbind(bpage.deviceId, modelData.code)
+                            }
+                            Item { Layout.fillWidth: true }
                         }
-                        Controls.ComboBox {
-                            model: backend.actions
-                            textRole: "text"
-                            valueRole: "value"
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 13
-                            Component.onCompleted: currentIndex = indexOfValue(modelData.action)
-                            onActivated: backend.setMapping(bpage.deviceId, modelData.code, currentValue)
-                        }
-                        Controls.Label {
-                            text: modelData.custom ? (modelData.isDefault ? "changed" : "custom") : "default"
-                            opacity: 0.6
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 4
-                        }
-                        // Remove: your own binding goes away (the button passes through again).
-                        // Reset: a changed built-in binding goes back to its default.
-                        // Unbind: an untouched built-in binding is set to "Do nothing".
-                        Controls.Button {
-                            text: modelData.custom ? (modelData.isDefault ? "Reset" : "Remove") : "Unbind"
-                            icon.name: modelData.custom ? (modelData.isDefault ? "edit-undo" : "edit-delete-remove")
-                                                        : "list-remove"
-                            onClicked: modelData.custom ? backend.removeMapping(bpage.deviceId, modelData.code)
-                                                        : backend.unbind(bpage.deviceId, modelData.code)
-                        }
-                        Item { Layout.fillWidth: true }
                     }
                 }
 
@@ -515,8 +733,8 @@ Kirigami.ApplicationWindow {
             id: kpage
             title: "Keyboard"
             // Pass-through keyboards connected now: with "no_keyboard", the keyboard waits for none.
-            // A program's uinput keyboard (frame-voice's, say) doesn't count.
-            property var keyboards: backend.devices.filter(d => d.connected && d.role === "passthrough"
+            // A program's uinput keyboard (a remote desktop's, say) doesn't count.
+            property var keyboards: backend.devices.filter(d => d.connected && (d.role === "passthrough" || d.role === "combo")
                                                                 && d.kinds.indexOf("keyboard") >= 0 && !d.uinput)
 
             Kirigami.FormLayout {
@@ -530,7 +748,7 @@ Kirigami.ApplicationWindow {
                 }
                 Controls.Switch {
                     Kirigami.FormData.label: "Keep it open:"
-                    text: "Until you press its Close key or your keyboard button, not only while the text field has focus"
+                    text: "Until you close it (its X) or press your keyboard button, not only while the text field has focus"
                     checked: backend.vrKeyboardPersist
                     enabled: backend.vrKeyboard !== "never"
                     onToggled: backend.setVrKeyboardPersist(checked)
@@ -540,6 +758,18 @@ Kirigami.ApplicationWindow {
                     text: kpage.keyboards.length ? kpage.keyboards.map(d => d.name).join(", ") : "none"
                 }
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Key combinations" }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Meta tap:"
+                    text: "Meta pressed and let go on its own does its combination below (Meta + other keys always work)"
+                    checked: backend.metaTap
+                    onToggled: backend.setMetaTap(checked)
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Carry floated windows:"
+                    text: "A window you float from the desktop starts carried by the 3D mouse, as carry_toggle does, until a click or Enter"
+                    checked: backend.carryOnFloat
+                    onToggled: backend.setCarryOnFloat(checked)
+                }
 
                 Repeater {
                     model: backend.keyShortcuts
@@ -593,13 +823,16 @@ Kirigami.ApplicationWindow {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                     wrapMode: Text.WordWrap
                     text: "Hold the modifiers (Ctrl, Alt, Shift, Meta), then press the key, on any keyboard. Or tap "
-                          + "one modifier on its own. The combination's last key isn't typed; the modifiers still reach "
+                          + "one modifier on its own: a left one taps either side, a right one only itself (Right Ctrl). "
+                          + "The combination's last key isn't typed; the modifiers still reach "
                           + "the app. While you're in Steam or a game, they see the keys too. Until you remove or change "
                           + "them, a Meta tap opens the Steam menu (or closes the dashboard) instead of the desktop's "
-                          + "launcher, and Meta+Shift+F floats the desktop window under the pointer in VR, or puts it "
-                          + "back. A command runs with sh as the input relay's service, outside the desktop's session, "
-                          + "with Frametop's ft-layout, ft-float and ft-steam on its path; its output goes to the "
-                          + "relay's log (journalctl --user -u frametop-input-relay)."
+                          + "launcher, Meta+Shift+F floats the desktop window under the pointer in VR, or puts it "
+                          + "back, Meta+Shift+H hides or shows the screens, and Ctrl+Alt+Shift+Esc lets go of every "
+                          + "key, for a modifier stuck on the desktop. A command runs with sh as the input "
+                          + "relay's service, outside the desktop's session, with Frametop's ft-layout, ft-float and "
+                          + "ft-steam on its path; its output goes to the relay's log (journalctl --user -u "
+                          + "frametop-input-relay)."
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
@@ -609,13 +842,235 @@ Kirigami.ApplicationWindow {
                 padding: Kirigami.Units.largeSpacing
                 wrapMode: Text.Wrap
                 opacity: 0.7
-                text: "Frametop's keyboard opens in front of you, below your eyes, and closes with its Close key or a layout reset "
-                      + "(or when the text field loses focus, with Keep it open off). It steps aside while the Steam "
-                      + "menu or Steam's own keyboard is up. Type on it with a laser or the 3D mouse. It types into any "
+                text: "Frametop's keyboard (Full Keyboard) opens in front of you, below your eyes, and closes with its X or a layout reset "
+                      + "(or when the text field loses focus, with Keep it open off). "
+                      + "Type on it with a laser, the 3D mouse, a controller's tip or a fingertip. It types into any "
                       + "app, but only Qt, GTK and Firefox apps say when a text field is selected; for the rest "
                       + "(Chromium, Electron and X11 apps), map Open/close keyboard to a button on the Buttons or "
-                      + "Controllers page. Keyboards set to Ignore, and keyboards other programs make (like "
-                      + "frame-voice's), don't count as connected."
+                      + "Controllers page. Keyboards set to Ignore, and keyboards other programs make, don't "
+                      + "count as connected."
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Voice
+    Component {
+        id: voicePage
+        Kirigami.ScrollablePage {
+            id: vpage
+            title: "Voice"
+            property var st: backend.voiceStatus
+            property var vs: backend.voiceSettings
+            property bool capturing: false
+            Component.onCompleted: backend.refreshVoice()
+            Component.onDestruction: if (capturing) backend.cancelControllerCapture()
+
+            Connections {
+                target: backend
+                function onCapturedController(button, label) {
+                    if (vpage.capturing) { vpage.capturing = false; backend.addVoiceButton(button) }
+                }
+            }
+            Timer {
+                // The relay takes every button for 30 s while capturing.
+                running: vpage.capturing
+                interval: 30000
+                onTriggered: { backend.cancelControllerCapture(); vpage.capturing = false }
+            }
+
+            ColumnLayout {
+                spacing: Kirigami.Units.largeSpacing
+
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: !backend.voiceInstalled
+                    type: Kirigami.MessageType.Information
+                    text: "Voice dictation isn't installed. Run voice/run.sh install in Frametop's folder: it "
+                          + "downloads about 320 MB of speech models, which stay on the headset."
+                }
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: backend.voiceInstalled && backend.voiceEnabled && !vpage.st.running
+                    type: Kirigami.MessageType.Warning
+                    text: "Voice dictation is on but not running. See journalctl --user -u frametop-voice."
+                }
+
+                Kirigami.FormLayout {
+                    Layout.fillWidth: true
+                    enabled: backend.voiceInstalled
+
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Voice dictation:"
+                        text: !vpage.st.running ? "Off" : vpage.st.dictating ? "On, listening now" : "On"
+                        checked: backend.voiceEnabled
+                        onToggled: backend.setVoiceOn(checked)
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Push to talk" }
+                    Controls.Label {
+                        Kirigami.FormData.label: "Keys:"
+                        text: backend.dictationKeys.length
+                              ? backend.dictationKeys.map(k => k.label + " (" + k.actionLabel.toLowerCase() + ")").join(", ")
+                              : "none"
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                    }
+                    Controls.Button {
+                        text: "Change on the Keyboard page"
+                        icon.name: "input-keyboard"
+                        onClicked: root.show(keyboardPage)
+                    }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "Keys do:"
+                        model: backend.dictationKeyModes
+                        textRole: "text"
+                        valueRole: "value"
+                        enabled: backend.dictationKeys.length > 0
+                        displayText: backend.dictationKeyMode ? currentText : "Some tap, some are held"
+                        readonly property string want: backend.dictationKeyMode
+                        onWantChanged: currentIndex = indexOfValue(want)
+                        Component.onCompleted: currentIndex = indexOfValue(want)
+                        onActivated: backend.setDictationKeyMode(currentValue)
+                    }
+                    Repeater {
+                        model: backend.voiceButtons
+                        delegate: RowLayout {
+                            required property var modelData
+                            Kirigami.FormData.label: "Controller:"
+                            Controls.Label { text: modelData.label }
+                            Controls.ToolButton {
+                                icon.name: "edit-delete"
+                                display: Controls.AbstractButton.IconOnly
+                                text: "Remove"
+                                Controls.ToolTip.text: text
+                                Controls.ToolTip.visible: hovered
+                                onClicked: backend.removeVoiceButton(modelData.button)
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: backend.voiceButtons.length ? "Another:" : "Controller:"
+                        Controls.Button {
+                            text: vpage.capturing ? "Press a button on a controller…" : "Capture a button"
+                            icon.name: "input-gamepad"
+                            highlighted: vpage.capturing
+                            enabled: backend.controllerStatus.helper
+                            onClicked: {
+                                if (vpage.capturing) { backend.cancelControllerCapture(); vpage.capturing = false }
+                                else { vpage.capturing = true; backend.startControllerCapture() }
+                            }
+                        }
+                        Controls.Label { text: "or"; opacity: 0.7 }
+                        Controls.ComboBox {
+                            id: voiceButtonBox
+                            model: backend.controllerButtons
+                            textRole: "text"
+                            valueRole: "value"
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                        }
+                        Controls.Button {
+                            text: "Add"
+                            icon.name: "list-add"
+                            onClicked: backend.addVoiceButton(voiceButtonBox.currentValue)
+                        }
+                    }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "Controller buttons:"
+                        model: backend.voiceModes
+                        textRole: "text"
+                        valueRole: "value"
+                        Component.onCompleted: currentIndex = indexOfValue(vpage.vs.controller_mode)
+                        onActivated: backend.setVoiceControllerMode(currentValue)
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Language" }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "You speak:"
+                        model: backend.voiceLanguages
+                        textRole: "text"
+                        valueRole: "value"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                        readonly property string want: vpage.vs.language
+                        onWantChanged: currentIndex = indexOfValue(want)
+                        Component.onCompleted: currentIndex = indexOfValue(want)
+                        onActivated: backend.setVoiceLanguage(currentValue)
+                    }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "Whisper model:"
+                        model: backend.voiceModels
+                        textRole: "text"
+                        valueRole: "value"
+                        enabled: !backend.voiceModelFetching
+                        displayText: backend.voiceModelFetching ? "Downloading " + backend.voiceModelFetching + "…" : currentText
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 18
+                        readonly property string want: backend.voiceModel
+                        onWantChanged: currentIndex = indexOfValue(want)
+                        onModelChanged: currentIndex = indexOfValue(want)
+                        Component.onCompleted: currentIndex = indexOfValue(want)
+                        onActivated: backend.setVoiceModel(currentValue)
+                    }
+                    Controls.Label {
+                        text: vpage.vs.language === "en"
+                              ? "Moonshine types English as you talk. Whisper types it when \"As you talk\" is off, and hears the wake word's commands."
+                              : "Whisper types other languages, slower than Moonshine types English. Bigger models hear better and take longer; large-v3-turbo can make VR stutter."
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Typing" }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "As you talk:"
+                        text: "Type words while you're still talking (off: all at once when you stop)"
+                        checked: vpage.vs.live_typing
+                        onToggled: backend.setVoiceOption("live_typing", checked)
+                    }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Sounds:"
+                        text: "A short tone when dictation starts and stops"
+                        checked: vpage.vs.sounds
+                        onToggled: backend.setVoiceOption("sounds", checked)
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Wake word" }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Wake word:"
+                        text: "Listen for it, then for a command (the microphone stays open)"
+                        checked: vpage.vs.wake_word
+                        onToggled: backend.setVoiceOption("wake_word", checked)
+                    }
+                    Controls.TextField {
+                        Kirigami.FormData.label: "Say:"
+                        text: vpage.vs.wake_phrases.map(p => p.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())).join(", ")
+                        placeholderText: "Hey Computer"
+                        enabled: vpage.vs.wake_word
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 16
+                        onEditingFinished: backend.setWakePhrases(text)
+                    }
+                    Repeater {
+                        model: backend.voiceCommands
+                        delegate: Controls.Label {
+                            required property var modelData
+                            Kirigami.FormData.label: "Command:"
+                            text: "\u201c" + modelData.say + "\u201d runs " + modelData.run
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                        }
+                    }
+                }
+
+                Controls.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    text: "Speech is recognised on the headset; nothing leaves it. Text is typed where you type: the "
+                          + "desktop window you clicked last, or Steam and games. It waits while you hold Ctrl, Alt, "
+                          + "Shift or Meta, so letters don't turn into shortcuts. A key held to talk "
+                          + "dictates while it's down; pressing another key with it cancels. A key works only on its own: with another modifier held it's a shortcut, not "
+                          + "dictation. Controller buttons still do what they do in games. After the wake word, a "
+                          + "command goes to voice/hooks/on-command, or runs a program you set in "
+                          + "~/.config/frametop-voice.json (\"commands\"; see voice/README.md)."
+                }
             }
         }
     }
@@ -649,6 +1104,29 @@ Kirigami.ApplicationWindow {
                     text: "Head follow is experimental. It's only lightly tested and not finished: the head "
                           + "follow settings below are a starting point, and polishing how it feels is left open "
                           + "for anyone who wants to take it further."
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Travel mode:"
+                    text: "SteamVR tracks for a moving car, train or plane (SteamVR's own setting, off by default)"
+                    checked: backend.travelMode
+                    enabled: backend.travelKnown && !backend.travelBusy
+                    onToggled: backend.setTravelMode(checked)
+                    Component.onCompleted: backend.refreshTravel()
+                }
+                RowLayout {
+                    visible: backend.travelNote !== ""
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        text: backend.travelNote
+                    }
+                    Controls.Button {
+                        text: "Check again"
+                        enabled: !backend.travelBusy
+                        onClicked: backend.refreshTravel()  // after starting SteamVR
+                    }
                 }
                 Repeater {
                     model: backend.pointerSettings
@@ -922,7 +1400,8 @@ Kirigami.ApplicationWindow {
                         text: (backend.pauseGesture.first === "" ? "No gesture: a mapped button, a key combination, or ft-pause still work."
                                : "Pauses and resumes Frametop, in games too. The game still gets the presses, so pick buttons it "
                                  + "doesn't use this way. Two buttons count as together when both go down within a third of a "
-                                 + "second, and twice means within 0.7 s.")
+                                 + "second, and twice means within 0.7 s. A gesture with a button on each controller works with "
+                                 + "one controller too: while only one is connected, its button alone, clicked twice, does it.")
                               + (gmpage.st.relay && backend.pauseGesture.first !== "" && !gmpage.st.gestureReader
                                  ? " Not reading the controllers right now (SteamVR isn't running?)." : "")
                     }
@@ -1107,26 +1586,22 @@ Kirigami.ApplicationWindow {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
-                RowLayout {
-                    Kirigami.FormData.label: "Eye tracker:"
-                    Controls.RadioButton {
-                        text: "Own tracker (recommended)"
-                        checked: backend.gazeTracker === "own"
-                        onToggled: if (checked) backend.setGazeTracker("own")
-                    }
-                    Controls.RadioButton {
-                        text: "SteamVR"
-                        checked: backend.gazeTracker === "steam"
-                        onToggled: if (checked) backend.setGazeTracker("steam")
-                    }
+                // Whose eye tracking: SteamVR's (GAZE_TRACKER=steam), or ours (own) with the classic
+                // pupil finder or an eye net (EYES_MODEL: latest or a version).
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Eye tracker" }
+                ModelPicker {
+                    Kirigami.FormData.label: "Tracker:"
+                    kind: "eyes"
+                    view: backend.eyeModels
+                    Component.onCompleted: backend.reloadModels()
                 }
                 Controls.Label {
                     // Ours is the default once it's installed (GAZE_TRACKER=auto, gaze/ft-gazed).
                     visible: backend.gazeTracker === "steam" && !backend.gazeOwnInstalled
-                    text: "Our own tracker is more accurate. Install it with gaze/tracker/install.sh in the "
-                          + "Frametop folder, in a terminal (asks for sudo)"
+                    text: "Our own tracker (the classic one and the eye nets) needs its frame grabber. Install it "
+                          + "with gaze/tracker/install.sh in the Frametop folder, in a terminal (asks for sudo)"
                           + (backend.gazeTrackerAuto ? "; gaze then uses it, and you calibrate it once."
-                                                     : ", then pick Own tracker here and calibrate it once.")
+                                                     : ", then pick it here and calibrate it once.")
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                     wrapMode: Text.WordWrap
                     opacity: 0.7
@@ -1176,6 +1651,7 @@ Kirigami.ApplicationWindow {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Gaze pointer tuning" }
                 Repeater {
                     model: backend.gazeSettings
                     delegate: RowLayout {
@@ -1252,6 +1728,8 @@ Kirigami.ApplicationWindow {
                     text: gpage.status.calibration_samples > 0
                           ? gpage.status.calibration_samples + " points ("
                             + (gpage.status.tracker === "own" ? "Own tracker, " + gpage.status.calibration_made
+                               + (gpage.status.own_mapped && gpage.status.own_mapped.length === 1
+                                  ? ", " + gpage.status.own_mapped[0] + " eye only" : "")
                                : gpage.status.kind === "eyes" ? gpage.status.model + ", each eye" : gpage.status.model) + ")"
                           : "none yet: use Calibrate"
                 }
@@ -1272,10 +1750,322 @@ Kirigami.ApplicationWindow {
                       + "with the button held and let go there. Hold still to drag: hold a press this long without moving "
                       + "to drag something instead. Look away to hand back: how far from the pointer you look before the "
                       + "gaze takes it back from the mouse. Largest correction to learn: a click corrected further than "
-                      + "this isn't learned; the tracker is that far off, so the quick check runs instead. Eye tracker: SteamVR's, or our own "
-                      + "(gaze/tracker), which keeps its own calibration. Eye bias: the gaze "
+                      + "this isn't learned; the tracker is that far off, so the quick check runs instead. With hand tracking, "
+                      + "a pinch clicks where you look; pinch, hold and move the hand to nudge the pointer first. Pinch nudge "
+                      + "starts after: how far the hand moves before the pointer does. Pinch nudge speed: how far the pointer "
+                      + "moves for each degree of hand movement after that. Eye tracker: SteamVR's, or our own "
+                      + "(gaze/tracker), the classic pupil finder or an eye net; each keeps its own calibration. Eye bias: the gaze "
                       + "combines both eyes, since their errors partly cancel; Left or Right counts that eye twice as "
                       + "much, and Auto weights each by how far off it was at your recent nudges."
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Hands
+    Component {
+        id: handsPage
+        Kirigami.ScrollablePage {
+            id: hpage
+            title: "Hands"
+            header: DriverWarning {}
+            property var st: backend.handsStatus
+            readonly property var range: backend.handsMarginRange
+            readonly property var spinRange: backend.spinDistanceRange
+            readonly property int spinAt: backend.handInteractions.findIndex(e => e.key === "SCREEN_SPIN_BRING")
+            // What runs, and why it can't: asked on the host, while this page is open.
+            Timer {
+                running: true
+                repeat: true
+                interval: 5000
+                triggeredOnStart: true
+                onTriggered: backend.refreshHands()
+            }
+
+            Kirigami.FormLayout {
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                    visible: !!hpage.st.problem
+                    type: backend.handsMode === "off" ? Kirigami.MessageType.Information : Kirigami.MessageType.Warning
+                    text: hpage.st.problem || ""
+                }
+                ColumnLayout {
+                    Kirigami.FormData.label: "Hand tracking:"
+                    Repeater {
+                        model: backend.handsModes
+                        delegate: Controls.RadioButton {
+                            required property var modelData
+                            text: modelData.text
+                            checked: backend.handsMode === modelData.value
+                            onToggled: if (checked) backend.setHandsMode(modelData.value)
+                        }
+                    }
+                }
+                Controls.Label {
+                    text: hpage.st.summary === undefined ? "…" : hpage.st.summary
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Hand cutouts:"
+                    text: "Cut a hole per hand in the panels, so Room View shows your real hands through them"
+                    checked: backend.handsCutouts
+                    onToggled: backend.setHandsCutouts(checked)
+                }
+                RowLayout {
+                    Kirigami.FormData.label: "Hand cutout margin:"
+                    enabled: backend.handsCutouts
+                    Controls.Label { text: "smaller"; opacity: 0.7 }
+                    Controls.Slider {
+                        id: marginSlider
+                        from: hpage.range.min
+                        to: hpage.range.max
+                        stepSize: hpage.range.step
+                        snapMode: Controls.Slider.SnapAlways
+                        value: backend.handsMargin
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                        onMoved: backend.setHandsMargin(value)
+                    }
+                    Controls.Label { text: "bigger"; opacity: 0.7 }
+                    Controls.Label {
+                        text: marginSlider.value.toFixed(2) + "°"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                    }
+                    Controls.ToolButton {
+                        icon.name: "edit-undo"
+                        display: Controls.AbstractButton.IconOnly
+                        text: "Default (" + hpage.range.default + "°)"
+                        Controls.ToolTip.text: text
+                        Controls.ToolTip.visible: hovered
+                        onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
+                    }
+                }
+
+                // Which hand models ft-hands runs (HANDS_MODEL): latest, a version, or stock MediaPipe.
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand model" }
+                ModelPicker {
+                    Kirigami.FormData.label: "Model:"
+                    kind: "hands"
+                    view: backend.handModels
+                    Component.onCompleted: backend.reloadModels()
+                }
+
+                // Three ways the hands work the desktop, each on its own (handsmode.METHODS).
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand input" }
+                Controls.Switch {
+                    Kirigami.FormData.label: "With gaze on:"
+                    text: "Pinch to click where you look"
+                    checked: !!backend.handMethods.gaze_clicks
+                    onToggled: backend.setHandMethod("gaze_clicks", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "Your eyes aim and your hands are the mouse's buttons. Index pinch: left click. "
+                        + "Middle finger to thumb: right click. Pinch and hold still to press and drag. Hold a pinch "
+                        + "with one hand and pinch with the other: both buttons held, each until its pinch opens."
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "With gaze off:"
+                    text: "Point a raised hand for a ray"
+                    checked: !!backend.handMethods.ray
+                    onToggled: backend.setHandMethod("ray", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "A hand raised in front and pointing shows a ray that works like a controller's "
+                        + "laser: pinch to click, middle pinch to right-click or scroll. A pinch with the hand held low "
+                        + "presses where the pointer is."
+                }
+                Controls.Switch {
+                    Kirigami.FormData.label: "Direct touch:"
+                    text: "Poke and grab Frametop's screens, gaze on or off"
+                    checked: !!backend.handMethods.touch
+                    onToggled: backend.setHandMethod("touch", checked)
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    Controls.ToolTip.text: "Touch a screen with your index finger to click it. Pinch its bar, an edge or "
+                        + "a corner to move or resize it."
+                }
+                Controls.Label {
+                    visible: backend.handsMode === "off"
+                    text: "These need hand tracking on (above)."
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                }
+
+                // Every interaction on Frametop's screens, each on its own (ft_input_settings.HAND_INTERACTIONS);
+                // they apply at once. Direct touch above switches all of them. The lazy susan's distance
+                // (SCREEN_SPIN_DISTANCE) goes under its switch, so the list is in two.
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand interactions" }
+                Repeater {
+                    model: backend.handInteractions.slice(0, hpage.spinAt + 1)
+                    delegate: interactionSwitch
+                }
+                RowLayout {
+                    enabled: !!backend.handMethods.touch && hpage.spinAt >= 0 && backend.handInteractions[hpage.spinAt].on
+                    Controls.Label { text: "Comes" }
+                    Controls.Slider {
+                        id: spinSlider
+                        from: hpage.spinRange.min
+                        to: hpage.spinRange.max
+                        stepSize: hpage.spinRange.step
+                        snapMode: Controls.Slider.SnapAlways
+                        value: backend.spinDistance
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                        onMoved: backend.setSpinDistance(value)
+                        Controls.ToolTip.visible: hovered
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        Controls.ToolTip.text: "How far in front of you a brought screen comes (at least 0.9 m, behind "
+                            + "frunner's search). One you push or pull there comes back that far next time, until the reset button."
+                    }
+                    Controls.Label {
+                        text: spinSlider.value.toFixed(2) + " m out"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                    }
+                    Controls.ToolButton {
+                        icon.name: "edit-undo"
+                        display: Controls.AbstractButton.IconOnly
+                        text: "Default (" + hpage.spinRange.default + " m)"
+                        Controls.ToolTip.text: text
+                        Controls.ToolTip.visible: hovered
+                        onClicked: { spinSlider.value = hpage.spinRange.default; backend.setSpinDistance(hpage.spinRange.default) }
+                    }
+                }
+                Repeater {
+                    model: backend.handInteractions.slice(hpage.spinAt + 1)
+                    delegate: interactionSwitch
+                }
+                Component {
+                    id: interactionSwitch
+                    Controls.Switch {
+                        required property var modelData
+                        Kirigami.FormData.label: modelData.group ? modelData.group + ":" : ""
+                        text: modelData.label
+                        checked: modelData.on
+                        enabled: !!backend.handMethods.touch
+                        onToggled: backend.setHandInteraction(modelData.key, checked)
+                        Controls.ToolTip.visible: hovered
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        Controls.ToolTip.text: modelData.tip
+                    }
+                }
+            }
+
+            footer: Controls.Label {
+                padding: Kirigami.Units.largeSpacing
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: "Your hands show through Frametop's screens where they're in front of them. Hand tracking "
+                      + "uses a lot of the headset's CPU. The margin is how far past your hand the screen opens up; "
+                      + "it applies right away. The hand inputs are separate: any of them can be on alone, and they "
+                      + "apply within a second. A hand holding a controller, or whose controller you just used, "
+                      + "does none of them."
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Commands
+    Component {
+        id: commandsPage
+        Kirigami.ScrollablePage {
+            id: cpage
+            title: "Commands"
+            header: DriverWarning {}
+            property string problem: ""
+            property bool adding: false
+
+            Connections {
+                target: backend
+                function onCommandAdded(saved, problem) {
+                    cpage.adding = false
+                    cpage.problem = problem
+                    if (saved) {
+                        commandName.text = ""
+                        commandRun.text = ""
+                    }
+                }
+            }
+
+            Kirigami.FormLayout {
+                Repeater {
+                    model: backend.commands
+                    delegate: RowLayout {
+                        required property var modelData
+                        Kirigami.FormData.label: modelData.name + ":"
+                        Controls.Label {
+                            text: modelData.run
+                            font.family: "monospace"
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                        }
+                        Controls.ToolButton {
+                            icon.name: "media-playback-start"
+                            display: Controls.AbstractButton.IconOnly
+                            text: "Run now"
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: backend.runCommand(modelData.name)
+                        }
+                        Controls.ToolButton {
+                            icon.name: "edit-delete"
+                            display: Controls.AbstractButton.IconOnly
+                            text: "Remove (and the buttons mapped to it)"
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: backend.removeCommand(modelData.name)
+                        }
+                    }
+                }
+                Controls.Label {
+                    visible: backend.commands.length === 0
+                    Kirigami.FormData.label: "Your commands:"
+                    text: "none yet"
+                    opacity: 0.7
+                }
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "New command" }
+                Controls.TextField {
+                    id: commandName
+                    Kirigami.FormData.label: "Name:"
+                    placeholderText: "e.g. stop-framecorder"
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 16
+                    onTextChanged: cpage.problem = ""
+                }
+                Controls.TextField {
+                    id: commandRun
+                    Kirigami.FormData.label: "Runs:"
+                    placeholderText: "e.g. killall framecorder"
+                    font.family: "monospace"
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 24
+                    onAccepted: addButton.clicked()
+                }
+                Controls.Button {
+                    id: addButton
+                    text: "Add"
+                    icon.name: "list-add"
+                    enabled: !cpage.adding && commandName.text.trim() !== "" && commandRun.text.trim() !== ""
+                    onClicked: {
+                        cpage.problem = ""
+                        cpage.adding = true
+                        backend.startAddCommand(commandName.text, commandRun.text)
+                    }
+                }
+                Controls.Label {
+                    visible: cpage.problem !== ""
+                    text: cpage.problem
+                    color: Kirigami.Theme.negativeTextColor
+                    wrapMode: Text.WordWrap
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                }
+            }
+
+            footer: Controls.Label {
+                padding: Kirigami.Units.largeSpacing
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: "A command runs with sh in the background, on the headset, as you. Nothing waits for it, and "
+                      + "its output goes to the journal (ft-cmd log NAME). Run it from: a button, a controller "
+                      + "button or a key combination (pick \"Run command NAME\" on those pages); frunner (Meta+Space, "
+                      + "type its name); Frametop Voice (the wake word, then \"run\" and its name, dashes said as "
+                      + "spaces); or a terminal, where its name is an alias (ft-cmd list, ft-cmd stop NAME). The "
+                      + "aliases live in ~/.config/frametop/aliases.sh, which one line in ~/.bashrc reads."
             }
         }
     }

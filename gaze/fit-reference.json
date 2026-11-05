@@ -1,0 +1,46 @@
+{
+ "schema": 1,
+ "made": "2026-10-14",
+ "source": "the maintainer's headset: 2 of 3 own-tracker calibrations (2026-10-08, 2026-10-09), the third fitted worse than 4 px",
+ "faces": 1,
+ "ipd": 0.0651,
+ "cameras_follow_lenses": null,
+ "eyes": {
+  "0": {
+   "centre": [
+    341.04,
+    221.4
+   ],
+   "jacobian": [
+    [
+     1.2749,
+     -0.4221
+    ],
+    [
+     -0.4783,
+     -1.3388
+    ]
+   ],
+   "fits": 2,
+   "fit_err": 2.339
+  },
+  "1": {
+   "centre": [
+    334.74,
+    173.53
+   ],
+   "jacobian": [
+    [
+     -1.3415,
+     -0.5307
+    ],
+    [
+     -0.4822,
+     1.4794
+    ]
+   ],
+   "fits": 2,
+   "fit_err": 2.146
+  }
+ }
+}

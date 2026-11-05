@@ -1,0 +1,479 @@
+#!/usr/bin/env python3
+"""The eye recorder's session runner (gaze/rec/session.py) without the headset: the round
+scripts' checks, the plans, the control sockets' answers, and whole rounds in a dry run.
+
+  python3 -m gaze.rec.tests.test_session
+"""
+import glob
+import json
+import os
+import shutil
+import socket
+import tempfile
+import threading
+import time
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+from gaze.rec import session  # noqa: E402
+
+
+def write_round(tmp, steps, **extra):
+    d = dict({"schema": 1, "id": "t", "title": "Test", "steps": steps}, **extra)
+    path = os.path.join(tmp, "t.json")
+    with open(path, "w") as f:
+        json.dump(d, f)
+    return path
+
+
+class RoundTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="eyerec-round-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def bad(self, steps, want):
+        with self.assertRaises(ValueError) as e:
+            session.load_round(write_round(self.tmp, steps))
+        self.assertIn(want, str(e.exception))
+
+    def test_shipped_rounds_load(self):
+        paths = sorted(glob.glob(os.path.join(session.ROUNDS_DIR, "*.json")))
+        self.assertEqual(len(paths), 10)
+        for p in paths:
+            r = session.load_round(p)
+            self.assertEqual(r["id"], os.path.basename(p)[:-5])
+            self.assertTrue(r["steps"][0]["ready"], p)
+
+    def test_panel_reach(self):
+        self.assertFalse(session.off_panel(0, 0))
+        self.assertFalse(session.off_panel(30, 20))
+        self.assertTrue(session.off_panel(38, 0))
+        self.assertTrue(session.off_panel(0, 26))
+        self.assertTrue(session.off_panel(30, 23), "corners reach less far up")
+        self.bad([{"id": "a", "kind": "dots", "dots": [[40, 0]]}], "off the panel")
+        self.bad([{"id": "a", "kind": "path", "path": "circle 0 0 26 4", "seconds": 4}], "off the panel")
+        self.bad([{"id": "a", "kind": "jumps", "count": 3, "range": [40, 10], "each": [0.5, 1]}], "off the panel")
+
+    def test_bad_steps(self):
+        self.bad([{"id": "a", "kind": "dance"}], "unknown kind")
+        self.bad([{"id": "A b", "kind": "dots", "dots": [[0, 0]]}], "bad id")
+        self.bad([{"id": "a", "kind": "path", "path": "spiral 0 0 1 2", "seconds": 2}], "bad path")
+        self.bad([{"id": "a", "kind": "path", "path": "circle 0 0 10 0", "seconds": 2}], "positive")
+        self.bad([{"id": "a", "kind": "prompt"}], "seconds")
+        self.bad([{"id": "a", "kind": "world", "point": [0, 0, 1], "seconds": 3}], "ahead")
+        self.bad([{"id": "a", "kind": "dots", "dots": [[0, 0]]}, {"id": "a", "kind": "dots", "dots": [[0, 0]]}], "repeat")
+        self.bad([{"id": "a", "kind": "dots", "group": "g", "dots": [[0, 0]]}, {"id": "b", "kind": "dots", "dots": [[0, 0]]},
+                  {"id": "c", "kind": "dots", "group": "g", "dots": [[0, 0]]}], "comes back")
+        self.bad([{"id": "a", "kind": "dots", "group": "dots", "dots": [[0, 0]]}], "opener")
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Blink", 1, "honk"]]}], "sound: blink")
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Blink", 1, "blink", 2]]}], "cues want")
+        # The eyes-shut rules (rounds/README.md)
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Blink", 1]]}], 'needs the sound "blink"')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Close both eyes", 2], ["Open", 2]]}], 'needs the sound "close"')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Shut your eyes", 2, "close"]]}], 'comes a cue with the sound "open"')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Close your eyes", 2, "close"], ["Open", 2]]}], '"open"')
+        # Moving the headset by hand
+        look = ["Look at the dot", 1.5]
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Push up", 2]]}], 'needs the sound "go"')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [["Push up", 2, "go"], ["Let go", 2, "done"]]}],
+                 "the eyes are still first")
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Push up", 2, "go"], ["Let go", 1, "done"]]}], "2 s or more")
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Push up", 2, "go"]]}], 'a "done" cue')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Push up", 2, "go"]]},
+                  {"id": "b", "kind": "prompt", "cues": [["Let go", 2, "done"]]}], 'a "done" cue')
+        self.bad([{"id": "a", "kind": "prompt", "cues": [look, ["Tilt: left side up", 2, "go"]]},
+                  {"id": "b", "kind": "dots", "ready": False, "group": "a", "dots": [[0, 0]], "text": "Look"},
+                  {"id": "c", "kind": "prompt", "ready": False, "group": "a", "text": "Keep holding",
+                   "cues": [["Let go", 2, "done"]]}], 'starts "Keep holding"')
+        session.load_round(write_round(self.tmp, [
+            {"id": "a", "kind": "prompt", "cues": [look, ["Slide to your left", 2, "go"]]},
+            {"id": "b", "kind": "dots", "ready": False, "group": "a", "dots": [[0, 0]], "text": "Keep holding it"},
+            {"id": "c", "kind": "prompt", "ready": False, "group": "a", "text": "Keep holding",
+             "cues": [["Let go, put it back", 2, "done"]]}]))
+        for word in ("Close your left eye", "Half closed", "Squint", "Open"):
+            session.load_round(write_round(self.tmp, [{"id": "a", "kind": "prompt", "cues": [[word, 1]]}]))
+
+    def test_sound_cues(self):
+        r = session.load_round(write_round(self.tmp, [{"id": "a", "kind": "prompt",
+                                                       "cues": [["Look", 1], ["Blink", 1.5, "blink"]]}]))
+        self.assertEqual(r["steps"][0]["cues"], [["Look", 1.0], ["Blink", 1.5, "blink"]])
+        self.assertEqual(session.step_seconds(r["steps"][0]), 2.5)
+
+    def test_grid_and_defaults(self):
+        r = session.load_round(write_round(self.tmp, [{"id": "a", "kind": "dots", "grid": [3, 2, 10, 5], "ready": False},
+                                                      {"id": "b", "kind": "reseat", "text": "off and on"}]))
+        a = r["steps"][0]
+        self.assertEqual(a["dots"], [[10, 5], [0, 5], [-10, 5], [10, -5], [0, -5], [-10, -5]])
+        self.assertTrue(a["ready"], "the first step always waits")
+        self.assertEqual((a["bg"], a["distance"], a["group"]), (session.MID_BG, session.PANEL_DISTANCE, "a"))
+        self.assertFalse(r["shift_check"], "a round that reseats on purpose has no shift check")
+
+    def test_plan(self):
+        rnd = session.load_round(os.path.join(session.ROUNDS_DIR, "jumps.json"))
+        a = session.build_plan(rnd, 7)
+        self.assertEqual([s["group"] for s in a[:2]], ["dots", "jumps"])
+        nine = a[0]["dots"]
+        self.assertEqual((nine[0], nine[-1], len(nine)), ([0.0, 0.0], [0.0, 0.0], 10))
+        self.assertEqual(sorted(map(tuple, nine[1:-1])), sorted(map(tuple, (d for d in session.grid(3, 3, 20, 20) if d != [0, 0]))))
+        jumps = a[1]
+        self.assertEqual(len(jumps["dots"]), 40)
+        self.assertTrue(all(0.5 <= t <= 1.5 for t in jumps["times"]))
+        self.assertTrue(all(not session.off_panel(*d) for d in jumps["dots"]))
+        self.assertEqual(a, session.build_plan(rnd, 7), "the same seed, the same round")
+        self.assertNotEqual(a[0]["dots"], session.build_plan(rnd, 8)[0]["dots"])
+        self.assertGreater(session.plan_seconds(a), 60)
+
+
+class SocketTest(unittest.TestCase):
+    """The panel and ft-eyes answer every command in order: an answer waited for is the one
+    after the answers of commands sent before it."""
+
+    def setUp(self):
+        self.name = "eyerec_socket_test_%d_%s" % (os.getpid(), self.id().rsplit(".", 1)[-1])
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.server.bind("\0" + self.name)
+        self.server.settimeout(0.2)
+        self.delay = 0.02
+        self.drop = set()
+        self.running = True
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def tearDown(self):
+        self.running = False
+        self.server.close()
+
+    def serve(self):
+        while self.running:
+            try:
+                data, addr = self.server.recvfrom(4096)
+            except OSError:
+                continue
+            text = data.decode()
+            time.sleep(self.delay)
+            if text in self.drop:
+                continue
+            try:
+                self.server.sendto(("ok " + text).encode(), addr)
+            except OSError:
+                pass
+
+    def test_answers_in_order(self):
+        s = session.Socket(self.name)
+        for n in range(5):
+            s.cmd("dot %d" % n)
+        self.assertEqual(s.cmd("ipd", reply=True), "ok ipd")
+        self.assertEqual(s.pending, 0)
+        s.cmd("bg 1")
+        self.assertEqual(s.cmd("log stop", reply=True), "ok log stop")
+        s.close()
+
+    def test_lost_answer(self):
+        s = session.Socket(self.name)
+        self.drop.add("fit")
+        self.assertIsNone(s.cmd("fit", reply=True, timeout=0.2))
+        self.assertEqual(s.cmd("ipd", reply=True), "ok ipd", "counting starts afresh")
+        s.close()
+
+    def test_errors_logged(self):
+        logs = []
+        s = session.Socket(self.name, log=logs.append)
+        s.cmd("x")
+        time.sleep(0.1)
+        s._got("error bad")
+        self.assertEqual(logs, ["%s: error bad" % self.name])
+        s.close()
+
+
+class DryRunTest(unittest.TestCase):
+    """Whole rounds with no processes: the files, the fitment, the controls."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="eyerec-dry-")
+        self.out = []
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def run_round(self, script, steer=None, profile=None, **kw):
+        path = os.path.join(self.tmp, "profile.json")
+        with open(path, "w") as f:
+            json.dump(profile or {}, f)
+        states = []
+        kw.setdefault("fit_coach", True)   # the coach's own tests; test_fitment_coach_off has it off
+        s = session.Session(self.tmp, script, profile=profile, dry_run=True, speed=kw.pop("speed", 40),
+                            next_after=kw.pop("next_after", 0.25), profile_path=path, button=False,
+                            on_status=lambda st: states.append(dict(st)), **kw)
+        s.print = self.out.append
+        s.start()
+        if steer:
+            steer(s, states)
+        s.join(60)
+        self.assertFalse(s._thread.is_alive())
+        with open(path) as f:
+            return s, states, json.load(f)
+
+    def files(self, s):
+        with open(os.path.join(s.session_dir, "session.json")) as f:
+            sj = json.load(f)
+        with open(os.path.join(s.session_dir, "fit.json")) as f:
+            fit = json.load(f)
+        return sj, fit
+
+    def prompts(self, s, take):
+        with open(os.path.join(s.session_dir, "takes", take, "prompts.jsonl")) as f:
+            return [json.loads(line) for line in f]
+
+    def test_round_folders_are_private(self):
+        # even under a umask that would let others read them (the window sets 077 too)
+        old = os.umask(0o022)
+        try:
+            s, _, _ = self.run_round("depth")
+        finally:
+            os.umask(old)
+        for d in (os.path.dirname(s.session_dir), s.session_dir, os.path.join(s.session_dir, "takes")):
+            self.assertEqual(os.stat(d).st_mode & 0o777, 0o700, d)
+
+    def test_round_and_profile(self):
+        s, states, profile = self.run_round("depth")
+        self.assertEqual(s.state, "done")
+        sj, fit = self.files(s)
+        # No IPD step: the setting is read and shown at the fitment.
+        self.assertEqual(sj["takes"], ["01-dots", "02-near", "03-mid", "04-far", "05-near-far"])
+        self.assertEqual((sj["status"], sj["fit"], sj["ipd_start"]), ("done", "good", 0.063))
+        self.assertNotIn("ipd_sweep", sj)
+        self.assertIn(session.IPD_TEXT.format(mm=63.0), "\n".join(self.out))
+        self.assertEqual(fit["fitment"]["result"], "good")
+        self.assertIsNotNone(fit["baseline"])
+        self.assertEqual(profile["bounties"]["depth"]["rounds"], 1)
+        self.assertEqual(profile["eyes_ipd"], 0.063)
+        for take in sj["takes"]:
+            with open(os.path.join(s.session_dir, "takes", take, "take.json")) as f:
+                self.assertEqual(json.load(f)["status"], "complete", take)
+        events = [e["event"] for e in self.prompts(s, "02-near")]
+        self.assertEqual(events[:4], ["take", "ready", "rec", "step"])
+        self.assertEqual(events[-3:], ["wait", "rec", "end"])
+        self.assertIn("ft_eyerecpanel: distance 0.500", self.out)
+        self.assertIn("ft_eyerecpanel: distance 5.000", self.out)
+        s2, _, profile = self.run_round("depth", profile=profile)
+        self.assertEqual(self.files(s2)[0]["takes"][0], "01-dots")
+        self.assertEqual(profile["bounties"]["depth"]["rounds"], 2)
+
+    def test_blink_beeps(self):
+        # The blinks round's beeps: each in prompts.jsonl's cue line, played as the cue starts.
+        s, _, _ = self.run_round("blinks", profile={"eyes_ipd": 0.063})
+        self.assertEqual(s.state, "done")
+        played = [line[len("sound: "):] for line in self.out if line.startswith("sound: ")]
+        self.assertEqual(played, ["blink"] * 8 + ["close", "open", "close", "open"])
+        sj, _ = self.files(s)
+        [take] = [t for t in sj["takes"] if t.endswith("blink-cue")]
+        cues = [e for e in self.prompts(s, take) if e["event"] == "cue"]
+        self.assertEqual([(e["word"], e.get("sound")) for e in cues], [("Blink", "blink")] * 8)
+        [take] = [t for t in sj["takes"] if t.endswith("closed")]
+        cues = [e.get("sound") for e in self.prompts(s, take) if e["event"] == "cue"]
+        self.assertEqual(cues, [None, "close", "open", "close", "open"])
+
+    def test_fitment_warns_then_skips(self):
+        # Next before the fit has been good for FIT_GOOD_S: a warning, then the round goes on.
+        s, states, _ = self.run_round("reading", next_after=0.01, speed=20)
+        sj, fit = self.files(s)
+        self.assertEqual((sj["fit"], fit["fitment"]["result"]), ("skipped", "skipped"))
+        self.assertTrue(any(st["note"] == session.FIT_SKIP_NOTE for st in states))
+        self.assertIsNone(fit["baseline"])
+
+    def test_fitment_coach_off(self):
+        # The default for now: no coaching or warning, the first Next goes on, and the coach's
+        # readings are still kept; no baseline, so no slip checks.
+        self.assertFalse(session.FIT_COACH)
+        s, states, _ = self.run_round("reading", next_after=0.6, speed=20, fit_coach=False)
+        sj, fit = self.files(s)
+        self.assertEqual(s.state, "done")
+        self.assertEqual((sj["fit"], fit["fitment"]["result"]), ("off", "off"))
+        self.assertTrue(fit["readings"])
+        self.assertIsNone(fit["baseline"])
+        self.assertFalse(fit["slips"])
+        self.assertFalse(any(st["note"] for st in states))
+        self.assertFalse(any(st["fit_words"] or st["fit_card"] for st in states))
+        self.assertTrue(all(st["fit_coach"] is False for st in states))
+
+    def test_skip_redo_stop(self):
+        def steer(s, states):
+            def wait_for(cond):
+                end = time.monotonic() + 30
+                while time.monotonic() < end and not cond():
+                    time.sleep(0.01)
+            # In the jumps take: redo the step while it runs, then skip the rest of the take.
+            # (Its ready first: the step's name comes one emit before the dots take's "running" goes.)
+            wait_for(lambda: s._status["step"] == "jumps" and s._status["state"] == "ready")
+            wait_for(lambda: s._status["step"] == "jumps" and s._status["state"] == "running")
+            s.redo()
+            wait_for(lambda: s._status["step"] == "jumps" and s._status["state"] == "ready")
+            wait_for(lambda: s._status["step"] == "jumps" and s._status["state"] == "running")
+            s.skip()
+            wait_for(lambda: s._status["step"] == "circle-slow" and s._status["state"] == "running")
+            s.stop(wait=0)
+        s, states, profile = self.run_round("jumps", steer=steer, speed=10, profile={"eyes_ipd": 0.063})
+        self.assertEqual(s.state, "stopped")
+        sj, _ = self.files(s)
+        self.assertEqual(sj["takes"], ["01-dots", "02-jumps", "03-pursuit"])
+        with open(os.path.join(s.session_dir, "takes", "02-jumps", "take.json")) as f:
+            self.assertEqual(json.load(f)["status"], "skipped")
+        with open(os.path.join(s.session_dir, "takes", "03-pursuit", "take.json")) as f:
+            self.assertEqual(json.load(f)["status"], "stopped")
+        redo = [e for e in self.prompts(s, "02-jumps") if e["event"] == "redo"]
+        self.assertEqual(len(redo), 1)
+        self.assertLess(redo[0]["from"], redo[0]["to"])
+        self.assertNotIn("bounties", profile, "a stopped round isn't counted")
+
+    # A round of two takes: a nudge with dots done while holding it (a chain), then one prompt.
+    TWO = [{"id": "nudge", "kind": "prompt", "group": "one", "dot": [0, 0], "seconds": 1, "text": "Push"},
+           {"id": "hold", "kind": "dots", "group": "one", "dots": [[0, 0], [5, 0]], "hold": 0.5, "ready": False,
+            "text": "Keep holding"},
+           {"id": "other", "kind": "prompt", "group": "two", "dot": [0, 0], "seconds": 1, "text": "Other"}]
+
+    def run_two(self, steer, **kw):
+        write_round(self.tmp, self.TWO)
+        return self.run_round("t", steer=steer, speed=10, next_after=0.6, rounds_dir=self.tmp, fit_coach=False,
+                              profile={"eyes_ipd": 0.063}, **kw)
+
+    @staticmethod
+    def at(s, step, state):
+        end = time.monotonic() + 30
+        while time.monotonic() < end and not (s._status["step"] == step and s._status["state"] == state):
+            time.sleep(0.005)
+        return s._status["step"] == step and s._status["state"] == state
+
+    def take_status(self, s, take):
+        with open(os.path.join(s.session_dir, "takes", take, "take.json")) as f:
+            return json.load(f)["status"]
+
+    def redos(self, s, take):
+        return [e["id"] for e in self.prompts(s, take) if e["event"] == "redo"]
+
+    def test_redo_in_the_countdown(self):
+        # R in the countdown starts this step again (it used to go back to the one before).
+        seen = {}
+        def steer(s, states):
+            self.assertTrue(self.at(s, "other", "countdown"))
+            s.redo()
+            seen["ready"] = self.at(s, "other", "ready")
+            seen["recording"] = s._recording
+        s, _, _ = self.run_two(steer)
+        self.assertEqual(s.state, "done")
+        self.assertTrue(seen["ready"])
+        self.assertFalse(seen["recording"], "the ready screen isn't recorded")
+        takes = self.files(s)[0]["takes"]
+        self.assertEqual(self.redos(s, takes[-1]), ["other"])
+        self.assertEqual(self.redos(s, takes[-2]), [])
+
+    def test_back_into_the_take_before(self):
+        # Back at a new take's first ready screen: the take before stays open until its Next,
+        # so its last step (with the nudge it follows on from) goes again in the same take.
+        seen = {}
+        def steer(s, states):
+            self.assertTrue(self.at(s, "other", "ready"))
+            seen["can_redo"] = s._status["can_redo"]
+            s.redo()
+            seen["back"] = self.at(s, "nudge", "ready")
+        s, _, _ = self.run_two(steer)
+        self.assertEqual(s.state, "done")
+        self.assertTrue(seen["can_redo"])
+        self.assertTrue(seen["back"], "back to the chain's head, not to hold")
+        takes = self.files(s)[0]["takes"]
+        self.assertEqual(len(takes), 3, takes)        # the opener's dots, one, two: no extra take
+        one = self.prompts(s, takes[1])
+        self.assertEqual(self.redos(s, takes[1]), ["nudge"])
+        self.assertEqual([e["id"] for e in one if e["event"] == "step"], ["nudge", "hold", "nudge", "hold"])
+        self.assertEqual(self.take_status(s, takes[1]), "complete")
+
+    def test_redo_a_step_that_follows_on(self):
+        # R while holding: the nudge goes again with it.
+        def steer(s, states):
+            self.assertTrue(self.at(s, "hold", "running"))
+            s.redo()
+            self.assertTrue(self.at(s, "nudge", "ready"))
+        s, _, _ = self.run_two(steer)
+        self.assertEqual(s.state, "done")
+        takes = self.files(s)[0]["takes"]
+        steps = [e["id"] for e in self.prompts(s, takes[1]) if e["event"] == "step"]
+        self.assertEqual(self.redos(s, takes[1]), ["nudge"])
+        self.assertEqual(steps, ["nudge", "hold", "nudge", "hold"])
+
+    def test_stop_or_skip_at_the_next_ready_screen(self):
+        # The take before is finished, not stopped or skipped, when the next take's ready screen
+        # is where it ends.
+        def stop(s, states):
+            self.assertTrue(self.at(s, "other", "ready"))
+            s.stop(wait=0)
+        s, _, _ = self.run_two(stop)
+        self.assertEqual(s.state, "stopped")
+        takes = self.files(s)[0]["takes"]
+        self.assertEqual(len(takes), 2)
+        self.assertEqual(self.take_status(s, takes[1]), "complete")
+
+        def skip(s, states):
+            self.assertTrue(self.at(s, "other", "ready"))
+            s.skip()
+        s, _, _ = self.run_two(skip)
+        self.assertEqual(s.state, "done")
+        takes = self.files(s)[0]["takes"]
+        self.assertEqual(len(takes), 2, "two was skipped before it started")
+        self.assertEqual(self.take_status(s, takes[1]), "complete")
+
+    def test_nothing_to_go_back_to(self):
+        # After a reseat Back is off: the headset sits differently now.
+        rnd = [{"id": "a", "kind": "prompt", "dot": [0, 0], "seconds": 1, "text": "A"},
+               {"id": "off", "kind": "reseat", "text": "off and on"},
+               {"id": "b", "kind": "prompt", "dot": [0, 0], "seconds": 1, "text": "B"}]
+        write_round(self.tmp, rnd)
+        seen = {}
+        def steer(s, states):
+            self.assertTrue(self.at(s, "b", "ready"))
+            seen["can_redo"] = s._status["can_redo"]
+        s, states, _ = self.run_round("t", steer=steer, speed=10, next_after=0.4, rounds_dir=self.tmp,
+                                      fit_coach=False, profile={"eyes_ipd": 0.063})
+        self.assertEqual(s.state, "done")
+        self.assertFalse(seen["can_redo"], "nothing goes back over a reseat")
+
+    def test_pause_stops_the_recording(self):
+        def steer(s, states):
+            end = time.monotonic() + 30
+            while time.monotonic() < end and not (s._status["step"] == "dots" and s._status["state"] == "running"):
+                time.sleep(0.01)
+            s.pause()
+            time.sleep(0.3)
+            self.assertFalse(s._recording)
+            s.resume()
+        s, _, _ = self.run_round("face", steer=steer, speed=10, profile={"eyes_ipd": 0.063})
+        self.assertEqual(s.state, "done")
+        events = [e["event"] for e in self.prompts(s, "01-dots")]
+        i = events.index("pause")
+        self.assertEqual(events[i - 1:i + 3], ["rec", "pause", "resume", "rec"])
+
+    def test_shift_check(self):
+        moved = {"on": False}
+
+        def steer(s, states):
+            # Once the fitment is done, the eyes appear 12 degrees up: the headset slipped down.
+            end = time.monotonic() + 30
+            while time.monotonic() < end and s._status["state"] in ("starting", "fitment"):
+                time.sleep(0.01)
+            ref = s.ref
+            summary = {str(cam): {"n": 90, "finds": 90, "found": 1.0,
+                                  "x": ref.eyes[cam]["centre"][0] + ref.eyes[cam]["jacobian"][0][1] * 12,
+                                  "y": ref.eyes[cam]["centre"][1] + ref.eyes[cam]["jacobian"][1][1] * 12,
+                                  "a": 28.0, "spacing": 15.0, "extra": 0.0} for cam in (0, 1)}
+            s._eyes.fake = lambda text: json.dumps(summary) if text == "fit" else "ok"
+            moved["on"] = True
+        s, states, _ = self.run_round("glasses", steer=steer, profile={"eyes_ipd": 0.063})
+        self.assertTrue(moved["on"])
+        _, fit = self.files(s)
+        self.assertGreaterEqual(len(fit["slips"]), 2, "the nine dots' middle, twice, and the grid's")
+        self.assertIn("up", fit["slips"][0]["hints"])
+        self.assertTrue(any(st["note"].startswith("The headset moved") for st in states))
+        self.assertTrue(any(e["event"] == "slip" for e in self.prompts(s, "01-dots")))
+
+
+if __name__ == "__main__":
+    unittest.main()

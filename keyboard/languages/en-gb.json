@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "en-gb",
+  "name": "English (UK)",
+  "locale": "en-GB",
+  "keymap": {
+    "rules": "evdev",
+    "model": "pc105",
+    "layout": "gb",
+    "variant": "",
+    "options": []
+  },
+  "legends": {
+    "source": "keymap",
+    "overrides": {}
+  },
+  "font_families": [
+    "Noto Sans",
+    "sans-serif"
+  ],
+  "required_keys": [
+    "IntlBackslash"
+  ]
+}

@@ -2,9 +2,10 @@
 
 The Frame's runtime is already a container: the dev container (Fedora toolbox
 in distrobox) is where everything builds and runs, and `setup/dev-container.sh`
-is its recipe. The recipe is the weak point — nothing in it is pinned. Rebuild
-the container tomorrow and you get a different Fedora, a different wlroots, a
-different glibc. This directory turns the container from a recipe into an
+is its recipe. It starts from the image's pinned base and installs the same
+package list (`setup/packages.txt`), but dnf still installs whatever Fedora has
+that day: rebuild the container tomorrow and you can get a different wlroots or
+glibc. This directory turns the container from a recipe into an
 **artifact**: an OCI image whose every input is frozen.
 
 ## What the image contains
@@ -19,7 +20,9 @@ different glibc. This directory turns the container from a recipe into an
    versions with aarch64 wheels, installed into `/opt/frametop/venv`. The venv
    sits on Fedora's own `python3`, which the base digest freezes, and sees the
    system site-packages: PySide6 and Kirigami come from dnf for that
-   interpreter, so one `python3` imports both, as in the dev container.
+   interpreter, so one `python3` imports both, as in the dev container. The
+   checked uv executable is temporary: only the environment it creates stays
+   in the image.
 3. **OpenVR from the pinned public tag** — `v2.15.6`, in
    `scripts/openvr.sh`. The build scripts fetch its headers and check their
    sha256. The image has no SteamVR, so it links the SDK's prebuilt
@@ -32,8 +35,34 @@ The native binaries (`ft-screens`, `ft-pointer`, the `ft_pointer` driver,
 `build.sh` scripts, run inside the image with `FRAME_IN_BOX=1`, so there is
 one build recipe for the image and the Frame. They stay in their `build/`
 folders under `/src/frametop` and are copied to `/opt/frametop`. Hand
-tracking stays deferred exactly as in `install.sh` (ncnn is a heavy,
-separately triggered build).
+tracking's `ft-camd` and `ft-hands` (with ncnn, built from the source
+`hands/Makefile` pins by sha256) stay in `hands/build/`, where their units and
+`ft-camd`'s file capabilities point.
+
+Component builds strip non-runtime symbols before the binaries are copied into
+the image. The pointer driver and gaze panel also discard unused sections;
+they keep `-O2`, the existing floating-point flags, and the host glibc checks.
+
+The image has a shared Fedora/toolchain stage, a builder, and the final runtime.
+The builder installs Fedora's full PySide6 RPM, then `pyside-runtime.py` exports
+the bindings imported by the four Frametop settings/recording applications.
+Their native binaries and support libraries are copied unchanged to the same
+Fedora paths, so both the system Python used by distrobox and the locked venv
+can import them. A manifest records their source RPMs and file hashes; the
+image build and offline tests check imports, hashes and shared-library resolution.
+The available-module metadata describes the exported subset rather than the
+full SDK. Keep `BACKENDS` in that script current when adding another Qt app.
+
+The native Qt/Kirigami libraries, desktop style, Breeze icons, platform plugins
+and image formats (including SVG and PDF) remain distro packages. Qt WebEngine,
+3D and other bindings unused by Frametop stay in the builder. This is Frametop's
+private application runtime; the separate `dev` container still installs the
+full PySide SDK. The runtime also keeps its compilers, headers and test tools,
+so the native build recipes and `ft dev test` still work. Base/environment
+layers stay separate from the source payload: the pinned toolbox base is
+shared with the retained rollback release, and cached builds can also reuse
+the added environment layers. Clean builds on independent runners need not
+produce identical environment layers, even with identical RPM versions.
 
 What deliberately stays outside the image for now: the **host payload** — the
 SteamVR driver registration (`vrpathreg`), ft-camd's file capabilities
@@ -48,16 +77,15 @@ the integration points live in one place:
 
 ```
 ft dev build        # build the image from this repo (docker or podman)
-ft update           # pull the published (versioned) image, pin its digest
 ft dev shell        # interactive shell, repo at /src/frametop
 ft ft-screens ...   # run any program from /opt/frametop
 ft dev test         # the Python test suites inside the image
 ft clean            # remove frametop's leftovers only (see the store section)
 ```
 
-`FT_IMAGE` overrides the image reference (repo mode defaults to the locally
-built `frametop:local`). Development commands live behind `ft dev` so an
-installed copy — which has no repo to build from — refuses them. Containers
+`FT_IMAGE` overrides the image reference (the default is the locally built
+`frametop:local`). The wrapper runs from a checkout only: releases
+don't install it. Containers
 run through the wrapper are named `frametop-<program>-<pid>`. Runs get no
 access to the host beyond the repo mount: how Frametop's programs run on the
 Frame is still open (see [design.md](design.md)).
@@ -65,26 +93,11 @@ Frame is still open (see [design.md](design.md)).
 ### No :latest on a headset
 
 A moving tag has no place on a headset: it cannot be reproduced in a bug
-report and cannot be rolled back. The wrapper enforces this for what gets
-**deployed** — installed mode refuses to run without a pinned reference, and
-both the update source and the pinned reference are rejected if they say
-`:latest`. Local development can use any tag it likes (`FT_IMAGE` is never
-second-guessed in repo mode).
-
-How pinning works:
-
-- `install.sh` (next slice) writes a **version tag** to
-  `~/.config/frametop/published` — the only place updates come from.
-- `ft update` pulls that reference and then writes the **digest**
-  (`repo@sha256:...`) to `~/.config/frametop/image`. Every later run, and
-  every bug report, names exactly that image.
-- Rollback is editing one file: put the previous digest back into
-  `~/.config/frametop/image`. The old image is still in the local store
-  (remove it with `ft clean` when you are done with it).
-
-Releases (below) don't use these: a release is a file, its image is pinned
-by ID in `.frametop-release`, and you roll back by running the previous
-release's `install.sh`.
+report and cannot be rolled back. A release is a file, its image is pinned by
+ID in `.frametop-release`, and you roll back by running the previous
+release's `install.sh`. (The wrapper's installed mode, which pinned a registry
+digest in `~/.config/frametop/image` and refused `:latest`, was dropped: no
+release used it.)
 
 ## The shared podman store
 
@@ -104,9 +117,9 @@ follow, and both are enforced or documented rather than hoped for:
 
 ## Network path for pulls
 
-`ft update` (and install) contact the registry over the Frame's normal
+Downloading a release (`get.sh --release`) goes over the Frame's normal
 Wi-Fi client interface (`wlan0`), not the 6 GHz streaming link to the PC
-dongle. The image is roughly 1–1.5 GB compressed — pulls ride the home
+dongle. The image is roughly 1–1.5 GB compressed — downloads ride the home
 network, so a weak Wi-Fi link is the bottleneck, not the streaming antenna.
 
 ## Storage
@@ -172,15 +185,24 @@ three ways, all through the same installer:
    from the release's folder. Each release has its own container, so
    installing one doesn't stop the one running.
 5. The release installed before stays; running its `install.sh` goes back to
-   it. Older ones are removed, with their containers and images.
-   `uninstall.sh` removes them all.
+   it and makes it `current` again. Older ones are removed, with
+   their containers and images. `uninstall.sh` removes them all.
+6. If the install stops part-way (an error, a power-off, a closed terminal),
+   run the same command again: it finishes it. Until then some services may
+   run from the new release and some from the old one (G7 W5 in
+   `docs/charts/README.md`). `install.sh` says so when it stops early.
+7. A release whose folder has fast-installed files (`scripts/fast-install`)
+   isn't installed over: run `scripts/fast-install undo` in the checkout first.
 
 Every update is a full 1.1 GB download, since the zip holds the whole image
-(user decision, 2026-10-07: one file, no registry). The `ft` wrapper's
-installed mode (`ft update`, `~/.config/frametop/published` and `image`) pulls
-from a registry, so releases don't use it.
+(user decision, 2026-10-07: one file, no registry).
 
 ## CI
+
+`.github/workflows/check.yml` runs the test gate when started by hand (manual only, no push or
+pull request trigger), on
+GitHub's free arm64 runner (`ubuntu-24.04-arm`): it builds the image (`ft dev build`) and runs
+`ft dev test` in it, read-only, with no secrets. It builds or publishes nothing.
 
 `.github/workflows/release.yml` runs on Depot's arm64 runners
 (`depot-ubuntu-24.04-arm-4`), only for a `v*` tag or by hand: no pushes or pull

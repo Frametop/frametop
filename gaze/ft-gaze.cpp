@@ -14,10 +14,12 @@
 // about 1.5 KB, 130 KB a second through podman's relay.
 //
 //   {"t":<sample time, CLOCK_MONOTONIC_RAW s>,"age":<ms old when read>,"n":<sample counter>,
-//    "head":{"yaw":..,"pitch":..,"hit":HIT},          head forward ray (for head nudging)
+//    "head":{"yaw":..,"pitch":..,"q":Q,"hit":HIT},    head forward ray (for head nudging)
 //    "src":{"action":SRC,"mmap1":SRC,"mmap2":SRC,"left":SRC,"right":SRC,"own":SRC},"eye":EYE}
-//   SRC = {"hy":..,"hp":..,"hit":HIT} or {"ok":0}    hy/hp: gaze direction relative to the
-//                                                     head, degrees (yaw +left, pitch +up)
+//   SRC = {"hy":..,"hp":..,"hq":Q,"hit":HIT} or {"ok":0}  hy/hp: gaze direction relative to
+//                                                     the head, degrees (yaw +left, pitch +up);
+//                                                     hq: the head pose it's relative to (the
+//                                                     one at the source's own sample time)
 //         mmap1 adds "open":[l,r] (probably eye openness, 0 in a blink) and "dist" (vergence
 //         distance, m); both mmap sets add "lr", the angle between the eyes (deg), which
 //         jumps when the tracker loses an eye, and "eyes":[[hy,hp],[hy,hp]], each eye's own
@@ -39,6 +41,10 @@
 //         variance (about 2e-5 on a clear view of the eye, rising as the lid or lashes get
 //         in the way), "new" whether it changed since the last sample (it freezes while the
 //         tracker can't see that eye, and in blinks). "eye" is null without the mmap.
+//   Q = [w,x,y,z]   a head pose's rotation as a unit quaternion (standing universe), so a
+//         head-relative direction can be turned into the room and back: the gaze service's
+//         fixation lock holds the gaze still in the room, where a look at a screen stays put
+//         while the head turns (gazecal.GazeLock).
 //   HIT = {"s":<screen>,"x":..,"y":..,"j":[dx/dhy,dy/dhy,dx/dhp,dy/dhp],"dpp":<deg per px>}
 //         or null. x, y are pixels on that screen; j is pixels per degree of head-relative
 //         yaw and pitch there, so a correction in degrees can be turned into pixels and back.
@@ -56,11 +62,17 @@
 // The mmap samples are in head space, 17 ms or so old when they appear, so each is turned
 // into the room with the head pose at its own timestamp, from a short pose history.
 //
+// The testbench (testbench/, a development tool that never ships) can stand in for both eye
+// trackers: it writes files in eye-server.mmap's and frametop-eyes-gaze's layouts to
+// $XDG_RUNTIME_DIR/frametop-testbench/, and while one was written in the last 2 s it's read
+// instead of the real one (Fresh). One a crashed testbench left behind stops counting by itself.
+//
 // Screens come from ft-screens (@ft_screens: "screens", "remotes" for other machines'
 // displays, "get N"), refreshed 4 times a second in the background. A curved screen is a cylinder toward its front (see OnSurface
 // in screens/vr.cpp).
 #include <openvr.h>
 
+#include "../conf/ftsock.h"
 #include "vrmath.h"
 
 #include <algorithm>
@@ -97,6 +109,22 @@ double NowRaw() {
     return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
+// The testbench's stand-in for a tracker's file (see the top), and whether it was written in the
+// last 2 s.
+std::string TestbenchPath(const char *name) {
+    const char *run = std::getenv("XDG_RUNTIME_DIR");
+    return (run && *run ? std::string(run) : "/run/user/" + std::to_string(getuid())) + "/frametop-testbench/" + name;
+}
+bool Fresh(const std::string &path) {
+    struct stat st {};
+    timespec now;
+    if (stat(path.c_str(), &st) != 0 || clock_gettime(CLOCK_REALTIME, &now) != 0) return false;
+    const double age = double(now.tv_sec - st.st_mtim.tv_sec) + (now.tv_nsec - st.st_mtim.tv_nsec) * 1e-9;
+    return age > -2.0 && age < 2.0;
+}
+constexpr const char *kEyeServer = "/dev/shm/eye-server.mmap";
+constexpr const char *kOwnGaze = "/dev/shm/frametop-eyes-gaze";
+
 // --- eye-server.mmap (packed, unaligned: read with memcpy) ---
 // SteamOS 0.4 (SteamVR 2.18.2; first on the 0.4.3 beta, the same on 0.4.5, the release)
 // moved every field from the timestamp on by 5 bytes (measured 2026-10-04 with the ftdiag
@@ -128,8 +156,8 @@ struct EyeFile {
     const uint8_t *p = nullptr;
     size_t size = 0;
     size_t At(size_t base) const { return base + shift; }
-    bool Open() {
-        const int fd = open("/dev/shm/eye-server.mmap", O_RDONLY | O_CLOEXEC);
+    bool Open(const char *path = kEyeServer) {
+        const int fd = open(path, O_RDONLY | O_CLOEXEC);
         if (fd < 0) return false;
         struct stat st {};
         if (fstat(fd, &st) != 0 || size_t(st.st_size) < kNeed) {
@@ -142,6 +170,10 @@ struct EyeFile {
         p = static_cast<const uint8_t *>(m);
         size = st.st_size;
         return true;
+    }
+    void Close() {
+        if (p) munmap(const_cast<uint8_t *>(p), size);
+        p = nullptr, size = 0;
     }
     // The sample counter, or 0 without the mapping: the one read the loop makes whether or
     // not the file was there (Get, V and ReadSample need it).
@@ -177,7 +209,8 @@ struct EyeFile {
     // SteamVR's tracker warming up, or a layout we don't know), so the mmap stays unused;
     // try again later. One detection per run is enough: the layout can't change under a
     // running ft-gaze, since SteamVR starts the eye server that writes the file, and the
-    // gaze service stops and starts with SteamVR.
+    // gaze service stops and starts with SteamVR. (The testbench's stand-in coming or going
+    // starts it over on a new EyeFile.)
     enum Detection { kWaiting, kFound, kNone };
     static constexpr double kConfirm = 0.5;
     static constexpr size_t kLayouts = sizeof kShifts / sizeof kShifts[0];
@@ -250,7 +283,9 @@ struct OwnSample {
 
 class OwnFile {
 public:
-    // Reopened when it appears or is replaced, since ft-eyes may start after us.
+    // Reopened when it appears or is replaced, since ft-eyes may start after us, and when the
+    // testbench's stand-in comes or goes.
+    const std::string &Path() const { return path_; }
     bool Read(OwnSample &o) {
         const double now = NowRaw();
         if (!p_ || now - checked_ > 2.0) Reopen(now);
@@ -279,11 +314,14 @@ private:
     static constexpr size_t kSize = 128;
     void Reopen(double now) {
         checked_ = now;
+        const std::string fake = TestbenchPath("frametop-eyes-gaze");
+        const std::string path = Fresh(fake) ? fake : kOwnGaze;
+        if (path != path_) Close(), path_ = path;
         struct stat st {};
-        if (stat("/dev/shm/frametop-eyes-gaze", &st) != 0) return Close();
+        if (stat(path_.c_str(), &st) != 0) return Close();
         if (p_ && st.st_ino == ino_) return;
         Close();
-        const int fd = open("/dev/shm/frametop-eyes-gaze", O_RDONLY | O_CLOEXEC);
+        const int fd = open(path_.c_str(), O_RDONLY | O_CLOEXEC);
         if (fd < 0) return;
         if (fstat(fd, &st) == 0 && size_t(st.st_size) >= kSize) {
             void *m = mmap(nullptr, kSize, PROT_READ, MAP_SHARED, fd, 0);
@@ -298,6 +336,7 @@ private:
     const uint8_t *p_ = nullptr;
     ino_t ino_ = 0;
     double checked_ = -1e9;
+    std::string path_ = kOwnGaze;
 };
 
 // --- Screens from ft-screens ---
@@ -314,11 +353,10 @@ public:
     void Start() {
         thread_ = std::thread([this] {
             const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-            sockaddr_un me{};
-            me.sun_family = AF_UNIX;
+            sockaddr_un me;
             const std::string name = "ft_gaze." + std::to_string(getpid());
-            std::memcpy(me.sun_path + 1, name.data(), name.size());
-            bind(fd, reinterpret_cast<sockaddr *>(&me), offsetof(sockaddr_un, sun_path) + 1 + name.size());
+            if (bind(fd, reinterpret_cast<sockaddr *>(&me), ft_sock_addr(name.c_str(), &me)) != 0)
+                std::perror(("ft-gaze: bind @" + name).c_str());   // (ft-screens' replies would go nowhere)
             timeval tv{0, 200000};
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
             while (running_) {
@@ -344,12 +382,7 @@ public:
 
 private:
     static std::string Ask(int fd, const std::string &cmd) {
-        sockaddr_un to{};
-        to.sun_family = AF_UNIX;
-        const char name[] = "ft_screens";
-        std::memcpy(to.sun_path + 1, name, sizeof name - 1);
-        sendto(fd, cmd.data(), cmd.size(), 0, reinterpret_cast<sockaddr *>(&to),
-               offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1);
+        if (ft_sock_send(fd, FT_SOCK_SCREENS, cmd.data(), cmd.size(), 0)) return "";   // no ft-screens: no answer to wait for
         char buf[1024];
         const ssize_t n = recv(fd, buf, sizeof buf - 1, 0);
         if (n <= 0) return "";
@@ -468,13 +501,38 @@ std::string HitJson(const std::vector<Screen> &screens, const vr::HmdMatrix34_t 
     return buf;
 }
 
+// Q: a pose's rotation as a unit quaternion [w,x,y,z] (v' = R v, R the pose's 3x3 part).
+std::string QuatJson(const vr::HmdMatrix34_t &p) {
+    const auto &m = p.m;
+    double w, x, y, z;
+    const double tr = m[0][0] + m[1][1] + m[2][2];
+    if (tr > 0) {
+        const double s = 2 * std::sqrt(tr + 1);  // 4w
+        w = s / 4, x = (m[2][1] - m[1][2]) / s, y = (m[0][2] - m[2][0]) / s, z = (m[1][0] - m[0][1]) / s;
+    } else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
+        const double s = 2 * std::sqrt(1 + m[0][0] - m[1][1] - m[2][2]);  // 4x
+        w = (m[2][1] - m[1][2]) / s, x = s / 4, y = (m[0][1] + m[1][0]) / s, z = (m[0][2] + m[2][0]) / s;
+    } else if (m[1][1] > m[2][2]) {
+        const double s = 2 * std::sqrt(1 + m[1][1] - m[0][0] - m[2][2]);  // 4y
+        w = (m[0][2] - m[2][0]) / s, x = (m[0][1] + m[1][0]) / s, y = s / 4, z = (m[1][2] + m[2][1]) / s;
+    } else {
+        const double s = 2 * std::sqrt(1 + m[2][2] - m[0][0] - m[1][1]);  // 4z
+        w = (m[1][0] - m[0][1]) / s, x = (m[0][2] + m[2][0]) / s, y = (m[1][2] + m[2][1]) / s, z = s / 4;
+    }
+    const double n = std::sqrt(w * w + x * x + y * y + z * z);
+    if (n < 1e-9) return "[1,0,0,0]";
+    char buf[80];
+    std::snprintf(buf, sizeof buf, "[%.6f,%.6f,%.6f,%.6f]", w / n, x / n, y / n, z / n);
+    return buf;
+}
+
 std::string SrcJson(const std::vector<Screen> &screens, const vr::HmdMatrix34_t &head, Vec3 dHead,
                     const std::string &extra = "") {
     double yaw, pitch;
     Angles(Normalize(dHead), yaw, pitch);
     char buf[96];
     std::snprintf(buf, sizeof buf, "{\"hy\":%.4f,\"hp\":%.4f,", yaw, pitch);
-    return buf + extra + "\"hit\":" + HitJson(screens, head, yaw, pitch) + "}";
+    return buf + extra + "\"hq\":" + QuatJson(head) + ",\"hit\":" + HitJson(screens, head, yaw, pitch) + "}";
 }
 
 // Sources (--sources, "sources LIST" on stdin): a bit each.
@@ -604,7 +662,16 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "ft-gaze: action manifest %s: error %d\n", manifest.c_str(), int(me));
 
     EyeFile eyes;
-    bool haveMmap = eyes.Open();
+    const std::string fakeEyes = TestbenchPath("eye-server.mmap");
+    std::string eyesPath = Fresh(fakeEyes) ? fakeEyes : kEyeServer;
+    bool haveMmap = eyes.Open(eyesPath.c_str());
+    // The stand-in's file: the testbench takes it away and makes a new one when the fake stops and
+    // starts again, maybe within one check, so it's known by its inode too.
+    auto inode = [](const std::string &path) {
+        struct stat st {};
+        return stat(path.c_str(), &st) == 0 ? st.st_ino : ino_t(0);
+    };
+    ino_t eyesIno = eyesPath == fakeEyes ? inode(fakeEyes) : 0;
     std::fprintf(stderr, "ft-gaze: eye-server.mmap %s\n", haveMmap ? "open" : "not available");
 
     OwnFile ownFile;
@@ -635,7 +702,7 @@ int main(int argc, char **argv) {
     uint32_t lastCounterSeen = eyes.Counter();
     // SteamVR's eye tracker creates the mmap a second or two after SteamVR starts, so it can
     // be missing when we start: look for it again every 2 s until it's there.
-    double nextOpen = NowRaw() + 2.0;
+    double nextOpen = NowRaw() + 2.0, nextFakeCheck = 0;
 
     while (true) {
         const double now = NowRaw();
@@ -651,9 +718,24 @@ int main(int argc, char **argv) {
         sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &hp, 1);
         if (hp.bPoseIsValid) history.Add(now, hp.mDeviceToAbsoluteTracking);
 
+        // The testbench's stand-in came or went: start over on the other file, layout and all.
+        if (now >= nextFakeCheck) {
+            nextFakeCheck = now + 0.5;
+            const std::string path = Fresh(fakeEyes) ? fakeEyes : kEyeServer;
+            const ino_t ino = path == fakeEyes ? inode(fakeEyes) : 0;
+            if (path != eyesPath || ino != eyesIno) {
+                eyes.Close();
+                eyes = EyeFile{};
+                eyesPath = path, eyesIno = ino;
+                haveMmap = eyes.Open(eyesPath.c_str());
+                lastCounterSeen = eyes.Counter();
+                nextLayoutCheck = missSince = 0;
+                std::fprintf(stderr, "ft-gaze: reading %s\n", path == fakeEyes ? "the testbench's fake eye tracker" : "SteamVR's eye tracker");
+            }
+        }
         if (!haveMmap && now >= nextOpen) {
             nextOpen = now + 2.0;
-            if ((haveMmap = eyes.Open())) {
+            if ((haveMmap = eyes.Open(eyesPath.c_str()))) {
                 std::fprintf(stderr, "ft-gaze: eye-server.mmap open\n");
                 lastCounterSeen = eyes.Counter();
             }
@@ -798,11 +880,12 @@ int main(int argc, char **argv) {
             const Vec3 f = Rotate(headNow, {0, 0, -1});
             yaw = std::atan2(-f.x, -f.z) * 180 / M_PI;
             pitch = std::asin(std::clamp(f.y, -1.0, 1.0)) * 180 / M_PI;
-            std::printf("{\"t\":%.5f,\"age\":%.1f,\"n\":%u,\"head\":{\"yaw\":%.4f,\"pitch\":%.4f,\"hit\":%s},"
+            std::printf("{\"t\":%.5f,\"age\":%.1f,\"n\":%u,\"head\":{\"yaw\":%.4f,\"pitch\":%.4f,\"q\":%s,\"hit\":%s},"
                         "\"src\":{\"action\":%s,\"mmap1\":%s,\"mmap2\":%s,\"left\":%s,\"right\":%s,\"own\":%s},"
                         "\"eye\":%s}\n",
-                        s.t, (now - s.t) * 1000, s.n, yaw, pitch, HitJson(list, headNow, 0, 0).c_str(), action.c_str(),
-                        m1.c_str(), m2.c_str(), left.c_str(), right.c_str(), own.c_str(), eye.c_str());
+                        s.t, (now - s.t) * 1000, s.n, yaw, pitch, QuatJson(headNow).c_str(),
+                        HitJson(list, headNow, 0, 0).c_str(), action.c_str(), m1.c_str(), m2.c_str(), left.c_str(),
+                        right.c_str(), own.c_str(), eye.c_str());
             if (std::fflush(stdout) != 0) break;  // the reader went away
         }
 

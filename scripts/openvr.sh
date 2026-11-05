@@ -9,13 +9,14 @@
 # libopenvr_api.so to link (the image uses the SDK's copy, since it has no SteamVR); the
 # programs still look in SteamVR's folder first, so on the Frame they load SteamVR's.
 openvr_tag=v2.15.6
+openvr_commit=0924064316de3effbcd1acf1e309182a2deb1c05   # the commit v2.15.6 names
 openvr_steamvr=/opt/steamvr/bin/linuxarm64
 
 openvr_fetch() {  # openvr_fetch <header> <sha256>
   local f=build/include/$1
   echo "$2  $f" | sha256sum -c --status 2>/dev/null && return 0
   mkdir -p build/include
-  curl -fsSL "https://raw.githubusercontent.com/ValveSoftware/openvr/$openvr_tag/headers/$1" -o "$f.part" || return
+  curl -fsSL "https://raw.githubusercontent.com/ValveSoftware/openvr/$openvr_commit/headers/$1" -o "$f.part" || return
   if ! echo "$2  $f.part" | sha256sum -c --status; then
     echo "$1 from openvr $openvr_tag doesn't match its pinned sha256" >&2
     rm -f "$f.part"

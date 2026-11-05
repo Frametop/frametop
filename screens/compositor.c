@@ -6,6 +6,9 @@
 //     never sized its windows and drew them all into one canvas of at most 1920x1080.
 //   - KWin renders into DMA-BUFs and hands them to us (linux-dmabuf). We draw nothing:
 //     each buffer goes to SteamVR as the panel's texture (vr.cpp, ImportDmabuf).
+//     KWin 6.6 puts those pixels on a synchronized subsurface and leaves a 1x1
+//     single-pixel buffer on the toplevel. The panel shows the largest DMA-BUF in
+//     that tree, and wp_presentation is answered on the toplevel so KWin keeps drawing.
 //   - Pointer input from the panels (controller lasers, the 3D mouse) goes to KWin through
 //     our seat, as if we were a normal desktop. KWin's nested backend adds our surface
 //     coordinates to its output's logical position without undoing its own scale, and its
@@ -30,6 +33,8 @@
 //   COMMAND     run with WAYLAND_DISPLAY set to our socket (e.g. the Frametop session)
 // Runs in the dev container (wlroots 0.20); KWin connects from the host.
 #define _GNU_SOURCE
+#include "../conf/ftsock.h"
+
 #include <drm_fourcc.h>
 #include <linux/input-event-codes.h>
 #include <signal.h>
@@ -57,17 +62,26 @@
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
+#include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
+#include <wlr/types/wlr_presentation_time.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_shm.h>
+#include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
+#include <wayland-protocols/presentation-time-enum.h>
 
 #include "vr.h"
 #include "controller-click.h"
 #include "remote.h"
+#include "logfile.h"
 #include "relay-buttons.h"
+#include "held-keys.h"
+#include "rendernode.h"
 
 #define MAX_SCREENS 24  // screens and spare outputs
 // A screen counts as playing a video while its last VIDEO_COMMITS commits each redrew at
@@ -90,8 +104,13 @@ struct screen {
     int index;
     struct wlr_xdg_toplevel *toplevel;
     struct wlr_buffer *held;      // on the panel now; unlocked when the next one arrives
+    struct wlr_buffer *pending;   // the newest one while the panel is held (ft_vr_screen_held), locked
+    struct wlr_buffer *latest;    // this frame's output-layer DMA-BUF, locked until the toplevel commits
+    struct wlr_surface *latest_surface;
+    int64_t latest_area;
     bool frame_pending;           // a commit waits for its frame callback
     unsigned commits;             // buffers committed, and the last one's size ("toplevels")
+    uint64_t present_seq;         // wp_presentation sequence, one per toplevel commit
     int buffer_width, buffer_height;
     struct wlr_xdg_toplevel_decoration_v1 *decoration;  // answered on the first commit
     struct wl_listener commit, destroy, decoration_destroy, set_title;
@@ -112,13 +131,15 @@ struct tracked_buffer {
 };
 
 struct server {
+    const char *log_path;  // --log: the log file, rotated by size (logfile.h)
     struct wl_display *display;
     struct wl_event_loop *loop;
     struct wlr_seat *seat;
     struct wlr_keyboard keyboard;
+    struct ft_lost_keys lost_keys;  // releases that came with no screen focused (held-keys.h)
     struct wlr_xdg_shell *xdg_shell;
     struct wlr_xdg_decoration_manager_v1 *decoration;
-    struct wl_listener new_toplevel, new_decoration;
+    struct wl_listener new_toplevel, new_decoration, new_surface;
     struct screen *screens[MAX_SCREENS];
     struct config config[MAX_SCREENS];
     double scale[MAX_SCREENS];  // KWin's scale for each screen (panel pixels per logical unit)
@@ -142,14 +163,22 @@ struct server {
     // panel. The input relay grabs the keyboards while it's the screens (see keys_update).
     bool keys_clicked;    // the last click was on a screen
     bool keys_desktop;    // ...and the screens are showing: typing goes to the desktop
+    bool keys_shown;      // the relay was told the screens show (see keys_update)
+    bool keys_paused;     // ...and that we're paused ("pause on" from it)
+    bool keys_wheel;      // ...and that the 3D mouse's wheel comes here (see keys_update)
     int key_remote;       // the last click was on this remote screen (index): typing goes to it; -1 not
+    // Frunner's search (frunner/ft-frunner) has the typing while it's open: "frunner on",
+    // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
+    uint32_t spot_until;  // ms; 0 closed
     int relay_fd;         // unbound, so the relay can't reply into our control socket
     uint32_t relay_sent;  // when the relay last heard from us (ms)
     unsigned ticks;
-    // Our keyboard ("vrkeyboard" commands from the input relay; see keyboard_command).
-    int kb_screen;         // the screen it's open for, -1 closed
-    bool kb_auto;          // opened for a focused text field (not by a button)
-    unsigned kb_close_at;  // ticks: close it then (a text field lost focus), 0 not
+    // Full Keyboard (keyboard/, through the relay's "fullkb OPEN", every second while it runs):
+    // the "vrkeyboard" commands open and close it (see keyboard_command).
+    unsigned kb_close_at;   // ticks: close it then (a text field lost focus), 0 not
+    uint32_t fullkb_until;  // ms; it counts as running until then, 0 not
+    bool fullkb_open;       // it's up for Frametop
+    bool fullkb_auto;       // ...opened for a focused text field
     bool vr;               // connected to SteamVR (not --no-vr)
     bool beside;           // a second instance next to the desktop (--beside): remote screens only
 };
@@ -158,6 +187,52 @@ static uint32_t now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+
+// ---------------------------------------------------------------- frunner
+
+#define SPOT_LEASE_MS 3000
+
+static bool spot_open(const struct server *s) {
+    return s->spot_until && (int32_t)(s->spot_until - now_ms()) > 0;
+}
+
+// From the control socket (@ft_screens), so replies come back there; a failing destination is
+// logged when it starts failing (ftsock.h).
+static void sock_send(struct server *s, struct ft_sock_log *to, const char *msg) {
+    ft_sock_send_logged(s->relay_fd, to, msg, strlen(msg), MSG_DONTWAIT);
+}
+
+// To ft-frunner's socket (@ft_frunner): "key <code> <value>" while it has the typing, and
+// "dismiss <why>" when something else takes it (a click elsewhere, a pause).
+static void spot_send(struct server *s, const char *msg) {
+    static struct ft_sock_log to = {FT_SOCK_FRUNNER, 0, 0, 0};
+    sock_send(s, &to, msg);
+}
+
+// To the input relay's control socket (@frametop_relay).
+static void relay_send(struct server *s, const char *msg) {
+    static struct ft_sock_log to = {FT_SOCK_RELAY, 0, 0, 0};
+    sock_send(s, &to, msg);
+}
+
+// To ft-floatd (@frametop_float).
+static void float_send(struct server *s, const char *msg) {
+    static struct ft_sock_log to = {FT_SOCK_FLOAT, 0, 0, 0};
+    sock_send(s, &to, msg);
+}
+
+static bool fullkb(const struct server *s) {
+    return s->fullkb_until && (int32_t)(s->fullkb_until - now_ms()) > 0;
+}
+
+static void spot_dismiss(struct server *s, const char *why) {
+    if (!spot_open(s)) return;
+    s->spot_until = 0;
+    wlr_log(WLR_INFO, "frunner dismissed (%s)", why);
+    char msg[64];
+    snprintf(msg, sizeof msg, "dismiss %s", why);
+    spot_send(s, msg);
 }
 
 // ---------------------------------------------------------------- buffers
@@ -184,6 +259,7 @@ static void track_buffer(struct server *s, struct wlr_buffer *buffer) {
 
 static bool relay_can_press(struct server *s);
 static void release_relay_buttons(struct server *s, const char *why);
+static void release_seat_buttons(struct server *s, const char *why);
 
 // A video (or anything moving over a large area) on a screen you don't look at keeps the
 // full frame rate (see frame_interval): its commits keep redrawing much of it, and keep
@@ -204,6 +280,74 @@ static void note_damage(struct screen *sc, struct wlr_surface *surface, struct w
     if (sc->big == all && t - oldest <= VIDEO_COMMITS * 1000 / VIDEO_HZ) sc->video_until = t + VIDEO_HOLD;
 }
 
+// The screen whose toplevel owns this surface, walking synchronized subsurfaces up.
+// KWin 6.6's output layer is one of those children.
+static struct screen *screen_for_surface(struct server *s, struct wlr_surface *surface) {
+    for (int n = 0; n < 8 && surface; ++n) {
+        for (int i = 0; i < MAX_SCREENS; ++i) {
+            struct screen *sc = s->screens[i];
+            if (sc && sc->toplevel->base->surface == surface) return sc;
+        }
+        struct wlr_subsurface *sub = wlr_subsurface_try_from_wlr_surface(surface);
+        surface = sub ? sub->parent : NULL;
+    }
+    return NULL;
+}
+
+// The largest DMA-BUF of this frame: on the toplevel itself in KWin 6.2, on a
+// synchronized child in KWin 6.6, whose toplevel has a 1x1 single-pixel buffer.
+// wlroots drops a synchronized child's current buffer again before the parent's commit
+// signal, so the layer's DMA-BUF is only visible in the child's own commit. Keep it.
+static void note_layer_buffer(struct screen *sc, struct wlr_surface *surface) {
+    struct wlr_buffer *buffer = surface->current.buffer;
+    struct wlr_dmabuf_attributes attrs;
+    if (!buffer || !wlr_buffer_get_dmabuf(buffer, &attrs)) return;
+    const int64_t area = (int64_t)buffer->width * buffer->height;
+    if (area < sc->latest_area) return;
+    if (sc->latest == buffer) {
+        sc->latest_surface = surface;
+        sc->latest_area = area;
+        return;
+    }
+    if (sc->latest) wlr_buffer_unlock(sc->latest);
+    sc->latest = wlr_buffer_lock(buffer);
+    sc->latest_surface = surface;
+    sc->latest_area = area;
+}
+
+// wlroots looks up a wl_output on this output's resource list before it sends
+// presented. An empty list skips that and still sends presented. KWin waits for it,
+// on the toplevel, including when the pixels came from a child.
+static void send_presented(struct wlr_surface *surface, uint32_t refresh, uint64_t seq) {
+    struct wlr_presentation_feedback *feedback = wlr_presentation_surface_sampled(surface);
+    if (!feedback) return;
+    static struct wlr_output output;
+    static bool ready;
+    if (!ready) {
+        wl_list_init(&output.resources);
+        ready = true;
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    const struct wlr_presentation_event event = {
+        .output = &output,
+        .tv_sec = (uint64_t)ts.tv_sec,
+        .tv_nsec = (uint32_t)ts.tv_nsec,
+        .refresh = refresh,
+        .seq = seq,
+        .flags = WP_PRESENTATION_FEEDBACK_KIND_VSYNC,
+    };
+    wlr_presentation_feedback_send_presented(feedback, &event);
+    wlr_presentation_feedback_destroy(feedback);
+}
+
+static void present(struct screen *sc, struct wlr_buffer *buffer);
+
+static void drop_pending(struct screen *sc) {
+    if (sc->pending) wlr_buffer_unlock(sc->pending);
+    sc->pending = NULL;
+}
+
 static void screen_commit(struct wl_listener *l, void *data) {
     struct screen *sc = wl_container_of(l, sc, commit);
     struct wlr_xdg_surface *xdg = sc->toplevel->base;
@@ -217,24 +361,52 @@ static void screen_commit(struct wl_listener *l, void *data) {
             wlr_xdg_toplevel_decoration_v1_set_mode(sc->decoration, WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
         return;
     }
-    struct wlr_buffer *buffer = xdg->surface->current.buffer;
-    static int logged;
-    if (logged < 6) {
-        ++logged;
-        wlr_log(WLR_INFO, "screen %d: commit, buffer %p (%dx%d), mapped %d", sc->index + 1, (void *)buffer,
-                buffer ? buffer->width : 0, buffer ? buffer->height : 0, xdg->surface->mapped);
-    }
-    if (!buffer) return;
+    note_layer_buffer(sc, xdg->surface);  // KWin 6.2 draws on the toplevel
+    struct wlr_buffer *buffer = sc->latest;
+    struct wlr_surface *content = sc->latest_surface ? sc->latest_surface : xdg->surface;
+    sc->latest = NULL;
+    sc->latest_surface = NULL;
+    sc->latest_area = -1;
+    // Frame callbacks and presentation feedback are on the toplevel. KWin stops
+    // after two frames if either goes unanswered, even before the layer has a buffer.
     sc->frame_pending = true;
+    send_presented(xdg->surface, (uint32_t)sc->server->period_ns, ++sc->present_seq);
+    if (!buffer) {
+        if (sc->present_seq == 40 && sc->commits == 0)
+            wlr_log(WLR_ERROR, "screen %d: no DMA-BUF in 40 commits (shm, or a surface we don't look at); "
+                    "nothing was presented", sc->index + 1);
+        return;
+    }
+    static int logged;
+    if (logged < 4) {
+        ++logged;
+        wlr_log(WLR_INFO, "screen %d: %s %dx%d", sc->index + 1,
+                content == xdg->surface ? "buffer" : "output layer", buffer->width, buffer->height);
+    }
     ++sc->commits;
-    note_damage(sc, xdg->surface, buffer);
+    note_damage(sc, content, buffer);
     sc->buffer_width = buffer->width, sc->buffer_height = buffer->height;
-    if (buffer == sc->held) return;
+    if (buffer == sc->held) {
+        wlr_buffer_unlock(buffer); // the lock taken when this frame's layer committed
+        drop_pending(sc);          // (older than this)
+        return;
+    }
+    if (ft_vr_screen_held(sc->index)) {
+        // ft-floatd is changing this window: the panel keeps the picture it has, and the newest
+        // buffer waits (with this frame's lock) for the tick that ends the hold.
+        if (sc->pending) wlr_buffer_unlock(sc->pending);
+        sc->pending = buffer;
+        return;
+    }
+    drop_pending(sc);  // a hold that ended since the last tick: this one is newer
+    present(sc, buffer);
+}
+
+// Put a buffer (locked once, for us to let go of) on the screen's panel.
+static void present(struct screen *sc, struct wlr_buffer *buffer) {
     struct wlr_dmabuf_attributes a;
     if (!wlr_buffer_get_dmabuf(buffer, &a)) {
-        static bool warned;
-        if (!warned) wlr_log(WLR_ERROR, "screen %d: not a DMA-BUF (shm?); skipped", sc->index + 1);
-        warned = true;
+        wlr_buffer_unlock(buffer);
         return;
     }
     struct ft_dmabuf b = {.width = a.width, .height = a.height, .format = a.format, .modifier = a.modifier,
@@ -245,19 +417,47 @@ static void screen_commit(struct wl_listener *l, void *data) {
         b.fd[i] = a.fd[i];
     }
     track_buffer(sc->server, buffer);
-    if (!ft_vr_screen_present(sc->index, buffer, &b)) return;
+    if (!ft_vr_screen_present(sc->index, buffer, &b)) {
+        wlr_buffer_unlock(buffer);
+        return;
+    }
     // Keep this buffer until the next frame replaces it, so SteamVR never samples a
     // buffer KWin is drawing into; then let KWin have the previous one back.
+    // `buffer` is already locked for this frame. One more lock is the one `held` keeps.
     wlr_buffer_lock(buffer);
     if (sc->held) wlr_buffer_unlock(sc->held);
     sc->held = buffer;
+    wlr_buffer_unlock(buffer);
 }
+
+static void keyboard_enter(struct server *s, struct wlr_surface *surface);
+static void release_keys(struct server *s, const char *why);
 
 static void screen_destroy(struct wl_listener *l, void *data) {
     struct screen *sc = wl_container_of(l, sc, destroy);
+    struct server *s = sc->server;
     wlr_log(WLR_INFO, "screen %d closed", sc->index + 1);
     if (sc->held) wlr_buffer_unlock(sc->held);
+    drop_pending(sc);
+    if (sc->latest) wlr_buffer_unlock(sc->latest);
     ft_vr_screen_destroy(sc->index);
+    if (s->seat->keyboard_state.focused_surface == sc->toplevel->base->surface) {
+        // Typing had this screen. wlroots would leave no screen focused, and drop the release
+        // of a key held meanwhile, so KWin kept it down (Meta, and every click moved
+        // a window). Focus goes to a screen that's left, and the held keys come up there (or
+        // with the next focus, if none is left).
+        bool alive[MAX_SCREENS];
+        for (int i = 0; i < MAX_SCREENS; ++i) alive[i] = s->screens[i] != NULL;
+        const int to = ft_focus_survivor(alive, MAX_SCREENS, sc->index,
+                                         s->pointer_focus ? s->pointer_focus->index : -1, s->n_config);
+        if (to >= 0) {
+            keyboard_enter(s, s->screens[to]->toplevel->base->surface);
+            wlr_log(WLR_INFO, "typing goes to screen %d", to + 1);
+        } else {
+            wlr_seat_keyboard_notify_clear_focus(s->seat);
+        }
+        release_keys(s, "its screen closed");
+    }
     if (sc->server->pointer_focus == sc) {
         release_relay_buttons(sc->server, "its screen closed");
         sc->server->pointer_focus = NULL;
@@ -292,6 +492,7 @@ static void new_toplevel(struct wl_listener *l, void *data) {
     sc->server = s;
     sc->index = index;
     sc->toplevel = toplevel;
+    sc->latest_area = -1;
     s->screens[index] = sc;
     if (index >= s->n_config) {
         wlr_log(WLR_INFO, "screen %d: KWin window, a spare output (floating window %d)", index + 1,
@@ -334,8 +535,6 @@ static void new_decoration(struct wl_listener *l, void *data) {
 
 // ---------------------------------------------------------------- input from the panels
 
-static void panel_key(struct server *s, uint32_t code, bool pressed);
-
 // Typing goes to remote screen `index` (or to the desktop: -1). The one it leaves lets go of
 // the keys it held.
 static void set_key_remote(struct server *s, int index) {
@@ -349,19 +548,10 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
         wl_display_terminate(s->display);
         return;
     }
-    if (e->type == FT_KEY) {
-        panel_key(s, e->key, e->pressed);
-        return;
-    }
-    if (e->type == FT_KEYBOARD_CLOSED) {
-        if (s->kb_screen >= 0) wlr_log(WLR_INFO, "keyboard closed");
-        s->kb_screen = -1;
-        s->kb_close_at = 0;
-        return;
-    }
     if (ft_remote_is(e->screen)) {
         // Another machine's display: its stream takes the input, and a click or a spin to it
         // takes the typing there too.
+        if (e->type == FT_BUTTON && e->pressed) spot_dismiss(s, "click");
         if ((e->type == FT_BUTTON && e->pressed) || e->type == FT_FRONT) {
             set_key_remote(s, e->screen);
             s->keys_clicked = true;
@@ -380,17 +570,13 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
     if (e->type == FT_FRONT) {
         // A spin brought this panel to the front: typing goes to it, as after a click there,
         // and ft-floatd makes its window (or the top one on a screen) KWin's active window.
-        wlr_seat_keyboard_notify_enter(s->seat, surface, NULL, 0, NULL);
+        keyboard_enter(s, surface);
         s->keys_clicked = true;
         set_key_remote(s, -1);
         if (s->beside) return;
         char msg[32];
         snprintf(msg, sizeof msg, "front %d", e->screen + 1);
-        struct sockaddr_un addr = {.sun_family = AF_UNIX};
-        const char name[] = "frametop_float";
-        memcpy(addr.sun_path + 1, name, sizeof name - 1);
-        sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
-               offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+        float_send(s, msg);
         return;
     }
     const uint32_t t = now_ms();
@@ -404,16 +590,27 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
                 // pointer until the next move: a press right after crossing onto another
                 // screen landed where the pointer had been. Entering one unit off makes the
                 // motion below go through.
-                wlr_seat_pointer_notify_enter(s->seat, surface, x + 1, y);
+                // With a button held (a window or a drag carried onto another screen), enter
+                // without wlroots' notify_enter: on a new surface it forgets the held buttons
+                // (reset_buttons), so their release was dropped and KWin kept the window moving
+                // until the next click. KWin is one client with a surface per screen, so the
+                // release belongs on the new one.
+                if (s->seat->pointer_state.button_count && !wlr_seat_pointer_has_grab(s->seat))
+                    wlr_seat_pointer_enter(s->seat, surface, x + 1, y);
+                else
+                    wlr_seat_pointer_notify_enter(s->seat, surface, x + 1, y);
                 s->pointer_focus = sc;
             }
             wlr_seat_pointer_notify_motion(s->seat, t, x, y);
             if (e->type == FT_BUTTON) {
+                // Keyboard focus first: releases owed to KWin (keyboard_enter) arrive before the
+                // press, so a Meta that was stuck doesn't make it a window move.
+                if (e->pressed) keyboard_enter(s, surface);
                 wlr_seat_pointer_notify_button(s->seat, t, e->button,
                                                e->pressed ? WL_POINTER_BUTTON_STATE_PRESSED
                                                           : WL_POINTER_BUTTON_STATE_RELEASED);
                 if (e->pressed) {
-                    wlr_seat_keyboard_notify_enter(s->seat, surface, NULL, 0, NULL);
+                    spot_dismiss(s, "click");
                     s->keys_clicked = true;
                     set_key_remote(s, -1);
                 }
@@ -426,11 +623,7 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
                 // Meta+scroll on a floating window: its scale, bigger or smaller (ft-floatd).
                 char msg[48];
                 snprintf(msg, sizeof msg, "scale %d %d", sc->index + 1, e->dy < 0 ? 1 : -1);
-                struct sockaddr_un addr = {.sun_family = AF_UNIX};
-                const char name[] = "frametop_float";
-                memcpy(addr.sun_path + 1, name, sizeof name - 1);
-                sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
-                       offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+                float_send(s, msg);
                 break;
             }
             if (e->dy != 0)
@@ -445,6 +638,10 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
         case FT_LEAVE:
             if (s->pointer_focus == sc) {
                 release_relay_buttons(s, "the pointer left the screens");
+                // Any other button still held (the 3D mouse's or a laser's press) is released
+                // here too: clearing the focus forgets it, its release would be dropped, and
+                // KWin would keep a move or drag going until the next click.
+                release_seat_buttons(s, "the pointer left the screens");
                 wlr_seat_pointer_notify_clear_focus(s->seat);
                 s->pointer_focus = NULL;
             }
@@ -455,24 +652,51 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
     wlr_seat_pointer_notify_frame(s->seat);
 }
 
-// Tell the input relay where typing goes, on a change and every second: while it's the
-// desktop, the relay grabs pass-through keyboards so SteamVR (and the Steam app with
-// gamescope's focus) doesn't get the keys too. Without word from us for a few seconds,
-// the relay gives the keyboards back, so a closed desktop doesn't keep them.
+// Tell the input relay where typing goes, and whether the screens show, on a change and every
+// second: while it's the desktop, the relay grabs pass-through keyboards so SteamVR (and the
+// Steam app with gamescope's focus) doesn't get the keys too. Without word from us for a few
+// seconds, the relay gives the keyboards back, so a closed desktop doesn't keep them. Full
+// Keyboard hears both from the relay: it shows over the screens and types into the desktop.
 static void keys_update(struct server *s) {
     if (!s->vr || s->beside) return;  // a test instance leaves the running desktop's keyboards alone
-    const bool desktop = s->keys_clicked && ft_vr_screens_shown();
+    if (s->spot_until && ft_vr_paused()) spot_dismiss(s, "paused");
+    if (s->spot_until && !spot_open(s)) {
+        s->spot_until = 0;
+        wlr_log(WLR_INFO, "frunner's lease lapsed");
+    }
+    // Frunner's search takes typing from wherever it went, Steam too.
+    const bool shown = ft_vr_screens_shown();
+    const bool desktop = spot_open(s) || (s->keys_clicked && shown);
+    // Gamepad mode's pill goes over the panel typing goes to: the remote screen, or the one KWin has
+    // keyboard focus on (vr.cpp, "the gamepad pill").
+    int pill = -1;
+    if (desktop && !spot_open(s)) {
+        if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) pill = s->key_remote;
+        for (int i = 0; i < MAX_SCREENS && pill < 0; ++i)
+            if (s->screens[i] && s->screens[i]->toplevel &&
+                s->screens[i]->toplevel->base->surface == s->seat->keyboard_state.focused_surface)
+                pill = i;
+    }
+    ft_vr_gamepad_target(pill);
+    // The fourth word is our pause: a "pause on|off" from the relay that never came (its socket
+    // was full) leaves us out of step until it hears this and says it again.
+    const bool paused = ft_vr_paused();
     const uint32_t t = now_ms();
-    if (desktop == s->keys_desktop && t - s->relay_sent < 1000) return;
+    // The fifth word: the 3D mouse's laser is on a panel, so its wheel comes here ("wheel").
+    const bool wheel = ft_vr_mouse_screen() >= 0;
+    if (desktop == s->keys_desktop && shown == s->keys_shown && paused == s->keys_paused && wheel == s->keys_wheel &&
+        t - s->relay_sent < 1000)
+        return;
     if (desktop != s->keys_desktop) wlr_log(WLR_INFO, "typing goes to %s", desktop ? "the desktop" : "Steam");
     s->keys_desktop = desktop;
+    s->keys_shown = shown;
+    s->keys_paused = paused;
+    s->keys_wheel = wheel;
     s->relay_sent = t;
-    struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    const char name[] = "frametop_relay";
-    memcpy(addr.sun_path + 1, name, sizeof name - 1);
-    const char *msg = desktop ? "keyboard desktop" : "keyboard steam";
-    sendto(s->relay_fd, msg, strlen(msg), MSG_DONTWAIT, (struct sockaddr *)&addr,
-           offsetof(struct sockaddr_un, sun_path) + 1 + sizeof name - 1);
+    char msg[40];
+    snprintf(msg, sizeof msg, "keyboard %s %d %d %d", desktop ? "desktop" : "steam", shown ? 1 : 0, paused ? 1 : 0,
+             wheel ? 1 : 0);
+    relay_send(s, msg);
 }
 
 // How often a screen gets its frame callback (ms; 0 every tick). KWin draws a screen only
@@ -533,16 +757,26 @@ static int tick(int fd, uint32_t mask, void *data) {
     uint64_t expirations;
     const ssize_t got = read(fd, &expirations, sizeof expirations);  // clears it; how many doesn't matter
     (void)got;
+    for (int i = 0; i < MAX_SCREENS; ++i) {  // a hold ended: the newest buffer goes up
+        struct screen *sc = s->screens[i];
+        if (!sc || !sc->pending || ft_vr_screen_held(i)) continue;
+        struct wlr_buffer *buffer = sc->pending;
+        sc->pending = NULL;
+        if (buffer == sc->held) wlr_buffer_unlock(buffer);
+        else present(sc, buffer);
+    }
     ft_vr_poll(handle_vr_event, s);
     ft_remote_tick();
     if (s->relay_buttons.held && !relay_can_press(s))
         release_relay_buttons(s, ft_vr_paused() ? "paused" : "its screen hid");
     if (++s->ticks % 9 == 0) keys_update(s);
+    if (s->ticks % 450 == 0) ft_log_check(s->log_path, FT_LOG_CAP, FT_LOG_KEEP);
     if (s->kb_close_at && s->ticks >= s->kb_close_at) {
         s->kb_close_at = 0;
-        if (s->kb_screen >= 0) {
-            ft_vr_keyboard_hide();
-            s->kb_screen = -1;
+        if (fullkb(s) && s->fullkb_open) {
+            wlr_log(WLR_INFO, "Full Keyboard closed (the text field lost focus)");
+            relay_send(s, "kbpanel hide");
+            s->fullkb_open = false;
         }
     }
     struct timespec now;
@@ -582,15 +816,81 @@ static bool key_held(const struct wlr_keyboard *kb, uint32_t code) {
 }
 
 // One key to the focused screen, through the seat's keyboard so its xkb state and
-// modifiers stay right.
+// modifiers stay right. With no screen focused, wlroots would drop it: a release waits for
+// the next focus instead (keyboard_enter).
 static void send_key(struct server *s, uint32_t code, int pressed) {
     s->typed_ms = now_ms();
-    struct wlr_keyboard_key_event ev = {
-        .time_msec = now_ms(), .keycode = code, .update_state = true,
-        .state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED};
-    wlr_keyboard_notify_key(&s->keyboard, &ev);
+    if (!ft_keyboard_key(&s->keyboard, code, pressed, now_ms())) {
+        wlr_log(WLR_INFO, "key %u pressed again while it's down: ignored", code);
+        return;
+    }
+    if (!s->seat->keyboard_state.focused_surface) {
+        if (!pressed) {
+            ft_lost_keys_add(&s->lost_keys, code);
+            wlr_log(WLR_INFO, "key %u released with no screen focused: it goes with the next focus", code);
+        }
+        return;
+    }
     wlr_seat_keyboard_notify_modifiers(s->seat, &s->keyboard.modifiers);
-    wlr_seat_keyboard_notify_key(s->seat, ev.time_msec, code, ev.state);
+    wlr_seat_keyboard_notify_key(s->seat, now_ms(), code,
+                                 pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED);
+}
+
+// Keyboard focus to a screen (a click, a spin, or the focused screen closing), the releases
+// that came with no screen focused, so KWin lets go of those keys (a modifier several times:
+// FT_MODIFIER_RELEASES), and the modifiers held now, so a Meta+click on a screen that didn't
+// have focus is still one.
+static void keyboard_enter(struct server *s, struct wlr_surface *surface) {
+    wlr_seat_keyboard_notify_enter(s->seat, surface, NULL, 0, NULL);
+    if (s->seat->keyboard_state.focused_surface != surface) return;
+    uint32_t code;
+    while ((code = ft_lost_keys_take(&s->lost_keys))) {
+        if (key_held(&s->keyboard, code)) continue;  // down again since: its release comes later
+        for (int n = ft_is_modifier(code) ? FT_MODIFIER_RELEASES : 1; n; --n)
+            wlr_seat_keyboard_notify_key(s->seat, now_ms(), code, WL_KEYBOARD_KEY_STATE_RELEASED);
+        wlr_log(WLR_INFO, "key %u released on the desktop (it came up with no screen focused)", code);
+    }
+    wlr_seat_keyboard_notify_modifiers(s->seat, &s->keyboard.modifiers);
+}
+
+// Every key ft-screens holds comes up, on the focused screen (or with the next focus).
+static void release_keys(struct server *s, const char *why) {
+    for (size_t n = s->keyboard.num_keycodes; n && s->keyboard.num_keycodes; --n) {
+        const uint32_t code = s->keyboard.keycodes[0];
+        send_key(s, code, 0);
+        wlr_log(WLR_INFO, "key %u released (%s)", code, why);
+    }
+}
+
+// "keys release" (the input relay's release_keys, Ctrl+Alt+Shift+Esc by default, and a relay
+// that starts): every key comes up wherever it may be held. Frunner's (its search repeats a
+// held key), the keys ft-screens holds, and a remote screen's; every modifier,
+// FT_MODIFIER_RELEASES times, in ft-screens' state and in KWin, whether ft-screens holds it or
+// not (KWin can hold one ft-screens let go, or count one press twice); then the focused screen
+// gets the keyboard again, which KWin takes as a fresh start.
+static void release_all_keys(struct server *s, char *reply, int size) {
+    const size_t held = s->keyboard.num_keycodes;
+    const uint32_t stuck = s->keyboard.modifiers.depressed;
+    if (spot_open(s)) spot_send(s, "keys release");
+    if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) ft_remote_blur(s->key_remote);
+    release_keys(s, "release all keys");
+    ft_keyboard_release_modifiers(&s->keyboard, now_ms());
+    struct wlr_surface *focus = s->seat->keyboard_state.focused_surface;
+    for (size_t i = 0; i < sizeof ft_modifier_keys / sizeof *ft_modifier_keys; ++i) {
+        if (!focus) {
+            ft_lost_keys_add(&s->lost_keys, ft_modifier_keys[i]);
+            continue;
+        }
+        for (int n = 0; n < FT_MODIFIER_RELEASES; ++n)
+            wlr_seat_keyboard_notify_key(s->seat, now_ms(), ft_modifier_keys[i], WL_KEYBOARD_KEY_STATE_RELEASED);
+    }
+    if (focus) {
+        wlr_seat_keyboard_notify_clear_focus(s->seat);
+        keyboard_enter(s, focus);
+    }
+    wlr_log(WLR_INFO, "release all keys: %zu held here, modifiers 0x%x down, every modifier released%s", held,
+            stuck, focus ? "" : " with the next focus");
+    snprintf(reply, size, "ok released %zu, modifiers were 0x%x", held, stuck);
 }
 
 // The input relay's mouse buttons (relay-buttons.h) can be pressed: the pointer is on a
@@ -622,6 +922,21 @@ static void release_relay_buttons(struct server *s, const char *why) {
     wlr_seat_pointer_notify_frame(s->seat);
 }
 
+// Release every button the seat still holds, to the surface it was pressed on. wlroots
+// counts presses of the same button (n_pressed) and sends the release with the last one,
+// so release the first button until the seat's list is empty.
+static void release_seat_buttons(struct server *s, const char *why) {
+    struct wlr_seat_pointer_state *ps = &s->seat->pointer_state;
+    if (!ps->button_count || !ps->focused_surface) return;
+    while (ps->button_count) {
+        const uint32_t code = ps->buttons[0].button;
+        const bool last = ps->buttons[0].n_pressed == 1;
+        wlr_seat_pointer_notify_button(s->seat, now_ms(), code, WL_POINTER_BUTTON_STATE_RELEASED);
+        if (last) wlr_log(WLR_INFO, "button %u released (%s)", code, why);
+    }
+    wlr_seat_pointer_notify_frame(s->seat);
+}
+
 // Keys from the input relay (physical keyboards): "key <evdev code> <1 press|0 release>".
 // They go to the screen KWin has keyboard focus on (the last one clicked), while typing
 // goes to the desktop (keys_update). The release of a key the desktop got the press for
@@ -629,13 +944,22 @@ static void release_relay_buttons(struct server *s, const char *why) {
 // Steam would otherwise modify every key typed after it). Mouse buttons go where the
 // pointer is instead (relay_button), and codes that are neither go nowhere.
 static void handle_key(struct server *s, uint32_t code, int value, char *reply, int size) {
+    ft_vr_key(code, value);
     if (value == 2) return (void)snprintf(reply, size, "ok repeat ignored");  // KWin repeats itself
+    if (ft_vr_carry_key(code, value)) return (void)snprintf(reply, size, "ok the carry's");
     const enum ft_relay_key kind = ft_relay_key_kind(code);
     if (kind == FT_RELAY_BUTTON) {
         relay_button(s, code, value != 0, reply, size);
         return;
     }
     if (kind == FT_RELAY_DROP) return (void)snprintf(reply, size, "ok not a key or mouse button");
+    // Frunner's search has the typing, except for the release of a key the desktop holds.
+    if (spot_open(s) && (value || !key_held(&s->keyboard, code))) {
+        char msg[32];
+        snprintf(msg, sizeof msg, "key %u %d", code, value);
+        spot_send(s, msg);
+        return (void)snprintf(reply, size, "ok frunner");
+    }
     // A remote screen has the typing, except for the release of a key the desktop holds.
     if (s->key_remote >= 0 && ft_remote_is(s->key_remote) && (value || !key_held(&s->keyboard, code))) {
         ft_remote_key(s->key_remote, code, value != 0);
@@ -649,11 +973,15 @@ static void handle_key(struct server *s, uint32_t code, int value, char *reply, 
     snprintf(reply, size, "ok");
 }
 
-// Our keyboard (keyboard.cpp). The input relay sends "vrkeyboard show" when a text field
-// on the desktop gets focus (and its setting allows), "vrkeyboard hide" when it loses it,
-// and "vrkeyboard toggle" for a mapped button; ft-layout sends "vrkeyboard close" when it
-// resets the layout. It opens for the screen KWin has keyboard focus on. A hide closes only a keyboard a text field opened, and waits a moment, so
-// moving between text fields doesn't close and reopen it.
+// The keyboard is Full Keyboard (keyboard/). The input relay sends "vrkeyboard show" when a
+// text field on the desktop gets focus (and its setting allows), "vrkeyboard hide" when it
+// loses it, and "vrkeyboard toggle" for a mapped button; ft-layout sends "vrkeyboard close" when
+// it resets the layout. They go to Full Keyboard through the relay ("kbpanel show|hide"); whether
+// it's up comes back with its next "fullkb". A hide closes only a keyboard a text field opened,
+// and waits a moment, so moving between text fields doesn't close and reopen it. While Full
+// Keyboard isn't running (no "fullkb" for 3 s), nothing opens: there's no other keyboard
+// (docs/design.md).
+// focused_screen: the screen KWin has keyboard focus on, for "debug" and "keys".
 static int focused_screen(struct server *s) {
     struct wlr_surface *focus = s->seat->keyboard_state.focused_surface;
     for (int i = 0; i < MAX_SCREENS; ++i)
@@ -665,60 +993,75 @@ static int focused_screen(struct server *s) {
 }
 
 static void keyboard_command(struct server *s, const char *what, char *reply, int size) {
-    const bool open = s->kb_screen >= 0;
-    if (strcmp(what, "hide") == 0) {
-        if (open && s->kb_auto && !s->kb_close_at) s->kb_close_at = s->ticks + 30;  // ~1/3 s
-        return (void)snprintf(reply, size, "ok");
-    }
-    if (strcmp(what, "close") == 0) {  // however it opened, now (ft-layout apply: a reset)
-        if (open) wlr_log(WLR_INFO, "keyboard closed (reset)");
-        ft_vr_keyboard_hide();
-        s->kb_screen = -1;
-        s->kb_close_at = 0;
-        return (void)snprintf(reply, size, "ok");
-    }
     const bool toggle = strcmp(what, "toggle") == 0;
-    if (!toggle && strcmp(what, "show") != 0) return (void)snprintf(reply, size, "error show|hide|toggle|close");
-    s->kb_close_at = 0;
-    if (open && toggle) {
-        ft_vr_keyboard_hide();
-        s->kb_screen = -1;
-        return (void)snprintf(reply, size, "ok closed");
+    if (strcmp(what, "hide") && strcmp(what, "close") && strcmp(what, "show") && !toggle)
+        return (void)snprintf(reply, size, "error show|hide|toggle|close");
+    if (!fullkb(s)) {
+        s->kb_close_at = 0;
+        if (strcmp(what, "show") == 0 || toggle)
+            wlr_log(WLR_INFO, "keyboard not opened (%s): Full Keyboard isn't running", toggle ? "button" : "text field");
+        return (void)snprintf(reply, size, strcmp(what, "show") == 0 || toggle ? "ok no keyboard" : "ok");
     }
-    if (open) return (void)snprintf(reply, size, "ok open");
+    if (strcmp(what, "hide") == 0) {
+        if (s->fullkb_open && s->fullkb_auto && !s->kb_close_at) s->kb_close_at = s->ticks + 30;  // ~1/3 s
+        return (void)snprintf(reply, size, "ok");
+    }
+    s->kb_close_at = 0;
+    if (strcmp(what, "close") == 0 || (toggle && s->fullkb_open)) {
+        if (s->fullkb_open) wlr_log(WLR_INFO, "Full Keyboard closed (%s)", toggle ? "button" : "reset");
+        relay_send(s, "kbpanel hide");
+        s->fullkb_open = false;
+        return (void)snprintf(reply, size, toggle ? "ok closed" : "ok");
+    }
+    if (s->fullkb_open) return (void)snprintf(reply, size, "ok open");
     if (!ft_vr_screens_shown()) {
-        wlr_log(WLR_INFO, "keyboard not opened (%s): the screens are hidden", toggle ? "button" : "text field");
+        wlr_log(WLR_INFO, "Full Keyboard not opened (%s): the screens are hidden", toggle ? "button" : "text field");
         return (void)snprintf(reply, size, "ok screens hidden");
     }
-    const int screen = focused_screen(s);
-    if (screen < 0 || !ft_vr_keyboard_show(screen)) {
-        wlr_log(WLR_INFO, "keyboard not opened (%s) for screen %d", toggle ? "button" : "text field", screen + 1);
-        return (void)snprintf(reply, size, "error not shown");
-    }
-    wlr_log(WLR_INFO, "keyboard open for screen %d (%s)", screen + 1, toggle ? "button" : "text field");
-    s->kb_screen = screen;
-    s->kb_auto = !toggle;
+    wlr_log(WLR_INFO, "Full Keyboard open (%s)", toggle ? "button" : "text field");
+    relay_send(s, "kbpanel show");
+    s->fullkb_open = true;
+    s->fullkb_auto = !toggle;
     snprintf(reply, size, "ok opened");
 }
 
-// A key from our keyboard, for the focused screen. Its release always goes through, so
-// no key stays held.
-static void panel_key(struct server *s, uint32_t code, bool pressed) {
-    if (s->key_remote >= 0 && ft_remote_is(s->key_remote) && (pressed || !key_held(&s->keyboard, code))) {
-        ft_remote_key(s->key_remote, code, pressed);
-        return;
-    }
-    if (pressed ? s->seat->keyboard_state.focused_surface != NULL : key_held(&s->keyboard, code))
-        send_key(s, code, pressed);
+// Where typing goes, for "debug" and "keys".
+static const char *typing_target(struct server *s) {
+    return spot_open(s) ? "frunner" : s->key_remote >= 0 ? "remote" : s->keys_desktop ? "desktop"
+           : s->keys_clicked ? "desktop (hidden)" : "steam";
 }
+
+// "keys": what ft-screens holds down and where it goes, for reports on stuck keys:
+// "ok focus=<screen>|none typing=<where> keys=<codes>|- mods=<names>|- lost=<codes>|-". keys are
+// the keys ft-screens has down (and KWin with them, unless it lost one), mods the modifiers in
+// effect with them (locked ones too: Caps, NumLock), and lost the releases still owed to KWin,
+// sent with the next focus. Only the modifiers, Esc and Tab are named (ft_key_list).
+static void keys_state(struct server *s, char *reply, int size) {
+    static const char *const mod_names[] = {"Shift", "Caps", "Ctrl", "Alt", "NumLock", "Mod3", "Meta", "AltGr"};
+    char keys[128], mods[96] = "-", lost[160];
+    ft_key_list(s->keyboard.keycodes, s->keyboard.num_keycodes, keys, sizeof keys);
+    ft_key_list(s->lost_keys.code, s->lost_keys.n, lost, sizeof lost);
+    const uint32_t m = wlr_keyboard_get_modifiers(&s->keyboard);
+    for (unsigned i = 0, at = 0; i < 8 && at < sizeof mods; ++i)
+        if (m & (1u << i)) at += snprintf(mods + at, sizeof mods - at, "%s%s", at ? "," : "", mod_names[i]);
+    const int focus = s->seat->keyboard_state.focused_surface ? focused_screen(s) : -1;
+    char where[16] = "none";
+    if (focus >= 0) snprintf(where, sizeof where, "%d", focus + 1);
+    snprintf(reply, size, "ok focus=%s typing=%s keys=%s mods=%s lost=%s", where, typing_target(s), keys, mods, lost);
+}
+
 // Control socket: abstract datagram @ft_screens. Here: "size <screen> <w> <h>" (a new
 // resolution, live), "scale <screen> <s>" (KWin's scale for it, from ft-layout),
 // "toplevels" (-> "ok <count>" and a line per KWin window: "<screen> <w>x<h> <commits>
 // <title>"), "input <screen> move|down|up|leave [x y [left|right|middle]]" (pointer input
 // as if from that panel, x and y in its pixels; for tests, mostly with --no-vr),
-// "key <code> <value>", "vrkeyboard show|hide|toggle|close" (our keyboard, from the input
-// relay), and "click <overlay key>" (from the pointer helper: a mouse click landed on
-// that panel, "-" for none); the rest is in vr.cpp (ft_vr_command).
+// "key <code> <value>", "pad ..." (gamepad mode's pad, from the input relay: to the remote screen
+// SteamVR's Gamepad mode is for), "vrkeyboard show|hide|toggle|close" (Full Keyboard,
+// from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not),
+// "frunner on|off" (frunner's search has the typing; see spot_open), "keys" (what's held:
+// keys_state), "keys release" (every key up: release_all_keys), and "click <overlay key>"
+// (from the pointer helper: a mouse click landed on that panel, "-" for none); the rest is in
+// vr.cpp (ft_vr_command).
 static int control_readable(int fd, uint32_t mask, void *data) {
     struct server *s = data;
     char buf[512], reply[2048];
@@ -763,14 +1106,46 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             } else {
                 if (s->scale[index - 1] != scale) wlr_log(WLR_INFO, "screen %d: KWin scale %g", index, scale);
                 s->scale[index - 1] = scale;
+                ft_vr_screen_scale(index - 1, scale);
                 snprintf(reply, sizeof reply, "ok");
             }
+        } else if (strncmp(buf, "pad ", 4) == 0) {
+            // Gamepad mode's pad, from the input relay (no reply): the remote screen SteamVR's
+            // Gamepad mode is for gets it (vr.cpp, "the gamepad pill"). ft-stream drops a blurred pad.
+            const int pad = ft_vr_gamepad_screen();
+            if (pad >= 0 && ft_remote_is(pad)) ft_remote_pad(pad, buf);
+            len = sizeof from;
+            continue;
+        } else if (sscanf(buf, "wheel %d", &value) == 1) {
+            // The 3D mouse's wheel, from the input relay while we said its laser is on a panel
+            // (keys_update): notches, positive up. No reply. Scrolled as SteamVR's would be.
+            const int screen = ft_vr_mouse_screen();
+            // (during a carry it's the carried panel's, whatever panel the laser is on: ft_vr_carry_wheel)
+            if (value && !ft_vr_carry_wheel(value)) {
+                if (screen >= 0) {
+                    struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dy = -value};
+                    handle_vr_event(&e, s);
+                } else {
+                    // a press just started, before the relay heard (keys_update, every ~100 ms): not lost
+                    ft_vr_held_wheel(value, handle_vr_event, s);
+                }
+            }
+            len = sizeof from;
+            continue;
         } else if (sscanf(buf, "key %u %d", &code, &value) == 2) {
             handle_key(s, code, value, reply, sizeof reply);
             len = sizeof from;
             continue;  // no reply: keys are fire-and-forget
         } else if (strncmp(buf, "vrkeyboard ", 11) == 0) {
             keyboard_command(s, buf + 11, reply, sizeof reply);
+        } else if (strcmp(buf, "fullkb 0") == 0 || strcmp(buf, "fullkb 1") == 0) {
+            // From the input relay (unbound, no reply): Full Keyboard runs, and is up or not.
+            if (!fullkb(s)) wlr_log(WLR_INFO, "Full Keyboard is the keyboard");
+            s->fullkb_until = (now_ms() + 3000) | 1;
+            s->fullkb_open = buf[7] == '1';
+            if (!s->fullkb_open) s->fullkb_auto = false;
+            len = sizeof from;
+            continue;
         } else if (strncmp(buf, "input ", 6) == 0) {
             char what[8] = "", button[8] = "left";
             double x = 0, y = 0;
@@ -833,18 +1208,40 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             }
         } else if (strncmp(buf, "click ", 6) == 0) {
             // A click on another panel takes typing to Steam. Our own panels (the screens,
-            // their controls) leave it: a click on a screen arrives as a panel event.
-            if (strcmp(buf + 6, "-") != 0 && strncmp(buf + 6, "frametop.", 9) != 0) s->keys_clicked = false;
+            // their controls) and Full Keyboard's leave it: a click on a screen arrives as a
+            // panel event, and Full Keyboard types where typing goes.
+            if (strcmp(buf + 6, "-") != 0 && strncmp(buf + 6, "frametop.", 9) != 0 &&
+                strncmp(buf + 6, "org.framekeyboard.", 18) != 0) {
+                s->keys_clicked = false;
+                spot_dismiss(s, "click");
+            }
             len = sizeof from;
             continue;
+        } else if (strcmp(buf, "frunner on") == 0 || strcmp(buf, "frunner off") == 0) {
+            // Frunner's search opened (renewed every second while open) or closed: it has the
+            // typing meanwhile. A remote screen lets go of the keys it holds first.
+            const bool on = strcmp(buf, "frunner on") == 0;
+            if (on && !spot_open(s)) {
+                if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) ft_remote_blur(s->key_remote);
+                wlr_log(WLR_INFO, "frunner open: typing goes to it");
+            } else if (!on && spot_open(s)) {
+                wlr_log(WLR_INFO, "frunner closed");
+            }
+            s->spot_until = on ? (now_ms() + SPOT_LEASE_MS) | 1 : 0;
+            keys_update(s);
+            snprintf(reply, sizeof reply, "ok");
+        } else if (strcmp(buf, "keys") == 0) {
+            keys_state(s, reply, sizeof reply);
+        } else if (strcmp(buf, "keys release") == 0) {
+            release_all_keys(s, reply, sizeof reply);
         } else if (strcmp(buf, "debug") == 0) {
             // ft-screens' side of scripts/report.sh's debug line; vr.cpp adds SteamVR's.
             char vr[1024] = "ok vr=off";
             if (s->vr) ft_vr_command("debug", vr, sizeof vr);
-            snprintf(reply, sizeof reply, "%s kb_screen=%d kb_auto=%d typing=%s focused_screen=%d pointer_screen=%d",
-                     vr, s->kb_screen + 1, s->kb_auto ? 1 : 0,
-                     s->key_remote >= 0 ? "remote" : s->keys_desktop ? "desktop" : s->keys_clicked ? "desktop (hidden)" : "steam",
-                     focused_screen(s) + 1, s->pointer_focus ? s->pointer_focus->index + 1 : 0);
+            snprintf(reply, sizeof reply,
+                     "%s fullkb=%s typing=%s focused_screen=%d pointer_screen=%d", vr,
+                     !fullkb(s) ? "off" : s->fullkb_open ? (s->fullkb_auto ? "open-auto" : "open") : "closed",
+                     typing_target(s), focused_screen(s) + 1, s->pointer_focus ? s->pointer_focus->index + 1 : 0);
         } else if (!ft_remote_command(buf, reply, sizeof reply)) {
             ft_vr_command(buf, reply, sizeof reply);
         }
@@ -857,15 +1254,14 @@ static int control_readable(int fd, uint32_t mask, void *data) {
 
 static int open_control_socket(const char *name) {
     int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    const size_t len = strlen(name);
-    if (len == 0 || len >= sizeof addr.sun_path - 1) {
+    struct sockaddr_un addr;
+    const socklen_t len = ft_sock_addr(name, &addr);
+    if (!len) {
         wlr_log(WLR_ERROR, "bad control socket name");
         close(fd);
         return -1;
     }
-    memcpy(addr.sun_path + 1, name, len);
-    if (bind(fd, (struct sockaddr *)&addr, offsetof(struct sockaddr_un, sun_path) + 1 + len) != 0) {
+    if (bind(fd, (struct sockaddr *)&addr, len) != 0) {
         wlr_log(WLR_ERROR, "can't bind @%s (another ft-screens running?)", name);
         close(fd);
         return -1;
@@ -883,9 +1279,41 @@ static int stop(int sig, void *data) {
 static void keyboard_led(struct wlr_keyboard *kb, uint32_t leds) {}
 static const struct wlr_keyboard_impl keyboard_impl = {.name = "ft-screens-keyboard", .led_update = keyboard_led};
 
+struct surface_watch {
+    struct server *server;
+    struct wl_listener commit, destroy;
+};
+static void surface_watch_destroy(struct wl_listener *l, void *data) {
+    struct surface_watch *w = wl_container_of(l, w, destroy);
+    // A desynchronized child can commit and go before its toplevel's next commit.
+    for (int i = 0; i < MAX_SCREENS; ++i) {
+        struct screen *sc = w->server->screens[i];
+        if (sc && sc->latest_surface == data) sc->latest_surface = NULL;
+    }
+    wl_list_remove(&w->commit.link);
+    wl_list_remove(&w->destroy.link);
+    free(w);
+}
+static void surface_watch_commit(struct wl_listener *l, void *data) {
+    struct surface_watch *w = wl_container_of(l, w, commit);
+    struct wlr_surface *surface = data;
+    struct screen *sc = screen_for_surface(w->server, surface);
+    if (sc && surface != sc->toplevel->base->surface) note_layer_buffer(sc, surface);  // screen_commit does it
+}
+static void surface_watch_new(struct wl_listener *l, void *data) {
+    struct server *s = wl_container_of(l, s, new_surface);
+    struct wlr_surface *surface = data;
+    struct surface_watch *w = calloc(1, sizeof *w);
+    w->server = s;
+    w->commit.notify = surface_watch_commit;
+    w->destroy.notify = surface_watch_destroy;
+    wl_signal_add(&surface->events.commit, &w->commit);
+    wl_signal_add(&surface->events.destroy, &w->destroy);
+}
+
 static bool setup_dmabuf(struct server *s) {
     struct stat st;
-    const char *node = "/dev/dri/renderD128";
+    const char *node = FT_RENDER_NODE;
     if (stat(node, &st) != 0) {
         wlr_log(WLR_ERROR, "no %s", node);
         return false;
@@ -912,12 +1340,11 @@ int main(int argc, char **argv) {
     // about 0.2 degrees) needed a very still hand to click (headset test 2026-10-03).
     s.controller_click.threshold = 32;
     for (int i = 0; i < MAX_SCREENS; ++i) s.scale[i] = 1;
-    s.kb_screen = -1;
     s.key_remote = -1;
     s.rate[FT_FOCUSED] = 0, s.rate[FT_IN_VIEW] = 15, s.rate[FT_HIDDEN] = 1;
     s.period_ns = 1000000000LL / 90;
     s.phase_ms = 1;
-    const char *socket_name = "ft-screens-0", *control_name = "ft_screens";
+    const char *socket_name = "ft-screens-0", *control_name = FT_SOCK_SCREENS;
     char **command = NULL;
     s.vr = true;
     for (int i = 1; i < argc; ++i) {
@@ -925,6 +1352,8 @@ int main(int argc, char **argv) {
             socket_name = argv[++i];
         } else if (strcmp(argv[i], "--control") == 0 && i + 1 < argc) {
             control_name = argv[++i];
+        } else if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
+            s.log_path = argv[++i];
         } else if (strcmp(argv[i], "--spares") == 0 && i + 1 < argc) {
             s.spares = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--no-vr") == 0) {
@@ -950,7 +1379,7 @@ int main(int argc, char **argv) {
             break;
         } else {
             fprintf(stderr,
-                    "usage: %s [--socket NAME] [--control NAME] [--no-vr] [--beside] [--screen WxH@METRES]... "
+                    "usage: %s [--log FILE] [--socket NAME] [--control NAME] [--no-vr] [--beside] [--screen WxH@METRES]... "
                     "[--spares N] [--rates F,V,H] [-- COMMAND ARGS...]\n",
                     argv[0]);
             return 2;
@@ -959,6 +1388,16 @@ int main(int argc, char **argv) {
     if (s.n_config == 0) s.config[s.n_config++] = (struct config){3440, 1440, 2.4};
 
     setvbuf(stdout, NULL, _IOLBF, 0);  // vr.cpp prints to stdout; keep it in order with the log
+    if (s.log_path) {
+        ft_log_rotate(s.log_path, FT_LOG_CAP, FT_LOG_KEEP);
+        if (ft_log_open(s.log_path) != 0) fprintf(stderr, "can't write the log %s: %m\n", s.log_path), s.log_path = NULL;
+    }
+    {   // one log for many runs: where each starts, in wall-clock time (trackwatch's lines are too)
+        const time_t wall = time(NULL);
+        char when[64];
+        strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S %z", localtime(&wall));
+        printf("==== ft-screens started %s (pid %d)\n", when, (int)getpid());
+    }
     wlr_log_init(WLR_INFO, NULL);
     if (s.vr && !ft_vr_init()) return 1;
     if (s.beside) ft_vr_beside();
@@ -968,8 +1407,21 @@ int main(int argc, char **argv) {
     s.loop = wl_display_get_event_loop(s.display);
     ft_remote_init(s.loop, s.vr);
     wl_list_init(&s.buffers);
-    wlr_compositor_create(s.display, 6, NULL);
+    struct wlr_compositor *comp = wlr_compositor_create(s.display, 6, NULL);
+    s.new_surface.notify = surface_watch_new;
+    wl_signal_add(&comp->events.new_surface, &s.new_surface);
     wlr_subcompositor_create(s.display);
+    // KWin 6.6's nested backend exits unless the host offers these. The names are the
+    // Wayland interfaces; scripts/update-check.py looks for them in this binary.
+    if (!wlr_single_pixel_buffer_manager_v1_create(s.display) || !wlr_viewporter_create(s.display) ||
+        !wlr_pointer_constraints_v1_create(s.display) || !wlr_presentation_create(s.display, NULL, 2)) {
+        wlr_log(WLR_ERROR, "can't offer wp_single_pixel_buffer_manager_v1, wp_viewporter, "
+                           "zwp_pointer_constraints_v1, or wp_presentation");
+        return 1;
+    }
+    wlr_log(WLR_INFO, "host protocols: wl_compositor wl_subcompositor xdg_wm_base wl_shm wl_seat "
+                      "zwp_linux_dmabuf_v1 wp_single_pixel_buffer_manager_v1 wp_viewporter "
+                      "zwp_pointer_constraints_v1 wp_presentation");
     const uint32_t shm_formats[] = {DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888};  // wlroots wants DRM codes
     wlr_shm_create(s.display, 1, shm_formats, 2);
     if (!setup_dmabuf(&s)) return 1;
@@ -1048,6 +1500,7 @@ int main(int argc, char **argv) {
     // wlroots asserts that nothing still listens to its globals when they go.
     wl_list_remove(&s.new_toplevel.link);
     wl_list_remove(&s.new_decoration.link);
+    wl_list_remove(&s.new_surface.link);
     wl_display_destroy(s.display);
     return 0;
 }

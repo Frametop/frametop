@@ -1,0 +1,223 @@
+#!/usr/bin/python3
+"""Show this desktop's notifications in the Steam session, through its notification server.
+
+The desktop runs Plasma on a private session bus, so apps here notify Plasma, whose popups
+only appear inside the desktop's screens. This registers with Plasma as a notification
+watcher (org.kde.NotificationManager.RegisterWatcher; Plasma then calls
+org.kde.NotificationWatcher on /NotificationWatcher for each one) and hands each
+notification to org.freedesktop.Notifications on the user bus, e.g. a VR notification
+server. A click there comes back as Plasma's InvokeAction, so the app gets ActionInvoked
+from its own notification server, and a dismissal closes it in Plasma. While forwarding,
+Plasma's own popups are off (Inhibit, which ends with this process); its history keeps
+everything.
+
+  ft-notifyfwd [auto|on]
+    auto  forward only when the user bus's server isn't SteamOS's steam_notif_daemon, which
+          hands notifications to a Steam client that can't show them on the Frame
+    on    forward to whatever serves org.freedesktop.Notifications on the user bus
+"""
+import os
+import sys
+
+from gi.repository import Gio, GLib
+
+NAME = "org.freedesktop.Notifications"
+PATH = "/org/freedesktop/Notifications"
+MANAGER = "org.kde.NotificationManager"
+WATCHER_PATH = "/NotificationWatcher"
+WATCHER_XML = """<node><interface name="org.kde.NotificationWatcher">
+  <method name="Notify">
+    <arg direction="in" type="u" name="id"/><arg direction="in" type="s" name="app_name"/>
+    <arg direction="in" type="u" name="replaces_id"/><arg direction="in" type="s" name="app_icon"/>
+    <arg direction="in" type="s" name="summary"/><arg direction="in" type="s" name="body"/>
+    <arg direction="in" type="as" name="actions"/><arg direction="in" type="a{sv}" name="hints"/>
+    <arg direction="in" type="i" name="timeout"/>
+  </method>
+  <method name="CloseNotification"><arg direction="in" type="u" name="id"/></method>
+</interface></node>"""
+STEAM_SERVER = "simple_notif_daemon"  # GetServerInformation's name for steam_notif_daemon
+DISMISSED = 2
+
+
+def log(*args):
+    print("ft-notifyfwd:", *args, file=sys.stderr, flush=True)
+
+
+class Forwarder:
+    def __init__(self, desktop, user, mode):
+        self.desktop, self.user, self.mode = desktop, user, mode
+        self.to_user = {}    # Plasma's id -> the user bus server's id
+        self.to_plasma = {}  # and back
+        self.closing = set() # Plasma ids closed before the user bus server answered
+        self.forwarding = False
+        self.inhibit_cookie = None
+        self.plasma = None   # unique name of Plasma's server
+
+        info = Gio.DBusNodeInfo.new_for_xml(WATCHER_XML).interfaces[0]
+        desktop.register_object_with_closures2(WATCHER_PATH, info, self.on_watcher_call, None, None)
+        for member in ("ActionInvoked", "NotificationClosed"):
+            user.signal_subscribe(NAME, NAME, member, PATH, None, Gio.DBusSignalFlags.NONE,
+                                  self.on_user_signal, None)
+        Gio.bus_watch_name_on_connection(desktop, NAME, Gio.BusNameWatcherFlags.NONE,
+                                         self.on_plasma, self.on_plasma_gone)
+        Gio.bus_watch_name_on_connection(user, NAME, Gio.BusNameWatcherFlags.NONE,
+                                         self.on_server, self.on_server_gone)
+        if mode == "on":
+            self.set_forwarding(True)  # the call can activate a server that isn't running yet
+
+    # --- Plasma, on the desktop's bus
+
+    def on_plasma(self, _conn, _name, owner):
+        self.plasma = owner
+        self.inhibit_cookie = None  # a new Plasma has no inhibition from us
+        self.desktop.call(NAME, PATH, MANAGER, "RegisterWatcher", None, None,
+                          Gio.DBusCallFlags.NONE, 5000, None, self.done, "RegisterWatcher")
+        self.update_inhibit()
+
+    def on_plasma_gone(self, *_):
+        self.plasma = None
+        self.inhibit_cookie = None
+
+    def update_inhibit(self):
+        if not self.plasma:
+            return
+        if self.forwarding and self.inhibit_cookie is None:
+            self.inhibit_cookie = 0  # pending
+            args = GLib.Variant("(ssa{sv})", ("frametop", "Notifications show in the Steam session", {}))
+            self.desktop.call(NAME, PATH, NAME, "Inhibit", args, GLib.VariantType("(u)"),
+                              Gio.DBusCallFlags.NONE, 5000, None, self.on_inhibited, None)
+        elif not self.forwarding and self.inhibit_cookie:
+            self.desktop.call(NAME, PATH, NAME, "UnInhibit", GLib.Variant("(u)", (self.inhibit_cookie,)),
+                              None, Gio.DBusCallFlags.NONE, 5000, None, self.done, "UnInhibit")
+            self.inhibit_cookie = None
+
+    def on_inhibited(self, conn, result, _):
+        try:
+            self.inhibit_cookie, = conn.call_finish(result).unpack()
+        except GLib.Error as e:
+            self.inhibit_cookie = None
+            log("Inhibit:", e.message)
+            return
+        if not self.forwarding:  # stopped meanwhile
+            self.update_inhibit()
+
+    def on_watcher_call(self, _conn, _sender, _path, _iface, method, params, invocation):
+        invocation.return_value(None)
+        if not self.forwarding:
+            return
+        if method == "Notify":
+            self.notify(params)
+        elif method == "CloseNotification":
+            pid, = params.unpack()
+            if pid in self.to_user:
+                self.close_user(pid)
+            else:
+                self.closing.add(pid)  # Notify's answer isn't in yet
+
+    def close_user(self, pid):
+        uid = self.to_user.pop(pid)
+        self.to_plasma.pop(uid, None)
+        self.user.call(NAME, PATH, NAME, "CloseNotification", GLib.Variant("(u)", (uid,)), None,
+                       Gio.DBusCallFlags.NONE, 5000, None, self.done, "CloseNotification")
+
+    def notify(self, params):
+        # Children, not unpack(): unpacking would lose the hints' D-Bus types (image-data's bytes).
+        pid, app, _replaces, icon, summary, body, actions, hints, timeout = (
+            params.get_child_value(i) for i in range(9))
+        pid = pid.get_uint32()
+        self.closing.discard(pid)
+        replaces = self.to_user.get(pid, 0)  # Plasma reuses the id for a replacement
+        args = GLib.Variant.new_tuple(app, GLib.Variant.new_uint32(replaces), icon, summary, body,
+                                      actions, hints, timeout)
+        self.user.call(NAME, PATH, NAME, "Notify", args, GLib.VariantType("(u)"),
+                       Gio.DBusCallFlags.NONE, 5000, None, self.on_notified, pid)
+
+    def on_notified(self, conn, result, pid):
+        try:
+            uid, = conn.call_finish(result).unpack()
+        except GLib.Error as e:
+            log("Notify:", e.message)
+            return
+        old = self.to_user.get(pid)
+        if old is not None and old != uid:
+            self.to_plasma.pop(old, None)
+        self.to_user[pid], self.to_plasma[uid] = uid, pid
+        if pid in self.closing:  # Plasma closed it before the answer came
+            self.closing.discard(pid)
+            self.close_user(pid)
+
+    # --- the user bus's notification server
+
+    def on_server(self, _conn, _name, _owner):
+        if self.mode == "on":
+            return self.set_forwarding(True)
+        self.user.call(NAME, PATH, NAME, "GetServerInformation", None, GLib.VariantType("(ssss)"),
+                       Gio.DBusCallFlags.NONE, 5000, None, self.on_server_info, None)
+
+    def on_server_info(self, conn, result, _):
+        try:
+            name = conn.call_finish(result).unpack()[0]
+        except GLib.Error as e:
+            log("GetServerInformation:", e.message)
+            name = STEAM_SERVER
+        self.set_forwarding(name != STEAM_SERVER)
+
+    def on_server_gone(self, *_):
+        if self.mode != "on":
+            self.set_forwarding(False)
+
+    def set_forwarding(self, on):
+        if on != self.forwarding:
+            log("forwarding" if on else "not forwarding (no usable notification server on the user bus)")
+            self.forwarding = on
+            self.to_user.clear(), self.to_plasma.clear(), self.closing.clear()
+        self.update_inhibit()
+
+    def on_user_signal(self, _conn, _sender, _path, _iface, member, params, _):
+        if member == "ActionInvoked":
+            uid, key = params.unpack()
+            pid = self.to_plasma.get(uid)
+            if pid is not None:
+                self.desktop.call(NAME, PATH, MANAGER, "InvokeAction", GLib.Variant("(us)", (pid, key)), None,
+                                  Gio.DBusCallFlags.NONE, 5000, None, self.done, "InvokeAction")
+        elif member == "NotificationClosed":
+            uid, reason = params.unpack()
+            pid = self.to_plasma.pop(uid, None)
+            if pid is None:
+                return
+            self.to_user.pop(pid, None)
+            # dismissed there: gone here too; expired there: Plasma's history keeps it
+            if reason == DISMISSED:
+                self.desktop.call(NAME, PATH, NAME, "CloseNotification", GLib.Variant("(u)", (pid,)), None,
+                                  Gio.DBusCallFlags.NONE, 5000, None, self.done, "CloseNotification")
+
+    @staticmethod
+    def done(conn, result, what):
+        try:
+            conn.call_finish(result)
+        except GLib.Error as e:
+            log(f"{what}:", e.message)
+
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else "auto"
+    if mode not in ("auto", "on"):
+        sys.exit(__doc__)
+    if os.path.basename(os.environ.get("XDG_RUNTIME_DIR", "")) != "frametop" and not os.environ.get("FT_NOTIFYFWD_TEST"):
+        return  # only in the Frametop desktop, whose session bus is its own
+    loop = GLib.MainLoop()
+    desktop = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    # The desktop's runtime directory is its own; the user bus is at the real one.
+    user_address = os.environ.get("FT_USER_BUS") or f"unix:path=/run/user/{os.getuid()}/bus"
+    user = Gio.DBusConnection.new_for_address_sync(
+        user_address, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+        None, None)
+    for conn in (desktop, user):
+        conn.set_exit_on_close(False)
+        conn.connect("closed", lambda *_: loop.quit())  # the desktop ended (or the login did)
+    _forwarder = Forwarder(desktop, user, mode)
+    loop.run()
+
+
+if __name__ == "__main__":
+    main()

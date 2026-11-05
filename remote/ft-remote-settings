@@ -21,6 +21,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "conf"))
+import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 CTL = os.path.join(REPO, "session", "remote-ctl.sh")
 CONF = os.path.expanduser("~/.config/frametop.conf")
 CREDS = os.path.expanduser("~/.config/frametop-remote")
@@ -29,34 +31,13 @@ HIDDEN = "••••••••"
 
 
 def read_conf(key, default=""):
-    value = default
-    try:
-        with open(CONF) as f:
-            for line in f:
-                line = line.split("#", 1)[0].strip()
-                if line.startswith(key + "="):
-                    value = line.split("=", 1)[1].strip()
-    except OSError:
-        pass
-    return value
+    return ft_conf.read(CONF).get(key, default)
 
 
 def write_conf(key, value):
-    """Set KEY=value in frametop.conf, keeping its comments and the rest of the file."""
-    try:
-        with open(CONF) as f:
-            lines = f.read().splitlines()
-    except OSError:
-        lines = []
-    for i, line in enumerate(lines):
-        if line.split("#", 1)[0].strip().startswith(key + "="):
-            comment = line[line.index("#"):] if "#" in line else ""
-            lines[i] = f"{key}={value}" + (f"   {comment}" if comment else "")
-            break
-    else:
-        lines.append(f"{key}={value}")
-    with open(CONF, "w") as f:
-        f.write("\n".join(lines) + "\n")
+    """Set KEY=value in frametop.conf, keeping its comments and the rest of the file (shell-quoted,
+    by a temp file and a rename: ft_conf.set_value)."""
+    ft_conf.set_value(key, value, CONF)
 
 
 def read_password():

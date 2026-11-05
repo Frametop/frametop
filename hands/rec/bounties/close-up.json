@@ -1,0 +1,389 @@
+{
+ "version": 1,
+ "name": "close-up",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Close-up hands",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "close-up",
+   "title": "Close-up hands",
+   "kind": "scene",
+   "intro": "Windows very close to you, about a forearm's length from your eyes. Poke, tap and pinch them there, with your hand near your face and low in front of your chest. Nothing happens when you do: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "poke-right",
+     "hands": "right",
+     "text": "Right hand: poke each lit button with your index fingertip, in and back out.|This window is close: about a forearm's length from your eyes.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.06,
+        -0.1,
+        -0.28
+       ],
+       "size": [
+        0.26,
+        0.18
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "seconds": 12,
+      "mix": {
+       "poke": 1
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "a relaxed hand, the other fingers loosely curled"
+      }
+     ]
+    },
+    {
+     "id": "poke-left",
+     "hands": "left",
+     "text": "Left hand: poke each lit button with your index fingertip.|Keep your head still and let the hand come close to your face.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.06,
+        -0.1,
+        -0.28
+       ],
+       "size": [
+        0.26,
+        0.18
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "seconds": 12,
+      "mix": {
+       "poke": 1
+      }
+     }
+    },
+    {
+     "id": "low-close",
+     "hands": "right",
+     "text": "A low window just in front of your chest. Poke its buttons with your right hand,|looking straight ahead, not down at it.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.08,
+        -0.3,
+        -0.26
+       ],
+       "size": [
+        0.26,
+        0.16
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "poke": 1
+      }
+     }
+    },
+    {
+     "id": "side-close",
+     "hands": "right",
+     "text": "A window close and out to your right. Poke it with your right hand,|keeping your head facing ahead.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.26,
+        -0.12,
+        -0.24
+       ],
+       "size": [
+        0.22,
+        0.16
+       ],
+       "look": "grid:2x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 11,
+      "mix": {
+       "poke": 1
+      }
+     }
+    },
+    {
+     "id": "taps-close",
+     "hands": "right",
+     "text": "Right hand close to the window: tap thumb to index on the lit button, as a click.|Hold: keep them together until it goes out.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.1,
+        -0.3
+       ],
+       "size": [
+        0.28,
+        0.18
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 12,
+      "mix": {
+       "tap": 2,
+       "hold": 1
+      },
+      "lit_s": 1.2
+     }
+    },
+    {
+     "id": "bar-right",
+     "hands": "right",
+     "text": "Right hand. Pinch the lit bar or corner of this close window, hold until it goes out,|then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.12,
+        -0.3
+       ],
+       "size": [
+        0.28,
+        0.18
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "every_s": 2.2,
+      "gap_s": 0.9,
+      "moves": [
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "br"
+       },
+       {
+        "grab": "bar"
+       },
+       {
+        "grab": "tr"
+       }
+      ],
+      "say": "Pinch the lit part and hold"
+     }
+    },
+    {
+     "id": "bar-left",
+     "hands": "left",
+     "text": "Left hand. Pinch the lit bar or corner and take it to the ghost, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.05,
+        -0.12,
+        -0.3
+       ],
+       "size": [
+        0.28,
+        0.18
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "grab": "bar",
+      "every_s": 3.0,
+      "gap_s": 1.0,
+      "count": 3,
+      "moves": [
+       [
+        0,
+        0.1,
+        0
+       ],
+       [
+        0,
+        -0.1,
+        0
+       ],
+       [
+        0.12,
+        0,
+        0
+       ]
+      ],
+      "say": "Pinch the bar, take it to the ghost"
+     }
+    },
+    {
+     "id": "both-hands",
+     "hands": "both",
+     "text": "Both hands close, index fingers pointing. Each lit button says L or R:|poke it with that hand.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.0,
+        -0.12,
+        -0.3
+       ],
+       "size": [
+        0.34,
+        0.2
+       ],
+       "look": "grid:4x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.4,
+      "seconds": 14,
+      "mix": {
+       "poke": 1
+      },
+      "hands": [
+       "left",
+       "right"
+      ]
+     }
+    },
+    {
+     "id": "look-alikes",
+     "hands": "right",
+     "text": "Right hand. Cyan: poke it. Orange with a cross: bring the fingertip about 1 cm short of it|and stop there, without touching.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.1,
+        -0.28
+       ],
+       "size": [
+        0.26,
+        0.18
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "poke": 1,
+       "nogo": 1
+      }
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace: poke the lit button as often as you like.|Bring the hand in close to your face and back out, higher and lower.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.05,
+        -0.12,
+        -0.28
+       ],
+       "size": [
+        0.26,
+        0.18
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 4,
+      "seconds": 16,
+      "mix": {
+       "poke": 1
+      },
+      "lit_s": 4,
+      "says": {
+       "poke": "Your own pace: poke it as often as you like"
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

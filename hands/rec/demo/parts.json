@@ -1,0 +1,216 @@
+{
+ "version": 1,
+ "note": "The demo GIFs for the hand recorder's v2 script: one recording per part, in this order. Motions are what the maintainer performs on camera; the plan is the Claude Doc ee05ba65 (Demo recordings, 2026-10-12).",
+ "parts": [
+  {
+   "id": "1",
+   "section": "Hand size",
+   "motions": [
+    "Both hands about 40 cm out, still",
+    "Palms toward you, then backs toward you",
+    "Fingers spread, then a fist, then point",
+    "About 1 s for each shape"
+   ]
+  },
+  {
+   "id": "2a",
+   "section": "Index taps",
+   "title": "Wrist roll",
+   "motions": [
+    "One hand low and relaxed, other fingers loosely curled: look down at it",
+    "2 light taps palm down",
+    "2 taps edge-on, 2 palm up, 2 palm toward your face"
+   ]
+  },
+  {
+   "id": "2b",
+   "section": "Index taps",
+   "title": "Through the zones",
+   "motions": [
+    "Keep tapping while you move: centre at chest height",
+    "Far out to your side, then crossed past the middle",
+    "Close to your face, then at arm's length",
+    "Quick taps, a double tap, one slow press"
+   ]
+  },
+  {
+   "id": "2c",
+   "section": "Index taps",
+   "title": "Both hands",
+   "motions": [
+    "Both hands tapping",
+    "Then one hand over the other, still tapping"
+   ]
+  },
+  {
+   "id": "3a",
+   "section": "Middle taps",
+   "title": "Wrist roll and zones",
+   "motions": [
+    "Thumb to the middle finger's pad, index half-curled: look down at the hand",
+    "2 taps palm down, edge-on, palm up, toward your face",
+    "Then a few taps out to the side and close to your face"
+   ]
+  },
+  {
+   "id": "3b",
+   "section": "Middle taps",
+   "title": "Firm presses and a head turn",
+   "motions": [
+    "3 slow, firm presses",
+    "Keep tapping and turn your head until the hand reaches the edge of the view",
+    "Then turn the other way"
+   ]
+  },
+  {
+   "id": "4a",
+   "section": "Look-alikes",
+   "title": "Fingers",
+   "motions": [
+    "Stop 1 cm short of a tap",
+    "Rub the thumb along the side of the index",
+    "Ring finger to thumb",
+    "Let a loosely curled hand rest"
+   ]
+  },
+  {
+   "id": "4b",
+   "section": "Look-alikes",
+   "title": "Fists",
+   "motions": [
+    "Close a fist slowly, open it",
+    "Close it fast, open it",
+    "Once at chest height, once low"
+   ]
+  },
+  {
+   "id": "5a",
+   "section": "Hold and drag",
+   "title": "One hand",
+   "motions": [
+    "Pinch and hold 3 s",
+    "Drag up, down, left, right",
+    "Roll the wrist while holding",
+    "Loosen the other fingers without letting go"
+   ]
+  },
+  {
+   "id": "5b",
+   "section": "Hold and drag",
+   "title": "Two hands",
+   "motions": [
+    "One hand holds a pinch, the other taps",
+    "Hands apart, then close, then crossed"
+   ]
+  },
+  {
+   "id": "6",
+   "section": "Three-finger scroll",
+   "motions": [
+    "Thumb on the index and middle tips",
+    "Move up and down slowly, then fast",
+    "Let the ring finger join once"
+   ]
+  },
+  {
+   "id": "7a",
+   "section": "Palm up",
+   "title": "Fingertips drop",
+   "motions": [
+    "Arms forward, palms up, fingers flat: hands close (elbows tucked)",
+    "Fingertips drop toward the floor and back: 1 slow, 2 fast",
+    "Same with forearms half out, then arms straight",
+    "One drop low at the waist, one at eye height"
+   ]
+  },
+  {
+   "id": "7b",
+   "section": "Palm up",
+   "title": "Fingertips rise",
+   "motions": [
+    "Palms up at the same three distances",
+    "Fingertips curl up toward you and back: 1 slow, 2 fast each"
+   ]
+  },
+  {
+   "id": "7c",
+   "section": "Palm up",
+   "title": "Pinch while bent",
+   "motions": [
+    "Palm up, hold a pinch",
+    "Drop the fingertips and raise them, still pinching",
+    "Flip palm up and down with the wrist bent"
+   ]
+  },
+  {
+   "id": "8",
+   "section": "Strokes and gestures",
+   "motions": [
+    "Lazy susan stroke each way, with the return stroke",
+    "A wave",
+    "5 s of talking with your hands"
+   ]
+  },
+  {
+   "id": "9a",
+   "section": "Reach and pull",
+   "title": "Grab that",
+   "motions": [
+    "Open palm at a far target",
+    "Close to a fist and pull back"
+   ]
+  },
+  {
+   "id": "9b",
+   "section": "Reach and pull",
+   "title": "Push, flick, a real object",
+   "motions": [
+    "Push away, then flick away",
+    "Reach for a cup or your phone"
+   ]
+  },
+  {
+   "id": "10",
+   "section": "Fists",
+   "motions": [
+    "Two fists: hold, pull apart, push together",
+    "Fists with the palms in, down, then up"
+   ]
+  },
+  {
+   "id": "11a",
+   "section": "Edges and exits",
+   "title": "Out and back",
+   "motions": [
+    "Right hand open: slide out past the right edge until gone, wait 1 s, back",
+    "Same up past your face",
+    "Left hand pinching: out past the left edge, then down past your lap"
+   ]
+  },
+  {
+   "id": "11b",
+   "section": "Edges and exits",
+   "title": "Crossing",
+   "motions": [
+    "Both hands cross fully to the opposite sides",
+    "Hold a moment, come back"
+   ]
+  },
+  {
+   "id": "12",
+   "section": "Desk work",
+   "motions": [
+    "Type a few words, use the mouse, pick up the phone",
+    "One tap, then back to the keys"
+   ]
+  },
+  {
+   "id": "13",
+   "section": "Controllers",
+   "motions": [
+    "Pick up the controllers, set them down",
+    "A tap in between"
+   ]
+  }
+ ]
+}

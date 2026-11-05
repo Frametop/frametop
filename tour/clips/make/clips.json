@@ -1,0 +1,241 @@
+{
+ "float": {
+  "scenes": [
+   {
+    "a": 12.5,
+    "b": 17.5,
+    "zoom": 1.7,
+    "cx": 925,
+    "cy": 625,
+    "ring": true,
+    "caps": [
+     [
+      12.5,
+      "Click the float button by Close"
+     ]
+    ]
+   },
+   {
+    "a": 20.5,
+    "b": 27,
+    "speed": 1.3,
+    "ring": true,
+    "caps": [
+     [
+      20.5,
+      "Drag its bar to take it anywhere"
+     ]
+    ]
+   }
+  ]
+ },
+ "mouse": {
+  "scenes": [
+   {
+    "a": 27,
+    "b": 34,
+    "ring": true,
+    "caps": [
+     [
+      27,
+      "One mouse reaches every screen"
+     ]
+    ]
+   }
+  ]
+ },
+ "frunner": {
+  "scenes": [
+   {
+    "a": 34.5,
+    "b": 47.5,
+    "speed": 1.3,
+    "ring": true,
+    "caps": [
+     [
+      34.5,
+      "Meta+Space opens frunner"
+     ],
+     [
+      37.5,
+      "Type an app, press Enter"
+     ],
+     [
+      41.5,
+      "It opens as a floating window"
+     ]
+    ]
+   }
+  ]
+ },
+ "frunner-more": {
+  "scenes": [
+   {
+    "a": 179,
+    "b": 194.5,
+    "speed": 1.4,
+    "ring": true,
+    "caps": [
+     [
+      179,
+      "Shift+Enter shows more ways to open"
+     ],
+     [
+      191.5,
+      "Here: docked on this screen"
+     ]
+    ]
+   }
+  ]
+ },
+ "mouse-tilt": {
+  "scenes": [
+   {
+    "a": 140,
+    "b": 158,
+    "speed": 1.6,
+    "ring": true,
+    "caps": [
+     [
+      140,
+      "Hold left on the bar and move: carry"
+     ],
+     [
+      146,
+      "Hold right too: tilt it"
+     ]
+    ]
+   }
+  ]
+ },
+ "hand-clicks": {
+  "scenes": [
+   {
+    "a": 199,
+    "b": 220.5,
+    "speed": 1.4,
+    "ring": true,
+    "caps": [
+     [
+      199,
+      "Pinch: click"
+     ],
+     [
+      203.5,
+      "Middle finger pinch: right click"
+     ],
+     [
+      213.5,
+      "Pinch and move: drag"
+     ]
+    ]
+   }
+  ]
+ },
+ "grab-that": {
+  "scenes": [
+   {
+    "a": 220.5,
+    "b": 226.5,
+    "caps": [
+     [
+      220.5,
+      "Open palm at a screen, then fist and pull"
+     ]
+    ]
+   }
+  ]
+ },
+ "two-hands": {
+  "scenes": [
+   {
+    "a": 233.5,
+    "b": 240,
+    "caps": [
+     [
+      233.5,
+      "Grab with both hands and stretch: resize"
+     ]
+    ]
+   }
+  ]
+ },
+ "hand-move": {
+  "scenes": [
+   {
+    "a": 241,
+    "b": 260,
+    "speed": 1.4,
+    "caps": [
+     [
+      241,
+      "Pinch the bar to carry and tilt"
+     ],
+     [
+      248,
+      "Grab a side to turn it"
+     ],
+     [
+      255,
+      "Let go mid-swing to throw"
+     ]
+    ]
+   }
+  ]
+ },
+ "roll": {
+  "scenes": [
+   {
+    "a": 266,
+    "b": 274,
+    "ring": true,
+    "caps": [
+     [
+      266,
+      "Drag the roll button: it rolls, then snaps level"
+     ]
+    ]
+   }
+  ]
+ },
+ "gaze-check": {
+  "scenes": [
+   {
+    "a": 423.5,
+    "b": 433,
+    "ring": true,
+    "caps": [
+     [
+      423.5,
+      "Look at each dot, then click or pinch"
+     ]
+    ],
+    "zoom": 1.5,
+    "cx": 975,
+    "cy": 560
+   }
+  ]
+ },
+ "gaze-nudge": {
+  "scenes": [
+   {
+    "a": 434.2,
+    "b": 446,
+    "speed": 1.3,
+    "zoom": 1.8,
+    "follow": true,
+    "ring": true,
+    "caps": [
+     [
+      434.2,
+      "Hold left, move onto it: nudge"
+     ],
+     [
+      440,
+      "Press right too: drag from there"
+     ]
+    ]
+   }
+  ]
+ }
+}

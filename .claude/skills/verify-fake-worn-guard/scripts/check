@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Model-check the testbench's fake-worn guard (docs/charts/fake-worn-guard/FakeWornGuard.tla) with TLC, one run per
+config and invariant, and compare with the recorded baseline (BASELINE below).
+
+  check [--model DIR]     exit 0: every result matches the baseline
+                          exit 1: a result differs (a new break, or a known finding now holds)
+                          exit 2: TLC couldn't run
+
+TLC 1.7.4 comes from TLA2TOOLS (a tla2tools.jar path) or is downloaded once into
+~/.cache/frametop-formal and checked against its SHA-256. Java comes from JAVA, then `java` on
+PATH, then mise's java@temurin-25."""
+import hashlib, os, re, shutil, subprocess, sys, tempfile, urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent.parent
+MODEL = HERE.parents[2] / 'docs/charts/fake-worn-guard'  # the models live with the other charts
+TLC_URL = 'https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar'
+TLC_SHA256 = '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88'
+CONFIGS = ['Clean', 'Kills', 'Hangs', 'All', 'NoF']
+RULES = ['TypeOK', 'NoHostTakeover', 'FakeIsNoticed']
+# What the code at the sync commit does (SKILL.md, Findings): 'holds', or the finding's name and
+# TLC's shortest path to it (one worker, so the same model gives the same path). A known rule
+# that breaks by another shortest path is a new way to break it, so it differs too.
+# Findings A and C (fixed by release_or_keep_flag) held both Hangs breaks until then.
+# Finding D (fixed by worn on's left-flag refusal) broke All's FakeIsNoticed until then.
+# Finding B (fixed by ft-stream's flag check) and E (by its AfterTest) held Kills' and All's
+# NoHostTakeover until then, and F (fixed by the guard leaving the flag) after them, by
+# YouRunWornOn OnCheck OnStartGuard GuardStarts OnWait GuardStopped OnFake StreamStarts
+# StreamTakesLock StreamTick HelperAnswers StreamTick. NoF is All without F's window.
+BASELINE = {
+    ('Clean', 'TypeOK'): 'holds', ('Clean', 'NoHostTakeover'): 'holds', ('Clean', 'FakeIsNoticed'): 'holds',
+    ('Kills', 'TypeOK'): 'holds', ('Kills', 'NoHostTakeover'): 'holds', ('Kills', 'FakeIsNoticed'): 'holds',
+    ('Hangs', 'TypeOK'): 'holds', ('Hangs', 'NoHostTakeover'): 'holds', ('Hangs', 'FakeIsNoticed'): 'holds',
+    ('All', 'TypeOK'): 'holds', ('All', 'NoHostTakeover'): 'holds', ('All', 'FakeIsNoticed'): 'holds',
+    ('NoF', 'TypeOK'): 'holds', ('NoF', 'NoHostTakeover'): 'holds', ('NoF', 'FakeIsNoticed'): 'holds',
+}
+
+
+def tla2tools():
+    if os.environ.get('TLA2TOOLS'):
+        return os.environ['TLA2TOOLS']
+    jar = Path.home() / '.cache/frametop-formal/tla2tools-1.7.4.jar'
+    if not jar.exists():
+        jar.parent.mkdir(parents=True, exist_ok=True)
+        data = urllib.request.urlopen(TLC_URL, timeout=120).read()
+        if hashlib.sha256(data).hexdigest() != TLC_SHA256:
+            sys.exit(f'check: {TLC_URL} does not match its SHA-256')
+        jar.write_bytes(data)
+    return str(jar)
+
+
+def java():
+    if os.environ.get('JAVA'):
+        return os.environ['JAVA']
+    if shutil.which('java'):
+        return 'java'
+    if shutil.which('mise'):
+        found = subprocess.run(['mise', 'which', 'java', '--tool', 'java@temurin-25'], capture_output=True, text=True)
+        if found.returncode:
+            subprocess.run(['mise', 'install', 'java@temurin-25'], check=True)
+            found = subprocess.run(['mise', 'which', 'java', '--tool', 'java@temurin-25'], capture_output=True, text=True)
+        if found.returncode == 0:
+            return found.stdout.strip()
+    sys.exit('check: no Java: set JAVA, put java 11+ on PATH, or install mise')
+
+
+def run(jar, jvm, model, config, rule, work):
+    cfg = Path(model, config + '.cfg').read_text()
+    cfg = re.sub(r'^INVARIANT .*\n', '', cfg, flags=re.M) + f'INVARIANT {rule}\n'
+    Path(work, 'run.cfg').write_text(cfg)
+    out = subprocess.run([jvm, '-XX:+UseParallelGC', '-cp', jar, 'tlc2.TLC', '-workers', '1', '-deadlock',
+                          '-metadir', str(Path(work, 'meta')), '-config', 'run.cfg', 'FakeWornGuard.tla'],
+                         cwd=work, capture_output=True, text=True, timeout=600).stdout
+    if f'Invariant {rule} is violated' in out:
+        steps = re.findall(r'^State \d+: <(\w+)', out, re.M)
+        return 'breaks', ' '.join(s for s in steps if s != 'Initial')
+    if 'No error has been found' in out:
+        return 'holds', ''
+    sys.stderr.write(out[-3000:])
+    sys.exit(f'check: TLC failed on {config}/{rule}')
+
+
+def main():
+    model = Path(sys.argv[sys.argv.index('--model') + 1]) if '--model' in sys.argv else MODEL
+    jar, jvm = tla2tools(), java()
+    differs = 0
+    with tempfile.TemporaryDirectory(prefix='fake-worn-check-') as work:
+        shutil.copy(Path(model, 'FakeWornGuard.tla'), work)
+        for config in CONFIGS:
+            for rule in RULES:
+                got, steps = run(jar, jvm, model, config, rule, work)
+                want = BASELINE[(config, rule)]
+                ok = got == want if want == 'holds' else (got == 'breaks' and steps == want[1])
+                differs += not ok
+                note = '' if want == 'holds' else f' (known finding {want[0]})' if ok else f' (known finding {want[0]}, by another path)'
+                print(f"{'ok  ' if ok else 'DIFF'} {config:6} {rule:15} {got}{note if got == 'breaks' else ''}")
+                if steps:
+                    print('       shortest path: ' + steps.replace(' ', ' -> '))
+    print('matches the baseline' if not differs else f'{differs} result(s) differ from the baseline: see SKILL.md')
+    return 1 if differs else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

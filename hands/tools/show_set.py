@@ -11,13 +11,15 @@ the color cameras (color_video<N>). Writes OUT/set_<n>.jpg (default /tmp).
 """
 import argparse
 import os
-import struct
+import sys
 
 import cv2
 import numpy as np
 
-HDR = struct.Struct('<8sII')
-CAM = struct.Struct('<16sIIQQ')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from recorder import fhformat  # noqa: E402  (FHSET01, hands/track/record.h)
+
+HDR, CAM = fhformat.SET_HDR, fhformat.SET_CAM
 ORDER = ['slam_left', 'slam_right', 'upper_left', 'upper_right']
 
 
@@ -29,7 +31,7 @@ def index(path):
         while off + HDR.size <= size:
             f.seek(off)
             magic, n, nbytes = HDR.unpack(f.read(HDR.size))
-            if magic[:7] != b'FHSET01' or off + nbytes > size:
+            if magic[:7] != fhformat.SET_MAGIC or off + nbytes > size:
                 break
             offs.append(off)
             off += nbytes

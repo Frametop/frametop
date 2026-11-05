@@ -49,6 +49,8 @@ gazed.TrackedEye = lambda: lambda now=None: None  # both eyes, whatever SteamVR'
 DOTS = 4
 real_dots = gazecheck.check_dots
 gazecheck.check_dots = lambda kind, own: real_dots(kind, own)[:DOTS]  # a short calibration
+gazecheck.Fusion.MIN = DOTS   # ...whose dots still fit a fusion (SteamVR's eyes at each)
+gazecheck.LOOKED_AWAY = 1e9   # the fake SteamVR's eyes stay put whatever the dot (looked-away-test.py has that check)
 logs = []
 gazed.log = gazecheck.log = lambda msg: logs.append(msg)
 
@@ -61,7 +63,8 @@ while True:
         if not os.read(0, 4096):
             break
     print(json.dumps({"t": time.monotonic(), "src": {"mmap1": {"hy": 1.0, "hp": 2.0, "unc": [0.001, 0.001],
-          "open": [0.8, 0.8]}, "own": {"ok": 0}}}), flush=True)
+          "open": [0.8, 0.8]}, "left": {"hy": 0.0, "hp": 2.0}, "right": {"hy": 2.0, "hp": 2.0},
+          "own": {"ok": 0}}}), flush=True)
 ''')
 SLEEPER = [sys.executable, "-c", "import sys; sys.stdin.read()"]  # quits when its stdin closes
 
@@ -285,6 +288,16 @@ check("the service sees it calibrated", wait(lambda: svc.checks.calibrated() is 
 check("and gaze mode stays on", "gaze off" in helper_state["heard"], False)
 check("and no second calibration opens", wait(lambda: svc.checks.check is not None, 3), False)
 check("one calibration in the log", sum(m.startswith("full check:") for m in logs), 1)
+fusion = gazecheck.Fusion.load(gazecheck.FUSION)
+check("SteamVR's eyes at the dots ours took: a fusion saved", (fusion.info.get("dots"), fusion.info.get("how"))
+      if fusion else None, (DOTS, "calibration"))
+dots = [d[:2] for d in real_dots("full", True)[:DOTS]]
+check("its points: SteamVR's eyes' mean, and the dot", [p[:2] for p in fusion.points] if fusion else None,
+      [[1.0, 2.0]] * DOTS)
+check("...the dots", [tuple(round(v, 3) for v in p[2:]) for p in fusion.points] if fusion else None,
+      [tuple(round(v, 3) for v in d) for d in dots])
+check("the service loaded it", wait(lambda: svc.fusion is not None and svc.fusion.ready(), 3), True)
+check("GAZE_FUSION unset: not in use", (svc.fusing, svc.status()["fusion"]["setting"]), (False, "off"))
 
 print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
 svc.running = False

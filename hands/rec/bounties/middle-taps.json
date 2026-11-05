@@ -1,0 +1,426 @@
+{
+ "version": 1,
+ "name": "middle-taps",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Middle taps",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "middle-taps",
+   "title": "Middle taps",
+   "kind": "scene",
+   "intro": "Hold your hand up in front of you, palm away, and point it at the lit button, as if a laser came out of your knuckles (Frametop's hand ray). When it lights up purple, tap thumb to middle fingertip, the index out of the way: a right click. Nothing happens when you tap: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "aim-right",
+     "hands": "right",
+     "text": "Right hand up in front of you, palm away, the left one down and out of view.|Point the hand at each button as it lights and middle tap. Start with the arm nearly straight.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "seconds": 12,
+      "mix": {
+       "middle": 1
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "elbow bent, hand near your chest"
+      }
+     ]
+    },
+    {
+     "id": "aim-left",
+     "hands": "left",
+     "text": "Left hand up in front of you, palm away, the right one down and out of view.|Point it at each lit button and middle tap. Start with the elbow bent, the hand near your chest.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "seconds": 12,
+      "mix": {
+       "middle": 1
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "arm nearly straight"
+      }
+     ]
+    },
+    {
+     "id": "two-windows",
+     "hands": "right",
+     "text": "Two windows, left and right: the lit button jumps between them.|Point your right hand at it and middle tap, keeping your head facing ahead.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.55,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.45,
+        0.3
+       ],
+       "look": "grid:2x2"
+      },
+      {
+       "id": "b",
+       "at": [
+        0.55,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.45,
+        0.3
+       ],
+       "look": "grid:2x2"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "middle": 1
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "turning your head to each one too"
+      }
+     ]
+    },
+    {
+     "id": "high-low",
+     "hands": "left",
+     "text": "One window high, one low. Point your left hand at the lit button and middle tap,|the hand going up and down with it.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        0.3,
+        -1.1
+       ],
+       "size": [
+        0.6,
+        0.25
+       ],
+       "look": "grid:3x1"
+      },
+      {
+       "id": "b",
+       "at": [
+        0,
+        -0.4,
+        -0.9
+       ],
+       "size": [
+        0.6,
+        0.25
+       ],
+       "look": "grid:3x1"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "middle": 1
+      }
+     }
+    },
+    {
+     "id": "far",
+     "hands": "right",
+     "text": "A big window far away: small moves of the hand aim across it.|Right hand up, palm away: point and middle tap.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.2,
+        0.1,
+        -3.0
+       ],
+       "size": [
+        1.6,
+        1.0
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.25,
+      "seconds": 10,
+      "mix": {
+       "middle": 1
+      }
+     }
+    },
+    {
+     "id": "both-hands",
+     "hands": "both",
+     "text": "Both hands up, palms away. Each lit button says L or R:|point that hand at it and middle tap.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.4,
+      "seconds": 16,
+      "mix": {
+       "middle": 1
+      },
+      "hands": [
+       "left",
+       "right"
+      ]
+     }
+    },
+    {
+     "id": "presses-right",
+     "hands": "right",
+     "text": "Right hand pointing. A button showing 2: a double middle tap. A button showing hold: press and keep it until it goes out, as if dragging.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 12,
+      "mix": {
+       "middle": 2,
+       "middle-hold": 1
+      },
+      "lit_s": 1.2
+     }
+    },
+    {
+     "id": "mixed-right",
+     "hands": "right",
+     "text": "Right hand pointing. Cyan: tap with the index. Purple: tap with the middle finger.|Telling the two apart is the point: make each one clear.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      }
+     }
+    },
+    {
+     "id": "mixed-left",
+     "hands": "left",
+     "text": "Left hand pointing. Cyan: index tap. Purple: middle tap.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.3,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      }
+     }
+    },
+    {
+     "id": "look-alikes",
+     "hands": "right",
+     "text": "Right hand pointing. Purple: middle tap. Orange with a cross: don't touch, stop about 1 cm short.|Now and then close the hand slowly into a fist instead.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "middle": 1,
+       "nogo": 1
+      }
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace: point at the lit button and middle tap as often as you like.|Move the arm while you do: straight out, bent, out to the side, higher and lower.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 4,
+      "seconds": 16,
+      "mix": {
+       "middle": 1
+      },
+      "lit_s": 4,
+      "says": {
+       "middle": "Your own pace: middle tap it as often as you like"
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -18,7 +18,7 @@ struct ft_dmabuf {
 };
 
 // FT_FRONT: a spin (the lazy susan) brought panel `screen` to straight ahead: typing goes there.
-enum ft_event_type { FT_MOTION, FT_BUTTON, FT_SCROLL, FT_LEAVE, FT_QUIT, FT_KEY, FT_KEYBOARD_CLOSED, FT_FRONT };
+enum ft_event_type { FT_MOTION, FT_BUTTON, FT_SCROLL, FT_LEAVE, FT_QUIT, FT_FRONT };
 
 struct ft_event {
     enum ft_event_type type;
@@ -28,7 +28,6 @@ struct ft_event {
     bool pressed;
     bool controller;  // FT_BUTTON: from a hand controller's laser (not the 3D mouse's)
     double dx, dy;    // FT_SCROLL: notches (positive dy: scroll down)
-    uint32_t key;     // FT_KEY: linux KEY_* from our keyboard (pressed: down or up)
 };
 
 bool ft_vr_init(void);
@@ -52,6 +51,16 @@ bool ft_vr_vsync(double *since, double *hz);
 // A panel for screen `index`, width in metres, placed in a row in front of the head.
 void ft_vr_screen_create(int index, double metres, int count);
 void ft_vr_screen_destroy(int index);
+// KWin's scale for a screen (its logical pixels: buffer pixels / scale; the lazy susan sizes by them).
+void ft_vr_screen_scale(int index, double scale);
+// A key from the input relay (evdev code, 1 press, 0 release, 2 repeat): a press counts as use of the
+// front slot's screen, and Ctrl held makes a carry move finely.
+void ft_vr_key(uint32_t code, int value);
+// Ctrl or Alt pressed while the 3D mouse carries a panel (carry_toggle): true for its press, repeats and
+// release, which go to the carry, not the desktop.
+bool ft_vr_carry_key(uint32_t code, int value);
+// The 3D mouse's wheel (notches, + up) during a carry_toggle carry: it pushes the carried panel. False if none.
+bool ft_vr_carry_wheel(int notches);
 // A remote screen's panel (remote.c): another machine's display, streamed by ft-stream. It
 // has a screen's controls and takes the same commands; its frames come through
 // ft_vr_screen_present, and its input arrives as events for its index. *restored: it's back
@@ -67,16 +76,25 @@ void ft_vr_float_output(int index, bool on);
 // Show a client buffer (identified by `key`) on the screen's panel. False if SteamVR
 // can't import it.
 bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *buf);
+// The panel keeps its picture for now ("hold", while ft-floatd changes its window): new buffers wait.
+bool ft_vr_screen_held(int index);
 // A buffer is going away: drop its import.
 void ft_vr_forget(const void *key);
 // Poll panel input and SteamVR events.
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data);
-// Our keyboard (keyboard.cpp), for typing on screen `index`: its keys arrive as FT_KEY
-// events, and FT_KEYBOARD_CLOSED when its Close key is pressed or the screens hide. False if
-// it can't be shown or there's no head pose. With the Steam menu or Steam's own keyboard
-// up, it waits and appears when they're gone.
-bool ft_vr_keyboard_show(int index);
-void ft_vr_keyboard_hide(void);
+// Gamepad mode's pill (vr.cpp): over the panel typing goes to, `screen` (-1: Steam, no pill), from
+// compositor.c's keys_update; and the panel SteamVR's Gamepad mode is for while it's ours (-1: none),
+// for the input relay's "pad" (a remote display's).
+void ft_vr_gamepad_target(int screen);
+int ft_vr_gamepad_screen(void);
+// The panel the 3D mouse's laser is on, when its wheel can scroll there directly (the input
+// relay's "wheel", not SteamVR's joystick scrolling): it shows, nothing's paused, and nothing
+// drags it. -1 when not.
+int ft_vr_mouse_screen(void);
+// The relay's wheel in the ~100 ms before it hears ft_vr_mouse_screen() went -1 for a held press, a
+// torn-off window or a KWin move (keys_update): what SteamVR's scroll would do there (push or pull a
+// carried window, tear one off, or scroll under the held button). False if that isn't why it's -1.
+bool ft_vr_held_wheel(int notches, void (*handle)(const struct ft_event *, void *), void *data);
 // A command from the control socket (@ft_screens); writes the reply (see vr.cpp).
 void ft_vr_command(const char *command, char *reply, int reply_size);
 

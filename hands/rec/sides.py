@@ -23,11 +23,11 @@ Standard library only (the window, validate.py on Windows, the maintainer's tool
 """
 import json
 import os
-import struct
 import time
 
-HDR = struct.Struct("<8sII")       # fh_set_hdr_t (hands/track/record.h)
-CAM = struct.Struct("<16sIIQQ")    # fh_set_cam_t: name, width, height, capture_ns, dqbuf_ns
+from recorder import fhformat  # noqa: E402  (FHSET01, hands/track/record.h)
+
+HDR, CAM = fhformat.SET_HDR, fhformat.SET_CAM
 SIDES = {"slam_left": "slam_right", "slam_right": "slam_left",
          "slam_left_dk": "slam_right_dk", "slam_right_dk": "slam_left_dk"}
 LIVE_FRESH_S = 6.0   # ft-hands rewrites its sides.json at least every 2 s

@@ -1,0 +1,89 @@
+{
+ "schema": 1,
+ "id": "light",
+ "title": "Light changes",
+ "intro": "The panel goes dark and bright. Your pupils change size with it: that's what this records.",
+ "steps": [
+  {
+   "id": "steps",
+   "kind": "light",
+   "text": "Keep looking at the dot while the light changes.",
+   "dot": [
+    0,
+    0
+   ],
+   "levels": [
+    [
+     0.03,
+     4
+    ],
+    [
+     0.9,
+     4
+    ],
+    [
+     0.03,
+     4
+    ],
+    [
+     0.33,
+     4
+    ],
+    [
+     0.9,
+     4
+    ],
+    [
+     0.33,
+     4
+    ],
+    [
+     0.03,
+     4
+    ]
+   ]
+  },
+  {
+   "id": "grid-dark",
+   "kind": "dots",
+   "text": "Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    5,
+    5,
+    24,
+    18
+   ],
+   "hold": 1.0,
+   "shuffle": true,
+   "bg": 0.03
+  },
+  {
+   "id": "grid-mid",
+   "kind": "dots",
+   "text": "Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    5,
+    5,
+    24,
+    18
+   ],
+   "hold": 1.0,
+   "shuffle": true,
+   "bg": 0.33
+  },
+  {
+   "id": "grid-bright",
+   "kind": "dots",
+   "text": "Look at each dot until its ring fills. Keep your head still.",
+   "grid": [
+    5,
+    5,
+    24,
+    18
+   ],
+   "hold": 1.0,
+   "shuffle": true,
+   "bg": 0.9
+  }
+ ]
+}

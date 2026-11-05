@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Tests for validate.py and hub.py (no network): a good export, and broken ones.
 
-  python3 hands/rec/tests/test_validate.py     (in the dev container, or anywhere with zstd)
+  python3 -m hands.rec.tests.test_validate     (in the dev container, or anywhere with zstd)
 """
 import hashlib
 import json
 import os
 import shutil
-import struct
 import sys
 import tempfile
 import unittest
@@ -15,11 +14,10 @@ import uuid
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import hub  # noqa: E402
-import session  # noqa: E402
-import takes  # noqa: E402
-import validate  # noqa: E402
+from hands.rec import hub  # noqa: E402
+from hands.rec import session  # noqa: E402
+from hands.rec import takes  # noqa: E402
+from hands.rec import validate  # noqa: E402
 
 SESSION = "20261002-101500"
 DEVICE = {"cv": {"cad_from_cal": {"method": "FrontAndUpperCamPositions", "plus_x": [0.63, -0.77, 0.02],
@@ -290,10 +288,10 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual([e for e in r.errors if "go back" not in e], [])
 
     def test_cli(self):
-        self.assertEqual(os.system(f"{sys.executable} {validate.__file__} {self.export} --json >/dev/null"), 0)
+        self.assertEqual(os.system(f"{sys.executable} -m hands.rec.validate {self.export} --json >/dev/null"), 0)
         d = self.copy()
         os.remove(os.path.join(d, "manifest.json"))
-        self.assertNotEqual(os.system(f"{sys.executable} {validate.__file__} {d} >/dev/null"), 0)
+        self.assertEqual(os.waitstatus_to_exitcode(os.system(f"{sys.executable} -m hands.rec.validate {d} >/dev/null 2>&1")), 1)
 
 
 class ExportJsonlTest(unittest.TestCase):
@@ -432,6 +430,15 @@ class HubTest(unittest.TestCase):
         self.assertTrue(any("manifest.json" in line for line in logged))
         self.assertEqual(hub.uploads(self.store, SESSION), [])   # a dry run records nothing
 
+    def test_consent_line(self):
+        """The description says which consent the upload goes under, and the older one it was
+        recorded under when they differ."""
+        self.assertEqual(hub.consent_line({"consent_version": "2026-10-14"}), "2026-10-14")
+        self.assertEqual(hub.consent_line({"consent_version": "2026-10-14", "recorded_consent_version": "2026-10-14"}),
+                         "2026-10-14")
+        self.assertEqual(hub.consent_line({"consent_version": "2026-10-14", "recorded_consent_version": "2026-10-03"}),
+                         "2026-10-14 (recorded under 2026-10-03)")
+
     def test_dataset_env(self):
         self.assertEqual(hub.dataset_id(), hub.HF_DATASET)
         with mock.patch.dict(os.environ, {hub.DATASET_ENV: "not a repo"}):
@@ -445,8 +452,23 @@ class HubTest(unittest.TestCase):
             self.assertEqual(cm.exception.kind, "closed")
             self.assertFalse(hub.upload_allowed())
         with mock.patch.object(hub, "texts_draft", return_value=True), \
-                mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1"}):
+                mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: "a/test"}):
             self.assertTrue(hub.upload_allowed())
+        # the variable alone, or with the real dataset, never opens it
+        for dataset in ("", hub.HF_DATASET, "not a repo"):
+            with mock.patch.object(hub, "texts_draft", return_value=True), \
+                    mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.DATASET_ENV: dataset}):
+                self.assertFalse(hub.upload_allowed(), dataset)
+        with mock.patch.object(hub, "texts_draft", return_value=True), \
+                mock.patch.dict(os.environ, {hub.ALLOW_ENV: "1", hub.TEST_DATASET_ENV: hub.HF_TEST_DATASET}):
+            self.assertFalse(hub.upload_allowed("testing"))
+
+    def test_missing_text_is_a_draft(self):
+        missing = os.path.join(self.tmp, "no-such-text.md")
+        with mock.patch.object(hub, "UPLOAD_PATH", missing):
+            self.assertTrue(hub.texts_draft())
+            with mock.patch.dict(os.environ, {hub.ALLOW_ENV: ""}):
+                self.assertFalse(hub.upload_allowed())
 
     def test_invalid_blocks(self):
         with open(os.path.join(self.store.export_dir(SESSION), "extra.bin"), "w") as f:

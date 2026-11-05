@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Frametop Tour
+GenericName=A walk through Frametop
+Comment=What Frametop does: screens, shortcuts, eye and hand tracking, frunner, floating windows, pins, profiles
+Exec=@REPO@/tour/ft-tour
+Icon=help-about
+Categories=Utility;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=help
+Keywords=tour;onboarding;help;welcome;frametop;

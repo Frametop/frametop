@@ -3,10 +3,10 @@
 request, what it answers, which of the daemon's parts it reaches and with what, and whether it
 starts a tear-off.
 
-The expected results are in request-golden.json, recorded from ft-floatd before its requests
-were split into one handler per command (docs/refactor/PROGRESS.md). A change that means to
-change a request records them again with --record, and the diff of that file shows what
-changed. D-Bus and GLib are stand-ins, and the daemon's parts are recorders: no KWin, sockets or
+The expected results are in request-golden.json, recorded from ft-floatd, so a change to its
+request handling that isn't meant to change what a request does shows up here. A change that
+means to change a request records them again with --record, and the diff of that file shows
+what changed. D-Bus and GLib are stand-ins, and the daemon's parts are recorders: no KWin, sockets or
 windows.
 
   float/test/request-test.py [--record] [FLOATD]   (default: float/ft_floatd.py next to this folder)

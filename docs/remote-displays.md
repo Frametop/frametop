@@ -376,7 +376,7 @@ Windows' "Remember window locations based on monitor connection" moves windows o
 
 The user decided remote displays are Frametop displays, with the same controls as the desktop's screens and their places saved in profiles. The spike's standalone overlays are replaced.
 
-**What's built (branch `remote-displays`, uncommitted):**
+**What's built:**
 - `stream/ft-stream.cpp` is the per-display helper. It pairs, launches and decodes, and converts into a ring of three RGBA buffers. It hands their dmabufs to ft-screens once, then says which buffer holds each new picture. The protocol is in its header comment: frames one way, then release, attention, pointer, keys and blur the other way. `stream/host.cpp` holds the pairing and launch code ft-streamtest had.
 - `screens/remote.c` starts one ft-stream per remote screen with a socket pair, restarts a stream that ends (2 s, then backing off to 30 s), shows its frames through `ft_vr_screen_present`, and sends it the panel's input and attention. Commands: `remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [label]` (`ok restored` when its panel is back where it was, below), `remote <N> stop`, `remote <N> info` (the stream's whole state, such as `lost can't connect`) and `remotes`. Remote screens are numbered from 101, so every other command (`place`, `width`, `curve`, `pin`, `get`, `conceal`) works on them as it is. `screens` leaves them out, because ft-layout, Display Settings and ft-floatd count KWin's outputs with it.
 - `vr.cpp` gives a remote screen a screen's panel (`frametop.remote.N`) with its controls. A press on a remote screen dragged onto another one is routed there (`UpdateRemoteDrag`). SteamVR keeps sending the moves to the panel the press began on, as if its surface went on past its edges. So every tick the pressing laser is hit-tested against all the remote screens, and the nearest one it meets takes the moves. On the panel the press began on, SteamVR's own moves count only while that panel is the nearest. Before this (2026-10-07), that panel's carried-on surface passed in front of or behind the other panel, and its moves pulled the host's pointer back: drags across worked only some of the time. The release comes up where the host's pointer is, through the stream the press went down on (Vibepollo takes a release only from the client that pressed).
@@ -499,8 +499,6 @@ The user decided remote displays are Frametop displays, with the same controls a
 - A per-display mouse mode (relative, for games).
 - The host's own keyboard and mouse driving Frametop while the headset is worn: [host-input.md](host-input.md).
 - A picture for a stream that's connecting or lost.
-- The installer doesn't build ft-stream yet (`stream/build.sh`), and `uninstall.sh` leaves `~/.local/share/frametop-stream` (the client keys and host tokens).
-- For the test, the pointer and gaze services run this branch's builds through drop-ins (`~/.config/systemd/user/frametop-{pointer,gaze}.service.d/remote-displays-worktree.conf`; `gaze/tracker/build` here links to the installed tracker's). Remove them when this is merged and installed.
 
 ## Open questions
 

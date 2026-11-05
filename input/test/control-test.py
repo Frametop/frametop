@@ -4,8 +4,8 @@
 what it replies, and which state it changes, from this user or another, from a bound address
 or an unbound one.
 
-The expected results are in control-golden.json, recorded from the relay before its dispatch
-was split into one handler per command (docs/refactor/PROGRESS.md). A change that means to
+The expected results are in control-golden.json, recorded from the relay, so a change to its
+dispatch that isn't meant to change the protocol shows up here. A change that means to
 change the protocol records them again with --record, and the diff of that file shows what
 changed. Each case runs on a new Relay whose parts are recorders: no devices, sockets the relay
 serves, services or the live relay.

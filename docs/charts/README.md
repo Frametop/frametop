@@ -15,8 +15,6 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | The testbench, its input proxy and fake trackers, the verify skills and their lease, the fake-worn guard, the Hand and Eye Recorders and their upload, report.sh, doctor.sh, the logs, the tour | G8 Verify, data and diagnostics | `G8-verify.mmd`, `G8-verify.tla`, `G8-verify-Guard.tla` |
 | The dev box and builds, `ft dev build`, `pack/Containerfile`, CI, `framedrop/build.sh` and the zip, FrameDrop, `get.sh`, `install-release.sh`, `install.sh`, `fast-install`, the models, `uninstall.sh` | G7 Build and release | `G7-release.mmd`, `G7-release.tla` |
 
-`feature-map.md` lists every feature (F1 to F22), its processes, sockets, files and units, and proposes the eight chart groups. It was written at `403c1eb`. Its bug table predates the H1, R1 and H2 fixes (`76121c7`, `e15b65f`, `2c783dd`), and it mentions an overview chart and a `snapshot/` folder that are kept outside the repo.
-
 All eight groups are charted.
 
 ## Files

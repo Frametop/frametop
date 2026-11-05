@@ -75,6 +75,27 @@ M PanelPose(double x, double y, double z, double yawDeg, double pitchDeg, double
     return m;
 }
 
+// A roll about a pose's own front axis (z), counterclockwise as you see its front: Mul(p, RollZ(rad)).
+template <class M>
+M RollZ(double rad) {
+    M m = Identity<M>();
+    m.m[0][0] = m.m[1][1] = float(std::cos(rad));
+    m.m[1][0] = float(std::sin(rad)), m.m[0][1] = float(-std::sin(rad));
+    return m;
+}
+
+// The roll (radians, as RollZ takes it) that levels pose p where it is, facing the same way: its right
+// edge horizontal and its top up, so Mul(p, RollZ(*rad)) has no tilt (DEE-337, the roll button's tap).
+// The shortest way round: a screen upside down turns half a turn. False facing straight up or down
+// (no level to find).
+template <class M>
+bool LevelRoll(const M &p, double *rad) {
+    const double xUp = p.m[1][0], yUp = p.m[1][1];   // how far up its right edge and its top point
+    if (std::hypot(xUp, yUp) < 1e-3) return false;
+    *rad = std::atan2(-xUp, yUp);
+    return true;
+}
+
 // A pose at pt facing the head (upright).
 template <class M>
 M FacingPose(const double pt[3], const M &head) {

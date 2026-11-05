@@ -1,8 +1,8 @@
 // Offline test of ft-gaze's eye-server.mmap layout detection (EyeFile::Detect in
 // gaze/ft-gaze.cpp) and of reading a sample at the layout it found, on a made-up file in
 // memory: no SteamVR, no eye tracker. Detect takes the time as an argument, so the passes
-// of ft-gaze's loop are played here with a made-up clock. mmap-layout-test.sh builds and
-// runs it in the dev container.
+// of ft-gaze's loop are played here with a made-up clock. `just test-c` builds and runs it
+// (gaze/build.sh fetches the OpenVR header it needs).
 #define main ft_gaze_main
 #include "../ft-gaze.cpp"
 #undef main

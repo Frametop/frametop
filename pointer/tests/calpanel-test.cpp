@@ -2,7 +2,7 @@
 // messages take the dot, close the panel, or do nothing while it's up; whose panel a claim is;
 // and which index pinches take the dot. Needs no SteamVR.
 //
-//   pointer/tests/calpanel-test.sh
+// `just test-c` builds and runs it.
 #include "../helper/calpanel.h"
 
 #include <cstdio>

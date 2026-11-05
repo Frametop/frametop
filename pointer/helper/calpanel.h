@@ -1,6 +1,6 @@
 // The gaze calibration panel's answers (see ft-pointer.cpp's top): while a panel is up, a press
 // from the relay answers it instead of clicking. Here so it can be tested without SteamVR
-// (pointer/tests/calpanel-test.sh).
+// (pointer/tests/calpanel-test.cpp, in `just test-c`).
 //
 // Accept (take this dot): the left button's press ("btn trigger 1", whatever mouse button,
 // controller button or key combination is mapped to the left action), Enter on a keyboard (the

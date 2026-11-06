@@ -14,6 +14,7 @@ From a terminal, on the Frame or from a PC over SSH:
 desktops.sh install        # the launcher's Desktop entry starts Frametop; Native Desktop is the stock one
 desktops.sh uninstall      # back to the stock SteamOS desktop, as Desktop
 desktops.sh start | stop | restart | status | log [lines]
+desktops.sh streams        # only the remote displays, without the desktop (Frametop Remote Displays)
 ```
 
 To have the desktop start by itself, turn on Start with SteamVR on the Power tab of Frametop Display Settings, or run `desktops.sh autostart on`. Both set `AUTOSTART=1` in `~/.config/frametop.conf`. `frametop-autostart.service`, which `desktops.sh install` adds, runs `session/autostart.sh` each time SteamVR starts. The Frame starts SteamVR when it boots, so the setting covers boot too. The script waits for SteamVR's server and compositor, then runs `desktops.sh start`. The desktop quits when SteamVR does, so a SteamVR restart brings it back. If you close the desktop, it stays closed until SteamVR starts again. Its log: `journalctl --user -u frametop-autostart`.

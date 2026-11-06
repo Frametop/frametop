@@ -96,6 +96,8 @@ if [ "${1:-}" != --inner ]; then
       echo "frametop: streaming without the desktop needs the screens backend (BACKEND=screens)" >&2
       exit 1
     fi
+    # Gone again however the script ends before stop_screens takes over (below).
+    trap 'rm -f "$streams_marker"' EXIT
     : > "$streams_marker"
   fi
   # A SteamOS update could move either of the files sourced here. The desktop still
@@ -145,6 +147,7 @@ if [ "${1:-}" != --inner ]; then
   export FT_SCREEN_COUNT=$(( ${#screen_args[@]} / 2 )) FT_FLOAT_SLOTS=$float_slots
   "$here/../scripts/in-box" "$here/../screens/build/ft-screens" --log "$screens_log" --socket "$socket" \
     "${screen_args[@]}" --spares "$float_slots" >> "$screens_log" 2>&1 < /dev/null &
+  screens_pid=$!  # in-box, which waits for ft-screens in the container
   # With HANDS_MODE=frametop, hand tracking and the hand view run while this desktop does
   # (hands/handsmode.py; it does nothing for the other modes).
   handsmode() { python3 "$here/../hands/handsmode.py" desktop "$1" 2>&1 || true; }
@@ -157,10 +160,10 @@ if [ "${1:-}" != --inner ]; then
   # an input relay that doesn't answer mustn't hold up the desktop.
   "$here/../input/ft-pause" enforce >/dev/null 2>&1 &
   if [ "$streams_only" = 1 ]; then
-    # Streams only: no KWin or Plasma. The session lasts while ft-screens does (it ends with
-    # SteamVR), or until its unit stops (stop_screens ends ft-screens then).
+    # Streams only: no KWin or Plasma. The session lasts while its own ft-screens does (it ends
+    # with SteamVR), or until its unit stops (stop_screens ends ft-screens then).
     echo "frametop: streaming the remote displays without the desktop"
-    while pgrep -x ft-screens >/dev/null; do sleep 2; done
+    while kill -0 "$screens_pid" 2>/dev/null; do sleep 2; done
     exit
   fi
   WAYLAND_DISPLAY=$XDG_RUNTIME_DIR/$socket "$0" --inner

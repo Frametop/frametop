@@ -666,7 +666,11 @@ static void keys_update(struct server *s) {
     }
     // Frunner's search takes typing from wherever it went, Steam too.
     const bool shown = ft_vr_screens_shown();
-    const bool desktop = spot_open(s) || (s->keys_clicked && shown);
+    // Only while something takes the keys: a remote screen that's still there, or a KWin window
+    // with the focus. Without one (the remote screen clicked last disconnected, with no KWin at
+    // all when streaming without the desktop) a grabbed keyboard would type nowhere.
+    const bool target = (s->key_remote >= 0 && ft_remote_is(s->key_remote)) || s->seat->keyboard_state.focused_surface;
+    const bool desktop = spot_open(s) || (s->keys_clicked && shown && target);
     // Gamepad mode's pill goes over the panel typing goes to: the remote screen, or the one KWin has
     // keyboard focus on (vr.cpp, "the gamepad pill").
     int pill = -1;

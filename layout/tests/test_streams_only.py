@@ -25,8 +25,8 @@ class FakeScreens:
     """ft-screens with `up` of the desktop's screens shown and a head pose; what it's asked is
     recorded. A screen it has no panel for answers with an error, as ft-screens does."""
 
-    def __init__(self, up):
-        self.up, self.asked = up, []
+    def __init__(self, up, head=True):
+        self.up, self.head, self.asked = up, head, []
 
     def ask(self, text, timeout=10.0):
         self.asked.append(text)
@@ -35,6 +35,8 @@ class FakeScreens:
         if text == "remotes":
             return "ok 0"
         if text == "head":
+            if not self.head:
+                raise RuntimeError("error no head pose")
             return "ok 0 1.6 0 0"
         if text.startswith("get "):
             n = int(text.split()[1])
@@ -105,6 +107,16 @@ class Arrange(unittest.TestCase):
         alone = self.m.plan_remotes(layout, 0, displays)[0]
         self.assertLess(alone["face"][1], above["face"][1])
 
+    def test_connecting_without_a_head_pose_uses_the_last_arrangement(self):
+        # Streams only, headset off: no screen 1 to work out where to put them from.
+        self.streams_only()
+        screens = FakeScreens(up=0, head=False)
+        with self.assertRaisesRegex(RuntimeError, "nothing arranged yet"):
+            self.m.remote_anchor(screens, self.m.load_layout())
+        self.m.save_anchor((0.0, 1.6, 0.0), 30.0)
+        self.assertEqual(self.m.remote_anchor(screens, self.m.load_layout()), ((0.0, 1.6, 0.0), 30.0))
+        self.assertNotIn("get 1", screens.asked)
+
     def test_reset_moves_the_remote_displays_only(self):
         self.streams_only()
         screens = FakeScreens(up=0)
@@ -151,6 +163,23 @@ class StreamsCommand(unittest.TestCase):
         pathlib.Path(self.m.STREAMS_ONLY_PATH).touch()
         self.assertEqual(self.m.main(["ft-layout", "streams", "stop"]), 0)
         self.assertEqual(self.ran, [["systemctl", "--user", "stop", "frametop-desktop"]])
+
+    def test_start_needs_the_screens_backend(self):
+        with open(self.m.CONF_PATH, "w") as f:
+            f.write("BACKEND=gamescope\n")
+        self.assertEqual(self.m.main(["ft-layout", "streams", "start"]), 1)
+        self.assertEqual(self.sessions, [])
+
+    def test_profile_launcher_while_streaming(self):
+        # A profile's launcher can't start the desktop while ft-screens runs streams only, and
+        # mustn't take the streams for the desktop.
+        self.m.save_layout({"screens": [{}], "layouts": {"Work": [{}]}})
+        pathlib.Path(self.m.STREAMS_ONLY_PATH).touch()
+        used = []
+        self.m.start_desktop = used.append
+        self.assertEqual(self.m.main(["ft-layout", "open", "Work"]), 1)
+        self.assertEqual(used, [])
+        self.assertNotEqual(self.m.load_layout().get("active"), "Work")
 
     def test_usage(self):
         self.assertEqual(self.m.main(["ft-layout", "streams", "restart"]), 2)

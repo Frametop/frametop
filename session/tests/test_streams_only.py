@@ -26,6 +26,7 @@ STUBS = {
     # ft-screens: its socket, then "running" while the up file is there
     "scripts/in-box": """#!/bin/bash
 echo "in-box $*" >> "$STATE/log"
+[ -n "${NO_SOCKET:-}" ] && exit 1  # an ft-screens that doesn't start
 python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$XDG_RUNTIME_DIR/ft-screens-0"
 : > "$STATE/up"
 while [ -e "$STATE/up" ]; do sleep 0.1; done
@@ -46,6 +47,8 @@ esac
 [ "$1 $2" = "-x ft-screens" ] && { echo pkill >> "$STATE/log"; rm -f "$STATE/up"; }
 exit 0
 """,
+    # Waiting for ft-screens' socket: one look (it's there by then, or the test wants none)
+    "bin/seq": "#!/bin/bash\necho 1\n",
     # The desktop (--inner) must not start: if it does, it gets no further than this
     "bin/dbus-run-session": "#!/bin/bash\necho plasma >> \"$STATE/log\"\nexit 1\n",
 }
@@ -141,6 +144,20 @@ class StreamsOnly(unittest.TestCase):
         self.assertEqual(self.proc.wait(timeout=10), 1)
         self.assertIn("needs the screens backend", self.proc.stdout.read())
         self.assertNotIn("in-box", self.log())
+        self.assertFalse(os.path.exists(self.marker))
+
+    def test_desktop_clears_a_stale_marker(self):
+        # Left by a streams session that was killed: the desktop's ft-layout must not see it.
+        open(self.marker, "w").close()
+        self.start(FT_STREAMS_ONLY="", NO_SOCKET="1")
+        self.assertEqual(self.proc.wait(timeout=10), 1)  # "ft-screens didn't start", before the desktop
+        self.assertIn("ft-layout start marker=0", self.log())
+        self.assertFalse(os.path.exists(self.marker))
+
+    def test_marker_goes_when_ft_screens_doesnt_start(self):
+        self.start(NO_SOCKET="1")
+        self.assertEqual(self.proc.wait(timeout=10), 1)
+        self.assertIn("ft-layout start marker=1", self.log())
         self.assertFalse(os.path.exists(self.marker))
 
 

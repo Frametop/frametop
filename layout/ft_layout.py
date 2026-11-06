@@ -1139,6 +1139,11 @@ def remote_anchor(sock, layout):
         f = sock.ask("head").split()
         return tuple(map(float, f[1:4])), float(f[4])
     except RuntimeError:
+        if not native_count(layout):  # streams only: no screen 1 to work it out from
+            anchor = stored_anchor()
+            if anchor is None:
+                raise RuntimeError("no head pose, and nothing arranged yet")
+            return anchor
         anchor = inferred_anchor(layout, parse_get(sock.ask("get 1")))
         if anchor is None:
             raise RuntimeError("no head pose, and screen 1 is pinned")
@@ -1152,7 +1157,7 @@ def start_remotes_now(layout, only):
         if not start_remotes(sock, layout, only):
             return
         eye, heading = remote_anchor(sock, layout)
-        place_remotes(sock, layout, screen_count(layout), eye, heading, only=only)
+        place_remotes(sock, layout, native_count(layout), eye, heading, only=only)
     except NoAnswer as e:
         log(f"saved; not started now: {e}")
     except RuntimeError as e:
@@ -1250,7 +1255,7 @@ def remote_command(args):
             if unplaced:
                 try:
                     eye, heading = remote_anchor(sock, layout)
-                    place_remotes(sock, layout, screen_count(layout), eye, heading, only=unplaced)
+                    place_remotes(sock, layout, native_count(layout), eye, heading, only=unplaced)
                 except RuntimeError as e:
                     log(f"not placed now: {e}")
             return
@@ -1615,13 +1620,18 @@ def start_desktop(profile):
 
 
 def session_running():
-    """Whether a Frametop session runs, the desktop or streams only (ft-screens is up)."""
-    return subprocess.run(["pgrep", "-x", "ft-screens"], capture_output=True).returncode == 0
+    """Whether a Frametop session runs or is starting: the desktop (either backend) or streams
+    only. Its unit is there before ft-screens is (the container takes seconds to start)."""
+    return any(subprocess.run(argv, capture_output=True).returncode == 0 for argv in (
+        ["pgrep", "-x", "ft-screens"], ["pgrep", "-f", "[v]r-overlay-key frametop "],
+        ["systemctl", "--user", "is-active", "--quiet", "frametop-desktop"]))
 
 
 def streams_command(args):
     """ft-layout streams start|stop: the remote displays without the desktop."""
     if args == ["start"]:
+        if backend() != "screens":
+            raise RuntimeError("streaming without the desktop needs the screens backend (BACKEND=screens)")
         if session_running():
             log("streams only" if streams_only() else "the Frametop desktop is running: its remote displays stream there")
             return 0
@@ -1882,6 +1892,9 @@ def main(argv):
         elif cmd == "open" and len(argv) == 3:
             if argv[2] not in load_layout().get("layouts", {}):
                 raise RuntimeError(f"no profile called {argv[2]!r}")
+            if streams_only():
+                raise RuntimeError("streaming without the desktop: stop streaming (Remote Displays) to "
+                                   "start the desktop in a profile")
             if desktop_running():
                 return main([argv[0], "use", argv[2]])
             start_desktop(argv[2])

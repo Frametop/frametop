@@ -87,6 +87,29 @@ class Get(unittest.TestCase):
         self.assertEqual(self.calls(), [
             f"-C {self.dir} fetch --quiet origin +refs/heads/experimental:refs/remotes/origin/experimental"])
 
+    # main with the Steam Frame check passed (grep says yes for /etc/os-release) and install_release
+    # only printing what it's given: install.sh's options pass through, others are refused.
+    MAIN = ('grep() { case "$*" in *os-release*) return 0 ;; esac; command grep "$@"; }; '
+            'install_release() { printf "[%s]" "$@"; }; main --release --yes ')
+
+    def test_no_keyboard_passes_through_to_the_install(self):
+        r = self.bash(self.MAIN + "--no-hands --no-keyboard")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("unknown option", r.stderr)
+        # channel, version, zip, dir, clone-only, any SteamOS, then install.sh's options
+        self.assertEqual(r.stdout, "[stable][][][][0][0][--][--yes][--no-hands][--no-keyboard]")
+
+    def test_an_unknown_option_is_refused(self):
+        r = self.bash(self.MAIN + "--no-such-thing")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("unknown option: --no-such-thing", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_usage_lists_no_keyboard(self):
+        r = self.bash("usage")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("[--no-keyboard]"), 2)  # the clone line and the --release line
+
     def test_main_uses_them(self):
         text = SCRIPT.read_text()
         self.assertIn('clone_repo "$repo" "$branch" "$dir"', text)

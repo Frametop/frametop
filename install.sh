@@ -8,7 +8,7 @@
 # distrobox the release brings, makes the release's container from its image, and builds nothing.
 #
 # Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
-#                    [--no-eye-recorder] [--no-bluetooth | --bluetooth]
+#                    [--no-eye-recorder] [--no-keyboard] [--no-bluetooth | --bluetooth]
 #   --yes           don't ask; installs voice dictation, gaze mode and the Eye Recorder, and hand
 #                   tracking, the Hand Recorder and our eye tracker if sudo can run without a
 #                   password prompt; skips the Bluetooth fixes and the SteamVR restart
@@ -19,6 +19,9 @@
 #   --no-eye-tracker  don't offer our own eye tracker (or the Eye Recorder, which needs it)
 #   --no-eye-recorder  don't offer the Eye Recorder (a release's; a clone builds it with
 #                   gaze/rec/install.sh)
+#   --no-keyboard   don't install Frametop's keyboard (Full Keyboard): for a Full Keyboard you
+#                   install and start yourself. Without it, a Full Keyboard of its own
+#                   (framekeyboard-autostart.service) makes the install ask which to use
 #   --no-bluetooth  don't offer the Bluetooth fixes
 #   --bluetooth     install the Bluetooth fixes without asking (with --yes: if sudo can run
 #                   without a password prompt)
@@ -27,7 +30,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$root/scripts/_env.sh"
 
-assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 hands=1 hand_recorder=1 voice=1
+assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 hands=1 hand_recorder=1 keyboard=1 voice=1
 for arg in "$@"; do
   case $arg in
     --yes) assume_yes=1 ;;
@@ -38,7 +41,8 @@ for arg in "$@"; do
     --no-voice) voice=0 ;;
     --no-hands) hands=0 hand_recorder=0 ;;
     --no-hand-recorder) hand_recorder=0 ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    --no-keyboard) keyboard=0 ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -148,10 +152,24 @@ build "$root/power/build.sh"
 "$root/power/run.sh" install
 
 step "7/12 multi-screen desktop (ft-screens), its keyboard (Full Keyboard), Frametop Input Settings, Display Settings, Remote Displays, and the Tour"
+# keyboard choice: begin
+# Frametop's keyboard is its own copy of Full Keyboard (keyboard/FRAMETOP.md). Its service stops
+# every other framekeyboard when it starts, so a Full Keyboard someone runs themselves (its own
+# install, or one from Nix, with framekeyboard-autostart.service; GitHub #80) only stays with
+# --no-keyboard, or a no here. Yes is the default, as before.
+if [ "$keyboard" = 1 ] && on_frame 'systemctl --user is-enabled --quiet framekeyboard-autostart.service' 2>/dev/null &&
+   ! ask "Full Keyboard is also installed on its own (framekeyboard-autostart.service). Use Frametop's copy of it instead? No keeps yours as it is, but Frametop's screens can't open it for text fields." y; then
+  keyboard=0
+fi
+# keyboard choice: end
 build "$root/screens/build.sh"
 build "$root/layout/countdown/build.sh"  # visible three-second reset countdown
 build "$root/stream/build.sh"  # ft-stream: remote displays (Frametop Remote Displays)
-build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKeid (keyboard/FRAMETOP.md)
+# keyboard build: begin
+if [ "$keyboard" = 1 ]; then
+  build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKeid (keyboard/FRAMETOP.md)
+fi
+# keyboard build: end
 "$root/desktops.sh" install >/dev/null
 "$root/input-settings/install.sh"
 "$root/display-settings/install.sh"
@@ -159,7 +177,26 @@ build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKei
 "$root/remote-displays/install.sh"
 "$root/remote/install.sh"
 "$root/menu/install.sh"  # the Frametop menu: one entry for these in Launch a program
-"$root/keyboard/run.sh" install
+# keyboard install: begin
+if [ "$keyboard" = 1 ]; then
+  "$root/keyboard/run.sh" install
+else
+  kb_later="keyboard/run.sh install"
+  [ "$FRAME_RELEASE" = 1 ] || kb_later="keyboard/build.sh && $kb_later"
+  echo "Frametop's keyboard: skipped. A Full Keyboard of your own stays as it is. Install Frametop's later with: $kb_later"
+  # One from an install before would stop yours whenever SteamVR starts. If it's the one running
+  # now (it stopped yours), removing it stops it too, so yours starts again.
+  if on_frame '[ -f ~/.config/systemd/user/frametop-keyboard.service ]'; then
+    kb_was_on=0
+    on_frame 'systemctl --user is-active --quiet frametop-keyboard.service' && kb_was_on=1
+    "$root/keyboard/run.sh" uninstall >/dev/null
+    echo "Frametop's keyboard service from an install before: removed"
+    if [ "$kb_was_on" = 1 ] && on_frame 'systemctl --user is-enabled --quiet framekeyboard-autostart.service && systemctl --user is-active --quiet steamvr.service && systemctl --user start framekeyboard-autostart.service' 2>/dev/null; then
+      echo "your Full Keyboard (framekeyboard-autostart.service): started again"
+    fi
+  fi
+fi
+# keyboard install: end
 on_frame "sed -i 's/^POINTER=0/POINTER=1/' ~/.config/frametop.conf; grep -q '^POINTER=' ~/.config/frametop.conf || echo 'POINTER=1' >> ~/.config/frametop.conf"
 echo "the launcher's Desktop entry now opens the multi-screen desktop; 3D mouse on (POINTER=1 in ~/.config/frametop.conf)"
 "$root/scripts/conf-migrate.sh"

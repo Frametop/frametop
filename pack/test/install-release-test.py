@@ -81,7 +81,8 @@ def make_zip(version):
                          capture_output=True, text=True, check=True).stdout
     Path(unpacked, "frametop-release.json").write_text(out)
     Path(tree, "install.sh").write_text('#!/usr/bin/env bash\nset -euo pipefail\nroot=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)\n'
-                                        'FRAME_RELEASE=1 FRAME_LOCAL=1\necho "install.sh of $root"\n' + CURRENT_BLOCK)
+                                        'FRAME_RELEASE=1 FRAME_LOCAL=1\necho "install.sh of $root"\necho "install.sh options: $*"\n'
+                                        + CURRENT_BLOCK)
     os.chmod(os.path.join(tree, "install.sh"), 0o755)
     return unpacked, tree, image_id
 
@@ -89,10 +90,11 @@ def make_zip(version):
 ZIPS = {v: make_zip(v) for v in ("1.0", "2.0", "3.0")}
 
 
-def install(version):
+def install(version, *options):
     unpacked, tree, image_id = ZIPS[version]
     env = dict(os.environ, FAKE_ID=image_id, FAKE_TREE=tree, FRAMETOP_STEAMOS_TABLE="none")
-    r = subprocess.run(["bash", "-c", SCRIPT + PODMAN + 'main "$@"', "install-release.sh", "--yes", "--dir", RELEASES],
+    r = subprocess.run(["bash", "-c", SCRIPT + PODMAN + 'main "$@"', "install-release.sh", "--yes", *options, "--dir",
+                        RELEASES],
                        cwd=unpacked, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL, check=False)
     return r.returncode, r.stdout + r.stderr
 
@@ -132,6 +134,13 @@ check("...and leaves the releases as they were", (current(), folders()), ("3.0",
 os.rename(os.path.join(RELEASES, "3.0", ".fast-install"), os.path.join(TMP, "undone"))
 code, out = install("3.0")
 check("after fast-install undo, it installs again", (code, current()), (0, "3.0"))
+
+# install.sh's own options go on to it (--no-keyboard: get.sh --release passes it here, GitHub #80).
+code, out = install("3.0", "--no-keyboard")
+check("--no-keyboard reaches the release's install.sh", (code, "install.sh options: --yes --no-keyboard" in out),
+      (0, True))
+code, out = install("3.0", "--no-such-thing")
+check("an option it doesn't know is refused", (code, "unknown option: --no-such-thing" in out), (2, True))
 
 print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
 shutil.rmtree(TMP, ignore_errors=True)

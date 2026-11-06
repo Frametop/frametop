@@ -114,6 +114,9 @@ Usage (on the Frame host; Frametop Display Settings calls it too):
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
   ft-layout remote remove ID         stops it and unpairs its client (the host stays)
+  ft-layout streams start|stop       streams only: the connected remote displays without the
+                                     desktop (ft-screens with no KWin or Plasma); stop ends
+                                     only that, never a running desktop
 """
 import concurrent.futures
 import fcntl
@@ -138,6 +141,10 @@ SCREENS = "\0ft_screens"
 # directory, not /tmp, where another user could put a link there first.
 LOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "ft-layout.lock")
 FLOAT = "\0frametop_float"  # ft-floatd: the apps' windows (profiles)
+# Streams only (FT_STREAMS_ONLY=1 in the session): ft-screens runs without KWin and Plasma, so
+# it shows the remote displays and no screens of the desktop. The session script keeps this
+# file while it runs, so every ft-layout run then knows.
+STREAMS_ONLY_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "frametop-streams-only")
 # The sizes Display Settings offers for a screen and Remote Displays for a stream: (w, h, what).
 # ft-screens has no pixel limit; portrait screens are just tall.
 SCREEN_RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2560, 1080, "ultrawide"),
@@ -199,6 +206,16 @@ def read_conf():
 
 def backend():
     return "gamescope" if read_conf().get("BACKEND", "screens") == "gamescope" else "screens"
+
+
+def streams_only():
+    """Whether Frametop runs only its remote displays (no desktop): STREAMS_ONLY_PATH."""
+    return os.path.exists(STREAMS_ONLY_PATH)
+
+
+def native_count(layout=None):
+    """The desktop's screens ft-screens shows: none when it runs streams only."""
+    return 0 if streams_only() else screen_count(layout)
 
 
 def screen_count(layout=None):
@@ -346,6 +363,8 @@ def primary_screen(layout):
 
 def plan(layout, count, panel_size=None):
     """Screen poses in the head frame: [{"pos": (x, y, z), "face": (yaw, pitch), "roll": deg}]."""
+    if count <= 0:
+        return []  # streams only: no screens of the desktop
     sizes = [screen_size(layout, i, panel_size) for i in range(count)]
     rolls = [ROLL[screen_rotation(layout, i)] for i in range(count)]
     return layout_geometry.place(layout, sizes, rolls)
@@ -611,7 +630,7 @@ def screens_up(sock):
 
 def apply_screens(wait=0):
     layout = load_layout()
-    count = screen_count(layout)
+    count = native_count(layout)
     deadline = time.time() + wait
     while True:
         try:
@@ -631,7 +650,8 @@ def apply_screens(wait=0):
         # visibility mode and the screens hidden on their own still reach ft-screens, which
         # otherwise keeps its defaults (always, nothing concealed) until a reset.
         send_visibility(sock, layout)
-        send_hidden(sock, layout)
+        if count:
+            send_hidden(sock, layout)
         raise
     eye, heading = tuple(map(float, f[1:4])), float(f[4])
     send_visibility(sock, layout)
@@ -650,14 +670,16 @@ def apply_screens(wait=0):
                 sock.ask(f"pin {i + 1} {pin['hand']} " + " ".join(f"{v:.5f}" for v in pin["rel"]))
             except RuntimeError as e:
                 log(f"screen {i + 1}: {e}")  # that controller isn't on
-    send_hidden(sock, layout)
+    if count:
+        send_hidden(sock, layout)
     place_remotes(sock, layout, count, eye, heading)
     try:
         sock.ask("vrkeyboard close")  # the keyboard, if open, goes too: a reset starts over
     except RuntimeError:
         pass  # an older ft-screens
     save_anchor(eye, heading)
-    log(f"arranged {count} screen(s)")
+    if count:
+        log(f"arranged {count} screen(s)")
     return results
 
 
@@ -673,7 +695,7 @@ def recenter_screens():
     name = layout.get("active") if layout.get("mode") == "custom" else None
     if name in layout.get("layouts", {}):
         use_named(layout, name)
-    count = screen_count(layout)
+    count = native_count(layout)
     custom = layout.get("mode") == "custom"
     targets = [(i + 1, t, screen_entry(layout, i).get("pin") if custom else None)
                for i, t in enumerate(plan(layout, count))]
@@ -1571,18 +1593,53 @@ def desktop_running():
         return False
 
 
-def start_desktop(profile):
-    """Start the Frametop desktop in a profile (as desktops.sh start does)."""
+def run_session(setenv, what):
+    """The session script in its own unit, frametop-desktop (as desktops.sh start does), with
+    setenv's NAME=VALUE settings."""
     if subprocess.run(["pgrep", "-x", "vrcompositor"], capture_output=True).returncode != 0:
         raise RuntimeError("SteamVR isn't running")
     subprocess.run(["systemctl", "--user", "reset-failed", "frametop-desktop"], capture_output=True)
     session = os.path.join(REPO, "session", "frametop-session.sh")
-    r = subprocess.run(["systemd-run", "--user", "--collect", "--quiet", "--unit", "frametop-desktop",
-                        f"--setenv=FT_PROFILE={profile}", "bash", "-c",
-                        f'exec "{session}" > /tmp/frametop-session.log 2>&1'], capture_output=True, text=True)
+    r = subprocess.run(["systemd-run", "--user", "--collect", "--quiet", "--unit", "frametop-desktop"] +
+                       [f"--setenv={e}" for e in setenv] +
+                       ["bash", "-c", f'exec "{session}" > /tmp/frametop-session.log 2>&1'],
+                       capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"couldn't start the desktop: {r.stderr.strip()}")
+        raise RuntimeError(f"couldn't start {what}: {r.stderr.strip()}")
+
+
+def start_desktop(profile):
+    """Start the Frametop desktop in a profile (as desktops.sh start does)."""
+    run_session([f"FT_PROFILE={profile}"], "the desktop")
     log(f"starting the desktop in {profile!r}")
+
+
+def session_running():
+    """Whether a Frametop session runs, the desktop or streams only (ft-screens is up)."""
+    return subprocess.run(["pgrep", "-x", "ft-screens"], capture_output=True).returncode == 0
+
+
+def streams_command(args):
+    """ft-layout streams start|stop: the remote displays without the desktop."""
+    if args == ["start"]:
+        if session_running():
+            log("streams only" if streams_only() else "the Frametop desktop is running: its remote displays stream there")
+            return 0
+        run_session(["FT_STREAMS_ONLY=1"], "the streams")
+        log("streaming the connected remote displays without the desktop")
+        return 0
+    if args == ["stop"]:
+        if not streams_only():
+            # Never the desktop: stopping it closes its windows.
+            log("not streaming without the desktop" + (" (the Frametop desktop is running)" if session_running() else ""))
+            return 0
+        r = subprocess.run(["systemctl", "--user", "stop", "frametop-desktop"], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"couldn't stop the streams: {r.stderr.strip()}")
+        log("stopped streaming")
+        return 0
+    log("usage: ft-layout streams start|stop")
+    return 2
 
 
 # ---------------------------------------------------------------- KWin (scale, positions, primary)
@@ -1847,6 +1904,8 @@ def main(argv):
                     apply(wait)
                 except RuntimeError as e:   # (no head pose with the headset off): the scales still go
                     log(f"not arranged now: {e}")
+                if streams_only():
+                    return 0  # no KWin to scale, no Plasma to open apps in
                 for _ in range(30):  # Plasma may still be starting
                     try:
                         log("kwin: " + (" ".join(apply_scales()) or "unchanged"))
@@ -1882,6 +1941,8 @@ def main(argv):
                 return main([argv[0], "use", name] if name in layout.get("layouts", {}) else [argv[0], "apply"])
         elif cmd == "remote":
             remote_command(argv[2:])
+        elif cmd == "streams":
+            return streams_command(argv[2:])
         elif cmd in ("pin", "unpin") and len(argv) >= 3:
             log(screens_socket().ask(" ".join(argv[1:])))
             kwin_follow()  # pinned screens go last
@@ -1900,10 +1961,11 @@ def main(argv):
                             try:
                                 sock = screens_socket()
                                 deadline = time.time() + wait
-                                while screens_up(sock) < screen_count() and time.time() < deadline:
+                                while screens_up(sock) < native_count() and time.time() < deadline:
                                     time.sleep(1)
                                 send_visibility(sock, load_layout())
-                                send_hidden(sock, load_layout())
+                                if native_count():
+                                    send_hidden(sock, load_layout())
                                 layout = load_layout()
                                 if start_remotes(sock, layout):  # streams start, arranged or not
                                     save_layout(layout)
@@ -1927,9 +1989,11 @@ def main(argv):
                             # scale x its distance from the top-left (2026-10-11: 1.25, hundreds of
                             # pixels off on the native screen).
                             log(f"not arranged now: {e}")
-                    if not wait:
+                    if streams_only():
+                        pass  # no KWin
+                    elif not wait:
                         kwin_follow()
-                    if wait:
+                    else:
                         # KWin keeps these, but new screens or a changed layout need them once.
                         for _ in range(30):  # Plasma may still be starting
                             try:

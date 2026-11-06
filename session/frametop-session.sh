@@ -13,6 +13,10 @@
 # Settings come from ~/.config/frametop.conf (see frametop.conf.example) and, for the
 # screens backend, ~/.config/frametop-layout.json (Frametop Display Settings writes both).
 # FT_BACKEND, FT_SCREENS, FT_WIDTH, FT_HEIGHT, and FT_PHYS_WIDTH override them.
+#
+# FT_STREAMS_ONLY=1 (Remote Displays' Stream without the desktop, desktops.sh streams) starts
+# ft-screens alone, with no KWin or Plasma: the remote displays stream as panels, and the
+# desktop's screens aren't there. Screens backend only.
 set -eu
 
 here=$(dirname "$(readlink -f "$0")")
@@ -59,6 +63,7 @@ width=${FT_WIDTH:-$WIDTH}
 height=${FT_HEIGHT:-$HEIGHT}
 phys_width=${FT_PHYS_WIDTH:-$PHYS_WIDTH}
 remote=${FT_REMOTE:-$REMOTE}
+streams_only=${FT_STREAMS_ONLY:-0}
 notify_forward=${FT_NOTIFY_FORWARD:-$NOTIFY_FORWARD}
 # Floating windows (screens backend): KWin gets this many spare outputs after the screens,
 # and ft-floatd floats a window on each (docs/floating-windows.md). Changing it takes a
@@ -67,6 +72,7 @@ float_slots=${FT_FLOAT_SLOTS:-$FLOAT_SLOTS}
 [[ $float_slots =~ ^[0-9]+$ ]] || float_slots=16
 [ "$float_slots" -le 16 ] || float_slots=16
 [ "$backend" = screens ] || float_slots=0
+[ "$streams_only" = 1 ] && float_slots=0  # no KWin, so no floating windows
 if [ "$backend" = gamescope ] && [ $((width * height)) -gt $((1920 * 1080)) ]; then
   # gamescope's VR backend aborts above 1920x1080 worth of pixels (its upload buffer;
   # see docs/design.md). Shrink a bigger size to fit, keeping its shape.
@@ -80,6 +86,17 @@ if [ "${1:-}" != --inner ]; then
   if pgrep -f '[v]r-overlay-key frametop ' >/dev/null || pgrep -x ft-screens >/dev/null; then
     echo "Frametop is already running" >&2
     exit 0
+  fi
+  # ft-layout reads this file to know the desktop's screens aren't coming (layout/ft_layout.py
+  # streams_only). Nothing runs now, so one that's there is left from a session that was killed.
+  streams_marker=$XDG_RUNTIME_DIR/frametop-streams-only
+  rm -f "$streams_marker"
+  if [ "$streams_only" = 1 ]; then
+    if [ "$backend" != screens ]; then
+      echo "frametop: streaming without the desktop needs the screens backend (BACKEND=screens)" >&2
+      exit 1
+    fi
+    : > "$streams_marker"
   fi
   # A SteamOS update could move either of the files sourced here. The desktop still
   # starts without them (scripts/update-check.py reports it).
@@ -131,7 +148,7 @@ if [ "${1:-}" != --inner ]; then
   # With HANDS_MODE=frametop, hand tracking and the hand view run while this desktop does
   # (hands/handsmode.py; it does nothing for the other modes).
   handsmode() { python3 "$here/../hands/handsmode.py" desktop "$1" 2>&1 || true; }
-  stop_screens() { pkill -x ft-screens 2>/dev/null || true; handsmode down; }
+  stop_screens() { pkill -x ft-screens 2>/dev/null || true; handsmode down; rm -f "$streams_marker"; }
   trap stop_screens EXIT
   for _ in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/$socket" ] && break; sleep 0.2; done
   [ -S "$XDG_RUNTIME_DIR/$socket" ] || { echo "ft-screens didn't start (see $screens_log)" >&2; exit 1; }
@@ -139,6 +156,13 @@ if [ "${1:-}" != --inner ]; then
   # Paused for a VR game, the relay stops that hand tracking again. In the background:
   # an input relay that doesn't answer mustn't hold up the desktop.
   "$here/../input/ft-pause" enforce >/dev/null 2>&1 &
+  if [ "$streams_only" = 1 ]; then
+    # Streams only: no KWin or Plasma. The session lasts while ft-screens does (it ends with
+    # SteamVR), or until its unit stops (stop_screens ends ft-screens then).
+    echo "frametop: streaming the remote displays without the desktop"
+    while pgrep -x ft-screens >/dev/null; do sleep 2; done
+    exit
+  fi
   WAYLAND_DISPLAY=$XDG_RUNTIME_DIR/$socket "$0" --inner
   exit
 fi

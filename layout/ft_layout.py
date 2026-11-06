@@ -545,8 +545,15 @@ def screens_socket():
 
 def screen_args(layout=None):
     layout = layout or load_layout()
-    return " ".join(f"--screen {w}x{h}@{screen_metres(layout, i):.3f}"
-                    for i, (w, h) in ((i, screen_pixels(layout, i)) for i in range(screen_count(layout))))
+    args = []
+    for i in range(screen_count(layout)):
+        w, h = screen_pixels(layout, i)
+        metres, s = screen_metres(layout, i), screen_scale(layout, i)
+        value = f"{w}x{h}@{metres:.3f}"
+        if abs(s - 1.0) > 1e-3:
+            value += f"x{s:g}"
+        args.append(f"--screen {value}")
+    return " ".join(args)
 
 
 def visibility(layout):
@@ -1725,6 +1732,15 @@ def arrangement(count):
     return [[b["i"] for b in sorted(c, key=lambda b: -b["pitch"])] for c in columns] + [[i] for i in pinned]
 
 
+def send_layout_scales(layout, count):
+    """Give KWin 6.6 its preferred scale and logical configure size through its host."""
+    if backend() != "screens":
+        return
+    sock = screens_socket()
+    for i in range(count):
+        sock.ask(f"scale {i + 1} {screen_scale(layout, i):g}")
+
+
 def send_scales(outs):
     """KWin's scale for each screen, as it is now, to ft-screens: KWin's nested backend
     doesn't undo its scale on pointer input, so ft-screens does (panel pixels / scale)."""
@@ -1747,6 +1763,16 @@ def logical_size(o):
     return (math.ceil(o["size"]["width"] / s - 1e-6), math.ceil(o["size"]["height"] / s - 1e-6))
 
 
+def mode_size(o):
+    """Current mode's pixel size, falling back to kscreen's rotated pixel size."""
+    mode = next((m for m in o.get("modes", []) if m.get("id") == o.get("currentModeId")), {})
+    size = mode.get("size") or o.get("size") or {}
+    w, h = size.get("width", 0), size.get("height", 0)
+    if mode.get("size") and KSCREEN_ROTATION.get(o.get("rotation"), "normal") in ("left", "right"):
+        w, h = h, w
+    return w, h
+
+
 def apply_scales():
     """Per-screen scale and rotation, positions side by side, and the primary screen (the
     taskbar goes there) to KWin, which keeps them in the session's config."""
@@ -1754,11 +1780,15 @@ def apply_scales():
     if not env:
         raise RuntimeError("the Frametop desktop isn't running")
     layout = load_layout()
+    count = screen_count(layout)
+    send_layout_scales(layout, count)
     args = []
     outs = outputs(env)
     for i, o in enumerate(outs):
         s = screen_scale(layout, i)
-        if abs(float(o.get("scale", 1)) - s) > 1e-3:
+        if not o.get("enabled", True):
+            args.append(f"output.{o['id']}.enable")
+        if abs((o.get("scale") or 1.0) - s) > 0.01:
             args.append(f"output.{o['id']}.scale.{s:g}")
         rot = screen_rotation(layout, i)
         if KSCREEN_ROTATION.get(o.get("rotation"), "normal") != rot:
@@ -1772,8 +1802,22 @@ def apply_scales():
     # Laid out as you see the screens around you (arrangement), centred on one line, so
     # the pointer and dragged windows cross to the screen you see next to this one.
     outs = outputs(env)
+    if backend() == "screens":
+        for _ in range(9):
+            if not any(abs((outs[i].get("scale") or 1.0) - screen_scale(layout, i)) > 0.01
+                       for i in range(min(count, len(outs)))):
+                break
+            time.sleep(0.05)
+            outs = outputs(env)
     send_scales(outs)
-    sizes = [logical_size(o) for o in outs if o.get("size")]
+    # A configure may still be pending. Use target scales for positions even then.
+    sizes = []
+    for i, o in enumerate(outs):
+        if not o.get("size"):
+            continue
+        w, h = mode_size(o)
+        s = screen_scale(layout, i)
+        sizes.append((round(w / s), round(h / s)) if w and h else logical_size(o))
     if len(sizes) == len(outs) and outs:
         columns = arrangement(len(outs))
         if not columns or sorted(i for c in columns for i in c) != list(range(len(outs))):

@@ -743,7 +743,6 @@ class Daemon:
         # then the window.
         slot.want = None
         self.set_size(slot, (w + 2 * m, h + 2 * m), whole(slot.kscale, s))
-        self.screens.ask(f"scale {slot.index} {s:g}")  # for pointer positions (KWin's units)
         self.set_panel(f, (m, m, w, h), title=round((ev["client"]["y"] - fr["y"]) * s))
         if place:
             self.pose(f, *place)
@@ -756,6 +755,7 @@ class Daemon:
             self.screens.ask(f"torn {slot.index} {gx} {gy}", quiet=True)
         kscreen(f"output.{slot.output}.enable", f"output.{slot.output}.scale.{s:g}",
                 f"output.{slot.output}.position.{slot.pos[0]},{slot.pos[1]}")
+        self.screens.ask(f"scale {slot.index} {s:g}")
         self.rescaled(slot, s)
         self.command(cmd="place", id=wid, output=slot.output, x=slot.pos[0] + m / s, y=slot.pos[1] + m / s,
                      w=fr["w"], h=fr["h"], onAllDesktops=True)

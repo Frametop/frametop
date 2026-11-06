@@ -1,7 +1,7 @@
 """install.sh, offline: Frametop's keyboard, or a Full Keyboard of the user's own (GitHub #80).
 
-It doesn't run install.sh. It takes the blocks between install.sh's "keyboard choice" and
-"keyboard install" markers and runs them in a stand-in script with stand-ins for on_frame, ask
+It doesn't run install.sh. It takes the blocks between install.sh's "keyboard choice",
+"keyboard build" and "keyboard install" markers and runs them in a stand-in script with stand-ins for on_frame, ask
 and build, and a keyboard/run.sh that only logs what it was asked to do."""
 import os
 import pathlib
@@ -22,10 +22,13 @@ def block(name):
 
 STUBS = r'''
 # The Frame, faked: STANDALONE=1 has framekeyboard-autostart.service enabled, OURS=1 has
-# frametop-keyboard.service installed. Every command is logged.
+# frametop-keyboard.service installed (OURS_ON=1: and running), STEAMVR=1 has SteamVR running.
+# Every command is logged.
 on_frame() {
   echo "on_frame $1" >> "$LOG"
   case $1 in
+    *"start framekeyboard-autostart.service"*) [ "$STANDALONE" = 1 ] && [ "$STEAMVR" = 1 ] ;;
+    *is-active*frametop-keyboard.service*) [ "$OURS_ON" = 1 ] ;;
     *is-enabled*framekeyboard-autostart.service*) [ "$STANDALONE" = 1 ] ;;
     *frametop-keyboard.service*) [ "$OURS" = 1 ] ;;
     *) return 0 ;;
@@ -37,7 +40,8 @@ build() { echo "build $*" >> "$LOG"; }
 
 
 class KeyboardChoice(unittest.TestCase):
-    def run_install(self, keyboard=1, standalone=0, ours=0, answer="y", assume_yes=0, release=0):
+    def run_install(self, keyboard=1, standalone=0, ours=0, ours_on=0, steamvr=0, answer="y", assume_yes=0,
+                    release=0):
         d = pathlib.Path(tempfile.mkdtemp(prefix="ft-install-keyboard-"))
         (d / "keyboard").mkdir()
         run = d / "keyboard" / "run.sh"
@@ -49,9 +53,10 @@ class KeyboardChoice(unittest.TestCase):
         script.write_text("set -euo pipefail\n" + STUBS
                           + f"root={d}\nkeyboard={keyboard}\nassume_yes={assume_yes}\nFRAME_RELEASE={release}\n"
                           + block("keyboard choice")
-                          + 'if [ "$keyboard" = 1 ]; then build "$root/keyboard/build.sh"; fi\n'
+                          + block("keyboard build")
                           + block("keyboard install"))
-        env = dict(os.environ, LOG=str(log), STANDALONE=str(standalone), OURS=str(ours), ANSWER=answer)
+        env = dict(os.environ, LOG=str(log), STANDALONE=str(standalone), OURS=str(ours), OURS_ON=str(ours_on),
+                   STEAMVR=str(steamvr), ANSWER=answer)
         r = subprocess.run(["bash", str(script)], capture_output=True, text=True, env=env, timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         lines = log.read_text().splitlines()
@@ -99,6 +104,21 @@ class KeyboardChoice(unittest.TestCase):
         out, lines = self.run_install(keyboard=0, ours=1)
         self.assertEqual(self.run_sh(lines), ["run.sh uninstall"])
         self.assertIn("removed", out)
+
+    def test_removing_ours_while_it_runs_starts_theirs_again(self):
+        out, lines = self.run_install(keyboard=0, standalone=1, ours=1, ours_on=1, steamvr=1)
+        self.assertEqual(self.run_sh(lines), ["run.sh uninstall"])
+        self.assertTrue(any("start framekeyboard-autostart.service" in l for l in lines))
+        self.assertIn("started again", out)
+
+    def test_removing_ours_while_stopped_starts_nothing(self):
+        for ours_on, steamvr in ((0, 1), (1, 0)):
+            with self.subTest(ours_on=ours_on, steamvr=steamvr):
+                out, lines = self.run_install(keyboard=0, standalone=1, ours=1, ours_on=ours_on, steamvr=steamvr)
+                self.assertEqual(self.run_sh(lines), ["run.sh uninstall"])
+                self.assertNotIn("started again", out)
+                if not ours_on:
+                    self.assertFalse(any("start framekeyboard-autostart" in l for l in lines))
 
     def test_a_release_says_only_run_sh_install(self):
         out, lines = self.run_install(keyboard=0, release=1)

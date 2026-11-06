@@ -165,9 +165,11 @@ fi
 build "$root/screens/build.sh"
 build "$root/layout/countdown/build.sh"  # visible three-second reset countdown
 build "$root/stream/build.sh"  # ft-stream: remote displays (Frametop Remote Displays)
+# keyboard build: begin
 if [ "$keyboard" = 1 ]; then
   build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKeid (keyboard/FRAMETOP.md)
 fi
+# keyboard build: end
 "$root/desktops.sh" install >/dev/null
 "$root/input-settings/install.sh"
 "$root/display-settings/install.sh"
@@ -182,10 +184,16 @@ else
   kb_later="keyboard/run.sh install"
   [ "$FRAME_RELEASE" = 1 ] || kb_later="keyboard/build.sh && $kb_later"
   echo "Frametop's keyboard: skipped. A Full Keyboard of your own stays as it is. Install Frametop's later with: $kb_later"
-  # One from an install before would stop yours whenever SteamVR starts.
+  # One from an install before would stop yours whenever SteamVR starts. If it's the one running
+  # now (it stopped yours), removing it stops it too, so yours starts again.
   if on_frame '[ -f ~/.config/systemd/user/frametop-keyboard.service ]'; then
+    kb_was_on=0
+    on_frame 'systemctl --user is-active --quiet frametop-keyboard.service' && kb_was_on=1
     "$root/keyboard/run.sh" uninstall >/dev/null
     echo "Frametop's keyboard service from an install before: removed"
+    if [ "$kb_was_on" = 1 ] && on_frame 'systemctl --user is-enabled --quiet framekeyboard-autostart.service && systemctl --user is-active --quiet steamvr.service && systemctl --user start framekeyboard-autostart.service' 2>/dev/null; then
+      echo "your Full Keyboard (framekeyboard-autostart.service): started again"
+    fi
   fi
 fi
 # keyboard install: end

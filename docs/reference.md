@@ -85,6 +85,8 @@ keyboard/run.sh status | restart | log [lines] | install | uninstall
 FULL_KEYBOARD_TESTS=1 keyboard/build.sh     # build it with its tests
 ```
 
+To run a Full Keyboard of your own instead (its own install, or one from Nix, started by its `framekeyboard-autostart.service`), install with `./install.sh --no-keyboard`. Frametop's service stops every other `framekeyboard` when it starts, so it's left out: the install doesn't build or install it, removes one an install before left, and doesn't touch yours. Without the option, an install that finds `framekeyboard-autostart.service` enabled asks which one to use (Frametop's, by default and with `--yes`). Your own copy types as it always has, but Frametop's screens can't open it for text fields or the keyboard button: that takes Frametop's copy (`--frametop`).
+
 KWin's nested backend doesn't undo a screen's scale on pointer input, so ft-screens divides panel positions (in pixels) by it. `ft-layout` sends it each screen's scale as KWin reports it (`scale N s`) whenever it applies scales: at desktop start and from Frametop Display Settings. A scale changed only in Plasma's own display settings is put back to the Frametop layout's the next time `ft-layout` runs.
 
 ft-screens listens for datagrams on the abstract socket `@ft_screens` and replies to the sender:

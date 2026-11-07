@@ -20,18 +20,18 @@ These are Vibepollo's:
 
    ```bash
    mkdir -p ~/frametop-host && cd ~/frametop-host
-   release=https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.0-3
-   curl -fLO "$release/vibepollo-2.0.0-1-x86_64.pkg.tar.zst"
-   curl -fLO "$release/vibepollo-2.0.0-1-x86_64.pkg.tar.zst.sha256"
-   sha256sum -c vibepollo-2.0.0-1-x86_64.pkg.tar.zst.sha256
-   curl -fLO https://raw.githubusercontent.com/Frametop/frametop-vibepollo/frametop-2.0.0-3/scripts/linux_install.sh
+   release=https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.3
+   curl -fLO "$release/vibepollo-2.0.3-1-x86_64.pkg.tar.zst"
+   curl -fLO "$release/vibepollo-2.0.3-1-x86_64.pkg.tar.zst.sha256"
+   sha256sum -c vibepollo-2.0.3-1-x86_64.pkg.tar.zst.sha256
+   curl -fLO https://raw.githubusercontent.com/Frametop/frametop-vibepollo/frametop-2.0.3/scripts/linux_install.sh
    ```
 
    `sha256sum -c` should print `OK`.
 2. Install it:
 
    ```bash
-   sudo bash linux_install.sh --package ./vibepollo-2.0.0-1-x86_64.pkg.tar.zst
+   sudo bash linux_install.sh --package ./vibepollo-2.0.3-1-x86_64.pkg.tar.zst
    ```
 
    The installer checks the requirements, installs the kernel headers if needed, installs the package, and opens the firewall (firewalld or ufw). Given a package, it doesn't add Vibepollo's own package repository. Don't add that repository later: an update from it would replace Frametop's build.
@@ -52,9 +52,11 @@ sudo ufw allow Vibepollo                                                        
 - The resolution switch, the HDR guard and the Frame's microphone are Windows-only for now. On Linux, a monitor keeps its own resolution and the stream scales it, and Send my microphone does nothing.
 - Use this computer's keyboard and mouse (on the computer's card in Remote Displays) works on Linux, with a Frametop build that has host input. While you wear the headset and its displays stream, its keyboards and mice work in Frametop and stop working on the computer. Take the headset off, turn the switch off, or press both Shifts and Escape on the computer to give them back. Volume, media and brightness keys stay on the computer, and so do touchpads and touchscreens.
 - Vibepollo runs as system services. `sudo systemctl status vibepollo-session-controller.service vibepollo.service` shows them, and `sudo journalctl -u vibepollo-session-controller.service -u vibepollo.service --since '-10 minutes'` shows their log. Don't start `vibepollo.service` yourself: the session controller starts it when you log in.
-- Because it runs as system services, Vibepollo has no tray icon and shows no desktop notifications on Linux. Its "Enable system tray" setting does nothing there. Open the Web UI at https://localhost:47990 instead. In frametop-2.0.0-3, the Vibepollo entry in the app menu tries to start a user service that the package doesn't install, so it does nothing.
+- Vibepollo Tray puts an icon in Plasma's system tray when you log in. It shows whether Vibepollo is running, opens the Web UI, and can start, restart or quit Vibepollo (systemd may ask for an administrator's password). To see when a display is streaming, and to get a desktop notification when that changes, choose Connect API token… in its menu. [Vibepollo's tray guide](https://github.com/Frametop/frametop-vibepollo/blob/frametop-2.0.3/docs/linux/desktop-tray.md) has the token's scopes and how to stop it starting at login.
+- The Vibepollo entry in the app menu opens the Web UI at https://localhost:47990. The Web UI doesn't show "Enable system tray" or "Hide tray controls" on Linux: those settings are for Vibepollo's own tray on Windows and macOS, not for Vibepollo Tray.
+- Builds before frametop-2.0.3 have no tray, their app menu entry does nothing, and they don't offer Frametop's updates. Update to frametop-2.0.3 by hand with the steps above.
 - Settings, the Web UI login and pairings are in `/var/lib/vibepollo`.
-- Vibepollo's [Linux install guide](https://github.com/Frametop/frametop-vibepollo/blob/frametop-2.0.0-3/docs/linux/install.md) has the details and troubleshooting.
+- Vibepollo's [Linux install guide](https://github.com/Frametop/frametop-vibepollo/blob/frametop-2.0.3/docs/linux/install.md) has the details and troubleshooting.
 
 ## Remove
 

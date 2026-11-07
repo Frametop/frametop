@@ -1495,6 +1495,29 @@ def window_add(layout, host, port, address, title, size):
     return d
 
 
+def window_forget(layout, host, d):
+    """The window panel goes from the desktop and the layout, and from the profiles: a later
+    window with its id starts fresh."""
+    n = next(n for n, h, e in remote_displays(layout) if e is d)
+    try:
+        screens_socket().ask(f"remote {n} stop")
+    except RuntimeError:
+        pass
+    host["displays"].remove(d)
+    for profile in layout.get("profiles", {}).values():
+        profile.get("remote", {}).pop(d["id"], None)
+    save_layout(layout)
+
+
+def window_prune(layout, host, windows):
+    """Forgets the host's window panels whose window closed there (ft-screens already dropped
+    their panels: the host gives a window a new address each time)."""
+    have = {w.get("address") for w in windows}
+    for d in [d for d in host.get("displays", []) if d.get("window") and d["app"][7:] not in have]:
+        window_forget(layout, host, d)
+        log(f"forgot {d['id']}: its window closed on {host.get('name') or host['address']}")
+
+
 def window_command(args):
     """ft-layout window list|apps|open|launch|close (see the usage)."""
     what = args[0] if args else ""
@@ -1505,8 +1528,9 @@ def window_command(args):
             for app in window_api(host, port, "GET", "/api/frametop/windows/apps").get("apps", []):
                 print(f"{app.get('id')}  {app.get('name')}")
             return
-        panels = {d["app"][7:]: d["id"] for d in host.get("displays", []) if d.get("window")}
         answer = window_api(host, port, "GET", "/api/frametop/windows")
+        window_prune(layout, host, answer.get("windows", []))
+        panels = {d["app"][7:]: d["id"] for d in host.get("displays", []) if d.get("window")}
         if answer.get("locked"):
             print(f"{host['name']} is locked: window panels stay black until it's unlocked")
         for w in answer.get("windows", []):
@@ -1526,8 +1550,9 @@ def window_command(args):
             address = args[2]
             if not re.fullmatch(r"0x[0-9a-fA-F]{1,16}", address):
                 raise RuntimeError("window open: ADDRESS is a window's address (0x...: window list)")
-            found = next((w for w in window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
-                          if w.get("address") == address), None)
+            windows = window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
+            window_prune(layout, host, windows)  # frees their clients
+            found = next((w for w in windows if w.get("address") == address), None)
             if found is None:
                 raise RuntimeError(f"{host.get('name')} has no window {address}")
             size = window_size(opts, (min(found.get("width") or WINDOW_SIZE[0], WINDOW_MAX[0]),
@@ -1546,17 +1571,10 @@ def window_command(args):
         return
     if what == "close" and len(args) == 2:
         layout = load_layout()
-        n, host, d = find_display(layout, args[1])
+        _, host, d = find_display(layout, args[1])
         if not d.get("window"):
             raise RuntimeError(f"{args[1]} isn't a window (ft-layout remote remove)")
-        try:
-            screens_socket().ask(f"remote {n} stop")
-        except RuntimeError:
-            pass
-        host["displays"].remove(d)
-        for profile in layout.get("profiles", {}).values():
-            profile.get("remote", {}).pop(d["id"], None)  # a later window with this id starts fresh
-        save_layout(layout)
+        window_forget(layout, host, d)
         try:
             window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",
                        {"address": d["app"][7:]})

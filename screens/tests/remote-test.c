@@ -2,7 +2,8 @@
 // operation at a time. The real remote.c runs with SteamVR stubbed; this program is also the
 // ft-stream it starts ($FT_STREAM): it says it's live, and asked to end it takes 300 ms to go
 // (Disconnect Monitor), or with the app "hang" it ignores SIGTERM. It notes the "focus" and
-// "blur" it's told (the shared clipboard's moments). It connects to nothing.
+// "blur" it's told (the shared clipboard's moments). With the app window:0x1 the host has no
+// such window, with window:0x2 it's full: either way it says why and ends. It connects to nothing.
 // Built by `just test-c` (justfile): remote.c with -DFT_REMOTE_QUIT_MS=600, so the SIGKILL comes soon.
 #define _GNU_SOURCE
 #include <limits.h>
@@ -23,7 +24,8 @@ int ft_vr_modifiers(uint32_t f, uint64_t *o, int m) { (void)f, (void)o, (void)m;
 bool ft_vr_screen_present(int i, const void *k, const struct ft_dmabuf *b) { (void)i, (void)k, (void)b; return true; }
 void ft_vr_forget(const void *k) { (void)k; }
 enum ft_attention ft_vr_screen_attention(int i) { (void)i; return FT_HIDDEN; }
-void ft_vr_screen_destroy(int i) { (void)i; }
+static int g_destroyed;
+void ft_vr_screen_destroy(int i) { (void)i, ++g_destroyed; }
 bool ft_vr_remote_create(int i, const char *l, double m, bool *r) { (void)i, (void)l, (void)m; *r = false; return true; }
 
 static char g_log[PATH_MAX];
@@ -47,6 +49,11 @@ static void on_term(int s) { (void)s, g_term = 1; }
 static int fake_stream(char **argv) {
     const char *host = argv[2], *app = argv[8];
     note("start", getpid(), host, app);
+    if (!strncmp(app, "window:", 7)) {  // as ft-stream does when the host's open fails
+        const char *why = !strcmp(app, "window:0x1") ? "state lost 404 no window 0x1" : "state lost 503 at most 4 windows";
+        send(3, why, strlen(why), MSG_NOSIGNAL);
+        return 1;
+    }
     if (!strcmp(app, "hang")) signal(SIGTERM, SIG_IGN), alarm(10);  // gone in the end, even if nothing kills it
     else signal(SIGTERM, on_term);
     send(3, "state live via network", 22, MSG_NOSIGNAL);
@@ -260,6 +267,22 @@ static bool focus_blur(void) {
     return true;
 }
 
+// A window closed on the host: its panel goes instead of trying again. A full host is worth
+// the usual retry.
+static bool window_closed(void) {
+    start(101, "192.0.2.7", "window:0x1", 60);
+    start(102, "192.0.2.8", "window:0x2", 60);
+    run(2600);
+    read_log();
+    int gone = 0, full = 0;
+    for (int i = 0; i < g_nprocs; ++i) gone += !strcmp(g_procs[i].app, "window:0x1"), full += !strcmp(g_procs[i].app, "window:0x2");
+    EXPECT(gone == 1 && !ft_remote_is(100) && g_destroyed == 1);
+    EXPECT(full == 2 && ft_remote_is(101));
+    char reply[256] = "";
+    EXPECT(ft_remote_command("remotes", reply, sizeof reply) && !strncmp(reply, "ok 1 102:", 9));
+    return true;
+}
+
 int main(int argc, char **argv) {
     if (argc > 8 && !strcmp(argv[1], "stream")) {
         snprintf(g_log, sizeof g_log, "%s/events.log", getenv("XDG_RUNTIME_DIR"));
@@ -276,6 +299,7 @@ int main(int argc, char **argv) {
     const struct { const char *name; scenario s; } all[] = {
         {"stop then start", stop_start}, {"new settings", new_settings}, {"same host", same_host},
         {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
+        {"window closed", window_closed},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

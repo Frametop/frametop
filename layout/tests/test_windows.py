@@ -144,6 +144,36 @@ class Windows(unittest.TestCase):
         self.assertEqual(said, ["closed oma7-window-55aa10: the window had already left it"])
         self.assertFalse(any(d.get("window") for d in self.displays()))
 
+    def test_list_forgets_panels_of_closed_windows(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        self.run_window("open", "oma7", "0x55aa20")
+        layout = self.m.load_layout()
+        layout["profiles"] = {"Work": {"remote": {"oma7-window-55aa10": {"pos": [1, 2, 3]}}}}
+        self.m.save_layout(layout)
+        self.answers["/api/frametop/windows"] = (200, dict(WINDOWS, windows=WINDOWS["windows"][1:]))  # foot closed
+        said = []
+        self.m.log = said.append
+        out = self.run_window("list", "oma7")
+        self.assertEqual(said, ["forgot oma7-window-55aa10: its window closed on oma7"])
+        self.assertEqual([d["id"] for d in self.displays() if d.get("window")], ["oma7-window-55aa20"])
+        self.assertEqual(self.m.load_layout()["profiles"]["Work"]["remote"], {})
+        self.assertIn("FT-W1 oma7-window-55aa20 gimp", out)
+        self.assertEqual(len(self.displays()), 2)  # the display panel stays
+
+    def test_open_reuses_a_closed_windows_client(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        self.answers["/api/frametop/windows"] = (200, dict(WINDOWS, windows=WINDOWS["windows"][1:]))
+        self.m.log = lambda *_: None
+        self.run_window("open", "oma7", "0x55aa20")
+        self.assertEqual([d["client"] for d in self.displays() if d.get("window")], ["frametop-oma7-win1"])
+
+    def test_list_failure_forgets_nothing(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        self.answers["/api/frametop/windows"] = (0, None)  # oma7 asleep
+        with self.assertRaises(RuntimeError):
+            self.run_window("list", "oma7")
+        self.assertEqual(len([d for d in self.displays() if d.get("window")]), 1)
+
     def test_close_forgets_the_panel_in_profiles(self):
         self.run_window("open", "oma7", "0x55aa10")
         layout = self.m.load_layout()

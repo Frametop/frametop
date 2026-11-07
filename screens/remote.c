@@ -19,7 +19,8 @@
 //               connecting, live, lost)
 // A host's streams start one after another ("queued" until then), and none starts while a
 // stream of the same display or host is still on its way out: see host_busy.
-// A stream that ends starts again, after 2 s, then longer after quick failures (up to 30 s).
+// A stream that ends starts again, after 2 s, then longer after quick failures (up to 30 s),
+// unless it streamed a window that closed on the host: that panel goes.
 // Its panel keeps the last picture meanwhile. ft-stream logs to
 // $XDG_RUNTIME_DIR/frametop-remote-<N>.log.
 #define _GNU_SOURCE
@@ -423,6 +424,22 @@ void ft_remote_tick(void) {
     }
 }
 
+// A window panel whose window closed on the host ("lost 404 no window 0x..."): the host
+// gives a window a new address each time, so that one never comes back. Its panel goes
+// instead of asking every 5 minutes; `ft-layout window list` forgets it.
+static bool window_gone(const struct remote *r) {
+    return !strncmp(r->app, "window:", 7) && !strncmp(r->state, "lost 404 no window 0x", 21);
+}
+
+// The panel goes, its textures after it; the remote keeps its pid until the exit is reaped.
+static void drop(struct remote *r) {
+    stop_stream(r);
+    ft_vr_screen_destroy(r->index);
+    forget_ring(r);
+    r->used = false;
+    r->restart_at = 0;
+}
+
 bool ft_remote_child(pid_t pid, int status) {
     for (int i = 0; i < FT_REMOTE_MAX; ++i) {
         struct remote *r = &g_remotes[i];
@@ -433,7 +450,12 @@ bool ft_remote_child(pid_t pid, int status) {
         else wlr_log(WLR_INFO, "remote %d: ft-stream killed (signal %d)", r->index + 1, WTERMSIG(status));
         if (r->fd >= 0) readable(r->fd, 0, r);  // what it said last ("lost 404 ...") is the back-off's
         disconnect(r);
-        if (r->used && !r->restart_at) schedule_restart(r);
+        if (r->used && window_gone(r)) {
+            drop(r);
+            wlr_log(WLR_INFO, "remote %d: its window closed on the host, the panel goes", r->index + 1);
+        } else if (r->used && !r->restart_at) {
+            schedule_restart(r);
+        }
         return true;
     }
     return false;
@@ -475,11 +497,7 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
     struct remote *r = find(index);
     if (strcmp(word, "stop") == 0) {
         if (!r) return snprintf(reply, size, "error no remote screen %d", number), true;
-        stop_stream(r);
-        ft_vr_screen_destroy(index);  // the panel goes before its textures
-        forget_ring(r);
-        r->used = false;  // keeps its pid until the exit is reaped
-        r->restart_at = 0;
+        drop(r);
         wlr_log(WLR_INFO, "remote %d: stopped", number);
         return snprintf(reply, size, "ok"), true;
     }

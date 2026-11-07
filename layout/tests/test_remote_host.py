@@ -73,6 +73,26 @@ class RemoteHost(unittest.TestCase):
             self.m.remote_command(["list"])
         self.assertIn("route auto input", out.getvalue())
 
+    def test_clipboard_on_and_off(self):
+        # Off until asked for (the shared clipboard, stream/clipboard.h); no restart either way.
+        self.assertNotIn("clipboard", self.host())
+        self.m.remote_command(["host", "oma7", "clipboard=on"])
+        self.assertIs(self.host()["clipboard"], True)
+        self.assertEqual(self.asked, [])
+        self.m.remote_command(["host", "oma7", "clipboard=off"])
+        self.assertIs(self.host()["clipboard"], False)
+        for bad in ("clipboard=yes", "clipboard", "clipboards=on"):
+            with self.assertRaisesRegex(RuntimeError, "clipboard=on\\|off"):
+                self.m.remote_command(["host", "oma7", bad])
+        self.assertIs(self.host()["clipboard"], False)
+
+    def test_list_says_clipboard(self):
+        self.m.remote_command(["host", "oma7", "input=on", "clipboard=on"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.m.remote_command(["list"])
+        self.assertIn("route auto input clipboard", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

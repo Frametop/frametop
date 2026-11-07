@@ -1,10 +1,12 @@
 // screens/remote.c, offline: a display never has two ft-streams, and a host does one stream
 // operation at a time. The real remote.c runs with SteamVR stubbed; this program is also the
 // ft-stream it starts ($FT_STREAM): it says it's live, and asked to end it takes 300 ms to go
-// (Disconnect Monitor), or with the app "hang" it ignores SIGTERM. It connects to nothing.
+// (Disconnect Monitor), or with the app "hang" it ignores SIGTERM. It notes the "focus" and
+// "blur" it's told (the shared clipboard's moments). It connects to nothing.
 // Built by `just test-c` (justfile): remote.c with -DFT_REMOTE_QUIT_MS=600, so the SIGKILL comes soon.
 #define _GNU_SOURCE
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -48,7 +50,20 @@ static int fake_stream(char **argv) {
     if (!strcmp(app, "hang")) signal(SIGTERM, SIG_IGN), alarm(10);  // gone in the end, even if nothing kills it
     else signal(SIGTERM, on_term);
     send(3, "state live via network", 22, MSG_NOSIGNAL);
-    while (!g_term) pause();
+    bool open = true;
+    while (!g_term) {
+        // A short wait, not pause(): a SIGTERM just before it would be missed.
+        struct pollfd p = {open ? 3 : -1, POLLIN, 0};
+        if (poll(&p, 1, 20) <= 0) continue;
+        char m[256];
+        const ssize_t n = recv(3, m, sizeof m - 1, 0);
+        if (n <= 0) {
+            open = false;
+            continue;
+        }
+        m[n] = 0;
+        if (!strcmp(m, "focus") || !strcmp(m, "blur")) note(m, getpid(), host, app);
+    }
     note("term", getpid(), host, app);
     usleep(300000);  // its Disconnect Monitor
     note("exit", getpid(), host, app);
@@ -95,6 +110,7 @@ struct proc {
     char host[64], app[64];
     long start, term, gone;  // 0: not yet
     bool killed;
+    char said[32];  // f: focus, b: blur, in order
 };
 static struct proc g_procs[16];
 static int g_nprocs;
@@ -119,6 +135,8 @@ static void read_log(void) {
             snprintf(p->host, sizeof p->host, "%s", host), snprintf(p->app, sizeof p->app, "%s", app);
         } else if (p && !strcmp(what, "term")) p->term = t;
         else if (p && (!strcmp(what, "reaped") || !strcmp(what, "killed"))) p->gone = t, p->killed = what[0] == 'k';
+        else if (p && (!strcmp(what, "focus") || !strcmp(what, "blur")) && strlen(p->said) < sizeof p->said - 1)
+            p->said[strlen(p->said)] = what[0];
     }
     if (f) fclose(f);
 }
@@ -218,6 +236,30 @@ static bool hung(void) {
     return true;
 }
 
+// Typing going to a remote screen and leaving it reaches its ft-stream, and only its own.
+static bool focus_blur(void) {
+    start(101, "192.0.2.7", "display:X", 60);
+    start(102, "192.0.2.8", "display:Y", 60);
+    run(300);
+    EXPECT(ft_remote_is(100) && ft_remote_is(101));
+    ft_remote_focus(100);
+    ft_remote_focus(100);  // every click says it
+    run(100);
+    ft_remote_blur(100);
+    ft_remote_focus(101);
+    ft_remote_focus(7);  // not a remote screen: nothing
+    run(300);
+    read_log();
+    EXPECT(g_nprocs == 2);
+    // Either may have logged its start first.
+    const struct proc *x = !strcmp(g_procs[0].app, "display:X") ? &g_procs[0] : &g_procs[1];
+    const struct proc *y = x == &g_procs[0] ? &g_procs[1] : &g_procs[0];
+    EXPECT(!strcmp(x->app, "display:X") && !strcmp(y->app, "display:Y"));
+    EXPECT(!strcmp(x->said, "ffb"));
+    EXPECT(!strcmp(y->said, "f"));
+    return true;
+}
+
 int main(int argc, char **argv) {
     if (argc > 8 && !strcmp(argv[1], "stream")) {
         snprintf(g_log, sizeof g_log, "%s/events.log", getenv("XDG_RUNTIME_DIR"));
@@ -233,7 +275,7 @@ int main(int argc, char **argv) {
     snprintf(g_log, sizeof g_log, "%s/events.log", dir);
     const struct { const char *name; scenario s; } all[] = {
         {"stop then start", stop_start}, {"new settings", new_settings}, {"same host", same_host},
-        {"other host", other_host},      {"hung ft-stream", hung},
+        {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

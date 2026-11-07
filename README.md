@@ -125,6 +125,8 @@ Each computer needs a host kit once:
 
 Then, on the Frame, open Frametop Remote Displays (in the app menu, or Remote displays in Display Settings), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
 
+With Share the clipboard on a Windows computer's card, text you copy on the desktop can be pasted on the computer once you click one of its displays, and text you copy there can be pasted on the desktop once you click back.
+
 A monitor you stream switches to the stream's resolution while it streams (Windows), so pick a size the monitor has, or one with the same shape. A computer that's asleep can't be reached. [docs/reference.md](docs/reference.md#frametop-remote-displays) has the details.
 
 ### Pause for VR games

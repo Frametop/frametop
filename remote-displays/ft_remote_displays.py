@@ -263,7 +263,7 @@ class Backend(QObject):
                         "hasToken": address in self._logins if sunshine else os.path.exists(token_path(address)),
                         "online": self._online.get(address), "route": h.get("route", "auto"),
                         "direct": ", ".join(h.get("direct", [])), "mic": bool(h.get("mic")),
-                        "input": bool(h.get("input")),
+                        "input": bool(h.get("input")), "clipboard": bool(h.get("clipboard")),
                         "displays": displays})
         return out
 
@@ -432,6 +432,12 @@ class Backend(QObject):
         """Use the host's own keyboard and mouse in Frametop (its streams pick it up within 3 s)."""
         self._run(f"{'Using' if on else 'Not using'} {name}'s keyboard and mouse",
                   "remote", "host", name, f"input={'on' if on else 'off'}")
+
+    @Slot(str, bool)
+    def setClipboard(self, name, on):
+        """Share copied text with the host both ways (its streams pick it up within 3 s)."""
+        self._run(f"{'Sharing' if on else 'Not sharing'} the clipboard with {name}",
+                  "remote", "host", name, f"clipboard={'on' if on else 'off'}")
 
     @Slot(str, str)
     def setDirect(self, name, text):

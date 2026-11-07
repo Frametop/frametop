@@ -65,6 +65,8 @@ def address_text(status):
 
 
 def state_text(status, wanted):
+    if status.get("failed"):
+        return "Couldn't check remote access: session/remote-ctl.sh status didn't run on the host"
     if not status.get("address"):
         return "The tailnet (tailscale0) has no address: remote access can't start"
     if status.get("running") == "1":
@@ -103,6 +105,8 @@ class Backend(QObject):
 
     @Property(str, notify=changed)
     def address(self):
+        if self._status.get("failed"):
+            return "unknown"
         return address_text(self._status) or ("no tailnet address" if self._known else "…")
 
     @Property(bool, notify=changed)
@@ -133,6 +137,9 @@ class Backend(QObject):
             self.poll.start()
         else:
             self.poll.stop()
+            if self._revealed:  # shown again only when asked again
+                self._revealed = False
+                self.changed.emit()
 
     @Slot()
     def refresh(self):
@@ -149,10 +156,13 @@ class Backend(QObject):
             return
         self._asking = None
         try:
+            failed = proc.error() == QProcess.FailedToStart or proc.exitCode() != 0
             out = bytes(proc.readAllStandardOutput()).decode(errors="replace")
         except RuntimeError:  # the process went with this backend (the app is quitting)
             return
-        self._status = parse_status(out)
+        # A check that couldn't run on the host (distrobox-host-exec failing) isn't a tailnet
+        # without an address: say so instead.
+        self._status = {"failed": "1"} if failed and not out.strip() else parse_status(out)
         self._known = True
         proc.deleteLater()
         self.changed.emit()

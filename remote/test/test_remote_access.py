@@ -123,6 +123,24 @@ class Page(unittest.TestCase):
         self.assertEqual(QGuiApplication.clipboard().text(), pw)
         self.assertEqual(self.messages[-1], ("Password copied", False))
 
+    def test_hidden_again_after_leaving_the_page(self):
+        self.b.changePassword()
+        self.b.setActive(True)
+        self.b.setRevealed(True)
+        self.assertNotEqual(self.b.password, ra.HIDDEN)
+        self.b.setActive(False)
+        self.assertFalse(self.b.revealed)
+        self.assertEqual(self.b.password, ra.HIDDEN)
+
+    def test_a_check_that_fails_on_the_host_says_so(self):
+        self.status.write_text("")
+        self.code.write_text("127")
+        self.b.setActive(True)
+        self.wait(lambda: self.b.state != "Checking…")
+        self.assertIn("Couldn't check", self.b.state)
+        self.assertEqual(self.b.address, "unknown")
+        self.b.setActive(False)
+
     def test_new_password_restarts_a_running_one(self):
         self.status.write_text(STATUS["running"])
         self.b.setActive(True)

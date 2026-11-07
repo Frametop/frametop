@@ -127,6 +127,10 @@ class App(unittest.TestCase):
                 w.spin(0.05)
                 found = [s["name"] for s in sections.property("model")]
                 self.assertEqual(found, expect)
+        # Typing only filters: no page opens until Enter (one would take the keyboard mid-word).
+        search.setProperty("text", "gaz")
+        w.spin(0.6)
+        self.assertEqual(w.root.property("current"), "screens")
         search.setProperty("text", "")
 
     def test_start_section(self):

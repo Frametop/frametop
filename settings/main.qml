@@ -85,7 +85,9 @@ Kirigami.ApplicationWindow {
                     anchors.fill: parent
                     anchors.margins: Kirigami.Units.smallSpacing
                     placeholderText: "Search settings"
-                    // Enter opens the first section found.
+                    // Enter opens the first section found, and only Enter: typing filters the list
+                    // without opening pages (which would take the keyboard's focus mid-word).
+                    autoAccept: false
                     onAccepted: if (side.found.length) root.showSection(side.found[0].name)
                 }
             }

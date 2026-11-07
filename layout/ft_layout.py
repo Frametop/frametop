@@ -1492,6 +1492,21 @@ def delete_named(layout, name):
 
 # ---------------------------------------------------------------- profiles (docs/profiles.md)
 
+# The settings apps Frametop Settings replaced (DEE-344), which profiles kept (user, 2026-10-28):
+# a profile saved with one open leaves it out now (ft-floatd's open_profile, and its list in
+# Frametop Settings). Their windows were saved by desktop file name ("app"), or, with none
+# matching, by command line and window class (Remote Access, a GTK app: org.frametop.RemoteAccess).
+RETIRED_APPS = ("ft-input-settings", "ft-display-settings", "ft-remote-displays", "ft-remote-settings",
+                "org.frametop.RemoteAccess")
+
+
+def retired_entry(entry):
+    """Whether a profile's window entry is one of the retired settings apps."""
+    if entry.get("app") in RETIRED_APPS or entry.get("class") in RETIRED_APPS:
+        return True
+    return any(os.path.basename(str(arg)) in RETIRED_APPS for arg in entry.get("cmd") or [])
+
+
 def ask_float(text, timeout=6.0):
     """ft-floatd (floating windows, in the desktop's session); None if it isn't running."""
     return ftipc.ask(FLOAT, text, timeout)

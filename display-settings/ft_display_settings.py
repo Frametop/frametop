@@ -66,9 +66,6 @@ NOTIFY_FORWARD = ("auto", "on", "off")  # session/ft-notifyfwd; frametop.conf's 
 DASHBOARD_APPS = ("steamvr", "frametop")  # float/ft-dashroute; frametop.conf's DASHBOARD_APPS
 NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tmp is the host's)
 AUTOSTART_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-autostart.service")
-# Settings apps an older profile may have kept, gone now (their pages are in Frametop Settings):
-# opening the profile leaves them out (ft-floatd's RETIRED_APPS), so its list does too.
-RETIRED_APPS = ("ft-input-settings", "ft-remote-displays", "org.frametop.RemoteAccess")
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
 
@@ -841,15 +838,17 @@ class Backend(QObject):
     # --- profiles (docs/profiles.md): a named layout's apps and hidden screens ---
     @Slot(str, result="QVariantList")
     def profileWindows(self, name):
-        """A profile's windows, as "app" and "where" for the list."""
+        """A profile's windows, as "app", "where", and "index" (its place in the saved list, for
+        removeProfileWindow) for the list. The retired settings apps aren't listed: opening the
+        profile leaves them out (ft_layout.retired_entry)."""
         out = []
-        for e in ft_layout.load_layout().get("profiles", {}).get(name, {}).get("windows", []):
-            if e.get("app") in RETIRED_APPS:
+        for i, e in enumerate(ft_layout.load_layout().get("profiles", {}).get(name, {}).get("windows", [])):
+            if ft_layout.retired_entry(e):
                 continue
             app = e.get("app") or os.path.basename((e.get("cmd") or ["?"])[0])
             app = app.rsplit(".", 1)[-1] if "." in app and not e.get("cmd") else app
             where = "floating" if "float" in e else f"screen {e.get('screen', 1)}" + (", maximized" if e.get("maximized") else "")
-            out.append({"app": app, "where": where})
+            out.append({"app": app, "where": where, "index": i})
         return out
 
     @Slot(str, result="QVariantList")

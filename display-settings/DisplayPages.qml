@@ -591,7 +591,6 @@ Item {
                             model: profileApps.windows
                             delegate: RowLayout {
                                 required property var modelData
-                                required property int index
                                 Controls.Label { text: modelData.app + " (" + modelData.where + ")" }
                                 Controls.ToolButton {
                                     icon.name: "list-remove"
@@ -599,7 +598,7 @@ Item {
                                     display: Controls.AbstractButton.IconOnly
                                     Controls.ToolTip.text: "Leave this window out of the profile"
                                     Controls.ToolTip.visible: hovered
-                                    onClicked: backend.removeProfileWindow(lpage.layout.active, index)
+                                    onClicked: backend.removeProfileWindow(lpage.layout.active, modelData.index)
                                 }
                             }
                         }

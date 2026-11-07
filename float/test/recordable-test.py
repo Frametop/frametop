@@ -50,7 +50,9 @@ check("spotlist lists Frametop Settings", floatd.listable(window("ft-settings"))
 launched = []
 me = types.SimpleNamespace(windows={}, window_key=lambda ev: "", place_entry=lambda ev, e: None,
                            launch_entries=lambda entries: launched.append([e.get("app") or e["cmd"] for e in entries]))
-profile = {"windows": [{"app": "ft-input-settings"}, {"app": "ft-remote-displays"}, {"app": "org.frametop.RemoteAccess"},
+profile = {"windows": [{"app": "ft-input-settings"}, {"app": "ft-remote-displays"},
+                       # Remote Access (GTK) matched no desktop file: saved by command line and class.
+                       {"cmd": ["/usr/bin/python3", "/x/remote/ft-remote-settings"], "class": "org.frametop.RemoteAccess"},
                        {"app": "org.kde.dolphin", "screen": 1}]}
 with mock.patch.object(floatd.ft_layout, "load_layout", return_value={"profiles": {"Desk": profile}}):
     check("a profile opens", floatd.Daemon.open_profile(me, "Desk"), "ok")

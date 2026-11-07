@@ -242,11 +242,8 @@ SKIP_APPS = ("org.kde.plasmashell", "org.kde.krunner", "org.kde.ksplashqml", "or
 # Frametop Settings stays out of profiles, as Display Settings did: profiles are saved from it, so
 # every one would open it (user, 2026-10-28). So do Frametop's other windows (recorders, the
 # tour, its own panels). The settings apps it replaced, which profiles kept (user, 2026-10-28),
-# are gone: a profile saved with one open leaves it out (open_profile; Display Settings' list
-# of a profile's windows too). Their pages are in Frametop Settings.
-RETIRED_APPS = ("ft-input-settings", "ft-remote-displays", "org.frametop.RemoteAccess")
-
-
+# are gone: a profile saved with one open leaves it out (open_profile and Frametop Settings' list
+# of a profile's windows, with ft_layout.retired_entry). Their pages are in Frametop Settings.
 def recordable(ev):
     """An app's top-level window, the kind a profile keeps."""
     if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
@@ -1184,7 +1181,7 @@ class Daemon:
         groups = {}
         for e in profile.get("windows", []):
             key = e.get("app") or json.dumps(e.get("cmd") or [])
-            if key != "[]" and key not in RETIRED_APPS:
+            if key != "[]" and not ft_layout.retired_entry(e):
                 groups.setdefault(key, []).append(e)
         claimed = set()
         keys = {wid: self.window_key(ev) for wid, ev in self.windows.items() if recordable(ev)}

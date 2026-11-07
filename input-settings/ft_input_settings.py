@@ -242,6 +242,7 @@ ACTION_LABELS = {
     "spin_prev": "Spin the panels: next one on the left to the front",
     "carry_toggle": "Carry the panel under the pointer / carry all",
     "frunner": "Frunner: search apps and remote displays",
+    "os_menu": "OS menu: Frametop's actions in frunner",
     "hands_toggle": "Hand tracking on/off",
     "release_keys": "Release all keys (a stuck modifier)",
     "key": "Pass through as key",

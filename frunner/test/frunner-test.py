@@ -166,13 +166,20 @@ def float_answer(text):
     return "ok"
 
 
+def relay_answer(text):
+    if text == "action pause_toggle":
+        return json.dumps({"t": "error", "error": "paused"})
+    return json.dumps({"t": "action", "action": text.split()[1]})
+
+
 screens = Fake(f"{tag}_screens", screens_answer)
 floatd = Fake(f"{tag}_float", float_answer)
+relay = Fake(f"{tag}_relay", relay_answer)
 env = dict(os.environ, HOME=home, XDG_DATA_HOME=os.path.join(home, "share"), XDG_DATA_DIRS=os.path.join(home, "none"),
            XDG_CONFIG_HOME=os.path.join(home, ".config"), XDG_CACHE_HOME=os.path.join(home, ".cache"),
            FT_COMMANDS_NO_SYSTEMD="1")
 daemon = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(HERE), "ft_frunner.py"), "--no-panel",
-                           "--socket", f"{tag}_sw", "--screens", f"{tag}_screens", "--float", f"{tag}_float"],
+                           "--socket", f"{tag}_sw", "--screens", f"{tag}_screens", "--float", f"{tag}_float", "--relay", f"{tag}_relay"],
                           env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 me = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 me.bind("")
@@ -377,10 +384,54 @@ try:
     with open(os.path.join(home, ".config", "frametop-frunner.json")) as f:
         counts = json.load(f)["usage"]
     check("usage is counted", sorted(counts), ["command:stop-framecorder", "editor", "firefox", "remote:desk-oled"])
+
+    # Frametop's own actions (DEE-172): in the search, and as the OS menu.
+    ask("open")
+    check("an empty query lists nothing", json.loads(ask("rows")[3:]), [])
+    type_text("hand")
+    check("Frametop's actions are found by name", json.loads(ask("rows")[3:]), ["Hand tracking on or off"])
+    relay.take()
+    press(ENTER)
+    check("Enter asks the input relay to do it", relay.take(), ["action hands_toggle"])
+    check("...and closes", ask("status").split()[1], "closed")
+
+    screens.take()
+    check("toggle ... actions opens the OS menu", ask("toggle left actions"), "ok")
+    check("...Frametop's keyboard too, from a controller", "vrkeyboard show" in screens.take(), True)
+    check("...with every action listed, in the menu's order", json.loads(ask("rows")[3:]),
+          ["Steam menu", "Hide or show the screens", "Spin to the next panel", "Spin to the previous panel",
+           "Put every floating window back", "Hand tracking on or off", "Pause for a VR game", "Let go of every key"])
+    type_text("spin")
+    check("typing searches as usual", json.loads(ask("rows")[3:]),
+          ["Spin to the next panel", "Spin to the previous panel"])
+    for _ in range(4):
+        press(BACKSPACE)
+    check("...and back to an empty query, the menu again", len(json.loads(ask("rows")[3:])), 8)
+    press(SHIFT, ENTER)
+    check("Shift+Enter: its menu", json.loads(ask("rows")[3:]), ["Steam menu", "Do it"])
+    press(ESC)
+    relay.take()
+    press(DOWN)
+    press(ENTER)
+    check("Down, Enter: the second action", relay.take(), ["action screens_toggle"])
+    check("...and it closed", ask("status").split()[1], "closed")
+    ask("toggle keyboard actions")
+    check("toggle again closes it", ask("toggle keyboard actions"), "ok closed")
+
+    ask("open mouse actions")
+    for _ in range(6):
+        press(DOWN)
+    relay.take()
+    press(ENTER)
+    check("an action the relay refuses (paused): asked once, and closed", (relay.take(), ask("status").split()[1]),
+          (["action pause_toggle"], "closed"))
+    ask("open")
+    check("a plain open after the OS menu lists nothing again", json.loads(ask("rows")[3:]), [])
+    press(ESC)
 finally:
     daemon.terminate()
     out = daemon.communicate(timeout=5)[0]
-    screens.stop = floatd.stop = True
+    screens.stop = floatd.stop = relay.stop = True
 if failed:
     print(out)
 print("all passed" if not failed else f"{failed} failed")

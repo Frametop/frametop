@@ -80,14 +80,14 @@ COMPONENTS = {
     'keyboard': ((OPENVR,), ('frametop/framekeyboard', 'frametop/framekeyboard-native-guard',
                              'frametop/engines/*', 'frametop/bridge/*', 'frametop/vr/*')),
     'power': ((OPENVR,), ('ft-powerd',)),
-    'stream': ((OPENVR,), ('ft-stream',)),   # the spikes only with build.sh --spikes
+    'stream': ((OPENVR,), ('ft-stream', 'ft-clip')),   # the spikes only with build.sh --spikes
     'voice': ((), ('bin/whisper-server',)),
     'hands': ((), ('ft-hands', 'ft-camd')),
     'hands/rec': ((OPENVR, STB), ('ft-handpanel',)),
 }
 WHOLE = {'keyboard'}   # its CMake build embeds layouts, languages and themes, and copies scripts
 BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl', '.vert', '.frag',
-                  '.patch', '.cmake'}
+                  '.patch', '.cmake', '.xml'}   # .xml: Wayland protocols (stream/protocols)
 BUILD_NAMES = {'build.sh', 'Makefile', 'CMakeLists.txt', 'meson.build', 'Cargo.toml', 'Cargo.lock'}
 # Built programs an installer has to put in place, and the sources they're built from: a
 # rebuild changes their bytes (the build folder's path is in them), so only a source change

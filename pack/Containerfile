@@ -101,7 +101,7 @@ RUN keyboard/build.sh \
 RUN power/build.sh \
  && install -t /runtime/opt/frametop/bin power/build/ft-powerd
 RUN stream/build.sh \
- && install -t /runtime/opt/frametop/bin stream/build/ft-stream \
+ && install -t /runtime/opt/frametop/bin stream/build/ft-stream stream/build/ft-clip \
  && rm -rf stream/build/mlc stream/build/gamestream
 # Our own eye tracker: ft-eyegrab (it runs on the host, as root) and ft-eyes'
 # build/venv, which here only points at the venv above.

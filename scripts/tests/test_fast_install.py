@@ -73,6 +73,8 @@ class Paths(unittest.TestCase):
         self.assertEqual(rebuilt('keyboard/bridge/native_bridge.py'), {'keyboard'})   # copied by CMake
         self.assertEqual(rebuilt('keyboard/docs/x.md'), set())
         self.assertEqual(rebuilt('stream/mic.patch'), {'stream'})
+        self.assertEqual(rebuilt('stream/protocols/wlr-data-control-unstable-v1.xml'), {'stream'})
+        self.assertEqual(rebuilt('stream/ft-clip.c'), {'stream'})
         self.assertEqual(rebuilt('voice/build.sh'), {'voice'})
         openvr = rebuilt('scripts/openvr.sh')
         self.assertTrue({'screens', 'power', 'keyboard'} <= openvr)

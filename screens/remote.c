@@ -380,6 +380,11 @@ void ft_remote_key(int index, uint32_t code, bool pressed) {
     if (r) say(r, "key %u %d", code, pressed ? 1 : 0);
 }
 
+void ft_remote_focus(int index) {
+    struct remote *r = find(index);
+    if (r) say(r, "focus");
+}
+
 void ft_remote_blur(int index) {
     struct remote *r = find(index);
     if (r) say(r, "blur");

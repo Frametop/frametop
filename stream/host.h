@@ -44,7 +44,7 @@ struct WebApi {
     long Call(const char *method, const std::string &path, const nlohmann::json *body, nlohmann::json *out);
     // Paired clients by host id: name and permissions.
     bool Clients(std::map<std::string, std::pair<std::string, uint32_t>> *clients);
-    // Lets a client launch apps and use the mouse and keyboard.
+    // Lets a client launch apps, use the mouse and keyboard, and set and read the clipboard.
     bool Grant(const std::string &uuid, const std::string &name);
 };
 
@@ -58,13 +58,17 @@ struct Client {
     // Makes the key directory and a unique id if needed, then asks the host about itself.
     bool Connect(const std::string &host, const std::string &id, int port = 0);
     // Pairs this client: with the token, by sending its own PIN through the API and then
-    // granting it launch, mouse and keyboard; with the login, by approving its own pairing
+    // granting it launch, mouse, keyboard and clipboard; with the login, by approving its own pairing
     // request with its PIN (Sunshine has no permissions to grant); with neither, by printing
     // the PIN to type in.
     bool Pair(WebApi *api);
     bool PairByLogin(WebApi &api, char *pin);  // gs_pair takes a char *
     bool GrantByName(WebApi &api);
     bool Unpair();
+    // The host's clipboard text (Vibepollo's /actions/clipboard): set to *text, or read into it.
+    // The HTTP status, -1 without an answer. pin: the Web UI's public key, if Remote Displays
+    // saved one (HOST.pin): another certificate is refused.
+    long Clipboard(bool set, std::string *text, const std::string &pin);
     // The app id for primary, monitor, display:DEVICE, a number, or an app's name; 0 if none.
     int FindApp(const std::string &want);
     // /launch (or /resume) for appId, keeping the status code: Vibepollo answers 503 while a

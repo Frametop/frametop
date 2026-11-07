@@ -536,10 +536,11 @@ static void new_decoration(struct wl_listener *l, void *data) {
 // ---------------------------------------------------------------- input from the panels
 
 // Typing goes to remote screen `index` (or to the desktop: -1). The one it leaves lets go of
-// the keys it held.
+// the keys it held; the one it goes to hears "focus" (the shared clipboard).
 static void set_key_remote(struct server *s, int index) {
     if (s->key_remote >= 0 && s->key_remote != index) ft_remote_blur(s->key_remote);
     s->key_remote = index;
+    if (index >= 0) ft_remote_focus(index);
 }
 
 static void handle_vr_event(const struct ft_event *e, void *data) {

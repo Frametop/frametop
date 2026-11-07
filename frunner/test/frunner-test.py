@@ -356,6 +356,24 @@ try:
         time.sleep(0.05)
     check("...in the background", os.path.exists(ran), True)
 
+    # The desktop's layout changes while it runs (Input Settings or System Settings): the next
+    # open types on the new one. Key 21 is Y on a US layout and Z on German QWERTZ.
+    ask("open")
+    press(21)
+    check("a US layout without kxkbrc", ask("status"), "ok open list y")
+    press(ESC)
+    with open(os.path.join(home, ".config", "kxkbrc"), "w") as f:
+        f.write("[Layout]\nLayoutList=de\nUse=true\nVariantList=\n")
+    ask("open")
+    press(21)
+    check("...and the desktop's new layout from the next open", ask("status"), "ok open list z")
+    press(ESC)
+    os.remove(os.path.join(home, ".config", "kxkbrc"))
+    ask("open")
+    press(21)
+    check("...and back to US when it goes", ask("status"), "ok open list y")
+    press(ESC)
+
     with open(os.path.join(home, ".config", "frametop-frunner.json")) as f:
         counts = json.load(f)["usage"]
     check("usage is counted", sorted(counts), ["command:stop-framecorder", "editor", "firefox", "remote:desk-oled"])

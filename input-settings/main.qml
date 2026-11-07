@@ -766,8 +766,10 @@ Kirigami.ApplicationWindow {
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 16
                     readonly property string want: backend.desktopLayout
                     onWantChanged: currentIndex = indexOfValue(want)
+                    onModelChanged: currentIndex = indexOfValue(want)
                     Component.onCompleted: currentIndex = indexOfValue(want)
-                    onActivated: backend.setDesktopLayout(currentValue)
+                    // the saved one again: a pick that didn't save doesn't stay showing
+                    onActivated: { backend.setDesktopLayout(currentValue); currentIndex = indexOfValue(backend.desktopLayout) }
                 }
                 Controls.ComboBox {
                     Kirigami.FormData.label: "Variant:"
@@ -780,7 +782,8 @@ Kirigami.ApplicationWindow {
                     onWantChanged: currentIndex = indexOfValue(want)
                     onModelChanged: currentIndex = indexOfValue(want)
                     Component.onCompleted: currentIndex = indexOfValue(want)
-                    onActivated: backend.setDesktopVariant(currentValue)
+                    // the saved one again: a pick that didn't save doesn't stay showing
+                    onActivated: { backend.setDesktopVariant(currentValue); currentIndex = indexOfValue(backend.desktopVariant) }
                 }
                 Controls.Label {
                     text: "What your keyboards type on the Frametop desktop: USB and Bluetooth keyboards, Full Keyboard and dictation. Pick the same language in Full Keyboard. Steam and VR games keep their own layout."

@@ -121,7 +121,7 @@ class Xkb:
                     ("variant", ctypes.c_char_p), ("options", ctypes.c_char_p)]
 
     def __init__(self):
-        self.lib = self.keymap = self.state = None
+        self.lib = self.ctx = self.keymap = self.state = None
         self.stamp = self.file_stamp()  # kxkbrc as it was read: changed() makes a new Xkb
         layout, variant, options = self.layout()
         try:
@@ -140,7 +140,7 @@ class Xkb:
             keymap = lib.xkb_keymap_new_from_names(ctx, ctypes.byref(names), 0) if ctx else None
             if not keymap:
                 raise OSError(f"no keymap for layout {layout!r}")
-            self.lib, self.keymap = lib, keymap
+            self.lib, self.ctx, self.keymap = lib, ctx, keymap
             self.reset()
             log(f"typing: layout {layout}{'(' + variant + ')' if variant else ''}")
         except (OSError, AttributeError) as e:
@@ -190,7 +190,9 @@ class Xkb:
                 self.lib.xkb_state_unref(self.state)
             self.lib.xkb_keymap_unref.argtypes = [ctypes.c_void_p]
             self.lib.xkb_keymap_unref(self.keymap)
-        self.lib = self.keymap = self.state = None
+            self.lib.xkb_context_unref.argtypes = [ctypes.c_void_p]
+            self.lib.xkb_context_unref(self.ctx)
+        self.lib = self.ctx = self.keymap = self.state = None
 
     def reset(self):
         if self.lib:

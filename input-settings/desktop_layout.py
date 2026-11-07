@@ -10,7 +10,10 @@ System Settings sends). The input relay and ft-frunner read kxkbrc themselves.
 The layouts and their variants come from xkeyboard-config's evdev.xml, the host's first: KWin runs
 on the host and builds its keymap from the host's copy."""
 import os
+import re
+import stat
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 
 CONFIG_DIR = os.path.expanduser("~/.config/frametop")
@@ -18,6 +21,7 @@ KXKBRC = os.path.join(CONFIG_DIR, "kxkbrc")
 RULES_XML = ("/run/host/usr/share/X11/xkb/rules/evdev.xml", "/usr/share/X11/xkb/rules/evdev.xml")
 GROUP = "Layout"
 LISTS = ("LayoutList", "VariantList", "DisplayNames")  # kept in step, one entry per layout
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # what env(1) takes as NAME=VALUE, not an option
 
 
 def read_rules(paths=RULES_XML):
@@ -84,6 +88,15 @@ def _entries(lines):
     return found
 
 
+def stamp(path=KXKBRC):
+    """kxkbrc's (mtime, size), None without it: whether it changed since."""
+    try:
+        st = os.stat(path)
+        return st.st_mtime_ns, st.st_size
+    except OSError:
+        return None
+
+
 def current(path=KXKBRC):
     """(layout, variant) KWin starts with: kxkbrc's first, or ("us", "") without a file, without a
     list, or with layouts switched off there (Use=false), as KWin does."""
@@ -96,20 +109,21 @@ def current(path=KXKBRC):
 
 
 def put_first(layout, variant="", path=KXKBRC):
-    """Make (layout, variant) the desktop's first layout in kxkbrc, and turn layouts on (Use=true).
-    The layouts already there stay after it, in their order (without a second copy of this one),
-    with their variants and display names; the file's other groups and entries stay as they are."""
+    """Make (layout, variant) the desktop's first layout in kxkbrc, in place of the one that was
+    first, and turn layouts on (Use=true). The other layouts there stay after it, in their order
+    (without a second copy of this one), with their variants and display names, so a list made in
+    System Settings keeps its extra layouts and picking again doesn't make it longer. The file's
+    other groups and entries stay as they are."""
     lines = _lines(path)
     entries = _entries(lines)
     use_on = entries.get("Use", "true").lower() != "false"
-    lists = {k: entries.get(k, "").split(",") if entries.get(k) is not None else [] for k in LISTS}
-    count = len([x for x in lists["LayoutList"] if x.strip()]) if use_on else 0
+    lists = {k: entries[k].split(",") if k in entries else [] for k in LISTS}
     rows = []  # (layout, variant, display name) already there, in order
-    for i in range(count):
+    for i in range(len(lists["LayoutList"]) if use_on else 0):
         row = tuple((lists[k][i] if i < len(lists[k]) else "").strip() for k in LISTS)
-        if row[0] and (row[0], row[1]) != (layout, variant) and row[:2] not in [r[:2] for r in rows]:
+        if row[0] and row[:2] not in [r[:2] for r in rows]:
             rows.append(row)
-    rows.insert(0, (layout, variant, ""))
+    rows = [(layout, variant, "")] + [r for r in rows[1:] if r[:2] != (layout, variant)]
     want = {"LayoutList": ",".join(r[0] for r in rows), "VariantList": ",".join(r[1] for r in rows), "Use": "true"}
     if "DisplayNames" in entries or any(r[2] for r in rows):
         want["DisplayNames"] = ",".join(r[2] for r in rows)
@@ -123,7 +137,11 @@ def put_first(layout, variant="", path=KXKBRC):
     start, end = span
     body = lines[start:end]
     for key, value in sorted(want.items()):
-        at = next((i for i, line in enumerate(body) if line.partition("=")[0].strip() == key and "=" in line), None)
+        # KConfig reads the last copy of a key: set that one, and drop the copies before it
+        found = [i for i, line in enumerate(body) if "=" in line and line.partition("=")[0].strip() == key]
+        for i in reversed(found[:-1]):
+            del body[i]
+        at = found[-1] - len(found[:-1]) if found else None
         if at is None:
             # after the group's last entry, before any blank lines that end it
             k = len(body)
@@ -134,11 +152,29 @@ def put_first(layout, variant="", path=KXKBRC):
             body[at] = f"{key}={value}"
     lines[start:end] = body
 
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = f"{path}.ft-tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    os.replace(tmp, path)
+    path = os.path.realpath(path)  # a kxkbrc linked from elsewhere stays a link
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".kxkbrc.", dir=os.path.dirname(path))
+    try:
+        try:
+            os.fchmod(fd, stat.S_IMODE(os.stat(path).st_mode))
+        except FileNotFoundError:
+            os.fchmod(fd, 0o666 & ~_umask())
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _umask():
+    mask = os.umask(0o022)
+    os.umask(mask)
+    return mask
 
 
 def desktop_env(proc="/proc", config_dir=CONFIG_DIR, uid=None):
@@ -171,7 +207,8 @@ def desktop_env(proc="/proc", config_dir=CONFIG_DIR, uid=None):
 def settings_command(env):
     """System Settings' keyboard page in the running desktop, with the desktop's own environment
     (its Wayland socket, bus and config folder), as its menu would start it."""
-    return ["env", "-i"] + [f"{k}={v}" for k, v in sorted(env.items())] + ["systemsettings", "kcm_keyboard"]
+    return (["env", "-i"] + [f"{k}={v}" for k, v in sorted(env.items()) if ENV_NAME.fullmatch(k)]
+            + ["systemsettings", "kcm_keyboard"])
 
 
 def reload_command(bus):
@@ -187,6 +224,6 @@ def reload(env=None, run=subprocess.run):
     if not bus:
         return False
     try:
-        return run(reload_command(bus), capture_output=True, timeout=5).returncode == 0
+        return run(reload_command(bus), capture_output=True, timeout=2).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False

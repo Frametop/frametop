@@ -79,7 +79,7 @@ class DesktopLayout(unittest.TestCase):
         dl.put_first("pl", "", str(self.rc))
         self.assertEqual(self.rc.read_text(), "[Layout]\nLayoutList=pl\nUse=true\nVariantList=\n")
         self.assertEqual(dl.current(str(self.rc)), ("pl", ""))
-        self.assertFalse(list(self.rc.parent.glob("*.ft-tmp")))
+        self.assertEqual(sorted(p.name for p in self.rc.parent.iterdir()), ["kxkbrc"])
 
     def test_keeps_the_rest(self):
         self.rc.parent.mkdir()
@@ -90,21 +90,65 @@ class DesktopLayout(unittest.TestCase):
         dl.put_first("pl", "", str(self.rc))
         text = self.rc.read_text()
         self.assertIn("[$Version]\nupdate_info=kxkb.upd:remove-empty-lists\n", text)
-        self.assertIn("LayoutList=pl,us,de\n", text)
-        self.assertIn("VariantList=,,nodeadkeys\n", text)
-        self.assertIn("DisplayNames=,,DE\n", text)
+        self.assertIn("LayoutList=pl,de\n", text)  # in place of the first, the others after it
+        self.assertIn("VariantList=,nodeadkeys\n", text)
+        self.assertIn("DisplayNames=,DE\n", text)
         self.assertIn("Options=grp:alt_shift_toggle\nResetOldOptions=true\n", text)
         self.assertTrue(text.endswith("\n\n[Other]\nKey=1\n"), text)
-        # picking one already in the list moves it to the front, with its display name dropped
+        # picking one already further down moves it to the front, with its display name dropped
         dl.put_first("de", "nodeadkeys", str(self.rc))
         text = self.rc.read_text()
-        self.assertIn("LayoutList=de,pl,us\n", text)
-        self.assertIn("VariantList=nodeadkeys,,\n", text)
-        self.assertIn("DisplayNames=,,\n", text)
+        self.assertIn("LayoutList=de\n", text)
+        self.assertIn("VariantList=nodeadkeys\n", text)
+        self.assertIn("DisplayNames=\n", text)
         self.assertEqual(dl.current(str(self.rc)), ("de", "nodeadkeys"))
-        # the same layout with another variant is another entry
-        dl.put_first("de", "", str(self.rc))
-        self.assertIn("LayoutList=de,de,pl,us\n", self.rc.read_text())
+
+    def test_picking_again_doesnt_grow(self):
+        self.rc.parent.mkdir()
+        self.rc.write_text("[Layout]\nLayoutList=us,de\nUse=true\nVariantList=,\n")
+        for layout, variant in (("pl", ""), ("fr", ""), ("pl", "qwertz"), ("pl", ""), ("de", ""), ("it", "")):
+            dl.put_first(layout, variant, str(self.rc))
+            self.assertEqual(dl.current(str(self.rc)), (layout, variant))
+        self.assertIn("LayoutList=it\n", self.rc.read_text())  # de was the other one: picked, then replaced
+        self.rc.write_text("[Layout]\nLayoutList=us,de,fr\nUse=true\nVariantList=,nodeadkeys,\n")
+        for layout in ("pl", "es", "pl", "uk"):
+            dl.put_first(layout, "", str(self.rc))
+        self.assertIn("LayoutList=uk,de,fr\n", self.rc.read_text())
+        self.assertIn("VariantList=,nodeadkeys,\n", self.rc.read_text())
+
+    def test_odd_files(self):
+        self.rc.parent.mkdir()
+        # a blank entry in the middle doesn't lose the ones after it
+        self.rc.write_text("[Layout]\nLayoutList=us,,de\nUse=true\nVariantList=,,nodeadkeys\n")
+        dl.put_first("pl", "", str(self.rc))
+        self.assertIn("LayoutList=pl,de\nUse=true\nVariantList=,nodeadkeys\n", self.rc.read_text())
+        # a repeated key: KConfig reads the last, so that one is set and the earlier one goes
+        self.rc.write_text("[Layout]\nLayoutList=fr\nUse=true\nLayoutList=de\nVariantList=\n")
+        self.assertEqual(dl.current(str(self.rc)), ("de", ""))
+        dl.put_first("pl", "", str(self.rc))
+        self.assertEqual(self.rc.read_text(), "[Layout]\nUse=true\nLayoutList=pl\nVariantList=\n")
+        self.assertEqual(dl.current(str(self.rc)), ("pl", ""))
+
+    def test_write_keeps_mode_and_link(self):
+        self.rc.parent.mkdir()
+        real = self.dir / "dotfiles-kxkbrc"
+        real.write_text("[Layout]\nLayoutList=us\n")
+        real.chmod(0o600)
+        self.rc.symlink_to(real)
+        dl.put_first("pl", "", str(self.rc))
+        self.assertTrue(self.rc.is_symlink())
+        self.assertEqual(oct(real.stat().st_mode & 0o777), "0o600")
+        self.assertEqual(dl.current(str(self.rc)), ("pl", ""))
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir() if p.name.startswith(".kxkbrc")), [])
+        self.assertEqual(sorted(p.name for p in self.rc.parent.iterdir()), ["kxkbrc"])
+
+    def test_stamp(self):
+        self.assertIsNone(dl.stamp(str(self.rc)))
+        dl.put_first("pl", "", str(self.rc))
+        first = dl.stamp(str(self.rc))
+        self.assertIsNotNone(first)
+        dl.put_first("de", "nodeadkeys", str(self.rc))
+        self.assertNotEqual(dl.stamp(str(self.rc)), first)
 
     def test_switched_off_lists_go(self):
         self.rc.parent.mkdir()
@@ -165,7 +209,7 @@ class DesktopLayout(unittest.TestCase):
         self.assertFalse(dl.reload({"DBUS_SESSION_BUS_ADDRESS": "b"}, run=missing))
 
     def test_settings_command(self):
-        self.assertEqual(dl.settings_command({"B": "2", "A": "1"}),
+        self.assertEqual(dl.settings_command({"B": "2", "A": "1", "-u": "x", "a b": "y", "": "z"}),
                          ["env", "-i", "A=1", "B=2", "systemsettings", "kcm_keyboard"])
 
 

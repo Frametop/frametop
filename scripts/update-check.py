@@ -66,7 +66,9 @@ PACKAGES = {
     "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
             "after a desktop restart; floating a window; no blur behind the taskbar's menus; "
             "logging out with a Deskflow client connected (6.2.5 crashes there, and the session's "
-            "logout watcher ends it: if it no longer crashes, the watcher can go)",
+            "logout watcher ends it: if it no longer crashes, the watcher can go); a layout "
+            "picked on Input Settings' Keyboard page applies at once (KWin's "
+            "org.kde.keyboard.reloadConfig on /Layouts)",
     "plasma-workspace": "the taskbar and panels after a desktop restart; no DiscoverNotifier or "
                         "ibus-daemon inside the desktop; a notification in the desktop shows in the "
                         "Steam session and its buttons work (ft-notifyfwd)",
@@ -221,6 +223,10 @@ def check_host():
         ("/usr/bin/dbus-run-session", "FAIL", "the desktop can't start its session bus"),
         ("/usr/bin/python3", "warn", "nested accessibility can't run its startup helper"),
         ("/usr/bin/gdbus", "warn", "nested accessibility can't discover or check its bus"),
+        ("/usr/share/X11/xkb/rules/evdev.xml", "warn",
+         "Input Settings' Keyboard page lists no desktop layouts (xkeyboard-config's list moved)"),
+        ("/usr/lib/qt6/plugins/plasma/kcms/systemsettings/kcm_keyboard.so", "warn",
+         "the desktop's System Settings has no Keyboard page (Input Settings' More layouts)"),
         ("/usr/lib/at-spi-bus-launcher", "warn", "nested accessibility can't start its bus"),
         ("/usr/lib/at-spi2-registryd", "warn", "nested accessibility has no fallback registry"),
         ("/usr/share/dbus-1/services/org.a11y.Bus.service", "warn",

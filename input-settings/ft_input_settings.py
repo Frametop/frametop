@@ -539,6 +539,7 @@ class Backend(QObject):
         self._travelRead.connect(self._travel_read, Qt.QueuedConnection)
         self._adding = False
         self._xkb = None  # xkeyboard-config's layouts (desktop_layout.read_rules), read once
+        self._kxkbrc_stamp = desktop_layout.stamp()  # the desktop's kxkbrc as the Keyboard page shows it
         self._relay_ok = False
         self._capture_vr = False
         self._capture_combo = ""  # the action a key combination is being captured for
@@ -596,6 +597,7 @@ class Backend(QObject):
 
     def _refresh(self):
         self._send("devices")
+        self._check_desktop_layout()
         self._send("pause ?")
         self._send("vrstatus", HELPER)
         self._send("gaze ?", HELPER)
@@ -1065,7 +1067,14 @@ class Backend(QObject):
             self._xkb = desktop_layout.read_rules()
         return self._xkb
 
-    @Property("QVariantList", constant=True)
+    def _check_desktop_layout(self):
+        """kxkbrc changed outside this app (the desktop's System Settings): show what it says now."""
+        now = desktop_layout.stamp()
+        if now != self._kxkbrc_stamp:
+            self._kxkbrc_stamp = now
+            self.desktopLayoutChanged.emit()
+
+    @Property("QVariantList", notify=desktopLayoutChanged)
     def desktopLayouts(self):
         """Every keyboard layout xkeyboard-config has, plus the desktop's own if it isn't listed."""
         items = desktop_layout.layout_choices(self._xkb_rules())
@@ -1092,14 +1101,18 @@ class Backend(QObject):
 
     def _put_desktop_layout(self, layout, variant):
         rules = self._xkb_rules()
-        if rules and layout not in rules:
-            self.message.emit(f"Keyboard layout {layout!r} isn't one xkeyboard-config has", True)
+        if rules and (layout not in rules or variant and variant not in {n for n, _ in rules[layout][1]}):
+            self.message.emit(f"Keyboard layout {layout}{'(' + variant + ')' if variant else ''} "
+                              "isn't one xkeyboard-config has", True)
+            self.desktopLayoutChanged.emit()
             return
         try:
             desktop_layout.put_first(layout, variant)
         except OSError as e:
             self.message.emit(f"Couldn't save the keyboard layout: {e}", True)
+            self.desktopLayoutChanged.emit()
             return
+        self._kxkbrc_stamp = desktop_layout.stamp()
         self.desktopLayoutChanged.emit()
         name = next((v["text"] for v in desktop_layout.variant_choices(rules, layout) if v["value"] == variant), layout)
         if desktop_layout.reload():

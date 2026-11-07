@@ -157,10 +157,10 @@ try:
     rules = json.load(open(os.path.expanduser("~/.config/frametop-input.json")))
 except (OSError, ValueError):
     rules = {}
-print("Keyboard setting (Input Settings > Keyboard):", rules.get("vr_keyboard", "no_keyboard (the default)"),
+print("Keyboard setting (Frametop Settings > Keyboard):", rules.get("vr_keyboard", "no_keyboard (the default)"),
       "| keep it open:", rules.get("vr_keyboard_persist", True))
 kb = rules.get("key_bindings")
-print("Meta tap (Input Settings > Keyboard):", "on" if rules.get("meta_tap", True) else "off",
+print("Meta tap (Frametop Settings > Keyboard):", "on" if rules.get("meta_tap", True) else "off",
       "| bound to:", (kb.get("125") if isinstance(kb, dict) else "steam_menu (the defaults)") or "nothing",
       "| right Meta:", (kb.get("126") if isinstance(kb, dict) else None) or "as Meta")
 print("the relay's devices (with the default setting, a pass-through keyboard keeps ours closed):")

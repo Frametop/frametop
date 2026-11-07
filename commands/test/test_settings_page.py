@@ -1,4 +1,4 @@
-"""Frametop Input Settings' Commands page: adding, refusing, removing (with the bindings to it),
+"""Frametop Settings' Commands page: adding, refusing, removing (with the bindings to it),
 the run:NAME actions in every picker, and the page itself loading. HOME is a temporary
 directory; host() is replaced, so nothing runs on the host. Needs PySide6 and Kirigami (the
 image's python3). Run: python3 commands/test/test_settings_page.py"""
@@ -15,9 +15,10 @@ os.environ["HOME"] = HOME
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "input-settings"))
+sys.path.insert(0, str(ROOT / "settings"))
 import ft_input_settings as fis  # noqa: E402
+import ft_settings  # noqa: E402  (Frametop Settings, the window these pages are in)
 import ft_commands  # noqa: E402  (ft_input_settings put commands/ on the path)
-from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 
@@ -135,19 +136,18 @@ class Page(unittest.TestCase):
         errors = []
         engine = QQmlApplicationEngine()
         engine.warnings.connect(lambda ws: errors.extend(w.toString() for w in ws))
-        engine.rootContext().setContextProperty("backend", self.b)
-        engine.rootContext().setContextProperty("startPage", "commands")
-        engine.load(QUrl.fromLocalFile(str(ROOT / "input-settings" / "main.qml")))
+        settings = ft_settings.Settings(start="commands", backends={"input": self.b})
+        ft_settings.load(engine, settings)
         if not engine.rootObjects():
-            self.skipTest("main.qml didn't load here (no Kirigami?): " + "; ".join(errors[:3]))
+            self.skipTest("Frametop Settings didn't load here (no Kirigami?): " + "; ".join(errors[:3]))
         for _ in range(20):
             self.app.processEvents()
         # Warnings from the Commands page's lines (other pages may warn offscreen, e.g. no SteamVR).
-        lines = (ROOT / "input-settings" / "main.qml").read_text().split("\n")
+        lines = (ROOT / "input-settings" / "InputPages.qml").read_text().split("\n")
         first = next(i for i, t in enumerate(lines) if "id: commandsPage" in t) + 1
         last = next(i for i in range(first, len(lines)) if "// ------" in lines[i]) + 1
         # Every page opened first says "Created graphical object was not placed in the graphics scene".
-        mine = [e for e in errors if any(f"main.qml:{n}:" in e for n in range(first - 1, last + 1))
+        mine = [e for e in errors if any(f"InputPages.qml:{n}:" in e for n in range(first - 1, last + 1))
                 and "not placed in the graphics scene" not in e]
         self.assertEqual(mine, [])
 

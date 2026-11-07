@@ -1,4 +1,4 @@
-"""Frametop Input Settings' main.qml against ft_input_settings.Backend, offline: every backend.name(...)
+"""Frametop Settings' input pages (InputPages.qml) against ft_input_settings.Backend, offline: every backend.name(...)
 the window calls is a slot (or signal) taking that many arguments, and every backend.name it reads
 is a property or a method. Qt says nothing when a binding names something the backend lost: the
 control just shows nothing, or its button does nothing, on the headset. Reads the class's
@@ -17,7 +17,7 @@ from pathlib import Path
 os.environ["HOME"] = tempfile.mkdtemp(prefix="ft-input-settings-qml-test-")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[2]
-QML = (ROOT / "input-settings" / "main.qml").read_text()
+QML = (ROOT / "input-settings" / "InputPages.qml").read_text()
 sys.path.insert(0, str(ROOT / "input-settings"))
 import ft_input_settings as fis  # noqa: E402
 
@@ -52,7 +52,7 @@ class QmlBackend(unittest.TestCase):
     def test_calls_are_methods(self):
         called = set(re.findall(r"\bbackend\.(\w+)\s*\(", QML))
         self.assertTrue(called)
-        self.assertEqual(sorted(called - set(self.arity)), [], "called from main.qml but not a slot")
+        self.assertEqual(sorted(called - set(self.arity)), [], "called from InputPages.qml but not a slot")
 
     def test_call_arity(self):
         bad = sorted({f"{m.group(1)}: {call_arity(QML, m.end())} arguments, it takes {sorted(self.arity[m.group(1)])}"
@@ -63,7 +63,7 @@ class QmlBackend(unittest.TestCase):
     def test_reads_exist(self):
         read = set(re.findall(r"\bbackend\.(\w+)\b(?!\s*\()", QML))
         self.assertTrue(read)
-        self.assertEqual(sorted(read - self.props - set(self.arity)), [], "read in main.qml but not on Backend")
+        self.assertEqual(sorted(read - self.props - set(self.arity)), [], "read in InputPages.qml but not on Backend")
 
 
 if __name__ == "__main__":

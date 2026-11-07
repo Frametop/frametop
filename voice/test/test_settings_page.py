@@ -1,4 +1,4 @@
-"""Frametop Input Settings' Voice page: dictation keys' tap or hold, the language, and the
+"""Frametop Settings' Voice page: dictation keys' tap or hold, the language, and the
 whisper model (a missing one is fetched first). HOME is a temporary directory and nothing
 reaches the relay, systemd or the network. Needs PySide6 (the image's python3).
 Run: python3 voice/test/test_settings_page.py"""

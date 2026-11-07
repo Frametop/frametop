@@ -151,7 +151,7 @@ step "6/12 power service (turns the displays off while the headset isn't used, e
 build "$root/power/build.sh"
 "$root/power/run.sh" install
 
-step "7/12 multi-screen desktop (ft-screens), its keyboard (Full Keyboard), Frametop Input Settings, Display Settings, Remote Displays, and the Tour"
+step "7/12 multi-screen desktop (ft-screens), its keyboard (Full Keyboard), Frametop Settings, and the Tour"
 # keyboard choice: begin
 # Frametop's keyboard is its own copy of Full Keyboard (keyboard/FRAMETOP.md). Its service stops
 # every other framekeyboard when it starts, so a Full Keyboard someone runs themselves (its own
@@ -164,18 +164,16 @@ fi
 # keyboard choice: end
 build "$root/screens/build.sh"
 build "$root/layout/countdown/build.sh"  # visible three-second reset countdown
-build "$root/stream/build.sh"  # ft-stream: remote displays (Frametop Remote Displays)
+build "$root/stream/build.sh"  # ft-stream: remote displays (Frametop Settings > Remote displays)
 # keyboard build: begin
 if [ "$keyboard" = 1 ]; then
   build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKeid (keyboard/FRAMETOP.md)
 fi
 # keyboard build: end
 "$root/desktops.sh" install >/dev/null
-"$root/input-settings/install.sh"
+"$root/settings/install.sh"  # Frametop Settings (and the older settings apps' entries removed)
 "$root/display-settings/install.sh"
 "$root/tour/install.sh"
-"$root/remote-displays/install.sh"
-"$root/remote/install.sh"
 "$root/menu/install.sh"  # the Frametop menu: one entry for these in Launch a program
 # keyboard install: begin
 if [ "$keyboard" = 1 ]; then
@@ -227,7 +225,7 @@ if [ "$hands" = 0 ]; then
   echo "skipped (--no-hands). Install later with: hands/run.sh install"
 elif [ "$assume_yes" = 1 ] && ! sudo_quiet; then
   echo "skipped: it needs your password (sudo), and --yes doesn't ask. Install it later with: hands/run.sh install"
-elif ask "Install hand tracking? Poke, pinch and grab the screens with your hands. It runs while the Frametop desktop does (change that on the Hands page of Frametop Input Settings), and its camera broker needs your password (sudo)." y; then
+elif ask "Install hand tracking? Poke, pinch and grab the screens with your hands. It runs while the Frametop desktop does (change that on the Hands page of Frametop Settings), and its camera broker needs your password (sudo)." y; then
   if "$root/hands/run.sh" install; then
     hands_caps=1 hands_done=1
     mode=$(on_frame "sed -n 's/^HANDS_MODE=\([a-z]*\).*/\1/p' ~/.config/frametop.conf | tail -1") || mode=
@@ -275,7 +273,7 @@ fi
 
 step "10/12 gaze mode (optional, experimental: the pointer goes where you look)"
 gaze=0
-if ask "Install gaze mode? You turn it on and calibrate it in Frametop Input Settings, on the Gaze page." y; then
+if ask "Install gaze mode? You turn it on and calibrate it in Frametop Settings, on the Gaze page." y; then
   "$root/gaze/run.sh" install
   gaze=1
 else
@@ -360,7 +358,7 @@ SteamVR has to restart once, to load the 3D mouse driver and to start the input 
 before it. Restarting SteamVR closes everything open in VR, including this terminal if
 it's in a VR desktop. Rebooting the headset works too.
 
-Recommended: in Frametop Display Settings > Power, choose when the displays turn off
+Recommended: in Frametop Settings > Power, choose when the displays turn off
 while the headset isn't used (for a stand or mount that covers its proximity sensor), and
 turn on Stay awake while plugged in, so Steam doesn't put the headset to sleep while it
 charges. The displays still turn off when you take the headset off.

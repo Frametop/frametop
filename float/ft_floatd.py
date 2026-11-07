@@ -257,26 +257,20 @@ def pid_chain(pid):
     return out
 
 
-# Windows a profile doesn't keep: Plasma's own, the Frametop settings apps, the login splash.
+# Windows a profile doesn't keep: Plasma's own, the login splash.
 SKIP_APPS = ("org.kde.plasmashell", "org.kde.krunner", "org.kde.ksplashqml", "org.kde.polkit-kde-authentication-agent-1")
 
 
-# Frametop's settings apps, which a profile keeps like any app (user, 2026-10-28: a profile
-# saved with Display Settings and Remote Displays open kept no windows). Display Settings
-# itself stays out: profiles are saved from it, so every one would open it (user, 2026-10-28).
-# So do Frametop's other windows (recorders, the tour, its own panels). Remote Access needs no
-# entry: its window is org.frametop.RemoteAccess, kept like any app's. Display Settings names
-# these (FRAMETOP_APPS).
-PROFILE_APPS = ("ft-input-settings", "ft-remote-displays")
-
-
+# Frametop Settings stays out of profiles, as Display Settings did: profiles are saved from it, so
+# every one would open it (user, 2026-10-28). So do Frametop's other windows (recorders, the
+# tour, its own panels). The settings apps it replaced, which profiles kept (user, 2026-10-28),
+# are gone: a profile saved with one open leaves it out (open_profile and Frametop Settings' list
+# of a profile's windows, with ft_layout.retired_entry). Their pages are in Frametop Settings.
 def recordable(ev):
     """An app's top-level window, the kind a profile keeps."""
     if not ev.get("normal") or ev.get("popup") or ev.get("transient"):
         return False
     app, cls = ev.get("app", ""), ev.get("cls", "")
-    if app in PROFILE_APPS or cls in PROFILE_APPS:
-        return True
     return app not in SKIP_APPS and not any(n.startswith(("ft-", "frametop", "ksplash")) for n in (app, cls))
 
 
@@ -1213,7 +1207,7 @@ class Daemon:
         groups = {}
         for e in profile.get("windows", []):
             key = e.get("app") or json.dumps(e.get("cmd") or [])
-            if key != "[]":
+            if key != "[]" and not ft_layout.retired_entry(e):
                 groups.setdefault(key, []).append(e)
         claimed = set()
         keys = {wid: self.window_key(ev) for wid, ev in self.windows.items() if recordable(ev)}

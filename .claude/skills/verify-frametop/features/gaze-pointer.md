@@ -12,7 +12,7 @@ files, so everything from ft-gaze on runs as with real eyes.
 
 ## How to get to it (user POV)
 
-- Turn gaze mode on (Frametop Input Settings, Gaze page, or `G on`), look at a panel.
+- Turn gaze mode on (Frametop Settings, Gaze page, or `G on`), look at a panel.
 
 ## Driving it with the testbench
 

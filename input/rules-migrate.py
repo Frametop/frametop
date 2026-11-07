@@ -94,7 +94,7 @@ def add_binding(path, name, combo, action, keys, what, setting):
         return True, None  # the defaults, or the combination is the user's already
     laid_out = json.dumps(rules, indent=2)
     if not text.startswith(laid_out) or text[len(laid_out):].strip():
-        return True, (f"key combinations: {path} isn't laid out as Frametop Input Settings writes it, so it's "
+        return True, (f"key combinations: {path} isn't laid out as Frametop Settings writes it, so it's "
                       f"left as it is: add {keys} ({setting}) on its Keyboard page")
     if not mode & 0o200:
         return True, f"key combinations: {path} is read-only, so it's left as it is: {keys} wasn't added"

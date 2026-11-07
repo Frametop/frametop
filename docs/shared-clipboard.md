@@ -2,7 +2,7 @@
 
 Status: built 2026-11-07 (DEE-218), text only, for Windows computers that stream with Vibepollo. Not yet tried in the headset. Dragging files between them isn't built.
 
-Turn on Share the clipboard on a computer's card in Frametop Remote Displays (`ft-layout remote host NAME clipboard=on|off`, `"clipboard": true` on its layout entry; off by default). Then:
+Turn on Share the clipboard on a computer's card on Frametop Settings' Remote displays page (`ft-layout remote host NAME clipboard=on|off`, `"clipboard": true` on its layout entry; off by default). Then:
 
 - Copy text on the Frametop desktop, click one of the computer's displays, and paste it there.
 - Copy text on the computer, click back on the desktop (or a floating window), and paste it there.

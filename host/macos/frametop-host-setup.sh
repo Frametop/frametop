@@ -449,7 +449,7 @@ $n"
 
     checks
     echo
-    say "Done. On the Steam Frame: open Frametop Remote Displays, Add computer, pick $(scutil --get ComputerName 2>/dev/null || hostname -s) ($(addresses)), and sign in as '$user'."
+    say "Done. On the Steam Frame: open Remote displays in Frametop Settings, Add computer, pick $(scutil --get ComputerName 2>/dev/null || hostname -s) ($(addresses)), and sign in as '$user'."
 }
 
 addresses() {

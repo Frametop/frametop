@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Frametop Settings
+GenericName=Settings for the VR desktop
+Comment=Screens, layout, remote displays, mice and keyboards, controllers, gaze, hands, voice, power and remote access
+Exec=@REPO@/settings/ft-settings
+Icon=preferences-system
+Categories=Settings;HardwareSettings;
+# Not in SteamVR's Launch a program list (Steam runs in gamescope): it's in the Frametop menu (menu/ft-menu.desktop).
+NotShowIn=gamescope;
+X-Frametop-Menu=settings
+Keywords=settings;display;screen;layout;resolution;remote;moonlight;vibepollo;mouse;keyboard;bluetooth;controller;pointer;gaze;hands;voice;power;vnc;steamvr;frametop;

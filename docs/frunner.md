@@ -4,7 +4,7 @@ Frunner is Frametop's search for apps, profiles, remote displays and Frametop's 
 
 - **An app that's already running:** its most recent window comes to you. The lazy susan spins the panel it's on, a screen or its own floating window, to straight ahead, and typing goes to it.
 - **An app that isn't running:** it starts as a floating window, where that app last floated or in front of you.
-- **A profile:** it opens like Open profile in Display Settings (`ft-layout open NAME`): its screens, remote displays and apps, as saved. The quick reset only recenters, so this is how a profile comes back whole.
+- **A profile:** it opens like Open profile in Frametop Settings (`ft-layout open NAME`): its screens, remote displays and apps, as saved. The quick reset only recenters, so this is how a profile comes back whole.
 - **A remote display:** frunner connects it if needed, then spins it to the front.
 - **One of your commands** ([commands.md](commands.md)): it runs in the background, and the pill says so.
 - **One of Frametop's own actions:** the input relay does it, as a button bound to it would. See [The OS menu](#the-os-menu).
@@ -19,11 +19,11 @@ Use Tab, Shift+Tab, or the arrow keys to move through the results, and Enter or 
 
 Esc goes back from a menu and closes the search. Meta+Space again, or a click anywhere else, closes it too.
 
-Frunner works while the Frametop desktop is running and Frametop isn't paused for a VR game. It's the `frunner` action in Frametop Input Settings, so a mouse button, a controller button, or another key combination can open it too. When it opens from a mouse or controller, Frametop's keyboard opens with it.
+Frunner works while the Frametop desktop is running and Frametop isn't paused for a VR game. It's the `frunner` action in Frametop Settings, so a mouse button, a controller button, or another key combination can open it too. When it opens from a mouse or controller, Frametop's keyboard opens with it.
 
 ## The OS menu
 
-The `os_menu` action opens frunner as an OS menu: before you type, it lists Frametop's own actions instead of nothing. Pick one with Tab, the arrow keys, the lasers or the 3D mouse, and Enter or a click does it. Typing searches everything as usual, and an empty query lists the actions again. `os_menu` has no default. Bind it to a controller button, a mouse button or a key combination in Frametop Input Settings. Opened from a controller or mouse, Frametop's keyboard opens too, as with `frunner`.
+The `os_menu` action opens frunner as an OS menu: before you type, it lists Frametop's own actions instead of nothing. Pick one with Tab, the arrow keys, the lasers or the 3D mouse, and Enter or a click does it. Typing searches everything as usual, and an empty query lists the actions again. `os_menu` has no default. Bind it to a controller button, a mouse button or a key combination in Frametop Settings. Opened from a controller or mouse, Frametop's keyboard opens too, as with `frunner`.
 
 The actions, in the menu's order (`MENU_ACTIONS` in `conf/ft_input_actions.py`):
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Frametop Tour: what Frametop does, a page at a time (ft_tour.py and main.qml, in Frametop's
-# container like Frametop Input Settings: see input-settings/ft-input-settings).
+# container like Frametop Settings: see settings/ft-settings).
 #   ft-tour              open the tour (FT_TOUR_PAGE=ID opens it on that page)
 #   ft-tour --first-run  open it only if it hasn't been closed, skipped, or finished yet (the
 #                        Frametop desktop's autostart)

@@ -40,7 +40,7 @@ Bash would read it differently from the parsers, or run part of it as a command.
 - Lists (`POINTER_IGNORE`) are comma-separated, with no space after the comma. Readers trim spaces around items and drop empty ones. An item can't contain a comma.
 - Numbers are `[+-]digits[.digits][e[+-]digits]`. Anything else (`abc`, `0x10`, `1_000`, `inf`) is a bad value: the program warns and uses the setting's default. It never crashes, and C never reads garbage as 0.
 - Switches are `1` and `0`, keywords lower-case (`on`, `off`, `auto`). The few readers that have always accepted any case of a keyword (`GAZE_TRACKER`, `GAZE_EYE`, `EYES_SIZE_GUARD`) still do; writers write lower-case.
-- `HANDS_NEAR=0` turns direct touch off in every reader (ft-screens, the pointer helper, the relay, Input Settings).
+- `HANDS_NEAR=0` turns direct touch off in every reader (ft-screens, the pointer helper, the relay, Frametop Settings).
 
 ## Writing
 

@@ -87,7 +87,7 @@ inline Answer Classify(long code, bool set, std::string *why) {
             return Answer::Retry;
         case kNoPin:
             *why = "no saved certificate for this host, so its clipboard isn't shared (add it again in "
-                   "Frametop Remote Displays, which saves one when it signs in to its Web UI)";
+                   "Frametop Settings, Remote displays, which saves one when it signs in to its Web UI)";
             return Answer::Gone;
         default:
             *why = code < 0 ? "no answer from the host" : "the host answered " + std::to_string(code);

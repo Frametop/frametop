@@ -129,7 +129,7 @@ class TravelMode(unittest.TestCase):
 
     def test_the_switch_is_wired(self):
         here = Path(__file__).resolve().parents[1]
-        qml = (here / "main.qml").read_text()
+        qml = (here / "InputPages.qml").read_text()
         py = (here / "ft_input_settings.py").read_text()
         for name in ("travelMode", "travelKnown", "travelBusy", "travelNote", "refreshTravel", "setTravelMode"):
             self.assertIn(f"backend.{name}", qml)

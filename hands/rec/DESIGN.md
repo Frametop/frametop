@@ -17,7 +17,7 @@ The plan this belongs to is `~/Desktop/Projects/frame-hands/notes/hands-plan.md`
 | `hands/rec/demos/` | The demo clips, `<id>.gif`, made from `demo/parts.json` (below). |
 | `hands/rec/takes.py` (Python, no Qt) | Reads sessions and takes from disk: frame sets for review, deleted ranges, export (compress, strip, manifest, checksums). |
 | `hands/rec/ft_handrec.py` + `main.qml` (PySide6 + Kirigami, dev container) | The desktop window: consent, the before-you-start checklist, the session controls, review, export and upload instructions. |
-| `hands/rec/ft-handrec` | The host launcher, like `input-settings/ft-input-settings`. |
+| `hands/rec/ft-handrec` | The host launcher, like `settings/ft-settings`. |
 | `hands/rec/build.sh` | Builds `ft-handpanel` into `hands/rec/build/`, like `gaze/build.sh`. |
 | `hands/rec/CONSENT.md`, `hands/rec/UPLOAD.md` | The texts the window shows. |
 | `hands/rec/install.sh` | Installs the recorder on a Frame with Frametop: the dev container's packages, hands/build.sh, the panel, ft-camd's capabilities, and the menu entry (`uninstall` removes the entry). |

@@ -35,6 +35,8 @@ GROUP = "Desktop Entry"
 # The submenus, in their order: (X-Frametop-Menu value, label).
 GROUPS = [("settings", "Settings"), ("screens", "Screens"), ("profiles", "Profiles"),
           ("help", "Help"), ("tools", "Recorders and tools")]
+# Groups whose one entry the top menu opens itself, without a submenu of one: Frametop Settings.
+DIRECT = {"settings"}
 GET_SH = "https://frametop.github.io/frametop/get.sh"
 FLOAT = "\0" + os.environ.get("FT_FLOAT_SOCKET", "frametop_float")
 TITLE = "Frametop"
@@ -219,8 +221,22 @@ def show_error(text):
 
 
 def top_items(groups):
-    items = [("group:" + g, text + " ›") for g, text in GROUPS if groups.get(g)]
+    items = []
+    for g, text in GROUPS:
+        if g in DIRECT and len(groups.get(g, [])) == 1:
+            items.append(("open:" + g, groups[g][0][0]))
+        elif groups.get(g):
+            items.append(("group:" + g, text + " ›"))
     return items + [("update", "Update Frametop…")]
+
+
+def open_entry(name, path, launch, error):
+    try:
+        launch(path)
+    except Exception as e:  # its file went since the menu read it, or Gio couldn't start it
+        error(f"Couldn't open {name}: {e}")
+        return "failed " + os.path.basename(path)
+    return "opened " + os.path.basename(path)
 
 
 def menu(choose=choose, launch=launch, update=None, error=show_error):
@@ -234,6 +250,9 @@ def menu(choose=choose, launch=launch, update=None, error=show_error):
         if tag == "update":
             (update or (lambda: start_detached(update_argv())))()
             return "update"
+        if tag.startswith("open:"):
+            name, path = groups[tag[5:]][0]
+            return open_entry(name, path, launch, error)
         group = tag.split(":", 1)[1]
         paths = dict((f"app:{i}", path) for i, (_, path) in enumerate(groups.get(group, [])))
         items = [(f"app:{i}", text) for i, (text, _) in enumerate(groups.get(group, []))]
@@ -241,12 +260,7 @@ def menu(choose=choose, launch=launch, update=None, error=show_error):
         if tag is None:
             return "closed"
         if tag in paths:
-            try:
-                launch(paths[tag])
-            except Exception as e:  # its file went since the menu read it, or Gio couldn't start it
-                error(f"Couldn't open {dict(items)[tag]}: {e}")
-                return "failed " + os.path.basename(paths[tag])
-            return "opened " + os.path.basename(paths[tag])
+            return open_entry(dict(items)[tag], paths[tag], launch, error)
 
 
 def listing():

@@ -705,7 +705,7 @@ std::string JsonQuote(const std::string &s) {
 // list: the main loop polls their visibility (IsOverlayVisible) every 50 ms.
 // Paused while the pointer is off: each vrcmd run connects to SteamVR as a new app, and a new
 // app every second kept SteamVR (and the headset's displays) from going to standby.
-// "overlays" requests (Frametop Input Settings' Ignored panels page) refresh the list even
+// "overlays" requests (Frametop Settings' Ignored panels page) refresh the list even
 // while paused, and are answered from this thread once it's fresh.
 class OverlayList {
 public:

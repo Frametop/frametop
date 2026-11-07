@@ -27,7 +27,7 @@ dev: python3-huggingface-hub
 # eye recorder (gaze/rec): its export encrypts to the dataset's keys with age (recorder/age.py),
 # on Python's cryptography (the image has it from uv.lock)
 dev: python3-cryptography
-# Frametop Input Settings app (Kirigami, PySide6). The image installs PySide6 in its builder
+# Frametop Settings app (Kirigami, PySide6). The image installs PySide6 in its builder
 # stage only and exports the bindings Frametop uses (pack/pyside-runtime.py)
 both: kf6-kirigami kf6-qqc2-desktop-style qt6-qtwayland breeze-icon-theme plasma-breeze
 dev: python3-pyside6

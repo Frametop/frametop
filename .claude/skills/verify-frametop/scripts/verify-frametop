@@ -284,7 +284,7 @@ def doctor():
           + ('' if fast == head or (not fast_state and release and head[:7] in release)
              else ': scripts/fast-install the change under test before driving it'))
     check('hand tracking', hands == 'active', f'{HANDS} {hands}' + ('' if hands == 'active' else
-          ': the hands recipes need it (Frametop Input Settings, or hands/run.sh)'))
+          ': the hands recipes need it (Frametop Settings, or hands/run.sh)'))
     # Not the run's to fail: which release is live is a hint, and hand tracking is opt-in.
     ok = all(c['ok'] for c in checks if c['name'] not in ('Frametop release', 'hand tracking'))
     return {'ok': ok, 'worn': worn, 'run': lock_holder(), 'checks': checks}, (2 if worn else 0 if ok else 1)

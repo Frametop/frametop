@@ -3,7 +3,7 @@
 
 Meta+Space (the input relay's frunner action) opens a search pill straight ahead of where your
 head points. Type to find an app, a remote display ("{host} - {display}") or one of your commands
-(Frametop Input Settings, Commands; commands/ft_commands.py); Tab, Shift+Tab,
+(Frametop Settings, Commands; commands/ft_commands.py); Tab, Shift+Tab,
 and the arrow keys move through what's found, and Enter or a click opens it:
   - an app that's running: its most recent window comes to the front. The lazy susan spins the
     panel it's on (a screen or its floating window) to straight ahead, and it gets typing. A

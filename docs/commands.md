@@ -6,7 +6,7 @@ For example, a command called `stop-framecorder` that runs `killall framecorder`
 
 ## Adding one
 
-Open Frametop Input Settings, then **Commands**. Type a name and what it runs, then press **Add**. Each command in the list has **Run now** and **Remove**. Removing a command also removes the buttons and key combinations mapped to it.
+Open Frametop Settings, then **Commands**. Type a name and what it runs, then press **Add**. Each command in the list has **Run now** and **Remove**. Removing a command also removes the buttons and key combinations mapped to it.
 
 A name is one word made of letters, digits, `.`, `_` and `-` (at most 40 characters). It can't be a program you already have (such as `ls`) or a shell word (such as `cd`), because its alias would hide that program. `list`, `add`, `remove`, `stop`, `log`, `run` and `help` are taken by `ft-cmd`.
 
@@ -24,9 +24,9 @@ The list lives in `~/.config/frametop-commands.json`.
 
 | From | How |
 | --- | --- |
-| A controller button | Input Settings, **Controllers**: capture the button, then pick **Run command NAME** |
-| A mouse button | Input Settings, **Buttons**: the same, for a button on that mouse |
-| A key combination | Input Settings, **Keyboard**: pick **Run command NAME**, then **Set keys…** |
+| A controller button | Frametop Settings, **Controllers**: capture the button, then pick **Run command NAME** |
+| A mouse button | Frametop Settings, **Buttons**: the same, for a button on that mouse |
+| A key combination | Frametop Settings, **Keyboard**: pick **Run command NAME**, then **Set keys…** |
 | frunner | Meta+Space, type part of the name, Enter. Shift+Enter has Run and Stop |
 | Frametop Voice | The wake word, then "run" and the name, with dashes, dots and underscores said as spaces: "Hey Computer, run stop framecorder". Spaces you didn't mean don't matter ("frame corder" works too) |
 | A terminal | The name itself (an alias), or `ft-cmd NAME` |

@@ -11,7 +11,7 @@ NAME` stops it. Without systemd-run it starts in a session of its own instead.
 
 Where a name works (docs/commands.md):
   - the input relay's action "run:NAME", for mouse and controller buttons and key combinations
-    (Frametop Input Settings), also while Frametop is paused for a game;
+    (Frametop Settings), also while Frametop is paused for a game;
   - frunner's search (Meta+Space): type the name, Enter runs it;
   - Frametop Voice: the wake word, then "run NAME" (dashes and dots said as spaces);
   - a terminal: `ft-cmd NAME`, and NAME itself, an alias from ~/.config/frametop/aliases.sh, which
@@ -57,7 +57,7 @@ test times trap true type typeset ulimit umask unalias unset wait
 # ft-cmd's own words (ft-cmd list, ft-cmd stop NAME...): no command can have them as its name.
 RESERVED = {"run", "list", "add", "remove", "stop", "log", "help"}
 BASHRC_MARK = "# Frametop commands as shell aliases"
-BASHRC_LINES = [BASHRC_MARK + " (Frametop Input Settings, Commands; uninstall.sh removes these lines)",
+BASHRC_LINES = [BASHRC_MARK + " (Frametop Settings, Commands; uninstall.sh removes these lines)",
                 '[ -f ~/.config/frametop/aliases.sh ] && . ~/.config/frametop/aliases.sh']
 
 
@@ -188,7 +188,7 @@ def quote(text):
 
 def aliases_text(commands, ft_cmd=None):
     ft_cmd = ft_cmd or CLI_LINK
-    lines = ["# Frametop commands (Frametop Input Settings, Commands). Frametop writes this file:",
+    lines = ["# Frametop commands (Frametop Settings, Commands). Frametop writes this file:",
              "# change the commands there, or in ~/.config/frametop-commands.json, not here.",
              "# Each runs in the background; ft-cmd stop NAME stops it."]
     lines += [f"alias {c['name']}={quote(ft_cmd + ' ' + c['name'])}" for c in commands]

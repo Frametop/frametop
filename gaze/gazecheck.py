@@ -7,7 +7,7 @@ directions: look at each one.
           EYE_LOST). SteamVR's "HMD on" can't say: it repeats every minute or so, and it can
           stay on for hours with nobody in the headset. It also opens when our own tracker asks
           for a click (its "reseat": the headset may sit differently on your face now), at most
-          once every QUICK_COOLDOWN, and on "quickcal" (Frametop Input Settings, or a mouse
+          once every QUICK_COOLDOWN, and on "quickcal" (Frametop Settings, or a mouse
           button or key combination mapped to Gaze quick check), and when a click's correction
           was past POINTER_GAZE_NUDGE_MAX (55 degrees; the helper's "recheck"): the tracker is
           far off. Ignored, it closes after QUICK_TIMEOUT and changes nothing. The headset going
@@ -1223,7 +1223,7 @@ class Checks:
             self.full_failed = main
             log(f"calibration failed: only {c['captured']} of {n} dots; the old one stays"
                 + (f". Not taken: {', '.join(f'{r} ({k})' for r, k in reasons.items())}" if reasons else ""))
-            self.to_panel(f"text Calibration failed: only {c['captured']} of {n} dots. Try again from Input Settings")
+            self.to_panel(f"text Calibration failed: only {c['captured']} of {n} dots. Try again from Frametop Settings")
             if main:
                 fit = main in c["fit_reasons"]
                 self.note(f"Most dots: {main}" + (". Check headset fit on the Gaze page" if fit else ""))

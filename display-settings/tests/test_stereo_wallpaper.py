@@ -16,7 +16,9 @@ os.environ["HOME"] = tempfile.mkdtemp(prefix="ft-display-settings-wall-")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "settings"))
 import ft_display_settings as fds  # noqa: E402
+import ft_settings  # noqa: E402  (Frametop Settings, the window these pages are in)
 import stereo_wallpaper as sw  # noqa: E402
 from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtGui import QColor, QGuiApplication, QImage  # noqa: E402
@@ -285,18 +287,17 @@ class BackendSlots(unittest.TestCase):
         errors = []
         engine = QQmlApplicationEngine()
         engine.warnings.connect(lambda ws: errors.extend(w.toString() for w in ws))
-        engine.rootContext().setContextProperty("backend", self.b)
-        engine.rootContext().setContextProperty("startPage", "screens")
-        qml = os.path.join(HERE, "..", "main.qml")
-        engine.load(QUrl.fromLocalFile(qml))
+        settings = ft_settings.Settings(start="screens", backends={"display": self.b})
+        ft_settings.load(engine, settings)
+        qml = os.path.join(HERE, "..", "DisplayPages.qml")
         if not engine.rootObjects():
-            self.skipTest("main.qml didn't load here (no Kirigami?): " + "; ".join(errors[:3]))
+            self.skipTest("Frametop Settings didn't load here (no Kirigami?): " + "; ".join(errors[:3]))
         for _ in range(20):
             self.app.processEvents()
         lines = Path(qml).read_text().split("\n")
         first = next(i for i, t in enumerate(lines) if "DEE-317" in t) + 1
         last = next(i for i in range(first, len(lines)) if "id: rightDialog" in lines[i]) + 6
-        mine = [e for e in errors if any(f"main.qml:{n}:" in e for n in range(first, last + 1))]
+        mine = [e for e in errors if any(f"DisplayPages.qml:{n}:" in e for n in range(first, last + 1))]
         self.assertEqual(mine, [])
 
 

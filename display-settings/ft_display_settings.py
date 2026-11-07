@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Frametop Display Settings: the Frametop screens' count, resolution, size, scale, and layout.
+"""Frametop Settings: the Frametop screens' count, resolution, size, scale, and layout.
 
-A Kirigami (QML) app with a Python backend, like Frametop Input Settings. It runs in
+A Kirigami (QML) app with a Python backend, like Frametop Settings. It runs in
 the dev container:
   - Screens (ft-screens backend): each screen's resolution (any, portrait too), its width
     in VR in metres, its scale, and which one has the taskbar. Resolution and width
@@ -28,7 +28,7 @@ the dev container:
     the desktop starts with SteamVR (AUTOSTART, session/autostart.sh).
 Settings go to ~/.config/frametop.conf and ~/.config/frametop-layout.json. Anything
 that touches SteamVR runs layout/ft-layout on the host.
-Launch with display-settings/ft-display-settings (host wrapper).
+Frametop Settings (settings/ft_settings.py) makes it, the first time one of its pages opens.
 """
 import json
 import os
@@ -37,9 +37,6 @@ import threading
 import time
 
 from PySide6.QtCore import Property, QObject, QProcess, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication, QIcon
-from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuickControls2 import QQuickStyle
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
@@ -60,7 +57,6 @@ MAX_PIXELS = 1920 * 1080
 RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080), (1728, 1080), (1920, 800), (2224, 928), (2560, 800)]
 SCREEN_RESOLUTIONS = ft_layout.SCREEN_RESOLUTIONS
 FT_SCREENS = "\0ft_screens"
-REMOTE_DISPLAYS = os.path.join(HERE, "..", "remote-displays", "ft_remote_displays.py")
 FT_POWERD = "\0ft_powerd"
 # Steam's default for "When Plugged In and Idle -> Sleep after", to go back to when
 # nothing was saved.
@@ -70,8 +66,6 @@ NOTIFY_FORWARD = ("auto", "on", "off")  # session/ft-notifyfwd; frametop.conf's 
 DASHBOARD_APPS = ("steamvr", "frametop")  # float/ft-dashroute; frametop.conf's DASHBOARD_APPS
 NOTIFYFWD_LOG = "/tmp/frametop-notifyfwd.log"  # its last line is its state (/tmp is the host's)
 AUTOSTART_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-autostart.service")
-# Frametop's own apps a profile can keep (ft-floatd's recordable), by their names.
-FRAMETOP_APPS = {"ft-input-settings": "Frametop Input Settings", "ft-remote-displays": "Frametop Remote Displays"}  # ft-floatd's PROFILE_APPS
 ROTATIONS = [("normal", "Landscape"), ("left", "Portrait"), ("right", "Portrait (flipped)")]
 
 
@@ -844,13 +838,17 @@ class Backend(QObject):
     # --- profiles (docs/profiles.md): a named layout's apps and hidden screens ---
     @Slot(str, result="QVariantList")
     def profileWindows(self, name):
-        """A profile's windows, as "app" and "where" for the list."""
+        """A profile's windows, as "app", "where", and "index" (its place in the saved list, for
+        removeProfileWindow) for the list. The retired settings apps aren't listed: opening the
+        profile leaves them out (ft_layout.retired_entry)."""
         out = []
-        for e in ft_layout.load_layout().get("profiles", {}).get(name, {}).get("windows", []):
+        for i, e in enumerate(ft_layout.load_layout().get("profiles", {}).get(name, {}).get("windows", [])):
+            if ft_layout.retired_entry(e):
+                continue
             app = e.get("app") or os.path.basename((e.get("cmd") or ["?"])[0])
-            app = FRAMETOP_APPS.get(app) or (app.rsplit(".", 1)[-1] if "." in app and not e.get("cmd") else app)
+            app = app.rsplit(".", 1)[-1] if "." in app and not e.get("cmd") else app
             where = "floating" if "float" in e else f"screen {e.get('screen', 1)}" + (", maximized" if e.get("maximized") else "")
-            out.append({"app": app, "where": where})
+            out.append({"app": app, "where": where, "index": i})
         return out
 
     @Slot(str, result="QVariantList")
@@ -912,12 +910,6 @@ class Backend(QObject):
         self._run("Saving the current arrangement", "capture")
 
     # --- remote displays: their own app ---
-    @Slot()
-    def openRemoteDisplays(self):
-        """Frametop Remote Displays (we're in the dev container already, as it runs)."""
-        if not QProcess.startDetached(sys.executable, [os.path.abspath(REMOTE_DISPLAYS)]):
-            self.message.emit("Couldn't start Frametop Remote Displays", True)
-
     # --- ft-layout on the host ---
     def _run(self, label, *args, argv=None):
         """ft-layout with args on the host (or argv instead), one at a time."""
@@ -944,25 +936,3 @@ class Backend(QObject):
             self.message.emit(f"{label}: done" + (f" ({last})" if last and not last.startswith("ok") else ""), False)
         else:
             self.message.emit(f"{label} failed: {last or 'exit code ' + str(code)}", True)
-
-
-def main():
-    app = QGuiApplication(sys.argv)
-    app.setApplicationName("ft-display-settings")
-    app.setApplicationDisplayName("Frametop Display Settings")
-    app.setDesktopFileName("ft-display-settings")
-    if not QIcon.themeName():
-        QIcon.setThemeName("breeze")
-    QQuickStyle.setStyle("org.kde.desktop")
-    engine = QQmlApplicationEngine()
-    backend = Backend()
-    engine.rootContext().setContextProperty("backend", backend)
-    engine.rootContext().setContextProperty("startPage", os.environ.get("FT_DISPLAY_PAGE", "screens"))
-    engine.load(QUrl.fromLocalFile(os.path.join(HERE, "main.qml")))
-    if not engine.rootObjects():
-        sys.exit(1)
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()

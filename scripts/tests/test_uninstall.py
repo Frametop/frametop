@@ -9,7 +9,7 @@ import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "uninstall.sh"
 
-OURS = ["ft-input-settings.desktop", "ft-gazebench.desktop", "ft-tour.desktop", "frametop-handrec.desktop",
+OURS = ["ft-settings.desktop", "ft-gazebench.desktop", "ft-tour.desktop", "frametop-handrec.desktop",
         "frametop-eyerec.desktop", "frametop-gazebench.desktop", "frametop-profile-work-desk.desktop"]
 NOT_OURS = ["deckard-nested-desktop.desktop", "native-deckard-nested-desktop.desktop", "firefox.desktop",
             "soft-ft-thing.desktop", "myframetop-x.desktop", "ft-notes.txt", "frametop-x.desktop.bak",

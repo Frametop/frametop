@@ -1,4 +1,4 @@
-"""Frametop Input Settings' rules file (~/.config/frametop-input.json): one that doesn't
+"""Frametop Settings' rules file (~/.config/frametop-input.json): one that doesn't
 read is kept, with a .bad- copy, and never saved over; read_json gives {} for it, and before,
 the next change saved that {} over everything in it. HOME is a temporary directory; nothing
 goes to the host. Needs PySide6 (the image's python3).

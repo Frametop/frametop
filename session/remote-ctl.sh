@@ -1,8 +1,8 @@
 #!/bin/bash
 # Start, stop, or ask about remote access to the Frametop desktop (VNC over the tailnet):
 # remote-desktop.sh (krdp capturing the desktop on 127.0.0.1) and vnc-bridge.sh (VNC of its
-# primary screen). Runs on the Frame host; frametop-session.sh and Frametop Remote Access
-# (remote/ft-remote-settings) use it.
+# primary screen). Runs on the Frame host; frametop-session.sh and Frametop Settings' Remote
+# access page (remote/remote_access.py, from the container) use it.
 #
 #   remote-ctl.sh start | stop | restart | status
 #

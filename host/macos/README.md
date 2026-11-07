@@ -25,7 +25,7 @@ This kit makes a Mac a host for Frametop's remote displays: the Mac's monitors a
    - It asks for the Web UI user name and password that the Steam Frame signs in with. The password is typed in Terminal and is never shown or saved. If an earlier run of this setup or an earlier Sunshine install already has a login, the setup uses that one instead.
    - It adds Frametop Streams to the menu bar.
 4. When macOS asks, allow Sunshine both Screen Recording and Accessibility in System Settings > Privacy & Security. Then go back to Terminal and press Enter. Without Accessibility, the pointer moves but clicks, scrolling and typing don't reach the Mac. The setup checks both permissions and offers to ask again if Accessibility is missing.
-5. On the Steam Frame, open Frametop Remote Displays and choose Add computer. Pick this Mac, sign in with the Web UI login, and choose the displays to show.
+5. On the Steam Frame, open Remote displays in Frametop Settings and choose Add computer. Pick this Mac, sign in with the Web UI login, and choose the displays to show.
 
 ### Monitors that come and go
 
@@ -123,7 +123,7 @@ The setup does all of this for you. These steps are for setting up an instance y
 
    Its Web UI is on the next port up from its `port`, for example https://localhost:47990 for instance 0. To start it at login, make a LaunchAgent that runs the same command. The setup's agents run `ft-sunshine-instance N` instead, which looks the display's id up by its key at every start and waits while the display is unplugged. A hand-written `output_name` is fixed, so check it after you plug monitors in again: when it names no display, Sunshine streams the main one.
 7. Allow Sunshine Screen Recording and Accessibility in System Settings > Privacy & Security, as in the setup's step 4.
-8. On the Steam Frame, choose Add computer in Frametop Remote Displays, pick the Mac and sign in. It lists every instance that answers.
+8. On the Steam Frame, choose Add computer on Frametop Settings' Remote displays page, pick the Mac and sign in. It lists every instance that answers.
 
 To add a monitor later, give it the next free number and repeat steps 4 and 6. Don't mix this with the setup on one Mac: the setup keeps track of its instances by a `display` file it writes in each folder, so it can give a hand-made instance's number to another display and rewrite that instance's settings.
 

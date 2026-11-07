@@ -11,7 +11,7 @@ Every USB or Bluetooth mouse and keyboard is a candidate. A physical device is
 identified by its Bluetooth address (EVIOCGUNIQ) or USB bus:vendor:product:name,
 so all its event nodes share one role (the Swiftpoint Z3 has a mouse node and a
 keyboard node for its extra buttons), except with "combo". Roles, from
-~/.config/frametop-input.json (written by the Frametop Input Settings app):
+~/.config/frametop-input.json (written by the Frametop Settings app):
   pointer      grabbed; drives the universal 3D mouse (default for devices with a mouse node)
   passthrough  keys go to the desktop; grabbed only while typing goes there, otherwise only observed,
                for the key combinations below (default for keyboards)

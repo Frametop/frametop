@@ -143,7 +143,7 @@ main() {
     [ -n "$native_copy" ] && echo "  - the launcher's Native Desktop entry (Desktop opens the same stock desktop then)"
     for f in "${units[@]}"; do echo "  - the service $(basename "$f")"; done
     [ -d "$driver" ] && echo "  - the 3D mouse's SteamVR driver (ft_pointer)"
-    [ ${#entries[@]} -gt 0 ] && echo "  - ${#entries[@]} menu entries (Frametop Display Settings, Input Settings, ...)"
+    [ ${#entries[@]} -gt 0 ] && echo "  - ${#entries[@]} menu entries (Frametop Settings, Reset Screen Layout, ...)"
     [ -n "$handsctl" ] && echo "  - $handsctl"
     [ -n "$cmd_link" ] && echo "  - $cmd_link (your commands' aliases stop working)"
     [ -n "$ondesktop_link" ] && echo "  - $ondesktop_link (take it out of your Steam games' launch options)"

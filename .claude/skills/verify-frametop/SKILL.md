@@ -14,7 +14,7 @@ All commands below run from the repo root, on the Frame. `V` is
 `.claude/skills/verify-frametop/scripts/verify-frametop`, `T` is `testbench/frame-testbench`
 (every `T` command prints one JSON object; the MCP server `frame-testbench` exposes the same
 operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/ft-gazectl`
-(gaze mode on or off, as the Input Settings' Gaze page does).
+(gaze mode on or off, as the Frametop Settings' Gaze page does).
 
 ## Hard rules
 

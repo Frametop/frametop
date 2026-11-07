@@ -17,6 +17,8 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 TOUR = os.path.dirname(HERE)
 sys.path.insert(0, TOUR)
 import ft_tour  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(TOUR), "settings"))
+import sections as ft_settings  # noqa: E402  (Frametop Settings' sections)
 
 failed = 0
 
@@ -117,14 +119,13 @@ check("key table row", rows[0], {"combo": "Meta tap", "action": "Steam menu"})
 
 # ---------------------------------------------------------------- the pages
 
-KNOWN = {"frunner", "spin", "remote", "gaze:calibrate", "gaze:quickcal"}
-INPUT = {"devices", "buttons", "controllers", "games", "keyboard", "commands", "voice", "pointer", "ignore", "gaze", "hands", "bluetooth"}
-DISPLAY = {"screens", "layout", "visibility", "power"}
+KNOWN = {"frunner", "spin", "gaze:calibrate", "gaze:quickcal"}
+SECTIONS = set(ft_settings.NAMES)  # Frametop Settings' sections
 
 
 def known(action):
     kind, _, page = action.partition(":")
-    return action in KNOWN or (kind == "input" and page in INPUT) or (kind == "display" and page in DISPLAY)
+    return action in KNOWN or (kind == "settings" and page in SECTIONS)
 
 
 none = ft_tour.features(os.path.join(tmp, "empty"), conf={})
@@ -160,7 +161,7 @@ check("hands not installed: says how, far too", "hands/run.sh install" in by["ha
 check("no voice: no dictation row", any("Dictation" in r[0] for r in by["more"]["rows"]), False)
 by = {p["id"]: p for p in full}
 check("recenter page offers settings only, without changing the layout",
-      all(a["id"].startswith(("input:", "display:")) for a in by["recenter"]["actions"]), True)
+      all(a["id"].startswith("settings:") for a in by["recenter"]["actions"]), True)
 check("gaze installed: a target", by["gaze"]["practice"], "gaze")
 check("gaze on: no note", by["gaze"].get("note"), None)
 check("gaze rows: Meta+J and Meta+K first", by["gaze"]["rows"][:2], ["Clicking", ["Tap Meta+J, or Meta+K",
@@ -170,10 +171,9 @@ check("hands and gaze: pinch at the gaze", any("look at something and pinch" in 
 check("hands far: a target", by["hands-far"]["practice"], "hands")
 check("the pages with videos", [p["id"] for p in full if p["clips"]],
       ["screens", "floating", "frunner", "gaze", "hands", "hands-far"])
-check("settings: a row for every Input Settings page",
-      {r[2][6:] for r in by["settings"]["rows"] if not isinstance(r, str) and r[2].startswith("input:")}, INPUT)
-check("settings: a row for every Display Settings page",
-      {r[2][8:] for r in by["settings"]["rows"] if not isinstance(r, str) and r[2].startswith("display:")}, DISPLAY)
+check("settings: a row for every Frametop Settings section, in the sidebar's groups",
+      [r if isinstance(r, str) else r[2][9:] for r in by["settings"]["rows"]],
+      [x for i, s in enumerate(ft_settings.SECTIONS) for x in ([s[2]] if i == 0 or ft_settings.SECTIONS[i - 1][2] != s[2] else []) + [s[0]]])
 check("hands installed: a target", by["hands"]["practice"], "hands")
 check("every clip in tour/clips is shown somewhere",
       sorted(n[:-5] for n in os.listdir(os.path.join(TOUR, "clips")) if n.endswith(".webp")),

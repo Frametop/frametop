@@ -26,7 +26,7 @@ The input relay types the text, so it has to be one from the same Frametop. `voi
 
 | Where | How |
 | --- | --- |
-| Keyboard | Tap **Right Ctrl** to start, tap again to stop. It counts only on its own: a shortcut with it (Ctrl+C), another modifier held when you press it (Shift, then Right Ctrl), or a click in between isn't dictation. Left Ctrl isn't it (crouch in many games). It's a key combination with the action *Dictation: start or stop*, so change it or add others in Frametop Input Settings, Keyboard. *Keys do* on the Voice page switches them all between tap to start and stop and **hold to talk** (*Dictation: while held*): held, Right Ctrl records until you let go, and another key with it (Right Ctrl+C) makes it the shortcut after all, so that recording is dropped without a tone. |
+| Keyboard | Tap **Right Ctrl** to start, tap again to stop. It counts only on its own: a shortcut with it (Ctrl+C), another modifier held when you press it (Shift, then Right Ctrl), or a click in between isn't dictation. Left Ctrl isn't it (crouch in many games). It's a key combination with the action *Dictation: start or stop*, so change it or add others in Frametop Settings, Keyboard. *Keys do* on the Voice page switches them all between tap to start and stop and **hold to talk** (*Dictation: while held*): held, Right Ctrl records until you let go, and another key with it (Right Ctrl+C) makes it the shortcut after all, so that recording is dropped without a tone. |
 | Mouse | Map a button to either dictation action on the Buttons page (pointer mode). |
 | Steam Frame controllers | Hold left **d-pad down**, speak, release. Set the buttons and hold or press-to-toggle on the Voice page. They're read from SteamVR's web socket (`input/vrws.py`), so they work in games and the Steam menu, and whatever else the button does still happens. |
 | Commands | `voice/ft-voice toggle`, `start`, `stop`, `cancel`, `type "text"`, and from a key combination, `command:ft-voice toggle` (the relay's commands have `voice/` on their path). |
@@ -34,7 +34,7 @@ The input relay types the text, so it has to be one from the same Frametop. `voi
 
 A single word works: recordings shorter than 0.3 s (`min_seconds`) are dropped, and anything longer is decoded even when the speech detector missed it. Moonshine can hear nothing in a lone short word with silence around it, so such a window is decoded again cut to its speech, then after 0.2 s of silence, and a lone word it repeats ("Way, way, way") is typed once. Dictation works while Frametop is paused for a VR game too.
 
-Frametop Input Settings has a **Voice** page: voice dictation on or off (on also means it starts at login), the dictation keys and whether they're tapped or held, controller buttons (capture one by pressing it) and their mode, the language and whisper model, typing as you talk, sounds, and the wake word and its phrases. Everything but the keys lives in `~/.config/frametop-voice.json`, along with voice commands and advanced settings, which you edit by hand; the app keeps them when it saves. ft-voiced applies changes within 2 s. Delete the file to go back to the defaults.
+Frametop Settings has a **Voice** page: voice dictation on or off (on also means it starts at login), the dictation keys and whether they're tapped or held, controller buttons (capture one by pressing it) and their mode, the language and whisper model, typing as you talk, sounds, and the wake word and its phrases. Everything but the keys lives in `~/.config/frametop-voice.json`, along with voice commands and advanced settings, which you edit by hand; the app keeps them when it saves. ft-voiced applies changes within 2 s. Delete the file to go back to the defaults.
 
 ### Live text
 
@@ -83,7 +83,7 @@ An assistant can either replace `hooks/on-command` or subscribe with `ft-voice e
 
 ## Voice commands
 
-Your Frametop commands ([docs/commands.md](../docs/commands.md), Input Settings, Commands) need no setup here: say the wake word, then "run" and the command's name.
+Your Frametop commands ([docs/commands.md](../docs/commands.md), Frametop Settings, Commands) need no setup here: say the wake word, then "run" and the command's name.
 
 A command that starts with a set phrase can run a program. Add a `"commands"` list to `~/.config/frametop-voice.json` by hand (the Voice page lists them but doesn't edit them). It is empty by default. Example: "Hey Computer, flag that" or "Hey Computer, flag that, fingers crossed" runs a hand tracking tool's flag command.
 
@@ -137,7 +137,7 @@ They apply when the service restarts (`voice/run.sh restart`). Wake phrase tunin
 | `ft-voiced` | The service (`frametop-voice.service`): mic capture (`pw-record`), push-to-talk, the wake word, live text, the control socket. It runs in Frametop's container (`scripts/in-box`), named `ft-voiced` there. |
 | `frametop-voice-whisper.service` | `whisper-server` (whisper.cpp, Vulkan on the Adreno 750) with the chosen model (`whisper-run`; `ggml-small.en-q5_1` by default) on `127.0.0.1:8178`, for wake word commands and languages other than English. ft-voiced starts it only while something uses it (it holds about 300 MB of the GPU's memory, more for large-v3-turbo) and stops it after. |
 | `ft-voice` | CLI for the control socket. |
-| `voice_settings.py` | The settings file, and carrying over frame-voice's. Standard library only: the installer runs it with the host's Python, and Input Settings reads it. |
+| `voice_settings.py` | The settings file, and carrying over frame-voice's. Standard library only: the installer runs it with the host's Python, and Frametop Settings reads it. |
 | `voice_commands.py` | Voice commands: matching, and checking the entries. |
 | `hooks/on-command` | Runs after a wake word with the command as `$1` when no voice command matches. The example logs it to `~/.local/state/frametop/voice/commands.log`. |
 | `build.sh` | Builds `build/bin/whisper-server` (whisper.cpp at a fixed commit, Vulkan, static) and `build/venv` (sherpa-onnx, sentencepiece, numpy; in a release, the image's locked venv). |

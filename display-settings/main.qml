@@ -1078,6 +1078,122 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Window controls" }
+
+                    RowLayout {
+                        Kirigami.FormData.label: "Vertical padding (each side):"
+                        Controls.Slider {
+                            id: grabBarPaddingY
+                            from: 0; to: 50; stepSize: 0.1
+                            value: backend.grabBarPaddingY
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setGrabBarPaddingY(value)
+                        }
+                        Controls.Label { text: grabBarPaddingY.value.toFixed(1) + " cm" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Horizontal padding (each side):"
+                        Controls.Slider {
+                            id: grabBarPaddingX
+                            from: 0; to: 50; stepSize: 0.1
+                            value: backend.grabBarPaddingX
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setGrabBarPaddingX(value)
+                        }
+                        Controls.Label { text: grabBarPaddingX.value.toFixed(1) + " cm" }
+                    }
+                    Controls.CheckBox {
+                        text: "Show drag zone"
+                        checked: backend.grabBarPreview
+                        onToggled: backend.setGrabBarPreview(checked)
+                    }
+                    Controls.CheckBox {
+                        text: "Keep drag zones visible while their windows are visible"
+                        enabled: backend.grabBarPreview
+                        checked: backend.grabBarPreviewAlways
+                        onToggled: backend.setGrabBarPreviewAlways(checked)
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Zone fill color:"
+                        enabled: backend.grabBarPreview
+                        Rectangle {
+                            width: Kirigami.Units.gridUnit * 2; height: Kirigami.Units.gridUnit
+                            color: backend.grabBarPreviewColor
+                            border.color: Kirigami.Theme.textColor
+                        }
+                        Controls.Button { text: "Choose…"; onClicked: barFillDialog.open() }
+                        ColorDialog {
+                            id: barFillDialog
+                            title: "Drag zone fill color"
+                            selectedColor: backend.grabBarPreviewColor
+                            onAccepted: backend.setGrabBarPreviewColor(selectedColor.toString())
+                        }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Fill opacity:"
+                        enabled: backend.grabBarPreview
+                        Controls.Slider {
+                            id: barFillOpacity
+                            from: 0; to: 1; stepSize: 0.01
+                            value: backend.grabBarPreviewOpacity
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setGrabBarPreviewOpacity(value)
+                        }
+                        Controls.Label { text: Math.round(barFillOpacity.value * 100) + "%" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Outline color:"
+                        enabled: backend.grabBarPreview
+                        Rectangle {
+                            width: Kirigami.Units.gridUnit * 2; height: Kirigami.Units.gridUnit
+                            color: backend.grabBarOutlineColor
+                            border.color: Kirigami.Theme.textColor
+                        }
+                        Controls.Button { text: "Choose…"; onClicked: barOutlineDialog.open() }
+                        ColorDialog {
+                            id: barOutlineDialog
+                            title: "Drag zone outline color"
+                            selectedColor: backend.grabBarOutlineColor
+                            onAccepted: backend.setGrabBarOutlineColor(selectedColor.toString())
+                        }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Outline opacity:"
+                        enabled: backend.grabBarPreview
+                        Controls.Slider {
+                            id: barOutlineOpacity
+                            from: 0; to: 1; stepSize: 0.01
+                            value: backend.grabBarOutlineOpacity
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setGrabBarOutlineOpacity(value)
+                        }
+                        Controls.Label { text: Math.round(barOutlineOpacity.value * 100) + "%" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Outline thickness:"
+                        enabled: backend.grabBarPreview
+                        Controls.Slider {
+                            id: barOutlineWidth
+                            from: 0; to: 8; stepSize: 1
+                            value: backend.grabBarOutlineWidth
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setGrabBarOutlineWidth(value)
+                        }
+                        Controls.Label { text: Math.round(barOutlineWidth.value) + " px" }
+                    }
+                    Controls.Label {
+                        text: "Add a fixed margin around the bar: horizontal padding on the left and right, "
+                              + "vertical padding above and below. For example, 2 cm adds 4 cm to that dimension; "
+                              + "0 cm is the original target. Padding stays the same physical size as the bar auto-sizes. "
+                              + "The visible pill stays the same size; the row moves down and its buttons move sideways "
+                              + "when needed to keep them outside the target. The preview follows the bars' normal fade, "
+                              + "unless kept visible. Settings apply immediately and are saved. Outline pixels are relative "
+                              + "to the original 256×24 pill texture; 0 hides the outline."
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
+
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Screens shown" }
 
                     // Counts as models, here and in Pinned screens: a new list rebuilds the rows, and

@@ -60,6 +60,9 @@ PACKAGES = {
                            "window's grab bar; picking up a controller; mapped controller buttons; gaze, "
                            "and a gaze calibration with Track Dominant Eye Only on; the reset countdown stays "
                            "visible while turning, accepts no pointer input, and disappears before reset; "
+                           "drag-bar GRAB_BAR_PADDING_X and GRAB_BAR_PADDING_Y add centimetres to laser hit dimensions "
+                           "without enlarging the pill; the preview matches the target and stays outside content "
+                           "and neighboring buttons (SetOverlayMouseScale, padded texture); "
                            "Full Keyboard (keyboard/) opens for a desktop text field over the screens with "
                            "the dashboard closed, in the dashboard, and in place of Steam's own keyboard in a "
                            "Steam field, and its lasers, controller tips and fingertips press keys",

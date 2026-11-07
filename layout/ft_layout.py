@@ -1562,7 +1562,10 @@ def window_command(args):
                        {"address": d["app"][7:]})
             log(f"closed {d['id']}: the window is back on {host.get('name') or host['address']}")
         except RuntimeError as e:
-            log(f"closed {d['id']}; the PC will put the window back within a minute ({e})")
+            if "no window output" in str(e):  # closed on the PC, or back after the grace period
+                log(f"closed {d['id']}: the window had already left it")
+            else:
+                log(f"closed {d['id']}; the PC will put the window back within a minute ({e})")
         return
     raise RuntimeError("window list HOST | apps HOST | open HOST ADDRESS [--size WxH] | "
                        "launch HOST APP [--size WxH] | close ID")

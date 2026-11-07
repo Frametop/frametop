@@ -134,6 +134,16 @@ class Windows(unittest.TestCase):
         self.assertFalse(any(d.get("window") for d in self.displays()))
         self.assertEqual(self.api[-1][2:], ("POST", "/api/frametop/windows/release", {"address": "0x55aa10"}))
 
+    def test_close_after_the_window_left(self):
+        # closed on the PC (or back after the grace period): the host has no output for it
+        self.run_window("open", "oma7", "0x55aa10")
+        self.answers["/api/frametop/windows/release"] = (400, {"error": "no window output for 0x55aa10"})
+        said = []
+        self.m.log = said.append
+        self.run_window("close", "oma7-window-55aa10")
+        self.assertEqual(said, ["closed oma7-window-55aa10: the window had already left it"])
+        self.assertFalse(any(d.get("window") for d in self.displays()))
+
     def test_close_forgets_the_panel_in_profiles(self):
         self.run_window("open", "oma7", "0x55aa10")
         layout = self.m.load_layout()

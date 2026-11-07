@@ -123,7 +123,8 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout window apps HOST         the desktop apps it can start
   ft-layout window open HOST ADDRESS [--size WxH]
                                      that window as a panel of its own in front of you (its own
-                                     output on the PC, WxH: the window's size by default)
+                                     output on the PC, WxH: the window's size, at most
+                                     1920x1200, by default)
   ft-layout window launch HOST APP [--size WxH]
                                      starts the app (an id from "window apps") as a panel
   ft-layout window close ID          the panel goes and the window goes back on the PC
@@ -1415,6 +1416,7 @@ def remote_command(args):
 # ---------------------------------------------------------------- PC app windows (DEE-347, DEE-350)
 
 WINDOW_SIZE = (1280, 800)  # a launched app's first size
+WINDOW_MAX = (1920, 1200)  # an opened window's first size at most: a tiled one can be 5096 wide
 WINDOW_DISTANCE = 1.1      # metres in front of you, a little below eye height
 WINDOW_PIXELS_PER_METRE = 1400
 
@@ -1528,7 +1530,8 @@ def window_command(args):
                           if w.get("address") == address), None)
             if found is None:
                 raise RuntimeError(f"{host.get('name')} has no window {address}")
-            size = window_size(opts, (found.get("width") or WINDOW_SIZE[0], found.get("height") or WINDOW_SIZE[1]))
+            size = window_size(opts, (min(found.get("width") or WINDOW_SIZE[0], WINDOW_MAX[0]),
+                                      min(found.get("height") or WINDOW_SIZE[1], WINDOW_MAX[1])))
             title = found.get("title") or found.get("class") or ""
         else:
             if not re.fullmatch(r"[A-Za-z0-9._@+-]+\.desktop", args[2]):

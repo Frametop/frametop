@@ -94,6 +94,12 @@ class Windows(unittest.TestCase):
         self.assertEqual(clients, ["frametop-oma7-win1", "frametop-oma7-win2"])
         self.assertEqual(self.displays()[-1]["size"], [1600, 900])
 
+    def test_open_caps_a_big_window(self):
+        # a window tiled on an ultrawide: the panel starts at most 1920x1200, and the PC resizes it
+        self.answers["/api/frametop/windows"] = (200, dict(WINDOWS, windows=[dict(WINDOWS["windows"][0], width=5096, height=1390)]))
+        self.run_window("open", "oma7", "0x55aa10")
+        self.assertEqual(self.displays()[-1]["size"], [1920, 1200])
+
     def test_open_twice_is_one_panel(self):
         self.run_window("open", "oma7", "0x55aa10")
         self.run_window("open", "oma7", "0x55aa10")

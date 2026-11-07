@@ -3,7 +3,8 @@
 // ft-stream it starts ($FT_STREAM): it says it's live, and asked to end it takes 300 ms to go
 // (Disconnect Monitor), or with the app "hang" it ignores SIGTERM. It notes the "focus" and
 // "blur" it's told (the shared clipboard's moments). With the app window:0x1 the host has no
-// such window, with window:0x2 it's full: either way it says why and ends. It connects to nothing.
+// such window, with window:0x2 it's full: either way it says why and ends. window:0x3 goes live
+// and ends 100 ms later (its window closed on the host). It connects to nothing.
 // Built by `just test-c` (justfile): remote.c with -DFT_REMOTE_QUIT_MS=600, so the SIGKILL comes soon.
 #define _GNU_SOURCE
 #include <limits.h>
@@ -52,6 +53,12 @@ static int fake_stream(char **argv) {
     if (!strncmp(app, "window:", 7)) {  // as ft-stream does when the host's open fails
         const char *why = !strcmp(app, "window:0x1") ? "state lost 404 no window 0x1" : "state lost 503 at most 4 windows";
         send(3, why, strlen(why), MSG_NOSIGNAL);
+        return 1;
+    }
+    if (!strcmp(app, "window:0x3")) {
+        send(3, "state live via network", 22, MSG_NOSIGNAL);
+        usleep(100000);
+        note("exit", getpid(), host, app);
         return 1;
     }
     if (!strcmp(app, "hang")) signal(SIGTERM, SIG_IGN), alarm(10);  // gone in the end, even if nothing kills it
@@ -283,6 +290,16 @@ static bool window_closed(void) {
     return true;
 }
 
+// A window panel's stream that ended: tried again after 0.2 s, not 2 s (the host's 404 then
+// takes the panel). A display's waits the usual 2 s.
+static bool window_retry(void) {
+    start(101, "192.0.2.7", "window:0x3", 60);
+    run(900);
+    read_log();
+    EXPECT(g_nprocs >= 2 && g_procs[1].start - g_procs[0].gone < 600);
+    return true;
+}
+
 int main(int argc, char **argv) {
     if (argc > 8 && !strcmp(argv[1], "stream")) {
         snprintf(g_log, sizeof g_log, "%s/events.log", getenv("XDG_RUNTIME_DIR"));
@@ -299,7 +316,7 @@ int main(int argc, char **argv) {
     const struct { const char *name; scenario s; } all[] = {
         {"stop then start", stop_start}, {"new settings", new_settings}, {"same host", same_host},
         {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
-        {"window closed", window_closed},
+        {"window closed", window_closed}, {"window retry", window_retry},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

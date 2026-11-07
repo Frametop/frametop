@@ -20,7 +20,8 @@
 // A host's streams start one after another ("queued" until then), and none starts while a
 // stream of the same display or host is still on its way out: see host_busy.
 // A stream that ends starts again, after 2 s, then longer after quick failures (up to 30 s),
-// unless it streamed a window that closed on the host: that panel goes.
+// unless it streamed a window that closed on the host: that panel goes. A window panel's
+// first try again comes after 0.2 s.
 // Its panel keeps the last picture meanwhile. ft-stream logs to
 // $XDG_RUNTIME_DIR/frametop-remote-<N>.log.
 #define _GNU_SOURCE
@@ -164,6 +165,10 @@ static void message(struct remote *r, const char *msg, const int *fds, int nfds)
 // stream operation each time. Connect it again, and it tries at once.
 #define FT_REMOTE_WAIT_MAX_MS 30000
 #define FT_REMOTE_WAIT_404_MS 300000
+// A window panel's stream that ends tries again at once: the host ends it when its window
+// closed (Super+W on it), and the answer to that try (404) is what takes the panel away. It
+// used to keep its last picture for the usual 2 s first.
+#define FT_REMOTE_WINDOW_RETRY_MS 200
 
 static void schedule_restart(struct remote *r) {
     const uint32_t ran = now_ms() - r->started_ms;
@@ -172,9 +177,11 @@ static void schedule_restart(struct remote *r) {
     uint32_t wait = 2000;
     for (int k = 1; k < r->failures && wait < most; ++k) wait *= 2;
     if (wait > most) wait = most;
+    if (!strncmp(r->app, "window:", 7) && r->failures <= 1 && strncmp(r->state, "lost 404", 8) != 0)
+        wait = FT_REMOTE_WINDOW_RETRY_MS;
     r->restart_at = now_ms() + wait;
     if (!r->restart_at) r->restart_at = 1;
-    wlr_log(WLR_INFO, "remote %d: starting it again in %u s", r->index + 1, wait / 1000);
+    wlr_log(WLR_INFO, "remote %d: starting it again in %.1f s", r->index + 1, wait / 1000.0);
 }
 
 static int readable(int fd, uint32_t mask, void *data) {

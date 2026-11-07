@@ -122,6 +122,7 @@ class Xkb:
 
     def __init__(self):
         self.lib = self.keymap = self.state = None
+        self.stamp = self.file_stamp()  # kxkbrc as it was read: changed() makes a new Xkb
         layout, variant, options = self.layout()
         try:
             lib = ctypes.CDLL(ctypes.util.find_library("xkbcommon") or "libxkbcommon.so.0")
@@ -146,12 +147,28 @@ class Xkb:
             log(f"typing: libxkbcommon: {e}; a US layout instead")
 
     @staticmethod
-    def layout():
+    def path():
+        return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "kxkbrc")
+
+    @classmethod
+    def file_stamp(cls):
+        try:
+            st = os.stat(cls.path())
+            return st.st_mtime_ns, st.st_size
+        except OSError:
+            return None
+
+    def changed(self):
+        """kxkbrc changed since this keymap was made (the desktop's System Settings, or Frametop
+        Input Settings' Keyboard page, picked another layout)."""
+        return self.file_stamp() != self.stamp
+
+    @classmethod
+    def layout(cls):
         """The desktop's first keyboard layout (Plasma's kxkbrc in this session's config)."""
         kf = GLib.KeyFile()
-        path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "kxkbrc")
         try:
-            kf.load_from_file(path, GLib.KeyFileFlags.NONE)
+            kf.load_from_file(cls.path(), GLib.KeyFileFlags.NONE)
         except GLib.Error:
             return "us", "", ""
 
@@ -165,6 +182,15 @@ class Xkb:
         except GLib.Error:
             options = ""
         return first("LayoutList") or "us", first("VariantList"), options or ""
+
+    def close(self):
+        """Let go of the keymap (before a new Xkb takes over)."""
+        if self.lib:
+            if self.state:
+                self.lib.xkb_state_unref(self.state)
+            self.lib.xkb_keymap_unref.argtypes = [ctypes.c_void_p]
+            self.lib.xkb_keymap_unref(self.keymap)
+        self.lib = self.keymap = self.state = None
 
     def reset(self):
         if self.lib:
@@ -667,6 +693,9 @@ class Frunner:
             return "error ft-screens didn't answer"
         self.is_open, self.query, self.mode, self.entries, self.sel, self.top = True, "", "list", [], 0, 0
         self.held.clear()
+        if self.xkb.changed():
+            self.xkb.close()
+            self.xkb = Xkb()
         self.xkb.reset()
         self.stop_repeat()
         if self.toast_timer:

@@ -50,6 +50,7 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 1. Pair it in Steam, under Settings → Bluetooth.
 2. If you installed the Bluetooth fixes, apply them once for the new device with Frametop Input Settings → Bluetooth → Apply Bluetooth fixes (or `setup/bluetooth/install.sh run`). After that it reconnects on its own.
 3. Move the mouse, and the dot appears where you're looking.
+4. For a keyboard that isn't US English (Polish, German, French and so on), pick its language in Frametop Input Settings → Keyboard → Desktop layout. That layout is what every keyboard types on the desktop, Full Keyboard and dictation included; pick the same language in Full Keyboard.
 
 ## Use
 

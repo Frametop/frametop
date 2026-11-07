@@ -33,11 +33,12 @@ class Home(unittest.TestCase):
 
     def setUp(self):
         self.home = tempfile.mkdtemp(prefix="ft-commands-test-")
-        self.saved = {k: getattr(fc, k) for k in ("COMMANDS_PATH", "ALIASES_PATH", "BASHRC", "CLI_LINK")}
+        self.saved = {k: getattr(fc, k) for k in ("COMMANDS_PATH", "ALIASES_PATH", "BASHRC", "CLI_LINK", "ONDESKTOP_LINK")}
         fc.COMMANDS_PATH = os.path.join(self.home, ".config/frametop-commands.json")
         fc.ALIASES_PATH = os.path.join(self.home, ".config/frametop/aliases.sh")
         fc.BASHRC = os.path.join(self.home, ".bashrc")
         fc.CLI_LINK = os.path.join(self.home, ".local/bin/ft-cmd")
+        fc.ONDESKTOP_LINK = os.path.join(self.home, ".local/bin/ft-ondesktop")
 
     def tearDown(self):
         for k, v in self.saved.items():
@@ -207,6 +208,25 @@ class Aliases(Home):
             f.write("mine")
         self.assertFalse(fc.link_cli())  # someone's own file stays
         self.assertEqual(self.read(fc.CLI_LINK), "mine")
+
+    def test_refresh_links_ondesktop(self):
+        """A Steam game's launch options name ~/.local/bin/ft-ondesktop: the relay's start points
+        it at this install, next to ft-cmd."""
+        fc.refresh()
+        self.assertEqual(os.readlink(fc.ONDESKTOP_LINK), fc.ONDESKTOP)
+        self.assertEqual(os.readlink(fc.CLI_LINK), fc.FT_CMD)
+        self.assertTrue(os.access(fc.ONDESKTOP, os.X_OK))
+        os.remove(fc.ONDESKTOP_LINK)
+        os.symlink("/old/release/steam/ft-ondesktop", fc.ONDESKTOP_LINK)  # a release update moved it
+        fc.refresh()
+        self.assertEqual(os.readlink(fc.ONDESKTOP_LINK), fc.ONDESKTOP)
+
+    def test_refresh_makes_ondesktop_when_ft_cmd_fails(self):
+        os.makedirs(os.path.dirname(fc.CLI_LINK))
+        os.symlink("/elsewhere", f"{fc.CLI_LINK}.tmp{os.getpid()}")  # a leftover: ft-cmd's link fails
+        with self.assertRaises(OSError):
+            fc.refresh()
+        self.assertEqual(os.readlink(fc.ONDESKTOP_LINK), fc.ONDESKTOP)
 
 
 class Running(Home):

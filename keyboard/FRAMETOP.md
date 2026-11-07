@@ -50,7 +50,7 @@ Frametop's desktop runs in a nested KWin that gamescope never sees, so keys sent
 
 Only same-user messages count on either side. Full Keyboard takes word only from the relay's own name, and sends desktop typing only while that word is under 3 seconds old, so a stopped relay never leaves typing addressed to a name another process could take. The relay takes keys and text only from the address that said hello.
 
-Known limits: on the desktop, keys go by their place on the keyboard, so pick the same layout in Full Keyboard as the desktop's. Text the desktop's layout has no key for (Chinese, Japanese, Korean, emoji) can't be typed on the desktop yet; it reaches Steam's fields as before.
+Known limits: on the desktop, keys go by their place on the keyboard, so pick the same layout in Full Keyboard as the desktop's (Frametop Settings → Keyboard → Desktop layout). Text the desktop's layout has no key for (Chinese, Japanese, Korean, emoji) can't be typed on the desktop yet; it reaches Steam's fields as before.
 
 ## Building and running
 

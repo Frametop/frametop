@@ -44,7 +44,8 @@ Steam's menu, or close the dashboard (steam/ft-steam menu, through Steam's UI), 
 pause Frametop for a VR game, or resume it (game_pause.py), dictate = start or stop dictation, and
 dictate_hold = dictation while held (Frametop Voice, voice/ft-voiced: "toggle|start|stop <source>"
 to @frametop_voice), frunner = open or close frunner's search for apps and remote displays
-("toggle <source>" to @ft_frunner; Meta+Space by default), hands_toggle = stop hand tracking if
+("toggle <source>" to @ft_frunner; Meta+Space by default), os_menu = open frunner with Frametop's
+own actions listed, its OS menu ("toggle <source> actions"; no default), hands_toggle = stop hand tracking if
 it runs, else start it, until the next desktop or SteamVR start (hands/handsmode.py toggle; Meta+H
 by default), release_keys = let go of every key held anywhere: what the desktop, a remote
 display and this relay hold, and every modifier in KWin, known to be held or not ("keys
@@ -217,6 +218,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
   reload            re-read both config files, re-apply roles, tell the helper
   vrcapture <s>     take every controller button for s seconds (0: stop), so the settings
                     app can capture one; watchers see them as events with id frame_controller
+  action NAME       from frunner: run one of Frametop's own actions (ft_input_actions.MENU_ACTIONS
+                    only; from this user only), as a button would ({"t": "action"}, or an error)
   vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
   vrdash 1|0        from the pointer helper: the dashboard is open (on a change and every 5 s), so
@@ -300,6 +303,7 @@ import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabulary)
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
+    MENU_ACTION_NAMES,
     VOICE_ACTIONS,
     VOICE_KEY_BINDINGS,
     VR_BUTTONS,
@@ -336,7 +340,7 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
            "dock_all", "spin_next", "spin_prev", "carry_toggle", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
-           "frunner", "hands_toggle", "release_keys", "key", "none")
+           "frunner", "os_menu", "hands_toggle", "release_keys", "key", "none")
 # GAZE_ACTIONS (mouse and keyboard only) and DEFAULT_KEY_BINDINGS, the key combinations a rules
 # file without "key_bindings" gets, are ft_input_actions'.
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
@@ -392,6 +396,8 @@ SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev", "screen
 # what pressed it, since one from a mouse or controller opens Frametop's keyboard too. It doesn't
 # need pointer mode, and does nothing while Frametop is paused.
 FRUNNER = "\0ft_frunner"
+# os_menu opens it with Frametop's own actions listed (ft_input_actions.MENU_ACTIONS, the OS
+# menu): "toggle <source> actions". Picking one sends "action NAME" here.
 # renamed_actions(): old action names rules files may still use, under their new ones (ft_input_actions).
 # hands_toggle: hand tracking off if it runs, else on (HANDSMODE toggle, which says which in this
 # service's log). It doesn't need pointer mode either.
@@ -424,7 +430,7 @@ def known_action(a):
 
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
-            and a not in ("steam_menu", "pause_toggle", "frunner", "hands_toggle", "release_keys")
+            and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "hands_toggle", "release_keys")
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
 
@@ -435,7 +441,7 @@ def works_paused(a):
 
 # What pressed pause_toggle, for the log (do_action's source).
 PAUSE_SOURCES = {"mouse": "mouse button", "keyboard": "key combination", "left": "controller button",
-                 "right": "controller button"}
+                 "right": "controller button", "frunner": "frunner"}
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FT_LAYOUT = os.path.join(REPO, "layout", "ft-layout")
 FT_STEAM = os.path.join(REPO, "steam", "ft-steam")
@@ -1493,10 +1499,11 @@ class Relay:
                 except OSError:
                     pass  # the Frametop desktop isn't running
                 log(action)
-        elif action == "frunner":
+        elif action in ("frunner", "os_menu"):
             if value == 1:
                 try:
-                    self.screens_sock.sendto(f"toggle {source}".encode(), FRUNNER)
+                    self.screens_sock.sendto(f"toggle {source}{' actions' if action == 'os_menu' else ''}".encode(),
+                                             FRUNNER)
                 except OSError:
                     log("frunner: not running (the Frametop desktop starts it)")
                 log(action)
@@ -2132,6 +2139,21 @@ class Relay:
                 self.pause.set(words[1] == "on", reason, now)
             if addr:
                 self.reply(addr, self.pause.status())
+            return
+        if cmd == "action" and len(words) == 2:
+            # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu.
+            # Only those (MENU_ACTION_NAMES), and only from this user: never run:, command: or keys:.
+            name = words[1]
+            if uid != os.getuid():
+                self.reply(addr, {"t": "error", "error": "another user's"})
+            elif name not in MENU_ACTION_NAMES:
+                self.reply(addr, {"t": "error", "error": f"not a menu action {name!r}"})
+            elif self.pause.paused and not works_paused(name):
+                self.reply(addr, {"t": "error", "error": "paused"})
+            else:
+                self.do_action(name, 1, now, "frunner")
+                self.do_action(name, 0, now, "frunner")
+                self.reply(addr, {"t": "action", "action": name})
             return
         if cmd == "pause" and words[1:] in (["enforce"], ["defer", "remote"]):
             # From frametop-session.sh (input/ft-pause enforce|defer-remote) as a desktop

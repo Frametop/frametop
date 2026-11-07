@@ -50,6 +50,7 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 1. Pair it in Steam, under Settings → Bluetooth.
 2. If you installed the Bluetooth fixes, apply them once for the new device with Frametop Settings → Bluetooth → Apply Bluetooth fixes (or `setup/bluetooth/install.sh run`). After that it reconnects on its own.
 3. Move the mouse, and the dot appears where you're looking.
+4. For a keyboard that isn't US English (Polish, German, French and so on), pick its language in Frametop Settings → Keyboard → Desktop layout. That layout is what every keyboard types on the desktop, Full Keyboard and dictation included; pick the same language in Full Keyboard.
 
 ## Use
 
@@ -125,7 +126,9 @@ Each computer needs a host kit once:
 
 Then, on the Frame, open Frametop Settings and pick Remote displays (or Remote displays in the Frametop menu), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
 
-A monitor you stream switches to the stream's resolution while it streams (Windows), so pick a size the monitor has, or one with the same shape. A computer that's asleep can't be reached. [docs/reference.md](docs/reference-apps.md#remote-displays) has the details.
+With Share the clipboard on a Windows computer's card, text you copy on the desktop can be pasted on the computer once you click one of its displays, and text you copy there can be pasted on the desktop once you click back.
+
+A monitor you stream switches to the stream's resolution while it streams (Windows), so pick a size the monitor has, or one with the same shape. A computer that's asleep can't be reached. [docs/reference-apps.md](docs/reference-apps.md#remote-displays) has the details.
 
 ### Pause for VR games
 
@@ -138,6 +141,20 @@ Frametop pauses while a VR game runs, so the game gets the headset's CPU and GPU
 | Map Pause/resume Frametop to a mouse button, key combination, or controller button | The same, from that button (Frametop Settings) |
 
 The Game optimization page of Frametop Settings turns the automatic pause off, changes the gesture, closes the desktop instead of hiding it (more for the game, but its windows close), and turns the sound off. From a terminal: `input/ft-pause on`, `off`, or `status`.
+
+### Flatscreen Steam games on a Frametop screen
+
+Steam opens flatscreen games in SteamVR's theater, where Frametop can't rotate or move them. To play one as a window of the Frametop desktop instead, for a portrait (TATE) shmup or a pinball table, set its launch options in Steam (the game's Properties, General) to:
+
+```
+/home/steamos/.local/bin/ft-ondesktop %command%
+```
+
+`~/.local/bin/ft-ondesktop --launch-option` prints that line with your home folder in it. While the Frametop desktop runs, the game then opens as one of its windows: move it to a portrait screen (add one in Frametop Settings), or float it with Meta+Shift+F and roll it there. When the desktop isn't running, the game opens in the theater as before. `ft-ondesktop --check` says which one a game will get.
+
+- Restarting the Frametop desktop ends a game running on it.
+- Mouse and keyboard reach the game like any desktop app. For the controllers as a gamepad, click the game's window, open the Steam menu and press Frametop's Enter Gamepad Mode pill: ft-ondesktop leaves Frametop's virtual pad visible to the game. Steam's own Gamepad mode, which goes with the theater, may not reach it.
+- Each start adds a line to `~/.local/state/frametop/ondesktop.log`.
 
 ### Gaze mode (experimental)
 
@@ -185,7 +202,7 @@ This is an early release, tested on one Steam Frame (SteamOS 0.4.5 build 2026100
 - A SteamOS or SteamVR update can break parts of it until Frametop catches up. After an update, run `cd ~/frametop && scripts/doctor.sh` in a terminal. It checks what Frametop needs from SteamOS, and says what changed since the versions you last marked as working and what to try. Once everything works, `scripts/doctor.sh --mark-good` records the versions. If something stops working, please report it.
 - The first install downloads 1–2 GB for the build container and compiles everything on the headset, which takes several minutes.
 - During a VR game, mapped controller buttons belong to the game, so they can't bring the screens up. The pause gesture still works: Frametop reads it without taking the thumbsticks from the game. With the automatic pause off, open the SteamVR dashboard, press Meta+Shift+H, or use a mapped mouse button instead.
-- Flatscreen games aren't detected as games, so they don't pause Frametop by themselves: click both thumbsticks twice to pause it. If your controllers end up working the screens instead of the game, set Controllers on the screens to "Only with the SteamVR dashboard open" (Frametop Settings, Visibility & pins tab).
+- Flatscreen games aren't detected as games, so they don't pause Frametop by themselves: click both thumbsticks twice to pause it. To put one on a Frametop screen instead, see Flatscreen Steam games on a Frametop screen. If your controllers end up working the screens instead of the game, set Controllers on the screens to "Only with the SteamVR dashboard open" (Frametop Settings, Visibility & pins tab).
 - Typing follows your last click. A controller click on a panel other than the screens (the dashboard, a Steam app) doesn't move typing there; click it with the mouse, or click a screen to bring typing back.
 - The screens don't draw a mouse cursor of their own. The 3D mouse's dot or SteamVR's laser shows where you're pointing.
 - Profiles reopen apps, not what the apps had open. Tabs, files, and folders are left to each app's own restore.
@@ -284,7 +301,7 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `commands/` | Frametop commands: your own shell commands, saved under a name and run in the background (`ft-cmd`). |
 | `frunner/` | frunner, the search for apps, remote displays and your commands (Meta+Space). See [docs/frunner.md](docs/frunner.md). |
 | `tour/` | Frametop Tour, the walk through what Frametop does, and the recenter help. |
-| `steam/` | ft-steam: Steam's menu and checks, through Steam's own UI. |
+| `steam/` | ft-steam: Steam's menu and checks, through Steam's own UI. ft-ondesktop: Steam games on the Frametop desktop instead of the theater. |
 | `models/` | The hand and eye model versions you pick from, and their catalog. See [models/README.md](models/README.md). |
 | `recorder/` | What the hand and eye recorders share: encryption, uploads, the bounty board, privacy checks. |
 | `conf/` | The shared readers and writers of Frametop's config and stored files (`ft_conf`, `ft_store`) and its socket helpers. See [docs/config.md](docs/config.md). |

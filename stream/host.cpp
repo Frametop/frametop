@@ -1,6 +1,8 @@
 // See host.h.
 #include "host.h"
 
+#include "clipboard.h"
+
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
@@ -28,11 +30,14 @@ void http_cleanup(void);  // in http.c, not in http.h
 namespace ftstream {
 namespace {
 
-// What a Frametop client may do on a Vibepollo host: list apps, view and launch them, and
-// send mouse and keyboard input (crypto::PERM in Vibepollo's crypto.h).
+// What a Frametop client may do on a Vibepollo host: list apps, view and launch them, send
+// mouse and keyboard input, and set and read the host's clipboard (the shared clipboard, used
+// only while its host's switch is on) (crypto::PERM in Vibepollo's crypto.h).
 constexpr uint32_t kPermMouse = 1u << 11, kPermKeyboard = 1u << 12;
+constexpr uint32_t kPermClipboardSet = 1u << 16, kPermClipboardRead = 1u << 17;
 constexpr uint32_t kPermList = 1u << 24, kPermView = 1u << 25, kPermLaunch = 1u << 26;
-constexpr uint32_t kFrametopPerm = kPermList | kPermView | kPermLaunch | kPermMouse | kPermKeyboard;
+constexpr uint32_t kFrametopPerm =
+    kPermList | kPermView | kPermLaunch | kPermMouse | kPermKeyboard | kPermClipboardSet | kPermClipboardRead;
 constexpr const char *kNoId = "0123456789ABCDEF";  // libgamestream's id without uniqueid.dat
 
 // Percent-encodes a query value (device ids are {GUID}, display names \\.\DISPLAYn).
@@ -86,6 +91,14 @@ std::string Attribute(const char *xml, size_t len, const char *name) {
 
 size_t Append(char *data, size_t size, size_t n, void *out) {
     static_cast<std::string *>(out)->append(data, size * n);
+    return size * n;
+}
+
+// As Append, refusing more than the shared clipboard takes (curl then fails the request).
+size_t AppendClipboard(char *data, size_t size, size_t n, void *out) {
+    auto *text = static_cast<std::string *>(out);
+    if (text->size() + size * n > clipboard::kMaxText) return 0;
+    text->append(data, size * n);
     return size * n;
 }
 
@@ -344,7 +357,7 @@ bool Client::GrantByName(WebApi &api) {
         if (c.first == id) named.push_back(u);
     if (named.size() != 1) return std::fprintf(stderr, "the host has %zu clients named %s\n", named.size(), id.c_str()), false;
     if (!api.Grant(named[0], id)) return false;
-    std::printf("%s may now launch and use the mouse and keyboard (perm was %u)\n", id.c_str(), clients[named[0]].second);
+    std::printf("%s may now launch, use the mouse and keyboard, and share the clipboard (perm was %u)\n", id.c_str(), clients[named[0]].second);
     return true;
 }
 
@@ -374,6 +387,51 @@ bool Client::Unpair() {
     DropConnection();
     std::printf("unpair: %s\n", ok ? "done" : why.c_str());
     return ok;
+}
+
+// Vibepollo's /actions/clipboard (Apollo's), with this client's certificate: the host takes
+// it only from a client that streams. Its certificate is the Web UI's, so the Web UI's pin
+// holds here too, and is required: the text never goes to a host it can't check. A
+// connection of its own each time, closed after (see DropConnection). The status, or
+// clipboard::kNoAnswer, kTooBig (the host's text is over kMaxText), kNoPin.
+long Client::Clipboard(bool set, std::string *text, const std::string &pin) {
+    if (pin.empty()) return clipboard::kNoPin;
+    CURL *c = curl_easy_init();
+    if (!c) return clipboard::kNoAnswer;
+    std::random_device rd;
+    char url[4096];
+    std::snprintf(url, sizeof url, "https://%s:%u/actions/clipboard?type=text&uniqueid=%s&uuid=%08x-0000-4000-8000-%012x",
+                  server.serverInfo.address, server.httpsPort, uniqueId.c_str(), rd(), rd());
+    const std::string cert = dir + "/client.pem", key = dir + "/key.pem";
+    std::string got;
+    curl_slist *headers = nullptr;
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_SSLCERTTYPE, "PEM");
+    curl_easy_setopt(c, CURLOPT_SSLCERT, cert.c_str());
+    curl_easy_setopt(c, CURLOPT_SSLKEYTYPE, "PEM");
+    curl_easy_setopt(c, CURLOPT_SSLKEY, key.c_str());
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(c, CURLOPT_PINNEDPUBLICKEY, pin.c_str());
+    curl_easy_setopt(c, CURLOPT_FORBID_REUSE, 1L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, AppendClipboard);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &got);
+    if (set) {
+        headers = curl_slist_append(headers, "Content-Type: text/plain; charset=utf-8");
+        curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(c, CURLOPT_POST, 1L);
+        curl_easy_setopt(c, CURLOPT_POSTFIELDS, text->data());
+        curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE_LARGE, curl_off_t(text->size()));
+    }
+    long code = clipboard::kNoAnswer;
+    const CURLcode r = curl_easy_perform(c);
+    if (r == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+    else if (r == CURLE_WRITE_ERROR) code = clipboard::kTooBig;  // AppendClipboard's cap
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(c);
+    if (!set && code == 200) *text = std::move(got);
+    return code;
 }
 
 int Client::FindApp(const std::string &want) {

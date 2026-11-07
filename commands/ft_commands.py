@@ -37,6 +37,10 @@ CLI_LINK = os.path.expanduser("~/.local/bin/ft-cmd")
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
 FT_CMD = os.path.join(HERE, "ft-cmd")
+# steam/ft-ondesktop, which a Steam game's launch options name by this path (a release update
+# moves the install, the link stays).
+ONDESKTOP_LINK = os.path.expanduser("~/.local/bin/ft-ondesktop")
+ONDESKTOP = os.path.join(REPO, "steam", "ft-ondesktop")
 # Commands find Frametop's own tools (ft-layout, ft-float, ft-steam, ft-voice) on their PATH, as
 # the relay's "command:CMD" always did.
 TOOL_DIRS = [os.path.join(REPO, d) for d in ("layout", "float", "steam", "voice", "commands")]
@@ -254,27 +258,35 @@ def remove_bashrc_lines(bashrc=None):
     return changed
 
 
-def link_cli(link=None):
-    """~/.local/bin/ft-cmd -> this checkout's ft-cmd (the aliases call it there). True if changed."""
-    link = link or CLI_LINK
-    if os.path.islink(link) and os.readlink(link) == FT_CMD:
+def link_cli(link=None, target=None):
+    """~/.local/bin/ft-cmd -> this checkout's ft-cmd (the aliases call it there), or LINK ->
+    TARGET. True if changed."""
+    link, target = link or CLI_LINK, target or FT_CMD
+    if os.path.islink(link) and os.readlink(link) == target:
         return False
     if os.path.exists(link) and not os.path.islink(link):
         return False  # someone's own file: leave it
     os.makedirs(os.path.dirname(link), exist_ok=True)
     tmp = f"{link}.tmp{os.getpid()}"
-    os.symlink(FT_CMD, tmp)
+    os.symlink(target, tmp)
     os.replace(tmp, link)
     return True
 
 
 def refresh():
-    """At the relay's start: the CLI link points at this install, and the aliases file matches
-    the list (a release update moves the install)."""
-    link_cli()
+    """At the relay's start: the CLI links (ft-cmd, ft-ondesktop) point at this install, and the
+    aliases file matches the list (a release update moves the install)."""
+    failed = None
+    for link, target in ((CLI_LINK, FT_CMD), (ONDESKTOP_LINK, ONDESKTOP)):
+        try:
+            link_cli(link, target)
+        except OSError as e:  # one link that can't be made doesn't keep the rest back
+            failed = failed or e
     commands = load()
     if commands or os.path.exists(ALIASES_PATH):
         write_aliases(commands)
+    if failed:
+        raise failed
 
 
 def unit_name(name, now=None):

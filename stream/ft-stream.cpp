@@ -32,8 +32,11 @@
 //     button CODE 1|0       a linux BTN_* code, pressed or released
 //     scroll DX DY          wheel notches (positive DY: down)
 //     key CODE 1|0          a linux KEY_* code, pressed or released
-//     blur                  typing went to another screen: the keys held here come up, and
-//                           gamepad mode's pad goes
+//     focus                 typing went to this screen (a click or a spin to it): the shared
+//                           clipboard sends the desktop's text
+//     blur                  typing went to another screen: the keys held here come up,
+//                           gamepad mode's pad goes, and the shared clipboard brings the host's
+//                           text back
 //     pad B LT RT LX LY RX RY
 //                           gamepad mode (input/vrpad.py): the Frame controllers as an Xbox pad,
 //                           B its XInput buttons (hex), triggers 0-255, sticks -32767..32767 (up
@@ -51,16 +54,21 @@
 // The host's sound plays here, and with "mic": true on its host in the layout (Frametop Remote
 // Displays: Send my microphone) the Frame's microphone goes back to the host's virtual one; see
 // Audio and Mic. With "input": true (Use this computer's keyboard and mouse) the host's own
-// keyboard and mouse come to the input relay while the headset is worn; see HostInput.
+// keyboard and mouse come to the input relay while the headset is worn; see HostInput. With
+// "clipboard": true (Share the clipboard) text copied on either side can be pasted on the other;
+// see SharedClipboard.
 //
 // Runs in the dev container. Build: stream/build.sh.
 #include "iris.h"
 
 #include "../conf/ftsock.h"
+#include "clipboard.h"
 #include "host.h"
 #include "hostinput.h"
 
 #include <netdb.h>
+#include <poll.h>
+#include <spawn.h>
 #include <opus/opus.h>
 #include <opus/opus_multistream.h>
 #include <pulse/error.h>
@@ -72,8 +80,10 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdarg>
 #include <fstream>
 #include <mutex>
@@ -534,6 +544,204 @@ struct HostInput {
 };
 HostInput g_hostin;
 
+// The shared clipboard (stream/clipboard.h, docs/remote-displays.md): with "clipboard": true on
+// its host in the layout (Frametop Remote Displays: Share the clipboard), the desktop's text
+// goes to the host when typing goes to this panel ("focus", or a key after a blur), and the
+// host's comes back when typing leaves it ("blur"). The desktop's side is ft-clip, next to this
+// program, on the Frametop desktop's own Wayland socket; the host's is Client::Clipboard. Both
+// run on a thread of their own, in order, so the stream never waits for them. Only sizes are
+// logged, never the text.
+struct SharedClipboard {
+    Client *client = nullptr;
+    std::string host, state, pin, clip, wayland;
+    std::atomic<bool> on{false}, gone{false};
+    bool focused = false;  // the main thread's
+    int64_t checkAt = 0;
+    std::mutex mu;
+    std::condition_variable cv;
+    std::deque<char> ops;  // 's' send the desktop's text, 'b' bring the host's back
+    bool quit = false;
+    std::set<std::string> said;  // the thread's: each problem is logged once
+    std::thread thread;
+
+    ~SharedClipboard() { Close(); }
+    void Open(Client *c, const std::string &address) {
+        client = c, host = address;
+        const char *run = std::getenv("XDG_RUNTIME_DIR");
+        state = clipboard::StateFile(run, hostinput::RelayId(address));
+        if (state.empty()) {
+            std::printf("clipboard: no XDG_RUNTIME_DIR, so it isn't shared\n");
+            gone = true;
+            return;
+        }
+        wayland = std::string(run) + "/frametop/wayland-0";  // session/frametop-session.sh
+        std::ifstream p(KeyDir("hosts") + "/" + address + ".pin");
+        if (!(p >> pin)) pin.clear();
+        char exe[4096];
+        const ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+        clip = n > 0 ? std::string(exe, size_t(n)) : "ft-stream";
+        clip = clip.substr(0, clip.rfind('/') + 1) + "ft-clip";
+        thread = std::thread(&SharedClipboard::Loop, this);
+    }
+    void Close() {
+        if (!thread.joinable()) return;
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            quit = true;
+        }
+        cv.notify_one();
+        thread.join();  // its requests time out within seconds; the exit watchdog covers the rest
+    }
+    // The main loop, every pass: the switch, read again every 3 s.
+    void Tick(int64_t now) {
+        if (now < checkAt) return;
+        checkAt = now + 3'000'000'000;
+        const bool want = HostFlag(host, "clipboard");
+        if (want != on.exchange(want)) std::printf("clipboard: %s with %s\n", want ? "shared" : "not shared", host.c_str());
+    }
+    void Focus() {
+        if (focused) return;
+        focused = true;
+        Queue('s');
+    }
+    void Blur() {
+        if (!focused) return;
+        focused = false;
+        Queue('b');
+    }
+    void Queue(char op) {
+        if (!on || gone) return;
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            if (ops.empty() || ops.back() != op) ops.push_back(op);
+        }
+        cv.notify_one();
+    }
+    void Loop() {
+        for (;;) {
+            char op;
+            {
+                std::unique_lock<std::mutex> lock(mu);
+                cv.wait(lock, [&] { return quit || !ops.empty(); });
+                if (quit) return;
+                op = ops.front();
+                ops.pop_front();
+            }
+            if (op == 's') Send();
+            else Bring();
+            std::fflush(stdout);
+        }
+    }
+    void Say(const std::string &why) {
+        if (said.insert(why).second) std::printf("clipboard: %s\n", why.c_str());
+    }
+    bool Answered(long code, bool set) {
+        std::string why;
+        const clipboard::Answer a = clipboard::Classify(code, set, &why);
+        if (a == clipboard::Answer::Ok) return true;
+        Say(why);
+        if (a == clipboard::Answer::Gone) gone = true;  // not again from this stream
+        return false;
+    }
+    // The desktop's text, "" when it holds none; false when there's no desktop to ask.
+    bool Desktop(std::string *text) {
+        const int st = Run("get", nullptr, text);
+        if (st == 2 || st < 0) return Say("no Frametop desktop to share the clipboard with (ft-clip get: " +
+                                          std::to_string(st) + ")"), false;
+        if (st != 0) text->clear();
+        return true;
+    }
+    void Send() {
+        if (!on) return;  // turned off while it waited
+        std::string text;
+        if (!Desktop(&text) || !clipboard::ShouldPush(text, clipboard::ReadLast(state))) return;
+        std::string body = text;
+        if (!Answered(client->Clipboard(true, &body, pin), true)) return;
+        clipboard::WriteLast(state, clipboard::Hash(text));
+        std::printf("clipboard: sent %zu bytes to %s\n", text.size(), host.c_str());
+    }
+    void Bring() {
+        if (!on) return;
+        std::string text, desktop;
+        if (!Answered(client->Clipboard(false, &text, pin), false) || !Desktop(&desktop)) return;
+        if (!clipboard::ShouldPull(text, desktop)) {
+            if (clipboard::Fits(text)) clipboard::WriteLast(state, clipboard::Hash(text));  // the same text
+            return;
+        }
+        const std::string lf = clipboard::Normalize(text);
+        const int st = Run("set", &lf, nullptr);
+        if (st != 0) return Say("ft-clip set: " + std::to_string(st));
+        clipboard::WriteLast(state, clipboard::Hash(lf));
+        std::printf("clipboard: brought %zu bytes from %s\n", lf.size(), host.c_str());
+    }
+    // ft-clip WHAT on the desktop's socket, with *in on its stdin, its stdout in *out. Its exit
+    // status, -1 if it didn't run or didn't finish in time (it's killed then).
+    int Run(const char *what, const std::string *in, std::string *out) {
+        int to[2] = {-1, -1}, from[2] = {-1, -1};
+        if (pipe2(to, O_CLOEXEC) != 0) return -1;
+        if (pipe2(from, O_CLOEXEC) != 0) return close(to[0]), close(to[1]), -1;
+        std::vector<std::string> env{"WAYLAND_DISPLAY=" + wayland};
+        for (char **e = environ; *e; ++e)
+            if (std::strncmp(*e, "WAYLAND_DISPLAY=", 16) != 0) env.push_back(*e);
+        std::vector<char *> envp;
+        for (auto &e : env) envp.push_back(e.data());
+        envp.push_back(nullptr);
+        posix_spawn_file_actions_t fa;
+        posix_spawn_file_actions_init(&fa);
+        posix_spawn_file_actions_adddup2(&fa, to[0], 0);
+        if (out) posix_spawn_file_actions_adddup2(&fa, from[1], 1);
+        else posix_spawn_file_actions_addopen(&fa, 1, "/dev/null", O_WRONLY, 0);
+        char *argv[] = {clip.data(), const_cast<char *>(what), nullptr};
+        pid_t pid = -1;
+        const int r = posix_spawn(&pid, clip.c_str(), &fa, nullptr, argv, envp.data());
+        posix_spawn_file_actions_destroy(&fa);
+        close(to[0]), close(from[1]);
+        if (r != 0) return close(to[1]), close(from[0]), Say("can't run " + clip + ": " + std::strerror(r)), -1;
+        // ft-clip reads all of its input before it does anything, so this can't wait on it.
+        for (size_t at = 0; in && at < in->size();) {
+            const ssize_t w = write(to[1], in->data() + at, in->size() - at);
+            if (w < 0 && errno == EINTR) continue;
+            if (w <= 0) break;
+            at += size_t(w);
+        }
+        close(to[1]);
+        const int64_t until = MonoNs() + 3'000'000'000;  // its own wait is 2 s
+        bool late = false, big = false;
+        if (out) {
+            char buf[65536];
+            for (;;) {
+                const int64_t left = (until - MonoNs()) / 1'000'000;
+                pollfd p{from[0], POLLIN, 0};
+                if (left <= 0 || poll(&p, 1, int(left)) <= 0) {
+                    late = true;
+                    break;
+                }
+                const ssize_t n = read(from[0], buf, sizeof buf);
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) break;
+                if (out->size() + size_t(n) > clipboard::kMaxText) {  // ft-clip says no first; never more
+                    big = true;
+                    break;
+                }
+                out->append(buf, size_t(n));
+            }
+        }
+        close(from[0]);
+        int st = 0;
+        while (!late && !big) {
+            const pid_t w = waitpid(pid, &st, WNOHANG);
+            if (w == pid) return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+            if (w < 0 || MonoNs() >= until) break;
+            usleep(10'000);
+        }
+        kill(pid, SIGKILL);
+        waitpid(pid, &st, 0);
+        Say(std::string("ft-clip ") + what + (big ? " gave more than 1 MiB" : " didn't finish in time"));
+        return -1;
+    }
+};
+SharedClipboard g_clip;
+
 void HostInputRecord(const unsigned char *data, int length) { g_hostin.Got(data, length); }
 
 int Submit(PDECODE_UNIT du) {
@@ -868,9 +1076,10 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     g_audio.Claim(g_host, MonoNs());
     g_mic.name = "Remote display microphone: " + g_host;
     g_hostin.Open(g_host);
+    g_clip.Open(&client, g_host);
     LiSetFrametopHostInputCallback(HostInputRecord);
     if (LiStartConnection(&client.server.serverInfo, &cfg, &cl, &dr, &ar, nullptr, 0, nullptr, 0) != 0)
-        return viewer.Send("state lost can't connect"), 1;
+        return viewer.Send("state lost can't connect"), g_clip.Close(), 1;
     std::printf("stream: connected, %d kbit/s asked\n", bitrate);
     std::fflush(stdout);
 
@@ -903,10 +1112,14 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
                 if (y != 0) LiSendHighResScrollEvent(short(-y * 120));
                 if (x != 0) LiSendHighResHScrollEvent(short(x * 120));
             } else if (std::sscanf(msg.c_str(), "key %u %d", &c, &down) == 2) {
+                if (down) g_clip.Focus();  // typing came back without a click (an older ft-screens says no "focus")
                 keys.Send(c, down != 0);
+            } else if (msg == "focus") {
+                g_clip.Focus();
             } else if (msg == "blur") {
                 keys.Blur();
                 pad.Off();
+                g_clip.Blur();
             } else if (msg.rfind("pad ", 0) == 0) {
                 pad.Message(msg);
             } else if (std::sscanf(msg.c_str(), "release %d", &i) == 1) {
@@ -923,6 +1136,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
         if (!open) break;
         g_audio.Claim(g_host, MonoNs());
         g_hostin.Tick(MonoNs(), live);
+        g_clip.Tick(MonoNs());
         if (MonoNs() >= micCheck) micCheck = MonoNs() + 3'000'000'000, g_mic.Want(g_audio.on && HostFlag(g_host, "mic"));
         if (dec.Events()) {
             if (!conv.Setup(dec)) break;
@@ -1017,6 +1231,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
         code = client.Launch(cfg, kDisconnectMonitor, false, &message);
         std::printf("release monitor: %d %s\n", code, message.c_str());
     }
+    g_clip.Close();  // a sync under way ends within seconds (the host says no now)
     return ended > 1 ? 1 : 0;
 }
 

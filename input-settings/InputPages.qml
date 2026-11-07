@@ -733,6 +733,45 @@ Item {
                     Kirigami.FormData.label: "Keyboards connected:"
                     text: kpage.keyboards.length ? kpage.keyboards.map(d => d.name).join(", ") : "none"
                 }
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Desktop layout" }
+                Controls.ComboBox {
+                    Kirigami.FormData.label: "Language:"
+                    model: backend.desktopLayouts
+                    textRole: "text"
+                    valueRole: "value"
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 16
+                    readonly property string want: backend.desktopLayout
+                    onWantChanged: currentIndex = indexOfValue(want)
+                    onModelChanged: currentIndex = indexOfValue(want)
+                    Component.onCompleted: currentIndex = indexOfValue(want)
+                    // the saved one again: a pick that didn't save doesn't stay showing
+                    onActivated: { backend.setDesktopLayout(currentValue); currentIndex = indexOfValue(backend.desktopLayout) }
+                }
+                Controls.ComboBox {
+                    Kirigami.FormData.label: "Variant:"
+                    model: backend.desktopVariants
+                    textRole: "text"
+                    valueRole: "value"
+                    visible: count > 1
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 16
+                    readonly property string want: backend.desktopVariant
+                    onWantChanged: currentIndex = indexOfValue(want)
+                    onModelChanged: currentIndex = indexOfValue(want)
+                    Component.onCompleted: currentIndex = indexOfValue(want)
+                    // the saved one again: a pick that didn't save doesn't stay showing
+                    onActivated: { backend.setDesktopVariant(currentValue); currentIndex = indexOfValue(backend.desktopVariant) }
+                }
+                Controls.Label {
+                    text: "What your keyboards type on the Frametop desktop: USB and Bluetooth keyboards, Full Keyboard and dictation. Pick the same language in Full Keyboard. Steam and VR games keep their own layout."
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                }
+                Controls.Button {
+                    text: "More layouts and a switch shortcut…"
+                    icon.name: "input-keyboard"
+                    onClicked: backend.openKeyboardLayouts()
+                }
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Key combinations" }
                 Controls.Switch {
                     Kirigami.FormData.label: "Meta tap:"

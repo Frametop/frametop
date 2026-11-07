@@ -95,6 +95,7 @@ sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands: standard library only)
 import input_commands  # noqa: E402  (the Commands page's logic)
 import travel_mode  # noqa: E402  (SteamVR's travel mode, through vrcmd)
+import desktop_layout  # noqa: E402  (the desktop's keyboard layout, in its kxkbrc)
 import catalog as model_catalog  # noqa: E402
 # How the pickers tag each entry: by status, and builtins by what they are.
 MODEL_TAGS = {"recommended": "Recommended", "testing": "Testing", "older": "Older"}
@@ -238,6 +239,7 @@ ACTION_LABELS = {
     "spin_prev": "Spin the panels: next one on the left to the front",
     "carry_toggle": "Carry the panel under the pointer / carry all",
     "frunner": "Frunner: search apps and remote displays",
+    "os_menu": "OS menu: Frametop's actions in frunner",
     "hands_toggle": "Hand tracking on/off",
     "release_keys": "Release all keys (a stuck modifier)",
     "key": "Pass through as key",
@@ -515,6 +517,7 @@ class Backend(QObject):
     commandAdded = Signal(bool, str)  # startAddCommand's: saved, why not ("" when saved)
     _bluetoothRead = Signal(object)  # refreshBluetooth's devices, from its thread
     travelChanged = Signal()
+    desktopLayoutChanged = Signal()
     _travelRead = Signal(object, str)  # travel mode: on, off or None (unknown), and why it's unknown
     message = Signal(str, bool)  # text, is error
 
@@ -533,6 +536,8 @@ class Backend(QObject):
         self._travel_want = None  # the switch's new state while it's being set, so it doesn't snap back
         self._travelRead.connect(self._travel_read, Qt.QueuedConnection)
         self._adding = False
+        self._xkb = None  # xkeyboard-config's layouts (desktop_layout.read_rules), read once
+        self._kxkbrc_stamp = desktop_layout.stamp()  # the desktop's kxkbrc as the Keyboard page shows it
         self._relay_ok = False
         self._capture_vr = False
         self._capture_combo = ""  # the action a key combination is being captured for
@@ -590,6 +595,7 @@ class Backend(QObject):
 
     def _refresh(self):
         self._send("devices")
+        self._check_desktop_layout()
         self._send("pause ?")
         self._send("vrstatus", HELPER)
         self._send("gaze ?", HELPER)
@@ -1052,6 +1058,92 @@ class Backend(QObject):
         if self._edit_rules(lambda rules: rules.update(vr_keyboard_persist=bool(on))) is NOT_SAVED:
             return
         self.message.emit("Keyboard: " + ("stays open until you hide it" if on else "closes with the text field"), False)
+
+    # --- the desktop's keyboard layout (desktop_layout.py) ---
+    def _xkb_rules(self):
+        if self._xkb is None:
+            self._xkb = desktop_layout.read_rules()
+        return self._xkb
+
+    def _check_desktop_layout(self):
+        """kxkbrc changed outside this app (the desktop's System Settings): show what it says now."""
+        now = desktop_layout.stamp()
+        if now != self._kxkbrc_stamp:
+            self._kxkbrc_stamp = now
+            self.desktopLayoutChanged.emit()
+
+    @Property("QVariantList", notify=desktopLayoutChanged)
+    def desktopLayouts(self):
+        """Every keyboard layout xkeyboard-config has, plus the desktop's own if it isn't listed."""
+        items = desktop_layout.layout_choices(self._xkb_rules())
+        layout = desktop_layout.current()[0]
+        if layout not in {i["value"] for i in items}:
+            items.insert(0, {"value": layout, "text": layout})
+        return items
+
+    @Property(str, notify=desktopLayoutChanged)
+    def desktopLayout(self):
+        return desktop_layout.current()[0]
+
+    @Property(str, notify=desktopLayoutChanged)
+    def desktopVariant(self):
+        return desktop_layout.current()[1]
+
+    @Property("QVariantList", notify=desktopLayoutChanged)
+    def desktopVariants(self):
+        layout, variant = desktop_layout.current()
+        items = desktop_layout.variant_choices(self._xkb_rules(), layout)
+        if variant not in {i["value"] for i in items}:
+            items.append({"value": variant, "text": variant})
+        return items
+
+    def _put_desktop_layout(self, layout, variant):
+        rules = self._xkb_rules()
+        if rules and (layout not in rules or variant and variant not in {n for n, _ in rules[layout][1]}):
+            self.message.emit(f"Keyboard layout {layout}{'(' + variant + ')' if variant else ''} "
+                              "isn't one xkeyboard-config has", True)
+            self.desktopLayoutChanged.emit()
+            return
+        try:
+            desktop_layout.put_first(layout, variant)
+        except OSError as e:
+            self.message.emit(f"Couldn't save the keyboard layout: {e}", True)
+            self.desktopLayoutChanged.emit()
+            return
+        self._kxkbrc_stamp = desktop_layout.stamp()
+        self.desktopLayoutChanged.emit()
+        name = next((v["text"] for v in desktop_layout.variant_choices(rules, layout) if v["value"] == variant), layout)
+        if desktop_layout.reload():
+            self.message.emit(f"Desktop keyboard layout: {name}", False)
+        else:
+            self.message.emit(f"Desktop keyboard layout: {name}, from the next time the Frametop desktop starts", False)
+
+    @Slot(str)
+    def setDesktopLayout(self, layout):
+        if layout and layout != self.desktopLayout:
+            self._put_desktop_layout(layout, "")
+
+    @Slot(str)
+    def setDesktopVariant(self, variant):
+        layout, now = desktop_layout.current()
+        if variant != now:
+            self._put_desktop_layout(layout, variant)
+
+    @Slot()
+    def openKeyboardLayouts(self):
+        """System Settings' Keyboard page in the Frametop desktop: more layouts to switch between,
+        the switching shortcut, and the keyboard model."""
+        env = desktop_layout.desktop_env()
+        if not env:
+            self.message.emit("The Frametop desktop isn't running: its System Settings opens in it", True)
+            return
+        runner = ["distrobox-host-exec"] if shutil.which("distrobox-host-exec") else []
+        try:
+            subprocess.Popen(runner + desktop_layout.settings_command(env), stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            self.message.emit("Opening System Settings' Keyboard page on the desktop", False)
+        except OSError as e:
+            self.message.emit(f"Couldn't open System Settings: {e}", True)
 
     # --- key combinations ---
     @Property(bool, notify=mappingsChanged)

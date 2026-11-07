@@ -24,7 +24,11 @@ bool ft_remote_is(int index);
 void ft_remote_event(const struct ft_event *e);
 // A key (linux KEY_* code) for remote screen `index`.
 void ft_remote_key(int index, uint32_t code, bool pressed);
-// Typing went elsewhere: the keys it holds on the host come up (and gamepad mode's pad goes).
+// Typing went to remote screen `index` (a click or a spin to it): the shared clipboard sends the
+// desktop's text to its host (stream/clipboard.h). Said on every click; ft-stream acts once.
+void ft_remote_focus(int index);
+// Typing went elsewhere: the keys it holds on the host come up (and gamepad mode's pad goes),
+// and the shared clipboard brings the host's text back.
 void ft_remote_blur(int index);
 // Gamepad mode's pad state for remote screen `index`: "pad B LT RT LX LY RX RY" or "pad off"
 // (from the input relay, input/vrpad.py).

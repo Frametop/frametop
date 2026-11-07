@@ -187,6 +187,28 @@ def output_scales():
     return {o["name"]: float(o.get("scale", 1)) for o in data.get("outputs", []) if o.get("name")}
 
 
+def facing_axes(pt, eye):
+    """Right, up and front of a panel at pt facing the eye, upright: FacingPose in screens/posemath.h."""
+    z = [eye[k] - pt[k] for k in range(3)]
+    n = math.sqrt(sum(v * v for v in z)) + 1e-9
+    z = [v / n for v in z]
+    x = [z[2], 0.0, -z[0]]
+    n = math.hypot(x[0], x[2])
+    x = [1.0, 0.0, 0.0] if n < 1e-6 else [x[0] / n, 0.0, x[2] / n]
+    y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]]
+    return x, y, z
+
+
+def face_eye(axes, c, p, eye):
+    """A screen's axes (right, up, front) as they meet the eye at its centre c, turned to meet it the same
+    way at p: a window floated from near a big screen's edge faces you, as the screen does at its centre,
+    instead of the screen's own way, turned away from you (DEE-336). A tilt the screen has stays."""
+    fc, fp = facing_axes(c, eye), facing_axes(p, eye)
+    # axis j = sum over i of fp_i (fc_i . axis_j): the screen's turn from facing, applied at p
+    return tuple(tuple(sum(fp[i][k] * sum(fc[i][m] * a[m] for m in range(3)) for i in range(3)) for k in range(3))
+                 for a in axes)
+
+
 def load_places():
     try:
         with open(PLACES_PATH) as f:
@@ -765,7 +787,8 @@ class Daemon:
         self.screens.ask(f"float {f.slot.index} {f.mpp:.7f} {x} {y} {w} {h} {title}")
 
     def place_panel(self, f, ev):
-        """Put the panel where the window was on its screen, a little in front of it."""
+        """Put the panel where the window was on its screen, a little in front of it, facing you as the
+        screen does (face_eye)."""
         m = re.match(r"WL-(\d+)$", ev["output"])
         reply = self.screens.ask(f"get {int(m.group(1)) + 1}", quiet=True) if m else ""
         if not reply.startswith("ok"):
@@ -777,6 +800,9 @@ class Daemon:
         dx = ((fr["x"] - out["x"]) + fr["w"] / 2 - out["w"] / 2) * s * f.mpp
         dy = ((fr["y"] - out["y"]) + fr["h"] / 2 - out["h"] / 2) * s * f.mpp
         p = [c[k] + xa[k] * dx - ya[k] * dy + za[k] * PULL_OUT for k in range(3)]
+        head = self.screens.ask("head", quiet=True).split()
+        if len(head) >= 4 and head[0] == "ok":
+            xa, ya, za = face_eye((xa, ya, za), c, p, [float(v) for v in head[1:4]])
         self.pose(f, p, xa, ya, za)
 
     def follow(self, f, ev):

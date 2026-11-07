@@ -11,6 +11,8 @@
 # (libpulse-simple), and sends the Frame's microphone back the same way. moonlight-mic.patch adds
 # that to moonlight-common-c (LiSendMicrophoneOpusData), and moonlight-hostin.patch the host's
 # keyboard and mouse (docs/host-input.md); the checkout is made again when either changes.
+# Also stream/build/ft-clip (ft-clip.c, on wlr-data-control: protocols/), the desktop's side of
+# the shared clipboard, which ft-stream runs from its own folder.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 "$root/scripts/sync.sh" >/dev/null
@@ -49,7 +51,12 @@ g++ $flags -I$mlc/src -I$src/libgamestream -I$src/src -o build/ft-stream ft-stre
   build/mlc/libmoonlight-common-c.a build/mlc/enet/libenet.a \
   $(pkg-config --libs gbm egl glesv2 libcurl openssl expat uuid opus libpulse-simple) -lpthread $vr
 strip --strip-unneeded build/ft-stream
-echo "built build/ft-stream"
+wayland-scanner client-header protocols/wlr-data-control-unstable-v1.xml build/include/wlr-data-control-unstable-v1-client-protocol.h
+wayland-scanner private-code protocols/wlr-data-control-unstable-v1.xml build/wlr-data-control-protocol.c
+gcc -std=gnu11 -O2 -Wall -Wextra -Ibuild/include -o build/ft-clip ft-clip.c build/wlr-data-control-protocol.c \
+  $(pkg-config --cflags --libs wayland-client)
+strip --strip-unneeded build/ft-clip
+echo "built build/ft-stream build/ft-clip"
 [ $spikes = 1 ] || exit 0
 g++ $flags -o build/ft-dectest spike/ft-dectest.cpp $(pkg-config --libs gbm egl glesv2) $vr
 g++ $flags -I$mlc/src -I$src/libgamestream -o build/ft-streamtest spike/ft-streamtest.cpp host.cpp build/gamestream/*.o \

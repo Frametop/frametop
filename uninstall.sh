@@ -42,6 +42,7 @@ releases=$HOME/.local/share/frametop/releases  # pack/install-release.sh
 vrpathreg=/opt/steamvr/bin/linuxarm64/vrpathreg
 handsctl=$HOME/.local/bin/ft-handsctl
 cmd_link=$HOME/.local/bin/ft-cmd  # commands/ft_commands.py: the relay links it, and your commands' aliases call it
+ondesktop_link=$HOME/.local/bin/ft-ondesktop  # the same: Steam games' launch options call it (steam/ft-ondesktop)
 bashrc_mark='# Frametop commands as shell aliases'  # ...and ~/.bashrc's two lines that read those aliases
 eye_rate=$HOME/.local/state/frametop/gaze/steamvr-eye-rate  # gaze/eye-rate.py turned the setting on
 dash_debugger=$HOME/.local/state/frametop/pointer/dashboard-debugger  # pointer/dashpatch/ft-dashpatch.py turned it on
@@ -128,13 +129,14 @@ main() {
   mapfile -t entries < <(desktop_entries "$apps")
   [ -L "$handsctl" ] || handsctl=
   [ -L "$cmd_link" ] || cmd_link=
+  [ -L "$ondesktop_link" ] || ondesktop_link=
   grep -qF "$bashrc_mark" "$HOME/.bashrc" 2>/dev/null && bashrc_lines=1
   [ -f "$eye_rate" ] && [ -f "$repo/gaze/eye-rate.py" ] || eye_rate=
   [ -f "$dash_debugger" ] && [ -f "$repo/pointer/dashpatch/ft-dashpatch.py" ] || dash_debugger=
   exists "${eyegrab_files[@]}" "${bt_files[@]}" && sys=1
 
   if [ -n "$override" ] || [ -n "$native_copy" ] || [ ${#units[@]} -gt 0 ] || [ ${#entries[@]} -gt 0 ] ||
-     [ -d "$driver" ] || [ -n "$handsctl" ] || [ -n "$cmd_link" ] || [ "$bashrc_lines" = 1 ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] || [ -n "$eye_rate" ] || [ -n "$dash_debugger" ]; then
+     [ -d "$driver" ] || [ -n "$handsctl" ] || [ -n "$cmd_link" ] || [ -n "$ondesktop_link" ] || [ "$bashrc_lines" = 1 ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] || [ -n "$eye_rate" ] || [ -n "$dash_debugger" ]; then
     step "Step 1 of 2: stop Frametop from starting"
     echo "This removes:"
     [ -n "$override" ] && echo "  - the launcher's Desktop entry (Launch a program -> Desktop opens the stock desktop again)"
@@ -144,6 +146,7 @@ main() {
     [ ${#entries[@]} -gt 0 ] && echo "  - ${#entries[@]} menu entries (Frametop Settings, Reset Screen Layout, ...)"
     [ -n "$handsctl" ] && echo "  - $handsctl"
     [ -n "$cmd_link" ] && echo "  - $cmd_link (your commands' aliases stop working)"
+    [ -n "$ondesktop_link" ] && echo "  - $ondesktop_link (take it out of your Steam games' launch options)"
     [ "$bashrc_lines" = 1 ] && echo "  - the two lines in ~/.bashrc that read your commands' aliases"
     [ -n "$eye_rate" ] && echo "  - gaze mode's SteamVR setting for 90 fps eye cameras (steamvr.gazeDepEyeToHeadEnable)"
     [ -n "$dash_debugger" ] && echo "  - SteamVR's dashboard debugger, which the 3D mouse's window moves use (VRWebHelper.DebuggerEnabled)"
@@ -172,6 +175,7 @@ main() {
     [ ${#entries[@]} -gt 0 ] && run rm -f "${entries[@]}"
     [ -n "$handsctl" ] && run rm -f "$handsctl"
     [ -n "$cmd_link" ] && run rm -f "$cmd_link"
+    [ -n "$ondesktop_link" ] && run rm -f "$ondesktop_link"
     [ "$bashrc_lines" = 1 ] && run sed -i "/^$bashrc_mark/{N;/aliases\.sh\$/d}" "$HOME/.bashrc"
     [ -n "$eye_rate" ] && { run python3 "$repo/gaze/eye-rate.py" off ||
       echo "warning: SteamVR's eye camera setting stays on. Turn it off with: python3 $repo/gaze/eye-rate.py off" >&2; }

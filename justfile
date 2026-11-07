@@ -25,7 +25,7 @@ test-python:
         'layout/countdown/tests/test_*.py' 'models/test/*.py' 'commands/test/*.py' 'input-settings/test/*.py' \
         'input/test/*.py' 'hands/tests/test_*.py' 'hands/rec/tests/*.py' 'recorder/tests/*.py' 'gaze/test/*.py' \
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
-        'tour/test/*.py' 'menu/test/*.py' 'settings/test/*.py' 'remote/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'pointer/tests/*.py' \
+        'tour/test/*.py' 'menu/test/*.py' 'settings/test/*.py' 'remote/test/*.py' 'steam/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'pointer/tests/*.py' \
         'scripts/tests/test_app_imports.py' \
         'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'scripts/tests/test_install_lib.py' \
         'scripts/tests/test_conf_readers.py' 'scripts/tests/test_install_interrupt.py' 'scripts/tests/test_install_keyboard.py' 'docs/tests/*.py' || status=1
@@ -82,6 +82,17 @@ test-c:
     done
     g++ -std=c++17 -Wall -Wextra -Werror -Istream stream/test/hostinput-test.cpp -o build/tests/hostinput-test
     run stream/test/hostinput-test.cpp build/tests/hostinput-test
+    g++ -std=c++17 -Wall -Wextra -Werror -Istream stream/test/clipboard-test.cpp -o build/tests/clipboard-test
+    run stream/test/clipboard-test.cpp build/tests/clipboard-test
+    # ft-clip, the shared clipboard's desktop side, against a wlroots data-control seat of the test's own
+    wayland-scanner client-header stream/protocols/wlr-data-control-unstable-v1.xml \
+      build/tests/wlr-data-control-unstable-v1-client-protocol.h
+    wayland-scanner private-code stream/protocols/wlr-data-control-unstable-v1.xml build/tests/wlr-data-control-protocol.c
+    gcc -std=gnu11 -Wall -Wextra -Werror -DFT_CLIP_MAX=262144 -Ibuild/tests stream/ft-clip.c \
+      build/tests/wlr-data-control-protocol.c $(pkg-config --cflags --libs wayland-client) -o build/tests/ft-clip
+    gcc -std=gnu11 -Wall -Wextra -Werror stream/test/ft-clip-test.c \
+      $(pkg-config --cflags --libs wlroots-0.20 wayland-server) -o build/tests/ft-clip-test
+    run stream/test/ft-clip-test.c build/tests/ft-clip-test build/tests/ft-clip
     gcc -std=gnu11 -Wall -Wextra -Wno-unused-function -Werror -pthread gaze/tracker/tests/eyegrab-files-test.c \
       -o build/tests/eyegrab-files-test
     run gaze/tracker/tests/eyegrab-files-test.c build/tests/eyegrab-files-test

@@ -1376,6 +1376,22 @@ Item {
                         checked: backend.pauseAuto
                         onToggled: backend.setPauseAuto(checked)
                     }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "PC games over Steam Link:"
+                        model: backend.pcGamesModes
+                        textRole: "text"
+                        valueRole: "value"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 20
+                        Component.onCompleted: currentIndex = indexOfValue(backend.pcGames)
+                        onActivated: backend.setPcGames(currentValue)
+                    }
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        text: "Frametop stays up while Steam Link streams the PC's SteamVR Home. It knows a PC game runs "
+                              + "when the PC runs Frametop's Vibepollo and was added in Remote Displays."
+                    }
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Controller gesture" }
                     Controls.ComboBox {

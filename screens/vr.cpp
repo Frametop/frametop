@@ -135,6 +135,7 @@
 
 #include <drm_fourcc.h>
 #include <openvr.h>
+#include "../conf/vrscene.h"  // after openvr.h: ftscene::Classify
 
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -534,7 +535,9 @@ double g_wristAngle = 60;    // a pinned screen shows while you see its front wi
 double g_gestureAngle = 20;  // gesture: look within this of the controller
 std::string g_gestureHand = "left";
 Lasers g_lasers = Lasers::OutsideGames;  // when controllers' lasers work the screens (see the top)
-bool g_gameRunning = false;              // a scene app (VR game) is running
+bool g_gameRunning = false;              // a VR game Frametop gives way to (conf/vrscene.h: not a Steam Link session alone)
+bool g_sceneApp = false;                 // any scene app, Steam Link's client included (Room View's events follow it)
+ftscene::Kind g_scene = ftscene::Kind::None;
 // SteamVR's own state, from ft-dashpatch (pointer/dashpatch), which reads it in the dashboard's
 // page: its controllers in Gamepad mode (the pad goes to a game or the Steam UI), and the Steam
 // game shown in a theater window (a flatscreen game: not a scene app, so not g_gameRunning), and
@@ -1157,14 +1160,21 @@ Mode EffectiveMode() {
 
 // A VR game starting or stopping (checked twice a second) resets the hide/show switch, whose
 // meaning depends on the mode in effect.
+// Steam Link's client is a scene app for the whole session, so it counts only while the relay says
+// a PC game runs that Frametop gives way to (conf/vrscene.h, DEE-346).
 void UpdateGame() {
     if (g_tick % 45) return;
-    const bool running = vr::VRApplications()->GetCurrentSceneProcessId() != 0;
+    const ftscene::Kind kind = ftscene::Classify();
+    if (kind != g_scene) std::printf("scene app: %s\n", ftscene::Name(kind));
+    g_scene = kind;
+    g_sceneApp = kind != ftscene::Kind::None;
+    const bool running = ftscene::GivesWay(kind, kind == ftscene::Kind::Link && ftscene::PcGame());
     if (running == g_gameRunning) return;
     g_gameRunning = running;
     g_manual = false;
     ++g_switchGen;
-    std::printf("%s\n", running ? "a VR game started" : "the VR game ended");
+    std::printf("%s\n", running ? (kind == ftscene::Kind::Link ? "a PC game started over Steam Link" : "a VR game started")
+                                 : "the VR game ended");
 }
 
 bool ModeVisible() {
@@ -2921,7 +2931,7 @@ void UpdateCutouts() {
         g_constructRoomView = se == vr::VRSettingsError_None ? v : true;
     }
     const bool room = g_roomView.Update(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(),
-                                        g_gameRunning, g_constructRoomView);
+                                        g_sceneApp, g_constructRoomView);
     const bool hands = g_cutouts && haveHead && g_handsNow && room;
     double eyes[2][3];
     if (haveHead) handcut::EyePositions(head, eyes);
@@ -6955,12 +6965,12 @@ static void ReadoutCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
                          DeviceLabel(s.dragDevice);
         std::snprintf(reply, size,
                       "ok dashboard=%d steam_front=%d mode=%s manual=%d lasers=%s game=%d paused=%d "
-                      "press=%#x by=%s on=%d catcher=%d drags=%s",
+                      "press=%#x by=%s on=%d catcher=%d drags=%s scene=%s",
                       vr::VROverlay()->IsDashboardVisible() ? 1 : 0, SteamInFront() ? 1 : 0,
                       ModeName(), g_manual ? 1 : 0,
                       LasersName(), g_gameRunning ? 1 : 0, g_paused ? 1 : 0, g_press.buttons,
                       DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_catcherShown ? 1 : 0,
-                      drags.empty() ? "-" : drags.c_str());
+                      drags.empty() ? "-" : drags.c_str(), ftscene::Name(g_scene));
         return;
     }
     case vrcmd::State: {
@@ -7243,7 +7253,7 @@ static void CutoutsCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
                    roomview::ParseForce(arg, &rv)) {
             g_roomView.SetForce(rv);
             g_roomView.Update(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(),
-                              g_gameRunning, g_constructRoomView);
+                              g_sceneApp, g_constructRoomView);
         } else if (std::strcmp(word, "state") != 0)
             return (void)std::snprintf(reply, size, "error cutouts on|off|state|predict on|off|lead <ms>|matte circle|mesh|capsules|"
                                                     "margin <deg> [ms [deg]]|shift off|<spec>|roomview auto|on|off");

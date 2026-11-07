@@ -272,6 +272,8 @@ CONTROLLER_BUTTONS = {
 DEFAULT_PAUSE_GESTURE = {"buttons": ["left/thumbstick", "right/thumbstick"], "presses": 2}
 PAUSE_DESKTOP_MODES = {"hide": "Hide it and slow it down (windows stay open)",
                        "close": "Close it (windows close; it starts again when you resume)"}
+PC_GAMES_MODES = {"hide": "Pause and hide Frametop, as for games on the Frame",
+                  "visible": "Keep Frametop up over them"}
 PAUSE_REASONS = {"game": "a VR game started", "gesture": "controller gesture", "command": "ft-pause",
                  "settings": "from here"}
 # Dictation's controller buttons are on the Voice page: read from SteamVR's web socket, they stay
@@ -1306,6 +1308,21 @@ class Backend(QObject):
     def setPauseDesktop(self, mode):
         if mode in PAUSE_DESKTOP_MODES:
             self._set_rule("pause_desktop", mode, "Paused, the desktop: " + PAUSE_DESKTOP_MODES[mode].split(" (")[0].lower())
+
+    @Property("QVariantList", constant=True)
+    def pcGamesModes(self):
+        return [{"value": k, "text": v} for k, v in PC_GAMES_MODES.items()]
+
+    @Property(str, notify=mappingsChanged)
+    def pcGames(self):
+        """PC games streamed over Steam Link (input/pc_game.py): "hide" (the default) or "visible"."""
+        mode = read_json(RULES_PATH).get("pc_games")
+        return mode if mode in PC_GAMES_MODES else "hide"
+
+    @Slot(str)
+    def setPcGames(self, mode):
+        if mode in PC_GAMES_MODES:
+            self._set_rule("pc_games", mode, "PC games over Steam Link: " + PC_GAMES_MODES[mode].split(",")[0].lower())
 
     @Property(bool, notify=mappingsChanged)
     def pauseSound(self):

@@ -222,6 +222,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     only; from this user only), as a button would ({"t": "action"}, or an error)
   vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
+  vrlink 1|0        from the pointer helper: Steam Link's client is the scene app (on a change and
+                    every 5 s), so pc_game.py asks the PC whether it runs a game
   vrdash 1|0        from the pointer helper: the dashboard is open (on a change and every 5 s), so
                     hand tracking parked for a game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
   gamepad desktop|remote|off   from ft-screens: SteamVR's Gamepad mode is Frametop's, for a desktop
@@ -271,6 +273,7 @@ import sys
 import time
 
 import game_pause
+import pc_game
 from ft_evdev import (  # the Linux input ABI (input.h, uinput.h)
     EV_KEY,
     EV_REL,
@@ -1309,6 +1312,7 @@ class Relay:
         self.desktop_layout = DesktopLayout()
 
         self.pause = game_pause.GamePause(log, self.pause_changed, VR_BUTTONS)
+        self.pc_game = pc_game.PcGame(log)
         self.gamepad = vrpad.GamepadMode(log, self.pad_send, lambda: vrpad.VirtualPad(log, self.stored, notify),
                                          lambda on: self.pause.set_pad(on))
         self.load_config()
@@ -1352,6 +1356,7 @@ class Relay:
             rules = read_rules("")   # the defaults (no file there)
             self.pause.configure(rules)
         self.rules = rules
+        self.pc_game.configure(rules)
         self.lease.configure(pointer_on, sensitivity, idle, wake_counts, self.pause.paused)
         self.gamepad.sound_on = self.pause.settings["sound"]
         # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
@@ -2110,6 +2115,9 @@ class Relay:
                 self.gamepad.stop("a VR game started")
             self.pause.game_state(words[1] == "1", now)
             return
+        if cmd == "vrlink" and len(words) == 2:
+            self.pc_game.link_state(words[1] == "1", now)
+            return
         if cmd == "vrdash" and len(words) == 2:
             self.pause.dashboard_state(words[1] == "1")
             self.gamepad.dashboard_state(words[1] == "1")
@@ -2331,6 +2339,7 @@ class Relay:
 
     def run(self):
         """The loop: devices, the control socket and the timers."""
+        self.pc_game.start()
         while True:
             now = time.monotonic()
             pointer = self.lease.current

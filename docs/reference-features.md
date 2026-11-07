@@ -39,6 +39,7 @@ Ways to pause and resume:
 - The controller gesture, by default both thumbsticks clicked together twice: both go down within 0.3 seconds of each other, and the second time within 0.7 seconds of the first. Once it goes off, it's ignored for 3 seconds, so a repeat or a triple press doesn't toggle Frametop straight back. The relay reads it from vrserver's web socket (`input/vrws.py`), which works whatever has input focus and takes nothing from the game, so the game sees the clicks too. With only one controller connected, a gesture with a button on each controller is that controller's button alone, clicked twice (`one_controller`), so the default works with one controller too. The Game optimization page changes it: one or two of the buttons the Controllers page lists, pressed once or twice (one button always takes two), or none.
 - The Pause/resume Frametop action, on a mouse button, a key combination, or a controller button (outside games, like every mapped controller button).
 - VR games, with Pause while a VR game runs on (`pause_auto`, the default). The pointer helper tells the relay when a scene app starts and ends (`vrgame 1|0`, repeated every 5 seconds). A game starting pauses Frametop. A pause that starts while a game runs ends 5 seconds after the game does, unless another game starts first. Resumed during a game, Frametop stays on until that game ends. A pause that starts outside a game lasts until you resume. Flatscreen games aren't scene apps, so they don't pause it.
+- PC games over Steam Link, as the Game optimization page says (`pc_games`: `hide`, the default, or `visible`). While a PC streams, Steam Link's client is the scene app, with or without a game on the PC, so it alone doesn't count as a game: Frametop stays up over the PC's SteamVR Home. The pointer helper tells the relay while it's the scene app (`vrlink 1|0`), and the relay asks each PC that Remote Displays added what its SteamVR runs (`input/pc_game.py`, `GET /api/frametop/vrscene` with its token, every 3 seconds). While one runs a game and the setting is `hide`, the relay writes `1` to `$XDG_RUNTIME_DIR/frametop-pcgame`, and the helper and ft-screens treat Steam Link as a game (`conf/vrscene.h`): Frametop pauses and hides as for a game on the Frame. A PC without Frametop's Vibepollo never says it runs a game.
 - From a terminal or a script:
 
 ```
@@ -46,6 +47,7 @@ input/ft-pause on | off | toggle   # pause or resume
 input/ft-pause status              # the state as JSON (the relay's "pause ?")
 input/vrws.py 10                   # the controllers' buttons from vrserver's web socket, for 10 s
 input/test/pause-test.py           # the gesture and the automatic pause, offline
+input/test/pcgame-test.py          # PC games over Steam Link, offline
 input/test/pause-buttons-test.py   # a click held into a pause comes up, offline
 ```
 

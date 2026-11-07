@@ -543,6 +543,7 @@
 
 #include "../../conf/ft_conf.h"
 #include "../../conf/ftsock.h"
+#include "../../conf/vrscene.h"
 #include "../../hands/include/fh_events.h"
 #include "../../hands/include/fh_ray.h"
 #include "../../screens/posemath.h"
@@ -1378,6 +1379,7 @@ struct Pointer {
     Clock::time_point handOkAt{};  // the gestures file last read whole
     // Gaze mode outside games, and its dot (see the top): lastMove/lastHeld/pulseAt.
     bool inGame = false, gazeAwake = false, gameSent = false;
+    bool inLink = false, linkSent = false;  // Steam Link's client is the scene app (DEE-346)
     Clock::time_point inGameAt{}, gazeAwakeAt{}, gameSentAt{};
     Clock::time_point lastMove{}, lastHeld{}, pulseAt{};
     // The left button, as sent to the driver; pressRight: the next press is the right button
@@ -2533,7 +2535,11 @@ void Pointer::GazeAwake() {
     const auto t = Clock::now();
     if (t - inGameAt > std::chrono::milliseconds(500)) {
         inGameAt = t;
-        inGame = vr::VRApplications()->GetCurrentSceneProcessId() != 0;
+        // Steam Link's client counts only while the relay says a PC game runs that Frametop gives
+        // way to (conf/vrscene.h); the relay polls the PC while "vrlink 1" holds.
+        const ftscene::Kind kind = ftscene::Classify();
+        inLink = kind == ftscene::Kind::Link;
+        inGame = ftscene::GivesWay(kind, inLink && ftscene::PcGame());
     }
     // Hand gestures in the last two minutes keep it the same way.
     const bool handsRecent = handsOn && handUsed != Clock::time_point{} && t - handUsed < std::chrono::minutes(2);
@@ -2551,10 +2557,12 @@ void Pointer::GazeAwake() {
     }
     // The relay pauses Frametop for VR games (input/game_pause.py). Repeated, so a relay
     // that restarts learns it, and silence (SteamVR gone) ends the game there.
-    if (inGame != gameSent || t - gameSentAt > std::chrono::seconds(5)) {
+    if (inGame != gameSent || inLink != linkSent || t - gameSentAt > std::chrono::seconds(5)) {
         gameSent = inGame;
+        linkSent = inLink;
         gameSentAt = t;
         SendTo(out, FT_SOCK_RELAY, inGame ? "vrgame 1" : "vrgame 0");
+        SendTo(out, FT_SOCK_RELAY, inLink ? "vrlink 1" : "vrlink 0");
     }
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline test of conf/ft_hostapi.py: the token goes with the question, a pinned key must match,
-and anything else (no token, an error status, not JSON, no answer) is None. The connection is a
+and anything else (no token, an error status, not JSON, no answer) is None. An instance with a
+token of its own (ADDRESS-PORT.token) is asked on its own Web UI port; a POST sends its body. The connection is a
 stub holding a certificate made here, so nothing reaches a PC.
 
   conf/test/hostapi-test.py
@@ -66,8 +67,9 @@ class Conn:
         if self.fail:
             raise ConnectionRefusedError()
 
-    def request(self, method, path, headers):
+    def request(self, method, path, body=None, headers=None):
         self.sent = (method, path, headers)
+        self.data = body
 
     def getresponse(self):
         return Reply(self.status, self.body)
@@ -81,8 +83,18 @@ def write(name, text):
         f.write(text)
 
 
+ports = []
+
+
+def connector(conn):
+    def connect(a, p, t):
+        ports.append(p)
+        return conn
+    return connect
+
+
 def get(conn, address="192.0.2.20", **kw):
-    return ft_hostapi.get_json(address, "/api/frametop/vrscene", connect=lambda a, t: conn, **kw)
+    return ft_hostapi.get_json(address, "/api/frametop/vrscene", connect=connector(conn), **kw)
 
 
 check("no token: None, nothing asked", (get(Conn(DER)), len(Conn.made)), (None, 1))
@@ -109,6 +121,28 @@ check("the dongle's address with the host's token", get(c, address="10.35.78.20"
       {"scene": "game"})
 check("...asked with that token", c.sent[2], {"Authorization": "Bearer abc123"})
 check("pin cached per certificate", len(ft_hostapi._pins), 2)
+check("...on the shared Web UI port", ports[-1], 47990)
+
+c = Conn(DER)
+check("another port without a token of its own: the shared one", get(c, port=48989), {"scene": "game"})
+check("...on 47990", (ports[-1], c.sent[2]), (47990, {"Authorization": "Bearer abc123"}))
+write("192.0.2.20-48989.token", "own456\n")
+c = Conn(OTHER)
+check("its own token, no pin of its own: any key", get(c, port=48989), {"scene": "game"})
+check("...its token, on its Web UI port", (ports[-1], c.sent[2]), (48990, {"Authorization": "Bearer own456"}))
+write("192.0.2.20-48989.pin", ft_hostapi.spki_pin(DER) + "\n")
+check("...with its own pin: another key is refused", get(Conn(OTHER), port=48989), None)
+check("47989 is the shared token's", ft_hostapi.token_path("192.0.2.20", 47989), os.path.join(tmp, "192.0.2.20.token"))
+
+c = Conn(DER, body=b'{"output": "FT-W1"}')
+got = ft_hostapi.post_json("192.0.2.20", "/api/frametop/windows/open", {"address": "0x1"}, connect=connector(c),
+                           port=48989)
+check("POST: status and answer", got, (200, {"output": "FT-W1"}))
+check("...its body as JSON", (c.sent[0], c.sent[2].get("Content-Type"), c.data),
+      ("POST", "application/json", b'{"address": "0x1"}'))
+check("an error status keeps the answer", ft_hostapi.post_json(
+    "192.0.2.20", "/x", {}, connect=connector(Conn(DER, status=400, body=b'{"error": "no window"}')), port=48989),
+    (400, {"error": "no window"}))
 
 for name in os.listdir(tmp):
     os.unlink(os.path.join(tmp, name))

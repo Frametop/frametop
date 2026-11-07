@@ -27,8 +27,10 @@ constexpr int kGameStreamPort = 47989;  // a host's HTTP port; its Web UI is on 
 
 // ~/.local/share/frametop-stream/ID: one client's certificate, key and unique id.
 std::string KeyDir(const std::string &id);
-// The host's API token: ~/.local/share/frametop-stream/hosts/HOST.token.
-std::string TokenFile(const std::string &host);
+// The host's API token: ~/.local/share/frametop-stream/hosts/HOST.token. An instance on a port
+// of its own (a host's Frametop windows, on 48989) may have one of its own, HOST-PORT.token:
+// with `port`, that one when it's there.
+std::string TokenFile(const std::string &host, int port = 0);
 // HOST[:PORT] (Moonlight's form) -> HOST and PORT (0 without one); false if PORT isn't a port.
 bool SplitPort(std::string *host, int *port);
 
@@ -37,7 +39,9 @@ bool SplitPort(std::string *host, int *port);
 struct WebApi {
     std::string base, token, login, pin;  // login: "USER:PASSWORD"; pin: the Web UI's public key,
                                           // "sha256//BASE64" (curl's form)
-    bool Load(const std::string &host, const std::string &file);
+    // The token in `file`, for the Web UI of the instance on `port` (0: 47989's, as every
+    // instance shared one token before HOST-PORT.token).
+    bool Load(const std::string &host, const std::string &file, int port = 0);
     // The login as two lines (user name, password) from `in`, for the instance on `port`.
     bool LoadLogin(const std::string &host, int port, FILE *in);
     // The HTTP status (or -1), with the response's JSON in *out.

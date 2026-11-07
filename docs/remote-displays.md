@@ -220,6 +220,25 @@ Vibepollo has no macOS build. Sunshine (labelled experimental on macOS) is the o
 
 Full-motion video can still reach the encoder's limit. Sunshine forces VideoToolbox's low-latency mode, which roughly halves throughput (#5814); an M4 Pro managed 0.36-0.46 Gpix/s in that mode. The super ultrawide at 60 fps is 0.44 Gpix/s; the test Mac is an M3 Max, with two encode engines. Open PR #5817 (ScreenCaptureKit + OBS's VideoToolbox encoder) may raise the limit. Its capture (AVFoundation) also sends 30-55 fps of a still desktop, not `minimum_fps_target`'s 1 fps, at a low bitrate (1-6 Mbit/s).
 
+### PC app windows (split compute, DEE-345)
+
+A single app window on a PC can be a panel of its own. The host runs a second Vibepollo inside the user's desktop session: the "Frametop windows" instance. Its port is its own (48989 on oma7), and so are its API token (`ADDRESS-PORT.token` next to `ADDRESS.token`, as ft-stream and `conf/ft_hostapi.py` read it) and its clients. The machine instance keeps streaming whole displays as before.
+
+**Linux, Hyprland (built 2026-11-07, fork branch `frametop/windows`).** The instance starts with `VIBEPOLLO_SESSION_BACKEND=hyprland-wlr` and `capture = wlr`. Its display list is Hyprland's outputs, headless ones included, so the display role streams any of them (`hyprland_wlr_backend_t` in `display_backend.cpp`). Opening a window (`POST /api/frametop/windows/open`, in `hyprland_windows.cpp`) does four things:
+
+1. It makes a headless output, FT-W1 and up, far to the right of the real monitors (x = 30000 and up), at the panel's size.
+2. It moves the window to that output's workspace without following it, so the desktop's focus stays where it was.
+3. It sets the window fullscreen in the compositor only (`fullscreen_state` internal 2, client 0). The app isn't told, and the desktop's bar and dock stay under it.
+4. Its answer is the output's name. ft-stream then streams `display:FT-Wn`.
+
+A resize sets the output's mode, and the window follows. Releasing a window restores its fullscreen state, moves it back to the workspace it came from, and removes the output. The host does that by itself for an output no stream has captured for 60 s, and it drops the output of a window that closed. At start, it puts back windows a crash left out (`frametop_windows.json` in its state folder). `GET /api/frametop/windows` lists the windows, and `/apps` the desktop apps. `POST /open {"app": ID}` starts one on a new output and waits for its window.
+
+On the Frame, `ft-layout window list|apps|open|launch|close` drives it. A window panel is a remote display with `"window": true`, `app` `window:ADDRESS` and the instance's `port`. Its client comes from the host's pool (`frametop-HOST-win1` and up), so the host's client list stays short. ft-stream asks for the window on each start, so a window that went back after the grace period comes out again on the next reconnect. A host gets its instance with `ft-layout remote host NAME windows=PORT`.
+
+Encoding on oma7 uses VAAPI on the Intel GPU (`encoder = vaapi`, `adapter_name = /dev/dri/renderD129`): NVENC fails with wlr-screencopy's dmabufs there.
+
+While the host's session is locked, Hyprland draws only the lock screen, so window outputs stream black. The list answer says so (`"locked": true`), and `ft-layout window list` prints it. A window whose workspace emptied when it left comes back to that workspace on the monitor it came from: Hyprland makes the recreated workspace on the window output, and removing that output would hand it to the desktop's own rules (omarchy renumbers it into another monitor's block). omarchy also gives each FT-W output a block of ten workspaces of its own (FT-W1 gets 31-40 on oma7) and keeps it in its state file.
+
 ### What stock hosts cost us
 
 | Limit | Effect | What can be done |

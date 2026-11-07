@@ -136,7 +136,13 @@ std::string KeyDir(const std::string &id) {
     return std::string(home ? home : ".") + "/.local/share/frametop-stream/" + id;
 }
 
-std::string TokenFile(const std::string &host) { return KeyDir("hosts") + "/" + host + ".token"; }
+std::string TokenFile(const std::string &host, int port) {
+    if (port && port != kGameStreamPort) {
+        const std::string own = KeyDir("hosts") + "/" + host + "-" + std::to_string(port) + ".token";
+        if (std::ifstream(own).good()) return own;
+    }
+    return KeyDir("hosts") + "/" + host + ".token";
+}
 
 bool SplitPort(std::string *host, int *port) {
     *port = 0;
@@ -151,10 +157,12 @@ bool SplitPort(std::string *host, int *port) {
     return *port > 0 && *port < 65535;
 }
 
-bool WebApi::Load(const std::string &host, const std::string &file) {
+bool WebApi::Load(const std::string &host, const std::string &file, int port) {
     std::ifstream f(file);
     if (!(f >> token)) return false;
-    base = "https://" + host + ":" + std::to_string(kGameStreamPort + 1);
+    // An instance with a token of its own (a host's second Vibepollo, for its windows) has its
+    // Web UI next to it, as LoadLogin's.
+    base = "https://" + host + ":" + std::to_string((port ? port : kGameStreamPort) + 1);
     // The Web UI's public key as Remote Displays saw it when signing in (HOST.pin next to
     // HOST.token): another one is refused. Without one, any (a host from make-frametop-token).
     const std::string pinFile = file.size() > 6 && file.compare(file.size() - 6, 6, ".token") == 0

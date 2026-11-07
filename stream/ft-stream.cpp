@@ -18,7 +18,13 @@
 //
 // HOST may be HOST:PORT, a host whose HTTP port isn't 47989 (a Mac's second Sunshine instance
 // is on 48089). Keys live in ~/.local/share/frametop-stream/NAME, the host's token in
-// ~/.local/share/frametop-stream/hosts/HOST.token (see host.h), named without the port.
+// ~/.local/share/frametop-stream/hosts/HOST.token (see host.h), named without the port, or
+// HOST-PORT.token for an instance with a token of its own (a host's Frametop windows).
+//
+// --app window:ADDRESS streams one app window of a host's Frametop windows instance (a
+// Vibepollo in the host's desktop session): it asks the host to put that window on an output of
+// its own at --size (POST /api/frametop/windows/open; again on every start, so a window that
+// went back comes out again) and streams that output as a display.
 //
 // "stream" is started by ft-screens (screens/remote.c), which gives it one end of a
 // SOCK_SEQPACKET socket pair as fd N. Messages are text, one per packet.
@@ -999,6 +1005,21 @@ int LayoutPort(const std::string &host, const std::string &id) {
     return 0;
 }
 
+// --app window:ADDRESS: the host puts the window on an output of its own, width x height.
+// The HTTP status (400 when the window isn't there), with the output's name or the host's why.
+long OpenWindow(WebApi &api, const std::string &address, int width, int height, std::string *output,
+                std::string *why) {
+    const nlohmann::json body = {{"address", address}, {"width", width}, {"height", height}};
+    nlohmann::json r;
+    const long code = api.Call("POST", "/api/frametop/windows/open", &body, &r);
+    if (code == 200 && r.is_object() && r.contains("output") && r["output"].is_string()) {
+        *output = r["output"].get<std::string>();
+        return code;
+    }
+    *why = r.is_object() ? r.value("error", "") : "";
+    return code == 200 ? -1 : code;
+}
+
 int Stream(Client &client, const std::string &app, int fd, int width, int height, int fps, int bitrate) {
     Viewer viewer{fd};
     // ft-screens' event loop blocks SIGTERM (it takes it through a signalfd), and an older
@@ -1263,9 +1284,13 @@ int main(int argc, char **argv) {
         else if (a == "--fd") fd = std::atoi(v), ++i;
         else return std::fprintf(stderr, "unknown option %s\n", argv[i]), 2;
     }
-    if (tokenFile.empty()) tokenFile = TokenFile(host);
+    if (!port && !id.empty() && (port = LayoutPort(host, id)))
+        std::printf("%s: %s's port is %d (the layout)\n", host.c_str(), id.c_str(), port);
+    const std::string shared = TokenFile(host);
+    if (tokenFile.empty()) tokenFile = TokenFile(host, port);
     WebApi api;
-    const bool haveToken = login ? api.LoadLogin(host, port, stdin) : api.Load(host, tokenFile);
+    const bool haveToken =
+        login ? api.LoadLogin(host, port, stdin) : api.Load(host, tokenFile, tokenFile == shared ? 0 : port);
     if (login && !haveToken) return std::fprintf(stderr, "--login: no user name and password on stdin\n"), 2;
     if (cmd == "monitors") {
         if (!haveToken) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
@@ -1281,8 +1306,6 @@ int main(int argc, char **argv) {
     // Moonlight's rule of thumb, about 20 Mbit/s for 1080p60, scaled by pixels and fps.
     if (!bitrate) bitrate = int(std::min(150000.0, 20000.0 * width * height * fps / (1920.0 * 1080 * 60)));
 
-    if (!port && (port = LayoutPort(host, id)))
-        std::printf("%s: %s's port is %d (the layout)\n", host.c_str(), id.c_str(), port);
     g_host = host;
     const std::string route = cmd == "stream" ? Route(host, port) : host;
     if (route.empty()) {  // dongle only, and it isn't up: ft-screens tries again later
@@ -1316,6 +1339,18 @@ int main(int argc, char **argv) {
     }
     if (cmd == "stream") {
         if (fd < 0) return std::fprintf(stderr, "stream needs --fd: ft-screens starts it\n"), 2;
+        if (app.rfind("window:", 0) == 0) {
+            if (!haveToken || login) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
+            std::string output, why;
+            const long code = OpenWindow(api, app.substr(7), width, height, &output, &why);
+            if (code != 200) {
+                std::fprintf(stderr, "window %s: %ld %s\n", app.c_str() + 7, code, why.c_str());
+                Viewer{fd}.Send("state lost " + std::to_string(code == 400 ? 404 : code) + " " + why);
+                return 1;
+            }
+            std::printf("window %s is on %s\n", app.c_str() + 7, output.c_str());
+            app = "display:" + output;
+        }
         return Stream(client, app, fd, width, height, fps, bitrate);
     }
     return std::fprintf(stderr, "unknown command %s\n", cmd.c_str()), 2;

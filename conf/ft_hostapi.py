@@ -6,9 +6,13 @@ and, when it was signed in from there, the public key pin its certificate had th
 a pin there must match, or the answer isn't read. A host without a pin file (one paired with
 make-frametop-token) takes any certificate, as ft-stream does.
 
+An instance on a port of its own (a host's Frametop windows, on 48989) may have a token of its
+own, ADDRESS-PORT.token (and ADDRESS-PORT.pin): with port=PORT, that one and that instance's Web
+UI (PORT + 1) when it's there, else the shared token and 47990, as ft-stream does (stream/host.h).
+
 get_json(address, path) is one GET with the token, its JSON answer or None (no token, no answer,
-a wrong key, not JSON). Standard library plus the openssl command for the pin; a pin is worked out
-once per certificate.
+a wrong key, not JSON); post_json(address, path, body) one POST, (status, JSON answer or None).
+Standard library plus the openssl command for the pin; a pin is worked out once per certificate.
 """
 
 import base64
@@ -25,12 +29,24 @@ WEB_UI_PORT = 47990
 _pins = {}  # sha256 of a certificate -> its public key pin
 
 
-def token_path(address):
+GAMESTREAM_PORT = 47989
+
+
+def token_path(address, port=0):
+    if port and port != GAMESTREAM_PORT:
+        own = os.path.join(TOKEN_DIR, f"{address}-{port}.token")
+        if os.path.exists(own):
+            return own
     return os.path.join(TOKEN_DIR, f"{address}.token")
 
 
-def pin_path(address):
-    return os.path.join(TOKEN_DIR, f"{address}.pin")
+def pin_path(address, port=0):
+    return token_path(address, port)[:-len(".token")] + ".pin"
+
+
+def web_ui_port(address, port=0):
+    """The Web UI port the token for (address, port) is for."""
+    return port + 1 if token_path(address, port) != token_path(address) else WEB_UI_PORT
 
 
 def _first_word(path):
@@ -54,30 +70,51 @@ def spki_pin(der):
     return _pins[digest]
 
 
-def get_json(address, path, timeout=2.0, connect=None, token_address=None):
-    """GET https://ADDRESS:47990PATH with the token for token_address (address by default), or
-    None. connect(address, timeout) -> an unconnected HTTPSConnection, for tests."""
+def request(address, method, path, body=None, timeout=2.0, connect=None, token_address=None, port=0):
+    """(HTTP status, JSON answer or None): status 0 when there's no token, no answer or a wrong
+    key. connect(address, port, timeout) -> an unconnected HTTPSConnection, for tests."""
     key = token_address or address
-    token = _first_word(token_path(key))
+    token = _first_word(token_path(key, port))
     if not token:
-        return None
-    known = _first_word(pin_path(key))
+        return 0, None
+    known = _first_word(pin_path(key, port))
     if connect is None:
         ctx = ssl.create_default_context()
         ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE  # self-signed: pinned below
-        connect = lambda a, t: http.client.HTTPSConnection(a, WEB_UI_PORT, timeout=t, context=ctx)
-    conn = connect(address, timeout)
+        connect = lambda a, p, t: http.client.HTTPSConnection(a, p, timeout=t, context=ctx)
+    conn = connect(address, web_ui_port(key, port), timeout)
     try:
         conn.connect()
         if known and spki_pin(conn.sock.getpeercert(binary_form=True)) != known:
-            return None
-        conn.request("GET", path, headers={"Authorization": f"Bearer {token}"})
+            return 0, None
+        headers = {"Authorization": f"Bearer {token}"}
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode()
+            headers["Content-Type"] = "application/json"
+        conn.request(method, path, body=data, headers=headers)
         reply = conn.getresponse()
-        body = reply.read(65536)
-        if reply.status != 200:
-            return None
-        return json.loads(body)
-    except (OSError, ValueError, http.client.HTTPException, subprocess.CalledProcessError):
-        return None
+        raw = reply.read(1 << 20)
+        try:
+            answer = json.loads(raw) if raw else None
+        except ValueError:
+            answer = None
+        return reply.status, answer
+    except (OSError, http.client.HTTPException, subprocess.CalledProcessError):
+        return 0, None
     finally:
         conn.close()
+
+
+def get_json(address, path, timeout=2.0, connect=None, token_address=None, port=0):
+    """GET https://ADDRESS:47990PATH with the token for token_address (address by default): its
+    JSON answer, or None."""
+    status, answer = request(address, "GET", path, timeout=timeout, connect=connect, token_address=token_address,
+                             port=port)
+    return answer if status == 200 else None
+
+
+def post_json(address, path, body, timeout=20.0, connect=None, token_address=None, port=0):
+    """POST BODY (JSON) to PATH: (HTTP status, JSON answer or None)."""
+    return request(address, "POST", path, body=body, timeout=timeout, connect=connect, token_address=token_address,
+                   port=port)

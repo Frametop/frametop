@@ -1,0 +1,146 @@
+#!/bin/sh
+# ft-ondesktop: start a Steam game on the Frametop desktop, as one of its windows, instead of in
+# SteamVR's theater. Put it in the game's launch options (Steam > the game > Properties > General):
+#
+#   /home/<you>/.local/bin/ft-ondesktop %command%
+#
+# (`ft-ondesktop --launch-option` prints that line with your home folder in it.) The game's window
+# then opens on a Frametop screen, so it can go on a portrait screen, or float (the float key,
+# Meta+Shift+F) and roll there, like any desktop window: for TATE shmups and pinball tables.
+#
+#   ft-ondesktop COMMAND [ARG...]  run COMMAND on the Frametop desktop if it's running, else as is
+#   ft-ondesktop --check           say whether the Frametop desktop is running, and its display
+#   ft-ondesktop --launch-option   print the launch option to paste into Steam
+#
+# How: Steam starts games for gamescope's Xwayland, and gamescope gives each app's
+# window its theater overlay (valve.steam.desktopgame.<app id>). This points the game at the
+# Frametop desktop's Xwayland instead, the DISPLAY and XAUTHORITY of its Plasma shell (the one with
+# Frametop's config folder), so gamescope never sees a window for it and makes no theater. Games
+# run as X11 clients either way. It also turns gamescope's Vulkan layer off (a game outside
+# gamescope fails to present through it), takes the desktop's cursor theme (Steam's is 256 px), and
+# leaves Frametop's gamepad (input/vrpad.py, 045e:028e) out of SDL's ignore list, so a game Steam
+# started can read it in Frametop's gamepad mode (only while it's the one 045e:028e device: a real
+# Xbox 360 pad has the same ids, and Steam Input gives the game its own copy of that one).
+# Everything else stays as Steam set it: the user's
+# runtime folder and D-Bus, audio, Proton and the Steam Linux Runtime, the overlay.
+#
+# With no Frametop desktop (stopped, closed for a VR game, or streaming remote displays only), the game
+# starts as is, in the theater. The game's window lives in the desktop: restarting the desktop ends
+# the game. Each start adds a line to ~/.local/state/frametop/ondesktop.log.
+#
+# Plain sh, not Python: it runs in the environment Steam sets up for the game (its overlay
+# preloaded, its runtime's library path), where the less it loads the better.
+# FT_ONDESKTOP_PROC, FT_ONDESKTOP_X11 and FT_ONDESKTOP_INPUT stand in for /proc, /tmp/.X11-unix
+# and /proc/bus/input/devices (the tests).
+set -u
+
+proc=${FT_ONDESKTOP_PROC:-/proc}
+x11=${FT_ONDESKTOP_X11:-/tmp/.X11-unix}
+input=${FT_ONDESKTOP_INPUT:-/proc/bus/input/devices}
+config=$HOME/.config/frametop
+link=$HOME/.local/bin/ft-ondesktop
+log=$HOME/.local/state/frametop/ondesktop.log
+
+usage() {
+  cat >&2 <<'EOF2'
+usage: ft-ondesktop COMMAND [ARG...]  run COMMAND on the Frametop desktop if it's running, else as is
+       ft-ondesktop --check           say whether the Frametop desktop is running, and its display
+       ft-ondesktop --launch-option   print the launch option to paste into Steam
+In a Steam game's launch options: /path/to/ft-ondesktop %command%
+EOF2
+  exit 2
+}
+
+# The Frametop desktop's X display: sets display, xauth, cursor_theme and cursor_size from its
+# Plasma shell's environment. False if it isn't running or its Xwayland socket is gone.
+find_desktop() {
+  display="" xauth="" cursor_theme="" cursor_size=""
+  for dir in "$proc"/[0-9]*; do
+    { read -r comm < "$dir/comm"; } 2>/dev/null || continue
+    [ "$comm" = plasmashell ] || continue
+    env=$( { tr '\0' '\n' < "$dir/environ"; } 2>/dev/null) || continue
+    printf '%s\n' "$env" | grep -qxF "XDG_CONFIG_HOME=$config" || continue
+    printf '%s\n' "$env" | grep -q '^XDG_RUNTIME_DIR=.*/frametop$' || continue
+    display=$(printf '%s\n' "$env" | sed -n 's/^DISPLAY=//p' | head -n 1)
+    case $display in
+      :[0-9]*) ;;
+      *) display=; continue ;;
+    esac
+    n=${display#:}
+    n=${n%%.*}
+    [ -S "$x11/X$n" ] || { display=; continue; }
+    xauth=$(printf '%s\n' "$env" | sed -n 's/^XAUTHORITY=//p' | head -n 1)
+    cursor_theme=$(printf '%s\n' "$env" | sed -n 's/^XCURSOR_THEME=//p' | head -n 1)
+    cursor_size=$(printf '%s\n' "$env" | sed -n 's/^XCURSOR_SIZE=//p' | head -n 1)
+    return 0
+  done
+  return 1
+}
+
+# True if Frametop's virtual pad is the only 045e:028e input device (none from a real Xbox 360 pad).
+only_our_pad() {
+  awk -F'"' '
+    /^I:/ { pad = / Vendor=045e / && / Product=028e / }
+    /^N:/ && pad { if ($2 == "frametop virtual gamepad") ours++; else others++ }
+    END { exit !(ours > 0 && others == 0) }' "$input" 2>/dev/null
+}
+
+# SDL's ignore list ("0xVVVV/0xPPPP,...") without Frametop's virtual Xbox 360 pad, 045e:028e.
+without_our_pad() {
+  out=
+  old_ifs=$IFS
+  IFS=,
+  set -f
+  for entry in $1; do
+    vid=$(printf '%d' "${entry%%/*}" 2>/dev/null) || vid=
+    pid=$(printf '%d' "${entry#*/}" 2>/dev/null) || pid=
+    [ "$vid" = 1118 ] && [ "$pid" = 654 ] && continue
+    out=${out:+$out,}$entry
+  done
+  set +f
+  IFS=$old_ifs
+  printf '%s' "$out"
+}
+
+note() {
+  mkdir -p "${log%/*}" 2>/dev/null &&
+    printf '%s app %s: %s\n' "$(date '+%F %T')" "${SteamAppId:-${SteamGameId:-?}}" "$1" >> "$log" 2>/dev/null
+  printf 'ft-ondesktop: %s\n' "$1" >&2
+}
+
+case ${1:-} in
+  ""|-h|--help) usage ;;
+  --launch-option)
+    case $link in
+      *[!A-Za-z0-9/._+-]*) printf '"%s" %%command%%\n' "$link" ;;  # a home folder with a space
+      *) printf '%s %%command%%\n' "$link" ;;
+    esac
+    exit 0 ;;
+  --check)
+    if find_desktop; then
+      echo "the Frametop desktop is running: games start on its display $display"
+      exit 0
+    fi
+    echo "the Frametop desktop isn't running: games start in SteamVR's theater"
+    exit 1 ;;
+  --) shift; [ $# -gt 0 ] || usage ;;
+esac
+
+if ! find_desktop; then
+  note "the Frametop desktop isn't running, so in the theater: $1"
+  exec "$@"
+fi
+
+export DISPLAY="$display"
+if [ -n "$xauth" ]; then export XAUTHORITY="$xauth"; else unset XAUTHORITY; fi
+[ -n "$cursor_theme" ] && export XCURSOR_THEME="$cursor_theme"
+[ -n "$cursor_size" ] && export XCURSOR_SIZE="$cursor_size"
+unset WAYLAND_DISPLAY GAMESCOPE_WAYLAND_DISPLAY ENABLE_GAMESCOPE_WSI
+export DISABLE_GAMESCOPE_WSI=1
+if [ -n "${SDL_GAMECONTROLLER_IGNORE_DEVICES:-}" ] && only_our_pad; then
+  ignore=$(without_our_pad "$SDL_GAMECONTROLLER_IGNORE_DEVICES")
+  if [ -n "$ignore" ]; then export SDL_GAMECONTROLLER_IGNORE_DEVICES="$ignore"
+  else unset SDL_GAMECONTROLLER_IGNORE_DEVICES; fi
+fi
+note "on the Frametop desktop (display $display): $1"
+exec "$@"

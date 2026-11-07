@@ -56,7 +56,9 @@ class Uninstall(unittest.TestCase):
                 ("the trial's saved files, with the settings",
                  r'local settings=\([^)#]*"\$HOME/\.local/state/frametop-trial"\)'),
                 ("the gaze bench's runs, with the recordings",
-                 r'for f in [^;\n#]*"\$HOME/\.local/share/frametop/gaze/bench"; do\s*\[ -e "\$f" \] && recs\+=')):
+                 r'for f in [^;\n#]*"\$HOME/\.local/share/frametop/gaze/bench"; do\s*\[ -e "\$f" \] && recs\+='),
+                ("the ft-ondesktop link Steam games' launch options call",
+                 r'ondesktop_link=\$HOME/\.local/bin/ft-ondesktop[^\n]*\n(?:.*\n)*\s*\[ -n "\$ondesktop_link" \] && run rm -f "\$ondesktop_link"')):
             with self.subTest(name):
                 self.assertRegex(text, pattern)
 

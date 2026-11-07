@@ -142,6 +142,20 @@ Frametop pauses while a VR game runs, so the game gets the headset's CPU and GPU
 
 The Game optimization page of Frametop Input Settings turns the automatic pause off, changes the gesture, closes the desktop instead of hiding it (more for the game, but its windows close), and turns the sound off. From a terminal: `input/ft-pause on`, `off`, or `status`.
 
+### Flatscreen Steam games on a Frametop screen
+
+Steam opens flatscreen games in SteamVR's theater, where Frametop can't rotate or move them. To play one as a window of the Frametop desktop instead, for a portrait (TATE) shmup or a pinball table, set its launch options in Steam (the game's Properties, General) to:
+
+```
+/home/steamos/.local/bin/ft-ondesktop %command%
+```
+
+`~/.local/bin/ft-ondesktop --launch-option` prints that line with your home folder in it. While the Frametop desktop runs, the game then opens as one of its windows: move it to a portrait screen (add one in Frametop Display Settings), or float it with Meta+Shift+F and roll it there. When the desktop isn't running, the game opens in the theater as before. `ft-ondesktop --check` says which one a game will get.
+
+- Restarting the Frametop desktop ends a game running on it.
+- Mouse and keyboard reach the game like any desktop app. For the controllers as a gamepad, click the game's window, open the Steam menu and press Frametop's Enter Gamepad Mode pill: ft-ondesktop leaves Frametop's virtual pad visible to the game. Steam's own Gamepad mode, which goes with the theater, may not reach it.
+- Each start adds a line to `~/.local/state/frametop/ondesktop.log`.
+
 ### Gaze mode (experimental)
 
 In gaze mode the pointer goes where you look, and the mouse or the keyboard does the last bit. The installer offers it (or run `gaze/run.sh install` later), and then our own eye tracker for it, which is more accurate than SteamVR's (or run `gaze/tracker/install.sh` later; it needs `sudo`). Gaze mode uses ours once it's installed, and SteamVR's until then. Turn it on and calibrate it on the Gaze page of Frametop Input Settings.
@@ -188,7 +202,7 @@ This is an early release, tested on one Steam Frame (SteamOS 0.4.5 build 2026100
 - A SteamOS or SteamVR update can break parts of it until Frametop catches up. After an update, run `cd ~/frametop && scripts/doctor.sh` in a terminal. It checks what Frametop needs from SteamOS, and says what changed since the versions you last marked as working and what to try. Once everything works, `scripts/doctor.sh --mark-good` records the versions. If something stops working, please report it.
 - The first install downloads 1–2 GB for the build container and compiles everything on the headset, which takes several minutes.
 - During a VR game, mapped controller buttons belong to the game, so they can't bring the screens up. The pause gesture still works: Frametop reads it without taking the thumbsticks from the game. With the automatic pause off, open the SteamVR dashboard, press Meta+Shift+H, or use a mapped mouse button instead.
-- Flatscreen games aren't detected as games, so they don't pause Frametop by themselves: click both thumbsticks twice to pause it. If your controllers end up working the screens instead of the game, set Controllers on the screens to "Only with the SteamVR dashboard open" (Frametop Display Settings, Visibility & pins tab).
+- Flatscreen games aren't detected as games, so they don't pause Frametop by themselves: click both thumbsticks twice to pause it. To put one on a Frametop screen instead, see Flatscreen Steam games on a Frametop screen. If your controllers end up working the screens instead of the game, set Controllers on the screens to "Only with the SteamVR dashboard open" (Frametop Display Settings, Visibility & pins tab).
 - Typing follows your last click. A controller click on a panel other than the screens (the dashboard, a Steam app) doesn't move typing there; click it with the mouse, or click a screen to bring typing back.
 - The screens don't draw a mouse cursor of their own. The 3D mouse's dot or SteamVR's laser shows where you're pointing.
 - Profiles reopen apps, not what the apps had open. Tabs, files, and folders are left to each app's own restore.
@@ -286,7 +300,7 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `commands/` | Frametop commands: your own shell commands, saved under a name and run in the background (`ft-cmd`). |
 | `frunner/` | frunner, the search for apps, remote displays and your commands (Meta+Space). See [docs/frunner.md](docs/frunner.md). |
 | `tour/` | Frametop Tour, the walk through what Frametop does, and the recenter help. |
-| `steam/` | ft-steam: Steam's menu and checks, through Steam's own UI. |
+| `steam/` | ft-steam: Steam's menu and checks, through Steam's own UI. ft-ondesktop: Steam games on the Frametop desktop instead of the theater. |
 | `models/` | The hand and eye model versions you pick from, and their catalog. See [models/README.md](models/README.md). |
 | `recorder/` | What the hand and eye recorders share: encryption, uploads, the bounty board, privacy checks. |
 | `conf/` | The shared readers and writers of Frametop's config and stored files (`ft_conf`, `ft_store`) and its socket helpers. See [docs/config.md](docs/config.md). |

@@ -75,7 +75,8 @@ PACKAGES = {
     "at-spi2-core": "an AT-SPI-aware app appears on the nested desktop's accessibility bus; "
                     "the registry stops and comes back after a desktop restart",
     "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked; "
-                 "Full Keyboard types into a Steam field and a game (libei)",
+                 "Full Keyboard types into a Steam field and a game (libei); a Steam game with "
+                 "steam/ft-ondesktop in its launch options opens on a Frametop screen, with no theater",
     "libei": "Full Keyboard types into a Steam field and a game (its own libei client, built in, "
              "talks to gamescope's EIS server from this package)",
     "deckard-steamvr-session": "Full Keyboard starts with SteamVR and its panel draws (frametop-keyboard.service "

@@ -52,3 +52,20 @@ def renamed_actions(table):
         return table
     return {k: renamed_actions(v) if isinstance(v, dict) else RENAMED_ACTIONS.get(v, v) if isinstance(v, str) else v
             for k, v in table.items()}
+
+# Frametop's own actions in frunner's search, and its OS menu (the os_menu action: frunner opens
+# with these listed): the input relay's action of that name runs ("action NAME" on its control
+# socket, frunner/ft_frunner.py), and only these run that way. Each is an action that works
+# without pointer mode; keyboard_toggle isn't one, since frunner opens and closes Frametop's keyboard
+# itself. (name, title, keywords), in the menu's order.
+MENU_ACTIONS = (
+    ("steam_menu", "Steam menu", ("dashboard", "steamos", "steam", "open", "close")),
+    ("screens_toggle", "Hide or show the screens", ("desktop", "screens", "hide", "show")),
+    ("spin_next", "Spin to the next panel", ("spin", "next", "right", "lazy susan")),
+    ("spin_prev", "Spin to the previous panel", ("spin", "previous", "left", "lazy susan")),
+    ("dock_all", "Put every floating window back", ("dock", "float", "windows")),
+    ("hands_toggle", "Hand tracking on or off", ("hands", "tracking")),
+    ("pause_toggle", "Pause for a VR game", ("pause", "game")),
+    ("release_keys", "Let go of every key", ("release", "stuck", "keys", "modifier")),
+)
+MENU_ACTION_NAMES = tuple(name for name, _, _ in MENU_ACTIONS)

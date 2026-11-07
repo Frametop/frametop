@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """ft-gazed: the gaze service. The headset's eye tracking, corrected, for the pointer.
 
-Two settings in ~/.config/frametop.conf (the Gaze page of Frametop Input Settings), read
+Two settings in ~/.config/frametop.conf (the Gaze page of Frametop Settings), read
 again when the file changes:
   GAZE_TRACKER=auto|own|steam
                            our own eye tracker (gaze/tracker/ft-eyes, ft-gaze's source "own";

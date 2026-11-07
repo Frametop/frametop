@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Frametop Voice's settings, shared by ft-voiced, Frametop Input Settings (its Voice page), and
+"""Frametop Voice's settings, shared by ft-voiced, Frametop Settings (its Voice page), and
 the installer. Standard library only: the installer runs it with the host's python3.
 
-~/.config/frametop-voice.json (written by Frametop Input Settings):
+~/.config/frametop-voice.json (written by Frametop Settings):
   {"controller": ["left/dpad_down"], "controller_mode": "hold",
    "language": "de", "model": "small",
    "live_typing": true, "sounds": false, "wake_word": false,
@@ -199,7 +199,7 @@ def from_frame_voice(old):
         if name in KEY_CODES:
             bindings[str(KEY_CODES[name])] = action
         else:
-            notes.append(f"push-to-talk {name}: set it on Frametop Input Settings' Keyboard page "
+            notes.append(f"push-to-talk {name}: set it on Frametop Settings' Keyboard page "
                          "(mouse buttons: Buttons page)")
     return new, bindings, notes
 

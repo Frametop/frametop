@@ -10,7 +10,7 @@
 
 The input relay does it (frametop-input-relay.service). So do the pause_toggle action, the
 controller gesture (by default both thumbsticks clicked together twice), and, with auto pause on,
-a VR game starting; Frametop Input Settings has the settings, on its Game optimization page.
+a VR game starting; Frametop Settings has the settings, on its Game optimization page.
 """
 
 import json

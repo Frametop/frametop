@@ -39,7 +39,7 @@ Toggled by:
     Toggled back on during a game, Frametop stays on until that game ends. A pause that starts
     outside a game lasts until it's toggled off.
 
-Settings in ~/.config/frametop-input.json (Frametop Input Settings, Game optimization page): "pause_auto"
+Settings in ~/.config/frametop-input.json (Frametop Settings, Game optimization page): "pause_auto"
 (bool), "pause_gesture" ({"buttons": one or two controller buttons, "presses": 1 or 2}, or null
 for none; one button always takes two presses), "pause_desktop" ("hide" or "close"), and
 "pause_sound" (a sound on pause and resume; bool). The state outlives a relay restart in

@@ -1,6 +1,6 @@
 """ft_input_actions: the input rules file's shared vocabulary (~/.config/frametop-input.json).
 
-The input relay (input/input-relay.py) acts on these, and Frametop Input Settings
+The input relay (input/input-relay.py) acts on these, and Frametop Settings
 (input-settings/) and Frametop Voice's settings (voice/voice_settings.py) edit and show them.
 One copy here, so the three read the same names and defaults. Standard library only, and
 nothing here reads a file: the callers decide which file and when. The two binding tables are

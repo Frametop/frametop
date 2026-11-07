@@ -3,7 +3,7 @@
 Steam on the Frame runs with -cef-enable-debugging, so its UI's JavaScript context
 (SharedJSContext) is reachable over the Chrome DevTools Protocol on 127.0.0.1:8080. Steam's
 own calls live there: SteamClient.* (settings, SteamVR's dashboard) and the UI's stores
-(SteamUIStore). Used by Frametop Display Settings (display-settings/steam_settings.py) and
+(SteamUIStore). Used by Frametop Settings (display-settings/steam_settings.py) and
 ft-steam (the Steam menu shortcut).
 
   evaluate(expression)   the expression's value (awaited, JSON-able); SteamUnreachable when

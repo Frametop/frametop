@@ -1,16 +1,19 @@
-// Frametop Remote Displays (Kirigami). Backend: ft_remote_displays.py ("backend").
+// Frametop Settings' Remote displays page: other computers' monitors as Frametop screens
+// (settings/main.qml loads this file the first time it opens). Backend: ft_remote_displays.py
+// ("backend", made then: settings/ft_settings.py).
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-Kirigami.ApplicationWindow {
+Item {
     id: root
-    title: "Frametop Remote Displays"
-    width: Kirigami.Units.gridUnit * 42
-    height: Kirigami.Units.gridUnit * 34
+    // settings/main.qml sets these two.
+    property QtObject backend
+    property var window
+    function showPassiveNotification(text, duration) { window.showPassiveNotification(text, duration) }
 
-    pageStack.initialPage: hostsPage
+    function page(name) { return name === "remote-displays" ? hostsPage : null }
 
     Connections {
         target: backend
@@ -35,15 +38,6 @@ Kirigami.ApplicationWindow {
         if (state.startsWith("lost")) return Kirigami.Theme.negativeTextColor
         if (state === "connecting" || state === "starting" || state === "queued") return Kirigami.Theme.neutralTextColor
         return Kirigami.Theme.disabledTextColor
-    }
-
-    footer: Controls.ToolBar {
-        visible: backend.busy !== ""
-        RowLayout {
-            anchors.fill: parent
-            Controls.BusyIndicator { running: backend.busy !== ""; Layout.preferredHeight: Kirigami.Units.iconSizes.medium }
-            Controls.Label { text: backend.busy + "…"; Layout.fillWidth: true }
-        }
     }
 
     // ---------------------------------------------------------------- dialogs
@@ -312,6 +306,15 @@ Kirigami.ApplicationWindow {
         id: hostsPage
         Kirigami.ScrollablePage {
             title: "Remote displays"
+            // What ft-layout is doing now (signing in, pairing, connecting).
+            footer: Controls.ToolBar {
+                visible: backend.busy !== ""
+                RowLayout {
+                    anchors.fill: parent
+                    Controls.BusyIndicator { running: backend.busy !== ""; Layout.preferredHeight: Kirigami.Units.iconSizes.medium }
+                    Controls.Label { text: backend.busy + "…"; Layout.fillWidth: true }
+                }
+            }
             actions: [
                 Kirigami.Action {
                     text: "Add computer"
@@ -346,7 +349,7 @@ Kirigami.ApplicationWindow {
                         ? "Streaming without the desktop: the connected displays are panels on their own. Stop streaming before you start the desktop."
                         : backend.hosts.length === 0
                         ? "Another computer's monitors as Frametop screens, with the screens' controls, in your layouts and profiles. The computer runs Vibepollo (a Mac: Sunshine, set up with Frametop's host setup): add it, sign in with its Web UI login, then pick its displays."
-                        : "Each display is a panel like a screen: move, size, curve and pin it in VR, and Display Settings' Save as profile keeps where it is. A disconnected display keeps its place and settings."
+                        : "Each display is a panel like a screen: move, size, curve and pin it in VR, and Save as profile (Layout & profiles) keeps where it is. A disconnected display keeps its place and settings."
             }
             ColumnLayout {
                 spacing: Kirigami.Units.largeSpacing

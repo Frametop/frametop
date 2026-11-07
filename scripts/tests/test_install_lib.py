@@ -23,16 +23,15 @@ UNITS = [("power/frametop-power.service", None), ("pointer/helper/frametop-point
 ENTRIES = [("gaze/bench/ft-gazebench.desktop", "frametop-gazebench.desktop"),
            ("gaze/rec/ft-eyerec.desktop", "frametop-eyerec.desktop"),
            ("hands/rec/ft-handrec.desktop", "frametop-handrec.desktop"),
-           ("gaze/probe/ft-gazeprobe.desktop", None), ("display-settings/ft-display-settings.desktop", None),
+           ("gaze/probe/ft-gazeprobe.desktop", None), ("settings/ft-settings.desktop", None),
            ("display-settings/ft-layout-reset.desktop", None), ("display-settings/ft-screens-toggle.desktop", None),
            ("tour/ft-tour.desktop", None), ("tour/ft-recenter-help.desktop", None),
-           ("input-settings/ft-input-settings.desktop", None), ("remote-displays/ft-remote-displays.desktop", None),
-           ("remote/ft-remote-settings.desktop", None), ("menu/ft-menu.desktop", None)]
+           ("menu/ft-menu.desktop", None)]
 # The installers that use it, and the ones whose copies it replaced.
 USERS = ["power/run.sh", "pointer/helper/run.sh", "keyboard/run.sh", "pointer/dashpatch/run.sh", "gaze/run.sh",
          "voice/run.sh", "hands/run.sh", "desktops.sh", "gaze/bench/install.sh", "gaze/rec/install.sh",
          "hands/rec/install.sh", "gaze/probe/install.sh", "display-settings/install.sh", "tour/install.sh",
-         "input-settings/install.sh", "remote-displays/install.sh", "remote/install.sh", "menu/install.sh"]
+         "settings/install.sh", "menu/install.sh"]
 
 STUB = '#!/bin/sh\nprintf "%s %s\\n" "$(basename "$0")" "$*" >>"$STUB_LOG"\n'
 REFUSE = '#!/bin/sh\necho "$(basename "$0") is not for tests" >&2\nexit 99\n'

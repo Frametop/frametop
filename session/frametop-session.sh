@@ -11,7 +11,7 @@
 #              worth of pixels, panels owned by the SteamVR dashboard.
 #
 # Settings come from ~/.config/frametop.conf (see frametop.conf.example) and, for the
-# screens backend, ~/.config/frametop-layout.json (Frametop Display Settings writes both).
+# screens backend, ~/.config/frametop-layout.json (Frametop Settings writes both).
 # FT_BACKEND, FT_SCREENS, FT_WIDTH, FT_HEIGHT, and FT_PHYS_WIDTH override them.
 #
 # FT_STREAMS_ONLY=1 (Remote Displays' Stream without the desktop, desktops.sh streams) starts
@@ -288,7 +288,7 @@ export XCURSOR_THEME=${cursor_theme:-breeze_cursors} XCURSOR_SIZE=${cursor_size:
 # match it to an installed app. KWin's permission check for screencast and fake
 # input is turned off for this nested session only, and so is the check on KWin's
 # D-Bus screenshot interface, which scripts use to see the screens without the headset.
-# The marker lets remote-ctl.sh (and Frametop Remote Access) start and stop it later in
+# The marker lets remote-ctl.sh (and Frametop Settings' Remote access page) start and stop it later in
 # this session; a desktop started without it can't capture.
 if [ "$remote" = 1 ]; then
   export KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 KWIN_SCREENSHOT_NO_PERMISSION_CHECKS=1

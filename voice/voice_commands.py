@@ -9,7 +9,7 @@ run:  the program and its arguments, run directly (never through a shell). "~" i
 rest: "arg" (default) appends the words after the phrase as one extra argument when there
       are any. "none" never appends them.
 
-Your Frametop commands (Frametop Input Settings, Commands; commands/ft_commands.py) are voice
+Your Frametop commands (Frametop Settings, Commands; commands/ft_commands.py) are voice
 commands too: "run NAME", NAME's dashes, dots and underscores said as spaces (named()).
 
 Pure standard library, so the tests can import it without the audio stack.

@@ -22,7 +22,7 @@ If Sunshine runs on this PC, uninstall it first: Vibepollo uses the same ports. 
    - It changes three Vibepollo settings: remote displays carry the PC's sound, and a virtual display goes away when Frametop disconnects it but stays through a dropped stream. Your other settings stay as they are.
    - It asks for the Web UI user name and password that the Steam Frame signs in with. If Vibepollo already has a login, you can keep it. The password is typed in the setup window and is never shown or saved.
    - It lets Vibepollo through the firewall on every network type, says whether a Steam Link dongle is plugged in, and checks that the Web UI answers.
-4. When it says Done, it prints this PC's name and addresses. On the Steam Frame, open Frametop Remote Displays and choose Add computer. Pick this PC, sign in with the Web UI login, and choose the displays to show: its monitors, or a virtual display at the size you pick.
+4. When it says Done, it prints this PC's name and addresses. On the Steam Frame, open Remote displays in Frametop Settings and choose Add computer. Pick this PC, sign in with the Web UI login, and choose the displays to show: its monitors, or a virtual display at the size you pick.
 
 When a newer kit comes out, run its setup the same way. It replaces an older Frametop build.
 

@@ -65,7 +65,7 @@ Pair it the normal way, in Steam under Settings → Bluetooth. Then apply the fi
 setup/bluetooth/install.sh run
 ```
 
-or use Apply Bluetooth fixes on the Bluetooth page of Frametop Input Settings, which asks for the password. Do this once per newly paired device. From then on, the service applies the fixes automatically at every boot.
+or use Apply Bluetooth fixes on the Bluetooth page of Frametop Settings, which asks for the password. Do this once per newly paired device. From then on, the service applies the fixes automatically at every boot.
 
 If a device won't pair at all, turn the fixes on first (`run`), then pair again. With privacy on, some devices, the Z3 included, fail to finish connecting.
 

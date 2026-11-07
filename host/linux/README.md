@@ -38,7 +38,7 @@ These are Vibepollo's:
 3. Restart the PC after the first install, and log in to Plasma (Wayland).
 4. Open https://localhost:47990 on the PC and create the Web UI login. The Steam Frame signs in with it once.
 5. If you'll use virtual displays, turn on "Remove Remote Monitor when its client disconnects" in the Web UI's settings. Then a virtual display goes away when Frametop disconnects it, as on Windows.
-6. On the Steam Frame, open Frametop Remote Displays and choose Add computer. Pick this PC, sign in with the Web UI login, and choose the displays to show.
+6. On the Steam Frame, open Remote displays in Frametop Settings and choose Add computer. Pick this PC, sign in with the Web UI login, and choose the displays to show.
 
 If the installer couldn't open the firewall, open it yourself:
 

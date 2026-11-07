@@ -2,7 +2,7 @@
 """Frametop Remote Displays: other computers' monitors as Frametop screens, streamed with
 Moonlight's protocol from Vibepollo, or from Sunshine on a Mac (docs/remote-displays.md).
 
-A Kirigami (QML) app with a Python backend, like Frametop Display Settings. It runs in
+A Kirigami (QML) app with a Python backend, like Frametop Settings. It runs in
 the dev container:
   - Hosts: computers running Vibepollo, found on the network (they announce _nvstream._tcp
     over mDNS; avahi-browse on the host) or typed in. You sign in once with the host's Web UI
@@ -26,7 +26,7 @@ the dev container:
 Where the displays are in VR is kept like the screens' (move them there; Display Settings'
 Save as profile keeps it). Anything that touches the streams runs layout/ft-layout on the
 host; the streams' state comes from ft-screens (@ft_screens: "remotes", "remote N info").
-Launch with remote-displays/ft-remote-displays (host wrapper).
+Frametop Settings (settings/ft_settings.py) makes it, the first time its page opens.
 """
 import base64
 import concurrent.futures
@@ -43,10 +43,7 @@ import threading
 import urllib.request
 import uuid
 
-from PySide6.QtCore import Property, QObject, QProcess, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication, QIcon
-from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtCore import Property, QObject, QProcess, Qt, QTimer, Signal, Slot
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
@@ -628,24 +625,3 @@ class Backend(QObject):
         else:
             self.message.emit(f"{label} failed: {last or 'exit code ' + str(code)}", True)
         self._next()
-
-
-def main():
-    app = QGuiApplication(sys.argv)
-    app.setApplicationName("ft-remote-displays")
-    app.setApplicationDisplayName("Frametop Remote Displays")
-    app.setDesktopFileName("ft-remote-displays")
-    if not QIcon.themeName():
-        QIcon.setThemeName("breeze")
-    QQuickStyle.setStyle("org.kde.desktop")
-    engine = QQmlApplicationEngine()
-    backend = Backend()
-    engine.rootContext().setContextProperty("backend", backend)
-    engine.load(QUrl.fromLocalFile(os.path.join(HERE, "main.qml")))
-    if not engine.rootObjects():
-        sys.exit(1)
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()

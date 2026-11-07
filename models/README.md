@@ -1,6 +1,6 @@
 # Model versions
 
-Users pick which hand and eye models Frametop runs on Frametop Input Settings' Hands and Gaze pages.
+Users pick which hand and eye models Frametop runs on Frametop Settings' Hands and Gaze pages.
 Each page lists the versions in a catalog, with notes on what to expect and benchmark numbers set
 against the one in use. `catalog.py` reads the catalogs, downloads versions and says what a setting
 runs; `ft-models` is the same from a terminal.
@@ -16,7 +16,7 @@ runs; `ft-models` is the same from a terminal.
   files: `models/test/test_catalog.py` checks it.
 - **Where the list comes from.** Installs read their branch's catalog from GitHub (`main` for a
   stable release, `experimental` for an experimental one or a clone on that branch), so a push
-  reaches them without a release: Input Settings' "Check for new versions", and the services when
+  reaches them without a release: Frametop Settings' "Check for new versions", and the services when
   they start (`ft-models auto`, at most every 15 minutes; `HANDS_MODELS_UPDATE=0` /
   `EYES_MODELS_UPDATE=0` turn that off). Offline, or when GitHub's copy isn't valid, the copy in
   the install is used.
@@ -24,7 +24,7 @@ runs; `ft-models` is the same from a terminal.
   fixed in `catalog.py` and never taken from a catalog. Each download is pinned to a commit and must
   match its sha256, or it isn't kept. Catalog checks are strict: one bad entry and the whole
   catalog is ignored. The texts are shown as plain text.
-- **Who applies it.** ft-hands reads `HANDS_MODEL` at start, and Input Settings restarts hand
+- **Who applies it.** ft-hands reads `HANDS_MODEL` at start, and Frametop Settings restarts hand
   tracking after a change. ft-eyes reads `EYES_MODEL` at start, and the gaze service restarts it
   when the setting changes. Each eye net keeps its own calibration (`net-NAME/`), so a switch asks
   for one calibration.

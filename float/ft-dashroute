@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ft-dashroute: apps picked in the SteamVR dashboard's Launch a program list open as Frametop
 floating windows, not as SteamVR windows of their own (DASHBOARD_APPS=frametop in
-~/.config/frametop.conf: Frametop Display Settings, Visibility & pins tab, "Apps from the
+~/.config/frametop.conf: Frametop Settings, Visibility & pins tab, "Apps from the
 SteamVR dashboard"). The default, DASHBOARD_APPS=steamvr, leaves them to SteamVR.
 
 The list is in Steam's own UI (its VR menu), and picking an app runs

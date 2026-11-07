@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""ft-floatd's window filters, offline: a profile keeps Frametop's settings apps (Input
-Settings, Remote Displays, Remote Access) like any app, and leaves out Display Settings, where
-profiles are saved from, and Frametop's other windows; spotlist lists them all. D-Bus and
+"""ft-floatd's window filters, offline: a profile keeps app windows and leaves out Frametop's own,
+Frametop Settings too (profiles are saved from it); spotlist lists them all. D-Bus and
 GLib are stand-ins, as in scale-test.py.
 
   float/test/recordable-test.py
@@ -41,16 +40,20 @@ def window(app, cls="", **flags):
     return dict({"normal": True, "app": app, "cls": cls}, **flags)
 
 
-for app in floatd.PROFILE_APPS:
-    check(f"a profile keeps {app}", floatd.recordable(window(app)), True)
 check("a profile keeps an app's window", floatd.recordable(window("org.kde.dolphin")), True)
-check("a profile keeps a settings app by its class", floatd.recordable(window("", "ft-remote-displays")), True)
-check("a profile keeps Remote Access", floatd.recordable(window("org.frametop.RemoteAccess")), True)
-for app in ("ft-display-settings", "ft-tour", "ft-recorder", "frametop-panel", "org.kde.plasmashell", "org.kde.ksplashqml"):
+for app in ("ft-settings", "ft-tour", "ft-recorder", "frametop-panel", "org.kde.plasmashell", "org.kde.ksplashqml"):
     check(f"a profile leaves out {app}", floatd.recordable(window(app)), False)
-check("a profile leaves out a settings app's dialog",
-      floatd.recordable(window("ft-input-settings", transient=True)), False)
-check("spotlist lists the settings apps", floatd.listable(window("ft-input-settings")), True)
-check("spotlist lists Display Settings", floatd.listable(window("ft-display-settings")), True)
+check("a profile leaves out Frametop Settings by its class", floatd.recordable(window("", "ft-settings")), False)
+check("spotlist lists Frametop Settings", floatd.listable(window("ft-settings")), True)
+
+# A profile saved with one of the settings apps Frametop Settings replaced opens without it.
+launched = []
+me = types.SimpleNamespace(windows={}, window_key=lambda ev: "", place_entry=lambda ev, e: None,
+                           launch_entries=lambda entries: launched.append([e.get("app") or e["cmd"] for e in entries]))
+profile = {"windows": [{"app": "ft-input-settings"}, {"app": "ft-remote-displays"}, {"app": "org.frametop.RemoteAccess"},
+                       {"app": "org.kde.dolphin", "screen": 1}]}
+with mock.patch.object(floatd.ft_layout, "load_layout", return_value={"profiles": {"Desk": profile}}):
+    check("a profile opens", floatd.Daemon.open_profile(me, "Desk"), "ok")
+check("its retired settings apps stay closed", launched, [["org.kde.dolphin"]])
 
 sys.exit(1 if failed else 0)

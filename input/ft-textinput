@@ -7,7 +7,7 @@ whenever the focused app enables text input on a field (text-input v1/v2/v3: Qt,
 and Firefox apps do; Xwayland apps and most Electron apps don't). This only passes that
 on: "textfield 1" or "textfield 0" to the input relay (@frametop_relay), which opens or
 closes Frametop's keyboard (Full Keyboard, through ft-screens), depending on the keyboard setting
-in Frametop Input Settings. Typing reaches the app as key presses on ft-screens' seat, except
+in Frametop Settings. Typing reaches the app as key presses on ft-screens' seat, except
 a character the desktop's keyboard layout has no key for (ą on a US layout), from Full Keyboard
 or dictation: the relay sends it here as "commit TEXT", and this commits it to the focused text
 field (zwp_input_method_context_v1.commit_string). Only those characters pass through here,

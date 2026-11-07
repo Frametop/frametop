@@ -476,7 +476,7 @@ int main(int argc, char **argv) {
         } else if (name_ok && pick != "latest") {
             if (!int8 && has_models(model_root + "versions/" + pick)) models = model_root + "versions/" + pick;
             else if (!int8)
-                std::fprintf(stderr, "HANDS_MODEL=%s isn't downloaded (Frametop Input Settings > Hands, or "
+                std::fprintf(stderr, "HANDS_MODEL=%s isn't downloaded (Frametop Settings > Hands, or "
                              "models/ft-models fetch hands %s): using the latest\n", pick.c_str(), pick.c_str());
         } else if (!pick.empty() && pick != "latest") {
             std::fprintf(stderr, "HANDS_MODEL=%s isn't a model name: using the latest\n", pick.c_str());

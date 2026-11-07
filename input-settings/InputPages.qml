@@ -1,37 +1,24 @@
-// Frametop Input Settings (Kirigami). Backend: ft_input_settings.py ("backend").
+// Frametop Settings' input pages (settings/main.qml loads this file the first time one of them
+// opens). Backend: ft_input_settings.py ("backend", made then: settings/ft_settings.py).
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-Kirigami.ApplicationWindow {
+Item {
     id: root
-    title: "Frametop Input Settings"
-    width: Kirigami.Units.gridUnit * 44
-    height: Kirigami.Units.gridUnit * 34
+    // settings/main.qml sets these two.
+    property QtObject backend
+    property var window
+    // Another page of the app, by its name (settings/ft_settings.py, SECTIONS).
+    function show(name) { window.showSection(name) }
+    function showPassiveNotification(text, duration) { window.showPassiveNotification(text, duration) }
 
-    globalDrawer: Kirigami.GlobalDrawer {
-        isMenu: false
-        modal: false
-        collapsible: true
-        collapsed: root.width < Kirigami.Units.gridUnit * 30
-        actions: [
-            Kirigami.Action { text: "Devices"; icon.name: "input-mouse"; onTriggered: root.show(devicesPage) },
-            Kirigami.Action { text: "Buttons"; icon.name: "input-keyboard"; onTriggered: root.show(buttonsPage) },
-            Kirigami.Action { text: "Controllers"; icon.name: "input-gamepad"; onTriggered: root.show(controllersPage) },
-            Kirigami.Action { text: "Game optimization"; icon.name: "applications-games"; onTriggered: root.show(gamesPage) },
-            Kirigami.Action { text: "Keyboard"; icon.name: "input-keyboard-virtual"; onTriggered: root.show(keyboardPage) },
-            Kirigami.Action { text: "Commands"; icon.name: "utilities-terminal"; onTriggered: root.show(commandsPage) },
-            Kirigami.Action { text: "Voice"; icon.name: "audio-input-microphone"; onTriggered: root.show(voicePage) },
-            Kirigami.Action { text: "Pointer"; icon.name: "transform-move"; onTriggered: root.show(pointerPage) },
-            Kirigami.Action { text: "Ignored panels"; icon.name: "view-hidden"; onTriggered: root.show(ignorePage) },
-            Kirigami.Action { text: "Gaze"; icon.name: "view-visible"; onTriggered: root.show(gazePage) },
-            Kirigami.Action { text: "Hands"; icon.name: "transform-browse"; onTriggered: root.show(handsPage) },
-            Kirigami.Action { text: "Bluetooth"; icon.name: "preferences-system-bluetooth"; onTriggered: root.show(bluetoothPage) },
-            Kirigami.Action { separator: true },
-            Kirigami.Action { text: "Controls guide"; icon.name: "help-contents"; onTriggered: backend.openControlsGuide() },
-            Kirigami.Action { text: "Frametop Tour"; icon.name: "help-about"; onTriggered: backend.openTour() }
-        ]
+    // The page for a section of the app, by name; null for a name that isn't one of these.
+    function page(name) {
+        return ({ devices: devicesPage, buttons: buttonsPage, controllers: controllersPage, games: gamesPage,
+                  keyboard: keyboardPage, commands: commandsPage, voice: voicePage, pointer: pointerPage,
+                  ignore: ignorePage, gaze: gazePage, hands: handsPage, bluetooth: bluetoothPage })[name] || null
     }
 
     // Why SteamVR has no ft_pointer driver, and how to get it back. Clicks, scrolling and mapped
@@ -263,17 +250,6 @@ Kirigami.ApplicationWindow {
             font: Kirigami.Theme.smallFont
         }
     }
-
-    function show(page) {
-        pageStack.clear()
-        pageStack.push(page)
-    }
-
-    // FT_INPUT_PAGE=buttons|controllers|games (Game optimization)|keyboard|commands|voice|pointer|ignore|gaze|hands|bluetooth opens the app on that page.
-    pageStack.initialPage: ({ buttons: buttonsPage, controllers: controllersPage, games: gamesPage, keyboard: keyboardPage,
-                              commands: commandsPage,
-                              voice: voicePage, pointer: pointerPage, ignore: ignorePage, gaze: gazePage, hands: handsPage,
-                              bluetooth: bluetoothPage })[startPage] || devicesPage
 
     Connections {
         target: backend
@@ -918,7 +894,7 @@ Kirigami.ApplicationWindow {
                     Controls.Button {
                         text: "Change on the Keyboard page"
                         icon.name: "input-keyboard"
-                        onClicked: root.show(keyboardPage)
+                        onClicked: root.show("keyboard")
                     }
                     Controls.ComboBox {
                         Kirigami.FormData.label: "Keys do:"

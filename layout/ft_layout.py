@@ -69,7 +69,7 @@ Presets: "arc" hinges the screens edge to edge around you, each turned to face y
 (like monitors on a desk); "flat" puts them on one flat wall facing forward. Screen 1
 is top left, then left to right.
 
-Usage (on the Frame host; Frametop Display Settings calls it too):
+Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout apply [--wait SECONDS]   arrange every screen; --wait is for desktop start:
                                      wait for the screens, skip if "auto" is off
   ft-layout reset                    recenter after the 3-second countdown (Meta+Shift+R,
@@ -1893,7 +1893,7 @@ def main(argv):
             if argv[2] not in load_layout().get("layouts", {}):
                 raise RuntimeError(f"no profile called {argv[2]!r}")
             if streams_only():
-                raise RuntimeError("streaming without the desktop: stop streaming (Remote Displays) to "
+                raise RuntimeError("streaming without the desktop: stop streaming (Frametop Settings, Remote displays) to "
                                    "start the desktop in a profile")
             if desktop_running():
                 return main([argv[0], "use", argv[2]])

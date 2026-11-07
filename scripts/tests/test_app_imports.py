@@ -1,5 +1,5 @@
-"""Frametop's small apps import offline: Display Settings, Remote Displays, ft-steam, ft-remote-settings
-and FrameDrop's progress window. Each loads in its own python3, with HOME a temporary folder and
+"""Frametop's small apps import offline: Frametop Settings and its display, remote displays and
+remote access backends, ft-steam, and FrameDrop's progress window. Each loads in its own python3, with HOME a temporary folder and
 Qt offscreen; nothing is read from or sent to the host, Steam or ft-screens. Their main() runs only
 as a script, so loading one starts nothing. The GTK 4 ones skip without PyGObject (they run on the
 Frame).
@@ -62,9 +62,13 @@ class Imports(unittest.TestCase):
         self.load("steam/steamui.py")
         self.load("steam/ft-steam", ["main"])
 
-    @unittest.skipUnless(have_pygobject(), "ft-remote-settings is GTK 4: no PyGObject here (it runs on the Frame)")
-    def test_remote_settings(self):
-        self.load("remote/ft-remote-settings", ["write_conf"])
+    def test_remote_access(self):
+        # its files under the temporary HOME, not the real one
+        self.load("remote/remote_access.py", ["Backend", "new_password"],
+                  'module.CONF.startswith(os.environ["HOME"]) and module.VNC_PASSWORD.startswith(os.environ["HOME"])')
+
+    def test_settings(self):
+        self.load("settings/ft_settings.py", ["Settings", "main"])
 
     @unittest.skipUnless(have_pygobject(), "the progress window is GTK 4: no PyGObject here (it runs on the Frame)")
     def test_framedrop_progress(self):

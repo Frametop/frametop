@@ -18,7 +18,7 @@ nothing and says so ("problem"), and never asks for a password.
   python3 hands/handsmode.py status [--json]   # the mode, what runs, what's wrong
   python3 hands/handsmode.py apply             # start what HANDS_MODE wants now, fix the SteamVR wants
   python3 hands/handsmode.py set MODE          # write HANDS_MODE, then apply it, stopping what it
-                                               # doesn't want (Frametop Input Settings, ft-handsctl mode)
+                                               # doesn't want (Frametop Settings, ft-handsctl mode)
   python3 hands/handsmode.py desktop up|down   # the session's hooks; only HANDS_MODE=frametop acts
   python3 hands/handsmode.py toggle [--sound]  # stop hand tracking if it runs, else start it (the
                                                # input relay's hands_toggle, ft-handsctl toggle)
@@ -27,7 +27,7 @@ toggle doesn't change HANDS_MODE: what it stops starts again with the next deskt
 SteamVR (always), and what it starts runs until SteamVR stops, as ft-handsctl on and off. --sound
 plays the pause sounds (input/game_pause.py's): stopped as on a pause, started as on a resume.
 
-It also reads and writes the three hand input switches Frametop Input Settings shows (METHODS:
+It also reads and writes the three hand input switches Frametop Settings shows (METHODS:
 gaze clicks, the hand ray, direct touch), which are pointer and ft-screens settings, not services.
 
 On the host, system Python, standard library only (the settings app runs it through
@@ -47,7 +47,7 @@ CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
 MODES = ("frametop", "always", "off")
 DEFAULT_MODE = "off"
 # The cutouts' margin (HANDS_MATTE_MARGIN, degrees seen from the eyes; ft-screens' default) and the
-# range Frametop Input Settings offers. ft-screens takes 0-10.
+# range Frametop Settings offers. ft-screens takes 0-10.
 MARGIN_DEFAULT = 1.5
 MARGIN_MIN, MARGIN_MAX, MARGIN_STEP = 0.0, 3.0, 0.25
 STEAMVR = "steamvr.service"
@@ -68,7 +68,7 @@ def read_conf(path=CONF_PATH):
 
 
 def write_value(key, value, path=CONF_PATH):
-    """Set KEY=value, keeping comments and the rest of the file (as Frametop Input Settings does:
+    """Set KEY=value, keeping comments and the rest of the file (as Frametop Settings does:
     shell-quoted, by a temp file and a rename)."""
     ft_conf.set_value(key, value, path)
 

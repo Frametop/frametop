@@ -38,7 +38,7 @@ def check(label, got, want):
 OUT = tempfile.mkdtemp(prefix="ft-rules-migrate-test-")
 LINE = '    "42+125+35": "screens_toggle",\n'
 RELEASE_LINE = '    "29+42+56+1": "release_keys",\n'
-# As Frametop Input Settings writes it (json.dump, indent 2, no newline at the end).
+# As Frametop Settings writes it (json.dump, indent 2, no newline at the end).
 CUSTOM = {"key_bindings": {"125+36": "gaze_left", "125+37": "gaze_right", "42+125+33": "float_toggle",
                            "97": "dictate", "125+35": "hands_toggle"},
           "devices": {"d1:01": {"role": "combo", "name": "Bluetooth 5.1 Keyboard"}}, "vr_keyboard": "no_keyboard"}

@@ -19,9 +19,9 @@ import sys
 from pathlib import Path
 
 DIRECT = ("QtCore", "QtGui", "QtQml", "QtQuick", "QtQuickControls2")
-BACKENDS = ("display-settings/ft_display_settings.py", "input-settings/ft_input_settings.py",
-            "remote-displays/ft_remote_displays.py", "hands/rec/ft_handrec.py", "gaze/rec/ft_eyerec.py",
-            "gaze/bench/gazebench.py")
+BACKENDS = ("settings/ft_settings.py", "display-settings/ft_display_settings.py",
+            "input-settings/ft_input_settings.py", "remote-displays/ft_remote_displays.py", "remote/remote_access.py",
+            "hands/rec/ft_handrec.py", "gaze/rec/ft_eyerec.py", "gaze/bench/gazebench.py")
 MANIFEST = Path("usr/share/frametop/pyside-runtime.json")
 
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Frametop Tour: a walk through what Frametop does, the first time the desktop starts, and
 whenever it's opened again (the app menu, frunner, Frametop -> Help in SteamVR's Launch a program list, the Tour
-entry in Frametop Input Settings, or tour/ft-tour).
+entry in Frametop Settings' sidebar, or tour/ft-tour).
 
-A Kirigami (QML) app with a Python backend, like Frametop Input Settings, in Frametop's
+A Kirigami (QML) app with a Python backend, like Frametop Settings, in Frametop's
 container. Each page is a topic: what to do and what it does, as a table, buttons that try it or
 open its settings, and on the gaze and hands pages a target to practise on. The pages follow
 what's installed (gaze mode, hand tracking, voice dictation) and the keyboard page lists the
-key combinations the input relay has now (Frametop Input Settings' own key_bindings()).
+key combinations the input relay has now (Frametop Settings' Keyboard page's own key_bindings()).
 
 Done or not is DONE_PATH. The session opens the tour (tour/ft-tour --first-run) when the
 desktop starts and it isn't there; closing the tour, skipping it, or finishing it writes it, and
@@ -34,9 +34,7 @@ UNITS = os.path.expanduser("~/.config/systemd/user")
 CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
 SOCKETS = {"gazed": "\0ft_gazed", "frunner": "\0ft_frunner", "screens": "\0ft_screens",
            "float": "\0frametop_float"}
-INPUT_SETTINGS = os.path.join(REPO, "input-settings", "ft_input_settings.py")
-DISPLAY_SETTINGS = os.path.join(REPO, "display-settings", "ft_display_settings.py")
-REMOTE_DISPLAYS = os.path.join(REPO, "remote-displays", "ft_remote_displays.py")
+SETTINGS = os.path.join(REPO, "settings", "ft_settings.py")  # Frametop Settings; "settings:SECTION" opens it there
 
 
 # ---------------------------------------------------------------- the flag
@@ -88,7 +86,7 @@ def combo_name(combo, names, modifiers, right_modifiers):
         return modifiers[parts[0]] + " tap"
     if len(parts) == 1 and parts[0] in right_modifiers:
         return right_modifiers[parts[0]] + " tap"
-    # Meta first, as the README writes them (Input Settings goes by code: Shift+Meta+F)
+    # Meta first, as the README writes them (Frametop Settings goes by code: Shift+Meta+F)
     parts.sort(key=lambda c: (MODIFIER_ORDER.index(c) if c in MODIFIER_ORDER else len(MODIFIER_ORDER)))
     return "+".join(modifiers.get(c) or names.get(c, str(c)).removeprefix("KEY_").title() for c in parts)
 
@@ -142,7 +140,7 @@ def pages(f, keys):
                  ["The buttons", "Try it now, or open its settings"],
                  ["The page list at the bottom", "Jumps to any page, so the tour is also a reference to come back to"]],
         "note": "You can take the tour again any time: Frametop Tour is in the app menu, in frunner (Meta+Space), "
-                "under Frametop → Help in SteamVR's Launch a program list, and in Frametop Input Settings.",
+                "under Frametop → Help in SteamVR's Launch a program list, and in Frametop Settings.",
         "actions": [], "clips": []}, {
         "id": "screens", "title": "Screens and the 3D mouse", "icon": "video-display",
         "intro": "Each screen is a panel in the room. The mouse moves a dot around you that snaps onto whatever "
@@ -167,7 +165,7 @@ def pages(f, keys):
                  "Getting back",
                  ["The reset button (left of the bar), or Meta+Shift+R", "Puts every screen back in its layout"],
                  ["Meta+Shift+H", "Hides or shows all screens"]],
-        "actions": [{"id": "display:screens", "text": "Screens settings", "icon": "video-display"}]}]
+        "actions": [{"id": "settings:screens", "text": "Screens settings", "icon": "video-display"}]}]
 
     out.append({
         "id": "recenter", "title": "Recenter & controls", "icon": "crosshairs",
@@ -211,12 +209,12 @@ def pages(f, keys):
                 "It keeps app windows, fullscreen playback, hidden screens and stream connections as they are. "
                 "Screens on a wrist and floating windows stay in place; one pinned to your view goes back in the room. "
                 "To bring back a profile's apps and windows too, open the profile: type its name in frunner "
-                "(Meta+Space), or Open profile in Display Settings. That can end fullscreen. "
+                "(Meta+Space), or Open profile in Frametop Settings, Layout & profiles. That can end fullscreen. "
                 "The legacy SteamVR dashboard-screen mode still uses full profile reset.",
-        "actions": [{"id": "input:hands", "text": "Hand settings", "icon": "transform-browse"},
-                    {"id": "input:pointer", "text": "Pointer settings", "icon": "input-mouse"},
-                    {"id": "input:keyboard", "text": "Keyboard settings", "icon": "input-keyboard"},
-                    {"id": "display:layout", "text": "Layout & profiles", "icon": "view-grid"}],
+        "actions": [{"id": "settings:hands", "text": "Hand settings", "icon": "transform-browse"},
+                    {"id": "settings:pointer", "text": "Pointer settings", "icon": "input-mouse"},
+                    {"id": "settings:keyboard", "text": "Keyboard settings", "icon": "input-keyboard"},
+                    {"id": "settings:layout", "text": "Layout & profiles", "icon": "view-grid"}],
         "clips": []})
 
     out.append({
@@ -255,12 +253,12 @@ def pages(f, keys):
         "intro": "These key combinations work on any keyboard, whatever has focus.",
         "keys": keys,
         "rows": [["Meta+Shift+R", "Reset Screen Layout"]],
-        "note": "Macros: on the Keyboard page of Frametop Input Settings, any key combination, or a modifier "
+        "note": "Macros: on the Keyboard page of Frametop Settings, any key combination, or a modifier "
                 "tapped on its own, can do a Frametop or Steam action, open a profile, or run a command of your "
                 "own. The Buttons and Controllers pages map mouse buttons and controller buttons the same way.",
-        "actions": [{"id": "input:keyboard", "text": "Keyboard shortcuts", "icon": "input-keyboard"},
-                    {"id": "input:buttons", "text": "Mouse buttons", "icon": "input-mouse"},
-                    {"id": "input:controllers", "text": "Controller buttons", "icon": "input-gamepad"}],
+        "actions": [{"id": "settings:keyboard", "text": "Keyboard shortcuts", "icon": "input-keyboard"},
+                    {"id": "settings:buttons", "text": "Mouse buttons", "icon": "input-mouse"},
+                    {"id": "settings:controllers", "text": "Controller buttons", "icon": "input-gamepad"}],
         "clips": []})
 
     gaze = {"id": "gaze", "title": "Eye tracking: look and click", "icon": "view-visible",
@@ -285,7 +283,7 @@ def pages(f, keys):
                                                                    "learning it"]],
             "actions": [{"id": "gaze:calibrate", "text": "Calibrate", "icon": "crosshairs"},
                         {"id": "gaze:quickcal", "text": "Quick check", "icon": "view-visible"},
-                        {"id": "input:gaze", "text": "Gaze settings", "icon": "configure"}]}
+                        {"id": "settings:gaze", "text": "Gaze settings", "icon": "configure"}]}
     if not f["gaze"]:
         gaze.update(intro="In gaze mode the pointer goes where you look, and the keyboard or the mouse does the last "
                           "bit. It isn't installed here: install it with gaze/run.sh install, then our own eye "
@@ -294,7 +292,7 @@ def pages(f, keys):
     else:
         gaze["practice"] = "gaze"
         if not f["gazeOn"]:
-            gaze["note"] = "Gaze mode is off now: turn it on, and calibrate, on the Gaze page of Frametop Input Settings."
+            gaze["note"] = "Gaze mode is off now: turn it on, and calibrate, on the Gaze page of Frametop Settings."
     out.append(gaze)
 
     hands = {"id": "hands", "title": "Hand tracking: touch and move screens", "icon": "transform-browse",
@@ -322,14 +320,14 @@ def pages(f, keys):
                       ["An open palm pushed into a near screen, or flicked at it", "Sends it 3 m out"],
                       ["An open hand on its edge, swept sideways quickly", "Lazy susan: the next screen on that side "
                                                                            "comes to you"]],
-             "actions": [{"id": "input:hands", "text": "Hand settings", "icon": "configure"}]}
+             "actions": [{"id": "settings:hands", "text": "Hand settings", "icon": "configure"}]}
     if not f["hands"]:
         hands.update(intro=hands["intro"] + " It isn't installed here: install it with hands/run.sh install (it "
                      "needs sudo once, for its camera broker).", actions=[], practice="")
     else:
         hands["practice"] = "hands"
         if not f["handsPointer"]:
-            hands["note"] = "Hand interaction is off now: switch it on on the Hands page of Frametop Input Settings."
+            hands["note"] = "Hand interaction is off now: switch it on on the Hands page of Frametop Settings."
     out.append(hands)
 
     far = {"id": "hands-far", "title": "Hand tracking: point from a distance", "icon": "transform-browse",
@@ -337,7 +335,7 @@ def pages(f, keys):
                                                                 "a raised, pointing hand shows a laser."
                                                                 if f["gaze"] else "A raised, pointing hand shows a laser."),
            "clips": [clip("hand-clicks", "Pinch to click, middle finger to right click")],
-           "rows": [], "actions": [{"id": "input:hands", "text": "Hand settings", "icon": "configure"}]}
+           "rows": [], "actions": [{"id": "settings:hands", "text": "Hand settings", "icon": "configure"}]}
     if f["gaze"]:
         far["rows"] += ["With gaze mode on",
                         ["Look at something and pinch index finger to thumb", "A click where you look, like a Vision Pro"],
@@ -367,23 +365,23 @@ def pages(f, keys):
         "rows": [["While carrying a screen, sweep its laser across your other controller's ring, then let go",
                   "Pins it to that wrist; it shows while you see its front. Sweep across the ring again to take it off"],
                  ["Grab a pinned screen's bar", "Adjusts it; it stays pinned"],
-                 ["On your head (Display Settings, Visibility & pins)", "Pins it to your head where it is"],
+                 ["On your head (Frametop Settings, Visibility & pins)", "Pins it to your head where it is"],
                  ["When the screens show (Visibility & pins)", "Always, only with the dashboard open, or while you look "
                                                               "at your wrist"]],
-        "actions": [{"id": "display:visibility", "text": "Visibility & pins", "icon": "window-pin"}],
+        "actions": [{"id": "settings:visibility", "text": "Visibility & pins", "icon": "window-pin"}],
         "clips": []}, {
         "id": "profiles", "title": "Display profiles", "icon": "view-grid",
         "intro": "A profile is a named setup: where the screens are, with their sizes and pins, which ones are "
                  "hidden, and which apps are open and where their windows are.",
-        "rows": [["Save as profile… (Display Settings, Layout)", "Saves the current setup under a name"],
+        "rows": [["Save as profile… (Frametop Settings, Layout & profiles)", "Saves the current setup under a name"],
                  ["Pick a profile under Arrangement, then Open profile", "The screens move, windows go to their "
                                                                          "places, and missing apps start. Nothing closes"],
-                 ["Start in profile (Display Settings, Layout)", "The desktop starts in that profile"],
+                 ["Start in profile (Frametop Settings, Layout & profiles)", "The desktop starts in that profile"],
                  ["Frametop: NAME in SteamVR's Launch a program list", "Starts the desktop in that profile, or "
                                                                       "switches to it"]],
         "note": "A profile can also go on a key combination, a mouse button, or a controller button in Frametop "
-                "Input Settings.",
-        "actions": [{"id": "display:layout", "text": "Layout & profiles", "icon": "view-grid"}],
+                "Settings.",
+        "actions": [{"id": "settings:layout", "text": "Layout & profiles", "icon": "view-grid"}],
         "clips": []}, {
         "id": "pause", "title": "Pause for VR games", "icon": "media-playback-pause",
         "intro": "Frametop pauses while a VR game runs, so the game gets the headset to itself, and comes back a few "
@@ -392,59 +390,64 @@ def pages(f, keys):
                  ["With one controller: click its thumbstick twice", "The same"],
                  ["Start a VR game", "Frametop pauses, and comes back 5 seconds after the game ends"]],
         "note": "The gesture, and what the desktop does while paused, are on the Game optimization page of "
-                "Frametop Input Settings.",
-        "actions": [{"id": "input:games", "text": "Game optimization", "icon": "applications-games"}],
+                "Frametop Settings.",
+        "actions": [{"id": "settings:games", "text": "Game optimization", "icon": "applications-games"}],
         "clips": []}]
 
     out.append({
         "id": "settings", "title": "Settings, page by page", "icon": "configure",
-        "intro": "Everything in this tour can be changed. Frametop Input Settings has a page for each kind of input, "
-                 "and Frametop Display Settings has the screens. Open any page from its row.",
-        "rows": ["Frametop Input Settings",
-                 ["Devices", "Every mouse and keyboard, and its role: 3D pointer (it moves the dot), Keyboard + 3D "
-                             "pointer (a keyboard with a touchpad), Pass through, or Ignore", "input:devices"],
-                 ["Buttons", "A mouse's extra buttons as Frametop or Steam actions, profiles, or your own commands",
-                  "input:buttons"],
-                 ["Controllers", "The same for the Frame controllers' buttons, outside games or in them too",
-                  "input:controllers"],
-                 ["Game optimization", "Pausing for VR games: on or off, the controller gesture, what the desktop "
-                                       "does while paused", "input:games"],
-                 ["Keyboard", "When Frametop's VR keyboard shows, and your key combinations and modifier taps",
-                  "input:keyboard"],
-                 ["Commands", "Your own shell commands by name: run them from a button, frunner, your voice, or a "
-                              "terminal alias", "input:commands"],
-                 ["Voice", "Dictation: push-to-talk keys and buttons, your language, typing as you talk, wake word "
-                           "commands", "input:voice"],
-                 ["Pointer", "The dot's speed, size, and distance, head follow, and Recenter. Changes apply live",
-                  "input:pointer"],
-                 ["Ignored panels", "Panels the mouse passes through, like a performance overlay that follows your "
-                                    "view", "input:ignore"],
-                 ["Gaze", "Gaze mode on or off, Calibrate, Quick check, Check headset fit, the mouse buttons, and "
-                          "which eye tracker", "input:gaze"],
-                 ["Hands", "When hand tracking runs, the hand model, the three ways to use your hands, and every "
-                           "gesture on or off", "input:hands"],
-                 ["Bluetooth", "Paired mice and keyboards, and the fix that makes an LE one reconnect by itself",
-                  "input:bluetooth"],
-                 "Frametop Display Settings",
-                 ["Screens", "How many screens, their resolution, size in VR, scale, and curve", "display:screens"],
-                 ["Layout & profiles", "The arrangement, saved profiles, and how the desktop starts", "display:layout"],
+        "intro": "Everything in this tour can be changed in Frametop Settings: a page for each part of Frametop, "
+                 "and a search for any setting. Open any page from its row.",
+        "rows": ["Screens",
+                 ["Screens", "How many screens, their resolution, size in VR, scale, and curve", "settings:screens"],
+                 ["Layout & profiles", "The arrangement, saved profiles, and how the desktop starts", "settings:layout"],
                  ["Visibility & pins", "When screens show, pins, hidden screens, notifications, and dashboard apps",
-                  "display:visibility"],
+                  "settings:visibility"],
+                 ["Remote displays", "Another computer's monitors as Frametop screens", "settings:remote-displays"],
+                 "Input",
+                 ["Devices", "Every mouse and keyboard, and its role: 3D pointer (it moves the dot), Keyboard + 3D "
+                             "pointer (a keyboard with a touchpad), Pass through, or Ignore", "settings:devices"],
+                 ["Buttons", "A mouse's extra buttons as Frametop or Steam actions, profiles, or your own commands",
+                  "settings:buttons"],
+                 ["Controllers", "The same for the Frame controllers' buttons, outside games or in them too",
+                  "settings:controllers"],
+                 ["Keyboard", "When Frametop's VR keyboard shows, and your key combinations and modifier taps",
+                  "settings:keyboard"],
+                 ["Commands", "Your own shell commands by name: run them from a button, frunner, your voice, or a "
+                              "terminal alias", "settings:commands"],
+                 ["Pointer", "The dot's speed, size, and distance, head follow, and Recenter. Changes apply live",
+                  "settings:pointer"],
+                 ["Ignored panels", "Panels the mouse passes through, like a performance overlay that follows your "
+                                    "view", "settings:ignore"],
+                 ["Bluetooth", "Paired mice and keyboards, and the fix that makes an LE one reconnect by itself",
+                  "settings:bluetooth"],
+                 "Eyes, hands & voice",
+                 ["Gaze", "Gaze mode on or off, Calibrate, Quick check, Check headset fit, the mouse buttons, and "
+                          "which eye tracker", "settings:gaze"],
+                 ["Hands", "When hand tracking runs, the hand model, the three ways to use your hands, and every "
+                           "gesture on or off", "settings:hands"],
+                 ["Voice", "Dictation: push-to-talk keys and buttons, your language, typing as you talk, wake word "
+                           "commands", "settings:voice"],
+                 "System",
+                 ["Game optimization", "Pausing for VR games: on or off, the controller gesture, what the desktop "
+                                       "does while paused", "settings:games"],
                  ["Power", "Turning the displays off when the headset is unused, and staying awake on the charger",
-                  "display:power"]],
+                  "settings:power"],
+                 ["Remote access", "See and use the Frametop desktop from another computer on your tailnet, over VNC",
+                  "settings:remote-access"]],
         "actions": [], "clips": []})
 
     more = {"id": "more", "title": "And more", "icon": "help-about",
             "intro": "A few more things Frametop can do, each with its own settings.",
-            "rows": [["Remote displays", "Another computer's monitors as Frametop screens (Frametop Remote Displays)"],
-                     ["Displays off", "The headset's displays turn off when it's unused (Display Settings, Power)"]],
-            "actions": [{"id": "remote", "text": "Remote displays", "icon": "network-workgroup"},
-                        {"id": "display:power", "text": "Power", "icon": "preferences-system-power-management"}],
+            "rows": [["Remote displays", "Another computer's monitors as Frametop screens (Frametop Settings, Remote displays)"],
+                     ["Displays off", "The headset's displays turn off when it's unused (Frametop Settings, Power)"]],
+            "actions": [{"id": "settings:remote-displays", "text": "Remote displays", "icon": "network-workgroup"},
+                        {"id": "settings:power", "text": "Power", "icon": "preferences-system-power-management"}],
             "clips": []}
     if f["voice"]:
         more["rows"].insert(0, ["Dictation: tap Right Ctrl, or hold the left d-pad down",
                                 "Speak, and it's typed where you type. Nothing leaves the headset"])
-        more["actions"].insert(0, {"id": "input:voice", "text": "Voice", "icon": "audio-input-microphone"})
+        more["actions"].insert(0, {"id": "settings:voice", "text": "Voice", "icon": "audio-input-microphone"})
     out.append(more)
     out.append({"id": "done", "title": "That's the tour", "icon": "checkmark",
                 "intro": "Frametop Tour stays in the app menu, frunner, and SteamVR's Launch a program list (Frametop → Help), for "
@@ -537,12 +540,8 @@ def main():
 
         @Slot(str)
         def act(self, what):
-            if what.startswith("input:"):
-                self._open(INPUT_SETTINGS, "FT_INPUT_PAGE", what[6:], "Frametop Input Settings")
-            elif what.startswith("display:"):
-                self._open(DISPLAY_SETTINGS, "FT_DISPLAY_PAGE", what[8:], "Frametop Display Settings")
-            elif what == "remote":
-                self._open(REMOTE_DISPLAYS, None, None, "Frametop Remote Displays")
+            if what.startswith("settings:"):
+                self._open(SETTINGS, "FT_SETTINGS_PAGE", what[9:], "Frametop Settings")
             elif what in ("gaze:calibrate", "gaze:quickcal"):
                 ok = send("gazed", what[5:])
                 self.message.emit(("Calibration: look at each dot in the headset; right click or Meta+K stops"

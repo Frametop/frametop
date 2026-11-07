@@ -480,7 +480,7 @@ def check_service(props, wake):
     if checks.get("problem"):
         find(f"The Gaze page says: {checks['problem']}")
     elif checks.get("calibrated") is False:
-        find("The eye tracker in use has no calibration: Calibrate on the Gaze page of Frametop Input Settings")
+        find("The eye tracker in use has no calibration: Calibrate on the Gaze page of Frametop Settings")
     if checks.get("panel") is False:
         find("The calibration panel (ft-gazepanel) isn't running, so no check or calibration can show: "
              "see the log below (gaze/build.sh builds it)")

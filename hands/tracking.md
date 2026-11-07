@@ -63,7 +63,7 @@ With `POINTER_HANDS=1`, the pointer helper (`pointer/helper/ft-pointer.cpp`) rea
 Settings in `~/.config/frametop.conf`:
 
 - `POINTER_HANDS` (0): 1 turns pinches and grips on.
-- `POINTER_GAZE_PINCH` (1): in gaze mode, 0 turns clicks at the gaze off (pinches and grips with no ray do nothing), leaving the ray when gaze is off and direct touch. Frametop Input Settings' Hands page has the three hand inputs as switches of their own (`hands/handsmode.py`, `methods_of`).
+- `POINTER_GAZE_PINCH` (1): in gaze mode, 0 turns clicks at the gaze off (pinches and grips with no ray do nothing), leaving the ray when gaze is off and direct touch. Frametop Settings' Hands page has the three hand inputs as switches of their own (`hands/handsmode.py`, `methods_of`).
 - `POINTER_PINCH_GAIN` (0.5): without gaze mode, a held pinch moves the pointer this many times the hand's angle, seen from the eye. Under 1 gives precision.
 - `POINTER_PINCH_DEADZONE` (1.5): without gaze mode, how many degrees the pinching hand moves before the pointer does, so a tap's jitter and the pinch point shifting as the fingers close don't move it.
 - `POINTER_GAZE_HAND_RAY` (0): in gaze mode, 1 keeps the hand ray beside the gaze (a raised, pointing hand's pinches are then ray pinches).

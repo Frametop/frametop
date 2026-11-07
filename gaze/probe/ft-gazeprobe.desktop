@@ -2,7 +2,7 @@
 Type=Application
 Name=Frametop Gaze Probe (development)
 GenericName=Eye tracking development tool
-Comment=For developing Frametop's gaze tracking. Day to day, the calibration and checks are on the Gaze page of Frametop Input Settings
+Comment=For developing Frametop's gaze tracking. Day to day, the calibration and checks are on the Gaze page of Frametop Settings
 Exec=@REPO@/gaze/probe/ft-gazeprobe
 Icon=view-visible
 Categories=Development;

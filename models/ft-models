@@ -13,7 +13,7 @@
                                         for a new catalog entry: the "files" of STAGING/VERSION and
                                         STAGING's LICENSE and README.md, as uploaded (models/README.md)
 
-Pick a model in Frametop Input Settings (Hands and Gaze pages), or set HANDS_MODEL / EYES_MODEL in
+Pick a model in Frametop Settings (Hands and Gaze pages), or set HANDS_MODEL / EYES_MODEL in
 ~/.config/frametop.conf: latest (follows new versions), a version's name, or a builtin (stock for
 hands; classic for eyes, and GAZE_TRACKER=steam for SteamVR's).
 """

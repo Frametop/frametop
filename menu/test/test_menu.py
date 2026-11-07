@@ -19,10 +19,7 @@ import ft_menu  # noqa: E402
 # Every menu entry template Frametop installs, and the submenu it goes in. A new one goes here
 # (and in scripts/tests/test_install_lib.py).
 TEMPLATES = {
-    "display-settings/ft-display-settings.desktop": "settings",
-    "input-settings/ft-input-settings.desktop": "settings",
-    "remote-displays/ft-remote-displays.desktop": "settings",
-    "remote/ft-remote-settings.desktop": "settings",
+    "settings/ft-settings.desktop": "settings",
     "display-settings/ft-layout-reset.desktop": "screens",
     "display-settings/ft-screens-toggle.desktop": "screens",
     "tour/ft-tour.desktop": "help",
@@ -91,7 +88,7 @@ class Menu(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.apps = pathlib.Path(self.tmp.name) / "applications"
-        install_into(self.apps, ["display-settings/ft-display-settings.desktop",
+        install_into(self.apps, ["settings/ft-settings.desktop",
                                  "display-settings/ft-layout-reset.desktop", "tour/ft-tour.desktop",
                                  "hands/rec/ft-handrec.desktop", "menu/ft-menu.desktop"])
         (self.apps / "frametop-profile-work.desktop").write_text(
@@ -114,12 +111,12 @@ class Menu(unittest.TestCase):
         return {g: [n for n, _ in items] for g, items in ft_menu.entries().items()}
 
     def test_lists_whats_installed(self):
-        self.assertEqual(self.names(), {"settings": ["Display Settings"], "screens": ["Reset Screen Layout"],
+        self.assertEqual(self.names(), {"settings": ["Settings"], "screens": ["Reset Screen Layout"],
                                         "help": ["Tour"], "tools": ["Hand Recorder"], "profiles": ["Work"]})
 
     def test_top_menu_order(self):
         self.assertEqual(ft_menu.top_items(ft_menu.entries()),
-                         [("group:settings", "Settings ›"), ("group:screens", "Screens ›"),
+                         [("open:settings", "Settings"), ("group:screens", "Screens ›"),
                           ("group:profiles", "Profiles ›"), ("group:help", "Help ›"),
                           ("group:tools", "Recorders and tools ›"), ("update", "Update Frametop…")])
 
@@ -142,6 +139,17 @@ class Menu(unittest.TestCase):
         self.assertEqual(shown[1], ("Screens", [("app:0", "Reset Screen Layout"), ("back", "‹ Back")]))
         self.assertEqual(opened, [str(self.apps / "ft-layout-reset.desktop")])
         self.assertEqual((did, updated), ("opened ft-layout-reset.desktop", []))
+
+    def test_settings_opens_from_the_top(self):
+        did, shown, opened, updated = self.run_menu(["open:settings"])
+        self.assertEqual(len(shown), 1)
+        self.assertEqual(opened, [str(self.apps / "ft-settings.desktop")])
+        self.assertEqual(did, "opened ft-settings.desktop")
+
+    def test_more_settings_entries_get_a_submenu(self):
+        (self.apps / "ft-more.desktop").write_text(
+            "[Desktop Entry]\nType=Application\nName=Frametop More\nExec=x\nX-Frametop-Menu=settings\n")
+        self.assertEqual(ft_menu.top_items(ft_menu.entries())[0], ("group:settings", "Settings ›"))
 
     def test_back_and_update(self):
         did, shown, opened, updated = self.run_menu(["group:help", "back", "update"])

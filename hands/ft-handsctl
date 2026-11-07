@@ -45,7 +45,7 @@ case ${1:-status} in
     for u in $units; do echo "$u: $(systemctl --user is-active $u || true)"; done
     journalctl --user -u frametop-hands.service --no-pager -o cat -n 40 |
       grep -E '^ *[0-9.]+s |sets with a hand|cameras:' | tail -2 | cut -c1-160 || true ;;
-  mode)  # hands/handsmode.py; the Hands page of Frametop Input Settings does the same
+  mode)  # hands/handsmode.py; the Hands page of Frametop Settings does the same
     if [ -n "${2:-}" ]; then python3 "$here/handsmode.py" set "$2"; else python3 "$here/handsmode.py" status; fi ;;
   log) journalctl --user -u frametop-camd.service -u frametop-hands.service --no-pager -o short -n "${2:-30}" ;;
   cutouts)

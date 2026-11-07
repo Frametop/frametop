@@ -1226,7 +1226,7 @@ class Voice:
         self.apply_options(voice_settings.load())
 
     def apply_options(self, b):
-        """Settings from Frametop Input Settings. Only changed ones are applied, so a save doesn't
+        """Settings from Frametop Settings. Only changed ones are applied, so a save doesn't
         undo e.g. `ft-voice wake off`."""
         changed = {k: b[k] for k in ("controller", "controller_mode", "wake_phrases", "commands", "advanced",
                                      "language", "model", *voice_settings.OPTIONS)

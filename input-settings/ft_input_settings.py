@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Frametop Input Settings: choose and map input devices for the universal 3D mouse.
+"""Frametop Settings: choose and map input devices for the universal 3D mouse.
 
 A Kirigami (QML) app with a Python backend. It runs in the dev container and talks
 to the input relay over its control socket (@frametop_relay):
@@ -47,7 +47,7 @@ to the input relay over its control socket (@frametop_relay):
     every 30 minutes.
 Rules go to ~/.config/frametop-input.json and pointer settings to
 ~/.config/frametop.conf; then the relay (and through it the helper) reloads.
-Launch with input-settings/ft-input-settings (host wrapper).
+Frametop Settings (settings/ft_settings.py) makes it, the first time one of its pages opens.
 """
 import fnmatch
 import functools
@@ -61,10 +61,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import Property, QObject, QProcess, QSocketNotifier, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication, QIcon
-from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtCore import Property, QObject, QSocketNotifier, Qt, QTimer, Signal, Slot
 
 RULES_PATH = os.path.expanduser("~/.config/frametop-input.json")
 CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
@@ -461,7 +458,7 @@ def write_conf_value(key, value):
 
 def host(*cmd, timeout=20):
     """Run a command on the SteamOS host (we live in the dev container), on the host's user
-    bus. The app itself has the bus of the session it was opened from (ft-input-settings),
+    bus. The app itself has the bus of the session it was opened from (settings/ft-settings),
     in the Frametop desktop a private one from dbus-run-session; distrobox-host-exec run on
     that one leaves `systemctl --user` on the host without its user manager ("Failed to
     connect to user scope bus via local transport")."""
@@ -1775,21 +1772,6 @@ class Backend(QObject):
         """The full calibration in the panel fixed to the headset (gaze/gazecheck.py)."""
         self._gaze_check("calibrate", "Calibration: look at each dot in the headset; right click or Meta+K stops")
 
-    @Slot()
-    def openTour(self):
-        """Frametop Tour (tour/ft_tour.py), in this container as it runs."""
-        ok, _pid = QProcess.startDetached(sys.executable, [os.path.join(REPO, "tour", "ft_tour.py")])
-        if not ok:
-            self.message.emit("Couldn't start Frametop Tour", True)
-
-    @Slot()
-    def openControlsGuide(self):
-        """Open the reference page without changing the running settings app's environment."""
-        ok, _pid = QProcess.startDetached("env", ["FT_TOUR_PAGE=recenter", sys.executable,
-                                                  os.path.join(REPO, "tour", "ft_tour.py")])
-        if not ok:
-            self.message.emit("Couldn't start the controls guide", True)
-
     def _gaze_check(self, command, done):
         if self._send(command, GAZED):
             self._check_asked = time.monotonic()
@@ -2204,25 +2186,3 @@ class Backend(QObject):
             return
         self._bluetooth_busy = True
         threading.Thread(target=self._bluetooth_job, args=(True,), daemon=True).start()
-
-
-def main():
-    app = QGuiApplication(sys.argv)
-    app.setApplicationName("ft-input-settings")
-    app.setApplicationDisplayName("Frametop Input Settings")
-    app.setDesktopFileName("ft-input-settings")
-    if not QIcon.themeName():
-        QIcon.setThemeName("breeze")
-    QQuickStyle.setStyle("org.kde.desktop")
-    engine = QQmlApplicationEngine()
-    backend = Backend()
-    engine.rootContext().setContextProperty("backend", backend)
-    engine.rootContext().setContextProperty("startPage", os.environ.get("FT_INPUT_PAGE", "devices"))
-    engine.load(QUrl.fromLocalFile(os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.qml")))
-    if not engine.rootObjects():
-        sys.exit(1)
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()

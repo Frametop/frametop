@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Starts the Frametop desktop when SteamVR starts, if AUTOSTART=1 in ~/.config/frametop.conf
-# (Start with SteamVR, on the Power tab of Frametop Display Settings). frametop-autostart.service
+# (Start with SteamVR, on the Power tab of Frametop Settings). frametop-autostart.service
 # runs it each time SteamVR starts; the Frame starts SteamVR at boot, so that covers boot too.
 # FT_CONF names another settings file, and FT_AUTOSTART_DRY=1 stops before starting (tests).
 set -u

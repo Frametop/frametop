@@ -33,7 +33,7 @@
 //     screen keeps it armed for its wrist: move it, let go, and it's re-pinned there
 //     (sweep across the ring to take it off). A pinned screen shows only while you see
 //     its front, within the wrist angle (and fades out over the last kFade degrees).
-//   - pin to your head (the pin command, from ft-layout and Frametop Display Settings): the
+//   - pin to your head (the pin command, from ft-layout and Frametop Settings): the
 //     screen rides on the headset as it is then, like a HUD, and shows whenever the
 //     screens do. Carrying it works like a wrist pin: let go and it's re-pinned to your
 //     head where you put it; sweep across a wrist ring to move it to that wrist, or twice
@@ -7062,7 +7062,7 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
             std::snprintf(reply, size, "ok %s 2", key);
             return;
         }
-        // one hand interaction on or off now (Frametop Input Settings' Hands page writes frametop.conf too)
+        // one hand interaction on or off now (Frametop Settings' Hands page writes frametop.conf too)
         const int on = !std::strcmp(word, "1") || !std::strcmp(word, "on") ? 1 : !std::strcmp(word, "0") || !std::strcmp(word, "off") ? 0 : -1;
         if (on < 0 || !SetHandSetting(key, on)) return (void)std::snprintf(reply, size, "error handsetting <HANDS_...> 0|1");
         std::printf("hands: %s %s (Input Settings)\n", key, on ? "on" : "off");

@@ -65,7 +65,7 @@ case ${1:-status} in
     for u in $units; do
       install_unit "$root/$(unit_dir $u)/$u"
     done
-    # Started as HANDS_MODE says (off: not at all; Frametop Input Settings, Hands), or by hand
+    # Started as HANDS_MODE says (off: not at all; Frametop Settings, Hands), or by hand
     # with ft-handsctl on|off (linked into ~/.local/bin).
     "$frame" --host "set -e; systemctl --user daemon-reload
 python3 $(printf %q "$FRAME_REPO/hands/handsmode.py") apply

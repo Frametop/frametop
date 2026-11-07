@@ -1,47 +1,26 @@
-// Frametop Display Settings (Kirigami). Backend: ft_display_settings.py ("backend").
+// Frametop Settings' display pages: Screens, Layout, Visibility & pins and Power (settings/main.qml
+// loads this file the first time one of them opens). Backend: ft_display_settings.py ("backend",
+// made then: settings/ft_settings.py).
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-Kirigami.ApplicationWindow {
+Item {
     id: root
-    title: "Frametop Display Settings"
-    width: Kirigami.Units.gridUnit * 46
-    height: Kirigami.Units.gridUnit * 36
+    // settings/main.qml sets these two.
+    property QtObject backend
+    property var window
+    function show(name) { window.showSection(name) }
+    function showPassiveNotification(text, duration) { window.showPassiveNotification(text, duration) }
 
-    // Pages as tabs across the top (a side drawer was easy to miss).
-    readonly property var pages: backend.backend === "screens"
-        ? [{ name: "screens", text: "Screens", icon: "video-display", page: screensPage },
-           { name: "layout", text: "Layout", icon: "view-grid", page: layoutPage },
-           { name: "visibility", text: "Visibility & pins", icon: "view-visible", page: visibilityPage },
-           { name: "power", text: "Power", icon: "preferences-system-power-management", page: powerPage }]
-        : [{ name: "screens", text: "Screens", icon: "video-display", page: screensPage },
-           { name: "layout", text: "Layout", icon: "view-grid", page: layoutPage },
-           { name: "power", text: "Power", icon: "preferences-system-power-management", page: powerPage }]
-
-    header: Controls.TabBar {
-        id: tabs
-        Repeater {
-            model: root.pages
-            Controls.TabButton {
-                required property var modelData
-                text: modelData.text
-                icon.name: modelData.icon
-                onClicked: root.show(modelData.page)
-            }
-        }
-        Component.onCompleted: currentIndex = Math.max(0, root.pages.findIndex(p => p.name === startPage))
+    // The page for a section of the app, by name; null for a name that isn't one of these.
+    // Visibility & pins is ft-screens' (the gamescope backend has none).
+    function page(name) {
+        if (name === "visibility" && backend.backend !== "screens") return screensPage
+        return ({ screens: screensPage, layout: layoutPage, visibility: visibilityPage, power: powerPage })[name] || null
     }
-
-    function show(page) {
-        pageStack.clear()
-        pageStack.push(page)
-    }
-
-    // FT_DISPLAY_PAGE=layout|visibility|power opens the app on that page.
-    pageStack.initialPage: ({ layout: layoutPage, visibility: visibilityPage, power: powerPage })[startPage] || screensPage
 
     // "1 hour", "15 minutes", "30 seconds".
     function duration(seconds) {
@@ -185,8 +164,8 @@ Kirigami.ApplicationWindow {
                     visible: spage.md
                     text: "Remote displays"
                     icon.name: "network-workgroup"
-                    tooltip: "Other computers' monitors as screens: Frametop Remote Displays"
-                    onTriggered: backend.openRemoteDisplays()
+                    tooltip: "Other computers' monitors as screens"
+                    onTriggered: root.show("remote-displays")
                 },
                 Kirigami.Action {
                     visible: backend.desktopRunning
@@ -935,7 +914,7 @@ Kirigami.ApplicationWindow {
                           + "The layout goes around where you're facing when it's applied. Move screens by hand any time "
                           + "(grab bar under each screen); to put them back: Meta+Shift+R in the desktop, the Reset "
                           + "Screen Layout menu entry, Arrange now here, or a mouse button mapped to \"Reset desktop "
-                          + "screen layout\" in Frametop Input Settings → Buttons."
+                          + "screen layout\" in Frametop Settings → Buttons."
                 }
             }
         }
@@ -946,7 +925,7 @@ Kirigami.ApplicationWindow {
         id: visibilityPage
         Kirigami.ScrollablePage {
             id: vpage
-            title: "Visibility"
+            title: "Visibility & pins"
             property var v: backend.visibility
 
             actions: [
@@ -1021,7 +1000,7 @@ Kirigami.ApplicationWindow {
                     Repeater {
                         model: [
                             { value: "hide", text: "Hide them unless the SteamVR dashboard is open", help: "The game has the view to itself; open the dashboard (or press Meta+Shift+H) to see the screens." },
-                            { value: "visible", text: "Keep them visible over the game", help: "They float over the game as they are outside it. Turn off Pause while a VR game runs in Frametop Input Settings (Game optimization), or Frametop pauses and hides them anyway." }
+                            { value: "visible", text: "Keep them visible over the game", help: "They float over the game as they are outside it. Turn off Pause while a VR game runs in Frametop Settings (Game optimization), or Frametop pauses and hides them anyway." }
                         ]
                         delegate: ColumnLayout {
                             required property var modelData

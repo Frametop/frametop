@@ -176,6 +176,16 @@ class Windows(unittest.TestCase):
         self.assertEqual([(d["app"], d["client"]) for d in self.displays() if d.get("window")],
                          [("window:0x77", "frametop-oma7-win1")])
 
+    def test_catalog_for_frunner(self):
+        self.answers["/api/frametop/windows/apps"] = (200, {"apps": [{"id": "foot.desktop", "name": "Foot", "icon": "foot",
+                                                                      "exec": "foot"}]})
+        self.run_window("open", "oma7", "0x55aa20")
+        out = json.loads(self.run_window("catalog", "oma7"))
+        self.assertEqual(out["apps"], [{"id": "foot.desktop", "name": "Foot", "icon": "foot"}])  # no exec line
+        self.assertEqual([(w["address"], w["panel"], w["screen"]) for w in out["windows"]],
+                         [("0x55aa10", None, None), ("0x55aa20", "oma7-window-55aa20", 102)])
+        self.assertEqual((out["host"], out["locked"]), ("oma7", False))
+
     def test_list_failure_forgets_nothing(self):
         self.run_window("open", "oma7", "0x55aa10")
         self.answers["/api/frametop/windows"] = (0, None)  # oma7 asleep

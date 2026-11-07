@@ -121,6 +121,7 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout window list HOST         a PC's app windows (its Frametop windows instance: the host's
                                      "windows" port, docs/remote-displays.md)
   ft-layout window apps HOST         the desktop apps it can start
+  ft-layout window catalog HOST      both, with the windows' panels, as one JSON line (frunner)
   ft-layout window open HOST ADDRESS [--size WxH]
                                      that window as a panel of its own in front of you (its own
                                      output on the PC, WxH: the window's size, at most
@@ -1539,6 +1540,22 @@ def window_command(args):
             title = "".join(c if c.isprintable() else " " for c in str(w.get("title", "")))  # a page's title, say
             print(f"{w.get('address')} {w.get('width')}x{w.get('height')} {out} {panel} {w.get('class')}: {title}")
         return
+    if what == "catalog" and len(args) == 2:
+        # One JSON line for frunner: the host's apps, and its windows with their panels' ids and screens.
+        layout = load_layout()
+        host, port = window_host(layout, args[1])
+        apps = window_api(host, port, "GET", "/api/frametop/windows/apps").get("apps", [])
+        answer = window_api(host, port, "GET", "/api/frametop/windows")
+        window_prune(layout, host, answer.get("windows", []))
+        panels = {d["app"][7:]: (n, d["id"]) for n, h, d in remote_displays(layout) if h is host and d.get("window")}
+        windows = []
+        for w in answer.get("windows", []):
+            n, panel = panels.get(w.get("address"), (None, None))
+            windows.append({k: w.get(k) for k in ("address", "class", "title", "width", "height", "output")} |
+                           {"panel": panel, "screen": n})
+        print(json.dumps({"host": host.get("name"), "locked": bool(answer.get("locked")),
+                          "apps": [{k: a.get(k) for k in ("id", "name", "icon")} for a in apps], "windows": windows}))
+        return
     if what in ("open", "launch") and len(args) >= 3:
         layout = load_layout()
         host, port = window_host(layout, args[1])
@@ -1586,7 +1603,7 @@ def window_command(args):
             else:
                 log(f"closed {d['id']}; the PC will put the window back within a minute ({e})")
         return
-    raise RuntimeError("window list HOST | apps HOST | open HOST ADDRESS [--size WxH] | "
+    raise RuntimeError("window list HOST | apps HOST | catalog HOST | open HOST ADDRESS [--size WxH] | "
                        "launch HOST APP [--size WxH] | close ID")
 
 

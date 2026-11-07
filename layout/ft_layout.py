@@ -1510,7 +1510,8 @@ def window_command(args):
         for w in answer.get("windows", []):
             out = w.get("output") or "-"
             panel = panels.get(w.get("address"), "-")
-            print(f"{w.get('address')} {w.get('width')}x{w.get('height')} {out} {panel} {w.get('class')}: {w.get('title')}")
+            title = "".join(c if c.isprintable() else " " for c in str(w.get("title", "")))  # a page's title, say
+            print(f"{w.get('address')} {w.get('width')}x{w.get('height')} {out} {panel} {w.get('class')}: {title}")
         return
     if what in ("open", "launch") and len(args) >= 3:
         layout = load_layout()
@@ -1550,6 +1551,8 @@ def window_command(args):
         except RuntimeError:
             pass
         host["displays"].remove(d)
+        for profile in layout.get("profiles", {}).values():
+            profile.get("remote", {}).pop(d["id"], None)  # a later window with this id starts fresh
         save_layout(layout)
         try:
             window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",

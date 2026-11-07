@@ -128,6 +128,19 @@ class Windows(unittest.TestCase):
         self.assertFalse(any(d.get("window") for d in self.displays()))
         self.assertEqual(self.api[-1][2:], ("POST", "/api/frametop/windows/release", {"address": "0x55aa10"}))
 
+    def test_close_forgets_the_panel_in_profiles(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        layout = self.m.load_layout()
+        layout["profiles"] = {"Work": {"remote": {"oma7-window-55aa10": {"pos": [1, 2, 3]}, "oma7-dp-2": {}}}}
+        self.m.save_layout(layout)
+        self.run_window("close", "oma7-window-55aa10")
+        self.assertEqual(self.m.load_layout()["profiles"]["Work"]["remote"], {"oma7-dp-2": {}})
+
+    def test_list_strips_control_characters(self):
+        windows = {"windows": [dict(WINDOWS["windows"][0], title="evil\x1b]0;x\x07page")], "outputs": []}
+        self.answers["/api/frametop/windows"] = (200, windows)
+        self.assertIn("foot: evil ]0;x page", self.run_window("list", "oma7"))
+
     def test_close_is_for_windows_only(self):
         with self.assertRaisesRegex(RuntimeError, "isn't a window"):
             self.run_window("close", "oma7-dp-2")

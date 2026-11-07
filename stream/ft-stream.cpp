@@ -1341,11 +1341,16 @@ int main(int argc, char **argv) {
         if (fd < 0) return std::fprintf(stderr, "stream needs --fd: ft-screens starts it\n"), 2;
         if (app.rfind("window:", 0) == 0) {
             if (!haveToken || login) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
+            // The host's Web UI where the stream goes too (the dongle's address on route dongle).
+            if (route != host) api.base = "https://" + route + api.base.substr(api.base.rfind(':'));
             std::string output, why;
             const long code = OpenWindow(api, app.substr(7), width, height, &output, &why);
             if (code != 200) {
                 std::fprintf(stderr, "window %s: %ld %s\n", app.c_str() + 7, code, why.c_str());
-                Viewer{fd}.Send("state lost " + std::to_string(code == 400 ? 404 : code) + " " + why);
+                // Only a window that's gone waits as long as a missing app does ("lost 404"):
+                // a full host or a Hyprland hiccup is worth the usual retry.
+                const bool gone = code == 400 && why.rfind("no window", 0) == 0;
+                Viewer{fd}.Send("state lost " + std::to_string(gone ? 404 : code) + " " + why);
                 return 1;
             }
             std::printf("window %s is on %s\n", app.c_str() + 7, output.c_str());
